@@ -76,6 +76,7 @@ describe("buildDetachedChildArgs", () => {
 				offline: true,
 				chdbConfigFile: "/tmp/backup config.xml",
 				onDirtyStore: policy,
+				minimumRawTelemetryRetentionDays: 120,
 			})
 			deepStrictEqual(args, [
 				"/repo/apps/cli/src/bin.ts",
@@ -92,6 +93,8 @@ describe("buildDetachedChildArgs", () => {
 				policy,
 				"--chdb-config-file",
 				"/tmp/backup config.xml",
+				"--minimum-raw-telemetry-retention-days",
+				"120",
 				"--offline",
 			])
 			strictEqual(args.filter((arg) => arg === "--on-dirty-store").length, 1)
@@ -111,6 +114,7 @@ describe("buildDetachedChildArgs", () => {
 				offline: false,
 				chdbConfigFile: undefined,
 				onDirtyStore: "fail",
+				minimumRawTelemetryRetentionDays: undefined,
 			}),
 			[
 				"start",

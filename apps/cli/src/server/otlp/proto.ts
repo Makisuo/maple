@@ -363,6 +363,22 @@ message ExportLogsServiceRequest {
 message ExportMetricsServiceRequest {
   repeated ResourceMetrics resource_metrics = 1;
 }
+
+message ExportTracePartialSuccess {
+  int64 rejected_spans = 1;
+  string error_message = 2;
+}
+message ExportTraceServiceResponse { ExportTracePartialSuccess partial_success = 1; }
+message ExportLogsPartialSuccess {
+  int64 rejected_log_records = 1;
+  string error_message = 2;
+}
+message ExportLogsServiceResponse { ExportLogsPartialSuccess partial_success = 1; }
+message ExportMetricsPartialSuccess {
+  int64 rejected_data_points = 1;
+  string error_message = 2;
+}
+message ExportMetricsServiceResponse { ExportMetricsPartialSuccess partial_success = 1; }
 `
 
 /**
@@ -375,6 +391,11 @@ const otlpRoot = protobuf.parse(PROTO_SRC, { keepCase: false }).root
 const ExportTraceServiceRequest = otlpRoot.lookupType("ExportTraceServiceRequest")
 const ExportLogsServiceRequest = otlpRoot.lookupType("ExportLogsServiceRequest")
 const ExportMetricsServiceRequest = otlpRoot.lookupType("ExportMetricsServiceRequest")
+const responseTypes = {
+	traces: otlpRoot.lookupType("ExportTraceServiceResponse"),
+	logs: otlpRoot.lookupType("ExportLogsServiceResponse"),
+	metrics: otlpRoot.lookupType("ExportMetricsServiceResponse"),
+} as const
 
 /**
  * Normalize a decoded protobuf message into the same plain-object shape the
@@ -419,4 +440,20 @@ export function encodeTraceRequest(obj: unknown): Uint8Array {
 export function encodeMetricsRequest(obj: unknown): Uint8Array {
 	const message = ExportMetricsServiceRequest.fromObject(obj as Record<string, unknown>)
 	return ExportMetricsServiceRequest.encode(message).finish()
+}
+
+export function encodeExportResponse(
+	signal: "traces" | "logs" | "metrics",
+	rejected: number,
+	errorMessage: string,
+): Uint8Array {
+	const type = responseTypes[signal]
+	const rejectedField =
+		signal === "traces"
+			? { rejectedSpans: rejected }
+			: signal === "logs"
+				? { rejectedLogRecords: rejected }
+				: { rejectedDataPoints: rejected }
+	const object = rejected > 0 ? { partialSuccess: { ...rejectedField, errorMessage } } : {}
+	return type.encode(type.fromObject(object)).finish()
 }

@@ -188,21 +188,11 @@ export interface ArchiveVerification {
 	readonly verifiedBytes: number
 }
 
-/** Explicitly verify every selected active shard against its manifest SHA-256.
- * Listing errors fail the operation before any partial success is reported. */
-export const verifyActiveGenerations = async (
+const verifyGenerationSummaries = async (
 	archiveDir: string,
-	signal?: ArchiveSignalName,
+	active: ReadonlyArray<ActiveGenerationSummary>,
+	signals: ReadonlyArray<string>,
 ): Promise<ArchiveVerification> => {
-	const listing = listActiveGenerations(archiveDir)
-	const relevantErrors = signal ? listing.errors.filter((error) => error.signal === signal) : listing.errors
-	if (relevantErrors.length > 0) {
-		const detail = relevantErrors
-			.map((error) => `${error.signal}/${error.rangeStart || "(root)"}: ${error.error}`)
-			.join("; ")
-		throw new Error(`refusing archive integrity verification: ${detail}`)
-	}
-	const active = signal ? listing.active.filter((summary) => summary.signal === signal) : listing.active
 	let shardCount = 0
 	let verifiedBytes = 0
 	for (const summary of active) {
@@ -242,11 +232,56 @@ export const verifyActiveGenerations = async (
 	}
 	return {
 		archiveDir,
-		signals: signal ? [signal] : listing.signals,
+		signals,
 		generationCount: active.length,
 		shardCount,
 		verifiedBytes,
 	}
+}
+
+/** Explicitly verify every selected active shard against its manifest SHA-256.
+ * Listing errors fail the operation before any partial success is reported. */
+export const verifyActiveGenerations = async (
+	archiveDir: string,
+	signal?: ArchiveSignalName,
+): Promise<ArchiveVerification> => {
+	const listing = listActiveGenerations(archiveDir)
+	const relevantErrors = signal ? listing.errors.filter((error) => error.signal === signal) : listing.errors
+	if (relevantErrors.length > 0) {
+		const detail = relevantErrors
+			.map((error) => `${error.signal}/${error.rangeStart || "(root)"}: ${error.error}`)
+			.join("; ")
+		throw new Error(`refusing archive integrity verification: ${detail}`)
+	}
+	const active = signal ? listing.active.filter((summary) => summary.signal === signal) : listing.active
+	return verifyGenerationSummaries(archiveDir, active, signal ? [signal] : listing.signals)
+}
+
+/** Verify exactly one active generation for a signal/day without re-hashing
+ * unrelated archive history. Used immediately before destructive live
+ * retirement. */
+export const verifyActiveGeneration = async (
+	archiveDir: string,
+	signal: ArchiveSignalName,
+	rangeDate: string,
+): Promise<ArchiveVerification> => {
+	const listing = listActiveGenerations(archiveDir)
+	const relevantErrors = listing.errors.filter(
+		(error) => error.signal === signal && (error.rangeStart === "" || error.rangeStart === rangeDate),
+	)
+	if (relevantErrors.length > 0) {
+		const detail = relevantErrors
+			.map((error) => `${error.signal}/${error.rangeStart || "(root)"}: ${error.error}`)
+			.join("; ")
+		throw new Error(`refusing archive integrity verification: ${detail}`)
+	}
+	const active = listing.active.filter(
+		(summary) => summary.signal === signal && summary.rangeStart === rangeDate,
+	)
+	if (active.length !== 1) {
+		throw new Error(`archive date ${rangeDate} lacks one active ${signal} generation`)
+	}
+	return verifyGenerationSummaries(archiveDir, active, [signal])
 }
 
 /**

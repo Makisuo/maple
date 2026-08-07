@@ -23,6 +23,7 @@ export interface DetachedChildArgs {
 	readonly offline: boolean
 	readonly chdbConfigFile: string | undefined
 	readonly onDirtyStore: DirtyStorePolicy
+	readonly minimumRawTelemetryRetentionDays: number | undefined
 }
 
 /** Build the foreground child argv without forwarding compiled-Bun virtual
@@ -43,6 +44,9 @@ export const buildDetachedChildArgs = (options: DetachedChildArgs): string[] => 
 		"--on-dirty-store",
 		options.onDirtyStore,
 		...(options.chdbConfigFile ? ["--chdb-config-file", options.chdbConfigFile] : []),
+		...(options.minimumRawTelemetryRetentionDays !== undefined
+			? ["--minimum-raw-telemetry-retention-days", String(options.minimumRawTelemetryRetentionDays)]
+			: []),
 		...(options.offline ? ["--offline"] : []),
 	]
 }

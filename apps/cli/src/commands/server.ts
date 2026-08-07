@@ -182,6 +182,14 @@ const chdbConfigFileFlag = Flag.optional(
 	),
 )
 
+const minimumRawTelemetryRetentionDaysFlag = Flag.optional(
+	Flag.integer("minimum-raw-telemetry-retention-days").pipe(
+		Flag.withDescription(
+			"Persist a monotonic raw-table retention floor (minimum 90 days; survives reset and restore)",
+		),
+	),
+)
+
 const backgroundFlag = Flag.boolean("background").pipe(
 	Flag.withAlias("d"),
 	Flag.withDescription("Run the server detached (logs to ~/.maple/maple.log); stop with `maple stop`"),
@@ -246,6 +254,7 @@ const startDetached = (
 	offline: boolean,
 	chdbConfigFile: string | undefined,
 	onDirtyStore: DirtyStorePolicy,
+	minimumRawTelemetryRetentionDays: number | undefined,
 ): Effect.Effect<void, ServerError> =>
 	Effect.gen(function* () {
 		const logPath = logFilePath(dataDir)
@@ -262,6 +271,7 @@ const startDetached = (
 			offline,
 			chdbConfigFile,
 			onDirtyStore,
+			minimumRawTelemetryRetentionDays,
 		})
 
 		const child = yield* Effect.try({
@@ -316,6 +326,7 @@ export const start = Command.make("start", {
 	port,
 	dataDir: dataDirFlag,
 	chdbConfigFile: chdbConfigFileFlag,
+	minimumRawTelemetryRetentionDays: minimumRawTelemetryRetentionDaysFlag,
 	background: backgroundFlag,
 	offline: offlineFlag,
 	reset: resetFlag,
@@ -463,6 +474,8 @@ export const start = Command.make("start", {
 				})
 			}
 
+			const requestedRetentionDays = Option.getOrUndefined(a.minimumRawTelemetryRetentionDays)
+
 			// Detached: spawn the same command without --background and exit.
 			if (a.background)
 				return yield* startDetached(
@@ -473,6 +486,7 @@ export const start = Command.make("start", {
 					a.offline,
 					Option.getOrUndefined(a.chdbConfigFile),
 					a.onDirtyStore,
+					requestedRetentionDays,
 				)
 
 			yield* Effect.sync(() =>
@@ -513,6 +527,7 @@ export const start = Command.make("start", {
 						port: a.port,
 						dataDir,
 						configFile: Option.getOrUndefined(a.chdbConfigFile),
+						minimumRawTelemetryRetentionDays: requestedRetentionDays,
 						assets,
 					}).pipe(
 						Effect.mapError((e) => new ServerError({ message: `failed to start: ${e.message}` })),

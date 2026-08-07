@@ -12,8 +12,10 @@
 import { CString, dlopen, FFIType, type Pointer, ptr, read, toArrayBuffer } from "bun:ffi"
 import { Effect, Schema, type Scope } from "effect"
 import { existsSync } from "node:fs"
+import { lstatSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
+import { durableJson } from "./durable-files"
 import { markStoreClosed, markStoreOpen, storeHasData } from "./store-version"
 
 /** A chDB failure — locating libchdb, opening the connection, or bootstrapping
@@ -85,6 +87,114 @@ export interface ChdbOptions {
 	readonly configFile?: string
 	/** Apply the Maple schema after connect. Defaults to true. */
 	readonly bootstrapSchema?: boolean
+	/** Loaded persistent floor; not a transient launch-only setting. */
+	readonly rawTelemetryRetentionDays?: number
+}
+
+export const RAW_TELEMETRY_TTL_COLUMNS = [
+	["logs", "TimestampTime"],
+	["traces", "Timestamp"],
+	["metrics_sum", "TimeUnix"],
+	["metrics_gauge", "TimeUnix"],
+	["metrics_histogram", "TimeUnix"],
+	["metrics_exponential_histogram", "TimeUnix"],
+] as const
+
+export const MINIMUM_RAW_TELEMETRY_RETENTION_DAYS = 90
+export const MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS = 3_650
+
+interface RawTelemetryRetentionConfig {
+	readonly formatVersion: 1
+	readonly minimumDays: number
+}
+
+export const rawTelemetryRetentionConfigPath = (dataDir: string): string =>
+	`${resolve(dataDir)}.raw-telemetry-retention.json`
+
+const parseRawTelemetryRetentionDays = (value: unknown): number => {
+	if (typeof value !== "object" || value === null || Array.isArray(value))
+		throw new Error("raw telemetry retention config must be a record")
+	const record = value as Record<string, unknown>
+	if (Object.keys(record).sort().join(",") !== "formatVersion,minimumDays" || record.formatVersion !== 1)
+		throw new Error("unsupported or malformed raw telemetry retention config")
+	const days = record.minimumDays
+	if (
+		typeof days !== "number" ||
+		!Number.isSafeInteger(days) ||
+		days < MINIMUM_RAW_TELEMETRY_RETENTION_DAYS ||
+		days > MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS
+	)
+		throw new Error(
+			`raw telemetry retention minimum must be an integer from ${MINIMUM_RAW_TELEMETRY_RETENTION_DAYS} through ${MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS} days`,
+		)
+	return days
+}
+
+export const readRawTelemetryRetentionDays = (dataDir: string): number | undefined => {
+	const path = rawTelemetryRetentionConfigPath(dataDir)
+	if (!existsSync(path)) return undefined
+	const stat = lstatSync(path)
+	if (stat.isSymbolicLink() || !stat.isFile())
+		throw new Error(`raw telemetry retention config is not a real file: ${path}`)
+	return parseRawTelemetryRetentionDays(JSON.parse(readFileSync(path, "utf8")) as unknown)
+}
+
+export const configureRawTelemetryRetentionDays = async (
+	dataDir: string,
+	minimumDays: number,
+): Promise<void> => {
+	const days = parseRawTelemetryRetentionDays({ formatVersion: 1, minimumDays })
+	const existing = readRawTelemetryRetentionDays(dataDir)
+	if (existing !== undefined && days < existing)
+		throw new Error(
+			`refusing to shorten persistent raw telemetry retention from ${existing} to ${days} days`,
+		)
+	const config: RawTelemetryRetentionConfig = { formatVersion: 1, minimumDays: days }
+	await durableJson(rawTelemetryRetentionConfigPath(dataDir), config)
+}
+
+export const rawTelemetryTtlStatements = (days: number): ReadonlyArray<string> => {
+	const validated = parseRawTelemetryRetentionDays({ formatVersion: 1, minimumDays: days })
+	return RAW_TELEMETRY_TTL_COLUMNS.map(
+		([table, column]) => `ALTER TABLE ${table} MODIFY TTL toDate(${column}) + INTERVAL ${validated} DAY`,
+	)
+}
+
+const existingTtlDays = (createTableQuery: string, table: string): number => {
+	const match = /\bTTL\s+toDate\([^)]*\)\s*\+\s*(?:toIntervalDay\((\d+)\)|INTERVAL\s+(\d+)\s+DAY)/i.exec(
+		createTableQuery,
+	)
+	const value = Number(match?.[1] ?? match?.[2])
+	if (!Number.isSafeInteger(value) || value < 1)
+		throw new Error(`cannot determine existing raw telemetry TTL for ${table}`)
+	return value
+}
+
+/** Apply a floor without shortening a higher TTL already present in the schema. */
+export const applyRawTelemetryRetentionFloor = (db: Pick<Chdb, "query" | "exec">, days: number): void => {
+	const validated = parseRawTelemetryRetentionDays({ formatVersion: 1, minimumDays: days })
+	const names = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => `'${table}'`).join(", ")
+	const rows = db
+		.query(
+			`SELECT name, create_table_query FROM system.tables WHERE database = 'default' AND name IN (${names}) ORDER BY name`,
+			"JSONEachRow",
+		)
+		.split("\n")
+		.filter((line) => line.trim().length > 0)
+		.map((line) => JSON.parse(line) as { name?: unknown; create_table_query?: unknown })
+	const definitions = new Map(
+		rows.map((row) => {
+			if (typeof row.name !== "string" || typeof row.create_table_query !== "string")
+				throw new Error("invalid system.tables TTL metadata")
+			return [row.name, row.create_table_query] as const
+		}),
+	)
+	for (const [table, column] of RAW_TELEMETRY_TTL_COLUMNS) {
+		const definition = definitions.get(table)
+		if (!definition) throw new Error(`raw telemetry table is missing: ${table}`)
+		if (existingTtlDays(definition, table) >= validated) continue
+		db.exec(`ALTER TABLE ${table} MODIFY TTL toDate(${column}) + INTERVAL ${validated} DAY`)
+	}
 }
 
 /** Build the embedded ClickHouse argv. Keep table metadata loading and restore
@@ -153,7 +263,14 @@ export class Chdb {
 			)
 
 		const db = new Chdb(sym, connPtrPtr, conn)
-		if (options.bootstrapSchema !== false) db.#bootstrap(options.schemaSql)
+		// Partition expressions, ingest conversions, and retention predicates must
+		// never inherit a host-specific timezone.
+		db.exec("SET session_timezone = 'UTC'")
+		if (options.bootstrapSchema !== false) {
+			db.#bootstrap(options.schemaSql)
+			if (options.rawTelemetryRetentionDays !== undefined)
+				applyRawTelemetryRetentionFloor(db, options.rawTelemetryRetentionDays)
+		}
 		return db
 	}
 

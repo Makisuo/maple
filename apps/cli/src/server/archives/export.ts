@@ -60,10 +60,13 @@ import { type ArchiveSignal } from "./signals"
  * an EXPLICIT isNull(c) flag as a separate hash argument, so NULL-ness is never
  * conflated with a value. An unknown value fails closed.
  */
-export const COMPLEX_DIGEST_ALGORITHM = "cityhash64-multiset-v3"
+export const COMPLEX_DIGEST_ALGORITHM = "cityhash64-bounded-multiset-v4"
 
 /** Digest algorithms this reader accepts in a manifest shard record. */
-export const KNOWN_COMPLEX_DIGEST_ALGORITHMS: ReadonlySet<string> = new Set(["cityhash64-multiset-v3"])
+export const KNOWN_COMPLEX_DIGEST_ALGORITHMS: ReadonlySet<string> = new Set([
+	"cityhash64-multiset-v3",
+	COMPLEX_DIGEST_ALGORITHM,
+])
 
 export interface ExportSettings {
 	readonly writerThreads: number
@@ -176,7 +179,10 @@ export interface SourceColumn {
  * shard's reopened schema is compared against this to prove the schema
  * round-tripped — not just that it has "some" columns.
  */
-export const captureSourceSchema = (db: Chdb, signal: ArchiveSignal): ReadonlyArray<SourceColumn> => {
+export const captureSourceSchema = (
+	db: Pick<Chdb, "query">,
+	signal: ArchiveSignal,
+): ReadonlyArray<SourceColumn> => {
 	const rows = readRows(db.query(`DESCRIBE ${signal.name} FORMAT JSONEachRow`, "JSONEachRow"))
 	const cols = rows.map((r) => ({ name: String(r.name), type: String(r.type) }))
 	if (cols.length === 0) throw new Error(`source table ${signal.name} has no columns`)
@@ -336,23 +342,36 @@ const normalizeValueForHash = (name: string, type: string): string => {
 }
 
 /**
- * The multiset complex-value digest of a slice: the sorted multiset of per-row
- * position-bound hashes, folded into one hash. Order-independent (sorted) so it
- * tolerates row-order differences between source and reopened Parquet, yet it
- * preserves row identity + multiplicity — so it detects:
+ * A fixed-memory multiset digest of a slice. Four independent commutative
+ * accumulators over position-bound row hashes make it order-independent while
+ * retaining row identity and multiplicity. Unlike the former sorted
+ * `groupArray`, memory usage does not grow with the number of rows. It detects:
  *   - a same-typed column swap (each affected row's hash changes),
  *   - cross-row value reassociation (a row's hash changes),
  *   - duplicate-one/drop-another (the multiset of row hashes changes),
  * all of which preserve count and time extrema and defeated the round-4
- * commutative per-column sum. Measured at maxShardRows (500k): 41ms, +15MiB RSS.
+ * commutative per-column sum.
  *
  * `sliceFrom` is the FROM clause (e.g. `traces` or `file('p', Parquet)`, with a
  * WHERE predicate already applied where needed). The sort is inside chDB; no
  * rows are materialized in JavaScript.
  */
-const multisetDigestSql = (sourceSchema: ReadonlyArray<SourceColumn>, sliceFrom: string): string => {
+export const multisetDigestSql = (sourceSchema: ReadonlyArray<SourceColumn>, sliceFrom: string): string => {
 	const args = perRowHashArgs(sourceSchema)
-	return `SELECT toString(cityHash64(groupArray(h))) AS d FROM (SELECT cityHash64(${args}) AS h FROM ${sliceFrom} ORDER BY h)`
+	return `SELECT concat(toString(count()), ':', toString(sumWithOverflow(h)), ':', toString(groupBitXor(h)), ':', toString(sumWithOverflow(cityHash64(h)))) AS d FROM (SELECT cityHash64(${args}) AS h FROM ${sliceFrom})`
+}
+
+/** Compute the canonical order-independent digest used by archive validation. */
+export const computeMultisetDigest = (
+	db: Pick<Chdb, "query">,
+	sourceSchema: ReadonlyArray<SourceColumn>,
+	sliceFrom: string,
+): string => {
+	const rows = readRows(db.query(multisetDigestSql(sourceSchema, sliceFrom), "JSONEachRow"))
+	const digest = rows[0]?.d
+	if (typeof digest !== "string" || !/^\d+:\d+:\d+:\d+$/.test(digest))
+		throw new Error(`invalid multiset digest result: ${String(digest)}`)
+	return digest
 }
 
 /**

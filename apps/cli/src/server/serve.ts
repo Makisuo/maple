@@ -8,13 +8,31 @@ import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
 import { isLoopbackHostname } from "../lib/local-address"
 import { MAPLE_VERSION } from "../version"
-import { acquireChdb, ChdbError, type Chdb } from "./chdb"
+import {
+	acquireChdb,
+	type Chdb,
+	ChdbError,
+	configureRawTelemetryRetentionDays,
+	readRawTelemetryRetentionDays,
+	rawTelemetryTtlStatements,
+} from "./chdb"
 import { buildInsertStatements } from "./inserts"
 import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch, OtlpFieldError } from "./otlp/encode"
-import { decodeLogsRequest, decodeMetricsRequest, decodeTraceRequest } from "./otlp/proto"
+import {
+	decodeLogsRequest,
+	decodeMetricsRequest,
+	decodeTraceRequest,
+	encodeExportResponse,
+} from "./otlp/proto"
 import { CURRENT_LOCAL_SCHEMA, LOCAL_SCHEMA_SQL, SCHEMA_FINGERPRINT } from "./schema-identity"
 import { assertCurrentPhysicalSchema } from "./schema-physical"
 import { ensureStoreMarkerDurable } from "./store-version"
+import {
+	ensureMaintenanceToken,
+	maintenanceTokenMatches,
+	RetiredDayAuthority,
+	retireLiveDayInServer,
+} from "./archives/retention"
 
 /** Fingerprint of the schema this build bootstraps stores with. Re-exported
  * from this module for the existing archive/checkpoint metadata seam. */
@@ -36,6 +54,7 @@ export interface ServerOptions {
 	readonly port: number
 	readonly dataDir: string
 	readonly configFile?: string
+	readonly minimumRawTelemetryRetentionDays?: number
 	/** Serves the bundled SPA; omit to disable the UI (API-only). */
 	readonly assets?: AssetResolver
 }
@@ -148,7 +167,12 @@ interface IngestResult {
 	readonly requestBytes: number
 }
 
-async function ingest(db: Chdb, signal: Signal, req: Request): Promise<IngestResult> {
+async function ingest(
+	db: Chdb,
+	authority: RetiredDayAuthority,
+	signal: Signal,
+	req: Request,
+): Promise<IngestResult> {
 	let raw: Uint8Array
 	try {
 		raw = new Uint8Array(await req.arrayBuffer())
@@ -189,6 +213,12 @@ async function ingest(db: Chdb, signal: Signal, req: Request): Promise<IngestRes
 			requestBytes,
 		}
 	}
+	let rejected = 0
+	batches = batches.map((batch) => {
+		const filtered = authority.filterBatch(batch.datasource, batch.ndjson)
+		rejected += filtered.rejected
+		return { ...batch, ndjson: filtered.ndjson, rowCount: filtered.accepted }
+	})
 	let accepted = 0
 	for (const batch of batches) {
 		if (batch.rowCount === 0) continue
@@ -205,7 +235,28 @@ async function ingest(db: Chdb, signal: Signal, req: Request): Promise<IngestRes
 			accepted += statement.rowCount
 		}
 	}
-	return { response: json({ accepted }), accepted, requestBytes }
+	const errorMessage = rejected > 0 ? "telemetry from permanently retired UTC days was rejected" : ""
+	if (contentType.includes("json")) {
+		const rejectedField =
+			signal === "traces"
+				? { rejectedSpans: rejected }
+				: signal === "logs"
+					? { rejectedLogRecords: rejected }
+					: { rejectedDataPoints: rejected }
+		return {
+			response: json(rejected > 0 ? { partialSuccess: { ...rejectedField, errorMessage } } : {}),
+			accepted,
+			requestBytes,
+		}
+	}
+	return {
+		response: new Response(encodeExportResponse(signal, rejected, errorMessage), {
+			status: 200,
+			headers: { "content-type": "application/x-protobuf" },
+		}),
+		accepted,
+		requestBytes,
+	}
 }
 
 /**
@@ -237,7 +288,7 @@ interface QueryResult {
 	readonly sql: string | undefined
 }
 
-async function handleQuery(db: Chdb, req: Request): Promise<QueryResult> {
+async function handleQuery(db: Chdb, authority: RetiredDayAuthority, req: Request): Promise<QueryResult> {
 	let sql: string
 	try {
 		const body = (await req.json()) as { sql?: unknown }
@@ -249,6 +300,15 @@ async function handleQuery(db: Chdb, req: Request): Promise<QueryResult> {
 	}
 	let out: string
 	const started = performance.now()
+	const readOnly = /^\s*(?:SELECT|WITH|SHOW|DESCRIBE|DESC|EXPLAIN|EXISTS)\b/i.test(sql)
+	if (!readOnly && authority.hasRetiredDays()) {
+		return {
+			response: text("local SQL writes are disabled after the first UTC day is retired", 405),
+			rowCount: 0,
+			durationMs: Math.round(performance.now() - started),
+			sql,
+		}
+	}
 	try {
 		out = db.query(forceJsonEachRow(sql))
 	} catch (error) {
@@ -330,12 +390,18 @@ const recoverResponse = (self: Effect.Effect<Response, IngestRejected>): Effect.
 
 /** OTLP-ingest request as a `Server`-kind span, mirroring the Rust gateway
  *  (`apps/ingest`): `maple.signal`, item count, request size, HTTP semconv. */
-const ingestSpan = (runSpan: SpanRunner, db: Chdb, signal: Signal, req: Request): Promise<Response> =>
+const ingestSpan = (
+	runSpan: SpanRunner,
+	db: Chdb,
+	authority: RetiredDayAuthority,
+	signal: Signal,
+	req: Request,
+): Promise<Response> =>
 	runSpan(
 		recoverResponse(
 			Effect.gen(function* () {
 				const { response, accepted, requestBytes } = yield* Effect.promise(() =>
-					ingest(db, signal, req),
+					ingest(db, authority, signal, req),
 				)
 				yield* Effect.annotateCurrentSpan({
 					"http.request.body.size": requestBytes,
@@ -357,12 +423,17 @@ const ingestSpan = (runSpan: SpanRunner, db: Chdb, signal: Signal, req: Request)
 	)
 
 /** `/local/query` request as a `Server`-kind span with the canonical DB attrs. */
-const querySpan = (runSpan: SpanRunner, db: Chdb, req: Request): Promise<Response> =>
+const querySpan = (
+	runSpan: SpanRunner,
+	db: Chdb,
+	authority: RetiredDayAuthority,
+	req: Request,
+): Promise<Response> =>
 	runSpan(
 		recoverResponse(
 			Effect.gen(function* () {
 				const { response, rowCount, durationMs, sql } = yield* Effect.promise(() =>
-					handleQuery(db, req),
+					handleQuery(db, authority, req),
 				)
 				yield* Effect.annotateCurrentSpan({
 					"db.system.name": "clickhouse",
@@ -381,11 +452,132 @@ const querySpan = (runSpan: SpanRunner, db: Chdb, req: Request): Promise<Respons
 		),
 	)
 
+/** Admission closes before retirement and reopens only after all previously
+ * accepted ingest/query work has drained and the durable transition finishes. */
+export class RequestQuiescenceGate {
+	#active = 0
+	#closed = false
+	#drained: Array<() => void> = []
+
+	enter(): (() => void) | null {
+		if (this.#closed) return null
+		this.#active++
+		let released = false
+		return () => {
+			if (released) return
+			released = true
+			this.#active--
+			if (this.#active === 0) {
+				for (const resolve of this.#drained.splice(0)) resolve()
+			}
+		}
+	}
+
+	async exclusive<A>(work: () => Promise<A>): Promise<A> {
+		if (this.#closed) throw new Error("another server maintenance operation is active")
+		this.#closed = true
+		try {
+			if (this.#active > 0) await new Promise<void>((resolve) => this.#drained.push(resolve))
+			return await work()
+		} finally {
+			this.#closed = false
+		}
+	}
+}
+
+const admitted = async (gate: RequestQuiescenceGate, work: () => Promise<Response>): Promise<Response> => {
+	const leave = gate.enter()
+	if (!leave) return text("server maintenance in progress", 503)
+	try {
+		return await work()
+	} finally {
+		leave()
+	}
+}
+
+const handleRetirement = async (
+	db: Chdb,
+	authority: RetiredDayAuthority,
+	gate: RequestQuiescenceGate,
+	token: string,
+	req: Request,
+): Promise<Response> => {
+	if (!maintenanceTokenMatches(token, req.headers.get("x-maple-maintenance-token")))
+		return text("maintenance authorization required", 403)
+	let body: unknown
+	try {
+		body = await req.json()
+	} catch {
+		return text("invalid JSON body", 400)
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
+	const record = body as Record<string, unknown>
+	const keys = Object.keys(record).sort().join(",")
+	if (keys !== "archiveDir,rangeDate,sealingLagHours") return text("invalid retirement fields", 400)
+	if (
+		typeof record.archiveDir !== "string" ||
+		typeof record.rangeDate !== "string" ||
+		typeof record.sealingLagHours !== "number"
+	)
+		return text("invalid retirement values", 400)
+	try {
+		const retired = await gate.exclusive(() =>
+			retireLiveDayInServer({
+				db,
+				authority,
+				archiveDir: record.archiveDir as string,
+				rangeDate: record.rangeDate as string,
+				sealingLagHours: record.sealingLagHours as number,
+			}),
+		)
+		return json(retired)
+	} catch (error) {
+		return text(`retirement failed: ${error instanceof Error ? error.message : String(error)}`, 409)
+	}
+}
+
+const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+/** Typed, authenticated replacement for sending BACKUP through /local/query. */
+const handleCheckpointBackup = async (db: Chdb, token: string, req: Request): Promise<Response> => {
+	if (!maintenanceTokenMatches(token, req.headers.get("x-maple-maintenance-token")))
+		return text("maintenance authorization required", 403)
+	let body: unknown
+	try {
+		body = await req.json()
+	} catch {
+		return text("invalid JSON body", 400)
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
+	const record = body as Record<string, unknown>
+	if (Object.keys(record).sort().join(",") !== "checkpointId" || typeof record.checkpointId !== "string")
+		return text("invalid checkpoint fields", 400)
+	if (!CHECKPOINT_ID.test(record.checkpointId)) return text("invalid checkpoint ID", 400)
+	try {
+		db.exec(
+			`BACKUP DATABASE default TO Disk('default', 'backups/snapshots/${record.checkpointId.toLowerCase()}/backup')`,
+		)
+		return json({ checkpointId: record.checkpointId.toLowerCase() })
+	} catch (error) {
+		return text(
+			`checkpoint backup failed: ${error instanceof Error ? error.message : String(error)}`,
+			400,
+		)
+	}
+}
+
 /** The `Bun.serve` fetch handler, closed over the chDB connection. Each ingest
  *  and query request is run through `runSpan` so it leaves a trace; `/health`
  *  and `OPTIONS` are skipped (loop-prevention convention — no health-check noise). */
 const makeFetch =
-	(db: Chdb, options: ServerOptions, runSpan: SpanRunner) =>
+	(
+		db: Chdb,
+		options: ServerOptions,
+		runSpan: SpanRunner,
+		authority: RetiredDayAuthority,
+		gate: RequestQuiescenceGate,
+		maintenanceToken: string,
+	) =>
 	async (req: Request): Promise<Response> => {
 		const url = new URL(req.url)
 		const origin = req.headers.get("origin")
@@ -397,10 +589,18 @@ const makeFetch =
 		if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
 		if (url.pathname === "/health") return respond(text("OK"))
 		if (req.method === "POST") {
-			if (url.pathname === "/v1/traces") return respond(await ingestSpan(runSpan, db, "traces", req))
-			if (url.pathname === "/v1/logs") return respond(await ingestSpan(runSpan, db, "logs", req))
-			if (url.pathname === "/v1/metrics") return respond(await ingestSpan(runSpan, db, "metrics", req))
-			if (url.pathname === "/local/query") return respond(await querySpan(runSpan, db, req))
+			if (url.pathname === "/v1/traces")
+				return respond(await admitted(gate, () => ingestSpan(runSpan, db, authority, "traces", req)))
+			if (url.pathname === "/v1/logs")
+				return respond(await admitted(gate, () => ingestSpan(runSpan, db, authority, "logs", req)))
+			if (url.pathname === "/v1/metrics")
+				return respond(await admitted(gate, () => ingestSpan(runSpan, db, authority, "metrics", req)))
+			if (url.pathname === "/local/query")
+				return respond(await admitted(gate, () => querySpan(runSpan, db, authority, req)))
+			if (url.pathname === "/local/checkpoint/backup")
+				return respond(await admitted(gate, () => handleCheckpointBackup(db, maintenanceToken, req)))
+			if (url.pathname === "/local/retention/retire")
+				return respond(await handleRetirement(db, authority, gate, maintenanceToken, req))
 		}
 		if (req.method === "GET" && options.assets) return respond(serveAsset(options.assets, url.pathname))
 		return respond(text("not found", 404))
@@ -415,17 +615,34 @@ export const startServer = (
 	options: ServerOptions,
 ): Effect.Effect<{ readonly port: number }, ChdbError | ServerBindError, Scope.Scope> =>
 	Effect.gen(function* () {
+		const retention = yield* Effect.try({
+			try: () => {
+				const existing = readRawTelemetryRetentionDays(options.dataDir)
+				const requested = options.minimumRawTelemetryRetentionDays
+				if (requested !== undefined) rawTelemetryTtlStatements(requested)
+				if (existing !== undefined && requested !== undefined && requested < existing)
+					throw new Error(
+						`refusing to shorten persistent raw telemetry retention from ${existing} to ${requested} days`,
+					)
+				return { existing, requested, effective: requested ?? existing }
+			},
+			catch: (error) =>
+				new ChdbError({
+					message: `failed to load persistent raw telemetry retention: ${error instanceof Error ? error.message : String(error)}`,
+				}),
+		})
 		const db = yield* acquireChdb({
 			dataDir: options.dataDir,
 			schemaSql: LOCAL_SCHEMA_SQL,
 			configFile: options.configFile,
+			rawTelemetryRetentionDays: retention.effective,
 		})
 		// `CREATE ... IF NOT EXISTS` does not repair a table whose physical
 		// definition was altered out of band. Inspect the opened store before the
 		// listener is bound; a mismatch fails startup rather than allowing new
 		// query code to run against a partially old layout.
 		yield* Effect.try({
-			try: () => assertCurrentPhysicalSchema(db),
+			try: () => assertCurrentPhysicalSchema(db, retention.effective),
 			catch: (error) =>
 				new ChdbError({
 					message: `local physical-schema verification failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -447,6 +664,38 @@ export const startServer = (
 					message: `could not durably record local-store identity: ${error instanceof Error ? error.message : String(error)}`,
 				}),
 		})
+		// The ALTER statements have now been accepted by the running database.
+		// Only after that validation succeeds does a requested value become the
+		// durable configuration used by subsequent launches.
+		if (retention.requested !== undefined)
+			yield* Effect.tryPromise({
+				try: () => configureRawTelemetryRetentionDays(options.dataDir, retention.requested!),
+				catch: (error) =>
+					new ChdbError({
+						message: `failed to persist raw telemetry retention: ${error instanceof Error ? error.message : String(error)}`,
+					}),
+			})
+		const authority = yield* Effect.try({
+			try: () => {
+				const loaded = new RetiredDayAuthority(options.dataDir)
+				// Checkpoint restore may have resurrected retired rows. Replay before
+				// the listener is bound, so no restored representation is observable.
+				loaded.replay(db)
+				return loaded
+			},
+			catch: (error) =>
+				new ChdbError({
+					message: `failed to enforce retired-day authority: ${error instanceof Error ? error.message : String(error)}`,
+				}),
+		})
+		const maintenanceToken = yield* Effect.tryPromise({
+			try: () => ensureMaintenanceToken(options.dataDir),
+			catch: (error) =>
+				new ChdbError({
+					message: `failed to load maintenance token: ${error instanceof Error ? error.message : String(error)}`,
+				}),
+		})
+		const gate = new RequestQuiescenceGate()
 		// A dedicated runtime carrying the OTel tracer for per-request spans: the
 		// Bun.serve handler runs outside Effect, so each request's span effect is
 		// run through this runtime. Disposed on scope close, which flushes any
@@ -462,7 +711,7 @@ export const startServer = (
 					Bun.serve({
 						port: options.port,
 						hostname: options.hostname,
-						fetch: makeFetch(db, options, runSpan),
+						fetch: makeFetch(db, options, runSpan, authority, gate, maintenanceToken),
 					}),
 				catch: (error) =>
 					new ServerBindError({
