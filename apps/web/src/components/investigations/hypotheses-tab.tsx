@@ -81,9 +81,7 @@ export function HypothesesTab({ investigation }: { investigation: V2Investigatio
 								</span>
 							</span>
 							<span className="w-40 shrink-0">
-								<span className="block text-sm text-foreground">
-									{lensCopy(entry.lensId).name}
-								</span>
+								<span className="block text-sm text-foreground">{lensCopy(entry).name}</span>
 								<span className="block font-mono text-xs text-muted-foreground tabular-nums">
 									{entry.elapsedSeconds === null
 										? "queued"

@@ -16,8 +16,7 @@
 import { UnitflowRuntime } from "@maple/unitflow"
 import { Layer } from "effect"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
-import { Atom } from "@/lib/effect-atom"
-import { mapleApiClientLayer, mapleApiV2ClientLayer } from "@/lib/registry"
+import { appMemoMap, mapleApiClientLayer, mapleApiV2ClientLayer } from "@/lib/registry"
 import { AlertsOverviewModel } from "./alerts-overview-model"
 import { DashboardsListModel } from "./dashboards-list-model"
 
@@ -25,7 +24,7 @@ export const unitflowRuntime = UnitflowRuntime.make(
 	Layer.mergeAll(AlertsOverviewModel.layer, DashboardsListModel.layer).pipe(
 		Layer.provideMerge(Layer.mergeAll(mapleApiClientLayer, mapleApiV2ClientLayer, Reactivity.layer)),
 	),
-	{ memoMap: Atom.runtime.memoMap },
+	{ memoMap: appMemoMap },
 )
 
 // Dispose the runtime on page unload so every live model instance runs its

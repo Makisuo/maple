@@ -14,7 +14,7 @@ export class DemoSeedResponse extends Schema.Class<DemoSeedResponse>("DemoSeedRe
 	metricsSent: Schema.Number,
 }) {}
 
-export class DemoSeedError extends Schema.TaggedErrorClass<DemoSeedError>()(
+export class DemoSeedError extends Schema.TaggedError<DemoSeedError>()(
 	"@maple/http/errors/DemoSeedError",
 	{
 		message: Schema.String,

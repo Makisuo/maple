@@ -563,7 +563,7 @@ describe("PlanetScaleService.listEvents", () => {
 				database: "main-db",
 				limit: 100,
 			})
-			assert.deepStrictEqual([...byDatabase.events.map((e) => e.id)].sort(), [
+			assert.deepStrictEqual(byDatabase.events.map((e) => e.id).sort(), [
 				"main-branch",
 				"main-deploy",
 			])
@@ -609,7 +609,7 @@ describe("PlanetScaleService.listEvents", () => {
 				branch: "main",
 				limit: 100,
 			})
-			assert.deepStrictEqual([...page.events.map((e) => e.id)].sort(), ["deploy", "main-ready"])
+			assert.deepStrictEqual(page.events.map((e) => e.id).sort(), ["deploy", "main-ready"])
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 

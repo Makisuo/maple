@@ -319,10 +319,6 @@ const parseShardRecord = (
 		)
 	}
 	const bytes = requiredCount(value, "bytes")
-	const complexDigest = requiredString(value, "complexDigest")
-	if (!/^[0-9]+$/.test(complexDigest)) {
-		throw new Error(`invalid archive shard complexDigest (must be a numeric digest): ${complexDigest}`)
-	}
 	const complexDigestAlgorithm = requiredString(value, "complexDigestAlgorithm")
 	if (!KNOWN_COMPLEX_DIGEST_ALGORITHMS.has(complexDigestAlgorithm)) {
 		throw new Error(
@@ -330,6 +326,11 @@ const parseShardRecord = (
 				`(known: ${[...KNOWN_COMPLEX_DIGEST_ALGORITHMS].join(", ")}); the manifest is preserved as-is`,
 		)
 	}
+	const complexDigest = requiredString(value, "complexDigest")
+	const digestPattern =
+		complexDigestAlgorithm === "cityhash64-bounded-multiset-v4" ? /^\d+:\d+:\d+:\d+$/ : /^\d+$/
+	if (!digestPattern.test(complexDigest))
+		throw new Error(`invalid archive shard complexDigest for ${complexDigestAlgorithm}: ${complexDigest}`)
 	return {
 		name,
 		rowCount,

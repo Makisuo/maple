@@ -82,7 +82,7 @@ const uid = (prefix: string): string => `__bench/${prefix}/${_uid++}`
 // A TaggedError shaped exactly like the real WarehouseQueryError (6 fields, one
 // a 6-member Literals union) — the unit the comment says is expensive.
 const defineTaggedError = () =>
-	Schema.TaggedErrorClass<any>()(
+	Schema.TaggedError<any>()(
 		uid("err"),
 		{
 			message: Schema.String,

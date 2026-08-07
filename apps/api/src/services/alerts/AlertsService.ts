@@ -104,7 +104,6 @@ import {
 import * as AlertingMetrics from "@/observability/AlertingMetrics"
 import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
 import {
-	INVESTIGATION_AGENT_BINDING,
 	INVESTIGATION_FANOUT_BINDING,
 } from "@/services/errors/ai-triage-enqueue"
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
@@ -1178,10 +1177,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			// Optional: present only inside a Worker isolate. Used to kick off the
 			// AI triage Workflow for issues created from freshly opened incidents.
 			const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
-			const investigationAgentBinding = Option.match(workerEnv, {
-				onNone: () => undefined,
-				onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
-			})
 			const investigationFanoutBinding = Option.match(workerEnv, {
 				onNone: () => undefined,
 				onSome: (e) => e[INVESTIGATION_FANOUT_BINDING],
@@ -1633,7 +1628,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				reasonOverride?: string,
 			): EvaluatedRule => {
 				const noDataBehavior = rule.compiledPlan.noDataBehavior
-				const sampleCount = obs.sampleCount
+				// Sample-weighted counts arrive fractional from the warehouse
+				// (`sum(SampleRate)`), and this flows into `last_sample_count`, an
+				// `integer` column — an unrounded value fails the insert outright.
+				const sampleCount = Math.round(obs.sampleCount)
 				const value = obs.hasData ? obs.value : noDataBehavior === "zero" ? 0 : null
 
 				if (!obs.hasData && noDataBehavior === "skip") {
@@ -4205,7 +4203,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									? groupKey
 									: (normalized.serviceNames[0] ?? ""),
 							timestamp,
-							agentBinding: investigationAgentBinding,
 							fanoutBinding: investigationFanoutBinding,
 						}).pipe(Effect.provideService(Database, database))
 					} else {

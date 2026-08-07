@@ -18,8 +18,8 @@ SCRATCH="$ROOT/scratch"
 CONFIG="$ROOT/backups.xml"
 SERVER_PID=""
 
-# Seal the UTC day containing "now" so the ingested markers fall inside it.
-RANGE_DATE="$(date -u +%Y-%m-%d)"
+# Use an already sealed UTC day; archive creation rejects the current day.
+RANGE_DATE="$(date -u -d '1 day ago' +%F 2>/dev/null || date -u -v-1d +%F)"
 
 cleanup() {
 	if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then

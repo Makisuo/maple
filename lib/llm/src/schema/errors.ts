@@ -171,7 +171,7 @@ export const LLMErrorReason = Schema.Union([
 ]).pipe(Schema.toTaggedUnion("_tag"))
 export type LLMErrorReason = Schema.Schema.Type<typeof LLMErrorReason>
 
-export class LLMError extends Schema.TaggedErrorClass<LLMError>()("LLM.Error", {
+export class LLMError extends Schema.TaggedError<LLMError>()("LLM.Error", {
   module: Schema.String,
   method: Schema.String,
   reason: LLMErrorReason,
@@ -200,7 +200,7 @@ export class LLMError extends Schema.TaggedErrorClass<LLMError>()("LLM.Error", {
  * Anything thrown or yielded by a handler that is not a `ToolFailure` is
  * treated as a defect and fails the stream.
  */
-export class ToolFailure extends Schema.TaggedErrorClass<ToolFailure>()("LLM.ToolFailure", {
+export class ToolFailure extends Schema.TaggedError<ToolFailure>()("LLM.ToolFailure", {
   message: Schema.String,
   error: Schema.optional(Schema.Defect()),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),

@@ -1,94 +1,126 @@
 /**
- * The in-turn pruner.
+ * The overflow fallback.
  *
- * The properties that matter: it protects the recent steps, it never silently shortens a payload
- * without saying so, and it does nothing at all when there is nothing worth reclaiming.
+ * The properties that matter: it protects the recent steps, it never leaves the transcript
+ * incoherent (an orphaned tool result, or a tool call whose answer vanished), it spends prose last,
+ * and it says so plainly when it has nothing left to give.
+ *
+ * What it must *not* do is edit a message. That is the whole reason it replaced the in-turn pruner —
+ * see the module header — so "never rewrites a surviving message" is load-bearing, not incidental.
  */
 import { LLM, Message, ToolResultPart, type LLMRequest, type Model } from "@maple/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
 import { assert, describe, it } from "vitest"
-import { estimateTokens, isNearContextLimit, pruneToolResults } from "./context"
+import { dropOldestToolStep, isNearContextLimit } from "./context"
 
 const MODEL: Model = CloudflareWorkersAI.configure({ accountId: "t", apiKey: "t" }).model("@cf/test/model")
 
-/**
- * Default size clears `PRUNE_MIN_RECLAIM_TOKENS` (20k tokens ≈ 80k chars) from a single pruned
- * step, so a test does not have to stack steps just to get past the threshold.
- */
-const big = (marker: string, chars = 100_000) => marker + "x".repeat(chars)
-
 /** One step: an assistant turn plus the tool result it produced. */
-const step = (marker: string, chars?: number): ReadonlyArray<Message> => [
+const step = (marker: string): ReadonlyArray<Message> => [
 	Message.assistant(`calling ${marker}`),
-	Message.tool(ToolResultPart.make({ id: marker, name: "search_traces", result: big(marker, chars) })),
+	Message.tool(ToolResultPart.make({ id: marker, name: "search_traces", result: `result ${marker}` })),
 ]
 
 const requestOf = (messages: ReadonlyArray<Message>): LLMRequest =>
 	LLM.request({ model: MODEL, system: "s", messages: [...messages] })
 
-const toolTexts = (request: LLMRequest): ReadonlyArray<string> =>
-	request.messages
-		.filter((message) => message.role === "tool")
-		.flatMap((message) => message.content)
-		.map((part) => (part.type === "tool-result" ? String(part.result.value) : ""))
+const spoken = (request: LLMRequest): ReadonlyArray<string> =>
+	request.messages.map((message) =>
+		message.content
+			.map((part) =>
+				part.type === "text"
+					? part.text
+					: part.type === "tool-result"
+						? String(part.result.value)
+						: "",
+			)
+			.join(""),
+	)
 
-describe("pruneToolResults", () => {
-	it("truncates old tool output and leaves the last two steps intact", () => {
-		const request = requestOf([...step("a"), ...step("b"), ...step("c"), ...step("d")])
-		const pruned = pruneToolResults(request)
+describe("dropOldestToolStep", () => {
+	it("drops the oldest step whole — assistant and its results together", () => {
+		const dropped = dropOldestToolStep(requestOf([...step("a"), ...step("b"), ...step("c")]))
 
-		const texts = toolTexts(pruned)
-		assert.lengthOf(texts, 4)
-		// The two oldest lost their tails; the two the model is still reasoning about did not.
-		assert.isBelow(texts[0]!.length, 3_000)
-		assert.isBelow(texts[1]!.length, 3_000)
-		assert.equal(texts[2], big("c"))
-		assert.equal(texts[3], big("d"))
+		// "calling a" leaves with "result a". A transcript holding one without the other is a tool
+		// call with no answer, or an answer to nothing.
+		assert.deepEqual(spoken(dropped), ["calling b", "result b", "calling c", "result c"])
 	})
 
-	it("tells the model what it dropped instead of quietly shortening the payload", () => {
-		// A tool result that silently loses its tail is indistinguishable from a tool that returned
-		// less than it did — which is how a model concludes "there were only 3 traces".
-		const pruned = pruneToolResults(requestOf([...step("a"), ...step("b"), ...step("c")]))
-
-		assert.include(toolTexts(pruned)[0]!, "truncated")
-		assert.include(toolTexts(pruned)[0]!, "characters omitted")
+	it("drops one step per call, so the caller controls how much it gives up", () => {
+		const once = dropOldestToolStep(requestOf([...step("a"), ...step("b"), ...step("c"), ...step("d")]))
+		assert.deepEqual(spoken(once), [
+			"calling b",
+			"result b",
+			"calling c",
+			"result c",
+			"calling d",
+			"result d",
+		])
 	})
 
-	it("keeps the surviving prefix, so the excerpt is the start of the real output", () => {
-		const pruned = pruneToolResults(requestOf([...step("a"), ...step("b"), ...step("c")]))
+	it("takes every result belonging to a step, not just the first", () => {
+		const fanOut = requestOf([
+			Message.assistant("calling a"),
+			Message.tool(ToolResultPart.make({ id: "a1", name: "search_traces", result: "r1" })),
+			Message.tool(ToolResultPart.make({ id: "a2", name: "search_logs", result: "r2" })),
+			...step("b"),
+			...step("c"),
+		])
 
-		assert.isTrue(toolTexts(pruned)[0]!.startsWith("a"))
+		assert.deepEqual(spoken(dropOldestToolStep(fanOut)), [
+			"calling b",
+			"result b",
+			"calling c",
+			"result c",
+		])
 	})
 
-	it("returns the request unchanged when there is nothing worth reclaiming", () => {
-		// Identity, not just equality: a short turn must pay nothing, so callers can apply this
-		// unconditionally.
-		const request = requestOf([...step("a", 10), ...step("b", 10), ...step("c", 10)])
-		assert.strictEqual(pruneToolResults(request), request)
-	})
-
-	it("returns the request unchanged when every step is still protected", () => {
-		const request = requestOf([...step("a"), ...step("b")])
-		assert.strictEqual(pruneToolResults(request), request)
-	})
-
-	it("leaves user and assistant messages alone", () => {
+	it("spends tool payloads before conversation, so the model keeps knowing what was asked", () => {
 		const request = requestOf([
 			Message.user("why is checkout slow?"),
+			Message.assistant("let me look"),
 			...step("a"),
 			...step("b"),
 			...step("c"),
 		])
-		const pruned = pruneToolResults(request)
 
-		const spoken = pruned.messages.filter((message) => message.role !== "tool")
-		assert.deepEqual(
-			spoken.map((message) =>
-				message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
-			),
-			["why is checkout slow?", "calling a", "calling b", "calling c"],
-		)
+		// The prose assistant turn has no results to reclaim — dropping it would cost memory and buy
+		// nothing, so the first *tool-calling* step goes instead.
+		assert.deepEqual(spoken(dropOldestToolStep(request)), [
+			"why is checkout slow?",
+			"let me look",
+			"calling b",
+			"result b",
+			"calling c",
+			"result c",
+		])
+	})
+
+	it("returns the request unchanged when only the protected steps are left", () => {
+		// Identity, not equality: this is the caller's signal that there is nothing left to give, and
+		// `turn.ts` ends the turn on it rather than retrying an identical request.
+		const request = requestOf([...step("a"), ...step("b")])
+		assert.strictEqual(dropOldestToolStep(request), request)
+	})
+
+	it("returns the request unchanged when there are no tool steps at all", () => {
+		const request = requestOf([
+			Message.user("hello"),
+			Message.assistant("hi"),
+			Message.user("still there?"),
+			Message.assistant("yes"),
+		])
+		assert.strictEqual(dropOldestToolStep(request), request)
+	})
+
+	it("never rewrites a surviving message", () => {
+		// The point of the whole module: a survivor comes through byte-for-byte. An edited message
+		// diverges the cached prefix exactly the way the in-turn pruner this replaced did, so
+		// "shorter" is only safe when it means "fewer messages", never "smaller messages".
+		const request = requestOf([...step("a"), ...step("b"), ...step("c")])
+		const dropped = dropOldestToolStep(request)
+
+		assert.deepEqual([...dropped.messages], request.messages.slice(2))
 	})
 })
 
@@ -107,13 +139,5 @@ describe("isNearContextLimit", () => {
 
 	it("says no when the model declares no window, rather than guessing", () => {
 		assert.isFalse(isNearContextLimit(10_000_000, {}))
-	})
-})
-
-describe("estimateTokens", () => {
-	it("is a rough chars-per-token estimate, used only to size a prune", () => {
-		assert.equal(estimateTokens(""), 0)
-		assert.equal(estimateTokens("abcd"), 1)
-		assert.equal(estimateTokens("abcde"), 2)
 	})
 })

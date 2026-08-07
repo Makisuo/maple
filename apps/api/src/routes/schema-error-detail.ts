@@ -12,10 +12,10 @@
  * `widgets[]` array — resolved from the offending value itself, so it survives
  * reordering and is stable across the v1/v2 key spellings.
  */
-import { Option, SchemaIssue } from "effect"
+import { SchemaIssue } from "effect"
 
 /** Which part of the request failed to decode; mirrors `HttpApiSchemaError.kind`. */
-export type SchemaErrorKind = "Params" | "Headers" | "Query" | "Body" | "Payload"
+export type SchemaErrorKind = "Params" | "Headers" | "Query" | "Body" | "Payload" | "ResponseHeaders"
 
 /** Formats a path as `dashboard.widgets[3].display.fillNulls`. */
 export const formatIssuePath = (path: ReadonlyArray<PropertyKey>): string => {
@@ -62,6 +62,26 @@ export const widgetIdForPath = (root: unknown, path: ReadonlyArray<PropertyKey>)
 
 const formatStandard = SchemaIssue.makeFormatterStandardSchemaV1()
 
+const reportedInputs = (issue: SchemaIssue.Issue): ReadonlyArray<unknown> => {
+	const inputs: Array<unknown> = []
+	const visit = (current: SchemaIssue.Issue) => {
+		if (SchemaIssue.hasInput(current)) inputs.push(current.input)
+		switch (current._tag) {
+			case "Filter":
+			case "Encoding":
+			case "Pointer":
+				visit(current.issue)
+				break
+			case "Composite":
+			case "AnyOf":
+				current.issues.forEach(visit)
+				break
+		}
+	}
+	visit(issue)
+	return inputs
+}
+
 export interface SchemaIssueDetail {
 	/** Dotted/bracketed JSON path of the offending value, `""` at the root. */
 	readonly path: string
@@ -82,7 +102,10 @@ const MAX_DETAILS = 20
  * one problem rather than two.
  */
 export const describeSchemaIssue = (issue: SchemaIssue.Issue): ReadonlyArray<SchemaIssueDetail> => {
-	const root = Option.getOrUndefined(SchemaIssue.getActual(issue))
+	// JSON-body decoding may wrap the decoded object in an outer issue whose
+	// reported input is the raw request string. Keep every reported input so the
+	// decoded root object can still resolve an enclosing widget id.
+	const inputs = reportedInputs(issue)
 	const byPath = new Map<string, { path: ReadonlyArray<PropertyKey>; messages: Array<string> }>()
 
 	for (const entry of formatStandard(issue).issues) {
@@ -101,7 +124,7 @@ export const describeSchemaIssue = (issue: SchemaIssue.Issue): ReadonlyArray<Sch
 
 	const details: Array<SchemaIssueDetail> = []
 	for (const [key, { path, messages }] of byPath) {
-		const widgetId = widgetIdForPath(root, path)
+		const widgetId = inputs.map((input) => widgetIdForPath(input, path)).find((id) => id !== undefined)
 		const message = messages.join("; ")
 		const location = key === "" ? "<root>" : key
 		const label = widgetId === undefined ? location : `${location} (widget "${widgetId}")`
@@ -117,6 +140,7 @@ const KIND_LABEL: Record<SchemaErrorKind, string> = {
 	Query: "query string",
 	Body: "body",
 	Payload: "payload",
+	ResponseHeaders: "response headers",
 }
 
 /** `Request payload is invalid (2 problems).` — the summary line for the 400. */

@@ -98,6 +98,7 @@ describe("MCP HTTP authorization", () => {
 					method: "POST",
 					headers: {
 						authorization: `Bearer ${key.secret}`,
+						accept: "application/json, text/event-stream",
 						"content-type": "application/json",
 						host: "internal-worker.invalid",
 						"x-forwarded-host": "api.example.com",
@@ -108,7 +109,7 @@ describe("MCP HTTP authorization", () => {
 						id: 1,
 						method: "initialize",
 						params: {
-							protocolVersion: "2025-11-25",
+							protocolVersion: "2025-06-18",
 							capabilities: {},
 							clientInfo: { name: "test", version: "1.0.0" },
 						},

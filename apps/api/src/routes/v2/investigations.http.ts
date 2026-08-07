@@ -34,7 +34,7 @@ import type {
 import { Effect, Match, Schema } from "effect"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 
-class InvestigationSubjectDecodeError extends Schema.TaggedErrorClass<InvestigationSubjectDecodeError>()(
+class InvestigationSubjectDecodeError extends Schema.TaggedError<InvestigationSubjectDecodeError>()(
 	"@maple/api/routes/v2/InvestigationSubjectDecodeError",
 	{
 		investigationId: InvestigationId,
@@ -193,6 +193,10 @@ const toV2Investigation = Effect.fn("HttpV2Investigations.toV2Investigation")(fu
 			confidence: lens.confidence,
 			toolCount: lens.toolCount,
 			elapsedSeconds: lens.elapsedSeconds,
+			name: lens.name,
+			question: lens.question,
+			priority: lens.priority,
+			deadlineHit: lens.deadlineHit,
 		})),
 		validator:
 			doc.validator === null

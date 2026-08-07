@@ -3,57 +3,27 @@ description: >-
     Frozen-lockfile install, shared by every CI job so there is one place to
     change install behaviour.
 
-    node_modules lives on a Blacksmith sticky disk — a block-level ext4 clone,
-    not a tarball.
+    Deliberately NOT cached. ~/.bun/install/cache for this repo is ~739MB, and
+    caching it measured consistently SLOWER than a cold install: knip's install
+    went 34s -> 57s and local-checkpoint-native's 44s -> 113s. tar is the cost,
+    not bandwidth: node_modules here is ~750k inodes across ~4.5k packages, and
+    no transfer rate fixes per-file serialization. Do not re-add actions/cache
+    here without measuring the step both ways.
 
-    Do NOT replace this with actions/cache. Caching ~/.bun/install/cache (~739MB)
-    that way measured consistently SLOWER than a cold install: knip 34s -> 57s,
-    local-checkpoint-native 44s -> 113s. That measurement was taken after the
-    migration to Blacksmith, whose transparent cache interception already serves
-    the GitHub cache API from colocated storage — so bandwidth was never the
-    problem. tar was: node_modules here is ~750k inodes across ~4.5k packages,
-    and no transfer rate fixes per-file serialization. A sticky disk avoids the
-    tarball round-trip entirely.
-
-    Trade-off, deliberately accepted: a sticky disk is its own filesystem, and
-    hardlinks cannot cross filesystems, so bun falls back to copyfile when it
-    links out of ~/.bun/install/cache. That only costs anything on the cold path
-    (a lockfile change). On the warm path `--frozen-lockfile` links nothing and
-    is a verification no-op.
+    This previously mounted node_modules on a Blacksmith sticky disk — a
+    block-level ext4 clone that avoids the tarball round-trip entirely. There is
+    no GitHub-hosted equivalent, so it went away with the move back off
+    Blacksmith; see git history if it ever returns.
 
 inputs:
     working-directory:
         description: Directory holding the bun.lock to install from.
         required: false
         default: "."
-    disk-key:
-        description: >-
-            Sticky disk identifier. Must be distinct per lockfile — the root
-            workspace and apps/slack-agent do not share a node_modules.
-        required: false
-        default: node-modules-root
-    commit:
-        description: >-
-            Whether this job snapshots the disk back. Every job gets its own
-            isolated clone, so concurrent mounts are safe, but concurrent
-            commits are wasteful (commit time is billed per job) and resolve
-            last-write-wins. Exactly ONE job per CI run per disk-key should pass
-            "on-change"; everything else leaves this "false".
-        required: false
-        default: "false"
 
 runs:
     using: composite
     steps:
-        # MUST come after actions/checkout. checkout defaults to `clean: true`,
-        # which is `git clean -ffdx` — it would delete a node_modules mounted
-        # before it, since node_modules is gitignored.
-        - uses: useblacksmith/stickydisk@v1
-          with:
-              key: ${{ github.repository }}-${{ inputs.disk-key }}
-              path: ${{ github.workspace }}/${{ inputs.working-directory }}/node_modules
-              commit: ${{ inputs.commit }}
-
         - run: bun install --frozen-lockfile
           shell: bash
           working-directory: ${{ inputs.working-directory }}

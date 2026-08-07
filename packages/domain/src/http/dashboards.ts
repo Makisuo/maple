@@ -342,13 +342,15 @@ export class DashboardsListResponse extends Schema.Class<DashboardsListResponse>
 	dashboards: Schema.Array(DashboardDocument),
 }) {}
 
-export class DashboardUpsertRequest extends Schema.Class<DashboardUpsertRequest>("DashboardUpsertRequest")({
-	dashboard: DashboardDocument,
-}) {}
+export class DashboardUpsertRequest extends Schema.Class<DashboardUpsertRequest>("DashboardUpsertRequest")(
+	{ dashboard: DashboardDocument },
+	{ parseOptions: { reportInput: true } },
+) {}
 
-export class DashboardCreateRequest extends Schema.Class<DashboardCreateRequest>("DashboardCreateRequest")({
-	dashboard: PortableDashboardDocument,
-}) {}
+export class DashboardCreateRequest extends Schema.Class<DashboardCreateRequest>("DashboardCreateRequest")(
+	{ dashboard: PortableDashboardDocument },
+	{ parseOptions: { reportInput: true } },
+) {}
 
 export class DashboardPersesImportRequest extends Schema.Class<DashboardPersesImportRequest>(
 	"DashboardPersesImportRequest",
@@ -436,7 +438,7 @@ const DashboardVersionsListQuery = Schema.Struct({
 	before: Schema.optional(Schema.NumberFromString.check(Schema.isInt())),
 })
 
-export class DashboardVersionNotFoundError extends Schema.TaggedErrorClass<DashboardVersionNotFoundError>()(
+export class DashboardVersionNotFoundError extends Schema.TaggedError<DashboardVersionNotFoundError>()(
 	"@maple/http/errors/DashboardVersionNotFoundError",
 	{
 		dashboardId: DashboardId,
@@ -446,7 +448,7 @@ export class DashboardVersionNotFoundError extends Schema.TaggedErrorClass<Dashb
 	{ httpApiStatus: 404 },
 ) {}
 
-export class DashboardPersistenceError extends Schema.TaggedErrorClass<DashboardPersistenceError>()(
+export class DashboardPersistenceError extends Schema.TaggedError<DashboardPersistenceError>()(
 	"@maple/http/errors/DashboardPersistenceError",
 	{
 		message: Schema.String,
@@ -454,7 +456,7 @@ export class DashboardPersistenceError extends Schema.TaggedErrorClass<Dashboard
 	{ httpApiStatus: 503 },
 ) {}
 
-export class DashboardNotFoundError extends Schema.TaggedErrorClass<DashboardNotFoundError>()(
+export class DashboardNotFoundError extends Schema.TaggedError<DashboardNotFoundError>()(
 	"@maple/http/errors/DashboardNotFoundError",
 	{
 		dashboardId: DashboardId,
@@ -463,7 +465,7 @@ export class DashboardNotFoundError extends Schema.TaggedErrorClass<DashboardNot
 	{ httpApiStatus: 404 },
 ) {}
 
-export class DashboardValidationError extends Schema.TaggedErrorClass<DashboardValidationError>()(
+export class DashboardValidationError extends Schema.TaggedError<DashboardValidationError>()(
 	"@maple/http/errors/DashboardValidationError",
 	{
 		message: Schema.String,
@@ -487,7 +489,7 @@ export class DashboardSchemaErrors extends HttpApiMiddleware.Service<DashboardSc
 	{ error: DashboardValidationError },
 ) {}
 
-export class DashboardConcurrencyError extends Schema.TaggedErrorClass<DashboardConcurrencyError>()(
+export class DashboardConcurrencyError extends Schema.TaggedError<DashboardConcurrencyError>()(
 	"@maple/http/errors/DashboardConcurrencyError",
 	{
 		dashboardId: DashboardId,
@@ -606,7 +608,7 @@ export class DashboardTemplateInstantiateRequest extends Schema.Class<DashboardT
 	name: Schema.optionalKey(Schema.String),
 }) {}
 
-export class DashboardTemplateNotFoundError extends Schema.TaggedErrorClass<DashboardTemplateNotFoundError>()(
+export class DashboardTemplateNotFoundError extends Schema.TaggedError<DashboardTemplateNotFoundError>()(
 	"@maple/http/errors/DashboardTemplateNotFoundError",
 	{
 		templateId: DashboardTemplateId,

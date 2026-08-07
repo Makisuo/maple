@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 
-export class UrlValidationError extends Schema.TaggedErrorClass<UrlValidationError>()(
+export class UrlValidationError extends Schema.TaggedError<UrlValidationError>()(
 	"@maple/api/lib/UrlValidationError",
 	{
 		message: Schema.String,

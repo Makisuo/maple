@@ -52,7 +52,11 @@ export default {
 			return markdownTwin(url.pathname) ? withVary(assetResponse) : assetResponse
 		}
 
-		const notFound = await env.ASSETS.fetch(new Request(new URL("/404.html", url), request))
+		// Deliberately *not* `new Request(url, request)`: the ASSETS.fetch above has
+		// already consumed the body stream, so re-deriving from `request` throws
+		// `Body has already been used` and the runtime answers 500. That is invisible
+		// for GETs (no body) and turned every POST to an unknown path into a 500.
+		const notFound = await env.ASSETS.fetch(new Request(new URL("/404.html", url)))
 		return new Response(notFound.body, {
 			status: 404,
 			headers: notFound.headers,

@@ -2,7 +2,7 @@ import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effe
 import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 
 /** Fatal misconfiguration discovered at startup — surfaces as a tagged defect in the Cause. */
-class EnvValidationError extends Schema.TaggedErrorClass<EnvValidationError>()(
+class EnvValidationError extends Schema.TaggedError<EnvValidationError>()(
 	"@maple/api/lib/EnvValidationError",
 	{ message: Schema.String },
 ) {}

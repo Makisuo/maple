@@ -441,43 +441,71 @@ export const upsertPlanetScaleIssue: (
 			)[0]
 
 			if (prior === undefined) {
-				const issueId = decodeIssueId(randomUUID())
-				await tx.insert(errorIssues).values({
-					id: issueId,
-					orgId: input.orgId,
-					kind: "integration",
-					sourceRefJson,
-					fingerprintHash,
-					serviceName,
-					exceptionType: input.title,
-					exceptionMessage: input.description,
-					errorLabel: input.title,
-					topFrame: "",
-					workflowState: "triage",
-					priority: 3,
-					severity: input.severity,
-					severitySource: "detector",
-					assignedActorId: null,
-					leaseHolderActorId: null,
-					leaseExpiresAt: null,
-					claimedAt: null,
-					notes: null,
-					firstSeenAt: new Date(input.timestamp),
-					lastSeenAt: new Date(input.timestamp),
-					occurrenceCount: 1,
-					resolvedAt: null,
-					resolvedByActorId: null,
-					snoozeUntil: null,
-					archivedAt: null,
-					createdAt: new Date(input.timestamp),
-					updatedAt: new Date(input.timestamp),
-				})
-				const actorId = await ensureActor()
-				await recordEvent(issueId, actorId, "created", {
-					toState: "triage",
-					payload: sourceRefJson,
-				})
-				return { issueId, action: "created" as const }
+				const candidateId = decodeIssueId(randomUUID())
+				// READ COMMITTED does not hold the gap between the select above and
+				// this insert, so a concurrent webhook for the same event can slip in
+				// and raise `error_issues_org_fp_idx`.
+				const claimed = await tx
+					.insert(errorIssues)
+					.values({
+						id: candidateId,
+						orgId: input.orgId,
+						kind: "integration",
+						sourceRefJson,
+						fingerprintHash,
+						serviceName,
+						exceptionType: input.title,
+						exceptionMessage: input.description,
+						errorLabel: input.title,
+						topFrame: "",
+						workflowState: "triage",
+						priority: 3,
+						severity: input.severity,
+						severitySource: "detector",
+						assignedActorId: null,
+						leaseHolderActorId: null,
+						leaseExpiresAt: null,
+						claimedAt: null,
+						notes: null,
+						firstSeenAt: new Date(input.timestamp),
+						lastSeenAt: new Date(input.timestamp),
+						occurrenceCount: 1,
+						resolvedAt: null,
+						resolvedByActorId: null,
+						snoozeUntil: null,
+						archivedAt: null,
+						createdAt: new Date(input.timestamp),
+						updatedAt: new Date(input.timestamp),
+					})
+					.onConflictDoNothing({
+						target: [errorIssues.orgId, errorIssues.fingerprintHash],
+					})
+					.returning({ id: errorIssues.id })
+
+				const insertedId = claimed[0]?.id
+				if (insertedId !== undefined) {
+					const actorId = await ensureActor()
+					await recordEvent(insertedId, actorId, "created", {
+						toState: "triage",
+						payload: sourceRefJson,
+					})
+					return { issueId: insertedId, action: "created" as const }
+				}
+				// The concurrent writer won and already emitted `created`; report the
+				// sighting against their issue rather than duplicating the history.
+				const winner = (
+					await tx
+						.select({ id: errorIssues.id })
+						.from(errorIssues)
+						.where(
+							and(
+								eq(errorIssues.orgId, input.orgId),
+								eq(errorIssues.fingerprintHash, fingerprintHash),
+							),
+						)
+						.limit(1)
+				)[0]
+				return { issueId: winner?.id ?? candidateId, action: "skipped" as const }
 			}
 
 			const issueId = prior.id

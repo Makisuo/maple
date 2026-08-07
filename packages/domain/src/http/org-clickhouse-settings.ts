@@ -200,31 +200,31 @@ export class OrgClickHouseCollectorConfigResponse extends Schema.Class<OrgClickH
 
 // --- Errors ------------------------------------------------------------------
 
-export class OrgClickHouseSettingsForbiddenError extends Schema.TaggedErrorClass<OrgClickHouseSettingsForbiddenError>()(
+export class OrgClickHouseSettingsForbiddenError extends Schema.TaggedError<OrgClickHouseSettingsForbiddenError>()(
 	"@maple/http/errors/OrgClickHouseSettingsForbiddenError",
 	{ message: Schema.String },
 	{ httpApiStatus: 403 },
 ) {}
 
-export class OrgClickHouseSettingsValidationError extends Schema.TaggedErrorClass<OrgClickHouseSettingsValidationError>()(
+export class OrgClickHouseSettingsValidationError extends Schema.TaggedError<OrgClickHouseSettingsValidationError>()(
 	"@maple/http/errors/OrgClickHouseSettingsValidationError",
 	{ message: Schema.String },
 	{ httpApiStatus: 400 },
 ) {}
 
-export class OrgClickHouseSettingsPersistenceError extends Schema.TaggedErrorClass<OrgClickHouseSettingsPersistenceError>()(
+export class OrgClickHouseSettingsPersistenceError extends Schema.TaggedError<OrgClickHouseSettingsPersistenceError>()(
 	"@maple/http/errors/OrgClickHouseSettingsPersistenceError",
 	{ message: Schema.String },
 	{ httpApiStatus: 503 },
 ) {}
 
-export class OrgClickHouseSettingsEncryptionError extends Schema.TaggedErrorClass<OrgClickHouseSettingsEncryptionError>()(
+export class OrgClickHouseSettingsEncryptionError extends Schema.TaggedError<OrgClickHouseSettingsEncryptionError>()(
 	"@maple/http/errors/OrgClickHouseSettingsEncryptionError",
 	{ message: Schema.String },
 	{ httpApiStatus: 500 },
 ) {}
 
-export class OrgClickHouseSettingsUpstreamRejectedError extends Schema.TaggedErrorClass<OrgClickHouseSettingsUpstreamRejectedError>()(
+export class OrgClickHouseSettingsUpstreamRejectedError extends Schema.TaggedError<OrgClickHouseSettingsUpstreamRejectedError>()(
 	"@maple/http/errors/OrgClickHouseSettingsUpstreamRejectedError",
 	{
 		message: Schema.String,
@@ -233,7 +233,7 @@ export class OrgClickHouseSettingsUpstreamRejectedError extends Schema.TaggedErr
 	{ httpApiStatus: 400 },
 ) {}
 
-export class OrgClickHouseSettingsUpstreamUnavailableError extends Schema.TaggedErrorClass<OrgClickHouseSettingsUpstreamUnavailableError>()(
+export class OrgClickHouseSettingsUpstreamUnavailableError extends Schema.TaggedError<OrgClickHouseSettingsUpstreamUnavailableError>()(
 	"@maple/http/errors/OrgClickHouseSettingsUpstreamUnavailableError",
 	{
 		message: Schema.String,

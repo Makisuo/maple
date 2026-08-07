@@ -78,7 +78,13 @@ export const buildList = (
 	rows: Db.CollectionState<DashboardRow>,
 	fallback: DashboardsFallbackState,
 ): DashboardsListData => {
-	if (AsyncResult.isSuccess(rows) && rows.value.length > 0) {
+	// A success is authoritative even when it carries no rows: `Db.changes` only
+	// emits `success` once the collection reaches `ready`, so "no dashboards" is a
+	// real answer, not a loading state. Requiring `length > 0` here made a healthy
+	// org that simply has none yet fall through to the snapshot branch and render
+	// `degraded` — which the route turns into read-only, disabling the one control
+	// that could fix it ("New dashboard"), with nothing on screen to explain why.
+	if (AsyncResult.isSuccess(rows)) {
 		return { phase: "ready", dashboards: deriveDashboardsList(rows.value), degraded: false }
 	}
 	if (fallback.status === "ready") {
@@ -93,10 +99,9 @@ export const buildList = (
 	if (message !== null) {
 		return { phase: "error", message }
 	}
-	if (!AsyncResult.isSuccess(rows)) {
-		return { phase: "loading" }
-	}
-	return { phase: "ready", dashboards: deriveDashboardsList(rows.value), degraded: false }
+	// Everything else is a collection that hasn't resolved yet (`initial`) — the
+	// success case returned above.
+	return { phase: "loading" }
 }
 
 export class DashboardsListModel extends Model.Service<DashboardsListModel>()("maple/dashboards/list")({

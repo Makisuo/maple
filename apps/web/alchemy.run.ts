@@ -73,7 +73,7 @@ export const createMapleWeb = ({
 				notFoundHandling: "single-page-application",
 			},
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			url: true,
+			workersDev: true,
 			domain: domains.web,
 		})
 

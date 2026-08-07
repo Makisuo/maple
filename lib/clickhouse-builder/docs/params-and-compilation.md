@@ -105,5 +105,5 @@ because it cannot be inferred from a string. See [Extending the DSL](./extending
 | `UnresolvedParam`    | Comparing on a param before compilation resolved it          |
 | `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple |
 
-It is an Effect `Schema.TaggedErrorClass`, catchable by the tag
+It is an Effect `Schema.TaggedError`, catchable by the tag
 `"@maple-dev/clickhouse-builder/QueryBuilderError"`.

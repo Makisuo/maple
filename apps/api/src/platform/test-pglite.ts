@@ -1,19 +1,23 @@
+import { readFileSync } from "node:fs"
 import { PGlite } from "@electric-sql/pglite"
-import { readBundledMigrationsSql } from "@maple/db/migrate"
 import { Effect, Layer } from "effect"
+import { snapshotPath } from "../../test/pglite-snapshot"
 import { Database } from "./DatabaseLive"
 import { databaseFromInstance } from "./DatabasePgliteLive"
 
-// Read + concatenate the bundled migration SQL once for the whole test process.
-const MIGRATIONS_SQL = readBundledMigrationsSql()
+// The post-migration data directory, read once per worker process and shared by
+// every instance it creates. The vitest globalSetup guarantees it exists before
+// any worker starts; a missing file means this module was loaded outside the
+// suite's own config, which is a wiring bug rather than something to paper over.
+const SNAPSHOT = new Blob([readFileSync(snapshotPath)])
 
 /**
  * Per-test embedded Postgres. Each call creates a fresh in-memory PGlite
- * instance; `layer` applies the bundled schema with a single `pglite.exec()`
- * (the SQL is read once at module load, not per test — avoids the drizzle
- * migrator's per-instance filesystem reads, which starve under CI's parallel
- * `turbo test`). The same instance backs the raw-SQL helpers below — PGlite is
- * single-connection, so there is no second connection to the DB.
+ * instance restored from the pre-migrated snapshot, so the schema is already
+ * there and no migration runs per test — see test/pglite-snapshot.ts for why
+ * (initdb inside WASM, not the migration, was 85% of the 429ms boot). The same
+ * instance backs the raw-SQL helpers below — PGlite is single-connection, so
+ * there is no second connection to the DB.
  */
 export interface TestDb {
 	readonly pglite: PGlite
@@ -22,17 +26,16 @@ export interface TestDb {
 }
 
 export const createTestDb = (track?: TestDb[]): TestDb => {
-	const pglite = new PGlite()
-	// Migrate exactly once per instance, even when the layer is built multiple
-	// times over the same DB (e.g. tests that provide makeLayer twice to
-	// simulate concurrent service instances). The raw `exec` of the baseline SQL
-	// is not idempotent — a second `CREATE TABLE` would error — so memoize the
-	// promise (drizzle's migrator used to dedupe this via __drizzle_migrations).
-	let migrated: Promise<unknown> | undefined
+	const pglite = new PGlite({ loadDataDir: SNAPSHOT })
+	// Building the layer twice over the same DB is legitimate (tests that provide
+	// makeLayer twice to simulate concurrent service instances). Restoring the
+	// snapshot is the constructor's job and happens once, so both builds just wait
+	// on the same readiness promise — there is no longer a non-idempotent `exec`
+	// to memoize around.
 	const layer = Layer.effect(
 		Database,
 		Effect.gen(function* () {
-			yield* Effect.promise(() => (migrated ??= pglite.exec(MIGRATIONS_SQL)))
+			yield* Effect.promise(() => pglite.waitReady)
 			return databaseFromInstance(pglite)
 		}),
 	)

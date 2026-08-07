@@ -12,10 +12,16 @@
  *   arrives the way `submit_diagnosis` already does: a tool supplied through
  *   `extraTools` whose `parameters` *is* the schema. The model filling it in is
  *   the model answering.
- * - **A deadline.** `isCurrent` is checked between steps to stop an attended
- *   turn that has been superseded; the same hook stops a lens that has run out of
- *   wall clock, which is exactly the semantics wanted — finish the step you are
- *   in, then stop.
+ * - **A deadline.** `softStop`, checked between steps. This used to ride on
+ *   `isCurrent`, which looked like the same thing and is not: `isCurrent` is the
+ *   *abort* hook, so a pass that ran out of clock returned an empty stream, never
+ *   reached a closing step, and therefore never called its submit tool. A lane
+ *   that had investigated for its entire budget was recorded exactly like one that
+ *   never looked. `softStop` means "finish by answering", and the loop responds by
+ *   spending one last step on the forced submit call.
+ *
+ * Both of those depend on `closingSubmit`: the tool-less closing step that serves
+ * attended chat has nothing to say for an agent whose answer *is* a tool call.
  */
 import { Schema, Stream, Effect, Option } from "effect"
 import { Tool, type Model, type Tools } from "@maple/llm"
@@ -94,11 +100,13 @@ export const runAgentPass = <S extends Schema.Top>(
 			agent: input.agent,
 			extraTools: submit,
 			usage,
-			isCurrent: () => {
-				if (input.deadlineAtMs === undefined) return true
-				if (Date.now() < input.deadlineAtMs) return true
+			// The turn's answer is this tool call, so the closing step has to keep offering it.
+			closingSubmit: { toolName: input.submitToolName },
+			softStop: () => {
+				if (input.deadlineAtMs === undefined) return false
+				if (Date.now() < input.deadlineAtMs) return false
 				deadlineHit = true
-				return false
+				return true
 			},
 		}).pipe(
 			Stream.runForEach((event) =>

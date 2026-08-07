@@ -1,5 +1,5 @@
 /**
- * Keeping a turn inside the model's context window.
+ * Keeping a turn inside the model's context window, when bounding results at creation wasn't enough.
  *
  * Two different growth problems hide behind "the conversation got too long", and they want
  * different fixes:
@@ -11,42 +11,34 @@
  *   - **Cross-turn.** `toLlmMessages` in `turn-runner.ts` replays the transcript, but it already
  *     drops tool messages entirely and keeps only text, so it is comparatively small.
  *
- * This module handles the first, and does it without a model call, a wire change, or any
- * persistence: old tool output is replaced by a truncated prefix plus an explicit marker. The model
- * is *told* what was dropped rather than silently handed a shorter payload, because a tool result
- * that quietly loses its tail is indistinguishable from a tool that returned less than it did.
+ * ## Why this is now a fallback rather than the main defence
+ *
+ * This module used to truncate old tool results *in place*, mid-turn. That is the one shape the
+ * default route cannot afford: OpenRouter `openai/gpt-5.6-luna` gets no cache breakpoints from
+ * `lib/llm` (its route id is not in `RESPECTS_INLINE_HINTS`), so caching there is implicit-prefix and
+ * prefix stability is the only lever. Rewriting a step-3 result diverges the prefix near the front of
+ * the turn and voids everything after it — at exactly the moment the transcript is longest.
+ *
+ * Results are therefore bounded once, when they are created (`mcp/tools/tool-output.ts`), and the
+ * transcript is append-only. What is left here is the case that survives that: enough bounded
+ * results to still overflow. The answer then is to drop whole *steps* off the front rather than edit
+ * any message — one clean break in the prefix instead of a rolling one, and it should almost never
+ * run. An assistant turn leaves with its own tool results, so the transcript never ends up with an
+ * orphaned result or a tool call whose answer vanished.
  */
-import { LLM, Message, ToolResultPart, type LLMRequest, type ToolResultValue } from "@maple/llm"
+import { LLM, type LLMRequest, type Message } from "@maple/llm"
 
 /**
- * Rough tokens-per-character. There is no tokenizer in a Worker isolate, and shipping one would
- * cost more startup CPU than the estimate is worth.
+ * How many of the most recent steps are never dropped.
  *
- * This is only ever used to decide *whether a prune is worth doing*. The authoritative number — the
- * one the trigger reads — is the provider's own `usage.inputTokens` from the previous step.
- */
-const CHARS_PER_TOKEN = 4
-
-export const tokensFromChars = (chars: number): number => Math.ceil(chars / CHARS_PER_TOKEN)
-
-export const estimateTokens = (text: string): number => tokensFromChars(text.length)
-
-/**
- * How many of the most recent steps keep their tool output verbatim.
+ * The model is usually still reasoning about the last step or two; taking those away is what makes
+ * context management feel like amnesia rather than housekeeping.
  *
- * The model is usually still reasoning about the last step or two; truncating those is what makes a
- * pruner feel like amnesia rather than housekeeping.
+ * (The char-based token estimate that used to live here went with the pruner. It existed only to
+ * decide whether a rewrite reclaimed enough to be worth its fidelity cost; dropping a whole step is
+ * unambiguously worth it, and the trigger below reads the provider's reported count anyway.)
  */
 const PROTECT_RECENT_STEPS = 2
-
-/** How much of an old tool result survives. */
-const PRUNE_TOOL_RESULT_CHARS = 2_000
-
-/**
- * Don't bother unless the prune buys real headroom. A turn that would reclaim a few hundred tokens
- * pays the rebuild cost and the fidelity cost for nothing.
- */
-const PRUNE_MIN_RECLAIM_TOKENS = 20_000
 
 /** Headroom kept free for the model's own reply when deciding whether the input still fits. */
 const RESERVE_CEILING_TOKENS = 20_000
@@ -64,28 +56,6 @@ export const isNearContextLimit = (
 	if (limits.context === undefined) return false
 	const reserved = Math.min(RESERVE_CEILING_TOKENS, limits.output ?? RESERVE_CEILING_TOKENS)
 	return inputTokens >= limits.context - reserved
-}
-
-const MARKER = (omitted: number) => `\n\n…[truncated, ${omitted} characters omitted]`
-
-/** Render a tool result as the text the model would see, for measuring and truncating. */
-const resultText = (result: ToolResultValue): string =>
-	typeof result.value === "string" ? result.value : JSON.stringify(result.value)
-
-/**
- * Truncate one tool result, or return `undefined` if it is already short enough.
- *
- * A string value keeps its original result type; anything else collapses to `"text"`, because a
- * truncated JSON payload is no longer parseable and handing the model a broken object is worse than
- * handing it a clearly-marked excerpt.
- */
-const truncateResult = (result: ToolResultValue): ToolResultValue | undefined => {
-	const text = resultText(result)
-	if (text.length <= PRUNE_TOOL_RESULT_CHARS) return undefined
-	const kept = text.slice(0, PRUNE_TOOL_RESULT_CHARS) + MARKER(text.length - PRUNE_TOOL_RESULT_CHARS)
-	return typeof result.value === "string"
-		? { type: result.type, value: kept }
-		: { type: "text", value: kept }
 }
 
 /**
@@ -108,30 +78,31 @@ const protectedFrom = (messages: ReadonlyArray<Message>): number => {
 }
 
 /**
- * Truncate tool output from all but the most recent steps.
+ * Drop the oldest tool-calling step: one assistant message and the tool results that answered it.
  *
- * Returns the request **unchanged** when there is nothing worth reclaiming, so a short turn pays
- * nothing and callers can apply this unconditionally.
+ * Targets an assistant message *followed by tool results* rather than simply the first assistant
+ * message, so plain conversational history from earlier turns is not what gets sacrificed — the
+ * tokens are in the tool payloads, and dropping prose to save them would trade the model's memory of
+ * what the user asked for nothing.
+ *
+ * Returns the request **unchanged** when there is no such step outside the protected window, which
+ * is the caller's signal that there is nothing left to give.
  */
-export const pruneToolResults = (request: LLMRequest): LLMRequest => {
+export const dropOldestToolStep = (request: LLMRequest): LLMRequest => {
 	const boundary = protectedFrom(request.messages)
 	if (boundary === 0) return request
 
-	let reclaimed = 0
-	const messages = request.messages.map((message, index) => {
-		if (index >= boundary || message.role !== "tool") return message
-		let changed = false
-		const content = message.content.map((part) => {
-			if (part.type !== "tool-result") return part
-			const truncated = truncateResult(part.result)
-			if (truncated === undefined) return part
-			changed = true
-			reclaimed += resultText(part.result).length - resultText(truncated).length
-			return ToolResultPart.make({ ...part, result: truncated })
-		})
-		return changed ? Message.make({ ...message, content }) : message
-	})
-
-	if (tokensFromChars(reclaimed) < PRUNE_MIN_RECLAIM_TOKENS) return request
-	return LLM.updateRequest(request, { messages })
+	const messages = request.messages
+	for (let i = 0; i < boundary; i++) {
+		if (messages[i]?.role !== "assistant") continue
+		// Its results run to the next non-tool message.
+		let end = i + 1
+		while (end < messages.length && messages[end]?.role === "tool") end++
+		// An assistant turn with no tool results is prose, not payload. Leave it.
+		if (end === i + 1) continue
+		// Never cut into the protected window, even if this step straddles it.
+		if (end > boundary) return request
+		return LLM.updateRequest(request, { messages: [...messages.slice(0, i), ...messages.slice(end)] })
+	}
+	return request
 }

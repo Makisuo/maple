@@ -21,7 +21,7 @@ permissions:
 jobs:
     cd:
         name: Deploy (${{ matrix.target.label }})
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 30
         # One leg per long-lived Tinybird workspace. Each GitHub Environment supplies
         # its own TINYBIRD_HOST/TINYBIRD_TOKEN, so the matching workspace admin token

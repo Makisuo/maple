@@ -8,6 +8,7 @@ import {
 	investigationScope,
 	matchesQuery,
 	sortInvestigations,
+	splitDuration,
 } from "./investigation-display"
 
 const make = (overrides: Partial<V2Investigation> = {}): V2Investigation =>
@@ -231,5 +232,32 @@ describe("sortInvestigations", () => {
 			"inv_snapshot",
 			"inv_low",
 		])
+	})
+})
+
+describe("splitDuration", () => {
+	it("collapses sub-second durations rather than showing microseconds", () => {
+		expect(splitDuration(0)).toEqual({ value: "<1", unit: "s" })
+		expect(splitDuration(500)).toEqual({ value: "<1", unit: "s" })
+		expect(splitDuration(999)).toEqual({ value: "<1", unit: "s" })
+	})
+
+	it("shows whole seconds under a minute", () => {
+		expect(splitDuration(1000)).toEqual({ value: "1", unit: "s" })
+		expect(splitDuration(42_000)).toEqual({ value: "42", unit: "s" })
+		// Floors rather than rounds: 59.6s must not display "60 s".
+		expect(splitDuration(59_600)).toEqual({ value: "59", unit: "s" })
+	})
+
+	it("switches to m:ss at a minute so every second stays visible", () => {
+		expect(splitDuration(60_000)).toEqual({ value: "1:00", unit: "min" })
+		expect(splitDuration(187_000)).toEqual({ value: "3:07", unit: "min" })
+		expect(splitDuration(3_599_000)).toEqual({ value: "59:59", unit: "min" })
+	})
+
+	it("switches to h:mm:ss at an hour", () => {
+		expect(splitDuration(3_600_000)).toEqual({ value: "1:00:00", unit: "h" })
+		expect(splitDuration(3_862_000)).toEqual({ value: "1:04:22", unit: "h" })
+		expect(splitDuration(93_784_000)).toEqual({ value: "26:03:04", unit: "h" })
 	})
 })

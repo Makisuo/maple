@@ -31,7 +31,19 @@ import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
 import { eq } from "drizzle-orm"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { Clock, Context, Duration, Effect, Layer, Option, Redacted, Ref, Schedule, Schema } from "effect"
+import {
+	Clock,
+	Context,
+	Duration,
+	Effect,
+	Layer,
+	Option,
+	Redacted,
+	Ref,
+	Schedule,
+	Schema,
+	Scope,
+} from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
 	decryptAes256Gcm,
@@ -75,35 +87,72 @@ type CachedSettingsRow = Pick<
 	| "chPasswordTag"
 >
 
-// Edge-cache bucket + TTL for the per-org runtime ClickHouse config lookup.
-// `resolveRuntimeConfig` runs on the hot path of every warehouse SQL execution
-// (and once per missing bucket in the cache fan-out), so a long-lived
-// cross-request entry removes the repeated Postgres round-trip. The config only
-// changes on BYO-CH onboarding/rotation, and every mutation busts both this edge
-// entry and the in-isolate memo (see invalidateRuntimeConfigCache), so a 1h TTL
-// loses no correctness while cutting cold Postgres handshakes ~12× vs the prior
-// 5-min entry.
+// Nothing READS this edge-cache bucket any more — see `resolveCachedSettings`
+// for the measurements that removed it. The bucket name survives only so
+// `invalidateRuntimeConfigCache` keeps busting entries written by the previous
+// release: those carry a 1h TTL, and isolates still running the old code read
+// them. Delete this constant and the invalidate call one release after the
+// removal ships.
 const ORG_CH_CONFIG_BUCKET = "org-clickhouse-config"
-const ORG_CH_CONFIG_TTL_SECONDS = 3_600
 
-// In-isolate value cache in front of the edge cache for the same lookup. Even a
-// Cache-API hit is an async round-trip, and a miss pays the full Postgres read
-// over Hyperdrive (observed at 0.85–2.4s in production traces, dominating the
-// session-replay list load). Workers reuse an isolate across many requests, so a
-// module-scoped memo lets a warm isolate resolve config with ZERO network. TTL
-// is tighter than the edge TTL, so cross-isolate staleness after a config
-// change (rare — BYO-CH onboarding/rotation) is bounded to minutes; the mutating
-// isolate also clears its own entry on write (see invalidateRuntimeConfigCache).
+// In-isolate value cache for the runtime-config lookup, served
+// stale-while-revalidate. Workers reuse an isolate across many requests, so a
+// module-scoped memo lets a warm isolate resolve config with ZERO network.
+//
+// SWR rather than a hard TTL because expiry used to mean *block*, and blocking
+// here is disastrous: the read sits synchronously in front of every widget
+// query on a dashboard. Production traces over 7 days measured 1079 blocking
+// resolutions at a p50 of 2547ms — one of them 6020ms, in a request whose two
+// actual ClickHouse queries took 135ms and 158ms. The config it was fetching
+// changes only on BYO-CH onboarding/rotation.
+//
+//   now <  freshUntil  -> serve, no work
+//   now <  hardUntil   -> serve the stale value AND refresh in the background
+//   otherwise          -> block on Postgres (cold isolate, or a memo so idle
+//                         that no background refresh ever completed)
+//
+// The hard ceiling exists because a background refresh is best-effort: it is
+// forked into the triggering request's scope and interrupted if that request
+// finishes first (see `refreshCachedSettings`). Without a ceiling, an isolate
+// serving only short requests could serve one value forever.
+//
+// Staleness is safe to this degree because the warehouse executor self-heals on
+// `WarehouseAuthError` — it calls `invalidateRuntimeConfig` and retries once, so
+// a credential rotation costs the first request one extra round-trip instead of
+// costing the org every request until the entry ages out.
 const ORG_CH_CONFIG_MEMO_TTL_MS = 300_000
-const runtimeConfigMemo = new Map<string, { value: CachedChSettings | null; expiresAt: number }>()
+const ORG_CH_CONFIG_MEMO_HARD_MS = 900_000
+interface RuntimeConfigMemoEntry {
+	readonly value: CachedChSettings | null
+	readonly freshUntil: number
+	readonly hardUntil: number
+}
+const runtimeConfigMemo = new Map<string, RuntimeConfigMemoEntry>()
+
+// Dedup marker for in-flight background refreshes, so N concurrent widget
+// requests that all find the same stale entry fork ONE Postgres read rather
+// than N.
+//
+// Deliberately a plain `Map` of timestamps and not a shared `Deferred`/`Fiber`/
+// `Promise`: Cloudflare ties I/O objects to the request that created them, so a
+// follower awaiting a leader's in-flight Effect can fail with "Cannot perform
+// I/O on behalf of a different request" (the same hazard documented in
+// `EdgeCacheService.getOrCompute`). Inert data is safe to share across
+// requests; I/O handles are not. Followers here don't wait for the leader —
+// they serve the stale value they already have.
+//
+// The age check is the backstop for a marker whose fiber died without running
+// its finalizer (isolate eviction); `Effect.ensuring` covers the normal paths,
+// including interruption.
+const refreshInFlight = new Map<string, number>()
+const REFRESH_MARKER_STALE_MS = 10_000
 
 /**
- * JSON-safe projection of the settings row cached cross-request by
- * `resolveRuntimeConfig`. Holds the ENCRYPTED password material
- * (ciphertext/iv/tag) — never the plaintext — so decryption still happens
- * per-request after the cache, keeping credentials out of Workers KV. `null`
- * encodes "no BYO ClickHouse row" (the common managed-org case), cached too so
- * managed orgs stop paying the Postgres round-trip just to learn "use Tinybird".
+ * Projection of the settings row memoized by `resolveRuntimeConfig`. Holds the
+ * ENCRYPTED password material (ciphertext/iv/tag) — never the plaintext — so
+ * decryption still happens per-request after the memo. `null` encodes "no BYO
+ * ClickHouse row" (the common managed-org case), memoized too so managed orgs
+ * stop paying the Postgres round-trip just to learn "use Tinybird".
  */
 const CachedChSettings = Schema.Struct({
 	schemaVersion: Schema.NullOr(Schema.String),
@@ -115,7 +164,6 @@ const CachedChSettings = Schema.Struct({
 	chPasswordTag: Schema.NullOr(Schema.String),
 })
 type CachedChSettings = typeof CachedChSettings.Type
-const CachedChSettingsOrNull = Schema.NullOr(CachedChSettings)
 
 const toCachedChSettings = (row: CachedSettingsRow): CachedChSettings => ({
 	schemaVersion: row.schemaVersion,
@@ -197,6 +245,17 @@ export interface OrgClickHouseSettingsServiceShape {
 		| OrgClickHouseSettingsEncryptionError
 		| OrgClickHouseSettingsValidationError
 	>
+	/**
+	 * Drop this org's cached runtime config, returning whether a BYO override was
+	 * actually dropped.
+	 *
+	 * `resolveRuntimeConfig` serves its answer from a stale-tolerant memo, so a
+	 * credential rotation keeps resolving to the retired password until the entry
+	 * ages out. The warehouse executor calls this on `WarehouseAuthError` and
+	 * retries once; the boolean gates that retry, so an auth failure against the
+	 * shared managed credential is not run twice.
+	 */
+	readonly invalidateRuntimeConfig: (orgId: OrgId) => Effect.Effect<boolean>
 	/**
 	 * Whether the ingest gateway is currently routing this org's frames to its
 	 * own ClickHouse (vs. falling back to managed Tinybird). Mirror of the
@@ -818,14 +877,39 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// value. Clears both the in-isolate memo (this isolate only — other isolates
 		// fall off within ORG_CH_CONFIG_MEMO_TTL_MS) and the cross-request edge entry
 		// (optional — absent in tests / non-worker contexts, a no-op when unavailable).
-		const invalidateRuntimeConfigCache = (orgId: OrgId): Effect.Effect<void> =>
+		const invalidateRuntimeConfigCache = (orgId: OrgId): Effect.Effect<boolean> =>
 			Effect.gen(function* () {
+				// Whether this org had a BYO row cached is the caller's retry gate (see
+				// `invalidateRuntimeConfig`), so read before deleting. A memo entry
+				// holding `null` means "we know this org is managed" — invalidating that
+				// changes no routing decision, so it does not count as a hit.
+				const memoized = runtimeConfigMemo.get(orgId)
+				const hadOverride = memoized !== undefined && memoized.value !== null
 				runtimeConfigMemo.delete(orgId)
+				// A refresh forked before this write must not land after it and restore
+				// the value we just dropped.
+				refreshInFlight.delete(orgId)
 				const cache = yield* Effect.serviceOption(EdgeCacheService)
 				if (Option.isSome(cache)) {
 					yield* cache.value.invalidate({ bucket: ORG_CH_CONFIG_BUCKET, key: orgId })
 				}
+				return hadOverride
 			})
+
+		/**
+		 * Public form of `invalidateRuntimeConfigCache`, for the warehouse
+		 * executor's credential-rotation self-heal.
+		 *
+		 * `resolveCachedSettings` serves this config stale by design, so a BYO
+		 * ClickHouse password rotation keeps resolving to the retired credential
+		 * until the entry ages out. The executor calls this on `WarehouseAuthError`
+		 * and retries once. The returned boolean is the retry gate: `true` only
+		 * when a per-org override was actually dropped, so an auth failure against
+		 * the shared managed credential — where re-resolving cannot change the
+		 * answer — is not run twice.
+		 */
+		const invalidateRuntimeConfig = (orgId: OrgId): Effect.Effect<boolean> =>
+			invalidateRuntimeConfigCache(orgId)
 
 		const requireActiveRow = Effect.fn("OrgClickHouseSettingsService.requireActiveRow")(function* (
 			orgId: OrgId,
@@ -1207,58 +1291,131 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			})
 		})
 
-		// The cached settings row behind both `resolveRuntimeConfig` and
-		// `isWarehouseWriteReady`.
+		// The narrow Postgres read behind the memo. Returns the ENCRYPTED row
+		// projection (or `null` for a managed org); decryption happens per-request
+		// in `resolveRuntimeConfig`, so plaintext credentials never enter a cache.
+		const lookupCachedSettings = (orgId: OrgId) =>
+			selectCachedRow(orgId).pipe(
+				Effect.map((row) => (Option.isSome(row) ? toCachedChSettings(row.value) : null)),
+			)
+
+		const storeCachedSettings = (orgId: OrgId, value: CachedChSettings | null, nowMs: number) => {
+			runtimeConfigMemo.set(orgId, {
+				value,
+				freshUntil: nowMs + ORG_CH_CONFIG_MEMO_TTL_MS,
+				hardUntil: nowMs + ORG_CH_CONFIG_MEMO_HARD_MS,
+			})
+		}
+
+		/**
+		 * Refresh a stale memo entry without making the caller wait for it.
+		 *
+		 * Forked into the *triggering request's* scope, never detached. This is the
+		 * whole correctness argument: Cloudflare owns I/O objects per-request, so a
+		 * fiber that outlives its request and then touches a socket it opened there
+		 * fails with "Cannot perform I/O on behalf of a different request".
+		 * `Effect.forkIn(scope)` guarantees interruption when the request scope
+		 * closes, so every socket this fiber opens is opened and consumed inside the
+		 * request that created it.
+		 *
+		 * Interruption is a no-op for correctness: the memo is written only on
+		 * success, so an interrupted refresh leaves the stale entry exactly as it
+		 * was and the next request tries again. The work is a ~26ms Postgres read
+		 * racing warehouse queries that take an order of magnitude longer, so it
+		 * lands well before the scope closes in practice.
+		 *
+		 * `waitUntil` is deliberately NOT used: the worker never passes Cloudflare's
+		 * `ExecutionContext` into the Effect graph (see `worker.ts`), and reaching it
+		 * through a module-scoped mutable would register one request's refresh on
+		 * another's context — manufacturing the very hazard above.
+		 *
+		 * Failures are swallowed after a warning: this is a cache refresh, and the
+		 * real query behind it reports failures with proper context.
+		 */
+		const refreshCachedSettings = Effect.fnUntraced(function* (orgId: OrgId, nowMs: number) {
+			const startedAt = refreshInFlight.get(orgId)
+			if (startedAt !== undefined && nowMs - startedAt < REFRESH_MARKER_STALE_MS) return false
+			refreshInFlight.set(orgId, nowMs)
+
+			const work = lookupCachedSettings(orgId).pipe(
+				Effect.flatMap((value) =>
+					Clock.currentTimeMillis.pipe(
+						Effect.map((writeNowMs) => storeCachedSettings(orgId, value, writeNowMs)),
+					),
+				),
+				Effect.tapError((error) =>
+					Effect.logWarning("Org ClickHouse config refresh failed; serving stale").pipe(
+						Effect.annotateLogs({ orgId, error: String(error) }),
+					),
+				),
+				Effect.ignore,
+				// Runs on interruption too, so a scope that closes mid-refresh cannot
+				// leave a marker that blocks the next refresh for REFRESH_MARKER_STALE_MS.
+				Effect.ensuring(Effect.sync(() => refreshInFlight.delete(orgId))),
+			)
+
+			const scope = yield* Effect.serviceOption(Scope.Scope)
+			// HTTP routes always have a request scope (HttpRouter provides one).
+			// Non-HTTP callers — crons, queue consumers, workflows — do not, and there
+			// the calling fiber IS the whole job, so it is a safe parent.
+			if (Option.isSome(scope)) {
+				yield* Effect.forkIn(work, scope.value)
+			} else {
+				yield* Effect.forkChild(work)
+			}
+			return true
+		})
+
+		// The cached settings row behind `resolveRuntimeConfig`.
 		//
 		// `selectCachedRow` is a Postgres round-trip on the hot path of EVERY
 		// warehouse SQL execution, and the bucket-cache fan-out re-runs it once per
-		// missing range. Two cache layers sit in front: a module-scoped in-isolate
-		// memo (zero network on a warm isolate) and, on a memo miss, the shared edge
-		// cache (a 1h entry, removing the cold round-trip on repeat loads).
+		// missing range — so this must not block. A module-scoped in-isolate memo
+		// answers it with zero network, and past its soft TTL it keeps answering
+		// from the stale value while a background fiber refreshes it.
 		//
-		// Note there is NO single-flight: `EdgeCacheService.getOrCompute` deliberately
-		// refuses to share an in-flight Effect across requests, because Cloudflare ties
-		// I/O objects to the request that created them. Concurrent cold misses each pay
-		// their own lookup and converge through the cache afterwards.
-		//
-		// Both layers store the ENCRYPTED row projection (or `null`) and decryption
-		// happens per-request in `resolveRuntimeConfig`, so plaintext credentials never
-		// enter a cache.
+		// There is deliberately no cache layer between the memo and Postgres. One
+		// used to sit here (a 1h edge-cache entry) on the theory that it removed the
+		// cold Postgres round-trip for a fresh isolate. Production measurement over
+		// 7 days said otherwise: the read completed 241 times at a span p50 of 26ms
+		// and was abandoned at its 40ms deadline 1079 times, and the abandoned reads
+		// cost a p50 of 2547ms — because `cache.match()` cannot be cancelled, so the
+		// abandoned read kept holding one of the Worker's six connection slots and
+		// the fallback Postgres read queued behind it. The layer meant to avoid a
+		// ~26ms round-trip was manufacturing a ~2.5s one 82% of the time.
 		const resolveCachedSettings = Effect.fn("OrgClickHouseSettingsService.resolveCachedSettings")(
 			function* (orgId: OrgId) {
 				const nowMs = yield* Clock.currentTimeMillis
 				const memoized = runtimeConfigMemo.get(orgId)
-				if (memoized !== undefined && memoized.expiresAt > nowMs) {
-					yield* Effect.annotateCurrentSpan("clickhouse.config.memoHit", true)
+
+				if (memoized !== undefined && nowMs < memoized.freshUntil) {
+					yield* Effect.annotateCurrentSpan({
+						"clickhouse.config.source": "memo",
+						// Legacy spelling, dual-emitted until dashboards move to
+						// `clickhouse.config.source`.
+						"clickhouse.config.memoHit": true,
+					})
 					return memoized.value
 				}
-				yield* Effect.annotateCurrentSpan("clickhouse.config.memoHit", false)
-				const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
-				const lookup = selectCachedRow(orgId).pipe(
-					Effect.map((row) => (Option.isSome(row) ? toCachedChSettings(row.value) : null)),
-				)
-				const cached: CachedChSettings | null = Option.isNone(edgeCache)
-					? yield* lookup
-					: yield* edgeCache.value
-							.getOrCompute(
-								{
-									bucket: ORG_CH_CONFIG_BUCKET,
-									key: orgId,
-									ttlSeconds: ORG_CH_CONFIG_TTL_SECONDS,
-									schema: CachedChSettingsOrNull,
-								},
-								lookup,
-							)
-							.pipe(
-								Effect.tap((result) =>
-									Effect.annotateCurrentSpan("clickhouse.config.cacheHit", result.hit),
-								),
-								Effect.map((result) => result.value),
-							)
-				runtimeConfigMemo.set(orgId, {
-					value: cached,
-					expiresAt: nowMs + ORG_CH_CONFIG_MEMO_TTL_MS,
+
+				if (memoized !== undefined && nowMs < memoized.hardUntil) {
+					const forked = yield* refreshCachedSettings(orgId, nowMs)
+					yield* Effect.annotateCurrentSpan({
+						"clickhouse.config.source": "memo_stale",
+						"clickhouse.config.refresh_forked": forked,
+						"clickhouse.config.stale_age_ms":
+							nowMs - (memoized.freshUntil - ORG_CH_CONFIG_MEMO_TTL_MS),
+						"clickhouse.config.memoHit": true,
+					})
+					return memoized.value
+				}
+
+				yield* Effect.annotateCurrentSpan({
+					"clickhouse.config.source": "postgres",
+					"clickhouse.config.memoHit": false,
 				})
+				const cached = yield* lookupCachedSettings(orgId)
+				storeCachedSettings(orgId, cached, nowMs)
 				return cached
 			},
 		)
@@ -1360,6 +1517,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			applySchema,
 			applySchemaStatus,
 			resolveRuntimeConfig,
+			invalidateRuntimeConfig,
 			isWarehouseWriteReady,
 			collectorConfig,
 		} satisfies OrgClickHouseSettingsServiceShape
@@ -1382,6 +1540,9 @@ export class OrgClickHouseSettingsService extends Context.Service<
 
 	static readonly resolveRuntimeConfig = (orgId: OrgId) =>
 		this.use((service) => service.resolveRuntimeConfig(orgId))
+
+	static readonly invalidateRuntimeConfig = (orgId: OrgId) =>
+		this.use((service) => service.invalidateRuntimeConfig(orgId))
 
 	static readonly isWarehouseWriteReady = (orgId: OrgId) =>
 		this.use((service) => service.isWarehouseWriteReady(orgId))

@@ -105,7 +105,12 @@ function InvestigationActions({
 				: { label: "Resolve", onClick: onResolve, variant: "default" as const }
 
 	return (
-		<>
+		// A flex row, not bare siblings: `PageLayout.HeaderActions` is a plain block,
+		// so two `inline-flex` buttons in it lay out inline and baseline-align — and
+		// the icon-only trigger has no text, so its baseline is its bottom edge and it
+		// sits low against the labelled button. Every other page wraps its actions the
+		// same way.
+		<div className="flex items-center gap-2">
 			<Button size="sm" variant={primary.variant} onClick={primary.onClick} disabled={busy}>
 				{primary.label}
 			</Button>
@@ -114,7 +119,7 @@ function InvestigationActions({
 					render={<Button variant="outline" size="icon-sm" />}
 					aria-label="More investigation actions"
 				>
-					<DotsVerticalIcon size={14} />
+					<DotsVerticalIcon />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end">
 					<DropdownMenuItem onClick={onRestart} disabled={busy}>
@@ -128,6 +133,6 @@ function InvestigationActions({
 					)}
 				</DropdownMenuContent>
 			</DropdownMenu>
-		</>
+		</div>
 	)
 }

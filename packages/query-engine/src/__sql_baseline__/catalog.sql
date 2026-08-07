@@ -1914,7 +1914,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- pipe:custom_traces_breakdown:by-attribute:baseline  [169e0040]
+-- pipe:custom_traces_breakdown:by-attribute:baseline  [a82b913f]
 SELECT
           SpanAttributes['http.route'] AS name,
           sum(SampleRate) AS count,
@@ -1931,13 +1931,12 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY name
         ORDER BY count DESC
         LIMIT 10
         FORMAT JSON
 
--- pipe:custom_traces_breakdown:by-attribute:bloom  [169e0040]
+-- pipe:custom_traces_breakdown:by-attribute:bloom  [a82b913f]
 SELECT
           SpanAttributes['http.route'] AS name,
           sum(SampleRate) AS count,
@@ -1954,13 +1953,12 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY name
         ORDER BY count DESC
         LIMIT 10
         FORMAT JSON
 
--- pipe:custom_traces_breakdown:by-attribute:text  [169e0040]
+-- pipe:custom_traces_breakdown:by-attribute:text  [a82b913f]
 SELECT
           SpanAttributes['http.route'] AS name,
           sum(SampleRate) AS count,
@@ -1977,13 +1975,12 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY name
         ORDER BY count DESC
         LIMIT 10
         FORMAT JSON
 
--- pipe:custom_traces_breakdown:by-service:baseline  [327fa1f0]
+-- pipe:custom_traces_breakdown:by-service:baseline  [12aefc0f]
 SELECT
           ServiceName AS name,
           sum(SampleRate) AS count,
@@ -2000,7 +1997,6 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY name
         ORDER BY count DESC
         LIMIT 10
@@ -2030,7 +2026,7 @@ SELECT
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:custom_traces_timeseries:grouped-by-attribute:baseline  [f7a51146]
+-- pipe:custom_traces_timeseries:grouped-by-attribute:baseline  [30cd2a59]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
           coalesce(nullIf(arrayStringConcat([toString(SpanAttributes['http.route']), toString(SpanAttributes['http.method'])], ' · '), ''), 'all') AS groupName,
@@ -2049,12 +2045,11 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:custom_traces_timeseries:grouped-by-attribute:bloom  [f7a51146]
+-- pipe:custom_traces_timeseries:grouped-by-attribute:bloom  [30cd2a59]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
           coalesce(nullIf(arrayStringConcat([toString(SpanAttributes['http.route']), toString(SpanAttributes['http.method'])], ' · '), ''), 'all') AS groupName,
@@ -2073,12 +2068,11 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:custom_traces_timeseries:grouped-by-attribute:text  [f7a51146]
+-- pipe:custom_traces_timeseries:grouped-by-attribute:text  [30cd2a59]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
           coalesce(nullIf(arrayStringConcat([toString(SpanAttributes['http.route']), toString(SpanAttributes['http.method'])], ' · '), ''), 'all') AS groupName,
@@ -2097,12 +2091,11 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:custom_traces_timeseries:grouped-by-service:baseline  [60857539]
+-- pipe:custom_traces_timeseries:grouped-by-service:baseline  [7574977e]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS bucket,
           coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
@@ -2121,12 +2114,11 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:custom_traces_timeseries:grouped-by-service:bloom  [60857539]
+-- pipe:custom_traces_timeseries:grouped-by-service:bloom  [7574977e]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS bucket,
           coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
@@ -2145,12 +2137,11 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:custom_traces_timeseries:grouped-by-service:text  [60857539]
+-- pipe:custom_traces_timeseries:grouped-by-service:text  [7574977e]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS bucket,
           coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
@@ -2169,12 +2160,11 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:custom_traces_timeseries:root-only:baseline  [056b7b95]
+-- pipe:custom_traces_timeseries:root-only:baseline  [9924d9ca]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket,
           'all' AS groupName,
@@ -2193,12 +2183,11 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:custom_traces_timeseries:ungrouped:baseline  [13bf30de]
+-- pipe:custom_traces_timeseries:ungrouped:baseline  [2856fa21]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket,
           'all' AS groupName,
@@ -2217,7 +2206,6 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND StatusCode != 'Error'
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON

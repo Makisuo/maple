@@ -1,0 +1,21 @@
+diff --git a/dist/internal/internal.js b/dist/internal/internal.js
+--- a/dist/internal/internal.js
++++ b/dist/internal/internal.js
+@@ -1,3 +1,4 @@
+ /**
+  * @since 4.0.0
+  */
++import { getCurrentSuite } from "@vitest/runner";
+@@ -17,4 +18,3 @@ import * as TestClock from "effect/testing/TestClock";
+ import * as TestConsole from "effect/testing/TestConsole";
+ import * as V from "vitest";
+-const getCurrentSuite = V.TestRunner.getCurrentSuite;
+ const runPromise = /*#__PURE__*/Effect.fnUntraced(function* (effect, _ctx) {
+diff --git a/src/internal/internal.ts b/src/internal/internal.ts
+--- a/src/internal/internal.ts
++++ b/src/internal/internal.ts
+@@ -4,0 +5 @@
++import { getCurrentSuite } from "@vitest/runner"
+@@ -22,2 +22,0 @@
+-const getCurrentSuite = V.TestRunner.getCurrentSuite
+-

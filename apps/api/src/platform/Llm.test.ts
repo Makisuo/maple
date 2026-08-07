@@ -9,7 +9,7 @@
  * The fake responds 400, which `@maple/llm` classifies as non-retryable. That keeps the run to a
  * single request with no backoff; the resulting failure is expected and ignored.
  */
-import { LLM } from "@maple/llm"
+import { LLM, type Model } from "@maple/llm"
 import { Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { describe, expect, it } from "vitest"
@@ -17,6 +17,7 @@ import {
 	contextLimitOf,
 	layerLlm,
 	outputLimitOf,
+	resolveLensModel,
 	resolveTriageModel,
 	type LlmCallTags,
 	type LlmEnv,
@@ -30,8 +31,15 @@ interface CapturedRequest {
 
 /**
  * Run one `LLM.generate` against a fetch that records the request instead of sending it.
+ *
+ * `resolve` picks which resolver builds the model, because the lens stage differs from triage in its
+ * defaults and the only honest way to check a default is to watch what leaves.
  */
-const captureRequest = async (env: LlmEnv, tags?: LlmCallTags): Promise<CapturedRequest> => {
+const captureRequest = async (
+	env: LlmEnv,
+	tags?: LlmCallTags,
+	resolve: (env: LlmEnv, tags?: LlmCallTags) => Model = resolveTriageModel,
+): Promise<CapturedRequest> => {
 	let captured: CapturedRequest | undefined
 
 	const fakeFetch: typeof globalThis.fetch = async (input, init) => {
@@ -50,7 +58,7 @@ const captureRequest = async (env: LlmEnv, tags?: LlmCallTags): Promise<Captured
 	}
 
 	const request = LLM.request({
-		model: resolveTriageModel(env, tags),
+		model: resolve(env, tags),
 		system: "You are concise.",
 		prompt: "hi",
 	})
@@ -118,6 +126,74 @@ describe("resolveTriageModel — OpenRouter attribution", () => {
 		expect(captured.body).not.toHaveProperty("user")
 		expect(captured.body).not.toHaveProperty("session_id")
 		expect(captured.body).not.toHaveProperty("trace")
+	})
+})
+
+describe("reasoning effort", () => {
+	it("sends no reasoning field for triage unless one is configured", async () => {
+		// This resolver serves chat, AI triage and the validator at once. Adding the knob must not
+		// retune three stages as a side effect.
+		const captured = await captureRequest(openRouterEnv, tags)
+
+		expect(captured.body).not.toHaveProperty("reasoning")
+	})
+
+	it("sends the configured triage effort", async () => {
+		const captured = await captureRequest(
+			{ ...openRouterEnv, MAPLE_TRIAGE_REASONING_EFFORT: "high" },
+			tags,
+		)
+
+		expect(captured.body).toMatchObject({ reasoning: { effort: "high" } })
+	})
+
+	it("defaults a lens pass to low, because a fan-out of five multiplies whatever it spends", async () => {
+		const captured = await captureRequest(openRouterEnv, tags, resolveLensModel)
+
+		expect(captured.body).toMatchObject({ reasoning: { effort: "low" } })
+	})
+
+	it("lets a lens be raised past the default", async () => {
+		const captured = await captureRequest(
+			{ ...openRouterEnv, MAPLE_LENS_REASONING_EFFORT: "medium" },
+			tags,
+			resolveLensModel,
+		)
+
+		expect(captured.body).toMatchObject({ reasoning: { effort: "medium" } })
+	})
+
+	it("omits the field entirely on `off`, rather than sending a zero budget", async () => {
+		// The escape hatch: a model that does not support reasoning must see no `reasoning` key.
+		const captured = await captureRequest(
+			{ ...openRouterEnv, MAPLE_LENS_REASONING_EFFORT: "off" },
+			tags,
+			resolveLensModel,
+		)
+
+		expect(captured.body).not.toHaveProperty("reasoning")
+	})
+
+	it("falls back to the default on an unrecognized value rather than failing the call", async () => {
+		// Read on a request path in a Worker: a typo'd env var must not take the agent down.
+		const captured = await captureRequest(
+			{ ...openRouterEnv, MAPLE_LENS_REASONING_EFFORT: "maximum" },
+			tags,
+			resolveLensModel,
+		)
+
+		expect(captured.body).toMatchObject({ reasoning: { effort: "low" } })
+	})
+
+	it("keeps reasoning off the Workers AI path", async () => {
+		const captured = await captureRequest(
+			{ MAPLE_LLM_PROVIDER: "workers-ai", CLOUDFLARE_API_KEY: "test-key" },
+			tags,
+			resolveLensModel,
+		)
+
+		// `reasoning` is OpenRouter's field, namespaced under its own provider options.
+		expect(captured.body).not.toHaveProperty("reasoning")
 	})
 })
 

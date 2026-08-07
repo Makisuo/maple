@@ -310,6 +310,10 @@ impl ClickHouseBreakerRegistry {
         let mut guard = state.lock().unwrap_or_else(|poison| poison.into_inner());
         guard.consecutive_failures = guard.consecutive_failures.saturating_add(1);
         if guard.consecutive_failures >= self.cfg.failure_threshold {
+            // Re-stamped on every failure on purpose: `on_failure` only runs for
+            // attempts the breaker *allowed*, so each one is either a pre-open
+            // failure or a half-open probe. Restarting the cooldown after a failed
+            // probe is the intended back-off.
             guard.opened_at = Some(now);
         }
     }

@@ -7,13 +7,10 @@ import {
 } from "@maple/domain/http"
 import { ScraperEnv } from "./Env"
 
-export class ApiRequestError extends Schema.TaggedErrorClass<ApiRequestError>()(
-	"@maple/scraper/ApiRequestError",
-	{
-		message: Schema.String,
-		status: Schema.NullOr(Schema.Number),
-	},
-) {}
+export class ApiRequestError extends Schema.TaggedError<ApiRequestError>()("@maple/scraper/ApiRequestError", {
+	message: Schema.String,
+	status: Schema.NullOr(Schema.Number),
+}) {}
 
 export interface ScrapeProxyResponse {
 	readonly status: number

@@ -117,11 +117,16 @@ function PickerSection({
 interface WidgetPickerProps {
 	open: boolean
 	onOpenChange: (open: boolean) => void
+	/**
+	 * Returns the widget that was added, or a falsy value when the add was
+	 * refused. The dialog stays open in that case — dismissing itself with
+	 * nothing added is indistinguishable from a dead click.
+	 */
 	onSelect: (
 		visualization: VisualizationType,
 		dataSource: WidgetDataSource,
 		display: WidgetDisplayConfig,
-	) => void
+	) => unknown
 }
 
 export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps) {
@@ -131,7 +136,7 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 
 	const handleSelectChart = (chartId: string) => {
 		const draft = createQueryDraft(0)
-		onSelect(
+		const added = onSelect(
 			"chart",
 			{
 				endpoint: "custom_query_builder_timeseries",
@@ -146,12 +151,12 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 			// charts never render as "Untitled".
 			{ chartId, title: deriveDefaultWidgetTitle([draft]) },
 		)
-		onOpenChange(false)
+		if (added) onOpenChange(false)
 	}
 
 	const handleSelectPreset = (preset: WidgetPresetDefinition) => {
-		onSelect(preset.visualization, preset.dataSource, preset.display)
-		onOpenChange(false)
+		const added = onSelect(preset.visualization, preset.dataSource, preset.display)
+		if (added) onOpenChange(false)
 	}
 
 	return (

@@ -42,14 +42,22 @@ test("@cross-browser sustained dashboard interactions stay responsive without re
 	const logs = await page.evaluate(() => window.__logsBench!.runScroll())
 	expect(logs.frames, "Logs stayed responsive").toBeGreaterThan(100)
 
+	// Headless WebKit on CI rasterizes the canvas map in software at ~1-2 rAF
+	// ticks per second under this load, while the logs segment on the same runner
+	// still hits 100+ frames. Only liveness — any frame at all — is meaningful
+	// there, and `frames` drops the first sample, so a 1.2s window bottoms the
+	// measurement out at 0-or-1: it asks whether the runner managed two rAF ticks,
+	// not whether the map is alive. Give WebKit a window wide enough for the
+	// answer to be about the map. Chromium and Firefox keep 1.2s and the >5 floor.
+	const webkitOnCi = !!process.env.CI && test.info().project.name.includes("webkit")
+	const mapDurationMs = webkitOnCi ? 6_000 : 1_200
+
 	await page.goto("/service-map-bench?services=40&edges=100&rps=high&seed=7")
 	await page.waitForFunction(() => window.__smBench?.ready === true, undefined, { timeout: 60_000 })
-	const map = await page.evaluate(() => window.__smBench!.run({ durationMs: 1_200, pan: true }))
-	// Headless WebKit on CI rasterizes the canvas map in software at ~1-2 rAF
-	// ticks per second under this load (observed 1-2 frames across retries while
-	// the logs segment still hit 100+ frames), so only liveness — any frame at
-	// all — is meaningful there. Chromium and Firefox keep the >5 floor.
-	const webkitOnCi = !!process.env.CI && test.info().project.name.includes("webkit")
+	const map = await page.evaluate(
+		(durationMs) => window.__smBench!.run({ durationMs, pan: true }),
+		mapDurationMs,
+	)
 	expect(map.frames, "service map kept producing frames").toBeGreaterThan(webkitOnCi ? 0 : 5)
 
 	expect(pageErrors, "uncaught page errors").toEqual([])

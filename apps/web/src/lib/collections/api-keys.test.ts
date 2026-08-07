@@ -4,7 +4,11 @@ import { vi } from "vitest"
 
 vi.mock("@/lib/registry", async () => {
 	const { Layer } = await import("effect")
-	return { mapleRuntime: {}, mapleApiClientLayer: Layer.empty }
+	return {
+		mapleRuntime: {},
+		mapleApiClientLayer: Layer.empty,
+		appMemoMap: Layer.makeMemoMapUnsafe(),
+	}
 })
 
 import { ApiKeyRowSchema, rowToV2ApiKey, type ApiKeyRow } from "./api-keys"

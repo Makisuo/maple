@@ -12,6 +12,11 @@ const WorkerFileSystemLive = FileSystem.layerNoop({})
 const WorkerHttpPlatformLive = Layer.effect(
 	HttpPlatform.HttpPlatform,
 	HttpPlatform.make({
+		platform: "web",
+		compression: HttpPlatform.makeCompressionWeb({
+			algorithms: ["gzip", "deflate"],
+			transform: (algorithm) => HttpPlatform.compressionTransformWeb(algorithm),
+		}),
 		fileResponse: (_path, status, statusText, headers) =>
 			HttpServerResponse.text("File responses are unavailable in the worker runtime", {
 				status,

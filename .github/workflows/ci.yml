@@ -25,11 +25,12 @@ jobs:
     # the full suite for diffs that could not have affected it.
     changes:
         name: Detect changes
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 5
         outputs:
             ts: ${{ steps.filter.outputs.ts == 'true' }}
             cli: ${{ steps.filter.outputs.cli == 'true' }}
+            archive: ${{ steps.filter.outputs.archive == 'true' }}
             web: ${{ steps.filter.outputs.web == 'true' }}
             clickhouse: ${{ steps.filter.outputs.clickhouse == 'true' }}
             slack: ${{ steps.filter.outputs.slack == 'true' }}
@@ -77,6 +78,23 @@ jobs:
                         - 'packages/ui/**'
                         - 'packages/browser/**'
                         - 'packages/browser-session/**'
+                        - 'scripts/build-local-binary.sh'
+                        - 'scripts/gen-ui-embed.ts'
+                      # The seven archive probes test the CLI's own on-disk archive
+                      # format — crash recovery, merge, GC, calibration. The `cli`
+                      # closure above is the right gate for "does the bundle still
+                      # build and open a store", which `local-checkpoint-native`
+                      # answers in one job. It is the wrong gate for these: measured
+                      # over 60 merged PRs, `cli` fired on 78% but only 20% touched
+                      # apps/cli at all — the rest were query-engine and domain edits
+                      # dragging seven crash-recovery legs along with them, 38% of the
+                      # repo's entire runner spend. Anything that changes archive
+                      # behaviour lives in one of these paths (`base` included: a
+                      # lockfile change can move chdb).
+                      archive:
+                        - *base
+                        - 'apps/cli/**'
+                        - 'apps/local-ui/**'
                         - 'scripts/build-local-binary.sh'
                         - 'scripts/gen-ui-embed.ts'
                       web:
@@ -136,6 +154,7 @@ jobs:
                   apps/cli/test/native-archive-calibrate-probe.sh
                   apps/cli/test/native-archive-gc-probe.sh
                   apps/cli/test/native-archive-merge-probe.sh
+                  apps/cli/test/native-retention-probe.sh
 
             # Syntax-check the POSIX installers against the actual /bin/sh they claim.
             - name: sh -n
@@ -148,16 +167,16 @@ jobs:
         name: TypeScript
         needs: changes
         if: ${{ needs.changes.outputs.ts == 'true' }}
-        # 8 vCPU rather than 4: with `^typecheck` gone from turbo.json this job is a
-        # wide fan of ~26 `tsc` + ~15 vitest processes gated only by the four tsdown
-        # builds, so it scales near-linearly to 8. Blacksmith bills per vCPU-minute, so
-        # 8 cores at roughly half the wall time is ~cost-neutral. 16 is not worth it —
-        # the build critical path dominates past 8.
-        #
-        # Since TypeScript 7 the `tsc` legs are themselves multi-threaded (~3 cores each
-        # on the big projects), so `--concurrency=10` below now oversubscribes rather
-        # than under-fills. Retune it against measured wall time before adding cores.
-        runs-on: blacksmith-8vcpu-ubuntu-2404
+        # With `^typecheck` gone from turbo.json this job is a wide fan of ~26 `tsc` +
+        # ~15 vitest processes gated only by the four tsdown builds, so it scales
+        # near-linearly with cores — it ran on an 8 vCPU Blacksmith runner, which billed
+        # per vCPU-minute and made the extra cores ~cost-neutral. GitHub-hosted standard
+        # runners bill per wall-clock minute at a flat rate regardless of size, so a
+        # larger runner costs strictly more here; this stays on the standard one and
+        # takes the longer wall time. `--concurrency=10` below was tuned for 8 cores and
+        # oversubscribes here (TypeScript 7's `tsc` legs are themselves multi-threaded) —
+        # retune against measured wall time if this job becomes the CI critical path.
+        runs-on: ubuntu-latest
         timeout-minutes: 20
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -223,7 +242,7 @@ jobs:
         name: Slack agent
         needs: changes
         if: ${{ needs.changes.outputs.slack == 'true' }}
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -233,13 +252,9 @@ jobs:
             # apps/slack-agent is deliberately outside the bun workspace (it
             # self-deploys to Railway, not Cloudflare), so the root install and
             # the `bun turbo` job above never reach it — it needs its own.
-            # Its own lockfile means its own disk key; and as the only job that
-            # installs it, its own writer.
             - uses: ./.github/actions/bun-install
               with:
                   working-directory: apps/slack-agent
-                  disk-key: node-modules-slack-agent
-                  commit: on-change
 
             - run: bun run typecheck
               working-directory: apps/slack-agent
@@ -257,7 +272,7 @@ jobs:
         name: ClickHouse schema + SQL catalog E2E
         needs: changes
         if: ${{ needs.changes.outputs.clickhouse == 'true' }}
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 20
         services:
             clickhouse:
@@ -317,20 +332,14 @@ jobs:
 
     knip:
         name: Knip
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
             - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
 
-            # Sole writer of the root node_modules sticky disk. This job carries it
-            # because it is the only one with no `needs: changes` gate, so it always
-            # runs — the disk therefore always has exactly one committer, and never
-            # zero. Every other job mounts the same key read-only (commit: false).
             - uses: ./.github/actions/bun-install
-              with:
-                  commit: on-change
 
             - run: bun knip
 
@@ -338,7 +347,7 @@ jobs:
         name: Local checkpoint native
         needs: changes
         if: ${{ needs.changes.outputs.cli == 'true' }}
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 20
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -410,8 +419,12 @@ jobs:
         # seven times is strictly slower.
         name: Local archive native (${{ matrix.probe }})
         needs: changes
-        if: ${{ needs.changes.outputs.cli == 'true' }}
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        # Narrower than the `cli` closure that gates local-checkpoint-native — see the
+        # `archive` filter. A change that only reaches the bundle through the workspace
+        # dependency graph gets the checkpoint job's build + store-open probes; it does
+        # not get all seven archive legs.
+        if: ${{ needs.changes.outputs.archive == 'true' }}
+        runs-on: ubuntu-latest
         timeout-minutes: 20
         strategy:
             fail-fast: false
@@ -452,6 +465,11 @@ jobs:
                     - probe: gc
                       script: native-archive-gc-probe.sh
                       tmp: maple-native-archive-gc
+                      keep_root: "1"
+                      duckdb: true
+                    - probe: retention
+                      script: native-retention-probe.sh
+                      tmp: maple-native-retention
                       keep_root: "1"
                       duckdb: true
         steps:
@@ -497,7 +515,7 @@ jobs:
         name: Service Map Perf
         needs: changes
         if: ${{ needs.changes.outputs.web == 'true' }}
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 20
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -568,7 +586,7 @@ jobs:
     # Requires branch protection to require exactly "CI passed" and nothing else.
     ci:
         name: CI passed
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 5
         if: ${{ always() }}
         needs:

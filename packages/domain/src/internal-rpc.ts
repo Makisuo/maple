@@ -37,7 +37,7 @@ export interface InternalMcpToolResult {
 	readonly isError?: boolean
 }
 
-export class InternalRpcInvalidInputError extends Schema.TaggedErrorClass<InternalRpcInvalidInputError>()(
+export class InternalRpcInvalidInputError extends Schema.TaggedError<InternalRpcInvalidInputError>()(
 	"@maple/internal-rpc/InvalidInputError",
 	{
 		method: Schema.Literals(["callMcpTool", "submitDiagnosis"]),
@@ -45,7 +45,7 @@ export class InternalRpcInvalidInputError extends Schema.TaggedErrorClass<Intern
 	},
 ) {}
 
-export class InternalRpcToolNotFoundError extends Schema.TaggedErrorClass<InternalRpcToolNotFoundError>()(
+export class InternalRpcToolNotFoundError extends Schema.TaggedError<InternalRpcToolNotFoundError>()(
 	"@maple/internal-rpc/ToolNotFoundError",
 	{
 		name: Schema.String,

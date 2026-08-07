@@ -3,13 +3,10 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import type { OtlpExportRequest } from "./prometheus/otlp"
 import { ScraperEnv } from "./Env"
 
-export class OtlpIngestError extends Schema.TaggedErrorClass<OtlpIngestError>()(
-	"@maple/scraper/OtlpIngestError",
-	{
-		message: Schema.String,
-		status: Schema.NullOr(Schema.Number),
-	},
-) {}
+export class OtlpIngestError extends Schema.TaggedError<OtlpIngestError>()("@maple/scraper/OtlpIngestError", {
+	message: Schema.String,
+	status: Schema.NullOr(Schema.Number),
+}) {}
 
 export interface OtlpIngestShape {
 	/**

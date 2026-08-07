@@ -2,7 +2,7 @@ import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Duration, Effect, Layer, Schema, Context } from "effect"
 import { Env } from "./Env"
 
-class EmailDeliveryError extends Schema.TaggedErrorClass<EmailDeliveryError>()(
+class EmailDeliveryError extends Schema.TaggedError<EmailDeliveryError>()(
 	"@maple/errors/EmailDeliveryError",
 	{
 		message: Schema.String,

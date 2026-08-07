@@ -3,7 +3,7 @@ import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { apiError, invalidRequest, V2SchemaErrors, V2UnexpectedErrors } from "@maple/domain/http/v2"
 import { describeSchemaIssue } from "@/routes/schema-error-detail"
 
-class V2RouteExecutionDefect extends Schema.TaggedErrorClass<V2RouteExecutionDefect>()(
+class V2RouteExecutionDefect extends Schema.TaggedError<V2RouteExecutionDefect>()(
 	"@maple/api/routes/v2/V2RouteExecutionDefect",
 	{
 		group: Schema.String,

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { ANTICIPATED_ERROR_IDENTIFIERS, isAnticipatedErrorIdentifier } from "./anticipated-errors"
 
 describe("ANTICIPATED_ERROR_IDENTIFIERS", () => {
-	it("includes legacy tags and v2 ErrorClass names for 4xx business errors", () => {
+	it("includes legacy tags and v2 Schema.Error names for 4xx business errors", () => {
 		for (const identifier of [
 			"@maple/http/errors/UnauthorizedError",
 			"@maple/http/errors/RawSqlValidationError",

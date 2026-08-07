@@ -18,7 +18,7 @@ import {
 	restoreCheckpoint,
 } from "../server/checkpoints"
 import { resolveUiAssets } from "../server/ui-assets"
-import { amber, bold, cyan, dim, green, underline } from "../lib/style"
+import { amber, bold, cyan, dim, green, MARK_LINES, MARK_WIDTH, underline } from "../lib/style"
 import {
 	buildDetachedChildArgs,
 	canonicalUrlHostname,
@@ -36,7 +36,7 @@ import {
 /** A `maple start`/`maple stop` failure. The message is shown to the user and
  *  the process exits non-zero — same role the old `process.exit(1)` paths had,
  *  but typed and handled by the CLI runtime (matches `ModeError`). */
-class ServerError extends Schema.TaggedErrorClass<ServerError>()("@maple/cli/ServerError", {
+class ServerError extends Schema.TaggedError<ServerError>()("@maple/cli/ServerError", {
 	message: Schema.String,
 }) {}
 
@@ -85,11 +85,13 @@ const startBanner = (
 	dashboardUrl: string | undefined,
 	offline: boolean,
 ): string => {
-	const row = (key: string, value: string) => `  ${dim(key.padEnd(11))}${value}`
-	const lines = [
-		"",
-		`  ${amber("🍁 maple")}  ${dim("· local mode")}`,
-		`  ${green("●")} listening on ${cyan(underline(bindAddr))}`,
+	// No leading indent here — the gutter below supplies it.
+	const row = (key: string, value: string) => `${dim(key.padEnd(11))}${value}`
+	const content = [
+		// The lockup. Mono has only one face, so the tension that carries it in
+		// the UI (display vs. mono) becomes weight: `maple` bold, `local` dim.
+		`${bold("maple")} ${dim("local")}`,
+		`${green("●")} listening on ${cyan(underline(bindAddr))}`,
 		"",
 		...(connectAddr === bindAddr ? [] : [row("connect", cyan(connectAddr))]),
 		row("OTLP/HTTP", `POST ${dim("/v1/{traces,logs,metrics}")}`),
@@ -97,14 +99,30 @@ const startBanner = (
 		...(dashboardUrl
 			? [
 					row("dashboard", cyan(dashboardUrl)),
-					...(offline ? [] : [`  ${dim(" ".repeat(11))}${dim("· bundled UI: pass --offline")}`]),
+					...(offline ? [] : [`${" ".repeat(11)}${dim("· bundled UI: pass --offline")}`]),
 				]
 			: []),
 		row("data", prettyPath(dataDir)),
 		row("pid", `${process.pid}  ${dim("· stop with")} ${bold("maple stop")}`),
-		"",
 	]
-	return `${lines.join("\n")}\n`
+
+	// The mark rides in a left gutter rather than sitting above the rows, so it
+	// costs no vertical space: the content is already as tall as the mark. On a
+	// terminal too narrow to seat it, the mark is dropped and the wordmark
+	// carries local mode alone — a wrapped banner is worse than no glyph.
+	//
+	// The threshold covers the gutter plus the key column plus a readable value.
+	// It deliberately does NOT measure the longest line: a dashboard URL or a
+	// `--data-dir` can be arbitrarily long, and those already wrap today. Gating
+	// on them would make the glyph blink out for reasons the user can't see.
+	const lines =
+		(process.stdout.columns ?? 80) >= 72
+			? Array.from({ length: Math.max(MARK_LINES.length, content.length) }, (_, i) =>
+					`  ${amber(MARK_LINES[i] ?? " ".repeat(MARK_WIDTH))}   ${content[i] ?? ""}`.trimEnd(),
+				)
+			: content.map((line) => `  ${line}`)
+
+	return `\n${lines.join("\n")}\n\n`
 }
 
 // PID file lives one level above the data dir (e.g. ~/.maple/maple.pid) so
@@ -161,6 +179,14 @@ const dataDirFlag = Flag.optional(
 const chdbConfigFileFlag = Flag.optional(
 	Flag.string("chdb-config-file").pipe(
 		Flag.withDescription("Optional ClickHouse config file passed to embedded chDB"),
+	),
+)
+
+const minimumRawTelemetryRetentionDaysFlag = Flag.optional(
+	Flag.integer("minimum-raw-telemetry-retention-days").pipe(
+		Flag.withDescription(
+			"Persist a monotonic raw-table retention floor (minimum 90 days; survives reset and restore)",
+		),
 	),
 )
 
@@ -228,6 +254,7 @@ const startDetached = (
 	offline: boolean,
 	chdbConfigFile: string | undefined,
 	onDirtyStore: DirtyStorePolicy,
+	minimumRawTelemetryRetentionDays: number | undefined,
 ): Effect.Effect<void, ServerError> =>
 	Effect.gen(function* () {
 		const logPath = logFilePath(dataDir)
@@ -244,6 +271,7 @@ const startDetached = (
 			offline,
 			chdbConfigFile,
 			onDirtyStore,
+			minimumRawTelemetryRetentionDays,
 		})
 
 		const child = yield* Effect.try({
@@ -298,6 +326,7 @@ export const start = Command.make("start", {
 	port,
 	dataDir: dataDirFlag,
 	chdbConfigFile: chdbConfigFileFlag,
+	minimumRawTelemetryRetentionDays: minimumRawTelemetryRetentionDaysFlag,
 	background: backgroundFlag,
 	offline: offlineFlag,
 	reset: resetFlag,
@@ -445,6 +474,8 @@ export const start = Command.make("start", {
 				})
 			}
 
+			const requestedRetentionDays = Option.getOrUndefined(a.minimumRawTelemetryRetentionDays)
+
 			// Detached: spawn the same command without --background and exit.
 			if (a.background)
 				return yield* startDetached(
@@ -455,6 +486,7 @@ export const start = Command.make("start", {
 					a.offline,
 					Option.getOrUndefined(a.chdbConfigFile),
 					a.onDirtyStore,
+					requestedRetentionDays,
 				)
 
 			yield* Effect.sync(() =>
@@ -495,6 +527,7 @@ export const start = Command.make("start", {
 						port: a.port,
 						dataDir,
 						configFile: Option.getOrUndefined(a.chdbConfigFile),
+						minimumRawTelemetryRetentionDays: requestedRetentionDays,
 						assets,
 					}).pipe(
 						Effect.mapError((e) => new ServerError({ message: `failed to start: ${e.message}` })),

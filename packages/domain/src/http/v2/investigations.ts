@@ -171,10 +171,40 @@ const V2InvestigationSnapshot = Schema.Struct({
 	),
 	incidentStartedAt: Schema.NullOr(Timestamp),
 	incidentEndedAt: Schema.NullOr(Timestamp),
+
+	// The identifiers the agent needs to call tools with, as distinct from the
+	// display `facts` above. On the create payload these are what let a caller
+	// hand the investigation a fingerprint and an incident window instead of
+	// making the agent guess both — `error_detail` cannot be called without the
+	// former, and every prompt opens by scoping to the latter. All optional so a
+	// caller that has none of them, and every client built before this, still
+	// posts a valid snapshot.
+	fingerprintHash: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	exceptionType: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	exceptionMessage: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	topFrame: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	errorLabel: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	occurrenceCount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	serviceName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	deploymentEnv: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	signalType: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	observedValue: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	thresholdValue: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 }).pipe(
 	Schema.encodeKeys({
 		incidentStartedAt: "incident_started_at",
 		incidentEndedAt: "incident_ended_at",
+		fingerprintHash: "fingerprint_hash",
+		exceptionType: "exception_type",
+		exceptionMessage: "exception_message",
+		topFrame: "top_frame",
+		errorLabel: "error_label",
+		occurrenceCount: "occurrence_count",
+		serviceName: "service_name",
+		deploymentEnv: "deployment_env",
+		signalType: "signal_type",
+		observedValue: "observed_value",
+		thresholdValue: "threshold_value",
 	}),
 )
 
@@ -209,12 +239,29 @@ const V2InvestigationLensRun = Schema.Struct({
 	confidence: Schema.NullOr(InvestigationConfidence),
 	toolCount: Schema.Number,
 	elapsedSeconds: Schema.NullOr(Schema.Number),
+	/**
+	 * Label and question for this lane, written by the planner.
+	 *
+	 * On the wire because the ids are per-incident now: a client cannot map
+	 * `pool_exhaustion_payments_api` to readable copy from a static table, and the
+	 * server is the only place that knows what the lane was actually asked. Null
+	 * on lanes from before the planner, where `lens_id` still names a catalogue
+	 * entry the client has copy for.
+	 */
+	name: Schema.NullOr(Schema.String),
+	question: Schema.NullOr(Schema.String),
+	priority: Schema.NullOr(Schema.Number),
+	/** True when this lane ran out of clock rather than finishing. */
+	deadlineHit: Schema.Boolean,
 }).pipe(
 	Schema.encodeKeys({
 		lensId: "lens_id",
 		progressNote: "progress_note",
 		toolCount: "tool_count",
 		elapsedSeconds: "elapsed_seconds",
+		name: "lens_name",
+		question: "lens_question",
+		deadlineHit: "deadline_hit",
 	}),
 )
 
@@ -285,6 +332,10 @@ const investigationExample = {
 			confidence: "high",
 			tool_count: 4,
 			elapsed_seconds: 12.6,
+			lens_name: "Checkout-api 14:02 rollout",
+			lens_question: "Did the 14:02 checkout-api rollout introduce the timeout?",
+			priority: 1,
+			deadline_hit: false,
 		},
 	],
 	validator: { status: "ranked", note: "1 promoted · 0 merged · 0 ruled out", elapsed_seconds: 8.2 },

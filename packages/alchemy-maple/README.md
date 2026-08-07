@@ -7,7 +7,7 @@ npm install @maple-dev/alchemy alchemy effect
 ```
 
 `alchemy` and `effect` are peer dependencies — this release is built and tested against
-`alchemy@2.0.0-beta.64` and `effect@4.0.0-beta.101`.
+`alchemy@2.0.0-beta.70` and `effect@4.0.0-beta.105`.
 
 ## Usage
 

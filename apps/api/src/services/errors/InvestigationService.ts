@@ -39,7 +39,12 @@ import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
 import { Cause, Clock, Context, Data, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
-import { fanoutPlan, type FanoutPlan } from "@/services/errors/fanout-policy"
+import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
+import {
+	routeInvestigation,
+	type InvestigationRoute,
+} from "@/services/errors/investigation-route"
+import { evaluateInvestigationQuota, selectInvestigationUsage } from "@/services/errors/investigation-quota"
 import {
 	STALE_BUDGETS,
 	isInvestigationStale,
@@ -89,6 +94,13 @@ const lensRowToDocument = (row: InvestigationLensRunRow): InvestigationLensRun =
 		confidence: row.confidence ?? null,
 		toolCount: row.toolCount,
 		elapsedSeconds: elapsedSeconds(row.elapsedMs ?? null),
+		// Null on lanes written before the planner. The client falls back to the seed
+		// catalogue for those, so a null here is a real "no copy", not a gap to fill
+		// with the id.
+		name: row.lensName ?? null,
+		question: row.lensQuestion ?? null,
+		priority: row.priority ?? null,
+		deadlineHit: row.deadlineHit,
 	})
 
 /**
@@ -408,15 +420,10 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				}
 			})
 
-			const startOfUtcDay = (nowMs: number) => {
-				const date = new Date(nowMs)
-				return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-			}
-
 			/**
 			 * Settings drive two independent decisions: whether an automatic start is
-			 * allowed at all, and whether the org has budget left. Returned so the
-			 * caller can also read `fanoutEnabled` without a second query.
+			 * allowed at all, and whether the org has budget left. How an investigation
+			 * *runs* is deliberately not among them — see `investigation-route.ts`.
 			 */
 			const loadSettings = (orgId: OrgId) =>
 				dbExecute((db) =>
@@ -442,50 +449,30 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				}
 
 				// Two ceilings counted in two different units, which is the whole point
-				// of having two columns. Summing `autonomousTurns` — which is
-				// incremented by the *pass* count — and comparing it to `maxRunsPerDay`
-				// silently reinterprets a configured 20 runs as 20 passes, i.e. about
-				// three critical incidents a day.
-				//
-				// Windowed on `startedAt`, not `createdAt`: a restart re-stamps
-				// `startedAt`, so restarting an investigation opened last week correctly
-				// spends today's budget instead of escaping the window entirely.
-				const dailyLimit = settings?.maxRunsPerDay ?? 20
-				const passLimit = settings?.maxPassesPerDay ?? 60
-				const usageRows = yield* dbExecute((db) =>
-					db
-						.select({
-							runs: sql<number>`count(*)::int`,
-							// The passes one start costs: N lenses plus the validator, or 1.
-							passes: sql<number>`coalesce(sum(case when ${investigations.fanoutSize} > 1 then ${investigations.fanoutSize} + 1 else 1 end), 0)::int`,
-						})
-						.from(investigations)
-						.where(
-							and(
-								eq(investigations.orgId, orgId),
-								gte(investigations.startedAt, new Date(startOfUtcDay(nowMs))),
-							),
-						),
-				)
-				const usedRuns = usageRows[0]?.runs ?? 0
-				const usedPasses = usageRows[0]?.passes ?? 0
-				const overRuns = usedRuns >= dailyLimit
-				const overPasses = usedPasses + passCount > passLimit
-				if (overRuns || overPasses) {
-					const retryableAtMs = startOfUtcDay(nowMs) + 24 * 60 * 60 * 1000
+				// of having two columns. Both the query and the verdict live in
+				// `investigation-quota.ts` so the enqueue path cannot drift back into
+				// comparing passes against the runs limit — see that module's header.
+				const usage = yield* dbExecute((db) => selectInvestigationUsage(db, orgId, nowMs))
+				const verdict = evaluateInvestigationQuota({
+					usage,
+					limits: settings,
+					passCount,
+					nowMs,
+				})
+				if (verdict.kind === "exceeded") {
 					yield* Effect.annotateCurrentSpan({
 						"maple.investigation.start_result": "quota_skipped",
-						"maple.investigation.daily_limit": dailyLimit,
-						"maple.investigation.daily_pass_limit": passLimit,
-						"maple.investigation.quota_dimension": overRuns ? "runs" : "passes",
+						"maple.investigation.quota_dimension": verdict.dimension,
+						"maple.investigation.quota_limit": verdict.limit,
 					})
 					return yield* Effect.fail(
 						new InvestigationQuotaError({
-							message: overRuns
-								? `Daily investigation budget of ${dailyLimit} runs has been reached.`
-								: `Daily investigation budget of ${passLimit} model passes has been reached.`,
-							limit: overRuns ? dailyLimit : passLimit,
-							retryableAt: decodeIsoSync(new Date(retryableAtMs).toISOString()),
+							message:
+								verdict.dimension === "runs"
+									? `Daily investigation budget of ${verdict.limit} runs has been reached.`
+									: `Daily investigation budget of ${verdict.limit} model passes has been reached.`,
+							limit: verdict.limit,
+							retryableAt: decodeIsoSync(new Date(verdict.retryableAtMs).toISOString()),
 						}),
 					)
 				}
@@ -520,7 +507,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			const startFanout = Effect.fnUntraced(function* (
 				orgId: OrgId,
 				doc: InvestigationDocument,
-				plan: FanoutPlan,
+				route: Extract<InvestigationRoute, { kind: "planned" }>,
 				attempt: number,
 				nowMs: number,
 			) {
@@ -552,7 +539,10 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						.update(investigations)
 						.set({
 							fanoutState: "queued",
-							fanoutSize: plan.size,
+							// Provisional. The planner may return fewer hypotheses than the
+							// ceiling, and the workflow's `plan` step corrects this — along with
+							// the reservation — once the real width exists.
+							fanoutSize: route.maxWidth,
 							workflowInstanceId: instanceId,
 							updatedAt: new Date(nowMs),
 						})
@@ -571,7 +561,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								params: {
 									orgId,
 									investigationId: doc.id,
-									lensIds: plan.lenses,
+									maxWidth: route.maxWidth,
+									reservedPasses: route.reservedPasses,
 									attempt,
 								},
 							}),
@@ -606,7 +597,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				yield* Effect.annotateCurrentSpan({
 					"maple.investigation.id": doc.id,
 					"maple.investigation.start_result": "fanout_started",
-					"maple.investigation.fanout_size": plan.size,
+					"maple.investigation.fanout_max_width": route.maxWidth,
 				})
 			})
 
@@ -649,11 +640,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				// turns to everyone who opens the investigation. Unfenced it renders as a wall of
 				// JSON attributed to whoever started the thread.
 				const message = wrapChatContext(
-					[
-						"Begin the autonomous investigation now.",
-						"Use the preserved subject snapshot below as the source context, gather evidence with tools, and call submit_diagnosis exactly once.",
-						JSON.stringify({ subject: doc.subject, snapshot: doc.snapshot }),
-					].join("\n\n"),
+					buildIncidentContextMessage(AUTONOMOUS_KICKOFF_LEAD, doc.subject, doc.snapshot),
 					"",
 				)
 
@@ -852,25 +839,27 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								return yield* documentFor(orgId, existing)
 							}
 						}
-						// The plan decides the cost, so it has to be known before the quota
+						// The route decides the cost, so it has to be known before the quota
 						// check and before the claim increments the counter.
 						const settings = yield* loadSettings(orgId)
-						const plan = fanoutPlan({
+						const route = routeInvestigation({
 							subject: request.subject,
 							snapshot: request.snapshot ?? null,
-							automatic: options.automatic,
-							enabled: settings?.fanoutEnabled ?? false,
 						})
-						yield* ensureStartAllowed(orgId, options.automatic, nowMs, plan.passCount)
+						const reservedPasses = route.kind === "planned" ? route.reservedPasses : 1
+						yield* ensureStartAllowed(orgId, options.automatic, nowMs, reservedPasses)
 						const doc = yield* createInvestigation(orgId, userId, request)
 						const claimed = yield* dbExecute((db) =>
 							db
 								.update(investigations)
 								.set({
 									startedAt: new Date(nowMs),
-									// Counted in passes, not runs: a five-lens fan-out costs six
-									// model calls and must burn six units of the daily budget.
-									autonomousTurns: sql`${investigations.autonomousTurns} + ${plan.passCount}`,
+									// Counted in passes, not runs: a planned investigation costs
+									// planner + N + validator model calls and must burn that many units
+									// of the daily budget. Reserved high here and reconciled downward by
+									// the workflow, because the real width is not knowable until the
+									// planner has run.
+									autonomousTurns: sql`${investigations.autonomousTurns} + ${reservedPasses}`,
 									updatedAt: new Date(nowMs),
 								})
 								.where(
@@ -884,7 +873,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								.returning({ id: investigations.id }),
 						)
 						if (claimed.length === 0) return doc
-						if (plan.size > 1) yield* startFanout(orgId, doc, plan, 0, nowMs)
+						if (route.kind === "planned") yield* startFanout(orgId, doc, route, 0, nowMs)
 						else yield* sendAutonomousTurn(orgId, doc, nowMs)
 						return yield* getInvestigation(orgId, doc.id).pipe(
 							Effect.catchTag("@maple/http/investigations/InvestigationNotFoundError", () =>
@@ -906,22 +895,18 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				const existing = yield* getInvestigation(orgId, id)
 				const row = yield* loadRow(orgId, id)
 				const settings = yield* loadSettings(orgId)
-				const plan = fanoutPlan({
+				const route = routeInvestigation({
 					subject: existing.subject,
 					snapshot: existing.snapshot,
-					// A restart is always somebody pressing Retry, so it is never automatic.
-					automatic: false,
-					enabled: settings?.fanoutEnabled ?? false,
 				})
-				yield* ensureStartAllowed(orgId, false, nowMs, plan.passCount)
+				const reservedPasses = route.kind === "planned" ? route.reservedPasses : 1
+				yield* ensureStartAllowed(orgId, false, nowMs, reservedPasses)
 
 				const attempt = (row?.fanoutAttempt ?? 0) + 1
 
-				// Stop the run we are replacing before deleting its lanes. Without this
-				// the old instance keeps going, and since lens rows are keyed only by
-				// (investigation_id, lens_id) it writes its claims and verdicts into the
-				// NEW attempt's lanes and can publish a diagnosis over a live run — a
-				// board assembled from two interleaved attempts.
+				// Stop the run we are replacing. Without this the old instance keeps
+				// going and can publish a diagnosis over a live run — a board assembled
+				// from two interleaved attempts.
 				if (row?.workflowInstanceId) {
 					const env = Option.getOrUndefined(workerEnv)
 					const binding = env?.[FANOUT_WORKFLOW_BINDING] as FanoutWorkflowBinding | undefined
@@ -963,9 +948,9 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 							status: "investigating",
 							error: null,
 							startedAt: new Date(nowMs),
-							autonomousTurns: sql`${investigations.autonomousTurns} + ${plan.passCount}`,
+							autonomousTurns: sql`${investigations.autonomousTurns} + ${reservedPasses}`,
 							fanoutState: "none",
-							fanoutSize: plan.size,
+							fanoutSize: route.kind === "planned" ? route.maxWidth : 1,
 							fanoutAttempt: attempt,
 							validatorNote: null,
 							validatorElapsedMs: null,
@@ -979,7 +964,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					error: null,
 					updatedAt: decodeIsoSync(new Date(nowMs).toISOString()),
 				})
-				if (plan.size > 1) yield* startFanout(orgId, restarting, plan, attempt, nowMs)
+				if (route.kind === "planned") yield* startFanout(orgId, restarting, route, attempt, nowMs)
 				else yield* sendAutonomousTurn(orgId, restarting, nowMs)
 				return yield* getInvestigation(orgId, id)
 			})

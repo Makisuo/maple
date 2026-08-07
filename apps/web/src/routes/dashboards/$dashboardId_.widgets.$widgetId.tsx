@@ -20,6 +20,7 @@ import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { WidgetEditorSkeleton } from "@/components/dashboard-builder/loading-skeletons"
 import { pickVariableParams, variableSearchRest } from "@/lib/dashboard-variables/search-params"
 import { Button } from "@maple/ui/components/ui/button"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 // The editor carries the dashboard's `var-*` selections through its own search
 // (as opaque pass-through — it renders variables at defaults) so returning to the
@@ -65,6 +66,13 @@ function WidgetConfigurePage() {
 		try {
 			await updateWidget(dashboardId, widgetId, updates)
 			navigateBack()
+		} catch (cause) {
+			// `onApply` is a fire-and-forget callback, so an uncaught rejection here
+			// would strand the user on the editor with no idea the save failed.
+			toastManager.add({
+				title: cause instanceof Error ? cause.message : "Couldn’t save this widget",
+				type: "error",
+			})
 		} finally {
 			setIsSaving(false)
 		}

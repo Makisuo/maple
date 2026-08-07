@@ -24,7 +24,7 @@ bun add @maple-dev/clickhouse-builder effect@beta
 `effect` is a peer dependency — bring your own. Note the `@beta` tag: this
 package requires **Effect 4** (`>=4.0.0-beta.33`), which is not yet on npm's
 `latest` tag. Installing a bare `effect` gets you 3.x, and the package will
-throw `Schema.TaggedErrorClass is not a function` on import.
+throw `Schema.TaggedError is not a function` on import.
 
 ## Quick start
 

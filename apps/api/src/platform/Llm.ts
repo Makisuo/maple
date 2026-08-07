@@ -104,8 +104,61 @@ export interface LlmEnv extends Record<string, unknown> {
 	/** Cheaper model for the fan-out lens passes; falls back to the triage model. */
 	readonly MAPLE_LENS_MODEL_OPENROUTER?: string
 	readonly MAPLE_LENS_MODEL_WORKERS_AI?: string
+	/** `low` | `medium` | `high` | `off`. See {@link ReasoningEffort}. */
+	readonly MAPLE_TRIAGE_REASONING_EFFORT?: string
+	readonly MAPLE_LENS_REASONING_EFFORT?: string
 	readonly OPENROUTER_API_KEY?: string
 }
+
+/**
+ * How hard the model should think before answering.
+ *
+ * The other dial. Maple has always tiered spend by swapping model *ids* — `resolveLensModel` picks a
+ * cheaper model than `resolveTriageModel` — but on a gpt-5.6-family model the reasoning budget moves
+ * cost and latency at least as much, and it does so without changing which model's judgement you are
+ * getting. Two different framings of "spend less on this stage", and they compose.
+ *
+ * `off` omits the field entirely rather than sending a zero budget: a model that does not support
+ * reasoning must see no `reasoning` key at all, so this is also the escape hatch if a swapped-in
+ * model rejects it.
+ */
+export type ReasoningEffort = "low" | "medium" | "high" | "off"
+
+const REASONING_EFFORTS: ReadonlySet<string> = new Set(["low", "medium", "high", "off"])
+
+const readReasoningEffort = (env: LlmEnv, key: keyof LlmEnv): ReasoningEffort | undefined => {
+	const raw = readString(env, key)?.toLowerCase()
+	// An unrecognized value falls through to the caller's default rather than throwing. This is read
+	// on a request path in a Worker; a typo'd env var must not take the agent down.
+	return raw !== undefined && REASONING_EFFORTS.has(raw) ? (raw as ReasoningEffort) : undefined
+}
+
+/**
+ * Bind the reasoning budget onto a model's defaults.
+ *
+ * `providerOptions` on `Model.defaults` is merged into every request by `resolveRequestOptions` in
+ * `lib/llm`'s route client, under the *request's* own options — so this is a default a call site can
+ * still override, which is what makes it the right place for a per-stage policy.
+ *
+ * OpenRouter-only, and namespaced under `openrouter` because that is whose field it is: the Workers
+ * AI protocol reads its own namespace and would ignore this, but sending Cloudflare a key addressed
+ * to another provider is the kind of thing that reads as a bug six months from now.
+ */
+const withReasoning = (model: Model, effort: ReasoningEffort | undefined): Model =>
+	effort === undefined || effort === "off"
+		? model
+		: Model.update(model, {
+				defaults: {
+					...model.defaults,
+					providerOptions: {
+						...model.defaults?.providerOptions,
+						openrouter: {
+							...model.defaults?.providerOptions?.openrouter,
+							reasoning: { effort },
+						},
+					},
+				},
+			})
 
 /**
  * Context windows for the models Maple configures.
@@ -180,11 +233,18 @@ export const resolveTriageModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
 					accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
 					apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
 				}).model(readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ?? DEFAULT_WORKERS_AI_MODEL)
-			: OpenRouter.configure({
-					apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
-					headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
-					...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
-				}).model(readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL),
+			: withReasoning(
+					OpenRouter.configure({
+						apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
+						headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
+						...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
+					}).model(readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL),
+					// No default. This resolver serves chat, AI triage *and* the validator, so a
+					// number picked here would silently retune three stages with different shapes at
+					// once — worth doing per stage, with measurement, not as a side effect of adding
+					// the knob.
+					readReasoningEffort(env, "MAPLE_TRIAGE_REASONING_EFFORT"),
+				),
 	)
 
 /**
@@ -220,26 +280,48 @@ const withLimits = (env: LlmEnv, model: Model): Model => {
  * has no resolver of its own on purpose — it *is* `resolveTriageModel`, and
  * introducing a third knob would let the ranking silently drift below the
  * lenses it ranks.
+ *
+ * The reasoning budget is that same argument in its other form, and it is the one
+ * part of this that is **not** opt-in: `low` by default, because "gather evidence
+ * through one narrow framing" describes a task that does not need a long think,
+ * and the fan-out multiplies whatever it does need by five. Raise it with
+ * `MAPLE_LENS_REASONING_EFFORT`, or set that to `off` to send no reasoning field.
+ *
+ * `withLimits` is not optional here, though it looked it: without it
+ * `defaults.limits` is `undefined`, so `contextLimitOf` returns `undefined`, so
+ * the turn loop's `isNearContextLimit` check never fires and a lens pass never
+ * sheds a step — the one agent class that fills its window with raw
+ * telemetry was the only one running without the guard. Note the coupling this
+ * introduces: `MAPLE_TRIAGE_MODEL_CONTEXT`/`_OUTPUT` are read inside
+ * `withLimits`, so a lens on a *different* model inherits the triage overrides.
+ * Acceptable — an override is set to describe a deployment, not a single model —
+ * but it is the thing to fix first if the two stages ever diverge that far.
  */
 export const resolveLensModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
-	resolveLlmProvider(env) === "workers-ai"
-		? CloudflareWorkersAI.configure({
-				accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
-				apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
-			}).model(
-				readString(env, "MAPLE_LENS_MODEL_WORKERS_AI") ??
-					readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ??
-					DEFAULT_WORKERS_AI_MODEL,
-			)
-		: OpenRouter.configure({
-				apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
-				headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
-				...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
-			}).model(
-				readString(env, "MAPLE_LENS_MODEL_OPENROUTER") ??
-					readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ??
-					DEFAULT_OPENROUTER_MODEL,
-			)
+	withLimits(
+		env,
+		resolveLlmProvider(env) === "workers-ai"
+			? CloudflareWorkersAI.configure({
+					accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
+					apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
+				}).model(
+					readString(env, "MAPLE_LENS_MODEL_WORKERS_AI") ??
+						readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ??
+						DEFAULT_WORKERS_AI_MODEL,
+				)
+			: withReasoning(
+					OpenRouter.configure({
+						apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
+						headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
+						...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
+					}).model(
+						readString(env, "MAPLE_LENS_MODEL_OPENROUTER") ??
+							readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ??
+							DEFAULT_OPENROUTER_MODEL,
+					),
+					readReasoningEffort(env, "MAPLE_LENS_REASONING_EFFORT") ?? "low",
+				),
+	)
 
 /**
  * The runnable LLM stack — identical for both providers, which is what makes the switch a pure

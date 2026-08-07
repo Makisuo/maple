@@ -62,7 +62,7 @@ const CAPABILITIES_INSPECTION_TIMEOUT = Duration.seconds(2)
 const WarehouseCapabilityMetadataTarget = Schema.Literals(["version", "indexes", "columns", "settings"])
 type WarehouseCapabilityMetadataTarget = Schema.Schema.Type<typeof WarehouseCapabilityMetadataTarget>
 
-class WarehouseCapabilityProbeError extends Schema.TaggedErrorClass<WarehouseCapabilityProbeError>()(
+class WarehouseCapabilityProbeError extends Schema.TaggedError<WarehouseCapabilityProbeError>()(
 	"@maple/query-engine/execution/WarehouseCapabilityProbeError",
 	{
 		target: WarehouseCapabilityMetadataTarget,
@@ -357,7 +357,7 @@ WHERE name = 'enable_full_text_index'`,
 
 	// Client-kind is load-bearing: the service-map DB-edge MV
 	// (service_map_db_edges_hourly_mv) only counts SpanKind IN ('Client','Producer').
-	const executeSql = Effect.fn("WarehouseQueryService.executeSql", { kind: "client" })(function* (
+	const executeSqlOnce = Effect.fn("WarehouseQueryService.executeSql", { kind: "client" })(function* (
 		tenant: ExecutionTenant,
 		sql: string,
 		pipe: string,
@@ -545,6 +545,53 @@ WHERE name = 'enable_full_text_index'`,
 		yield* Effect.annotateCurrentSpan("db.retry.attempts", yield* Ref.get(retryAttempts))
 		return result.data
 	})
+
+	/**
+	 * `executeSqlOnce`, plus a single self-heal retry when the warehouse rejects
+	 * our credentials.
+	 *
+	 * The host caches per-org routing config and tolerates it being stale, which
+	 * is right for a row that only changes on BYO-ClickHouse onboarding and
+	 * credential rotation — but it means a rotation resolves to the retired
+	 * password until the cached entry ages out. `deps.invalidateRoute` drops that
+	 * entry and reports whether an org override was actually in play; only then
+	 * is re-running worthwhile, because a `WarehouseAuthError` on the shared
+	 * managed credential resolves to the same bad credential the second time.
+	 *
+	 * Exactly one retry, and only for auth: the second attempt reads config the
+	 * first attempt just invalidated, so if that still fails the credentials are
+	 * genuinely wrong and looping would only multiply the failure. `Effect.retry`
+	 * is deliberately not used — the recovery is the invalidation, not the delay.
+	 *
+	 * The annotation lands on the *caller's* span rather than either
+	 * `executeSql` span, so one logical query that self-healed reads as one
+	 * flagged operation. A non-zero rate here that doesn't line up with a
+	 * rotation means the staleness window is too long.
+	 */
+	const executeSql = (
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options?: SqlQueryOptions,
+		execution: "trusted" | "raw" = "trusted",
+	) => {
+		const attempt = executeSqlOnce(tenant, sql, pipe, options, execution)
+		const invalidateRoute = deps.invalidateRoute
+		if (invalidateRoute === undefined) return attempt
+		return attempt.pipe(
+			Effect.catchTag("@maple/http/errors/WarehouseAuthError", (error) =>
+				invalidateRoute(tenant).pipe(
+					Effect.flatMap((invalidated) =>
+						invalidated
+							? Effect.annotateCurrentSpan("warehouse.config.auth_retry", true).pipe(
+									Effect.andThen(executeSqlOnce(tenant, sql, pipe, options, execution)),
+								)
+							: Effect.fail(error),
+					),
+				),
+			),
+		)
+	}
 
 	const executeTrustedSql = (
 		tenant: ExecutionTenant,

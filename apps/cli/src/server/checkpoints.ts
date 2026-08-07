@@ -192,22 +192,22 @@ const checkpointErrorFields = {
 	cause: Schema.String,
 }
 
-export class CheckpointCreateError extends Schema.TaggedErrorClass<CheckpointCreateError>()(
+export class CheckpointCreateError extends Schema.TaggedError<CheckpointCreateError>()(
 	"@maple/cli/CheckpointCreateError",
 	{ ...checkpointErrorFields, checkpointId: CheckpointId },
 ) {}
 
-export class CheckpointRecoveryError extends Schema.TaggedErrorClass<CheckpointRecoveryError>()(
+export class CheckpointRecoveryError extends Schema.TaggedError<CheckpointRecoveryError>()(
 	"@maple/cli/CheckpointRecoveryError",
 	checkpointErrorFields,
 ) {}
 
-export class CheckpointResetError extends Schema.TaggedErrorClass<CheckpointResetError>()(
+export class CheckpointResetError extends Schema.TaggedError<CheckpointResetError>()(
 	"@maple/cli/CheckpointResetError",
 	checkpointErrorFields,
 ) {}
 
-export class CheckpointRestoreError extends Schema.TaggedErrorClass<CheckpointRestoreError>()(
+export class CheckpointRestoreError extends Schema.TaggedError<CheckpointRestoreError>()(
 	"@maple/cli/CheckpointRestoreError",
 	{ ...checkpointErrorFields, selector: Schema.String },
 ) {}
@@ -417,15 +417,12 @@ export const writeBackupConfig = (path: string, sourceDataDir?: string): void =>
 	)
 }
 
-export class LocalQueryError extends Schema.TaggedErrorClass<LocalQueryError>()(
-	"@maple/cli/LocalQueryError",
-	{
-		status: NonNegativeInt,
-		detail: Schema.String,
-		message: Schema.String,
-		cause: Schema.String,
-	},
-) {}
+export class LocalQueryError extends Schema.TaggedError<LocalQueryError>()("@maple/cli/LocalQueryError", {
+	status: NonNegativeInt,
+	detail: Schema.String,
+	message: Schema.String,
+	cause: Schema.String,
+}) {}
 
 const localQueryError = (status: number, detail: string, cause = detail): LocalQueryError =>
 	new LocalQueryError({
@@ -435,52 +432,58 @@ const localQueryError = (status: number, detail: string, cause = detail): LocalQ
 		cause,
 	})
 
+export const postLoopbackLocalQuery = async (port: number, sql: string): Promise<unknown> => {
+	const response = await fetch(`http://127.0.0.1:${port}/local/query`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ sql }),
+	})
+	if (!response.ok) {
+		const detail = await response.text().catch(() => "")
+		throw localQueryError(response.status, detail)
+	}
+	return response.json()
+}
+
 export const checkpointQueryUrl = (host: string, port: number): string =>
 	`${serverUrl(host, port)}/local/query`
 
-const postLocalQuery = (
+const postCheckpointBackup = (
 	host: string,
 	port: number,
-	sql: string,
+	dataDir: string,
+	checkpointId: CheckpointId,
 ): Effect.Effect<unknown, LocalQueryError, HttpClient.HttpClient> => {
-	const url = checkpointQueryUrl(host, port)
+	const url = `${serverUrl(host, port)}/local/checkpoint/backup`
 	return Effect.gen(function* () {
+		const token = yield* Effect.try({
+			try: () => readFileSync(`${resolve(dataDir)}.maintenance-token`, "utf8").trim(),
+			catch: (error) => localQueryError(0, `failed to read maintenance token: ${errorMessage(error)}`),
+		})
 		const client = yield* HttpClient.HttpClient
 		const request = HttpClientRequest.post(url).pipe(
-			HttpClientRequest.bodyText(JSON.stringify({ sql }), "application/json"),
+			HttpClientRequest.setHeader("x-maple-maintenance-token", token),
+			HttpClientRequest.bodyText(JSON.stringify({ checkpointId }), "application/json"),
 		)
 		const response = yield* client
 			.execute(request)
 			.pipe(Effect.mapError((error) => localQueryError(0, errorMessage(error), errorCause(error))))
-		yield* Effect.annotateCurrentSpan("http.response.status_code", response.status)
-		const text = yield* response.text.pipe(
+		const responseText = yield* response.text.pipe(
 			Effect.mapError((error) =>
 				localQueryError(response.status, errorMessage(error), errorCause(error)),
 			),
 		)
-		if (response.status < 200 || response.status >= 300) {
-			const detail = text
-			return yield* localQueryError(response.status, detail)
-		}
+		if (response.status < 200 || response.status >= 300)
+			return yield* localQueryError(response.status, responseText)
 		return yield* Effect.try({
-			try: () => JSON.parse(text) as unknown,
+			try: () => JSON.parse(responseText) as unknown,
 			catch: (error) => localQueryError(response.status, errorMessage(error), errorCause(error)),
 		})
 	}).pipe(
 		Effect.timeout("30 seconds"),
 		Effect.catchTag("TimeoutError", () =>
-			Effect.fail(localQueryError(0, "local checkpoint query timed out after 30 seconds")),
+			Effect.fail(localQueryError(0, "local checkpoint backup timed out after 30 seconds")),
 		),
-		Effect.withSpan("CheckpointService.postLocalQuery", {
-			kind: "client",
-			attributes: {
-				"peer.service": "maple-local",
-				"http.request.method": "POST",
-				"server.address": host,
-				"server.port": port,
-				"url.full": url,
-			},
-		}),
 	)
 }
 
@@ -964,6 +967,10 @@ const acquireMaintenance = async (
 ): Promise<() => Promise<void>> => {
 	const lockPath = maintenanceLockPath(dataDir)
 	if (existsSync(lockPath)) await assertRealDirectory(lockPath, "maintenance lock")
+	// The lock is a *sibling* of the data dir, so its parent (`~/.maple`) may not
+	// exist yet — on a fresh CI runner it never does, and the bare mkdir below
+	// failed with ENOENT before the lock could be taken.
+	await mkdir(dirname(lockPath), { recursive: true })
 	try {
 		await mkdir(lockPath, { mode: 0o700 })
 	} catch (error) {
@@ -1499,11 +1506,7 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 				},
 				catch: createError,
 			})
-			yield* postLocalQuery(
-				options.host,
-				options.port,
-				`BACKUP DATABASE default TO Disk('default', '${snapshotBackupSqlPath(checkpointId)}')`,
-			).pipe(
+			yield* postCheckpointBackup(options.host, options.port, options.dataDir, checkpointId).pipe(
 				Effect.mapError((error) =>
 					createError(
 						isMissingBackupConfigurationError(error)

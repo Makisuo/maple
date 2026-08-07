@@ -368,6 +368,7 @@ export const V2DashboardCreateParams = Schema.Struct({
 	.annotate({
 		identifier: "DashboardCreateParams",
 		title: "Dashboard create parameters",
+		parseOptions: { reportInput: true },
 	})
 export type V2DashboardCreateParams = Schema.Schema.Type<typeof V2DashboardCreateParams>
 
@@ -390,6 +391,7 @@ export const V2DashboardUpdateParams = Schema.Struct({
 		identifier: "DashboardUpdateParams",
 		title: "Dashboard update parameters",
 		description: "Fields to update. Omitted fields retain their current values.",
+		parseOptions: { reportInput: true },
 	})
 export type V2DashboardUpdateParams = Schema.Schema.Type<typeof V2DashboardUpdateParams>
 

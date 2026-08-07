@@ -43,7 +43,6 @@ import {
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import {
-	INVESTIGATION_AGENT_BINDING,
 	INVESTIGATION_FANOUT_BINDING,
 	maybeEnqueueTriage,
 } from "@/services/errors/ai-triage-enqueue"
@@ -64,6 +63,7 @@ import {
 	type GoldenSignalSeries,
 	type LogVolumeSeries,
 } from "./anomaly/detection"
+import { issueSeverityFromAlert } from "@/services/errors/severity-map"
 import { rollingCountBuckets } from "./anomaly/rolling-counts"
 import { decideTransition, stateMachineConfigFor, type DetectorStateSnapshot } from "./anomaly/state-machine"
 import {
@@ -236,10 +236,6 @@ const make = Effect.gen(function* () {
 	// Optional: present only inside a Worker isolate. Used to kick off the
 	// AI triage Workflow when an incident opens (org opt-in).
 	const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
-	const investigationAgentBinding = Option.match(workerEnv, {
-		onNone: () => undefined,
-		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
-	})
 	const investigationFanoutBinding = Option.match(workerEnv, {
 		onNone: () => undefined,
 		onSome: (e) => e[INVESTIGATION_FANOUT_BINDING],
@@ -1571,7 +1567,9 @@ const make = Effect.gen(function* () {
 								serviceName: evaluation.serviceName,
 								deploymentEnv: evaluation.deploymentEnv,
 								fingerprintHash: evaluation.fingerprintHash,
-								severity: evaluation.severity,
+								// Same two-scale mismatch as the alert path: unmapped, a `warning`
+								// anomaly reached the snapshot as an unclassified incident.
+								severity: issueSeverityFromAlert(evaluation.severity),
 								observedValue: evaluation.value,
 								baselineMedian: evaluation.baselineMedian,
 								baselineSigma: evaluation.baselineSigma,
@@ -1579,7 +1577,6 @@ const make = Effect.gen(function* () {
 								sampleCount: evaluation.sampleCount,
 								detectedAt: new Date(nowMs).toISOString(),
 							},
-							agentBinding: investigationAgentBinding,
 							fanoutBinding: investigationFanoutBinding,
 						}).pipe(Effect.provideService(Database, database))
 						if (triage.enqueued) {
@@ -1754,6 +1751,9 @@ const make = Effect.gen(function* () {
 							.select({
 								detectorKey: anomalyDetectorStates.detectorKey,
 								fingerprintHash: anomalyDetectorStates.fingerprintHash,
+								// Carried so the promotion below can write the incident's
+								// `last_sample_count` from the promoted series' own count.
+								lastSampleCount: anomalyDetectorStates.lastSampleCount,
 							})
 							.from(anomalyDetectorStates)
 							.where(
@@ -1826,7 +1826,13 @@ const make = Effect.gen(function* () {
 										...(nextEntry !== undefined
 											? {
 													lastObservedValue: nextEntry.lastValue,
-													lastSampleCount: nextEntry.lastValue,
+													// The count comes from the promoted series' state row, not
+													// from the fingerprint entry — entries carry only a value.
+													// This previously read `nextEntry.lastValue`, i.e. the
+													// metric reading (a p95 in ms) into an `integer` column,
+													// so every detach failed with `invalid input syntax for
+													// type integer: "4729.711321330495"`.
+													lastSampleCount: next.lastSampleCount ?? 0,
 												}
 											: {}),
 									}

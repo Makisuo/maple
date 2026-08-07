@@ -48,7 +48,7 @@ export const responseHasActivePlan = (response: unknown): boolean => {
 // Sentinel keeping non-200 Autumn responses out of the edge cache: the compute
 // fails with this so `getOrCompute` never stores it, then the caller recovers it
 // into the normal path. Mirrors `AutumnResult` so `.result` stays typed.
-class UncacheableAutumnResult extends Schema.TaggedErrorClass<UncacheableAutumnResult>()(
+class UncacheableAutumnResult extends Schema.TaggedError<UncacheableAutumnResult>()(
 	"@maple/api/billing/UncacheableAutumnResult",
 	{
 		result: Schema.Struct({ statusCode: Schema.Number, response: Schema.Unknown }),

@@ -239,6 +239,13 @@
       "when": 1786016873783,
       "tag": "0034_lens_mechanism",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786059358436,
+      "tag": "0035_planned_investigations",
+      "breakpoints": true
     }
   ]
 }

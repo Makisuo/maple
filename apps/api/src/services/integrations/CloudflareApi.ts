@@ -13,7 +13,8 @@
  * already have a connection resolve a fresh token via `CloudflareOAuthService.getValidAccessToken`
  * and pass it in.
  */
-import { API, T, type DefaultErrors } from "@distilled.cloud/cloudflare"
+import { CloudflareProtocol, Retry, T, type CloudflareOpError } from "@distilled.cloud/cloudflare"
+import * as API from "@distilled.cloud/core/api"
 import * as Accounts from "@distilled.cloud/cloudflare/accounts"
 import { fromOAuth, type Credentials } from "@distilled.cloud/cloudflare/Credentials"
 import * as Hyperdrive from "@distilled.cloud/cloudflare/hyperdrive"
@@ -255,7 +256,7 @@ export const listHyperdriveConfigs: (
 const GraphqlRequest = Schema.Struct({
 	query: Schema.String,
 	variables: Schema.optional(Schema.Unknown),
-}).pipe(T.Http({ method: "POST", path: "/graphql" }))
+}).pipe(T.Http({ method: "POST", uri: "/graphql" }))
 
 const GraphqlErrorItem = Schema.Struct({
 	message: Schema.String,
@@ -277,12 +278,14 @@ type GraphqlResponseShape = typeof GraphqlResponse.Type
 const graphqlOperation: API.OperationMethod<
 	GraphqlRequestShape,
 	GraphqlResponseShape,
-	DefaultErrors,
+	CloudflareOpError,
 	Credentials | HttpClient.HttpClient
 > = API.make(() => ({
 	input: GraphqlRequest,
 	output: GraphqlResponse,
 	errors: [],
+	protocol: CloudflareProtocol,
+	retry: Retry.Retry,
 }))
 
 export interface CloudflareGraphqlError {

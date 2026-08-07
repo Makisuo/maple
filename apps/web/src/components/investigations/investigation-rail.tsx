@@ -3,11 +3,12 @@ import { Link } from "@tanstack/react-router"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import type { IssueEscalationAttemptDocument } from "@maple/domain/http"
 import { cn } from "@maple/ui/lib/utils"
-import { formatDuration, formatNumber } from "@maple/ui/lib/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { formatRelativeTime, toEpochMs } from "@maple/ui/lib/time-format"
 
 import { ChecksRail } from "./checks-rail"
 import { fanoutRunSteps } from "./lens-derive"
+import { splitDuration } from "./investigation-display"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { investigationOriginLabel } from "./investigation-status"
@@ -168,10 +169,14 @@ function RunSpine({
 
 	const openedMs = toEpochMs(investigation.created_at)
 	const diagnosedMs = investigation.diagnosed_at ? toEpochMs(investigation.diagnosed_at) : null
-	const elapsed =
+	// `splitDuration`, not `formatDuration`: this is the same time-to-diagnosis the
+	// verdict card states one panel to the left, and the two read as different
+	// numbers when one says "1.0min" and the other "1:00 min".
+	const toDiagnosis =
 		diagnosedMs !== null && Number.isFinite(openedMs) && diagnosedMs >= openedMs
-			? formatDuration(diagnosedMs - openedMs)
+			? splitDuration(diagnosedMs - openedMs)
 			: null
+	const elapsed = toDiagnosis ? `${toDiagnosis.value} ${toDiagnosis.unit}` : null
 
 	nodes.push({
 		key: "opened",
