@@ -18,7 +18,7 @@ import {
 	restoreCheckpoint,
 } from "../server/checkpoints"
 import { resolveUiAssets } from "../server/ui-assets"
-import { amber, bold, cyan, dim, green, underline } from "../lib/style"
+import { amber, bold, cyan, dim, green, MARK_LINES, MARK_WIDTH, underline } from "../lib/style"
 import {
 	buildDetachedChildArgs,
 	canonicalUrlHostname,
@@ -85,11 +85,13 @@ const startBanner = (
 	dashboardUrl: string | undefined,
 	offline: boolean,
 ): string => {
-	const row = (key: string, value: string) => `  ${dim(key.padEnd(11))}${value}`
-	const lines = [
-		"",
-		`  ${amber("🍁 maple")}  ${dim("· local mode")}`,
-		`  ${green("●")} listening on ${cyan(underline(bindAddr))}`,
+	// No leading indent here — the gutter below supplies it.
+	const row = (key: string, value: string) => `${dim(key.padEnd(11))}${value}`
+	const content = [
+		// The lockup. Mono has only one face, so the tension that carries it in
+		// the UI (display vs. mono) becomes weight: `maple` bold, `local` dim.
+		`${bold("maple")} ${dim("local")}`,
+		`${green("●")} listening on ${cyan(underline(bindAddr))}`,
 		"",
 		...(connectAddr === bindAddr ? [] : [row("connect", cyan(connectAddr))]),
 		row("OTLP/HTTP", `POST ${dim("/v1/{traces,logs,metrics}")}`),
@@ -97,14 +99,30 @@ const startBanner = (
 		...(dashboardUrl
 			? [
 					row("dashboard", cyan(dashboardUrl)),
-					...(offline ? [] : [`  ${dim(" ".repeat(11))}${dim("· bundled UI: pass --offline")}`]),
+					...(offline ? [] : [`${" ".repeat(11)}${dim("· bundled UI: pass --offline")}`]),
 				]
 			: []),
 		row("data", prettyPath(dataDir)),
 		row("pid", `${process.pid}  ${dim("· stop with")} ${bold("maple stop")}`),
-		"",
 	]
-	return `${lines.join("\n")}\n`
+
+	// The mark rides in a left gutter rather than sitting above the rows, so it
+	// costs no vertical space: the content is already as tall as the mark. On a
+	// terminal too narrow to seat it, the mark is dropped and the wordmark
+	// carries local mode alone — a wrapped banner is worse than no glyph.
+	//
+	// The threshold covers the gutter plus the key column plus a readable value.
+	// It deliberately does NOT measure the longest line: a dashboard URL or a
+	// `--data-dir` can be arbitrarily long, and those already wrap today. Gating
+	// on them would make the glyph blink out for reasons the user can't see.
+	const lines =
+		(process.stdout.columns ?? 80) >= 72
+			? Array.from({ length: Math.max(MARK_LINES.length, content.length) }, (_, i) =>
+					`  ${amber(MARK_LINES[i] ?? " ".repeat(MARK_WIDTH))}   ${content[i] ?? ""}`.trimEnd(),
+				)
+			: content.map((line) => `  ${line}`)
+
+	return `\n${lines.join("\n")}\n\n`
 }
 
 // PID file lives one level above the data dir (e.g. ~/.maple/maple.pid) so

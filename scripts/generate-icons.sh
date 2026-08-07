@@ -79,7 +79,6 @@ tile() { # tile <rx|none> <mark-transform> <out>
 }
 
 tile 7    "$SEATED"  "$TMP/rounded.svg"
-tile 7    "$TIGHT"   "$TMP/small.svg"
 tile 0    "$SEATED"  "$TMP/square.svg"
 tile none "$CENTRED" "$TMP/bare.svg"
 tile none "$SPLASH"  "$TMP/splash.svg"
@@ -88,11 +87,27 @@ render() { rsvg-convert -w "$2" -h "$2" "$1" -o "$3"; }
 flatten() { magick "$1" -background "$TILE" -alpha remove -alpha off "$2"; }
 
 # --- .ico: 16px from the tighter crop, 32px from the standard tile ----------
-render "$TMP/small.svg"   16 "$TMP/16.png"
-render "$TMP/rounded.svg" 32 "$TMP/32.png"
-for app in landing web local-ui; do
-	magick "$TMP/16.png" "$TMP/32.png" "apps/$app/public/favicon.ico"
+# `local TILE/MARK` shadows the globals for the tile() calls below it (bash
+# scopes dynamically), so a colorway applies to one .ico and restores itself.
+ico() { # ico <tile-fill> <mark-fill> <out>
+	local TILE="$1" MARK="$2" out="$3"
+	tile 7 "$TIGHT"  "$TMP/ico-small.svg"
+	tile 7 "$SEATED" "$TMP/ico-rounded.svg"
+	render "$TMP/ico-small.svg"   16 "$TMP/16.png"
+	render "$TMP/ico-rounded.svg" 32 "$TMP/32.png"
+	magick "$TMP/16.png" "$TMP/32.png" "$out"
+}
+
+for app in landing web; do
+	ico "$TILE" "$MARK" "apps/$app/public/favicon.ico"
 done
+
+# local mode inverts to the "Fired" colorway — amber tile, ink tree. Local and
+# the hosted app are routinely open in adjacent tabs, and at 16px the only thing
+# that separates two favicons is overall value, not detail: Soot is a dark chip,
+# Fired an amber one. Keep this in step with apps/local-ui/public/favicon.svg,
+# which carries the same swap and the longer note.
+ico "$MARK" "$TILE" "apps/local-ui/public/favicon.ico"
 
 # --- Expo web favicon -------------------------------------------------------
 render "$TMP/rounded.svg" 48 apps/mobile/assets/favicon.png
