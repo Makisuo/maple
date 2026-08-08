@@ -272,6 +272,7 @@
         "@maple/effect-db": "workspace:*",
         "@maple/infra": "workspace:*",
         "@maple/query-engine": "workspace:*",
+        "@maple/thinking-orbs": "workspace:*",
         "@maple/ui": "workspace:*",
         "@maple/unitflow": "workspace:*",
         "@rrweb/replay": "^2.0.1",
@@ -461,6 +462,17 @@
       },
       "peerDependencies": {
         "@opentelemetry/api": ">=1.9.0",
+      },
+    },
+    "lib/thinking-orbs": {
+      "name": "@maple/thinking-orbs",
+      "devDependencies": {
+        "@types/react": "catalog:react",
+        "react": "catalog:react",
+        "typescript": "catalog:tooling",
+      },
+      "peerDependencies": {
+        "react": "^19.0.0",
       },
     },
     "lib/unitflow": {
@@ -1557,6 +1569,8 @@
     "@maple/query-engine-integrations": ["@maple/query-engine-integrations@workspace:packages/query-engine-integrations"],
 
     "@maple/scraper": ["@maple/scraper@workspace:apps/scraper"],
+
+    "@maple/thinking-orbs": ["@maple/thinking-orbs@workspace:lib/thinking-orbs"],
 
     "@maple/ui": ["@maple/ui@workspace:packages/ui"],
 

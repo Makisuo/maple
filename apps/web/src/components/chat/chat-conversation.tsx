@@ -31,8 +31,8 @@ import {
 	PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
+import { ThinkingOrbIcon } from "@/components/ai-elements/thinking-orb-icon"
 import { Button } from "@maple/ui/components/ui/button"
-import { Spinner } from "@maple/ui/components/ui/spinner"
 import { trackProduct } from "@/lib/analytics"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { AiTriageResult } from "@maple/domain/http"
@@ -393,7 +393,7 @@ function EmptyNotice({
 	return (
 		<div className="flex flex-col items-center justify-center gap-2 text-center">
 			<p className="flex items-center gap-1.5 text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
-				{busy ? <Spinner className="size-3" /> : null}
+				{busy ? <ThinkingOrbIcon state="breathing" /> : null}
 				<span className={busy ? "shimmer" : undefined}>{title}</span>
 			</p>
 			<p className="max-w-sm text-sm text-muted-foreground">{children}</p>

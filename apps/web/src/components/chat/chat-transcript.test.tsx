@@ -24,6 +24,14 @@ class NoopObserver {
 vi.stubGlobal("ResizeObserver", NoopObserver)
 vi.stubGlobal("IntersectionObserver", NoopObserver)
 
+/**
+ * The status orb paints to a canvas, and jsdom's `getContext` is a stub that logs
+ * "Not implemented" to stderr on every call. The component already treats a null
+ * context as "don't animate", so returning null is the honest answer here — this
+ * only silences the noise, it doesn't change what's asserted.
+ */
+HTMLCanvasElement.prototype.getContext = () => null
+
 const message = (id: string, role: "user" | "assistant", text: string): UIMessage =>
 	({ id, role, parts: [{ type: "text", text }] }) as unknown as UIMessage
 
@@ -115,6 +123,124 @@ describe("ChatTranscript", () => {
 		expect(marker?.textContent).toContain("Thinking")
 		expect(marker?.closest('[data-slot="message"]')).toBeNull()
 		expect(items().map((el) => (el as HTMLElement).dataset.messageId)).toEqual(["m1", "__status"])
+	})
+
+	describe("the status orb tracks what the agent is doing", () => {
+		/** An assistant turn stopped mid-call on `toolName`. */
+		const runningTool = (id: string, toolName: string): UIMessage =>
+			({
+				id,
+				role: "assistant",
+				parts: [
+					{
+						type: `tool-${toolName}`,
+						toolCallId: `${id}-call`,
+						state: "input-available",
+						input: {},
+					},
+				],
+			}) as unknown as UIMessage
+
+		/** Every animating orb on screen, by accessible name. There should never be more than one. */
+		const orbs = () =>
+			[...document.querySelectorAll("canvas")].map((c) => c.getAttribute("aria-label") ?? "")
+
+		const marker = () => document.querySelector('[data-slot="marker"]')
+
+		it.each([
+			["search_traces", "Searching…"],
+			["run_sql", "Solving…"],
+			["service_map", "Connecting…"],
+			// Unmapped tools fall back rather than needing registration in `toolOrbStates`.
+			["create_dashboard", "Working…"],
+		])("gives a running %s its own orb, and no second one", (toolName, expected) => {
+			render(
+				<ChatTranscript
+					{...baseProps}
+					isLoading
+					messages={[message("m1", "user", "hi"), runningTool("m2", toolName)]}
+				/>,
+			)
+
+			// The tool row is the turn's live edge. A status marker here would repeat it verbatim.
+			expect(orbs()).toEqual([expected])
+			expect(marker()).toBeNull()
+		})
+
+		it("shows the thinking row only when no tool is in flight", () => {
+			render(
+				<ChatTranscript
+					{...baseProps}
+					isLoading
+					messages={[message("m1", "user", "hi"), message("m2", "assistant", "hello")]}
+				/>,
+			)
+
+			expect(marker()?.textContent).toBe("Thinking…")
+			expect(orbs()).toEqual(["Thinking…"])
+		})
+
+		it("puts one orb in the group header, tracking the call actually in flight", () => {
+			const burst = {
+				id: "m2",
+				role: "assistant",
+				parts: [
+					{ type: "tool-search_traces", toolCallId: "a", state: "output-available", output: "{}" },
+					{ type: "tool-list_services", toolCallId: "b", state: "output-available", output: "{}" },
+					{ type: "tool-run_sql", toolCallId: "c", state: "input-available", input: {} },
+				],
+			} as unknown as UIMessage
+
+			render(
+				<ChatTranscript {...baseProps} isLoading messages={[message("m1", "user", "hi"), burst]} />,
+			)
+
+			// Collapsed group: the header is the only live thing, and it reads as the running call.
+			expect(orbs()).toEqual(["Solving…"])
+			expect(marker()).toBeNull()
+			expect(screen.getByText("Run Sql")).toBeTruthy()
+			expect(screen.getByText("2/3")).toBeTruthy()
+		})
+
+		it("keeps a single orb when an expanded group has several calls in flight", () => {
+			const parts = Array.from({ length: 12 }, (_, i) => ({
+				type: "tool-search_traces",
+				toolCallId: `c${i}`,
+				// Two still running: without the live/grouped split these would each add a canvas.
+				state: i < 10 ? "output-available" : "input-available",
+				input: {},
+				output: i < 10 ? "{}" : undefined,
+			}))
+			const burst = { id: "m2", role: "assistant", parts } as unknown as UIMessage
+
+			render(
+				<ChatTranscript {...baseProps} isLoading messages={[message("m1", "user", "hi"), burst]} />,
+			)
+			fireEvent.click(screen.getAllByRole("button")[0]!)
+
+			expect(orbs()).toEqual(["Searching…"])
+		})
+
+		it("yields to streaming prose — the text is the progress signal at that point", () => {
+			const streaming = {
+				id: "m2",
+				role: "assistant",
+				parts: [
+					{ type: "tool-search_traces", toolCallId: "a", state: "input-available", input: {} },
+					{ type: "text", text: "Here's what I found", state: "streaming" },
+				],
+			} as unknown as UIMessage
+
+			render(
+				<ChatTranscript
+					{...baseProps}
+					isLoading
+					messages={[message("m1", "user", "hi"), streaming]}
+				/>,
+			)
+
+			expect(marker()).toBeNull()
+		})
 	})
 
 	it("offers copy actions on assistant turns only", () => {

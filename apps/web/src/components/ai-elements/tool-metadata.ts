@@ -27,6 +27,7 @@ import {
 	TagIcon,
 	TrashIcon,
 } from "@/components/icons"
+import type { OrbState } from "@maple/thinking-orbs"
 import type { IconComponent } from "@/components/icons"
 
 /**
@@ -56,6 +57,18 @@ export function toolLabel(toolName: string): string {
 /** Icon for a (possibly namespaced) tool name, defaulting to a generic code glyph. */
 export function toolIcon(toolName: string): IconComponent {
 	return toolIcons[normalizeToolName(toolName)] ?? CodeIcon
+}
+
+/**
+ * Orb animation for a (possibly namespaced) tool name.
+ *
+ * The mapping is deliberately coarse — four buckets over ~50 tools. The point is that a glance
+ * at the orb tells you what *kind* of work is in flight (sweeping data vs. crunching a query vs.
+ * walking the topology), not that every tool gets its own animation. Anything unmapped falls
+ * back to `working`, which is also the right read for the write/mutate tools.
+ */
+export function toolOrbState(toolName: string): OrbState {
+	return toolOrbStates[normalizeToolName(toolName)] ?? "working"
 }
 
 const toolLabels: Record<string, string> = {
@@ -175,4 +188,32 @@ const toolIcons: Record<string, IconComponent> = {
 	get_session_transcript: ChatBubbleSparkleIcon,
 	register_agent: IdBadgeIcon,
 	get_event: CircleInfoIcon,
+}
+
+/**
+ * Only the three non-default buckets are listed; everything else resolves to `working` via
+ * `toolOrbState`. Keeping the fallback implicit means a new Maple tool doesn't have to be
+ * registered here to look right — it just doesn't get a specialised animation.
+ */
+const toolOrbStates: Record<string, OrbState> = {
+	// `searching` — a scan meridian sweeps a dotted globe. Anything that trawls a corpus.
+	search_traces: "searching",
+	find_slow_traces: "searching",
+	search_logs: "searching",
+	mine_log_patterns: "searching",
+	find_errors: "searching",
+	search_sessions: "searching",
+	search_source_code: "searching",
+	explore_attributes: "searching",
+	// `solving` — bands scramble in quarter turns, then click back. Query crunching.
+	run_sql: "solving",
+	query_data: "solving",
+	compare_periods: "solving",
+	inspect_chart_data: "solving",
+	// `connecting` — a constellation wires itself, packets running the edges. Topology walks.
+	service_map: "connecting",
+	list_services: "connecting",
+	get_service_top_operations: "connecting",
+	diagnose_service: "connecting",
+	audit_setup: "connecting",
 }

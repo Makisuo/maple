@@ -1,0 +1,19 @@
+{
+	"name": "@maple/thinking-orbs",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"peerDependencies": {
+		"react": "^19.0.0"
+	},
+	"devDependencies": {
+		"@types/react": "catalog:react",
+		"react": "catalog:react",
+		"typescript": "catalog:tooling"
+	}
+}

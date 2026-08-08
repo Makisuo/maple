@@ -38,16 +38,31 @@ import {
 import type { UIMessage } from "@/components/ai-elements/types"
 import type { AiTriageResult } from "@maple/domain/http"
 
-function shouldShowThinkingIndicator(
-	message: UIMessage,
-	isLoading: boolean,
-	isLastMessage: boolean,
-): boolean {
+/**
+ * Whether the turn needs its own "still working" row.
+ *
+ * A turn should have exactly one live element, at its trailing edge. A running tool already
+ * renders one — the orb in its row, or in its group's header — so adding the status marker on
+ * top put two identical animations six pixels apart, each narrating the same call ("Search
+ * Traces" above "Searching…"). The marker earns its place only when nothing else is live:
+ * before the first token, and in the gap after a burst settles but before prose starts.
+ *
+ * The result stays a primitive because it crosses the memo barrier into the row components
+ * (see `TranscriptMessageRowProps`) — it must not be a fresh object per render.
+ */
+function showsThinkingRow(message: UIMessage, isLoading: boolean, isLastMessage: boolean): boolean {
 	if (!isLoading || !isLastMessage || message.role !== "assistant") return false
 	const parts = message.parts
 	if (parts.length === 0) return true
 	const lastPart = parts[parts.length - 1]
+	// Streaming prose is its own progress signal.
 	if (lastPart.type === "text" && (lastPart as { state?: string }).state === "streaming") return false
+	for (const part of parts) {
+		if (!isToolPart(part)) continue
+		// A proposal renders as an approval card, which is not a live row — it has no orb to defer to.
+		if (part.state === "proposed") continue
+		if (deriveToolStatus(part.state) === "running") return false
+	}
 	return true
 }
 
@@ -82,6 +97,8 @@ function renderToolNodes(buf: readonly ToolPart[], keyHint: string): ReactNode {
 				input={t.input}
 				output={t.output}
 				errorText={t.errorText}
+				// Nothing follows a standalone call, so this row is the turn's live edge.
+				live
 			/>
 		)
 	}
@@ -96,6 +113,7 @@ function renderToolNodes(buf: readonly ToolPart[], keyHint: string): ReactNode {
 			errorCount={errorCount}
 			completedCount={buf.length - runningCount}
 			currentLabel={lastRunning ? toolLabel(toolNameFor(lastRunning)) : undefined}
+			currentToolName={lastRunning ? toolNameFor(lastRunning) : undefined}
 		>
 			{buf.map((t) => (
 				<ToolRow
@@ -402,7 +420,7 @@ export function ChatTranscript({
 									<TranscriptToolRunRow
 										key={row.id}
 										row={row}
-										showThinking={shouldShowThinkingIndicator(
+										showThinking={showsThinkingRow(
 											last,
 											isLoading,
 											last.id === lastMessageId,
@@ -415,7 +433,7 @@ export function ChatTranscript({
 								<TranscriptMessageRow
 									key={message.id}
 									message={message}
-									showThinking={shouldShowThinkingIndicator(
+									showThinking={showsThinkingRow(
 										message,
 										isLoading,
 										message.id === lastMessageId,
