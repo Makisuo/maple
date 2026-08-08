@@ -5,6 +5,7 @@ import {
 	type AlertIncidentId,
 	type AlertRuleId,
 } from "@maple/domain/http"
+import { projectAlertLifecycleEvent } from "@maple/alerting-core"
 import type { AlertDestinationRow } from "@maple/db"
 import { Effect } from "effect"
 import { parseBase64Aes256GcmKey } from "@/platform/Crypto"
@@ -127,8 +128,26 @@ export const makeAlertDestinationDelivery = (options: {
 			{ sendEmail, resolveSlackBotToken: options.resolveSlackBotToken },
 		)
 
-	const buildPayload = (context: AlertDeliveryPayloadContext) =>
+	const buildPayload = (context: AlertDeliveryPayloadContext, tenantId: string) =>
 		({
+			event: projectAlertLifecycleEvent({
+				tenantId,
+				ruleId: context.ruleId,
+				ruleName: context.ruleName,
+				incidentId: context.incidentId,
+				eventType: context.eventType,
+				incidentStatus: context.incidentStatus,
+				groupKey: context.groupKey,
+				signalType: context.signalType,
+				severity: context.severity,
+				comparator: context.comparator,
+				threshold: context.threshold,
+				thresholdUpper: context.thresholdUpper,
+				windowMinutes: context.windowMinutes,
+				value: context.value,
+				sampleCount: context.sampleCount,
+				occurredAtMs: context.sentAtMs,
+			}),
 			eventType: context.eventType,
 			incidentId: context.incidentId,
 			incidentStatus: context.incidentStatus,
@@ -153,6 +172,7 @@ export const makeAlertDestinationDelivery = (options: {
 			chatUrl: buildAlertChatUrl(options.appBaseUrl, context),
 			sentAt: new Date(context.sentAtMs).toISOString(),
 		}) satisfies {
+			readonly event: ReturnType<typeof projectAlertLifecycleEvent>
 			readonly eventType: AlertDeliveryPayloadContext["eventType"]
 			readonly incidentId: AlertIncidentId | null
 			readonly incidentStatus: AlertDeliveryPayloadContext["incidentStatus"]
@@ -177,7 +197,7 @@ export const makeAlertDestinationDelivery = (options: {
 			secretConfig: enrichedSecret,
 			...context,
 		}
-		const payload = buildPayload(fullContext)
+		const payload = buildPayload(fullContext, destinationRow.orgId)
 		return yield* dispatchDelivery(fullContext, JSON.stringify(payload))
 	})
 

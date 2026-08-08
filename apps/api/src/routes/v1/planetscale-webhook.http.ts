@@ -9,6 +9,7 @@ import { Env } from "@/platform/Env"
 import {
 	classifyPlanetScaleEvent,
 	decodePlanetScaleWebhookPayload,
+	projectPlanetScaleWebhookEvent,
 	verifyPlanetScaleSignature,
 } from "@/services/integrations/planetscale/webhook-events"
 import { PlanetScaleWebhookQueue } from "@/services/integrations/planetscale/PlanetScaleWebhookQueue"
@@ -166,17 +167,33 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 				return textResponse("ok", 200)
 			}
 
-			// Both issue-worthy and timeline-only events go through the queue: the
-			// durable retry is what makes a missed deploy marker recoverable.
-			if (classified.action === "issue" || classified.action === "timeline") {
+			// Every verified factual event is normalized and projected before the
+			// durable queue boundary. The queued CloudEvent is the stable contract;
+			// payload remains temporarily for parity with the existing consumers.
+			{
 				const now = yield* Clock.currentTimeMillis
+				const orgId = decodeOrgIdSync(connection.orgId)
+				const event = yield* Effect.try({
+					try: () =>
+						projectPlanetScaleWebhookEvent({
+							orgId,
+							connectionId,
+							payload,
+							receivedAt: now,
+						}),
+					catch: () =>
+						new PlanetScaleWebhookUnavailable({
+							body: "Webhook event projection unavailable",
+						}),
+				})
 				const enqueued = yield* webhookQueue
 					.send({
 						kind: "planetscale-webhook",
-						orgId: decodeOrgIdSync(connection.orgId),
+						orgId,
 						connectionId,
 						payload,
 						receivedAt: now,
+						event,
 					})
 					.pipe(
 						Effect.tapError((error) =>
@@ -200,10 +217,6 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 						connectionId,
 						event: payload.event,
 					}),
-				)
-			} else {
-				yield* Effect.logInfo("PlanetScale webhook lifecycle event acknowledged").pipe(
-					Effect.annotateLogs({ orgId: connection.orgId, event: payload.event }),
 				)
 			}
 

@@ -187,11 +187,13 @@ describe("PlanetScaleWebhookRouter", () => {
 				assert.strictEqual(jobs[0]?.orgId, "org_1")
 				assert.strictEqual(jobs[0]?.connectionId, CONNECTION_ID)
 				assert.strictEqual(jobs[0]?.payload.event, "branch.out_of_memory")
+				assert.strictEqual(jobs[0]?.event.type, "dev.maple.planetscale.webhook.received.v1")
+				assert.strictEqual(jobs[0]?.event.tenantid, "org_1")
 			}).pipe(Effect.ensuring(Effect.promise(dispose)))
 		}).pipe(Effect.provide(testDb.layer))
 	})
 
-	it.effect("enqueues lifecycle events too, and still drops genuinely unknown ones", () => {
+	it.effect("enqueues every verified factual event before downstream classification", () => {
 		const testDb = createTestDb(trackedDbs)
 		const jobs: PlanetScaleWebhookJob[] = []
 		return Effect.gen(function* () {
@@ -260,15 +262,16 @@ describe("PlanetScaleWebhookRouter", () => {
 				assert.strictEqual(branchReady.status, 202)
 				assert.strictEqual(jobs.length, 2)
 
-				// Forward-compatibility must not become "enqueue everything": an
-				// event neither side knows is acknowledged and dropped.
+				// Unknown provider facts also enter the typed event layer. The current
+				// issue/timeline consumer may ignore them, but other consumers can opt in.
 				const unknown = yield* post({
 					event: "branch.some_future_event",
 					organization: "acme",
 					database: "shop",
 				})
 				assert.strictEqual(unknown.status, 202)
-				assert.strictEqual(jobs.length, 2)
+				assert.strictEqual(jobs.length, 3)
+				assert.strictEqual(jobs[2]?.payload.event, "branch.some_future_event")
 			}).pipe(Effect.ensuring(Effect.promise(dispose)))
 		}).pipe(Effect.provide(testDb.layer))
 	})

@@ -41,6 +41,7 @@
 		"@maple/domain": "workspace:*",
 		"@maple/effect-cloudflare": "workspace:*",
 		"@maple/email": "workspace:*",
+		"@maple/eventing-core": "workspace:*",
 		"@maple/infra": "workspace:*",
 		"@maple/llm": "workspace:*",
 		"@maple/query-engine": "workspace:*",

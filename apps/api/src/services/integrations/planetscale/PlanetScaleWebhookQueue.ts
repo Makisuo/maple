@@ -1,6 +1,7 @@
 import type { Queue } from "@cloudflare/workers-types"
 import { OrgId } from "@maple/domain/http"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { MapleCloudEventSchema } from "@maple/eventing-core"
 import { Context, Data, Effect, Layer, Schema } from "effect"
 import { PlanetScaleWebhookPayload } from "./webhook-events"
 
@@ -12,6 +13,7 @@ export const PlanetScaleWebhookJob = Schema.Struct({
 	connectionId: Schema.String,
 	payload: PlanetScaleWebhookPayload,
 	receivedAt: Schema.Number,
+	event: MapleCloudEventSchema,
 })
 export type PlanetScaleWebhookJob = Schema.Schema.Type<typeof PlanetScaleWebhookJob>
 

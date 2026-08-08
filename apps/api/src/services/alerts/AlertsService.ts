@@ -659,26 +659,29 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					)
 
 					const destinations = new Map(rows.map((row) => [row.id, row]))
-					const payload = buildPayload({
-						eventType,
-						incidentId: incident.id,
-						incidentStatus: decodeAlertIncidentStatusSync(incident.status),
-						dedupeKey: incident.dedupeKey,
-						ruleId: rule.id,
-						ruleName: rule.name,
-						groupKey: incident.groupKey,
-						signalType: rule.signalType,
-						severity: rule.severity,
-						comparator: rule.comparator,
-						threshold: rule.threshold,
-						thresholdUpper: rule.thresholdUpper,
-						windowMinutes: rule.windowMinutes,
-						value: evaluation.value,
-						sampleCount: evaluation.sampleCount,
-						template: rule.notificationTemplate,
-						linkUrl: resolveNotificationLinkUrl(rule, incident.groupKey),
-						sentAtMs: scheduledAt,
-					})
+					const payload = buildPayload(
+						{
+							eventType,
+							incidentId: incident.id,
+							incidentStatus: decodeAlertIncidentStatusSync(incident.status),
+							dedupeKey: incident.dedupeKey,
+							ruleId: rule.id,
+							ruleName: rule.name,
+							groupKey: incident.groupKey,
+							signalType: rule.signalType,
+							severity: rule.severity,
+							comparator: rule.comparator,
+							threshold: rule.threshold,
+							thresholdUpper: rule.thresholdUpper,
+							windowMinutes: rule.windowMinutes,
+							value: evaluation.value,
+							sampleCount: evaluation.sampleCount,
+							template: rule.notificationTemplate,
+							linkUrl: resolveNotificationLinkUrl(rule, incident.groupKey),
+							sentAtMs: scheduledAt,
+						},
+						orgId,
+					)
 
 					yield* Effect.forEach(
 						rule.destinationIds,

@@ -59,6 +59,7 @@
         "@maple/domain": "workspace:*",
         "@maple/effect-cloudflare": "workspace:*",
         "@maple/email": "workspace:*",
+        "@maple/eventing-core": "workspace:*",
         "@maple/infra": "workspace:*",
         "@maple/llm": "workspace:*",
         "@maple/query-engine": "workspace:*",
@@ -93,6 +94,7 @@
         "@effect/platform-bun": "catalog:effect",
         "@maple-dev/effect-sdk": "workspace:*",
         "@maple/domain": "workspace:*",
+        "@maple/eventing-core": "workspace:*",
         "@maple/query-engine": "workspace:*",
         "effect": "catalog:effect",
         "protobufjs": "^8.6.1",
@@ -511,6 +513,9 @@
     "packages/alerting-core": {
       "name": "@maple/alerting-core",
       "version": "0.0.0",
+      "dependencies": {
+        "@maple/eventing-core": "workspace:*",
+      },
       "devDependencies": {
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
@@ -645,6 +650,19 @@
       },
       "peerDependencies": {
         "react": "^19.0.0",
+      },
+    },
+    "packages/eventing-core": {
+      "name": "@maple/eventing-core",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
       },
     },
     "packages/infra": {
@@ -1554,6 +1572,8 @@
     "@maple/electric-sync": ["@maple/electric-sync@workspace:apps/electric-sync"],
 
     "@maple/email": ["@maple/email@workspace:packages/email"],
+
+    "@maple/eventing-core": ["@maple/eventing-core@workspace:packages/eventing-core"],
 
     "@maple/infra": ["@maple/infra@workspace:packages/infra"],
 

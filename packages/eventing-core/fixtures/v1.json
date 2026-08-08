@@ -1,0 +1,177 @@
+{
+	"version": 1,
+	"eventIdVectors": [
+		{
+			"name": "tenant-scoped projected occurrence",
+			"input": {
+				"tenantId": "tenant-a",
+				"sourceKind": "otel.log",
+				"source": "urn:maple:source:otel:local",
+				"occurrenceId": "event-123",
+				"projectionId": "gitlab-issue-created",
+				"projectionRevision": 3
+			},
+			"output": "sha256:061c0b5d99b92ef65ab8813c6d84988e4b1582e705e0077c952e62a0e84b6b08"
+		}
+	],
+	"predicateVectors": [
+		{
+			"name": "int64 remains exact above JavaScript safe integer range",
+			"predicate": {
+				"op": "gt",
+				"field": { "namespace": "attribute", "key": "counter", "type": "int64" },
+				"value": { "type": "int64", "value": "9007199254740992" }
+			},
+			"fields": [
+				{
+					"namespace": "attribute",
+					"key": "counter",
+					"value": { "type": "int64", "value": "9007199254740993" }
+				}
+			],
+			"matches": true
+		},
+		{
+			"name": "timestamps compare as UTC instants",
+			"predicate": {
+				"op": "eq",
+				"field": { "namespace": "signal", "key": "occurred_at", "type": "timestamp" },
+				"value": { "type": "timestamp", "value": "2026-08-07T19:42:00.123456789Z" }
+			},
+			"fields": [
+				{
+					"namespace": "signal",
+					"key": "occurred_at",
+					"value": { "type": "timestamp", "value": "2026-08-07T15:42:00.123456789-04:00" }
+				}
+			],
+			"matches": true
+		},
+		{
+			"name": "numeric strings do not coerce",
+			"predicate": {
+				"op": "gte",
+				"field": { "namespace": "attribute", "key": "attempt", "type": "int64" },
+				"value": { "type": "int64", "value": "3" }
+			},
+			"fields": [
+				{
+					"namespace": "attribute",
+					"key": "attempt",
+					"value": { "type": "string", "value": "12" }
+				}
+			],
+			"matches": false,
+			"typeMismatches": ["attribute:attempt"]
+		},
+		{
+			"name": "neq does not match a missing field",
+			"predicate": {
+				"op": "neq",
+				"field": { "namespace": "attribute", "key": "state", "type": "string" },
+				"value": { "type": "string", "value": "closed" }
+			},
+			"fields": [],
+			"matches": false
+		},
+		{
+			"name": "boolean composition and string containment",
+			"predicate": {
+				"op": "all",
+				"clauses": [
+					{
+						"op": "eq",
+						"field": { "namespace": "attribute", "key": "active", "type": "boolean" },
+						"value": { "type": "boolean", "value": true }
+					},
+					{
+						"op": "contains",
+						"field": { "namespace": "body", "key": "text", "type": "string" },
+						"value": { "type": "string", "value": "issue created" }
+					}
+				]
+			},
+			"fields": [
+				{
+					"namespace": "attribute",
+					"key": "active",
+					"value": { "type": "boolean", "value": true }
+				},
+				{
+					"namespace": "body",
+					"key": "text",
+					"value": { "type": "string", "value": "gitlab issue created successfully" }
+				}
+			],
+			"matches": true
+		},
+		{
+			"name": "float64 ordering is numeric",
+			"predicate": {
+				"op": "lt",
+				"field": { "namespace": "attribute", "key": "ratio", "type": "float64" },
+				"value": { "type": "float64", "value": 10.25 }
+			},
+			"fields": [
+				{
+					"namespace": "attribute",
+					"key": "ratio",
+					"value": { "type": "float64", "value": 9.5 }
+				}
+			],
+			"matches": true
+		},
+		{
+			"name": "durations compare as exact nanoseconds",
+			"predicate": {
+				"op": "gte",
+				"field": { "namespace": "signal", "key": "duration", "type": "duration" },
+				"value": { "type": "duration", "value": "1000000000" }
+			},
+			"fields": [
+				{
+					"namespace": "signal",
+					"key": "duration",
+					"value": { "type": "duration", "value": "1000000001" }
+				}
+			],
+			"matches": true
+		},
+		{
+			"name": "boolean equality has no string coercion",
+			"predicate": {
+				"op": "eq",
+				"field": { "namespace": "attribute", "key": "enabled", "type": "boolean" },
+				"value": { "type": "boolean", "value": true }
+			},
+			"fields": [
+				{
+					"namespace": "attribute",
+					"key": "enabled",
+					"value": { "type": "string", "value": "true" }
+				}
+			],
+			"matches": false,
+			"typeMismatches": ["attribute:enabled"]
+		},
+		{
+			"name": "string membership is exact and case-sensitive",
+			"predicate": {
+				"op": "in",
+				"field": { "namespace": "attribute", "key": "state", "type": "string" },
+				"values": [
+					{ "type": "string", "value": "opened" },
+					{ "type": "string", "value": "closed" }
+				]
+			},
+			"fields": [
+				{
+					"namespace": "attribute",
+					"key": "state",
+					"value": { "type": "string", "value": "Closed" }
+				}
+			],
+			"matches": false
+		}
+	]
+}

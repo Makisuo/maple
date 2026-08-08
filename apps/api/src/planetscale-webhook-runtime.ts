@@ -54,9 +54,20 @@ export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 							),
 						),
 					onSuccess: (job) => {
-						const classified = classifyPlanetScaleEvent(job.payload.event)
+						const event = job.event
+						const eventData =
+							typeof event.data === "object" &&
+							event.data !== null &&
+							!Array.isArray(event.data)
+								? (event.data as { readonly [key: string]: unknown })
+								: null
+						const eventName =
+							typeof eventData?.event === "string" ? eventData.event : job.payload.event
+						const classified = classifyPlanetScaleEvent(eventName)
 						const annotateJob = Effect.annotateCurrentSpan({
 							orgId: job.orgId,
+							"maple.event.id": event.id,
+							"maple.event.type": event.type,
 							"maple.planetscale.connection_id": job.connectionId,
 							"maple.planetscale.webhook.event": job.payload.event,
 						})

@@ -1,19 +1,29 @@
 import { assert, describe, it } from "@effect/vitest"
+import { OrgId } from "@maple/domain/http"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
+import { projectPlanetScaleWebhookEvent } from "./webhook-events"
 import { PlanetScaleWebhookQueue, type PlanetScaleWebhookJob } from "./PlanetScaleWebhookQueue"
 
+const orgId = Schema.decodeUnknownSync(OrgId)("org_1")
+const payload = {
+	event: "branch.anomaly",
+	organization: "acme",
+	database: "shop",
+	resource: { name: "main" },
+}
 const job: PlanetScaleWebhookJob = {
 	kind: "planetscale-webhook",
-	orgId: "org_1",
+	orgId,
 	connectionId: "connection_1",
-	payload: {
-		event: "branch.anomaly",
-		organization: "acme",
-		database: "shop",
-		resource: { name: "main" },
-	},
+	payload,
 	receivedAt: 1_000,
+	event: projectPlanetScaleWebhookEvent({
+		orgId,
+		connectionId: "connection_1",
+		payload,
+		receivedAt: 1_000,
+	}),
 }
 
 const provideQueue = (environment: Record<string, unknown>) =>

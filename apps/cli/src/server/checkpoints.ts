@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { spawnSync } from "node:child_process"
 import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { cp, lstat, mkdir, readFile, readdir, rm, stat } from "node:fs/promises"
@@ -18,6 +18,11 @@ import {
 	syncDirectory,
 	syncTree,
 } from "./durable-files"
+import {
+	eventingControlSnapshotPath,
+	LocalEventingControlStore,
+	type EventingControlSnapshotValidation,
+} from "./eventing/control-store"
 import { CURRENT_LOCAL_SCHEMA, SCHEMA_FINGERPRINT } from "./schema-identity"
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
 import {
@@ -28,12 +33,12 @@ import {
 } from "./store-version"
 
 const STATE_FORMAT_VERSION = 1
-const MANIFEST_FORMAT_VERSION = 1
+const MANIFEST_FORMAT_VERSION = 2
 const OPERATION_FORMAT_VERSION = 1
 const RESTORE_TRANSACTION_FORMAT_VERSION = 1
 const RESET_TRANSACTION_FORMAT_VERSION = 1
 const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const RESETTABLE_CHDB_ENTRIES = new Set(["data", "metadata", "status", "store", "tmp"])
+const RESETTABLE_LIVE_ENTRIES = new Set(["control", "data", "metadata", "status", "store", "tmp"])
 export const CHECKPOINT_REOPEN_PROBE_ENV = "MAPLE_INTERNAL_CHECKPOINT_REOPEN_DATA_DIR"
 
 const CheckpointUuid = Schema.String.check(Schema.isPattern(CHECKPOINT_ID))
@@ -83,8 +88,7 @@ const CheckpointValidationSchema = Schema.Struct({
 
 export type CheckpointValidation = Schema.Schema.Type<typeof CheckpointValidationSchema>
 
-const CheckpointManifestSchema = Schema.Struct({
-	formatVersion: Schema.Literal(MANIFEST_FORMAT_VERSION),
+const CheckpointManifestFields = {
 	checkpointId: CheckpointId,
 	operationId: CheckpointOperationId,
 	mapleVersion: Schema.String,
@@ -95,7 +99,27 @@ const CheckpointManifestSchema = Schema.Struct({
 	backupRelativePath: Schema.String,
 	backupBytes: NonNegativeInt,
 	validation: CheckpointValidationSchema,
+} as const
+
+const EventingControlSnapshotValidationSchema = Schema.Struct({
+	schemaVersion: NonNegativeInt,
+	projectionRevisions: NonNegativeInt,
+	projectionFailures: NonNegativeInt,
+	stagedEvents: NonNegativeInt,
+	readyEvents: NonNegativeInt,
 })
+
+const CheckpointManifestSchema = Schema.Union([
+	Schema.Struct({ formatVersion: Schema.Literal(1), ...CheckpointManifestFields }),
+	Schema.Struct({
+		formatVersion: Schema.Literal(MANIFEST_FORMAT_VERSION),
+		...CheckpointManifestFields,
+		controlRelativePath: Schema.String,
+		controlBytes: NonNegativeInt,
+		controlSha256: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+		controlValidation: EventingControlSnapshotValidationSchema,
+	}),
+])
 
 export type CheckpointManifest = Schema.Schema.Type<typeof CheckpointManifestSchema>
 
@@ -124,7 +148,7 @@ const RestoreTransactionPhase = Schema.Literals([
 	"markers-committed",
 ])
 const ResetTransactionPhase = Schema.Literals(["intent", "live-cleared", "markers-cleared"])
-const ResetTarget = Schema.Literals(["data", "metadata", "status", "store", "tmp"])
+const ResetTarget = Schema.Literals(["control", "data", "metadata", "status", "store", "tmp"])
 
 const CheckpointOperationSchema = Schema.Struct({
 	formatVersion: Schema.Literal(OPERATION_FORMAT_VERSION),
@@ -313,8 +337,22 @@ const snapshotManifestPath = (dataDir: string, checkpointId: CheckpointId): stri
 const snapshotBackupDir = (dataDir: string, checkpointId: CheckpointId): string =>
 	join(checkpointSnapshotDir(dataDir, checkpointId), "backup")
 const snapshotBackupRelativePath = (checkpointId: CheckpointId): string => `snapshots/${checkpointId}/backup`
+const snapshotControlRelativePath = (checkpointId: CheckpointId): string =>
+	`snapshots/${checkpointId}/control.sqlite`
 const snapshotBackupSqlPath = (checkpointId: CheckpointId): string =>
 	`backups/${snapshotBackupRelativePath(checkpointId)}`
+
+const sha256File = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex")
+
+const controlValidationMatches = (
+	left: EventingControlSnapshotValidation,
+	right: EventingControlSnapshotValidation,
+): boolean =>
+	left.schemaVersion === right.schemaVersion &&
+	left.projectionRevisions === right.projectionRevisions &&
+	left.projectionFailures === right.projectionFailures &&
+	left.stagedEvents === right.stagedEvents &&
+	left.readyEvents === right.readyEvents
 
 const assertContained = (root: string, candidate: string, label: string): string => {
 	const absoluteRoot = resolve(root)
@@ -653,6 +691,12 @@ export const parseCheckpointManifest = (
 	if (manifest.backupRelativePath !== snapshotBackupRelativePath(manifest.checkpointId)) {
 		throw new Error("checkpoint backup path does not match its immutable ID")
 	}
+	if (
+		manifest.formatVersion === MANIFEST_FORMAT_VERSION &&
+		manifest.controlRelativePath !== snapshotControlRelativePath(manifest.checkpointId)
+	) {
+		throw new Error("checkpoint control-store path does not match its immutable ID")
+	}
 	if (manifest.chdbVersion !== CHDB_VERSION) {
 		throw new Error(
 			`checkpoint chDB version mismatch (checkpoint: ${manifest.chdbVersion}; build: ${CHDB_VERSION})`,
@@ -763,6 +807,24 @@ const resolveCheckpointById = async (
 			`checkpoint backup size mismatch (manifest: ${manifest.backupBytes}; actual: ${actualBackupBytes})`,
 		)
 	}
+	const controlPath = eventingControlSnapshotPath(dataDir, checkpointId)
+	if (manifest.formatVersion === MANIFEST_FORMAT_VERSION) {
+		await assertNoSymlink(snapshotsRoot, controlPath)
+		await assertRealFile(controlPath, "checkpoint eventing control snapshot")
+		const controlBytes = (await stat(controlPath)).size
+		if (controlBytes !== manifest.controlBytes)
+			throw new Error(
+				`checkpoint control-store size mismatch (manifest: ${manifest.controlBytes}; actual: ${controlBytes})`,
+			)
+		const controlSha256 = sha256File(controlPath)
+		if (controlSha256 !== manifest.controlSha256)
+			throw new Error("checkpoint control-store digest mismatch")
+		const controlValidation = LocalEventingControlStore.validateSnapshot(controlPath)
+		if (!controlValidationMatches(manifest.controlValidation, controlValidation))
+			throw new Error("checkpoint control-store validation does not match its manifest")
+	} else if (existsSync(controlPath)) {
+		throw new Error("legacy checkpoint contains an unsigned eventing control snapshot")
+	}
 	return {
 		checkpointId,
 		snapshotDir,
@@ -804,6 +866,15 @@ const restoreResolvedInto = async (
 			`RESTORE DATABASE default FROM Disk('src', '${resolvedCheckpoint.backupSqlPath}') ` +
 				"SETTINGS allow_different_database_def=1",
 		)
+		if (resolvedCheckpoint.manifest.formatVersion === MANIFEST_FORMAT_VERSION) {
+			await LocalEventingControlStore.restoreSnapshot(
+				join(resolvedCheckpoint.snapshotDir, "control.sqlite"),
+				targetDataDir,
+			)
+		} else {
+			const controlStore = await LocalEventingControlStore.open(targetDataDir)
+			controlStore.close()
+		}
 		return { db, validation: validateRestoredDatabase(db) }
 	} catch (error) {
 		db?.close()
@@ -1505,10 +1576,14 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 					const { oldState, snapshot, startedAt } = prepared
 					let { operation } = prepared
 					await syncTree(snapshotBackupDir(options.dataDir, checkpointId))
+					const controlPath = eventingControlSnapshotPath(options.dataDir, checkpointId)
+					await assertNoSymlink(checkpointSnapshotsRoot(options.dataDir), controlPath)
+					await assertRealFile(controlPath, "checkpoint eventing control snapshot")
+					const controlValidation = LocalEventingControlStore.validateSnapshot(controlPath)
 					operation = { ...operation, phase: "backup-complete" }
 					await writeOperation(options.dataDir, operation, options.faults)
 					const provisionalManifest: CheckpointManifest = {
-						formatVersion: 1,
+						formatVersion: MANIFEST_FORMAT_VERSION,
 						checkpointId,
 						operationId,
 						mapleVersion: MAPLE_VERSION,
@@ -1518,6 +1593,10 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 						sourceDataDir: resolve(options.dataDir),
 						backupRelativePath: snapshotBackupRelativePath(checkpointId),
 						backupBytes: await dirSize(snapshotBackupDir(options.dataDir, checkpointId)),
+						controlRelativePath: snapshotControlRelativePath(checkpointId),
+						controlBytes: (await stat(controlPath)).size,
+						controlSha256: sha256File(controlPath),
+						controlValidation,
 						validation: {
 							validatedAt: startedAt,
 							traces: 0,
@@ -1688,7 +1767,7 @@ const beginResetTransactionUnlocked = async (
 		const entries = await readdir(live, { withFileTypes: true })
 		for (const entry of entries) {
 			if (entry.name === "backups") continue
-			if (!RESETTABLE_CHDB_ENTRIES.has(entry.name)) {
+			if (!RESETTABLE_LIVE_ENTRIES.has(entry.name)) {
 				unknown.push(join(live, entry.name))
 				continue
 			}
@@ -1936,9 +2015,10 @@ export const reconcileCheckpointRecovery = Effect.fn("CheckpointService.reconcil
 })
 
 /**
- * Explicitly remove the live chDB store while preserving the checkpoint
- * registry below `<dataDir>/backups`. The maintenance lock serializes this
- * destructive operation with checkpoint, restore, and archive work.
+ * Explicitly remove the live chDB and eventing control stores while preserving
+ * the checkpoint registry below `<dataDir>/backups`. The maintenance lock
+ * serializes this destructive operation with checkpoint, restore, and archive
+ * work.
  */
 export const resetLiveStorePreservingCheckpoints = Effect.fn("CheckpointService.reset")(function* (
 	dataDir: string,

@@ -17,6 +17,8 @@ import {
 	rawTelemetryTtlStatements,
 } from "./chdb"
 import { buildInsertStatements } from "./inserts"
+import { eventingControlSnapshotPath, LocalEventingControlStore } from "./eventing/control-store"
+import { LocalEventingRuntime } from "./eventing/runtime"
 import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch, OtlpFieldError } from "./otlp/encode"
 import {
 	decodeLogsRequest,
@@ -98,7 +100,7 @@ export const corsHeadersForAllowedOrigin = (
 		? {
 				"access-control-allow-origin": origin,
 				"access-control-allow-methods": "GET, POST, OPTIONS",
-				"access-control-allow-headers": "content-type, content-encoding",
+				"access-control-allow-headers": "content-type, content-encoding, x-maple-maintenance-token",
 				"access-control-allow-private-network": "true",
 				vary: "Origin",
 			}
@@ -166,6 +168,7 @@ interface IngestResult {
 async function ingest(
 	db: Chdb,
 	authority: RetiredDayAuthority,
+	eventing: LocalEventingRuntime,
 	signal: Signal,
 	req: Request,
 ): Promise<IngestResult> {
@@ -195,6 +198,17 @@ async function ingest(
 			requestBytes,
 		}
 	}
+	let evaluation: ReturnType<LocalEventingRuntime["evaluateOtlp"]>
+	try {
+		evaluation = eventing.evaluateOtlp(signal, decoded, (rangeDate) => authority.isRetired(rangeDate))
+	} catch (error) {
+		const status = error instanceof OtlpFieldError ? 400 : 503
+		return {
+			response: text(`event projection ${signal}: ${(error as Error).message}`, status),
+			accepted: 0,
+			requestBytes,
+		}
+	}
 	let batches: EncodedBatch[]
 	try {
 		batches = encodeFor(signal, decoded)
@@ -205,6 +219,18 @@ async function ingest(
 		const stage = status === 400 ? "decode" : "encode"
 		return {
 			response: text(`${stage} ${signal}: ${(error as Error).message}`, status),
+			accepted: 0,
+			requestBytes,
+		}
+	}
+	let stagedEventIds: readonly string[] = []
+	try {
+		eventing.persistFailures(evaluation.failures)
+		if (evaluation.events.length > 0) stagedEventIds = eventing.stage(evaluation.events).eventIds
+	} catch (error) {
+		const status = error instanceof OtlpFieldError ? 400 : 503
+		return {
+			response: text(`event projection ${signal}: ${(error as Error).message}`, status),
 			accepted: 0,
 			requestBytes,
 		}
@@ -229,6 +255,15 @@ async function ingest(
 				}
 			}
 			accepted += statement.rowCount
+		}
+	}
+	try {
+		if (stagedEventIds.length > 0) eventing.markReady(stagedEventIds)
+	} catch (error) {
+		return {
+			response: text(`event outbox readiness ${signal}: ${(error as Error).message}`, 503),
+			accepted,
+			requestBytes,
 		}
 	}
 	const errorMessage = rejected > 0 ? "telemetry from permanently retired UTC days was rejected" : ""
@@ -390,6 +425,7 @@ const ingestSpan = (
 	runSpan: SpanRunner,
 	db: Chdb,
 	authority: RetiredDayAuthority,
+	eventing: LocalEventingRuntime,
 	signal: Signal,
 	req: Request,
 ): Promise<Response> =>
@@ -397,7 +433,7 @@ const ingestSpan = (
 		recoverResponse(
 			Effect.gen(function* () {
 				const { response, accepted, requestBytes } = yield* Effect.promise(() =>
-					ingest(db, authority, signal, req),
+					ingest(db, authority, eventing, signal, req),
 				)
 				yield* Effect.annotateCurrentSpan({
 					"http.request.body.size": requestBytes,
@@ -535,7 +571,13 @@ const handleRetirement = async (
 const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 /** Typed, authenticated replacement for sending BACKUP through /local/query. */
-const handleCheckpointBackup = async (db: Chdb, token: string, req: Request): Promise<Response> => {
+const handleCheckpointBackup = async (
+	db: Chdb,
+	controlStore: LocalEventingControlStore,
+	dataDir: string,
+	token: string,
+	req: Request,
+): Promise<Response> => {
 	if (!maintenanceTokenMatches(token, req.headers.get("x-maple-maintenance-token")))
 		return text("maintenance authorization required", 403)
 	let body: unknown
@@ -550,16 +592,70 @@ const handleCheckpointBackup = async (db: Chdb, token: string, req: Request): Pr
 		return text("invalid checkpoint fields", 400)
 	if (!CHECKPOINT_ID.test(record.checkpointId)) return text("invalid checkpoint ID", 400)
 	try {
-		db.exec(
-			`BACKUP DATABASE default TO Disk('default', 'backups/snapshots/${record.checkpointId.toLowerCase()}/backup')`,
-		)
-		return json({ checkpointId: record.checkpointId.toLowerCase() })
+		const checkpointId = record.checkpointId.toLowerCase()
+		const control = await controlStore.backupTo(eventingControlSnapshotPath(dataDir, checkpointId))
+		db.exec(`BACKUP DATABASE default TO Disk('default', 'backups/snapshots/${checkpointId}/backup')`)
+		return json({ checkpointId, control })
 	} catch (error) {
 		return text(
 			`checkpoint backup failed: ${error instanceof Error ? error.message : String(error)}`,
 			400,
 		)
 	}
+}
+
+const eventingAuthorized = (token: string, req: Request): Response | null =>
+	maintenanceTokenMatches(token, req.headers.get("x-maple-maintenance-token"))
+		? null
+		: text("maintenance authorization required", 403)
+
+const handleProjectionActivation = async (
+	eventing: LocalEventingRuntime,
+	token: string,
+	req: Request,
+): Promise<Response> => {
+	const unauthorized = eventingAuthorized(token, req)
+	if (unauthorized) return unauthorized
+	let body: unknown
+	try {
+		body = await req.json()
+	} catch {
+		return text("invalid JSON body", 400)
+	}
+	try {
+		eventing.activate(body)
+		return json({ active: eventing.listActive() })
+	} catch (error) {
+		return text(
+			`invalid event projection: ${error instanceof Error ? error.message : String(error)}`,
+			400,
+		)
+	}
+}
+
+const handleEventingRead = (
+	eventing: LocalEventingRuntime,
+	token: string,
+	req: Request,
+	url: URL,
+): Response => {
+	const unauthorized = eventingAuthorized(token, req)
+	if (unauthorized) return unauthorized
+	if (url.pathname === "/local/eventing/health") return json(eventing.health())
+	if (url.pathname === "/local/eventing/projections") return json(eventing.listActive())
+	if (url.pathname === "/local/eventing/outbox") {
+		const rawLimit = url.searchParams.get("limit")
+		const limit = rawLimit === null ? 100 : Number(rawLimit)
+		const state = url.searchParams.get("state") ?? "ready"
+		try {
+			if (state === "ready") return json(eventing.listReady(limit))
+			if (state === "staged") return json(eventing.listStaged(limit))
+			return text("outbox state must be ready or staged", 400)
+		} catch (error) {
+			return text(error instanceof Error ? error.message : String(error), 400)
+		}
+	}
+	return text("not found", 404)
 }
 
 /** The `Bun.serve` fetch handler, closed over the chDB connection. Each ingest
@@ -573,6 +669,8 @@ const makeFetch =
 		authority: RetiredDayAuthority,
 		gate: RequestQuiescenceGate,
 		maintenanceToken: string,
+		controlStore: LocalEventingControlStore,
+		eventing: LocalEventingRuntime,
 	) =>
 	async (req: Request): Promise<Response> => {
 		const url = new URL(req.url)
@@ -586,18 +684,34 @@ const makeFetch =
 		if (url.pathname === "/health") return respond(text("OK"))
 		if (req.method === "POST") {
 			if (url.pathname === "/v1/traces")
-				return respond(await admitted(gate, () => ingestSpan(runSpan, db, authority, "traces", req)))
+				return respond(
+					await admitted(gate, () => ingestSpan(runSpan, db, authority, eventing, "traces", req)),
+				)
 			if (url.pathname === "/v1/logs")
-				return respond(await admitted(gate, () => ingestSpan(runSpan, db, authority, "logs", req)))
+				return respond(
+					await admitted(gate, () => ingestSpan(runSpan, db, authority, eventing, "logs", req)),
+				)
 			if (url.pathname === "/v1/metrics")
-				return respond(await admitted(gate, () => ingestSpan(runSpan, db, authority, "metrics", req)))
+				return respond(
+					await admitted(gate, () => ingestSpan(runSpan, db, authority, eventing, "metrics", req)),
+				)
 			if (url.pathname === "/local/query")
 				return respond(await admitted(gate, () => querySpan(runSpan, db, authority, req)))
 			if (url.pathname === "/local/checkpoint/backup")
-				return respond(await admitted(gate, () => handleCheckpointBackup(db, maintenanceToken, req)))
+				return respond(
+					await gate.exclusive(() =>
+						handleCheckpointBackup(db, controlStore, options.dataDir, maintenanceToken, req),
+					),
+				)
+			if (url.pathname === "/local/eventing/projections")
+				return respond(
+					await gate.exclusive(() => handleProjectionActivation(eventing, maintenanceToken, req)),
+				)
 			if (url.pathname === "/local/retention/retire")
 				return respond(await handleRetirement(db, authority, gate, maintenanceToken, req))
 		}
+		if (req.method === "GET" && url.pathname.startsWith("/local/eventing/"))
+			return respond(handleEventingRead(eventing, maintenanceToken, req, url))
 		if (req.method === "GET" && options.assets) return respond(serveAsset(options.assets, url.pathname))
 		return respond(text("not found", 404))
 	}
@@ -632,6 +746,23 @@ export const startServer = (
 			schemaSql: LOCAL_SCHEMA_SQL,
 			configFile: options.configFile,
 			rawTelemetryRetentionDays: retention.effective,
+		})
+		const controlStore = yield* Effect.acquireRelease(
+			Effect.tryPromise({
+				try: () => LocalEventingControlStore.open(options.dataDir),
+				catch: (error) =>
+					new ChdbError({
+						message: `failed to open local eventing control store: ${error instanceof Error ? error.message : String(error)}`,
+					}),
+			}),
+			(store) => Effect.sync(() => store.close()),
+		)
+		const eventing = yield* Effect.try({
+			try: () => new LocalEventingRuntime(controlStore),
+			catch: (error) =>
+				new ChdbError({
+					message: `failed to compile local event projections: ${error instanceof Error ? error.message : String(error)}`,
+				}),
 		})
 		// `CREATE ... IF NOT EXISTS` does not repair a table whose physical
 		// definition was altered out of band. Inspect the opened store before the
@@ -707,7 +838,16 @@ export const startServer = (
 					Bun.serve({
 						port: options.port,
 						hostname: options.hostname,
-						fetch: makeFetch(db, options, runSpan, authority, gate, maintenanceToken),
+						fetch: makeFetch(
+							db,
+							options,
+							runSpan,
+							authority,
+							gate,
+							maintenanceToken,
+							controlStore,
+							eventing,
+						),
 					}),
 				catch: (error) =>
 					new ServerBindError({
@@ -721,4 +861,4 @@ export const startServer = (
 		return { port: server.port ?? options.port }
 	})
 
-export const __testables = { recordServerResponse }
+export const __testables = { handleEventingRead, ingest, recordServerResponse }

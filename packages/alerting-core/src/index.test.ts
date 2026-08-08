@@ -6,6 +6,7 @@ import {
 	interleaveAlertRulesByTenant,
 	makeAlertDeliveryKey,
 	planAlertLifecycle,
+	projectAlertLifecycleEvent,
 	type AlertEvaluation,
 } from "./index"
 
@@ -177,6 +178,39 @@ describe("interleaveAlertRulesByTenant", () => {
 })
 
 describe("delivery policy", () => {
+	it("projects lifecycle intents into deterministic common CloudEvents", () => {
+		const input = {
+			tenantId: "org-1",
+			ruleId: "rule-1",
+			ruleName: "High errors",
+			incidentId: "incident-1",
+			eventType: "trigger" as const,
+			incidentStatus: "open",
+			groupKey: "checkout",
+			signalType: "error_rate",
+			severity: "critical",
+			comparator: "gt" as const,
+			threshold: 5,
+			thresholdUpper: null,
+			windowMinutes: 5,
+			value: 7.2,
+			sampleCount: 12,
+			occurredAtMs: 1_786_131_720_123,
+		}
+		const event = projectAlertLifecycleEvent(input)
+		expect(event).toEqual(projectAlertLifecycleEvent(input))
+		expect(event).toMatchObject({
+			type: "dev.maple.alert.lifecycle.trigger.v1",
+			subject: "alert-incidents/incident-1",
+			tenantid: "org-1",
+			projectionid: "alert-lifecycle",
+			data: { eventType: "trigger", incidentId: "incident-1" },
+		})
+		expect(() => projectAlertLifecycleEvent({ ...input, occurredAtMs: Number.MAX_SAFE_INTEGER })).toThrow(
+			"outside the supported date range",
+		)
+	})
+
 	it("builds stable idempotency keys", () => {
 		expect(makeAlertDeliveryKey("incident", "destination", "trigger", 42)).toBe(
 			"incident:destination:trigger:42",

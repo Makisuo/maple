@@ -1,27 +1,41 @@
 import type { MessageBatch } from "@cloudflare/workers-types"
 import { afterEach, assert, describe, it } from "@effect/vitest"
-import { Effect, Layer } from "effect"
+import { OrgId } from "@maple/domain/http"
+import { Effect, Layer, Schema } from "effect"
 import { Database, DatabaseError } from "@/platform/DatabaseLive"
 import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { processPlanetScaleWebhookBatch } from "./planetscale-webhook-runtime"
+import { projectPlanetScaleWebhookEvent } from "./services/integrations/planetscale/webhook-events"
 import type { PlanetScaleWebhookJob } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
 
 const trackedDbs: TestDb[] = []
 
 afterEach(() => cleanupTestDbs(trackedDbs))
 
-const job: PlanetScaleWebhookJob = {
-	kind: "planetscale-webhook",
-	orgId: "org_1",
-	connectionId: "connection_1",
-	payload: {
+const orgId = Schema.decodeUnknownSync(OrgId)("org_1")
+
+const makeJob = (
+	payload: PlanetScaleWebhookJob["payload"] = {
 		event: "branch.out_of_memory",
 		organization: "acme",
 		database: "shop",
 		resource: { name: "main" },
 	},
+): PlanetScaleWebhookJob => ({
+	kind: "planetscale-webhook",
+	orgId,
+	connectionId: "connection_1",
+	payload,
 	receivedAt: 1_000,
-}
+	event: projectPlanetScaleWebhookEvent({
+		orgId,
+		connectionId: "connection_1",
+		payload,
+		receivedAt: 1_000,
+	}),
+})
+
+const job = makeJob()
 
 const makeBatch = (body: unknown) => {
 	let acknowledged = false
@@ -86,10 +100,7 @@ describe("PlanetScale webhook queue consumer", () => {
 
 	it.effect("writes a lifecycle event to the timeline but not to the issue hub", () => {
 		const testDb = createTestDb(trackedDbs)
-		const delivery = makeBatch({
-			...job,
-			payload: { ...job.payload, event: "branch.ready" },
-		})
+		const delivery = makeBatch(makeJob({ ...job.payload, event: "branch.ready" }))
 		return Effect.gen(function* () {
 			yield* processPlanetScaleWebhookBatch(delivery.batch)
 			assert.isTrue(delivery.acknowledged())
@@ -138,14 +149,13 @@ describe("PlanetScale webhook queue consumer", () => {
 
 	it.effect("carries the deploy-request number so redelivery dedupes", () => {
 		const testDb = createTestDb(trackedDbs)
-		const delivery = makeBatch({
-			...job,
-			payload: {
+		const delivery = makeBatch(
+			makeJob({
 				...job.payload,
 				event: "deploy_request.schema_applied",
 				resource: { number: 42 },
-			},
-		})
+			}),
+		)
 		return Effect.gen(function* () {
 			yield* processPlanetScaleWebhookBatch(delivery.batch)
 			const event = yield* Effect.promise(() =>

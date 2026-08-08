@@ -1,4 +1,15 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto"
+import {
+	canonicalJson,
+	CompiledProjectionRegistry,
+	defineSignalFields,
+	ProjectorRegistry,
+	SignalSourceRegistry,
+	type JsonValue,
+	type MapleCloudEvent,
+	type SignalProjector,
+	type SignalSourceAdapter,
+} from "@maple/eventing-core"
 import type { IssueSeverity, OrgId, WorkflowState } from "@maple/domain/http"
 import { ActorId, ErrorIssueEventId, ErrorIssueId } from "@maple/domain/primitives"
 import {
@@ -49,6 +60,152 @@ export const decodePlanetScaleWebhookPayload = Schema.decodeUnknownEffect(
 	Schema.fromJsonString(PlanetScaleWebhookPayload),
 )
 
+export interface PlanetScaleWebhookEventInput {
+	readonly orgId: string
+	readonly connectionId: string
+	readonly payload: PlanetScaleWebhookPayload
+	readonly receivedAt: number
+}
+
+interface PlanetScaleWebhookAdapterInput {
+	readonly connectionId: string
+	readonly payload: PlanetScaleWebhookPayload
+}
+
+interface PlanetScaleWebhookAdapterContext {
+	readonly tenantId: string
+	readonly acceptedAt: string
+}
+
+const validDate = (epochMs: number, label: string): Date => {
+	if (!Number.isSafeInteger(epochMs) || epochMs < 0)
+		throw new Error(`${label} must be a non-negative epoch millisecond`)
+	const date = new Date(epochMs)
+	if (Number.isNaN(date.getTime())) throw new Error(`${label} is outside the supported date range`)
+	return date
+}
+
+export const PLANETSCALE_WEBHOOK_ADAPTER: SignalSourceAdapter<
+	PlanetScaleWebhookAdapterInput,
+	PlanetScaleWebhookAdapterContext
+> = {
+	definition: {
+		sourceKind: "planetscale.webhook",
+		fields: [
+			{
+				field: { namespace: "signal", key: "event.name", type: "string" },
+				operators: ["exists", "eq", "neq", "contains", "in"],
+				sensitivity: "public",
+				replay: "unavailable",
+			},
+		],
+	},
+	normalize: ({ connectionId, payload }, context) => {
+		const observedAtDate = new Date(context.acceptedAt)
+		if (Number.isNaN(observedAtDate.getTime()))
+			throw new Error("PlanetScale receipt time is outside the supported date range")
+		const payloadJson = payload as unknown as JsonValue
+		const occurredAtMs =
+			payload.timestamp != null && payload.timestamp > 0
+				? Math.trunc(payload.timestamp * 1_000)
+				: observedAtDate.getTime()
+		const occurredAt = validDate(occurredAtMs, "PlanetScale event timestamp").toISOString()
+		const occurrenceId = `derived:sha256:${createHash("sha256")
+			.update(connectionId)
+			.update("\0")
+			.update(canonicalJson(payloadJson))
+			.update("\0")
+			.update(occurredAt)
+			.digest("hex")}`
+		return [
+			{
+				sourceKind: "planetscale.webhook",
+				source: `urn:maple:planetscale:${connectionId}`,
+				tenantId: context.tenantId,
+				occurrenceId,
+				identityQuality: "derived",
+				occurredAt,
+				observedAt: observedAtDate.toISOString(),
+				subject:
+					payload.database == null
+						? `planetscale-connections/${connectionId}`
+						: `planetscale-databases/${payload.database}`,
+				fields: defineSignalFields([
+					{
+						field: { namespace: "signal", key: "event.name", type: "string" },
+						value: { type: "string", value: payload.event },
+					},
+				]),
+				data: {
+					connectionId,
+					event: payload.event,
+					organization: payload.organization ?? null,
+					database: payload.database ?? null,
+					resource: (payload.resource ?? null) as JsonValue,
+				},
+			},
+		]
+	},
+}
+
+const PLANETSCALE_WEBHOOK_PROJECTOR: SignalProjector<Record<string, never>> = {
+	id: "planetscale.webhook",
+	version: 1,
+	sourceKinds: ["planetscale.webhook"],
+	outputType: "dev.maple.planetscale.webhook.received.v1",
+	dataSchema: "urn:maple:event-schema:planetscale-webhook:v1",
+	decodeConfig: (value) => {
+		if (
+			typeof value !== "object" ||
+			value === null ||
+			Array.isArray(value) ||
+			Object.keys(value).length > 0
+		)
+			throw new Error("PlanetScale webhook projector config must be empty")
+		return {}
+	},
+	project: (signal) => ({ data: signal.data as JsonValue }),
+}
+
+const PLANETSCALE_SOURCES = new SignalSourceRegistry().register(PLANETSCALE_WEBHOOK_ADAPTER.definition)
+const PLANETSCALE_PROJECTORS = new ProjectorRegistry().register(PLANETSCALE_WEBHOOK_PROJECTOR)
+
+/** Normalize and project one verified, durably queued PlanetScale webhook through the common layer. */
+export const projectPlanetScaleWebhookEvent = (input: PlanetScaleWebhookEventInput): MapleCloudEvent => {
+	const observedAt = validDate(input.receivedAt, "PlanetScale receipt time").toISOString()
+	const [signal] = PLANETSCALE_WEBHOOK_ADAPTER.normalize(
+		{ connectionId: input.connectionId, payload: input.payload },
+		{ tenantId: input.orgId, acceptedAt: observedAt },
+	)
+	if (!signal) throw new Error("PlanetScale webhook adapter produced no signal")
+	const registry = CompiledProjectionRegistry.compile(
+		[
+			{
+				id: "planetscale-webhook",
+				revision: 1,
+				enabled: true,
+				tenantId: input.orgId,
+				sourceKind: "planetscale.webhook",
+				selector: {
+					op: "exists",
+					field: { namespace: "signal", key: "event.name", type: "string" },
+				},
+				projector: { id: "planetscale.webhook", version: 1, config: {} },
+				activeFrom: observedAt,
+			},
+		],
+		PLANETSCALE_SOURCES,
+		PLANETSCALE_PROJECTORS,
+	)
+	const result = registry.evaluate(signal)
+	if (result.failures.length > 0) throw new Error(result.failures[0]!.message)
+	if (result.events.length !== 1) throw new Error("PlanetScale webhook projection produced no event")
+	return result.events[0]!
+}
+
+// ---------------------------------------------------------------------------
+// Classification
+// ---------------------------------------------------------------------------
 /** Where an event belongs on the timeline. Mirrored by the web vocabulary table. */
 export type PlanetScaleEventCategory = "deploy_request" | "branch" | "database" | "cluster" | "keyspace"
 

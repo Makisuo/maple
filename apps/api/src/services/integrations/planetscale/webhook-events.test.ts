@@ -10,6 +10,7 @@ import {
 	deployRequestNumber,
 	insertPlanetScaleEvent,
 	planetScaleIssueFingerprint,
+	projectPlanetScaleWebhookEvent,
 	truncateToSecond,
 	upsertPlanetScaleIssue,
 	verifyPlanetScaleSignature,
@@ -47,6 +48,63 @@ describe("verifyPlanetScaleSignature", () => {
 })
 
 describe("classifyPlanetScaleEvent", () => {
+	it("normalizes queued webhooks into deterministic common CloudEvents", () => {
+		const payload = Schema.decodeUnknownSync(PlanetScaleWebhookPayload)(JSON.parse(OOM_PAYLOAD))
+		const input = {
+			orgId: "org_events",
+			connectionId: "connection-1",
+			payload,
+			receivedAt: 1_698_252_880_000,
+		}
+		const event = projectPlanetScaleWebhookEvent(input)
+		assert.deepStrictEqual(event, projectPlanetScaleWebhookEvent(input))
+		assert.strictEqual(event.type, "dev.maple.planetscale.webhook.received.v1")
+		assert.strictEqual(event.tenantid, "org_events")
+		assert.strictEqual(event.subject, "planetscale-databases/main-db")
+		assert.strictEqual((event.data as { readonly event: string }).event, "branch.out_of_memory")
+		assert.throws(
+			() => projectPlanetScaleWebhookEvent({ ...input, receivedAt: Number.MAX_SAFE_INTEGER }),
+			/outside the supported date range/,
+		)
+	})
+
+	it("keeps source-timestamp identities stable and receipt-time fallbacks payload-consistent", () => {
+		const timestamped = Schema.decodeUnknownSync(PlanetScaleWebhookPayload)(JSON.parse(OOM_PAYLOAD))
+		const first = projectPlanetScaleWebhookEvent({
+			orgId: "org_events",
+			connectionId: "connection-1",
+			payload: timestamped,
+			receivedAt: 1_698_252_880_000,
+		})
+		const redelivery = projectPlanetScaleWebhookEvent({
+			orgId: "org_events",
+			connectionId: "connection-1",
+			payload: timestamped,
+			receivedAt: 1_698_252_990_000,
+		})
+		assert.strictEqual(first.id, redelivery.id)
+		assert.strictEqual(first.time, redelivery.time)
+
+		const withoutTimestamp = Schema.decodeUnknownSync(PlanetScaleWebhookPayload)({
+			event: "branch.ready",
+			database: "main-db",
+		})
+		const receivedFirst = projectPlanetScaleWebhookEvent({
+			orgId: "org_events",
+			connectionId: "connection-1",
+			payload: withoutTimestamp,
+			receivedAt: 1_698_252_880_000,
+		})
+		const receivedAgain = projectPlanetScaleWebhookEvent({
+			orgId: "org_events",
+			connectionId: "connection-1",
+			payload: withoutTimestamp,
+			receivedAt: 1_698_252_990_000,
+		})
+		assert.notStrictEqual(receivedFirst.id, receivedAgain.id)
+		assert.notStrictEqual(receivedFirst.time, receivedAgain.time)
+	})
+
 	it("maps health events to issues and lifecycle events to timeline rows", () => {
 		assert.strictEqual(classifyPlanetScaleEvent("branch.out_of_memory").action, "issue")
 		assert.strictEqual(classifyPlanetScaleEvent("branch.anomaly").action, "issue")
