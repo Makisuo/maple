@@ -1,6 +1,8 @@
 import { jsonSchema, tool, type ToolSet } from "ai"
-import { Effect, Layer, Schema, type ManagedRuntime } from "effect"
-import { mapleToolDefinitions, toInputSchema } from "@/mcp/tools/registry"
+import { Effect, type ManagedRuntime } from "effect"
+import { McpToolExecutor } from "@/mcp/dispatcher"
+import { mapleToolCatalog, toInputSchema } from "@/mcp/tools/registry"
+import type { TenantContext } from "@/services/auth/tenant-context"
 
 /**
  * Every Maple MCP tool's name/description/schema exposed to a model WITHOUT an
@@ -9,7 +11,7 @@ import { mapleToolDefinitions, toInputSchema } from "@/mcp/tools/registry"
  */
 export const buildPredictionToolSet = (): ToolSet =>
 	Object.fromEntries(
-		mapleToolDefinitions.map((definition) => [
+		mapleToolCatalog.map((definition) => [
 			definition.name,
 			tool({
 				description: definition.description,
@@ -29,20 +31,21 @@ export const buildPredictionToolSet = (): ToolSet =>
 export const buildExecutionToolSet = (
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	runtime: ManagedRuntime.ManagedRuntime<any, never>,
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	requestLayer: Layer.Layer<any>,
+	tenant: TenantContext,
 ): ToolSet =>
 	Object.fromEntries(
-		mapleToolDefinitions.map((definition) => [
+		mapleToolCatalog.map((definition) => [
 			definition.name,
 			tool({
 				description: definition.description,
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				inputSchema: jsonSchema(toInputSchema(definition.schema) as any),
-				execute: async (input: unknown) => {
-					const decoded = Schema.decodeUnknownSync(definition.schema)(input)
-					return runtime.runPromise(definition.handler(decoded).pipe(Effect.provide(requestLayer)))
-				},
+				execute: async (input: unknown) =>
+					runtime.runPromise(
+						McpToolExecutor.pipe(
+							Effect.flatMap((executor) => executor.execute(tenant, definition.name, input)),
+						),
+					),
 			}),
 		]),
 	)

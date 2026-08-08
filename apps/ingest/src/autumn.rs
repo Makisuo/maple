@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use maple_ingest::metrics;
-use moka::future::Cache;
 use reqwest::Client;
 use serde::Serialize;
 use tokio::sync::mpsc;
@@ -13,6 +12,7 @@ use uuid::Uuid;
 const AUTUMN_API_VERSION: &str = "2.3.0";
 const AUTUMN_TRACK_PATH: &str = "/v1/balances.track";
 const AUTUMN_CHECK_PATH: &str = "/v1/balances.check";
+const AUTUMN_FINALIZE_PATH: &str = "/v1/balances.finalize";
 
 pub struct UsageEvent {
     pub org_id: String,
@@ -71,14 +71,24 @@ type AccumulatorKey = (String, &'static str); // (org_id, feature_id)
 struct PendingUsage {
     value: f64,
     idempotency_key: String,
+    /// Once a batch has been attempted, its value and key are immutable. New
+    /// usage waits here until that batch succeeds, then starts under a new key.
+    queued_value: f64,
+    sealed: bool,
 }
 
 impl PendingUsage {
-    fn new() -> Self {
+    fn new(value: f64) -> Self {
         Self {
-            value: 0.0,
+            value,
             idempotency_key: Uuid::new_v4().to_string(),
+            queued_value: 0.0,
+            sealed: false,
         }
+    }
+
+    fn total(&self) -> f64 {
+        self.value + self.queued_value
     }
 }
 
@@ -108,8 +118,11 @@ async fn flush_loop(
 
                 // Collect entries to flush
                 let entries: Vec<(AccumulatorKey, f64, String)> = accumulator
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.value, v.idempotency_key.clone()))
+                    .iter_mut()
+                    .map(|(key, pending)| {
+                        pending.sealed = true;
+                        (key.clone(), pending.value, pending.idempotency_key.clone())
+                    })
                     .collect();
 
                 let mut flushed_keys: Vec<AccumulatorKey> = Vec::new();
@@ -168,7 +181,14 @@ async fn flush_loop(
 
                 // Remove successfully flushed entries
                 for key in &flushed_keys {
-                    accumulator.remove(key);
+                    if let Some(completed) = accumulator.remove(key) {
+                        if completed.queued_value > 0.0 {
+                            accumulator.insert(
+                                key.clone(),
+                                PendingUsage::new(completed.queued_value),
+                            );
+                        }
+                    }
                 }
 
                 let flush_duration = flush_start.elapsed();
@@ -181,7 +201,7 @@ async fn flush_loop(
                     metrics::autumn_flush("error", flush_duration.as_secs_f64());
 
                     if consecutive_failures >= critical_threshold {
-                        let total_pending_gb: f64 = accumulator.values().map(|v| v.value).sum();
+                        let total_pending_gb: f64 = accumulator.values().map(PendingUsage::total).sum();
                         error!(
                             consecutive_failures,
                             pending_entries = accumulator.len(),
@@ -194,17 +214,21 @@ async fn flush_loop(
                 // Update pending gauge. Note: this now sums mixed units across
                 // features (GB for logs/traces/metrics, counts for browser_sessions);
                 // the metric name is kept as-is to avoid breaking existing dashboards.
-                let total_pending: f64 = accumulator.values().map(|v| v.value).sum();
+                let total_pending: f64 = accumulator.values().map(PendingUsage::total).sum();
                 metrics::autumn_pending_gb(total_pending);
             }
 
             event = rx.recv() => {
                 match event {
                     Some(event) => {
-                        accumulator
+                        let pending = accumulator
                             .entry((event.org_id, event.feature_id))
-                            .or_insert_with(PendingUsage::new)
-                            .value += event.value;
+                            .or_insert_with(|| PendingUsage::new(0.0));
+                        if pending.sealed {
+                            pending.queued_value += event.value;
+                        } else {
+                            pending.value += event.value;
+                        }
                     }
                     None => {
                         // Channel closed, do a final flush attempt
@@ -262,7 +286,12 @@ async fn flush_all(
 
         match result {
             Ok(resp) if resp.status().is_success() => {
-                accumulator.remove(&(org_id.clone(), feature_id));
+                let key = (org_id.clone(), *feature_id);
+                if let Some(completed) = accumulator.remove(&key) {
+                    if completed.queued_value > 0.0 {
+                        accumulator.insert(key, PendingUsage::new(completed.queued_value));
+                    }
+                }
             }
             Ok(resp) => {
                 warn!(
@@ -284,83 +313,174 @@ async fn flush_all(
     }
 }
 
-/// Synchronous, cached entitlement check against Autumn's
-/// `POST /v1/balances.check`.
+/// Autumn-native entitlement and atomic usage meter.
 ///
-/// Unlike [`AutumnTracker`] (fire-and-forget usage metering), this sits in the
-/// ingest hot path and gates a request *before* it is accepted. It is only
-/// constructed when `AUTUMN_ENFORCE_LIMITS=true` and `AUTUMN_SECRET_KEY` is set,
-/// so local dev / self-hosted deployments are unaffected.
+/// Billable handlers reserve their exact quantity with `balances.check`, commit
+/// data to Maple's WAL, then confirm the lock. A rejected check never reaches
+/// storage; a failed storage write releases the lock. Plain `is_allowed` remains
+/// for replay payloads that belong to an already-metered browser session.
 #[derive(Clone)]
 pub struct AutumnEntitlements {
     client: Client,
     secret_key: String,
     api_url: String,
-    // Keyed by `"{org_id}:{feature_id}"`. Holds *confirmed* decisions only.
-    // Fail-open allows are deliberately not cached: caching them would let one
-    // failed check suppress enforcement for a whole TTL window, turning a
-    // momentary Autumn blip into minutes of unmetered ingest.
-    cache: Cache<String, bool>,
 }
 
 #[derive(Serialize)]
 struct CheckRequest<'a> {
     customer_id: &'a str,
     feature_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required_balance: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    send_event: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lock: Option<CheckLockRequest<'a>>,
+}
+
+#[derive(Serialize)]
+struct CheckLockRequest<'a> {
+    lock_id: &'a str,
+    enabled: bool,
+    expires_at: u64,
+}
+
+#[derive(Serialize)]
+struct FinalizeRequest<'a> {
+    lock_id: &'a str,
+    action: &'a str,
+}
+
+#[derive(Debug)]
+pub struct AutumnReservation {
+    lock_id: String,
+}
+
+pub enum AutumnReserveOutcome {
+    Reserved(AutumnReservation),
+    Denied,
+    /// Autumn could not give a confirmed answer. The ingest path fails open and
+    /// uses the retrying tracker after the WAL commit.
+    Unavailable,
 }
 
 impl AutumnEntitlements {
-    pub fn new(client: Client, secret_key: String, api_url: &str, cache_ttl_secs: u64) -> Self {
+    pub fn new(client: Client, secret_key: String, api_url: &str) -> Self {
         let api_url = api_url.trim_end_matches('/').to_string();
-        let cache = Cache::builder()
-            .time_to_live(Duration::from_secs(cache_ttl_secs.max(1)))
-            .max_capacity(10_000)
-            .build();
-
-        info!(cache_ttl_secs, "Autumn entitlement enforcement enabled");
+        info!("Autumn native billing enforcement enabled");
 
         Self {
             client,
             secret_key,
             api_url,
-            cache,
         }
     }
 
-    /// Returns whether `org_id` may ingest the given `feature_id`
-    /// (`"logs" | "traces" | "metrics"`). Fails open (`true`) on any
-    /// transport/decode error so a billing-provider outage never drops
-    /// customer data.
+    /// Check without consuming usage. Decisions are intentionally not cached:
+    /// Autumn customer controls can change, or cross a limit, on any event.
     pub async fn is_allowed(&self, org_id: &str, feature_id: &str) -> bool {
-        let cache_key = format!("{org_id}:{feature_id}");
-        // Recorded on `ingest.entitlement_check` when this runs under the HTTP
-        // path; a no-op elsewhere (the field is only declared on that span).
-        if let Some(allowed) = self.cache.get(&cache_key).await {
-            tracing::Span::current().record("maple.ingest.cache_hit", true);
-            return allowed;
-        }
         tracing::Span::current().record("maple.ingest.cache_hit", false);
+        self.post_check(org_id, feature_id, None, None)
+            .await
+            .and_then(|value| decide_allowed(&value, None))
+            .unwrap_or(true)
+    }
 
-        match self.fetch_allowed(org_id, feature_id).await {
-            Some(allowed) => {
-                self.cache.insert(cache_key, allowed).await;
-                allowed
-            }
-            // No confirmed decision. Fail open for this request, but don't
-            // remember it — the next request re-checks, so enforcement resumes
-            // as soon as Autumn does rather than a TTL later.
-            None => true,
+    /// Atomically check and reserve an exact usage quantity.
+    pub async fn reserve(
+        &self,
+        org_id: &str,
+        feature_id: &str,
+        value: f64,
+    ) -> AutumnReserveOutcome {
+        let lock_id = Uuid::new_v4().to_string();
+        let expires_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+            + 120_000;
+        let lock = CheckLockRequest {
+            lock_id: &lock_id,
+            enabled: true,
+            expires_at,
+        };
+        match self
+            .post_check(org_id, feature_id, Some(value), Some(lock))
+            .await
+            .and_then(|response| decide_allowed(&response, Some(value)))
+        {
+            Some(true) => AutumnReserveOutcome::Reserved(AutumnReservation { lock_id }),
+            Some(false) => AutumnReserveOutcome::Denied,
+            None => AutumnReserveOutcome::Unavailable,
         }
     }
 
-    /// `Some(decision)` when Autumn gave us an answer we understand, `None` when
-    /// it did not — transport failure, non-2xx, unreadable or non-JSON body, or
-    /// a shape `decide_allowed` doesn't recognize. The caller fails open on
-    /// `None`; only `Some` is cacheable.
-    async fn fetch_allowed(&self, org_id: &str, feature_id: &str) -> Option<bool> {
+    /// Confirm a committed WAL write or release a failed one. A short retry
+    /// handles transient downstream errors while the two-minute lock is valid.
+    pub async fn finalize(&self, reservation: &AutumnReservation, confirm: bool) -> bool {
+        let action = if confirm { "confirm" } else { "release" };
+        let body = FinalizeRequest {
+            lock_id: &reservation.lock_id,
+            action,
+        };
+        for attempt in 1..=3 {
+            let span = tracing::info_span!(
+                "autumn.finalize",
+                otel.kind = "client",
+                "http.request.method" = "POST",
+                "server.address" = "api.useautumn.com",
+                "peer.service" = "autumn",
+            );
+            let result = self
+                .client
+                .post(format!("{}{}", self.api_url, AUTUMN_FINALIZE_PATH))
+                .header("Authorization", format!("Bearer {}", self.secret_key))
+                .header("x-api-version", AUTUMN_API_VERSION)
+                .timeout(Duration::from_secs(5))
+                .json(&body)
+                .send()
+                .instrument(span)
+                .await;
+            match result {
+                Ok(response) if response.status().is_success() => return true,
+                Ok(response) => warn!(
+                    lock_id = %reservation.lock_id,
+                    action,
+                    attempt,
+                    status = %response.status(),
+                    "Autumn finalize returned non-success"
+                ),
+                Err(error) => warn!(
+                    lock_id = %reservation.lock_id,
+                    action,
+                    attempt,
+                    error = %error,
+                    "Autumn finalize request failed"
+                ),
+            }
+            tokio::time::sleep(Duration::from_millis(100 * attempt)).await;
+        }
+        error!(
+            lock_id = %reservation.lock_id,
+            action,
+            "CRITICAL: Autumn reservation could not be finalized before lock expiry"
+        );
+        false
+    }
+
+    async fn post_check(
+        &self,
+        org_id: &str,
+        feature_id: &str,
+        required_balance: Option<f64>,
+        lock: Option<CheckLockRequest<'_>>,
+    ) -> Option<serde_json::Value> {
         let body = CheckRequest {
             customer_id: org_id,
             feature_id,
+            required_balance,
+            send_event: required_balance.map(|_| true),
+            lock,
         };
 
         let span = tracing::info_span!(
@@ -436,8 +556,7 @@ impl AutumnEntitlements {
             }
         };
 
-        let decision = decide_allowed(&value);
-        if decision.is_none() {
+        if decide_allowed(&value, required_balance).is_none() {
             // Valid JSON we didn't recognize. Fail open, but log the body so
             // the real shape is visible and we can adapt decide_allowed.
             warn!(
@@ -447,7 +566,7 @@ impl AutumnEntitlements {
                 "Unrecognized Autumn check response shape; failing open"
             );
         }
-        decision
+        Some(value)
     }
 }
 
@@ -473,23 +592,23 @@ fn truncate_for_log(body: &str) -> String {
 /// Returns `None` when the JSON carries none of the fields we understand, so the
 /// caller can log the body and fail open rather than guess.
 ///
-/// Block only when the org genuinely has no headroom:
-/// - `unlimited` or `overage_allowed` (usage-based `startup` plan) → allow.
-/// - a numeric remaining balance → allow while `> 0` (hard-capped `starter`
-///   blocks once depleted). We gate on remaining rather than the `allowed` flag
-///   because Autumn's default `required_balance` is 1, which flips `allowed`
-///   false at <1 GB left (~98%) — premature for a GB-denominated meter.
-/// - otherwise → defer to `allowed`. An org with no subscription gets
-///   `allowed:false`, so this blocks.
-fn decide_allowed(value: &serde_json::Value) -> Option<bool> {
+/// Autumn's explicit `allowed` field is authoritative. This matters for native
+/// customer spend limits: a plan can allow overage generally while a customer
+/// control denies the next event. Older response shapes without `allowed` fall
+/// back to unlimited/overage/remaining for compatibility.
+fn decide_allowed(value: &serde_json::Value, required_balance: Option<f64>) -> Option<bool> {
     let as_bool = |v: &serde_json::Value, key: &str| v.get(key).and_then(|x| x.as_bool());
+
+    if let Some(allowed) = as_bool(value, "allowed") {
+        return Some(allowed);
+    }
 
     let mut understood = false;
     let mut unlimited = as_bool(value, "unlimited").unwrap_or(false);
     let mut overage = as_bool(value, "overage_allowed").unwrap_or(false);
     let mut remaining: Option<f64> = None;
 
-    if unlimited || overage || as_bool(value, "allowed").is_some() {
+    if unlimited || overage {
         understood = true;
     }
 
@@ -520,10 +639,12 @@ fn decide_allowed(value: &serde_json::Value) -> Option<bool> {
         return Some(true);
     }
     if let Some(remaining) = remaining {
-        return Some(remaining > 0.0);
+        return Some(match required_balance {
+            Some(required) => remaining >= required,
+            None => remaining > 0.0,
+        });
     }
-    // No remaining figure to gate on → defer to Autumn's own decision.
-    Some(as_bool(value, "allowed").unwrap_or(true))
+    None
 }
 
 #[cfg(test)]
@@ -533,10 +654,17 @@ mod tests {
     use axum::http::StatusCode;
     use axum::routing::post;
     use axum::Router;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     fn decide(json: &str) -> Option<bool> {
         let value = serde_json::from_str::<serde_json::Value>(json).expect("valid json");
-        decide_allowed(&value)
+        decide_allowed(&value, None)
+    }
+
+    fn decide_for(json: &str, required_balance: f64) -> Option<bool> {
+        let value = serde_json::from_str::<serde_json::Value>(json).expect("valid json");
+        decide_allowed(&value, Some(required_balance))
     }
 
     // --- Flat hosted REST shape: `balance` is a number; unlimited /
@@ -553,6 +681,17 @@ mod tests {
     }
 
     #[test]
+    fn legacy_shape_requires_the_full_reserved_quantity() {
+        assert_eq!(
+            decide_for(
+                r#"{"balance": 0.5, "unlimited": false, "overage_allowed": false}"#,
+                0.75,
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
     fn flat_hardcap_depleted_blocks() {
         // allowed:false at remaining 0 — and even if `allowed` lagged, remaining
         // gates the decision.
@@ -565,14 +704,12 @@ mod tests {
     }
 
     #[test]
-    fn flat_sub_one_gb_remaining_still_allows() {
-        // Autumn's required_balance:1 makes `allowed:false` here, but 0.5 GB left
-        // is not depleted — we must still allow.
+    fn explicit_denial_wins_even_when_balance_remains() {
         assert_eq!(
             decide(
                 r#"{"allowed": false, "balance": 0.5, "unlimited": false, "overage_allowed": false}"#
             ),
-            Some(true)
+            Some(false)
         );
     }
 
@@ -625,9 +762,9 @@ mod tests {
     }
 
     #[test]
-    fn nested_overage_allows() {
+    fn native_customer_cap_denial_wins_over_plan_overage() {
         let json = r#"{"allowed": false, "balance": {"remaining": -5, "unlimited": false, "overage_allowed": true}}"#;
-        assert_eq!(decide(json), Some(true));
+        assert_eq!(decide(json), Some(false));
     }
 
     // --- No balance / no subscription: defer to `allowed`. ---
@@ -658,32 +795,9 @@ mod tests {
     async fn fails_open_on_transport_error() {
         // Port 1 is closed => connection refused => we must fail open (allow),
         // never dropping customer data on a billing-provider outage.
-        let entitlements = AutumnEntitlements::new(
-            Client::new(),
-            "sk_test".to_string(),
-            "http://127.0.0.1:1",
-            60,
-        );
+        let entitlements =
+            AutumnEntitlements::new(Client::new(), "sk_test".to_string(), "http://127.0.0.1:1");
         assert!(entitlements.is_allowed("org_123", "logs").await);
-    }
-
-    #[tokio::test]
-    async fn fail_open_decisions_are_not_cached() {
-        // A fail-open allow must not be remembered: caching it would let one
-        // failed check suppress enforcement for the whole TTL.
-        let entitlements = AutumnEntitlements::new(
-            Client::new(),
-            "sk_test".to_string(),
-            "http://127.0.0.1:1",
-            3600,
-        );
-        assert!(entitlements.is_allowed("org_123", "logs").await);
-        entitlements.cache.run_pending_tasks().await;
-        assert_eq!(
-            entitlements.cache.get("org_123:logs").await,
-            None,
-            "fail-open allow must not be cached"
-        );
     }
 
     async fn record_check(
@@ -724,7 +838,6 @@ mod tests {
             Client::new(),
             "sk_test".to_string(),
             &format!("http://{addr}"),
-            60,
         );
         assert!(entitlements.is_allowed("org_123", "logs").await);
 
@@ -732,6 +845,59 @@ mod tests {
         assert_eq!(body["customer_id"], "org_123");
         assert_eq!(body["feature_id"], "logs");
         assert_eq!(api_version.as_deref(), Some(AUTUMN_API_VERSION));
+    }
+
+    async fn record_atomic_check(
+        State(tx): State<tokio::sync::mpsc::UnboundedSender<(String, serde_json::Value)>>,
+        body: String,
+    ) -> axum::Json<serde_json::Value> {
+        let _ = tx.send(("check".to_string(), serde_json::from_str(&body).unwrap()));
+        axum::Json(serde_json::json!({ "allowed": true, "balance": 10 }))
+    }
+
+    async fn record_finalize(
+        State(tx): State<tokio::sync::mpsc::UnboundedSender<(String, serde_json::Value)>>,
+        body: String,
+    ) -> axum::Json<serde_json::Value> {
+        let _ = tx.send(("finalize".to_string(), serde_json::from_str(&body).unwrap()));
+        axum::Json(serde_json::json!({ "success": true }))
+    }
+
+    #[tokio::test]
+    async fn reserve_tracks_exact_usage_under_a_lock_then_confirms() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route(AUTUMN_CHECK_PATH, post(record_atomic_check))
+            .route(AUTUMN_FINALIZE_PATH, post(record_finalize))
+            .with_state(tx);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let entitlements = AutumnEntitlements::new(
+            Client::new(),
+            "sk_test".to_string(),
+            &format!("http://{addr}"),
+        );
+        let reservation = match entitlements.reserve("org_123", "logs", 0.125).await {
+            AutumnReserveOutcome::Reserved(reservation) => reservation,
+            _ => panic!("usage should be reserved"),
+        };
+        assert!(entitlements.finalize(&reservation, true).await);
+
+        let (_, check) = rx.recv().await.expect("check request");
+        let (_, finalize) = rx.recv().await.expect("finalize request");
+        assert_eq!(check["customer_id"], "org_123");
+        assert_eq!(check["feature_id"], "logs");
+        assert_eq!(check["required_balance"], 0.125);
+        assert_eq!(check["send_event"], true);
+        assert_eq!(check["lock"]["enabled"], true);
+        assert_eq!(finalize["lock_id"], check["lock"]["lock_id"]);
+        assert_eq!(finalize["action"], "confirm");
     }
 
     // --- Idempotency: one key per accumulated entry, stable across retries. ---
@@ -769,6 +935,44 @@ mod tests {
         let app = Router::new()
             .route(AUTUMN_TRACK_PATH, post(record_track))
             .with_state((tx, status));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{addr}"), rx)
+    }
+
+    async fn record_track_fail_once(
+        State((tx, attempts)): State<(
+            tokio::sync::mpsc::UnboundedSender<(serde_json::Value, Option<String>)>,
+            Arc<AtomicUsize>,
+        )>,
+        headers: axum::http::HeaderMap,
+        body: String,
+    ) -> StatusCode {
+        let api_version = headers
+            .get("x-api-version")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let _ = tx.send((serde_json::from_str(&body).unwrap(), api_version));
+        if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            StatusCode::INTERNAL_SERVER_ERROR
+        } else {
+            StatusCode::OK
+        }
+    }
+
+    async fn spawn_fail_once_autumn_stub() -> (
+        String,
+        tokio::sync::mpsc::UnboundedReceiver<(serde_json::Value, Option<String>)>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route(AUTUMN_TRACK_PATH, post(record_track_fail_once))
+            .with_state((tx, Arc::new(AtomicUsize::new(0))));
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
@@ -817,5 +1021,28 @@ mod tests {
         assert_eq!(second["value"], 3.0);
         assert_eq!(first_api_version.as_deref(), Some(AUTUMN_API_VERSION));
         assert_eq!(second_api_version.as_deref(), Some(AUTUMN_API_VERSION));
+    }
+
+    #[tokio::test]
+    async fn usage_after_a_failed_flush_waits_for_a_fresh_batch_key() {
+        let (api_url, mut rx) = spawn_fail_once_autumn_stub().await;
+        let tracker = AutumnTracker::spawn("sk_test".to_string(), &api_url, 1);
+
+        tracker.track("org_queued", "metrics", 1.5);
+        let (failed, _) = rx.recv().await.expect("failed first flush");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        tracker.track("org_queued", "metrics", 2.0);
+
+        let (retry, _) = rx.recv().await.expect("retry of sealed batch");
+        let (queued, _) = rx
+            .recv()
+            .await
+            .expect("fresh batch for newly arrived usage");
+
+        assert_eq!(failed["idempotency_key"], retry["idempotency_key"]);
+        assert_eq!(failed["value"], 1.5);
+        assert_eq!(retry["value"], 1.5);
+        assert_ne!(retry["idempotency_key"], queued["idempotency_key"]);
+        assert_eq!(queued["value"], 2.0);
     }
 }

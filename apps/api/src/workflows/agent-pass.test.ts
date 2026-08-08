@@ -18,6 +18,7 @@ import { LLMClient, LLMEvent, type LLMRequest, type Model } from "@maple/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
 import { PermissionRule } from "@maple/domain/permission"
 import type { AgentDefinition } from "@/chat/agents"
+import { McpToolExecutor } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { runAgentPass } from "./agent-pass"
 
@@ -53,6 +54,13 @@ const AGENT: AgentDefinition = {
 
 const SCHEMA = Schema.Struct({ claim: Schema.String })
 
+const ToolExecutorStubLayer = Layer.succeed(McpToolExecutor, {
+	execute: (_tenant, name) =>
+		Effect.succeed({
+			content: [{ type: "text" as const, text: `${name} completed` }],
+		}),
+})
+
 const stub = (steps: ReadonlyArray<ReadonlyArray<LLMEvent>>) => {
 	let step = 0
 	const service = {
@@ -82,7 +90,7 @@ const pass = (
 			submitToolDescription: "Record the candidate.",
 			schema: SCHEMA,
 			...(options.deadlineAtMs === undefined ? {} : { deadlineAtMs: options.deadlineAtMs }),
-		}).pipe(Effect.provide(stub(steps))),
+		}).pipe(Effect.provide(stub(steps)), Effect.provide(ToolExecutorStubLayer)),
 	)
 
 /** Every step calls a tool, so the agent never voluntarily stops. */

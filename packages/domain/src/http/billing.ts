@@ -88,11 +88,50 @@ export class BillingSubscription extends Schema.Class<BillingSubscription>("Bill
 	quantity: Schema.optionalKey(Schema.Number),
 }) {}
 
+export const BillingLimitType = Schema.Literals(["absolute", "usage_percentage"])
+export type BillingLimitType = typeof BillingLimitType.Type
+
+export const BillingFeatureId = Schema.Literals(["logs", "traces", "metrics", "browser_sessions"])
+export type BillingFeatureId = typeof BillingFeatureId.Type
+
+export const BillingAlertThresholdType = Schema.Literals([
+	"usage",
+	"usage_percentage",
+	"remaining",
+	"remaining_percentage",
+])
+export type BillingAlertThresholdType = typeof BillingAlertThresholdType.Type
+
+/** Autumn-native cap on paid overage for one feature. */
+export class BillingSpendLimit extends Schema.Class<BillingSpendLimit>("BillingSpendLimit")({
+	featureId: Schema.optionalKey(Schema.String),
+	enabled: Schema.Boolean,
+	limitType: Schema.optionalKey(BillingLimitType),
+	overageLimit: Schema.optionalKey(Schema.Number),
+	source: Schema.optionalKey(Schema.String),
+}) {}
+
+/** Autumn-native usage alert; delivery is driven by Autumn webhooks. */
+export class BillingUsageAlert extends Schema.Class<BillingUsageAlert>("BillingUsageAlert")({
+	featureId: Schema.optionalKey(Schema.String),
+	enabled: Schema.Boolean,
+	threshold: Schema.Number,
+	thresholdType: BillingAlertThresholdType,
+	name: Schema.optionalKey(Schema.String),
+	source: Schema.optionalKey(Schema.String),
+}) {}
+
+export class BillingControls extends Schema.Class<BillingControls>("BillingControls")({
+	spendLimits: Schema.optionalKey(Schema.Array(BillingSpendLimit)),
+	usageAlerts: Schema.optionalKey(Schema.Array(BillingUsageAlert)),
+}) {}
+
 export class BillingCustomer extends Schema.Class<BillingCustomer>("BillingCustomer")({
 	id: Schema.String,
 	subscriptions: Schema.Array(BillingSubscription),
 	balances: Schema.optionalKey(Schema.Record(Schema.String, BillingBalance)),
 	flags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+	billingControls: Schema.optionalKey(Schema.NullOr(BillingControls)),
 }) {}
 
 // ---- Plan catalog (listPlans) ----
@@ -187,58 +226,41 @@ export class DailySpendResponse extends Schema.Class<DailySpendResponse>("DailyS
 	cycleEnd: Schema.Number,
 }) {}
 
-// ---- Spend limits (Postgres-backed) ----
+// ---- Autumn-native billing controls ----
 
-export const SpendEnforcementMode = Schema.Literals(["notify", "pause"])
-export type SpendEnforcementMode = typeof SpendEnforcementMode.Type
+const NonNegativeFiniteNumber = Schema.Number.pipe(
+	Schema.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)),
+)
+const UsagePercentage = Schema.Number.pipe(
+	Schema.check(Schema.isFinite(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(100)),
+)
 
-export class SpendLimits extends Schema.Class<SpendLimits>("SpendLimits")({
-	/** Null = no ceiling configured; per-feature caps may still apply. */
-	monthlyLimitCents: Schema.NullOr(Schema.Number),
-	enforcementMode: SpendEnforcementMode,
-	alertThresholdPercents: Schema.Array(Schema.Number),
-	/** Keyed by Autumn featureId; null = no cap, overage billed at the plan rate. */
-	featureCaps: Schema.Record(Schema.String, Schema.NullOr(Schema.Number)),
+export class UpdateBillingSpendLimit extends Schema.Class<UpdateBillingSpendLimit>("UpdateBillingSpendLimit")(
+	{
+		featureId: BillingFeatureId,
+		enabled: Schema.Boolean,
+		limitType: Schema.optionalKey(BillingLimitType),
+		overageLimit: Schema.optionalKey(NonNegativeFiniteNumber),
+	},
+) {}
 
-	// Derived evaluation state, written by the spend-limit cron. Read-only here:
-	// the client renders breach/pause state, it never asserts it.
-	lastEvaluatedAt: Schema.NullOr(Schema.Number),
-	evaluatedSpendCents: Schema.NullOr(Schema.Number),
-	breachedAt: Schema.NullOr(Schema.Number),
-	pausedAt: Schema.NullOr(Schema.Number),
-	/** Features paused by their own cap — a logs cap never stops traces. */
-	pausedFeatures: Schema.Array(Schema.String),
-}) {}
+export class UpdateBillingUsageAlert extends Schema.Class<UpdateBillingUsageAlert>("UpdateBillingUsageAlert")(
+	{
+		featureId: BillingFeatureId,
+		enabled: Schema.Boolean,
+		threshold: UsagePercentage,
+		thresholdType: Schema.Literal("usage_percentage"),
+		name: Schema.optionalKey(Schema.String),
+	},
+) {}
 
-/**
- * Full replace of the editable fields — the billing page edits this as one card
- * (limit + thresholds + mode + caps), so a partial patch would let two
- * concurrent saves interleave into a state neither user chose.
- */
-export class UpdateSpendLimitsRequest extends Schema.Class<UpdateSpendLimitsRequest>(
-	"UpdateSpendLimitsRequest",
+export class UpdateBillingControlsRequest extends Schema.Class<UpdateBillingControlsRequest>(
+	"UpdateBillingControlsRequest",
 )({
-	monthlyLimitCents: Schema.NullOr(Schema.Number),
-	enforcementMode: SpendEnforcementMode,
-	alertThresholdPercents: Schema.Array(Schema.Number),
-	featureCaps: Schema.Record(Schema.String, Schema.NullOr(Schema.Number)),
+	/** Targeted Autumn upserts; disabled entries remove the corresponding control. */
+	spendLimits: Schema.Array(UpdateBillingSpendLimit),
+	usageAlerts: Schema.Array(UpdateBillingUsageAlert),
 }) {}
-
-export class SpendLimitValidationError extends Schema.TaggedError<SpendLimitValidationError>()(
-	"@maple/http/errors/SpendLimitValidationError",
-	{
-		message: Schema.String,
-	},
-	{ httpApiStatus: 400 },
-) {}
-
-export class SpendLimitPersistenceError extends Schema.TaggedError<SpendLimitPersistenceError>()(
-	"@maple/http/errors/SpendLimitPersistenceError",
-	{
-		message: Schema.String,
-	},
-	{ httpApiStatus: 500 },
-) {}
 
 // ---- Mutations (attach / previewAttach / openCustomerPortal) ----
 
@@ -290,6 +312,12 @@ export class BillingUpstreamError extends Schema.TaggedError<BillingUpstreamErro
 	{ httpApiStatus: 502 },
 ) {}
 
+export class BillingForbiddenError extends Schema.TaggedError<BillingForbiddenError>()(
+	"@maple/http/errors/BillingForbiddenError",
+	{ message: Schema.String },
+	{ httpApiStatus: 403 },
+) {}
+
 // ---- Groups ----
 
 // Authed billing operations: customer/usage reads + attach/preview/portal.
@@ -323,16 +351,10 @@ export class BillingApiGroup extends HttpApiGroup.make("billing")
 		}),
 	)
 	.add(
-		HttpApiEndpoint.get("getSpendLimits", "/spend-limits", {
-			success: SpendLimits,
-			error: SpendLimitPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.put("updateSpendLimits", "/spend-limits", {
-			payload: UpdateSpendLimitsRequest,
-			success: SpendLimits,
-			error: [SpendLimitValidationError, SpendLimitPersistenceError],
+		HttpApiEndpoint.put("updateBillingControls", "/billing-controls", {
+			payload: UpdateBillingControlsRequest,
+			success: BillingCustomer,
+			error: [BillingForbiddenError, BillingUpstreamError],
 		}),
 	)
 	.add(

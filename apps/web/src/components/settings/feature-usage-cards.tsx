@@ -34,15 +34,12 @@ export function FeatureUsageCardsSkeleton() {
 function FeatureCard({
 	feature,
 	currency,
-	cap,
-	paused,
+	overageCap,
 }: {
 	feature: FeatureSpend
 	currency: string
-	/** Configured per-cycle cap in the feature's unit, or null when uncapped. */
-	cap: number | null
-	/** True when this signal is currently rejected at the gateway by its cap. */
-	paused: boolean
+	/** Autumn-native paid overage cap, beyond the included allowance. */
+	overageCap: number | null
 }) {
 	const color = FEATURE_COLORS[feature.featureId]
 	const included = feature.unlimited ? null : feature.included
@@ -55,6 +52,7 @@ function FeatureCard({
 	// "you will be charged for this" and "we stopped accepting it".
 	const hardCapped = feature.overageAllowed === false && !feature.unlimited
 	const hasOverage = feature.overageUnits > 0 && !hardCapped
+	const nativeCapReached = overageCap !== null && feature.overageUnits >= overageCap
 
 	return (
 		// Fixed-height slots for the title and the headline, so the meter and the
@@ -72,7 +70,7 @@ function FeatureCard({
 					/>
 					<span className="line-clamp-2 text-sm leading-[18px]">{feature.label}</span>
 				</div>
-				{cap === null ? (
+				{overageCap === null ? (
 					<span className="shrink-0 border border-border/60 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
 						NO CAP
 					</span>
@@ -80,12 +78,14 @@ function FeatureCard({
 					<span
 						className={cn(
 							"shrink-0 border px-1.5 py-0.5 font-mono text-[10px] leading-none",
-							paused
+							nativeCapReached
 								? "border-severity-error/50 text-severity-error"
 								: "border-primary/40 text-primary",
 						)}
 					>
-						{paused ? "CAPPED" : `CAP ${formatVolume(feature.featureId, cap)}`}
+						{nativeCapReached
+							? "CAP REACHED"
+							: `+${formatVolume(feature.featureId, overageCap)} CAP`}
 					</span>
 				)}
 			</div>
@@ -146,12 +146,10 @@ function FeatureCard({
 
 export function FeatureUsageCards({
 	model,
-	featureCaps,
-	pausedFeatures,
+	overageCaps,
 }: {
 	model: SpendModel
-	featureCaps: Readonly<Record<string, number | null>>
-	pausedFeatures: ReadonlyArray<string>
+	overageCaps: Readonly<Record<string, number | null>>
 }) {
 	return (
 		<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -160,8 +158,7 @@ export function FeatureUsageCards({
 					key={feature.featureId}
 					feature={feature}
 					currency={model.currency}
-					cap={featureCaps[feature.featureId] ?? null}
-					paused={pausedFeatures.includes(feature.featureId)}
+					overageCap={overageCaps[feature.featureId] ?? null}
 				/>
 			))}
 		</div>

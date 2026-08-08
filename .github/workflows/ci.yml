@@ -222,6 +222,11 @@ jobs:
             # fails if an app re-declares one (landing ↔ web drift guard).
             - run: bun run check:tokens
 
+            # Raw MCP handlers carry Effect requirements. Type-aware Effect rules
+            # prevent `any`/`unknown` or assertions from erasing that environment,
+            # which would otherwise turn a missing tenant into a runtime defect.
+            - run: bun run lint:effect-boundaries
+
             # --concurrency here rather than in turbo.json: the global value also governs
             # `bun dev`, which fans out persistent servers and wants a high ceiling.
             - run: bun turbo typecheck test build --filter='!@maple/ingest' --concurrency=10

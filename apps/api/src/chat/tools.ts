@@ -7,11 +7,17 @@
  */
 import { investigationIdFromChatSessionId } from "@maple/domain/chat-session"
 import { evaluatePermission, type PermissionRuleset } from "@maple/domain/permission"
-import { AiTriageResult, SubmitDiagnosisRequest } from "@maple/domain/http"
+import {
+	AiTriageResult,
+	InvestigationNotFoundError,
+	InvestigationPersistenceError,
+	SubmitDiagnosisRequest,
+} from "@maple/domain/http"
 import { InvestigationId } from "@maple/domain/primitives"
 import { Tool, ToolFailure, type Model, type Tools } from "@maple/llm"
 import { Effect, Option, Schema } from "effect"
-import { buildMapleTools, summarizeToolFailure, withRuntimeServices } from "@/mcp/tools/llm-tools"
+import type { McpToolExecutorShape } from "@/mcp/dispatcher"
+import { buildMapleTools, summarizeToolFailure } from "@/mcp/tools/llm-tools"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import type { TurnUsage } from "./loop/types"
 
@@ -36,8 +42,7 @@ export type SubmitDiagnosis = (
 	orgId: TenantContext["orgId"],
 	investigationId: InvestigationId,
 	request: SubmitDiagnosisRequest,
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-) => Effect.Effect<unknown, unknown, any>
+) => Effect.Effect<unknown, InvestigationPersistenceError | InvestigationNotFoundError>
 
 export const buildSubmitDiagnosisTool = (
 	sessionId: string,
@@ -63,26 +68,24 @@ export const buildSubmitDiagnosisTool = (
 		parameters: AiTriageResult,
 		success: Schema.String,
 		execute: (report) =>
-			withRuntimeServices(
-				submitDiagnosis(
-					tenant.orgId,
-					investigationId,
-					new SubmitDiagnosisRequest({
-						report,
-						model: String(model.id),
-						inputTokens: usage.input,
-						outputTokens: usage.output,
-					}),
-				).pipe(
-					Effect.as("Diagnosis recorded."),
-					// Named failures only. `catchCause` + `String(cause)` fed the model a rendered
-					// Effect cause — stack frames, and connection details out of a DatabaseError.
-					Effect.catchCause((cause) =>
-						Effect.fail(
-							new ToolFailure({
-								message: `submit_diagnosis failed: ${summarizeToolFailure(cause)}`,
-							}),
-						),
+			submitDiagnosis(
+				tenant.orgId,
+				investigationId,
+				new SubmitDiagnosisRequest({
+					report,
+					model: String(model.id),
+					inputTokens: usage.input,
+					outputTokens: usage.output,
+				}),
+			).pipe(
+				Effect.as("Diagnosis recorded."),
+				// Named failures only. `catchCause` + `String(cause)` fed the model a rendered
+				// Effect cause — stack frames, and connection details out of a DatabaseError.
+				Effect.catchCause((cause) =>
+					Effect.fail(
+						new ToolFailure({
+							message: `submit_diagnosis failed: ${summarizeToolFailure(cause)}`,
+						}),
 					),
 				),
 			),
@@ -97,8 +100,12 @@ export const buildSubmitDiagnosisTool = (
  * sees is identical to the read-only case — but the loop never dispatches it, because it breaks on
  * the proposal first, and `POST /api/chat/apply` remains the only path that actually mutates.
  */
-export const buildChatTools = (tenant: TenantContext, ruleset: PermissionRuleset): Tools =>
-	buildMapleTools(tenant, {
+export const buildChatTools = (
+	executor: McpToolExecutorShape,
+	tenant: TenantContext,
+	ruleset: PermissionRuleset,
+): Tools =>
+	buildMapleTools(executor, tenant, {
 		// `deny` means the model never sees the tool. That is a stronger guarantee than refusing the
 		// call afterwards, and it is free — an unoffered tool cannot be called.
 		include: (name) => evaluatePermission(ruleset, name) !== "deny",

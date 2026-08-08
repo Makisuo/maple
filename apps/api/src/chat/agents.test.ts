@@ -9,7 +9,7 @@ import { ChatMode, makeChatSessionId } from "@maple/domain/chat-session"
 import { evaluatePermission } from "@maple/domain/permission"
 import { assert, describe, it } from "vitest"
 import { AGENTS, agentForSession, buildSystemPrompt, spawnableFor } from "./agents"
-import { mapleToolDefinitions } from "@/mcp/tools/registry"
+import { mapleToolCatalog } from "@/mcp/tools/registry"
 
 const subagents = Object.values(AGENTS).filter((agent) => agent.mode === "subagent")
 
@@ -38,7 +38,7 @@ describe("AGENTS", () => {
 		// applied out of band by `POST /api/chat/apply`. An `ask` here would deadlock the sub-agent
 		// into proposing something nobody can accept.
 		for (const agent of subagents) {
-			for (const definition of mapleToolDefinitions) {
+			for (const definition of mapleToolCatalog) {
 				assert.notEqual(
 					evaluatePermission(agent.permission, definition.name),
 					"ask",

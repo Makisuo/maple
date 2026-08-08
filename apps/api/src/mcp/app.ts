@@ -7,7 +7,7 @@ import { LatencyAnalysisPrompt } from "./prompts/latency-analysis"
 import { IncidentTriagePrompt } from "./prompts/incident-triage"
 import { InstructionsResource } from "./resources/instructions"
 import { sessionStore } from "./lib/session-store"
-import { CurrentMcpTenant, resolveHttpMcpTenant } from "./lib/query-warehouse"
+import { CurrentMcpRequestTenant, CurrentMcpTenant, resolveHttpMcpTenant } from "./lib/query-warehouse"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { Env } from "@/platform/Env"
@@ -44,7 +44,11 @@ const McpAuthorizationMiddleware = HttpRouter.middleware<{ provides: CurrentMcpT
 				Effect.provideService(ApiKeysService, apiKeys),
 				Effect.provideService(AuthService, auth),
 				Effect.provideService(Env, env),
-				Effect.flatMap((tenant) => Effect.provideService(httpEffect, CurrentMcpTenant, tenant)),
+				Effect.flatMap((tenant) =>
+					Effect.provideService(httpEffect, CurrentMcpTenant, tenant).pipe(
+						Effect.provideService(CurrentMcpRequestTenant, tenant),
+					),
+				),
 				Effect.catchTags({
 					"@maple/mcp/errors/McpAuthMissingError": () => mcpChallenge(false),
 					"@maple/mcp/errors/McpAuthInvalidError": () => mcpChallenge(true),

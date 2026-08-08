@@ -1,3 +1,4 @@
+import { InternalRpcToolNotFoundError } from "@maple/domain/internal-rpc"
 import { Effect, Schema } from "effect"
 import { registerAddDashboardWidgetTool } from "./add-dashboard-widget"
 import { registerDescribeWarehouseTablesTool } from "./describe-warehouse-tables"
@@ -52,21 +53,26 @@ import { registerGetSessionTracesTool } from "./get-session-traces"
 import { registerServiceMapTool } from "./service-map"
 import { registerSourceCodeTools } from "./source-code"
 import type { McpToolError, McpToolRegistrar, McpToolResult } from "./types"
+import type { McpToolRequirements } from "./runtime-requirements"
 import { registerUpdateDashboardTool } from "./update-dashboard"
 import { registerUpdateDashboardWidgetTool } from "./update-dashboard-widget"
 
-// `R` is intentionally `any` here: MapleToolDefinition is the type-erased
-// boundary between heterogeneous tool implementations (each with its own
-// service requirements) and the McpServer.addTool API (which expects
-// McpServerClient). The runtime layer wires the actual services; we accept the
-// loose `any` here to let both sides typecheck.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface MapleToolDefinition {
+interface MapleToolDefinition {
 	readonly name: string
 	readonly description: string
 	readonly schema: Schema.Codec<unknown, unknown, never, unknown>
-	readonly handler: (params: unknown) => Effect.Effect<McpToolResult, McpToolError, any>
+	readonly handler: (params: unknown) => Effect.Effect<McpToolResult, McpToolError, McpToolRequirements>
 }
+
+export interface MapleToolCatalogEntry {
+	readonly name: string
+	readonly description: string
+	readonly schema: Schema.Codec<unknown, unknown, never, unknown>
+}
+
+class McpDecodeError extends Schema.TaggedError<McpDecodeError>()("@maple/mcp/decode-error", {
+	errorMessage: Schema.String,
+}) {}
 
 /**
  * Effect emits exactly `{ anyOf: [{ type: "object" }, { type: "array" }] }` — no
@@ -118,16 +124,15 @@ export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
 
 const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition> => {
 	const definitions: MapleToolDefinition[] = []
-	const registrar: McpToolRegistrar = {
-		tool(name, description, schema, handler) {
-			definitions.push({
-				name,
-				description,
-				schema,
-				handler: handler as MapleToolDefinition["handler"],
-			})
-		},
+	const collect: McpToolRegistrar["tool"] = (name, description, schema, handler) => {
+		definitions.push({
+			name,
+			description,
+			schema,
+			handler: (params) => handler(params as typeof schema.Type),
+		})
 	}
+	const registrar: McpToolRegistrar = { tool: collect }
 
 	registerFindErrorsTool(registrar)
 	registerInspectTraceTool(registrar)
@@ -187,4 +192,44 @@ const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition> => {
 	return definitions
 }
 
-export const mapleToolDefinitions = collectMapleToolDefinitions()
+const mapleToolDefinitions = collectMapleToolDefinitions()
+
+/** Handler-free registry view for schemas, permissions, MCP discovery, and tests. */
+export const mapleToolCatalog: ReadonlyArray<MapleToolCatalogEntry> = mapleToolDefinitions.map(
+	({ name, description, schema }) => ({ name, description, schema }),
+)
+
+const toDecodeErrorMessage = (definition: MapleToolDefinition, error: unknown): string => {
+	if (Schema.isSchemaError(error)) {
+		return `${String(error)}. Check the "${definition.name}" tool schema for valid parameter names and types.`
+	}
+	return String(error)
+}
+
+/**
+ * The one raw registry entry point. Its full Effect environment is intentionally
+ * preserved; only `McpToolExecutor` may close it with tenant and app services.
+ */
+export const executeRegisteredMcpToolUnscoped = Effect.fn("McpToolRegistry.execute")(function* (
+	name: string,
+	input: unknown,
+) {
+	const definition = mapleToolDefinitions.find((candidate) => candidate.name === name)
+	if (!definition) {
+		return yield* new InternalRpcToolNotFoundError({
+			name,
+			message: `Unknown MCP tool: ${name}`,
+		})
+	}
+
+	yield* Effect.annotateCurrentSpan({ tool: definition.name })
+	const decoded = yield* Effect.try({
+		try: () => Schema.decodeUnknownSync(definition.schema)(input),
+		catch: (error) =>
+			new McpDecodeError({
+				errorMessage: toDecodeErrorMessage(definition, error),
+			}),
+	})
+
+	return yield* definition.handler(decoded).pipe(Effect.tap(() => Effect.logInfo("Tool completed")))
+})

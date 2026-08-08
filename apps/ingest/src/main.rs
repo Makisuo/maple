@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
-use autumn::{AutumnEntitlements, AutumnTracker};
+use autumn::{AutumnEntitlements, AutumnReservation, AutumnReserveOutcome, AutumnTracker};
 use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
@@ -128,8 +128,6 @@ struct AppConfig {
     autumn_secret_key: Option<String>,
     autumn_api_url: String,
     autumn_flush_interval_secs: u64,
-    autumn_enforce_limits: bool,
-    autumn_check_cache_ttl_secs: u64,
     ingest_key_cache_ttl_secs: u64,
     org_routing_cache_ttl_secs: u64,
     /// Ceiling on the total decompressed rrweb payload a single replay session
@@ -388,22 +386,6 @@ impl AppConfig {
             1,
         )?;
 
-        // Billing enforcement: when enabled, the gateway rejects ingestion for
-        // orgs that are over their hard-capped base-plan allotment or have no
-        // active subscription (see AutumnEntitlements). Off by default so it can
-        // be deployed dark and flipped on per-environment after verification.
-        let autumn_enforce_limits = parse_bool(
-            "AUTUMN_ENFORCE_LIMITS",
-            std::env::var("AUTUMN_ENFORCE_LIMITS").ok(),
-            false,
-        )?;
-
-        let autumn_check_cache_ttl_secs = parse_u64(
-            "AUTUMN_CHECK_CACHE_TTL_SECS",
-            std::env::var("AUTUMN_CHECK_CACHE_TTL_SECS").ok(),
-            60,
-        )?;
-
         let ingest_key_cache_ttl_secs = parse_u64(
             "INGEST_KEY_CACHE_TTL_SECS",
             std::env::var("INGEST_KEY_CACHE_TTL_SECS").ok(),
@@ -503,8 +485,6 @@ impl AppConfig {
             autumn_secret_key,
             autumn_api_url,
             autumn_flush_interval_secs,
-            autumn_enforce_limits,
-            autumn_check_cache_ttl_secs,
             ingest_key_cache_ttl_secs,
             org_routing_cache_ttl_secs,
             replay_max_session_bytes,
@@ -665,8 +645,6 @@ struct KeyRow {
     org_id: String,
     self_managed: bool,
     clickhouse_ready: bool,
-    spend_paused: bool,
-    paused_features: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -677,8 +655,6 @@ struct ConnectorRow {
     dataset: String,
     self_managed: bool,
     clickhouse_ready: bool,
-    spend_paused: bool,
-    paused_features: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -711,8 +687,6 @@ impl IngestKeyIdentity {
             key_id: self.key_id,
             self_managed: routing.self_managed,
             clickhouse_ready: routing.clickhouse_ready,
-            spend_paused: routing.spend_paused,
-            paused_features: routing.paused_features,
         }
     }
 }
@@ -738,8 +712,6 @@ impl CloudflareConnectorIdentity {
             secret_key_id: self.secret_key_id,
             self_managed: routing.self_managed,
             clickhouse_ready: routing.clickhouse_ready,
-            spend_paused: routing.spend_paused,
-            paused_features: routing.paused_features,
         }
     }
 }
@@ -748,14 +720,6 @@ impl CloudflareConnectorIdentity {
 struct OrgRouting {
     self_managed: bool,
     clickhouse_ready: bool,
-    /// The org is over its configured monthly spend ceiling AND chose to pause
-    /// ingest on breach. Stamped on `org_spend_limits` by the API's hourly
-    /// spend-limit cron — the gateway never prices a cycle itself. Defaults to
-    /// false, so an org with no row (the common case) is never paused.
-    spend_paused: bool,
-    /// Autumn featureIds whose per-cycle cap is exceeded. Per signal on purpose:
-    /// blowing the logs cap must not stop traces.
-    paused_features: Vec<String>,
 }
 
 impl OrgRouting {
@@ -763,8 +727,6 @@ impl OrgRouting {
         Self {
             self_managed: row.self_managed,
             clickhouse_ready: row.clickhouse_ready,
-            spend_paused: row.spend_paused,
-            paused_features: row.paused_features.clone(),
         }
     }
 
@@ -772,8 +734,6 @@ impl OrgRouting {
         Self {
             self_managed: row.self_managed,
             clickhouse_ready: row.clickhouse_ready,
-            spend_paused: row.spend_paused,
-            paused_features: row.paused_features.clone(),
         }
     }
 }
@@ -784,58 +744,12 @@ impl OrgRouting {
 /// never drift apart.
 const BROWSER_SESSIONS_FEATURE_ID: &str = "browser_sessions";
 
-/// Is this signal blocked by the org's own spend guardrails?
-///
-/// `feature_id` is the Autumn featureId the signal meters as (`logs` / `traces` /
-/// `metrics` / `browser_sessions`). A whole-org pause blocks everything; a cap
-/// blocks only its own signal. Shared by the OTLP, session-replay and Cloudflare
-/// Logpush paths so they can't diverge on what "paused" means.
-fn spend_blocks_signal(spend_paused: bool, paused_features: &[String], feature_id: &str) -> bool {
-    spend_paused || paused_features.iter().any(|id| id == feature_id)
-}
-
-/// The 402 the org's own spend guardrails produce for `feature_id`, or `None`
-/// when it is clear to ingest.
-///
-/// The org's OWN ceiling, not the plan's: `paused_at` / `paused_features` are
-/// stamped on `org_spend_limits` by the API's hourly spend-limit cron, and are
-/// only ever set when the customer chose "pause ingest at limit". Checked before
-/// the Autumn entitlement because it needs no network call — the state arrived
-/// with the resolved key — and because a customer who asked us to stop spending
-/// their money should not wait on a billing-provider round-trip.
-///
-/// Never fails open into a pause: the cron leaves the previous state untouched
-/// when it can't price a cycle, and an org with no row is never paused.
-fn spend_limit_rejection(
-    org_id: &str,
-    spend_paused: bool,
-    paused_features: &[String],
-    feature_id: &str,
-) -> Option<ApiError> {
-    if !spend_blocks_signal(spend_paused, paused_features, feature_id) {
-        return None;
-    }
-    let by_cap = !spend_paused;
-    warn!(
-        org_id,
-        feature_id, by_cap, "Ingestion blocked: customer spend limit reached"
-    );
-    Some(ApiError::new(
-        StatusCode::PAYMENT_REQUIRED,
-        if by_cap {
-            "Per-feature volume cap reached for this billing cycle"
-        } else {
-            "Monthly spend limit reached; ingest paused by your organization's settings"
-        },
-    ))
-}
-
 /// The 402 Autumn's entitlement check produces for `feature_id`, or `None` when
 /// the org may ingest it.
 ///
 /// Rejects when the org has no active subscription or has exhausted a hard-capped
 /// allotment. Fails open on any Autumn error (see `AutumnEntitlements::is_allowed`).
-/// Inert unless `AUTUMN_ENFORCE_LIMITS=true` and `AUTUMN_SECRET_KEY` is set.
+/// Inert unless `AUTUMN_SECRET_KEY` is set.
 async fn entitlement_rejection(
     state: &AppState,
     org_id: &str,
@@ -864,6 +778,37 @@ async fn entitlement_rejection(
         StatusCode::PAYMENT_REQUIRED,
         "Plan limit reached or no active subscription",
     ))
+}
+
+/// Reserve exact usage through Autumn's atomic check+event lock. `None` means
+/// billing is disabled or temporarily unavailable; callers then use the
+/// retrying tracker after the WAL commit so provider outages do not drop data.
+async fn reserve_autumn_usage(
+    state: &AppState,
+    org_id: &str,
+    feature_id: &'static str,
+    value: f64,
+) -> Result<Option<AutumnReservation>, ApiError> {
+    if org_id == SENTINEL_ORG_ID || value <= 0.0 {
+        return Ok(None);
+    }
+    let Some(entitlements) = &state.autumn_entitlements else {
+        return Ok(None);
+    };
+    match entitlements.reserve(org_id, feature_id, value).await {
+        AutumnReserveOutcome::Reserved(reservation) => Ok(Some(reservation)),
+        AutumnReserveOutcome::Unavailable => Ok(None),
+        AutumnReserveOutcome::Denied => {
+            warn!(
+                org_id,
+                feature_id, value, "Ingestion blocked by Autumn billing controls"
+            );
+            Err(ApiError::new(
+                StatusCode::PAYMENT_REQUIRED,
+                "Billing limit reached for this feature",
+            ))
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -915,10 +860,6 @@ struct ResolvedIngestKey {
     // version (SCHEMA_VERSION) — NOT the Tinybird-coupled PROJECT_REVISION, so a
     // Tinybird-only schema change can't silently un-ready a BYO-CH org.
     clickhouse_ready: bool,
-    // Spend guardrails, resolved with routing: whole-org pause (spend ceiling
-    // breached in "pause ingest" mode) and per-signal cap pauses.
-    spend_paused: bool,
-    paused_features: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -933,8 +874,6 @@ struct ResolvedCloudflareConnector {
     // to the self-managed pool when the owning org has BYO Tinybird active.
     self_managed: bool,
     clickhouse_ready: bool,
-    spend_paused: bool,
-    paused_features: Vec<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -1626,17 +1565,11 @@ async fn main() {
         )
     });
 
-    // Entitlement enforcement is opt-in: requires both a secret key and the
-    // AUTUMN_ENFORCE_LIMITS flag. When absent, ingestion is never billing-gated.
-    let autumn_entitlements = match (&config.autumn_secret_key, config.autumn_enforce_limits) {
-        (Some(key), true) => Some(AutumnEntitlements::new(
-            http_client.clone(),
-            key.clone(),
-            &config.autumn_api_url,
-            config.autumn_check_cache_ttl_secs,
-        )),
-        _ => None,
-    };
+    // A configured Autumn account is the billing authority. Native balance
+    // checks and customer controls must not be bypassable by a second flag.
+    let autumn_entitlements = config.autumn_secret_key.as_ref().map(|key| {
+        AutumnEntitlements::new(http_client.clone(), key.clone(), &config.autumn_api_url)
+    });
 
     let ingest_key_cache = Cache::builder()
         .time_to_live(Duration::from_secs(config.ingest_key_cache_ttl_secs))
@@ -2011,28 +1944,21 @@ async fn accept_grpc_decoded(
     resolved: &ResolvedIngestKey,
     decoded_bytes: usize,
 ) -> Result<(), tonic::Status> {
-    // The customer's own pause applies here even though this path is unbilled:
-    // "pause my ingest" has to mean every door, or an org that set a ceiling
-    // keeps ingesting over gRPC and never understands why. No entitlement check
-    // — gating an unbilled path on a balance it never decrements would be
-    // incoherent; see the note in the metering block below.
-    if resolved.org_id != SENTINEL_ORG_ID {
-        if let Some(error) = spend_limit_rejection(
-            &resolved.org_id,
-            resolved.spend_paused,
-            &resolved.paused_features,
-            signal.path(),
-        ) {
-            return Err(tonic::Status::resource_exhausted(error.message));
-        }
-    }
-
     let _org_inflight_permit = state
         .org_inflight_limiter
         .try_acquire(&resolved.org_id)
         .ok_or_else(|| tonic::Status::resource_exhausted("Per-org ingest limit exceeded"))?;
     let item_count = decoded.item_count();
-    process_decoded_payload(
+    let reservation = reserve_autumn_usage(
+        state,
+        &resolved.org_id,
+        signal.path(),
+        billable_gb(decoded_bytes as u64),
+    )
+    .await
+    .map_err(|error| tonic::Status::resource_exhausted(error.message))?;
+
+    let result = process_decoded_payload(
         state,
         signal,
         PayloadFormat::Protobuf,
@@ -2040,31 +1966,49 @@ async fn accept_grpc_decoded(
         &decoded,
         resolved,
     )
-    .await
-    .map(|_| {
-        // gRPC volume is recorded but deliberately NOT metered to Autumn here:
-        // this path has never been billed, and switching that on is a
-        // customer-facing pricing change that needs its own review. Recording it
-        // makes the internal dashboard honest about total ingest, and the
-        // warehouse-vs-Autumn gap then quantifies exactly what is unbilled.
-        if resolved.org_id != SENTINEL_ORG_ID {
-            if let Some(usage) = &state.usage_metrics {
-                usage.record(
-                    &resolved.org_id,
-                    signal.path(),
-                    decoded_bytes as u64,
-                    item_count as u64,
-                );
+    .await;
+
+    match result {
+        Ok(_) => {
+            if let (Some(entitlements), Some(reservation)) =
+                (&state.autumn_entitlements, reservation.as_ref())
+            {
+                let _ = entitlements.finalize(reservation, true).await;
+            }
+            if resolved.org_id != SENTINEL_ORG_ID {
+                if let Some(usage) = &state.usage_metrics {
+                    usage.record(
+                        &resolved.org_id,
+                        signal.path(),
+                        decoded_bytes as u64,
+                        item_count as u64,
+                    );
+                }
+                if reservation.is_none() {
+                    if let Some(tracker) = &state.autumn_tracker {
+                        tracker.track(
+                            &resolved.org_id,
+                            signal.path(),
+                            billable_gb(decoded_bytes as u64),
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(error) => {
+            if let (Some(entitlements), Some(reservation)) =
+                (&state.autumn_entitlements, reservation.as_ref())
+            {
+                let _ = entitlements.finalize(reservation, false).await;
+            }
+            if error.status == StatusCode::TOO_MANY_REQUESTS {
+                Err(tonic::Status::resource_exhausted(error.message))
+            } else {
+                Err(tonic::Status::unavailable(error.message))
             }
         }
-    })
-    .map_err(|error| {
-        if error.status == StatusCode::TOO_MANY_REQUESTS {
-            tonic::Status::resource_exhausted(error.message)
-        } else {
-            tonic::Status::unavailable(error.message)
-        }
-    })
+    }
 }
 
 async fn resolve_grpc_ingest_key(
@@ -2098,9 +2042,6 @@ async fn resolve_grpc_ingest_key(
             key_id: "sentinel".to_string(),
             self_managed: false,
             clickhouse_ready: false,
-            // The sentinel is a synthetic health probe, not a billable org.
-            spend_paused: false,
-            paused_features: Vec::new(),
         });
     }
 
@@ -2341,27 +2282,6 @@ async fn handle_replay_meta_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
-    // Replay is metered to Autumn at the end of this function, so it has to be
-    // gated like every other billable signal: a `browser_sessions` cap that
-    // keeps billing is the worst way for a spend limit to fail. Same two gates,
-    // in the same order, as handle_signal_inner. The sentinel org is a synthetic
-    // probe, never billed and never blocked.
-    if org_id != SENTINEL_ORG_ID {
-        if let Some(error) = spend_limit_rejection(
-            &org_id,
-            resolved_key.spend_paused,
-            &resolved_key.paused_features,
-            BROWSER_SESSIONS_FEATURE_ID,
-        ) {
-            return Err(error);
-        }
-        if let Some(error) =
-            entitlement_rejection(state, &org_id, BROWSER_SESSIONS_FEATURE_ID).await
-        {
-            return Err(error);
-        }
-    }
-
     let pipeline = native_rows_pipeline_for(
         state,
         destination,
@@ -2436,7 +2356,14 @@ async fn handle_replay_meta_inner(
         return Ok(0);
     }
     let count = rows.len();
-    pipeline
+    let reservation = reserve_autumn_usage(
+        state,
+        &org_id,
+        BROWSER_SESSIONS_FEATURE_ID,
+        session_starts as f64,
+    )
+    .await?;
+    let enqueue_result = pipeline
         .accept_rows_to(
             &org_id,
             state.config.tinybird.datasource_session_replays.clone(),
@@ -2448,13 +2375,27 @@ async fn handle_replay_meta_inner(
         .map_err(|e| {
             warn!(org_id = %org_id, error = %e, "session metadata enqueue rejected");
             api_error_from_pipeline(&e)
-        })?;
+        });
 
-    // Meter browser sessions to Autumn after the rows are safely enqueued, mirroring
-    // the logs/traces/metrics path (which only tracks on success). Skip the internal
-    // sentinel org so self-observability traffic is not billed.
-    if let Some(tracker) = &state.autumn_tracker {
-        if org_id != SENTINEL_ORG_ID && session_starts > 0 {
+    if let Err(error) = enqueue_result {
+        if let (Some(entitlements), Some(reservation)) =
+            (&state.autumn_entitlements, reservation.as_ref())
+        {
+            let _ = entitlements.finalize(reservation, false).await;
+        }
+        return Err(error);
+    }
+
+    if let (Some(entitlements), Some(reservation)) =
+        (&state.autumn_entitlements, reservation.as_ref())
+    {
+        let _ = entitlements.finalize(reservation, true).await;
+    }
+
+    // Fail-open fallback: if Autumn could not reserve, record after the WAL
+    // commit through the retrying tracker.
+    if reservation.is_none() && org_id != SENTINEL_ORG_ID && session_starts > 0 {
+        if let Some(tracker) = &state.autumn_tracker {
             tracker.track(&org_id, "browser_sessions", session_starts as f64);
         }
     }
@@ -2530,7 +2471,7 @@ async fn handle_session_events_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
-    // Same two gates as the metadata endpoint, in the same order. Session events
+    // Same Autumn gate as the metadata endpoint. Session events
     // are not separately metered — `browser_sessions` remains the billed unit,
     // and introducing a `browser_events` meter is a pricing decision, not a
     // schema one — but they must still be entitlement-gated: an out-of-quota org
@@ -2538,14 +2479,6 @@ async fn handle_session_events_inner(
     // the incoherent half of the old design, and it only widens now that custom
     // events are a promoted feature.
     if org_id != SENTINEL_ORG_ID {
-        if let Some(error) = spend_limit_rejection(
-            &org_id,
-            resolved_key.spend_paused,
-            &resolved_key.paused_features,
-            BROWSER_SESSIONS_FEATURE_ID,
-        ) {
-            return Err(error);
-        }
         if let Some(error) =
             entitlement_rejection(state, &org_id, BROWSER_SESSIONS_FEATURE_ID).await
         {
@@ -2713,20 +2646,6 @@ async fn handle_replay_blob_inner(
     );
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
-
-    // Spend pause only — see handle_session_events_inner: rrweb chunks are not
-    // metered, but they are the bulk of a session's bytes, so a pause that
-    // didn't cover them would barely be a pause.
-    if org_id != SENTINEL_ORG_ID {
-        if let Some(error) = spend_limit_rejection(
-            &org_id,
-            resolved_key.spend_paused,
-            &resolved_key.paused_features,
-            BROWSER_SESSIONS_FEATURE_ID,
-        ) {
-            return Err(error);
-        }
-    }
 
     let pipeline = native_rows_pipeline_for(
         state,
@@ -2972,7 +2891,7 @@ async fn handle_signal(
     let duration_ms = duration.as_millis() as u64;
 
     match result {
-        Ok((response, item_count, org_id, decoded_bytes)) => {
+        Ok((response, item_count, org_id, decoded_bytes, metered_atomically)) => {
             let status_code = response.status().as_u16();
             span_handle.record("http.response.status_code", status_code);
             span_handle.record("otel.status_code", "Ok");
@@ -2985,8 +2904,10 @@ async fn handle_signal(
                 if let Some(usage) = &state.usage_metrics {
                     usage.record(&org_id, feature_id, decoded_bytes as u64, item_count as u64);
                 }
-                if let Some(tracker) = &state.autumn_tracker {
-                    tracker.track(&org_id, feature_id, billable_gb(decoded_bytes as u64));
+                if !metered_atomically {
+                    if let Some(tracker) = &state.autumn_tracker {
+                        tracker.track(&org_id, feature_id, billable_gb(decoded_bytes as u64));
+                    }
                 }
             }
             info!(
@@ -3086,13 +3007,14 @@ async fn handle_cloudflare_logpush(
     }
 }
 
-/// Returns Ok((response, item_count, org_id, decoded_bytes)) or Err((ApiError, error_kind_label))
+/// Returns Ok((response, item_count, org_id, decoded_bytes, metered_atomically))
+/// or Err((ApiError, error_kind_label)).
 async fn handle_signal_inner(
     state: &AppState,
     headers: &HeaderMap,
     body: Bytes,
     signal: Signal,
-) -> Result<(Response, usize, String, usize), (ApiError, &'static str)> {
+) -> Result<(Response, usize, String, usize, bool), (ApiError, &'static str)> {
     // --- Auth ---
     let ingest_key = extract_ingest_key(headers).ok_or_else(|| {
         warn!("Missing ingest key");
@@ -3111,6 +3033,7 @@ async fn handle_signal_inner(
             0,
             SENTINEL_ORG_ID.to_string(),
             0,
+            false,
         ));
     }
 
@@ -3161,22 +3084,6 @@ async fn handle_signal_inner(
         resolve_ms = key_resolve_start.elapsed().as_millis() as u64,
         "Authenticated"
     );
-
-    // --- Billing gates (per-signal) ---
-    // Customer's own spend guardrails first (no network), then the plan
-    // entitlement. Same pair, in the same order, as the session-replay path.
-    if let Some(error) = spend_limit_rejection(
-        &resolved_key.org_id,
-        resolved_key.spend_paused,
-        &resolved_key.paused_features,
-        signal.path(),
-    ) {
-        return Err((error, "spend_limit"));
-    }
-
-    if let Some(error) = entitlement_rejection(state, &resolved_key.org_id, signal.path()).await {
-        return Err((error, "billing_limit"));
-    }
 
     let _org_inflight_permit = state
         .org_inflight_limiter
@@ -3287,7 +3194,16 @@ async fn handle_signal_inner(
 
     let decoded_bytes = decoded_payload.len();
 
-    let response = process_decoded_payload(
+    let reservation = reserve_autumn_usage(
+        state,
+        &resolved_key.org_id,
+        signal.path(),
+        billable_gb(decoded_bytes as u64),
+    )
+    .await
+    .map_err(|error| (error, "billing_limit"))?;
+
+    let response_result = process_decoded_payload(
         state,
         signal,
         payload_format,
@@ -3295,14 +3211,33 @@ async fn handle_signal_inner(
         &decoded,
         &resolved_key,
     )
-    .await
-    .map_err(|e| (e, "forward"))?;
+    .await;
+
+    let response = match response_result {
+        Ok(response) => {
+            if let (Some(entitlements), Some(reservation)) =
+                (&state.autumn_entitlements, reservation.as_ref())
+            {
+                let _ = entitlements.finalize(reservation, true).await;
+            }
+            response
+        }
+        Err(error) => {
+            if let (Some(entitlements), Some(reservation)) =
+                (&state.autumn_entitlements, reservation.as_ref())
+            {
+                let _ = entitlements.finalize(reservation, false).await;
+            }
+            return Err((error, "forward"));
+        }
+    };
 
     Ok((
         response,
         item_count,
         resolved_key.org_id.clone(),
         decoded_bytes,
+        reservation.is_some(),
     ))
 }
 
@@ -3347,41 +3282,6 @@ async fn handle_cloudflare_logpush_inner(
     Span::current().record("maple.ingest.self_managed", resolved.self_managed);
     Span::current().record("maple.ingest.clickhouse_ready", resolved.clickhouse_ready);
 
-    // Logpush bills the `logs` feature — so the customer's own spend guardrails
-    // gate it exactly like OTLP logs do.
-    if spend_blocks_signal(resolved.spend_paused, &resolved.paused_features, "logs") {
-        warn!(
-            org_id = %resolved.org_id,
-            connector_id,
-            by_cap = !resolved.spend_paused,
-            "Cloudflare logpush blocked: customer spend limit reached"
-        );
-        return Err((
-            ApiError::new(
-                StatusCode::PAYMENT_REQUIRED,
-                "Spend limit reached; ingest paused by your organization's settings",
-            ),
-            "spend_limit",
-        ));
-    }
-
-    // Logpush bills the `logs` feature — gate it the same way as OTLP logs.
-    if let Some(entitlements) = &state.autumn_entitlements {
-        if !entitlements.is_allowed(&resolved.org_id, "logs").await {
-            warn!(
-                org_id = %resolved.org_id,
-                connector_id,
-                "Cloudflare logpush blocked: plan limit reached or no active subscription"
-            );
-            return Err((
-                ApiError::new(
-                    StatusCode::PAYMENT_REQUIRED,
-                    "Plan limit reached or no active subscription",
-                ),
-                "billing_limit",
-            ));
-        }
-    }
     debug!(
         connector_id = %resolved.connector_id,
         org_id = %resolved.org_id,
@@ -3488,10 +3388,16 @@ async fn handle_cloudflare_logpush_inner(
                 key_id: resolved.secret_key_id.clone(),
                 self_managed: resolved.self_managed,
                 clickhouse_ready: resolved.clickhouse_ready,
-                spend_paused: resolved.spend_paused,
-                paused_features: resolved.paused_features.clone(),
             };
             let decoded = DecodedPayload::Logs(request);
+            let reservation = reserve_autumn_usage(
+                state,
+                &resolved.org_id,
+                Signal::Logs.path(),
+                billable_gb(decoded_payload.len() as u64),
+            )
+            .await
+            .map_err(|error| (error, "billing_limit"))?;
             let response = match process_decoded_payload(
                 state,
                 Signal::Logs,
@@ -3504,6 +3410,11 @@ async fn handle_cloudflare_logpush_inner(
             {
                 Ok(response) => response,
                 Err(error) => {
+                    if let (Some(entitlements), Some(reservation)) =
+                        (&state.autumn_entitlements, reservation.as_ref())
+                    {
+                        let _ = entitlements.finalize(reservation, false).await;
+                    }
                     let _ = state
                         .cloudflare_resolver
                         .record_failure(&resolved.connector_id, &error.message)
@@ -3512,16 +3423,17 @@ async fn handle_cloudflare_logpush_inner(
                 }
             };
 
+            if let (Some(entitlements), Some(reservation)) =
+                (&state.autumn_entitlements, reservation.as_ref())
+            {
+                let _ = entitlements.finalize(reservation, true).await;
+            }
+
             let _ = state
                 .cloudflare_resolver
                 .record_success(&resolved.connector_id)
                 .await;
 
-            // Logpush already *checks* the `logs` entitlement above but has never
-            // reported usage against it, so this org consumes quota without ever
-            // metering. Record the volume here (same `decoded_payload.len()` basis
-            // as the OTLP path); switching on the Autumn `track` is a separate,
-            // customer-facing decision.
             if resolved.org_id != SENTINEL_ORG_ID {
                 if let Some(usage) = &state.usage_metrics {
                     usage.record(
@@ -3530,6 +3442,15 @@ async fn handle_cloudflare_logpush_inner(
                         decoded_payload.len() as u64,
                         item_count as u64,
                     );
+                }
+                if reservation.is_none() {
+                    if let Some(tracker) = &state.autumn_tracker {
+                        tracker.track(
+                            &resolved.org_id,
+                            Signal::Logs.path(),
+                            billable_gb(decoded_payload.len() as u64),
+                        );
+                    }
                 }
             }
 
@@ -4790,15 +4711,11 @@ impl PostgresKeyStore {
         let client = self.client().await?;
         client
             .query(
-                // Exercises every join the production lookup uses, so a missing
-                // table or column exits at startup instead of 503'ing requests.
+                // Exercises the routing join used by production lookups.
                 "SELECT k.org_id, \
-                        COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                        COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
-                        COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{}')::text[] AS paused_features \
+                        COALESCE(s.sync_status = 'connected', false) AS self_managed \
                  FROM org_ingest_keys k \
                  LEFT JOIN org_clickhouse_settings s ON s.org_id = k.org_id \
-                 LEFT JOIN org_spend_limits l ON l.org_id = k.org_id \
                  WHERE k.private_key_hash = $1 LIMIT 1",
                 &[&"__ingest_probe_no_match__"],
             )
@@ -4822,12 +4739,9 @@ impl KeyStore for PostgresKeyStore {
         let sql = format!(
             "SELECT k.org_id, \
                     COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                    COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
-                    COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
-                    COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
+                    COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready \
              FROM org_ingest_keys k \
              LEFT JOIN org_clickhouse_settings s ON s.org_id = k.org_id \
-             LEFT JOIN org_spend_limits l ON l.org_id = k.org_id \
              WHERE k.{hash_column} = $2 LIMIT 1"
         );
         let client = self.client().await?;
@@ -4848,8 +4762,6 @@ impl KeyStore for PostgresKeyStore {
             org_id: row.get("org_id"),
             self_managed: row.get("self_managed"),
             clickhouse_ready: row.get("clickhouse_ready"),
-            spend_paused: row.get("spend_paused"),
-            paused_features: row.get("paused_features"),
         }))
     }
 
@@ -4863,12 +4775,9 @@ impl KeyStore for PostgresKeyStore {
         let sql = format!(
             "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
                     COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                    COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
-                    COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
-                    COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
+                    COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready \
              FROM cloudflare_logpush_connectors c \
              LEFT JOIN org_clickhouse_settings s ON s.org_id = c.org_id \
-             LEFT JOIN org_spend_limits l ON l.org_id = c.org_id \
              WHERE c.id = $2 AND c.secret_hash = $3 AND c.enabled = true LIMIT 1"
         );
         let rows = client
@@ -4891,8 +4800,6 @@ impl KeyStore for PostgresKeyStore {
             dataset: row.get("dataset"),
             self_managed: row.get("self_managed"),
             clickhouse_ready: row.get("clickhouse_ready"),
-            spend_paused: row.get("spend_paused"),
-            paused_features: row.get("paused_features"),
         }))
     }
 
@@ -4999,18 +4906,13 @@ impl KeyStore for PostgresKeyStore {
         let client = self.client().await?;
         let rows = client
             .query(
-                // Anchored on a one-row scalar subquery, not on
-                // org_clickhouse_settings: an org can have spend limits and no
-                // BYO-ClickHouse config, and the old FROM would return no row at
-                // all for it — reading as "never paused".
+                // Anchored on a one-row scalar subquery so an org without a
+                // BYO-ClickHouse config still resolves to shared routing.
                 &format!(
                     "SELECT COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                            COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
-                            COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
-                            COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
+                            COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready \
                      FROM (SELECT $2::text AS org_id) o \
-                     LEFT JOIN org_clickhouse_settings s ON s.org_id = o.org_id \
-                     LEFT JOIN org_spend_limits l ON l.org_id = o.org_id LIMIT 1"
+                     LEFT JOIN org_clickhouse_settings s ON s.org_id = o.org_id LIMIT 1"
                 ),
                 &[&revision, &org_id],
             )
@@ -5023,8 +4925,6 @@ impl KeyStore for PostgresKeyStore {
         Ok(Some(OrgRouting {
             self_managed: row.get("self_managed"),
             clickhouse_ready: row.get("clickhouse_ready"),
-            spend_paused: row.get("spend_paused"),
-            paused_features: row.get("paused_features"),
         }))
     }
 
@@ -5098,9 +4998,6 @@ impl KeyStore for StaticKeyStore {
             org_id: self.org_id.clone(),
             self_managed: false,
             clickhouse_ready: false,
-            // Self-hosted / local: no billing provider, so nothing can be paused.
-            spend_paused: false,
-            paused_features: Vec::new(),
         }))
     }
 
@@ -5556,8 +5453,6 @@ mod tests {
             key_id: "abc".to_string(),
             self_managed: false,
             clickhouse_ready: false,
-            spend_paused: false,
-            paused_features: Vec::new(),
         };
 
         enrich_resource_attributes(&mut attributes, &resolved);
@@ -5591,8 +5486,6 @@ mod tests {
             key_id: "abc".to_string(),
             self_managed: false,
             clickhouse_ready: false,
-            spend_paused: false,
-            paused_features: Vec::new(),
         }
     }
 
@@ -5786,8 +5679,6 @@ mod tests {
             secret_key_id: "secret".to_string(),
             self_managed: false,
             clickhouse_ready: false,
-            spend_paused: false,
-            paused_features: Vec::new(),
         };
         let record = serde_json::from_str::<JsonMap<String, JsonValue>>(
             r#"{
@@ -5938,8 +5829,6 @@ mod tests {
                 OrgRouting {
                     self_managed: row.self_managed,
                     clickhouse_ready: row.clickhouse_ready,
-                    spend_paused: false,
-                    paused_features: Vec::new(),
                 },
             );
             self.keys
@@ -5955,8 +5844,6 @@ mod tests {
                 OrgRouting {
                     self_managed: row.self_managed,
                     clickhouse_ready: row.clickhouse_ready,
-                    spend_paused: false,
-                    paused_features: Vec::new(),
                 },
             );
             self.connectors
@@ -6273,8 +6160,6 @@ mod tests {
                 autumn_secret_key: None,
                 autumn_api_url: "https://api.useautumn.com".to_string(),
                 autumn_flush_interval_secs: 1,
-                autumn_enforce_limits: false,
-                autumn_check_cache_ttl_secs: 60,
                 ingest_key_cache_ttl_secs: 60,
                 org_routing_cache_ttl_secs: 5,
                 replay_max_session_bytes: 1024 * 1024 * 1024,
@@ -6384,120 +6269,6 @@ mod tests {
         assert!(!budget.is_exhausted("org_a", "s1").await);
     }
 
-    #[test]
-    fn spend_blocks_signal_pauses_the_whole_org_or_just_the_capped_signal() {
-        // Whole-org pause: the spend ceiling was breached in "pause ingest" mode.
-        assert!(spend_blocks_signal(true, &[], "logs"));
-        assert!(spend_blocks_signal(true, &[], "traces"));
-
-        // A per-feature cap blocks only its own signal — blowing the logs cap
-        // must not stop traces, which is the whole point of a per-feature cap.
-        let caps = vec!["logs".to_string()];
-        assert!(spend_blocks_signal(false, &caps, "logs"));
-        assert!(!spend_blocks_signal(false, &caps, "traces"));
-        assert!(!spend_blocks_signal(false, &caps, "metrics"));
-
-        // The default state — no row in org_spend_limits — never blocks.
-        assert!(!spend_blocks_signal(false, &[], "logs"));
-    }
-
-    #[tokio::test]
-    async fn resolve_ingest_key_carries_spend_pause_state_from_the_key_lookup() {
-        // The cold path builds routing from the key row, so a paused org must be
-        // paused on the very first request after a key-cache miss — not only once
-        // the separate routing cache refreshes.
-        let store = Arc::new(FakeKeyStore::default());
-        store.insert_private(
-            "maple_sk_test_paused",
-            KeyRow {
-                org_id: "org_paused".to_string(),
-                self_managed: false,
-                clickhouse_ready: false,
-                spend_paused: true,
-                paused_features: vec!["logs".to_string()],
-            },
-        );
-
-        let resolved = make_resolver(store)
-            .resolve_ingest_key("maple_sk_test_paused")
-            .await
-            .expect("resolve should succeed")
-            .expect("key should be found");
-
-        assert!(resolved.spend_paused);
-        assert_eq!(resolved.paused_features, vec!["logs".to_string()]);
-        assert!(spend_blocks_signal(
-            resolved.spend_paused,
-            &resolved.paused_features,
-            "traces"
-        ));
-    }
-
-    #[test]
-    fn a_browser_sessions_cap_blocks_replay_without_touching_other_signals() {
-        // Replay is metered as `browser_sessions`, so the cap has to reach it —
-        // a cap that keeps billing is the worst way for a spend limit to fail.
-        let caps = vec![BROWSER_SESSIONS_FEATURE_ID.to_string()];
-
-        let rejection = spend_limit_rejection("org_1", false, &caps, BROWSER_SESSIONS_FEATURE_ID)
-            .expect("a browser_sessions cap must block replay");
-        assert_eq!(rejection.status, StatusCode::PAYMENT_REQUIRED);
-        assert!(rejection.message.contains("Per-feature volume cap"));
-
-        // And only replay: capping sessions must not stop trace ingestion.
-        assert!(spend_limit_rejection("org_1", false, &caps, "traces").is_none());
-
-        // A whole-org pause blocks replay too, with the ceiling's message.
-        let paused = spend_limit_rejection("org_1", true, &[], BROWSER_SESSIONS_FEATURE_ID)
-            .expect("a whole-org pause must block replay");
-        assert!(paused.message.contains("Monthly spend limit reached"));
-
-        // No guardrails configured — never blocked.
-        assert!(spend_limit_rejection("org_1", false, &[], BROWSER_SESSIONS_FEATURE_ID).is_none());
-    }
-
-    #[tokio::test]
-    async fn replay_metadata_is_rejected_and_unmetered_when_sessions_are_capped() {
-        // End-to-end on the handler: the 402 must land before the pipeline write
-        // and before the Autumn `track`, or we bill for data we refused.
-        let store = Arc::new(FakeKeyStore::default());
-        store.insert_private(
-            "maple_sk_test_replay_capped",
-            KeyRow {
-                org_id: "org_replay_capped".to_string(),
-                self_managed: false,
-                clickhouse_ready: false,
-                spend_paused: false,
-                paused_features: vec![BROWSER_SESSIONS_FEATURE_ID.to_string()],
-            },
-        );
-
-        let queue_dir = unique_main_test_dir("replay-capped");
-        let state = test_app_state(
-            store,
-            queue_dir.clone(),
-            "http://127.0.0.1:1".to_string(),
-            Duration::from_secs(30),
-        )
-        .await;
-
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "authorization",
-            "Bearer maple_sk_test_replay_capped".parse().unwrap(),
-        );
-        let body = Bytes::from(r#"{"session_id":"s1","version":1,"status":"active"}"#.to_string());
-
-        let error = handle_replay_meta_inner(&state, &headers, body)
-            .await
-            .expect_err("a browser_sessions cap must reject replay metadata");
-        assert_eq!(error.status, StatusCode::PAYMENT_REQUIRED);
-
-        // `state.autumn_tracker` is None in tests, so the assertion that matters
-        // is structural: the gate returns before the metering block is reached.
-        let _ = std::fs::remove_dir_all(&queue_dir);
-    }
-
     /// What a fake R2 recorded for one PUT.
     #[derive(Debug)]
     struct CapturedPut {
@@ -6591,8 +6362,6 @@ mod tests {
                 // `native_rows_pipeline_for` before reaching the blob path.
                 self_managed: true,
                 clickhouse_ready: true,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
         test_app_state(
@@ -6768,8 +6537,6 @@ mod tests {
                 org_id: "org_shared".to_string(),
                 self_managed: false,
                 clickhouse_ready: false,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
 
@@ -6793,8 +6560,6 @@ mod tests {
                 org_id: "org_byo".to_string(),
                 self_managed: true,
                 clickhouse_ready: true,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
 
@@ -6818,8 +6583,6 @@ mod tests {
                 org_id: "org_stale".to_string(),
                 self_managed: true,
                 clickhouse_ready: false,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
 
@@ -6846,8 +6609,6 @@ mod tests {
                 org_id: "org_transition".to_string(),
                 self_managed: false,
                 clickhouse_ready: false,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
 
@@ -6865,8 +6626,6 @@ mod tests {
             OrgRouting {
                 self_managed: true,
                 clickhouse_ready: true,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -6899,8 +6658,6 @@ mod tests {
                 org_id: "org_d1_blip".to_string(),
                 self_managed: false,
                 clickhouse_ready: false,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
 
@@ -6917,8 +6674,6 @@ mod tests {
             OrgRouting {
                 self_managed: true,
                 clickhouse_ready: true,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -6966,8 +6721,6 @@ mod tests {
                 dataset: "http_requests".to_string(),
                 self_managed: false,
                 clickhouse_ready: false,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
         let routing = make_routing_resolver(Arc::clone(&store), Duration::from_millis(5));
@@ -6995,8 +6748,6 @@ mod tests {
             OrgRouting {
                 self_managed: true,
                 clickhouse_ready: true,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -7157,8 +6908,6 @@ mod tests {
                 org_id: "org_span_tree".to_string(),
                 self_managed: true,
                 clickhouse_ready: true,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
         store.insert_clickhouse_target(
@@ -7185,7 +6934,7 @@ mod tests {
 
         // Stands in for the `ingest` server span that handle_signal creates.
         let server_span = tracing::info_span!("ingest");
-        let (response, item_count, _, _) = handle_signal_inner(
+        let (response, item_count, _, _, _) = handle_signal_inner(
             &state,
             &test_headers(raw_key),
             Bytes::from(test_log_request("span tree").encode_to_vec()),
@@ -7253,8 +7002,6 @@ mod tests {
                 org_id: "org_forward_ready".to_string(),
                 self_managed: false,
                 clickhouse_ready: false,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
         let state = test_app_state(
@@ -7266,7 +7013,7 @@ mod tests {
         .await;
 
         let first_payload = test_log_request("before setup").encode_to_vec();
-        let (first_response, first_count, _, _) = handle_signal_inner(
+        let (first_response, first_count, _, _, _) = handle_signal_inner(
             &state,
             &test_headers(raw_key),
             Bytes::from(first_payload),
@@ -7295,8 +7042,6 @@ mod tests {
             OrgRouting {
                 self_managed: true,
                 clickhouse_ready: true,
-                spend_paused: false,
-                paused_features: Vec::new(),
             },
         );
         store.insert_clickhouse_target(
@@ -7314,7 +7059,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let second_payload = test_log_request("after setup").encode_to_vec();
-        let (second_response, second_count, _, _) = handle_signal_inner(
+        let (second_response, second_count, _, _, _) = handle_signal_inner(
             &state,
             &test_headers(raw_key),
             Bytes::from(second_payload),

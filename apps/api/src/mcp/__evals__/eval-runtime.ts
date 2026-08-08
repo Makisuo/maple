@@ -4,8 +4,8 @@ import { MainLive } from "@/app"
 import { Env } from "@/platform/Env"
 import { WorkerEnvironment } from "@/platform/WorkerEnvironment"
 import { createTestDb } from "@/platform/test-pglite"
-import { mapleToolDefinitions } from "@/mcp/tools/registry"
-import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
+import { McpToolExecutor } from "@/mcp/dispatcher"
+import type { TenantContext } from "@/services/auth/tenant-context"
 import { FIXTURES } from "./utils"
 
 const INTERNAL_TOKEN = "eval-internal-token"
@@ -27,8 +27,7 @@ const testEnv = (): Record<string, string> => ({
 export interface EvalRuntime {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	readonly runtime: ManagedRuntime.ManagedRuntime<any, never>
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	readonly requestLayer: Layer.Layer<any>
+	readonly tenant: TenantContext
 	readonly dispose: () => Promise<void>
 }
 
@@ -58,16 +57,16 @@ export const makeEvalRuntime = (): EvalRuntime => {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const runtime = ManagedRuntime.make(layer as any) as ManagedRuntime.ManagedRuntime<any, never>
 
-	const requestLayer = Layer.succeed(CurrentMcpTenant, {
+	const tenant: TenantContext = {
 		orgId: Schema.decodeUnknownSync(OrgId)(FIXTURES.orgId),
 		userId: Schema.decodeUnknownSync(UserId)("internal-service"),
 		roles: [],
 		authMode: "self_hosted",
-	})
+	}
 
 	return {
 		runtime,
-		requestLayer,
+		tenant,
 		dispose: async () => {
 			await runtime.dispose()
 			await testDb.close()
@@ -85,8 +84,7 @@ export const runToolDirect = async (
 	params: unknown,
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> => {
-	const definition = mapleToolDefinitions.find((d) => d.name === name)
-	if (!definition) throw new Error(`unknown tool: ${name}`)
-	const decoded = Schema.decodeUnknownSync(definition.schema)(params)
-	return rt.runtime.runPromise(definition.handler(decoded).pipe(Effect.provide(rt.requestLayer)))
+	return rt.runtime.runPromise(
+		McpToolExecutor.pipe(Effect.flatMap((executor) => executor.execute(rt.tenant, name, params))),
+	)
 }

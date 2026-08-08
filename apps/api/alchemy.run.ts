@@ -184,7 +184,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			//               SlackEventsRouter (app_uninstalled/tokens_revoked), which
 			//               catches deliveries Slack never sent/retried through, or
 			//               installs that predate the webhook
-			crons: ["0 */12 * * *", "0 * * * *", "0 */6 * * *", "5 * * * *"],
+			crons: ["0 */12 * * *", "0 * * * *", "0 */6 * * *"],
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
