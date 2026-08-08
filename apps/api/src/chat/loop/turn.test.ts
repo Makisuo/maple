@@ -350,19 +350,28 @@ const fold = (events: ReadonlyArray<ChatTurnEvent>): string =>
 	}, "")
 
 describe("runChatTurn retry", () => {
-	it("retracts nothing when the failed attempt's batch never flushed", async () => {
+	it("retracts exactly what a sub-batch attempt had flushed, whatever that was", async () => {
 		const result = await Effect.runPromise(
 			collect([{ events: [textDelta("Hello wo")], fail: true }, [textDelta("Hello world."), finish()]]),
 		)
 
-		// `Stream.groupedWithin` drops its pending buffer on an upstream failure rather than
-		// flushing it, so a provider that dies inside one batching window emitted nothing and there
-		// is nothing to take back. The marker is still emitted — it is also the progress signal.
+		// Below `DELTA_BATCH_SIZE`, so whether this attempt emitted anything is a race between the
+		// provider's failure and the 16ms window: `Stream.groupedWithin` drops a pending buffer on an
+		// upstream failure, but a window that fires first ships it. Both are correct — the invariant
+		// is that the marker takes back exactly what reached a consumer and no more, so the reader's
+		// fold lands on the retry's text alone. Asserting a literal count here would be asserting
+		// which fiber won.
 		const retracted = retries(result.events)
 		assert.lengthOf(retracted, 1)
-		assert.equal(retracted[0]?.type === "turn-retry" ? retracted[0].retractChars : undefined, 0)
+		const at = result.events.findIndex((event) => event.type === "turn-retry")
+		const marker = result.events[at]
+		const flushedBefore = textOf(result.events.slice(0, at))
+		assert.equal(
+			marker?.type === "turn-retry" ? marker.retractChars : undefined,
+			flushedBefore.length,
+		)
 		assert.equal(result.calls, 2)
-		assert.equal(textOf(result.events), "Hello world.")
+		assert.equal(fold(result.events), "Hello world.")
 		assert.lengthOf(terminal(result.events), 1)
 	})
 
