@@ -7,6 +7,7 @@ import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tan
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import { Badge } from "@maple/ui/components/ui/badge"
+import { ArrowUpDownIcon } from "@/components/icons"
 import { type Trace } from "@/api/warehouse/traces"
 import type { TracesSearchParams } from "@/routes/traces"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
@@ -18,6 +19,9 @@ import { useInfiniteTraces, FETCH_THRESHOLD } from "@/hooks/use-infinite-traces"
 import { useListNavigation } from "@/hooks/use-list-navigation"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 
+type TraceSortKey = NonNullable<TracesSearchParams["sortBy"]>
+type TraceSortDir = NonNullable<TracesSearchParams["sortDir"]>
+
 interface TracesTableViewProps {
 	allData: Trace[]
 	isFetchingNextPage: boolean
@@ -26,6 +30,9 @@ interface TracesTableViewProps {
 	fetchNextPage: () => void
 	waiting: boolean
 	onTraceClick: (trace: Trace) => void
+	sortBy: TraceSortKey
+	sortDir: TraceSortDir
+	onSortChange: (key: TraceSortKey) => void
 }
 
 /**
@@ -74,6 +81,43 @@ function HttpStatusBadge({ statusCode }: { statusCode: number }) {
 		>
 			{statusCode}
 		</Badge>
+	)
+}
+
+/**
+ * Clickable column header. Sorting is server-side — the list is paged, so
+ * reordering the rows already fetched would only sort the current window.
+ */
+function SortableHeader({
+	label,
+	sortKey,
+	activeKey,
+	dir,
+	onSort,
+}: {
+	label: string
+	sortKey: TraceSortKey
+	activeKey: TraceSortKey
+	dir: TraceSortDir
+	onSort: (key: TraceSortKey) => void
+}) {
+	const active = activeKey === sortKey
+	return (
+		<button
+			type="button"
+			onClick={() => onSort(sortKey)}
+			className={`inline-flex items-center gap-1 transition-colors ${
+				active ? "text-foreground" : "hover:text-foreground"
+			}`}
+		>
+			{label}
+			<ArrowUpDownIcon
+				size={10}
+				className={`transition-opacity ${active ? "opacity-100" : "opacity-40"} ${
+					active && dir === "asc" ? "rotate-180" : ""
+				}`}
+			/>
+		</button>
 	)
 }
 
@@ -164,6 +208,9 @@ function TracesTableView({
 	fetchNextPage,
 	waiting,
 	onTraceClick,
+	sortBy,
+	sortDir,
+	onSortChange,
 }: TracesTableViewProps) {
 	const { effectiveTimezone } = useTimezonePreference()
 	const scrollContainerRef = React.useRef<HTMLDivElement>(null)
@@ -256,7 +303,15 @@ function TracesTableView({
 			},
 			{
 				accessorKey: "durationMs",
-				header: "Duration",
+				header: () => (
+					<SortableHeader
+						label="Duration"
+						sortKey="durationMs"
+						activeKey={sortBy}
+						dir={sortDir}
+						onSort={onSortChange}
+					/>
+				),
 				size: 100,
 				cell: ({ row }) => (
 					<span className="font-mono text-xs">{formatDuration(row.original.durationMs)}</span>
@@ -274,7 +329,7 @@ function TracesTableView({
 					),
 			},
 		],
-		[effectiveTimezone],
+		[effectiveTimezone, sortBy, sortDir, onSortChange],
 	)
 
 	const table = useReactTable({
@@ -359,6 +414,13 @@ function TracesTableView({
 								{headerGroup.headers.map((header) => (
 									<th
 										key={header.id}
+										aria-sort={
+											header.id === sortBy
+												? sortDir === "asc"
+													? "ascending"
+													: "descending"
+												: undefined
+										}
 										className={`${HEADER_CELL_CLASS} ${columnClasses(header.id).responsive ?? ""}`}
 										style={{
 											width: header.getSize() !== 150 ? header.getSize() : undefined,
@@ -447,6 +509,9 @@ function TracesTableView({
 
 export function TracesTable({ filters }: TracesTableProps) {
 	const navigate = useNavigate()
+	// Bound to the traces route so the sort patch keeps the rest of the search
+	// params typed and intact.
+	const navigateTraces = useNavigate({ from: "/traces/" })
 	const { firstPageResult, allData, isFetchingNextPage, hasNextPage, isCapped, fetchNextPage } =
 		useInfiniteTraces(filters)
 
@@ -465,6 +530,19 @@ export function TracesTable({ filters }: TracesTableProps) {
 		[navigate],
 	)
 
+	const sortBy = filters?.sortBy ?? "timestamp"
+	const sortDir = filters?.sortDir ?? "desc"
+
+	const onSortChange = React.useCallback(
+		(key: TraceSortKey) => {
+			// Same column toggles direction; a new column starts at desc
+			// (slowest / newest first, the useful end of both).
+			const nextDir: TraceSortDir = key === sortBy && sortDir === "desc" ? "asc" : "desc"
+			navigateTraces({ search: (prev) => ({ ...prev, sortBy: key, sortDir: nextDir }) })
+		},
+		[navigateTraces, sortBy, sortDir],
+	)
+
 	return Result.builder(firstPageResult)
 		.onInitial(() => <LoadingState />)
 		.onError((error) => <QueryErrorState error={error} />)
@@ -477,6 +555,9 @@ export function TracesTable({ filters }: TracesTableProps) {
 				fetchNextPage={fetchNextPage}
 				waiting={result.waiting ?? false}
 				onTraceClick={onTraceClick}
+				sortBy={sortBy}
+				sortDir={sortDir}
+				onSortChange={onSortChange}
 			/>
 		))
 		.render()

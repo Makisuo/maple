@@ -52,6 +52,8 @@ const ListTracesInputSchema = Schema.Struct({
 		Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(1000)),
 	),
 	offset: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+	sortBy: Schema.optional(Schema.Literals(["timestamp", "durationMs"])),
+	sortDir: Schema.optional(Schema.Literals(["asc", "desc"])),
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
 	// Every inclusion facet is multi-select in the sidebar, so each is an array
@@ -290,6 +292,8 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 			source: "traces" as const,
 			limit,
 			offset,
+			sortBy: input.sortBy,
+			sortDir: input.sortDir,
 			// Only project the span attributes the list UI actually renders
 			// (via transformSpanListRow → getHttpInfo). Avoids reading the full
 			// SpanAttributes / ResourceAttributes maps — large win on wide traces.

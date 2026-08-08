@@ -20,6 +20,9 @@ import { AutocompleteValuesProvider } from "@/hooks/use-autocomplete-values"
 
 const ContainsMatchMode = Schema.optional(Schema.Literals(["contains"]))
 
+const TraceSortKeyParam = Schema.optional(Schema.Literals(["timestamp", "durationMs"]))
+const SortDirParam = Schema.optional(Schema.Literals(["asc", "desc"]))
+
 const AttributeFilterParam = Schema.Struct({
 	key: Schema.String,
 	value: Schema.String,
@@ -51,6 +54,10 @@ const tracesSearchSchema = Schema.Struct({
 	excludedNamespaces: OptionalStringArrayParam,
 	excludedHttpMethods: OptionalStringArrayParam,
 	excludedHttpStatusCodes: OptionalStringArrayParam,
+	// Sorting is server-side: the list is paged, so sorting the rows already
+	// fetched would only reorder the current window.
+	sortBy: TraceSortKeyParam,
+	sortDir: SortDirParam,
 	...TimeRangeSearchFields,
 })
 

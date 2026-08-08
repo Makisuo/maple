@@ -745,7 +745,14 @@ export interface TracesListOpts extends TracesQueryOpts {
 	 */
 	cursor?: string
 	columns?: readonly string[]
+	/** Defaults to `"timestamp"`. */
+	sortBy?: TracesListSortKey
+	/** Defaults to `"desc"`. */
+	sortDir?: TracesListSortDir
 }
+
+export type TracesListSortKey = "timestamp" | "durationMs"
+export type TracesListSortDir = "asc" | "desc"
 
 export interface TracesListOutput {
 	readonly traceId: string
@@ -776,6 +783,16 @@ export interface TracesListOutput {
  * newest matching timestamp). Stage 2 gates on `Timestamp >= cutoff`, so the
  * heavy columns are materialized only for the small slice of rows at/after the
  * cutoff. The outer `LIMIT` / `OFFSET` trims any ties at the cutoff timestamp.
+ *
+ * Sorting by `durationMs` keeps the same two-stage shape but moves the cutoff
+ * onto the sort column — swapping only the stage-2 `ORDER BY` would sort by
+ * duration *within the newest N rows* rather than across the window. The cutoff
+ * is the tuple `(Duration, Timestamp)` rather than the scalar `Duration`:
+ * durations tie constantly (every `Duration = 0` span), and a scalar
+ * `Duration <= cutoff` gate on an ascending sort would drag the whole window
+ * back into stage 2. ClickHouse compares tuples lexicographically, and both
+ * order keys point the same way, so one comparison against the min (desc) or
+ * max (asc) tuple gates exactly the rows the outer LIMIT/OFFSET can reach.
  */
 export function tracesListQuery(opts: TracesListOpts) {
 	const limit = opts.limit ?? 25
@@ -810,20 +827,42 @@ export function tracesListQuery(opts: TracesListOpts) {
 		CH.when(cursor, (v: string) => $.Timestamp.lt(v)),
 	]
 
-	// Stage 1: cheap scan — only `Timestamp` is read. Compiled with placeholders
-	// intact ({} params) so the outer `CH.compile()` substitutes them once.
-	// Limit is `limit + offset` so the cutoff covers every row the outer query
-	// might examine, not just the slice it returns.
-	const cutoffInner = from(Traces)
-		.select(($) => ({ ts: $.Timestamp }))
-		.where(baseWhere)
-		.orderBy(["ts", "desc"])
-		.limit(limit + offset)
-	const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true }).sql
-	const cutoff = CH.rawExpr<string>(`(SELECT min(ts) FROM (${cutoffSql}))`)
+	const sortBy = opts.sortBy ?? "timestamp"
+	const sortDir = opts.sortDir ?? "desc"
 
-	// Stage 2: heavy columns read only for rows at/after the cutoff timestamp.
-	let q = from(Traces)
+	// Stage 1: cheap scan — only the sort columns are read. Compiled with
+	// placeholders intact ({} params) so the outer `CH.compile()` substitutes them
+	// once. Limit is `limit + offset` so the cutoff covers every row the outer
+	// query might examine, not just the slice it returns.
+	const cutoffGate = ($: ColumnAccessor<typeof Traces.columns>): CH.Condition => {
+		if (sortBy === "durationMs") {
+			const cutoffInner = from(Traces)
+				.select((c) => ({ d: c.Duration, ts: c.Timestamp }))
+				.where(baseWhere)
+				.orderBy(["d", sortDir], ["ts", sortDir])
+				.limit(limit + offset)
+			const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true }).sql
+			// Descending reads from the largest tuple down, so the cutoff is the
+			// smallest tuple in the slice — and vice versa.
+			const agg = sortDir === "desc" ? "min" : "max"
+			const cutoff = CH.rawExpr<unknown>(`(SELECT ${agg}((d, ts)) FROM (${cutoffSql}))`)
+			const sortKey = CH.rawExpr<unknown>("(Duration, Timestamp)")
+			return sortDir === "desc" ? sortKey.gte(cutoff) : sortKey.lte(cutoff)
+		}
+
+		const cutoffInner = from(Traces)
+			.select((c) => ({ ts: c.Timestamp }))
+			.where(baseWhere)
+			.orderBy(["ts", sortDir])
+			.limit(limit + offset)
+		const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true }).sql
+		const agg = sortDir === "desc" ? "min" : "max"
+		const cutoff = CH.rawExpr<string>(`(SELECT ${agg}(ts) FROM (${cutoffSql}))`)
+		return sortDir === "desc" ? $.Timestamp.gte(cutoff) : $.Timestamp.lte(cutoff)
+	}
+
+	// Stage 2: heavy columns read only for rows at/after the cutoff.
+	const stage2 = from(Traces)
 		.select(($) => ({
 			traceId: $.TraceId,
 			timestamp: $.Timestamp,
@@ -838,8 +877,13 @@ export function tracesListQuery(opts: TracesListOpts) {
 			spanAttributes: spanAttrExpr ?? $.SpanAttributes,
 			resourceAttributes: resourceAttrExpr ?? $.ResourceAttributes,
 		}))
-		.where(($) => [...baseWhere($), $.Timestamp.gte(cutoff)])
-		.orderBy(["timestamp", "desc"])
+		.where(($) => [...baseWhere($), cutoffGate($)])
+
+	let q = (
+		sortBy === "durationMs"
+			? stage2.orderBy(["durationMs", sortDir], ["timestamp", sortDir])
+			: stage2.orderBy(["timestamp", sortDir])
+	)
 		.limit(limit)
 		.format("JSON")
 

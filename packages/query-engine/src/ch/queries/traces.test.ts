@@ -74,6 +74,38 @@ describe("tracesListQuery", () => {
 		expect(sql).toContain("FORMAT JSON")
 	})
 
+	it("keeps the timestamp cutoff untouched when sorting explicitly by timestamp desc", () => {
+		const explicit = compileCH(tracesListQuery({ sortBy: "timestamp", sortDir: "desc" }), baseParams).sql
+		expect(explicit).toBe(compileCH(tracesListQuery({}), baseParams).sql)
+		expect(explicit).toContain("SELECT min(ts) FROM")
+	})
+
+	it("moves the cutoff onto (Duration, Timestamp) when sorting by duration", () => {
+		const { sql } = compileCH(tracesListQuery({ sortBy: "durationMs", limit: 50 }), baseParams)
+		// Stage 1 ranks by the sort column, not by recency.
+		expect(sql).toContain("ORDER BY d DESC, ts DESC")
+		expect(sql).toContain("SELECT min((d, ts)) FROM")
+		expect(sql).toContain("(Duration, Timestamp) >= (SELECT min((d, ts))")
+		expect(sql).toContain("ORDER BY durationMs DESC, timestamp DESC")
+		expect(sql).not.toContain("SELECT min(ts) FROM")
+	})
+
+	it("flips the cutoff aggregate and comparison for an ascending duration sort", () => {
+		const { sql } = compileCH(tracesListQuery({ sortBy: "durationMs", sortDir: "asc" }), baseParams)
+		expect(sql).toContain("ORDER BY d ASC, ts ASC")
+		expect(sql).toContain("(Duration, Timestamp) <= (SELECT max((d, ts))")
+		expect(sql).toContain("ORDER BY durationMs ASC, timestamp ASC")
+	})
+
+	it("covers limit + offset rows in the duration cutoff so deep pages stay correct", () => {
+		const { sql } = compileCH(
+			tracesListQuery({ sortBy: "durationMs", limit: 50, offset: 100 }),
+			baseParams,
+		)
+		expect(sql).toContain("LIMIT 150")
+		expect(sql).toContain("OFFSET 100")
+	})
+
 	it("applies cursor pagination", () => {
 		const q = tracesListQuery({ cursor: "2024-01-01T12:00:00" })
 		const { sql } = compileCH(q, baseParams)

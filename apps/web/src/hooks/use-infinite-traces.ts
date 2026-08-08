@@ -51,6 +51,8 @@ function buildQueryParams(
 		excludedNamespaces: filters?.excludedNamespaces,
 		excludedHttpMethods: filters?.excludedHttpMethods,
 		excludedHttpStatusCodes: filters?.excludedHttpStatusCodes,
+		sortBy: filters?.sortBy,
+		sortDir: filters?.sortDir,
 	}
 }
 

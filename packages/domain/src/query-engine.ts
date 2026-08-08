@@ -245,6 +245,8 @@ export const TracesListQuery = Schema.Struct({
 		),
 	),
 	cursor: Schema.optional(Schema.String),
+	sortBy: Schema.optional(Schema.Literals(["timestamp", "durationMs"])),
+	sortDir: Schema.optional(Schema.Literals(["asc", "desc"])),
 })
 export type TracesListQuery = Schema.Schema.Type<typeof TracesListQuery>
 

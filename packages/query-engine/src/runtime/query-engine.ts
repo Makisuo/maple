@@ -1602,6 +1602,8 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						limit: clampedLimit,
 						offset: tracesQuery.offset,
 						cursor: tracesQuery.cursor,
+						sortBy: tracesQuery.sortBy,
+						sortDir: tracesQuery.sortDir,
 						columns: (tracesQuery as { columns?: readonly string[] }).columns as
 							| string[]
 							| undefined,
@@ -1619,6 +1621,9 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						traceId: row.traceId,
 						timestamp: String(row.timestamp),
 						spanId: row.spanId,
+						// Empty for a root span. Lets the traces list tell a child-span row
+						// apart from a root one and deep-link `?spanId=` only for children.
+						parentSpanId: row.parentSpanId,
 						serviceName: row.serviceName,
 						spanName: row.spanName,
 						durationMs: Number(row.durationMs),
