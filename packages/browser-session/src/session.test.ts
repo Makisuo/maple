@@ -8,6 +8,7 @@ import {
 	nextMetaVersion,
 	onSessionRotate,
 	peekSession,
+	resetSessionStorageStateForTests,
 } from "./session"
 import { resetVisitorCacheForTests } from "./visitor"
 
@@ -15,10 +16,13 @@ import { resetVisitorCacheForTests } from "./visitor"
 // rotation logic can be exercised under Node with a controllable clock.
 class FakeStorage {
 	private store = new Map<string, string>()
+	/** Reads keep working while writes throw — the quota-exhaustion shape. */
+	writesThrow = false
 	getItem(key: string): string | null {
 		return this.store.has(key) ? this.store.get(key)! : null
 	}
 	setItem(key: string, value: string): void {
+		if (this.writesThrow) throw new DOMException("QuotaExceededError")
 		this.store.set(key, value)
 	}
 	clear(): void {
@@ -36,6 +40,7 @@ beforeEach(() => {
 	vi.setSystemTime(new Date("2026-05-22T12:00:00Z"))
 	storage = new FakeStorage()
 	resetVisitorCacheForTests()
+	resetSessionStorageStateForTests()
 	;(globalThis as { window?: unknown }).window = {
 		sessionStorage: storage,
 		localStorage: new FakeStorage(),
@@ -236,6 +241,31 @@ describe("nextMetaVersion", () => {
 		vi.advanceTimersByTime(31 * MINUTE)
 		getSession() // rotation resets it
 		expect(nextMetaVersion()).toBe(1)
+	})
+
+	it("keeps incrementing when reads succeed but writes throw", () => {
+		// Quota exhaustion: getItem keeps returning the last durable snapshot while
+		// setItem throws. Before the ephemeral fallback outranked storage this
+		// pinned the counter at 1, and since the gateway meters `version == 1`
+		// rows, every 60s heartbeat was billed as a whole new session.
+		getSession()
+		storage.writesThrow = true
+
+		expect(nextMetaVersion()).toBe(1)
+		expect(nextMetaVersion()).toBe(2)
+		expect(nextMetaVersion()).toBe(3)
+	})
+
+	it("hands control back to storage once writes recover", () => {
+		getSession()
+		storage.writesThrow = true
+		nextMetaVersion() // 1
+		nextMetaVersion() // 2
+		storage.writesThrow = false
+
+		expect(nextMetaVersion()).toBe(3)
+		// The durable copy is authoritative again, so the counter survives a reload.
+		expect(JSON.parse(storage.getItem(STORAGE_KEY)!).metaVersion).toBe(3)
 	})
 })
 

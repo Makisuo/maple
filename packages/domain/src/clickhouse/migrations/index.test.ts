@@ -15,6 +15,7 @@ import {
 import { migration_0010_search_indexes } from "./0010_search_indexes"
 import { migration_0011_session_analytics_columns } from "./0011_session_analytics_columns"
 import { migration_0012_session_event_attribute_keys } from "./0012_session_event_attribute_keys"
+import { migration_0013_session_billable_start } from "./0013_session_billable_start"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -29,12 +30,21 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
-		expect(migrations.at(-1)).toBe(migration_0012_session_event_attribute_keys)
-		expect(latestMigrationVersion).toBe(12)
-		// 0010 is performance-only, so the ingest-gating version skips it: 9 → 12.
-		expect(clickHouseSchemaVersion).toBe("12")
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+		expect(migrations.at(-1)).toBe(migration_0013_session_billable_start)
+		expect(latestMigrationVersion).toBe(13)
+		// 0010 is performance-only, so the ingest-gating version skips it: 9 → 13.
+		expect(clickHouseSchemaVersion).toBe("13")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
+	})
+
+	it("adds BillableStart with a constant default, so the ALTER stays metadata-only", () => {
+		const sql = migration_0013_session_billable_start.statements.join("\n")
+
+		// Trailing column + constant DEFAULT is what keeps this off the mutation
+		// path; without the default, rows from SDKs predating the field quarantine.
+		expect(sql).toContain("ADD COLUMN IF NOT EXISTS BillableStart UInt8 DEFAULT 0")
+		expect(sql).not.toContain("MATERIALIZE COLUMN")
 	})
 
 	it("adds session analytics columns with defaults so older SDK rows never quarantine", () => {

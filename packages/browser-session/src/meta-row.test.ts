@@ -206,3 +206,43 @@ describe("buildSessionMetaRow analytics fields", () => {
 		expect(row.group_id).toBe("")
 	})
 })
+
+describe("buildSessionMetaRow billing marker", () => {
+	// This key is the wire contract between three layers that cannot see each
+	// other's types: the SDK writes it, the Rust gateway meters on it
+	// (`is_billable_visit_start`), and the warehouse maps it via
+	// `$.billable_start`. Renaming it here silently stops billing.
+	it("emits billable_start as 0/1, never a boolean or an absent key", () => {
+		const claimed = buildSessionMetaRow({
+			...base,
+			status: "active",
+			recorded: false,
+			billableStart: true,
+		})
+		expect(claimed.billable_start).toBe(1)
+
+		const unclaimed = buildSessionMetaRow({
+			...base,
+			status: "active",
+			recorded: false,
+			billableStart: false,
+		})
+		expect(unclaimed.billable_start).toBe(0)
+
+		// Absent input must still emit the key — the column is UInt8, and an
+		// omitted key would read as the DEFAULT rather than an explicit "no".
+		const unset = buildSessionMetaRow({ ...base, status: "active", recorded: false })
+		expect(unset.billable_start).toBe(0)
+	})
+
+	it("keeps the marker on the ended row, which is what survives the merge", () => {
+		const row = buildSessionMetaRow({
+			...base,
+			version: 7,
+			status: "ended",
+			recorded: false,
+			billableStart: true,
+		})
+		expect(row.billable_start).toBe(1)
+	})
+})

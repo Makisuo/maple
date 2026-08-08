@@ -21,9 +21,12 @@ import { setupStandaloneSession } from "./standalone-session.js"
 import { getCurrentIdentity } from "./user.js"
 
 export interface ClientReplayConfig {
-	/** Record rrweb session replays. Default `true`. */
+	/** Record rrweb session replays. Default `true`. Session analytics are kept. */
 	readonly enabled?: boolean | undefined
-	/** Fraction of sessions to record, 0–1. Default `1`. */
+	/**
+	 * Fraction of sessions to capture, 0–1. Default `1`. An unsampled visitor
+	 * produces no session rows and is not billed.
+	 */
 	readonly sampleRate?: number | undefined
 	/** Mask all `<input>` values in the recording. Default `true`. */
 	readonly maskAllInputs?: boolean | undefined
@@ -78,7 +81,12 @@ export const startClientSession = (config: ClientSessionConfig): ClientSessionHa
 		maskAllText: config.replay?.maskAllText ?? false,
 	}
 	const replayEnabled = (config.replay?.enabled ?? true) && typeof document !== "undefined"
-	const sampled = replayEnabled && Math.random() < (config.replay?.sampleRate ?? 1)
+	// One draw, two decisions — see the same split in `@maple-dev/browser`'s
+	// `init.ts`. The sample rate reaches the metadata rows because those are what
+	// Autumn bills; `enabled: false` drops only the recording, never the session.
+	const sampledIn = Math.random() < (config.replay?.sampleRate ?? 1)
+	const captureSession = sampledIn
+	const sampled = replayEnabled && sampledIn
 	let runtime: Runtime | undefined
 	let stopped = false
 	let generation = 0
@@ -109,6 +117,10 @@ export const startClientSession = (config: ClientSessionConfig): ClientSessionHa
 		setVisitorTracking((config.privacy?.persistVisitorId ?? true) && mayPersistIdentifier())
 		const session = (rotateOnNextStart ? rotateSession() : undefined) ?? getSession()
 		rotateOnNextStart = false
+		// Sampled out: no sink, no metadata row, nothing billed. Leaving `runtime`
+		// unset keeps `stopRuntime` a no-op, which is exactly right — there is
+		// nothing to flush.
+		if (!captureSession) return
 		const next: Runtime = { sink: startEventSink(engineConfig, session.id) }
 		runtime = next
 		const ownGeneration = ++generation

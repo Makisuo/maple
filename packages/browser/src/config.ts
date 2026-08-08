@@ -43,9 +43,20 @@ export interface MapleBrowserConfig {
 		readonly instrumentFetch?: boolean
 	}
 	readonly replay?: {
-		/** Default true. */
+		/**
+		 * Whether to record video of captured sessions. Default true. Turning this
+		 * off keeps session analytics — page views, `track()` calls, durations —
+		 * and drops only the rrweb recording.
+		 */
 		readonly enabled?: boolean
-		/** Fraction of sessions to record, 0–1. Default 1. */
+		/**
+		 * Fraction of sessions to capture, 0–1. Default 1.
+		 *
+		 * This is the billing lever: an unsampled visitor produces no session rows
+		 * at all, so they cost nothing and appear nowhere in session analytics. It
+		 * is not a recording-only sample — dropping it to 0.1 means one session in
+		 * ten exists, not ten in ten of which one has video.
+		 */
 		readonly sampleRate?: number
 	}
 	readonly privacy?: {

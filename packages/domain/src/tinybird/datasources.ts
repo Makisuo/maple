@@ -1799,6 +1799,29 @@ export const sessionReplays = defineDatasource("session_replays", {
 		LastActivityAt: column(t.dateTime64(9).nullable(), {
 			jsonPath: "$.last_activity_at",
 		}),
+
+		/**
+		 * Whether this session was billed to Autumn as a browser session.
+		 *
+		 * The billed unit is a *visit*, not a session row: `SessionId` lives in
+		 * sessionStorage and is therefore scoped per tab and per origin, so a
+		 * visitor with four tabs open owns four sessions. The SDK claims a visit
+		 * once per visitor per 30-minute idle window against a cookie shared across
+		 * subdomains, and only the claiming session carries a 1 here.
+		 *
+		 * Set on every row of a billable session, not just the first, because this
+		 * is a ReplacingMergeTree that replaces the whole row at the latest
+		 * `Version` — a flag present only on the first row would be erased by the
+		 * unload row. `countIf(BillableStart = 1)` is what reproduces the invoice;
+		 * `uniq(SessionId)` counts sessions, which is the larger number.
+		 *
+		 * Defaults to 0, so rows from SDK bundles predating the field read as
+		 * unbilled here even though the gateway did bill them under the older
+		 * `Version = 1` rule.
+		 */
+		BillableStart: column(t.uint8().default(0), {
+			jsonPath: "$.billable_start",
+		}),
 	},
 	engine: engine.replacingMergeTree({
 		partitionKey: "toDate(StartTime)",

@@ -5,6 +5,7 @@ import {
 	type SessionSuspendOptions,
 	startSessionLifecycle,
 } from "./session-lifecycle"
+import { resetVisitClaimForTests } from "./visit"
 import { resetVisitorCacheForTests } from "./visitor"
 
 // Same in-memory storage stand-in session.test.ts uses, so the rotation logic
@@ -90,6 +91,9 @@ beforeEach(() => {
 	documentListeners = new Listeners()
 	windowListeners = new Listeners()
 	resetVisitorCacheForTests()
+	// The claim's in-memory fallback is module state; without this a later test
+	// inherits the previous one's paid visit and reports itself unbillable.
+	resetVisitClaimForTests()
 	doc = {
 		visibilityState: "visible",
 		addEventListener: documentListeners.add,
@@ -206,6 +210,62 @@ describe("idle rotation", () => {
 		expect(onSessionChange).toHaveBeenCalledWith(handle!.sessionId)
 		// Capture restarts under the new record, not the replaced one.
 		expect(onStart).toHaveBeenLastCalledWith(expect.objectContaining({ id: handle!.sessionId }))
+	})
+})
+
+describe("billable_start", () => {
+	it("stays on every row of the session, so the merged row reports the charge", () => {
+		const handle = start()
+		expect(last().billable_start).toBe(1)
+		expect(last().version).toBe(1)
+
+		// Heartbeats and the ended row repeat the flag but not version 1, which is
+		// the conjunction the gateway meters on. Dropping it here would let the
+		// ended row replace the flagged one in the ReplacingMergeTree and leave the
+		// warehouse unable to reproduce the invoice.
+		vi.advanceTimersByTime(HEARTBEAT)
+		expect(last().billable_start).toBe(1)
+		expect(last().version).toBe(2)
+
+		windowListeners.dispatch("pagehide")
+		expect(last().status).toBe("ended")
+		expect(last().billable_start).toBe(1)
+		expect(Number(last().version)).toBeGreaterThan(1)
+		expect(handle).toBeDefined()
+	})
+
+	it("is 0 for a session whose visit was already claimed elsewhere", () => {
+		const first = start()
+		expect(last().billable_start).toBe(1)
+
+		// A second tab: same visitor, same 30-minute window, but its own
+		// sessionStorage and so its own session record. It is a real session the
+		// product must show — and not a second charge. Only the shared claim store
+		// (localStorage here, the cookie in a real browser) can know that.
+		posted = []
+		const globals = globalThis as Record<string, unknown>
+		const sharedLocalStorage = (globals.window as { localStorage: FakeStorage }).localStorage
+		globals.window = { sessionStorage: new FakeStorage(), localStorage: sharedLocalStorage }
+
+		start()
+		expect(last().billable_start).toBe(0)
+		expect(last().version).toBe(1)
+		expect(first).toBeDefined()
+	})
+
+	it("charges again once the visit window has elapsed", async () => {
+		start()
+		expect(last().billable_start).toBe(1)
+
+		// Past the idle window the heartbeat has already ended the run; the rotation
+		// is what re-arms it, and the new session is a new visit.
+		vi.advanceTimersByTime(31 * MINUTE)
+		posted = []
+		rotateSession()
+		await flushMicrotasks()
+
+		expect(last().status).toBe("active")
+		expect(last().billable_start).toBe(1)
 	})
 })
 
