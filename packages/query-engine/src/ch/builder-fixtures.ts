@@ -517,6 +517,20 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		sampleValues: { targetType: "http" },
 	},
 
+	// ----- traces (runtime/query-engine.ts trace-list page enrichment) -----
+	{
+		module: "traces",
+		name: "traceServicesByTraceIdsQuery",
+		label: "page-enrichment",
+		compile: () =>
+			CH.compile(
+				CH.traceServicesByTraceIdsQuery({
+					traceIds: [TRACE_ID, "4bf92f3577b34da6a3ce929d0e0e4736"],
+				}),
+				window,
+			),
+	},
+
 	// ----- activity: the only deliberately cross-org builders in the product.
 	// ----- Fixtured so the catalog's tenant-scope test actually exercises the
 	// ----- cross-org branch, rather than asserting a rule nothing exemplifies.

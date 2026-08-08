@@ -100,6 +100,9 @@ const DEFAULT_LIMIT = 100
 const DEFAULT_OFFSET = 0
 
 const LIST_PROJECTED_COLUMNS = [
+	// Synthetic query-engine column: opt this list into the batched
+	// service_map_spans enrichment without charging every trace-list consumer.
+	"services",
 	"spanAttributes.http.method",
 	"spanAttributes.http.request.method",
 	"spanAttributes.http.route",
@@ -235,6 +238,19 @@ function transformSpanListRow(row: Record<string, unknown>): Trace {
 	}
 
 	const timestamp = String(row.timestamp)
+	const serviceName = String(row.serviceName)
+	const services = Array.isArray(row.services)
+		? Array.from(
+				new Set(
+					row.services.flatMap((service) => {
+						const name = String(service)
+						return name ? [name] : []
+					}),
+				),
+			)
+		: serviceName
+			? [serviceName]
+			: []
 	return {
 		traceId: toTraceId(String(row.traceId)),
 		spanId: String(row.spanId),
@@ -243,7 +259,7 @@ function transformSpanListRow(row: Record<string, unknown>): Trace {
 		endTime: timestamp,
 		durationMs: Number(row.durationMs),
 		spanCount: 1,
-		services: [String(row.serviceName)],
+		services,
 		rootSpan: {
 			name: String(row.spanName),
 			kind: String(row.spanKind),

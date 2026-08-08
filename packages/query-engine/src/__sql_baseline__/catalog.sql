@@ -1914,6 +1914,19 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
+-- builder:traces:traceServicesByTraceIdsQuery:page-enrichment  [4e5e4b4b]
+SELECT
+          TraceId AS traceId,
+          arrayDistinct(arrayPushFront(arraySort(groupUniqArray(ServiceName)), argMin(ServiceName, (if(ParentSpanId = '', 0, 1), Timestamp)))) AS services
+        FROM service_map_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND TraceId IN ('0af7651916cd43dd8448eb211c80319c', '4bf92f3577b34da6a3ce929d0e0e4736')
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY traceId
+        LIMIT 2
+        FORMAT JSON
+
 -- pipe:custom_traces_breakdown:by-attribute:baseline  [a82b913f]
 SELECT
           SpanAttributes['http.route'] AS name,

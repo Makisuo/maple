@@ -11,6 +11,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromUnion, unionAll, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { Table } from "@maple-dev/clickhouse-builder"
 import {
+	ServiceMapSpans,
 	ServiceOverviewSpans,
 	ServiceOverviewHourly,
 	TraceDetailSpans,
@@ -1417,5 +1418,56 @@ export function traceListQuery(opts: TraceListOpts) {
 		.groupBy("traceId")
 		.orderBy(["startTime", "desc"], ["traceId", "desc"])
 		.limit(limit)
+		.format("JSON")
+}
+
+// ---------------------------------------------------------------------------
+// Trace-list service enrichment
+// ---------------------------------------------------------------------------
+
+export interface TraceServicesByTraceIdsOpts {
+	readonly traceIds: readonly string[]
+}
+
+export interface TraceServicesByTraceIdsOutput {
+	readonly traceId: string
+	/** True root first when present, then the remaining observed services sorted. */
+	readonly services: readonly string[]
+}
+
+/**
+ * Batch-load the services touched by one already-paged set of traces.
+ *
+ * `service_map_spans` is the light projection sorted by
+ * `(OrgId, TraceId, SpanId, Timestamp)`, so the tenant + page TraceIds form an
+ * ORDER BY prefix instead of rescanning and aggregating every trace in the
+ * list window. The caller supplies buffered page-derived time bounds as a
+ * partition hint; without them, every retained daily partition is probed.
+ *
+ * The projection intentionally contains the OTel dependency-bearing kinds
+ * (Client/Producer/Server/Consumer). The list mapper always preserves its row
+ * service as a fallback, covering Internal/unset single-service roots and MV
+ * propagation lag.
+ */
+export function traceServicesByTraceIdsQuery(opts: TraceServicesByTraceIdsOpts) {
+	return from(ServiceMapSpans)
+		.select(($) => {
+			const rootOrder = CH.rawExpr<unknown>("(if(ParentSpanId = '', 0, 1), Timestamp)")
+			const rootServiceName = argMin($.ServiceName, rootOrder)
+			return {
+				traceId: $.TraceId,
+				services: arrayDistinct(
+					arrayPushFront(arraySort(CH.groupUniqArray($.ServiceName)), rootServiceName),
+				),
+			}
+		})
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.TraceId.in_(...opts.traceIds),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
+		])
+		.groupBy("traceId")
+		.limit(opts.traceIds.length)
 		.format("JSON")
 }

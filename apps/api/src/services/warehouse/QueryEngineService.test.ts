@@ -2,7 +2,7 @@ import { describe, it } from "@effect/vitest"
 import { Effect, Exit, Option, Schema } from "effect"
 import { strict as nodeAssert } from "node:assert"
 import { MetricName, OrgId, ServiceName, UserId } from "@maple/domain"
-import { RawSqlValidationError } from "@maple/domain/http"
+import { RawSqlValidationError, WarehouseUpstreamError } from "@maple/domain/http"
 import {
 	baselineWarehouseCapabilities,
 	type QueryEngineEvaluateRequest,
@@ -641,6 +641,145 @@ describe("makeQueryEngineExecute", () => {
 					},
 				],
 			})
+		}),
+	)
+
+	it.effect("enriches opted-in trace-list rows with every service from the paged trace ids", () =>
+		Effect.gen(function* () {
+			const receivedSql: string[] = []
+			const execute = makeQueryEngineExecute(
+				makeTinybirdStub({
+					sqlQuery: (_tenant: unknown, sql: unknown) => {
+						const query = String(sql)
+						receivedSql.push(query)
+						if (query.includes("FROM service_map_spans")) {
+							return Effect.succeed([
+								{
+									traceId: "trace-1",
+									services: ["gateway", "checkout", "payments"],
+								},
+							])
+						}
+
+						return Effect.succeed([
+							{
+								traceId: "trace-1",
+								timestamp: "2026-01-01 00:01:00",
+								spanId: "span-1",
+								parentSpanId: "",
+								serviceName: "gateway",
+								spanName: "GET /checkout",
+								durationMs: 120,
+								statusCode: "Ok",
+								spanKind: "Server",
+								hasError: 0,
+								spanAttributes: {},
+								resourceAttributes: {},
+							},
+							{
+								traceId: "trace-1",
+								timestamp: "2026-01-01 00:02:00",
+								spanId: "span-2",
+								parentSpanId: "span-1",
+								serviceName: "checkout",
+								spanName: "charge",
+								durationMs: 80,
+								statusCode: "Ok",
+								spanKind: "Server",
+								hasError: 0,
+								spanAttributes: {},
+								resourceAttributes: {},
+							},
+							{
+								traceId: "trace-2",
+								timestamp: "2026-01-01 00:03:00",
+								spanId: "span-3",
+								parentSpanId: "",
+								serviceName: "worker",
+								spanName: "job",
+								durationMs: 50,
+								statusCode: "Ok",
+								spanKind: "Internal",
+								hasError: 0,
+								spanAttributes: {},
+								resourceAttributes: {},
+							},
+						])
+					},
+				}),
+			)
+
+			const response = yield* execute(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				query: {
+					kind: "list",
+					source: "traces",
+					limit: 100,
+					columns: ["services"],
+					filters: { rootSpansOnly: true },
+				},
+			})
+
+			assert.strictEqual(response.result.kind, "list")
+			assert.deepStrictEqual(
+				response.result.data.map((row) => row.services),
+				[["gateway", "checkout", "payments"], ["gateway", "checkout", "payments"], ["worker"]],
+			)
+			assert.strictEqual(receivedSql.length, 2)
+			const serviceSql = receivedSql[1] ?? ""
+			assert.include(serviceSql, "FROM service_map_spans")
+			assert.include(serviceSql, "TraceId IN ('trace-1', 'trace-2')")
+			assert.include(serviceSql, "Timestamp >= '2025-12-31 00:01:00'")
+			assert.include(serviceSql, "Timestamp <= '2026-01-02 00:03:00'")
+		}),
+	)
+
+	it.effect("falls back to each row service when trace-list enrichment fails", () =>
+		Effect.gen(function* () {
+			const execute = makeQueryEngineExecute(
+				makeTinybirdStub({
+					sqlQuery: (_tenant: unknown, sql: unknown) =>
+						String(sql).includes("FROM service_map_spans")
+							? Effect.fail(
+									new WarehouseUpstreamError({
+										pipeName: "traceListServices",
+										message: "temporary enrichment failure",
+										upstreamStatus: 503,
+									}),
+								)
+							: Effect.succeed([
+									{
+										traceId: "trace-1",
+										timestamp: "2026-01-01 00:01:00",
+										spanId: "span-1",
+										parentSpanId: "",
+										serviceName: "gateway",
+										spanName: "GET /checkout",
+										durationMs: 120,
+										statusCode: "Ok",
+										spanKind: "Server",
+										hasError: 0,
+										spanAttributes: {},
+										resourceAttributes: {},
+									},
+								]),
+				}),
+			)
+
+			const response = yield* execute(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				query: {
+					kind: "list",
+					source: "traces",
+					columns: ["services"],
+					filters: { rootSpansOnly: true },
+				},
+			})
+
+			assert.strictEqual(response.result.kind, "list")
+			assert.deepStrictEqual(response.result.data[0]?.services, ["gateway"])
 		}),
 	)
 

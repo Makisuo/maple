@@ -36,7 +36,7 @@ import {
 	type WarehouseQuerySettings,
 } from "../profiles"
 import { canonicalJSON } from "../canonical-json"
-import { computeBucketSeconds } from "../datetime"
+import { computeBucketSeconds, formatWarehouseDateTime, parseWarehouseDateTime } from "../datetime"
 import {
 	MAX_BREAKDOWN_RANGE_SECONDS,
 	MAX_LIST_RANGE_SECONDS,
@@ -200,6 +200,36 @@ export const msToTinybirdDateTime = (ms: number): string => {
 }
 
 const CACHE_SNAP_S = 15
+const TRACE_SERVICE_PARTITION_BUFFER_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Bound the service-enrichment lookup to the daily partitions surrounding the
+ * rows already selected for this page. A one-day cushion covers traces that
+ * cross the requested range boundary without probing the full 30-day
+ * retention window of `service_map_spans`.
+ */
+function traceServicePartitionWindow(
+	rows: ReadonlyArray<{ readonly timestamp: unknown }>,
+	fallback: { readonly startTime: string; readonly endTime: string },
+): { readonly startTime: string; readonly endTime: string } {
+	const pageTimes = rows.map((row) => parseWarehouseDateTime(String(row.timestamp))).filter(Number.isFinite)
+
+	if (pageTimes.length === 0) return fallback
+
+	return {
+		startTime: formatWarehouseDateTime(Math.min(...pageTimes) - TRACE_SERVICE_PARTITION_BUFFER_MS),
+		endTime: formatWarehouseDateTime(Math.max(...pageTimes) + TRACE_SERVICE_PARTITION_BUFFER_MS),
+	}
+}
+
+function servicesForTraceRow(
+	rowServiceName: string,
+	enrichedServices: readonly string[] | undefined,
+): string[] {
+	const services = [...(enrichedServices ?? [])]
+	if (rowServiceName && !services.includes(rowServiceName)) services.push(rowServiceName)
+	return services
+}
 
 /**
  * Snap a Tinybird datetime to a window. Used to align cache keys so that
@@ -1579,6 +1609,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		if (request.query.source === "traces" && request.query.kind === "list") {
 			const tracesQuery = request.query
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
+			const requestedColumns = (tracesQuery as { columns?: readonly string[] }).columns
 
 			// Graceful limit clamping: cap at 200, auto-reduce to 50 when no indexed filters
 			const hasIndexedFilter = !!(
@@ -1604,13 +1635,48 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						cursor: tracesQuery.cursor,
 						sortBy: tracesQuery.sortBy,
 						sortDir: tracesQuery.sortDir,
-						columns: (tracesQuery as { columns?: readonly string[] }).columns as
-							| string[]
-							| undefined,
+						columns: requestedColumns as string[] | undefined,
 					}),
 				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
 				"tracesList",
 				"list",
+			)
+
+			const traceIds = Array.from(
+				new Set(rows.map((row) => String(row.traceId)).filter((traceId) => traceId.length > 0)),
+			)
+			const wantsTraceServices = requestedColumns?.includes("services") === true
+			const serviceRows: ReadonlyArray<CH.TraceServicesByTraceIdsOutput> =
+				wantsTraceServices && traceIds.length > 0
+					? yield* executeCHQuery(
+							warehouse,
+							tenant,
+							CH.traceServicesByTraceIdsQuery({ traceIds }),
+							{
+								orgId: tenant.orgId,
+								...traceServicePartitionWindow(rows, {
+									startTime: request.startTime,
+									endTime: request.endTime,
+								}),
+							},
+							"traceListServices",
+							"list",
+						).pipe(
+							Effect.catch((error) =>
+								Effect.logWarning(
+									"Trace-list service enrichment failed; using row services",
+								).pipe(
+									Effect.annotateLogs({
+										"error.tag": error._tag,
+										"error.message": error.message,
+									}),
+									Effect.as([] as ReadonlyArray<CH.TraceServicesByTraceIdsOutput>),
+								),
+							),
+						)
+					: []
+			const servicesByTraceId = new Map(
+				serviceRows.map((row) => [String(row.traceId), row.services.map(String)] as const),
 			)
 
 			return new QueryEngineExecuteResponse({
@@ -1630,6 +1696,10 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						statusCode: row.statusCode,
 						spanKind: row.spanKind,
 						hasError: Number(row.hasError) === 1,
+						services: servicesForTraceRow(
+							String(row.serviceName),
+							servicesByTraceId.get(String(row.traceId)),
+						),
 						spanAttributes: row.spanAttributes ?? {},
 						resourceAttributes: row.resourceAttributes ?? {},
 					})),

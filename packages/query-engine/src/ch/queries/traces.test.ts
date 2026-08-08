@@ -4,6 +4,7 @@ import {
 	slowTracesQuery,
 	spanSearchQuery,
 	traceListQuery,
+	traceServicesByTraceIdsQuery,
 	traceSummariesQuery,
 	tracesListQuery,
 	tracesRootListQuery,
@@ -197,6 +198,29 @@ describe("tracesListQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		// Cursor predicate applies in both stages.
 		expect(sql.match(/Timestamp < '2024-01-01T12:00:00'/g)).toHaveLength(2)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// traceServicesByTraceIdsQuery
+// ---------------------------------------------------------------------------
+
+describe("traceServicesByTraceIdsQuery", () => {
+	it("aggregates one page of trace services through keyed and partition-pruned filters", () => {
+		const { sql } = compileCH(
+			traceServicesByTraceIdsQuery({ traceIds: ["trace-a", "trace-b"] }),
+			baseParams,
+		)
+
+		expect(sql).toContain("FROM service_map_spans")
+		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("TraceId IN ('trace-a', 'trace-b')")
+		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
+		expect(sql).toContain("Timestamp <= '2024-01-02 00:00:00'")
+		expect(sql).toContain("groupUniqArray(ServiceName)")
+		expect(sql).toContain("argMin(ServiceName, (if(ParentSpanId = '', 0, 1), Timestamp))")
+		expect(sql).toContain("GROUP BY traceId")
+		expect(sql).toContain("LIMIT 2")
 	})
 })
 
