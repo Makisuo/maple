@@ -1,8 +1,7 @@
 import { PLANETSCALE_ALERT_TEMPLATES } from "./planetscale"
 import type { AlertTemplateDefinition } from "./types"
 
-export type { AlertTemplateDefinition, AlertTemplateParameter, AlertTemplateRequirement } from "./types"
-export { templateTag } from "./types"
+export type { AlertTemplateDefinition } from "./types"
 
 /**
  * Every ready-made alert rule Maple can offer.

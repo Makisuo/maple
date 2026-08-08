@@ -47,7 +47,6 @@ import {
 } from "../limits"
 import { attributeIndexMode, logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeExecuteRawSql } from "./raw-sql"
-import type { BucketGroupObs } from "./evaluate-bucket-codec"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
 // `computeBucketSeconds` from here; the implementation now lives in the pure
@@ -2053,17 +2052,21 @@ export interface AlertBucketRequest {
 	readonly endTime: string
 }
 
+/** One warehouse row's contribution to an alert evaluation. */
+export interface BucketGroupObs {
+	readonly bucket: string
+	readonly groupKey: string
+	readonly value: number | null
+	readonly sampleCount: number
+}
+
 /**
  * THE single alert lowering: run one alert source over one time range and emit
  * per-(bucket, group) observations.
  *
- * Everything downstream is a thin derivation of this — `evaluate` reduces the
- * buckets to a scalar per group (`reduceAlertBuckets`), `evaluateSeries` returns
- * them as-is for the preview chart, and the bucket cache stores them encoded via
- * `encodeEvalPoints` and re-fetches only the missing ranges. Because a cached
- * evaluation decodes back into the very same observations an uncached one
- * builds, the two agree for real timeseries data (where each (bucket, group) row
- * is unique).
+ * Everything downstream is a thin derivation of this: `evaluate` reduces the
+ * buckets to a scalar per group and `evaluateSeries` returns them as-is for the
+ * preview chart.
  *
  * Assumes a spec source is already validated as a supported timeseries query.
  */
@@ -2193,7 +2196,7 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
  *
  * `sampleCount` is forced to 0 whenever `value` is null so that
  * `hasData === sampleCount > 0` holds for raw rows exactly as it does for the
- * spec sources — the bucket codec derives `hasData` from the sample count alone,
+ * spec sources — downstream reduction derives `hasData` from the sample count alone,
  * so a `{value: null, samples: 1}` row would otherwise decode as "has data but
  * no scalar" rather than the no-data case the alert engine expects.
  */
@@ -2246,16 +2249,6 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 				details: [
 					`Raw SQL alert group keys may contain at most ${MAX_RAW_SQL_GROUP_KEY_LENGTH} characters.`,
 				],
-			})
-		}
-		// `encodeEvalPoints` prefixes group keys with NUL-delimited markers and relies
-		// on real keys never containing NUL. That holds for CH-derived keys but not
-		// for arbitrary user SQL, so reject rather than let a crafted key collide
-		// with the codec's value/count namespaces.
-		if (groupKey.includes("\u0000")) {
-			return yield* new QueryEngineValidationError({
-				message: "Invalid raw SQL alert query",
-				details: ["Raw SQL alert group keys may not contain NUL characters."],
 			})
 		}
 		const numValue = row.value == null ? null : Number(row.value)
@@ -2399,9 +2392,7 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
  * rule preview chart: each bucket is one evaluation window, so the series is
  * exactly the sequence of observations the scheduler would have produced.
  *
- * Deliberately NOT routed through the bucket cache — preview requests are
- * ad-hoc form states and would only pollute it (see the eval-bucket-cache
- * regression note in QueryEngineService).
+ * Preview requests are ad-hoc form states and execute directly.
  */
 export const makeQueryEngineEvaluateSeries = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
 	Effect.fn("QueryEngineService.evaluateSeries")(function* (

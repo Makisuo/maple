@@ -23,10 +23,6 @@ export interface ServiceOperation {
 	sparkline: ServiceOperationSparklinePoint[]
 }
 
-export interface ServiceOperationsResult {
-	operations: ServiceOperation[]
-}
-
 const GetServiceOperationsInput = Schema.Struct({
 	serviceName: ServiceName,
 	startTime: WarehouseDateTimeString,

@@ -108,24 +108,14 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			{ className: "ClickHouseSchemaApplyWorkflow" },
 		)
 
-		// Headless AI triage agent: investigates freshly opened incidents (error or
-		// anomaly) with read-only tools and writes a structured summary back to the
-		// run row. Class is exported from src/worker.ts.
-		const aiTriageWorkflow = Cloudflare.Workflow<{
-			orgId: string
-			incidentKind: string
-			incidentId: string
-			issueId?: string
-			runId: string
-		}>(resolveWorkerName("ai-triage", stage), { className: "AiTriageWorkflow" })
-
 		// Fan-out investigation: N lens agents in parallel, then a validator that
 		// promotes one cause and records why each rival lost. Class is exported from
 		// src/worker.ts.
 		const investigationFanoutWorkflow = Cloudflare.Workflow<{
 			orgId: string
 			investigationId: string
-			lensIds: ReadonlyArray<string>
+			maxWidth: number
+			reservedPasses: number
 			attempt: number
 		}>(resolveWorkerName("investigation-fanout", stage), {
 			className: "InvestigationFanoutWorkflow",
@@ -214,7 +204,6 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				PLANETSCALE_WEBHOOK_QUEUE: planetScaleWebhookQueue,
 				PLANETSCALE_WEBHOOK_QUEUE_NAME: planetScaleWebhookQueueName,
 				CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: schemaApplyWorkflow,
-				AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
 				INVESTIGATION_FANOUT_WORKFLOW: investigationFanoutWorkflow,
 				API_V2_RATE_LIMITER: Cloudflare.RateLimit("API_V2_RATE_LIMITER", {
 					namespaceId: 2026071801,

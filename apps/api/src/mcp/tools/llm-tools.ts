@@ -1,12 +1,8 @@
 /**
  * Maple's MCP registry, wrapped as `@maple/llm` tools.
  *
- * One wrapper, two callers: the streaming chat turn (`apps/api/src/chat/tools.ts`) and the
- * autonomous triage loop (`apps/api/src/workflows/triage-agent.ts`). They were near-identical
- * copies, down to a duplicated `withRuntimeServices` and `toolResultText` — and they had already
- * drifted in the one place it mattered: triage still rendered a whole Effect `Cause` into the
- * message it handed the model, which is stack frames and, inside a `DatabaseError`, connection
- * details. Both now go through `summarizeToolFailure`.
+ * The streaming chat turn and investigation agents share this wrapper so tool
+ * dispatch, runtime provisioning, and safe failure summaries cannot drift.
  *
  * Dynamic (`jsonSchema`) mode is the right fit for every tool here: `toInputSchema` already produces
  * the exact JSON Schema the MCP surface publishes, and `callMcpTool` does its own Effect Schema

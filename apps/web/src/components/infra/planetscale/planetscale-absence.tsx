@@ -23,10 +23,6 @@ export const METRICS_PAUSED_MESSAGE = "Branch metrics are paused — add a metri
 /** Short form for a table cell subline or a stat rail, where the Alert already carries the fix. */
 export const METRICS_PAUSED_SHORT = "metrics paused"
 
-/** The grant is gone; nothing will refresh until someone reconnects. */
-export const GRANT_REVOKED_MESSAGE =
-	"The PlanetScale authorization was revoked — reconnect to resume inventory and metrics."
-
 const integrationLink = { to: "/integrations", search: { integration: "planetscale" } } as const
 
 /**

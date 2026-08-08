@@ -39,12 +39,6 @@ export const LOCAL_SCHEMA_MANIFEST_DIGEST = LOCAL_SCHEMA_MANIFEST.digest
 export const LOCAL_SCHEMA_V1_SQL = schemaV1Sql
 export const LOCAL_SCHEMA_V1_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV1Sql)
 export const LOCAL_SCHEMA_V1_MANIFEST_DIGEST = LOCAL_SCHEMA_V1_MANIFEST.digest
-/** Compatibility alias for callers that used the old gate constant. The value
- * is sourced from the append-only literal history, not from the current
- * manifest, so updating a schema without appending its identity still fails. */
-export const EXPECTED_LOCAL_SCHEMA_MANIFEST_DIGEST =
-	LOCAL_SCHEMA_HISTORY[LOCAL_SCHEMA_HISTORY.length - 1]!.manifestDigest
-
 export interface LocalSchemaIdentity {
 	readonly version: number
 	readonly fingerprint: string

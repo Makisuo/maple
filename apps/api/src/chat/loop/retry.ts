@@ -2,9 +2,7 @@
  * Which model-call failures a chat step retries, and how long it waits.
  *
  * Pure policy, deliberately separate from the loop that applies it. `./turn.ts` retries a
- * *stream*, so it needs the retraction machinery around the emitted deltas, while
- * `apps/api/src/workflows/triage-agent.ts` retries an `Effect` and could use `Effect.retry`
- * directly. The classification must not diverge between them, so it lives here.
+ * *stream*, so it needs the retraction machinery around the emitted deltas.
 
  * The ceilings this policy is applied under live in `./budgets.ts`, with every other limit the
  * loop enforces.

@@ -3,7 +3,6 @@
 // This re-export keeps the historical import path for web call sites.
 export {
 	ALL_VALUE,
-	collectVariableRefs,
 	hasUnresolvedVariableRefs,
 	interpolateDisplayText,
 	interpolateWidgetParams,

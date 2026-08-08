@@ -725,17 +725,6 @@ export interface CalibrationValidationReport {
 	readonly measuredAt: string
 }
 
-/** Write a calibration validation report (separate from the immutable config). */
-export const writeValidationReport = (path: string, report: CalibrationValidationReport): void => {
-	writeFileSync(resolve(path), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 })
-}
-
-/** Resolve the calibration archive dir, creating it if needed. */
-export const ensureCalibrationArchiveDir = (archiveDir: string): string => {
-	const abs = resolve(archiveDir)
-	return abs
-}
-
 /** The fixed candidate matrix evaluated by the calibrator. */
 export const CANDIDATE_MATRIX: ReadonlyArray<CalibrationCandidate> = [
 	{ writerThreads: 1, rowGroupRows: 10_000, maxShardRows: 500_000, maxShardBytes: 256 * 1024 * 1024 },

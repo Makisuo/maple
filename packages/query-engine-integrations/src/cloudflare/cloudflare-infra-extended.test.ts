@@ -14,10 +14,6 @@ import {
 	cloudflareZoneFirewallTimeseriesSQL,
 	cloudflareZoneFirewallTopRowSchema,
 	cloudflareZoneFirewallTopSQL,
-	cloudflareZoneHostBreakdownRowSchema,
-	cloudflareZoneHostBreakdownSQL,
-	cloudflareZoneHostTimeseriesRowSchema,
-	cloudflareZoneHostTimeseriesSQL,
 } from "./cloudflare-infra-extended"
 
 const baseParams = {
@@ -28,33 +24,6 @@ const baseParams = {
 
 const zoneParams = { ...baseParams, serviceName: "cloudflare/example.com" }
 const zoneTimeseriesParams = { ...zoneParams, bucketSeconds: 300 }
-
-describe("cloudflareZoneHostBreakdownSQL", () => {
-	it("groups zone HTTP counters by the host attribute, coalescing the pre-rename key", () => {
-		const { sql } = compileCH(cloudflareZoneHostBreakdownSQL(), zoneParams)
-		expect(sql).toContain("FROM metrics_sum")
-		expect(sql).toContain("OrgId = 'org_1'")
-		expect(sql).toContain("ServiceName = 'cloudflare/example.com'")
-		// Rows written before commit 46ee9b129 carry `http.host`, newer ones `server.address`.
-		expect(sql).toContain("server.address']")
-		expect(sql).toContain("http.host']")
-		expect(sql).toContain("http.status_class'] = '5xx'")
-		expect(sql).toContain("cache.status'] IN ('hit', 'stale', 'revalidated', 'updating')")
-		expect(sql).toContain("GROUP BY host")
-		expect(sql).toContain("FORMAT JSON")
-	})
-})
-
-describe("cloudflareZoneHostTimeseriesSQL", () => {
-	it("buckets requests per host", () => {
-		const { sql } = compileCH(cloudflareZoneHostTimeseriesSQL(), zoneTimeseriesParams)
-		expect(sql).toContain("toStartOfInterval")
-		expect(sql).toContain("MetricName = 'cloudflare.http.requests'")
-		expect(sql).toContain("server.address']")
-		expect(sql).toContain("http.host']")
-		expect(sql).toContain("GROUP BY bucket, host")
-	})
-})
 
 describe("cloudflareZoneFirewallTimeseriesSQL", () => {
 	it("buckets firewall events by action", () => {
@@ -138,40 +107,6 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 		if (decoded === undefined) throw new Error("expected a decoded row")
 		return decoded
 	}
-
-	it("cloudflareZoneHostBreakdownRowSchema coerces string counters", () => {
-		const compiled = compileCH(cloudflareZoneHostBreakdownSQL(), zoneParams, {
-			rowSchema: cloudflareZoneHostBreakdownRowSchema,
-		})
-		expect(
-			decodeFirst(compiled, {
-				host: "app.example.com",
-				requests: "12345678901",
-				errors5xx: "42",
-				cacheHits: "9999",
-				bytes: "88888888888",
-			}),
-		).toEqual({
-			host: "app.example.com",
-			requests: 12345678901,
-			errors5xx: 42,
-			cacheHits: 9999,
-			bytes: 88888888888,
-		})
-	})
-
-	it("cloudflareZoneHostTimeseriesRowSchema coerces string requests", () => {
-		const compiled = compileCH(cloudflareZoneHostTimeseriesSQL(), zoneTimeseriesParams, {
-			rowSchema: cloudflareZoneHostTimeseriesRowSchema,
-		})
-		expect(
-			decodeFirst(compiled, {
-				bucket: "2026-07-02T00:00:00.000Z",
-				host: "app.example.com",
-				requests: "500",
-			}),
-		).toEqual({ bucket: "2026-07-02T00:00:00.000Z", host: "app.example.com", requests: 500 })
-	})
 
 	it("cloudflareZoneFirewallTimeseriesRowSchema coerces string events", () => {
 		const compiled = compileCH(cloudflareZoneFirewallTimeseriesSQL(), zoneTimeseriesParams, {

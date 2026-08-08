@@ -125,9 +125,6 @@ export type ErrorIssueEventId = Schema.Schema.Type<typeof ErrorIssueEventId>
 export const AnomalyIncidentId = MapleUuidId("@maple/AnomalyIncidentId", "Anomaly Incident ID")
 export type AnomalyIncidentId = Schema.Schema.Type<typeof AnomalyIncidentId>
 
-export const AiTriageRunId = MapleUuidId("@maple/AiTriageRunId", "AI Triage Run ID")
-export type AiTriageRunId = Schema.Schema.Type<typeof AiTriageRunId>
-
 export const InvestigationId = MapleUuidId("@maple/InvestigationId", "Investigation ID")
 export type InvestigationId = Schema.Schema.Type<typeof InvestigationId>
 

@@ -10,7 +10,6 @@ export {
 	formatSessionDuration,
 	gradientFor,
 	hostFromUrl,
-	isMobileDevice,
 } from "@maple/ui/lib/replay-format"
 
 /** Marker dot colour by action kind, shared by the player and timeline tracks. */

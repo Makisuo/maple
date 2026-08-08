@@ -21,11 +21,6 @@ export const TimeRangeSearchFields = {
 	timePreset: Schema.optional(Schema.String),
 }
 
-const TimeRangeSearchStruct = Schema.Struct(TimeRangeSearchFields)
-
-/** Structural shape of the time-range slice of any route's search params. */
-export type TimeRangeSearch = typeof TimeRangeSearchStruct.Type
-
 export function applyTimeRangeSearch<T extends Record<string, unknown>>(prev: T, range: TimeRange) {
 	if (range.presetValue) {
 		return {

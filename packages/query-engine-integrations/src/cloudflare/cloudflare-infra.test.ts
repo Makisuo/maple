@@ -3,7 +3,6 @@ import { compileCH } from "@maple-dev/clickhouse-builder"
 import {
 	cloudflareWorkerCountersSQL,
 	cloudflareWorkerLatencySQL,
-	cloudflareWorkerTimeseriesSQL,
 	cloudflareZoneCacheTimeseriesSQL,
 	cloudflareZoneCountersSQL,
 	cloudflareZoneLatencySQL,
@@ -130,16 +129,6 @@ describe("cloudflareWorkerLatencySQL", () => {
 		expect(sql).toContain("quantile'] = '0.99'")
 		expect(sql).not.toContain("'0.95'")
 		expect(sql).toContain("if(countIf(")
-		expect(sql).toContain("FORMAT JSON")
-	})
-})
-
-describe("cloudflareWorkerTimeseriesSQL", () => {
-	it("buckets Worker counters by interval", () => {
-		const { sql } = compileCH(cloudflareWorkerTimeseriesSQL(), timeseriesParams)
-		expect(sql).toContain("toStartOfInterval(TimeUnix, INTERVAL 300 SECOND)")
-		expect(sql).toContain("sumIf(Value, MetricName = 'cloudflare.worker.errors')")
-		expect(sql).toContain("GROUP BY serviceName, bucket")
 		expect(sql).toContain("FORMAT JSON")
 	})
 })

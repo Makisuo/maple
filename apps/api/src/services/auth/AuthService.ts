@@ -5,7 +5,6 @@ import {
 	UnauthorizedError,
 } from "@maple/domain/http"
 import {
-	type AuthEnv,
 	makeGetCustomerData,
 	makeGetUserEmail,
 	makeLoginSelfHosted,
@@ -22,7 +21,7 @@ import { Env } from "@/platform/Env"
 // `AuthService` Context.Service that binds those primitives to the app's `Env`.
 // Re-exported so existing `from "./AuthService"` / `@/services/AuthService`
 // imports keep resolving.
-export { type AuthEnv, makeResolveTenant, type TenantContext }
+export { makeResolveTenant, type TenantContext }
 
 type HeaderRecord = Record<string, string | undefined>
 

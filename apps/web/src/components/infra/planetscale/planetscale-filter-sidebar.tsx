@@ -5,7 +5,6 @@ import {
 	FilterSidebarBody,
 	FilterSidebarFrame,
 	FilterSidebarHeader,
-	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
 import type { BranchCandidate } from "./branch-selection"
 import {
@@ -102,8 +101,4 @@ export function PlanetScaleFilterSidebar({
 			</FilterSidebarBody>
 		</FilterSidebarFrame>
 	)
-}
-
-export function PlanetScaleFilterSidebarLoading() {
-	return <FilterSidebarLoading sectionCount={3} />
 }

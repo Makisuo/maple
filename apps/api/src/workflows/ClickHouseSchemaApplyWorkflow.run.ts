@@ -35,7 +35,7 @@ import { makeTracedPgConnection, type TracedPgConnection } from "@/platform/pg-e
 
 /**
  * This workflow runs outside the worker's layer graph, so it owns its telemetry
- * instance and drains it itself — same arrangement as AiTriageWorkflow.run.
+ * instance and drains it itself.
  * Module scope is safe because the file is only ever dynamically imported from
  * the thin shell in `ClickHouseSchemaApplyWorkflow.ts`, off the startup-CPU path.
  */

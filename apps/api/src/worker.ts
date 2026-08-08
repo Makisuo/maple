@@ -312,7 +312,6 @@ const handle = async (
 // The class is a thin shell that dynamic-imports its heavy logic inside run(),
 // so this static export keeps module-scope evaluation light (startup-CPU budget).
 export { ClickHouseSchemaApplyWorkflow } from "./workflows/ClickHouseSchemaApplyWorkflow"
-export { AiTriageWorkflow } from "./workflows/AiTriageWorkflow"
 export { InvestigationFanoutWorkflow } from "./workflows/InvestigationFanoutWorkflow"
 // The durable chat transcript. Safe to export at module scope despite the 10021 startup-CPU
 // constraint: `ChatSession` imports only types from `@maple/domain/chat-session`, so it pulls
