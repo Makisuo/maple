@@ -25,7 +25,17 @@ interface TracesTableViewProps {
 	isCapped: boolean
 	fetchNextPage: () => void
 	waiting: boolean
-	onTraceClick: (traceId: string, startTime: string) => void
+	onTraceClick: (trace: Trace) => void
+}
+
+/**
+ * The span to pre-select on the detail page. With `rootOnly` off the list shows
+ * individual child spans, and clicking one should land on that span rather than
+ * on the trace with nothing selected. Root-span rows stay undefined so the
+ * default trace view opens unchanged.
+ */
+function deepLinkSpanId(trace: Trace): string | undefined {
+	return trace.isRootSpan ? undefined : trace.spanId
 }
 
 function truncateId(id: string, length = 8): string {
@@ -168,7 +178,11 @@ function TracesTableView({
 					<Link
 						to="/traces/$traceId"
 						params={{ traceId: row.original.traceId }}
-						search={(prev: Record<string, unknown>) => ({ ...prev, t: row.original.startTime })}
+						search={(prev: Record<string, unknown>) => ({
+							...prev,
+							t: row.original.startTime,
+							spanId: deepLinkSpanId(row.original),
+						})}
 						className="font-mono text-xs text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary"
 						onClick={(e) => e.stopPropagation()}
 					>
@@ -296,7 +310,7 @@ function TracesTableView({
 		enabled: allData.length > 0,
 		onOpen: (id) => {
 			const trace = allData[Number(id)]
-			if (trace) onTraceClick(trace.traceId, trace.startTime)
+			if (trace) onTraceClick(trace)
 		},
 		scrollTo: (_id, index) => virtualizer.scrollToIndex(index, { align: "auto" }),
 	})
@@ -374,11 +388,11 @@ function TracesTableView({
 									data-focused={virtualRow.index === focusedIndex || undefined}
 									className="border-b transition-colors hover:bg-muted/50 data-[focused]:bg-muted/70 data-[focused]:ring-1 data-[focused]:ring-ring data-[focused]:ring-inset cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
 									tabIndex={0}
-									onClick={() => onTraceClick(row.original.traceId, row.original.startTime)}
+									onClick={() => onTraceClick(row.original)}
 									onKeyDown={(e) => {
 										if (e.key === "Enter" || e.key === " ") {
 											e.preventDefault()
-											onTraceClick(row.original.traceId, row.original.startTime)
+											onTraceClick(row.original)
 										}
 									}}
 								>
@@ -437,11 +451,15 @@ export function TracesTable({ filters }: TracesTableProps) {
 		useInfiniteTraces(filters)
 
 	const onTraceClick = React.useCallback(
-		(traceId: string, startTime: string) => {
+		(trace: Trace) => {
 			navigate({
 				to: "/traces/$traceId",
-				params: { traceId },
-				search: (prev: Record<string, unknown>) => ({ ...prev, t: startTime }),
+				params: { traceId: trace.traceId },
+				search: (prev: Record<string, unknown>) => ({
+					...prev,
+					t: trace.startTime,
+					spanId: deepLinkSpanId(trace),
+				}),
 			})
 		},
 		[navigate],

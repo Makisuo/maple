@@ -121,6 +121,9 @@ interface TraceRootSpanSummary {
 
 export interface Trace {
 	traceId: TraceId
+	/** The span this row was built from — the root span unless `rootOnly` is off. */
+	spanId: string
+	isRootSpan: boolean
 	startTime: string
 	endTime: string
 	durationMs: number
@@ -232,6 +235,8 @@ function transformSpanListRow(row: Record<string, unknown>): Trace {
 	const timestamp = String(row.timestamp)
 	return {
 		traceId: toTraceId(String(row.traceId)),
+		spanId: String(row.spanId),
+		isRootSpan: !row.parentSpanId,
 		startTime: timestamp,
 		endTime: timestamp,
 		durationMs: Number(row.durationMs),

@@ -751,6 +751,8 @@ export interface TracesListOutput {
 	readonly traceId: string
 	readonly timestamp: string
 	readonly spanId: string
+	/** Empty string for a root span. */
+	readonly parentSpanId: string
 	readonly serviceName: string
 	readonly spanName: string
 	readonly durationMs: number
@@ -826,6 +828,7 @@ export function tracesListQuery(opts: TracesListOpts) {
 			traceId: $.TraceId,
 			timestamp: $.Timestamp,
 			spanId: $.SpanId,
+			parentSpanId: $.ParentSpanId,
 			serviceName: $.ServiceName,
 			spanName: $.SpanName,
 			durationMs: $.Duration.div(1000000),

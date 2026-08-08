@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { Button } from "../ui/button"
 import { SpanRow } from "./span-row"
 import { useTraceView } from "./trace-view-context"
-import { collectAllCollapsibleIds, computeDefaultExpandedSpanIds } from "./auto-collapse"
+import { collectAllCollapsibleIds, collectAncestorIds, computeDefaultExpandedSpanIds } from "./auto-collapse"
 import type { SpanNode } from "../../lib/types"
 
 // Estimated row height; the virtualizer self-corrects via measureElement.
@@ -29,6 +29,28 @@ export function SpanHierarchy() {
 		return computeDefaultExpandedSpanIds(rootSpans, { keepVisibleSpanId: selectedSpanId })
 	})
 
+	// Reveal a span selected after mount — a deep link from the traces list, or a
+	// pick in another tab — by merging its ancestor chain into the expanded set.
+	// Union rather than recompute, so the user's own toggles survive. Adjusting
+	// state during render (rather than in an effect) keeps the row laid out before
+	// the scroll effect below runs.
+	const [lastSelectedSpanId, setLastSelectedSpanId] = React.useState(selectedSpanId)
+	if (selectedSpanId !== lastSelectedSpanId) {
+		setLastSelectedSpanId(selectedSpanId)
+		if (selectedSpanId) {
+			const ancestors = collectAncestorIds(rootSpans, selectedSpanId)
+			if (ancestors.size > 0) {
+				setExpandedSpans((prev) => {
+					let next: Set<string> | null = null
+					for (const id of ancestors) {
+						if (!prev.has(id)) (next ??= new Set(prev)).add(id)
+					}
+					return next ?? prev
+				})
+			}
+		}
+	}
+
 	const toggleSpan = React.useCallback((span: SpanNode) => {
 		setExpandedSpans((prev) => {
 			const next = new Set(prev)
@@ -52,6 +74,73 @@ export function SpanHierarchy() {
 		getItemKey: (index) => flat[index].spanId,
 		overscan: 12,
 	})
+
+	// Bring the selected span on screen — virtualized rows are absent from the DOM,
+	// so scrolling has to go through the virtualizer.
+	//
+	// On a deep link the first attempt lands before the scroll container (inside a
+	// resizable panel) has been laid out, and `scrollToIndex` against a zero-height
+	// viewport is a no-op. So retry across a few frames and only latch the ref once
+	// the row is genuinely inside the visible window — a single shot silently loses
+	// the scroll on exactly the case this exists for.
+	const scrolledToRef = React.useRef<string | undefined>(undefined)
+	React.useEffect(() => {
+		if (!selectedSpanId || selectedSpanId === scrolledToRef.current) return
+		const index = flat.findIndex((node) => node.spanId === selectedSpanId)
+		if (index === -1) return
+
+		// `virtualizer.scrollToIndex` is deliberately unused: inside the resizable
+		// panel its internal viewport rect reads as the full content height, so it
+		// decides every row is already visible and scrolls nowhere. The virtual item's
+		// `start`/`end` are trustworthy though — they are what positions the row — so
+		// scroll the container to them directly.
+		//
+		// Re-assert across frames instead of scrolling once: on a deep link the panel
+		// and the row heights settle over the first few frames, and mount layout wipes
+		// an early scrollTop. The latch is therefore only taken after a *later* frame
+		// observes the row actually in view, never right after writing scrollTop.
+		let attempts = 0
+		let handle = 0
+		const attempt = () => {
+			const scroller = scrollRef.current
+			if (scroller?.clientHeight) {
+				const row = virtualizer.getVirtualItems().find((item) => item.index === index)
+				const start = row?.start ?? index * ROW_HEIGHT
+				const end = row?.end ?? start + ROW_HEIGHT
+				const viewTop = scroller.scrollTop
+				const viewBottom = viewTop + scroller.clientHeight
+
+				// A row already sitting comfortably inside the window is left alone —
+				// selecting a visible span must not yank the list around.
+				const comfortablyVisible = start >= viewTop + ROW_HEIGHT && end <= viewBottom - ROW_HEIGHT
+				if (row && comfortablyVisible) {
+					scrolledToRef.current = selectedSpanId
+					return
+				}
+
+				// Otherwise centre it: flush-to-edge alignment loses the row again when
+				// the estimated row heights are replaced by measured ones a frame later.
+				const target = Math.max(
+					0,
+					Math.min(
+						start - (scroller.clientHeight - (end - start)) / 2,
+						scroller.scrollHeight - scroller.clientHeight,
+					),
+				)
+				if (Math.abs(viewTop - target) <= 1) {
+					if (row) {
+						scrolledToRef.current = selectedSpanId
+						return
+					}
+				} else {
+					scroller.scrollTop = target
+				}
+			}
+			if (++attempts < 15) handle = requestAnimationFrame(attempt)
+		}
+		attempt()
+		return () => cancelAnimationFrame(handle)
+	}, [selectedSpanId, flat, virtualizer])
 
 	if (rootSpans.length === 0) {
 		return (

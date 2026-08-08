@@ -6648,11 +6648,12 @@ SELECT
           AND HasError = 1
 FORMAT JSON
 
--- spec:traces-list:baseline  [ec86c957]
+-- spec:traces-list:baseline  [c381db35]
 SELECT
           TraceId AS traceId,
           Timestamp AS timestamp,
           SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
           ServiceName AS serviceName,
           SpanName AS spanName,
           Duration / 1000000 AS durationMs,
@@ -6681,11 +6682,12 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- spec:traces-list:bloom  [ec86c957]
+-- spec:traces-list:bloom  [c381db35]
 SELECT
           TraceId AS traceId,
           Timestamp AS timestamp,
           SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
           ServiceName AS serviceName,
           SpanName AS spanName,
           Duration / 1000000 AS durationMs,
@@ -6714,11 +6716,12 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- spec:traces-list:text  [ec86c957]
+-- spec:traces-list:text  [c381db35]
 SELECT
           TraceId AS traceId,
           Timestamp AS timestamp,
           SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
           ServiceName AS serviceName,
           SpanName AS spanName,
           Duration / 1000000 AS durationMs,
