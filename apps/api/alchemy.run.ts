@@ -243,6 +243,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				TINYBIRD_TOKEN: Redacted.make(requireEnv("TINYBIRD_TOKEN")),
 				...optionalSecret("TINYBIRD_SIGNING_KEY"),
 				...optionalPlain("TINYBIRD_WORKSPACE_ID"),
+				...optionalPlain("TINYBIRD_RAW_SQL_JWT_RPS_LIMIT"),
 				...optionalPlain("CLICKHOUSE_URL"),
 				CLICKHOUSE_PROVIDER: process.env.CLICKHOUSE_PROVIDER?.trim() || "tinybird",
 				...optionalPlain("CLICKHOUSE_USER"),

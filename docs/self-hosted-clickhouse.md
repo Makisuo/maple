@@ -30,6 +30,8 @@ removes Tinybird-restricted query settings. For a vanilla/self-managed server, s
 `CLICKHOUSE_PROVIDER=clickhouse`; Maple then preserves `CLICKHOUSE_PASSWORD` for raw
 SQL. Tinybird raw SQL also requires explicit `TINYBIRD_SIGNING_KEY` and
 `TINYBIRD_WORKSPACE_ID` values; Maple never derives either from the API token.
+Set `TINYBIRD_RAW_SQL_JWT_RPS_LIMIT` to a positive integer to add an optional
+Tinybird-enforced request ceiling; Maple gives each org an independent bucket.
 
 Env-level vanilla ClickHouse raw SQL is enabled only when `MAPLE_AUTH_MODE=self_hosted`,
 where the deployment is single-org. Hosted multi-org deployments fail closed unless

@@ -19,6 +19,12 @@ import { Env } from "@/platform/Env"
 const JWT_TTL_SECONDS = 600
 /** Re-mint this many seconds before true expiry (must exceed the executor's 30s client cache). */
 const JWT_REFRESH_SKEW_SECONDS = 60
+/**
+ * Each token carries one scope per OrgId-bearing datasource, so an unbounded
+ * org map can consume meaningful isolate memory. Eviction only causes a cheap
+ * local re-mint; it does not invalidate the previously issued JWT.
+ */
+export const JWT_CACHE_MAX_ENTRIES = 512
 
 export interface TinybirdOrgTokenServiceShape {
 	/** A Tinybird read JWT scoped to `orgId` across every OrgId-bearing datasource. */
@@ -44,6 +50,16 @@ export class TinybirdOrgTokenService extends Context.Service<
 
 		// Per-instance (per-isolate) cache. `expiresAt` is the re-mint deadline in ms.
 		const cache = new Map<string, { token: string; expiresAt: number }>()
+		const pruneCache = (nowMs: number) => {
+			for (const [orgId, entry] of cache) {
+				if (entry.expiresAt <= nowMs) cache.delete(orgId)
+			}
+			while (cache.size >= JWT_CACHE_MAX_ENTRIES) {
+				const oldestOrgId = cache.keys().next().value
+				if (oldestOrgId === undefined) break
+				cache.delete(oldestOrgId)
+			}
+		}
 
 		const getOrgReadToken = Effect.fn("TinybirdOrgTokenService.getOrgReadToken")(function* (
 			orgId: OrgId,
@@ -51,10 +67,15 @@ export class TinybirdOrgTokenService extends Context.Service<
 			const nowMs = yield* Clock.currentTimeMillis
 			const cached = cache.get(orgId)
 			if (cached !== undefined && cached.expiresAt > nowMs) {
+				// Map iteration order is insertion order; refresh it on access so the
+				// fixed-size cache evicts the least-recently-used org.
+				cache.delete(orgId)
+				cache.set(orgId, cached)
 				yield* Effect.annotateCurrentSpan("maple.tinybird.jwt.cache_hit", true)
 				return cached.token
 			}
 			yield* Effect.annotateCurrentSpan("maple.tinybird.jwt.cache_hit", false)
+			pruneCache(nowMs)
 			if (Option.isNone(env.TINYBIRD_SIGNING_KEY)) {
 				return yield* new TinybirdOrgTokenError({
 					reason: "MissingSigningKey",
@@ -84,6 +105,7 @@ export class TinybirdOrgTokenService extends Context.Service<
 						datasourceNames,
 						nowSeconds: Math.floor(nowMs / 1000),
 						ttlSeconds: JWT_TTL_SECONDS,
+						rpsLimit: Option.getOrUndefined(env.TINYBIRD_RAW_SQL_JWT_RPS_LIMIT),
 					}),
 				catch: () =>
 					new TinybirdOrgTokenError({
