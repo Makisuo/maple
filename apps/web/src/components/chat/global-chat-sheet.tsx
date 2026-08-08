@@ -26,7 +26,8 @@ export function openGlobalChat() {
 
 /**
  * App-wide chat surface, mounted once in the root AppFrame: a right slide-over
- * hosting the Maple AI conversation on a persistent org-scoped "quick" thread.
+ * hosting the Maple AI conversation. It opens on a persistent org-scoped
+ * "quick" thread and can create fresh conversations without leaving the sheet.
  * Replaces the old sidebar nav entry — the full /chat page remains for deep
  * links (alert triage, widget fix, shared views) and multi-tab work.
  *
@@ -59,7 +60,7 @@ export function GlobalChatSheet() {
 
 	return (
 		<Suspense fallback={<ChatContentFallback />}>
-			<GlobalChatPanel orgId={orgId} onOpenChange={setOpen} />
+			<GlobalChatPanel key={orgId} orgId={orgId} onOpenChange={setOpen} />
 		</Suspense>
 	)
 }

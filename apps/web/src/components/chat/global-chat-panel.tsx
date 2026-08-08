@@ -1,10 +1,10 @@
-import { lazy, Suspense } from "react"
+import { lazy, Suspense, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Sheet, SheetDescription, SheetHeader, SheetPopup, SheetTitle } from "@maple/ui/components/ui/sheet"
-import { ExternalLinkIcon } from "@/components/icons"
-import { ensureStoredTab } from "@/hooks/use-chat-tabs"
+import { ExternalLinkIcon, PlusIcon } from "@/components/icons"
+import { ensureStoredTab, useChatTabs } from "@/hooks/use-chat-tabs"
 import { QUICK_CHAT_TAB_ID } from "./global-chat-constants"
 
 const GlobalChatContent = lazy(() =>
@@ -28,6 +28,13 @@ export function GlobalChatPanel({
 	orgId: string
 	onOpenChange: (open: boolean) => void
 }) {
+	const { createTab, renameTab } = useChatTabs(orgId)
+	const [tabId, setTabId] = useState(QUICK_CHAT_TAB_ID)
+
+	const handleCreate = () => {
+		setTabId(createTab())
+	}
+
 	return (
 		<Sheet open onOpenChange={onOpenChange}>
 			<SheetPopup
@@ -35,29 +42,39 @@ export function GlobalChatPanel({
 				className="w-[calc(100%-(--spacing(12)))] sm:max-w-2xl"
 				closeProps={{ className: "absolute end-3 top-5 z-10" }}
 			>
-				<SheetHeader className="flex flex-row items-start justify-between gap-3 border-b pe-14 pb-4">
-					<div className="min-w-0 space-y-1">
+				<SheetHeader className="gap-3 border-b pb-4">
+					<div className="min-w-0 space-y-1 pe-8">
 						<SheetTitle className="truncate text-base">Maple AI</SheetTitle>
 						<SheetDescription>
 							Ask about your services, traces, errors, and alerts.
 						</SheetDescription>
 					</div>
-					<Button
-						size="sm"
-						variant="ghost"
-						onClick={() => {
-							ensureStoredTab(orgId, QUICK_CHAT_TAB_ID, "Quick chat")
-							onOpenChange(false)
-						}}
-						render={<Link to="/chat" search={{ tab: QUICK_CHAT_TAB_ID }} />}
-					>
-						Open full page
-						<ExternalLinkIcon className="size-3.5" />
-					</Button>
+					<div className="flex flex-wrap items-center gap-1">
+						<Button size="sm" variant="ghost" onClick={handleCreate}>
+							<PlusIcon className="size-3.5" />
+							New chat
+						</Button>
+						<Button
+							size="sm"
+							variant="ghost"
+							onClick={() => {
+								ensureStoredTab(
+									orgId,
+									tabId,
+									tabId === QUICK_CHAT_TAB_ID ? "Quick chat" : "New Chat",
+								)
+								onOpenChange(false)
+							}}
+							render={<Link to="/chat" search={{ tab: tabId }} />}
+						>
+							Open full page
+							<ExternalLinkIcon className="size-3.5" />
+						</Button>
+					</div>
 				</SheetHeader>
 				<div className="flex min-h-0 flex-1 flex-col">
 					<Suspense fallback={<ChatConversationFallback />}>
-						<GlobalChatContent tabId={QUICK_CHAT_TAB_ID} />
+						<GlobalChatContent key={tabId} tabId={tabId} onFirstMessage={renameTab} />
 					</Suspense>
 				</div>
 			</SheetPopup>
