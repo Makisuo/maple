@@ -1,0 +1,310 @@
+<div
+    class="latency-clock"
+    role="img"
+    aria-label="A checkout request moving from checkout-client through edge-proxy and order-service to orders-db and payment-api, with bars comparing total response time, time to first byte, and server request duration"
+>
+    <div class="latency-clock__header" aria-hidden="true">
+        <span>trace / POST /checkout</span>
+        <span class="latency-clock__status">p99 · 380 ms</span>
+    </div>
+
+    <div class="latency-clock__path" aria-hidden="true">
+        <div class="latency-clock__node">
+            <span class="latency-clock__kind">CLIENT</span>
+            <strong>checkout-client</strong>
+            <small>DNS · TCP · TLS</small>
+        </div>
+        <div class="latency-clock__connector"><span>request</span></div>
+        <div class="latency-clock__node">
+            <span class="latency-clock__kind">PROXY</span>
+            <strong>edge-proxy</strong>
+            <small>terminate · route</small>
+        </div>
+        <div class="latency-clock__connector"><span>forward</span></div>
+        <div class="latency-clock__node latency-clock__node--active">
+            <span class="latency-clock__kind">SERVER SPAN</span>
+            <strong>order-service</strong>
+            <small>application work</small>
+        </div>
+    </div>
+
+    <div class="latency-clock__dependencies" aria-hidden="true">
+        <span class="latency-clock__branch"></span>
+        <div class="latency-clock__dependency">
+            <span class="latency-clock__kind">DB SPAN</span>
+            <strong>orders-db</strong>
+            <small>SELECT orders</small>
+        </div>
+        <div class="latency-clock__dependency">
+            <span class="latency-clock__kind">CLIENT SPAN</span>
+            <strong>payment-api</strong>
+            <small>POST /authorize</small>
+        </div>
+    </div>
+
+    <div class="latency-clock__ruler" aria-hidden="true">
+        <div class="latency-clock__ticks">
+            <span>0 ms</span>
+            <span>100</span>
+            <span>200</span>
+            <span>300</span>
+            <span>400</span>
+        </div>
+        <div class="latency-clock__row">
+            <div><strong>Total response</strong><small>client → final byte</small></div>
+            <span class="latency-clock__bar latency-clock__bar--total"></span>
+        </div>
+        <div class="latency-clock__row">
+            <div><strong>Time to first byte</strong><small>client → first byte</small></div>
+            <span class="latency-clock__bar latency-clock__bar--ttfb"></span>
+        </div>
+        <div class="latency-clock__row">
+            <div><strong>Server duration</strong><small>SERVER span only</small></div>
+            <span class="latency-clock__bar latency-clock__bar--server"></span>
+        </div>
+    </div>
+</div>
+
+<style>
+    .latency-clock {
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        background: var(--bg-deep);
+        color: var(--foreground);
+        font-family: var(--font-mono);
+    }
+
+    .latency-clock__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        border-bottom: 1px solid var(--border);
+        padding: 0.85rem 1rem;
+        color: var(--muted-foreground);
+        font-size: 10px;
+    }
+
+    .latency-clock__status {
+        color: var(--chart-p99);
+    }
+
+    .latency-clock__path {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 2.6rem minmax(0, 1fr) 2.6rem minmax(0, 1.15fr);
+        align-items: center;
+        gap: 0.55rem;
+        padding: 1.1rem 1rem 0.85rem;
+    }
+
+    .latency-clock__node,
+    .latency-clock__dependency {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        border: 1px solid var(--border);
+        background: var(--background);
+        padding: 0.75rem;
+    }
+
+    .latency-clock__node--active {
+        border-color: color-mix(in oklab, var(--primary) 68%, var(--border));
+        background: color-mix(in oklab, var(--primary) 7%, var(--bg-deep));
+    }
+
+    .latency-clock__node--active .latency-clock__kind::before {
+        display: inline-block;
+        width: 4px;
+        height: 4px;
+        margin-right: 5px;
+        background: var(--primary);
+        content: "";
+        vertical-align: 1px;
+    }
+
+    .latency-clock__kind {
+        color: var(--primary);
+        font-size: 9px;
+        letter-spacing: 0.11em;
+    }
+
+    .latency-clock strong {
+        overflow: hidden;
+        margin-top: 0.35rem;
+        color: var(--foreground);
+        font-family: var(--font-display);
+        font-size: 12px;
+        font-weight: 550;
+        letter-spacing: -0.01em;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .latency-clock small {
+        overflow: hidden;
+        margin-top: 0.25rem;
+        color: var(--muted-foreground);
+        font-size: 9px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .latency-clock__connector {
+        position: relative;
+        height: 1px;
+        background: var(--border);
+    }
+
+    .latency-clock__connector::after {
+        position: absolute;
+        top: 50%;
+        right: -1px;
+        width: 5px;
+        height: 5px;
+        border-top: 1px solid var(--muted-foreground);
+        border-right: 1px solid var(--muted-foreground);
+        content: "";
+        transform: translateY(-50%) rotate(45deg);
+    }
+
+    .latency-clock__connector span {
+        position: absolute;
+        left: 50%;
+        bottom: 0.35rem;
+        color: var(--muted-foreground);
+        font-size: 8px;
+        transform: translateX(-50%);
+    }
+
+    .latency-clock__dependencies {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.6rem;
+        margin: 0 1rem 1rem 56%;
+        padding-top: 1rem;
+    }
+
+    .latency-clock__branch {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 52%;
+        height: 1rem;
+        border-top: 1px solid var(--border);
+        border-right: 1px solid var(--border);
+    }
+
+    .latency-clock__dependency {
+        padding: 0.6rem 0.7rem;
+    }
+
+    .latency-clock__ruler {
+        border-top: 1px solid var(--border);
+        padding: 0.85rem 1rem 1rem;
+    }
+
+    .latency-clock__ticks {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        margin-left: 8.8rem;
+        padding-bottom: 0.5rem;
+        color: var(--muted-foreground);
+        font-size: 8px;
+    }
+
+    .latency-clock__ticks span:not(:first-child) {
+        text-align: right;
+    }
+
+    .latency-clock__row {
+        display: grid;
+        grid-template-columns: 8rem 1fr;
+        align-items: center;
+        gap: 0.8rem;
+        min-height: 2.25rem;
+    }
+
+    .latency-clock__row > div {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .latency-clock__row strong {
+        margin: 0;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+    }
+
+    .latency-clock__row small {
+        margin-top: 0.15rem;
+        font-size: 8px;
+    }
+
+    .latency-clock__bar {
+        position: relative;
+        display: block;
+        height: 2px;
+        background: var(--muted-foreground);
+    }
+
+    .latency-clock__bar::before,
+    .latency-clock__bar::after {
+        position: absolute;
+        top: -3px;
+        width: 1px;
+        height: 8px;
+        background: inherit;
+        content: "";
+    }
+
+    .latency-clock__bar::before { left: 0; }
+    .latency-clock__bar::after { right: 0; }
+    .latency-clock__bar--total { background: var(--chart-p99); }
+    .latency-clock__bar--ttfb { width: 95%; background: var(--foreground); }
+    .latency-clock__bar--server { width: 61%; margin-left: 27%; background: color-mix(in oklab, var(--primary) 72%, var(--muted-foreground)); }
+
+    @media (max-width: 639px) {
+        .latency-clock__path {
+            grid-template-columns: 1fr;
+            gap: 0;
+        }
+
+        .latency-clock__connector {
+            width: 1px;
+            height: 1.2rem;
+            margin-left: 50%;
+        }
+
+        .latency-clock__connector::after {
+            top: auto;
+            right: auto;
+            bottom: 0;
+            left: -2px;
+            transform: rotate(135deg);
+        }
+
+        .latency-clock__connector span { display: none; }
+
+        .latency-clock__dependencies {
+            margin: 0 1rem 1rem;
+            padding-top: 1.25rem;
+        }
+
+        .latency-clock__branch {
+            left: 50%;
+            width: 25%;
+            transform: translateX(-50%);
+        }
+
+        .latency-clock__ticks {
+            margin-left: 7.8rem;
+        }
+
+        .latency-clock__row {
+            grid-template-columns: 7rem 1fr;
+        }
+    }
+</style>

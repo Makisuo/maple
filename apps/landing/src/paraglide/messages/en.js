@@ -5115,7 +5115,7 @@ export const nav_guides = () => `Guides`
 
 
 /**
- *
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
@@ -5147,7 +5147,7 @@ export const footer_what_is_apm = () => `What is APM?`
 
 
 /**
- *
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
