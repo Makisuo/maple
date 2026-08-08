@@ -5,7 +5,7 @@
  * plus two small stamping helpers; nothing here decides anything.
  */
 import type { ChatEvent, ChatTaskRef } from "@maple/domain/chat-session"
-import type { Message, Model, Tools, Usage } from "@maple/llm"
+import type { FinishReason, Message, Model, Tools, Usage } from "@maple/llm"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import type { AgentDefinition } from "../agents"
 import type { StepRetryBudget, TaskBudget } from "./budgets"
@@ -68,6 +68,8 @@ export interface ChatTurnInput {
 	readonly closingSubmit?: { readonly toolName: string }
 	/** Accumulates this turn's token usage; see {@link TurnUsage}. */
 	readonly usage?: TurnUsage
+	/** Mutable outcome facts annotated on the enclosing `chat.turn` span by the session runner. */
+	readonly observability?: TurnObservability
 	/**
 	 * Which agent this turn runs as. Defaults to the primary agent the session id names, so existing
 	 * callers keep the behaviour their mode already had.
@@ -105,6 +107,8 @@ export interface StepState {
 	readonly agent: AgentDefinition
 	/** Shared with every descendant sub-agent turn. */
 	readonly taskBudget: TaskBudget
+	/** One semantic recovery is allowed for a completed response with no visible output. */
+	readonly emptyRecoveryUsed: boolean
 	/**
 	 * This is the step that closes a turn which ran out of steps or clock. Its natural exit is
 	 * "no tool calls", which would otherwise report `"stop"` and lose the signal the client badges
@@ -144,6 +148,26 @@ export interface TurnUsage {
 }
 
 export const makeTurnUsage = (): TurnUsage => ({ input: 0, output: 0, cacheRead: 0 })
+
+/**
+ * Low-cardinality facts collected by the loop and emitted once on the enclosing turn span.
+ *
+ * Mutable for the same reason as {@link TurnUsage}: the stream discovers its final outcome after
+ * the caller has already created the span, and nested sub-agents deliberately receive no reference
+ * to this record so they cannot overwrite the parent turn's attributes.
+ */
+export interface TurnObservability {
+	outcome?: "stop" | "aborted" | "error" | "max-steps" | "unknown"
+	finishReason?: FinishReason
+	emptyOutput: boolean
+	recoveryCount: number
+	failureReason?: string
+}
+
+export const makeTurnObservability = (): TurnObservability => ({
+	emptyOutput: false,
+	recoveryCount: 0,
+})
 
 export const addUsage = (total: TurnUsage, usage: Usage | undefined): void => {
 	total.input += usage?.inputTokens ?? 0

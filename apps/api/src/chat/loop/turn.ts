@@ -39,6 +39,7 @@ import {
 	ToolResultPart,
 	toDefinitions,
 	ToolRuntime,
+	type FinishReason,
 	type LLMRequest,
 	type Tools,
 } from "@maple/llm"
@@ -93,6 +94,16 @@ const DOOM_LOOP_NOTICE =
 	"answer the user from them now, and say plainly what they do not tell you and what a different " +
 	"approach would need."
 
+/** A private repair instruction, equivalent to the user following up with “continue”. */
+const EMPTY_OUTPUT_NOTICE =
+	"Your previous response ended without any visible answer or actionable tool call. Continue now: " +
+	"either answer the user in visible text or make the tool call needed to proceed. Do not return only hidden reasoning."
+
+/** Stable, non-provider-authored copy that is safe to persist and render in the browser. */
+const CHAT_TURN_FAILED = "Maple couldn't complete this response."
+const CHAT_EMPTY_RESPONSE = "Maple didn't produce a response."
+const CHAT_CONTENT_FILTERED = "Maple couldn't answer that request."
+
 /**
  * What a *headless* agent is told when its turn is cut short.
  *
@@ -113,6 +124,30 @@ const forcedSubmitNotice = (toolName: string) =>
  * Whether this turn is out of wall clock. Distinct from {@link isCurrent}; see `ChatTurnInput`.
  */
 const isSoftStopped = (input: ChatTurnInput): boolean => input.softStop !== undefined && input.softStop()
+
+interface TerminalDetails {
+	readonly error?: string
+	readonly finishReason?: FinishReason
+	readonly emptyOutput?: boolean
+	readonly failureReason?: string
+}
+
+/** Record the top-level outcome before emitting the durable terminal event. */
+const finishTurn = (
+	input: ChatTurnInput,
+	state: StepState,
+	reason: Parameters<typeof turnEnd>[1],
+	details: TerminalDetails = {},
+): Stream.Stream<ChatTurnEvent> => {
+	const observation = input.observability
+	if (observation !== undefined) {
+		observation.outcome = reason
+		if (details.finishReason !== undefined) observation.finishReason = details.finishReason
+		observation.emptyOutput ||= state.emptyRecoveryUsed || details.emptyOutput === true
+		if (details.failureReason !== undefined) observation.failureReason = details.failureReason
+	}
+	return Stream.fromIterable([turnEnd(input, reason, details.error)])
+}
 
 /**
  * Build the step that closes a turn, in whichever of its two shapes applies.
@@ -199,6 +234,7 @@ export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> 
 				budget: makeStepRetryBudget(),
 				agent,
 				taskBudget,
+				emptyRecoveryUsed: false,
 				doomLoop: initialDoomLoopState,
 			}
 			return Stream.concat(Stream.fromIterable([start]), runStep(input, tools, request, state))
@@ -274,7 +310,11 @@ const runStep = (
 				if (called.contextOverflow) {
 					const pruned = dropOldestToolStep(request)
 					if (pruned === request || state.attempt + 1 >= MAX_STEP_ATTEMPTS) {
-						return Stream.fromIterable([turnEnd(input, "error", called.message)])
+						console.error(`[chat.turn] ${called.reason}: ${called.message}`)
+						return finishTurn(input, state, "error", {
+							error: CHAT_TURN_FAILED,
+							failureReason: called.reason,
+						})
 					}
 					return Stream.concat(
 						Stream.fromIterable([
@@ -298,7 +338,11 @@ const runStep = (
 					state.attempt + 1 >= MAX_STEP_ATTEMPTS ||
 					!affordable
 				) {
-					return Stream.fromIterable([turnEnd(input, "error", called.message)])
+					console.error(`[chat.turn] ${called.reason}: ${called.message}`)
+					return finishTurn(input, state, "error", {
+						error: CHAT_TURN_FAILED,
+						failureReason: called.reason,
+					})
 				}
 				state.budget.spentMs += delayMs
 
@@ -343,25 +387,178 @@ const runStep = (
 				if (!isCurrent(input)) return Stream.empty
 
 				const response = LLMResponse.fromEvents(collected)
-				// A stream that neither failed nor assembled still ended the turn; say so, rather
-				// than leaving the log with no terminal event at all.
-				if (!response) return Stream.fromIterable([turnEnd(input, "stop")])
+				// A clean EOF without a provider terminal event is not a successful answer. Treating it
+				// as `stop` produced the same empty bubble as a genuinely blank model completion.
+				if (!response) {
+					return finishTurn(input, state, "error", {
+						error: CHAT_TURN_FAILED,
+						emptyOutput: emitted === 0,
+						failureReason: "IncompleteResponse",
+					})
+				}
 
 				if (input.usage) addUsage(input.usage, response.usage)
 
 				const calls = response.events
 					.filter(LLMEvent.is.toolCall)
 					.filter((call) => !call.providerExecuted)
+				const finishReason = response.finishReason
+				const providerFailure = response.events.find(LLMEvent.is.providerError)
+
+				// Some protocols report a failed response as a normal stream event rather than failing
+				// the Effect. Route those through the same bounded policy as thrown model failures.
+				if (providerFailure !== undefined) {
+					console.error(`[chat.turn] ProviderError: ${providerFailure.message}`)
+					const failureReason =
+						providerFailure.classification === "context-overflow"
+							? "ContextOverflow"
+							: "ProviderError"
+
+					if (providerFailure.classification === "context-overflow") {
+						const pruned = dropOldestToolStep(request)
+						if (pruned !== request && state.attempt + 1 < MAX_STEP_ATTEMPTS) {
+							return Stream.concat(
+								Stream.fromIterable([
+									tagged(input, {
+										type: "turn-retry" as const,
+										messageId: input.messageId,
+										attempt: state.attempt + 2,
+										retractChars: emitted,
+										reason: failureReason,
+										delayMs: 0,
+									}),
+								]),
+								runStep(input, tools, pruned, { ...state, attempt: state.attempt + 1 }),
+							)
+						}
+						return finishTurn(input, state, "error", {
+							error: CHAT_TURN_FAILED,
+							finishReason,
+							failureReason,
+						})
+					}
+
+					if (providerFailure.retryable === true) {
+						const delayMs = stepRetryDelayMs(state.attempt)
+						const affordable = state.budget.spentMs + delayMs <= STEP_RETRY_BUDGET_MS
+						if (state.attempt + 1 < MAX_STEP_ATTEMPTS && affordable) {
+							state.budget.spentMs += delayMs
+							const marker = tagged(input, {
+								type: "turn-retry" as const,
+								messageId: input.messageId,
+								attempt: state.attempt + 2,
+								retractChars: emitted,
+								reason: failureReason,
+								delayMs,
+							})
+							return Stream.concat(
+								Stream.fromIterable([marker]),
+								Stream.unwrap(
+									Effect.sleep(Duration.millis(delayMs)).pipe(
+										Effect.map(() =>
+											isCurrent(input)
+												? runStep(input, tools, request, {
+														...state,
+														attempt: state.attempt + 1,
+													})
+												: Stream.empty,
+										),
+									),
+								),
+							)
+						}
+					}
+
+					return finishTurn(input, state, "error", {
+						error: CHAT_TURN_FAILED,
+						finishReason,
+						failureReason,
+					})
+				}
+
+				if (finishReason === "content-filter") {
+					return finishTurn(input, state, "error", {
+						error: CHAT_CONTENT_FILTERED,
+						finishReason,
+						failureReason: "ContentFilter",
+					})
+				}
+				if (finishReason === "error" || finishReason === "unknown") {
+					return finishTurn(input, state, "error", {
+						error: CHAT_TURN_FAILED,
+						finishReason,
+						failureReason: finishReason === "error" ? "ProviderError" : "UnknownFinishReason",
+					})
+				}
+				if (finishReason === "tool-calls" && calls.length === 0) {
+					return finishTurn(input, state, "error", {
+						error: CHAT_TURN_FAILED,
+						finishReason,
+						emptyOutput: response.text.trim() === "",
+						failureReason: "MissingToolCall",
+					})
+				}
 
 				if (calls.length === 0) {
-					return Stream.fromIterable([turnEnd(input, state.closing ? "max-steps" : "stop")])
+					const emptyOutput = response.text.trim() === ""
+					if (emptyOutput) {
+						if (
+							(finishReason === "stop" || finishReason === "length") &&
+							!state.emptyRecoveryUsed &&
+							state.attempt + 1 < MAX_STEP_ATTEMPTS &&
+							state.closing === undefined &&
+							hasStepBudget(state.taskBudget)
+						) {
+							if (input.observability !== undefined) {
+								input.observability.emptyOutput = true
+								input.observability.recoveryCount += 1
+							}
+							const replay = response.reasoning.trim() === "" ? [] : [response.message]
+							const recoveryRequest = LLM.updateRequest(request, {
+								messages: [...request.messages, ...replay, Message.user(EMPTY_OUTPUT_NOTICE)],
+							})
+							const marker = tagged(input, {
+								type: "turn-retry" as const,
+								messageId: input.messageId,
+								attempt: state.attempt + 2,
+								retractChars: emitted,
+								reason: "EmptyOutput",
+								delayMs: 0,
+							})
+							return Stream.concat(
+								Stream.fromIterable([marker]),
+								runStep(input, tools, recoveryRequest, {
+									...state,
+									attempt: state.attempt + 1,
+									emptyRecoveryUsed: true,
+								}),
+							)
+						}
+
+						return finishTurn(input, state, "error", {
+							error: CHAT_EMPTY_RESPONSE,
+							finishReason,
+							emptyOutput: true,
+							failureReason: "EmptyOutput",
+						})
+					}
+
+					return finishTurn(input, state, state.closing ? "max-steps" : "stop", {
+						finishReason,
+					})
 				}
 
 				// A prose closing step is sent with `tools: []` and `toolChoice: "none"`, so a call
 				// here means the provider ignored both. Ending rather than dispatching keeps
 				// `MAX_STEPS` a real bound: without this the closing step would recurse into another
 				// closing step, and a provider that always emits a call would loop forever.
-				if (state.closing === "prose") return Stream.fromIterable([turnEnd(input, "max-steps")])
+				if (state.closing === "prose") {
+					return finishTurn(input, state, "error", {
+						error: CHAT_TURN_FAILED,
+						finishReason,
+						failureReason: "UnexpectedClosingToolCall",
+					})
+				}
 
 				// A submit closing step, by contrast, exists precisely so one tool call happens. It is
 				// dispatched and the turn then ends unconditionally — no recursion, no doom-loop
@@ -371,7 +568,13 @@ const runStep = (
 				if (state.closing === "submit") {
 					const submitName = input.closingSubmit?.toolName
 					const forced = calls.filter((call) => call.name === submitName)
-					if (forced.length === 0) return Stream.fromIterable([turnEnd(input, "max-steps")])
+					if (forced.length === 0) {
+						return finishTurn(input, state, "error", {
+							error: CHAT_TURN_FAILED,
+							finishReason,
+							failureReason: "MissingForcedToolCall",
+						})
+					}
 					return Stream.unwrap(
 						Effect.gen(function* () {
 							const dispatched = yield* Effect.forEach(
@@ -382,27 +585,29 @@ const runStep = (
 									),
 								{ concurrency: 1 },
 							)
-							return Stream.fromIterable([
-								...forced.map((call) =>
-									tagged(input, {
-										type: "tool-call" as const,
-										messageId: input.messageId,
-										callId: call.id,
-										name: call.name,
-										input: call.input,
-									}),
-								),
-								...dispatched.map(([call, outcome]) =>
-									tagged(input, {
-										type: "tool-result" as const,
-										messageId: input.messageId,
-										callId: call.id,
-										output: outcome.result.value,
-										...(outcome.result.type === "error" ? { isError: true } : {}),
-									}),
-								),
-								turnEnd(input, "max-steps"),
-							])
+							return Stream.concat(
+								Stream.fromIterable([
+									...forced.map((call) =>
+										tagged(input, {
+											type: "tool-call" as const,
+											messageId: input.messageId,
+											callId: call.id,
+											name: call.name,
+											input: call.input,
+										}),
+									),
+									...dispatched.map(([call, outcome]) =>
+										tagged(input, {
+											type: "tool-result" as const,
+											messageId: input.messageId,
+											callId: call.id,
+											output: outcome.result.value,
+											...(outcome.result.type === "error" ? { isError: true } : {}),
+										}),
+									),
+								]),
+								finishTurn(input, state, "max-steps", { finishReason }),
+							)
 						}),
 					)
 				}
@@ -428,7 +633,8 @@ const runStep = (
 						input: gated.input,
 						proposed: true,
 					})
-					return Stream.fromIterable([proposal, turnEnd(input, "stop")])
+					const terminal = finishTurn(input, state, "stop", { finishReason })
+					return Stream.concat(Stream.fromIterable([proposal]), terminal)
 				}
 
 				const announced = calls.map((call) =>

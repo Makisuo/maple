@@ -36,6 +36,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { trackProduct } from "@/lib/analytics"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { AiTriageResult } from "@maple/domain/http"
+import { TurnFailureNotice } from "./turn-failure-notice"
 
 const DEFAULT_SUGGESTIONS = [
 	"What's the overall system health?",
@@ -142,8 +143,18 @@ export function ChatConversation({
 		return base
 	}, [subjectSeededByServer, mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
 
-	const { sessionId, messages, status, isLoading, historyReady, failedSends, sendMessage, stop, canStop } =
-		useMapleChat({ tabId, context })
+	const {
+		sessionId,
+		messages,
+		status,
+		error,
+		isLoading,
+		historyReady,
+		failedSends,
+		sendMessage,
+		stop,
+		canStop,
+	} = useMapleChat({ tabId, context })
 	const diagnosisMessageId = useMemo(() => findDiagnosisMessageId(messages), [messages])
 
 	// Apply an approved proposal via Maple's authenticated API (propose-then-apply).
@@ -303,6 +314,9 @@ export function ChatConversation({
 							onRetry={handleSend}
 						/>
 					)}
+					{error !== undefined && failedSends.length === 0 ? (
+						<TurnFailureNotice error={error} onContinue={() => handleSend("Continue.")} />
+					) : null}
 					<PromptInput onSubmit={({ text }) => handleSend(text)}>
 						<PromptInputTextarea
 							ref={textareaRef}

@@ -1,11 +1,32 @@
+---
+// One request on one timeline. Every number below is expressed against `scale`,
+// so the ticks, the gridlines and the bars are all driven by the same values.
+const scale = 500;
+const pct = (ms: number) => `${((ms / scale) * 100).toFixed(2)}%`;
+
+const ticks = [0, 100, 200, 300, 400, 500];
+
+const setup = 88; // DNS + TCP + TLS, measured at the client
+const server = 380; // the SERVER span — this is the p99 the guide is about
+const ttfb = setup + server; // 468
+const total = ttfb + 8; // 476, the response body finishes 8 ms later
+
+const rows = [
+    { label: "Connection setup", detail: `${setup} ms · DNS, TCP, TLS`, from: 0, to: setup, variant: "setup" },
+    { label: "Server duration", detail: `${server} ms · SERVER span`, from: setup, to: ttfb, variant: "server" },
+    { label: "Time to first byte", detail: `${ttfb} ms · first byte`, from: 0, to: ttfb, variant: "ttfb" },
+    { label: "Total response", detail: `${total} ms · full body`, from: 0, to: total, variant: "total" },
+] as const;
+---
+
 <div
     class="latency-clock"
     role="img"
-    aria-label="A checkout request moving from checkout-client through edge-proxy and order-service to orders-db and payment-api, with bars comparing total response time, time to first byte, and server request duration"
+    aria-label={`A checkout request moving from checkout-client through edge-proxy into the order-service SERVER span, which calls orders-db and payment-api. On a ${scale} millisecond timeline, connection setup takes ${setup} ms, the server span takes ${server} ms, time to first byte is ${ttfb} ms, and the total response takes ${total} ms.`}
 >
     <div class="latency-clock__header" aria-hidden="true">
         <span>trace / POST /checkout</span>
-        <span class="latency-clock__status">p99 · 380 ms</span>
+        <span class="latency-clock__status">p99 · {server} ms server</span>
     </div>
 
     <div class="latency-clock__path" aria-hidden="true">
@@ -28,45 +49,70 @@
         </div>
     </div>
 
-    <div class="latency-clock__dependencies" aria-hidden="true">
-        <span class="latency-clock__branch"></span>
-        <div class="latency-clock__dependency">
-            <span class="latency-clock__kind">DB SPAN</span>
-            <strong>orders-db</strong>
-            <small>SELECT orders</small>
-        </div>
-        <div class="latency-clock__dependency">
-            <span class="latency-clock__kind">CLIENT SPAN</span>
-            <strong>payment-api</strong>
-            <small>POST /authorize</small>
-        </div>
+    <div class="latency-clock__tree" aria-hidden="true">
+        <ul class="latency-clock__children">
+            <li>
+                <span class="latency-clock__kind">DB SPAN</span>
+                <div class="latency-clock__childline">
+                    <strong>orders-db</strong>
+                    <small>SELECT orders</small>
+                </div>
+            </li>
+            <li>
+                <span class="latency-clock__kind">CLIENT SPAN</span>
+                <div class="latency-clock__childline">
+                    <strong>payment-api</strong>
+                    <small>POST /authorize</small>
+                </div>
+            </li>
+        </ul>
     </div>
 
     <div class="latency-clock__ruler" aria-hidden="true">
-        <div class="latency-clock__ticks">
-            <span>0 ms</span>
-            <span>100</span>
-            <span>200</span>
-            <span>300</span>
-            <span>400</span>
+        <div class="latency-clock__track">
+            <div class="latency-clock__ticks">
+                {
+                    ticks.map((tick, index) => (
+                        <span
+                            style={`left:${pct(tick)}`}
+                            data-edge={index === 0 ? "start" : index === ticks.length - 1 ? "end" : undefined}
+                        >
+                            {index === ticks.length - 1 ? `${tick} ms` : tick}
+                        </span>
+                    ))
+                }
+            </div>
         </div>
-        <div class="latency-clock__row">
-            <div><strong>Total response</strong><small>client → final byte</small></div>
-            <span class="latency-clock__bar latency-clock__bar--total"></span>
-        </div>
-        <div class="latency-clock__row">
-            <div><strong>Time to first byte</strong><small>client → first byte</small></div>
-            <span class="latency-clock__bar latency-clock__bar--ttfb"></span>
-        </div>
-        <div class="latency-clock__row">
-            <div><strong>Server duration</strong><small>SERVER span only</small></div>
-            <span class="latency-clock__bar latency-clock__bar--server"></span>
-        </div>
+
+        {
+            rows.map((row) => (
+                <div class="latency-clock__row">
+                    <div>
+                        <strong>{row.label}</strong>
+                        <small>{row.detail}</small>
+                    </div>
+                    <div class="latency-clock__track latency-clock__track--gridded">
+                        <span
+                            class={`latency-clock__bar latency-clock__bar--${row.variant}`}
+                            style={`left:${pct(row.from)};right:calc(100% - ${pct(row.to)})`}
+                        />
+                    </div>
+                </div>
+            ))
+        }
     </div>
 </div>
 
 <style>
     .latency-clock {
+        /* The path row and the dependency tree share this template so the tree
+           rail lands exactly on the left edge of the order-service card. */
+        --path-columns: minmax(0, 1fr) 2.6rem minmax(0, 1fr) 2.6rem minmax(0, 1.15fr);
+        --pad-x: 1rem;
+        --rail: 1.05rem;
+        --label-column: 8rem;
+        --label-gap: 0.8rem;
+        --gridline: color-mix(in oklab, var(--border) 70%, transparent);
         overflow: hidden;
         border: 1px solid var(--border);
         border-radius: 0.75rem;
@@ -81,7 +127,7 @@
         justify-content: space-between;
         gap: 1rem;
         border-bottom: 1px solid var(--border);
-        padding: 0.85rem 1rem;
+        padding: 0.85rem var(--pad-x);
         color: var(--muted-foreground);
         font-size: 10px;
     }
@@ -92,14 +138,14 @@
 
     .latency-clock__path {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 2.6rem minmax(0, 1fr) 2.6rem minmax(0, 1.15fr);
+        grid-template-columns: var(--path-columns);
         align-items: center;
         gap: 0.55rem;
-        padding: 1.1rem 1rem 0.85rem;
+        padding: 1.1rem var(--pad-x) 0;
     }
 
     .latency-clock__node,
-    .latency-clock__dependency {
+    .latency-clock__children li {
         display: flex;
         min-width: 0;
         flex-direction: column;
@@ -171,64 +217,132 @@
     .latency-clock__connector span {
         position: absolute;
         left: 50%;
-        bottom: 0.35rem;
+        bottom: 0.4rem;
         color: var(--muted-foreground);
         font-size: 8px;
         transform: translateX(-50%);
     }
 
-    .latency-clock__dependencies {
-        position: relative;
+    /* Dependency tree: the children hang off the order-service column, joined by
+       a rail that starts at the bottom of that card and elbows into each child. */
+    .latency-clock__tree {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 0.6rem;
-        margin: 0 1rem 1rem 56%;
-        padding-top: 1rem;
+        grid-template-columns: var(--path-columns);
+        gap: 0.55rem;
+        padding: 0 var(--pad-x) 1.1rem;
     }
 
-    .latency-clock__branch {
+    .latency-clock__children {
+        position: relative;
+        display: grid;
+        grid-column: 5;
+        gap: 0.5rem;
+        margin: 0;
+        padding: var(--rail) 0 0 var(--rail);
+        list-style: none;
+    }
+
+    /* Stem: from the bottom edge of order-service down to the first elbow. */
+    .latency-clock__children::before {
         position: absolute;
         top: 0;
         left: 0;
-        width: 52%;
-        height: 1rem;
-        border-top: 1px solid var(--border);
-        border-right: 1px solid var(--border);
+        width: 1px;
+        height: var(--rail);
+        background: var(--border);
+        content: "";
     }
 
-    .latency-clock__dependency {
-        padding: 0.6rem 0.7rem;
+    .latency-clock__children li {
+        position: relative;
+        padding: 0.55rem 0.7rem;
+    }
+
+    .latency-clock__childline {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+    }
+
+    /* Elbow into each child, drawn to the vertical centre of its label row. */
+    .latency-clock__children li::before {
+        position: absolute;
+        top: 0;
+        left: calc(var(--rail) * -1);
+        width: var(--rail);
+        height: 1.05rem;
+        border-bottom: 1px solid var(--border);
+        border-left: 1px solid var(--border);
+        content: "";
+    }
+
+    /* Continue the rail across the gap between siblings. */
+    .latency-clock__children li + li::after {
+        position: absolute;
+        top: -0.5rem;
+        left: calc(var(--rail) * -1);
+        width: 1px;
+        height: 0.5rem;
+        background: var(--border);
+        content: "";
     }
 
     .latency-clock__ruler {
         border-top: 1px solid var(--border);
-        padding: 0.85rem 1rem 1rem;
+        padding: 0.85rem var(--pad-x) 1rem;
+    }
+
+    .latency-clock__track {
+        position: relative;
+        margin-left: calc(var(--label-column) + var(--label-gap));
+    }
+
+    /* One gridline per tick, so every bar edge can be read against the scale.
+       The repeating layer covers 0–400; the first layer closes the grid at 500. */
+    .latency-clock__track--gridded {
+        background-image:
+            linear-gradient(to left, var(--gridline) 0 1px, transparent 1px),
+            repeating-linear-gradient(to right, var(--gridline) 0 1px, transparent 1px 20%);
     }
 
     .latency-clock__ticks {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        margin-left: 8.8rem;
-        padding-bottom: 0.5rem;
+        position: relative;
+        height: 1.1rem;
         color: var(--muted-foreground);
         font-size: 8px;
     }
 
-    .latency-clock__ticks span:not(:first-child) {
-        text-align: right;
+    .latency-clock__ticks span {
+        position: absolute;
+        top: 0;
+        white-space: nowrap;
+        transform: translateX(-50%);
+    }
+
+    .latency-clock__ticks span[data-edge="start"] {
+        transform: none;
+    }
+
+    .latency-clock__ticks span[data-edge="end"] {
+        transform: translateX(-100%);
     }
 
     .latency-clock__row {
         display: grid;
-        grid-template-columns: 8rem 1fr;
-        align-items: center;
-        gap: 0.8rem;
-        min-height: 2.25rem;
+        grid-template-columns: var(--label-column) 1fr;
+        align-items: stretch;
+        gap: var(--label-gap);
     }
 
-    .latency-clock__row > div {
+    .latency-clock__row > div:first-child {
         display: flex;
         flex-direction: column;
+        justify-content: center;
+        padding: 0.4rem 0;
+    }
+
+    .latency-clock__row .latency-clock__track {
+        margin-left: 0;
     }
 
     .latency-clock__row strong {
@@ -244,12 +358,15 @@
     }
 
     .latency-clock__bar {
-        position: relative;
+        position: absolute;
+        top: 50%;
         display: block;
         height: 2px;
         background: var(--muted-foreground);
+        transform: translateY(-50%);
     }
 
+    /* End caps, so a bar's start and stop are unambiguous against the grid. */
     .latency-clock__bar::before,
     .latency-clock__bar::after {
         position: absolute;
@@ -262,11 +379,18 @@
 
     .latency-clock__bar::before { left: 0; }
     .latency-clock__bar::after { right: 0; }
+    .latency-clock__bar--setup { background: var(--muted-foreground); }
+    .latency-clock__bar--server { background: var(--primary); }
+    .latency-clock__bar--ttfb { background: var(--foreground); }
     .latency-clock__bar--total { background: var(--chart-p99); }
-    .latency-clock__bar--ttfb { width: 95%; background: var(--foreground); }
-    .latency-clock__bar--server { width: 61%; margin-left: 27%; background: color-mix(in oklab, var(--primary) 72%, var(--muted-foreground)); }
 
     @media (max-width: 639px) {
+        .latency-clock {
+            --rail: 0.85rem;
+            --label-column: 7rem;
+            --label-gap: 0.6rem;
+        }
+
         .latency-clock__path {
             grid-template-columns: 1fr;
             gap: 0;
@@ -275,36 +399,26 @@
         .latency-clock__connector {
             width: 1px;
             height: 1.2rem;
-            margin-left: 50%;
+            margin-left: 1.25rem;
         }
 
         .latency-clock__connector::after {
             top: auto;
             right: auto;
-            bottom: 0;
+            bottom: -1px;
             left: -2px;
             transform: rotate(135deg);
         }
 
         .latency-clock__connector span { display: none; }
 
-        .latency-clock__dependencies {
-            margin: 0 1rem 1rem;
-            padding-top: 1.25rem;
+        .latency-clock__tree {
+            grid-template-columns: 1fr;
         }
 
-        .latency-clock__branch {
-            left: 50%;
-            width: 25%;
-            transform: translateX(-50%);
-        }
-
-        .latency-clock__ticks {
-            margin-left: 7.8rem;
-        }
-
-        .latency-clock__row {
-            grid-template-columns: 7rem 1fr;
+        .latency-clock__children {
+            grid-column: 1;
+            margin-left: 1.25rem;
         }
     }
 </style>

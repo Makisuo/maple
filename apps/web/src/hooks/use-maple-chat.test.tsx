@@ -53,6 +53,7 @@ function Harness() {
 	return (
 		<div>
 			<span data-testid="status">{chat.status}</span>
+			<span data-testid="error">{chat.error?.message ?? ""}</span>
 			<span data-testid="ready">{String(chat.historyReady)}</span>
 			<span data-testid="text">
 				{chat.messages
@@ -89,6 +90,40 @@ afterEach(() => {
 })
 
 describe("useMapleChat stream reader", () => {
+	it("surfaces a terminal turn error and clears it when the user continues", async () => {
+		tracedFetch
+			.mockResolvedValueOnce(jsonResponse(emptyHistory))
+			.mockResolvedValueOnce(jsonResponse({ cursor: 0, messageId: "m1" }))
+			.mockResolvedValueOnce(
+				sseResponse([
+					frame({ seq: 1, type: "turn-start", messageId: "m1" }),
+					frame({
+						seq: 2,
+						type: "turn-end",
+						messageId: "m1",
+						reason: "error",
+						error: "Maple couldn't complete this response.",
+					}),
+				]),
+			)
+			// Keep the follow-up request in flight; `sendMessage` clears the old failure immediately.
+			.mockImplementationOnce(() => new Promise<Response>(() => {}))
+
+		render(<Harness />)
+		await waitFor(() => expect(screen.getByTestId("ready").textContent).toBe("true"))
+		await act(async () => {
+			screen.getByText("send").click()
+		})
+
+		await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("error"))
+		expect(screen.getByTestId("error").textContent).toBe("Maple couldn't complete this response.")
+
+		await act(async () => {
+			screen.getByText("send").click()
+		})
+		expect(screen.getByTestId("error").textContent).toBe("")
+	})
+
 	it("reconnects from its cursor when the stream closes without a turn-end", async () => {
 		// The server closes after its 25s tail window elapses. Treating that as the end of the turn
 		// left `status` at "streaming" forever, with the composer disabled and the turn still

@@ -103,6 +103,7 @@ const RETRY_HINT = "retry: 1000\n\n"
  * the `diagnosis_timeout` ceiling the triage path already uses.
  */
 const TURN_STALE_MS = 15 * 60 * 1000
+const CHAT_TURN_FAILED = "Maple couldn't complete this response."
 
 export class ChatSession extends DurableObject<Record<string, unknown>> {
 	private readonly sql: SqlStorage
@@ -411,12 +412,13 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 			const { runChatSessionTurn } = await import("./turn-runner")
 			await runChatSessionTurn({ session: this, sessionId, env: this.env, messageId, tenant })
 		} catch (cause) {
+			console.error("[chat.turn] Failed to start turn runner", cause)
 			if (this.holdsTurn(messageId)) {
 				this.append({
 					type: "turn-end",
 					messageId,
 					reason: "error",
-					error: cause instanceof Error ? cause.message : "The chat turn failed to start.",
+					error: CHAT_TURN_FAILED,
 				})
 			}
 		} finally {

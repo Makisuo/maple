@@ -186,6 +186,9 @@ const compactIfNeeded = (
 /** Compaction is housekeeping; it must not hold the turn slot open. */
 const COMPACTION_TIMEOUT = "20 seconds"
 
+/** Stable copy for the durable/browser event; detailed causes stay server-side. */
+const CHAT_TURN_FAILED = "Maple couldn't complete this response."
+
 /**
  * Drive one turn to completion.
  *
@@ -215,6 +218,20 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	)
 
 	const tenant = toTenantContext(input.tenant)
+	const observability = loop.makeTurnObservability()
+	let recordedTerminal = false
+	const annotateTurn = () =>
+		Effect.annotateCurrentSpan({
+			"maple.chat.outcome": observability.outcome ?? "unknown",
+			...(observability.finishReason === undefined
+				? {}
+				: { "maple.chat.finish_reason": observability.finishReason }),
+			"maple.chat.empty_output": observability.emptyOutput,
+			"maple.chat.recovery_count": observability.recoveryCount,
+			...(observability.failureReason === undefined
+				? {}
+				: { "maple.chat.failure_reason": observability.failureReason }),
+		})
 
 	const program = Effect.gen(function* () {
 		const investigations = yield* InvestigationService
@@ -244,6 +261,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 				messageId: input.messageId,
 				extraTools,
 				usage,
+				observability,
 				// An abort clears the claim; the turn notices here and stops at the next event
 				// rather than streaming into a conversation that has moved on.
 				isCurrent: () => input.session.holdsTurn(input.messageId),
@@ -257,11 +275,28 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 			})
 			.pipe(
 				Stream.takeWhile(() => input.session.holdsTurn(input.messageId)),
-				Stream.runForEach((event) => Effect.sync(() => input.session.append(event))),
+				Stream.runForEach((event) =>
+					Effect.sync(() => {
+						input.session.append(event)
+						if (event.type === "turn-end" && event.task === undefined) {
+							recordedTerminal = true
+							observability.outcome = event.reason
+						}
+					}),
+				),
 			)
 
+		if (!recordedTerminal && !input.session.holdsTurn(input.messageId)) {
+			observability.outcome = "aborted"
+		}
+		yield* annotateTurn()
 		yield* compactIfNeeded(input, model, usage)
 	}).pipe(
+		Effect.tapError(() => {
+			observability.outcome = "error"
+			observability.failureReason ??= "UnhandledTurnFailure"
+			return annotateTurn()
+		}),
 		Effect.withSpan("chat.turn", {
 			attributes: {
 				orgId: tenant.orgId,
@@ -274,15 +309,15 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	try {
 		await runtime.runPromise(program)
 	} catch (cause) {
-		// The client sees this string. Keep it to the message — a raw `Cause` carries stack frames
-		// and, inside a DatabaseError, connection details, and it is written to a durable log the
-		// browser reads back.
+		// The detailed cause belongs in server logs and the failed Effect span, never in the durable
+		// event the browser reads back.
+		console.error("[chat.turn] Unhandled turn failure", cause)
 		if (input.session.holdsTurn(input.messageId)) {
 			input.session.append({
 				type: "turn-end",
 				messageId: input.messageId,
 				reason: "error",
-				error: cause instanceof Error ? cause.message : "The chat turn failed.",
+				error: CHAT_TURN_FAILED,
 			})
 		}
 	} finally {

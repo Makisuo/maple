@@ -7,9 +7,17 @@
  */
 import { assert, describe, it } from "vitest"
 import { Effect, Layer, Schema, Stream } from "effect"
-import { LLMClient, LLMEvent, Tool, type LLMRequest, type Model, type Tools } from "@maple/llm"
+import {
+	LLMClient,
+	LLMEvent,
+	Tool,
+	type FinishReason,
+	type LLMRequest,
+	type Model,
+	type Tools,
+} from "@maple/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
-import { runChatTurn, type ChatTurnEvent } from "./index"
+import { makeTurnObservability, runChatTurn, type ChatTurnEvent } from "./index"
 import { MAX_STEP_ATTEMPTS } from "./budgets"
 import { DEFAULT_RULESET } from "../permissions"
 import type { AgentDefinition } from "../agents"
@@ -31,7 +39,14 @@ const MODEL: Model = CloudflareWorkersAI.configure({
 /** A text delta, as the provider-neutral event the turn folds. */
 const textDelta = (text: string): LLMEvent => ({ type: "text-delta", id: "t1", text }) as LLMEvent
 
-const finish = (): LLMEvent => ({ type: "finish", reason: "stop" }) as LLMEvent
+const finish = (reason: FinishReason = "stop"): LLMEvent => ({ type: "finish", reason }) as LLMEvent
+
+const reasoningDelta = (text: string): LLMEvent => ({ type: "reasoning-delta", id: "r1", text }) as LLMEvent
+
+const providerError = (
+	message: string,
+	options: { readonly retryable?: boolean; readonly classification?: "context-overflow" } = {},
+): LLMEvent => ({ type: "provider-error", message, ...options }) as LLMEvent
 
 /**
  * `input` matters to more than the tool: `stop.ts` fingerprints it, so a fixture that wants many
@@ -106,12 +121,14 @@ interface CollectOverrides {
 
 const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) => {
 	const stub = stubModel(steps)
+	const observability = makeTurnObservability()
 	return runChatTurn({
 		sessionId: overrides.sessionId ?? "org_test:tab",
 		tenant: TENANT,
 		model: MODEL,
 		messages: [],
 		messageId: "m1",
+		observability,
 		...(overrides.isCurrent ? { isCurrent: overrides.isCurrent } : {}),
 		...(overrides.softStop ? { softStop: overrides.softStop } : {}),
 		...(overrides.agent ? { agent: overrides.agent } : {}),
@@ -121,7 +138,7 @@ const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) =
 		Stream.runCollect,
 		Effect.map((events) => Array.from(events) as ChatTurnEvent[]),
 		Effect.provide(stub.layer),
-		Effect.map((events) => ({ events, requests: stub.log, calls: stub.calls() })),
+		Effect.map((events) => ({ events, requests: stub.log, calls: stub.calls(), observability })),
 	)
 }
 
@@ -227,6 +244,122 @@ describe("runChatTurn", () => {
 		// An abort already recorded the terminal event on the session; emitting another here would
 		// double-close the turn in the durable log.
 		assert.isEmpty(terminal(events))
+	})
+})
+
+describe("runChatTurn completion outcomes", () => {
+	it.each(["stop", "length"] as const)("recovers one blank %s completion", async (reason) => {
+		const result = await Effect.runPromise(
+			collect([[finish(reason)], [textDelta("Recovered answer."), finish()]]),
+		)
+
+		assert.equal(result.calls, 2)
+		assert.equal(fold(result.events), "Recovered answer.")
+		assert.lengthOf(retries(result.events), 1)
+		const marker = retries(result.events)[0]
+		assert.equal(marker?.type === "turn-retry" ? marker.reason : undefined, "EmptyOutput")
+		assert.equal(marker?.type === "turn-retry" ? marker.delayMs : undefined, 0)
+		assert.equal(result.observability.emptyOutput, true)
+		assert.equal(result.observability.recoveryCount, 1)
+		assert.equal(result.observability.outcome, "stop")
+	})
+
+	it("retracts whitespace before recovering", async () => {
+		const result = await Effect.runPromise(
+			collect([
+				[textDelta("   "), finish()],
+				[textDelta("Visible"), finish()],
+			]),
+		)
+
+		const marker = retries(result.events)[0]
+		assert.equal(marker?.type === "turn-retry" ? marker.retractChars : undefined, 3)
+		assert.equal(fold(result.events), "Visible")
+	})
+
+	it("preserves reasoning in the private recovery request", async () => {
+		const result = await Effect.runPromise(
+			collect([
+				[reasoningDelta("analysis only"), finish()],
+				[textDelta("Visible"), finish()],
+			]),
+		)
+
+		const recovery = result.requests[1]
+		const reasoning = recovery?.messages
+			.flatMap((message) => message.content)
+			.filter((part) => part.type === "reasoning")
+			.map((part) => part.text)
+			.join("")
+		assert.equal(reasoning, "analysis only")
+		const instruction = recovery?.messages
+			.at(-1)
+			?.content.map((part) => (part.type === "text" ? part.text : ""))
+			.join("")
+		assert.include(instruction ?? "", "without any visible answer")
+		assert.isEmpty(result.events.filter((event) => event.type === "user-message"))
+	})
+
+	it("fails visibly after the one blank recovery is exhausted", async () => {
+		const result = await Effect.runPromise(collect([[finish()], [finish()], [textDelta("never")]]))
+
+		assert.equal(result.calls, 2)
+		assert.lengthOf(retries(result.events), 1)
+		assert.lengthOf(terminal(result.events), 1)
+		const end = terminal(result.events)[0]
+		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "error")
+		assert.equal(end?.type === "turn-end" ? end.error : undefined, "Maple didn't produce a response.")
+	})
+
+	it.each(["content-filter", "error", "unknown", "tool-calls"] as const)(
+		"does not auto-retry a %s finish without deliverable output",
+		async (reason) => {
+			const result = await Effect.runPromise(collect([[finish(reason)], [textDelta("never")]]))
+			assert.equal(result.calls, 1)
+			assert.isEmpty(retries(result.events))
+			const end = terminal(result.events)[0]
+			assert.equal(end?.type === "turn-end" ? end.reason : undefined, "error")
+			assert.equal(
+				end?.type === "turn-end" ? end.error : undefined,
+				reason === "content-filter"
+					? "Maple couldn't answer that request."
+					: "Maple couldn't complete this response.",
+			)
+		},
+	)
+
+	it("retries a response-level provider error only when marked retryable", async () => {
+		const retried = await Effect.runPromise(
+			collect([[providerError("overloaded", { retryable: true })], [textDelta("ok"), finish()]]),
+		)
+		assert.equal(retried.calls, 2)
+		assert.equal(fold(retried.events), "ok")
+		assert.lengthOf(retries(retried.events), 1)
+
+		const terminalFailure = await Effect.runPromise(
+			collect([[providerError("invalid request")], [textDelta("never"), finish()]]),
+		)
+		assert.equal(terminalFailure.calls, 1)
+		const end = terminal(terminalFailure.events)[0]
+		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "error")
+		assert.equal(
+			end?.type === "turn-end" ? end.error : undefined,
+			"Maple couldn't complete this response.",
+		)
+		assert.notInclude(end?.type === "turn-end" ? (end.error ?? "") : "", "invalid request")
+	}, 10_000)
+
+	it("fails a blank closing step instead of escaping the step bound", async () => {
+		const result = await Effect.runPromise(
+			collect([[toolCall("c1", "find_errors"), finish()], [finish()]], {
+				agent: agentWith({ steps: 1 }),
+			}),
+		)
+
+		assert.equal(result.calls, 2)
+		assert.isEmpty(retries(result.events))
+		const end = terminal(result.events)[0]
+		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "error")
 	})
 })
 
@@ -366,10 +499,7 @@ describe("runChatTurn retry", () => {
 		const at = result.events.findIndex((event) => event.type === "turn-retry")
 		const marker = result.events[at]
 		const flushedBefore = textOf(result.events.slice(0, at))
-		assert.equal(
-			marker?.type === "turn-retry" ? marker.retractChars : undefined,
-			flushedBefore.length,
-		)
+		assert.equal(marker?.type === "turn-retry" ? marker.retractChars : undefined, flushedBefore.length)
 		assert.equal(result.calls, 2)
 		assert.equal(fold(result.events), "Hello world.")
 		assert.lengthOf(terminal(result.events), 1)
@@ -524,7 +654,7 @@ describe("runChatTurn permissions", () => {
 	it("honours an agent's own step budget", async () => {
 		const looping: Step = [toolCall("c1", "find_errors"), finish()]
 		const result = await Effect.runPromise(
-			collect([...Array.from({ length: 6 }, () => looping), [textDelta("summary"), finish()]], {
+			collect([...Array.from({ length: 3 }, () => looping), [textDelta("summary"), finish()]], {
 				agent: agentWith({ steps: 3 }),
 			}),
 		)
@@ -552,7 +682,7 @@ describe("runChatTurn max steps, defensively", () => {
 		assert.equal(result.calls, 3)
 		assert.lengthOf(terminal(result.events), 1)
 		const end = terminal(result.events)[0]
-		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "max-steps")
+		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "error")
 	}, 30_000)
 })
 
@@ -627,7 +757,6 @@ describe("runChatTurn closing submit", () => {
 	 */
 	it("closes with the submit tool when a soft stop fires mid-run", async () => {
 		const submitted: Array<unknown> = []
-		let stopped = false
 		const result = await Effect.runPromise(
 			collect(
 				[
@@ -637,12 +766,8 @@ describe("runChatTurn closing submit", () => {
 				{
 					extraTools: submitTool(submitted),
 					closingSubmit: { toolName: SUBMIT },
-					softStop: () => {
-						// False on the first check so one real step runs, then true.
-						const previous = stopped
-						stopped = true
-						return previous
-					},
+					// Checked after the first real tool step, which is when the forced submit closes it.
+					softStop: () => true,
 				},
 			),
 		)
