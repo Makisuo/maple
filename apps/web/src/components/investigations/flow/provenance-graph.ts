@@ -18,7 +18,12 @@ import { toEpochMs } from "@maple/ui/lib/time-format"
 import { lensCopy } from "../lens-catalogue"
 import { type LensRun, type LensNodeState, checksHeld, lensChecks, lensNodeState } from "../lens-derive"
 import { splitDuration } from "../investigation-display"
-import { classifyAction, type ActionKind, type ActionTarget } from "./action-target"
+import {
+	classifyAction,
+	routingContextFromInvestigation,
+	type ActionKind,
+	type ActionTarget,
+} from "./action-target"
 
 /* -------------------------------------------------------------------------------------------------
  * Geometry
@@ -103,6 +108,8 @@ export interface LensOverflowNodeData {
 }
 
 export interface ActionNodeData {
+	/** Zero-based position in `report.suggestedActions` — the detail panel's identity, and its URL key. */
+	readonly index: number
 	readonly ordinal: string
 	readonly text: string
 	/** What shape of work this is, so the node can carry a glyph for it. */
@@ -110,6 +117,12 @@ export interface ActionNodeData {
 	readonly target: ActionTarget | null
 	/** Static roadmap chip — a promise attached to a real handle, not a node of its own. */
 	readonly promise: "AUTOFIX · SOON" | "PULL REQ · SOON"
+	/**
+	 * Injected by the canvas when it maps these to xyflow nodes, never by the
+	 * builder — `buildProvenanceGraph` stays a pure function of the investigation,
+	 * which is what lets it be tested without a renderer.
+	 */
+	readonly onOpen?: (index: number) => void
 }
 
 export type ProvenanceNode =
@@ -374,9 +387,10 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 				width: ACTION_WIDTH,
 				height: ACTION_HEIGHT,
 				data: {
+					index,
 					ordinal: String(index + 1).padStart(2, "0"),
 					text: action,
-					...classifyAction(action, investigation),
+					...classifyAction(action, routingContextFromInvestigation(investigation)),
 					promise: index === actions.length - 1 ? "PULL REQ · SOON" : "AUTOFIX · SOON",
 				},
 			})),

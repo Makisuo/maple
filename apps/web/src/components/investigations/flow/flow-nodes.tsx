@@ -315,7 +315,7 @@ export const FlowHeadingNode = memo(function FlowHeadingNode({
  * both. The glyph differentiates by shape alone, which is also what makes the
  * column scannable at the 0.7 zoom a narrow window forces.
  */
-const ACTION_GLYPH: Record<ActionKind, { Icon: IconComponent; label: string }> = {
+export const ACTION_GLYPH: Record<ActionKind, { Icon: IconComponent; label: string }> = {
 	rollback: { Icon: RocketIcon, label: "Deploy or rollback" },
 	alert: { Icon: BellIcon, label: "Alerting" },
 	dashboard: { Icon: ChartBarIcon, label: "Dashboard" },
@@ -338,10 +338,33 @@ function ActionGlyph({ kind }: { kind: ActionKind }) {
 }
 
 export const FlowActionNode = memo(function FlowActionNode({ data }: NodeProps & { data: ActionNodeData }) {
+	const open = () => data.onOpen?.(data.index)
+
 	return (
 		<>
 			<Ports />
-			<div className="flex size-full items-center gap-2.5 rounded-lg border bg-card px-3">
+			{/*
+			 * `role="button"` on a div rather than a real `<button>`: the CTA below is
+			 * an `<a>`, and an anchor inside a button is invalid HTML. Same escape
+			 * hatch — and same `closest("a")` guard — as the investigation table's
+			 * clickable rows, so the CTA opens its page instead of the panel.
+			 */}
+			<div
+				role="button"
+				tabIndex={0}
+				aria-label={`Proposed action ${data.ordinal}: ${data.text}`}
+				onClick={(event) => {
+					if ((event.target as HTMLElement).closest("a")) return
+					open()
+				}}
+				onKeyDown={(event) => {
+					if (event.key !== "Enter" && event.key !== " ") return
+					if ((event.target as HTMLElement).closest("a")) return
+					event.preventDefault()
+					open()
+				}}
+				className="flex size-full cursor-pointer items-center gap-2.5 rounded-lg border bg-card px-3 transition-colors hover:border-primary/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+			>
 				{/*
 				 * A fixed-width gutter carrying both the rank and the shape of work:
 				 * the ordinal is the order the report put them in, the glyph is what

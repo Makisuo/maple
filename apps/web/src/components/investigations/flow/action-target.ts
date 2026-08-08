@@ -44,6 +44,27 @@ export interface ActionClassification {
 }
 
 /**
+ * The three facts routing needs, lifted out of `V2Investigation`.
+ *
+ * The canvas has a whole investigation to hand; the chat report card has only an
+ * `AiTriageResult` and no investigation at all. Naming what routing actually
+ * consumes lets both surfaces classify the same prose the same way, instead of
+ * the chat card being stuck with unclassified rows because it cannot produce an
+ * investigation it never had.
+ */
+export interface ActionRoutingContext {
+	readonly serviceName?: string | null
+	readonly scope?: string | null
+	readonly issueId?: string | null
+}
+
+export const routingContextFromInvestigation = (investigation: V2Investigation): ActionRoutingContext => ({
+	serviceName: investigation.snapshot.serviceName ?? null,
+	scope: investigation.snapshot.scope ?? null,
+	issueId: investigation.subject.type === "incident" ? (investigation.subject.issue_id ?? null) : null,
+})
+
+/**
  * Word stems, matched with a trailing inflection so "span" also catches "spans"
  * and "deploy" catches "deployed" — the report writes prose, and half its verbs
  * arrive plural or past-tense. The leading `\b` is what keeps this from matching
@@ -96,10 +117,10 @@ const KINDS: ReadonlyArray<{ kind: ActionKind; match: RegExp }> = [
 	{ kind: "service", match: inflected(["service", "endpoint", "runtime"]) },
 ]
 
-export function classifyAction(action: string, investigation: V2Investigation): ActionClassification {
+export function classifyAction(action: string, context: ActionRoutingContext): ActionClassification {
 	const text = action.toLowerCase()
 	const kind = KINDS.find((entry) => entry.match.test(text))?.kind ?? "task"
-	return { kind, target: actionTarget(text, investigation) }
+	return { kind, target: actionTarget(text, context) }
 }
 
 /**
@@ -107,18 +128,18 @@ export function classifyAction(action: string, investigation: V2Investigation): 
  * rollback that says "alert on pool_active" still has an alerts page to go to,
  * which is more use than no link at all.
  */
-function actionTarget(text: string, investigation: V2Investigation): ActionTarget | null {
+function actionTarget(text: string, context: ActionRoutingContext): ActionTarget | null {
 	if (text.includes("alert")) return { label: "CREATE ALERT", href: "/alerts" }
 	if (text.includes("dashboard")) return { label: "OPEN DASHBOARDS", href: "/dashboards" }
 	if (text.includes("trace") || text.includes("span")) return { label: "VIEW TRACES", href: "/traces" }
 	if (text.includes("log")) return { label: "SEARCH LOGS", href: "/logs" }
 
-	const scope = investigation.snapshot.serviceName ?? investigation.snapshot.scope
+	const scope = context.serviceName ?? context.scope
 	if (scope && !scope.includes(" ") && (text.includes("service") || text.includes(scope.toLowerCase()))) {
 		return { label: "VIEW SERVICE", href: `/services/${encodeURIComponent(scope)}` }
 	}
 
-	const issueId = investigation.subject.type === "incident" ? investigation.subject.issue_id : null
+	const issueId = context.issueId
 	if (issueId && (text.includes("issue") || text.includes("error"))) {
 		return { label: "OPEN ISSUE", href: `/errors/issues/${issueId}` }
 	}

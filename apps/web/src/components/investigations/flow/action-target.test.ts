@@ -1,19 +1,11 @@
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { describe, expect, it } from "vitest"
 
-import { classifyAction } from "./action-target"
+import { classifyAction, routingContextFromInvestigation } from "./action-target"
 
-const investigation = {
-	subject: {
-		type: "incident",
-		incident_kind: "error",
-		incident_id: "einc_1",
-		issue_id: "iss_9dK1",
-	},
-	snapshot: { scope: "checkout-api", serviceName: "checkout-api" },
-} as never as V2Investigation
+const context = { serviceName: "checkout-api", scope: "checkout-api", issueId: "iss_9dK1" }
 
-const kindOf = (action: string) => classifyAction(action, investigation).kind
+const kindOf = (action: string) => classifyAction(action, context).kind
 
 describe("classifyAction", () => {
 	it("reads the shape of work off the verb", () => {
@@ -62,21 +54,63 @@ describe("classifyAction", () => {
 	 * and a rollback losing its icon along with its link would be the wrong trade.
 	 */
 	it("classifies an action it cannot route", () => {
-		const rollback = classifyAction("Roll back deploy 8f21c", investigation)
+		const rollback = classifyAction("Roll back deploy 8f21c", context)
 		expect(rollback).toMatchObject({ kind: "rollback", target: null })
 	})
 
 	it("still routes an action whose kind has no page of its own", () => {
-		expect(classifyAction("Roll back the deploy, then alert on saturation", investigation)).toMatchObject(
-			{ kind: "rollback", target: { href: "/alerts" } },
-		)
+		expect(classifyAction("Roll back the deploy, then alert on saturation", context)).toMatchObject({
+			kind: "rollback",
+			target: { href: "/alerts" },
+		})
 	})
 
-	it("routes to the issue only when the investigation has one", () => {
-		expect(classifyAction("Triage the error issue", investigation).target).toMatchObject({
+	it("routes to the issue only when there is one", () => {
+		expect(classifyAction("Triage the error issue", context).target).toMatchObject({
 			href: "/errors/issues/iss_9dK1",
 		})
-		const freeform = { snapshot: {}, subject: { type: "freeform" } } as never as V2Investigation
-		expect(classifyAction("Triage the error issue", freeform).target).toBeNull()
+		expect(classifyAction("Triage the error issue", {}).target).toBeNull()
+	})
+
+	/**
+	 * A scope is only a service link when it could *be* a service name. Freeform
+	 * investigations title their own scope ("checkout latency spike"), and
+	 * `/services/checkout%20latency%20spike` is a 404 dressed up as a call to action.
+	 */
+	it("does not route a multi-word scope to a service page", () => {
+		expect(
+			classifyAction("Check the service exporter config", { scope: "checkout latency spike" }).target,
+		).toBeNull()
+	})
+})
+
+describe("routingContextFromInvestigation", () => {
+	it("carries the issue id of an incident subject", () => {
+		const investigation = {
+			subject: {
+				type: "incident",
+				incident_kind: "error",
+				incident_id: "einc_1",
+				issue_id: "iss_9dK1",
+			},
+			snapshot: { scope: "checkout-api", serviceName: "checkout-api" },
+		} as never as V2Investigation
+		expect(routingContextFromInvestigation(investigation)).toEqual({
+			serviceName: "checkout-api",
+			scope: "checkout-api",
+			issueId: "iss_9dK1",
+		})
+	})
+
+	/** A freeform investigation has no incident behind it, so no issue to open. */
+	it("has no issue id for a freeform subject", () => {
+		const freeform = {
+			subject: { type: "freeform" },
+			snapshot: { scope: "checkout latency spike" },
+		} as never as V2Investigation
+		expect(routingContextFromInvestigation(freeform).issueId).toBeNull()
+		expect(
+			classifyAction("Triage the error issue", routingContextFromInvestigation(freeform)).target,
+		).toBeNull()
 	})
 })

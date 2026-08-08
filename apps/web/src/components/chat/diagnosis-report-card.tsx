@@ -1,14 +1,15 @@
-import { Link } from "@tanstack/react-router"
+import { useState } from "react"
 import { Card } from "@maple/ui/components/ui/card"
 import type { AiTriageResult } from "@maple/domain/http"
-import { PulseIcon } from "@/components/icons"
-
-/** Shared with the investigation rail so the card and the rail never disagree. */
-export const CONFIDENCE_TONE: Record<string, string> = {
-	high: "text-success",
-	medium: "text-severity-warn",
-	low: "text-muted-foreground",
-}
+import { ChevronRightIcon, PulseIcon } from "@/components/icons"
+import {
+	ActionDetailSheet,
+	EvidenceChips,
+	type ProposedAction,
+} from "@/components/investigations/action-detail-sheet"
+import { CONFIDENCE_TONE } from "@/components/investigations/confidence-meter"
+import { classifyAction } from "@/components/investigations/flow/action-target"
+import { ACTION_GLYPH } from "@/components/investigations/flow/flow-nodes"
 
 /**
  * The inline report card the investigate-mode chat renders when the agent calls
@@ -18,6 +19,20 @@ export const CONFIDENCE_TONE: Record<string, string> = {
  */
 export function DiagnosisReportCard({ report }: { report: AiTriageResult }) {
 	const evidence = report.evidence.filter((e) => e.note || e.traceIds.length || e.logPatterns.length)
+	// Local state, not a search param: this card renders inside the global chat
+	// sheet and on routes that own no `?action=` of their own. Only the
+	// investigation route, which does, makes the panel linkable.
+	const [openIndex, setOpenIndex] = useState<number | null>(null)
+
+	const actions: Array<ProposedAction> = report.suggestedActions.map((action, index) => ({
+		index,
+		text: action,
+		// The chat card has a report, not an investigation — the affected scope is
+		// the only routing fact it can offer, which is exactly why `classifyAction`
+		// takes a context rather than a whole investigation.
+		...classifyAction(action, { scope: report.affectedScope }),
+		promise: index === report.suggestedActions.length - 1 ? "PULL REQ · SOON" : "AUTOFIX · SOON",
+	}))
 
 	return (
 		<Card className="gap-4 border-primary/20 bg-card/60 p-5">
@@ -56,50 +71,63 @@ export function DiagnosisReportCard({ report }: { report: AiTriageResult }) {
 							{item.note ? (
 								<p className="text-sm leading-relaxed text-foreground">{item.note}</p>
 							) : null}
-							{item.traceIds.length || item.logPatterns.length ? (
-								<div className="flex flex-wrap items-center gap-1.5">
-									{item.traceIds.map((traceId) => (
-										<Link
-											key={traceId}
-											to="/traces/$traceId"
-											params={{ traceId }}
-											className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground transition-colors hover:bg-muted/70"
-										>
-											{traceId.slice(0, 12)}…
-										</Link>
-									))}
-									{item.logPatterns.map((pattern) => (
-										<span
-											key={pattern}
-											className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-										>
-											{pattern}
-										</span>
-									))}
-								</div>
-							) : null}
+							<EvidenceChips item={item} />
 						</div>
 					))}
 				</section>
 			) : null}
 
-			{report.suggestedActions.length > 0 ? (
+			{actions.length > 0 ? (
 				<section className="space-y-2">
 					<h4 className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
 						Recommended actions
 					</h4>
-					<ol className="space-y-2">
-						{report.suggestedActions.map((action, index) => (
-							<li key={action} className="flex gap-2.5 text-sm text-foreground">
-								<span className="mt-px flex size-5 shrink-0 items-center justify-center rounded-md bg-muted font-mono text-[11px] tabular-nums text-muted-foreground">
-									{index + 1}
-								</span>
-								<span className="leading-relaxed">{action}</span>
-							</li>
-						))}
+					<ol className="space-y-1">
+						{actions.map((action) => {
+							const { Icon, label } = ACTION_GLYPH[action.kind]
+							return (
+								<li key={action.text}>
+									{/*
+									 * The whole row, not a trailing affordance: the row *is* the
+									 * action, and a chevron the reader has to aim at makes a
+									 * one-line sentence feel like a form control.
+									 */}
+									<button
+										type="button"
+										onClick={() => setOpenIndex(action.index)}
+										className="-mx-2 flex w-[calc(100%+1rem)] items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted/50"
+									>
+										<span className="mt-px flex size-5 shrink-0 items-center justify-center rounded-md bg-muted font-mono text-[11px] tabular-nums text-muted-foreground">
+											{action.index + 1}
+										</span>
+										<Icon
+											size={13}
+											aria-label={label}
+											className="mt-1 shrink-0 text-muted-foreground"
+										/>
+										<span className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
+											{action.text}
+										</span>
+										<ChevronRightIcon
+											size={13}
+											className="mt-1 shrink-0 text-muted-foreground/50"
+										/>
+									</button>
+								</li>
+							)
+						})}
 					</ol>
 				</section>
 			) : null}
+
+			<ActionDetailSheet
+				action={actions.find((action) => action.index === openIndex) ?? null}
+				report={report}
+				open={openIndex !== null}
+				onOpenChange={(next) => {
+					if (!next) setOpenIndex(null)
+				}}
+			/>
 		</Card>
 	)
 }

@@ -87,6 +87,38 @@
 	}
 }
 
+/* Investigation provenance canvas — the dashes drift from source to target, which
+   is what tells you which way the causality runs now that the arrowheads are gone.
+   Each keyframe travels exactly one dash cycle (dasharray 3+3, 4+4) so the loop
+   restarts on an identical frame; a round number like -10px would visibly jump.
+   Durations differ to keep both strands at the same ~7.5px/s drift. */
+@keyframes provenance-strand {
+	to {
+		stroke-dashoffset: -6px;
+	}
+}
+
+@keyframes provenance-strand-roadmap {
+	to {
+		stroke-dashoffset: -8px;
+	}
+}
+
+.provenance-strand {
+	animation: provenance-strand 0.8s linear infinite;
+}
+
+.provenance-strand-roadmap {
+	animation: provenance-strand-roadmap 1.05s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.provenance-strand,
+	.provenance-strand-roadmap {
+		animation: none;
+	}
+}
+
 /* Cold-boot splash — branded self-assembling trace waterfall (see boot-splash.tsx
    and the inline copy in index.html). The amber mark sits still; five span bars
    grow in, in start-time order, while a thin amber playhead scans across them so

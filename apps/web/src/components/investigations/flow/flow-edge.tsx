@@ -7,7 +7,7 @@
  * the breaks line up into a second, meaningless column.
  */
 import { memo } from "react"
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from "@xyflow/react"
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from "@xyflow/react"
 import { cn } from "@maple/ui/lib/utils"
 
 import type { EdgeKind } from "./provenance-graph"
@@ -17,7 +17,14 @@ export interface FlowEdgeData extends Record<string, unknown> {
 	readonly label?: string
 }
 
-const ARROW = "url(#maple-flow-arrow)"
+/**
+ * The dot sits centred on the card's own edge, so it reads as a port on the card
+ * rather than a bead floating in the gutter. That means it has to hold its own
+ * against the border it lands on: full muted-foreground and a hair wider than the
+ * 2px it takes to merely cap the strand.
+ */
+const DOT = "fill-muted-foreground"
+const DOT_R = 2.5
 
 export const FlowEdge = memo(function FlowEdge({
 	sourceX,
@@ -28,16 +35,18 @@ export const FlowEdge = memo(function FlowEdge({
 	targetPosition,
 	data,
 }: EdgeProps & { data?: FlowEdgeData }) {
-	const [path, labelX] = getBezierPath({
+	const [path, labelX] = getSmoothStepPath({
 		sourceX,
 		sourceY,
 		targetX,
 		targetY,
 		sourcePosition,
 		targetPosition,
-		// A low curvature keeps the causal spine reading as a straight run while
-		// still letting the fan strands bow apart.
-		curvature: 0.4,
+		// Square corners, softened. The 1→1 causal hops share a Y so they stay dead
+		// straight; the radius only ever shows on the fan and merge columns.
+		borderRadius: 8,
+		// Under GUTTER/2 (52/2), so the vertical trunk clears both node edges.
+		offset: 16,
 	})
 	const kind = data?.kind ?? "causal"
 
@@ -45,13 +54,29 @@ export const FlowEdge = memo(function FlowEdge({
 		<>
 			<BaseEdge
 				path={path}
-				markerEnd={ARROW}
+				// Marching dashes, drifting source→target. Keyframes live in styles.css
+				// because they have to stay in step with the dasharray below.
+				className={kind === "roadmap" ? "provenance-strand-roadmap" : "provenance-strand"}
 				style={{
-					stroke: "var(--border)",
+					// Not `--border`: a 1px dashed run at border contrast is roughly half a
+					// solid one, and the strand disappears. Muted-foreground held back to 45%
+					// lands it between the card border and the label text.
+					stroke: "var(--muted-foreground)",
+					strokeOpacity: 0.45,
 					strokeWidth: 1,
-					...(kind === "roadmap" ? { strokeDasharray: "2 3" } : {}),
+					// Dashed throughout — direction is carried by the left-to-right layout,
+					// not by an arrowhead.
+					strokeDasharray: kind === "roadmap" ? "4 4" : "3 3",
 				}}
 			/>
+			{/*
+			 * The junction dots. They do the work the arrowhead used to: without them a
+			 * dashed strand fades out a pixel short of the card and reads as unattached.
+			 * A fan re-draws the same source dot four times over — identical coordinates,
+			 * so it costs three overdrawn circles and stays one dot on screen.
+			 */}
+			<circle cx={sourceX} cy={sourceY} r={DOT_R} className={DOT} />
+			<circle cx={targetX} cy={targetY} r={DOT_R} className={DOT} />
 			{data?.label ? (
 				<EdgeLabelRenderer>
 					<span
@@ -74,28 +99,3 @@ export const FlowEdge = memo(function FlowEdge({
 		</>
 	)
 })
-
-/**
- * A single shared arrowhead definition. xyflow's built-in `MarkerType` markers
- * are re-emitted per edge; with a fan of four strands into one verdict node that
- * is a dozen identical `<marker>` elements for one triangle.
- */
-export function FlowEdgeMarkers() {
-	return (
-		<svg className="pointer-events-none absolute size-0" aria-hidden>
-			<defs>
-				<marker
-					id="maple-flow-arrow"
-					viewBox="0 0 6 6"
-					markerWidth="6"
-					markerHeight="6"
-					refX="5"
-					refY="3"
-					orient="auto"
-				>
-					<path d="M0 0 L5 3 L0 6 Z" fill="var(--border)" />
-				</marker>
-			</defs>
-		</svg>
-	)
-}

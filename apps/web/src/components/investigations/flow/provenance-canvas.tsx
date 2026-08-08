@@ -26,7 +26,8 @@ import type { V2Investigation } from "@maple/domain/http/v2"
 import { cn } from "@maple/ui/lib/utils"
 
 import { CursorIcon, MaximizeIcon, MinusIcon, PlusIcon } from "@/components/icons"
-import { FlowEdge, FlowEdgeMarkers, type FlowEdgeData } from "./flow-edge"
+import { ActionDetailSheet, type ProposedAction } from "../action-detail-sheet"
+import { FlowEdge, type FlowEdgeData } from "./flow-edge"
 import {
 	FlowActionNode,
 	FlowHeadingNode,
@@ -53,8 +54,20 @@ const HEADING_GUTTER = 28
 /** Room below it for the control bar, which overlaps the canvas's bottom-left corner. */
 const CONTROL_GUTTER = 34
 
-export function ProvenanceCanvas({ investigation }: { investigation: V2Investigation }) {
+export function ProvenanceCanvas({
+	investigation,
+	openActionIndex,
+	onOpenAction,
+}: {
+	investigation: V2Investigation
+	/** Which proposed action's detail panel is open, from the route's `?action=`. */
+	openActionIndex: number | null
+	onOpenAction: (index: number | null) => void
+}) {
 	const graph = useMemo(() => buildProvenanceGraph(investigation), [investigation])
+	const actions = useMemo(() => proposedActions(graph), [graph])
+	const openAction = actions.find((action) => action.index === openActionIndex) ?? null
+
 	// A freeform investigation that has not produced anything yet is a single node.
 	// One box on a 330px canvas is worse than no canvas.
 	if (graph.nodes.filter((node) => node.type !== "heading").length < 2) return null
@@ -63,11 +76,35 @@ export function ProvenanceCanvas({ investigation }: { investigation: V2Investiga
 		<ReactFlowProvider>
 			<section className="flex shrink-0 flex-col gap-3.5 rounded-lg border bg-card/40 px-6 pb-5.5 pt-4.5">
 				<Caption graph={graph} />
-				<Canvas graph={graph} />
+				<Canvas graph={graph} onOpenAction={onOpenAction} />
 			</section>
+			<ActionDetailSheet
+				action={openAction}
+				report={investigation.report}
+				open={openAction !== null}
+				onOpenChange={(next) => {
+					if (!next) onOpenAction(null)
+				}}
+			/>
 		</ReactFlowProvider>
 	)
 }
+
+/** The action nodes as the detail panel wants them — the canvas already computed every field. */
+const proposedActions = (graph: ProvenanceGraph): Array<ProposedAction> =>
+	graph.nodes.flatMap((node) =>
+		node.type === "action"
+			? [
+					{
+						index: node.data.index,
+						text: node.data.text,
+						kind: node.data.kind,
+						target: node.data.target,
+						promise: node.data.promise,
+					},
+				]
+			: [],
+	)
 
 function Caption({ graph }: { graph: ProvenanceGraph }) {
 	return (
@@ -87,7 +124,13 @@ function Caption({ graph }: { graph: ProvenanceGraph }) {
 	)
 }
 
-function Canvas({ graph }: { graph: ProvenanceGraph }) {
+function Canvas({
+	graph,
+	onOpenAction,
+}: {
+	graph: ProvenanceGraph
+	onOpenAction: (index: number | null) => void
+}) {
 	const [instance, setInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null)
 	const [paneWidth, setPaneWidth] = useState(0)
 	const paneRef = useRef<HTMLDivElement | null>(null)
@@ -107,6 +150,9 @@ function Canvas({ graph }: { graph: ProvenanceGraph }) {
 		? Math.min(1, Math.max(MIN_FIT, (paneWidth * (1 - FIT.padding * 2)) / graph.width))
 		: 1
 
+	// Stable, so injecting it below does not rebuild every node on every render.
+	const openAction = useCallback((index: number) => onOpenAction(index), [onOpenAction])
+
 	const nodes = useMemo<Array<Node>>(
 		() =>
 			graph.nodes.map((node) => ({
@@ -115,12 +161,25 @@ function Canvas({ graph }: { graph: ProvenanceGraph }) {
 				position: node.position,
 				width: node.width,
 				height: node.height,
-				data: node.data as unknown as Record<string, unknown>,
+				// The action nodes are the only interactive ones; the handler is injected
+				// here rather than built into the graph so `buildProvenanceGraph` stays pure.
+				data: (node.type === "action"
+					? { ...node.data, onOpen: openAction }
+					: node.data) as unknown as Record<string, unknown>,
 				draggable: false,
 				selectable: false,
 				connectable: false,
+				/*
+				 * Load-bearing. xyflow's node wrapper derives pointer-events from
+				 * `isSelectable || isDraggable || onNodeClick || onNodeMouse*` and sets
+				 * `pointer-events: none` when all of them are off — which is exactly this
+				 * canvas's configuration. Every link on every node was inert because of
+				 * it. The wrapper spreads `node.style` after its own, so saying it here is
+				 * how a node opts back in without becoming selectable or draggable.
+				 */
+				style: { pointerEvents: "all" },
 			})),
-		[graph],
+		[graph, openAction],
 	)
 
 	const edges = useMemo<Array<Edge>>(
@@ -194,7 +253,6 @@ function Canvas({ graph }: { graph: ProvenanceGraph }) {
 			className="relative w-full"
 			style={{ height: graph.height * scale + HEADING_GUTTER + CONTROL_GUTTER }}
 		>
-			<FlowEdgeMarkers />
 			<ReactFlow
 				nodes={nodes}
 				edges={edges}
@@ -226,7 +284,7 @@ function Canvas({ graph }: { graph: ProvenanceGraph }) {
 					place()
 				}}
 			/>
-			<GraphOutline graph={graph} />
+			<GraphOutline graph={graph} onOpenAction={onOpenAction} />
 		</div>
 	)
 }
@@ -275,20 +333,35 @@ function Controls({ onManualMove, onReset }: { onManualMove: () => void; onReset
  * Mirroring the graph costs a handful of `<li>`s and is the difference between
  * the page's lead being readable and being invisible.
  */
-function GraphOutline({ graph }: { graph: ProvenanceGraph }) {
+function GraphOutline({
+	graph,
+	onOpenAction,
+}: {
+	graph: ProvenanceGraph
+	onOpenAction: (index: number | null) => void
+}) {
 	return (
 		<ol className="sr-only">
 			{graph.nodes
 				.filter((node) => node.type !== "heading")
 				.map((node) => (
 					<li key={node.id}>
-						{node.type === "spine"
-							? `${node.data.eyebrow}: ${node.data.title}${node.data.status ? ` — ${node.data.status}` : ""}`
-							: node.type === "lens"
-								? `Lens ${node.data.title} — ${node.data.state.word}`
-								: node.type === "lensOverflow"
-									? `${node.data.hidden} further lenses`
-									: `Proposed action ${node.data.ordinal}: ${node.data.text}`}
+						{node.type === "spine" ? (
+							`${node.data.eyebrow}: ${node.data.title}${node.data.status ? ` — ${node.data.status}` : ""}`
+						) : node.type === "lens" ? (
+							`Lens ${node.data.title} — ${node.data.state.word}`
+						) : node.type === "lensOverflow" ? (
+							`${node.data.hidden} further lenses`
+						) : (
+							/*
+							 * A real button, because this outline is the keyboard route into
+							 * the canvas: the node itself lives inside a transformed pane
+							 * whose tab order is layout order, not causal order.
+							 */
+							<button type="button" onClick={() => onOpenAction(node.data.index)}>
+								{`Proposed action ${node.data.ordinal}: ${node.data.text}`}
+							</button>
+						)}
 					</li>
 				))}
 		</ol>

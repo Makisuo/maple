@@ -25,6 +25,21 @@ const SearchSchema = Schema.Struct({
 	 * investigation stays clean and a link to Evidence survives a reload.
 	 */
 	tab: Schema.optional(Schema.Literals(INVESTIGATION_TABS)),
+	/**
+	 * The open proposed-action detail, by index into the report's actions, so the
+	 * panel is linkable and survives a reload.
+	 *
+	 * Written as a number by `navigate`, which the router serialises as JSON — so
+	 * the address bar reads `?action=1`. Typing it as `Schema.String` instead put
+	 * `?action=%221%22` in the URL, which round-trips but is not a link anyone
+	 * would write by hand.
+	 *
+	 * `Unknown` rather than `Number` because `validateSearch` is a throwing
+	 * boundary: `?action=abc` against a number schema takes down the whole route
+	 * behind an error boundary, and a mangled query string should cost the panel,
+	 * not the investigation. The view narrows it.
+	 */
+	action: Schema.optional(Schema.Unknown),
 })
 
 export const Route = createFileRoute("/investigations/$id")({
@@ -36,7 +51,7 @@ const decodeInvestigationId = Schema.decodeUnknownOption(InvestigationId)
 
 function InvestigationPage() {
 	const { id: rawId } = Route.useParams()
-	const { r, tab } = Route.useSearch()
+	const { r, tab, action } = Route.useSearch()
 	// `InvestigationId` is a branded UUID. Decoding it with the throwing variant
 	// took down the whole route on any other shape — including the legacy encoded
 	// ids the `?r=` migration below exists to rescue, which made that path
@@ -46,15 +61,17 @@ function InvestigationPage() {
 		const legacyRef = r ? decodeInvestigationRef(r) : undefined
 		return legacyRef ? <LegacyInvestigationRedirect legacyId={rawId} /> : <NotFoundShell />
 	}
-	return <InvestigationDetail id={decoded.value} legacyRef={r} rawId={rawId} tab={tab} />
+	return <InvestigationDetail action={action} id={decoded.value} legacyRef={r} rawId={rawId} tab={tab} />
 }
 
 function InvestigationDetail({
+	action,
 	id,
 	legacyRef,
 	rawId,
 	tab,
 }: {
+	action: unknown
 	id: InvestigationId
 	legacyRef: string | undefined
 	rawId: string
@@ -85,7 +102,12 @@ function InvestigationDetail({
 			)
 		})
 		.onSuccess((investigation) => (
-			<InvestigationView investigation={investigation} tab={tab ?? "overview"} onRefresh={refresh} />
+			<InvestigationView
+				action={action}
+				investigation={investigation}
+				tab={tab ?? "overview"}
+				onRefresh={refresh}
+			/>
 		))
 		.render()
 }

@@ -99,10 +99,13 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
  * they've navigated away from it.
  */
 export function InvestigationView({
+	action,
 	investigation,
 	tab,
 	onRefresh,
 }: {
+	/** The open proposed-action detail, straight off `?action=` and not yet narrowed. */
+	action: unknown
 	investigation: V2Investigation
 	tab: InvestigationTab
 	onRefresh: () => void
@@ -157,6 +160,32 @@ export function InvestigationView({
 	 * sends and history loading around it — so the question is handed to the Chat
 	 * tab, which is where the answer belongs anyway.
 	 */
+	/**
+	 * Anything that isn't a real index — a hand-edited `?action=abc`, a stale link,
+	 * a fractional or negative number — resolves to no open panel. The canvas then
+	 * looks the index up, finds nothing, and the page renders as if it were absent.
+	 */
+	const openActionIndex =
+		typeof action === "number" && Number.isInteger(action) && action >= 0 ? action : null
+
+	const handleOpenAction = (index: number | null) => {
+		// `replace` so opening and closing the panel doesn't stack history entries
+		// between the reader and the page they arrived from.
+		// Written out rather than reduced over `prev`: an untyped reducer here sees
+		// the union of every route's search params, and this route's `tab` literal
+		// does not survive that widening. The canvas only renders on Overview, so
+		// carrying `tab` forward is all there is to carry.
+		void navigate({
+			to: "/investigations/$id",
+			params: { id: investigation.id },
+			search: {
+				...(tab === "overview" ? {} : { tab }),
+				...(index === null ? {} : { action: index }),
+			},
+			replace: true,
+		})
+	}
+
 	const handleFollowUp = () => {
 		void navigate({
 			to: "/investigations/$id",
@@ -222,7 +251,11 @@ export function InvestigationView({
 											 * three partial ones — so the verdict below it
 											 * qualifies a chain the reader has already seen.
 											 */}
-											<ProvenanceCanvas investigation={investigation} />
+											<ProvenanceCanvas
+												investigation={investigation}
+												openActionIndex={openActionIndex}
+												onOpenAction={handleOpenAction}
+											/>
 											<VerdictCard investigation={investigation} />
 											<ImpactStrip investigation={investigation} />
 											<SignalsCard investigation={investigation} />
