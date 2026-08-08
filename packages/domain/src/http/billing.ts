@@ -320,7 +320,7 @@ export class BillingForbiddenError extends Schema.TaggedError<BillingForbiddenEr
 
 // ---- Groups ----
 
-// Authed billing operations: customer/usage reads + attach/preview/portal.
+// Authed billing operations: customer/usage reads, native controls, and checkout/portal.
 export class BillingApiGroup extends HttpApiGroup.make("billing")
 	.add(
 		HttpApiEndpoint.get("getCustomer", "/customer", {

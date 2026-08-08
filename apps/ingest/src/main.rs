@@ -738,7 +738,7 @@ impl OrgRouting {
     }
 }
 
-/// The Autumn featureId session replay meters as. A `&'static str` for the same
+/// The Autumn feature ID that session replay meters as. A `&'static str` for the same
 /// reason `Signal::path()` is: it is simultaneously the billing feature, the
 /// spend-cap key, and the usage metric's `signal` dimension, and those three must
 /// never drift apart.
@@ -834,9 +834,9 @@ struct AppState {
     autumn_tracker: Option<AutumnTracker>,
     autumn_entitlements: Option<AutumnEntitlements>,
     /// Per-org ingest volume, on its own delta-temporality provider. Recorded
-    /// beside `autumn_tracker` from the same value so the warehouse is ground
-    /// truth for what the gateway metered. `None` when metric export is skipped
-    /// (local dev, or a loopback endpoint).
+    /// from the same accepted quantity as the Autumn reservation/fallback so the
+    /// warehouse is ground truth for what the gateway metered. `None` when metric
+    /// export is skipped (local dev, or a loopback endpoint).
     usage_metrics: Option<Arc<UsageMetrics>>,
     replay_session_budget: ReplaySessionBudget,
     /// `Some` when replay payloads go to R2; `None` keeps them inline in the
