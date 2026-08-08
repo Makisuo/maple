@@ -267,6 +267,7 @@
         "@effect/atom-react": "catalog:effect",
         "@fontsource-variable/geist": "^5.2.9",
         "@fontsource-variable/geist-mono": "^5.2.8",
+        "@maple-dev/browser": "workspace:*",
         "@maple-dev/effect-sdk": "workspace:*",
         "@maple/domain": "workspace:*",
         "@maple/effect-db": "workspace:*",
