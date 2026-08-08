@@ -1,54 +1,170 @@
 diff --git a/bin/exec.js b/bin/exec.js
+index 54ff600893844773c1362be6acd87fcc707dc876..cfd2eb15146e78cd885543b78642e99e74a8db43 100644
 --- a/bin/exec.js
 +++ b/bin/exec.js
-@@ -181 +181 @@
+@@ -178,7 +178,7 @@ var init_AuthProvider$1 = __esm({ "lib/Auth/AuthProvider.js": (() => {
+ 	]);
+ 	INTERACTIVE_METHODS = new Set(["login", "configure"]);
+ 	interactiveMutex = Semaphore.makeUnsafe(1);
 -	AuthError = class extends Schema.TaggedErrorClass()("AuthError", {
 +	AuthError = class extends Schema.TaggedError()("AuthError", {
+ 		message: Schema.String,
+ 		cause: Schema.optional(Schema.Defect())
+ 	}) {};
 diff --git a/lib/Auth/AuthProvider.js b/lib/Auth/AuthProvider.js
+index a3d5290478ff12dd06bf07af9eb05bd502f35d3d..4ee1a77799e161bbc16ff3b42352d1729a0a8ece 100644
 --- a/lib/Auth/AuthProvider.js
 +++ b/lib/Auth/AuthProvider.js
-@@ -39 +39 @@
+@@ -36,7 +36,7 @@ const LOCKED_METHODS = new Set(["read", "login", "logout", "configure"]);
+  */
+ const INTERACTIVE_METHODS = new Set(["login", "configure"]);
+ const interactiveMutex = Semaphore.makeUnsafe(1);
 -export class AuthError extends Schema.TaggedErrorClass()("AuthError", {
 +export class AuthError extends Schema.TaggedError()("AuthError", {
+     message: Schema.String,
+     cause: Schema.optional(Schema.Defect()),
+ }) {
 diff --git a/lib/Bundle/Bundle.js b/lib/Bundle/Bundle.js
+index e237b2b4a3901f52300d811a4ea226f40d32dac9..6b287a72c44b0140122d26cdce5cbfad67b4cce3 100644
 --- a/lib/Bundle/Bundle.js
 +++ b/lib/Bundle/Bundle.js
-@@ -18 +18 @@
+@@ -15,7 +15,7 @@ import { rawPlugin } from "./RawPlugin.js";
+  * nothing must not require the native bundler to be loadable (#562).
+  */
+ const loadRolldown = () => import("rolldown");
 -export class BundleError extends Schema.TaggedErrorClass()("BundleError", {
 +export class BundleError extends Schema.TaggedError()("BundleError", {
+     message: Schema.String,
+     cause: Schema.optional(Schema.Defect({ includeStack: true })),
+ }) {
+diff --git a/lib/Cli/commands/cloudflare.js b/lib/Cli/commands/cloudflare.js
+index d2948880e5cd1487d38d69bfdb7b065a720380fc..d71a1f2acb82ec6d27310637626bdb22192f499e 100644
+--- a/lib/Cli/commands/cloudflare.js
++++ b/lib/Cli/commands/cloudflare.js
+@@ -73,7 +73,7 @@ const teardownCommand = Command.make("teardown", {
+         workerName,
+         profile,
+     }).pipe(Effect.provide(services));
+-}))).pipe(Command.withHidden, Command.withDescription("Tear down the cloudflare state store"));
++}))).pipe(Command.unlisted, Command.withDescription("Tear down the cloudflare state store"));
+ /**
+  * Cloudflare scopes that `buildTokenPolicies` knows how to turn into a policy,
+  * mapped to a short human label shown as a hint in the selection prompt.
+diff --git a/lib/Cli/commands/nuke.js b/lib/Cli/commands/nuke.js
+index 8d4828e524de40e5f203cf46cf20bf6637e0db7a..46771fa55a3329ff39edac9f44fa5cc05e788bb0 100644
+--- a/lib/Cli/commands/nuke.js
++++ b/lib/Cli/commands/nuke.js
+@@ -560,7 +560,7 @@ const nukeCommand = Command.make("nuke", {
+     }
+ }))).pipe(
+ // hide the command because it's dangerous and we don't want agents to discover and use it
+-Command.withHidden, Command.withDescription("Enumerate every live resource across the stack's providers and delete " +
++Command.unlisted, Command.withDescription("Enumerate every live resource across the stack's providers and delete " +
+     "them. DESTRUCTIVE — use --include/--exclude/--filter to scope it."));
+ export const unsafeCommand = Command.make("unsafe", {}).pipe(Command.withDescription("Dangerous, irreversible operations."), Command.withSubcommands([nukeCommand]));
+ //# sourceMappingURL=nuke.js.map
+\ No newline at end of file
 diff --git a/lib/Cloudflare/Access.js b/lib/Cloudflare/Access.js
+index 5aec9ac4ddca929a69dc8543cf6aaf00a478b417..90a777e12d637d60c57a03565c9eb56459cc367c 100644
 --- a/lib/Cloudflare/Access.js
 +++ b/lib/Cloudflare/Access.js
-@@ -10 +10 @@
+@@ -7,7 +7,7 @@ import * as Stream from "effect/Stream";
+ import * as ChildProcess from "effect/unstable/process/ChildProcess";
+ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+ import { cachedFunction } from "../Util/cached-function.js";
 -export class AccessError extends Schema.TaggedErrorClass()("AccessError", {
 +export class AccessError extends Schema.TaggedError()("AccessError", {
+     message: Schema.String,
+     cause: Schema.optional(Schema.Defect()),
+ }) {
 diff --git a/lib/Cloudflare/Workers/RuntimeBindings.js b/lib/Cloudflare/Workers/RuntimeBindings.js
+index c6c8745811318c01ad8b10a52a8d866c4027ccfb..64b83ee193cf7cfd864ea96f5311411df39263e6 100644
 --- a/lib/Cloudflare/Workers/RuntimeBindings.js
 +++ b/lib/Cloudflare/Workers/RuntimeBindings.js
-@@ -6 +6 @@
+@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
+ import * as Redacted from "effect/Redacted";
+ import * as Schema from "effect/Schema";
+ import { isLocalId } from "../LocalRuntime.js";
 -export class WorkerValidationError extends Schema.TaggedErrorClass()("WorkerValidationError", {
 +export class WorkerValidationError extends Schema.TaggedError()("WorkerValidationError", {
+     message: Schema.String,
+     hint: Schema.optional(Schema.String),
+     value: Schema.Unknown,
 diff --git a/src/Auth/AuthProvider.ts b/src/Auth/AuthProvider.ts
+index c4d8394ebbf2a3754892730d2729619bc011ab82..9a146a99f1d31493e530b2dca56ee527999c85b5 100644
 --- a/src/Auth/AuthProvider.ts
 +++ b/src/Auth/AuthProvider.ts
-@@ -43 +43 @@
+@@ -40,7 +40,7 @@ const LOCKED_METHODS = new Set(["read", "login", "logout", "configure"]);
+ const INTERACTIVE_METHODS = new Set(["login", "configure"]);
+ const interactiveMutex = Semaphore.makeUnsafe(1);
+ 
 -export class AuthError extends Schema.TaggedErrorClass<AuthError>()(
 +export class AuthError extends Schema.TaggedError<AuthError>()(
+   "AuthError",
+   {
+     message: Schema.String,
 diff --git a/src/Bundle/Bundle.ts b/src/Bundle/Bundle.ts
+index 4e8af036eafdcc2ebb6c096e47de571b8187865a..3aa996e0400bc6506819da53c9ebbfc73159943f 100644
 --- a/src/Bundle/Bundle.ts
 +++ b/src/Bundle/Bundle.ts
-@@ -98 +98 @@
+@@ -95,7 +95,7 @@ export interface BundleFile {
+   readonly hash: string;
+ }
+ 
 -export class BundleError extends Schema.TaggedErrorClass<BundleError>()(
 +export class BundleError extends Schema.TaggedError<BundleError>()(
+   "BundleError",
+   {
+     message: Schema.String,
+diff --git a/src/Cli/commands/cloudflare.ts b/src/Cli/commands/cloudflare.ts
+index c0c25a9af3c99fb656ffd5cab5d5bc2f26e51b43..8eaab97a79f01fd74513816a2b81537946bde513 100644
+--- a/src/Cli/commands/cloudflare.ts
++++ b/src/Cli/commands/cloudflare.ts
+@@ -142,7 +142,7 @@ const teardownCommand = Command.make(
+     }),
+   ),
+ ).pipe(
+-  Command.withHidden,
++  Command.unlisted,
+   Command.withDescription("Tear down the cloudflare state store"),
+ );
+ 
+diff --git a/src/Cli/commands/nuke.ts b/src/Cli/commands/nuke.ts
+index e3651c1094135bec0339b72225c04f6cc09d1180..df2e8494fe3fcbb5caf7a18402ae0808ea4bd1e6 100644
+--- a/src/Cli/commands/nuke.ts
++++ b/src/Cli/commands/nuke.ts
+@@ -799,7 +799,7 @@ const nukeCommand = Command.make(
+   ),
+ ).pipe(
+   // hide the command because it's dangerous and we don't want agents to discover and use it
+-  Command.withHidden,
++  Command.unlisted,
+   Command.withDescription(
+     "Enumerate every live resource across the stack's providers and delete " +
+       "them. DESTRUCTIVE — use --include/--exclude/--filter to scope it.",
 diff --git a/src/Cloudflare/Access.ts b/src/Cloudflare/Access.ts
+index 0d8d68502dbbd0c31519d89b28f79e345215710b..94193074129747bf1e9c248485d7c9a5f84a3de2 100644
 --- a/src/Cloudflare/Access.ts
 +++ b/src/Cloudflare/Access.ts
-@@ -11 +11 @@
+@@ -8,7 +8,7 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess";
+ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+ import { cachedFunction } from "../Util/cached-function.ts";
+ 
 -export class AccessError extends Schema.TaggedErrorClass<AccessError>()(
 +export class AccessError extends Schema.TaggedError<AccessError>()(
+   "AccessError",
+   {
+     message: Schema.String,
 diff --git a/src/Cloudflare/Workers/RuntimeBindings.ts b/src/Cloudflare/Workers/RuntimeBindings.ts
+index 4344de609722731789d061b0beead971d41fcaf5..9c96fe2e2de7bbe9136893efb0eab3d0cce4605b 100644
 --- a/src/Cloudflare/Workers/RuntimeBindings.ts
 +++ b/src/Cloudflare/Workers/RuntimeBindings.ts
-@@ -45 +45 @@
+@@ -42,7 +42,7 @@ import * as Schema from "effect/Schema";
+ import { isLocalId } from "../LocalRuntime.ts";
+ import type { WorkerBinding } from "./WorkerBinding.ts";
+ 
 -export class WorkerValidationError extends Schema.TaggedErrorClass<WorkerValidationError>()(
 +export class WorkerValidationError extends Schema.TaggedError<WorkerValidationError>()(
+   "WorkerValidationError",
+   {
+     message: Schema.String,
