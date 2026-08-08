@@ -1,10 +1,7 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CurrentTenant,
-	ExecuteQueryBuilderResponse,
 	MapleApi,
-	QueryEngineExecutionError,
-	QueryEngineValidationError,
 	RawSqlExecuteResponse,
 	type RawSqlValidationError,
 	SpanHierarchyResponse,
@@ -26,16 +23,13 @@ import {
 	CloudflareInfraZonesResponse,
 	CloudflareInfraZoneTimeseriesResponse,
 	CloudflareInfraZoneDetailResponse,
-	CloudflareInfraZoneHostsResponse,
 	CloudflareInfraZoneSecurityResponse,
 	CloudflareInfraZoneBreakdownResponse,
 	CloudflareInfraZoneDnsResponse,
 	CloudflareInfraZoneFacetsResponse,
 	CloudflareInfraPlatformResourcesResponse,
 	CloudflareInfraWorkersResponse,
-	CloudflareInfraWorkerTimeseriesResponse,
 	ServiceDbQuerySummaryResponse,
-	ServiceExternalEdgesResponse,
 	ServiceDetailOverviewResponse,
 	ServiceDependenciesBundleResponse,
 	ServicePlatformsResponse,
@@ -78,7 +72,6 @@ import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryServic
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
 import {
 	CH,
-	QueryEngineExecuteRequest,
 	formatWarehouseDateTime,
 	parseWarehouseDateTime,
 } from "@maple/query-engine"
@@ -94,7 +87,6 @@ import {
 import { Queries } from "@/routes/queries"
 import { makeQueryRunners } from "@/routes/query-runner"
 import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
-import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 import * as Integrations from "@maple/query-engine-integrations"
 
 // `warehouse.sqlQuery` fails with the warehouse error union (distinct tagged
@@ -371,25 +363,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new ServiceDependenciesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
 			)
-			.handle("serviceDependenciesForService", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.serviceDependenciesForService, tenant, payload)
-					return new ServiceDependenciesResponse({ data: rows })
-				}),
-			)
 			.handle("serviceDbEdges", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const rows = yield* runQuery(Queries.serviceDbEdges, tenant, payload)
 					return new ServiceDbEdgesResponse({ data: rows.map((row) => ({ ...row })) })
-				}),
-			)
-			.handle("serviceDbEdgesForService", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.serviceDbEdgesForService, tenant, payload)
-					return new ServiceDbEdgesResponse({ data: rows })
 				}),
 			)
 			.handle("serviceCloudflareStats", ({ payload }) =>
@@ -607,27 +585,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					})
 				}),
 			)
-			.handle("cloudflareInfraZoneHosts", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const filters = toCloudflareFilters(payload)
-					yield* warehouse.warmRoute(tenant)
-					const [totalRows, bucketRows] = yield* Effect.all(
-						[
-							runQuery(Queries.cloudflareInfraZoneHostTotals, tenant, payload),
-							runQuery(Queries.cloudflareInfraZoneHostTimeseries, tenant, payload),
-						],
-						{ concurrency: 2 },
-					)
-					return new CloudflareInfraZoneHostsResponse({
-						totals: totalRows.map((row) => ({ ...row })),
-						buckets: bucketRows.map((row) => ({ ...row })),
-						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
-							Integrations.CF_METRIC.requests,
-						]),
-					})
-				}),
-			)
 			.handle("cloudflareInfraZoneSecurity", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
@@ -810,15 +767,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new CloudflareInfraWorkersResponse({ data })
 				}),
 			)
-			.handle("cloudflareInfraWorkerTimeseries", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.cloudflareInfraWorkerTimeseries, tenant, payload)
-					return new CloudflareInfraWorkerTimeseriesResponse({
-						data: rows.map((row) => ({ ...row })),
-					})
-				}),
-			)
 			.handle("serviceDetailOverview", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
@@ -933,13 +881,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							lastSeen: String(row.lastSeen),
 						})),
 					})
-				}),
-			)
-			.handle("serviceExternalEdges", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.serviceExternalEdges, tenant, payload)
-					return new ServiceExternalEdgesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
 			)
 			.handle("servicePlatforms", ({ payload }) =>
@@ -1158,163 +1099,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							metricCount: Number(row.metricCount),
 							dataPointCount: Number(row.dataPointCount),
 						})),
-					})
-				}),
-			)
-			.handle("executeQueryBuilder", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const enabledQueries = payload.queries.filter((q) => q.enabled)
-
-					if (enabledQueries.length === 0) {
-						return yield* Effect.fail(
-							new QueryEngineValidationError({
-								message: "No enabled queries in request",
-								details: ["At least one query must be enabled"],
-							}),
-						)
-					}
-
-					const allWarnings: string[] = []
-
-					if (payload.kind === "timeseries") {
-						// Build a spec per query, execute each, then merge series across queries.
-						// Series names are namespaced by the query's display name when there are
-						// multiple queries, otherwise we keep the raw group names from the query
-						// engine result so single-query widgets render naturally.
-						type Point = { bucket: string; series: Record<string, number> }
-						type QueryOutcome = {
-							warnings: string[]
-							entry: { name: string; points: Point[] } | null
-						}
-
-						// Execute each query concurrently (independent warehouse round-trips)
-						// but collect positionally: Effect.forEach returns results in input
-						// order regardless of concurrency, so series naming/merge order stays
-						// deterministic instead of depending on which query finishes first.
-						//
-						// Warm first, like the other fan-outs. `queryEngine.execute` warms
-						// inside the bucket cache, but only when a fill splits into more than
-						// one range — so a cold 4-way fan-out here still raced four config
-						// reads, each contending for a connection slot with its siblings'
-						// warehouse fetches. Measured cost of that contention: a cache read
-						// abandoned at its 40ms deadline whose span still runs ~2.3s.
-						yield* warehouse.warmRoute(tenant)
-						const outcomes: QueryOutcome[] = yield* Effect.forEach(
-							enabledQueries,
-							(query) =>
-								Effect.gen(function* () {
-									const built = buildTimeseriesQuerySpec(query)
-									const warnings = built.warnings.map((w) => `${query.name}: ${w}`)
-
-									if (!built.query) {
-										if (built.error) warnings.push(`${query.name}: ${built.error}`)
-										return { warnings, entry: null }
-									}
-
-									const request = new QueryEngineExecuteRequest({
-										startTime: payload.startTime,
-										endTime: payload.endTime,
-										query: built.query,
-									})
-
-									const response = yield* queryEngine.execute(tenant, request)
-									if (response.result.kind !== "timeseries") {
-										warnings.push(`${query.name}: unexpected non-timeseries result`)
-										return { warnings, entry: null }
-									}
-
-									return {
-										warnings,
-										entry: {
-											name: query.legend?.trim() || query.name,
-											points: response.result.data.map((p) => ({
-												bucket: p.bucket,
-												series: { ...p.series },
-											})),
-										},
-									}
-								}),
-							{ concurrency: 4 },
-						)
-
-						const perQueryPoints: Array<{ name: string; points: Point[] }> = []
-						for (const outcome of outcomes) {
-							allWarnings.push(...outcome.warnings)
-							if (outcome.entry) perQueryPoints.push(outcome.entry)
-						}
-
-						const multiQuery = perQueryPoints.length > 1
-						const rowsByBucket = new Map<string, Record<string, number>>()
-						for (const { name: queryName, points } of perQueryPoints) {
-							for (const point of points) {
-								const row = rowsByBucket.get(point.bucket) ?? {}
-								for (const [groupName, value] of Object.entries(point.series)) {
-									if (typeof value !== "number" || !Number.isFinite(value)) continue
-									const isAllGroup = groupName.toLowerCase() === "all"
-									const seriesKey = multiQuery
-										? isAllGroup
-											? queryName
-											: `${queryName}: ${groupName}`
-										: isAllGroup
-											? queryName
-											: groupName
-									row[seriesKey] = value
-								}
-								rowsByBucket.set(point.bucket, row)
-							}
-						}
-
-						const merged = [...rowsByBucket.entries()]
-							.sort(([a], [b]) => a.localeCompare(b))
-							.map(([bucket, series]) => ({ bucket, series }))
-
-						return new ExecuteQueryBuilderResponse({
-							result: { kind: "timeseries", data: merged },
-							warnings: allWarnings.length > 0 ? allWarnings : undefined,
-						})
-					}
-
-					// Breakdown: take just the first enabled query (matches the web's behaviour
-					// for single-query breakdown widgets — multi-query breakdowns aren't a thing
-					// in the dashboard builder yet).
-					const primary = enabledQueries[0]
-					const built = buildBreakdownQuerySpec(primary)
-					for (const w of built.warnings) allWarnings.push(`${primary.name}: ${w}`)
-
-					if (!built.query) {
-						return yield* Effect.fail(
-							new QueryEngineValidationError({
-								message: built.error ?? "Failed to build breakdown query",
-								details: built.error ? [built.error] : [],
-							}),
-						)
-					}
-
-					const request = new QueryEngineExecuteRequest({
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-						query: built.query,
-					})
-
-					const response = yield* queryEngine.execute(tenant, request)
-					if (response.result.kind !== "breakdown") {
-						return yield* Effect.fail(
-							new QueryEngineExecutionError({
-								message: "Unexpected non-breakdown result",
-							}),
-						)
-					}
-
-					return new ExecuteQueryBuilderResponse({
-						result: {
-							kind: "breakdown",
-							data: response.result.data.map((item) => ({
-								name: item.name,
-								value: item.value,
-							})),
-						},
-						warnings: allWarnings.length > 0 ? allWarnings : undefined,
 					})
 				}),
 			)

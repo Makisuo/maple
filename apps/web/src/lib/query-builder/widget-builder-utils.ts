@@ -45,10 +45,9 @@ const QUERY_BUILDER_ENDPOINTS = new Set([
 // dispatches through one registry.
 // ---------------------------------------------------------------------------
 
-export type { QueryBuilderWidgetState, StatAggregate } from "@/lib/query-builder/widget-builder-shared"
+export type { QueryBuilderWidgetState } from "@/lib/query-builder/widget-builder-shared"
 export {
 	deriveDefaultWidgetTitle,
-	histogramValueColumn,
 	inferDefaultUnitForQueries,
 	inferDisplayUnitForQuery,
 	toSeriesFieldOptions,

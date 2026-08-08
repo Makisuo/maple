@@ -1,10 +1,9 @@
 import { useState } from "react"
-import { Link } from "@tanstack/react-router"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { cn } from "@maple/ui/lib/utils"
-import { ArrowRightIcon, CircleCheckIcon, PaperPlaneIcon, PulseIcon } from "@/components/icons"
+import { PaperPlaneIcon, PulseIcon } from "@/components/icons"
 import { sendTestEvent, type IngestConnection } from "./use-ingest-connection"
 
 /**
@@ -85,39 +84,4 @@ export function SendTestEventStrip({ apiKey, onTestSent }: { apiKey: string; onT
 			</div>
 		</div>
 	)
-}
-
-/**
- * Persistent status panel for ingestion settings: flips between the waiting
- * strip and a "connected — receiving telemetry" line that links into traces.
- * Unlike the dashboard checklist this never gets dismissed, so it doubles as an
- * at-a-glance ingest-health indicator.
- */
-export function IngestStatusPanel({
-	connection,
-	onTestSent,
-}: {
-	connection: IngestConnection
-	onTestSent: () => void
-}) {
-	if (connection.status === "connected") {
-		return (
-			<div className="flex flex-col gap-3 rounded-lg border border-severity-info/30 bg-severity-info/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-				<div className="flex items-center gap-2.5">
-					<CircleCheckIcon size={14} className="text-severity-info" />
-					<span className="text-xs text-foreground">
-						{connection.firstRealService
-							? `Connected — receiving telemetry from ${connection.firstRealService}`
-							: "Connected — receiving your telemetry"}
-					</span>
-				</div>
-				<Button variant="outline" size="sm" className="gap-2 shrink-0" render={<Link to="/traces" />}>
-					Explore traces
-					<ArrowRightIcon size={13} />
-				</Button>
-			</div>
-		)
-	}
-
-	return <SendTestEventStrip apiKey={connection.apiKey} onTestSent={onTestSent} />
 }

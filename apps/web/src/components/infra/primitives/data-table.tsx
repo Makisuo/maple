@@ -19,14 +19,6 @@ export const ROW_LINK_CLASS =
 	"group flex items-center gap-4 border-b border-border/40 px-4 py-3 transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
 
 /**
- * Row className for tables whose rows *select* rather than navigate. Same chrome as
- * `ROW_LINK_CLASS` plus button resets; pair it with `aria-pressed` so the selected
- * row is announced, not just tinted.
- */
-export const ROW_BUTTON_CLASS =
-	"group flex w-full items-center gap-4 border-b border-border/40 px-4 py-3 text-left transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none aria-pressed:bg-muted/40"
-
-/**
  * The three sort props a `ColumnHead` needs, as one spreadable object. Lets a
  * table declare its column list once and render it twice — interactive for the
  * table, inert for the skeleton — instead of duplicating the columns per state.

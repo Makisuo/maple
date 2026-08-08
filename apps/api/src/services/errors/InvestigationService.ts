@@ -1004,7 +1004,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			 * report onto the investigation row, then applies the incident-side
 			 * effects (severity + issue timeline) and tracks token usage — all
 			 * idempotent on the investigation id so a re-diagnosis or retry can't
-			 * duplicate them. Ported from the legacy AiTriageWorkflow persist step.
+			 * duplicate them.
 			 */
 			const submitDiagnosis: InvestigationServiceShape["submitDiagnosis"] = Effect.fn(
 				"InvestigationService.submitDiagnosis",

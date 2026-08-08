@@ -38,18 +38,19 @@ export interface CreateAlertingWorkerOptions {
 export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOptions) =>
 	Effect.gen(function* () {
 		const hyperdriveRefId = resolveHyperdriveRefId(stage)
-		// Cross-script binding to the AI triage Workflow hosted by the api worker —
-		// the error/anomaly ticks enqueue triage runs when incidents open. The
+		// Cross-script binding to the investigation fan-out Workflow hosted by the
+		// api worker. Alert, error, and anomaly ticks start investigations when
+		// incidents open. The
 		// first arg is the physical workflow name; `scriptName` makes this a
 		// reference-only binding (the api worker owns the workflow resource).
-		const aiTriageWorkflow = Cloudflare.Workflow<{
+		const investigationFanoutWorkflow = Cloudflare.Workflow<{
 			orgId: string
-			incidentKind: string
-			incidentId: string
-			issueId?: string
-			runId: string
-		}>(resolveWorkerName("ai-triage", stage), {
-			className: "AiTriageWorkflow",
+			investigationId: string
+			maxWidth: number
+			reservedPasses: number
+			attempt: number
+		}>(resolveWorkerName("investigation-fanout", stage), {
+			className: "InvestigationFanoutWorkflow",
 			scriptName: resolveWorkerName("api", stage),
 		})
 
@@ -66,7 +67,7 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
-				AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
+				INVESTIGATION_FANOUT_WORKFLOW: investigationFanoutWorkflow,
 				// Production only: preview/stg workers run the same email crons against
 				// their own DB branches, so a binding here means every live stage sends
 				// its own copy of onboarding/digest/alert emails to real users.

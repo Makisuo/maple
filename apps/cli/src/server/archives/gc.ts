@@ -593,14 +593,6 @@ const removeTombstone = async (tomb: string): Promise<void> => {
 }
 
 /**
- * Exported alias of {@link collectOneTarget} for the action-driven reconcile
- * executor (Gate 3b r4): the plan decides WHICH targets to collect; this helper
- * executes ONE target's topology switch (rename/remove/verify) with its source +
- * pointer precondition revalidation.
- */
-export const collectOneTargetForReconcile = collectOneTarget
-
-/**
  * Reconcile an interrupted GC operation. Drives the FROZEN target set to
  * completion idempotently — NEVER re-expands the set. A pointer change or source
  * divergence at any stage stops collection and preserves remaining state.
@@ -759,19 +751,6 @@ export const preflightGcTargets = async (archiveDir: string, intent: GcOperation
 		}
 		revalidateSource(archiveDir, target)
 		revalidatePointer(archiveDir, target)
-	}
-}
-
-/** Legacy compatibility wrapper — delegates to the split helpers by phase. */
-export const reconcileGcOperation = async (
-	_dataDir: string,
-	archiveDir: string,
-	intent: GcOperationIntent,
-): Promise<void> => {
-	if (intent.phase === "complete") {
-		await verifyCompleteAndArchiveGc(archiveDir, intent)
-	} else {
-		await resumeFrozenTargetsAndCompleteGc(archiveDir, intent)
 	}
 }
 

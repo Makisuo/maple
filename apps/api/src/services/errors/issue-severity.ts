@@ -1,9 +1,7 @@
 /**
- * Plain-drizzle severity helpers shared by the AI triage workflow's persist
- * step (which runs on a raw D1 client with no Effect services) and the
- * Effect-side services. Every write is idempotent: deterministic runId-derived
- * ids + onConflictDoNothing, or guarded UPDATEs — the workflow persist step
- * retries and must not duplicate events or escalations.
+ * Plain-drizzle severity helpers used by investigation diagnosis persistence.
+ * Every write is idempotent: deterministic runId-derived ids plus
+ * onConflictDoNothing, or guarded UPDATEs.
  */
 import { createHash, randomUUID } from "node:crypto"
 import type { AiTriageResult, IssueSeverity } from "@maple/domain/http"
@@ -51,7 +49,6 @@ export const escalationDedupeKey = (orgId: string, issueId: string, severity: Is
 /**
  * UUIDv5-style id derived from a seed so retried writers regenerate the SAME
  * id and the primary key (+ onConflictDoNothing) absorbs the duplicate.
- * Same construction as the ai_triage timeline event id in AiTriageWorkflow.run.
  */
 const deterministicUuid = (seed: string): string => {
 	const hex = createHash("sha256").update(seed).digest("hex")

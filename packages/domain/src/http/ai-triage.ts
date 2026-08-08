@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { AiTriageRunId, ErrorIssueId, IsoDateTimeString, UserId } from "../primitives"
+import { IsoDateTimeString, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
 import { IssueSeverity } from "./errors"
 
@@ -13,12 +13,6 @@ export const AiTriageIncidentKind = Schema.Literals(["error", "anomaly", "alert"
 	title: "AI Triage Incident Kind",
 })
 export type AiTriageIncidentKind = Schema.Schema.Type<typeof AiTriageIncidentKind>
-
-export const AiTriageRunStatus = Schema.Literals(["queued", "running", "completed", "failed"]).annotate({
-	identifier: "@maple/AiTriageRunStatus",
-	title: "AI Triage Run Status",
-})
-export type AiTriageRunStatus = Schema.Schema.Type<typeof AiTriageRunStatus>
 
 // ---------------------------------------------------------------------------
 // Structured triage result (what the agent must submit)
@@ -62,30 +56,8 @@ export class AiTriageResult extends Schema.Class<AiTriageResult>("AiTriageResult
 }) {}
 
 // ---------------------------------------------------------------------------
-// Documents
+// Settings
 // ---------------------------------------------------------------------------
-
-export class AiTriageRunDocument extends Schema.Class<AiTriageRunDocument>("AiTriageRunDocument")({
-	id: AiTriageRunId,
-	incidentKind: AiTriageIncidentKind,
-	incidentId: Schema.String,
-	issueId: Schema.NullOr(ErrorIssueId),
-	status: AiTriageRunStatus,
-	result: Schema.NullOr(AiTriageResult),
-	model: Schema.NullOr(Schema.String),
-	inputTokens: Schema.NullOr(Schema.Number),
-	outputTokens: Schema.NullOr(Schema.Number),
-	error: Schema.NullOr(Schema.String),
-	createdAt: IsoDateTimeString,
-	startedAt: Schema.NullOr(IsoDateTimeString),
-	completedAt: Schema.NullOr(IsoDateTimeString),
-}) {}
-
-export class AiTriageRunsListResponse extends Schema.Class<AiTriageRunsListResponse>(
-	"AiTriageRunsListResponse",
-)({
-	runs: Schema.Array(AiTriageRunDocument),
-}) {}
 
 export class AiTriageSettingsDocument extends Schema.Class<AiTriageSettingsDocument>(
 	"AiTriageSettingsDocument",
@@ -108,14 +80,6 @@ export class AiTriageSettingsUpdateRequest extends Schema.Class<AiTriageSettings
 	maxPassesPerDay: Schema.optionalKey(
 		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 2000 })),
 	),
-}) {}
-
-export class AiTriageRunCreateRequest extends Schema.Class<AiTriageRunCreateRequest>(
-	"AiTriageRunCreateRequest",
-)({
-	incidentKind: AiTriageIncidentKind,
-	incidentId: Schema.String,
-	issueId: Schema.optionalKey(ErrorIssueId),
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -147,27 +111,6 @@ export class AiTriageValidationError extends Schema.TaggedError<AiTriageValidati
 	{ httpApiStatus: 400 },
 ) {}
 
-export class AiTriageNotFoundError extends Schema.TaggedError<AiTriageNotFoundError>()(
-	"@maple/http/ai-triage/AiTriageNotFoundError",
-	{
-		message: Schema.String,
-	},
-	{ httpApiStatus: 404 },
-) {}
-
-// ---------------------------------------------------------------------------
-// Query schemas
-// ---------------------------------------------------------------------------
-
-const RunsListQuery = Schema.Struct({
-	issueId: Schema.optional(ErrorIssueId),
-	incidentId: Schema.optional(Schema.String),
-	incidentKind: Schema.optional(AiTriageIncidentKind),
-	limit: Schema.optional(
-		Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 })),
-	),
-})
-
 // ---------------------------------------------------------------------------
 // API group
 // ---------------------------------------------------------------------------
@@ -184,20 +127,6 @@ export class AiTriageApiGroup extends HttpApiGroup.make("aiTriage")
 			payload: AiTriageSettingsUpdateRequest,
 			success: AiTriageSettingsDocument,
 			error: [AiTriagePersistenceError, AiTriageForbiddenError, AiTriageValidationError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("listRuns", "/runs", {
-			query: RunsListQuery,
-			success: AiTriageRunsListResponse,
-			error: AiTriagePersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("createRun", "/runs", {
-			payload: AiTriageRunCreateRequest,
-			success: AiTriageRunDocument,
-			error: [AiTriagePersistenceError, AiTriageValidationError, AiTriageNotFoundError],
 		}),
 	)
 	.prefix("/api/ai-triage")

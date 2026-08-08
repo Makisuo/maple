@@ -26,14 +26,6 @@
  *   wrote, which is the same discipline `validate` uses: read lanes from
  *   Postgres, not from step return values, because a step whose result was lost
  *   to a retry boundary still wrote its row.
- *
- * On the rename from `lens-<lensId>`: an in-flight instance replays cached steps
- * against redeployed code, so renaming a step orphans its cache and re-bills the
- * pass. That is accepted here rather than guarded, because the fan-out shipped
- * behind `ai_triage_settings.fanout_enabled`, which defaulted false and had no
- * write path anywhere in the codebase — no instance has ever run in production.
- * A version-branch would be a duplicate of this whole file guarding a case that
- * cannot exist. A v1 payload that somehow arrives simply re-runs from `plan`.
  */
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { investigationLensRuns, investigations } from "@maple/db"

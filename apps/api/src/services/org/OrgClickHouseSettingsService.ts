@@ -28,7 +28,6 @@ import {
 	type TableDiffEntry,
 } from "@maple/domain/clickhouse"
 import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
-import { EdgeCacheService } from "@maple/cache"
 import { eq } from "drizzle-orm"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import {
@@ -86,14 +85,6 @@ type CachedSettingsRow = Pick<
 	| "chPasswordIv"
 	| "chPasswordTag"
 >
-
-// Nothing READS this edge-cache bucket any more — see `resolveCachedSettings`
-// for the measurements that removed it. The bucket name survives only so
-// `invalidateRuntimeConfigCache` keeps busting entries written by the previous
-// release: those carry a 1h TTL, and isolates still running the old code read
-// them. Delete this constant and the invalidate call one release after the
-// removal ships.
-const ORG_CH_CONFIG_BUCKET = "org-clickhouse-config"
 
 // In-isolate value cache for the runtime-config lookup, served
 // stale-while-revalidate. Workers reuse an isolate across many requests, so a
@@ -874,9 +865,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 
 		// Bust the cached runtime config for an org after any write to its settings
 		// row, so the next warehouse query re-resolves rather than serving a stale
-		// value. Clears both the in-isolate memo (this isolate only — other isolates
-		// fall off within ORG_CH_CONFIG_MEMO_TTL_MS) and the cross-request edge entry
-		// (optional — absent in tests / non-worker contexts, a no-op when unavailable).
+		// value. Other isolates fall off within ORG_CH_CONFIG_MEMO_TTL_MS.
 		const invalidateRuntimeConfigCache = (orgId: OrgId): Effect.Effect<boolean> =>
 			Effect.gen(function* () {
 				// Whether this org had a BYO row cached is the caller's retry gate (see
@@ -889,10 +878,6 @@ export class OrgClickHouseSettingsService extends Context.Service<
 				// A refresh forked before this write must not land after it and restore
 				// the value we just dropped.
 				refreshInFlight.delete(orgId)
-				const cache = yield* Effect.serviceOption(EdgeCacheService)
-				if (Option.isSome(cache)) {
-					yield* cache.value.invalidate({ bucket: ORG_CH_CONFIG_BUCKET, key: orgId })
-				}
 				return hadOverride
 			})
 

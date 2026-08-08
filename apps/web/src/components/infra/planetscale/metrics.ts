@@ -41,13 +41,6 @@ export function lagClass(seconds: number): string | undefined {
 	return tone === "neutral" ? undefined : VALUE_TONE[tone]
 }
 
-const TONE_RANK: Record<Tone, number> = { neutral: 0, ok: 1, warn: 2, crit: 3 }
-
-/** The most severe of several tones — for a row or card that summarizes many vitals. */
-export function worstTone(...tones: ReadonlyArray<Tone>): Tone {
-	return tones.reduce<Tone>((worst, tone) => (TONE_RANK[tone] > TONE_RANK[worst] ? tone : worst), "neutral")
-}
-
 /** Replica lag reads in seconds once it is a real problem, milliseconds while it isn't. */
 export const formatLag = (seconds: number) =>
 	seconds >= 1 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds * 1000)}ms`

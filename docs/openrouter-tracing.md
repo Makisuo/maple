@@ -15,7 +15,7 @@ References verified on August 4, 2026:
 
 | Path                                  | Client                                | Surfaces                                                                                    |
 | ------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `apps/api/src/platform/Llm.ts`        | `@maple/llm` (`OpenRouter.configure`) | chat turns (`src/chat/turn-runner.ts`), AI triage (`src/workflows/AiTriageWorkflow.run.ts`) |
+| `apps/api/src/platform/Llm.ts`        | `@maple/llm` (`OpenRouter.configure`) | chat turns and investigation planner/hypothesis/validator agents                            |
 | `apps/slack-agent/agent/agent.ts`     | `@openrouter/ai-sdk-provider`         | the Slack agent                                                                             |
 | `apps/api/src/mcp/__evals__/model.ts` | `@ai-sdk/openai-compatible`           | MCP evals in CI — **not** attributed or tagged                                              |
 

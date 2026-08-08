@@ -1,5 +1,5 @@
 import type { ComponentType } from "react"
-import { WIDGET_TYPES, type PanelType, type WidgetTypeMeta } from "@maple/domain/http"
+import type { WidgetTypeMeta } from "@maple/domain/http"
 
 import type { IconComponent } from "@/components/icons"
 import type {
@@ -117,4 +117,4 @@ export const extendDisplay = (
 	return display
 }
 
-export { WIDGET_TYPES, type PanelType, type WidgetTypeMeta }
+export type { WidgetTypeMeta }

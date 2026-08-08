@@ -46,15 +46,9 @@ import type {
 export {
 	type AnyLocalStoreMigrationModule,
 	type LocalStoreMigration,
-	type LocalStoreMigrationModule,
-	type MigrationDbOptions,
 	type MigrationModuleContext,
-	type MigrationOperation,
 	type MigrationPhase,
 	type MigrationStepJournal,
-	type MigrationStepStatus,
-	type StateDisposition,
-	type StateDispositionEntry,
 } from "./local-store-migration-module"
 
 export { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
@@ -1062,10 +1056,6 @@ const reconcilePromotion = async (dataDir: string, journal: MigrationJournal): P
 		)
 	return promoteLocalStoreMigration(dataDir, journal)
 }
-
-/** Filesystem-only promotion recovery seam used by fault-injection tests and
- * by the public coordinator after a process restart. */
-export const reconcileLocalStorePromotion = reconcilePromotion
 
 const moduleForStep = (
 	step: MigrationStepJournal,

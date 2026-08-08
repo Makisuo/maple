@@ -1,18 +1,14 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { durableJson, durableRename, durableRemove, syncDirectory } from "../durable-files"
+import { durableJson, durableRename, syncDirectory } from "../durable-files"
 import {
 	activePointerPath,
-	archiveQuarantineRoot,
 	archiveRoot,
 	assertNoSymlink,
 	assertNoSymlinkSync,
-	assertRealDirectory,
-	assertRealFile,
 	assertRealFileSync,
 	ensurePrivateDirectory,
 	rangeRoot,
-	signalRoot,
 	validateArchiveId,
 	validateRangeDate,
 } from "./paths"
@@ -934,198 +930,6 @@ export const inspectActiveOperation = (
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Reconciliation plan: a discriminated union of CONCRETE ordered actions.
-// The plan is the decision model apply executes verbatim; it never rediscovers
-// the branch. Each action names an exact operation with its precondition; apply
-// revalidates the precondition immediately before the mutation (Gate 3b r4).
-// ---------------------------------------------------------------------------
-
-/** A SHA-256 of the intent record bytes, binding the plan to the exact journal observed at plan time. */
-export const journalDigest = (raw: Record<string, unknown>): string => {
-	const c = require("node:crypto") as typeof import("node:crypto")
-	return c.createHash("sha256").update(JSON.stringify(raw)).digest("hex")
-}
-
-/** Concrete create-reconciliation actions, in execution order. */
-export type CreateAction =
-	| { readonly type: "migrate-v2" }
-	| { readonly type: "quarantine-building" }
-	| { readonly type: "verify-building-absent" }
-	| { readonly type: "remove-owned-scratch" }
-	| { readonly type: "verify-scratch-absent" }
-	| { readonly type: "release-owned-pin" }
-	| { readonly type: "verify-pin-absent" }
-	| { readonly type: "verify-published-generation" }
-	| { readonly type: "select-pointer" }
-	| { readonly type: "verify-pointer-selects-intended" }
-	| { readonly type: "rebuild-catalog" }
-	| { readonly type: "verify-catalog-exact" }
-	| { readonly type: "advance-phase"; readonly to: ArchiveOperationPhase }
-	| { readonly type: "verify-terminal-invariants" }
-	| { readonly type: "archive-operation" }
-
-/** Concrete GC-reconciliation actions, in execution order. */
-export type GcAction =
-	| { readonly type: "collect-target"; readonly index: number }
-	| {
-			readonly type: "persist-cursor"
-			readonly completedTargets: number
-			readonly to: ArchiveOperationPhase
-	  }
-	| { readonly type: "rebuild-catalog" }
-	| { readonly type: "verify-catalog-exact" }
-	| { readonly type: "verify-terminal-invariants" }
-	| { readonly type: "archive-operation" }
-
-export type ReconciliationPlan =
-	| { readonly kind: "no-op" }
-	| { readonly kind: "fail-closed"; readonly reason: string }
-	| {
-			readonly kind: "create"
-			readonly operationId: string
-			readonly journalDigest: string
-			readonly actions: ReadonlyArray<CreateAction>
-	  }
-	| {
-			readonly kind: "gc"
-			readonly operationId: string
-			readonly journalDigest: string
-			readonly actions: ReadonlyArray<GcAction>
-	  }
-
-/** A topology observer the plan builder uses to decide the branch ONCE. */
-export interface ReconcileTopology {
-	readonly promoted: boolean
-	readonly buildingPresent: boolean
-	readonly phase: ArchiveOperationPhase
-}
-
-/**
- * Build the immutable reconciliation plan from an inspection + the observed
- * create-kind topology. Makes the branch decision ONCE (pre-publication-abort vs
- * post-promotion-complete vs already-complete-verify) and emits the exact ordered
- * concrete actions; apply executes them without re-branching.
- */
-export const buildCreatePlan = (
-	inspection: V2ActiveOperationSnapshot | V3ActiveOperationSnapshot,
-	topology: ReconcileTopology,
-): ReconciliationPlan => {
-	// For a v2 snapshot, the only known-safe action is migrate then reconcile;
-	// the v2 phase is always "intent" (the only phase a v2 record can hold), so
-	// after migration the v3 reconciler will observe the post-migration topology.
-	// The plan therefore emits migrate-v2 as the first action, then defers the
-	// concrete post-migration steps to a re-plan under the lock at apply time
-	// (the topology can only be observed AFTER migration rewrites the record).
-	if (inspection.kind === "v2") {
-		return {
-			kind: "create",
-			operationId: inspection.operationId,
-			journalDigest: journalDigest(inspection.raw),
-			actions: [{ type: "migrate-v2" }, { type: "advance-phase", to: "intent" }],
-		}
-	}
-	const intent = inspection.intent as CreateOperationIntent
-	const actions: CreateAction[] = []
-	const phase = topology.phase
-	// Already complete: verify terminal invariants, then archive.
-	if (phaseAtLeast(phase, "complete")) {
-		actions.push({ type: "verify-terminal-invariants" }, { type: "archive-operation" })
-		return {
-			kind: "create",
-			operationId: inspection.operationId,
-			journalDigest: journalDigestOfIntent(intent),
-			actions,
-		}
-	}
-	// Already aborted in active/ is fail-closed (should have been quarantined).
-	if (phaseAtLeast(phase, "aborted")) {
-		return {
-			kind: "fail-closed",
-			reason: `aborted archive operation still in active dir: ${inspection.dir}`,
-		}
-	}
-	if (!topology.promoted) {
-		// Pre-publication: quarantine building (if present), remove scratch, release pin, abort, archive.
-		if (topology.buildingPresent) actions.push({ type: "quarantine-building" })
-		else actions.push({ type: "verify-building-absent" })
-		actions.push(
-			{ type: "remove-owned-scratch" },
-			{ type: "release-owned-pin" },
-			{ type: "advance-phase", to: "aborted" },
-			{ type: "archive-operation" },
-		)
-		return {
-			kind: "create",
-			operationId: inspection.operationId,
-			journalDigest: journalDigestOfIntent(intent),
-			actions,
-		}
-	}
-	// Post-promotion: verify published, finish pointer/catalog/pin/scratch, complete, archive.
-	actions.push({ type: "verify-published-generation" })
-	if (!phaseAtLeast(phase, "pointer-complete"))
-		actions.push({ type: "select-pointer" }, { type: "advance-phase", to: "pointer-complete" })
-	else actions.push({ type: "verify-pointer-selects-intended" })
-	actions.push({ type: "rebuild-catalog" }, { type: "verify-catalog-exact" })
-	if (!phaseAtLeast(phase, "catalog-complete"))
-		actions.push({ type: "advance-phase", to: "catalog-complete" })
-	if (!phaseAtLeast(phase, "pin-released"))
-		actions.push({ type: "release-owned-pin" }, { type: "advance-phase", to: "pin-released" })
-	else actions.push({ type: "verify-pin-absent" })
-	if (!phaseAtLeast(phase, "scratch-removed"))
-		actions.push({ type: "remove-owned-scratch" }, { type: "advance-phase", to: "scratch-removed" })
-	else actions.push({ type: "verify-scratch-absent" })
-	actions.push(
-		{ type: "advance-phase", to: "complete" },
-		{ type: "verify-terminal-invariants" },
-		{ type: "archive-operation" },
-	)
-	return {
-		kind: "create",
-		operationId: inspection.operationId,
-		journalDigest: journalDigestOfIntent(intent),
-		actions,
-	}
-}
-
-/**
- * Build the GC plan: collect each remaining target (cursor..end), persist cursor
- * per target (nonterminal gc-collecting), rebuild + verify affected catalogs,
- * persist complete, verify terminal, archive.
- */
-export const buildGcPlan = (inspection: V3ActiveOperationSnapshot): ReconciliationPlan => {
-	const intent = inspection.intent as GcOperationIntent
-	const actions: GcAction[] = []
-	for (let i = intent.completedTargets; i < intent.targets.length; i++) {
-		actions.push(
-			{ type: "collect-target", index: i },
-			{ type: "persist-cursor", completedTargets: i + 1, to: "gc-collecting" },
-		)
-	}
-	// Affected-signal catalog rebuild + verify.
-	const signals = [...new Set(intent.targets.map((t) => t.signal))]
-	for (const _signal of signals) {
-		actions.push({ type: "rebuild-catalog" }, { type: "verify-catalog-exact" })
-	}
-	actions.push(
-		{ type: "persist-cursor", completedTargets: intent.targets.length, to: "complete" },
-		{ type: "verify-terminal-invariants" },
-		{ type: "archive-operation" },
-	)
-	return {
-		kind: "gc",
-		operationId: inspection.operationId,
-		journalDigest: journalDigestOfIntent(intent),
-		actions,
-	}
-}
-
-const journalDigestOfIntent = (intent: ArchiveOperationIntent): string => {
-	const c = require("node:crypto") as typeof import("node:crypto")
-	return c.createHash("sha256").update(JSON.stringify(intent)).digest("hex")
-}
-
 /**
  * Move a completed operation's journal from `operations/active/` to the retained
  * `operations/completed/` location so it no longer blocks later work. The
@@ -1143,34 +947,6 @@ export const archiveCompletedOperation = async (archiveDir: string, operationId:
 	}
 	await durableRename(activeDir, dest)
 	await syncDirectory(activeOperationsRoot(archiveDir))
-}
-
-/**
- * Quarantine an operation dir (pre-publication incomplete output) by renaming it
- * under `quarantine/` with a stable, owned name, so archive evidence is retained
- * for inspection rather than silently deleted (D-004). Returns the quarantine
- * destination path.
- */
-export const quarantineOperation = async (archiveDir: string, operationId: string): Promise<string> => {
-	const activeDir = operationDir(archiveDir, operationId)
-	const quarantineRoot = archiveQuarantineRoot(archiveDir)
-	await ensurePrivateDirectory(quarantineRoot, archiveRoot(archiveDir))
-	const dest = join(quarantineRoot, `operation-${validateArchiveId(operationId, "operation")}`)
-	if (existsSync(dest)) {
-		throw new Error(`quarantined operation already exists; refusing to overwrite: ${dest}`)
-	}
-	await durableRename(activeDir, dest)
-	await syncDirectory(activeOperationsRoot(archiveDir))
-	return dest
-}
-
-/** Remove the active operation dir entirely (used after a clean abort). */
-export const removeActiveOperation = async (archiveDir: string, operationId: string): Promise<void> => {
-	const activeDir = operationDir(archiveDir, operationId)
-	if (existsSync(activeDir)) {
-		await durableRemove(activeDir)
-		await syncDirectory(activeOperationsRoot(archiveDir))
-	}
 }
 
 /**
@@ -1219,7 +995,6 @@ export const ownedPathsFor = (intent: {
 		intent.generationId,
 	)
 	const building = join(archiveRoot(intent.archiveDir), "building", intent.generationId)
-	void signalRoot
 	return { finalGeneration, building }
 }
 
@@ -1240,21 +1015,4 @@ export const assertPointerConsistent = (archiveDir: string, intent: CreateOperat
 				`recorded base ${intent.baseActiveGenerationId}, now ${current} (concurrent activity; refusing to clobber)`,
 		)
 	}
-}
-
-/**
- * Assert that a path is a real directory beneath the archive root (no symlink),
- * if it exists. Used by reconcile to validate owned topology before acting.
- */
-export const assertOwnedDirectoryIfPresent = async (
-	archiveDir: string,
-	path: string,
-	label: string,
-): Promise<void> => {
-	if (!existsSync(path)) return
-	await assertNoSymlink(archiveDir, path, label)
-	await assertRealDirectory(path, label)
-	await assertRealFile(join(path, "intent.json"), `${label} intent`).catch(() => {
-		throw new Error(`${label} is missing its intent.json: ${path}`)
-	})
 }

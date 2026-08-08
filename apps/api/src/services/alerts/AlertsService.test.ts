@@ -78,7 +78,6 @@ const makeConfig = () =>
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "lookup-key",
 			MAPLE_INGEST_PUBLIC_URL: "http://127.0.0.1:3474",
 			MAPLE_APP_BASE_URL: "http://127.0.0.1:3471",
-			QE_EVAL_BUCKET_CACHE_ENABLED: "false",
 		}),
 	)
 
@@ -202,10 +201,6 @@ const makeLayer = (
 		Layer.provide(warehouseLive),
 		Layer.provide(edgeCacheLive),
 		Layer.provide(bucketCacheLive),
-		// Wire the test config so QE_EVAL_BUCKET_CACHE_ENABLED=false reaches
-		// QueryEngineService. These alert-logic stubs return aggregate-shaped rows
-		// (no per-bucket timestamps), which the bucket-cached evaluate path can't
-		// bucket; keep alerts on the blob path. (Bucket path: QueryEngineEvaluateCache.test.ts.)
 		Layer.provide(configLive),
 	)
 	const runtimeLive = Layer.succeed(AlertRuntime, { ...defaultTestRuntime, ...runtimeOverrides })

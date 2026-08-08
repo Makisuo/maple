@@ -83,11 +83,6 @@
 			"class_name": "ClickHouseSchemaApplyWorkflow",
 		},
 		{
-			"name": "ai-triage-workflow",
-			"binding": "AI_TRIAGE_WORKFLOW",
-			"class_name": "AiTriageWorkflow",
-		},
-		{
 			"name": "investigation-fanout-workflow",
 			"binding": "INVESTIGATION_FANOUT_WORKFLOW",
 			"class_name": "InvestigationFanoutWorkflow",

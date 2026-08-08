@@ -24,8 +24,8 @@ import type { IssueSeverity } from "@maple/domain/http"
  * the `/investigations` surface AND keys the `maple-chat` durable session
  * (`<orgId>:inv-<id>`) whose first turn is the autonomous diagnostic pass.
  *
- * Supersedes `ai_triage_runs`: a typed-incident investigation mirrors its
- * incident into the nullable `incidentKind`/`incidentId` columns to keep the
+ * A typed-incident investigation mirrors its incident into the nullable
+ * `incidentKind`/`incidentId` columns to keep the
  * one-investigation-per-incident dedup (the partial unique index below); a
  * free-form investigation leaves them null and is unconstrained. `reportJson`
  * holds the structured `AiTriageResult` written by `submit_diagnosis`.

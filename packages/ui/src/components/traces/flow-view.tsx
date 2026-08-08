@@ -63,7 +63,7 @@ export function TraceFlowView({
 	// effect below, so a selection change never re-layouts or refits the view.
 	const { initialNodes, initialEdges } = useMemo(() => {
 		const { nodes, edges } = transformSpansToFlow(rootSpans, services, totalDurationMs)
-		const layouted = getLayoutedElements(nodes, edges, rootSpans)
+		const layouted = getLayoutedElements(nodes, edges)
 		return { initialNodes: layouted.nodes, initialEdges: layouted.edges }
 	}, [rootSpans, services, totalDurationMs])
 

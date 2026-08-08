@@ -15,7 +15,6 @@ import {
 	CloudflareInfraZoneDetailRequest,
 	CloudflareInfraZoneDnsRequest,
 	CloudflareInfraZoneFacetsRequest,
-	CloudflareInfraZoneHostsRequest,
 	CloudflareInfraZonesRequest,
 	CloudflareInfraZoneSecurityRequest,
 	CloudflareInfraZoneTimeseriesRequest,
@@ -129,9 +128,6 @@ const cloudflareFilterPayload = (input: CloudflareFilterInput) => {
 	}
 	return out
 }
-
-/** Filter keys the responding panel could not apply — drives the zone-wide scope markers. */
-export type CloudflareIgnoredFilters = ReadonlyArray<string>
 
 const TimeRangeInputSchema = Schema.Struct({
 	startTime: WarehouseDateTimeString,
@@ -357,73 +353,8 @@ export const getCloudflareWorkers = Effect.fn("QueryEngine.getCloudflareWorkers"
 })
 
 // ---------------------------------------------------------------------------
-// Zone detail: extended sections (hosts, security, DNS) + live top traffic
+// Zone detail: security, DNS, and live top traffic
 // ---------------------------------------------------------------------------
-
-export interface CloudflareZoneHostTotal {
-	/** Hostname (poller-capped top N; the tail shows as "other", pre-host rows as ""). */
-	host: string
-	requests: number
-	errors5xx: number
-	/** 5xx error ratio, 0–1. */
-	errorRate: number
-	cacheHits: number
-	/** Served-by-cache ratio, 0–1. */
-	cacheHitRate: number
-	bytes: number
-}
-
-export interface CloudflareZoneHostBucket {
-	bucket: string
-	host: string
-	requests: number
-}
-
-export const getCloudflareZoneHosts = Effect.fn("QueryEngine.getCloudflareZoneHosts")(function* ({
-	data,
-}: {
-	data: CloudflareZoneDetailInput
-}) {
-	const input = yield* decodeInput(ZoneDetailInputSchema, data, "getCloudflareZoneHosts")
-	const result = yield* runWarehouseQuery("cloudflareInfraZoneHosts", () =>
-		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.queryEngine.cloudflareInfraZoneHosts({
-				payload: new CloudflareInfraZoneHostsRequest({
-					serviceName: input.serviceName,
-					startTime: input.startTime,
-					endTime: input.endTime,
-					bucketSeconds: input.bucketSeconds,
-					...cloudflareFilterPayload(input),
-				}),
-			})
-		}),
-	)
-	return {
-		totals: result.totals.map((row): CloudflareZoneHostTotal => {
-			const requests = Number(row.requests ?? 0)
-			const errors5xx = Number(row.errors5xx ?? 0)
-			const cacheHits = Number(row.cacheHits ?? 0)
-			return {
-				host: String(row.host ?? ""),
-				requests,
-				errors5xx,
-				errorRate: ratio(errors5xx, requests),
-				cacheHits,
-				cacheHitRate: ratio(cacheHits, requests),
-				bytes: Number(row.bytes ?? 0),
-			}
-		}),
-		buckets: result.buckets.map(
-			(row): CloudflareZoneHostBucket => ({
-				bucket: String(row.bucket ?? ""),
-				host: String(row.host ?? ""),
-				requests: Number(row.requests ?? 0),
-			}),
-		),
-		ignoredFilters: result.ignoredFilters,
-	}
-})
 
 export interface CloudflareZoneFirewallBucket {
 	bucket: string

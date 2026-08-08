@@ -375,7 +375,7 @@ eve's native idiom:
 - **Deliberately not ported:** page context and the widget-fix entry point (web-only payloads —
   the surgical fix _rules_ live in the dashboard-builder skill, with `get_dashboard` standing in
   for the attached widget JSON), the `submit_diagnosis` tool (the thread reply _is_ the report),
-  and the headless triage agent (`apps/api/src/workflows/triage-agent.ts`).
+  and the autonomous investigation agents.
 - **Beyond parity — chart images:** the authored `render_chart` tool renders a time-series
   chart in-process (hand-rolled SVG → `@resvg/resvg-js`, no headless browser or external chart
   service) and posts it into the thread via Slack's external-upload flow with the per-team bot

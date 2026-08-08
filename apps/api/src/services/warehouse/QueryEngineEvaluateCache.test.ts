@@ -17,10 +17,7 @@ import {
 } from "@/services/warehouse/WarehouseQueryService"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService, type EdgeCacheServiceShape } from "@maple/cache"
-import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
-
-const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asUserId = Schema.decodeUnknownSync(UserId)
@@ -87,7 +84,7 @@ const evalStub = (rows: ReadonlyArray<Record<string, unknown>>) =>
 			compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie),
 	}) satisfies Parameters<typeof makeQueryEngineEvaluate>[0]
 
-describe("makeQueryEngineEvaluate (shared bucket-encoding core)", () => {
+describe("makeQueryEngineEvaluate (shared alert-lowering core)", () => {
 	it.effect("reduces per-bucket values with sum and sums sample counts", () =>
 		Effect.gen(function* () {
 			const result = yield* makeQueryEngineEvaluate(evalStub(COUNT_ROWS))(tenant, countRequest("sum"))
@@ -233,7 +230,7 @@ describe("evaluate with a raw_sql source", () => {
 	it.effect("treats a null value as no data rather than a missing scalar", () =>
 		Effect.gen(function* () {
 			// `hasData === sampleCount > 0` must hold for raw rows exactly as it does
-			// for the spec sources — that invariant is what the bucket codec assumes.
+			// for the spec sources.
 			const raw = yield* makeQueryEngineEvaluate(rawStub([{ value: null }]))(tenant, rawRequest("sum"))
 			assert.deepStrictEqual(raw, [{ groupKey: "all", value: null, sampleCount: 0, hasData: false }])
 		}),
@@ -247,29 +244,14 @@ describe("evaluate with a raw_sql source", () => {
 		}),
 	)
 
-	it.effect("rejects a group key containing NUL, which would collide with the codec", () =>
-		Effect.gen(function* () {
-			const exit = yield* Effect.exit(
-				makeQueryEngineEvaluate(rawStub([{ value: 1, group: "a\u0000v\u0000b" }]))(
-					tenant,
-					rawRequest("sum"),
-				),
-			)
-			assert.equal(exit._tag, "Failure")
-		}),
-	)
 })
 
-// --- Full-service: the bucket-cached evaluate path. ---
-
-const makeConfig = (overrides: Record<string, string> = {}) =>
+const makeConfig = () =>
 	ConfigProvider.layer(
 		ConfigProvider.fromUnknown({
 			QE_BUCKET_CACHE_ENABLED: "true",
 			QE_BUCKET_CACHE_TTL_SECONDS: "86400",
 			QE_BUCKET_CACHE_FLUX_SECONDS: "0",
-			QE_EVAL_BUCKET_CACHE_ENABLED: "true",
-			...overrides,
 		}),
 	)
 
@@ -306,53 +288,6 @@ const makeFullStub = (
 		ingest: () => Effect.void,
 		sql: () => Promise.resolve({ data: [] }),
 	}) as unknown as WarehouseQueryServiceShape
-
-const makeQueryEngineLayer = (stub: WarehouseQueryServiceShape) =>
-	QueryEngineService.layer.pipe(
-		Layer.provide(Layer.succeed(WarehouseQueryService, stub)),
-		Layer.provide(edgeCacheLive),
-		Layer.provide(BucketCacheService.layer.pipe(Layer.provide(edgeCacheLive))),
-		Layer.provide(makeConfig()),
-	)
-
-describe("QueryEngineService.evaluate via bucket cache", () => {
-	it.live("matches the direct path and serves an identical repeat from cache", () => {
-		const counter = { n: 0 }
-		const layer = makeQueryEngineLayer(makeFullStub(COUNT_ROWS, counter))
-
-		return Effect.gen(function* () {
-			const qe = yield* QueryEngineService
-			const first = yield* qe.evaluate(tenant, countRequest("sum"))
-			const second = yield* qe.evaluate(tenant, countRequest("sum"))
-
-			// Parity: cached repeat equals the first (computed) result.
-			assert.deepStrictEqual(second, first)
-			// The second evaluation is a pure bucket-cache hit — no new SQL.
-			assert.strictEqual(counter.n, 1)
-			// Parity with the uncached direct path.
-			const direct = yield* makeQueryEngineEvaluate(evalStub(COUNT_ROWS))(tenant, countRequest("sum"))
-			assert.deepStrictEqual(first, direct)
-			assert.deepStrictEqual(first, [{ groupKey: "all", value: 10, sampleCount: 10, hasData: true }])
-		}).pipe(Effect.provide(layer))
-	})
-
-	it.live("falls back to the blob path and never caches when the kill switch is off", () => {
-		const counter = { n: 0 }
-		const layer = QueryEngineService.layer.pipe(
-			Layer.provide(Layer.succeed(WarehouseQueryService, makeFullStub(COUNT_ROWS, counter))),
-			Layer.provide(edgeCacheLive),
-			Layer.provide(BucketCacheService.layer.pipe(Layer.provide(edgeCacheLive))),
-			Layer.provide(makeConfig({ QE_EVAL_BUCKET_CACHE_ENABLED: "false" })),
-		)
-
-		return Effect.gen(function* () {
-			const qe = yield* QueryEngineService
-			const result = yield* qe.evaluate(tenant, countRequest("sum"))
-			// Same answer as the bucket path.
-			assert.deepStrictEqual(result, [{ groupKey: "all", value: 10, sampleCount: 10, hasData: true }])
-		}).pipe(Effect.provide(layer))
-	})
-})
 
 // --- cachedDirect: per-route TTL plumbing. ---
 
