@@ -113,28 +113,11 @@ const exploreItem: NavItem = {
 }
 
 /**
- * `infra_monitoring` gates the host/k8s agent pages only — Cloudflare and
- * PlanetScale analytics come from integrations, not the infra agent, so when
- * infra is off the section collapses to just the integration pages (which gate
- * themselves on connection status). The row itself never disappears, so the
- * sidebar's shape does not change when the flag resolves.
- */
-function visibleInfrastructureItem(flags: { infraEnabled: boolean }): NavItem {
-	if (flags.infraEnabled) return infrastructureItem
-	const subItems = infrastructureItem.subItems?.filter(
-		(sub) => sub.href.startsWith("/infra/cloudflare") || sub.href.startsWith("/infra/planetscale"),
-	)
-	// The parent click target follows the first surviving integration page
-	// instead of hardcoding one of them.
-	return { ...infrastructureItem, href: subItems?.[0]?.href ?? "/infra/cloudflare", subItems }
-}
-
-/**
  * The sidebar's information architecture, and the single source the command
  * palette flattens. Anomalies is reachable at /anomalies but stays out of both
  * until the detector has been validated against production baselines.
  */
-export function navGroups(flags: { infraEnabled: boolean }): NavGroup[] {
+export function navGroups(): NavGroup[] {
 	return [
 		{ id: "overview", items: [overviewItem] },
 		{
@@ -143,7 +126,7 @@ export function navGroups(flags: { infraEnabled: boolean }): NavGroup[] {
 			items: [
 				{ title: "Services", href: "/services", icon: ServerIcon },
 				{ title: "Service Map", href: "/service-map", icon: NetworkNodesIcon },
-				visibleInfrastructureItem(flags),
+				infrastructureItem,
 			],
 		},
 		{
@@ -194,7 +177,7 @@ export interface PaletteNavEntry {
  * are the entries that keep muscle memory working, and they were never in the
  * palette before this.
  */
-export function paletteNavItems(flags: { infraEnabled: boolean }): PaletteNavEntry[] {
+export function paletteNavItems(): PaletteNavEntry[] {
 	const entries: PaletteNavEntry[] = []
 	const seen = new Set<string>()
 	const push = (entry: PaletteNavEntry) => {
@@ -204,7 +187,7 @@ export function paletteNavItems(flags: { infraEnabled: boolean }): PaletteNavEnt
 		entries.push(entry)
 	}
 
-	for (const group of navGroups(flags)) {
+	for (const group of navGroups()) {
 		for (const item of group.items) {
 			push({ id: `nav:${item.title}`, title: item.title, href: item.href, icon: item.icon })
 			for (const sub of item.subItems ?? []) {

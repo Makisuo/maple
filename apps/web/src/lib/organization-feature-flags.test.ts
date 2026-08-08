@@ -6,35 +6,25 @@ describe("organizationFeatureFlagsFrom", () => {
 		expect(
 			organizationFeatureFlagsFrom({
 				aiautotriage: true,
-				infra_monitoring: true,
 				unrelated_metadata: "preserved by Clerk, ignored here",
 			}),
-		).toEqual({ aiAutoTriage: true, infrastructureMonitoring: true })
+		).toEqual({ aiAutoTriage: true })
 	})
 
-	it("disables missing and malformed flags independently", () => {
+	it("disables a missing or malformed flag", () => {
 		expect(organizationFeatureFlagsFrom({})).toEqual({
 			aiAutoTriage: false,
-			infrastructureMonitoring: false,
 		})
 		expect(
 			organizationFeatureFlagsFrom({
 				aiautotriage: "true",
-				infra_monitoring: true,
 			}),
-		).toEqual({ aiAutoTriage: false, infrastructureMonitoring: true })
-		expect(
-			organizationFeatureFlagsFrom({
-				aiautotriage: true,
-				infra_monitoring: 1,
-			}),
-		).toEqual({ aiAutoTriage: true, infrastructureMonitoring: false })
+		).toEqual({ aiAutoTriage: false })
 	})
 
 	it("fails closed when public metadata is unavailable", () => {
 		expect(organizationFeatureFlagsFrom(undefined)).toEqual({
 			aiAutoTriage: false,
-			infrastructureMonitoring: false,
 		})
 	})
 })

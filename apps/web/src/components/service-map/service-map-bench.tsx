@@ -581,7 +581,6 @@ export function ServiceMapBench({ params }: { params: BenchParams }) {
 						runtimes={graph.runtimes}
 						overviews={graph.overviews}
 						workloads={graph.workloads}
-						showInfraTab
 						durationSeconds={DURATION_SECONDS}
 						startTime={START_TIME}
 						endTime={END_TIME}

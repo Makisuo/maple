@@ -1,4 +1,4 @@
-import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -16,7 +16,6 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { FolderIcon, MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { PageHero } from "@/components/infra/primitives/page-hero"
-import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { PodTable, PodTableLoading } from "@/components/infra/pod-table"
 import { PodSummaryBand, PodSummaryBandLoading, type PodScope } from "@/components/infra/pod-summary-band"
 import { PodsFilterSidebarView, type PodFilters } from "@/components/infra/k8s-filter-sidebar"
@@ -65,12 +64,6 @@ export const Route = createFileRoute("/infra/kubernetes/pods/")({
 	validateSearch: Schema.toStandardSchemaV1(podsSearchSchema),
 })
 
-function PodsPage() {
-	const infraEnabled = useInfraEnabled()
-	if (!infraEnabled) return <Navigate to="/" replace />
-	return <PodsPageContent />
-}
-
 const SCOPE_LABEL: Record<PodScope, string> = {
 	saturated: "at or above 90% of a limit",
 	elevated: "at or above 60% of a limit",
@@ -78,7 +71,7 @@ const SCOPE_LABEL: Record<PodScope, string> = {
 	stale: "whose collector has gone quiet",
 }
 
-function PodsPageContent() {
+function PodsPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 

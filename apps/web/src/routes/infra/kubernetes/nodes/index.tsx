@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -16,7 +16,6 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { MagnifierIcon, ServerIcon, XmarkIcon } from "@/components/icons"
 import { PageHero } from "@/components/infra/primitives/page-hero"
-import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { NodeTable, NodeTableLoading } from "@/components/infra/node-table"
 import { NodeHoneycomb } from "@/components/infra/node-honeycomb"
 import { NodesFilterSidebarView, type NodeFilters } from "@/components/infra/k8s-filter-sidebar"
@@ -41,12 +40,6 @@ export const Route = createFileRoute("/infra/kubernetes/nodes/")({
 })
 
 function NodesPage() {
-	const infraEnabled = useInfraEnabled()
-	if (!infraEnabled) return <Navigate to="/" replace />
-	return <NodesPageContent />
-}
-
-function NodesPageContent() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 	const [searchText, setSearchText] = useState("")

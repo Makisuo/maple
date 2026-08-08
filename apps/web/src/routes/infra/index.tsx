@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react"
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-
-import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -42,12 +40,6 @@ const STATUS_FILTERS: ReadonlyArray<{ value: StatusFilter; label: string }> = [
 ]
 
 function InfraPage() {
-	const infraEnabled = useInfraEnabled()
-	if (!infraEnabled) return <Navigate to="/" replace />
-	return <InfraPageContent />
-}
-
-function InfraPageContent() {
 	const [installOpen, setInstallOpen] = useState(false)
 	const [search, setSearch] = useState("")
 	const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")

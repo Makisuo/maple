@@ -106,8 +106,6 @@ Within about a minute of a healthy rollout:
 1. Open **Infrastructure** in Maple — your nodes should appear with live CPU/memory/disk, and the Kubernetes → Pods / Nodes / Workloads views should populate.
 2. If a view stays empty, check the agent logs: `kubectl -n maple logs -l app.kubernetes.io/component=agent --tail=200`.
 
-> **Hosted Maple:** the Infrastructure feature is gated per organization during rollout. If you don't see it, ask your Maple contact to enable `infra_monitoring` for your org. Self-hosted and local installs have it on by default.
-
 ## Wire the service map's Infrastructure tab
 
 To get a pod-count badge and an Infrastructure tab on each **service** node (correlating your app traces to the workload running them), opt a namespace into env-var injection:

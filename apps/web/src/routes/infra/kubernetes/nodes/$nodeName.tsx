@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { DetailRail } from "@maple/ui/components/detail-rail"
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
@@ -9,7 +9,6 @@ import { cn } from "@maple/ui/lib/utils"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ServerIcon } from "@/components/icons"
-import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { NodeDetailChart } from "@/components/infra/k8s-detail-chart"
 import { PodTable } from "@/components/infra/pod-table"
 import { PageHero, HeroChip } from "@/components/infra/primitives/page-hero"
@@ -30,12 +29,6 @@ const METRIC_TABS = [
 ] as const
 
 function NodeDetailPage() {
-	const infraEnabled = useInfraEnabled()
-	if (!infraEnabled) return <Navigate to="/" replace />
-	return <NodeDetailContent />
-}
-
-function NodeDetailContent() {
 	const { nodeName } = Route.useParams()
 	const [preset, setPreset] = useState("1h")
 	const [metric, setMetric] = useState<NodeInfraMetric>("cpu_usage")

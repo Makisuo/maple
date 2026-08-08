@@ -1,8 +1,6 @@
 import { useState } from "react"
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomValue, useAtomRefresh } from "@/lib/effect-atom"
-
-import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 
@@ -29,12 +27,6 @@ const METRIC_STRIPS = [
 ] as const
 
 function HostDetailPage() {
-	const infraEnabled = useInfraEnabled()
-	if (!infraEnabled) return <Navigate to="/" replace />
-	return <HostDetailPageContent />
-}
-
-function HostDetailPageContent() {
 	const { hostName } = Route.useParams()
 	const [preset, setPreset] = useState("1h")
 

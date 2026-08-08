@@ -89,7 +89,6 @@ import type {
 } from "@/api/warehouse/service-map"
 import type { GetServiceOverviewInput, ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
-import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { ServiceMapNode } from "./service-map-node"
 import { ServiceMapLoading } from "./service-map-loading"
 import { ServiceMapEdge } from "./service-map-edge"
@@ -195,7 +194,6 @@ interface ServiceDetailPanelProps {
 	overviews: ServiceOverview[]
 	workloads: ServiceWorkload[]
 	durationSeconds: number
-	showInfraTab: boolean
 	platforms: Map<string, ServicePlatform>
 	colorMode: ServiceMapColorMode
 	/** Cloudflare direct-integration analytics overlaid onto this instrumented Worker, if matched. */
@@ -211,7 +209,6 @@ function ServiceDetailPanel({
 	overviews,
 	workloads,
 	durationSeconds,
-	showInfraTab,
 	platforms,
 	colorMode,
 	cloudflare,
@@ -286,17 +283,15 @@ function ServiceDetailPanel({
 						<NetworkNodesIcon size={12} />
 						Service
 					</TabsTrigger>
-					{showInfraTab && (
-						<TabsTrigger value="infrastructure">
-							<CubeIcon size={12} />
-							Infrastructure
-							{serviceWorkloads.length > 0 && (
-								<span className="ml-1 text-[9px] tabular-nums text-muted-foreground/70">
-									{serviceWorkloads.length}
-								</span>
-							)}
-						</TabsTrigger>
-					)}
+					<TabsTrigger value="infrastructure">
+						<CubeIcon size={12} />
+						Infrastructure
+						{serviceWorkloads.length > 0 && (
+							<span className="ml-1 text-[9px] tabular-nums text-muted-foreground/70">
+								{serviceWorkloads.length}
+							</span>
+						)}
+					</TabsTrigger>
 				</TabsList>
 
 				<TabsContent value="service" className="flex-1 min-h-0 mt-0">
@@ -557,31 +552,29 @@ function ServiceDetailPanel({
 					</ScrollArea>
 				</TabsContent>
 
-				{showInfraTab && (
-					<TabsContent value="infrastructure" className="flex-1 min-h-0 mt-0">
-						<ScrollArea className="h-full">
-							<div className="p-4 space-y-4">
-								{serviceWorkloads.length === 0 ? (
-									<ServiceInfraEmptyState />
-								) : (
+				<TabsContent value="infrastructure" className="flex-1 min-h-0 mt-0">
+					<ScrollArea className="h-full">
+						<div className="p-4 space-y-4">
+							{serviceWorkloads.length === 0 ? (
+								<ServiceInfraEmptyState />
+							) : (
+								<div className="space-y-2">
+									<h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
+										Kubernetes workloads
+									</h4>
 									<div className="space-y-2">
-										<h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
-											Kubernetes workloads
-										</h4>
-										<div className="space-y-2">
-											{serviceWorkloads.map((wl) => (
-												<ServiceWorkloadRow
-													key={`${wl.workloadKind}/${wl.workloadName}/${wl.namespace}/${wl.clusterName}`}
-													workload={wl}
-												/>
-											))}
-										</div>
+										{serviceWorkloads.map((wl) => (
+											<ServiceWorkloadRow
+												key={`${wl.workloadKind}/${wl.workloadName}/${wl.namespace}/${wl.clusterName}`}
+												workload={wl}
+											/>
+										))}
 									</div>
-								)}
-							</div>
-						</ScrollArea>
-					</TabsContent>
-				)}
+								</div>
+							)}
+						</div>
+					</ScrollArea>
+				</TabsContent>
 			</Tabs>
 		</div>
 	)
@@ -1771,7 +1764,6 @@ export function ServiceMapCanvas({
 	runtimes,
 	overviews,
 	workloads,
-	showInfraTab,
 	durationSeconds,
 	startTime,
 	endTime,
@@ -1803,7 +1795,6 @@ export function ServiceMapCanvas({
 	runtimes: Map<string, string>
 	overviews: ServiceOverview[]
 	workloads: ServiceWorkload[]
-	showInfraTab: boolean
 	durationSeconds: number
 	startTime: string
 	endTime: string
@@ -2479,7 +2470,6 @@ export function ServiceMapCanvas({
 								edges={serviceEdges}
 								overviews={overviews}
 								workloads={workloads}
-								showInfraTab={showInfraTab}
 								platforms={platforms}
 								colorMode={colorMode}
 								cloudflare={cloudflareOverlayByService.get(selectedServiceId)}
@@ -2512,7 +2502,6 @@ export function ServiceMapView({
 	onFocusChange,
 }: ServiceMapViewProps) {
 	const orgId = useMapleOrganizationId()
-	const infraEnabled = useInfraEnabled()
 	const durationSeconds = useMemo(() => {
 		const ms = new Date(endTime).getTime() - new Date(startTime).getTime()
 		return Math.max(1, ms / 1000)
@@ -2640,8 +2629,7 @@ export function ServiceMapView({
 	}, [platformsResult])
 
 	// Bulk fetch workloads keyed off the same set of services that appear in edges.
-	// Gated on infraEnabled so we don't issue this query on plans without the
-	// infrastructure feature. Empty services array short-circuits to no rows.
+	// An empty services array short-circuits to no rows.
 	const services = useMemo(() => {
 		if (!Result.isSuccess(mapResult)) return [] as string[]
 		const set = new Set<string>()
@@ -2659,7 +2647,7 @@ export function ServiceMapView({
 	)
 	const workloadsResult = useRefreshableAtomValue(getServiceWorkloadsResultAtom(workloadsInput))
 	// Don't block first paint on workloads — fall back to empty until it lands.
-	const workloads = infraEnabled && Result.isSuccess(workloadsResult) ? workloadsResult.value.workloads : []
+	const workloads = Result.isSuccess(workloadsResult) ? workloadsResult.value.workloads : []
 
 	// Keep the skeleton until every result that determines the NODE SET / namespaces
 	// has settled (resolved once — success or error), so the layout is computed a
@@ -2698,7 +2686,6 @@ export function ServiceMapView({
 					runtimes={runtimes}
 					overviews={overviews}
 					workloads={workloads}
-					showInfraTab={infraEnabled}
 					durationSeconds={durationSeconds}
 					startTime={startTime}
 					endTime={endTime}
