@@ -1,0 +1,296 @@
+/**
+ * The overview's lead: the whole causal chain on one canvas.
+ *
+ * This replaced three widgets that each told a slice of the same story — the
+ * rail's run spine, the Next-actions ledger and the checks panel. What caused the
+ * investigation, what it dispatched, what it concluded and what it proposes are
+ * one left-to-right read now, and the page stops repeating itself.
+ *
+ * xyflow with hand-computed positions rather than a layout engine: the graph is a
+ * fixed column grid (`provenance-graph.ts` owns the arithmetic), and ELK would
+ * buy nothing but a worker round-trip before first paint. What xyflow *is* here
+ * for is pan, zoom and fit — a seven-action report is wider than any column this
+ * page has.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+	ReactFlow,
+	ReactFlowProvider,
+	useReactFlow,
+	type Edge,
+	type Node,
+	type ReactFlowInstance,
+} from "@xyflow/react"
+import "@xyflow/react/dist/style.css"
+import type { V2Investigation } from "@maple/domain/http/v2"
+import { cn } from "@maple/ui/lib/utils"
+
+import { CursorIcon, MaximizeIcon, MinusIcon, PlusIcon } from "@/components/icons"
+import { FlowEdge, FlowEdgeMarkers, type FlowEdgeData } from "./flow-edge"
+import {
+	FlowActionNode,
+	FlowHeadingNode,
+	FlowLensNode,
+	FlowLensOverflowNode,
+	FlowSpineNode,
+} from "./flow-nodes"
+import { buildProvenanceGraph, type ProvenanceGraph } from "./provenance-graph"
+
+const nodeTypes = {
+	spine: FlowSpineNode,
+	lens: FlowLensNode,
+	lensOverflow: FlowLensOverflowNode,
+	action: FlowActionNode,
+	heading: FlowHeadingNode,
+}
+
+const edgeTypes = { provenance: FlowEdge }
+
+const MIN_FIT = 0.68
+const FIT = { padding: 0.06, maxZoom: 1, minZoom: MIN_FIT }
+/** Room above the graph for the column headings, which sit 20px over their column. */
+const HEADING_GUTTER = 28
+/** Room below it for the control bar, which overlaps the canvas's bottom-left corner. */
+const CONTROL_GUTTER = 34
+
+export function ProvenanceCanvas({ investigation }: { investigation: V2Investigation }) {
+	const graph = useMemo(() => buildProvenanceGraph(investigation), [investigation])
+	// A freeform investigation that has not produced anything yet is a single node.
+	// One box on a 330px canvas is worse than no canvas.
+	if (graph.nodes.filter((node) => node.type !== "heading").length < 2) return null
+
+	return (
+		<ReactFlowProvider>
+			<section className="flex shrink-0 flex-col gap-3.5 rounded-lg border bg-card/40 px-6 pb-5.5 pt-4.5">
+				<Caption graph={graph} />
+				<Canvas graph={graph} />
+			</section>
+		</ReactFlowProvider>
+	)
+}
+
+function Caption({ graph }: { graph: ProvenanceGraph }) {
+	return (
+		<div className="flex items-center gap-2.5">
+			<span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+				Provenance
+			</span>
+			<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+				what produced this investigation, and what it produced
+			</span>
+			{graph.caption ? (
+				<span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
+					{graph.caption}
+				</span>
+			) : null}
+		</div>
+	)
+}
+
+function Canvas({ graph }: { graph: ProvenanceGraph }) {
+	const [instance, setInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null)
+	const [paneWidth, setPaneWidth] = useState(0)
+	const paneRef = useRef<HTMLDivElement | null>(null)
+	// Once the reader pans or zooms themselves, stop refitting under them.
+	const userMovedRef = useRef(false)
+
+	/**
+	 * The zoom `fitView` will settle on, computed here so the pane can be exactly
+	 * as tall as the graph ends up drawn — a pane sized to the graph's *unscaled*
+	 * height leaves a third of itself empty on a narrow window.
+	 *
+	 * Floored at `MIN_FIT` rather than shrinking to whatever fits: below about
+	 * two-thirds the design's 9px verdict words stop being words, and a graph the
+	 * reader can pan beats one they can't read.
+	 */
+	const scale = paneWidth
+		? Math.min(1, Math.max(MIN_FIT, (paneWidth * (1 - FIT.padding * 2)) / graph.width))
+		: 1
+
+	const nodes = useMemo<Array<Node>>(
+		() =>
+			graph.nodes.map((node) => ({
+				id: node.id,
+				type: node.type,
+				position: node.position,
+				width: node.width,
+				height: node.height,
+				data: node.data as unknown as Record<string, unknown>,
+				draggable: false,
+				selectable: false,
+				connectable: false,
+			})),
+		[graph],
+	)
+
+	const edges = useMemo<Array<Edge>>(
+		() =>
+			graph.edges.map((edge) => ({
+				id: edge.id,
+				source: edge.source,
+				target: edge.target,
+				type: "provenance",
+				data: {
+					kind: edge.kind,
+					...(edge.label ? { label: edge.label } : {}),
+				} satisfies FlowEdgeData,
+			})),
+		[graph],
+	)
+
+	/**
+	 * Place the graph ourselves rather than calling `fitView`.
+	 *
+	 * fitView centres, and centring is wrong the moment the graph is wider than
+	 * the pane: a causal chain clipped at *both* ends hides the thing that caused
+	 * the investigation, which is the whole left-to-right point. When the zoom is
+	 * clamped we anchor to x=0 and let the reader pan right instead.
+	 */
+	const place = useCallback(() => {
+		const pane = paneRef.current
+		if (!instance || !pane) return
+		const width = pane.clientWidth
+		const zoom = Math.min(1, Math.max(MIN_FIT, (width * (1 - FIT.padding * 2)) / graph.width))
+		const drawn = graph.width * zoom
+		void instance.setViewport({
+			x: drawn > width ? width * FIT.padding : (width - drawn) / 2,
+			// The graph's own top is -HEADING_OFFSET (the column headings), so the
+			// gutter has to clear that at the current zoom.
+			y: HEADING_GUTTER * zoom,
+			zoom,
+		})
+	}, [graph, instance])
+
+	// The pane's width settles after mount and changes again whenever the right
+	// panel opens — replace until the reader takes the viewport over. Tracking the
+	// width in state keeps the pane exactly as tall as the graph ends up drawn.
+	useEffect(() => {
+		const pane = paneRef.current
+		if (!pane) return
+		const observer = new ResizeObserver(([entry]) => {
+			setPaneWidth(entry?.contentRect.width ?? 0)
+			if (userMovedRef.current) return
+			requestAnimationFrame(() => {
+				if (!userMovedRef.current) place()
+			})
+		})
+		observer.observe(pane)
+		return () => observer.disconnect()
+	}, [place])
+
+	// New graph (a lens reported, the verdict landed) — replace it at whatever it grew into.
+	useEffect(() => {
+		userMovedRef.current = false
+		place()
+	}, [place])
+
+	return (
+		// The pane takes the graph's drawn height, so that *width* is the only thing
+		// fitView ever has to shrink for. A fixed height had the tallest column —
+		// five proposed actions — squeezing the whole canvas to 54%, at which the
+		// design's 9px verdict words stop being words.
+		<div
+			ref={paneRef}
+			className="relative w-full"
+			style={{ height: graph.height * scale + HEADING_GUTTER + CONTROL_GUTTER }}
+		>
+			<FlowEdgeMarkers />
+			<ReactFlow
+				nodes={nodes}
+				edges={edges}
+				nodeTypes={nodeTypes}
+				edgeTypes={edgeTypes}
+				onInit={setInstance}
+				onMoveStart={(event) => {
+					// A reader-initiated pan carries a source event; a programmatic
+					// fitView passes null.
+					if (event) userMovedRef.current = true
+				}}
+				nodesDraggable={false}
+				nodesConnectable={false}
+				elementsSelectable={false}
+				connectOnClick={false}
+				panOnScroll={false}
+				zoomOnScroll={false}
+				zoomOnDoubleClick={false}
+				preventScrolling={false}
+				minZoom={0.3}
+				maxZoom={1.4}
+				proOptions={{ hideAttribution: true }}
+				aria-label="Investigation provenance graph"
+			/>
+			<Controls
+				onManualMove={() => (userMovedRef.current = true)}
+				onReset={() => {
+					userMovedRef.current = false
+					place()
+				}}
+			/>
+			<GraphOutline graph={graph} />
+		</div>
+	)
+}
+
+/**
+ * Scrolling the page is what the wheel does here — `zoomOnScroll` is off, because
+ * a canvas that eats the wheel mid-page traps the reader on a 260px band. Zoom is
+ * these four buttons and a drag.
+ */
+function Controls({ onManualMove, onReset }: { onManualMove: () => void; onReset: () => void }) {
+	const flow = useReactFlow()
+	const button = "flex size-6.5 items-center justify-center text-muted-foreground hover:text-foreground"
+
+	const zoom = useCallback(
+		(direction: "in" | "out") => {
+			onManualMove()
+			if (direction === "in") void flow.zoomIn()
+			else void flow.zoomOut()
+		},
+		[flow, onManualMove],
+	)
+
+	return (
+		<div className="absolute bottom-0 left-0 flex divide-x rounded-sm border bg-background">
+			<span className={cn(button, "cursor-default")} aria-hidden>
+				<CursorIcon size={12} />
+			</span>
+			<button type="button" className={button} onClick={() => zoom("in")} aria-label="Zoom in">
+				<PlusIcon size={12} />
+			</button>
+			<button type="button" className={button} onClick={() => zoom("out")} aria-label="Zoom out">
+				<MinusIcon size={12} />
+			</button>
+			<button type="button" className={button} onClick={onReset} aria-label="Fit the graph to the view">
+				<MaximizeIcon size={12} />
+			</button>
+		</div>
+	)
+}
+
+/**
+ * The same chain as a list, for screen readers.
+ *
+ * xyflow renders into a transformed canvas whose reading order is layout order,
+ * not causal order, and the nodes are `<div>`s with no relationship between them.
+ * Mirroring the graph costs a handful of `<li>`s and is the difference between
+ * the page's lead being readable and being invisible.
+ */
+function GraphOutline({ graph }: { graph: ProvenanceGraph }) {
+	return (
+		<ol className="sr-only">
+			{graph.nodes
+				.filter((node) => node.type !== "heading")
+				.map((node) => (
+					<li key={node.id}>
+						{node.type === "spine"
+							? `${node.data.eyebrow}: ${node.data.title}${node.data.status ? ` — ${node.data.status}` : ""}`
+							: node.type === "lens"
+								? `Lens ${node.data.title} — ${node.data.state.word}`
+								: node.type === "lensOverflow"
+									? `${node.data.hidden} further lenses`
+									: `Proposed action ${node.data.ordinal}: ${node.data.text}`}
+					</li>
+				))}
+		</ol>
+	)
+}
