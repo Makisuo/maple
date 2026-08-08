@@ -10,14 +10,15 @@ import type { InvestigationContext } from "@/components/chat/investigation-conte
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { EvidenceTab } from "./evidence-tab"
+import { ProvenanceCanvas } from "./flow/provenance-canvas"
 import { FollowUpComposer } from "./follow-up-composer"
 import { HypothesesTab } from "./hypotheses-tab"
 import { ImpactStrip } from "./impact-strip"
 import { investigationHeadline } from "./investigation-display"
 import { InvestigationHeader } from "./investigation-header"
-import { InvestigationRail } from "./investigation-rail"
+import { InvestigationMeta } from "./investigation-meta"
 import { type InvestigationTab, InvestigationTabs } from "./investigation-tabs"
-import { NextActions } from "./next-actions"
+import { SignalsCard } from "./signals-card"
 import { VerdictCard } from "./verdict-card"
 
 const factKey = (label: string) =>
@@ -214,11 +215,26 @@ export function InvestigationView({
 										<HypothesesTab investigation={investigation} />
 									) : (
 										<>
+											{/*
+											 * The canvas leads. It carries what the rail's run
+											 * spine, its checks panel and the Next-actions ledger
+											 * used to say separately — one causal read instead of
+											 * three partial ones — so the verdict below it
+											 * qualifies a chain the reader has already seen.
+											 */}
+											<ProvenanceCanvas investigation={investigation} />
 											<VerdictCard investigation={investigation} />
 											<ImpactStrip investigation={investigation} />
-											<NextActions investigation={investigation} />
+											<SignalsCard investigation={investigation} />
 										</>
 									)}
+									{/*
+									 * The audit trail, under the finding rather than beside it.
+									 * This is what was left of the right rail once the canvas took
+									 * over the run and the checks — not enough to keep a 320px
+									 * column standing next to a graph that wanted the width.
+									 */}
+									<InvestigationMeta investigation={investigation} />
 								</div>
 							</DashboardLayout.Scroll>
 							{/*
@@ -236,9 +252,6 @@ export function InvestigationView({
 						</>
 					)}
 				</DashboardLayout.Content>
-				<DashboardLayout.RightPanel title="Investigation context" width="w-80">
-					<InvestigationRail investigation={investigation} />
-				</DashboardLayout.RightPanel>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
 	)

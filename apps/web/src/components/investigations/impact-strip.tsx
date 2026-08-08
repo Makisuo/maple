@@ -1,19 +1,22 @@
 import type { ReactNode } from "react"
 import type { V2Investigation } from "@maple/domain/http/v2"
-import { formatDuration } from "@maple/ui/lib/format"
+import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { getServiceColor } from "@maple/ui/lib/colors"
 import { toEpochMs } from "@maple/ui/lib/time-format"
 
 /**
- * Three named lanes under the verdict, each reading a field that has been on the
+ * Four named lanes under the verdict, each reading a field that has been on the
  * wire the whole time and rendered nowhere — `report.affectedScope`, the union of
- * `evidence[].relatedServices`, and the snapshot's incident window.
+ * `evidence[].relatedServices`, the snapshot's incident window, and its
+ * occurrence count.
  *
- * There was a fourth, "Blast radius", showing an events-and-users count. It was
- * invented: those numbers belong to the incident, not the investigation, and
- * nothing on the wire carries them. A fabricated user count sitting inside an
- * impact strip is the most dangerous number that could be on this page, so the
- * lane is gone until there is a real source for it.
+ * "Blast radius" was here once as an events-*and-users* count and was deleted,
+ * because the user half was invented and a fabricated user count inside an impact
+ * strip is the most dangerous number that could be on this page. It is back as
+ * events alone: `snapshot.occurrence_count` is a real field written when the
+ * investigation was opened, and the lane hides entirely when it is absent. The
+ * user count stays gone — nothing in the warehouse counts affected users for a
+ * backend service, and "0 users" would be a worse lie than silence.
  *
  * Fixed lane widths rather than `gap` alone: the lanes have to hold their
  * vertical rules in place as the rail widens and narrows, and a flex-only strip
@@ -25,6 +28,7 @@ export function ImpactStrip({ investigation }: { investigation: V2Investigation 
 
 	const services = servicesTouched(investigation)
 	const window = incidentWindow(snapshot)
+	const occurrences = snapshot.occurrenceCount
 
 	return (
 		<div className={STRIP}>
@@ -54,6 +58,16 @@ export function ImpactStrip({ investigation }: { investigation: V2Investigation 
 			<Lane label="Incident window">
 				<span className="text-foreground tabular-nums">{window}</span>
 			</Lane>
+			{occurrences != null && Number.isFinite(occurrences) ? (
+				<Lane label="Blast radius">
+					<span className="text-foreground">
+						<span className="tabular-nums">{formatNumber(occurrences)}</span>{" "}
+						<span className="text-muted-foreground">
+							{occurrences === 1 ? "event" : "events"}
+						</span>
+					</span>
+				</Lane>
+			) : null}
 		</div>
 	)
 }
@@ -95,7 +109,7 @@ function Lane({ label, children }: { label: string; children: ReactNode }) {
  * Deduped — the same service usually appears on several findings, and printing
  * it three times says nothing.
  */
-function servicesTouched(investigation: V2Investigation): ReadonlyArray<string> {
+export function servicesTouched(investigation: V2Investigation): ReadonlyArray<string> {
 	const seen = new Set<string>()
 	for (const evidence of investigation.report?.evidence ?? []) {
 		for (const service of evidence.relatedServices) {

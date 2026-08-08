@@ -168,9 +168,9 @@ const pad = (n: number) => String(n).padStart(2, "0")
  * tenth-of-a-minute resolution sits frozen for six seconds and then lurches.
  * Clock notation past a minute keeps every second visible.
  *
- * It lives here rather than in `verdict-card` because the rail states the same
- * time-to-diagnosis one panel over, and having one component import the other
- * for it built an import cycle that left `RunSpine` throwing at runtime.
+ * It lives here rather than in `verdict-card` because the provenance canvas
+ * stamps the same elapsed time on its investigation node, and having one
+ * component import the other for it built an import cycle that threw at runtime.
  */
 export const splitDuration = (ms: number): Elapsed => {
 	// A pass that died before it started is a real case (`workflow_binding_unavailable`
