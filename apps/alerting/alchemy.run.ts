@@ -85,6 +85,7 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 				// Tinybird-scoped raw SQL" (same bindings as the api worker).
 				...optionalSecret("TINYBIRD_SIGNING_KEY"),
 				...optionalPlain("TINYBIRD_WORKSPACE_ID"),
+				...optionalPlain("TINYBIRD_RAW_SQL_JWT_RPS_LIMIT"),
 				MAPLE_AUTH_MODE: process.env.MAPLE_AUTH_MODE?.trim() || "self_hosted",
 				MAPLE_DEFAULT_ORG_ID: process.env.MAPLE_DEFAULT_ORG_ID?.trim() || "default",
 				MAPLE_INGEST_KEY_ENCRYPTION_KEY: Redacted.make(requireEnv("MAPLE_INGEST_KEY_ENCRYPTION_KEY")),

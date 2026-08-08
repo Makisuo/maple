@@ -13,6 +13,8 @@ export interface EnvShape {
 	readonly TINYBIRD_TOKEN: Redacted.Redacted<string>
 	readonly TINYBIRD_SIGNING_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly TINYBIRD_WORKSPACE_ID: Option.Option<string>
+	/** Optional Tinybird-enforced RPS ceiling, bucketed independently per org. */
+	readonly TINYBIRD_RAW_SQL_JWT_RPS_LIMIT: Option.Option<number>
 	readonly CLICKHOUSE_URL: Option.Option<string>
 	readonly CLICKHOUSE_PROVIDER: string
 	readonly CLICKHOUSE_USER: string
@@ -100,6 +102,7 @@ const envConfig = Config.all({
 	TINYBIRD_TOKEN: Config.redacted("TINYBIRD_TOKEN"),
 	TINYBIRD_SIGNING_KEY: optionalRedacted("TINYBIRD_SIGNING_KEY"),
 	TINYBIRD_WORKSPACE_ID: optionalString("TINYBIRD_WORKSPACE_ID"),
+	TINYBIRD_RAW_SQL_JWT_RPS_LIMIT: Config.option(Config.number("TINYBIRD_RAW_SQL_JWT_RPS_LIMIT")),
 	CLICKHOUSE_URL: optionalString("CLICKHOUSE_URL"),
 	CLICKHOUSE_PROVIDER: stringWithDefault("CLICKHOUSE_PROVIDER", "tinybird"),
 	CLICKHOUSE_USER: stringWithDefault("CLICKHOUSE_USER", "default"),
@@ -241,6 +244,38 @@ const makeEnv = Effect.gen(function* () {
 			new EnvValidationError({
 				message: "CLICKHOUSE_PROVIDER must be either 'clickhouse' or 'tinybird'",
 			}),
+		)
+	}
+
+	const hasTinybirdSigningKey = Option.isSome(env.TINYBIRD_SIGNING_KEY)
+	const hasTinybirdWorkspaceId = Option.isSome(env.TINYBIRD_WORKSPACE_ID)
+	if (hasTinybirdSigningKey !== hasTinybirdWorkspaceId) {
+		return yield* Effect.die(
+			new EnvValidationError({
+				message:
+					"TINYBIRD_SIGNING_KEY and TINYBIRD_WORKSPACE_ID must be configured together for Tinybird raw SQL",
+			}),
+		)
+	}
+
+	if (
+		Option.isSome(env.TINYBIRD_RAW_SQL_JWT_RPS_LIMIT) &&
+		(!Number.isSafeInteger(env.TINYBIRD_RAW_SQL_JWT_RPS_LIMIT.value) ||
+			env.TINYBIRD_RAW_SQL_JWT_RPS_LIMIT.value <= 0)
+	) {
+		return yield* Effect.die(
+			new EnvValidationError({
+				message: "TINYBIRD_RAW_SQL_JWT_RPS_LIMIT must be a positive integer when configured",
+			}),
+		)
+	}
+
+	if (
+		Option.isSome(env.TINYBIRD_SIGNING_KEY) &&
+		Redacted.value(env.TINYBIRD_TOKEN) === Redacted.value(env.TINYBIRD_SIGNING_KEY.value)
+	) {
+		yield* Effect.logWarning(
+			"TINYBIRD_TOKEN and TINYBIRD_SIGNING_KEY are identical; use a least-privilege runtime token instead of the workspace admin token",
 		)
 	}
 
