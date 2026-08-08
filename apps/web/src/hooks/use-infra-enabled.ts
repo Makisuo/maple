@@ -1,4 +1,5 @@
 import { useOrganization } from "@clerk/clerk-react"
+import { organizationFeatureFlagsFrom } from "@/lib/organization-feature-flags"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
 /**
@@ -19,5 +20,5 @@ export function useInfraEnabled(): boolean {
 	const { organization, isLoaded } = useOrganization()
 	if (!isLoaded) return false
 
-	return organization?.publicMetadata?.infra_monitoring === true
+	return organizationFeatureFlagsFrom(organization?.publicMetadata).infrastructureMonitoring
 }

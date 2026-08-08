@@ -6,6 +6,7 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { hasBringYourOwnCloudAddOn } from "@/lib/billing/plan-gating"
 import { useIsOrgAdmin } from "@/hooks/use-is-org-admin"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { organizationFeatureFlagsFrom } from "@/lib/organization-feature-flags"
 import {
 	BellIcon,
 	CircleCheckIcon,
@@ -184,8 +185,8 @@ export function useVisibleSettingsSections() {
 	}
 
 	const canAccessDataPlatform = isAdmin && hasBringYourOwnCloudAddOn(customer)
-	const hasAiMetadataFlag = organization?.publicMetadata?.bringyourownai === true
-	const canAccessAi = isAdmin && hasAiMetadataFlag
+	const featureFlags = organizationFeatureFlagsFrom(organization?.publicMetadata)
+	const canAccessAi = isAdmin && featureFlags.aiAutoTriage
 
 	const dataSections = navSections
 		.map((section) => ({
