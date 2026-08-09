@@ -140,9 +140,8 @@ struct AppConfig {
     replay_blob_store: Option<ReplayBlobStoreConfig>,
     /// Whether `Cf-IPCountry` on an inbound request can be believed.
     ///
-    /// Off by default, and that default is the safe one: this gateway is a
-    /// Railway container, so it is reachable directly on its
-    /// `*.up.railway.app` origin and any client can set the header itself.
+    /// Off by default, and that default is the safe one: container deployments
+    /// can expose a direct origin where any client can set the header itself.
     /// Enable it only on deployments where every path to the process is
     /// terminated by Cloudflare. Off simply writes `''`, which is what the
     /// column held before this existed — it cannot regress anything.
@@ -5174,9 +5173,9 @@ fn current_time_millis() -> u128 {
 
 /// Build the KeyStore for this process. The `Static` variant resolves any
 /// well-formed ingest key to a single configured org — used for single-tenant
-/// local dev so contributors don't need CF D1 credentials to boot the service.
-/// The `D1` variant reads `org_ingest_keys` from Cloudflare D1 via the REST API
-/// (the API service writes to the same D1 database); a probe query runs at
+/// local dev so contributors don't need database credentials to boot the service.
+/// The `Postgres` variant reads `org_ingest_keys` from PlanetScale through
+/// PSBouncer (the API service writes to the same database); a probe query runs at
 /// startup so any auth/schema/network issue surfaces here instead of 503'ing
 /// every request.
 async fn build_key_store(

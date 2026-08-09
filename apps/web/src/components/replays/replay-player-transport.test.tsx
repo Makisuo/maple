@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ReplayPlayerProvider } from "./replay-player-context"
 import { ReplaySurface } from "./replay-player"
-import { PREVIEW_RRWEB_EVENTS } from "./preview-fixtures"
+
+const REPLAY_EVENTS = [{ timestamp: 1_000 }, { timestamp: 31_000 }]
 
 // The offset the transport hands rrweb's `play()`.
 //
@@ -94,7 +95,7 @@ function renderPlayer() {
 	)
 	const view = render(
 		<Wrapper>
-			<ReplayPlayerProvider sessionId="sess-1" previewEvents={PREVIEW_RRWEB_EVENTS} recorded>
+			<ReplayPlayerProvider sessionId="sess-1" eventsOverride={REPLAY_EVENTS} recorded>
 				<ReplaySurface url="https://app.acme.dev/dashboard" />
 			</ReplayPlayerProvider>
 		</Wrapper>,

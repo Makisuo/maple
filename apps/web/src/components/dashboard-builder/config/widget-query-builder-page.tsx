@@ -30,7 +30,7 @@ import {
 	resetQueryForDataSource,
 	type QueryBuilderDataSource,
 	type QueryBuilderMetricType,
-} from "@/lib/query-builder/model"
+} from "@maple/query-engine/query-builder"
 import {
 	toSeriesFieldOptions,
 	buildWidgetDataSource,

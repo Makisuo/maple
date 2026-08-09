@@ -1,7 +1,7 @@
 import { Effect, Result, Schema } from "effect"
 import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
 import { QueryEngineExecuteRequest } from "@maple/query-engine"
-import { buildBreakdownQuerySpec } from "@/lib/query-builder/model"
+import { buildBreakdownQuerySpec } from "@maple/query-engine/query-builder"
 import {
 	type BackendError,
 	type WarehouseQueryError,

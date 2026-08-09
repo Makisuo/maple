@@ -26,7 +26,7 @@ import {
 	type QueryBuilderDataSource,
 	type QueryBuilderMetricType,
 	type QueryBuilderQueryDraft,
-} from "@/lib/query-builder/model"
+} from "@maple/query-engine/query-builder"
 
 // ---------------------------------------------------------------------------
 // Types

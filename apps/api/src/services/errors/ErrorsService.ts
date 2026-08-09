@@ -85,15 +85,13 @@ import {
 } from "@maple/query-engine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
-import {
-	INVESTIGATION_FANOUT_BINDING,
-	maybeEnqueueTriage,
-} from "@/services/errors/ai-triage-enqueue"
+import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { escalationDedupeKey, escalationReasonFor } from "@/services/errors/issue-severity"
 import { SYSTEM_ERRORS_AGENT_NAME, isReservedAgentName } from "@/services/auth/system-actors"
 import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
+import { isRetryablePostgresContention } from "@/platform/postgres-errors"
 import { selectDistinctOrgIds } from "@/platform/distinct-org-ids"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { Env } from "@/platform/Env"
@@ -159,7 +157,6 @@ const RETENTION_PHASE_EVERY_N_TICKS = 60
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 const SYSTEM_AGENT_NAME = SYSTEM_ERRORS_AGENT_NAME
-const D1_INARRAY_CHUNK_SIZE = 90
 const ACTIONABLE_WORKFLOW_STATES: ReadonlyArray<WorkflowState> = [
 	"triage",
 	"todo",
@@ -216,40 +213,7 @@ export const makePersistenceError = (error: unknown): ErrorPersistenceError => {
 	return new ErrorPersistenceError(baseFor("Error persistence failure", error))
 }
 
-// Concurrent ticks against D1 (file-locked SQLite under the hood) occasionally surface
-// busy/locked errors, and Postgres surfaces the same contention as SQLSTATE 40001
-// (serialization_failure) / 40P01 (deadlock_detected). They're harmless to retry — the
-// next attempt usually succeeds in ms. Only this predicate's match retries; anything
-// else fails fast.
-const BUSY_ERROR_PATTERN = /SQLITE_BUSY|database is locked|D1_BUSY|busy|40001|40P01/i
-
-/** Retryable Postgres contention SQLSTATEs (postgres.js errors carry them on `.code`). */
-const PG_CONTENTION_CODES: ReadonlySet<string> = new Set(["40001", "40P01"])
-
-const causeMessage = (cause: unknown): string | undefined => {
-	if (cause instanceof Error) return cause.message
-	if (typeof cause === "string") return cause
-	return undefined
-}
-
-const causeCode = (cause: unknown): string | undefined => {
-	if (typeof cause === "object" && cause !== null && "code" in cause) {
-		const code = (cause as { code?: unknown }).code
-		if (typeof code === "string") return code
-	}
-	return undefined
-}
-
-export const isBusyDatabaseError = (error: DatabaseError): boolean => {
-	if (BUSY_ERROR_PATTERN.test(error.message)) return true
-	const code = causeCode(error.cause)
-	if (code !== undefined && PG_CONTENTION_CODES.has(code)) return true
-	const inner = causeMessage(error.cause)
-	if (inner && BUSY_ERROR_PATTERN.test(inner)) return true
-	return false
-}
-
-const BUSY_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
+const CONTENTION_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
 
 export interface ErrorsServiceShape {
 	readonly listIssues: (
@@ -489,8 +453,8 @@ const make: Effect.Effect<
 	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 		database.execute(fn).pipe(
 			Effect.retry({
-				schedule: BUSY_RETRY_SCHEDULE,
-				while: isBusyDatabaseError,
+				schedule: CONTENTION_RETRY_SCHEDULE,
+				while: isRetryablePostgresContention,
 			}),
 			Effect.tapError((error) =>
 				Effect.gen(function* () {
@@ -870,19 +834,15 @@ const make: Effect.Effect<
 	const collectActorDocs = (orgId: OrgId, actorIds: ReadonlyArray<ActorId | null>) => {
 		const filtered = Array.from(new Set(actorIds.filter((v): v is ActorId => v != null)))
 		if (filtered.length === 0) return Effect.succeed(new Map<ActorId, ActorDocument>())
-		return Effect.forEach(Arr.chunksOf(filtered, D1_INARRAY_CHUNK_SIZE), (chunk) =>
-			dbExecute((db) =>
-				db
-					.select()
-					.from(actors)
-					.where(and(eq(actors.orgId, orgId), inArray(actors.id, chunk))),
-			),
+		return dbExecute((db) =>
+			db
+				.select()
+				.from(actors)
+				.where(and(eq(actors.orgId, orgId), inArray(actors.id, filtered))),
 		).pipe(
-			Effect.map((groups) => {
+			Effect.map((rows) => {
 				const map = new Map<ActorId, ActorDocument>()
-				for (const rows of groups) {
-					for (const row of rows) map.set(row.id, rowToActor(row))
-				}
+				for (const row of rows) map.set(row.id, rowToActor(row))
 				return map
 			}),
 		)
@@ -988,44 +948,38 @@ const make: Effect.Effect<
 		// Two sources of "open incident": error_incidents for fingerprint
 		// issues, and open alert_incidents linked via errorIssueId for
 		// alert-backed issues. An issue id only ever appears in one of them.
-		return Effect.forEach(Arr.chunksOf(issueIds, D1_INARRAY_CHUNK_SIZE), (chunk) =>
-			Effect.all([
-				dbExecute((db) =>
-					db
-						.select({ issueId: errorIncidents.issueId })
-						.from(errorIncidents)
-						.where(
-							and(
-								eq(errorIncidents.orgId, orgId),
-								eq(errorIncidents.status, "open"),
-								inArray(errorIncidents.issueId, chunk),
-							),
+		return Effect.all([
+			dbExecute((db) =>
+				db
+					.select({ issueId: errorIncidents.issueId })
+					.from(errorIncidents)
+					.where(
+						and(
+							eq(errorIncidents.orgId, orgId),
+							eq(errorIncidents.status, "open"),
+							inArray(errorIncidents.issueId, issueIds),
 						),
-				),
-				dbExecute((db) =>
-					db
-						.select({ issueId: alertIncidents.errorIssueId })
-						.from(alertIncidents)
-						.where(
-							and(
-								eq(alertIncidents.orgId, orgId),
-								eq(alertIncidents.status, "open"),
-								inArray(alertIncidents.errorIssueId, chunk),
-							),
-						),
-				),
-			]),
-		).pipe(
-			Effect.map(
-				(groups) =>
-					new Set(
-						groups.flatMap(([errorRows, alertRows]) => [
-							...errorRows.map((r) => r.issueId),
-							...alertRows.flatMap((r) =>
-								r.issueId == null ? [] : [r.issueId as ErrorIssueId],
-							),
-						]),
 					),
+			),
+			dbExecute((db) =>
+				db
+					.select({ issueId: alertIncidents.errorIssueId })
+					.from(alertIncidents)
+					.where(
+						and(
+							eq(alertIncidents.orgId, orgId),
+							eq(alertIncidents.status, "open"),
+							inArray(alertIncidents.errorIssueId, issueIds),
+						),
+					),
+			),
+		]).pipe(
+			Effect.map(
+				([errorRows, alertRows]) =>
+					new Set([
+						...errorRows.map((r) => r.issueId),
+						...alertRows.flatMap((r) => (r.issueId == null ? [] : [r.issueId as ErrorIssueId])),
+					]),
 			),
 		)
 	}
@@ -2126,22 +2080,18 @@ const make: Effect.Effect<
 			// "skipped" escalation with reason no_enabled_destinations.
 			const referencedIds = Array.from(new Set(request.rules.flatMap((rule) => rule.destinationIds)))
 			if (referencedIds.length > 0) {
-				const ownedRows = yield* Effect.forEach(
-					Arr.chunksOf(referencedIds, D1_INARRAY_CHUNK_SIZE),
-					(chunk) =>
-						dbExecute((db) =>
-							db
-								.select({ id: alertDestinations.id })
-								.from(alertDestinations)
-								.where(
-									and(
-										eq(alertDestinations.orgId, orgId),
-										inArray(alertDestinations.id, chunk),
-									),
-								),
+				const ownedRows = yield* dbExecute((db) =>
+					db
+						.select({ id: alertDestinations.id })
+						.from(alertDestinations)
+						.where(
+							and(
+								eq(alertDestinations.orgId, orgId),
+								inArray(alertDestinations.id, referencedIds),
+							),
 						),
 				)
-				const owned = new Set(ownedRows.flatMap((rows) => rows.map((r) => r.id)))
+				const owned = new Set(ownedRows.map((row) => row.id))
 				const unknown = referencedIds.filter((id) => !owned.has(id))
 				if (unknown.length > 0) {
 					return yield* Effect.fail(
@@ -2982,61 +2932,29 @@ const make: Effect.Effect<
 			)
 			if (toDelete.length > 0) {
 				const ids = toDelete.map((r) => r.id)
-				const idChunks = Arr.chunksOf(ids, D1_INARRAY_CHUNK_SIZE)
-				yield* Effect.forEach(
-					idChunks,
-					(chunk) =>
-						dbExecute((db) =>
-							db
-								.delete(errorIncidents)
-								.where(
-									and(
-										eq(errorIncidents.orgId, orgId),
-										inArray(errorIncidents.issueId, chunk),
-									),
-								),
-						),
-					{ discard: true },
+				yield* dbExecute((db) =>
+					db
+						.delete(errorIncidents)
+						.where(and(eq(errorIncidents.orgId, orgId), inArray(errorIncidents.issueId, ids))),
 				)
-				yield* Effect.forEach(
-					idChunks,
-					(chunk) =>
-						dbExecute((db) =>
-							db
-								.delete(errorIssueStates)
-								.where(
-									and(
-										eq(errorIssueStates.orgId, orgId),
-										inArray(errorIssueStates.issueId, chunk),
-									),
-								),
+				yield* dbExecute((db) =>
+					db
+						.delete(errorIssueStates)
+						.where(
+							and(eq(errorIssueStates.orgId, orgId), inArray(errorIssueStates.issueId, ids)),
 						),
-					{ discard: true },
 				)
-				yield* Effect.forEach(
-					idChunks,
-					(chunk) =>
-						dbExecute((db) =>
-							db
-								.delete(errorIssueEvents)
-								.where(
-									and(
-										eq(errorIssueEvents.orgId, orgId),
-										inArray(errorIssueEvents.issueId, chunk),
-									),
-								),
+				yield* dbExecute((db) =>
+					db
+						.delete(errorIssueEvents)
+						.where(
+							and(eq(errorIssueEvents.orgId, orgId), inArray(errorIssueEvents.issueId, ids)),
 						),
-					{ discard: true },
 				)
-				yield* Effect.forEach(
-					idChunks,
-					(chunk) =>
-						dbExecute((db) =>
-							db
-								.delete(errorIssues)
-								.where(and(eq(errorIssues.orgId, orgId), inArray(errorIssues.id, chunk))),
-						),
-					{ discard: true },
+				yield* dbExecute((db) =>
+					db
+						.delete(errorIssues)
+						.where(and(eq(errorIssues.orgId, orgId), inArray(errorIssues.id, ids))),
 				)
 				issuesDeleted = ids.length
 			}

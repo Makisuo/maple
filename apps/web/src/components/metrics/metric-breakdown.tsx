@@ -15,7 +15,7 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { formatBackendError } from "@/lib/error-messages"
-import type { MetricsQueryDraft } from "@/lib/query-builder/model"
+import type { MetricsQueryDraft } from "@maple/query-engine/query-builder"
 
 const SERVICE_KEY = "service.name"
 const BREAKDOWN_LIMIT = 10

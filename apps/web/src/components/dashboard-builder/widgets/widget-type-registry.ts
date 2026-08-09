@@ -14,7 +14,7 @@ import type {
 	QueryBuilderWidgetState,
 } from "@/lib/query-builder/widget-builder-shared"
 import type { WidgetDataSource } from "@/components/dashboard-builder/types"
-import type { QueryBuilderQueryDraft } from "@/lib/query-builder/model"
+import type { QueryBuilderQueryDraft } from "@maple/query-engine/query-builder"
 
 // ---------------------------------------------------------------------------
 // The widget-type framework.

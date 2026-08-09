@@ -47,7 +47,7 @@ import {
 	type QueryBuilderDataSource,
 	type QueryBuilderMetricType,
 	type QueryBuilderQueryDraft,
-} from "@/lib/query-builder/model"
+} from "@maple/query-engine/query-builder"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { AutocompleteValuesProvider, useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
 

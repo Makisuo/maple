@@ -600,7 +600,7 @@ export const isRetryableUpstream = (
  * This closes the "stuck not ready" gap: the ingest gateway only routes an org's
  * frames to its own ClickHouse when `schema_version` equals the running version,
  * but a credential re-save preserves the old value and the standalone CLI never
- * writes D1 — so a CLI-applied (or revision-bumped) org whose cluster is actually
+ * writes Maple's application database — so a CLI-applied (or revision-bumped) org whose cluster is actually
  * current would otherwise stay on the managed Tinybird write path forever, with no
  * way to re-stamp because Apply is disabled when there's no diff. The non-empty
  * guard avoids healing off a degenerate empty diff (e.g. a failed schema fetch),
@@ -1091,7 +1091,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			// Self-heal the recorded schema version. The ingest gateway only routes an
 			// org's frames directly to its ClickHouse when the stored `schema_version`
 			// equals the running `clickHouseSchemaVersion`. But a credential re-save
-			// *preserves* the old value and the standalone CLI never writes D1, so an org
+			// *preserves* the old value and the standalone CLI never writes Maple's database, so an org
 			// whose CH is already in sync can be stuck "not ready" forever — with no way to
 			// re-stamp, because the Apply action is disabled when there is no diff. When the
 			// live schema matches what we expect, record the current schema version so the

@@ -70,7 +70,7 @@ async function main(argv: ReadonlyArray<string>): Promise<number> {
 				`schema version:     ${clickHouseSchemaVersion}\n` +
 				`project revision:   ${clickHouseProjectRevision}\n` +
 				`\nNote: this CLI applies the ClickHouse schema but does NOT mark the org\n` +
-				`ready in Maple (it never writes Maple's D1). After applying, open\n` +
+				`ready in Maple (it never writes Maple's application database). After applying, open\n` +
 				`Settings → BYO Backend → ClickHouse (or call the schemaDiff endpoint) so\n` +
 				`Maple records schema version ${clickHouseSchemaVersion} and the ingest gateway routes here.\n`,
 		)

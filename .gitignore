@@ -53,7 +53,7 @@ playwright/.cache/
 /apps/ingest/target
 /apps/ingest/.wal
 
-# local-only Drizzle Studio config pointing at miniflare D1
+# local-only Drizzle Studio configuration
 drizzle.config.local.ts
 .18bd7*.bun-build
 .[0-9a-f]*.bun-build

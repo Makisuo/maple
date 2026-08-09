@@ -9,7 +9,7 @@ import {
 	type TimeseriesPoint,
 } from "@/components/query-builder/formula-results"
 import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
-import { buildTimeseriesQuerySpec } from "@/lib/query-builder/model"
+import { buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 import {
 	decodeInput,
 	executeQueryEngine,

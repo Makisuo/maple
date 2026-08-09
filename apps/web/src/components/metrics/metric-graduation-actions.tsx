@@ -16,7 +16,7 @@ import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { encodeAlertChartToSearchParam } from "@/lib/alerts/widget-chart-param"
 import type { WidgetDataSource } from "@/components/dashboard-builder/types"
-import type { MetricsQueryDraft } from "@/lib/query-builder/model"
+import type { MetricsQueryDraft } from "@maple/query-engine/query-builder"
 
 function buildWidgetDataSource(draft: MetricsQueryDraft): WidgetDataSource {
 	return {

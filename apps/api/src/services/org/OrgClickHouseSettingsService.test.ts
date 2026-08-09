@@ -104,7 +104,7 @@ describe("shouldHealSchemaVersion", () => {
 	const inSync: ReadonlyArray<TableDiffEntry> = [upToDate("traces"), upToDate("logs")]
 
 	it("heals when the live schema is in sync but the stored revision is stale", () => {
-		// The exact production case: CH applied via the standalone CLI (so D1 was never
+		// The exact production case: CH applied via the standalone CLI (so Maple's database was never
 		// stamped) or a revision bump left it behind, yet every table is up_to_date.
 		expect(shouldHealSchemaVersion(inSync, STALE, REV)).toBe(true)
 		expect(shouldHealSchemaVersion(inSync, null, REV)).toBe(true)

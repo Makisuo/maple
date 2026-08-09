@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
-import type { QueryBuilderDataSource } from "@/lib/query-builder/model"
+import type { QueryBuilderDataSource } from "@maple/query-engine/query-builder"
 
 function Harness({ dataSource, initialValue }: { dataSource: QueryBuilderDataSource; initialValue: string }) {
 	const [value, setValue] = React.useState(initialValue)

@@ -9,7 +9,7 @@ import {
 	ChartLineIcon,
 	type IconComponent,
 } from "@/components/icons"
-import { createQueryDraft, type QueryBuilderQueryDraft } from "@/lib/query-builder/model"
+import { createQueryDraft, type QueryBuilderQueryDraft } from "@maple/query-engine/query-builder"
 import type {
 	VisualizationType,
 	WidgetDataSource,

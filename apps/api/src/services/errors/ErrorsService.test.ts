@@ -32,10 +32,11 @@ import type { CompiledQuery } from "@maple/query-engine/ch"
 import { EdgeCacheService, makeEdgeCacheService, makeMemoryBackend } from "@maple/cache"
 import { Database, DatabaseError } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
+import { isRetryablePostgresContention } from "@/platform/postgres-errors"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import type { SqlQueryOptions, WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
-import { describeCause, ErrorsService, isBusyDatabaseError, makePersistenceError } from "./ErrorsService"
+import { describeCause, ErrorsService, makePersistenceError } from "./ErrorsService"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 
@@ -80,44 +81,33 @@ describe("describeCause", () => {
 	})
 })
 
-describe("isBusyDatabaseError", () => {
+describe("isRetryablePostgresContention", () => {
 	const makeError = (message: string, cause: unknown = null) => new DatabaseError({ message, cause })
-
-	it("matches SQLITE_BUSY in message", () => {
-		expect(isBusyDatabaseError(makeError("SQLITE_BUSY: database is locked"))).toBe(true)
-	})
-
-	it("matches D1_BUSY in message", () => {
-		expect(isBusyDatabaseError(makeError("D1_BUSY: write conflict"))).toBe(true)
-	})
-
-	it("matches busy pattern in nested cause", () => {
-		const cause = new Error("internal SQLITE_BUSY trying to commit")
-		expect(isBusyDatabaseError(makeError("wrapper", cause))).toBe(true)
-	})
 
 	it("matches Postgres serialization_failure (SQLSTATE 40001) via the cause code", () => {
 		const cause = Object.assign(new Error("could not serialize access due to concurrent update"), {
 			code: "40001",
 		})
-		expect(isBusyDatabaseError(makeError("query failed", cause))).toBe(true)
+		expect(isRetryablePostgresContention(makeError("query failed", cause))).toBe(true)
 	})
 
 	it("matches Postgres deadlock_detected (SQLSTATE 40P01) via the cause code", () => {
 		const cause = Object.assign(new Error("deadlock detected"), { code: "40P01" })
-		expect(isBusyDatabaseError(makeError("query failed", cause))).toBe(true)
+		expect(isRetryablePostgresContention(makeError("query failed", cause))).toBe(true)
 	})
 
-	it("matches PG contention codes appearing in the message", () => {
-		expect(isBusyDatabaseError(makeError("SQLSTATE 40001: could not serialize access"))).toBe(true)
-		expect(isBusyDatabaseError(makeError("SQLSTATE 40P01: deadlock detected"))).toBe(true)
+	it("matches Postgres contention codes appearing in either message", () => {
+		expect(isRetryablePostgresContention(makeError("SQLSTATE 40001: could not serialize access"))).toBe(
+			true,
+		)
+		expect(isRetryablePostgresContention(makeError("wrapper", "SQLSTATE 40P01: deadlock"))).toBe(true)
 	})
 
 	it("rejects unrelated database errors", () => {
-		expect(isBusyDatabaseError(makeError("UNIQUE constraint failed"))).toBe(false)
-		expect(isBusyDatabaseError(makeError("no such table"))).toBe(false)
+		expect(isRetryablePostgresContention(makeError("UNIQUE constraint failed"))).toBe(false)
+		expect(isRetryablePostgresContention(makeError("no such table"))).toBe(false)
 		const uniqueViolation = Object.assign(new Error("duplicate key value"), { code: "23505" })
-		expect(isBusyDatabaseError(makeError("query failed", uniqueViolation))).toBe(false)
+		expect(isRetryablePostgresContention(makeError("query failed", uniqueViolation))).toBe(false)
 	})
 })
 

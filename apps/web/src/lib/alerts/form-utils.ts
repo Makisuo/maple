@@ -37,7 +37,7 @@ import {
 	buildTimeseriesQuerySpec,
 	createQueryDraft,
 	type QueryBuilderQueryDraft,
-} from "@/lib/query-builder/model"
+} from "@maple/query-engine/query-builder"
 import { formatErrorRate, formatLatency, formatNumber } from "@maple/ui/lib/format"
 
 const asHazelOrganizationId = Schema.decodeUnknownSync(HazelOrganizationId)

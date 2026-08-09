@@ -1,118 +1,81 @@
 # Persistence Operations
 
-Maple stores dashboard persistence data in SQLite/libSQL and uses Drizzle migrations.
+Maple stores relational application state in PostgreSQL with a schema defined by Drizzle in
+`packages/db/src/schema/`.
 
-## Modes
+## Runtime modes
 
-- Local default: `MAPLE_DB_URL` unset, DB file at `apps/api/.data/maple.db`
-- Turso/libSQL remote: set `MAPLE_DB_URL` and `MAPLE_DB_AUTH_TOKEN`
+- **Production and staging:** one PlanetScale Postgres branch per stage. Cloudflare Workers
+  connect through the `MAPLE_DB` Hyperdrive binding; the application never opens the direct
+  administrative connection.
+- **Wrangler development:** Docker Postgres on port 5499 through Hyperdrive's
+  `localConnectionString`.
+- **Non-Worker local entrypoints and tests:** embedded PGlite. `MAPLE_DB_URL` is a PGlite data
+  directory, or `memory://` for an ephemeral database. It is not a remote database URL.
+- **PR previews:** no application database while preview deploys are disabled. Routes that
+  need `Database` fail normally; DB-free routes such as health checks continue to work.
 
-## Migration Commands
+Application code keeps timestamps as epoch-millisecond numbers and converts at the Drizzle
+boundary (`new Date(ms)` on write, `.getTime()` on read).
 
-Run from repo root:
+## Local development
 
-```bash
-bun run db:migrate
-```
-
-Generate new migration from schema changes:
-
-```bash
-bun run db:generate
-```
-
-Apply schema directly without migration files (development utility):
-
-```bash
-bun run db:push
-```
-
-Open Drizzle Studio:
+Start and migrate the Docker Postgres used by Wrangler:
 
 ```bash
-bun run db:studio
+bun db:up
+bun db:migrate:local
 ```
 
-## API Runtime Behavior
+Persistent PGlite is created automatically for non-Worker local entrypoints under
+`apps/api/.data/pglite`. Set `MAPLE_DB_URL=memory://` when persistence is not wanted.
 
-`@maple/api` applies migrations on startup from its database layer (`runMigrations()` in
-`packages/db/src/migrate.ts` for the libSQL path; data migrations re-run on each Cloudflare
-D1 worker boot from `apps/api/src/services/DatabaseD1Live.ts`). There is no separate
-`db:migrate` step before `dev`/`start`.
+## Authoring migrations
 
-## Two Migration Runners (read before authoring a migration)
+Change the Drizzle schema, then generate the SQL and metadata together:
 
-DDL migrations in `packages/db/drizzle/` are applied by **two different runners that decide
-what to run differently** — they must be kept in agreement:
+```bash
+bun run --cwd packages/db db:generate
+```
 
-- **libSQL** (local dev, Turso, self-host) — `drizzle-orm/libsql/migrator` reads
-  `meta/_journal.json`, runs each entry whose `when` timestamp is greater than the newest
-  `created_at` already in `__drizzle_migrations`. **A `.sql` file that is not in the journal
-  is never applied here.**
-- **Cloudflare D1** (prod/staging) — alchemy's `migrationsDir` enumerates `**/*.sql` by
-  **directory listing** (sorted by numeric prefix), tracks applied files by **filename** in
-  `drizzle_migrations`, and ignores `_journal.json` entirely. It is **not** idempotent — a
-  duplicate `CREATE TABLE` will fail.
+Review the generated file in `packages/db/drizzle/` and its matching journal/snapshot changes.
+Do not hand-create a migration without also updating `drizzle/meta/_journal.json`; both deployed
+Postgres and PGlite use Drizzle's journal ordering.
 
-Consequence: a `.sql` file present on disk but missing from `_journal.json` ships to D1/prod
-but silently never reaches libSQL/self-host. This exact drift happened with
-`0011_org_ingest_sampling_policies.sql`.
+Useful local commands:
 
-**To author a DDL migration:** add the `.sql` file under `packages/db/drizzle/` (drizzle
-backtick DDL style) **and** append a `meta/_journal.json` entry whose `idx` is sequential and
-whose `tag` matches the filename. Keep `idx`, the tag number, and the filename aligned. Then
-update the head snapshot (below) so `db:generate` stays clean.
+```bash
+bun run --cwd packages/db db:migrate
+bun run --cwd packages/db db:push
+bun run --cwd packages/db db:studio
+```
 
-## Snapshot State (`meta/*_snapshot.json`)
+`db:push` is a development utility only. Committed environments use migrations.
 
-Snapshots feed `drizzle-kit generate` **only** (they have zero runtime effect; neither runner
-reads them). The head snapshot — `meta/{lastIdx}_snapshot.json` — must equal the live
-`schema/`, otherwise `generate` emits a bogus catch-up migration. The chain was re-baselined
-at `0014_snapshot.json` (== `schema/`); intermediate `0011–0013` snapshots are intentionally
-absent (`generate` only diffs against the head). After any schema change, run `db:generate`
-and confirm it reports "No schema changes" before/after as expected.
+## Deployment and tests
 
-> Caveat: some historical schema state was reached via boot-time data-migration DDL (the
-> `alert_rules` reshape in `0013-alert-query-signal-types`), which `drizzle-kit` cannot see.
-> The head snapshot, not the `.sql` history, is the source of truth for `generate`.
+CI runs `drizzle-kit migrate` against the stage's PlanetScale **direct** port 5432 before the
+Alchemy deployment. Never run migrations through a pooler or Hyperdrive. The deployed Worker
+does not migrate on boot.
 
-## Data Migrations (JSON-column rewrites)
-
-**Schema changes — including plain column adds/drops — are DDL and belong in a Drizzle
-migration `.sql` file under `packages/db/drizzle/` plus a matching `_journal.json` entry.**
-They are applied by `migrate()` on the libSQL path and by D1's `migrationsDir` on deploy.
-Do **not** express a DDL change as a boot-time data-migration script — that splits the work
-across two runners (`runMigrations()` and `DatabaseD1Live.ts`) that have to be kept in sync
-by hand, which has caused a column to ship to one path but not the other.
-
-The data-migration path below is reserved strictly for transforms a DDL migration _cannot_
-express — e.g. structurally rewriting a stored JSON blob (`dashboards.payloadJson`,
-`dashboardVersions.snapshotJson`). Those run as TypeScript scripts in
-`packages/db/src/migrations/`.
-
-- Each script is **idempotent** and guarded by the `_maple_data_migrations` bookkeeping
-  table (`id`, `applied_at`) — it short-circuits if its id is already recorded.
-- The libSQL path runs them inside `runMigrations()` (`packages/db/src/migrate.ts`), after
-  the DDL `migrate()`.
-- The Cloudflare D1 worker never calls `runMigrations()`, so each data migration is also
-  invoked once on worker boot from `DatabaseD1Live.ts`; the guard table makes every later
-  boot a single `SELECT`. **Anything added here must be added to both runners.**
-
-See `packages/db/src/migrations/0012-dashboard-widget-reshape.ts` for the reference shape.
-
-## Self-Host Note
-
-For file-based mode, mount/persist `apps/api/.data` in your runtime environment.
+PGlite applies the same bundled migrations while its layer is built. The test harness caches a
+fresh migrated PGlite snapshot and restores it per test, so integration tests exercise the
+PostgreSQL schema without a shared server.
 
 ## Tinybird Materialized Views and TTL Coupling
 
-Materialized view TTLs in `packages/domain/src/tinybird/materializations.ts` and their target datasources in `packages/domain/src/tinybird/datasources.ts` must match the source table TTL. Today all sources (`traces`, `logs`) and their MV targets are 90 days.
+Raw `traces` and `logs` are retained for 30 days. Projection targets that preserve one row per
+span or log use the same 30-day ceiling; aggregate targets intentionally retain rollups for 90 or
+365 days. The TTL belongs to the target datasource in
+`packages/domain/src/tinybird/datasources.ts`, not to the materialized-view definition.
 
 Two operational consequences:
 
 1. **Backfill ceiling.** When deploying a new MV with `POPULATE`, you can only backfill data the source table still has — anything aged past the source TTL is lost. Plan deploys before any TTL reduction.
 
-2. **TTL changes ship in lockstep.** If raw-table TTL changes (e.g., dropping `traces` to 30 days for cost), every MV target reading from it needs the same change in the same Tinybird deploy. A mismatched TTL leaves orphaned aggregate rows that never roll off.
+2. **TTL changes require a target audit.** Keep row-level projections in lockstep with their raw
+   source. Preserve the independently documented retention of hourly and error rollups unless the
+   product retention policy changes too.
 
 ### Cardinality pre-flight for `traces_aggregates_hourly_mv`
 

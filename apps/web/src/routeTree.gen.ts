@@ -54,7 +54,6 @@ import { Route as MetricsMetricNameRouteImport } from './routes/metrics/$metricN
 import { Route as RecommendationsRecommendationKeyRouteImport } from './routes/recommendations/$recommendationKey'
 import { Route as ReplaysIndexRouteImport } from './routes/replays/index'
 import { Route as ReplaysSessionIdRouteImport } from './routes/replays/$sessionId'
-import { Route as ReplaysPreviewRouteImport } from './routes/replays/preview'
 import { Route as ServicesIndexRouteImport } from './routes/services/index'
 import { Route as ServicesServiceNameRouteImport } from './routes/services/$serviceName'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
@@ -300,11 +299,6 @@ const ReplaysSessionIdRoute = ReplaysSessionIdRouteImport.update({
   path: '/replays/$sessionId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReplaysPreviewRoute = ReplaysPreviewRouteImport.update({
-  id: '/replays/preview',
-  path: '/replays/preview',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ServicesIndexRoute = ServicesIndexRouteImport.update({
   id: '/services/',
   path: '/services/',
@@ -441,7 +435,6 @@ export interface FileRoutesByFullPath {
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
   '/replays/$sessionId': typeof ReplaysSessionIdRoute
-  '/replays/preview': typeof ReplaysPreviewRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts/': typeof AlertsIndexRoute
@@ -507,7 +500,6 @@ export interface FileRoutesByTo {
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
   '/replays/$sessionId': typeof ReplaysSessionIdRoute
-  '/replays/preview': typeof ReplaysPreviewRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts': typeof AlertsIndexRoute
@@ -574,7 +566,6 @@ export interface FileRoutesById {
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
   '/replays/$sessionId': typeof ReplaysSessionIdRoute
-  '/replays/preview': typeof ReplaysPreviewRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts/': typeof AlertsIndexRoute
@@ -642,7 +633,6 @@ export interface FileRouteTypes {
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
     | '/replays/$sessionId'
-    | '/replays/preview'
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts/'
@@ -708,7 +698,6 @@ export interface FileRouteTypes {
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
     | '/replays/$sessionId'
-    | '/replays/preview'
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts'
@@ -774,7 +763,6 @@ export interface FileRouteTypes {
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
     | '/replays/$sessionId'
-    | '/replays/preview'
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts/'
@@ -841,7 +829,6 @@ export interface RootRouteChildren {
   MetricsMetricNameRoute: typeof MetricsMetricNameRoute
   RecommendationsRecommendationKeyRoute: typeof RecommendationsRecommendationKeyRoute
   ReplaysSessionIdRoute: typeof ReplaysSessionIdRoute
-  ReplaysPreviewRoute: typeof ReplaysPreviewRoute
   ServicesServiceNameRoute: typeof ServicesServiceNameRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
   AlertsIndexRoute: typeof AlertsIndexRoute
@@ -1188,13 +1175,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReplaysSessionIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/replays/preview': {
-      id: '/replays/preview'
-      path: '/replays/preview'
-      fullPath: '/replays/preview'
-      preLoaderRoute: typeof ReplaysPreviewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/services/': {
       id: '/services/'
       path: '/services'
@@ -1361,7 +1341,6 @@ const rootRouteChildren: RootRouteChildren = {
   MetricsMetricNameRoute: MetricsMetricNameRoute,
   RecommendationsRecommendationKeyRoute: RecommendationsRecommendationKeyRoute,
   ReplaysSessionIdRoute: ReplaysSessionIdRoute,
-  ReplaysPreviewRoute: ReplaysPreviewRoute,
   ServicesServiceNameRoute: ServicesServiceNameRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
   AlertsIndexRoute: AlertsIndexRoute,
