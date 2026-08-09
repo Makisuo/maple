@@ -1,0 +1,14 @@
+# The build context is `apps/ingest` itself (see the Dockerfile's `COPY . .`),
+# so anything not excluded here is both uploaded to the daemon AND folded into
+# the context hash alchemy uses to decide whether to rebuild. A local `cargo
+# build` leaves ~27 GB in target/, which would make every deploy from a dev
+# machine ship that directory and re-hash on every touch. CI never has it,
+# which is exactly why the problem hides until someone deploys locally.
+target/
+node_modules/
+
+# Not inputs to `cargo build --release`.
+alchemy.run.ts
+package.json
+railway.json
+LOAD_TESTS.md
