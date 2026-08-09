@@ -17,7 +17,7 @@
 //   - everything else gets plain text substitution.
 // ---------------------------------------------------------------------------
 
-import { escapeClickHouseString } from "../sql"
+import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 import { splitWhereClause } from "@maple/domain/where-clause"
 
 /** Sentinel for the "All" selection, both in URLs and resolved values. */

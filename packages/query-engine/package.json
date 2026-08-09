@@ -8,7 +8,6 @@
 		"./formula-results": "./src/formula-results.ts",
 		"./traces-shared": "./src/traces-shared.ts",
 		"./query-builder": "./src/query-builder/model.ts",
-		"./sql": "./src/sql/index.ts",
 		"./ch": "./src/ch/index.ts",
 		"./profiles": "./src/profiles/index.ts",
 		"./caching": "./src/caching/index.ts",

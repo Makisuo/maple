@@ -7,7 +7,7 @@ import { useDashboardVariablesOptional } from "@/components/dashboard-builder/da
 import { useWidgetTimeRangeOverride } from "@/components/dashboard-builder/widgets/widget-time-range-context"
 import { resolveTimeRange } from "@/atoms/dashboard-time-range-atoms"
 import { getServerFunction } from "@/components/dashboard-builder/data-source-registry"
-import { hasUnresolvedVariableRefs, interpolateWidgetParams } from "@/lib/dashboard-variables/interpolate"
+import { hasUnresolvedVariableRefs, interpolateWidgetParams } from "@maple/query-engine"
 import type { DashboardWidget, TimeRange, WidgetDataSource } from "@/components/dashboard-builder/types"
 
 /**

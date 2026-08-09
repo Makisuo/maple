@@ -1,5 +1,5 @@
 import { createHash, createHmac } from "node:crypto"
-import { escapeClickHouseString } from "@maple/query-engine/sql"
+import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 
 // ---------------------------------------------------------------------------
 // Tinybird per-org read JWT minting.

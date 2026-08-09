@@ -1,5 +1,5 @@
 /**
- * Drives the LiveWaterfall animation with Motion v12. Cycle structure:
+ * Drives the live trace waterfall animation with Motion v12. Cycle structure:
  *
  *   PLAY  (totalMs * speed)    — bars grow in sequence at 1/speed wall-speed.
  *   PAUSE (1400ms)             — all bars full; slowest-span annotation reveals.
