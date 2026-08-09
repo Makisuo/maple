@@ -18,6 +18,7 @@
 		"ch:up": "docker compose -f docker-compose.development.yml up -d clickhouse",
 		"ch:down": "docker compose -f docker-compose.development.yml stop clickhouse",
 		"ch:test": "CLICKHOUSE_E2E=1 CLICKHOUSE_E2E_URL=http://127.0.0.1:8123 bun run --filter=@maple/api test -- src/services/warehouse/sql-catalog.clickhouse.e2e.test.ts src/services/warehouse/WarehouseQueryService.clickhouse.e2e.test.ts",
+		"warehouse:reset": "bun run ./scripts/reset-local-warehouse.ts",
 		"db:migrate:local": "DATABASE_URL=postgres://maple:maple@localhost:5499/maple bun run --cwd packages/db db:migrate",
 		"migrate:prod": "bun run --cwd packages/db ps:apply-schema main",
 		"dev:alerting": "bun --filter=@maple/alerting dev",
