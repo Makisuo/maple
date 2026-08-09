@@ -21,6 +21,7 @@ import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LogsBenchRouteImport } from './routes/logs-bench'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as McpAuthorizeRouteImport } from './routes/mcp-authorize'
+import { Route as NodeLabRouteImport } from './routes/node-lab'
 import { Route as OrgRequiredRouteImport } from './routes/org-required'
 import { Route as OverviewBenchRouteImport } from './routes/overview-bench'
 import { Route as QueryBuilderLabRouteImport } from './routes/query-builder-lab'
@@ -131,6 +132,11 @@ const McpRoute = McpRouteImport.update({
 const McpAuthorizeRoute = McpAuthorizeRouteImport.update({
   id: '/mcp-authorize',
   path: '/mcp-authorize',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NodeLabRoute = NodeLabRouteImport.update({
+  id: '/node-lab',
+  path: '/node-lab',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrgRequiredRoute = OrgRequiredRouteImport.update({
@@ -411,6 +417,7 @@ export interface FileRoutesByFullPath {
   '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
   '/mcp-authorize': typeof McpAuthorizeRoute
+  '/node-lab': typeof NodeLabRoute
   '/org-required': typeof OrgRequiredRoute
   '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -476,6 +483,7 @@ export interface FileRoutesByTo {
   '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
   '/mcp-authorize': typeof McpAuthorizeRoute
+  '/node-lab': typeof NodeLabRoute
   '/org-required': typeof OrgRequiredRoute
   '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -542,6 +550,7 @@ export interface FileRoutesById {
   '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
   '/mcp-authorize': typeof McpAuthorizeRoute
+  '/node-lab': typeof NodeLabRoute
   '/org-required': typeof OrgRequiredRoute
   '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -609,6 +618,7 @@ export interface FileRouteTypes {
     | '/logs-bench'
     | '/mcp'
     | '/mcp-authorize'
+    | '/node-lab'
     | '/org-required'
     | '/overview-bench'
     | '/query-builder-lab'
@@ -674,6 +684,7 @@ export interface FileRouteTypes {
     | '/logs-bench'
     | '/mcp'
     | '/mcp-authorize'
+    | '/node-lab'
     | '/org-required'
     | '/overview-bench'
     | '/query-builder-lab'
@@ -739,6 +750,7 @@ export interface FileRouteTypes {
     | '/logs-bench'
     | '/mcp'
     | '/mcp-authorize'
+    | '/node-lab'
     | '/org-required'
     | '/overview-bench'
     | '/query-builder-lab'
@@ -805,6 +817,7 @@ export interface RootRouteChildren {
   LogsBenchRoute: typeof LogsBenchRoute
   McpRoute: typeof McpRoute
   McpAuthorizeRoute: typeof McpAuthorizeRoute
+  NodeLabRoute: typeof NodeLabRoute
   OrgRequiredRoute: typeof OrgRequiredRoute
   OverviewBenchRoute: typeof OverviewBenchRoute
   QueryBuilderLabRoute: typeof QueryBuilderLabRoute
@@ -942,6 +955,13 @@ declare module '@tanstack/react-router' {
       path: '/mcp-authorize'
       fullPath: '/mcp-authorize'
       preLoaderRoute: typeof McpAuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/node-lab': {
+      id: '/node-lab'
+      path: '/node-lab'
+      fullPath: '/node-lab'
+      preLoaderRoute: typeof NodeLabRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/org-required': {
@@ -1317,6 +1337,7 @@ const rootRouteChildren: RootRouteChildren = {
   LogsBenchRoute: LogsBenchRoute,
   McpRoute: McpRoute,
   McpAuthorizeRoute: McpAuthorizeRoute,
+  NodeLabRoute: NodeLabRoute,
   OrgRequiredRoute: OrgRequiredRoute,
   OverviewBenchRoute: OverviewBenchRoute,
   QueryBuilderLabRoute: QueryBuilderLabRoute,

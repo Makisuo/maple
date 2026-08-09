@@ -112,25 +112,27 @@
 	animation: provenance-strand-roadmap 1.05s linear infinite;
 }
 
-/* A running lens lane. The sweep is a third-width bar crossing the node's bottom
-   edge, which stays readable at the 0.68 zoom where the 11px spinner does not;
-   the ring is the amber node's "this is happening now", borrowing severity-pulse
-   so the two live signals on the canvas share one motion. */
-@keyframes provenance-lens-sweep {
+/* The one "this is still running" signal every live node on the canvas wears: an
+   indeterminate progress bar on a visible track.
+
+   It replaced two separate effects that both read as rendering faults rather than
+   as progress — a 1px full-bleed sweep along the card's bottom border, which looked
+   like a stray hairline, and an expanding ring around the icon tile, which looked
+   like a focus state misfiring. Neither said "loading" because neither had a
+   track: a lone travelling mark is ambiguous, and the same mark inside a channel
+   is unmistakable. One bar, one motion, on the spine node, the lens lanes and the
+   pending verdict alike. */
+@keyframes provenance-progress {
 	from {
 		transform: translateX(-100%);
 	}
 	to {
-		transform: translateX(300%);
+		transform: translateX(250%);
 	}
 }
 
-.provenance-lens-sweep {
-	animation: provenance-lens-sweep 1.4s ease-in-out infinite;
-}
-
-.provenance-live-ring {
-	animation: severity-pulse 1.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+.provenance-progress-fill {
+	animation: provenance-progress 1.5s cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
 
 /* The ghost canvas (provenance-loading.tsx). Cards assemble left to right, the
@@ -184,9 +186,14 @@
 @media (prefers-reduced-motion: reduce) {
 	.provenance-strand,
 	.provenance-strand-roadmap,
-	.provenance-lens-sweep,
-	.provenance-live-ring,
 	.provenance-load-bar {
+		animation: none;
+	}
+
+	/* The bar stops travelling but keeps its track and its segment, so a running
+	   node still reads as running — a partly-filled channel is a progress bar
+	   whether or not it moves. */
+	.provenance-progress-fill {
 		animation: none;
 	}
 
@@ -197,10 +204,6 @@
 	.provenance-load-strand {
 		animation-duration: 1ms;
 		animation-delay: 0s;
-	}
-
-	.provenance-live-ring {
-		display: none;
 	}
 }
 

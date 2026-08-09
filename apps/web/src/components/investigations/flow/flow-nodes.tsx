@@ -18,18 +18,20 @@ import {
 	BoltIcon,
 	ChartBarIcon,
 	CircleCheckIcon,
+	CircleQuestionIcon,
 	CircleXmarkIcon,
 	ClockIcon,
 	CodeIcon,
+	DotsIcon,
 	EyeIcon,
 	type IconComponent,
-	LoaderIcon,
 	MagnifierIcon,
 	NetworkNodesIcon,
 	RadioCheckedIcon,
 	RocketIcon,
 	ServerIcon,
 	SlidersIcon,
+	SpinnerIcon,
 	SquareTerminalIcon,
 } from "@/components/icons"
 import type { LensTone } from "../lens-derive"
@@ -73,9 +75,24 @@ const GLYPH: Record<FlowGlyph, IconComponent> = {
 	verdict: CircleCheckIcon,
 }
 
+/**
+ * One glyph per lane state, and only the running one is a loader.
+ *
+ * A queued lane and a reported lane both used to draw a stopped spinner, which
+ * said "this component is broken" rather than "this lane is waiting". They now
+ * split by what the lane is actually waiting on:
+ *
+ * - `queued` — nothing has happened. Bare dots, deliberately outside the circle
+ *   family below: this lane has not entered the decision at all, which is the
+ *   same thing its dashed border is saying.
+ * - `reported` — the lane did its work and the answer is undecided. A question
+ *   mark completes the circle vocabulary the settled states already speak in,
+ *   sitting exactly between the tick and the cross.
+ */
 const LENS_GLYPH: Record<LensNodeData["state"]["icon"], IconComponent> = {
-	pending: LoaderIcon,
-	running: LoaderIcon,
+	queued: DotsIcon,
+	running: SpinnerIcon,
+	reported: CircleQuestionIcon,
 	confirmed: EyeIcon,
 	ruledOut: CircleXmarkIcon,
 	deadline: ClockIcon,
@@ -86,6 +103,31 @@ const LENS_GLYPH: Record<LensNodeData["state"]["icon"], IconComponent> = {
 const EYEBROW = "text-[10px] font-medium uppercase tracking-[0.12em]"
 /** Both handles are hidden — this graph is read-only, nothing connects to anything. */
 const HANDLE = "!size-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+
+/**
+ * The canvas's one live signal: an indeterminate bar in a visible track.
+ *
+ * Every node that is still working wears this and nothing else. The track is the
+ * load-bearing half — a travelling mark on its own reads as a rendering artefact,
+ * and the same mark inside a channel reads as progress — which is why this
+ * replaced both the 1px full-bleed sweep the lens lanes used to draw along their
+ * bottom border and the ring that used to expand out of the spine node's icon
+ * tile. 3px rather than a hairline so it survives the 0.68 zoom a narrow window
+ * forces, and so it is unmistakably a bar rather than a stray rule.
+ */
+function LiveBar({ className }: { className?: string }) {
+	return (
+		<span
+			aria-hidden
+			className={cn(
+				"relative block h-[3px] w-full shrink-0 overflow-hidden rounded-full bg-primary/20",
+				className,
+			)}
+		>
+			<span className="provenance-progress-fill absolute inset-y-0 w-2/5 rounded-full bg-primary" />
+		</span>
+	)
+}
 
 function Ports() {
 	return (
@@ -112,19 +154,6 @@ export const FlowSpineNode = memo(function FlowSpineNode({ data }: NodeProps & {
 						data.lifted && !data.current ? "bg-background" : null,
 					)}
 				>
-					{/*
-					 * The live ring. Depth by tone, never by shadow — this is a ring that
-					 * expands and fades, the same `severity-pulse` the infra board uses,
-					 * not a glow. It sits behind the tile so the glyph stays legible, and
-					 * it is the reason a reader can tell at a glance that the amber node
-					 * is running rather than merely being the one they are looking at.
-					 */}
-					{data.live ? (
-						<span
-							aria-hidden
-							className="provenance-live-ring absolute inset-0 rounded-sm border border-primary"
-						/>
-					) : null}
 					<Icon
 						size={13}
 						className={cn(
@@ -166,6 +195,12 @@ export const FlowSpineNode = memo(function FlowSpineNode({ data }: NodeProps & {
 					{data.phase}
 				</p>
 			) : null}
+			{/*
+			 * Directly under the phase line, so the stage and the fact that it is
+			 * still moving are one block. In the gutter rather than on the border:
+			 * a bar drawn on the card's edge was the thing that read as a hairline.
+			 */}
+			{data.live ? <LiveBar /> : null}
 			{data.status ? (
 				<p className="flex items-baseline gap-1 text-[9px] leading-3">
 					<span className="shrink-0 font-medium tracking-[0.06em] text-severity-error">
@@ -245,14 +280,25 @@ export const FlowLensNode = memo(function FlowLensNode({ data }: NodeProps & { d
 	const { state } = data
 	const Icon = LENS_GLYPH[state.icon]
 	const running = state.icon === "running"
-	/** Queued or running — a lane whose result has not landed, whatever it is doing. */
-	const waiting = running || state.icon === "pending"
+	/**
+	 * The lane's own sentence, on the lane.
+	 *
+	 * Every card used to keep this row for a skeleton bar and put the sentence in a
+	 * `title` tooltip — which meant a settled lane displayed a loading placeholder
+	 * that would never resolve, and the fan read as a column of cards still
+	 * fetching. A running lane says what it is doing, everyone else says what they
+	 * found. The row is the same row either way.
+	 */
+	const line = running ? (data.progressNote ?? data.result) : data.result
 	return (
 		<>
 			<Ports />
 			<div
 				className={cn(
-					"relative flex size-full flex-col justify-center gap-1 overflow-hidden rounded-md border bg-background px-2.5",
+					// `bg-card`, not `bg-background`: the canvas section is `bg-card/40`, so a
+					// background-filled node punched a hole in it and read as a recess rather
+					// than as a card sitting on one.
+					"relative flex size-full flex-col justify-center gap-1 overflow-hidden rounded-md border bg-card px-2.5",
 					TONE_BORDER[state.tone],
 					state.dashed ? "border-dashed" : null,
 				)}
@@ -278,7 +324,11 @@ export const FlowLensNode = memo(function FlowLensNode({ data }: NodeProps & { d
 							// Spec rule 04: a running lane moves, and only a running lane.
 							// It spins rather than pulses — the glyph is a loader, and a
 							// loader that fades in and out reads as a disabled control.
-							running ? "animate-spin motion-reduce:animate-none" : null,
+							// 1.1s, slower than Tailwind's 1s default: at 11px a faster
+							// arc reads as a flicker rather than as a revolution.
+							running
+								? "animate-spin [animation-duration:1.1s] motion-reduce:animate-none"
+								: null,
 						)}
 					/>
 					<span
@@ -293,38 +343,17 @@ export const FlowLensNode = memo(function FlowLensNode({ data }: NodeProps & { d
 						{data.elapsed ?? ""}
 					</span>
 				</p>
-				{/*
-				 * What the lane is doing, on the lane. Reserved to running lanes: a
-				 * settled one's note describes a step it has already left, and the row
-				 * that matters there is the result, which the tooltip carries.
-				 */}
-				{running && data.progressNote ? (
-					<p
-						className="truncate text-[9px] leading-3 text-muted-foreground"
-						title={data.progressNote}
-					>
-						{data.progressNote}
+				{line ? (
+					<p className="truncate text-[9px] leading-3 text-muted-foreground" title={line}>
+						{line}
 					</p>
-				) : waiting ? (
-					/*
-					 * The same row, held open by a bar, for a lane that has not said
-					 * anything yet — a queued one, or a running one between notes. The
-					 * card's height is fixed at 64px either way, so without this the
-					 * third row is simply blank and a queued lane reads as a finished
-					 * lane whose result failed to render.
-					 */
-					<Skeleton className="h-1.5 w-2/3 rounded-full" />
 				) : null}
 				{/*
-				 * An indeterminate sweep along the bottom edge. The 11px spinner stops
-				 * being readable at the 0.68 zoom a narrow window forces; a bar crossing
-				 * the full 146px width does not.
+				 * The lane's own progress bar, in the row the skeleton would otherwise
+				 * hold open. The 11px spinner stops being readable at the 0.68 zoom a
+				 * narrow window forces; a 3px bar across the full 146px does not.
 				 */}
-				{running ? (
-					<span aria-hidden className="absolute inset-x-0 bottom-0 h-px overflow-hidden">
-						<span className="provenance-lens-sweep absolute inset-y-0 w-1/3 bg-primary" />
-					</span>
-				) : null}
+				{running ? <LiveBar className="mt-0.5" /> : null}
 			</div>
 		</>
 	)
@@ -371,10 +400,8 @@ export const FlowPendingVerdictNode = memo(function FlowPendingVerdictNode({
 					<Skeleton className="h-1.5 w-full rounded-full" />
 					<Skeleton className="h-1.5 w-1/2 rounded-full" />
 				</div>
-				{/* The same sweep the running lens lanes wear, so the canvas's live nodes share one motion. */}
-				<span aria-hidden className="absolute inset-x-0 bottom-0 h-px overflow-hidden">
-					<span className="provenance-lens-sweep absolute inset-y-0 w-1/3 bg-primary" />
-				</span>
+				{/* The same bar the spine and the lens lanes wear, so every live node on the canvas shares one signal. */}
+				<LiveBar className="mt-0.5" />
 			</div>
 		</>
 	)
