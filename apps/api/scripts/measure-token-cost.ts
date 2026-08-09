@@ -8,7 +8,7 @@
  */
 import { writeFileSync } from "node:fs"
 import { encode } from "gpt-tokenizer"
-import { mapleToolDefinitions, toInputSchema } from "@/mcp/tools/registry"
+import { mapleToolCatalog, toInputSchema } from "@/mcp/tools/registry"
 
 interface ToolTokens {
 	readonly name: string
@@ -18,7 +18,7 @@ interface ToolTokens {
 }
 
 const measure = (): { total: number; tools: ToolTokens[] } => {
-	const tools = mapleToolDefinitions.map((definition): ToolTokens => {
+	const tools = mapleToolCatalog.map((definition): ToolTokens => {
 		const schema = JSON.stringify(toInputSchema(definition.schema))
 		const nameTokens = encode(definition.name).length
 		const descriptionTokens = encode(definition.description).length
