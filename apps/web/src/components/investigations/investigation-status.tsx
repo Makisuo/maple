@@ -17,6 +17,10 @@ type InvestigationStatus = V2Investigation["status"]
 const STATUS: Record<InvestigationStatus, { label: string; tone: string }> = {
 	investigating: { label: "In progress", tone: "bg-primary/10 text-primary" },
 	diagnosed: { label: "Diagnosed", tone: "bg-success/10 text-success" },
+	// Warn, not destructive. The run worked and reached "not established"; the
+	// destructive tone belongs to `failed`, where the machinery actually broke,
+	// and using it here is what made every honest partial read as a defect.
+	inconclusive: { label: "Inconclusive", tone: "bg-severity-warn/10 text-severity-warn" },
 	resolved: { label: "Resolved", tone: "bg-muted text-muted-foreground" },
 	failed: { label: "Failed", tone: "bg-destructive/10 text-destructive" },
 }

@@ -464,14 +464,29 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 					position: { x: 0, y: 0 },
 					width: SPINE_WIDTH,
 					height: SPINE_HEIGHT_TALL,
-					data: {
-						glyph: "verdict",
-						eyebrow: "VERDICT",
-						title: report.suspectedCause,
-						note: `${report.confidence} confidence`,
-						...(investigation.diagnosed_at ? { at: investigation.diagnosed_at } : {}),
-						lifted: true,
-					},
+					// An inconclusive run reaches this node with a real report, so it
+					// draws a verdict rather than stopping the chain mid-air. What it
+					// must not do is look identical to a promoted cause: the eyebrow
+					// says PARTIAL RESULT, and the note counts what was settled instead
+					// of stating a confidence in a lead nothing confirmed.
+					data:
+						investigation.status === "inconclusive"
+							? {
+									glyph: "verdict",
+									eyebrow: "PARTIAL RESULT",
+									title: report.suspectedCause,
+									note: `${report.ruledOut?.length ?? 0} ruled out · ${report.unchecked?.length ?? 0} unchecked`,
+									...(investigation.updated_at ? { at: investigation.updated_at } : {}),
+									lifted: true,
+								}
+							: {
+									glyph: "verdict",
+									eyebrow: "VERDICT",
+									title: report.suspectedCause,
+									note: `${report.confidence} confidence`,
+									...(investigation.diagnosed_at ? { at: investigation.diagnosed_at } : {}),
+									lifted: true,
+								},
 				},
 			],
 			SPINE_WIDTH,
@@ -672,17 +687,32 @@ const pendingVerdict = (investigation: V2Investigation): PendingVerdictNodeData 
 }
 
 /** The run's outcome, which is the one thing the canvas doesn't say anywhere else. */
+// `Record<string, string>` with a `?? status` fallback downstream, so a missing
+// member prints the raw wire token instead of failing the build. Added by hand
+// for that reason.
 const INVESTIGATION_TITLE: Record<string, string> = {
 	investigating: "In progress",
 	diagnosed: "Diagnosed",
+	inconclusive: "Inconclusive",
 	resolved: "Resolved",
 	failed: "Failed",
 }
 
+/**
+ * Statuses that end a run without a `diagnosed_at`.
+ *
+ * `inconclusive` deliberately has no `diagnosed_at` — the column is what "time
+ * to diagnosis" reads, and a timestamp there claims a diagnosis happened. So
+ * every place that dates the end of a run has to fall back to `updated_at` for
+ * it, exactly as it already did for `failed`.
+ */
+const endsWithoutDiagnosis = (status: string): boolean => status === "failed" || status === "inconclusive"
+
 const elapsedLabel = (investigation: V2Investigation): string | null => {
 	const openedMs = toEpochMs(investigation.created_at)
 	const endedAt =
-		investigation.diagnosed_at ?? (investigation.status === "failed" ? investigation.updated_at : null)
+		investigation.diagnosed_at ??
+		(endsWithoutDiagnosis(investigation.status) ? investigation.updated_at : null)
 	if (!endedAt) return null
 	const endMs = toEpochMs(endedAt)
 	if (!Number.isFinite(openedMs) || !Number.isFinite(endMs) || endMs < openedMs) return null
@@ -695,7 +725,8 @@ const caption = (investigation: V2Investigation): string | null => {
 	const opened = clockTime(investigation.created_at)
 	if (!opened) return null
 	const endedAt =
-		investigation.diagnosed_at ?? (investigation.status === "failed" ? investigation.updated_at : null)
+		investigation.diagnosed_at ??
+		(endsWithoutDiagnosis(investigation.status) ? investigation.updated_at : null)
 	const ended = clockTime(endedAt)
 	const elapsed = elapsedLabel(investigation)
 	if (!ended) return `${opened} → running`

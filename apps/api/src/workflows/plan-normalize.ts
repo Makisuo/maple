@@ -6,12 +6,19 @@
  * each of those decisions is a rule someone will want to argue with. A rule you
  * can read as a table and test without a model is a rule that stays honest.
  *
- * The load-bearing one is rule 3. A hypothesis whose tools do not survive the
- * intersection is *dropped*, not dispatched with an empty allowlist. That is the
- * mechanical form of the lesson `config_flags` taught: a lane asking a question
- * its tools cannot answer does not report "inconclusive", it reports a confident
- * guess, and the validator then has to rank a confabulation against real
- * findings.
+ * The load-bearing one is rule 3. A hypothesis is never dispatched with an empty
+ * allowlist — that is the mechanical form of the lesson `config_flags` taught: a
+ * lane asking a question its tools cannot answer does not report "inconclusive",
+ * it reports a confident guess, and the validator then has to rank a
+ * confabulation against real findings.
+ *
+ * What rule 3 no longer does is *drop* on the first failure. Production showed
+ * the cost: a model that gets its tool vocabulary wrong gets it wrong uniformly,
+ * so "drop the hypothesis" became "discard the whole plan" and roughly seven
+ * runs in ten dispatched three standing category probes at an incident nobody
+ * had read. The rule now repairs — seed tools, then a generic rescue set — and
+ * drops only when no real tool can be found at all. Every repair is a `note`, so
+ * a reader can still see that the planner named nothing that exists.
  */
 import type {
 	InvestigationPlan,
@@ -20,7 +27,7 @@ import type {
 	IssueSeverity,
 } from "@maple/domain/http"
 import { Option } from "effect"
-import { permittedTools, seedHypotheses } from "./hypothesis-catalogue"
+import { permittedTools, RESCUE_TOOL_NAMES, seedHypotheses, seedToolNames } from "./hypothesis-catalogue"
 
 /** A hypothesis as the workflow dispatches it: ids slugged, tools already filtered. */
 export interface PlannedHypothesis {
@@ -44,6 +51,15 @@ export interface NormalizedPlan {
 	readonly collapseReason: string | null
 	/** True when the planner produced nothing usable and the seed catalogue stood in. */
 	readonly usedSeedFallback: boolean
+	/**
+	 * False when the planner never called its submit tool at all.
+	 *
+	 * Distinct from `usedSeedFallback` because the two failures have opposite
+	 * fixes: a planner that never submitted is out of budget, a planner that
+	 * submitted an unusable plan is writing bad hypotheses. Conflating them is
+	 * what made the fallback undiagnosable for as long as it was.
+	 */
+	readonly plannerSubmitted: boolean
 	/** What normalization changed, persisted with the plan so a reader can see it. */
 	readonly notes: ReadonlyArray<string>
 }
@@ -110,6 +126,7 @@ const fallback = (
 	context: NormalizePlanContext,
 	notes: ReadonlyArray<string>,
 	scopeSummary: string,
+	plannerSubmitted: boolean,
 ): NormalizedPlan => {
 	// Narrower than `maxWidth` on purpose. These were not selected on evidence, so
 	// spending a critical incident's full width on four standing questions buys
@@ -133,6 +150,7 @@ const fallback = (
 		collapsed: hypotheses.length === 1,
 		collapseReason: null,
 		usedSeedFallback: true,
+		plannerSubmitted,
 		notes,
 	}
 }
@@ -151,6 +169,7 @@ export const normalizePlan = (
 			context,
 			["planner produced no plan; fell back to the seed catalogue"],
 			"Planning did not complete. These are standing hypotheses, not ones selected from this incident's evidence.",
+			false,
 		)
 	}
 	const plan = raw.value
@@ -172,12 +191,25 @@ export const normalizePlan = (
 			id = `${slug.slice(0, 45)}_${suffix}`
 			suffix += 1
 		}
-		const toolNames = [...permittedTools(hypothesis.toolNames)]
+		// Rule 3, and its repair. A hypothesis whose tools all vanish is still a
+		// proposition somebody chose after looking at this incident, and the way
+		// a model gets a tool vocabulary wrong is uniformly — so dropping these
+		// discarded whole plans and ran three standing questions instead. Try the
+		// seed framing's tools, then the generic rescue set, and only drop when a
+		// repair is genuinely impossible.
+		let toolNames = [...permittedTools(hypothesis.toolNames)]
 		if (toolNames.length === 0) {
-			notes.push(`dropped "${hypothesis.name}": none of its tools exist`)
-			continue
-		}
-		if (toolNames.length < hypothesis.toolNames.length) {
+			// `RESCUE_TOOL_NAMES` is asserted non-empty at its module's load, so this
+			// always produces a usable lane. That is the point: there is no longer a
+			// path where a bad tool list costs the plan.
+			const seeded = seedToolNames(hypothesis.seedLensId)
+			const repaired = [...permittedTools(seeded ?? RESCUE_TOOL_NAMES)]
+			notes.push(
+				`"${hypothesis.name}": named no tool that exists (${hypothesis.toolNames.join(", ") || "none"}); ` +
+					`ran it with ${seeded === null ? "the default toolkit" : `the ${hypothesis.seedLensId} tools`} instead`,
+			)
+			toolNames = repaired
+		} else if (toolNames.length < hypothesis.toolNames.length) {
 			notes.push(
 				`"${hypothesis.name}": dropped ${hypothesis.toolNames.length - toolNames.length} unknown tool(s)`,
 			)
@@ -203,6 +235,7 @@ export const normalizePlan = (
 			context,
 			[...notes, "no hypothesis survived normalization; fell back to the seed catalogue"],
 			plan.scopeSummary,
+			true,
 		)
 	}
 
@@ -237,6 +270,7 @@ export const normalizePlan = (
 				"Only one hypothesis survived planning, so there were no rivals to rank.")
 			: null,
 		usedSeedFallback: false,
+		plannerSubmitted: true,
 		notes,
 	}
 }

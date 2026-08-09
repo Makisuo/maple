@@ -8,6 +8,7 @@ import {
 	runMigrations,
 } from "@maple/db"
 import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
+import type { AiTriageResult } from "@maple/domain/http"
 import { ErrorIssueId, InvestigationId, OrgId } from "@maple/domain/primitives"
 import { eq } from "drizzle-orm"
 import { Schema } from "effect"
@@ -368,12 +369,24 @@ describe("runInvestigationFanout", () => {
 		expect((await loadInvestigation()).status).toBe("diagnosed")
 	})
 
-	it("records validation_inconclusive when the validator promotes nothing", async () => {
+	/**
+	 * Nothing held up, and the validator said so *with* a partial.
+	 *
+	 * The row must not read as a defect: no `failed`, no raw error string, no
+	 * `diagnosed_at` (which "time to diagnosis" keys off) and no `severity` (which
+	 * would be an AI assessment of a cause nobody established).
+	 */
+	it("publishes a partial result when the validator promotes nothing", async () => {
 		const result = await run(
 			baseDeps({
 				invokeValidator: async ({ candidates }) => ({
 					promotedLensId: null,
-					report: null,
+					report: {
+						...report,
+						suspectedCause: "Most likely the payments-api pool, but unconfirmed.",
+						confidence: "medium",
+						ruledOut: ["Deploy: service.version unchanged across 41k spans"],
+					},
 					rivals: candidates.map((candidate) => ({
 						lensId: candidate.lensId,
 						verdict: "rejected" as const,
@@ -389,10 +402,97 @@ describe("runInvestigationFanout", () => {
 		expect(result.status).toBe("inconclusive")
 
 		const row = await loadInvestigation()
-		expect(row.status).toBe("failed")
+		expect(row.status).toBe("inconclusive")
 		expect(row.fanoutState).toBe("rejected_all")
-		expect(row.error).toContain("validation_inconclusive")
-		expect(row.reportJson).toBeNull()
+		expect(row.error).toBeNull()
+		expect(row.diagnosedAt).toBeNull()
+		expect(row.severity).toBeNull()
+		// Forced to low whatever the validator claimed: a lead nothing confirmed is
+		// the promotion the validator declined to make, smuggled in one layer down.
+		expect(row.confidence).toBe("low")
+		expect(row.validatorNote).toBe("no candidate survived")
+
+		const stored = row.reportJson as AiTriageResult
+		expect(stored.suspectedCause).toBe("Most likely the payments-api pool, but unconfirmed.")
+		expect(stored.confidence).toBe("low")
+		expect(stored.ruledOut).toContain("Deploy: service.version unchanged across 41k spans")
+		// The validator's own entry survives alongside the lane-derived ones.
+		expect(stored.ruledOut?.length).toBeGreaterThan(1)
+	})
+
+	/**
+	 * The validator died or never called its tool. The lanes still ran, and what
+	 * they concluded is the whole value left in the run — this is the case that
+	 * used to publish `validation_inconclusive: The validator did not return a
+	 * ranking.` and discard every lane's work in the same statement.
+	 */
+	it("synthesises the partial from the lanes when the validator submits nothing", async () => {
+		const result = await run(
+			baseDeps({
+				invokeHypothesis: async ({ hypothesis }) =>
+					hypothesis.id === HYPOTHESIS_IDS[2]
+						? { ...hypothesisOutput(hypothesis.id), claim: null, deadlineHit: true }
+						: hypothesisOutput(hypothesis.id),
+				invokeValidator: async ({ candidates }) => ({
+					promotedLensId: null,
+					report: null,
+					rivals: candidates.map((candidate) => ({
+						lensId: candidate.lensId,
+						verdict: "ruled_out" as const,
+						reason: `nothing in ${candidate.lensId} explained the onset`,
+					})),
+					note: "The validator did not return a ranking.",
+					model: "strong-model",
+					inputTokens: 500,
+					outputTokens: 80,
+				}),
+			}),
+		)
+		expect(result.status).toBe("inconclusive")
+
+		const row = await loadInvestigation()
+		expect(row.status).toBe("inconclusive")
+		expect(row.error).toBeNull()
+
+		const stored = row.reportJson as AiTriageResult
+		expect(stored.confidence).toBe("low")
+		expect(stored.suspectedCause).toBe("No cause was established.")
+		// Ruled-out lanes become findings rather than vanishing.
+		expect(stored.ruledOut?.join(" ")).toContain("explained the onset")
+		// The cut-short lane is named as unchecked, not silently absent — "nobody
+		// could look" and "nobody thought of it" must not read the same.
+		expect(stored.unchecked?.join(" ")).toContain("cut short by the time budget")
+	})
+
+	/**
+	 * The boundary that makes `applyInconclusiveWrites` a sibling of
+	 * `applyDiagnosisWrites` rather than a flag on it: an inconclusive run must
+	 * never escalate the linked issue or write an `ai_triage` event, because there
+	 * is no cause whose severity anyone assessed.
+	 */
+	it("does not touch the linked issue when the run is inconclusive", async () => {
+		await run(
+			baseDeps({
+				invokeValidator: async () => ({
+					promotedLensId: null,
+					report: null,
+					rivals: [],
+					note: "no candidate survived",
+					model: "strong-model",
+					inputTokens: 500,
+					outputTokens: 80,
+				}),
+			}),
+		)
+
+		const events = await harness.db
+			.select()
+			.from(errorIssueEvents)
+			.where(eq(errorIssueEvents.issueId, harness.issueId))
+		expect(events).toHaveLength(0)
+
+		const [issue] = await harness.db.select().from(errorIssues).where(eq(errorIssues.id, harness.issueId))
+		expect(issue?.severity ?? null).toBeNull()
 	})
 
 	/**

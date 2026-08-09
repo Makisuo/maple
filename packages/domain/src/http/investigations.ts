@@ -13,10 +13,19 @@ import { IssueSeverity } from "./errors"
  * Lifecycle of a durable investigation "war-room". `investigating` covers the
  * autonomous diagnostic pass (the agent's first turn); `diagnosed` is set once
  * `submit_diagnosis` lands a report; `resolved` is a human-closed terminal.
+ *
+ * `inconclusive` and `failed` are both terminal and are not the same claim.
+ * `failed` means the machinery broke — the planner died, a step timed out, the
+ * validator never returned. `inconclusive` means the machinery worked and the
+ * answer is "not established": lanes reported, none held up, and the run
+ * published a partial saying what it ruled out and what it could not check.
+ * Collapsing the two is what made every honest "we could not tell" render as a
+ * defect, with the raw error string shown to the user.
  */
 export const InvestigationStatus = Schema.Literals([
 	"investigating",
 	"diagnosed",
+	"inconclusive",
 	"resolved",
 	"failed",
 ]).annotate({
@@ -195,9 +204,20 @@ export class LensRival extends Schema.Class<LensRival>("LensRival")({
 }) {}
 
 /**
- * The validator's output. `promotedLensId` is null exactly when `report` is —
- * that pair is the `validation_inconclusive` outcome: the lenses reported and
- * none of them held up, which is a real answer and not a failure to produce one.
+ * The validator's output.
+ *
+ * The invariant is one-directional: `promotedLensId !== null` implies
+ * `report !== null`, never the reverse. A promoted lens with nothing to publish
+ * would show a diagnosis-shaped page with no diagnosis on it, so that pairing is
+ * coerced away. A **null lens with a report** is the opposite and is the point:
+ * it is the partial — nothing held up, and the report says what was ruled out,
+ * what could not be checked, and the strongest remaining lead at low confidence.
+ *
+ * That asymmetry is new. Both-null used to be the only way to promote nothing,
+ * which meant the honest outcome carried no information at all and reached the
+ * user as `validation_inconclusive: …` in an error box. Both-null is still
+ * accepted — a validator that dies mid-pass produces it — but the workflow then
+ * synthesises the partial from the lane rows rather than publishing nothing.
  */
 export class ValidatorVerdict extends Schema.Class<ValidatorVerdict>("ValidatorVerdict")({
 	promotedLensId: Schema.NullOr(LensId),
@@ -262,7 +282,7 @@ export class InvestigationHypothesis extends Schema.Class<InvestigationHypothesi
  * What the planner produced: the scope it established and the hypotheses worth
  * spending a pass on.
  */
-export class InvestigationPlan extends Schema.Class<InvestigationPlan>("InvestigationPlan")({
+const planFields = {
 	/** What the sweep established, in 2-3 sentences. Prefixed onto every lane's prompt. */
 	scopeSummary: Schema.String,
 	/**
@@ -280,7 +300,39 @@ export class InvestigationPlan extends Schema.Class<InvestigationPlan>("Investig
 	 * stay tellable apart on the boards.
 	 */
 	collapseReason: Schema.NullOr(Schema.String),
-}) {}
+} as const
+
+export class InvestigationPlan extends Schema.Class<InvestigationPlan>("InvestigationPlan")(planFields) {}
+
+/**
+ * The plan as *stored*, which is the plan plus what normalization did to it.
+ *
+ * A separate class rather than three more fields on {@link InvestigationPlan},
+ * because that one is the planner's submit-tool parameter schema: every field
+ * added there becomes a field the model can set, and "did we fall back to the
+ * seed catalogue" is precisely the fact the model must not be able to author.
+ * The forgiving schema sits at the model boundary and the fuller one at the
+ * storage boundary — the same split that already separates
+ * `InvestigationHypothesis.id` from {@link LensId}.
+ *
+ * All three additions are `optionalKey` so every plan stored before they existed
+ * still decodes.
+ */
+export class InvestigationPlanRecord extends Schema.Class<InvestigationPlanRecord>("InvestigationPlanRecord")(
+	{
+		...planFields,
+		/** True when the planner produced nothing usable and the seed catalogue stood in. */
+		usedSeedFallback: Schema.optionalKey(Schema.Boolean),
+		/**
+		 * False when the planner never called its submit tool. Separate from
+		 * `usedSeedFallback` because the two have opposite fixes — out of budget
+		 * versus writing unusable hypotheses.
+		 */
+		plannerSubmitted: Schema.optionalKey(Schema.Boolean),
+		/** What normalization changed: dropped hypotheses, repaired tool lists, truncation. */
+		notes: Schema.optionalKey(Schema.Array(Schema.String)),
+	},
+) {}
 
 // ---------------------------------------------------------------------------
 // Subject (what is being investigated)

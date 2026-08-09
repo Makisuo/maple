@@ -7,9 +7,12 @@
  * vote — exactly the thing the fan-out exists to avoid. Its only job is
  * adjudication, and its output is the trust payload the Hypotheses table renders.
  *
- * Promoting nothing is an allowed and meaningful outcome (`validation_inconclusive`):
- * lanes reported, none held up. That is a real answer about the incident, not a
- * failure to produce one, and the boards already draw it.
+ * Promoting nothing is an allowed and meaningful outcome: lanes reported, none
+ * held up. That is a real answer about the incident, not a failure to produce
+ * one — and it is now published as one. The validator leaves `promotedLensId`
+ * null but still submits a `report`, the *partial*: what was ruled out, what
+ * could not be checked, and the strongest remaining lead at low confidence. The
+ * run lands on `status: "inconclusive"`, not `failed`.
  */
 import { ValidatorVerdict } from "@maple/domain/http"
 import type { InvestigationSubject, InvestigationSubjectSnapshot } from "@maple/domain/http"
@@ -54,6 +57,17 @@ export interface ValidatorAgentInput {
 	readonly candidates: ReadonlyArray<ValidatorCandidateInput>
 	readonly model: Model
 	readonly tenant: TenantContext
+	/**
+	 * Wall clock after which the pass stops at its next step boundary.
+	 *
+	 * Not optional the way `runAgentPass` allows, because omitting it is what
+	 * production did and the result was a ranking that sometimes sat for five
+	 * minutes and was then killed by the workflow's step timeout. The two
+	 * outcomes are not the same: a soft-stopped validator spends a last step on
+	 * the forced submit and still returns a verdict, a timed-out one returns
+	 * nothing and the run records `validation_failed`.
+	 */
+	readonly deadlineAtMs: number
 }
 
 export interface ValidatorAgentOutput {
@@ -110,27 +124,40 @@ export const runValidatorAgent = Effect.fn("investigation.validator")(function* 
 		prompt: buildValidatorPrompt(input),
 		submitToolName: "submit_verdict",
 		submitToolDescription:
-			"Record your ranking. Call it exactly once. Promoting nothing is a legitimate outcome — " +
-			"set promotedLensId and report to null together and explain in `note`.",
+			"Record your ranking. Call it exactly once — this call IS your answer, and prose outside " +
+			"it is discarded. Promoting nothing is a legitimate outcome: leave promotedLensId null " +
+			"and still submit a `report` as a partial, saying what was ruled out, what could not be " +
+			"checked, and the strongest remaining lead at low confidence.",
 		schema: ValidatorVerdict,
+		deadlineAtMs: input.deadlineAtMs,
 	})
 
-	// The schema cannot express "these two are null together", so it is enforced
-	// here: a promoted lens with no report would flip the row to `diagnosed` with
-	// nothing to show, and a report with no promoted lens would leave every lane
-	// saying it lost while the page displays a cause. A validator that never
-	// answered at all is the same outcome — nothing was promoted.
+	yield* Effect.annotateCurrentSpan({ "maple.validator.deadline_hit": pass.deadlineHit })
+
+	// The schema cannot express the one-directional invariant, so it is enforced
+	// here. Only ONE pairing is incoherent: a promoted lens with no report, which
+	// would flip the row to `diagnosed` with nothing to show. It is coerced to
+	// "promoted nothing".
+	//
+	// A report with no promoted lens is NOT incoherent — it is the partial, and
+	// coercing it away is precisely what this code used to do. Every "we could
+	// not tell" arrived at the user stripped of what the run had established, as
+	// `validation_inconclusive: …` in an error box.
+	//
+	// A validator that never answered still yields both-null; the workflow
+	// synthesises the partial from the lane rows rather than publishing nothing.
 	const raw = Option.getOrUndefined(pass.answer)
+	const promotedWithoutReport = raw !== undefined && raw.promotedLensId !== null && raw.report === null
 	const coherent =
-		raw && (raw.promotedLensId === null) === (raw.report === null)
+		raw !== undefined && !promotedWithoutReport
 			? raw
 			: new ValidatorVerdict({
 					promotedLensId: null,
-					report: null,
+					report: raw?.report ?? null,
 					rivals: raw?.rivals ?? [],
 					note: raw
-						? `${raw.note} (discarded: the validator promoted a lens without a report, or a report without a lens)`
-						: "The validator did not return a ranking.",
+						? `${raw.note} (discarded: the validator promoted a lens without a report to publish)`
+						: "The validator did not return a ranking, so this run reports only what its lanes established.",
 				})
 
 	return {

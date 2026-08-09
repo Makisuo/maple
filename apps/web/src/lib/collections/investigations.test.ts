@@ -96,6 +96,46 @@ describe("rowsToInvestigation", () => {
 	})
 
 	/**
+	 * The partial's payload has to survive the decode, and asserting the decode
+	 * merely *succeeded* would not prove it: `rowsToInvestigation` runs
+	 * `Schema.decodeUnknownOption`, which silently DROPS keys the schema does not
+	 * declare. A `V2AiTriageResult` missing `ruledOut` / `unchecked` would pass a
+	 * not-null check while shipping an inconclusive investigation with its entire
+	 * result removed — so these assert the fields are present on the output.
+	 */
+	it("carries an inconclusive run's ruled-out and unchecked lists through the decode", () => {
+		const investigation = rowsToInvestigation(
+			row({
+				status: "inconclusive",
+				severity: null,
+				confidence: "low",
+				error: null,
+				fanout_state: "rejected_all",
+				validator_note: "no candidate survived",
+				report_json: {
+					summary: "Nothing held up.",
+					suspectedCause: "Possibly the payments-api pool, unconfirmed",
+					severityAssessment: "low",
+					affectedScope: "checkout-api",
+					evidence: [],
+					suggestedActions: [],
+					confidence: "low",
+					ruledOut: ["Deploy: service.version unchanged across 41k spans"],
+					unchecked: ["Pool depth: payments-api emits no connection metrics"],
+				},
+			}),
+			[lens()],
+		)
+		expect(investigation?.status).toBe("inconclusive")
+		expect(investigation?.report?.ruledOut).toEqual([
+			"Deploy: service.version unchanged across 41k spans",
+		])
+		expect(investigation?.report?.unchecked).toEqual([
+			"Pool depth: payments-api emits no connection metrics",
+		])
+	})
+
+	/**
 	 * `snapshot_json` is nullable in the table but non-nullable on the resource,
 	 * and the page reads straight through it. Passing the null along was the bug a
 	 * cast hid; the server has had `fallbackSnapshot` for this all along.

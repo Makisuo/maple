@@ -53,6 +53,22 @@ export class AiTriageResult extends Schema.Class<AiTriageResult>("AiTriageResult
 	 * the whole investigation.
 	 */
 	ruledOut: Schema.optionalKey(Schema.Array(Schema.String)),
+	/**
+	 * Angles this run could NOT check, and why — "connection-pool depth:
+	 * payments-api emits no `db.client.connections.*` instrument", "the 14:02
+	 * rollout: the lane ran out of clock before it finished".
+	 *
+	 * The other half of what makes a report believable, and the half that only
+	 * matters when nothing was promoted. {@link ruledOut} says what was
+	 * eliminated; without this, everything that was neither eliminated nor
+	 * promoted is silently indistinguishable from something nobody thought of —
+	 * and a responder reading a partial cannot tell which of the two they are
+	 * looking at.
+	 *
+	 * `optionalKey` and unenforced at the tool boundary, for the same two reasons
+	 * as {@link ruledOut} directly above.
+	 */
+	unchecked: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
 // ---------------------------------------------------------------------------

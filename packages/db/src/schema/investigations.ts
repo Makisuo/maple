@@ -10,7 +10,7 @@ import type {
 	InvestigationSeededBy,
 	InvestigationStatus,
 	InvestigationHypothesis,
-	InvestigationPlan,
+	InvestigationPlanRecord,
 	InvestigationSubject,
 	InvestigationSubjectSnapshot,
 	LensId,
@@ -69,8 +69,14 @@ export const investigations = pgTable(
 		 * dispatched, verbatim. Stored rather than re-derived because the plan is
 		 * the only record of what a run *chose not* to test, which is half of what
 		 * makes its conclusion readable a week later.
+		 *
+		 * `InvestigationPlanRecord`, not `InvestigationPlan`: it also carries what
+		 * normalization did — `usedSeedFallback`, `plannerSubmitted`, `notes`. Those
+		 * were computed and discarded for as long as this column existed, which is
+		 * why "seven runs in ten never planned the incident" went unnoticed until
+		 * someone read the spans by hand.
 		 */
-		planJson: jsonb("plan_json").$type<InvestigationPlan>(),
+		planJson: jsonb("plan_json").$type<InvestigationPlanRecord>(),
 		plannerModel: text("planner_model"),
 		plannerElapsedMs: integer("planner_elapsed_ms"),
 		validatorNote: text("validator_note"),

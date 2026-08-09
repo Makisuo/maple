@@ -134,7 +134,12 @@ function RowFinding({
 		<span
 			className={cn(
 				"flex min-w-0 items-center gap-1.5 text-xs",
-				finding.kind === "failure" ? "text-destructive" : "text-muted-foreground",
+				finding.kind === "failure" && "text-destructive",
+				// Three tones, not two. Scanning the hub, a lead nothing confirmed
+				// must not look like a confirmed cause, and "we could not tell" must
+				// not look like "it broke".
+				finding.kind === "partial" && "text-severity-warn",
+				finding.kind !== "failure" && finding.kind !== "partial" && "text-muted-foreground",
 			)}
 			title={finding.text}
 		>

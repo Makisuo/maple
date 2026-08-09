@@ -3,9 +3,13 @@
  *
  * Every case here is a way a model can hand back something unusable, and each
  * one used to be a way an investigation could dispatch a lane that could not
- * work. The rule worth defending hardest is the tool intersection: a hypothesis
- * with no usable tools is dropped, not run — because a lane that cannot check
- * its claim does not report "inconclusive", it reports a guess.
+ * work. The rule worth defending hardest is the tool intersection: a lane is
+ * never run with an empty allowlist, because a lane that cannot check its claim
+ * does not report "inconclusive", it reports a guess.
+ *
+ * That rule is now enforced by *repair* rather than by dropping. The tests below
+ * pin both halves: the repair happens, and the seed catalogue is reached only by
+ * the two routes that genuinely leave nothing to run.
  */
 import { describe, expect, it } from "vitest"
 import { InvestigationPlan, InvestigationSubject } from "@maple/domain/http"
@@ -94,8 +98,13 @@ describe("normalizePlan", () => {
 		expect(result.notes.join(" ")).toContain("unknown tool")
 	})
 
-	/** The `config_flags` failure mode, caught mechanically instead of by a comment. */
-	it("drops a hypothesis left with no tools at all", () => {
+	/**
+	 * The `config_flags` failure mode: a lane must never be dispatched with an
+	 * empty allowlist. It is now prevented by repairing the tool list rather than
+	 * by dropping the hypothesis — dropping meant that one bad tool vocabulary,
+	 * applied uniformly the way models apply them, discarded the whole plan.
+	 */
+	it("repairs a hypothesis left with no tools rather than dropping it", () => {
 		const result = normalizePlan(
 			plan([
 				hypothesis(),
@@ -108,13 +117,37 @@ describe("normalizePlan", () => {
 			]),
 			context,
 		)
-		expect(result.hypotheses.map((h) => h.id)).toEqual(["pool_exhaustion"])
-		expect(result.notes.join(" ")).toContain("none of its tools exist")
+		expect(result.hypotheses.map((h) => h.id)).toEqual(["pool_exhaustion", "flag_flip"])
+		const repaired = result.hypotheses.find((h) => h.id === "flag_flip")
+		expect(repaired?.toolNames.length).toBeGreaterThan(0)
+		expect(repaired?.toolNames).not.toContain("read_feature_flags")
+		expect(result.notes.join(" ")).toContain("the default toolkit")
 	})
 
+	it("repairs a seed-framed hypothesis with that seed's own tools", () => {
+		const result = normalizePlan(
+			plan([hypothesis({ toolNames: ["nope"], seedLensId: "deploy_correlation" })]),
+			context,
+		)
+		expect(result.usedSeedFallback).toBe(false)
+		expect(result.hypotheses[0]?.toolNames).toContain("explore_attributes")
+		expect(result.notes.join(" ")).toContain("deploy_correlation")
+	})
+
+	/**
+	 * The only surviving route to the seed catalogue via normalization: an id and
+	 * name that both slug to nothing. A bad tool list no longer gets here.
+	 */
 	it("falls back to seeds when nothing survives normalization", () => {
-		const result = normalizePlan(plan([hypothesis({ toolNames: ["nope"] })]), context)
+		const result = normalizePlan(plan([hypothesis({ id: "!!", name: "!!" })]), context)
 		expect(result.usedSeedFallback).toBe(true)
+		expect(result.plannerSubmitted).toBe(true)
+	})
+
+	it("records that the planner never submitted, distinctly from an unusable plan", () => {
+		const result = normalizePlan(Option.none(), context)
+		expect(result.usedSeedFallback).toBe(true)
+		expect(result.plannerSubmitted).toBe(false)
 	})
 
 	it("truncates to maxWidth by priority, not by submission order", () => {
