@@ -114,17 +114,33 @@ const HANDLE = "!size-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
  * bottom border and the ring that used to expand out of the spine node's icon
  * tile. 3px rather than a hairline so it survives the 0.68 zoom a narrow window
  * forces, and so it is unmistakably a bar rather than a stray rule.
+ *
+ * Two placements, by what the bar belongs to. Inline (default) it sits in the
+ * content stack directly under the line it annotates — the spine node's phase
+ * row, where it is that stage's progress. `edge` pins it flush along the card's
+ * bottom border, clipped into the card's own corner radius, for the lens lanes
+ * and the pending verdict, which have no line for it to annotate: there it is
+ * the card that is working. The inset rounded pill those two used to draw
+ * belonged to neither, and floated.
  */
-function LiveBar({ className }: { className?: string }) {
+function LiveBar({ className, edge = false }: { className?: string; edge?: boolean }) {
 	return (
 		<span
 			aria-hidden
 			className={cn(
-				"relative block h-[3px] w-full shrink-0 overflow-hidden rounded-full bg-primary/20",
+				"overflow-hidden bg-primary/20",
+				edge
+					? "absolute inset-x-0 bottom-0 h-[3px]"
+					: "relative block h-[3px] w-full shrink-0 rounded-full",
 				className,
 			)}
 		>
-			<span className="provenance-progress-fill absolute inset-y-0 w-2/5 rounded-full bg-primary" />
+			<span
+				className={cn(
+					"provenance-progress-fill absolute inset-y-0 w-2/5 bg-primary",
+					edge ? null : "rounded-full",
+				)}
+			/>
 		</span>
 	)
 }
@@ -349,11 +365,14 @@ export const FlowLensNode = memo(function FlowLensNode({ data }: NodeProps & { d
 					</p>
 				) : null}
 				{/*
-				 * The lane's own progress bar, in the row the skeleton would otherwise
-				 * hold open. The 11px spinner stops being readable at the 0.68 zoom a
-				 * narrow window forces; a 3px bar across the full 146px does not.
+				 * On the card's bottom edge, not in the stack above it. As an inset
+				 * rounded pill sitting in the content flow it belonged to nothing —
+				 * a floating capsule with dead space under it — where flush against
+				 * the border, clipped into the card's own corner radius, it reads as
+				 * part of the card's frame. The 11px spinner stops being readable at
+				 * the 0.68 zoom a narrow window forces; this does not.
 				 */}
-				{running ? <LiveBar className="mt-0.5" /> : null}
+				{running ? <LiveBar edge /> : null}
 			</div>
 		</>
 	)
@@ -400,8 +419,8 @@ export const FlowPendingVerdictNode = memo(function FlowPendingVerdictNode({
 					<Skeleton className="h-1.5 w-full rounded-full" />
 					<Skeleton className="h-1.5 w-1/2 rounded-full" />
 				</div>
-				{/* The same bar the spine and the lens lanes wear, so every live node on the canvas shares one signal. */}
-				<LiveBar className="mt-0.5" />
+				{/* On the bottom edge, like the lens lanes — this node is a card that is working, not a row with a bar in it. */}
+				<LiveBar edge />
 			</div>
 		</>
 	)
