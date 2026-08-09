@@ -1,14 +1,13 @@
 import type { ReactNode } from "react"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Option, Schema } from "effect"
-import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 
 import { INVESTIGATION_TABS } from "@/components/investigations/investigation-tabs"
 import { InvestigationView } from "@/components/investigations/investigation-view"
 import { ErrorState } from "@/components/common/error-state"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { useInvestigation } from "@/hooks/use-investigation"
+import { retryOrgCollections } from "@/lib/collections/org-collections"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -53,6 +52,15 @@ function InvestigationPage() {
 	return <InvestigationDetail action={action} id={decoded.value} tab={tab} />
 }
 
+/**
+ * The page's data is an ElectricSQL shape, not a fetch.
+ *
+ * It used to poll `/v2/investigations/:id` every 3s while a run was in flight,
+ * which put a three-second floor under every transition the provenance canvas
+ * draws — a lane going `checking`, a progress note, the verdict landing. The two
+ * shapes (`investigations` + its lens lanes) are recombined into the same
+ * `V2Investigation` this view already took, so nothing below here changed.
+ */
 function InvestigationDetail({
 	action,
 	id,
@@ -62,45 +70,35 @@ function InvestigationDetail({
 	id: InvestigationId
 	tab: (typeof INVESTIGATION_TABS)[number] | undefined
 }) {
-	const query = MapleApiV2AtomClient.query("investigations", "retrieve", {
-		params: { id },
-		reactivityKeys: ["investigations", `investigation:${id}`],
-	})
-	const result = useAtomValue(query)
-	const refresh = useAtomRefresh(query)
-	const isInvestigating = Result.isSuccess(result) && result.value.status === "investigating"
-	useIntervalRefresh(refresh, { intervalMs: 3_000, enabled: isInvestigating })
+	const sync = useInvestigation(id)
 
-	return Result.builder(result)
-		.onInitial(() => <LoadingShell />)
-		.onError((error) => {
-			// Only a real "no such investigation" is a dead end. A dropped request or
-			// a restarting API is not, and telling someone their investigation is gone
-			// when it isn't sends them looking for a problem that doesn't exist.
-			return isNotFound(error) ? (
-				<NotFoundShell />
-			) : (
-				<LoadFailureShell error={error} onRetry={refresh} />
+	switch (sync.state) {
+		case "loading":
+			return <LoadingShell />
+		// The shape synced and this org has no such row. Unlike a dropped request,
+		// this IS a dead end — the sync is authoritative about what the org holds.
+		case "missing":
+			return <NotFoundShell />
+		// The stream gave up (or never loaded) — a transport problem, not a missing
+		// investigation. Telling someone their investigation is gone when it isn't
+		// sends them looking for a problem that doesn't exist, so this stays a retry.
+		case "failed":
+			return (
+				<LoadFailureShell
+					error={new Error("The live connection to this investigation was lost")}
+					onRetry={retryOrgCollections}
+				/>
 			)
-		})
-		.onSuccess((investigation) => (
-			<InvestigationView
-				action={action}
-				investigation={investigation}
-				tab={tab ?? "overview"}
-				onRefresh={refresh}
-			/>
-		))
-		.render()
+		case "ready":
+			return (
+				<InvestigationView
+					action={action}
+					investigation={sync.investigation}
+					tab={tab ?? "overview"}
+				/>
+			)
+	}
 }
-
-/** The v2 API answers a missing investigation with a tagged not-found error. */
-const isNotFound = (error: unknown): boolean =>
-	typeof error === "object" &&
-	error !== null &&
-	"_tag" in error &&
-	typeof error._tag === "string" &&
-	error._tag.toLowerCase().includes("notfound")
 
 /**
  * Every non-success state wears the same chrome — breadcrumbs, a sticky header,

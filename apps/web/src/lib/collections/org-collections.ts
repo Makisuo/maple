@@ -268,7 +268,7 @@ type SyncedCollectionLifecycle = Pick<DashboardsCollection, "subscriberCount" | 
  * a leaked subscription: tearing down then still logs the live-query error
  * once, but a stale shape stream must not long-poll forever.
  */
-const cleanupCollectionWhenIdle = (collection: SyncedCollectionLifecycle): void => {
+export const cleanupCollectionWhenIdle = (collection: SyncedCollectionLifecycle): void => {
 	if (collection.subscriberCount === 0) {
 		void collection.cleanup()
 		return

@@ -16,7 +16,14 @@ import { formatNumber } from "@maple/ui/lib/format"
 import { toEpochMs } from "@maple/ui/lib/time-format"
 
 import { lensCopy } from "../lens-catalogue"
-import { type LensRun, type LensNodeState, checksHeld, lensChecks, lensNodeState } from "../lens-derive"
+import {
+	type LensRun,
+	type LensNodeState,
+	checksHeld,
+	lensChecks,
+	lensNodeState,
+	lensTally,
+} from "../lens-derive"
 import { splitDuration } from "../investigation-display"
 import {
 	classifyAction,
@@ -46,7 +53,19 @@ const GUTTER = 52
 const SPINE_HEIGHT = 112
 /** The investigation and verdict nodes are one step taller — they carry an extra line. */
 const SPINE_HEIGHT_TALL = 128
-const LENS_HEIGHT = 52
+/**
+ * A running investigation node is taller again: it carries a phase line the
+ * finished one has no row for, and the card clips at its border rather than
+ * growing, so an unbudgeted row silently eats the timestamp under it.
+ */
+const SPINE_HEIGHT_LIVE = 148
+/**
+ * One row taller than the design's 52 to hold a running lane's progress note.
+ * Uniform across the column rather than per-state: the layout centres a column by
+ * summing one height per node, and a fan whose rows changed height every poll
+ * would walk up and down the canvas as lanes settled.
+ */
+const LENS_HEIGHT = 64
 const LENS_GAP = 8
 const ACTION_HEIGHT = 76
 const ACTION_GAP = 8
@@ -92,6 +111,10 @@ export interface SpineNodeData {
 	readonly current?: boolean
 	/** The verdict node is the only muted-fill node — one step up from the canvas. */
 	readonly lifted?: boolean
+	/** This step is happening right now — the node rings and its strands march. */
+	readonly live?: boolean
+	/** What the live step is doing, e.g. `FANNING OUT · 2/4 REPORTED`. Only set while `live`. */
+	readonly phase?: string
 }
 
 export interface LensNodeData {
@@ -101,10 +124,31 @@ export interface LensNodeData {
 	readonly result: string
 	readonly state: LensNodeState
 	readonly elapsed: string | null
+	/**
+	 * What the lane is doing right now, printed while it runs.
+	 *
+	 * It was already on the wire and already derived — `lensChecks` reads it for
+	 * the rail — but on this canvas it only ever reached a `title` tooltip, which
+	 * is the one place a reader watching a run in progress will not look.
+	 */
+	readonly progressNote: string | null
 }
 
 export interface LensOverflowNodeData {
 	readonly hidden: number
+}
+
+/**
+ * The step after the fan, while there is no verdict to show.
+ *
+ * It states the *process* and never a result: no suspected cause, no confidence,
+ * no timestamp. A placeholder verdict would be a claim the run has not made; a
+ * placeholder step is the structure the run is still moving through, and without
+ * it the chain simply stops mid-air at the fan.
+ */
+export interface PendingVerdictNodeData {
+	readonly word: string
+	readonly note: string | null
 }
 
 export interface ActionNodeData {
@@ -136,6 +180,14 @@ export type ProvenanceNode =
 			height: number
 			data: LensOverflowNodeData
 	  }
+	| {
+			id: string
+			type: "pendingVerdict"
+			position: XY
+			width: number
+			height: number
+			data: PendingVerdictNodeData
+	  }
 	| { id: string; type: "action"; position: XY; width: number; height: number; data: ActionNodeData }
 	| {
 			id: string
@@ -160,6 +212,16 @@ export interface ProvenanceEdge {
 	readonly kind: EdgeKind
 	/** Rendered above the line, never on it. Only causal and roadmap edges carry one. */
 	readonly label?: string
+	/**
+	 * This strand feeds work that has not finished — the one thing on the canvas
+	 * allowed to move.
+	 *
+	 * Every strand used to march, which meant a diagnosis from last Tuesday
+	 * animated exactly as hard as a run happening now and motion carried no
+	 * information at all. Liveness is a property of the strand's *target*: the
+	 * step it is delivering into is the step still being worked on.
+	 */
+	readonly live?: boolean
 }
 
 export interface ProvenanceGraph {
@@ -173,6 +235,14 @@ export interface ProvenanceGraph {
 	readonly actionHeading: string | null
 	/** `14:02 → 14:03 · 38s`, or as much of it as the timestamps carry. */
 	readonly caption: string | null
+	/**
+	 * When a still-running pass opened, so the caption can tick against it.
+	 *
+	 * The epoch instant rather than the formatted duration: this builder is a pure
+	 * function of the investigation and its tests would need a frozen clock the
+	 * moment it read `Date.now()`. The component owns the tick.
+	 */
+	readonly runningSince: number | null
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -188,6 +258,13 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 	const { subject, snapshot, report } = investigation
 	const columns: Array<{ nodes: Array<ProvenanceNode>; width: number }> = []
 	const edges: Array<ProvenanceEdge> = []
+	const running = investigation.status === "investigating"
+	/**
+	 * The nodes whose work is still open. Collected as the columns are built and
+	 * resolved into edges at the end, because a strand's liveness is its target's
+	 * and the target does not exist yet when the strand is pushed.
+	 */
+	const liveIds = new Set<string>()
 
 	/** Ids of the nodes the next column's edges originate from. */
 	let upstream: Array<string> = []
@@ -286,7 +363,7 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 				type: "spine",
 				position: { x: 0, y: 0 },
 				width: SPINE_WIDTH,
-				height: SPINE_HEIGHT_TALL,
+				height: running ? SPINE_HEIGHT_LIVE : SPINE_HEIGHT_TALL,
 				data: {
 					glyph: "investigation",
 					eyebrow: "INVESTIGATION",
@@ -302,12 +379,14 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 						.filter(Boolean)
 						.join(" · "),
 					current: true,
+					...(running ? { live: true, phase: livePhase(investigation) } : {}),
 				},
 			},
 		],
 		SPINE_WIDTH,
 		"causal",
 	)
+	if (running) liveIds.add("investigation")
 
 	/* --- the lens fan -------------------------------------------------------- */
 
@@ -317,20 +396,27 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 	// rail's second line; with the rail gone it is the node's hover text, and it is
 	// the only place the *reason* a lane held or didn't survives on this tab.
 	const results = lensChecks(visible)
-	const lensNodes: Array<ProvenanceNode> = visible.map((run, index) => ({
-		id: `lens-${run.lensId}-${index}`,
-		type: "lens" as const,
-		position: { x: 0, y: 0 },
-		width: LENS_WIDTH,
-		height: LENS_HEIGHT,
-		data: {
-			title: lensCopy(run).name,
-			question: run.question ?? "",
-			result: results[index]?.result ?? "",
-			state: lensNodeState(run),
-			elapsed: run.elapsedSeconds == null ? null : `${run.elapsedSeconds.toFixed(1)}s`,
-		},
-	}))
+	const lensNodes: Array<ProvenanceNode> = visible.map((run, index) => {
+		const id = `lens-${run.lensId}-${index}`
+		// A queued lane is live too: nothing has happened on it yet, which is
+		// precisely why its strand should not read as settled.
+		if (run.status === "checking" || run.status === "queued") liveIds.add(id)
+		return {
+			id,
+			type: "lens" as const,
+			position: { x: 0, y: 0 },
+			width: LENS_WIDTH,
+			height: LENS_HEIGHT,
+			data: {
+				title: lensCopy(run).name,
+				question: run.question ?? "",
+				result: results[index]?.result ?? "",
+				state: lensNodeState(run),
+				elapsed: run.elapsedSeconds == null ? null : `${run.elapsedSeconds.toFixed(1)}s`,
+				progressNote: run.progressNote,
+			},
+		}
+	})
 	if (hidden > 0) {
 		lensNodes.push({
 			id: "lens-overflow",
@@ -348,9 +434,28 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 
 	/* --- verdict ------------------------------------------------------------- */
 
-	// Absent while the pass is still running, not empty: a placeholder verdict is a
-	// claim the investigation has not made yet.
-	if (investigation.status !== "investigating" && report) {
+	/*
+	 * Still absent while the pass is running: a placeholder *verdict* is a claim
+	 * the investigation has not made yet. What stands in its place is a node about
+	 * the process rather than the finding — see `PendingVerdictNodeData`.
+	 */
+	if (running && lensNodes.length > 0) {
+		pushColumn(
+			[
+				{
+					id: "pending-verdict",
+					type: "pendingVerdict",
+					position: { x: 0, y: 0 },
+					width: SPINE_WIDTH,
+					height: SPINE_HEIGHT_TALL,
+					data: pendingVerdict(investigation),
+				},
+			],
+			SPINE_WIDTH,
+			"fan",
+		)
+		liveIds.add("pending-verdict")
+	} else if (!running && report) {
 		pushColumn(
 			[
 				{
@@ -440,14 +545,17 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 		x += column.width + GUTTER
 	}
 
+	const openedMs = toEpochMs(investigation.created_at)
+
 	return {
 		nodes: [...headings, ...columns.flatMap((column) => column.nodes)],
-		edges,
+		edges: edges.map((edge) => (liveIds.has(edge.target) ? { ...edge, live: true } : edge)),
 		width: Math.max(0, x - GUTTER),
 		height,
 		lensHeading,
 		actionHeading,
 		caption: caption(investigation),
+		runningSince: running && Number.isFinite(openedMs) ? openedMs : null,
 	}
 }
 
@@ -523,6 +631,44 @@ const incidentTitle = (investigation: V2Investigation): string => {
 	const scope = snapshot.scope?.trim()
 	if (scope) return scope
 	return subject.type === "incident" ? `${subject.incident_kind} incident` : "Incident"
+}
+
+/**
+ * Which stage a running pass is in, for the amber node's second line.
+ *
+ * `running` is checked before the validator, because `blocked` means "the
+ * validator has nothing to rank yet" and is set for the whole time the lanes are
+ * still reporting — reading it first would label a fan-out mid-flight
+ * "VALIDATING", which is the one stage it demonstrably is not in.
+ */
+const livePhase = (investigation: V2Investigation): string => {
+	const state = investigation.fanout?.state
+	if (state === "queued") return "QUEUEING"
+	if (state === "running") {
+		const tally = lensTally(investigation.lens_runs)
+		// The bare ratio, not "1/3 REPORTED": the node is 146px and the longer form
+		// truncated to "FANNING OUT · 1/3…", losing the word it was spent on. What
+		// the ratio counts is stated by the fan it sits next to.
+		return tally.total > 0 ? `FANNING OUT · ${tally.settled}/${tally.total}` : "FANNING OUT"
+	}
+	if (state === "validating" || investigation.validator?.status === "blocked") return "VALIDATING"
+	// The single-pass path — a freeform question, or an org that opted out of planning.
+	return "RUNNING"
+}
+
+/**
+ * The ghost step's two lines. Both describe work, never a finding: `settled`
+ * counts lanes that will not change again, which is the same number the fan is
+ * showing, so the two cannot disagree.
+ */
+const pendingVerdict = (investigation: V2Investigation): PendingVerdictNodeData => {
+	const tally = lensTally(investigation.lens_runs)
+	const validating =
+		investigation.fanout?.state === "validating" || (tally.total > 0 && tally.settled === tally.total)
+	return {
+		word: validating ? "VALIDATING" : "AWAITING VERDICT",
+		note: tally.total > 0 ? `${tally.settled} of ${tally.total} lenses reported` : null,
+	}
 }
 
 /** The run's outcome, which is the one thing the canvas doesn't say anywhere else. */

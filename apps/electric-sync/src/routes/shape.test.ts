@@ -7,8 +7,10 @@ import {
 	ElectricSyncRouter,
 	isElectricConfigCoherent,
 	isShapeName,
+	isValidScopeValue,
 	SHAPE_NAMES,
 	shapeResponseHeaders,
+	shapeScopeColumn,
 } from "./shape.http"
 
 const parse = (raw: string) => {
@@ -34,6 +36,23 @@ describe("isShapeName", () => {
 		// Must not be fooled by prototype keys.
 		assert.isFalse(isShapeName("toString"))
 		assert.isFalse(isShapeName("constructor"))
+	})
+})
+
+describe("scoped shapes", () => {
+	it("marks exactly the investigation shapes as scoped", () => {
+		assert.strictEqual(shapeScopeColumn("investigation"), "id")
+		assert.strictEqual(shapeScopeColumn("investigation_lens_runs"), "investigation_id")
+		// Everything else is org-wide; a stray `scope` on one of these is ignored.
+		assert.isNull(shapeScopeColumn("dashboards"))
+		assert.isNull(shapeScopeColumn("alert_rules"))
+	})
+
+	it("rejects an absent or unbounded scope value", () => {
+		assert.isFalse(isValidScopeValue(null))
+		assert.isFalse(isValidScopeValue(""))
+		assert.isFalse(isValidScopeValue("x".repeat(129)))
+		assert.isTrue(isValidScopeValue("inv_YofPTrK9782DWwcnXhpcCw"))
 	})
 })
 
@@ -147,6 +166,23 @@ describe("ElectricSyncRouter config degradation", () => {
 				"/api/sync/shape?shape=users",
 			)
 			assert.strictEqual(status, 503)
+		}),
+	)
+
+	/**
+	 * A scoped shape asked for without its scope must NOT quietly fall back to the
+	 * org-wide stream it exists to avoid — that would sync an org's whole
+	 * investigation history to render one page. The check sits before tenant
+	 * resolution, so this 400s rather than 401s even with no bearer.
+	 */
+	it.effect("400s a scoped shape that arrives without a scope", () =>
+		Effect.gen(function* () {
+			const { status, body } = yield* shapeRequest(
+				syncConfig({}),
+				"/api/sync/shape?shape=investigation&offset=-1",
+			)
+			assert.strictEqual(status, 400)
+			assert.strictEqual(body, "Shape investigation requires a scope")
 		}),
 	)
 
@@ -282,6 +318,68 @@ describe("buildUpstreamShapeUrl", () => {
 		const columns = params.get("columns")?.split(",") ?? []
 		assert.notInclude(columns, "secret_ciphertext")
 		assert.include(columns, "config_json")
+	})
+
+	/**
+	 * The investigation shapes are the first parameterised ones. Org alone is too
+	 * wide: an org accumulates investigations forever and a browser renders one, so
+	 * an org-wide shape would stream the whole history to read a single page.
+	 */
+	it("narrows a scoped shape to one investigation, positionally", () => {
+		const { params } = parse(
+			buildUpstreamShapeUrl({ ...base, shape: "investigation", scopeValue: "inv_1" }),
+		)
+		assert.strictEqual(params.get("table"), "investigations")
+		assert.strictEqual(params.get("where"), `"org_id" = $1 AND "id" = $2`)
+		assert.strictEqual(params.get("params[1]"), "org_123")
+		assert.strictEqual(params.get("params[2]"), "inv_1")
+
+		const lanes = parse(
+			buildUpstreamShapeUrl({ ...base, shape: "investigation_lens_runs", scopeValue: "inv_1" }),
+		).params
+		assert.strictEqual(lanes.get("where"), `"org_id" = $1 AND "investigation_id" = $2`)
+		assert.strictEqual(lanes.get("params[2]"), "inv_1")
+	})
+
+	/**
+	 * The scope value is bound as `$2`, never interpolated — so a value carrying
+	 * SQL is inert data, and the column it is compared against comes from our own
+	 * whitelist rather than the request.
+	 */
+	it("binds a hostile scope value as a parameter rather than into the WHERE", () => {
+		const { params } = parse(
+			buildUpstreamShapeUrl({
+				...base,
+				shape: "investigation",
+				scopeValue: `x" OR "org_id" <> '`,
+			}),
+		)
+		assert.strictEqual(params.get("where"), `"org_id" = $1 AND "id" = $2`)
+		assert.strictEqual(params.get("params[2]"), `x" OR "org_id" <> '`)
+	})
+
+	it("projects only the investigation columns the page renders", () => {
+		const columns =
+			parse(buildUpstreamShapeUrl({ ...base, shape: "investigation", scopeValue: "inv_1" }))
+				.params.get("columns")
+				?.split(",") ?? []
+		assert.include(columns, "id")
+		assert.include(columns, "org_id")
+		assert.include(columns, "report_json")
+		// Needed to filter lanes to the live attempt, exactly as the service does.
+		assert.include(columns, "fanout_attempt")
+		// Nothing renders the planner's transcript; it is also the largest column.
+		assert.notInclude(columns, "plan_json")
+		assert.notInclude(columns, "workflow_instance_id")
+
+		const lanes =
+			parse(buildUpstreamShapeUrl({ ...base, shape: "investigation_lens_runs", scopeValue: "inv_1" }))
+				.params.get("columns")
+				?.split(",") ?? []
+		assert.include(lanes, "progress_note")
+		assert.include(lanes, "started_at")
+		assert.notInclude(lanes, "evidence_json")
+		assert.notInclude(lanes, "hypothesis_json")
 	})
 
 	it("adds Electric Cloud source credentials only when provided", () => {

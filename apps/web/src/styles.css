@@ -112,10 +112,40 @@
 	animation: provenance-strand-roadmap 1.05s linear infinite;
 }
 
+/* A running lens lane. The sweep is a third-width bar crossing the node's bottom
+   edge, which stays readable at the 0.68 zoom where the 11px spinner does not;
+   the ring is the amber node's "this is happening now", borrowing severity-pulse
+   so the two live signals on the canvas share one motion. */
+@keyframes provenance-lens-sweep {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(300%);
+	}
+}
+
+.provenance-lens-sweep {
+	animation: provenance-lens-sweep 1.4s ease-in-out infinite;
+}
+
+.provenance-live-ring {
+	animation: severity-pulse 1.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+/* Motion is the only thing that carries "live" here, so under reduced motion the
+   live strands still read: they keep the amber stroke, the amber junction dots
+   and the phase line the settled ones never get. */
 @media (prefers-reduced-motion: reduce) {
 	.provenance-strand,
-	.provenance-strand-roadmap {
+	.provenance-strand-roadmap,
+	.provenance-lens-sweep,
+	.provenance-live-ring {
 		animation: none;
+	}
+
+	.provenance-live-ring {
+		display: none;
 	}
 }
 

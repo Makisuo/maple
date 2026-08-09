@@ -38,6 +38,7 @@ import type {
 	FlowGlyph,
 	LensNodeData,
 	LensOverflowNodeData,
+	PendingVerdictNodeData,
 	SpineNodeData,
 } from "./provenance-graph"
 
@@ -105,14 +106,28 @@ export const FlowSpineNode = memo(function FlowSpineNode({ data }: NodeProps & {
 			<div className="flex items-center gap-1.5">
 				<span
 					className={cn(
-						"flex size-5.5 shrink-0 items-center justify-center rounded-sm",
+						"relative flex size-5.5 shrink-0 items-center justify-center rounded-sm",
 						data.current ? "bg-primary text-primary-foreground" : "bg-muted",
 						data.lifted && !data.current ? "bg-background" : null,
 					)}
 				>
+					{/*
+					 * The live ring. Depth by tone, never by shadow — this is a ring that
+					 * expands and fades, the same `severity-pulse` the infra board uses,
+					 * not a glow. It sits behind the tile so the glyph stays legible, and
+					 * it is the reason a reader can tell at a glance that the amber node
+					 * is running rather than merely being the one they are looking at.
+					 */}
+					{data.live ? (
+						<span
+							aria-hidden
+							className="provenance-live-ring absolute inset-0 rounded-sm border border-primary"
+						/>
+					) : null}
 					<Icon
 						size={13}
 						className={cn(
+							"relative",
 							data.current
 								? null
 								: data.glyph === "verdict"
@@ -140,6 +155,16 @@ export const FlowSpineNode = memo(function FlowSpineNode({ data }: NodeProps & {
 			>
 				{data.title}
 			</p>
+			{/*
+			 * The stage, while there is one. It is the answer to the question a reader
+			 * opens a running investigation to ask — "what is it doing?" — and the node
+			 * that *is* the running thing was the only one on the canvas not saying.
+			 */}
+			{data.phase ? (
+				<p className={cn(EYEBROW, "truncate text-[9px] leading-3 text-primary")} title={data.phase}>
+					{data.phase}
+				</p>
+			) : null}
 			{data.status ? (
 				<p className="flex items-baseline gap-1 text-[9px] leading-3">
 					<span className="shrink-0 font-medium tracking-[0.06em] text-severity-error">
@@ -218,12 +243,13 @@ export const FlowSpineNode = memo(function FlowSpineNode({ data }: NodeProps & {
 export const FlowLensNode = memo(function FlowLensNode({ data }: NodeProps & { data: LensNodeData }) {
 	const { state } = data
 	const Icon = LENS_GLYPH[state.icon]
+	const running = state.icon === "running"
 	return (
 		<>
 			<Ports />
 			<div
 				className={cn(
-					"flex size-full flex-col justify-center gap-1 rounded-md border bg-background px-2.5",
+					"relative flex size-full flex-col justify-center gap-1 overflow-hidden rounded-md border bg-background px-2.5",
 					TONE_BORDER[state.tone],
 					state.dashed ? "border-dashed" : null,
 				)}
@@ -246,8 +272,10 @@ export const FlowLensNode = memo(function FlowLensNode({ data }: NodeProps & { d
 						className={cn(
 							"shrink-0",
 							TONE_TEXT[state.tone],
-							// Spec rule 04: a running lane pulses, and only a running lane.
-							state.icon === "running" ? "animate-pulse motion-reduce:animate-none" : null,
+							// Spec rule 04: a running lane moves, and only a running lane.
+							// It spins rather than pulses — the glyph is a loader, and a
+							// loader that fades in and out reads as a disabled control.
+							running ? "animate-spin motion-reduce:animate-none" : null,
 						)}
 					/>
 					<span
@@ -262,6 +290,64 @@ export const FlowLensNode = memo(function FlowLensNode({ data }: NodeProps & { d
 						{data.elapsed ?? ""}
 					</span>
 				</p>
+				{/*
+				 * What the lane is doing, on the lane. Reserved to running lanes: a
+				 * settled one's note describes a step it has already left, and the row
+				 * that matters there is the result, which the tooltip carries.
+				 */}
+				{running && data.progressNote ? (
+					<p
+						className="truncate text-[9px] leading-3 text-muted-foreground"
+						title={data.progressNote}
+					>
+						{data.progressNote}
+					</p>
+				) : null}
+				{/*
+				 * An indeterminate sweep along the bottom edge. The 11px spinner stops
+				 * being readable at the 0.68 zoom a narrow window forces; a bar crossing
+				 * the full 146px width does not.
+				 */}
+				{running ? (
+					<span aria-hidden className="absolute inset-x-0 bottom-0 h-px overflow-hidden">
+						<span className="provenance-lens-sweep absolute inset-y-0 w-1/3 bg-primary" />
+					</span>
+				) : null}
+			</div>
+		</>
+	)
+})
+
+/**
+ * The step after the fan while the verdict is still being reached.
+ *
+ * Dashed and muted throughout — it is the one node on the canvas that describes
+ * work rather than a result, and it must not be mistaken at a glance for the
+ * real verdict node it will be replaced by.
+ */
+export const FlowPendingVerdictNode = memo(function FlowPendingVerdictNode({
+	data,
+}: NodeProps & { data: PendingVerdictNodeData }) {
+	return (
+		<>
+			<Ports />
+			<div className="flex size-full flex-col justify-center gap-1.5 overflow-hidden rounded-lg border border-dashed bg-background px-3 py-2.5">
+				<div className="flex items-start gap-1.5">
+					<span className="flex size-5.5 shrink-0 items-center justify-center rounded-sm border border-dashed">
+						<ClockIcon size={13} className="text-muted-foreground" />
+					</span>
+					{/*
+					 * Wraps rather than truncates. "AWAITING VERDICT" does not fit the
+					 * 146px node on one line at the eyebrow's tracking, and the word IS
+					 * this node — a node reading "AWAITING VE…" says nothing at all.
+					 */}
+					<span className={cn(EYEBROW, "min-w-0 flex-1 leading-[1.3] text-muted-foreground")}>
+						{data.word}
+					</span>
+				</div>
+				{data.note ? (
+					<p className="text-[10px] leading-[1.4] text-muted-foreground">{data.note}</p>
+				) : null}
 			</div>
 		</>
 	)

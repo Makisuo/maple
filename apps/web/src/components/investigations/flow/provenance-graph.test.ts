@@ -157,6 +157,117 @@ describe("buildProvenanceGraph", () => {
 		expect(running).not.toContain("action")
 	})
 
+	/**
+	 * What stands where the verdict will go. It states the process and never a
+	 * finding, which is what keeps it from being the placeholder verdict the rule
+	 * above forbids — and without it the chain stops mid-air at the fan.
+	 */
+	it("stands a process-only ghost where the verdict will land", () => {
+		const graph = buildProvenanceGraph(
+			make({
+				status: "investigating",
+				report: null,
+				lens_runs: [lens({ status: "reported", verdict: "pending" }), lens({ status: "checking" })],
+				fanout: { state: "running", size: 2 },
+			} as never),
+		)
+		const ghost = graph.nodes.find((node) => node.type === "pendingVerdict")
+		expect(ghost).toMatchObject({ data: { word: "AWAITING VERDICT", note: "1 of 2 lenses reported" } })
+		// No claim anywhere on it — no cause, no confidence, no instant.
+		expect(Object.keys(ghost?.data ?? {})).toEqual(["word", "note"])
+	})
+
+	it("says VALIDATING once every lane has settled", () => {
+		const graph = buildProvenanceGraph(
+			make({
+				status: "investigating",
+				report: null,
+				lens_runs: [lens({ status: "reported", verdict: "pending" }), lens({ status: "no_finding" })],
+				fanout: { state: "validating", size: 2 },
+			} as never),
+		)
+		expect(graph.nodes.find((node) => node.type === "pendingVerdict")).toMatchObject({
+			data: { word: "VALIDATING" },
+		})
+	})
+
+	it("raises no ghost once the run has ended, or where there was no fan", () => {
+		const ghosts = (investigation: V2Investigation) =>
+			buildProvenanceGraph(investigation).nodes.filter((node) => node.type === "pendingVerdict")
+		expect(ghosts(make())).toHaveLength(0)
+		expect(ghosts(make({ status: "failed", report: null } as never))).toHaveLength(0)
+		// A single-pass run dispatched no lenses; a ghost merging a fan of none is a
+		// column about work that was never split up.
+		expect(ghosts(make({ status: "investigating", report: null } as never))).toHaveLength(0)
+	})
+
+	/**
+	 * The inversion this whole pass exists for: motion means live. A finished
+	 * investigation's strands must be inert, or the one moving signal on the canvas
+	 * is spent on a diagnosis from last week.
+	 */
+	it("marks live only the strands feeding work that is still open", () => {
+		expect(buildProvenanceGraph(make({ lens_runs: [lens()] } as never)).edges.some((e) => e.live)).toBe(
+			false,
+		)
+
+		const graph = buildProvenanceGraph(
+			make({
+				status: "investigating",
+				report: null,
+				lens_runs: [
+					lens({ lensId: "settled", status: "reported", verdict: "pending" }),
+					lens({ lensId: "busy", status: "checking" }),
+					lens({ lensId: "waiting", status: "queued" }),
+				],
+				fanout: { state: "running", size: 3 },
+			} as never),
+		)
+		const live = graph.edges.filter((edge) => edge.live).map((edge) => edge.target)
+		expect(live).toContain("investigation")
+		expect(live).toContain("pending-verdict")
+		expect(live.some((id) => id.startsWith("lens-busy"))).toBe(true)
+		// Queued is live too — nothing has happened on that lane yet.
+		expect(live.some((id) => id.startsWith("lens-waiting"))).toBe(true)
+		expect(live.some((id) => id.startsWith("lens-settled"))).toBe(false)
+	})
+
+	it("names the stage a running pass is in", () => {
+		const phase = (overrides: Partial<V2Investigation>) => {
+			const nodes = chain(make({ status: "investigating", report: null, ...overrides } as never))
+			const node = nodes.find((n) => n.id === "investigation")
+			return node?.type === "spine" ? node.data.phase : undefined
+		}
+		expect(phase({ fanout: { state: "queued", size: 3 } } as never)).toBe("QUEUEING")
+		expect(
+			phase({
+				fanout: { state: "running", size: 2 },
+				lens_runs: [lens({ status: "reported" }), lens({ status: "checking" })],
+			} as never),
+		).toBe("FANNING OUT · 1/2")
+		expect(phase({ fanout: { state: "validating", size: 2 } } as never)).toBe("VALIDATING")
+		// The single-pass path, and the one that must not be labelled VALIDATING:
+		// `blocked` is set for the whole time the lanes are still reporting.
+		expect(phase({} as never)).toBe("RUNNING")
+		expect(
+			phase({
+				fanout: { state: "running", size: 1 },
+				lens_runs: [lens({ status: "checking" })],
+				validator: { status: "blocked", note: "waiting", elapsedSeconds: null },
+			} as never),
+		).toBe("FANNING OUT · 0/1")
+		// A finished run states its outcome, not a stage.
+		const done = chain(make()).find((node) => node.id === "investigation")
+		expect(done?.type === "spine" ? done.data.phase : "set").toBeUndefined()
+	})
+
+	it("hands the caption a clock to tick against only while the pass runs", () => {
+		expect(buildProvenanceGraph(make()).runningSince).toBeNull()
+		expect(
+			buildProvenanceGraph(make({ status: "investigating", report: null } as never)).runningSince,
+		).toBe(Date.parse("2026-08-01T14:02:00.000Z"))
+	})
+
 	it("omits the verdict on a failed pass that attached no report", () => {
 		expect(kinds(make({ status: "failed", report: null } as never))).not.toContain("VERDICT")
 	})

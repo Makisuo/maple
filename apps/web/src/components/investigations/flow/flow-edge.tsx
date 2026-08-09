@@ -15,6 +15,8 @@ import type { EdgeKind } from "./provenance-graph"
 export interface FlowEdgeData extends Record<string, unknown> {
 	readonly kind: EdgeKind
 	readonly label?: string
+	/** Feeds a step that hasn't finished. The only strand that moves. */
+	readonly live?: boolean
 }
 
 /**
@@ -24,6 +26,8 @@ export interface FlowEdgeData extends Record<string, unknown> {
  * 2px it takes to merely cap the strand.
  */
 const DOT = "fill-muted-foreground"
+/** A live strand's ports take the amber the running node already owns. */
+const DOT_LIVE = "fill-primary"
 const DOT_R = 2.5
 
 export const FlowEdge = memo(function FlowEdge({
@@ -49,20 +53,37 @@ export const FlowEdge = memo(function FlowEdge({
 		offset: 16,
 	})
 	const kind = data?.kind ?? "causal"
+	const live = data?.live === true
 
 	return (
 		<>
 			<BaseEdge
 				path={path}
-				// Marching dashes, drifting source→target. Keyframes live in styles.css
-				// because they have to stay in step with the dasharray below.
-				className={kind === "roadmap" ? "provenance-strand-roadmap" : "provenance-strand"}
+				/*
+				 * Marching dashes, drifting source→target — but only on a strand feeding
+				 * work that is still open. Motion on this canvas means "this is happening
+				 * now" and means nothing else; a graph where every strand marched forever
+				 * spent its one moving signal on a diagnosis from last Tuesday. Keyframes
+				 * live in styles.css because they have to stay in step with the dasharray
+				 * below.
+				 */
+				className={
+					live
+						? kind === "roadmap"
+							? "provenance-strand-roadmap"
+							: "provenance-strand"
+						: undefined
+				}
 				style={{
 					// Not `--border`: a 1px dashed run at border contrast is roughly half a
 					// solid one, and the strand disappears. Muted-foreground held back to 45%
 					// lands it between the card border and the label text.
-					stroke: "var(--muted-foreground)",
-					strokeOpacity: 0.45,
+					//
+					// A live strand takes the amber and more of its own opacity, so the
+					// live/settled split survives a still frame — which is what a reader
+					// with reduced motion sees of it, and all they see of it.
+					stroke: live ? "var(--primary)" : "var(--muted-foreground)",
+					strokeOpacity: live ? 0.7 : 0.45,
 					strokeWidth: 1,
 					// Dashed throughout — direction is carried by the left-to-right layout,
 					// not by an arrowhead.
@@ -75,8 +96,8 @@ export const FlowEdge = memo(function FlowEdge({
 			 * A fan re-draws the same source dot four times over — identical coordinates,
 			 * so it costs three overdrawn circles and stays one dot on screen.
 			 */}
-			<circle cx={sourceX} cy={sourceY} r={DOT_R} className={DOT} />
-			<circle cx={targetX} cy={targetY} r={DOT_R} className={DOT} />
+			<circle cx={sourceX} cy={sourceY} r={DOT_R} className={live ? DOT_LIVE : DOT} />
+			<circle cx={targetX} cy={targetY} r={DOT_R} className={live ? DOT_LIVE : DOT} />
 			{data?.label ? (
 				<EdgeLabelRenderer>
 					<span

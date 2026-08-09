@@ -102,13 +102,11 @@ export function InvestigationView({
 	action,
 	investigation,
 	tab,
-	onRefresh,
 }: {
 	/** The open proposed-action detail, straight off `?action=` and not yet narrowed. */
 	action: unknown
 	investigation: V2Investigation
 	tab: InvestigationTab
-	onRefresh: () => void
 }) {
 	const navigate = useNavigate()
 	const [busy, setBusy] = useState(false)
@@ -132,7 +130,8 @@ export function InvestigationView({
 				title: isResolved ? "Investigation reopened" : "Investigation restarted",
 				type: "success",
 			})
-			onRefresh()
+			// No refetch: the row this page renders is an Electric shape, so the
+			// restart's writes arrive on their own.
 		} else {
 			toastManager.add({ title: "Investigation could not be restarted", type: "error" })
 		}
@@ -148,7 +147,6 @@ export function InvestigationView({
 		setBusy(false)
 		if (Exit.isSuccess(result)) {
 			toastManager.add({ title: "Investigation resolved", type: "success" })
-			onRefresh()
 		} else {
 			toastManager.add({ title: "Investigation could not be resolved", type: "error" })
 		}

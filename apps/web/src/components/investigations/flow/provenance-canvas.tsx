@@ -33,14 +33,18 @@ import {
 	FlowHeadingNode,
 	FlowLensNode,
 	FlowLensOverflowNode,
+	FlowPendingVerdictNode,
 	FlowSpineNode,
 } from "./flow-nodes"
+import { useTickingNow } from "@/hooks/use-ticking-now"
+import { splitDuration } from "../investigation-display"
 import { buildProvenanceGraph, type ProvenanceGraph } from "./provenance-graph"
 
 const nodeTypes = {
 	spine: FlowSpineNode,
 	lens: FlowLensNode,
 	lensOverflow: FlowLensOverflowNode,
+	pendingVerdict: FlowPendingVerdictNode,
 	action: FlowActionNode,
 	heading: FlowHeadingNode,
 }
@@ -107,6 +111,15 @@ const proposedActions = (graph: ProvenanceGraph): Array<ProposedAction> =>
 	)
 
 function Caption({ graph }: { graph: ProvenanceGraph }) {
+	/*
+	 * A running pass counts up. The wire only refreshes every three seconds, so
+	 * without this the one number on the canvas that is supposed to be live sat
+	 * frozen between polls and read as a stalled run — `useTickingNow` is the
+	 * sanctioned timer exception for exactly this.
+	 */
+	const now = useTickingNow(graph.runningSince !== null)
+	const running = graph.runningSince !== null ? splitDuration(Math.max(0, now - graph.runningSince)) : null
+
 	return (
 		<div className="flex items-center gap-2.5">
 			<span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -116,8 +129,17 @@ function Caption({ graph }: { graph: ProvenanceGraph }) {
 				what produced this investigation, and what it produced
 			</span>
 			{graph.caption ? (
-				<span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
+				<span className="flex shrink-0 items-center gap-1.5 font-mono text-xs text-muted-foreground tabular-nums">
+					{running ? (
+						<span
+							aria-hidden
+							className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
+						/>
+					) : null}
 					{graph.caption}
+					{running ? (
+						<span className="text-foreground">{` · ${running.value}${running.unit}`}</span>
+					) : null}
 				</span>
 			) : null}
 		</div>
@@ -192,6 +214,7 @@ function Canvas({
 				data: {
 					kind: edge.kind,
 					...(edge.label ? { label: edge.label } : {}),
+					...(edge.live ? { live: true } : {}),
 				} satisfies FlowEdgeData,
 			})),
 		[graph],
@@ -347,11 +370,13 @@ function GraphOutline({
 				.map((node) => (
 					<li key={node.id}>
 						{node.type === "spine" ? (
-							`${node.data.eyebrow}: ${node.data.title}${node.data.status ? ` — ${node.data.status}` : ""}`
+							`${node.data.eyebrow}: ${node.data.title}${node.data.status ? ` — ${node.data.status}` : ""}${node.data.phase ? ` — ${node.data.phase}` : ""}`
 						) : node.type === "lens" ? (
-							`Lens ${node.data.title} — ${node.data.state.word}`
+							`Lens ${node.data.title} — ${node.data.state.word}${node.data.state.icon === "running" && node.data.progressNote ? `, ${node.data.progressNote}` : ""}`
 						) : node.type === "lensOverflow" ? (
 							`${node.data.hidden} further lenses`
+						) : node.type === "pendingVerdict" ? (
+							`${node.data.word}${node.data.note ? `: ${node.data.note}` : ""}`
 						) : (
 							/*
 							 * A real button, because this outline is the keyboard route into
