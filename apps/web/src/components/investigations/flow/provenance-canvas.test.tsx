@@ -87,12 +87,36 @@ beforeAll(() => {
 // two canvases.
 afterEach(cleanup)
 
-const renderCanvas = (onOpenAction = vi.fn()) => {
-	render(
-		<ProvenanceCanvas investigation={investigation} openActionIndex={null} onOpenAction={onOpenAction} />,
-	)
+const renderCanvas = (onOpenAction = vi.fn(), subject: V2Investigation = investigation) => {
+	render(<ProvenanceCanvas investigation={subject} openActionIndex={null} onOpenAction={onOpenAction} />)
 	return onOpenAction
 }
+
+/** Mid-run: a fan in flight, no report, so both ghost columns are up. */
+const running = {
+	...investigation,
+	status: "investigating",
+	report: null,
+	diagnosed_at: null,
+	lens_runs: [
+		{
+			lensId: "deploy_correlation",
+			status: "checking",
+			verdict: "pending",
+			claim: null,
+			reason: null,
+			progressNote: null,
+			confidence: null,
+			toolCount: 1,
+			elapsedSeconds: 2.1,
+			name: null,
+			question: null,
+			priority: null,
+			deadlineHit: false,
+		},
+	],
+	fanout: { state: "running", size: 1 },
+} as never as V2Investigation
 
 describe("ProvenanceCanvas", () => {
 	/**
@@ -135,5 +159,23 @@ describe("ProvenanceCanvas", () => {
 		const onOpenAction = renderCanvas()
 		fireEvent.click(screen.getByRole("link", { name: /CREATE ALERT/ }))
 		expect(onOpenAction).not.toHaveBeenCalled()
+	})
+
+	/**
+	 * The ghost actions column is a loading state, and a loading state that can be
+	 * clicked, tabbed to, or read out as a real proposal is worse than none — the
+	 * reader would go looking for an action nobody has proposed.
+	 */
+	it("renders the pending actions column as inert ghosts", () => {
+		renderCanvas(vi.fn(), running)
+		const ghosts = document.querySelectorAll(".react-flow__node-actionGhost")
+		expect(ghosts).toHaveLength(2)
+		for (const ghost of ghosts) {
+			expect(ghost.querySelector("a")).toBeNull()
+			expect(ghost.querySelector("button")).toBeNull()
+		}
+		expect(screen.queryByRole("button", { name: /Proposed action/ })).toBeNull()
+		// Announced once, as pending — not as two anonymous proposals.
+		expect(screen.getByText("Proposed actions pending")).toBeTruthy()
 	})
 })

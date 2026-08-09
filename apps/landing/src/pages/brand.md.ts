@@ -14,8 +14,16 @@ export const GET: APIRoute = ({ site }) => {
 	const url = (path: string) => absolute(site, path)
 
 	const assets = [
-		["Lockup, primary", "amber mark, ink type — light grounds", "/brand/wordmark/maple-lockup-primary.svg"],
-		["Lockup, reversed", "amber mark, bone type — dark grounds", "/brand/wordmark/maple-lockup-reversed.svg"],
+		[
+			"Lockup, primary",
+			"amber mark, ink type — light grounds",
+			"/brand/wordmark/maple-lockup-primary.svg",
+		],
+		[
+			"Lockup, reversed",
+			"amber mark, bone type — dark grounds",
+			"/brand/wordmark/maple-lockup-reversed.svg",
+		],
 		["Lockup, mono ink", "single fill", "/brand/wordmark/maple-lockup-ink.svg"],
 		["Lockup, mono white", "single fill", "/brand/wordmark/maple-lockup-white.svg"],
 		["Wordmark only", "type alone, outlined", "/brand/wordmark/maple-wordmark-ink.svg"],
@@ -62,9 +70,9 @@ export const GET: APIRoute = ({ site }) => {
 
 			"## Usage",
 			blocks(
-				"- **Don't fill the mark with a gradient.** The eyes and the notch beside the trunk are knockouts in one `fill-rule=\"evenodd\"` path, so a gradient reaches them at a different value and they stop reading as eyes.",
+				'- **Don\'t fill the mark with a gradient.** The eyes and the notch beside the trunk are knockouts in one `fill-rule="evenodd"` path, so a gradient reaches them at a different value and they stop reading as eyes.',
 				"- **Don't put the rounded tile inside your own chrome.** The tile exists to survive a browser tab strip; on a surface that already has an edge it is a box around a box. Use the bare mark.",
-				"- **Don't rebuild the wordmark** by setting \"Maple\" in another face next to the mark. Use the outlined lockup.",
+				'- **Don\'t rebuild the wordmark** by setting "Maple" in another face next to the mark. Use the outlined lockup.',
 				"- **Don't stretch, rotate, or recolour.** Scale uniformly and pick a colourway above; if none clears your ground, use mono white or mono ink.",
 				"- **Do keep clear space** of at least half the mark's width on every side.",
 				"- **Do respect the 16px floor** for the bare mark — below that its eyes antialias into a blob, so use the tile instead.",

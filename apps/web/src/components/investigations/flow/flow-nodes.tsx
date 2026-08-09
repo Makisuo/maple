@@ -9,6 +9,7 @@ import { memo } from "react"
 import { Link } from "@tanstack/react-router"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { cn } from "@maple/ui/lib/utils"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
 
 import {
@@ -244,6 +245,8 @@ export const FlowLensNode = memo(function FlowLensNode({ data }: NodeProps & { d
 	const { state } = data
 	const Icon = LENS_GLYPH[state.icon]
 	const running = state.icon === "running"
+	/** Queued or running — a lane whose result has not landed, whatever it is doing. */
+	const waiting = running || state.icon === "pending"
 	return (
 		<>
 			<Ports />
@@ -302,6 +305,15 @@ export const FlowLensNode = memo(function FlowLensNode({ data }: NodeProps & { d
 					>
 						{data.progressNote}
 					</p>
+				) : waiting ? (
+					/*
+					 * The same row, held open by a bar, for a lane that has not said
+					 * anything yet — a queued one, or a running one between notes. The
+					 * card's height is fixed at 64px either way, so without this the
+					 * third row is simply blank and a queued lane reads as a finished
+					 * lane whose result failed to render.
+					 */
+					<Skeleton className="h-1.5 w-2/3 rounded-full" />
 				) : null}
 				{/*
 				 * An indeterminate sweep along the bottom edge. The 11px spinner stops
@@ -331,7 +343,7 @@ export const FlowPendingVerdictNode = memo(function FlowPendingVerdictNode({
 	return (
 		<>
 			<Ports />
-			<div className="flex size-full flex-col justify-center gap-1.5 overflow-hidden rounded-lg border border-dashed bg-background px-3 py-2.5">
+			<div className="relative flex size-full flex-col justify-center gap-1.5 overflow-hidden rounded-lg border border-dashed bg-background px-3 py-2.5">
 				<div className="flex items-start gap-1.5">
 					<span className="flex size-5.5 shrink-0 items-center justify-center rounded-sm border border-dashed">
 						<ClockIcon size={13} className="text-muted-foreground" />
@@ -348,6 +360,21 @@ export const FlowPendingVerdictNode = memo(function FlowPendingVerdictNode({
 				{data.note ? (
 					<p className="text-[10px] leading-[1.4] text-muted-foreground">{data.note}</p>
 				) : null}
+				{/*
+				 * Two bars where the verdict node prints its suspected cause and its
+				 * confidence. Bars rather than words on purpose: this node is forbidden
+				 * to state a finding, and a bar is the one way to say "a finding lands
+				 * here" without making one up. They also stop the node reading as a
+				 * dead end — the chain visibly continues past the fan.
+				 */}
+				<div aria-hidden className="flex flex-col gap-1 pt-0.5">
+					<Skeleton className="h-1.5 w-full rounded-full" />
+					<Skeleton className="h-1.5 w-1/2 rounded-full" />
+				</div>
+				{/* The same sweep the running lens lanes wear, so the canvas's live nodes share one motion. */}
+				<span aria-hidden className="absolute inset-x-0 bottom-0 h-px overflow-hidden">
+					<span className="provenance-lens-sweep absolute inset-y-0 w-1/3 bg-primary" />
+				</span>
 			</div>
 		</>
 	)
@@ -422,6 +449,35 @@ function ActionGlyph({ kind }: { kind: ActionKind }) {
 		</span>
 	)
 }
+
+/**
+ * A proposed action the report has not written yet.
+ *
+ * Dashed, inert, and wordless. It keeps the actions column's gutter and its two
+ * text rows so the real cards land in the same places these stood — the column
+ * does not shift when the verdict arrives, it fills in.
+ */
+export const FlowActionGhostNode = memo(function FlowActionGhostNode() {
+	return (
+		<>
+			<Ports />
+			<div
+				aria-hidden
+				className="pointer-events-none flex size-full items-center gap-2.5 rounded-lg border border-dashed bg-card/40 px-3"
+			>
+				<span className="flex w-4 shrink-0 flex-col items-center gap-1.5 self-start pt-3">
+					<Skeleton className="h-1.5 w-3 rounded-full" />
+					<Skeleton className="size-3.5 rounded-sm" />
+				</span>
+				<div className="flex min-w-0 flex-1 flex-col gap-1.5 py-2.5">
+					<Skeleton className="h-2 w-full rounded-full" />
+					<Skeleton className="h-2 w-2/3 rounded-full" />
+					<Skeleton className="h-1.5 w-16 rounded-full" />
+				</div>
+			</div>
+		</>
+	)
+})
 
 export const FlowActionNode = memo(function FlowActionNode({ data }: NodeProps & { data: ActionNodeData }) {
 	const open = () => data.onOpen?.(data.index)

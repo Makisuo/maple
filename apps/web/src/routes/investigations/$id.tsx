@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { Option, Schema } from "effect"
 
 import { INVESTIGATION_TABS } from "@/components/investigations/investigation-tabs"
+import { ProvenanceCanvasLoading } from "@/components/investigations/flow/provenance-loading"
 import { InvestigationView } from "@/components/investigations/investigation-view"
 import { ErrorState } from "@/components/common/error-state"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -140,13 +141,18 @@ function LoadFailureShell({ error, onRetry }: { error: unknown; onRetry: () => v
 	)
 }
 
+/**
+ * The header rows are bars, but the canvas is not: it is the page's lead widget,
+ * and a grey block standing in for it told the reader nothing about what was
+ * coming. The ghost draws the chain it is about to be replaced by.
+ */
 function LoadingShell({ label = "Loading investigation…" }: { label?: string }) {
 	return (
 		<InvestigationShell trail="…" title={label}>
 			<div className="mx-auto w-full max-w-4xl space-y-4">
 				<Skeleton className="h-4 w-32" />
 				<Skeleton className="h-8 w-3/4" />
-				<Skeleton className="h-56 w-full" />
+				<ProvenanceCanvasLoading />
 			</div>
 		</InvestigationShell>
 	)

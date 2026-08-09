@@ -3,10 +3,10 @@
 Hand-authored brand sources. Two files, both generated once and committed —
 nothing here is built in CI.
 
-| File           | What it is                                                       |
-| -------------- | ---------------------------------------------------------------- |
-| `lockup.svg`   | Mark + "Maple", type outlined. Two flat fills: mark, then type.   |
-| `wordmark.svg` | The type alone, cropped to its own ink. One flat fill.            |
+| File           | What it is                                                      |
+| -------------- | --------------------------------------------------------------- |
+| `lockup.svg`   | Mark + "Maple", type outlined. Two flat fills: mark, then type. |
+| `wordmark.svg` | The type alone, cropped to its own ink. One flat fill.          |
 
 Both come from `scripts/outline-wordmark.py`, which draws the spec on the
 `09 — Wordmark / lockup` artboard of the **Maple Logo** file in Paper. That

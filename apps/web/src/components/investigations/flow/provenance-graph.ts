@@ -151,6 +151,19 @@ export interface PendingVerdictNodeData {
 	readonly note: string | null
 }
 
+/**
+ * A proposed action that has not been proposed yet.
+ *
+ * Carries no fields, and that is the point: it says a card lands here, not what
+ * the card will say. Two of them are pushed while a pass runs so the chain does
+ * not stop dead at the pending verdict — the reader can see there is a column
+ * still to come, which is the one thing the canvas used to leave them guessing.
+ */
+export interface ActionGhostNodeData {
+	/** Position in the ghost column, for a stable key and the screen-reader outline. */
+	readonly slot: number
+}
+
 export interface ActionNodeData {
 	/** Zero-based position in `report.suggestedActions` — the detail panel's identity, and its URL key. */
 	readonly index: number
@@ -189,6 +202,14 @@ export type ProvenanceNode =
 			data: PendingVerdictNodeData
 	  }
 	| { id: string; type: "action"; position: XY; width: number; height: number; data: ActionNodeData }
+	| {
+			id: string
+			type: "actionGhost"
+			position: XY
+			width: number
+			height: number
+			data: ActionGhostNodeData
+	  }
 	| {
 			id: string
 			type: "heading"
@@ -439,7 +460,8 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 	 * the investigation has not made yet. What stands in its place is a node about
 	 * the process rather than the finding — see `PendingVerdictNodeData`.
 	 */
-	if (running && lensNodes.length > 0) {
+	const awaitingVerdict = running && lensNodes.length > 0
+	if (awaitingVerdict) {
 		pushColumn(
 			[
 				{
@@ -497,7 +519,8 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 	/* --- proposed actions ---------------------------------------------------- */
 
 	const actions = report?.suggestedActions ?? []
-	if (actions.length > 0 && investigation.status !== "investigating") {
+	const proposing = actions.length > 0 && investigation.status !== "investigating"
+	if (proposing) {
 		nextLabel = "PROPOSES"
 		pushColumn(
 			actions.map((action, index) => ({
@@ -517,26 +540,56 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 			ACTION_WIDTH,
 			"roadmap",
 		)
+	} else if (awaitingVerdict) {
+		/*
+		 * Two ghosts while the pass is still running. Two is a shape, not a count —
+		 * the heading stays count-less and the cards carry no ordinals, because the
+		 * report has not said how many actions it will propose. What they do say is
+		 * that the chain continues, which is why the column exists at all: without
+		 * it the canvas ends at the pending verdict and reads as finished.
+		 */
+		nextLabel = "PROPOSES"
+		pushColumn(
+			[0, 1].map((slot) => ({
+				id: `action-ghost-${slot}`,
+				type: "actionGhost" as const,
+				position: { x: 0, y: 0 },
+				width: ACTION_WIDTH,
+				height: ACTION_HEIGHT,
+				data: { slot },
+			})),
+			ACTION_WIDTH,
+			"roadmap",
+		)
+		liveIds.add("action-ghost-0")
+		liveIds.add("action-ghost-1")
 	}
 
 	/* --- position ------------------------------------------------------------ */
 
+	const isActionColumn = (column: { nodes: Array<ProvenanceNode> }): boolean => {
+		const kind = column.nodes[0]?.type
+		return kind === "action" || kind === "actionGhost"
+	}
 	const columnHeight = (column: { nodes: Array<ProvenanceNode> }): number => {
-		const gap = column.nodes[0]?.type === "action" ? ACTION_GAP : LENS_GAP
+		const gap = isActionColumn(column) ? ACTION_GAP : LENS_GAP
 		return column.nodes.reduce((total, node, index) => total + node.height + (index ? gap : 0), 0)
 	}
 	const height = Math.max(0, ...columns.map(columnHeight))
 
 	const lensHeading = lensColumnHeading(investigation)
-	const actionHeading =
-		actions.length > 0 && investigation.status !== "investigating"
-			? `PROPOSES · ${actions.length} ${actions.length === 1 ? "ACTION" : "ACTIONS"} BY IMPACT`
+	const actionHeading = proposing
+		? `PROPOSES · ${actions.length} ${actions.length === 1 ? "ACTION" : "ACTIONS"} BY IMPACT`
+		: // No count while the ghosts stand there — a count is a claim about a report
+			// that has not been written.
+			awaitingVerdict
+			? "PROPOSES · PENDING"
 			: null
 
 	const headings: Array<ProvenanceNode> = []
 	let x = 0
 	for (const column of columns) {
-		const gap = column.nodes[0]?.type === "action" ? ACTION_GAP : LENS_GAP
+		const gap = isActionColumn(column) ? ACTION_GAP : LENS_GAP
 		const top = (height - columnHeight(column)) / 2
 		let y = top
 		for (const node of column.nodes) {
@@ -546,7 +599,8 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 		// The two multi-node columns carry their count as a heading; the spine
 		// columns say what they are on the node itself.
 		const kind = column.nodes[0]?.type
-		const text = kind === "action" ? actionHeading : kind === "lens" ? lensHeading : null
+		const text =
+			kind === "action" || kind === "actionGhost" ? actionHeading : kind === "lens" ? lensHeading : null
 		if (text) {
 			headings.push({
 				id: `heading-${kind}`,

@@ -89,7 +89,7 @@ import {
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
-import { persistErrorTickWindow } from "@/services/errors/error-tick-persistence"
+import { isErrorTickClaimLost, persistErrorTickWindow } from "@/services/errors/error-tick-persistence"
 import { escalationDedupeKey, escalationReasonFor } from "@/services/errors/issue-severity"
 import { SYSTEM_ERRORS_AGENT_NAME, isReservedAgentName } from "@/services/auth/system-actors"
 import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
@@ -152,8 +152,18 @@ const TICK_MINUTE_MS = 60_000
 const TICK_INGESTION_LAG_MS = TICK_MINUTE_MS
 const TICK_BOOTSTRAP_WINDOW_MS = 2 * TICK_MINUTE_MS
 /** Bound one warehouse query without dropping backlog: a lagging cursor advances
- * by at most one hour per cron and continues catching up on later invocations. */
-const TICK_MAX_WINDOW_MS = 60 * TICK_MINUTE_MS
+ * by at most this much per cron and continues catching up on later invocations.
+ * Five minutes recovers a one-hour outage in ~12 crons while keeping the widest
+ * possible apply at ~5x steady state, so a backlog can never grow a window the
+ * transaction cannot commit inside its lease. */
+const TICK_MAX_WINDOW_MS = 5 * TICK_MINUTE_MS
+/** Time alone does not bound work: fingerprint cardinality can explode inside a
+ * single minute (a UUID leaking into an exception message). Above this many
+ * fingerprints the window is halved and rescanned before anything is applied. */
+const TICK_MAX_WINDOW_ROWS = 20_000
+/** Halving floor. The rollup is minute-grain, so a one-minute window is
+ * indivisible — below that, splitting cannot shed rows. */
+const TICK_MAX_WINDOW_SPLITS = 4
 const TICK_CLAIM_TTL_MS = 5 * TICK_MINUTE_MS
 const NOTIFICATION_CLAIM_TTL_MS = 30_000
 const NOTIFICATION_OUTBOX_BATCH_SIZE = 100
@@ -2609,13 +2619,15 @@ const make: Effect.Effect<
 				})
 				.onConflictDoNothing({ target: errorTickStates.orgId })
 
-			const claimed = await db
-				.update(errorTickStates)
-				.set({
-					claimToken,
-					claimExpiresAt: new Date(nowMs + TICK_CLAIM_TTL_MS),
-					updatedAt: new Date(nowMs),
-				})
+			// `for update skip locked` is what makes the TTL a crash-recovery
+			// mechanism rather than a deadline. `persistErrorTickWindow` holds this
+			// row locked for the life of its transaction, so a legitimately slow
+			// apply is skipped here instead of being stolen and rolled back at its
+			// checkpoint — the retry-forever loop that stalls an org permanently.
+			// Only a dead worker leaves the row unlocked with a lapsed lease.
+			const claimable = db
+				.select({ orgId: errorTickStates.orgId })
+				.from(errorTickStates)
 				.where(
 					and(
 						eq(errorTickStates.orgId, orgId),
@@ -2626,6 +2638,16 @@ const make: Effect.Effect<
 						),
 					),
 				)
+				.for("update", { skipLocked: true })
+
+			const claimed = await db
+				.update(errorTickStates)
+				.set({
+					claimToken,
+					claimExpiresAt: new Date(nowMs + TICK_CLAIM_TTL_MS),
+					updatedAt: new Date(nowMs),
+				})
+				.where(inArray(errorTickStates.orgId, claimable))
 				.returning({
 					processedThrough: errorTickStates.processedThrough,
 					bootstrapCompleted: errorTickStates.bootstrapCompleted,
@@ -2670,8 +2692,8 @@ const make: Effect.Effect<
 				leasesExpired: 0,
 			}
 		}
-		const { windowStartMs, windowEndMs } = tickWindow
-		yield* Effect.annotateCurrentSpan({ windowStartMs, windowEndMs })
+		const { windowStartMs } = tickWindow
+		yield* Effect.annotateCurrentSpan({ windowStartMs, windowEndMs: tickWindow.windowEndMs })
 		const tenant = systemTenant(orgId)
 		const preamble = yield* loadOrgTickPreamble(orgId, nowMs).pipe(
 			Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
@@ -2701,23 +2723,61 @@ const make: Effect.Effect<
 		).pipe(Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)))
 		const issuesReopened = wakeCandidates.length
 
-		const tickParams = {
-			orgId,
-			startTime: formatWarehouseDateTime(windowStartMs),
-			endTime: formatWarehouseDateTime(windowEndMs),
+		const scanWindow = (endMs: number) => {
+			const tickParams = {
+				orgId,
+				startTime: formatWarehouseDateTime(windowStartMs),
+				endTime: formatWarehouseDateTime(endMs),
+			}
+			const issuesCompiled = tickWindow.isBootstrap
+				? CH.compile(CH.errorTickBootstrapIssuesQuery(), tickParams)
+				: CH.compile(CH.errorTickIssuesQuery(), tickParams)
+			return warehouse
+				.compiledQuery(tenant, issuesCompiled, {
+					profile: "aggregation",
+					context: "errorIssuesScan",
+				})
+				.pipe(
+					Effect.mapError(makePersistenceError),
+					Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
+				)
 		}
-		const issuesCompiled = tickWindow.isBootstrap
-			? CH.compile(CH.errorTickBootstrapIssuesQuery(), tickParams)
-			: CH.compile(CH.errorTickIssuesQuery(), tickParams)
-		const issuesRaw = yield* warehouse
-			.compiledQuery(tenant, issuesCompiled, {
-				profile: "aggregation",
-				context: "errorIssuesScan",
-			})
-			.pipe(
-				Effect.mapError(makePersistenceError),
-				Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
+
+		// Shed rows before the transaction rather than after it fails. A catch-up
+		// window, or one minute of a fingerprint-cardinality explosion, can carry
+		// far more fingerprints than an apply should hold open at once; halving the
+		// window and rescanning costs one extra warehouse query and leaves the
+		// remainder for the next cron. Steady state is a single minute and never
+		// enters the loop.
+		let windowEndMs = tickWindow.windowEndMs
+		let issuesRaw = yield* scanWindow(windowEndMs)
+		let splits = 0
+		while (issuesRaw.length > TICK_MAX_WINDOW_ROWS && splits < TICK_MAX_WINDOW_SPLITS) {
+			const widthMinutes = Math.round((windowEndMs - windowStartMs) / TICK_MINUTE_MS)
+			if (widthMinutes <= 1) break
+			windowEndMs = windowStartMs + Math.ceil(widthMinutes / 2) * TICK_MINUTE_MS
+			splits += 1
+			issuesRaw = yield* scanWindow(windowEndMs)
+		}
+		if (issuesRaw.length > TICK_MAX_WINDOW_ROWS) {
+			// An indivisible minute over the cap. Applying it is still the right
+			// call — skipping would lose the window — but it is a fingerprinting
+			// problem, not a load problem, and it should be visible as one.
+			yield* Effect.logWarning("Error tick window exceeds row cap at minimum width").pipe(
+				Effect.annotateLogs({
+					orgId,
+					windowStartMs,
+					windowEndMs,
+					fingerprints: issuesRaw.length,
+					cap: TICK_MAX_WINDOW_ROWS,
+				}),
 			)
+		}
+		yield* Effect.annotateCurrentSpan({
+			windowEndMs,
+			windowSplits: splits,
+			scanFingerprints: issuesRaw.length,
+		})
 
 		const rows = issuesRaw.map((raw) => ({
 			fingerprintHash: String(raw.fingerprintHash ?? ""),
@@ -2755,7 +2815,26 @@ const make: Effect.Effect<
 				makeIncidentId: newErrorIncidentId,
 				makeEventId: newEventId,
 			}),
-		).pipe(Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)))
+		).pipe(
+			Effect.tapError((error) =>
+				// A lost claim now means the worker stalled past the crash-recovery
+				// TTL — the cursor row lock rules out an ordinary steal. Surface it as
+				// its own signal so a recurring stall is distinguishable from a
+				// warehouse or database failure.
+				isErrorTickClaimLost(error)
+					? Effect.logError("Error tick lost its cursor claim before commit").pipe(
+							Effect.annotateLogs({
+								orgId,
+								windowStartMs,
+								windowEndMs,
+								fingerprints: rows.length,
+								claimTtlMs: TICK_CLAIM_TTL_MS,
+							}),
+						)
+					: Effect.void,
+			),
+			Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
+		)
 
 		// The authoritative state and notification outbox are committed above.
 		// Workflow fan-out remains best-effort and runs only after that commit.

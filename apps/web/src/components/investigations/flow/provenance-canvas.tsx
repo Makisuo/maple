@@ -29,6 +29,7 @@ import { CursorIcon, MaximizeIcon, MinusIcon, PlusIcon } from "@/components/icon
 import { ActionDetailSheet, type ProposedAction } from "../action-detail-sheet"
 import { FlowEdge, type FlowEdgeData } from "./flow-edge"
 import {
+	FlowActionGhostNode,
 	FlowActionNode,
 	FlowHeadingNode,
 	FlowLensNode,
@@ -36,6 +37,7 @@ import {
 	FlowPendingVerdictNode,
 	FlowSpineNode,
 } from "./flow-nodes"
+import { ProvenanceCanvasLoading } from "./provenance-loading"
 import { useTickingNow } from "@/hooks/use-ticking-now"
 import { splitDuration } from "../investigation-display"
 import { buildProvenanceGraph, type ProvenanceGraph } from "./provenance-graph"
@@ -46,6 +48,7 @@ const nodeTypes = {
 	lensOverflow: FlowLensOverflowNode,
 	pendingVerdict: FlowPendingVerdictNode,
 	action: FlowActionNode,
+	actionGhost: FlowActionGhostNode,
 	heading: FlowHeadingNode,
 }
 
@@ -73,8 +76,12 @@ export function ProvenanceCanvas({
 	const openAction = actions.find((action) => action.index === openActionIndex) ?? null
 
 	// A freeform investigation that has not produced anything yet is a single node.
-	// One box on a 330px canvas is worse than no canvas.
-	if (graph.nodes.filter((node) => node.type !== "heading").length < 2) return null
+	// One box on a 330px canvas is worse than no canvas — but a *running* one is
+	// about to become a real graph, and leaving a hole where the page's lead widget
+	// goes until it does, then popping the whole chain in, is worse than either.
+	if (graph.nodes.filter((node) => node.type !== "heading").length < 2) {
+		return investigation.status === "investigating" ? <ProvenanceCanvasLoading /> : null
+	}
 
 	return (
 		<ReactFlowProvider>
@@ -377,6 +384,12 @@ function GraphOutline({
 							`${node.data.hidden} further lenses`
 						) : node.type === "pendingVerdict" ? (
 							`${node.data.word}${node.data.note ? `: ${node.data.note}` : ""}`
+						) : node.type === "actionGhost" ? (
+							// Announced once, on the first ghost — "proposed action pending"
+							// twice running says nothing the second time.
+							node.data.slot === 0 ? (
+								"Proposed actions pending"
+							) : null
 						) : (
 							/*
 							 * A real button, because this outline is the keyboard route into

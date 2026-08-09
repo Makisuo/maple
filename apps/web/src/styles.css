@@ -133,6 +133,51 @@
 	animation: severity-pulse 1.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
+/* The ghost canvas (provenance-loading.tsx). Cards assemble left to right, the
+   strands fade in behind them, and one bar per card keeps breathing afterwards so
+   a graph that takes a while to arrive still reads as loading rather than as an
+   empty graph that finished. Same easing as the service map's ghost topology. */
+@keyframes provenance-load-node {
+	from {
+		opacity: 0;
+		transform: scale(0.94) translateY(4px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes provenance-load-strand {
+	from {
+		opacity: 0;
+	}
+}
+
+@keyframes provenance-load-bar {
+	0%,
+	100% {
+		opacity: 0.14;
+	}
+	50% {
+		opacity: 0.34;
+	}
+}
+
+.provenance-load-node {
+	transform-box: fill-box;
+	transform-origin: center;
+	animation: provenance-load-node 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.provenance-load-strand {
+	animation: provenance-load-strand 0.7s ease-out both;
+}
+
+.provenance-load-bar {
+	animation: provenance-load-bar 1.8s ease-in-out infinite;
+}
+
 /* Motion is the only thing that carries "live" here, so under reduced motion the
    live strands still read: they keep the amber stroke, the amber junction dots
    and the phase line the settled ones never get. */
@@ -140,8 +185,18 @@
 	.provenance-strand,
 	.provenance-strand-roadmap,
 	.provenance-lens-sweep,
-	.provenance-live-ring {
+	.provenance-live-ring,
+	.provenance-load-bar {
 		animation: none;
+	}
+
+	/* The ghost's assembly is an entrance, so it has to settle rather than stop:
+	   `animation: none` on a `both`-filled keyframe would leave every card at its
+	   0% frame — a blank canvas. */
+	.provenance-load-node,
+	.provenance-load-strand {
+		animation-duration: 1ms;
+		animation-delay: 0s;
 	}
 
 	.provenance-live-ring {

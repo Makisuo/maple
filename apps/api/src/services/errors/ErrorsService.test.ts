@@ -12,6 +12,7 @@ import {
 	UserId,
 } from "@maple/domain/http"
 import {
+	ActorId,
 	AlertDestinationId,
 	ErrorIncidentId,
 	ErrorIssueEventId,
@@ -39,6 +40,7 @@ import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglit
 import type { SqlQueryOptions, WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { describeCause, ErrorsService, makePersistenceError } from "./ErrorsService"
+import { isErrorTickClaimLost, persistErrorTickWindow } from "./error-tick-persistence"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 
@@ -322,6 +324,7 @@ const makeGatingLayer = (opts: {
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asUserId = Schema.decodeUnknownSync(UserId)
+const asActorId = Schema.decodeUnknownSync(ActorId)
 const asIssueId = Schema.decodeUnknownSync(ErrorIssueId)
 const asIncidentId = Schema.decodeUnknownSync(ErrorIncidentId)
 const asEventId = Schema.decodeUnknownSync(ErrorIssueEventId)
@@ -805,6 +808,32 @@ const loadEventsForIssue = (issueId: ErrorIssueId) =>
 		)
 	})
 
+/**
+ * Walk the cursor forward to the current cutoff the way the once-a-minute cron
+ * does. The evaluator advances by at most `TICK_MAX_WINDOW_MS` of event time per
+ * invocation, so a test that jumps the clock has to run the ticks that jump
+ * skipped — a single `runTick` after a 31-minute leap only covers the first
+ * five minutes of it.
+ */
+const runTicksUntilCaughtUp = Effect.fn("test.runTicksUntilCaughtUp")(function* (maxTicks = 32) {
+	const errors = yield* ErrorsService
+	const database = yield* Database
+	const totals = { issuesTouched: 0, incidentsOpened: 0, incidentsResolved: 0, ticks: 0 }
+	for (let i = 0; i < maxTicks; i++) {
+		const nowMs = yield* Clock.currentTimeMillis
+		const cutoffMs = Math.floor(nowMs / 60_000) * 60_000 - 60_000
+		const cursor = yield* database.execute((db) => db.select().from(errorTickStates))
+		const behind = cursor.length === 0 || cursor.some((row) => row.processedThrough.getTime() < cutoffMs)
+		if (!behind) break
+		const result = yield* errors.runTick()
+		totals.issuesTouched += result.issuesTouched
+		totals.incidentsOpened += result.incidentsOpened
+		totals.incidentsResolved += result.incidentsResolved
+		totals.ticks += 1
+	}
+	return totals
+})
+
 describe("ErrorsService.runTick", () => {
 	it.effect("with no known orgs the tick scans nothing and writes nothing", () =>
 		Effect.gen(function* () {
@@ -1112,15 +1141,17 @@ describe("ErrorsService.runTick", () => {
 				1,
 			)
 
-			// Stale window elapsed, no fresh errors: two OVERLAPPING ticks race the
-			// open→resolved flip. The CAS lets exactly one dispatch the resolve.
+			// Stale window elapsed, no fresh errors. Two OVERLAPPING ticks race the
+			// open→resolved flip: the cursor row lock plus the state CAS let exactly
+			// one of them do it. The cursor has to walk the quiet period first.
 			rows = []
 			yield* TestClock.setTime(TICK_MS + 31 * 60_000)
+			const caughtUp = yield* runTicksUntilCaughtUp()
 			const resolveResults = yield* Effect.all([errors.runTick(), errors.runTick()], {
 				concurrency: 2,
 			})
 			assert.strictEqual(
-				resolveResults.reduce((s, r) => s + r.incidentsResolved, 0),
+				caughtUp.incidentsResolved + resolveResults.reduce((s, r) => s + r.incidentsResolved, 0),
 				1,
 			)
 			assert.lengthOf(
@@ -1355,14 +1386,20 @@ describe("ErrorsService.runTick", () => {
 			rows.length = 0
 			const resolveTickMs = TICK_MS + 31 * 60_000
 			yield* TestClock.setTime(resolveTickMs)
-			const second = yield* errors.runTick()
-			assert.strictEqual(second.issuesTouched, 0)
-			assert.strictEqual(second.incidentsResolved, 1)
+			const caughtUp = yield* runTicksUntilCaughtUp()
+			assert.strictEqual(caughtUp.issuesTouched, 0)
+			assert.strictEqual(caughtUp.incidentsResolved, 1)
 
 			const incidents = yield* loadIncidentsForIssue(issue.id)
 			assert.lengthOf(incidents, 1)
 			assert.strictEqual(incidents[0]?.status, "resolved")
-			assert.strictEqual(incidents[0]?.resolvedAt?.getTime(), resolveTickMs - 60_000)
+			// Staleness is measured in event time against the window being applied,
+			// so the flip lands in the first window that closes more than 30 minutes
+			// after the last occurrence — within one window width of that boundary.
+			const lastTriggeredMs = incidents[0]!.lastTriggeredAt.getTime()
+			const resolvedAtMs = incidents[0]!.resolvedAt!.getTime()
+			assert.isAbove(resolvedAtMs, lastTriggeredMs + 30 * 60_000)
+			assert.isAtMost(resolvedAtMs, lastTriggeredMs + 35 * 60_000)
 
 			const states = yield* database.execute((db) =>
 				db.select().from(errorIssueStates).where(eq(errorIssueStates.issueId, issue.id)),
@@ -1373,6 +1410,221 @@ describe("ErrorsService.runTick", () => {
 			// not advanced.
 			const after = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
 			assert.strictEqual(after.workflowState, "triage")
+		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+	})
+
+	it.effect("a window over the fingerprint cap is halved and rescanned before it is applied", () => {
+		// One fingerprint per row: a cardinality explosion, which is exactly the
+		// shape a time-based window cap cannot bound.
+		const oversized = Array.from({ length: 20_001 }, (_, i) => scanRow({ fingerprintHash: `9${i}` }))
+		let issueScans = 0
+		// Oversized only on the first scan of the second tick; the rescan of the
+		// halved window comes back empty, so nothing is applied and the assertion
+		// is about the cursor, not about 20k inserted rows.
+		const rowsFor = () => (issueScans === 2 ? oversized : [])
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			yield* TestClock.setTime(TICK_MS)
+			yield* seedIssue(asIssueId(randomUUID()))
+			yield* errors.runTick()
+			assert.strictEqual(issueScans, 1)
+
+			// Cursor sits at TICK_MS - 60s; a 6-minute jump offers a 5-minute window.
+			yield* TestClock.setTime(TICK_MS + 6 * 60_000)
+			const result = yield* errors.runTick()
+
+			// Two scans in one tick: the oversized one and the halved rescan.
+			assert.strictEqual(issueScans, 3)
+			assert.strictEqual(result.issuesTouched, 0)
+
+			// 5 minutes halved is 3, so the cursor advances 3 of the 5 available
+			// minutes and the next cron picks up the remainder.
+			const cursor = yield* database.execute((db) =>
+				db.select().from(errorTickStates).where(eq(errorTickStates.orgId, ORG)),
+			)
+			assert.strictEqual(cursor[0]?.processedThrough.getTime(), TICK_MS + 120_000)
+		}).pipe(
+			Effect.provide(
+				makeErrorsLayer(rowsFor, () => {
+					issueScans += 1
+				}),
+			),
+		)
+	})
+
+	it.effect("a window applied without the cursor claim commits nothing", () => {
+		const rows = [scanRow()]
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			yield* TestClock.setTime(TICK_MS)
+			yield* seedIssue(asIssueId(randomUUID()))
+			yield* errors.runTick()
+
+			const before = yield* database.execute((db) =>
+				db.select().from(errorTickStates).where(eq(errorTickStates.orgId, ORG)),
+			)
+			const issuesBefore = yield* loadIssuesByFingerprint("77777777777777777777")
+
+			// Stand in for a worker that stalled past the crash-recovery TTL and had
+			// its claim taken over: the window must roll back whole, not half-apply.
+			const outcome = yield* database
+				.execute((db) =>
+					persistErrorTickWindow(db, {
+						orgId: ORG,
+						actorId: asActorId("00000000-0000-4000-8000-0000000000aa"),
+						rows: [
+							{
+								fingerprintHash: "77777777777777777777",
+								serviceName: "checkout-api",
+								exceptionType: "TimeoutError",
+								exceptionMessage: "upstream timed out",
+								errorLabel: "TimeoutError: upstream timed out",
+								topFrame: "",
+								count: 5,
+								firstSeenMs: TICK_MS - 120_000,
+								lastSeenMs: TICK_MS - 61_000,
+							},
+						],
+						policy: {
+							orgId: ORG,
+							enabled: false,
+							destinationIdsJson: [],
+							notifyOnFirstSeen: true,
+							notifyOnRegression: true,
+							notifyOnResolve: false,
+							notifyOnTransitionInReview: false,
+							notifyOnTransitionDone: false,
+							notifyOnClaim: false,
+							minOccurrenceCount: 1,
+							severity: "warning",
+							updatedAt: new Date(TICK_MS),
+							updatedBy: "test",
+						},
+						destinationIds: [],
+						windowEndMs: TICK_MS + 60_000,
+						autoResolveMinutes: 30,
+						claimToken: "a-token-this-worker-no-longer-holds",
+						makeIssueId: () => asIssueId(randomUUID()),
+						makeIncidentId: () => asIncidentId(randomUUID()),
+						makeEventId: () => asEventId(randomUUID()),
+					}),
+				)
+				.pipe(Effect.flip)
+
+			assert.isTrue(isErrorTickClaimLost(outcome))
+
+			// Neither the issue nor the cursor moved.
+			const issuesAfter = yield* loadIssuesByFingerprint("77777777777777777777")
+			assert.deepStrictEqual(issuesAfter, issuesBefore)
+			const after = yield* database.execute((db) =>
+				db.select().from(errorTickStates).where(eq(errorTickStates.orgId, ORG)),
+			)
+			assert.strictEqual(after[0]?.processedThrough.getTime(), before[0]?.processedThrough.getTime())
+		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+	})
+
+	it.effect("one batched window applies new, ongoing, regressed and snoozed fingerprints", () => {
+		const ONGOING = "11111111111111111111"
+		const REGRESSED = "22222222222222222222"
+		const SNOOZED = "33333333333333333333"
+		const FRESH = "44444444444444444444"
+		let rows: ReadonlyArray<Record<string, unknown>> = [scanRow({ fingerprintHash: ONGOING, count: 3 })]
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			yield* TestClock.setTime(TICK_MS)
+			// Makes the org discoverable; unrelated to the fingerprints under test.
+			yield* seedIssue(asIssueId(randomUUID()), { fingerprintHash: "fp-anchor" })
+
+			// ONGOING gets a real issue + open incident from a first tick.
+			yield* errors.runTick()
+			const ongoing = (yield* loadIssuesByFingerprint(ONGOING))[0]!
+			const openIncident = (yield* loadIncidentsForIssue(ongoing.id))[0]!
+			assert.strictEqual(openIncident.status, "open")
+
+			const regressedId = asIssueId(randomUUID())
+			yield* seedIssue(regressedId, {
+				fingerprintHash: REGRESSED,
+				workflowState: "done",
+				resolvedAt: new Date(TICK_MS),
+				occurrenceCount: 10,
+				firstSeenAt: new Date(TICK_MS - 600_000),
+				lastSeenAt: new Date(TICK_MS - 600_000),
+			})
+			const snoozedId = asIssueId(randomUUID())
+			yield* seedIssue(snoozedId, {
+				fingerprintHash: SNOOZED,
+				workflowState: "wontfix",
+				snoozeUntil: null,
+				occurrenceCount: 7,
+			})
+			const snoozedBefore = (yield* loadIssuesByFingerprint(SNOOZED))[0]!
+
+			const secondMs = TICK_MS + 60_000
+			const firstSeen = formatWarehouseDateTime(secondMs - 120_000)
+			const lastSeen = formatWarehouseDateTime(secondMs - 61_000)
+			rows = [
+				scanRow({ fingerprintHash: ONGOING, count: 4, firstSeen, lastSeen }),
+				scanRow({ fingerprintHash: REGRESSED, count: 2, firstSeen, lastSeen }),
+				scanRow({ fingerprintHash: SNOOZED, count: 9, firstSeen, lastSeen }),
+				scanRow({ fingerprintHash: FRESH, count: 6, firstSeen, lastSeen }),
+			]
+			yield* TestClock.setTime(secondMs)
+			const result = yield* errors.runTick()
+
+			// The snoozed fingerprint is skipped, the other three are applied.
+			assert.strictEqual(result.issuesTouched, 3)
+
+			// Ongoing: counters accumulate, bounds widen, no second incident.
+			const ongoingAfter = (yield* loadIssuesByFingerprint(ONGOING))[0]!
+			assert.strictEqual(ongoingAfter.occurrenceCount, 3 + 4)
+			assert.strictEqual(ongoingAfter.firstSeenAt.getTime(), ongoing.firstSeenAt.getTime())
+			assert.isAbove(ongoingAfter.lastSeenAt.getTime(), ongoing.lastSeenAt.getTime())
+			const ongoingIncidents = yield* loadIncidentsForIssue(ongoing.id)
+			assert.lengthOf(ongoingIncidents, 1)
+			assert.strictEqual(ongoingIncidents[0]?.occurrenceCount, 3 + 4)
+			assert.strictEqual(ongoingIncidents[0]?.status, "open")
+
+			// Regressed: reopened, resolution cleared, both audit events written.
+			const regressedAfter = (yield* loadIssuesByFingerprint(REGRESSED))[0]!
+			assert.strictEqual(regressedAfter.workflowState, "triage")
+			assert.isNull(regressedAfter.resolvedAt)
+			assert.strictEqual(regressedAfter.occurrenceCount, 12)
+			const regressedEvents = yield* loadEventsForIssue(regressedId)
+			assert.lengthOf(
+				regressedEvents.filter((e) => e.type === "regression"),
+				1,
+			)
+			assert.lengthOf(
+				regressedEvents.filter((e) => e.type === "state_change" && e.fromState === "done"),
+				1,
+			)
+			const regressedIncidents = yield* loadIncidentsForIssue(regressedId)
+			assert.lengthOf(regressedIncidents, 1)
+			assert.strictEqual(regressedIncidents[0]?.reason, "regression")
+
+			// Snoozed: byte-identical to before the window ran.
+			const snoozedAfter = (yield* loadIssuesByFingerprint(SNOOZED))[0]!
+			assert.deepStrictEqual(snoozedAfter, snoozedBefore)
+			assert.lengthOf(yield* loadIncidentsForIssue(snoozedId), 0)
+
+			// Fresh: created with a first_seen incident.
+			const freshAfter = (yield* loadIssuesByFingerprint(FRESH))[0]!
+			assert.strictEqual(freshAfter.occurrenceCount, 6)
+			assert.strictEqual(freshAfter.workflowState, "triage")
+			const freshEvents = yield* loadEventsForIssue(freshAfter.id)
+			assert.lengthOf(
+				freshEvents.filter((e) => e.type === "created"),
+				1,
+			)
+			const freshIncidents = yield* loadIncidentsForIssue(freshAfter.id)
+			assert.lengthOf(freshIncidents, 1)
+			assert.strictEqual(freshIncidents[0]?.reason, "first_seen")
+
+			assert.strictEqual(result.incidentsOpened, 2)
+			void database
 		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
 	})
 

@@ -243,7 +243,6 @@ describe("evaluate with a raw_sql source", () => {
 			assert.deepStrictEqual(raw, spec)
 		}),
 	)
-
 })
 
 const makeConfig = () =>

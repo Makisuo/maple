@@ -145,7 +145,7 @@ describe("buildProvenanceGraph", () => {
 	})
 
 	/** Spec rule 04: while investigating there is no verdict node — absent, not empty. */
-	it("omits the verdict and the actions while the pass is still running", () => {
+	it("omits the verdict and the real actions while the pass is still running", () => {
 		const running = kinds(
 			make({
 				status: "investigating",
@@ -155,6 +155,42 @@ describe("buildProvenanceGraph", () => {
 		)
 		expect(running).not.toContain("VERDICT")
 		expect(running).not.toContain("action")
+	})
+
+	/**
+	 * Same argument as the pending-verdict ghost, one column further right: the
+	 * chain used to stop dead at the fan's merge, which reads as finished. Two
+	 * wordless cards say the column is still coming without claiming what will be
+	 * in it — the heading carries no count for the same reason.
+	 */
+	it("stands wordless ghosts where the proposed actions will land", () => {
+		const graph = buildProvenanceGraph(
+			make({
+				status: "investigating",
+				report: null,
+				lens_runs: [lens({ status: "checking" })],
+				fanout: { state: "running", size: 1 },
+			} as never),
+		)
+		const ghosts = graph.nodes.filter((node) => node.type === "actionGhost")
+		expect(ghosts.map((node) => node.id)).toEqual(["action-ghost-0", "action-ghost-1"])
+		// No text on the wire at all — the only field is a layout slot.
+		expect(ghosts.map((node) => node.data)).toEqual([{ slot: 0 }, { slot: 1 }])
+		expect(graph.actionHeading).toBe("PROPOSES · PENDING")
+		// They feed off the pending verdict, and their strands march like it does.
+		const roadmap = graph.edges.filter((edge) => edge.kind === "roadmap")
+		expect(roadmap.map((edge) => edge.source)).toEqual(["pending-verdict", "pending-verdict"])
+		expect(roadmap.every((edge) => edge.live)).toBe(true)
+	})
+
+	it("raises no action ghosts once the report has landed, or where there was no fan", () => {
+		const ghosts = (investigation: V2Investigation) =>
+			buildProvenanceGraph(investigation).nodes.filter((node) => node.type === "actionGhost")
+		// Diagnosed: the real action nodes are there instead.
+		expect(ghosts(make())).toHaveLength(0)
+		expect(ghosts(make({ status: "failed", report: null } as never))).toHaveLength(0)
+		// No fan means no pending verdict to hang them off.
+		expect(ghosts(make({ status: "investigating", report: null } as never))).toHaveLength(0)
 	})
 
 	/**

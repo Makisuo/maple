@@ -5,12 +5,7 @@ import type { ActionKind } from "./replay-player-context"
 // timeline). The pure formatters are promoted to @maple/ui (shared with the
 // local-mode UI); the warehouse-coupled window helper stays here.
 
-export {
-	formatClock,
-	formatSessionDuration,
-	gradientFor,
-	hostFromUrl,
-} from "@maple/ui/lib/replay-format"
+export { formatClock, formatSessionDuration, gradientFor, hostFromUrl } from "@maple/ui/lib/replay-format"
 
 /** Marker dot colour by action kind, shared by the player and timeline tracks. */
 export const MARKER_STYLES: Record<ActionKind, string> = {

@@ -249,7 +249,6 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 								{m.nav_docs()}
 							</a>
 						</NavigationMenuItem>
-
 					</NavigationMenuList>
 				</NavigationMenu>
 			</div>
