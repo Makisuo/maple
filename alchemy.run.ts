@@ -1,12 +1,16 @@
 import { appendFileSync } from "node:fs"
 import * as Alchemy from "alchemy"
+import * as AWS from "alchemy/AWS"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as RemovalPolicy from "alchemy/RemovalPolicy"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { parseMapleRegion, resolveAwsRegion, stageDeploysIngest } from "@maple/infra/aws"
 import { formatMapleStage, parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createMapleApi } from "./apps/api/alchemy.run.ts"
 import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
+import { createMapleIngest } from "./apps/ingest/alchemy.run.ts"
 import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
 import { createLocalUiWorker } from "./apps/local-ui/alchemy.run.ts"
 import { createMapleWeb } from "./apps/web/alchemy.run.ts"
@@ -76,7 +80,11 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
 export default Alchemy.Stack(
 	"maple",
 	{
-		providers: Cloudflare.providers(),
+		// Cloudflare hosts the Workers/DO/R2 surface; AWS hosts the Rust OTLP
+		// gateway on ECS (`apps/ingest`). AWS credentials arrive as env vars from
+		// Infisical exactly like the Cloudflare ones — `AWS.providers()` reads
+		// AWS_REGION / AWS_ACCOUNT_ID / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+		providers: Layer.mergeAll(Cloudflare.providers(), AWS.providers()),
 		// Shared account-wide state store (Worker + DO SQLite) — bootstrapped once
 		// per Cloudflare account (`alchemy bootstrap cloudflare` or the first
 		// `deploy --yes`). ALCHEMY_LOCAL_STATE=1 opts into .alchemy/ file state for
@@ -90,8 +98,31 @@ export default Alchemy.Stack(
 
 		const apiUrl = resolveUrl(domains.api, "MAPLE_API_BASE_URL")
 		const electricSyncUrl = resolveUrl(domains.sync, "MAPLE_ELECTRIC_SYNC_URL")
-		// ingest is not deployed via alchemy; for non-custom-domain stages, fall
-		// back to a caller-supplied env var or the public Maple ingest endpoint.
+		// Geographic instance this deploy belongs to. `us` today; an EU instance is
+		// the same stack deployed with MAPLE_REGION=eu against that instance's own
+		// Tinybird workspace and application database. Guarded here because a
+		// mismatch between MAPLE_REGION and AWS_REGION would put the ACM
+		// certificate in a different region from the ALB that must use it — and
+		// worse, would export telemetry across the residency boundary the EU
+		// instance exists to enforce.
+		const region = parseMapleRegion(process.env.MAPLE_REGION)
+		const expectedAwsRegion = resolveAwsRegion(region)
+		const configuredAwsRegion = process.env.AWS_REGION?.trim()
+		if (configuredAwsRegion && configuredAwsRegion !== expectedAwsRegion) {
+			throw new Error(
+				`AWS_REGION="${configuredAwsRegion}" does not match MAPLE_REGION="${region}" (expects "${expectedAwsRegion}").`,
+			)
+		}
+
+		// The Rust OTLP gateway on ECS Fargate (prd/stg only — PR previews get no
+		// ingest domain, and a VPC + ALB per PR is real money for a stack nothing
+		// points at; dev stages run it through docker-compose). `domains.ingest`
+		// reaches it via a Cloudflare CNAME at the ALB, so the URL below stays a
+		// plain string and does not depend on the service resource.
+		const ingest = stageDeploysIngest(stage)
+			? yield* createMapleIngest({ stage, domains, region })
+			: undefined
+
 		const ingestUrl = resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev")
 
 		// Chat and AI triage run inside the api worker (ChatSession Durable Object),
@@ -164,6 +195,12 @@ export default Alchemy.Stack(
 		// and the summary carries their identity for the CLI output.
 		return {
 			...summary,
+			// ALB hostname to CNAME `domains.ingest` at, plus the one-time ACM
+			// validation record — both are manual entries in the Cloudflare
+			// `maple.dev` zone, surfaced here so they come out of the deploy rather
+			// than the AWS console.
+			ingestServiceUrl: ingest?.serviceUrl,
+			ingestCertificateValidation: ingest?.certificateValidation,
 			electricSyncWorker: electricSync.workerName,
 			webWorker: web.workerName,
 			landingWorker: landing.workerName,
