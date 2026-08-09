@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import * as AWS from "alchemy/AWS"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
@@ -11,6 +12,13 @@ import {
 } from "@maple/infra/aws"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { resolveDeploymentEnvironment } from "@maple/infra/cloudflare"
+
+/**
+ * Binary the deploy workflows compile ahead of time (with a warm cargo cache)
+ * so the image build is a COPY rather than a from-scratch build of 385 crates.
+ * Present in CI, absent on a dev machine — see `Dockerfile.prebuilt`.
+ */
+const PREBUILT_BINARY = "apps/ingest/dist/maple-ingest"
 
 const requireEnv = (key: string): string => {
 	const value = process.env[key]?.trim()
@@ -201,10 +209,20 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 			cluster,
 			serviceName: name("ingest"),
 
-			// Dockerfile source: alchemy builds `apps/ingest/Dockerfile`, creates a
-			// private ECR repository, and pushes under a content-hash tag. Rebuilds
-			// only when the context hash changes, so CI needs no docker step.
+			// Alchemy creates a private ECR repository and pushes under a content-hash
+			// tag, rebuilding only when the context hash changes — so a deploy that
+			// doesn't touch apps/ingest never builds at all.
+			//
+			// When it DOES build, the Dockerfile depends on where we are. CI compiles
+			// the binary in a separate, cached step and leaves it at dist/, so the
+			// image build is a COPY (~30s). A dev machine has no dist/, so it falls
+			// back to the self-contained source build. Keyed on the file rather than
+			// on `process.env.CI` so a local run that happens to have built the binary
+			// gets the fast path too, and so CI can never silently ship a stale one.
 			context: "apps/ingest",
+			...(existsSync(PREBUILT_BINARY)
+				? { dockerfile: "apps/ingest/Dockerfile.prebuilt" }
+				: {}),
 			// The docker build platform is derived from this (`taskImagePlatform` in
 			// alchemy's ECS/Task). Explicit so a build from an Apple Silicon machine
 			// produces the same artifact CI does — an arm64 image on an X86_64 task

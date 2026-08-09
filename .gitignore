@@ -57,3 +57,5 @@ playwright/.cache/
 drizzle.config.local.ts
 .18bd7*.bun-build
 .[0-9a-f]*.bun-build
+apps/ingest/dist/
+apps/ingest/target-ci/

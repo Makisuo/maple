@@ -5,6 +5,10 @@
 # machine ship that directory and re-hash on every touch. CI never has it,
 # which is exactly why the problem hides until someone deploys locally.
 target/
+# The CI compile's target dir. `dist/` is deliberately NOT ignored — that is the
+# binary Dockerfile.prebuilt copies in, and it must stay part of the context
+# hash so a rebuilt binary produces a new image tag.
+target-ci/
 node_modules/
 
 # Not inputs to `cargo build --release`.
