@@ -7,6 +7,9 @@ import {
 	LEGACY_SCHEMA_FINGERPRINT,
 	LOCAL_SCHEMA_MANIFEST,
 	LOCAL_SCHEMA_V1,
+	LOCAL_SCHEMA_V2,
+	LOCAL_SCHEMA_V2_MANIFEST,
+	LOCAL_SCHEMA_V3,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -48,31 +51,52 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated revision and the known issue-297 fingerprint", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("718581a523cbf01c")
-		expect(SCHEMA_DIGEST).toBe("718581a523cbf01c216bf930cc3ffca72921c387c926c3c2c0cf1861b00c4ceb")
+	it("matches the generated v3 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("0d7e8c2f7857a351")
+		expect(SCHEMA_DIGEST).toBe("0d7e8c2f7857a3510beb2bf5ab6f214551274986e513592c6dd22d4eb83aa3ca")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(1)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(3)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V3)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
+		const serviceMapIngress = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "service_map_edges_hourly_ingest",
+		)
+		expect(serviceMapIngress?.engine).toBe("Null")
+		expect(serviceMapIngress?.orderBy).toBeUndefined()
 		const materializedView = LOCAL_SCHEMA_MANIFEST.objects.find(
 			(object) => object.kind === "materialized_view",
 		)
 		expect(materializedView?.columns).toHaveLength(0)
+		const timeOrderedErrors = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "error_events_by_time_mv",
+		)
+		expect(timeOrderedErrors?.definition).toContain("FROM traces")
+		expect(timeOrderedErrors?.definition).not.toContain("FROM error_events")
+		const v2TimeOrderedErrors = LOCAL_SCHEMA_V2_MANIFEST.objects.find(
+			(object) => object.name === "error_events_by_time_mv",
+		)
+		expect(v2TimeOrderedErrors?.definition).toContain("FROM error_events")
 	})
 })
 
 describe("local migration registry", () => {
 	it("resolves the known fingerprint-only legacy store to current", () => {
 		const chain = resolveMigrationChain(LEGACY_LOCAL_SCHEMA, CURRENT_LOCAL_SCHEMA)
-		expect(chain.map((migration) => migration.id)).toEqual(["local-0000-to-0001-raw-replay"])
+		expect(chain.map((migration) => migration.id)).toEqual([
+			"local-0000-to-0001-raw-replay",
+			"local-0001-to-0002-error-rollup",
+			"local-0002-to-0003-service-map-ingest-bridge",
+		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
+		expect(chain[1]?.to).toEqual(LOCAL_SCHEMA_V2)
+		expect(chain[2]?.to).toEqual(LOCAL_SCHEMA_V3)
 		expect(typeof chain[0]?.apply).toBe("function")
 	})
 
@@ -94,12 +118,12 @@ describe("local migration registry", () => {
 				maple: "dev",
 				createdAt: "2026-01-01T00:00:00.000Z",
 				createdByMaple: "dev",
-				schemaVersion: 1,
+				schemaVersion: 3,
 				schemaDigest: SCHEMA_DIGEST,
 				schema: SCHEMA_FINGERPRINT,
 				activation: "active",
 			}),
-		).toMatchObject({ version: 1, fingerprint: SCHEMA_FINGERPRINT, digest: SCHEMA_DIGEST })
+		).toMatchObject({ version: 3, fingerprint: SCHEMA_FINGERPRINT, digest: SCHEMA_DIGEST })
 	})
 
 	it("rejects unknown, future, downgrade, and ambiguous paths", () => {
@@ -108,7 +132,7 @@ describe("local migration registry", () => {
 		).toThrow(/no registered/)
 		expect(() =>
 			resolveMigrationChain(
-				{ ...CURRENT_LOCAL_SCHEMA, version: 2, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 4, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
@@ -374,7 +398,7 @@ describe("durable migration recovery", () => {
 				createdAt: journal.createdAt,
 				schema: LEGACY_SCHEMA_FINGERPRINT,
 			})
-			await ensureStoreMarkerDurable(dataDir, CURRENT_LOCAL_SCHEMA, "test", journal.createdAt, {
+			await ensureStoreMarkerDurable(dataDir, LOCAL_SCHEMA_V1, "test", journal.createdAt, {
 				activation: "staging",
 				storeId: targetStoreId,
 			})

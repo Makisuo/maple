@@ -7,6 +7,8 @@ import {
 	errorDetailTracesQuery,
 	errorsFacetsQuery,
 	errorIssuesQuery,
+	errorTickBootstrapIssuesQuery,
+	errorTickIssuesQuery,
 	errorFingerprintsQuery,
 	tracesFacetsQuery,
 } from "./errors"
@@ -233,6 +235,30 @@ describe("errorIssuesQuery", () => {
 		expect(sql).toContain("FROM error_events")
 		expect(sql).not.toContain("FROM error_events_by_time")
 		expect(sql).toContain("FingerprintHash IN (toUInt64('123'))")
+	})
+})
+
+describe("errorTickIssuesQuery", () => {
+	it("scans the minute rollup with a half-open window and no truncating limit", () => {
+		const { sql } = compileCH(errorTickIssuesQuery(), baseParams)
+
+		expect(sql).toContain("FROM error_fingerprints_minutely")
+		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("Minute >= '2024-01-01 00:00:00'")
+		expect(sql).toContain("Minute < '2024-01-02 00:00:00'")
+		expect(sql).toContain("sum(OccurrenceCount) AS count")
+		expect(sql).not.toContain("LIMIT")
+	})
+})
+
+describe("errorTickBootstrapIssuesQuery", () => {
+	it("bootstraps once from raw events without a truncating limit", () => {
+		const { sql } = compileCH(errorTickBootstrapIssuesQuery(), baseParams)
+
+		expect(sql).toContain("FROM error_events_by_time")
+		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
+		expect(sql).toContain("Timestamp < '2024-01-02 00:00:00'")
+		expect(sql).not.toContain("LIMIT")
 	})
 })
 

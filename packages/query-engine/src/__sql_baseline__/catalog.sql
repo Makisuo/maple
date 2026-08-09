@@ -86,6 +86,42 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
+-- builder:errors:errorTickBootstrapIssuesQuery:bootstrap-window  [654cc034]
+SELECT
+          toString(FingerprintHash) AS fingerprintHash,
+          any(ServiceName) AS serviceName,
+          any(ExceptionType) AS exceptionType,
+          any(ExceptionMessage) AS exceptionMessage,
+          any(ErrorLabel) AS errorLabel,
+          any(TopFrame) AS topFrame,
+          count() AS count,
+          min(Timestamp) AS firstSeen,
+          max(Timestamp) AS lastSeen
+        FROM error_events_by_time
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp < '2026-01-03 14:15:00'
+        GROUP BY fingerprintHash
+        FORMAT JSON
+
+-- builder:errors:errorTickIssuesQuery:cursor-window  [40cf1922]
+SELECT
+          toString(FingerprintHash) AS fingerprintHash,
+          any(ServiceName) AS serviceName,
+          any(ExceptionType) AS exceptionType,
+          any(ExceptionMessage) AS exceptionMessage,
+          any(ErrorLabel) AS errorLabel,
+          any(TopFrame) AS topFrame,
+          sum(OccurrenceCount) AS count,
+          min(FirstSeen) AS firstSeen,
+          max(LastSeen) AS lastSeen
+        FROM error_fingerprints_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= '2026-01-01 10:30:00'
+          AND Minute < '2026-01-03 14:15:00'
+        GROUP BY fingerprintHash
+        FORMAT JSON
+
 -- builder:errors:spanDetailQuery:default  [64ddf7c1]
 SELECT
           TraceId AS traceId,

@@ -33,6 +33,8 @@ import {
 import { durableJson, durableRename, ensurePrivateDirectory } from "./durable-files"
 import { MAPLE_VERSION } from "../version"
 import { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
+import { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
+import { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -52,6 +54,8 @@ export {
 } from "./local-store-migration-module"
 
 export { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
+export { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
+export { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
 
 const NONTERMINAL_PHASES = new Set<MigrationPhase>([
 	"planned",
@@ -111,7 +115,11 @@ export interface MigrationResult {
 	readonly copiedRows: Readonly<Record<string, number>>
 }
 
-export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> = [legacyToCurrentModule]
+export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> = [
+	legacyToCurrentModule,
+	v1ToV2ErrorRollupModule,
+	v2ToV3ServiceMapIngestBridgeModule,
+]
 
 export const validateMigrationRegistry = (
 	registry: ReadonlyArray<AnyLocalStoreMigrationModule>,
@@ -1115,6 +1123,7 @@ const makeModuleContext = (
 		openSource: (fn, options = {}) => session.use(sourceDataDir, fn, { ...options, role: "source" }),
 		openTarget: (fn, options = {}) =>
 			session.use(journal.targetDataDir, fn, { ...options, role: "target" }),
+		closeStores: () => session.close(),
 		ensureCapacity: () =>
 			stepIndex === 0 ? ensureMigrationCapacity(dataDir, session) : Promise.resolve(),
 		saveStep: async (update) => {

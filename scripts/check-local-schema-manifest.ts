@@ -7,6 +7,12 @@ import {
 	LOCAL_SCHEMA_V1,
 	LOCAL_SCHEMA_V1_MANIFEST_DIGEST,
 	LOCAL_SCHEMA_V1_SQL,
+	LOCAL_SCHEMA_V2,
+	LOCAL_SCHEMA_V2_MANIFEST_DIGEST,
+	LOCAL_SCHEMA_V2_SQL,
+	LOCAL_SCHEMA_V3,
+	LOCAL_SCHEMA_V3_MANIFEST_DIGEST,
+	LOCAL_SCHEMA_V3_SQL,
 	LOCAL_SCHEMA_VERSION,
 } from "../apps/cli/src/server/schema-identity"
 import { resolveMigrationChain } from "../apps/cli/src/server/local-store-migrations"
@@ -57,6 +63,30 @@ if (
 	LOCAL_SCHEMA_V1.digest !== v1.digest
 ) {
 	fail("the immutable local schema v1 snapshot no longer matches its historical identity")
+}
+
+const v2 = LOCAL_SCHEMA_HISTORY.find((entry) => entry.version === LOCAL_SCHEMA_V2.version)
+if (
+	!v2 ||
+	LOCAL_SCHEMA_V2_MANIFEST_DIGEST !== v2.manifestDigest ||
+	schemaFingerprint(LOCAL_SCHEMA_V2_SQL) !== v2.fingerprint ||
+	schemaDigest(LOCAL_SCHEMA_V2_SQL) !== v2.digest ||
+	LOCAL_SCHEMA_V2.fingerprint !== v2.fingerprint ||
+	LOCAL_SCHEMA_V2.digest !== v2.digest
+) {
+	fail("the immutable local schema v2 snapshot no longer matches its historical identity")
+}
+
+const v3 = LOCAL_SCHEMA_HISTORY.find((entry) => entry.version === LOCAL_SCHEMA_V3.version)
+if (
+	!v3 ||
+	LOCAL_SCHEMA_V3_MANIFEST_DIGEST !== v3.manifestDigest ||
+	schemaFingerprint(LOCAL_SCHEMA_V3_SQL) !== v3.fingerprint ||
+	schemaDigest(LOCAL_SCHEMA_V3_SQL) !== v3.digest ||
+	LOCAL_SCHEMA_V3.fingerprint !== v3.fingerprint ||
+	LOCAL_SCHEMA_V3.digest !== v3.digest
+) {
+	fail("the immutable local schema v3 snapshot no longer matches its historical identity")
 }
 
 const names = LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name)

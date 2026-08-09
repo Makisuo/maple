@@ -15,6 +15,7 @@ import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import {
 	ErrorEvents,
 	ErrorEventsByTime,
+	ErrorFingerprintsMinutely,
 	ServiceUsage,
 	TraceDetailSpans,
 	TraceListMv,
@@ -862,6 +863,60 @@ export function errorIssuesQuery(opts: ErrorIssuesOpts) {
 		.groupBy("fingerprintHash")
 		.orderBy(["count", "desc"])
 		.limit(opts.limit ?? 50)
+		.format("JSON")
+}
+
+/**
+ * Error groups observed in one or more completed minute buckets. Unlike the UI
+ * issue query, this intentionally has no LIMIT: the durable Postgres cursor may
+ * advance only after every fingerprint in the claimed half-open window commits.
+ */
+export function errorTickIssuesQuery() {
+	return from(ErrorFingerprintsMinutely)
+		.select(($) => ({
+			fingerprintHash: CH.toString_($.FingerprintHash),
+			serviceName: CH.any_($.ServiceName),
+			exceptionType: CH.any_($.ExceptionType),
+			exceptionMessage: CH.any_($.ExceptionMessage),
+			errorLabel: CH.any_($.ErrorLabel),
+			topFrame: CH.any_($.TopFrame),
+			count: CH.sum($.OccurrenceCount),
+			firstSeen: CH.min_($.FirstSeen),
+			lastSeen: CH.max_($.LastSeen),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Minute.gte(param.dateTime("startTime")),
+			$.Minute.lt(param.dateTime("endTime")),
+		])
+		.groupBy("fingerprintHash")
+		.format("JSON")
+}
+
+/**
+ * One-time cursor bootstrap against the existing per-occurrence projection.
+ * Incremental materialized views do not backfill historical rows, so a newly
+ * deployed evaluator uses this query for its initial two-minute window only.
+ */
+export function errorTickBootstrapIssuesQuery() {
+	return from(ErrorEventsByTime)
+		.select(($) => ({
+			fingerprintHash: CH.toString_($.FingerprintHash),
+			serviceName: CH.any_($.ServiceName),
+			exceptionType: CH.any_($.ExceptionType),
+			exceptionMessage: CH.any_($.ExceptionMessage),
+			errorLabel: CH.any_($.ErrorLabel),
+			topFrame: CH.any_($.TopFrame),
+			count: CH.count(),
+			firstSeen: CH.min_($.Timestamp),
+			lastSeen: CH.max_($.Timestamp),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lt(param.dateTime("endTime")),
+		])
+		.groupBy("fingerprintHash")
 		.format("JSON")
 }
 

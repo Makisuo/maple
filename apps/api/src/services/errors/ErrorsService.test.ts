@@ -20,10 +20,12 @@ import {
 import {
 	alertDestinations,
 	errorIncidents,
+	errorNotificationDeliveries,
 	errorIssues,
 	errorIssueEvents,
 	errorIssueStates,
 	errorNotificationPolicies,
+	errorTickStates,
 	issueEscalations,
 	orgIngestKeys,
 } from "@maple/db"
@@ -754,8 +756,8 @@ describe("ErrorsService.setSeverity", () => {
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-// Multiple of TICK_WINDOW_MS * RETENTION_PHASE_EVERY_N_TICKS (2min * 30 = 1h),
-// so a tick at exactly this instant runs the retention phase.
+// Multiple of the one-minute cron phase * 60, so a tick at exactly this
+// instant runs the retention phase.
 const RETENTION_TICK_MS = 1_750_003_200_000
 // One tick later — the retention phase does not run.
 const TICK_MS = RETENTION_TICK_MS + 120_000
@@ -774,8 +776,8 @@ const scanRow = (overrides: Record<string, unknown> = {}): Record<string, unknow
 	topFrame: "checkout/handler.ts:42",
 	count: 3,
 	affectedServicesCount: 1,
-	firstSeen: formatWarehouseDateTime(TICK_MS - 60_000),
-	lastSeen: formatWarehouseDateTime(TICK_MS - 1_000),
+	firstSeen: formatWarehouseDateTime(TICK_MS - 120_000),
+	lastSeen: formatWarehouseDateTime(TICK_MS - 60_000 - 1_000),
 	...overrides,
 })
 
@@ -871,7 +873,7 @@ describe("ErrorsService.runTick", () => {
 		}).pipe(Effect.provide(makeGatingLayer({ failDiscovery: true, scanned })))
 	})
 
-	it.effect("discovery uses the 5s discovery profile; the per-org scan uses the list profile", () => {
+	it.effect("discovery uses the 5s profile; the minutely tick scan uses aggregation", () => {
 		const profiles = new Map<string, string | undefined>()
 		return Effect.gen(function* () {
 			const errors = yield* ErrorsService
@@ -881,7 +883,7 @@ describe("ErrorsService.runTick", () => {
 			yield* errors.runTick()
 
 			assert.strictEqual(profiles.get("errorActiveOrgsDiscovery"), "discovery")
-			assert.strictEqual(profiles.get("errorIssuesScan"), "list")
+			assert.strictEqual(profiles.get("errorIssuesScan"), "aggregation")
 		}).pipe(Effect.provide(makeGatingLayer({ scanRows: () => [scanRow()], profiles })))
 	})
 
@@ -941,9 +943,9 @@ describe("ErrorsService.runTick", () => {
 				assert.strictEqual(issue.errorLabel, "TimeoutError: upstream timed out")
 				assert.strictEqual(issue.topFrame, "checkout/handler.ts:42")
 				assert.strictEqual(issue.occurrenceCount, 3)
-				assert.strictEqual(issue.firstSeenAt.getTime(), TICK_MS - 60_000)
-				assert.strictEqual(issue.lastSeenAt.getTime(), TICK_MS - 1_000)
-				assert.strictEqual(issue.createdAt.getTime(), TICK_MS)
+				assert.strictEqual(issue.firstSeenAt.getTime(), TICK_MS - 120_000)
+				assert.strictEqual(issue.lastSeenAt.getTime(), TICK_MS - 60_000 - 1_000)
+				assert.strictEqual(issue.createdAt.getTime(), TICK_MS - 60_000)
 
 				const events = yield* loadEventsForIssue(issue.id)
 				assert.deepStrictEqual(
@@ -967,7 +969,7 @@ describe("ErrorsService.runTick", () => {
 		},
 	)
 
-	it.effect("re-running the tick over the same scan rows refreshes the issue, never duplicates it", () => {
+	it.effect("re-running the same completed window is a no-op", () => {
 		const rows = [scanRow()]
 		return Effect.gen(function* () {
 			const errors = yield* ErrorsService
@@ -977,20 +979,27 @@ describe("ErrorsService.runTick", () => {
 			const first = yield* errors.runTick()
 			assert.strictEqual(first.incidentsOpened, 1)
 
-			yield* TestClock.setTime(TICK_MS + 60_000)
+			// Same aligned minute boundary: the persisted cursor has already committed
+			// this half-open window, so the second invocation cannot count it again.
 			const second = yield* errors.runTick()
-			assert.strictEqual(second.issuesTouched, 1)
+			assert.strictEqual(second.issuesTouched, 0)
 			assert.strictEqual(second.incidentsOpened, 0)
 
 			const issues = yield* loadIssuesByFingerprint(SCAN_FINGERPRINT)
 			assert.lengthOf(issues, 1)
-			// Re-observation accumulates occurrences onto the same issue row.
-			assert.strictEqual(issues[0]?.occurrenceCount, 6)
+			assert.strictEqual(issues[0]?.occurrenceCount, 3)
 
 			const incidents = yield* loadIncidentsForIssue(issues[0]!.id)
 			assert.lengthOf(incidents, 1)
 			assert.strictEqual(incidents[0]?.status, "open")
-			assert.strictEqual(incidents[0]?.occurrenceCount, 6)
+			assert.strictEqual(incidents[0]?.occurrenceCount, 3)
+
+			const database = yield* Database
+			const cursors = yield* database.execute((db) =>
+				db.select().from(errorTickStates).where(eq(errorTickStates.orgId, ORG)),
+			)
+			assert.strictEqual(cursors[0]?.processedThrough.getTime(), TICK_MS - 60_000)
+			assert.isTrue(cursors[0]?.bootstrapCompleted)
 
 			const events = yield* loadEventsForIssue(issues[0]!.id)
 			assert.lengthOf(
@@ -998,6 +1007,75 @@ describe("ErrorsService.runTick", () => {
 				1,
 			)
 		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+	})
+
+	it.effect("failed incident notifications stay queued and succeed on a later tick", () => {
+		let rows: ReadonlyArray<Record<string, unknown>> = [scanRow()]
+		let attempts = 0
+		const destinationId = "7d31c9e1-0000-4000-8000-000000000001" as AlertDestinationId
+		const retryingDispatcher: (typeof NotificationDispatcher)["Service"] = {
+			dispatch: (_orgId, _destinationIds, _context) =>
+				Effect.sync(() => {
+					attempts += 1
+					return attempts === 1
+						? {
+								delivered: 0,
+								failed: 1,
+								destinations: [
+									{
+										destinationId,
+										destinationName: "test",
+										status: "failed" as const,
+										error: "temporary failure",
+									},
+								],
+							}
+						: {
+								delivered: 1,
+								failed: 0,
+								destinations: [
+									{
+										destinationId,
+										destinationName: "test",
+										status: "delivered" as const,
+										error: null,
+									},
+								],
+							}
+				}),
+		}
+
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			yield* TestClock.setTime(TICK_MS)
+			yield* seedIssue(asIssueId(randomUUID()))
+			yield* database.execute((db) =>
+				db.insert(errorNotificationPolicies).values({
+					orgId: ORG,
+					enabled: true,
+					destinationIdsJson: [destinationId],
+					updatedAt: new Date(TICK_MS),
+					updatedBy: "test",
+				}),
+			)
+
+			yield* errors.runTick()
+			let deliveries = yield* database.execute((db) => db.select().from(errorNotificationDeliveries))
+			assert.lengthOf(deliveries, 1)
+			assert.strictEqual(deliveries[0]?.status, "queued")
+			assert.strictEqual(deliveries[0]?.attemptCount, 1)
+
+			rows = []
+			yield* TestClock.setTime(TICK_MS + 60_000)
+			yield* errors.runTick()
+			deliveries = yield* database.execute((db) => db.select().from(errorNotificationDeliveries))
+			assert.strictEqual(deliveries[0]?.status, "success")
+			assert.strictEqual(deliveries[0]?.attemptCount, 2)
+			assert.strictEqual(attempts, 2)
+		}).pipe(
+			Effect.provide(makeErrorsLayer(() => rows, undefined, undefined, undefined, retryingDispatcher)),
+		)
 	})
 
 	it.effect("overlapping ticks dispatch each incident notification exactly once", () => {
@@ -1055,8 +1133,8 @@ describe("ErrorsService.runTick", () => {
 			const reopenMs = TICK_MS + 32 * 60_000
 			rows = [
 				scanRow({
-					firstSeen: formatWarehouseDateTime(reopenMs - 60_000),
-					lastSeen: formatWarehouseDateTime(reopenMs - 1_000),
+					firstSeen: formatWarehouseDateTime(reopenMs - 120_000),
+					lastSeen: formatWarehouseDateTime(reopenMs - 60_000 - 1_000),
 				}),
 			]
 			yield* TestClock.setTime(reopenMs)
@@ -1284,7 +1362,7 @@ describe("ErrorsService.runTick", () => {
 			const incidents = yield* loadIncidentsForIssue(issue.id)
 			assert.lengthOf(incidents, 1)
 			assert.strictEqual(incidents[0]?.status, "resolved")
-			assert.strictEqual(incidents[0]?.resolvedAt?.getTime(), resolveTickMs)
+			assert.strictEqual(incidents[0]?.resolvedAt?.getTime(), resolveTickMs - 60_000)
 
 			const states = yield* database.execute((db) =>
 				db.select().from(errorIssueStates).where(eq(errorIssueStates.issueId, issue.id)),

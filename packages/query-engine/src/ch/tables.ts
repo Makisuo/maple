@@ -188,6 +188,21 @@ export const ErrorEventsByTime = table("error_events_by_time", {
 	ErrorLabel: T.string,
 })
 
+/** Minute-grain per-fingerprint rollup consumed by the error issue tick. */
+export const ErrorFingerprintsMinutely = table("error_fingerprints_minutely", {
+	OrgId: T.string,
+	Minute: T.dateTime,
+	FingerprintHash: T.uint64,
+	ServiceName: T.string,
+	ExceptionType: T.string,
+	ExceptionMessage: T.string,
+	ErrorLabel: T.string,
+	TopFrame: T.string,
+	OccurrenceCount: T.uint64,
+	FirstSeen: T.dateTime,
+	LastSeen: T.dateTime,
+})
+
 export const MetricsSum = table("metrics_sum", {
 	OrgId: T.string,
 	ResourceAttributes: T.map(T.string, T.string),

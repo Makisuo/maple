@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core"
 import type {
 	ActorId,
+	AlertDestinationId,
 	ErrorIncidentId,
 	ErrorIssueEventId,
 	ErrorIssueId,
@@ -213,6 +214,67 @@ export const errorNotificationPolicies = pgTable("error_notification_policies", 
 	updatedBy: text("updated_by").notNull(),
 })
 
+/**
+ * Durable per-org checkpoint for the scheduled error evaluator.
+ *
+ * `processedThrough` is an exclusive minute boundary. A short lease prevents
+ * overlapping cron invocations from evaluating the same window; the evaluator
+ * advances the checkpoint in the same Postgres transaction as issue/incident
+ * mutations.
+ */
+export const errorTickStates = pgTable(
+	"error_tick_states",
+	{
+		orgId: text("org_id").$type<OrgId>().notNull().primaryKey(),
+		processedThrough: timestamp("processed_through", { withTimezone: true, mode: "date" }).notNull(),
+		bootstrapCompleted: boolean("bootstrap_completed").notNull().default(false),
+		claimToken: text("claim_token"),
+		claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true, mode: "date" }),
+		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+	},
+	(table) => [index("error_tick_states_claim_idx").on(table.claimExpiresAt)],
+)
+
+export type ErrorNotificationDeliveryStatus = "queued" | "processing" | "success" | "failed"
+
+/**
+ * Transactional outbox for error-incident notifications. One row represents
+ * one logical delivery to one destination and is retried in place. The unique
+ * key makes enqueue idempotent when a transaction is retried.
+ */
+export const errorNotificationDeliveries = pgTable(
+	"error_notification_deliveries",
+	{
+		id: text("id").notNull().primaryKey(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		destinationId: text("destination_id").$type<AlertDestinationId>().notNull(),
+		deliveryKey: text("delivery_key").notNull(),
+		payloadJson: jsonb("payload_json").$type<unknown>().notNull(),
+		status: text("status").$type<ErrorNotificationDeliveryStatus>().notNull(),
+		attemptCount: integer("attempt_count").notNull().default(0),
+		scheduledAt: timestamp("scheduled_at", { withTimezone: true, mode: "date" }).notNull(),
+		claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "date" }),
+		claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true, mode: "date" }),
+		claimedBy: text("claimed_by"),
+		attemptedAt: timestamp("attempted_at", { withTimezone: true, mode: "date" }),
+		errorMessage: text("error_message"),
+		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+	},
+	(table) => [
+		index("error_notification_deliveries_due_idx").on(
+			table.status,
+			table.scheduledAt,
+			table.claimExpiresAt,
+		),
+		index("error_notification_deliveries_org_idx").on(table.orgId),
+		uniqueIndex("error_notification_deliveries_key_destination_idx").on(
+			table.deliveryKey,
+			table.destinationId,
+		),
+	],
+)
+
 export type ActorRow = typeof actors.$inferSelect
 export type ActorInsert = typeof actors.$inferInsert
 export type ErrorIssueRow = typeof errorIssues.$inferSelect
@@ -221,3 +283,5 @@ export type ErrorIssueEventRow = typeof errorIssueEvents.$inferSelect
 export type ErrorIssueEventInsert = typeof errorIssueEvents.$inferInsert
 export type ErrorIncidentRow = typeof errorIncidents.$inferSelect
 export type ErrorNotificationPolicyRow = typeof errorNotificationPolicies.$inferSelect
+export type ErrorTickStateRow = typeof errorTickStates.$inferSelect
+export type ErrorNotificationDeliveryRow = typeof errorNotificationDeliveries.$inferSelect

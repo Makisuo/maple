@@ -80,6 +80,9 @@ export interface MigrationModuleContext {
 	readonly step: MigrationStepJournal
 	readonly openSource: <A>(fn: (db: Chdb) => A | Promise<A>, options?: MigrationDbOptions) => Promise<A>
 	readonly openTarget: <A>(fn: (db: Chdb) => A | Promise<A>, options?: MigrationDbOptions) => Promise<A>
+	/** Close the coordinator-owned chDB session before a module performs a
+	 * filesystem-level clone of a clean, stopped store. */
+	readonly closeStores: () => Promise<void>
 	readonly ensureCapacity: () => Promise<void>
 	readonly saveStep: (update: MigrationStepUpdate) => Promise<void>
 }

@@ -205,6 +205,8 @@ export {
 	errorsSummaryQuery,
 	errorDetailTracesQuery,
 	errorIssuesQuery,
+	errorTickBootstrapIssuesQuery,
+	errorTickIssuesQuery,
 	errorFingerprintsQuery,
 	errorIssueTimeseriesQuery,
 	errorIssueSampleTracesQuery,

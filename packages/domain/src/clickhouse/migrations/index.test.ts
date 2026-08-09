@@ -15,6 +15,7 @@ import {
 import { migration_0010_search_indexes } from "./0010_search_indexes"
 import { migration_0011_session_analytics_columns } from "./0011_session_analytics_columns"
 import { migration_0012_session_event_attribute_keys } from "./0012_session_event_attribute_keys"
+import { migration_0013_service_map_ingest_bridge } from "./0013_service_map_ingest_bridge"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -29,11 +30,11 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
-		expect(migrations.at(-1)).toBe(migration_0012_session_event_attribute_keys)
-		expect(latestMigrationVersion).toBe(12)
-		// 0010 is performance-only, so the ingest-gating version skips it: 9 → 12.
-		expect(clickHouseSchemaVersion).toBe("12")
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+		expect(migrations.at(-1)).toBe(migration_0013_service_map_ingest_bridge)
+		expect(latestMigrationVersion).toBe(13)
+		// 0010 is performance-only, so the ingest-gating version skips it: 9 → 13.
+		expect(clickHouseSchemaVersion).toBe("13")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 	})
 
@@ -70,6 +71,39 @@ describe("ClickHouse migrations", () => {
 			"ALTER TABLE session_events MODIFY COLUMN Attributes Map(String, String)",
 		])
 		expect(migrations.find((m) => m.version === 12)?.requiredForIngest).toBeUndefined()
+	})
+
+	it("routes service-map rollup writes through a zero-retention plain-schema bridge", () => {
+		const ingressTable = migration_0013_service_map_ingest_bridge.statements.find((statement) =>
+			statement.startsWith("CREATE TABLE IF NOT EXISTS service_map_edges_hourly_ingest"),
+		)
+		const ingressView = migration_0013_service_map_ingest_bridge.statements.find((statement) =>
+			statement.startsWith("CREATE MATERIALIZED VIEW IF NOT EXISTS service_map_edges_hourly_ingest_mv"),
+		)
+
+		expect(ingressTable).toContain("ENGINE = Null")
+		expect(ingressTable).toContain("CallCount UInt64")
+		expect(ingressTable).not.toContain("AggregateFunction(")
+		expect(ingressView).toContain("TO service_map_edges_hourly")
+		expect(renderStatementFull(ingressView!, "maple")).toContain(
+			"FROM `maple`.`service_map_edges_hourly_ingest`",
+		)
+		expect(migrations.find((m) => m.version === 13)?.requiredForIngest).toBeUndefined()
+	})
+
+	it("adds the incremental minutely error rollup without replacing the deployed time-copy view", () => {
+		const sql = migration_0013_service_map_ingest_bridge.statements.join("\n\n")
+		const minutelyView = migration_0013_service_map_ingest_bridge.statements.find((statement) =>
+			statement.startsWith("CREATE MATERIALIZED VIEW IF NOT EXISTS error_fingerprints_minutely_mv"),
+		)
+
+		expect(sql).toContain("CREATE TABLE IF NOT EXISTS error_fingerprints_minutely")
+		expect(sql).toContain("PARTITION BY toYYYYMM(Minute)")
+		expect(sql).toContain("ORDER BY (OrgId, Minute, FingerprintHash)")
+		expect(minutelyView).toContain("FROM error_events")
+		expect(renderStatementFull(minutelyView!, "maple")).toContain("FROM `maple`.`error_events`")
+		expect(sql).not.toContain("DROP TABLE IF EXISTS error_events_by_time_mv")
+		expect(sql).not.toContain("DROP VIEW IF EXISTS error_events_by_time_mv")
 	})
 
 	it("adds the portable search substrate without requiring experimental text indexes", () => {

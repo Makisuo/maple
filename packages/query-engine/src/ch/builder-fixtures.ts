@@ -219,6 +219,20 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		compile: () => CH.compile(CH.errorIssuesQuery({ limit: 500 }), window),
 	},
 	{
+		// ErrorsService steady-state cursor window over the compact minute rollup.
+		module: "errors",
+		name: "errorTickIssuesQuery",
+		label: "cursor-window",
+		compile: () => CH.compile(CH.errorTickIssuesQuery(), window),
+	},
+	{
+		// ErrorsService one-time cursor bootstrap from retained canonical events.
+		module: "errors",
+		name: "errorTickBootstrapIssuesQuery",
+		label: "bootstrap-window",
+		compile: () => CH.compile(CH.errorTickBootstrapIssuesQuery(), window),
+	},
+	{
 		// ErrorsService errorIssueEnvFingerprints
 		module: "errors",
 		name: "errorFingerprintsQuery",

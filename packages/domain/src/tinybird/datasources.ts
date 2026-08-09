@@ -399,26 +399,57 @@ export const serviceMapChildren = defineDatasource("service_map_children", {
 export type ServiceMapChildrenRow = InferRow<typeof serviceMapChildren>
 
 /**
+ * Events-API ingress bridge for the scheduled service-map rollup.
+ *
+ * Tinybird requires JSONPaths for direct NDJSON ingestion, but rejects
+ * AggregateFunction/SimpleAggregateFunction columns in a datasource that has
+ * JSONPaths. Keep the API-facing schema plain and discard its rows after the
+ * `service_map_edges_hourly_ingest_mv` insert trigger forwards them to the
+ * aggregate target below.
+ */
+export const serviceMapEdgesHourlyIngest = defineDatasource("service_map_edges_hourly_ingest", {
+	description:
+		"Zero-retention Events API ingress bridge for scheduled service-map edge rollups. A materialized view forwards each insert to service_map_edges_hourly.",
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Hour: t.dateTime(),
+		SourceService: t.string().lowCardinality(),
+		TargetService: t.string(),
+		DeploymentEnv: t.string().lowCardinality(),
+		CallCount: t.uint64(),
+		ErrorCount: t.uint64(),
+		DurationSumMs: t.float64(),
+		MaxDurationMs: t.float64(),
+		SampledSpanCount: t.uint64(),
+		UnsampledSpanCount: t.uint64(),
+		SampleRateSum: t.float64(),
+	},
+	engine: engine.null(),
+})
+
+export type ServiceMapEdgesHourlyIngestRow = InferRow<typeof serviceMapEdgesHourlyIngest>
+
+/**
  * Pre-aggregated hourly service-to-service edges for the service map.
  * One row per (OrgId, Hour, SourceService, TargetService, DeploymentEnv) so the
  * service map query reads ~hundreds of hourly rows instead of millions of
  * individual spans. Uses AggregatingMergeTree with SimpleAggregateFunction
  * columns for correct incremental merging of sum/max aggregates.
  *
- * Populated by the scheduled hourly rollup in `ServiceMapRollupService` — NOT
- * by a materialized view. The edge target service is recovered via a
- * Client/Producer-span → child Server/Consumer-span join, which an MV cannot
- * express. The rollup writes each completed hour exactly once (watermarked).
+ * The scheduled hourly rollup computes the cross-span join and writes its
+ * completed result to `service_map_edges_hourly_ingest`. The ingress bridge's
+ * materialized view forwards the rows here. This target is never ingested
+ * through the Events API, so it must not declare JSONPaths.
  */
 export const serviceMapEdgesHourly = defineDatasource("service_map_edges_hourly", {
 	description:
-		"Pre-aggregated hourly service-to-service edges for the service map. Uses AggregatingMergeTree for incremental aggregation. Populated by the scheduled ServiceMapRollupService rollup (one write per completed hour).",
-	// jsonPaths enabled: this is ingested directly via POST /v0/events from
-	// ServiceMapRollupService, not by a materialized view. Declaring
-	// `jsonPaths: false` made Tinybird reject every write with "Data Source
-	// needs to have JSONPaths defined", so the table stopped filling — and
-	// because an hour is sealed only once its edge rows land, the rollup then
-	// re-ran all six lookback hours for every org on every tick, forever.
+		"Pre-aggregated hourly service-to-service edges for the service map. Uses AggregatingMergeTree for incremental aggregation. Populated from the scheduled rollup through a Null-engine ingress bridge.",
+	jsonPaths: false,
+	// Preserve the already-materialized annual history while this existing
+	// datasource evolves from an Events API target into an MV target. Without
+	// an explicit forward query, Tinybird may choose the new Null source for a
+	// rebuild; it intentionally contains no historical rows.
+	forwardQuery: "SELECT *",
 	schema: {
 		OrgId: t.string().lowCardinality(),
 		Hour: t.dateTime(),
@@ -836,13 +867,12 @@ export type ErrorEventsRow = InferRow<typeof errorEvents>
  *
  * `error_events` leads its sort key with `FingerprintHash`, which is optimal for
  * per-issue occurrence lookups (filter on a specific FingerprintHash) but pessimal
- * for the recent-window scans that dominate the workload: the errors/triage tick's
- * `errorIssuesScan` (and the dashboard error queries) filter a `Timestamp` range and
- * `GROUP BY FingerprintHash`, which can't prune via the primary index on the original
- * table and ends up scanning the org's whole day-partition — timing out the 30s
- * warehouse budget for high-volume orgs. This sibling makes the time range the leading
- * (post-org) sort dimension so those scans prune to the window. Same schema, same 90d
- * TTL; the only difference is the sorting key.
+ * for recent-window scans. Dashboard error queries and the evaluator's one-time
+ * bootstrap filter a `Timestamp` range and `GROUP BY FingerprintHash`, which cannot
+ * prune via the primary index on the original table. This sibling makes the time range
+ * the leading (post-org) sort dimension; steady-state evaluator ticks use the compact
+ * `error_fingerprints_minutely` rollup instead. Same schema and 90d TTL; only the
+ * sorting key differs.
  */
 export const errorEventsByTime = defineDatasource("error_events_by_time", {
 	description:
@@ -873,6 +903,44 @@ export const errorEventsByTime = defineDatasource("error_events_by_time", {
 })
 
 export type ErrorEventsByTimeRow = InferRow<typeof errorEventsByTime>
+
+/**
+ * Minute-grain error fingerprint rollup used by the scheduled issue evaluator.
+ *
+ * The evaluator only needs one row per fingerprint/window, not the trace/span
+ * payload carried by `error_events_by_time`. Keeping the mutable display fields
+ * as SimpleAggregateFunction(anyLast, String) lets partial insert blocks merge
+ * while the count and time bounds remain exact.
+ *
+ * Query pattern: OrgId equality + contiguous Minute range, then GROUP BY
+ * FingerprintHash. The sorting key follows that filter prefix and keeps the
+ * fingerprint last (highest cardinality).
+ */
+export const errorFingerprintsMinutely = defineDatasource("error_fingerprints_minutely", {
+	description:
+		"Minute-grain per-fingerprint error aggregates for the scheduled issue evaluator. Cascaded from error_events to avoid re-running fingerprint extraction.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Minute: t.dateTime(),
+		FingerprintHash: t.uint64(),
+		ServiceName: t.simpleAggregateFunction("anyLast", t.string()),
+		ExceptionType: t.simpleAggregateFunction("anyLast", t.string()),
+		ExceptionMessage: t.simpleAggregateFunction("anyLast", t.string()),
+		ErrorLabel: t.simpleAggregateFunction("anyLast", t.string()),
+		TopFrame: t.simpleAggregateFunction("anyLast", t.string()),
+		OccurrenceCount: t.simpleAggregateFunction("sum", t.uint64()),
+		FirstSeen: t.simpleAggregateFunction("min", t.dateTime()),
+		LastSeen: t.simpleAggregateFunction("max", t.dateTime()),
+	},
+	engine: engine.aggregatingMergeTree({
+		partitionKey: "toYYYYMM(Minute)",
+		sortingKey: ["OrgId", "Minute", "FingerprintHash"],
+		ttl: "Minute + INTERVAL 90 DAY",
+	}),
+})
+
+export type ErrorFingerprintsMinutelyRow = InferRow<typeof errorFingerprintsMinutely>
 
 /**
  * Pre-materialized root spans for the trace list view.
