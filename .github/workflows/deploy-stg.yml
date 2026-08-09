@@ -47,6 +47,13 @@ jobs:
                   export-type: "env"
                   secret-path: "/"
 
+            # AFTER Infisical — see the note in deploy-prd.yml.
+            - name: Configure AWS credentials (OIDC)
+              uses: aws-actions/configure-aws-credentials@v5
+              with:
+                  role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+                  aws-region: us-east-1
+
             - name: Install dependencies
               run: bun install --frozen-lockfile
 

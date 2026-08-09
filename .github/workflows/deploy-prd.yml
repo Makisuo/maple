@@ -52,6 +52,17 @@ jobs:
                   export-type: "env"
                   secret-path: "/"
 
+            # AFTER Infisical: the OIDC exchange writes AWS_ACCESS_KEY_ID /
+            # AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN / AWS_REGION into the env,
+            # which is exactly what alchemy's AWS auth reads (it picks the `env`
+            # method whenever CI=true). Running it last means these always win over
+            # anything stale carrying the same names out of Infisical.
+            - name: Configure AWS credentials (OIDC)
+              uses: aws-actions/configure-aws-credentials@v5
+              with:
+                  role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+                  aws-region: us-east-1
+
             - name: Install dependencies
               run: bun install --frozen-lockfile
 
