@@ -28,7 +28,7 @@ import {
 	useWidgetTimeRangeOverride,
 	widgetTimeRangeLabel,
 } from "@/components/dashboard-builder/widgets/widget-time-range-context"
-import { interpolateDisplayText } from "@/lib/dashboard-variables/interpolate"
+import { interpolateDisplayText } from "@maple/query-engine"
 
 interface WidgetShellProps {
 	title: string

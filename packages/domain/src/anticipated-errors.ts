@@ -72,9 +72,3 @@ export const ANTICIPATED_ERROR_IDENTIFIERS: ReadonlySet<string> = deriveAnticipa
 
 export const isAnticipatedErrorIdentifier = (identifier: string): boolean =>
 	ANTICIPATED_ERROR_IDENTIFIERS.has(identifier)
-
-/** @deprecated Use `ANTICIPATED_ERROR_IDENTIFIERS`. */
-export const ANTICIPATED_ERROR_TAGS = ANTICIPATED_ERROR_IDENTIFIERS
-
-/** @deprecated Use `isAnticipatedErrorIdentifier`. */
-export const isAnticipatedErrorTag = isAnticipatedErrorIdentifier

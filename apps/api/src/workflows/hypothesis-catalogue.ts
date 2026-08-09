@@ -35,9 +35,6 @@ import type { InvestigationHypothesis, SeedLensId } from "@maple/domain/http"
  * enforced here rather than merely asserted to the model. Session-replay tools
  * are excluded too — they are the largest outputs in the registry and an
  * investigation has never needed one to reach a cause.
- *
- * Moved here from `triage-prompt.ts`, which is scheduled for deletion along with
- * the legacy triage workflow; that file re-exports this name for the cutover.
  */
 export const INVESTIGATION_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 	"diagnose_service",

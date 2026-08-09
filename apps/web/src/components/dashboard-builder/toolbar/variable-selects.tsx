@@ -15,7 +15,7 @@ import {
 	useDashboardVariables,
 	type VariableOptionsState,
 } from "@/components/dashboard-builder/dashboard-variables-context"
-import { ALL_VALUE, type ResolvedVariable } from "@/lib/dashboard-variables/interpolate"
+import { ALL_VALUE, type ResolvedVariable } from "@maple/query-engine"
 import type { DashboardVariable } from "@/components/dashboard-builder/types"
 
 /**
