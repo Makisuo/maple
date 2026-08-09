@@ -40,7 +40,8 @@
 				"test/probes/*.ts",
 				"test/archive-probe-helpers.ts",
 				"test/merge-injection-probe.ts",
-				"test/native-local-store-migration-fixture.ts"
+				"test/native-local-store-migration-fixture.ts",
+				"test/native-service-map-ingest-bridge-probe.ts"
 			],
 			"ignoreBinaries": ["duckdb"]
 		},
