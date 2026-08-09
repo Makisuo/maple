@@ -118,6 +118,9 @@ const stars = await getGitHubStars();
             <div class="flex items-center gap-4">
                 <a href={l("/privacy")} class="text-fg-muted text-[10px] hover:text-foreground transition-colors">{m.footer_privacy()}</a>
                 <a href={l("/terms")} class="text-fg-muted text-[10px] hover:text-foreground transition-colors">{m.footer_terms()}</a>
+                <!-- English-only page, so a bare href rather than l() — same as
+                     /changelog and /docs above. -->
+                <a href="/brand" class="text-fg-muted text-[10px] hover:text-foreground transition-colors">{m.footer_brand()}</a>
                 <LanguageSwitcher />
                 <div class="flex items-center gap-3 border-l border-border pl-4">
                     <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" aria-label={m.footer_github()} class="text-fg-muted hover:text-foreground transition-colors">

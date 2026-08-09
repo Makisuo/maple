@@ -2487,6 +2487,14 @@ export const footer_terms = () => `이용약관`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const footer_brand = () => `브랜드`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const pricing_30day_retention = () => `30일 보존`
 
 

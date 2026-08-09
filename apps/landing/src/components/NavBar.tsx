@@ -21,6 +21,7 @@ import { featurePath, useCasePath } from "../lib/page-registry"
 import { useCases } from "../lib/use-cases"
 import { identifyLanding } from "../lib/telemetry"
 import { GithubStarButton, Octocat } from "./GithubStarButton"
+import { LogoContextMenu } from "./LogoContextMenu"
 
 const PUBLISHABLE_KEY = import.meta.env.PUBLIC_CLERK_PUBLISHABLE_KEY
 
@@ -142,12 +143,12 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 			{/* Logo. The nav list is absolutely centred rather than laid out
 			    between the two groups, so the centring survives the asymmetric
 			    right-hand group (star pill + Log in + CTA). */}
-			<div className="flex items-center">
+			<LogoContextMenu>
 				<a href={l("/")} className="flex items-center gap-2.5">
 					<MapleMark size={26} className="text-primary shrink-0" />
 					<span className="text-fg font-medium text-sm">Maple</span>
 				</a>
-			</div>
+			</LogoContextMenu>
 
 			<div className="absolute left-1/2 hidden -translate-x-1/2 lg:block">
 				<NavigationMenu className="flex">

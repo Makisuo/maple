@@ -1,0 +1,618 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import SeoHead from "../components/SeoHead.astro";
+import LocalEyebrow from "../components/local/LocalEyebrow.astro";
+import BrandAssetTile from "../components/brand/BrandAssetTile.astro";
+
+// English-only and hardcoded, like /local and /privacy. The kit filenames are
+// the contract with anyone who has linked to one, so they live here as literals
+// rather than being derived — a helper that renamed them would break inbound
+// links silently.
+import markAmber from "../../public/brand/logo/maple-mark-amber.svg?raw";
+import markInk from "../../public/brand/logo/maple-mark-ink.svg?raw";
+import markWhite from "../../public/brand/logo/maple-mark-white.svg?raw";
+import markSoot from "../../public/brand/logo/maple-mark-soot.svg?raw";
+import markFired from "../../public/brand/logo/maple-mark-fired.svg?raw";
+import lockupPrimary from "../../public/brand/wordmark/maple-lockup-primary.svg?raw";
+import lockupReversed from "../../public/brand/wordmark/maple-lockup-reversed.svg?raw";
+import lockupInk from "../../public/brand/wordmark/maple-lockup-ink.svg?raw";
+import lockupWhite from "../../public/brand/wordmark/maple-lockup-white.svg?raw";
+
+const pageTitle = "Brand — Maple";
+const pageDescription =
+    "The Maple logo, wordmark, colours, and type — with a downloadable brand kit. Use them as they are; please don't redraw them.";
+
+const KIT = "/brand/maple-brand-kit.zip";
+
+// Grounds are raw values on purpose: a swatch of how the amber reads on ink is
+// describing the brand, so it must not follow the site's theme.
+const BONE = "#E8E0D6";
+const INK = "#171410";
+
+const lockups = [
+    {
+        name: "Lockup — primary",
+        note: "amber mark, ink type · light grounds",
+        svg: lockupPrimary,
+        href: "/brand/wordmark/maple-lockup-primary.svg",
+        png: "/brand/wordmark/maple-lockup-primary-1024.png",
+        ground: BONE,
+    },
+    {
+        name: "Lockup — reversed",
+        note: "amber mark, bone type · dark grounds",
+        svg: lockupReversed,
+        href: "/brand/wordmark/maple-lockup-reversed.svg",
+        png: "/brand/wordmark/maple-lockup-reversed-1024.png",
+        ground: INK,
+    },
+    {
+        name: "Lockup — mono ink",
+        note: "one fill · print, engraving, embroidery",
+        svg: lockupInk,
+        href: "/brand/wordmark/maple-lockup-ink.svg",
+        png: "/brand/wordmark/maple-lockup-ink-1024.png",
+        ground: BONE,
+    },
+    {
+        name: "Lockup — mono white",
+        note: "one fill · photography, dark print",
+        svg: lockupWhite,
+        href: "/brand/wordmark/maple-lockup-white.svg",
+        png: "/brand/wordmark/maple-lockup-white-1024.png",
+        ground: INK,
+    },
+];
+
+const marks = [
+    {
+        name: "Mark — amber",
+        note: "the default, on any ground it clears",
+        svg: markAmber,
+        href: "/brand/logo/maple-mark-amber.svg",
+        png: "/brand/logo/maple-mark-amber-1024.png",
+        ground: INK,
+    },
+    {
+        name: "Mark — ink",
+        note: "light grounds, single colour",
+        svg: markInk,
+        href: "/brand/logo/maple-mark-ink.svg",
+        png: "/brand/logo/maple-mark-ink-1024.png",
+        ground: BONE,
+    },
+    {
+        name: "Mark — white",
+        note: "photography and dark print",
+        svg: markWhite,
+        href: "/brand/logo/maple-mark-white.svg",
+        png: "/brand/logo/maple-mark-white-1024.png",
+        ground: INK,
+    },
+    {
+        name: "Soot tile",
+        note: "amber on ink · app icon, favicon",
+        svg: markSoot,
+        href: "/brand/logo/maple-mark-soot.svg",
+        png: "/brand/logo/maple-mark-soot-1024.png",
+        ground: "#2A2520",
+    },
+    {
+        name: "Fired tile",
+        note: "ink on amber · Maple Local",
+        svg: markFired,
+        href: "/brand/logo/maple-mark-fired.svg",
+        png: "/brand/logo/maple-mark-fired-1024.png",
+        ground: "#2A2520",
+    },
+];
+
+// Two kinds of colour, kept apart because their authoritative form differs.
+// Asset colours are hex — that is what is written into the SVGs and the icon
+// script. Interface colours are oklch, because that is what tokens.css declares
+// and a hex here would be a lossy transcription of it.
+const assetColors = [
+    { name: "Amber", value: "#E86F00", note: "the mark", on: INK },
+    { name: "Ink", value: "#171410", note: "tiles, dark grounds", on: BONE },
+    { name: "Bone", value: "#E8E0D6", note: "type on dark grounds", on: INK },
+];
+
+const uiColors = [
+    { name: "--primary", value: "oklch(0.714 0.154 59)", note: "brand accent, dark theme" },
+    { name: "--primary", value: "oklch(0.66 0.16 59)", note: "brand accent, light theme" },
+    { name: "--background", value: "oklch(0.207 0.008 67)", note: "app ground, dark theme" },
+    { name: "--amber-deep", value: "oklch(0.55 0.16 55)", note: "landing accent, pressed" },
+    { name: "--amber-soft", value: "oklch(0.78 0.12 65)", note: "landing accent, raised" },
+];
+
+// Every rule here is a constraint the artwork actually has, transcribed from the
+// comments in favicon.svg, maple-mark.tsx, and generate-icons.sh. A do/don't
+// list of invented rules is one nobody follows.
+const rules = [
+    {
+        ok: false,
+        title: "Don't fill the mark with a gradient",
+        body: "The eyes and the notch beside the trunk are knockouts in a single evenodd path — whatever sits behind reads through them. A gradient arrives at the eyes at a different value than at the silhouette edge, and they stop reading as eyes.",
+    },
+    {
+        ok: false,
+        title: "Don't put the tile inside our chrome",
+        body: "The rounded tile exists so the mark survives a browser tab strip. Inside a header or a slide that already has a surface, it is a box around a box — use the bare mark.",
+    },
+    {
+        ok: false,
+        title: "Don't rebuild the wordmark",
+        body: "Setting “Maple” next to the mark in whatever face is to hand gives you a different logo every time. The lockup above is outlined, so it needs no font installed.",
+    },
+    {
+        ok: false,
+        title: "Don't stretch, rotate, or recolour",
+        body: "Scale it uniformly and take a colourway from this page. If none of them clears your ground, use mono white or mono ink rather than mixing a new one.",
+    },
+    {
+        ok: true,
+        title: "Do give it room, and size",
+        body: "Keep clear space of at least half the mark's width on every side. The bare mark stops resolving below 16px — its eyes are barely a pixel wide and antialias into a blob — so below that, use the tile.",
+    },
+    {
+        ok: true,
+        title: "Do use the files as they are",
+        body: "Everything here is the exact byte the product ships. If you need something that isn't in the kit — a different ratio, a partner lockup — ask rather than improvise.",
+    },
+];
+---
+
+<Layout title={pageTitle} description={pageDescription}>
+    <!-- The Organization block carries `logo`, and this is the one page whose
+         subject is that logo — if any page should emit it, it is this one. -->
+    <SeoHead title={pageTitle} description={pageDescription} includeOrganization />
+
+    <Nav />
+
+    <!-- Hero -->
+    <section class="bg-bg">
+        <div class="mx-auto max-w-6xl px-6 pt-32 pb-20 md:pt-40 md:pb-24">
+            <div class="max-w-3xl">
+                <LocalEyebrow label="Brand" />
+                <h1
+                    class="font-display text-4xl sm:text-5xl md:text-6xl font-semibold leading-[1.03] tracking-tight">
+                    The Maple logo, and how to use it
+                </h1>
+                <p class="mt-6 text-sm md:text-base text-fg-muted leading-relaxed max-w-2xl">
+                    Writing about Maple, building an integration, or putting us on a slide? Take what
+                    you need — no permission required, and no need to ask first. The one thing we do
+                    ask is that you use the artwork as it is rather than redrawing it.
+                </p>
+                <div class="mt-9 flex flex-wrap items-center gap-3">
+                    <a
+                        class="brand-cta"
+                        href={KIT}
+                        download
+                        data-track="brand_asset_downloaded"
+                        data-track-asset={KIT}>
+                        Download the brand kit
+                        <span class="brand-cta__meta">.zip</span>
+                    </a>
+                    <span class="text-xs text-fg-muted">
+                        Logo, wordmark, and app icons — SVG plus PNG at 256, 512, and 1024.
+                    </span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 01 — Logo -->
+    <section class="bg-bg-deep border-t border-border">
+        <div class="mx-auto max-w-6xl px-6 py-20 md:py-24">
+            <div class="max-w-2xl mb-12">
+                <LocalEyebrow index="01" label="Logo" />
+                <h2
+                    class="font-display text-3xl sm:text-4xl font-semibold leading-[1.06] tracking-tight">
+                    A tree, and the word next to it
+                </h2>
+                <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed">
+                    The lockup is the default — reach for the bare mark only where the name is
+                    already present, and for the tile only where the mark has to hold its own edge
+                    against chrome we don't control. Each tile below shows the exact file you get.
+                </p>
+            </div>
+
+            <div class="mb-4 text-[10px] uppercase tracking-[0.18em] text-fg-muted">Lockup</div>
+            <div class="grid sm:grid-cols-2 gap-4 mb-12">
+                {lockups.map((a) => <BrandAssetTile {...a} wide />)}
+            </div>
+
+            <div class="mb-4 text-[10px] uppercase tracking-[0.18em] text-fg-muted">Mark</div>
+            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {marks.map((a) => <BrandAssetTile {...a} />)}
+            </div>
+        </div>
+    </section>
+
+    <!-- 02 — Colour -->
+    <section class="bg-bg border-t border-border">
+        <div class="mx-auto max-w-6xl px-6 py-20 md:py-24">
+            <div class="max-w-2xl mb-12">
+                <LocalEyebrow index="02" label="Colour" />
+                <h2
+                    class="font-display text-3xl sm:text-4xl font-semibold leading-[1.06] tracking-tight">
+                    One amber, one ink
+                </h2>
+                <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed">
+                    The brand is a warm amber at hue 59 on a near-black that leans brown rather than
+                    blue. Everything else in the product is a neutral or a severity colour — the
+                    accent is deliberately the only saturated thing on screen.
+                </p>
+            </div>
+
+            <div class="mb-4 text-[10px] uppercase tracking-[0.18em] text-fg-muted">
+                Artwork — hex is authoritative
+            </div>
+            <div class="grid sm:grid-cols-3 gap-4 mb-12">
+                {
+                    assetColors.map((c) => (
+                        <figure class="sw" data-copy={c.value}>
+                            <div class="sw__chip" style={`background:${c.value};color:${c.on}`}>
+                                <span class="sw__hex">{c.value}</span>
+                            </div>
+                            <figcaption class="sw__meta">
+                                <span class="sw__name">{c.name}</span>
+                                <span class="sw__note">{c.note}</span>
+                                <button type="button" class="sw__copy" aria-label={`Copy ${c.value}`}>
+                                    <span class="sw__label">copy</span>
+                                </button>
+                            </figcaption>
+                        </figure>
+                    ))
+                }
+            </div>
+
+            <div class="mb-4 text-[10px] uppercase tracking-[0.18em] text-fg-muted">
+                Interface — oklch is authoritative
+            </div>
+            <div class="ui-tokens">
+                {
+                    uiColors.map((c) => (
+                        <div class="ui-token" data-copy={c.value}>
+                            <span class="ui-token__chip" style={`background:${c.value}`} aria-hidden="true" />
+                            <code class="ui-token__name">{c.name}</code>
+                            <code class="ui-token__value">{c.value}</code>
+                            <span class="ui-token__note">{c.note}</span>
+                            <button type="button" class="ui-token__copy" aria-label={`Copy ${c.value}`}>
+                                <span class="ui-token__label">copy</span>
+                            </button>
+                        </div>
+                    ))
+                }
+            </div>
+        </div>
+    </section>
+
+    <!-- 03 — Type -->
+    <section class="bg-bg-deep border-t border-border">
+        <div class="mx-auto max-w-6xl px-6 py-20 md:py-24">
+            <div class="grid lg:grid-cols-[minmax(0,380px)_1fr] gap-12 lg:gap-16 items-start">
+                <div>
+                    <LocalEyebrow index="03" label="Type" />
+                    <h2
+                        class="font-display text-3xl sm:text-4xl font-semibold leading-[1.06] tracking-tight">
+                        Geist, and Geist Mono
+                    </h2>
+                    <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed">
+                        Headings are Geist. Body copy is Geist Mono — that is not a mistake or a
+                        code-block rule, it is the default text face across the product. An
+                        observability tool is read the way a terminal is read, and the monospace
+                        keeps ids, durations, and hex digests in columns that line up.
+                    </p>
+                    <p class="mt-4 text-sm text-fg-muted leading-relaxed">
+                        The wordmark is Geist Medium at −0.02em. Both faces are open source, under
+                        the SIL Open Font License.
+                    </p>
+                </div>
+                <div class="specimen">
+                    <div class="specimen__row">
+                        <span class="specimen__tag">Geist · display</span>
+                        <p class="specimen__display">Traces, logs, and metrics</p>
+                    </div>
+                    <div class="specimen__row">
+                        <span class="specimen__tag">Geist Mono · body</span>
+                        <p class="specimen__body">
+                            p95 842ms · error_rate 0.4% · 1a2b3c4d5e6f7890
+                        </p>
+                    </div>
+                    <div class="specimen__row specimen__row--last">
+                        <span class="specimen__tag">Geist Medium · wordmark</span>
+                        <p class="specimen__wordmark">Maple</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 04 — Usage -->
+    <section class="bg-bg border-t border-border">
+        <div class="mx-auto max-w-6xl px-6 py-20 md:py-24">
+            <div class="max-w-2xl mb-12">
+                <LocalEyebrow index="04" label="Usage" />
+                <h2
+                    class="font-display text-3xl sm:text-4xl font-semibold leading-[1.06] tracking-tight">
+                    Four things not to do, two to do
+                </h2>
+                <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed">
+                    These aren't style preferences — each one is a property the artwork actually
+                    has, and breaking it produces a logo that renders wrong rather than one we
+                    merely dislike.
+                </p>
+            </div>
+
+            <div class="grid sm:grid-cols-2 gap-4">
+                {
+                    rules.map((r) => (
+                        <div class="rule" class:list={[r.ok && "rule--ok"]}>
+                            <span class="rule__mark" aria-hidden="true">{r.ok ? "✓" : "✗"}</span>
+                            <h3 class="rule__title">{r.title}</h3>
+                            <p class="rule__body">{r.body}</p>
+                        </div>
+                    ))
+                }
+            </div>
+
+            <p class="mt-12 text-sm text-fg-muted leading-relaxed max-w-2xl">
+                Need something the kit doesn't cover — a partner lockup, a different ratio, or
+                permission to do one of the four things above? Email
+                <a class="text-primary hover:underline" href="mailto:hello@maple.dev">hello@maple.dev</a
+                >.
+            </p>
+        </div>
+    </section>
+
+    <Footer />
+</Layout>
+
+<script>
+    import { bindCopyButtons } from "../lib/copy-to-clipboard";
+
+    // Three surfaces, one payload contract: every host carries `data-copy`, so
+    // the binding is the same for an SVG file and a colour value.
+    const brand = { event: "brand_asset_copied", key: "asset" } as const;
+
+    bindCopyButtons({
+        hostSelector: ".bt[data-copy]",
+        buttonSelector: ".bt__copy",
+        labelSelector: ".bt__label",
+        copiedLabel: "copied",
+        track: brand,
+    });
+    bindCopyButtons({
+        hostSelector: ".sw[data-copy]",
+        buttonSelector: ".sw__copy",
+        labelSelector: ".sw__label",
+        track: brand,
+    });
+    bindCopyButtons({
+        hostSelector: ".ui-token[data-copy]",
+        buttonSelector: ".ui-token__copy",
+        labelSelector: ".ui-token__label",
+        track: brand,
+    });
+</script>
+
+<style>
+    .brand-cta {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--primary);
+        color: var(--primary-foreground);
+        font-size: 13px;
+        font-weight: 500;
+        padding: 10px 18px;
+        border-radius: 8px;
+        transition: background 0.15s;
+    }
+    .brand-cta:hover {
+        background: var(--amber-soft);
+    }
+    .brand-cta__meta {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        opacity: 0.62;
+    }
+
+    /* --- colour swatches --- */
+    .sw {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--bg-elevated);
+    }
+    .sw__chip {
+        display: flex;
+        align-items: flex-end;
+        min-height: 128px;
+        padding: 14px;
+    }
+    .sw__hex {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        letter-spacing: 0.04em;
+    }
+    .sw__meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 14px;
+        border-top: 1px solid var(--border);
+    }
+    .sw__name {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--foreground);
+    }
+    .sw__note {
+        font-size: 11px;
+        color: var(--muted-foreground);
+        flex: 1;
+        min-width: 0;
+    }
+    .sw__copy,
+    .ui-token__copy {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        color: var(--muted-foreground);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 4px 7px;
+        background: transparent;
+        cursor: pointer;
+        flex-shrink: 0;
+        min-width: 52px;
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .sw__copy:hover,
+    .ui-token__copy:hover {
+        color: var(--foreground);
+        border-color: var(--muted-foreground);
+    }
+    .sw__copy.is-done,
+    .ui-token__copy.is-done {
+        color: var(--primary);
+        border-color: var(--primary);
+    }
+
+    /* --- interface tokens --- */
+    .ui-tokens {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--bg-elevated);
+    }
+    /* Fixed slots rather than gap alone: the chip, name, and value have to hold
+       their vertical lanes across rows whose notes differ in length. */
+    .ui-token {
+        display: grid;
+        grid-template-columns: 20px 132px 200px 1fr auto;
+        align-items: center;
+        gap: 14px;
+        padding: 11px 14px;
+        border-bottom: 1px solid var(--border);
+    }
+    .ui-token:last-child {
+        border-bottom: 0;
+    }
+    .ui-token__chip {
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        border: 1px solid rgb(255 255 255 / 0.1);
+    }
+    .ui-token__name,
+    .ui-token__value {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        color: var(--foreground);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .ui-token__value {
+        color: var(--muted-foreground);
+    }
+    .ui-token__note {
+        font-size: 11px;
+        color: var(--muted-foreground);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    @media (max-width: 720px) {
+        .ui-token {
+            grid-template-columns: 20px 1fr auto;
+        }
+        .ui-token__value,
+        .ui-token__note {
+            display: none;
+        }
+    }
+
+    /* --- type specimen --- */
+    .specimen {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--bg-elevated);
+    }
+    .specimen__row {
+        padding: 26px 28px;
+        border-bottom: 1px solid var(--border);
+    }
+    .specimen__row--last {
+        border-bottom: 0;
+    }
+    .specimen__tag {
+        display: block;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+        margin-bottom: 14px;
+    }
+    .specimen__display {
+        font-family: var(--font-display);
+        font-size: clamp(26px, 4vw, 38px);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.08;
+        color: var(--foreground);
+    }
+    .specimen__body {
+        font-family: var(--font-mono);
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--foreground);
+    }
+    .specimen__wordmark {
+        font-family: var(--font-display);
+        font-size: clamp(30px, 4.4vw, 44px);
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        color: var(--foreground);
+    }
+
+    /* --- usage rules --- */
+    .rule {
+        position: relative;
+        padding: 22px 24px 24px 52px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--bg-elevated);
+    }
+    .rule__mark {
+        position: absolute;
+        left: 22px;
+        top: 22px;
+        font-size: 13px;
+        line-height: 20px;
+        color: var(--muted-foreground);
+    }
+    .rule--ok .rule__mark {
+        color: var(--primary);
+    }
+    .rule__title {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--foreground);
+        line-height: 20px;
+    }
+    .rule__body {
+        margin-top: 9px;
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--muted-foreground);
+    }
+</style>

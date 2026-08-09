@@ -10,7 +10,7 @@
  */
 
 import { writeClipboardText } from "@maple/ui/lib/clipboard"
-import { trackLanding } from "./telemetry"
+import { type LandingEvent, trackLanding } from "./telemetry"
 
 const RESET_MS = 1600
 
@@ -33,6 +33,12 @@ export interface CopyButtonOptions {
 	errorLabel?: string
 	/** Class toggled on the button while the copied state holds. */
 	doneClass?: string
+	/**
+	 * What to report when a copy lands. Defaults to the install-snippet event
+	 * this was built for; pass it when the payload isn't a shell command, so the
+	 * `command` property doesn't end up holding something that isn't one.
+	 */
+	track?: { event: LandingEvent; key: string }
 }
 
 /**
@@ -48,6 +54,7 @@ export function bindCopyButtons({
 	copiedLabel = "copied",
 	errorLabel = "press ⌘C",
 	doneClass = "is-done",
+	track = { event: "install_command_copied", key: "command" },
 }: CopyButtonOptions): void {
 	for (const host of root.querySelectorAll<HTMLElement>(hostSelector)) {
 		const button = host.matches(buttonSelector)
@@ -64,10 +71,10 @@ export function bindCopyButtons({
 
 		button.addEventListener("click", async () => {
 			const ok = await writeClipboardText(text)
-			// Copying the install command is the strongest intent signal the
-			// marketing site has — tracked here rather than at each of the four call
-			// sites, since this is the one place that knows the copy succeeded.
-			trackLanding("install_command_copied", { command: text.slice(0, 120), copied: ok })
+			// Copying is the strongest intent signal the marketing site has —
+			// tracked here rather than at each call site, since this is the one
+			// place that knows the copy succeeded.
+			trackLanding(track.event, { [track.key]: text.slice(0, 120), copied: ok })
 			label.textContent = ok ? copiedLabel : errorLabel
 			button.classList.toggle(doneClass, ok)
 

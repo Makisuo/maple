@@ -2487,6 +2487,14 @@ export const footer_terms = () => `利用規約`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const footer_brand = () => `ブランド`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const pricing_30day_retention = () => `30日間の保持`
 
 

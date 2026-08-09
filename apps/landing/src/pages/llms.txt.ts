@@ -105,6 +105,14 @@ export const GET: APIRoute = ({ site }) => {
 		`- [Repository](https://github.com/Makisuo/maple)`,
 		"",
 
+		"## Brand",
+		"",
+		"Logo, wordmark, colours, and type, with a downloadable kit. Use the artwork as it is rather than redrawing it.",
+		"",
+		...both("Brand assets", "/brand"),
+		`- [Brand kit archive](${url("/brand/maple-brand-kit.zip")})`,
+		"",
+
 		"## Legal",
 		"",
 		`- [Privacy policy](${url("/privacy")})`,
