@@ -515,9 +515,12 @@ describe("runChatTurn retry", () => {
 	})
 
 	it("retracts exactly the text the failed attempt did flush", async () => {
-		// A full batch (`DELTA_BATCH_SIZE`) flushes on the size cap regardless of timing, so this is
-		// the deterministic stand-in for a real provider stream, where the 16ms window fires
-		// constantly and most text has already shipped by the time the body dies.
+		// A full batch (`DELTA_BATCH_SIZE`) flushes on the size cap regardless of timing, so unlike
+		// the case above this attempt is guaranteed to have shipped text — the stand-in for a real
+		// provider stream, where the 16ms window fires constantly and most text has already shipped
+		// by the time the body dies. Only the size-capped batch is guaranteed: the trailing
+		// `"buffered"` delta is a pending partial batch, and on a slow runner the window fires
+		// before the failure and ships that too. So the floor is fixed; the exact count is not.
 		const flushed = Array.from({ length: 24 }, (_, i) => textDelta(String(i % 10)))
 		const result = await Effect.runPromise(
 			collect([
@@ -531,8 +534,11 @@ describe("runChatTurn retry", () => {
 		// and the log is durable.
 		const retracted = retries(result.events)
 		assert.lengthOf(retracted, 1)
-		const marker = retracted[0]
-		assert.equal(marker?.type === "turn-retry" ? marker.retractChars : undefined, 24)
+		const at = result.events.findIndex((event) => event.type === "turn-retry")
+		const marker = result.events[at]
+		const flushedBefore = textOf(result.events.slice(0, at))
+		assert.equal(marker?.type === "turn-retry" ? marker.retractChars : undefined, flushedBefore.length)
+		assert.isAtLeast(flushedBefore.length, 24)
 		assert.equal(marker?.type === "turn-retry" ? marker.attempt : undefined, 2)
 
 		// Fold the whole event list the way `ChatSession.history()` does, and check the reader lands
