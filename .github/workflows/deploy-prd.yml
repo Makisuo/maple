@@ -21,7 +21,7 @@ permissions:
 jobs:
     deploy-prd:
         runs-on: ubuntu-latest
-        timeout-minutes: 30
+        timeout-minutes: 45
         # On a workflow_run event `github.sha` is the default branch head, not the
         # commit CI actually ran against — so pin everything to head_sha, both for
         # what gets deployed and for the telemetry stamp.
@@ -65,6 +65,42 @@ jobs:
 
             - name: Install dependencies
               run: bun install --frozen-lockfile
+
+            # The Rust gateway is compiled HERE, not inside the image build.
+            # alchemy's docker build passes no --cache-from (AWS/ECR/Image.ts), and
+            # a fresh runner's layer cache is empty, so a Dockerfile that runs
+            # `cargo build` recompiles all 385 crates on every deploy — ~20 minutes,
+            # however the layers are arranged. Out here the cargo cache survives
+            # between runs, so an unchanged ingest is a no-op and a one-crate change
+            # is about a minute. Dockerfile.prebuilt then just COPYs the result.
+            #
+            # Inside rust:1.88-bookworm rather than on the runner: the runtime base
+            # is debian:bookworm-slim (glibc 2.36) and ubuntu-24.04 ships 2.39, so a
+            # host-built binary starts and immediately dies with
+            # `version 'GLIBC_2.39' not found`.
+            - name: Cache ingest cargo build
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: |
+                      ~/.cargo-ingest
+                      apps/ingest/target-ci
+                  key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
+                  restore-keys: |
+                      ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
+                      ingest-cargo-${{ runner.os }}-
+
+            - name: Build ingest binary
+              run: |
+                  mkdir -p ~/.cargo-ingest apps/ingest/dist
+                  docker run --rm \
+                      --user "$(id -u):$(id -g)" \
+                      -e CARGO_HOME=/cargo \
+                      -v "$HOME/.cargo-ingest:/cargo" \
+                      -v "$PWD/apps/ingest:/app" \
+                      -w /app \
+                      rust:1.88-bookworm \
+                      cargo build --release --target-dir /app/target-ci
+                  cp apps/ingest/target-ci/release/maple-ingest apps/ingest/dist/maple-ingest
 
             # NOTE: prod schema migrations are applied OUT OF BAND (manually, via
             # `bun run migrate:prod` → `ps:apply-schema main`, against the direct 5432

@@ -19,7 +19,7 @@ permissions:
 jobs:
     deploy-stg:
         runs-on: ubuntu-latest
-        timeout-minutes: 30
+        timeout-minutes: 45
         if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
         environment: staging
         env:
@@ -56,6 +56,32 @@ jobs:
 
             - name: Install dependencies
               run: bun install --frozen-lockfile
+
+            # Compiled outside the image build, in a bookworm container — see the
+            # note in deploy-prd.yml.
+            - name: Cache ingest cargo build
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: |
+                      ~/.cargo-ingest
+                      apps/ingest/target-ci
+                  key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
+                  restore-keys: |
+                      ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
+                      ingest-cargo-${{ runner.os }}-
+
+            - name: Build ingest binary
+              run: |
+                  mkdir -p ~/.cargo-ingest apps/ingest/dist
+                  docker run --rm \
+                      --user "$(id -u):$(id -g)" \
+                      -e CARGO_HOME=/cargo \
+                      -v "$HOME/.cargo-ingest:/cargo" \
+                      -v "$PWD/apps/ingest:/app" \
+                      -w /app \
+                      rust:1.88-bookworm \
+                      cargo build --release --target-dir /app/target-ci
+                  cp apps/ingest/target-ci/release/maple-ingest apps/ingest/dist/maple-ingest
 
             # BEFORE migrate: installs default privileges granting PUBLIC on every
             # table created from here on, so a new or rebuilt table can never land
