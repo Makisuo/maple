@@ -6353,6 +6353,7 @@ mod tests {
         .expect("test pipeline should start without Tinybird credentials");
 
         AppState {
+            key_store_ready: Arc::new(AtomicBool::new(true)),
             config: AppConfig {
                 port: 0,
                 otlp_grpc_port: None,
