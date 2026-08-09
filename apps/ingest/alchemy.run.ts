@@ -83,11 +83,33 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 			tags: { Service: "maple-ingest", Region: region },
 		})
 
-		// The ALB is the only thing that should reach the tasks, but Fargate tasks
-		// in public subnets need a public IP to egress without NAT, so the port is
-		// open to the internet. Tightening this to the ALB's security group is a
-		// follow-up once the ALB SG is addressable from here.
-		const securityGroup = yield* AWS.EC2.SecurityGroup("ingest-sg", {
+		// Two groups, because `AWS.ECS.Service` applies `securityGroups` to BOTH the
+		// ALB and the tasks — there is no separate knob for the load balancer. Both
+		// are attached to both, and the split lives in the RULES: the internet
+		// reaches 443 (the ALB listener), and INGEST_PORT is reachable only from
+		// something already in the ALB group.
+		//
+		// This matters more here than it would behind a NAT: the tasks carry public
+		// IPs so they can egress without one, so an ENI's address is directly
+		// dialable. Opening INGEST_PORT to 0.0.0.0/0 would let anyone who finds it
+		// post OTLP straight to a task over plaintext HTTP, skipping the ALB and,
+		// since the domain is proxied, Cloudflare's TLS and rate limiting with it.
+		const albSecurityGroup = yield* AWS.EC2.SecurityGroup("ingest-alb-sg", {
+			vpcId: network.vpcId,
+			groupName: name("ingest-alb"),
+			description: "Maple OTLP ingest — public HTTPS to the load balancer",
+			ingress: [
+				{
+					ipProtocol: "tcp",
+					fromPort: 443,
+					toPort: 443,
+					cidrIpv4: "0.0.0.0/0",
+					description: "OTLP over HTTPS",
+				},
+			],
+		})
+
+		const taskSecurityGroup = yield* AWS.EC2.SecurityGroup("ingest-sg", {
 			vpcId: network.vpcId,
 			groupName: name("ingest"),
 			description: "Maple OTLP ingest gateway",
@@ -96,8 +118,8 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 					ipProtocol: "tcp",
 					fromPort: INGEST_PORT,
 					toPort: INGEST_PORT,
-					cidrIpv4: "0.0.0.0/0",
-					description: "OTLP over HTTP",
+					referencedGroupId: albSecurityGroup.groupId,
+					description: "ALB to task",
 				},
 			],
 		})
@@ -134,15 +156,26 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 		)
 
 		// Optional credentials — absent in a stage that hasn't enabled the feature.
-		// Autumn absent means billing enforcement is dark; the R2 secret absent
-		// means replay payloads stay inline in ClickHouse rather than moving to the
-		// blob store (`apps/ingest/src/main.rs` refuses a half-set R2 config, so
-		// the endpoint env below is gated on the same value).
+		// Autumn absent means billing enforcement is dark.
 		const autumnKey = process.env.AUTUMN_SECRET_KEY?.trim()
 		const autumnSecret = autumnKey ? yield* secret("autumn-secret-key", autumnKey) : undefined
-		const replayR2Key = process.env.INGEST_REPLAY_R2_SECRET_ACCESS_KEY?.trim()
-		const replayR2Secret = replayR2Key
-			? yield* secret("replay-r2-secret-access-key", replayR2Key)
+
+		// Replay blob storage keys off the ENDPOINT, matching the gateway's own
+		// switch (`Config::from_env` in `apps/ingest/src/main.rs` treats
+		// INGEST_REPLAY_R2_ENDPOINT as the enable flag and `required()`s the rest).
+		// Gating on any other variable inverts the contract: a deploy holding the
+		// endpoint, bucket and access key but missing the secret would drop the
+		// endpoint from the task env, and the gateway — seeing no R2 config at all —
+		// would silently fall back to storing replay payloads inline. That is the
+		// exact failure the Rust guard exists to prevent, so the check moves here:
+		// endpoint set means the deploy fails now rather than the tasks crash-loop
+		// later.
+		const replayR2Endpoint = process.env.INGEST_REPLAY_R2_ENDPOINT?.trim()
+		const replayR2Secret = replayR2Endpoint
+			? yield* secret(
+					"replay-r2-secret-access-key",
+					requireEnv("INGEST_REPLAY_R2_SECRET_ACCESS_KEY"),
+				)
 			: undefined
 
 		// An ALB can only use a certificate from its OWN region, and the ACM
@@ -187,11 +220,19 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 			desiredCount: resolveIngestDesiredCount(stage),
 			vpcId: network.vpcId,
 			subnets: network.publicSubnetIds,
-			securityGroups: [securityGroup.groupId],
+			securityGroups: [albSecurityGroup.groupId, taskSecurityGroup.groupId],
 			assignPublicIp: true,
 
 			public: true,
-			listenerPort: INGEST_PORT,
+			// `port` is the CONTAINER port (what the target group forwards to); the
+			// listener port is separate and defaults to 443 once `certificateArn` is
+			// set, which is what we want. Setting `listenerPort: INGEST_PORT` instead
+			// would break twice over: the listener would sit on 3474, which
+			// Cloudflare's proxy does not forward to (it only fetches origins on its
+			// supported port list), and `port` would fall back to alchemy's default
+			// of 3000 while the gateway binds 3474 — so no target would ever pass
+			// `/health` and the service would never stabilize.
+			port: INGEST_PORT,
 			healthCheckPath: "/health",
 			...(certificate ? { certificateArn: certificate.certificateArn } : {}),
 
@@ -225,13 +266,14 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				// single-digit dollars a month; moving them to S3 would save nothing
 				// and would require a SigV4 or presigned read path in the Worker
 				// (`apps/api/src/platform/ReplayBlobStore.ts` uses the native R2
-				// binding). Gated on the secret above — a half-set R2 config refuses
-				// to boot, so all-or-nothing is deliberate.
-				...(replayR2Secret
+				// binding). `requireEnv` on the companions rather than
+				// `optionalPlain`, so a half-set config fails the deploy instead of
+				// reaching a task that refuses to boot.
+				...(replayR2Endpoint
 					? {
-							...optionalPlain("INGEST_REPLAY_R2_ENDPOINT"),
-							...optionalPlain("INGEST_REPLAY_R2_BUCKET"),
-							...optionalPlain("INGEST_REPLAY_R2_ACCESS_KEY_ID"),
+							INGEST_REPLAY_R2_ENDPOINT: replayR2Endpoint,
+							INGEST_REPLAY_R2_BUCKET: requireEnv("INGEST_REPLAY_R2_BUCKET"),
+							INGEST_REPLAY_R2_ACCESS_KEY_ID: requireEnv("INGEST_REPLAY_R2_ACCESS_KEY_ID"),
 							...optionalPlain("INGEST_REPLAY_R2_REGION", "auto"),
 						}
 					: {}),
