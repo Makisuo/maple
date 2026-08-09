@@ -556,15 +556,31 @@ impl AutumnEntitlements {
             }
         };
 
-        if decide_allowed(&value, required_balance).is_none() {
-            // Valid JSON we didn't recognize. Fail open, but log the body so
-            // the real shape is visible and we can adapt decide_allowed.
-            warn!(
-                org_id,
-                feature_id,
-                body = %truncate_for_log(&text),
-                "Unrecognized Autumn check response shape; failing open"
-            );
+        match decide_allowed(&value, required_balance) {
+            None => {
+                // Valid JSON we didn't recognize. Fail open, but log the body so
+                // the real shape is visible and we can adapt decide_allowed.
+                warn!(
+                    org_id,
+                    feature_id,
+                    body = %truncate_for_log(&text),
+                    "Unrecognized Autumn check response shape; failing open"
+                );
+            }
+            Some(false) => {
+                // A denial turns into a customer-visible 402, so record what
+                // Autumn actually said. `allowed:false` alone cannot distinguish
+                // "no subscription" from "in overage" from "spend limit hit" —
+                // and those want opposite handling.
+                warn!(
+                    org_id,
+                    feature_id,
+                    ?required_balance,
+                    body = %truncate_for_log(&text),
+                    "Autumn denied ingestion; recording response body for the denial reason"
+                );
+            }
+            Some(true) => {}
         }
         Some(value)
     }
