@@ -225,6 +225,14 @@ jobs:
             # Raw MCP handlers carry Effect requirements. Type-aware Effect rules
             # prevent `any`/`unknown` or assertions from erasing that environment,
             # which would otherwise turn a missing tenant into a runtime defect.
+            #
+            # The rules are only as good as the types they see: @maple-dev/effect-sdk
+            # resolves through its built dist, and an unbuilt dist makes every value
+            # from it `any` — which both fires false positives (the SDK's telemetry
+            # layer poisoning a ManagedRuntime) and silently erases real requirements.
+            # Build it first so the gate lints the same types a developer does.
+            - name: Build Effect SDK for type-aware lint
+              run: bun turbo build --filter=@maple-dev/effect-sdk
             - run: bun run lint:effect-boundaries
 
             # --concurrency here rather than in turbo.json: the global value also governs
