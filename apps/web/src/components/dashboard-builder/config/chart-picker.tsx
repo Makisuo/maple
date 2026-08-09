@@ -16,7 +16,7 @@ import type {
 } from "@/components/dashboard-builder/types"
 import type { WidgetPresetDefinition } from "@/components/dashboard-builder/widgets/widget-definitions"
 import { widgetTypeList } from "@/components/dashboard-builder/widgets/types"
-import { createQueryDraft } from "@/lib/query-builder/model"
+import { createQueryDraft } from "@maple/query-engine/query-builder"
 import { deriveDefaultWidgetTitle } from "@/lib/query-builder/widget-builder-utils"
 
 // ---------------------------------------------------------------------------

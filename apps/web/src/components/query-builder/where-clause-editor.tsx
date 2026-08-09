@@ -5,7 +5,7 @@ import type {
 	WhereClauseAutocompleteScope,
 	WhereClauseAutocompleteValues,
 } from "@/lib/query-builder/where-clause-autocomplete"
-import type { QueryBuilderDataSource } from "@/lib/query-builder/model"
+import type { QueryBuilderDataSource } from "@maple/query-engine/query-builder"
 import { useAutocompleteContextOptional } from "@/hooks/use-autocomplete-context"
 import { useAutocompleteValuesContextOptional } from "@/hooks/use-autocomplete-values"
 import { useWhereClauseAutocomplete } from "@/hooks/use-where-clause-autocomplete"

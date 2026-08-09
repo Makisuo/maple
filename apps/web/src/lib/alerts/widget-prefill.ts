@@ -1,7 +1,7 @@
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 
 import { normalizeRuleQueryDraft, rawSqlHasValueColumn, type RuleFormState } from "@/lib/alerts/form-utils"
-import { buildTimeseriesQuerySpec } from "@/lib/query-builder/model"
+import { buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 
 export type WidgetAlertPrefillNotice = {
 	severity: "warning" | "error"

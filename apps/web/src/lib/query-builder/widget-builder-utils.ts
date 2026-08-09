@@ -1,4 +1,4 @@
-import { buildTimeseriesQuerySpec, createQueryDraft } from "@/lib/query-builder/model"
+import { buildTimeseriesQuerySpec, createQueryDraft } from "@maple/query-engine/query-builder"
 import {
 	TRACE_DEFAULT_COLUMNS,
 	type ListColumnDraft,

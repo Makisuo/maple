@@ -6,7 +6,7 @@ import { GithubHttp } from "./GithubHttp"
 // ---------------------------------------------------------------------------
 // GitHub App REST client. Vendor-specific: mints a short-lived App JWT (RS256,
 // Web Crypto), exchanges it for per-installation tokens, and calls the GitHub
-// REST API. No Octokit (Worker bundle weight). This module never touches D1.
+// REST API. No Octokit (Worker bundle weight). This module never touches the application database.
 //
 // `GithubAppError` is internal to the GitHub layer; `GithubProvider` maps it to
 // the generic `VcsProviderError` at the port boundary.

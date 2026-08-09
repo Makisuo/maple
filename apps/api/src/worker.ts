@@ -82,7 +82,7 @@ const flushTelemetry = async (env: Record<string, unknown>): Promise<void> => {
 // `telemetry.layer`.
 const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
 
-// The route graph (`./app`) and the D1 layer are imported DYNAMICALLY, not at
+// The route graph (`./app`) and database layer are imported DYNAMICALLY, not at
 // module scope. The static import graph reachable from `./app` eagerly builds
 // hundreds of Effect Schema ASTs (`@maple/domain` + 47 MCP tool schemas) at
 // module-evaluation time. Cloudflare runs only the top-level module scope

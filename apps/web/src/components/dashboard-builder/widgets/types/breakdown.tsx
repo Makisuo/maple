@@ -26,7 +26,7 @@ import {
 	extendDisplay,
 	type WidgetTypeDefinition,
 } from "@/components/dashboard-builder/widgets/widget-type-registry"
-import { BREAKDOWN_TAIL_LIMIT } from "@/lib/query-builder/model"
+import { BREAKDOWN_TAIL_LIMIT } from "@maple/query-engine/query-builder"
 import type { BuildDataSourceContext } from "@/lib/query-builder/widget-builder-shared"
 import {
 	hasActiveGroupBy,

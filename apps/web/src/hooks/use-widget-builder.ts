@@ -12,7 +12,7 @@ import {
 	queryLabel,
 	type QueryBuilderFormulaDraft,
 	type QueryBuilderQueryDraft,
-} from "@/lib/query-builder/model"
+} from "@maple/query-engine/query-builder"
 import { toSeriesFieldOptions, validateQueries } from "@/lib/query-builder/widget-builder-utils"
 
 export function useWidgetBuilder() {

@@ -42,12 +42,10 @@ import {
 } from "@/services/warehouse/warehouse-org-quarantine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
-import {
-	INVESTIGATION_FANOUT_BINDING,
-	maybeEnqueueTriage,
-} from "@/services/errors/ai-triage-enqueue"
+import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
+import { isRetryablePostgresContention } from "@/platform/postgres-errors"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -111,9 +109,6 @@ const ANOMALY_ACTIVE_DISCOVERY_WINDOW_MS = 2 * HOUR_MS
 const ANOMALY_ACTIVE_ORGS_CACHE_BUCKET = "anomaly-active-orgs"
 const ANOMALY_ACTIVE_ORGS_CACHE_KEY = "active"
 const ANOMALY_ACTIVE_ORGS_CACHE_TTL_S = 6 * 60 * 60
-/** D1 caps bound parameters per statement (~100); mirror ErrorsService's chunking. */
-const D1_INARRAY_CHUNK_SIZE = 90
-
 const describeCause = (cause: unknown): string | undefined => {
 	if (cause == null) return undefined
 	if (cause instanceof Error) return cause.stack ?? cause.message
@@ -136,15 +131,7 @@ const makePersistenceError = (error: unknown): AnomalyPersistenceError => {
 		: new AnomalyPersistenceError({ message, cause })
 }
 
-const BUSY_ERROR_PATTERN = /SQLITE_BUSY|database is locked|D1_BUSY|busy/i
-
-const isBusyDatabaseError = (error: DatabaseError): boolean => {
-	if (BUSY_ERROR_PATTERN.test(error.message)) return true
-	const inner = error.cause instanceof Error ? error.cause.message : undefined
-	return inner !== undefined && BUSY_ERROR_PATTERN.test(inner)
-}
-
-const BUSY_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
+const CONTENTION_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
 
 /**
  * Adapt a drizzle incident row (timestamptz → Date, jsonb → unknown[]) to the
@@ -244,8 +231,8 @@ const make = Effect.gen(function* () {
 	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 		database.execute(fn).pipe(
 			Effect.retry({
-				schedule: BUSY_RETRY_SCHEDULE,
-				while: isBusyDatabaseError,
+				schedule: CONTENTION_RETRY_SCHEDULE,
+				while: isRetryablePostgresContention,
 			}),
 			Effect.tapError((error) =>
 				Effect.logError("AnomalyDetectionService dbExecute failed").pipe(
@@ -1164,24 +1151,25 @@ const make = Effect.gen(function* () {
 		)
 
 		// firstSeenAt per fingerprint so young issues stay with first_seen handling.
-		// Chunked: D1 caps bound parameters at ~100 per statement, so a single
-		// inArray over a busy org's fingerprints fails the whole tick for it
-		// (same constraint as ErrorsService's D1_INARRAY_CHUNK_SIZE).
 		const fingerprints = [...new Set(spikes.observations.map((o) => o.fingerprintHash))]
-		const fingerprintChunks = Arr.chunksOf(fingerprints, D1_INARRAY_CHUNK_SIZE)
-		const issueRowChunks = yield* Effect.forEach(fingerprintChunks, (chunk) =>
-			dbExecute((db) =>
-				db
-					.select({
-						fingerprintHash: errorIssues.fingerprintHash,
-						issueId: errorIssues.id,
-						firstSeenAt: errorIssues.firstSeenAt,
-					})
-					.from(errorIssues)
-					.where(and(eq(errorIssues.orgId, orgId), inArray(errorIssues.fingerprintHash, chunk))),
-			),
-		)
-		const issueRows = issueRowChunks.flat()
+		const issueRows =
+			fingerprints.length === 0
+				? []
+				: yield* dbExecute((db) =>
+						db
+							.select({
+								fingerprintHash: errorIssues.fingerprintHash,
+								issueId: errorIssues.id,
+								firstSeenAt: errorIssues.firstSeenAt,
+							})
+							.from(errorIssues)
+							.where(
+								and(
+									eq(errorIssues.orgId, orgId),
+									inArray(errorIssues.fingerprintHash, fingerprints),
+								),
+							),
+					)
 		const issueFirstSeenAt = new Map(issueRows.map((r) => [r.fingerprintHash, r.firstSeenAt.getTime()]))
 		const issueIdByFingerprint = new Map(issueRows.map((r) => [r.fingerprintHash, r.issueId]))
 

@@ -25,7 +25,7 @@ import { and, eq, gt, inArray, isNull, lt } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
-import { WorkerEnvironment } from "@/platform/WorkerEnvironment"
+import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 
 const AUTHORIZATION_REQUEST_TTL_MS = 10 * 60 * 1000
 const AUTHORIZATION_CODE_TTL_MS = 5 * 60 * 1000

@@ -59,7 +59,7 @@ export type MaplePgliteClient = ReturnType<typeof createMaplePgliteClient>
 /**
  * Canonical client type the app codes against. PostgresJsDatabase and
  * PgliteDatabase share the PgDatabase core; the PGlite layer casts into this
- * (same precedent as the old D1 layer).
+ * (same precedent as the deployed Postgres layer).
  */
 export type MapleDatabaseClient = MaplePgClient
 

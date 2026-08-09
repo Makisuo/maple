@@ -77,7 +77,7 @@ export const latestMigrationVersion: number = migrations.reduce(
  * Performance-only migrations set `requiredForIngest: false`; they can improve
  * query speed without interrupting routing to an otherwise compatible schema.
  *
- * Stamped into D1 by the API's applySchema workflow and the schemaDiff self-heal,
+ * Stamped into Postgres by the API's applySchema workflow and the schemaDiff self-heal,
  * and compared by the Rust ingest gateway (emitted as `SCHEMA_VERSION` into
  * `clickhouse_insert_mappings.rs` by `scripts/generate-clickhouse-insert-mappings.ts`).
  */

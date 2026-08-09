@@ -20,7 +20,7 @@ import {
 	resetAggregationForMetricType,
 	type MetricsQueryDraft,
 	type QueryBuilderMetricType,
-} from "@/lib/query-builder/model"
+} from "@maple/query-engine/query-builder"
 
 export interface MetricDetailQueryState {
 	type?: QueryBuilderMetricType

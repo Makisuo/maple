@@ -43,7 +43,7 @@ import {
 	resetQueryForDataSource,
 	type QueryBuilderDataSource,
 	type QueryBuilderQueryDraft,
-} from "@/lib/query-builder/model"
+} from "@maple/query-engine/query-builder"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { listMetricsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 

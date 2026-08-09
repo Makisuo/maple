@@ -6,9 +6,7 @@ import { formatRelativeFrom } from "@maple/ui/lib/time-format"
 import { formatSessionDuration, gradientFor, hostFromUrl } from "./replay-format"
 import { parseChTimestampMs } from "./replay-timeline"
 
-// Presentational building blocks for the session-replay detail page. Extracted
-// from the route so both the real page and the placeholder-data preview render
-// the exact same components (no drift between what ships and what we review).
+// Presentational building blocks for the session-replay detail page.
 
 /** One-shot CSS entrance reveal, skipped when the user prefers reduced motion. */
 export function Reveal({ children, delay = 0 }: { children: ReactNode; delay?: number }) {
