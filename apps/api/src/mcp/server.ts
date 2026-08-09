@@ -1,7 +1,7 @@
 import { McpSchema, McpServer as EffectMcpServer } from "effect/unstable/ai"
 import { Context, Effect, Layer } from "effect"
-import { callMcpTool, listMcpTools } from "./dispatcher"
-import { CurrentMcpTenant, resolveHttpMcpTenant } from "./lib/query-warehouse"
+import { McpToolExecutor, listMcpTools } from "./dispatcher"
+import { CurrentMcpRequestTenant } from "./lib/query-warehouse"
 import type { McpToolResult } from "./tools/types"
 
 const toCallToolResult = (result: McpToolResult): typeof McpSchema.CallToolResult.Type =>
@@ -23,6 +23,7 @@ const toBoundaryErrorResult = (error: { readonly _tag: string; readonly message:
 export const McpToolsLive = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const server = yield* EffectMcpServer.McpServer
+		const executor = yield* McpToolExecutor
 		const descriptors = yield* listMcpTools
 		yield* Effect.forEach(descriptors, (descriptor) =>
 			server.addTool({
@@ -32,25 +33,23 @@ export const McpToolsLive = Layer.effectDiscard(
 					inputSchema: descriptor.inputSchema,
 				}),
 				annotations: Context.empty(),
-				handle: (payload) =>
-					resolveHttpMcpTenant.pipe(
-						Effect.flatMap((tenant) =>
-							callMcpTool(descriptor.name, payload).pipe(
-								Effect.provideService(CurrentMcpTenant, tenant),
+				handle: (payload: unknown) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentMcpRequestTenant
+						if (tenant === undefined) {
+							return toBoundaryErrorResult({
+								_tag: "@maple/mcp/errors/McpAuthMissingError",
+								message: "The authenticated MCP tenant is unavailable.",
+							})
+						}
+
+						return yield* executor.execute(tenant, descriptor.name, payload).pipe(
+							Effect.map(toCallToolResult),
+							Effect.catchTag("@maple/internal-rpc/ToolNotFoundError", (error) =>
+								Effect.succeed(toBoundaryErrorResult(error)),
 							),
-						),
-						Effect.map(toCallToolResult),
-						Effect.catchTags({
-							"@maple/internal-rpc/ToolNotFoundError": (error) =>
-								Effect.succeed(toBoundaryErrorResult(error)),
-							"@maple/mcp/errors/McpAuthMissingError": (error) =>
-								Effect.succeed(toBoundaryErrorResult(error)),
-							"@maple/mcp/errors/McpAuthInvalidError": (error) =>
-								Effect.succeed(toBoundaryErrorResult(error)),
-							"@maple/mcp/errors/McpInvalidTenantError": (error) =>
-								Effect.succeed(toBoundaryErrorResult(error)),
-						}),
-					),
+						)
+					}),
 			}),
 		)
 	}),

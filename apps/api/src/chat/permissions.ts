@@ -9,7 +9,7 @@
  */
 import { PermissionRule, type PermissionRuleset } from "@maple/domain/permission"
 import { MUTATING_TOOL_NAMES } from "@/mcp/tools/mutating"
-import { mapleToolDefinitions } from "@/mcp/tools/registry"
+import { mapleToolCatalog } from "@/mcp/tools/registry"
 
 /**
  * Today's behaviour, expressed as data: everything runs, mutations stop and ask.
@@ -34,7 +34,7 @@ export const DEFAULT_RULESET: PermissionRuleset = [
  */
 export const READ_ONLY_RULESET: PermissionRuleset = [
 	new PermissionRule({ tool: "*", action: "deny" }),
-	...mapleToolDefinitions
+	...mapleToolCatalog
 		.filter((definition) => !MUTATING_TOOL_NAMES.has(definition.name))
 		.map((definition) => definition.name)
 		.sort()

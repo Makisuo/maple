@@ -197,14 +197,21 @@ const CHAT_TURN_FAILED = "Maple couldn't complete this response."
  * client reads, so a turn that dies without one is indistinguishable from a turn that hung.
  */
 export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promise<void> => {
-	const [{ MainLive }, { layerPg }, { layerLlm, resolveTriageModel }, loop, { buildSubmitDiagnosisTool }] =
-		await Promise.all([
-			import("../app"),
-			import("../platform/DatabasePgLive"),
-			import("../platform/Llm"),
-			import("./loop"),
-			import("./tools"),
-		])
+	const [
+		{ MainLive },
+		{ layerPg },
+		{ layerLlm, resolveTriageModel },
+		loop,
+		{ buildSubmitDiagnosisTool },
+		{ McpToolExecutor },
+	] = await Promise.all([
+		import("../app"),
+		import("../platform/DatabasePgLive"),
+		import("../platform/Llm"),
+		import("./loop"),
+		import("./tools"),
+		import("../mcp/dispatcher"),
+	])
 	const { InvestigationService } = await import("@/services/errors/InvestigationService")
 
 	const runtime = ManagedRuntime.make(
@@ -235,6 +242,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 
 	const program = Effect.gen(function* () {
 		const investigations = yield* InvestigationService
+		const toolExecutor = yield* McpToolExecutor
 		const history = input.session.history()
 		const model = resolveTriageModel(input.env, {
 			surface: "chat",
@@ -256,6 +264,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 			.runChatTurn({
 				sessionId: input.sessionId,
 				tenant,
+				toolExecutor,
 				model,
 				messages: toLlmMessages(history, input.session.compaction()),
 				messageId: input.messageId,

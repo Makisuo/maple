@@ -1,15 +1,29 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Context, Effect, Schema } from "effect"
 import type { InternalRpcToolNotFoundError } from "@maple/domain/internal-rpc"
-import { callMcpTool, listMcpTools } from "./dispatcher"
-import { mapleToolDefinitions, toInputSchema } from "./tools/registry"
+import { McpToolExecutor, listMcpTools } from "./dispatcher"
+import { mapleToolCatalog, toInputSchema } from "./tools/registry"
+import type { McpToolRuntimeRequirements } from "./tools/runtime-requirements"
+import type { TenantContext } from "@/services/auth/tenant-context"
+
+const TENANT: TenantContext = {
+	orgId: "org_test" as TenantContext["orgId"],
+	userId: "user_test" as TenantContext["userId"],
+	roles: [],
+	authMode: "self_hosted",
+}
+
+// These cases stop at registry lookup/schema decoding, before a tool service is read.
+const makeValidationExecutor = McpToolExecutor.make.pipe(
+	Effect.provide(Context.empty() as Context.Context<McpToolRuntimeRequirements>),
+)
 
 describe("MCP dispatcher", () => {
 	it("publishes an object input schema for every tool", () => {
 		// Strict MCP clients (the Vercel AI SDK's `tools/list` validator) drop the
 		// WHOLE connection when any tool's inputSchema.type is not "object" — the
 		// offending tool names are collected so a failure names them.
-		const invalidSchemas = mapleToolDefinitions
+		const invalidSchemas = mapleToolCatalog
 			.map((definition) => ({
 				name: definition.name,
 				type: toInputSchema(definition.schema).type,
@@ -23,7 +37,7 @@ describe("MCP dispatcher", () => {
 		Effect.gen(function* () {
 			const descriptors = yield* listMcpTools
 			expect(descriptors).toEqual(
-				mapleToolDefinitions.map((definition) => ({
+				mapleToolCatalog.map((definition) => ({
 					name: definition.name,
 					description: definition.description,
 					inputSchema: toInputSchema(definition.schema),
@@ -49,14 +63,8 @@ describe("MCP dispatcher", () => {
 
 	it.effect("returns MCP validation feedback for invalid model tool input", () =>
 		Effect.gen(function* () {
-			const result = yield* callMcpTool("inspect_trace", {}) as unknown as Effect.Effect<
-				{
-					readonly content: ReadonlyArray<{ readonly type: "text"; readonly text: string }>
-					readonly isError?: boolean
-				},
-				never,
-				never
-			>
+			const executor = yield* makeValidationExecutor
+			const result = yield* executor.execute(TENANT, "inspect_trace", {})
 			expect(result.isError).toBe(true)
 			expect(result.content[0]?.text).toContain("Invalid parameters")
 			expect(result.content[0]?.text).toContain("inspect_trace")
@@ -65,8 +73,9 @@ describe("MCP dispatcher", () => {
 
 	it.effect("fails unknown RPC tool names with a typed error", () =>
 		Effect.gen(function* () {
+			const executor = yield* makeValidationExecutor
 			const error = yield* Effect.flip(
-				callMcpTool("not_a_maple_tool", {}) as Effect.Effect<
+				executor.execute(TENANT, "not_a_maple_tool", {}) as Effect.Effect<
 					never,
 					InternalRpcToolNotFoundError,
 					never

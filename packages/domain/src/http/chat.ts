@@ -61,12 +61,26 @@ export class ChatToolInvalidInputError extends Schema.TaggedError<ChatToolInvali
 	{ httpApiStatus: 400 },
 ) {}
 
+export class ChatToolExecutionError extends Schema.TaggedError<ChatToolExecutionError>()(
+	"@maple/http/errors/ChatToolExecutionError",
+	{
+		tool: Schema.String,
+		message: Schema.String,
+	},
+	{ httpApiStatus: 500 },
+) {}
+
 export class ChatApiGroup extends HttpApiGroup.make("chat")
 	.add(
 		HttpApiEndpoint.post("apply", "/apply", {
 			payload: ChatApplyRequest,
 			success: ChatApplyResponse,
-			error: [ChatToolNotFoundError, ChatToolNotApplicableError, ChatToolInvalidInputError],
+			error: [
+				ChatToolNotFoundError,
+				ChatToolNotApplicableError,
+				ChatToolInvalidInputError,
+				ChatToolExecutionError,
+			],
 		}),
 	)
 	.prefix("/api/chat")

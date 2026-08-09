@@ -14,9 +14,8 @@ import {
  * the warehouse's daily volume into every number the page renders — the KPI row,
  * the per-feature cards, and the cumulative chart.
  *
- * The dollars come from `@maple/domain/billing`, the same module the API's
- * spend-limit cron prices with, so the chart cannot disagree with the evaluator
- * that pauses ingestion. Anything derived here is presentation: which day is
+ * The dollars come from `@maple/domain/billing`, the shared pricing module.
+ * Anything derived here is presentation: which day is
  * "today", how to stack the bands, what the projection line ends at.
  */
 

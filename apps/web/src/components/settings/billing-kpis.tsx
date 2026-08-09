@@ -51,16 +51,12 @@ export function BillingKpisSkeleton() {
 
 export function BillingKpis({
 	model,
-	limitCents,
-	pausedAt,
+	maximumInvoiceCents,
 }: {
 	model: SpendModel
-	/** Configured monthly ceiling, or null when the org has none. */
-	limitCents: number | null
-	/** Set when ingest is currently paused by that ceiling. */
-	pausedAt: number | null
+	/** Base plus every configured paid-overage cap; null when any feature is uncapped. */
+	maximumInvoiceCents: number | null
 }) {
-	const percentUsed = limitCents !== null && limitCents > 0 ? (model.spendCents / limitCents) * 100 : null
 	const driver = model.topDriver
 
 	return (
@@ -81,56 +77,22 @@ export function BillingKpis({
 				<p className="mt-2 text-[11px] text-muted-foreground">At the current pace</p>
 			</KpiCard>
 
-			<KpiCard label="Spend limit">
-				{limitCents === null ? (
+			<KpiCard label="Maximum invoice">
+				{maximumInvoiceCents === null ? (
 					<>
-						<p className="font-mono text-2xl tabular-nums text-muted-foreground">None</p>
+						<p className="font-mono text-2xl tabular-nums text-muted-foreground">Uncapped</p>
 						<p className="mt-2 text-[11px] text-muted-foreground">
-							Set one below to get alerts before the bill grows
+							At least one paid feature has no overage cap
 						</p>
 					</>
 				) : (
 					<>
-						<div className="flex items-baseline gap-2">
-							<p className="font-mono text-2xl tabular-nums">
-								{dollars(limitCents, model.currency)}
-							</p>
-							{percentUsed !== null && (
-								<span
-									className={cn(
-										"text-[11px] tabular-nums",
-										percentUsed >= 100
-											? "text-severity-error"
-											: percentUsed >= 80
-												? "text-severity-warn"
-												: "text-muted-foreground",
-									)}
-								>
-									{Math.round(percentUsed)}% used
-								</span>
-							)}
-						</div>
-						{/* The bar is the point of this card: a number alone doesn't say
-						    "close". Overage past the ceiling clamps at full width and turns
-						    error-colored rather than overflowing the track. */}
-						<div className="mt-3 h-1 w-full bg-muted">
-							<div
-								className={cn(
-									"h-full",
-									percentUsed !== null && percentUsed >= 100
-										? "bg-severity-error"
-										: percentUsed !== null && percentUsed >= 80
-											? "bg-severity-warn"
-											: "bg-severity-info",
-								)}
-								style={{ width: `${Math.min(100, percentUsed ?? 0)}%` }}
-							/>
-						</div>
-						{pausedAt !== null && (
-							<p className="mt-2 text-[11px] text-severity-error">
-								Ingest paused at this limit
-							</p>
-						)}
+						<p className="font-mono text-2xl tabular-nums">
+							{dollars(maximumInvoiceCents, model.currency)}
+						</p>
+						<p className="mt-2 text-[11px] text-muted-foreground">
+							Base plan plus all paid-overage caps
+						</p>
 					</>
 				)}
 			</KpiCard>

@@ -22,6 +22,7 @@ import { MAX_STEP_ATTEMPTS } from "./budgets"
 import { DEFAULT_RULESET } from "../permissions"
 import type { AgentDefinition } from "../agents"
 import { PermissionRule } from "@maple/domain/permission"
+import type { McpToolExecutorShape } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
 const TENANT: TenantContext = {
@@ -30,6 +31,13 @@ const TENANT: TenantContext = {
 	roles: [],
 	authMode: "self_hosted",
 }
+
+const TOOL_EXECUTOR = {
+	execute: (_tenant, name) =>
+		Effect.succeed({
+			content: [{ type: "text" as const, text: `${name} completed` }],
+		}),
+} satisfies McpToolExecutorShape
 
 const MODEL: Model = CloudflareWorkersAI.configure({
 	accountId: "test",
@@ -125,6 +133,7 @@ const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) =
 	return runChatTurn({
 		sessionId: overrides.sessionId ?? "org_test:tab",
 		tenant: TENANT,
+		toolExecutor: TOOL_EXECUTOR,
 		model: MODEL,
 		messages: [],
 		messageId: "m1",

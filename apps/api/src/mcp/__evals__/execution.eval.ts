@@ -47,7 +47,7 @@ describeMapleEval("observability tool execution (fake warehouse)", {
 		const result = await generateText({
 			model: createEvalModel(),
 			temperature: 0,
-			tools: buildExecutionToolSet(rt!.runtime, rt!.requestLayer),
+			tools: buildExecutionToolSet(rt!.runtime, rt!.tenant),
 			stopWhen: stepCountIs(6),
 			messages: [{ role: "user", content: input }],
 		})

@@ -7,6 +7,7 @@
 import type { ChatEvent, ChatTaskRef } from "@maple/domain/chat-session"
 import type { FinishReason, Message, Model, Tools, Usage } from "@maple/llm"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import type { McpToolExecutorShape } from "@/mcp/dispatcher"
 import type { AgentDefinition } from "../agents"
 import type { StepRetryBudget, TaskBudget } from "./budgets"
 import type { DoomLoopState } from "./stop"
@@ -24,6 +25,8 @@ export type ChatTurnEvent = WithoutSeq<Exclude<ChatEvent, { type: "user-message"
 export interface ChatTurnInput {
 	readonly sessionId: string
 	readonly tenant: TenantContext
+	/** Closed, tenant-mandatory MCP execution boundary captured by the caller's runtime. */
+	readonly toolExecutor: McpToolExecutorShape
 	readonly model: Model
 	/** The full transcript so far, oldest first, already including the new user message. */
 	readonly messages: ReadonlyArray<Message>

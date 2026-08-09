@@ -37,15 +37,6 @@ const EXTERNALLY_CONSUMED: Readonly<Record<string, ReadonlyArray<string>>> = {
 	],
 	// The only per-user contact record with a delivery preference.
 	digest_subscriptions: ["org_id", "user_id", "email", "enabled", "last_sent_at"],
-	// Revenue proxy + churn/expansion triggers, refreshed hourly by a cron.
-	org_spend_limits: [
-		"org_id",
-		"monthly_limit_cents",
-		"evaluated_spend_cents",
-		"breached_at",
-		"paused_at",
-		"last_evaluated_at",
-	],
 	// Integration breadth — read as booleans ("has this org connected X"), so
 	// only the join key matters.
 	slack_workspaces: ["org_id"],

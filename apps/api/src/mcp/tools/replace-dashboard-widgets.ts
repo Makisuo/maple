@@ -19,6 +19,7 @@ import { resolveTenant } from "@/mcp/lib/query-warehouse"
 const TOOL = "replace_dashboard_widgets"
 
 const decodeWidget = Schema.decodeUnknownEffect(DashboardWidgetSchema)
+const decodeJson = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))
 
 export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -33,12 +34,7 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.replaceDashboardWidgets")(function* ({ dashboard_id, widgets_json }) {
-			const parseResult = yield* Effect.result(
-				Effect.try({
-					try: () => JSON.parse(widgets_json) as unknown,
-					catch: (e) => e,
-				}),
-			)
+			const parseResult = decodeJson(widgets_json)
 			if (Result.isFailure(parseResult)) {
 				return validationError(
 					`widgets_json is not valid JSON: ${String(parseResult.failure)}`,

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { mapleToolDefinitions } from "./registry"
+import { mapleToolCatalog } from "./registry"
 import { MUTATING_TOOL_NAMES } from "./mutating"
 import { evaluatePermission, isToolVisible } from "@maple/domain/permission"
 import { DEFAULT_RULESET, READ_ONLY_RULESET } from "@/chat/permissions"
 
 describe("MUTATING_TOOL_NAMES", () => {
 	it("every approval-gated tool exists in the registry", () => {
-		const registered = new Set(mapleToolDefinitions.map((d) => d.name))
+		const registered = new Set(mapleToolCatalog.map((d) => d.name))
 		for (const name of MUTATING_TOOL_NAMES) {
 			expect(registered.has(name), `missing registered tool: ${name}`).toBe(true)
 		}
@@ -32,7 +32,7 @@ describe("DEFAULT_RULESET", () => {
 		// that day-one behaviour is unchanged: every registered tool resolves to `ask` if and only
 		// if it is in the set, and to `allow` otherwise. If either side drifts, this fails loudly
 		// rather than quietly widening what the chat agent can do without approval.
-		for (const definition of mapleToolDefinitions) {
+		for (const definition of mapleToolCatalog) {
 			expect(
 				evaluatePermission(DEFAULT_RULESET, definition.name),
 				`permission drifted for ${definition.name}`,
@@ -41,7 +41,7 @@ describe("DEFAULT_RULESET", () => {
 	})
 
 	it("hides nothing — the gate is approval, not invisibility", () => {
-		for (const definition of mapleToolDefinitions) {
+		for (const definition of mapleToolCatalog) {
 			expect(isToolVisible(DEFAULT_RULESET, definition.name)).toBe(true)
 		}
 	})
@@ -69,7 +69,7 @@ describe("READ_ONLY_RULESET", () => {
 	it("never asks — a sub-agent turn has no way to surface an approval card", () => {
 		// Approval ends the *outer* turn and is applied by `POST /api/chat/apply`; a nested turn has
 		// no such exit, so an `ask` in a sub-agent ruleset is a configuration error.
-		for (const definition of mapleToolDefinitions) {
+		for (const definition of mapleToolCatalog) {
 			expect(evaluatePermission(READ_ONLY_RULESET, definition.name)).not.toBe("ask")
 		}
 	})
