@@ -5,7 +5,7 @@ mod autumn;
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -881,6 +881,9 @@ struct AppState {
     config: AppConfig,
     http_client: Client,
     telemetry_pipeline: Option<TelemetryPipeline>,
+    /// Set once the key store has answered a probe. Drives `/ready`; never
+    /// `/health` — see the comment on `health()`.
+    key_store_ready: Arc<AtomicBool>,
     resolver: IngestKeyResolver,
     org_inflight_limiter: OrgInFlightLimiter,
     sampling_resolver: SamplingPolicyResolver,
@@ -1566,10 +1569,14 @@ async fn main() {
     };
 
     // The API service writes ingest-key rows to PlanetScale Postgres, so ingest
-    // reads them from the same place. We run a probe query before accepting
-    // traffic; if anything is wrong (auth, schema, network) the deploy fails
-    // here rather than 503'ing forever.
-    let store: Arc<dyn KeyStore> = match build_key_store(&config).await {
+    // reads them from the same place. We probe at boot, but only config errors
+    // (a malformed URL) are fatal — an unreachable database boots DEGRADED and
+    // retries in the background. Deploy-time validation lives on `/ready`, not on
+    // process exit, so a bad deploy never goes ready while a transient database
+    // fault can no longer kill a healthy running fleet.
+    let key_store_ready = Arc::new(AtomicBool::new(false));
+    let store: Arc<dyn KeyStore> = match build_key_store(&config, Arc::clone(&key_store_ready)).await
+    {
         Ok(store) => store,
         Err(error) => {
             eprintln!("Key store init error: {error}");
@@ -1671,6 +1678,7 @@ async fn main() {
     let http_client_for_blobs = http_client.clone();
 
     let state = Arc::new(AppState {
+        key_store_ready: Arc::clone(&key_store_ready),
         resolver: IngestKeyResolver {
             store: Arc::clone(&store),
             lookup_hmac_key: config.lookup_hmac_key.clone(),
@@ -1732,6 +1740,7 @@ async fn main() {
     let grpc_state = Arc::clone(&state);
     let app = Router::new()
         .route("/health", get(health))
+        .route("/ready", get(ready))
         .route("/v1/traces", post(handle_traces))
         .route("/v1/logs", post(handle_logs))
         .route("/v1/metrics", post(handle_metrics))
@@ -2112,8 +2121,26 @@ async fn resolve_grpc_ingest_key(
         .ok_or_else(|| tonic::Status::unauthenticated("Invalid ingest key"))
 }
 
+/// Liveness only — deliberately independent of Postgres.
+///
+/// If this ever starts reporting database health, a database outage becomes a
+/// platform-driven restart loop, which is the exact failure this endpoint's
+/// separation from `/ready` exists to prevent.
 async fn health() -> &'static str {
     "OK"
+}
+
+/// Readiness — false until the key store has answered at least once.
+///
+/// This is the deploy gate that `std::process::exit(1)` used to be: a genuinely
+/// broken deploy (bad credentials, missing schema) never goes ready and the
+/// platform can roll it back, without a transient fault killing live tasks.
+async fn ready(State(state): State<Arc<AppState>>) -> Response {
+    if state.key_store_ready.load(Ordering::Relaxed) {
+        (StatusCode::OK, "READY").into_response()
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, "DEGRADED: key store unavailable").into_response()
+    }
 }
 
 async fn handle_traces(
@@ -4742,6 +4769,23 @@ fn postgres_client_span(
     )
 }
 
+/// Flatten an error's source chain into one line.
+///
+/// `tokio_postgres::Error`'s `Display` is the bare string "db error" — the
+/// SQLSTATE, the pooler's rejection reason, the TLS failure all live in
+/// `source()`. During the 2026-08-09 outage every log line read
+/// `fetch_ingest_key failed: db error`, which could not distinguish a refused
+/// connection from exhausted pooler slots from rejected credentials.
+fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut source = error.source();
+    while let Some(inner) = source {
+        parts.push(inner.to_string());
+        source = inner.source();
+    }
+    parts.join(": ")
+}
+
 impl PostgresKeyStore {
     fn new(url: &str) -> Result<Self, String> {
         let pg_config = url
@@ -4780,7 +4824,7 @@ impl PostgresKeyStore {
         self.pool
             .get()
             .await
-            .map_err(|error| format!("postgres pool checkout failed: {error}"))
+            .map_err(|error| format!("postgres pool checkout failed: {}", error_chain(&error)))
     }
 
     /// Startup gate — runs the production lookup query with a stub hash so any
@@ -4805,7 +4849,7 @@ impl PostgresKeyStore {
             .instrument(postgres_client_span("probe", "SELECT", "org_ingest_keys", &self.target))
             .await
             .map(|_| ())
-            .map_err(|error| format!("postgres probe query failed: {error}"))
+            .map_err(|error| format!("postgres probe query failed: {}", error_chain(&error)))
     }
 }
 
@@ -4840,7 +4884,7 @@ impl KeyStore for PostgresKeyStore {
                 &self.target,
             ))
             .await
-            .map_err(|error| format!("postgres fetch_ingest_key failed: {error}"))?;
+            .map_err(|error| format!("postgres fetch_ingest_key failed: {}", error_chain(&error)))?;
         let Some(row) = rows.into_iter().next() else {
             return Ok(None);
         };
@@ -5238,7 +5282,10 @@ fn current_time_millis() -> u128 {
 /// (the API service writes to the same D1 database); a probe query runs at
 /// startup so any auth/schema/network issue surfaces here instead of 503'ing
 /// every request.
-async fn build_key_store(config: &AppConfig) -> Result<Arc<dyn KeyStore>, String> {
+async fn build_key_store(
+    config: &AppConfig,
+    ready: Arc<AtomicBool>,
+) -> Result<Arc<dyn KeyStore>, String> {
     match &config.key_store_backend {
         KeyStoreBackend::Static { org_id } => {
             info!(
@@ -5246,6 +5293,7 @@ async fn build_key_store(config: &AppConfig) -> Result<Arc<dyn KeyStore>, String
                 org_id = %org_id,
                 "Key store backend selected"
             );
+            ready.store(true, Ordering::Relaxed);
             Ok(Arc::new(StaticKeyStore {
                 org_id: org_id.clone(),
             }))
@@ -5255,15 +5303,65 @@ async fn build_key_store(config: &AppConfig) -> Result<Arc<dyn KeyStore>, String
                 backend = "planetscale-postgres",
                 "Key store backend selected"
             );
-            let store = PostgresKeyStore::new(url)?;
-            store
-                .probe()
-                .await
-                .map_err(|error| format!("Postgres startup probe failed: {error}"))?;
-            info!("Postgres startup probe succeeded");
-            Ok(Arc::new(store))
+            // A malformed MAPLE_PG_URL is operator error, fixable in seconds, and
+            // can never resolve on its own — that stays fatal.
+            let store = Arc::new(PostgresKeyStore::new(url)?);
+
+            // A failing probe is NOT fatal. It used to `exit(1)`, which turned any
+            // transient Postgres/PSBouncer fault into a restart loop: every boot
+            // reopened pool connections against the very component that was
+            // struggling, and each restart wiped the in-memory key + routing
+            // caches, so nothing could serve stale and nothing could recover
+            // without an operator. Boot degraded and re-probe in the background
+            // instead — auth 503s until Postgres returns, then heals by itself.
+            match store.probe().await {
+                Ok(()) => {
+                    info!("Postgres startup probe succeeded");
+                    ready.store(true, Ordering::Relaxed);
+                }
+                Err(error) => {
+                    error!(
+                        %error,
+                        "Postgres startup probe failed; booting DEGRADED (ingest auth will 503 until Postgres recovers). /ready stays false; /health stays OK so the platform does not restart-loop this task."
+                    );
+                    spawn_key_store_reprobe(Arc::clone(&store), ready);
+                }
+            }
+
+            Ok(store)
         }
     }
+}
+
+/// Re-probe Postgres until it answers, then flip the readiness flag.
+///
+/// Backoff is capped and jittered: an un-jittered fleet retrying in lockstep is
+/// how a recovering pooler gets knocked straight back over.
+fn spawn_key_store_reprobe(store: Arc<PostgresKeyStore>, ready: Arc<AtomicBool>) {
+    tokio::spawn(async move {
+        let mut delay_ms: u64 = 1_000;
+        loop {
+            // Cheap per-iteration jitter without pulling in `rand`; recomputed
+            // each pass so replicas that booted together drift apart.
+            let jitter_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| u64::from(elapsed.subsec_nanos()) % 1_000)
+                .unwrap_or(0);
+            tokio::time::sleep(Duration::from_millis(delay_ms + jitter_ms)).await;
+
+            match store.probe().await {
+                Ok(()) => {
+                    info!("Postgres reachable again; key store READY");
+                    ready.store(true, Ordering::Relaxed);
+                    return;
+                }
+                Err(error) => {
+                    warn!(%error, delay_ms, "Postgres re-probe failed; still degraded");
+                    delay_ms = (delay_ms * 2).min(30_000);
+                }
+            }
+        }
+    });
 }
 
 fn parse_bool(name: &str, raw: Option<String>, default: bool) -> Result<bool, String> {
