@@ -90,6 +90,9 @@ describe("bundled migrations", () => {
 		"alert_destinations",
 		// API-key live reads (0014_electric_publication_api_keys)
 		"api_keys",
+		// Investigation detail page (0037_electric_publication_investigations)
+		"investigations",
+		"investigation_lens_runs",
 	]
 
 	// Published by 0009/0011, then pruned by 0022 once their client collections were

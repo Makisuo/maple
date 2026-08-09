@@ -1,13 +1,10 @@
-import { makeResolveTenant } from "@maple/auth"
-import { Effect, Layer, Option, Redacted, Schema } from "effect"
-import {
-	FetchHttpClient,
-	HttpClient,
-	HttpRouter,
-	HttpServerRequest,
-	HttpServerResponse,
-} from "effect/unstable/http"
-import { SyncConfig } from "../config"
+import { Effect } from "effect"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { TenantResolver } from "../auth/TenantResolver"
+import { ElectricClient } from "../electric/ElectricClient"
+import { errorResponse, type ShapeError, Unauthorized } from "../errors"
+import { decodeShapeRequest } from "../shapes/request"
+import { shapeResponseHeaders } from "./headers"
 
 /**
  * ElectricSQL shape proxy — the standalone `apps/electric-sync` worker.
@@ -15,386 +12,96 @@ import { SyncConfig } from "../config"
  * Electric serves per-table "shapes" over HTTP but has no auth of its own — the
  * documented pattern is to proxy shape requests through your own service, which
  * pins the shape definition (table, WHERE, columns) server-side so a client can
- * only sub-filter within it. This route is that proxy: it authenticates the
- * caller from the Clerk / self-hosted session bearer (`makeResolveTenant`,
- * shared with `@maple/api`), injects the org-scoping `"org_id" = $1` predicate
- * that mirrors the warehouse OrgId enforcement, and forwards only Electric's
- * reserved cursor params from the client. The client sends `?shape=<name>` (a
- * Maple param) plus offset/handle/live/cursor; it never sees or sets the table
- * or WHERE.
+ * only sub-filter within it. This route is that proxy. It is deliberately thin:
+ * the whitelist lives in `shapes/registry`, validation in `shapes/request`, the
+ * upstream (URL, credentials, timeout, 5xx policy) in `electric/ElectricClient`,
+ * auth in `auth/TenantResolver`, and the failure → HTTP mapping in `errors`. What
+ * is left here is the order those happen in, which is the only part that is
+ * genuinely about being an HTTP route.
  *
- * Unlike the old in-API route, there is NO API-key auth path here: this service
- * has no database, and the browser's shape-fetch only ever sends the session
- * bearer, so tenant resolution is the sole auth mechanism.
+ * The client sends `?shape=<name>` (a Maple param, plus `?scope=` for the scoped
+ * shapes) alongside Electric's own offset/handle/live/cursor; it never sees or
+ * sets the table, WHERE, or columns.
  */
 
-// Server-pinned shape whitelist. Every shape is additionally org-scoped below;
-// `extraWhere` narrows the synced rows further and `columns` restricts which
-// columns Electric streams to the browser (drop encrypted secrets / large jsonb
-// blobs — the client never needs them, and they must not leave the server). Both
-// are immutable — changing either is a new shape name + full re-sync, so version
-// the name if it must ever change. When `columns` is set it MUST include the
-// table's primary-key column(s) (Electric requires the PK in the projection).
-//
-// Every table listed here MUST also be a member of `electric_publication_default`
-// (packages/db/drizzle/0009 + later publication migrations) — Electric runs with
-// ELECTRIC_MANUAL_TABLE_PUBLISHING=true and will not publish a table itself, so a
-// shape over an unpublished table never receives changes. The reverse also holds:
-// a published table with no shape here (and no client collection) is pure
-// replication cost, so drop it from the publication instead of leaving it. That
-// is why the errors vertical (error_issues / actors / open_error_incidents) and
-// scrape_target_checks are gone — see 0022_electric_publication_prune.
-const SHAPES = {
-	dashboards: { table: "dashboards" },
-	alert_rules: { table: "alert_rules" },
-	alert_rule_states: { table: "alert_rule_states" },
-	alert_incidents: { table: "alert_incidents" },
-	// API key hashes and agent metadata are authentication material/internal
-	// configuration and must never reach the browser. The dashboard needs only
-	// the safe display fields below; `id` + `org_id` are required for identity
-	// and tenant scoping.
-	api_keys: {
-		table: "api_keys",
-		columns: [
-			"id",
-			"org_id",
-			"name",
-			"description",
-			"key_prefix",
-			"revoked",
-			"revoked_at",
-			"last_used_at",
-			"expires_at",
-			"scopes",
-			"kind",
-			"created_at",
-			"created_by",
-			"created_by_email",
-		],
-	},
-	// `config_json` holds only public config (summary / channel label / hazel
-	// metadata); the encrypted webhook secrets live in separate `secret_*` columns
-	// that MUST NOT reach the browser, so the projection drops them (and the
-	// unused `created_by`/`updated_by`). The PK `id` is required in the projection.
-	alert_destinations: {
-		table: "alert_destinations",
-		columns: [
-			"id",
-			"org_id",
-			"name",
-			"type",
-			"enabled",
-			"config_json",
-			"last_tested_at",
-			"last_test_error",
-			"created_at",
-			"updated_at",
-		],
-	},
-} as const satisfies Record<
-	string,
-	{ readonly table: string; readonly extraWhere?: string; readonly columns?: ReadonlyArray<string> }
->
+/** The base is synthetic: `req.url` is origin-relative and only its query matters here. */
+const INTERNAL_URL_BASE = "http://internal"
 
-export type ShapeName = keyof typeof SHAPES
-
-/** Every whitelisted shape, so tests can assert invariants across the whole set. */
-export const SHAPE_NAMES = Object.keys(SHAPES) as ReadonlyArray<ShapeName>
-
-export const isShapeName = (value: string | null): value is ShapeName =>
-	value !== null && Object.prototype.hasOwnProperty.call(SHAPES, value)
-
-// The only client-supplied params we forward upstream. Everything else — table,
-// where, columns, params[n] — is pinned by us, so a client can never widen the
-// shape or escape its org scope. These are Electric's reserved cursor +
-// cache-recovery params (see @electric-sql/client):
-//   - offset / handle / live / cursor advance position in the log.
-//   - expired_handle / cache-buster are cache-BUSTERS. Electric is designed to run
-//     behind a caching CDN, and Cloudflare caches our upstream fetch to Electric
-//     (Electric marks snapshot/log chunks `cache-control: public`). When Electric
-//     rotates a shape handle (compaction), the client re-requests with these params
-//     set so the new URL misses the stale CDN entry. DROPPING them makes the bust a
-//     no-op: the upstream URL is byte-identical to the cached one, Cloudflare serves
-//     the same stale response carrying the already-expired handle, and the client
-//     spins in an infinite 409 refetch loop — the exact failure @electric-sql/client
-//     warns about ("proxy/CDN is serving a stale cached response and ignoring
-//     cache-buster query params"). They only affect caching, never the shape
-//     definition or org scope, so forwarding them is safe.
-const CLIENT_PASSTHROUGH_PARAMS = [
-	"offset",
-	"handle",
-	"live",
-	"cursor",
-	"expired_handle",
-	"cache-buster",
-] as const
-
-// Upstream response headers that must not survive re-wrapping: the platform
-// re-encodes and re-chunks the streamed body, so a stale content-encoding /
-// content-length would misdescribe it.
-const STRIPPED_UPSTREAM_HEADERS = ["content-encoding", "content-length"]
-
-/**
- * Adds `header` to a `Vary` header value without clobbering existing tokens or
- * duplicating (case-insensitive). A pre-existing `Vary: *` already defeats shared
- * caching, so it's left as-is.
- */
-const appendVary = (existing: string | undefined, header: string): string => {
-	const trimmed = existing?.trim()
-	if (!trimmed) return header
-	if (trimmed === "*") return trimmed
-	const tokens = trimmed
-		.split(",")
-		.map((t) => t.trim())
-		.filter(Boolean)
-	if (tokens.some((t) => t.toLowerCase() === header.toLowerCase())) return tokens.join(", ")
-	return [...tokens, header].join(", ")
-}
-
-/**
- * Shapes the headers we return to the browser from an upstream Electric response.
- * Pure and exported so tests can assert the cache-isolation guarantees.
- *
- * Electric marks the initial snapshot / historical log chunks `cache-control:
- * public` so a CDN can fan them out. But our client-facing URL carries NO org — it
- * is `?shape=<name>&offset=…`, byte-identical for every tenant, with the org
- * derived from the bearer. A shared cache keyed on that URL would serve one org's
- * rows to another (the same cross-tenant leak the server-pinned `org_id` WHERE
- * exists to prevent, one layer up). So, per Electric's auth guide, we:
- *   - add `Vary: Authorization` so any compliant cache keys on the bearer (→ org);
- *   - downgrade `public` → `private` so no shared CDN/proxy holds an org's rows at
- *     all (live `no-store` responses are left untouched).
- * We also drop content-encoding/content-length, which misdescribe the re-wrapped
- * body. Effect lowercases header keys, so we match on lowercase names.
- */
-export const shapeResponseHeaders = (upstream: Readonly<Record<string, string>>): Record<string, string> => {
-	const headers: Record<string, string> = { ...upstream }
-	for (const key of STRIPPED_UPSTREAM_HEADERS) delete headers[key]
-
-	headers.vary = appendVary(headers.vary, "Authorization")
-
-	const cacheControl = headers["cache-control"]
-	if (cacheControl && /\bpublic\b/.test(cacheControl)) {
-		headers["cache-control"] = cacheControl.replace(/\bpublic\b/g, "private")
-	}
-
-	return headers
-}
-
-/**
- * Builds the upstream Electric `/v1/shape` URL. Pure and exported so tests can
- * assert that a client can never override the pinned `table`/`where`/`params` —
- * only the whitelisted cursor params flow through.
- */
-export const buildUpstreamShapeUrl = (args: {
-	readonly electricUrl: string
-	readonly shape: ShapeName
-	readonly orgId: string
-	readonly sourceId?: string | undefined
-	readonly secret?: string | undefined
-	readonly clientParams: URLSearchParams
-}): string => {
-	const def = SHAPES[args.shape]
-	const base = args.electricUrl.replace(/\/+$/, "")
-	const url = new URL(`${base}/v1/shape`)
-
-	// Pinned server-side. Org scope is positional param $1 so the orgId value is
-	// never interpolated into the WHERE string.
-	url.searchParams.set("table", def.table)
-	const orgWhere = `"org_id" = $1`
-	url.searchParams.set(
-		"where",
-		"extraWhere" in def && def.extraWhere ? `${orgWhere} AND ${def.extraWhere}` : orgWhere,
-	)
-	url.searchParams.set("params[1]", args.orgId)
-
-	// Column projection is pinned server-side too — a shape that drops secret /
-	// oversized columns must never let the client widen it back to `SELECT *`.
-	if ("columns" in def && def.columns) url.searchParams.set("columns", def.columns.join(","))
-
-	// Electric Cloud source credentials (absent when self-hosting Electric).
-	if (args.sourceId) url.searchParams.set("source_id", args.sourceId)
-	if (args.secret) url.searchParams.set("secret", args.secret)
-
-	for (const key of CLIENT_PASSTHROUGH_PARAMS) {
-		const value = args.clientParams.get(key)
-		if (value !== null) url.searchParams.set(key, value)
-	}
-
-	return url.toString()
-}
-
-/**
- * Electric Cloud authenticates every shape request with a source `secret`
- * (paired with `source_id`); self-hosted Electric (local docker) needs neither.
- * A config carrying exactly ONE of the two is incoherent — most commonly a
- * deploy that inherited a shared `ELECTRIC_URL` + `ELECTRIC_SOURCE_ID` from the
- * secret store but no matching `ELECTRIC_SECRET` (e.g. a PR preview whose per-PR
- * Electric source step was skipped because the CLI token isn't provisioned).
- * Forwarding that upstream is a guaranteed 401 `MISSING_SECRET` from Electric
- * Cloud, which surfaces as a hard-broken shape stream in the browser. Instead we
- * treat it as "not configured" and take the same 503 graceful-degrade path as a
- * missing `ELECTRIC_URL`. Pure + exported so the coherence rule is unit-tested.
- */
-export const isElectricConfigCoherent = (creds: {
-	readonly sourceId: Option.Option<unknown>
-	readonly secret: Option.Option<unknown>
-}): boolean => Option.isSome(creds.sourceId) === Option.isSome(creds.secret)
-
-const errorText = (message: string, status: number) =>
-	HttpServerResponse.text(message, {
-		status,
-		headers: { "content-type": "text/plain; charset=utf-8" },
+/** Records the outcome on the `electric_sync.shape` span. Must run inside it. */
+const annotate = (error: ShapeError) => {
+	const { status, errorType } = errorResponse(error)
+	return Effect.annotateCurrentSpan({
+		"http.response.status_code": status,
+		"error.type": errorType,
 	})
+}
 
-class ElectricSyncUnavailable extends Schema.TaggedError<ElectricSyncUnavailable>()(
-	"ElectricSyncUnavailable",
-	{
-		/**
-		 * The SDK reads a span's `status.message` off the failure's `Error.message`,
-		 * so without this the span carried `error.type` and nothing else — you could
-		 * see that Electric had failed but not what it said.
-		 */
-		message: Schema.String,
-		response: Schema.Any,
-	},
-) {}
+const respond = (error: ShapeError) => {
+	const { status, body, headers } = errorResponse(error)
+	return HttpServerResponse.raw(body, { status, headers })
+}
+
+/** Annotate and answer, without failing the span — see the 4xx note below. */
+const rejectClient = (error: ShapeError) => annotate(error).pipe(Effect.as(respond(error)))
 
 export const ElectricSyncRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
-		const config = yield* SyncConfig
-		const client = yield* HttpClient.HttpClient
-		const resolveTenant = makeResolveTenant(config)
+		const electric = yield* ElectricClient
+		const tenants = yield* TenantResolver
 
-		// Electric Cloud needs `source_id` + `secret` together; a half-configured
-		// deploy would forward a doomed unauthenticated request (401 MISSING_SECRET).
-		// Detect it once at isolate startup and disable sync (503 below) rather than
-		// per-request, and log so the misconfiguration is discoverable in telemetry.
-		// Checked on the raw `Option`s — presence is the whole question, so nothing
-		// is flattened until a value is actually needed on the URL below.
-		const configCoherent = isElectricConfigCoherent({
-			sourceId: config.ELECTRIC_SOURCE_ID,
-			secret: config.ELECTRIC_SECRET,
+		const handle = Effect.fnUntraced(function* (req: HttpServerRequest.HttpServerRequest) {
+			const clientParams = new URL(req.url, INTERNAL_URL_BASE).searchParams
+
+			const request = yield* Effect.fromResult(decodeShapeRequest(clientParams))
+			yield* Effect.annotateCurrentSpan("maple.sync.shape", request.shape)
+
+			// The configuration gate sits ahead of auth on purpose: a deploy with no
+			// Electric (self-hosted without the container, or a half-configured Cloud
+			// deploy) answers 503 to everyone, and the web app's collections watch for
+			// exactly that to degrade to their existing effect-atom fetches. Making it
+			// conditional on a valid bearer would leave an unauthenticated client
+			// unable to tell "sync is off" from "your session expired".
+			yield* electric.ensureConfigured
+
+			const tenant = yield* tenants
+				.resolve(req.headers)
+				.pipe(Effect.mapError((error) => new Unauthorized({ message: error.message })))
+			yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+
+			const upstream = yield* electric.fetchShape(request, tenant.orgId)
+
+			// Cache-isolate the org-scoped body (Vary: Authorization + no public
+			// caching) and drop headers that misdescribe the re-serialized body.
+			return HttpServerResponse.raw(upstream.body, {
+				status: upstream.status,
+				headers: shapeResponseHeaders(upstream.headers),
+			})
 		})
-
-		const electricUrl = Option.getOrUndefined(config.ELECTRIC_URL)
-		const sourceId = Option.getOrUndefined(config.ELECTRIC_SOURCE_ID)
-		const secret = Option.match(config.ELECTRIC_SECRET, {
-			onNone: () => undefined,
-			onSome: Redacted.value,
-		})
-		if (electricUrl && !configCoherent) {
-			yield* Effect.logWarning(
-				"Electric sync disabled: incoherent Cloud credentials — set both ELECTRIC_SOURCE_ID and ELECTRIC_SECRET, or neither",
-			).pipe(
-				Effect.annotateLogs({
-					hasSourceId: Option.isSome(config.ELECTRIC_SOURCE_ID),
-					hasSecret: Option.isSome(config.ELECTRIC_SECRET),
-				}),
-			)
-		}
-
-		const handleSpan = (req: HttpServerRequest.HttpServerRequest) =>
-			Effect.gen(function* () {
-				// Not configured (self-hosted without an Electric container, or a
-				// half-configured Cloud deploy missing its source secret) → 503; the
-				// web app's collections degrade and it keeps using its existing
-				// effect-atom fetches.
-				if (!electricUrl || !configCoherent) {
-					yield* Effect.annotateCurrentSpan({
-						"http.response.status_code": 503,
-						// Two distinct causes share this branch: no `ELECTRIC_URL` at all
-						// (expected on self-hosted) versus a deploy that half-configured
-						// Cloud credentials (a misconfiguration to chase down). Same
-						// response, different error.type, so traces can tell them apart.
-						"error.type": electricUrl ? "ElectricConfigIncoherent" : "ElectricConfigUnavailable",
-					})
-					return yield* new ElectricSyncUnavailable({
-						message: electricUrl
-							? "Electric Cloud credentials are half-configured (ELECTRIC_URL set, source_id/secret missing)"
-							: "Electric sync is not configured (no ELECTRIC_URL)",
-						response: errorText("Electric sync is not configured", 503),
-					})
-				}
-
-				const requestUrl = new URL(req.url, "http://internal")
-				const shapeParam = requestUrl.searchParams.get("shape")
-				if (!isShapeName(shapeParam)) return errorText("Unknown or missing shape", 400)
-				yield* Effect.annotateCurrentSpan("maple.sync.shape", shapeParam)
-
-				// Auth: Clerk / self-hosted tenant resolution (covers both modes).
-				const tenant = yield* resolveTenant(req.headers).pipe(Effect.option)
-				if (Option.isNone(tenant)) return errorText("Unauthorized", 401)
-				const orgId = tenant.value.orgId
-				yield* Effect.annotateCurrentSpan("orgId", orgId)
-
-				const upstreamUrl = buildUpstreamShapeUrl({
-					electricUrl,
-					shape: shapeParam,
-					orgId,
-					sourceId,
-					secret,
-					clientParams: requestUrl.searchParams,
-				})
-
-				// Electric `live` requests long-poll, then return a COMPLETE response
-				// (not an open SSE stream), and control-plane shapes are small, so we
-				// buffer the body rather than manage a scoped pass-through stream.
-				// `Effect.option` discards the cause, so the reason is captured here on
-				// the way past — otherwise the span can only say "it failed".
-				let upstreamFailure = "unknown transport failure"
-				const result = yield* client.get(upstreamUrl).pipe(
-					Effect.annotateSpans("peer.service", "electric"),
-					Effect.flatMap((response) =>
-						response.text.pipe(Effect.map((body) => ({ response, body }))),
-					),
-					Effect.tapError((error) => {
-						upstreamFailure = String(error)
-						return Effect.logWarning("Electric shape upstream request failed").pipe(
-							Effect.annotateLogs({ shape: shapeParam, error: upstreamFailure }),
-						)
-					}),
-					Effect.option,
-				)
-				if (Option.isNone(result)) {
-					yield* Effect.annotateCurrentSpan({
-						"http.response.status_code": 502,
-						"error.type": "ElectricUpstreamUnavailable",
-					})
-					return yield* new ElectricSyncUnavailable({
-						message: `Electric upstream unreachable (${shapeParam}): ${upstreamFailure}`,
-						response: errorText("Electric upstream unreachable", 502),
-					})
-				}
-				const { response, body } = result.value
-				if (response.status >= 500) {
-					yield* Effect.annotateCurrentSpan({
-						"http.response.status_code": response.status,
-						"error.type": "ElectricUpstreamError",
-					})
-					return yield* new ElectricSyncUnavailable({
-						// The body is what Electric actually said; truncated because a
-						// status description is not a place to put a whole payload.
-						message: `Electric returned ${response.status} for shape ${shapeParam}: ${body.slice(0, 300)}`,
-						response: HttpServerResponse.raw(body, {
-							status: response.status,
-							headers: shapeResponseHeaders(response.headers),
-						}),
-					})
-				}
-
-				// Cache-isolate the org-scoped body (Vary: Authorization + no public
-				// caching) and drop headers that misdescribe the re-serialized body.
-				return HttpServerResponse.raw(body, {
-					status: response.status,
-					headers: shapeResponseHeaders(response.headers),
-				})
-			}).pipe(Effect.withSpan("electric_sync.shape"))
 
 		yield* router.add("GET", "/api/sync/shape", (req) =>
-			handleSpan(req).pipe(
-				Effect.catchTag("ElectricSyncUnavailable", ({ response }) => Effect.succeed(response)),
+			handle(req).pipe(
+				// Every failure is annotated on the span and shaped by the same mapper;
+				// they differ only in whether the span itself fails. Per OTEL HTTP
+				// semconv for SERVER spans (and the rule `apps/ingest` already follows),
+				// a 4xx is a rejection the service handled correctly, so it is caught
+				// INSIDE the span and leaves it `Ok` — otherwise routine unknown-shape
+				// and expired-session requests would flood the error dashboards.
+				Effect.catchTags({
+					"@maple/electric-sync/ShapeRequestInvalid": rejectClient,
+					"@maple/electric-sync/Unauthorized": rejectClient,
+				}),
+				// The rest are real failures. Annotate while the span is still current,
+				// then let them through it so it carries `Error` + the error's message,
+				// and only turn them into a response outside.
+				Effect.tapError(annotate),
+				Effect.withSpan("electric_sync.shape"),
+				Effect.catchTags({
+					"@maple/electric-sync/ElectricNotConfigured": (error) => Effect.succeed(respond(error)),
+					"@maple/electric-sync/ElectricUpstreamUnreachable": (error) =>
+						Effect.succeed(respond(error)),
+					"@maple/electric-sync/ElectricUpstreamError": (error) => Effect.succeed(respond(error)),
+				}),
 			),
 		)
 	}),
-).pipe(Layer.provide(FetchHttpClient.layer))
+)
