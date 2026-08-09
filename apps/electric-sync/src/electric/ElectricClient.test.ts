@@ -5,7 +5,12 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { type RecordedRequest, stubFetch, syncConfigLayer } from "../test-support"
 import { SHAPE_NAMES, type ShapeName, shapeScopeColumn } from "../shapes/registry"
 import type { ShapeRequest } from "../shapes/request"
-import { buildUpstreamShapeUrl, ElectricClient, isElectricConfigCoherent } from "./ElectricClient"
+import {
+	buildUpstreamShapeUrl,
+	describeUpstreamFailure,
+	ElectricClient,
+	isElectricConfigCoherent,
+} from "./ElectricClient"
 
 const parse = (raw: string) => {
 	const url = new URL(raw)
@@ -74,6 +79,51 @@ describe("isElectricConfigCoherent", () => {
 				secret: Option.some(Redacted.make("sh_secret")),
 			}),
 		)
+	})
+})
+
+/**
+ * The upstream URL carries the Electric Cloud source `secret`, and error text
+ * routinely embeds that URL — so every string this produces lands in a span
+ * message and a log annotation, and must not carry the credential.
+ */
+describe("describeUpstreamFailure", () => {
+	const SECRET = "sh_supersecret"
+	const failingUrl = `http://electric:3000/v1/shape?table=dashboards&secret=${SECRET}&offset=-1`
+
+	it("redacts the secret in the error's own text", () => {
+		const described = describeUpstreamFailure(new Error(`Transport error (GET ${failingUrl})`))
+		assert.notInclude(described, SECRET)
+		assert.include(described, "secret=REDACTED")
+	})
+
+	/**
+	 * The regression this exists for: redacting the outer text and then appending
+	 * `String(error.cause)` verbatim leaked the credential, because a fetch
+	 * failure's cause commonly embeds the request URL as well.
+	 */
+	it("redacts the secret in the appended cause, not just the outer text", () => {
+		const described = describeUpstreamFailure(
+			new Error("Transport error", { cause: new Error(`connect ECONNREFUSED ${failingUrl}`) }),
+		)
+		assert.notInclude(described, SECRET)
+		// The diagnosis still survives — redaction must not cost the cause.
+		assert.include(described, "ECONNREFUSED")
+	})
+
+	it("keeps the cause when there is nothing to redact", () => {
+		const described = describeUpstreamFailure(
+			new Error("Transport error", { cause: new Error("getaddrinfo ENOTFOUND electric") }),
+		)
+		assert.include(described, "Transport error")
+		assert.include(described, "ENOTFOUND")
+	})
+
+	it("falls back to a name rather than interpolating an empty message", () => {
+		// `Cause.TimeoutError` carries no `message`.
+		const nameless = new Error()
+		nameless.name = "TimeoutError"
+		assert.include(describeUpstreamFailure(nameless), "TimeoutError")
 	})
 })
 

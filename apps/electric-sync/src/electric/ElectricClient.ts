@@ -44,22 +44,33 @@ const CLIENT_PASSTHROUGH_PARAMS = [
 const UPSTREAM_TIMEOUT = Duration.seconds(30)
 
 /**
+ * Strips the Electric Cloud source secret out of anything headed for telemetry.
+ *
+ * The upstream URL carries `secret=…`, and error text routinely embeds that URL,
+ * so any failure string that reaches a span or a log has to come through here
+ * first. Applied to the FULLY composed string — see `describeUpstreamFailure`.
+ */
+const redactSecrets = (text: string): string => text.replace(/(secret=)[^&\s)]*/g, "$1REDACTED")
+
+/**
  * Renders an upstream failure for a span message and a log.
  *
- * Two things it must do that `String(error)` alone did not. It keeps the *cause* —
- * an `HttpClientError`'s own text is "Transport error (GET …)", and the part worth
- * reading (ECONNREFUSED, the DNS failure, the abort) is one level down. And it
- * redacts `secret=`: the upstream URL carries the Electric Cloud source secret and
- * the error text embeds that URL, so an unredacted message would write the secret
- * into retained telemetry every time Electric was unreachable.
+ * It keeps the *cause*: an `HttpClientError`'s own text is "Transport error
+ * (GET …)", and the part worth reading (ECONNREFUSED, the DNS failure, the
+ * abort) is one level down.
+ *
+ * Exported so the redaction is asserted directly rather than inferred from an
+ * upstream failure that may or may not carry a URL in its cause.
  */
-const describeUpstreamFailure = (error: unknown): string => {
+export const describeUpstreamFailure = (error: unknown): string => {
 	// `Cause.TimeoutError` carries no `message`, so fall back through name to the
 	// string form rather than interpolating `undefined` into a span.
 	const text = error instanceof Error ? error.message || error.name || String(error) : String(error)
-	const redacted = text.replace(/(secret=)[^&\s)]*/g, "$1REDACTED")
 	const cause = error instanceof Error && error.cause !== undefined ? String(error.cause) : undefined
-	return cause === undefined ? redacted : `${redacted}: ${cause}`
+	// Redact AFTER composing, never per-part: a fetch failure's cause commonly
+	// embeds the request URL too, so redacting only the outer text would leak the
+	// exact credential this exists to protect.
+	return redactSecrets(cause === undefined ? text : `${text}: ${cause}`)
 }
 
 const isLiveRequest = (clientParams: URLSearchParams): boolean => {
