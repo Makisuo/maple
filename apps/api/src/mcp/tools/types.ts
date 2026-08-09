@@ -16,6 +16,11 @@ export class McpAuthInvalidError extends Schema.TaggedError<McpAuthInvalidError>
 	{ message: Schema.String, reason: Schema.optionalKey(Schema.String) },
 ) {}
 
+export class McpAuthUnavailableError extends Schema.TaggedError<McpAuthUnavailableError>()(
+	"@maple/mcp/errors/McpAuthUnavailableError",
+	{ message: Schema.String },
+) {}
+
 export class McpInvalidTenantError extends Schema.TaggedError<McpInvalidTenantError>()(
 	"@maple/mcp/errors/McpInvalidTenantError",
 	{ message: Schema.String, field: Schema.String },
@@ -31,6 +36,7 @@ export type McpToolError =
 	| McpTenantError
 	| McpAuthMissingError
 	| McpAuthInvalidError
+	| McpAuthUnavailableError
 	| McpInvalidTenantError
 	| McpQueryError
 

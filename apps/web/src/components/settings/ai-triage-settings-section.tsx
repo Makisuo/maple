@@ -20,6 +20,58 @@ interface AiTriageSettingsSectionProps {
 
 const SETTINGS_REACTIVITY_KEYS = ["aiTriageSettings"]
 
+/**
+ * A number field that commits on blur and only when the value actually changed.
+ *
+ * Shared by both ceilings rather than written twice: the draft state, the parse,
+ * the range guard and the no-op check are the same six lines, and the second copy
+ * is where the two fields drift apart.
+ */
+function DailyLimitField({
+	id,
+	label,
+	value,
+	min,
+	max,
+	disabled,
+	help,
+	onCommit,
+}: {
+	id: string
+	label: string
+	value: number
+	min: number
+	max: number
+	disabled: boolean
+	help: React.ReactNode
+	onCommit: (next: number) => void
+}) {
+	const [draft, setDraft] = useState<string | null>(null)
+	return (
+		<div className="space-y-2 sm:max-w-xs">
+			<Label htmlFor={id}>{label}</Label>
+			<Input
+				id={id}
+				type="number"
+				min={min}
+				max={max}
+				disabled={disabled}
+				value={draft ?? String(value)}
+				onChange={(event) => setDraft(event.target.value)}
+				onBlur={() => {
+					if (draft === null) return
+					const parsed = Number.parseInt(draft, 10)
+					setDraft(null)
+					if (Number.isFinite(parsed) && parsed >= min && parsed <= max && parsed !== value) {
+						onCommit(parsed)
+					}
+				}}
+			/>
+			<p className="text-xs text-muted-foreground">{help}</p>
+		</div>
+	)
+}
+
 export function AiTriageSettingsSection({ isAdmin, hasEntitlement }: AiTriageSettingsSectionProps) {
 	const settingsQueryAtom = MapleApiAtomClient.query("aiTriage", "getSettings", {
 		reactivityKeys: SETTINGS_REACTIVITY_KEYS,
@@ -32,7 +84,6 @@ export function AiTriageSettingsSection({ isAdmin, hasEntitlement }: AiTriageSet
 	})
 
 	const [isSaving, setIsSaving] = useState(false)
-	const [maxRunsDraft, setMaxRunsDraft] = useState<string | null>(null)
 
 	if (!isAdmin || !hasEntitlement) {
 		return null
@@ -106,41 +157,42 @@ export function AiTriageSettingsSection({ isAdmin, hasEntitlement }: AiTriageSet
 								/>
 							</div>
 
-							<div className="space-y-2 sm:max-w-xs">
-								<Label htmlFor="ai-triage-max-runs">Max runs per day</Label>
-								<Input
-									id="ai-triage-max-runs"
-									type="number"
-									min={1}
-									max={500}
-									value={maxRunsDraft ?? String(current.maxRunsPerDay)}
-									onChange={(event) => setMaxRunsDraft(event.target.value)}
-									onBlur={() => {
-										if (maxRunsDraft === null) return
-										const parsed = Number.parseInt(maxRunsDraft, 10)
-										setMaxRunsDraft(null)
-										if (
-											Number.isFinite(parsed) &&
-											parsed >= 1 &&
-											parsed <= 500 &&
-											parsed !== current.maxRunsPerDay
-										) {
-											save(
-												new AiTriageSettingsUpdateRequest({
-													maxRunsPerDay: parsed,
-												}),
-												"Daily run cap updated",
-											)
-										}
-									}}
-								/>
-								<p className="text-xs text-muted-foreground">
-									Bounds LLM spend — additional incidents skip triage once reached. A
-									planned investigation also spends about six of the{" "}
-									{current.maxPassesPerDay} daily model passes, whichever ceiling is reached
-									first.
-								</p>
-							</div>
+							<DailyLimitField
+								id="ai-triage-max-runs"
+								label="Max investigations per day"
+								value={current.maxRunsPerDay}
+								min={1}
+								max={500}
+								disabled={isSaving}
+								help="How many incidents auto-triage may investigate in a UTC day."
+								onCommit={(parsed) =>
+									save(
+										new AiTriageSettingsUpdateRequest({ maxRunsPerDay: parsed }),
+										"Daily run cap updated",
+									)
+								}
+							/>
+
+							<DailyLimitField
+								id="ai-triage-max-passes"
+								label="Max model passes per day"
+								value={current.maxPassesPerDay}
+								min={1}
+								max={2000}
+								disabled={isSaving}
+								help="The spend ceiling. A planned investigation spends about six passes — planner, hypotheses, validator — so this is usually what stops triage first, whichever ceiling is reached first."
+								onCommit={(parsed) =>
+									save(
+										new AiTriageSettingsUpdateRequest({ maxPassesPerDay: parsed }),
+										"Daily model-pass cap updated",
+									)
+								}
+							/>
+
+							<p className="text-xs text-muted-foreground">
+								Both ceilings apply to automatic triage only. Investigations you start or
+								retry yourself are never blocked by them.
+							</p>
 
 							<div className="flex justify-end">
 								<Button

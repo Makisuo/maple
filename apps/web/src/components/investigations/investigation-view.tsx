@@ -2,6 +2,7 @@ import { useMemo, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { Exit } from "effect"
 import { useAtomSet } from "@/lib/effect-atom"
+import { formatBackendError } from "@/lib/error-messages"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
@@ -133,7 +134,10 @@ export function InvestigationView({
 			// No refetch: the row this page renders is an Electric shape, so the
 			// restart's writes arrive on their own.
 		} else {
-			toastManager.add({ title: "Investigation could not be restarted", type: "error" })
+			// The server's reason is the whole message — a daily-budget 429 says which
+			// ceiling was hit and when it resets, and a fixed title threw all of it away.
+			const { title, description } = formatBackendError(result)
+			toastManager.add({ title, description, type: "error" })
 		}
 	}
 
@@ -148,7 +152,8 @@ export function InvestigationView({
 		if (Exit.isSuccess(result)) {
 			toastManager.add({ title: "Investigation resolved", type: "success" })
 		} else {
-			toastManager.add({ title: "Investigation could not be resolved", type: "error" })
+			const { title, description } = formatBackendError(result)
+			toastManager.add({ title, description, type: "error" })
 		}
 	}
 

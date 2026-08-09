@@ -2,6 +2,7 @@ import { useMemo, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Exit, Schema } from "effect"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { formatBackendError } from "@/lib/error-messages"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -148,7 +149,8 @@ function InvestigationsHub() {
 		if (Exit.isSuccess(created)) {
 			void navigate({ to: "/investigations/$id", params: { id: created.value.id } })
 		} else {
-			toastManager.add({ title: "Investigation could not be started", type: "error" })
+			const { title, description } = formatBackendError(created)
+			toastManager.add({ title, description, type: "error" })
 		}
 	}
 

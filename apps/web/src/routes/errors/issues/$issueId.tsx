@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { formatBackendError } from "@/lib/error-messages"
 import { Exit, Schema } from "effect"
 import { useMemo, useState } from "react"
 import { toastManager } from "@maple/ui/components/ui/toast"
@@ -326,7 +327,8 @@ function IssueDetailPage() {
 				params: { id: result.value.id },
 			})
 		} else {
-			toastManager.add({ title: "Investigation could not be started", type: "error" })
+			const { title, description } = formatBackendError(result)
+			toastManager.add({ title, description, type: "error" })
 		}
 	}
 

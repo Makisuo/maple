@@ -218,7 +218,7 @@ export class PlanetScaleOAuthService extends Context.Service<
 				return { status: res.status, text }
 			}).pipe(
 				Effect.mapError((error) =>
-					toUpstreamError(`PlanetScale API request failed: ${error.message}`),
+					toUpstreamError(`PlanetScale API request failed: ${error.message}`, undefined, error),
 				),
 				Effect.timeoutOrElse({
 					duration: REQUEST_TIMEOUT,
@@ -319,8 +319,12 @@ export class PlanetScaleOAuthService extends Context.Service<
 					)
 				}
 				const decoded = yield* decodeOrganizationsPage(response.text).pipe(
-					Effect.mapError(() =>
-						toUpstreamError("PlanetScale organizations listing returned an unexpected payload"),
+					Effect.mapError((cause) =>
+						toUpstreamError(
+							"PlanetScale organizations listing returned an unexpected payload",
+							undefined,
+							cause,
+						),
 					),
 				)
 				organizations.push(...decoded.data)

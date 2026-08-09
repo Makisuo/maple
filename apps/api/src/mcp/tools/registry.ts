@@ -72,7 +72,11 @@ export interface MapleToolCatalogEntry {
 
 class McpDecodeError extends Schema.TaggedError<McpDecodeError>()("@maple/mcp/decode-error", {
 	errorMessage: Schema.String,
-}) {}
+}) {
+	override get message(): string {
+		return this.errorMessage
+	}
+}
 
 /**
  * Effect emits exactly `{ anyOf: [{ type: "object" }, { type: "array" }] }` — no

@@ -264,6 +264,7 @@ export interface OrgClickHouseSettingsServiceShape {
 		| OrgClickHouseSettingsForbiddenError
 		| OrgClickHouseSettingsValidationError
 		| OrgClickHouseSettingsPersistenceError
+		| OrgClickHouseSettingsEncryptionError
 	>
 }
 
@@ -1472,14 +1473,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			yield* requireAdmin(roles)
 			const row = yield* requireActiveRow(orgId)
-			const password = yield* decryptStoredPassword(row).pipe(
-				Effect.mapError(
-					() =>
-						new OrgClickHouseSettingsValidationError({
-							message: "Stored ClickHouse credentials could not be decrypted",
-						}),
-				),
-			)
+			const password = yield* decryptStoredPassword(row)
 			yield* validateClickHouseCredentialTransport(row.chUrl, password)
 			const yaml = renderCollectorYaml({
 				orgId,

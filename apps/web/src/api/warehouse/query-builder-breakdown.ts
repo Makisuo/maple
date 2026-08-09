@@ -10,11 +10,10 @@ import {
 	invalidWarehouseInput,
 } from "@/api/warehouse/effect-utils"
 
-// Discriminate the typed query-engine error channel on `_tag` (both the local
-// `WarehouseQueryError` and the backend `@maple/http/errors/Warehouse*` union
-// carry a `message` field) rather than collapsing it via `instanceof Error`.
+// Read the message from either a local/tagged error or a public v2 envelope.
 function queryEngineErrorMessage(error: WarehouseQueryError | BackendError, fallback: string): string {
-	return "message" in error && typeof error.message === "string" ? error.message : fallback
+	if ("message" in error && typeof error.message === "string") return error.message
+	return "error" in error && typeof error.error.message === "string" ? error.error.message : fallback
 }
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))

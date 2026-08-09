@@ -68,6 +68,7 @@ export const V2UnexpectedErrorsLive = Layer.succeed(
 						group: error.group,
 						operation: error.operation,
 						defectType,
+						cause: error.cause,
 					}),
 					Effect.andThen(Effect.fail(apiError())),
 				)

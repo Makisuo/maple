@@ -54,25 +54,72 @@ export type WarehouseApiError =
 	| WarehouseTransformError
 	| WarehouseInvalidInputError
 
-/**
- * Structural shape of a tagged backend error surfaced by the Maple API client.
- * Backend errors are a sprawling union of `@maple/http/errors/*` tagged classes;
- * we narrow on the `_tag` prefix rather than re-importing every class.
- */
-export interface BackendError {
+/** Tagged v1 backend error surfaced by the Maple API client. */
+export interface TaggedBackendError {
 	readonly _tag: string
 }
+
+/** Public v2 error envelope. V2 deliberately has no internal `_tag`. */
+export interface V2BackendError {
+	readonly error: {
+		readonly type: string
+		readonly code: string
+		readonly message: string
+		readonly param?: string
+		readonly doc_url?: string
+	}
+}
+
+export type BackendError = TaggedBackendError | V2BackendError
 
 function toMessage(cause: unknown, fallback: string): string {
 	return cause instanceof Error ? cause.message : fallback
 }
 
-const isTaggedBackendError = (cause: unknown): cause is BackendError =>
+const isTaggedBackendError = (cause: unknown): cause is TaggedBackendError =>
 	typeof cause === "object" &&
 	cause !== null &&
 	"_tag" in cause &&
 	typeof (cause as { _tag: unknown })._tag === "string" &&
 	(cause as { _tag: string })._tag.startsWith("@maple/http/errors/")
+
+const isV2BackendError = (cause: unknown): cause is V2BackendError => {
+	if (typeof cause !== "object" || cause === null || !("error" in cause)) return false
+	const error = (cause as { error: unknown }).error
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"type" in error &&
+		typeof error.type === "string" &&
+		"code" in error &&
+		typeof error.code === "string" &&
+		"message" in error &&
+		typeof error.message === "string"
+	)
+}
+
+export const isBackendError = (cause: unknown): cause is BackendError =>
+	isTaggedBackendError(cause) || isV2BackendError(cause)
+
+export const isWarehouseApiError = (cause: unknown): cause is WarehouseApiError =>
+	typeof cause === "object" &&
+	cause !== null &&
+	"_tag" in cause &&
+	typeof cause._tag === "string" &&
+	cause._tag.startsWith("@maple/web/api/warehouse/")
+
+/** Preserve known errors; introduce a local query error only for an unstructured failure. */
+export const normalizeWarehouseError = (
+	operation: string,
+	cause: unknown,
+): WarehouseApiError | BackendError => {
+	if (isBackendError(cause) || isWarehouseApiError(cause)) return cause
+	return new WarehouseQueryError({
+		operation,
+		message: toMessage(cause, `Warehouse query failed for ${operation}`),
+		cause,
+	})
+}
 
 export function decodeInput<S extends Schema.Top & { readonly DecodingServices: never }>(
 	schema: S,
@@ -98,16 +145,7 @@ export function runWarehouseQuery<A>(
 	return Effect.suspend(execute).pipe(
 		Effect.withSpan(operation),
 		Effect.provide(mapleApiClientLayer),
-		Effect.mapError((cause) => {
-			if (isTaggedBackendError(cause)) {
-				return cause
-			}
-			return new WarehouseQueryError({
-				operation,
-				message: toMessage(cause, `Warehouse query failed for ${operation}`),
-				cause,
-			})
-		}),
+		Effect.mapError((cause) => normalizeWarehouseError(operation, cause)),
 	)
 }
 
@@ -117,8 +155,8 @@ export function runWarehouseQuery<A>(
  * Same span + error normalization, different client layer and a wider input
  * error type: the v2 endpoints fail with the public envelope union
  * (`V2InvalidRequestError`, `V2PayloadTooLargeError`, …) rather than the v1
- * warehouse tags, and all of those collapse into `WarehouseQueryError` here so
- * callers keep one error shape.
+ * warehouse tags. Both forms pass through unchanged so the UI retains the
+ * server's status, code, and remediation copy.
  */
 export function runWarehouseQueryV2<A, E>(
 	operation: string,
@@ -127,16 +165,7 @@ export function runWarehouseQueryV2<A, E>(
 	return Effect.suspend(execute).pipe(
 		Effect.withSpan(operation),
 		Effect.provide(mapleApiV2ClientLayer),
-		Effect.mapError((cause) => {
-			if (isTaggedBackendError(cause)) {
-				return cause
-			}
-			return new WarehouseQueryError({
-				operation,
-				message: toMessage(cause, `Warehouse query failed for ${operation}`),
-				cause,
-			})
-		}),
+		Effect.mapError((cause) => normalizeWarehouseError(operation, cause)),
 	)
 }
 
@@ -192,22 +221,13 @@ export function extractCount(response: QueryEngineExecuteResponse): number {
 export function executeQueryEngine(
 	operation: string,
 	payload: QueryEngineExecuteRequest,
-): Effect.Effect<QueryEngineExecuteResponse, WarehouseQueryError | BackendError> {
+): Effect.Effect<QueryEngineExecuteResponse, WarehouseApiError | BackendError> {
 	return Effect.gen(function* () {
 		yield* Effect.annotateCurrentSpan("query.operation", operation)
 		return yield* executeQueryEngineEffect(payload)
 	}).pipe(
 		Effect.withSpan(operation),
 		Effect.provide(mapleApiClientLayer),
-		Effect.mapError((cause) => {
-			if (isTaggedBackendError(cause)) {
-				return cause
-			}
-			return new WarehouseQueryError({
-				operation,
-				message: toMessage(cause, "Query engine request failed"),
-				cause,
-			})
-		}),
+		Effect.mapError((cause) => normalizeWarehouseError(operation, cause)),
 	)
 }

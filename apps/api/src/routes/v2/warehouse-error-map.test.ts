@@ -6,6 +6,9 @@ import {
 	WarehouseSchemaDriftError,
 	WarehouseUpstreamError,
 	WarehouseValidationError,
+	QueryEngineExecutionError,
+	QueryEngineTimeoutError,
+	QueryEngineValidationError,
 	type WarehouseError,
 } from "@maple/domain/http"
 import {
@@ -14,7 +17,7 @@ import {
 	V2ServiceUnavailableError,
 	V2UpstreamError,
 } from "@maple/domain/http/v2"
-import { warehouseToV2 } from "./warehouse-error-map"
+import { queryEngineToV2, warehouseToV2 } from "./warehouse-error-map"
 
 const map = warehouseToV2("trace_search")
 
@@ -78,5 +81,46 @@ describe("warehouseToV2", () => {
 			} as unknown as WarehouseError
 			expect(() => map(error), tag).not.toThrow()
 		}
+	})
+})
+
+describe("queryEngineToV2", () => {
+	const mapQueryError = queryEngineToV2("trace_query")
+
+	it("keeps query validation as a 400", () => {
+		const mapped = mapQueryError(
+			new QueryEngineValidationError({ message: "invalid aggregation", details: [] }),
+		)
+		expect(mapped).toBeInstanceOf(V2InvalidRequestError)
+		expect(mapped.error.code).toBe("trace_query_invalid")
+	})
+
+	it("maps query execution faults to 502", () => {
+		const mapped = mapQueryError(new QueryEngineExecutionError({ message: "execution failed" }))
+		expect(mapped).toBeInstanceOf(V2UpstreamError)
+		expect(mapped.error.code).toBe("trace_query_failed")
+	})
+
+	it("keeps timeouts within the v2 503 contract", () => {
+		const mapped = mapQueryError(new QueryEngineTimeoutError({ message: "timed out" }))
+		expect(mapped).toBeInstanceOf(V2ServiceUnavailableError)
+		expect(mapped.error.code).toBe("trace_query_unavailable")
+	})
+
+	it("delegates warehouse quota and outage semantics", () => {
+		expect(
+			mapQueryError(
+				new WarehouseQuotaExceededError({
+					pipeName: "traces_timeseries",
+					message: "TIMEOUT_EXCEEDED",
+					setting: "max_execution_time",
+				}),
+			),
+		).toBeInstanceOf(V2RateLimitError)
+		expect(
+			mapQueryError(
+				new WarehouseUpstreamError({ pipeName: "traces_timeseries", message: "unavailable" }),
+			),
+		).toBeInstanceOf(V2ServiceUnavailableError)
 	})
 })

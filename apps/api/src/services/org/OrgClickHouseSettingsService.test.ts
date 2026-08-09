@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "@effect/vitest"
 import {
 	OrgClickHouseSettingsUpstreamRejectedError,
 	OrgClickHouseSettingsUpstreamUnavailableError,
+	OrgClickHouseSettingsEncryptionError,
 	OrgClickHouseSettingsValidationError,
 	OrgId,
 	RoleName,
@@ -501,6 +502,25 @@ describe("resolveRuntimeConfig caching", () => {
 				asRole("org:admin"),
 			]).pipe(Effect.exit)
 			expect(getError(exit)).toBeInstanceOf(OrgClickHouseSettingsValidationError)
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	it.effect("reports corrupt stored collector credentials as an encryption failure", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_corrupt_collector_password"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedPasswordRow(testDb, orgId, "https://clickhouse.example.test"))
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					"UPDATE org_clickhouse_settings SET ch_password_tag = 'corrupt' WHERE org_id = $1",
+					[orgId],
+				),
+			)
+			const exit = yield* OrgClickHouseSettingsService.collectorConfig(asOrgId(orgId), [
+				asRole("org:admin"),
+			]).pipe(Effect.exit)
+			expect(getError(exit)).toBeInstanceOf(OrgClickHouseSettingsEncryptionError)
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 })

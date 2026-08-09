@@ -671,9 +671,11 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 
 			yield* ensureSubscriptions().pipe(
 				Effect.catchCause((cause) =>
-					Effect.logWarning("Failed to seed digest subscriptions").pipe(
-						Effect.annotateLogs({ error: Cause.pretty(cause) }),
-					),
+					Cause.hasInterruptsOnly(cause)
+						? Effect.interrupt
+						: Effect.logWarning("Failed to seed digest subscriptions").pipe(
+								Effect.annotateLogs({ error: Cause.pretty(cause) }),
+							),
 				),
 			)
 
@@ -797,13 +799,17 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 											// not surface as a send failure (lastAttemptedAt still blocks
 											// same-day retries).
 											Effect.catchCause((cause) =>
-												Effect.logWarning("Failed to record digest lastSentAt").pipe(
-													Effect.annotateLogs({
-														subscriptionId: sub.id,
-														orgId: rawOrgId,
-														error: Cause.pretty(cause),
-													}),
-												),
+												Cause.hasInterruptsOnly(cause)
+													? Effect.interrupt
+													: Effect.logWarning(
+															"Failed to record digest lastSentAt",
+														).pipe(
+															Effect.annotateLogs({
+																subscriptionId: sub.id,
+																orgId: rawOrgId,
+																error: Cause.pretty(cause),
+															}),
+														),
 											),
 										),
 									),
@@ -818,29 +824,34 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 						return sendResults
 					}).pipe(
 						Effect.catchCause((cause) =>
-							Effect.gen(function* () {
-								const quarantined = yield* quarantineOnConfigClassCause(
-									edgeCache,
-									rawOrgId,
-									cause,
-									now,
-								)
-								if (quarantined) {
-									yield* Effect.logInfo(
-										"Org warehouse rejected queries with a config-class error; quarantined",
-									).pipe(
-										Effect.annotateLogs({ orgId: rawOrgId, error: Cause.pretty(cause) }),
-									)
-								} else {
-									yield* Effect.logError("Digest failed for org").pipe(
-										Effect.annotateLogs({
-											orgId: rawOrgId,
-											error: Cause.pretty(cause),
-										}),
-									)
-								}
-								return orgSubs.map(() => ({ sent: false }))
-							}),
+							Cause.hasInterruptsOnly(cause)
+								? Effect.interrupt
+								: Effect.gen(function* () {
+										const quarantined = yield* quarantineOnConfigClassCause(
+											edgeCache,
+											rawOrgId,
+											cause,
+											now,
+										)
+										if (quarantined) {
+											yield* Effect.logInfo(
+												"Org warehouse rejected queries with a config-class error; quarantined",
+											).pipe(
+												Effect.annotateLogs({
+													orgId: rawOrgId,
+													error: Cause.pretty(cause),
+												}),
+											)
+										} else {
+											yield* Effect.logError("Digest failed for org").pipe(
+												Effect.annotateLogs({
+													orgId: rawOrgId,
+													error: Cause.pretty(cause),
+												}),
+											)
+										}
+										return orgSubs.map(() => ({ sent: false }))
+									}),
 						),
 					),
 				{ concurrency: 1 },

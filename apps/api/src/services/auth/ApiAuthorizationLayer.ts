@@ -31,11 +31,12 @@ export const ApiAuthorizationLayer = Layer.effect(
 
 					const token = getBearerToken(request.headers)
 					const apiKeyResolved = yield* apiKeys.resolveByBearer(token).pipe(
-						Effect.mapError(
-							(error) =>
-								new UnauthorizedError({
-									message: error.message || "API key validation failed",
+						Effect.catchTag("@maple/http/errors/ApiKeyLookupPersistenceError", () =>
+							Effect.fail(
+								new CurrentTenant.AuthorizationUnavailableError({
+									message: "API key validation is temporarily unavailable",
 								}),
+							),
 						),
 					)
 

@@ -179,6 +179,8 @@ const runInternalRpc = async (
 	}
 	ctx.waitUntil(flushTelemetry(env))
 	if (exit._tag === "Success") return exit.value
+	const defect = exit.cause.reasons.find(Cause.isDieReason)
+	if (defect) throw defect.defect
 	const failure = exit.cause.reasons.find(Cause.isFailReason)
 	if (failure) {
 		return {
@@ -186,8 +188,7 @@ const runInternalRpc = async (
 			error: encodeRpcError(failure.error),
 		}
 	}
-	const defect = exit.cause.reasons.find(Cause.isDieReason)
-	throw defect?.defect ?? new Error("RPC method failed with an unexpected cause")
+	throw new Error("RPC method failed with an unexpected cause")
 }
 
 const isMcpPost = (request: Request): boolean => {
@@ -266,8 +267,8 @@ const handle = async (
 
 	if (kv && reqSid) await preloadSession(kv, reqSid)
 
-	const { handler } = await getHandler()
 	try {
+		const { handler } = await getHandler()
 		const response = await handler(forwardRequest, Context.empty() as never)
 		if (kv && isMcp) {
 			const resSid = response.headers.get("mcp-session-id")
@@ -309,7 +310,7 @@ const handle = async (
 			)
 		}
 		ctx.waitUntil(flushTelemetry(env))
-		return new Response(`worker handler error: ${message}`, { status: 504 })
+		return new Response("The API worker is temporarily unavailable.", { status: 504 })
 	}
 }
 

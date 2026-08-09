@@ -306,6 +306,7 @@ export class OrgClickHouseSettingsApiGroup extends HttpApiGroup.make("orgClickHo
 				OrgClickHouseSettingsForbiddenError,
 				OrgClickHouseSettingsValidationError,
 				OrgClickHouseSettingsPersistenceError,
+				OrgClickHouseSettingsEncryptionError,
 			],
 		}),
 	)

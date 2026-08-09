@@ -21,13 +21,10 @@ import { computeBucketSeconds } from "@/api/warehouse/timeseries-utils"
 
 type ExecuteError = WarehouseApiError | BackendError
 
-// Discriminate the typed error channel on `_tag` (every member is a tagged
-// error — the local `Warehouse*Error` classes and the backend
-// `@maple/http/errors/Warehouse*` union both carry a `message` field) rather
-// than collapsing it via `instanceof Error`, which loses the tag and the
-// statically-known message.
+// Read the message from either a local/tagged error or a public v2 envelope.
 function executeErrorMessage(error: ExecuteError, fallback: string): string {
-	return "message" in error && typeof error.message === "string" ? error.message : fallback
+	if ("message" in error && typeof error.message === "string") return error.message
+	return "error" in error && typeof error.error.message === "string" ? error.error.message : fallback
 }
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))

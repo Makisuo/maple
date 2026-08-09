@@ -76,6 +76,14 @@ const callMcpToolUnscoped = Effect.fn("McpToolDispatcher.call")(function* (name:
 						content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
 					} satisfies McpToolResult),
 				),
+			"@maple/mcp/errors/McpAuthUnavailableError": (error) =>
+				Effect.logError(`Auth dependency error: ${error.message}`).pipe(
+					Effect.annotateLogs({ errorTag: error._tag }),
+					Effect.as({
+						isError: true,
+						content: [{ type: "text", text: "Authentication is temporarily unavailable." }],
+					} satisfies McpToolResult),
+				),
 			"@maple/mcp/errors/McpInvalidTenantError": (error) =>
 				Effect.logError(`Tenant validation error [${error.field}]: ${error.message}`).pipe(
 					Effect.annotateLogs({ errorTag: error._tag, field: error.field }),

@@ -5,7 +5,12 @@ import { AuthService } from "@/services/auth/AuthService"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { Env } from "@/platform/Env"
 import { ActorId, OrgId, RoleName, UserId } from "@maple/domain/http"
-import { McpAuthMissingError, McpAuthInvalidError, McpInvalidTenantError } from "@/mcp/tools/types"
+import {
+	McpAuthInvalidError,
+	McpAuthMissingError,
+	McpAuthUnavailableError,
+	McpInvalidTenantError,
+} from "@/mcp/tools/types"
 
 const INTERNAL_SERVICE_PREFIX = "maple_svc_"
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
@@ -126,12 +131,12 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(func
 
 	const apiKeys = yield* ApiKeysService
 	const apiKeyResolved = yield* apiKeys.resolveByBearer(token).pipe(
-		Effect.mapError(
-			(error) =>
-				new McpAuthInvalidError({
-					message: error.message || "API key validation failed",
-					reason: "api_key_lookup",
+		Effect.catchTag("@maple/http/errors/ApiKeyLookupPersistenceError", () =>
+			Effect.fail(
+				new McpAuthUnavailableError({
+					message: "API key validation is temporarily unavailable",
 				}),
+			),
 		),
 	)
 

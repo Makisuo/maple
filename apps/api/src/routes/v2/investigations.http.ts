@@ -233,6 +233,28 @@ const mapWith404 =
 			}),
 		)
 
+const startErrorHandlers = {
+	"@maple/http/investigations/InvestigationPersistenceError": () =>
+		Effect.fail(dependencyUnavailable("investigation_start_unavailable")),
+	"@maple/http/investigations/InvestigationQuotaError": (error: InvestigationQuotaError) =>
+		Effect.fail(
+			investigationQuotaReached({
+				dimension: error.dimension,
+				limit: error.limit,
+				retryableAt: error.retryableAt,
+			}),
+		),
+	"@maple/http/investigations/InvestigationRejectedError": (error: InvestigationRejectedError) =>
+		Effect.fail(
+			upstreamError(
+				"investigation_start_rejected",
+				`The investigation agent rejected the start request with HTTP ${error.status}.`,
+			),
+		),
+	"@maple/http/investigations/InvestigationUnavailableError": (error: InvestigationUnavailableError) =>
+		Effect.fail(dependencyUnavailable(`investigation_${error.reason}`)),
+} as const
+
 const mapStartErrors = <A, R>(
 	effect: Effect.Effect<
 		A,
@@ -246,21 +268,9 @@ const mapStartErrors = <A, R>(
 ) =>
 	effect.pipe(
 		Effect.catchTags({
+			...startErrorHandlers,
 			"@maple/http/investigations/InvestigationNotFoundError": () =>
 				Effect.fail(resourceNotFound("investigation", "No such investigation.")),
-			"@maple/http/investigations/InvestigationPersistenceError": () =>
-				Effect.fail(dependencyUnavailable("investigation_start_unavailable")),
-			"@maple/http/investigations/InvestigationQuotaError": (error) =>
-				Effect.fail(investigationQuotaReached(error.retryableAt)),
-			"@maple/http/investigations/InvestigationRejectedError": (error) =>
-				Effect.fail(
-					upstreamError(
-						"investigation_start_rejected",
-						`The investigation agent rejected the start request with HTTP ${error.status}.`,
-					),
-				),
-			"@maple/http/investigations/InvestigationUnavailableError": (error) =>
-				Effect.fail(dependencyUnavailable(`investigation_${error.reason}`)),
 		}),
 	)
 
@@ -273,24 +283,7 @@ const mapCreateStartErrors = <A, R>(
 		| InvestigationUnavailableError,
 		R
 	>,
-) =>
-	effect.pipe(
-		Effect.catchTags({
-			"@maple/http/investigations/InvestigationPersistenceError": () =>
-				Effect.fail(dependencyUnavailable("investigation_start_unavailable")),
-			"@maple/http/investigations/InvestigationQuotaError": (error) =>
-				Effect.fail(investigationQuotaReached(error.retryableAt)),
-			"@maple/http/investigations/InvestigationRejectedError": (error) =>
-				Effect.fail(
-					upstreamError(
-						"investigation_start_rejected",
-						`The investigation agent rejected the start request with HTTP ${error.status}.`,
-					),
-				),
-			"@maple/http/investigations/InvestigationUnavailableError": (error) =>
-				Effect.fail(dependencyUnavailable(`investigation_${error.reason}`)),
-		}),
-	)
+) => effect.pipe(Effect.catchTags(startErrorHandlers))
 
 const mapSubjectDecodeError = (error: InvestigationSubjectDecodeError) =>
 	Effect.logError(error.message).pipe(

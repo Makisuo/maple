@@ -14,6 +14,7 @@ import {
 	type AnomalyLinkedIssueNotFoundError,
 	AnomalyPersistenceError,
 	CurrentTenant,
+	type ErrorPersistenceError,
 } from "@maple/domain/http"
 import {
 	MapleApiV2,
@@ -85,11 +86,14 @@ const toV2Settings = (s: AnomalyDetectorSettingsDocument): V2AnomalySettings => 
 /** Service tagged errors → v2 envelope errors (no 404). */
 const mapCommonError =
 	(operation: string) =>
-	<A, R>(effect: Effect.Effect<A, AnomalyPersistenceError, R>) =>
+	<A, R>(effect: Effect.Effect<A, AnomalyPersistenceError | ErrorPersistenceError, R>) =>
 		effect.pipe(
-			Effect.catchTag("@maple/http/anomalies/AnomalyPersistenceError", () =>
-				Effect.fail(dependencyUnavailable(`anomaly_${operation}_unavailable`)),
-			),
+			Effect.catchTags({
+				"@maple/http/anomalies/AnomalyPersistenceError": () =>
+					Effect.fail(dependencyUnavailable(`anomaly_${operation}_unavailable`)),
+				"@maple/http/errors/ErrorPersistenceError": () =>
+					Effect.fail(dependencyUnavailable(`anomaly_${operation}_unavailable`)),
+			}),
 		)
 
 /** Service tagged errors → v2 envelope errors (incident/linked-issue 404s). */
@@ -218,10 +222,9 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 			.handle("setIncidentIssue", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId).pipe(
-						Effect.mapError((error) => new AnomalyPersistenceError({ message: error.message })),
-						mapCommonError("link_issue"),
-					)
+					const actor = yield* errors
+						.ensureUserActor(tenant.orgId, tenant.userId)
+						.pipe(mapCommonError("link_issue"))
 					const { incident, previousIssueId } = yield* anomalies
 						.setIncidentIssue(tenant.orgId, params.id, payload.issue_id)
 						.pipe(mapWith404("link_issue"))

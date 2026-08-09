@@ -12,13 +12,14 @@ import {
 import { InvestigationId, IsoDateTimeString } from "@maple/domain/primitives"
 import { aiTriageSettings, investigations } from "@maple/db"
 import { and, eq, lt } from "drizzle-orm"
-import { Cause, Clock, Data, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
+import { Cause, Clock, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
 import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { Database } from "@/platform/DatabaseLive"
 import { isChatSessionNamespace } from "@/chat/session"
 import { widthFor } from "@/workflows/plan-normalize"
 import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
 import { evaluateInvestigationQuota, selectInvestigationUsage } from "@/services/errors/investigation-quota"
+import { FanoutStartError } from "@/services/errors/investigation-fanout-error"
 import {
 	isInvestigationStale,
 	staleBudgetMs,
@@ -28,11 +29,6 @@ import { UserId } from "@maple/domain/primitives"
 
 /** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
 const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
-
-/** A `beginTurn` call that the Durable Object could not complete (overload, eviction, limits). */
-class InvestigationStartError extends Data.TaggedError("@maple/api/InvestigationStartError")<{
-	readonly message: string
-}> {}
 
 /** Cloudflare Workflow binding that runs a fan-out. Present only in a Worker isolate. */
 export const INVESTIGATION_FANOUT_BINDING = "INVESTIGATION_FANOUT_WORKFLOW"
@@ -193,8 +189,6 @@ export interface MaybeEnqueueTriageInput {
 	/** Manual starts ignore the automation-enabled flag, but never the quota. */
 	readonly force?: boolean
 }
-
-class FanoutStartError extends Data.TaggedError("FanoutStartError")<{ readonly cause: string }> {}
 
 interface FanoutWorkflowBinding {
 	readonly create: (options: { id: string; params: unknown }) => Promise<{ id: string }>

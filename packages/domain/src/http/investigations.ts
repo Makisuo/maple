@@ -483,6 +483,12 @@ export class InvestigationQuotaError extends Schema.TaggedError<InvestigationQuo
 	"@maple/http/investigations/InvestigationQuotaError",
 	{
 		message: Schema.String,
+		/**
+		 * Which of the two daily ceilings was hit. Carried because a run and a model
+		 * pass are different units with different settings, and an operator told only
+		 * "quota reached" cannot tell which number to raise.
+		 */
+		dimension: Schema.Literals(["runs", "passes"]),
 		limit: Schema.Number,
 		retryableAt: IsoDateTimeString,
 	},

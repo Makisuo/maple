@@ -11,7 +11,11 @@ export class EdgeCacheIOError extends Schema.TaggedError<EdgeCacheIOError>()(
 		key: Schema.String,
 		cause: Schema.String,
 	},
-) {}
+) {
+	override get message(): string {
+		return `Edge cache ${this.op} failed for ${this.bucket}/${this.key}: ${this.cause}`
+	}
+}
 
 export interface EdgeCacheGetOrComputeOptions<A = unknown, I = unknown> {
 	readonly bucket: string

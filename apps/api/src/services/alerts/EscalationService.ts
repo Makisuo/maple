@@ -276,22 +276,24 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 			)
 
 			const policyCache = new Map<OrgId, IssueEscalationPolicyRow | null>()
-			// catchCause swallows defects too: a dying processOne is logged and
+			// catchCause isolates defects: a dying processOne is logged and
 			// counted as "failed", and the row keeps whatever state it reached —
 			// still "queued" (attempts bumped) before the pre-dispatch sent-flip,
 			// so the next tick retries it; "sent" after the flip, so it is never
-			// re-delivered (at-most-once).
+			// re-delivered (at-most-once). Scheduler interruption is re-raised.
 			const outcomes = yield* Effect.forEach(rows, (row) =>
 				processOne(row, policyCache).pipe(
 					Effect.catchCause((cause) =>
-						Effect.logError("Escalation processing failed").pipe(
-							Effect.annotateLogs({
-								escalationId: row.id,
-								orgId: row.orgId,
-								cause: Cause.pretty(cause),
-							}),
-							Effect.as("failed" as const),
-						),
+						Cause.hasInterruptsOnly(cause)
+							? Effect.interrupt
+							: Effect.logError("Escalation processing failed").pipe(
+									Effect.annotateLogs({
+										escalationId: row.id,
+										orgId: row.orgId,
+										cause: Cause.pretty(cause),
+									}),
+									Effect.as("failed" as const),
+								),
 					),
 				),
 			)

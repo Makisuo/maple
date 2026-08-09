@@ -34,6 +34,17 @@ const mcpChallenge = (invalid: boolean) =>
 		)
 	})
 
+const mcpUnavailable = () =>
+	Effect.succeed(
+		HttpServerResponse.jsonUnsafe(
+			{
+				error: "service_unavailable",
+				message: "Authentication is temporarily unavailable; retry with backoff.",
+			},
+			{ status: 503, headers: { "cache-control": "no-store" } },
+		),
+	)
+
 const McpAuthorizationMiddleware = HttpRouter.middleware<{ provides: CurrentMcpTenant }>()(
 	Effect.gen(function* () {
 		const apiKeys = yield* ApiKeysService
@@ -52,6 +63,7 @@ const McpAuthorizationMiddleware = HttpRouter.middleware<{ provides: CurrentMcpT
 				Effect.catchTags({
 					"@maple/mcp/errors/McpAuthMissingError": () => mcpChallenge(false),
 					"@maple/mcp/errors/McpAuthInvalidError": () => mcpChallenge(true),
+					"@maple/mcp/errors/McpAuthUnavailableError": mcpUnavailable,
 					"@maple/mcp/errors/McpInvalidTenantError": () => mcpChallenge(true),
 				}),
 			)

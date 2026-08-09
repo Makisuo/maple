@@ -27,7 +27,7 @@ import { encodeKey, encodeOrgScopedKey, orgScopedKeyPayload } from "@/lib/cache-
 import { getActiveOrgId } from "@/lib/services/common/auth-headers"
 import { formatBackendError } from "@/lib/error-messages"
 import { Cause, Option } from "effect"
-import { WarehouseDecodeError, type BackendError } from "@/api/warehouse/effect-utils"
+import { WarehouseDecodeError, type BackendError, type WarehouseApiError } from "@/api/warehouse/effect-utils"
 import { QueryEngineValidationError } from "@maple/domain/http"
 import { MAX_LIST_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
 import { formatForTinybird } from "@/lib/time-utils"
@@ -270,13 +270,6 @@ class WidgetDataAtomError extends Schema.TaggedError<WidgetDataAtomError>()(
 	},
 ) {}
 
-const isTaggedBackendError = (error: unknown): boolean =>
-	typeof error === "object" &&
-	error !== null &&
-	"_tag" in error &&
-	typeof (error as { _tag: unknown })._tag === "string" &&
-	(error as { _tag: string })._tag.startsWith("@maple/http/errors/")
-
 // Errors that mean "the query ran fine, the time range just had no rows."
 // These should surface immediately as the "No data" UI in WidgetFrame —
 // retrying does not help and creates a runaway request loop.
@@ -295,14 +288,11 @@ const isExpectedEmptyDataError = (error: unknown): boolean => {
 }
 
 // The error channel the widget-fetch atom exposes: every failure is either a
-// `WidgetDataAtomError` (parse / unknown-endpoint / unstructured failures) or a
-// tagged `@maple/http/errors/*` backend error passed through unchanged so
-// `formatBackendError` can match its specific tag.
-type WidgetFetchError = WidgetDataAtomError | BackendError
+// `WidgetDataAtomError` (parse / unknown endpoint) or the server function's
+// existing local/v1/v2 error. Preserve those states for `formatBackendError`.
+type WidgetFetchError = WidgetDataAtomError | WarehouseApiError | BackendError
 
-const toWidgetDataAtomError = (error: unknown): WidgetFetchError => {
-	if (error instanceof WidgetDataAtomError) return error
-	if (isTaggedBackendError(error)) return error as BackendError
+const toWidgetDataAtomError = (error: unknown): WidgetDataAtomError => {
 	if (error instanceof Error) {
 		return new WidgetDataAtomError({
 			message: error.message,
@@ -338,7 +328,6 @@ const fetchWidgetData = Effect.fnUntraced(
 		const response = yield* serverFn({ data: parsed.params })
 		return (response as { data?: unknown })?.data ?? response
 	},
-	Effect.mapError(toWidgetDataAtomError),
 	Effect.retry({
 		times: 2,
 		schedule: Schedule.exponential("500 millis"),
