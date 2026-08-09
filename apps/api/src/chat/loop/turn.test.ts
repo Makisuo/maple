@@ -797,6 +797,86 @@ describe("runChatTurn closing submit", () => {
 	}, 30_000)
 
 	/**
+	 * The `validation_inconclusive` bug. The validator has no tools but its submit
+	 * one, so it answers on step 0 — and when it answered in *prose* it never made a
+	 * tool call, so it never reached the branch that offers the forced submit. The
+	 * turn ended with text nobody reads and an empty verdict.
+	 */
+	it("closes with the forced submit when the model answers in prose instead of calling it", async () => {
+		const submitted: Array<unknown> = []
+		const result = await Effect.runPromise(
+			collect(
+				[
+					[textDelta("The strongest candidate is the pool."), finish()],
+					[toolCall("s1", SUBMIT, { claim: "pool exhaustion" }), finish()],
+				],
+				{ extraTools: submitTool(submitted), closingSubmit: { toolName: SUBMIT } },
+			),
+		)
+
+		assert.deepEqual(submitted, [{ claim: "pool exhaustion" }])
+		const closing = result.requests[result.requests.length - 1]
+		assert.equal(closing?.toolChoice?.name, SUBMIT)
+		assert.lengthOf(terminal(result.events), 1)
+	}, 30_000)
+
+	/** Same gap, silent shape: an empty completion is no more an answer than prose is. */
+	it("closes with the forced submit after an empty completion exhausts its recovery", async () => {
+		const submitted: Array<unknown> = []
+		await Effect.runPromise(
+			collect([[finish()], [finish()], [toolCall("s1", SUBMIT, { claim: "recovered" }), finish()]], {
+				extraTools: submitTool(submitted),
+				closingSubmit: { toolName: SUBMIT },
+			}),
+		)
+
+		assert.deepEqual(submitted, [{ claim: "recovered" }])
+	}, 30_000)
+
+	/** And it cannot loop: a closing step that answers in prose too just ends. */
+	it("does not offer the submit tool twice when the closing step ignores it", async () => {
+		const submitted: Array<unknown> = []
+		const result = await Effect.runPromise(
+			collect(
+				[
+					[textDelta("prose"), finish()],
+					[textDelta("prose again"), finish()],
+				],
+				{
+					extraTools: submitTool(submitted),
+					closingSubmit: { toolName: SUBMIT },
+				},
+			),
+		)
+
+		assert.isEmpty(submitted)
+		assert.equal(result.calls, 2)
+		assert.lengthOf(terminal(result.events), 1)
+	}, 30_000)
+
+	/**
+	 * The submit call is the answer, so the turn is over. Recursing would spend
+	 * another model call — and under the validator's one-step budget that call is the
+	 * forced closing step, which asks for a second verdict and overwrites the first.
+	 */
+	it("ends the turn once the submit tool has been called, without another step", async () => {
+		const submitted: Array<unknown> = []
+		const result = await Effect.runPromise(
+			collect(
+				[
+					[toolCall("s1", SUBMIT, { claim: "first" }), finish()],
+					[toolCall("s2", SUBMIT, { claim: "second" }), finish()],
+				],
+				{ extraTools: submitTool(submitted), closingSubmit: { toolName: SUBMIT } },
+			),
+		)
+
+		assert.deepEqual(submitted, [{ claim: "first" }])
+		assert.equal(result.calls, 1)
+		assert.lengthOf(terminal(result.events), 1)
+	}, 30_000)
+
+	/**
 	 * A hard abort is still a hard abort: the session already wrote a terminal
 	 * event, so this turn must write nothing more — no closing step, no submit.
 	 */

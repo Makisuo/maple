@@ -534,7 +534,38 @@ const runStep = (
 								}),
 							)
 						}
+					}
 
+					// A headless pass answers *through* a tool, so a step with no tool call is not an
+					// answer — it is prose (or silence) where the structured verdict should have been.
+					// Attended chat ends here and shows the text; a submit pass has nothing to show, and
+					// this is how a validator that never called `submit_verdict` became
+					// `validation_inconclusive`. The closing step exists for exactly this, and until now
+					// only the *ran out of steps* branch could reach it: a model that answered in prose on
+					// its very first step never made a tool call, so it never got asked again.
+					//
+					// `state.closing === undefined` bounds it to one attempt, and the `"submit"` branch
+					// above ends the turn unconditionally whatever comes back — so this cannot loop.
+					const submitName = input.closingSubmit?.toolName
+					if (state.closing === undefined && submitName !== undefined && tools[submitName]) {
+						const replay =
+							emptyOutput && response.reasoning.trim() === "" ? [] : [response.message]
+						const closing = closingStep(
+							input,
+							tools,
+							request,
+							[...request.messages, ...replay],
+							MAX_STEPS_NOTICE,
+						)
+						return runStep(input, tools, closing.request, {
+							...state,
+							step: state.step + 1,
+							attempt: 0,
+							closing: closing.closing,
+						})
+					}
+
+					if (emptyOutput) {
 						return finishTurn(input, state, "error", {
 							error: CHAT_EMPTY_RESPONSE,
 							finishReason,
@@ -675,6 +706,20 @@ const runStep = (
 						// Aborted while the tools were in flight: record what they returned so the
 						// transcript is not left with dangling calls, then stop.
 						if (!isCurrent(input)) return Stream.fromIterable(results)
+
+						// The submit call *is* the answer, so a pass that made it has nothing left to do.
+						// Recursing would spend another model call on a turn that is already over — and
+						// under a one-step budget (the validator's) that next step is the *forced* closing
+						// one, which asks for a second verdict and overwrites the first with it.
+						if (
+							input.closingSubmit !== undefined &&
+							calls.some((call) => call.name === input.closingSubmit?.toolName)
+						) {
+							return Stream.concat(
+								Stream.fromIterable(results),
+								finishTurn(input, state, "stop", { finishReason }),
+							)
+						}
 
 						const transcript = [
 							...request.messages,
