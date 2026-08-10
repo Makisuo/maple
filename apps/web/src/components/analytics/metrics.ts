@@ -63,6 +63,16 @@ export interface AnalyticsMetricDescriptor {
 	 * views tile is the misreading this flag exists to prevent.
 	 */
 	readonly visitorLevel?: boolean
+	/**
+	 * A metric worth drawing on the *same axes* as this one, plotted alongside it
+	 * whenever this one is selected.
+	 *
+	 * Only ever a same-unit pairing — two counts share an axis, a count and a rate
+	 * do not — which is why this is a per-metric opt-in rather than something the
+	 * chart infers. Reciprocal by convention: if A names B, B names A, so the pair
+	 * looks the same whichever half you click.
+	 */
+	readonly companion?: AnalyticsMetricKey
 	/** The headline. `null` means "not measurable here", never zero. */
 	readonly value: (source: AnalyticsMetricSource) => number | null
 	/** The sparkline and, when selected, the chart. */
@@ -125,6 +135,11 @@ export const ANALYTICS_METRICS: ReadonlyArray<AnalyticsMetricDescriptor> = [
 		label: "Unique visitors",
 		format: formatNumber,
 		visitorLevel: true,
+		// The pairing the page is really read for: how many people, against how much
+		// they read. They come from different tables with different coverage, so the
+		// chart draws them unstacked — visitors are a subset of page views, and
+		// their sum means nothing.
+		companion: "pageViews",
 		value: (source) => source.summary.visitors,
 		series: (source) => fromTimeseries(source, (point) => point.visitors),
 		// Partial coverage is the caveat that belongs on the number itself, not in
@@ -149,6 +164,7 @@ export const ANALYTICS_METRICS: ReadonlyArray<AnalyticsMetricDescriptor> = [
 		key: "pageViews",
 		label: "Page views",
 		format: formatNumber,
+		companion: "visitors",
 		// Summed from the buckets rather than taken from the summary: page views
 		// come from `session_events`, which the summary query deliberately does not
 		// read (see its doc comment on why `sum(PageViews)` is the wrong source).

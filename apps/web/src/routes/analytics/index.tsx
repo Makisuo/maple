@@ -30,6 +30,7 @@ import {
 	ANALYTICS_METRICS,
 	findMetric,
 	isMetricAvailable,
+	type AnalyticsMetricDescriptor,
 	type AnalyticsMetricKey,
 	type AnalyticsMetricSource,
 } from "@/components/analytics/metrics"
@@ -218,6 +219,25 @@ function WebAnalyticsPage() {
 }
 
 /**
+ * The metric drawn alongside the selected one, when it declares a companion and
+ * that companion actually reports something.
+ *
+ * The availability check is the load-bearing half. Visitors and page views pair
+ * with each other, but visitors come from the migration-0011 analytics block —
+ * on an org whose SDK build predates it, selecting Page views would otherwise
+ * draw a second series flat along the axis and label it "Unique visitors", which
+ * reads as "nobody visited" rather than "not reported".
+ */
+function pairedCompanion(
+	metric: AnalyticsMetricDescriptor,
+	source: AnalyticsMetricSource,
+): AnalyticsMetricDescriptor | undefined {
+	if (!metric.companion) return undefined
+	const companion = findMetric(metric.companion)
+	return isMetricAvailable(companion, source) ? companion : undefined
+}
+
+/**
  * The window immediately before this one, of the same length — the baseline the
  * KPI deltas are measured against. "Last 7 days" compares against the 7 days
  * before it, which is what makes a delta answer "is this better than usual".
@@ -335,7 +355,12 @@ function AnalyticsContent({
 								selected={metric.key}
 								onSelect={setPicked}
 							/>
-							<AnalyticsTrafficChart metric={metric} source={source} syncId="web-analytics" />
+							<AnalyticsTrafficChart
+								metric={metric}
+								companion={pairedCompanion(metric, source)}
+								source={source}
+								syncId="web-analytics"
+							/>
 						</>
 					)
 				})
