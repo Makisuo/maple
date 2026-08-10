@@ -3,15 +3,29 @@ import type { Effect } from "effect"
 import { type DatabaseClient, type DatabaseError, executeWithSpan } from "./DatabaseLive"
 
 /**
- * Seconds a request-path dial may spend before postgres.js destroys the socket.
+ * Per-attempt dial budgets, in seconds, for the request path.
  *
- * Sized off production: `Database.execute` p50 is ~51ms and the alerting worker
- * — same code, same Hyperdrive config, 47x the volume — has a p95 of 1.5s, so
- * 2s cannot fire on a healthy dial. It exists because the driver default is
- * 30s, and a Worker holding a connection slot for 30s hurts the whole isolate
- * far more than a fast failure hurts the one request.
+ * Production measurement behind these numbers: `db.connect_ms` is bimodal —
+ * p50 12ms, but >5% never complete — while `db.query_ms` p95 is 83ms. So the
+ * query is never the problem and a dial either lands immediately or stalls;
+ * there is no middle. `db.connect.in_flight` peaks at 3, so it is not our own
+ * concurrency: Hyperdrive is failing to hand over a pooled connection.
+ *
+ * A short first attempt catches the common case without waiting on a stall.
+ * The retry is what makes that safe — a dial can fail for no reason attributable
+ * to this request, and postgres.js will not re-try it for us: `connectTimedOut`
+ * destroys the socket and `errored()` rejects the queued query outright
+ * (postgres 3.4.9, src/connection.js:261-264, :390-394).
+ *
+ * The second attempt gets a longer budget because a stall means Hyperdrive is
+ * likely establishing a fresh origin connection to us-east-1 rather than
+ * serving a warm one, and that legitimately takes seconds. Worst case is
+ * bounded at ~10s instead of the driver's 30s default.
+ *
+ * Retrying is safe **only because it is dial-only** — see the loop below, which
+ * never re-runs `fn` once a statement could have been issued.
  */
-const REQUEST_CONNECT_TIMEOUT_SECONDS = 2
+const CONNECT_ATTEMPT_TIMEOUT_SECONDS = [2, 8] as const
 
 /**
  * Workflow entrypoints run for minutes and dial once per run, so a
@@ -51,28 +65,42 @@ export const executeOnFreshPgClient = <T>(
 	extraAttributes?: Record<string, unknown>,
 ) =>
 	executeWithSpan(async (hooks) => {
-		const { db, awaitConnected, end } = createMaplePgClient(connectionString, {
-			maxConnections: 1,
-			connectTimeoutSeconds: REQUEST_CONNECT_TIMEOUT_SECONDS,
-			onQuery: hooks.collect,
-		})
-		dialsInFlight += 1
-		hooks.record({ "db.connect.in_flight": dialsInFlight })
-		try {
-			// Establish the connection before running the query, so the span can
-			// attribute handshake time separately — without this the dial and the
-			// query are one opaque number and a stalled handshake is
-			// indistinguishable from slow SQL, which is the ambiguity that made the
-			// p95 investigation guesswork. Costs one extra round-trip per execute
-			// (see `awaitConnected`); revisit once the tail is understood.
-			await awaitConnected()
-			hooks.markConnected()
-			return await fn(db)
-		} finally {
-			dialsInFlight -= 1
-			// Never let a socket-teardown error shadow the real DB error from fn(db).
-			await end().catch(() => undefined)
+		let lastConnectError: unknown
+		for (let attempt = 0; attempt < CONNECT_ATTEMPT_TIMEOUT_SECONDS.length; attempt++) {
+			const { db, awaitConnected, end } = createMaplePgClient(connectionString, {
+				maxConnections: 1,
+				connectTimeoutSeconds: CONNECT_ATTEMPT_TIMEOUT_SECONDS[attempt],
+				onQuery: hooks.collect,
+			})
+			dialsInFlight += 1
+			try {
+				hooks.record({ "db.connect.in_flight": dialsInFlight, "db.retry.attempts": attempt })
+				// Establish the connection before running the query, so the span can
+				// attribute handshake time separately — without this the dial and the
+				// query are one opaque number and a stalled handshake is
+				// indistinguishable from slow SQL, which is the ambiguity that made
+				// the p95 investigation guesswork. Costs one extra round-trip per
+				// execute (see `awaitConnected`); revisit once the tail is understood.
+				try {
+					await awaitConnected()
+				} catch (error) {
+					// Dial-only retry. Nothing has been issued on this connection yet,
+					// so re-dialing cannot re-run a statement — which is the entire
+					// reason this is safe. A query-phase failure must never land here:
+					// a statement that timed out may already have committed, and
+					// retrying it would make writes at-least-once.
+					lastConnectError = error
+					continue
+				}
+				hooks.markConnected()
+				return await fn(db)
+			} finally {
+				dialsInFlight -= 1
+				// Never let a socket-teardown error shadow the real DB error from fn(db).
+				await end().catch(() => undefined)
+			}
 		}
+		throw lastConnectError
 	}, extraAttributes)
 
 /**
