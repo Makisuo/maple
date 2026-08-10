@@ -37,6 +37,7 @@ import { Route as WidgetLabRouteImport } from './routes/widget-lab'
 import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
 import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
+import { Route as AnalyticsIndexRouteImport } from './routes/analytics/index'
 import { Route as AnomaliesIndexRouteImport } from './routes/anomalies/index'
 import { Route as AnomaliesIncidentIdRouteImport } from './routes/anomalies/$incidentId'
 import { Route as DashboardsIndexRouteImport } from './routes/dashboards/index'
@@ -212,6 +213,11 @@ const AlertsRuleIdRoute = AlertsRuleIdRouteImport.update({
 const AlertsCreateRoute = AlertsCreateRouteImport.update({
   id: '/alerts/create',
   path: '/alerts/create',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AnalyticsIndexRoute = AnalyticsIndexRouteImport.update({
+  id: '/analytics/',
+  path: '/analytics/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AnomaliesIndexRoute = AnomaliesIndexRouteImport.update({
@@ -445,6 +451,7 @@ export interface FileRoutesByFullPath {
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts/': typeof AlertsIndexRoute
+  '/analytics/': typeof AnalyticsIndexRoute
   '/anomalies/': typeof AnomaliesIndexRoute
   '/dashboards/': typeof DashboardsIndexRoute
   '/errors/': typeof ErrorsIndexRoute
@@ -511,6 +518,7 @@ export interface FileRoutesByTo {
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts': typeof AlertsIndexRoute
+  '/analytics': typeof AnalyticsIndexRoute
   '/anomalies': typeof AnomaliesIndexRoute
   '/dashboards': typeof DashboardsIndexRoute
   '/errors': typeof ErrorsIndexRoute
@@ -578,6 +586,7 @@ export interface FileRoutesById {
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts/': typeof AlertsIndexRoute
+  '/analytics/': typeof AnalyticsIndexRoute
   '/anomalies/': typeof AnomaliesIndexRoute
   '/dashboards/': typeof DashboardsIndexRoute
   '/errors/': typeof ErrorsIndexRoute
@@ -646,6 +655,7 @@ export interface FileRouteTypes {
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts/'
+    | '/analytics/'
     | '/anomalies/'
     | '/dashboards/'
     | '/errors/'
@@ -712,6 +722,7 @@ export interface FileRouteTypes {
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts'
+    | '/analytics'
     | '/anomalies'
     | '/dashboards'
     | '/errors'
@@ -778,6 +789,7 @@ export interface FileRouteTypes {
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts/'
+    | '/analytics/'
     | '/anomalies/'
     | '/dashboards/'
     | '/errors/'
@@ -845,6 +857,7 @@ export interface RootRouteChildren {
   ServicesServiceNameRoute: typeof ServicesServiceNameRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
   AlertsIndexRoute: typeof AlertsIndexRoute
+  AnalyticsIndexRoute: typeof AnalyticsIndexRoute
   AnomaliesIndexRoute: typeof AnomaliesIndexRoute
   DashboardsIndexRoute: typeof DashboardsIndexRoute
   ErrorsIndexRoute: typeof ErrorsIndexRoute
@@ -1067,6 +1080,13 @@ declare module '@tanstack/react-router' {
       path: '/alerts/create'
       fullPath: '/alerts/create'
       preLoaderRoute: typeof AlertsCreateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/analytics/': {
+      id: '/analytics/'
+      path: '/analytics'
+      fullPath: '/analytics/'
+      preLoaderRoute: typeof AnalyticsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/anomalies/': {
@@ -1365,6 +1385,7 @@ const rootRouteChildren: RootRouteChildren = {
   ServicesServiceNameRoute: ServicesServiceNameRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
   AlertsIndexRoute: AlertsIndexRoute,
+  AnalyticsIndexRoute: AnalyticsIndexRoute,
   AnomaliesIndexRoute: AnomaliesIndexRoute,
   DashboardsIndexRoute: DashboardsIndexRoute,
   ErrorsIndexRoute: ErrorsIndexRoute,

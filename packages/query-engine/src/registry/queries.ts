@@ -32,6 +32,11 @@ import type {
 	ServiceHealthSnapshotRequest,
 	ServiceOverviewRequest,
 	WorkloadDetailSummaryRequest,
+	WebAnalyticsSummaryRequest,
+	WebAnalyticsTimeseriesRequest,
+	WebAnalyticsPageviewsRequest,
+	WebAnalyticsPagesRequest,
+	WebAnalyticsBreakdownsRequest,
 } from "@maple/domain/http"
 import { Match } from "effect"
 import { attributeIndexMode, logBodySearchMode } from "../capabilities"
@@ -659,6 +664,112 @@ export const serviceDbTopQueries = defineQuery({
 	cache: 15,
 	compile: (payload: ServiceDbQuerySummaryRequest, orgId: string) =>
 		CH.serviceDbTopQueriesSQL(dbQueryParams(payload, orgId)),
+})
+
+// --- Web analytics --------------------------------------------------------
+//
+// Five queries behind one page, so they share a filter surface. `webAnalytics*`
+// payloads carry the filters flat; `webAnalyticsFilters` picks them off so each
+// entry below stays a one-line pass-through and the five can't drift apart.
+//
+// All 15s: this is a live dashboard people watch during a launch, and the
+// breakdown fan-out is over a 30-day-TTL table small enough that 60s buys
+// nothing but a page that looks stuck after a filter click.
+
+const webAnalyticsFilters = (payload: {
+	readonly host?: string
+	readonly pagePath?: string
+	readonly referrerHost?: string
+	readonly country?: string
+	readonly deviceType?: string
+	readonly browserName?: string
+	readonly osName?: string
+	readonly language?: string
+	readonly utmSource?: string
+	readonly utmMedium?: string
+	readonly utmCampaign?: string
+	readonly visitorType?: "new" | "returning"
+}): CH.WebAnalyticsFilters => ({
+	host: payload.host,
+	pagePath: payload.pagePath,
+	referrerHost: payload.referrerHost,
+	country: payload.country,
+	deviceType: payload.deviceType,
+	browserName: payload.browserName,
+	osName: payload.osName,
+	language: payload.language,
+	utmSource: payload.utmSource,
+	utmMedium: payload.utmMedium,
+	utmCampaign: payload.utmCampaign,
+	visitorType: payload.visitorType,
+})
+
+export const webAnalyticsSummary = defineQuery({
+	id: "webAnalyticsSummary",
+	profile: "aggregation",
+	cache: 15,
+	compile: (payload: WebAnalyticsSummaryRequest, orgId: string) =>
+		CH.compile(CH.webAnalyticsSummaryQuery(webAnalyticsFilters(payload)), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+export const webAnalyticsTimeseries = defineQuery({
+	id: "webAnalyticsTimeseries",
+	profile: "aggregation",
+	cache: 15,
+	compile: (payload: WebAnalyticsTimeseriesRequest, orgId: string) =>
+		CH.compile(
+			CH.webAnalyticsTimeseriesQuery({
+				...webAnalyticsFilters(payload),
+				bucketSeconds: payload.bucketSeconds,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const webAnalyticsPageviews = defineQuery({
+	id: "webAnalyticsPageviews",
+	profile: "aggregation",
+	cache: 15,
+	compile: (payload: WebAnalyticsPageviewsRequest, orgId: string) =>
+		CH.compile(
+			CH.webAnalyticsPageviewsTimeseriesQuery({
+				...webAnalyticsFilters(payload),
+				bucketSeconds: payload.bucketSeconds,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const webAnalyticsPages = defineQuery({
+	id: "webAnalyticsPages",
+	profile: "aggregation",
+	cache: 15,
+	compile: (payload: WebAnalyticsPagesRequest, orgId: string) =>
+		CH.compile(
+			CH.webAnalyticsPagesQuery({ ...webAnalyticsFilters(payload), limit: payload.limit }),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const webAnalyticsBreakdowns = defineQuery({
+	id: "webAnalyticsBreakdowns",
+	profile: "aggregation",
+	// Same read-thread cap as the other UNION fan-outs: 12 branches over one
+	// table, and unbounded threads buy latency at the cost of memory spikes.
+	settings: { maxThreads: 4 },
+	cache: 15,
+	compile: (payload: WebAnalyticsBreakdownsRequest, orgId: string) =>
+		CH.compileUnion(
+			CH.webAnalyticsBreakdownsQuery({
+				...webAnalyticsFilters(payload),
+				limitPerDimension: payload.limitPerDimension,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
 })
 
 // --- Facet queries (UNION of per-dimension branches) ----------------------
