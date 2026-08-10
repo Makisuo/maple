@@ -281,6 +281,16 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 				INGEST_KEY_STORE_BACKEND: "postgres",
 
+				// Trust `Cf-IPCountry` on inbound requests, which is what gates
+				// `derive_country` in `apps/ingest/src/main.rs` and therefore whether
+				// `session_replays.Country` is ever non-empty. Safe here specifically
+				// because the ALB security group only admits Cloudflare's proxy ranges
+				// (see `albSecurityGroup` above), so the header cannot be
+				// client-supplied. Left unset until now, which is why every session
+				// recorded before this deploy has `Country = ''` — the gateway never
+				// stores a client IP, so there is nothing to backfill from.
+				MAPLE_INGEST_TRUST_PROXY_GEO: "true",
+
 				INGEST_QUEUE_MAX_BYTES: String(WAL_MAX_BYTES),
 				INGEST_WAL_SHARDS: String(WAL_SHARDS),
 

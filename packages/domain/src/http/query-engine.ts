@@ -1108,6 +1108,147 @@ export class PodsSummaryResponse extends Schema.Class<PodsSummaryResponse>("Pods
 	stalePods: Schema.Number,
 }) {}
 
+// ---------------------------------------------------------------------------
+// Web Analytics
+//
+// Product analytics over the browser SDK's session data. Every request shares
+// the same filter surface so a facet click narrows all five panels identically;
+// `WebAnalyticsFilterFields` is spread rather than nested so the wire shape stays
+// flat and the web side can build one filter object per page.
+// ---------------------------------------------------------------------------
+
+const WebAnalyticsFilterFields = {
+	host: Schema.optional(Schema.String),
+	pagePath: Schema.optional(Schema.String),
+	referrerHost: Schema.optional(Schema.String),
+	country: Schema.optional(Schema.String),
+	deviceType: Schema.optional(Schema.String),
+	browserName: Schema.optional(Schema.String),
+	osName: Schema.optional(Schema.String),
+	language: Schema.optional(Schema.String),
+	utmSource: Schema.optional(Schema.String),
+	utmMedium: Schema.optional(Schema.String),
+	utmCampaign: Schema.optional(Schema.String),
+	visitorType: Schema.optional(Schema.Literals(["new", "returning"])),
+} as const
+
+export class WebAnalyticsSummaryRequest extends Schema.Class<WebAnalyticsSummaryRequest>(
+	"WebAnalyticsSummaryRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	...WebAnalyticsFilterFields,
+}) {}
+
+export class WebAnalyticsSummaryResponse extends Schema.Class<WebAnalyticsSummaryResponse>(
+	"WebAnalyticsSummaryResponse",
+)({
+	data: Schema.Struct({
+		visitors: Schema.Number,
+		sessions: Schema.Number,
+		newSessions: Schema.Number,
+		bouncedSessions: Schema.Number,
+		// The coverage numerator: sessions whose SDK build posts the analytics
+		// block. `identifiedSessions / sessions` is what the page reports so a
+		// visitor count that covers a fraction of traffic never reads as the whole.
+		identifiedSessions: Schema.Number,
+		avgDurationMs: Schema.Number,
+	}),
+}) {}
+
+export class WebAnalyticsTimeseriesRequest extends Schema.Class<WebAnalyticsTimeseriesRequest>(
+	"WebAnalyticsTimeseriesRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	bucketSeconds: Schema.optional(Schema.Number),
+	...WebAnalyticsFilterFields,
+}) {}
+
+export class WebAnalyticsTimeseriesResponse extends Schema.Class<WebAnalyticsTimeseriesResponse>(
+	"WebAnalyticsTimeseriesResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			bucket: Schema.String,
+			visitors: Schema.Number,
+			sessions: Schema.Number,
+			newSessions: Schema.Number,
+		}),
+	),
+}) {}
+
+export class WebAnalyticsPageviewsRequest extends Schema.Class<WebAnalyticsPageviewsRequest>(
+	"WebAnalyticsPageviewsRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	bucketSeconds: Schema.optional(Schema.Number),
+	...WebAnalyticsFilterFields,
+}) {}
+
+export class WebAnalyticsPageviewsResponse extends Schema.Class<WebAnalyticsPageviewsResponse>(
+	"WebAnalyticsPageviewsResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			bucket: Schema.String,
+			pageViews: Schema.Number,
+			sessions: Schema.Number,
+		}),
+	),
+}) {}
+
+export class WebAnalyticsPagesRequest extends Schema.Class<WebAnalyticsPagesRequest>(
+	"WebAnalyticsPagesRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	limit: Schema.optional(Schema.Number),
+	...WebAnalyticsFilterFields,
+}) {}
+
+export class WebAnalyticsPagesResponse extends Schema.Class<WebAnalyticsPagesResponse>(
+	"WebAnalyticsPagesResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			host: Schema.String,
+			pagePath: Schema.String,
+			pageViews: Schema.Number,
+			sessions: Schema.Number,
+		}),
+	),
+}) {}
+
+export class WebAnalyticsBreakdownsRequest extends Schema.Class<WebAnalyticsBreakdownsRequest>(
+	"WebAnalyticsBreakdownsRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	limitPerDimension: Schema.optional(Schema.Number),
+	...WebAnalyticsFilterFields,
+}) {}
+
+export class WebAnalyticsBreakdownsResponse extends Schema.Class<WebAnalyticsBreakdownsResponse>(
+	"WebAnalyticsBreakdownsResponse",
+)({
+	data: Schema.Struct({
+		referrerHosts: Schema.Array(FacetRow),
+		countries: Schema.Array(FacetRow),
+		deviceTypes: Schema.Array(FacetRow),
+		browsers: Schema.Array(FacetRow),
+		operatingSystems: Schema.Array(FacetRow),
+		languages: Schema.Array(FacetRow),
+		utmSources: Schema.Array(FacetRow),
+		utmMediums: Schema.Array(FacetRow),
+		utmCampaigns: Schema.Array(FacetRow),
+		entryPaths: Schema.Array(FacetRow),
+		exitPaths: Schema.Array(FacetRow),
+		hosts: Schema.Array(FacetRow),
+	}),
+}) {}
+
 export class PodFacetsRequest extends Schema.Class<PodFacetsRequest>("PodFacetsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -1941,6 +2082,41 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("workloadFacets", "/workload-facets", {
 			payload: WorkloadFacetsRequest,
 			success: WorkloadFacetsResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("webAnalyticsSummary", "/web-analytics-summary", {
+			payload: WebAnalyticsSummaryRequest,
+			success: WebAnalyticsSummaryResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("webAnalyticsTimeseries", "/web-analytics-timeseries", {
+			payload: WebAnalyticsTimeseriesRequest,
+			success: WebAnalyticsTimeseriesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("webAnalyticsPageviews", "/web-analytics-pageviews", {
+			payload: WebAnalyticsPageviewsRequest,
+			success: WebAnalyticsPageviewsResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("webAnalyticsPages", "/web-analytics-pages", {
+			payload: WebAnalyticsPagesRequest,
+			success: WebAnalyticsPagesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("webAnalyticsBreakdowns", "/web-analytics-breakdowns", {
+			payload: WebAnalyticsBreakdownsRequest,
+			success: WebAnalyticsBreakdownsResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

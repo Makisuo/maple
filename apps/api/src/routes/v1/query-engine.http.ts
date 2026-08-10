@@ -57,6 +57,11 @@ import {
 	WorkloadDetailSummaryResponse,
 	WorkloadInfraTimeseriesResponse,
 	WorkloadFacetsResponse,
+	WebAnalyticsSummaryResponse,
+	WebAnalyticsTimeseriesResponse,
+	WebAnalyticsPageviewsResponse,
+	WebAnalyticsPagesResponse,
+	WebAnalyticsBreakdownsResponse,
 	CommitSha,
 	FingerprintHash,
 	ServiceName,
@@ -1518,6 +1523,107 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						}
 					}
 					return new WorkloadFacetsResponse({ data: buckets })
+				}),
+			)
+			.handle("webAnalyticsSummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const row = yield* runQueryFirst(Queries.webAnalyticsSummary, tenant, payload)
+					// A window with no sessions returns no rows at all, not a row of
+					// zeroes — the page needs the zeroes to render its empty state.
+					return new WebAnalyticsSummaryResponse({
+						data: {
+							visitors: Number(row?.visitors) || 0,
+							sessions: Number(row?.sessions) || 0,
+							newSessions: Number(row?.newSessions) || 0,
+							bouncedSessions: Number(row?.bouncedSessions) || 0,
+							identifiedSessions: Number(row?.identifiedSessions) || 0,
+							avgDurationMs: Number(row?.avgDurationMs) || 0,
+						},
+					})
+				}),
+			)
+			.handle("webAnalyticsTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.webAnalyticsTimeseries, tenant, payload)
+					return new WebAnalyticsTimeseriesResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							visitors: Number(row.visitors) || 0,
+							sessions: Number(row.sessions) || 0,
+							newSessions: Number(row.newSessions) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("webAnalyticsPageviews", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.webAnalyticsPageviews, tenant, payload)
+					return new WebAnalyticsPageviewsResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							pageViews: Number(row.pageViews) || 0,
+							sessions: Number(row.sessions) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("webAnalyticsPages", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.webAnalyticsPages, tenant, payload)
+					return new WebAnalyticsPagesResponse({
+						data: rows.map((row) => ({
+							host: String(row.host),
+							pagePath: String(row.pagePath),
+							pageViews: Number(row.pageViews) || 0,
+							sessions: Number(row.sessions) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("webAnalyticsBreakdowns", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.webAnalyticsBreakdowns, tenant, payload)
+					const buckets = {
+						referrerHosts: [] as Array<{ name: string; count: number }>,
+						countries: [] as Array<{ name: string; count: number }>,
+						deviceTypes: [] as Array<{ name: string; count: number }>,
+						browsers: [] as Array<{ name: string; count: number }>,
+						operatingSystems: [] as Array<{ name: string; count: number }>,
+						languages: [] as Array<{ name: string; count: number }>,
+						utmSources: [] as Array<{ name: string; count: number }>,
+						utmMediums: [] as Array<{ name: string; count: number }>,
+						utmCampaigns: [] as Array<{ name: string; count: number }>,
+						entryPaths: [] as Array<{ name: string; count: number }>,
+						exitPaths: [] as Array<{ name: string; count: number }>,
+						hosts: [] as Array<{ name: string; count: number }>,
+					}
+					// facetType → response key. A table rather than a twelve-arm switch:
+					// the mapping is the whole content of this step, and the keys have to
+					// stay in step with WebAnalyticsFacetKey in the query builder.
+					const bucketOf: Record<string, keyof typeof buckets> = {
+						referrerHost: "referrerHosts",
+						country: "countries",
+						deviceType: "deviceTypes",
+						browserName: "browsers",
+						osName: "operatingSystems",
+						language: "languages",
+						utmSource: "utmSources",
+						utmMedium: "utmMediums",
+						utmCampaign: "utmCampaigns",
+						entryPath: "entryPaths",
+						exitPath: "exitPaths",
+						host: "hosts",
+					}
+					for (const row of rows) {
+						const key = bucketOf[row.facetType]
+						if (key) buckets[key].push({ name: String(row.name), count: Number(row.count) || 0 })
+					}
+					return new WebAnalyticsBreakdownsResponse({ data: buckets })
 				}),
 			)
 			.handle("executeRawSql", ({ payload }) =>

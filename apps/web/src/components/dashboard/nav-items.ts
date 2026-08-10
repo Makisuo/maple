@@ -1,5 +1,6 @@
 import {
 	BellIcon,
+	ChartBarHorizontalIcon,
 	ChartLineIcon,
 	CircleWarningIcon,
 	CloudflareIcon,
@@ -134,6 +135,7 @@ export function navGroups(): NavGroup[] {
 			label: "Analyze",
 			items: [
 				exploreItem,
+				{ title: "Web Analytics", href: "/analytics", icon: ChartBarHorizontalIcon },
 				{ title: "Dashboards", href: "/dashboards", icon: GridSquareCirclePlusIcon },
 			],
 		},

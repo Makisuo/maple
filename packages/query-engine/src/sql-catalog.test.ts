@@ -28,6 +28,7 @@ import * as serviceOperationQueries from "./ch/queries/service-operations"
 import * as serviceQueries from "./ch/queries/services"
 import * as sessionEventQueries from "./ch/queries/session-events"
 import * as sessionReplayQueries from "./ch/queries/session-replays"
+import * as webAnalyticsQueries from "./ch/queries/web-analytics"
 import * as topOperationQueries from "./ch/queries/top-operations"
 import * as traceQueries from "./ch/queries/traces"
 
@@ -164,6 +165,7 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	"session-events": sessionEventQueries,
 	"session-replays": sessionReplayQueries,
 	"top-operations": topOperationQueries,
+	"web-analytics": webAnalyticsQueries,
 	traces: traceQueries,
 }
 

@@ -19,6 +19,9 @@ import type { TimeRange } from "@/components/time-range-picker/types"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ToolbarStat } from "@maple/ui/components/toolbar"
+import { Button } from "@maple/ui/components/ui/button"
+import { Link } from "@tanstack/react-router"
+import { ChartBarHorizontalIcon } from "@/components/icons"
 
 const replaysSearchSchema = Schema.Struct({
 	service: Schema.optional(Schema.String),
@@ -127,6 +130,29 @@ function ReplaysPage() {
 				<ToolbarStat value={sessions.length} label="sessions" />
 				<ToolbarStat value={sessions.filter((s) => s.status === "active").length} label="live" dot />
 			</div>
+			{/* Replays and Web Analytics read the same session data from opposite ends —
+			    one session at a time versus the aggregate — so each is the obvious next
+			    question from the other. The time range travels with the link; arriving
+			    at a different window than the one you were just looking at is what makes
+			    a cross-link feel like it lost your place. */}
+			<Button
+				variant="outline"
+				size="sm"
+				aria-label="View web analytics"
+				render={
+					<Link
+						to="/analytics"
+						search={{
+							startTime: search.startTime,
+							endTime: search.endTime,
+							timePreset: search.timePreset,
+						}}
+					/>
+				}
+			>
+				<ChartBarHorizontalIcon size={14} />
+				<span className="hidden sm:inline">Analytics</span>
+			</Button>
 			<TimeRangeHeaderControls
 				startTime={search.startTime ?? startTime}
 				endTime={search.endTime ?? endTime}

@@ -45,6 +45,18 @@ export function uniq<T>(expr: Expr<T>): Expr<number> {
 	return compileFnCall<number>("uniq", expr)
 }
 
+/**
+ * `uniqIf(value, condition)` — distinct `value`s among the rows matching
+ * `condition`.
+ *
+ * The conditional counterpart to {@link uniq}, and the one to reach for over
+ * `countIf` on a `ReplacingMergeTree`: un-merged duplicate rows for the same
+ * key would inflate a `countIf` but not a `uniqIf` on that key.
+ */
+export function uniqIf<T>(expr: Expr<T>, cond: Condition): Expr<number> {
+	return compileFnCall<number>("uniqIf", expr, cond)
+}
+
 export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
 	return compileFnCall<ReadonlyArray<T>>("groupUniqArray", expr)
 }
