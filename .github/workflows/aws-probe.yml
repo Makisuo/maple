@@ -16,6 +16,11 @@ on:
                 type: choice
                 options: [ecr, network, image]
                 default: ecr
+            state:
+                description: "State backend: local (file) or cloud (the shared Cloudflare store the real deploy uses)"
+                type: choice
+                options: [local, cloud]
+                default: local
             keep:
                 description: "Keep the resources instead of destroying them (leave off unless you need to inspect)"
                 type: boolean
@@ -41,12 +46,26 @@ jobs:
         environment: production
         env:
             PROBE_LEVEL: ${{ inputs.level }}
+            PROBE_STATE: ${{ inputs.state }}
         steps:
             - name: Checkout
               uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
             - name: Setup mise (toolchain)
               uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+            # Needed only for `state: cloud` (the state store authenticates to
+            # Cloudflare), but unconditional so the two runs differ in exactly one
+            # variable — the state backend — and nothing else.
+            - name: Load deployment secrets from Infisical
+              uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+              with:
+                  method: "oidc"
+                  identity-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+                  project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+                  env-slug: "prod"
+                  export-type: "env"
+                  secret-path: "/"
 
             - name: Configure AWS credentials (OIDC)
               uses: aws-actions/configure-aws-credentials@v5

@@ -26,15 +26,35 @@
  */
 import * as Alchemy from "alchemy"
 import * as AWS from "alchemy/AWS"
+import * as Cloudflare from "alchemy/Cloudflare"
 import * as Effect from "effect/Effect"
 
 type ProbeLevel = "ecr" | "network" | "image"
 
 const level = (process.env.PROBE_LEVEL ?? "ecr") as ProbeLevel
 
+/**
+ * The remaining difference between CI (hangs) and local (works at every level,
+ * verified). Local runs used file state; the real deploy uses the shared
+ * Cloudflare state store, which has to initialise BEFORE any resource work —
+ * which is exactly where a hang would leave CloudTrail empty and the log
+ * silent. `cloud` reproduces that half; keep it on `local` otherwise so the
+ * probe can never write to the account's real state.
+ */
+const useCloudState = process.env.PROBE_STATE === "cloud"
+
+// Same shim as alchemy.run.ts: Infisical defines the account id under the v1
+// name, the v2 auth provider reads the v2 one.
+if (!process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_DEFAULT_ACCOUNT_ID) {
+	process.env.CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_DEFAULT_ACCOUNT_ID
+}
+
 export default Alchemy.Stack(
 	"aws-probe",
-	{ providers: AWS.providers(), state: Alchemy.localState() },
+	{
+		providers: AWS.providers(),
+		state: useCloudState ? Cloudflare.state() : Alchemy.localState(),
+	},
 	Effect.gen(function* () {
 		const tags = { Service: "maple-aws-probe", Ephemeral: "true" }
 
@@ -43,7 +63,7 @@ export default Alchemy.Stack(
 			tags,
 		})
 		if (level === "ecr") {
-			return { level, repositoryUri: repository.repositoryUri }
+			return { level, state: useCloudState ? "cloud" : "local", repositoryUri: repository.repositoryUri }
 		}
 
 		const network = yield* AWS.EC2.Network("probe-network", {
@@ -63,7 +83,7 @@ export default Alchemy.Stack(
 		const image = yield* AWS.ECR.Image("probe-image", {
 			repositoryUri: repository.repositoryUri,
 			context: "apps/ingest",
-			dockerfile: "apps/ingest/Dockerfile.prebuilt",
+			dockerfile: "Dockerfile.prebuilt",
 			platform: "linux/amd64",
 		})
 		return { level, imageUri: image.imageUri }
