@@ -32,26 +32,16 @@ export function isTimeRangeWithin(
 	return Number.isFinite(durationSeconds) && durationSeconds >= 0 && durationSeconds <= maxRangeSeconds
 }
 
-/**
- * Resolve a relative shorthand ("15m", "7d", "3mo", "today") to an absolute
- * window.
- *
- * Delegates to the shared resolver so this app, the API, and the query engine
- * can't drift on what a shorthand means. The shared implementation reproduces
- * date-fns' local-calendar semantics — month-end clamping and local midnight
- * for "today" — so behaviour here is unchanged.
- */
+/** Resolves shorthand with the shared local-calendar semantics. */
 export function relativeToAbsolute(shorthand: string): { startTime: string; endTime: string } | null {
 	return resolveRelativeRangeToWarehouse(shorthand)
 }
 
 export function presetLabel(shorthand: string): string {
 	if (shorthand === "12mo") return "Last 1 year"
-	// Check PRESET_OPTIONS first for exact match
 	const preset = PRESET_OPTIONS.find((p) => p.value === shorthand)
 	if (preset) return preset.label
 
-	// Generate dynamically
 	const trimmed = shorthand.trim().toLowerCase()
 	if (trimmed === "today") return "Today"
 
@@ -91,7 +81,6 @@ export function formatTimeRangeDisplay(startTime?: string, endTime?: string): st
 	const days = Math.round(diffMs / (24 * 60 * 60 * 1000))
 	const weeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000))
 
-	// Check if end time is approximately now (within 1 minute)
 	const isRelative = Math.abs(end.getTime() - Date.now()) < 60 * 1000
 
 	if (isRelative) {

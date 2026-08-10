@@ -19,7 +19,6 @@ import { widgetTypeList } from "@/components/dashboard-builder/widgets/types"
 import { createQueryDraft } from "@maple/query-engine/query-builder"
 import { deriveDefaultWidgetTitle } from "@/lib/query-builder/widget-builder-utils"
 
-// ---------------------------------------------------------------------------
 // "Add widget".
 //
 // Every section but the first is a widget type's `presets` rendered with its
@@ -29,7 +28,6 @@ import { deriveDefaultWidgetTitle } from "@/lib/query-builder/widget-builder-uti
 //
 // Charts are the exception: line/bar/area have no presets because they are the
 // blank starting point, so their section offers the three chart styles directly.
-// ---------------------------------------------------------------------------
 
 const CHART_STYLES = [
 	{

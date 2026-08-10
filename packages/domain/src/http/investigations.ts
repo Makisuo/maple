@@ -5,9 +5,7 @@ import { AiTriageEvidence, AiTriageIncidentKind, AiTriageResult } from "./ai-tri
 import { Authorization } from "./current-tenant"
 import { IssueSeverity } from "./errors"
 
-// ---------------------------------------------------------------------------
 // Literals
-// ---------------------------------------------------------------------------
 
 /**
  * Lifecycle of a durable investigation "war-room". `investigating` covers the
@@ -47,9 +45,7 @@ export const InvestigationConfidence = Schema.Literals(["high", "medium", "low"]
 })
 export type InvestigationConfidence = Schema.Schema.Type<typeof InvestigationConfidence>
 
-// ---------------------------------------------------------------------------
 // Fan-out (lenses + validator)
-// ---------------------------------------------------------------------------
 
 /**
  * The standing catalogue of framings.
@@ -227,9 +223,7 @@ export class ValidatorVerdict extends Schema.Class<ValidatorVerdict>("ValidatorV
 	note: Schema.String,
 }) {}
 
-// ---------------------------------------------------------------------------
 // The plan (what the planner decided is worth testing)
-// ---------------------------------------------------------------------------
 
 /**
  * One falsifiable proposition about *this* incident, and the tools needed to test
@@ -334,9 +328,7 @@ export class InvestigationPlanRecord extends Schema.Class<InvestigationPlanRecor
 	},
 ) {}
 
-// ---------------------------------------------------------------------------
 // Subject (what is being investigated)
-// ---------------------------------------------------------------------------
 
 /**
  * A page/entity context hint carried by a free-form investigation — structurally
@@ -427,9 +419,7 @@ export class InvestigationSubjectSnapshot extends Schema.Class<InvestigationSubj
 	thresholdValue: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Documents
-// ---------------------------------------------------------------------------
 
 export class InvestigationDocument extends Schema.Class<InvestigationDocument>("InvestigationDocument")({
 	id: InvestigationId,
@@ -472,9 +462,7 @@ export class InvestigationsListResponse extends Schema.Class<InvestigationsListR
 	investigations: Schema.Array(InvestigationDocument),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Requests
-// ---------------------------------------------------------------------------
 
 export class InvestigationCreateRequest extends Schema.Class<InvestigationCreateRequest>(
 	"InvestigationCreateRequest",
@@ -502,9 +490,7 @@ export class SubmitDiagnosisRequest extends Schema.Class<SubmitDiagnosisRequest>
 	outputTokens: Schema.optionalKey(Schema.Number),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Errors
-// ---------------------------------------------------------------------------
 
 export class InvestigationPersistenceError extends Schema.TaggedError<InvestigationPersistenceError>()(
 	"@maple/http/investigations/InvestigationPersistenceError",
@@ -566,9 +552,7 @@ export class InvestigationRejectedError extends Schema.TaggedError<Investigation
 	{ httpApiStatus: 502 },
 ) {}
 
-// ---------------------------------------------------------------------------
 // Query schemas
-// ---------------------------------------------------------------------------
 
 const InvestigationsListQuery = Schema.Struct({
 	/** War-room filter: only investigations for this error issue. */
@@ -581,10 +565,8 @@ const InvestigationsListQuery = Schema.Struct({
 	),
 })
 
-// ---------------------------------------------------------------------------
 // API group (user-facing; diagnosis submission crosses the internal Worker RPC
 // boundary and is not part of this Clerk-authenticated HTTP group)
-// ---------------------------------------------------------------------------
 
 export class InvestigationApiGroup extends HttpApiGroup.make("investigations")
 	.add(

@@ -28,9 +28,7 @@ import {
 	type QueryBuilderQueryDraft,
 } from "@maple/query-engine/query-builder"
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface MetricSelectionOption {
 	value: string
@@ -65,9 +63,7 @@ interface QueryPanelProps {
 	showVisibilityToggle?: boolean
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function parseMetricSelection(raw: string): {
 	metricName: string
@@ -87,9 +83,7 @@ const ADD_ON_KEYS: { key: QueryBuilderAddOnKey; label: string }[] = [
 	{ key: "legend", label: "Legend" },
 ]
 
-// ---------------------------------------------------------------------------
 // QueryPanel
-// ---------------------------------------------------------------------------
 
 export function QueryPanel({
 	query,
@@ -248,9 +242,7 @@ export function QueryPanel({
 	)
 }
 
-// ---------------------------------------------------------------------------
 // TracesLogsBody
-// ---------------------------------------------------------------------------
 
 function TracesLogsBody({
 	query,
@@ -356,9 +348,7 @@ function TracesLogsBody({
 	)
 }
 
-// ---------------------------------------------------------------------------
 // MetricsBody
-// ---------------------------------------------------------------------------
 
 function MetricsBody({
 	query,
@@ -572,9 +562,7 @@ function MetricsBody({
 	)
 }
 
-// ---------------------------------------------------------------------------
 // AddOnSections
-// ---------------------------------------------------------------------------
 
 function AddOnSections({
 	query,

@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Executable documentation examples.
 //
 // Every non-trivial snippet in `docs/` lives here as a real test that compiles
@@ -12,7 +11,6 @@
 //
 // When changing an example here, change the matching docs block in the same
 // commit — the pairing is the whole point.
-// ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Option, Schema } from "effect"
@@ -25,9 +23,7 @@ import { raw as rawFragment, compile as compileFragment } from "./sql/sql-fragme
  *  collapsed to one line for readability, so assertions compare it collapsed. */
 const oneLine = (sql: string) => sql.replace(/\s+/g, " ").trim()
 
-// ---------------------------------------------------------------------------
 // Shared fixtures — the tables every docs page builds on.
-// ---------------------------------------------------------------------------
 
 const Events = CH.table("events", {
 	OrgId: T.string,
@@ -43,9 +39,7 @@ const Services = CH.table("services", {
 	Team: T.string,
 })
 
-// ---------------------------------------------------------------------------
 // getting-started.md
-// ---------------------------------------------------------------------------
 
 describe("docs/getting-started.md", () => {
 	it("Your first query", () => {
@@ -100,9 +94,7 @@ describe("docs/getting-started.md", () => {
 	)
 })
 
-// ---------------------------------------------------------------------------
 // tables-and-types.md
-// ---------------------------------------------------------------------------
 
 describe("docs/tables-and-types.md", () => {
 	it("Reading a Map column", () => {
@@ -130,9 +122,7 @@ describe("docs/tables-and-types.md", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // queries.md
-// ---------------------------------------------------------------------------
 
 describe("docs/queries.md", () => {
 	it("select by column name", () => {
@@ -176,9 +166,7 @@ describe("docs/queries.md", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // expressions.md
-// ---------------------------------------------------------------------------
 
 describe("docs/expressions.md", () => {
 	it("Optional predicates with when", () => {
@@ -227,9 +215,7 @@ describe("docs/expressions.md", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // joins-and-subqueries.md
-// ---------------------------------------------------------------------------
 
 describe("docs/joins-and-subqueries.md", () => {
 	it("Joining a table", () => {
@@ -328,9 +314,7 @@ describe("docs/joins-and-subqueries.md", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // unions-and-ctes.md
-// ---------------------------------------------------------------------------
 
 describe("docs/unions-and-ctes.md", () => {
 	it("unionAll with an outer ORDER BY", () => {
@@ -407,9 +391,7 @@ describe("docs/unions-and-ctes.md", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // params-and-compilation.md
-// ---------------------------------------------------------------------------
 
 describe("docs/params-and-compilation.md", () => {
 	it("Params are resolved at compile time", () => {
@@ -439,9 +421,7 @@ describe("docs/params-and-compilation.md", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // decoding-results.md
-// ---------------------------------------------------------------------------
 
 describe("docs/decoding-results.md", () => {
 	const rowSchema = Schema.Struct({
@@ -503,9 +483,7 @@ describe("docs/decoding-results.md", () => {
 	)
 })
 
-// ---------------------------------------------------------------------------
 // tenant-scoping.md
-// ---------------------------------------------------------------------------
 
 describe("docs/tenant-scoping.md", () => {
 	it("An OrgId equality scopes the query", () => {
@@ -570,9 +548,7 @@ describe("docs/tenant-scoping.md", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // reference.md
-// ---------------------------------------------------------------------------
 
 describe("docs/reference.md", () => {
 	it("Window functions", () => {
@@ -597,9 +573,7 @@ describe("docs/reference.md", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // extending.md
-// ---------------------------------------------------------------------------
 
 describe("docs/extending.md", () => {
 	it("defineFn declares a missing function", () => {

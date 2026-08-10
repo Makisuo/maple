@@ -147,9 +147,7 @@ export function hostInfraTimeseries({ data }: { data: HostInfraTimeseriesInput }
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Pods
-// ---------------------------------------------------------------------------
 
 export interface ListPodsInput {
 	startTime: string
@@ -334,9 +332,7 @@ export function podInfraTimeseries({ data }: { data: PodInfraTimeseriesInput }) 
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Nodes
-// ---------------------------------------------------------------------------
 
 export interface ListNodesInput {
 	startTime: string
@@ -448,9 +444,7 @@ export function nodeInfraTimeseries({ data }: { data: NodeInfraTimeseriesInput }
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Workloads (Deployments / StatefulSets / DaemonSets)
-// ---------------------------------------------------------------------------
 
 export interface ListWorkloadsInput {
 	startTime: string

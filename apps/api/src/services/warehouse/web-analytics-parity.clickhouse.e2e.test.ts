@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Raw-vs-rollup parity for web analytics.
 //
 // `web_events` is a performance change, not a semantics change: every one of the
@@ -20,7 +19,6 @@
 //     path the breakdown fan-out inlines twelve times.
 //   - The MV's WHERE dropping or admitting the wrong event types: clicks and
 //     network rows must never reach `web_events`, and custom rows must.
-// ---------------------------------------------------------------------------
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import * as CH from "@maple/query-engine/ch"

@@ -1,11 +1,9 @@
-// ---------------------------------------------------------------------------
 // Top Operations
 //
 // DSL port of the previously string-interpolated query in
 // `observability/top-operations.ts`. Groups spans for one service by SpanName
 // and ranks them by the requested metric (count, latency quantiles, error
 // rate, or apdex). OrgId-scoped per the Warehouse Query Pattern.
-// ---------------------------------------------------------------------------
 
 import { Match } from "effect"
 import type { TracesMetric } from "@maple/domain/query-engine"

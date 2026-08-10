@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Typed Session Event Queries
 //
 // DSL-based queries over the session_events datasource — the distilled,
@@ -7,7 +6,6 @@
 // + transcript surfaced to humans (replay panels) and agents (MCP tools).
 //
 // Plain MergeTree, immutable append; no ReplacingMergeTree dedup needed.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { compileFnCall } from "@maple-dev/clickhouse-builder"
@@ -19,7 +17,6 @@ function count(): CH.Expr<number> {
 	return compileFnCall<number>("count")
 }
 
-// ---------------------------------------------------------------------------
 // Transcript: every event for one session, in order
 //
 // (OrgId, SessionId) is the sort-key prefix, so this is a contiguous range
@@ -29,7 +26,6 @@ function count(): CH.Expr<number> {
 // Timestamp predicate ClickHouse reads the primary index of every daily
 // partition. The optional startTime/endTime bounds (the session's time window)
 // prune to the 1-2 partitions the session spans. Omit to scan all.
-// ---------------------------------------------------------------------------
 
 export interface SessionTranscriptOutput {
 	readonly timestamp: string
@@ -106,7 +102,6 @@ export function sessionTranscriptQuery(opts: SessionTranscriptOpts = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Event-match semi-join: sessions whose distilled events match the predicates
 //
 // Row-level filters are ANDed, so callers pass a coherent predicate set (e.g.
@@ -117,7 +112,6 @@ export function sessionTranscriptQuery(opts: SessionTranscriptOpts = {}) {
 // orgId/startTime/endTime params as the list query (same pattern as
 // `sessionActivityAggregateQuery`), so they resolve to one window when compiled
 // together. No limit/offset/format — those belong to the outer list query.
-// ---------------------------------------------------------------------------
 
 export interface SessionEventMatchOpts {
 	type?: string
@@ -151,7 +145,6 @@ export function sessionEventMatchQuery(opts: SessionEventMatchOpts) {
 		.groupBy("sessionId")
 }
 
-// ---------------------------------------------------------------------------
 // Active / idle time, computed from gaps between distilled events
 //
 // A session's wall-clock duration overstates engagement: a 30s interaction left
@@ -172,7 +165,6 @@ export function sessionEventMatchQuery(opts: SessionEventMatchOpts) {
 // threshold (replay-timeline.ts): `session_events` are sparse semantic events
 // (no continuous mouse-move samples), so a 2s threshold would flag nearly every
 // gap as idle. 15s is a heuristic — tune if it proves too coarse/fine.
-// ---------------------------------------------------------------------------
 
 /** Gaps longer than this (ms) between distilled events count as idle, not active. */
 export const IDLE_GAP_THRESHOLD_MS = 15_000

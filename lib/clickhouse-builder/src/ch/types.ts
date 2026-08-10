@@ -1,19 +1,15 @@
-// ---------------------------------------------------------------------------
 // ClickHouse Type Descriptors
 //
 // Phantom-typed descriptors that map ClickHouse column types to TypeScript
 // types. The `_phantom` field is never read at runtime — it exists only so
 // TypeScript can infer the correct TS type from a column definition.
-// ---------------------------------------------------------------------------
 
 export interface CHType<Tag extends string, TSType> {
 	readonly _tag: Tag
 	readonly _phantom?: TSType
 }
 
-// ---------------------------------------------------------------------------
 // Primitive types
-// ---------------------------------------------------------------------------
 
 export type CHString = CHType<"String", string>
 export type CHUInt8 = CHType<"UInt8", number>
@@ -26,9 +22,7 @@ export type CHDateTime = CHType<"DateTime", string>
 export type CHDateTime64 = CHType<"DateTime64", string>
 export type CHBool = CHType<"Bool", boolean>
 
-// ---------------------------------------------------------------------------
 // Compound types
-// ---------------------------------------------------------------------------
 
 export type CHMap<_K extends CHType<string, string>, V extends CHType<string, any>> = CHType<
 	"Map",
@@ -39,9 +33,7 @@ export type CHArray<E extends CHType<string, any>> = CHType<"Array", ReadonlyArr
 
 export type CHNullable<T extends CHType<string, any>> = CHType<"Nullable", InferTS<T> | null>
 
-// ---------------------------------------------------------------------------
 // Type-level TS extraction
-// ---------------------------------------------------------------------------
 
 export type InferTS<T> = T extends CHType<string, infer TS> ? TS : never
 
@@ -57,9 +49,7 @@ export type NullableColumnDefs<Cols extends ColumnDefs> = {
 	readonly [K in keyof Cols & string]: CHType<"Nullable", InferTS<Cols[K]> | null>
 }
 
-// ---------------------------------------------------------------------------
 // Constructors
-// ---------------------------------------------------------------------------
 
 export const string: CHString = { _tag: "String" }
 export const uint8: CHUInt8 = { _tag: "UInt8" }

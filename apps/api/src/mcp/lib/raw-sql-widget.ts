@@ -1,7 +1,6 @@
 import { rawSqlDisplayTypeFor } from "@maple/domain/http"
 import type { RawSqlDisplayType, WidgetDataSourceSchema } from "@maple/domain/http"
 
-// ---------------------------------------------------------------------------
 // MCP-side mirror of the web's raw-SQL widget builder so agents can create
 // raw-SQL widgets without hand-crafting the dataSource JSON.
 //
@@ -9,7 +8,6 @@ import type { RawSqlDisplayType, WidgetDataSourceSchema } from "@maple/domain/ht
 // apps/web/src/lib/raw-sql/templates.ts. Both now read `rawSqlDisplayTypeFor`
 // from the shared widget-type table, so only `buildRawSqlDataSource` (which
 // mirrors widget-query-builder-page.tsx) still has a web-side twin.
-// ---------------------------------------------------------------------------
 
 type WidgetDataSource = typeof WidgetDataSourceSchema.Type
 

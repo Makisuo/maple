@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Telemetry liveness
 //
 // "Is this signal quiet because it recovered, or because we stopped receiving
@@ -25,7 +24,6 @@
 // both. Counts are UInt64 and arrive as strings on BYO-ClickHouse, so both
 // row schemas are built from `CHNumber` — compile with them or BYO-CH orgs get
 // arithmetic over strings.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"

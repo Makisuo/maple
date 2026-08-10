@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Anomaly detection math — pure functions, no I/O.
 //
 // Baseline model: seasonal-naive. For the current hour-of-day `h`, the
@@ -10,7 +9,6 @@
 // Error/latency breaches require statistical, ratio, absolute-delta, and
 // volume guards. Throughput is deliberately stricter: only a near-total loss
 // of a historically continuous traffic stream is service-health evidence.
-// ---------------------------------------------------------------------------
 
 import type { AnomalyIncidentSeverity, AnomalySensitivity, AnomalySignalType } from "@maple/domain/http"
 
@@ -79,9 +77,7 @@ export function robustSigma(
 	return Math.max(MAD_TO_SIGMA * mad(values, m), epsilonAbs, epsilonRel * m)
 }
 
-// ---------------------------------------------------------------------------
 // Input shapes (rows already split into current vs baseline by the caller)
-// ---------------------------------------------------------------------------
 
 export interface GoldenSignalSeries {
 	readonly serviceName: string
@@ -142,9 +138,7 @@ const skipped = (
 	severity: "warning",
 })
 
-// ---------------------------------------------------------------------------
 // Golden signals
-// ---------------------------------------------------------------------------
 
 /** Minimum weighted request count in the current window before evaluating. */
 const GOLDEN_MIN_VOLUME = 50
@@ -283,9 +277,7 @@ export function evaluateGoldenSignals(
 	return evaluations
 }
 
-// ---------------------------------------------------------------------------
 // Log volume (error-class severities)
-// ---------------------------------------------------------------------------
 
 const LOG_MIN_VOLUME = 30
 
@@ -327,9 +319,7 @@ export function evaluateLogVolume(series: LogVolumeSeries, config: DetectionConf
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Error fingerprint spikes (Poisson-flavored — counts are small)
-// ---------------------------------------------------------------------------
 
 /** Half-hour windows in 7 days. */
 const HALF_HOURS_PER_WEEK = 336

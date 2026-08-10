@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Client flushable preset — manual `flush()` for the browser
 //
 // `Maple.layer` (the `Otlp.layerJson`-based client preset) exports on a 5s
@@ -24,7 +23,6 @@
 // the request outlive the unloading document (for small bodies).
 //
 // Traces, logs, and Effect metric snapshots are flushed together.
-// ---------------------------------------------------------------------------
 
 import { hasConsent, onConsentChange } from "@maple/browser-session"
 import { Layer, Redacted } from "effect"

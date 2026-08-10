@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Anomaly incident state machine — pure decision logic, no I/O.
 //
 // Mirrors the alert_rule_states hysteresis mechanics: a series must breach on
@@ -6,7 +5,6 @@
 // ticks to resolve it. A cooldown after resolution stops flapping series from
 // re-opening immediately (a guard the user-configured alerting path doesn't
 // need, but a zero-config detector does).
-// ---------------------------------------------------------------------------
 
 import type { AnomalySignalType } from "@maple/domain/http"
 

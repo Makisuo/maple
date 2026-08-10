@@ -49,9 +49,7 @@ const decodeInvestigationId = Schema.decodeUnknownOption(InvestigationId)
  */
 const decodeInvestigation = Schema.decodeUnknownOption(Schema.toType(V2Investigation))
 
-// ---------------------------------------------------------------------------
 // Rows
-// ---------------------------------------------------------------------------
 
 /**
  * Identity row schema for the `investigation` shape — one struct per column the
@@ -109,9 +107,7 @@ export const InvestigationLensRunRowSchema = Schema.Struct({
 })
 export type InvestigationLensRunRow = typeof InvestigationLensRunRowSchema.Type
 
-// ---------------------------------------------------------------------------
 // Mappers (mirror toV2Investigation + InvestigationService's row mappers)
-// ---------------------------------------------------------------------------
 
 /** Mirrors `elapsedSeconds` in InvestigationService — ms → one decimal place. */
 const elapsedSeconds = (ms: number | null): number | null => (ms == null ? null : Math.round(ms / 100) / 10)
@@ -302,9 +298,7 @@ export const rowsToInvestigation = (
 	return Option.getOrNull(decodeInvestigation(candidate))
 }
 
-// ---------------------------------------------------------------------------
 // Collections (read-only — the page writes through the v2 API, not the shape)
-// ---------------------------------------------------------------------------
 
 export const createInvestigationCollection = (orgId: string, investigationId: string) =>
 	createSyncedCollection({

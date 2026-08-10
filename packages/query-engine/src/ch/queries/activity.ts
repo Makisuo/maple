@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Active-org discovery queries
 //
 // Per-org cron loops (error-issue detector, anomaly detector) historically
@@ -17,7 +16,6 @@
 //
 // The discovery window must be a SUPERSET of the per-org scan window so no
 // active org is missed for the tick.
-// ---------------------------------------------------------------------------
 
 import { from, param } from "@maple-dev/clickhouse-builder"
 import { ErrorEventsByTime, LogsAggregatesHourly, TracesAggregatesHourly } from "../tables"

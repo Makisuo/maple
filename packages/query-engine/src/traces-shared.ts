@@ -1,13 +1,9 @@
-// ---------------------------------------------------------------------------
 // Shared constants and helpers used by the CH DSL queries.
-// ---------------------------------------------------------------------------
 
 import type { TracesMetric, AttributeFilter } from "@maple/domain/query-engine"
 import type { AttributeIndexMode } from "./capabilities"
 
-// ---------------------------------------------------------------------------
 // Metric → column needs mapping
-// ---------------------------------------------------------------------------
 
 export type MetricNeed = "count" | "avg_duration" | "quantiles" | "error_rate" | "apdex"
 
@@ -21,9 +17,7 @@ export const METRIC_NEEDS: Record<TracesMetric, MetricNeed[]> = {
 	apdex: ["count", "apdex"],
 }
 
-// ---------------------------------------------------------------------------
 // trace_list_mv column mappings (used by performance-hints UI)
-// ---------------------------------------------------------------------------
 
 export const TRACE_LIST_MV_ATTR_MAP: Record<string, string> = {
 	"http.method": "HttpMethod",
@@ -39,14 +33,11 @@ export const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
 	"deployment.environment": "DeploymentEnv",
 }
 
-// ---------------------------------------------------------------------------
 // Attribute filter → typed Condition
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { normalizedSpanNameExpr } from "@maple/domain/tinybird/span-display-name"
 
-// ---------------------------------------------------------------------------
 // HTTP semconv coalescing
 //
 // OpenTelemetry renamed several HTTP span attributes in the stable semconv:
@@ -57,7 +48,6 @@ import { normalizedSpanNameExpr } from "@maple/domain/tinybird/span-display-name
 // use *either* key. Filters that read the raw `traces` table must coalesce the
 // same way — otherwise a facet shows a count while applying it matches zero
 // rows (the data carries the new key, the filter looked up the old one).
-// ---------------------------------------------------------------------------
 
 const HTTP_SEMCONV_ALIASES: Record<string, readonly string[]> = {
 	"http.method": ["http.method", "http.request.method"],

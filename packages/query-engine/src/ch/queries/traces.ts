@@ -1,8 +1,6 @@
-// ---------------------------------------------------------------------------
 // Typed Traces Queries
 //
 // DSL-based query definitions for traces timeseries, breakdown, and list.
-// ---------------------------------------------------------------------------
 
 import type { TracesMetric } from "@maple/domain/query-engine"
 import { compileCH, compileFnCall } from "@maple-dev/clickhouse-builder"
@@ -37,7 +35,6 @@ import {
 	matchOrIn,
 } from "./query-helpers"
 
-// ---------------------------------------------------------------------------
 // Metric SELECT expressions
 //
 // COUNT SEMANTICS — read this before touching `count`.
@@ -59,7 +56,6 @@ import {
 //
 // Consequence: the number is sampling-config-independent. Turning head sampling
 // on must not make a dashboard's "spans" number drop.
-// ---------------------------------------------------------------------------
 
 /**
  * Minimal column shape the metric SELECT exprs need — satisfied by both
@@ -129,9 +125,7 @@ function metricSelectExprs(
 	}
 }
 
-// ---------------------------------------------------------------------------
 // GROUP BY expression builder
-// ---------------------------------------------------------------------------
 
 function buildGroupNameExpr(
 	$: ColumnAccessor<typeof Traces.columns>,
@@ -284,9 +278,7 @@ function buildMvBreakdownGroupExpr(
 	}
 }
 
-// ---------------------------------------------------------------------------
 // WHERE clause builders
-// ---------------------------------------------------------------------------
 
 function buildWhereConditions(
 	$: ColumnAccessor<typeof Traces.columns>,
@@ -295,15 +287,11 @@ function buildWhereConditions(
 	return tracesBaseWhereConditions($, opts)
 }
 
-// ---------------------------------------------------------------------------
 // Shared options interface
-// ---------------------------------------------------------------------------
 
 interface TracesQueryOpts extends TracesBaseWhereOpts {}
 
-// ---------------------------------------------------------------------------
 // Timeseries query
-// ---------------------------------------------------------------------------
 
 export interface TracesTimeseriesOpts extends TracesQueryOpts {
 	metric: TracesMetric
@@ -653,9 +641,7 @@ export function tracesTimeseriesQuery(
 	>
 }
 
-// ---------------------------------------------------------------------------
 // Breakdown query
-// ---------------------------------------------------------------------------
 
 export interface TracesBreakdownOpts extends TracesQueryOpts {
 	metric: TracesMetric
@@ -731,9 +717,7 @@ export function tracesBreakdownQuery(opts: TracesBreakdownOpts) {
 	return raw as unknown as CHQuery<ColumnDefs, TracesBreakdownOutput, {}>
 }
 
-// ---------------------------------------------------------------------------
 // List query
-// ---------------------------------------------------------------------------
 
 export interface TracesListOpts extends TracesQueryOpts {
 	limit?: number
@@ -895,7 +879,6 @@ export function tracesListQuery(opts: TracesListOpts) {
 	return q
 }
 
-// ---------------------------------------------------------------------------
 // Slow traces query
 //
 // DSL port of the previously string-interpolated query in
@@ -903,7 +886,6 @@ export function tracesListQuery(opts: TracesListOpts) {
 // (`ParentSpanId = ''`) ordered by Duration DESC at the database, so the
 // caller gets the actual slowest traces in the window rather than the most
 // recent. OrgId-scoped per the Warehouse Query Pattern.
-// ---------------------------------------------------------------------------
 
 export interface SlowTracesOpts {
 	service?: string
@@ -942,7 +924,6 @@ export function slowTracesQuery(opts: SlowTracesOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Span-level search query
 //
 // DSL port of the span-level search in `observability/search-traces.ts`
@@ -952,7 +933,6 @@ export function slowTracesQuery(opts: SlowTracesOpts) {
 // present, it reads `trace_detail_spans`, whose sort key starts with
 // (OrgId, TraceId); otherwise it uses the raw `traces` search path.
 // OrgId-scoped via `tracesBaseWhereConditions`.
-// ---------------------------------------------------------------------------
 
 export interface SpanSearchOpts extends TracesQueryOpts {
 	traceId?: string
@@ -1054,9 +1034,7 @@ export function spanSearchQuery(opts: SpanSearchOpts) {
 	return spanSearchFrom(Traces, opts, limit, offset, cutoff)
 }
 
-// ---------------------------------------------------------------------------
 // Root trace list query (aggregated root-span-level, for trace list UI)
-// ---------------------------------------------------------------------------
 
 export interface TracesRootListOpts extends TracesQueryOpts {
 	limit?: number
@@ -1283,9 +1261,7 @@ export function tracesRootListQuery(opts: TracesRootListOpts) {
 	return q
 }
 
-// ---------------------------------------------------------------------------
 // Trace list query (one row per TraceId, for trace list UIs)
-// ---------------------------------------------------------------------------
 
 export interface TraceListOpts extends TracesQueryOpts {
 	limit?: number
@@ -1421,9 +1397,7 @@ export function traceListQuery(opts: TraceListOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Trace-list service enrichment
-// ---------------------------------------------------------------------------
 
 export interface TraceServicesByTraceIdsOpts {
 	readonly traceIds: readonly string[]

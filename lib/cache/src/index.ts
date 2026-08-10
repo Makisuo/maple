@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // @maple/cache
 //
 // A cache port and a get-or-compute service, with no knowledge of queries or
@@ -9,7 +8,6 @@
 // The query-shaped half stayed behind: `bucket-cache` understands QuerySpec
 // time buckets, so it lives in @maple/query-engine/caching and depends on this
 // package rather than the other way round.
-// ---------------------------------------------------------------------------
 
 export * from "./cache-backend"
 export * from "./edge-cache"

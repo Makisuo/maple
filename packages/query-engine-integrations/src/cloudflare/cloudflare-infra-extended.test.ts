@@ -91,7 +91,6 @@ describe("cloudflareDurableObjectCountersSQL", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // CHNumber coercion — a BYO-ClickHouse org reads its OWN ClickHouse, whose
 // `FORMAT JSON` serializes UInt64/Int64 aggregates (sum/count/max/…) as JSON
 // STRINGS, while managed Tinybird returns them as numbers. Every numeric output
@@ -100,7 +99,6 @@ describe("cloudflareDurableObjectCountersSQL", () => {
 // a bare 500. These tests drive each (SQL, rowSchema) pair through the exact
 // `compileCH(...).decodeRows` path the query-engine handlers use, feeding
 // string-encoded rows (the BYO-CH shape).
-// ---------------------------------------------------------------------------
 describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () => {
 	const decodeFirst = <O>(compiled: CompiledQuery<O>, row: Record<string, unknown>): O => {
 		const [decoded] = Effect.runSync(compiled.decodeRows([row]))

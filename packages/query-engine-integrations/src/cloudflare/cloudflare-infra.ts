@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Cloudflare infrastructure page
 //
 // Rollups and timeseries backing the /infra/cloudflare page: per-zone HTTP
@@ -12,7 +11,6 @@
 // Split by table because counters live in `metrics_sum` (5-min delta sums)
 // and pre-computed percentiles live in `metrics_gauge` (one row per
 // `quantile`). The API handlers merge the two by ServiceName.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
@@ -59,9 +57,7 @@ const CACHE_SERVED_STATUSES = ["hit", "stale", "revalidated", "updating"] as con
 // JSON `null` and would break row decoding — so guard each with
 // `if(countIf > 0, avgIf, 0)`. (Same guard as cloudflare-map.ts.)
 
-// ---------------------------------------------------------------------------
 // Zones
-// ---------------------------------------------------------------------------
 
 export interface CloudflareZoneCountersOutput {
 	readonly serviceName: string
@@ -237,13 +233,11 @@ export function cloudflareZoneTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Zone detail (single zone, scoped by ServiceName)
 //
 // The poller stores `http.status_class` and `cache.status` on every
 // `cloudflare.http.requests` row, so a single zone supports bucketed
 // breakdowns by either dimension plus a latency-percentile timeseries.
-// ---------------------------------------------------------------------------
 
 export interface CloudflareZoneStatusTimeseriesOutput {
 	/** Bucket start, ISO-8601 UTC. */
@@ -372,9 +366,7 @@ export function cloudflareZoneLatencyTimeseriesSQL() {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Workers
-// ---------------------------------------------------------------------------
 
 export interface CloudflareWorkerCountersOutput {
 	readonly serviceName: string

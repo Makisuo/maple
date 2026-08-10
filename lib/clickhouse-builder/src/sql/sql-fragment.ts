@@ -1,16 +1,12 @@
 import { Data } from "effect"
 
-// ---------------------------------------------------------------------------
 // ClickHouse string escaping
-// ---------------------------------------------------------------------------
 
 export function escapeClickHouseString(value: string): string {
 	return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
 }
 
-// ---------------------------------------------------------------------------
 // SQL Fragment AST
-// ---------------------------------------------------------------------------
 
 export type SqlFragment = Data.TaggedEnum<{
 	/** Raw SQL string — no escaping. For ClickHouse-specific syntax. */
@@ -31,9 +27,7 @@ export type SqlFragment = Data.TaggedEnum<{
 
 const Frag = Data.taggedEnum<SqlFragment>()
 
-// ---------------------------------------------------------------------------
 // Constructors
-// ---------------------------------------------------------------------------
 
 export const raw = (sql: string): SqlFragment => Frag.Raw({ sql })
 export const str = (value: string): SqlFragment => Frag.Str({ value })
@@ -45,9 +39,7 @@ export const as_ = (expr: SqlFragment, alias: string): SqlFragment => Frag.As({ 
 export const when = (condition: boolean, fragment: SqlFragment): SqlFragment =>
 	Frag.When({ condition, fragment })
 
-// ---------------------------------------------------------------------------
 // Compiler
-// ---------------------------------------------------------------------------
 
 export const compile: (fragment: SqlFragment) => string = Frag.$match({
 	Raw: ({ sql }) => sql,

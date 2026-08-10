@@ -21,9 +21,7 @@ import {
 import { Authorization } from "./current-tenant"
 import { warehouseHttpErrors } from "./warehouse"
 
-// ---------------------------------------------------------------------------
 // Dedicated endpoint schemas
-// ---------------------------------------------------------------------------
 
 /** Shared primitives for filtered list/facet endpoints. */
 const StringArray = Schema.Array(Schema.String)
@@ -614,7 +612,6 @@ export class ServiceDbEdgesForServiceRequest extends Schema.Class<ServiceDbEdges
 	deploymentEnv: Schema.optional(DeploymentEnvironment),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Service-detail page bundles
 //
 // The service-detail page used to fan out N independent Worker requests on
@@ -622,7 +619,6 @@ export class ServiceDbEdgesForServiceRequest extends Schema.Class<ServiceDbEdges
 // browser→Worker round-trip. These bundle endpoints run a tab's queries in a
 // single Worker invocation (config resolved once, sub-queries in parallel),
 // collapsing the round-trips to 1.
-// ---------------------------------------------------------------------------
 
 export class ServiceDetailOverviewRequest extends Schema.Class<ServiceDetailOverviewRequest>(
 	"ServiceDetailOverviewRequest",
@@ -916,9 +912,7 @@ export class MetricsSummaryResponse extends Schema.Class<MetricsSummaryResponse>
 	),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Infrastructure (host-centric)
-// ---------------------------------------------------------------------------
 
 export class ListHostsRequest extends Schema.Class<ListHostsRequest>("ListHostsRequest")({
 	startTime: TinybirdDateTime,
@@ -1017,9 +1011,7 @@ export class FleetUtilizationTimeseriesResponse extends Schema.Class<FleetUtiliz
 	),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Kubernetes (pods / nodes / workloads)
-// ---------------------------------------------------------------------------
 
 const WorkloadKindLiteral = Schema.Literals(["deployment", "statefulset", "daemonset"])
 
@@ -1114,14 +1106,12 @@ export class PodsSummaryResponse extends Schema.Class<PodsSummaryResponse>("Pods
 	stalePods: Schema.Number,
 }) {}
 
-// ---------------------------------------------------------------------------
 // Web Analytics
 //
 // Product analytics over the browser SDK's session data. Every request shares
 // the same filter surface so a facet click narrows all five panels identically;
 // `WebAnalyticsFilterFields` is spread rather than nested so the wire shape stays
 // flat and the web side can build one filter object per page.
-// ---------------------------------------------------------------------------
 
 const WebAnalyticsFilterFields = {
 	host: Schema.optional(Schema.String),
@@ -1548,9 +1538,7 @@ export class WorkloadInfraTimeseriesResponse extends Schema.Class<WorkloadInfraT
 	unit: Schema.Literals(["percent", "cores"]),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Query Builder drafts (persisted by dashboards and alert rules)
-// ---------------------------------------------------------------------------
 
 const QueryBuilderAddOnsSchema = Schema.Struct({
 	groupBy: Schema.Boolean,
@@ -1612,9 +1600,7 @@ export const QueryBuilderQueryDraftSchema = Schema.Union([
 ])
 export type QueryBuilderQueryDraftPayload = Schema.Schema.Type<typeof QueryBuilderQueryDraftSchema>
 
-// ---------------------------------------------------------------------------
 // Raw SQL chart (Hyperdx-style — user-authored ClickHouse SQL with macros)
-// ---------------------------------------------------------------------------
 
 export const RawSqlDisplayType = Schema.Literals([
 	"line",

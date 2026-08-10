@@ -8,7 +8,6 @@ import { pickValueField, toBreakdownRows, type BreakdownRow } from "../_shared/b
 import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import { useContainerSize } from "../../../hooks/use-container-size"
 
-// ---------------------------------------------------------------------------
 // Ranked horizontal bars — the "top N by volume" panel.
 //
 // The funnel used to be the only row-per-category chart, so every ranking was
@@ -17,7 +16,6 @@ import { useContainerSize } from "../../../hooks/use-container-size"
 // bar, so four unrelated operations of equal size all render "100%". Here rows
 // are sorted by value and each percentage is a share of the **total**, which is
 // the only reading that sums to 100% across the panel.
-// ---------------------------------------------------------------------------
 
 interface Bar extends BreakdownRow {
 	color: string

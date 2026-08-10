@@ -16,9 +16,7 @@ const baseParams = {
 	endTime: "2024-01-02 00:00:00",
 }
 
-// ---------------------------------------------------------------------------
 // attributeKeysQuery
-// ---------------------------------------------------------------------------
 
 describe("attributeKeysQuery", () => {
 	it("compiles basic attribute keys query", () => {
@@ -56,9 +54,7 @@ describe("attributeKeysQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // spanAttributeValuesQuery
-// ---------------------------------------------------------------------------
 
 describe("spanAttributeValuesQuery", () => {
 	it("compiles span attribute values", () => {
@@ -82,9 +78,7 @@ describe("spanAttributeValuesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // resourceAttributeValuesQuery
-// ---------------------------------------------------------------------------
 
 describe("resourceAttributeValuesQuery", () => {
 	it("compiles resource attribute values", () => {
@@ -99,9 +93,7 @@ describe("resourceAttributeValuesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // logAttributeValuesQuery
-// ---------------------------------------------------------------------------
 
 describe("logAttributeValuesQuery", () => {
 	it("compiles log attribute values", () => {
@@ -115,9 +107,7 @@ describe("logAttributeValuesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // metricAttributeValuesQuery
-// ---------------------------------------------------------------------------
 
 describe("metricAttributeValuesQuery", () => {
 	it("compiles metric attribute values", () => {
@@ -129,9 +119,7 @@ describe("metricAttributeValuesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // metricScopedAttributeKeysQuery
-// ---------------------------------------------------------------------------
 
 const scopedParams = { ...baseParams, metricName: "http.server.duration" }
 
@@ -168,9 +156,7 @@ describe("metricScopedAttributeKeysQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // metricScopedAttributeValuesQuery
-// ---------------------------------------------------------------------------
 
 describe("metricScopedAttributeValuesQuery", () => {
 	it("groups by the map value for the requested key, filtered by MetricName", () => {

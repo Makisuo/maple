@@ -138,14 +138,12 @@ describe("sql catalog", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Builder coverage — the third entry surface.
 //
 // Every `*Query`/`*SQL` export under ch/queries must be either fixtured in
 // ch/builder-fixtures.ts or explicitly exempted below. Adding a builder
 // without either fails here — the same playbook as `uncoveredPipes`, extended
 // to the ~125 builders reached only through direct compiledQuery call sites.
-// ---------------------------------------------------------------------------
 
 const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	activity: activityQueries,

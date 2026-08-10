@@ -35,9 +35,7 @@ export { ErrorIssuePublicId, InvestigationPublicId } from "./resource-ids"
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
 
-// ---------------------------------------------------------------------------
 // Subject (snake_case wire form of the internal InvestigationSubject union)
-// ---------------------------------------------------------------------------
 
 /** A page/entity context hint (structurally the web's AutoContext) — opaque JSON. */
 const InvestigationContextRef = Schema.Record(Schema.String, Schema.Unknown)
@@ -290,9 +288,7 @@ const V2InvestigationFanout = Schema.Struct({
 	size: Schema.Number,
 })
 
-// ---------------------------------------------------------------------------
 // Resource
-// ---------------------------------------------------------------------------
 
 const investigationExample = {
 	id: "inv_YofPTrK9782DWwcnXhpcCw",
@@ -435,9 +431,7 @@ export const V2Investigation = Schema.Struct({
 })
 export type V2Investigation = Schema.Schema.Type<typeof V2Investigation>
 
-// ---------------------------------------------------------------------------
 // Requests / queries
-// ---------------------------------------------------------------------------
 
 export const V2InvestigationCreateParams = Schema.Struct({
 	subject: V2InvestigationCreateSubject,

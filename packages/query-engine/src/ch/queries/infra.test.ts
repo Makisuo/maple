@@ -44,9 +44,7 @@ describe("hostDetailSummaryQuery (sanity)", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Pods
-// ---------------------------------------------------------------------------
 
 describe("listPodsQuery", () => {
 	it("compiles with required filters and pod metric whitelist", () => {
@@ -275,9 +273,7 @@ describe("podGaugeTimeseriesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Nodes
-// ---------------------------------------------------------------------------
 
 describe("listNodesQuery", () => {
 	it("filters out pod-scoped rows so node aggregates are clean", () => {
@@ -341,9 +337,7 @@ describe("nodeGaugeTimeseriesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Workloads
-// ---------------------------------------------------------------------------
 
 describe("listWorkloadsQuery", () => {
 	it("groups by k8s.deployment.name when kind = deployment", () => {

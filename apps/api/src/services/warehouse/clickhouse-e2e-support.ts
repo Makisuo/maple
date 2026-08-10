@@ -1,11 +1,9 @@
-// ---------------------------------------------------------------------------
 // Shared plumbing for the ClickHouse-backed e2e tests.
 //
 // Both suites need the same three things: connection settings from the CI job's
 // env, a raw HTTP exec, and a database with every migration replayed into it.
 // Gated on `CLICKHOUSE_E2E=1` so a plain `bun run test` never reaches for a
 // server that isn't running.
-// ---------------------------------------------------------------------------
 
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"

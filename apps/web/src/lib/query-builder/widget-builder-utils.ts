@@ -36,14 +36,12 @@ const QUERY_BUILDER_ENDPOINTS = new Set([
 	"custom_query_builder_list",
 ])
 
-// ---------------------------------------------------------------------------
 // Lowering the widget editor's state to a persisted widget, and back.
 //
 // This module owns only what every widget type shares. The per-type halves live
 // in `components/dashboard-builder/widgets/types/*` — see `widget-type-registry`
 // for why. What used to be four if-chains over `state.visualization` is now four
 // dispatches through one registry.
-// ---------------------------------------------------------------------------
 
 export type { QueryBuilderWidgetState } from "@/lib/query-builder/widget-builder-shared"
 export {
@@ -56,9 +54,7 @@ export {
 const definitionForState = (state: QueryBuilderWidgetState) =>
 	widgetTypes[toPanelType(state.visualization, state.chartId)]
 
-// ---------------------------------------------------------------------------
 // Persisted widget → editor state
-// ---------------------------------------------------------------------------
 
 export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState {
 	const params = (widget.dataSource.params ?? {}) as Record<string, unknown>
@@ -150,9 +146,7 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 	return { ...shared, queries: [legacyQueryDraft(params)], formulas: [] }
 }
 
-// ---------------------------------------------------------------------------
 // Editor state → persisted widget
-// ---------------------------------------------------------------------------
 
 /** The plain timeseries data source every query-driven type starts from. */
 function timeseriesDataSource(state: QueryBuilderWidgetState): {
@@ -260,9 +254,7 @@ export function buildWidgetDisplay(
 	})
 }
 
-// ---------------------------------------------------------------------------
 // Validation
-// ---------------------------------------------------------------------------
 
 export function validateQueries(state: QueryBuilderWidgetState): string | null {
 	const definition = definitionForState(state)

@@ -8,9 +8,7 @@ import type * as cf from "@cloudflare/workers-types"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 
-// ---------------------------------------------------------------------------
 // SqlStorage — Effect-native wrapper around cf.SqlStorage
-// ---------------------------------------------------------------------------
 
 export type SqlStorageValue = cf.SqlStorageValue
 
@@ -59,9 +57,7 @@ const fromSqlStorage = (sql: cf.SqlStorage): SqlStorage => ({
 	},
 })
 
-// ---------------------------------------------------------------------------
 // DurableObjectTransaction
-// ---------------------------------------------------------------------------
 
 export interface DurableObjectTransaction {
 	get<T = unknown>(key: string, options?: cf.DurableObjectGetOptions): Effect.Effect<T | undefined>
@@ -77,9 +73,7 @@ export interface DurableObjectTransaction {
 	deleteAlarm(options?: cf.DurableObjectSetAlarmOptions): Effect.Effect<void>
 }
 
-// ---------------------------------------------------------------------------
 // DurableObjectStorage
-// ---------------------------------------------------------------------------
 
 export interface DurableObjectStorage {
 	get<T = unknown>(key: string, options?: cf.DurableObjectGetOptions): Effect.Effect<T | undefined>
@@ -103,9 +97,7 @@ export interface DurableObjectStorage {
 	onNextSessionRestoreBookmark(bookmark: string): Effect.Effect<string>
 }
 
-// ---------------------------------------------------------------------------
 // Constructors from raw Cloudflare types
-// ---------------------------------------------------------------------------
 
 export const fromDurableObjectTransaction = (txn: cf.DurableObjectTransaction): DurableObjectTransaction => ({
 	get: ((keyOrKeys: string | string[], options?: cf.DurableObjectGetOptions) =>

@@ -9,7 +9,6 @@ import { Context, Effect, Layer } from "effect"
 import { VcsRepository } from "./VcsRepository"
 import { VcsSyncQueue } from "./VcsSyncQueue"
 
-// ---------------------------------------------------------------------------
 // Vendor-agnostic producer for the periodic (cron) VCS sync. Once every 12h it
 // enqueues one `installation-sync` job (reason "scheduled") per processable
 // installation across every org. All provider work — re-listing repos,
@@ -17,7 +16,6 @@ import { VcsSyncQueue } from "./VcsSyncQueue"
 // the queue consumer (VcsSyncService) behind the VcsProviderClient port, so this
 // scheduler never touches a provider module. It is the backstop for any webhook
 // delivery (push, branch, installation) that was dropped.
-// ---------------------------------------------------------------------------
 
 interface VcsScheduledSyncResult {
 	/** Installations found across all orgs, regardless of status. */

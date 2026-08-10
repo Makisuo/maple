@@ -1,11 +1,9 @@
-// ---------------------------------------------------------------------------
 // Cloudflare integration usage
 //
 // Hourly ingest volume per Cloudflare-derived service (zone or Worker script)
 // from `metrics_sum`, backing the integrations-page "is data flowing?" readout.
 // The request-count metrics are 5-min delta sums written by the analytics
 // poller, so sum(Value) per bucket is the true request count.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"

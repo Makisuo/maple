@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Cloudflare zone breakdowns + filter facets
 //
 // One generic pair of queries (totals + timeseries) serves every breakdown
@@ -9,7 +8,6 @@
 // Row shape is uniform across dimensions: dimensions with no errors/bytes
 // metric emit literal 0 for those columns, so the response schema and the UI
 // table stay generic.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
@@ -285,9 +283,7 @@ export function cloudflareZoneBreakdownCoverageSQL(dimension: CloudflareBreakdow
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Filter facets
-// ---------------------------------------------------------------------------
 
 export interface CloudflareZoneFacetsOutput {
 	readonly name: string

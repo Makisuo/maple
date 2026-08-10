@@ -140,13 +140,11 @@ describe("CompiledQuery.decodeFirstRow", () => {
 	)
 })
 
-// ---------------------------------------------------------------------------
 // Tenant scope
 //
 // `tenantScope` is what executors gate on, so these cases pin the exact shapes
 // that must NOT read as scoped. Each one compiles to SQL that mentions the
 // tenant column — which is why a substring check can't tell them apart.
-// ---------------------------------------------------------------------------
 
 describe("CompiledQuery.tenantScope", () => {
 	const events = CH.table("events", { OrgId: CH.string, Count: CH.uint64 })

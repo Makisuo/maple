@@ -209,9 +209,7 @@ const executeQueryEngineEffect = Effect.fn("QueryEngine.execute")(function* (
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Typed result extractors for QueryEngineResult union
-// ---------------------------------------------------------------------------
 
 export function extractFacets(response: QueryEngineExecuteResponse): ReadonlyArray<FacetItem> {
 	const r = response.result

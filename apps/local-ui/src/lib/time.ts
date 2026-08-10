@@ -17,9 +17,7 @@ export interface TimeBounds {
 	endTime: string
 }
 
-// ---------------------------------------------------------------------------
 // Time-range presets — drive the segmented range control in the filter bar.
-// ---------------------------------------------------------------------------
 
 export interface TimeRange {
 	readonly key: string

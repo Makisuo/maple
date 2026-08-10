@@ -19,7 +19,6 @@ import {
 	type StatAggregate,
 } from "@/lib/query-builder/widget-builder-shared"
 
-// ---------------------------------------------------------------------------
 // The settings rail's vocabulary.
 //
 // Each field reads and writes the builder state through context, so a panel
@@ -27,7 +26,6 @@ import {
 // one form gated on `isStat && …`. The rail used to be a single 592-line
 // component behind seven `isX` booleans and two `showX` booleans, where adding a
 // widget type meant threading a tenth flag through every section.
-// ---------------------------------------------------------------------------
 
 export type LegendPosition = "bottom" | "right" | "hidden"
 

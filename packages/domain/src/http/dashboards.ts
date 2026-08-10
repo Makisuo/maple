@@ -231,9 +231,7 @@ export const DashboardWidgetSchema = Schema.Struct({
 	timeRange: Schema.optionalKey(TimeRangeSchema),
 })
 
-// ---------------------------------------------------------------------------
 // Dashboard variables
-// ---------------------------------------------------------------------------
 
 // Must not start with an underscore so `$name` references can never collide
 // with the `$__` built-in macros ($__startTime, $__timeFilter, ...).
@@ -375,9 +373,7 @@ export class DashboardDeleteResponse extends Schema.Class<DashboardDeleteRespons
 	},
 ) {}
 
-// ---------------------------------------------------------------------------
 // Versions / history
-// ---------------------------------------------------------------------------
 
 export const DashboardVersionChangeKind = Schema.Literals([
 	"created",
@@ -498,9 +494,7 @@ export class DashboardConcurrencyError extends Schema.TaggedError<DashboardConcu
 	{ httpApiStatus: 409 },
 ) {}
 
-// ---------------------------------------------------------------------------
 // Templates
-// ---------------------------------------------------------------------------
 
 export class DashboardTemplateParameter extends Schema.Class<DashboardTemplateParameter>(
 	"DashboardTemplateParameter",

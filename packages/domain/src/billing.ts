@@ -22,7 +22,6 @@ export function isActivePlanSubscription(sub: PlanGatingSubscription | null | un
 	return sub.status === "active"
 }
 
-// ---------------------------------------------------------------------------
 // Cycle pricing
 //
 // One definition of "what does this cycle cost so far", in cents, used by the
@@ -31,7 +30,6 @@ export function isActivePlanSubscription(sub: PlanGatingSubscription | null | un
 // Cents throughout. Rates are per-unit dollars in the Autumn catalog (e.g.
 // $0.30/GB, $0.002/session), so the multiply happens in cents and rounds once,
 // at the end — not per feature.
-// ---------------------------------------------------------------------------
 
 export interface FeatureUsagePricing {
 	/** Usage this cycle, in the feature's billed unit (GB, or a raw count). */
@@ -150,7 +148,6 @@ export function projectCycleSpend({
 	return baseCents + Math.round(overageCents * (totalMs / elapsedMs))
 }
 
-// ---------------------------------------------------------------------------
 // Whose prices apply
 //
 // Two sources describe a plan: the customer's OWN subscription plan (expanded
@@ -160,7 +157,6 @@ export function projectCycleSpend({
 // pays. Pricing from the catalog in that case bills them at somebody else's
 // rates, so the customer's own plan always wins and the catalog is the fallback
 // for the (common) case where nothing was expanded.
-// ---------------------------------------------------------------------------
 
 /** Structural view of a plan's per-feature line, from either source. */
 export interface PlanItemLike {

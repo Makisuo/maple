@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // SQL catalog for the integration query builders.
 //
 // The core package's catalog cannot cover these: `@maple/query-engine` must not
@@ -6,7 +5,6 @@
 // the builders instead. Same contract as the core catalog — compile the REAL
 // exported builder with production-shaped params, so every SQL shape the
 // product can emit is enumerated and snapshotted.
-// ---------------------------------------------------------------------------
 
 import { compile, compileUnion, type CompiledQuery } from "@maple/query-engine/ch"
 import * as CH from "./index"

@@ -67,9 +67,7 @@ import { createTtlCache } from "./ttl-cache.js"
  * for channels it is a member of, which naturally bounds the event volume.
  */
 
-// ---------------------------------------------------------------------------
 // Bounds
-// ---------------------------------------------------------------------------
 
 /**
  * Engagement expires. Without a bound, one @mention makes every later human
@@ -109,9 +107,7 @@ const ENGAGEMENT_RECENT_MESSAGE_WINDOW = 15
  */
 const EVE_THREAD_PAGE_SIZE = 50
 
-// ---------------------------------------------------------------------------
 // Engagement cache
-// ---------------------------------------------------------------------------
 
 // Engagement is sticky once established (the bot's reply stays in the thread
 // forever), so an entry could live long; it is deliberately short instead,
@@ -154,9 +150,7 @@ function engagementCacheKey(teamId: string | undefined, channelId: string, threa
 	return `${teamId ?? "-"}:${channelId}:${threadTs}`
 }
 
-// ---------------------------------------------------------------------------
 // Pending-promotion registry
-// ---------------------------------------------------------------------------
 
 /**
  * A promotion the handler still has to confirm. Keyed by the message's own ts,
@@ -228,9 +222,7 @@ export function pendingFollowUp(target: {
 	return pendingPromotions.get(pendingKey(target.teamId, target.channelId, target.messageTs)) ?? null
 }
 
-// ---------------------------------------------------------------------------
 // Learning engagement from the event stream
-// ---------------------------------------------------------------------------
 
 /**
  * Refreshes the engagement cache from an event that already *proves* the bot is
@@ -302,9 +294,7 @@ export function recordThreadEngagement(rawBody: string): void {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // Promotion (webhook path — synchronous, zero network)
-// ---------------------------------------------------------------------------
 
 export interface PromotionOptions {
 	/** Slack redelivery (`x-slack-retry-num` present); suppresses the `:eyes:` ack. */
@@ -403,9 +393,7 @@ function parseFollowUpCandidate(rawBody: string): FollowUpCandidate | null {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Confirmation (dispatch path — post-200, no budget, no extra fetch)
-// ---------------------------------------------------------------------------
 
 export type FollowUpEngagedReason =
 	/** The bot posted or was mentioned here within ENGAGED_TTL_MS. */

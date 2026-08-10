@@ -8,9 +8,7 @@ import { createRouter } from "@tanstack/react-router"
 import { Clock, Effect, Exit, type ManagedRuntime, type Tracer } from "effect"
 import type { Atom, AtomRegistry } from "effect/unstable/reactivity"
 
-// ---------------------------------------------------------------------------
 // Internal type aliases (centralizes `any` for runtime types)
-// ---------------------------------------------------------------------------
 
 type AnyManagedRuntime = ManagedRuntime.ManagedRuntime<any, any>
 type AnyAtomRuntime = Atom.AtomRuntime<any, any>
@@ -143,9 +141,7 @@ export function createEffectRouter<
 		context: { ...userContext, ...effectContext },
 	})
 
-	// ---------------------------------------------------------------------------
 	// Navigation-level span tracking
-	// ---------------------------------------------------------------------------
 
 	// Span end timestamps are nanoseconds. Source the wall clock through the
 	// runtime's Clock (testable) rather than a raw Date.now(), then scale to ns.
@@ -178,9 +174,7 @@ export function createEffectRouter<
 	return router
 }
 
-// ---------------------------------------------------------------------------
 // Navigation span access
-// ---------------------------------------------------------------------------
 
 // Known SPA singleton: a single browser document has exactly one active
 // navigation at a time, so module-level mutable state is acceptable here.

@@ -4,7 +4,6 @@ import { listOrgScopedDatasourceNames } from "@/services/warehouse/warehouse-cat
 import { mintOrgReadJwt } from "@/services/auth/tinybird-jwt"
 import { Env } from "@/platform/Env"
 
-// ---------------------------------------------------------------------------
 // TinybirdOrgTokenService — mints and caches per-org Tinybird read JWTs used to
 // scope the raw-SQL path to a single org's rows (row-level security enforced by
 // Tinybird server-side; see lib/tinybird-jwt.ts).
@@ -13,7 +12,6 @@ import { Env } from "@/platform/Env"
 // expires SKEW seconds before the token itself, so a served token always has
 // comfortably more life left than the executor's 30s client-cache TTL — a cached
 // Tinybird client never outlives the JWT it was built with.
-// ---------------------------------------------------------------------------
 
 /** Token lifetime. */
 const JWT_TTL_SECONDS = 600

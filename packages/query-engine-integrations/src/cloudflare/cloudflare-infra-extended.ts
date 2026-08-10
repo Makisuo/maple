@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Cloudflare infrastructure page — extended datasets
 //
 // Companions to cloudflare-infra.ts for the poller's newer datasets: firewall/WAF
@@ -11,7 +10,6 @@
 // delta sums), point-in-time samples/percentiles in `metrics_gauge`, every
 // numeric output through CHNumber so BYO-ClickHouse string-encoded aggregates
 // decode identically to Tinybird numbers.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
@@ -29,9 +27,7 @@ import {
 
 // Same NaN guard as cloudflare-infra.ts.
 
-// ---------------------------------------------------------------------------
 // Firewall/WAF events (single zone)
-// ---------------------------------------------------------------------------
 
 export interface CloudflareZoneFirewallTimeseriesOutput {
 	readonly bucket: string
@@ -109,9 +105,7 @@ export function cloudflareZoneFirewallTopSQL(opts: CloudflareFilterOpts = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // DNS analytics (single zone)
-// ---------------------------------------------------------------------------
 
 export interface CloudflareZoneDnsTimeseriesOutput {
 	readonly bucket: string
@@ -184,9 +178,7 @@ export function cloudflareZoneDnsBreakdownSQL(opts: CloudflareFilterOpts = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Workers-platform resources (org-wide)
-// ---------------------------------------------------------------------------
 
 export interface CloudflareQueueGaugesOutput {
 	/** `cloudflare-queue/{queueId}`. */

@@ -128,10 +128,8 @@ Bun.serve({
 	},
 })
 
-// ---------------------------------------------------------------------------
 // Analytics fixtures — deterministic-ish synthetic edge traffic so the poller
 // produces plausible cloudflare.* metrics locally.
-// ---------------------------------------------------------------------------
 
 const zoneFixture = (id: string, name: string) => ({
 	id,

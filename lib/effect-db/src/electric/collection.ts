@@ -115,12 +115,10 @@ function createBackoffOnError(
 	let currentDelay = backoffConfig.initialDelayMs
 	let resetTimeout: ReturnType<typeof setTimeout> | null = null
 
-	// Reset backoff state after a period of successful operation
 	const scheduleReset = () => {
 		if (resetTimeout) {
 			clearTimeout(resetTimeout)
 		}
-		// Reset after configured timeout of no errors
 		resetTimeout = setTimeout(() => {
 			retryCount = 0
 			currentDelay = backoffConfig.initialDelayMs
@@ -130,18 +128,10 @@ function createBackoffOnError(
 	return async (error) => {
 		retryCount++
 
-		// Dispatch error state changed event
 		dispatchErrorStateChanged(collectionId, true)
 
-		// Check if this is a 401 auth error - stop this stream and hand recovery to
-		// the app. A 401 here is usually a transient token problem (expired Clerk
-		// token on a long-lived stream, or a stale-org stream after an org switch),
-		// NOT proof the session is gone — permanently killing sync would leave the
-		// collection alive but deaf, so every later optimistic write would await a
-		// txid that can never arrive and time out. The recovery listener recreates
-		// the collections (minting a fresh token via the auth-headers provider)
-		// under a bounded retry budget, so a genuinely dead session degrades to a
-		// stopped stream instead of a loop.
+		// A 401 can be a stale stream token, so let the app recreate the collection
+		// under its bounded retry budget instead of leaving a live-but-deaf instance.
 		const errorStatus = (error as { status?: number })?.status
 		if (errorStatus === 401) {
 			logVia(
@@ -156,11 +146,10 @@ function createBackoffOnError(
 			if (typeof window !== "undefined") {
 				window.dispatchEvent(new CustomEvent("collection:auth-error", { detail: { collectionId } }))
 			}
-			// Return undefined to stop syncing this (stale-token) stream
 			return
 		}
 
-		// Check if this is a schema validation error - likely a stale cache after a deploy
+		// A schema mismatch usually means the client retained a pre-deploy shape.
 		const errorName = (error as Error)?.name || (error as { _tag?: string })?._tag
 		if (errorName === "SchemaValidationError") {
 			logVia(runtime, "warning", "Schema validation error, dispatching recovery event", {
@@ -170,11 +159,9 @@ function createBackoffOnError(
 			if (typeof window !== "undefined") {
 				window.dispatchEvent(new CustomEvent("collection:schema-error"))
 			}
-			// Return undefined to stop syncing — the layout will handle recovery
 			return
 		}
 
-		// Check if max retries exceeded
 		if (retryCount > backoffConfig.maxRetries) {
 			logVia(runtime, "error", "Max retries exceeded, stopping sync", {
 				collectionId,
@@ -185,13 +172,11 @@ function createBackoffOnError(
 			// Terminal: nothing will refetch this shape until the collection is
 			// recreated, so tell the app rather than leaving it on a skeleton.
 			dispatchSyncFailed(collectionId)
-			// Return undefined to stop syncing
 			return
 		}
 
-		// Calculate delay with optional jitter
 		const delay = backoffConfig.jitter
-			? currentDelay * (0.5 + Math.random()) // Jitter between 50-150% of delay
+			? currentDelay * (0.5 + Math.random())
 			: currentDelay
 
 		logVia(runtime, "warning", "Connection error, retrying", {
@@ -203,25 +188,19 @@ function createBackoffOnError(
 			cause: error,
 		})
 
-		// Wait for the delay
 		await new Promise((resolve) => setTimeout(resolve, delay))
 
-		// Increase delay for next retry (exponential backoff)
 		currentDelay = Math.min(currentDelay * backoffConfig.multiplier, backoffConfig.maxDelayMs)
 
-		// Schedule reset of backoff state
 		scheduleReset()
 
-		// Call user's onError handler if provided
 		if (userOnError) {
 			const result = await userOnError(error)
-			// If user handler returns a result, use it
 			if (result !== undefined) {
 				return result
 			}
 		}
 
-		// Return empty object to continue syncing with same params
 		return {}
 	}
 }
@@ -232,24 +211,16 @@ type InferSchemaOutput<T> = T extends StandardSchemaV1
 		: Record<string, unknown>
 	: Record<string, unknown>
 
-/**
- * Effect-based utilities for Electric collections.
- */
+/** Effect-based Electric collection utilities. */
 export interface EffectElectricCollectionUtils extends ElectricCollectionUtils {
-	/**
-	 * Wait for a specific transaction ID to be synced (Effect version).
-	 */
+	/** Waits for a transaction to reach this collection. */
 	readonly awaitTxIdEffect: (
 		txid: Txid,
 		timeout?: number,
 	) => Effect.Effect<boolean, TxIdTimeoutError | InvalidTxIdError | AwaitTxIdError>
 }
 
-/**
- * Creates Electric collection options with Effect-based handlers
- */
-
-// With schema + with runtime (R inferred from runtime)
+/** Creates Electric collection options with Effect-based handlers. */
 export function effectElectricCollectionOptions<T extends StandardSchemaV1, R>(
 	config: EffectElectricCollectionConfig<
 		InferSchemaOutput<T>,
@@ -267,7 +238,6 @@ export function effectElectricCollectionOptions<T extends StandardSchemaV1, R>(
 	schema: T
 }
 
-// With schema + without runtime (R must be never)
 export function effectElectricCollectionOptions<T extends StandardSchemaV1>(
 	config: EffectElectricCollectionConfig<
 		InferSchemaOutput<T>,
@@ -285,7 +255,6 @@ export function effectElectricCollectionOptions<T extends StandardSchemaV1>(
 	schema: T
 }
 
-// Without schema + with runtime (R inferred from runtime)
 export function effectElectricCollectionOptions<T extends Row<unknown>, R>(
 	config: EffectElectricCollectionConfig<T, string | number, never, Record<string, never>, R> & {
 		schema?: never
@@ -297,7 +266,6 @@ export function effectElectricCollectionOptions<T extends Row<unknown>, R>(
 	schema?: never
 }
 
-// Without schema + without runtime (R must be never)
 export function effectElectricCollectionOptions<T extends Row<unknown>>(
 	config: EffectElectricCollectionConfig<T, string | number, never, Record<string, never>, never> & {
 		schema?: never
@@ -320,13 +288,11 @@ export function effectElectricCollectionOptions(
 	const promiseOnUpdate = convertUpdateHandler(config.onUpdate, config.runtime)
 	const promiseOnDelete = convertDeleteHandler(config.onDelete, config.runtime)
 
-	// Handle backoff configuration
 	const backoffEnabled = config.backoff !== false
 	const backoffConfig: Required<BackoffConfig> = backoffEnabled
 		? { ...DEFAULT_BACKOFF_CONFIG, ...(typeof config.backoff === "object" ? config.backoff : {}) }
-		: DEFAULT_BACKOFF_CONFIG // Won't be used when disabled
+		: DEFAULT_BACKOFF_CONFIG
 
-	// Create modified shapeOptions with backoff-wrapped onError
 	const modifiedShapeOptions = backoffEnabled
 		? {
 				...config.shapeOptions,

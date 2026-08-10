@@ -1,10 +1,8 @@
-// ---------------------------------------------------------------------------
 // Shared output-shaping helpers for timeseries queries.
 //
 // These are not Cloudflare-specific despite most of the callers living there —
 // PlanetScale, usage and alert-check queries format buckets the same way, and
 // the format string has to match what the frontend parses.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"

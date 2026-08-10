@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Cloudflare zone filters
 //
 // The Cloudflare poller stores dimensions as SLICES, not a cube. Each breakdown
@@ -13,7 +12,6 @@
 // as data. Every query passes its metric family's row, inapplicable keys are
 // dropped here, and the handler reports them back as `ignoredFilters` so the UI
 // can mark that panel zone-wide rather than silently lying about its scope.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { type ColumnAccessor } from "@maple-dev/clickhouse-builder"

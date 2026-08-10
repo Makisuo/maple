@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Replay event-stream normalization
 //
 // The player concatenates a session's rrweb chunk blobs into one event array.
@@ -10,7 +9,6 @@
 // a corrupted one and the reported length balloons to the whole tab lifetime.
 //
 // `normalizeEvents` repairs the stream so those legacy sessions stay playable.
-// ---------------------------------------------------------------------------
 
 import { Array as Arr, Order } from "effect"
 

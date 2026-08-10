@@ -95,9 +95,7 @@ export interface LivenessProbeInput {
 	readonly baselineEndMs: number
 }
 
-// ---------------------------------------------------------------------------
 // I/O
-// ---------------------------------------------------------------------------
 
 const EMPTY_TOTALS: ServiceWindowTotals = { spanCount: 0, estimatedSpanCount: 0 }
 
@@ -225,9 +223,7 @@ export const probeLiveness: (input: LivenessProbeInput) => Effect.Effect<Livenes
 	return result
 })
 
-// ---------------------------------------------------------------------------
 // Pure verdict logic
-// ---------------------------------------------------------------------------
 
 const verdict = (
 	dataFlowing: boolean,

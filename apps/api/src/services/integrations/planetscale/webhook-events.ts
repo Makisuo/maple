@@ -22,9 +22,7 @@ import { Database, type DatabaseError } from "@/platform/DatabaseLive"
  * so repeated firings dedupe into one issue that re-opens.
  */
 
-// ---------------------------------------------------------------------------
 // Signature
-// ---------------------------------------------------------------------------
 
 /** Verify PlanetScale's `X-PlanetScale-Signature`: HMAC-SHA256 hex of the raw body. */
 export const verifyPlanetScaleSignature = (
@@ -39,9 +37,7 @@ export const verifyPlanetScaleSignature = (
 	return timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(provided, "utf8"))
 }
 
-// ---------------------------------------------------------------------------
 // Payload
-// ---------------------------------------------------------------------------
 
 export const PlanetScaleWebhookPayload = Schema.Struct({
 	/** Unix epoch seconds. */
@@ -57,9 +53,7 @@ export const decodePlanetScaleWebhookPayload = Schema.decodeUnknownEffect(
 	Schema.fromJsonString(PlanetScaleWebhookPayload),
 )
 
-// ---------------------------------------------------------------------------
 // Classification
-// ---------------------------------------------------------------------------
 
 /** Where an event belongs on the timeline. Mirrored by the web vocabulary table. */
 export type PlanetScaleEventCategory = "deploy_request" | "branch" | "database" | "cluster" | "keyspace"
@@ -231,9 +225,7 @@ const BRANCH_STATE_VERB: Record<string, string> = {
 	"branch.start_maintenance": "entered maintenance",
 }
 
-// ---------------------------------------------------------------------------
 // Timeline rows
-// ---------------------------------------------------------------------------
 
 /**
  * PlanetScale webhook `timestamp` is epoch SECONDS; the deploy-request REST
@@ -313,9 +305,7 @@ export const insertPlanetScaleEvent: (
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Issue upsert (kind="integration")
-// ---------------------------------------------------------------------------
 
 const SYSTEM_INTEGRATIONS_AGENT_NAME = "system-integrations"
 

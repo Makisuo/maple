@@ -3,11 +3,9 @@ import { VcsQueueError, VcsSyncJob } from "@maple/domain/http"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Context, Effect, Layer, Schema } from "effect"
 
-// ---------------------------------------------------------------------------
 // Vendor-agnostic queue producer. Reads the `VCS_SYNC_QUEUE` binding from the
 // worker env and sends Schema-encoded `VcsSyncJob`s. The same queue carries
 // jobs for every provider (discriminated by `job.provider`).
-// ---------------------------------------------------------------------------
 
 const QUEUE_BINDING = "VCS_SYNC_QUEUE"
 const encodeJob = Schema.encodeSync(VcsSyncJob)

@@ -6,11 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { WidgetDataSource } from "@/components/dashboard-builder/types"
 import type { DashboardRow } from "@/lib/collections/dashboards"
 
-// ---------------------------------------------------------------------------
 // A stand-in for the Electric-synced collection. `useDashboardMutations` runs no
 // live query, so the write half only needs `get`/`update`/`delete` plus the txid
 // util — which makes the whole mutator surface testable without a shape stream.
-// ---------------------------------------------------------------------------
 
 const rows = new Map<string, DashboardRow>()
 let persistResult: () => Promise<void> = () => Promise.resolve()

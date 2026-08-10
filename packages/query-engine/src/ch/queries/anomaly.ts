@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Anomaly detector queries
 //
 // The built-in anomaly detector computes seasonal-naive baselines per series
@@ -11,7 +10,6 @@
 // trailing 7-day window returns both the in-progress hour (the current
 // observation) and ≤21 sealed same-hour-of-day samples (the baseline) in ONE
 // query; the caller splits rows on `hour === currentHourStart`.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
@@ -23,9 +21,7 @@ export function matchedHoursOfDay(currentHourOfDay: number): readonly number[] {
 	return [(currentHourOfDay + 23) % 24, currentHourOfDay, (currentHourOfDay + 1) % 24]
 }
 
-// ---------------------------------------------------------------------------
 // Golden signals — per (service, env, hour) from traces_aggregates_hourly
-// ---------------------------------------------------------------------------
 
 export interface AnomalyTraceSignalsOpts {
 	/** Hour-of-day values (0–23) to include; see `matchedHoursOfDay`. */
@@ -67,9 +63,7 @@ export function anomalyTraceSignalsQuery(opts: AnomalyTraceSignalsOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Log volume — per (service, env, hour) from logs_aggregates_hourly
-// ---------------------------------------------------------------------------
 
 const ERROR_SEVERITIES = ["error", "fatal", "critical"] as const
 const WARN_SEVERITIES = ["warn", "warning"] as const
@@ -102,9 +96,7 @@ export function anomalyLogVolumeQuery(opts: AnomalyTraceSignalsOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Error fingerprint spikes — current 30-min window per (fingerprint, env)
-// ---------------------------------------------------------------------------
 
 export interface AnomalyErrorSpikeCurrentOutput {
 	readonly fingerprintHash: string
@@ -136,10 +128,8 @@ export function anomalyErrorSpikeCurrentQuery(opts: { limit?: number }) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Error fingerprint spike baseline — 7d hourly stats per (fingerprint, env).
 // Runs ~once per org per hour; the caller caches the blob in KV.
-// ---------------------------------------------------------------------------
 
 export interface AnomalyErrorSpikeBaselineOutput {
 	readonly fingerprintHash: string
@@ -178,12 +168,10 @@ export function anomalyErrorSpikeBaselineQuery(opts: { limit?: number }) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Incident timeseries — continuous window for ONE detector series, backing the
 // observed-vs-baseline chart on the anomaly detail page. Unlike the detector
 // queries above there is no matched-hours filter: the chart wants every bucket
 // in the window for a single (service, env) or (fingerprint, env) series.
-// ---------------------------------------------------------------------------
 
 export interface AnomalyTraceSignalTimeseriesOutput {
 	readonly hour: string

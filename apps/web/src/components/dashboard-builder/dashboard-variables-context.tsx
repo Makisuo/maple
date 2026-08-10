@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Dashboard variables
 //
 // Grafana-style dashboard variables: definitions live on the dashboard
@@ -10,7 +9,6 @@
 // Widgets consume the resolved values through `useDashboardVariablesOptional`
 // inside `useWidgetDataSource`, where `$name` references in widget params are
 // interpolated before the query fires.
-// ---------------------------------------------------------------------------
 
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"

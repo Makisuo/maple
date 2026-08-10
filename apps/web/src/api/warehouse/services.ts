@@ -257,9 +257,7 @@ const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(fun
 	}
 })
 
-// ---------------------------------------------------------------------------
 // Fast service-health snapshot (main overview)
-// ---------------------------------------------------------------------------
 
 export interface ServiceHealthSnapshot {
 	serviceName: string
@@ -325,9 +323,7 @@ const getServiceHealthSnapshotEffect = Effect.fn("QueryEngine.getServiceHealthSn
 	}
 })
 
-// ---------------------------------------------------------------------------
 // Service latency baseline (baseline-relative health)
-// ---------------------------------------------------------------------------
 
 export interface ServiceLatencyBaseline {
 	serviceName: string

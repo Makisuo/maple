@@ -208,9 +208,7 @@ export type TinybirdProjectRevision = Schema.Schema.Type<typeof TinybirdProjectR
 export const TinybirdHost = MapleId("@maple/TinybirdHost", "Tinybird Host")
 export type TinybirdHost = Schema.Schema.Type<typeof TinybirdHost>
 
-// ---------------------------------------------------------------------------
 // Telemetry dimension primitives
-// ---------------------------------------------------------------------------
 
 export const ServiceName = MapleTelemetry("@maple/ServiceName", "Service Name")
 export type ServiceName = Schema.Schema.Type<typeof ServiceName>
@@ -233,9 +231,7 @@ export type FingerprintHash = Schema.Schema.Type<typeof FingerprintHash>
 export const MetricName = MapleTelemetry("@maple/MetricName", "Metric Name")
 export type MetricName = Schema.Schema.Type<typeof MetricName>
 
-// ---------------------------------------------------------------------------
 // OpenTelemetry enums (closed value sets → modeled as literal unions)
-// ---------------------------------------------------------------------------
 
 // Title Case per the repo's span status convention; verified distinct values in the
 // warehouse are exactly Ok / Error / Unset.
@@ -267,9 +263,7 @@ export const HttpMethod = Schema.Literals([
 })
 export type HttpMethod = Schema.Schema.Type<typeof HttpMethod>
 
-// ---------------------------------------------------------------------------
 // External / audit / dashboard reference IDs
-// ---------------------------------------------------------------------------
 
 export const ExternalUserId = MapleId("@maple/ExternalUserId", "External User ID")
 export type ExternalUserId = Schema.Schema.Type<typeof ExternalUserId>

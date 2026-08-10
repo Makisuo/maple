@@ -33,9 +33,7 @@ export function attributeKeysQuery(opts: AttributeKeysQueryOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Attribute values queries
-// ---------------------------------------------------------------------------
 
 export interface AttributeValuesOpts {
 	attributeKey: string
@@ -104,12 +102,10 @@ export function logAttributeValuesQuery(opts: AttributeValuesOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Metric-scoped attribute discovery — reads the raw metric tables so keys and
 // values are filtered to a single metric. The hourly rollups above have no
 // MetricName column (and only materialize from metrics_sum), so per-metric
 // scoping must scan the raw table for the metric's type.
-// ---------------------------------------------------------------------------
 
 export interface MetricScopedAttributeKeysOpts {
 	metricType: MetricType

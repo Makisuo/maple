@@ -2,9 +2,7 @@ import { makeCond, makeExpr } from "../expr"
 import { raw, str, compile } from "../../sql/sql-fragment"
 import type { Expr, Condition } from "../expr"
 
-// ---------------------------------------------------------------------------
 // Map functions (handwritten — bracket syntax or custom assembly)
-// ---------------------------------------------------------------------------
 
 export function mapContains(mapExpr: Expr<Record<string, string>>, key: string): Condition {
 	return makeCond(raw(`mapContains(${compile(mapExpr.toFragment())}, ${compile(str(key))})`))

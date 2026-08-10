@@ -14,9 +14,7 @@ import { QUERY_BUILDER_METRIC_TYPES } from "@maple/query-engine/query-builder"
 import { toNames } from "@/lib/query-builder/autocomplete-utils"
 import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete"
 
-// ---------------------------------------------------------------------------
 // Context
-// ---------------------------------------------------------------------------
 
 export interface AutocompleteValuesContextType {
 	traces: WhereClauseAutocompleteValues
@@ -44,9 +42,7 @@ export function useAutocompleteValuesContextOptional(): AutocompleteValuesContex
 	return React.use(AutocompleteValuesCtx)
 }
 
-// ---------------------------------------------------------------------------
 // Inner component (must be inside AutocompleteKeysProvider)
-// ---------------------------------------------------------------------------
 
 /**
  * Subscribe to `atom` only once `enabled` is true; until then read a static
@@ -223,9 +219,7 @@ function AutocompleteValuesInner({
 	return <AutocompleteValuesCtx value={value}>{children}</AutocompleteValuesCtx>
 }
 
-// ---------------------------------------------------------------------------
 // Public provider
-// ---------------------------------------------------------------------------
 
 export function AutocompleteValuesProvider({
 	startTime,

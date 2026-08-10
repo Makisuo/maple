@@ -1,9 +1,7 @@
-// ---------------------------------------------------------------------------
 // Typed Metrics Queries
 //
 // DSL-based query definitions for metrics timeseries, breakdown, and
 // a raw-SQL builder for counter rate/increase (which requires CTEs).
-// ---------------------------------------------------------------------------
 
 import type { AttributeFilter, MetricType } from "@maple/domain/query-engine"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
@@ -37,9 +35,7 @@ function resourceFilterConditions(
  */
 const DEPLOYMENT_ENV_KEY = "deployment.environment"
 
-// ---------------------------------------------------------------------------
 // Shared options & output types
-// ---------------------------------------------------------------------------
 
 interface MetricsQueryOpts {
 	metricType: MetricType
@@ -82,9 +78,7 @@ const metricsTimeseriesColumns = {
 	dataPointCount: T.uint64,
 }
 
-// ---------------------------------------------------------------------------
 // Timeseries query — handles all 4 metric types
-// ---------------------------------------------------------------------------
 
 export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 	const { tbl, isHistogram } = resolveMetricTable(opts.metricType)
@@ -131,9 +125,7 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 	return finalizeTimeseries(inner, metricsTimeseriesColumns, "dataPointCount", opts)
 }
 
-// ---------------------------------------------------------------------------
 // Rate/increase timeseries — raw SQL (requires CTE)
-// ---------------------------------------------------------------------------
 
 export interface MetricsRateTimeseriesOpts {
 	metricName?: string
@@ -438,9 +430,7 @@ export function metricsTimeseriesRateQuery(
 	return finalizeTimeseries(inner, metricsRateTimeseriesColumns, "dataPointCount", opts)
 }
 
-// ---------------------------------------------------------------------------
 // Sparklines query — batched preview series for the metrics browse grid
-// ---------------------------------------------------------------------------
 
 export interface MetricsSparklinesOpts {
 	metricType: MetricType
@@ -481,9 +471,7 @@ export function metricsSparklinesQuery(opts: MetricsSparklinesOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Breakdown query
-// ---------------------------------------------------------------------------
 
 export interface MetricsBreakdownOpts {
 	metricType: MetricType
@@ -539,9 +527,7 @@ export function metricsBreakdownQuery(opts: MetricsBreakdownOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // List metrics — reads the hourly `metric_catalog` rollup
-// ---------------------------------------------------------------------------
 
 export interface ListMetricsOpts {
 	serviceName?: string
@@ -593,9 +579,7 @@ export function listMetricsQuery(opts: ListMetricsOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Metrics summary — reads the hourly `metric_catalog` rollup
-// ---------------------------------------------------------------------------
 
 export interface MetricsSummaryOutput {
 	readonly metricType: string

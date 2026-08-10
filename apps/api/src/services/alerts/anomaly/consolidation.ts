@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Error-spike consolidation + incident reopen — pure functions, no I/O.
 //
 // One production event (a bad deploy, a dependency outage) usually surfaces
@@ -12,7 +11,6 @@
 // Reopen: a series re-breaching shortly after its incident resolved is the
 // same event flapping, not a new one. Within the reopen window the prior
 // incident reopens (keeping its triage result) instead of inserting a row.
-// ---------------------------------------------------------------------------
 
 import {
 	AnomalyIncidentSeverity,

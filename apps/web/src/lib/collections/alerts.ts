@@ -53,9 +53,7 @@ const decodeGroupByFromJson = Schema.decodeUnknownSync(Schema.fromJsonString(Ale
 const safeParseStringArray = (value: unknown): ReadonlyArray<string> =>
 	Option.getOrElse(decodeStringArray(value), () => [] as ReadonlyArray<string>)
 
-// ---------------------------------------------------------------------------
 // alert_rules
-// ---------------------------------------------------------------------------
 
 /**
  * Identity row schema for `alert_rules` — mirrors the pgTable columns (snake_case)
@@ -101,9 +99,7 @@ export const AlertRuleRowSchema = Schema.Struct({
 })
 export type AlertRuleRow = typeof AlertRuleRowSchema.Type
 
-// ---------------------------------------------------------------------------
 // alert_rule_states
-// ---------------------------------------------------------------------------
 
 export const AlertRuleStateRowSchema = Schema.Struct({
 	org_id: Schema.String,
@@ -120,9 +116,7 @@ export const AlertRuleStateRowSchema = Schema.Struct({
 })
 export type AlertRuleStateRow = typeof AlertRuleStateRowSchema.Type
 
-// ---------------------------------------------------------------------------
 // alert_incidents
-// ---------------------------------------------------------------------------
 
 export const AlertIncidentRowSchema = Schema.Struct({
 	id: Schema.String,
@@ -152,9 +146,7 @@ export const AlertIncidentRowSchema = Schema.Struct({
 })
 export type AlertIncidentRow = typeof AlertIncidentRowSchema.Type
 
-// ---------------------------------------------------------------------------
 // Mappers (mirror the server row→document mappers in AlertsService.ts)
-// ---------------------------------------------------------------------------
 
 /**
  * Most recent evaluation error/timestamp for a rule, aggregated across its group
@@ -257,9 +249,7 @@ export const rowToAlertIncidentDocument = (row: AlertIncidentRow): AlertIncident
 		errorIssueId: row.error_issue_id != null ? asErrorIssueId(row.error_issue_id) : null,
 	})
 
-// ---------------------------------------------------------------------------
 // Collections (read-only — no write handlers)
-// ---------------------------------------------------------------------------
 
 export const createAlertRulesCollection = (orgId: string) =>
 	createSyncedCollection({
@@ -289,9 +279,7 @@ export const createAlertIncidentsCollection = (orgId: string) =>
 		getKey: (row) => row.id,
 	})
 
-// ---------------------------------------------------------------------------
 // alert_destinations
-// ---------------------------------------------------------------------------
 
 /**
  * Identity row schema for the `alert_destinations` shape. The shape is

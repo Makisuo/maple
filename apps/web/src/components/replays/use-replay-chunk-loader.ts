@@ -22,7 +22,6 @@ import {
 	replayRangeInput,
 } from "./replay-range"
 
-// ---------------------------------------------------------------------------
 // Progressive chunk loading
 //
 // The player used to fetch a session's entire rrweb payload before rendering a
@@ -34,7 +33,6 @@ import {
 // consumes chunks in order, so a second in-flight range would only ever be the
 // one after the range already being fetched. One subscription also keeps this a
 // plain hook instead of an imperative registry subscription per range.
-// ---------------------------------------------------------------------------
 
 /** What the player needs to know about loading, beyond the events themselves. */
 export type ReplayBufferState = "idle" | "buffering" | "seeking"

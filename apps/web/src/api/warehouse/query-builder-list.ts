@@ -32,7 +32,6 @@ const getQueryBuilderListEffect = Effect.fn("QueryEngine.getQueryBuilderList")(f
 		return yield* invalidWarehouseInput("getQueryBuilderList", "No enabled queries to run")
 	}
 
-	// Use the first enabled query for the list
 	const query = enabledQueries[0]
 	const built = buildListQuerySpec(query, input.limit, input.columns as string[] | undefined)
 

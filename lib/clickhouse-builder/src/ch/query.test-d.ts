@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
 // Type-level tests: Query builder, joins, subqueries, union, compilation
-// ---------------------------------------------------------------------------
 
 import { expectTypeOf } from "expect-type"
 import type { Effect } from "effect"
@@ -10,9 +8,7 @@ import type { InferUnionOutput } from "./union"
 import type { CompiledQuery } from "./compile"
 import type { Expr } from "./expr"
 
-// ---------------------------------------------------------------------------
 // Test fixtures
-// ---------------------------------------------------------------------------
 
 const Users = CH.table("users", {
 	Id: CH.string,
@@ -37,9 +33,7 @@ const Tags = CH.table("tags", {
 	Label: CH.string,
 })
 
-// ---------------------------------------------------------------------------
 // Select — callback overload infers Output from returned record
-// ---------------------------------------------------------------------------
 
 const q1 = CH.from(Users).select(($) => ({
 	bucket: CH.toStartOfInterval($.CreatedAt, 60),
@@ -54,9 +48,7 @@ expectTypeOf<Q1Output>().toEqualTypeOf<{
 	readonly avgScore: number
 }>()
 
-// ---------------------------------------------------------------------------
 // Select — shorthand overload infers Output from column names
-// ---------------------------------------------------------------------------
 
 const q2 = CH.from(Users).select("Id", "Name")
 
@@ -75,16 +67,12 @@ expectTypeOf<Q3Output>().toEqualTypeOf<{
 	readonly Score: number
 }>()
 
-// ---------------------------------------------------------------------------
 // Select — shorthand rejects invalid column names
-// ---------------------------------------------------------------------------
 
 // @ts-expect-error — "NonExistent" is not a column on Users
 CH.from(Users).select("Id", "NonExistent")
 
-// ---------------------------------------------------------------------------
 // Column accessor types inside select callback
-// ---------------------------------------------------------------------------
 
 CH.from(Users).select(($) => {
 	expectTypeOf($.Id).toMatchTypeOf<Expr<string>>()
@@ -96,9 +84,7 @@ CH.from(Users).select(($) => {
 	return { id: $.Id }
 })
 
-// ---------------------------------------------------------------------------
 // Chaining preserves Output type through where/groupBy/orderBy/limit/format
-// ---------------------------------------------------------------------------
 
 const full = CH.from(Users)
 	.select(($) => ({
@@ -117,9 +103,7 @@ expectTypeOf<FullOutput>().toEqualTypeOf<{
 	readonly count: number
 }>()
 
-// ---------------------------------------------------------------------------
 // groupBy and orderBy only accept keys from Output
-// ---------------------------------------------------------------------------
 
 const qWithSelect = CH.from(Users).select(($) => ({
 	name: $.Name,
@@ -136,9 +120,7 @@ qWithSelect.groupBy("bogus")
 // @ts-expect-error — "bogus" is not a key of Output
 qWithSelect.orderBy(["bogus", "asc"])
 
-// ---------------------------------------------------------------------------
 // innerJoin — adds typed columns under alias
-// ---------------------------------------------------------------------------
 
 const joined = CH.from(Users).innerJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
 
@@ -155,9 +137,7 @@ expectTypeOf<JQOutput>().toEqualTypeOf<{
 	readonly orderStatus: string
 }>()
 
-// ---------------------------------------------------------------------------
 // leftJoin — wraps joined columns with | null
-// ---------------------------------------------------------------------------
 
 const leftJoined = CH.from(Users).leftJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
 
@@ -174,9 +154,7 @@ expectTypeOf<LJQOutput>().toEqualTypeOf<{
 	readonly orderStatus: string | null
 }>()
 
-// ---------------------------------------------------------------------------
 // Multiple joins accumulate
-// ---------------------------------------------------------------------------
 
 const multi = CH.from(Users)
 	.innerJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
@@ -194,9 +172,7 @@ expectTypeOf<MultiOutput>().toEqualTypeOf<{
 	readonly label: string
 }>()
 
-// ---------------------------------------------------------------------------
 // crossJoin — no nullable wrapping
-// ---------------------------------------------------------------------------
 
 const crossed = CH.from(Users)
 	.crossJoin(Orders, "o")
@@ -211,9 +187,7 @@ expectTypeOf<CrossOutput>().toEqualTypeOf<{
 	readonly orderAmount: number
 }>()
 
-// ---------------------------------------------------------------------------
 // innerJoinQuery — join with subquery
-// ---------------------------------------------------------------------------
 
 const subquery = CH.from(Orders).select(($) => ({
 	userId: $.UserId,
@@ -233,9 +207,7 @@ expectTypeOf<JoinedSubOutput>().toEqualTypeOf<{
 	readonly total: number
 }>()
 
-// ---------------------------------------------------------------------------
 // leftJoinQuery — nullable subquery join
-// ---------------------------------------------------------------------------
 
 const leftJoinedSub = CH.from(Users)
 	.leftJoinQuery(subquery, "agg", (u, agg) => u.Id.eq(agg.userId))
@@ -250,9 +222,7 @@ expectTypeOf<LeftJoinedSubOutput>().toEqualTypeOf<{
 	readonly total: number | null
 }>()
 
-// ---------------------------------------------------------------------------
 // fromQuery — type-safe FROM subquery
-// ---------------------------------------------------------------------------
 
 const inner = CH.from(Users).select(($) => ({
 	userId: $.Id,
@@ -271,9 +241,7 @@ expectTypeOf<OuterOutput>().toEqualTypeOf<{
 	readonly name: string
 }>()
 
-// ---------------------------------------------------------------------------
 // unionAll — preserves shared Output type
-// ---------------------------------------------------------------------------
 
 const uq1 = CH.from(Users).select(($) => ({
 	name: $.Name,
@@ -298,9 +266,7 @@ union.orderBy(["count", "desc"])
 // @ts-expect-error — "bogus" is not in union Output
 union.orderBy(["bogus", "asc"])
 
-// ---------------------------------------------------------------------------
 // unionAll — mismatched Output types should fail
-// ---------------------------------------------------------------------------
 
 const qA = CH.from(Users).select(($) => ({
 	name: $.Name,
@@ -315,9 +281,7 @@ const qB = CH.from(Users).select(($) => ({
 // @ts-expect-error — Output types don't match (count vs extra)
 CH.unionAll(qA, qB)
 
-// ---------------------------------------------------------------------------
 // compileCH — output type matches query Output
-// ---------------------------------------------------------------------------
 
 const compileTarget = CH.from(Users).select(($) => ({
 	id: $.Id,
@@ -333,9 +297,7 @@ expectTypeOf(compiled.decodeRows([])).toMatchTypeOf<
 	Effect.Effect<ReadonlyArray<{ readonly id: string; readonly age: number }>, unknown>
 >()
 
-// ---------------------------------------------------------------------------
 // InferQueryOutput utility type
-// ---------------------------------------------------------------------------
 
 type Extracted = InferQueryOutput<typeof compileTarget>
 expectTypeOf<Extracted>().toEqualTypeOf<{

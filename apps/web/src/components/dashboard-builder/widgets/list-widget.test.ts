@@ -79,9 +79,7 @@ import { listLogs } from "@/api/warehouse/logs"
 import { serverFunctionMap } from "@/components/dashboard-builder/data-source-registry"
 import { resolveFieldPath } from "@/lib/resolve-field-path"
 
-// -------------------------------------------------------------------------
 // 1. Verify listTraces works with exactly the params a list widget sends
-// -------------------------------------------------------------------------
 describe("list widget data flow", () => {
 	it.effect("listTraces succeeds with list widget params (no filter)", () =>
 		Effect.gen(function* () {
@@ -138,9 +136,7 @@ describe("list widget data flow", () => {
 		}),
 	)
 
-	// -----------------------------------------------------------------------
 	// 2. Verify serverFunctionMap contains list endpoints
-	// -----------------------------------------------------------------------
 	it("serverFunctionMap has list_traces", () => {
 		expect(serverFunctionMap.list_traces).toBeDefined()
 		expect(typeof serverFunctionMap.list_traces).toBe("function")
@@ -151,10 +147,8 @@ describe("list widget data flow", () => {
 		expect(typeof serverFunctionMap.list_logs).toBe("function")
 	})
 
-	// -----------------------------------------------------------------------
 	// 3. Verify the full atom-like call path:
 	//    serverFn({ data: params }) → response.data extraction
-	// -----------------------------------------------------------------------
 	it.effect("serverFunctionMap.list_traces({ data }) returns { data: Trace[] }", () =>
 		Effect.gen(function* () {
 			const serverFn = serverFunctionMap.list_traces
@@ -204,9 +198,7 @@ describe("list widget data flow", () => {
 	)
 })
 
-// -------------------------------------------------------------------------
 // 4. Simulate the exact widgetFetchAtom flow (JSON key roundtrip)
-// -------------------------------------------------------------------------
 describe("widgetFetchAtom simulation", () => {
 	function normalizeForKey(value: unknown): unknown {
 		if (value === null || typeof value !== "object") return value
@@ -285,9 +277,7 @@ describe("widgetFetchAtom simulation", () => {
 	)
 })
 
-// -------------------------------------------------------------------------
 // 5. Test buildWidgetDataSource for list
-// -------------------------------------------------------------------------
 describe("buildWidgetDataSource for list", () => {
 	// Import dynamically to avoid circular dependency issues
 	it.effect("produces correct data source from list state", () =>
@@ -368,9 +358,7 @@ describe("buildWidgetDataSource for list", () => {
 	)
 })
 
-// -------------------------------------------------------------------------
 // 6. resolveFieldPath tests
-// -------------------------------------------------------------------------
 describe("resolveFieldPath", () => {
 	const traceRow = {
 		traceId: "t1",

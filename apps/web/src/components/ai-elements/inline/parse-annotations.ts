@@ -8,7 +8,6 @@ export function parseAnnotations(text: string): Segment[] {
 
 	for (const match of text.matchAll(ANNOTATION_RE)) {
 		const matchStart = match.index!
-		// Add preceding text if any
 		if (matchStart > lastIndex) {
 			segments.push({ type: "text", content: text.slice(lastIndex, matchStart) })
 		}
@@ -20,19 +19,17 @@ export function parseAnnotations(text: string): Segment[] {
 			const data = JSON.parse(jsonStr)
 			segments.push({ type: entityType, data })
 		} catch {
-			// Invalid JSON — treat the whole line as plain text
+			// Malformed annotations remain visible as text.
 			segments.push({ type: "text", content: match[0] })
 		}
 
 		lastIndex = matchStart + match[0].length
 	}
 
-	// Add trailing text if any
 	if (lastIndex < text.length) {
 		segments.push({ type: "text", content: text.slice(lastIndex) })
 	}
 
-	// If no annotations found, return the original text as a single segment
 	if (segments.length === 0) {
 		segments.push({ type: "text", content: text })
 	}

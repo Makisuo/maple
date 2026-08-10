@@ -18,9 +18,7 @@ import {
 	type GcOperationIntent,
 } from "./journal"
 
-// ---------------------------------------------------------------------------
 // Inspection result: the complete output of read-only validation.
-// ---------------------------------------------------------------------------
 
 /**
  * The read-only validation outcome. `inspectReconciliationState` returns one of:
@@ -78,9 +76,7 @@ export interface ReconciliationSnapshot {
 	readonly affectedSignals: ReadonlyArray<string>
 }
 
-// ---------------------------------------------------------------------------
 // Decision: the sole output of the pure transition table.
-// ---------------------------------------------------------------------------
 
 export type ReconciliationDecision =
 	| { readonly kind: "NoOp" }

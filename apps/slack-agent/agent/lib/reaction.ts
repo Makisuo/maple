@@ -60,9 +60,7 @@ export const ALLOWED_REACTION_EMOJIS = [
 
 export type AllowedReactionEmoji = (typeof ALLOWED_REACTION_EMOJIS)[number]
 
-// ---------------------------------------------------------------------------
 // Triggering-message registry
-// ---------------------------------------------------------------------------
 
 interface AckedMessageEntry extends TtlCacheEntry {
 	readonly messageTs: string
@@ -116,9 +114,7 @@ export function clearAckedTriggeringMessages(): void {
 	ackedMessages.clear()
 }
 
-// ---------------------------------------------------------------------------
 // Slack Web API calls
-// ---------------------------------------------------------------------------
 
 export interface SlackReactionCall {
 	readonly botToken: string
@@ -172,9 +168,7 @@ async function callReactionEndpoint(
 	}
 }
 
-// ---------------------------------------------------------------------------
 // The tool behaviour
-// ---------------------------------------------------------------------------
 
 /** The slice of eve's session context this tool actually reads. */
 export interface ReactionSession {

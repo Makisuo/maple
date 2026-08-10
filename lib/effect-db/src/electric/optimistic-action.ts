@@ -97,44 +97,32 @@ export interface OptimisticActionConfig<
 		context: MutationContext<TMutateResult>,
 	) => Effect.Effect<MutationResultWithTxId<TSuccess>, TError, TRequires>
 
-	/**
-	 * Timeout for sync in milliseconds (default 30000ms)
-	 */
+	/** Sync timeout in milliseconds. Defaults to 30 seconds. */
 	syncTimeout?: number
 }
 
-/**
- * Normalize collection input to array format
- */
 function normalizeCollections(collections: CollectionInput): NormalizedCollection[] {
-	// Single collection - check if it looks like a collection
 	if ("state" in collections && typeof (collections as any).insert === "function") {
 		return [{ name: "primary", collection: collections as EffectCollection }]
 	}
 
-	// Array of collections
 	if (Array.isArray(collections)) {
 		return collections.map((c, i) => ({ name: `collection_${i}`, collection: c }))
 	}
 
-	// Record of collections
 	return Object.entries(collections).map(([name, collection]) => ({
 		name,
 		collection,
 	}))
 }
 
-/**
- * Sync all collections with transaction ID using pure Effect.
- * Uses Effect.all for parallel execution with full Effect control.
- */
+/** Waits for every collection to observe a transaction. */
 function syncAllCollections(
 	collections: NormalizedCollection[],
 	txid: Txid,
 	timeout: number,
 ): Effect.Effect<void, SyncError | TxIdTimeoutError | InvalidTxIdError | AwaitTxIdError> {
 	return Effect.gen(function* () {
-		// Create sync effect for each collection
 		const syncEffects = collections.map(({ name, collection }) =>
 			collection.utils.awaitTxIdEffect(txid, timeout).pipe(
 				Effect.mapError(
@@ -150,7 +138,6 @@ function syncAllCollections(
 			),
 		)
 
-		// Run all syncs in parallel using Effect.all
 		yield* Effect.all(syncEffects, { concurrency: "unbounded" })
 	})
 }
@@ -158,8 +145,8 @@ function syncAllCollections(
 /**
  * Creates an Effect-based optimistic action with automatic collection sync.
  *
- * Pure Effect implementation - no raw Promises for sync operations.
- * Collections are declared upfront and sync happens automatically on all of them.
+ * The optimistic update runs synchronously; completion waits for every declared
+ * collection to observe the server transaction.
  *
  * @example
  * ```typescript
@@ -208,11 +195,9 @@ export function optimisticAction<
 			let mutateResult!: TMutateResult
 			let mutationResult!: MutationResultWithTxId<TSuccess>
 
-			// Create transaction that wraps the Effect-based mutation
 			const transaction = createTransaction({
 				autoCommit: true,
 				mutationFn: async (params) => {
-					// Run the mutation Effect
 					const mutationEffect = mutate(variables, {
 						mutateResult,
 						transaction: params.transaction,
@@ -224,7 +209,7 @@ export function optimisticAction<
 						const cause = exit.cause
 						const failReason = cause.reasons.find(Cause.isFailReason)
 						if (failReason) {
-							throw failReason.error // Typed TError
+							throw failReason.error
 						}
 						throw new OptimisticActionError({
 							message: "Mutation failed unexpectedly",
@@ -234,7 +219,6 @@ export function optimisticAction<
 
 					mutationResult = exit.value
 
-					// Run automatic sync on ALL collections using Effect.all
 					const syncEffect = syncAllCollections(
 						normalizedCollections,
 						mutationResult.transactionId,
@@ -265,25 +249,21 @@ export function optimisticAction<
 				},
 			})
 
-			// Execute optimistic mutation synchronously
 			transaction.mutate(() => {
 				mutateResult = onMutate(variables)
 			})
 
-			// Wait for transaction completion
 			yield* Effect.tryPromise({
 				try: () => transaction.isPersisted.promise,
 				catch: (error) => {
-					// Attempt rollback
 					if (transaction.state !== "completed" && transaction.state !== "failed") {
 						try {
 							transaction.rollback()
 						} catch {
-							// Ignore rollback errors
+							// Best effort; preserve the mutation failure below.
 						}
 					}
 
-					// Preserve typed errors
 					if (error && typeof error === "object" && "_tag" in error) {
 						return error as TError | SyncError
 					}

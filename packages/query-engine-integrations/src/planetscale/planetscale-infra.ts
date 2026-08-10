@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // PlanetScale infrastructure page (/infra/planetscale)
 //
 // Bucketed timeseries over the scraped PlanetScale metrics for the database
@@ -11,7 +10,6 @@
 // on PlanetScale is routinely ~30 branches — mostly short-lived `pr-*` ones — so
 // the database-wide `max()` is dominated by whichever ephemeral branch spiked.
 // Scoping to a branch is what makes the chart mean anything.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"

@@ -1,17 +1,13 @@
-// ---------------------------------------------------------------------------
 // UNION ALL Query Builder
 //
 // Combines multiple CHQuery instances with UNION ALL. All sub-queries must
 // share the same Output type. Supports optional outer ORDER BY / LIMIT /
 // OFFSET wrapping.
-// ---------------------------------------------------------------------------
 
 import type { ColumnDefs } from "./types"
 import type { CHQuery } from "./query"
 
-// ---------------------------------------------------------------------------
 // Union state (runtime)
-// ---------------------------------------------------------------------------
 
 interface CHUnionState {
 	readonly queries: ReadonlyArray<CHQuery<any, any, any>>
@@ -21,9 +17,7 @@ interface CHUnionState {
 	readonly formatValue?: string
 }
 
-// ---------------------------------------------------------------------------
 // CHUnionQuery interface
-// ---------------------------------------------------------------------------
 
 export interface CHUnionQuery<Output extends Record<string, any> = {}> {
 	readonly _tag: "CHUnionQuery"
@@ -44,9 +38,7 @@ export interface CHUnionQuery<Output extends Record<string, any> = {}> {
 /** Extract the Output type from a CHUnionQuery. */
 export type InferUnionOutput<Q> = Q extends CHUnionQuery<infer O> ? O : never
 
-// ---------------------------------------------------------------------------
 // Implementation
-// ---------------------------------------------------------------------------
 
 function makeUnionQuery<Output extends Record<string, any>>(state: CHUnionState): CHUnionQuery<Output> {
 	return {
@@ -74,9 +66,7 @@ function makeUnionQuery<Output extends Record<string, any>>(state: CHUnionState)
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Entry point
-// ---------------------------------------------------------------------------
 
 export function unionAll<Output extends Record<string, any>>(
 	...queries: Array<CHQuery<ColumnDefs, Output, any>>

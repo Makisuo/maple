@@ -17,9 +17,7 @@ import {
 import { Authorization } from "./current-tenant"
 import { AlertSeverity } from "./alerts"
 
-// ---------------------------------------------------------------------------
 // Workflow state machine literals
-// ---------------------------------------------------------------------------
 
 export const WorkflowState = Schema.Literals([
 	"triage",
@@ -154,9 +152,7 @@ export const ErrorIncidentReason = Schema.Literals(["first_seen", "regression", 
 })
 export type ErrorIncidentReason = Schema.Schema.Type<typeof ErrorIncidentReason>
 
-// ---------------------------------------------------------------------------
 // Actor documents
-// ---------------------------------------------------------------------------
 
 export class ActorDocument extends Schema.Class<ActorDocument>("ActorDocument")({
 	id: ActorId,
@@ -172,9 +168,7 @@ export class ActorsListResponse extends Schema.Class<ActorsListResponse>("Actors
 	actors: Schema.Array(ActorDocument),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Issue + event documents
-// ---------------------------------------------------------------------------
 
 export class ErrorIssueDocument extends Schema.Class<ErrorIssueDocument>("ErrorIssueDocument")({
 	id: ErrorIssueId,
@@ -278,9 +272,7 @@ export class ErrorIssueEventsResponse extends Schema.Class<ErrorIssueEventsRespo
 	events: Schema.Array(ErrorIssueEventDocument),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Request payloads
-// ---------------------------------------------------------------------------
 
 export class ErrorIssueTransitionRequest extends Schema.Class<ErrorIssueTransitionRequest>(
 	"ErrorIssueTransitionRequest",
@@ -338,9 +330,7 @@ export class RegisterAgentRequest extends Schema.Class<RegisterAgentRequest>("Re
 	capabilities: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Notification policy
-// ---------------------------------------------------------------------------
 
 export class ErrorNotificationPolicyDocument extends Schema.Class<ErrorNotificationPolicyDocument>(
 	"ErrorNotificationPolicyDocument",
@@ -376,9 +366,7 @@ export class ErrorNotificationPolicyUpsertRequest extends Schema.Class<ErrorNoti
 	severity: Schema.optionalKey(AlertSeverity),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Escalation policy (severity → destination routing for triage outcomes)
-// ---------------------------------------------------------------------------
 
 export const EscalationConfidence = Schema.Literals(["low", "medium", "high"]).annotate({
 	identifier: "@maple/EscalationConfidence",
@@ -411,9 +399,7 @@ export class IssueEscalationPolicyUpsertRequest extends Schema.Class<IssueEscala
 	rules: Schema.optionalKey(Schema.Array(IssueEscalationPolicyRule)),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Query schemas
-// ---------------------------------------------------------------------------
 
 /**
  * Keyset cursor for `listIssues`: the sort key of the last row of the previous
@@ -485,9 +471,7 @@ const IssueEventsQuery = Schema.Struct({
 	),
 })
 
-// ---------------------------------------------------------------------------
 // Errors
-// ---------------------------------------------------------------------------
 
 export class ErrorPersistenceError extends Schema.TaggedError<ErrorPersistenceError>()(
 	"@maple/http/errors/ErrorPersistenceError",
@@ -624,9 +608,7 @@ export class ActorNotFoundError extends Schema.TaggedError<ActorNotFoundError>()
 	{ httpApiStatus: 404 },
 ) {}
 
-// ---------------------------------------------------------------------------
 // API group
-// ---------------------------------------------------------------------------
 
 export class ErrorsApiGroup extends HttpApiGroup.make("errors")
 	.add(

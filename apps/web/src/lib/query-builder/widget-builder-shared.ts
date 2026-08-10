@@ -19,7 +19,6 @@ import type { LegendPosition } from "@/components/dashboard-builder/config/setti
 import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } from "@maple/domain/where-clause"
 
-// ---------------------------------------------------------------------------
 // Shared widget-builder vocabulary.
 //
 // Everything here is type-agnostic: the editor's state shape, the parsers that
@@ -27,7 +26,6 @@ import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } fro
 // builder needs. It lives apart from `widget-builder-utils.ts` so the per-type
 // definitions under `components/dashboard-builder/widgets/types/` can import it
 // without an import cycle through the registry those dispatchers read.
-// ---------------------------------------------------------------------------
 
 export type StatAggregate = "sum" | "first" | "count" | "avg" | "max" | "min"
 

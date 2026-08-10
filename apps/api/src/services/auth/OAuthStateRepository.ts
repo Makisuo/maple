@@ -4,12 +4,10 @@ import { eq, lt } from "drizzle-orm"
 import { Context, Effect, Layer, Option } from "effect"
 import { Database, type DatabaseError } from "@/platform/DatabaseLive"
 
-// ---------------------------------------------------------------------------
 // Generic, provider-agnostic repo over the shared `oauth_auth_states` table —
 // the short-lived CSRF nonce store for any OAuth / App-install redirect flow.
 // Callers supply `provider` in the insert row and verify it on read, so this
 // repo is reusable across integrations (GitHub install, Hazel OAuth, …).
-// ---------------------------------------------------------------------------
 
 const toPersistenceError = (error: DatabaseError) =>
 	new OAuthStatePersistenceError({ message: error.message })

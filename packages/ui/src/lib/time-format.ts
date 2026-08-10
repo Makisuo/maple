@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Relative-time formatting — the single implementation.
 //
 // This module replaced fourteen independent relative-time formatters spread
@@ -15,7 +14,6 @@
 //
 // Import the `@maple/query-engine/datetime` leaf, never the package root — the
 // root barrel pulls the drivers and would bloat every bundle that touches `cn`.
-// ---------------------------------------------------------------------------
 
 import { parseWarehouseDateTime } from "@maple/query-engine/datetime"
 

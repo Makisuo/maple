@@ -1,9 +1,7 @@
-// ---------------------------------------------------------------------------
 // Shared query helpers
 //
 // Reusable expression builders and WHERE condition helpers used across
 // traces, alerts, services, and metrics queries.
-// ---------------------------------------------------------------------------
 
 import type { AttributeFilter, MetricType } from "@maple/domain/query-engine"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
@@ -14,9 +12,7 @@ import { MetricsSum, MetricsGauge, MetricsHistogram, MetricsExpHistogram } from 
 import { buildAttrFilterCondition, httpDisplaySpanName } from "../../traces-shared"
 import type { AttributeIndexMode } from "../../capabilities"
 
-// ---------------------------------------------------------------------------
 // APDEX expressions
-// ---------------------------------------------------------------------------
 
 /**
  * Build the standard APDEX aggregation expressions (satisfiedCount,
@@ -58,9 +54,7 @@ export function apdexExprs(durationMs: CH.Expr<number>, thresholdMs: number, err
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Attribute map projection
-// ---------------------------------------------------------------------------
 
 /**
  * Build a ClickHouse `map()` literal that extracts only the requested attribute
@@ -80,9 +74,7 @@ export function buildProjectedMapExpr(
 	return CH.mapLiteral(...pairs)
 }
 
-// ---------------------------------------------------------------------------
 // Traces base WHERE conditions
-// ---------------------------------------------------------------------------
 
 interface TracesMatchModes {
 	serviceName?: "contains"
@@ -323,7 +315,6 @@ export function tracesBaseWhereConditions(
 	return conditions
 }
 
-// ---------------------------------------------------------------------------
 // ServiceOverviewSpans MV compatibility
 //
 // The service_overview_spans MV pre-filters traces at write time to
@@ -335,7 +326,6 @@ export function tracesBaseWhereConditions(
 // Checks whether a set of filters/groupBy can be satisfied purely from the
 // MV's column set. The MV lacks SpanName, SpanKind, ParentSpanId,
 // SpanAttributes, and ResourceAttributes.
-// ---------------------------------------------------------------------------
 
 /** Returns true iff the opts + groupBy can be served by service_overview_spans_mv. */
 export function canUseServiceOverviewMv(opts: TracesBaseWhereOpts, groupBy?: readonly string[]): boolean {
@@ -420,7 +410,6 @@ export function serviceOverviewWhereConditions(
 	return conditions
 }
 
-// ---------------------------------------------------------------------------
 // TracesAggregatesHourly MV compatibility
 //
 // `traces_aggregates_hourly` is the generalized aggregating MV. Its dimensions
@@ -429,7 +418,6 @@ export function serviceOverviewWhereConditions(
 // sum, t-digest quantiles, error count) plus min/max. Queries that filter and
 // group on a subset of those dimensions can be answered by reading hourly rows
 // instead of raw spans — orders of magnitude cheaper for 7d+ ranges.
-// ---------------------------------------------------------------------------
 
 /**
  * Returns true iff a query (filters + groupBy + bucketSeconds) can be served
@@ -516,9 +504,7 @@ export function tracesAggregatesWhereConditions(
 	return conditions
 }
 
-// ---------------------------------------------------------------------------
 // Metrics table lookup + SELECT factory
-// ---------------------------------------------------------------------------
 
 const VALUE_TABLES = {
 	sum: MetricsSum,

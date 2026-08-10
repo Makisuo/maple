@@ -12,7 +12,6 @@ import {
 } from "@/lib/query-builder/widget-builder-utils"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
 
-// ---------------------------------------------------------------------------
 // Switching a widget's panel type, exhaustively.
 //
 // The editor's Type picker lets any widget become any other, and the lowering
@@ -21,7 +20,6 @@ import type { DashboardWidget } from "@/components/dashboard-builder/types"
 // and rendered a line chart over breakdown rows) or lower to the wrong endpoint.
 // These walk every panel type through save → reopen → save and pin the
 // invariants that were only ever checked by clicking.
-// ---------------------------------------------------------------------------
 
 const ALL_PANELS: PanelType[] = PANEL_TYPES.map((meta) => meta.panelType)
 

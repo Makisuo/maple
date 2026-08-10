@@ -1,7 +1,5 @@
-// ---------------------------------------------------------------------------
 // Structured output types for MCP tools
 // Each tool returns a discriminated union variant with typed data
-// ---------------------------------------------------------------------------
 
 export interface SystemHealthData {
 	timeRange: { start: string; end: string }
@@ -280,9 +278,7 @@ export interface ServiceMapData {
 	serviceCount: number
 }
 
-// ---------------------------------------------------------------------------
 // Alert rule types
-// ---------------------------------------------------------------------------
 
 export interface AlertRuleRow {
 	id: string
@@ -336,9 +332,7 @@ export interface GetAlertRuleData {
 	rule: AlertRuleDetailRow
 }
 
-// ---------------------------------------------------------------------------
 // Alert incident types
-// ---------------------------------------------------------------------------
 
 export interface AlertIncidentRow {
 	id: string
@@ -392,9 +386,7 @@ export interface ListAlertChecksData {
 	checks: AlertCheckRow[]
 }
 
-// ---------------------------------------------------------------------------
 // Dashboard types
-// ---------------------------------------------------------------------------
 
 export interface DashboardRow {
 	id: string
@@ -452,9 +444,7 @@ export interface ReplaceDashboardWidgetsData {
 	validation?: WidgetInspectionSummary
 }
 
-// ---------------------------------------------------------------------------
 // Compare periods types
-// ---------------------------------------------------------------------------
 
 export interface ComparePeriodsData {
 	currentPeriod: { start: string; end: string }
@@ -470,9 +460,7 @@ export interface ComparePeriodsData {
 	}>
 }
 
-// ---------------------------------------------------------------------------
 // Explore attributes types
-// ---------------------------------------------------------------------------
 
 export interface ExploreAttributesData {
 	source: string
@@ -483,9 +471,7 @@ export interface ExploreAttributesData {
 	values?: Array<{ value: string; count: number }>
 }
 
-// ---------------------------------------------------------------------------
 // List services types
-// ---------------------------------------------------------------------------
 
 export interface ListServicesData {
 	timeRange: { start: string; end: string }
@@ -498,9 +484,7 @@ export interface ListServicesData {
 	}>
 }
 
-// ---------------------------------------------------------------------------
 // Get service top operations types
-// ---------------------------------------------------------------------------
 
 export interface GetServiceTopOperationsData {
 	timeRange: { start: string; end: string }
@@ -513,9 +497,7 @@ export interface GetServiceTopOperationsData {
 	}>
 }
 
-// ---------------------------------------------------------------------------
 // Get incident timeline types
-// ---------------------------------------------------------------------------
 
 export interface IncidentTimelineRow {
 	id: string
@@ -541,9 +523,7 @@ export interface GetIncidentTimelineData {
 	resolvedCount: number
 }
 
-// ---------------------------------------------------------------------------
 // Inspect chart data types
-// ---------------------------------------------------------------------------
 
 export type InspectChartFlag =
 	| "EMPTY"

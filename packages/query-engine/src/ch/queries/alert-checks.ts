@@ -1,9 +1,7 @@
-// ---------------------------------------------------------------------------
 // Typed Alert Check Queries
 //
 // DSL-based query definitions for listing historical alert rule check rows
 // from the `alert_checks` datasource.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"

@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // The SQL gate.
 //
 // Runs every SQL shape the product can emit through a real ClickHouse analyzer.
@@ -10,7 +9,6 @@
 // `DESCRIBE (SELECT …)` type-checks without reading a row, so this is cheap:
 // ~80 unique shapes, a few seconds on top of a job that already boots the
 // server and replays the migrations.
-// ---------------------------------------------------------------------------
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { Effect } from "effect"

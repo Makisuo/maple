@@ -1,19 +1,15 @@
-// ---------------------------------------------------------------------------
 // Query Parameters
 //
 // Params are placeholder expressions whose values are resolved at compile
 // time (not at SQL execution time). They carry their name and type as
 // phantom types so the query's Params type can be inferred.
-// ---------------------------------------------------------------------------
 
 import type { SqlFragment } from "../sql/sql-fragment"
 import { raw } from "../sql/sql-fragment"
 import type { Expr } from "./expr"
 import { QueryBuilderError } from "./compile"
 
-// ---------------------------------------------------------------------------
 // Param marker — used during query definition (before compilation)
-// ---------------------------------------------------------------------------
 
 export interface ParamMarker<N extends string, T> extends Expr<T> {
 	readonly _paramName: N
@@ -79,9 +75,7 @@ function makeParamMarker<N extends string, T>(name: N, fragment: SqlFragment): P
 	} as ParamMarker<N, T>
 }
 
-// ---------------------------------------------------------------------------
 // Param constructors (used in query definitions)
-// ---------------------------------------------------------------------------
 
 export const param = {
 	string: <N extends string>(name: N): ParamMarker<N, string> =>

@@ -278,7 +278,6 @@ export function RangeFilterSection({
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Distribution
 //
 // Anchors the typed numbers: without it the reader is guessing what a normal
@@ -286,7 +285,6 @@ export function RangeFilterSection({
 // this long". Everything it does is also reachable from the inputs and presets,
 // so it stays a redundant affordance rather than the only path — hence role=img
 // and no focus handling of its own.
-// ---------------------------------------------------------------------------
 
 interface RangeHistogramProps {
 	buckets: ReadonlyArray<RangeBucket>
@@ -436,9 +434,7 @@ function RangeHistogram({
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Parsing and formatting
-// ---------------------------------------------------------------------------
 
 const UNIT_MS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }
 

@@ -37,9 +37,7 @@ export type OrgCollections = {
 // switch is exactly the desired lifecycle.
 let current: OrgCollections | null = null
 
-// ---------------------------------------------------------------------------
 // Self-heal generation counter
-// ---------------------------------------------------------------------------
 //
 // When a collection's shape stream fails schema validation (a post-deploy column
 // drift), the @maple/effect-db factory dispatches a `"collection:schema-error"`
@@ -71,9 +69,7 @@ export const recreateOrgCollections = (): void => {
 	for (const listener of generationListeners) listener()
 }
 
-// ---------------------------------------------------------------------------
 // Terminal sync failures
-// ---------------------------------------------------------------------------
 //
 // `collection:sync-failed` (from @maple/effect-db) means a shape stream spent its
 // whole backoff budget and STOPPED — nothing will refetch it until the collection
@@ -129,9 +125,7 @@ export const retryOrgCollections = (): void => {
 	recreateOrgCollections()
 }
 
-// ---------------------------------------------------------------------------
 // Bounded self-heal
-// ---------------------------------------------------------------------------
 //
 // A schema error the recreated shape can't clear (e.g. a client row-schema that
 // declares a column the *deployed* table doesn't have — every row fails

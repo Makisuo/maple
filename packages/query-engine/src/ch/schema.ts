@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Shared ClickHouse row-schema codecs
 //
 // ClickHouse's `FORMAT JSON` serializes 64-bit integers (`UInt64`/`Int64`, the
@@ -11,7 +10,6 @@
 // to any compiled query whose numeric outputs flow into a runtime `Schema.Number`
 // — otherwise the string trips a `ParseError` the moment it hits a `Schema.Class`
 // constructor or an HTTP response encode.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 

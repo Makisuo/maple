@@ -50,9 +50,7 @@ describe("traceSummariesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // tracesListQuery
-// ---------------------------------------------------------------------------
 
 describe("tracesListQuery", () => {
 	it("compiles basic list with all columns", () => {
@@ -201,9 +199,7 @@ describe("tracesListQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // traceServicesByTraceIdsQuery
-// ---------------------------------------------------------------------------
 
 describe("traceServicesByTraceIdsQuery", () => {
 	it("aggregates one page of trace services through keyed and partition-pruned filters", () => {
@@ -224,9 +220,7 @@ describe("traceServicesByTraceIdsQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // tracesRootListQuery
-// ---------------------------------------------------------------------------
 
 describe("tracesRootListQuery", () => {
 	it("compiles basic root list with all columns", () => {
@@ -327,9 +321,7 @@ describe("tracesRootListQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // traceListQuery
-// ---------------------------------------------------------------------------
 
 /**
  * Body of the `TraceId IN (SELECT traceId FROM (…))` page subquery. Scans for
@@ -466,9 +458,7 @@ describe("traceListQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // slowTracesQuery
-// ---------------------------------------------------------------------------
 
 describe("slowTracesQuery", () => {
 	it("reads slow root spans from the pre-extracted trace list MV", () => {
@@ -485,9 +475,7 @@ describe("slowTracesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // spanSearchQuery
-// ---------------------------------------------------------------------------
 
 describe("spanSearchQuery", () => {
 	it("uses the trace-detail table when a trace id is provided", () => {

@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Subquery conditions
 //
 // These live here rather than in `expr.ts` because they need `compileCH`, and
@@ -6,7 +5,6 @@
 // there would close the cycle `expr → compile → query → expr`, which survives
 // today only because everything crossing it is a hoisted `function` declaration
 // — one top-level `const` away from a TDZ crash in the bundle.
-// ---------------------------------------------------------------------------
 
 import { compileCH } from "./compile"
 import { type Condition, type Expr, makeCond } from "./expr"

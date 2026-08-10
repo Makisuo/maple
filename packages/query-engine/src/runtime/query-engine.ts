@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Query Engine — lowering core
 //
 // Validation, QuerySpec → CH lowering, row shaping, and the alert evaluate /
@@ -6,7 +5,6 @@
 // app composes these via `QueryEngineService` (caching + Layer wiring) and
 // injects a concrete warehouse + tenant. Span names are preserved verbatim
 // ("QueryEngineService.*") so existing traces and dashboards keep matching.
-// ---------------------------------------------------------------------------
 
 import * as CH from "../ch"
 import {

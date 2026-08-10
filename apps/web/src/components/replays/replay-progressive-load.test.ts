@@ -13,7 +13,6 @@ import {
 	rangesCovering,
 } from "./replay-range"
 
-// ---------------------------------------------------------------------------
 // Progressive-load decision logic.
 //
 // The loader hook itself is a thin shell over these decisions plus React state;
@@ -22,7 +21,6 @@ import {
 // a simulated playthrough, because the browser pane this would otherwise be
 // verified in never fires requestAnimationFrame (it renders hidden), so wall-clock
 // playback can't be driven there.
-// ---------------------------------------------------------------------------
 
 const START_MS = 1_764_150_000_000
 const CHUNK_MS = 5_000

@@ -19,9 +19,7 @@ import {
 } from "@/api/warehouse/effect-utils"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
-// ---------------------------------------------------------------------------
 // List sessions
-// ---------------------------------------------------------------------------
 
 const ListReplaysInput = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),
@@ -96,9 +94,7 @@ export const listReplays = Effect.fn("SessionReplays.listReplays")(function* ({
 	return { data: result.data }
 })
 
-// ---------------------------------------------------------------------------
 // List facets (filter sidebar option counts)
-// ---------------------------------------------------------------------------
 
 const ReplaysFacetsInput = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),
@@ -155,9 +151,7 @@ export const getReplaysFacets = Effect.fn("SessionReplays.facets")(function* ({
 	}
 })
 
-// ---------------------------------------------------------------------------
 // Session detail
-// ---------------------------------------------------------------------------
 
 const GetReplayInput = Schema.Struct({
 	sessionId: SessionId,
@@ -190,7 +184,6 @@ export const getReplay = Effect.fn("SessionReplays.getReplay")(function* ({
 	return { data: result.data }
 })
 
-// ---------------------------------------------------------------------------
 // Session event chunks — manifest first, then bounded ranges (v2)
 //
 // A session's rrweb payload is unbounded by construction: ingest accepts up to
@@ -201,7 +194,6 @@ export const getReplay = Effect.fn("SessionReplays.getReplay")(function* ({
 //
 // These are the only replay reads on v2 — the v1 group has no payload endpoint
 // precisely so the unbounded read cannot come back.
-// ---------------------------------------------------------------------------
 
 /** Warehouse `YYYY-MM-DD HH:mm:ss` → the ISO-8601 the v2 query params take. */
 const toIsoWindow = (value: string | undefined) =>
@@ -285,9 +277,7 @@ export const getReplayEvents = Effect.fn("SessionReplays.getReplayEvents")(funct
 	return { chunks: result.data }
 })
 
-// ---------------------------------------------------------------------------
 // Distilled session transcript (console / network / errors / nav / clicks)
-// ---------------------------------------------------------------------------
 
 const SessionTranscriptInput = Schema.Struct({
 	sessionId: SessionId,
@@ -317,9 +307,7 @@ export const getSessionTranscript = Effect.fn("SessionReplays.sessionTranscript"
 	return { data: result.data }
 })
 
-// ---------------------------------------------------------------------------
 // Reverse correlation: replays observing a trace
-// ---------------------------------------------------------------------------
 
 const ReplaysForTraceInput = Schema.Struct({
 	traceId: TraceId,
@@ -350,9 +338,7 @@ export const getReplaysForTrace = Effect.fn("SessionReplays.replaysForTrace")(fu
 	return { data: result.data }
 })
 
-// ---------------------------------------------------------------------------
 // Per-trace summaries for a session's correlated traces (timeline bars)
-// ---------------------------------------------------------------------------
 
 const SessionTraceSummariesInput = Schema.Struct({
 	traceIds: Schema.Array(TraceId),

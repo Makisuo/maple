@@ -5,13 +5,11 @@ import { sessionActivityQuery, IDLE_GAP_THRESHOLD_MS } from "./session-events"
 const sessionParams = { orgId: "org_1", sessionId: "sess_1" }
 const WINDOW = { startTime: "2026-06-24 04:00:00", endTime: "2026-06-25 06:00:00" }
 
-// ---------------------------------------------------------------------------
 // sessionActivityQuery
 //
 // Active/idle time from gaps between distilled events: a lagInFrame window
 // measures each event's gap to its predecessor, then sumIf splits the gaps at
 // the idle threshold. One row per session.
-// ---------------------------------------------------------------------------
 
 describe("sessionActivityQuery", () => {
 	it("computes per-event gaps with a lagInFrame window ordered by Timestamp, Seq", () => {

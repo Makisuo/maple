@@ -1,12 +1,8 @@
-// ---------------------------------------------------------------------------
 // Core HTTP primitives
-// ---------------------------------------------------------------------------
 export { type HttpEffect, Request, safeHttpEffect } from "./http.ts"
 export { serveWebRequest } from "./http-server.ts"
 
-// ---------------------------------------------------------------------------
 // Per-request / per-invocation runtime (maple-specific)
-// ---------------------------------------------------------------------------
 export {
 	buildRequestRuntime,
 	type ExecutionContextLike,
@@ -15,21 +11,15 @@ export {
 	withRequestRuntime,
 } from "./runtime.ts"
 
-// ---------------------------------------------------------------------------
 // Worker env + config (from alchemy-effect)
-// ---------------------------------------------------------------------------
 export { default as cloudflareWorkers } from "./cloudflare-workers.ts"
 export { WorkerConfigProvider, WorkerConfigProviderLayer } from "./config-provider.ts"
 export { WorkerEnvironment, layerFromEnvRecord } from "./worker-environment.ts"
 
-// ---------------------------------------------------------------------------
 // Cache API
-// ---------------------------------------------------------------------------
 export { WorkersCache } from "./workers-cache.ts"
 
-// ---------------------------------------------------------------------------
 // Durable Objects
-// ---------------------------------------------------------------------------
 export { DurableObjectState, fromDurableObjectState } from "./durable-object-state.ts"
 export {
 	type DurableObjectStorage,
@@ -60,9 +50,7 @@ export {
 	processScheduledEvents,
 } from "./scheduled-events.ts"
 
-// ---------------------------------------------------------------------------
 // Workflows
-// ---------------------------------------------------------------------------
 export {
 	type WorkflowBody,
 	type WorkflowHandle,
@@ -79,9 +67,7 @@ export {
 	workflowHandle,
 } from "./workflow.ts"
 
-// ---------------------------------------------------------------------------
 // RPC
-// ---------------------------------------------------------------------------
 export {
 	decodeRpcResult,
 	decodeRpcValue,
@@ -106,9 +92,7 @@ export {
 	toRpcStream,
 } from "./rpc.ts"
 
-// ---------------------------------------------------------------------------
 // Storage bindings (runtime clients)
-// ---------------------------------------------------------------------------
 export {
 	KVNamespace,
 	KVNamespaceError,
@@ -129,9 +113,7 @@ export {
 	type R2PutOptions,
 } from "./r2-bucket.ts"
 
-// ---------------------------------------------------------------------------
 // Outbound fetch (service bindings)
-// ---------------------------------------------------------------------------
 export { ServiceBinding, type ServiceBindingFetch, type ServiceBindingToken } from "./fetch.ts"
 export {
 	type Fetcher,

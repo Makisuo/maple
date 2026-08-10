@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Dashboard variable interpolation
 //
 // Resolves `$name` / `${name}` references inside widget data-source params
@@ -15,7 +14,6 @@
 //   - `whereClause`-like values are handled clause-by-clause: a clause that
 //     references an "All" selection is dropped entirely (All = don't filter).
 //   - everything else gets plain text substitution.
-// ---------------------------------------------------------------------------
 
 import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 import { splitWhereClause } from "@maple/domain/where-clause"

@@ -1,11 +1,9 @@
-// ---------------------------------------------------------------------------
 // Cloudflare infrastructure page data
 //
 // Per-zone HTTP edge analytics (`cloudflare/{zoneName}`) and per-Worker
 // invocation analytics (`cloudflare-worker/{scriptName}`) written by the
 // direct-integration analytics poller. Backs /infra/cloudflare. Rates are
 // derived here as 0–1 ratios (×100 only at display, per repo convention).
-// ---------------------------------------------------------------------------
 
 import { Effect, Schema } from "effect"
 import {
@@ -352,9 +350,7 @@ export const getCloudflareWorkers = Effect.fn("QueryEngine.getCloudflareWorkers"
 	}
 })
 
-// ---------------------------------------------------------------------------
 // Zone detail: security, DNS, and live top traffic
-// ---------------------------------------------------------------------------
 
 export interface CloudflareZoneFirewallBucket {
 	bucket: string
@@ -528,9 +524,7 @@ export const getCloudflarePlatformResources = Effect.fn("QueryEngine.getCloudfla
 	},
 )
 
-// ---------------------------------------------------------------------------
 // Generic zone breakdown + filter facets
-// ---------------------------------------------------------------------------
 
 export const CLOUDFLARE_BREAKDOWN_DIMENSIONS = [
 	"path",

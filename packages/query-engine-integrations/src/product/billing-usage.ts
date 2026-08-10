@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Billing — daily ingested volume
 //
 // The billing page's spend chart is cumulative dollars by feature, which needs
@@ -18,7 +17,6 @@
 // Day buckets are UTC, matching how the warehouse stores every timestamp. Byte
 // sums are UInt64 and arrive as JSON strings on BYO-ClickHouse, so both row
 // schemas are built from `CHNumber`.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"

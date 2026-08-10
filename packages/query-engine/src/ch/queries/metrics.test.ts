@@ -17,9 +17,7 @@ const baseParams = {
 	metricName: "cpu.utilization",
 }
 
-// ---------------------------------------------------------------------------
 // metricsTimeseriesQuery
-// ---------------------------------------------------------------------------
 
 describe("metricsTimeseriesQuery", () => {
 	it("compiles value timeseries (sum)", () => {
@@ -131,9 +129,7 @@ describe("metricsTimeseriesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // metricsTimeseriesRateQuery
-// ---------------------------------------------------------------------------
 
 describe("metricsTimeseriesRateQuery", () => {
 	it("caps grouped rate timeseries before returning the long tail", () => {
@@ -314,13 +310,9 @@ describe("metricsTimeseriesRateQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // metricsBreakdownQuery
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
 // metricsSparklinesQuery
-// ---------------------------------------------------------------------------
 
 describe("metricsSparklinesQuery", () => {
 	it("compiles a batched IN query grouped per metric and bucket", () => {
@@ -416,9 +408,7 @@ describe("metricsBreakdownQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // listMetricsQuery
-// ---------------------------------------------------------------------------
 
 describe("listMetricsQuery", () => {
 	it("reads the metric_catalog rollup", () => {
@@ -459,9 +449,7 @@ describe("listMetricsQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // metricsSummaryQuery
-// ---------------------------------------------------------------------------
 
 describe("metricsSummaryQuery", () => {
 	it("aggregates the metric_catalog rollup by metric type", () => {

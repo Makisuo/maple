@@ -31,12 +31,10 @@ import { EdgeCacheService } from "@maple/cache"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import * as QueryEngineMetrics from "@/observability/QueryEngineMetrics"
 
-// ---------------------------------------------------------------------------
 // QueryEngineService — caching + orchestration. The pure lowering (validation,
 // QuerySpec → CH, evaluate/raw-SQL) lives in `@maple/query-engine/runtime`; this
 // service composes those impls, wires the edge + bucket caches, and exposes the
 // tenant-scoped HTTP surface.
-// ---------------------------------------------------------------------------
 
 export interface QueryEngineServiceShape {
 	readonly execute: (

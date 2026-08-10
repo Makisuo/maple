@@ -14,7 +14,6 @@ import type {
 	VcsRepositoryId,
 } from "@maple/domain/http"
 
-// ---------------------------------------------------------------------------
 // Vendor-agnostic VCS integration tables. Every row carries a `provider`
 // discriminator; GitHub-specific concepts never reach this layer. External
 // provider ids (installation/repo/account) are stored as TEXT for
@@ -22,7 +21,6 @@ import type {
 //
 // IMPORTANT: only `VcsRepository` (apps/api/src/services/vcs/VcsRepository.ts)
 // may import these tables. All other code goes through that repo service.
-// ---------------------------------------------------------------------------
 
 /** One row per provider App installation, owned by the initiating Maple org. */
 export const vcsInstallations = pgTable(

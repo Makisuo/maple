@@ -214,7 +214,6 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 			)
 		})
 
-		// ---------------------------------------------------------------------
 		// Revoke-by-team-id — the reverse direction of `uninstall`: a workspace
 		// admin removes the app (or revokes its tokens) from Slack's own "Manage
 		// Apps" UI instead of Maple's dashboard.
@@ -232,7 +231,6 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 		// worker's cron) is the backstop for a call the bot never made — a crash
 		// mid-processing, a network blip to Maple, or an installation that
 		// predates this wiring.
-		// ---------------------------------------------------------------------
 
 		const decodeRevokeBody = Schema.decodeUnknownOption(
 			Schema.Struct({ reason: Schema.Literals(["app_uninstalled", "tokens_revoked"]) }),

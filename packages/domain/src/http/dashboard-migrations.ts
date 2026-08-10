@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // One-shot data migration for stored dashboards.
 //
 // Reshapes a persisted dashboard JSON document to the current widget shape:
@@ -9,7 +8,6 @@
 // Operates on plain JSON (`unknown`), never on decoded class instances, because
 // it runs before the strict schema can decode legacy data. It is idempotent:
 // running it on an already-current document returns an equivalent document.
-// ---------------------------------------------------------------------------
 
 const METRIC_ONLY_QUERY_FIELDS = ["metricName", "metricType", "isMonotonic", "signalSource"] as const
 

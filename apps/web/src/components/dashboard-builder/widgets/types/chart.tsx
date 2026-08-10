@@ -8,12 +8,10 @@ import {
 	type WidgetTypeDefinition,
 } from "@/components/dashboard-builder/widgets/widget-type-registry"
 
-// ---------------------------------------------------------------------------
 // Line, bar and area. All three persist as `visualization: "chart"` and differ
 // only in `display.chartId`, so they share a renderer and a data source; the
 // settings rail is where they diverge — a curve is meaningless on a bar, and
 // stacking is meaningless on a line.
-// ---------------------------------------------------------------------------
 
 function TimeSeriesSettings({ stacked, curve }: { stacked: boolean; curve: boolean }) {
 	return (

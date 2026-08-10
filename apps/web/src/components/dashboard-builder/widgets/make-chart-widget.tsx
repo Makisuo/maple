@@ -6,7 +6,6 @@ import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleto
 import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
 
-// ---------------------------------------------------------------------------
 // Every widget that mounts a `chartRegistry` component — line/bar/area (all
 // persisted as `visualization: "chart"`), plus pie, histogram, heatmap and
 // funnel — was its own near-identical file. They differed only in a default
@@ -18,7 +17,6 @@ import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/compone
 // fields they don't read, so the factory forwards the whole display config. What
 // a panel type can actually *set* is decided by its settings rail, not by which
 // props its renderer happened to spell out.
-// ---------------------------------------------------------------------------
 
 interface ChartWidgetProps {
 	dataState: WidgetDataState

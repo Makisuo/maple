@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Query Builder
 //
 // Fluent builder with progressive type accumulation, inspired by Kysely's
@@ -24,7 +23,6 @@
 //       traceId: $.TraceId,
 //       errorType: $.e.ErrorType,
 //     }))
-// ---------------------------------------------------------------------------
 
 import type { ColumnDefs, CHType, InferTS, OutputToColumnDefs, NullableColumnDefs } from "./types"
 import type { Table } from "./table"
@@ -32,9 +30,7 @@ import type { Expr, Condition, ColumnRef } from "./expr"
 import { makeColumnRef } from "./expr"
 import type { TenantScope } from "./compile"
 
-// ---------------------------------------------------------------------------
 // Type utilities
-// ---------------------------------------------------------------------------
 
 export type ColumnAccessor<Cols extends ColumnDefs> = {
 	readonly [K in keyof Cols & string]: ColumnRef<K, Cols[K]>
@@ -62,9 +58,7 @@ export type JoinOnCallback<MainCols extends ColumnDefs, JoinedCols extends Colum
 	joined: ColumnAccessor<JoinedCols>,
 ) => Condition
 
-// ---------------------------------------------------------------------------
 // Query state (runtime storage)
-// ---------------------------------------------------------------------------
 
 interface TypedJoinClause {
 	readonly type: "INNER" | "LEFT" | "CROSS"
@@ -113,9 +107,7 @@ interface CHQueryState {
 	}>
 }
 
-// ---------------------------------------------------------------------------
 // CHQuery interface
-// ---------------------------------------------------------------------------
 
 export interface CHQuery<
 	Cols extends ColumnDefs = ColumnDefs,
@@ -185,9 +177,7 @@ export interface CHQuery<
 	 */
 	crossOrg(): CHQuery<Cols, Output, Joins>
 
-	// ---------------------------------------------------------------------------
 	// Type-safe joins with Table
-	// ---------------------------------------------------------------------------
 
 	innerJoin<JName extends string, JCols extends ColumnDefs, Alias extends string>(
 		table: Table<JName, JCols>,
@@ -206,9 +196,7 @@ export interface CHQuery<
 		alias: Alias,
 	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: JCols }>
 
-	// ---------------------------------------------------------------------------
 	// Type-safe joins with subquery (CHQuery)
-	// ---------------------------------------------------------------------------
 
 	innerJoinQuery<
 		JCols extends ColumnDefs,
@@ -273,16 +261,12 @@ export interface CHQuery<
 	): CHQuery<Cols, Output, Joins>
 }
 
-// ---------------------------------------------------------------------------
 // Type utilities for extracting output types from queries
-// ---------------------------------------------------------------------------
 
 /** Extract the Output type from a CHQuery. */
 export type InferQueryOutput<Q> = Q extends CHQuery<any, infer O, any> ? O : never
 
-// ---------------------------------------------------------------------------
 // ColumnAccessor factory (Proxy-based)
-// ---------------------------------------------------------------------------
 
 export function createColumnAccessor<Cols extends ColumnDefs>(_columns: Cols): ColumnAccessor<Cols> {
 	const cache = new Map<string, ColumnRef<string, CHType<string, any>>>()
@@ -300,9 +284,7 @@ export function createColumnAccessor<Cols extends ColumnDefs>(_columns: Cols): C
 	})
 }
 
-// ---------------------------------------------------------------------------
 // Qualified ColumnAccessor for joined tables (generates alias.Column SQL)
-// ---------------------------------------------------------------------------
 
 function createQualifiedColumnAccessor(alias: string): ColumnAccessor<any> {
 	const cache = new Map<string, ColumnRef<string, CHType<string, any>>>()
@@ -320,9 +302,7 @@ function createQualifiedColumnAccessor(alias: string): ColumnAccessor<any> {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // Joined ColumnAccessor — main columns + nested alias accessors
-// ---------------------------------------------------------------------------
 
 export function createJoinedColumnAccessor<Cols extends ColumnDefs, Joins extends Record<string, ColumnDefs>>(
 	_columns: Cols,
@@ -354,9 +334,7 @@ export function createJoinedColumnAccessor<Cols extends ColumnDefs, Joins extend
 	})
 }
 
-// ---------------------------------------------------------------------------
 // Query builder implementation
-// ---------------------------------------------------------------------------
 
 function makeQuery<
 	Cols extends ColumnDefs,
@@ -419,9 +397,7 @@ function makeQuery<
 			return makeQuery({ ...state, crossOrg: true })
 		},
 
-		// -----------------------------------------------------------------------
 		// Type-safe joins with Table
-		// -----------------------------------------------------------------------
 
 		innerJoin(table, alias, onFn) {
 			const mainAlias = state.tableAlias ?? state.tableName
@@ -460,9 +436,7 @@ function makeQuery<
 			}) as any
 		},
 
-		// -----------------------------------------------------------------------
 		// Type-safe joins with subquery (CHQuery)
-		// -----------------------------------------------------------------------
 
 		innerJoinQuery(query, alias, onFn) {
 			const mainAlias = state.tableAlias ?? state.fromQueryAlias ?? state.tableName
@@ -511,9 +485,7 @@ function makeQuery<
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Entry points
-// ---------------------------------------------------------------------------
 
 export function from<Name extends string, Cols extends ColumnDefs>(
 	table: Table<Name, Cols>,

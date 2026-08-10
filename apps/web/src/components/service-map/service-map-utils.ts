@@ -195,7 +195,6 @@ export const parseDbNodeId = (id: string): { dbSystem: string; dbNamespace: stri
 	}
 }
 
-// Layout constants (defaults)
 export const DEFAULT_LAYOUT_CONFIG = {
 	nodeWidth: 220,
 	nodeHeight: 70,
@@ -218,9 +217,6 @@ export const NS_PADDING_Y = 24
 export const NS_LABEL_HEIGHT = 28
 const NS_CLUSTER_GAP = 80
 
-/**
- * Derive the unique list of services from edges + service overview data
- */
 function deriveServiceList(edges: ServiceEdge[], serviceOverviews: ServiceOverview[]): string[] {
 	const services = new Set<string>()
 	for (const edge of edges) {
@@ -284,10 +280,9 @@ export function buildFlowElements({
 }: BuildFlowElementsInput): { nodes: Node<ServiceNodeData>[]; edges: Edge<ServiceEdgeData>[] } {
 	const services = deriveServiceList(edges, serviceOverviews)
 
-	// Build lookup of service overview metrics
 	const overviewMap = new Map<string, ServiceOverview>()
 	for (const svc of serviceOverviews) {
-		// Keep highest-throughput entry per service name
+		// Duplicate names resolve to their highest-throughput row.
 		const existing = overviewMap.get(svc.serviceName)
 		if (!existing || svc.throughput > existing.throughput) {
 			overviewMap.set(svc.serviceName, svc)
@@ -306,11 +301,8 @@ export function buildFlowElements({
 		infraMap.set(wl.serviceName, existing)
 	}
 
-	// Aggregate by database identity — (db.system, db.namespace) — so services
-	// calling the SAME database share a node while distinct databases of the
-	// same system stay separate. Namespace-less edges ("" — legacy rows or
-	// unidentified instrumentation) collapse into one generic per-system node.
-	// Sum of call/error counts; weighted-average latency.
+	// Database identity is (db.system, db.namespace); namespace-less edges share
+	// a generic per-system node. Latency is weighted by call count.
 	const dbAgg = new Map<
 		string,
 		{
@@ -367,11 +359,8 @@ export function buildFlowElements({
 		}
 	})
 
-	// PlanetScale inventory match: a DB node whose namespace equals a database
-	// name in the org's polled inventory (and whose system is a PlanetScale
-	// product) gets the integration's data OVERLAID — branding plus, when the
-	// scraper delivered metrics in the window, live health numbers. Like the
-	// Cloudflare overlay, PlanetScale data never creates nodes of its own.
+	// Inventory and scraped metrics decorate matching trace-derived DB nodes;
+	// PlanetScale data never creates a node by itself.
 	const planetscaleStatsByName = new Map(planetscaleStats.map((s) => [s.database.toLowerCase(), s]))
 	const PLANETSCALE_SYSTEMS = new Set(["mysql", "mariadb", "postgresql", "postgres"])
 	const planetscaleFor = (dbSystem: string, dbNamespace: string): PlanetScaleNodeMetrics | undefined => {
@@ -388,9 +377,7 @@ export function buildFlowElements({
 		}
 	}
 
-	// Hyperdrive config inventory resolved against the PlanetScale inventory —
-	// attached to the collapsed Hyperdrive node(s) so the detail panel can show
-	// what actually sits behind the proxy. Computed once; empty stays undefined.
+	// Resolve Hyperdrive origins once and attach them only to collapsed proxy nodes.
 	const hyperdriveInfo =
 		hyperdriveConfigs.length > 0
 			? matchHyperdriveConfigs(hyperdriveConfigs, planetscaleDatabases ?? new Map())
@@ -427,10 +414,8 @@ export function buildFlowElements({
 		})
 	}
 
-	// Cloudflare direct-integration analytics. A Worker whose script matches an
-	// instrumented service (by service name or faas.name) gets its analytics
-	// OVERLAID onto that node's detail; anything without a matching real service
-	// is dropped — Cloudflare data never creates nodes of its own.
+	// Direct analytics decorate matching instrumented Workers; unmatched scripts
+	// do not create service-map nodes.
 	const nodeById = new Map(flowNodes.map((n) => [n.id, n]))
 	const serviceNameSet = new Set(services)
 	const scriptToInstrumented = new Map<string, string>()
@@ -588,7 +573,6 @@ function computeLayers(
 	nodes: Node<ServiceNodeData>[],
 	edges: Edge<ServiceEdgeData>[],
 ): Map<string, { layer: number; indexInLayer: number; layerSize: number }> {
-	// Build adjacency list (forward + reverse) and in-degree map
 	const adjacency = new Map<string, string[]>()
 	const reverseAdj = new Map<string, string[]>()
 	const inDegree = new Map<string, number>()
@@ -603,7 +587,7 @@ function computeLayers(
 		inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1)
 	}
 
-	// Roots = nodes with in-degree 0, sorted alphabetically for determinism
+	// Alphabetical ordering makes equal graphs deterministic.
 	let roots = nodes
 		.filter((n) => (inDegree.get(n.id) ?? 0) === 0)
 		.map((n) => n.id)
@@ -619,7 +603,6 @@ function computeLayers(
 		roots = [sorted[0].id]
 	}
 
-	// BFS from roots
 	const layerMap = new Map<string, number>()
 	const queue: Array<{ id: string; layer: number }> = []
 	for (const root of roots) {
@@ -638,7 +621,7 @@ function computeLayers(
 		}
 	}
 
-	// Any unreached nodes (shouldn't happen within a connected component, but be safe)
+	// Keep malformed or disconnected remnants in a final layer.
 	let maxDepth = 0
 	for (const l of layerMap.values()) {
 		if (l > maxDepth) maxDepth = l
@@ -649,7 +632,6 @@ function computeLayers(
 		}
 	}
 
-	// Group nodes by layer, initial alphabetical sort for determinism
 	const layerGroups = new Map<number, string[]>()
 	for (const [id, layer] of layerMap) {
 		if (!layerGroups.has(layer)) layerGroups.set(layer, [])
@@ -711,7 +693,6 @@ function computeLayers(
 		}
 	}
 
-	// Build final result
 	const result = new Map<string, { layer: number; indexInLayer: number; layerSize: number }>()
 	for (const [layer, group] of layerGroups) {
 		for (let i = 0; i < group.length; i++) {
@@ -756,7 +737,6 @@ export function computeFlatPositions(
 	} = config
 	const positions = new Map<string, { x: number; y: number }>()
 
-	// Find connected components
 	const components = findConnectedComponents(nodes, edges)
 
 	// Separate true isolates (no edges at all) from connected components
@@ -776,7 +756,6 @@ export function computeFlatPositions(
 		}
 	}
 
-	// Layout each connected component, stacking vertically
 	let currentYOffset = 0
 	const nodeById = new Map(nodes.map((n) => [n.id, n]))
 
@@ -790,7 +769,6 @@ export function computeFlatPositions(
 
 		const layers = computeLayers(compNodes, compEdges)
 
-		// Find the tallest layer to center vertically
 		let maxLayerSize = 0
 		for (const { layerSize } of layers.values()) {
 			maxLayerSize = Math.max(maxLayerSize, layerSize)
@@ -801,7 +779,6 @@ export function computeFlatPositions(
 
 		for (const [id, assignment] of layers) {
 			const x = assignment.layer * layerGapX
-			// Center each layer's nodes vertically within the component's height
 			const layerHeight = assignment.layerSize * cellHeight
 			const layerOffsetY = (componentHeight - layerHeight) / 2
 			const y = currentYOffset + layerOffsetY + assignment.indexInLayer * cellHeight
@@ -816,7 +793,6 @@ export function computeFlatPositions(
 		const rowY = currentYOffset + disconnectedMarginY
 		const totalWidth = isolates.length * nodeWidth + (isolates.length - 1) * disconnectedGapX
 
-		// Center the isolate row relative to the connected graph's horizontal extent
 		let minX = Infinity
 		let maxX = -Infinity
 		for (const { x } of positions.values()) {
@@ -845,17 +821,9 @@ export function nodeNamespace(node: Node<ServiceNodeData>): string | undefined {
 }
 
 /**
- * Compute node positions. When at least one service node carries a
- * `service.namespace`, the graph is laid out as horizontal **swimlanes** — one
- * lane per namespace, plus an unboxed lane at the bottom for databases and
- * namespace-less services. Crucially, the column (x) of every node comes from a
- * SINGLE global hierarchical layering over the whole graph (call depth), so
- * cross-namespace edges keep flowing left→right instead of looping backward the
- * way per-cluster layouts (each restarting x at 0) make them. Each lane occupies
- * a disjoint vertical band so the dotted boxes never overlap. When no node has a
- * namespace, this is identical to {@link computeFlatPositions} (today's layout).
- *
- * Positions are deterministic: same input always produces same output.
+ * Uses global call-depth columns with disjoint namespace lanes, keeping
+ * cross-namespace edges left-to-right. Falls back to the flat layout when no
+ * service has a namespace.
  */
 export function computeNodePositions(
 	nodes: Node<ServiceNodeData>[],
@@ -864,7 +832,6 @@ export function computeNodePositions(
 ): Map<string, { x: number; y: number }> {
 	if (nodes.length === 0) return new Map<string, { x: number; y: number }>()
 
-	// Gate: only switch to swimlanes when the user has defined namespaces.
 	const hasNamespaces = nodes.some((n) => nodeNamespace(n) !== undefined)
 	if (!hasNamespaces) return computeFlatPositions(nodes, edges, config)
 

@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Service Map — hourly edge rollup
 //
 // `service_map_edges_hourly` cannot be filled by a materialized view: the
@@ -12,7 +11,6 @@
 // Its output columns match the `service_map_edges_hourly` table exactly — a
 // test in `service-map.test.ts` asserts the alias set — so rows flow straight
 // into `ingest` with no reshaping.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import type { CompiledQuery, CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
@@ -171,7 +169,6 @@ export function serviceMapEdgesRollupSQL(
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Resolutions rollup (companion of the edges rollup)
 //
 // Emits one row per resolved `(SourceService, parent.server.address) →
@@ -182,7 +179,6 @@ export function serviceMapEdgesRollupSQL(
 // Reads raw `traces` (not `service_map_spans`) because the projection MV
 // doesn't carry SpanAttributes; we need `server.address` on the parent. Runs
 // once per completed hour from `ServiceMapRollupService.processOrg`.
-// ---------------------------------------------------------------------------
 
 /** One resolved address-to-service mapping bucket — mirrors the columns of
  * `service_address_resolutions_hourly`. */

@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
 // Type-level tests: Expression type safety
-// ---------------------------------------------------------------------------
 
 import { expectTypeOf } from "expect-type"
 import * as CH from "./index"
@@ -9,16 +7,12 @@ import type { ParamMarker } from "./param"
 import type { CHString, CHFloat64, CHMap } from "./types"
 import { makeColumnRef } from "./expr"
 
-// ---------------------------------------------------------------------------
 // Literal expressions
-// ---------------------------------------------------------------------------
 
 expectTypeOf(CH.lit("hello")).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.lit(42)).toMatchTypeOf<Expr<number>>()
 
-// ---------------------------------------------------------------------------
 // Aggregate functions — return types
-// ---------------------------------------------------------------------------
 
 expectTypeOf(CH.count()).toMatchTypeOf<Expr<number>>()
 expectTypeOf(CH.avg(CH.lit(1))).toMatchTypeOf<Expr<number>>()
@@ -42,9 +36,7 @@ expectTypeOf(CH.groupUniqArray(CH.lit(1))).toMatchTypeOf<Expr<ReadonlyArray<numb
 // quantile returns Expr<number>
 expectTypeOf(CH.quantile(0.95)(CH.lit(1))).toMatchTypeOf<Expr<number>>()
 
-// ---------------------------------------------------------------------------
 // ClickHouse functions — return types
-// ---------------------------------------------------------------------------
 
 expectTypeOf(CH.toStartOfInterval(CH.lit("ts"), 60)).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.if_(CH.lit(1).gt(0), CH.lit("yes"), CH.lit("no"))).toMatchTypeOf<Expr<string>>()
@@ -57,9 +49,7 @@ expectTypeOf(CH.toFloat64OrZero(CH.lit("3.14"))).toMatchTypeOf<Expr<number>>()
 expectTypeOf(CH.length(CH.lit("hello"))).toMatchTypeOf<Expr<number>>()
 expectTypeOf(CH.position(CH.lit("hello"), "ell")).toMatchTypeOf<Expr<number>>()
 
-// ---------------------------------------------------------------------------
 // Comparison operators — return Condition
-// ---------------------------------------------------------------------------
 
 const strExpr = CH.lit("hello")
 const numExpr = CH.lit(42)
@@ -84,9 +74,7 @@ const cond = strExpr.eq("x")
 expectTypeOf(cond.and(numExpr.gt(0))).toMatchTypeOf<Condition>()
 expectTypeOf(cond.or(numExpr.lt(10))).toMatchTypeOf<Condition>()
 
-// ---------------------------------------------------------------------------
 // Arithmetic — only valid for Expr<number>
-// ---------------------------------------------------------------------------
 
 expectTypeOf(numExpr.div(2)).toMatchTypeOf<Expr<number>>()
 expectTypeOf(numExpr.mul(2)).toMatchTypeOf<Expr<number>>()
@@ -108,9 +96,7 @@ strExpr.add(1)
 // @ts-expect-error — .sub() requires Expr<number>
 strExpr.sub(1)
 
-// ---------------------------------------------------------------------------
 // String operations — only valid for Expr<string>
-// ---------------------------------------------------------------------------
 
 expectTypeOf(strExpr.like("%test%")).toMatchTypeOf<Condition>()
 expectTypeOf(strExpr.ilike("%test%")).toMatchTypeOf<Condition>()
@@ -125,9 +111,7 @@ numExpr.ilike("%test%")
 // @ts-expect-error — .notLike() requires Expr<string>
 numExpr.notLike("%test%")
 
-// ---------------------------------------------------------------------------
 // ColumnRef .get() — only valid for Map columns
-// ---------------------------------------------------------------------------
 
 const mapRef = makeColumnRef<"Attrs", CHMap<CHString, CHString>>("Attrs")
 expectTypeOf(mapRef.get("key")).toMatchTypeOf<Expr<string>>()
@@ -140,9 +124,7 @@ const numRef = makeColumnRef<"Score", CHFloat64>("Score")
 // @ts-expect-error — .get() requires a Map column type
 numRef.get("key")
 
-// ---------------------------------------------------------------------------
 // Type mismatch in comparisons
-// ---------------------------------------------------------------------------
 
 // @ts-expect-error — cannot compare Expr<string> with number
 strExpr.eq(42)
@@ -150,9 +132,7 @@ strExpr.eq(42)
 // @ts-expect-error — cannot compare Expr<number> with string
 numExpr.eq("hello")
 
-// ---------------------------------------------------------------------------
 // Aggregate function input constraints
-// ---------------------------------------------------------------------------
 
 // @ts-expect-error — avg requires Expr<number>
 CH.avg(CH.lit("hello"))
@@ -160,9 +140,7 @@ CH.avg(CH.lit("hello"))
 // @ts-expect-error — sum requires Expr<number>
 CH.sum(CH.lit("hello"))
 
-// ---------------------------------------------------------------------------
 // Param type safety
-// ---------------------------------------------------------------------------
 
 expectTypeOf(CH.param.string("orgId")).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.param.string("orgId")).toMatchTypeOf<ParamMarker<"orgId", string>>()
@@ -177,17 +155,13 @@ expectTypeOf(CH.param.dateTime("start")).toMatchTypeOf<ParamMarker<"start", stri
 expectTypeOf(CH.param.string("orgId")._paramName).toEqualTypeOf<"orgId">()
 expectTypeOf(CH.param.int("limit")._paramName).toEqualTypeOf<"limit">()
 
-// ---------------------------------------------------------------------------
 // mapContains / mapGet / inList — return types
-// ---------------------------------------------------------------------------
 
 expectTypeOf(CH.mapContains(mapRef, "key")).toMatchTypeOf<Condition>()
 expectTypeOf(CH.mapGet(mapRef, "key")).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.inList(strExpr, ["a", "b"])).toMatchTypeOf<Condition>()
 
-// ---------------------------------------------------------------------------
 // Array constructors
-// ---------------------------------------------------------------------------
 
 expectTypeOf(CH.arrayOf(CH.lit("a"), CH.lit("b"))).toMatchTypeOf<Expr<ReadonlyArray<string>>>()
 expectTypeOf(CH.arrayOf(CH.lit(1), CH.lit(2))).toMatchTypeOf<Expr<ReadonlyArray<number>>>()

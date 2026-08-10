@@ -6,14 +6,12 @@ import { Authorization } from "./current-tenant"
 import { QueryEngineExecutionError, QueryEngineTimeoutError } from "./query-engine"
 import { warehouseHttpErrors } from "./warehouse"
 
-// ---------------------------------------------------------------------------
 // Session replay endpoint schemas
 //
 // Backed by the session_replays (metadata) + session_replay_events (chunk index)
 // datasources in ClickHouse. `getReplayEvents` returns the rrweb event arrays
 // inline; the API hydrates them from R2 first when the row is blob-backed, so
 // the wire shape is the same either way — no signed URLs, no client-side fetch.
-// ---------------------------------------------------------------------------
 
 // --- List ---
 
@@ -292,9 +290,7 @@ export class SessionTranscriptResponse extends Schema.Class<SessionTranscriptRes
 	data: Schema.Array(SessionEventItem),
 }) {}
 
-// ---------------------------------------------------------------------------
 // API group
-// ---------------------------------------------------------------------------
 
 const sessionReplayEndpointErrors = [
 	QueryEngineExecutionError,

@@ -3,7 +3,6 @@ import { RawSqlExecuteRequest, RawSqlDisplayType } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
-// ---------------------------------------------------------------------------
 // Raw SQL chart server function (widget data source `raw_sql_chart`).
 //
 // Widget params shape:
@@ -24,7 +23,6 @@ import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/w
 //     shape and buckets client-side.
 //   - heatmap            → raw rows; chart accepts `{ x, y, value }` or wide
 //     `{ name, …numeric }` formats.
-// ---------------------------------------------------------------------------
 
 const TIME_SERIES_DISPLAY_TYPES: ReadonlyArray<"line" | "area" | "bar"> = ["line", "area", "bar"]
 

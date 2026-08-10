@@ -14,13 +14,11 @@ const baseParams = { orgId: "org_1" }
 const sessionParams = { orgId: "org_1", sessionId: "sess_1" }
 const WINDOW = { startTime: "2026-06-24 04:00:00", endTime: "2026-06-25 06:00:00" }
 
-// ---------------------------------------------------------------------------
 // sessionTraceSummariesQuery
 //
 // One bar per correlated trace on the session replay timeline. The root span's
 // kind + attributes ride along so the UI can render the canonical HTTP label
 // (`POST /api/foo`) instead of the raw span name (e.g. `HTTP POST`).
-// ---------------------------------------------------------------------------
 
 describe("sessionTraceSummariesQuery", () => {
 	it("projects the root span kind + attributes for HTTP label formatting", () => {
@@ -142,13 +140,11 @@ describe("sessionsForTraceQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // UserId filter (exact match) — list + facets
 //
 // UserId is high-cardinality identity data, so it's an exact-match filter, not a
 // facet branch. On the list it narrows to one user's sessions; on the facets it
 // narrows every dimension's counts (no facet branch is excluded for it).
-// ---------------------------------------------------------------------------
 
 describe("sessionReplaysListQuery userId filter", () => {
 	it("adds an exact UserId predicate when provided", () => {
@@ -208,12 +204,10 @@ describe("sessionReplaysFacetsQuery userId filter", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // identify() identity (migration 0011): UserName / UserEmail / GroupId /
 // GroupName. These columns default to '' on sessions recorded before identify()
 // existed, so every path here must stay additive — an un-identified session
 // selects empty strings rather than dropping out.
-// ---------------------------------------------------------------------------
 
 describe("session replay identity columns", () => {
 	// Every branch produces the same row shape; a missing column in one of them is
@@ -286,13 +280,11 @@ describe("getSessionReplayQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Session-time filters — duration (stored) + active time (session_events gaps)
 //
 // Guardrail: the default list and the duration-only filter must never touch
 // session_events. Active-time filtering joins the per-session activity aggregate
 // (the only path that scans the events table).
-// ---------------------------------------------------------------------------
 
 describe("sessionReplaysListQuery session-time filters", () => {
 	it("keeps the fast path (no subquery, no session_events) when unfiltered", () => {
@@ -361,13 +353,11 @@ describe("sessionReplaysListQuery session-time filters", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Event refinement — INNER JOIN the distilled session_events match subquery
 //
 // Powers the search_sessions MCP tool's "by what happened inside" filtering.
 // Only an event predicate triggers the join; metadata-only filters (including
 // the web listReplays path) must never read session_events.
-// ---------------------------------------------------------------------------
 
 describe("sessionReplaysListQuery event refinement", () => {
 	it("INNER JOINs the session_events match subquery and selects matchCount", () => {
@@ -419,13 +409,11 @@ describe("sessionReplaysListQuery event refinement", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Session-length distribution + percentiles (facets union)
 //
 // Drives the sidebar's histogram and its "> p50" / "> p95" preset chips. These
 // ride the facets union's existing {name, count, facetType} shape rather than a
 // separate query, so they inherit its filters and its single round-trip.
-// ---------------------------------------------------------------------------
 
 describe("sessionReplaysFacetsQuery duration distribution", () => {
 	it("buckets session length into half-octaves from 1s", () => {

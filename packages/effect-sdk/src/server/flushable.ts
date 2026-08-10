@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Server flushable preset — manual `flush()` for Node/Bun/Deno
 //
 // `Maple.layer` (the `Otlp.layerJson`-based server preset) batches in the
@@ -15,7 +14,6 @@
 //   await telemetry.dispose()      // stop the auto-flush timer + final flush
 //
 // Traces, logs, and Effect metric snapshots are flushed together.
-// ---------------------------------------------------------------------------
 
 import { Effect, Layer } from "effect"
 import {

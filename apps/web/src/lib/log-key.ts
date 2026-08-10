@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Log key — opaque, URL-safe identifier for a single log row.
 //
 // The ClickHouse `logs` table has no primary id. A row is identified by the
@@ -7,7 +6,6 @@
 // `$logId` path segment of `/logs/$logId`; `decodeLogKey` reverses it and
 // never throws — malformed input yields `null` so the page can render its
 // "invalid link" state.
-// ---------------------------------------------------------------------------
 
 export interface LogKey {
 	/** Raw Log.timestamp — ClickHouse DateTime64 string. */

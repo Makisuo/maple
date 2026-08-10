@@ -244,9 +244,7 @@ export const listHyperdriveConfigs: (
 	}))
 })
 
-// ---------------------------------------------------------------------------
 // GraphQL Analytics (the raw escape hatch the module doc-comment anticipates)
-// ---------------------------------------------------------------------------
 //
 // The GraphQL Analytics API is not among distilled's generated services, but the SDK exports its
 // operation factory, so we define the POST /graphql call as a first-class distilled operation:

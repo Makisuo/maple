@@ -1,11 +1,9 @@
-// ---------------------------------------------------------------------------
 // Dashboard Type System
 //
 // The widget shape is owned by the Effect schemas in @maple/domain. The types
 // below derive from those schemas so the web client cannot drift from the HTTP
 // boundary. Only web-only concerns (data-source endpoint registry keys, render
 // state) are defined here.
-// ---------------------------------------------------------------------------
 
 import type {
 	DashboardRefreshIntervalSeconds,

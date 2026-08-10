@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // The metric vocabulary shared by the KPI strip and the traffic chart.
 //
 // One descriptor per tile, holding everything both surfaces need: the headline
@@ -6,7 +5,6 @@
 // direction of change is the good one. The strip renders the descriptors, the
 // chart renders the selected one's series — so a tile and the chart it drives
 // can never disagree about what they are showing.
-// ---------------------------------------------------------------------------
 
 import { formatNumber, formatPercent } from "@maple/ui/lib/format"
 

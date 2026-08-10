@@ -9,7 +9,6 @@ import {
 import type { QueryProfileName } from "../profiles"
 import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 
-// ---------------------------------------------------------------------------
 // User-authored ClickHouse SQL: validation, macro expansion, and execution.
 //
 // Tenant isolation is enforced by the rawSqlQuery warehouse capability:
@@ -17,7 +16,6 @@ import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 // credentials, and shared vanilla ClickHouse is limited to single-org mode.
 // `$__orgFilter` remains mandatory as defense in depth and because OrgId is the
 // leading sorting-key filter on Maple telemetry tables.
-// ---------------------------------------------------------------------------
 
 const COLUMN_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_.]*$/
 

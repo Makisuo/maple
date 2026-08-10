@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // @maple/query-engine-integrations
 //
 // Query builders for third-party integrations (Cloudflare, PlanetScale) and for
@@ -12,7 +11,6 @@
 // Session replay/events deliberately stayed in the core package — the MCP tool
 // layer in `@maple/query-engine/observability` builds on those queries, so
 // moving them would make the two packages circular.
-// ---------------------------------------------------------------------------
 
 export * from "./cloudflare/index"
 export * from "./planetscale/index"

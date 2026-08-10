@@ -44,9 +44,7 @@ interface KeyValue {
 	value?: AnyValue
 }
 
-// ---------------------------------------------------------------------------
 // Value / format helpers (ports of the Rust functions of the same name)
-// ---------------------------------------------------------------------------
 
 /**
  * Port of Rust `bytes_hex`: base64-decode the field to bytes; if empty or all
@@ -379,9 +377,7 @@ function severityNumberToText(n: number | undefined): string {
 	return ""
 }
 
-// ---------------------------------------------------------------------------
 // Shared numeric coercions
-// ---------------------------------------------------------------------------
 
 /** UInt32 flags field — present as a number after `defaults: true`. */
 function asUint32(value: number | string | undefined): number {
@@ -439,9 +435,7 @@ function numberPointValue(point: { asDouble?: number; asInt?: string | number })
 	return 0
 }
 
-// ---------------------------------------------------------------------------
 // Exemplars (port of Rust `encode_exemplars`)
-// ---------------------------------------------------------------------------
 
 interface Exemplar {
 	traceId?: string
@@ -482,9 +476,7 @@ function encodeExemplars(exemplars: Exemplar[] | undefined): EncodedExemplars {
 	return out
 }
 
-// ---------------------------------------------------------------------------
 // NDJSON assembly
-// ---------------------------------------------------------------------------
 
 function toBatches(byDatasource: Map<string, Record<string, unknown>[]>): EncodedBatch[] {
 	const batches: EncodedBatch[] = []
@@ -504,9 +496,7 @@ function toBatches(byDatasource: Map<string, Record<string, unknown>[]>): Encode
 	return batches
 }
 
-// ---------------------------------------------------------------------------
 // Traces
-// ---------------------------------------------------------------------------
 
 interface TraceRequest {
 	resourceSpans?: ResourceSpans[]
@@ -606,9 +596,7 @@ export function encodeTraces(req: unknown): EncodedBatch[] {
 	return toBatches(byDatasource)
 }
 
-// ---------------------------------------------------------------------------
 // Logs
-// ---------------------------------------------------------------------------
 
 interface LogsRequest {
 	resourceLogs?: ResourceLogs[]
@@ -689,9 +677,7 @@ function isNonZeroNano(value: string | number | undefined): boolean {
 	return true
 }
 
-// ---------------------------------------------------------------------------
 // Metrics
-// ---------------------------------------------------------------------------
 
 interface MetricsRequest {
 	resourceMetrics?: ResourceMetrics[]

@@ -1,9 +1,7 @@
 import type { SqlFragment } from "./sql-fragment"
 import { compile } from "./sql-fragment"
 
-// ---------------------------------------------------------------------------
 // Query structure
-// ---------------------------------------------------------------------------
 
 interface SqlJoin {
 	readonly type: "INNER" | "LEFT" | "CROSS"
@@ -25,9 +23,7 @@ export interface SqlQuery {
 	readonly format?: string
 }
 
-// ---------------------------------------------------------------------------
 // Compiler
-// ---------------------------------------------------------------------------
 
 export function compileQuery(q: SqlQuery): string {
 	const parts: string[] = []

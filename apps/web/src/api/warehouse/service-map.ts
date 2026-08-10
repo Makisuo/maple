@@ -268,14 +268,12 @@ export const getServiceMapDbEdges = Effect.fn("QueryEngine.getServiceMapDbEdges"
 	}
 })
 
-// ---------------------------------------------------------------------------
 // Cloudflare direct-integration Worker analytics
 //
 // The analytics poller writes Worker metrics under the synthetic service name
 // `cloudflare-worker/{script}` with no spans. The map overlays these onto the
 // matching instrumented service node (by service name or faas.name); scripts
 // with no matching real service are dropped — CF data never creates nodes.
-// ---------------------------------------------------------------------------
 
 const WORKER_SERVICE_PREFIX = "cloudflare-worker/"
 
@@ -344,14 +342,12 @@ export const getServiceMapCloudflare = Effect.fn("QueryEngine.getServiceMapCloud
 	}
 })
 
-// ---------------------------------------------------------------------------
 // PlanetScale scraped-metrics rollups
 //
 // The scraper collects PlanetScale's Prometheus metrics per branch; the map
 // overlays the per-database rollup onto the matching trace-derived DB node
 // (matched by database name against the org's polled inventory). PlanetScale
 // data never creates nodes of its own.
-// ---------------------------------------------------------------------------
 
 export interface PlanetScaleDatabaseStat {
 	database: string

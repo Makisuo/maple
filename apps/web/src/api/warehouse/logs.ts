@@ -139,11 +139,9 @@ const listLogsEffect = Effect.fn("QueryEngine.listLogs")(function* ({ data }: { 
 	}
 })
 
-// ---------------------------------------------------------------------------
 // Single log lookup — exact-match by composite key, backs the `/logs/$logId`
 // shareable detail page. `timestamp` is the raw ClickHouse DateTime64 string
 // (sub-second precision), so it is not constrained to WarehouseDateTimeString.
-// ---------------------------------------------------------------------------
 
 const GetLogInputSchema = Schema.Struct({
 	timestamp: Schema.String,
@@ -345,13 +343,11 @@ const getLogsFacetValuesEffect = Effect.fn("QueryEngine.getLogsFacetValues")(fun
 	}
 })
 
-// ---------------------------------------------------------------------------
 // Log attribute keys / values
 // Backed by `log_attribute_keys_mv` and `log_attribute_values_mv` →
 // `attribute_keys_hourly` / `attribute_values_hourly`. Reads the rollup, not
 // the raw `logs` table — autocomplete on log attribute name/value stays fast
 // regardless of tenant log volume.
-// ---------------------------------------------------------------------------
 
 const GetLogAttributeKeysInputSchema = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),

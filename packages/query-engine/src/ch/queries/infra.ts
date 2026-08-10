@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Typed Infrastructure Queries
 //
 // Host-centric aggregations built on top of OTel hostmetrics data that lands
@@ -11,7 +10,6 @@
 //   - system.network.io                sum,   bytes, attributes: device, direction
 //
 // Host identity is carried on the ResourceAttributes map under `host.name`.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
@@ -29,9 +27,7 @@ const HOSTMETRIC_NAMES = [
 	"system.cpu.load_average.15m",
 ] as const
 
-// ---------------------------------------------------------------------------
 // List hosts — one row per host.name with latest-window headline gauges
-// ---------------------------------------------------------------------------
 
 export interface ListHostsOpts {
 	search?: string
@@ -90,9 +86,7 @@ export function listHostsQuery(opts: ListHostsOpts = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Host detail summary — single host, latest-window headline gauges + uptime
-// ---------------------------------------------------------------------------
 
 export interface HostDetailSummaryOpts {
 	hostName: string
@@ -147,10 +141,8 @@ export function hostDetailSummaryQuery(opts: HostDetailSummaryOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Host infra time-series — gauge metric broken down by a single attribute key
 // (e.g. CPU by state, filesystem by mountpoint). Always filtered to one host.
-// ---------------------------------------------------------------------------
 
 export interface HostGaugeTimeseriesOpts {
 	hostName: string
@@ -186,13 +178,11 @@ export function hostGaugeTimeseriesQuery(opts: HostGaugeTimeseriesOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Host network time-series — sum metric broken down by direction.
 // Reports bytes/sec computed from the latest sample in each bucket divided by
 // the bucket size. `system.network.io` is a cumulative counter; the UI layer
 // is expected to render the derivative, but for the first cut we surface
 // average bytes/sec using the gauge-style aggregation.
-// ---------------------------------------------------------------------------
 
 export interface HostNetworkTimeseriesOpts {
 	hostName: string
@@ -204,11 +194,9 @@ export interface HostNetworkTimeseriesOutput {
 	readonly sumValue: number
 }
 
-// ---------------------------------------------------------------------------
 // Fleet utilization time-series — bucketed averages of CPU + memory across all
 // hosts in the org, plus an active-host count per bucket. Powers the small
 // sparklines on the overview KPI cards.
-// ---------------------------------------------------------------------------
 
 export interface FleetUtilizationTimeseriesOutput {
 	readonly bucket: string
@@ -262,7 +250,6 @@ export function hostNetworkTimeseriesQuery(opts: HostNetworkTimeseriesOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Kubernetes — pod aggregations over k8s.pod.* metrics emitted by the kubelet
 // stats receiver. Identity carried on ResourceAttributes:
 //   k8s.pod.name, k8s.pod.uid, k8s.namespace.name, k8s.node.name,
@@ -274,7 +261,6 @@ export function hostNetworkTimeseriesQuery(opts: HostNetworkTimeseriesOpts) {
 //   k8s.pod.cpu_request_utilization   gauge, 0..1
 //   k8s.pod.memory_limit_utilization  gauge, 0..1
 //   k8s.pod.memory_request_utilization gauge, 0..1
-// ---------------------------------------------------------------------------
 
 const POD_METRIC_NAMES = [
 	"k8s.pod.cpu.usage",
@@ -532,13 +518,11 @@ function podScopeCondition(
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Pod count — the denominator behind "Top 50 of 1,284".
 //
 // The list is limited, so `rows.length` only ever tells you how many rows came
 // back, never how many matched. Without this the UI silently claims the fleet is
 // the size of the page.
-// ---------------------------------------------------------------------------
 
 export interface ListPodsSummaryOutput {
 	readonly totalPods: number
@@ -657,10 +641,8 @@ export function podDetailSummaryQuery(opts: PodDetailSummaryOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Pod time-series — gauge metric for one pod, optionally broken down by an
 // attribute key (e.g. container name, when present).
-// ---------------------------------------------------------------------------
 
 export interface PodGaugeTimeseriesOpts {
 	podName: string
@@ -692,12 +674,10 @@ export function podGaugeTimeseriesQuery(opts: PodGaugeTimeseriesOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Kubernetes — node aggregations over k8s.node.* metrics from the kubelet
 // stats + k8s_cluster receivers.
 //   k8s.node.cpu.usage    gauge, cores
 //   k8s.node.uptime       gauge, seconds
-// ---------------------------------------------------------------------------
 
 const NODE_METRIC_NAMES = ["k8s.node.cpu.usage", "k8s.node.uptime"] as const
 
@@ -836,10 +816,8 @@ export function nodeGaugeTimeseriesQuery(opts: NodeGaugeTimeseriesOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Kubernetes — workload aggregations (Deployment / StatefulSet / DaemonSet).
 // Walks over k8s.pod.* metrics and groups by workload-name + namespace.
-// ---------------------------------------------------------------------------
 
 export type WorkloadKind = "deployment" | "statefulset" | "daemonset"
 
@@ -992,13 +970,11 @@ export function workloadGaugeTimeseriesQuery(opts: WorkloadGaugeTimeseriesOpts) 
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // K8s facets — distinct (name, count) pairs per ResourceAttribute key, used to
 // populate the SigNoz-style left filter sidebar. Each facet query is a UNION
 // of per-attribute SELECTs scoped to the rows that show up in the matching
 // list query (pods, nodes, or workloads), filtered by the same opts so the
 // facet counts reflect the *current* filtered set.
-// ---------------------------------------------------------------------------
 
 export type PodFacetsOutput = FacetOutput
 

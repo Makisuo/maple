@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Typed Service Map Queries
 //
 // `*Query` exports return a `CHQuery` for the caller to compile; `*SQL` exports
@@ -6,7 +5,6 @@
 // every query's tenant scope is derived from its predicates rather than
 // asserted — see `serviceMapEdgeJoinQuery` for why that distinction earned its
 // own paragraph.
-// ---------------------------------------------------------------------------
 
 import {
 	DB_QUERY_KEY_SQL,
@@ -48,9 +46,7 @@ const _leastDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("lea
 const _greatestDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("greatest")
 const _addHours = defineFn<[CH.Expr<string>, CH.Expr<number>], string>("addHours")
 
-// ---------------------------------------------------------------------------
 // Service dependencies
-// ---------------------------------------------------------------------------
 
 export interface ServiceDependenciesOpts {
 	deploymentEnv?: string
@@ -233,7 +229,6 @@ export function serviceDependenciesSQL(
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Service ↔ service dependencies — scoped to one source service
 //
 // The service-detail page's Dependencies tab only needs outbound edges for the
@@ -245,7 +240,6 @@ export function serviceDependenciesSQL(
 //     single service's outbound spans instead of every span in the org.
 // Output shape matches `ServiceDependenciesOutput` so callers can reuse the
 // same row-transform code.
-// ---------------------------------------------------------------------------
 
 export interface ServiceDependenciesForServiceOpts {
 	serviceName: string
@@ -376,7 +370,6 @@ export function serviceDependenciesForServiceQuery(opts: ServiceDependenciesForS
 	return serviceDependenciesQueryBase(opts)
 }
 
-// ---------------------------------------------------------------------------
 // Service ↔ database edges
 //
 // Surfaces DB calls (Client/Producer spans with `db.system.name` set) as a separate
@@ -388,7 +381,6 @@ export function serviceDependenciesForServiceQuery(opts: ServiceDependenciesForS
 // hour from raw `traces` so the most recent in-flight bucket is included even
 // before the MV finalizes it. Mirrors the dual-source pattern used by
 // `serviceDependenciesSQL` for `service_map_edges_hourly`.
-// ---------------------------------------------------------------------------
 
 export interface ServiceDbEdgesOpts {
 	deploymentEnv?: string
@@ -539,13 +531,11 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Service ↔ database edges — scoped to one source service
 //
 // Same shape as `serviceDbEdgesSQL` but pre-filters both branches by
 // `ServiceName = ?`. Mirrors the `serviceExternalEdgesSQL` pattern (which is
 // already service-scoped).
-// ---------------------------------------------------------------------------
 
 export interface ServiceDbEdgesForServiceOpts {
 	serviceName: string
@@ -562,7 +552,6 @@ export function serviceDbEdgesForServiceQuery(opts: ServiceDbEdgesForServiceOpts
 	return serviceDbEdgesQueryBase(opts)
 }
 
-// ---------------------------------------------------------------------------
 // Service-map database query summaries
 //
 // Selected database drill-down ("Query Activity" + "Top Query Shapes"). Reads
@@ -573,7 +562,6 @@ export function serviceDbEdgesForServiceQuery(opts: ServiceDbEdgesForServiceOpts
 // window. The query SHAPE (label + normalized key) is derived by the SQL
 // fragments in `@maple/domain/tinybird/db-query-shape-sql`, shared byte-for-byte
 // with the rollup MV so a shape's key is stable across the sealed/live boundary.
-// ---------------------------------------------------------------------------
 
 export interface ServiceDbQuerySummaryParams {
 	readonly orgId: string
@@ -991,7 +979,6 @@ export function serviceDbTopQueriesSQL(
 	return compileCH(query, params, { rowSchema: ServiceDbTopQueryOutputSchema })
 }
 
-// ---------------------------------------------------------------------------
 // Service ↔ external target edges (http / messaging / rpc)
 //
 // Surfaces non-DB Client/Producer outbound calls — HTTP endpoints, message
@@ -1001,7 +988,6 @@ export function serviceDbTopQueriesSQL(
 // against `service_address_resolutions_hourly` so HTTP targets whose address
 // resolves to a known internal service (in the same window) drop out — those
 // already appear under "Services" via `serviceDependenciesSQL`.
-// ---------------------------------------------------------------------------
 
 export interface ServiceExternalEdgesOpts {
 	deploymentEnv?: string
@@ -1187,7 +1173,6 @@ export function serviceExternalEdgesSQL(
 	return compileCH(query, params, { rowSchema: ServiceExternalEdgesOutputSchema })
 }
 
-// ---------------------------------------------------------------------------
 // Service hosting platform
 //
 // Per-service rollup of the OTel resource attributes that identify where a
@@ -1201,7 +1186,6 @@ export function serviceExternalEdgesSQL(
 // attribute" semantics the platform classifier needs. `k8s.pod.name` /
 // `k8s.deployment.name` are required for the kubernetes signal because
 // `k8s.cluster.name` can leak onto in-transit spans via the otel-gateway.
-// ---------------------------------------------------------------------------
 
 export interface ServicePlatformsOpts {
 	deploymentEnv?: string

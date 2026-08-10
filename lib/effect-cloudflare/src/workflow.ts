@@ -27,9 +27,7 @@ import * as Effect from "effect/Effect"
 import { makeWorkflowBridge } from "./rpc.ts"
 import { WorkerEnvironment } from "./worker-environment.ts"
 
-// ---------------------------------------------------------------------------
 // Runtime services provided by the bridge while a workflow executes
-// ---------------------------------------------------------------------------
 
 export class WorkflowEvent extends Context.Service<
 	WorkflowEvent,
@@ -49,9 +47,7 @@ export class WorkflowStep extends Context.Service<
 	}
 >()("Cloudflare.WorkflowStep") {}
 
-// ---------------------------------------------------------------------------
 // Step primitives — thin wrappers over WorkflowStep methods
-// ---------------------------------------------------------------------------
 
 export const task = <T>(name: string, effect: Effect.Effect<T>): Effect.Effect<T, never, WorkflowStep> =>
 	WorkflowStep.pipe(Effect.flatMap((step) => step.do(name, effect)))
@@ -75,9 +71,7 @@ export type WorkflowRunServices = WorkflowEvent | WorkflowStep
 
 export type WorkflowBody<Result = unknown> = Effect.Effect<Result, never, WorkflowRunServices>
 
-// ---------------------------------------------------------------------------
 // Handles returned to worker code for starting / inspecting instances
-// ---------------------------------------------------------------------------
 
 export interface WorkflowHandle {
 	readonly name: string
@@ -99,9 +93,7 @@ export interface WorkflowInstanceStatus {
 	error?: { name: string; message: string } | null
 }
 
-// ---------------------------------------------------------------------------
 // Module-level impl registry (mirrors the DO namespace registry)
-// ---------------------------------------------------------------------------
 
 type WorkflowImpl = Effect.Effect<WorkflowBody, never, any>
 
@@ -111,9 +103,7 @@ export const registerWorkflowImpl = (name: string, impl: WorkflowImpl): void => 
 	implRegistry.set(name, impl)
 }
 
-// ---------------------------------------------------------------------------
 // Bridge base class
-// ---------------------------------------------------------------------------
 
 const Bridge = makeWorkflowBridge(
 	WorkflowEntrypoint as unknown as abstract new (
@@ -134,9 +124,7 @@ const Bridge = makeWorkflowBridge(
 	},
 )
 
-// ---------------------------------------------------------------------------
 // Public factory
-// ---------------------------------------------------------------------------
 
 /**
  * Define a Cloudflare Workflow class with an Effect-native body.

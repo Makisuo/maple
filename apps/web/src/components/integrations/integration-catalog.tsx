@@ -341,11 +341,9 @@ export function IntegrationIconPlate({
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Overview model — the dense connected-row / available-card split. Derived from
 // the same list queries as `useIntegrationStatuses` (plus the cheap PlanetScale
 // inventory read); deliberately NO warehouse queries at hub level.
-// ---------------------------------------------------------------------------
 
 interface ConnectedOverview {
 	readonly kind: "connected"

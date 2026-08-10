@@ -1,17 +1,13 @@
-// ---------------------------------------------------------------------------
 // Expression System
 //
 // Typed expressions that compile to SqlFragment. Every Expr<T> carries a
 // phantom TSType so TypeScript can infer output row types from SELECT clauses.
-// ---------------------------------------------------------------------------
 
 import type { SqlFragment } from "../sql/sql-fragment"
 import { raw, str, compile, as_ as sqlAs } from "../sql/sql-fragment"
 import type { CHType, InferTS } from "./types"
 
-// ---------------------------------------------------------------------------
 // Core interfaces
-// ---------------------------------------------------------------------------
 
 export interface Expr<TSType> {
 	readonly _brand: "Expr"
@@ -66,9 +62,7 @@ export interface Condition {
 	or(other: Condition): Condition
 }
 
-// ---------------------------------------------------------------------------
 // Core helpers (exported for define-fn.ts and consumer extensibility)
-// ---------------------------------------------------------------------------
 
 export function toFragment(value: unknown): SqlFragment {
 	if (
@@ -88,9 +82,7 @@ export function toFragment(value: unknown): SqlFragment {
 	return raw(String(value))
 }
 
-// ---------------------------------------------------------------------------
 // Expr implementation
-// ---------------------------------------------------------------------------
 
 export function makeExpr<T>(fragment: SqlFragment): Expr<T> {
 	const self: Expr<T> = {
@@ -135,9 +127,7 @@ export function makeExpr<T>(fragment: SqlFragment): Expr<T> {
 	return self
 }
 
-// ---------------------------------------------------------------------------
 // ColumnRef implementation
-// ---------------------------------------------------------------------------
 
 /**
  * The column carrying row-level tenancy. An equality or membership test on it
@@ -185,9 +175,7 @@ export function makeColumnRef<Name extends string, ColType extends CHType<string
 	) as ColumnRef<Name, ColType>
 }
 
-// ---------------------------------------------------------------------------
 // Condition implementation
-// ---------------------------------------------------------------------------
 
 export function makeCond(fragment: SqlFragment, scopesTenant?: boolean): Condition {
 	return {
@@ -200,9 +188,7 @@ export function makeCond(fragment: SqlFragment, scopesTenant?: boolean): Conditi
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Literals
-// ---------------------------------------------------------------------------
 
 export function lit(value: string): Expr<string>
 export function lit(value: number): Expr<number>
@@ -211,13 +197,11 @@ export function lit(value: string | number): Expr<string> | Expr<number> {
 	return makeExpr<number>(raw(String(value)))
 }
 
-// ---------------------------------------------------------------------------
 // Subquery expressions
 //
 // `exists` / `inSubquery` / `notInSubquery` live in `./subquery`, not here —
 // they accept a `CHQuery` and so need `compileCH`, which this module cannot
 // import without closing a cycle. Reach them from the package root.
-// ---------------------------------------------------------------------------
 
 /**
  * Reference an outer query's column in a correlated subquery.
@@ -247,9 +231,7 @@ export function not(condition: Condition): Condition {
 	return makeCond(raw(`NOT (${compile(condition.toFragment())})`))
 }
 
-// ---------------------------------------------------------------------------
 // Raw expression (escape hatch)
-// ---------------------------------------------------------------------------
 
 export function rawExpr<T = unknown>(sql: string): Expr<T> {
 	return makeExpr<T>(raw(sql))
@@ -264,17 +246,13 @@ export function dynamicColumn<T = string>(name: string): Expr<T> {
 	return makeExpr<T>(raw(name))
 }
 
-// ---------------------------------------------------------------------------
 // Aliased expression — used by query compilation
-// ---------------------------------------------------------------------------
 
 export function aliased<T>(expr: Expr<T>, alias: string): SqlFragment {
 	return sqlAs(expr.toFragment(), alias)
 }
 
-// ---------------------------------------------------------------------------
 // Conditional helpers (for optional WHERE clauses)
-// ---------------------------------------------------------------------------
 
 export function when<T>(value: T | undefined | false | null, fn: (v: T) => Condition): Condition | undefined {
 	if (value === undefined || value === null || value === false) return undefined
@@ -286,9 +264,7 @@ export function whenTrue(value: boolean | undefined, fn: () => Condition): Condi
 	return fn()
 }
 
-// ---------------------------------------------------------------------------
 // Re-export all ClickHouse functions so `import * as CH from "./expr"` works
-// ---------------------------------------------------------------------------
 
 export {
 	count,

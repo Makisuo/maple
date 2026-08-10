@@ -3,9 +3,7 @@ import { Schema } from "effect"
 import { AnomalyIncidentId, ErrorIssueId, IsoDateTimeString, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
 
-// ---------------------------------------------------------------------------
 // Literals
-// ---------------------------------------------------------------------------
 
 export const AnomalySignalType = Schema.Literals([
 	"error_rate",
@@ -49,9 +47,7 @@ export const AnomalyTriageStatus = Schema.Literals(["none", "pending", "complete
 })
 export type AnomalyTriageStatus = Schema.Schema.Type<typeof AnomalyTriageStatus>
 
-// ---------------------------------------------------------------------------
 // Documents
-// ---------------------------------------------------------------------------
 
 /**
  * One fingerprint participating in a (possibly consolidated) error-spike
@@ -161,9 +157,7 @@ export class AnomalyDetectorSettingsUpdateRequest extends Schema.Class<AnomalyDe
 	mutedSignals: Schema.optionalKey(Schema.Array(AnomalySignalType)),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Errors
-// ---------------------------------------------------------------------------
 
 export class AnomalyPersistenceError extends Schema.TaggedError<AnomalyPersistenceError>()(
 	"@maple/http/anomalies/AnomalyPersistenceError",
@@ -200,9 +194,7 @@ export class AnomalyLinkedIssueNotFoundError extends Schema.TaggedError<AnomalyL
 	{ httpApiStatus: 404 },
 ) {}
 
-// ---------------------------------------------------------------------------
 // Query schemas
-// ---------------------------------------------------------------------------
 
 const IncidentListQuery = Schema.Struct({
 	status: Schema.optional(AnomalyIncidentStatus),
@@ -222,9 +214,7 @@ const IncidentTimeseriesQuery = Schema.Struct({
 	endTime: Schema.optional(IsoDateTimeString),
 })
 
-// ---------------------------------------------------------------------------
 // API group
-// ---------------------------------------------------------------------------
 
 export class AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 	.add(

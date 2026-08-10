@@ -1039,7 +1039,6 @@ const getCustomChartServiceSparklinesEffect = Effect.fn("QueryEngine.getCustomCh
 	},
 )
 
-// ---------------------------------------------------------------------------
 // Throughput refinement — exact pre-sampling counts (SpanMetrics `calls`)
 //
 // The primary chart effects above resolve throughput from the sampling-aware
@@ -1049,7 +1048,6 @@ const getCustomChartServiceSparklinesEffect = Effect.fn("QueryEngine.getCustomCh
 // chart shows sampling is active (`samplingActive`), so unsampled services never
 // issue the expensive query at all. Env-scoped views also skip it: the counter
 // is service-level / all-environment and can't be filtered by `DeploymentEnv`.
-// ---------------------------------------------------------------------------
 
 export interface ThroughputRefinementPoint {
 	/** ISO bucket — matches `ServiceDetailTimeSeriesPoint.bucket`. */

@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Auto-detected platform / runtime resource attributes
 //
 // Maps `std-env` runtime + provider detection plus a small set of
@@ -19,7 +18,6 @@
 // AWS Lambda detection is done via env vars (`AWS_LAMBDA_FUNCTION_NAME`)
 // because std-env's `provider` doesn't enumerate Lambda — Lambda runs node on
 // EC2-managed hosts and isn't a CI/CD provider in std-env's taxonomy.
-// ---------------------------------------------------------------------------
 
 import { Match } from "effect"
 import { platform, provider, runtime } from "std-env"

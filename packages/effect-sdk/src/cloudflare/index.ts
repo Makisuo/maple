@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // MapleCloudflareSDK — Cloudflare Workers OTLP telemetry
 //
 // Constructible at module scope (no env required); resolves env lazily on
@@ -29,7 +28,6 @@
 // The buffer-drain → encode → POST machinery is shared with the server/client
 // flushable presets via `../shared/flush-core.ts`; this module owns only the
 // Cloudflare-specific lazy `env` resolution.
-// ---------------------------------------------------------------------------
 
 import { Layer } from "effect"
 import {
@@ -190,8 +188,6 @@ export const make = (config: Config = {}): Telemetry => {
 	return { layer, flush }
 }
 
-// ---------------------------------------------------------------------------
 // Convenience namespace export so call sites read as
 // `MapleCloudflareSDK.make({...})` when imported as a default.
-// ---------------------------------------------------------------------------
 export const MapleCloudflareSDK = { make }

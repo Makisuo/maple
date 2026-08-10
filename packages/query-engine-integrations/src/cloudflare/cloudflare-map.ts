@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Cloudflare service-map stats
 //
 // Per-Worker rollups (one row per script) that let the service map overlay
@@ -14,7 +13,6 @@
 // Split by table because the counters live in `metrics_sum` (delta sums) and
 // the pre-computed percentiles live in `metrics_gauge` (one row per quantile).
 // The caller (the `serviceCloudflareStats` handler) merges both by ServiceName.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"

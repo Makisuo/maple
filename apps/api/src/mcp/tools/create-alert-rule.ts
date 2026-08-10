@@ -21,9 +21,7 @@ const splitCsv = (value: string): string[] =>
 		.map((entry) => entry.trim())
 		.filter((entry) => entry.length > 0)
 
-// ---------------------------------------------------------------------------
 // Template definitions
-// ---------------------------------------------------------------------------
 
 interface AlertTemplate {
 	signalType: string
@@ -68,9 +66,7 @@ const ALERT_TEMPLATES: Record<string, AlertTemplate> = {
 	},
 }
 
-// ---------------------------------------------------------------------------
 // Build request from raw params (custom mode)
-// ---------------------------------------------------------------------------
 
 interface CreateAlertRuleParams {
 	name: string

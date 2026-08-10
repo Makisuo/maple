@@ -3,9 +3,7 @@ import { makeCond } from "../expr"
 import { compile, raw, str } from "../../sql/sql-fragment"
 import type { Condition, Expr } from "../expr"
 
-// ---------------------------------------------------------------------------
 // Standard string functions (defineFn one-liners)
-// ---------------------------------------------------------------------------
 
 export const toString_ = defineFn<[Expr<any>], string>("toString")
 export const length_ = defineFn<[Expr<string>], number>("length")
@@ -15,7 +13,6 @@ export const positionCaseInsensitive = defineFn<[Expr<string>, Expr<string>], nu
 )
 export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left")
 
-// ---------------------------------------------------------------------------
 // URL functions
 //
 // ClickHouse parses these without a full URL library: `domain` returns the host
@@ -24,15 +21,12 @@ export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left")
 // fragment are already excluded, so a path grouped with `path_` carries no
 // query-parameter PII. `cutQueryString` is the variant that keeps scheme and
 // host, for when the full URL minus its query is wanted.
-// ---------------------------------------------------------------------------
 
 export const domain_ = defineFn<[Expr<string>], string>("domain")
 export const path_ = defineFn<[Expr<string>], string>("path")
 export const cutQueryString = defineFn<[Expr<string>], string>("cutQueryString")
 
-// ---------------------------------------------------------------------------
 // Mixed Expr + literal args (compileFnCall wrappers)
-// ---------------------------------------------------------------------------
 
 export function position_(haystack: Expr<string>, needle: string): Expr<number> {
 	return compileFnCall<number>("position", haystack, needle)
@@ -63,9 +57,7 @@ export function matchCond(haystack: Expr<string>, pattern: string): Condition {
 	return makeCond(raw(`match(${compile(haystack.toFragment())}, ${compile(str(pattern))})`))
 }
 
-// ---------------------------------------------------------------------------
 // Variadic string functions
-// ---------------------------------------------------------------------------
 
 export function concat(...exprs: Array<Expr<string> | string>): Expr<string> {
 	return compileFnCall<string>("concat", ...exprs)

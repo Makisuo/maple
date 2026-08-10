@@ -1,8 +1,4 @@
-/**
- * TanStack DB utilities for effect-atom.
- * Provides reactive atoms that integrate with TanStack DB collections and live queries.
- * @since 1.0.0
- */
+/** TanStack DB adapters for effect-atom. @since 1.0.0 */
 
 import {
 	type Collection,
@@ -19,19 +15,14 @@ import * as Atom from "effect/unstable/reactivity/Atom"
 import type { CollectionStatus, ConditionalQueryFn, QueryFn, QueryOptions } from "./types"
 import { TanStackDBError } from "./types"
 
-/**
- * Creates an Atom from a TanStack DB collection.
- * Returns an AsyncResult that tracks the collection's lifecycle state.
- */
+/** Creates an atom that tracks a collection's lifecycle and rows. */
 export const makeCollectionAtom = <T extends object, TKey extends string | number>(
 	collection: Collection<T, TKey, any> & NonSingleResult,
 ): Atom.Atom<AsyncResult.AsyncResult<Array<T>, TanStackDBError>> => {
 	return Atom.readable((get) => {
-		// Start sync if not already started
 		collection.startSyncImmediate()
 
-		// Set up subscription immediately, before checking initial status
-		// This ensures we get notified when async sync completes
+		// Subscribe before reading status so an async completion cannot be missed.
 		const subscription = collection.subscribeChanges(() => {
 			const status: CollectionStatus = collection.status
 
@@ -65,12 +56,10 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
 			get.setSelf(AsyncResult.success(newData))
 		})
 
-		// Cleanup on unmount
 		get.addFinalizer(() => {
 			subscription.unsubscribe()
 		})
 
-		// Return initial state based on current status
 		const status: CollectionStatus = collection.status
 
 		if (status === "error") {
@@ -89,26 +78,20 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
 			)
 		}
 
-		// Get current data
 		const initialData = Array.from(collection.entries()).map(([_, value]) => value)
 
 		return AsyncResult.success(initialData)
 	})
 }
 
-/**
- * Creates an Atom from a TanStack DB collection with single result.
- * Returns an AsyncResult that contains a single item or undefined.
- */
+/** Creates an atom for a single-result collection. */
 export const makeSingleCollectionAtom = <T extends object, TKey extends string | number>(
 	collection: Collection<T, TKey, any> & SingleResult,
 ): Atom.Atom<AsyncResult.AsyncResult<T | undefined, TanStackDBError>> => {
 	return Atom.readable((get) => {
-		// Start sync if not already started
 		collection.startSyncImmediate()
 
-		// Set up subscription immediately, before checking initial status
-		// This ensures we get notified when async sync completes
+		// Subscribe before reading status so an async completion cannot be missed.
 		const subscription = collection.subscribeChanges(() => {
 			const status: CollectionStatus = collection.status
 
@@ -143,12 +126,10 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 			get.setSelf(AsyncResult.success(newData))
 		})
 
-		// Cleanup on unmount
 		get.addFinalizer(() => {
 			subscription.unsubscribe()
 		})
 
-		// Return initial state based on current status
 		const status: CollectionStatus = collection.status
 
 		if (status === "error") {
@@ -167,7 +148,6 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 			)
 		}
 
-		// Get current data (single result)
 		const entries = Array.from(collection.entries())
 		const initialData = entries.length > 0 ? entries[0]![1] : undefined
 
@@ -175,24 +155,19 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 	})
 }
 
-/**
- * Creates an Atom from a TanStack DB query function.
- * Automatically creates a live query collection and manages its lifecycle.
- */
+/** Creates an atom backed by a managed live-query collection. */
 export const makeQuery = <TContext extends Context>(
 	queryFn: QueryFn<TContext>,
 	options?: QueryOptions,
 ): Atom.Atom<AsyncResult.AsyncResult<InferResultType<TContext>, TanStackDBError>> => {
 	return Atom.readable((get) => {
-		// Create live query collection
 		const collection = createLiveQueryCollection({
 			query: queryFn,
 			startSync: options?.startSync ?? true,
-			gcTime: options?.gcTime ?? 0, // Let atom lifecycle manage GC by default
+			gcTime: options?.gcTime ?? 0, // The atom owns the collection lifetime by default.
 		})
 
-		// Set up subscription immediately, before checking initial status
-		// This ensures we get notified when async sync completes
+		// Subscribe before reading status so an async completion cannot be missed.
 		const subscription = collection.subscribeChanges(() => {
 			const status: CollectionStatus = collection.status
 
@@ -222,19 +197,16 @@ export const makeQuery = <TContext extends Context>(
 				return
 			}
 
-			// Get current data - handle both single and array results
 			const isSingleResult = (collection as any).config?.singleResult === true
 			const entries = Array.from(collection.entries()).map(([_, value]) => value)
 			const newData = (isSingleResult ? entries[0] : entries) as unknown as InferResultType<TContext>
 			get.setSelf(AsyncResult.success(newData))
 		})
 
-		// Cleanup on unmount
 		get.addFinalizer(() => {
 			subscription.unsubscribe()
 		})
 
-		// Return initial state based on current status
 		const status: CollectionStatus = collection.status
 
 		if (status === "error") {
@@ -256,7 +228,6 @@ export const makeQuery = <TContext extends Context>(
 			)
 		}
 
-		// Get current data - handle both single and array results
 		const isSingleResult = (collection as any).config?.singleResult === true
 		const entries = Array.from(collection.entries()).map(([_, value]) => value)
 		const initialData = (isSingleResult ? entries[0] : entries) as unknown as InferResultType<TContext>
@@ -265,10 +236,7 @@ export const makeQuery = <TContext extends Context>(
 	})
 }
 
-/**
- * Creates an Atom from a TanStack DB query function (unsafe version).
- * Returns undefined instead of an AsyncResult for simpler usage when you don't need error handling.
- */
+/** Creates a query atom that discards loading and error details. */
 export const makeQueryUnsafe = <TContext extends Context>(
 	queryFn: QueryFn<TContext>,
 	options?: QueryOptions,
@@ -279,24 +247,18 @@ export const makeQueryUnsafe = <TContext extends Context>(
 	})
 }
 
-/**
- * Creates an Atom from a conditional TanStack DB query function.
- * The query function can return null/undefined to disable the query.
- */
+/** Creates a query atom that is disabled when its query returns nullish. */
 export const makeQueryConditional = <TContext extends Context>(
 	queryFn: ConditionalQueryFn<TContext>,
 	options?: QueryOptions,
 ): Atom.Atom<AsyncResult.AsyncResult<InferResultType<TContext>, TanStackDBError> | undefined> => {
 	return Atom.readable((get) => {
-		// Create a proxy query builder to detect if the query function returns null/undefined
-		// without actually executing any query methods
+		// Probe whether the callback builds a query without executing builder methods.
 		let queryReturnsNull = false
 
 		const proxyBuilder = new Proxy({} as InitialQueryBuilder, {
 			get: () => {
-				// If any method is accessed, the query is being built (not null)
 				queryReturnsNull = false
-				// Return a function that returns the proxy itself for chaining
 				return () => proxyBuilder
 			},
 		})
@@ -311,7 +273,6 @@ export const makeQueryConditional = <TContext extends Context>(
 			return undefined
 		}
 
-		// Otherwise create the query atom
 		return get(makeQuery(queryFn as QueryFn<TContext>, options))
 	})
 }

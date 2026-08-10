@@ -19,9 +19,7 @@ import protobuf from "protobufjs"
 const PROTO_SRC = `
 syntax = "proto3";
 
-// ---------------------------------------------------------------------------
 // common/v1
-// ---------------------------------------------------------------------------
 message AnyValue {
   oneof value {
     string string_value = 1;
@@ -54,17 +52,13 @@ message InstrumentationScope {
   uint32 dropped_attributes_count = 4;
 }
 
-// ---------------------------------------------------------------------------
 // resource/v1
-// ---------------------------------------------------------------------------
 message Resource {
   repeated KeyValue attributes = 1;
   uint32 dropped_attributes_count = 2;
 }
 
-// ---------------------------------------------------------------------------
 // trace/v1
-// ---------------------------------------------------------------------------
 message TracesData {
   repeated ResourceSpans resource_spans = 1;
 }
@@ -141,9 +135,7 @@ message Status {
   StatusCode code = 3;
 }
 
-// ---------------------------------------------------------------------------
 // logs/v1
-// ---------------------------------------------------------------------------
 message LogsData {
   repeated ResourceLogs resource_logs = 1;
 }
@@ -204,9 +196,7 @@ message LogRecord {
   string event_name = 12;
 }
 
-// ---------------------------------------------------------------------------
 // metrics/v1
-// ---------------------------------------------------------------------------
 message MetricsData {
   repeated ResourceMetrics resource_metrics = 1;
 }
@@ -349,9 +339,7 @@ message Exemplar {
   bytes trace_id = 5;
 }
 
-// ---------------------------------------------------------------------------
 // collector request wrappers
-// ---------------------------------------------------------------------------
 message ExportTraceServiceRequest {
   repeated ResourceSpans resource_spans = 1;
 }

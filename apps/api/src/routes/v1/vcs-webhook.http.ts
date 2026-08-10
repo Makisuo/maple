@@ -13,13 +13,11 @@ class EnqueueFailure extends Data.TaggedError("EnqueueFailure")<{
 	readonly message: string
 }> {}
 
-// ---------------------------------------------------------------------------
 // Public webhook receiver, one static route per registered provider
 // (`/api/integrations/<provider>/webhook`). Generic pipeline: the provider
 // verifies the signature + maps the event to jobs; this router just enqueues
 // and returns 202. NOT behind auth — authenticity comes from the provider's
 // signature check.
-// ---------------------------------------------------------------------------
 
 const textResponse = (body: string, status: number) => HttpServerResponse.text(body, { status })
 

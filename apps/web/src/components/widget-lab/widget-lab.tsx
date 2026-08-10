@@ -436,9 +436,7 @@ export function WidgetLab() {
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Per-widget scenario cards
-// ---------------------------------------------------------------------------
 
 function StatScenarioCard({ scenario, mode }: { scenario: WidgetScenario; mode: WidgetMode }) {
 	return (

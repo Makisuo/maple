@@ -7,7 +7,6 @@ import {
 } from "@maple/domain/http"
 import type { VisualizationType } from "@/components/dashboard-builder/types"
 
-// ---------------------------------------------------------------------------
 // Panel types — the single user-facing "what kind of panel is this?" axis.
 //
 // Persistence keeps two fields: `visualization` (the widget kind, which decides
@@ -22,7 +21,6 @@ import type { VisualizationType } from "@/components/dashboard-builder/types"
 // between that list and the persisted fields; it is the only place that needs
 // the live chart registry, because repairing a corrupted widget means asking
 // what category its `chartId` actually belongs to.
-// ---------------------------------------------------------------------------
 
 export type { PanelType }
 

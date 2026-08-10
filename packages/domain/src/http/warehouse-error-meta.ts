@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Warehouse error presentation metadata — the single source of truth.
 //
 // The nine warehouse error classes used to be re-enumerated by hand in five
@@ -17,7 +16,6 @@
 //
 // Imports nothing beyond `./warehouse-errors` (which imports only `effect`
 // Schema), so web/CLI bundles stay driver-free.
-// ---------------------------------------------------------------------------
 
 import type { WarehouseError } from "./warehouse-errors"
 import { warehouseHttpErrors } from "./warehouse-errors"

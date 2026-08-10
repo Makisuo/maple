@@ -2,7 +2,6 @@ import { Context, Effect, Layer, Option } from "effect"
 import { R2Bucket, type R2BucketClient } from "@maple/effect-cloudflare/r2-bucket"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 
-// ---------------------------------------------------------------------------
 // ReplayBlobStore — reads rrweb chunk payloads out of R2.
 //
 // The ingest gateway stores each replay chunk's gzipped rrweb array as an
@@ -20,7 +19,6 @@ import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 //     from a BYO-ClickHouse org, which never stops writing inline). It passes
 //     through untouched. This is the dual-read, and it is the whole migration
 //     strategy: no backfill, the old rows age out on the table's 30-day TTL.
-// ---------------------------------------------------------------------------
 
 /** Binding name; must match the key in `apps/api/alchemy.run.ts`. */
 export const REPLAY_BLOBS_BINDING = "REPLAY_BLOBS"

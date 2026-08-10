@@ -354,12 +354,10 @@ describe("SlackInternalRouter", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // POST /internal/slack/workspaces/:teamId/revoke — the Railway-hosted bot
 // calls this after detecting app_uninstalled/tokens_revoked in its own
 // webhook handler (Slack allows only one Events API Request URL per app, and
 // it's already pointed at the bot, not this API).
-// ---------------------------------------------------------------------------
 
 describe("SlackInternalRouter (revoke)", () => {
 	it.effect("revokes an active workspace and echoes revoked:true", () => {

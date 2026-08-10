@@ -1,14 +1,10 @@
-// ---------------------------------------------------------------------------
 // Tinybird Endpoint Types
 //
 // Type-only definitions for query results. The actual SQL queries are compiled
 // by @maple/query-engine — these types exist solely for consumers that import
 // output/param shapes (apps/web, observability layer).
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
 // list_traces
-// ---------------------------------------------------------------------------
 
 export interface ListTracesOutput {
 	readonly traceId: string
@@ -54,9 +50,7 @@ export interface ListTracesParams {
 	any_span_name_match_mode?: string
 }
 
-// ---------------------------------------------------------------------------
 // span_hierarchy
-// ---------------------------------------------------------------------------
 
 export interface SpanHierarchyOutput {
 	readonly traceId: string
@@ -80,9 +74,7 @@ export interface SpanHierarchyParams {
 	span_id?: string
 }
 
-// ---------------------------------------------------------------------------
 // list_logs
-// ---------------------------------------------------------------------------
 
 export interface ListLogsOutput {
 	readonly timestamp: string
@@ -110,9 +102,7 @@ export interface ListLogsParams {
 	search?: string
 }
 
-// ---------------------------------------------------------------------------
 // logs_count
-// ---------------------------------------------------------------------------
 
 export interface LogsCountOutput {
 	readonly total: number
@@ -128,9 +118,7 @@ export interface LogsCountParams {
 	search?: string
 }
 
-// ---------------------------------------------------------------------------
 // logs_facets
-// ---------------------------------------------------------------------------
 
 export interface LogsFacetsOutput {
 	readonly severityText: string
@@ -147,9 +135,7 @@ export interface LogsFacetsParams {
 	end_time?: string
 }
 
-// ---------------------------------------------------------------------------
 // error_rate_by_service
-// ---------------------------------------------------------------------------
 
 export interface ErrorRateByServiceOutput {
 	readonly serviceName: string
@@ -164,9 +150,7 @@ export interface ErrorRateByServiceParams {
 	end_time?: string
 }
 
-// ---------------------------------------------------------------------------
 // get_service_usage
-// ---------------------------------------------------------------------------
 
 export interface GetServiceUsageOutput {
 	readonly serviceName: string
@@ -192,9 +176,7 @@ export interface GetServiceUsageParams {
 	end_time?: string
 }
 
-// ---------------------------------------------------------------------------
 // get_service_usage_compare
-// ---------------------------------------------------------------------------
 
 export type GetServiceUsageComparedOutput = GetServiceUsageOutput & {
 	readonly period: "current" | "previous"
@@ -209,9 +191,7 @@ export interface GetServiceUsageCompareParams {
 	previous_end_time: string
 }
 
-// ---------------------------------------------------------------------------
 // list_metrics
-// ---------------------------------------------------------------------------
 
 export interface ListMetricsOutput {
 	readonly metricName: string
@@ -236,9 +216,7 @@ export interface ListMetricsParams {
 	search?: string
 }
 
-// ---------------------------------------------------------------------------
 // metrics_summary
-// ---------------------------------------------------------------------------
 
 export interface MetricsSummaryOutput {
 	readonly metricType: string
@@ -253,9 +231,7 @@ export interface MetricsSummaryParams {
 	end_time?: string
 }
 
-// ---------------------------------------------------------------------------
 // traces_facets
-// ---------------------------------------------------------------------------
 
 export interface TracesFacetsOutput {
 	readonly name: string
@@ -286,9 +262,7 @@ export interface TracesFacetsParams {
 	resource_filter_value_match_mode?: string
 }
 
-// ---------------------------------------------------------------------------
 // traces_duration_stats
-// ---------------------------------------------------------------------------
 
 export interface TracesDurationStatsOutput {
 	readonly minDurationMs: number
@@ -318,9 +292,7 @@ export interface TracesDurationStatsParams {
 	resource_filter_value_match_mode?: string
 }
 
-// ---------------------------------------------------------------------------
 // service_overview
-// ---------------------------------------------------------------------------
 
 export interface ServiceOverviewOutput {
 	readonly serviceName: string
@@ -346,9 +318,7 @@ export interface ServiceOverviewParams {
 	commit_shas?: string
 }
 
-// ---------------------------------------------------------------------------
 // service_overview_compare
-// ---------------------------------------------------------------------------
 
 export type ServiceOverviewComparedOutput = ServiceOverviewOutput & {
 	readonly period: "current" | "previous"
@@ -364,9 +334,7 @@ export interface ServiceOverviewCompareParams {
 	commit_shas?: string
 }
 
-// ---------------------------------------------------------------------------
 // services_facets
-// ---------------------------------------------------------------------------
 
 export interface ServicesFacetsOutput {
 	readonly name: string
@@ -380,9 +348,7 @@ export interface ServicesFacetsParams {
 	end_time?: string
 }
 
-// ---------------------------------------------------------------------------
 // service_releases_timeline
-// ---------------------------------------------------------------------------
 
 export interface ServiceReleasesTimelineOutput {
 	readonly bucket: string
@@ -398,9 +364,7 @@ export interface ServiceReleasesTimelineParams {
 	bucket_seconds?: number
 }
 
-// ---------------------------------------------------------------------------
 // errors_by_type
-// ---------------------------------------------------------------------------
 
 export interface ErrorsByTypeOutput {
 	readonly fingerprintHash: string
@@ -424,9 +388,7 @@ export interface ErrorsByTypeParams {
 	root_only?: boolean
 }
 
-// ---------------------------------------------------------------------------
 // errors_timeseries
-// ---------------------------------------------------------------------------
 
 export interface ErrorsTimeseriesOutput {
 	readonly bucket: string
@@ -443,9 +405,7 @@ export interface ErrorsTimeseriesParams {
 	exclude_spam_patterns?: string
 }
 
-// ---------------------------------------------------------------------------
 // error_detail_traces
-// ---------------------------------------------------------------------------
 
 export interface ErrorDetailTracesOutput {
 	readonly traceId: string
@@ -468,9 +428,7 @@ export interface ErrorDetailTracesParams {
 	root_only?: boolean
 }
 
-// ---------------------------------------------------------------------------
 // errors_facets
-// ---------------------------------------------------------------------------
 
 export interface ErrorsFacetsOutput {
 	readonly name: string
@@ -489,9 +447,7 @@ export interface ErrorsFacetsParams {
 	root_only?: boolean
 }
 
-// ---------------------------------------------------------------------------
 // errors_summary
-// ---------------------------------------------------------------------------
 
 export interface ErrorsSummaryOutput {
 	readonly totalErrors: number
@@ -512,9 +468,7 @@ export interface ErrorsSummaryParams {
 	root_only?: boolean
 }
 
-// ---------------------------------------------------------------------------
 // service_apdex_time_series
-// ---------------------------------------------------------------------------
 
 export interface ServiceApdexTimeSeriesOutput {
 	readonly bucket: string
@@ -533,9 +487,7 @@ export interface ServiceApdexTimeSeriesParams {
 	apdex_threshold_ms?: number
 }
 
-// ---------------------------------------------------------------------------
 // Alert aggregates
-// ---------------------------------------------------------------------------
 
 export interface AlertTracesAggregateOutput {
 	readonly count: number
@@ -632,9 +584,7 @@ export interface AlertLogsAggregateByServiceParams {
 	severity?: string
 }
 
-// ---------------------------------------------------------------------------
 // Custom charts
-// ---------------------------------------------------------------------------
 
 export interface CustomTracesTimeseriesOutput {
 	readonly bucket: string
@@ -737,9 +687,7 @@ export interface CustomLogsBreakdownParams {
 	group_by_severity?: string
 }
 
-// ---------------------------------------------------------------------------
 // service_dependencies
-// ---------------------------------------------------------------------------
 
 export interface ServiceDependenciesOutput {
 	readonly sourceService: string
@@ -758,9 +706,7 @@ export interface ServiceDependenciesParams {
 	deployment_env?: string
 }
 
-// ---------------------------------------------------------------------------
 // Attribute keys & values
-// ---------------------------------------------------------------------------
 
 export interface SpanAttributeKeysOutput {
 	readonly attributeKey: string

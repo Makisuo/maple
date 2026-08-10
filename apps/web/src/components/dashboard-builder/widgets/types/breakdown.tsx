@@ -36,7 +36,6 @@ import {
 import type { WidgetDataSource } from "@/components/dashboard-builder/types"
 import { chartPresetPreview } from "@/components/dashboard-builder/widgets/types/preset-preview"
 
-// ---------------------------------------------------------------------------
 // Categorical charts: pie, histogram, heatmap, funnel, horizontal bar.
 //
 // They read one row per category from the breakdown endpoint, not one row per
@@ -44,7 +43,6 @@ import { chartPresetPreview } from "@/components/dashboard-builder/widgets/types
 // is silent — the widget renders one slice per bucket with uniform values and no
 // labels — which is why the group-by requirement is declared on the type
 // (`meta.requiresGroupBy`) and enforced before Apply.
-// ---------------------------------------------------------------------------
 
 const breakdownDataSource = (
 	{ sharedTransform, visibleQueries }: BuildDataSourceContext,

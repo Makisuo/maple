@@ -3,7 +3,6 @@ import { WorkersCache } from "@maple/effect-cloudflare/workers-cache"
 import { CacheBackend, type EdgeCacheBackend, makeMemoryBackend } from "@maple/cache"
 import * as QueryEngineMetrics from "@/observability/QueryEngineMetrics"
 
-// ---------------------------------------------------------------------------
 // Concrete `CacheBackend` implementation for the API runtime.
 //
 // The edge-cache logic (and the pure in-memory fallback) lives in
@@ -12,7 +11,6 @@ import * as QueryEngineMetrics from "@/observability/QueryEngineMetrics"
 // never the web/cli bundles). The default cache is obtained via the
 // `WorkersCache` Effect service from `@maple/effect-cloudflare` — prod gets the
 // Workers cache; tests/dev get `null` and fall back to the in-memory backend.
-// ---------------------------------------------------------------------------
 
 const SYNTHETIC_HOST = "https://maple-api.internal"
 

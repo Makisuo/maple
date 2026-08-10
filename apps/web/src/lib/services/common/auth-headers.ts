@@ -5,7 +5,6 @@ type MapleAuthHeadersProvider = () => Promise<MapleAuthHeaders> | MapleAuthHeade
 let authHeaders: MapleAuthHeaders = {}
 let authHeadersProvider: MapleAuthHeadersProvider | undefined
 
-// ---------------------------------------------------------------------------
 // Bearer-token cache
 //
 // Every outbound API request awaits this module (see http-client.ts), and the
@@ -20,7 +19,6 @@ let authHeadersProvider: MapleAuthHeadersProvider | undefined
 // JWT-shaped bearer tokens are cached — an opaque token has no expiry we can
 // trust, and the providers that issue one (self-hosted, reading sessionStorage)
 // are synchronous anyway.
-// ---------------------------------------------------------------------------
 
 /** Inside this much remaining life, a request must wait for a fresh token. */
 const TOKEN_MIN_REMAINING_MS = 10_000

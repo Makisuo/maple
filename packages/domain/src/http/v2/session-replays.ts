@@ -21,9 +21,7 @@ export const SessionReplayPublicId = PublicId(PublicIdPrefixes.sessionReplay, Se
 
 const EXAMPLE_ID = "srep_4yeq2Gm3r2drGjuAHorp"
 
-// ---------------------------------------------------------------------------
 // Resources
-// ---------------------------------------------------------------------------
 
 /** Fields shared by the list summary and the full detail object. */
 const sessionReplayBaseFields = {
@@ -283,9 +281,7 @@ export const V2SessionReplayRef = Schema.Struct({
 })
 export type V2SessionReplayRef = Schema.Schema.Type<typeof V2SessionReplayRef>
 
-// ---------------------------------------------------------------------------
 // Requests / queries
-// ---------------------------------------------------------------------------
 
 export const V2SessionReplaySearchParams = Schema.Struct({
 	start_time: Timestamp.annotate({ description: "Window start (ISO-8601). Required." }),

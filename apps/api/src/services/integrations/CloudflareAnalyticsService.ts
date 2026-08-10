@@ -202,9 +202,7 @@ const toWarehouseDateTime64 = (ms: number) => {
 	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
 }
 
-// ---------------------------------------------------------------------------
 // Dataset registry — everything dataset-specific lives here; the poll pipeline is generic.
-// ---------------------------------------------------------------------------
 
 interface PollWindow {
 	readonly start: number
@@ -501,9 +499,7 @@ const DATASET_BY_ID = new Map(DATASETS.map((dataset) => [dataset.id, dataset]))
 const ZONE_DATASETS = DATASETS.filter((dataset) => dataset.scope === "zone")
 const ACCOUNT_DATASETS = DATASETS.filter((dataset) => dataset.scope === "account")
 
-// ---------------------------------------------------------------------------
 // GraphQL error classification
-// ---------------------------------------------------------------------------
 
 /** Classify GraphQL-level errors (HTTP 200 + errors[]) into the poller's reaction. */
 type GraphqlErrorKind = "authz" | "disabled" | "quantiles-unavailable" | "other"
@@ -582,9 +578,7 @@ const graphqlErrorMessage = (errors: ReadonlyArray<CloudflareGraphqlError>): str
 		.join("; ")
 		.slice(0, 500)
 
-// ---------------------------------------------------------------------------
 // Window math
-// ---------------------------------------------------------------------------
 
 interface ParsedSettings {
 	readonly notOlderThanMs: number | null
@@ -674,9 +668,7 @@ const backfillWindow = (row: CloudflareAnalyticsStateRow, now: number): PollWind
 	return { start, end }
 }
 
-// ---------------------------------------------------------------------------
 // Round planning
-// ---------------------------------------------------------------------------
 
 /** One dataset's slice of a batched GraphQL document. */
 interface WorkPart {
@@ -947,9 +939,7 @@ const observeDatasetFailure = (orgId: OrgId, failure: DatasetPollFailure) =>
 		Effect.ignore,
 	)
 
-// ---------------------------------------------------------------------------
 // Service
-// ---------------------------------------------------------------------------
 
 interface CloudflareAnalyticsZoneStatusShape {
 	readonly id: string
@@ -1036,9 +1026,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			authMode: "self_hosted",
 		})
 
-		// ------------------------------------------------------------------
 		// State-row helpers
-		// ------------------------------------------------------------------
 
 		const loadStateRows = (orgId: OrgId) =>
 			dbExecute((db) =>
@@ -1276,9 +1264,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			return [...rows, ...inserted]
 		})
 
-		// ------------------------------------------------------------------
 		// Settings refresh (per-plan limits discovery)
-		// ------------------------------------------------------------------
 
 		/**
 		 * Refresh stale per-plan dataset settings. Returns true when anything was written — the
@@ -1402,11 +1388,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 			return wrote
 		})
 
-		// ------------------------------------------------------------------
 		// Ingest — via the gateway, so per-org routing (managed Tinybird vs BYO
 		// ClickHouse), schema-version gating, WAL durability, and Autumn metering
 		// all apply exactly as they do for the org's own telemetry.
-		// ------------------------------------------------------------------
 
 		/**
 		 * The org's public ingest key (`maple_pk_*`), minted on first use. The gateway resolves the
@@ -1457,9 +1441,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				),
 		)
 
-		// ------------------------------------------------------------------
 		// Generic dataset polling
-		// ------------------------------------------------------------------
 
 		/**
 		 * One poll step: query a batched document's window, attribute GraphQL-level errors to their
@@ -1669,9 +1651,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			return results
 		})
 
-		// ------------------------------------------------------------------
 		// Hyperdrive config inventory (discovery-cadence, service-map consumer)
-		// ------------------------------------------------------------------
 
 		/**
 		 * Upsert the org's Hyperdrive configs by `(orgId, configId)` and soft-delete rows whose
@@ -1758,9 +1738,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			},
 		)
 
-		// ------------------------------------------------------------------
 		// Per-org poll
-		// ------------------------------------------------------------------
 
 		const pollOrg = Effect.fn("CloudflareAnalyticsService.pollOrg")(function* (orgId: OrgId) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
@@ -2053,9 +2031,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			)
 		})
 
-		// ------------------------------------------------------------------
 		// All-orgs tick + status
-		// ------------------------------------------------------------------
 
 		const pollAllOrgs = Effect.fn("CloudflareAnalyticsService.pollAllOrgs")(function* () {
 			const orgRows = yield* dbExecute((db) =>

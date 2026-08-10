@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Rollup splice boundaries
 //
 // Several queries reconstruct a time window from two tiers: exact raw rows for
@@ -22,7 +21,6 @@
 //
 // The expressions are SQL strings rather than DSL nodes because they embed
 // `__PARAM_*__` placeholders that `compile()` substitutes later.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 

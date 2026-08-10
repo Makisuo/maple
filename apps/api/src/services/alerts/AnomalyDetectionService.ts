@@ -273,7 +273,6 @@ const make = Effect.gen(function* () {
 		authMode: "self_hosted",
 	})
 
-	// -----------------------------------------------------------------
 	// Active-org gating
 	//
 	// The tick historically evaluated every org with an ingest key, scanning a
@@ -284,7 +283,6 @@ const make = Effect.gen(function* () {
 	// and are always evaluated. Fails CLOSED: if discovery errors, reuse the
 	// last-known active set from cache (or just BYO if cold) rather than
 	// evaluating every known org — the old fan-out amplified warehouse stress.
-	// -----------------------------------------------------------------
 
 	const resolveActiveOrgs = Effect.fn("AnomalyDetectionService.resolveActiveOrgs")(function* (
 		knownOrgs: ReadonlyArray<OrgId>,
@@ -378,9 +376,7 @@ const make = Effect.gen(function* () {
 		)
 	})
 
-	// -----------------------------------------------------------------
 	// Settings
-	// -----------------------------------------------------------------
 
 	const parseMutedSignals = (raw: ReadonlyArray<string>): ReadonlyArray<AnomalySignalType> =>
 		Arr.filterMap(raw, (value) => decodeMutedSignalResult(value))
@@ -463,9 +459,7 @@ const make = Effect.gen(function* () {
 		return settingsToDocument(refreshed ?? { ...existing, ...next })
 	})
 
-	// -----------------------------------------------------------------
 	// Incident reads
-	// -----------------------------------------------------------------
 
 	const incidentToDocument = (row: AnomalyIncidentRow): AnomalyIncidentDocument =>
 		new AnomalyIncidentDocument({
@@ -577,9 +571,7 @@ const make = Effect.gen(function* () {
 		return incidentToDocument(row)
 	})
 
-	// -----------------------------------------------------------------
 	// Incident mutations
-	// -----------------------------------------------------------------
 
 	const resolveIncidentManually: AnomalyDetectionServiceShape["resolveIncidentManually"] = Effect.fn(
 		"AnomalyDetectionService.resolveIncidentManually",
@@ -669,9 +661,7 @@ const make = Effect.gen(function* () {
 		}
 	})
 
-	// -----------------------------------------------------------------
 	// Incident timeseries — observed-vs-baseline chart data
-	// -----------------------------------------------------------------
 
 	/** Max chart window; matches the detector's own baseline horizon. */
 	const TIMESERIES_MAX_WINDOW_MS = BASELINE_WINDOW_MS
@@ -825,9 +815,7 @@ const make = Effect.gen(function* () {
 		})
 	})
 
-	// -----------------------------------------------------------------
 	// Tick: data fetch
-	// -----------------------------------------------------------------
 
 	interface HourRow {
 		readonly hour: string
@@ -1083,9 +1071,7 @@ const make = Effect.gen(function* () {
 		return { observations, baselines }
 	})
 
-	// -----------------------------------------------------------------
 	// Tick: per-org processing
-	// -----------------------------------------------------------------
 
 	const claimOrg = (orgId: OrgId, nowMs: number) =>
 		dbExecute((db) =>

@@ -1,7 +1,6 @@
 import { getColumnJsonPath, getColumnType, getTinybirdType, isDatasourceDefinition } from "@tinybirdco/sdk"
 import * as Datasources from "@maple/domain/tinybird"
 
-// ---------------------------------------------------------------------------
 // Live introspection of the `defineDatasource` exports in
 // packages/domain/src/tinybird/datasources.ts. This neutral catalog powers
 // both raw-SQL datasource scoping and the MCP discovery tool, keeping the
@@ -12,7 +11,6 @@ import * as Datasources from "@maple/domain/tinybird"
 // `getTinybirdType()`. Curated notes — enum casing, unit warnings, sort-key
 // hints — live in the TABLE_NOTES record below; the type system can't infer
 // them but they cause the most expensive agent mistakes.
-// ---------------------------------------------------------------------------
 
 const TABLE_NOTES: Record<string, ReadonlyArray<string>> = {
 	logs: [

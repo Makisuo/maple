@@ -1,6 +1,5 @@
 import type { RawSqlDisplayType } from "./query-engine"
 
-// ---------------------------------------------------------------------------
 // The widget type table.
 //
 // A dashboard widget has two persisted axes: `visualization` (which renderer and
@@ -16,7 +15,6 @@ import type { RawSqlDisplayType } from "./query-engine"
 // Before this existed the same facts were forked across the web store, the
 // portable-dashboard importer, the MCP tools and the Perses importer, and they
 // had already drifted. Anything a new widget type needs to declare belongs here.
-// ---------------------------------------------------------------------------
 
 export type PanelType =
 	| "line"

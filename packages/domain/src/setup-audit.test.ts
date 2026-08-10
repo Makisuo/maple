@@ -849,9 +849,7 @@ describe("integration checks", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Telemetry checks
-// ---------------------------------------------------------------------------
 
 /** Runs the audit against a perturbed telemetry snapshot, with configuration left healthy. */
 const telemetry = (overrides: Partial<WarehouseAuditInputs>) =>

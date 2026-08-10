@@ -21,7 +21,6 @@ import type { TenantContext } from "@/services/auth/AuthService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgTokenService"
 
-// ---------------------------------------------------------------------------
 // WarehouseQueryService — the API's managed-warehouse executor.
 //
 // The execution logic (SQL run, retry, error mapping, client cache, OrgId
@@ -30,7 +29,6 @@ import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgToke
 // drivers (the ONLY place `@clickhouse/client-web` + `@tinybirdco/sdk` are
 // used) and resolves the per-org upstream config from the DB + env, injecting
 // both into `makeWarehouseExecutor`.
-// ---------------------------------------------------------------------------
 
 // Re-export the executor types so existing import sites stay stable.
 export type { WarehouseQueryServiceShape, SqlQueryOptions }

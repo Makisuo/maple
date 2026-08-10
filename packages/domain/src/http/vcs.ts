@@ -1,14 +1,12 @@
 import { Schema, SchemaGetter } from "effect"
 import { OrgId, UserId } from "../primitives"
 
-// ---------------------------------------------------------------------------
 // Vendor-agnostic VCS integration types.
 //
 // Everything here is provider-neutral: rows carry a `provider` discriminator
 // and GitHub-specific concepts (App auth, REST/webhook payload shapes) live in
 // the GitHub layer behind the `VcsProviderClient` port. Adding another provider
 // means extending `VcsProviderId` + the enum normalizations — no new tables.
-// ---------------------------------------------------------------------------
 
 // ---- Branded IDs ----------------------------------------------------------
 

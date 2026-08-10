@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Web Analytics Queries
 //
 // Product analytics over the browser SDK's session data: unique visitors, page
@@ -48,7 +47,6 @@
 // qualifies (the SDK writes them on both the v1 and v2 row — see the invariant
 // documented in packages/browser-session/src/meta-row.ts), so they are safe in
 // WHERE; the DSL has no HAVING.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param, from, inSubquery, unionAll, compileFnCall } from "@maple-dev/clickhouse-builder"
@@ -79,9 +77,7 @@ function ifNotFinite(value: CH.Expr<number>, fallback: number): CH.Expr<number> 
 	return compileFnCall<number>("ifNotFinite", value, CH.lit(fallback))
 }
 
-// ---------------------------------------------------------------------------
 // Shared filter surface
-// ---------------------------------------------------------------------------
 
 /**
  * The URL-driven filter surface, shared by every query on the page so a facet
@@ -342,9 +338,7 @@ function navigationWhereRollup(
 	return [...navigationConditionsRollup($, filters), replaysSemiJoin($.SessionId, filters)]
 }
 
-// ---------------------------------------------------------------------------
 // Summary KPIs
-// ---------------------------------------------------------------------------
 
 export interface WebAnalyticsSummaryOutput {
 	/** Distinct persistent browser ids. 0 when no session carries the analytics block. */
@@ -405,9 +399,7 @@ export function webAnalyticsSummaryQuery(
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Visitor timeseries
-// ---------------------------------------------------------------------------
 
 export interface WebAnalyticsTimeseriesOpts extends WebAnalyticsFilters {
 	readonly bucketSeconds?: number
@@ -469,9 +461,7 @@ export function webAnalyticsTimeseriesQuery(
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Page-view timeseries
-// ---------------------------------------------------------------------------
 
 export interface WebAnalyticsPageviewsTimeseriesOpts extends WebAnalyticsFilters {
 	readonly bucketSeconds?: number
@@ -518,9 +508,7 @@ export function webAnalyticsPageviewsTimeseriesQuery(
 				.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Top pages
-// ---------------------------------------------------------------------------
 
 export interface WebAnalyticsPagesOpts extends WebAnalyticsFilters {
 	readonly limit?: number
@@ -576,9 +564,7 @@ export function webAnalyticsPagesQuery(
 				.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Dimension breakdowns (UNION ALL fan-out)
-// ---------------------------------------------------------------------------
 
 export type WebAnalyticsBreakdownsOpts = WebAnalyticsFilters & {
 	/** Rows per dimension. Defaults to 50 — enough for a sidebar, small enough to stay cheap. */

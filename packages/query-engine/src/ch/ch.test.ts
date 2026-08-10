@@ -14,9 +14,7 @@ import {
 } from "./queries/errors"
 import { unionAll } from "@maple-dev/clickhouse-builder"
 
-// ---------------------------------------------------------------------------
 // Core DSL tests
-// ---------------------------------------------------------------------------
 
 describe("CH.from / select / where / compile", () => {
 	const TestTable = CH.table("test_table", {
@@ -205,9 +203,7 @@ describe("CH.from / select / where / compile", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Traces timeseries query — parity with buildTracesTimeseriesSQL
-// ---------------------------------------------------------------------------
 
 describe("tracesTimeseriesQuery", () => {
 	const baseParams = {
@@ -636,9 +632,7 @@ describe("tracesTimeseriesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Traces breakdown query — parity with buildTracesBreakdownSQL
-// ---------------------------------------------------------------------------
 
 describe("tracesBreakdownQuery", () => {
 	const baseParams = {
@@ -769,9 +763,7 @@ describe("tracesBreakdownQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Traces list query
-// ---------------------------------------------------------------------------
 
 describe("tracesListQuery", () => {
 	const baseParams = {
@@ -883,9 +875,7 @@ describe("tracesListQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // UNION ALL queries
-// ---------------------------------------------------------------------------
 
 describe("unionAll", () => {
 	const TestTable = CH.table("test_table", {
@@ -943,9 +933,7 @@ describe("unionAll", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Subquery support
-// ---------------------------------------------------------------------------
 
 describe("subquery support", () => {
 	const TestTable = CH.table("test_table", {
@@ -1005,9 +993,7 @@ describe("subquery support", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Type-safe joins
-// ---------------------------------------------------------------------------
 
 describe("type-safe joins", () => {
 	const Users = CH.table("users", {
@@ -1156,9 +1142,7 @@ describe("type-safe joins", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // New expression functions
-// ---------------------------------------------------------------------------
 
 describe("new expression functions", () => {
 	const TestTable = CH.table("test_table", {
@@ -1232,9 +1216,7 @@ describe("new expression functions", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Converted queries — smoke tests
-// ---------------------------------------------------------------------------
 
 describe("converted queries", () => {
 	const baseParams = { orgId: "org_1", startTime: "2024-01-01", endTime: "2024-01-02" }

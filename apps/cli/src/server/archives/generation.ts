@@ -1214,11 +1214,9 @@ const releaseOwnedPin = async (dataDir: string, intent: CreateOperationIntent): 
 	await releaseCheckpointPin(dataDir, intent.checkpointId, expectedPinPath, intent.pinPurpose)
 }
 
-// ---------------------------------------------------------------------------
 // Reconciliation as ONE protocol: one inspector → one pure decision → one
 // mutating executor (Gate 3b r5). The pure decideReconciliation is the sole
 // branch logic. All entry points route through reconcileArchiveGenerationUnderLock.
-// ---------------------------------------------------------------------------
 
 /**
  * Inspect the active operation and produce a complete validated snapshot (or

@@ -22,7 +22,6 @@ import {
 } from "@/components/icons"
 import { MarkerLegend } from "./marker-legend"
 
-// ---------------------------------------------------------------------------
 // Replay editor timeline
 //
 // A video-editor-style strip below the recording: a transport row, a time
@@ -34,7 +33,6 @@ import { MarkerLegend } from "./marker-legend"
 //
 // All rows reserve the same `LANE_GUTTER` on the left, so percentage-based
 // time positions line up across tracks and with the playhead overlay.
-// ---------------------------------------------------------------------------
 
 /** Left gutter (label column) shared by every row. Narrows on phones to leave the
  *  time axis room. Kept in sync with the `left-28 sm:left-36` offsets on the scrub

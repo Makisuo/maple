@@ -204,9 +204,7 @@ export function SessionDetailView({ sessionId, onBack, onSelectTrace }: SessionD
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Transcript
-// ---------------------------------------------------------------------------
 
 function parseChTime(value: string | null | undefined): number {
 	if (!value) return NaN
@@ -331,9 +329,7 @@ function TranscriptBody({ event }: { event: SessionTranscriptOutput }) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Bits
-// ---------------------------------------------------------------------------
 
 function StatusBadge({ active }: { active: boolean }) {
 	if (active) {

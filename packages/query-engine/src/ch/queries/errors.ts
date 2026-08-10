@@ -1,8 +1,6 @@
-// ---------------------------------------------------------------------------
 // Typed Error Queries
 //
 // DSL-based query definitions for error aggregation and timeseries.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 // From the root, not `/expr`: these overloads take a `CHQuery`, keeping the
@@ -44,7 +42,6 @@ const fingerprintHashEq = (expr: CH.Expr<number>, hash: string) => expr.eq(finge
 const fingerprintHashIn = (expr: CH.Expr<number>, hashes: readonly string[]) =>
 	CH.inExprList(expr, hashes.map(fingerprintHashLiteral))
 
-// ---------------------------------------------------------------------------
 // Errors by type
 //
 // Top Errors groups the canonical `error_events` rows by the ingest-computed
@@ -52,7 +49,6 @@ const fingerprintHashIn = (expr: CH.Expr<number>, hashes: readonly string[]) =>
 // with the stored `ErrorLabel`. The error identity is the stable fingerprint
 // hash (string), not a query-time heuristic — see materializations.ts /
 // fingerprint.ts for how the hash + label are derived.
-// ---------------------------------------------------------------------------
 
 export interface ErrorsByTypeOpts {
 	rootOnly?: boolean
@@ -100,9 +96,7 @@ export function errorsByTypeQuery(opts: ErrorsByTypeOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Errors timeseries
-// ---------------------------------------------------------------------------
 
 export interface ErrorsTimeseriesOpts {
 	fingerprintHash: string
@@ -132,9 +126,7 @@ export function errorsTimeseriesQuery(opts: ErrorsTimeseriesOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Span hierarchy
-// ---------------------------------------------------------------------------
 
 /**
  * Span attribute keys the waterfall / timeline / flow views actually read
@@ -274,9 +266,7 @@ export function spanHierarchyQuery(opts: SpanHierarchyOpts) {
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Span detail — full attributes for a single span
-// ---------------------------------------------------------------------------
 
 export interface SpanDetailOpts {
 	traceId: string
@@ -341,9 +331,7 @@ export function spanDetailQuery(opts: SpanDetailOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Trace timestamp probe — resolve any one span timestamp for a trace
-// ---------------------------------------------------------------------------
 
 export interface TraceTimeProbeOutput {
 	readonly timestamp: string
@@ -375,9 +363,7 @@ export function traceTimeProbeQuery(opts: { traceId: string; narrowByTime?: bool
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Traces duration stats
-// ---------------------------------------------------------------------------
 
 export interface TracesDurationStatsOpts {
 	serviceName?: string
@@ -455,9 +441,7 @@ export function tracesDurationStatsQuery(opts: TracesDurationStatsOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Traces facets (UNION ALL — 6 facet dimensions on trace_list_mv)
-// ---------------------------------------------------------------------------
 
 export type TracesFacetDimension =
 	| "service"
@@ -640,9 +624,7 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 	).format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Errors facets (UNION ALL — service + environment + error_type facets)
-// ---------------------------------------------------------------------------
 
 export interface ErrorsFacetsOpts {
 	rootOnly?: boolean
@@ -704,9 +686,7 @@ export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFa
 	return unionAll(serviceQuery, envQuery, errorTypeQuery).format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Errors summary (CROSS JOIN between error_spans and service_usage)
-// ---------------------------------------------------------------------------
 
 export interface ErrorsSummaryOpts {
 	rootOnly?: boolean
@@ -807,9 +787,7 @@ export function errorsSummaryQuery(opts: ErrorsSummaryOpts) {
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Error Issues — fingerprint-grouped aggregate from error_events
-// ---------------------------------------------------------------------------
 
 export interface ErrorIssuesOpts {
 	services?: readonly string[]
@@ -920,9 +898,7 @@ export function errorTickBootstrapIssuesQuery() {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Error fingerprints — distinct fingerprint hashes observed in a scope
-// ---------------------------------------------------------------------------
 
 export interface ErrorFingerprintsOpts {
 	services?: readonly string[]
@@ -958,9 +934,7 @@ export function errorFingerprintsQuery(opts: ErrorFingerprintsOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Error Issue timeseries — per-fingerprint occurrence bucket
-// ---------------------------------------------------------------------------
 
 export interface ErrorIssueTimeseriesOutput {
 	readonly bucket: string
@@ -984,9 +958,7 @@ export function errorIssueTimeseriesQuery() {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Error Issue sample traces — most recent occurrences for one issue
-// ---------------------------------------------------------------------------
 
 export interface ErrorIssueSampleTracesOutput {
 	readonly traceId: string
@@ -1018,9 +990,7 @@ export function errorIssueSampleTracesQuery(opts: { limit?: number }) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Error detail traces (INNER JOIN with error subquery)
-// ---------------------------------------------------------------------------
 
 export interface ErrorDetailTracesOpts {
 	fingerprintHash: string

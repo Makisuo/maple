@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-// ---------------------------------------------------------------------------
 // bench-startup-cpu.ts — does defining Schema/TaggedError classes actually
 // cost meaningful Cloudflare *startup* CPU?
 //
@@ -27,7 +26,6 @@
 // vs. baseline graph) is what settles the argument and is engine-agnostic. For
 // the authoritative V8 startup number, use `worker` mode (it shells out to
 // `wrangler check startup`, which profiles the real worker on workerd).
-// ---------------------------------------------------------------------------
 
 import { spawnSync } from "node:child_process"
 import { readdirSync, readFileSync, statSync } from "node:fs"

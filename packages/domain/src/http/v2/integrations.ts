@@ -7,7 +7,6 @@ import { V2NotFoundError, V2PermissionError, V2ServiceUnavailableError, V2Upstre
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
 
-// ---------------------------------------------------------------------------
 // Slack integration. A workspace installs the Maple Slack app via OAuth; the
 // resulting bot token + minted Maple API key are stored server-side (see the
 // `slack_workspaces` table). These endpoints drive the dashboard's Slack
@@ -46,7 +45,6 @@ const wireExample = <A>(example: object): A => example as A
 // from the first path segment under `/v2`, so every `/v2/integrations/<provider>`
 // group shares the `integrations:read` / `integrations:write` family no matter
 // which file it is declared in — the split is about file size, nothing else.
-// ---------------------------------------------------------------------------
 
 export const V2SlackIntegrationStatus = Schema.Struct({
 	object: Schema.Literal("slack_integration").annotate({

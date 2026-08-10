@@ -1,13 +1,11 @@
 import { Textarea } from "@maple/ui/components/ui/textarea"
 
-// ---------------------------------------------------------------------------
 // Note (markdown) widget content editor.
 //
 // Notes are static — there is no query and no warehouse round-trip, so this
 // panel replaces the query panels entirely and the preview updates as you type.
 // `MarkdownWidget` supports headings, bold/italic, inline code, bullet and
 // ordered lists, and links (non-http schemes are rendered inert).
-// ---------------------------------------------------------------------------
 
 interface MarkdownEditorPanelProps {
 	content: string

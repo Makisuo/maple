@@ -4283,7 +4283,6 @@ mod tests {
         assert_eq!(exp["aggregation_temporality"], 2);
     }
 
-    // -----------------------------------------------------------------------
     // Schema-parity contract.
     //
     // The lists below are the JSON top-level keys each ingest datasource must
@@ -4298,7 +4297,6 @@ mod tests {
     //   "$.foo.bar"        -> "foo"     (only the top level)
     // ResourceAttributes uses `$.resource_attributes.maple_org_id` for OrgId,
     // which is already covered by the `resource_attributes` map.
-    // -----------------------------------------------------------------------
     mod schema_contract {
         pub const LOGS: &[&str] = &[
             "timestamp",

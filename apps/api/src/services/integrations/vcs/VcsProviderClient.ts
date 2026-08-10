@@ -17,7 +17,6 @@ import type {
 	VcsWebhookSignatureError,
 } from "@maple/domain/http"
 
-// ---------------------------------------------------------------------------
 // The single typed seam between the vendor-agnostic core and a VCS provider.
 //
 // Everything ABOVE this port (queue, orchestrator, webhook router, repo, tables)
@@ -25,7 +24,6 @@ import type {
 // (GithubProvider, GithubAppClient, GitHub schemas) is provider-specific and
 // never imports the vcs_* tables. The registry is the only place a provider id
 // is wired to an implementation.
-// ---------------------------------------------------------------------------
 
 export interface VcsWebhookRequest {
 	readonly headers: Record<string, string | undefined>

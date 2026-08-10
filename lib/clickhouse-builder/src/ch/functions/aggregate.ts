@@ -3,17 +3,13 @@ import { makeExpr } from "../expr"
 import { raw, compile } from "../../sql/sql-fragment"
 import type { Expr, Condition } from "../expr"
 
-// ---------------------------------------------------------------------------
 // Standard aggregates (defineFn one-liners)
-// ---------------------------------------------------------------------------
 
 export const count = defineFn<[], number>("count")
 export const avg = defineFn<[Expr<number>], number>("avg")
 export const sum = defineFn<[Expr<number>], number>("sum")
 
-// ---------------------------------------------------------------------------
 // Condition-taking aggregates
-// ---------------------------------------------------------------------------
 
 export const countIf = defineFn<[Condition], number>("countIf")
 export const sumIf = defineFn<[Expr<number>, Condition], number>("sumIf")
@@ -21,9 +17,7 @@ export const avgIf = defineFn<[Expr<number>, Condition], number>("avgIf")
 export const maxIf = defineFn<[Expr<number>, Condition], number>("maxIf")
 export const minIf = defineFn<[Expr<number>, Condition], number>("minIf")
 
-// ---------------------------------------------------------------------------
 // Generic aggregates (compileFnCall for type preservation)
-// ---------------------------------------------------------------------------
 
 export function min_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
 	return compileFnCall<NonNullable<T>>("min", expr)
@@ -75,9 +69,7 @@ export function argMaxMerge<T>(expr: Expr<T>): Expr<T> {
 	return compileFnCall<T>("argMaxMerge", expr)
 }
 
-// ---------------------------------------------------------------------------
 // Curried / parametric aggregates (handwritten — custom SQL syntax)
-// ---------------------------------------------------------------------------
 
 export function quantile(q: number) {
 	return (expr: Expr<number>): Expr<number> =>

@@ -6,9 +6,7 @@ import {
 } from "@maple/domain/http"
 import type { TemplateParameterValues, WidgetDef } from "./types"
 
-// ---------------------------------------------------------------------------
 // Brand makers — used inside template definitions for compile-time correctness
-// ---------------------------------------------------------------------------
 
 export const templateId = (value: string): DashboardTemplateId =>
 	Schema.decodeUnknownSync(DashboardTemplateId)(value)
@@ -18,10 +16,8 @@ export const paramKey = (value: string): DashboardTemplateParameterKey =>
 
 const decodePortableDashboard = Schema.decodeUnknownSync(PortableDashboardDocument)
 
-// ---------------------------------------------------------------------------
 // Query draft helpers — produce the queries format expected by the
 // custom_query_builder_timeseries / custom_query_builder_breakdown endpoints
-// ---------------------------------------------------------------------------
 
 export function makeQueryDraft(opts: {
 	id: string
@@ -91,9 +87,7 @@ export function makeQueryBuilderBreakdownDataSource(queries: Record<string, unkn
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Chart display presets
-// ---------------------------------------------------------------------------
 
 // `seriesStats` (the Min/Max/Mean/Last table) is opt-in and costs up to 45% of a
 // widget's height. Every preset states it outright rather than leaning on the
@@ -147,9 +141,7 @@ export function chartDisplayForMetric(aggregation: string): Record<string, unkno
 	return CHART_DISPLAY_BAR
 }
 
-// ---------------------------------------------------------------------------
 // Where clause helpers
-// ---------------------------------------------------------------------------
 
 // Escape a user-supplied value before it is interpolated into a double-quoted
 // metric where-clause literal, so a value containing `"` (or `\`) can't break
@@ -166,9 +158,7 @@ export function combineWhere(...clauses: Array<string | undefined>): string {
 	return clauses.filter((clause) => clause && clause.trim().length > 0).join(" AND ")
 }
 
-// ---------------------------------------------------------------------------
 // Metrics chart helpers
-// ---------------------------------------------------------------------------
 
 export function metricsTimeseries(opts: {
 	id: string
@@ -218,9 +208,7 @@ export function metricsBreakdown(opts: {
 	])
 }
 
-// ---------------------------------------------------------------------------
 // Build PortableDashboardDocument from a template's widget list
-// ---------------------------------------------------------------------------
 
 export function buildPortableDashboard(opts: {
 	name: string

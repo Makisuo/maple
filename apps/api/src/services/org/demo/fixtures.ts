@@ -26,7 +26,6 @@ const DB_QUERIES = [
 
 const WORKER_JOBS = ["send_email", "process_payment", "sync_inventory", "generate_report", "refresh_cache"]
 
-// ---------------------------------------------------------------------------
 // Demo data is written straight to the `traces` / `logs` datasources via
 // WarehouseQueryService.ingest (bypassing the billing-enforced ingest gateway),
 // so each row must match those datasources' ingestion JSON — the OpenTelemetry
@@ -36,7 +35,6 @@ const WORKER_JOBS = ["send_email", "process_payment", "sync_inventory", "generat
 // Org scoping is derived from `resource_attributes.maple_org_id`, so every row
 // MUST carry it. `SampleRate` / `IsEntryPoint` are computed by datasource
 // DEFAULT expressions, so they are intentionally omitted here.
-// ---------------------------------------------------------------------------
 
 type Attrs = Record<string, string>
 
@@ -325,12 +323,10 @@ function generateWorkerTrace(timestamp: Date, orgId: string): DemoTraceBatch {
 	return { traceRows: [row], logRows: [] }
 }
 
-// ---------------------------------------------------------------------------
 // Demo runtime metrics — Node.js process gauges/counters for demo-api and
 // demo-worker, one point per service per minute. These make the metric-based
 // dashboard templates (Node.js Runtime, Metric Overview) show real data
 // instead of rendering empty against demo orgs.
-// ---------------------------------------------------------------------------
 
 const METRIC_SERVICES = ["demo-api", "demo-worker"] as const satisfies readonly DemoServiceName[]
 const METRIC_INTERVAL_MS = 60_000

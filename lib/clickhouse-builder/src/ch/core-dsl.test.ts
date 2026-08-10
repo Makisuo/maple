@@ -11,9 +11,7 @@ const TestTable = CH.table("test_table", {
 	Active: CH.uint8,
 })
 
-// ---------------------------------------------------------------------------
 // Untested expression functions
-// ---------------------------------------------------------------------------
 
 describe("expression functions", () => {
 	it("compiles coalesce", () => {
@@ -197,9 +195,7 @@ describe("expression functions", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Condition combinators
-// ---------------------------------------------------------------------------
 
 describe("condition combinators", () => {
 	it("and() combines conditions", () => {
@@ -227,9 +223,7 @@ describe("condition combinators", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Compile edge cases
-// ---------------------------------------------------------------------------
 
 describe("compile edge cases", () => {
 	it("throws QueryBuilderError when no select", () => {
@@ -298,9 +292,7 @@ describe("compile edge cases", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // Param resolution
-// ---------------------------------------------------------------------------
 
 describe("param resolution", () => {
 	it("resolves param.string", () => {

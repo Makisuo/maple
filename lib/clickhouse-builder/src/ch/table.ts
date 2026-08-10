@@ -1,9 +1,7 @@
-// ---------------------------------------------------------------------------
 // Table Schema Definition
 //
 // A Table carries its name and column definitions at both the type level
 // (for inference) and runtime (for SQL generation).
-// ---------------------------------------------------------------------------
 
 import type { ColumnDefs } from "./types"
 

@@ -33,9 +33,7 @@ const baseParams = {
 	endTime: "2024-01-02 00:00:00",
 }
 
-// ---------------------------------------------------------------------------
 // serviceExternalEdgesSQL
-// ---------------------------------------------------------------------------
 
 describe("serviceExternalEdgesSQL", () => {
 	it("scopes by org, service, and time window", () => {
@@ -182,9 +180,7 @@ describe("serviceExternalEdgesSQL", () => {
 	)
 })
 
-// ---------------------------------------------------------------------------
 // serviceMapResolutionsRollupSQL — companion of the edges rollup
-// ---------------------------------------------------------------------------
 
 describe("serviceMapResolutionsRollupSQL", () => {
 	const hourParams = {
@@ -239,9 +235,7 @@ describe("serviceMapResolutionsRollupSQL", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // serviceDependenciesForServiceQuery — service-scoped service↔service edges
-// ---------------------------------------------------------------------------
 
 describe("serviceDependenciesSQL", () => {
 	it("reads partial boundary hours from raw spans without widening the start", () => {
@@ -445,9 +439,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // serviceDbEdgesForServiceQuery — service-scoped service↔database edges
-// ---------------------------------------------------------------------------
 
 describe("serviceDbEdgesForServiceQuery", () => {
 	it.effect("decodes org-wide database edge rows with numeric strings from ClickHouse JSON", () =>
@@ -560,9 +552,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // serviceDbQuerySummarySQL / serviceDbQueryTimeseriesSQL / serviceDbTopQueriesSQL
-// ---------------------------------------------------------------------------
 
 describe("service-map database query summaries", () => {
 	const params = {

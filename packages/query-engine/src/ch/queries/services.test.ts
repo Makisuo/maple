@@ -49,9 +49,7 @@ describe("serviceCatalogQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // serviceHealthSnapshotQuery
-// ---------------------------------------------------------------------------
 
 describe("serviceHealthSnapshotQuery", () => {
 	it("reads the hourly aggregate and merges weighted golden signals", () => {
@@ -96,9 +94,7 @@ describe("serviceHealthSnapshotQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // serviceOverviewQuery
-// ---------------------------------------------------------------------------
 
 describe("serviceOverviewQuery", () => {
 	it("compiles basic overview with all columns", () => {
@@ -176,9 +172,7 @@ describe("serviceOverviewQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // serviceHealthBaselineQuery
-// ---------------------------------------------------------------------------
 
 describe("serviceHealthBaselineQuery", () => {
 	it("compiles a per-service p95 baseline scoped to the org", () => {
@@ -207,9 +201,7 @@ describe("serviceHealthBaselineQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // serviceReleasesTimelineQuery
-// ---------------------------------------------------------------------------
 
 describe("serviceReleasesTimelineQuery", () => {
 	it("compiles releases timeline", () => {
@@ -228,9 +220,7 @@ describe("serviceReleasesTimelineQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // serviceEnvironmentsQuery
-// ---------------------------------------------------------------------------
 
 describe("serviceEnvironmentsQuery", () => {
 	it("compiles a service-scoped, time-windowed distinct-environments query", () => {
@@ -252,9 +242,7 @@ describe("serviceEnvironmentsQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // serviceApdexTimeseriesQuery
-// ---------------------------------------------------------------------------
 
 describe("serviceApdexTimeseriesQuery", () => {
 	it("compiles apdex timeseries with default threshold", () => {
@@ -328,9 +316,7 @@ describe("serviceApdexTimeseriesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // serviceUsageQuery
-// ---------------------------------------------------------------------------
 
 describe("serviceUsageQuery", () => {
 	it("compiles basic usage query", () => {
@@ -398,9 +384,7 @@ describe("serviceUsageWithPreviousQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // servicesFacetsQuery
-// ---------------------------------------------------------------------------
 
 describe("servicesFacetsQuery", () => {
 	it("compiles UNION ALL with environment, namespace, commit_sha, and service facets", () => {

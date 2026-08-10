@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Replay timeline mapping
 //
 // Session replays carry raw wall-clock time: rrweb's `totalTime` is just
@@ -10,7 +9,6 @@
 // duration reflects active time, while still mapping back to rrweb's real clock
 // for seeking/playback. Pass `[]` intervals for an identity mapping (used when
 // "Skip idle" is toggled off — full wall-clock behaviour, unchanged).
-// ---------------------------------------------------------------------------
 
 /** An inactive stretch, in real ms from session start (start < end). */
 export interface InactiveInterval {
@@ -109,7 +107,6 @@ export function buildTimeline(intervals: ReadonlyArray<InactiveInterval>, realTo
 	return { activeTotalMs, toDisplay, toReal }
 }
 
-// ---------------------------------------------------------------------------
 // Span ⇄ recording alignment
 //
 // Backend spans carry an absolute start timestamp; the recording's playhead is
@@ -118,7 +115,6 @@ export function buildTimeline(intervals: ReadonlyArray<InactiveInterval>, realTo
 // the offset from the rrweb epoch, then map that offset through the same
 // idle-collapsing `Timeline` the markers use so bars stay aligned whether
 // "Skip idle" is on or off.
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a ClickHouse DateTime64 string (`"YYYY-MM-DD HH:mm:ss[.fff]"`, UTC, no

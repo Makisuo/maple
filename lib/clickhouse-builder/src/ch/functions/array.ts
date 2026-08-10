@@ -2,18 +2,14 @@ import { makeCond, makeExpr, toFragment } from "../expr"
 import { raw, str, compile } from "../../sql/sql-fragment"
 import type { Condition, Expr } from "../expr"
 
-// ---------------------------------------------------------------------------
 // Array constructors (handwritten — bracket syntax, not fn() call)
-// ---------------------------------------------------------------------------
 
 export function arrayOf<T>(...exprs: Expr<T>[]): Expr<ReadonlyArray<T>> {
 	const args = exprs.map((e) => compile(e.toFragment())).join(", ")
 	return makeExpr<ReadonlyArray<T>>(raw(`[${args}]`))
 }
 
-// ---------------------------------------------------------------------------
 // Array functions (handwritten — polymorphic or special syntax)
-// ---------------------------------------------------------------------------
 
 export function arrayStringConcat(
 	parts: Expr<string>[] | Expr<ReadonlyArray<string>>,

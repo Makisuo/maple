@@ -46,9 +46,7 @@ export const buildContextPreamble = (ctx: ChatContext): string => {
 	return ""
 }
 
-// ---------------------------------------------------------------------------
 // Formatters (ported from apps/chat-agent/src/index.ts)
-// ---------------------------------------------------------------------------
 
 const formatAutoContextLine = (ctx: AutoContext): string => {
 	switch (ctx.kind) {

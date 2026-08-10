@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Service Operations
 //
 // Per-operation (SpanName) breakdown for one service: throughput, error rate,
@@ -13,7 +12,6 @@
 // Reads raw `traces` (the service_overview_spans MV has no SpanName column).
 // Counts are sampling-weighted via `sum(SampleRate)`; quantiles stay
 // unweighted, matching every other raw-Traces query.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"

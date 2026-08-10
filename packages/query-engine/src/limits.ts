@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Query time-range limits — single source of truth
 //
 // These ceilings used to be duplicated as ad-hoc constants across the query
@@ -12,7 +11,6 @@
 //
 // The relative-shorthand *grammar* lives in `./datetime` alongside the rest of
 // the date math; this module only decides what is too wide.
-// ---------------------------------------------------------------------------
 
 import { relativeRangeSeconds } from "./datetime"
 

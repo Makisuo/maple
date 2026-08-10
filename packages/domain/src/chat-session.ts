@@ -17,9 +17,7 @@
 import { Schema } from "effect"
 import { ActorId, AuthMode, OrgId, RoleName, UserId } from "./primitives"
 
-// ---------------------------------------------------------------------------
 // Session addressing
-// ---------------------------------------------------------------------------
 
 /**
  * `"<orgId>:<tabId>"`. Mirrors the addressing Flue used (and the chat-agent Durable Object naming
@@ -73,9 +71,7 @@ export const chatModeFromSessionId = (sessionId: string): ChatMode => {
 	return "default"
 }
 
-// ---------------------------------------------------------------------------
 // Durable transcript
-// ---------------------------------------------------------------------------
 
 export const ChatRole = Schema.Literals(["user", "assistant"])
 export type ChatRole = Schema.Schema.Type<typeof ChatRole>
@@ -154,9 +150,7 @@ export class ChatHistoryResponse extends Schema.Class<ChatHistoryResponse>("@map
 	running: Schema.Boolean,
 }) {}
 
-// ---------------------------------------------------------------------------
 // Event stream
-// ---------------------------------------------------------------------------
 
 /**
  * Marks an event as belonging to a sub-agent turn nested inside a parent turn.
@@ -377,9 +371,7 @@ export const encodeChatEventPayload = (event: ChatEventInput): string => encodeP
 export const decodeChatEventPayload = (payload: string, seq: number): ChatEvent =>
 	({ ...decodePayload(payload), seq }) as ChatEvent
 
-// ---------------------------------------------------------------------------
 // Turn identity
-// ---------------------------------------------------------------------------
 
 /**
  * The caller identity a turn runs as, in the shape that survives a Durable Object hop.
@@ -413,9 +405,7 @@ export type ChatTurnTenantEncoded = (typeof ChatTurnTenant)["Encoded"]
 export const encodeChatTurnTenant = Schema.encodeSync(ChatTurnTenant)
 export const decodeChatTurnTenant = Schema.decodeSync(ChatTurnTenant)
 
-// ---------------------------------------------------------------------------
 // Requests
-// ---------------------------------------------------------------------------
 
 export class ChatSendRequest extends Schema.Class<ChatSendRequest>("@maple/ChatSendRequest")({
 	/** The full message text, with any client-side context preamble already folded in. */

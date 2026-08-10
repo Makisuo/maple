@@ -732,9 +732,7 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
 		this.use((service) => service.getCurrentProjectRevision())
 }
 
-// ---------------------------------------------------------------------------
 // Promise-returning wrappers for non-Effect callers (Cloudflare Workflow steps)
-// ---------------------------------------------------------------------------
 
 const provideSync = <A, E>(effect: Effect.Effect<A, E, TinybirdProjectSync>): Promise<A> =>
 	Effect.runPromise(Effect.provide(effect, TinybirdProjectSync.layer))

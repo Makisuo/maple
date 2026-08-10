@@ -115,9 +115,7 @@ describe("isRetryablePostgresContention", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // PGlite-backed integration harness (fresh in-memory DB per test)
-// ---------------------------------------------------------------------------
 
 const createdDbs: TestDb[] = []
 
@@ -380,9 +378,7 @@ const seedIngestKey = (orgId: string) =>
 		)
 	})
 
-// ---------------------------------------------------------------------------
 // countOpenIssuesByService
-// ---------------------------------------------------------------------------
 
 describe("ErrorsService.countOpenIssuesByService", () => {
 	it.effect("groups actionable error issues by service, excluding done/alert/archived", () =>
@@ -411,9 +407,7 @@ describe("ErrorsService.countOpenIssuesByService", () => {
 	)
 })
 
-// ---------------------------------------------------------------------------
 // setSeverity
-// ---------------------------------------------------------------------------
 
 describe("ErrorsService.setSeverity", () => {
 	it.effect("sets a manual severity, records the event, and queues an escalation", () =>
@@ -751,11 +745,9 @@ describe("ErrorsService.setSeverity", () => {
 	)
 })
 
-// ---------------------------------------------------------------------------
 // runTick — the per-minute scheduled tick that turns warehouse error rows
 // into issues/incidents. The warehouse stub feeds synthetic scan rows; the
 // TestClock pins the tick window.
-// ---------------------------------------------------------------------------
 
 const DAY_MS = 24 * 60 * 60 * 1000
 

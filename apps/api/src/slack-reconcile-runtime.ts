@@ -8,7 +8,6 @@ import { ApiKeysService } from "./services/org/ApiKeysService"
 import { OAuthStateRepository } from "./services/auth/OAuthStateRepository"
 import { SlackIntegrationService } from "./services/integrations/SlackIntegrationService"
 
-// ---------------------------------------------------------------------------
 // Slack workspace reconciliation's cron layer graph — mirrors
 // vcs-sync-runtime.ts's `buildScrapeRetentionLayer`, its own light graph
 // (NOT the fetch path's MainLive) so the tick stays within the startup CPU
@@ -23,7 +22,6 @@ import { SlackIntegrationService } from "./services/integrations/SlackIntegratio
 // see slack-integration.http.ts): catches a forward call the bot never made
 // (crash mid-processing, network blip to Maple) and installs that predate
 // this wiring.
-// ---------------------------------------------------------------------------
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",

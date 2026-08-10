@@ -30,9 +30,7 @@ const signalTypeField = AnomalySignalType.annotate({
 	examples: ["error_rate"],
 })
 
-// ---------------------------------------------------------------------------
 // Resources
-// ---------------------------------------------------------------------------
 
 /** One fingerprint sharing a consolidated error-spike incident. */
 const V2AnomalyIncidentFingerprint = Schema.Struct({
@@ -216,9 +214,7 @@ export const V2AnomalySettings = Schema.Struct({
 })
 export type V2AnomalySettings = Schema.Schema.Type<typeof V2AnomalySettings>
 
-// ---------------------------------------------------------------------------
 // Requests / queries
-// ---------------------------------------------------------------------------
 
 export const V2AnomalyLinkIssueParams = Schema.Struct({
 	issue_id: Schema.NullOr(ErrorIssuePublicId).annotate({

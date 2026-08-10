@@ -1,11 +1,9 @@
-// ---------------------------------------------------------------------------
 // Shared OAuth-connection machinery for provider integrations (Cloudflare,
 // Hazel, ...). Both providers persist into the same `oauth_connections` /
 // `oauth_auth_states` tables, so the state-row lifecycle, encrypted token
 // persistence, token-endpoint HTTP calls, and refresh semantics live here —
 // parameterized by provider id and display label. Provider-specific flow
 // (PKCE, OIDC discovery, account resolution) stays in each service.
-// ---------------------------------------------------------------------------
 
 import { randomUUID } from "node:crypto"
 import {

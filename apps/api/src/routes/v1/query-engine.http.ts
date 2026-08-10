@@ -1751,11 +1751,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 	}),
 )
 
-// ---------------------------------------------------------------------------
 // Auto-bucket helper for raw-SQL $__interval_s when the user didn't supply
 // granularitySeconds. Mirrors apps/web/src/api/tinybird/timeseries-utils.ts so
 // the backend can compute it without depending on the web package.
-// ---------------------------------------------------------------------------
 
 const TARGET_POINTS = 30
 const AUTO_BUCKET_LADDER = [300, 900, 1800, 3600, 14400, 86400] as const

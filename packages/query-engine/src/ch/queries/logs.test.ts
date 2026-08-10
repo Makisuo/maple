@@ -18,9 +18,7 @@ const baseParams = {
 	bucketSeconds: 3600,
 }
 
-// ---------------------------------------------------------------------------
 // logsTimeseriesQuery
-// ---------------------------------------------------------------------------
 
 describe("logsTimeseriesQuery", () => {
 	it("compiles basic timeseries with no groupBy", () => {
@@ -134,9 +132,7 @@ describe("logsTimeseriesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // canUseLogsAggregatesHourly + MV routing in logsTimeseriesQuery
-// ---------------------------------------------------------------------------
 
 describe("canUseLogsAggregatesHourly", () => {
 	it("accepts hour-aligned bucket sizes", () => {
@@ -242,9 +238,7 @@ describe("logsTimeseriesQuery MV routing", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // logsBreakdownQuery
-// ---------------------------------------------------------------------------
 
 describe("logsBreakdownQuery", () => {
 	it("uses the hourly aggregate for full interior hours when grouping by service", () => {
@@ -310,9 +304,7 @@ describe("logsBreakdownQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // logsCountQuery
-// ---------------------------------------------------------------------------
 
 describe("logsCountQuery", () => {
 	it("uses the hourly aggregate for full interior hours and raw logs for exact edges", () => {
@@ -360,9 +352,7 @@ describe("logsCountQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // logsListQuery
-// ---------------------------------------------------------------------------
 
 describe("logsListQuery", () => {
 	it("compiles basic list with all columns", () => {
@@ -476,9 +466,7 @@ describe("logsListQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // getLogByKeyQuery
-// ---------------------------------------------------------------------------
 
 describe("getLogByKeyQuery", () => {
 	const keyParams = { ...baseParams, timestamp: "2024-01-01 12:00:00.123456" }
@@ -523,9 +511,7 @@ describe("getLogByKeyQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // errorRateByServiceQuery
-// ---------------------------------------------------------------------------
 
 describe("errorRateByServiceQuery", () => {
 	it("uses the hourly aggregate for full interior hours and raw logs for exact edges", () => {
@@ -550,9 +536,7 @@ describe("errorRateByServiceQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // logsFacetsQuery
-// ---------------------------------------------------------------------------
 
 describe("logsFacetsQuery", () => {
 	it("routes to logs_aggregates_hourly with severity/service/deploymentEnv/namespace facets", () => {
@@ -625,9 +609,7 @@ describe("logsFacetsQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // environments filter (applies to all logs queries via ResourceAttributes)
-// ---------------------------------------------------------------------------
 
 describe("environments filter", () => {
 	it("logsListQuery filters by a single environment", () => {

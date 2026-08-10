@@ -16,7 +16,6 @@ import type {
 import type { WidgetDataSource } from "@/components/dashboard-builder/types"
 import type { QueryBuilderQueryDraft } from "@maple/query-engine/query-builder"
 
-// ---------------------------------------------------------------------------
 // The widget-type framework.
 //
 // A `WidgetTypeDefinition` is everything the app needs to know about one kind of
@@ -32,7 +31,6 @@ import type { QueryBuilderQueryDraft } from "@maple/query-engine/query-builder"
 // The type-agnostic half — labels, layout, owned display keys, MCP exposure,
 // Perses kinds — lives in `@maple/domain` so the API and the MCP tools read the
 // same table. This module adds the parts that only exist in a browser.
-// ---------------------------------------------------------------------------
 
 export type VisualizationComponent = ComponentType<{
 	dataState: WidgetDataState

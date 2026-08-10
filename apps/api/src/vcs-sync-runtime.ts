@@ -19,11 +19,9 @@ import {
 } from "./services/integrations/vcs/VcsSyncQueue"
 import { VcsSyncService } from "./services/integrations/vcs/VcsSyncService"
 
-// ---------------------------------------------------------------------------
 // Per-invocation runtime for the `VCS_SYNC_QUEUE` consumer. Mirrors the
 // alerting worker's `buildLayer`: its own light layer graph (NOT the fetch
 // path's MainLive) so the queue invocation stays within the startup CPU budget.
-// ---------------------------------------------------------------------------
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",

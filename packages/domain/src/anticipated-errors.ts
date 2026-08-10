@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Anticipated error identifiers
 //
 // The set of stable domain HTTP error identifiers that represent *expected*
@@ -18,7 +17,6 @@
 // identifier plus an `httpApiStatus` annotation, so a new 4xx error is picked
 // up automatically. A 5xx error (persistence/upstream failures) is intentionally
 // excluded and keeps tracing.
-// ---------------------------------------------------------------------------
 import * as Http from "./http/index"
 import * as HttpV2 from "./http/v2/index"
 

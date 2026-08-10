@@ -71,14 +71,12 @@ export interface DurableObjectNamespaceHandle<Shape = unknown> {
 	newUniqueId(): DurableObjectId
 }
 
-// ---------------------------------------------------------------------------
 // Module-level registry: name -> init effect
 //
 // The DO bridge class needs to look up the user-provided impl at CF-
 // instantiation time. The impl is registered when the factory is called
 // (at module evaluation in the DO's source file) and retrieved by the
 // bridge constructor (when CF invokes `new ClassName(state, env)`).
-// ---------------------------------------------------------------------------
 
 type DurableObjectImpl = Effect.Effect<
 	Effect.Effect<Record<string, unknown>, never, DurableObjectState>,
@@ -94,9 +92,7 @@ export const registerDurableObjectImpl = (name: string, impl: DurableObjectImpl)
 
 export const getDurableObjectImpl = (name: string): DurableObjectImpl | undefined => implRegistry.get(name)
 
-// ---------------------------------------------------------------------------
 // Bridge base class — built once, parameterised per DO name.
-// ---------------------------------------------------------------------------
 
 const Bridge = makeDurableObjectBridge(
 	DurableObject as unknown as abstract new (state: unknown, env: unknown) => cf.DurableObject,
@@ -120,9 +116,7 @@ const Bridge = makeDurableObjectBridge(
 	},
 )
 
-// ---------------------------------------------------------------------------
 // Public factory
-// ---------------------------------------------------------------------------
 
 /**
  * Define a Durable Object class with an Effect-based runtime implementation.

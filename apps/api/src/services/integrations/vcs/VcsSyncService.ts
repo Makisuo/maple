@@ -22,12 +22,10 @@ import { VcsProviderRegistry } from "./VcsProviderRegistry"
 import { VcsRepository } from "./VcsRepository"
 import { VcsSyncQueue } from "./VcsSyncQueue"
 
-// ---------------------------------------------------------------------------
 // Vendor-agnostic sync orchestrator. Decodes a queue message, resolves the
 // owning installation (→ orgId + provider auth), then dispatches by job kind:
 // fetch via the provider port → persist via the repo. The provider port is the
 // only provider-specific surface it touches.
-// ---------------------------------------------------------------------------
 
 // The historical window every branch commit-sync walks — each tracked branch is
 // backfilled over the same span. Exported because the dashboard's "track a branch"

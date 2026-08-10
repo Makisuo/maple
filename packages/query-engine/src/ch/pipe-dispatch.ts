@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Named-Query Registry (pipe dispatch)
 //
 // The single canonical mapping from a named query ("pipe") + flat params to
@@ -12,7 +11,6 @@
 // It is deliberately distinct from the structured camelCase `QuerySpec` filters
 // consumed by `QueryEngineService` — same output opts, different input formats,
 // so the two adapters are not duplicates.
-// ---------------------------------------------------------------------------
 
 import * as CH from "./index"
 import type { TracesMetric, AttributeFilter, MetricType } from "@maple/domain/query-engine"
@@ -682,9 +680,7 @@ export function compilePipeQuery(
 		)
 }
 
-// ---------------------------------------------------------------------------
 // Attribute filter param helpers (numbered suffix pattern from Tinybird pipes)
-// ---------------------------------------------------------------------------
 
 const SUFFIXES = ["", "_2", "_3", "_4", "_5"] as const
 
@@ -715,9 +711,7 @@ function buildAttributeFiltersFromParams(
 	return filters.length > 0 ? filters : undefined
 }
 
-// ---------------------------------------------------------------------------
 // Parameter adapters — translate pipe-style params to typed query opts
-// ---------------------------------------------------------------------------
 
 /**
  * `errorsOnly` is tri-state in the query layer: `true` keeps only errored spans,

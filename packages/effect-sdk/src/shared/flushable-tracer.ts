@@ -1,11 +1,9 @@
-// ---------------------------------------------------------------------------
 // Buffer-backed OTLP tracer (platform-agnostic)
 //
 // Pure Tracer that pushes OTLP-shaped spans into a caller-owned buffer. URL,
 // resource, and headers are NOT baked in here — the caller (the Cloudflare,
 // server, or client flushable preset) resolves them and POSTs the drained
 // buffer on `flush`, so the layer itself can be constructed without I/O.
-// ---------------------------------------------------------------------------
 import { Cause, type Context, Layer, type Option, Predicate, Tracer } from "effect"
 import * as ErrorReporter from "effect/ErrorReporter"
 import * as OtlpResource from "effect/unstable/observability/OtlpResource"
@@ -110,9 +108,7 @@ export const makeSpanBuffer = (options: SpanBufferOptions = {}): SpanBuffer => {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // OTLP span construction (adapted from `effect/unstable/observability/OtlpTracer`)
-// ---------------------------------------------------------------------------
 
 const ATTR_EXCEPTION_TYPE = "exception.type"
 const ATTR_EXCEPTION_MESSAGE = "exception.message"
@@ -263,9 +259,7 @@ const makeOtlpSpan = (self: SpanImpl, anticipatedErrorIdentifiers?: ReadonlySet<
 	}
 }
 
-// ---------------------------------------------------------------------------
 // OTLP wire types
-// ---------------------------------------------------------------------------
 
 export interface OtlpSpan {
 	readonly traceId: string

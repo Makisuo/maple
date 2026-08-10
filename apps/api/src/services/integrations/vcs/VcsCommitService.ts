@@ -17,7 +17,6 @@ import { Clock, Context, Effect, Layer, Option, Result, Schema } from "effect"
 import { VcsProviderRegistry } from "./VcsProviderRegistry"
 import { VcsRepository } from "./VcsRepository"
 
-// ---------------------------------------------------------------------------
 // Resolves a commit by SHA for the dashboard's hover card — entirely vendor-
 // agnostic. It only ever talks to `VcsRepository` (storage) and a
 // `VcsProviderClient` obtained from the registry; it never imports a provider
@@ -29,7 +28,6 @@ import { VcsRepository } from "./VcsRepository"
 //   2. else     → probe each connected repo via `provider.fetchCommit` until one
 //                 resolves, persist it, and return it
 //   3. else     → not found (cached briefly so repeated hovers don't re-probe)
-// ---------------------------------------------------------------------------
 
 // How long a "not found" result is cached. Short because a backfill may land
 // the commit moments later, but long enough to absorb hover-card bursts.

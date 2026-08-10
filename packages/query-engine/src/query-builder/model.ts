@@ -289,9 +289,7 @@ function parseBucketSeconds(raw: string): number | undefined {
 	return undefined
 }
 
-// ---------------------------------------------------------------------------
 // Clause-to-filter mapping via Match
-// ---------------------------------------------------------------------------
 
 interface AccumulatedAttributeFilter {
 	key: string
@@ -532,9 +530,7 @@ function applyMetricsClause(
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Group-by mapping via Match
-// ---------------------------------------------------------------------------
 
 type TracesGroupByKey = "service" | "span_name" | "status_code" | "http_method" | "attribute" | "none"
 
@@ -644,11 +640,9 @@ function resolveMetricsGroupByToken(
 	)
 }
 
-// ---------------------------------------------------------------------------
 // Shared resolveGroupBy — used by both the dashboard query builder and the
 // alerting compiler so they interpret raw user tokens (`service.name`,
 // `attr.<key>`, …) identically.
-// ---------------------------------------------------------------------------
 
 export interface ResolvedGroupBy {
 	/** Internal QuerySpec groupBy tokens (e.g. "service", "span_name", "attribute"). */
@@ -761,9 +755,7 @@ export function resolveGroupBy(
 	return { tokens, attributeKeys, resourceAttributeKeys, warnings }
 }
 
-// ---------------------------------------------------------------------------
 // Accumulator → QuerySpec filters
-// ---------------------------------------------------------------------------
 
 function buildTracesSpecFilters(acc: TracesFilterAccumulator): Record<string, unknown> | undefined {
 	const filters: Record<string, unknown> = {}
@@ -795,9 +787,7 @@ function dedupeGroupByKeys<T extends string>(keys: readonly T[]): T[] {
 	return result
 }
 
-// ---------------------------------------------------------------------------
 // Query spec builders
-// ---------------------------------------------------------------------------
 
 export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): BuildSpecResult {
 	const warnings: string[] = []

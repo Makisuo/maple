@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Typed Session Replay Queries
 //
 // DSL-based queries over the session_replays (metadata) and
@@ -16,7 +15,6 @@
 // monotonic ErrorCount via `hasErrors` (true-only — see listSessionReplays).
 // Stale-prone post-aggregation predicates (e.g. exact Status) are deliberately
 // not exposed as SQL filters since the DSL has no HAVING clause.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { compileFnCall, compileFnCallCond } from "@maple-dev/clickhouse-builder"
@@ -76,9 +74,7 @@ function ifNotFinite(value: CH.Expr<number>, fallback: number): CH.Expr<number> 
 	return compileFnCall<number>("ifNotFinite", value, CH.lit(fallback))
 }
 
-// ---------------------------------------------------------------------------
 // List query
-// ---------------------------------------------------------------------------
 
 export interface SessionReplaysListOpts {
 	serviceName?: string
@@ -444,14 +440,12 @@ export function sessionReplaysListQuery(
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // List facets (UNION ALL — browser / device / country / service + error count)
 //
 // Populates the replays filter sidebar. Counts use uniq(SessionId) so the two
 // ReplacingMergeTree rows per session (Version 1 + 2) don't double-count. Each
 // dimension's own equality filter is excluded from its branch so the currently
 // selected value doesn't collapse the facet to a single option.
-// ---------------------------------------------------------------------------
 
 export interface SessionReplaysFacetsOpts {
 	serviceName?: string
@@ -594,7 +588,6 @@ export function sessionReplaysFacetsQuery(
 	).format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Single session detail
 //
 // (OrgId, SessionId) is the full sort-key prefix, so this is an O(log N)
@@ -603,7 +596,6 @@ export function sessionReplaysFacetsQuery(
 // session_replays is PARTITION BY toDate(StartTime); the optional startTime/
 // endTime bounds (version-invariant column, identical across v1/v2) prune the
 // daily partitions a deep-scan would otherwise touch. Omit to scan all.
-// ---------------------------------------------------------------------------
 
 export interface SessionReplayDetailOpts {
 	startTime?: string
@@ -688,7 +680,6 @@ export function getSessionReplayQuery(opts: SessionReplayDetailOpts = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Chunk reads for one session (ordered for playback)
 //
 // Two builders, deliberately split: `sessionReplayChunkIndexQuery` returns the
@@ -706,7 +697,6 @@ export function getSessionReplayQuery(opts: SessionReplayDetailOpts = {}) {
 // ClickHouse must read the primary index of every daily partition to find this
 // session's chunks. The optional startTime/endTime bounds (the caller passes
 // the session's time window) prune to the 1-2 partitions the session spans.
-// ---------------------------------------------------------------------------
 
 export interface SessionReplayChunkIndexOpts {
 	/** Optional session time window — prunes daily partitions. Omit to scan all. */
@@ -815,9 +805,7 @@ export function sessionReplayEventsQuery(opts: SessionReplayEventsOpts = {}) {
 	return (opts.offset === undefined ? limited : limited.offset(opts.offset)).format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Reverse correlation: sessions that observed a given trace id
-// ---------------------------------------------------------------------------
 
 export interface SessionsForTraceOpts {
 	traceId: string
@@ -851,7 +839,6 @@ export function sessionsForTraceQuery(opts: SessionsForTraceOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Per-trace summaries for a session's correlated traces
 //
 // One row per TraceId, used to draw a single bar per trace on the session
@@ -866,7 +853,6 @@ export function sessionsForTraceQuery(opts: SessionsForTraceOpts) {
 // fired within it) prune to the 1-2 partitions the session spans. The root
 // span (ParentSpanId = '') supplies the trace's name/service/duration, with a
 // fallback for traces whose root span wasn't ingested.
-// ---------------------------------------------------------------------------
 
 export interface SessionTraceSummariesOpts {
 	/** The correlated trace ids to summarize (from session_replays.TraceIds). */

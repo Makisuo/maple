@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Count-scale invariants for traces queries.
 //
 // A single dashboard must never show two answers to "how many spans?". Two
@@ -14,7 +13,6 @@
 //
 // Breaking either produced the bug this file exists to prevent: a "Spans" stat
 // reading 5.5B directly above a status donut totalling 26.6M.
-// ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest"
 import { compileCH } from "@maple-dev/clickhouse-builder"

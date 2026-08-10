@@ -4,7 +4,6 @@ import { compile as compileFragment } from "@maple-dev/clickhouse-builder/sql"
 import * as CH from "../index"
 import { edgeCondition, hourGrain, interiorBounds, interiorConditions, minuteGrain } from "./rollup-splice"
 
-// ---------------------------------------------------------------------------
 // These pin the tiling invariant: the raw edge and the aggregate interior must
 // cover the window exactly once. Getting it wrong does not raise — it inflates
 // or deflates counts — so the boundary is asserted directly rather than
@@ -15,7 +14,6 @@ import { edgeCondition, hourGrain, interiorBounds, interiorConditions, minuteGra
 // had. It does NOT prove the tiers tile against real data; that needs a live
 // ClickHouse (insert spans straddling a boundary, assert raw-only total ==
 // spliced total) and belongs with the apps/api DESCRIBE sweep.
-// ---------------------------------------------------------------------------
 
 const sqlOf = (cond: CH.Condition) => compileFragment(cond.toFragment())
 

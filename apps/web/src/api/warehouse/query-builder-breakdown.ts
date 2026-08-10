@@ -131,7 +131,6 @@ function mergeBreakdownResults(
 			.sort((a, b) => b.value - a.value)
 	}
 
-	// Multiple queries: merge by name, one column per query
 	const rowsByName = new Map<string, Record<string, string | number>>()
 	const columnNames: string[] = []
 	const queriesById = new Map(enabledQueries.map((q) => [q.id, q]))
@@ -148,7 +147,6 @@ function mergeBreakdownResults(
 		}
 	}
 
-	// Fill missing values with 0
 	for (const row of rowsByName.values()) {
 		for (const col of columnNames) {
 			if (typeof row[col] !== "number") {
@@ -157,7 +155,6 @@ function mergeBreakdownResults(
 		}
 	}
 
-	// Sort by the first column's value descending
 	const firstCol = columnNames[0]
 	return Array.from(rowsByName.values()).toSorted((a, b) => {
 		const aVal = typeof a[firstCol] === "number" ? a[firstCol] : 0
@@ -177,9 +174,7 @@ const getQueryBuilderBreakdownEffect = Effect.fn("QueryEngine.getQueryBuilderBre
 }) {
 	const input = yield* decodeInput(QueryBuilderBreakdownInputSchema, data, "getQueryBuilderBreakdown")
 
-	// A breakdown has no formulas, so a hidden query has nothing to feed — it is purely "don't
-	// show me", and running it would only cost a warehouse round trip to plot a row the author
-	// asked to hide.
+	// Hidden breakdown queries feed no formulas, so do not execute them.
 	const enabledQueries = input.queries.filter((query) => query.enabled !== false && !query.hidden)
 	if (enabledQueries.length === 0) {
 		return yield* invalidWarehouseInput("getQueryBuilderBreakdown", "No enabled queries to run")

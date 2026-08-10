@@ -25,9 +25,7 @@ const decodePortableDashboard = Schema.decodeUnknownEffect(PortableDashboardDocu
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
 const decodeParamKey = Schema.decodeUnknownSync(DashboardTemplateParameterKey)
 
-// ---------------------------------------------------------------------------
 // Simplified widget specs path — MCP-only, parses JSON tool input
-// ---------------------------------------------------------------------------
 
 function inferUnit(metric: string): string {
 	if (["avg_duration", "p50_duration", "p95_duration", "p99_duration"].includes(metric))
@@ -281,9 +279,7 @@ function parseSimpleWidgets(json: string): WidgetDef[] | string {
 
 const DEFAULT_TIME_RANGE = "1h"
 
-// ---------------------------------------------------------------------------
 // Tool registration
-// ---------------------------------------------------------------------------
 
 export function registerCreateDashboardTool(server: McpToolRegistrar) {
 	const templateList = DASHBOARD_TEMPLATES.map((t) => `  ${t.id} — ${t.description}`).join("\n")

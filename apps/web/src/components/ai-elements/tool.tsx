@@ -20,9 +20,7 @@ const LazyToolRenderer = lazy(() =>
 	})),
 )
 
-// ---------------------------------------------------------------------------
 // Status helpers
-// ---------------------------------------------------------------------------
 
 type ToolStatus = "running" | "completed" | "error"
 
@@ -208,9 +206,7 @@ const stripStructuredChunks = (text: string): string =>
 		.filter((chunk) => parseStructuredFromText(chunk) === null)
 		.join("\n\n")
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 interface ToolProps {
 	toolName: string

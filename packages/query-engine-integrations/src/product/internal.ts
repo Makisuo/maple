@@ -1,20 +1,16 @@
-// ---------------------------------------------------------------------------
 // Internal observability queries
 //
 // Queries that read Maple's own self-instrumentation. These run against the
 // `internal` org's Traces stream and are used by developer tooling — not
 // product code. Keeping them out of the user-facing query modules makes
 // their scope explicit.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from } from "@maple-dev/clickhouse-builder"
 import { Traces } from "@maple/query-engine/ch/tables"
 
-// ---------------------------------------------------------------------------
 // db.statement samples
-// ---------------------------------------------------------------------------
 
 /**
  * Pull the recent SQL we ran in production, grouped by fingerprint and ranked

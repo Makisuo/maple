@@ -15,7 +15,6 @@ import { ScrapeTargetPublicId } from "./scrape-targets"
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
 
-// ---------------------------------------------------------------------------
 // PlanetScale integration. An org connects PlanetScale over OAuth, binds the
 // grant to one PlanetScale organization, and Maple provisions a managed scrape
 // target that pulls branch metrics. Inventory (databases/branches), query
@@ -46,7 +45,6 @@ const wireExample = <A>(example: object): A => example as A
 // Scope family is `integrations`, shared with Slack: families are derived from
 // the first path segment under `/v2`, so the split across two contract files is
 // purely about file size.
-// ---------------------------------------------------------------------------
 
 export const V2PlanetScaleMetricsAuth = Schema.Literals(["oauth", "service_token", "missing"]).annotate({
 	identifier: "PlanetScaleMetricsAuth",

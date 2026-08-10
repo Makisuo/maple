@@ -518,7 +518,6 @@ const make: Effect.Effect<
 		authMode: "self_hosted",
 	})
 
-	// ---------------------------------------------------------------
 	// Active-org gating
 	//
 	// The tick historically scanned the warehouse for every org that ever held
@@ -532,7 +531,6 @@ const make: Effect.Effect<
 	// if none, fall back to just the BYO set. Orgs with existing issue/incident
 	// state are still scanned by the caller (`withState`), so auto-resolution
 	// keeps working even when discovery is down.
-	// ---------------------------------------------------------------
 
 	const resolveActiveOrgs = Effect.fn("ErrorsService.resolveActiveOrgs")(function* (
 		knownOrgs: ReadonlyArray<string>,
@@ -619,9 +617,7 @@ const make: Effect.Effect<
 			)
 	})
 
-	// ---------------------------------------------------------------
 	// Actors
-	// ---------------------------------------------------------------
 
 	const parseCapabilities = (raw: unknown): ReadonlyArray<string> =>
 		Option.getOrElse(decodeStoredJsonArray(raw), (): ReadonlyArray<unknown> => []).filter(
@@ -863,9 +859,7 @@ const make: Effect.Effect<
 		},
 	)
 
-	// ---------------------------------------------------------------
 	// Issue row -> document mapping
-	// ---------------------------------------------------------------
 
 	const collectActorDocs = (orgId: OrgId, actorIds: ReadonlyArray<ActorId | null>) => {
 		const filtered = Array.from(new Set(actorIds.filter((v): v is ActorId => v != null)))
@@ -1032,9 +1026,7 @@ const make: Effect.Effect<
 		return rowToIssue(row, openSet.has(row.id), actorMap)
 	})
 
-	// ---------------------------------------------------------------
 	// Events / audit log
-	// ---------------------------------------------------------------
 
 	const recordEvent = Effect.fn("ErrorsService.recordEvent")(function* (
 		orgId: OrgId,
@@ -1093,9 +1085,7 @@ const make: Effect.Effect<
 		},
 	)
 
-	// ---------------------------------------------------------------
 	// Issue list + detail
-	// ---------------------------------------------------------------
 
 	const listIssues: ErrorsServiceShape["listIssues"] = Effect.fn("ErrorsService.listIssues")(
 		function* (orgId, opts) {
@@ -1358,9 +1348,7 @@ const make: Effect.Effect<
 		},
 	)
 
-	// ---------------------------------------------------------------
 	// State transitions
-	// ---------------------------------------------------------------
 
 	const validateTransition = (issueId: ErrorIssueId, from: WorkflowState, to: WorkflowState) => {
 		const allowed = WORKFLOW_TRANSITIONS[from]
@@ -1504,9 +1492,7 @@ const make: Effect.Effect<
 		},
 	)
 
-	// ---------------------------------------------------------------
 	// Claim / lease
-	// ---------------------------------------------------------------
 
 	const leaseConflict = (issueId: ErrorIssueId, row: ErrorIssueRow | null) =>
 		new ErrorIssueLeaseConflictError({
@@ -1878,9 +1864,7 @@ const make: Effect.Effect<
 		},
 	)
 
-	// ---------------------------------------------------------------
 	// Incidents (unchanged listings)
-	// ---------------------------------------------------------------
 
 	const listIssueIncidents: ErrorsServiceShape["listIssueIncidents"] = Effect.fn(
 		"ErrorsService.listIssueIncidents",
@@ -1919,9 +1903,7 @@ const make: Effect.Effect<
 		})
 	})
 
-	// ---------------------------------------------------------------
 	// Notification policy (per-org) controlling incident delivery.
-	// ---------------------------------------------------------------
 
 	const decodeAlertDestinationIds = Schema.decodeUnknownOption(
 		ErrorNotificationPolicyDocument.fields.destinationIds,
@@ -2055,9 +2037,7 @@ const make: Effect.Effect<
 		return rowToPolicy(merged)
 	})
 
-	// ---------------------------------------------------------------
 	// Escalation policy (per-org severity → destination routing).
-	// ---------------------------------------------------------------
 
 	const decodeEscalationRules = Schema.decodeUnknownOption(Schema.Array(IssueEscalationPolicyRule))
 
@@ -2494,9 +2474,7 @@ const make: Effect.Effect<
 		)
 	})
 
-	// ---------------------------------------------------------------
 	// Scheduled tick
-	// ---------------------------------------------------------------
 
 	/**
 	 * The four unconditional reads at the head of every per-org tick, in ONE

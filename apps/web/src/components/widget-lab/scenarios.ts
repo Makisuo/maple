@@ -47,9 +47,7 @@ const rangeErrorState: WidgetDataState = {
 
 const ready = <T>(data: T): WidgetDataState => ({ status: "ready", data })
 
-// ---------------------------------------------------------------------------
 // Stat
-// ---------------------------------------------------------------------------
 
 export const statScenarios: WidgetScenario[] = [
 	{
@@ -161,9 +159,7 @@ export const statScenarios: WidgetScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Gauge
-// ---------------------------------------------------------------------------
 
 // Percent unit treats values as 0-1 ratios (0.42 → "42%").
 const gaugeThresholds = [
@@ -271,10 +267,8 @@ export const gaugeScenarios: WidgetScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Stat sparkline — preview the StatSparkline component directly with various
 // timeseries shapes (the full stat-widget sparkline needs a live data source).
-// ---------------------------------------------------------------------------
 
 const makeSeries = (values: number[]): Record<string, unknown>[] =>
 	values.map((value, index) => ({
@@ -305,12 +299,10 @@ export const sparklineSamples: SparklineSample[] = [
 	{ label: "Single point (renders nothing)", data: makeSeries([42]) },
 ]
 
-// ---------------------------------------------------------------------------
 // Stat + sparkline — the stat widget with its trend sparkline enabled. In a
 // real dashboard the sparkline pulls a live timeseries derived from the stat's
 // own query; here we pass static series data so the composed layout (value +
 // trend) can be polished without a data source.
-// ---------------------------------------------------------------------------
 
 export interface StatSparklineScenario {
 	label: string
@@ -353,9 +345,7 @@ export const statSparklineScenarios: StatSparklineScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Chart — iterate every registry entry with its built-in sampleData
-// ---------------------------------------------------------------------------
 
 // Threshold + legend scenarios reuse a registry chart's bundled sample data.
 const sampleFor = (chartId: string): Record<string, unknown>[] =>
@@ -458,11 +448,9 @@ export const chartScenarios: ChartScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Stress / edge cases — high cardinality, long names, null/zero data.
 // These exercise the palette (distinct colors past series 5), legend overflow,
 // and the pie/bar "Other" bucketing.
-// ---------------------------------------------------------------------------
 
 /** N synthetic timeseries with smooth, deterministic, distinct shapes. */
 function makeManySeries(seriesCount: number, points = 14, namePrefix = "service"): Record<string, unknown>[] {
@@ -812,9 +800,7 @@ export const stressScenarios: ChartScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Table
-// ---------------------------------------------------------------------------
 
 const serviceRows = [
 	{ service: "api-gateway", p99: 245, throughput: 1820, errorRate: 0.4 },
@@ -969,9 +955,7 @@ export const tableScenarios: WidgetScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // List
-// ---------------------------------------------------------------------------
 
 const traceRows = [
 	{
@@ -1115,9 +1099,7 @@ export const listScenarios: WidgetScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Pie
-// ---------------------------------------------------------------------------
 
 const pieFew = [
 	{ name: "api-gateway", value: 4820 },
@@ -1190,9 +1172,7 @@ export const pieScenarios: WidgetScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Funnel
-// ---------------------------------------------------------------------------
 
 const funnelStages = [
 	{ name: "Visited", value: 4820 },
@@ -1299,9 +1279,7 @@ export const funnelScenarios: WidgetScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Horizontal bar (ranked)
-// ---------------------------------------------------------------------------
 
 /**
  * The case that motivated the panel: the top rows are near-identical, which a
@@ -1406,9 +1384,7 @@ export const hbarScenarios: WidgetScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Histogram
-// ---------------------------------------------------------------------------
 
 const bellCurve = [
 	{ name: "0-50", value: 8 },
@@ -1502,9 +1478,7 @@ export const histogramScenarios: WidgetScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Heatmap
-// ---------------------------------------------------------------------------
 
 const hours = ["00", "03", "06", "09", "12", "15", "18", "21"]
 const buckets = ["0-50ms", "50-100ms", "100-200ms", "200-500ms", "500ms+"]
@@ -1604,9 +1578,7 @@ export const heatmapScenarios: WidgetScenario[] = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Markdown
-// ---------------------------------------------------------------------------
 
 export const markdownScenarios: WidgetScenario[] = [
 	{

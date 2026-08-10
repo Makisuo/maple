@@ -1,7 +1,6 @@
 import { createHash, createHmac } from "node:crypto"
 import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 
-// ---------------------------------------------------------------------------
 // Tinybird per-org read JWT minting.
 //
 // Tinybird "Forward" enforces row-level security via self-signed JWTs: a token
@@ -14,7 +13,6 @@ import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 //
 // We mint these locally (HMAC-SHA256 signed with the workspace admin token as the
 // secret) rather than via the SDK's `createJWT`, which is a network round-trip.
-// ---------------------------------------------------------------------------
 
 /** Standard Tinybird JWT scope entry. */
 export interface TinybirdJwtScope {

@@ -2,9 +2,7 @@ import { makeExpr } from "../expr"
 import { raw, str, compile } from "../../sql/sql-fragment"
 import type { Expr } from "../expr"
 
-// ---------------------------------------------------------------------------
 // Date/time functions (handwritten — custom INTERVAL syntax)
-// ---------------------------------------------------------------------------
 
 export function toStartOfInterval(col: Expr<string>, seconds: number | Expr<number>): Expr<string> {
 	const secStr =

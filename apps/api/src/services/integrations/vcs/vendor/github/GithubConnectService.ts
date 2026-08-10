@@ -23,7 +23,6 @@ import { BACKFILL_WINDOW_MS } from "@/services/integrations/vcs/VcsSyncService"
 import { VcsSyncQueue } from "@/services/integrations/vcs/VcsSyncQueue"
 import { GithubAppClient, type GithubAppError } from "./GithubAppClient"
 
-// ---------------------------------------------------------------------------
 // The dashboard connect flow for the GitHub App. Bridges a real GitHub
 // installation into a `vcs_installations` row owned by a Maple org, then hands
 // off to the existing sync engine (enqueues an InstallationSyncJob).
@@ -38,7 +37,6 @@ import { GithubAppClient, type GithubAppError } from "./GithubAppClient"
 // we sync someone's private repos we prove they own it. Two checks: (1) the OAuth
 // `code` must show the user can manage that installation, and (2) we never bind an
 // installation that already belongs to a different org.
-// ---------------------------------------------------------------------------
 
 const GITHUB_PROVIDER = "github" as const
 const GITHUB_WEB_BASE = "https://github.com"

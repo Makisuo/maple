@@ -1,9 +1,7 @@
-// ---------------------------------------------------------------------------
 // Maple Table Definitions
 //
 // Derived from packages/domain/src/tinybird/datasources.ts
 // These define the ClickHouse table schemas used by the query DSL.
-// ---------------------------------------------------------------------------
 
 import { table } from "@maple-dev/clickhouse-builder"
 import * as T from "@maple-dev/clickhouse-builder/types"

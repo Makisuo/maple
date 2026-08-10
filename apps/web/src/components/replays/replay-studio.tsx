@@ -5,7 +5,6 @@ import { SessionRail } from "@/components/replays/session-events-panel"
 import { recordedMarker, type ReplayPartitionWindow } from "@/components/replays/replay-format"
 import { Reveal, SessionIdentityBar } from "@/components/replays/session-detail-parts"
 
-// ---------------------------------------------------------------------------
 // Replay studio
 //
 // The shared layout for the session-replay detail page.
@@ -18,7 +17,6 @@ import { Reveal, SessionIdentityBar } from "@/components/replays/session-detail-
 // (Session). The page itself never scrolls (`DashboardLayout.Fill`). Below lg
 // the rail drops under the stage column and the left column's scroller owns
 // the page.
-// ---------------------------------------------------------------------------
 
 /** The session metadata the studio renders from the warehouse `getReplayResult` row. */
 interface ReplayStudioSession {

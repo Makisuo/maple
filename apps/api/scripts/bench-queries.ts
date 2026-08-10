@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-// ---------------------------------------------------------------------------
 // bench-queries.ts — ClickHouse query benchmarking CLI (Effect)
 //
 // Replays production SQL (captured on `WarehouseQueryService.executeSql` spans
@@ -19,7 +18,6 @@
 //   CLICKHOUSE_URL, CLICKHOUSE_USER,       — target (where we replay queries)
 //     CLICKHOUSE_PASSWORD, CLICKHOUSE_DATABASE
 //   MAPLE_INTERNAL_ORG_ID  (default: internal)
-// ---------------------------------------------------------------------------
 
 import { dirname, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
@@ -41,9 +39,7 @@ import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { CH } from "@maple/query-engine"
 import * as Integrations from "@maple/query-engine-integrations"
 
-// ---------------------------------------------------------------------------
 // Errors
-// ---------------------------------------------------------------------------
 
 class MissingConfigError extends Schema.TaggedError<MissingConfigError>()(
 	"@maple/api/scripts/bench-queries/MissingConfigError",
@@ -87,9 +83,7 @@ class InvalidDurationError extends Schema.TaggedError<InvalidDurationError>()(
 	},
 ) {}
 
-// ---------------------------------------------------------------------------
 // Internal data shapes (typed JSON; not branded — local dev tool)
-// ---------------------------------------------------------------------------
 
 interface Sample {
 	readonly fingerprint: string
@@ -166,9 +160,7 @@ interface QueryLogEntry {
 	readonly readBytes: number
 }
 
-// ---------------------------------------------------------------------------
 // BenchConfig — resolve warehouse credentials from the environment via `Config`
-// ---------------------------------------------------------------------------
 
 interface ClickHouseConfig {
 	readonly url: string
@@ -221,9 +213,7 @@ export class BenchConfig extends Context.Service<BenchConfig, BenchConfigShape>(
 	static readonly layer = Layer.effect(this, this.make)
 }
 
-// ---------------------------------------------------------------------------
 // ClickHouse client — raw HTTP so we can read X-ClickHouse-Summary + query_id
-// ---------------------------------------------------------------------------
 
 const parseSummaryHeader = (value: string | null): Option.Option<Record<string, string>> => {
 	if (!value) return Option.none()
@@ -341,9 +331,7 @@ export class ClickHouse extends Context.Service<ClickHouse, ClickHouseShape>()("
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(BenchConfig.layer))
 }
 
-// ---------------------------------------------------------------------------
 // Tinybird client — source for mining db.query.text spans
-// ---------------------------------------------------------------------------
 
 interface TinybirdShape {
 	readonly query: (
@@ -410,9 +398,7 @@ export class Tinybird extends Context.Service<Tinybird, TinybirdShape>()("bench/
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(BenchConfig.layer))
 }
 
-// ---------------------------------------------------------------------------
 // File IO via the core FileSystem service
-// ---------------------------------------------------------------------------
 
 const readJsonFile = <T>(path: string) =>
 	Effect.gen(function* () {
@@ -443,9 +429,7 @@ const writeJsonFile = (path: string, value: unknown) =>
 			)
 	})
 
-// ---------------------------------------------------------------------------
 // Pure helpers — time, formatting, stats, table
-// ---------------------------------------------------------------------------
 
 const parseRelativeDuration = (input: string): Effect.Effect<number, InvalidDurationError> => {
 	const match = /^(\d+)\s*(s|m|h|d)$/i.exec(input.trim())
@@ -548,9 +532,7 @@ const renderTable = (
 
 const timestampSlug = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)
 
-// ---------------------------------------------------------------------------
 // Handlers
-// ---------------------------------------------------------------------------
 
 interface FetchConfig {
 	readonly context: Option.Option<string>
@@ -916,9 +898,7 @@ const compareHandler = Effect.fn("bench.compare")(function* (config: {
 	)
 })
 
-// ---------------------------------------------------------------------------
 // CLI command tree (effect/unstable/cli)
-// ---------------------------------------------------------------------------
 
 const fetchCommand = Command.make(
 	"fetch",

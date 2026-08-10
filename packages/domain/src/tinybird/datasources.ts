@@ -1771,7 +1771,6 @@ export const sessionReplays = defineDatasource("session_replays", {
 		}),
 		Version: column(t.uint32(), { jsonPath: "$.version" }),
 
-		// ---------------------------------------------------------------------
 		// Analytics dimensions (added in migration 0011).
 		//
 		// Two rules govern everything below:

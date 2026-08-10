@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { collectSqlCatalog } from "./sql-catalog"
 
-// ---------------------------------------------------------------------------
 // A verbatim record of every SQL string the product can emit.
 //
 // `sql-catalog.test.ts` asserts *properties* of the catalog (it compiles, it
@@ -12,7 +11,6 @@ import { collectSqlCatalog } from "./sql-catalog"
 // Regenerate with `vitest -u` ONLY when a SQL change is intended, and treat the
 // resulting diff as part of the review. An unexplained diff means the refactor
 // is wrong.
-// ---------------------------------------------------------------------------
 
 describe("sql catalog baseline", () => {
 	it("emits the same SQL as the recorded baseline", async () => {

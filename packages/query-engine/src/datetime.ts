@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Warehouse DateTime normalization
 //
 // ClickHouse / Tinybird return `DateTime` columns as strings like
@@ -9,7 +8,6 @@
 // These helpers are the single source of truth for turning a warehouse
 // DateTime string into an unambiguous UTC value. Already-zoned strings (with a
 // `Z` or numeric offset) and non-matching shapes are passed through untouched.
-// ---------------------------------------------------------------------------
 
 const WAREHOUSE_DATETIME_PATTERN = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?$/
 
@@ -69,7 +67,6 @@ export function formatWarehouseDateTimeMs(epochMs: number): string {
 	return new Date(epochMs).toISOString().replace("T", " ").replace(/Z$/, "")
 }
 
-// ---------------------------------------------------------------------------
 // Relative range shorthand — single source of truth
 //
 // The time picker persists relative ranges as shorthand ("15m", "7d", "3mo",
@@ -82,7 +79,6 @@ export function formatWarehouseDateTimeMs(epochMs: number): string {
 // date-fns' `subMonths`/`startOfDay`. In the browser that is the viewer's
 // calendar (unchanged behaviour); on a Worker, local is UTC, which is the only
 // sensible reading server-side. One implementation serves both.
-// ---------------------------------------------------------------------------
 
 const RELATIVE_RANGE_PATTERN = /^(\d+)(mo|m|h|d|w)$/
 
@@ -190,14 +186,12 @@ export function resolveRelativeRangeToWarehouse(
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Time-series bucketing — single source of truth
 //
 // Both the web app and the query engine pick an auto bucket size and build
 // bucket timelines. Keeping one pure implementation here (no driver / no
 // `Date.now()`) prevents the two from drifting and producing different
 // granularities for the same window.
-// ---------------------------------------------------------------------------
 
 /**
  * Bucket-size ladder (seconds) for auto time-series granularity. The sub-5-minute

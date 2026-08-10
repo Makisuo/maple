@@ -47,9 +47,7 @@ const VALID_STATUS_CODES = ["Ok", "Error", "Unset", ""]
 
 const quoteList = (values: ReadonlyArray<string>) => values.map((value) => `'${value}'`).join(", ")
 
-// ---------------------------------------------------------------------------
 // A2 — attribute key inventory (all scopes, one scan)
-// ---------------------------------------------------------------------------
 
 export interface AuditAttributeKeyRow {
 	readonly scope: string
@@ -90,9 +88,7 @@ export function auditAttributeKeyInventoryQuery(opts: { limit?: number } = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // A3 — per-service span shape
-// ---------------------------------------------------------------------------
 
 export interface AuditSpanShapeRow {
 	readonly serviceName: string
@@ -160,9 +156,7 @@ export function auditSpanShapeByServiceQuery(opts: { limit?: number } = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // A4 — per-service sampling weight and commit tagging
-// ---------------------------------------------------------------------------
 
 export interface AuditSamplingRow {
 	readonly serviceName: string
@@ -205,9 +199,7 @@ export function auditSamplingByServiceQuery(opts: { limit?: number } = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // A5 — per-service log severity distribution
-// ---------------------------------------------------------------------------
 
 export interface AuditLogSeverityRow {
 	readonly serviceName: string
@@ -243,9 +235,7 @@ export function auditLogSeverityByServiceQuery(opts: { limit?: number } = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // A6 — metric label cardinality
-// ---------------------------------------------------------------------------
 
 export interface AuditMetricLabelRow {
 	readonly attributeKey: string
@@ -286,9 +276,7 @@ export function auditMetricLabelCardinalityQuery(opts: { limit?: number } = {}) 
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // A7 — peer / dependency identifier values
-// ---------------------------------------------------------------------------
 
 /** Keys whose *values* name a dependency, where inconsistent spelling fragments a service-map node. */
 export const AUDIT_PEER_KEYS = [
@@ -337,9 +325,7 @@ export function auditPeerValueInventoryQuery(opts: { limit?: number } = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // A8 — database edge identity
-// ---------------------------------------------------------------------------
 
 export interface AuditDbEdgeRow {
 	readonly serviceName: string
@@ -379,9 +365,7 @@ export function auditDbEdgeIdentityQuery(opts: { limit?: number } = {}) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // B1 — log ↔ trace correlation (bounded raw read)
-// ---------------------------------------------------------------------------
 
 /** Upper bound on the raw `logs` window, applied in the builder — callers cannot widen it. */
 export const AUDIT_LOG_CORRELATION_MAX_HOURS = 6
@@ -434,7 +418,6 @@ export function auditLogCorrelationQuery() {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // B2 / B3 — trace completeness
 //
 // Both mirror the service-map edge join, which is the same join over the same two tables and the
@@ -445,7 +428,6 @@ export function auditLogCorrelationQuery() {
 // What they can and cannot say: the warehouse only ever sees what arrived, so neither query can
 // detect ingest loss. They are *internal consistency* checks — spans that reference a parent nobody
 // sent, and traces observed with no root. Word every finding that way.
-// ---------------------------------------------------------------------------
 
 /**
  * Deterministic 1-in-N trace sampling, applied to **both** sides of a join so every span of a kept

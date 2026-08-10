@@ -9,7 +9,6 @@ import { manifestDurationMs, type ReplayChunkMeta } from "./replay-range"
 import { useReplayChunkLoader } from "./use-replay-chunk-loader"
 import { buildTimeline, type InactiveInterval, type Timeline } from "./replay-timeline"
 
-// ---------------------------------------------------------------------------
 // Replay player context
 //
 // The rrweb engine + transport state used to live inside the player surface.
@@ -17,7 +16,6 @@ import { buildTimeline, type InactiveInterval, type Timeline } from "./replay-ti
 // separate parts of the page, so both need to read `currentMs` and drive
 // `seek`. This provider owns the engine and exposes that state via context;
 // `<ReplaySurface>` and `<ReplayEditorTimeline>` are both consumers.
-// ---------------------------------------------------------------------------
 
 const EMPTY_CHUNKS: ReadonlyArray<ReplayChunkMeta> = []
 

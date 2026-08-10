@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // PlanetScale service-map stats
 //
 // Per-database (and per-branch) rollups over the metrics the scraper collects
@@ -17,7 +16,6 @@
 // Like the Cloudflare overlay, this data never creates map nodes of its own —
 // the frontend matches rows to existing trace-derived DB nodes by database
 // name and attaches the numbers.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"

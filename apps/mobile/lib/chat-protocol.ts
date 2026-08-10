@@ -14,9 +14,7 @@ export const makeChatSessionId = (orgId: string, tabId: string): string => `${or
 export const chatApiBaseUrl: string =
 	process.env.EXPO_PUBLIC_API_BASE_URL ?? (__DEV__ ? "http://127.0.0.1:3472" : "https://api.maple.dev")
 
-// ---------------------------------------------------------------------------
 // Event stream
-// ---------------------------------------------------------------------------
 
 export interface ChatUserMessageEvent {
 	seq: number
@@ -81,11 +79,9 @@ export interface ChatSendResponse {
 	messageId: string
 }
 
-// ---------------------------------------------------------------------------
 // Parsing — hand-rolled narrowing instead of a cast, since this is untrusted
 // bytes off the wire. Any field that fails to match its expected shape fails
 // the whole frame rather than smuggling a bad value past the type system.
-// ---------------------------------------------------------------------------
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null

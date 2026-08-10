@@ -915,9 +915,7 @@ export const traceListMvMv = defineMaterializedView("trace_list_mv_mv", {
 	],
 })
 
-// ---------------------------------------------------------------------------
 // Attribute key aggregation MVs
-// ---------------------------------------------------------------------------
 
 export const traceSpanAttributeKeysMv = defineMaterializedView("trace_span_attribute_keys_mv", {
 	description: "Aggregates span attribute keys from traces hourly.",
@@ -1003,11 +1001,9 @@ export const metricAttributeKeysMv = defineMaterializedView("metric_attribute_ke
 	],
 })
 
-// ---------------------------------------------------------------------------
 // Metric catalog — one MV per raw metric table, all feeding `metric_catalog`.
 // Each hourly-rolls up distinct metrics so the Metrics page discovery queries
 // read the tiny catalog instead of scanning raw datapoints.
-// ---------------------------------------------------------------------------
 
 export const metricCatalogSumMv = defineMaterializedView("metric_catalog_sum_mv", {
 	description: "Hourly rollup of distinct sum metrics into metric_catalog.",

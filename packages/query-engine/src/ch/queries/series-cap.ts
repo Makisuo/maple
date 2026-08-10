@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Top-N series cap for group-by timeseries queries
 //
 // High-cardinality group-by time charts can return hundreds of thousands of
@@ -12,7 +11,6 @@
 // The cap is opt-in: when `seriesLimit` is unset (or the query has no real
 // group-by), the inner query is returned unchanged so existing SQL snapshots
 // stay byte-identical.
-// ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 // From the root, not `/expr`: takes a `CHQuery`, so the subquery stays typed.

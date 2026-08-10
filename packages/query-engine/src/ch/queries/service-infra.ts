@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Service ↔ Infrastructure join
 //
 // Joins OTel `ServiceName` to k8s workload identity (`k8s.deployment.name` /
@@ -24,7 +23,6 @@
 //
 // Built with the ClickHouse query-builder DSL (a `fromQuery(...).leftJoinQuery`
 // over two grouped subqueries), then compiled to SQL — no hand-written SQL.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import {

@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // SQL Catalog
 //
 // Every SQL string the product can emit, enumerated from the real dispatch and
@@ -24,7 +23,6 @@
 // between materialized views and raw scans is several unrelated SQL shapes
 // wearing one name, and only the shape the fixture happens to select is ever
 // executed. `assertRouteCoverage` below fails when a route is never exercised.
-// ---------------------------------------------------------------------------
 
 import { Effect } from "effect"
 import type { CompiledQuery } from "@maple-dev/clickhouse-builder"
@@ -45,9 +43,7 @@ import { compilePipeQuery } from "./ch/pipe-dispatch"
 import { fingerprintSql } from "./execution/fingerprint"
 import { makeQueryEngineExecute, type QueryEngineWarehouse, type QueryTenant } from "./runtime"
 
-// ---------------------------------------------------------------------------
 // Fixture inputs
-// ---------------------------------------------------------------------------
 
 const ORG_ID = "org_sql_catalog"
 /** A window that spans whole hours plus partial edges on both sides, so the
@@ -308,9 +304,7 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	},
 ]
 
-// ---------------------------------------------------------------------------
 // Collection
-// ---------------------------------------------------------------------------
 
 export interface CatalogEntry {
 	/** Stable identifier, e.g. `pipe:list_traces:filtered:bloom`. */
@@ -373,7 +367,6 @@ export function collectPipeCatalog(): ReadonlyArray<CatalogEntry> {
 	return entries
 }
 
-// ---------------------------------------------------------------------------
 // QuerySpec collection (dashboards, overview charts, the metrics explorer)
 //
 // The pipe registry is only half the product. Dashboards and the overview go
@@ -382,7 +375,6 @@ export function collectPipeCatalog(): ReadonlyArray<CatalogEntry> {
 // query opts, so `canUseAnnualServiceOverview` is unreachable from a pipe. The
 // annual route — the one that shipped `NO_COMMON_TYPE` — exists ONLY on this
 // path. A sweep built on pipes alone would have missed the outage entirely.
-// ---------------------------------------------------------------------------
 
 export interface QuerySpecFixture {
 	readonly label: string
@@ -801,7 +793,6 @@ export function collectQuerySpecCatalog(): ReadonlyArray<CatalogEntry> {
 	return entries
 }
 
-// ---------------------------------------------------------------------------
 // Builder collection (direct `warehouse.compiledQuery` call sites)
 //
 // The pipe registry + QuerySpec lowering cover only ~36 of 161 exported query
@@ -809,7 +800,6 @@ export function collectQuerySpecCatalog(): ReadonlyArray<CatalogEntry> {
 // met the analyzer. `builderFixtures` (ch/builder-fixtures.ts) enumerates them
 // with production-shaped params; the e2e sweep picks these entries up with
 // zero test changes because it iterates the catalog.
-// ---------------------------------------------------------------------------
 
 export function collectBuilderCatalog(): ReadonlyArray<CatalogEntry> {
 	const entries: Array<CatalogEntry> = []
@@ -853,9 +843,7 @@ export function dedupeByFingerprint(entries: ReadonlyArray<CatalogEntry>): Reado
 	return [...seen.values()]
 }
 
-// ---------------------------------------------------------------------------
 // Anti-rot assertions
-// ---------------------------------------------------------------------------
 
 /** Pipe names in `warehouseQueries` that no fixture covers. */
 export function uncoveredPipes(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<WarehouseQueryName> {

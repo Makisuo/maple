@@ -3,11 +3,9 @@ import { Context, Effect, Layer } from "effect"
 import { GithubProvider } from "./vendor/github/GithubProvider"
 import type { VcsProviderClient } from "./VcsProviderClient"
 
-// ---------------------------------------------------------------------------
 // Resolves a provider id → its `VcsProviderClient` implementation. This is the
 // ONLY module that names a concrete provider. Adding a provider = implement the
 // port + add one entry here; the generic orchestrator/webhook never change.
-// ---------------------------------------------------------------------------
 
 export interface VcsProviderRegistryShape {
 	/** The ids of every registered provider (e.g. for static webhook routes). */

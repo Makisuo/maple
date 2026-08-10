@@ -422,12 +422,10 @@ const getSpanHierarchyEffect = Effect.fn("QueryEngine.getSpanHierarchy")(functio
 	}
 })
 
-// ---------------------------------------------------------------------------
 // Span detail — full attribute maps for a single span, loaded on demand.
 // The hierarchy query intentionally returns only trimmed maps (the keys the
 // tree views render); the detail panel fetches the full maps lazily for the
 // one selected span.
-// ---------------------------------------------------------------------------
 
 const GetSpanDetailInputSchema = Schema.Struct({
 	traceId: TraceId,

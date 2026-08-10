@@ -4,9 +4,7 @@ import { IsoDateTimeString, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
 import { IssueSeverity } from "./errors"
 
-// ---------------------------------------------------------------------------
 // Literals
-// ---------------------------------------------------------------------------
 
 export const AiTriageIncidentKind = Schema.Literals(["error", "anomaly", "alert"]).annotate({
 	identifier: "@maple/AiTriageIncidentKind",
@@ -14,9 +12,7 @@ export const AiTriageIncidentKind = Schema.Literals(["error", "anomaly", "alert"
 })
 export type AiTriageIncidentKind = Schema.Schema.Type<typeof AiTriageIncidentKind>
 
-// ---------------------------------------------------------------------------
 // Structured triage result (what the agent must submit)
-// ---------------------------------------------------------------------------
 
 export class AiTriageEvidence extends Schema.Class<AiTriageEvidence>("AiTriageEvidence")({
 	traceIds: Schema.Array(Schema.String),
@@ -71,9 +67,7 @@ export class AiTriageResult extends Schema.Class<AiTriageResult>("AiTriageResult
 	unchecked: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Settings
-// ---------------------------------------------------------------------------
 
 export class AiTriageSettingsDocument extends Schema.Class<AiTriageSettingsDocument>(
 	"AiTriageSettingsDocument",
@@ -98,9 +92,7 @@ export class AiTriageSettingsUpdateRequest extends Schema.Class<AiTriageSettings
 	),
 }) {}
 
-// ---------------------------------------------------------------------------
 // Errors
-// ---------------------------------------------------------------------------
 
 export class AiTriagePersistenceError extends Schema.TaggedError<AiTriagePersistenceError>()(
 	"@maple/http/ai-triage/AiTriagePersistenceError",
@@ -127,9 +119,7 @@ export class AiTriageValidationError extends Schema.TaggedError<AiTriageValidati
 	{ httpApiStatus: 400 },
 ) {}
 
-// ---------------------------------------------------------------------------
 // API group
-// ---------------------------------------------------------------------------
 
 export class AiTriageApiGroup extends HttpApiGroup.make("aiTriage")
 	.add(

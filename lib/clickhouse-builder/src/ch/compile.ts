@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Query Compilation
 //
 // Compiles a CHQuery + params into a SQL string by:
@@ -6,7 +5,6 @@
 // 2. Evaluating the selectFn to get aliased SqlFragments
 // 3. Evaluating the whereFn (with params resolved) to get Conditions
 // 4. Assembling into SqlQuery and calling the existing compileQuery()
-// ---------------------------------------------------------------------------
 
 import type { ColumnDefs } from "./types"
 import type { CHQuery } from "./query"
@@ -17,10 +15,8 @@ import { raw, ident, escapeClickHouseString, compile as compileSqlFragment } fro
 import { compileQuery, type SqlQuery } from "../sql/sql-query"
 import { Effect, Option, Schema } from "effect"
 
-// ---------------------------------------------------------------------------
 // QueryBuilderError — tagged error for invariant violations in the DSL.
 // Catchable via `Effect.catchTag("@maple-dev/clickhouse-builder/QueryBuilderError")` at the service layer.
-// ---------------------------------------------------------------------------
 
 export class QueryBuilderError extends Schema.TaggedError<QueryBuilderError>()(
 	"@maple-dev/clickhouse-builder/QueryBuilderError",
@@ -61,10 +57,8 @@ const orderByClause = (specs: ReadonlyArray<[string, "asc" | "desc"]>): Array<st
 		return `${column} ${direction.toUpperCase()}`
 	})
 
-// ---------------------------------------------------------------------------
 // CompiledQuery — bundles the SQL string with its output type so consumers
 // never need to cast manually.
-// ---------------------------------------------------------------------------
 
 /**
  * Whether a compiled query is confined to one tenant.
@@ -388,9 +382,7 @@ export function compileCH<
 	}
 }
 
-// ---------------------------------------------------------------------------
 // UNION ALL compilation
-// ---------------------------------------------------------------------------
 
 export function compileUnion<Output extends Record<string, any>, Params extends Record<string, any>>(
 	union: CHUnionQuery<Output>,

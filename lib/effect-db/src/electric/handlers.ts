@@ -10,10 +10,7 @@ import { Cause, Effect, Exit, type ManagedRuntime } from "effect"
 import { DeleteError, InsertError, MissingTxIdError, UpdateError } from "./errors"
 import type { EffectDeleteHandler, EffectInsertHandler, EffectUpdateHandler } from "./types"
 
-/**
- * Converts an Effect-based insert handler to a Promise-based handler
- * that can be used with the standard electric collection options
- */
+/** Adapts an Effect insert handler to Electric's Promise API. */
 export function convertInsertHandler<
 	T extends Row<unknown>,
 	TKey extends string | number,
@@ -49,7 +46,6 @@ export function convertInsertHandler<
 					effect as Effect.Effect<{ txid: Txid | Array<Txid> }, InsertError, never>,
 				)
 
-		// Handle the Exit type
 		if (Exit.isFailure(exit)) {
 			const cause = exit.cause
 			const failReason = cause.reasons.find(Cause.isFailReason)
@@ -76,10 +72,7 @@ export function convertInsertHandler<
 	}
 }
 
-/**
- * Converts an Effect-based update handler to a Promise-based handler
- * that can be used with the standard electric collection options
- */
+/** Adapts an Effect update handler to Electric's Promise API. */
 export function convertUpdateHandler<
 	T extends Row<unknown>,
 	TKey extends string | number,
@@ -115,7 +108,6 @@ export function convertUpdateHandler<
 					effect as Effect.Effect<{ txid: Txid | Array<Txid> }, UpdateError, never>,
 				)
 
-		// Handle the Exit type
 		if (Exit.isFailure(exit)) {
 			const cause = exit.cause
 			const failReason = cause.reasons.find(Cause.isFailReason)
@@ -142,10 +134,7 @@ export function convertUpdateHandler<
 	}
 }
 
-/**
- * Converts an Effect-based delete handler to a Promise-based handler
- * that can be used with the standard electric collection options
- */
+/** Adapts an Effect delete handler to Electric's Promise API. */
 export function convertDeleteHandler<
 	T extends Row<unknown>,
 	TKey extends string | number,
@@ -181,7 +170,6 @@ export function convertDeleteHandler<
 					effect as Effect.Effect<{ txid: Txid | Array<Txid> }, DeleteError, never>,
 				)
 
-		// Handle the Exit type
 		if (Exit.isFailure(exit)) {
 			const cause = exit.cause
 			const failReason = cause.reasons.find(Cause.isFailReason)

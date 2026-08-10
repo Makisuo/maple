@@ -20,9 +20,7 @@ const baseParams = {
 	bucketSeconds: 3600,
 }
 
-// ---------------------------------------------------------------------------
 // errorsByTypeQuery
-// ---------------------------------------------------------------------------
 
 describe("errorsByTypeQuery", () => {
 	it("compiles broad errors by type from the time-ordered error events table", () => {
@@ -76,9 +74,7 @@ describe("errorsByTypeQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // errorsTimeseriesQuery
-// ---------------------------------------------------------------------------
 
 describe("errorsTimeseriesQuery", () => {
 	it("compiles error timeseries with bucket", () => {
@@ -101,9 +97,7 @@ describe("errorsTimeseriesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // errorsSummaryQuery
-// ---------------------------------------------------------------------------
 
 describe("errorsSummaryQuery", () => {
 	it("compiles CROSS JOIN between filtered totals", () => {
@@ -137,9 +131,7 @@ describe("errorsSummaryQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // errorDetailTracesQuery
-// ---------------------------------------------------------------------------
 
 describe("errorDetailTracesQuery", () => {
 	it("compiles trace-detail lookup with a small error TraceId subquery", () => {
@@ -182,9 +174,7 @@ describe("errorDetailTracesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // errorsFacetsQuery
-// ---------------------------------------------------------------------------
 
 describe("errorsFacetsQuery", () => {
 	it("compiles UNION ALL with 3 facet dimensions", () => {
@@ -215,9 +205,7 @@ describe("errorsFacetsQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // errorIssuesQuery
-// ---------------------------------------------------------------------------
 
 describe("errorIssuesQuery", () => {
 	it("uses the time-ordered table for broad issue scans", () => {
@@ -262,9 +250,7 @@ describe("errorTickBootstrapIssuesQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // errorFingerprintsQuery
-// ---------------------------------------------------------------------------
 
 describe("errorFingerprintsQuery", () => {
 	it("compiles a distinct-fingerprint scan scoped by service and environment", () => {
@@ -281,9 +267,7 @@ describe("errorFingerprintsQuery", () => {
 	})
 })
 
-// ---------------------------------------------------------------------------
 // tracesFacetsQuery
-// ---------------------------------------------------------------------------
 
 describe("tracesFacetsQuery", () => {
 	it("compiles UNION ALL with 7 facet dimensions", () => {

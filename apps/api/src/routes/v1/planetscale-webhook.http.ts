@@ -13,7 +13,6 @@ import {
 } from "@/services/integrations/planetscale/webhook-events"
 import { PlanetScaleWebhookQueue } from "@/services/integrations/planetscale/PlanetScaleWebhookQueue"
 
-// ---------------------------------------------------------------------------
 // Public PlanetScale webhook receiver. NOT behind auth — authenticity comes
 // from the per-connection HMAC secret (`X-PlanetScale-Signature`, SHA-256 hex
 // of the raw body), following the VCS webhook pattern. The connection id in
@@ -22,7 +21,6 @@ import { PlanetScaleWebhookQueue } from "@/services/integrations/planetscale/Pla
 // Health events (OOM, storage thresholds, anomalies) become kind="integration"
 // triage issues through a durable queue; lifecycle events are acknowledged and
 // logged. Queue failures return 503 so PlanetScale retries the delivery.
-// ---------------------------------------------------------------------------
 
 const ROUTE = "/api/integrations/planetscale/webhook/:connectionId"
 

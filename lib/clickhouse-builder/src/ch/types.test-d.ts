@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
 // Type-level tests: Phantom type inference
-// ---------------------------------------------------------------------------
 
 import { expectTypeOf } from "expect-type"
 import type {
@@ -22,9 +20,7 @@ import type {
 	NullableColumnDefs,
 } from "./types"
 
-// ---------------------------------------------------------------------------
 // Primitive type inference
-// ---------------------------------------------------------------------------
 
 expectTypeOf<InferTS<CHString>>().toEqualTypeOf<string>()
 expectTypeOf<InferTS<CHUInt8>>().toEqualTypeOf<number>()
@@ -37,9 +33,7 @@ expectTypeOf<InferTS<CHDateTime>>().toEqualTypeOf<string>()
 expectTypeOf<InferTS<CHDateTime64>>().toEqualTypeOf<string>()
 expectTypeOf<InferTS<CHBool>>().toEqualTypeOf<boolean>()
 
-// ---------------------------------------------------------------------------
 // Compound type inference
-// ---------------------------------------------------------------------------
 
 expectTypeOf<InferTS<CHMap<CHString, CHString>>>().toEqualTypeOf<Record<string, string>>()
 expectTypeOf<InferTS<CHMap<CHString, CHFloat64>>>().toEqualTypeOf<Record<string, number>>()
@@ -54,9 +48,7 @@ expectTypeOf<InferTS<CHArray<CHMap<CHString, CHString>>>>().toEqualTypeOf<
 >()
 expectTypeOf<InferTS<CHNullable<CHArray<CHString>>>>().toEqualTypeOf<ReadonlyArray<string> | null>()
 
-// ---------------------------------------------------------------------------
 // OutputToColumnDefs — converts output record to synthetic column defs
-// ---------------------------------------------------------------------------
 
 type TestOutput = { name: string; count: number; active: boolean }
 type Converted = OutputToColumnDefs<TestOutput>
@@ -65,9 +57,7 @@ expectTypeOf<InferTS<Converted["name"]>>().toEqualTypeOf<string>()
 expectTypeOf<InferTS<Converted["count"]>>().toEqualTypeOf<number>()
 expectTypeOf<InferTS<Converted["active"]>>().toEqualTypeOf<boolean>()
 
-// ---------------------------------------------------------------------------
 // NullableColumnDefs — wraps each column type with | null
-// ---------------------------------------------------------------------------
 
 type TestCols = { Name: CHString; Score: CHFloat64; Active: CHBool }
 type Nulled = NullableColumnDefs<TestCols>
@@ -76,9 +66,7 @@ expectTypeOf<InferTS<Nulled["Name"]>>().toEqualTypeOf<string | null>()
 expectTypeOf<InferTS<Nulled["Score"]>>().toEqualTypeOf<number | null>()
 expectTypeOf<InferTS<Nulled["Active"]>>().toEqualTypeOf<boolean | null>()
 
-// ---------------------------------------------------------------------------
 // Negative cases — wrong type inferences should fail
-// ---------------------------------------------------------------------------
 
 // @ts-expect-error — CHString infers string, not number
 expectTypeOf<InferTS<CHString>>().toEqualTypeOf<number>()

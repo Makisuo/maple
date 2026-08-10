@@ -1,8 +1,6 @@
-// ---------------------------------------------------------------------------
 // Typed Services Queries
 //
 // DSL-based query definitions for service overview, releases, apdex, and usage.
-// ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
@@ -21,9 +19,7 @@ import { CHNumber } from "../schema"
 import { apdexExprs, serviceOverviewWhereConditions, hourFloor, type FacetOutput } from "./query-helpers"
 import { edgeCondition, interiorConditions } from "./rollup-splice"
 
-// ---------------------------------------------------------------------------
 // Service overview
-// ---------------------------------------------------------------------------
 
 const SERVICE_RAW_DURATION_STATE = "quantilesTDigestState(0.5, 0.95, 0.99)(Duration)"
 const SERVICE_ROLLUP_DURATION_STATE = "quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles)"
@@ -227,9 +223,7 @@ export function serviceOverviewQuery(opts: ServiceOverviewOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Service health snapshot
-// ---------------------------------------------------------------------------
 
 export interface ServiceHealthSnapshotOpts {
 	environments?: readonly string[]
@@ -292,9 +286,7 @@ export const serviceHealthSnapshotRowSchema: CompiledQueryRowSchema<ServiceHealt
 		p95LatencyMs: CHNumber,
 	})
 
-// ---------------------------------------------------------------------------
 // Service health baseline
-// ---------------------------------------------------------------------------
 
 export interface ServiceHealthBaselineOpts {
 	environments?: readonly string[]
@@ -333,9 +325,7 @@ export function serviceHealthBaselineQuery(opts: ServiceHealthBaselineOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Service releases timeline
-// ---------------------------------------------------------------------------
 
 export interface ServiceReleasesTimelineOpts {
 	serviceName: string
@@ -371,7 +361,6 @@ export function serviceReleasesTimelineQuery(opts: ServiceReleasesTimelineOpts) 
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Service environments
 //
 // Distinct non-empty deployment environments a single service reports in the
@@ -379,7 +368,6 @@ export function serviceReleasesTimelineQuery(opts: ServiceReleasesTimelineOpts) 
 // all-services overview scan that fetched every service's rows just to extract
 // one service's environments. Service-scoped + time-windowed so ClickHouse
 // prunes both the service and the date partitions.
-// ---------------------------------------------------------------------------
 
 export interface ServiceEnvironmentsOpts {
 	serviceName: string
@@ -401,9 +389,7 @@ export function serviceEnvironmentsQuery(opts: ServiceEnvironmentsOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Service Apdex time series
-// ---------------------------------------------------------------------------
 
 export interface ServiceApdexTimeseriesOpts {
 	serviceName: string
@@ -474,9 +460,7 @@ export function serviceApdexTimeseriesQuery(
 		.format("JSON") as unknown as CHQuery<ColumnDefs, ServiceApdexTimeseriesOutput, {}>
 }
 
-// ---------------------------------------------------------------------------
 // Service usage
-// ---------------------------------------------------------------------------
 
 export interface ServiceUsageOpts {
 	serviceName?: string
@@ -629,9 +613,7 @@ export function serviceUsageWithPreviousQuery(opts: ServiceUsageOpts) {
 		.format("JSON")
 }
 
-// ---------------------------------------------------------------------------
 // Services facets (UNION ALL — environment + commit_sha facets)
-// ---------------------------------------------------------------------------
 
 export type ServicesFacetsOutput = FacetOutput
 

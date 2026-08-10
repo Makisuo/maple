@@ -1,4 +1,3 @@
-// ---------------------------------------------------------------------------
 // Fixtures for query builders that never pass through the pipe registry or the
 // QuerySpec lowering — the ~125 exports reached only via direct
 // `warehouse.compiledQuery` call sites in apps/api. Without a fixture here a
@@ -13,7 +12,6 @@
 // Batch ① (2026-08): session-replays, session-events, and the errors builders
 // only reachable from ErrorsService/telemetry. Remaining modules live on the
 // exemption list and shrink batch by batch.
-// ---------------------------------------------------------------------------
 
 import type { CompiledQuery } from "@maple-dev/clickhouse-builder"
 import * as CH from "./index"
@@ -356,12 +354,10 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			}),
 	},
 
-	// -------------------------------------------------------------------------
 	// Batch ④ — the modules the query-engine refactor touches. These exist so a
 	// refactor that claims "no SQL changed" is actually checkable: without a
 	// fixture, a builder contributes nothing to `__sql_baseline__/catalog.sql`
 	// and its SQL can drift silently.
-	// -------------------------------------------------------------------------
 
 	// ----- service-operations: the three-tier raw/minutely/hourly splice -----
 	{
