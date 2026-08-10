@@ -192,6 +192,124 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			}),
 	},
 
+	// ----- web-analytics (routes/v1/query-engine.http.ts, via registry/queries.ts) -----
+	//
+	// Two fixtures per page-view builder: unfiltered, and with a
+	// session_replays-only filter set. The second is the one that matters — it
+	// forces the `SessionId IN (SELECT …)` semi-join branch, which is a whole
+	// second SQL shape that no unfiltered fixture reaches.
+	{
+		module: "web-analytics",
+		name: "webAnalyticsSummaryQuery",
+		label: "default",
+		compile: () => CH.compile(CH.webAnalyticsSummaryQuery({}), window),
+	},
+	{
+		module: "web-analytics",
+		name: "webAnalyticsSummaryQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compile(
+				CH.webAnalyticsSummaryQuery({
+					host: "maple.dev",
+					pagePath: "/pricing",
+					referrerHost: "t.co",
+					country: "DE",
+					deviceType: "desktop",
+					browserName: "Chrome",
+					osName: "macOS",
+					language: "en-US",
+					utmSource: "twitter",
+					utmMedium: "social",
+					utmCampaign: "launch",
+					visitorType: "new",
+				}),
+				window,
+			),
+	},
+	{
+		module: "web-analytics",
+		name: "webAnalyticsTimeseriesQuery",
+		label: "default",
+		compile: () => CH.compile(CH.webAnalyticsTimeseriesQuery({ bucketSeconds: 3600 }), window),
+	},
+	{
+		module: "web-analytics",
+		name: "webAnalyticsPageviewsTimeseriesQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(CH.webAnalyticsPageviewsTimeseriesQuery({ bucketSeconds: 3600 }), window),
+	},
+	{
+		// Forces the semi-join: `referrerHost` is a session_replays-only dimension,
+		// so session_events has to narrow through a subquery to honour it.
+		module: "web-analytics",
+		name: "webAnalyticsPageviewsTimeseriesQuery",
+		label: "semi-joined",
+		compile: () =>
+			CH.compile(
+				CH.webAnalyticsPageviewsTimeseriesQuery({
+					bucketSeconds: 3600,
+					referrerHost: "t.co",
+					visitorType: "returning",
+				}),
+				window,
+			),
+	},
+	{
+		module: "web-analytics",
+		name: "webAnalyticsPagesQuery",
+		label: "default",
+		compile: () => CH.compile(CH.webAnalyticsPagesQuery({ limit: 100 }), window),
+	},
+	{
+		// host/pagePath filter directly off Url — deliberately NOT through the
+		// semi-join, so the 82% of sessions with no analytics block still count.
+		module: "web-analytics",
+		name: "webAnalyticsPagesQuery",
+		label: "url-filtered",
+		compile: () =>
+			CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, host: "maple.dev" }), window),
+	},
+	{
+		module: "web-analytics",
+		name: "webAnalyticsPagesQuery",
+		label: "semi-joined",
+		compile: () =>
+			CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, country: "DE" }), window),
+	},
+	{
+		module: "web-analytics",
+		name: "webAnalyticsBreakdownsQuery",
+		label: "default",
+		compile: () => CH.compileUnion(CH.webAnalyticsBreakdownsQuery({}), window),
+	},
+	{
+		// Every dimension selected at once: each branch must exclude its own filter,
+		// so this is the fixture that would catch a branch that forgot to.
+		module: "web-analytics",
+		name: "webAnalyticsBreakdownsQuery",
+		label: "all-dimensions-filtered",
+		compile: () =>
+			CH.compileUnion(
+				CH.webAnalyticsBreakdownsQuery({
+					host: "maple.dev",
+					pagePath: "/pricing",
+					referrerHost: "t.co",
+					country: "DE",
+					deviceType: "desktop",
+					browserName: "Chrome",
+					osName: "macOS",
+					language: "en-US",
+					utmSource: "twitter",
+					utmMedium: "social",
+					utmCampaign: "launch",
+					visitorType: "new",
+				}),
+				window,
+			),
+	},
+
 	// ----- errors builders reached only via direct calls (ErrorsService, v2 telemetry, observability) -----
 	{
 		// telemetry.http.ts v2GetSpan / observability/span-detail.ts

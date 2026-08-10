@@ -16,6 +16,21 @@ export const positionCaseInsensitive = defineFn<[Expr<string>, Expr<string>], nu
 export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left")
 
 // ---------------------------------------------------------------------------
+// URL functions
+//
+// ClickHouse parses these without a full URL library: `domain` returns the host
+// without scheme, port, or userinfo (and `''` for an unparseable input rather
+// than throwing), and `path` returns the pathname only — query string and
+// fragment are already excluded, so a path grouped with `path_` carries no
+// query-parameter PII. `cutQueryString` is the variant that keeps scheme and
+// host, for when the full URL minus its query is wanted.
+// ---------------------------------------------------------------------------
+
+export const domain_ = defineFn<[Expr<string>], string>("domain")
+export const path_ = defineFn<[Expr<string>], string>("path")
+export const cutQueryString = defineFn<[Expr<string>], string>("cutQueryString")
+
+// ---------------------------------------------------------------------------
 // Mixed Expr + literal args (compileFnCall wrappers)
 // ---------------------------------------------------------------------------
 

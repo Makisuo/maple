@@ -154,6 +154,26 @@ export {
 	type SessionActivityOutput,
 } from "./queries/session-events"
 
+// Queries — Web Analytics (product analytics over the browser SDK's session data)
+export {
+	webAnalyticsSummaryQuery,
+	webAnalyticsTimeseriesQuery,
+	webAnalyticsPageviewsTimeseriesQuery,
+	webAnalyticsPagesQuery,
+	webAnalyticsBreakdownsQuery,
+	type WebAnalyticsFilters,
+	type WebAnalyticsFacetKey,
+	type WebAnalyticsSummaryOutput,
+	type WebAnalyticsTimeseriesOpts,
+	type WebAnalyticsTimeseriesOutput,
+	type WebAnalyticsPageviewsTimeseriesOpts,
+	type WebAnalyticsPageviewsTimeseriesOutput,
+	type WebAnalyticsPagesOpts,
+	type WebAnalyticsPagesOutput,
+	type WebAnalyticsBreakdownsOpts,
+	type WebAnalyticsBreakdownsOutput,
+} from "./queries/web-analytics"
+
 // Queries — Services
 export {
 	serviceOverviewQuery,

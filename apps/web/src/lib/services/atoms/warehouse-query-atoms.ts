@@ -111,6 +111,13 @@ import {
 	getSessionTraceSummaries,
 	listReplays,
 } from "@/api/warehouse/replays"
+import {
+	getWebAnalyticsBreakdowns,
+	getWebAnalyticsPages,
+	getWebAnalyticsPageviews,
+	getWebAnalyticsSummary,
+	getWebAnalyticsTimeseries,
+} from "@/api/warehouse/web-analytics"
 
 /**
  * The error union every warehouse server function fails with: the structured
@@ -229,6 +236,29 @@ export const listReplaysResultAtom = makeQueryAtomFamily(listReplays, {
 })
 
 export const replaysFacetsResultAtom = makeQueryAtomFamily(getReplaysFacets, {
+	staleTime: 30_000,
+})
+
+// Web analytics — one page, five atoms, all 30s. Traffic numbers are watched
+// during a launch, so a longer TTL reads as a stalled page; a shorter one just
+// re-runs the same 30-day-TTL scans.
+export const webAnalyticsSummaryResultAtom = makeQueryAtomFamily(getWebAnalyticsSummary, {
+	staleTime: 30_000,
+})
+
+export const webAnalyticsTimeseriesResultAtom = makeQueryAtomFamily(getWebAnalyticsTimeseries, {
+	staleTime: 30_000,
+})
+
+export const webAnalyticsPageviewsResultAtom = makeQueryAtomFamily(getWebAnalyticsPageviews, {
+	staleTime: 30_000,
+})
+
+export const webAnalyticsPagesResultAtom = makeQueryAtomFamily(getWebAnalyticsPages, {
+	staleTime: 30_000,
+})
+
+export const webAnalyticsBreakdownsResultAtom = makeQueryAtomFamily(getWebAnalyticsBreakdowns, {
 	staleTime: 30_000,
 })
 
