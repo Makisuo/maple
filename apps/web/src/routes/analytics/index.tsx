@@ -9,6 +9,8 @@ import { formatNumber, formatPercent } from "@maple/ui/lib/format"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { PageHero } from "@/components/infra/primitives/page-hero"
+import { NotFoundError } from "@/components/route-error"
+import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import { PlayRotateClockwiseIcon } from "@/components/icons"
 import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
 import { chartBucketSeconds } from "@/components/infra/chart-utils"
@@ -58,6 +60,20 @@ export const Route = createFileRoute("/analytics/")({
 })
 
 function WebAnalyticsPage() {
+	// Hiding the nav row is not hiding the page — the URL still resolves, and ⌘K,
+	// browser history and a shared link all reach it. So the flag is enforced here
+	// too, rendering the router's own not-found component so an unflagged org sees
+	// exactly what it would see for a route that does not exist. Client-side only,
+	// like `aiAutoTriage`: the API does not read Clerk org metadata, so this hides
+	// the surface rather than protecting the data (which is already org-scoped by
+	// CurrentTenant on every query).
+	const featureFlags = useOrganizationFeatureFlags()
+	if (!featureFlags.webAnalytics) return <NotFoundError />
+
+	return <WebAnalyticsPageContent />
+}
+
+function WebAnalyticsPageContent() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 

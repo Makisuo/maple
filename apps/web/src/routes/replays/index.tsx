@@ -22,6 +22,7 @@ import { ToolbarStat } from "@maple/ui/components/toolbar"
 import { Button } from "@maple/ui/components/ui/button"
 import { Link } from "@tanstack/react-router"
 import { ChartBarHorizontalIcon } from "@/components/icons"
+import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 
 const replaysSearchSchema = Schema.Struct({
 	service: Schema.optional(Schema.String),
@@ -124,6 +125,8 @@ function ReplaysPage() {
 	// toggling either surface keeps the other in sync.
 	const engagedOnly = search.activeMin === 30 && search.activeMax == null
 
+	const webAnalyticsEnabled = useOrganizationFeatureFlags().webAnalytics
+
 	const headerActions = (
 		<>
 			<div className="mr-2 hidden items-center gap-4 sm:flex">
@@ -134,25 +137,31 @@ function ReplaysPage() {
 			    one session at a time versus the aggregate — so each is the obvious next
 			    question from the other. The time range travels with the link; arriving
 			    at a different window than the one you were just looking at is what makes
-			    a cross-link feel like it lost your place. */}
-			<Button
-				variant="outline"
-				size="sm"
-				aria-label="View web analytics"
-				render={
-					<Link
-						to="/analytics"
-						search={{
-							startTime: search.startTime,
-							endTime: search.endTime,
-							timePreset: search.timePreset,
-						}}
-					/>
-				}
-			>
-				<ChartBarHorizontalIcon size={14} />
-				<span className="hidden sm:inline">Analytics</span>
-			</Button>
+			    a cross-link feel like it lost your place.
+			
+			    Gated on the same flag as the sidebar row and the route itself: hiding two
+			    of the three entry points leaves a button that navigates to "Page not
+			    found". */}
+			{webAnalyticsEnabled ? (
+				<Button
+					variant="outline"
+					size="sm"
+					aria-label="View web analytics"
+					render={
+						<Link
+							to="/analytics"
+							search={{
+								startTime: search.startTime,
+								endTime: search.endTime,
+								timePreset: search.timePreset,
+							}}
+						/>
+					}
+				>
+					<ChartBarHorizontalIcon size={14} />
+					<span className="hidden sm:inline">Analytics</span>
+				</Button>
+			) : null}
 			<TimeRangeHeaderControls
 				startTime={search.startTime ?? startTime}
 				endTime={search.endTime ?? endTime}

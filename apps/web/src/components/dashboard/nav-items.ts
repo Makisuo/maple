@@ -18,6 +18,7 @@ import {
 	ServerIcon,
 } from "@/components/icons"
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
+import type { OrganizationFeatureFlags } from "@/lib/organization-feature-flags"
 
 export interface NavSubItem {
 	title: string
@@ -117,8 +118,22 @@ const exploreItem: NavItem = {
  * The sidebar's information architecture, and the single source the command
  * palette flattens. Anomalies is reachable at /anomalies but stays out of both
  * until the detector has been validated against production baselines.
+ *
+ * `flags` gates staged rollouts. Omitting it hides every flagged row, which is
+ * the safe default for a caller that has no organization context — the flags are
+ * decoded from Clerk metadata and are unavailable while it loads, and a row that
+ * appears and then vanishes is worse than one that arrives a beat late.
  */
-export function navGroups(): NavGroup[] {
+export function navGroups(flags?: OrganizationFeatureFlags): NavGroup[] {
+	// Rows behind a rollout flag. Filtered out of both the sidebar and ⌘K, since
+	// `paletteNavItems` derives from this — a flagged-off page that is still
+	// findable by typing its name is not hidden.
+	const analyzeItems: NavItem[] = [exploreItem]
+	if (flags?.webAnalytics) {
+		analyzeItems.push({ title: "Web Analytics", href: "/analytics", icon: ChartBarHorizontalIcon })
+	}
+	analyzeItems.push({ title: "Dashboards", href: "/dashboards", icon: GridSquareCirclePlusIcon })
+
 	return [
 		{ id: "overview", items: [overviewItem] },
 		{
@@ -133,11 +148,7 @@ export function navGroups(): NavGroup[] {
 		{
 			id: "analyze",
 			label: "Analyze",
-			items: [
-				exploreItem,
-				{ title: "Web Analytics", href: "/analytics", icon: ChartBarHorizontalIcon },
-				{ title: "Dashboards", href: "/dashboards", icon: GridSquareCirclePlusIcon },
-			],
+			items: analyzeItems,
 		},
 		{
 			id: "triage",
@@ -179,7 +190,7 @@ export interface PaletteNavEntry {
  * are the entries that keep muscle memory working, and they were never in the
  * palette before this.
  */
-export function paletteNavItems(): PaletteNavEntry[] {
+export function paletteNavItems(flags?: OrganizationFeatureFlags): PaletteNavEntry[] {
 	const entries: PaletteNavEntry[] = []
 	const seen = new Set<string>()
 	const push = (entry: PaletteNavEntry) => {
@@ -189,7 +200,7 @@ export function paletteNavItems(): PaletteNavEntry[] {
 		entries.push(entry)
 	}
 
-	for (const group of navGroups()) {
+	for (const group of navGroups(flags)) {
 		for (const item of group.items) {
 			push({ id: `nav:${item.title}`, title: item.title, href: item.href, icon: item.icon })
 			for (const sub of item.subItems ?? []) {

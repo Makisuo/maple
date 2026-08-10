@@ -30,6 +30,7 @@ import { openGlobalChat } from "@/components/chat/global-chat-sheet"
 import { paletteNavItems } from "@/components/dashboard/nav-items"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
+import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import { useAtomValue } from "@/lib/effect-atom"
 import { Result } from "@/lib/effect-atom"
 import { getTracesFacetValuesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -132,12 +133,16 @@ function PaletteContent({
 		}
 	}
 
+	// Flagged-off pages must not be findable by name either, so the palette reads
+	// the same flags the sidebar does and passes them to the same builder.
+	const featureFlags = useOrganizationFeatureFlags()
+
 	const entries = useMemo<PaletteEntry[]>(() => {
 		// Sections *and* their children — Traces, Logs, Metrics, Replays, Hosts,
 		// the K8s lists and the integration pages are all reachable by name here,
 		// which is what lets the sidebar fold them into two sections.
 		const navigation: PaletteEntry[] = [
-			...paletteNavItems().map((item) => ({
+			...paletteNavItems(featureFlags).map((item) => ({
 				id: item.id,
 				title: item.title,
 				group: "Navigation" as const,
@@ -222,7 +227,7 @@ function PaletteContent({
 		]
 
 		return [...navigation, ...serviceEntries, ...dashboardEntries, ...actions]
-	}, [dashboards, favorites, serviceNames, theme, setTheme, onShowShortcuts])
+	}, [dashboards, favorites, serviceNames, theme, setTheme, onShowShortcuts, featureFlags])
 
 	// Browse mode shows only a taste of the services list — the full set stays
 	// searchable, but dozens of service rows shouldn't bury Dashboards/Actions.

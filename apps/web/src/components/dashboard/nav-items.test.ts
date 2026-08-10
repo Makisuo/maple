@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { isNavItemActive, isPathActive, navGroups, paletteNavItems, type NavItem } from "./nav-items"
+import type { OrganizationFeatureFlags } from "@/lib/organization-feature-flags"
+
+/** Flags with every rollout on, for the tests that assert the flagged rows exist. */
+const ALL_FLAGS: OrganizationFeatureFlags = { aiAutoTriage: true, webAnalytics: true }
 
 function findItem(title: string): NavItem {
-	const item = navGroups()
+	const item = navGroups(ALL_FLAGS)
 		.flatMap((group) => group.items)
 		.find((candidate) => candidate.title === title)
 	if (!item) throw new Error(`no nav item titled ${title}`)
@@ -50,8 +54,23 @@ describe("isNavItemActive", () => {
 })
 
 describe("navGroups", () => {
-	it("renders ten top-level rows at rest", () => {
+	it("renders nine top-level rows with no flags", () => {
 		const rows = navGroups().flatMap((group) => group.items)
+		expect(rows.map((item) => item.title)).toEqual([
+			"Overview",
+			"Services",
+			"Service Map",
+			"Infrastructure",
+			"Explore",
+			"Dashboards",
+			"Investigations",
+			"Errors",
+			"Alerts",
+		])
+	})
+
+	it("renders ten with every rollout enabled", () => {
+		const rows = navGroups(ALL_FLAGS).flatMap((group) => group.items)
 		expect(rows.map((item) => item.title)).toEqual([
 			"Overview",
 			"Services",
@@ -64,6 +83,13 @@ describe("navGroups", () => {
 			"Errors",
 			"Alerts",
 		])
+	})
+
+	it("omits Web Analytics from the palette when its flag is off", () => {
+		// The palette derives from navGroups, so a flagged-off page must not be
+		// findable by typing its name either — that would defeat hiding the row.
+		expect(paletteNavItems().map((entry) => entry.href)).not.toContain("/analytics")
+		expect(paletteNavItems(ALL_FLAGS).map((entry) => entry.href)).toContain("/analytics")
 	})
 
 	it("gives every child of a previewed section an icon", () => {
