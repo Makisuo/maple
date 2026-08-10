@@ -188,6 +188,18 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
+				// Direct PSBouncer transport (port 6432, ?sslmode=require), dialed
+				// straight from the Worker instead of through Hyperdrive. Presence of
+				// this value IS the switch — see platform/pg-connection-source.ts.
+				//
+				// Set only on the api worker: measured over 6h, alerting completed
+				// 270,151 dials with zero failures on its own Hyperdrive config while
+				// api failed 4.4% on `maple-prd`, so alerting has nothing to fix and
+				// must not pay per-execute PSBouncer handshakes at 17 dials/s.
+				//
+				// The MAPLE_DB binding below stays attached, so rollback is blanking
+				// this value and redeploying — no infra change.
+				...optionalSecret("MAPLE_DB_DIRECT_URL"),
 				// Workers AI (`env.AI`, the v1 `Ai()` binding), driving the AI-triage agent on
 				// `@maple/llm`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
 				// resource, which also fronts model calls with caching/rate-limits/logging.

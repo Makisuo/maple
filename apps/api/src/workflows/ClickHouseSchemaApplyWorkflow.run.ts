@@ -31,6 +31,7 @@ import {
 import { eq } from "drizzle-orm"
 import { Effect } from "effect"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
+import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
 import { makeTracedPgConnection, type TracedPgConnection } from "@/platform/pg-execute"
 import { invalidateOrgRuntimeConfigMemo } from "@/services/org/OrgClickHouseSettingsService"
 
@@ -65,6 +66,8 @@ type DbStep = <T>(fn: (db: MaplePgClient) => Promise<T>) => Promise<T>
 
 export interface SchemaApplyWorkflowEnv extends Record<string, unknown> {
 	readonly MAPLE_DB: unknown
+	/** Direct PSBouncer URL; when set it wins over MAPLE_DB (see pg-connection-source.ts). */
+	readonly MAPLE_DB_DIRECT_URL?: string
 	readonly MAPLE_INGEST_KEY_ENCRYPTION_KEY: string
 }
 
@@ -123,22 +126,6 @@ export async function loadOptionalFeatureState(
 			reason: error instanceof Error ? error.message : String(error),
 		}
 	}
-}
-
-/**
- * Narrow the worker env's `MAPLE_DB` Hyperdrive binding to its connection
- * string. Workflows share the worker env, where `MAPLE_DB` is the Hyperdrive
- * binding the request-path `DatabasePgLive` layer also dials.
- */
-const resolveMapleDbConnectionString = (binding: unknown): string => {
-	if (
-		typeof binding === "object" &&
-		binding !== null &&
-		typeof (binding as { connectionString?: unknown }).connectionString === "string"
-	) {
-		return (binding as { connectionString: string }).connectionString
-	}
-	throw new Error("MAPLE_DB is not a Hyperdrive binding (missing connectionString)")
 }
 
 const STEP: StepConfig = { retries: { limit: 5, delay: "2 seconds", backoff: "exponential" } }
@@ -365,7 +352,15 @@ export async function runClickHouseSchemaApply(
 	event: WorkflowEventLike<SchemaApplyWorkflowPayload>,
 	step: WorkflowStepLike,
 ): Promise<SchemaApplyWorkflowResult> {
-	const connection = makeTracedPgConnection(resolveMapleDbConnectionString(env.MAPLE_DB))
+	// Same resolver the request path uses, so a worker flipped to the direct
+	// PSBouncer transport does not leave its Workflows dialing Hyperdrive.
+	// Passing the attributes also fixes a pre-existing gap: these spans carried
+	// no `db.namespace`/`server.address` at all.
+	const source = resolveDbConnectionSource(env)
+	if (source._tag === "Unavailable") {
+		throw new Error(source.reason)
+	}
+	const connection = makeTracedPgConnection(source.connectionString, source.attributes)
 	try {
 		return await runWithDb(connection, env, event, step)
 	} finally {

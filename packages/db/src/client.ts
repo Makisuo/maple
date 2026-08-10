@@ -66,6 +66,13 @@ const toDrizzleLogger = (onQuery: ((query: string) => void) | undefined) =>
  * can never produce a second hit, and named statements are the classic way to
  * pin a connection in a pooler. Hyperdrive multiplexes client connections over
  * its origin pool, so the unnamed extended protocol is the safer default.
+ *
+ * That argument gets *stronger*, not weaker, on the direct PSBouncer transport
+ * (see apps/api/src/platform/pg-connection-source.ts). Under transaction
+ * pooling a `PREPARE` issued on one server connection is invisible to the next
+ * transaction's server connection, so named statements are not merely wasteful
+ * there — they are a correctness hazard. Do not turn this back on for either
+ * transport.
  */
 export const createMaplePgClient = (
 	connectionString: string,

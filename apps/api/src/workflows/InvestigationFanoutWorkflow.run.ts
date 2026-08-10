@@ -47,6 +47,7 @@ import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { applyDiagnosisWrites, applyInconclusiveWrites } from "@/services/errors/apply-diagnosis"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
+import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
 import {
 	makeTracedPgConnection,
 	type TracedPgConnection,
@@ -57,6 +58,8 @@ import { normalizePlan, widthFor, type NormalizedPlan, type PlannedHypothesis } 
 
 export interface InvestigationFanoutWorkflowEnv extends Record<string, unknown> {
 	readonly MAPLE_DB: unknown
+	/** Direct PSBouncer URL; when set it wins over MAPLE_DB (see pg-connection-source.ts). */
+	readonly MAPLE_DB_DIRECT_URL?: string
 	readonly CHAT_SESSION?: unknown
 	readonly OPENROUTER_API_KEY?: string
 	readonly AI?: unknown
@@ -175,9 +178,7 @@ const makeRuntime = async (env: InvestigationFanoutWorkflowEnv) => {
 
 type SharedRuntime = Awaited<ReturnType<typeof makeRuntime>>
 
-// ---------------------------------------------------------------------------
 // Planner
-// ---------------------------------------------------------------------------
 
 export interface InvokePlannerInput {
 	readonly env: InvestigationFanoutWorkflowEnv
@@ -259,9 +260,7 @@ const recordPlanOutcome = async (
 		.catch(() => {})
 }
 
-// ---------------------------------------------------------------------------
 // Hypothesis lanes
-// ---------------------------------------------------------------------------
 
 /** What a lane step reports back to the workflow body. Deliberately small. */
 export interface HypothesisStepResult {
@@ -384,9 +383,7 @@ const invokeHypothesis = async (input: InvokeHypothesisInput): Promise<InvokeHyp
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Validator
-// ---------------------------------------------------------------------------
 
 export interface InvokeValidatorInput {
 	readonly env: InvestigationFanoutWorkflowEnv
@@ -581,10 +578,7 @@ export async function runInvestigationFanout(
 	step: WorkflowStepLike,
 	deps: InvestigationFanoutDeps = {},
 ): Promise<InvestigationFanoutWorkflowResult> {
-	const connection =
-		deps.db !== undefined
-			? tracedPgConnectionFrom(deps.db)
-			: makeTracedPgConnection(resolveMapleDbConnectionString(env.MAPLE_DB))
+	const connection = deps.db !== undefined ? tracedPgConnectionFrom(deps.db) : dialWorkflowDb(env)
 	try {
 		return await runWithDb(connection, env, event, step, deps)
 	} finally {
@@ -593,12 +587,18 @@ export async function runInvestigationFanout(
 	}
 }
 
-const resolveMapleDbConnectionString = (binding: unknown): string => {
-	const value = (binding as { connectionString?: unknown } | undefined)?.connectionString
-	if (typeof value !== "string" || value === "") {
-		throw new Error("MAPLE_DB binding is missing a connection string")
+/**
+ * Dial Postgres through the same resolver the request path uses, so a worker
+ * flipped to the direct PSBouncer transport does not leave its Workflows
+ * dialing Hyperdrive. Passing the attributes also fixes a pre-existing gap:
+ * these spans carried no `db.namespace`/`server.address` at all.
+ */
+const dialWorkflowDb = (env: InvestigationFanoutWorkflowEnv): TracedPgConnection => {
+	const source = resolveDbConnectionSource(env)
+	if (source._tag === "Unavailable") {
+		throw new Error(source.reason)
 	}
-	return value
+	return makeTracedPgConnection(source.connectionString, source.attributes)
 }
 
 async function runWithDb(

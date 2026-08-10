@@ -109,7 +109,6 @@ export {
 // ---------------------------------------------------------------------------
 // Storage bindings (runtime clients)
 // ---------------------------------------------------------------------------
-export { Hyperdrive, type HyperdriveConnectionClient, type HyperdriveToken } from "./hyperdrive-connection.ts"
 export {
 	KVNamespace,
 	KVNamespaceError,
