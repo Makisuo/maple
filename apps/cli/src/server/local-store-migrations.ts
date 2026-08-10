@@ -35,6 +35,7 @@ import { MAPLE_VERSION } from "../version"
 import { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
 import { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
 import { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
+import { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -56,6 +57,7 @@ export {
 export { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
 export { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
 export { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
+export { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
 
 const NONTERMINAL_PHASES = new Set<MigrationPhase>([
 	"planned",
@@ -119,6 +121,7 @@ export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> =
 	legacyToCurrentModule,
 	v1ToV2ErrorRollupModule,
 	v2ToV3ServiceMapIngestBridgeModule,
+	v3ToV4WebEventsModule,
 ]
 
 export const validateMigrationRegistry = (

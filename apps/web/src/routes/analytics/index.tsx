@@ -1,28 +1,38 @@
+import { useState } from "react"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result } from "@/lib/effect-atom"
+import { formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-engine"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { formatNumber, formatPercent } from "@maple/ui/lib/format"
+import { formatPercent } from "@maple/ui/lib/format"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { PageHero } from "@/components/infra/primitives/page-hero"
-import { NotFoundError } from "@/components/route-error"
-import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import { PlayRotateClockwiseIcon } from "@/components/icons"
-import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
 import { chartBucketSeconds } from "@/components/infra/chart-utils"
-import type { WebAnalyticsBreakdowns, WebAnalyticsSummary } from "@/api/warehouse/web-analytics"
+import type { WebAnalyticsBreakdowns } from "@/api/warehouse/web-analytics"
 import type { QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
 import {
 	AnalyticsBreakdownPanel,
 	type BreakdownDimension,
 } from "@/components/analytics/analytics-breakdown-panel"
 import { AnalyticsFilterSidebar } from "@/components/analytics/analytics-filter-sidebar"
-import { AnalyticsPagesPanel } from "@/components/analytics/analytics-pages-panel"
+import {
+	AnalyticsMetricStrip,
+	AnalyticsMetricStripLoading,
+} from "@/components/analytics/analytics-metric-strip"
 import { AnalyticsTrafficChart } from "@/components/analytics/analytics-traffic-chart"
+import { Favicon } from "@/components/analytics/row-icon"
+import {
+	ANALYTICS_METRICS,
+	findMetric,
+	isMetricAvailable,
+	type AnalyticsMetricKey,
+	type AnalyticsMetricSource,
+} from "@/components/analytics/metrics"
 import { countryLabel, languageLabel } from "@/components/analytics/labels"
 import {
 	activeFilterChips,
@@ -60,28 +70,6 @@ export const Route = createFileRoute("/analytics/")({
 })
 
 function WebAnalyticsPage() {
-	// Hiding the nav row is not hiding the page — the URL still resolves, and ⌘K,
-	// browser history and a shared link all reach it. So the flag is enforced here
-	// too, rendering the router's own not-found component so an unflagged org sees
-	// exactly what it would see for a route that does not exist. Client-side only,
-	// like `aiAutoTriage`: the API does not read Clerk org metadata, so this hides
-	// the surface rather than protecting the data (which is already org-scoped by
-	// CurrentTenant on every query).
-	const { flags, isLoaded } = useOrganizationFeatureFlags()
-
-	// `isLoaded` is load-bearing, not defensive. Flags fail closed while Clerk
-	// resolves, and a route — unlike a nav row — turns "off" into a visible verdict:
-	// without this, an org that *has* the flag would see "Page not found" flash and
-	// then the real page on every load. Render nothing for that window instead; the
-	// sidebar and page chrome come from the layout, so this is a brief empty content
-	// area rather than a blank app.
-	if (!isLoaded) return null
-	if (!flags.webAnalytics) return <NotFoundError />
-
-	return <WebAnalyticsPageContent />
-}
-
-function WebAnalyticsPageContent() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 
@@ -149,36 +137,39 @@ function WebAnalyticsPageContent() {
 					<DashboardLayout.Content>
 						<DashboardLayout.Sticky>
 							<DashboardLayout.Header>
-								{/* The reciprocal of the Analytics button on Session Replays: this
-								    page aggregates the sessions that page plays back one at a time,
-								    and "who are these people actually" is the next question from
-								    either side. Carries the window across, same as the outbound link. */}
-								<Button
-									variant="outline"
-									size="sm"
-									aria-label="View session replays"
-									render={
-										<Link
-											to="/replays"
-											search={{
-												startTime: search.startTime,
-												endTime: search.endTime,
-												timePreset: search.timePreset,
-											}}
-										/>
-									}
-								>
-									<PlayRotateClockwiseIcon size={14} />
-									<span className="hidden sm:inline">Replays</span>
-								</Button>
-								<TimeRangeHeaderControls
-									startTime={search.startTime ?? startTime}
-									endTime={search.endTime ?? endTime}
-									presetValue={
-										search.timePreset ?? (search.startTime ? undefined : DEFAULT_PRESET)
-									}
-									onTimeChange={handleTimeChange}
-								/>
+								<div className="flex flex-wrap items-center gap-2">
+									{/* The reciprocal of the Analytics button on Session Replays: this
+									    page aggregates the sessions that page plays back one at a time,
+									    and "who are these people actually" is the next question from
+									    either side. Carries the window across, same as the outbound link. */}
+									<Button
+										variant="outline"
+										size="sm"
+										aria-label="View session replays"
+										render={
+											<Link
+												to="/replays"
+												search={{
+													startTime: search.startTime,
+													endTime: search.endTime,
+													timePreset: search.timePreset,
+												}}
+											/>
+										}
+									>
+										<PlayRotateClockwiseIcon size={14} />
+										<span className="hidden sm:inline">Replays</span>
+									</Button>
+									<TimeRangeHeaderControls
+										startTime={search.startTime ?? startTime}
+										endTime={search.endTime ?? endTime}
+										presetValue={
+											search.timePreset ??
+											(search.startTime ? undefined : DEFAULT_PRESET)
+										}
+										onTimeChange={handleTimeChange}
+									/>
+								</div>
 							</DashboardLayout.Header>
 						</DashboardLayout.Sticky>
 						<DashboardLayout.Scroll>
@@ -226,6 +217,21 @@ function WebAnalyticsPageContent() {
 	)
 }
 
+/**
+ * The window immediately before this one, of the same length — the baseline the
+ * KPI deltas are measured against. "Last 7 days" compares against the 7 days
+ * before it, which is what makes a delta answer "is this better than usual".
+ */
+function previousWindow(startTime: string, endTime: string) {
+	const start = parseWarehouseDateTime(startTime)
+	const end = parseWarehouseDateTime(endTime)
+	const span = end - start
+	return {
+		startTime: formatWarehouseDateTime(start - span),
+		endTime: startTime,
+	}
+}
+
 function AnalyticsContent({
 	startTime,
 	endTime,
@@ -241,6 +247,21 @@ function AnalyticsContent({
 }) {
 	const bucketSeconds = chartBucketSeconds(startTime, endTime)
 	const windowInput = { startTime, endTime, ...filters }
+	const previous = previousWindow(startTime, endTime)
+	const previousInput = { ...previous, ...filters }
+
+	// `null` means "nobody has picked yet", which is deliberately distinct from
+	// "picked Unique visitors" — the strip's leading metric is visitor-level, and
+	// on an org whose SDK build predates the analytics block it is unavailable.
+	// Seeding it as the default put a flat-zero line under a headline reading "—".
+	// Resolved during render rather than seeded into state, for the same reason
+	// the breakdown panel derives its first populated tab: availability depends on
+	// the window and the filters, both of which change under the selection.
+	//
+	// Local state, not a search param: which metric you are looking at is a view
+	// preference, and putting it in the URL would attach it to every shared link
+	// and every back-button step.
+	const [picked, setPicked] = useState<AnalyticsMetricKey | null>(null)
 
 	const summaryResult = useRetainedRefreshableResultValue(
 		webAnalyticsSummaryResultAtom({ data: windowInput }),
@@ -255,36 +276,69 @@ function AnalyticsContent({
 		webAnalyticsPagesResultAtom({ data: { ...windowInput, limit: PAGES_LIMIT } }),
 	)
 
+	// The comparison window. Two queries rather than one because Page views and
+	// Pages / session are measured over `session_events`, which the summary query
+	// deliberately does not read — without the second, those two tiles would be
+	// the only ones with no delta.
+	const previousSummaryResult = useRetainedRefreshableResultValue(
+		webAnalyticsSummaryResultAtom({ data: previousInput }),
+	)
+	const previousPageviewsResult = useRetainedRefreshableResultValue(
+		webAnalyticsPageviewsResultAtom({ data: { ...previousInput, bucketSeconds } }),
+	)
+
+	const timeseries = Result.builder(timeseriesResult)
+		.onSuccess((rows) => rows.data)
+		.orElse(() => [])
+	const pageviews = Result.builder(pageviewsResult)
+		.onSuccess((rows) => rows.data)
+		.orElse(() => [])
+
+	// The comparison is strictly decorative: a slow or failed baseline query drops
+	// the delta pills and leaves every headline number intact.
+	const previousSource: AnalyticsMetricSource | undefined = Result.builder(previousSummaryResult)
+		.onSuccess((summary) => ({
+			summary,
+			timeseries: [],
+			pageviews: Result.builder(previousPageviewsResult)
+				.onSuccess((rows) => rows.data)
+				.orElse(() => []),
+		}))
+		.orElse(() => undefined)
+
 	return (
 		<div className="space-y-6">
-			<SummaryRail result={summaryResult} />
-
-			{Result.builder(timeseriesResult)
-				.onInitial(() => <Skeleton className="h-56 w-full" />)
-				.onError((error) => <QueryErrorState error={error} />)
-				.onSuccess((visitors) => (
-					<AnalyticsTrafficChart
-						visitorPoints={visitors.data}
-						pageviewPoints={Result.builder(pageviewsResult)
-							.onSuccess((views) => views.data)
-							.orElse(() => [])}
-						syncId="web-analytics"
-					/>
+			{Result.builder(summaryResult)
+				.onInitial(() => (
+					<>
+						<AnalyticsMetricStripLoading />
+						<Skeleton className="h-56 w-full" />
+					</>
 				))
-				.render()}
-
-			{Result.builder(pagesResult)
-				.onInitial(() => <Skeleton className="h-72 w-full" />)
 				.onError((error) => <QueryErrorState error={error} />)
-				.onSuccess((pages, result) => (
-					<AnalyticsPagesPanel
-						pages={pages.data}
-						selectedPath={filters.pagePath}
-						onTogglePath={(pagePath) => onToggleFilter("pagePath", pagePath)}
-						waiting={result.waiting}
-						showHost={new Set(pages.data.map((page) => page.host)).size > 1}
-					/>
-				))
+				.onSuccess((summary) => {
+					const source: AnalyticsMetricSource = { summary, timeseries, pageviews }
+					// An explicit pick wins while it still holds; a filter change that
+					// empties it falls back rather than drawing a line along the axis.
+					const pickedMetric = picked ? findMetric(picked) : undefined
+					const metric =
+						pickedMetric && isMetricAvailable(pickedMetric, source)
+							? pickedMetric
+							: (ANALYTICS_METRICS.find((candidate) => isMetricAvailable(candidate, source)) ??
+								ANALYTICS_METRICS[0]!)
+
+					return (
+						<>
+							<AnalyticsMetricStrip
+								source={source}
+								previous={previousSource}
+								selected={metric.key}
+								onSelect={setPicked}
+							/>
+							<AnalyticsTrafficChart metric={metric} source={source} syncId="web-analytics" />
+						</>
+					)
+				})
 				.render()}
 
 			{Result.builder(breakdownsResult)
@@ -306,7 +360,15 @@ function AnalyticsContent({
 						})
 						.orElse(() => undefined)
 
-					const acquisition: ReadonlyArray<BreakdownDimension> = [
+					const pages = Result.builder(pagesResult)
+						.onSuccess((rows) => rows.data)
+						.orElse(() => [])
+					// One site is the common case, and then the favicon is the same mark on
+					// every row — noise. It earns its place only once two sites can share
+					// a path, which is exactly when the path alone stops identifying a row.
+					const multiSite = new Set(pages.map((page) => page.host)).size > 1
+
+					const referrers: ReadonlyArray<BreakdownDimension> = [
 						{
 							tab: "Referrers",
 							rows: breakdowns.referrerHosts,
@@ -341,38 +403,49 @@ function AnalyticsContent({
 							nounPlural: "campaigns",
 							coverageDependent: true,
 						},
+					]
+
+					const pageDimensions: ReadonlyArray<BreakdownDimension> = [
 						{
-							tab: "Entry page",
-							rows: breakdowns.entryPaths,
+							tab: "Pages",
+							// The one dimension with a real page-view count, and the only one
+							// on the page with full coverage — it reads `session_events`,
+							// which every SDK build writes. Entries and Exits beside it come
+							// from the analytics block and do not.
+							rows: pages.map((page) => ({
+								name: page.pagePath,
+								count: page.sessions,
+								views: page.pageViews,
+								secondary: page.host,
+							})),
 							filterKey: "pagePath",
 							noun: "page",
 							nounPlural: "pages",
+							renderIcon: multiSite
+								? (row) => <Favicon host={row.secondary ?? ""} />
+								: undefined,
+							note: "Page views cover every session, including those whose SDK build predates the visitor-level analytics fields.",
+							emptyMessage: "No page views in the selected window.",
+						},
+						{
+							tab: "Entries",
+							rows: breakdowns.entryPaths,
+							filterKey: "pagePath",
+							noun: "entry page",
+							nounPlural: "entry pages",
 							coverageDependent: true,
 						},
 						{
-							tab: "Exit page",
+							tab: "Exits",
 							rows: breakdowns.exitPaths,
 							filterKey: "pagePath",
-							noun: "page",
-							nounPlural: "pages",
+							noun: "exit page",
+							nounPlural: "exit pages",
 							coverageDependent: true,
 						},
 					]
 
-					const audience: ReadonlyArray<BreakdownDimension> = [
-						{
-							tab: "Countries",
-							rows: breakdowns.countries,
-							filterKey: "country",
-							noun: "country",
-							nounPlural: "countries",
-							formatValue: countryLabel,
-							// Geo is derived at the ingest gateway from Cf-IPCountry and only
-							// when it is configured to trust that header. Say so, rather than
-							// letting an empty list read as "nobody visited".
-							emptyMessage:
-								"No geo data. Country is resolved at the ingest gateway from the Cloudflare edge header, and only for traffic received after that was enabled — it is never backfilled.",
-						},
+					const devices: ReadonlyArray<BreakdownDimension> = [
 						{
 							tab: "Devices",
 							rows: breakdowns.deviceTypes,
@@ -394,6 +467,22 @@ function AnalyticsContent({
 							noun: "OS",
 							nounPlural: "operating systems",
 						},
+					]
+
+					const geography: ReadonlyArray<BreakdownDimension> = [
+						{
+							tab: "Countries",
+							rows: breakdowns.countries,
+							filterKey: "country",
+							noun: "country",
+							nounPlural: "countries",
+							formatValue: countryLabel,
+							// Geo is derived at the ingest gateway from Cf-IPCountry and only
+							// when it is configured to trust that header. Say so, rather than
+							// letting an empty list read as "nobody visited".
+							emptyMessage:
+								"No geo data. Country is resolved at the ingest gateway from the Cloudflare edge header, and only for traffic received after that was enabled — it is never backfilled.",
+						},
 						{
 							tab: "Languages",
 							rows: breakdowns.languages,
@@ -413,87 +502,40 @@ function AnalyticsContent({
 						},
 					]
 
+					// `items-start` so each card sizes to its own content instead of
+					// stretching to match the tallest in its row — a Devices card with
+					// three rows should not be as tall as a Pages card with fifty.
+					const cards: ReadonlyArray<{
+						title: string
+						dimensions: ReadonlyArray<BreakdownDimension>
+						//
+						// Titles name the *theme*, never the leading tab — "Devices ·
+						// Devices Browsers OS" stutters, and the title then carries no
+						// information the tab strip beside it isn't already carrying.
+					}> = [
+						{ title: "Acquisition", dimensions: referrers },
+						{ title: "Content", dimensions: pageDimensions },
+						{ title: "Technology", dimensions: devices },
+						{ title: "Audience", dimensions: geography },
+					]
+
 					return (
-						<div className="grid gap-4 lg:grid-cols-2">
-							<AnalyticsBreakdownPanel
-								title="Acquisition"
-								dimensions={acquisition}
-								activeValue={(key) => filters[key]}
-								onToggleFilter={onToggleFilter}
-								waiting={result.waiting}
-								footnote={coverageNote}
-							/>
-							<AnalyticsBreakdownPanel
-								title="Audience"
-								dimensions={audience}
-								activeValue={(key) => filters[key]}
-								onToggleFilter={onToggleFilter}
-								waiting={result.waiting}
-								footnote={coverageNote}
-							/>
+						<div className="grid items-start gap-4 lg:grid-cols-2">
+							{cards.map((card) => (
+								<AnalyticsBreakdownPanel
+									key={card.title}
+									title={card.title}
+									dimensions={card.dimensions}
+									activeValue={(key) => filters[key]}
+									onToggleFilter={onToggleFilter}
+									waiting={result.waiting}
+									footnote={coverageNote}
+								/>
+							))}
 						</div>
 					)
 				})
 				.render()}
 		</div>
 	)
-}
-
-const formatDuration = (ms: number): string => {
-	if (ms <= 0) return "—"
-	const seconds = Math.round(ms / 1000)
-	if (seconds < 60) return `${seconds}s`
-	const minutes = Math.floor(seconds / 60)
-	return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`
-}
-
-function SummaryRail({ result }: { result: Result.Result<WebAnalyticsSummary, QueryAtomFailure> }) {
-	return Result.builder(result)
-		.onInitial(() => <StatRailLoading />)
-		.onError((error) => <QueryErrorState error={error} />)
-		.onSuccess((summary) => {
-			// Nothing in this window reports the analytics block, so every
-			// visitor-level number would be a confident-looking zero. Say "not
-			// reported" instead — sessions and page views are still real, and the
-			// panels below still work.
-			const identified = summary.identifiedSessions > 0
-			const partial = identified && summary.coverage < 0.98
-			const coverageNote = partial
-				? `${formatPercent(summary.coverage)} of sessions report one`
-				: undefined
-
-			return (
-				<StatRail>
-					<StatRailItem
-						eyebrow="Unique visitors"
-						value={identified ? formatNumber(summary.visitors) : "—"}
-						compact
-						subline={identified ? coverageNote : "No session reports a visitor id"}
-					/>
-					<StatRailItem
-						eyebrow="Sessions"
-						value={formatNumber(summary.sessions)}
-						compact
-						subline={identified ? `${formatNumber(summary.newSessions)} first-time` : undefined}
-					/>
-					<StatRailItem
-						eyebrow="Bounce rate"
-						value={summary.bounceRate === null ? "—" : formatPercent(summary.bounceRate)}
-						compact
-						subline={
-							summary.bounceRate === null
-								? "Needs per-session page-view counts"
-								: `One page view or fewer, of ${formatNumber(summary.identifiedSessions)} reporting sessions`
-						}
-					/>
-					<StatRailItem
-						eyebrow="Avg. session"
-						value={formatDuration(summary.avgDurationMs)}
-						compact
-						subline="Wall clock, sessions that ended"
-					/>
-				</StatRail>
-			)
-		})
-		.render()
 }

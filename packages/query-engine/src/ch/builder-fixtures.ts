@@ -55,6 +55,95 @@ const FINGERPRINT = "11640393269246331608"
 
 const window = { orgId: ORG_ID, startTime: START_TIME, endTime: END_TIME }
 
+// ----- web-analytics (routes/v1/query-engine.http.ts, via registry/queries.ts) -----
+//
+// Two fixtures per page-view builder: unfiltered, and with a
+// session_replays-only filter set. The second is the one that matters — it
+// forces the `SessionId IN (SELECT …)` semi-join branch, which is a whole
+// second SQL shape that no unfiltered fixture reaches.
+//
+// Every one is emitted TWICE, once per page-view source. `useWebEvents` is a
+// routing predicate, and `routeCoverage()` in sql-catalog.ts requires a
+// predicate to be exercised both ways — but the stronger reason is that the two
+// paths are required to return identical numbers, so both SQL shapes belong in
+// the reviewable baseline side by side. Generated rather than written out so a
+// fixture cannot exist for one source and not the other.
+const WEB_ANALYTICS_ALL_FILTERS = {
+	host: "maple.dev",
+	pagePath: "/pricing",
+	referrerHost: "t.co",
+	country: "DE",
+	deviceType: "desktop",
+	browserName: "Chrome",
+	osName: "macOS",
+	language: "en-US",
+	utmSource: "twitter",
+	utmMedium: "social",
+	utmCampaign: "launch",
+	visitorType: "new",
+} as const
+
+const webAnalyticsVariants = (
+	name: string,
+	label: string,
+	compile: (useWebEvents: boolean) => CompiledQuery<unknown>,
+): ReadonlyArray<BuilderFixture> => [
+	{ module: "web-analytics", name, label, compile: () => compile(false) },
+	{ module: "web-analytics", name, label: `${label}-rollup`, compile: () => compile(true) },
+]
+
+const webAnalyticsFixtures: ReadonlyArray<BuilderFixture> = [
+	...webAnalyticsVariants("webAnalyticsSummaryQuery", "default", (useWebEvents) =>
+		CH.compile(CH.webAnalyticsSummaryQuery({ useWebEvents }), window),
+	),
+	...webAnalyticsVariants("webAnalyticsSummaryQuery", "filtered", (useWebEvents) =>
+		CH.compile(CH.webAnalyticsSummaryQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useWebEvents }), window),
+	),
+	...webAnalyticsVariants("webAnalyticsTimeseriesQuery", "default", (useWebEvents) =>
+		CH.compile(CH.webAnalyticsTimeseriesQuery({ bucketSeconds: 3600, useWebEvents }), window),
+	),
+	...webAnalyticsVariants("webAnalyticsPageviewsTimeseriesQuery", "default", (useWebEvents) =>
+		CH.compile(CH.webAnalyticsPageviewsTimeseriesQuery({ bucketSeconds: 3600, useWebEvents }), window),
+	),
+	// Forces the semi-join: `referrerHost` is a session_replays-only dimension,
+	// so the page-view source has to narrow through a subquery to honour it.
+	...webAnalyticsVariants("webAnalyticsPageviewsTimeseriesQuery", "semi-joined", (useWebEvents) =>
+		CH.compile(
+			CH.webAnalyticsPageviewsTimeseriesQuery({
+				bucketSeconds: 3600,
+				referrerHost: "t.co",
+				visitorType: "returning",
+				useWebEvents,
+			}),
+			window,
+		),
+	),
+	...webAnalyticsVariants("webAnalyticsPagesQuery", "default", (useWebEvents) =>
+		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, useWebEvents }), window),
+	),
+	// host/pagePath filter directly off the page-view source — deliberately NOT
+	// through the semi-join, so the 82% of sessions with no analytics block still count.
+	...webAnalyticsVariants("webAnalyticsPagesQuery", "url-filtered", (useWebEvents) =>
+		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, host: "maple.dev", useWebEvents }), window),
+	),
+	...webAnalyticsVariants("webAnalyticsPagesQuery", "semi-joined", (useWebEvents) =>
+		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, country: "DE", useWebEvents }), window),
+	),
+	...webAnalyticsVariants("webAnalyticsBreakdownsQuery", "default", (useWebEvents) =>
+		CH.compileUnion(CH.webAnalyticsBreakdownsQuery({ useWebEvents }), window),
+	),
+	// Every dimension selected at once: each branch must exclude its own filter,
+	// so this is the fixture that would catch a branch that forgot to. On the
+	// rollup variant it is also the one that shows the navigation semi-join being
+	// inlined into all twelve branches — the shape the rollup exists to make cheap.
+	...webAnalyticsVariants("webAnalyticsBreakdownsQuery", "all-dimensions-filtered", (useWebEvents) =>
+		CH.compileUnion(
+			CH.webAnalyticsBreakdownsQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useWebEvents }),
+			window,
+		),
+	),
+]
+
 export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 	// ----- session-replays (routes/session-replay.http.ts, routes/v2/session-replays.http.ts) -----
 	{
@@ -192,123 +281,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			}),
 	},
 
-	// ----- web-analytics (routes/v1/query-engine.http.ts, via registry/queries.ts) -----
-	//
-	// Two fixtures per page-view builder: unfiltered, and with a
-	// session_replays-only filter set. The second is the one that matters — it
-	// forces the `SessionId IN (SELECT …)` semi-join branch, which is a whole
-	// second SQL shape that no unfiltered fixture reaches.
-	{
-		module: "web-analytics",
-		name: "webAnalyticsSummaryQuery",
-		label: "default",
-		compile: () => CH.compile(CH.webAnalyticsSummaryQuery({}), window),
-	},
-	{
-		module: "web-analytics",
-		name: "webAnalyticsSummaryQuery",
-		label: "filtered",
-		compile: () =>
-			CH.compile(
-				CH.webAnalyticsSummaryQuery({
-					host: "maple.dev",
-					pagePath: "/pricing",
-					referrerHost: "t.co",
-					country: "DE",
-					deviceType: "desktop",
-					browserName: "Chrome",
-					osName: "macOS",
-					language: "en-US",
-					utmSource: "twitter",
-					utmMedium: "social",
-					utmCampaign: "launch",
-					visitorType: "new",
-				}),
-				window,
-			),
-	},
-	{
-		module: "web-analytics",
-		name: "webAnalyticsTimeseriesQuery",
-		label: "default",
-		compile: () => CH.compile(CH.webAnalyticsTimeseriesQuery({ bucketSeconds: 3600 }), window),
-	},
-	{
-		module: "web-analytics",
-		name: "webAnalyticsPageviewsTimeseriesQuery",
-		label: "default",
-		compile: () =>
-			CH.compile(CH.webAnalyticsPageviewsTimeseriesQuery({ bucketSeconds: 3600 }), window),
-	},
-	{
-		// Forces the semi-join: `referrerHost` is a session_replays-only dimension,
-		// so session_events has to narrow through a subquery to honour it.
-		module: "web-analytics",
-		name: "webAnalyticsPageviewsTimeseriesQuery",
-		label: "semi-joined",
-		compile: () =>
-			CH.compile(
-				CH.webAnalyticsPageviewsTimeseriesQuery({
-					bucketSeconds: 3600,
-					referrerHost: "t.co",
-					visitorType: "returning",
-				}),
-				window,
-			),
-	},
-	{
-		module: "web-analytics",
-		name: "webAnalyticsPagesQuery",
-		label: "default",
-		compile: () => CH.compile(CH.webAnalyticsPagesQuery({ limit: 100 }), window),
-	},
-	{
-		// host/pagePath filter directly off Url — deliberately NOT through the
-		// semi-join, so the 82% of sessions with no analytics block still count.
-		module: "web-analytics",
-		name: "webAnalyticsPagesQuery",
-		label: "url-filtered",
-		compile: () =>
-			CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, host: "maple.dev" }), window),
-	},
-	{
-		module: "web-analytics",
-		name: "webAnalyticsPagesQuery",
-		label: "semi-joined",
-		compile: () =>
-			CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, country: "DE" }), window),
-	},
-	{
-		module: "web-analytics",
-		name: "webAnalyticsBreakdownsQuery",
-		label: "default",
-		compile: () => CH.compileUnion(CH.webAnalyticsBreakdownsQuery({}), window),
-	},
-	{
-		// Every dimension selected at once: each branch must exclude its own filter,
-		// so this is the fixture that would catch a branch that forgot to.
-		module: "web-analytics",
-		name: "webAnalyticsBreakdownsQuery",
-		label: "all-dimensions-filtered",
-		compile: () =>
-			CH.compileUnion(
-				CH.webAnalyticsBreakdownsQuery({
-					host: "maple.dev",
-					pagePath: "/pricing",
-					referrerHost: "t.co",
-					country: "DE",
-					deviceType: "desktop",
-					browserName: "Chrome",
-					osName: "macOS",
-					language: "en-US",
-					utmSource: "twitter",
-					utmMedium: "social",
-					utmCampaign: "launch",
-					visitorType: "new",
-				}),
-				window,
-			),
-	},
+	...webAnalyticsFixtures,
 
 	// ----- errors builders reached only via direct calls (ErrorsService, v2 telemetry, observability) -----
 	{

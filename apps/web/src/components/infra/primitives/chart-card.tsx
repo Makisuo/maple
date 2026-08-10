@@ -17,7 +17,12 @@ export function ChartCard({
 	className,
 }: {
 	title: string
-	legend: ReactNode
+	/**
+	 * Optional: a single-series chart whose series is named by the title has
+	 * nothing to disambiguate, and web analytics' chart is legended by the KPI
+	 * strip above it. Multi-series charts should still pass one.
+	 */
+	legend?: ReactNode
 	/** Scope marker: what this panel is actually filtered to. */
 	scope?: ReactNode
 	children: ReactNode

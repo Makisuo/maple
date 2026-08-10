@@ -1174,6 +1174,12 @@ export class WebAnalyticsTimeseriesResponse extends Schema.Class<WebAnalyticsTim
 			visitors: Schema.Number,
 			sessions: Schema.Number,
 			newSessions: Schema.Number,
+			// The per-bucket halves of the same three summary numbers, so the KPI
+			// strip can draw a sparkline under each headline. `bouncedSessions` is
+			// over `identifiedSessions`, not `sessions` — see the query.
+			bouncedSessions: Schema.Number,
+			identifiedSessions: Schema.Number,
+			avgDurationMs: Schema.Number,
 		}),
 	),
 }) {}

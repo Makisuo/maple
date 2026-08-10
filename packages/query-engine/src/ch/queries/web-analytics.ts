@@ -53,10 +53,17 @@
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param, from, inSubquery, unionAll, compileFnCall } from "@maple-dev/clickhouse-builder"
 import type { ColumnAccessor, CHQuery, CHUnionQuery } from "@maple-dev/clickhouse-builder"
-import { SessionReplays, SessionEvents } from "../tables"
+import { SessionReplays, SessionEvents, WebEvents } from "../tables"
 import type { FacetOutput } from "./query-helpers"
 
-/** The `session_events.Type` value the SDK emits once per page view. */
+/**
+ * The page-view discriminator: `session_events.Type` on the raw path,
+ * `web_events.Kind` on the rollup. Deliberately not `EventName = '$pageview'` —
+ * `track()` takes a caller-supplied name with no reserved-prefix check, so a
+ * customer calling `track('$pageview')` would inflate the count. `Kind` carries
+ * the source `Type` through untouched, which is what makes the two paths
+ * provably identical.
+ */
 const NAVIGATION = "navigation"
 
 // assumeNotNull(x) — drops the Nullable wrapper for a caller whose WHERE (or, as
@@ -100,6 +107,17 @@ export interface WebAnalyticsFilters {
 	readonly utmCampaign?: string
 	/** `new` keeps first-ever sessions for a visitor, `returning` the rest. */
 	readonly visitorType?: "new" | "returning"
+	/**
+	 * Read page views from the `web_events` rollup instead of `session_events`.
+	 *
+	 * Purely a source swap — every predicate below has a one-to-one counterpart on
+	 * the rollup (`Type`→`Kind`, `domain(Url)`→`Host`, `path(Url)`→`PagePath`),
+	 * so both paths must return byte-identical numbers. It is threaded through the
+	 * shared helpers rather than forking the query builders precisely so that
+	 * property stays checkable: there is one definition of the filter semantics,
+	 * and only the table it resolves against changes.
+	 */
+	readonly useWebEvents?: boolean
 }
 
 /** Which `session_replays` dimensions a facet branch can exclude from its own WHERE. */
@@ -118,9 +136,59 @@ export type WebAnalyticsFacetKey =
 	| "host"
 
 type ReplaysAccessor = ColumnAccessor<typeof SessionReplays.columns>
+type EventsAccessor = ColumnAccessor<typeof SessionEvents.columns>
+type WebEventsAccessor = ColumnAccessor<typeof WebEvents.columns>
 
 /**
- * `SELECT SessionId FROM session_events WHERE <navigation matching host/path>` —
+ * The page-view predicate over raw `session_events`.
+ *
+ * `Type = 'navigation'` leans on the `idx_type set(16)` skip index and the
+ * `Timestamp` bounds prune `PARTITION BY toDate(Timestamp)` — which is all the
+ * pruning available, since `Timestamp` sits third in that table's sorting key.
+ * `domain()`/`path()` are evaluated per scanned row.
+ */
+function navigationConditionsRaw(
+	$: EventsAccessor,
+	filters: WebAnalyticsFilters,
+	only?: "host" | "pagePath",
+): Array<CH.Condition | undefined> {
+	return [
+		$.OrgId.eq(param.string("orgId")),
+		$.Timestamp.gte(param.dateTime("startTime")),
+		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Type.eq(NAVIGATION),
+		only === "pagePath" ? undefined : CH.when(filters.host, (v: string) => CH.domain_($.Url).eq(v)),
+		only === "host" ? undefined : CH.when(filters.pagePath, (v: string) => CH.path_($.Url).eq(v)),
+	]
+}
+
+/**
+ * The same predicate over the `web_events` rollup — the one-to-one counterpart
+ * of {@link navigationConditionsRaw}, and the reason the two paths can be held
+ * to byte-identical results.
+ *
+ * Here `Timestamp` is second in the sorting key, so the bounds are a real
+ * primary-index range rather than day-granularity partition pruning, the table
+ * holds only the two event types product analytics asks about, and `Host` /
+ * `PagePath` were parsed once at write time instead of once per scanned row.
+ */
+function navigationConditionsRollup(
+	$: WebEventsAccessor,
+	filters: WebAnalyticsFilters,
+	only?: "host" | "pagePath",
+): Array<CH.Condition | undefined> {
+	return [
+		$.OrgId.eq(param.string("orgId")),
+		$.Timestamp.gte(param.dateTime("startTime")),
+		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Kind.eq(NAVIGATION),
+		only === "pagePath" ? undefined : CH.when(filters.host, (v: string) => $.Host.eq(v)),
+		only === "host" ? undefined : CH.when(filters.pagePath, (v: string) => $.PagePath.eq(v)),
+	]
+}
+
+/**
+ * `SELECT SessionId FROM <page-view source> WHERE <navigation matching host/path>` —
  * which sessions actually viewed the filtered page or site.
  *
  * This is how the `host` and `pagePath` filters reach `session_replays`, and it
@@ -135,19 +203,25 @@ type ReplaysAccessor = ColumnAccessor<typeof SessionReplays.columns>
  *
  * `only` restricts which of the two filters the subquery honours, so a facet
  * branch can exclude its own dimension (see `replaysWhere`).
+ *
+ * This subquery is inlined into **every one of the twelve breakdown branches**
+ * whenever a page filter is active, which is what made a single top-pages click
+ * the most expensive interaction on the page. Pointing it at `web_events` is the
+ * main reason that table exists.
  */
-function navigationSessionsSubquery(filters: WebAnalyticsFilters, only?: "host" | "pagePath") {
-	return from(SessionEvents)
-		.select(($) => ({ sessionId: $.SessionId }))
-		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
-			$.Type.eq(NAVIGATION),
-			only === "pagePath" ? undefined : CH.when(filters.host, (v: string) => CH.domain_($.Url).eq(v)),
-			only === "host" ? undefined : CH.when(filters.pagePath, (v: string) => CH.path_($.Url).eq(v)),
-		])
-		.groupBy("sessionId")
+function navigationSessionsSubquery(
+	filters: WebAnalyticsFilters,
+	only?: "host" | "pagePath",
+): CHQuery<any, { readonly sessionId: string }, any> {
+	return filters.useWebEvents
+		? from(WebEvents)
+				.select(($) => ({ sessionId: $.SessionId }))
+				.where(($) => navigationConditionsRollup($, filters, only))
+				.groupBy("sessionId")
+		: from(SessionEvents)
+				.select(($) => ({ sessionId: $.SessionId }))
+				.where(($) => navigationConditionsRaw($, filters, only))
+				.groupBy("sessionId")
 }
 
 /**
@@ -241,27 +315,31 @@ function matchingSessionsSubquery(filters: WebAnalyticsFilters) {
 }
 
 /**
- * WHERE conditions for the page-view queries over `session_events`.
- *
- * `Type = 'navigation'` is served by the `idx_type` set(16) skip index, and the
- * `Timestamp` bounds prune `PARTITION BY toDate(Timestamp)` — `Timestamp` sits
- * third in the sorting key, so partition pruning is what keeps this cheap.
+ * The `session_replays` semi-join clause, appended to whichever page-view source
+ * is in play. Source-independent — it matches on `SessionId`, which both tables
+ * carry — so it is shared rather than duplicated across the two `navigationWhere`
+ * variants below.
  */
-function navigationWhere(
-	$: ColumnAccessor<typeof SessionEvents.columns>,
+function replaysSemiJoin(sessionId: CH.Expr<string>, filters: WebAnalyticsFilters): CH.Condition | undefined {
+	return needsSessionSemiJoin(filters)
+		? inSubquery(sessionId, matchingSessionsSubquery(filters))
+		: undefined
+}
+
+/** WHERE conditions for the page-view queries over raw `session_events`. */
+function navigationWhereRaw(
+	$: EventsAccessor,
 	filters: WebAnalyticsFilters,
 ): Array<CH.Condition | undefined> {
-	return [
-		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
-		$.Type.eq(NAVIGATION),
-		CH.when(filters.host, (v: string) => CH.domain_($.Url).eq(v)),
-		CH.when(filters.pagePath, (v: string) => CH.path_($.Url).eq(v)),
-		needsSessionSemiJoin(filters)
-			? inSubquery($.SessionId, matchingSessionsSubquery(filters))
-			: undefined,
-	]
+	return [...navigationConditionsRaw($, filters), replaysSemiJoin($.SessionId, filters)]
+}
+
+/** WHERE conditions for the page-view queries over the `web_events` rollup. */
+function navigationWhereRollup(
+	$: WebEventsAccessor,
+	filters: WebAnalyticsFilters,
+): Array<CH.Condition | undefined> {
+	return [...navigationConditionsRollup($, filters), replaysSemiJoin($.SessionId, filters)]
 }
 
 // ---------------------------------------------------------------------------
@@ -340,6 +418,11 @@ export interface WebAnalyticsTimeseriesOutput {
 	readonly visitors: number
 	readonly sessions: number
 	readonly newSessions: number
+	/** Bounces **within `identifiedSessions`**. Divide by that, never by `sessions`. */
+	readonly bouncedSessions: number
+	/** The per-bucket coverage denominator, and the bounce-rate denominator. */
+	readonly identifiedSessions: number
+	readonly avgDurationMs: number
 }
 
 /**
@@ -348,6 +431,19 @@ export interface WebAnalyticsTimeseriesOutput {
  * Bucketed on `StartTime`, so a session lands in the bucket it began in rather
  * than being smeared across the buckets it spanned. That matches how every
  * comparable product counts a session and keeps the branch a flat aggregate.
+ *
+ * `bouncedSessions` / `identifiedSessions` / `avgDurationMs` are the per-bucket
+ * counterparts of the same three numbers in {@link webAnalyticsSummaryQuery},
+ * with **identical predicates** — the KPI strip draws a sparkline from these
+ * under a headline it takes from the summary, and any divergence between the two
+ * shows up on screen as a trend line that contradicts the number above it. In
+ * particular `bouncedSessions` keeps the `VisitorId != ''` gate: `PageViews` is
+ * part of the migration-0011 analytics block, so without it every bucket of an
+ * older SDK build's traffic reports a 100% bounce rate. See that query's doc
+ * comment for the full account.
+ *
+ * All three ride the existing scan and `GROUP BY bucket`, so they cost nothing
+ * beyond the three extra aggregate states.
  */
 export function webAnalyticsTimeseriesQuery(
 	opts: WebAnalyticsTimeseriesOpts = {},
@@ -359,6 +455,13 @@ export function webAnalyticsTimeseriesQuery(
 			visitors: CH.uniqIf($.VisitorId, $.VisitorId.neq("")),
 			sessions: CH.uniq($.SessionId),
 			newSessions: CH.uniqIf($.SessionId, $.VisitorIsNew.eq(1)),
+			bouncedSessions: CH.uniqIf($.SessionId, $.PageViews.lte(1).and($.VisitorId.neq(""))),
+			identifiedSessions: CH.uniqIf($.SessionId, $.VisitorId.neq("")),
+			// avgIf over the ended rows only — same as the summary: the v1 row's
+			// DurationMs is NULL and would average in as a NULL.
+			avgDurationMs: CH.round_(
+				ifNotFinite(CH.avgIf(assumeNotNull($.DurationMs), $.DurationMs.gt(0)), 0),
+			),
 		}))
 		.where(($) => replaysWhere($, opts))
 		.groupBy("bucket")
@@ -381,9 +484,8 @@ export interface WebAnalyticsPageviewsTimeseriesOutput {
 }
 
 /**
- * Page views per bucket from `session_events` navigation rows — a plain
- * `count()`, since that table is an append-only MergeTree with no duplicate
- * rows to guard against.
+ * Page views per bucket from navigation rows — a plain `count()`, since both
+ * sources are append-only MergeTrees with no duplicate rows to guard against.
  *
  * Its own query rather than a branch of {@link webAnalyticsTimeseriesQuery}
  * because it reads a different table with a different time column and a
@@ -393,16 +495,27 @@ export function webAnalyticsPageviewsTimeseriesQuery(
 	opts: WebAnalyticsPageviewsTimeseriesOpts = {},
 ): CHQuery<any, WebAnalyticsPageviewsTimeseriesOutput, any> {
 	const bucketSeconds = opts.bucketSeconds ?? 3600
-	return from(SessionEvents)
-		.select(($) => ({
-			bucket: CH.toStartOfInterval($.Timestamp, bucketSeconds),
-			pageViews: CH.count(),
-			sessions: CH.uniq($.SessionId),
-		}))
-		.where(($) => navigationWhere($, opts))
-		.groupBy("bucket")
-		.orderBy(["bucket", "asc"])
-		.format("JSON")
+	return opts.useWebEvents
+		? from(WebEvents)
+				.select(($) => ({
+					bucket: CH.toStartOfInterval($.Timestamp, bucketSeconds),
+					pageViews: CH.count(),
+					sessions: CH.uniq($.SessionId),
+				}))
+				.where(($) => navigationWhereRollup($, opts))
+				.groupBy("bucket")
+				.orderBy(["bucket", "asc"])
+				.format("JSON")
+		: from(SessionEvents)
+				.select(($) => ({
+					bucket: CH.toStartOfInterval($.Timestamp, bucketSeconds),
+					pageViews: CH.count(),
+					sessions: CH.uniq($.SessionId),
+				}))
+				.where(($) => navigationWhereRaw($, opts))
+				.groupBy("bucket")
+				.orderBy(["bucket", "asc"])
+				.format("JSON")
 }
 
 // ---------------------------------------------------------------------------
@@ -421,28 +534,46 @@ export interface WebAnalyticsPagesOutput {
 }
 
 /**
- * Most-viewed pages, grouped by `domain(Url)` + `path(Url)`.
+ * Most-viewed pages, grouped by host + pathname.
  *
- * `path()` returns the pathname only — query string and fragment are already
- * excluded — so grouping on it cannot leak query-parameter PII into a
- * dimension list. Rows whose Url failed to parse (`domain` = '') are dropped
+ * The pathname is the pathname only — query string and fragment are already
+ * excluded, on both paths — so grouping on it cannot leak query-parameter PII
+ * into a dimension list. Rows whose Url failed to parse (host = '') are dropped
  * rather than collapsed into a blank row.
+ *
+ * On the rollup this is where the double `domain()`/`path()` evaluation goes
+ * away entirely: the raw form parses the URL once in the SELECT, once more in
+ * the WHERE, for all ~13x the rows it needed to read.
  */
 export function webAnalyticsPagesQuery(
 	opts: WebAnalyticsPagesOpts = {},
 ): CHQuery<any, WebAnalyticsPagesOutput, any> {
-	return from(SessionEvents)
-		.select(($) => ({
-			host: CH.domain_($.Url),
-			pagePath: CH.path_($.Url),
-			pageViews: CH.count(),
-			sessions: CH.uniq($.SessionId),
-		}))
-		.where(($) => [...navigationWhere($, opts), CH.domain_($.Url).neq("")])
-		.groupBy("host", "pagePath")
-		.orderBy(["pageViews", "desc"])
-		.limit(opts.limit ?? 100)
-		.format("JSON")
+	const limit = opts.limit ?? 100
+	return opts.useWebEvents
+		? from(WebEvents)
+				.select(($) => ({
+					host: $.Host,
+					pagePath: $.PagePath,
+					pageViews: CH.count(),
+					sessions: CH.uniq($.SessionId),
+				}))
+				.where(($) => [...navigationWhereRollup($, opts), $.Host.neq("")])
+				.groupBy("host", "pagePath")
+				.orderBy(["pageViews", "desc"])
+				.limit(limit)
+				.format("JSON")
+		: from(SessionEvents)
+				.select(($) => ({
+					host: CH.domain_($.Url),
+					pagePath: CH.path_($.Url),
+					pageViews: CH.count(),
+					sessions: CH.uniq($.SessionId),
+				}))
+				.where(($) => [...navigationWhereRaw($, opts), CH.domain_($.Url).neq("")])
+				.groupBy("host", "pagePath")
+				.orderBy(["pageViews", "desc"])
+				.limit(limit)
+				.format("JSON")
 }
 
 // ---------------------------------------------------------------------------

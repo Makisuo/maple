@@ -24,6 +24,7 @@ import {
 	spanMetricsCallsHourly,
 	serviceOperationsMinutely,
 	serviceOperationsHourly,
+	webEvents,
 } from "./datasources"
 import {
 	DB_NAMESPACE_ATTR_SQL,
@@ -1371,6 +1372,57 @@ export const logsAggregatesHourlyMv = defineMaterializedView("logs_aggregates_ho
           ResourceAttributes['service.namespace'] AS ServiceNamespace
         FROM logs
         GROUP BY OrgId, Hour, ServiceName, SeverityText, DeploymentEnv, ServiceNamespace
+      `,
+		}),
+	],
+})
+
+/**
+ * Populates `web_events` — the web analytics fact table.
+ *
+ * A pure row-wise projection: filter to the two product-analytics event types,
+ * pre-extract `domain(Url)`/`path(Url)`, re-sort by time in the target. No
+ * aggregation, which is what makes this safe as a materialized view.
+ *
+ * That distinction is load-bearing, because the neighbouring table is not.
+ * `session_replays` is a `ReplacingMergeTree(Version)` whose SDK writes a v1 row
+ * at session start and a v2 row at session end. A materialized view fires per
+ * *inserted block*, so it would see those as two independent sessions and
+ * evaluate any per-session predicate against half a session — `PageViews <= 1`
+ * against the v1 row (where `PageViews` is 0) would report every session as a
+ * bounce, which is exactly the bug `webAnalyticsSummaryQuery`'s doc comment
+ * records having shipped once already. `session_events` has no such hazard: it
+ * is an append-only MergeTree with no dedup and no versioning, so per-block
+ * firing is irrelevant here.
+ *
+ * `Type` is carried through as `Kind` rather than folded into `EventName`, so
+ * the page-view predicate stays provably identical to the pre-rollup
+ * `Type = 'navigation'` even if a customer calls `track('$pageview')`.
+ *
+ * Column order must match the `web_events` SCHEMA order — enforced by
+ * `materialized-projection-order.test.ts`.
+ */
+export const webEventsMv = defineMaterializedView("web_events_mv", {
+	description:
+		"Populates web_events from session_events navigation and custom rows, with domain(Url)/path(Url) pre-extracted and the event name normalized.",
+	datasource: webEvents,
+	nodes: [
+		node({
+			name: "web_events_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          Timestamp,
+          SessionId,
+          Seq,
+          Type AS Kind,
+          if(Type = 'navigation', '$pageview', Message) AS EventName,
+          domain(Url) AS Host,
+          path(Url) AS PagePath,
+          Url,
+          Attributes
+        FROM session_events
+        WHERE Type IN ('navigation', 'custom')
       `,
 		}),
 	],

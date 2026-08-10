@@ -633,6 +633,38 @@ export const SessionEvents = table("session_events", {
 	Attributes: T.map(T.string, T.string),
 })
 
+// Web analytics fact table — the navigation and custom rows of session_events,
+// re-sorted by time with the URL pre-parsed. Populated by `web_events_mv`.
+//
+// Exists because session_events is sorted (OrgId, SessionId, Timestamp, Seq), so
+// a time-range filter there cannot use the primary index at all, and its idx_type
+// skip index prunes ~nothing (navigation rows are interleaved through every
+// session's transcript). Reads that only want page views were scanning ~13x the
+// rows they used and parsing domain(Url)/path(Url) per row on top.
+//
+// Also the funnel substrate: windowFunnel over (Timestamp, EventName, PagePath)
+// grouped by SessionId.
+export const WebEvents = table("web_events", {
+	OrgId: T.string,
+	Timestamp: T.dateTime64,
+	SessionId: T.string,
+	// Tiebreaker within a millisecond, so a funnel's step order is stable.
+	Seq: T.uint32,
+	// "navigation" | "custom" — the source Type, carried through unchanged. This
+	// is the page-view predicate, NOT `EventName = '$pageview'`: track() takes a
+	// caller-supplied name with no reserved-prefix check, so a customer calling
+	// track('$pageview') would otherwise inflate the count.
+	Kind: T.string,
+	// "$pageview" for navigation, else the track() name. The funnel step key.
+	EventName: T.string,
+	// domain(Url) / path(Url), materialized at write time.
+	Host: T.string,
+	PagePath: T.string,
+	Url: T.string,
+	// track() props.
+	Attributes: T.map(T.string, T.string),
+})
+
 export const MetricsExpHistogram = table("metrics_exponential_histogram", {
 	OrgId: T.string,
 	ResourceAttributes: T.map(T.string, T.string),

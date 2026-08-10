@@ -2007,3 +2007,91 @@ export const sessionEvents = defineDatasource("session_events", {
 })
 
 export type SessionEventsRow = InferRow<typeof sessionEvents>
+
+/**
+ * Web analytics fact table — the page views and custom events out of
+ * `session_events`, re-sorted by time and with the URL pre-parsed.
+ * Populated by materialized view, not direct ingestion.
+ *
+ * ## Why this exists
+ *
+ * `session_events` is sorted `(OrgId, SessionId, Timestamp, Seq)`, so a
+ * time-range filter cannot use the primary index at all — only
+ * `PARTITION BY toDate(Timestamp)` prunes, at day granularity. Its `idx_type`
+ * skip index does not rescue that: navigation rows are interleaved with every
+ * session's clicks and network calls, so at `GRANULARITY 4` (32,768 rows per
+ * index granule) essentially every granule contains one and it prunes ~nothing.
+ * Measured on one production org over 7 days: 6,879 navigation rows out of
+ * 88,250 — the analytics queries read ~13x the data they use, and evaluated
+ * `domain(Url)`/`path(Url)` per row on top of it.
+ *
+ * A `host`/`pagePath` filter then multiplies that by twelve, because
+ * `navigationSessionsSubquery` is inlined into every branch of the breakdowns
+ * UNION.
+ *
+ * So: time-first sorting key, `Host`/`PagePath` materialized at write time, and
+ * only the two event types product analytics asks about.
+ *
+ * ## Why only navigation + custom
+ *
+ * These are the two that answer product questions and the two that can be funnel
+ * steps ("viewed /pricing", `track('signup_completed')`). Clicks are the next
+ * largest type by far (11,970 vs 6,879 over the same window) and a CSS selector
+ * is not a stable step definition, so including them would roughly triple the
+ * table to serve a worse funnel. In-session debugging still reads
+ * `session_events` directly — this table is not a replacement for it.
+ *
+ * ## Kind vs EventName
+ *
+ * Both, deliberately. `track()` puts a caller-supplied name straight into
+ * `Message` with no reserved-prefix check, so a customer calling
+ * `track('$pageview')` would silently inflate page views if `EventName` were the
+ * only discriminator. `Kind` is the column that is provably identical to the old
+ * `Type = 'navigation'` predicate; `EventName` is the funnel's step key.
+ *
+ * TTL 30 days, matching the rest of the session family. Note the source carries
+ * the same TTL, so this table can never be rebuilt past that horizon — a longer
+ * retention here is a one-way decision, not a tuning knob.
+ */
+export const webEvents = defineDatasource("web_events", {
+	description:
+		"Web analytics fact table: navigation and custom events from session_events, sorted by time with domain(Url)/path(Url) pre-extracted. Powers page views, top pages and funnels. Populated by materialized view.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Timestamp: t.dateTime64(9),
+		SessionId: t.string(),
+		/** Breaks ties within a millisecond, so a funnel's step order is stable. */
+		Seq: t.uint32(),
+		/** `navigation` | `custom` — the source `Type`, carried through unchanged. */
+		Kind: t.string().lowCardinality(),
+		/** `$pageview` for navigation, else the `track()` name. */
+		EventName: t.string(),
+		/** `domain(Url)`. LowCardinality: an org has a handful of hosts. */
+		Host: t.string().lowCardinality(),
+		/** `path(Url)` — pathname only, so no query string or fragment. Unbounded for `/orders/:uuid` apps, hence plain String. */
+		PagePath: t.string(),
+		Url: t.string(),
+		/** `track()` props. Plain String keys — the customer's app chooses them. */
+		Attributes: t.map(t.string(), t.string()),
+	},
+	engine: engine.mergeTree({
+		partitionKey: "toDate(Timestamp)",
+		sortingKey: ["OrgId", "Timestamp", "SessionId", "Seq"],
+		ttl: "toDate(Timestamp) + INTERVAL 30 DAY",
+	}),
+	indexes: [
+		{
+			// A funnel over a rare custom event would otherwise scan the whole
+			// window. `set(64)` because an org's distinct event names are few —
+			// past 64 per granule the index degrades to always-match, which is the
+			// same cost as not having it.
+			name: "idx_event_name",
+			expr: "EventName",
+			type: "set(64)",
+			granularity: 4,
+		},
+	],
+})
+
+export type WebEventsRow = InferRow<typeof webEvents>

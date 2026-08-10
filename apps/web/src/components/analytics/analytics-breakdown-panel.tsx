@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from "react"
+import { useDeferredValue, useMemo, useState, type ReactNode } from "react"
 
 import { cn } from "@maple/ui/lib/utils"
 import { formatNumber, formatPercent } from "@maple/ui/lib/format"
@@ -9,11 +9,33 @@ import type { WebAnalyticsFacetRow } from "@/api/warehouse/web-analytics"
 import type { AnalyticsFilterKey } from "./filters"
 import { analyticsRowIcon, dimensionHasIcons } from "./row-icon"
 
+/**
+ * A ranked row, optionally carrying a page-view count.
+ *
+ * `views` is present only where we genuinely measure it — the Pages dimension,
+ * off `session_events` — and absent everywhere else. It is deliberately not
+ * backfilled for the `session_replays` dimensions: a page-view count per
+ * referrer or per browser would need a semi-join back to `session_events` on
+ * every branch of the twelve-way breakdown union, and an approximation in that
+ * column would be indistinguishable from the real one beside it.
+ */
+export interface BreakdownRow extends WebAnalyticsFacetRow {
+	readonly views?: number
+	/**
+	 * A qualifier the row is grouped by but not named after — the Pages dimension
+	 * is ranked per `(host, path)` and displays the path, so two sites sharing
+	 * `/settings` are two rows that would otherwise be indistinguishable. Feeds
+	 * the row key, the tooltip and the local search, and is what `renderIcon`
+	 * reads to pick a favicon.
+	 */
+	readonly secondary?: string
+}
+
 export interface BreakdownDimension {
 	/** Tab label. */
 	readonly tab: string
 	/** Rows for this dimension, already ranked by the server. */
-	readonly rows: ReadonlyArray<WebAnalyticsFacetRow>
+	readonly rows: ReadonlyArray<BreakdownRow>
 	/** Which URL filter a row click sets. */
 	readonly filterKey: AnalyticsFilterKey
 	/** Singular noun for the value column head and the empty state. */
@@ -29,6 +51,20 @@ export interface BreakdownDimension {
 	/** Row-name → display text, for codes whose label differs (country, language). */
 	readonly formatValue?: (name: string) => string
 	/**
+	 * A note about *this dimension*, shown beside the share sentence. Distinct
+	 * from the panel-wide `footnote`, which is the coverage caveat: a dimension
+	 * can have something to say (Pages: "these counts cover every session") that
+	 * is not about coverage at all, and is in fact the opposite of a caveat.
+	 */
+	readonly note?: string
+	/**
+	 * Per-row leading icon, for dimensions whose icon is not derivable from the
+	 * row name alone — Pages needs its row's *host* favicon, which lives in
+	 * `secondary` rather than in the path the row is named by. Dimensions whose
+	 * icon follows from the name keep using `analyticsRowIcon`.
+	 */
+	readonly renderIcon?: (row: BreakdownRow) => ReactNode
+	/**
 	 * True when the column belongs to the migration-0011 analytics block, so the
 	 * panel's coverage caveat applies to it.
 	 *
@@ -42,7 +78,7 @@ export interface BreakdownDimension {
 	readonly coverageDependent?: boolean
 }
 
-type SortKey = "name" | "count"
+type SortKey = "name" | "count" | "views"
 
 /**
  * Identity label for dimensions with no `formatValue`. A module constant so the
@@ -75,7 +111,9 @@ interface AnalyticsBreakdownPanelProps {
  *   rows do not sum to 1. The footer says as much rather than implying they do.
  * - Counts are sessions, not visitors. Every branch of the breakdown query
  *   counts `uniq(SessionId)` — see that file's header for why counting rows
- *   would double-count on a ReplacingMergeTree.
+ *   would double-count on a ReplacingMergeTree. A dimension that also supplies
+ *   `views` (only Pages does) gains a page-view column and is ranked and tinted
+ *   by it instead.
  *
  * The row filter is local and network-free (`useDeferredValue` over the already-
  * fetched rows): the point is to find a known value in a 50-row list, and a
@@ -115,23 +153,36 @@ export function AnalyticsBreakdownPanel({
 
 	const label = dimension.formatValue ?? identityLabel
 
+	// The share is of whichever column ranks the dimension — page views where we
+	// have them, sessions otherwise — so the tint always tracks the number the
+	// rows are actually ordered by.
+	const hasViews = dimension.rows.some((row) => row.views !== undefined)
+
 	const rows = useMemo(() => {
-		const total = dimension.rows.reduce((sum, row) => sum + row.count, 0)
+		const total = dimension.rows.reduce((sum, row) => sum + (hasViews ? (row.views ?? 0) : row.count), 0)
 		const needle = deferredQuery.trim().toLowerCase()
 		return dimension.rows
-			.filter((row) => (needle ? label(row.name).toLowerCase().includes(needle) : true))
-			.map((row) => ({ ...row, share: total > 0 ? row.count / total : 0 }))
-	}, [dimension, deferredQuery, label])
+			.filter((row) =>
+				needle
+					? label(row.name).toLowerCase().includes(needle) ||
+						(row.secondary?.toLowerCase().includes(needle) ?? false)
+					: true,
+			)
+			.map((row) => ({
+				...row,
+				share: total > 0 ? (hasViews ? (row.views ?? 0) : row.count) / total : 0,
+			}))
+	}, [dimension, deferredQuery, label, hasViews])
 
 	const dimensionFootnote = dimension.coverageDependent ? footnote : undefined
 
 	// Whether *this dimension* carries icons, not whether this row does. Rows
 	// without one then reserve the gutter (a non-domain `utm_source` sitting
 	// among domains), so one iconless row doesn't unindent itself.
-	const hasIcons = dimensionHasIcons(dimension.filterKey)
+	const hasIcons = dimension.renderIcon !== undefined || dimensionHasIcons(dimension.filterKey)
 
 	const { sorted, sortKey, sortDir, handleSort } = useTableSort(rows, {
-		initialKey: "count" as SortKey,
+		initialKey: (hasViews ? "views" : "count") as SortKey,
 		stringKeys: ["name"],
 	})
 
@@ -176,7 +227,7 @@ export function AnalyticsBreakdownPanel({
 				<DataTable.Root
 					ariaLabel={`${dimension.tab} breakdown`}
 					waiting={waiting}
-					maxHeight={320}
+					maxHeight={360}
 					stickySurfaceClass="bg-card"
 				>
 					<DataTable.Head>
@@ -188,28 +239,45 @@ export function AnalyticsBreakdownPanel({
 							dir={sortDir}
 							onSort={handleSort}
 						/>
+						{hasViews ? (
+							<ColumnHead<SortKey>
+								label="Views"
+								width="w-16"
+								align="right"
+								sortKey="views"
+								currentKey={sortKey}
+								dir={sortDir}
+								onSort={handleSort}
+							/>
+						) : null}
 						<ColumnHead<SortKey>
 							label="Sessions"
-							width="w-24"
+							width={hasViews ? "w-20" : "w-24"}
 							align="right"
 							sortKey="count"
 							currentKey={sortKey}
 							dir={sortDir}
 							onSort={handleSort}
 						/>
-						<ColumnHead<SortKey> label="Share" width="w-16" align="right" />
+						{/* Dropped once a Views column is present. These cards are half-width,
+						    and a third numeric column truncated every page path to "/app…" —
+						    the row tint already encodes the share, so the column was the
+						    least informative thing competing for the space. */}
+						{hasViews ? null : <ColumnHead<SortKey> label="Share" width="w-16" align="right" />}
 					</DataTable.Head>
 					{sorted.length === 0 ? (
 						<DataTable.Empty>No {dimension.noun} matches that filter.</DataTable.Empty>
 					) : (
 						sorted.map((row) => {
 							const isSelected = selected === row.name
-							const icon = hasIcons
-								? analyticsRowIcon(dimension.filterKey, row.name)
-								: undefined
+							const icon = dimension.renderIcon
+								? dimension.renderIcon(row)
+								: hasIcons
+									? analyticsRowIcon(dimension.filterKey, row.name)
+									: undefined
 							return (
 								<button
-									key={row.name}
+									key={row.secondary ? `${row.secondary}${row.name}` : row.name}
 									type="button"
 									onClick={() => onToggleFilter(dimension.filterKey, row.name)}
 									aria-pressed={isSelected}
@@ -233,17 +301,33 @@ export function AnalyticsBreakdownPanel({
 													? "font-medium text-foreground"
 													: "text-foreground/90",
 											)}
-											title={label(row.name)}
+											title={
+												row.secondary
+													? `${row.secondary}${row.name}`
+													: label(row.name)
+											}
 										>
 											{label(row.name)}
 										</span>
 									</span>
-									<span className="w-24 text-right font-mono text-[11px] tabular-nums">
+									{hasViews ? (
+										<span className="w-16 text-right font-mono text-[11px] tabular-nums">
+											{formatNumber(row.views ?? 0)}
+										</span>
+									) : null}
+									<span
+										className={cn(
+											"text-right font-mono text-[11px] tabular-nums",
+											hasViews ? "w-20 text-muted-foreground" : "w-24",
+										)}
+									>
 										{formatNumber(row.count)}
 									</span>
-									<span className="w-16 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
-										{formatPercent(row.share)}
-									</span>
+									{hasViews ? null : (
+										<span className="w-16 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+											{formatPercent(row.share)}
+										</span>
+									)}
 								</button>
 							)
 						})
@@ -252,12 +336,16 @@ export function AnalyticsBreakdownPanel({
 			)}
 
 			{/* The share sentence describes a ranking, so it is suppressed when there is
-			    nothing ranked — the coverage footnote is the useful half there. */}
-			{dimensionFootnote || dimension.rows.length > 0 ? (
+			    nothing ranked — the notes are the useful half there. */}
+			{dimensionFootnote || dimension.note || dimension.rows.length > 0 ? (
 				<div className="px-4 py-2 text-[10px] text-muted-foreground/80">
+					{/* Names whichever thing is actually carrying the share: the column
+					    where there is one, the row shading where the Views column has
+					    taken its place. */}
 					{dimension.rows.length > 0
-						? `Share is of the ${formatNumber(dimension.rows.length)} listed ${dimension.nounPlural}, not of all traffic.`
+						? `${hasViews ? "Row shading shows each row's share" : "Share is"} of the ${formatNumber(dimension.rows.length)} listed ${dimension.nounPlural}, not of all traffic.`
 						: null}
+					{dimension.note ? ` ${dimension.note}` : ""}
 					{dimensionFootnote ? ` ${dimensionFootnote}` : ""}
 				</div>
 			) : null}

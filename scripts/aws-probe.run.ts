@@ -63,7 +63,11 @@ export default Alchemy.Stack(
 			tags,
 		})
 		if (level === "ecr") {
-			return { level, state: useCloudState ? "cloud" : "local", repositoryUri: repository.repositoryUri }
+			return {
+				level,
+				state: useCloudState ? "cloud" : "local",
+				repositoryUri: repository.repositoryUri,
+			}
 		}
 
 		const network = yield* AWS.EC2.Network("probe-network", {

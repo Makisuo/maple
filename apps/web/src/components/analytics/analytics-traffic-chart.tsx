@@ -7,125 +7,66 @@ import {
 	ChartTooltipContent,
 	type ChartConfig,
 } from "@maple/ui/components/ui/chart"
-import { formatNumber } from "@maple/ui/lib/format"
 
-import type { WebAnalyticsPageviewsPoint, WebAnalyticsTimeseriesPoint } from "@/api/warehouse/web-analytics"
 import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler } from "../infra/chart-utils"
 import { CHART_HEIGHT, ChartCard, ChartCardMessage } from "../infra/primitives/chart-card"
+import type { AnalyticsMetricDescriptor, AnalyticsMetricSource } from "./metrics"
 
-const CHART_CONFIG = {
-	pageViews: { label: "Page views", color: "var(--chart-2)" },
-	visitors: { label: "Visitors", color: "var(--chart-1)" },
-} satisfies ChartConfig
+// The page's one accent, same as the KPI sparklines (`SPARK_COLOR.neutral`) and
+// the row tints (`shareTint`). Deliberately not `--chart-1`, which is this same
+// amber only in the dark theme and a blue in the light one — the chart would
+// have disagreed with the tile that selected it, at half of all page loads.
+const SERIES_COLOR = "var(--primary)"
 
 interface AnalyticsTrafficChartProps {
-	visitorPoints: ReadonlyArray<WebAnalyticsTimeseriesPoint>
-	pageviewPoints: ReadonlyArray<WebAnalyticsPageviewsPoint>
+	/** The metric selected in the KPI strip. Supplies the series and its formatting. */
+	metric: AnalyticsMetricDescriptor
+	source: AnalyticsMetricSource
 	syncId?: string
 }
 
 /**
- * Page views and unique visitors on one set of axes.
+ * The selected metric over time.
  *
- * The two series come from different tables with different coverage — page views
- * from every session, visitors only from sessions whose SDK build posts the
- * analytics block — so they are deliberately *not* stacked and the visitors area
- * is drawn over the page-view area rather than under it. Reading visitors as a
- * subset of page views is the correct reading; reading their sum as anything is
- * not.
+ * One series, not the fixed page-views-and-visitors pair this used to draw. The
+ * pair was a compromise made when the rail above was inert; now that each tile
+ * selects, showing two series would leave six metrics unreachable and would
+ * force two incompatible units (a rate and a count) onto one axis. The strip is
+ * the legend — the tile that is lit is the series that is drawn.
  *
- * Buckets are outer-joined on the union of both series' timestamps, so a window
- * where one table has data and the other doesn't shows a gap in one line instead
- * of shifting the other one sideways.
+ * Formatting for the axis and the tooltip comes from the descriptor, so bounce
+ * rate renders as a percentage and average session as a duration without this
+ * component knowing either metric exists.
  */
-export function AnalyticsTrafficChart({ visitorPoints, pageviewPoints, syncId }: AnalyticsTrafficChartProps) {
-	const gradientPrefix = useId().replace(/:/g, "")
+export function AnalyticsTrafficChart({ metric, source, syncId }: AnalyticsTrafficChartProps) {
+	const gradientId = `${useId().replace(/:/g, "")}-area`
 
 	const data = useMemo(() => {
-		const byBucket = new Map<string, { visitors: number; pageViews: number }>()
-		for (const point of pageviewPoints) {
-			const entry = byBucket.get(point.bucket) ?? { visitors: 0, pageViews: 0 }
-			entry.pageViews = point.pageViews
-			byBucket.set(point.bucket, entry)
-		}
-		for (const point of visitorPoints) {
-			const entry = byBucket.get(point.bucket) ?? { visitors: 0, pageViews: 0 }
-			entry.visitors = point.visitors
-			byBucket.set(point.bucket, entry)
-		}
-		const buckets = [...byBucket.keys()].sort()
-		const label = makeBucketLabeler(buckets)
-		return buckets.map((bucket) => ({ label: label(bucket), ...byBucket.get(bucket)! }))
-	}, [visitorPoints, pageviewPoints])
+		const points = metric.series(source)
+		const label = makeBucketLabeler(points.map((point) => point.bucket))
+		return points.map((point) => ({ label: label(point.bucket), value: point.value }))
+	}, [metric, source])
 
-	const totals = useMemo(
-		() => ({
-			pageViews: data.reduce((sum, row) => sum + row.pageViews, 0),
-			visitors: visitorPoints.reduce((sum, row) => sum + row.visitors, 0),
-		}),
-		[data, visitorPoints],
-	)
-
-	// A flat-zero visitors series means no session in the window reports a visitor
-	// id, not that nobody visited — the page-view series right next to it proves
-	// otherwise. Drop the series rather than draw a line along the axis, and label
-	// it so the absence reads as unreported instead of as zero.
-	const hasVisitors = totals.visitors > 0
-	const seriesKeys = hasVisitors ? (["pageViews", "visitors"] as const) : (["pageViews"] as const)
-
-	const legend = (
-		<>
-			{(["pageViews", "visitors"] as const).map((key) => (
-				<span key={key} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-					<span
-						aria-hidden
-						className="size-1.5 rounded-full"
-						style={{
-							backgroundColor:
-								key === "visitors" && !hasVisitors
-									? "var(--muted-foreground)"
-									: CHART_CONFIG[key].color,
-							opacity: key === "visitors" && !hasVisitors ? 0.4 : 1,
-						}}
-					/>
-					{CHART_CONFIG[key].label}
-					<span className="font-mono tabular-nums text-muted-foreground/70">
-						{key === "visitors" && !hasVisitors ? "not reported" : formatNumber(totals[key])}
-					</span>
-				</span>
-			))}
-		</>
+	const config = useMemo(
+		() =>
+			({
+				value: { label: metric.label, color: SERIES_COLOR },
+			}) satisfies ChartConfig,
+		[metric.label],
 	)
 
 	return (
-		<ChartCard title="Traffic" legend={legend}>
+		<ChartCard title={metric.label}>
 			{data.length === 0 ? (
 				<ChartCardMessage>{CHART_EMPTY_MESSAGE}</ChartCardMessage>
 			) : (
-				<ChartContainer config={CHART_CONFIG} className="w-full" style={{ height: CHART_HEIGHT }}>
+				<ChartContainer config={config} className="w-full" style={{ height: CHART_HEIGHT }}>
 					<AreaChart data={data} syncId={syncId} syncMethod="value" margin={{ left: 4, right: 8 }}>
 						<defs>
-							{seriesKeys.map((key) => (
-								<linearGradient
-									key={key}
-									id={`${gradientPrefix}-${key}`}
-									x1="0"
-									y1="0"
-									x2="0"
-									y2="1"
-								>
-									<stop
-										offset="0%"
-										stopColor={CHART_CONFIG[key].color}
-										stopOpacity={0.35}
-									/>
-									<stop
-										offset="100%"
-										stopColor={CHART_CONFIG[key].color}
-										stopOpacity={0.02}
-									/>
-								</linearGradient>
-							))}
+							<linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+								<stop offset="0%" stopColor={SERIES_COLOR} stopOpacity={0.35} />
+								<stop offset="100%" stopColor={SERIES_COLOR} stopOpacity={0.02} />
+							</linearGradient>
 						</defs>
 						<CartesianGrid vertical={false} strokeDasharray={CHART_GRID_DASH} />
 						<XAxis
@@ -139,23 +80,45 @@ export function AnalyticsTrafficChart({ visitorPoints, pageviewPoints, syncId }:
 						<YAxis
 							tickLine={false}
 							axisLine={false}
-							width={44}
-							tickFormatter={(value: number) => formatNumber(value)}
+							width={52}
+							// The metric formatters render a zero *headline* as "—" ("no
+							// session ended", not "0s"). On an axis that reading is wrong —
+							// the baseline is a real zero — so it is spelled out here.
+							tickFormatter={(value: number) => (value === 0 ? "0" : metric.format(value))}
 							className="text-[10px]"
 						/>
-						<ChartTooltip content={<ChartTooltipContent />} />
-						{/* Page views first so the smaller visitors area paints on top of it. */}
-						{seriesKeys.map((key) => (
-							<Area
-								key={key}
-								type="monotone"
-								dataKey={key}
-								stroke={CHART_CONFIG[key].color}
-								strokeWidth={1.5}
-								fill={`url(#${gradientPrefix}-${key})`}
-								isAnimationActive={false}
-							/>
-						))}
+						{/* `formatter` replaces the whole tooltip row, not just the number,
+						    so the swatch and label are rebuilt here — otherwise a metric
+						    like Bounce rate would render its raw 0.2864. */}
+						<ChartTooltip
+							content={
+								<ChartTooltipContent
+									formatter={(value) => (
+										<>
+											<span
+												aria-hidden
+												className="size-2.5 shrink-0 self-center rounded-[2px]"
+												style={{ backgroundColor: SERIES_COLOR }}
+											/>
+											<div className="flex flex-1 items-center justify-between gap-3 leading-none">
+												<span className="text-muted-foreground">{metric.label}</span>
+												<span className="font-mono font-medium tabular-nums text-foreground">
+													{metric.format(Number(value))}
+												</span>
+											</div>
+										</>
+									)}
+								/>
+							}
+						/>
+						<Area
+							type="monotone"
+							dataKey="value"
+							stroke={SERIES_COLOR}
+							strokeWidth={1.5}
+							fill={`url(#${gradientId})`}
+							isAnimationActive={false}
+						/>
 					</AreaChart>
 				</ChartContainer>
 			)}

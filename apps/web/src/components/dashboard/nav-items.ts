@@ -18,7 +18,6 @@ import {
 	ServerIcon,
 } from "@/components/icons"
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
-import type { OrganizationFeatureFlags } from "@/lib/organization-feature-flags"
 
 export interface NavSubItem {
 	title: string
@@ -119,20 +118,19 @@ const exploreItem: NavItem = {
  * palette flattens. Anomalies is reachable at /anomalies but stays out of both
  * until the detector has been validated against production baselines.
  *
- * `flags` gates staged rollouts. Omitting it hides every flagged row, which is
- * the safe default for a caller that has no organization context — the flags are
- * decoded from Clerk metadata and are unavailable while it loads, and a row that
+ * Takes no flags: no row is behind a staged rollout right now (Web Analytics was
+ * the last, and shipped to everyone). Re-gating one means taking an
+ * `OrganizationFeatureFlags` parameter back and threading it from
+ * `useOrganizationFeatureFlags` — and making it *optional*, so a caller with no
+ * organization context yet hides the row rather than flashing it. A row that
  * appears and then vanishes is worse than one that arrives a beat late.
  */
-export function navGroups(flags?: OrganizationFeatureFlags): NavGroup[] {
-	// Rows behind a rollout flag. Filtered out of both the sidebar and ⌘K, since
-	// `paletteNavItems` derives from this — a flagged-off page that is still
-	// findable by typing its name is not hidden.
-	const analyzeItems: NavItem[] = [exploreItem]
-	if (flags?.webAnalytics) {
-		analyzeItems.push({ title: "Web Analytics", href: "/analytics", icon: ChartBarHorizontalIcon })
-	}
-	analyzeItems.push({ title: "Dashboards", href: "/dashboards", icon: GridSquareCirclePlusIcon })
+export function navGroups(): NavGroup[] {
+	const analyzeItems: NavItem[] = [
+		exploreItem,
+		{ title: "Web Analytics", href: "/analytics", icon: ChartBarHorizontalIcon },
+		{ title: "Dashboards", href: "/dashboards", icon: GridSquareCirclePlusIcon },
+	]
 
 	return [
 		{ id: "overview", items: [overviewItem] },
@@ -190,7 +188,7 @@ export interface PaletteNavEntry {
  * are the entries that keep muscle memory working, and they were never in the
  * palette before this.
  */
-export function paletteNavItems(flags?: OrganizationFeatureFlags): PaletteNavEntry[] {
+export function paletteNavItems(): PaletteNavEntry[] {
 	const entries: PaletteNavEntry[] = []
 	const seen = new Set<string>()
 	const push = (entry: PaletteNavEntry) => {
@@ -200,7 +198,7 @@ export function paletteNavItems(flags?: OrganizationFeatureFlags): PaletteNavEnt
 		entries.push(entry)
 	}
 
-	for (const group of navGroups(flags)) {
+	for (const group of navGroups()) {
 		for (const item of group.items) {
 			push({ id: `nav:${item.title}`, title: item.title, href: item.href, icon: item.icon })
 			for (const sub of item.subItems ?? []) {

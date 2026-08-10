@@ -95,6 +95,15 @@ export interface WebAnalyticsTimeseriesPoint {
 	visitors: number
 	sessions: number
 	newSessions: number
+	/**
+	 * Bounces within `identifiedSessions` for this bucket. The bucket's bounce
+	 * rate is `bouncedSessions / identifiedSessions` — dividing by `sessions`
+	 * counts every session from an SDK build without the analytics block as a
+	 * bounce, which is the bug the summary query's doc comment records.
+	 */
+	bouncedSessions: number
+	identifiedSessions: number
+	avgDurationMs: number
 }
 
 export interface WebAnalyticsPageviewsPoint {

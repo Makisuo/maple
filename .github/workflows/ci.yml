@@ -453,6 +453,19 @@ jobs:
                   bun run --filter=@maple/api test --
                   src/services/warehouse/sql-catalog.clickhouse.e2e.test.ts
 
+            # The catalog sweep proves the rollup SQL parses; this proves it
+            # AGREES with the raw path it replaced. A divergence here renders as a
+            # plausible-looking wrong number, so nothing downstream would catch it.
+            - name: Verify web analytics raw-vs-rollup parity
+              env:
+                  CLICKHOUSE_E2E: "1"
+                  CLICKHOUSE_E2E_URL: http://127.0.0.1:8123
+                  CLICKHOUSE_E2E_USER: maple
+                  CLICKHOUSE_E2E_PASSWORD: maple
+              run: >-
+                  bun run --filter=@maple/api test --
+                  src/services/warehouse/web-analytics-parity.clickhouse.e2e.test.ts
+
     local-checkpoint-native:
         name: Local checkpoint native
         needs: changes

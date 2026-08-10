@@ -19,11 +19,9 @@ const DisabledByDefaultFeatureFlag = Schema.Unknown.pipe(
  */
 export const OrganizationFeatureFlags = Schema.Struct({
 	aiAutoTriage: DisabledByDefaultFeatureFlag,
-	webAnalytics: DisabledByDefaultFeatureFlag,
 }).pipe(
 	Schema.encodeKeys({
 		aiAutoTriage: "aiautotriage",
-		webAnalytics: "webanalytics",
 	}),
 )
 
@@ -34,7 +32,6 @@ const decodeOrganizationFeatureFlags = Schema.decodeUnknownOption(OrganizationFe
 /** Every rollout off — the value for malformed metadata, and for the pre-load window. */
 export const DISABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
 	aiAutoTriage: false,
-	webAnalytics: false,
 }
 
 /**
@@ -45,7 +42,6 @@ export const DISABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
  */
 export const ENABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
 	aiAutoTriage: true,
-	webAnalytics: true,
 }
 
 /** Decode Clerk metadata, falling back to every rollout disabled for non-object input. */

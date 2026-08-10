@@ -10,6 +10,8 @@ import {
 	LOCAL_SCHEMA_V2,
 	LOCAL_SCHEMA_V2_MANIFEST,
 	LOCAL_SCHEMA_V3,
+	LOCAL_SCHEMA_V3_MANIFEST,
+	LOCAL_SCHEMA_V4,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -51,16 +53,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v3 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("0d7e8c2f7857a351")
-		expect(SCHEMA_DIGEST).toBe("0d7e8c2f7857a3510beb2bf5ab6f214551274986e513592c6dd22d4eb83aa3ca")
+	it("matches the generated v4 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("75ac856927d88d56")
+		expect(SCHEMA_DIGEST).toBe("75ac856927d88d56518f12c68407a8f2a199d000b6eeb8576f9c97000138f5a4")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(3)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V3)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(4)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V4)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -82,6 +84,21 @@ describe("current local schema identity", () => {
 			(object) => object.name === "error_events_by_time_mv",
 		)
 		expect(v2TimeOrderedErrors?.definition).toContain("FROM error_events")
+
+		// v4 is exactly v3 plus the web analytics fact table and its view. Asserted
+		// against the frozen v3 manifest rather than the diff so a later structural
+		// change can't quietly ride along on this version.
+		const webEvents = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "web_events")
+		expect(webEvents?.engine).toBe("MergeTree")
+		expect(webEvents?.orderBy).toBe("(OrgId, Timestamp, SessionId, Seq)")
+		expect(webEvents?.indexes).toContain("idx_event_name")
+		const webEventsView = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "web_events_mv")
+		expect(webEventsView?.definition).toContain("FROM session_events")
+		const v3Names = new Set(LOCAL_SCHEMA_V3_MANIFEST.objects.map((object) => object.name))
+		expect(v3Names.has("web_events")).toBe(false)
+		expect(
+			LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name).filter((name) => !v3Names.has(name)),
+		).toEqual(["web_events", "web_events_mv"])
 	})
 })
 
@@ -92,11 +109,13 @@ describe("local migration registry", () => {
 			"local-0000-to-0001-raw-replay",
 			"local-0001-to-0002-error-rollup",
 			"local-0002-to-0003-service-map-ingest-bridge",
+			"local-0003-to-0004-web-events",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
 		expect(chain[1]?.to).toEqual(LOCAL_SCHEMA_V2)
 		expect(chain[2]?.to).toEqual(LOCAL_SCHEMA_V3)
+		expect(chain[3]?.to).toEqual(LOCAL_SCHEMA_V4)
 		expect(typeof chain[0]?.apply).toBe("function")
 	})
 
@@ -118,12 +137,12 @@ describe("local migration registry", () => {
 				maple: "dev",
 				createdAt: "2026-01-01T00:00:00.000Z",
 				createdByMaple: "dev",
-				schemaVersion: 3,
+				schemaVersion: 4,
 				schemaDigest: SCHEMA_DIGEST,
 				schema: SCHEMA_FINGERPRINT,
 				activation: "active",
 			}),
-		).toMatchObject({ version: 3, fingerprint: SCHEMA_FINGERPRINT, digest: SCHEMA_DIGEST })
+		).toMatchObject({ version: 4, fingerprint: SCHEMA_FINGERPRINT, digest: SCHEMA_DIGEST })
 	})
 
 	it("rejects unknown, future, downgrade, and ambiguous paths", () => {
@@ -132,7 +151,7 @@ describe("local migration registry", () => {
 		).toThrow(/no registered/)
 		expect(() =>
 			resolveMigrationChain(
-				{ ...CURRENT_LOCAL_SCHEMA, version: 4, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 5, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)

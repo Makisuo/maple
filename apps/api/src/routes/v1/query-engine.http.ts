@@ -70,7 +70,7 @@ import {
 	TraceId,
 	SpanId,
 } from "@maple/domain/http"
-import { Clock, Config, Effect, Match, Option, Schema } from "effect"
+import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { makeDirectRouteCachePolicy, makeExecuteRawSql } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -88,6 +88,7 @@ import {
 import { Queries } from "@/routes/queries"
 import { makeQueryRunners } from "@/routes/query-runner"
 import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
+import type { TenantContext } from "@/services/auth/AuthService"
 import * as Integrations from "@maple/query-engine-integrations"
 
 // `warehouse.sqlQuery` fails with the warehouse error union (distinct tagged
@@ -122,6 +123,80 @@ const isMissingServiceOperationsRollup = (error: unknown): boolean => {
 	)
 }
 
+/**
+ * `web_events` is a read-path rollup on a `requiredForIngest: false` migration,
+ * so a BYO cluster can be perfectly healthy and still not have it — the org just
+ * hasn't re-applied schema yet. Same shape as the service-operations detector
+ * above, and the same reason: the fallback has to be automatic and per-org,
+ * because there is no global moment when every cluster has migrated.
+ */
+const isMissingWebEvents = (error: unknown): boolean => {
+	if (typeof error !== "object" || error === null) return false
+	const candidate = error as {
+		readonly _tag?: unknown
+		readonly clickhouseType?: unknown
+		readonly message?: unknown
+	}
+	return (
+		candidate._tag === "@maple/http/errors/WarehouseConfigError" &&
+		(candidate.clickhouseType === "UNKNOWN_TABLE" ||
+			(typeof candidate.message === "string" && /web_events/i.test(candidate.message)))
+	)
+}
+
+/**
+ * Read a rollup table, degrading to the raw-source query on a cluster that does
+ * not have it.
+ *
+ * **This is error recovery, not a rollout switch.** There is no flag and nothing
+ * to set: these rollups ship in `requiredForIngest: false` migrations, which
+ * reach a BYO-ClickHouse cluster only when an org admin opens Settings → BYO
+ * Backend and clicks Apply schema. Nothing reconciles that — there is no cron,
+ * no on-deploy hook, and `upsert` deliberately runs no DDL.
+ * `ClickHouseSchemaApplyWorkflow` even skips perf-only migrations in its first
+ * pass and retries them best-effort inside a try/catch, so a run can report
+ * `succeeded` with the table still absent. So the window where an org lacks one
+ * is unbounded, per-org, and invisible from here, and the only correct response
+ * is to notice at query time and read the other table. Without this, those orgs
+ * get a hard 502 titled "Database is not configured correctly" with no
+ * remediation hint, indefinitely.
+ *
+ * The two definitions in each pair are required to return identical rows — this
+ * is a source swap, not a semantics change, enforced for web analytics by
+ * `web-analytics-parity.clickhouse.e2e.test.ts` — so the degrade is invisible to
+ * the caller and needs no response-shape branching. `Effect.fn` would give this
+ * a second span; it is deliberately a plain helper so the fallback annotation
+ * lands on the handler's own span.
+ */
+const makeRollupFallback =
+	(detect: (error: unknown) => boolean, warning: string) =>
+	<A, P, E, R>(
+		rollup: (tenant: TenantContext, payload: P) => Effect.Effect<A, E, R>,
+		raw: (tenant: TenantContext, payload: P) => Effect.Effect<A, E, R>,
+		tenant: TenantContext,
+		payload: P,
+	): Effect.Effect<A, E, R> =>
+		rollup(tenant, payload).pipe(
+			Effect.catch((error) => {
+				if (!detect(error)) return Effect.fail(error)
+				return Effect.gen(function* () {
+					yield* Effect.logWarning(warning).pipe(Effect.annotateLogs({ orgId: tenant.orgId }))
+					yield* Effect.annotateCurrentSpan("query.rollup.fallback", true)
+					return yield* raw(tenant, payload)
+				})
+			}),
+		)
+
+const withWebEventsFallback = makeRollupFallback(
+	isMissingWebEvents,
+	"web_events is absent on this cluster; reading raw session_events. Apply ClickHouse schema to restore the fast path.",
+)
+
+const withServiceOperationsFallback = makeRollupFallback(
+	isMissingServiceOperationsRollup,
+	"service_operations rollup is absent on this cluster; reading raw traces. Apply ClickHouse schema to restore the fast path.",
+)
+
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
 const decodeServiceName = Schema.decodeUnknownSync(ServiceName)
@@ -148,9 +223,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 		const warehouse = yield* WarehouseQueryService
 		const { runQuery, runQueryFirst } = makeQueryRunners({ warehouse, queryEngine })
 
-		const serviceOperationsRollupEnabled = yield* Config.boolean(
-			"SERVICE_OPERATIONS_ROLLUP_ENABLED",
-		).pipe(Config.withDefault(false))
 		const executeRawSql = makeExecuteRawSql<ExecutionTenant, WarehouseSqlError | RawSqlValidationError>(
 			warehouse,
 		)
@@ -970,39 +1042,18 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"serviceOperations",
 						payload,
 						Effect.gen(function* () {
-							yield* Effect.annotateCurrentSpan(
-								"query.rollup.enabled",
-								serviceOperationsRollupEnabled,
-							)
-							// Migration 0008 is deployed, backfilled, and parity-checked, so
-							// deployed stages ship this on (`alchemy.run.ts`). The Config
-							// default stays `false` for local/test, where the rollup tables
-							// may not exist. Disabling it restores the all-raw rollback path
-							// without changing the endpoint contract.
-							const runRawSummary = () =>
-								runQuery(Queries.serviceOperationsSummaryRaw, tenant, payload)
-							let useRollup = serviceOperationsRollupEnabled
-							const summaryEffect = useRollup
-								? runQuery(Queries.serviceOperationsSummary, tenant, payload).pipe(
-										Effect.catch((error) => {
-											if (!isMissingServiceOperationsRollup(error))
-												return Effect.fail(error)
-											useRollup = false
-											return Effect.gen(function* () {
-												yield* Effect.logWarning(
-													"Service operations rollup is unavailable; using raw rollback path",
-												).pipe(Effect.annotateLogs({ orgId: tenant.orgId }))
-												yield* Effect.annotateCurrentSpan(
-													"query.rollup.fallback",
-													true,
-												)
-												return yield* runRawSummary()
-											})
-										}),
-									)
-								: runRawSummary()
+							// Both reads try `service_operations_minutely`/`_hourly` and
+							// degrade per-org on UNKNOWN_TABLE. The timeseries read repeats
+							// the probe rather than inheriting the summary's verdict: one
+							// extra failed query on a cluster that never applied migration
+							// 0008 is cheaper than the mutable flag this replaced.
 							const summaryRows = yield* mapExecError(
-								summaryEffect,
+								withServiceOperationsFallback(
+									(t, pl) => runQuery(Queries.serviceOperationsSummary, t, pl),
+									(t, pl) => runQuery(Queries.serviceOperationsSummaryRaw, t, pl),
+									tenant,
+									payload,
+								),
 								"serviceOperations query failed",
 							)
 							if (summaryRows.length === 0) {
@@ -1021,25 +1072,13 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							const requestedBucketSeconds = payload.bucketSeconds ?? windowSeconds / 50
 							const bucketSeconds = Math.max(1, Math.round(requestedBucketSeconds / 60)) * 60
 							const timeseriesInput = { ...payload, spanNames, bucketSeconds }
-							const runRawTimeseries = () =>
-								runQuery(Queries.serviceOperationsTimeseriesRaw, tenant, timeseriesInput)
-							const timeseriesEffect = useRollup
-								? runQuery(Queries.serviceOperationsTimeseries, tenant, timeseriesInput).pipe(
-										Effect.catch((error) =>
-											isMissingServiceOperationsRollup(error)
-												? Effect.gen(function* () {
-														yield* Effect.annotateCurrentSpan(
-															"query.rollup.fallback",
-															true,
-														)
-														return yield* runRawTimeseries()
-													})
-												: Effect.fail(error),
-										),
-									)
-								: runRawTimeseries()
 							const timeseriesRows = yield* mapExecError(
-								timeseriesEffect,
+								withServiceOperationsFallback(
+									(t, pl) => runQuery(Queries.serviceOperationsTimeseries, t, pl),
+									(t, pl) => runQuery(Queries.serviceOperationsTimeseriesRaw, t, pl),
+									tenant,
+									timeseriesInput,
+								),
 								"serviceOperationsTimeseries query failed",
 							)
 
@@ -1528,7 +1567,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("webAnalyticsSummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const row = yield* runQueryFirst(Queries.webAnalyticsSummary, tenant, payload)
+					const row = yield* withWebEventsFallback(
+						(t, pl) => runQueryFirst(Queries.webAnalyticsSummary, t, pl),
+						(t, pl) => runQueryFirst(Queries.webAnalyticsSummaryRaw, t, pl),
+						tenant,
+						payload,
+					)
 					// A window with no sessions returns no rows at all, not a row of
 					// zeroes — the page needs the zeroes to render its empty state.
 					return new WebAnalyticsSummaryResponse({
@@ -1546,13 +1590,21 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("webAnalyticsTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.webAnalyticsTimeseries, tenant, payload)
+					const rows = yield* withWebEventsFallback(
+						(t, pl) => runQuery(Queries.webAnalyticsTimeseries, t, pl),
+						(t, pl) => runQuery(Queries.webAnalyticsTimeseriesRaw, t, pl),
+						tenant,
+						payload,
+					)
 					return new WebAnalyticsTimeseriesResponse({
 						data: rows.map((row) => ({
 							bucket: String(row.bucket),
 							visitors: Number(row.visitors) || 0,
 							sessions: Number(row.sessions) || 0,
 							newSessions: Number(row.newSessions) || 0,
+							bouncedSessions: Number(row.bouncedSessions) || 0,
+							identifiedSessions: Number(row.identifiedSessions) || 0,
+							avgDurationMs: Number(row.avgDurationMs) || 0,
 						})),
 					})
 				}),
@@ -1560,7 +1612,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("webAnalyticsPageviews", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.webAnalyticsPageviews, tenant, payload)
+					const rows = yield* withWebEventsFallback(
+						(t, pl) => runQuery(Queries.webAnalyticsPageviews, t, pl),
+						(t, pl) => runQuery(Queries.webAnalyticsPageviewsRaw, t, pl),
+						tenant,
+						payload,
+					)
 					return new WebAnalyticsPageviewsResponse({
 						data: rows.map((row) => ({
 							bucket: String(row.bucket),
@@ -1573,7 +1630,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("webAnalyticsPages", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.webAnalyticsPages, tenant, payload)
+					const rows = yield* withWebEventsFallback(
+						(t, pl) => runQuery(Queries.webAnalyticsPages, t, pl),
+						(t, pl) => runQuery(Queries.webAnalyticsPagesRaw, t, pl),
+						tenant,
+						payload,
+					)
 					return new WebAnalyticsPagesResponse({
 						data: rows.map((row) => ({
 							host: String(row.host),
@@ -1587,7 +1649,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("webAnalyticsBreakdowns", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.webAnalyticsBreakdowns, tenant, payload)
+					const rows = yield* withWebEventsFallback(
+						(t, pl) => runQuery(Queries.webAnalyticsBreakdowns, t, pl),
+						(t, pl) => runQuery(Queries.webAnalyticsBreakdownsRaw, t, pl),
+						tenant,
+						payload,
+					)
 					const buckets = {
 						referrerHosts: [] as Array<{ name: string; count: number }>,
 						countries: [] as Array<{ name: string; count: number }>,
