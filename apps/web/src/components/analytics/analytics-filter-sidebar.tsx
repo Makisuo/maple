@@ -25,6 +25,8 @@ import {
 	type AnalyticsFilters,
 } from "./filters"
 import { countryLabel, languageLabel } from "./labels"
+import { Favicon, isHostLike } from "./row-icon"
+import { browserIconFor, deviceIconFor } from "@/components/replays/session-icons"
 
 interface AnalyticsFilterSidebarProps {
 	breakdownsResult: Result.Result<WebAnalyticsBreakdowns, QueryAtomFailure>
@@ -35,6 +37,16 @@ interface AnalyticsFilterSidebarProps {
 
 const toOptions = (rows: ReadonlyArray<{ name: string; count: number }>): ReadonlyArray<FilterOption> =>
 	rows.map((row) => ({ name: row.name, count: row.count }))
+
+/**
+ * Sized to the section's `getOptionIcon` slot (3.5) rather than the breakdown
+ * panel's (4), so a favicon sits at the same height as the browser and device
+ * marks below it.
+ */
+const hostIcon = (name: string) => <Favicon host={name} className="size-3.5" />
+
+/** `utm_source` is free text — only give it a favicon when it is actually a domain. */
+const utmSourceIcon = (name: string) => (isHostLike(name) ? hostIcon(name) : null)
 
 export function AnalyticsFilterSidebar({
 	breakdownsResult,
@@ -116,6 +128,7 @@ function AnalyticsFilterSidebarView({
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.host}
 					options={toOptions(breakdowns.hosts)}
+					renderOptionIcon={hostIcon}
 					{...single("host")}
 				/>
 				<SearchableFilterSection
@@ -126,6 +139,7 @@ function AnalyticsFilterSidebarView({
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.referrerHost}
 					options={toOptions(breakdowns.referrerHosts)}
+					renderOptionIcon={hostIcon}
 					{...single("referrerHost")}
 				/>
 				<SearchableFilterSection
@@ -137,11 +151,13 @@ function AnalyticsFilterSidebarView({
 				<FilterSection
 					title={FILTER_SECTION_LABEL_TEXT.deviceType}
 					options={toOptions(breakdowns.deviceTypes)}
+					getOptionIcon={deviceIconFor}
 					{...single("deviceType")}
 				/>
 				<FilterSection
 					title={FILTER_SECTION_LABEL_TEXT.browserName}
 					options={toOptions(breakdowns.browsers)}
+					getOptionIcon={browserIconFor}
 					{...single("browserName")}
 				/>
 				<FilterSection
@@ -159,6 +175,7 @@ function AnalyticsFilterSidebarView({
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.utmSource}
 					options={toOptions(breakdowns.utmSources)}
+					renderOptionIcon={utmSourceIcon}
 					{...single("utmSource")}
 				/>
 				<FilterSection

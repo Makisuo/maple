@@ -32,6 +32,11 @@
 		<link rel="manifest" href="/manifest.json" />
 		<meta name="theme-color" content="#171410" />
 
+		<!-- Web Analytics paints one favicon per referrer/site row, so a populated
+		     breakdown fires ~50 requests at this host at once. Without this they all
+		     queue behind the same cold TLS handshake. -->
+		<link rel="preconnect" href="https://favicon.maple.dev" />
+
 		<!-- Apply the saved theme before first paint to avoid a flash of the wrong theme.
 		     Must stay in sync with the theme store in @maple/ui/hooks/use-theme
 		     (storage key "maple-theme", `light`/`dark` class on <html>, default "dark"). -->

@@ -6,6 +6,7 @@ import { formatNumber, formatPercent } from "@maple/ui/lib/format"
 import { ColumnHead, DataTable, useTableSort } from "../infra/primitives/data-table"
 import { shareTint } from "../infra/primitives/share-tint"
 import type { WebAnalyticsPage } from "@/api/warehouse/web-analytics"
+import { Favicon } from "./row-icon"
 
 type SortKey = "pagePath" | "host" | "pageViews" | "sessions"
 
@@ -149,8 +150,9 @@ export function AnalyticsPagesPanel({
 										{row.pagePath}
 									</span>
 									{showHost ? (
-										<span className="w-32 truncate text-[11px] text-muted-foreground sm:w-40">
-											{row.host}
+										<span className="flex w-32 items-center gap-1.5 text-[11px] text-muted-foreground sm:w-40">
+											<Favicon host={row.host} />
+											<span className="truncate">{row.host}</span>
 										</span>
 									) : null}
 									<span className="w-20 text-right font-mono text-[11px] tabular-nums">

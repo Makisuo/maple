@@ -7,6 +7,7 @@ import { ColumnHead, DataTable, useTableSort } from "../infra/primitives/data-ta
 import { shareTint } from "../infra/primitives/share-tint"
 import type { WebAnalyticsFacetRow } from "@/api/warehouse/web-analytics"
 import type { AnalyticsFilterKey } from "./filters"
+import { analyticsRowIcon, dimensionHasIcons } from "./row-icon"
 
 export interface BreakdownDimension {
 	/** Tab label. */
@@ -124,6 +125,11 @@ export function AnalyticsBreakdownPanel({
 
 	const dimensionFootnote = dimension.coverageDependent ? footnote : undefined
 
+	// Whether *this dimension* carries icons, not whether this row does. Rows
+	// without one then reserve the gutter (a non-domain `utm_source` sitting
+	// among domains), so one iconless row doesn't unindent itself.
+	const hasIcons = dimensionHasIcons(dimension.filterKey)
+
 	const { sorted, sortKey, sortDir, handleSort } = useTableSort(rows, {
 		initialKey: "count" as SortKey,
 		stringKeys: ["name"],
@@ -198,6 +204,9 @@ export function AnalyticsBreakdownPanel({
 					) : (
 						sorted.map((row) => {
 							const isSelected = selected === row.name
+							const icon = hasIcons
+								? analyticsRowIcon(dimension.filterKey, row.name)
+								: undefined
 							return (
 								<button
 									key={row.name}
@@ -212,14 +221,22 @@ export function AnalyticsBreakdownPanel({
 										isSelected && "bg-primary/10",
 									)}
 								>
-									<span
-										className={cn(
-											"min-w-0 flex-1 truncate text-[12px]",
-											isSelected ? "font-medium text-foreground" : "text-foreground/90",
-										)}
-										title={label(row.name)}
-									>
-										{label(row.name)}
+									<span className="flex min-w-0 flex-1 items-center gap-2">
+										{icon ??
+											(hasIcons ? (
+												<span className="size-4 shrink-0" aria-hidden />
+											) : null)}
+										<span
+											className={cn(
+												"min-w-0 truncate text-[12px]",
+												isSelected
+													? "font-medium text-foreground"
+													: "text-foreground/90",
+											)}
+											title={label(row.name)}
+										>
+											{label(row.name)}
+										</span>
 									</span>
 									<span className="w-24 text-right font-mono text-[11px] tabular-nums">
 										{formatNumber(row.count)}

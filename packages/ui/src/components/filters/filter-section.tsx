@@ -88,6 +88,14 @@ interface FilterSectionBaseProps {
 	colorMap?: Record<string, string>
 	/** Option-name → icon, rendered before the label (like colorMap's swatch). */
 	getOptionIcon?: (name: string) => IconComponent | undefined
+	/**
+	 * Option-name → an already-rendered icon node, in the same slot as
+	 * `getOptionIcon`. Separate from it rather than a widening of it, because
+	 * `IconComponent` is `ComponentType<SVGProps<SVGSVGElement>>` and the icons
+	 * that need this are remote `<img>` favicons, which do not honestly satisfy
+	 * that type. A section sets one or the other, never both.
+	 */
+	renderOptionIcon?: (name: string) => React.ReactNode
 	/** Option-name → display text, for fixed vocabularies whose URL value differs from its label. */
 	getOptionLabel?: (name: string) => string
 }
@@ -106,6 +114,7 @@ function FilterSectionBase({
 	searchable,
 	colorMap,
 	getOptionIcon,
+	renderOptionIcon,
 	getOptionLabel,
 }: FilterSectionBaseProps & { searchable: boolean }) {
 	const [isOpen, setIsOpen] = React.useState(defaultOpen)
@@ -238,7 +247,11 @@ function FilterSectionBase({
 												style={{ backgroundColor: colorMap[option.name] }}
 											/>
 										)}
-										{OptionIcon && <OptionIcon className="size-3.5 shrink-0" />}
+										{OptionIcon ? (
+											<OptionIcon className="size-3.5 shrink-0" />
+										) : (
+											renderOptionIcon?.(option.name)
+										)}
 										<span className="truncate">{labelFor(option.name)}</span>
 									</Label>
 									<span
