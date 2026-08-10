@@ -30,7 +30,9 @@ import {
 import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { EdgeCacheService } from "@maple/cache"
+import { type EdgeCacheBackend, EdgeCacheService } from "@maple/cache"
+
+type EdgeCacheBackendName = EdgeCacheBackend["name"]
 import {
 	Clock,
 	Context,
@@ -221,6 +223,28 @@ export const ORG_CH_CONFIG_BUCKET = "org-clickhouse-config"
 /** Long, because eviction is driven by explicit invalidation at every write site. */
 const ORG_CH_CONFIG_EDGE_TTL_SECONDS = 3_600
 const ORG_CH_CONFIG_EDGE_READ_TIMEOUT_MS = 150
+
+/**
+ * Whether this host's cache store is one the writers' invalidation actually
+ * reaches. An hour-long entry is only safe under that condition.
+ *
+ * The org config is mutated exclusively from `apps/api`, which owns the
+ * `EDGE_CACHE` KV binding — so `"workers-kv"` is the store those busts land in,
+ * and `"memory"` is per-isolate and therefore self-consistent by construction.
+ *
+ * `"workers-cache"` is neither. `apps/alerting` runs this same service against
+ * `caches.default` (it has no KV binding), which no `invalidateOrgRuntimeConfig`
+ * ever touches — so an hour-long entry there would let alert evaluation keep
+ * using a warehouse config the customer already rotated or deleted, firing on
+ * stale data or missing incidents. Falling back to the memo + Postgres is the
+ * correct behaviour for such a host: it is slower, and it is right.
+ *
+ * The proper fix is to bind the same KV namespace into the alerting stack (it
+ * already binds Hyperdrive by ID across stacks, so there is precedent); until
+ * then the tier stays off there rather than silently serving stale routing.
+ */
+const durableTierIsInvalidated = (backendName: EdgeCacheBackendName): boolean =>
+	backendName !== "workers-cache"
 
 const toCachedChSettings = (row: CachedSettingsRow): CachedChSettings => ({
 	schemaVersion: row.schemaVersion,
@@ -1373,7 +1397,9 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		 */
 		const lookupCachedSettings = Effect.fnUntraced(function* (orgId: OrgId) {
 			const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
-			if (Option.isNone(edgeCache)) return yield* readSettingsFromPostgres(orgId)
+			if (Option.isNone(edgeCache) || !durableTierIsInvalidated(edgeCache.value.backendName)) {
+				return yield* readSettingsFromPostgres(orgId)
+			}
 
 			const result = yield* edgeCache.value.getOrCompute(
 				{

@@ -89,27 +89,41 @@ const KV_MIN_TTL_SECONDS = 60
  * that long after an explicit `delete` — and invalidation-on-mutation is the
  * property the org config cache is relying on.
  *
- * Values are stored wrapped as `{ v }`. `EdgeCacheBackend` uses `undefined` to
- * mean "not cached", and a cached `null` is a legitimate value — for the org
- * config bucket it is the COMMON one ("this org is managed, use Tinybird"), and
- * caching it is the single biggest win there. KV's `get` returns `null` for a
- * missing key, so storing a bare `null` would make every managed org a
- * permanent miss. The envelope keeps absence and null distinguishable.
+ * Values are stored wrapped as `{ v, exp }`, which the other two backends do not
+ * need:
+ *
+ * - `v` because `EdgeCacheBackend` uses `undefined` to mean "not cached" while a
+ *   cached `null` is a legitimate value — for the org config bucket it is the
+ *   COMMON one ("this org is managed, use Tinybird"), and caching it is the
+ *   single biggest win there. KV's `get` returns `null` for a missing key, so
+ *   storing a bare `null` would make every managed org a permanent miss.
+ * - `exp` because KV refuses an `expirationTtl` under 60s, and real buckets ask
+ *   for less (`qe-evaluate` and the integrations routes use 30s). The other
+ *   backends carry their own deadline (`Cache-Control: max-age`, `expiresAt`),
+ *   so without this a 30s entry would be served for 60s. `expirationTtl` still
+ *   goes out at the 60s floor to bound storage; `exp` is what expires the read.
  */
 export const makeKvBackend = (kv: KvLike): EdgeCacheBackend => {
 	const composite = (bucket: string, hash: string) => `${bucket}:${hash}`
 
 	return {
 		name: "workers-kv",
-		get: async (bucket, hash) => {
+		get: async (bucket, hash, nowMs) => {
 			const envelope = await kv.get(composite(bucket, hash), "json")
 			if (envelope === null || typeof envelope !== "object" || !("v" in envelope)) return undefined
-			return (envelope as { v: unknown }).v
+			const { v, exp } = envelope as { v: unknown; exp?: number }
+			// KV cannot expire an entry sooner than 60s, so short-TTL buckets carry
+			// their real deadline in the envelope and expire on read.
+			if (typeof exp === "number" && nowMs >= exp) return undefined
+			return v
 		},
-		put: async (bucket, hash, value, ttlSeconds) => {
-			await kv.put(composite(bucket, hash), JSON.stringify({ v: value }), {
-				expirationTtl: Math.max(KV_MIN_TTL_SECONDS, Math.floor(ttlSeconds)),
-			})
+		put: async (bucket, hash, value, ttlSeconds, nowMs) => {
+			const ttl = Math.floor(ttlSeconds)
+			await kv.put(
+				composite(bucket, hash),
+				JSON.stringify({ v: value, exp: nowMs + ttl * 1_000 }),
+				{ expirationTtl: Math.max(KV_MIN_TTL_SECONDS, ttl) },
+			)
 		},
 		delete: async (bucket, hash) => {
 			await kv.delete(composite(bucket, hash))

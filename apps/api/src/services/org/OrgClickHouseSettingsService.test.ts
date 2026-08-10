@@ -7,7 +7,13 @@ import {
 	OrgId,
 	RoleName,
 } from "@maple/domain/http"
-import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
+import {
+	type EdgeCacheBackend,
+	EdgeCacheService,
+	makeEdgeCacheService,
+	makeMemoryBackend,
+	MemoryCacheBackendLive,
+} from "@maple/cache"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -519,6 +525,43 @@ describe("resolveRuntimeConfig caching", () => {
 			const afterFullBust = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
 			expect(expectSome(afterFullBust).url).toBe("https://b.example")
 		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	// `apps/alerting` runs this same service but has no EDGE_CACHE binding, so its
+	// CacheBackend is `caches.default` — a store that no `invalidateOrgRuntimeConfig`
+	// ever reaches, since the writers all live in apps/api and bust KV. An
+	// hour-long entry there would let alert evaluation keep using a warehouse
+	// config the customer already rotated or deleted.
+	it("skips the durable tier on a backend the writers' invalidation cannot reach", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_durable_uninvalidated"
+		const workersCacheBackend: EdgeCacheBackend = { ...makeMemoryBackend(), name: "workers-cache" }
+		const layer = Layer.mergeAll(
+			OrgClickHouseSettingsService.layer.pipe(
+				Layer.provide(Layer.mergeAll(Env.layer.pipe(Layer.provide(configLive)), testDb.layer)),
+			),
+			Layer.succeed(EdgeCacheService, makeEdgeCacheService(workersCacheBackend)),
+		)
+
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://a.example"))
+			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					orgId,
+					"https://b.example",
+				]),
+			)
+
+			// Cold isolate: memo gone, nothing else should be answering.
+			invalidateOrgRuntimeConfigMemo(orgId)
+
+			const resolved = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			// Reads through to Postgres. The KV-backed test above sees the OLD url
+			// here — that divergence is the whole point.
+			expect(expectSome(resolved).url).toBe("https://b.example")
+		}).pipe(Effect.provide(layer))
 	})
 
 	// The reason the durable tier exists: a cold isolate has no memo entry at all,
