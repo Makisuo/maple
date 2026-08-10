@@ -87,6 +87,126 @@
 	}
 }
 
+/* Investigation provenance canvas — the dashes drift from source to target, which
+   is what tells you which way the causality runs now that the arrowheads are gone.
+   Each keyframe travels exactly one dash cycle (dasharray 3+3, 4+4) so the loop
+   restarts on an identical frame; a round number like -10px would visibly jump.
+   Durations differ to keep both strands at the same ~7.5px/s drift. */
+@keyframes provenance-strand {
+	to {
+		stroke-dashoffset: -6px;
+	}
+}
+
+@keyframes provenance-strand-roadmap {
+	to {
+		stroke-dashoffset: -8px;
+	}
+}
+
+.provenance-strand {
+	animation: provenance-strand 0.8s linear infinite;
+}
+
+.provenance-strand-roadmap {
+	animation: provenance-strand-roadmap 1.05s linear infinite;
+}
+
+/* The one "this is still running" signal every live node on the canvas wears: an
+   indeterminate progress bar on a visible track.
+
+   It replaced two separate effects that both read as rendering faults rather than
+   as progress — a 1px full-bleed sweep along the card's bottom border, which looked
+   like a stray hairline, and an expanding ring around the icon tile, which looked
+   like a focus state misfiring. Neither said "loading" because neither had a
+   track: a lone travelling mark is ambiguous, and the same mark inside a channel
+   is unmistakable. One bar, one motion, on the spine node, the lens lanes and the
+   pending verdict alike. */
+@keyframes provenance-progress {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(250%);
+	}
+}
+
+.provenance-progress-fill {
+	animation: provenance-progress 1.5s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+/* The ghost canvas (provenance-loading.tsx). Cards assemble left to right, the
+   strands fade in behind them, and one bar per card keeps breathing afterwards so
+   a graph that takes a while to arrive still reads as loading rather than as an
+   empty graph that finished. Same easing as the service map's ghost topology. */
+@keyframes provenance-load-node {
+	from {
+		opacity: 0;
+		transform: scale(0.94) translateY(4px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes provenance-load-strand {
+	from {
+		opacity: 0;
+	}
+}
+
+@keyframes provenance-load-bar {
+	0%,
+	100% {
+		opacity: 0.14;
+	}
+	50% {
+		opacity: 0.34;
+	}
+}
+
+.provenance-load-node {
+	transform-box: fill-box;
+	transform-origin: center;
+	animation: provenance-load-node 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.provenance-load-strand {
+	animation: provenance-load-strand 0.7s ease-out both;
+}
+
+.provenance-load-bar {
+	animation: provenance-load-bar 1.8s ease-in-out infinite;
+}
+
+/* Motion is the only thing that carries "live" here, so under reduced motion the
+   live strands still read: they keep the amber stroke, the amber junction dots
+   and the phase line the settled ones never get. */
+@media (prefers-reduced-motion: reduce) {
+	.provenance-strand,
+	.provenance-strand-roadmap,
+	.provenance-load-bar {
+		animation: none;
+	}
+
+	/* The bar stops travelling but keeps its track and its segment, so a running
+	   node still reads as running — a partly-filled channel is a progress bar
+	   whether or not it moves. */
+	.provenance-progress-fill {
+		animation: none;
+	}
+
+	/* The ghost's assembly is an entrance, so it has to settle rather than stop:
+	   `animation: none` on a `both`-filled keyframe would leave every card at its
+	   0% frame — a blank canvas. */
+	.provenance-load-node,
+	.provenance-load-strand {
+		animation-duration: 1ms;
+		animation-delay: 0s;
+	}
+}
+
 /* Cold-boot splash — branded self-assembling trace waterfall (see boot-splash.tsx
    and the inline copy in index.html). The amber mark sits still; five span bars
    grow in, in start-time order, while a thin amber playhead scans across them so

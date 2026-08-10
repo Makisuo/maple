@@ -1,7 +1,7 @@
 import * as React from "react"
 
 import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
-import { GROUP_BY_OPTIONS, type QueryBuilderDataSource } from "@/lib/query-builder/model"
+import { GROUP_BY_OPTIONS, type QueryBuilderDataSource } from "@maple/query-engine/query-builder"
 
 interface GroupByMultiSelectProps {
 	/** Wired to the field's `<Label htmlFor>` so clicking the label focuses the input. */

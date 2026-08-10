@@ -1,11 +1,10 @@
 import { createClient as createClickHouseClient } from "@clickhouse/client-web"
 import { Tinybird } from "@tinybirdco/sdk"
 import { Context, Effect, Layer, Option, Redacted } from "effect"
-import { WarehouseConfigError, type WarehouseQueryRequest } from "@maple/domain/http"
+import { WarehouseConfigError, WarehouseUpstreamError, type WarehouseQueryRequest } from "@maple/domain/http"
 import {
 	BackendDialect,
 	makeWarehouseExecutor,
-	toWarehouseQueryError,
 	WarehouseResponseLimitError,
 	type ClickHouseProtocolBackendConfig,
 	type ResolvedWarehouseConfig,
@@ -350,9 +349,34 @@ export class WarehouseQueryService extends Context.Service<
 			// A per-org BYO ClickHouse row (`org_clickhouse_settings`) overrides the
 			// managed upstream for that org's reads AND raw SQL (the credentials are
 			// already tenant-isolated).
-			const override = yield* orgClickHouseSettings
-				.resolveRuntimeConfig(tenant.orgId)
-				.pipe(Effect.mapError((error) => toWarehouseQueryError(label, error)))
+			const override = yield* orgClickHouseSettings.resolveRuntimeConfig(tenant.orgId).pipe(
+				Effect.catchTags({
+					"@maple/http/errors/OrgClickHouseSettingsPersistenceError": (error) =>
+						Effect.fail(
+							new WarehouseUpstreamError({
+								pipeName: label,
+								message: error.message,
+								cause: error,
+							}),
+						),
+					"@maple/http/errors/OrgClickHouseSettingsEncryptionError": (error) =>
+						Effect.fail(
+							new WarehouseConfigError({
+								pipeName: label,
+								message: error.message,
+								cause: error,
+							}),
+						),
+					"@maple/http/errors/OrgClickHouseSettingsValidationError": (error) =>
+						Effect.fail(
+							new WarehouseConfigError({
+								pipeName: label,
+								message: error.message,
+								cause: error,
+							}),
+						),
+				}),
+			)
 			if (Option.isSome(override)) {
 				yield* Effect.annotateCurrentSpan("clientSource", "org_override")
 				yield* Effect.annotateCurrentSpan("db.client", "clickhouse")

@@ -72,7 +72,11 @@ export class V2InvalidRequestError extends Schema.Error<V2InvalidRequestError>(
 		description:
 			"The request was malformed — a parameter is missing, of the wrong type, or out of range. HTTP 400.",
 	},
-) {}
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
 
 export class V2AuthenticationError extends Schema.Error<V2AuthenticationError>(
 	"@maple/http/v2/AuthenticationError",
@@ -89,7 +93,11 @@ export class V2AuthenticationError extends Schema.Error<V2AuthenticationError>(
 		title: "Authentication error",
 		description: "The Bearer token is missing, malformed, or invalid. HTTP 401.",
 	},
-) {}
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
 
 export class V2PermissionError extends Schema.Error<V2PermissionError>("@maple/http/v2/PermissionError")(
 	Schema.Struct({
@@ -105,7 +113,11 @@ export class V2PermissionError extends Schema.Error<V2PermissionError>("@maple/h
 		description:
 			"The credentials are valid but lack the required scope or org role for this operation. HTTP 403.",
 	},
-) {}
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
 
 export class V2NotFoundError extends Schema.Error<V2NotFoundError>("@maple/http/v2/NotFoundError")(
 	Schema.Struct({
@@ -121,7 +133,11 @@ export class V2NotFoundError extends Schema.Error<V2NotFoundError>("@maple/http/
 		title: "Not found error",
 		description: "No object exists for the given ID. HTTP 404.",
 	},
-) {}
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
 
 export class V2ConflictError extends Schema.Error<V2ConflictError>("@maple/http/v2/ConflictError")(
 	Schema.Struct({
@@ -136,7 +152,11 @@ export class V2ConflictError extends Schema.Error<V2ConflictError>("@maple/http/
 		title: "Conflict error",
 		description: "The request conflicts with the current state of the object. HTTP 409.",
 	},
-) {}
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
 
 /**
  * The request asked for more data than one response may carry.
@@ -165,7 +185,11 @@ export class V2PayloadTooLargeError extends Schema.Error<V2PayloadTooLargeError>
 		description:
 			"The requested range would exceed the endpoint's response budget. Narrow the range and retry. HTTP 413.",
 	},
-) {}
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
 
 export class V2RateLimitError extends Schema.Error<V2RateLimitError>("@maple/http/v2/RateLimitError")(
 	Schema.Struct({
@@ -180,7 +204,11 @@ export class V2RateLimitError extends Schema.Error<V2RateLimitError>("@maple/htt
 		title: "Rate limit error",
 		description: "Too many requests in a given window. Back off and retry. HTTP 429.",
 	},
-) {}
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
 
 export class V2ApiError extends Schema.Error<V2ApiError>("@maple/http/v2/ApiError")(
 	Schema.Struct({
@@ -195,7 +223,11 @@ export class V2ApiError extends Schema.Error<V2ApiError>("@maple/http/v2/ApiErro
 		title: "API error",
 		description: "An unexpected server-side error. Safe to retry with backoff. HTTP 500.",
 	},
-) {}
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
 
 /**
  * `api_error` flavor for a misbehaving upstream provider (502) — the target of
@@ -217,7 +249,11 @@ export class V2UpstreamError extends Schema.Error<V2UpstreamError>("@maple/http/
 		description:
 			"An upstream provider the operation depends on failed or rejected our credentials. Check the integration's connection before retrying. HTTP 502.",
 	},
-) {}
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
 
 /** `api_error` flavor for upstream/persistence unavailability (503). */
 export class V2ServiceUnavailableError extends Schema.Error<V2ServiceUnavailableError>(
@@ -236,7 +272,11 @@ export class V2ServiceUnavailableError extends Schema.Error<V2ServiceUnavailable
 		description:
 			"A dependency (persistence or upstream) was temporarily unavailable. Retry with backoff. HTTP 503.",
 	},
-) {}
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
 
 // Constructors — keep handler adapters one-liners.
 
@@ -301,12 +341,27 @@ export const rateLimited = () =>
 		},
 	})
 
-export const investigationQuotaReached = (retryableAt: string) =>
+/**
+ * The daily-budget 429.
+ *
+ * Names the ceiling that was hit — runs and model passes are separate settings,
+ * and collapsing both into "quota reached" made a raised run cap look ignored
+ * when it was the pass cap that stopped the start. The ISO timestamp stays at
+ * the end for API consumers; the dashboard rewrites it as a relative time.
+ */
+export const investigationQuotaReached = (input: {
+	readonly dimension: "runs" | "passes"
+	readonly limit: number
+	readonly retryableAt: string
+}) =>
 	new V2RateLimitError({
 		error: {
 			type: "rate_limit_error",
 			code: "investigation_daily_quota",
-			message: `Daily investigation quota reached. Retry after ${retryableAt}.`,
+			message:
+				input.dimension === "runs"
+					? `Daily limit of ${input.limit} investigations reached. Resets at ${input.retryableAt}.`
+					: `Daily limit of ${input.limit} model passes reached. Resets at ${input.retryableAt}.`,
 		},
 	})
 

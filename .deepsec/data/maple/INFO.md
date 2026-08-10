@@ -4,7 +4,7 @@
 
 Maple is a multi-tenant OpenTelemetry observability platform. A TanStack
 Start SPA (`apps/web`) talks to an Effect HTTP API (`apps/api`, deployed
-on Cloudflare Workers + D1), which proxies queries to a warehouse
+on Cloudflare Workers + PlanetScale Postgres), which proxies queries to a warehouse
 (Tinybird SDK or self-hosted ClickHouse). A Rust ingest gateway
 (`apps/ingest`) accepts OTLP from customer apps after key auth and
 forwards to the OTel collector. An MCP server lives under `/mcp` of the

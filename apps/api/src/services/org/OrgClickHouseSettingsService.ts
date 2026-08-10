@@ -28,9 +28,11 @@ import {
 	type TableDiffEntry,
 } from "@maple/domain/clickhouse"
 import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
-import { EdgeCacheService } from "@maple/cache"
 import { eq } from "drizzle-orm"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { type EdgeCacheBackend, EdgeCacheService } from "@maple/cache"
+
+type EdgeCacheBackendName = EdgeCacheBackend["name"]
 import {
 	Clock,
 	Context,
@@ -87,14 +89,6 @@ type CachedSettingsRow = Pick<
 	| "chPasswordTag"
 >
 
-// Nothing READS this edge-cache bucket any more — see `resolveCachedSettings`
-// for the measurements that removed it. The bucket name survives only so
-// `invalidateRuntimeConfigCache` keeps busting entries written by the previous
-// release: those carry a 1h TTL, and isolates still running the old code read
-// them. Delete this constant and the invalidate call one release after the
-// removal ships.
-const ORG_CH_CONFIG_BUCKET = "org-clickhouse-config"
-
 // In-isolate value cache for the runtime-config lookup, served
 // stale-while-revalidate. Workers reuse an isolate across many requests, so a
 // module-scoped memo lets a warm isolate resolve config with ZERO network.
@@ -111,17 +105,25 @@ const ORG_CH_CONFIG_BUCKET = "org-clickhouse-config"
 //   otherwise          -> block on Postgres (cold isolate, or a memo so idle
 //                         that no background refresh ever completed)
 //
-// The hard ceiling exists because a background refresh is best-effort: it is
-// forked into the triggering request's scope and interrupted if that request
-// finishes first (see `refreshCachedSettings`). Without a ceiling, an isolate
-// serving only short requests could serve one value forever.
+// The SOFT TTL is what bounds staleness. Every write through this service busts
+// the memo, but only in the isolate that served the write — other isolates
+// converge by re-reading at the soft TTL. That degree of staleness is safe
+// because the warehouse executor self-heals on `WarehouseAuthError`: it calls
+// `invalidateRuntimeConfig` and retries once, so a credential rotation costs the
+// first request one extra round-trip instead of costing the org every request
+// until the entry ages out.
 //
-// Staleness is safe to this degree because the warehouse executor self-heals on
-// `WarehouseAuthError` — it calls `invalidateRuntimeConfig` and retries once, so
-// a credential rotation costs the first request one extra round-trip instead of
-// costing the org every request until the entry ages out.
+// The HARD ceiling is not a staleness bound — it is an isolate-lifetime backstop.
+// A background refresh is best-effort: it is forked into the triggering request's
+// scope and interrupted if that request finishes first (see
+// `refreshCachedSettings`). Without a ceiling, a pathological isolate serving
+// only sub-refresh-length requests could serve one value forever. It is set well
+// past a typical Workers isolate lifetime so that the blocking read happens once
+// per cold isolate and never again — a bursty dashboard workload (idle isolate,
+// then a widget fan-out) must not pay it on the first query of every burst, with
+// the rest of the fan-out queued behind it.
 const ORG_CH_CONFIG_MEMO_TTL_MS = 300_000
-const ORG_CH_CONFIG_MEMO_HARD_MS = 900_000
+const ORG_CH_CONFIG_MEMO_HARD_MS = 21_600_000
 interface RuntimeConfigMemoEntry {
 	readonly value: CachedChSettings | null
 	readonly freshUntil: number
@@ -148,6 +150,46 @@ const refreshInFlight = new Map<string, number>()
 const REFRESH_MARKER_STALE_MS = 10_000
 
 /**
+ * Drop an org's memoized runtime config, for writers that live OUTSIDE this
+ * service and so have no service instance to call — today the schema-apply
+ * workflow, which stamps `schema_version`/`sync_status` on the row directly.
+ *
+ * The two maps must always be cleared together: a refresh forked before a write
+ * must not land after it and restore the value that was just dropped.
+ *
+ * The workflow runs in its own isolate, so this clears that isolate's memo and
+ * not the API's — API isolates still converge at `ORG_CH_CONFIG_MEMO_TTL_MS`.
+ * It exists so the invariant "every writer of this row busts the memo" holds at
+ * every write site rather than at most of them.
+ */
+export const invalidateOrgRuntimeConfigMemo = (orgId: string): void => {
+	runtimeConfigMemo.delete(orgId)
+	refreshInFlight.delete(orgId)
+}
+
+/**
+ * Drop BOTH cache tiers for an org: this isolate's memo and the shared durable
+ * entry. Every writer of `org_clickhouse_settings` must call it.
+ *
+ * The durable tier makes this non-optional in a way the memo never was. A memo
+ * is per-isolate and expires in minutes, so a missed bust self-healed; a KV
+ * entry is shared by every isolate in every colo and lives for
+ * `ORG_CH_CONFIG_EDGE_TTL_SECONDS`, so a missed bust is an hour of every request
+ * globally reading a config that no longer exists.
+ *
+ * `EdgeCacheService` is resolved with `Effect.serviceOption` at call time, so
+ * this is safe to run in a context that has no cache layer (tests, hosts without
+ * the binding) — it degrades to a memo-only bust.
+ */
+export const invalidateOrgRuntimeConfig = Effect.fnUntraced(function* (orgId: string) {
+	invalidateOrgRuntimeConfigMemo(orgId)
+	const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
+	if (Option.isSome(edgeCache)) {
+		yield* edgeCache.value.invalidate({ bucket: ORG_CH_CONFIG_BUCKET, key: orgId })
+	}
+})
+
+/**
  * Projection of the settings row memoized by `resolveRuntimeConfig`. Holds the
  * ENCRYPTED password material (ciphertext/iv/tag) — never the plaintext — so
  * decryption still happens per-request after the memo. `null` encodes "no BYO
@@ -164,6 +206,45 @@ const CachedChSettings = Schema.Struct({
 	chPasswordTag: Schema.NullOr(Schema.String),
 })
 type CachedChSettings = typeof CachedChSettings.Type
+
+/**
+ * Codec for the durable (KV) tier. `null` — "this org is managed, use Tinybird"
+ * — is a cached value in its own right, not an absence, and it is the common
+ * case, so it must survive the JSON round-trip.
+ */
+const CachedChSettingsCodec = Schema.NullOr(CachedChSettings)
+
+/**
+ * Bucket + key shape for the durable tier. `invalidate` derives the storage hash
+ * from the same `{ bucket, key }`, so every write site must pass the org id
+ * unchanged.
+ */
+export const ORG_CH_CONFIG_BUCKET = "org-clickhouse-config"
+/** Long, because eviction is driven by explicit invalidation at every write site. */
+const ORG_CH_CONFIG_EDGE_TTL_SECONDS = 3_600
+const ORG_CH_CONFIG_EDGE_READ_TIMEOUT_MS = 150
+
+/**
+ * Whether this host's cache store is one the writers' invalidation actually
+ * reaches. An hour-long entry is only safe under that condition.
+ *
+ * The org config is mutated exclusively from `apps/api`, which owns the
+ * `EDGE_CACHE` KV binding — so `"workers-kv"` is the store those busts land in,
+ * and `"memory"` is per-isolate and therefore self-consistent by construction.
+ *
+ * `"workers-cache"` is neither. `apps/alerting` runs this same service against
+ * `caches.default` (it has no KV binding), which no `invalidateOrgRuntimeConfig`
+ * ever touches — so an hour-long entry there would let alert evaluation keep
+ * using a warehouse config the customer already rotated or deleted, firing on
+ * stale data or missing incidents. Falling back to the memo + Postgres is the
+ * correct behaviour for such a host: it is slower, and it is right.
+ *
+ * The proper fix is to bind the same KV namespace into the alerting stack (it
+ * already binds Hyperdrive by ID across stacks, so there is precedent); until
+ * then the tier stays off there rather than silently serving stale routing.
+ */
+const durableTierIsInvalidated = (backendName: EdgeCacheBackendName): boolean =>
+	backendName !== "workers-cache"
 
 const toCachedChSettings = (row: CachedSettingsRow): CachedChSettings => ({
 	schemaVersion: row.schemaVersion,
@@ -273,6 +354,7 @@ export interface OrgClickHouseSettingsServiceShape {
 		| OrgClickHouseSettingsForbiddenError
 		| OrgClickHouseSettingsValidationError
 		| OrgClickHouseSettingsPersistenceError
+		| OrgClickHouseSettingsEncryptionError
 	>
 }
 
@@ -609,7 +691,7 @@ export const isRetryableUpstream = (
  * This closes the "stuck not ready" gap: the ingest gateway only routes an org's
  * frames to its own ClickHouse when `schema_version` equals the running version,
  * but a credential re-save preserves the old value and the standalone CLI never
- * writes D1 — so a CLI-applied (or revision-bumped) org whose cluster is actually
+ * writes Maple's application database — so a CLI-applied (or revision-bumped) org whose cluster is actually
  * current would otherwise stay on the managed Tinybird write path forever, with no
  * way to re-stamp because Apply is disabled when there's no diff. The non-empty
  * guard avoids healing off a degenerate empty diff (e.g. a failed schema fetch),
@@ -874,9 +956,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 
 		// Bust the cached runtime config for an org after any write to its settings
 		// row, so the next warehouse query re-resolves rather than serving a stale
-		// value. Clears both the in-isolate memo (this isolate only — other isolates
-		// fall off within ORG_CH_CONFIG_MEMO_TTL_MS) and the cross-request edge entry
-		// (optional — absent in tests / non-worker contexts, a no-op when unavailable).
+		// value. Other isolates fall off within ORG_CH_CONFIG_MEMO_TTL_MS.
 		const invalidateRuntimeConfigCache = (orgId: OrgId): Effect.Effect<boolean> =>
 			Effect.gen(function* () {
 				// Whether this org had a BYO row cached is the caller's retry gate (see
@@ -885,14 +965,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 				// changes no routing decision, so it does not count as a hit.
 				const memoized = runtimeConfigMemo.get(orgId)
 				const hadOverride = memoized !== undefined && memoized.value !== null
-				runtimeConfigMemo.delete(orgId)
-				// A refresh forked before this write must not land after it and restore
-				// the value we just dropped.
-				refreshInFlight.delete(orgId)
-				const cache = yield* Effect.serviceOption(EdgeCacheService)
-				if (Option.isSome(cache)) {
-					yield* cache.value.invalidate({ bucket: ORG_CH_CONFIG_BUCKET, key: orgId })
-				}
+				yield* invalidateOrgRuntimeConfig(orgId)
 				return hadOverride
 			})
 
@@ -1106,7 +1179,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			// Self-heal the recorded schema version. The ingest gateway only routes an
 			// org's frames directly to its ClickHouse when the stored `schema_version`
 			// equals the running `clickHouseSchemaVersion`. But a credential re-save
-			// *preserves* the old value and the standalone CLI never writes D1, so an org
+			// *preserves* the old value and the standalone CLI never writes Maple's database, so an org
 			// whose CH is already in sync can be stuck "not ready" forever — with no way to
 			// re-stamp, because the Apply action is disabled when there is no diff. When the
 			// live schema matches what we expect, record the current schema version so the
@@ -1294,10 +1367,53 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// The narrow Postgres read behind the memo. Returns the ENCRYPTED row
 		// projection (or `null` for a managed org); decryption happens per-request
 		// in `resolveRuntimeConfig`, so plaintext credentials never enter a cache.
-		const lookupCachedSettings = (orgId: OrgId) =>
+		const readSettingsFromPostgres = (orgId: OrgId) =>
 			selectCachedRow(orgId).pipe(
 				Effect.map((row) => (Option.isSome(row) ? toCachedChSettings(row.value) : null)),
 			)
+
+		/**
+		 * The durable tier between the per-isolate memo and Postgres.
+		 *
+		 * The memo only ever helps an isolate that has already paid once, and
+		 * Workers evict isolates constantly: measured over the three days after the
+		 * SWR memo shipped, 10–13k resolutions/day still fell through to Postgres at
+		 * a p50 of 482–636ms each — 1.4–2.6 HOURS of blocked wall time per day. That
+		 * cost is the per-`.execute()` postgres.js dial, not the query.
+		 *
+		 * A shared cache is the only thing that removes it, since the whole point is
+		 * to help an isolate that has never seen this org. It is deliberately on
+		 * Workers KV rather than `caches.default` — see `makeKvBackend` in
+		 * `CacheBackendLive.ts` for the measured reason, and treat this as an
+		 * experiment until `cache.read_status` per `cache.backend` says otherwise.
+		 *
+		 * `readTimeoutMs` is well above the service default of 40ms because that
+		 * default is tuned for a cheap `compute`. Here `compute` is a ~500ms dial,
+		 * so waiting 150ms for a cache read that usually lands in single-digit ms is
+		 * the better trade even when it occasionally loses.
+		 *
+		 * `Effect.serviceOption` keeps the dependency optional: tests and any host
+		 * without the layer fall through to Postgres rather than failing to build.
+		 */
+		const lookupCachedSettings = Effect.fnUntraced(function* (orgId: OrgId) {
+			const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
+			if (Option.isNone(edgeCache) || !durableTierIsInvalidated(edgeCache.value.backendName)) {
+				return yield* readSettingsFromPostgres(orgId)
+			}
+
+			const result = yield* edgeCache.value.getOrCompute(
+				{
+					bucket: ORG_CH_CONFIG_BUCKET,
+					key: orgId,
+					ttlSeconds: ORG_CH_CONFIG_EDGE_TTL_SECONDS,
+					readTimeoutMs: ORG_CH_CONFIG_EDGE_READ_TIMEOUT_MS,
+					schema: CachedChSettingsCodec,
+				},
+				readSettingsFromPostgres(orgId),
+			)
+			yield* Effect.annotateCurrentSpan("clickhouse.config.edge_hit", result.hit)
+			return result.value
+		})
 
 		const storeCachedSettings = (orgId: OrgId, value: CachedChSettings | null, nowMs: number) => {
 			runtimeConfigMemo.set(orgId, {
@@ -1487,14 +1603,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			yield* requireAdmin(roles)
 			const row = yield* requireActiveRow(orgId)
-			const password = yield* decryptStoredPassword(row).pipe(
-				Effect.mapError(
-					() =>
-						new OrgClickHouseSettingsValidationError({
-							message: "Stored ClickHouse credentials could not be decrypted",
-						}),
-				),
-			)
+			const password = yield* decryptStoredPassword(row)
 			yield* validateClickHouseCredentialTransport(row.chUrl, password)
 			const yaml = renderCollectorYaml({
 				orgId,

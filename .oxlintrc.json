@@ -48,5 +48,5 @@
 			}
 		}
 	],
-	"ignorePatterns": [".context", "lib/llm"]
+	"ignorePatterns": [".context", "lib/llm", "lib/thinking-orbs"]
 }

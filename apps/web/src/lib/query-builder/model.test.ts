@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildTimeseriesQuerySpec, createQueryDraft } from "@/lib/query-builder/model"
+import { buildTimeseriesQuerySpec, createQueryDraft } from "@maple/query-engine/query-builder"
 
 describe("query-builder model bucket parsing", () => {
 	it("defaults new drafts to auto-bucket", () => {

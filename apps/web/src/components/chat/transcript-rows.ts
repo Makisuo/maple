@@ -11,7 +11,7 @@ export type ToolPart = {
 	errorText?: string
 }
 
-export function isToolPart(part: UIMessage["parts"][number]): boolean {
+export function isToolPart(part: UIMessage["parts"][number]): part is UIMessage["parts"][number] & ToolPart {
 	return part.type.startsWith("tool-") || part.type === "dynamic-tool"
 }
 
@@ -46,7 +46,7 @@ function rendersOwnCard(part: ToolPart): boolean {
 export function isToolOnlyMessage(message: UIMessage): boolean {
 	if (message.role !== "assistant") return false
 	if (message.parts.length === 0) return false
-	return message.parts.every((part) => isToolPart(part) && !rendersOwnCard(part as ToolPart))
+	return message.parts.every((part) => isToolPart(part) && !rendersOwnCard(part))
 }
 
 export type TranscriptRow =
@@ -95,5 +95,5 @@ export function buildTranscriptRows(messages: readonly UIMessage[]): TranscriptR
 
 /** Every tool part in a merged run, in order, flattened into one buffer. */
 export function toolPartsOf(row: Extract<TranscriptRow, { kind: "tool-run" }>): ToolPart[] {
-	return row.messages.flatMap((message) => message.parts.filter(isToolPart) as ToolPart[])
+	return row.messages.flatMap((message) => message.parts.filter(isToolPart))
 }

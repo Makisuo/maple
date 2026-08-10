@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -16,7 +16,6 @@ import { QueryErrorState } from "@/components/common/query-error-state"
 import { GridIcon, MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { PageHero } from "@/components/infra/primitives/page-hero"
 import { cn } from "@maple/ui/lib/utils"
-import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { WorkloadTable, WorkloadTableLoading } from "@/components/infra/workload-table"
 import { WorkloadsFilterSidebarView, type WorkloadFilters } from "@/components/infra/k8s-filter-sidebar"
 import { listWorkloadsResultAtom, workloadFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -45,19 +44,13 @@ export const Route = createFileRoute("/infra/kubernetes/workloads/")({
 	validateSearch: Schema.toStandardSchemaV1(workloadsSearchSchema),
 })
 
-function WorkloadsPage() {
-	const infraEnabled = useInfraEnabled()
-	if (!infraEnabled) return <Navigate to="/" replace />
-	return <WorkloadsPageContent />
-}
-
 const KIND_LABEL: Record<WorkloadKind, string> = {
 	deployment: "Deployment",
 	statefulset: "StatefulSet",
 	daemonset: "DaemonSet",
 }
 
-function WorkloadsPageContent() {
+function WorkloadsPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 	const [searchText, setSearchText] = useState("")

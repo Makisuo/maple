@@ -399,26 +399,57 @@ export const serviceMapChildren = defineDatasource("service_map_children", {
 export type ServiceMapChildrenRow = InferRow<typeof serviceMapChildren>
 
 /**
+ * Events-API ingress bridge for the scheduled service-map rollup.
+ *
+ * Tinybird requires JSONPaths for direct NDJSON ingestion, but rejects
+ * AggregateFunction/SimpleAggregateFunction columns in a datasource that has
+ * JSONPaths. Keep the API-facing schema plain and discard its rows after the
+ * `service_map_edges_hourly_ingest_mv` insert trigger forwards them to the
+ * aggregate target below.
+ */
+export const serviceMapEdgesHourlyIngest = defineDatasource("service_map_edges_hourly_ingest", {
+	description:
+		"Zero-retention Events API ingress bridge for scheduled service-map edge rollups. A materialized view forwards each insert to service_map_edges_hourly.",
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Hour: t.dateTime(),
+		SourceService: t.string().lowCardinality(),
+		TargetService: t.string(),
+		DeploymentEnv: t.string().lowCardinality(),
+		CallCount: t.uint64(),
+		ErrorCount: t.uint64(),
+		DurationSumMs: t.float64(),
+		MaxDurationMs: t.float64(),
+		SampledSpanCount: t.uint64(),
+		UnsampledSpanCount: t.uint64(),
+		SampleRateSum: t.float64(),
+	},
+	engine: engine.null(),
+})
+
+export type ServiceMapEdgesHourlyIngestRow = InferRow<typeof serviceMapEdgesHourlyIngest>
+
+/**
  * Pre-aggregated hourly service-to-service edges for the service map.
  * One row per (OrgId, Hour, SourceService, TargetService, DeploymentEnv) so the
  * service map query reads ~hundreds of hourly rows instead of millions of
  * individual spans. Uses AggregatingMergeTree with SimpleAggregateFunction
  * columns for correct incremental merging of sum/max aggregates.
  *
- * Populated by the scheduled hourly rollup in `ServiceMapRollupService` — NOT
- * by a materialized view. The edge target service is recovered via a
- * Client/Producer-span → child Server/Consumer-span join, which an MV cannot
- * express. The rollup writes each completed hour exactly once (watermarked).
+ * The scheduled hourly rollup computes the cross-span join and writes its
+ * completed result to `service_map_edges_hourly_ingest`. The ingress bridge's
+ * materialized view forwards the rows here. This target is never ingested
+ * through the Events API, so it must not declare JSONPaths.
  */
 export const serviceMapEdgesHourly = defineDatasource("service_map_edges_hourly", {
 	description:
-		"Pre-aggregated hourly service-to-service edges for the service map. Uses AggregatingMergeTree for incremental aggregation. Populated by the scheduled ServiceMapRollupService rollup (one write per completed hour).",
-	// jsonPaths enabled: this is ingested directly via POST /v0/events from
-	// ServiceMapRollupService, not by a materialized view. Declaring
-	// `jsonPaths: false` made Tinybird reject every write with "Data Source
-	// needs to have JSONPaths defined", so the table stopped filling — and
-	// because an hour is sealed only once its edge rows land, the rollup then
-	// re-ran all six lookback hours for every org on every tick, forever.
+		"Pre-aggregated hourly service-to-service edges for the service map. Uses AggregatingMergeTree for incremental aggregation. Populated from the scheduled rollup through a Null-engine ingress bridge.",
+	jsonPaths: false,
+	// Preserve the already-materialized annual history while this existing
+	// datasource evolves from an Events API target into an MV target. Without
+	// an explicit forward query, Tinybird may choose the new Null source for a
+	// rebuild; it intentionally contains no historical rows.
+	forwardQuery: "SELECT *",
 	schema: {
 		OrgId: t.string().lowCardinality(),
 		Hour: t.dateTime(),
@@ -836,13 +867,12 @@ export type ErrorEventsRow = InferRow<typeof errorEvents>
  *
  * `error_events` leads its sort key with `FingerprintHash`, which is optimal for
  * per-issue occurrence lookups (filter on a specific FingerprintHash) but pessimal
- * for the recent-window scans that dominate the workload: the errors/triage tick's
- * `errorIssuesScan` (and the dashboard error queries) filter a `Timestamp` range and
- * `GROUP BY FingerprintHash`, which can't prune via the primary index on the original
- * table and ends up scanning the org's whole day-partition — timing out the 30s
- * warehouse budget for high-volume orgs. This sibling makes the time range the leading
- * (post-org) sort dimension so those scans prune to the window. Same schema, same 90d
- * TTL; the only difference is the sorting key.
+ * for recent-window scans. Dashboard error queries and the evaluator's one-time
+ * bootstrap filter a `Timestamp` range and `GROUP BY FingerprintHash`, which cannot
+ * prune via the primary index on the original table. This sibling makes the time range
+ * the leading (post-org) sort dimension; steady-state evaluator ticks use the compact
+ * `error_fingerprints_minutely` rollup instead. Same schema and 90d TTL; only the
+ * sorting key differs.
  */
 export const errorEventsByTime = defineDatasource("error_events_by_time", {
 	description:
@@ -873,6 +903,44 @@ export const errorEventsByTime = defineDatasource("error_events_by_time", {
 })
 
 export type ErrorEventsByTimeRow = InferRow<typeof errorEventsByTime>
+
+/**
+ * Minute-grain error fingerprint rollup used by the scheduled issue evaluator.
+ *
+ * The evaluator only needs one row per fingerprint/window, not the trace/span
+ * payload carried by `error_events_by_time`. Keeping the mutable display fields
+ * as SimpleAggregateFunction(anyLast, String) lets partial insert blocks merge
+ * while the count and time bounds remain exact.
+ *
+ * Query pattern: OrgId equality + contiguous Minute range, then GROUP BY
+ * FingerprintHash. The sorting key follows that filter prefix and keeps the
+ * fingerprint last (highest cardinality).
+ */
+export const errorFingerprintsMinutely = defineDatasource("error_fingerprints_minutely", {
+	description:
+		"Minute-grain per-fingerprint error aggregates for the scheduled issue evaluator. Cascaded from error_events to avoid re-running fingerprint extraction.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Minute: t.dateTime(),
+		FingerprintHash: t.uint64(),
+		ServiceName: t.simpleAggregateFunction("anyLast", t.string()),
+		ExceptionType: t.simpleAggregateFunction("anyLast", t.string()),
+		ExceptionMessage: t.simpleAggregateFunction("anyLast", t.string()),
+		ErrorLabel: t.simpleAggregateFunction("anyLast", t.string()),
+		TopFrame: t.simpleAggregateFunction("anyLast", t.string()),
+		OccurrenceCount: t.simpleAggregateFunction("sum", t.uint64()),
+		FirstSeen: t.simpleAggregateFunction("min", t.dateTime()),
+		LastSeen: t.simpleAggregateFunction("max", t.dateTime()),
+	},
+	engine: engine.aggregatingMergeTree({
+		partitionKey: "toYYYYMM(Minute)",
+		sortingKey: ["OrgId", "Minute", "FingerprintHash"],
+		ttl: "Minute + INTERVAL 90 DAY",
+	}),
+})
+
+export type ErrorFingerprintsMinutelyRow = InferRow<typeof errorFingerprintsMinutely>
 
 /**
  * Pre-materialized root spans for the trace list view.
@@ -1939,3 +2007,91 @@ export const sessionEvents = defineDatasource("session_events", {
 })
 
 export type SessionEventsRow = InferRow<typeof sessionEvents>
+
+/**
+ * Web analytics fact table — the page views and custom events out of
+ * `session_events`, re-sorted by time and with the URL pre-parsed.
+ * Populated by materialized view, not direct ingestion.
+ *
+ * ## Why this exists
+ *
+ * `session_events` is sorted `(OrgId, SessionId, Timestamp, Seq)`, so a
+ * time-range filter cannot use the primary index at all — only
+ * `PARTITION BY toDate(Timestamp)` prunes, at day granularity. Its `idx_type`
+ * skip index does not rescue that: navigation rows are interleaved with every
+ * session's clicks and network calls, so at `GRANULARITY 4` (32,768 rows per
+ * index granule) essentially every granule contains one and it prunes ~nothing.
+ * Measured on one production org over 7 days: 6,879 navigation rows out of
+ * 88,250 — the analytics queries read ~13x the data they use, and evaluated
+ * `domain(Url)`/`path(Url)` per row on top of it.
+ *
+ * A `host`/`pagePath` filter then multiplies that by twelve, because
+ * `navigationSessionsSubquery` is inlined into every branch of the breakdowns
+ * UNION.
+ *
+ * So: time-first sorting key, `Host`/`PagePath` materialized at write time, and
+ * only the two event types product analytics asks about.
+ *
+ * ## Why only navigation + custom
+ *
+ * These are the two that answer product questions and the two that can be funnel
+ * steps ("viewed /pricing", `track('signup_completed')`). Clicks are the next
+ * largest type by far (11,970 vs 6,879 over the same window) and a CSS selector
+ * is not a stable step definition, so including them would roughly triple the
+ * table to serve a worse funnel. In-session debugging still reads
+ * `session_events` directly — this table is not a replacement for it.
+ *
+ * ## Kind vs EventName
+ *
+ * Both, deliberately. `track()` puts a caller-supplied name straight into
+ * `Message` with no reserved-prefix check, so a customer calling
+ * `track('$pageview')` would silently inflate page views if `EventName` were the
+ * only discriminator. `Kind` is the column that is provably identical to the old
+ * `Type = 'navigation'` predicate; `EventName` is the funnel's step key.
+ *
+ * TTL 30 days, matching the rest of the session family. Note the source carries
+ * the same TTL, so this table can never be rebuilt past that horizon — a longer
+ * retention here is a one-way decision, not a tuning knob.
+ */
+export const webEvents = defineDatasource("web_events", {
+	description:
+		"Web analytics fact table: navigation and custom events from session_events, sorted by time with domain(Url)/path(Url) pre-extracted. Powers page views, top pages and funnels. Populated by materialized view.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Timestamp: t.dateTime64(9),
+		SessionId: t.string(),
+		/** Breaks ties within a millisecond, so a funnel's step order is stable. */
+		Seq: t.uint32(),
+		/** `navigation` | `custom` — the source `Type`, carried through unchanged. */
+		Kind: t.string().lowCardinality(),
+		/** `$pageview` for navigation, else the `track()` name. */
+		EventName: t.string(),
+		/** `domain(Url)`. LowCardinality: an org has a handful of hosts. */
+		Host: t.string().lowCardinality(),
+		/** `path(Url)` — pathname only, so no query string or fragment. Unbounded for `/orders/:uuid` apps, hence plain String. */
+		PagePath: t.string(),
+		Url: t.string(),
+		/** `track()` props. Plain String keys — the customer's app chooses them. */
+		Attributes: t.map(t.string(), t.string()),
+	},
+	engine: engine.mergeTree({
+		partitionKey: "toDate(Timestamp)",
+		sortingKey: ["OrgId", "Timestamp", "SessionId", "Seq"],
+		ttl: "toDate(Timestamp) + INTERVAL 30 DAY",
+	}),
+	indexes: [
+		{
+			// A funnel over a rare custom event would otherwise scan the whole
+			// window. `set(64)` because an org's distinct event names are few —
+			// past 64 per granule the index degrades to always-match, which is the
+			// same cost as not having it.
+			name: "idx_event_name",
+			expr: "EventName",
+			type: "set(64)",
+			granularity: 4,
+		},
+	],
+})
+
+export type WebEventsRow = InferRow<typeof webEvents>

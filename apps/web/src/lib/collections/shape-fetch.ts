@@ -66,18 +66,28 @@ export const createSyncedCollection = <A extends Row<unknown>>(config: {
 	orgId: string
 	schema: Schema.Schema<A>
 	getKey: (row: A) => string
+	/**
+	 * Narrows a scoped shape to one row's worth of subtree (today: one
+	 * investigation). The proxy pins which column this compares against and binds
+	 * the value positionally — the client only ever supplies the value. It also
+	 * joins the collection id, so two investigations open in two tabs do not share
+	 * one shape handle.
+	 */
+	scope?: string
 	parser?: SyncedConfig<A>["shapeOptions"]["parser"]
 	onUpdate?: SyncedConfig<A>["onUpdate"]
 	onDelete?: SyncedConfig<A>["onDelete"]
 }) =>
 	createEffectCollection<A, MapleRuntimeR>({
-		id: `${config.shape}:${config.orgId}`,
+		id: config.scope
+			? `${config.shape}:${config.orgId}:${config.scope}`
+			: `${config.shape}:${config.orgId}`,
 		runtime: mapleRuntime,
 		schema: config.schema,
 		getKey: config.getKey,
 		shapeOptions: {
 			url: shapeProxyUrl,
-			params: { shape: config.shape },
+			params: { shape: config.shape, ...(config.scope ? { scope: config.scope } : {}) },
 			fetchClient: mapleShapeFetch,
 			...(config.parser ? { parser: config.parser } : {}),
 		},

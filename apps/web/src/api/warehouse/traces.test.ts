@@ -50,6 +50,9 @@ describe("tinybird traces attribute filter params", () => {
 				expect.objectContaining({
 					startTime: "2026-02-01 00:00:00",
 					endTime: "2026-02-01 01:00:00",
+					query: expect.objectContaining({
+						columns: expect.arrayContaining(["services"]),
+					}),
 				}),
 			)
 		}),
@@ -113,6 +116,7 @@ describe("tinybird traces attribute filter params", () => {
 								timestamp: "2026-02-01 00:00:00",
 								durationMs: 2000,
 								serviceName: "checkout",
+								services: ["gateway", "checkout", "payments"],
 								spanName: "GET",
 								spanKind: "SPAN_KIND_SERVER",
 								statusCode: "Ok",
@@ -136,6 +140,7 @@ describe("tinybird traces attribute filter params", () => {
 			})
 
 			expect(response.data[0]).toMatchObject({
+				services: ["gateway", "checkout", "payments"],
 				rootSpanName: "GET",
 				rootSpan: {
 					name: "GET",

@@ -1,9 +1,9 @@
-import { useOrganization } from "@clerk/clerk-react"
 import { useMapleCustomer } from "@/hooks/use-maple-customer"
 
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { hasBringYourOwnCloudAddOn } from "@/lib/billing/plan-gating"
+import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import { useIsOrgAdmin } from "@/hooks/use-is-org-admin"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
@@ -152,7 +152,10 @@ export function useVisibleSettingsSections() {
 	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
 	const isAdmin = useIsOrgAdmin()
 	const { data: customer, isLoading: isCustomerLoading } = useMapleCustomer()
-	const { organization } = useOrganization()
+	// Shared with the main sidebar and the flagged routes, so a flag can't be read
+	// one way here and another way there (it already force-enables when self-hosted,
+	// which is what the `!isClerkAuthEnabled` branch below used to do inline).
+	const { flags: featureFlags } = useOrganizationFeatureFlags()
 
 	const visibleSections = navSections
 		.map((section) => ({
@@ -184,8 +187,7 @@ export function useVisibleSettingsSections() {
 	}
 
 	const canAccessDataPlatform = isAdmin && hasBringYourOwnCloudAddOn(customer)
-	const hasAiMetadataFlag = organization?.publicMetadata?.bringyourownai === true
-	const canAccessAi = isAdmin && hasAiMetadataFlag
+	const canAccessAi = isAdmin && featureFlags.aiAutoTriage
 
 	const dataSections = navSections
 		.map((section) => ({

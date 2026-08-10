@@ -26,14 +26,6 @@
  *   wrote, which is the same discipline `validate` uses: read lanes from
  *   Postgres, not from step return values, because a step whose result was lost
  *   to a retry boundary still wrote its row.
- *
- * On the rename from `lens-<lensId>`: an in-flight instance replays cached steps
- * against redeployed code, so renaming a step orphans its cache and re-bills the
- * pass. That is accepted here rather than guarded, because the fan-out shipped
- * behind `ai_triage_settings.fanout_enabled`, which defaulted false and had no
- * write path anywhere in the codebase — no instance has ever run in production.
- * A version-branch would be a duplicate of this whole file guarding a case that
- * cannot exist. A v1 payload that somehow arrives simply re-runs from `plan`.
  */
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { investigationLensRuns, investigations } from "@maple/db"
@@ -52,7 +44,7 @@ import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-clo
 import { randomUUID } from "node:crypto"
 import { and, eq, sql } from "drizzle-orm"
 import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
-import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
+import { applyDiagnosisWrites, applyInconclusiveWrites } from "@/services/errors/apply-diagnosis"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import {
@@ -61,7 +53,7 @@ import {
 	tracedPgConnectionFrom,
 } from "@/platform/pg-execute"
 import type { WorkflowEventLike, WorkflowStepLike } from "./ClickHouseSchemaApplyWorkflow.run"
-import { normalizePlan, widthFor, type PlannedHypothesis } from "./plan-normalize"
+import { normalizePlan, widthFor, type NormalizedPlan, type PlannedHypothesis } from "./plan-normalize"
 
 export interface InvestigationFanoutWorkflowEnv extends Record<string, unknown> {
 	readonly MAPLE_DB: unknown
@@ -98,15 +90,19 @@ const decodeSubject = Schema.decodeUnknownSync(InvestigationSubject)
 const decodeSnapshotOption = Schema.decodeUnknownOption(InvestigationSubjectSnapshot)
 const decodePlanOption = Schema.decodeUnknownOption(InvestigationPlan)
 const decodeReport = Schema.decodeUnknownSync(AiTriageResult)
+const decodeReportOption = Schema.decodeUnknownOption(AiTriageResult)
 
 /** Internal actor the lane tools run as — same identity the internal MCP RPC path uses. */
 const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
 
 /**
- * Wall-clock for the planning pass. Short because planning is scoping: four
- * rounds of tool calls against tools that answer quickly.
+ * Wall-clock for the planning pass. Still short, because planning is scoping —
+ * rounds of tool calls against tools that answer quickly. Raised with
+ * `PLANNER_MAX_STEPS` (4 → 8) so the step count stays the binding constraint:
+ * a planner that deadlines mid-sweep submits nothing, and submitting nothing is
+ * the failure this whole change exists to stop.
  */
-const PLAN_BUDGET_MS = 2 * 60 * 1000
+const PLAN_BUDGET_MS = 3 * 60 * 1000
 
 /**
  * Wall-clock for the evidence-gathering phase, after planning. Lanes check it
@@ -115,17 +111,31 @@ const PLAN_BUDGET_MS = 2 * 60 * 1000
  *
  * Two minutes longer than the old single lens budget, because a lane now arrives
  * with a specific claim and real tools rather than a framing. Total gathering
- * window is `PLAN_BUDGET_MS + HYPOTHESIS_BUDGET_MS` = 8 minutes, comfortably
+ * window is `PLAN_BUDGET_MS + HYPOTHESIS_BUDGET_MS` = 9 minutes, comfortably
  * inside the 25-minute stale sweep with room for the validator.
  */
 const HYPOTHESIS_BUDGET_MS = 6 * 60 * 1000
+
+/**
+ * Wall-clock for the ranking pass, kept two minutes under `VALIDATE_STEP`'s
+ * timeout so the validator stops itself rather than being stopped.
+ *
+ * It had no budget at all until roughly one validator run in seven sat for the
+ * full five minutes and was killed by the step, which records
+ * `validation_failed` — a run that produced nothing, rather than one that
+ * produced a partial. A soft stop spends a last step on the forced submit and
+ * still returns a verdict, which is always the better of the two.
+ */
+const VALIDATE_BUDGET_MS = 3 * 60 * 1000
 
 /** Hard ceiling on lanes, and therefore on the alphabet of step names. */
 const MAX_HYPOTHESES = 5
 
 const CLAIM_STEP = { retries: { limit: 3, delay: "2 seconds", backoff: "exponential" } } as const
 // One retry at most, here and below — a retried pass re-runs a whole model call.
-const PLAN_STEP = { retries: { limit: 1, delay: "5 seconds" }, timeout: "4 minutes" } as const
+// Kept above `PLAN_BUDGET_MS` with room to spare: the budget is a soft stop the
+// planner checks between turns, and it needs a turn left to submit inside it.
+const PLAN_STEP = { retries: { limit: 1, delay: "5 seconds" }, timeout: "5 minutes" } as const
 const HYPOTHESIS_STEP = { retries: { limit: 1, delay: "5 seconds" }, timeout: "10 minutes" } as const
 const VALIDATE_STEP = { retries: { limit: 1, delay: "5 seconds" }, timeout: "5 minutes" } as const
 const PERSIST_STEP = { retries: { limit: 5, delay: "2 seconds", backoff: "exponential" } } as const
@@ -217,6 +227,36 @@ const invokePlanner = async (input: InvokePlannerInput): Promise<InvokePlannerOu
 		outputTokens: output.usage.output,
 		toolCount: output.toolSteps,
 	}
+}
+
+/**
+ * Publish what normalization decided, as its own span.
+ *
+ * Separate from `investigation.plan` because normalization runs in the workflow
+ * body, after the planner's Effect has already closed its span. Worth a span of
+ * its own regardless: "did this run actually plan the incident" is the question
+ * production could not answer, and the API traces itself, so putting it here
+ * makes it answerable from Maple rather than only from Postgres.
+ *
+ * Never fails — an investigation must not die because a span did not record.
+ */
+const recordPlanOutcome = async (
+	runtime: SharedRuntime,
+	investigationId: string,
+	plan: NormalizedPlan,
+): Promise<void> => {
+	await runtime
+		.runPromise(
+			Effect.annotateCurrentSpan({
+				"maple.investigation.id": investigationId,
+				"maple.plan.used_seed_fallback": plan.usedSeedFallback,
+				"maple.plan.planner_submitted": plan.plannerSubmitted,
+				"maple.plan.hypothesis_count": plan.hypotheses.length,
+				"maple.plan.note_count": plan.notes.length,
+				"maple.plan.collapsed": plan.collapsed,
+			}).pipe(Effect.withSpan("investigation.plan.normalize")),
+		)
+		.catch(() => {})
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +406,7 @@ export interface InvokeValidatorInput {
 		readonly note: string | null
 		readonly deadlineHit: boolean
 	}>
+	readonly deadlineAtMs: number
 	readonly runtime: SharedRuntime
 }
 
@@ -398,6 +439,7 @@ const invokeValidator = async (input: InvokeValidatorInput): Promise<InvokeValid
 				sessionId: `inv_${input.investigationId}`,
 			}),
 			tenant: tenantFor(input.orgId),
+			deadlineAtMs: input.deadlineAtMs,
 		}),
 	)
 	return {
@@ -413,6 +455,96 @@ const invokeValidator = async (input: InvokeValidatorInput): Promise<InvokeValid
 		inputTokens: output.usage.input,
 		outputTokens: output.usage.output,
 	}
+}
+
+/** The subset of an `investigation_lens_runs` row a partial is built from. */
+interface PartialLaneRow {
+	readonly lensId: string
+	readonly lensName: string | null
+	readonly verdict: string | null
+	readonly claim: string | null
+	readonly reason: string | null
+	readonly error: string | null
+	readonly deadlineHit: boolean
+}
+
+/**
+ * Build the partial result published when nothing was promoted.
+ *
+ * Lane-derived entries are merged *under* whatever the validator wrote rather
+ * than replacing it, and the derivation runs even when the validator filled the
+ * arrays itself. Two reasons, and the second is the load-bearing one:
+ *
+ * 1. Models routinely under-fill optional arrays, and `ruledOut` / `unchecked`
+ *    are exactly the fields a model drops when it is running out of room.
+ * 2. The lane rows are ground truth. They record what each lane actually
+ *    concluded and which lanes ran out of clock; the validator is reporting on
+ *    them from memory.
+ *
+ * When the validator submitted nothing at all — it died, or never called its
+ * tool — the whole report is synthesised. That case is why this exists: a run
+ * whose validator vanished used to publish `validation_inconclusive: The
+ * validator did not return a ranking.` and nothing else, discarding every lane's
+ * work in the same breath.
+ */
+export const partialFromLanes = (
+	lanes: ReadonlyArray<PartialLaneRow>,
+	verdict: { readonly note: string; readonly report: AiTriageResult | null },
+	snapshot: InvestigationSubjectSnapshot | null,
+): AiTriageResult => {
+	const nameOf = (lane: PartialLaneRow) => lane.lensName ?? lane.lensId
+
+	const derivedRuledOut = lanes
+		.filter((lane) => lane.verdict === "ruled_out" || lane.verdict === "rejected")
+		.filter((lane) => lane.reason !== null && lane.reason.trim() !== "")
+		.map((lane) => `${nameOf(lane)}: ${lane.reason}`)
+
+	const derivedUnchecked = lanes
+		.filter((lane) => lane.deadlineHit || lane.claim === null)
+		.map((lane) =>
+			lane.deadlineHit
+				? `${nameOf(lane)}: cut short by the time budget before it finished`
+				: `${nameOf(lane)}: ${lane.error ?? "did not report"}`,
+		)
+
+	// Dedupe by the whole line: the validator naming a lane the lanes also name
+	// would otherwise print it twice, which reads as two separate findings.
+	const merge = (
+		fromValidator: ReadonlyArray<string> | undefined,
+		derived: ReadonlyArray<string>,
+	): ReadonlyArray<string> => [...new Set([...(fromValidator ?? []), ...derived])]
+
+	const ruledOut = merge(verdict.report?.ruledOut, derivedRuledOut)
+	const unchecked = merge(verdict.report?.unchecked, derivedUnchecked)
+
+	if (verdict.report !== null) {
+		return new AiTriageResult({
+			...verdict.report,
+			// Always low: see `applyInconclusiveWrites`. Nothing held up, so a
+			// higher confidence on the lead would be the promotion the validator
+			// declined to make, smuggled in through the report.
+			confidence: "low",
+			ruledOut,
+			unchecked,
+		})
+	}
+
+	return new AiTriageResult({
+		summary: verdict.note,
+		suspectedCause: "No cause was established.",
+		// `IssueSeverity` has no "unclassified" member, and inventing one to carry
+		// "we did not assess this" would widen an enum the issues system reads. It
+		// does not matter here: `applyInconclusiveWrites` writes `severity: null`
+		// onto the row, so the hub shows the incident's own severity and this field
+		// is never the one displayed. "low" is the reading that claims least.
+		severityAssessment: "low",
+		affectedScope: snapshot?.scope ?? "",
+		evidence: [],
+		suggestedActions: [],
+		confidence: "low",
+		ruledOut,
+		unchecked,
+	})
 }
 
 export interface InvestigationFanoutDeps {
@@ -588,6 +720,7 @@ async function runWithDb(
 				snapshot: snapshotOrNull(snapshot),
 				maxWidth: width,
 			})
+			await recordPlanOutcome(runtime, investigationId, plan)
 
 			// Reconcile the reservation downward. The caller had to reserve before the
 			// width was knowable, and it reserved *high* on purpose — under-reserving
@@ -599,12 +732,20 @@ async function runWithDb(
 					.set({
 						fanoutSize: plan.collapsed ? 1 : plan.hypotheses.length,
 						autonomousTurns: sql`greatest(0, ${investigations.autonomousTurns} - ${Math.max(0, reservedPasses - actualPasses)})`,
+						// `usedSeedFallback` / `plannerSubmitted` / `notes` are the whole
+						// reason this is `InvestigationPlanRecord`. Without them the row
+						// cannot answer "did we actually plan this incident?", and the
+						// only way anyone found out the answer was usually no was by
+						// reading `investigation.hypothesis` spans by hand.
 						planJson: {
 							scopeSummary: plan.scopeSummary,
 							incidentStartedAt: plan.incidentStartedAt,
 							incidentEndedAt: plan.incidentEndedAt,
 							hypotheses: plan.hypotheses,
 							collapseReason: plan.collapseReason,
+							usedSeedFallback: plan.usedSeedFallback,
+							plannerSubmitted: plan.plannerSubmitted,
+							notes: plan.notes,
 						} as never,
 						plannerModel: output.model === "" ? null : output.model,
 						plannerElapsedMs: finishedAt - startedAt,
@@ -641,6 +782,7 @@ async function runWithDb(
 				scopeSummary: plan.scopeSummary,
 				collapsed: plan.collapsed,
 				usedSeedFallback: plan.usedSeedFallback,
+				plannerSubmitted: plan.plannerSubmitted,
 				notes: plan.notes,
 				hypotheses: plan.hypotheses,
 				plannerInputTokens: output.inputTokens,
@@ -946,6 +1088,10 @@ async function runWithDb(
 						note: lane.error,
 						deadlineHit: lane.deadlineHit,
 					})),
+					// Derived from `startedAt`, which is a clock read *inside* the step —
+					// a `Date.now()` in the workflow body differs on every replay and
+					// would invalidate every cached step after it.
+					deadlineAtMs: startedAt + VALIDATE_BUDGET_MS,
 					runtime,
 				})
 
@@ -1011,8 +1157,31 @@ async function runWithDb(
 					return `**${name}** — ${lane.claim}${cutShort}\n_${lane.verdict}_: ${lane.reason ?? ""}`.trim()
 				}),
 				"",
+				// When nothing was promoted, the established facts live in the partial
+				// rather than in a diagnosis — and a follow-up turn that cannot see
+				// them re-derives them from scratch on the user's next question.
 				verdict.promotedLensId === null
-					? `**Validator** — promoted nothing. ${verdict.note}`
+					? [
+							`**Validator** — promoted nothing. ${verdict.note}`,
+							...(() => {
+								const partial = partialFromLanes(
+									lanes,
+									{
+										note: verdict.note,
+										report: Option.getOrNull(decodeReportOption(verdict.report)),
+									},
+									snapshotOrNull(snapshot),
+								)
+								return [
+									...(partial.ruledOut?.length
+										? [`_Ruled out:_ ${partial.ruledOut.join("; ")}`]
+										: []),
+									...(partial.unchecked?.length
+										? [`_Could not check:_ ${partial.unchecked.join("; ")}`]
+										: []),
+								]
+							})(),
+						].join("\n\n")
 					: `**Validator** — promoted ${nameOf(
 							verdict.promotedLensId,
 							lanes.find((lane) => lane.lensId === verdict.promotedLensId)?.lensName ?? null,
@@ -1048,24 +1217,67 @@ async function runWithDb(
 				planned.plannerOutputTokens +
 				verdict.outputTokens
 
-			if (verdict.promotedLensId === null || verdict.report === null) {
+			// Lenient on this path on purpose. `decodeReport` throws, which is right
+			// when a promoted diagnosis is about to be published — a malformed one
+			// must not reach the page. Here a malformed report only costs the weak
+			// lead: the lane-derived half of the partial is still worth publishing.
+			const partialReport = Option.getOrNull(decodeReportOption(verdict.report))
+
+			if (verdict.promotedLensId === null) {
 				// Lanes reported and none held up. That is an answer about the incident,
-				// not a failure to produce one — but there is no diagnosis to publish.
+				// not a failure to produce one, and it is now published as one: a
+				// partial carrying what was ruled out and what could not be checked,
+				// built from the validator's report where it wrote one and from the
+				// lane rows either way.
+				//
+				// This used to write `status: "failed"` and a raw
+				// `validation_inconclusive: …` string that the UI rendered in an error
+				// box, which described every honest "we could not tell" as a defect and
+				// threw away every lane's work in the same statement.
+				const report = partialFromLanes(
+					lanes,
+					{ note: verdict.note, report: partialReport },
+					snapshotOrNull(snapshot),
+				)
 				await dbStep((db) =>
-					db
-						.update(investigations)
-						.set({
-							status: "failed",
-							fanoutState: "rejected_all",
-							error: `validation_inconclusive: ${verdict.note}`,
-							validatorNote: verdict.note,
-							validatorElapsedMs: verdict.elapsedMs,
-							model: verdict.model,
-							inputTokens,
-							outputTokens,
-							updatedAt: new Date(now),
-						})
-						.where(and(eq(investigations.orgId, orgIdTyped), eq(investigations.id, idTyped))),
+					applyInconclusiveWrites(db, {
+						orgId: orgIdTyped,
+						investigationId: idTyped,
+						report,
+						model: verdict.model,
+						inputTokens,
+						outputTokens,
+						nowMs: now,
+						validatorNote: verdict.note,
+						validatorElapsedMs: verdict.elapsedMs,
+					}),
+				)
+				await meterTokens(env, orgId, investigationId, attempt, inputTokens, outputTokens)
+				return { status: "inconclusive" as const }
+			}
+
+			// A promoted lens with no report is incoherent, not a partial: it would
+			// flip the row to `diagnosed` with nothing to show. `validator-agent`
+			// already coerces that pairing away, so reaching here means the coercion
+			// was bypassed — treat it as the partial it effectively is.
+			if (verdict.report === null) {
+				const report = partialFromLanes(
+					lanes,
+					{ note: verdict.note, report: null },
+					snapshotOrNull(snapshot),
+				)
+				await dbStep((db) =>
+					applyInconclusiveWrites(db, {
+						orgId: orgIdTyped,
+						investigationId: idTyped,
+						report,
+						model: verdict.model,
+						inputTokens,
+						outputTokens,
+						nowMs: now,
+						validatorNote: `${verdict.note} (a lens was promoted with no report to publish)`,
+						validatorElapsedMs: verdict.elapsedMs,
+					}),
 				)
 				await meterTokens(env, orgId, investigationId, attempt, inputTokens, outputTokens)
 				return { status: "inconclusive" as const }

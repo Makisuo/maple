@@ -1,0 +1,503 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import Footer from "../../components/Footer.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Breadcrumb from "../../components/Breadcrumb.astro";
+import FAQ from "../../components/FAQ.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import LatencyClockDiagram from "../../components/guides/LatencyClockDiagram.astro";
+
+const pageTitle = "API Latency: Debug p99 with OpenTelemetry | Maple";
+const pageDescription =
+    "Measure API latency correctly, separate network delay from server time, and trace a p99 regression to the release and operation that caused it.";
+const published = "2026-08-08";
+const updatedLabel = "August 8, 2026";
+
+const toc = [
+    ["definition", "Define the latency clock"],
+    ["client-timing", "Measure from the client"],
+    ["percentiles", "Read the distribution"],
+    ["opentelemetry", "Connect metrics to traces"],
+    ["investigation", "Narrow the cause"],
+    ["sampling", "Account for sampling"],
+    ["maple-example", "Debug the regression"],
+] as const;
+
+const faqs = [
+    {
+        question: "Is API latency the same as response time?",
+        answer:
+            "Not necessarily. Time to first byte ends when the first response byte reaches the client. Total response time ends when the entire body arrives. Server request duration measures the application's portion of the request. They may be close for small payloads, but streaming and large responses make them diverge.",
+    },
+    {
+        question: "Should I alert on average API latency or p99?",
+        answer:
+            "Use a percentile tied to a user-facing service-level objective. An average can hide a small but important group of slow requests. p99 is useful for tail latency, but it becomes noisy when the window contains too few requests. Low-volume routes need a longer window or an objective expressed over individual requests.",
+    },
+    {
+        question: "Should latency come from metrics or traces?",
+        answer:
+            "Use metrics or representative span-derived aggregates to detect and alert on the distribution. Use traces to explain the slow requests inside the affected slice. A trace is detailed evidence about one request, not a population summary.",
+    },
+    {
+        question: "How do I know whether a third-party API is responsible?",
+        answer:
+            "Instrument the outgoing HTTP client. Its CLIENT span should appear beneath your server span and carry the remote address, status, and duration. If that child span consumes most of the parent duration, group it by destination and compare its latency and errors over the incident window.",
+    },
+];
+
+const siteUrl = Astro.site?.toString().replace(/\/$/, "") ?? "https://maple.dev";
+const articleJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    headline: "When API p99 jumps but p50 doesn't",
+    description: pageDescription,
+    datePublished: published,
+    dateModified: published,
+    author: { "@type": "Person", name: "Makisuo" },
+    publisher: {
+        "@type": "Organization",
+        name: "Maple",
+        logo: { "@type": "ImageObject", url: `${siteUrl}/logo192.png` },
+    },
+    mainEntityOfPage: `${siteUrl}/guides/api-latency`,
+};
+---
+
+<Layout title={pageTitle} description={pageDescription} ogType="article" alternates={["en"]}>
+    <SeoHead title={pageTitle} description={pageDescription} type="WebPage" />
+    <script is:inline type="application/ld+json" set:html={JSON.stringify(articleJsonLd)} />
+    <Nav />
+    <Breadcrumb
+        items={[
+            { label: "Home", href: "/" },
+            { label: "Guides", href: "/guides" },
+            { label: "API latency" },
+        ]}
+    />
+
+    <main>
+        <header class="relative overflow-hidden border-b border-border pt-[19px]">
+            <div
+                class="pointer-events-none absolute inset-0"
+                aria-hidden="true"
+                style="background-image: linear-gradient(to right, oklch(1 0 0 / 4%) 1px, transparent 1px), linear-gradient(to bottom, oklch(1 0 0 / 4%) 1px, transparent 1px); background-size: 60px 60px; mask-image: radial-gradient(ellipse 80% 72% at 24% 28%, black, transparent);"
+            >
+            </div>
+            <div class="relative mx-auto grid max-w-6xl gap-12 px-6 pb-16 pt-20 md:pb-24 md:pt-28 lg:grid-cols-[minmax(0,0.9fr)_minmax(430px,1.1fr)] lg:items-center lg:gap-16">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted">
+                        <span class="border border-primary/40 px-2 py-1 text-primary">API performance</span>
+                        <span>14 min read</span>
+                    </div>
+                    <h1 class="mt-6 max-w-[13ch] font-display text-[clamp(40px,6vw,70px)] font-medium leading-[0.98] tracking-[-0.045em] text-fg">
+                        When API p99 jumps but p50 doesn't
+                    </h1>
+                    <p class="mt-7 max-w-[60ch] text-[15px] leading-[1.75] text-fg-muted md:text-base">
+                        Measure the right clock, isolate the slow population, and follow one OpenTelemetry trace to the release and operation responsible.
+                    </p>
+                    <div class="mt-7 flex flex-wrap gap-x-5 gap-y-2 font-mono text-[10px] text-fg-muted">
+                        <span>By Makisuo</span>
+                        <time datetime={published}>Updated {updatedLabel}</time>
+                    </div>
+                </div>
+
+                <LatencyClockDiagram />
+            </div>
+        </header>
+
+        <nav aria-label="Guide sections" class="border-b border-border bg-bg-deep">
+            <div class="mx-auto flex max-w-6xl gap-6 overflow-x-auto px-6 py-4 font-mono text-[10px] whitespace-nowrap text-fg-muted">
+                {toc.map(([id, label]) => (
+                    <a href={`#${id}`} class="transition-colors hover:text-primary">{label}</a>
+                ))}
+            </div>
+        </nav>
+
+        <div class="mx-auto grid max-w-6xl gap-12 px-6 py-16 md:py-24 lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-16">
+            <aside class="hidden lg:block">
+                <nav aria-label="On this page" class="sticky top-28">
+                    <p class="font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted">On this page</p>
+                    <ol class="mt-4 space-y-3 border-l border-border">
+                        {toc.map(([id, label], index) => (
+                            <li>
+                                <a href={`#${id}`} class="-ml-px grid grid-cols-[1.7rem_1fr] border-l border-transparent pl-3 text-[12px] leading-snug text-fg-muted transition-colors hover:border-primary hover:text-fg">
+                                    <span class="font-mono text-[9px] text-fg-muted">{String(index + 1).padStart(2, "0")}</span>
+                                    <span>{label}</span>
+                                </a>
+                            </li>
+                        ))}
+                    </ol>
+                </nav>
+            </aside>
+
+            <article class="latency-guide min-w-0">
+                <section id="definition" class="scroll-mt-24">
+                    <p class="guide-eyebrow">01 · Definition</p>
+                    <h2>API latency is only useful after you define the clock</h2>
+
+                    <div class="guide-answer">
+                        <p>
+                            <strong>API latency</strong> is the elapsed time for an API operation from a stated observation point. Client timing includes network setup and transfer; server timing covers only the work visible after the server receives the request.
+                        </p>
+                    </div>
+
+                    <p>
+                        Your checkout endpoint can have a 42 ms median and a 380 ms p99. Most requests are healthy, but the slowest 1% take a different path through the system. An average smooths that path out of view.
+                    </p>
+                    <p>
+                        Before comparing numbers, write down which interval you mean. Several measurements are commonly called latency, and each exposes a different part of the request path.
+                    </p>
+
+                    <div class="guide-table-wrap">
+                        <table>
+                            <thead>
+                                <tr><th>Measurement</th><th>Starts</th><th>Stops</th><th>Best vantage point</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td><strong>Connection setup</strong></td><td>Before DNS</td><td>After TCP and TLS</td><td>Client</td></tr>
+                                <tr><td><strong>Time to first byte</strong></td><td>Before the request</td><td>First response byte</td><td>Client</td></tr>
+                                <tr><td><strong>Server duration</strong></td><td>Server receives request</td><td>Server completes handling</td><td>Server span or metric</td></tr>
+                                <tr><td><strong>Total response time</strong></td><td>Before the request</td><td>Full response body</td><td>Client</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <p>
+                        An HTTP server span cannot see the user's DNS lookup or the distance between the user and your edge. A client-side time-to-first-byte measurement includes those costs, but cannot explain which database query ran inside the server.
+                    </p>
+                    <p>
+                        For the rest of this guide, <strong>latency</strong> means inbound request duration as observed by the server unless we explicitly say time to first byte or total response time. Server duration is the clock we can break into child spans and change from application code.
+                    </p>
+                </section>
+
+                <section id="client-timing" class="scroll-mt-24">
+                    <p class="guide-eyebrow">02 · Outside-in measurement</p>
+                    <h2>Measure one request from the client before opening a dashboard</h2>
+                    <p>
+                        When someone says “the API is slow,” <code>curl</code> is a good first instrument. Its <code>--write-out</code> variables expose cumulative timestamps for DNS, connection setup, TLS, first byte, and the completed transfer.
+                    </p>
+
+                    <pre><code>curl --output /dev/null --silent --show-error \
+  --write-out 'dns:      %&#123;time_namelookup&#125;s\nconnect:  %&#123;time_connect&#125;s\ntls:      %&#123;time_appconnect&#125;s\nttfb:     %&#123;time_starttransfer&#125;s\ntotal:    %&#123;time_total&#125;s\n' \
+  https://api.example.com/v1/checkout</code></pre>
+
+                    <p>Example output:</p>
+
+                    <pre><code>dns:      0.014s
+connect:  0.048s
+tls:      0.096s
+ttfb:     0.381s
+total:    0.389s</code></pre>
+
+                    <p>These values are cumulative, not individual stage durations:</p>
+                    <ul>
+                        <li>DNS took about 14 ms.</li>
+                        <li>TCP setup took about <code>48 - 14 = 34 ms</code>.</li>
+                        <li>TLS took about <code>96 - 48 = 48 ms</code>.</li>
+                        <li>The wait after connection setup and before the first byte took about <code>381 - 96 = 285 ms</code>.</li>
+                        <li>Transferring the response after the first byte took about <code>389 - 381 = 8 ms</code>.</li>
+                    </ul>
+
+                    <p>
+                        The long interval begins after the secure connection exists and ends when the response starts. That points toward server work or a downstream dependency, but it does not prove which one.
+                    </p>
+                    <p>
+                        Run the probe from more than one relevant location. A laptop beside the server tells a different story from a mobile client across an ocean. Separate <code>curl</code> invocations also create separate connection histories, while a production client may reuse connections.
+                    </p>
+                </section>
+
+                <section id="percentiles" class="scroll-mt-24">
+                    <p class="guide-eyebrow">03 · Distribution</p>
+                    <h2>API latency percentiles expose the slow path</h2>
+                    <p>Production latency is a distribution, so read it as one.</p>
+
+                    <div class="percentile-strip">
+                        <div class="percentile-strip__p50"><span>p50</span><strong>42 ms</strong><small>typical request</small></div>
+                        <div class="percentile-strip__p95"><span>p95</span><strong>94 ms</strong><small>first 95%</small></div>
+                        <div class="percentile-strip__p99"><span>p99</span><strong>380 ms</strong><small>slow tail</small></div>
+                    </div>
+
+                    <p>
+                        The typical request is healthy. Even the first 95% are healthy. The problem lives in a much slower tail. That shape narrows the search: a general CPU shortage or consistently expensive code path usually moves the center of the distribution too. A p99-only regression suggests an intermittent branch such as a cache miss, lock contention, retries, a cold start, a saturated connection pool, or an input-specific query.
+                    </p>
+
+                    <h3>Percentiles need enough context to mean anything</h3>
+                    <ul>
+                        <li>Compare the same route and environment. Blending <code>GET /health</code> with <code>POST /checkout</code> produces a number that describes neither.</li>
+                        <li>Use a time window with enough requests. A p99 over 40 requests is effectively one observation.</li>
+                        <li>Compare request volume alongside latency. A pool that is fine at 30 requests per second may queue at 300.</li>
+                        <li>Record a route template such as <code>/orders/&#123;orderId&#125;</code>, not raw paths such as <code>/orders/847291</code>.</li>
+                    </ul>
+                    <p>
+                        There is no universal “good” p99. The target comes from the user journey and its service-level objective. A synchronous checkout and a background export should not share a threshold.
+                    </p>
+                </section>
+
+                <section id="opentelemetry" class="scroll-mt-24">
+                    <p class="guide-eyebrow">04 · Telemetry model</p>
+                    <h2>OpenTelemetry connects the percentile to request work</h2>
+                    <p>
+                        OpenTelemetry gives each request a trace and each timed operation inside it a span. Standard HTTP instrumentation records the request method, route, status, and duration. Instrumented database and HTTP clients add child spans, while context propagation connects work across service boundaries.
+                    </p>
+                    <p>
+                        The stable HTTP conventions define <code>http.server.request.duration</code> as the server-side request-duration histogram. In a trace, an inbound HTTP request is a <code>SERVER</code> span and <code>http.route</code> is the low-cardinality route template. Those conventions let a backend group the same operation across runtimes and releases.
+                    </p>
+
+                    <p>At minimum, make these resource attributes trustworthy:</p>
+
+                    <pre><code>service.name=order-service
+deployment.environment.name=production
+service.version=def456</code></pre>
+
+                    <p>
+                        <code>service.name</code> gives the request an owner. The environment separates production from staging. <code>service.version</code> turns “latency started around 14:05” into a comparison between the code before and after a release.
+                    </p>
+                    <p>
+                        Metrics and traces answer different parts of the investigation. A histogram summarizes the population and should drive the alert. A trace preserves the order and duration of work inside one request. Deriving metrics from spans can connect the two, but a sampled set of traces is not automatically a statistically safe latency dataset.
+                    </p>
+                </section>
+
+                <section id="investigation" class="scroll-mt-24">
+                    <p class="guide-eyebrow">05 · Investigation strategy</p>
+                    <h2>Opening the slowest trace first can waste the investigation</h2>
+                    <p>
+                        Sorting every trace by duration and opening the worst one feels efficient. It can send a team after a rare cold start while the actual regression is a release-specific database loop.
+                    </p>
+                    <p>
+                        Preserve the incident window first. Compare the affected route with its own baseline, group it by <code>service.version</code>, region, or instance, and only then choose slow traces from the group that moved. The few minutes spent scoping the population prevent an interesting outlier from becoming the diagnosis.
+                    </p>
+
+                    <div class="guide-table-wrap">
+                        <table>
+                            <thead><tr><th>Observed shape</th><th>Likely direction</th><th>Evidence to inspect</th></tr></thead>
+                            <tbody>
+                                <tr><td><strong>p50, p95, and p99 rise</strong></td><td>Common work or broad saturation</td><td>Root children, CPU, queues, dependencies</td></tr>
+                                <tr><td><strong>p99 rises; p50 stays flat</strong></td><td>Intermittent branch or contention</td><td>Slow traces grouped by version and attributes</td></tr>
+                                <tr><td><strong>Latency rises with traffic</strong></td><td>A finite pool is saturating</td><td>Pool wait, worker queue, database connections</td></tr>
+                                <tr><td><strong>Server is fast; TTFB is slow</strong></td><td>Network, proxy, TLS, or edge path</td><td>Client timing by region and gateway spans</td></tr>
+                                <tr><td><strong>TTFB is fast; total is slow</strong></td><td>Large or streamed response</td><td>Response size, compression, throughput</td></tr>
+                                <tr><td><strong>Span count grows after release</strong></td><td>N+1 or retry amplification</td><td>Repeated operations and statements</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h3>Make the smallest change supported by the evidence</h3>
+                    <ul>
+                        <li>Batch repeated reads instead of adding a cache in front of an N+1 loop.</li>
+                        <li>Index the predicate proven slow by the query plan, not every nearby column.</li>
+                        <li>Tune a connection pool only after measuring acquisition wait and database capacity together.</li>
+                        <li>Put timeouts and bounded retries around downstream calls. Retries without a budget multiply tail latency.</li>
+                        <li>Move non-critical work out of the request path when the response does not depend on it.</li>
+                    </ul>
+                    <p>If the trace does not expose the relevant boundary, add a span around that boundary before changing the system.</p>
+                </section>
+
+                <section id="sampling" class="scroll-mt-24">
+                    <p class="guide-eyebrow">06 · Statistical limits</p>
+                    <h2>Sampling changes what your latency data can prove</h2>
+                    <p>
+                        At high volume, keeping every trace may be unnecessary. With consistent probability head sampling, retained traces can represent the broader population, although rare tail behavior remains sensitive to sample size.
+                    </p>
+                    <p>
+                        Tail sampling is intentionally selective. A policy that keeps all slow or failed traces is useful for debugging, but the resulting trace set no longer represents normal traffic. Do not calculate an SLO percentile from a dataset deliberately biased toward slow requests.
+                    </p>
+                    <p>
+                        For exact request-rate and latency metrics alongside sampled traces, derive metrics before traces are dropped. The OpenTelemetry Collector's Span Metrics connector can turn completed spans into request metrics and then pass the trace pipeline to a sampler. Keep metrics for alerting and long-range percentiles; keep representative or diagnostically valuable traces for explanation.
+                    </p>
+                </section>
+
+                <section id="maple-example" class="scroll-mt-24">
+                    <p class="guide-eyebrow">07 · Worked investigation</p>
+                    <h2>A p99 API latency regression, debugged in Maple</h2>
+                    <p>
+                        This representative investigation uses illustrative values. The service-level objective for <code>POST /checkout</code> says p99 must remain at or below 200 ms. An alert reports 380 ms.
+                    </p>
+
+                    <div class="maple-local-block">
+                        <p class="guide-kicker">Run it locally</p>
+                        <h3>Point an existing OpenTelemetry service at Maple</h3>
+                        <pre><code>maple start --offline
+
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:4318"
+export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
+export OTEL_SERVICE_NAME="order-service"</code></pre>
+                        <p>
+                            Local mode needs no API key. Hosted Maple uses <code>https://ingest.maple.dev</code> with an <code>Authorization=Bearer ...</code> OTLP header. The <a href="/docs/getting-started/introduction">language guides</a> cover automatic instrumentation and custom spans.
+                        </p>
+                    </div>
+
+                    <ol class="investigation-steps">
+                        <li>
+                            <span>01</span>
+                            <div>
+                                <h3>Check which percentile moved</h3>
+                                <p>p50 and p95 stay nearly flat while p99 rises sharply. Request volume is steady. The evidence points to a conditional path affecting a small slice of checkout traffic.</p>
+                            </div>
+                        </li>
+                        <li>
+                            <span>02</span>
+                            <div>
+                                <h3>Compare the releases before and after the regression</h3>
+                                <p>Grouping <code>POST /checkout</code> by <code>service.version</code> creates a clean boundary.</p>
+                                <div class="release-compare">
+                                    <div><span>abc123 · baseline</span><strong>120 ms</strong><small>p99 · 3 DB spans</small></div>
+                                    <div class="release-compare__bad"><span>def456 · regressed</span><strong>380 ms</strong><small>p99 · 50 DB spans</small></div>
+                                </div>
+                            </div>
+                        </li>
+                    </ol>
+
+                    <figure class="guide-figure">
+                        <img
+                            src="/screenshots/story-api-releases.webp"
+                            alt="Maple release comparison for order-service showing p99 rising from 120 milliseconds to 380 milliseconds and database spans per request rising from 3 to 50"
+                            width="2560"
+                            height="1320"
+                            loading="lazy"
+                        />
+                        <figcaption>The version comparison gives the regression an owner before we read individual traces.</figcaption>
+                    </figure>
+
+                    <ol class="investigation-steps investigation-steps--continued" start="3">
+                        <li>
+                            <span>03</span>
+                            <div>
+                                <h3>Open traces from the affected slice</h3>
+                                <pre><code>service.name = "order-service"
+deployment.environment.name = "production"
+service.version = "def456"
+http.route = "/checkout"
+duration &gt; 200ms</code></pre>
+                                <p>The waterfall shows repeated database child spans. Sequential repetition indicates an N+1 pattern; long waits before otherwise fast queries point to connection-pool or database concurrency limits.</p>
+                            </div>
+                        </li>
+                    </ol>
+
+                    <figure class="guide-figure">
+                        <img
+                            src="/screenshots/hero-traces.webp"
+                            alt="Maple trace waterfall with a slow SQL span selected and its database attributes visible"
+                            width="3600"
+                            height="1850"
+                            loading="lazy"
+                        />
+                        <figcaption>The trace explains one slow request. The percentile and version comparison tell us whether it represents the incident.</figcaption>
+                    </figure>
+
+                    <ol class="investigation-steps investigation-steps--continued" start="4">
+                        <li>
+                            <span>04</span>
+                            <div>
+                                <h3>Fix the mechanism and verify the same distribution</h3>
+                                <p>Assume <code>def456</code> introduced a lookup inside an item loop. Revert for immediate safety, then replace the loop with a batched query or join. Verify p99 falls below 200 ms, database spans return from 50 to 3, and the other routes remain stable.</p>
+                            </div>
+                        </li>
+                    </ol>
+
+                    <div class="guide-maple">
+                        <p class="guide-kicker">Keep the investigation anchored</p>
+                        <h3>Record the route, window, release, and target percentile</h3>
+                        <p>
+                            Write down those four values before opening a trace. That small record keeps the first unusual span from pulling the investigation away from the population that actually triggered the alert.
+                        </p>
+                        <div class="mt-6 flex flex-wrap gap-3">
+                            <a href="/docs/local-mode" class="guide-button guide-button--primary">Start Maple locally</a>
+                            <a href="/docs/concepts/sampling-throughput" class="guide-button">Read the sampling guide</a>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="guide-sources">
+                    <p class="guide-eyebrow">Sources and further reading</p>
+                    <ul>
+                        <li><a href="https://curl.se/docs/manpage.html#-w" target="_blank" rel="noopener noreferrer">curl: write-out timing variables</a></li>
+                        <li><a href="https://opentelemetry.io/docs/specs/semconv/http/http-metrics/" target="_blank" rel="noopener noreferrer">OpenTelemetry: HTTP metrics semantic conventions</a></li>
+                        <li><a href="https://opentelemetry.io/docs/specs/semconv/http/http-spans/" target="_blank" rel="noopener noreferrer">OpenTelemetry: HTTP span semantic conventions</a></li>
+                        <li><a href="https://opentelemetry.io/docs/concepts/sampling/" target="_blank" rel="noopener noreferrer">OpenTelemetry: Sampling</a></li>
+                        <li><a href="https://opentelemetry.io/docs/collector/components/connector/" target="_blank" rel="noopener noreferrer">OpenTelemetry Collector: Connectors</a></li>
+                    </ul>
+                </section>
+            </article>
+        </div>
+    </main>
+
+    <FAQ items={faqs} />
+    <BottomCTA />
+    <Footer />
+</Layout>
+
+<style is:global>
+    .latency-guide section + section { margin-top: 5.5rem; }
+    .latency-guide .guide-eyebrow { margin: 0 0 0.9rem; font-family: var(--font-mono); font-size: 10px; line-height: 1.4; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted-foreground); }
+    .latency-guide h2 { max-width: 22ch; margin: 0 0 1.5rem; font-family: var(--font-display); font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 500; line-height: 1.08; letter-spacing: -0.03em; color: var(--foreground); text-wrap: balance; }
+    .latency-guide h3 { margin: 2.5rem 0 0.8rem; font-family: var(--font-display); font-size: 1.15rem; font-weight: 550; line-height: 1.3; letter-spacing: -0.015em; color: var(--foreground); }
+    .latency-guide > section > p:not(.guide-eyebrow, .guide-kicker), .latency-guide .guide-answer p { max-width: 70ch; margin: 0 0 1.15rem; font-size: 15px; line-height: 1.8; color: var(--muted-foreground); }
+    .latency-guide strong { font-weight: 600; color: var(--foreground); }
+    .latency-guide a:not(.guide-button) { color: var(--primary); text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--primary) 42%, transparent); text-underline-offset: 3px; transition: color 150ms ease; }
+    .latency-guide a:not(.guide-button):hover { color: var(--foreground); }
+    .latency-guide code:not(pre code) { border: 1px solid var(--border); background: var(--bg-elevated); padding: 0.1rem 0.35rem; font-family: var(--font-mono); font-size: 12px; color: var(--foreground); }
+    .latency-guide pre { max-width: 100%; margin: 1.5rem 0 1.75rem; overflow-x: auto; border: 1px solid var(--border); border-left: 2px solid var(--primary); background: var(--bg-deep); padding: 1rem 1.1rem; font-family: var(--font-mono); font-size: 12px; line-height: 1.75; color: var(--foreground); }
+    .latency-guide ul { display: grid; gap: 0.65rem; max-width: 70ch; margin: 1.3rem 0 1.6rem; padding-left: 1.1rem; color: var(--muted-foreground); font-size: 14px; line-height: 1.7; }
+    .latency-guide li::marker { color: var(--primary); }
+    .guide-answer { margin: 2rem 0; border-left: 2px solid var(--primary); background: var(--bg-deep); padding: 1.25rem 1.35rem; }
+    .latency-guide .guide-answer p { margin: 0; font-size: 16px; color: var(--foreground); }
+    .guide-table-wrap { max-width: 100%; overflow-x: auto; }
+    .latency-guide table { width: 100%; min-width: 680px; margin: 1.6rem 0 2rem; border-collapse: collapse; font-size: 13px; line-height: 1.6; color: var(--muted-foreground); }
+    .latency-guide th { border-bottom: 1px solid var(--border); padding: 0.7rem 0.9rem; text-align: left; font-family: var(--font-mono); font-size: 9px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--foreground); }
+    .latency-guide td { border-bottom: 1px solid var(--border); padding: 0.9rem; vertical-align: top; }
+    .percentile-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 2rem 0; overflow: hidden; border: 1px solid var(--border); border-radius: 0.75rem; background: var(--border); }
+    .percentile-strip > div { display: flex; flex-direction: column; border-top: 1px solid transparent; background: var(--background); padding: 1.35rem; }
+    .percentile-strip span, .release-compare span { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted-foreground); }
+    .percentile-strip strong, .release-compare strong { margin-top: 0.55rem; font-family: var(--font-display); font-size: 1.6rem; font-weight: 550; }
+    .percentile-strip small, .release-compare small { margin-top: 0.3rem; font-family: var(--font-mono); font-size: 9px; color: var(--muted-foreground); }
+    .percentile-strip > .percentile-strip__p50 { border-top-color: var(--chart-p50); }
+    .percentile-strip > .percentile-strip__p95 { border-top-color: var(--chart-p95); }
+    .percentile-strip > .percentile-strip__p99 { border-top-color: var(--chart-p99); }
+    .percentile-strip__p50 strong { color: var(--chart-p50); }
+    .percentile-strip__p95 strong { color: var(--chart-p95); }
+    .percentile-strip__p99 strong { color: var(--chart-p99); }
+    .latency-guide .guide-kicker { margin: 0; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--primary); }
+    .maple-local-block { margin: 2rem 0 3rem; border: 1px solid var(--border); border-radius: 0.75rem; background: var(--bg-deep); padding: 1.5rem; }
+    .maple-local-block h3 { margin: 0.55rem 0 0.8rem; font-size: 1.35rem; }
+    .maple-local-block > p:not(.guide-kicker) { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted-foreground); }
+    .maple-local-block pre { margin: 1.3rem 0; border-left-width: 1px; background: var(--background); }
+    .investigation-steps { margin: 2rem 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+    .investigation-steps li { display: grid; grid-template-columns: 2.6rem 1fr; gap: 1rem; border-bottom: 1px solid var(--border); padding: 1.4rem 0; }
+    .investigation-steps li > div { min-width: 0; }
+    .investigation-steps > li > span { padding-top: 0.2rem; font-family: var(--font-mono); font-size: 10px; color: var(--primary); }
+    .investigation-steps h3, .investigation-steps p { margin: 0; }
+    .investigation-steps h3 { font-size: 1.05rem; }
+    .investigation-steps p { margin-top: 0.5rem; font-size: 13px; line-height: 1.7; color: var(--muted-foreground); }
+    .investigation-steps pre { margin-bottom: 0.5rem; }
+    .investigation-steps--continued { margin-top: 2.5rem; }
+    .release-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin-top: 1.2rem; overflow: hidden; border: 1px solid var(--border); background: var(--border); }
+    .release-compare > div { display: flex; flex-direction: column; background: var(--background); padding: 1rem; }
+    .release-compare > .release-compare__bad { border-left: 1px solid var(--chart-p99); background: color-mix(in oklab, var(--chart-p99) 5%, var(--background)); }
+    .release-compare__bad span, .release-compare__bad strong { color: var(--chart-p99); }
+    .guide-figure { margin: 2.5rem 0 3.5rem; }
+    .guide-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 0.75rem; background: var(--bg-deep); }
+    .guide-figure figcaption { margin-top: 0.75rem; font-family: var(--font-mono); font-size: 9px; line-height: 1.6; color: var(--muted-foreground); }
+    .guide-maple { margin-top: 3.5rem; border: 1px solid var(--primary); border-radius: 0.75rem; background: var(--bg-deep); padding: 1.5rem; }
+    .guide-maple h3 { margin: 0.55rem 0 0.8rem; font-size: 1.35rem; }
+    .guide-maple > p:not(.guide-kicker) { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted-foreground); }
+    .guide-button { display: inline-flex; min-height: 2.25rem; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.55rem 0.8rem; font-size: 12px; font-weight: 550; color: var(--foreground); text-decoration: none; transition: background-color 150ms ease, border-color 150ms ease; }
+    .guide-button:hover { border-color: var(--primary); background: color-mix(in oklab, var(--primary) 8%, transparent); }
+    .guide-button--primary { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
+    .guide-button--primary:hover { background: color-mix(in oklab, var(--primary) 82%, black); }
+    .guide-sources { border-top: 1px solid var(--border); padding-top: 2rem; }
+    .guide-sources ul { display: grid; gap: 0.6rem; margin: 0; padding: 0; list-style: none; }
+    .guide-sources li { font-family: var(--font-mono); font-size: 10px; }
+    @media (max-width: 639px) {
+        .percentile-strip { grid-template-columns: 1fr; }
+        .release-compare { grid-template-columns: 1fr; }
+        .investigation-steps li { grid-template-columns: 2rem 1fr; }
+    }
+    @media (min-width: 640px) {
+        .maple-local-block, .guide-maple { padding: 2rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .latency-guide a, .guide-button { transition: none; }
+    }
+</style>

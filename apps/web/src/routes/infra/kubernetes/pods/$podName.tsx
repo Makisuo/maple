@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { DetailRail } from "@maple/ui/components/detail-rail"
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { Schema } from "effect"
 
@@ -12,7 +12,6 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { FolderIcon } from "@/components/icons"
-import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { PodDetailChart } from "@/components/infra/k8s-detail-chart"
 import { PageHero, HeroChip } from "@/components/infra/primitives/page-hero"
 import { StatRail, StatRailItem } from "@/components/infra/primitives/stat-rail"
@@ -41,12 +40,6 @@ const METRIC_TABS = [
 ] as const
 
 function PodDetailPage() {
-	const infraEnabled = useInfraEnabled()
-	if (!infraEnabled) return <Navigate to="/" replace />
-	return <PodDetailContent />
-}
-
-function PodDetailContent() {
 	const { podName } = Route.useParams()
 	const search = Route.useSearch()
 	const namespace = search.namespace

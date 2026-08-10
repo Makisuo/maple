@@ -181,7 +181,7 @@ The web app expects `VITE_API_BASE_URL` to point to the API (defaults to `http:/
 For ingest + key auth, set these at minimum in your root `.env` when running the ingest gateway:
 
 - `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY`
-- `MAPLE_INGEST_KEY_ENCRYPTION_KEY` (required for D1-backed ingest deployments)
+- `MAPLE_INGEST_KEY_ENCRYPTION_KEY` (required when ingest reads encrypted credentials from Postgres)
 - `INGEST_PORT`
 - `INGEST_FORWARD_OTLP_ENDPOINT`
 - `INGEST_FORWARD_TIMEOUT_MS`
@@ -190,24 +190,26 @@ For ingest + key auth, set these at minimum in your root `.env` when running the
 - `INGEST_REPLAY_MAX_SESSION_BYTES` (optional; ceiling on the decompressed rrweb
   payload one replay session may record, default 1 GiB, `0` disables)
 
-## Persistence (SQLite / Turso)
+## Persistence (PostgreSQL / PGlite)
 
-Maple now persists dashboards in SQLite via libSQL:
+Maple persists application state in PostgreSQL:
 
-- Default local mode: no Turso CLI needed. If `MAPLE_DB_URL` is unset, Maple uses `apps/api/.data/maple.db`.
-- Turso cloud mode: set `MAPLE_DB_URL` to your Turso/libSQL URL and `MAPLE_DB_AUTH_TOKEN` to your token.
-- Self-hosting: persist the `apps/api/.data` directory as a volume so dashboard state survives container/restart cycles.
+- Production and staging use PlanetScale Postgres through Cloudflare Hyperdrive.
+- Wrangler development uses the Docker Postgres started by `bun db:up`.
+- Non-Worker local entrypoints use embedded PGlite under `apps/api/.data/pglite`; set
+  `MAPLE_DB_URL=memory://` for an ephemeral database.
 
 Migration commands:
 
 ```bash
-bun --filter=@maple/api db:migrate
-bun --filter=@maple/db db:generate
-bun --filter=@maple/db db:push
-bun --filter=@maple/db db:studio
+bun db:up
+bun db:migrate:local
+bun run --cwd packages/db db:generate
+bun run --cwd packages/db db:studio
 ```
 
-When running the API (`bun --filter=@maple/api dev` or `bun --filter=@maple/api start`), migrations are applied automatically before boot.
+CI migrates deployed PlanetScale branches over their direct port before Alchemy deploys the
+Workers. See [`docs/persistence.md`](docs/persistence.md) for the full workflow.
 
 ## Ingest Keys
 

@@ -1,12 +1,11 @@
 ---
 /**
- * LiveTrace — deeper version of the waterfall, with a side-panel inspector
- * that shows span attributes on hover. The animation reuses the same loop
- * as LiveWaterfall (live-waterfall.client.ts) but adds a hover handler that
- * routes attributes into the inspector.
+ * LiveTrace — a trace waterfall with a side-panel inspector that shows span
+ * attributes on hover. `live-waterfall.client.ts` drives the animation, while
+ * a hover handler routes attributes into the inspector.
  *
- * Service color is hashed from the name (same helper as LiveWaterfall) so a
- * given service has a consistent hue across the page.
+ * Service color is hashed from the name so a given service has a consistent
+ * hue across the page.
  */
 interface SpanRow {
 	id: string;

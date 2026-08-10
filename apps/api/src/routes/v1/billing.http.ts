@@ -6,6 +6,7 @@ import { EdgeCacheService } from "@maple/cache"
 import {
 	AttachResult,
 	BillingCustomer,
+	BillingForbiddenError,
 	BillingInvoice,
 	BillingInvoicesResponse,
 	BillingUpstreamError,
@@ -25,10 +26,11 @@ import {
 	makeCallAutumn,
 	readCustomerCached,
 	type AutumnResult,
+	updateCustomerBillingControls,
 } from "@/services/billing/autumn-client"
 import { AuthService, type AuthServiceShape } from "@/services/auth/AuthService"
+import { requireAdmin } from "@/services/auth/auth"
 import { DailySpendService } from "@/services/billing/DailySpendService"
-import { SpendLimitsService } from "@/services/billing/SpendLimitsService"
 
 // Pull the `invoices` array off a raw expanded `getOrCreateCustomer` response.
 // Exported for tests. Autumn omits the key for a customer with no invoices, so
@@ -95,7 +97,6 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 		const auth = yield* AuthService
 		const edgeCache = yield* EdgeCacheService
 		const dailySpend = yield* DailySpendService
-		const spendLimits = yield* SpendLimitsService
 		const secretKey = Option.match(env.AUTUMN_SECRET_KEY, {
 			onNone: () => undefined,
 			onSome: (value) => Redacted.value(value),
@@ -188,21 +189,33 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 						return yield* dailySpend.get(tenant, cycle)
 					}),
 				)
-				.handle("getSpendLimits", () =>
+				.handle("updateBillingControls", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(
+							tenant.roles,
+							() =>
+								new BillingForbiddenError({
+									message: "Only org admins can manage billing controls",
+								}),
+						)
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-						return yield* spendLimits.get(tenant.orgId)
-					}),
-				)
-				.handle("updateSpendLimits", ({ payload }) =>
-					Effect.gen(function* () {
-						const tenant = yield* CurrentTenant.Context
-						yield* Effect.annotateCurrentSpan({
-							orgId: tenant.orgId,
-							"billing.enforcement_mode": payload.enforcementMode,
-						})
-						return yield* spendLimits.update(tenant.orgId, payload, String(tenant.userId))
+						const result = yield* updateCustomerBillingControls(
+							secretKey,
+							env.AUTUMN_API_URL,
+							tenant.orgId,
+							payload,
+						)
+						yield* ensureOk(result)
+						yield* invalidateCustomer(tenant.orgId, result)
+						const refreshed = yield* callAutumn(
+							"getOrCreateCustomer",
+							{ expand: ["subscriptions.plan"] },
+							tenant.orgId,
+						)
+						return yield* ensureOk(refreshed).pipe(
+							Effect.flatMap((response) => decodeUpstream(BillingCustomer, response)),
+						)
 					}),
 				)
 				.handle("attach", ({ payload }) =>

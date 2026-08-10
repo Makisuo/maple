@@ -143,12 +143,26 @@ const V2AiTriageResult = Schema.Struct({
 	evidence: Schema.Array(V2AiTriageEvidence),
 	suggestedActions: Schema.Array(Schema.String),
 	confidence: Schema.Literals(["high", "medium", "low"]),
+	/**
+	 * What was eliminated, and what could not be looked at.
+	 *
+	 * `ruled_out` has been stored on every report since it was added and was
+	 * never projected onto the wire, so no client has ever been able to see what
+	 * a run considered. On an `inconclusive` investigation these two ARE the
+	 * result — omitting them would ship a partial with its payload removed.
+	 *
+	 * `optionalKey` because every report stored before they existed still has to
+	 * decode.
+	 */
+	ruledOut: Schema.optionalKey(Schema.Array(Schema.String)),
+	unchecked: Schema.optionalKey(Schema.Array(Schema.String)),
 }).pipe(
 	Schema.encodeKeys({
 		suspectedCause: "suspected_cause",
 		severityAssessment: "severity_assessment",
 		affectedScope: "affected_scope",
 		suggestedActions: "suggested_actions",
+		ruledOut: "ruled_out",
 	}),
 )
 
@@ -308,6 +322,11 @@ const investigationExample = {
 		evidence: [],
 		suggested_actions: ["Roll back deploy 4f21a."],
 		confidence: "high",
+		// Present on the example so the existing decode test exercises the two keys
+		// a partial result depends on. `ruled_out` in particular has been stored
+		// since it was added and was never projected onto the wire.
+		ruled_out: ["Downstream dependency: every callee stayed under 90ms in the window."],
+		unchecked: [],
 	},
 	model: "claude-opus-4-8",
 	severity: "high",

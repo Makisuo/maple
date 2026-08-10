@@ -42,6 +42,8 @@ export const LANDING_EVENTS = [
 	"pricing_calculator_changed",
 	"install_command_copied",
 	"docs_search",
+	"brand_asset_copied",
+	"brand_asset_downloaded",
 ] as const
 
 export type LandingEvent = (typeof LANDING_EVENTS)[number]

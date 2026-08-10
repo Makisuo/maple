@@ -83,11 +83,12 @@ Relational state (issues, alert rules, dashboards, org config, keys) is Drizzle/
 `packages/db/src/schema/`, one PS branch per deployed stage (`main`=prd, `stg`), reached from
 Workers via the Hyperdrive binding `MAPLE_DB`.
 
-- App code keeps epoch-ms numbers and converts at the drizzle boundary (`new Date(ms)` writing,
-  `.getTime()` reading; `msToDate`/`dateToMs` in `apps/api/src/lib/time.ts`). Never read driver
-  write-result shapes — use `.returning()` + length. `count(*)` needs `::int` (bigint → string).
+- App code keeps epoch-ms numbers and converts at the drizzle boundary — use `msToDate` /
+  `dateToMs` from `apps/api/src/platform/time.ts` rather than bare `new Date(ms)` /
+  `.getTime()`, including inside Promise-land helpers. Never read driver write-result shapes
+  — use `.returning()` + length. `count(*)` needs `::int` (bigint → string).
 - Layers: `DatabasePgLive` (Workers, short-lived postgres.js client per `execute`) and
-  `DatabasePgliteLive` (tests/local; `createTestDb()` in `apps/api/src/lib/test-pglite.ts`).
+  `DatabasePgliteLive` (tests/local; `createTestDb()` in `apps/api/src/platform/test-pglite.ts`).
 - Migrations: `bun run --cwd packages/db db:generate`; CI applies them against the branch's DIRECT
   port 5432 (never a pooler) before `alchemy deploy`. PGlite applies them at layer build.
 - **PR preview deploys are disabled** (2026-08, cost). `deploy-pr-preview.yml` triggers on the
@@ -109,6 +110,13 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   for TanStack Router `validateSearch`. `Schema.optionalKey()` for JSON-decoded HTTP/domain schemas;
   `Schema.optional()` only where `undefined` is a real JS value (search params, MCP tool params).
 - **Effect:** source is vendored at `.context/effect/` (subtree of Effect-TS/effect-smol).
+- **Alchemy:** read `node_modules/alchemy/src/` — the package ships its own TypeScript source,
+  so it always matches the version actually running. There is deliberately no vendored copy:
+  `.context/alchemy-effect` held `alchemy-effect@0.11.0`, a package upstream renamed into
+  `alchemy@2.x` (now `packages/alchemy`) and stopped publishing in April 2026. Four months on
+  it had diverged exactly where it mattered — it has `AWS/StageConfig.ts` where the real
+  package has `AWS/Environment.ts` + `AWS/AuthProvider.ts` — and a code review cited its line
+  numbers as fact for a bug in the live code.
 - **LLM core:** `lib/llm` (`@maple/llm`) is a vendored copy of `anomalyco/opencode`'s
   `packages/llm`, pinned by SHA in `lib/llm/UPSTREAM.json` and re-synced with
   `bun run llm:sync`. Don't reformat it and don't put Maple behaviour inside it — see

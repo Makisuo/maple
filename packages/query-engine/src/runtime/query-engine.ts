@@ -36,7 +36,7 @@ import {
 	type WarehouseQuerySettings,
 } from "../profiles"
 import { canonicalJSON } from "../canonical-json"
-import { computeBucketSeconds } from "../datetime"
+import { computeBucketSeconds, formatWarehouseDateTime, parseWarehouseDateTime } from "../datetime"
 import {
 	MAX_BREAKDOWN_RANGE_SECONDS,
 	MAX_LIST_RANGE_SECONDS,
@@ -47,7 +47,6 @@ import {
 } from "../limits"
 import { attributeIndexMode, logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeExecuteRawSql } from "./raw-sql"
-import type { BucketGroupObs } from "./evaluate-bucket-codec"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
 // `computeBucketSeconds` from here; the implementation now lives in the pure
@@ -200,6 +199,36 @@ export const msToTinybirdDateTime = (ms: number): string => {
 }
 
 const CACHE_SNAP_S = 15
+const TRACE_SERVICE_PARTITION_BUFFER_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Bound the service-enrichment lookup to the daily partitions surrounding the
+ * rows already selected for this page. A one-day cushion covers traces that
+ * cross the requested range boundary without probing the full 30-day
+ * retention window of `service_map_spans`.
+ */
+function traceServicePartitionWindow(
+	rows: ReadonlyArray<{ readonly timestamp: unknown }>,
+	fallback: { readonly startTime: string; readonly endTime: string },
+): { readonly startTime: string; readonly endTime: string } {
+	const pageTimes = rows.map((row) => parseWarehouseDateTime(String(row.timestamp))).filter(Number.isFinite)
+
+	if (pageTimes.length === 0) return fallback
+
+	return {
+		startTime: formatWarehouseDateTime(Math.min(...pageTimes) - TRACE_SERVICE_PARTITION_BUFFER_MS),
+		endTime: formatWarehouseDateTime(Math.max(...pageTimes) + TRACE_SERVICE_PARTITION_BUFFER_MS),
+	}
+}
+
+function servicesForTraceRow(
+	rowServiceName: string,
+	enrichedServices: readonly string[] | undefined,
+): string[] {
+	const services = [...(enrichedServices ?? [])]
+	if (rowServiceName && !services.includes(rowServiceName)) services.push(rowServiceName)
+	return services
+}
 
 /**
  * Snap a Tinybird datetime to a window. Used to align cache keys so that
@@ -1579,6 +1608,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		if (request.query.source === "traces" && request.query.kind === "list") {
 			const tracesQuery = request.query
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
+			const requestedColumns = (tracesQuery as { columns?: readonly string[] }).columns
 
 			// Graceful limit clamping: cap at 200, auto-reduce to 50 when no indexed filters
 			const hasIndexedFilter = !!(
@@ -1602,13 +1632,50 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						limit: clampedLimit,
 						offset: tracesQuery.offset,
 						cursor: tracesQuery.cursor,
-						columns: (tracesQuery as { columns?: readonly string[] }).columns as
-							| string[]
-							| undefined,
+						sortBy: tracesQuery.sortBy,
+						sortDir: tracesQuery.sortDir,
+						columns: requestedColumns as string[] | undefined,
 					}),
 				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
 				"tracesList",
 				"list",
+			)
+
+			const traceIds = Array.from(
+				new Set(rows.map((row) => String(row.traceId)).filter((traceId) => traceId.length > 0)),
+			)
+			const wantsTraceServices = requestedColumns?.includes("services") === true
+			const serviceRows: ReadonlyArray<CH.TraceServicesByTraceIdsOutput> =
+				wantsTraceServices && traceIds.length > 0
+					? yield* executeCHQuery(
+							warehouse,
+							tenant,
+							CH.traceServicesByTraceIdsQuery({ traceIds }),
+							{
+								orgId: tenant.orgId,
+								...traceServicePartitionWindow(rows, {
+									startTime: request.startTime,
+									endTime: request.endTime,
+								}),
+							},
+							"traceListServices",
+							"list",
+						).pipe(
+							Effect.catch((error) =>
+								Effect.logWarning(
+									"Trace-list service enrichment failed; using row services",
+								).pipe(
+									Effect.annotateLogs({
+										"error.tag": error._tag,
+										"error.message": error.message,
+									}),
+									Effect.as([] as ReadonlyArray<CH.TraceServicesByTraceIdsOutput>),
+								),
+							),
+						)
+					: []
+			const servicesByTraceId = new Map(
+				serviceRows.map((row) => [String(row.traceId), row.services.map(String)] as const),
 			)
 
 			return new QueryEngineExecuteResponse({
@@ -1619,12 +1686,19 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						traceId: row.traceId,
 						timestamp: String(row.timestamp),
 						spanId: row.spanId,
+						// Empty for a root span. Lets the traces list tell a child-span row
+						// apart from a root one and deep-link `?spanId=` only for children.
+						parentSpanId: row.parentSpanId,
 						serviceName: row.serviceName,
 						spanName: row.spanName,
 						durationMs: Number(row.durationMs),
 						statusCode: row.statusCode,
 						spanKind: row.spanKind,
 						hasError: Number(row.hasError) === 1,
+						services: servicesForTraceRow(
+							String(row.serviceName),
+							servicesByTraceId.get(String(row.traceId)),
+						),
 						spanAttributes: row.spanAttributes ?? {},
 						resourceAttributes: row.resourceAttributes ?? {},
 					})),
@@ -1978,17 +2052,21 @@ export interface AlertBucketRequest {
 	readonly endTime: string
 }
 
+/** One warehouse row's contribution to an alert evaluation. */
+export interface BucketGroupObs {
+	readonly bucket: string
+	readonly groupKey: string
+	readonly value: number | null
+	readonly sampleCount: number
+}
+
 /**
  * THE single alert lowering: run one alert source over one time range and emit
  * per-(bucket, group) observations.
  *
- * Everything downstream is a thin derivation of this — `evaluate` reduces the
- * buckets to a scalar per group (`reduceAlertBuckets`), `evaluateSeries` returns
- * them as-is for the preview chart, and the bucket cache stores them encoded via
- * `encodeEvalPoints` and re-fetches only the missing ranges. Because a cached
- * evaluation decodes back into the very same observations an uncached one
- * builds, the two agree for real timeseries data (where each (bucket, group) row
- * is unique).
+ * Everything downstream is a thin derivation of this: `evaluate` reduces the
+ * buckets to a scalar per group and `evaluateSeries` returns them as-is for the
+ * preview chart.
  *
  * Assumes a spec source is already validated as a supported timeseries query.
  */
@@ -2118,7 +2196,7 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
  *
  * `sampleCount` is forced to 0 whenever `value` is null so that
  * `hasData === sampleCount > 0` holds for raw rows exactly as it does for the
- * spec sources — the bucket codec derives `hasData` from the sample count alone,
+ * spec sources — downstream reduction derives `hasData` from the sample count alone,
  * so a `{value: null, samples: 1}` row would otherwise decode as "has data but
  * no scalar" rather than the no-data case the alert engine expects.
  */
@@ -2171,16 +2249,6 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 				details: [
 					`Raw SQL alert group keys may contain at most ${MAX_RAW_SQL_GROUP_KEY_LENGTH} characters.`,
 				],
-			})
-		}
-		// `encodeEvalPoints` prefixes group keys with NUL-delimited markers and relies
-		// on real keys never containing NUL. That holds for CH-derived keys but not
-		// for arbitrary user SQL, so reject rather than let a crafted key collide
-		// with the codec's value/count namespaces.
-		if (groupKey.includes("\u0000")) {
-			return yield* new QueryEngineValidationError({
-				message: "Invalid raw SQL alert query",
-				details: ["Raw SQL alert group keys may not contain NUL characters."],
 			})
 		}
 		const numValue = row.value == null ? null : Number(row.value)
@@ -2324,9 +2392,7 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
  * rule preview chart: each bucket is one evaluation window, so the series is
  * exactly the sequence of observations the scheduler would have produced.
  *
- * Deliberately NOT routed through the bucket cache — preview requests are
- * ad-hoc form states and would only pollute it (see the eval-bucket-cache
- * regression note in QueryEngineService).
+ * Preview requests are ad-hoc form states and execute directly.
  */
 export const makeQueryEngineEvaluateSeries = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
 	Effect.fn("QueryEngineService.evaluateSeries")(function* (

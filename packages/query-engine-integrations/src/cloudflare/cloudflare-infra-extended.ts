@@ -1,8 +1,7 @@
 // ---------------------------------------------------------------------------
 // Cloudflare infrastructure page — extended datasets
 //
-// Companions to cloudflare-infra.ts for the poller's newer datasets: per-host
-// HTTP breakdowns (`server.address` attribute on `cloudflare.http.*`), firewall/WAF
+// Companions to cloudflare-infra.ts for the poller's newer datasets: firewall/WAF
 // events (`cloudflare.firewall.events`), authoritative-DNS analytics
 // (`cloudflare.dns.queries`), and the Workers-platform resources (Queues
 // gauges under `cloudflare-queue/{id}`, Durable Object counters on the
@@ -29,99 +28,6 @@ import {
 } from "./cloudflare-infra-filters"
 
 // Same NaN guard as cloudflare-infra.ts.
-
-// ---------------------------------------------------------------------------
-// Per-host HTTP breakdown (single zone)
-// ---------------------------------------------------------------------------
-
-export interface CloudflareZoneHostBreakdownOutput {
-	/** Hostname (poller-capped: top N per window, tail folded into "other"). */
-	readonly host: string
-	readonly requests: number
-	readonly errors5xx: number
-	readonly cacheHits: number
-	readonly bytes: number
-}
-
-export interface CloudflareZoneHostTimeseriesOutput {
-	/** Bucket start, ISO-8601 UTC. */
-	readonly bucket: string
-	readonly host: string
-	readonly requests: number
-}
-
-export const cloudflareZoneHostBreakdownRowSchema: CompiledQueryRowSchema<CloudflareZoneHostBreakdownOutput> =
-	Schema.Struct({
-		host: Schema.String,
-		requests: CHNumber,
-		errors5xx: CHNumber,
-		cacheHits: CHNumber,
-		bytes: CHNumber,
-	})
-
-export const cloudflareZoneHostTimeseriesRowSchema: CompiledQueryRowSchema<CloudflareZoneHostTimeseriesOutput> =
-	Schema.Struct({
-		bucket: Schema.String,
-		host: Schema.String,
-		requests: CHNumber,
-	})
-
-const CACHE_SERVED_STATUSES = ["hit", "stale", "revalidated", "updating"] as const
-
-/** Host totals for one zone pseudo-service; rows predating the host attribute fold into "". */
-export function cloudflareZoneHostBreakdownSQL(opts: CloudflareFilterOpts = {}) {
-	return from(MetricsSum)
-		.select(($) => ({
-			host: cloudflareHostAttr($),
-			requests: CH.sumIf($.Value, $.MetricName.eq("cloudflare.http.requests")),
-			errors5xx: CH.sumIf(
-				$.Value,
-				$.MetricName.eq("cloudflare.http.requests").and(
-					$.Attributes.get("http.status_class").eq("5xx"),
-				),
-			),
-			cacheHits: CH.sumIf(
-				$.Value,
-				$.MetricName.eq("cloudflare.http.requests").and(
-					$.Attributes.get("cache.status").in_(...CACHE_SERVED_STATUSES),
-				),
-			),
-			bytes: CH.sumIf($.Value, $.MetricName.eq("cloudflare.http.bytes")),
-		}))
-		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			$.ServiceName.eq(param.string("serviceName")),
-			$.MetricName.in_("cloudflare.http.requests", "cloudflare.http.bytes"),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
-			...cloudflareFilterConditions($, opts, CF_FILTERABLE[CF_METRIC.requests] ?? []),
-		])
-		.groupBy("host")
-		.orderBy(["requests", "desc"])
-		.limit(50)
-		.format("JSON")
-}
-
-/** Bucketed request counts per host for one zone pseudo-service. */
-export function cloudflareZoneHostTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
-	return from(MetricsSum)
-		.select(($) => ({
-			bucket: isoBucket($.TimeUnix),
-			host: cloudflareHostAttr($),
-			requests: CH.sum($.Value),
-		}))
-		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			$.ServiceName.eq(param.string("serviceName")),
-			$.MetricName.eq("cloudflare.http.requests"),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
-			...cloudflareFilterConditions($, opts, CF_FILTERABLE[CF_METRIC.requests] ?? []),
-		])
-		.groupBy("bucket", "host")
-		.orderBy(["bucket", "asc"], ["host", "asc"])
-		.format("JSON")
-}
 
 // ---------------------------------------------------------------------------
 // Firewall/WAF events (single zone)

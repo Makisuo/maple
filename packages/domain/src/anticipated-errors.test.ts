@@ -6,7 +6,6 @@ describe("ANTICIPATED_ERROR_IDENTIFIERS", () => {
 		for (const identifier of [
 			"@maple/http/errors/UnauthorizedError",
 			"@maple/http/errors/RawSqlValidationError",
-			"@maple/http/ai-triage/AiTriageNotFoundError",
 			"@maple/http/errors/IntegrationsNotConnectedError",
 			"@maple/http/v2/InvalidRequestError",
 			"@maple/http/v2/AuthenticationError",

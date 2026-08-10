@@ -41,20 +41,29 @@ function renderAttributeValue(attrKey: string, value: string) {
 	)
 }
 
-const PUBLIC_PATHS = new Set([
-	"/sign-in",
-	"/sign-up",
-	"/org-required",
-	// Fixture-only dev surfaces. They render `scenarios.ts` / generated data and
-	// never touch a warehouse or the app database, so gating them on a session
-	// only made the widget gallery unreachable without a running API.
+/**
+ * Fixture-only dev surfaces. They render `scenarios.ts` / generated data and
+ * never touch a warehouse or the app database, so gating them on a session only
+ * made the widget gallery unreachable without a running API.
+ *
+ * Named separately from the auth pages because they need one thing those do not:
+ * a bypass of the *plan* gate as well as the auth one. A signed-in session whose
+ * Autumn customer query never settles — the normal state of a local dev API,
+ * which 401s it — parks every one of these behind the boot splash forever, which
+ * is the same "unreachable without a running API" failure the auth bypass exists
+ * to prevent, arriving through the other door.
+ */
+const FIXTURE_PATHS = [
 	"/widget-lab",
+	"/node-lab",
 	"/service-map-bench",
 	"/service-detail-bench",
 	"/infra-bench",
 	"/logs-bench",
 	"/overview-bench",
-])
+]
+
+const PUBLIC_PATHS = new Set(["/sign-in", "/sign-up", "/org-required", ...FIXTURE_PATHS])
 
 // Routes that render their own onboarding/billing UI and so must never be
 // gated on plan selection (neither redirected away nor blocked while loading).
@@ -174,6 +183,13 @@ function ClerkReverseRedirects() {
 	if (isSignedIn && orgId && pathname === "/org-required") {
 		const target = getRedirectTarget(searchStr)
 		return <Navigate to={target.pathname} search={target.search} replace />
+	}
+
+	// A fixture surface has no org-scoped data to gate, so it renders whatever the
+	// plan query is doing. Checked after the auth-page redirects above, which are
+	// about sending a signed-in reader somewhere better rather than gating them.
+	if (FIXTURE_PATHS.includes(pathname)) {
+		return <AppFrame />
 	}
 
 	if (isSignedIn && orgId) {

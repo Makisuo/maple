@@ -1,5 +1,5 @@
 // Hyperdrive runtime binding, mirroring the token/bind shape of the old
-// d1-connection module: `Hyperdrive("MAPLE_DB")` is a lightweight token
+// `Hyperdrive("MAPLE_DB")` is a lightweight token
 // identifying the env binding name, and `Hyperdrive.bind(token)` returns a
 // client whose `connectionString` resolves the pooled Postgres URL from the
 // worker environment. Drivers (postgres.js via drizzle) dial that URL.

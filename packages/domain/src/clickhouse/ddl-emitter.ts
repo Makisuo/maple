@@ -176,7 +176,7 @@ const parseDatasource = (content: string): ParsedDatasourceSchema => {
 	if (engine.length === 0) {
 		throw new Error("Datasource is missing an ENGINE declaration")
 	}
-	if (sortingKey.length === 0) {
+	if (engine !== "Null" && sortingKey.length === 0) {
 		throw new Error("Datasource is missing an ENGINE_SORTING_KEY declaration")
 	}
 
@@ -335,7 +335,9 @@ export const emitCreateTable = (datasource: ResourceContent, options?: EmitterOp
 	if (parsed.partitionKey.length > 0) {
 		lines.push(`PARTITION BY ${parsed.partitionKey}`)
 	}
-	lines.push(`ORDER BY (${parsed.sortingKey})`)
+	if (parsed.sortingKey.length > 0) {
+		lines.push(`ORDER BY (${parsed.sortingKey})`)
+	}
 	if (parsed.ttl !== undefined && parsed.ttl.length > 0) {
 		lines.push(`TTL ${parsed.ttl}`)
 	}

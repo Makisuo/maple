@@ -1,23 +1,6 @@
 export const TRIAL_DURATION_DAYS = 14
 
-export interface PlanLimits {
-	logsGB: number
-	tracesGB: number
-	metricsGB: number
-	retentionDays: number
-	browserSessions: number
-}
-
-const PLAN_LIMITS: Record<string, PlanLimits> = {
-	starter: { logsGB: 10, tracesGB: 10, metricsGB: 10, retentionDays: 7, browserSessions: 5000 },
-	startup: { logsGB: 40, tracesGB: 40, metricsGB: 40, retentionDays: 30, browserSessions: 5000 },
-}
-
 const DEFAULT_PLAN = "starter"
-
-export function getPlanLimits(planSlug: string | undefined): PlanLimits {
-	return PLAN_LIMITS[planSlug ?? DEFAULT_PLAN] ?? PLAN_LIMITS[DEFAULT_PLAN]
-}
 
 export interface PlanFeature {
 	icon: string

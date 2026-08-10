@@ -246,6 +246,34 @@
       "when": 1786059358436,
       "tag": "0035_planned_investigations",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786231852176,
+      "tag": "0036_remove_org_spend_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786269900000,
+      "tag": "0037_electric_publication_investigations",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786292037508,
+      "tag": "0038_error_tick_cursor_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786300000000,
+      "tag": "0039_investigation_inconclusive_backfill",
+      "breakpoints": true
     }
   ]
 }

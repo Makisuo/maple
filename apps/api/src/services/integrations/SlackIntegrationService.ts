@@ -170,7 +170,11 @@ export const missingBotScopes = (grantedScope: string | null): ReadonlyArray<str
 class SlackCrossOrgConflict extends Data.TaggedError("SlackCrossOrgConflict")<{
 	readonly teamId: string
 	readonly orgId: string
-}> {}
+}> {
+	override get message(): string {
+		return `Slack team ${this.teamId} is already connected to org ${this.orgId}`
+	}
+}
 
 const decodeApiKeyIdOption = Schema.decodeUnknownOption(ApiKeyId)
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)

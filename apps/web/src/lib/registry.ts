@@ -34,7 +34,7 @@ export const mapleApiV2ClientLayer: Layer.Layer<MapleApiV2AtomClient> = appRegis
 )
 
 // One persistent ManagedRuntime built from both typed API layers, shared by every
-// imperative (non-React) Effect run: `runMapleApi*` (collection write handlers) and
+// imperative (non-React) Effect run: `runMapleApiV2` (collection write handlers) and
 // the `optimisticAction` atoms in @maple/effect-db. Building it once avoids
 // rebuilding the client layers on every call, and gives the
 // Effect-native collection factory a runtime for its handlers + backoff logging.

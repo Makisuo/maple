@@ -30,10 +30,9 @@
 	// Cron schedules — handler: worker.ts `scheduled`, dispatched on `event.cron`.
 	// "0 */12 * * *" = VCS sync backstop; "0 * * * *" = scrape_target_checks
 	// retention; "0 */6 * * *" = Slack workspace reconciliation (backstop for
-	// SlackEventsRouter); "5 * * * *" = spend-limit evaluation (stamps breach /
-	// pause state the ingest gateway reads). (Mirrored in alchemy.run.ts for deploy.)
+	// SlackEventsRouter). (Mirrored in alchemy.run.ts for deploy.)
 	"triggers": {
-		"crons": ["0 */12 * * *", "0 * * * *", "0 */6 * * *", "5 * * * *"],
+		"crons": ["0 */12 * * *", "0 * * * *", "0 */6 * * *"],
 	},
 	// Local dev: wrangler connects the binding straight to localConnectionString
 	// (the docker-compose Postgres; see `bun run db:up` + `bun run db:migrate:local`).
@@ -66,6 +65,13 @@
 			"binding": "MCP_SESSIONS",
 			"id": "00000000000000000000000000000000",
 		},
+		// Backend for EdgeCacheService. Present => KV is used; remove the binding
+		// and the service falls back to `caches.default`. See CacheBackendLive.ts
+		// for why KV is being trialled over the Cache API.
+		{
+			"binding": "EDGE_CACHE",
+			"id": "00000000000000000000000000000000",
+		},
 	],
 	// Cloudflare Email Service (Email Sending). `remote: true` routes sends through
 	// the real Cloudflare sender even under local dev. (Mirrored in alchemy.run.ts
@@ -81,11 +87,6 @@
 			"name": "clickhouse-schema-apply-workflow",
 			"binding": "CLICKHOUSE_SCHEMA_APPLY_WORKFLOW",
 			"class_name": "ClickHouseSchemaApplyWorkflow",
-		},
-		{
-			"name": "ai-triage-workflow",
-			"binding": "AI_TRIAGE_WORKFLOW",
-			"class_name": "AiTriageWorkflow",
 		},
 		{
 			"name": "investigation-fanout-workflow",

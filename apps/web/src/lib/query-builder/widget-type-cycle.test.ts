@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { PANEL_TYPES, type PanelType } from "@maple/domain/http"
-import { createQueryDraft } from "@/lib/query-builder/model"
+import { createQueryDraft } from "@maple/query-engine/query-builder"
 import { fromPanelType, toPanelType } from "@/lib/query-builder/panel-types"
 import { widgetTypes } from "@/components/dashboard-builder/widgets/types"
 import {

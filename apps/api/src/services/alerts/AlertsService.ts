@@ -103,9 +103,7 @@ import {
 } from "effect"
 import * as AlertingMetrics from "@/observability/AlertingMetrics"
 import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
-import {
-	INVESTIGATION_FANOUT_BINDING,
-} from "@/services/errors/ai-triage-enqueue"
+import { INVESTIGATION_FANOUT_BINDING } from "@/services/errors/ai-triage-enqueue"
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
@@ -964,7 +962,7 @@ export interface AlertsServiceShape {
 		request: AlertDestinationCreateRequest,
 	) => Effect.Effect<
 		AlertDestinationDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError
+		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertDeliveryError
 	>
 	readonly updateDestination: (
 		orgId: OrgId,
@@ -2061,11 +2059,36 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											webhookUrl: webhook.webhookUrl,
 											webhookToken: webhook.token,
 										})),
-										Effect.mapError((error) =>
-											makeValidationError(
-												`Could not provision Hazel channel webhook: ${error.message}`,
-											),
-										),
+										Effect.catchTags({
+											"@maple/http/errors/IntegrationsNotConnectedError": (error) =>
+												Effect.fail(
+													makeValidationError(
+														`Could not provision Hazel channel webhook: ${error.message}`,
+													),
+												),
+											"@maple/http/errors/IntegrationsRevokedError": (error) =>
+												Effect.fail(
+													makeValidationError(
+														`Could not provision Hazel channel webhook: ${error.message}`,
+													),
+												),
+											"@maple/http/errors/IntegrationsValidationError": (error) =>
+												Effect.fail(
+													makeValidationError(
+														`Could not provision Hazel channel webhook: ${error.message}`,
+													),
+												),
+											"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+												Effect.fail(makePersistenceError(error)),
+											"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+												Effect.fail(
+													makeDeliveryError(
+														"Could not provision Hazel channel webhook",
+														"hazel-oauth",
+														error,
+													),
+												),
+										}),
 									)
 							: buildSecretConfig(request)
 				}

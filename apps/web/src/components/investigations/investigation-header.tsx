@@ -100,9 +100,14 @@ function InvestigationActions({
 	const primary =
 		status === "failed"
 			? { label: "Retry", onClick: onRestart, variant: "default" as const }
-			: status === "resolved"
-				? { label: "Reopen", onClick: onRestart, variant: "outline" as const }
-				: { label: "Resolve", onClick: onResolve, variant: "default" as const }
+			: // "Run again", not "Retry". Nothing broke — the run worked and reached
+				// "not established", and offering to retry it describes the result as a
+				// defect in the one word the button has.
+				status === "inconclusive"
+				? { label: "Run again", onClick: onRestart, variant: "default" as const }
+				: status === "resolved"
+					? { label: "Reopen", onClick: onRestart, variant: "outline" as const }
+					: { label: "Resolve", onClick: onResolve, variant: "default" as const }
 
 	return (
 		// A flex row, not bare siblings: `PageLayout.HeaderActions` is a plain block,

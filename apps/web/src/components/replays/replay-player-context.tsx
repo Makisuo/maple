@@ -255,19 +255,15 @@ export function errorMessage(error: unknown): string {
 export function ReplayPlayerProvider({
 	sessionId,
 	children,
-	previewEvents,
+	eventsOverride,
 	window,
 	recorded,
 	sessionActive = false,
 }: {
 	sessionId: string
 	children: React.ReactNode
-	/**
-	 * Escape hatch for the placeholder-data preview route: a ready-made rrweb
-	 * event array that bypasses the warehouse fetch entirely. Production callers
-	 * never pass this, so the atom path below is unchanged.
-	 */
-	previewEvents?: ReadonlyArray<unknown>
+	/** Test-only event injection that bypasses the warehouse fetch. */
+	eventsOverride?: ReadonlyArray<unknown>
 	/** Partition-pruning window; must match the route prefetch key (see $sessionId.tsx). */
 	window?: ReplayPartitionWindow
 	/**
@@ -295,8 +291,8 @@ export function ReplayPlayerProvider({
 		sessionId,
 		window,
 		chunks: manifestChunks,
-		// The preview route supplies events directly and must not hit the network.
-		enabled: previewEvents === undefined,
+		// Tests can supply events directly without hitting the network.
+		enabled: eventsOverride === undefined,
 	})
 
 	const { status, error, events } = React.useMemo<{
@@ -304,15 +300,14 @@ export function ReplayPlayerProvider({
 		error: unknown
 		events: unknown[]
 	}>(() => {
-		if (previewEvents) {
-			const decoded = normalizeEvents(previewEvents)
+		if (eventsOverride) {
+			const decoded = normalizeEvents(eventsOverride)
 			if (decoded.length >= 2) return { status: "ready" as const, error: null, events: decoded }
-			// Same classification as the warehouse path below, so the preview route
-			// can exercise every unplayable state rather than always claiming `empty`.
+			// Keep injected tests on the same status path as warehouse-loaded sessions.
 			return {
 				status: classifyUnplayable({
 					recorded,
-					chunkCount: previewEvents.length,
+					chunkCount: eventsOverride.length,
 					sessionActive,
 				}),
 				error: null,
@@ -350,7 +345,7 @@ export function ReplayPlayerProvider({
 					: { status: "loading" as const, error: null, events: EMPTY_EVENTS }
 			})
 			.orElse(() => ({ status: "loading" as const, error: null, events: EMPTY_EVENTS }))
-	}, [manifestResult, previewEvents, recorded, sessionActive, loader.seedEvents, loader.loadError])
+	}, [manifestResult, eventsOverride, recorded, sessionActive, loader.seedEvents, loader.loadError])
 
 	// Playable length from the manifest — known before any payload is fetched.
 	const manifestTotalMs = React.useMemo(() => manifestDurationMs(manifestChunks), [manifestChunks])
@@ -503,7 +498,7 @@ export function ReplayPlayerProvider({
 	// The manifest knows the full length before the payload is loaded, so the
 	// scrubber shows the real duration from the first frame. `getMetaData()` would
 	// report only the loaded span and visibly stretch as chunks stream in — but it
-	// is still the right answer for the preview route, which has no manifest.
+	// is still the right answer for injected test events, which have no manifest.
 	React.useEffect(() => {
 		if (manifestTotalMs > 0) setTotalMs(manifestTotalMs)
 	}, [manifestTotalMs])

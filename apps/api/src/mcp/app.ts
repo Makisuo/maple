@@ -7,7 +7,7 @@ import { LatencyAnalysisPrompt } from "./prompts/latency-analysis"
 import { IncidentTriagePrompt } from "./prompts/incident-triage"
 import { InstructionsResource } from "./resources/instructions"
 import { sessionStore } from "./lib/session-store"
-import { CurrentMcpTenant, resolveHttpMcpTenant } from "./lib/query-warehouse"
+import { CurrentMcpRequestTenant, CurrentMcpTenant, resolveHttpMcpTenant } from "./lib/query-warehouse"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { Env } from "@/platform/Env"
@@ -34,6 +34,17 @@ const mcpChallenge = (invalid: boolean) =>
 		)
 	})
 
+const mcpUnavailable = () =>
+	Effect.succeed(
+		HttpServerResponse.jsonUnsafe(
+			{
+				error: "service_unavailable",
+				message: "Authentication is temporarily unavailable; retry with backoff.",
+			},
+			{ status: 503, headers: { "cache-control": "no-store" } },
+		),
+	)
+
 const McpAuthorizationMiddleware = HttpRouter.middleware<{ provides: CurrentMcpTenant }>()(
 	Effect.gen(function* () {
 		const apiKeys = yield* ApiKeysService
@@ -44,10 +55,15 @@ const McpAuthorizationMiddleware = HttpRouter.middleware<{ provides: CurrentMcpT
 				Effect.provideService(ApiKeysService, apiKeys),
 				Effect.provideService(AuthService, auth),
 				Effect.provideService(Env, env),
-				Effect.flatMap((tenant) => Effect.provideService(httpEffect, CurrentMcpTenant, tenant)),
+				Effect.flatMap((tenant) =>
+					Effect.provideService(httpEffect, CurrentMcpTenant, tenant).pipe(
+						Effect.provideService(CurrentMcpRequestTenant, tenant),
+					),
+				),
 				Effect.catchTags({
 					"@maple/mcp/errors/McpAuthMissingError": () => mcpChallenge(false),
 					"@maple/mcp/errors/McpAuthInvalidError": () => mcpChallenge(true),
+					"@maple/mcp/errors/McpAuthUnavailableError": mcpUnavailable,
 					"@maple/mcp/errors/McpInvalidTenantError": () => mcpChallenge(true),
 				}),
 			)

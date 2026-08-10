@@ -394,14 +394,6 @@ export interface CloudflareWorkerLatencyOutput {
 	readonly durationP99Ms: number
 }
 
-export interface CloudflareWorkerTimeseriesOutput {
-	readonly serviceName: string
-	/** Bucket start, ISO-8601 UTC. */
-	readonly bucket: string
-	readonly requests: number
-	readonly errors: number
-}
-
 /** Row schema for {@link cloudflareWorkerCountersSQL}. Same {@link CHNumber} coercion. */
 export const cloudflareWorkerCountersRowSchema: CompiledQueryRowSchema<CloudflareWorkerCountersOutput> =
 	Schema.Struct({
@@ -419,15 +411,6 @@ export const cloudflareWorkerLatencyRowSchema: CompiledQueryRowSchema<Cloudflare
 		cpuP99Ms: CHNumber,
 		durationP50Ms: CHNumber,
 		durationP99Ms: CHNumber,
-	})
-
-/** Row schema for {@link cloudflareWorkerTimeseriesSQL}. Same {@link CHNumber} coercion. */
-export const cloudflareWorkerTimeseriesRowSchema: CompiledQueryRowSchema<CloudflareWorkerTimeseriesOutput> =
-	Schema.Struct({
-		serviceName: Schema.String,
-		bucket: Schema.String,
-		requests: CHNumber,
-		errors: CHNumber,
 	})
 
 /** Counter rollup over `metrics_sum`, one row per Worker pseudo-service. */
@@ -485,25 +468,5 @@ export function cloudflareWorkerLatencySQL() {
 		])
 		.groupBy("serviceName")
 		.limit(500)
-		.format("JSON")
-}
-
-/** Bucketed counter timeseries over `metrics_sum`, one row per Worker × bucket. */
-export function cloudflareWorkerTimeseriesSQL() {
-	return from(MetricsSum)
-		.select(($) => ({
-			serviceName: $.ServiceName,
-			bucket: isoBucket($.TimeUnix),
-			requests: CH.sumIf($.Value, $.MetricName.eq("cloudflare.worker.requests")),
-			errors: CH.sumIf($.Value, $.MetricName.eq("cloudflare.worker.errors")),
-		}))
-		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			$.MetricName.in_(...WORKER_COUNTER_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
-		])
-		.groupBy("serviceName", "bucket")
-		.orderBy(["serviceName", "asc"], ["bucket", "asc"])
 		.format("JSON")
 }

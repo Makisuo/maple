@@ -1,7 +1,7 @@
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { describe, expect, it } from "vitest"
 
-import { checksHeld, fanoutRunSteps, hasFanout, lensChecks, lensTally, type LensRun } from "./lens-derive"
+import { checksHeld, hasFanout, lensChecks, lensNodeState, lensTally, type LensRun } from "./lens-derive"
 
 const lens = (overrides: Partial<LensRun> = {}): LensRun =>
 	({
@@ -14,6 +14,10 @@ const lens = (overrides: Partial<LensRun> = {}): LensRun =>
 		confidence: "medium",
 		toolCount: 3,
 		elapsedSeconds: 12.6,
+		name: null,
+		question: null,
+		priority: null,
+		deadlineHit: false,
 		...overrides,
 	}) as LensRun
 
@@ -148,56 +152,49 @@ describe("lensTally", () => {
 	})
 })
 
-describe("fanoutRunSteps", () => {
-	it("drops out entirely on the single-pass path", () => {
-		expect(fanoutRunSteps(make())).toEqual([])
-	})
-
-	it("reports progress while lenses are still in flight", () => {
-		const steps = fanoutRunSteps(
-			make({
-				lens_runs: [lens(), lens({ lensId: "traffic_shape", status: "checking" })],
-				validator: {
-					status: "blocked",
-					note: "Starts once all 2 lenses report",
-					elapsedSeconds: null,
-				},
-				fanout: { state: "running", size: 2 },
-			} as never),
-		)
-		expect(steps.map((step) => step.key)).toEqual(["dispatched", "reporting"])
-		expect(steps[1]!.label).toBe("1 of 2 reported")
+describe("lensNodeState", () => {
+	it("always states the verdict in words, never in colour alone", () => {
+		const runs = [
+			lens({ status: "queued" }),
+			lens({ status: "checking" }),
+			lens({ verdict: "promoted" }),
+			lens({ verdict: "merged" }),
+			lens({ verdict: "ruled_out" }),
+			lens({ verdict: "pending" }),
+			lens({ deadlineHit: true }),
+			lens({ status: "no_finding" }),
+		]
+		for (const state of runs.map(lensNodeState)) {
+			expect(state.word.length).toBeGreaterThan(0)
+		}
 	})
 
 	/**
-	 * The wedge this file exists to prevent. A lens that crashes becomes a
-	 * terminal `no_finding` lane and the workflow ranks anyway — so gating on
-	 * "reported" left the spine pulsing "4 of 5 reported" on a run that had
-	 * already published a diagnosis.
+	 * A lane that ran out of clock says so before it says anything about a
+	 * verdict — the workflow writes `ruled_out` on lanes it never heard back from,
+	 * and rendering that is a claim the run did not make.
 	 */
-	it("does not stall when a lens ended with no finding", () => {
-		const steps = fanoutRunSteps(
-			make({
-				lens_runs: [
-					lens({ verdict: "promoted" }),
-					lens({ lensId: "traffic_shape", status: "no_finding", verdict: "rejected" }),
-				],
-				validator: { status: "ranked", note: "1 promoted · 1 rejected", elapsed_seconds: 8.2 },
-				fanout: { state: "ranked", size: 2 },
-			} as never),
-		)
-		expect(steps.map((step) => step.key)).toEqual(["dispatched", "reported", "validated"])
-		expect(steps.at(-1)).toMatchObject({ tone: "success" })
+	it("reports a timed-out lane as timed out, not as ruled out", () => {
+		expect(lensNodeState(lens({ deadlineHit: true, verdict: "ruled_out" }))).toMatchObject({
+			word: "DEADLINE HIT",
+			tone: "warning",
+		})
 	})
 
-	it("marks a run whose validator promoted nothing as inconclusive", () => {
-		const steps = fanoutRunSteps(
-			make({
-				lens_runs: [lens({ verdict: "rejected" })],
-				validator: { status: "rejected_all", note: "no candidate survived", elapsedSeconds: 8.2 },
-				fanout: { state: "rejected_all", size: 1 },
-			} as never),
-		)
-		expect(steps.at(-1)).toMatchObject({ key: "validation-inconclusive", tone: "failed" })
+	it("agrees with the checks rail about which lanes held", () => {
+		const runs = [
+			lens({ verdict: "promoted" }),
+			lens({ verdict: "merged" }),
+			lens({ verdict: "rejected" }),
+		]
+		const heldWords = runs.map((run) => lensNodeState(run).word).filter((word) => word !== "RULED OUT")
+		expect(heldWords).toHaveLength(checksHeld(lensChecks(runs)))
+	})
+
+	it("does not strike a lane the validator has not ranked yet", () => {
+		expect(lensNodeState(lens({ verdict: "pending" }))).toMatchObject({
+			word: "REPORTED",
+			struck: false,
+		})
 	})
 })

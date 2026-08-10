@@ -21,7 +21,9 @@ export function EvidenceTab({ investigation }: { investigation: V2Investigation 
 				<p className="py-10 text-center text-sm text-muted-foreground">
 					{investigation.status === "investigating"
 						? "Evidence appears here as the lenses report."
-						: "This pass recorded no evidence."}
+						: investigation.status === "inconclusive"
+							? "This run promoted no cause, so it attached no evidence. What it did rule out is on the Overview."
+							: "This pass recorded no evidence."}
 				</p>
 			</div>
 		)

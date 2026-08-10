@@ -323,6 +323,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 						(error) =>
 							new IntegrationsUpstreamError({
 								message: `PlanetScale API request failed: ${error.message}`,
+								cause: error,
 							}),
 					),
 					Effect.timeoutOrElse({
@@ -369,9 +370,10 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					}
 					const decoded = yield* decodePage(response.text).pipe(
 						Effect.mapError(
-							() =>
+							(cause) =>
 								new IntegrationsUpstreamError({
 									message: `PlanetScale API returned an unexpected payload for ${basePath}`,
+									cause,
 								}),
 						),
 					)
@@ -873,14 +875,16 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 						refreshDeployRequestsFor(connection, row, authorization).pipe(
 							// One bad database must not stop the others.
 							Effect.catchCause((cause) =>
-								Effect.logWarning("PlanetScale deploy-request backfill failed").pipe(
-									Effect.annotateLogs({
-										orgId: connection.orgId,
-										database: row.name,
-										error: Cause.pretty(cause),
-									}),
-									Effect.map(() => 0),
-								),
+								Cause.hasInterruptsOnly(cause)
+									? Effect.interrupt
+									: Effect.logWarning("PlanetScale deploy-request backfill failed").pipe(
+											Effect.annotateLogs({
+												orgId: connection.orgId,
+												database: row.name,
+												error: Cause.pretty(cause),
+											}),
+											Effect.map(() => 0),
+										),
 							),
 						),
 					{ concurrency: DEPLOY_REQUESTS_CONCURRENCY },
@@ -900,10 +904,15 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				// backfill must never cost the org its inventory.
 				const deployEvents = yield* refreshDeployRequests(connection).pipe(
 					Effect.catchCause((cause) =>
-						Effect.logWarning("PlanetScale deploy-request backfill failed for org").pipe(
-							Effect.annotateLogs({ orgId: connection.orgId, error: Cause.pretty(cause) }),
-							Effect.map(() => 0),
-						),
+						Cause.hasInterruptsOnly(cause)
+							? Effect.interrupt
+							: Effect.logWarning("PlanetScale deploy-request backfill failed for org").pipe(
+									Effect.annotateLogs({
+										orgId: connection.orgId,
+										error: Cause.pretty(cause),
+									}),
+									Effect.map(() => 0),
+								),
 					),
 				)
 				yield* Effect.annotateCurrentSpan({
@@ -939,9 +948,14 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 						attributes: { orgId: connection.orgId },
 					}),
 					Effect.catchCause((cause) =>
-						Effect.logWarning("PlanetScale inventory refresh failed").pipe(
-							Effect.annotateLogs({ orgId: connection.orgId, error: Cause.pretty(cause) }),
-						),
+						Cause.hasInterruptsOnly(cause)
+							? Effect.interrupt
+							: Effect.logWarning("PlanetScale inventory refresh failed").pipe(
+									Effect.annotateLogs({
+										orgId: connection.orgId,
+										error: Cause.pretty(cause),
+									}),
+								),
 					),
 				)
 				return { outcome: "failed" as const, deployEvents }
@@ -975,15 +989,17 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 							}),
 							// A broken org must not stop the fleet.
 							Effect.catchCause((cause) =>
-								Effect.logWarning("PlanetScale org poll failed").pipe(
-									Effect.annotateLogs({
-										orgId: connection.orgId,
-										error: Cause.pretty(cause),
-									}),
-									Effect.map(() => {
-										failures++
-									}),
-								),
+								Cause.hasInterruptsOnly(cause)
+									? Effect.interrupt
+									: Effect.logWarning("PlanetScale org poll failed").pipe(
+											Effect.annotateLogs({
+												orgId: connection.orgId,
+												error: Cause.pretty(cause),
+											}),
+											Effect.map(() => {
+												failures++
+											}),
+										),
 							),
 						),
 					{ concurrency: ORG_CONCURRENCY, discard: true },
@@ -1070,9 +1086,10 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					Schema.fromJsonString(PageSchema(InsightRowSchema)),
 				)(response.text).pipe(
 					Effect.mapError(
-						() =>
+						(cause) =>
 							new IntegrationsUpstreamError({
 								message: "PlanetScale Query Insights returned an unexpected payload",
+								cause,
 							}),
 					),
 				)

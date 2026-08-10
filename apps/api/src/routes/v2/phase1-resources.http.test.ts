@@ -360,7 +360,8 @@ const makeHarness = (
 				return Effect.fail(
 					new InvestigationQuotaError({
 						message: "Daily quota reached",
-						limit: 20,
+						dimension: "passes",
+						limit: 90,
 						retryableAt: decodeIso("2026-07-16T00:00:00.000Z"),
 					}),
 				)
@@ -818,7 +819,11 @@ describe("v2 investigations over HTTP", () => {
 		})
 		expect(quota.status).toBe(429)
 		expect(quota.body.error.code).toBe("investigation_daily_quota")
-		expect(quota.body.error.message).toContain("2026-07-16T00:00:00.000Z")
+		// The ceiling that was hit is named, so a raised run cap can't look ignored
+		// when it was the pass cap that stopped the start.
+		expect(quota.body.error.message).toBe(
+			"Daily limit of 90 model passes reached. Resets at 2026-07-16T00:00:00.000Z.",
+		)
 		await quotaHarness.dispose()
 
 		const unavailableHarness = makeHarness(warehouseStub, false, "unavailable")

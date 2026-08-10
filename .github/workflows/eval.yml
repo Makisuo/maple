@@ -46,7 +46,9 @@ jobs:
 
             - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
 
-            - run: bun install --frozen-lockfile
+            - uses: ./.github/actions/bun-install
+              with:
+                  filters: "@maple/api"
 
             - name: Run MCP evals
               run: bun run --filter @maple/api eval

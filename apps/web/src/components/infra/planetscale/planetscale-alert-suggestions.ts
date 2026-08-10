@@ -5,7 +5,7 @@
 // /alerts/create link via the same `encodeAlertChartToSearchParam` mechanism the
 // metrics explorer uses — no new route, no new form.
 
-import type { MetricsQueryDraft } from "@/lib/query-builder/model"
+import type { MetricsQueryDraft } from "@maple/query-engine/query-builder"
 
 export interface PlanetScaleAlertSuggestion {
 	readonly id: "storage-headroom" | "replica-lag" | "connection-ceiling"

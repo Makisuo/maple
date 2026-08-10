@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { BREAKDOWN_TAIL_LIMIT, createFormulaDraft, createQueryDraft } from "@/lib/query-builder/model"
+import { BREAKDOWN_TAIL_LIMIT, createFormulaDraft, createQueryDraft } from "@maple/query-engine/query-builder"
 import {
 	buildWidgetDataSource,
 	buildWidgetDisplay,

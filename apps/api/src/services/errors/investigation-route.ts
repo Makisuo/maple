@@ -1,29 +1,7 @@
 /**
- * How an investigation runs: one turn of a conversation, or a planner and
- * several agents.
- *
- * This replaced `fanout-policy.ts`, which answered two different questions in
- * one function and got both wrong as a result.
- *
- * The first was *whether* to fan out. It required `ai_triage_settings.fanout_enabled`,
- * a column that defaulted false and had no write path anywhere — no route, no
- * UI, no admin RPC. On top of that it required a severity in `{critical, high}`,
- * while error incidents passed no severity at all and alert severities are a
- * two-value scale that cannot express `high`. Three independent reasons the
- * multi-hypothesis path could never run in production, none of which failed
- * loudly.
- *
- * That question is gone, and deliberately not replaced with a better-behaved
- * flag. An incident investigation is planned; a free-form question is one turn
- * of a conversation the user keeps talking to. Those are two different kinds of
- * work, not two settings — and a toggle over them would mean shipping a product
- * whose good version is the one nobody found the switch for. That is exactly
- * what `fanout_enabled` was.
- *
- * The second question was *how wide*, and that survives — as `widthFor` in
- * `plan-normalize.ts`, where it caps the planner's output rather than gating
- * dispatch. Collapsing the two is what produced the bug where a medium-severity
- * alert computed a width of five and dispatched zero.
+ * Choose the execution shape from the investigation subject. Incident-backed
+ * investigations are planned and fan out; a free-form question is one turn in
+ * a continuing conversation.
  */
 import type { InvestigationSubject, InvestigationSubjectSnapshot } from "@maple/domain/http"
 import { widthFor } from "@/workflows/plan-normalize"

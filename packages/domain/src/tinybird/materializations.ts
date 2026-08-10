@@ -1,6 +1,7 @@
 import { defineMaterializedView, node } from "@tinybirdco/sdk"
 import {
 	serviceUsage,
+	serviceMapEdgesHourly,
 	serviceMapSpans,
 	serviceMapChildren,
 	serviceMapDbEdgesHourly,
@@ -12,6 +13,7 @@ import {
 	errorSpans,
 	errorEvents,
 	errorEventsByTime,
+	errorFingerprintsMinutely,
 	traceDetailSpans,
 	traceListMv,
 	attributeKeysHourly,
@@ -22,6 +24,7 @@ import {
 	spanMetricsCallsHourly,
 	serviceOperationsMinutely,
 	serviceOperationsHourly,
+	webEvents,
 } from "./datasources"
 import {
 	DB_NAMESPACE_ATTR_SQL,
@@ -372,13 +375,12 @@ export const serviceMapChildrenMv = defineMaterializedView("service_map_children
 	],
 })
 
-// `service_map_edges_hourly` (service-to-service edges) is intentionally NOT
-// populated by a materialized view. The downstream service name can only be
-// recovered by joining a Client/Producer span to its child Server/Consumer
-// span (modern OTEL instrumentation no longer emits a `peer.service`
-// attribute) — a cross-span join that an *incremental* ClickHouse MV cannot
-// express. The table is filled by the scheduled hourly rollup in
-// `ServiceMapRollupService`, which runs that join once per completed hour.
+// The cross-span service-map JOIN remains in `ServiceMapRollupService`: an
+// incremental MV cannot recover the downstream service name by joining a
+// Client/Producer span to its child Server/Consumer span. The MV below does no
+// aggregation or joining; it is only an ingestion bridge. Tinybird's Events
+// API writes plain columns with JSONPaths into a Null-engine source, which
+// immediately forwards them to the JSONPath-free aggregate target.
 //
 // Why not a *refreshable* MV (`REFRESH EVERY 1 HOUR`), which can run a join?
 //  - This schema deploys to both Tinybird and ClickHouse; Tinybird has no
@@ -387,6 +389,33 @@ export const serviceMapChildrenMv = defineMaterializedView("service_map_children
 //  - Refreshable MVs are still experimental on the deployed ClickHouse (24.8).
 //  - The job adds bounded-lookback catch-up + skip-existing idempotency that a
 //    `REFRESH ... APPEND` MV does not provide.
+
+export const serviceMapEdgesHourlyIngestMv = defineMaterializedView("service_map_edges_hourly_ingest_mv", {
+	description:
+		"Forwards scheduled service-map rollup rows from the Events API-compatible Null source into the aggregate target.",
+	datasource: serviceMapEdgesHourly,
+	nodes: [
+		node({
+			name: "service_map_edges_hourly_ingest_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          Hour,
+          SourceService,
+          TargetService,
+          DeploymentEnv,
+          CallCount,
+          ErrorCount,
+          DurationSumMs,
+          MaxDurationMs,
+          SampledSpanCount,
+          UnsampledSpanCount,
+          SampleRateSum
+        FROM service_map_edges_hourly_ingest
+      `,
+		}),
+	],
+})
 
 /**
  * Materialized view pre-aggregating service-to-database edges per hour.
@@ -762,9 +791,11 @@ export const errorEventsMv = defineMaterializedView("error_events_mv", {
 
 /**
  * Same per-occurrence projection as `error_events_mv`, written to the time-ordered
- * `error_events_by_time` datasource so recent-window scans (errorIssuesScan tick +
- * dashboard error queries) can prune by Timestamp. See `errorEventsByTime` in
- * datasources.ts for why both sort orders exist.
+ * `error_events_by_time` datasource so recent-window scans can prune by Timestamp.
+ *
+ * Keep this pipe triggered by `traces`: Tinybird does not support changing the
+ * trigger datasource of an existing materialized pipe in-place. The compact
+ * evaluator rollup can still cascade independently from `error_events` below.
  */
 export const errorEventsByTimeMv = defineMaterializedView("error_events_by_time_mv", {
 	description:
@@ -774,6 +805,38 @@ export const errorEventsByTimeMv = defineMaterializedView("error_events_by_time_
 		node({
 			name: "error_events_by_time_mv_node",
 			sql: errorEventsSelectSql,
+		}),
+	],
+})
+
+/**
+ * Compact source for the per-minute error issue evaluator. This cascades from
+ * `error_events`, so fingerprint extraction happens once at ingest and the tick
+ * scans one aggregate row per fingerprint/minute instead of raw span payloads.
+ */
+export const errorFingerprintsMinutelyMv = defineMaterializedView("error_fingerprints_minutely_mv", {
+	description:
+		"Pre-aggregates error_events by org, minute, and fingerprint for the scheduled issue evaluator.",
+	datasource: errorFingerprintsMinutely,
+	nodes: [
+		node({
+			name: "error_fingerprints_minutely_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          toStartOfMinute(Timestamp) AS Minute,
+          FingerprintHash,
+          anyLast(ServiceName) AS ServiceName,
+          anyLast(ExceptionType) AS ExceptionType,
+          anyLast(ExceptionMessage) AS ExceptionMessage,
+          anyLast(ErrorLabel) AS ErrorLabel,
+          anyLast(TopFrame) AS TopFrame,
+          count() AS OccurrenceCount,
+          min(Timestamp) AS FirstSeen,
+          max(Timestamp) AS LastSeen
+        FROM error_events
+        GROUP BY OrgId, Minute, FingerprintHash
+      `,
 		}),
 	],
 })
@@ -1309,6 +1372,57 @@ export const logsAggregatesHourlyMv = defineMaterializedView("logs_aggregates_ho
           ResourceAttributes['service.namespace'] AS ServiceNamespace
         FROM logs
         GROUP BY OrgId, Hour, ServiceName, SeverityText, DeploymentEnv, ServiceNamespace
+      `,
+		}),
+	],
+})
+
+/**
+ * Populates `web_events` — the web analytics fact table.
+ *
+ * A pure row-wise projection: filter to the two product-analytics event types,
+ * pre-extract `domain(Url)`/`path(Url)`, re-sort by time in the target. No
+ * aggregation, which is what makes this safe as a materialized view.
+ *
+ * That distinction is load-bearing, because the neighbouring table is not.
+ * `session_replays` is a `ReplacingMergeTree(Version)` whose SDK writes a v1 row
+ * at session start and a v2 row at session end. A materialized view fires per
+ * *inserted block*, so it would see those as two independent sessions and
+ * evaluate any per-session predicate against half a session — `PageViews <= 1`
+ * against the v1 row (where `PageViews` is 0) would report every session as a
+ * bounce, which is exactly the bug `webAnalyticsSummaryQuery`'s doc comment
+ * records having shipped once already. `session_events` has no such hazard: it
+ * is an append-only MergeTree with no dedup and no versioning, so per-block
+ * firing is irrelevant here.
+ *
+ * `Type` is carried through as `Kind` rather than folded into `EventName`, so
+ * the page-view predicate stays provably identical to the pre-rollup
+ * `Type = 'navigation'` even if a customer calls `track('$pageview')`.
+ *
+ * Column order must match the `web_events` SCHEMA order — enforced by
+ * `materialized-projection-order.test.ts`.
+ */
+export const webEventsMv = defineMaterializedView("web_events_mv", {
+	description:
+		"Populates web_events from session_events navigation and custom rows, with domain(Url)/path(Url) pre-extracted and the event name normalized.",
+	datasource: webEvents,
+	nodes: [
+		node({
+			name: "web_events_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          Timestamp,
+          SessionId,
+          Seq,
+          Type AS Kind,
+          if(Type = 'navigation', '$pageview', Message) AS EventName,
+          domain(Url) AS Host,
+          path(Url) AS PagePath,
+          Url,
+          Attributes
+        FROM session_events
+        WHERE Type IN ('navigation', 'custom')
       `,
 		}),
 	],

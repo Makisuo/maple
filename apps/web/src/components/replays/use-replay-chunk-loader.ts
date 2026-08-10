@@ -51,7 +51,7 @@ interface ChunkLoaderArgs {
 	readonly sessionId: string
 	readonly window: ReplayPartitionWindow | undefined
 	readonly chunks: ReadonlyArray<ReplayChunkMeta>
-	/** False while the manifest is still loading, or for the preview route. */
+	/** False while the manifest is still loading, or when tests inject events. */
 	readonly enabled: boolean
 }
 

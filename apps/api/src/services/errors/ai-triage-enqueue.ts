@@ -9,16 +9,17 @@ import {
 	type IssueSeverity,
 	type OrgId,
 } from "@maple/domain/http"
-import { AiTriageRunId, InvestigationId, IsoDateTimeString } from "@maple/domain/primitives"
+import { InvestigationId, IsoDateTimeString } from "@maple/domain/primitives"
 import { aiTriageSettings, investigations } from "@maple/db"
 import { and, eq, lt } from "drizzle-orm"
-import { Cause, Clock, Data, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
+import { Cause, Clock, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
 import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { Database } from "@/platform/DatabaseLive"
 import { isChatSessionNamespace } from "@/chat/session"
 import { widthFor } from "@/workflows/plan-normalize"
 import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
 import { evaluateInvestigationQuota, selectInvestigationUsage } from "@/services/errors/investigation-quota"
+import { FanoutStartError } from "@/services/errors/investigation-fanout-error"
 import {
 	isInvestigationStale,
 	staleBudgetMs,
@@ -29,35 +30,10 @@ import { UserId } from "@maple/domain/primitives"
 /** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
 const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
 
-/** A `beginTurn` call that the Durable Object could not complete (overload, eviction, limits). */
-class InvestigationStartError extends Data.TaggedError("@maple/api/InvestigationStartError")<{
-	readonly message: string
-}> {}
-
 /** Cloudflare Workflow binding that runs a fan-out. Present only in a Worker isolate. */
 export const INVESTIGATION_FANOUT_BINDING = "INVESTIGATION_FANOUT_WORKFLOW"
 
-/**
- * Kept for the one-release migration window because the legacy workflow module
- * still imports it. Nothing else should.
- */
-export const AI_TRIAGE_WORKFLOW_BINDING = "AI_TRIAGE_WORKFLOW"
-
 const decodeInvestigationId = Schema.decodeUnknownSync(InvestigationId)
-const decodeLegacyRunId = Schema.decodeUnknownSync(AiTriageRunId)
-
-interface LegacyWorkflowBinding {
-	readonly create: (options?: unknown) => Promise<unknown>
-}
-
-/** @deprecated Used only by the legacy manual-run endpoint during cutover. */
-export const isAiTriageWorkflowBinding = (value: unknown): value is LegacyWorkflowBinding =>
-	typeof value === "object" &&
-	value !== null &&
-	typeof (value as { create?: unknown }).create === "function"
-
-/** @deprecated Used only by the legacy manual-run endpoint during cutover. */
-export const newAiTriageRunId = () => decodeLegacyRunId(randomUUID())
 
 const STALE_INVESTIGATION_MS = 15 * 60 * 1000
 
@@ -214,8 +190,6 @@ export interface MaybeEnqueueTriageInput {
 	readonly force?: boolean
 }
 
-class FanoutStartError extends Data.TaggedError("FanoutStartError")<{ readonly cause: string }> {}
-
 interface FanoutWorkflowBinding {
 	readonly create: (options: { id: string; params: unknown }) => Promise<{ id: string }>
 }
@@ -234,9 +208,9 @@ export interface MaybeEnqueueTriageResult {
 /**
  * Create and seed one durable investigation for a newly opened incident.
  *
- * This is the producer-facing compatibility seam during the cutover: callers
- * retain their non-failing "maybe enqueue" contract, while all persistence and
- * conversation identity now use `investigations` + `inv-<id>`.
+ * Producers retain a non-failing "maybe enqueue" contract: investigation
+ * failures must never take down the detector or alert tick that discovered the
+ * incident.
  */
 export const maybeEnqueueTriage: (
 	input: MaybeEnqueueTriageInput,

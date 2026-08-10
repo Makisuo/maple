@@ -1,4 +1,4 @@
-import { lstat, mkdir, readdir } from "node:fs/promises"
+import { lstat, mkdir } from "node:fs/promises"
 import { existsSync, lstatSync } from "node:fs"
 import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import { randomUUID } from "node:crypto"
@@ -112,9 +112,6 @@ export const buildingRoot = (archiveDir: string): string => join(archiveRoot(arc
 
 export const buildingGenerationRoot = (archiveDir: string, generationId: string): string =>
 	join(buildingRoot(archiveDir), validateArchiveId(generationId, "generation"))
-
-export const archiveQuarantineRoot = (archiveDir: string): string =>
-	join(archiveRoot(archiveDir), "quarantine")
 
 /**
  * Resolve `candidate` and prove it stays inside `root`. Returns the absolute
@@ -238,30 +235,6 @@ export const assertRealFile = async (path: string, label: string): Promise<void>
 	if (info.isSymbolicLink() || !info.isFile()) {
 		throw new Error(`${label} must be a real file: ${path}`)
 	}
-}
-
-/**
- * Recursively walk a directory tree, refusing symlinks and unsupported special
- * files at every depth. Returns the total byte size of real files. Used to
- * validate a Parquet shard tree and to measure generated output before any
- * manifest or pointer commit — a symlinked shard could otherwise point outside
- * the archive root.
- */
-export const treeBytes = async (path: string): Promise<number> => {
-	let total = 0
-	const stack: string[] = [path]
-	while (stack.length > 0) {
-		const current = stack.pop()!
-		const info = await lstat(current)
-		if (info.isSymbolicLink()) throw new Error(`refusing symlink in archive tree: ${current}`)
-		if (info.isFile()) {
-			total += info.size
-			continue
-		}
-		if (!info.isDirectory()) throw new Error(`unsupported archive entry type: ${current}`)
-		for (const entry of await readdir(current)) stack.push(join(current, entry))
-	}
-	return total
 }
 
 /**

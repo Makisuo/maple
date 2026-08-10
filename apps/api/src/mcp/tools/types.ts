@@ -1,5 +1,6 @@
 import type { Effect } from "effect"
 import { Schema } from "effect"
+import type { McpToolRequirements } from "./runtime-requirements"
 
 class McpTenantError extends Schema.TaggedError<McpTenantError>()("@maple/mcp/errors/McpTenantError", {
 	message: Schema.String,
@@ -13,6 +14,11 @@ export class McpAuthMissingError extends Schema.TaggedError<McpAuthMissingError>
 export class McpAuthInvalidError extends Schema.TaggedError<McpAuthInvalidError>()(
 	"@maple/mcp/errors/McpAuthInvalidError",
 	{ message: Schema.String, reason: Schema.optionalKey(Schema.String) },
+) {}
+
+export class McpAuthUnavailableError extends Schema.TaggedError<McpAuthUnavailableError>()(
+	"@maple/mcp/errors/McpAuthUnavailableError",
+	{ message: Schema.String },
 ) {}
 
 export class McpInvalidTenantError extends Schema.TaggedError<McpInvalidTenantError>()(
@@ -30,6 +36,7 @@ export type McpToolError =
 	| McpTenantError
 	| McpAuthMissingError
 	| McpAuthInvalidError
+	| McpAuthUnavailableError
 	| McpInvalidTenantError
 	| McpQueryError
 
@@ -39,11 +46,11 @@ export interface McpToolResult {
 }
 
 export interface McpToolRegistrar {
-	tool<TSchema extends Schema.Codec<unknown, unknown, never, unknown>>(
+	tool<TSchema extends Schema.Codec<unknown, unknown, never, unknown>, R extends McpToolRequirements>(
 		name: string,
 		description: string,
 		schema: TSchema,
-		handler: (params: TSchema["Type"]) => Effect.Effect<McpToolResult, McpToolError, any>,
+		handler: (params: TSchema["Type"]) => Effect.Effect<McpToolResult, McpToolError, R>,
 	): void
 }
 

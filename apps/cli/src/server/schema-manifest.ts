@@ -252,9 +252,6 @@ export const withRawTelemetryRetentionFloor = (
 
 export const normalizedDefinition = (value: string): string => normalizedSchemaSql(value)
 
-export const schemaObject = (manifest: LocalSchemaManifest, name: string): LocalSchemaObject | undefined =>
-	manifest.objects.find((object) => object.name === name)
-
 const normalizeType = (value: string): string => normalize(value).replace(/\s*,\s*/g, ", ")
 
 const compareColumnAttribute = (actual: string | undefined, expected: string | undefined): boolean =>

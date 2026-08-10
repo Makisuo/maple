@@ -164,26 +164,64 @@ jobs:
                   sh -n scripts/uninstall.sh
 
     typescript:
-        name: TypeScript
+        name: TypeScript (${{ matrix.shard }})
         needs: changes
         if: ${{ needs.changes.outputs.ts == 'true' }}
-        # With `^typecheck` gone from turbo.json this job is a wide fan of ~26 `tsc` +
-        # ~15 vitest processes gated only by the four tsdown builds, so it scales
-        # near-linearly with cores — it ran on an 8 vCPU Blacksmith runner, which billed
-        # per vCPU-minute and made the extra cores ~cost-neutral. GitHub-hosted standard
-        # runners bill per wall-clock minute at a flat rate regardless of size, so a
-        # larger runner costs strictly more here; this stays on the standard one and
-        # takes the longer wall time. `--concurrency=10` below was tuned for 8 cores and
-        # oversubscribes here (TypeScript 7's `tsc` legs are themselves multi-threaded) —
-        # retune against measured wall time if this job becomes the CI critical path.
+        # A cold run used to put 63 build/typecheck/test tasks on one 2-vCPU runner.
+        # TypeScript 7's compiler and Vitest both create their own workers, so Turbo's
+        # old concurrency=10 caused severe CPU contention: API tests stretched to 410s,
+        # web tests to 265s, and the job to 9-11 minutes. Keep each compiler or test
+        # process on a quiet runner instead. API/web test files are sharded because they
+        # are the only suites large enough to remain on the cold-run critical path.
         runs-on: ubuntu-latest
-        timeout-minutes: 20
+        timeout-minutes: 12
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - shard: quality
+                      install-filters: "@maple/api"
+                    - shard: build-web
+                      install-filters: "@maple/web"
+                    - shard: build-other
+                      install-filters: >-
+                          @maple-dev/alchemy @maple-dev/browser
+                          @maple-dev/clickhouse-builder @maple-dev/effect-sdk
+                          @maple/landing @maple/local-ui
+                    - shard: typecheck-api
+                      install-filters: "@maple/api"
+                    - shard: typecheck-web
+                      install-filters: "@maple/web"
+                    - shard: typecheck-rest
+                      install-filters: >-
+                          @maple/alerting @maple/cli @maple/electric-sync @maple/landing
+                          @maple/local-ui @maple/scraper mobile ./lib/* ./examples/*
+                    - shard: typecheck-packages
+                      install-filters: "./packages/*"
+                    - shard: test-api-1
+                      install-filters: "@maple/api"
+                    - shard: test-api-2
+                      install-filters: "@maple/api"
+                    - shard: test-web-1
+                      install-filters: "@maple/web"
+                    - shard: test-web-2
+                      install-filters: "@maple/web"
+                    - shard: test-packages
+                      # Knip shares this lane and resolves config files from every
+                      # workspace, so this is the one shard that needs a full install.
+                      install-filters: ""
+                    - shard: test-rest
+                      install-filters: >-
+                          @maple/alerting @maple/cli @maple/electric-sync @maple/landing
+                          @maple/local-ui @maple/scraper mobile ./lib/*
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
             - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
 
             - uses: ./.github/actions/bun-install
+              with:
+                  filters: ${{ matrix.install-filters }}
 
             # The append-only schema-history gate below reads the base branch's
             # history file through `git show origin/<base>:...`. checkout leaves a
@@ -191,21 +229,21 @@ jobs:
             # `git fetch origin <branch>` can leave refs/remotes/origin/<branch>
             # absent, which the gate would read as "no base history yet".
             - name: Fetch base branch for the append-only schema gate
-              if: ${{ github.event_name == 'pull_request' }}
+              if: ${{ matrix.shard == 'quality' && github.event_name == 'pull_request' }}
               run: |
                   git fetch --no-tags --depth=1 origin \
                     "+refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
 
-            # Turbo's local cache is per-runner and dies with the job, so without this
-            # every run was `Cached: 0 cached, 59 total`. `github.sha` in the primary key
-            # never hits, which is deliberate: it forces a save on every run so the cache
-            # rolls forward instead of going stale behind a restore-key hit.
+            # Each shard has one rolling cache writer. The legacy v1 fallback makes the
+            # first sharded run reuse the cache produced by the former monolithic job.
+            # `github.sha` forces a new save so every shard rolls forward independently.
             - name: Restore turbo cache
               uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
                   path: .turbo/cache
-                  key: turbo-v1-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+                  key: turbo-v2-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-${{ github.sha }}
                   restore-keys: |
+                      turbo-v2-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-
                       turbo-v1-${{ runner.os }}-${{ github.job }}-
                       turbo-v1-${{ runner.os }}-
 
@@ -213,30 +251,115 @@ jobs:
             # @maple-dev/clickhouse-builder through its built dist — so the DSL has to
             # exist before the check runs, exactly as in clickhouse-schema-e2e.
             - name: Build ClickHouse query DSL
+              if: ${{ matrix.shard == 'quality' }}
               run: bun turbo build --filter=@maple-dev/clickhouse-builder
 
             - name: Validate generated ClickHouse and local-store schemas
+              if: ${{ matrix.shard == 'quality' }}
               run: bun run clickhouse:schema:check
 
             # Shared design tokens live in packages/ui/src/styles/tokens.css;
             # fails if an app re-declares one (landing ↔ web drift guard).
-            - run: bun run check:tokens
+            - name: Validate shared design tokens
+              if: ${{ matrix.shard == 'quality' }}
+              run: bun run check:tokens
 
-            # --concurrency here rather than in turbo.json: the global value also governs
-            # `bun dev`, which fans out persistent servers and wants a high ceiling.
-            - run: bun turbo typecheck test build --filter='!@maple/ingest' --concurrency=10
+            # Raw MCP handlers carry Effect requirements. Type-aware Effect rules
+            # prevent `any`/`unknown` or assertions from erasing that environment,
+            # which would otherwise turn a missing tenant into a runtime defect.
+            #
+            # The rules are only as good as the types they see: @maple-dev/effect-sdk
+            # resolves through its built dist, and an unbuilt dist makes every value
+            # from it `any` — which both fires false positives (the SDK's telemetry
+            # layer poisoning a ManagedRuntime) and silently erases real requirements.
+            # Build it first so the gate lints the same types a developer does.
+            - name: Build Effect SDK for type-aware lint
+              if: ${{ matrix.shard == 'quality' }}
+              run: bun turbo build --filter=@maple-dev/effect-sdk
+            - name: Lint Effect boundaries
+              if: ${{ matrix.shard == 'quality' }}
+              run: bun run lint:effect-boundaries
+
+            - name: Build web production bundle
+              if: ${{ matrix.shard == 'build-web' }}
+              run: bun turbo build --filter=@maple/web --concurrency=2
+
+            - name: Build remaining production bundles
+              if: ${{ matrix.shard == 'build-other' }}
+              run: >-
+                  bun turbo build --filter=@maple-dev/alchemy
+                  --filter=@maple-dev/browser --filter=@maple-dev/clickhouse-builder
+                  --filter=@maple-dev/effect-sdk --filter=@maple/landing
+                  --filter=@maple/local-ui --concurrency=2
 
             # `turbo typecheck` does not cover tsconfig.alchemy.json (alchemy.run.ts and
             # every apps/*/alchemy.run.ts) — only the root `typecheck` script chains it,
             # and CI calls turbo directly. Without this they ship unchecked.
-            - run: bunx tsc -p tsconfig.alchemy.json
+            - name: Typecheck Alchemy entrypoints
+              if: ${{ matrix.shard == 'quality' }}
+              run: bunx tsc -p tsconfig.alchemy.json
 
             # Guard the code-split web bundle: initial-load gzip budget and no
             # chat/replay code in the startup graph. Reads the dist/ the turbo
             # build step just produced (or restored from cache).
             - name: Web bundle budget
+              if: ${{ matrix.shard == 'build-web' }}
               run: bun run check:bundle
               working-directory: apps/web
+
+            # Large TypeScript projects get a runner each; the remaining small
+            # projects fan out at two Turbo tasks per 2-vCPU runner.
+            - name: Typecheck API
+              if: ${{ matrix.shard == 'typecheck-api' }}
+              run: bun turbo typecheck --filter=@maple/api --concurrency=2
+
+            - name: Typecheck web
+              if: ${{ matrix.shard == 'typecheck-web' }}
+              run: bun turbo typecheck --filter=@maple/web --concurrency=2
+
+            - name: Typecheck remaining apps, libraries, and examples
+              if: ${{ matrix.shard == 'typecheck-rest' }}
+              run: >-
+                  bun turbo typecheck --filter='./apps/*' --filter='./lib/*'
+                  --filter='./examples/*' --filter='!@maple/api'
+                  --filter='!@maple/web' --filter='!@maple/ingest' --concurrency=2
+
+            - name: Typecheck packages
+              if: ${{ matrix.shard == 'typecheck-packages' }}
+              run: bun turbo typecheck --filter='./packages/*' --concurrency=2
+
+            # Vitest's shard argument is part of Turbo's task hash, so each half is
+            # independently cached and no test file is lost between the two runners.
+            - name: Test API (shard 1/2)
+              if: ${{ matrix.shard == 'test-api-1' }}
+              run: bun turbo test --filter=@maple/api --concurrency=2 -- --shard=1/2
+
+            - name: Test API (shard 2/2)
+              if: ${{ matrix.shard == 'test-api-2' }}
+              run: bun turbo test --filter=@maple/api --concurrency=2 -- --shard=2/2
+
+            - name: Test web (shard 1/2)
+              if: ${{ matrix.shard == 'test-web-1' }}
+              run: bun turbo test --filter=@maple/web --concurrency=2 -- --shard=1/2
+
+            - name: Test web (shard 2/2)
+              if: ${{ matrix.shard == 'test-web-2' }}
+              run: bun turbo test --filter=@maple/web --concurrency=2 -- --shard=2/2
+
+            - name: Test packages
+              if: ${{ matrix.shard == 'test-packages' }}
+              run: bun turbo test --filter='./packages/*' --concurrency=2
+
+            - name: Find unused files and dependencies
+              if: ${{ matrix.shard == 'test-packages' }}
+              run: bun knip
+
+            - name: Test remaining apps and libraries
+              if: ${{ matrix.shard == 'test-rest' }}
+              run: >-
+                  bun turbo test --filter='./apps/*' --filter='./lib/*'
+                  --filter='!@maple/api' --filter='!@maple/web'
+                  --filter='!@maple/ingest' --concurrency=2
 
     slack-agent:
         name: Slack agent
@@ -330,18 +453,18 @@ jobs:
                   bun run --filter=@maple/api test --
                   src/services/warehouse/sql-catalog.clickhouse.e2e.test.ts
 
-    knip:
-        name: Knip
-        runs-on: ubuntu-latest
-        timeout-minutes: 10
-        steps:
-            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
-
-            - uses: ./.github/actions/bun-install
-
-            - run: bun knip
+            # The catalog sweep proves the rollup SQL parses; this proves it
+            # AGREES with the raw path it replaced. A divergence here renders as a
+            # plausible-looking wrong number, so nothing downstream would catch it.
+            - name: Verify web analytics raw-vs-rollup parity
+              env:
+                  CLICKHOUSE_E2E: "1"
+                  CLICKHOUSE_E2E_URL: http://127.0.0.1:8123
+                  CLICKHOUSE_E2E_USER: maple
+                  CLICKHOUSE_E2E_PASSWORD: maple
+              run: >-
+                  bun run --filter=@maple/api test --
+                  src/services/warehouse/web-analytics-parity.clickhouse.e2e.test.ts
 
     local-checkpoint-native:
         name: Local checkpoint native
@@ -512,24 +635,63 @@ jobs:
                   if-no-files-found: ignore
 
     service-map-perf:
-        name: Service Map Perf
+        name: Web perf (${{ matrix.shard }})
         needs: changes
         if: ${{ needs.changes.outputs.web == 'true' }}
         runs-on: ubuntu-latest
-        timeout-minutes: 20
+        timeout-minutes: 12
+        # The old job deliberately used one Playwright worker so concurrent browsers
+        # could not distort frame timings, but that also serialized 16 tests to 3.6m.
+        # A matrix preserves one browser/test group per machine while running the seven
+        # independent groups concurrently. The slowest former group was WebKit at 60s.
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - shard: service-map
+                      browser: chromium
+                      project: chromium-performance
+                      specs: perf/service-map.perf.spec.ts
+                    - shard: infra
+                      browser: chromium
+                      project: chromium-performance
+                      specs: perf/infra.perf.spec.ts
+                    - shard: logs
+                      browser: chromium
+                      project: chromium-performance
+                      specs: perf/logs.perf.spec.ts perf/logs-hover.spec.ts
+                    - shard: service-detail
+                      browser: chromium
+                      project: chromium-performance
+                      specs: perf/service-detail.perf.spec.ts
+                    - shard: chromium-smoke
+                      browser: chromium
+                      project: chromium-smoke
+                      specs: perf/cross-browser.perf.spec.ts
+                    - shard: firefox-smoke
+                      browser: firefox
+                      project: firefox-smoke
+                      specs: perf/cross-browser.perf.spec.ts
+                    - shard: webkit-smoke
+                      browser: webkit
+                      project: webkit-smoke
+                      specs: perf/cross-browser.perf.spec.ts
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
             - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
 
             - uses: ./.github/actions/bun-install
+              with:
+                  filters: "@maple/web"
 
             - name: Restore turbo cache
               uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
                   path: .turbo/cache
-                  key: turbo-v1-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+                  key: turbo-v2-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-${{ github.sha }}
                   restore-keys: |
+                      turbo-v2-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-
                       turbo-v1-${{ runner.os }}-${{ github.job }}-
                       turbo-v1-${{ runner.os }}-
 
@@ -554,28 +716,35 @@ jobs:
               uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
                   path: ~/.cache/ms-playwright
-                  key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+                  key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ matrix.browser }}
+                  restore-keys: |
+                      playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ matrix.browser }}-
+                      playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
-            # Headless browsers for the rendering benchmark and the @cross-browser
-            # smoke projects (firefox/webkit fail to launch in 1ms if only chromium
-            # is installed).
-            - name: Install Playwright browsers
+            - name: Install Playwright browser
               if: steps.playwright-cache.outputs.cache-hit != 'true'
-              run: bunx playwright install chromium firefox webkit
+              env:
+                  PW_BROWSER: ${{ matrix.browser }}
+              run: bunx playwright install "$PW_BROWSER"
               working-directory: apps/web
 
             # Deliberately NOT folded into `install --with-deps`: system libs go to
             # apt paths that ~/.cache/ms-playwright does not cover, so on a cache hit
             # the combined form would skip them and webkit would fail to launch.
             - name: Install Playwright system deps
-              run: bunx playwright install-deps chromium firefox webkit
+              env:
+                  PW_BROWSER: ${{ matrix.browser }}
+              run: bunx playwright install-deps "$PW_BROWSER"
               working-directory: apps/web
 
-            # Boots a self-hosted dev server (see playwright.config.ts) and runs the
-            # canvas-particle rendering gate against the synthetic /service-map-bench
-            # route (120 services / 400 edges at high traffic).
-            - name: Run perf gate
-              run: bun --filter=@maple/web test:perf
+            - name: Run perf shard
+              env:
+                  PW_PROJECT: ${{ matrix.project }}
+                  PW_SPECS: ${{ matrix.specs }}
+              run: |
+                  read -r -a specs <<< "$PW_SPECS"
+                  bunx playwright test "${specs[@]}" --project="$PW_PROJECT"
+              working-directory: apps/web
 
     # The single required status check. Individual jobs above are path-filtered, and a
     # skipped job never reports — so if any of them were required directly, branch
@@ -594,7 +763,6 @@ jobs:
             - typescript
             - slack-agent
             - clickhouse-schema-e2e
-            - knip
             - local-checkpoint-native
             - local-archive-native
             - service-map-perf

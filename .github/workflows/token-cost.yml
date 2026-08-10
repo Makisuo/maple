@@ -10,6 +10,7 @@ on:
         paths:
             - "apps/api/src/mcp/**"
             - "packages/domain/src/**"
+            - ".github/actions/bun-install/action.yml"
             - ".github/workflows/token-cost.yml"
 
 concurrency:
@@ -31,7 +32,21 @@ jobs:
 
             - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
 
-            - run: bun install --frozen-lockfile
+            # This script only needs the API dependency closure. Installing all
+            # workspaces accounted for roughly half of this job's wall time.
+            - uses: ./.github/actions/bun-install
+              with:
+                  filters: "@maple/api"
+
+            - name: Restore turbo cache
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: .turbo/cache
+                  key: turbo-v2-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+                  restore-keys: |
+                      turbo-v2-${{ runner.os }}-${{ github.job }}-
+                      turbo-v2-${{ runner.os }}-typescript-build-other-
+                      turbo-v1-${{ runner.os }}-
 
             # @maple/api's measure-tokens imports query-engine, which pulls the
             # dist-based @maple-dev/clickhouse-builder (+ effect-sdk, browser).

@@ -32,6 +32,11 @@ import type {
 	ServiceHealthSnapshotRequest,
 	ServiceOverviewRequest,
 	WorkloadDetailSummaryRequest,
+	WebAnalyticsSummaryRequest,
+	WebAnalyticsTimeseriesRequest,
+	WebAnalyticsPageviewsRequest,
+	WebAnalyticsPagesRequest,
+	WebAnalyticsBreakdownsRequest,
 } from "@maple/domain/http"
 import { Match } from "effect"
 import { attributeIndexMode, logBodySearchMode } from "../capabilities"
@@ -661,6 +666,151 @@ export const serviceDbTopQueries = defineQuery({
 		CH.serviceDbTopQueriesSQL(dbQueryParams(payload, orgId)),
 })
 
+// --- Web analytics --------------------------------------------------------
+//
+// Five queries behind one page, so they share a filter surface. `webAnalytics*`
+// payloads carry the filters flat; `webAnalyticsFilters` picks them off so each
+// entry below stays a one-line pass-through and the five can't drift apart.
+//
+// All 15s: this is a live dashboard people watch during a launch, and the
+// breakdown fan-out is over a 30-day-TTL table small enough that 60s buys
+// nothing but a page that looks stuck after a filter click.
+
+const webAnalyticsFilters = (
+	payload: {
+		readonly host?: string
+		readonly pagePath?: string
+		readonly referrerHost?: string
+		readonly country?: string
+		readonly deviceType?: string
+		readonly browserName?: string
+		readonly osName?: string
+		readonly language?: string
+		readonly utmSource?: string
+		readonly utmMedium?: string
+		readonly utmCampaign?: string
+		readonly visitorType?: "new" | "returning"
+	},
+	useWebEvents: boolean,
+): CH.WebAnalyticsFilters => ({
+	host: payload.host,
+	pagePath: payload.pagePath,
+	referrerHost: payload.referrerHost,
+	country: payload.country,
+	deviceType: payload.deviceType,
+	browserName: payload.browserName,
+	osName: payload.osName,
+	language: payload.language,
+	utmSource: payload.utmSource,
+	utmMedium: payload.utmMedium,
+	utmCampaign: payload.utmCampaign,
+	visitorType: payload.visitorType,
+	useWebEvents,
+})
+
+// Each of the five is defined twice, differing only in which table page views
+// resolve against. The `id` is shared within a pair — it names the route, and
+// therefore the cache key and the `query.context` span label, neither of which
+// should shift when the flag flips. That's the same arrangement as
+// `serviceOperationsSummary` / `serviceOperationsSummaryRaw` below.
+//
+// A shared cache key across the pair is safe *because* the two are required to
+// return identical numbers: if a 15s-old entry written by one variant were wrong
+// for the other, parity is already broken and that is the bug to fix.
+//
+// Summary/timeseries/breakdowns read `session_replays` either way — they touch
+// the page-view source only through the semi-join, i.e. only when a host or
+// pagePath filter is set, which is precisely the case the rollup exists for.
+// They still come in pairs so the flag means one thing across the whole page
+// rather than being silently payload-dependent.
+
+const webAnalyticsSummaryDef = (useWebEvents: boolean) => ({
+	id: "webAnalyticsSummary" as const,
+	profile: "aggregation" as const,
+	cache: 15,
+	compile: (payload: WebAnalyticsSummaryRequest, orgId: string) =>
+		CH.compile(CH.webAnalyticsSummaryQuery(webAnalyticsFilters(payload, useWebEvents)), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+export const webAnalyticsSummary = defineQuery(webAnalyticsSummaryDef(true))
+/** Rollback path, used when `web_events` is absent or the flag is off. */
+export const webAnalyticsSummaryRaw = defineQuery(webAnalyticsSummaryDef(false))
+
+const webAnalyticsTimeseriesDef = (useWebEvents: boolean) => ({
+	id: "webAnalyticsTimeseries" as const,
+	profile: "aggregation" as const,
+	cache: 15,
+	compile: (payload: WebAnalyticsTimeseriesRequest, orgId: string) =>
+		CH.compile(
+			CH.webAnalyticsTimeseriesQuery({
+				...webAnalyticsFilters(payload, useWebEvents),
+				bucketSeconds: payload.bucketSeconds,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const webAnalyticsTimeseries = defineQuery(webAnalyticsTimeseriesDef(true))
+export const webAnalyticsTimeseriesRaw = defineQuery(webAnalyticsTimeseriesDef(false))
+
+const webAnalyticsPageviewsDef = (useWebEvents: boolean) => ({
+	id: "webAnalyticsPageviews" as const,
+	profile: "aggregation" as const,
+	cache: 15,
+	compile: (payload: WebAnalyticsPageviewsRequest, orgId: string) =>
+		CH.compile(
+			CH.webAnalyticsPageviewsTimeseriesQuery({
+				...webAnalyticsFilters(payload, useWebEvents),
+				bucketSeconds: payload.bucketSeconds,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const webAnalyticsPageviews = defineQuery(webAnalyticsPageviewsDef(true))
+export const webAnalyticsPageviewsRaw = defineQuery(webAnalyticsPageviewsDef(false))
+
+const webAnalyticsPagesDef = (useWebEvents: boolean) => ({
+	id: "webAnalyticsPages" as const,
+	profile: "aggregation" as const,
+	cache: 15,
+	compile: (payload: WebAnalyticsPagesRequest, orgId: string) =>
+		CH.compile(
+			CH.webAnalyticsPagesQuery({
+				...webAnalyticsFilters(payload, useWebEvents),
+				limit: payload.limit,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const webAnalyticsPages = defineQuery(webAnalyticsPagesDef(true))
+export const webAnalyticsPagesRaw = defineQuery(webAnalyticsPagesDef(false))
+
+const webAnalyticsBreakdownsDef = (useWebEvents: boolean) => ({
+	id: "webAnalyticsBreakdowns" as const,
+	profile: "aggregation" as const,
+	// Same read-thread cap as the other UNION fan-outs: 12 branches over one
+	// table, and unbounded threads buy latency at the cost of memory spikes.
+	settings: { maxThreads: 4 },
+	cache: 15,
+	compile: (payload: WebAnalyticsBreakdownsRequest, orgId: string) =>
+		CH.compileUnion(
+			CH.webAnalyticsBreakdownsQuery({
+				...webAnalyticsFilters(payload, useWebEvents),
+				limitPerDimension: payload.limitPerDimension,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const webAnalyticsBreakdowns = defineQuery(webAnalyticsBreakdownsDef(true))
+export const webAnalyticsBreakdownsRaw = defineQuery(webAnalyticsBreakdownsDef(false))
+
 // --- Facet queries (UNION of per-dimension branches) ----------------------
 
 export const podFacets = defineQuery({
@@ -846,9 +996,9 @@ export const spanHierarchy = defineQuery({
 //
 // Four defs, two logical queries. Each has a rollup form and a raw form, and
 // the CHOICE between them stays in the handler because it is policy, not query
-// construction: a feature flag selects the rollup, and a typed
-// `isMissingServiceOperationsRollup` error falls back to raw at runtime,
-// flipping a flag that the timeseries query then honors too.
+// construction: the handler always reads the rollup and falls back to raw on a
+// typed `isMissingServiceOperationsRollup` error — a per-org degrade for BYO
+// clusters that never applied migration 0008. There is no flag.
 //
 // Rollup/raw pairs share an id, matching the context their spans already
 // report — the fallback is recorded separately as `query.rollup.fallback`.

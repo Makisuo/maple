@@ -97,7 +97,8 @@ test("React render work stays measurable during refresh and topology updates", a
 	expect(report.metricRefresh.commits, "metric-refresh render cascade").toBeLessThan(80)
 	expect(report.topologyChange.commits, "topology-change React commits").toBeGreaterThan(0)
 	expect(report.topologyChange.commits, "topology-change render cascade").toBeLessThan(80)
-	expect(report.viewportPan.commits, "viewport-pan React commits").toBeGreaterThan(0)
+	// The viewport, particles, minimap, controls, and background all update
+	// imperatively during an active gesture, so zero React commits is ideal.
 	expect(report.viewportPan.commits, "viewport-pan render cascade").toBeLessThan(800)
 	expect(report.viewportPanCommitsPerFrame, "viewport-pan commits per frame").toBeLessThan(4)
 })
@@ -165,8 +166,8 @@ test("service map renders filter/SMIL-free and animates smoothly under heavy tra
 
 	// The structural assertions above (no feGaussianBlur / animateMotion, canvas
 	// drawn) are the environment-independent regression guard. The frame-timing
-	// thresholds below are tuned for a real GPU: locally the canvas impl hits
-	// ~125 fps idle / ~70 fps pan. GitHub's CI runner has NO GPU — idle is
+	// thresholds below are tuned for a real GPU: locally the imperative render
+	// path hits ~120 fps both idle and panning. GitHub's CI runner has NO GPU — idle is
 	// vsync-capped at ~60 and pan rendering is software-bound at ~14 fps
 	// regardless of code quality (below even the pre-fix SVG baseline), so the
 	// strict pan numbers are physically unreachable there. Under CI we keep the
@@ -174,20 +175,34 @@ test("service map renders filter/SMIL-free and animates smoothly under heavy tra
 	// SVG-filter cost of ~23 fps / p95 ~50ms) plus a "pan isn't frozen" floor.
 	const ci = !!process.env.CI
 
-	// Idle is the headline, rock-stable metric — it captures the continuous
-	// SVG-filter/SMIL cost that this change removes.
-	expect(idle.fps, "idle fps").toBeGreaterThan(ci ? 45 : 55)
+	// Idle captures the continuous SVG-filter/SMIL cost this change removes — but
+	// gate it on frame PACING, not fps. On a GPU-less shared runner the same code
+	// measured p50 16.7ms / p95 33.4ms, identical to the decimal, across three
+	// consecutive attempts while fps drifted 44.7 -> 43.6 -> 41.7 and red-failed a
+	// 45 floor on a branch that touches no web code. fps is frames divided by
+	// wall-clock, so it counts time the CI host descheduled the browser entirely;
+	// p50/p95 measure how the frames that DID run were paced. 16.7ms is exactly
+	// vsync and 33.4ms is exactly one dropped frame — the rendering was perfect on
+	// the run that "failed".
+	//
+	// Pacing still separates the regression this test exists to catch by a wide
+	// margin: the pre-fix per-edge blur + SMIL cost ~23 fps with p50/p95 far above
+	// vsync (~50ms p95), against 16.7/33.4 here. fps keeps a not-frozen floor
+	// only, exactly as pan already does below.
+	expect(idle.frameP50, "idle p50 frame time (ms)").toBeLessThan(ci ? 25 : 20)
 	expect(idle.frameP95, "idle p95 frame time (ms)").toBeLessThan(ci ? 40 : 20)
+	expect(idle.fps, "idle fps (not frozen)").toBeGreaterThan(ci ? 20 : 55)
 
 	if (ci) {
 		// GPU-less runner: pan fps can't discriminate impl quality, only catch a
 		// fully-frozen animation loop.
 		expect(pan.fps, "pan fps (CI floor)").toBeGreaterThan(5)
 	} else {
-		// Pan drives setViewport every frame (noisier); guard gross regressions only.
-		// Pre-fix baseline: ~17 fps / p95 ~125ms; post-fix: ~70 fps / p95 ~32ms.
-		expect(pan.fps, "pan fps").toBeGreaterThan(35)
-		expect(pan.frameP95, "pan p95 frame time (ms)").toBeLessThan(70)
+		// Stay in the display's native performance class: 120-class on a high-refresh
+		// display, or a locked 60-class cadence on a conventional display.
+		const highRefresh = idle.fps > 90
+		expect(pan.fps, "pan fps").toBeGreaterThan(highRefresh ? 100 : 55)
+		expect(pan.frameP95, "pan p95 frame time (ms)").toBeLessThan(highRefresh ? 20 : 25)
 	}
 })
 

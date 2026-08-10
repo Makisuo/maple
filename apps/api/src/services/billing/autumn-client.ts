@@ -3,15 +3,15 @@ import { autumnHandler, type CustomerData } from "autumn-js/backend"
 import type { EdgeCacheServiceShape } from "@maple/cache"
 import { isActivePlanSubscription } from "@maple/domain/billing"
 import { BillingUpstreamError } from "@maple/domain/http"
+import type { UpdateBillingControlsRequest } from "@maple/domain/http"
+import { AUTUMN_API_VERSION } from "./autumn-api"
 
 /**
- * Autumn plumbing shared by the billing routes and the spend-limit cron.
+ * Autumn plumbing shared by the billing routes.
  *
- * Lives outside `routes/billing.http.ts` because the cron needs the same
- * customer/usage/catalog reads — including the per-org customer cache — to price
- * a cycle, and a second copy of this would be free to drift from the one the UI
- * reads. Everything here is a plain function: the caller owns the secret key and
- * the cache instance.
+ * Lives outside `routes/billing.http.ts` so the customer cache and canonical
+ * Autumn REST mutations share one boundary. Everything here is a plain function:
+ * the caller owns the secret key and cache instance.
  */
 
 export type AutumnResult = Awaited<ReturnType<typeof autumnHandler>>
@@ -114,6 +114,58 @@ export const makeCallAutumn =
 							message: error instanceof Error ? error.message : String(error),
 						}),
 				})
+
+/**
+ * `autumnHandler` intentionally exposes only its RPC route list; customer
+ * billing controls live on the canonical REST surface instead.
+ */
+export const updateCustomerBillingControls = (
+	secretKey: string | undefined,
+	apiUrl: string,
+	orgId: string,
+	controls: UpdateBillingControlsRequest,
+): Effect.Effect<AutumnResult, BillingUpstreamError> =>
+	secretKey === undefined
+		? Effect.fail(new BillingUpstreamError({ message: "Billing is not configured" }))
+		: Effect.tryPromise({
+				try: async () => {
+					const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/v1/customers.update`, {
+						method: "POST",
+						headers: {
+							Authorization: `Bearer ${secretKey}`,
+							"Content-Type": "application/json",
+							"x-api-version": AUTUMN_API_VERSION,
+						},
+						body: JSON.stringify({
+							customer_id: orgId,
+							billing_controls: {
+								spend_limits: controls.spendLimits.map((limit) => ({
+									feature_id: limit.featureId,
+									enabled: limit.enabled,
+									limit_type: limit.limitType,
+									overage_limit: limit.overageLimit,
+								})),
+								usage_alerts: controls.usageAlerts.map((alert) => ({
+									feature_id: alert.featureId,
+									enabled: alert.enabled,
+									threshold: alert.threshold,
+									threshold_type: alert.thresholdType,
+									...(alert.name ? { name: alert.name } : {}),
+								})),
+							},
+						}),
+					})
+					const text = await response.text()
+					return {
+						statusCode: response.status,
+						response: text.length === 0 ? {} : JSON.parse(text),
+					} as AutumnResult
+				},
+				catch: (error) =>
+					new BillingUpstreamError({
+						message: error instanceof Error ? error.message : String(error),
+					}),
+			})
 
 // Surface a readable message for a non-2xx Autumn response (it carries a
 // `{ message }` / `{ error }` body) so the client error isn't an opaque 502.

@@ -6,6 +6,7 @@ import {
 	presentWarehouseError,
 	type WarehouseErrorLike,
 } from "@maple/domain"
+import { formatRelativeFrom } from "@maple/ui/lib/time-format"
 import { isChunkLoadError } from "./chunk-reload"
 
 export interface FormattedError {
@@ -71,6 +72,25 @@ export const v2ErrorInfo = (input: unknown): V2ErrorInfo | null => {
 	return { type, code, message }
 }
 
+/**
+ * Backend messages carry ISO instants because API consumers need to parse them.
+ * A reader does not — "Resets at 2026-08-10T00:00:00.000Z." answers "when can I
+ * try again?" only after mental timezone arithmetic. Rewrite the timestamp in
+ * place and keep the sentence the server wrote.
+ */
+// A preceding "at " is swallowed because the replacement supplies its own
+// preposition: "Resets at 2026-08-10T00:00:00.000Z" becomes "Resets in 7h",
+// not "Resets at in 7h".
+const ISO_INSTANT = /(?:\bat )?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/g
+
+export const humanizeInstants = (message: string, nowMs: number = Date.now()): string =>
+	message.replace(ISO_INSTANT, (match, iso: string) => {
+		const epochMs = Date.parse(iso)
+		// An unparseable match can only come from a regex/Date disagreement — leave
+		// the server's text alone rather than rendering "—" inside a sentence.
+		return Number.isFinite(epochMs) ? formatRelativeFrom(epochMs, nowMs) : match
+	})
+
 const V2_ERROR_TITLES: Record<string, string> = {
 	invalid_request_error: "Invalid request",
 	authentication_error: "Not authorized",
@@ -88,7 +108,7 @@ export const formatBackendError = (input: unknown): FormattedError => {
 	if (v2 !== null) {
 		return {
 			title: V2_ERROR_TITLES[v2.type] ?? "Something went wrong",
-			description: v2.message,
+			description: humanizeInstants(v2.message),
 		}
 	}
 

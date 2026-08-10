@@ -1,0 +1,165 @@
+name: AWS Probe (manual)
+
+# Bisect harness for the ingest deploy hang. Manual only — nothing triggers it
+# automatically, and it deploys no application code.
+#
+# Why this exists: the hang only reproduces in CI, and reproducing it through
+# `Deploy PRD` costs a 45-minute timeout per attempt and blocks production
+# behind it. This runs the same AWS provider set, on the same runner image,
+# with the same OIDC credentials, against one resource class at a time, with a
+# 12-minute ceiling — so an attempt is minutes, not most of an hour.
+on:
+    workflow_dispatch:
+        inputs:
+            level:
+                description: "How far to go: ecr (repository) → network (VPC) → image (docker build + push)"
+                type: choice
+                options: [ecr, network, image]
+                default: ecr
+            state:
+                description: "State backend: local (file) or cloud (the shared Cloudflare store the real deploy uses)"
+                type: choice
+                options: [local, cloud]
+                default: local
+            keep:
+                description: "Keep the resources instead of destroying them (leave off unless you need to inspect)"
+                type: boolean
+                default: false
+
+concurrency:
+    group: aws-probe
+    cancel-in-progress: false
+
+permissions:
+    contents: read
+    id-token: write
+
+jobs:
+    probe:
+        runs-on: ubuntu-latest
+        # Not a long-running deploy: if a level has not settled in this window it
+        # has hung, and that IS the result. Sized so a COLD cargo build (measured
+        # at 2m54s, not the ~20min this repo used to claim) cannot eat the budget
+        # and masquerade as the hang being investigated.
+        timeout-minutes: 20
+        # The OIDC role's trust policy only accepts
+        # `repo:MapleTechLabs/maple:environment:{production,staging}` subs, so the
+        # job has to declare one of them to get credentials at all.
+        environment: production
+        env:
+            PROBE_LEVEL: ${{ inputs.level }}
+            PROBE_STATE: ${{ inputs.state }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - name: Setup mise (toolchain)
+              uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+            # Needed only for `state: cloud` (the state store authenticates to
+            # Cloudflare), but unconditional so the two runs differ in exactly one
+            # variable — the state backend — and nothing else.
+            - name: Load deployment secrets from Infisical
+              uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+              with:
+                  method: "oidc"
+                  identity-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+                  project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+                  env-slug: "prod"
+                  export-type: "env"
+                  secret-path: "/"
+
+            - name: Configure AWS credentials (OIDC)
+              uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+              with:
+                  role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+                  aws-region: us-east-1
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+
+            # Only the image level needs a binary to COPY; the cheaper levels skip
+            # the three-minute compile entirely.
+            # Same key as deploy-prd.yml on purpose: the probe rides that
+            # workflow's warm cache instead of compiling from scratch inside a
+            # budget meant for the probe itself.
+            - name: Cache ingest cargo build
+              if: inputs.level == 'image'
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: |
+                      ~/.cargo-ingest
+                      ${{ runner.temp }}/ingest-target
+                  key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
+                  restore-keys: |
+                      ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
+                      ingest-cargo-${{ runner.os }}-
+
+            - name: Build ingest binary
+              if: inputs.level == 'image'
+              run: |
+                  mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
+                  docker run --rm \
+                      --user "$(id -u):$(id -g)" \
+                      -e CARGO_HOME=/cargo \
+                      -v "$HOME/.cargo-ingest:/cargo" \
+                      -v "$PWD/apps/ingest:/app" \
+                      -v "$RUNNER_TEMP/ingest-target:/target" \
+                      -w /app \
+                      rust:1.88-bookworm \
+                      cargo build --release --target-dir /target
+                  cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
+
+            # The watchdog is the whole point on a hang: alchemy prints nothing, so
+            # the process table is the only witness. A busy cargo/docker child means
+            # slow; bun at 0% CPU means blocked, and wchan names the kernel wait.
+            - name: Probe
+              run: |
+                  (
+                      while true; do
+                          sleep 30
+                          echo "=== watchdog $(date -u +%H:%M:%S) ==="
+                          ps -eo pid,ppid,etime,pcpu,stat,wchan:20,args --sort=-pcpu | head -12
+                          for p in $(pgrep -x bun || true); do
+                              echo "--- bun $p fds ---"
+                              ls -l "/proc/$p/fd" 2>/dev/null | tail -12
+                          done
+                          docker ps --format '{{.ID}} {{.Image}} {{.Status}}' 2>&1 | head -5
+                          echo "--- .alchemy/log/out (tail) ---"
+                          tail -n 20 .alchemy/log/out 2>/dev/null || echo "(no log yet)"
+                      done
+                  ) &
+                  trap 'kill %1 2>/dev/null || true' EXIT
+                  bunx alchemy deploy scripts/aws-probe.run.ts --yes --adopt --stage probe
+
+            # alchemy writes its stdout to .alchemy/log/out, NOT to the console. That
+            # single fact explains every "silent hang" in this investigation: four
+            # production runs and a --log-level debug run all looked like 40 minutes
+            # of nothing while the log sat in the workspace. Found via /proc/<pid>/fd
+            # in the watchdog output.
+            # BEFORE destroy, always: `alchemy destroy` removes the local state
+            # directory on success, so uploading afterwards captured nothing and
+            # `if-no-files-found: ignore` swallowed the fact silently.
+            - name: Upload probe state for recovery
+              if: always()
+              uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+              with:
+                  name: alchemy-probe-state
+                  path: .alchemy/
+                  if-no-files-found: warn
+                  retention-days: 7
+
+            - name: Dump alchemy log
+              if: always()
+              run: |
+                  echo "===== .alchemy/log/out ====="
+                  cat .alchemy/log/out 2>/dev/null || echo "(missing)"
+                  echo "===== .alchemy/log/err ====="
+                  cat .alchemy/log/err 2>/dev/null || echo "(missing)"
+
+            - name: Destroy probe resources
+              if: always() && !inputs.keep
+              run: |
+                  if ! bunx alchemy destroy scripts/aws-probe.run.ts --yes --stage probe; then
+                      echo "::warning title=Probe teardown failed::Probe resources may still exist in 465760687006. Download the alchemy-probe-state artifact from this run, unpack it at the repo root, and re-run: bunx alchemy destroy scripts/aws-probe.run.ts --yes --stage probe"
+                  fi

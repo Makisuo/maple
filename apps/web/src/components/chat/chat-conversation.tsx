@@ -31,11 +31,12 @@ import {
 	PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
+import { ThinkingOrbIcon } from "@/components/ai-elements/thinking-orb-icon"
 import { Button } from "@maple/ui/components/ui/button"
-import { Spinner } from "@maple/ui/components/ui/spinner"
 import { trackProduct } from "@/lib/analytics"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { AiTriageResult } from "@maple/domain/http"
+import { TurnFailureNotice } from "./turn-failure-notice"
 
 const DEFAULT_SUGGESTIONS = [
 	"What's the overall system health?",
@@ -142,8 +143,18 @@ export function ChatConversation({
 		return base
 	}, [subjectSeededByServer, mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
 
-	const { sessionId, messages, status, isLoading, historyReady, failedSends, sendMessage, stop, canStop } =
-		useMapleChat({ tabId, context })
+	const {
+		sessionId,
+		messages,
+		status,
+		error,
+		isLoading,
+		historyReady,
+		failedSends,
+		sendMessage,
+		stop,
+		canStop,
+	} = useMapleChat({ tabId, context })
 	const diagnosisMessageId = useMemo(() => findDiagnosisMessageId(messages), [messages])
 
 	// Apply an approved proposal via Maple's authenticated API (propose-then-apply).
@@ -303,6 +314,9 @@ export function ChatConversation({
 							onRetry={handleSend}
 						/>
 					)}
+					{error !== undefined && failedSends.length === 0 ? (
+						<TurnFailureNotice error={error} onContinue={() => handleSend("Continue.")} />
+					) : null}
 					<PromptInput onSubmit={({ text }) => handleSend(text)}>
 						<PromptInputTextarea
 							ref={textareaRef}
@@ -393,7 +407,7 @@ function EmptyNotice({
 	return (
 		<div className="flex flex-col items-center justify-center gap-2 text-center">
 			<p className="flex items-center gap-1.5 text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
-				{busy ? <Spinner className="size-3" /> : null}
+				{busy ? <ThinkingOrbIcon state="breathing" /> : null}
 				<span className={busy ? "shimmer" : undefined}>{title}</span>
 			</p>
 			<p className="max-w-sm text-sm text-muted-foreground">{children}</p>

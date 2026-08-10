@@ -20,7 +20,7 @@ import {
 	getSpanAttributeValuesResultAtom,
 	getTracesFacetValuesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
-import { ALL_VALUE, type VariableValues } from "@/lib/dashboard-variables/interpolate"
+import { ALL_VALUE, type VariableValues } from "@maple/query-engine"
 import type { DashboardVariable } from "./types"
 import { useDashboardTimeRange } from "./dashboard-providers"
 

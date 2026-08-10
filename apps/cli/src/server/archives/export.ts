@@ -128,15 +128,6 @@ const parseCount = (text: string): number => {
 	return count
 }
 
-/**
- * Count the rows in `table` whose event time falls on a given UTC date using
- * toDate() equality (robust against the chDB toDateTime64 aggregate miscount).
- */
-export const countRowsForDay = (db: Chdb, signal: ArchiveSignal, rangeDate: string): number => {
-	const sql = `SELECT count() FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}, 'UTC') = '${rangeDate}'`
-	return parseCount(db.query(sql, "JSONEachRow"))
-}
-
 const sha256File = (path: string): string => {
 	const hash = createHash("sha256")
 	hash.update(readFileSync(path))

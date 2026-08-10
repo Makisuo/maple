@@ -357,6 +357,63 @@ describe("InvestigationService", () => {
 		}).pipe(Effect.provide(harness.layer))
 	})
 
+	/**
+	 * The daily budget bounds unattended spend. Gating a person on it made the
+	 * Retry button permanently dead once the org was at its ceiling — on a page
+	 * whose failure copy tells the reader to press it — and charged a restart as a
+	 * fresh run even though the usage query counts rows in today's window and the
+	 * row being restarted is already one of them.
+	 */
+	it.effect("lets a person start and retry after the daily budget is spent", () => {
+		const chat = chatSessionHarness()
+		const workflow = fanoutWorkflowHarness()
+		const harness = makeHarness({
+			...chat.env,
+			INVESTIGATION_FANOUT_WORKFLOW: workflow.binding,
+		})
+		return Effect.gen(function* () {
+			const database = yield* Database
+			const service = yield* InvestigationService
+			const now = new Date()
+
+			// Both ceilings set to one, and one investigation already started today —
+			// so runs and passes are each exhausted before the calls below.
+			yield* database.execute((db) =>
+				db.insert(aiTriageSettings).values({
+					orgId: ORG,
+					enabled: true,
+					maxRunsPerDay: 1,
+					maxPassesPerDay: 1,
+					updatedAt: now,
+				}),
+			)
+			yield* database.execute((db) =>
+				db.insert(investigations).values({
+					id: asInvestigationId(randomUUID()),
+					orgId: ORG,
+					subjectJson: freeformRequest("already spent today's budget").subject,
+					status: "investigating",
+					startedAt: now,
+					fanoutSize: 5,
+					autonomousTurns: 6,
+					createdAt: now,
+					updatedAt: now,
+				}),
+			)
+
+			const started = yield* service.createAndStartInvestigation(
+				ORG,
+				null,
+				criticalIncidentRequest("err_over_budget"),
+				{ automatic: false },
+			)
+			assert.strictEqual(started.status, "investigating")
+
+			const restarted = yield* service.restartInvestigation(ORG, started.id)
+			assert.strictEqual(restarted.status, "investigating")
+		}).pipe(Effect.provide(harness.layer))
+	})
+
 	it.effect("hides the previous attempt's lanes and starts a fresh instance on restart", () => {
 		const chat = chatSessionHarness()
 		const workflow = fanoutWorkflowHarness()

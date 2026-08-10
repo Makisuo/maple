@@ -73,7 +73,6 @@ import {
 	getCloudflareZoneDetail,
 	getCloudflareZoneDns,
 	getCloudflareZoneFacets,
-	getCloudflareZoneHosts,
 	getCloudflareZones,
 	getCloudflareZoneSecurity,
 	getCloudflareZoneTimeseries,
@@ -112,6 +111,13 @@ import {
 	getSessionTraceSummaries,
 	listReplays,
 } from "@/api/warehouse/replays"
+import {
+	getWebAnalyticsBreakdowns,
+	getWebAnalyticsPages,
+	getWebAnalyticsPageviews,
+	getWebAnalyticsSummary,
+	getWebAnalyticsTimeseries,
+} from "@/api/warehouse/web-analytics"
 
 /**
  * The error union every warehouse server function fails with: the structured
@@ -130,24 +136,9 @@ class QueryAtomError extends Schema.TaggedError<QueryAtomError>()("@maple/web/se
 	cause: Schema.optionalKey(Schema.Unknown),
 }) {}
 
-// The error union surfaced to atom consumers: the structured query errors plus
-// any tagged backend error, all normalized through `QueryAtomError`'s shape for
-// anything that is not already a known tagged error.
+// Query failures already carry a useful local, v1, or v2 shape. Only cache-key
+// decoding needs an atom-local wrapper.
 export type QueryAtomFailure = QueryError | QueryAtomError
-
-const isTaggedBackendError = (error: QueryError): boolean => error._tag.startsWith("@maple/http/errors/")
-
-const toQueryAtomError = (error: QueryError): QueryAtomFailure => {
-	// Tagged `@maple/http/errors/*` errors are already user-presentable via
-	// `formatBackendError`; pass them through untouched.
-	if (isTaggedBackendError(error)) return error
-	// Remaining: a structured `WarehouseApiError`, all of which carry `message`.
-	const message = "message" in error ? error.message : "Warehouse query atom failed"
-	return new QueryAtomError({
-		message,
-		cause: error,
-	})
-}
 
 function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, options?: QueryAtomOptions) {
 	const UnknownFromJson = Schema.fromJsonString(Schema.Unknown)
@@ -163,8 +154,14 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 		// (memoized) layer; this lifts the parent onto the same tracer.
 		let resultAtom = MapleApiAtomClient.runtime.atom(
 			Schema.decodeUnknownEffect(UnknownFromJson)(orgScopedKeyPayload(key)).pipe(
+				Effect.mapError(
+					(cause) =>
+						new QueryAtomError({
+							message: "Invalid warehouse query cache key",
+							cause,
+						}),
+				),
 				Effect.flatMap((input) => query(input as Input)),
-				Effect.mapError(toQueryAtomError),
 			),
 		)
 
@@ -239,6 +236,29 @@ export const listReplaysResultAtom = makeQueryAtomFamily(listReplays, {
 })
 
 export const replaysFacetsResultAtom = makeQueryAtomFamily(getReplaysFacets, {
+	staleTime: 30_000,
+})
+
+// Web analytics — one page, five atoms, all 30s. Traffic numbers are watched
+// during a launch, so a longer TTL reads as a stalled page; a shorter one just
+// re-runs the same 30-day-TTL scans.
+export const webAnalyticsSummaryResultAtom = makeQueryAtomFamily(getWebAnalyticsSummary, {
+	staleTime: 30_000,
+})
+
+export const webAnalyticsTimeseriesResultAtom = makeQueryAtomFamily(getWebAnalyticsTimeseries, {
+	staleTime: 30_000,
+})
+
+export const webAnalyticsPageviewsResultAtom = makeQueryAtomFamily(getWebAnalyticsPageviews, {
+	staleTime: 30_000,
+})
+
+export const webAnalyticsPagesResultAtom = makeQueryAtomFamily(getWebAnalyticsPages, {
+	staleTime: 30_000,
+})
+
+export const webAnalyticsBreakdownsResultAtom = makeQueryAtomFamily(getWebAnalyticsBreakdowns, {
 	staleTime: 30_000,
 })
 
@@ -418,10 +438,6 @@ export const cloudflareZoneDetailResultAtom = makeQueryAtomFamily(getCloudflareZ
 })
 
 export const cloudflareWorkersResultAtom = makeQueryAtomFamily(getCloudflareWorkers, {
-	staleTime: 30_000,
-})
-
-export const cloudflareZoneHostsResultAtom = makeQueryAtomFamily(getCloudflareZoneHosts, {
 	staleTime: 30_000,
 })
 

@@ -20,10 +20,31 @@ inputs:
         description: Directory holding the bun.lock to install from.
         required: false
         default: "."
+    filters:
+        description: >-
+            Optional space-separated workspace filters. When set, the root `maple`
+            workspace (CI tools) and only these dependency closures are installed.
+            Use only with the root lockfile; nested standalone workspaces should leave
+            this empty.
+        required: false
+        default: ""
 
 runs:
     using: composite
     steps:
-        - run: bun install --frozen-lockfile
+        - env:
+              MAPLE_WORKSPACE_FILTERS: ${{ inputs.filters }}
+          run: |
+              if [[ -z "$MAPLE_WORKSPACE_FILTERS" ]]; then
+                bun install --frozen-lockfile
+                exit 0
+              fi
+
+              read -r -a filters <<< "$MAPLE_WORKSPACE_FILTERS"
+              args=(--filter=maple)
+              for filter in "${filters[@]}"; do
+                args+=(--filter="$filter")
+              done
+              bun install --frozen-lockfile "${args[@]}"
           shell: bash
           working-directory: ${{ inputs.working-directory }}

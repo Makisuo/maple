@@ -188,6 +188,7 @@ Default URL: `http://localhost:3472`
 | `TINYBIRD_HOST`                                                   | yes                   | Placeholder OK when using `CLICKHOUSE_URL`                                                           |
 | `TINYBIRD_TOKEN`                                                  | yes                   | Placeholder OK when using `CLICKHOUSE_URL`                                                           |
 | `TINYBIRD_SIGNING_KEY` / `TINYBIRD_WORKSPACE_ID`                  | with Tinybird raw SQL | Explicit JWT signing configuration; never derived from `TINYBIRD_TOKEN`                              |
+| `TINYBIRD_RAW_SQL_JWT_RPS_LIMIT`                                  | optional              | Positive integer; Tinybird-enforced raw-SQL ceiling with a separate bucket per org                   |
 | `CLICKHOUSE_URL`                                                  | recommended           | `http://localhost:8123` for local ClickHouse stack                                                   |
 | `CLICKHOUSE_PROVIDER`                                             | optional              | `tinybird` (default) or `clickhouse`; set `clickhouse` for env-level vanilla/self-managed ClickHouse |
 | `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_DATABASE` | with CH               | Match docker-compose (`maple` / `maple` / `default`)                                                 |

@@ -6,6 +6,9 @@ import {
 	MAX_RAW_SQL_RESULT_BYTES,
 	WarehouseSchemaDriftError,
 	WarehouseUpstreamError,
+	OrgClickHouseSettingsEncryptionError,
+	OrgClickHouseSettingsPersistenceError,
+	OrgClickHouseSettingsValidationError,
 	OrgId,
 	UserId,
 } from "@maple/domain/http"
@@ -242,6 +245,52 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 			if (captured?.kind !== "clickhouse") throw new Error("expected ClickHouse config")
 			assert.strictEqual(captured.password, "byo-password")
 		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("preserves runtime-config dependency and configuration semantics", () => {
+		const cases = [
+			{
+				source: new OrgClickHouseSettingsPersistenceError({ message: "database unavailable" }),
+				expected: WarehouseUpstreamError,
+			},
+			{
+				source: new OrgClickHouseSettingsEncryptionError({ message: "decrypt failed" }),
+				expected: WarehouseConfigError,
+			},
+			{
+				source: new OrgClickHouseSettingsValidationError({ message: "invalid stored URL" }),
+				expected: WarehouseConfigError,
+			},
+		] as const
+
+		return Effect.forEach(
+			cases,
+			({ source, expected }) => {
+				const configLive = makeConfig({}, false)
+				const envLive = Env.layer.pipe(Layer.provide(configLive))
+				const tokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(envLive))
+				const orgSettingsLive = Layer.succeed(OrgClickHouseSettingsService, {
+					resolveRuntimeConfig: () => Effect.fail(source),
+					invalidateRuntimeConfig: () => Effect.succeed(false),
+				} as unknown as OrgClickHouseSettingsServiceShape)
+				const layer = WarehouseQueryService.layer.pipe(
+					Layer.provide(Layer.mergeAll(envLive, tokenLive, orgSettingsLive)),
+				)
+
+				return Effect.gen(function* () {
+					const exit = yield* WarehouseQueryService.use((service) =>
+						service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
+					).pipe(Effect.exit)
+					const mapped = getError(exit)
+					assert.instanceOf(mapped, expected)
+					assert.strictEqual(
+						(mapped as WarehouseConfigError | WarehouseUpstreamError).cause,
+						source,
+					)
+				}).pipe(Effect.provide(layer))
+			},
+			{ discard: true },
+		)
 	})
 
 	it.effect("maps missing Tinybird signing configuration to WarehouseConfigError", () => {

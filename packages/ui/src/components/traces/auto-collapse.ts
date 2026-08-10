@@ -35,6 +35,33 @@ export function collectAllCollapsibleIds(nodes: SpanNode[]): Set<string> {
 	return ids
 }
 
+/**
+ * Every ancestor of `spanId`, i.e. the set of ids that must be expanded for that
+ * span to be visible in the tree. Empty when the span is a root or is absent.
+ */
+export function collectAncestorIds(nodes: SpanNode[], spanId: string): Set<string> {
+	const nodeById = new Map<string, SpanNode>()
+	const index = (node: SpanNode) => {
+		nodeById.set(node.spanId, node)
+		node.children.forEach(index)
+	}
+	nodes.forEach(index)
+
+	return collectAncestorIdsFromIndex(nodeById, spanId)
+}
+
+function collectAncestorIdsFromIndex(nodeById: Map<string, SpanNode>, spanId: string): Set<string> {
+	const ancestors = new Set<string>()
+	let current = nodeById.get(spanId)
+	while (current?.parentSpanId) {
+		const parent = nodeById.get(current.parentSpanId)
+		if (!parent) break
+		ancestors.add(parent.spanId)
+		current = parent
+	}
+	return ancestors
+}
+
 export interface ComputeDefaultExpandedOptions {
 	/** Keep this span's ancestor chain expanded so it's never hidden by auto-collapse. */
 	keepVisibleSpanId?: string
@@ -84,12 +111,8 @@ export function computeDefaultExpandedSpanIds(
 
 	// Force the selected/deep-linked span's ancestor chain open.
 	if (opts.keepVisibleSpanId) {
-		let current = nodeById.get(opts.keepVisibleSpanId)
-		while (current?.parentSpanId) {
-			const parent = nodeById.get(current.parentSpanId)
-			if (!parent) break
-			expanded.add(parent.spanId)
-			current = parent
+		for (const id of collectAncestorIdsFromIndex(nodeById, opts.keepVisibleSpanId)) {
+			expanded.add(id)
 		}
 	}
 

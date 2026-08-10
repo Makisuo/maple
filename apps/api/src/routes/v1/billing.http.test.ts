@@ -7,8 +7,14 @@ import {
 	CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS,
 	readCustomerCached,
 	responseHasActivePlan,
+	updateCustomerBillingControls,
 } from "@/services/billing/autumn-client"
-import { BillingCustomer } from "@maple/domain/http"
+import {
+	BillingCustomer,
+	UpdateBillingControlsRequest,
+	UpdateBillingSpendLimit,
+	UpdateBillingUsageAlert,
+} from "@maple/domain/http"
 import { decodeInvoices, resolveCycleWindow } from "./billing.http"
 
 const ORG = "org_test_123"
@@ -37,6 +43,87 @@ const activePlanResponse = {
 	subscriptions: [{ planId: "startup", status: "active", trialEndsAt: 9_999_999_999_000, addOn: false }],
 }
 const noPlanResponse = { id: ORG, subscriptions: [] }
+
+describe("updateCustomerBillingControls", () => {
+	it("uses Autumn's canonical customer update route and v2.3 wire shape", async () => {
+		const originalFetch = globalThis.fetch
+		let request: { readonly url: string; readonly init?: RequestInit } | undefined
+		globalThis.fetch = (async (input, init) => {
+			request = { url: String(input), init }
+			return new Response(JSON.stringify({ id: ORG }), { status: 200 })
+		}) as typeof globalThis.fetch
+
+		try {
+			const result = await Effect.runPromise(
+				updateCustomerBillingControls(
+					"am_sk_test",
+					"https://api.useautumn.com/",
+					ORG,
+					new UpdateBillingControlsRequest({
+						spendLimits: [
+							new UpdateBillingSpendLimit({
+								featureId: "logs",
+								enabled: true,
+								limitType: "absolute",
+								overageLimit: 250,
+							}),
+							new UpdateBillingSpendLimit({
+								featureId: "traces",
+								enabled: false,
+							}),
+						],
+						usageAlerts: [
+							new UpdateBillingUsageAlert({
+								featureId: "logs",
+								enabled: true,
+								threshold: 80,
+								thresholdType: "usage_percentage",
+								name: "Maple billing warning",
+							}),
+						],
+					}),
+				),
+			)
+
+			assert.strictEqual(result.statusCode, 200)
+			assert.strictEqual(request?.url, "https://api.useautumn.com/v1/customers.update")
+			assert.strictEqual(request?.init?.method, "POST")
+			assert.deepStrictEqual(request?.init?.headers, {
+				Authorization: "Bearer am_sk_test",
+				"Content-Type": "application/json",
+				"x-api-version": "2.3.0",
+			})
+			assert.deepStrictEqual(JSON.parse(String(request?.init?.body)), {
+				customer_id: ORG,
+				billing_controls: {
+					spend_limits: [
+						{
+							feature_id: "logs",
+							enabled: true,
+							limit_type: "absolute",
+							overage_limit: 250,
+						},
+						{
+							feature_id: "traces",
+							enabled: false,
+						},
+					],
+					usage_alerts: [
+						{
+							feature_id: "logs",
+							enabled: true,
+							threshold: 80,
+							threshold_type: "usage_percentage",
+							name: "Maple billing warning",
+						},
+					],
+				},
+			})
+		} finally {
+			globalThis.fetch = originalFetch
+		}
+	})
+})
 
 describe("readCustomerCached", () => {
 	it.effect("caches a 200 response: 2nd call hits the cache, upstream runs once", () =>

@@ -61,11 +61,28 @@ export class RpcCallError extends Data.TaggedError("@maple/effect-cloudflare/Rpc
 
 class RpcRemoteError extends Data.TaggedError("@maple/effect-cloudflare/RpcRemoteError")<{
 	readonly error: unknown
-}> {}
+}> {
+	override get message() {
+		return remoteErrorMessage(this.error, "Remote RPC call failed")
+	}
+}
 
 export class RpcRemoteStreamError extends Data.TaggedError("@maple/effect-cloudflare/RpcRemoteStreamError")<{
 	readonly error: unknown
-}> {}
+}> {
+	override get message() {
+		return remoteErrorMessage(this.error, "Remote RPC stream failed")
+	}
+}
+
+const remoteErrorMessage = (error: unknown, fallback: string): string => {
+	if (error instanceof Error) return error.message
+	if (typeof error === "object" && error !== null && "message" in error) {
+		const message = error.message
+		if (typeof message === "string") return message
+	}
+	return error === undefined ? fallback : String(error)
+}
 
 export type RpcErrorEnvelope = {
 	_tag: typeof ErrorTag
@@ -78,11 +95,7 @@ export type RpcStreamErrorMarker = {
 }
 
 export const isRpcStreamErrorMarker = (value: unknown): value is RpcStreamErrorMarker =>
-	typeof value === "object" &&
-	value !== null &&
-	"_tag" in value &&
-	value._tag === StreamErrorTag &&
-	"error" in value
+	typeof value === "object" && value !== null && "_tag" in value && value._tag === StreamErrorTag
 
 export const isRpcErrorEnvelope = (value: unknown): value is RpcErrorEnvelope =>
 	typeof value === "object" &&
@@ -359,7 +372,12 @@ const wrapWorkflowStep = (step: any) => ({
 
 const encodeStreamErrorMarker = (cause: Cause.Cause<unknown>): string => {
 	const failReason = cause.reasons.find(Cause.isFailReason)
-	const error = failReason ? encodeRpcError(failReason.error) : undefined
+	const encoded = failReason ? encodeRpcError(failReason.error) : undefined
+	// JSON.stringify omits `undefined` object fields. The decoder deliberately
+	// requires an `error` field to recognize this reserved marker, so a defect or
+	// `Effect.fail(undefined)` used to leak the marker into the success stream.
+	const error =
+		encoded === undefined ? { name: "Error", message: "The remote stream failed unexpectedly." } : encoded
 	return (
 		JSON.stringify({
 			_tag: StreamErrorTag,

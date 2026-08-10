@@ -7,7 +7,7 @@ import {
 	type WhereClauseAutocompleteSuggestion,
 	type WhereClauseAutocompleteValues,
 } from "@/lib/query-builder/where-clause-autocomplete"
-import type { QueryBuilderDataSource } from "@/lib/query-builder/model"
+import type { QueryBuilderDataSource } from "@maple/query-engine/query-builder"
 
 export interface UseWhereClauseAutocompleteOptions {
 	expression: string

@@ -33,6 +33,9 @@ import {
 import { durableJson, durableRename, ensurePrivateDirectory } from "./durable-files"
 import { MAPLE_VERSION } from "../version"
 import { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
+import { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
+import { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
+import { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -46,18 +49,15 @@ import type {
 export {
 	type AnyLocalStoreMigrationModule,
 	type LocalStoreMigration,
-	type LocalStoreMigrationModule,
-	type MigrationDbOptions,
 	type MigrationModuleContext,
-	type MigrationOperation,
 	type MigrationPhase,
 	type MigrationStepJournal,
-	type MigrationStepStatus,
-	type StateDisposition,
-	type StateDispositionEntry,
 } from "./local-store-migration-module"
 
 export { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
+export { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
+export { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
+export { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
 
 const NONTERMINAL_PHASES = new Set<MigrationPhase>([
 	"planned",
@@ -117,7 +117,12 @@ export interface MigrationResult {
 	readonly copiedRows: Readonly<Record<string, number>>
 }
 
-export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> = [legacyToCurrentModule]
+export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> = [
+	legacyToCurrentModule,
+	v1ToV2ErrorRollupModule,
+	v2ToV3ServiceMapIngestBridgeModule,
+	v3ToV4WebEventsModule,
+]
 
 export const validateMigrationRegistry = (
 	registry: ReadonlyArray<AnyLocalStoreMigrationModule>,
@@ -1063,10 +1068,6 @@ const reconcilePromotion = async (dataDir: string, journal: MigrationJournal): P
 	return promoteLocalStoreMigration(dataDir, journal)
 }
 
-/** Filesystem-only promotion recovery seam used by fault-injection tests and
- * by the public coordinator after a process restart. */
-export const reconcileLocalStorePromotion = reconcilePromotion
-
 const moduleForStep = (
 	step: MigrationStepJournal,
 	modules: ReadonlyArray<AnyLocalStoreMigrationModule>,
@@ -1125,6 +1126,7 @@ const makeModuleContext = (
 		openSource: (fn, options = {}) => session.use(sourceDataDir, fn, { ...options, role: "source" }),
 		openTarget: (fn, options = {}) =>
 			session.use(journal.targetDataDir, fn, { ...options, role: "target" }),
+		closeStores: () => session.close(),
 		ensureCapacity: () =>
 			stepIndex === 0 ? ensureMigrationCapacity(dataDir, session) : Promise.resolve(),
 		saveStep: async (update) => {

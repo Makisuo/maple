@@ -8,7 +8,7 @@ import {
 	WorkerEnvironment,
 } from "@maple/effect-cloudflare"
 import { WorkerEntrypoint } from "cloudflare:workers"
-import { Cause, Context, Effect, FileSystem, Layer, ManagedRuntime, Path } from "effect"
+import { Cause, Context, Effect, Exit, FileSystem, Layer, ManagedRuntime, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
@@ -82,7 +82,7 @@ const flushTelemetry = async (env: Record<string, unknown>): Promise<void> => {
 // `telemetry.layer`.
 const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
 
-// The route graph (`./app`) and the D1 layer are imported DYNAMICALLY, not at
+// The route graph (`./app`) and database layer are imported DYNAMICALLY, not at
 // module scope. The static import graph reachable from `./app` eagerly builds
 // hundreds of Effect Schema ASTs (`@maple/domain` + 47 MCP tool schemas) at
 // module-evaluation time. Cloudflare runs only the top-level module scope
@@ -165,15 +165,22 @@ const runInternalRpc = async (
 	ctx: ExecutionContext,
 ) => {
 	const [runtime, rpc] = await Promise.all([getRpcRuntime(env), import("./internal-rpc")])
-	const program =
-		method === "listMcpTools"
-			? rpc.listMcpToolsRpc
-			: method === "callMcpTool"
-				? rpc.callMcpToolRpc(input)
-				: rpc.submitDiagnosisRpc(input)
-	const exit = await runtime.runPromiseExit(program as Effect.Effect<unknown, unknown, never>)
+	let exit: Exit.Exit<unknown, unknown>
+	switch (method) {
+		case "listMcpTools":
+			exit = await runtime.runPromiseExit(rpc.listMcpToolsRpc)
+			break
+		case "callMcpTool":
+			exit = await runtime.runPromiseExit(rpc.callMcpToolRpc(input))
+			break
+		case "submitDiagnosis":
+			exit = await runtime.runPromiseExit(rpc.submitDiagnosisRpc(input))
+			break
+	}
 	ctx.waitUntil(flushTelemetry(env))
 	if (exit._tag === "Success") return exit.value
+	const defect = exit.cause.reasons.find(Cause.isDieReason)
+	if (defect) throw defect.defect
 	const failure = exit.cause.reasons.find(Cause.isFailReason)
 	if (failure) {
 		return {
@@ -181,8 +188,7 @@ const runInternalRpc = async (
 			error: encodeRpcError(failure.error),
 		}
 	}
-	const defect = exit.cause.reasons.find(Cause.isDieReason)
-	throw defect?.defect ?? new Error("RPC method failed with an unexpected cause")
+	throw new Error("RPC method failed with an unexpected cause")
 }
 
 const isMcpPost = (request: Request): boolean => {
@@ -261,8 +267,8 @@ const handle = async (
 
 	if (kv && reqSid) await preloadSession(kv, reqSid)
 
-	const { handler } = await getHandler()
 	try {
+		const { handler } = await getHandler()
 		const response = await handler(forwardRequest, Context.empty() as never)
 		if (kv && isMcp) {
 			const resSid = response.headers.get("mcp-session-id")
@@ -304,7 +310,7 @@ const handle = async (
 			)
 		}
 		ctx.waitUntil(flushTelemetry(env))
-		return new Response(`worker handler error: ${message}`, { status: 504 })
+		return new Response("The API worker is temporarily unavailable.", { status: 504 })
 	}
 }
 
@@ -312,7 +318,6 @@ const handle = async (
 // The class is a thin shell that dynamic-imports its heavy logic inside run(),
 // so this static export keeps module-scope evaluation light (startup-CPU budget).
 export { ClickHouseSchemaApplyWorkflow } from "./workflows/ClickHouseSchemaApplyWorkflow"
-export { AiTriageWorkflow } from "./workflows/AiTriageWorkflow"
 export { InvestigationFanoutWorkflow } from "./workflows/InvestigationFanoutWorkflow"
 // The durable chat transcript. Safe to export at module scope despite the 10021 startup-CPU
 // constraint: `ChatSession` imports only types from `@maple/domain/chat-session`, so it pulls
@@ -356,12 +361,11 @@ const handleQueue = async (
 	}
 }
 
-// Cron handler. Four schedules (see wrangler.jsonc / alchemy.run.ts
+// Cron handler. Three schedules (see wrangler.jsonc / alchemy.run.ts
 // `triggers.crons`), dispatched on `event.cron`:
 //   "0 */12 * * *" — enqueue a periodic VCS sync per installation
 //   "0 * * * *"    — apply scrape-check retention
 //   "0 */6 * * *"  — Slack workspace reconciliation
-//   "5 * * * *"    — evaluate org spend limits
 // Retention is hourly rather than 12-hourly because a busy target can write
 // ~75k check rows a day, so the 10k-row cap binds within a few hours.
 const SCRAPE_RETENTION_CRON = "0 * * * *"
@@ -370,11 +374,6 @@ const SCRAPE_RETENTION_CRON = "0 * * * *"
 // doesn't need to be tight, it only catches a forward call the bot never
 // made (crash, network blip) or installs that predate that wiring.
 const SLACK_RECONCILE_CRON = "0 */6 * * *"
-// Spend-limit evaluation. Hourly is the resolution the billing page promises
-// ("alerts fire before any enforcement") and the ceiling it protects is a
-// monthly one, so a tighter cadence would only add Autumn round-trips. Runs on
-// the same minute as scrape retention but is dispatched by its own cron string.
-const SPEND_LIMIT_CRON = "5 * * * *"
 
 const handleScheduled = async (
 	event: ScheduledController,
@@ -399,19 +398,6 @@ const handleScheduled = async (
 			)
 		} finally {
 			ctx.waitUntil(flushVcsTelemetry(env))
-		}
-		return
-	}
-
-	if (event.cron === SPEND_LIMIT_CRON) {
-		const { buildSpendLimitLayer, runSpendLimitEvaluation, flushSpendLimitTelemetry } =
-			await import("./spend-limit-runtime")
-		try {
-			await runScheduledEffect(buildSpendLimitLayer(env), runSpendLimitEvaluation, ctx, {
-				onInterrupt: "graceful",
-			})
-		} finally {
-			ctx.waitUntil(flushSpendLimitTelemetry(env))
 		}
 		return
 	}

@@ -4,7 +4,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { toEpochMs } from "@maple/ui/lib/time-format"
 
 import { SEVERITY_LABEL } from "@/components/errors/severity-badge"
-import { CheckIcon } from "@/components/icons"
+import { CheckIcon, CircleQuestionIcon, CircleXmarkIcon } from "@/components/icons"
 import { useTickingNow } from "@/hooks/use-ticking-now"
 import { type Elapsed, splitDuration } from "./investigation-display"
 import { ConfidenceMeter } from "./confidence-meter"
@@ -12,9 +12,10 @@ import { lensCopy } from "./lens-catalogue"
 import { type LensRun, hasFanout, lensTally } from "./lens-derive"
 
 /**
- * What the investigation concluded, or how far it has got trying. One card, three
- * shapes — diagnosed, running, failed — because they answer the same question at
- * different stages and swapping between them shouldn't move the page around.
+ * What the investigation concluded, or how far it has got trying. One card, four
+ * shapes — diagnosed, running, inconclusive, failed — because they answer the
+ * same question at different stages and swapping between them shouldn't move the
+ * page around.
  *
  * The left edge is a 3px accent rule, so the card is square on that side: a
  * rounded corner behind a flat bar leaves a sliver of card showing above and
@@ -23,6 +24,14 @@ import { type LensRun, hasFanout, lensTally } from "./lens-derive"
 export function VerdictCard({ investigation }: { investigation: V2Investigation }) {
 	if (investigation.status === "investigating") {
 		return <InvestigatingVerdict investigation={investigation} />
+	}
+	// Before the `failed` check. These are different claims: `inconclusive` means
+	// the run worked and reached "not established", `failed` means the machinery
+	// broke. Rendering the first as the second is what put a raw
+	// `validation_inconclusive: …` string in a destructive box on top of a run
+	// that had ruled things out perfectly well.
+	if (investigation.status === "inconclusive") {
+		return <InconclusiveVerdict investigation={investigation} />
 	}
 	if (investigation.status === "failed") {
 		return <FailedVerdict investigation={investigation} />
@@ -361,6 +370,176 @@ function FailedVerdict({ investigation }: { investigation: V2Investigation }) {
 			) : null}
 			{fanned ? <LensLanes lenses={lenses} validator={validator} /> : null}
 		</VerdictShell>
+	)
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Inconclusive
+ * -----------------------------------------------------------------------------------------------*/
+
+/** Above this the lists collapse; the rest is one click away on the Hypotheses tab. */
+const PARTIAL_VISIBLE_MAX = 5
+
+/**
+ * A run that reached "not established", published as a result rather than as an
+ * error.
+ *
+ * The editorial call that matters most is the h2: the page still leads with a
+ * *sentence about the incident* — the strongest remaining lead — rather than
+ * with "we could not tell". Someone opening this has an open incident, and what
+ * they need first is the lead and then the list of things no longer worth their
+ * time. The failed card's raw `reason` box is deliberately absent: `error` is
+ * null on these rows now, and the payload that replaced it is `ruledOut` /
+ * `unchecked`.
+ */
+function InconclusiveVerdict({ investigation }: { investigation: V2Investigation }) {
+	const lenses = investigation.lens_runs
+	const tally = lensTally(lenses)
+	const validator = investigation.validator
+	const fanned = hasFanout(investigation)
+	const report = investigation.report
+	// From `started_at` for the same reason the failed card is: a restart
+	// re-stamps it, and measuring from `created_at` reports a 20-day-old
+	// investigation as a 480-hour run.
+	const ranFor = elapsedBetween(
+		investigation.started_at ?? investigation.created_at,
+		investigation.updated_at,
+	)
+	const ruledOut = report?.ruledOut ?? []
+	const unchecked = report?.unchecked ?? []
+	// Legacy rows backfilled to `inconclusive` have no report at all. The
+	// validator's note is the only sentence they carry.
+	const headline =
+		report?.suspectedCause ??
+		validator?.note ??
+		"No cause was established, and this run recorded no partial."
+
+	return (
+		<VerdictShell
+			// Warn, never destructive. Nothing broke — and the accent is the first
+			// thing read, so it sets whether the whole card is a result or a defect.
+			accent="bg-severity-warn"
+			stats={
+				<>
+					<Stat label="Ran for">
+						{ranFor ? (
+							<BigStat value={ranFor.value} unit={ranFor.unit} />
+						) : (
+							<span className="text-muted-foreground">—</span>
+						)}
+					</Stat>
+					{fanned ? (
+						<Stat label="Lenses reported">
+							<span className="text-foreground tabular-nums">
+								{tally.reported} of {tally.total}
+							</span>
+						</Stat>
+					) : null}
+					{/* Replaces the failed card's "Validation: Rejected all", which said
+					    the same thing in a way that sounded like a defect. What was
+					    eliminated is the run's actual output, so it gets the stat. */}
+					<Stat label="Ruled out">
+						<span className="text-foreground tabular-nums">{ruledOut.length}</span>
+					</Stat>
+					<Stat label="Confidence" last>
+						{/* A low-confidence lead is a real thing and the meter is the
+						    component that says so. The word "None" would claim the run
+						    produced nothing, which is the framing being removed. */}
+						{report ? (
+							<ConfidenceMeter confidence="low" />
+						) : (
+							<span className="text-muted-foreground">—</span>
+						)}
+					</Stat>
+				</>
+			}
+		>
+			<Eyebrow tone="text-severity-warn">
+				Partial result
+				<span aria-hidden className="text-muted-foreground/40">
+					·
+				</span>
+				<span>Nothing promoted</span>
+				{fanned ? (
+					<>
+						<span aria-hidden className="text-muted-foreground/40">
+							·
+						</span>
+						<span className="normal-case tracking-normal text-muted-foreground">
+							{tally.reported} of {tally.total} lenses reported
+						</span>
+					</>
+				) : null}
+			</Eyebrow>
+			<h2 className="font-display text-xl font-semibold leading-7 tracking-[-0.01em] text-foreground">
+				{headline}
+			</h2>
+			{report ? <p className="text-sm leading-6 text-muted-foreground">{report.summary}</p> : null}
+
+			{/* Two columns above `lg`, stacked below — the shell's own breakpoint, so
+			    the lists reflow with the stat rail rather than against it. */}
+			{ruledOut.length > 0 || unchecked.length > 0 ? (
+				<div className="mt-1 grid gap-x-8 gap-y-5 lg:grid-cols-2">
+					<PartialList
+						label="Ruled out"
+						items={ruledOut}
+						icon={
+							<CircleXmarkIcon size={13} className="mt-0.5 shrink-0 text-muted-foreground/70" />
+						}
+						// Not struck through. These are conclusions the run reached, which
+						// is the opposite of the dead lanes the failed card strikes out.
+						tone="text-foreground"
+					/>
+					<PartialList
+						label="Could not check"
+						items={unchecked}
+						icon={
+							<CircleQuestionIcon
+								size={13}
+								className="mt-0.5 shrink-0 text-muted-foreground/70"
+							/>
+						}
+						tone="text-muted-foreground"
+					/>
+				</div>
+			) : null}
+
+			{fanned ? <LensLanes lenses={lenses} validator={validator} /> : null}
+		</VerdictShell>
+	)
+}
+
+function PartialList({
+	label,
+	items,
+	icon,
+	tone,
+}: {
+	label: string
+	items: ReadonlyArray<string>
+	icon: ReactNode
+	tone: string
+}) {
+	if (items.length === 0) return null
+	const visible = items.slice(0, PARTIAL_VISIBLE_MAX)
+	const hidden = items.length - visible.length
+	return (
+		<div className="flex min-w-0 flex-col gap-2">
+			<span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+				{label}
+			</span>
+			<ul className="flex flex-col gap-1.5">
+				{visible.map((item) => (
+					<li key={item} className={cn("flex gap-2 text-sm leading-6", tone)}>
+						{icon}
+						<span className="min-w-0">{item}</span>
+					</li>
+				))}
+			</ul>
+			{hidden > 0 ? (
+				<span className="text-xs text-muted-foreground">+{hidden} more on the Hypotheses tab</span>
+			) : null}
+		</div>
 	)
 }
 

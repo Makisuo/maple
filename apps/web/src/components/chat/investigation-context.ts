@@ -1,5 +1,4 @@
-import { Option, Schema } from "effect"
-import { fromBase64Url } from "@/lib/base64url"
+import { Schema } from "effect"
 import { narrowAlertSignal } from "@/components/ai-triage/breach"
 import { signalLabel, type AlertContext } from "./alert-context"
 
@@ -52,32 +51,6 @@ export interface InvestigationContext {
 	/** Prior AI-triage findings, folded into the preamble so the agent builds on them. */
 	aiSummary?: string
 	aiSuspectedCause?: string
-}
-
-/** Minimal identity carried in the `/investigations/$id?r=` param — the attached resource. */
-export interface InvestigationRef {
-	kind: InvestigationKind
-	id: string
-	issueId?: string
-}
-
-/** The compact base64url wire shape carried in `/investigations/$id?r=`. */
-const InvestigationRefWireSchema = Schema.Struct({
-	k: InvestigationKindSchema,
-	id: Schema.String,
-	i: Schema.optionalKey(Schema.String),
-})
-const decodeRefWire = Schema.decodeUnknownOption(InvestigationRefWireSchema)
-
-export const decodeInvestigationRef = (raw: string): InvestigationRef | undefined => {
-	try {
-		return Option.match(decodeRefWire(JSON.parse(fromBase64Url(raw))), {
-			onNone: () => undefined,
-			onSome: (w) => ({ kind: w.k, id: w.id, ...(w.i !== undefined ? { issueId: w.i } : {}) }),
-		})
-	} catch {
-		return undefined
-	}
 }
 
 /** Stable chat tab id. Alerts keep their legacy `alert-…` id so notification threads continue. */

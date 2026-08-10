@@ -15,6 +15,8 @@ import {
 import { migration_0010_search_indexes } from "./0010_search_indexes"
 import { migration_0011_session_analytics_columns } from "./0011_session_analytics_columns"
 import { migration_0012_session_event_attribute_keys } from "./0012_session_event_attribute_keys"
+import { migration_0013_service_map_ingest_bridge } from "./0013_service_map_ingest_bridge"
+import { migration_0014_web_events, webEventsBackfill } from "./0014_web_events"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -29,12 +31,77 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
-		expect(migrations.at(-1)).toBe(migration_0012_session_event_attribute_keys)
-		expect(latestMigrationVersion).toBe(12)
-		// 0010 is performance-only, so the ingest-gating version skips it: 9 → 12.
-		expect(clickHouseSchemaVersion).toBe("12")
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
+		expect(migrations.at(-1)).toBe(migration_0014_web_events)
+		expect(latestMigrationVersion).toBe(14)
+		// 0010 and 0014 are performance-only, so the ingest-gating version skips
+		// both and stays at 13 — nothing writes `web_events` directly, and bumping
+		// it would un-ready every BYO-CH org's ingest routing for a read-path change.
+		expect(clickHouseSchemaVersion).toBe("13")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
+		expect(migration_0014_web_events.requiredForIngest).toBe(false)
+	})
+
+	it("installs web_events with a live-write MV and no POPULATE", () => {
+		const sql = migration_0014_web_events.statements.filter((stmt) => !isBackfill(stmt)).join("\n")
+
+		// Time-first sorting key is the entire point of the table: session_events
+		// is sorted (OrgId, SessionId, Timestamp, Seq), so a time range there can
+		// only prune partitions.
+		expect(sql).toContain("ORDER BY (OrgId, Timestamp, SessionId, Seq)")
+		expect(sql).toContain("INDEX idx_event_name EventName TYPE set(64) GRANULARITY 4")
+		expect(sql).toContain("CREATE MATERIALIZED VIEW IF NOT EXISTS web_events_mv TO web_events")
+		expect(sql).toContain("WHERE Type IN ('navigation', 'custom')")
+
+		// POPULATE would race the view's own writes into a table with no dedup, and
+		// it is unchunked — history comes from `webEventsBackfill` instead, which
+		// the apply plan splits into day-aligned steps and which runs while no
+		// writer is attached.
+		expect(sql).not.toContain("POPULATE")
+
+		// `Kind` carries the source `Type` through untouched so the page-view
+		// predicate stays provably identical to the pre-rollup `Type = 'navigation'`
+		// even when a customer calls `track('$pageview')`.
+		expect(sql).toContain("Type AS Kind")
+	})
+
+	it("orders the web_events backfill so it can never overlap the materialized view", () => {
+		// The whole double-count hazard is an ordering property, and nothing else
+		// checks it. web_events has no dedup, so a backfill running while the view
+		// is attached counts every page view in the overlap twice.
+		const kinds = migration_0014_web_events.statements.map((stmt) =>
+			isBackfill(stmt)
+				? "backfill"
+				: String(stmt).includes("CREATE MATERIALIZED VIEW")
+					? "create-view"
+					: String(stmt).includes("DROP VIEW")
+						? "drop-view"
+						: String(stmt).includes("TRUNCATE")
+							? "truncate"
+							: "create-table",
+		)
+		expect(kinds).toEqual(["drop-view", "create-table", "truncate", "backfill", "create-view"])
+
+		// Restated as the invariant rather than the sequence, so a future insertion
+		// between them still has to preserve it.
+		expect(kinds.indexOf("backfill")).toBeLessThan(kinds.indexOf("create-view"))
+		expect(kinds.indexOf("drop-view")).toBeLessThan(kinds.indexOf("truncate"))
+		expect(kinds.indexOf("truncate")).toBeLessThan(kinds.indexOf("backfill"))
+	})
+
+	it("keeps the web_events backfill projection identical to its materialized view", () => {
+		// Two divergent copies of this SELECT would show up as a page-view count
+		// that steps at the backfill boundary — on a table with no dedup, nothing
+		// else would catch it.
+		const mvBody = migration_0014_web_events.statements.find((s) =>
+			String(s).includes("CREATE MATERIALIZED VIEW"),
+		)
+		expect(String(mvBody)).toContain(webEventsBackfill.select)
+		expect(webEventsBackfill.where).toBe("Type IN ('navigation', 'custom')")
+		expect(webEventsBackfill.from).toBe("session_events")
+		expect(webEventsBackfill.tsColumn).toBe("Timestamp")
+		// Row-wise: no GROUP BY means no group can straddle a chunk boundary.
+		expect(webEventsBackfill.groupBy).toBeUndefined()
 	})
 
 	it("adds session analytics columns with defaults so older SDK rows never quarantine", () => {
@@ -70,6 +137,39 @@ describe("ClickHouse migrations", () => {
 			"ALTER TABLE session_events MODIFY COLUMN Attributes Map(String, String)",
 		])
 		expect(migrations.find((m) => m.version === 12)?.requiredForIngest).toBeUndefined()
+	})
+
+	it("routes service-map rollup writes through a zero-retention plain-schema bridge", () => {
+		const ingressTable = migration_0013_service_map_ingest_bridge.statements.find((statement) =>
+			statement.startsWith("CREATE TABLE IF NOT EXISTS service_map_edges_hourly_ingest"),
+		)
+		const ingressView = migration_0013_service_map_ingest_bridge.statements.find((statement) =>
+			statement.startsWith("CREATE MATERIALIZED VIEW IF NOT EXISTS service_map_edges_hourly_ingest_mv"),
+		)
+
+		expect(ingressTable).toContain("ENGINE = Null")
+		expect(ingressTable).toContain("CallCount UInt64")
+		expect(ingressTable).not.toContain("AggregateFunction(")
+		expect(ingressView).toContain("TO service_map_edges_hourly")
+		expect(renderStatementFull(ingressView!, "maple")).toContain(
+			"FROM `maple`.`service_map_edges_hourly_ingest`",
+		)
+		expect(migrations.find((m) => m.version === 13)?.requiredForIngest).toBeUndefined()
+	})
+
+	it("adds the incremental minutely error rollup without replacing the deployed time-copy view", () => {
+		const sql = migration_0013_service_map_ingest_bridge.statements.join("\n\n")
+		const minutelyView = migration_0013_service_map_ingest_bridge.statements.find((statement) =>
+			statement.startsWith("CREATE MATERIALIZED VIEW IF NOT EXISTS error_fingerprints_minutely_mv"),
+		)
+
+		expect(sql).toContain("CREATE TABLE IF NOT EXISTS error_fingerprints_minutely")
+		expect(sql).toContain("PARTITION BY toYYYYMM(Minute)")
+		expect(sql).toContain("ORDER BY (OrgId, Minute, FingerprintHash)")
+		expect(minutelyView).toContain("FROM error_events")
+		expect(renderStatementFull(minutelyView!, "maple")).toContain("FROM `maple`.`error_events`")
+		expect(sql).not.toContain("DROP TABLE IF EXISTS error_events_by_time_mv")
+		expect(sql).not.toContain("DROP VIEW IF EXISTS error_events_by_time_mv")
 	})
 
 	it("adds the portable search substrate without requiring experimental text indexes", () => {

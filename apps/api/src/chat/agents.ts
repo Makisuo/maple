@@ -52,8 +52,14 @@ export interface AgentDefinition {
  * more steps mostly bought more ways to say no. A lane now arrives with a named
  * claim, a confirmed evidence source and an established interval, so the extra
  * steps go into testing it rather than into finding something to test.
+ *
+ * Raised again to 10 alongside the evidence floor in the lane prompt. Production
+ * lanes were stopping at four to six steps and about thirteen seconds against a
+ * six-minute budget — not because they ran out of room, but because nothing told
+ * them that thin was unacceptable. The prompt is what changes that; this only
+ * makes sure the ceiling is not what stops them once it does.
  */
-export const HYPOTHESIS_MAX_STEPS = 8
+export const HYPOTHESIS_MAX_STEPS = 10
 
 /**
  * The agent that tests one hypothesis.

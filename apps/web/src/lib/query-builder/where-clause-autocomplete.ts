@@ -2,7 +2,7 @@ import {
 	QUERY_BUILDER_METRIC_TYPES,
 	type QueryBuilderDataSource,
 	type QueryBuilderMetricType,
-} from "@/lib/query-builder/model"
+} from "@maple/query-engine/query-builder"
 import { type Operator, normalizeKey as sharedNormalizeKey } from "@maple/domain/where-clause"
 
 type WhereClauseAutocompleteContext = "key" | "operator" | "value" | "conjunction"

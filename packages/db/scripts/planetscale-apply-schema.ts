@@ -34,10 +34,8 @@ await withBranchConnection(branch as string, async (connectionUrl) => {
 	// OWNER privileges only and a table-rebuild migration DROPs grants outright,
 	// so without this the ingest gateway — the one consumer that reads through
 	// PUBLIC rather than by inheriting `postgres` — hits "permission denied for
-	// table …" on anything the migration creates. That is the 2026-07-29 outage:
-	// `org_spend_limits` landed owner-only, the gateway's startup probe joins it,
-	// the probe failed, the process exited, Railway burned its 5 restart retries,
-	// and ingest was down 21.7h for every org.
+	// table …" on anything the migration creates. A missing runtime grant makes
+	// the gateway's startup probe fail and the process exit before serving traffic.
 	await ensureRuntimePrivileges(connectionUrl)
 
 	console.log(`\n→ Applying schema to ${resolveDatabase()}/${branch} via drizzle-kit migrate\n`)

@@ -25,10 +25,8 @@ export function isActivePlanSubscription(sub: PlanGatingSubscription | null | un
 // ---------------------------------------------------------------------------
 // Cycle pricing
 //
-// One definition of "what does this cycle cost so far", in cents, shared by the
-// billing page's spend chart and the API's spend-limit evaluator. The two must
-// agree exactly: a chart that says $199 while the evaluator pauses ingestion at
-// its $200 limit is worse than either being wrong alone.
+// One definition of "what does this cycle cost so far", in cents, used by the
+// billing page's spend chart and invoice estimates.
 //
 // Cents throughout. Rates are per-unit dollars in the Autumn catalog (e.g.
 // $0.30/GB, $0.002/session), so the multiply happens in cents and rounds once,

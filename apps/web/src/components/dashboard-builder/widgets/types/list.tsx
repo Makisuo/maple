@@ -9,7 +9,7 @@ import {
 import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
 import { listPresets } from "@/components/dashboard-builder/widgets/widget-definitions"
 import type { WidgetTypeDefinition } from "@/components/dashboard-builder/widgets/widget-type-registry"
-import { createQueryDraft, type QueryBuilderQueryDraft } from "@/lib/query-builder/model"
+import { createQueryDraft, type QueryBuilderQueryDraft } from "@maple/query-engine/query-builder"
 import { buildListEndpointParams, parsePositiveNumber } from "@/lib/query-builder/widget-builder-shared"
 import { rowsPresetPreview } from "@/components/dashboard-builder/widgets/types/preset-preview"
 

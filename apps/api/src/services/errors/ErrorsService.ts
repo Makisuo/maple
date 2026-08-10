@@ -59,6 +59,8 @@ import {
 	type ActorRow,
 	errorIncidents,
 	type ErrorIncidentRow,
+	errorNotificationDeliveries,
+	type ErrorNotificationDeliveryRow,
 	errorIssues,
 	errorIssueEvents,
 	type ErrorIssueEventInsert,
@@ -69,6 +71,7 @@ import {
 	errorIssueStates,
 	errorNotificationPolicies,
 	type ErrorNotificationPolicyRow,
+	errorTickStates,
 	issueEscalationPolicies,
 	type IssueEscalationPolicyRow,
 	type IssueEscalationRow,
@@ -76,7 +79,7 @@ import {
 	orgClickHouseSettings,
 	orgIngestKeys,
 } from "@maple/db"
-import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm"
 import {
 	CH,
 	parseWarehouseDateTime,
@@ -85,20 +88,19 @@ import {
 } from "@maple/query-engine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
-import {
-	INVESTIGATION_FANOUT_BINDING,
-	maybeEnqueueTriage,
-} from "@/services/errors/ai-triage-enqueue"
+import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
+import { isErrorTickClaimLost, persistErrorTickWindow } from "@/services/errors/error-tick-persistence"
 import { escalationDedupeKey, escalationReasonFor } from "@/services/errors/issue-severity"
 import { SYSTEM_ERRORS_AGENT_NAME, isReservedAgentName } from "@/services/auth/system-actors"
 import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
+import { isRetryablePostgresContention } from "@/platform/postgres-errors"
 import { selectDistinctOrgIds } from "@/platform/distinct-org-ids"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
-import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
+import { NotificationDispatcher, type NotificationRequest } from "@/services/alerts/NotificationDispatcher"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/cache"
 import {
@@ -125,6 +127,18 @@ const decodeSpanIdSync = Schema.decodeUnknownSync(SpanIdSchema)
 // to an empty/null value at each call site — stored blobs are best-effort.
 const decodeStoredJsonRecord = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))
 const decodeStoredJsonArray = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown))
+const ErrorNotificationOutboxPayload = Schema.Struct({
+	kind: Schema.Literals(["open", "resolve"]),
+	issueId: Schema.String,
+	incidentId: Schema.String,
+	serviceName: Schema.String,
+	exceptionType: Schema.String,
+	severity: Schema.Literals(["warning", "critical"]),
+	threshold: Schema.Number,
+	count: Schema.Number,
+})
+type ErrorNotificationOutboxPayload = Schema.Schema.Type<typeof ErrorNotificationOutboxPayload>
+const decodeErrorNotificationOutboxPayload = Schema.decodeUnknownOption(ErrorNotificationOutboxPayload)
 
 const DEFAULT_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000
 /** Fallback fingerprint-scan window for the issue list's env filter when the
@@ -132,9 +146,30 @@ const DEFAULT_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000
 const ENV_FINGERPRINT_DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 const DEFAULT_EVENTS_LIMIT = 100
 const AUTO_RESOLVE_MINUTES = 30
-const TICK_WINDOW_MS = 2 * 60_000
-/** Active-org discovery window — a superset of the 2-min scan window so an org
- *  with recent (but not last-2-min) errors still gets scanned, with slack for
+const TICK_MINUTE_MS = 60_000
+/** Wait one full minute beyond bucket close so ordinary OTLP/exporter lag lands
+ * before the event-time cursor makes the bucket immutable. */
+const TICK_INGESTION_LAG_MS = TICK_MINUTE_MS
+const TICK_BOOTSTRAP_WINDOW_MS = 2 * TICK_MINUTE_MS
+/** Bound one warehouse query without dropping backlog: a lagging cursor advances
+ * by at most this much per cron and continues catching up on later invocations.
+ * Five minutes recovers a one-hour outage in ~12 crons while keeping the widest
+ * possible apply at ~5x steady state, so a backlog can never grow a window the
+ * transaction cannot commit inside its lease. */
+const TICK_MAX_WINDOW_MS = 5 * TICK_MINUTE_MS
+/** Time alone does not bound work: fingerprint cardinality can explode inside a
+ * single minute (a UUID leaking into an exception message). Above this many
+ * fingerprints the window is halved and rescanned before anything is applied. */
+const TICK_MAX_WINDOW_ROWS = 20_000
+/** Halving floor. The rollup is minute-grain, so a one-minute window is
+ * indivisible — below that, splitting cannot shed rows. */
+const TICK_MAX_WINDOW_SPLITS = 4
+const TICK_CLAIM_TTL_MS = 5 * TICK_MINUTE_MS
+const NOTIFICATION_CLAIM_TTL_MS = 30_000
+const NOTIFICATION_OUTBOX_BATCH_SIZE = 100
+const NOTIFICATION_MAX_ATTEMPTS = 5
+/** Active-org discovery window — a superset of the bootstrap scan window so an org
+ *  with recent errors still gets scanned, with slack for
  *  cron jitter and MV write lag. */
 const ERROR_ACTIVE_DISCOVERY_WINDOW_MS = 15 * 60_000
 // Last-known active-org set, cached so a discovery failure can fail CLOSED
@@ -150,16 +185,14 @@ const RESOLVED_RETENTION_DAYS = 14
 const ARCHIVED_RETENTION_DAYS = 90
 /**
  * Retention runs one tick an hour. The phase is bucketed on the CRON period,
- * not on `TICK_WINDOW_MS`: the alerting cron fires every minute while the scan
- * window is two minutes wide, so bucketing on the window put two consecutive
- * ticks in the same bucket and ran retention twice an hour for every org.
+ * not on the evaluator's catch-up window: the alerting cron fires every minute,
+ * so lifecycle work is bucketed on that one-minute cadence.
  */
 const RETENTION_PHASE_PERIOD_MS = 60_000
 const RETENTION_PHASE_EVERY_N_TICKS = 60
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 const SYSTEM_AGENT_NAME = SYSTEM_ERRORS_AGENT_NAME
-const D1_INARRAY_CHUNK_SIZE = 90
 const ACTIONABLE_WORKFLOW_STATES: ReadonlyArray<WorkflowState> = [
 	"triage",
 	"todo",
@@ -216,40 +249,7 @@ export const makePersistenceError = (error: unknown): ErrorPersistenceError => {
 	return new ErrorPersistenceError(baseFor("Error persistence failure", error))
 }
 
-// Concurrent ticks against D1 (file-locked SQLite under the hood) occasionally surface
-// busy/locked errors, and Postgres surfaces the same contention as SQLSTATE 40001
-// (serialization_failure) / 40P01 (deadlock_detected). They're harmless to retry — the
-// next attempt usually succeeds in ms. Only this predicate's match retries; anything
-// else fails fast.
-const BUSY_ERROR_PATTERN = /SQLITE_BUSY|database is locked|D1_BUSY|busy|40001|40P01/i
-
-/** Retryable Postgres contention SQLSTATEs (postgres.js errors carry them on `.code`). */
-const PG_CONTENTION_CODES: ReadonlySet<string> = new Set(["40001", "40P01"])
-
-const causeMessage = (cause: unknown): string | undefined => {
-	if (cause instanceof Error) return cause.message
-	if (typeof cause === "string") return cause
-	return undefined
-}
-
-const causeCode = (cause: unknown): string | undefined => {
-	if (typeof cause === "object" && cause !== null && "code" in cause) {
-		const code = (cause as { code?: unknown }).code
-		if (typeof code === "string") return code
-	}
-	return undefined
-}
-
-export const isBusyDatabaseError = (error: DatabaseError): boolean => {
-	if (BUSY_ERROR_PATTERN.test(error.message)) return true
-	const code = causeCode(error.cause)
-	if (code !== undefined && PG_CONTENTION_CODES.has(code)) return true
-	const inner = causeMessage(error.cause)
-	if (inner && BUSY_ERROR_PATTERN.test(inner)) return true
-	return false
-}
-
-const BUSY_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
+const CONTENTION_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
 
 export interface ErrorsServiceShape {
 	readonly listIssues: (
@@ -489,8 +489,8 @@ const make: Effect.Effect<
 	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 		database.execute(fn).pipe(
 			Effect.retry({
-				schedule: BUSY_RETRY_SCHEDULE,
-				while: isBusyDatabaseError,
+				schedule: CONTENTION_RETRY_SCHEDULE,
+				while: isRetryablePostgresContention,
 			}),
 			Effect.tapError((error) =>
 				Effect.gen(function* () {
@@ -870,19 +870,15 @@ const make: Effect.Effect<
 	const collectActorDocs = (orgId: OrgId, actorIds: ReadonlyArray<ActorId | null>) => {
 		const filtered = Array.from(new Set(actorIds.filter((v): v is ActorId => v != null)))
 		if (filtered.length === 0) return Effect.succeed(new Map<ActorId, ActorDocument>())
-		return Effect.forEach(Arr.chunksOf(filtered, D1_INARRAY_CHUNK_SIZE), (chunk) =>
-			dbExecute((db) =>
-				db
-					.select()
-					.from(actors)
-					.where(and(eq(actors.orgId, orgId), inArray(actors.id, chunk))),
-			),
+		return dbExecute((db) =>
+			db
+				.select()
+				.from(actors)
+				.where(and(eq(actors.orgId, orgId), inArray(actors.id, filtered))),
 		).pipe(
-			Effect.map((groups) => {
+			Effect.map((rows) => {
 				const map = new Map<ActorId, ActorDocument>()
-				for (const rows of groups) {
-					for (const row of rows) map.set(row.id, rowToActor(row))
-				}
+				for (const row of rows) map.set(row.id, rowToActor(row))
 				return map
 			}),
 		)
@@ -988,44 +984,38 @@ const make: Effect.Effect<
 		// Two sources of "open incident": error_incidents for fingerprint
 		// issues, and open alert_incidents linked via errorIssueId for
 		// alert-backed issues. An issue id only ever appears in one of them.
-		return Effect.forEach(Arr.chunksOf(issueIds, D1_INARRAY_CHUNK_SIZE), (chunk) =>
-			Effect.all([
-				dbExecute((db) =>
-					db
-						.select({ issueId: errorIncidents.issueId })
-						.from(errorIncidents)
-						.where(
-							and(
-								eq(errorIncidents.orgId, orgId),
-								eq(errorIncidents.status, "open"),
-								inArray(errorIncidents.issueId, chunk),
-							),
+		return Effect.all([
+			dbExecute((db) =>
+				db
+					.select({ issueId: errorIncidents.issueId })
+					.from(errorIncidents)
+					.where(
+						and(
+							eq(errorIncidents.orgId, orgId),
+							eq(errorIncidents.status, "open"),
+							inArray(errorIncidents.issueId, issueIds),
 						),
-				),
-				dbExecute((db) =>
-					db
-						.select({ issueId: alertIncidents.errorIssueId })
-						.from(alertIncidents)
-						.where(
-							and(
-								eq(alertIncidents.orgId, orgId),
-								eq(alertIncidents.status, "open"),
-								inArray(alertIncidents.errorIssueId, chunk),
-							),
-						),
-				),
-			]),
-		).pipe(
-			Effect.map(
-				(groups) =>
-					new Set(
-						groups.flatMap(([errorRows, alertRows]) => [
-							...errorRows.map((r) => r.issueId),
-							...alertRows.flatMap((r) =>
-								r.issueId == null ? [] : [r.issueId as ErrorIssueId],
-							),
-						]),
 					),
+			),
+			dbExecute((db) =>
+				db
+					.select({ issueId: alertIncidents.errorIssueId })
+					.from(alertIncidents)
+					.where(
+						and(
+							eq(alertIncidents.orgId, orgId),
+							eq(alertIncidents.status, "open"),
+							inArray(alertIncidents.errorIssueId, issueIds),
+						),
+					),
+			),
+		]).pipe(
+			Effect.map(
+				([errorRows, alertRows]) =>
+					new Set([
+						...errorRows.map((r) => r.issueId),
+						...alertRows.flatMap((r) => (r.issueId == null ? [] : [r.issueId as ErrorIssueId])),
+					]),
 			),
 		)
 	}
@@ -2126,22 +2116,18 @@ const make: Effect.Effect<
 			// "skipped" escalation with reason no_enabled_destinations.
 			const referencedIds = Array.from(new Set(request.rules.flatMap((rule) => rule.destinationIds)))
 			if (referencedIds.length > 0) {
-				const ownedRows = yield* Effect.forEach(
-					Arr.chunksOf(referencedIds, D1_INARRAY_CHUNK_SIZE),
-					(chunk) =>
-						dbExecute((db) =>
-							db
-								.select({ id: alertDestinations.id })
-								.from(alertDestinations)
-								.where(
-									and(
-										eq(alertDestinations.orgId, orgId),
-										inArray(alertDestinations.id, chunk),
-									),
-								),
+				const ownedRows = yield* dbExecute((db) =>
+					db
+						.select({ id: alertDestinations.id })
+						.from(alertDestinations)
+						.where(
+							and(
+								eq(alertDestinations.orgId, orgId),
+								inArray(alertDestinations.id, referencedIds),
+							),
 						),
 				)
-				const owned = new Set(ownedRows.flatMap((rows) => rows.map((r) => r.id)))
+				const owned = new Set(ownedRows.map((row) => row.id))
 				const unknown = referencedIds.filter((id) => !owned.has(id))
 				if (unknown.length > 0) {
 					return yield* Effect.fail(
@@ -2270,87 +2256,6 @@ const make: Effect.Effect<
 	const issueLinkUrl = (issueId: string) =>
 		`${env.MAPLE_APP_BASE_URL}/errors/issues/${encodeURIComponent(issueId)}`
 
-	const notifyIncidentOpened = (
-		orgId: OrgId,
-		policy: ErrorNotificationPolicyRow,
-		params: {
-			readonly issueId: string
-			readonly incidentId: string
-			readonly reason: ErrorIncidentReason
-			readonly serviceName: string
-			readonly exceptionType: string
-			readonly count: number
-		},
-	) => {
-		if (!policy.enabled) return Effect.void
-		if (params.count < policy.minOccurrenceCount) return Effect.void
-		if (params.reason === "first_seen" && !policy.notifyOnFirstSeen) return Effect.void
-		if (params.reason === "regression" && !policy.notifyOnRegression) return Effect.void
-
-		const destinationIds = parsePolicyDestinations(policy.destinationIdsJson)
-		if (destinationIds.length === 0) return Effect.void
-
-		return dispatcher
-			.dispatch(orgId, destinationIds, {
-				deliveryKey: `err:${orgId}:${params.incidentId}:open`,
-				ruleId: params.issueId,
-				ruleName: `${params.exceptionType} in ${params.serviceName}`,
-				groupKey: params.serviceName,
-				signalType: "error_rate",
-				severity: policy.severity,
-				comparator: "gte",
-				threshold: policy.minOccurrenceCount,
-				eventType: "trigger",
-				incidentId: params.incidentId,
-				incidentStatus: "open",
-				dedupeKey: `error:${orgId}:${params.issueId}`,
-				windowMinutes: 2,
-				value: params.count,
-				sampleCount: params.count,
-				linkUrl: issueLinkUrl(params.issueId),
-			})
-			.pipe(Effect.asVoid)
-	}
-
-	const notifyIncidentResolved = (
-		orgId: OrgId,
-		policy: ErrorNotificationPolicyRow,
-		params: {
-			readonly issueId: string
-			readonly incidentId: string
-			readonly serviceName: string
-			readonly exceptionType: string
-			readonly occurrenceCount: number
-		},
-	) => {
-		if (!policy.enabled) return Effect.void
-		if (!policy.notifyOnResolve) return Effect.void
-
-		const destinationIds = parsePolicyDestinations(policy.destinationIdsJson)
-		if (destinationIds.length === 0) return Effect.void
-
-		return dispatcher
-			.dispatch(orgId, destinationIds, {
-				deliveryKey: `err:${orgId}:${params.incidentId}:resolve`,
-				ruleId: params.issueId,
-				ruleName: `${params.exceptionType} in ${params.serviceName}`,
-				groupKey: params.serviceName,
-				signalType: "error_rate",
-				severity: policy.severity,
-				comparator: "gte",
-				threshold: policy.minOccurrenceCount,
-				eventType: "resolve",
-				incidentId: params.incidentId,
-				incidentStatus: "resolved",
-				dedupeKey: `error:${orgId}:${params.issueId}`,
-				windowMinutes: 2,
-				value: params.occurrenceCount,
-				sampleCount: params.occurrenceCount,
-				linkUrl: issueLinkUrl(params.issueId),
-			})
-			.pipe(Effect.asVoid)
-	}
-
 	const maybeNotifyTransition = Effect.fn("ErrorsService.maybeNotifyTransition")(function* (
 		orgId: OrgId,
 		actorId: ActorId | null,
@@ -2422,6 +2327,171 @@ const make: Effect.Effect<
 				linkUrl: issueLinkUrl(row.id),
 			})
 			.pipe(Effect.asVoid)
+	})
+
+	const notificationWorkerId = `errors-${randomUUID()}`
+	const claimableNotificationWhere = (currentTime: number) =>
+		or(
+			and(
+				eq(errorNotificationDeliveries.status, "queued"),
+				lte(errorNotificationDeliveries.scheduledAt, new Date(currentTime)),
+			),
+			and(
+				eq(errorNotificationDeliveries.status, "processing"),
+				isNotNull(errorNotificationDeliveries.claimExpiresAt),
+				lte(errorNotificationDeliveries.claimExpiresAt, new Date(currentTime)),
+			),
+		)
+
+	const notificationRequest = (
+		row: ErrorNotificationDeliveryRow,
+		payload: ErrorNotificationOutboxPayload,
+	): NotificationRequest => ({
+		deliveryKey: row.deliveryKey,
+		ruleId: payload.issueId,
+		ruleName: `${payload.exceptionType} in ${payload.serviceName}`,
+		groupKey: payload.serviceName,
+		signalType: "error_rate",
+		severity: payload.severity,
+		comparator: "gte",
+		threshold: payload.threshold,
+		eventType: payload.kind === "open" ? "trigger" : "resolve",
+		incidentId: payload.incidentId,
+		incidentStatus: payload.kind === "open" ? "open" : "resolved",
+		dedupeKey: `error:${row.orgId}:${payload.issueId}`,
+		windowMinutes: 1,
+		value: payload.count,
+		sampleCount: payload.count,
+		linkUrl: issueLinkUrl(payload.issueId),
+	})
+
+	/**
+	 * Drain a bounded batch from the error notification outbox. Delivery is
+	 * at-least-once: a worker dying after the remote provider accepts a message
+	 * but before the success update may retry it, so the stable deliveryKey is
+	 * preserved for provider/consumer deduplication.
+	 */
+	const processNotificationOutbox = Effect.fn("ErrorsService.processNotificationOutbox")(function* () {
+		const currentTime = yield* Clock.currentTimeMillis
+		const due = yield* dbExecute((db) =>
+			db
+				.select()
+				.from(errorNotificationDeliveries)
+				.where(claimableNotificationWhere(currentTime))
+				.orderBy(asc(errorNotificationDeliveries.scheduledAt))
+				.limit(NOTIFICATION_OUTBOX_BATCH_SIZE),
+		)
+
+		yield* Effect.forEach(
+			due,
+			(row) =>
+				Effect.gen(function* () {
+					const claimedRows = yield* dbExecute((db) =>
+						db
+							.update(errorNotificationDeliveries)
+							.set({
+								status: "processing",
+								attemptCount: sql`${errorNotificationDeliveries.attemptCount} + 1`,
+								claimedAt: new Date(currentTime),
+								claimExpiresAt: new Date(currentTime + NOTIFICATION_CLAIM_TTL_MS),
+								claimedBy: notificationWorkerId,
+								updatedAt: new Date(currentTime),
+							})
+							.where(
+								and(
+									eq(errorNotificationDeliveries.id, row.id),
+									claimableNotificationWhere(currentTime),
+								),
+							)
+							.returning(),
+					)
+					const claimed = claimedRows[0]
+					if (!claimed) return
+
+					const payloadOption = decodeErrorNotificationOutboxPayload(claimed.payloadJson)
+					if (Option.isNone(payloadOption)) {
+						yield* dbExecute((db) =>
+							db
+								.update(errorNotificationDeliveries)
+								.set({
+									status: "failed",
+									attemptedAt: new Date(currentTime),
+									errorMessage: "Stored error notification payload is invalid",
+									claimedAt: null,
+									claimExpiresAt: null,
+									claimedBy: null,
+									updatedAt: new Date(currentTime),
+								})
+								.where(
+									and(
+										eq(errorNotificationDeliveries.id, claimed.id),
+										eq(errorNotificationDeliveries.claimedBy, notificationWorkerId),
+									),
+								),
+						)
+						return
+					}
+
+					const result = yield* dispatcher.dispatch(
+						claimed.orgId,
+						[claimed.destinationId],
+						notificationRequest(claimed, payloadOption.value),
+					)
+					const destination = result.destinations?.[0]
+					const delivered = destination?.status === "delivered" || result.delivered > 0
+					const retryable = destination == null || destination.status === "failed"
+					const exhausted = claimed.attemptCount >= NOTIFICATION_MAX_ATTEMPTS
+					const retryDelayMs = Math.min(30_000 * 2 ** (claimed.attemptCount - 1), 15 * 60_000)
+
+					yield* dbExecute((db) =>
+						db
+							.update(errorNotificationDeliveries)
+							.set(
+								delivered
+									? {
+											status: "success",
+											attemptedAt: new Date(currentTime),
+											errorMessage: null,
+											claimedAt: null,
+											claimExpiresAt: null,
+											claimedBy: null,
+											updatedAt: new Date(currentTime),
+										}
+									: retryable && !exhausted
+										? {
+												status: "queued",
+												scheduledAt: new Date(currentTime + retryDelayMs),
+												attemptedAt: new Date(currentTime),
+												errorMessage:
+													destination?.error ?? "Notification delivery failed",
+												claimedAt: null,
+												claimExpiresAt: null,
+												claimedBy: null,
+												updatedAt: new Date(currentTime),
+											}
+										: {
+												status: "failed",
+												attemptedAt: new Date(currentTime),
+												errorMessage:
+													destination?.error ??
+													destination?.status ??
+													"Notification delivery failed",
+												claimedAt: null,
+												claimExpiresAt: null,
+												claimedBy: null,
+												updatedAt: new Date(currentTime),
+											},
+							)
+							.where(
+								and(
+									eq(errorNotificationDeliveries.id, claimed.id),
+									eq(errorNotificationDeliveries.claimedBy, notificationWorkerId),
+								),
+							),
+					)
+				}),
+			{ concurrency: 5 },
+		)
 	})
 
 	// ---------------------------------------------------------------
@@ -2529,54 +2599,185 @@ const make: Effect.Effect<
 		return expired.length
 	})
 
+	const claimTickWindow = Effect.fn("ErrorsService.claimTickWindow")(function* (
+		orgId: OrgId,
+		cutoffMs: number,
+		nowMs: number,
+	) {
+		const claimToken = randomUUID()
+		const initialProcessedThrough = new Date(cutoffMs - TICK_BOOTSTRAP_WINDOW_MS)
+		const claim = yield* dbExecute(async (db) => {
+			await db
+				.insert(errorTickStates)
+				.values({
+					orgId,
+					processedThrough: initialProcessedThrough,
+					bootstrapCompleted: false,
+					claimToken: null,
+					claimExpiresAt: null,
+					updatedAt: new Date(nowMs),
+				})
+				.onConflictDoNothing({ target: errorTickStates.orgId })
+
+			// `for update skip locked` is what makes the TTL a crash-recovery
+			// mechanism rather than a deadline. `persistErrorTickWindow` holds this
+			// row locked for the life of its transaction, so a legitimately slow
+			// apply is skipped here instead of being stolen and rolled back at its
+			// checkpoint — the retry-forever loop that stalls an org permanently.
+			// Only a dead worker leaves the row unlocked with a lapsed lease.
+			const claimable = db
+				.select({ orgId: errorTickStates.orgId })
+				.from(errorTickStates)
+				.where(
+					and(
+						eq(errorTickStates.orgId, orgId),
+						lt(errorTickStates.processedThrough, new Date(cutoffMs)),
+						or(
+							isNull(errorTickStates.claimExpiresAt),
+							lte(errorTickStates.claimExpiresAt, new Date(nowMs)),
+						),
+					),
+				)
+				.for("update", { skipLocked: true })
+
+			const claimed = await db
+				.update(errorTickStates)
+				.set({
+					claimToken,
+					claimExpiresAt: new Date(nowMs + TICK_CLAIM_TTL_MS),
+					updatedAt: new Date(nowMs),
+				})
+				.where(inArray(errorTickStates.orgId, claimable))
+				.returning({
+					processedThrough: errorTickStates.processedThrough,
+					bootstrapCompleted: errorTickStates.bootstrapCompleted,
+				})
+			return claimed
+		})
+		const row = claim[0]
+		if (!row) return null
+		const windowStartMs = row.processedThrough.getTime()
+		return {
+			claimToken,
+			isBootstrap: !row.bootstrapCompleted,
+			windowStartMs,
+			windowEndMs: Math.min(windowStartMs + TICK_MAX_WINDOW_MS, cutoffMs),
+		}
+	})
+
+	const releaseTickClaim = (orgId: OrgId, claimToken: string, nowMs: number) =>
+		dbExecute((db) =>
+			db
+				.update(errorTickStates)
+				.set({ claimToken: null, claimExpiresAt: null, updatedAt: new Date(nowMs) })
+				.where(and(eq(errorTickStates.orgId, orgId), eq(errorTickStates.claimToken, claimToken))),
+		).pipe(Effect.ignore)
+
 	const processOrg = Effect.fn("ErrorsService.processOrg")(function* (
 		orgId: OrgId,
-		windowStartMs: number,
-		windowEndMs: number,
+		cutoffMs: number,
+		nowMs: number,
 		runRetention: boolean,
-		isActive: boolean,
 	) {
-		yield* Effect.annotateCurrentSpan({ orgId, runRetention, isActive })
+		yield* Effect.annotateCurrentSpan({ orgId, runRetention })
+		const tickWindow = yield* claimTickWindow(orgId, cutoffMs, nowMs)
+		if (!tickWindow) {
+			return {
+				issuesTouched: 0,
+				incidentsOpened: 0,
+				incidentsResolved: 0,
+				issuesReopened: 0,
+				issuesArchived: 0,
+				issuesDeleted: 0,
+				leasesExpired: 0,
+			}
+		}
+		const { windowStartMs } = tickWindow
+		yield* Effect.annotateCurrentSpan({ windowStartMs, windowEndMs: tickWindow.windowEndMs })
 		const tenant = systemTenant(orgId)
-		const preamble = yield* loadOrgTickPreamble(orgId, windowEndMs)
+		const preamble = yield* loadOrgTickPreamble(orgId, nowMs).pipe(
+			Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
+		)
 		// The actor exists after an org's first tick, so the insert path is a
 		// once-per-org cost rather than a per-tick round-trip.
 		const systemActor = preamble.actorRow
 			? rowToActor(preamble.actorRow)
-			: yield* ensureSystemActor(orgId)
-		const policy = preamble.policyRow ?? defaultPolicy(orgId, windowEndMs)
+			: yield* ensureSystemActor(orgId).pipe(
+					Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
+				)
+		const policy = preamble.policyRow ?? defaultPolicy(orgId, nowMs)
 
 		const leasesExpired = yield* expireLeasesForOrg(
 			orgId,
-			windowEndMs,
+			nowMs,
 			preamble.expiredLeases,
 			systemActor,
-		)
+		).pipe(Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)))
 
 		const wakeCandidates = preamble.wakeCandidates
 		yield* Effect.forEach(wakeCandidates, (row) =>
 			applyTransition(orgId, systemActor.id, row, "triage", {
 				payload: { viaSnoozeWakeup: true },
-				timestamp: windowEndMs,
+				timestamp: nowMs,
 			}),
-		)
+		).pipe(Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)))
 		const issuesReopened = wakeCandidates.length
 
-		// `isActive` is false only for orgs with neither recent errors nor existing
-		// issue/incident state, so skipping the scan loses nothing: there is
-		// nothing to detect and nothing to resolve. Such orgs no longer reach
-		// `processOrg` at all (see `scanOrgs` in `runTick`) — this branch now only
-		// covers an org that went inactive between discovery and the scan.
-		const issuesCompiled = CH.compile(CH.errorIssuesQuery({ limit: 500 }), {
-			orgId,
-			startTime: formatWarehouseDateTime(windowStartMs),
-			endTime: formatWarehouseDateTime(windowEndMs),
+		const scanWindow = (endMs: number) => {
+			const tickParams = {
+				orgId,
+				startTime: formatWarehouseDateTime(windowStartMs),
+				endTime: formatWarehouseDateTime(endMs),
+			}
+			const issuesCompiled = tickWindow.isBootstrap
+				? CH.compile(CH.errorTickBootstrapIssuesQuery(), tickParams)
+				: CH.compile(CH.errorTickIssuesQuery(), tickParams)
+			return warehouse
+				.compiledQuery(tenant, issuesCompiled, {
+					profile: "aggregation",
+					context: "errorIssuesScan",
+				})
+				.pipe(
+					Effect.mapError(makePersistenceError),
+					Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
+				)
+		}
+
+		// Shed rows before the transaction rather than after it fails. A catch-up
+		// window, or one minute of a fingerprint-cardinality explosion, can carry
+		// far more fingerprints than an apply should hold open at once; halving the
+		// window and rescanning costs one extra warehouse query and leaves the
+		// remainder for the next cron. Steady state is a single minute and never
+		// enters the loop.
+		let windowEndMs = tickWindow.windowEndMs
+		let issuesRaw = yield* scanWindow(windowEndMs)
+		let splits = 0
+		while (issuesRaw.length > TICK_MAX_WINDOW_ROWS && splits < TICK_MAX_WINDOW_SPLITS) {
+			const widthMinutes = Math.round((windowEndMs - windowStartMs) / TICK_MINUTE_MS)
+			if (widthMinutes <= 1) break
+			windowEndMs = windowStartMs + Math.ceil(widthMinutes / 2) * TICK_MINUTE_MS
+			splits += 1
+			issuesRaw = yield* scanWindow(windowEndMs)
+		}
+		if (issuesRaw.length > TICK_MAX_WINDOW_ROWS) {
+			// An indivisible minute over the cap. Applying it is still the right
+			// call — skipping would lose the window — but it is a fingerprinting
+			// problem, not a load problem, and it should be visible as one.
+			yield* Effect.logWarning("Error tick window exceeds row cap at minimum width").pipe(
+				Effect.annotateLogs({
+					orgId,
+					windowStartMs,
+					windowEndMs,
+					fingerprints: issuesRaw.length,
+					cap: TICK_MAX_WINDOW_ROWS,
+				}),
+			)
+		}
+		yield* Effect.annotateCurrentSpan({
+			windowEndMs,
+			windowSplits: splits,
+			scanFingerprints: issuesRaw.length,
 		})
-		const issuesRaw = isActive
-			? yield* warehouse
-					.compiledQuery(tenant, issuesCompiled, { profile: "list", context: "errorIssuesScan" })
-					.pipe(Effect.mapError(makePersistenceError))
-			: []
 
 		const rows = issuesRaw.map((raw) => ({
 			fingerprintHash: String(raw.fingerprintHash ?? ""),
@@ -2586,373 +2787,95 @@ const make: Effect.Effect<
 			errorLabel: String(raw.errorLabel ?? ""),
 			topFrame: String(raw.topFrame ?? ""),
 			count: Number(raw.count ?? 0),
-			affectedServicesCount: Number(raw.affectedServicesCount ?? 0),
 			firstSeen: String(raw.firstSeen ?? ""),
 			lastSeen: String(raw.lastSeen ?? ""),
 		}))
 
-		const fingerprintResults = yield* Effect.forEach(rows, (row) =>
-			Effect.gen(function* () {
-				const firstSeenMs = parseWarehouseDateTime(row.firstSeen)
-				const lastSeenMs = parseWarehouseDateTime(row.lastSeen)
-				const existing = yield* dbExecute((db) =>
-					db
-						.select()
-						.from(errorIssues)
-						.where(
-							and(
-								eq(errorIssues.orgId, orgId),
-								eq(errorIssues.fingerprintHash, row.fingerprintHash),
-							),
-						)
-						.limit(1),
-				)
-
-				const prior = existing[0]
-				let issueId: ErrorIssueId
-				let wasRegression = false
-				let wasNew = false
-
-				if (prior) {
-					issueId = prior.id
-					// If the issue is in wontfix with an active snooze, skip entirely.
-					if (
-						prior.workflowState === "wontfix" &&
-						(prior.snoozeUntil == null || prior.snoozeUntil.getTime() > windowEndMs)
-					) {
-						return { touched: 0, opened: 0 }
-					}
-
-					yield* dbExecute((db) =>
-						db
-							.update(errorIssues)
-							.set({
-								lastSeenAt: new Date(lastSeenMs),
-								occurrenceCount: sql`${errorIssues.occurrenceCount} + ${row.count}`,
-								errorLabel: row.errorLabel,
-								updatedAt: new Date(windowEndMs),
-							})
-							.where(eq(errorIssues.id, prior.id)),
-					)
-
-					if (prior.workflowState === "done") {
-						const refreshed = yield* requireIssue(orgId, prior.id)
-						yield* applyTransition(orgId, systemActor.id, refreshed, "triage", {
-							payload: { viaRegression: true },
-							timestamp: windowEndMs,
-						})
-						yield* recordEvent(orgId, prior.id, systemActor.id, "regression", {
-							payload: { occurrenceCount: row.count },
-							timestamp: windowEndMs,
-						})
-						wasRegression = true
-					}
-				} else {
-					const candidateId = newErrorIssueId()
-					// The SELECT above and this INSERT are not one transaction, so
-					// overlapping ticks can both miss the fingerprint and both try to
-					// create it. Without the conflict clause the loser raised
-					// `error_issues_org_fp_idx` and aborted processOrg for the *whole*
-					// org, losing every remaining fingerprint in the window.
-					const claimedIssue = yield* dbExecute((db) =>
-						db
-							.insert(errorIssues)
-							.values({
-								id: candidateId,
-								orgId,
-								fingerprintHash: row.fingerprintHash,
-								serviceName: row.serviceName,
-								exceptionType: row.exceptionType,
-								exceptionMessage: row.exceptionMessage,
-								errorLabel: row.errorLabel,
-								topFrame: row.topFrame,
-								workflowState: "triage",
-								priority: 3,
-								assignedActorId: null,
-								leaseHolderActorId: null,
-								leaseExpiresAt: null,
-								claimedAt: null,
-								notes: null,
-								firstSeenAt: new Date(firstSeenMs),
-								lastSeenAt: new Date(lastSeenMs),
-								occurrenceCount: row.count,
-								resolvedAt: null,
-								resolvedByActorId: null,
-								snoozeUntil: null,
-								archivedAt: null,
-								createdAt: new Date(windowEndMs),
-								updatedAt: new Date(windowEndMs),
-							})
-							.onConflictDoNothing({
-								target: [errorIssues.orgId, errorIssues.fingerprintHash],
-							})
-							.returning({ id: errorIssues.id }),
-					)
-
-					const insertedId = claimedIssue[0]?.id
-					if (insertedId === undefined) {
-						// Another tick won the race. Adopt its issue and treat this as a
-						// sighting of an existing one — it already emitted `created`, and a
-						// second event would double-count the issue's history.
-						const winner = yield* dbExecute((db) =>
-							db
-								.select({ id: errorIssues.id })
-								.from(errorIssues)
-								.where(
-									and(
-										eq(errorIssues.orgId, orgId),
-										eq(errorIssues.fingerprintHash, row.fingerprintHash),
-									),
-								)
-								.limit(1),
-						)
-						const winnerId = winner[0]?.id
-						// Unreachable in practice — the conflict fired, so the row exists.
-						// Bail rather than invent an id if the row vanished under us.
-						if (winnerId === undefined) return { touched: 0, opened: 0 }
-						issueId = winnerId
-					} else {
-						wasNew = true
-						issueId = insertedId
-						yield* recordEvent(orgId, issueId, systemActor.id, "created", {
-							toState: "triage",
-							payload: {
-								serviceName: row.serviceName,
-								exceptionType: row.exceptionType,
-								occurrenceCount: row.count,
-							},
-							timestamp: windowEndMs,
-						})
-					}
-				}
-
-				const stateRow = yield* dbExecute((db) =>
-					db
-						.select()
-						.from(errorIssueStates)
-						.where(and(eq(errorIssueStates.orgId, orgId), eq(errorIssueStates.issueId, issueId)))
-						.limit(1),
-				)
-				const openIncidentIdRaw = stateRow[0]?.openIncidentId ?? null
-
-				if (openIncidentIdRaw == null) {
-					const reason: ErrorIncidentReason = wasNew
-						? "first_seen"
-						: wasRegression
-							? "regression"
-							: "first_seen"
-					const incidentId = newErrorIncidentId()
-
-					// CAS the open slot BEFORE creating the incident or dispatching:
-					// overlapping ticks can both read openIncidentId == null, and the
-					// notify path below dispatches immediately (no outbox), so only the
-					// upsert winner may proceed. setWhere keeps the conflict-update a
-					// no-op when another tick already claimed the slot; RETURNING then
-					// yields zero rows for the loser.
-					const claimed = yield* dbExecute((db) =>
-						db
-							.insert(errorIssueStates)
-							.values({
-								orgId,
-								issueId,
-								lastObservedOccurrenceAt: new Date(lastSeenMs),
-								lastEvaluatedAt: new Date(windowEndMs),
-								openIncidentId: incidentId,
-								updatedAt: new Date(windowEndMs),
-							})
-							.onConflictDoUpdate({
-								target: [errorIssueStates.orgId, errorIssueStates.issueId],
-								set: {
-									lastObservedOccurrenceAt: new Date(lastSeenMs),
-									lastEvaluatedAt: new Date(windowEndMs),
-									openIncidentId: incidentId,
-									updatedAt: new Date(windowEndMs),
-								},
-								setWhere: isNull(errorIssueStates.openIncidentId),
-							})
-							.returning({ openIncidentId: errorIssueStates.openIncidentId }),
-					)
-					const wonOpenSlot = claimed[0]?.openIncidentId === incidentId
-
-					if (!wonOpenSlot) {
-						// Lost the race: a concurrent tick opened the incident for this
-						// same scan window and already dispatched its notification. Do
-						// not bump occurrence counts here — the winner counted this
-						// window's occurrences on insert.
-						yield* Effect.logInfo("Skipping duplicate error incident open (lost CAS)").pipe(
-							Effect.annotateLogs({ orgId, issueId }),
-						)
-						return { touched: 1, opened: 0 }
-					}
-
-					yield* dbExecute((db) =>
-						db.insert(errorIncidents).values({
-							id: incidentId,
-							orgId,
-							issueId,
-							status: "open",
-							reason,
-							firstTriggeredAt: new Date(firstSeenMs),
-							lastTriggeredAt: new Date(lastSeenMs),
-							resolvedAt: null,
-							occurrenceCount: row.count,
-							createdAt: new Date(windowEndMs),
-							updatedAt: new Date(windowEndMs),
-						}),
-					)
-
-					yield* notifyIncidentOpened(orgId, policy, {
-						issueId,
-						incidentId,
-						reason,
-						serviceName: row.serviceName,
-						exceptionType: row.exceptionType,
-						count: row.count,
-					})
-
-					// AI auto-triage (org opt-in). maybeEnqueueTriage never fails, so a
-					// triage problem can't take down the error tick.
-					yield* maybeEnqueueTriage({
-						orgId,
-						incidentKind: "error",
-						incidentId,
-						issueId,
-						context: {
-							kind: "error",
-							reason,
-							// The one field the enqueue path could never see. Without it the
-							// snapshot's severity decoded to null on every error incident, and
-							// severity is what sizes an investigation. A brand-new issue has
-							// none yet, and null is the honest value — the routing table reads
-							// it as medium rather than as "skip".
-							severity: prior?.severity ?? null,
-							serviceName: row.serviceName,
-							exceptionType: row.exceptionType,
-							exceptionMessage: row.exceptionMessage,
-							errorLabel: row.errorLabel,
-							topFrame: row.topFrame,
-							fingerprintHash: row.fingerprintHash,
-							occurrenceCount: row.count,
-							firstSeen: row.firstSeen,
-							lastSeen: row.lastSeen,
-							issueId,
-						},
-						fanoutBinding: investigationFanoutBinding,
-					}).pipe(Effect.provideService(Database, database))
-
-					return { touched: 1, opened: 1 }
-				} else {
-					yield* dbExecute((db) =>
-						db
-							.update(errorIncidents)
-							.set({
-								lastTriggeredAt: new Date(lastSeenMs),
-								occurrenceCount: sql`${errorIncidents.occurrenceCount} + ${row.count}`,
-								updatedAt: new Date(windowEndMs),
-							})
-							.where(eq(errorIncidents.id, openIncidentIdRaw)),
-					)
-					yield* dbExecute((db) =>
-						db
-							.update(errorIssueStates)
-							.set({
-								lastObservedOccurrenceAt: new Date(lastSeenMs),
-								lastEvaluatedAt: new Date(windowEndMs),
-								updatedAt: new Date(windowEndMs),
-							})
-							.where(
-								and(eq(errorIssueStates.orgId, orgId), eq(errorIssueStates.issueId, issueId)),
-							),
-					)
-					return { touched: 1, opened: 0 }
-				}
+		const persistence = yield* dbExecute((db) =>
+			persistErrorTickWindow(db, {
+				orgId,
+				actorId: systemActor.id,
+				rows: rows.map((row) => ({
+					fingerprintHash: row.fingerprintHash,
+					serviceName: row.serviceName,
+					exceptionType: row.exceptionType,
+					exceptionMessage: row.exceptionMessage,
+					errorLabel: row.errorLabel,
+					topFrame: row.topFrame,
+					count: row.count,
+					firstSeenMs: parseWarehouseDateTime(row.firstSeen),
+					lastSeenMs: parseWarehouseDateTime(row.lastSeen),
+				})),
+				policy,
+				destinationIds: parsePolicyDestinations(policy.destinationIdsJson),
+				windowEndMs,
+				autoResolveMinutes: AUTO_RESOLVE_MINUTES,
+				claimToken: tickWindow.claimToken,
+				makeIssueId: newErrorIssueId,
+				makeIncidentId: newErrorIncidentId,
+				makeEventId: newEventId,
 			}),
+		).pipe(
+			Effect.tapError((error) =>
+				// A lost claim now means the worker stalled past the crash-recovery
+				// TTL — the cursor row lock rules out an ordinary steal. Surface it as
+				// its own signal so a recurring stall is distinguishable from a
+				// warehouse or database failure.
+				isErrorTickClaimLost(error)
+					? Effect.logError("Error tick lost its cursor claim before commit").pipe(
+							Effect.annotateLogs({
+								orgId,
+								windowStartMs,
+								windowEndMs,
+								fingerprints: rows.length,
+								claimTtlMs: TICK_CLAIM_TTL_MS,
+							}),
+						)
+					: Effect.void,
+			),
+			Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
 		)
 
-		const issuesTouched = fingerprintResults.reduce((s, r) => s + r.touched, 0)
-		const incidentsOpened = fingerprintResults.reduce((s, r) => s + r.opened, 0)
-
-		// Auto-resolve stale incidents
-		const cutoffMs = windowEndMs - AUTO_RESOLVE_MINUTES * 60_000
-		const staleIncidents = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(errorIncidents)
-				.where(
-					and(
-						eq(errorIncidents.orgId, orgId),
-						eq(errorIncidents.status, "open"),
-						lt(errorIncidents.lastTriggeredAt, new Date(cutoffMs)),
-					),
-				),
+		// The authoritative state and notification outbox are committed above.
+		// Workflow fan-out remains best-effort and runs only after that commit.
+		yield* Effect.forEach(persistence.pendingTriages, (pending) =>
+			maybeEnqueueTriage({
+				orgId,
+				incidentKind: "error",
+				incidentId: pending.incidentId,
+				issueId: pending.issueId,
+				context: {
+					kind: "error",
+					reason: pending.reason,
+					severity: pending.severity,
+					serviceName: pending.row.serviceName,
+					exceptionType: pending.row.exceptionType,
+					exceptionMessage: pending.row.exceptionMessage,
+					errorLabel: pending.row.errorLabel,
+					topFrame: pending.row.topFrame,
+					fingerprintHash: pending.row.fingerprintHash,
+					occurrenceCount: pending.row.count,
+					firstSeen: formatWarehouseDateTime(pending.row.firstSeenMs),
+					lastSeen: formatWarehouseDateTime(pending.row.lastSeenMs),
+					issueId: pending.issueId,
+				},
+				fanoutBinding: investigationFanoutBinding,
+			}).pipe(Effect.provideService(Database, database)),
 		)
-		const resolveOutcomes = yield* Effect.forEach(staleIncidents, (incident) =>
-			Effect.gen(function* () {
-				// CAS the status flip: overlapping ticks both list the incident as
-				// stale, and the resolve notification dispatches immediately — only
-				// the tick that wins the open→resolved transition may notify.
-				const flipped = yield* dbExecute((db) =>
-					db
-						.update(errorIncidents)
-						.set({
-							status: "resolved",
-							resolvedAt: new Date(windowEndMs),
-							updatedAt: new Date(windowEndMs),
-						})
-						.where(and(eq(errorIncidents.id, incident.id), eq(errorIncidents.status, "open")))
-						.returning({ id: errorIncidents.id }),
-				)
-				if (flipped.length === 0) {
-					return { resolved: 0 }
-				}
-				yield* dbExecute((db) =>
-					db
-						.update(errorIssueStates)
-						.set({ openIncidentId: null, updatedAt: new Date(windowEndMs) })
-						.where(
-							and(
-								eq(errorIssueStates.orgId, orgId),
-								eq(errorIssueStates.issueId, incident.issueId),
-							),
-						),
-				)
 
-				if (policy.enabled && policy.notifyOnResolve) {
-					const issueRows = yield* dbExecute((db) =>
-						db
-							.select({
-								serviceName: errorIssues.serviceName,
-								exceptionType: errorIssues.exceptionType,
-							})
-							.from(errorIssues)
-							.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, incident.issueId)))
-							.limit(1),
-					)
-					const issueRow = issueRows[0]
-					if (issueRow) {
-						yield* notifyIncidentResolved(orgId, policy, {
-							issueId: incident.issueId,
-							incidentId: incident.id,
-							serviceName: issueRow.serviceName,
-							exceptionType: issueRow.exceptionType,
-							occurrenceCount: incident.occurrenceCount,
-						})
-					}
-				}
-				return { resolved: 1 }
-			}),
-		)
-		const incidentsResolved = resolveOutcomes.reduce((s, r) => s + r.resolved, 0)
+		const issuesTouched = persistence.issuesTouched
+		const incidentsOpened = persistence.incidentsOpened
+		const incidentsResolved = persistence.incidentsResolved
 
 		let issuesArchived = 0
 		let issuesDeleted = 0
 
 		if (runRetention) {
-			const resolvedCutoff = windowEndMs - RESOLVED_RETENTION_DAYS * DAY_MS
+			const resolvedCutoff = nowMs - RESOLVED_RETENTION_DAYS * DAY_MS
 			const archivedRows = yield* dbExecute((db) =>
 				db
 					.update(errorIssues)
-					.set({ archivedAt: new Date(windowEndMs), updatedAt: new Date(windowEndMs) })
+					.set({ archivedAt: new Date(nowMs), updatedAt: new Date(nowMs) })
 					.where(
 						and(
 							eq(errorIssues.orgId, orgId),
@@ -2966,7 +2889,7 @@ const make: Effect.Effect<
 			)
 			issuesArchived = archivedRows.length
 
-			const archivedCutoff = windowEndMs - ARCHIVED_RETENTION_DAYS * DAY_MS
+			const archivedCutoff = nowMs - ARCHIVED_RETENTION_DAYS * DAY_MS
 			const toDelete = yield* dbExecute((db) =>
 				db
 					.select({ id: errorIssues.id })
@@ -2982,61 +2905,29 @@ const make: Effect.Effect<
 			)
 			if (toDelete.length > 0) {
 				const ids = toDelete.map((r) => r.id)
-				const idChunks = Arr.chunksOf(ids, D1_INARRAY_CHUNK_SIZE)
-				yield* Effect.forEach(
-					idChunks,
-					(chunk) =>
-						dbExecute((db) =>
-							db
-								.delete(errorIncidents)
-								.where(
-									and(
-										eq(errorIncidents.orgId, orgId),
-										inArray(errorIncidents.issueId, chunk),
-									),
-								),
-						),
-					{ discard: true },
+				yield* dbExecute((db) =>
+					db
+						.delete(errorIncidents)
+						.where(and(eq(errorIncidents.orgId, orgId), inArray(errorIncidents.issueId, ids))),
 				)
-				yield* Effect.forEach(
-					idChunks,
-					(chunk) =>
-						dbExecute((db) =>
-							db
-								.delete(errorIssueStates)
-								.where(
-									and(
-										eq(errorIssueStates.orgId, orgId),
-										inArray(errorIssueStates.issueId, chunk),
-									),
-								),
+				yield* dbExecute((db) =>
+					db
+						.delete(errorIssueStates)
+						.where(
+							and(eq(errorIssueStates.orgId, orgId), inArray(errorIssueStates.issueId, ids)),
 						),
-					{ discard: true },
 				)
-				yield* Effect.forEach(
-					idChunks,
-					(chunk) =>
-						dbExecute((db) =>
-							db
-								.delete(errorIssueEvents)
-								.where(
-									and(
-										eq(errorIssueEvents.orgId, orgId),
-										inArray(errorIssueEvents.issueId, chunk),
-									),
-								),
+				yield* dbExecute((db) =>
+					db
+						.delete(errorIssueEvents)
+						.where(
+							and(eq(errorIssueEvents.orgId, orgId), inArray(errorIssueEvents.issueId, ids)),
 						),
-					{ discard: true },
 				)
-				yield* Effect.forEach(
-					idChunks,
-					(chunk) =>
-						dbExecute((db) =>
-							db
-								.delete(errorIssues)
-								.where(and(eq(errorIssues.orgId, orgId), inArray(errorIssues.id, chunk))),
-						),
-					{ discard: true },
+				yield* dbExecute((db) =>
+					db
+						.delete(errorIssues)
+						.where(and(eq(errorIssues.orgId, orgId), inArray(errorIssues.id, ids))),
 				)
 				issuesDeleted = ids.length
 			}
@@ -3053,16 +2944,15 @@ const make: Effect.Effect<
 		}
 	})
 
-	// Overlapping ticks are tolerated (there is no per-org claim lock): scan
-	// bookkeeping may repeat under overlap, but incident open/resolve
-	// transitions — and the notifications they dispatch — are CAS-guarded in
-	// processOrg, so users never receive duplicate incident emails.
+	// Align to the latest completed minute. Per-org cursor leases serialize
+	// overlapping cron invocations; the cursor advances atomically with issue,
+	// incident, audit-event, and notification-outbox writes.
 	const runTick: ErrorsServiceShape["runTick"] = Effect.fn("ErrorsService.runTick")(function* () {
-		const endMs = yield* Clock.currentTimeMillis
-		const startMs = endMs - TICK_WINDOW_MS
+		const nowMs = yield* Clock.currentTimeMillis
+		const cutoffMs = Math.floor(nowMs / TICK_MINUTE_MS) * TICK_MINUTE_MS - TICK_INGESTION_LAG_MS
 
 		const retentionRan =
-			Math.floor(endMs / RETENTION_PHASE_PERIOD_MS) % RETENTION_PHASE_EVERY_N_TICKS === 0
+			Math.floor(nowMs / RETENTION_PHASE_PERIOD_MS) % RETENTION_PHASE_EVERY_N_TICKS === 0
 
 		// `error_issue_states` and `error_issues` hold hundreds of thousands of rows
 		// across a couple dozen orgs, so a plain `SELECT DISTINCT` scanned 160k/270k
@@ -3078,7 +2968,7 @@ const make: Effect.Effect<
 		)
 		const knownOrgs = new Set<string>([...stateOrgs, ...issueOrgs, ...ingestOrgs.map((r) => r.orgId)])
 
-		const activeOrgs = yield* resolveActiveOrgs([...knownOrgs], endMs)
+		const activeOrgs = yield* resolveActiveOrgs([...knownOrgs], nowMs)
 		// Orgs that hold issue/incident state must be scanned even with no recent
 		// errors: the scan returning empty is what drives auto-resolution and
 		// aging. Only pure ingest-key-only orgs with neither recent errors nor
@@ -3117,7 +3007,7 @@ const make: Effect.Effect<
 						)
 						return emptyResult
 					}
-					return yield* processOrg(org as OrgId, startMs, endMs, retentionRan, isActive(org))
+					return yield* processOrg(org as OrgId, cutoffMs, nowMs, retentionRan)
 				}).pipe(
 					// Isolate genuine per-org failures/defects so one bad org can't fail the
 					// whole tick. Interrupts (isolate teardown) are NOT per-org failures —
@@ -3131,7 +3021,7 @@ const make: Effect.Effect<
 										edgeCache,
 										org,
 										cause,
-										endMs,
+										nowMs,
 									)
 									if (quarantined) {
 										yield* Effect.logInfo(
@@ -3167,6 +3057,10 @@ const make: Effect.Effect<
 			}),
 			emptyResult,
 		)
+
+		// Drain after evaluator transactions commit. If delivery fails, the row is
+		// rescheduled with backoff and a future tick retries it.
+		yield* processNotificationOutbox()
 
 		yield* Effect.annotateCurrentSpan({
 			orgsKnown: knownOrgs.size,

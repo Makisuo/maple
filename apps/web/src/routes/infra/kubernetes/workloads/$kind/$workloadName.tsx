@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { DetailRail } from "@maple/ui/components/detail-rail"
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { Schema } from "effect"
 
@@ -12,7 +12,6 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { GridIcon } from "@/components/icons"
-import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { WorkloadDetailChart } from "@/components/infra/k8s-detail-chart"
 import { PodTable } from "@/components/infra/pod-table"
 import { PageHero, HeroChip } from "@/components/infra/primitives/page-hero"
@@ -60,12 +59,6 @@ const KIND_LABEL: Record<WorkloadKind, string> = {
 }
 
 function WorkloadDetailPage() {
-	const infraEnabled = useInfraEnabled()
-	if (!infraEnabled) return <Navigate to="/" replace />
-	return <WorkloadDetailContent />
-}
-
-function WorkloadDetailContent() {
 	const params = Route.useParams()
 	const search = Route.useSearch()
 	const namespace = search.namespace

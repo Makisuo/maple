@@ -31,7 +31,6 @@ import {
 import { formatWarehouseDateTime } from "@maple/query-engine"
 const SYSTEM_DIGEST_USER = UserId.make("system-digest")
 const ROOT_ROLE = RoleName.make("root")
-const D1_INARRAY_CHUNK_SIZE = 90
 
 const toPersistenceError = (error: unknown) =>
 	new DigestPersistenceError({
@@ -608,23 +607,18 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			const activeOrgIds = [...new Set(clerkMemberships.map((m) => m.orgId))]
 			if (activeOrgIds.length === 0) return
 
-			// D1 caps SQLite bind variables at ~100, so chunk inArray queries.
-			const existingSubs = yield* Effect.forEach(
-				Arr.chunksOf(activeOrgIds, D1_INARRAY_CHUNK_SIZE),
-				(chunk) =>
-					database
-						.execute((db) =>
-							db
-								.select({
-									id: digestSubscriptions.id,
-									orgId: digestSubscriptions.orgId,
-									userId: digestSubscriptions.userId,
-								})
-								.from(digestSubscriptions)
-								.where(inArray(digestSubscriptions.orgId, chunk)),
-						)
-						.pipe(Effect.mapError(toPersistenceError)),
-			).pipe(Effect.map(Arr.flatten))
+			const existingSubs = yield* database
+				.execute((db) =>
+					db
+						.select({
+							id: digestSubscriptions.id,
+							orgId: digestSubscriptions.orgId,
+							userId: digestSubscriptions.userId,
+						})
+						.from(digestSubscriptions)
+						.where(inArray(digestSubscriptions.orgId, activeOrgIds)),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
 
 			const activeKeys = new Set(clerkMemberships.map((m) => `${m.orgId}:${m.userId}`))
 			const staleIds = existingSubs
@@ -632,19 +626,14 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 				.map((s) => s.id)
 
 			if (staleIds.length > 0) {
-				yield* Effect.forEach(
-					Arr.chunksOf(staleIds, D1_INARRAY_CHUNK_SIZE),
-					(chunk) =>
-						database
-							.execute((db) =>
-								db
-									.update(digestSubscriptions)
-									.set({ enabled: false, updatedAt: new Date(now) })
-									.where(inArray(digestSubscriptions.id, chunk)),
-							)
-							.pipe(Effect.mapError(toPersistenceError)),
-					{ discard: true },
-				)
+				yield* database
+					.execute((db) =>
+						db
+							.update(digestSubscriptions)
+							.set({ enabled: false, updatedAt: new Date(now) })
+							.where(inArray(digestSubscriptions.id, staleIds)),
+					)
+					.pipe(Effect.mapError(toPersistenceError))
 
 				yield* Effect.logInfo("Disabled stale digest subscriptions").pipe(
 					Effect.annotateLogs({ count: staleIds.length }),
@@ -682,9 +671,11 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 
 			yield* ensureSubscriptions().pipe(
 				Effect.catchCause((cause) =>
-					Effect.logWarning("Failed to seed digest subscriptions").pipe(
-						Effect.annotateLogs({ error: Cause.pretty(cause) }),
-					),
+					Cause.hasInterruptsOnly(cause)
+						? Effect.interrupt
+						: Effect.logWarning("Failed to seed digest subscriptions").pipe(
+								Effect.annotateLogs({ error: Cause.pretty(cause) }),
+							),
 				),
 			)
 
@@ -808,13 +799,17 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 											// not surface as a send failure (lastAttemptedAt still blocks
 											// same-day retries).
 											Effect.catchCause((cause) =>
-												Effect.logWarning("Failed to record digest lastSentAt").pipe(
-													Effect.annotateLogs({
-														subscriptionId: sub.id,
-														orgId: rawOrgId,
-														error: Cause.pretty(cause),
-													}),
-												),
+												Cause.hasInterruptsOnly(cause)
+													? Effect.interrupt
+													: Effect.logWarning(
+															"Failed to record digest lastSentAt",
+														).pipe(
+															Effect.annotateLogs({
+																subscriptionId: sub.id,
+																orgId: rawOrgId,
+																error: Cause.pretty(cause),
+															}),
+														),
 											),
 										),
 									),
@@ -829,29 +824,34 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 						return sendResults
 					}).pipe(
 						Effect.catchCause((cause) =>
-							Effect.gen(function* () {
-								const quarantined = yield* quarantineOnConfigClassCause(
-									edgeCache,
-									rawOrgId,
-									cause,
-									now,
-								)
-								if (quarantined) {
-									yield* Effect.logInfo(
-										"Org warehouse rejected queries with a config-class error; quarantined",
-									).pipe(
-										Effect.annotateLogs({ orgId: rawOrgId, error: Cause.pretty(cause) }),
-									)
-								} else {
-									yield* Effect.logError("Digest failed for org").pipe(
-										Effect.annotateLogs({
-											orgId: rawOrgId,
-											error: Cause.pretty(cause),
-										}),
-									)
-								}
-								return orgSubs.map(() => ({ sent: false }))
-							}),
+							Cause.hasInterruptsOnly(cause)
+								? Effect.interrupt
+								: Effect.gen(function* () {
+										const quarantined = yield* quarantineOnConfigClassCause(
+											edgeCache,
+											rawOrgId,
+											cause,
+											now,
+										)
+										if (quarantined) {
+											yield* Effect.logInfo(
+												"Org warehouse rejected queries with a config-class error; quarantined",
+											).pipe(
+												Effect.annotateLogs({
+													orgId: rawOrgId,
+													error: Cause.pretty(cause),
+												}),
+											)
+										} else {
+											yield* Effect.logError("Digest failed for org").pipe(
+												Effect.annotateLogs({
+													orgId: rawOrgId,
+													error: Cause.pretty(cause),
+												}),
+											)
+										}
+										return orgSubs.map(() => ({ sent: false }))
+									}),
 						),
 					),
 				{ concurrency: 1 },

@@ -11,6 +11,8 @@ import { migration_0009_one_year_service_history } from "./0009_one_year_service
 import { migration_0010_search_indexes } from "./0010_search_indexes"
 import { migration_0011_session_analytics_columns } from "./0011_session_analytics_columns"
 import { migration_0012_session_event_attribute_keys } from "./0012_session_event_attribute_keys"
+import { migration_0013_service_map_ingest_bridge } from "./0013_service_map_ingest_bridge"
+import { migration_0014_web_events } from "./0014_web_events"
 
 /**
  * A migration statement is either a raw SQL string (structural DDL) or a
@@ -54,6 +56,8 @@ export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0010_search_indexes,
 	migration_0011_session_analytics_columns,
 	migration_0012_session_event_attribute_keys,
+	migration_0013_service_map_ingest_bridge,
+	migration_0014_web_events,
 ] as const
 
 /** Highest migration `version` bundled — i.e. the schema level a fully-applied
@@ -77,7 +81,7 @@ export const latestMigrationVersion: number = migrations.reduce(
  * Performance-only migrations set `requiredForIngest: false`; they can improve
  * query speed without interrupting routing to an otherwise compatible schema.
  *
- * Stamped into D1 by the API's applySchema workflow and the schemaDiff self-heal,
+ * Stamped into Postgres by the API's applySchema workflow and the schemaDiff self-heal,
  * and compared by the Rust ingest gateway (emitted as `SCHEMA_VERSION` into
  * `clickhouse_insert_mappings.rs` by `scripts/generate-clickhouse-insert-mappings.ts`).
  */

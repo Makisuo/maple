@@ -902,6 +902,16 @@ export function routeCoverage(): ReadonlyMap<string, { true: number; false: numb
 		)
 	}
 
+	// `useWebEvents` picks the page-view source: the `web_events` rollup, or raw
+	// `session_events`. Read off the fixture labels rather than re-deriving it —
+	// `webAnalyticsVariants` emits every web-analytics fixture in both variants
+	// and suffixes the rollup one, so this records exactly what the baseline
+	// contains. If someone adds a one-sided fixture by hand, this is what notices.
+	for (const fixture of builderFixtures) {
+		if (fixture.module !== "web-analytics") continue
+		record("useWebEvents", fixture.label.endsWith("-rollup"))
+	}
+
 	return coverage
 }
 

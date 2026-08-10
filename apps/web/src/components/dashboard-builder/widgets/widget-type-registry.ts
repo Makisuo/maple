@@ -1,5 +1,5 @@
 import type { ComponentType } from "react"
-import { WIDGET_TYPES, type PanelType, type WidgetTypeMeta } from "@maple/domain/http"
+import type { WidgetTypeMeta } from "@maple/domain/http"
 
 import type { IconComponent } from "@/components/icons"
 import type {
@@ -14,7 +14,7 @@ import type {
 	QueryBuilderWidgetState,
 } from "@/lib/query-builder/widget-builder-shared"
 import type { WidgetDataSource } from "@/components/dashboard-builder/types"
-import type { QueryBuilderQueryDraft } from "@/lib/query-builder/model"
+import type { QueryBuilderQueryDraft } from "@maple/query-engine/query-builder"
 
 // ---------------------------------------------------------------------------
 // The widget-type framework.
@@ -117,4 +117,4 @@ export const extendDisplay = (
 	return display
 }
 
-export { WIDGET_TYPES, type PanelType, type WidgetTypeMeta }
+export type { WidgetTypeMeta }

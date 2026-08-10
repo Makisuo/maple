@@ -30,6 +30,7 @@ export {
 	tracesListQuery,
 	tracesRootListQuery,
 	traceListQuery,
+	traceServicesByTraceIdsQuery,
 	traceSummariesQuery,
 	slowTracesQuery,
 	spanSearchQuery,
@@ -38,11 +39,13 @@ export {
 	type TracesListOpts,
 	type TracesRootListOpts,
 	type TraceListOpts,
+	type TraceServicesByTraceIdsOpts,
 	type TracesTimeseriesOutput,
 	type TracesBreakdownOutput,
 	type TracesListOutput,
 	type TracesRootListOutput,
 	type TraceListOutput,
+	type TraceServicesByTraceIdsOutput,
 	type TraceSummariesOpts,
 	type TraceSummaryOutput,
 	type SlowTracesOpts,
@@ -151,6 +154,26 @@ export {
 	type SessionActivityOutput,
 } from "./queries/session-events"
 
+// Queries — Web Analytics (product analytics over the browser SDK's session data)
+export {
+	webAnalyticsSummaryQuery,
+	webAnalyticsTimeseriesQuery,
+	webAnalyticsPageviewsTimeseriesQuery,
+	webAnalyticsPagesQuery,
+	webAnalyticsBreakdownsQuery,
+	type WebAnalyticsFilters,
+	type WebAnalyticsFacetKey,
+	type WebAnalyticsSummaryOutput,
+	type WebAnalyticsTimeseriesOpts,
+	type WebAnalyticsTimeseriesOutput,
+	type WebAnalyticsPageviewsTimeseriesOpts,
+	type WebAnalyticsPageviewsTimeseriesOutput,
+	type WebAnalyticsPagesOpts,
+	type WebAnalyticsPagesOutput,
+	type WebAnalyticsBreakdownsOpts,
+	type WebAnalyticsBreakdownsOutput,
+} from "./queries/web-analytics"
+
 // Queries — Services
 export {
 	serviceOverviewQuery,
@@ -202,6 +225,8 @@ export {
 	errorsSummaryQuery,
 	errorDetailTracesQuery,
 	errorIssuesQuery,
+	errorTickBootstrapIssuesQuery,
+	errorTickIssuesQuery,
 	errorFingerprintsQuery,
 	errorIssueTimeseriesQuery,
 	errorIssueSampleTracesQuery,

@@ -10,8 +10,11 @@ export const CLICKHOUSE_MV_SOURCE_TABLES: ReadonlyArray<string> = [
 	"metrics_gauge",
 	"metrics_histogram",
 	"metrics_exponential_histogram",
+	"error_events",
+	"service_map_edges_hourly_ingest",
 	"service_overview_spans",
 	"service_operations_minutely",
+	"session_events",
 ]
 
 /**

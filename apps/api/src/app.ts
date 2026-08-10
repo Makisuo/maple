@@ -4,6 +4,7 @@ import { Layer } from "effect"
 import { Headers, HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { McpLive } from "./mcp/app"
+import { McpToolExecutor } from "./mcp/dispatcher"
 import { HttpBillingLive, HttpBillingPublicLive } from "@/routes/v1/billing.http"
 import { HttpAiTriageLive } from "@/routes/v1/ai-triage.http"
 import { HttpAnomaliesLive } from "@/routes/v1/anomalies.http"
@@ -82,7 +83,6 @@ import { DashboardPersistenceService } from "./services/dashboards/DashboardPers
 import { DailySpendService } from "./services/billing/DailySpendService"
 import { DemoService } from "./services/org/DemoService"
 import { DigestService } from "./services/digest/DigestService"
-import { SpendLimitsService } from "./services/billing/SpendLimitsService"
 import { OnboardingService } from "./services/org/OnboardingService"
 import { EmailService } from "@/platform/EmailService"
 import { OrgMembersService } from "./services/org/OrgMembersService"
@@ -165,7 +165,6 @@ const CoreServicesLive = Layer.mergeAll(
 	),
 	PlanetScaleService.layer.pipe(Layer.provide(PlanetScaleOAuthLive)),
 	IngestAttributeMappingService.layer,
-	SpendLimitsService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
 
 const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provideMerge(CoreServicesLive))
@@ -274,11 +273,10 @@ const VcsServicesLive = Layer.mergeAll(
 	VcsSourceService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
 ).pipe(Layer.provideMerge(InfraLive))
 
-// The spend chart's warehouse series. The Postgres-backed spend guardrails ride
-// along in CoreServicesLive with the other config services.
+// Warehouse-backed daily volume for the billing spend chart.
 const DailySpendServiceLive = DailySpendService.layer.pipe(Layer.provideMerge(WarehouseQueryServiceLive))
 
-export const MainLive = Layer.mergeAll(
+const MainServicesLive = Layer.mergeAll(
 	CoreServicesLive,
 	DailySpendServiceLive,
 	CloudflareAnalyticsServiceLive,
@@ -297,6 +295,8 @@ export const MainLive = Layer.mergeAll(
 	VcsServicesLive,
 	SlackIntegrationServiceLive,
 )
+
+export const MainLive = McpToolExecutor.layer.pipe(Layer.provideMerge(MainServicesLive))
 
 const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpAuthPublicLive),

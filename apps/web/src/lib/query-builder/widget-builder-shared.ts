@@ -7,7 +7,7 @@ import {
 	type QueryBuilderFormulaDraft,
 	type QueryBuilderMetricType,
 	type QueryBuilderQueryDraft,
-} from "@/lib/query-builder/model"
+} from "@maple/query-engine/query-builder"
 import type { ListColumnDraft, ListDataSource } from "@/components/dashboard-builder/config/list-config-panel"
 import type {
 	TimeRange,

@@ -9,10 +9,8 @@ import type {
 	CloudflareInfraZoneDetailRequest,
 	ServicePlanetScaleStatsRequest,
 	CloudflareInfraPlatformResourcesRequest,
-	CloudflareInfraWorkerTimeseriesRequest,
 	CloudflareInfraWorkersRequest,
 	CloudflareInfraZoneDnsRequest,
-	CloudflareInfraZoneHostsRequest,
 	CloudflareInfraZoneSecurityRequest,
 	CloudflareInfraZoneTimeseriesRequest,
 	CloudflareInfraZonesRequest,
@@ -102,44 +100,6 @@ const cloudflareInfraZoneLatency = defineQuery({
 		return CH.compile(Integrations.cloudflareZoneLatencySQL(), params, {
 			rowSchema: Integrations.cloudflareZoneLatencyRowSchema,
 		})
-	},
-})
-
-const cloudflareInfraZoneHostTotals = defineQuery({
-	id: "cloudflareInfraZoneHostTotals",
-	profile: "aggregation",
-	cache: 15,
-	compile: (payload: CloudflareInfraZoneHostsRequest, orgId: string) => {
-		const params = {
-			orgId: orgId,
-			serviceName: payload.serviceName,
-			startTime: payload.startTime,
-			endTime: payload.endTime,
-		}
-		const filters = toCloudflareFilters(payload)
-		return CH.compile(Integrations.cloudflareZoneHostBreakdownSQL(filters), params, {
-			rowSchema: Integrations.cloudflareZoneHostBreakdownRowSchema,
-		})
-	},
-})
-
-const cloudflareInfraZoneHostTimeseries = defineQuery({
-	id: "cloudflareInfraZoneHostTimeseries",
-	profile: "aggregation",
-	cache: 15,
-	compile: (payload: CloudflareInfraZoneHostsRequest, orgId: string) => {
-		const params = {
-			orgId: orgId,
-			serviceName: payload.serviceName,
-			startTime: payload.startTime,
-			endTime: payload.endTime,
-		}
-		const filters = toCloudflareFilters(payload)
-		return CH.compile(
-			Integrations.cloudflareZoneHostTimeseriesSQL(filters),
-			{ ...params, bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: Integrations.cloudflareZoneHostTimeseriesRowSchema },
-		)
 	},
 })
 
@@ -739,28 +699,9 @@ export const Queries = {
 			),
 	}),
 
-	cloudflareInfraWorkerTimeseries: defineQuery({
-		id: "cloudflareInfraWorkerTimeseries",
-		profile: "aggregation",
-		cache: 15,
-		compile: (payload: CloudflareInfraWorkerTimeseriesRequest, orgId: string) =>
-			CH.compile(
-				Integrations.cloudflareWorkerTimeseriesSQL(),
-				{
-					orgId,
-					startTime: payload.startTime,
-					endTime: payload.endTime,
-					bucketSeconds: payload.bucketSeconds,
-				},
-				{ rowSchema: Integrations.cloudflareWorkerTimeseriesRowSchema },
-			),
-	}),
-
 	// Integration queries, declared above.
 	cloudflareInfraZoneCounters,
 	cloudflareInfraZoneLatency,
-	cloudflareInfraZoneHostTotals,
-	cloudflareInfraZoneHostTimeseries,
 	cloudflareInfraZoneFirewallTimeseries,
 	cloudflareInfraZoneFirewallTop,
 	cloudflareInfraZoneDnsTimeseries,

@@ -1,9 +1,43 @@
 import { HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { describe, expect, it } from "vitest"
 import { WAREHOUSE_ERROR_TAGS } from "@maple/domain"
-import { formatBackendError } from "./error-messages"
+import { formatBackendError, humanizeInstants } from "./error-messages"
+
+describe("humanizeInstants", () => {
+	const NOW = Date.parse("2026-08-09T17:00:00.000Z")
+
+	it("rewrites an ISO instant as a relative time, keeping the sentence", () => {
+		expect(
+			humanizeInstants(
+				"Daily limit of 90 model passes reached. Resets at 2026-08-10T00:00:00.000Z.",
+				NOW,
+			),
+		).toBe("Daily limit of 90 model passes reached. Resets in 7h.")
+	})
+
+	it("leaves a message without an instant alone", () => {
+		expect(humanizeInstants("No such investigation.", NOW)).toBe("No such investigation.")
+	})
+})
 
 describe("formatBackendError", () => {
+	/**
+	 * The v2 envelope is checked first, and its message is the whole point: a
+	 * hardcoded toast title threw away which ceiling was hit and when it resets.
+	 */
+	it("surfaces a v2 rate-limit message as the description", () => {
+		const result = formatBackendError({
+			error: {
+				type: "rate_limit_error",
+				code: "investigation_daily_quota",
+				message: "Daily limit of 90 model passes reached. Resets at 2026-08-10T00:00:00.000Z.",
+			},
+		})
+		expect(result.title).toBe("Rate limited")
+		expect(result.description).toContain("Daily limit of 90 model passes reached")
+		expect(result.description).not.toContain("2026-08-10T00:00:00.000Z")
+	})
+
 	it("formats WarehouseQuotaExceededError with execution time setting", () => {
 		const result = formatBackendError({
 			_tag: "@maple/http/errors/WarehouseQuotaExceededError",

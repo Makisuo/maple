@@ -1,32 +1,40 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	ChatApplyResponse,
+	ChatToolExecutionError,
 	ChatToolInvalidInputError,
 	ChatToolNotApplicableError,
 	ChatToolNotFoundError,
+	CurrentTenant,
 	MapleApi,
 } from "@maple/domain/http"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
 import { orgIdFromChatSessionId } from "@maple/domain/chat-session"
 import { chatSessionStub } from "@/chat/session"
-import { mapleToolDefinitions } from "@/mcp/tools/registry"
+import { mapleToolCatalog } from "@/mcp/tools/registry"
 import { MUTATING_TOOL_NAMES } from "@/mcp/tools/mutating"
-import { resolveHttpMcpTenant } from "@/mcp/lib/query-warehouse"
-import type { McpToolResult } from "@/mcp/tools/types"
+import { McpToolExecutor } from "@/mcp/dispatcher"
+import type { TenantContext } from "@/services/auth/tenant-context"
 
-const errorResult = (label: string, message: string): McpToolResult => ({
-	isError: true,
-	content: [{ type: "text", text: `${label}: ${message}` }],
-})
+const executionDefect = (tool: string, defect: unknown) =>
+	Effect.logError("Chat approval tool execution defect").pipe(
+		Effect.annotateLogs({ tool, defect }),
+		Effect.andThen(
+			Effect.fail(
+				new ChatToolExecutionError({
+					tool,
+					message: `Could not apply "${tool}". Please try again.`,
+				}),
+			),
+		),
+	)
 
 /**
  * `POST /api/chat/apply` — apply an approval-gated AI chat proposal by re-running
- * the named MCP mutation tool under the caller's Clerk-authenticated org. The
- * tool handler resolves its own tenant from the request (Clerk session fallback
- * in `resolveMcpTenantContext`), so no extra tenant wiring is needed — the route
- * just guards the allowlist, validates input against the tool's schema, and runs
- * the existing handler with the full app service layer (provided via `MainLive`).
+ * the named MCP mutation tool under the caller's authenticated tenant. The
+ * authorization middleware has already resolved CurrentTenant; the executor
+ * requires that tenant as an ordinary argument and closes all handler services.
  *
  * When the caller names the conversation the proposal came from, the outcome is also appended to
  * that session's durable log as the proposed call's `tool-result`. That is what settles the
@@ -45,6 +53,7 @@ const recordApplyOutcome = (
 		readonly messageId?: string
 		readonly toolCallId?: string
 	},
+	orgId: TenantContext["orgId"],
 	content: string,
 	isError: boolean,
 ) =>
@@ -55,8 +64,7 @@ const recordApplyOutcome = (
 		const sessionOrgId = orgIdFromChatSessionId(sessionId)
 		if (!sessionOrgId) return
 
-		const tenant = yield* Effect.option(resolveHttpMcpTenant)
-		if (Option.isNone(tenant) || tenant.value.orgId !== sessionOrgId) return
+		if (orgId !== sessionOrgId) return
 
 		const env = yield* WorkerEnvironment
 		const stub = chatSessionStub(env, sessionId)
@@ -80,6 +88,14 @@ export const HttpChatLive = HttpApiBuilder.group(MapleApi, "chat", (handlers) =>
 	handlers.handle("apply", ({ payload }) =>
 		Effect.gen(function* () {
 			const tool = payload.tool
+			const authenticated = yield* CurrentTenant.Context
+			const executor = yield* McpToolExecutor
+			const tenant: TenantContext = {
+				orgId: authenticated.orgId,
+				userId: authenticated.userId,
+				roles: [...authenticated.roles],
+				authMode: authenticated.authMode,
+			}
 
 			// Defense in depth: only approval-gated mutations are applicable here.
 			if (!MUTATING_TOOL_NAMES.has(tool)) {
@@ -89,12 +105,12 @@ export const HttpChatLive = HttpApiBuilder.group(MapleApi, "chat", (handlers) =>
 				})
 			}
 
-			const definition = mapleToolDefinitions.find((d) => d.name === tool)
+			const definition = mapleToolCatalog.find((d) => d.name === tool)
 			if (!definition) {
 				return yield* new ChatToolNotFoundError({ tool, message: `Unknown tool "${tool}".` })
 			}
 
-			const decoded = yield* Effect.try({
+			yield* Effect.try({
 				try: () => Schema.decodeUnknownSync(definition.schema)(payload.input),
 				catch: (error) =>
 					new ChatToolInvalidInputError({
@@ -103,27 +119,21 @@ export const HttpChatLive = HttpApiBuilder.group(MapleApi, "chat", (handlers) =>
 					}),
 			})
 
-			// Run the real tool. Mirror the MCP server: domain-level tool failures
-			// (query/tenant/auth) become an `isError` result carrying the message,
-			// rather than a transport error — the approval card surfaces it inline.
-			const result = yield* definition.handler(decoded).pipe(
-				Effect.catchTags({
-					"@maple/mcp/errors/McpQueryError": (e) => Effect.succeed(errorResult(e._tag, e.message)),
-					"@maple/mcp/errors/McpTenantError": (e) => Effect.succeed(errorResult(e._tag, e.message)),
-					"@maple/mcp/errors/McpAuthMissingError": (e) =>
-						Effect.succeed(errorResult(e._tag, e.message)),
-					"@maple/mcp/errors/McpAuthInvalidError": (e) =>
-						Effect.succeed(errorResult(e._tag, e.message)),
-					"@maple/mcp/errors/McpInvalidTenantError": (e) =>
-						Effect.succeed(errorResult(`${e._tag} (${e.field})`, e.message)),
-				}),
+			// Domain-level tool failures are encoded as `isError` by the shared dispatcher.
+			// A defect remains a transport failure, but it is declared and serialized instead
+			// of falling through HttpApi as a bodyless 500.
+			const result = yield* executor.execute(tenant, tool, payload.input).pipe(
+				Effect.catchTag("@maple/internal-rpc/ToolNotFoundError", () =>
+					Effect.fail(new ChatToolNotFoundError({ tool, message: `Unknown tool "${tool}".` })),
+				),
+				Effect.catchDefect((defect) => executionDefect(tool, defect)),
 			)
 
 			const content = result.content.map((entry) => entry.text).join("\n")
 
 			// Best-effort: the mutation has already run and its outcome is the response. A session
 			// that cannot be reached must not turn a successful apply into a failed request.
-			yield* recordApplyOutcome(payload, content, result.isError === true).pipe(
+			yield* recordApplyOutcome(payload, tenant.orgId, content, result.isError === true).pipe(
 				Effect.catchCause(() => Effect.void),
 			)
 

@@ -29,14 +29,3 @@ export function useAlertRuleStates(ruleId?: AlertRuleId): ReadonlyArray<AlertRul
 		return ruleId != null ? all.filter((row) => row.rule_id === ruleId) : all
 	}, [rows, ruleId])
 }
-
-/** Group state rows per rule id, for overview-style consumers. */
-export function statesByRuleId(states: ReadonlyArray<AlertRuleStateRow>): Map<string, AlertRuleStateRow[]> {
-	const map = new Map<string, AlertRuleStateRow[]>()
-	for (const state of states) {
-		const list = map.get(state.rule_id)
-		if (list) list.push(state)
-		else map.set(state.rule_id, [state])
-	}
-	return map
-}

@@ -27,7 +27,8 @@ describe("mintOrgReadJwt", () => {
 			scopes: ReadonlyArray<{ type: string; resource: string; filter: string }>
 		}
 		assert.strictEqual(decoded.workspace_id, "ws-uuid-123")
-		assert.strictEqual(decoded.name, "maple-raw-sql")
+		assert.match(decoded.name, /^maple-raw-sql-[0-9a-f]{16}$/)
+		assert.notInclude(decoded.name, "org_abc")
 		assert.strictEqual(decoded.exp, 1_600)
 		assert.deepStrictEqual(decoded.scopes, [
 			{ type: "DATASOURCES:READ", resource: "traces", filter: "OrgId = 'org_abc'" },
@@ -37,6 +38,27 @@ describe("mintOrgReadJwt", () => {
 		// Signature verifies independently against the explicit signing key.
 		const expected = createHmac("sha256", SIGNING_KEY).update(`${header}.${payload}`).digest("base64url")
 		assert.strictEqual(signature, expected)
+	})
+
+	it("adds an org-isolated Tinybird rate-limit bucket when configured", () => {
+		const tokenFor = (orgId: string) =>
+			mintOrgReadJwt({
+				signingKey: SIGNING_KEY,
+				workspaceId: "ws-uuid-123",
+				orgId,
+				datasourceNames: ["traces"],
+				nowSeconds: 1_000,
+				ttlSeconds: 600,
+				rpsLimit: 25,
+			})
+		const decode = (token: string) =>
+			decodePart(token.split(".")[1]) as { name: string; limits: { rps: number } }
+
+		const a = decode(tokenFor("org_a"))
+		const b = decode(tokenFor("org_b"))
+		assert.deepStrictEqual(a.limits, { rps: 25 })
+		assert.deepStrictEqual(b.limits, { rps: 25 })
+		assert.notStrictEqual(a.name, b.name)
 	})
 
 	it("escapes single quotes in the org id to prevent filter injection", () => {

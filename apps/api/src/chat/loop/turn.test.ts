@@ -7,13 +7,22 @@
  */
 import { assert, describe, it } from "vitest"
 import { Effect, Layer, Schema, Stream } from "effect"
-import { LLMClient, LLMEvent, Tool, type LLMRequest, type Model, type Tools } from "@maple/llm"
+import {
+	LLMClient,
+	LLMEvent,
+	Tool,
+	type FinishReason,
+	type LLMRequest,
+	type Model,
+	type Tools,
+} from "@maple/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
-import { runChatTurn, type ChatTurnEvent } from "./index"
+import { makeTurnObservability, runChatTurn, type ChatTurnEvent } from "./index"
 import { MAX_STEP_ATTEMPTS } from "./budgets"
 import { DEFAULT_RULESET } from "../permissions"
 import type { AgentDefinition } from "../agents"
 import { PermissionRule } from "@maple/domain/permission"
+import type { McpToolExecutorShape } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
 const TENANT: TenantContext = {
@@ -23,6 +32,13 @@ const TENANT: TenantContext = {
 	authMode: "self_hosted",
 }
 
+const TOOL_EXECUTOR = {
+	execute: (_tenant, name) =>
+		Effect.succeed({
+			content: [{ type: "text" as const, text: `${name} completed` }],
+		}),
+} satisfies McpToolExecutorShape
+
 const MODEL: Model = CloudflareWorkersAI.configure({
 	accountId: "test",
 	apiKey: "test",
@@ -31,7 +47,14 @@ const MODEL: Model = CloudflareWorkersAI.configure({
 /** A text delta, as the provider-neutral event the turn folds. */
 const textDelta = (text: string): LLMEvent => ({ type: "text-delta", id: "t1", text }) as LLMEvent
 
-const finish = (): LLMEvent => ({ type: "finish", reason: "stop" }) as LLMEvent
+const finish = (reason: FinishReason = "stop"): LLMEvent => ({ type: "finish", reason }) as LLMEvent
+
+const reasoningDelta = (text: string): LLMEvent => ({ type: "reasoning-delta", id: "r1", text }) as LLMEvent
+
+const providerError = (
+	message: string,
+	options: { readonly retryable?: boolean; readonly classification?: "context-overflow" } = {},
+): LLMEvent => ({ type: "provider-error", message, ...options }) as LLMEvent
 
 /**
  * `input` matters to more than the tool: `stop.ts` fingerprints it, so a fixture that wants many
@@ -106,12 +129,15 @@ interface CollectOverrides {
 
 const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) => {
 	const stub = stubModel(steps)
+	const observability = makeTurnObservability()
 	return runChatTurn({
 		sessionId: overrides.sessionId ?? "org_test:tab",
 		tenant: TENANT,
+		toolExecutor: TOOL_EXECUTOR,
 		model: MODEL,
 		messages: [],
 		messageId: "m1",
+		observability,
 		...(overrides.isCurrent ? { isCurrent: overrides.isCurrent } : {}),
 		...(overrides.softStop ? { softStop: overrides.softStop } : {}),
 		...(overrides.agent ? { agent: overrides.agent } : {}),
@@ -121,7 +147,7 @@ const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) =
 		Stream.runCollect,
 		Effect.map((events) => Array.from(events) as ChatTurnEvent[]),
 		Effect.provide(stub.layer),
-		Effect.map((events) => ({ events, requests: stub.log, calls: stub.calls() })),
+		Effect.map((events) => ({ events, requests: stub.log, calls: stub.calls(), observability })),
 	)
 }
 
@@ -227,6 +253,122 @@ describe("runChatTurn", () => {
 		// An abort already recorded the terminal event on the session; emitting another here would
 		// double-close the turn in the durable log.
 		assert.isEmpty(terminal(events))
+	})
+})
+
+describe("runChatTurn completion outcomes", () => {
+	it.each(["stop", "length"] as const)("recovers one blank %s completion", async (reason) => {
+		const result = await Effect.runPromise(
+			collect([[finish(reason)], [textDelta("Recovered answer."), finish()]]),
+		)
+
+		assert.equal(result.calls, 2)
+		assert.equal(fold(result.events), "Recovered answer.")
+		assert.lengthOf(retries(result.events), 1)
+		const marker = retries(result.events)[0]
+		assert.equal(marker?.type === "turn-retry" ? marker.reason : undefined, "EmptyOutput")
+		assert.equal(marker?.type === "turn-retry" ? marker.delayMs : undefined, 0)
+		assert.equal(result.observability.emptyOutput, true)
+		assert.equal(result.observability.recoveryCount, 1)
+		assert.equal(result.observability.outcome, "stop")
+	})
+
+	it("retracts whitespace before recovering", async () => {
+		const result = await Effect.runPromise(
+			collect([
+				[textDelta("   "), finish()],
+				[textDelta("Visible"), finish()],
+			]),
+		)
+
+		const marker = retries(result.events)[0]
+		assert.equal(marker?.type === "turn-retry" ? marker.retractChars : undefined, 3)
+		assert.equal(fold(result.events), "Visible")
+	})
+
+	it("preserves reasoning in the private recovery request", async () => {
+		const result = await Effect.runPromise(
+			collect([
+				[reasoningDelta("analysis only"), finish()],
+				[textDelta("Visible"), finish()],
+			]),
+		)
+
+		const recovery = result.requests[1]
+		const reasoning = recovery?.messages
+			.flatMap((message) => message.content)
+			.filter((part) => part.type === "reasoning")
+			.map((part) => part.text)
+			.join("")
+		assert.equal(reasoning, "analysis only")
+		const instruction = recovery?.messages
+			.at(-1)
+			?.content.map((part) => (part.type === "text" ? part.text : ""))
+			.join("")
+		assert.include(instruction ?? "", "without any visible answer")
+		assert.isEmpty(result.events.filter((event) => event.type === "user-message"))
+	})
+
+	it("fails visibly after the one blank recovery is exhausted", async () => {
+		const result = await Effect.runPromise(collect([[finish()], [finish()], [textDelta("never")]]))
+
+		assert.equal(result.calls, 2)
+		assert.lengthOf(retries(result.events), 1)
+		assert.lengthOf(terminal(result.events), 1)
+		const end = terminal(result.events)[0]
+		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "error")
+		assert.equal(end?.type === "turn-end" ? end.error : undefined, "Maple didn't produce a response.")
+	})
+
+	it.each(["content-filter", "error", "unknown", "tool-calls"] as const)(
+		"does not auto-retry a %s finish without deliverable output",
+		async (reason) => {
+			const result = await Effect.runPromise(collect([[finish(reason)], [textDelta("never")]]))
+			assert.equal(result.calls, 1)
+			assert.isEmpty(retries(result.events))
+			const end = terminal(result.events)[0]
+			assert.equal(end?.type === "turn-end" ? end.reason : undefined, "error")
+			assert.equal(
+				end?.type === "turn-end" ? end.error : undefined,
+				reason === "content-filter"
+					? "Maple couldn't answer that request."
+					: "Maple couldn't complete this response.",
+			)
+		},
+	)
+
+	it("retries a response-level provider error only when marked retryable", async () => {
+		const retried = await Effect.runPromise(
+			collect([[providerError("overloaded", { retryable: true })], [textDelta("ok"), finish()]]),
+		)
+		assert.equal(retried.calls, 2)
+		assert.equal(fold(retried.events), "ok")
+		assert.lengthOf(retries(retried.events), 1)
+
+		const terminalFailure = await Effect.runPromise(
+			collect([[providerError("invalid request")], [textDelta("never"), finish()]]),
+		)
+		assert.equal(terminalFailure.calls, 1)
+		const end = terminal(terminalFailure.events)[0]
+		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "error")
+		assert.equal(
+			end?.type === "turn-end" ? end.error : undefined,
+			"Maple couldn't complete this response.",
+		)
+		assert.notInclude(end?.type === "turn-end" ? (end.error ?? "") : "", "invalid request")
+	}, 10_000)
+
+	it("fails a blank closing step instead of escaping the step bound", async () => {
+		const result = await Effect.runPromise(
+			collect([[toolCall("c1", "find_errors"), finish()], [finish()]], {
+				agent: agentWith({ steps: 1 }),
+			}),
+		)
+
+		assert.equal(result.calls, 2)
+		assert.isEmpty(retries(result.events))
+		const end = terminal(result.events)[0]
+		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "error")
 	})
 })
 
@@ -350,26 +492,35 @@ const fold = (events: ReadonlyArray<ChatTurnEvent>): string =>
 	}, "")
 
 describe("runChatTurn retry", () => {
-	it("retracts nothing when the failed attempt's batch never flushed", async () => {
+	it("retracts exactly what a sub-batch attempt had flushed, whatever that was", async () => {
 		const result = await Effect.runPromise(
 			collect([{ events: [textDelta("Hello wo")], fail: true }, [textDelta("Hello world."), finish()]]),
 		)
 
-		// `Stream.groupedWithin` drops its pending buffer on an upstream failure rather than
-		// flushing it, so a provider that dies inside one batching window emitted nothing and there
-		// is nothing to take back. The marker is still emitted — it is also the progress signal.
+		// Below `DELTA_BATCH_SIZE`, so whether this attempt emitted anything is a race between the
+		// provider's failure and the 16ms window: `Stream.groupedWithin` drops a pending buffer on an
+		// upstream failure, but a window that fires first ships it. Both are correct — the invariant
+		// is that the marker takes back exactly what reached a consumer and no more, so the reader's
+		// fold lands on the retry's text alone. Asserting a literal count here would be asserting
+		// which fiber won.
 		const retracted = retries(result.events)
 		assert.lengthOf(retracted, 1)
-		assert.equal(retracted[0]?.type === "turn-retry" ? retracted[0].retractChars : undefined, 0)
+		const at = result.events.findIndex((event) => event.type === "turn-retry")
+		const marker = result.events[at]
+		const flushedBefore = textOf(result.events.slice(0, at))
+		assert.equal(marker?.type === "turn-retry" ? marker.retractChars : undefined, flushedBefore.length)
 		assert.equal(result.calls, 2)
-		assert.equal(textOf(result.events), "Hello world.")
+		assert.equal(fold(result.events), "Hello world.")
 		assert.lengthOf(terminal(result.events), 1)
 	})
 
 	it("retracts exactly the text the failed attempt did flush", async () => {
-		// A full batch (`DELTA_BATCH_SIZE`) flushes on the size cap regardless of timing, so this is
-		// the deterministic stand-in for a real provider stream, where the 16ms window fires
-		// constantly and most text has already shipped by the time the body dies.
+		// A full batch (`DELTA_BATCH_SIZE`) flushes on the size cap regardless of timing, so unlike
+		// the case above this attempt is guaranteed to have shipped text — the stand-in for a real
+		// provider stream, where the 16ms window fires constantly and most text has already shipped
+		// by the time the body dies. Only the size-capped batch is guaranteed: the trailing
+		// `"buffered"` delta is a pending partial batch, and on a slow runner the window fires
+		// before the failure and ships that too. So the floor is fixed; the exact count is not.
 		const flushed = Array.from({ length: 24 }, (_, i) => textDelta(String(i % 10)))
 		const result = await Effect.runPromise(
 			collect([
@@ -383,8 +534,11 @@ describe("runChatTurn retry", () => {
 		// and the log is durable.
 		const retracted = retries(result.events)
 		assert.lengthOf(retracted, 1)
-		const marker = retracted[0]
-		assert.equal(marker?.type === "turn-retry" ? marker.retractChars : undefined, 24)
+		const at = result.events.findIndex((event) => event.type === "turn-retry")
+		const marker = result.events[at]
+		const flushedBefore = textOf(result.events.slice(0, at))
+		assert.equal(marker?.type === "turn-retry" ? marker.retractChars : undefined, flushedBefore.length)
+		assert.isAtLeast(flushedBefore.length, 24)
 		assert.equal(marker?.type === "turn-retry" ? marker.attempt : undefined, 2)
 
 		// Fold the whole event list the way `ChatSession.history()` does, and check the reader lands
@@ -515,7 +669,7 @@ describe("runChatTurn permissions", () => {
 	it("honours an agent's own step budget", async () => {
 		const looping: Step = [toolCall("c1", "find_errors"), finish()]
 		const result = await Effect.runPromise(
-			collect([...Array.from({ length: 6 }, () => looping), [textDelta("summary"), finish()]], {
+			collect([...Array.from({ length: 3 }, () => looping), [textDelta("summary"), finish()]], {
 				agent: agentWith({ steps: 3 }),
 			}),
 		)
@@ -543,7 +697,7 @@ describe("runChatTurn max steps, defensively", () => {
 		assert.equal(result.calls, 3)
 		assert.lengthOf(terminal(result.events), 1)
 		const end = terminal(result.events)[0]
-		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "max-steps")
+		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "error")
 	}, 30_000)
 })
 
@@ -618,7 +772,6 @@ describe("runChatTurn closing submit", () => {
 	 */
 	it("closes with the submit tool when a soft stop fires mid-run", async () => {
 		const submitted: Array<unknown> = []
-		let stopped = false
 		const result = await Effect.runPromise(
 			collect(
 				[
@@ -628,12 +781,8 @@ describe("runChatTurn closing submit", () => {
 				{
 					extraTools: submitTool(submitted),
 					closingSubmit: { toolName: SUBMIT },
-					softStop: () => {
-						// False on the first check so one real step runs, then true.
-						const previous = stopped
-						stopped = true
-						return previous
-					},
+					// Checked after the first real tool step, which is when the forced submit closes it.
+					softStop: () => true,
 				},
 			),
 		)
@@ -645,6 +794,86 @@ describe("runChatTurn closing submit", () => {
 				: undefined,
 			"max-steps",
 		)
+	}, 30_000)
+
+	/**
+	 * The `validation_inconclusive` bug. The validator has no tools but its submit
+	 * one, so it answers on step 0 — and when it answered in *prose* it never made a
+	 * tool call, so it never reached the branch that offers the forced submit. The
+	 * turn ended with text nobody reads and an empty verdict.
+	 */
+	it("closes with the forced submit when the model answers in prose instead of calling it", async () => {
+		const submitted: Array<unknown> = []
+		const result = await Effect.runPromise(
+			collect(
+				[
+					[textDelta("The strongest candidate is the pool."), finish()],
+					[toolCall("s1", SUBMIT, { claim: "pool exhaustion" }), finish()],
+				],
+				{ extraTools: submitTool(submitted), closingSubmit: { toolName: SUBMIT } },
+			),
+		)
+
+		assert.deepEqual(submitted, [{ claim: "pool exhaustion" }])
+		const closing = result.requests[result.requests.length - 1]
+		assert.equal(closing?.toolChoice?.name, SUBMIT)
+		assert.lengthOf(terminal(result.events), 1)
+	}, 30_000)
+
+	/** Same gap, silent shape: an empty completion is no more an answer than prose is. */
+	it("closes with the forced submit after an empty completion exhausts its recovery", async () => {
+		const submitted: Array<unknown> = []
+		await Effect.runPromise(
+			collect([[finish()], [finish()], [toolCall("s1", SUBMIT, { claim: "recovered" }), finish()]], {
+				extraTools: submitTool(submitted),
+				closingSubmit: { toolName: SUBMIT },
+			}),
+		)
+
+		assert.deepEqual(submitted, [{ claim: "recovered" }])
+	}, 30_000)
+
+	/** And it cannot loop: a closing step that answers in prose too just ends. */
+	it("does not offer the submit tool twice when the closing step ignores it", async () => {
+		const submitted: Array<unknown> = []
+		const result = await Effect.runPromise(
+			collect(
+				[
+					[textDelta("prose"), finish()],
+					[textDelta("prose again"), finish()],
+				],
+				{
+					extraTools: submitTool(submitted),
+					closingSubmit: { toolName: SUBMIT },
+				},
+			),
+		)
+
+		assert.isEmpty(submitted)
+		assert.equal(result.calls, 2)
+		assert.lengthOf(terminal(result.events), 1)
+	}, 30_000)
+
+	/**
+	 * The submit call is the answer, so the turn is over. Recursing would spend
+	 * another model call — and under the validator's one-step budget that call is the
+	 * forced closing step, which asks for a second verdict and overwrites the first.
+	 */
+	it("ends the turn once the submit tool has been called, without another step", async () => {
+		const submitted: Array<unknown> = []
+		const result = await Effect.runPromise(
+			collect(
+				[
+					[toolCall("s1", SUBMIT, { claim: "first" }), finish()],
+					[toolCall("s2", SUBMIT, { claim: "second" }), finish()],
+				],
+				{ extraTools: submitTool(submitted), closingSubmit: { toolName: SUBMIT } },
+			),
+		)
+
+		assert.deepEqual(submitted, [{ claim: "first" }])
+		assert.equal(result.calls, 1)
+		assert.lengthOf(terminal(result.events), 1)
 	}, 30_000)
 
 	/**

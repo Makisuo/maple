@@ -4,6 +4,7 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
+		"./aws": "./src/aws/index.ts",
 		"./cloudflare": "./src/cloudflare/index.ts",
 		"./dev-urls": "./src/dev-urls.ts"
 	},

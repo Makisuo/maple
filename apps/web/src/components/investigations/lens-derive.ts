@@ -117,62 +117,69 @@ export const checksHeld = (checks: ReadonlyArray<LensCheck>): number =>
 	checks.filter((check) => check.state === "held").length
 
 /* -------------------------------------------------------------------------------------------------
- * Run spine — fan-out segment
+ * Lens nodes — the provenance canvas's fan
  * -----------------------------------------------------------------------------------------------*/
 
-export interface RunStep {
-	readonly key: string
-	readonly label: string
-	readonly detail: string
-	readonly tone: "muted" | "active" | "success" | "failed"
+export type LensTone = "muted" | "primary" | "success" | "info" | "warning" | "destructive"
+/**
+ * `queued` and `reported` used to be one `pending` icon, which meant both wore a
+ * loader — motionless, because only a running lane is allowed to move. A stopped
+ * spinner is the one glyph that says nothing at all: it reads as a component that
+ * failed to start rather than as a state.
+ *
+ * They are also not the same state. A queued lane has not begun; a reported one
+ * has finished its work and is waiting on someone else's judgement. Two waits,
+ * two glyphs.
+ */
+export type LensIcon = "queued" | "running" | "reported" | "confirmed" | "ruledOut" | "deadline" | "failed"
+
+export interface LensNodeState {
+	/** Always present. The word carries the state; colour only reinforces it. */
+	readonly word: string
+	readonly tone: LensTone
+	readonly icon: LensIcon
+	/** A ruled-out lane strikes its title — the claim was considered and rejected. */
+	readonly struck: boolean
+	/** A queued lane hasn't started, so its border is dashed rather than solid. */
+	readonly dashed: boolean
 }
 
 /**
- * The steps between "Opened" and the run's terminal node. The rail still owns
- * the endpoints — those come from real timestamps — and this fills the middle.
- * Empty on the single-pass path, where there is no fan-out to describe.
+ * The same status/verdict switch `lensChecks` walks, resolved to a node's badge
+ * instead of a rail row.
+ *
+ * It lives beside `lensChecks` rather than in the canvas for the reason that
+ * function exists at all: the fan and the checks rail describe the same lanes
+ * 600px apart, and two independent mappings are how you end up with a green tick
+ * next to a node reading "ruled out".
  */
-export const fanoutRunSteps = (investigation: V2Investigation): ReadonlyArray<RunStep> => {
-	const lenses = investigation.lens_runs
-	if (lenses.length === 0) return []
-	const tally = lensTally(lenses)
-	const validator = investigation.validator
-
-	const steps: Array<RunStep> = [
-		{
-			key: "dispatched",
-			label: `Dispatched ${tally.total} lenses`,
-			detail: investigation.fanout.state === "none" ? "" : "Each works one angle in parallel",
-			tone: "muted",
-		},
-	]
-
-	if (tally.settled < tally.total) {
-		steps.push({
-			key: "reporting",
-			label: `${tally.settled} of ${tally.total} reported`,
-			detail: validator?.note ?? "Validation blocked until every lens reports",
-			tone: "active",
-		})
-		return steps
+export const lensNodeState = (lens: LensRun): LensNodeState => {
+	const base = { struck: false, dashed: false }
+	switch (lens.status) {
+		case "queued":
+			return { ...base, word: "PENDING", tone: "muted", icon: "queued", dashed: true }
+		case "checking":
+			return { ...base, word: "RUNNING", tone: "primary", icon: "running" }
+		default: {
+			// A lane that ran out of clock says so before it says anything about a
+			// verdict — "ruled out" on a lane that never finished is a claim the run
+			// did not make.
+			if (lens.deadlineHit) {
+				return { ...base, word: "DEADLINE HIT", tone: "warning", icon: "deadline" }
+			}
+			if (lens.status === "no_finding") {
+				return { ...base, word: "NO FINDING", tone: "muted", icon: "failed" }
+			}
+			if (lens.verdict === "pending") {
+				return { ...base, word: "REPORTED", tone: "muted", icon: "reported" }
+			}
+			if (lens.verdict === "promoted") {
+				return { ...base, word: "CONFIRMED", tone: "success", icon: "confirmed" }
+			}
+			if (lens.verdict === "merged") {
+				return { ...base, word: "MERGED", tone: "info", icon: "confirmed" }
+			}
+			return { ...base, word: "RULED OUT", tone: "muted", icon: "ruledOut", struck: true }
+		}
 	}
-
-	steps.push({
-		key: "reported",
-		label: `All ${tally.total} reported`,
-		detail: "",
-		tone: "muted",
-	})
-
-	if (validator?.status === "ranked") {
-		steps.push({ key: "validated", label: "Validated", detail: validator.note, tone: "success" })
-	} else if (validator?.status === "rejected_all") {
-		steps.push({
-			key: "validation-inconclusive",
-			label: "Validation inconclusive",
-			detail: validator.note,
-			tone: "failed",
-		})
-	}
-	return steps
 }

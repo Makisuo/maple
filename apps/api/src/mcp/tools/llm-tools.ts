@@ -1,12 +1,8 @@
 /**
  * Maple's MCP registry, wrapped as `@maple/llm` tools.
  *
- * One wrapper, two callers: the streaming chat turn (`apps/api/src/chat/tools.ts`) and the
- * autonomous triage loop (`apps/api/src/workflows/triage-agent.ts`). They were near-identical
- * copies, down to a duplicated `withRuntimeServices` and `toolResultText` — and they had already
- * drifted in the one place it mattered: triage still rendered a whole Effect `Cause` into the
- * message it handed the model, which is stack frames and, inside a `DatabaseError`, connection
- * details. Both now go through `summarizeToolFailure`.
+ * The streaming chat turn and investigation agents share this wrapper so tool
+ * dispatch, runtime provisioning, and safe failure summaries cannot drift.
  *
  * Dynamic (`jsonSchema`) mode is the right fit for every tool here: `toInputSchema` already produces
  * the exact JSON Schema the MCP surface publishes, and `callMcpTool` does its own Effect Schema
@@ -18,25 +14,10 @@
  */
 import { Tool, ToolFailure, type Tools } from "@maple/llm"
 import { Cause, Effect } from "effect"
-import { callMcpTool } from "@/mcp/dispatcher"
-import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import { mapleToolDefinitions, toInputSchema } from "@/mcp/tools/registry"
+import type { McpToolExecutorShape } from "@/mcp/dispatcher"
+import { mapleToolCatalog, toInputSchema } from "@/mcp/tools/registry"
 import { truncateToolOutput } from "@/mcp/tools/tool-output"
 import type { TenantContext } from "@/services/auth/tenant-context"
-
-/**
- * Re-pin the service requirements of an MCP tool handler.
- *
- * `MapleToolDefinition.handler` types its requirements as `any` — a deliberate erasure at the
- * boundary between ~57 heterogeneous tool implementations and the single `McpServer.addTool`
- * signature (see the comment on the type in `mcp/tools/registry.ts`). `@maple/llm`'s `Tool.make`
- * insists on `never`, and `any` is not assignable to `never` in that position, so the erasure has
- * to be undone somewhere. Doing it here, once and by name, keeps it visible: the services really
- * are supplied, by the `ManagedRuntime` each caller builds around its loop.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const withRuntimeServices = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Effect<A, E> =>
-	effect as Effect.Effect<A, E>
 
 /**
  * Serialize an MCP tool result for the model. Maple's tools already return model-facing text
@@ -98,9 +79,13 @@ export interface BuildMapleToolsOptions {
 }
 
 /** Wrap the Maple MCP registry as `@maple/llm` tools. */
-export const buildMapleTools = (tenant: TenantContext, options: BuildMapleToolsOptions = {}): Tools =>
+export const buildMapleTools = (
+	executor: McpToolExecutorShape,
+	tenant: TenantContext,
+	options: BuildMapleToolsOptions = {},
+): Tools =>
 	Object.fromEntries(
-		mapleToolDefinitions
+		mapleToolCatalog
 			.filter((definition) => options.include?.(definition.name) ?? true)
 			.map((definition) => {
 				const gated = options.gate?.(definition.name) ?? false
@@ -118,27 +103,24 @@ export const buildMapleTools = (tenant: TenantContext, options: BuildMapleToolsO
 											message: `${definition.name} requires user approval and was not executed.`,
 										}),
 									)
-								: withRuntimeServices(
-										callMcpTool(definition.name, params).pipe(
-											Effect.provideService(CurrentMcpTenant, tenant),
-											Effect.flatMap((result) =>
-												result.isError
-													? Effect.fail(
-															new ToolFailure({
-																message: toolResultText(result),
-															}),
-														)
-													: Effect.succeed(toolResultText(result)),
-											),
-											// A tool that fails outright (unknown tool, tenant error) must
-											// not kill the turn — hand the model the message and let it
-											// route around.
-											Effect.catchCause((cause) =>
-												Effect.fail(
-													new ToolFailure({
-														message: `Tool failed: ${summarizeToolFailure(cause)}`,
-													}),
-												),
+								: executor.execute(tenant, definition.name, params).pipe(
+										Effect.flatMap((result) =>
+											result.isError
+												? Effect.fail(
+														new ToolFailure({
+															message: toolResultText(result),
+														}),
+													)
+												: Effect.succeed(toolResultText(result)),
+										),
+										// A tool that fails outright (unknown tool, tenant error) must
+										// not kill the turn — hand the model the message and let it
+										// route around.
+										Effect.catchCause((cause) =>
+											Effect.fail(
+												new ToolFailure({
+													message: `Tool failed: ${summarizeToolFailure(cause)}`,
+												}),
 											),
 										),
 									),

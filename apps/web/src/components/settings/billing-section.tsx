@@ -1,7 +1,6 @@
 import { useMemo, type ReactNode } from "react"
 import { format } from "date-fns"
 
-import { SpendLimits } from "@maple/domain/http"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Button } from "@maple/ui/components/ui/button"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -11,19 +10,18 @@ import { Result, useAtomValue } from "@/lib/effect-atom"
 import {
 	billingCustomerAtom,
 	billingDailySpendAtom,
-	billingInvoicesAtom,
 	billingPlansAtom,
 	billingUsageAtom,
-	spendLimitsAtom,
 } from "@/lib/services/atoms/billing-atoms"
 import { useBillingActions } from "@/hooks/use-billing-actions"
 import { getLegacyPlanInfo, getTrialStatus, type TrialStatus } from "@/lib/billing/plan-gating"
 import { buildSpendModel } from "@/lib/billing/spend"
 import { estimateCycleCost } from "@/lib/billing/cost-estimate"
+import { maximumInvoiceCents, spendLimitFor } from "@/lib/billing/controls"
 import { BillingKpis, BillingKpisSkeleton } from "./billing-kpis"
 import { FeatureUsageCards, FeatureUsageCardsSkeleton } from "./feature-usage-cards"
 import { SpendChart, SpendChartSkeleton } from "./spend-chart"
-import { SpendLimitsCard, SpendLimitsCardSkeleton } from "./spend-limits-card"
+import { BillingControlsCard, BillingControlsCardSkeleton } from "./billing-controls-card"
 import { PlanOffer } from "./plan-offer"
 import { CostBreakdown, CostBreakdownSkeleton } from "./cost-breakdown"
 import { InvoicesSection } from "./invoices-section"
@@ -37,21 +35,6 @@ import { InvoicesSection } from "./invoices-section"
  * feature cards sit ABOVE the chart deliberately: they are the things being
  * billed, and the chart is only their sum over time.
  */
-
-// The guardrails card renders for an org that has never configured limits, so an
-// absent row must resolve to the same defaults the API would synthesize rather
-// than hiding the card entirely.
-const DEFAULT_SPEND_LIMITS = new SpendLimits({
-	monthlyLimitCents: null,
-	enforcementMode: "notify",
-	alertThresholdPercents: [80, 100],
-	featureCaps: {},
-	lastEvaluatedAt: null,
-	evaluatedSpendCents: null,
-	breachedAt: null,
-	pausedAt: null,
-	pausedFeatures: [],
-})
 
 function DataPoint({
 	label,
@@ -177,27 +160,12 @@ export function BillingSection({ isAdmin = true }: { isAdmin?: boolean }) {
 	const plansResult = useAtomValue(billingPlansAtom)
 	const usageResult = useAtomValue(billingUsageAtom)
 	const dailySpendResult = useAtomValue(billingDailySpendAtom)
-	const spendLimitsResult = useAtomValue(spendLimitsAtom)
-	const invoicesResult = useAtomValue(billingInvoicesAtom)
 	const { openCustomerPortal } = useBillingActions()
 
 	const customer = Result.isSuccess(customerResult) ? customerResult.value : undefined
 	const plans = Result.isSuccess(plansResult) ? plansResult.value.plans : undefined
 	const usageTotal = Result.isSuccess(usageResult) ? usageResult.value.total : undefined
 	const daily = Result.isSuccess(dailySpendResult) ? dailySpendResult.value : undefined
-	// A failed limits read must not hide the guardrails card — the defaults are a
-	// truthful "nothing configured", which is what an absent row means anyway.
-	const limits = Result.isSuccess(spendLimitsResult) ? spendLimitsResult.value : DEFAULT_SPEND_LIMITS
-
-	// Most recent closed invoice, for the edit dialog's "last cycle closed at"
-	// anchor — what the ceiling is being set against.
-	const lastCycleTotal = useMemo(() => {
-		if (!Result.isSuccess(invoicesResult)) return null
-		const closed = invoicesResult.value.invoices
-			.filter((invoice) => invoice.status === "paid")
-			.sort((a, b) => b.createdAt - a.createdAt)
-		return closed[0]?.total ?? null
-	}, [invoicesResult])
 
 	const isLoading = Result.isInitial(customerResult) || Result.isInitial(usageResult)
 	// The estimate also needs the plan catalog (for base price + overage rates);
@@ -230,6 +198,13 @@ export function BillingSection({ isAdmin = true }: { isAdmin?: boolean }) {
 		() => buildSpendModel({ customer, plans, usage: usageTotal, nowMs: Date.now() }),
 		[customer, plans, usageTotal],
 	)
+	const maximumInvoice = maximumInvoiceCents(model, customer)
+	const overageCaps = Object.fromEntries(
+		(model?.features ?? []).map((feature) => [
+			feature.featureId,
+			spendLimitFor(customer, feature.featureId)?.overageLimit ?? null,
+		]),
+	)
 
 	return (
 		<div>
@@ -245,11 +220,7 @@ export function BillingSection({ isAdmin = true }: { isAdmin?: boolean }) {
 				{isLoading || model === null ? (
 					<BillingKpisSkeleton />
 				) : (
-					<BillingKpis
-						model={model}
-						limitCents={limits.monthlyLimitCents}
-						pausedAt={limits.pausedAt}
-					/>
+					<BillingKpis model={model} maximumInvoiceCents={maximumInvoice} />
 				)}
 			</section>
 
@@ -259,11 +230,7 @@ export function BillingSection({ isAdmin = true }: { isAdmin?: boolean }) {
 					{isLoading || model === null ? (
 						<FeatureUsageCardsSkeleton />
 					) : (
-						<FeatureUsageCards
-							model={model}
-							featureCaps={limits.featureCaps}
-							pausedFeatures={limits.pausedFeatures}
-						/>
+						<FeatureUsageCards model={model} overageCaps={overageCaps} />
 					)}
 				</div>
 			</section>
@@ -272,25 +239,20 @@ export function BillingSection({ isAdmin = true }: { isAdmin?: boolean }) {
 				{isLoading || model === null || Result.isInitial(dailySpendResult) ? (
 					<SpendChartSkeleton />
 				) : (
-					<SpendChart model={model} daily={daily} limitCents={limits.monthlyLimitCents} />
+					<SpendChart model={model} daily={daily} />
 				)}
 			</section>
 
 			<section className="mt-12">
 				<SectionHeader
-					title="Spend limits"
-					subtitle="Enforced at the ingest gateway · nothing is dropped without warning first"
+					title="Billing controls"
+					subtitle="Stored and enforced by Autumn per feature"
 				/>
 				<div className="mt-4">
-					{Result.isInitial(spendLimitsResult) ? (
-						<SpendLimitsCardSkeleton />
+					{customer === undefined ? (
+						<BillingControlsCardSkeleton />
 					) : (
-						<SpendLimitsCard
-							limits={limits}
-							model={model}
-							lastCycleTotal={lastCycleTotal}
-							canEdit={isAdmin}
-						/>
+						<BillingControlsCard customer={customer} model={model} canEdit={isAdmin} />
 					)}
 				</div>
 			</section>

@@ -26,9 +26,8 @@ import type { DailySpendResponse } from "@maple/domain/http"
  * "where will the bill land", and a daily bar chart makes the reader integrate in
  * their head. Per-day volume lives on the feature cards above.
  *
- * The base fee is a flat bottom band from day 1 — it's owed on day 1 — and the
- * amber dashed line is the configured spend limit. Amber appears nowhere else in
- * the plot, which is what makes the limit readable at a glance.
+ * The base fee is a flat bottom band from day 1 — it's owed on day 1 — while the
+ * dashed projection carries today's actual total to the end of the cycle.
  */
 
 const CHART_HEIGHT = 260
@@ -50,27 +49,16 @@ export function SpendChartSkeleton() {
 	return <Skeleton className="h-[300px] w-full rounded-none" />
 }
 
-export function SpendChart({
-	model,
-	daily,
-	limitCents,
-}: {
-	model: SpendModel
-	daily: DailySpendResponse | undefined
-	/** Configured monthly ceiling in cents, or null — draws the amber limit line. */
-	limitCents: number | null
-}) {
+export function SpendChart({ model, daily }: { model: SpendModel; daily: DailySpendResponse | undefined }) {
 	const data = useMemo(() => buildCumulativeSeries({ daily, model }), [daily, model])
 
-	const limitDollars = limitCents === null ? null : limitCents / 100
 	const projected = model.projectedCents / 100
 
-	// The y-domain must contain the limit line and the projection, or the two
-	// things the chart exists to compare would sit off-canvas.
+	// The y-domain must contain both actual spend and the projection.
 	const yMax = useMemo(() => {
-		const peak = Math.max(projected, limitDollars ?? 0, ...data.map((point) => point.total ?? 0), 1)
+		const peak = Math.max(projected, ...data.map((point) => point.total ?? 0), 1)
 		return Math.ceil((peak * 1.1) / 10) * 10
-	}, [data, limitDollars, projected])
+	}, [data, projected])
 
 	// Where "today" sits on an axis that now runs to the end of the cycle, and
 	// where the projection lands.
@@ -186,8 +174,7 @@ export function SpendChart({
 							/>
 						))}
 						{/* The projection: today's actual total joined to where the cycle
-						    lands, dashed because it hasn't happened. Amber, matching the
-						    limit line — both are statements about the future. */}
+						    lands, dashed because it hasn't happened. */}
 						{hasFuture && (
 							<Line
 								dataKey="projected"
@@ -210,19 +197,6 @@ export function SpendChart({
 								label={{
 									value: `${formatCurrency(projected, model.currency)} projected`,
 									position: "top",
-									fill: "var(--color-primary)",
-									fontSize: 10,
-								}}
-							/>
-						)}
-						{limitDollars !== null && (
-							<ReferenceLine
-								y={limitDollars}
-								stroke="var(--color-primary)"
-								strokeDasharray="4 4"
-								label={{
-									value: `SPEND LIMIT · ${formatCurrency(limitDollars, model.currency)}`,
-									position: "insideTopRight",
 									fill: "var(--color-primary)",
 									fontSize: 10,
 								}}

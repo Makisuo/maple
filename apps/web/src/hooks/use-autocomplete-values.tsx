@@ -10,7 +10,7 @@ import {
 	getSpanAttributeValuesResultAtom,
 	getTracesFacetsResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
-import { QUERY_BUILDER_METRIC_TYPES } from "@/lib/query-builder/model"
+import { QUERY_BUILDER_METRIC_TYPES } from "@maple/query-engine/query-builder"
 import { toNames } from "@/lib/query-builder/autocomplete-utils"
 import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete"
 

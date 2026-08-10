@@ -33,7 +33,11 @@ const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 class PlanetScaleWebhookUnavailable extends Schema.TaggedError<PlanetScaleWebhookUnavailable>()(
 	"PlanetScaleWebhookUnavailable",
 	{ body: Schema.String },
-) {}
+) {
+	override get message(): string {
+		return this.body
+	}
+}
 
 export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {

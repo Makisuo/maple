@@ -10,6 +10,13 @@ export class UnauthorizedError extends Schema.TaggedError<UnauthorizedError>()(
 	{ httpApiStatus: 401 },
 ) {}
 
+/** Credential storage could not be consulted; this is not an invalid token. */
+export class AuthorizationUnavailableError extends Schema.TaggedError<AuthorizationUnavailableError>()(
+	"@maple/http/errors/AuthorizationUnavailableError",
+	{ message: Schema.String },
+	{ httpApiStatus: 503 },
+) {}
+
 export class TenantSchema extends Schema.Class<TenantSchema>("TenantSchema")({
 	orgId: OrgId,
 	userId: UserId,
@@ -30,7 +37,7 @@ export class Authorization extends HttpApiMiddleware.Service<
 		provides: Context
 	}
 >()("Authorization", {
-	error: UnauthorizedError,
+	error: [UnauthorizedError, AuthorizationUnavailableError],
 	security: {
 		bearer: HttpApiSecurity.bearer,
 	},

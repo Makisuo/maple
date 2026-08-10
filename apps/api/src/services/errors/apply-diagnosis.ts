@@ -124,3 +124,67 @@ export const applyDiagnosisWrites = async (db: MaplePgClient, input: ApplyDiagno
 			.onConflictDoNothing()
 	})
 }
+
+export interface ApplyInconclusiveInput {
+	readonly orgId: OrgId
+	readonly investigationId: InvestigationId
+	/** The partial: what was ruled out, what could not be checked, the weak lead. */
+	readonly report: AiTriageResult
+	readonly model: string | null
+	readonly inputTokens: number | null
+	readonly outputTokens: number | null
+	readonly nowMs: number
+	readonly validatorNote: string | null
+	readonly validatorElapsedMs: number | null
+}
+
+/**
+ * Publish a partial result: nothing was promoted, but the run still has
+ * something to say.
+ *
+ * A sibling of {@link applyDiagnosisWrites} rather than a flag on it, because
+ * the issue-side half must not run. An inconclusive investigation escalating a
+ * linked issue's severity would be an escalation nobody concluded, and the
+ * `ai_triage` timeline event's payload (`severityAssessment`, `applied`) is
+ * meaningless without a promoted cause. Making that a boolean parameter would
+ * put both behaviours one typo apart.
+ *
+ * Three of these writes are load-bearing and each undoes a specific lie the
+ * `status: "failed"` path used to tell:
+ *
+ * - `severity: null` — not `report.severityAssessment`. The hub falls back to
+ *   the incident's own severity, so the row shows what the incident is rather
+ *   than an AI severity assessment of a cause nobody established.
+ * - `diagnosedAt: null` — "time to diagnosis" keys off it, and a timestamp there
+ *   claims a diagnosis happened.
+ * - `error: null` — the raw `validation_inconclusive: …` string in that column
+ *   is what the UI used to render in a destructive box. The report replaces it.
+ */
+export const applyInconclusiveWrites = async (
+	db: MaplePgClient,
+	input: ApplyInconclusiveInput,
+): Promise<void> => {
+	const now = new Date(input.nowMs)
+	await db
+		.update(investigations)
+		.set({
+			status: "inconclusive",
+			reportJson: input.report,
+			severity: null,
+			// Always low, whatever the report says. Nothing was established, and a
+			// partial that claims medium confidence in a lead is the "least-bad
+			// option promoted to avoid an empty answer" the validator is told to
+			// refuse — reintroduced one layer down.
+			confidence: "low",
+			model: input.model,
+			inputTokens: input.inputTokens,
+			outputTokens: input.outputTokens,
+			error: null,
+			diagnosedAt: null,
+			fanoutState: "rejected_all",
+			validatorNote: input.validatorNote,
+			validatorElapsedMs: input.validatorElapsedMs,
+			updatedAt: now,
+		})
+		.where(and(eq(investigations.orgId, input.orgId), eq(investigations.id, input.investigationId)))
+}

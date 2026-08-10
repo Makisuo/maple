@@ -58,6 +58,15 @@ export const runPlannerAgent = Effect.fn("investigation.plan")(function* (input:
 		deadlineAtMs: input.deadlineAtMs,
 	})
 
+	// `planner_submitted` is the single most diagnostic bit this pass produces: a
+	// planner that never called its submit tool sends the run to the seed
+	// catalogue, and for a long time that was invisible everywhere.
+	yield* Effect.annotateCurrentSpan({
+		"maple.plan.planner_submitted": Option.isSome(pass.answer),
+		"maple.plan.tool_steps": pass.toolCalls,
+		"maple.plan.deadline_hit": pass.deadlineHit,
+	})
+
 	return {
 		plan: pass.answer,
 		model: String(input.model.id),

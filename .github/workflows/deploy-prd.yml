@@ -21,13 +21,17 @@ permissions:
 jobs:
     deploy-prd:
         runs-on: ubuntu-latest
-        timeout-minutes: 30
+        timeout-minutes: 45
         # On a workflow_run event `github.sha` is the default branch head, not the
         # commit CI actually ran against — so pin everything to head_sha, both for
         # what gets deployed and for the telemetry stamp.
         if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
         environment: production
         env:
+            # Opt-in for the AWS/ECS ingest half (see alchemy.run.ts). Unset or not
+            # "1", the deploy is the pure-Cloudflare stack that shipped in 2m05s.
+            # Set the repo variable to "1" to reproduce the hang under investigation.
+            MAPLE_DEPLOY_AWS_INGEST: ${{ vars.MAPLE_DEPLOY_AWS_INGEST }}
             INFISICAL_ENV_SLUG: prod
             # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
             # reads COMMIT_SHA; web build reads VITE_COMMIT_SHA via Vite define).
@@ -52,8 +56,66 @@ jobs:
                   export-type: "env"
                   secret-path: "/"
 
+            # AFTER Infisical: the OIDC exchange writes AWS_ACCESS_KEY_ID /
+            # AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN / AWS_REGION into the env,
+            # which is exactly what alchemy's AWS auth reads (it picks the `env`
+            # method whenever CI=true). Running it last means these always win over
+            # anything stale carrying the same names out of Infisical.
+            - name: Configure AWS credentials (OIDC)
+              uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+              with:
+                  role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+                  aws-region: us-east-1
+
             - name: Install dependencies
               run: bun install --frozen-lockfile
+
+            # The Rust gateway is compiled HERE, not inside the image build.
+            # alchemy's docker build passes no --cache-from (AWS/ECR/Image.ts), and
+            # a fresh runner's layer cache is empty, so a Dockerfile that runs
+            # `cargo build` recompiles all 385 crates on every deploy, however the
+            # layers are arranged. Cold cost is 2m54s, MEASURED — an earlier
+            # version of this comment guessed ~20 minutes, which was wrong by ~7x
+            # and has already been quoted back as fact in a review, so treat the
+            # number here as load-bearing. Out here the cargo cache survives
+            # between runs, so an unchanged ingest is a no-op and a one-crate
+            # change is about a minute. Dockerfile.prebuilt then COPYs the result.
+            #
+            # Inside rust:1.88-bookworm rather than on the runner: the runtime base
+            # is debian:bookworm-slim (glibc 2.36) and ubuntu-24.04 ships 2.39, so a
+            # host-built binary starts and immediately dies with
+            # `version 'GLIBC_2.39' not found`.
+            - name: Cache ingest cargo build
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: |
+                      ~/.cargo-ingest
+                      ${{ runner.temp }}/ingest-target
+                  key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
+                  restore-keys: |
+                      ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
+                      ingest-cargo-${{ runner.os }}-
+
+            # --target-dir points OUTSIDE apps/ingest deliberately. Alchemy hashes
+            # the image context with `hashDirectory`, which has no .dockerignore
+            # support and derives its exclusions from gitignore rules WITHOUT
+            # rebasing root-anchored ones onto the context dir — `/apps/ingest/target`
+            # becomes the glob `apps/ingest/target/**` evaluated with cwd=apps/ingest,
+            # which matches nothing. A target dir inside the context would therefore
+            # be walked and hashed in full on every deploy.
+            - name: Build ingest binary
+              run: |
+                  mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
+                  docker run --rm \
+                      --user "$(id -u):$(id -g)" \
+                      -e CARGO_HOME=/cargo \
+                      -v "$HOME/.cargo-ingest:/cargo" \
+                      -v "$PWD/apps/ingest:/app" \
+                      -v "$RUNNER_TEMP/ingest-target:/target" \
+                      -w /app \
+                      rust:1.88-bookworm \
+                      cargo build --release --target-dir /target
+                  cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
 
             # NOTE: prod schema migrations are applied OUT OF BAND (manually, via
             # `bun run migrate:prod` → `ps:apply-schema main`, against the direct 5432

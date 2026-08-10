@@ -78,7 +78,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 	const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(EnvLive))
 
 	// WorkerEnvironment is merged in so the incident-open issue-hub hook can see
-	// the cross-script AI_TRIAGE_WORKFLOW binding (absent → triage marked failed).
+	// the cross-script investigation workflow binding.
 	// AlertRuntime is a Context.Reference with defaults, so it needs no wiring here.
 	const AlertsServiceLive = AlertsService.layer.pipe(
 		Layer.provide(
@@ -102,8 +102,8 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(BaseLive, NotificationDispatcherLive)),
 	)
 
-	// WorkerEnvironment is merged in so the incident-open AI-triage hook can see
-	// the cross-script AI_TRIAGE_WORKFLOW binding (absent → triage marked failed).
+	// WorkerEnvironment is merged in so incident-open investigations can see the
+	// cross-script fan-out workflow binding.
 	const ErrorsServiceLive = ErrorsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(

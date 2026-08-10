@@ -154,23 +154,49 @@ export function resolveDatabaseMode(stage: MapleStage): MapleDatabaseMode {
 }
 
 /**
+ * Which worker is binding `MAPLE_DB`.
+ *
+ * These get separate Hyperdrive configs on prd because they are wildly
+ * asymmetric neighbours: measured over 6h, `alerting` issued 60,688 Postgres
+ * queries/hour against the api's 1,415 — 97% of the traffic versus 2%. Sharing
+ * one config meant sharing one origin connection pool, and the api spent its
+ * time queueing behind the crons. A dial that found a free slot took 12ms and
+ * one that did not stalled until Hyperdrive's 15s connection timeout, which is
+ * what put maple-api's p99 at 15.4s.
+ */
+export type MapleDbConsumer = "api" | "alerting"
+
+/**
  * Dashboard-managed Hyperdrive configs, bound by ID (v1's `HyperdriveRef`).
  * The origin/credentials are managed in the Cloudflare dashboard — deploys
  * never see or rewrite the database connection. Stages returning undefined get
  * an alchemy-managed Hyperdrive pushed from MAPLE_PG_URL, or no database at
  * all — `resolveDatabaseMode` is the authority on which. Config IDs are not
  * secrets.
+ *
+ * Separate configs partition the origin's connections rather than creating
+ * more: the per-config `origin_connection_limit`s SUM against the branch's
+ * `max_connections`, and Hyperdrive will not coordinate between them, so
+ * over-provisioning one starves the other at the database rather than at the
+ * pool.
  */
-export function resolveHyperdriveRefId(stage: MapleStage): string | undefined {
+export function resolveHyperdriveRefId(stage: MapleStage, consumer: MapleDbConsumer): string | undefined {
 	switch (stage.kind) {
 		case "prd":
-			// `maple-prd` — origin: PlanetScale `main` branch.
-			return "ad4c487838594b89810b23e5fb14e129"
+			// Both target the PlanetScale `main` branch. Their `origin_connection_limit`s
+			// SUM against that branch's `max_connections` — Hyperdrive will not
+			// coordinate between configs, so over-provisioning one starves the other
+			// at the database rather than at the pool.
+			return consumer === "alerting"
+				? "f473167201af4d2cae494f9989f1d742" // `maple-alerting-prd`
+				: "ad4c487838594b89810b23e5fb14e129" // `maple-prd`
 		case "stg":
 			// TEMPORARY: staging shares prod's `maple-prd` config (owner decision,
 			// 2026-07-14) — stg workers therefore read/write the PRODUCTION
 			// database and the stg alerting crons overlap prod's. Replace with a
 			// dedicated `maple-stg` config (PlanetScale `stg` branch) ASAP.
+			// Deliberately NOT split per consumer here: stg is already pointed at the
+			// wrong database, and splitting it would add a second wrong pool.
 			return "ad4c487838594b89810b23e5fb14e129"
 		case "pr":
 		case "dev":

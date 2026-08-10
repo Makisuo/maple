@@ -35,9 +35,6 @@ import type { InvestigationHypothesis, SeedLensId } from "@maple/domain/http"
  * enforced here rather than merely asserted to the model. Session-replay tools
  * are excluded too — they are the largest outputs in the registry and an
  * investigation has never needed one to reach a cause.
- *
- * Moved here from `triage-prompt.ts`, which is scheduled for deletion along with
- * the legacy triage workflow; that file re-exports this name for the cutover.
  */
 export const INVESTIGATION_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 	"diagnose_service",
@@ -118,6 +115,10 @@ You have been assigned ONE hypothesis to test. Other agents are testing other hy
 ## Before you answer
 
 You are testing one proposition. Do not answer until you have either (a) evidence that supports it with a mechanism you can state, or (b) evidence that eliminates it. Reading one trace is not testing a hypothesis; it is forming one.
+
+**Either outcome has to carry numbers and a window.** "payments-api p95 went 180ms → 4.2s between 14:03 and 14:19, while its two callees stayed under 90ms" is a finding. "service.version was unchanged across 41k spans between 13:45 and 14:20" is also a finding. "The dependency looks healthy" is neither — it is a summary of a glance, and the validator cannot rank it against anything. If you cannot yet state a number and an interval, you have not finished; make another tool call.
+
+You have a generous budget and it is not a target to beat. Finishing in two calls is not efficiency — a lane that returns in a few seconds having read one page has spent a pass to produce something the validator has to throw away, and a run where every lane does that produces no answer at all. Spend what the question needs.
 
 If your first tool call returns nothing useful, that is information about your query, not about the incident — widen the interval, drop a filter, or use a different tool before concluding.
 
@@ -222,6 +223,45 @@ export const SEED_HYPOTHESES: ReadonlyArray<SeedHypothesis> = [
 		],
 	},
 ]
+
+/**
+ * What a hypothesis gets when the planner named only tools that do not exist.
+ *
+ * Deliberately generic and deliberately small: five tools that between them can
+ * open almost any proposition about an OTel incident — the incident itself, its
+ * errors, its traces, its logs, and a way to aggregate. Not the whole universe,
+ * because a lane handed twenty tools with no steer spends its budget browsing.
+ *
+ * This exists because the alternative was worse. Dropping such a hypothesis
+ * meant that when *every* hypothesis had a bad tool list — one typo'd
+ * vocabulary, applied uniformly, which is exactly how a model fails — the entire
+ * plan was discarded and three standing category probes ran in its place. A
+ * planner-authored proposition with a repaired tool list is a better use of a
+ * lane than a catalogue entry nobody chose. The `toolNames` rule still binds the
+ * planner; this only stops one formatting slip from costing the whole plan.
+ */
+export const RESCUE_TOOL_NAMES: ReadonlyArray<string> = [
+	"error_detail",
+	"find_errors",
+	"search_traces",
+	"search_logs",
+	"query_data",
+]
+
+/**
+ * The rescue set must survive its own intersection, or the repair it exists to
+ * perform silently becomes a drop and the seed fallback comes back. Asserted at
+ * module load rather than in a test, for the same reason
+ * `_assertPlannerToolsAreReadOnly` below is: a rename in the universe above
+ * should fail the import, not one assertion in one suite.
+ */
+if (RESCUE_TOOL_NAMES.some((name) => !HYPOTHESIS_TOOL_UNIVERSE.has(name))) {
+	throw new Error("RESCUE_TOOL_NAMES contains a tool outside HYPOTHESIS_TOOL_UNIVERSE")
+}
+
+/** Seed tool lists by id, for repairing a planner hypothesis that named a seed framing. */
+export const seedToolNames = (seedLensId: string | null): ReadonlyArray<string> | null =>
+	SEED_HYPOTHESES.find((seed) => seed.id === seedLensId)?.toolNames ?? null
 
 /**
  * Seed hypotheses as plan entries, for the fallback path.

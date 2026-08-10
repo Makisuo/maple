@@ -153,6 +153,7 @@ const runTask = (
 		yield* runTurn({
 			sessionId: input.sessionId,
 			tenant: input.tenant,
+			toolExecutor: input.toolExecutor,
 			model: input.model,
 			agent: child,
 			messages: [Message.user(params.prompt)],

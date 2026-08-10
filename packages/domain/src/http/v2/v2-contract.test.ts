@@ -430,6 +430,12 @@ describe("V2 alerts wire format", () => {
 })
 
 describe("v2 error envelope", () => {
+	it("exposes the public message to Effect and telemetry without changing the wire shape", () => {
+		const error = notFound("No such api_key", "id")
+		expect(error.message).toBe("No such api_key")
+		expect(String(error)).toContain("No such api_key")
+	})
+
 	it("encodes exactly the Stripe envelope with no _tag", () => {
 		const error = notFound("No such api_key", "id")
 		const wire = Schema.encodeSync(V2NotFoundError)(error) as Record<string, unknown>

@@ -58,12 +58,13 @@ export interface ServiceMapRollupServiceShape {
 /**
  * Scheduled hourly rollup for the service map's service-to-service edges.
  *
- * `service_map_edges_hourly` cannot be filled by a materialized view: an edge's
- * downstream service is only recoverable by joining a Client/Producer span to
- * its child Server/Consumer span (modern OTEL instrumentation no longer emits a
+ * The edge itself cannot be computed by a materialized view: its downstream
+ * service is only recoverable by joining a Client/Producer span to its child
+ * Server/Consumer span (modern OTEL instrumentation no longer emits a
  * `peer.service` attribute). This service runs that join — `serviceMapEdgesRollupSQL`
- * — once per completed hour and ingests the pre-aggregated result, so the
- * dashboard read path (`serviceDependenciesSQL`) stays cheap.
+ * — once per completed hour and ingests the pre-aggregated result through the
+ * Events API bridge, so the dashboard read path (`serviceDependenciesSQL`)
+ * stays cheap.
  */
 export class ServiceMapRollupService extends Context.Service<
 	ServiceMapRollupService,
@@ -120,7 +121,7 @@ export class ServiceMapRollupService extends Context.Service<
 						if (rows.length > 0) {
 							// Not metered to Autumn: derived from spans that were already billed
 							// on arrival at the ingest gateway.
-							yield* warehouse.ingest(tenant, "service_map_edges_hourly", rows)
+							yield* warehouse.ingest(tenant, "service_map_edges_hourly_ingest", rows)
 							edgesWritten += rows.length
 						}
 

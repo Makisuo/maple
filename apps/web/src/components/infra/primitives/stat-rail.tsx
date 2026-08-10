@@ -41,7 +41,29 @@ interface StatRailItemProps {
 	delay?: number
 	/** Drop the reserved sparkline slot so the value spans full width (dense grids with no sparks). */
 	compact?: boolean
+	/**
+	 * Makes the tile a button. Given it, the tile also honours `selected` and
+	 * `disabled`; without it the tile stays the plain readout every other rail
+	 * renders, so no existing caller changes behaviour.
+	 */
+	onSelect?: () => void
+	/** Only meaningful alongside `onSelect`. */
+	selected?: boolean
+	/** A tile with nothing to show: still rendered, but not selectable. */
+	disabled?: boolean
 }
+
+/**
+ * The active-tile marker, built the same way the sidebar builds its own: a 2px
+ * lane reserved on *every* tile, painted only on the selected one, with the
+ * corner squared so it reads as a rule against the tile edge rather than a
+ * rounded sliver floating inside it. Reserving the lane on all of them is what
+ * keeps the contents from shifting sideways as the selection moves.
+ *
+ * See `ACTIVE_RAIL` in `components/dashboard/app-sidebar.tsx` — same idiom, one
+ * level out.
+ */
+const RAIL_LANE = "before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:transition-colors"
 
 export function StatRailItem({
 	eyebrow,
@@ -53,42 +75,94 @@ export function StatRailItem({
 	subline,
 	delay,
 	compact,
+	onSelect,
+	selected,
+	disabled,
 }: StatRailItemProps) {
-	return (
-		<div
-			className={cn("relative px-5 py-4 animate-in fade-in slide-in-from-bottom-1 duration-500")}
-			style={delay ? { animationDelay: `${delay}ms`, animationFillMode: "backwards" } : undefined}
-		>
+	const body = (
+		<>
 			<div className="flex items-baseline justify-between gap-3">
-				<span className="text-[11px] font-medium text-muted-foreground">{eyebrow}</span>
+				<span
+					className={cn(
+						"truncate text-[11px] font-medium transition-colors",
+						selected ? "text-primary" : "text-muted-foreground",
+					)}
+				>
+					{eyebrow}
+				</span>
 				{action ??
 					(delta ? (
-						<span className="font-mono text-[10px] tabular-nums text-muted-foreground/80">
+						<span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/80">
 							{delta}
 						</span>
 					) : null)}
 			</div>
 			<div className="mt-2 flex items-end justify-between gap-3">
+				{/* The value never wraps and never yields width; the sparkline gives way
+				    instead. A two-line "12m 45s" pushes its whole row taller than the
+				    tiles beside it, and the number is the thing the tile is for. */}
 				<div
 					className={cn(
-						"font-mono text-[26px] font-semibold tabular-nums leading-none tracking-[-0.01em]",
+						"shrink-0 whitespace-nowrap font-mono text-[26px] font-semibold tabular-nums leading-none tracking-[-0.01em]",
 						VALUE_TONE[tone],
 					)}
 				>
 					{value}
 				</div>
 				{spark && spark.length > 1 ? (
-					<BarSpark values={spark.slice(-28)} color={SPARK_COLOR[tone]} className="h-7 w-24" />
+					<BarSpark
+						values={spark.slice(-28)}
+						color={SPARK_COLOR[tone]}
+						className="h-7 w-24 min-w-0 shrink"
+					/>
 				) : compact ? null : (
-					<div className="h-7 w-24" />
+					<div className="h-7 w-24 min-w-0 shrink" />
 				)}
 			</div>
-			{subline ? <div className="mt-2 text-[11px] text-muted-foreground">{subline}</div> : null}
-		</div>
+			{subline ? (
+				<div className="mt-2 truncate text-[11px] text-muted-foreground">{subline}</div>
+			) : null}
+		</>
+	)
+
+	const shell = cn("relative px-5 py-4 animate-in fade-in slide-in-from-bottom-1 duration-500")
+	const style = delay ? { animationDelay: `${delay}ms`, animationFillMode: "backwards" } : undefined
+
+	if (!onSelect) {
+		return (
+			<div className={shell} style={style}>
+				{body}
+			</div>
+		)
+	}
+
+	return (
+		<button
+			type="button"
+			disabled={disabled}
+			aria-pressed={selected}
+			onClick={onSelect}
+			className={cn(
+				shell,
+				"w-full text-left",
+				RAIL_LANE,
+				selected ? "bg-muted/40 before:bg-primary" : "before:bg-transparent",
+				disabled ? "cursor-default" : "cursor-pointer hover:bg-muted/25",
+				"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
+			)}
+			style={style}
+		>
+			{body}
+		</button>
 	)
 }
 
-function BarSpark({
+/**
+ * The ranked bar sparkline used inside a stat tile. Exported because the web
+ * analytics KPI strip draws the same bars full-bleed along the bottom of its own
+ * (selectable) tiles — same mark, different slot.
+ */
+export function BarSpark({
 	values,
 	color,
 	className,

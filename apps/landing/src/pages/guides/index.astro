@@ -37,6 +37,16 @@ const coreGuides = [
     },
 ];
 
+const investigationGuides = [
+    {
+        href: "/guides/api-latency",
+        label: "API performance",
+        title: "When API p99 jumps but p50 doesn't",
+        description: "Measure the right latency clock, isolate the slow population, and trace a regression to the release and operation responsible.",
+        read: "14 min",
+    },
+];
+
 const fieldNotes = (await getCollection("blog") as BlogPost[])
     .filter((post) => (!post.data.draft || import.meta.env.DEV) && post.data.category === "guides")
     .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
@@ -49,6 +59,7 @@ const itemListJsonLd = {
     itemListElement: [
         { href: "/guides/what-is-apm", title: "What is APM, and why is it important?" },
         ...coreGuides,
+        ...investigationGuides,
     ].map((guide, index) => ({
         "@type": "ListItem",
         position: index + 1,
@@ -196,12 +207,22 @@ const itemListJsonLd = {
             </div>
         </section>
 
-        {fieldNotes.length > 0 && (
+        {(investigationGuides.length > 0 || fieldNotes.length > 0) && (
             <section class="py-16 md:py-24" aria-labelledby="field-notes">
                 <div class="mx-auto max-w-6xl px-6">
                     <p class="font-mono text-[10px] uppercase tracking-[0.16em] text-fg-muted">03 · Field notes</p>
                     <h2 id="field-notes" class="mt-3 font-display text-3xl font-medium tracking-[-0.025em] text-fg">Investigations you can run</h2>
                     <div class="mt-9 divide-y divide-border border-y border-border">
+                        {investigationGuides.map((guide) => (
+                            <a href={guide.href} class="group grid gap-3 py-6 transition-colors sm:grid-cols-[9rem_1fr_auto] sm:items-center sm:gap-6">
+                                <span class="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">{guide.label}</span>
+                                <div>
+                                    <h3 class="font-display text-lg font-medium text-fg transition-colors group-hover:text-primary">{guide.title}</h3>
+                                    <p class="mt-1.5 max-w-[68ch] text-xs leading-relaxed text-fg-muted">{guide.description}</p>
+                                </div>
+                                <span class="font-mono text-[10px] text-fg-muted">{guide.read} →</span>
+                            </a>
+                        ))}
                         {fieldNotes.map((post) => (
                             <a href={`/blog/${post.id}`} class="group grid gap-3 py-6 transition-colors sm:grid-cols-[9rem_1fr_auto] sm:items-center sm:gap-6">
                                 <time datetime={post.data.date.toISOString()} class="font-mono text-[10px] text-fg-muted">

@@ -1,10 +1,7 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CurrentTenant,
-	ExecuteQueryBuilderResponse,
 	MapleApi,
-	QueryEngineExecutionError,
-	QueryEngineValidationError,
 	RawSqlExecuteResponse,
 	type RawSqlValidationError,
 	SpanHierarchyResponse,
@@ -26,16 +23,13 @@ import {
 	CloudflareInfraZonesResponse,
 	CloudflareInfraZoneTimeseriesResponse,
 	CloudflareInfraZoneDetailResponse,
-	CloudflareInfraZoneHostsResponse,
 	CloudflareInfraZoneSecurityResponse,
 	CloudflareInfraZoneBreakdownResponse,
 	CloudflareInfraZoneDnsResponse,
 	CloudflareInfraZoneFacetsResponse,
 	CloudflareInfraPlatformResourcesResponse,
 	CloudflareInfraWorkersResponse,
-	CloudflareInfraWorkerTimeseriesResponse,
 	ServiceDbQuerySummaryResponse,
-	ServiceExternalEdgesResponse,
 	ServiceDetailOverviewResponse,
 	ServiceDependenciesBundleResponse,
 	ServicePlatformsResponse,
@@ -63,6 +57,11 @@ import {
 	WorkloadDetailSummaryResponse,
 	WorkloadInfraTimeseriesResponse,
 	WorkloadFacetsResponse,
+	WebAnalyticsSummaryResponse,
+	WebAnalyticsTimeseriesResponse,
+	WebAnalyticsPageviewsResponse,
+	WebAnalyticsPagesResponse,
+	WebAnalyticsBreakdownsResponse,
 	CommitSha,
 	FingerprintHash,
 	ServiceName,
@@ -71,17 +70,12 @@ import {
 	TraceId,
 	SpanId,
 } from "@maple/domain/http"
-import { Clock, Config, Effect, Match, Option, Schema } from "effect"
+import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { makeDirectRouteCachePolicy, makeExecuteRawSql } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
-import {
-	CH,
-	QueryEngineExecuteRequest,
-	formatWarehouseDateTime,
-	parseWarehouseDateTime,
-} from "@maple/query-engine"
+import { CH, formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import {
 	hostMetricSpec,
@@ -94,7 +88,7 @@ import {
 import { Queries } from "@/routes/queries"
 import { makeQueryRunners } from "@/routes/query-runner"
 import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
-import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
+import type { TenantContext } from "@/services/auth/AuthService"
 import * as Integrations from "@maple/query-engine-integrations"
 
 // `warehouse.sqlQuery` fails with the warehouse error union (distinct tagged
@@ -129,6 +123,80 @@ const isMissingServiceOperationsRollup = (error: unknown): boolean => {
 	)
 }
 
+/**
+ * `web_events` is a read-path rollup on a `requiredForIngest: false` migration,
+ * so a BYO cluster can be perfectly healthy and still not have it — the org just
+ * hasn't re-applied schema yet. Same shape as the service-operations detector
+ * above, and the same reason: the fallback has to be automatic and per-org,
+ * because there is no global moment when every cluster has migrated.
+ */
+const isMissingWebEvents = (error: unknown): boolean => {
+	if (typeof error !== "object" || error === null) return false
+	const candidate = error as {
+		readonly _tag?: unknown
+		readonly clickhouseType?: unknown
+		readonly message?: unknown
+	}
+	return (
+		candidate._tag === "@maple/http/errors/WarehouseConfigError" &&
+		(candidate.clickhouseType === "UNKNOWN_TABLE" ||
+			(typeof candidate.message === "string" && /web_events/i.test(candidate.message)))
+	)
+}
+
+/**
+ * Read a rollup table, degrading to the raw-source query on a cluster that does
+ * not have it.
+ *
+ * **This is error recovery, not a rollout switch.** There is no flag and nothing
+ * to set: these rollups ship in `requiredForIngest: false` migrations, which
+ * reach a BYO-ClickHouse cluster only when an org admin opens Settings → BYO
+ * Backend and clicks Apply schema. Nothing reconciles that — there is no cron,
+ * no on-deploy hook, and `upsert` deliberately runs no DDL.
+ * `ClickHouseSchemaApplyWorkflow` even skips perf-only migrations in its first
+ * pass and retries them best-effort inside a try/catch, so a run can report
+ * `succeeded` with the table still absent. So the window where an org lacks one
+ * is unbounded, per-org, and invisible from here, and the only correct response
+ * is to notice at query time and read the other table. Without this, those orgs
+ * get a hard 502 titled "Database is not configured correctly" with no
+ * remediation hint, indefinitely.
+ *
+ * The two definitions in each pair are required to return identical rows — this
+ * is a source swap, not a semantics change, enforced for web analytics by
+ * `web-analytics-parity.clickhouse.e2e.test.ts` — so the degrade is invisible to
+ * the caller and needs no response-shape branching. `Effect.fn` would give this
+ * a second span; it is deliberately a plain helper so the fallback annotation
+ * lands on the handler's own span.
+ */
+const makeRollupFallback =
+	(detect: (error: unknown) => boolean, warning: string) =>
+	<A, P, E, R>(
+		rollup: (tenant: TenantContext, payload: P) => Effect.Effect<A, E, R>,
+		raw: (tenant: TenantContext, payload: P) => Effect.Effect<A, E, R>,
+		tenant: TenantContext,
+		payload: P,
+	): Effect.Effect<A, E, R> =>
+		rollup(tenant, payload).pipe(
+			Effect.catch((error) => {
+				if (!detect(error)) return Effect.fail(error)
+				return Effect.gen(function* () {
+					yield* Effect.logWarning(warning).pipe(Effect.annotateLogs({ orgId: tenant.orgId }))
+					yield* Effect.annotateCurrentSpan("query.rollup.fallback", true)
+					return yield* raw(tenant, payload)
+				})
+			}),
+		)
+
+const withWebEventsFallback = makeRollupFallback(
+	isMissingWebEvents,
+	"web_events is absent on this cluster; reading raw session_events. Apply ClickHouse schema to restore the fast path.",
+)
+
+const withServiceOperationsFallback = makeRollupFallback(
+	isMissingServiceOperationsRollup,
+	"service_operations rollup is absent on this cluster; reading raw traces. Apply ClickHouse schema to restore the fast path.",
+)
+
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
 const decodeServiceName = Schema.decodeUnknownSync(ServiceName)
@@ -155,9 +223,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 		const warehouse = yield* WarehouseQueryService
 		const { runQuery, runQueryFirst } = makeQueryRunners({ warehouse, queryEngine })
 
-		const serviceOperationsRollupEnabled = yield* Config.boolean(
-			"SERVICE_OPERATIONS_ROLLUP_ENABLED",
-		).pipe(Config.withDefault(false))
 		const executeRawSql = makeExecuteRawSql<ExecutionTenant, WarehouseSqlError | RawSqlValidationError>(
 			warehouse,
 		)
@@ -371,25 +436,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new ServiceDependenciesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
 			)
-			.handle("serviceDependenciesForService", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.serviceDependenciesForService, tenant, payload)
-					return new ServiceDependenciesResponse({ data: rows })
-				}),
-			)
 			.handle("serviceDbEdges", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const rows = yield* runQuery(Queries.serviceDbEdges, tenant, payload)
 					return new ServiceDbEdgesResponse({ data: rows.map((row) => ({ ...row })) })
-				}),
-			)
-			.handle("serviceDbEdgesForService", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.serviceDbEdgesForService, tenant, payload)
-					return new ServiceDbEdgesResponse({ data: rows })
 				}),
 			)
 			.handle("serviceCloudflareStats", ({ payload }) =>
@@ -607,27 +658,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					})
 				}),
 			)
-			.handle("cloudflareInfraZoneHosts", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const filters = toCloudflareFilters(payload)
-					yield* warehouse.warmRoute(tenant)
-					const [totalRows, bucketRows] = yield* Effect.all(
-						[
-							runQuery(Queries.cloudflareInfraZoneHostTotals, tenant, payload),
-							runQuery(Queries.cloudflareInfraZoneHostTimeseries, tenant, payload),
-						],
-						{ concurrency: 2 },
-					)
-					return new CloudflareInfraZoneHostsResponse({
-						totals: totalRows.map((row) => ({ ...row })),
-						buckets: bucketRows.map((row) => ({ ...row })),
-						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
-							Integrations.CF_METRIC.requests,
-						]),
-					})
-				}),
-			)
 			.handle("cloudflareInfraZoneSecurity", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
@@ -810,15 +840,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new CloudflareInfraWorkersResponse({ data })
 				}),
 			)
-			.handle("cloudflareInfraWorkerTimeseries", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.cloudflareInfraWorkerTimeseries, tenant, payload)
-					return new CloudflareInfraWorkerTimeseriesResponse({
-						data: rows.map((row) => ({ ...row })),
-					})
-				}),
-			)
 			.handle("serviceDetailOverview", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
@@ -935,13 +956,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					})
 				}),
 			)
-			.handle("serviceExternalEdges", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.serviceExternalEdges, tenant, payload)
-					return new ServiceExternalEdgesResponse({ data: rows.map((row) => ({ ...row })) })
-				}),
-			)
 			.handle("servicePlatforms", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
@@ -1028,39 +1042,18 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"serviceOperations",
 						payload,
 						Effect.gen(function* () {
-							yield* Effect.annotateCurrentSpan(
-								"query.rollup.enabled",
-								serviceOperationsRollupEnabled,
-							)
-							// Migration 0008 is deployed, backfilled, and parity-checked, so
-							// deployed stages ship this on (`alchemy.run.ts`). The Config
-							// default stays `false` for local/test, where the rollup tables
-							// may not exist. Disabling it restores the all-raw rollback path
-							// without changing the endpoint contract.
-							const runRawSummary = () =>
-								runQuery(Queries.serviceOperationsSummaryRaw, tenant, payload)
-							let useRollup = serviceOperationsRollupEnabled
-							const summaryEffect = useRollup
-								? runQuery(Queries.serviceOperationsSummary, tenant, payload).pipe(
-										Effect.catch((error) => {
-											if (!isMissingServiceOperationsRollup(error))
-												return Effect.fail(error)
-											useRollup = false
-											return Effect.gen(function* () {
-												yield* Effect.logWarning(
-													"Service operations rollup is unavailable; using raw rollback path",
-												).pipe(Effect.annotateLogs({ orgId: tenant.orgId }))
-												yield* Effect.annotateCurrentSpan(
-													"query.rollup.fallback",
-													true,
-												)
-												return yield* runRawSummary()
-											})
-										}),
-									)
-								: runRawSummary()
+							// Both reads try `service_operations_minutely`/`_hourly` and
+							// degrade per-org on UNKNOWN_TABLE. The timeseries read repeats
+							// the probe rather than inheriting the summary's verdict: one
+							// extra failed query on a cluster that never applied migration
+							// 0008 is cheaper than the mutable flag this replaced.
 							const summaryRows = yield* mapExecError(
-								summaryEffect,
+								withServiceOperationsFallback(
+									(t, pl) => runQuery(Queries.serviceOperationsSummary, t, pl),
+									(t, pl) => runQuery(Queries.serviceOperationsSummaryRaw, t, pl),
+									tenant,
+									payload,
+								),
 								"serviceOperations query failed",
 							)
 							if (summaryRows.length === 0) {
@@ -1079,25 +1072,13 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							const requestedBucketSeconds = payload.bucketSeconds ?? windowSeconds / 50
 							const bucketSeconds = Math.max(1, Math.round(requestedBucketSeconds / 60)) * 60
 							const timeseriesInput = { ...payload, spanNames, bucketSeconds }
-							const runRawTimeseries = () =>
-								runQuery(Queries.serviceOperationsTimeseriesRaw, tenant, timeseriesInput)
-							const timeseriesEffect = useRollup
-								? runQuery(Queries.serviceOperationsTimeseries, tenant, timeseriesInput).pipe(
-										Effect.catch((error) =>
-											isMissingServiceOperationsRollup(error)
-												? Effect.gen(function* () {
-														yield* Effect.annotateCurrentSpan(
-															"query.rollup.fallback",
-															true,
-														)
-														return yield* runRawTimeseries()
-													})
-												: Effect.fail(error),
-										),
-									)
-								: runRawTimeseries()
 							const timeseriesRows = yield* mapExecError(
-								timeseriesEffect,
+								withServiceOperationsFallback(
+									(t, pl) => runQuery(Queries.serviceOperationsTimeseries, t, pl),
+									(t, pl) => runQuery(Queries.serviceOperationsTimeseriesRaw, t, pl),
+									tenant,
+									timeseriesInput,
+								),
 								"serviceOperationsTimeseries query failed",
 							)
 
@@ -1158,163 +1139,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							metricCount: Number(row.metricCount),
 							dataPointCount: Number(row.dataPointCount),
 						})),
-					})
-				}),
-			)
-			.handle("executeQueryBuilder", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const enabledQueries = payload.queries.filter((q) => q.enabled)
-
-					if (enabledQueries.length === 0) {
-						return yield* Effect.fail(
-							new QueryEngineValidationError({
-								message: "No enabled queries in request",
-								details: ["At least one query must be enabled"],
-							}),
-						)
-					}
-
-					const allWarnings: string[] = []
-
-					if (payload.kind === "timeseries") {
-						// Build a spec per query, execute each, then merge series across queries.
-						// Series names are namespaced by the query's display name when there are
-						// multiple queries, otherwise we keep the raw group names from the query
-						// engine result so single-query widgets render naturally.
-						type Point = { bucket: string; series: Record<string, number> }
-						type QueryOutcome = {
-							warnings: string[]
-							entry: { name: string; points: Point[] } | null
-						}
-
-						// Execute each query concurrently (independent warehouse round-trips)
-						// but collect positionally: Effect.forEach returns results in input
-						// order regardless of concurrency, so series naming/merge order stays
-						// deterministic instead of depending on which query finishes first.
-						//
-						// Warm first, like the other fan-outs. `queryEngine.execute` warms
-						// inside the bucket cache, but only when a fill splits into more than
-						// one range — so a cold 4-way fan-out here still raced four config
-						// reads, each contending for a connection slot with its siblings'
-						// warehouse fetches. Measured cost of that contention: a cache read
-						// abandoned at its 40ms deadline whose span still runs ~2.3s.
-						yield* warehouse.warmRoute(tenant)
-						const outcomes: QueryOutcome[] = yield* Effect.forEach(
-							enabledQueries,
-							(query) =>
-								Effect.gen(function* () {
-									const built = buildTimeseriesQuerySpec(query)
-									const warnings = built.warnings.map((w) => `${query.name}: ${w}`)
-
-									if (!built.query) {
-										if (built.error) warnings.push(`${query.name}: ${built.error}`)
-										return { warnings, entry: null }
-									}
-
-									const request = new QueryEngineExecuteRequest({
-										startTime: payload.startTime,
-										endTime: payload.endTime,
-										query: built.query,
-									})
-
-									const response = yield* queryEngine.execute(tenant, request)
-									if (response.result.kind !== "timeseries") {
-										warnings.push(`${query.name}: unexpected non-timeseries result`)
-										return { warnings, entry: null }
-									}
-
-									return {
-										warnings,
-										entry: {
-											name: query.legend?.trim() || query.name,
-											points: response.result.data.map((p) => ({
-												bucket: p.bucket,
-												series: { ...p.series },
-											})),
-										},
-									}
-								}),
-							{ concurrency: 4 },
-						)
-
-						const perQueryPoints: Array<{ name: string; points: Point[] }> = []
-						for (const outcome of outcomes) {
-							allWarnings.push(...outcome.warnings)
-							if (outcome.entry) perQueryPoints.push(outcome.entry)
-						}
-
-						const multiQuery = perQueryPoints.length > 1
-						const rowsByBucket = new Map<string, Record<string, number>>()
-						for (const { name: queryName, points } of perQueryPoints) {
-							for (const point of points) {
-								const row = rowsByBucket.get(point.bucket) ?? {}
-								for (const [groupName, value] of Object.entries(point.series)) {
-									if (typeof value !== "number" || !Number.isFinite(value)) continue
-									const isAllGroup = groupName.toLowerCase() === "all"
-									const seriesKey = multiQuery
-										? isAllGroup
-											? queryName
-											: `${queryName}: ${groupName}`
-										: isAllGroup
-											? queryName
-											: groupName
-									row[seriesKey] = value
-								}
-								rowsByBucket.set(point.bucket, row)
-							}
-						}
-
-						const merged = [...rowsByBucket.entries()]
-							.sort(([a], [b]) => a.localeCompare(b))
-							.map(([bucket, series]) => ({ bucket, series }))
-
-						return new ExecuteQueryBuilderResponse({
-							result: { kind: "timeseries", data: merged },
-							warnings: allWarnings.length > 0 ? allWarnings : undefined,
-						})
-					}
-
-					// Breakdown: take just the first enabled query (matches the web's behaviour
-					// for single-query breakdown widgets — multi-query breakdowns aren't a thing
-					// in the dashboard builder yet).
-					const primary = enabledQueries[0]
-					const built = buildBreakdownQuerySpec(primary)
-					for (const w of built.warnings) allWarnings.push(`${primary.name}: ${w}`)
-
-					if (!built.query) {
-						return yield* Effect.fail(
-							new QueryEngineValidationError({
-								message: built.error ?? "Failed to build breakdown query",
-								details: built.error ? [built.error] : [],
-							}),
-						)
-					}
-
-					const request = new QueryEngineExecuteRequest({
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-						query: built.query,
-					})
-
-					const response = yield* queryEngine.execute(tenant, request)
-					if (response.result.kind !== "breakdown") {
-						return yield* Effect.fail(
-							new QueryEngineExecutionError({
-								message: "Unexpected non-breakdown result",
-							}),
-						)
-					}
-
-					return new ExecuteQueryBuilderResponse({
-						result: {
-							kind: "breakdown",
-							data: response.result.data.map((item) => ({
-								name: item.name,
-								value: item.value,
-							})),
-						},
-						warnings: allWarnings.length > 0 ? allWarnings : undefined,
 					})
 				}),
 			)
@@ -1738,6 +1562,135 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						}
 					}
 					return new WorkloadFacetsResponse({ data: buckets })
+				}),
+			)
+			.handle("webAnalyticsSummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const row = yield* withWebEventsFallback(
+						(t, pl) => runQueryFirst(Queries.webAnalyticsSummary, t, pl),
+						(t, pl) => runQueryFirst(Queries.webAnalyticsSummaryRaw, t, pl),
+						tenant,
+						payload,
+					)
+					// A window with no sessions returns no rows at all, not a row of
+					// zeroes — the page needs the zeroes to render its empty state.
+					return new WebAnalyticsSummaryResponse({
+						data: {
+							visitors: Number(row?.visitors) || 0,
+							sessions: Number(row?.sessions) || 0,
+							newSessions: Number(row?.newSessions) || 0,
+							bouncedSessions: Number(row?.bouncedSessions) || 0,
+							identifiedSessions: Number(row?.identifiedSessions) || 0,
+							avgDurationMs: Number(row?.avgDurationMs) || 0,
+						},
+					})
+				}),
+			)
+			.handle("webAnalyticsTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* withWebEventsFallback(
+						(t, pl) => runQuery(Queries.webAnalyticsTimeseries, t, pl),
+						(t, pl) => runQuery(Queries.webAnalyticsTimeseriesRaw, t, pl),
+						tenant,
+						payload,
+					)
+					return new WebAnalyticsTimeseriesResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							visitors: Number(row.visitors) || 0,
+							sessions: Number(row.sessions) || 0,
+							newSessions: Number(row.newSessions) || 0,
+							bouncedSessions: Number(row.bouncedSessions) || 0,
+							identifiedSessions: Number(row.identifiedSessions) || 0,
+							avgDurationMs: Number(row.avgDurationMs) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("webAnalyticsPageviews", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* withWebEventsFallback(
+						(t, pl) => runQuery(Queries.webAnalyticsPageviews, t, pl),
+						(t, pl) => runQuery(Queries.webAnalyticsPageviewsRaw, t, pl),
+						tenant,
+						payload,
+					)
+					return new WebAnalyticsPageviewsResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							pageViews: Number(row.pageViews) || 0,
+							sessions: Number(row.sessions) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("webAnalyticsPages", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* withWebEventsFallback(
+						(t, pl) => runQuery(Queries.webAnalyticsPages, t, pl),
+						(t, pl) => runQuery(Queries.webAnalyticsPagesRaw, t, pl),
+						tenant,
+						payload,
+					)
+					return new WebAnalyticsPagesResponse({
+						data: rows.map((row) => ({
+							host: String(row.host),
+							pagePath: String(row.pagePath),
+							pageViews: Number(row.pageViews) || 0,
+							sessions: Number(row.sessions) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("webAnalyticsBreakdowns", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* withWebEventsFallback(
+						(t, pl) => runQuery(Queries.webAnalyticsBreakdowns, t, pl),
+						(t, pl) => runQuery(Queries.webAnalyticsBreakdownsRaw, t, pl),
+						tenant,
+						payload,
+					)
+					const buckets = {
+						referrerHosts: [] as Array<{ name: string; count: number }>,
+						countries: [] as Array<{ name: string; count: number }>,
+						deviceTypes: [] as Array<{ name: string; count: number }>,
+						browsers: [] as Array<{ name: string; count: number }>,
+						operatingSystems: [] as Array<{ name: string; count: number }>,
+						languages: [] as Array<{ name: string; count: number }>,
+						utmSources: [] as Array<{ name: string; count: number }>,
+						utmMediums: [] as Array<{ name: string; count: number }>,
+						utmCampaigns: [] as Array<{ name: string; count: number }>,
+						entryPaths: [] as Array<{ name: string; count: number }>,
+						exitPaths: [] as Array<{ name: string; count: number }>,
+						hosts: [] as Array<{ name: string; count: number }>,
+					}
+					// facetType → response key. A table rather than a twelve-arm switch:
+					// the mapping is the whole content of this step, and the keys have to
+					// stay in step with WebAnalyticsFacetKey in the query builder.
+					const bucketOf: Record<string, keyof typeof buckets> = {
+						referrerHost: "referrerHosts",
+						country: "countries",
+						deviceType: "deviceTypes",
+						browserName: "browsers",
+						osName: "operatingSystems",
+						language: "languages",
+						utmSource: "utmSources",
+						utmMedium: "utmMediums",
+						utmCampaign: "utmCampaigns",
+						entryPath: "entryPaths",
+						exitPath: "exitPaths",
+						host: "hosts",
+					}
+					for (const row of rows) {
+						const key = bucketOf[row.facetType]
+						if (key) buckets[key].push({ name: String(row.name), count: Number(row.count) || 0 })
+					}
+					return new WebAnalyticsBreakdownsResponse({ data: buckets })
 				}),
 			)
 			.handle("executeRawSql", ({ payload }) =>

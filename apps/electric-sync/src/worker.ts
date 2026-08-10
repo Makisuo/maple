@@ -2,7 +2,7 @@ import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
-import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
+import { FetchHttpClient, HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
@@ -72,6 +72,8 @@ const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpAp
 // empty; the cost moves to the first request's far larger CPU budget.
 const buildHandler = async () => {
 	const { ElectricSyncRouter } = await import("./routes/shape.http")
+	const { ElectricClient } = await import("./electric/ElectricClient")
+	const { TenantResolver } = await import("./auth/TenantResolver")
 	const { SyncConfig } = await import("./config")
 	return HttpRouter.toWebHandler(
 		ElectricSyncRouter.pipe(
@@ -80,9 +82,12 @@ const buildHandler = async () => {
 					allowedOrigins: ["*"],
 					allowedMethods: ["GET", "OPTIONS"],
 					allowedHeaders: ["*"],
-					// electric-* headers must be readable cross-origin so
-					// @electric-sql/client can advance the shape cursor
-					// (handle/offset/up-to-date) through the proxy.
+					// Load-bearing, not hygiene: the electric-* headers must be
+					// readable cross-origin or @electric-sql/client cannot advance
+					// the shape cursor (handle/offset/up-to-date) through the proxy,
+					// and every stream stalls after its first chunk. Dropping an
+					// entry here breaks sync in the browser with nothing failing
+					// server-side, which is why it is spelled out rather than tested.
 					exposedHeaders: [
 						"electric-handle",
 						"electric-offset",
@@ -92,6 +97,11 @@ const buildHandler = async () => {
 					],
 				}),
 			),
+			// The route depends on these two services rather than constructing them,
+			// so tests can substitute either one; this is the only place the real
+			// implementations (and the real `fetch`) are wired in.
+			Layer.provideMerge(ElectricClient.layer.pipe(Layer.provide(FetchHttpClient.layer))),
+			Layer.provideMerge(TenantResolver.layer),
 			Layer.provideMerge(SyncConfig.layer),
 			Layer.provideMerge(WorkerPlatformLive),
 			Layer.provideMerge(telemetry.layer),

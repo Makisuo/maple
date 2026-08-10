@@ -24,7 +24,12 @@ export class WorkerEnvironment extends Context.Service<WorkerEnvironment, Record
 	 */
 	static readonly layer: Layer.Layer<WorkerEnvironment> = Layer.effect(
 		this,
-		cloudflareWorkers.pipe(Effect.map(({ env }) => env as Record<string, unknown>)),
+		// `?? {}` because the service's type promises a record and consumers read
+		// bindings straight off it. A host whose `cloudflare:workers` module has no
+		// `env` (the vitest stub, historically) would otherwise hand out
+		// `undefined` behind a non-nullable type, and the first consumer to
+		// dereference a binding crashes instead of seeing "binding absent".
+		cloudflareWorkers.pipe(Effect.map(({ env }) => (env ?? {}) as Record<string, unknown>)),
 	)
 }
 

@@ -20,7 +20,14 @@
  * free to move.
  */
 export { runChatTurn } from "./turn"
-export { makeTurnUsage, type ChatTurnEvent, type ChatTurnInput, type TurnUsage } from "./types"
+export {
+	makeTurnObservability,
+	makeTurnUsage,
+	type ChatTurnEvent,
+	type ChatTurnInput,
+	type TurnObservability,
+	type TurnUsage,
+} from "./types"
 export { MAX_STEPS, SUBAGENT_MAX_STEPS } from "./budgets"
 export { dropOldestToolStep, isNearContextLimit } from "./context"
 export { isRetryableStepFailure, stepRetryDelayMs } from "./retry"

@@ -1,3 +1,11 @@
+# Cargo build artifacts (27 GB and growing). The root .gitignore already has
+# `/apps/ingest/target`, but alchemy's image-context hash re-reads gitignore
+# rules with cwd=apps/ingest and does not rebase root-anchored patterns, so that
+# one converts to a glob matching nothing. Declaring it HERE makes the rule
+# relative to this directory, which is what actually excludes it from the hash —
+# without this a local `alchemy deploy` walks the whole tree.
+/target
+
 target/.wal
 
 # ui-dist/ is a build artifact: `scripts/build-local-binary.sh` builds the

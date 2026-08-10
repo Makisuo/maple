@@ -563,10 +563,7 @@ describe("PlanetScaleService.listEvents", () => {
 				database: "main-db",
 				limit: 100,
 			})
-			assert.deepStrictEqual(byDatabase.events.map((e) => e.id).sort(), [
-				"main-branch",
-				"main-deploy",
-			])
+			assert.deepStrictEqual(byDatabase.events.map((e) => e.id).sort(), ["main-branch", "main-deploy"])
 
 			const byCategory = yield* service.listEvents(asOrgId("org_1"), {
 				...window,

@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { isNavItemActive, isPathActive, navGroups, paletteNavItems, type NavItem } from "./nav-items"
 
-const enabled = { infraEnabled: true }
-const gated = { infraEnabled: false }
-
-function findItem(flags: { infraEnabled: boolean }, title: string): NavItem {
-	const item = navGroups(flags)
+function findItem(title: string): NavItem {
+	const item = navGroups()
 		.flatMap((group) => group.items)
 		.find((candidate) => candidate.title === title)
 	if (!item) throw new Error(`no nav item titled ${title}`)
@@ -33,7 +30,7 @@ describe("isPathActive", () => {
 
 describe("isNavItemActive", () => {
 	it("keeps Explore active on every signal, not just its own href", () => {
-		const explore = findItem(enabled, "Explore")
+		const explore = findItem("Explore")
 		for (const path of ["/traces", "/logs", "/metrics", "/replays"]) {
 			expect(isNavItemActive(path, explore)).toBe(true)
 		}
@@ -41,11 +38,11 @@ describe("isNavItemActive", () => {
 	})
 
 	it("keeps Explore active on a signal's detail route", () => {
-		expect(isNavItemActive("/logs/abc123", findItem(enabled, "Explore"))).toBe(true)
+		expect(isNavItemActive("/logs/abc123", findItem("Explore"))).toBe(true)
 	})
 
 	it("keeps Infrastructure active across its children", () => {
-		const infra = findItem(enabled, "Infrastructure")
+		const infra = findItem("Infrastructure")
 		expect(isNavItemActive("/infra", infra)).toBe(true)
 		expect(isNavItemActive("/infra/kubernetes/pods", infra)).toBe(true)
 		expect(isNavItemActive("/infra/planetscale", infra)).toBe(true)
@@ -53,14 +50,15 @@ describe("isNavItemActive", () => {
 })
 
 describe("navGroups", () => {
-	it("renders nine top-level rows at rest", () => {
-		const rows = navGroups(enabled).flatMap((group) => group.items)
+	it("renders ten top-level rows", () => {
+		const rows = navGroups().flatMap((group) => group.items)
 		expect(rows.map((item) => item.title)).toEqual([
 			"Overview",
 			"Services",
 			"Service Map",
 			"Infrastructure",
 			"Explore",
+			"Web Analytics",
 			"Dashboards",
 			"Investigations",
 			"Errors",
@@ -68,17 +66,22 @@ describe("navGroups", () => {
 		])
 	})
 
+	it("reaches Web Analytics from the palette", () => {
+		// The palette derives from navGroups, so the row being unconditional has to
+		// mean it is typeable too — this was gated behind a rollout flag, and the
+		// two surfaces went dark together.
+		expect(paletteNavItems().map((entry) => entry.href)).toContain("/analytics")
+	})
+
 	it("gives every child of a previewed section an icon", () => {
 		// The closed row previews its children by drawing their glyphs (see
 		// `NavRow`), and draws nothing at all unless *every* child has one — so
 		// dropping an icon here silently removes the preview rather than
 		// rendering a gap.
-		for (const flags of [enabled, gated]) {
-			for (const title of ["Explore", "Infrastructure"]) {
-				const item = findItem(flags, title)
-				expect(item.subItems?.length).toBeGreaterThan(0)
-				expect(item.subItems?.every((sub) => sub.icon)).toBe(true)
-			}
+		for (const title of ["Explore", "Infrastructure"]) {
+			const item = findItem(title)
+			expect(item.subItems?.length).toBeGreaterThan(0)
+			expect(item.subItems?.every((sub) => sub.icon)).toBe(true)
 		}
 	})
 
@@ -86,22 +89,14 @@ describe("navGroups", () => {
 		// Six glyphs beside "Infrastructure" overflow the 16rem sidebar and
 		// truncate the label to "Infrastruct…". The three k8s pages sharing one
 		// mark is what buys the room back — `NavRow` dedupes by icon identity.
-		const infra = findItem(enabled, "Infrastructure")
+		const infra = findItem("Infrastructure")
 		expect(new Set(infra.subItems?.map((sub) => sub.icon)).size).toBe(4)
-	})
-
-	it("keeps the Infrastructure row when the agent pages are gated off", () => {
-		// The row must survive so the sidebar's shape doesn't change when the
-		// Clerk flag resolves — only the children it offers do.
-		const infra = findItem(gated, "Infrastructure")
-		expect(infra.subItems?.map((sub) => sub.title)).toEqual(["Cloudflare", "PlanetScale"])
-		expect(infra.href).toBe("/infra/cloudflare")
 	})
 })
 
 describe("paletteNavItems", () => {
 	it("keeps every destination the sidebar folded into a section reachable by name", () => {
-		const titles = paletteNavItems(enabled).map((entry) => entry.title)
+		const titles = paletteNavItems().map((entry) => entry.title)
 		for (const title of [
 			"Traces",
 			"Logs",
@@ -119,19 +114,13 @@ describe("paletteNavItems", () => {
 	})
 
 	it("points the signal entries at their own routes", () => {
-		const entries = paletteNavItems(enabled)
+		const entries = paletteNavItems()
 		expect(entries.find((e) => e.title === "Logs")?.href).toBe("/logs")
 		expect(entries.find((e) => e.title === "Replays")?.href).toBe("/replays")
 	})
 
 	it("emits no duplicate ids", () => {
-		const ids = paletteNavItems(enabled).map((entry) => entry.id)
+		const ids = paletteNavItems().map((entry) => entry.id)
 		expect(new Set(ids).size).toBe(ids.length)
-	})
-
-	it("drops the gated infra children", () => {
-		const titles = paletteNavItems(gated).map((entry) => entry.title)
-		expect(titles).not.toContain("K8s Pods")
-		expect(titles).toContain("Cloudflare")
 	})
 })

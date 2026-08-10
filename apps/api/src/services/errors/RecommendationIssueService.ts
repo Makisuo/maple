@@ -13,7 +13,7 @@ import { detectAttributeRecommendations, planReconcileIssues } from "@maple/doma
 import { orgIngestAttributeMappings, orgRecommendationIssues } from "@maple/db"
 import { CH, formatWarehouseDateTime } from "@maple/query-engine"
 import { and, eq } from "drizzle-orm"
-import { Array as Arr, Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { Database, type DatabaseError } from "@/platform/DatabaseLive"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -193,16 +193,9 @@ export class RecommendationIssueService extends Context.Service<
 					updatedAt: new Date(now),
 					resolvedAt: null,
 				}))
-				// Cloudflare D1 caps bound parameters at 100 per statement. Each row binds 12
-				// columns, so insert in chunks of 8 (8 × 12 = 96 < 100).
-				yield* Effect.forEach(
-					Arr.chunksOf(rows, 8),
-					(chunk) =>
-						runDb(
-							"insert",
-							database.execute((db) => db.insert(orgRecommendationIssues).values(chunk)),
-						),
-					{ discard: true },
+				yield* runDb(
+					"insert",
+					database.execute((db) => db.insert(orgRecommendationIssues).values(rows)),
 				)
 			}
 

@@ -21,6 +21,7 @@ import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LogsBenchRouteImport } from './routes/logs-bench'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as McpAuthorizeRouteImport } from './routes/mcp-authorize'
+import { Route as NodeLabRouteImport } from './routes/node-lab'
 import { Route as OrgRequiredRouteImport } from './routes/org-required'
 import { Route as OverviewBenchRouteImport } from './routes/overview-bench'
 import { Route as QueryBuilderLabRouteImport } from './routes/query-builder-lab'
@@ -36,6 +37,7 @@ import { Route as WidgetLabRouteImport } from './routes/widget-lab'
 import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
 import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
+import { Route as AnalyticsIndexRouteImport } from './routes/analytics/index'
 import { Route as AnomaliesIndexRouteImport } from './routes/anomalies/index'
 import { Route as AnomaliesIncidentIdRouteImport } from './routes/anomalies/$incidentId'
 import { Route as DashboardsIndexRouteImport } from './routes/dashboards/index'
@@ -54,7 +56,6 @@ import { Route as MetricsMetricNameRouteImport } from './routes/metrics/$metricN
 import { Route as RecommendationsRecommendationKeyRouteImport } from './routes/recommendations/$recommendationKey'
 import { Route as ReplaysIndexRouteImport } from './routes/replays/index'
 import { Route as ReplaysSessionIdRouteImport } from './routes/replays/$sessionId'
-import { Route as ReplaysPreviewRouteImport } from './routes/replays/preview'
 import { Route as ServicesIndexRouteImport } from './routes/services/index'
 import { Route as ServicesServiceNameRouteImport } from './routes/services/$serviceName'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
@@ -134,6 +135,11 @@ const McpAuthorizeRoute = McpAuthorizeRouteImport.update({
   path: '/mcp-authorize',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NodeLabRoute = NodeLabRouteImport.update({
+  id: '/node-lab',
+  path: '/node-lab',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OrgRequiredRoute = OrgRequiredRouteImport.update({
   id: '/org-required',
   path: '/org-required',
@@ -207,6 +213,11 @@ const AlertsRuleIdRoute = AlertsRuleIdRouteImport.update({
 const AlertsCreateRoute = AlertsCreateRouteImport.update({
   id: '/alerts/create',
   path: '/alerts/create',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AnalyticsIndexRoute = AnalyticsIndexRouteImport.update({
+  id: '/analytics/',
+  path: '/analytics/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AnomaliesIndexRoute = AnomaliesIndexRouteImport.update({
@@ -298,11 +309,6 @@ const ReplaysIndexRoute = ReplaysIndexRouteImport.update({
 const ReplaysSessionIdRoute = ReplaysSessionIdRouteImport.update({
   id: '/replays/$sessionId',
   path: '/replays/$sessionId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReplaysPreviewRoute = ReplaysPreviewRouteImport.update({
-  id: '/replays/preview',
-  path: '/replays/preview',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ServicesIndexRoute = ServicesIndexRouteImport.update({
@@ -417,6 +423,7 @@ export interface FileRoutesByFullPath {
   '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
   '/mcp-authorize': typeof McpAuthorizeRoute
+  '/node-lab': typeof NodeLabRoute
   '/org-required': typeof OrgRequiredRoute
   '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -441,10 +448,10 @@ export interface FileRoutesByFullPath {
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
   '/replays/$sessionId': typeof ReplaysSessionIdRoute
-  '/replays/preview': typeof ReplaysPreviewRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts/': typeof AlertsIndexRoute
+  '/analytics/': typeof AnalyticsIndexRoute
   '/anomalies/': typeof AnomaliesIndexRoute
   '/dashboards/': typeof DashboardsIndexRoute
   '/errors/': typeof ErrorsIndexRoute
@@ -483,6 +490,7 @@ export interface FileRoutesByTo {
   '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
   '/mcp-authorize': typeof McpAuthorizeRoute
+  '/node-lab': typeof NodeLabRoute
   '/org-required': typeof OrgRequiredRoute
   '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -507,10 +515,10 @@ export interface FileRoutesByTo {
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
   '/replays/$sessionId': typeof ReplaysSessionIdRoute
-  '/replays/preview': typeof ReplaysPreviewRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts': typeof AlertsIndexRoute
+  '/analytics': typeof AnalyticsIndexRoute
   '/anomalies': typeof AnomaliesIndexRoute
   '/dashboards': typeof DashboardsIndexRoute
   '/errors': typeof ErrorsIndexRoute
@@ -550,6 +558,7 @@ export interface FileRoutesById {
   '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
   '/mcp-authorize': typeof McpAuthorizeRoute
+  '/node-lab': typeof NodeLabRoute
   '/org-required': typeof OrgRequiredRoute
   '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -574,10 +583,10 @@ export interface FileRoutesById {
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
   '/replays/$sessionId': typeof ReplaysSessionIdRoute
-  '/replays/preview': typeof ReplaysPreviewRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts/': typeof AlertsIndexRoute
+  '/analytics/': typeof AnalyticsIndexRoute
   '/anomalies/': typeof AnomaliesIndexRoute
   '/dashboards/': typeof DashboardsIndexRoute
   '/errors/': typeof ErrorsIndexRoute
@@ -618,6 +627,7 @@ export interface FileRouteTypes {
     | '/logs-bench'
     | '/mcp'
     | '/mcp-authorize'
+    | '/node-lab'
     | '/org-required'
     | '/overview-bench'
     | '/query-builder-lab'
@@ -642,10 +652,10 @@ export interface FileRouteTypes {
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
     | '/replays/$sessionId'
-    | '/replays/preview'
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts/'
+    | '/analytics/'
     | '/anomalies/'
     | '/dashboards/'
     | '/errors/'
@@ -684,6 +694,7 @@ export interface FileRouteTypes {
     | '/logs-bench'
     | '/mcp'
     | '/mcp-authorize'
+    | '/node-lab'
     | '/org-required'
     | '/overview-bench'
     | '/query-builder-lab'
@@ -708,10 +719,10 @@ export interface FileRouteTypes {
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
     | '/replays/$sessionId'
-    | '/replays/preview'
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts'
+    | '/analytics'
     | '/anomalies'
     | '/dashboards'
     | '/errors'
@@ -750,6 +761,7 @@ export interface FileRouteTypes {
     | '/logs-bench'
     | '/mcp'
     | '/mcp-authorize'
+    | '/node-lab'
     | '/org-required'
     | '/overview-bench'
     | '/query-builder-lab'
@@ -774,10 +786,10 @@ export interface FileRouteTypes {
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
     | '/replays/$sessionId'
-    | '/replays/preview'
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts/'
+    | '/analytics/'
     | '/anomalies/'
     | '/dashboards/'
     | '/errors/'
@@ -817,6 +829,7 @@ export interface RootRouteChildren {
   LogsBenchRoute: typeof LogsBenchRoute
   McpRoute: typeof McpRoute
   McpAuthorizeRoute: typeof McpAuthorizeRoute
+  NodeLabRoute: typeof NodeLabRoute
   OrgRequiredRoute: typeof OrgRequiredRoute
   OverviewBenchRoute: typeof OverviewBenchRoute
   QueryBuilderLabRoute: typeof QueryBuilderLabRoute
@@ -841,10 +854,10 @@ export interface RootRouteChildren {
   MetricsMetricNameRoute: typeof MetricsMetricNameRoute
   RecommendationsRecommendationKeyRoute: typeof RecommendationsRecommendationKeyRoute
   ReplaysSessionIdRoute: typeof ReplaysSessionIdRoute
-  ReplaysPreviewRoute: typeof ReplaysPreviewRoute
   ServicesServiceNameRoute: typeof ServicesServiceNameRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
   AlertsIndexRoute: typeof AlertsIndexRoute
+  AnalyticsIndexRoute: typeof AnalyticsIndexRoute
   AnomaliesIndexRoute: typeof AnomaliesIndexRoute
   DashboardsIndexRoute: typeof DashboardsIndexRoute
   ErrorsIndexRoute: typeof ErrorsIndexRoute
@@ -957,6 +970,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof McpAuthorizeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/node-lab': {
+      id: '/node-lab'
+      path: '/node-lab'
+      fullPath: '/node-lab'
+      preLoaderRoute: typeof NodeLabRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/org-required': {
       id: '/org-required'
       path: '/org-required'
@@ -1060,6 +1080,13 @@ declare module '@tanstack/react-router' {
       path: '/alerts/create'
       fullPath: '/alerts/create'
       preLoaderRoute: typeof AlertsCreateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/analytics/': {
+      id: '/analytics/'
+      path: '/analytics'
+      fullPath: '/analytics/'
+      preLoaderRoute: typeof AnalyticsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/anomalies/': {
@@ -1186,13 +1213,6 @@ declare module '@tanstack/react-router' {
       path: '/replays/$sessionId'
       fullPath: '/replays/$sessionId'
       preLoaderRoute: typeof ReplaysSessionIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/replays/preview': {
-      id: '/replays/preview'
-      path: '/replays/preview'
-      fullPath: '/replays/preview'
-      preLoaderRoute: typeof ReplaysPreviewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/services/': {
@@ -1337,6 +1357,7 @@ const rootRouteChildren: RootRouteChildren = {
   LogsBenchRoute: LogsBenchRoute,
   McpRoute: McpRoute,
   McpAuthorizeRoute: McpAuthorizeRoute,
+  NodeLabRoute: NodeLabRoute,
   OrgRequiredRoute: OrgRequiredRoute,
   OverviewBenchRoute: OverviewBenchRoute,
   QueryBuilderLabRoute: QueryBuilderLabRoute,
@@ -1361,10 +1382,10 @@ const rootRouteChildren: RootRouteChildren = {
   MetricsMetricNameRoute: MetricsMetricNameRoute,
   RecommendationsRecommendationKeyRoute: RecommendationsRecommendationKeyRoute,
   ReplaysSessionIdRoute: ReplaysSessionIdRoute,
-  ReplaysPreviewRoute: ReplaysPreviewRoute,
   ServicesServiceNameRoute: ServicesServiceNameRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
   AlertsIndexRoute: AlertsIndexRoute,
+  AnalyticsIndexRoute: AnalyticsIndexRoute,
   AnomaliesIndexRoute: AnomaliesIndexRoute,
   DashboardsIndexRoute: DashboardsIndexRoute,
   ErrorsIndexRoute: ErrorsIndexRoute,

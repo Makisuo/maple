@@ -36,14 +36,12 @@ import {
 } from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
-import { Cause, Clock, Context, Data, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
 import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
-import {
-	routeInvestigation,
-	type InvestigationRoute,
-} from "@/services/errors/investigation-route"
+import { routeInvestigation, type InvestigationRoute } from "@/services/errors/investigation-route"
+import { FanoutStartError } from "@/services/errors/investigation-fanout-error"
 import { evaluateInvestigationQuota, selectInvestigationUsage } from "@/services/errors/investigation-quota"
 import {
 	STALE_BUDGETS,
@@ -59,8 +57,6 @@ import { Env } from "@/platform/Env"
  * same reason `CHAT_SESSION` is resolved this way.
  */
 export const FANOUT_WORKFLOW_BINDING = "INVESTIGATION_FANOUT_WORKFLOW"
-
-class FanoutStartError extends Data.TaggedError("FanoutStartError")<{ readonly cause: string }> {}
 
 interface FanoutWorkflowBinding {
 	readonly create: (options: { id: string; params: unknown }) => Promise<{ id: string }>
@@ -430,6 +426,17 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					db.select().from(aiTriageSettings).where(eq(aiTriageSettings.orgId, orgId)).limit(1),
 				).pipe(Effect.map((rows) => rows[0]))
 
+			/**
+			 * Both gates here are automatic-only.
+			 *
+			 * The daily budget exists to bound *unattended* spend — an incident storm
+			 * opening investigations while nobody is watching. A person clicking
+			 * Investigate or Retry is a deliberate act, and charging it to the same
+			 * counter made the Retry button permanently dead once the org was at its
+			 * ceiling, on a page whose failure copy tells the reader to press it. It
+			 * was also double-counting: the usage query counts rows started today, and
+			 * the row being restarted is already one of them.
+			 */
 			const ensureStartAllowed = Effect.fnUntraced(function* (
 				orgId: OrgId,
 				automatic: boolean,
@@ -447,6 +454,14 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						}),
 					)
 				}
+
+				// Manual starts are not budgeted — see this function's header. The check
+				// below is reached only by an automatic start, which today means nothing
+				// in production: the autonomous producer is `maybeEnqueueTriage`, which
+				// runs the same verdict itself and skips rather than failing. Kept wired
+				// (and declared 429 on the routes) so re-enabling is one flag, not a
+				// rebuild of the error path.
+				if (!automatic) return
 
 				// Two ceilings counted in two different units, which is the whole point
 				// of having two columns. Both the query and the verdict live in
@@ -469,8 +484,9 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						new InvestigationQuotaError({
 							message:
 								verdict.dimension === "runs"
-									? `Daily investigation budget of ${verdict.limit} runs has been reached.`
-									: `Daily investigation budget of ${verdict.limit} model passes has been reached.`,
+									? `Daily limit of ${verdict.limit} investigations reached. Resets at midnight UTC.`
+									: `Daily limit of ${verdict.limit} model passes reached. Resets at midnight UTC.`,
+							dimension: verdict.dimension,
 							limit: verdict.limit,
 							retryableAt: decodeIsoSync(new Date(verdict.retryableAtMs).toISOString()),
 						}),
@@ -841,7 +857,6 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						}
 						// The route decides the cost, so it has to be known before the quota
 						// check and before the claim increments the counter.
-						const settings = yield* loadSettings(orgId)
 						const route = routeInvestigation({
 							subject: request.subject,
 							snapshot: request.snapshot ?? null,
@@ -894,7 +909,6 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				const nowMs = yield* Clock.currentTimeMillis
 				const existing = yield* getInvestigation(orgId, id)
 				const row = yield* loadRow(orgId, id)
-				const settings = yield* loadSettings(orgId)
 				const route = routeInvestigation({
 					subject: existing.subject,
 					snapshot: existing.snapshot,
@@ -1004,7 +1018,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			 * report onto the investigation row, then applies the incident-side
 			 * effects (severity + issue timeline) and tracks token usage — all
 			 * idempotent on the investigation id so a re-diagnosis or retry can't
-			 * duplicate them. Ported from the legacy AiTriageWorkflow persist step.
+			 * duplicate them.
 			 */
 			const submitDiagnosis: InvestigationServiceShape["submitDiagnosis"] = Effect.fn(
 				"InvestigationService.submitDiagnosis",

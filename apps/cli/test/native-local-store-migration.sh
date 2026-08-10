@@ -118,7 +118,7 @@ step "creating legacy v0 source store"
 bounded 60 "legacy source fixture" \
 	env MAPLE_LIBCHDB="$LIBCHDB" bun "$REPO_ROOT/apps/cli/test/native-local-store-migration-fixture.ts" "$DATA" "$CONFIG"
 
-# Replace the newly-created active v2 marker with the historical v1 marker.
+# Install the historical fingerprint-only marker for the v0 physical source.
 # The physical source was created by native chDB; the marker is the only
 # compatibility evidence the v0 resolver is allowed to use.
 step "installing legacy marker"
@@ -137,7 +137,12 @@ bounded 120 "maple schema migrate" \
 }
 grep -q "local store migrated" "$ROOT/migrate.out" || fail "native migration did not report promotion"
 [[ -f "$ROOT/maple-store-version.json" ]] || fail "active marker disappeared after native promotion"
-jq -e '.formatVersion == 2 and .activation == "active" and .schemaVersion == 1 and .schema == "718581a523cbf01c"' \
+# Pinned to the CURRENT head identity on purpose — this is the gate that proves
+# the native migration promotes all the way to head, not merely that it ran. It
+# must be bumped in lockstep with LOCAL_SCHEMA_VERSION and the matching
+# LOCAL_SCHEMA_V<n>.fingerprint in apps/cli/src/server/schema-identity.ts;
+# leaving it on the previous version is what makes this step fail after a bump.
+jq -e '.formatVersion == 2 and .activation == "active" and .schemaVersion == 4 and .schema == "75ac856927d88d56"' \
 	"$ROOT/maple-store-version.json" >/dev/null || fail "native migration wrote the wrong active identity"
 
 step "reopening promoted store in a fresh server"
@@ -158,7 +163,11 @@ db_edge_count="$(query "SELECT count() AS count FROM service_map_db_edges_hourly
 step "stopping server and checking rollback retention"
 stop_server
 
+step "verifying the service-map ingress bridge"
+bounded 60 "service-map ingress bridge probe" \
+	env MAPLE_LIBCHDB="$LIBCHDB" bun "$REPO_ROOT/apps/cli/test/native-service-map-ingest-bridge-probe.ts" "$DATA" "$CONFIG"
+
 rollback="$(sed -n 's/^.*rollback *//p' "$ROOT/migrate.out" | tail -1)"
 [[ -n "$rollback" && -d "$rollback" ]] || fail "native migration did not retain a rollback source"
 [[ -f "$(dirname "$rollback")/maple-store-version.json" ]] || fail "native rollback marker was not retained"
-echo "PASS: native historical raw-store migration, rebuilt aggregates, fresh reopen, and rollback retention"
+echo "PASS: native historical migration, rebuilt aggregates, v3 materialization triggers, fresh reopen, and rollback retention"

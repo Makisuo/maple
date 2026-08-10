@@ -143,6 +143,36 @@ describe("investigationFinding", () => {
 	it("reports nothing to show when a resolved run has no report", () => {
 		expect(investigationFinding(make({ status: "resolved" }))).toEqual({ kind: "none" })
 	})
+
+	/**
+	 * `partial`, not `cause`. The hub is scanned rather than read, and a lead
+	 * nothing confirmed rendering identically to a promoted cause makes an
+	 * unconfirmed guess look like an answer.
+	 */
+	it("marks an inconclusive run as partial rather than as a cause", () => {
+		const investigation = make({
+			status: "inconclusive",
+			report: {
+				summary: "Nothing held up.",
+				suspectedCause: "Possibly the payments-api pool, unconfirmed",
+				severityAssessment: "low",
+				affectedScope: "checkout-api",
+				evidence: [],
+				suggestedActions: [],
+				confidence: "low",
+				ruledOut: ["Deploy: service.version unchanged"],
+			},
+		} as Partial<V2Investigation>)
+		expect(investigationFinding(investigation)).toEqual({
+			kind: "partial",
+			text: "Possibly the payments-api pool, unconfirmed",
+		})
+	})
+
+	/** And it is never a `failure`: nothing broke, so the row must not read red. */
+	it("does not read an inconclusive run as a failure when it has no report", () => {
+		expect(investigationFinding(make({ status: "inconclusive", report: null })).kind).toBe("partial")
+	})
 })
 
 describe("investigationKindKey", () => {

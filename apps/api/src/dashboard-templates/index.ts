@@ -118,6 +118,5 @@ export type {
 	TemplateMetadata,
 	TemplateParameterValues,
 	TemplatePreviewWidget,
-	TemplateRequirement,
 	WidgetDef,
 } from "./types"

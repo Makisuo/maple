@@ -28,6 +28,7 @@ import { Tool, type Model, type Tools } from "@maple/llm"
 import { Message } from "@maple/llm"
 import { runChatTurn, makeTurnUsage, type TurnUsage } from "@/chat/loop"
 import type { AgentDefinition } from "@/chat/agents"
+import { McpToolExecutor } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
 export interface AgentPassInput<S extends Schema.Top> {
@@ -70,9 +71,10 @@ export interface AgentPassOutput<A> {
  */
 export const runAgentPass = <S extends Schema.Top>(
 	input: AgentPassInput<S>,
-): Effect.Effect<AgentPassOutput<S["Type"]>> =>
+): Effect.Effect<AgentPassOutput<S["Type"]>, never, McpToolExecutor> =>
 	Effect.gen(function* () {
 		type A = S["Type"]
+		const toolExecutor = yield* McpToolExecutor
 		const usage = input.usage ?? makeTurnUsage()
 		let answer: Option.Option<A> = Option.none()
 		let toolCalls = 0
@@ -94,6 +96,7 @@ export const runAgentPass = <S extends Schema.Top>(
 		yield* runChatTurn({
 			sessionId: input.id,
 			tenant: input.tenant,
+			toolExecutor,
 			model: input.model,
 			messages: [Message.user(input.prompt)],
 			messageId: input.id,

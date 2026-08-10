@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import type { RawSqlValidationError } from "@maple/domain/http"
 import type { WarehouseSqlError } from "@maple/query-engine/execution"
-import { makeExecuteRawSql, type ExecuteRawSqlResult } from "@maple/query-engine/runtime"
+import { makeExecuteRawSql } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
@@ -31,8 +31,6 @@ export interface RunRawSqlInput {
 	readonly endTime: string
 	readonly granularitySeconds: number
 }
-
-export type RunRawSqlResult = ExecuteRawSqlResult
 
 /**
  * Expand the raw-SQL macros (`$__orgFilter`, `$__timeFilter(col)`, …) with the

@@ -8,23 +8,22 @@
 		"lib/*",
 		"examples/*"
 	],
-	"overrides": {
-		"@effect/sql-d1": "4.0.0-beta.105"
-	},
 	"scripts": {
 		"build": "turbo build",
 		"dev": "turbo dev",
+		"prepare": "effect-tsgo patch --no-typescript --oxlint",
 		"dev:essentials": "turbo dev --filter=@maple/api --filter=@maple/alerting --filter=@maple/ingest --filter=@maple/web --filter=@maple/scraper --filter=@maple/electric-sync",
 		"docker:build": "COMPOSE_PARALLEL_LIMIT=1 docker compose build",
 		"docker:up": "COMPOSE_PARALLEL_LIMIT=1 docker compose up --build",
 		"db:up": "docker compose up -d postgres electric",
 		"ch:up": "docker compose -f docker-compose.development.yml up -d clickhouse",
 		"ch:down": "docker compose -f docker-compose.development.yml stop clickhouse",
-		"ch:test": "CLICKHOUSE_E2E=1 CLICKHOUSE_E2E_URL=http://127.0.0.1:8123 bun run --filter=@maple/api test -- src/services/warehouse/sql-catalog.clickhouse.e2e.test.ts src/services/warehouse/WarehouseQueryService.clickhouse.e2e.test.ts",
+		"ch:test": "CLICKHOUSE_E2E=1 CLICKHOUSE_E2E_URL=http://127.0.0.1:8123 bun run --filter=@maple/api test -- src/services/warehouse/sql-catalog.clickhouse.e2e.test.ts src/services/warehouse/WarehouseQueryService.clickhouse.e2e.test.ts src/services/warehouse/web-analytics-parity.clickhouse.e2e.test.ts",
 		"db:migrate:local": "DATABASE_URL=postgres://maple:maple@localhost:5499/maple bun run --cwd packages/db db:migrate",
 		"migrate:prod": "bun run --cwd packages/db ps:apply-schema main",
 		"dev:alerting": "bun --filter=@maple/alerting dev",
 		"format": "oxfmt && oxlint --ignore-pattern '.context/**' --fix",
+		"lint:effect-boundaries": "oxlint -c .oxlintrc.effect-boundaries.json apps/api/src/mcp/tools apps/api/src/mcp/dispatcher.ts apps/api/src/mcp/lib/query-warehouse.ts apps/api/src/mcp/server.ts apps/api/src/chat/tools.ts apps/api/src/chat/loop/types.ts apps/api/src/chat/loop/turn.ts apps/api/src/chat/turn-runner.ts apps/api/src/internal-rpc.ts apps/api/src/workflows/agent-pass.ts apps/api/src/routes/v1/chat.http.ts apps/api/src/worker.ts",
 		"alchemy:build-deps": "turbo build --filter=@maple-dev/effect-sdk --filter=@maple-dev/browser --filter=@maple-dev/clickhouse-builder",
 		"alchemy:deploy": "bun run alchemy:build-deps && alchemy deploy --yes",
 		"alchemy:deploy:prd": "bun run alchemy:build-deps && alchemy deploy --yes --adopt --stage prd",
@@ -50,6 +49,7 @@
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260603.1",
 		"@effect/platform-node": "4.0.0-beta.105",
+		"@effect/tsgo": "0.32.1",
 		"@effect/vitest": "4.0.0-beta.105",
 		"@maple/infra": "workspace:*",
 		"@tinybirdco/sdk": "catalog:tinybird",
@@ -58,10 +58,14 @@
 		"effect": "catalog:effect",
 		"knip": "^6.17.1",
 		"oxfmt": "^0.55.0",
-		"oxlint": "^1.70.0",
+		"oxlint": "1.76.0",
+		"oxlint-tsgolint": "7.0.2001",
 		"portless": "^0.14.0",
 		"turbo": "^2.9.18",
 		"typescript": "catalog:tooling"
+	},
+	"overrides": {
+		"@effect/sql-d1": "4.0.0-beta.105"
 	},
 	"packageManager": "bun@1.3.11",
 	"catalog": {

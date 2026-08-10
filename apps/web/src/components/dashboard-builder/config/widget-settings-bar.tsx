@@ -3,8 +3,6 @@ import { widgetTypes } from "@/components/dashboard-builder/widgets/types"
 import { useWidgetBuilder } from "@/hooks/use-widget-builder"
 import { toPanelType } from "@/lib/query-builder/panel-types"
 
-export type { LegendPosition } from "@/components/dashboard-builder/config/settings-fields"
-
 /**
  * The "Panel Options" rail.
  *

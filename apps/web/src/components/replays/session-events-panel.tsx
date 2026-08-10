@@ -35,9 +35,7 @@ export type EventRow = {
 	readonly attributes?: string
 }
 
-/** The session metadata the rail's Session tab renders — a subset of the studio's
- *  session shape, structurally satisfied by both the warehouse row and the preview
- *  fixture. */
+/** The session metadata rendered by the rail's Session tab. */
 export interface SessionRailSession {
 	readonly durationMs: number | null
 	readonly activeTimeMs?: number | null
@@ -53,8 +51,7 @@ export interface SessionRailSession {
 	readonly userAgent?: string | null
 	/** From `recordedMarker()`: true/false when the SDK stamped the session, undefined when unknown. */
 	readonly recorded?: boolean
-	// Analytics dimensions. Optional because the preview fixture and older
-	// sessions (written before migration 0011) have none.
+	// Analytics dimensions. Optional because sessions written before migration 0011 have none.
 	/** Persistent per-browser id — the same value on this visitor's other sessions,
 	 *  including anonymous ones on the marketing site. */
 	readonly visitorId?: string | null
@@ -94,17 +91,12 @@ export function SessionRail({
 	sessionId,
 	session,
 	traceIds,
-	previewEvents,
-	previewSummaries,
 	window,
 	className,
 }: {
 	sessionId: string
 	session: SessionRailSession
 	traceIds: ReadonlyArray<string>
-	/** Placeholder-data preview: render these events instead of fetching them. */
-	previewEvents?: ReadonlyArray<EventRow>
-	previewSummaries?: ReadonlyArray<SessionTraceSummary>
 	/** Partition-pruning window; must match the route prefetch key (see $sessionId.tsx). */
 	window?: ReplayPartitionWindow
 	className?: string
@@ -120,7 +112,7 @@ export function SessionRail({
 				<RailTabButton
 					active={tab === "traces"}
 					onClick={() => setTab("traces")}
-					count={traceIds.length > 0 ? traceIds.length : (previewSummaries?.length ?? 0)}
+					count={traceIds.length}
 				>
 					Traces
 				</RailTabButton>
@@ -129,12 +121,8 @@ export function SessionRail({
 				</RailTabButton>
 			</div>
 
-			{tab === "events" && (
-				<EventsTab sessionId={sessionId} window={window} previewEvents={previewEvents} />
-			)}
-			{tab === "traces" && (
-				<TracesTab traceIds={traceIds} previewSummaries={previewSummaries} window={window} />
-			)}
+			{tab === "events" && <EventsTab sessionId={sessionId} window={window} />}
+			{tab === "traces" && <TracesTab traceIds={traceIds} window={window} />}
 			{tab === "session" && <SessionTab sessionId={sessionId} session={session} />}
 		</section>
 	)
@@ -199,15 +187,7 @@ function useClockAt() {
 
 // --- Events tab -------------------------------------------------------------
 
-function EventsTab({
-	sessionId,
-	window,
-	previewEvents,
-}: {
-	sessionId: string
-	window?: ReplayPartitionWindow
-	previewEvents?: ReadonlyArray<EventRow>
-}) {
+function EventsTab({ sessionId, window }: { sessionId: string; window?: ReplayPartitionWindow }) {
 	const result = useAtomValue(getSessionTranscriptResultAtom({ data: { sessionId, ...window } }))
 	const [filter, setFilter] = React.useState<EventFilter>("all")
 
@@ -259,7 +239,6 @@ function EventsTab({
 		)
 	}
 
-	if (previewEvents) return renderBody(previewEvents)
 	return Result.builder(result)
 		.onInitial(() => <Skeleton className="m-3 min-h-0 flex-1 rounded-lg" />)
 		.onError(() => (
@@ -460,14 +439,11 @@ function NetDurationBar({ durationMs, failed }: { durationMs: number; failed: bo
 
 function TracesTab({
 	traceIds,
-	previewSummaries,
 	window,
 }: {
 	traceIds: ReadonlyArray<string>
-	previewSummaries?: ReadonlyArray<SessionTraceSummary>
 	window?: ReplayPartitionWindow
 }) {
-	if (previewSummaries) return <TraceList summaries={previewSummaries} />
 	if (traceIds.length === 0) {
 		return (
 			<p className="p-4 text-xs leading-relaxed text-muted-foreground">

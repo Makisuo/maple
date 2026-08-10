@@ -83,14 +83,14 @@ describe("routeInvestigation", () => {
 	})
 
 	it("reserves the width plus the planner and the validator", () => {
-		expect(routeInvestigation({ subject: incident("error"), snapshot: snapshot("critical") })).toMatchObject(
-			{ kind: "planned", maxWidth: 5, reservedPasses: 7 },
-		)
+		expect(
+			routeInvestigation({ subject: incident("error"), snapshot: snapshot("critical") }),
+		).toMatchObject({ kind: "planned", maxWidth: 5, reservedPasses: 7 })
 	})
 
 	it("narrows an anomaly, which is already a claim about one signal", () => {
-		expect(routeInvestigation({ subject: incident("anomaly"), snapshot: snapshot("critical") })).toMatchObject(
-			{ kind: "planned", maxWidth: 3, reservedPasses: 5 },
-		)
+		expect(
+			routeInvestigation({ subject: incident("anomaly"), snapshot: snapshot("critical") }),
+		).toMatchObject({ kind: "planned", maxWidth: 3, reservedPasses: 5 })
 	})
 })

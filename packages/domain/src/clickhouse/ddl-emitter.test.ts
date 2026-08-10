@@ -33,6 +33,17 @@ describe("ClickHouse DDL emitter", () => {
 		expect(ddl).toContain("TTL toDate(Timestamp) + INTERVAL 30 DAY")
 	})
 
+	it("emits Null-engine ingestion bridges without a sorting key", async () => {
+		const manifest = await buildTinybirdProjectManifest()
+		const ingress = manifest.datasources.find((ds) => ds.name === "service_map_edges_hourly_ingest")
+		expect(ingress).toBeDefined()
+
+		const ddl = emitCreateTable(ingress!)
+		expect(ddl).toContain("ENGINE = Null")
+		expect(ddl).not.toContain("ORDER BY")
+		expect(ddl).not.toContain("`json:")
+	})
+
 	it("preserves DEFAULT expressions on computed columns", async () => {
 		const manifest = await buildTinybirdProjectManifest()
 		const traces = manifest.datasources.find((ds) => ds.name === "traces")

@@ -10,7 +10,7 @@ import type {
 	InvestigationSeededBy,
 	InvestigationStatus,
 	InvestigationHypothesis,
-	InvestigationPlan,
+	InvestigationPlanRecord,
 	InvestigationSubject,
 	InvestigationSubjectSnapshot,
 	LensId,
@@ -24,8 +24,8 @@ import type { IssueSeverity } from "@maple/domain/http"
  * the `/investigations` surface AND keys the `maple-chat` durable session
  * (`<orgId>:inv-<id>`) whose first turn is the autonomous diagnostic pass.
  *
- * Supersedes `ai_triage_runs`: a typed-incident investigation mirrors its
- * incident into the nullable `incidentKind`/`incidentId` columns to keep the
+ * A typed-incident investigation mirrors its incident into the nullable
+ * `incidentKind`/`incidentId` columns to keep the
  * one-investigation-per-incident dedup (the partial unique index below); a
  * free-form investigation leaves them null and is unconstrained. `reportJson`
  * holds the structured `AiTriageResult` written by `submit_diagnosis`.
@@ -69,8 +69,14 @@ export const investigations = pgTable(
 		 * dispatched, verbatim. Stored rather than re-derived because the plan is
 		 * the only record of what a run *chose not* to test, which is half of what
 		 * makes its conclusion readable a week later.
+		 *
+		 * `InvestigationPlanRecord`, not `InvestigationPlan`: it also carries what
+		 * normalization did — `usedSeedFallback`, `plannerSubmitted`, `notes`. Those
+		 * were computed and discarded for as long as this column existed, which is
+		 * why "seven runs in ten never planned the incident" went unnoticed until
+		 * someone read the spans by hand.
 		 */
-		planJson: jsonb("plan_json").$type<InvestigationPlan>(),
+		planJson: jsonb("plan_json").$type<InvestigationPlanRecord>(),
 		plannerModel: text("planner_model"),
 		plannerElapsedMs: integer("planner_elapsed_ms"),
 		validatorNote: text("validator_note"),

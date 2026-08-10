@@ -57,7 +57,6 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
-import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 
 /**
  * A 2px lane is reserved on every row so icons share one vertical line whether
@@ -149,12 +148,12 @@ function UserMenu() {
 	)
 }
 
-function GuestMenu() {
-	const handleLogout = () => {
-		clearSelfHostedSessionToken()
-		window.location.assign("/sign-in")
-	}
+function handleGuestLogout() {
+	clearSelfHostedSessionToken()
+	window.location.assign("/sign-in")
+}
 
+function GuestMenu() {
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
@@ -186,7 +185,7 @@ function GuestMenu() {
 				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
 				<DropdownMenuGroup>
-					<DropdownMenuItem onClick={handleLogout}>
+					<DropdownMenuItem onClick={handleGuestLogout}>
 						<LogoutIcon size={16} />
 						Log out
 					</DropdownMenuItem>
@@ -540,8 +539,7 @@ function FooterCluster() {
 // (instead of bare useRouterState) keeps it quiet during loader/pending ticks.
 export const AppSidebar = memo(function AppSidebar() {
 	const currentPath = useRouterState({ select: (s) => s.location.pathname })
-	const infraEnabled = useInfraEnabled()
-	const groups = useMemo(() => navGroups({ infraEnabled }), [infraEnabled])
+	const groups = navGroups()
 
 	return (
 		<Sidebar collapsible="icon">

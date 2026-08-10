@@ -2,7 +2,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Checkbox } from "@maple/ui/components/ui/checkbox"
 import { Input } from "@maple/ui/components/ui/input"
-import type { QueryBuilderFormulaDraft } from "@/lib/query-builder/model"
+import type { QueryBuilderFormulaDraft } from "@maple/query-engine/query-builder"
 
 interface FormulaPanelProps {
 	formula: QueryBuilderFormulaDraft

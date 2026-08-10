@@ -2,6 +2,7 @@ import { useMemo, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { Exit } from "effect"
 import { useAtomSet } from "@/lib/effect-atom"
+import { formatBackendError } from "@/lib/error-messages"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
@@ -10,14 +11,15 @@ import type { InvestigationContext } from "@/components/chat/investigation-conte
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { EvidenceTab } from "./evidence-tab"
+import { ProvenanceCanvas } from "./flow/provenance-canvas"
 import { FollowUpComposer } from "./follow-up-composer"
 import { HypothesesTab } from "./hypotheses-tab"
 import { ImpactStrip } from "./impact-strip"
 import { investigationHeadline } from "./investigation-display"
 import { InvestigationHeader } from "./investigation-header"
-import { InvestigationRail } from "./investigation-rail"
+import { InvestigationMeta } from "./investigation-meta"
 import { type InvestigationTab, InvestigationTabs } from "./investigation-tabs"
-import { NextActions } from "./next-actions"
+import { SignalsCard } from "./signals-card"
 import { VerdictCard } from "./verdict-card"
 
 const factKey = (label: string) =>
@@ -98,13 +100,14 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
  * they've navigated away from it.
  */
 export function InvestigationView({
+	action,
 	investigation,
 	tab,
-	onRefresh,
 }: {
+	/** The open proposed-action detail, straight off `?action=` and not yet narrowed. */
+	action: unknown
 	investigation: V2Investigation
 	tab: InvestigationTab
-	onRefresh: () => void
 }) {
 	const navigate = useNavigate()
 	const [busy, setBusy] = useState(false)
@@ -128,9 +131,13 @@ export function InvestigationView({
 				title: isResolved ? "Investigation reopened" : "Investigation restarted",
 				type: "success",
 			})
-			onRefresh()
+			// No refetch: the row this page renders is an Electric shape, so the
+			// restart's writes arrive on their own.
 		} else {
-			toastManager.add({ title: "Investigation could not be restarted", type: "error" })
+			// The server's reason is the whole message — a daily-budget 429 says which
+			// ceiling was hit and when it resets, and a fixed title threw all of it away.
+			const { title, description } = formatBackendError(result)
+			toastManager.add({ title, description, type: "error" })
 		}
 	}
 
@@ -144,9 +151,9 @@ export function InvestigationView({
 		setBusy(false)
 		if (Exit.isSuccess(result)) {
 			toastManager.add({ title: "Investigation resolved", type: "success" })
-			onRefresh()
 		} else {
-			toastManager.add({ title: "Investigation could not be resolved", type: "error" })
+			const { title, description } = formatBackendError(result)
+			toastManager.add({ title, description, type: "error" })
 		}
 	}
 
@@ -156,6 +163,32 @@ export function InvestigationView({
 	 * sends and history loading around it — so the question is handed to the Chat
 	 * tab, which is where the answer belongs anyway.
 	 */
+	/**
+	 * Anything that isn't a real index — a hand-edited `?action=abc`, a stale link,
+	 * a fractional or negative number — resolves to no open panel. The canvas then
+	 * looks the index up, finds nothing, and the page renders as if it were absent.
+	 */
+	const openActionIndex =
+		typeof action === "number" && Number.isInteger(action) && action >= 0 ? action : null
+
+	const handleOpenAction = (index: number | null) => {
+		// `replace` so opening and closing the panel doesn't stack history entries
+		// between the reader and the page they arrived from.
+		// Written out rather than reduced over `prev`: an untyped reducer here sees
+		// the union of every route's search params, and this route's `tab` literal
+		// does not survive that widening. The canvas only renders on Overview, so
+		// carrying `tab` forward is all there is to carry.
+		void navigate({
+			to: "/investigations/$id",
+			params: { id: investigation.id },
+			search: {
+				...(tab === "overview" ? {} : { tab }),
+				...(index === null ? {} : { action: index }),
+			},
+			replace: true,
+		})
+	}
+
 	const handleFollowUp = () => {
 		void navigate({
 			to: "/investigations/$id",
@@ -214,11 +247,30 @@ export function InvestigationView({
 										<HypothesesTab investigation={investigation} />
 									) : (
 										<>
+											{/*
+											 * The canvas leads. It carries what the rail's run
+											 * spine, its checks panel and the Next-actions ledger
+											 * used to say separately — one causal read instead of
+											 * three partial ones — so the verdict below it
+											 * qualifies a chain the reader has already seen.
+											 */}
+											<ProvenanceCanvas
+												investigation={investigation}
+												openActionIndex={openActionIndex}
+												onOpenAction={handleOpenAction}
+											/>
 											<VerdictCard investigation={investigation} />
 											<ImpactStrip investigation={investigation} />
-											<NextActions investigation={investigation} />
+											<SignalsCard investigation={investigation} />
 										</>
 									)}
+									{/*
+									 * The audit trail, under the finding rather than beside it.
+									 * This is what was left of the right rail once the canvas took
+									 * over the run and the checks — not enough to keep a 320px
+									 * column standing next to a graph that wanted the width.
+									 */}
+									<InvestigationMeta investigation={investigation} />
 								</div>
 							</DashboardLayout.Scroll>
 							{/*
@@ -236,9 +288,6 @@ export function InvestigationView({
 						</>
 					)}
 				</DashboardLayout.Content>
-				<DashboardLayout.RightPanel title="Investigation context" width="w-80">
-					<InvestigationRail investigation={investigation} />
-				</DashboardLayout.RightPanel>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
 	)

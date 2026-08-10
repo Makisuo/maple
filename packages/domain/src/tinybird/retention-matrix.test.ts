@@ -7,6 +7,7 @@ const RETENTION_DAYS = {
 	attribute_values_hourly: 90,
 	error_events: 90,
 	error_events_by_time: 90,
+	error_fingerprints_minutely: 90,
 	error_spans: 90,
 	logs: 30,
 	logs_aggregates_hourly: 365,
@@ -36,18 +37,37 @@ const RETENTION_DAYS = {
 	trace_list_mv: 30,
 	traces: 30,
 	traces_aggregates_hourly: 365,
+	// Pinned to its source `session_events`: past 30 days this table could never
+	// be rebuilt, so a longer tier here is a retention decision, not a tuning knob.
+	web_events: 30,
 } as const
 
-describe("Tinybird retention matrix", () => {
-	it("assigns every datasource to the intended 30/90/365-day tier", () => {
-		const actualNames = tinybirdProjectManifest.datasources.map(({ name }) => name).sort()
-		expect(actualNames).toEqual(Object.keys(RETENTION_DAYS).sort())
+const ZERO_RETENTION_DATASOURCES = ["service_map_edges_hourly_ingest"] as const
 
-		for (const datasource of tinybirdProjectManifest.datasources) {
-			const expectedDays = RETENTION_DAYS[datasource.name as keyof typeof RETENTION_DAYS]
-			expect(datasource.content, datasource.name).toMatch(
+describe("Tinybird retention matrix", () => {
+	it("assigns every stored datasource to the intended 30/90/365-day tier", () => {
+		const actualNames = tinybirdProjectManifest.datasources.map(({ name }) => name).sort()
+		expect(actualNames).toEqual([...Object.keys(RETENTION_DAYS), ...ZERO_RETENTION_DATASOURCES].sort())
+
+		for (const [name, expectedDays] of Object.entries(RETENTION_DAYS)) {
+			const datasource = tinybirdProjectManifest.datasources.find(
+				(candidate) => candidate.name === name,
+			)
+			expect(datasource, name).toBeDefined()
+			expect(datasource!.content, datasource!.name).toMatch(
 				new RegExp(`ENGINE_TTL "[^"]+ \\+ INTERVAL ${expectedDays} DAY"`),
 			)
+		}
+	})
+
+	it("does not retain Null-engine ingestion bridges", () => {
+		for (const name of ZERO_RETENTION_DATASOURCES) {
+			const datasource = tinybirdProjectManifest.datasources.find(
+				(candidate) => candidate.name === name,
+			)
+			expect(datasource, name).toBeDefined()
+			expect(datasource?.content, name).toContain("ENGINE Null")
+			expect(datasource?.content, name).not.toContain("ENGINE_TTL")
 		}
 	})
 

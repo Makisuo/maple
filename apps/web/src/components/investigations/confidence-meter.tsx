@@ -1,12 +1,22 @@
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { cn } from "@maple/ui/lib/utils"
 
-import { CONFIDENCE_TONE } from "@/components/chat/diagnosis-report-card"
-
 type Confidence = NonNullable<V2Investigation["confidence"]>
 
 /** Sort rank: most confident first, unset last. */
 export const CONFIDENCE_RANK: Record<Confidence, number> = { high: 0, medium: 1, low: 2 }
+
+/**
+ * The word's tint, alongside this file's other confidence vocabulary. It lived on
+ * the chat report card, which meant three surfaces in `investigations/` reached
+ * into `chat/` for a colour — and the card itself now reaches the other way for
+ * the action detail panel, which would have closed the loop.
+ */
+export const CONFIDENCE_TONE: Record<string, string> = {
+	high: "text-success",
+	medium: "text-severity-warn",
+	low: "text-muted-foreground",
+}
 
 const FILLED: Record<Confidence, number> = { high: 3, medium: 2, low: 1 }
 

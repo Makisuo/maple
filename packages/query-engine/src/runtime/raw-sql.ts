@@ -7,7 +7,7 @@ import {
 	RawSqlValidationError,
 } from "@maple/domain/http"
 import type { QueryProfileName } from "../profiles"
-import { escapeClickHouseString } from "../sql"
+import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 
 // ---------------------------------------------------------------------------
 // User-authored ClickHouse SQL: validation, macro expansion, and execution.

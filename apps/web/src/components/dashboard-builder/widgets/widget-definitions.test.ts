@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
-import { buildBreakdownQuerySpec, buildListQuerySpec } from "@/lib/query-builder/model"
+import { buildBreakdownQuerySpec, buildListQuerySpec } from "@maple/query-engine/query-builder"
 import {
 	funnelPresets,
 	hbarPresets,

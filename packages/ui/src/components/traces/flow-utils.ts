@@ -298,7 +298,6 @@ function buildLayoutTree(nodes: FlowNode[], edges: FlowEdge[]): LayoutNode[] {
 export function getLayoutedElements(
 	nodes: FlowNode[],
 	edges: FlowEdge[],
-	_rootSpans: SpanNode[], // Kept for API compatibility but not used
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
 	const nodePositions = new Map<string, { x: number; y: number }>()
 

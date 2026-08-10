@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { execFileSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 /**
@@ -22,10 +22,11 @@ const trackedTsx = execFileSync("git", ["ls-files", "--cached", "--others", "--e
 })
 	.split("\n")
 	.filter((f) => f.length > 0)
+	.filter((f) => existsSync(join(repoRoot, f)))
 	// The primitives themselves define the padding these rules check for.
 	.filter((f) => !/packages\/ui\/src\/components\/ui\/(alert-)?dialog\.tsx$/.test(f))
 
-/** Any explicit horizontal padding counts — `spend-limit-dialog` opts out of `p-6` and uses `px-5`. */
+/** Any explicit horizontal padding counts; settings dialogs opt out of `p-6` and use `px-5`. */
 const HAS_H_PADDING = /\bp-\d|\bpx-\d|\bpx-\[/
 
 const stripComments = (s: string) => s.replaceAll(/\{\/\*.*?\*\/\}/gs, "").trim()

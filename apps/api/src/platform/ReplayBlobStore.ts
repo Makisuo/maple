@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Option } from "effect"
 import { R2Bucket, type R2BucketClient } from "@maple/effect-cloudflare/r2-bucket"
-import { WorkerEnvironment } from "@/platform/WorkerEnvironment"
+import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 
 // ---------------------------------------------------------------------------
 // ReplayBlobStore — reads rrweb chunk payloads out of R2.

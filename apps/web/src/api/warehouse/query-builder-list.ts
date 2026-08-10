@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect"
 import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
 import { QueryEngineExecuteRequest } from "@maple/query-engine"
-import { buildListQuerySpec } from "@/lib/query-builder/model"
+import { buildListQuerySpec } from "@maple/query-engine/query-builder"
 import { decodeInput, executeQueryEngine, invalidWarehouseInput } from "@/api/warehouse/effect-utils"
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))

@@ -65,7 +65,6 @@ const testConfig = () =>
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
 			MAPLE_APP_BASE_URL: "http://127.0.0.1:3471",
 			INTERNAL_SERVICE_TOKEN: "test-internal-token",
-			QE_EVAL_BUCKET_CACHE_ENABLED: "false",
 		}),
 	)
 

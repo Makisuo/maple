@@ -29,7 +29,7 @@ import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Env } from "@/platform/Env"
-import { WorkerEnvironment } from "@/platform/WorkerEnvironment"
+import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 
 const DEVICE_TTL_SECONDS = 15 * 60
 const POLL_INTERVAL_SECONDS = 5

@@ -1,6 +1,13 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
-	"ignoreWorkspaces": ["apps/ingest", "apps/landing", "apps/mobile", "examples/*", "lib/llm"],
+	"ignoreWorkspaces": [
+		"apps/ingest",
+		"apps/landing",
+		"apps/mobile",
+		"examples/*",
+		"lib/llm",
+		"lib/thinking-orbs"
+	],
 	"ignore": ["**/routeTree.gen.ts", ".context/**", ".deepsec/**"],
 	"ignoreExportsUsedInFile": true,
 	"workspaces": {
@@ -34,7 +41,7 @@
 				"test/archive-probe-helpers.ts",
 				"test/merge-injection-probe.ts",
 				"test/native-local-store-migration-fixture.ts",
-				"test/native-reconnect-probe.ts"
+				"test/native-service-map-ingest-bridge-probe.ts"
 			],
 			"ignoreBinaries": ["duckdb"]
 		},

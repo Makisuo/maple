@@ -1,0 +1,143 @@
+---
+/**
+ * One downloadable asset on /brand: the artwork on the ground it is drawn for,
+ * with copy + download beneath it.
+ *
+ * The SVG is inlined rather than referenced with an `<img>` so the copy button
+ * has something to put on the clipboard without a fetch, and so the mark
+ * inherits nothing from the page — these tiles are the one place on the site
+ * where what you see has to be exactly the bytes you get.
+ *
+ * `ground` is a raw CSS colour, not a token: a swatch showing how the amber
+ * reads on ink is describing the *brand*, and it must not follow the site's
+ * theme the way the surrounding chrome does.
+ */
+interface Props {
+	name: string;
+	note: string;
+	/** Inlined SVG markup — the exact contents of the downloadable file. */
+	svg: string;
+	/** Public path to the .svg, used for the download link and the copy label. */
+	href: string;
+	/** Public path to the largest .png. */
+	png: string;
+	ground: string;
+	/** Wide lockups need the full tile width; square marks would swell to fill it. */
+	wide?: boolean;
+}
+const { name, note, svg, href, png, ground, wide = false } = Astro.props;
+---
+
+<figure class="bt" data-copy={svg}>
+	<div class="bt__stage" style={`background:${ground}`}>
+		<div class="bt__art" class:list={[wide ? "bt__art--wide" : "bt__art--square"]} set:html={svg} />
+	</div>
+	<figcaption class="bt__meta">
+		<div class="bt__text">
+			<span class="bt__name">{name}</span>
+			<span class="bt__note">{note}</span>
+		</div>
+		<div class="bt__actions">
+			<button type="button" class="bt__btn bt__copy" aria-label={`Copy ${name} as SVG`}>
+				<span class="bt__label">copy svg</span>
+			</button>
+			<a
+				class="bt__btn"
+				href={href}
+				download
+				data-track="brand_asset_downloaded"
+				data-track-asset={href}>svg</a
+			>
+			<a
+				class="bt__btn"
+				href={png}
+				download
+				data-track="brand_asset_downloaded"
+				data-track-asset={png}>png</a
+			>
+		</div>
+	</figcaption>
+</figure>
+
+<style>
+	.bt {
+		display: flex;
+		flex-direction: column;
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		overflow: hidden;
+		background: var(--bg-elevated);
+	}
+	.bt__stage {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 40px 24px;
+		min-height: 168px;
+	}
+	.bt__art :global(svg) {
+		display: block;
+		height: auto;
+	}
+	.bt__art--square :global(svg) {
+		width: 72px;
+	}
+	.bt__art--wide :global(svg) {
+		width: 100%;
+		max-width: 232px;
+	}
+	.bt__meta {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 12px 14px;
+		border-top: 1px solid var(--border);
+	}
+	.bt__text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.bt__name {
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--foreground);
+	}
+	.bt__note {
+		font-size: 11px;
+		color: var(--muted-foreground);
+	}
+	.bt__actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-shrink: 0;
+	}
+	.bt__btn {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.04em;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		border-radius: 5px;
+		padding: 4px 7px;
+		background: transparent;
+		cursor: pointer;
+		transition: color 0.15s, border-color 0.15s;
+	}
+	.bt__btn:hover {
+		color: var(--foreground);
+		border-color: var(--muted-foreground);
+	}
+	.bt__copy.is-done {
+		color: var(--primary);
+		border-color: var(--primary);
+	}
+	/* The copy label swaps between "copy svg" and "copied", and a width that
+	   follows the text makes the whole action row twitch on every click. */
+	.bt__copy {
+		min-width: 64px;
+	}
+</style>

@@ -34,7 +34,7 @@ import {
 import { Effect, Encoding, Option, Result, Schema } from "effect"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
-import { warehouseToV2 } from "./warehouse-error-map"
+import { queryEngineToV2, warehouseToV2 } from "./warehouse-error-map"
 
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
@@ -384,12 +384,7 @@ const metricFilters = (
 	groupByResourceAttributeKey,
 })
 
-const queryError = (signal: "trace" | "log" | "metric") => (error: unknown) => {
-	const tag = typeof error === "object" && error !== null && "_tag" in error ? String(error._tag) : ""
-	return tag.includes("Validation")
-		? invalidRequest(`${signal}_query_invalid`, "The aggregation request is invalid.", "aggregation")
-		: dependencyUnavailable(`${signal}_query_unavailable`)
-}
+const queryError = (signal: "trace" | "log" | "metric") => queryEngineToV2(`${signal}_query`)
 
 const decodeQueryEngineRequest = (input: unknown, signal: "trace" | "log" | "metric") =>
 	Schema.decodeUnknownEffect(QueryEngineExecuteRequest)(input).pipe(

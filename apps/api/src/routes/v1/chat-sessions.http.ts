@@ -59,7 +59,11 @@ const decodeSendRequest = Schema.decodeUnknownEffect(Schema.fromJsonString(ChatS
 class ChatSessionUnavailableError extends Schema.TaggedError<ChatSessionUnavailableError>()(
 	"@maple/api/chat/ChatSessionUnavailableError",
 	{ operation: Schema.String },
-) {}
+) {
+	override get message(): string {
+		return `Chat session ${this.operation} is temporarily unavailable`
+	}
+}
 
 const sessionCall = <A>(operation: string, run: () => Promise<A>) =>
 	Effect.tryPromise({

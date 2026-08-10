@@ -6,9 +6,11 @@ import {
 	CircleXmarkIcon,
 	LoaderIcon,
 } from "@/components/icons"
+import { cn } from "@maple/ui/lib/utils"
 import type { StructuredToolOutput } from "@maple/domain"
 import { STRUCTURED_MARKER } from "./renderers/constants"
-import { toolIcon, toolLabel } from "./tool-metadata"
+import { ThinkingOrbIcon } from "./thinking-orb-icon"
+import { toolIcon, toolLabel, toolOrbState } from "./tool-metadata"
 
 export { normalizeToolName, toolLabel } from "./tool-metadata"
 
@@ -36,13 +38,28 @@ function deriveStatus(state: string): ToolStatus {
 	}
 }
 
-function StatusGlyph({ status }: { status: ToolStatus }) {
-	if (status === "running")
-		return (
+/**
+ * Only `live` rows get an orb.
+ *
+ * A live row is the trailing edge of a streaming turn — a standalone call with nothing after it —
+ * so it is the one thing on screen that should be moving. Rows inside a `ToolGroup` are detail
+ * behind a header that already carries an orb, and an expanded twelve-call burst would otherwise
+ * be twelve canvases animating against each other.
+ *
+ * Within a row every state shares one size so the line doesn't shift as the call settles: `size-5`
+ * for live rows, to match the orb's 20px, and `size-4` for grouped rows.
+ */
+function StatusGlyph({ status, toolName, live }: { status: ToolStatus; toolName: string; live: boolean }) {
+	const size = live ? "size-5" : "size-4"
+	if (status === "running") {
+		return live ? (
+			<ThinkingOrbIcon state={toolOrbState(toolName)} />
+		) : (
 			<LoaderIcon className="size-4 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" />
 		)
-	if (status === "error") return <CircleXmarkIcon className="size-4 shrink-0 text-destructive" />
-	return <CircleCheckIcon className="size-4 shrink-0 text-severity-info" />
+	}
+	if (status === "error") return <CircleXmarkIcon className={cn(size, "shrink-0 text-destructive")} />
+	return <CircleCheckIcon className={cn(size, "shrink-0 text-severity-info")} />
 }
 
 // Pick the most salient input field for a one-line row summary, e.g. `service=api`.
@@ -202,6 +219,8 @@ interface ToolProps {
 	input?: unknown
 	output?: unknown
 	errorText?: string
+	/** This row is the turn's live edge, so its running state is an orb rather than a quiet loader. */
+	live?: boolean
 }
 
 /**
@@ -210,7 +229,7 @@ interface ToolProps {
  * by the parent (standalone `Tool` shell or `ToolGroup`) so rows never nest cards.
  */
 export const ToolRow = memo(function ToolRow(props: ToolProps) {
-	const { toolName, state, input, output, errorText } = props
+	const { toolName, state, input, output, errorText, live = false } = props
 	const status = deriveStatus(state)
 	const label = toolLabel(toolName)
 	const Icon = toolIcon(toolName)
@@ -236,8 +255,13 @@ export const ToolRow = memo(function ToolRow(props: ToolProps) {
 				disabled={!hasContent}
 				onClick={() => setOpen((v) => !v)}
 			>
-				<StatusGlyph status={status} />
-				<Icon className="size-4 shrink-0 text-muted-foreground" />
+				<StatusGlyph status={status} toolName={toolName} live={live} />
+				{/* The tool icon differentiates rows when you're scanning a group of a dozen. A
+				    standalone row has nothing to differentiate itself from, and its label already
+				    names the tool — so next to the orb it was just a second glyph competing with a
+				    finely-dotted one. Dropped in both of a live row's states, so nothing shifts
+				    when the call settles. */}
+				{live ? null : <Icon className="size-4 shrink-0 text-muted-foreground" />}
 				<span className="shrink-0 font-medium text-foreground">{label}</span>
 				{summary ? (
 					<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">

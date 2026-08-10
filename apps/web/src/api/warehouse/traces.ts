@@ -52,6 +52,8 @@ const ListTracesInputSchema = Schema.Struct({
 		Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(1000)),
 	),
 	offset: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+	sortBy: Schema.optional(Schema.Literals(["timestamp", "durationMs"])),
+	sortDir: Schema.optional(Schema.Literals(["asc", "desc"])),
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
 	// Every inclusion facet is multi-select in the sidebar, so each is an array
@@ -98,6 +100,9 @@ const DEFAULT_LIMIT = 100
 const DEFAULT_OFFSET = 0
 
 const LIST_PROJECTED_COLUMNS = [
+	// Synthetic query-engine column: opt this list into the batched
+	// service_map_spans enrichment without charging every trace-list consumer.
+	"services",
 	"spanAttributes.http.method",
 	"spanAttributes.http.request.method",
 	"spanAttributes.http.route",
@@ -121,6 +126,9 @@ interface TraceRootSpanSummary {
 
 export interface Trace {
 	traceId: TraceId
+	/** The span this row was built from — the root span unless `rootOnly` is off. */
+	spanId: string
+	isRootSpan: boolean
 	startTime: string
 	endTime: string
 	durationMs: number
@@ -230,13 +238,28 @@ function transformSpanListRow(row: Record<string, unknown>): Trace {
 	}
 
 	const timestamp = String(row.timestamp)
+	const serviceName = String(row.serviceName)
+	const services = Array.isArray(row.services)
+		? Array.from(
+				new Set(
+					row.services.flatMap((service) => {
+						const name = String(service)
+						return name ? [name] : []
+					}),
+				),
+			)
+		: serviceName
+			? [serviceName]
+			: []
 	return {
 		traceId: toTraceId(String(row.traceId)),
+		spanId: String(row.spanId),
+		isRootSpan: !row.parentSpanId,
 		startTime: timestamp,
 		endTime: timestamp,
 		durationMs: Number(row.durationMs),
 		spanCount: 1,
-		services: [String(row.serviceName)],
+		services,
 		rootSpan: {
 			name: String(row.spanName),
 			kind: String(row.spanKind),
@@ -285,6 +308,8 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 			source: "traces" as const,
 			limit,
 			offset,
+			sortBy: input.sortBy,
+			sortDir: input.sortDir,
 			// Only project the span attributes the list UI actually renders
 			// (via transformSpanListRow → getHttpInfo). Avoids reading the full
 			// SpanAttributes / ResourceAttributes maps — large win on wide traces.
