@@ -40,7 +40,19 @@ import {
 	isOrgWarehouseQuarantined,
 	quarantineOnConfigClassCause,
 } from "@/services/warehouse/warehouse-org-quarantine"
-import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
+import {
+	Array as Arr,
+	Cause,
+	Clock,
+	Context,
+	Effect,
+	Layer,
+	MutableHashMap,
+	Option,
+	Ref,
+	Schedule,
+	Schema,
+} from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
@@ -62,7 +74,11 @@ import {
 	type LogVolumeSeries,
 } from "./anomaly/detection"
 import { issueSeverityFromAlert } from "@/services/errors/severity-map"
-import { batchDetectorStates, DETECTOR_STATE_FLUSH_CONCURRENCY } from "./anomaly/detector-state-batch"
+import {
+	batchDetectorStates,
+	DETECTOR_STATE_FLUSH_CONCURRENCY,
+	effectiveOtherStates,
+} from "./anomaly/detector-state-batch"
 import { rollingCountBuckets } from "./anomaly/rolling-counts"
 import { decideTransition, stateMachineConfigFor, type DetectorStateSnapshot } from "./anomaly/state-machine"
 import {
@@ -1106,10 +1122,10 @@ const make = Effect.gen(function* () {
 	 * on connections to the same origin pool, not on this loop in isolation.
 	 */
 	const flushDetectorStates = Effect.fnUntraced(function* (
-		rows: ReadonlyArray<typeof anomalyDetectorStates.$inferInsert>,
+		writes: MutableHashMap.MutableHashMap<string, typeof anomalyDetectorStates.$inferInsert>,
 	) {
 		yield* Effect.forEach(
-			batchDetectorStates(rows),
+			batchDetectorStates(Arr.map(Arr.fromIterable(writes), ([, row]) => row)),
 			(chunk) =>
 				dbExecute((db) =>
 					db
@@ -1357,9 +1373,12 @@ const make = Effect.gen(function* () {
 		// same trade as `error-tick-persistence.ts`. This loop averaged ~70 dials
 		// per org tick and peaked at 628.
 		//
-		// Safe to accumulate in a plain array: the `Effect.forEach` below is
-		// sequential (no `concurrency` option), so pushes cannot interleave.
-		const detectorStateWrites: Array<typeof anomalyDetectorStates.$inferInsert> = []
+		// Keyed by `detectorKey` rather than a plain list: the consolidated-incident
+		// refcount below has to see this tick's own buffered writes, and last-wins
+		// on a repeated key is what the sequential per-row loop did anyway. Safe to
+		// mutate directly — the `Effect.forEach` below is sequential (no
+		// `concurrency` option), so writes cannot interleave.
+		const detectorStateWrites = MutableHashMap.empty<string, typeof anomalyDetectorStates.$inferInsert>()
 
 		yield* Effect.forEach(
 			orderedDecisions,
@@ -1793,7 +1812,16 @@ const make = Effect.gen(function* () {
 						runtime === undefined || runtime.row.detectorKey === evaluation.detectorKey
 					// Refcount: a consolidated incident only resolves once no other
 					// series still points at it.
-					const otherStates = yield* dbExecute((db) =>
+					//
+					// These rows are pre-tick truth. Detector-state writes are buffered
+					// until `flushDetectorStates` runs after this loop, so a sibling that
+					// already recovered earlier in this same pass still reads as pointing
+					// here — and two siblings recovering in one tick would each see the
+					// other and neither would close the incident. `effectiveOtherStates`
+					// overlays the buffered writes to fix that, which is also why there is
+					// no `LIMIT 1`: the one row it returned could be the very row the
+					// overlay removes, hiding a genuinely live sibling behind it.
+					const persistedOtherStates = yield* dbExecute((db) =>
 						db
 							.select({
 								detectorKey: anomalyDetectorStates.detectorKey,
@@ -1809,9 +1837,14 @@ const make = Effect.gen(function* () {
 									eq(anomalyDetectorStates.openIncidentId, incidentId),
 									ne(anomalyDetectorStates.detectorKey, evaluation.detectorKey),
 								),
-							)
-							.limit(1),
+							),
 					)
+					const otherStates = effectiveOtherStates({
+						persisted: persistedOtherStates,
+						pending: Arr.map(Arr.fromIterable(detectorStateWrites), ([, row]) => row),
+						currentDetectorKey: evaluation.detectorKey,
+						incidentId,
+					})
 					if (otherStates.length === 0) {
 						yield* dbExecute((db) =>
 							db
@@ -1905,7 +1938,7 @@ const make = Effect.gen(function* () {
 					lastIncidentId = incidentId
 				}
 
-				detectorStateWrites.push({
+				MutableHashMap.set(detectorStateWrites, evaluation.detectorKey, {
 					orgId,
 					detectorKey: evaluation.detectorKey,
 					signalType: evaluation.signalType,

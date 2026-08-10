@@ -1,4 +1,4 @@
-import { Array as Arr, MutableHashMap } from "effect"
+import { Array as Arr, MutableHashMap, Result } from "effect"
 
 /**
  * Rows per multi-row detector-state upsert.
@@ -52,4 +52,72 @@ export function batchDetectorStates<T extends { readonly detectorKey: string }>(
 		Arr.map(Arr.fromIterable(deduped), ([, row]) => row),
 		chunkSize,
 	)
+}
+
+/** The subset of a detector-state row the incident refcount needs. */
+export interface DetectorRefcountRow {
+	readonly detectorKey: string
+	readonly fingerprintHash: string | null
+	readonly lastSampleCount: number | null
+}
+
+/**
+ * Which *other* series still point at a consolidated incident, accounting for
+ * this tick's not-yet-flushed detector-state writes.
+ *
+ * The refcount that decides whether a consolidated incident may resolve reads
+ * `anomaly_detector_states` live, but detector-state writes are now buffered
+ * until the end of the org pass. Without this overlay the query returns pre-tick
+ * truth: two series sharing one incident that both recover in the same tick each
+ * still see the other pointing at it, so neither closes the incident. It then
+ * lingers with its headline on an already-recovered series until the one-hour
+ * no-data sweep closes it with the wrong reason.
+ *
+ * The overlay runs both ways. A pending write that no longer points at this
+ * incident removes that series from the count even though the database still
+ * lists it; a pending write that newly points at it (an attach or reopen earlier
+ * in this same pass) adds a series the database does not list yet.
+ *
+ * `persisted` must therefore be unbounded — a `LIMIT 1` could return the single
+ * row this overlay is about to remove and hide a live sibling behind it.
+ */
+export function effectiveOtherStates<
+	P extends {
+		readonly detectorKey: string
+		// Optional because drizzle's insert shape makes nullable columns optional.
+		// An absent value means "not pointing at this incident", same as null.
+		readonly openIncidentId?: string | null
+		readonly fingerprintHash?: string | null
+		readonly lastSampleCount?: number | null
+	},
+>(options: {
+	readonly persisted: ReadonlyArray<DetectorRefcountRow>
+	readonly pending: Iterable<P>
+	readonly currentDetectorKey: string
+	readonly incidentId: string
+}): Array<DetectorRefcountRow> {
+	const { persisted, pending, currentDetectorKey, incidentId } = options
+
+	const byKey = MutableHashMap.fromIterable(
+		Arr.filterMap(persisted, (row) =>
+			row.detectorKey === currentDetectorKey
+				? Result.failVoid
+				: Result.succeed([row.detectorKey, row] as const),
+		),
+	)
+
+	for (const write of pending) {
+		if (write.detectorKey === currentDetectorKey) continue
+		if (write.openIncidentId === incidentId) {
+			MutableHashMap.set(byKey, write.detectorKey, {
+				detectorKey: write.detectorKey,
+				fingerprintHash: write.fingerprintHash ?? null,
+				lastSampleCount: write.lastSampleCount ?? null,
+			})
+		} else {
+			MutableHashMap.remove(byKey, write.detectorKey)
+		}
+	}
+
+	return Arr.map(Arr.fromIterable(byKey), ([, row]) => row)
 }
