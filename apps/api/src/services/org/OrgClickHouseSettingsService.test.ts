@@ -333,6 +333,62 @@ describe("resolveRuntimeConfig caching", () => {
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 
+	it.effect("primeRuntimeConfigs warms many orgs at once, memoizing the managed org as null", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const byoOrg = "org_ch_prime_byo"
+		const managedOrg = "org_ch_prime_managed"
+		return Effect.gen(function* () {
+			const service = yield* OrgClickHouseSettingsService
+			yield* Effect.promise(() => seedRow(testDb, byoOrg, "https://primed.example"))
+
+			// One call covering both orgs — the managed one has no settings row at all.
+			yield* service.primeRuntimeConfigs([asOrgId(byoOrg), asOrgId(managedOrg)])
+
+			// Move Postgres out from under both entries. Neither resolve may see it.
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					byoOrg,
+					"https://changed.example",
+				]),
+			)
+			yield* Effect.promise(() => seedRow(testDb, managedOrg, "https://appeared.example"))
+
+			const byo = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(byoOrg))
+			expect(expectSome(byo).url).toBe("https://primed.example")
+
+			// The negative answer has to be memoized too — it is the common case
+			// (managed orgs route to Tinybird) and the whole point of priming them.
+			const managed = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(managedOrg))
+			expect(Option.isNone(managed)).toBe(true)
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	it.effect("primeRuntimeConfigs leaves a still-fresh entry alone", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_prime_fresh"
+		return Effect.gen(function* () {
+			const service = yield* OrgClickHouseSettingsService
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://fresh.example"))
+
+			// Populate the memo, then change Postgres behind it.
+			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					orgId,
+					"https://rewritten.example",
+				]),
+			)
+
+			// Priming must skip an entry inside its fresh window, so this cannot
+			// pull the newer row forward — priming is an optimization, never a
+			// refresh, and must not change what a caller would otherwise observe.
+			yield* service.primeRuntimeConfigs([asOrgId(orgId)])
+
+			const resolved = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(resolved).url).toBe("https://fresh.example")
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
 	it.effect("a settings write busts the cached entry", () => {
 		const testDb = createTestDb(cacheTrackedDbs)
 		const orgId = "org_ch_invalidate"

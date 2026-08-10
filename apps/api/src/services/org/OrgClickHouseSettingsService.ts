@@ -28,9 +28,10 @@ import {
 	type TableDiffEntry,
 } from "@maple/domain/clickhouse"
 import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
-import { eq } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import {
+	Array as Arr,
 	Clock,
 	Context,
 	Duration,
@@ -262,6 +263,27 @@ export interface OrgClickHouseSettingsServiceShape {
 		| OrgClickHouseSettingsEncryptionError
 		| OrgClickHouseSettingsValidationError
 	>
+	/**
+	 * Warm the runtime-config memo for many orgs in ONE Postgres round-trip.
+	 *
+	 * For a caller that is about to fan out across orgs (the alerting tick), the
+	 * per-org `resolveRuntimeConfig` read is the wrong shape: every concurrent
+	 * sibling misses the memo, because none of them has finished writing it yet.
+	 * That is why no shared cache tier ever fixed this — a cache turns N Postgres
+	 * reads into N cache reads that contend for the same connection budget. The
+	 * fix is to collapse them into one read *before* the fan-out starts.
+	 *
+	 * Orgs with no settings row are memoized as `null` (the managed/Tinybird
+	 * answer), which is the common case and the biggest win — otherwise every
+	 * managed org re-reads Postgres forever to be told again that it has no row.
+	 *
+	 * Best-effort by contract: entries that are still fresh are left alone, so
+	 * this can never un-stale a newer write, and callers may ignore its failure
+	 * and fall back to per-org resolution.
+	 */
+	readonly primeRuntimeConfigs: (
+		orgIds: ReadonlyArray<OrgId>,
+	) => Effect.Effect<void, OrgClickHouseSettingsPersistenceError>
 	/**
 	 * Drop this org's cached runtime config, returning whether a BYO override was
 	 * actually dropped.
@@ -1316,6 +1338,61 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			})
 		}
 
+		// Batched sibling of `selectCachedRow`, same projection plus `orgId` so the
+		// rows can be keyed back to the orgs that were asked for. One statement for
+		// the whole set: the dial is the cost, not the row count.
+		const selectCachedRowsForOrgs = Effect.fn("OrgClickHouseSettingsService.selectCachedRowsForOrgs")(
+			function* (orgIds: ReadonlyArray<OrgId>) {
+				const rows = yield* database
+					.execute((db) =>
+						db
+							.select({
+								orgId: orgClickHouseSettings.orgId,
+								schemaVersion: orgClickHouseSettings.schemaVersion,
+								syncStatus: orgClickHouseSettings.syncStatus,
+								chUrl: orgClickHouseSettings.chUrl,
+								chUser: orgClickHouseSettings.chUser,
+								chDatabase: orgClickHouseSettings.chDatabase,
+								chPasswordCiphertext: orgClickHouseSettings.chPasswordCiphertext,
+								chPasswordIv: orgClickHouseSettings.chPasswordIv,
+								chPasswordTag: orgClickHouseSettings.chPasswordTag,
+							})
+							.from(orgClickHouseSettings)
+							.where(inArray(orgClickHouseSettings.orgId, [...orgIds])),
+					)
+					.pipe(Effect.mapError(toPersistenceError))
+				return rows
+			},
+		)
+
+		const primeRuntimeConfigs = Effect.fn("OrgClickHouseSettingsService.primeRuntimeConfigs")(function* (
+			orgIds: ReadonlyArray<OrgId>,
+		) {
+			const nowMs = yield* Clock.currentTimeMillis
+			// Only orgs whose entry is absent or no longer fresh. Skipping the
+			// fresh ones is what makes this safe to call unconditionally: priming
+			// can never overwrite a newer value with an older read.
+			const pending = Arr.dedupe(
+				orgIds.filter((orgId) => {
+					const memoized = runtimeConfigMemo.get(orgId)
+					return memoized === undefined || nowMs >= memoized.freshUntil
+				}),
+			)
+			yield* Effect.annotateCurrentSpan({
+				"clickhouse.config.prime_requested": orgIds.length,
+				"clickhouse.config.primed_orgs": pending.length,
+			})
+			if (Arr.isReadonlyArrayEmpty(pending)) return
+
+			const rows = yield* selectCachedRowsForOrgs(pending)
+			const byOrgId = new Map(rows.map((row) => [row.orgId, row] as const))
+			const writeNowMs = yield* Clock.currentTimeMillis
+			for (const orgId of pending) {
+				const row = byOrgId.get(orgId)
+				storeCachedSettings(orgId, row === undefined ? null : toCachedChSettings(row), writeNowMs)
+			}
+		})
+
 		/**
 		 * Refresh a stale memo entry without making the caller wait for it.
 		 *
@@ -1539,6 +1616,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			applySchema,
 			applySchemaStatus,
 			resolveRuntimeConfig,
+			primeRuntimeConfigs,
 			invalidateRuntimeConfig,
 			isWarehouseWriteReady,
 			collectorConfig,

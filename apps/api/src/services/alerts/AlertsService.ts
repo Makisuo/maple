@@ -126,6 +126,7 @@ import {
 } from "./AlertDeliveryDispatch"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
+import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
 import { describeCause } from "@/services/errors/ErrorsService"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
@@ -1157,6 +1158,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const hazelOAuth = yield* HazelOAuthService
 			const email = yield* EmailService
 			const orgMembers = yield* OrgMembersService
+			const orgChSettings = yield* OrgClickHouseSettingsService
 			const slackBotToken = yield* SlackBotTokenResolver
 
 			const resolveEmailMembers = (
@@ -4883,6 +4885,23 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				yield* Metric.update(AlertingMetrics.activeRulesGauge, rows.length)
 
 				const prefetch = yield* loadTickPrefetch(rows)
+
+				// Warm the org warehouse-config memo for the whole tick in one read,
+				// before the per-rule forEach below fans out at concurrency 5.
+				//
+				// Without this, the fan-out is the worst possible shape for that memo:
+				// `interleaveAlertRulesByOrg` deliberately puts consecutive rules on
+				// DIFFERENT orgs (for fairness), so the five in-flight fibers miss on
+				// five different orgs at once and none of them has written the memo yet
+				// when the others look. Measured at 13,989 Postgres resolutions/day at
+				// p50 632ms — ~2.4 hours of blocked wall time — against a 94% memo hit
+				// rate, i.e. the misses are concurrency, not cache sizing.
+				//
+				// Best-effort: priming is an optimization, and a failure here must not
+				// take down a tick that would otherwise resolve each config on demand.
+				yield* orgChSettings
+					.primeRuntimeConfigs(Arr.dedupe(Arr.map(rows, (row) => row.orgId)))
+					.pipe(Effect.ignore)
 
 				// Incremented from fibers running under the concurrent per-rule forEach
 				// below, so it must be a Ref rather than a mutable closure variable.

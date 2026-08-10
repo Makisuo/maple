@@ -5,7 +5,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
 import { Env } from "@/platform/Env"
 import { PlanetScaleOAuthService } from "./PlanetScaleOAuthService"
-import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/platform/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 
 const trackedDbs: TestDb[] = []
 
@@ -632,6 +632,45 @@ describe("PlanetScaleOAuthService", () => {
 				),
 			),
 		)
+	})
+
+	it.effect("getValidAccessToken serves a repeat call from the memo without re-reading Postgres", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleOAuthService
+			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+				callbackUrl: CALLBACK_URL,
+			})
+			yield* service.completeConnect("auth-code", state)
+
+			const first = yield* service.getValidAccessToken(asOrgId("org_a"))
+
+			// Delete the row out from under the service. A memo hit is the only way
+			// the second call can still produce a token — without the memo this is a
+			// fresh SELECT that finds nothing and fails not-connected.
+			yield* Effect.promise(() => executeSql(testDb, "DELETE FROM oauth_connections"))
+
+			const second = yield* service.getValidAccessToken(asOrgId("org_a"))
+			assert.strictEqual(second.accessToken, first.accessToken)
+		}).pipe(Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch())))
+	})
+
+	it.effect("disconnect invalidates the memo so a removed grant stops issuing tokens", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleOAuthService
+			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+				callbackUrl: CALLBACK_URL,
+			})
+			yield* service.completeConnect("auth-code", state)
+
+			// Populate the memo first — that is the state the invalidation has to clear.
+			yield* service.getValidAccessToken(asOrgId("org_a"))
+			yield* service.disconnect(asOrgId("org_a"))
+
+			const error = yield* service.getValidAccessToken(asOrgId("org_a")).pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsNotConnectedError")
+		}).pipe(Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch())))
 	})
 
 	it.effect("disconnect removes the grant; disconnecting a fresh org reports nothing removed", () => {

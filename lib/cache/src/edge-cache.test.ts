@@ -494,10 +494,11 @@ describe("EdgeCacheService read deadline", () => {
 	})
 
 	it.live("stops reading a bucket whose reads keep timing out, then resumes after a success", () => {
-		// Two consecutive timeouts trip the breaker, so the third call must not
-		// issue a read at all — that read would only occupy a connection slot the
-		// rest of the request needs.
-		const { backend, getCalls } = makeHangingThenHealthyBackend(2)
+		// Three timeouts take the decaying ratio past the open threshold (and meet
+		// the minimum sample count), so the fourth call must not issue a read at
+		// all — that read would only occupy a connection slot the rest of the
+		// request needs.
+		const { backend, getCalls } = makeHangingThenHealthyBackend(3)
 
 		return Effect.gen(function* () {
 			const cache = yield* EdgeCacheService
@@ -506,17 +507,59 @@ describe("EdgeCacheService read deadline", () => {
 
 			yield* cache.getOrCompute(opts, compute)
 			yield* cache.getOrCompute(opts, compute)
-			assert.strictEqual(getCalls(), 2, "both reads were attempted and timed out")
+			yield* cache.getOrCompute(opts, compute)
+			assert.strictEqual(getCalls(), 3, "all three reads were attempted and timed out")
 
 			yield* cache.getOrCompute(opts, compute)
-			assert.strictEqual(getCalls(), 2, "breaker skipped the read instead of issuing it")
+			assert.strictEqual(getCalls(), 3, "breaker skipped the read instead of issuing it")
+		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(2000))
+	})
+
+	it.live("opens the breaker on interleaved timeouts, not just consecutive ones", () => {
+		// The regression this exists for: the breaker used to count *consecutive*
+		// timeouts and reset to zero on any single success. Production timeouts
+		// arrive interleaved (measured 61 timeouts against 45 hits and 236 misses
+		// over 24h), so that counter never reached its threshold and every other
+		// read kept paying the full deadline. A decaying ratio remembers the run.
+		//
+		// Alternating timeout/success at a 60% failure rate must open it.
+		let call = 0
+		const store = new Map<string, unknown>()
+		const backend: EdgeCacheBackend = {
+			name: "memory",
+			get: async (bucket, hash) => {
+				call += 1
+				// Odd calls hang (timeout), even calls answer — T,S,T,S,T.
+				if (call % 2 === 1) return await new Promise<never>(() => {})
+				return store.get(`${bucket}:${hash}`)
+			},
+			put: async (bucket, hash, value) => {
+				store.set(`${bucket}:${hash}`, value)
+			},
+			delete: async (bucket, hash) => {
+				store.delete(`${bucket}:${hash}`)
+			},
+		}
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			const compute = Effect.succeed("computed")
+			const opts = { bucket: "flappy", key: "k", ttlSeconds: 30 } as const
+
+			for (let i = 0; i < 5; i++) {
+				yield* cache.getOrCompute(opts, compute)
+			}
+			assert.strictEqual(call, 5, "all five reads were attempted")
+
+			yield* cache.getOrCompute(opts, compute)
+			assert.strictEqual(call, 5, "breaker opened despite the interleaved successes")
 		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(2000))
 	})
 
 	it.live("keeps serving hits from a bucket that never times out", () => {
-		// Guards against the breaker firing on a healthy bucket: the counter must
-		// reset on every successful read, so an isolated timeout elsewhere in the
-		// bucket's history never accumulates into a skip.
+		// Guards against the breaker firing on a healthy bucket: with no timeouts
+		// the failure ratio stays at zero, so it can never reach the open
+		// threshold no matter how many reads the bucket serves.
 		const { backend } = makeHangingThenHealthyBackend(0)
 
 		return Effect.gen(function* () {

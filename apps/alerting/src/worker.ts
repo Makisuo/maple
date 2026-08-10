@@ -86,6 +86,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 				BaseLive,
 				QueryEngineServiceLive,
 				WarehouseQueryServiceLive,
+				OrgClickHouseSettingsLive,
 				HazelOAuthServiceLive,
 				EmailServiceLive,
 				OrgMembersServiceLive,

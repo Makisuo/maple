@@ -151,8 +151,8 @@ const sha256Hex = async (input: string): Promise<string> => {
 export const DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS = 40
 
 /**
- * Consecutive timeouts on one bucket before reads are skipped, and how long to
- * skip them for.
+ * Per-bucket timeout-rate breaker: how long to skip reads for, and the decaying
+ * failure ratio that opens the skip.
  *
  * At a high timeout rate the reads are not merely useless, they are actively
  * harmful: each abandoned `cache.match()` holds one of the Worker's six
@@ -161,12 +161,29 @@ export const DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS = 40
  * reads in flight, fewer slots held, and the next read after the window has a
  * free slot to land in.
  *
- * Deliberately cheap to recover from: a single successful read resets the
- * counter, so a bucket that was momentarily contended is not penalised beyond
- * one window.
+ * This was a count of *consecutive* timeouts that any single success reset to
+ * zero. That is memoryless at exactly the rates seen in production — measured
+ * over 24h on `caches.default`: 61 timeouts against 45 hits and 236 misses, so
+ * roughly one read in five, arriving interleaved rather than in runs. The
+ * breaker opened, waited its window, let one read through, saw it succeed,
+ * reset to zero, and paid two more full deadlines before opening again. It
+ * never converged, and timeouts still cost a span p50 of 12,936ms.
+ *
+ * An exponentially-weighted ratio keeps the history a run-counter throws away.
+ * Recovery is still fast but no longer free: from a saturated ratio of 1.0 a
+ * successful probe decays it to 0.67, then 0.44 — two good reads to close,
+ * versus one under the old rule.
  */
-const READ_BREAKER_TIMEOUTS = 2
 const READ_BREAKER_WINDOW_MS = 2_000
+/** Weight of the newest outcome in the EWMA. 1/3 → ~2 successes to recover. */
+const READ_BREAKER_DECAY = 1 / 3
+/** Ratio at or above which the bucket stops being read. */
+const READ_BREAKER_OPEN_RATIO = 0.5
+/**
+ * Outcomes required before the ratio may open the breaker, so one unlucky first
+ * read on a cold bucket cannot skip the next window on a sample size of one.
+ */
+const READ_BREAKER_MIN_SAMPLES = 3
 
 /**
  * Build an `EdgeCacheServiceShape` against a specific backend. Exported for
@@ -180,10 +197,10 @@ export const makeEdgeCacheService = (
 	const boundedReadTimeoutMs = Number.isFinite(readTimeoutMs)
 		? Math.max(1, Math.floor(readTimeoutMs))
 		: DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS
-	// Per-bucket consecutive-timeout state for the read breaker. Isolate-scoped
-	// and intentionally plain data — never an in-flight Promise or I/O handle,
-	// which could not be shared across requests (see the note in `getOrCompute`).
-	const readBreaker = new Map<string, { timeouts: number; skipUntil: number }>()
+	// Per-bucket timeout-rate state for the read breaker. Isolate-scoped and
+	// intentionally plain data — never an in-flight Promise or I/O handle, which
+	// could not be shared across requests (see the note in `getOrCompute`).
+	const readBreaker = new Map<string, { ratio: number; samples: number; skipUntil: number }>()
 
 	const shouldSkipRead = (bucket: string, nowMs: number): boolean => {
 		const state = readBreaker.get(bucket)
@@ -191,14 +208,18 @@ export const makeEdgeCacheService = (
 	}
 
 	const recordReadOutcome = (bucket: string, timedOut: boolean, nowMs: number): void => {
-		if (!timedOut) {
-			readBreaker.delete(bucket)
-			return
-		}
-		const timeouts = (readBreaker.get(bucket)?.timeouts ?? 0) + 1
+		const state = readBreaker.get(bucket)
+		const previousRatio = state?.ratio ?? 0
+		// Cap the sample count at the minimum: it is a "have we seen enough yet"
+		// gate, not a running total, and letting it grow would only risk overflow
+		// on a long-lived isolate.
+		const samples = Math.min((state?.samples ?? 0) + 1, READ_BREAKER_MIN_SAMPLES)
+		const ratio = previousRatio + READ_BREAKER_DECAY * ((timedOut ? 1 : 0) - previousRatio)
+		const open = samples >= READ_BREAKER_MIN_SAMPLES && ratio >= READ_BREAKER_OPEN_RATIO
 		readBreaker.set(bucket, {
-			timeouts,
-			skipUntil: timeouts >= READ_BREAKER_TIMEOUTS ? nowMs + READ_BREAKER_WINDOW_MS : 0,
+			ratio,
+			samples,
+			skipUntil: open ? nowMs + READ_BREAKER_WINDOW_MS : 0,
 		})
 	}
 

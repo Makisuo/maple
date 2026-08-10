@@ -102,6 +102,68 @@ describe("ScrapeTargetsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
+	it.effect("scrapeForCollector sends no auth header for PlanetScale and never reads the grant", () => {
+		const testDb = createTestDb(trackedDbs)
+		const calls: Array<{ url: string; authorization: string | null }> = []
+
+		globalThis.fetch = (async (input, init) => {
+			const requestUrl =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+			const headers = new Headers(init?.headers)
+			calls.push({ url: requestUrl, authorization: headers.get("authorization") })
+			return new Response("up 1\n", {
+				status: 200,
+				headers: { "content-type": "text/plain; version=0.0.4" },
+			})
+		}) as typeof fetch
+
+		// Discovery is stubbed so the test exercises the scrape leg only. The OAuth
+		// service is NOT stubbed: no grant is stored for this org, so
+		// `getValidAccessToken` would fail. That is the point — before the signed-URL
+		// change this scrape resolved the grant on every call and this test failed.
+		const discoveryStub = Layer.succeed(PlanetScaleDiscoveryService, {
+			discover: () =>
+				Effect.succeed([
+					{
+						url: "https://metrics.planetscale.com/api/v1/metrics",
+						signedUrl: "https://metrics.planetscale.com/api/v1/metrics?sig=abc&exp=123",
+						subTargetKey: "branch-1",
+						labels: {},
+					},
+				]),
+			lastError: () => Effect.succeed(null),
+			invalidate: () => Effect.void,
+		})
+
+		const layer = ScrapeTargetsService.layer.pipe(
+			Layer.provide(Layer.mergeAll(discoveryStub, PlanetScaleOAuthService.layer)),
+			Layer.provide(testDb.layer),
+			Layer.provide(Env.layer),
+			Layer.provide(makeConfig()),
+		)
+
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const target = yield* service.create(
+				asOrgId("org_1"),
+				new CreateScrapeTargetRequest({
+					name: "PlanetScale",
+					organization: "acme",
+					targetType: "planetscale",
+					authType: "planetscale_oauth",
+					scrapeIntervalSeconds: asScrapeIntervalSeconds(30),
+				}),
+			)
+
+			const response = yield* service.scrapeForCollector(target.id, "branch-1")
+
+			assert.strictEqual(response.status, 200)
+			const scrape = calls.find((call) => call.url.includes("sig=abc"))
+			assert.isDefined(scrape, "expected the signed sub-target URL to be fetched")
+			assert.isNull(scrape?.authorization ?? null)
+		}).pipe(Effect.provide(layer))
+	})
+
 	it.effect("recordScrapeResults updates lastScrapeAt on success and clears the error", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {

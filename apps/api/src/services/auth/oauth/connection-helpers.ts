@@ -33,6 +33,24 @@ import { msToDate } from "@/platform/time"
 export const OAUTH_STATE_TTL_MS = 10 * 60_000 // 10 minutes
 export const OAUTH_REFRESH_LEEWAY_MS = 60_000 // refresh when the access token is within 1 minute of expiry
 
+/**
+ * How long `getValidConnectionToken` may serve a connection row from the
+ * in-isolate memo instead of re-reading Postgres.
+ *
+ * Why this exists: on Workers every `database.execute` opens a fresh
+ * postgres.js client over Hyperdrive, so an uncached read on a hot path is a
+ * ~200ms network call that is also exposed to the 2s/8s dial ladder in
+ * `pg-execute.ts` — measured at p50 11ms but with ~4% of dials stalling out to
+ * 10s. Poller and scrape paths call this once per tick per org, which made it
+ * one of the largest sources of dial volume on the api worker.
+ *
+ * 60s is deliberately far tighter than the token's own lifetime: the memo is
+ * about collapsing a burst of same-tick reads, not about holding credentials.
+ * It is also bounded twice over — an entry is only served while `rowIsValid`
+ * still holds for it, so a token nearing expiry re-reads regardless of TTL.
+ */
+const CONNECTION_MEMO_TTL_MS = 60_000
+
 /** Standard OAuth2 token payload (OIDC providers add `id_token`). */
 export const OAuthTokenResponseSchema = Schema.Struct({
 	access_token: Schema.String,
@@ -154,6 +172,28 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 			return row satisfies OAuthAuthStateRow
 		})
 
+		/**
+		 * Per-isolate connection-row memo backing `getValidConnectionToken` only.
+		 *
+		 * Scoped to that one caller on purpose. `loadConnection` /
+		 * `requireConnection` must stay uncached: the refresh path re-reads the row
+		 * specifically to detect that a *different* isolate rotated the refresh
+		 * token (see `refreshWithSingleFlight`), and a memo there would hand that
+		 * re-read its own stale row and turn a recoverable race into a spurious
+		 * "revoked".
+		 */
+		const connectionMemo = new Map<string, { row: OAuthConnectionRow; expiresAt: number }>()
+
+		/**
+		 * Drop the memoized row for an org. Must be called from every path that
+		 * writes or removes the connection — a stale entry here serves a token for
+		 * a grant that was just revoked or reconnected.
+		 */
+		const invalidateConnectionMemo = (orgId: OrgId) =>
+			Effect.sync(() => {
+				connectionMemo.delete(orgId)
+			})
+
 		const loadConnection = (orgId: OrgId) =>
 			dbExecute((db) =>
 				db
@@ -206,7 +246,7 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 						// pollers resume automatically.
 						set: { ...values, revokedAt: null, updatedAt: new Date(currentTime) },
 					}),
-			)
+			).pipe(Effect.ensuring(invalidateConnectionMemo(orgId)))
 
 		/**
 		 * Stamp the connection as revoked (idempotent — only the first stamp writes).
@@ -218,6 +258,9 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 			orgId: OrgId,
 		) {
 			const currentTime = yield* Clock.currentTimeMillis
+			// Before the write, not after: the memo must not outlive the decision to
+			// revoke even if the stamp itself fails (it is best-effort/ignored below).
+			yield* invalidateConnectionMemo(orgId)
 			yield* dbExecute((db) =>
 				db
 					.update(oauthConnections)
@@ -239,7 +282,10 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					.delete(oauthConnections)
 					.where(and(eq(oauthConnections.orgId, orgId), eq(oauthConnections.provider, provider)))
 					.returning({ id: oauthConnections.id }),
-			).pipe(Effect.map((result) => ({ disconnected: result.length > 0 })))
+			).pipe(
+				Effect.map((result) => ({ disconnected: result.length > 0 })),
+				Effect.ensuring(invalidateConnectionMemo(orgId)),
+			)
 
 		/** POST an `application/x-www-form-urlencoded` body and return the raw status + text. */
 		const postForm = Effect.fn("OAuthConnectionHelpers.postForm")(
@@ -428,10 +474,24 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		 */
 		const getValidConnectionToken = Effect.fn("OAuthConnectionHelpers.getValidConnectionToken")(
 			function* (config: OAuthTokenEndpointConfig, orgId: OrgId) {
+				const nowMs = yield* Clock.currentTimeMillis
+				const memoized = connectionMemo.get(orgId)
+				if (memoized !== undefined && memoized.expiresAt > nowMs && rowIsValid(memoized.row, nowMs)) {
+					yield* Effect.annotateCurrentSpan("oauth.connection.memoHit", true)
+					return yield* accessTokenFromRow(memoized.row)
+				}
+				yield* Effect.annotateCurrentSpan("oauth.connection.memoHit", false)
+
 				const row = yield* requireConnection(orgId)
-				if (rowIsValid(row, yield* Clock.currentTimeMillis)) {
+				if (rowIsValid(row, nowMs)) {
+					connectionMemo.set(orgId, { row, expiresAt: nowMs + CONNECTION_MEMO_TTL_MS })
 					return yield* accessTokenFromRow(row)
 				}
+				// Deliberately not memoized. `refreshWithSingleFlight` resolves to the
+				// row as it was read *before* the refresh, so its ciphertext is the
+				// superseded token — caching it would serve a stale credential for the
+				// whole TTL. Refreshes are rare; the next call re-reads and memoizes
+				// the persisted row.
 				return yield* refreshWithSingleFlight(config, orgId)
 			},
 		)

@@ -29,6 +29,7 @@ import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { Env } from "@/platform/Env"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { EmailService } from "@/platform/EmailService"
+import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { OrgMembersError, OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
@@ -208,6 +209,9 @@ const makeLayer = (
 	const hazelOAuthLive = HazelOAuthService.layer.pipe(Layer.provide(Layer.mergeAll(envLive, databaseLive)))
 	const emailLive = Layer.succeed(EmailService, emailStub ?? stubEmailService())
 	const orgMembersLive = Layer.succeed(OrgMembersService, stubOrgMembersService())
+	const orgChSettingsLive = OrgClickHouseSettingsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
+	)
 
 	return AlertsService.layer.pipe(
 		Layer.provide(
@@ -220,6 +224,7 @@ const makeLayer = (
 				hazelOAuthLive,
 				emailLive,
 				orgMembersLive,
+				orgChSettingsLive,
 				investigationsLive,
 			),
 		),

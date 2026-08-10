@@ -911,13 +911,23 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				}
 
 				let scrapeUrl = row.value.url
+				// PlanetScale targets send no Authorization header at all, and that is
+				// the point: `authHeadersForRow` resolves the org's OAuth grant through
+				// `getValidConnectionToken`, which is uncached and therefore one fresh
+				// Postgres dial on *every* scrape — measured at ~1.2k dials/hour, each
+				// exposed to the 2s/8s dial ladder in `pg-execute.ts`. The data plane
+				// ignores the header (see below), so the whole read bought nothing.
+				//
+				// Branch on `targetType`, not on "did we end up with a signed URL": if
+				// PlanetScale ever starts honouring the header, this should fail to
+				// compile against a new target type rather than silently 401.
+				let headers: Record<string, string> = {}
 				if (row.value.targetType === "planetscale") {
 					// Resolve the per-branch endpoint from the discovery cache and use
 					// its SIGNED url: PlanetScale authenticates the metrics data plane
 					// with the short-lived `?sig=&exp=` params minted in the SD response,
 					// not the Authorization header (that only auths the discovery
-					// listing). The header built below is still sent but the data plane
-					// ignores it.
+					// listing).
 					const subTargets = yield* discovery.discover(row.value)
 					const match = subTargets.find((entry) => entry.subTargetKey === subTargetKey)
 					if (!match) {
@@ -929,9 +939,9 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 						)
 					}
 					scrapeUrl = match.signedUrl
+				} else {
+					headers = yield* authHeadersForRow(row.value)
 				}
-
-				const headers = yield* authHeadersForRow(row.value)
 				const timeoutMs = Math.min(
 					10_000,
 					Math.max(1_000, (row.value.scrapeIntervalSeconds - 1) * 1000),
