@@ -155,7 +155,7 @@ export function useVisibleSettingsSections() {
 	// Shared with the main sidebar and the flagged routes, so a flag can't be read
 	// one way here and another way there (it already force-enables when self-hosted,
 	// which is what the `!isClerkAuthEnabled` branch below used to do inline).
-	const featureFlags = useOrganizationFeatureFlags()
+	const { flags: featureFlags } = useOrganizationFeatureFlags()
 
 	const visibleSections = navSections
 		.map((section) => ({

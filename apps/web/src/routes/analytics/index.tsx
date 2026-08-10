@@ -67,8 +67,16 @@ function WebAnalyticsPage() {
 	// like `aiAutoTriage`: the API does not read Clerk org metadata, so this hides
 	// the surface rather than protecting the data (which is already org-scoped by
 	// CurrentTenant on every query).
-	const featureFlags = useOrganizationFeatureFlags()
-	if (!featureFlags.webAnalytics) return <NotFoundError />
+	const { flags, isLoaded } = useOrganizationFeatureFlags()
+
+	// `isLoaded` is load-bearing, not defensive. Flags fail closed while Clerk
+	// resolves, and a route — unlike a nav row — turns "off" into a visible verdict:
+	// without this, an org that *has* the flag would see "Page not found" flash and
+	// then the real page on every load. Render nothing for that window instead; the
+	// sidebar and page chrome come from the layout, so this is a brief empty content
+	// area rather than a blank app.
+	if (!isLoaded) return null
+	if (!flags.webAnalytics) return <NotFoundError />
 
 	return <WebAnalyticsPageContent />
 }

@@ -135,7 +135,7 @@ function PaletteContent({
 
 	// Flagged-off pages must not be findable by name either, so the palette reads
 	// the same flags the sidebar does and passes them to the same builder.
-	const featureFlags = useOrganizationFeatureFlags()
+	const { flags: featureFlags } = useOrganizationFeatureFlags()
 
 	const entries = useMemo<PaletteEntry[]>(() => {
 		// Sections *and* their children — Traces, Logs, Metrics, Replays, Hosts,

@@ -125,7 +125,7 @@ function ReplaysPage() {
 	// toggling either surface keeps the other in sync.
 	const engagedOnly = search.activeMin === 30 && search.activeMax == null
 
-	const webAnalyticsEnabled = useOrganizationFeatureFlags().webAnalytics
+	const webAnalyticsEnabled = useOrganizationFeatureFlags().flags.webAnalytics
 
 	const headerActions = (
 		<>
