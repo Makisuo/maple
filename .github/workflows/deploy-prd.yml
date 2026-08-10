@@ -123,5 +123,27 @@ jobs:
             # migrates, so new and rebuilt tables are readable by every consumer —
             # including the ingest gateway, which reaches Postgres through PSBouncer as
             # a role that does NOT inherit `postgres`.
+            # The watchdog only arms when the AWS half is opted in, so a normal
+            # production deploy is untouched. Four runs have hung inside this step
+            # emitting nothing at any log level, with no AWS API call ever reaching
+            # CloudTrail — so the question is no longer "what does alchemy say" but
+            # "what is the process actually doing". `ps` answers what nothing inside
+            # alchemy will: a busy cargo/docker child means the build is simply slow,
+            # a bun process at 0% CPU means it is blocked on something (a lock, a
+            # socket, a prompt on a stdin that will never deliver).
             - name: Deploy PRD stack with Alchemy
-              run: bun run alchemy:deploy:prd
+              run: |
+                  if [ "${MAPLE_DEPLOY_AWS_INGEST:-}" = "1" ]; then
+                      (
+                          while true; do
+                              sleep 60
+                              echo "=== watchdog $(date -u +%H:%M:%S) ==="
+                              ps -eo pid,ppid,etime,pcpu,rss,stat,args --sort=-pcpu | head -15
+                              echo "--- docker ---"
+                              docker ps --format '{{.ID}} {{.Image}} {{.Status}}' 2>&1 | head -5
+                          done
+                      ) &
+                      watchdog=$!
+                      trap 'kill "$watchdog" 2>/dev/null || true' EXIT
+                  fi
+                  bun run alchemy:deploy:prd
