@@ -40,7 +40,19 @@ import {
 	isOrgWarehouseQuarantined,
 	quarantineOnConfigClassCause,
 } from "@/services/warehouse/warehouse-org-quarantine"
-import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
+import {
+	Array as Arr,
+	Cause,
+	Clock,
+	Context,
+	Effect,
+	Layer,
+	MutableHashMap,
+	Option,
+	Ref,
+	Schedule,
+	Schema,
+} from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
@@ -62,6 +74,11 @@ import {
 	type LogVolumeSeries,
 } from "./anomaly/detection"
 import { issueSeverityFromAlert } from "@/services/errors/severity-map"
+import {
+	batchDetectorStates,
+	DETECTOR_STATE_FLUSH_CONCURRENCY,
+	effectiveOtherStates,
+} from "./anomaly/detector-state-batch"
 import { rollingCountBuckets } from "./anomaly/rolling-counts"
 import { decideTransition, stateMachineConfigFor, type DetectorStateSnapshot } from "./anomaly/state-machine"
 import {
@@ -1088,6 +1105,53 @@ const make = Effect.gen(function* () {
 				.returning({ orgId: anomalyDetectorSettings.orgId }),
 		)
 
+	/**
+	 * Flush accumulated detector states as multi-row upserts.
+	 *
+	 * Replaces one `dbExecute` per evaluated series. `set` reads from `excluded.*`
+	 * rather than per-row literals — with many rows in one statement there is no
+	 * single literal to write, and `excluded` is the row the statement is
+	 * currently conflicting on (same pattern as `error-tick-persistence.ts:302`).
+	 *
+	 * Dedupe and chunking live in `batchDetectorStates`, which is pure and tested.
+	 *
+	 * Chunks run concurrently: each is its own dial, and `batchDetectorStates`
+	 * dedupes by `detectorKey` first, so no two chunks ever touch the same row and
+	 * they cannot deadlock against each other. Bounded rather than unbounded
+	 * because `processOrg` is itself already running at concurrency 4 — the cap is
+	 * on connections to the same origin pool, not on this loop in isolation.
+	 */
+	const flushDetectorStates = Effect.fnUntraced(function* (
+		writes: MutableHashMap.MutableHashMap<string, typeof anomalyDetectorStates.$inferInsert>,
+	) {
+		yield* Effect.forEach(
+			batchDetectorStates(Arr.map(Arr.fromIterable(writes), ([, row]) => row)),
+			(chunk) =>
+				dbExecute((db) =>
+					db
+						.insert(anomalyDetectorStates)
+						.values(chunk)
+						.onConflictDoUpdate({
+							target: [anomalyDetectorStates.orgId, anomalyDetectorStates.detectorKey],
+							set: {
+								consecutiveBreaches: sql`excluded.consecutive_breaches`,
+								consecutiveHealthy: sql`excluded.consecutive_healthy`,
+								lastStatus: sql`excluded.last_status`,
+								lastValue: sql`excluded.last_value`,
+								baselineMedian: sql`excluded.baseline_median`,
+								lastSampleCount: sql`excluded.last_sample_count`,
+								lastEvaluatedAt: sql`excluded.last_evaluated_at`,
+								openIncidentId: sql`excluded.open_incident_id`,
+								lastResolvedAt: sql`excluded.last_resolved_at`,
+								lastIncidentId: sql`excluded.last_incident_id`,
+								updatedAt: sql`excluded.updated_at`,
+							},
+						}),
+				),
+			{ concurrency: DETECTOR_STATE_FLUSH_CONCURRENCY, discard: true },
+		)
+	})
+
 	const newIncidentId = () => decodeIncidentIdSync(randomUUID())
 
 	interface OrgTickStats {
@@ -1301,6 +1365,20 @@ const make = Effect.gen(function* () {
 			})
 		const orderedDecisions = [...openDecisions, ...decisions.filter((d) => d.transition !== "open")]
 		let openBudget = MAX_OPENS_PER_TICK
+
+		// Detector-state writes are accumulated here and flushed as one multi-row
+		// upsert after the loop, rather than one `dbExecute` per decision. Under
+		// `DatabasePgLive` each execute dials and tears down its own postgres.js
+		// client, so the handshake count is what costs, not the statement count —
+		// same trade as `error-tick-persistence.ts`. This loop averaged ~70 dials
+		// per org tick and peaked at 628.
+		//
+		// Keyed by `detectorKey` rather than a plain list: the consolidated-incident
+		// refcount below has to see this tick's own buffered writes, and last-wins
+		// on a repeated key is what the sequential per-row loop did anyway. Safe to
+		// mutate directly — the `Effect.forEach` below is sequential (no
+		// `concurrency` option), so writes cannot interleave.
+		const detectorStateWrites = MutableHashMap.empty<string, typeof anomalyDetectorStates.$inferInsert>()
 
 		yield* Effect.forEach(
 			orderedDecisions,
@@ -1734,7 +1812,16 @@ const make = Effect.gen(function* () {
 						runtime === undefined || runtime.row.detectorKey === evaluation.detectorKey
 					// Refcount: a consolidated incident only resolves once no other
 					// series still points at it.
-					const otherStates = yield* dbExecute((db) =>
+					//
+					// These rows are pre-tick truth. Detector-state writes are buffered
+					// until `flushDetectorStates` runs after this loop, so a sibling that
+					// already recovered earlier in this same pass still reads as pointing
+					// here — and two siblings recovering in one tick would each see the
+					// other and neither would close the incident. `effectiveOtherStates`
+					// overlays the buffered writes to fix that, which is also why there is
+					// no `LIMIT 1`: the one row it returned could be the very row the
+					// overlay removes, hiding a genuinely live sibling behind it.
+					const persistedOtherStates = yield* dbExecute((db) =>
 						db
 							.select({
 								detectorKey: anomalyDetectorStates.detectorKey,
@@ -1750,9 +1837,14 @@ const make = Effect.gen(function* () {
 									eq(anomalyDetectorStates.openIncidentId, incidentId),
 									ne(anomalyDetectorStates.detectorKey, evaluation.detectorKey),
 								),
-							)
-							.limit(1),
+							),
 					)
+					const otherStates = effectiveOtherStates({
+						persisted: persistedOtherStates,
+						pending: Arr.map(Arr.fromIterable(detectorStateWrites), ([, row]) => row),
+						currentDetectorKey: evaluation.detectorKey,
+						incidentId,
+					})
 					if (otherStates.length === 0) {
 						yield* dbExecute((db) =>
 							db
@@ -1846,48 +1938,30 @@ const make = Effect.gen(function* () {
 					lastIncidentId = incidentId
 				}
 
-				yield* dbExecute((db) =>
-					db
-						.insert(anomalyDetectorStates)
-						.values({
-							orgId,
-							detectorKey: evaluation.detectorKey,
-							signalType: evaluation.signalType,
-							serviceName: evaluation.serviceName,
-							deploymentEnv: evaluation.deploymentEnv,
-							fingerprintHash: evaluation.fingerprintHash,
-							consecutiveBreaches: decision.consecutiveBreaches,
-							consecutiveHealthy: decision.consecutiveHealthy,
-							lastStatus: evaluation.status,
-							lastValue: evaluation.value,
-							baselineMedian: evaluation.baselineMedian,
-							lastSampleCount: evaluation.sampleCount,
-							lastEvaluatedAt: new Date(nowMs),
-							openIncidentId,
-							lastResolvedAt: msToDate(lastResolvedAt),
-							lastIncidentId,
-							updatedAt: new Date(nowMs),
-						})
-						.onConflictDoUpdate({
-							target: [anomalyDetectorStates.orgId, anomalyDetectorStates.detectorKey],
-							set: {
-								consecutiveBreaches: decision.consecutiveBreaches,
-								consecutiveHealthy: decision.consecutiveHealthy,
-								lastStatus: evaluation.status,
-								lastValue: evaluation.value,
-								baselineMedian: evaluation.baselineMedian,
-								lastSampleCount: evaluation.sampleCount,
-								lastEvaluatedAt: new Date(nowMs),
-								openIncidentId,
-								lastResolvedAt: msToDate(lastResolvedAt),
-								lastIncidentId,
-								updatedAt: new Date(nowMs),
-							},
-						}),
-				)
+				MutableHashMap.set(detectorStateWrites, evaluation.detectorKey, {
+					orgId,
+					detectorKey: evaluation.detectorKey,
+					signalType: evaluation.signalType,
+					serviceName: evaluation.serviceName,
+					deploymentEnv: evaluation.deploymentEnv,
+					fingerprintHash: evaluation.fingerprintHash,
+					consecutiveBreaches: decision.consecutiveBreaches,
+					consecutiveHealthy: decision.consecutiveHealthy,
+					lastStatus: evaluation.status,
+					lastValue: evaluation.value,
+					baselineMedian: evaluation.baselineMedian,
+					lastSampleCount: evaluation.sampleCount,
+					lastEvaluatedAt: new Date(nowMs),
+					openIncidentId,
+					lastResolvedAt: msToDate(lastResolvedAt),
+					lastIncidentId,
+					updatedAt: new Date(nowMs),
+				})
 			}),
 			{ discard: true },
 		)
+
+		yield* flushDetectorStates(detectorStateWrites)
 
 		// No-data sweep: open incidents whose series stopped reporting entirely
 		// resolve after an hour of silence (mirrors ErrorsService auto-resolve).

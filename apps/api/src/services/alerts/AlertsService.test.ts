@@ -32,6 +32,7 @@ import { EmailService } from "@/platform/EmailService"
 import { OrgMembersError, OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
+import { Database } from "@/platform/DatabaseLive"
 import { decryptAes256Gcm } from "@/platform/Crypto"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 
@@ -3184,5 +3185,192 @@ describe("AlertsService.previewRule", () => {
 			assert.isAbove(points.length, 0)
 			assert.isTrue(points.some((p) => p.value === 42))
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
+	})
+
+	it.effect("dedupes rule destinations and environments, preserving order", () => {
+		const testDb = createTestDb(trackedDbs)
+		// Guards the `Arr.dedupe` calls in normalizeRule. A destination listed twice
+		// still notifies once, and the surviving order is first-occurrence — the
+		// same contract `[...new Set()]` gave before.
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_dedupe")
+			const userId = asUserId("user_dedupe")
+			const first = yield* createWebhookDestination(alerts, orgId, userId)
+			const second = yield* alerts.createDestination(orgId, userId, adminRoles, {
+				type: "webhook",
+				name: "Secondary webhook",
+				enabled: true,
+				url: "https://example.com/maple-alerts-2",
+				signingSecret: "webhook-secret-2",
+			})
+
+			const rule = yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Deduped rule",
+					severity: "warning",
+					enabled: true,
+					serviceNames: ["checkout"],
+					environments: ["  prod  ", "staging", "prod", "   ", "staging"],
+					signalType: "error_rate",
+					comparator: "gt",
+					threshold: 5,
+					windowMinutes: 5,
+					destinationIds: [second.id, first.id, second.id],
+				}),
+			)
+
+			assert.deepStrictEqual(rule.destinationIds, [second.id, first.id])
+			// Trimmed, blank-dropped, deduped, first-occurrence order.
+			assert.deepStrictEqual(rule.environments, ["prod", "staging"])
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}), { fetch: okFetch })))
+	})
+
+	it.effect("keeps scheduler tick round-trips flat as rule count grows", () => {
+		const testDb = createTestDb(trackedDbs)
+		const counter = { executes: 0 }
+		// Counts `Database.execute` calls, which is the unit that costs: under
+		// `DatabasePgLive` each one dials and tears down its own postgres.js client.
+		// This guards the tick-head prefetch and the set-based housekeeping against
+		// someone re-adding a statement inside the per-rule loop — which is exactly
+		// how the tick reached ~7 dials per rule per minute in production.
+		const countingDb = {
+			...testDb,
+			layer: Layer.effect(
+				Database,
+				Effect.gen(function* () {
+					const inner = yield* Database
+					return Database.of({
+						execute: (fn) => {
+							counter.executes += 1
+							return inner.execute(fn)
+						},
+					})
+				}),
+			).pipe(Layer.provide(testDb.layer)),
+		}
+
+		const seedRules = (
+			alerts: AlertsServiceShape,
+			orgId: ReturnType<typeof asOrgId>,
+			userId: ReturnType<typeof asUserId>,
+			destinationId: AlertDestinationId,
+			from: number,
+			count: number,
+		) =>
+			Effect.forEach(
+				Array.from({ length: count }, (_, index) => from + index),
+				(index) =>
+					alerts.createRule(
+						orgId,
+						userId,
+						adminRoles,
+						new AlertRuleUpsertRequest({
+							name: `Scaling rule ${index}`,
+							severity: "warning",
+							enabled: true,
+							serviceNames: ["checkout"],
+							signalType: "error_rate",
+							comparator: "gt",
+							threshold: 5,
+							windowMinutes: 5,
+							destinationIds: [destinationId],
+						}),
+					),
+				{ concurrency: 1, discard: true },
+			)
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_roundtrip")
+			const userId = asUserId("user_roundtrip")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+
+			yield* seedRules(alerts, orgId, userId, destination.id, 0, 3)
+			counter.executes = 0
+			yield* alerts.runSchedulerTick()
+			const forThree = counter.executes
+
+			yield* seedRules(alerts, orgId, userId, destination.id, 3, 9)
+			yield* TestClock.adjust(Duration.minutes(1))
+			counter.executes = 0
+			yield* alerts.runSchedulerTick()
+			const forTwelve = counter.executes
+
+			// Four times the rules must not cost four times the round-trips. The old
+			// shape was ~7 per rule, so 3 → 12 rules would have added ~63 executes.
+			const perExtraRule = (forTwelve - forThree) / 9
+			assert.isBelow(
+				perExtraRule,
+				3,
+				`expected well under 3 executes per additional rule, got ${perExtraRule} (${forThree} for 3 rules, ${forTwelve} for 12)`,
+			)
+		}).pipe(Effect.provide(makeLayer(countingDb, makeWarehouseStub({}), { fetch: okFetch })))
+	})
+
+	it.effect("does not auto-resolve an incident whose group is still evaluating", () => {
+		const testDb = createTestDb(trackedDbs)
+		// A grouped rule where both groups stay breached across two ticks. The tick
+		// reads open incidents from a tick-head prefetch now, so this is the
+		// regression guard for that snapshot going stale: neither group is orphaned,
+		// so `resolveOrphanedGroupIncidents` must leave both incidents open rather
+		// than firing an all-clear for the one it saw before this tick's writes.
+		const breachedGroups = {
+			rawQueryRows: [
+				{ groupKey: "checkout", value: 42, sampleCount: 500 },
+				{ groupKey: "payments", value: 37, sampleCount: 500 },
+			],
+		}
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_orphan_guard")
+			const userId = asUserId("user_orphan_guard")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+
+			yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Grouped error rate",
+					severity: "critical",
+					enabled: true,
+					serviceNames: ["checkout", "payments"],
+					signalType: "error_rate",
+					comparator: "gt",
+					threshold: 5,
+					windowMinutes: 5,
+					minimumSampleCount: 10,
+					consecutiveBreachesRequired: 1,
+					consecutiveHealthyRequired: 2,
+					renotifyIntervalMinutes: 30,
+					destinationIds: [destination.id],
+				}),
+			)
+
+			yield* alerts.runSchedulerTick()
+			const afterFirst = yield* alerts.listIncidents(orgId)
+			const openAfterFirst = afterFirst.incidents.filter((i) => i.status === "open")
+
+			yield* TestClock.adjust(Duration.minutes(1))
+			yield* alerts.runSchedulerTick()
+			const afterSecond = yield* alerts.listIncidents(orgId)
+			const openAfterSecond = afterSecond.incidents.filter((i) => i.status === "open")
+			const resolvedAfterSecond = afterSecond.incidents.filter((i) => i.status === "resolved")
+
+			// Still breaching on the second tick, so nothing may have been resolved.
+			assert.strictEqual(
+				openAfterSecond.length,
+				openAfterFirst.length,
+				"a still-breaching group lost its open incident",
+			)
+			assert.lengthOf(resolvedAfterSecond, 0)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(breachedGroups), { fetch: okFetch })))
 	})
 })
