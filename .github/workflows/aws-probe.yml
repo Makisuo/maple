@@ -37,9 +37,11 @@ permissions:
 jobs:
     probe:
         runs-on: ubuntu-latest
-        # Not a long-running deploy: if a level has not settled in 12 minutes it
-        # has hung, and that IS the result. The point is a fast verdict.
-        timeout-minutes: 12
+        # Not a long-running deploy: if a level has not settled in this window it
+        # has hung, and that IS the result. Sized so a COLD cargo build (measured
+        # at 2m54s, not the ~20min this repo used to claim) cannot eat the budget
+        # and masquerade as the hang being investigated.
+        timeout-minutes: 20
         # The OIDC role's trust policy only accepts
         # `repo:MapleTechLabs/maple:environment:{production,staging}` subs, so the
         # job has to declare one of them to get credentials at all.
@@ -68,7 +70,7 @@ jobs:
                   secret-path: "/"
 
             - name: Configure AWS credentials (OIDC)
-              uses: aws-actions/configure-aws-credentials@v5
+              uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
               with:
                   role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
                   aws-region: us-east-1
@@ -78,6 +80,21 @@ jobs:
 
             # Only the image level needs a binary to COPY; the cheaper levels skip
             # the three-minute compile entirely.
+            # Same key as deploy-prd.yml on purpose: the probe rides that
+            # workflow's warm cache instead of compiling from scratch inside a
+            # budget meant for the probe itself.
+            - name: Cache ingest cargo build
+              if: inputs.level == 'image'
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: |
+                      ~/.cargo-ingest
+                      ${{ runner.temp }}/ingest-target
+                  key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
+                  restore-keys: |
+                      ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
+                      ingest-cargo-${{ runner.os }}-
+
             - name: Build ingest binary
               if: inputs.level == 'image'
               run: |
@@ -115,4 +132,20 @@ jobs:
 
             - name: Destroy probe resources
               if: always() && !inputs.keep
-              run: bunx alchemy destroy scripts/aws-probe.run.ts --yes --stage probe || true
+              run: |
+                  if ! bunx alchemy destroy scripts/aws-probe.run.ts --yes --stage probe; then
+                      echo "::warning title=Probe teardown failed::Probe resources may still exist in 465760687006. Download the alchemy-probe-state artifact from this run, unpack it at the repo root, and re-run: bunx alchemy destroy scripts/aws-probe.run.ts --yes --stage probe"
+                  fi
+
+            # The state lives in the workspace, which dies with the runner — so a
+            # failed OR cancelled teardown would otherwise leave a VPC in the
+            # account with nothing to destroy it from. Timeouts are the EXPECTED
+            # outcome here, so this is the normal path, not the edge case.
+            - name: Upload probe state for recovery
+              if: always() && !inputs.keep
+              uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+              with:
+                  name: alchemy-probe-state
+                  path: .alchemy/
+                  if-no-files-found: ignore
+                  retention-days: 7
