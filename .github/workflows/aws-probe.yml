@@ -125,10 +125,37 @@ jobs:
                               ls -l "/proc/$p/fd" 2>/dev/null | tail -12
                           done
                           docker ps --format '{{.ID}} {{.Image}} {{.Status}}' 2>&1 | head -5
+                          echo "--- .alchemy/log/out (tail) ---"
+                          tail -n 20 .alchemy/log/out 2>/dev/null || echo "(no log yet)"
                       done
                   ) &
                   trap 'kill %1 2>/dev/null || true' EXIT
                   bunx alchemy deploy scripts/aws-probe.run.ts --yes --adopt --stage probe
+
+            # alchemy writes its stdout to .alchemy/log/out, NOT to the console. That
+            # single fact explains every "silent hang" in this investigation: four
+            # production runs and a --log-level debug run all looked like 40 minutes
+            # of nothing while the log sat in the workspace. Found via /proc/<pid>/fd
+            # in the watchdog output.
+            # BEFORE destroy, always: `alchemy destroy` removes the local state
+            # directory on success, so uploading afterwards captured nothing and
+            # `if-no-files-found: ignore` swallowed the fact silently.
+            - name: Upload probe state for recovery
+              if: always()
+              uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+              with:
+                  name: alchemy-probe-state
+                  path: .alchemy/
+                  if-no-files-found: warn
+                  retention-days: 7
+
+            - name: Dump alchemy log
+              if: always()
+              run: |
+                  echo "===== .alchemy/log/out ====="
+                  cat .alchemy/log/out 2>/dev/null || echo "(missing)"
+                  echo "===== .alchemy/log/err ====="
+                  cat .alchemy/log/err 2>/dev/null || echo "(missing)"
 
             - name: Destroy probe resources
               if: always() && !inputs.keep
@@ -136,16 +163,3 @@ jobs:
                   if ! bunx alchemy destroy scripts/aws-probe.run.ts --yes --stage probe; then
                       echo "::warning title=Probe teardown failed::Probe resources may still exist in 465760687006. Download the alchemy-probe-state artifact from this run, unpack it at the repo root, and re-run: bunx alchemy destroy scripts/aws-probe.run.ts --yes --stage probe"
                   fi
-
-            # The state lives in the workspace, which dies with the runner — so a
-            # failed OR cancelled teardown would otherwise leave a VPC in the
-            # account with nothing to destroy it from. Timeouts are the EXPECTED
-            # outcome here, so this is the normal path, not the edge case.
-            - name: Upload probe state for recovery
-              if: always() && !inputs.keep
-              uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
-              with:
-                  name: alchemy-probe-state
-                  path: .alchemy/
-                  if-no-files-found: ignore
-                  retention-days: 7
