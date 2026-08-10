@@ -7,7 +7,13 @@ import {
 	OrgId,
 	RoleName,
 } from "@maple/domain/http"
-import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
+import {
+	type EdgeCacheBackend,
+	EdgeCacheService,
+	makeEdgeCacheService,
+	makeMemoryBackend,
+	MemoryCacheBackendLive,
+} from "@maple/cache"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -18,7 +24,10 @@ import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platfor
 import {
 	type ClickHouseExecConfig,
 	execClickHouse,
+	invalidateOrgRuntimeConfig,
+	invalidateOrgRuntimeConfigMemo,
 	isRetryableUpstream,
+	ORG_CH_CONFIG_BUCKET,
 	OrgClickHouseSettingsService,
 	shouldHealSchemaVersion,
 	validateClickHouseCredentialTransport,
@@ -359,11 +368,50 @@ describe("resolveRuntimeConfig caching", () => {
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 
-	// The memo's soft TTL (5min) and hard ceiling (15min), mirrored from the
+	// The memo's soft TTL (5min) and hard ceiling (6h), mirrored from the
 	// service. Tests drive TestClock across them rather than reaching into the
 	// module's private state.
 	const SOFT_TTL_MS = 300_000
-	const HARD_TTL_MS = 900_000
+	const HARD_TTL_MS = 21_600_000
+
+	// A raw UPDATE bypasses the service, so it is invisible to the DURABLE tier
+	// just as it is to the memo — the refresh behind a stale memo entry re-reads
+	// the cached row and sees nothing new.
+	//
+	// Tests below use a raw UPDATE as an instrument for observing MEMO mechanics
+	// (did the caller block? did the forked refresh land?), so they evict the
+	// durable entry to stand in for the invalidation a real write would have
+	// performed. Evicting only the durable tier — never the memo — is what keeps
+	// the memo the thing under test.
+	const evictDurable = (orgId: string) =>
+		Effect.flatMap(EdgeCacheService, (cache) =>
+			cache.invalidate({ bucket: ORG_CH_CONFIG_BUCKET, key: orgId }),
+		)
+
+	/**
+	 * Resolve until the forked background refresh has landed.
+	 *
+	 * A single `TestClock.adjust(1)` is NOT enough. The refresh completes when
+	 * real promises settle — a PGlite read, plus a durable-tier read whose key
+	 * hashing goes through `crypto.subtle` — and none of that is driven by the
+	 * test clock. Asserting on one tick passed locally and failed in CI, where
+	 * the machine is slower and contended.
+	 *
+	 * Polling keeps the contract honest: callers assert the STALE value first
+	 * (proving nobody blocked), then use this to assert the refresh eventually
+	 * lands. Bounded, so a refresh that never lands still fails the test.
+	 */
+	const resolveUntilUrl = Effect.fnUntraced(function* (orgId: string, expected: string) {
+		let last: string | undefined
+		for (let attempt = 0; attempt < 200; attempt++) {
+			const resolved = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			last = Option.isSome(resolved) ? resolved.value.url : undefined
+			if (last === expected) return last
+			yield* TestClock.adjust(1)
+			yield* Effect.yieldNow
+		}
+		return last
+	})
 
 	it.effect("past the soft TTL, serves the stale value and refreshes behind the request", () => {
 		const testDb = createTestDb(cacheTrackedDbs)
@@ -380,17 +428,17 @@ describe("resolveRuntimeConfig caching", () => {
 				]),
 			)
 
+			yield* evictDurable(orgId)
+
 			// Past the soft TTL but inside the hard ceiling: the caller must NOT
 			// wait on Postgres, so it still sees the old URL.
 			yield* TestClock.adjust(SOFT_TTL_MS + 1_000)
 			const stale = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
 			expect(expectSome(stale).url).toBe("https://a.example")
 
-			// The refresh forked by that call now lands, so the NEXT resolve sees the
+			// The refresh forked by that call lands, so a subsequent resolve sees the
 			// new value without anyone having blocked on the read.
-			yield* TestClock.adjust(1)
-			const refreshed = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
-			expect(expectSome(refreshed).url).toBe("https://b.example")
+			expect(yield* resolveUntilUrl(orgId, "https://b.example")).toBe("https://b.example")
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 
@@ -408,12 +456,138 @@ describe("resolveRuntimeConfig caching", () => {
 				]),
 			)
 
+			yield* evictDurable(orgId)
+
 			// Nothing refreshed the entry in the meantime (an isolate whose requests
 			// all ended before their refresh landed), so the ceiling forces a
 			// blocking read rather than serving an unboundedly old value.
 			yield* TestClock.adjust(HARD_TTL_MS + 1_000)
 			const fresh = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
 			expect(expectSome(fresh).url).toBe("https://b.example")
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	// The ceiling is an isolate-lifetime backstop, not a staleness bound. It used
+	// to be 15min, which made a bursty workload (idle isolate, then a widget
+	// fan-out) block on Postgres at the head of every burst. At 20min — well past
+	// the old ceiling — the caller must still be served from the memo.
+	it.effect("an idle stretch past the old 15min ceiling still serves without blocking", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_swr_ceiling_raised"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://a.example"))
+			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					orgId,
+					"https://b.example",
+				]),
+			)
+
+			yield* evictDurable(orgId)
+
+			yield* TestClock.adjust(1_200_000)
+			const stale = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			// The old URL proves nobody blocked on the read; the refresh this call
+			// forked lands next, so the burst behind it is already current.
+			expect(expectSome(stale).url).toBe("https://a.example")
+
+			expect(yield* resolveUntilUrl(orgId, "https://b.example")).toBe("https://b.example")
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	// The two tiers must be busted together. A memo-only bust used to be a
+	// complete invalidation; with a durable tier underneath it is not, and the
+	// failure is silent — the read falls through to a shared entry that outlives
+	// every isolate. `invalidateOrgRuntimeConfig` is the one writers must call.
+	it.effect("a memo-only bust falls through to the durable tier; the full bust does not", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_memo_module_bust"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://a.example"))
+			const before = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(before).url).toBe("https://a.example")
+
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					orgId,
+					"https://b.example",
+				]),
+			)
+
+			invalidateOrgRuntimeConfigMemo(orgId)
+			const afterMemoBust = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			// Still the old URL: the memo is gone, but the durable entry answered.
+			expect(expectSome(afterMemoBust).url).toBe("https://a.example")
+
+			yield* invalidateOrgRuntimeConfig(orgId)
+			const afterFullBust = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(afterFullBust).url).toBe("https://b.example")
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	// `apps/alerting` runs this same service but has no EDGE_CACHE binding, so its
+	// CacheBackend is `caches.default` — a store that no `invalidateOrgRuntimeConfig`
+	// ever reaches, since the writers all live in apps/api and bust KV. An
+	// hour-long entry there would let alert evaluation keep using a warehouse
+	// config the customer already rotated or deleted.
+	it("skips the durable tier on a backend the writers' invalidation cannot reach", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_durable_uninvalidated"
+		const workersCacheBackend: EdgeCacheBackend = { ...makeMemoryBackend(), name: "workers-cache" }
+		const layer = Layer.mergeAll(
+			OrgClickHouseSettingsService.layer.pipe(
+				Layer.provide(Layer.mergeAll(Env.layer.pipe(Layer.provide(configLive)), testDb.layer)),
+			),
+			Layer.succeed(EdgeCacheService, makeEdgeCacheService(workersCacheBackend)),
+		)
+
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://a.example"))
+			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					orgId,
+					"https://b.example",
+				]),
+			)
+
+			// Cold isolate: memo gone, nothing else should be answering.
+			invalidateOrgRuntimeConfigMemo(orgId)
+
+			const resolved = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			// Reads through to Postgres. The KV-backed test above sees the OLD url
+			// here — that divergence is the whole point.
+			expect(expectSome(resolved).url).toBe("https://b.example")
+		}).pipe(Effect.provide(layer))
+	})
+
+	// The reason the durable tier exists: a cold isolate has no memo entry at all,
+	// and in prod that path measured 10–13k resolutions/day at a p50 of ~500ms.
+	it.effect("a cold isolate is served by the durable tier, not Postgres", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_durable_cold"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://a.example"))
+			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					orgId,
+					"https://b.example",
+				]),
+			)
+
+			// Drop only the memo — this is what a fresh isolate looks like: no
+			// in-process state, but the shared entry a sibling isolate wrote is there.
+			invalidateOrgRuntimeConfigMemo(orgId)
+
+			const resolved = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			// The old URL proves the durable tier answered. Had it gone to Postgres
+			// it would have picked up the raw UPDATE — and paid the dial to do it.
+			expect(expectSome(resolved).url).toBe("https://a.example")
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 
@@ -449,11 +623,10 @@ describe("resolveRuntimeConfig caching", () => {
 					"https://c.example",
 				]),
 			)
+			yield* evictDurable(orgId)
 			yield* TestClock.adjust(SOFT_TTL_MS + 1_000)
 			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
-			yield* TestClock.adjust(1)
-			const refreshed = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
-			expect(expectSome(refreshed).url).toBe("https://c.example")
+			expect(yield* resolveUntilUrl(orgId, "https://c.example")).toBe("https://c.example")
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 

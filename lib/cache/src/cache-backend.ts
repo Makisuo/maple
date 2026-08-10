@@ -15,7 +15,7 @@ export interface EdgeCacheBackend {
 	 * `memory` fallback — which is silently selected whenever `caches` is
 	 * undefined, and makes every cross-request hit disappear.
 	 */
-	readonly name: "workers-cache" | "memory"
+	readonly name: "workers-cache" | "workers-kv" | "memory"
 	readonly get: (bucket: string, hash: string, nowMs: number) => Promise<unknown | undefined>
 	readonly put: (
 		bucket: string,
