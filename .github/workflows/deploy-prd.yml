@@ -83,24 +83,32 @@ jobs:
               with:
                   path: |
                       ~/.cargo-ingest
-                      apps/ingest/target-ci
+                      ${{ runner.temp }}/ingest-target
                   key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
                   restore-keys: |
                       ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
                       ingest-cargo-${{ runner.os }}-
 
+            # --target-dir points OUTSIDE apps/ingest deliberately. Alchemy hashes
+            # the image context with `hashDirectory`, which has no .dockerignore
+            # support and derives its exclusions from gitignore rules WITHOUT
+            # rebasing root-anchored ones onto the context dir — `/apps/ingest/target`
+            # becomes the glob `apps/ingest/target/**` evaluated with cwd=apps/ingest,
+            # which matches nothing. A target dir inside the context would therefore
+            # be walked and hashed in full on every deploy.
             - name: Build ingest binary
               run: |
-                  mkdir -p ~/.cargo-ingest apps/ingest/dist
+                  mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
                   docker run --rm \
                       --user "$(id -u):$(id -g)" \
                       -e CARGO_HOME=/cargo \
                       -v "$HOME/.cargo-ingest:/cargo" \
                       -v "$PWD/apps/ingest:/app" \
+                      -v "$RUNNER_TEMP/ingest-target:/target" \
                       -w /app \
                       rust:1.88-bookworm \
-                      cargo build --release --target-dir /app/target-ci
-                  cp apps/ingest/target-ci/release/maple-ingest apps/ingest/dist/maple-ingest
+                      cargo build --release --target-dir /target
+                  cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
 
             # NOTE: prod schema migrations are applied OUT OF BAND (manually, via
             # `bun run migrate:prod` → `ps:apply-schema main`, against the direct 5432
@@ -112,4 +120,4 @@ jobs:
             # including the ingest gateway, which reaches Postgres through PSBouncer as
             # a role that does NOT inherit `postgres`.
             - name: Deploy PRD stack with Alchemy
-              run: bun run alchemy:deploy:prd
+              run: bun run alchemy:deploy:prd -- --log-level debug
