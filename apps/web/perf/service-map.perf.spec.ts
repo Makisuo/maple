@@ -97,7 +97,8 @@ test("React render work stays measurable during refresh and topology updates", a
 	expect(report.metricRefresh.commits, "metric-refresh render cascade").toBeLessThan(80)
 	expect(report.topologyChange.commits, "topology-change React commits").toBeGreaterThan(0)
 	expect(report.topologyChange.commits, "topology-change render cascade").toBeLessThan(80)
-	expect(report.viewportPan.commits, "viewport-pan React commits").toBeGreaterThan(0)
+	// The viewport, particles, minimap, controls, and background all update
+	// imperatively during an active gesture, so zero React commits is ideal.
 	expect(report.viewportPan.commits, "viewport-pan render cascade").toBeLessThan(800)
 	expect(report.viewportPanCommitsPerFrame, "viewport-pan commits per frame").toBeLessThan(4)
 })
@@ -165,8 +166,8 @@ test("service map renders filter/SMIL-free and animates smoothly under heavy tra
 
 	// The structural assertions above (no feGaussianBlur / animateMotion, canvas
 	// drawn) are the environment-independent regression guard. The frame-timing
-	// thresholds below are tuned for a real GPU: locally the canvas impl hits
-	// ~125 fps idle / ~70 fps pan. GitHub's CI runner has NO GPU — idle is
+	// thresholds below are tuned for a real GPU: locally the imperative render
+	// path hits ~120 fps both idle and panning. GitHub's CI runner has NO GPU — idle is
 	// vsync-capped at ~60 and pan rendering is software-bound at ~14 fps
 	// regardless of code quality (below even the pre-fix SVG baseline), so the
 	// strict pan numbers are physically unreachable there. Under CI we keep the
@@ -197,10 +198,11 @@ test("service map renders filter/SMIL-free and animates smoothly under heavy tra
 		// fully-frozen animation loop.
 		expect(pan.fps, "pan fps (CI floor)").toBeGreaterThan(5)
 	} else {
-		// Pan drives setViewport every frame (noisier); guard gross regressions only.
-		// Pre-fix baseline: ~17 fps / p95 ~125ms; post-fix: ~70 fps / p95 ~32ms.
-		expect(pan.fps, "pan fps").toBeGreaterThan(35)
-		expect(pan.frameP95, "pan p95 frame time (ms)").toBeLessThan(70)
+		// Stay in the display's native performance class: 120-class on a high-refresh
+		// display, or a locked 60-class cadence on a conventional display.
+		const highRefresh = idle.fps > 90
+		expect(pan.fps, "pan fps").toBeGreaterThan(highRefresh ? 100 : 55)
+		expect(pan.frameP95, "pan p95 frame time (ms)").toBeLessThan(highRefresh ? 20 : 25)
 	}
 })
 

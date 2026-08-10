@@ -415,13 +415,17 @@ function BenchDriver({
 						prev = now
 						const elapsed = now - start
 						if (pan) {
-							// Oscillate pan + zoom so the engine repaints the whole
-							// graph every frame (this is where edge cost shows up).
+							// Match React Flow's active pointer-pan path: update the store
+							// transform directly, then persist once at the end. Calling the
+							// public setViewport API here marked every synthetic frame as a
+							// completed gesture and fired onMoveEnd 120 times per second.
 							const phase = (elapsed / durationMs) * Math.PI * 2
-							flow.setViewport({
-								x: base.x + Math.sin(phase) * 400,
-								y: base.y + Math.cos(phase) * 250,
-								zoom: base.zoom * (0.85 + 0.15 * (1 + Math.sin(phase * 1.7)) * 0.5),
+							store.setState({
+								transform: [
+									base.x + Math.sin(phase) * 400,
+									base.y + Math.cos(phase) * 250,
+									base.zoom * (0.85 + 0.15 * (1 + Math.sin(phase * 1.7)) * 0.5),
+								],
 							})
 						}
 						if (elapsed < durationMs) {
@@ -429,11 +433,17 @@ function BenchDriver({
 							return
 						}
 						observer?.disconnect()
-						if (pan) flow.setViewport(base)
+						if (pan) {
+							store.setState({ transform: [base.x, base.y, base.zoom] })
+							store.getState().onMoveEnd?.(null, base)
+						}
 
 						// First delta is the gap before measurement began — drop it.
 						const samples = deltas.slice(1)
 						const sorted = [...samples].sort((a, b) => a - b)
+						// p10 approximates the display's native cadence even when a busy
+						// run misses some vsyncs (8.3ms at 120Hz, 16.7ms at 60Hz).
+						const nativeFrameMs = percentile(sorted, 10)
 						const totalBlockingMs = longTaskEntries.reduce(
 							(sum, e) => sum + Math.max(0, e.duration - 50),
 							0,
@@ -444,7 +454,7 @@ function BenchDriver({
 							fps: samples.length / (elapsed / 1000),
 							frameP50: percentile(sorted, 50),
 							frameP95: percentile(sorted, 95),
-							droppedFrames: samples.filter((d) => d > (1000 / 60) * 1.5).length,
+							droppedFrames: samples.filter((d) => d > nativeFrameMs * 1.5).length,
 							longTasks: longTaskEntries.length,
 							totalBlockingMs,
 							params,

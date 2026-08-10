@@ -10,10 +10,6 @@ import {
 } from "react"
 import {
 	ReactFlow,
-	Controls,
-	MiniMap,
-	Background,
-	BackgroundVariant,
 	applyNodeChanges,
 	type Edge,
 	type Node,
@@ -93,6 +89,9 @@ import { ServiceMapNode } from "./service-map-node"
 import { ServiceMapLoading } from "./service-map-loading"
 import { ServiceMapEdge } from "./service-map-edge"
 import { ServiceMapToolbar } from "./service-map-toolbar"
+import { ServiceMapBackground } from "./service-map-background"
+import { ServiceMapControls } from "./service-map-controls"
+import { ServiceMapMiniMap } from "./service-map-minimap"
 import { applyDeclutter, type DeclutterFocus, type DeclutterState } from "./service-map-declutter"
 import { NamespaceGroupNode, type NamespaceGroupData } from "./service-map-namespace-group"
 import { layoutServiceMapWithElk, type ElkLayoutResult } from "./service-map-elk"
@@ -146,29 +145,6 @@ const FALLBACK_NODE_HEIGHT = 70
 
 const formatReplicationLag = (seconds: number) =>
 	seconds >= 1 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds * 1000)}ms`
-
-// Custom MiniMap node that renders with the service's legend color
-function ServiceMiniMapNode({
-	x,
-	y,
-	width,
-	height,
-	color,
-	borderRadius,
-}: import("@xyflow/react").MiniMapNodeProps) {
-	return (
-		<rect
-			x={x}
-			y={y}
-			width={width}
-			height={height}
-			rx={borderRadius}
-			ry={borderRadius}
-			fill={color}
-			stroke="none"
-		/>
-	)
-}
 
 const edgeTypes = {
 	serviceEdge: ServiceMapEdge,
@@ -2334,21 +2310,9 @@ export function ServiceMapCanvas({
 									proOptions={{ hideAttribution: true }}
 								>
 									<ServiceMapParticleCanvas />
-									<Controls showInteractive={false} />
-									<MiniMap
-										nodeColor={(node: Node) => {
-											if (node.type === "namespaceGroup") return "transparent"
-											const data = node.data as ServiceNodeData
-											return getServiceMapNodeColor(data, colorMode)
-										}}
-										nodeComponent={ServiceMiniMapNode}
-										nodeStrokeWidth={0}
-										maskColor="oklch(0.15 0 0 / 0.8)"
-										className="!bg-muted/50 !border-border"
-										pannable={false}
-										zoomable={false}
-									/>
-									<Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+									<ServiceMapControls />
+									<ServiceMapMiniMap key={colorMode} colorMode={colorMode} />
+									<ServiceMapBackground />
 								</ReactFlow>
 							</ParticleRegistryProvider>
 						</div>

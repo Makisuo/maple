@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
-import { allocateParticleBudget, MAX_TOTAL_PARTICLES, type EdgeParticleSpec } from "./service-map-particles"
+import {
+	allocateParticleBudget,
+	createParticleRegistry,
+	MAX_TOTAL_PARTICLES,
+	type EdgeParticleSpec,
+} from "./service-map-particles"
 
 const spec = (callsPerSecond: number): EdgeParticleSpec => ({
 	pathString: "M0 0 L10 10",
@@ -63,5 +68,25 @@ describe("allocateParticleBudget", () => {
 		const specs = Array.from({ length: 50 }, (_, i) => [`e${i}`, spec(1000)] as const)
 		const budget = allocateParticleBudget(specs, 30)
 		expect(sum(budget)).toBeLessThanOrEqual(30)
+	})
+})
+
+describe("createParticleRegistry", () => {
+	it("increments its revision only for material edge changes", () => {
+		const registry = createParticleRegistry()
+		const first = spec(10)
+		registry.set("edge", first)
+		expect(registry.revision).toBe(1)
+
+		registry.set("edge", { ...first })
+		expect(registry.revision).toBe(1)
+
+		registry.set("edge", { ...first, callsPerSecond: 20 })
+		expect(registry.revision).toBe(2)
+
+		registry.remove("missing")
+		expect(registry.revision).toBe(2)
+		registry.remove("edge")
+		expect(registry.revision).toBe(3)
 	})
 })
