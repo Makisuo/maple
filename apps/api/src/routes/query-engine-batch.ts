@@ -13,13 +13,17 @@ import { Clock, Duration, Effect } from "effect"
  * Concurrency for the fan-out. Matches the bucket-cache fill concurrency, which
  * is already tuned for the Cloudflare six-connection limit — going unbounded
  * would reintroduce exactly the outbound contention `warmRoute` exists to avoid.
+ *
+ * `QUERY_ENGINE_BATCH_MAX` (the client-side cap, in @maple/domain) is held equal
+ * to this on purpose, so a batch is exactly one wave and can't be gated by a
+ * tail query in a later wave. Keep them in step until outcomes stream.
  */
 export const QE_BATCH_CONCURRENCY = 4
 
 /**
  * Wall-clock ceiling for one batch, shared by every item. The browser aborts at
- * 45s, so the response has to land before that: better to return eleven results
- * and one timeout than to have the client throw the whole batch away.
+ * 45s, so the response has to land before that: better to return the results
+ * that finished plus one timeout than to have the client throw the batch away.
  */
 export const QE_BATCH_DEADLINE_MS = 25_000
 
@@ -35,7 +39,7 @@ const timedOut = (): QueryEngineBatchOutcome => ({
  * Runs every request against a SHARED deadline, so total wall time is bounded
  * no matter how many items or waves there are. Per-item failures are returned
  * as `failure` outcomes rather than failing the effect: one bad widget must not
- * take down the eleven others sharing its request.
+ * take down the others sharing its request.
  */
 export const runQueryEngineBatch = <
 	Request,

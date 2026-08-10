@@ -493,8 +493,21 @@ export class QueryEngineExecuteResponse extends Schema.Class<QueryEngineExecuteR
 // POST — plus its own CORS preflight — against a worker pinned to us-east-1.
 // The batch endpoint collapses a render pass into a single round trip.
 
-/** Max queries per batch. Bounded so one request can't monopolize a worker. */
-export const QUERY_ENGINE_BATCH_MAX = 12
+/**
+ * Max queries per batch.
+ *
+ * Deliberately equal to the server's fan-out concurrency (`QE_BATCH_CONCURRENCY`
+ * in `apps/api/src/routes/query-engine-batch.ts`), so one batch is exactly ONE
+ * wave. That matters because delivery is currently all-or-nothing: the caller
+ * gets every result together, so a batch resolves at the speed of its slowest
+ * member. Per-query p95 is ~5s against a p50 of ~250-600ms, so the more queries
+ * share a batch, the likelier one tail query gates the whole render — a batch of
+ * 12 would run three waves and would very often be gated.
+ *
+ * Raise this only once `/execute-batch` streams its outcomes (per-query events
+ * settled as they complete), which removes the all-or-nothing coupling entirely.
+ */
+export const QUERY_ENGINE_BATCH_MAX = 4
 
 /**
  * A per-item failure. Carries the original error's `_tag` so the client can
@@ -509,7 +522,7 @@ export type QueryEngineBatchFailure = Schema.Schema.Type<typeof QueryEngineBatch
 
 /**
  * Per-item outcome. Deliberately part of the SUCCESS type: one failing widget
- * must not fail the other eleven queries sharing its request.
+ * must not fail the other queries sharing its request.
  */
 export const QueryEngineBatchOutcome = Schema.Union([
 	Schema.Struct({ outcome: Schema.Literal("success"), result: QueryEngineResult }),
