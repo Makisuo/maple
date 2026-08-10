@@ -688,6 +688,20 @@ export class VcsCommitDetailResponse extends Schema.Class<VcsCommitDetailRespons
 	},
 ) {}
 
+/**
+ * Bulk sibling of VcsCommitDetailResponse, for list views that show one deploy
+ * per row. Unresolvable SHAs are absent from `commits` rather than raising —
+ * the caller matches by `sha` and falls back to rendering the raw reference.
+ */
+export class VcsCommitDetailsResponse extends Schema.Class<VcsCommitDetailsResponse>(
+	"VcsCommitDetailsResponse",
+)({
+	commits: Schema.Array(VcsCommitDetailResponse),
+}) {}
+
+/** Upper bound on SHAs per bulk commit lookup — one page of a list view. */
+export const VCS_COMMIT_DETAILS_MAX_SHAS = 50
+
 export class IntegrationsForbiddenError extends Schema.TaggedError<IntegrationsForbiddenError>()(
 	"@maple/http/errors/IntegrationsForbiddenError",
 	{
@@ -1023,6 +1037,20 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 				IntegrationsUpstreamError,
 				IntegrationsPersistenceError,
 			],
+		}),
+	)
+	.add(
+		// Bulk sibling of vcsCommitDetail, for list views that would otherwise
+		// issue one request (and one CORS preflight) per row. `shas` is a raw
+		// comma-separated string for the same reason `:sha` is raw above —
+		// unguarded telemetry values must reach the handler, which drops the
+		// ones it can't resolve instead of failing the whole batch.
+		HttpApiEndpoint.get("vcsCommitDetails", "/vcs/commits", {
+			query: Schema.Struct({
+				shas: Schema.String.check(Schema.isMinLength(1)),
+			}),
+			success: VcsCommitDetailsResponse,
+			error: [IntegrationsNotConnectedError, IntegrationsUpstreamError, IntegrationsPersistenceError],
 		}),
 	)
 	.prefix("/api/integrations")

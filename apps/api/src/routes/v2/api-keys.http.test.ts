@@ -81,7 +81,12 @@ const makeHarness = (
 	const request = async (
 		method: string,
 		path: string,
-		options: { token?: string; body?: unknown; origin?: string } = {},
+		options: {
+			token?: string
+			body?: unknown
+			origin?: string
+			headers?: Record<string, string>
+		} = {},
 	) => {
 		const response = await handler(
 			new Request(`http://maple.test${path}`, {
@@ -90,6 +95,7 @@ const makeHarness = (
 					...(options.token !== undefined ? { authorization: `Bearer ${options.token}` } : {}),
 					...(options.body !== undefined ? { "content-type": "application/json" } : {}),
 					...(options.origin !== undefined ? { origin: options.origin } : {}),
+					...options.headers,
 				},
 				body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
 			}),
@@ -230,6 +236,31 @@ describe("v2 api_keys over HTTP", () => {
 		})
 		expect(response.headers.get("retry-after")).toBe("60")
 		expect(response.headers.get("access-control-expose-headers")).toContain("Retry-After")
+		await harness.dispose()
+	})
+
+	// Without Access-Control-Max-Age, Chrome caches a preflight for only 5s, so
+	// nearly every browser call pays a second round trip to a worker pinned in
+	// us-east-1 before the real request is even sent. Those OPTIONS never reach
+	// our traces (the tracer is disabled for them), so only a test guards this.
+	it("caches CORS preflights so every request doesn't pay a second round trip", async () => {
+		const harness = makeHarness()
+		const response = await harness.request("OPTIONS", "/v2/api_keys", {
+			origin: "https://app.maple.dev",
+			headers: {
+				"access-control-request-method": "GET",
+				"access-control-request-headers": "authorization,content-type",
+			},
+		})
+
+		expect(response.headers.get("access-control-max-age")).toBe(String(API_CORS_OPTIONS.maxAge))
+		// `Authorization` must appear EXPLICITLY, not just via the `*` wildcard —
+		// the Fetch spec excludes it from the wildcard, and with only `*` browsers
+		// still allow the request but refuse to cache its preflight. Since every
+		// browser call to this API is authenticated, that silently reduced maxAge
+		// to a no-op. Verified in Chrome: 3 authenticated requests cost 3
+		// preflights with `*` alone and 1 with `Authorization` listed.
+		expect(response.headers.get("access-control-allow-headers")).toContain("Authorization")
 		await harness.dispose()
 	})
 

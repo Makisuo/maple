@@ -161,6 +161,24 @@ export const commitQueryAtom = Atom.family((sha: string) =>
 	}),
 )
 
+/**
+ * Bulk sibling of `commitQueryAtom`, for list views that render one deploy per
+ * row. One request per row also means one CORS *preflight* per row, so a table
+ * of N services used to cost 2N round trips to a worker pinned in us-east-1.
+ * Keyed on the sorted, deduped SHA list so a re-render with the same rows
+ * reuses the same atom (and its cached result).
+ */
+export const commitsQueryAtom = Atom.family((shasKey: string) =>
+	MapleApiAtomClient.query("integrations", "vcsCommitDetails", {
+		query: { shas: shasKey },
+		timeToLive: COMMIT_DETAIL_TTL_MS,
+	}),
+)
+
+/** Canonical `commitsQueryAtom` key for a set of SHAs (deduped + sorted). */
+export const commitsQueryKey = (shas: Iterable<string>): string =>
+	[...new Set(shas)].filter(isResolvableSha).sort().join(",")
+
 // Renders nothing — it exists only to mount (and thus run) the query early.
 function CommitPrefetch({ sha }: { sha: string }) {
 	useAtomValue(commitQueryAtom(sha))

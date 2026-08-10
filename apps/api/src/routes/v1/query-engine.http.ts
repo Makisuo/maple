@@ -75,7 +75,12 @@ import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { makeDirectRouteCachePolicy, makeExecuteRawSql } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
-import { CH, formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-engine"
+import {
+	CH,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+	QueryEngineExecuteBatchResponse,
+} from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import {
 	hostMetricSpec,
@@ -87,6 +92,7 @@ import {
 } from "@/routes/query-helpers"
 import { Queries } from "@/routes/queries"
 import { makeQueryRunners } from "@/routes/query-runner"
+import { runQueryEngineBatch } from "@/routes/query-engine-batch"
 import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
 import type { TenantContext } from "@/services/auth/AuthService"
 import * as Integrations from "@maple/query-engine-integrations"
@@ -232,6 +238,25 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					return yield* queryEngine.execute(tenant, payload)
+				}),
+			)
+			.handle("executeBatch", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					// Resolve the org's warehouse route + config ONCE for the batch.
+					// Without it each item independently races resolveRuntimeConfig
+					// and they contend — the same ordering problem the other
+					// fan-out routes call warmRoute for.
+					yield* warehouse.warmRoute(tenant)
+
+					const results = yield* runQueryEngineBatch({
+						requests: payload.requests,
+						execute: (request) =>
+							queryEngine
+								.execute(tenant, request)
+								.pipe(Effect.map((response) => response.result)),
+					})
+					return new QueryEngineExecuteBatchResponse({ results })
 				}),
 			)
 			.handle("spanHierarchy", ({ payload }) =>

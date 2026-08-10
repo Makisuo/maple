@@ -26,7 +26,8 @@ import { cn } from "@maple/ui/lib/utils"
 import { formatErrorRate } from "@maple/ui/lib/format"
 import {
 	CommitShaHoverCard,
-	commitQueryAtom,
+	commitsQueryAtom,
+	commitsQueryKey,
 	firstLine,
 	isResolvableSha,
 } from "@/components/vcs/commit-sha-hover-card"
@@ -233,16 +234,67 @@ function deployMetaLine(text: string) {
 }
 
 /**
- * Message-first deploy lines: subject line on top (once the deduped, cached
- * per-sha lookup resolves), `sha · age` demoted underneath. While unresolved —
- * or when the reference isn't a resolvable sha — the sha IS the headline, so
- * the meta line carries only the age instead of repeating it.
+ * Commit messages for every SHA the table is showing, resolved in one request
+ * by `ServicesTable` (see `commitsQueryAtom`). Empty map = not resolved yet, or
+ * no commits — either way rows fall back to showing the raw SHA.
+ */
+const CommitMessagesContext = React.createContext<ReadonlyMap<string, string>>(new Map())
+
+const EMPTY_COMMIT_MESSAGES: ReadonlyMap<string, string> = new Map()
+
+/**
+ * Resolves every deploy SHA the table is about to render in ONE request, rather
+ * than letting each row subscribe to its own per-SHA atom. Rows previously fired
+ * a request *and* a CORS preflight each, so a 30-service fleet opened ~60 round
+ * trips on mount. Never blocks paint: until it resolves, rows show the raw SHA.
+ */
+function CommitMessagesProvider({
+	services,
+	children,
+}: {
+	services: ReadonlyArray<ServiceOverview>
+	children: React.ReactNode
+}) {
+	const shasKey = React.useMemo(
+		() =>
+			commitsQueryKey(
+				services.flatMap((service) => {
+					const sha = deriveDeployInfo(service.commits)?.sha
+					return sha === undefined ? [] : [sha]
+				}),
+			),
+		[services],
+	)
+	// No resolvable SHAs on screen — don't subscribe at all. Mounting the atom
+	// with an empty key would send a request for zero commits, which the
+	// endpoint rejects (`shas` is minLength 1).
+	if (shasKey === "") return <>{children}</>
+	return <ResolvedCommitMessages shasKey={shasKey}>{children}</ResolvedCommitMessages>
+}
+
+function ResolvedCommitMessages({ shasKey, children }: { shasKey: string; children: React.ReactNode }) {
+	const result = useAtomValue(commitsQueryAtom(shasKey))
+	const messages = React.useMemo(
+		() =>
+			Result.isSuccess(result)
+				? new Map(result.value.commits.map((commit) => [commit.sha, firstLine(commit.message)]))
+				: EMPTY_COMMIT_MESSAGES,
+		[result],
+	)
+	return <CommitMessagesContext.Provider value={messages}>{children}</CommitMessagesContext.Provider>
+}
+
+/**
+ * Message-first deploy lines: subject line on top (once the table's single bulk
+ * lookup resolves), `sha · age` demoted underneath. While unresolved — or when
+ * the reference isn't a resolvable sha — the sha IS the headline, so the meta
+ * line carries only the age instead of repeating it.
  */
 function ResolvedDeployLines({ sha, firstSeen, stateLine }: DeployLinesProps) {
-	const result = useAtomValue(commitQueryAtom(sha))
+	const messages = React.useContext(CommitMessagesContext)
 	const shortSha = truncateCommitSha(sha)
 	const age = firstSeen !== "" ? formatRelativeTimeOrDate(firstSeen) : ""
-	const message = Result.isSuccess(result) ? firstLine(result.value.message) : ""
+	const message = messages.get(sha) ?? ""
 	return (
 		<>
 			<CommitShaHoverCard sha={sha} className="min-w-0 max-w-full truncate text-xs text-foreground">
@@ -622,158 +674,164 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 			}
 
 			return (
-				<div className={`space-y-4 transition-opacity ${combinedResult.waiting ? "opacity-60" : ""}`}>
-					{/* Desktop: full metrics table. Below md the fixed-width columns and
+				<CommitMessagesProvider services={services}>
+					<div
+						className={`space-y-4 transition-opacity ${combinedResult.waiting ? "opacity-60" : ""}`}
+					>
+						{/* Desktop: full metrics table. Below md the fixed-width columns and
 				    in-cell sparklines force horizontal scroll, so we swap to a list. */}
-					<div className="hidden md:block rounded-md border overflow-auto">
-						{/* Fixed layout: the metric columns keep their set widths and the
+						<div className="hidden md:block rounded-md border overflow-auto">
+							{/* Fixed layout: the metric columns keep their set widths and the
 						    Service column absorbs whatever remains, truncating long names —
 						    so the table always fits the viewport instead of scrolling
 						    horizontally. */}
-						<Table aria-label="Services" className="w-full table-fixed">
-							<TableHeader>
-								<TableRow>
-									{/* Explicit width so the fixed layout scales every column
+							<Table aria-label="Services" className="w-full table-fixed">
+								<TableHeader>
+									<TableRow>
+										{/* Explicit width so the fixed layout scales every column
 									    proportionally — leaving Service auto would let the fixed
 									    metric columns squeeze it to nothing on narrow viewports. */}
-									<TableHead>Service</TableHead>
-									<TableHead className="hidden lg:table-cell w-[6%]">P50</TableHead>
-									<TableHead className="w-[9%]">P95</TableHead>
-									<TableHead className="hidden lg:table-cell w-[7%]">P99</TableHead>
-									<TableHead className="w-[12%]">Error Rate</TableHead>
-									<TableHead className="hidden md:table-cell w-[12%]">Throughput</TableHead>
-									<TableHead className="hidden lg:table-cell w-[18%]">
-										Last deploy
-									</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{services.length === 0 ? (
-									<TableRow>
-										<TableCell colSpan={7} className="h-24 text-center">
-											No services found
-										</TableCell>
+										<TableHead>Service</TableHead>
+										<TableHead className="hidden lg:table-cell w-[6%]">P50</TableHead>
+										<TableHead className="w-[9%]">P95</TableHead>
+										<TableHead className="hidden lg:table-cell w-[7%]">P99</TableHead>
+										<TableHead className="w-[12%]">Error Rate</TableHead>
+										<TableHead className="hidden md:table-cell w-[12%]">
+											Throughput
+										</TableHead>
+										<TableHead className="hidden lg:table-cell w-[18%]">
+											Last deploy
+										</TableHead>
 									</TableRow>
-								) : (
-									groups.map(([environment, envServices]) => (
-										<React.Fragment key={environment}>
-											<TableRow className="bg-muted/30 hover:bg-muted/30">
-												<TableCell colSpan={7} className="py-2">
-													<div className="flex items-center gap-2">
-														<EnvironmentBadge environment={environment} />
-														<span className="text-xs text-muted-foreground">
-															{envServices.length}{" "}
-															{envServices.length === 1
-																? "service"
-																: "services"}
-														</span>
-													</div>
-												</TableCell>
-											</TableRow>
-											{envServices.map(rowFor)}
-										</React.Fragment>
-									))
-								)}
-							</TableBody>
-						</Table>
-					</div>
-
-					{/* Mobile: stacked, tap-to-drill list. Grouped by environment to
-				    match the desktop table; metrics collapse to a tight mono line. */}
-					<div className="overflow-hidden rounded-md border md:hidden">
-						{services.length === 0 ? (
-							<div className="p-6 text-center text-sm text-muted-foreground">
-								No services found
-							</div>
-						) : (
-							groups.map(([environment, envServices]) => (
-								<div key={environment}>
-									<div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2">
-										<EnvironmentBadge environment={environment} />
-										<span className="text-xs text-muted-foreground">
-											{envServices.length}{" "}
-											{envServices.length === 1 ? "service" : "services"}
-										</span>
-									</div>
-									{envServices.map((service: ServiceOverview) => {
-										const health = healthFor(service)
-										return (
-											<Link
-												key={`${service.serviceName}-${service.serviceNamespace}-${service.environment}`}
-												to="/services/$serviceName"
-												params={{ serviceName: service.serviceName }}
-												search={serviceDetailSearch(filters, service.environment)}
-												className="flex min-h-11 items-center justify-between gap-3 border-b px-3 py-2.5 last:border-b-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-											>
-												<div className="min-w-0 flex-1">
-													<div className="flex items-center gap-1.5 text-sm font-medium text-primary">
-														<ServiceDot serviceName={service.serviceName} />
-														<span className="truncate">
-															{service.serviceName}
-														</span>
-														<HealthDot health={health} />
-													</div>
-													{service.serviceNamespace ? (
-														<div className="truncate text-xs text-muted-foreground">
-															{service.serviceNamespace}
+								</TableHeader>
+								<TableBody>
+									{services.length === 0 ? (
+										<TableRow>
+											<TableCell colSpan={7} className="h-24 text-center">
+												No services found
+											</TableCell>
+										</TableRow>
+									) : (
+										groups.map(([environment, envServices]) => (
+											<React.Fragment key={environment}>
+												<TableRow className="bg-muted/30 hover:bg-muted/30">
+													<TableCell colSpan={7} className="py-2">
+														<div className="flex items-center gap-2">
+															<EnvironmentBadge environment={environment} />
+															<span className="text-xs text-muted-foreground">
+																{envServices.length}{" "}
+																{envServices.length === 1
+																	? "service"
+																	: "services"}
+															</span>
 														</div>
-													) : null}
-													<div className="mt-1 flex items-center gap-3 font-mono text-xs tabular-nums">
-														<span>
-															<span className="text-muted-foreground/60">
-																P99{" "}
-															</span>
-															<LatencyValue
-																ms={service.p99LatencyMs}
-																scale="p99"
-															/>
-														</span>
-														<span>
-															<span className="text-muted-foreground/60">
-																Thru{" "}
-															</span>
-															<span className="text-foreground">
-																{service.hasSampling ? "~" : ""}
-																{formatThroughput(service.throughput)}
-															</span>
-														</span>
-													</div>
-												</div>
-												<div className="shrink-0 text-right">
-													<div
-														className={cn(
-															"font-mono text-sm font-semibold tabular-nums",
-															errorRateToneClass(service.errorRate),
-														)}
-													>
-														{formatErrorRate(service.errorRate)}
-													</div>
-													<div className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
-														err
-													</div>
-												</div>
-											</Link>
-										)
-									})}
-								</div>
-							))
-						)}
-					</div>
+													</TableCell>
+												</TableRow>
+												{envServices.map(rowFor)}
+											</React.Fragment>
+										))
+									)}
+								</TableBody>
+							</Table>
+						</div>
 
-					<div className="flex items-center justify-between text-sm text-muted-foreground">
-						<span>
-							Showing {services.length} {healthFilter ?? ""}{" "}
-							{services.length === 1 ? "service" : "services"}
-						</span>
-						{(unhealthyCount > 0 || degradedCount > 0) && (
-							<span className="text-xs">
-								{unhealthyCount > 0 ? `${unhealthyCount} unhealthy` : null}
-								{unhealthyCount > 0 && degradedCount > 0 ? " · " : null}
-								{degradedCount > 0 ? `${degradedCount} degraded` : null}
+						{/* Mobile: stacked, tap-to-drill list. Grouped by environment to
+				    match the desktop table; metrics collapse to a tight mono line. */}
+						<div className="overflow-hidden rounded-md border md:hidden">
+							{services.length === 0 ? (
+								<div className="p-6 text-center text-sm text-muted-foreground">
+									No services found
+								</div>
+							) : (
+								groups.map(([environment, envServices]) => (
+									<div key={environment}>
+										<div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2">
+											<EnvironmentBadge environment={environment} />
+											<span className="text-xs text-muted-foreground">
+												{envServices.length}{" "}
+												{envServices.length === 1 ? "service" : "services"}
+											</span>
+										</div>
+										{envServices.map((service: ServiceOverview) => {
+											const health = healthFor(service)
+											return (
+												<Link
+													key={`${service.serviceName}-${service.serviceNamespace}-${service.environment}`}
+													to="/services/$serviceName"
+													params={{ serviceName: service.serviceName }}
+													search={serviceDetailSearch(filters, service.environment)}
+													className="flex min-h-11 items-center justify-between gap-3 border-b px-3 py-2.5 last:border-b-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+												>
+													<div className="min-w-0 flex-1">
+														<div className="flex items-center gap-1.5 text-sm font-medium text-primary">
+															<ServiceDot serviceName={service.serviceName} />
+															<span className="truncate">
+																{service.serviceName}
+															</span>
+															<HealthDot health={health} />
+														</div>
+														{service.serviceNamespace ? (
+															<div className="truncate text-xs text-muted-foreground">
+																{service.serviceNamespace}
+															</div>
+														) : null}
+														<div className="mt-1 flex items-center gap-3 font-mono text-xs tabular-nums">
+															<span>
+																<span className="text-muted-foreground/60">
+																	P99{" "}
+																</span>
+																<LatencyValue
+																	ms={service.p99LatencyMs}
+																	scale="p99"
+																/>
+															</span>
+															<span>
+																<span className="text-muted-foreground/60">
+																	Thru{" "}
+																</span>
+																<span className="text-foreground">
+																	{service.hasSampling ? "~" : ""}
+																	{formatThroughput(service.throughput)}
+																</span>
+															</span>
+														</div>
+													</div>
+													<div className="shrink-0 text-right">
+														<div
+															className={cn(
+																"font-mono text-sm font-semibold tabular-nums",
+																errorRateToneClass(service.errorRate),
+															)}
+														>
+															{formatErrorRate(service.errorRate)}
+														</div>
+														<div className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
+															err
+														</div>
+													</div>
+												</Link>
+											)
+										})}
+									</div>
+								))
+							)}
+						</div>
+
+						<div className="flex items-center justify-between text-sm text-muted-foreground">
+							<span>
+								Showing {services.length} {healthFilter ?? ""}{" "}
+								{services.length === 1 ? "service" : "services"}
 							</span>
-						)}
+							{(unhealthyCount > 0 || degradedCount > 0) && (
+								<span className="text-xs">
+									{unhealthyCount > 0 ? `${unhealthyCount} unhealthy` : null}
+									{unhealthyCount > 0 && degradedCount > 0 ? " · " : null}
+									{degradedCount > 0 ? `${degradedCount} degraded` : null}
+								</span>
+							)}
+						</div>
 					</div>
-				</div>
+				</CommitMessagesProvider>
 			)
 		})
 		.render()

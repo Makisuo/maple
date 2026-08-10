@@ -487,6 +487,52 @@ export class QueryEngineExecuteResponse extends Schema.Class<QueryEngineExecuteR
 	result: QueryEngineResult,
 }) {}
 
+// ---- Batched execution ----------------------------------------------------
+//
+// The dashboard fans out one query per widget, and each used to be its own
+// POST — plus its own CORS preflight — against a worker pinned to us-east-1.
+// The batch endpoint collapses a render pass into a single round trip.
+
+/** Max queries per batch. Bounded so one request can't monopolize a worker. */
+export const QUERY_ENGINE_BATCH_MAX = 12
+
+/**
+ * A per-item failure. Carries the original error's `_tag` so the client can
+ * hand it straight to its existing error normalization — `@maple/http/errors/*`
+ * tags pass through untouched and keep their UI copy.
+ */
+export const QueryEngineBatchFailure = Schema.Struct({
+	_tag: Schema.String,
+	message: Schema.String,
+})
+export type QueryEngineBatchFailure = Schema.Schema.Type<typeof QueryEngineBatchFailure>
+
+/**
+ * Per-item outcome. Deliberately part of the SUCCESS type: one failing widget
+ * must not fail the other eleven queries sharing its request.
+ */
+export const QueryEngineBatchOutcome = Schema.Union([
+	Schema.Struct({ outcome: Schema.Literal("success"), result: QueryEngineResult }),
+	Schema.Struct({ outcome: Schema.Literal("failure"), error: QueryEngineBatchFailure }),
+])
+export type QueryEngineBatchOutcome = Schema.Schema.Type<typeof QueryEngineBatchOutcome>
+
+export class QueryEngineExecuteBatchRequest extends Schema.Class<QueryEngineExecuteBatchRequest>(
+	"QueryEngineExecuteBatchRequest",
+)({
+	requests: Schema.Array(QueryEngineExecuteRequest).check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(QUERY_ENGINE_BATCH_MAX),
+	),
+}) {}
+
+export class QueryEngineExecuteBatchResponse extends Schema.Class<QueryEngineExecuteBatchResponse>(
+	"QueryEngineExecuteBatchResponse",
+)({
+	/** Positionally aligned with the request's `requests`. */
+	results: Schema.Array(QueryEngineBatchOutcome),
+}) {}
+
 export const QueryEngineAlertReducer = Schema.Literals(["identity", "sum", "avg", "min", "max"]).annotate({
 	identifier: "@maple/QueryEngineAlertReducer",
 })

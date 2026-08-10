@@ -262,3 +262,103 @@ describe("VcsCommitService.resolveCommitDetail", () => {
 		}).pipe(Effect.provide(commitLayer(testDb, layer)))
 	})
 })
+
+describe("VcsCommitService.resolveCommitDetails", () => {
+	// Seeds `count` stored commits (sha = <hexDigit> repeated 40x) under one repo.
+	const seedCommits = (repo: VcsRepo, orgId: OrgId, shas: ReadonlyArray<string>) =>
+		Effect.gen(function* () {
+			yield* seed(repo, orgId, [{ externalRepoId: "7", name: "repo" }])
+			const r = expectSome(yield* repo.resolveRepository(orgId, "github", "7"))
+			yield* repo.upsertCommits(
+				r,
+				shas.map((sha) => ({
+					sha,
+					message: `msg ${sha.slice(0, 4)}\n\nbody`,
+					authorName: "Stored Author",
+					authorEmail: "s@example.com",
+					authorLogin: "storedlogin",
+					authorAvatarUrl: null,
+					authoredAt: 1000,
+					committedAt: 2000,
+					htmlUrl: `https://github.com/octo/repo/commit/${sha}`,
+				})),
+			)
+		})
+
+	it.effect("resolves every stored SHA without touching the provider", () => {
+		const testDb = createTestDb(trackedDbs)
+		const { layer, calls } = routedHttp(() => false)
+		const SHAS = ["a", "b", "c"].map((c) => c.repeat(40))
+		return Effect.gen(function* () {
+			const svc = yield* VcsCommitService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_test")
+			yield* seedCommits(repo, orgId, SHAS)
+
+			const details = yield* svc.resolveCommitDetails(orgId, SHAS)
+			assert.strictEqual(details.length, 3)
+			assert.deepStrictEqual(details.map((d) => d.sha).toSorted(), [...SHAS].toSorted())
+			assert.ok(details.every((d) => d.resolved === "stored"))
+			assert.strictEqual(details[0]!.repoFullName, "octo/repo")
+			// The whole batch must be two reads, not one per SHA.
+			assert.strictEqual(calls.commitGets, 0)
+		}).pipe(Effect.provide(commitLayer(testDb, layer)))
+	})
+
+	it.effect("drops unresolvable SHAs instead of failing the batch", () => {
+		const testDb = createTestDb(trackedDbs)
+		// Nothing resolves at the provider, so the unknown SHA 404s.
+		const { layer } = routedHttp(() => false)
+		const STORED = "a".repeat(40)
+		return Effect.gen(function* () {
+			const svc = yield* VcsCommitService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_test")
+			yield* seedCommits(repo, orgId, [STORED])
+
+			const details = yield* svc.resolveCommitDetails(orgId, [
+				STORED,
+				"f".repeat(40), // valid shape, no repo has it
+				"not-a-sha", // invalid shape
+				"", // empty
+			])
+			assert.deepStrictEqual(
+				details.map((d) => d.sha),
+				[STORED],
+			)
+		}).pipe(Effect.provide(commitLayer(testDb, layer)))
+	})
+
+	it.effect("dedupes repeated SHAs", () => {
+		const testDb = createTestDb(trackedDbs)
+		const { layer } = routedHttp(() => false)
+		const SHA = "a".repeat(40)
+		return Effect.gen(function* () {
+			const svc = yield* VcsCommitService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_test")
+			yield* seedCommits(repo, orgId, [SHA])
+
+			const details = yield* svc.resolveCommitDetails(orgId, [SHA, SHA, SHA])
+			assert.strictEqual(details.length, 1)
+		}).pipe(Effect.provide(commitLayer(testDb, layer)))
+	})
+
+	it.effect("caps how many unknown SHAs it probes against the provider", () => {
+		const testDb = createTestDb(trackedDbs)
+		// Everything resolves upstream, so only the cap limits the probe count.
+		const { layer, calls } = routedHttp(() => true)
+		// 12 distinct valid SHAs, none stored — above the BULK_PROBE_LIMIT of 8.
+		const SHAS = "0123456789ab".split("").map((c) => c.repeat(40))
+		return Effect.gen(function* () {
+			const svc = yield* VcsCommitService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_test")
+			yield* seed(repo, orgId, [{ externalRepoId: "7", name: "repo" }])
+
+			const details = yield* svc.resolveCommitDetails(orgId, SHAS)
+			assert.strictEqual(details.length, 8)
+			assert.strictEqual(calls.commitGets, 8)
+		}).pipe(Effect.provide(commitLayer(testDb, layer)))
+	})
+})
