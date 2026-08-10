@@ -1,14 +1,17 @@
 import { Result } from "@/lib/effect-atom"
 
 import { Separator } from "@maple/ui/components/ui/separator"
+import { cn } from "@maple/ui/lib/utils"
 
 import type { WebAnalyticsBreakdowns } from "@/api/warehouse/web-analytics"
 import type { QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
 import {
 	FilterSection,
 	SearchableFilterSection,
+	SingleCheckboxFilter,
 	type FilterOption,
 } from "@/components/filters/filter-section"
+import { FILTER_SECTION_LABEL } from "@maple/ui/components/filters/filter-styles"
 import {
 	FilterSidebarBody,
 	FilterSidebarError,
@@ -16,7 +19,11 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { FILTER_SECTION_LABEL, type AnalyticsFilterKey, type AnalyticsFilters } from "./filters"
+import {
+	FILTER_SECTION_LABEL as FILTER_SECTION_LABEL_TEXT,
+	type AnalyticsFilterKey,
+	type AnalyticsFilters,
+} from "./filters"
 import { countryLabel, languageLabel } from "./labels"
 
 interface AnalyticsFilterSidebarProps {
@@ -84,71 +91,83 @@ function AnalyticsFilterSidebarView({
 		<FilterSidebarFrame waiting={waiting}>
 			<FilterSidebarHeader canClear={canClear} onClear={onClearFilters} />
 			<FilterSidebarBody>
-				<FilterSection
-					title={FILTER_SECTION_LABEL.visitorType}
-					options={[
-						{ name: "new", count: 0 },
-						{ name: "returning", count: 0 },
-					]}
-					getOptionLabel={(name) => (name === "new" ? "New" : "Returning")}
-					{...single("visitorType")}
-				/>
+				{/* Two exclusive checkboxes rather than a FilterSection: that component
+				    requires a `count` per option and always renders it, and this filter has
+				    no per-option count to give — the sidebar's other counts come from
+				    server-side facet branches, and a hard-coded 0 beside "New" reads as
+				    "zero new visitors" rather than as "not counted". Unchecking both means
+				    all visitors. */}
+				<div className="py-1">
+					<h4 className={cn(FILTER_SECTION_LABEL, "py-1 text-muted-foreground")}>
+						{FILTER_SECTION_LABEL_TEXT.visitorType}
+					</h4>
+					<SingleCheckboxFilter
+						title="New"
+						checked={filters.visitorType === "new"}
+						onChange={(on) => onFilterChange("visitorType", on ? "new" : undefined)}
+					/>
+					<SingleCheckboxFilter
+						title="Returning"
+						checked={filters.visitorType === "returning"}
+						onChange={(on) => onFilterChange("visitorType", on ? "returning" : undefined)}
+					/>
+				</div>
 				<Separator className="my-1" />
 				<SearchableFilterSection
-					title={FILTER_SECTION_LABEL.host}
+					title={FILTER_SECTION_LABEL_TEXT.host}
 					options={toOptions(breakdowns.hosts)}
 					{...single("host")}
 				/>
 				<SearchableFilterSection
-					title={FILTER_SECTION_LABEL.pagePath}
+					title={FILTER_SECTION_LABEL_TEXT.pagePath}
 					options={toOptions(breakdowns.entryPaths)}
 					{...single("pagePath")}
 				/>
 				<SearchableFilterSection
-					title={FILTER_SECTION_LABEL.referrerHost}
+					title={FILTER_SECTION_LABEL_TEXT.referrerHost}
 					options={toOptions(breakdowns.referrerHosts)}
 					{...single("referrerHost")}
 				/>
 				<SearchableFilterSection
-					title={FILTER_SECTION_LABEL.country}
+					title={FILTER_SECTION_LABEL_TEXT.country}
 					options={toOptions(breakdowns.countries)}
 					getOptionLabel={countryLabel}
 					{...single("country")}
 				/>
 				<FilterSection
-					title={FILTER_SECTION_LABEL.deviceType}
+					title={FILTER_SECTION_LABEL_TEXT.deviceType}
 					options={toOptions(breakdowns.deviceTypes)}
 					{...single("deviceType")}
 				/>
 				<FilterSection
-					title={FILTER_SECTION_LABEL.browserName}
+					title={FILTER_SECTION_LABEL_TEXT.browserName}
 					options={toOptions(breakdowns.browsers)}
 					{...single("browserName")}
 				/>
 				<FilterSection
-					title={FILTER_SECTION_LABEL.osName}
+					title={FILTER_SECTION_LABEL_TEXT.osName}
 					options={toOptions(breakdowns.operatingSystems)}
 					{...single("osName")}
 				/>
 				<SearchableFilterSection
-					title={FILTER_SECTION_LABEL.language}
+					title={FILTER_SECTION_LABEL_TEXT.language}
 					options={toOptions(breakdowns.languages)}
 					getOptionLabel={languageLabel}
 					{...single("language")}
 				/>
 				<Separator className="my-1" />
 				<SearchableFilterSection
-					title={FILTER_SECTION_LABEL.utmSource}
+					title={FILTER_SECTION_LABEL_TEXT.utmSource}
 					options={toOptions(breakdowns.utmSources)}
 					{...single("utmSource")}
 				/>
 				<FilterSection
-					title={FILTER_SECTION_LABEL.utmMedium}
+					title={FILTER_SECTION_LABEL_TEXT.utmMedium}
 					options={toOptions(breakdowns.utmMediums)}
 					{...single("utmMedium")}
 				/>
 				<SearchableFilterSection
-					title={FILTER_SECTION_LABEL.utmCampaign}
+					title={FILTER_SECTION_LABEL_TEXT.utmCampaign}
 					options={toOptions(breakdowns.utmCampaigns)}
 					{...single("utmCampaign")}
 				/>

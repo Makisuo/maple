@@ -43,6 +43,13 @@ export interface BreakdownDimension {
 
 type SortKey = "name" | "count"
 
+/**
+ * Identity label for dimensions with no `formatValue`. A module constant so the
+ * `?? identityLabel` fallback has a stable identity across renders and can be a
+ * memo dependency; an inline `(name) => name` would be a fresh closure each time.
+ */
+const identityLabel = (name: string): string => name
+
 interface AnalyticsBreakdownPanelProps {
 	title: string
 	dimensions: ReadonlyArray<BreakdownDimension>
@@ -82,20 +89,30 @@ export function AnalyticsBreakdownPanel({
 	waiting,
 	footnote,
 }: AnalyticsBreakdownPanelProps) {
-	// Open on the first dimension that actually has rows. Otherwise a panel whose
-	// leading tab is empty for its own reasons (Countries, before geo is enabled)
-	// presents as a broken panel, hiding the five populated tabs beside it.
+	// `null` means "nobody has picked a tab yet", which is deliberately distinct
+	// from "tab 0". Landing on the first *populated* dimension is what stops a
+	// panel whose leading tab is empty for its own reasons (Countries, before geo
+	// is enabled) from presenting as broken while five populated tabs sit beside
+	// it — and that has to be derived during render, not seeded into state.
+	// `useState(firstPopulated)` would freeze the answer at mount, so a panel that
+	// mounted before its rows arrived, or whose rows changed under a new filter or
+	// time range, would keep pointing at a tab that is now empty.
+	const [pickedTab, setPickedTab] = useState<number | null>(null)
+	const [query, setQuery] = useState("")
+	const deferredQuery = useDeferredValue(query)
+
 	const firstPopulated = Math.max(
 		dimensions.findIndex((dim) => dim.rows.length > 0),
 		0,
 	)
-	const [activeTab, setActiveTab] = useState(firstPopulated)
-	const [query, setQuery] = useState("")
-	const deferredQuery = useDeferredValue(query)
-
+	// An explicit pick wins even when it lands on an empty dimension — the person
+	// asked for that tab, and silently bouncing them off it would be worse than an
+	// honest empty state.
+	const activeTab = pickedTab ?? firstPopulated
 	const dimension = dimensions[activeTab] ?? dimensions[0]!
 	const selected = activeValue(dimension.filterKey)
-	const label = dimension.formatValue ?? ((name: string) => name)
+
+	const label = dimension.formatValue ?? identityLabel
 
 	const rows = useMemo(() => {
 		const total = dimension.rows.reduce((sum, row) => sum + row.count, 0)
@@ -122,7 +139,7 @@ export function AnalyticsBreakdownPanel({
 							key={dim.tab}
 							type="button"
 							onClick={() => {
-								setActiveTab(index)
+								setPickedTab(index)
 								setQuery("")
 							}}
 							className={cn(
