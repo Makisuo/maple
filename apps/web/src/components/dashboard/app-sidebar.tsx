@@ -57,6 +57,7 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
+import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 
 /**
  * A 2px lane is reserved on every row so icons share one vertical line whether
@@ -539,7 +540,9 @@ function FooterCluster() {
 // (instead of bare useRouterState) keeps it quiet during loader/pending ticks.
 export const AppSidebar = memo(function AppSidebar() {
 	const currentPath = useRouterState({ select: (s) => s.location.pathname })
-	const groups = navGroups()
+	// Fail-closed during load is correct here: a row that appears a beat late is
+	// better than one that appears and then vanishes.
+	const groups = navGroups(useOrganizationFeatureFlags().flags)
 
 	return (
 		<Sidebar collapsible="icon">

@@ -19,9 +19,11 @@ const DisabledByDefaultFeatureFlag = Schema.Unknown.pipe(
  */
 export const OrganizationFeatureFlags = Schema.Struct({
 	aiAutoTriage: DisabledByDefaultFeatureFlag,
+	webAnalytics: DisabledByDefaultFeatureFlag,
 }).pipe(
 	Schema.encodeKeys({
 		aiAutoTriage: "aiautotriage",
+		webAnalytics: "webanalytics",
 	}),
 )
 
@@ -29,8 +31,21 @@ export type OrganizationFeatureFlags = Schema.Schema.Type<typeof OrganizationFea
 
 const decodeOrganizationFeatureFlags = Schema.decodeUnknownOption(OrganizationFeatureFlags)
 
-const DISABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
+/** Every rollout off — the value for malformed metadata, and for the pre-load window. */
+export const DISABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
 	aiAutoTriage: false,
+	webAnalytics: false,
+}
+
+/**
+ * Every rollout on, for the self-hosted build where there is no Clerk to read
+ * metadata from. Mirrors how `settings-nav` treats `!isClerkAuthEnabled`: a flag
+ * is a staged-rollout tool for the managed product, and leaving them all off
+ * would permanently hide the features from anyone running Maple themselves.
+ */
+export const ENABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
+	aiAutoTriage: true,
+	webAnalytics: true,
 }
 
 /** Decode Clerk metadata, falling back to every rollout disabled for non-object input. */

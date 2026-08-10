@@ -9,6 +9,8 @@ import { formatNumber, formatPercent } from "@maple/ui/lib/format"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { PageHero } from "@/components/infra/primitives/page-hero"
+import { NotFoundError } from "@/components/route-error"
+import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import { PlayRotateClockwiseIcon } from "@/components/icons"
 import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
 import { chartBucketSeconds } from "@/components/infra/chart-utils"
@@ -58,6 +60,28 @@ export const Route = createFileRoute("/analytics/")({
 })
 
 function WebAnalyticsPage() {
+	// Hiding the nav row is not hiding the page — the URL still resolves, and ⌘K,
+	// browser history and a shared link all reach it. So the flag is enforced here
+	// too, rendering the router's own not-found component so an unflagged org sees
+	// exactly what it would see for a route that does not exist. Client-side only,
+	// like `aiAutoTriage`: the API does not read Clerk org metadata, so this hides
+	// the surface rather than protecting the data (which is already org-scoped by
+	// CurrentTenant on every query).
+	const { flags, isLoaded } = useOrganizationFeatureFlags()
+
+	// `isLoaded` is load-bearing, not defensive. Flags fail closed while Clerk
+	// resolves, and a route — unlike a nav row — turns "off" into a visible verdict:
+	// without this, an org that *has* the flag would see "Page not found" flash and
+	// then the real page on every load. Render nothing for that window instead; the
+	// sidebar and page chrome come from the layout, so this is a brief empty content
+	// area rather than a blank app.
+	if (!isLoaded) return null
+	if (!flags.webAnalytics) return <NotFoundError />
+
+	return <WebAnalyticsPageContent />
+}
+
+function WebAnalyticsPageContent() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 
