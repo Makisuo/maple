@@ -1,13 +1,15 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result } from "@/lib/effect-atom"
 
+import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatNumber, formatPercent } from "@maple/ui/lib/format"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { PageHero } from "@/components/infra/primitives/page-hero"
+import { PlayRotateClockwiseIcon } from "@/components/icons"
 import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
 import { chartBucketSeconds } from "@/components/infra/chart-utils"
 import type { WebAnalyticsBreakdowns, WebAnalyticsSummary } from "@/api/warehouse/web-analytics"
@@ -123,6 +125,28 @@ function WebAnalyticsPage() {
 					<DashboardLayout.Content>
 						<DashboardLayout.Sticky>
 							<DashboardLayout.Header>
+								{/* The reciprocal of the Analytics button on Session Replays: this
+								    page aggregates the sessions that page plays back one at a time,
+								    and "who are these people actually" is the next question from
+								    either side. Carries the window across, same as the outbound link. */}
+								<Button
+									variant="outline"
+									size="sm"
+									aria-label="View session replays"
+									render={
+										<Link
+											to="/replays"
+											search={{
+												startTime: search.startTime,
+												endTime: search.endTime,
+												timePreset: search.timePreset,
+											}}
+										/>
+									}
+								>
+									<PlayRotateClockwiseIcon size={14} />
+									<span className="hidden sm:inline">Replays</span>
+								</Button>
 								<TimeRangeHeaderControls
 									startTime={search.startTime ?? startTime}
 									endTime={search.endTime ?? endTime}
