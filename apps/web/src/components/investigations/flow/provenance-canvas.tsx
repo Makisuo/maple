@@ -42,7 +42,12 @@ import { useTickingNow } from "@/hooks/use-ticking-now"
 import { splitDuration } from "../investigation-display"
 import { buildProvenanceGraph, type ProvenanceGraph } from "./provenance-graph"
 
-const nodeTypes = {
+/**
+ * Exported so the node studio (`routes/node-lab.tsx`) hosts the *same* registration
+ * rather than a copy of it — a catalogue that renders its own idea of these nodes
+ * is a catalogue that can go quietly out of date with the page it documents.
+ */
+export const nodeTypes = {
 	spine: FlowSpineNode,
 	lens: FlowLensNode,
 	lensOverflow: FlowLensOverflowNode,
@@ -52,7 +57,7 @@ const nodeTypes = {
 	heading: FlowHeadingNode,
 }
 
-const edgeTypes = { provenance: FlowEdge }
+export const edgeTypes = { provenance: FlowEdge }
 
 const MIN_FIT = 0.68
 const FIT = { padding: 0.06, maxZoom: 1, minZoom: MIN_FIT }

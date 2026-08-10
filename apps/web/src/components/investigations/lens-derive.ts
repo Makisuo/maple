@@ -121,7 +121,17 @@ export const checksHeld = (checks: ReadonlyArray<LensCheck>): number =>
  * -----------------------------------------------------------------------------------------------*/
 
 export type LensTone = "muted" | "primary" | "success" | "info" | "warning" | "destructive"
-export type LensIcon = "pending" | "running" | "confirmed" | "ruledOut" | "deadline" | "failed"
+/**
+ * `queued` and `reported` used to be one `pending` icon, which meant both wore a
+ * loader — motionless, because only a running lane is allowed to move. A stopped
+ * spinner is the one glyph that says nothing at all: it reads as a component that
+ * failed to start rather than as a state.
+ *
+ * They are also not the same state. A queued lane has not begun; a reported one
+ * has finished its work and is waiting on someone else's judgement. Two waits,
+ * two glyphs.
+ */
+export type LensIcon = "queued" | "running" | "reported" | "confirmed" | "ruledOut" | "deadline" | "failed"
 
 export interface LensNodeState {
 	/** Always present. The word carries the state; colour only reinforces it. */
@@ -147,7 +157,7 @@ export const lensNodeState = (lens: LensRun): LensNodeState => {
 	const base = { struck: false, dashed: false }
 	switch (lens.status) {
 		case "queued":
-			return { ...base, word: "PENDING", tone: "muted", icon: "pending", dashed: true }
+			return { ...base, word: "PENDING", tone: "muted", icon: "queued", dashed: true }
 		case "checking":
 			return { ...base, word: "RUNNING", tone: "primary", icon: "running" }
 		default: {
@@ -161,7 +171,7 @@ export const lensNodeState = (lens: LensRun): LensNodeState => {
 				return { ...base, word: "NO FINDING", tone: "muted", icon: "failed" }
 			}
 			if (lens.verdict === "pending") {
-				return { ...base, word: "REPORTED", tone: "muted", icon: "pending" }
+				return { ...base, word: "REPORTED", tone: "muted", icon: "reported" }
 			}
 			if (lens.verdict === "promoted") {
 				return { ...base, word: "CONFIRMED", tone: "success", icon: "confirmed" }

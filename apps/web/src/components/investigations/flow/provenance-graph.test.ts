@@ -89,11 +89,13 @@ describe("buildProvenanceGraph", () => {
 			"action",
 			"action",
 		])
-		// Every column origin is 198 apart (146 node + 52 gutter) until the wide
-		// actions column, so x is strictly increasing and the graph never overlaps.
+		// Column origins are 198 apart (146 spine + 52 gutter) up to the lens column,
+		// which is 180 wide rather than 146 — so every origin after it is offset by
+		// that extra 34, and the actions column lands 34 further right. x stays
+		// strictly increasing and the graph never overlaps, which is what this pins.
 		const xs = [...new Set(graph.nodes.map((node) => node.position.x))].sort((a, b) => a - b)
-		expect(xs).toEqual([0, 198, 396, 594, 792, 990])
-		expect(graph.width).toBe(1270)
+		expect(xs).toEqual([0, 198, 396, 594, 826, 1024])
+		expect(graph.width).toBe(1304)
 	})
 
 	/**

@@ -42,7 +42,17 @@ import {
  * -----------------------------------------------------------------------------------------------*/
 
 export const SPINE_WIDTH = 146
-export const LENS_WIDTH = 146
+/**
+ * Wider than the design's 146, and wider than the spine beside it.
+ *
+ * At 146 the text column is 126px, which is seventeen 12px mono characters —
+ * shorter than almost every lane name the planner writes, so the entire fan
+ * rendered as a column of identical `Deploy correlati…`. A card whose title is
+ * mostly ellipsis reads as broken layout no matter how well the rest of it is
+ * drawn. 180 buys twenty-two characters, which clears the catalogue names and
+ * most planner-written ones.
+ */
+export const LENS_WIDTH = 180
 export const ACTION_WIDTH = 280
 const GUTTER = 52
 
@@ -50,26 +60,38 @@ const GUTTER = 52
  * Two heights, both grown by one row for the relative-time footer every spine
  * card carries along its bottom edge.
  */
-const SPINE_HEIGHT = 112
+export const SPINE_HEIGHT = 112
 /** The investigation and verdict nodes are one step taller — they carry an extra line. */
-const SPINE_HEIGHT_TALL = 128
+export const SPINE_HEIGHT_TALL = 128
 /**
- * A running investigation node is taller again: it carries a phase line the
- * finished one has no row for, and the card clips at its border rather than
- * growing, so an unbudgeted row silently eats the timestamp under it.
+ * The investigation node — the only `current` one, and the only one whose title
+ * renders at `text-sm`.
+ *
+ * That larger title is worth two rows on its own, and at the plain tall height it
+ * was not given them: "Checkout timeouts" rendered as "Checkout", with the second
+ * line clipped off at the border. Sized from the rows the card actually draws —
+ * eyebrow, two title lines, two note lines, timestamp — rather than borrowed from
+ * the nodes around it.
  */
-const SPINE_HEIGHT_LIVE = 148
+export const SPINE_HEIGHT_CURRENT = 140
+/**
+ * A running investigation node is taller again: it carries a phase line and the
+ * live progress bar under it, neither of which the finished one has a row for.
+ * The card clips at its border rather than growing, so an unbudgeted row silently
+ * eats the timestamp — or, as it did, half the title.
+ */
+export const SPINE_HEIGHT_LIVE = 168
 /**
  * One row taller than the design's 52 to hold a running lane's progress note.
  * Uniform across the column rather than per-state: the layout centres a column by
  * summing one height per node, and a fan whose rows changed height every poll
  * would walk up and down the canvas as lanes settled.
  */
-const LENS_HEIGHT = 64
+export const LENS_HEIGHT = 64
 const LENS_GAP = 8
-const ACTION_HEIGHT = 76
+export const ACTION_HEIGHT = 76
 const ACTION_GAP = 8
-const HEADING_HEIGHT = 12
+export const HEADING_HEIGHT = 12
 /** Column headings ride 20px above their column's top edge. */
 const HEADING_OFFSET = 20
 
@@ -384,7 +406,7 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 				type: "spine",
 				position: { x: 0, y: 0 },
 				width: SPINE_WIDTH,
-				height: running ? SPINE_HEIGHT_LIVE : SPINE_HEIGHT_TALL,
+				height: running ? SPINE_HEIGHT_LIVE : SPINE_HEIGHT_CURRENT,
 				data: {
 					glyph: "investigation",
 					eyebrow: "INVESTIGATION",
