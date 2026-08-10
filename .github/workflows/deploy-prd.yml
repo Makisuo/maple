@@ -28,6 +28,10 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
         environment: production
         env:
+            # Opt-in for the AWS/ECS ingest half (see alchemy.run.ts). Unset or not
+            # "1", the deploy is the pure-Cloudflare stack that shipped in 2m05s.
+            # Set the repo variable to "1" to reproduce the hang under investigation.
+            MAPLE_DEPLOY_AWS_INGEST: ${{ vars.MAPLE_DEPLOY_AWS_INGEST }}
             INFISICAL_ENV_SLUG: prod
             # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
             # reads COMMIT_SHA; web build reads VITE_COMMIT_SHA via Vite define).
@@ -120,4 +124,4 @@ jobs:
             # including the ingest gateway, which reaches Postgres through PSBouncer as
             # a role that does NOT inherit `postgres`.
             - name: Deploy PRD stack with Alchemy
-              run: bun run alchemy:deploy:prd -- --log-level debug
+              run: bun run alchemy:deploy:prd
