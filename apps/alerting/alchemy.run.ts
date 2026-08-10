@@ -37,7 +37,9 @@ export interface CreateAlertingWorkerOptions {
 
 export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOptions) =>
 	Effect.gen(function* () {
-		const hyperdriveRefId = resolveHyperdriveRefId(stage)
+		// `alerting` binds its own Hyperdrive config on prd — it issues ~97% of the
+		// workers' Postgres traffic and was starving the api's connection pool.
+		const hyperdriveRefId = resolveHyperdriveRefId(stage, "alerting")
 		// Cross-script binding to the investigation fan-out Workflow hosted by the
 		// api worker. Alert, error, and anomaly ticks start investigations when
 		// incidents open. The

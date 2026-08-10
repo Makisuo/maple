@@ -63,7 +63,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 		//   still boots and serves — DatabasePgLive fails per query instead of
 		//   dying — so DB-backed routes 500 while everything else works.
 		const databaseMode = resolveDatabaseMode(stage)
-		const hyperdriveRefId = resolveHyperdriveRefId(stage)
+		const hyperdriveRefId = resolveHyperdriveRefId(stage, "api")
 		const mapleDb =
 			databaseMode !== "managed"
 				? undefined
