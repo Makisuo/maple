@@ -77,6 +77,18 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
 		return { logsDestination, tracesDestination }
 	})
 
+/**
+ * Opt-in switch for the AWS half of the stack (`apps/ingest` on ECS).
+ *
+ * Set `MAPLE_DEPLOY_AWS_INGEST=1` to include it. Unset, both the AWS providers
+ * and the ingest resources drop out and the stack is exactly what shipped
+ * before the AWS work landed — which is the point: the ingest deploy currently
+ * hangs, and it hangs in the same `alchemy deploy` run that ships every
+ * Cloudflare worker, so an unconditional AWS half means no production deploys
+ * at all.
+ */
+const DEPLOY_AWS_INGEST = process.env.MAPLE_DEPLOY_AWS_INGEST === "1"
+
 export default Alchemy.Stack(
 	"maple",
 	{
@@ -84,7 +96,17 @@ export default Alchemy.Stack(
 		// gateway on ECS (`apps/ingest`). AWS credentials arrive as env vars from
 		// Infisical exactly like the Cloudflare ones — `AWS.providers()` reads
 		// AWS_REGION / AWS_ACCOUNT_ID / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
-		providers: Layer.mergeAll(Cloudflare.providers(), AWS.providers()),
+		//
+		// OPT-IN, because the AWS half currently wedges the deploy. Four prd runs
+		// have burned their whole timeout inside `alchemy deploy` with no output
+		// at any log level, no AWS API call in CloudTrail, and no resource
+		// created — while blocking every Cloudflare worker behind them, since
+		// they deploy in the same run. Unset, this stack is byte-identical to the
+		// last one that shipped (2m05s), so production keeps deploying while the
+		// hang is investigated with the flag on.
+		providers: DEPLOY_AWS_INGEST
+			? Layer.mergeAll(Cloudflare.providers(), AWS.providers())
+			: Cloudflare.providers(),
 		// Shared account-wide state store (Worker + DO SQLite) — bootstrapped once
 		// per Cloudflare account (`alchemy bootstrap cloudflare` or the first
 		// `deploy --yes`). ALCHEMY_LOCAL_STATE=1 opts into .alchemy/ file state for
@@ -119,9 +141,12 @@ export default Alchemy.Stack(
 		// points at; dev stages run it through docker-compose). `domains.ingest`
 		// reaches it via a Cloudflare CNAME at the ALB, so the URL below stays a
 		// plain string and does not depend on the service resource.
-		const ingest = stageDeploysIngest(stage)
-			? yield* createMapleIngest({ stage, domains, region })
-			: undefined
+		// Gated on the same flag as `AWS.providers()` above — creating the resource
+		// without its provider registered is not a runnable combination.
+		const ingest =
+			DEPLOY_AWS_INGEST && stageDeploysIngest(stage)
+				? yield* createMapleIngest({ stage, domains, region })
+				: undefined
 
 		const ingestUrl = resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev")
 
