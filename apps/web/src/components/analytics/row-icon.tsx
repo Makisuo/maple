@@ -56,13 +56,7 @@ export function Favicon({ host, className }: { host: string; className?: string 
 			decoding="async"
 			referrerPolicy="no-referrer"
 			onError={() => setFailed(true)}
-			// The plate is dark-theme-only and not decoration: a favicon is whatever
-			// the site ships, and plenty are a black glyph on transparent
-			// (github.com is the standing example) — against the dark card those
-			// rows read as having no icon at all. On light backgrounds the same
-			// icons are already legible, and a plate there would box every
-			// transparent logo in a visible white square.
-			className={cn(ICON_BOX, "rounded-[3px] object-contain dark:bg-white/90 dark:p-px", className)}
+			className={cn(ICON_BOX, "rounded-[3px] object-contain", className)}
 		/>
 	)
 }
