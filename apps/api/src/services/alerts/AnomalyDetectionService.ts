@@ -62,7 +62,7 @@ import {
 	type LogVolumeSeries,
 } from "./anomaly/detection"
 import { issueSeverityFromAlert } from "@/services/errors/severity-map"
-import { batchDetectorStates } from "./anomaly/detector-state-batch"
+import { batchDetectorStates, DETECTOR_STATE_FLUSH_CONCURRENCY } from "./anomaly/detector-state-batch"
 import { rollingCountBuckets } from "./anomaly/rolling-counts"
 import { decideTransition, stateMachineConfigFor, type DetectorStateSnapshot } from "./anomaly/state-machine"
 import {
@@ -1098,33 +1098,42 @@ const make = Effect.gen(function* () {
 	 * currently conflicting on (same pattern as `error-tick-persistence.ts:302`).
 	 *
 	 * Dedupe and chunking live in `batchDetectorStates`, which is pure and tested.
+	 *
+	 * Chunks run concurrently: each is its own dial, and `batchDetectorStates`
+	 * dedupes by `detectorKey` first, so no two chunks ever touch the same row and
+	 * they cannot deadlock against each other. Bounded rather than unbounded
+	 * because `processOrg` is itself already running at concurrency 4 — the cap is
+	 * on connections to the same origin pool, not on this loop in isolation.
 	 */
 	const flushDetectorStates = Effect.fnUntraced(function* (
 		rows: ReadonlyArray<typeof anomalyDetectorStates.$inferInsert>,
 	) {
-		for (const chunk of batchDetectorStates(rows)) {
-			yield* dbExecute((db) =>
-				db
-					.insert(anomalyDetectorStates)
-					.values(chunk)
-					.onConflictDoUpdate({
-						target: [anomalyDetectorStates.orgId, anomalyDetectorStates.detectorKey],
-						set: {
-							consecutiveBreaches: sql`excluded.consecutive_breaches`,
-							consecutiveHealthy: sql`excluded.consecutive_healthy`,
-							lastStatus: sql`excluded.last_status`,
-							lastValue: sql`excluded.last_value`,
-							baselineMedian: sql`excluded.baseline_median`,
-							lastSampleCount: sql`excluded.last_sample_count`,
-							lastEvaluatedAt: sql`excluded.last_evaluated_at`,
-							openIncidentId: sql`excluded.open_incident_id`,
-							lastResolvedAt: sql`excluded.last_resolved_at`,
-							lastIncidentId: sql`excluded.last_incident_id`,
-							updatedAt: sql`excluded.updated_at`,
-						},
-					}),
-			)
-		}
+		yield* Effect.forEach(
+			batchDetectorStates(rows),
+			(chunk) =>
+				dbExecute((db) =>
+					db
+						.insert(anomalyDetectorStates)
+						.values(chunk)
+						.onConflictDoUpdate({
+							target: [anomalyDetectorStates.orgId, anomalyDetectorStates.detectorKey],
+							set: {
+								consecutiveBreaches: sql`excluded.consecutive_breaches`,
+								consecutiveHealthy: sql`excluded.consecutive_healthy`,
+								lastStatus: sql`excluded.last_status`,
+								lastValue: sql`excluded.last_value`,
+								baselineMedian: sql`excluded.baseline_median`,
+								lastSampleCount: sql`excluded.last_sample_count`,
+								lastEvaluatedAt: sql`excluded.last_evaluated_at`,
+								openIncidentId: sql`excluded.open_incident_id`,
+								lastResolvedAt: sql`excluded.last_resolved_at`,
+								lastIncidentId: sql`excluded.last_incident_id`,
+								updatedAt: sql`excluded.updated_at`,
+							},
+						}),
+				),
+			{ concurrency: DETECTOR_STATE_FLUSH_CONCURRENCY, discard: true },
+		)
 	})
 
 	const newIncidentId = () => decodeIncidentIdSync(randomUUID())

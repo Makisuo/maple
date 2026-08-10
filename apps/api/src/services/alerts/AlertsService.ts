@@ -95,8 +95,11 @@ import {
 	Layer,
 	Match,
 	Metric,
+	MutableHashMap,
 	Option,
 	Random,
+	Record,
+	Result,
 	Redacted,
 	Ref,
 	Schema,
@@ -4545,7 +4548,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					// Counts what actually resolved, not what was a candidate: an incident
 					// resolved out-of-band since the tick began is skipped above and must
 					// not be counted here.
-					const resolvedCount = Arr.filter(resolveOutcomes, (ok) => ok).length
+					const resolvedCount = Arr.countBy(resolveOutcomes, (ok) => ok)
 					yield* Metric.update(AlertingMetrics.incidentsResolvedTotal, resolvedCount)
 					yield* Metric.update(AlertingMetrics.staleIncidentsResolvedTotal, resolvedCount)
 				},
@@ -4675,7 +4678,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			 * can use its leading index column.
 			 */
 			const loadTickPrefetch = Effect.fnUntraced(function* (rows: ReadonlyArray<AlertRuleRow>) {
-				if (rows.length === 0) {
+				if (Arr.isReadonlyArrayEmpty(rows)) {
 					return {
 						stateFor: () => null,
 						openIncidentFor: () => null,
@@ -4683,8 +4686,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					} satisfies TickPrefetch
 				}
 
-				const ruleIds = rows.map((row) => row.id)
-				const orgIds = [...new Set(rows.map((row) => row.orgId))]
+				const ruleIds = Arr.map(rows, (row) => row.id)
+				const orgIds = Arr.dedupe(Arr.map(rows, (row) => row.orgId))
 
 				const { stateRows, incidentRows } = yield* dbExecute(async (db) => {
 					const [stateRows, incidentRows] = await Promise.all([
@@ -4711,37 +4714,46 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					return { stateRows, incidentRows }
 				})
 
-				const stateByGroup = new Map<string, AlertRuleStateRow>()
-				for (const state of stateRows) {
-					stateByGroup.set(groupCacheKey(state.orgId, state.ruleId, state.groupKey), state)
-				}
+				const stateByGroup = MutableHashMap.fromIterable(
+					Arr.map(
+						stateRows,
+						(state) => [groupCacheKey(state.orgId, state.ruleId, state.groupKey), state] as const,
+					),
+				)
 
-				const incidentByGroup = new Map<string, AlertIncidentRow>()
-				const incidentsByRule = new Map<string, AlertIncidentRow[]>()
-				for (const incident of incidentRows) {
-					// `groupKey` is nullable on this table. The per-group lookup replaces an
-					// `eq(groupKey, …)` predicate, and SQL equality never matches NULL, so a
-					// null-keyed incident must not be reachable from it. The per-rule list
-					// keeps them: its consumer coalesces null to the ungrouped key.
-					if (incident.groupKey !== null) {
-						incidentByGroup.set(
-							groupCacheKey(incident.orgId, incident.ruleId, incident.groupKey),
-							incident,
-						)
-					}
-					const key = ruleCacheKey(incident.orgId, incident.ruleId)
-					const bucket = incidentsByRule.get(key)
-					if (bucket) bucket.push(incident)
-					else incidentsByRule.set(key, [incident])
-				}
+				// `groupKey` is nullable on this table. The per-group lookup replaces an
+				// `eq(groupKey, …)` predicate, and SQL equality never matches NULL, so a
+				// null-keyed incident must not be reachable from it — hence the filterMap.
+				// The per-rule grouping below keeps them: its consumer coalesces null to
+				// the ungrouped key.
+				const incidentByGroup = MutableHashMap.fromIterable(
+					Arr.filterMap(incidentRows, (incident) =>
+						incident.groupKey === null
+							? Result.failVoid
+							: Result.succeed([
+									groupCacheKey(incident.orgId, incident.ruleId, incident.groupKey),
+									incident,
+								] as const),
+					),
+				)
+
+				const incidentsByRule = Arr.groupBy(incidentRows, (incident) =>
+					ruleCacheKey(incident.orgId, incident.ruleId),
+				)
 
 				return {
 					stateFor: (orgId, ruleId, groupKey) =>
-						stateByGroup.get(groupCacheKey(orgId, ruleId, groupKey)) ?? null,
+						Option.getOrNull(
+							MutableHashMap.get(stateByGroup, groupCacheKey(orgId, ruleId, groupKey)),
+						),
 					openIncidentFor: (orgId, ruleId, groupKey) =>
-						incidentByGroup.get(groupCacheKey(orgId, ruleId, groupKey)) ?? null,
+						Option.getOrNull(
+							MutableHashMap.get(incidentByGroup, groupCacheKey(orgId, ruleId, groupKey)),
+						),
 					openIncidentsForRule: (orgId, ruleId) =>
-						incidentsByRule.get(ruleCacheKey(orgId, ruleId)) ?? EMPTY_INCIDENTS,
+						Record.get(incidentsByRule, ruleCacheKey(orgId, ruleId)).pipe(
+							Option.getOrElse(() => EMPTY_INCIDENTS),
+						),
 				} satisfies TickPrefetch
 			})
 
@@ -4783,9 +4795,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							Effect.ignore,
 						)
 
-				const selfHealOrgIds = [...new Set(selfHeal.map((t) => t.orgId))]
-				const groupedRuleIds = selfHeal.filter((t) => t.grouped).map((t) => t.ruleId)
-				const ungroupedRuleIds = selfHeal.filter((t) => !t.grouped).map((t) => t.ruleId)
+				const selfHealOrgIds = Arr.dedupe(Arr.map(selfHeal, (t) => t.orgId))
+				// One pass: `partition` returns [excluded, satisfying], so the `Result`
+				// failure arm carries the ungrouped ids and the success arm the grouped.
+				const [ungroupedRuleIds, groupedRuleIds] = Arr.partition(selfHeal, (t) =>
+					t.grouped ? Result.succeed(t.ruleId) : Result.fail(t.ruleId),
+				)
 
 				// A grouped rule can never legitimately own an ungrouped state row, and
 				// an ungrouped rule can never own a grouped one. Two statements because
@@ -4828,11 +4843,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							.where(
 								and(
 									inArray(alertRuleStates.orgId, [
-										...new Set(clearError.map((t) => t.orgId)),
+										...Arr.dedupe(Arr.map(clearError, (t) => t.orgId)),
 									]),
 									inArray(
 										alertRuleStates.ruleId,
-										clearError.map((t) => t.ruleId),
+										Arr.map(clearError, (t) => t.ruleId),
 									),
 									isNotNull(alertRuleStates.lastError),
 								),

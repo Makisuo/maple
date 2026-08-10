@@ -1,3 +1,5 @@
+import { Array as Arr, MutableHashMap } from "effect"
+
 /**
  * Rows per multi-row detector-state upsert.
  *
@@ -7,6 +9,16 @@
  * fingerprints, so this is bounded rather than assumed safe.
  */
 export const DETECTOR_STATE_UPSERT_CHUNK = 500
+
+/**
+ * Chunks flushed concurrently per org.
+ *
+ * Chunks are disjoint by `detectorKey`, so concurrent upserts never contend for
+ * the same row. The bound is about connections, not correctness: `processOrg`
+ * already runs at concurrency 4, and every chunk is its own dial against the
+ * same Hyperdrive origin pool.
+ */
+export const DETECTOR_STATE_FLUSH_CONCURRENCY = 4
 
 /**
  * Prepare accumulated detector-state writes for multi-row upserts.
@@ -19,7 +31,8 @@ export const DETECTOR_STATE_UPSERT_CHUNK = 500
  *    the sequential loop did when a key appeared more than once.
  * 2. **Chunking**, to stay under the bound-parameter cap.
  *
- * Insertion order is preserved so the resulting statements stay deterministic —
+ * Insertion order is preserved — `MutableHashMap.set` on an existing key updates
+ * in place rather than reordering — so the emitted statements stay deterministic,
  * which is what makes the round-trip count assertable in tests.
  *
  * Callers pass rows for a single org, so `detectorKey` alone is the right dedupe
@@ -28,20 +41,15 @@ export const DETECTOR_STATE_UPSERT_CHUNK = 500
 export function batchDetectorStates<T extends { readonly detectorKey: string }>(
 	rows: ReadonlyArray<T>,
 	chunkSize: number = DETECTOR_STATE_UPSERT_CHUNK,
-): T[][] {
-	if (rows.length === 0) return []
+): Array<Array<T>> {
+	if (Arr.isReadonlyArrayEmpty(rows)) return []
 
-	const deduped = new Map<string, T>()
-	for (const row of rows) {
-		// `set` on an existing key overwrites the value but keeps the original
-		// insertion position, which is the order preservation described above.
-		deduped.set(row.detectorKey, row)
-	}
+	const deduped = Arr.reduce(rows, MutableHashMap.empty<string, T>(), (acc, row) =>
+		MutableHashMap.set(acc, row.detectorKey, row),
+	)
 
-	const values = [...deduped.values()]
-	const chunks: T[][] = []
-	for (let i = 0; i < values.length; i += chunkSize) {
-		chunks.push(values.slice(i, i + chunkSize))
-	}
-	return chunks
+	return Arr.chunksOf(
+		Arr.map(Arr.fromIterable(deduped), ([, row]) => row),
+		chunkSize,
+	)
 }
