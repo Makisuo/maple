@@ -1,52 +1,12 @@
-// Web Analytics Queries
+// Browser analytics spans three coverage tiers:
+// - navigation rows in `session_events` provide page views and URLs;
+// - base `session_replays` columns provide device, country, and duration;
+// - the optional analytics block provides visitor, acquisition, and language.
+// `identifiedSessions` reports the third tier's coverage alongside totals.
 //
-// Product analytics over the browser SDK's session data: unique visitors, page
-// views, top pages, acquisition (referrer / UTM), and audience breakdowns
-// (country / device / browser / OS / language).
-//
-// ## Two tables, and three coverage tiers
-//
-// These queries deliberately read from *both* session tables, because neither
-// one alone can answer the page. What matters is that the columns fall into
-// three tiers of coverage, and conflating them produces numbers that contradict
-// each other on screen:
-//
-//  1. **`session_events` with `Type = 'navigation'`** — one row per page view,
-//     for every session across every SDK build. Knows only SessionId, Timestamp
-//     and Url. This is the widest-coverage source there is, and where page views
-//     and top pages come from.
-//  2. **`session_replays` base columns** — `BrowserName`, `OsName`,
-//     `DeviceType`, `Country`, `DurationMs`. Predate migration 0011 and are
-//     populated for essentially every session. (`Country` has its own gap: it is
-//     derived at the ingest gateway from `Cf-IPCountry` and only when the
-//     gateway is configured to trust that header, so it is `''` for traffic
-//     received before that was enabled and is never backfilled.)
-//  3. **`session_replays` analytics block** (migration 0011) — `VisitorId`,
-//     `VisitorIsNew`, `Referrer`, `ReferrerHost`, `Utm*`, `Host`, `EntryPath`,
-//     `ExitPath`, `Language`, and in practice `PageViews`. Only sessions from an
-//     SDK build that posts the block populate these. Measured against production
-//     at the time of writing: one org of seven, ~18% of sessions.
-//
-// So a page-view count and a visitor count on the same screen describe different
-// populations, and the UI is expected to say which — `webAnalyticsSummaryQuery`
-// returns `identifiedSessions` alongside `sessions` precisely so the page can
-// report the covered share instead of presenting a partial count as the whole.
-// Tier 2 needs no such caveat, and attaching one to it is its own bug.
-//
-// ## ReplacingMergeTree counting
-//
-// The SDK writes a session twice: Version=1 at session start, Version=2 at
-// session end. Reads can see both rows before a background merge collapses
-// them, so **every count over `session_replays` here is `uniq`/`uniqIf` on
-// SessionId, never `count`/`countIf`** — the same rule
-// `sessionReplaysFacetsQuery` follows. `sum(PageViews)` is the one exception and
-// is *not* used for the page-view metric for exactly this reason; page views
-// come from the append-only `session_events` instead.
-//
-// Filters only touch version-invariant columns. Every analytics column
-// qualifies (the SDK writes them on both the v1 and v2 row — see the invariant
-// documented in packages/browser-session/src/meta-row.ts), so they are safe in
-// WHERE; the DSL has no HAVING.
+// `session_replays` may expose both session versions before merging, so counts
+// use `uniq[If](SessionId)`. Page views come from append-only navigation events.
+// WHERE clauses use only columns written identically to both session versions.
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param, from, inSubquery, unionAll, compileFnCall } from "@maple-dev/clickhouse-builder"

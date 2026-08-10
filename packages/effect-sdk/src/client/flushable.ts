@@ -1,28 +1,6 @@
-// Client flushable preset — manual `flush()` for the browser
-//
-// `Maple.layer` (the `Otlp.layerJson`-based client preset) exports on a 5s
-// timer but never flushes on page unload — the scope doesn't close on
-// `pagehide`, so the last few seconds of spans (including replay-linked traces)
-// are silently lost. This preset swaps the Otlp layer for the buffer-backed
-// tracer/logger and adds an explicit `flush()` plus, by default, a `pagehide` /
-// `visibilitychange→hidden` handler that flushes the tail before the tab goes
-// away — the browser equivalent of the Cloudflare preset's `ctx.waitUntil`.
-//
-//   import { MapleFlush } from "@maple-dev/effect-sdk/client"
-//   const telemetry = MapleFlush.make({
-//     serviceName: "my-frontend",
-//     endpoint: "https://ingest.maple.dev",
-//     ingestKey: "maple_pk_...",
-//   })
-//   // ...provide telemetry.layer to your runtime...
-//
-// Flush uses `fetch(url, { keepalive: true })`, not `navigator.sendBeacon`:
-// Maple's ingest gateway authenticates via the `Authorization` header (no
-// query-param auth), and sendBeacon cannot set request headers, so it would
-// 401 whenever an ingest key is set. `keepalive` carries the header AND lets
-// the request outlive the unloading document (for small bodies).
-//
-// Traces, logs, and Effect metric snapshots are flushed together.
+// Browser telemetry preset with explicit and unload-triggered flushes for
+// buffered traces, logs, and metric snapshots. Transport uses keepalive fetch:
+// unlike sendBeacon it can carry the ingest key's Authorization header.
 
 import { hasConsent, onConsentChange } from "@maple/browser-session"
 import { Layer, Redacted } from "effect"

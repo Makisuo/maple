@@ -15,36 +15,13 @@ import {
 import { parseArchiveActivePointer } from "./manifest"
 import { archiveSignal } from "./signals"
 
-// Archive generation operation journal and reconciliation (Gate 3).
-//
-// `createArchiveGeneration` performs a multi-step durable state transition
-// (resolve → pin → scratch restore → export → validate → promote → pointer →
-// catalog → unpin → cleanup). A process kill at any step can leave an orphan
-// pin, dangling scratch, or a half-published generation that the next run must
-// reconcile correctly. The `finally` block of the operation runs on a thrown
-// error but NOT on a real SIGKILL, so the journal — not the finally — is the
-// authority for crash recovery.
-//
-// This module ports the checkpoint subsystem's proven crash-safety pattern
-// (reconcileCheckpointOperations in checkpoints.ts): a versioned intent journal
-// written BEFORE any destructive boundary, recording exact identities, that the
-// next operation reconciles to its exact intended state or fails closed
-// (preserving everything; D-004). The journal may be behind filesystem reality
-// but never ahead: it records the LAST completed durable boundary, so
-// reconciliation validates recorded identity against observed topology before
-// acting.
-//
-// One active operation is permitted at a time. The maintenance lock serializes
-// operations, so at most one `operations/active/` entry should exist; if more
-// than one is found, the state is ambiguous and reconciliation fails closed.
+// Crash-recovery journal for archive generation. Each entry records the last
+// fsync-complete boundary before the next destructive step, so it may trail the
+// filesystem but never lead it. Reconciliation validates recorded identities
+// against observed topology and fails closed on ambiguity. The maintenance lock
+// permits one active entry.
 
-/**
- * Versioned journal format. The parser accepts only this version (fail-closed on
- * any other). Gate 3b raises v2 → v3 to introduce the `kind` discriminator
- * (create vs gc) so reconcile can dispatch on operation type. A v2 create intent
- * is migrated to v3 under the maintenance lock by {@link migrateV2CreateIntent};
- * the parser never silently reinterprets a v2 record.
- */
+/** The parser accepts v3 only; v2 create intents require an explicit locked migration. */
 export const ARCHIVE_OPERATION_FORMAT_VERSION = 3 as const
 
 /** Operation kind discriminator recorded in every v3 intent. */
