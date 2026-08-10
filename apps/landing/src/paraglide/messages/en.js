@@ -2463,7 +2463,7 @@ export const footer_discord = () => `Discord`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const footer_copyright = () => `© 2026 Maple. All rights reserved.`
+export const footer_copyright = () => `© 2026 Makisuo, Inc.`
 
 
 /**
