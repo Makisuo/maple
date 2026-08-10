@@ -1,3 +1,0 @@
-[submodule "vendor/alchemy"]
-	path = vendor/alchemy
-	url = git@github.com:alchemy-run/alchemy.git
