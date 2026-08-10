@@ -382,6 +382,31 @@ describe("resolveRuntimeConfig caching", () => {
 			cache.invalidate({ bucket: ORG_CH_CONFIG_BUCKET, key: orgId }),
 		)
 
+	/**
+	 * Resolve until the forked background refresh has landed.
+	 *
+	 * A single `TestClock.adjust(1)` is NOT enough. The refresh completes when
+	 * real promises settle — a PGlite read, plus a durable-tier read whose key
+	 * hashing goes through `crypto.subtle` — and none of that is driven by the
+	 * test clock. Asserting on one tick passed locally and failed in CI, where
+	 * the machine is slower and contended.
+	 *
+	 * Polling keeps the contract honest: callers assert the STALE value first
+	 * (proving nobody blocked), then use this to assert the refresh eventually
+	 * lands. Bounded, so a refresh that never lands still fails the test.
+	 */
+	const resolveUntilUrl = Effect.fnUntraced(function* (orgId: string, expected: string) {
+		let last: string | undefined
+		for (let attempt = 0; attempt < 200; attempt++) {
+			const resolved = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			last = Option.isSome(resolved) ? resolved.value.url : undefined
+			if (last === expected) return last
+			yield* TestClock.adjust(1)
+			yield* Effect.yieldNow
+		}
+		return last
+	})
+
 	it.effect("past the soft TTL, serves the stale value and refreshes behind the request", () => {
 		const testDb = createTestDb(cacheTrackedDbs)
 		const orgId = "org_ch_swr_stale"
@@ -405,11 +430,9 @@ describe("resolveRuntimeConfig caching", () => {
 			const stale = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
 			expect(expectSome(stale).url).toBe("https://a.example")
 
-			// The refresh forked by that call now lands, so the NEXT resolve sees the
+			// The refresh forked by that call lands, so a subsequent resolve sees the
 			// new value without anyone having blocked on the read.
-			yield* TestClock.adjust(1)
-			const refreshed = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
-			expect(expectSome(refreshed).url).toBe("https://b.example")
+			expect(yield* resolveUntilUrl(orgId, "https://b.example")).toBe("https://b.example")
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 
@@ -464,9 +487,7 @@ describe("resolveRuntimeConfig caching", () => {
 			// forked lands next, so the burst behind it is already current.
 			expect(expectSome(stale).url).toBe("https://a.example")
 
-			yield* TestClock.adjust(1)
-			const refreshed = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
-			expect(expectSome(refreshed).url).toBe("https://b.example")
+			expect(yield* resolveUntilUrl(orgId, "https://b.example")).toBe("https://b.example")
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 
@@ -562,9 +583,7 @@ describe("resolveRuntimeConfig caching", () => {
 			yield* evictDurable(orgId)
 			yield* TestClock.adjust(SOFT_TTL_MS + 1_000)
 			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
-			yield* TestClock.adjust(1)
-			const refreshed = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
-			expect(expectSome(refreshed).url).toBe("https://c.example")
+			expect(yield* resolveUntilUrl(orgId, "https://c.example")).toBe("https://c.example")
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 
