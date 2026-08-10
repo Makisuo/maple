@@ -29,9 +29,34 @@ import {
 	type DesiredTable,
 } from "@maple/domain/clickhouse"
 import { eq } from "drizzle-orm"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
+import { EdgeCacheService } from "@maple/cache"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { makeTracedPgConnection, type TracedPgConnection } from "@/platform/pg-execute"
+import { invalidateOrgRuntimeConfig } from "@/services/org/OrgClickHouseSettingsService"
+
+/**
+ * Bust the org's cached runtime config after this workflow writes to
+ * `org_clickhouse_settings`.
+ *
+ * This matters more than it looks. The workflow stamps `schema_version`, which
+ * is part of the cached projection, and it runs in its OWN isolate — so clearing
+ * the module-scoped memo here reaches nothing the API is serving. What does
+ * reach the API is the durable KV entry, which is shared across every isolate
+ * and colo and lives an hour. Without this, a completed schema apply leaves the
+ * whole fleet reading a stale `schema_version` and reporting phantom
+ * `clickhouse.schemaDrift` until the entry expires.
+ *
+ * Best-effort: a failure here must never fail the apply, which has already
+ * committed its Postgres write.
+ */
+const bustRuntimeConfigCache = (orgId: string): Promise<void> =>
+	Effect.runPromise(
+		invalidateOrgRuntimeConfig(orgId).pipe(
+			Effect.provide(EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))),
+		),
+	).catch(() => undefined)
 
 /**
  * This workflow runs outside the worker's layer graph, so it owns its telemetry
@@ -471,6 +496,7 @@ async function runWithDb(
 					})
 					.where(eq(orgClickHouseSettings.orgId, orgId)),
 			)
+			await bustRuntimeConfigCache(orgId)
 		})
 
 		for (const migration of clickHouseMigrations) {
@@ -629,6 +655,7 @@ async function runWithDb(
 				.set({ syncStatus: "error", lastSyncError: message, updatedAt: new Date(finishedAt) })
 				.where(eq(orgClickHouseSettings.orgId, orgId)),
 		).catch(() => undefined)
+		await bustRuntimeConfigCache(orgId)
 		throw error
 	}
 }
