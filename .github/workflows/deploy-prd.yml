@@ -83,6 +83,7 @@ jobs:
             # host-built binary starts and immediately dies with
             # `version 'GLIBC_2.39' not found`.
             - name: Cache ingest cargo build
+              if: vars.MAPLE_DEPLOY_AWS_INGEST == '1'
               uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
                   path: |
@@ -101,6 +102,7 @@ jobs:
             # which matches nothing. A target dir inside the context would therefore
             # be walked and hashed in full on every deploy.
             - name: Build ingest binary
+              if: vars.MAPLE_DEPLOY_AWS_INGEST == '1'
               run: |
                   mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
                   docker run --rm \
