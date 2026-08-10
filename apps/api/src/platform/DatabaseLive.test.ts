@@ -2,7 +2,7 @@ import { afterEach, assert, describe, it } from "@effect/vitest"
 import { orgOnboardingState } from "@maple/db"
 import { eq, sql } from "drizzle-orm"
 import { Effect, Exit, Tracer } from "effect"
-import { Database } from "./DatabaseLive"
+import { Database, executeWithSpan } from "./DatabaseLive"
 import { PGLITE_DB_NAMESPACE } from "./DatabasePgliteLive"
 import { cleanupTestDbs, createTestDb, type TestDb } from "./test-pglite"
 
@@ -179,5 +179,82 @@ describe("Database execute span instrumentation", () => {
 				assert.strictEqual(span.attributes.get("db.statement_count"), 1)
 			}
 		}).pipe(Effect.provide(createTestDb(trackedDbs).layer)),
+	)
+})
+
+/**
+ * `db.duration_ms` alone cannot distinguish a stalled connection handshake from
+ * a slow query — the ambiguity that made the production p95 investigation
+ * guesswork. These cover the split that resolves it.
+ */
+describe("Database execute connect/query split", () => {
+	it.effect("reports both phases when the body marks the handshake", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const database = yield* Database
+
+			yield* database
+				.execute((db) => db.execute(sql`select 1 as probe`))
+				.pipe(Effect.withTracer(tracer))
+
+			const [span] = dbSpans(spans)
+			assert.isDefined(span)
+			assert.strictEqual(span.attributes.get("db.connect.completed"), true)
+			assert.isNumber(span.attributes.get("db.connect_ms"))
+			assert.isNumber(span.attributes.get("db.query_ms"))
+		}).pipe(Effect.provide(createTestDb(trackedDbs).layer)),
+	)
+
+	it.effect("attributes time before the handshake to connect, not to the query", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+
+			yield* executeWithSpan(async (hooks) => {
+				await new Promise((resolve) => setTimeout(resolve, 30))
+				hooks.markConnected()
+				hooks.collect("select 1")
+				return "ok"
+			}).pipe(Effect.withTracer(tracer))
+
+			const [span] = dbSpans(spans)
+			assert.isDefined(span)
+			// Margin for timer imprecision; the point is that the pre-mark wait
+			// landed in connect instead of being folded into query time.
+			assert.isAtLeast(span.attributes.get("db.connect_ms") as number, 25)
+		}),
+	)
+
+	it.effect("flags a dial that never completed and omits query time", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+
+			const exit = yield* executeWithSpan(() =>
+				Promise.reject(new Error("write CONNECT_TIMEOUT")),
+			).pipe(Effect.withTracer(tracer), Effect.exit)
+
+			assert.isTrue(Exit.isFailure(exit))
+			const [span] = dbSpans(spans)
+			assert.isDefined(span)
+			assert.strictEqual(span.attributes.get("db.connect.completed"), false)
+			// Still reports the time burned before giving up.
+			assert.isNumber(span.attributes.get("db.connect_ms"))
+			assert.isUndefined(span.attributes.get("db.query_ms"))
+		}),
+	)
+
+	it.effect("merges attributes recorded by the body", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+
+			yield* executeWithSpan((hooks) => {
+				hooks.record({ "db.connect.in_flight": 3 })
+				hooks.markConnected()
+				return Promise.resolve("ok")
+			}).pipe(Effect.withTracer(tracer))
+
+			const [span] = dbSpans(spans)
+			assert.isDefined(span)
+			assert.strictEqual(span.attributes.get("db.connect.in_flight"), 3)
+		}),
 	)
 })

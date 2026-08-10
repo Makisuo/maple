@@ -30,8 +30,16 @@ export const databaseFromInstance = (pglite: PGlite): DatabaseShape =>
 	Database.of({
 		execute: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 			executeWithSpan(
-				(collect) =>
-					fn(createMaplePgliteClient(pglite, { onQuery: collect }) as unknown as DatabaseClient),
+				(hooks) => {
+					// PGlite is in-process — there is no dial, so mark immediately or
+					// the whole call would be attributed to `db.connect_ms`.
+					hooks.markConnected()
+					return fn(
+						createMaplePgliteClient(pglite, {
+							onQuery: hooks.collect,
+						}) as unknown as DatabaseClient,
+					)
+				},
 				// Without a namespace these spans collapse into the per-system
 				// generic node. There is no server to address — PGlite is in-process —
 				// so name the engine rather than a host, which also keeps local and
