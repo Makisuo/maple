@@ -34,7 +34,9 @@ import {
 	PlanetScaleWebhookConfigResponse,
 	RoleName,
 	UserId,
+	VCS_COMMIT_DETAILS_MAX_SHAS,
 	VcsCommitDetailResponse,
+	VcsCommitDetailsResponse,
 } from "@maple/domain/http"
 import { cloudflareAnalyticsState } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
@@ -675,6 +677,20 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						const tenant = yield* CurrentTenant.Context
 						const detail = yield* vcsCommits.resolveCommitDetail(tenant.orgId, params.sha)
 						return new VcsCommitDetailResponse(detail)
+					}),
+				)
+				.handle("vcsCommitDetails", ({ query }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const shas = query.shas
+							.split(",")
+							.map((sha) => sha.trim())
+							.filter((sha) => sha.length > 0)
+							.slice(0, VCS_COMMIT_DETAILS_MAX_SHAS)
+						const details = yield* vcsCommits.resolveCommitDetails(tenant.orgId, shas)
+						return new VcsCommitDetailsResponse({
+							commits: details.map((detail) => new VcsCommitDetailResponse(detail)),
+						})
 					}),
 				)
 		)

@@ -395,6 +395,31 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			return Option.some(yield* decodeOne("vcs_repositories", row.value, rowToRepo))
 		})
 
+		// Bulk sibling of getRepositoryById. The services table resolves a whole
+		// page of deploy rows at once; issuing one read per repository would turn
+		// a single request into N outbound calls, which is the dominant driver of
+		// Postgres latency on this worker.
+		const getRepositoriesByIds = Effect.fn("VcsRepository.getRepositoriesByIds")(function* (
+			orgId: OrgId,
+			repositoryIds: ReadonlyArray<VcsRepositoryId>,
+		) {
+			if (repositoryIds.length === 0) return [] as ReadonlyArray<VcsRepo>
+			const rows = yield* database
+				.execute((db) =>
+					db
+						.select()
+						.from(vcsRepositories)
+						.where(
+							and(
+								eq(vcsRepositories.orgId, orgId),
+								inArray(vcsRepositories.id, [...new Set(repositoryIds)]),
+							),
+						),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+			return yield* Effect.forEach(rows, (row) => decodeOne("vcs_repositories", row, rowToRepo))
+		})
+
 		// Persist the installation's repositories. Takes the resolved installation
 		// (not raw ids) so org/provider/internal-installation-id all come from one
 		// entity — the rows link to it by our internal `installationId`.
@@ -645,6 +670,25 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			const row = Option.fromNullishOr(rows[0])
 			if (Option.isNone(row)) return Option.none<VcsCommit>()
 			return Option.some(yield* decodeOne("vcs_commits", row.value, rowToCommit))
+		})
+
+		// Bulk sibling of findCommitBySha, for resolving a whole table of deploy
+		// rows in one read instead of one per SHA. Unknown SHAs are simply absent
+		// from the result — callers fall back to a provider probe for those.
+		const findCommitsByShas = Effect.fn("VcsRepository.findCommitsByShas")(function* (
+			orgId: OrgId,
+			shas: ReadonlyArray<GitCommitSha>,
+		) {
+			if (shas.length === 0) return [] as ReadonlyArray<VcsCommit>
+			const rows = yield* database
+				.execute((db) =>
+					db
+						.select()
+						.from(vcsCommits)
+						.where(and(eq(vcsCommits.orgId, orgId), inArray(vcsCommits.sha, [...new Set(shas)]))),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+			return yield* Effect.forEach(rows, (row) => decodeOne("vcs_commits", row, rowToCommit))
 		})
 
 		// ---- Branches -----------------------------------------------------
@@ -934,6 +978,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			listRepositoriesByInstallation,
 			resolveRepository,
 			getRepositoryById,
+			getRepositoriesByIds,
 			upsertRepositories,
 			markRepositoryRemoved,
 			purgeRepository,
@@ -941,6 +986,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			markRepoSyncError,
 			upsertCommits,
 			findCommitBySha,
+			findCommitsByShas,
 			upsertBranches,
 			getOrCreateBranch,
 			listBranchesByRepository,

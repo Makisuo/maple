@@ -79,7 +79,29 @@ export interface VcsCommitServiceShape {
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
 	>
+	/**
+	 * Resolve many SHAs at once for list views (the services table renders one
+	 * deploy row per service/environment). Unresolvable SHAs — invalid, unknown,
+	 * or belonging to no connected repo — are simply omitted rather than failing
+	 * the batch, so one bad deploy reference can't blank out the whole table.
+	 */
+	readonly resolveCommitDetails: (
+		orgId: OrgId,
+		shas: ReadonlyArray<string>,
+	) => Effect.Effect<ReadonlyArray<VcsCommitDetail>, IntegrationsPersistenceError>
 }
+
+/**
+ * How many unknown SHAs we probe against providers for one bulk request. Stored
+ * SHAs are free (two reads for the whole batch); a probe is an outbound provider
+ * call per SHA, and outbound call count — not the cost of any single call — is
+ * what drives this worker's latency. A list view that would blow past this is
+ * showing deploys we've never ingested, which is a backfill problem, not a
+ * hover-card one.
+ */
+const BULK_PROBE_LIMIT = 8
+/** Concurrency for those probes — matches the bucket-cache fill concurrency. */
+const BULK_PROBE_CONCURRENCY = 4
 
 // Storage / decode errors all carry a `message`; collapse them to the
 // persistence error the HTTP layer speaks.
@@ -338,7 +360,60 @@ export class VcsCommitService extends Context.Service<VcsCommitService, VcsCommi
 				})
 			})
 
-			return { resolveCommitDetail } satisfies VcsCommitServiceShape
+			const resolveCommitDetails = Effect.fn("VcsCommitService.resolveCommitDetails")(function* (
+				orgId: OrgId,
+				rawShas: ReadonlyArray<string>,
+			) {
+				yield* Effect.annotateCurrentSpan({ orgId, "vcs.commit.requested": rawShas.length })
+
+				// Non-40-hex references (short SHAs, non-standard deploy ids) are
+				// dropped silently here. The singular endpoint still reports them as
+				// VcsCommitShaInvalidError; in a list they're just rows that render
+				// their raw reference, which is what the table does anyway.
+				const shas: Array<GitCommitSha> = []
+				const seen = new Set<string>()
+				for (const raw of rawShas) {
+					if (seen.has(raw)) continue
+					seen.add(raw)
+					const decoded = yield* decodeSha(raw).pipe(Effect.option)
+					if (Option.isSome(decoded)) shas.push(decoded.value)
+				}
+				if (shas.length === 0) return [] as ReadonlyArray<VcsCommitDetail>
+
+				// 1. One read for every stored commit, then one read for the repos they
+				//    belong to — two outbound calls for the whole batch.
+				const stored = yield* asPersistence(repo.findCommitsByShas(orgId, shas))
+				const repositories = yield* asPersistence(
+					repo.getRepositoriesByIds(
+						orgId,
+						stored.map((commit) => commit.repositoryId),
+					),
+				)
+				const repoNameById = new Map(repositories.map((r) => [r.id, r.fullName]))
+				const details = stored.map((commit) =>
+					detailFromCommit(commit, repoNameById.get(commit.repositoryId) ?? ""),
+				)
+
+				// 2. Probe the misses, bounded. Each probe reuses the singular path so
+				//    negative caching and persistence behave identically.
+				const storedShas = new Set(stored.map((commit) => commit.sha))
+				const missing = shas.filter((sha) => !storedShas.has(sha)).slice(0, BULK_PROBE_LIMIT)
+				yield* Effect.annotateCurrentSpan({
+					"vcs.commit.stored_hits": stored.length,
+					"vcs.commit.probed": missing.length,
+				})
+
+				const probed = yield* Effect.forEach(
+					missing,
+					// A miss is the normal case for an unconnected repo — never fail the batch.
+					(sha) => resolveCommitDetail(orgId, sha).pipe(Effect.option),
+					{ concurrency: BULK_PROBE_CONCURRENCY },
+				)
+
+				return [...details, ...probed.filter(Option.isSome).map((option) => option.value)]
+			})
+
+			return { resolveCommitDetail, resolveCommitDetails } satisfies VcsCommitServiceShape
 		}),
 	},
 ) {

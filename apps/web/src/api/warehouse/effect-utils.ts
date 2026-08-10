@@ -1,5 +1,6 @@
 import {
 	TinybirdDateTime,
+	QueryEngineExecuteBatchRequest,
 	QueryEngineExecuteRequest,
 	type QueryEngineExecuteResponse,
 	type FacetItem,
@@ -9,7 +10,8 @@ import {
 import { Effect, Schema } from "effect"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import { mapleApiClientLayer, mapleApiV2ClientLayer } from "@/lib/registry"
+import { mapleApiClientLayer, mapleApiV2ClientLayer, mapleRuntime } from "@/lib/registry"
+import { makeExecuteBatcher } from "./execute-batcher"
 
 export const WarehouseDateTimeString = TinybirdDateTime
 
@@ -181,11 +183,30 @@ export function invalidWarehouseInput(
 	)
 }
 
+// One process-wide batcher: coalescing only helps if every caller shares it.
+const executeBatcher = makeExecuteBatcher((requests) =>
+	mapleRuntime.runPromise(
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			const response = yield* client.queryEngine.executeBatch({
+				payload: new QueryEngineExecuteBatchRequest({ requests }),
+			})
+			return response.results
+		}).pipe(
+			Effect.withSpan("QueryEngine.executeBatch", {
+				attributes: { "query.batch_size": requests.length },
+			}),
+		),
+	),
+)
+
 const executeQueryEngineEffect = Effect.fn("QueryEngine.execute")(function* (
 	payload: QueryEngineExecuteRequest,
 ) {
-	const client = yield* MapleApiAtomClient
-	return yield* client.queryEngine.execute({ payload })
+	return yield* Effect.tryPromise({
+		try: () => executeBatcher.enqueue(payload),
+		catch: (cause) => cause,
+	})
 })
 
 // ---------------------------------------------------------------------------
@@ -224,10 +245,11 @@ export function executeQueryEngine(
 ): Effect.Effect<QueryEngineExecuteResponse, WarehouseApiError | BackendError> {
 	return Effect.gen(function* () {
 		yield* Effect.annotateCurrentSpan("query.operation", operation)
+		// The client layer comes from `mapleRuntime` inside the batcher, so no
+		// `Effect.provide` here — this fiber only awaits the batch's promise.
 		return yield* executeQueryEngineEffect(payload)
 	}).pipe(
 		Effect.withSpan(operation),
-		Effect.provide(mapleApiClientLayer),
 		Effect.mapError((cause) => normalizeWarehouseError(operation, cause)),
 	)
 }

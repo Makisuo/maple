@@ -11,7 +11,13 @@ import {
 	StatusCode,
 	TraceId,
 } from "../primitives"
-import { QueryEngineExecuteRequest, QueryEngineExecuteResponse, TinybirdDateTime } from "../query-engine"
+import {
+	QueryEngineExecuteBatchRequest,
+	QueryEngineExecuteBatchResponse,
+	QueryEngineExecuteRequest,
+	QueryEngineExecuteResponse,
+	TinybirdDateTime,
+} from "../query-engine"
 import { Authorization } from "./current-tenant"
 import { warehouseHttpErrors } from "./warehouse"
 
@@ -1716,6 +1722,16 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("execute", "/execute", {
 			payload: QueryEngineExecuteRequest,
 			success: QueryEngineExecuteResponse,
+			error: validatedQueryEndpointErrors,
+		}),
+	)
+	.add(
+		// Batched sibling of `execute`. Per-item failures ride in the SUCCESS
+		// payload (see QueryEngineBatchOutcome); the error list here is for
+		// whole-request failures only — auth, decode, a blown batch cap.
+		HttpApiEndpoint.post("executeBatch", "/execute-batch", {
+			payload: QueryEngineExecuteBatchRequest,
+			success: QueryEngineExecuteBatchResponse,
 			error: validatedQueryEndpointErrors,
 		}),
 	)
