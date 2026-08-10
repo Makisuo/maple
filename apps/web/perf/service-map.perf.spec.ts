@@ -174,10 +174,23 @@ test("service map renders filter/SMIL-free and animates smoothly under heavy tra
 	// SVG-filter cost of ~23 fps / p95 ~50ms) plus a "pan isn't frozen" floor.
 	const ci = !!process.env.CI
 
-	// Idle is the headline, rock-stable metric — it captures the continuous
-	// SVG-filter/SMIL cost that this change removes.
-	expect(idle.fps, "idle fps").toBeGreaterThan(ci ? 45 : 55)
+	// Idle captures the continuous SVG-filter/SMIL cost this change removes — but
+	// gate it on frame PACING, not fps. On a GPU-less shared runner the same code
+	// measured p50 16.7ms / p95 33.4ms, identical to the decimal, across three
+	// consecutive attempts while fps drifted 44.7 -> 43.6 -> 41.7 and red-failed a
+	// 45 floor on a branch that touches no web code. fps is frames divided by
+	// wall-clock, so it counts time the CI host descheduled the browser entirely;
+	// p50/p95 measure how the frames that DID run were paced. 16.7ms is exactly
+	// vsync and 33.4ms is exactly one dropped frame — the rendering was perfect on
+	// the run that "failed".
+	//
+	// Pacing still separates the regression this test exists to catch by a wide
+	// margin: the pre-fix per-edge blur + SMIL cost ~23 fps with p50/p95 far above
+	// vsync (~50ms p95), against 16.7/33.4 here. fps keeps a not-frozen floor
+	// only, exactly as pan already does below.
+	expect(idle.frameP50, "idle p50 frame time (ms)").toBeLessThan(ci ? 25 : 20)
 	expect(idle.frameP95, "idle p95 frame time (ms)").toBeLessThan(ci ? 40 : 20)
+	expect(idle.fps, "idle fps (not frozen)").toBeGreaterThan(ci ? 20 : 55)
 
 	if (ci) {
 		// GPU-less runner: pan fps can't discriminate impl quality, only catch a
