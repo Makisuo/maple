@@ -1,6 +1,5 @@
 import * as React from "react"
 import { Result } from "@/lib/effect-atom"
-import { Effect } from "effect"
 
 import { listTraces, type Trace, type TracesResponse } from "@/api/warehouse/traces"
 import { listTracesResultAtom, type QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -8,6 +7,7 @@ import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refresha
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import type { TracesSearchParams } from "@/routes/traces"
 import { logClientError } from "@/lib/services/common/telemetry"
+import { mapleRuntime } from "@/lib/registry"
 
 const PAGE_SIZE = 100
 const FETCH_THRESHOLD = 20
@@ -117,7 +117,8 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 		const currentKey = filterKeyRef.current
 		const offset = allData.length
 
-		Effect.runPromise(listTraces({ data: { ...queryParams, limit: PAGE_SIZE, offset } }))
+		mapleRuntime
+			.runPromise(listTraces({ data: { ...queryParams, limit: PAGE_SIZE, offset } }))
 			.then((result) => {
 				if (filterKeyRef.current !== currentKey) return
 				setAdditionalPages((prev) => [...prev, result])
