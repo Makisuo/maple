@@ -62,6 +62,7 @@ import {
 	type LogVolumeSeries,
 } from "./anomaly/detection"
 import { issueSeverityFromAlert } from "@/services/errors/severity-map"
+import { batchDetectorStates } from "./anomaly/detector-state-batch"
 import { rollingCountBuckets } from "./anomaly/rolling-counts"
 import { decideTransition, stateMachineConfigFor, type DetectorStateSnapshot } from "./anomaly/state-machine"
 import {
@@ -1088,6 +1089,44 @@ const make = Effect.gen(function* () {
 				.returning({ orgId: anomalyDetectorSettings.orgId }),
 		)
 
+	/**
+	 * Flush accumulated detector states as multi-row upserts.
+	 *
+	 * Replaces one `dbExecute` per evaluated series. `set` reads from `excluded.*`
+	 * rather than per-row literals — with many rows in one statement there is no
+	 * single literal to write, and `excluded` is the row the statement is
+	 * currently conflicting on (same pattern as `error-tick-persistence.ts:302`).
+	 *
+	 * Dedupe and chunking live in `batchDetectorStates`, which is pure and tested.
+	 */
+	const flushDetectorStates = Effect.fnUntraced(function* (
+		rows: ReadonlyArray<typeof anomalyDetectorStates.$inferInsert>,
+	) {
+		for (const chunk of batchDetectorStates(rows)) {
+			yield* dbExecute((db) =>
+				db
+					.insert(anomalyDetectorStates)
+					.values(chunk)
+					.onConflictDoUpdate({
+						target: [anomalyDetectorStates.orgId, anomalyDetectorStates.detectorKey],
+						set: {
+							consecutiveBreaches: sql`excluded.consecutive_breaches`,
+							consecutiveHealthy: sql`excluded.consecutive_healthy`,
+							lastStatus: sql`excluded.last_status`,
+							lastValue: sql`excluded.last_value`,
+							baselineMedian: sql`excluded.baseline_median`,
+							lastSampleCount: sql`excluded.last_sample_count`,
+							lastEvaluatedAt: sql`excluded.last_evaluated_at`,
+							openIncidentId: sql`excluded.open_incident_id`,
+							lastResolvedAt: sql`excluded.last_resolved_at`,
+							lastIncidentId: sql`excluded.last_incident_id`,
+							updatedAt: sql`excluded.updated_at`,
+						},
+					}),
+			)
+		}
+	})
+
 	const newIncidentId = () => decodeIncidentIdSync(randomUUID())
 
 	interface OrgTickStats {
@@ -1301,6 +1340,17 @@ const make = Effect.gen(function* () {
 			})
 		const orderedDecisions = [...openDecisions, ...decisions.filter((d) => d.transition !== "open")]
 		let openBudget = MAX_OPENS_PER_TICK
+
+		// Detector-state writes are accumulated here and flushed as one multi-row
+		// upsert after the loop, rather than one `dbExecute` per decision. Under
+		// `DatabasePgLive` each execute dials and tears down its own postgres.js
+		// client, so the handshake count is what costs, not the statement count —
+		// same trade as `error-tick-persistence.ts`. This loop averaged ~70 dials
+		// per org tick and peaked at 628.
+		//
+		// Safe to accumulate in a plain array: the `Effect.forEach` below is
+		// sequential (no `concurrency` option), so pushes cannot interleave.
+		const detectorStateWrites: Array<typeof anomalyDetectorStates.$inferInsert> = []
 
 		yield* Effect.forEach(
 			orderedDecisions,
@@ -1846,48 +1896,30 @@ const make = Effect.gen(function* () {
 					lastIncidentId = incidentId
 				}
 
-				yield* dbExecute((db) =>
-					db
-						.insert(anomalyDetectorStates)
-						.values({
-							orgId,
-							detectorKey: evaluation.detectorKey,
-							signalType: evaluation.signalType,
-							serviceName: evaluation.serviceName,
-							deploymentEnv: evaluation.deploymentEnv,
-							fingerprintHash: evaluation.fingerprintHash,
-							consecutiveBreaches: decision.consecutiveBreaches,
-							consecutiveHealthy: decision.consecutiveHealthy,
-							lastStatus: evaluation.status,
-							lastValue: evaluation.value,
-							baselineMedian: evaluation.baselineMedian,
-							lastSampleCount: evaluation.sampleCount,
-							lastEvaluatedAt: new Date(nowMs),
-							openIncidentId,
-							lastResolvedAt: msToDate(lastResolvedAt),
-							lastIncidentId,
-							updatedAt: new Date(nowMs),
-						})
-						.onConflictDoUpdate({
-							target: [anomalyDetectorStates.orgId, anomalyDetectorStates.detectorKey],
-							set: {
-								consecutiveBreaches: decision.consecutiveBreaches,
-								consecutiveHealthy: decision.consecutiveHealthy,
-								lastStatus: evaluation.status,
-								lastValue: evaluation.value,
-								baselineMedian: evaluation.baselineMedian,
-								lastSampleCount: evaluation.sampleCount,
-								lastEvaluatedAt: new Date(nowMs),
-								openIncidentId,
-								lastResolvedAt: msToDate(lastResolvedAt),
-								lastIncidentId,
-								updatedAt: new Date(nowMs),
-							},
-						}),
-				)
+				detectorStateWrites.push({
+					orgId,
+					detectorKey: evaluation.detectorKey,
+					signalType: evaluation.signalType,
+					serviceName: evaluation.serviceName,
+					deploymentEnv: evaluation.deploymentEnv,
+					fingerprintHash: evaluation.fingerprintHash,
+					consecutiveBreaches: decision.consecutiveBreaches,
+					consecutiveHealthy: decision.consecutiveHealthy,
+					lastStatus: evaluation.status,
+					lastValue: evaluation.value,
+					baselineMedian: evaluation.baselineMedian,
+					lastSampleCount: evaluation.sampleCount,
+					lastEvaluatedAt: new Date(nowMs),
+					openIncidentId,
+					lastResolvedAt: msToDate(lastResolvedAt),
+					lastIncidentId,
+					updatedAt: new Date(nowMs),
+				})
 			}),
 			{ discard: true },
 		)
+
+		yield* flushDetectorStates(detectorStateWrites)
 
 		// No-data sweep: open incidents whose series stopped reporting entirely
 		// resolve after an hour of silence (mirrors ErrorsService auto-resolve).

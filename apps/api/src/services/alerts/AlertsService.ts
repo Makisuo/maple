@@ -83,6 +83,7 @@ import {
 	alertRules,
 	type AlertRuleRow,
 	alertRuleStates,
+	type AlertRuleStateRow,
 } from "@maple/db"
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import {
@@ -3786,6 +3787,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				timestamp: number,
 				pendingChecks: Ref.Ref<AlertChecksRow[]>,
 				issueBudget: Ref.Ref<number>,
+				prefetch: TickPrefetch,
 			) {
 				const stateConflictTarget: [
 					typeof alertRuleStates.orgId,
@@ -3799,39 +3801,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// upsert via onConflictDoUpdate, incident insert keyed on unique
 				// incidentKey, delivery events via onConflictDoNothing on deliveryKey.
 				const outcome = yield* Effect.gen(function* () {
-					const state =
-						(yield* dbExecute((db) =>
-							db
-								.select()
-								.from(alertRuleStates)
-								.where(
-									and(
-										eq(alertRuleStates.orgId, row.orgId),
-										eq(alertRuleStates.ruleId, row.id),
-										eq(alertRuleStates.groupKey, groupKey),
-									),
-								)
-								.limit(1),
-						))[0] ?? null
+					// Both reads come from the tick-head prefetch rather than a query per
+					// group. Safe because this function is the only writer of either key
+					// and runs at most once per key per tick — see `loadTickPrefetch`.
+					const state = prefetch.stateFor(row.orgId, row.id, groupKey)
 
-					// Look up the open incident for this group via the unique
+					// The open incident for this group, via the unique
 					// (orgId, ruleId, status, groupKey) combination. Composite group
 					// keys make serviceName ambiguous, so groupKey is authoritative.
-					const openIncident =
-						(yield* dbExecute((db) =>
-							db
-								.select()
-								.from(alertIncidents)
-								.where(
-									and(
-										eq(alertIncidents.orgId, row.orgId),
-										eq(alertIncidents.ruleId, row.id),
-										eq(alertIncidents.status, "open"),
-										eq(alertIncidents.groupKey, groupKey),
-									),
-								)
-								.limit(1),
-						))[0] ?? null
+					const openIncident = prefetch.openIncidentFor(row.orgId, row.id, groupKey)
 
 					// Default for check-history ingest: carry open-incident linkage (if any),
 					// transition remains "none" unless a branch below overrides it.
@@ -4449,20 +4427,20 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					normalized: NormalizedRule,
 					evaluatedGroups: HashSet.HashSet<string>,
 					timestamp: number,
+					openIncidents: ReadonlyArray<AlertIncidentRow>,
 				) {
-					const openIncidents = yield* dbExecute((db) =>
-						db
-							.select()
-							.from(alertIncidents)
-							.where(
-								and(
-									eq(alertIncidents.orgId, orgId),
-									eq(alertIncidents.ruleId, ruleId),
-									eq(alertIncidents.status, "open"),
-								),
-							),
-					)
-
+					// Supplied from the tick-head prefetch instead of re-read here — this
+					// was the single heaviest query shape in the service, because it read
+					// the same set `processEvaluation` had already read moments earlier.
+					//
+					// Only incidents whose group was NOT evaluated survive the filter
+					// below, and an unevaluated group is by definition one this tick wrote
+					// nothing for, so the snapshot and a fresh read agree on every row that
+					// matters here. What the snapshot cannot see is an incident resolved
+					// out-of-band (a manual resolve via the API) since the tick began. The
+					// resolve statement below is guarded on `status = 'open'` and gated on
+					// its own row count so that case is a no-op rather than a duplicate
+					// all-clear notification.
 					const orphaned = Arr.filter(
 						openIncidents,
 						(i) => !HashSet.has(evaluatedGroups, i.groupKey ?? UNGROUPED_GROUP_KEY),
@@ -4508,10 +4486,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					)
 
 					// Serialized per rule via claim lock + idempotent writes.
-					yield* Effect.forEach(orphaned, (incident) => {
+					const resolveOutcomes = yield* Effect.forEach(orphaned, (incident) => {
 						const groupKey = incident.groupKey ?? UNGROUPED_GROUP_KEY
 						return Effect.gen(function* () {
-							yield* dbExecute((db) =>
+							// `status = 'open'` in the predicate, plus RETURNING, is what makes
+							// the prefetched snapshot safe: if this incident was resolved
+							// out-of-band since the tick began, zero rows come back and we skip
+							// the notification instead of paging a second all-clear. (The old
+							// re-read had the same race between its own select and update; this
+							// closes it rather than just narrowing it.)
+							const resolved = yield* dbExecute((db) =>
 								db
 									.update(alertIncidents)
 									.set({
@@ -4519,8 +4503,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										resolvedAt: new Date(timestamp),
 										updatedAt: new Date(timestamp),
 									})
-									.where(eq(alertIncidents.id, incident.id)),
+									.where(
+										and(
+											eq(alertIncidents.id, incident.id),
+											eq(alertIncidents.status, "open"),
+										),
+									)
+									.returning({ id: alertIncidents.id }),
 							)
+							if (resolved.length === 0) return false
 
 							yield* queueIncidentNotifications(
 								orgId,
@@ -4547,11 +4538,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										),
 									),
 							)
+							return true
 						})
 					})
 
-					yield* Metric.update(AlertingMetrics.incidentsResolvedTotal, orphaned.length)
-					yield* Metric.update(AlertingMetrics.staleIncidentsResolvedTotal, orphaned.length)
+					// Counts what actually resolved, not what was a candidate: an incident
+					// resolved out-of-band since the tick began is skipped above and must
+					// not be counted here.
+					const resolvedCount = Arr.filter(resolveOutcomes, (ok) => ok).length
+					yield* Metric.update(AlertingMetrics.incidentsResolvedTotal, resolvedCount)
+					yield* Metric.update(AlertingMetrics.staleIncidentsResolvedTotal, resolvedCount)
 				},
 			)
 
@@ -4568,16 +4564,28 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const SCHEDULER_HEARTBEAT_MS = 5 * 60_000
 
 			/**
-			 * CAS the per-rule scheduler lock. Winning the claim returns one row; losing
-			 * returns zero, so callers can keep using `claimed.length === 0` to bail.
+			 * CAS the per-rule scheduler lock, then refresh the user-visible heartbeat.
 			 *
-			 * The `INSERT` arm covers the first tick for a rule (replacing the old
-			 * `isNull(lastScheduledAt)` branch); `setWhere` makes a loser's conflict
-			 * update a no-op so `RETURNING` stays empty.
+			 * Both statements run inside ONE `execute`: under `DatabasePgLive` each call
+			 * dials and tears down its own postgres.js client, so the handshake count is
+			 * what costs, not the statement count — same trade as
+			 * `ErrorsService.loadOrgTickPreamble`. These are the two statements every
+			 * rule paid for on every tick.
+			 *
+			 * The claim: the `INSERT` arm covers the first tick for a rule; `setWhere`
+			 * makes a loser's conflict update a no-op so `RETURNING` stays empty.
+			 * Winning returns one row, losing returns zero, so callers keep using
+			 * `claimed.length === 0` to bail.
+			 *
+			 * The heartbeat: `alert_rules.last_scheduled_at` is gated in SQL so it
+			 * touches zero rows — and writes no WAL tuple — on the ~4 of every 5 ticks
+			 * that fall inside the heartbeat window. It runs only for the claim winner,
+			 * and its failure is swallowed so it cannot cost a rule its evaluation:
+			 * the claim is already committed by then, and the heartbeat is cosmetic.
 			 */
-			const claimRule = (orgId: OrgId, ruleId: AlertRuleId, timestamp: number) =>
-				dbExecute((db) =>
-					db
+			const claimAndTouchRule = (orgId: OrgId, ruleId: AlertRuleId, timestamp: number) =>
+				dbExecute(async (db) => {
+					const claimed = await db
 						.insert(alertRuleClaims)
 						.values({ ruleId, orgId, lastScheduledAt: new Date(timestamp) })
 						.onConflictDoUpdate({
@@ -4588,32 +4596,250 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								new Date(timestamp - SCHEDULER_LOCK_TTL_MS),
 							),
 						})
-						.returning({ id: alertRuleClaims.ruleId }),
-				)
+						.returning({ id: alertRuleClaims.ruleId })
 
-			/**
-			 * Coarse heartbeat for the user-visible `alert_rules.last_scheduled_at`.
-			 * Gated in SQL so it touches zero rows — and so writes no WAL tuple — on the
-			 * ~4 of every 5 ticks that fall inside the heartbeat window.
-			 */
-			const touchRuleScheduledAt = (ruleId: AlertRuleId, timestamp: number) =>
-				dbExecute((db) =>
-					db
-						.update(alertRules)
-						.set({ lastScheduledAt: new Date(timestamp) })
-						.where(
-							and(
-								eq(alertRules.id, ruleId),
-								or(
-									isNull(alertRules.lastScheduledAt),
-									lt(
-										alertRules.lastScheduledAt,
-										new Date(timestamp - SCHEDULER_HEARTBEAT_MS),
+					if (claimed.length === 0) return claimed
+
+					try {
+						await db
+							.update(alertRules)
+							.set({ lastScheduledAt: new Date(timestamp) })
+							.where(
+								and(
+									eq(alertRules.id, ruleId),
+									or(
+										isNull(alertRules.lastScheduledAt),
+										lt(
+											alertRules.lastScheduledAt,
+											new Date(timestamp - SCHEDULER_HEARTBEAT_MS),
+										),
 									),
 								),
+							)
+					} catch {
+						// Matches the `Effect.ignore` this call carried when it was a
+						// separate execute.
+					}
+
+					return claimed
+				})
+
+			/**
+			 * The two per-rule reads the scheduler used to issue inside its loop,
+			 * fetched once for the whole tick.
+			 *
+			 * Between them these were ~13k queries/hour in production — one
+			 * `alert_rule_states` select and one `alert_incidents` select per rule per
+			 * group per minute, each paying a full dial under `DatabasePgLive`.
+			 *
+			 * Hoisting them is not a staleness trade, because of how the writes are
+			 * scoped. Every key here is `(orgId, ruleId, groupKey)`, `processEvaluation`
+			 * runs at most once per key per tick, and its writes only ever touch its own
+			 * key: the state upsert targets that key's primary key, and both incident
+			 * updates target `openIncident.id` — the incident belonging to that same
+			 * key. So no group can read a value another group has invalidated.
+			 *
+			 * `openIncidentsForRule` is the exception and is documented at its use site
+			 * in `resolveOrphanedGroupIncidents`.
+			 */
+			interface TickPrefetch {
+				readonly stateFor: (
+					orgId: OrgId,
+					ruleId: AlertRuleId,
+					groupKey: string,
+				) => AlertRuleStateRow | null
+				readonly openIncidentFor: (
+					orgId: OrgId,
+					ruleId: AlertRuleId,
+					groupKey: string,
+				) => AlertIncidentRow | null
+				readonly openIncidentsForRule: (
+					orgId: OrgId,
+					ruleId: AlertRuleId,
+				) => ReadonlyArray<AlertIncidentRow>
+			}
+
+			const EMPTY_INCIDENTS: ReadonlyArray<AlertIncidentRow> = []
+
+			const groupCacheKey = (orgId: string, ruleId: string, groupKey: string) =>
+				`${orgId} ${ruleId} ${groupKey}`
+			const ruleCacheKey = (orgId: string, ruleId: string) => `${orgId} ${ruleId}`
+
+			/**
+			 * Load the tick's state and open-incident rows in ONE `execute`.
+			 *
+			 * Two statements, one dial — the handshake is the cost, not the statement
+			 * (`ErrorsService.loadOrgTickPreamble`). `orgId` is in both predicates for
+			 * the index rather than for correctness: rule ids are globally unique, so
+			 * the id list already scopes the read, but without `orgId` neither predicate
+			 * can use its leading index column.
+			 */
+			const loadTickPrefetch = Effect.fnUntraced(function* (rows: ReadonlyArray<AlertRuleRow>) {
+				if (rows.length === 0) {
+					return {
+						stateFor: () => null,
+						openIncidentFor: () => null,
+						openIncidentsForRule: () => EMPTY_INCIDENTS,
+					} satisfies TickPrefetch
+				}
+
+				const ruleIds = rows.map((row) => row.id)
+				const orgIds = [...new Set(rows.map((row) => row.orgId))]
+
+				const { stateRows, incidentRows } = yield* dbExecute(async (db) => {
+					const [stateRows, incidentRows] = await Promise.all([
+						db
+							.select()
+							.from(alertRuleStates)
+							.where(
+								and(
+									inArray(alertRuleStates.orgId, orgIds),
+									inArray(alertRuleStates.ruleId, ruleIds),
+								),
 							),
-						),
-				)
+						db
+							.select()
+							.from(alertIncidents)
+							.where(
+								and(
+									inArray(alertIncidents.orgId, orgIds),
+									inArray(alertIncidents.ruleId, ruleIds),
+									eq(alertIncidents.status, "open"),
+								),
+							),
+					])
+					return { stateRows, incidentRows }
+				})
+
+				const stateByGroup = new Map<string, AlertRuleStateRow>()
+				for (const state of stateRows) {
+					stateByGroup.set(groupCacheKey(state.orgId, state.ruleId, state.groupKey), state)
+				}
+
+				const incidentByGroup = new Map<string, AlertIncidentRow>()
+				const incidentsByRule = new Map<string, AlertIncidentRow[]>()
+				for (const incident of incidentRows) {
+					// `groupKey` is nullable on this table. The per-group lookup replaces an
+					// `eq(groupKey, …)` predicate, and SQL equality never matches NULL, so a
+					// null-keyed incident must not be reachable from it. The per-rule list
+					// keeps them: its consumer coalesces null to the ungrouped key.
+					if (incident.groupKey !== null) {
+						incidentByGroup.set(
+							groupCacheKey(incident.orgId, incident.ruleId, incident.groupKey),
+							incident,
+						)
+					}
+					const key = ruleCacheKey(incident.orgId, incident.ruleId)
+					const bucket = incidentsByRule.get(key)
+					if (bucket) bucket.push(incident)
+					else incidentsByRule.set(key, [incident])
+				}
+
+				return {
+					stateFor: (orgId, ruleId, groupKey) =>
+						stateByGroup.get(groupCacheKey(orgId, ruleId, groupKey)) ?? null,
+					openIncidentFor: (orgId, ruleId, groupKey) =>
+						incidentByGroup.get(groupCacheKey(orgId, ruleId, groupKey)) ?? null,
+					openIncidentsForRule: (orgId, ruleId) =>
+						incidentsByRule.get(ruleCacheKey(orgId, ruleId)) ?? EMPTY_INCIDENTS,
+				} satisfies TickPrefetch
+			})
+
+			/**
+			 * Apply the tick's accumulated `alert_rule_states` housekeeping set-based.
+			 *
+			 * Replaces two per-rule statements that were each gated to touch zero rows
+			 * in steady state — cheap in WAL terms, but still a full dial apiece under
+			 * `DatabasePgLive`, every rule, every minute. At most three statements per
+			 * tick now, and none at all when nothing evaluated.
+			 *
+			 * `orgId` is in each predicate for the index, not for correctness: rule ids
+			 * are globally unique (`alert_rules.id` is the primary key), so the id lists
+			 * already scope these to the right tenant. Without it the predicate could
+			 * not use the `(org_id, rule_id, group_key)` primary key at all.
+			 *
+			 * Best-effort by design. Housekeeping must not fail a tick whose real work —
+			 * evaluation, incidents, notifications — has already completed. This does
+			 * cost per-rule attribution: a failure here is logged for the tick rather
+			 * than recorded against the individual rule as it was when inline.
+			 */
+			const flushRuleStateHousekeeping = Effect.fnUntraced(function* (
+				selfHeal: ReadonlyArray<{
+					readonly orgId: OrgId
+					readonly ruleId: AlertRuleId
+					readonly grouped: boolean
+				}>,
+				clearError: ReadonlyArray<{ readonly orgId: OrgId; readonly ruleId: AlertRuleId }>,
+				timestamp: number,
+			) {
+				const bestEffort =
+					(label: string) => (effect: Effect.Effect<unknown, AlertPersistenceError>) =>
+						effect.pipe(
+							Effect.tapError((error) =>
+								Effect.logWarning(label).pipe(
+									Effect.annotateLogs({ message: error.message }),
+								),
+							),
+							Effect.ignore,
+						)
+
+				const selfHealOrgIds = [...new Set(selfHeal.map((t) => t.orgId))]
+				const groupedRuleIds = selfHeal.filter((t) => t.grouped).map((t) => t.ruleId)
+				const ungroupedRuleIds = selfHeal.filter((t) => !t.grouped).map((t) => t.ruleId)
+
+				// A grouped rule can never legitimately own an ungrouped state row, and
+				// an ungrouped rule can never own a grouped one. Two statements because
+				// the two shapes need opposite `group_key` predicates.
+				if (groupedRuleIds.length > 0) {
+					yield* dbExecute((db) =>
+						db
+							.delete(alertRuleStates)
+							.where(
+								and(
+									inArray(alertRuleStates.orgId, selfHealOrgIds),
+									inArray(alertRuleStates.ruleId, groupedRuleIds),
+									eq(alertRuleStates.groupKey, UNGROUPED_GROUP_KEY),
+								),
+							),
+					).pipe(bestEffort("Failed to self-heal ungrouped state rows for grouped rules"))
+				}
+
+				if (ungroupedRuleIds.length > 0) {
+					yield* dbExecute((db) =>
+						db
+							.delete(alertRuleStates)
+							.where(
+								and(
+									inArray(alertRuleStates.orgId, selfHealOrgIds),
+									inArray(alertRuleStates.ruleId, ungroupedRuleIds),
+									ne(alertRuleStates.groupKey, UNGROUPED_GROUP_KEY),
+								),
+							),
+					).pipe(bestEffort("Failed to self-heal grouped state rows for ungrouped rules"))
+				}
+
+				// Only rules that evaluated cleanly are listed, so a rule that failed
+				// this tick keeps the `lastError` `recordEvaluationFailure` wrote for it.
+				if (clearError.length > 0) {
+					yield* dbExecute((db) =>
+						db
+							.update(alertRuleStates)
+							.set({ lastError: null, updatedAt: new Date(timestamp) })
+							.where(
+								and(
+									inArray(alertRuleStates.orgId, [
+										...new Set(clearError.map((t) => t.orgId)),
+									]),
+									inArray(
+										alertRuleStates.ruleId,
+										clearError.map((t) => t.ruleId),
+									),
+									isNotNull(alertRuleStates.lastError),
+								),
+							),
+					).pipe(bestEffort("Failed to clear stored evaluation errors"))
+				}
+			})
 
 			const recordEvaluationStatus = (evaluation: EvaluatedRule) =>
 				Match.value(evaluation.status).pipe(
@@ -4634,11 +4860,32 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				)
 				yield* Metric.update(AlertingMetrics.activeRulesGauge, rows.length)
 
+				const prefetch = yield* loadTickPrefetch(rows)
+
 				// Incremented from fibers running under the concurrent per-rule forEach
 				// below, so it must be a Ref rather than a mutable closure variable.
 				const evaluationFailureCount = yield* Ref.make(0)
 				const pendingChecks = yield* Ref.make<AlertChecksRow[]>([])
 				const issueBudget = yield* Ref.make(ISSUE_UPSERTS_PER_TICK)
+
+				// Two housekeeping statements used to run per rule, inside the loop.
+				// Both are gated to touch zero rows in steady state (to keep the
+				// Electric shape quiet), but a zero-row statement still costs a full
+				// dial under `DatabasePgLive` — ~2 dials × every rule × every minute.
+				// The rules they need are accumulated here and applied set-based once
+				// per tick instead. Refs for the same reason as `evaluationFailureCount`:
+				// the forEach below runs at concurrency 5.
+				//
+				// Deliberately separate lists, because the two statements do not cover
+				// the same rules: the self-heal delete is skipped on the multi-service
+				// path (which returns early), while the error clear applies to every
+				// rule that evaluated cleanly.
+				const selfHealTargets = yield* Ref.make<
+					Array<{ readonly orgId: OrgId; readonly ruleId: AlertRuleId; readonly grouped: boolean }>
+				>([])
+				const clearErrorTargets = yield* Ref.make<
+					Array<{ readonly orgId: OrgId; readonly ruleId: AlertRuleId }>
+				>([])
 
 				const recordEvaluationFailure = Effect.fnUntraced(function* (
 					row: AlertRuleRow,
@@ -4774,10 +5021,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					(row) =>
 						Effect.gen(function* () {
 							const timestamp = yield* now
-							const claimed = yield* claimRule(row.orgId, row.id, timestamp)
+							const claimed = yield* claimAndTouchRule(row.orgId, row.id, timestamp)
 							if (claimed.length === 0) return
-
-							yield* touchRuleScheduledAt(row.id, timestamp).pipe(Effect.ignore)
 
 							yield* Effect.gen(function* () {
 								const ruleStart = yield* now
@@ -4807,6 +5052,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 												timestamp,
 												pendingChecks,
 												issueBudget,
+												prefetch,
 											)
 										}),
 									)
@@ -4817,6 +5063,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										normalized,
 										HashSet.fromIterable(normalized.serviceNames),
 										timestamp,
+										prefetch.openIncidentsForRule(row.orgId, row.id),
 									)
 									yield* Metric.update(
 										AlertingMetrics.ruleEvaluationDurationMs,
@@ -4848,6 +5095,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											timestamp,
 											pendingChecks,
 											issueBudget,
+											prefetch,
 										)
 									}),
 								)
@@ -4861,6 +5109,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									normalized,
 									evaluatedGroups,
 									timestamp,
+									prefetch.openIncidentsForRule(row.orgId, row.id),
 								)
 
 								// Self-heal state rows whose key shape contradicts the rule's
@@ -4869,19 +5118,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								// or by recordEvaluationFailure), and vice versa. Orphan resolution
 								// above only deletes incident-backed rows. Zero rows touched in
 								// steady state, so the Electric shape stays quiet.
-								yield* dbExecute((db) =>
-									db
-										.delete(alertRuleStates)
-										.where(
-											and(
-												eq(alertRuleStates.orgId, row.orgId),
-												eq(alertRuleStates.ruleId, row.id),
-												grouped
-													? eq(alertRuleStates.groupKey, UNGROUPED_GROUP_KEY)
-													: ne(alertRuleStates.groupKey, UNGROUPED_GROUP_KEY),
-											),
-										),
-								)
+								//
+								// Applied set-based after the loop (see `flushSelfHeal`). Safe to
+								// defer: it is scoped to this rule and this rule's own writes are
+								// already done, so end-of-tick is the same state it would have seen
+								// here.
+								yield* Ref.update(selfHealTargets, (targets) => {
+									targets.push({ orgId: row.orgId, ruleId: row.id, grouped })
+									return targets
+								})
 
 								yield* Metric.update(
 									AlertingMetrics.ruleEvaluationDurationMs,
@@ -4893,19 +5138,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								// ticks touch zero rows (no Electric shape churn). This also
 								// covers grouped/multi-service rules, whose "__total__" error row
 								// is never revisited by upsertState.
+								//
+								// Accumulated and applied set-based after the loop. Only rules that
+								// reach here are cleared, so a rule that failed this tick keeps the
+								// `lastError` that `recordEvaluationFailure` just wrote for it.
 								Effect.tap(() =>
-									dbExecute((db) =>
-										db
-											.update(alertRuleStates)
-											.set({ lastError: null, updatedAt: new Date(timestamp) })
-											.where(
-												and(
-													eq(alertRuleStates.orgId, row.orgId),
-													eq(alertRuleStates.ruleId, row.id),
-													isNotNull(alertRuleStates.lastError),
-												),
-											),
-									).pipe(Effect.ignore),
+									Ref.update(clearErrorTargets, (targets) => {
+										targets.push({ orgId: row.orgId, ruleId: row.id })
+										return targets
+									}),
 								),
 								Effect.catchTags({
 									"@maple/http/errors/AlertValidationError": (error) =>
@@ -4937,6 +5178,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							)
 						}),
 					{ concurrency: 5 },
+				)
+
+				yield* flushRuleStateHousekeeping(
+					yield* Ref.get(selfHealTargets),
+					yield* Ref.get(clearErrorTargets),
+					tickStart,
 				)
 
 				// Resolve stale incidents for disabled rules
