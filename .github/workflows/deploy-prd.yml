@@ -62,7 +62,7 @@ jobs:
             # method whenever CI=true). Running it last means these always win over
             # anything stale carrying the same names out of Infisical.
             - name: Configure AWS credentials (OIDC)
-              uses: aws-actions/configure-aws-credentials@v5
+              uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
               with:
                   role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
                   aws-region: us-east-1
@@ -73,10 +73,13 @@ jobs:
             # The Rust gateway is compiled HERE, not inside the image build.
             # alchemy's docker build passes no --cache-from (AWS/ECR/Image.ts), and
             # a fresh runner's layer cache is empty, so a Dockerfile that runs
-            # `cargo build` recompiles all 385 crates on every deploy — ~20 minutes,
-            # however the layers are arranged. Out here the cargo cache survives
-            # between runs, so an unchanged ingest is a no-op and a one-crate change
-            # is about a minute. Dockerfile.prebuilt then just COPYs the result.
+            # `cargo build` recompiles all 385 crates on every deploy, however the
+            # layers are arranged. Cold cost is 2m54s, MEASURED — an earlier
+            # version of this comment guessed ~20 minutes, which was wrong by ~7x
+            # and has already been quoted back as fact in a review, so treat the
+            # number here as load-bearing. Out here the cargo cache survives
+            # between runs, so an unchanged ingest is a no-op and a one-crate
+            # change is about a minute. Dockerfile.prebuilt then COPYs the result.
             #
             # Inside rust:1.88-bookworm rather than on the runner: the runtime base
             # is debian:bookworm-slim (glibc 2.36) and ubuntu-24.04 ships 2.39, so a

@@ -219,10 +219,14 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 			// back to the self-contained source build. Keyed on the file rather than
 			// on `process.env.CI` so a local run that happens to have built the binary
 			// gets the fast path too, and so CI can never silently ship a stale one.
+			// `dockerfile` is resolved relative to `context`, NOT to the cwd — despite
+			// one doc comment upstream saying otherwise, `ImageProps` and
+			// `AWS/ECR/Image.ts:225` both join it onto the context. A repo-root path
+			// here produced `apps/ingest/apps/ingest/Dockerfile.prebuilt` and failed
+			// the deploy outright; caught by deploying the real thing through
+			// scripts/aws-probe.run.ts.
 			context: "apps/ingest",
-			...(existsSync(PREBUILT_BINARY)
-				? { dockerfile: "apps/ingest/Dockerfile.prebuilt" }
-				: {}),
+			...(existsSync(PREBUILT_BINARY) ? { dockerfile: "Dockerfile.prebuilt" } : {}),
 			// The docker build platform is derived from this (`taskImagePlatform` in
 			// alchemy's ECS/Task). Explicit so a build from an Apple Silicon machine
 			// produces the same artifact CI does — an arm64 image on an X86_64 task
