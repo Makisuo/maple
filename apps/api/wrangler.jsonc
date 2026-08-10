@@ -65,13 +65,6 @@
 			"binding": "MCP_SESSIONS",
 			"id": "00000000000000000000000000000000",
 		},
-		// Backend for EdgeCacheService. Present => KV is used; remove the binding
-		// and the service falls back to `caches.default`. See CacheBackendLive.ts
-		// for why KV is being trialled over the Cache API.
-		{
-			"binding": "EDGE_CACHE",
-			"id": "00000000000000000000000000000000",
-		},
 	],
 	// Cloudflare Email Service (Email Sending). `remote: true` routes sends through
 	// the real Cloudflare sender even under local dev. (Mirrored in alchemy.run.ts

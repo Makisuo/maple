@@ -15,7 +15,7 @@ export interface EdgeCacheBackend {
 	 * `memory` fallback — which is silently selected whenever `caches` is
 	 * undefined, and makes every cross-request hit disappear.
 	 */
-	readonly name: "workers-cache" | "workers-kv" | "memory"
+	readonly name: "workers-cache" | "memory"
 	readonly get: (bucket: string, hash: string, nowMs: number) => Promise<unknown | undefined>
 	readonly put: (
 		bucket: string,
@@ -28,7 +28,7 @@ export interface EdgeCacheBackend {
 }
 
 /**
- * Injected edge-cache storage backend (Workers KV in prod, in-memory in
+ * Injected edge-cache storage backend (`caches.default` in prod, in-memory in
  * tests/dev).
  *
  * The tag string still names the old home. Tags are identity, not
