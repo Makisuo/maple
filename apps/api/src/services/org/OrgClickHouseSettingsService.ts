@@ -30,9 +30,6 @@ import {
 import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { type EdgeCacheBackend, EdgeCacheService } from "@maple/cache"
-
-type EdgeCacheBackendName = EdgeCacheBackend["name"]
 import {
 	Clock,
 	Context,
@@ -168,28 +165,6 @@ export const invalidateOrgRuntimeConfigMemo = (orgId: string): void => {
 }
 
 /**
- * Drop BOTH cache tiers for an org: this isolate's memo and the shared durable
- * entry. Every writer of `org_clickhouse_settings` must call it.
- *
- * The durable tier makes this non-optional in a way the memo never was. A memo
- * is per-isolate and expires in minutes, so a missed bust self-healed; a KV
- * entry is shared by every isolate in every colo and lives for
- * `ORG_CH_CONFIG_EDGE_TTL_SECONDS`, so a missed bust is an hour of every request
- * globally reading a config that no longer exists.
- *
- * `EdgeCacheService` is resolved with `Effect.serviceOption` at call time, so
- * this is safe to run in a context that has no cache layer (tests, hosts without
- * the binding) — it degrades to a memo-only bust.
- */
-export const invalidateOrgRuntimeConfig = Effect.fnUntraced(function* (orgId: string) {
-	invalidateOrgRuntimeConfigMemo(orgId)
-	const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
-	if (Option.isSome(edgeCache)) {
-		yield* edgeCache.value.invalidate({ bucket: ORG_CH_CONFIG_BUCKET, key: orgId })
-	}
-})
-
-/**
  * Projection of the settings row memoized by `resolveRuntimeConfig`. Holds the
  * ENCRYPTED password material (ciphertext/iv/tag) — never the plaintext — so
  * decryption still happens per-request after the memo. `null` encodes "no BYO
@@ -206,45 +181,6 @@ const CachedChSettings = Schema.Struct({
 	chPasswordTag: Schema.NullOr(Schema.String),
 })
 type CachedChSettings = typeof CachedChSettings.Type
-
-/**
- * Codec for the durable (KV) tier. `null` — "this org is managed, use Tinybird"
- * — is a cached value in its own right, not an absence, and it is the common
- * case, so it must survive the JSON round-trip.
- */
-const CachedChSettingsCodec = Schema.NullOr(CachedChSettings)
-
-/**
- * Bucket + key shape for the durable tier. `invalidate` derives the storage hash
- * from the same `{ bucket, key }`, so every write site must pass the org id
- * unchanged.
- */
-export const ORG_CH_CONFIG_BUCKET = "org-clickhouse-config"
-/** Long, because eviction is driven by explicit invalidation at every write site. */
-const ORG_CH_CONFIG_EDGE_TTL_SECONDS = 3_600
-const ORG_CH_CONFIG_EDGE_READ_TIMEOUT_MS = 150
-
-/**
- * Whether this host's cache store is one the writers' invalidation actually
- * reaches. An hour-long entry is only safe under that condition.
- *
- * The org config is mutated exclusively from `apps/api`, which owns the
- * `EDGE_CACHE` KV binding — so `"workers-kv"` is the store those busts land in,
- * and `"memory"` is per-isolate and therefore self-consistent by construction.
- *
- * `"workers-cache"` is neither. `apps/alerting` runs this same service against
- * `caches.default` (it has no KV binding), which no `invalidateOrgRuntimeConfig`
- * ever touches — so an hour-long entry there would let alert evaluation keep
- * using a warehouse config the customer already rotated or deleted, firing on
- * stale data or missing incidents. Falling back to the memo + Postgres is the
- * correct behaviour for such a host: it is slower, and it is right.
- *
- * The proper fix is to bind the same KV namespace into the alerting stack (it
- * already binds Hyperdrive by ID across stacks, so there is precedent); until
- * then the tier stays off there rather than silently serving stale routing.
- */
-const durableTierIsInvalidated = (backendName: EdgeCacheBackendName): boolean =>
-	backendName !== "workers-cache"
 
 const toCachedChSettings = (row: CachedSettingsRow): CachedChSettings => ({
 	schemaVersion: row.schemaVersion,
@@ -965,7 +901,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 				// changes no routing decision, so it does not count as a hit.
 				const memoized = runtimeConfigMemo.get(orgId)
 				const hadOverride = memoized !== undefined && memoized.value !== null
-				yield* invalidateOrgRuntimeConfig(orgId)
+				invalidateOrgRuntimeConfigMemo(orgId)
 				return hadOverride
 			})
 
@@ -1372,49 +1308,6 @@ export class OrgClickHouseSettingsService extends Context.Service<
 				Effect.map((row) => (Option.isSome(row) ? toCachedChSettings(row.value) : null)),
 			)
 
-		/**
-		 * The durable tier between the per-isolate memo and Postgres.
-		 *
-		 * The memo only ever helps an isolate that has already paid once, and
-		 * Workers evict isolates constantly: measured over the three days after the
-		 * SWR memo shipped, 10–13k resolutions/day still fell through to Postgres at
-		 * a p50 of 482–636ms each — 1.4–2.6 HOURS of blocked wall time per day. That
-		 * cost is the per-`.execute()` postgres.js dial, not the query.
-		 *
-		 * A shared cache is the only thing that removes it, since the whole point is
-		 * to help an isolate that has never seen this org. It is deliberately on
-		 * Workers KV rather than `caches.default` — see `makeKvBackend` in
-		 * `CacheBackendLive.ts` for the measured reason, and treat this as an
-		 * experiment until `cache.read_status` per `cache.backend` says otherwise.
-		 *
-		 * `readTimeoutMs` is well above the service default of 40ms because that
-		 * default is tuned for a cheap `compute`. Here `compute` is a ~500ms dial,
-		 * so waiting 150ms for a cache read that usually lands in single-digit ms is
-		 * the better trade even when it occasionally loses.
-		 *
-		 * `Effect.serviceOption` keeps the dependency optional: tests and any host
-		 * without the layer fall through to Postgres rather than failing to build.
-		 */
-		const lookupCachedSettings = Effect.fnUntraced(function* (orgId: OrgId) {
-			const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
-			if (Option.isNone(edgeCache) || !durableTierIsInvalidated(edgeCache.value.backendName)) {
-				return yield* readSettingsFromPostgres(orgId)
-			}
-
-			const result = yield* edgeCache.value.getOrCompute(
-				{
-					bucket: ORG_CH_CONFIG_BUCKET,
-					key: orgId,
-					ttlSeconds: ORG_CH_CONFIG_EDGE_TTL_SECONDS,
-					readTimeoutMs: ORG_CH_CONFIG_EDGE_READ_TIMEOUT_MS,
-					schema: CachedChSettingsCodec,
-				},
-				readSettingsFromPostgres(orgId),
-			)
-			yield* Effect.annotateCurrentSpan("clickhouse.config.edge_hit", result.hit)
-			return result.value
-		})
-
 		const storeCachedSettings = (orgId: OrgId, value: CachedChSettings | null, nowMs: number) => {
 			runtimeConfigMemo.set(orgId, {
 				value,
@@ -1453,7 +1346,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			if (startedAt !== undefined && nowMs - startedAt < REFRESH_MARKER_STALE_MS) return false
 			refreshInFlight.set(orgId, nowMs)
 
-			const work = lookupCachedSettings(orgId).pipe(
+			const work = readSettingsFromPostgres(orgId).pipe(
 				Effect.flatMap((value) =>
 					Clock.currentTimeMillis.pipe(
 						Effect.map((writeNowMs) => storeCachedSettings(orgId, value, writeNowMs)),
@@ -1499,6 +1392,26 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// abandoned read kept holding one of the Worker's six connection slots and
 		// the fallback Postgres read queued behind it. The layer meant to avoid a
 		// ~26ms round-trip was manufacturing a ~2.5s one 82% of the time.
+		//
+		// A SECOND attempt (#387) put the same tier on Workers KV instead, on the
+		// theory that a KV `get` is a cancellable subrequest and so cheap to
+		// abandon. Measured over 24h on the live deploy it was worse, and removed:
+		// KV reads that COMPLETE take 92ms (vs 6ms on the Cache API) and 79% of them
+		// still hit their deadline. It also could not reach the cost it was aimed
+		// at. 94% of the Postgres fallback is `apps/alerting` (4,646 resolutions/day
+		// at p50 573ms, ~44min of blocked wall time) which has no KV binding and so
+		// could never use the tier; `apps/api`, which had it, falls back at p50 24ms
+		// — cheaper than a KV read.
+		//
+		// The reason both attempts failed is that this is not a cold-isolate miss.
+		// Grouping alerting's Postgres resolutions by trace: 1,033 traces do zero,
+		// while 106 traces do 22 EACH (half of all of them). It is an in-request
+		// fan-out where every branch misses the memo because none has finished
+		// writing it yet. No shared cache can fix concurrent siblings — it just
+		// turns N Postgres reads into N cache reads contending for the same six
+		// connection slots. The fix is to resolve the config once BEFORE the
+		// fan-out, the way `warehouse.warmRoute` already does in
+		// `routes/v1/query-engine.http.ts`.
 		const resolveCachedSettings = Effect.fn("OrgClickHouseSettingsService.resolveCachedSettings")(
 			function* (orgId: OrgId) {
 				const nowMs = yield* Clock.currentTimeMillis
@@ -1530,7 +1443,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 					"clickhouse.config.source": "postgres",
 					"clickhouse.config.memoHit": false,
 				})
-				const cached = yield* lookupCachedSettings(orgId)
+				const cached = yield* readSettingsFromPostgres(orgId)
 				storeCachedSettings(orgId, cached, nowMs)
 				return cached
 			},

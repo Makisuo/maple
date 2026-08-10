@@ -99,13 +99,6 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			title: resolveWorkerName("mcp-sessions", stage),
 		})
 
-		// EdgeCacheService backend. Binding present => KV; drop it to fall back to
-		// `caches.default` (see CacheBackendLive.ts for the measured reason KV is
-		// being trialled).
-		const edgeCache = yield* Cloudflare.KV.Namespace("EDGE_CACHE", {
-			title: resolveWorkerName("edge-cache", stage),
-		})
-
 		// Long-running schema-apply: chunks heavy backfill migrations across durable
 		// steps so they never hit the Worker request budget. Class is exported from
 		// src/worker.ts. The first Workflow arg IS the physical workflow name; the
@@ -203,7 +196,6 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				AI: Cloudflare.AI.Gateway("maple-api-ai"),
 				CHAT_SESSION: chatSession,
 				MCP_SESSIONS: mcpSessions,
-				EDGE_CACHE: edgeCache,
 				// Read side of the replay payload store; absent bindings degrade to
 				// inline-only hydration (see platform/ReplayBlobStore.ts).
 				REPLAY_BLOBS: replayBlobs,

@@ -66,17 +66,6 @@ export interface EdgeCacheReadResult<A> {
 }
 
 export interface EdgeCacheServiceShape {
-	/**
-	 * Which store is behind this service, mirroring `cache.backend` on the spans.
-	 *
-	 * Exposed because it decides whether a bucket may be cached ACROSS isolates at
-	 * all. `"memory"` is per-isolate, so a bust always reaches the reader.
-	 * `"workers-kv"` is shared, and only the worker that owns the binding writes
-	 * it. `"workers-cache"` is shared but colo-local and busted per-isolate, so a
-	 * long-lived entry there can outlive an invalidation issued elsewhere — fine
-	 * for query results keyed by their own inputs, wrong for mutable config.
-	 */
-	readonly backendName: EdgeCacheBackend["name"]
 	readonly getOrCompute: <A, E, R, I = unknown>(
 		options: EdgeCacheGetOrComputeOptions<A, I>,
 		compute: Effect.Effect<A, E, R>,
@@ -446,7 +435,6 @@ export const makeEdgeCacheService = (
 	})
 
 	return {
-		backendName: backend.name,
 		getOrCompute,
 		invalidate,
 		rawGetDetailed,
