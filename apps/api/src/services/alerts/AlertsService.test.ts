@@ -3187,6 +3187,48 @@ describe("AlertsService.previewRule", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 
+	it.effect("dedupes rule destinations and environments, preserving order", () => {
+		const testDb = createTestDb(trackedDbs)
+		// Guards the `Arr.dedupe` calls in normalizeRule. A destination listed twice
+		// still notifies once, and the surviving order is first-occurrence — the
+		// same contract `[...new Set()]` gave before.
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_dedupe")
+			const userId = asUserId("user_dedupe")
+			const first = yield* createWebhookDestination(alerts, orgId, userId)
+			const second = yield* alerts.createDestination(orgId, userId, adminRoles, {
+				type: "webhook",
+				name: "Secondary webhook",
+				enabled: true,
+				url: "https://example.com/maple-alerts-2",
+				signingSecret: "webhook-secret-2",
+			})
+
+			const rule = yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Deduped rule",
+					severity: "warning",
+					enabled: true,
+					serviceNames: ["checkout"],
+					environments: ["  prod  ", "staging", "prod", "   ", "staging"],
+					signalType: "error_rate",
+					comparator: "gt",
+					threshold: 5,
+					windowMinutes: 5,
+					destinationIds: [second.id, first.id, second.id],
+				}),
+			)
+
+			assert.deepStrictEqual(rule.destinationIds, [second.id, first.id])
+			// Trimmed, blank-dropped, deduped, first-occurrence order.
+			assert.deepStrictEqual(rule.environments, ["prod", "staging"])
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}), { fetch: okFetch })))
+	})
+
 	it.effect("keeps scheduler tick round-trips flat as rule count grows", () => {
 		const testDb = createTestDb(trackedDbs)
 		const counter = { executes: 0 }

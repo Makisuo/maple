@@ -1363,14 +1363,19 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					request.signalType === "builder_query" || request.signalType === "raw_query"
 				const environments =
 					request.environments && !queryOwnsScope
-						? [...new Set(request.environments.map((s) => s.trim()).filter((s) => s.length > 0))]
+						? Arr.dedupe(
+								Arr.filterMap(request.environments, (s) => {
+									const trimmed = s.trim()
+									return trimmed.length > 0 ? Result.succeed(trimmed) : Result.failVoid
+								}),
+							)
 						: []
 				const tags = normalizeTags(request.tags)
 				const groupBy = request.groupBy ?? null
 				// Dedupe while preserving selection order — a destination listed twice still
 				// notifies once, so we persist each id at most once. This is the authoritative
 				// fix; the editor also dedupes on submit for UX (see buildRuleRequest).
-				const destinationIds = [...new Set(request.destinationIds)]
+				const destinationIds = Arr.dedupe(request.destinationIds)
 
 				const details: string[] = []
 				if (name.length === 0 && !options?.forPreview) details.push("name is required")
@@ -1507,8 +1512,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						),
 				)
 
-				const existingIds = new Set(rows.map((row) => row.id))
-				const missing = destinationIds.filter((id) => !existingIds.has(id))
+				const existingIds = HashSet.fromIterable(Arr.map(rows, (row) => row.id))
+				const missing = Arr.filter(destinationIds, (id) => !HashSet.has(existingIds, id))
 				if (missing.length > 0) {
 					return yield* Effect.fail(makeValidationError("Unknown destination IDs", missing))
 				}
@@ -2782,9 +2787,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					// compiled plan decides groupedness, and a breaching group (if any)
 					// wins so the test reflects what the scheduler would fire on.
 					const allResults = yield* evaluateRule(orgId, normalized)
-					const excludeSet = new Set(normalized.excludeServiceNames)
+					const excludeSet = HashSet.fromIterable(normalized.excludeServiceNames)
 					const results = isGroupedPlan(normalized.compiledPlan)
-						? allResults.filter((r) => !excludeSet.has(r.groupKey))
+						? Arr.filter(allResults, (r) => !HashSet.has(excludeSet, r.groupKey))
 						: allResults
 					const breached = results.find((r) => r.evaluation.status === "breached")
 					evaluation = breached?.evaluation ??
@@ -2998,13 +3003,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							sampleCountStrategy: plan.sampleCountStrategy,
 						})
 						.pipe(catchQueryEngineErrors)
-					const excludeSet = new Set(normalized.excludeServiceNames)
+					const excludeSet = HashSet.fromIterable(normalized.excludeServiceNames)
 					// Preview must key its series exactly as the scheduler stores them,
 					// or the preview chart and the tracking chart disagree on the
 					// ungrouped series' name.
 					const grouped = isGroupedPlan(plan)
 					for (const obs of observations) {
-						if (excludeSet.has(obs.groupKey)) continue
+						if (HashSet.has(excludeSet, obs.groupKey)) continue
 						record(grouped ? obs.groupKey : UNGROUPED_GROUP_KEY, Date.parse(obs.bucket), {
 							value: obs.value,
 							sampleCount: obs.sampleCount,
@@ -3558,11 +3563,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}
 				}
 
-				const uniqueDestinationIds = [...new Set(rows.map((r) => r.destinationId))]
-				const uniqueRuleIds = [...new Set(rows.map((r) => r.ruleId))]
-				const uniqueIncidentIds = [
-					...new Set(rows.filter((r) => r.incidentId != null).map((r) => r.incidentId!)),
-				]
+				const uniqueDestinationIds = Arr.dedupe(Arr.map(rows, (r) => r.destinationId))
+				const uniqueRuleIds = Arr.dedupe(Arr.map(rows, (r) => r.ruleId))
+				const uniqueIncidentIds = Arr.dedupe(
+					Arr.filterMap(rows, (r) =>
+						r.incidentId != null ? Result.succeed(r.incidentId) : Result.failVoid,
+					),
+				)
 
 				const [allDestinations, allRules, allIncidents] = yield* Effect.all(
 					[
