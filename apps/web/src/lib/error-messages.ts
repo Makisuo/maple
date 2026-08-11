@@ -40,10 +40,13 @@ export interface ErrorDiagnostics {
 
 export interface NormalizedAppError {
 	readonly category: ErrorCategory
+	readonly tag?: string
 	readonly code?: string
 	readonly status?: number
 	readonly param?: string
 	readonly docUrl?: string
+	readonly retryAfterSeconds?: number
+	readonly retryAt?: string
 	readonly recovery: ErrorRecovery
 	readonly title: string
 	readonly description: string
@@ -55,10 +58,13 @@ export interface FormattedError {
 	readonly title: string
 	readonly description: string
 	readonly category: ErrorCategory
+	readonly tag?: string
 	readonly code?: string
 	readonly status?: number
 	readonly param?: string
 	readonly docUrl?: string
+	readonly retryAfterSeconds?: number
+	readonly retryAt?: string
 	readonly recovery: ErrorRecovery
 	readonly recognized: boolean
 	/** Compatibility signal for callers not yet using `recovery`. */
@@ -103,13 +109,30 @@ const unwrap = (error: unknown): unknown => {
 }
 
 export interface V2ErrorInfo {
+	readonly tag?: string
 	readonly type: string
 	readonly code: string
 	readonly message: string
+	readonly title?: string
+	readonly retryable?: boolean
+	readonly recovery?: string
+	readonly retryAfterSeconds?: number
+	readonly retryAt?: string
 	readonly param?: string
 	readonly docUrl?: string
 }
 
+const booleanField = (value: unknown, key: string): boolean | undefined => {
+	if (typeof value !== "object" || value === null || !(key in value)) return undefined
+	const field = (value as Record<string, unknown>)[key]
+	return typeof field === "boolean" ? field : undefined
+}
+
+const numberField = (value: unknown, key: string): number | undefined => {
+	if (typeof value !== "object" || value === null || !(key in value)) return undefined
+	const field = (value as Record<string, unknown>)[key]
+	return typeof field === "number" && Number.isFinite(field) ? field : undefined
+}
 export const v2ErrorInfo = (input: unknown): V2ErrorInfo | null => {
 	const error = unwrap(input)
 	if (typeof error !== "object" || error === null || !("error" in error)) return null
@@ -118,12 +141,24 @@ export const v2ErrorInfo = (input: unknown): V2ErrorInfo | null => {
 	const code = stringField(body, "code")
 	const message = stringField(body, "message")
 	if (type === undefined || code === undefined || message === undefined) return null
+	const tag = rawStringField(body, "_tag")
+	const title = stringField(body, "title")
+	const retryable = booleanField(body, "retryable")
+	const recovery = stringField(body, "recovery")
+	const retryAfterSeconds = numberField(body, "retry_after_seconds")
+	const retryAt = stringField(body, "retry_at")
 	const param = stringField(body, "param")
 	const docUrl = stringField(body, "doc_url")
 	return {
 		type,
 		code,
 		message,
+		...(tag === undefined ? {} : { tag }),
+		...(title === undefined ? {} : { title }),
+		...(retryable === undefined ? {} : { retryable }),
+		...(recovery === undefined ? {} : { recovery }),
+		...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+		...(retryAt === undefined ? {} : { retryAt }),
 		...(param === undefined ? {} : { param }),
 		...(docUrl === undefined ? {} : { docUrl }),
 	}
@@ -187,6 +222,8 @@ interface NormalizedFields {
 	readonly status?: number
 	readonly param?: string
 	readonly docUrl?: string
+	readonly retryAfterSeconds?: number
+	readonly retryAt?: string
 	readonly recovery?: ErrorRecovery
 	readonly recognized?: boolean
 	readonly tag?: string
@@ -199,16 +236,43 @@ const normalized = (value: unknown, fields: NormalizedFields): NormalizedAppErro
 	description: humanizeInstants(fields.description),
 	recovery: fields.recovery ?? recoveryFor(fields.category, fields.param),
 	recognized: fields.recognized ?? true,
+	...(fields.tag === undefined ? {} : { tag: fields.tag }),
 	...(fields.code === undefined ? {} : { code: fields.code }),
 	...(fields.status === undefined ? {} : { status: fields.status }),
 	...(fields.param === undefined ? {} : { param: fields.param }),
 	...(fields.docUrl === undefined ? {} : { docUrl: fields.docUrl }),
+	...(fields.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: fields.retryAfterSeconds }),
+	...(fields.retryAt === undefined ? {} : { retryAt: fields.retryAt }),
 	diagnostics: {
 		value,
 		...(fields.tag === undefined ? {} : { tag: fields.tag }),
 		...(fields.technicalMessage === undefined ? {} : { technicalMessage: fields.technicalMessage }),
 	},
 })
+
+const recoveryFromV2 = (v2: V2ErrorInfo): ErrorRecovery | undefined => {
+	switch (v2.recovery) {
+		case "fix_request":
+			return { kind: "fix-input", ...(v2.param === undefined ? {} : { param: v2.param }) }
+		case "reauthenticate":
+			return { kind: "reauth" }
+		case "retry":
+			return { kind: "retry", automatic: false }
+		case "refresh":
+			return { kind: "reload" }
+		case "none":
+		case "request_access":
+		case "reconnect":
+		case "contact_support":
+			return { kind: "none" }
+		default:
+			return v2.retryable === undefined
+				? undefined
+				: v2.retryable
+					? { kind: "retry", automatic: false }
+					: { kind: "none" }
+	}
+}
 
 const normalizeV2 = (value: unknown, v2: V2ErrorInfo): NormalizedAppError => {
 	const meta = V2_TYPE_META[v2.type] ?? {
@@ -222,10 +286,14 @@ const normalizeV2 = (value: unknown, v2: V2ErrorInfo): NormalizedAppError => {
 			: meta.category
 	return normalized(value, {
 		category,
-		title: V2_CODE_TITLES[v2.code] ?? meta.title,
+		title: v2.title ?? V2_CODE_TITLES[v2.code] ?? meta.title,
 		description: v2.message,
 		code: v2.code,
 		status: meta.status,
+		recovery: recoveryFromV2(v2),
+		...(v2.tag === undefined ? {} : { tag: v2.tag }),
+		...(v2.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: v2.retryAfterSeconds }),
+		...(v2.retryAt === undefined ? {} : { retryAt: v2.retryAt }),
 		...(v2.param === undefined ? {} : { param: v2.param }),
 		...(v2.docUrl === undefined ? {} : { docUrl: v2.docUrl }),
 	})
@@ -547,10 +615,13 @@ export const presentAppError = (error: NormalizedAppError): FormattedError => ({
 	category: error.category,
 	recovery: error.recovery,
 	recognized: error.recognized,
+	...(error.tag === undefined ? {} : { tag: error.tag }),
 	...(error.code === undefined ? {} : { code: error.code }),
 	...(error.status === undefined ? {} : { status: error.status }),
 	...(error.param === undefined ? {} : { param: error.param }),
 	...(error.docUrl === undefined ? {} : { docUrl: error.docUrl }),
+	...(error.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: error.retryAfterSeconds }),
+	...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
 	...(error.recovery.kind === "retry" && error.recovery.automatic ? { kind: "network" as const } : {}),
 })
 

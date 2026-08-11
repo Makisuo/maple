@@ -32,7 +32,7 @@ import {
 	InvestigationSnapshotFact,
 	InvestigationSnapshotReference,
 	InvestigationSubjectSnapshot,
-	InvestigationUnavailableError,
+	InvestigationAgentUnavailableError,
 	InvestigationsListResponse,
 	InvestigationId,
 	IsoDateTimeString,
@@ -367,10 +367,8 @@ const makeHarness = (
 				)
 			case "unavailable":
 				return Effect.fail(
-					new InvestigationUnavailableError({
+					new InvestigationAgentUnavailableError({
 						message: "Agent unavailable",
-						reason: "agent_unavailable",
-						retryable: true,
 					}),
 				)
 			case "rejected":
@@ -543,7 +541,11 @@ const makeHarness = (
 			Context.empty() as never,
 		)
 		const text = await response.text()
-		return { status: response.status, body: text.length > 0 ? JSON.parse(text) : null }
+		return {
+			status: response.status,
+			headers: response.headers,
+			body: text.length > 0 ? JSON.parse(text) : null,
+		}
 	}
 
 	const bootstrapKey = (scopes?: ReadonlyArray<string>) =>
@@ -819,6 +821,11 @@ describe("v2 investigations over HTTP", () => {
 		})
 		expect(quota.status).toBe(429)
 		expect(quota.body.error.code).toBe("investigation_daily_quota")
+		expect(quota.body.error._tag).toBe("@maple/http/investigations/InvestigationQuotaError")
+		expect(quota.body.error.retryable).toBe(true)
+		expect(quota.body.error.recovery).toBe("retry")
+		expect(quota.body.error.retry_at).toBe("2026-07-16T00:00:00.000Z")
+		expect(quota.headers.get("retry-after")).toBe("Thu, 16 Jul 2026 00:00:00 GMT")
 		// The ceiling that was hit is named, so a raised run cap can't look ignored
 		// when it was the pass cap that stopped the start.
 		expect(quota.body.error.message).toBe(
@@ -834,6 +841,10 @@ describe("v2 investigations over HTTP", () => {
 		})
 		expect(unavailable.status).toBe(503)
 		expect(unavailable.body.error.code).toBe("investigation_agent_unavailable")
+		expect(unavailable.body.error._tag).toBe(
+			"@maple/http/investigations/InvestigationAgentUnavailableError",
+		)
+		expect(unavailable.body.error.retryable).toBe(true)
 		await unavailableHarness.dispose()
 
 		const rejectedHarness = makeHarness(warehouseStub, false, "rejected")
@@ -844,6 +855,8 @@ describe("v2 investigations over HTTP", () => {
 		})
 		expect(rejected.status).toBe(502)
 		expect(rejected.body.error.code).toBe("investigation_start_rejected")
+		expect(rejected.body.error._tag).toBe("@maple/http/investigations/InvestigationRejectedError")
+		expect(rejected.body.error.retryable).toBe(false)
 		await rejectedHarness.dispose()
 	})
 })

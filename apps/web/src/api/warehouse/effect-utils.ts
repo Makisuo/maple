@@ -61,12 +61,18 @@ export interface TaggedBackendError {
 	readonly _tag: string
 }
 
-/** Public v2 error envelope. V2 deliberately has no internal `_tag`. */
+/** Public v2 error envelope. Semantic domain tags live inside `error` on v2. */
 export interface V2BackendError {
 	readonly error: {
+		readonly _tag?: string
 		readonly type: string
 		readonly code: string
 		readonly message: string
+		readonly title?: string
+		readonly retryable?: boolean
+		readonly recovery?: string
+		readonly retry_after_seconds?: number
+		readonly retry_at?: string
 		readonly param?: string
 		readonly doc_url?: string
 	}

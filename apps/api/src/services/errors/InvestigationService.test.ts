@@ -10,7 +10,8 @@ import {
 	InvestigationId,
 	InvestigationNotFoundError,
 	InvestigationSubjectSnapshot,
-	InvestigationUnavailableError,
+	InvestigationAgentUnavailableError,
+	InvestigationStartFailedError,
 	OrgId,
 	SubmitDiagnosisRequest,
 } from "@maple/domain/http"
@@ -508,9 +509,7 @@ describe("InvestigationService", () => {
 					automatic: false,
 				}),
 			)
-			assert.instanceOf(error, InvestigationUnavailableError)
-			assert.strictEqual(error.reason, "agent_unavailable")
-			assert.isTrue(error.retryable)
+			assert.instanceOf(error, InvestigationAgentUnavailableError)
 		}).pipe(Effect.provide(harness.layer))
 	})
 
@@ -520,12 +519,11 @@ describe("InvestigationService", () => {
 		return Effect.gen(function* () {
 			const service = yield* InvestigationService
 			const error = yield* Effect.flip(
-				service.createAndStartInvestigation(ORG, null, incidentRequest("err_busy"), {
+				service.createAndStartInvestigation(ORG, null, freeformRequest("err_busy"), {
 					automatic: false,
 				}),
 			)
-			assert.instanceOf(error, InvestigationUnavailableError)
-			assert.isTrue(error.retryable)
+			assert.instanceOf(error, InvestigationStartFailedError)
 		}).pipe(Effect.provide(harness.layer))
 	})
 
