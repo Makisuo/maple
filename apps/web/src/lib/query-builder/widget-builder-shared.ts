@@ -8,7 +8,7 @@ import {
 	type QueryBuilderMetricType,
 	type QueryBuilderQueryDraft,
 } from "@maple/query-engine/query-builder"
-import type { ListColumnDraft, ListDataSource } from "@/components/dashboard-builder/config/list-config-panel"
+import type { ListColumnDraft, ListDataSource } from "@/lib/query-builder/list-widget-config"
 import type {
 	TimeRange,
 	ValueUnit,

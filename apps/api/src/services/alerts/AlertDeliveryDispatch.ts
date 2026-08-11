@@ -9,12 +9,26 @@ import {
 	type AlertSeverity,
 } from "@maple/domain/http"
 import type { AlertDestinationRow } from "@maple/db"
-import { Clock, Duration, Effect, Match, Option, Schema } from "effect"
+import { Clock, Duration, Effect, Match, Schema } from "effect"
 import type { EnrichedDestinationSecretConfig } from "./AlertDestinationHydration"
 import { safeFetch } from "@/http/url-validator"
-// Circular with ./alert-email (it imports our formatting helpers); safe — both
-// sides only reference the other's exports inside function bodies.
 import { buildAlertEmailContent } from "./alert-email"
+import {
+	comparatorBreachPhrase,
+	discordEmbedColor,
+	eventTypeEmoji,
+	formatComparator,
+	formatEventTypeLabel,
+	formatObservedSummary,
+	formatSeverityLabel,
+	formatSignalLabel,
+	formatSignalMetric,
+	formatThresholdSummary,
+	formatWindow,
+	severityEmoji,
+	slackAttachmentColor,
+	type TemplateRenderContext,
+} from "./alert-formatting"
 import { DEFAULT_BODY_TEMPLATE, DEFAULT_TITLE_TEMPLATE } from "./alert-templating/defaultTemplates"
 import {
 	hasCustomTemplate,
@@ -126,150 +140,6 @@ export const buildAlertChatUrl = (baseUrl: string, context: ChatUrlContext): str
 		alert: encoded,
 	})
 	return `${baseUrl}/chat?${params.toString()}`
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Formatting helpers                                                        */
-/* -------------------------------------------------------------------------- */
-
-const round = (value: number, decimals = 2): string => {
-	const factor = 10 ** decimals
-	return (Math.round(value * factor) / factor).toString()
-}
-
-export const formatComparator = (
-	value: AlertComparator,
-	threshold?: number,
-	thresholdUpper?: number | null,
-): string => {
-	const operator = Match.value(value).pipe(
-		Match.when("gt", () => ">"),
-		Match.when("gte", () => ">="),
-		Match.when("lt", () => "<"),
-		Match.when("lte", () => "<="),
-		Match.when("eq", () => "="),
-		Match.when("neq", () => "!="),
-		Match.when("between", () => "between"),
-		Match.when("not_between", () => "not between"),
-		Match.exhaustive,
-	)
-	if (threshold == null) return operator
-	if (value === "between" || value === "not_between") {
-		const upper = thresholdUpper ?? threshold
-		return `${operator} ${threshold} and ${upper}`
-	}
-	return `${operator} ${threshold}`
-}
-
-export const formatSignalLabel = (signal: string) => {
-	const labels: Record<string, string> = {
-		error_rate: "Error Rate",
-		p95_latency: "P95 Latency",
-		p99_latency: "P99 Latency",
-		apdex: "Apdex",
-		throughput: "Throughput",
-		metric: "Metric",
-	}
-	return labels[signal] ?? signal
-}
-
-export const eventTypeEmoji = (type: string) => {
-	const map: Record<string, string> = {
-		trigger: "\u{1F6A8}",
-		resolve: "\u2705",
-		renotify: "\u{1F514}",
-		test: "\u{1F9EA}",
-	}
-	return map[type] ?? "\u{1F4E2}"
-}
-
-export const formatEventTypeLabel = (type: string) => {
-	const map: Record<string, string> = {
-		trigger: "Triggered",
-		resolve: "Resolved",
-		renotify: "Re-notification",
-		test: "Test",
-	}
-	return map[type] ?? type
-}
-
-const formatSignalMetric = (value: number | null, signalType: string): string =>
-	Option.match(Option.fromNullishOr(value), {
-		onNone: () => "n/a",
-		onSome: (v) =>
-			Match.value(signalType).pipe(
-				Match.when("error_rate", () => `${round(v * 100, 1)}%`),
-				Match.whenOr("p95_latency", "p99_latency", () => `${round(v)}ms`),
-				Match.when("apdex", () => `${round(v, 3)}`),
-				Match.when("throughput", () => `${round(v)} rpm`),
-				Match.orElse(() => `${round(v)}`),
-			),
-	})
-
-export const formatWindow = (minutes: number): string => {
-	if (minutes < 60) return `${minutes}m`
-	const hours = minutes / 60
-	return hours % 1 === 0 ? `${hours}h` : `${minutes}m`
-}
-
-export const severityEmoji = (severity: AlertSeverity): string =>
-	Match.value(severity).pipe(
-		Match.when("critical", () => "\u{1F534}"),
-		Match.when("warning", () => "\u{1F7E0}"),
-		Match.exhaustive,
-	)
-
-export const formatSeverityLabel = (severity: AlertSeverity): string =>
-	Match.value(severity).pipe(
-		Match.when("critical", () => "Critical"),
-		Match.when("warning", () => "Warning"),
-		Match.exhaustive,
-	)
-
-export const slackAttachmentColor = (eventType: string, severity: string): string => {
-	if (eventType === "resolve") return "#2eb67d"
-	if (eventType === "test") return "#36c5f0"
-	if (severity === "critical") return "#e01e5a"
-	return "#ecb22e" // warning
-}
-
-/** Discord embed colors are decimal ints — the int forms of the Slack hexes. */
-const discordEmbedColor = (eventType: string, severity: string): number => {
-	if (eventType === "resolve") return 0x2eb67d
-	if (eventType === "test") return 0x36c5f0
-	if (severity === "critical") return 0xe01e5a
-	return 0xecb22e // warning
-}
-
-type ObservedContext = Pick<
-	DispatchContext,
-	"value" | "signalType" | "comparator" | "threshold" | "thresholdUpper"
->
-
-type ThresholdContext = Omit<ObservedContext, "value">
-
-/** The comparator + formatted threshold(s), e.g. `> 5%` or `between 5% and 10%`. */
-export const formatThresholdSummary = (context: ThresholdContext): string =>
-	context.comparator === "between" || context.comparator === "not_between"
-		? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)}`
-		: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`
-
-export const formatObservedSummary = (context: ObservedContext): string =>
-	`${formatSignalMetric(context.value, context.signalType)} ${formatThresholdSummary(context)}`
-
-/** Prose form of the breach condition, e.g. "above the 5% threshold". */
-const comparatorBreachPhrase = (context: ThresholdContext): string => {
-	const threshold = formatSignalMetric(context.threshold, context.signalType)
-	const upper = formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)
-	return Match.value(context.comparator).pipe(
-		Match.whenOr("gt", "gte", () => `above the ${threshold} threshold`),
-		Match.whenOr("lt", "lte", () => `below the ${threshold} threshold`),
-		Match.when("eq", () => `at the ${threshold} threshold`),
-		Match.when("neq", () => `away from the ${threshold} target`),
-		Match.when("between", () => `inside the ${threshold}–${upper} range`),
-		Match.when("not_between", () => `outside the ${threshold}–${upper} range`),
-		Match.exhaustive,
-	)
 }
 
 /* -------------------------------------------------------------------------- */
@@ -446,27 +316,6 @@ const buildDiscordEmbeds = (context: DispatchContext, linkUrl: string, chatUrl: 
  * it can be exercised in tests without constructing a destination row / secret
  * config (which a full `DispatchContext` requires). The full context satisfies it.
  */
-export type TemplateRenderContext = Pick<
-	DispatchContext,
-	| "ruleId"
-	| "ruleName"
-	| "eventType"
-	| "severity"
-	| "signalType"
-	| "comparator"
-	| "threshold"
-	| "thresholdUpper"
-	| "value"
-	| "sampleCount"
-	| "groupKey"
-	| "windowMinutes"
-	| "incidentId"
-	| "incidentStatus"
-	| "dedupeKey"
-	| "template"
-	| "sentAtMs"
->
-
 /**
  * Build the flat `{{ variable }}` context for templated notifications. Every
  * value is a pre-formatted string, reusing the same helpers the hardcoded

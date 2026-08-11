@@ -37,7 +37,7 @@ export const toMcpQueryError =
 /**
  * `Effect.catchTags` handler map that converts every warehouse error tag into an
  * `McpQueryError` (with the schema-drift hint), leaving any non-warehouse errors
- * (e.g. the MCP auth errors from `resolveTenant`) untouched. Apply inline so the
+ * (e.g. the MCP auth errors from `CurrentMcpTenant`) untouched. Apply inline so the
  * residual error channel infers from the caught tags:
  * `effect.pipe(Effect.catchTags(warehouseToMcpHandlers("pipe_label")))`.
  */

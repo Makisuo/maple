@@ -3,7 +3,7 @@ import { formatTable, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import type { AuditCheckResult, AuditSeverity } from "@maple/domain/setup-audit"
 import { SetupAuditService } from "@/services/org/SetupAuditService"
 
@@ -44,7 +44,7 @@ export function registerAuditSetupTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.auditSetup")(function* ({ include_passing }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const service = yield* SetupAuditService
 			const report = yield* service.run(tenant).pipe(
 				Effect.mapError(

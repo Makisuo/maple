@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Result } from "@/lib/effect-atom"
-import { useNavigate } from "@tanstack/react-router"
+import { getRouteApi } from "@tanstack/react-router"
 
 import {
 	FilterSection,
@@ -10,7 +10,6 @@ import {
 } from "@/components/filters/filter-section"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { browserIconFor, deviceIconFor } from "@/components/replays/session-icons"
-import { Route } from "@/routes/replays"
 import {
 	InputGroup,
 	InputGroupAddon,
@@ -32,6 +31,8 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
+
+const routeApi = getRouteApi("/replays/")
 
 interface ReplaysFacetItem {
 	readonly name: string
@@ -146,8 +147,8 @@ interface ReplaysFilterSidebarProps {
 }
 
 export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps) {
-	const navigate = useNavigate({ from: Route.fullPath })
-	const search = Route.useSearch()
+	const navigate = routeApi.useNavigate()
+	const search = routeApi.useSearch()
 
 	// Single-value params: take the last toggled option (switching dimensions
 	// replaces the prior value; unchecking the only one clears it).
@@ -228,6 +229,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<TextFilter
+							key={`user:${search.user ?? ""}`}
 							id="replays-user-search"
 							label="Name or email"
 							placeholder="Filter by name or email…"
@@ -237,6 +239,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 						/>
 
 						<TextFilter
+							key={`userId:${search.userId ?? ""}`}
 							id="replays-user-filter"
 							label="User ID"
 							placeholder="Filter by user ID…"
@@ -341,11 +344,6 @@ interface TextFilterProps {
 
 function TextFilter({ id, label, placeholder, clearLabel, value, onApply }: TextFilterProps) {
 	const [text, setText] = useState(value ?? "")
-
-	// Keep in sync when the param changes elsewhere (Clear all, the active-user chip's ×).
-	useEffect(() => {
-		setText(value ?? "")
-	}, [value])
 
 	const clear = () => {
 		setText("")

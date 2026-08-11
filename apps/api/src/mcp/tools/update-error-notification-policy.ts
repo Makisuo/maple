@@ -8,7 +8,7 @@ import {
 } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { AlertDestinationId, AlertSeverity, ErrorNotificationPolicyUpsertRequest } from "@maple/domain/http"
 
@@ -54,7 +54,7 @@ export function registerUpdateErrorNotificationPolicyTool(server: McpToolRegistr
 			}
 			const decodedSeverity = Option.getOrUndefined(parsedSeverity)
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const policies = yield* ErrorPolicyService
 
 			const patch: Partial<{

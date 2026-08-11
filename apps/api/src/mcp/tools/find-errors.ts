@@ -1,6 +1,6 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { formatNumber, formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -22,7 +22,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
 		}),
 		Effect.fn("McpTool.findErrors")(function* ({ start_time, end_time, service, environment, limit }) {
 			const { st, et } = resolveTimeRange(start_time, end_time)
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 
 			const errors = yield* findErrors({
 				timeRange: { startTime: st, endTime: et },

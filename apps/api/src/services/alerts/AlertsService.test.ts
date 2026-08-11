@@ -213,7 +213,7 @@ const makeLayer = (
 	const emailLive = Layer.succeed(EmailService, emailStub ?? stubEmailService())
 	const orgMembersLive = Layer.succeed(OrgMembersService, stubOrgMembersService())
 	const orgChSettingsLive = OrgClickHouseSettingsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
+		Layer.provide(Layer.mergeAll(envLive, databaseLive, edgeCacheLive)),
 	)
 	const alertDestinationsLive = AlertDestinationsService.layer.pipe(
 		Layer.provide(

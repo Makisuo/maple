@@ -2,7 +2,7 @@ import { McpQueryError, requiredStringParam, type McpToolRegistrar } from "./typ
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 
 const comparatorLabel: Record<string, string> = {
@@ -20,7 +20,7 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 			rule_id: requiredStringParam("Alert rule ID"),
 		}),
 		Effect.fn("McpTool.getAlertRule")(function* ({ rule_id }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const alerts = yield* AlertRulesService
 
 			const result = yield* alerts.listRules(tenant.orgId).pipe(

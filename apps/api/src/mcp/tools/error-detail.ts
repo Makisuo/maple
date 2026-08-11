@@ -5,7 +5,7 @@ import {
 	requiredStringParam,
 	type McpToolRegistrar,
 } from "./types"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { formatDurationFromMs, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -40,7 +40,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
 			limit,
 		}) {
 			const { st, et } = resolveTimeRange(start_time, end_time)
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 
 			const result = yield* errorDetail({
 				fingerprintHash: fingerprint,

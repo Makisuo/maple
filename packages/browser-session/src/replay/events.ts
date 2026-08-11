@@ -11,12 +11,6 @@ import type { ReplayEngineConfig } from "./transport"
 // that turn browser activity into events — and it is loaded on the sampled
 // replay path alongside rrweb.
 //
-// `SessionEvent` and `activeTraceId` are re-exported so the capture modules keep
-// importing them from one place. Everything else about the sink is reached
-// through `../events-sink` directly.
-export type { SessionEvent } from "../events-sink"
-export { activeTraceId, setActiveTraceIdProvider } from "../events-sink"
-
 // Deliberately no counters: page views and errors are tallied by the sink,
 // which outlives capture and runs whether or not replay is sampled, so the
 // lifecycles read them off `getActiveSink()` rather than through this handle.

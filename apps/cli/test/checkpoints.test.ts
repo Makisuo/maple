@@ -51,7 +51,7 @@ import {
 	syncDirectory,
 	syncTree,
 } from "../src/server/durable-files"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 import { storeMarkerPath, storeOpenMarkerPath } from "../src/server/store-version"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 

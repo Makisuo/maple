@@ -5,7 +5,7 @@ import {
 	validationError,
 	type McpToolRegistrar,
 } from "./types"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatTable } from "@/mcp/lib/format"
@@ -52,7 +52,7 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 			}
 			const resolvedMetric = metricOption.value
 			const resolvedLimit = clampLimit(limit, { defaultValue: 20, max: 500 })
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				service: service_name,

@@ -1,7 +1,7 @@
 import { McpQueryError, optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Clock, Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { DashboardDocument, DashboardId, PortableDashboardDocument } from "@maple/domain/http"
 import { IsoDateTimeString } from "@maple/domain"
@@ -46,7 +46,7 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 				}
 			}
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const persistence = yield* DashboardPersistenceService
 
 			const portable = dashboard_json

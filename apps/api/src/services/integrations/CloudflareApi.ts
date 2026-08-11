@@ -14,19 +14,14 @@
 import { Effect } from "effect"
 import type * as Impl from "./CloudflareApiImpl"
 
-export type {
-	CloudflareGraphqlError,
-	CloudflareHyperdriveConfig,
-	CloudflareZone,
-} from "./CloudflareApiImpl"
+export type { CloudflareGraphqlError, CloudflareHyperdriveConfig, CloudflareZone } from "./CloudflareApiImpl"
 
 const impl = Effect.promise(() => import("./CloudflareApiImpl"))
 
 export const listAccounts: typeof Impl.listAccounts = (...args) =>
 	Effect.flatMap(impl, (m) => m.listAccounts(...args))
 
-export const listZones: typeof Impl.listZones = (...args) =>
-	Effect.flatMap(impl, (m) => m.listZones(...args))
+export const listZones: typeof Impl.listZones = (...args) => Effect.flatMap(impl, (m) => m.listZones(...args))
 
 export const listWorkerScripts: typeof Impl.listWorkerScripts = (...args) =>
 	Effect.flatMap(impl, (m) => m.listWorkerScripts(...args))
