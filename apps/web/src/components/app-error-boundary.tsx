@@ -19,6 +19,7 @@ import { Component, type ReactNode } from "react"
 
 import { buttonVariants } from "@maple/ui/components/ui/button"
 import { isChunkLoadError, shouldAttemptChunkReload } from "@/lib/chunk-reload"
+import { formatBackendError } from "@/lib/error-messages"
 
 interface AppErrorBoundaryProps {
 	children: ReactNode
@@ -58,13 +59,13 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 
 function CrashScreen({ error }: { error: unknown }) {
 	const name = error instanceof Error ? error.name : "Error"
-	const message =
-		error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error"
+	const presentation = formatBackendError(error)
 	const stack = error instanceof Error ? error.stack : undefined
 
 	return (
 		<main
 			role="alert"
+			aria-live="assertive"
 			aria-label="Maple crashed"
 			className="flex min-h-screen w-full flex-col items-center justify-center gap-6 bg-background px-6"
 		>
@@ -86,20 +87,7 @@ function CrashScreen({ error }: { error: unknown }) {
 					The dashboard crashed
 				</h1>
 				<p className="text-sm text-balance text-muted-foreground">
-					An unexpected error stopped this session. Your telemetry is safe — reloading usually
-					recovers it.
-				</p>
-			</div>
-
-			<div className="w-full max-w-md overflow-hidden rounded-lg border bg-muted/30">
-				<div className="flex items-center gap-2 border-b bg-background/60 px-3 py-1.5">
-					<span className="size-1.5 shrink-0 rounded-full bg-destructive" />
-					<span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
-						{name}
-					</span>
-				</div>
-				<p className="max-h-24 overflow-y-auto px-3 py-2 font-mono text-xs break-words text-muted-foreground">
-					{message}
+					{presentation.description} Your telemetry is safe — reloading usually recovers it.
 				</p>
 			</div>
 
@@ -116,13 +104,13 @@ function CrashScreen({ error }: { error: unknown }) {
 				</a>
 			</div>
 
-			{import.meta.env.DEV && stack && (
+			{import.meta.env.DEV && (
 				<details className="w-full max-w-2xl text-left">
 					<summary className="cursor-pointer text-xs text-muted-foreground select-none">
-						Stack trace
+						{name} details
 					</summary>
 					<pre className="mt-2 overflow-auto bg-muted p-3 font-mono text-[11px] leading-relaxed">
-						{stack}
+						{stack ?? presentation.title}
 					</pre>
 				</details>
 			)}

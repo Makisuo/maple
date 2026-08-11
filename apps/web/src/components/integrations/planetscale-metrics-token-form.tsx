@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Cause, Exit } from "effect"
+import { Exit } from "effect"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
@@ -8,6 +8,7 @@ import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { ExternalLinkIcon, LoaderIcon } from "@/components/icons"
 import { useAtomSet } from "@/lib/effect-atom"
+import { errorMessage } from "@/lib/error-toast"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
 /** PlanetScale prints service token secrets with this prefix. Advisory, not a contract. */
@@ -103,7 +104,7 @@ export function PlanetScaleMetricsTokenForm({
 			onSaved()
 			return
 		}
-		setError(extractErrorMessage(result) ?? "Failed to save the metrics service token.")
+		setError(errorMessage(result, "Failed to save the metrics service token."))
 	}
 
 	const linkHref = organization !== null ? tokenSettingsUrl(organization) : (docsUrl ?? null)
@@ -194,11 +195,4 @@ export function PlanetScaleMetricsTokenForm({
 			) : null}
 		</div>
 	)
-}
-
-/** Best-effort human message from a failed mutation Exit (tagged API errors carry one). */
-function extractErrorMessage(result: Exit.Exit<unknown, unknown>): string | null {
-	if (Exit.isSuccess(result)) return null
-	const first = Cause.prettyErrors(result.cause)[0]
-	return first?.message ?? null
 }

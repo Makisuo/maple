@@ -31,8 +31,8 @@ import type {
 	V2AlertRuleTestParams,
 } from "@maple/domain/http/v2"
 import type { QueryEngineAlertReducer } from "@maple/query-engine"
-import { Cause, Exit, Option, Schema } from "effect"
-import { v2ErrorInfo } from "@/lib/error-messages"
+import { Exit, Schema } from "effect"
+import { errorMessage } from "@/lib/error-toast"
 import {
 	buildTimeseriesQuerySpec,
 	createQueryDraft,
@@ -144,24 +144,7 @@ export { destinationTypeLabels } from "@/components/alerts/destination-provider"
 
 export function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
 	if (Exit.isSuccess(exit)) return fallback
-	const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
-	// v2 error envelope ({ error: { type, code, message } }) — the message is the
-	// server's human-readable explanation (validation details included).
-	const v2 = v2ErrorInfo(failure)
-	if (v2 !== null && v2.message.trim().length > 0) return v2.message
-	if (failure instanceof Error && failure.message.trim().length > 0) return failure.message
-	if (
-		typeof failure === "object" &&
-		failure !== null &&
-		"message" in failure &&
-		typeof failure.message === "string" &&
-		failure.message.trim().length > 0
-	) {
-		return failure.message
-	}
-	const defect = Cause.squash(exit.cause)
-	if (defect instanceof Error && defect.message.trim().length > 0) return defect.message
-	return fallback
+	return errorMessage(exit, fallback)
 }
 
 export function formatSignalValue(signalType: AlertSignalType, value: number | null): string {

@@ -1,10 +1,10 @@
 import type { ErrorComponentProps } from "@tanstack/react-router"
 import { Link, useRouter } from "@tanstack/react-router"
-import { useEffect } from "react"
 import { AlertWarningIcon, CircleQuestionIcon, HouseIcon } from "@/components/icons"
 import { Button, buttonVariants } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { useNetworkAutoRetry } from "@/hooks/use-network-auto-retry"
+import { useMountEffect } from "@/hooks/use-mount-effect"
 import { formatBackendError } from "@/lib/error-messages"
 import { isChunkLoadError, shouldAttemptChunkReload } from "@/lib/chunk-reload"
 
@@ -12,14 +12,8 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 	const router = useRouter()
 	const isStaleChunk = isChunkLoadError(error)
 
-	useEffect(() => {
-		if (isStaleChunk && shouldAttemptChunkReload()) {
-			window.location.reload()
-		}
-	}, [isStaleChunk])
-
 	const formatted = formatBackendError(error)
-	const { title, description } = formatted
+	const { title } = formatted
 	const stack = error instanceof Error ? error.stack : undefined
 
 	const retry = () => {
@@ -27,10 +21,19 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 		router.invalidate()
 	}
 	// Route-loader transport failures self-heal without a manual reload.
-	useNetworkAutoRetry(formatted.kind === "network" && !isStaleChunk, retry)
+	const autoRetrying = useNetworkAutoRetry(
+		formatted.recovery.kind === "retry" && formatted.recovery.automatic && !isStaleChunk,
+		retry,
+	)
+	const description = autoRetrying
+		? `${formatted.description} Retrying automatically…`
+		: formatted.description
+	const canRetry = formatted.recovery.kind === "retry" || formatted.recovery.kind === "reload"
+	const shouldReload = isStaleChunk || formatted.recovery.kind === "reload"
 
 	return (
-		<Empty className="min-h-[60vh]">
+		<Empty className="min-h-[60vh]" role="alert" aria-live="assertive" aria-atomic="true">
+			{isStaleChunk ? <StaleChunkReload /> : null}
 			<EmptyHeader>
 				<EmptyMedia variant="icon" className="bg-destructive/10 text-destructive">
 					<AlertWarningIcon size={18} />
@@ -39,19 +42,21 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 				<EmptyDescription>{description}</EmptyDescription>
 			</EmptyHeader>
 			<div className="mt-2 flex items-center gap-2">
-				<Button
-					size="sm"
-					variant="default"
-					onClick={() => {
-						if (isStaleChunk) {
-							window.location.reload()
-							return
-						}
-						retry()
-					}}
-				>
-					{isStaleChunk ? "Reload" : "Try again"}
-				</Button>
+				{canRetry ? (
+					<Button
+						size="sm"
+						variant="default"
+						onClick={() => {
+							if (shouldReload) {
+								window.location.reload()
+								return
+							}
+							retry()
+						}}
+					>
+						{shouldReload ? "Reload" : "Try again"}
+					</Button>
+				) : null}
 				<Link to="/" className={buttonVariants({ size: "sm", variant: "outline" })}>
 					<HouseIcon size={14} />
 					Go home
@@ -69,6 +74,13 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 			)}
 		</Empty>
 	)
+}
+
+function StaleChunkReload() {
+	useMountEffect(() => {
+		if (shouldAttemptChunkReload()) window.location.reload()
+	})
+	return null
 }
 
 function NotFoundError() {
