@@ -88,12 +88,12 @@ describe("updateCustomerBillingControls", () => {
 			assert.strictEqual(result.statusCode, 200)
 			assert.strictEqual(request?.url, "https://api.useautumn.com/v1/customers.update")
 			assert.strictEqual(request?.init?.method, "POST")
-			assert.deepStrictEqual(request?.init?.headers, {
-				Authorization: "Bearer am_sk_test",
-				"Content-Type": "application/json",
-				"x-api-version": "2.3.0",
-			})
-			assert.deepStrictEqual(JSON.parse(String(request?.init?.body)), {
+			const headers = new Headers(request?.init?.headers)
+			assert.strictEqual(headers.get("authorization"), "Bearer am_sk_test")
+			assert.strictEqual(headers.get("content-type"), "application/json")
+			assert.strictEqual(headers.get("x-api-version"), "2.3.0")
+			const requestBody = await new Response(request?.init?.body).text()
+			assert.deepStrictEqual(JSON.parse(requestBody), {
 				customer_id: ORG,
 				billing_controls: {
 					spend_limits: [

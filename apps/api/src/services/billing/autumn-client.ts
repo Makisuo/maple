@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { autumnHandler, type CustomerData } from "autumn-js/backend"
 import type { EdgeCacheServiceShape } from "@maple/cache"
 import { isActivePlanSubscription } from "@maple/domain/billing"
@@ -115,6 +116,11 @@ export const makeCallAutumn =
 						}),
 				})
 
+const toBillingUpstreamError = (error: unknown) =>
+	new BillingUpstreamError({
+		message: error instanceof Error ? error.message : String(error),
+	})
+
 /**
  * `autumnHandler` intentionally exposes only its RPC route list; customer
  * billing controls live on the canonical REST surface instead.
@@ -127,45 +133,44 @@ export const updateCustomerBillingControls = (
 ): Effect.Effect<AutumnResult, BillingUpstreamError> =>
 	secretKey === undefined
 		? Effect.fail(new BillingUpstreamError({ message: "Billing is not configured" }))
-		: Effect.tryPromise({
-				try: async () => {
-					const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/v1/customers.update`, {
-						method: "POST",
+		: Effect.gen(function* () {
+				const client = yield* HttpClient.HttpClient
+				const request = yield* HttpClientRequest.bodyJson(
+					HttpClientRequest.post(`${apiUrl.replace(/\/+$/, "")}/v1/customers.update`, {
 						headers: {
 							Authorization: `Bearer ${secretKey}`,
-							"Content-Type": "application/json",
 							"x-api-version": AUTUMN_API_VERSION,
 						},
-						body: JSON.stringify({
-							customer_id: orgId,
-							billing_controls: {
-								spend_limits: controls.spendLimits.map((limit) => ({
-									feature_id: limit.featureId,
-									enabled: limit.enabled,
-									limit_type: limit.limitType,
-									overage_limit: limit.overageLimit,
-								})),
-								usage_alerts: controls.usageAlerts.map((alert) => ({
-									feature_id: alert.featureId,
-									enabled: alert.enabled,
-									threshold: alert.threshold,
-									threshold_type: alert.thresholdType,
-									...(alert.name ? { name: alert.name } : {}),
-								})),
-							},
-						}),
-					})
-					const text = await response.text()
-					return {
-						statusCode: response.status,
-						response: text.length === 0 ? {} : JSON.parse(text),
-					} as AutumnResult
-				},
-				catch: (error) =>
-					new BillingUpstreamError({
-						message: error instanceof Error ? error.message : String(error),
 					}),
-			})
+					{
+						customer_id: orgId,
+						billing_controls: {
+							spend_limits: controls.spendLimits.map((limit) => ({
+								feature_id: limit.featureId,
+								enabled: limit.enabled,
+								limit_type: limit.limitType,
+								overage_limit: limit.overageLimit,
+							})),
+							usage_alerts: controls.usageAlerts.map((alert) => ({
+								feature_id: alert.featureId,
+								enabled: alert.enabled,
+								threshold: alert.threshold,
+								threshold_type: alert.thresholdType,
+								...(alert.name ? { name: alert.name } : {}),
+							})),
+						},
+					},
+				).pipe(Effect.mapError(toBillingUpstreamError))
+				const response = yield* client.execute(request).pipe(Effect.mapError(toBillingUpstreamError))
+				const text = yield* response.text.pipe(Effect.mapError(toBillingUpstreamError))
+				const responseBody =
+					text.length === 0
+						? {}
+						: yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
+								Effect.mapError(toBillingUpstreamError),
+							)
+				return { statusCode: response.status, response: responseBody } as AutumnResult
+			}).pipe(Effect.provide(FetchHttpClient.layer))
 
 // Surface a readable message for a non-2xx Autumn response (it carries a
 // `{ message }` / `{ error }` body) so the client error isn't an opaque 502.
