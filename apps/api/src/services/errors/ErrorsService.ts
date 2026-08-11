@@ -113,6 +113,7 @@ import { selectDistinctOrgIds } from "@/platform/distinct-org-ids"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
+import { describeCause } from "@/platform/describe-cause"
 import { NotificationDispatcher, type NotificationRequest } from "@/services/alerts/NotificationDispatcher"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/cache"
@@ -232,16 +233,7 @@ const severitySortRank = (severity: IssueSeverity | null): number =>
 		Match.exhaustive,
 	)
 
-export const describeCause = (cause: unknown): string | undefined => {
-	if (cause == null) return undefined
-	if (cause instanceof Error) return cause.stack ?? cause.message
-	if (typeof cause === "string") return cause
-	try {
-		return JSON.stringify(cause)
-	} catch {
-		return String(cause)
-	}
-}
+export { describeCause } from "@/platform/describe-cause"
 
 export const makePersistenceError = (error: unknown): ErrorPersistenceError => {
 	const baseFor = (message: string, raw: unknown) => {

@@ -6,6 +6,7 @@ import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
+import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
@@ -48,6 +49,18 @@ const QueryEngineServiceLive = QueryEngineService.layer.pipe(
 const EmailServiceLive = EmailService.layer.pipe(Layer.provide(InfraLive))
 const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(InfraLive))
 
+const AlertDestinationsServiceLive = AlertDestinationsService.layer.pipe(
+	Layer.provide(
+		Layer.mergeAll(
+			InfraLive,
+			AlertRuntime.layer,
+			HazelOAuthServiceLive,
+			EmailServiceLive,
+			OrgMembersServiceLive,
+		),
+	),
+)
+
 const AlertsServiceLive = AlertsService.layer.pipe(
 	Layer.provide(
 		Layer.mergeAll(
@@ -59,6 +72,7 @@ const AlertsServiceLive = AlertsService.layer.pipe(
 			EmailServiceLive,
 			OrgMembersServiceLive,
 			OrgClickHouseSettingsServiceLive,
+			AlertDestinationsServiceLive,
 		),
 	),
 )

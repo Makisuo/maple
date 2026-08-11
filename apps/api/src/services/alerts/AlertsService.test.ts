@@ -22,6 +22,7 @@ import {
 	type AlertsServiceShape,
 	interleaveAlertRulesByOrg,
 } from "./AlertsService"
+import { AlertDestinationsService } from "./AlertDestinationsService"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService } from "@maple/cache"
 import { baselineWarehouseCapabilities } from "@maple/query-engine"
@@ -212,8 +213,13 @@ const makeLayer = (
 	const orgChSettingsLive = OrgClickHouseSettingsService.layer.pipe(
 		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
 	)
+	const alertDestinationsLive = AlertDestinationsService.layer.pipe(
+		Layer.provide(
+			Layer.mergeAll(envLive, databaseLive, runtimeLive, hazelOAuthLive, emailLive, orgMembersLive),
+		),
+	)
 
-	return AlertsService.layer.pipe(
+	const alertsLive = AlertsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
 				envLive,
@@ -226,9 +232,11 @@ const makeLayer = (
 				orgMembersLive,
 				orgChSettingsLive,
 				investigationsLive,
+				alertDestinationsLive,
 			),
 		),
 	)
+	return Layer.mergeAll(alertDestinationsLive, alertsLive)
 }
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -351,6 +359,19 @@ const insertDeliveryEventRow = async (
 }
 
 describe("AlertsService", () => {
+	it.effect("delegates the legacy destination methods to AlertDestinationsService", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const destinations = yield* AlertDestinationsService
+			assert.strictEqual(alerts.listDestinations, destinations.listDestinations)
+			assert.strictEqual(alerts.createDestination, destinations.createDestination)
+			assert.strictEqual(alerts.updateDestination, destinations.updateDestination)
+			assert.strictEqual(alerts.deleteDestination, destinations.deleteDestination)
+			assert.strictEqual(alerts.testDestination, destinations.testDestination)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}))))
+	})
+
 	it.effect("caps active alert rules per organization", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {

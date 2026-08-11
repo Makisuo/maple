@@ -17,7 +17,7 @@ import type {
 } from "@maple/domain/http/v2"
 import { MapleApiV2, paginateArray, resourceNotFound } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { AlertsService } from "@/services/alerts/AlertsService"
+import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 import { mapAlertError } from "./alerts-error-map"
 
 const toV2Destination = (doc: AlertDestinationDocument): V2AlertDestination => ({
@@ -156,13 +156,13 @@ const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinati
 
 export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "alertDestinations", (handlers) =>
 	Effect.gen(function* () {
-		const alerts = yield* AlertsService
+		const destinations = yield* AlertDestinationsService
 
 		return handlers
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* alerts
+					const response = yield* destinations
 						.listDestinations(tenant.orgId)
 						.pipe(mapAlertError("destination_list"))
 					const page = yield* paginateArray(response.destinations.map(toV2Destination), query)
@@ -172,7 +172,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("retrieve", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* alerts
+					const response = yield* destinations
 						.listDestinations(tenant.orgId)
 						.pipe(mapAlertError("destination_list"))
 					const destination = response.destinations.find((doc) => doc.id === params.id)
@@ -186,7 +186,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("create", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const created = yield* alerts
+					const created = yield* destinations
 						.createDestination(
 							tenant.orgId,
 							tenant.userId,
@@ -200,7 +200,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const updated = yield* alerts
+					const updated = yield* destinations
 						.updateDestination(
 							tenant.orgId,
 							tenant.userId,
@@ -215,7 +215,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const deleted = yield* alerts
+					const deleted = yield* destinations
 						.deleteDestination(tenant.orgId, tenant.roles, params.id)
 						.pipe(mapAlertError("destination_delete"))
 					return {
@@ -229,7 +229,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("test", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const result = yield* alerts
+					const result = yield* destinations
 						.testDestination(tenant.orgId, tenant.userId, tenant.roles, params.id)
 						.pipe(mapAlertError("destination_test"))
 					return {
