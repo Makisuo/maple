@@ -1,6 +1,6 @@
 import { useDeferredValue, useMemo } from "react"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { IsoDateTimeString, isRangeComparator, type AlertRulePreviewResponse } from "@maple/domain/http"
 import type { V2AlertRulePreviewParams } from "@maple/domain/http/v2"
@@ -80,7 +80,7 @@ export function useAlertRulePreview(
 
 	const result = useAtomValue(
 		payload
-			? MapleApiV2AtomClient.query("alertRules", "preview", {
+			? retainedQueryV2("alertRules", "preview", {
 					payload,
 					reactivityKeys: ["alertPreview"],
 					// Idle TTL so abandoned keystroke variants don't accumulate.

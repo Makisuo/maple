@@ -21,8 +21,8 @@ import {
 import "@xyflow/react/dist/style.css"
 
 import { Result, useAtom, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { serviceMapLayoutAtomFamily, upsertSnapshot } from "@/atoms/service-map-layout-atoms"
 import { serviceMapViewPrefsAtomFamily } from "@/atoms/service-map-view-prefs-atoms"
 import { Link } from "@tanstack/react-router"
@@ -2483,12 +2483,12 @@ export function ServiceMapView({
 		getServiceMapPlanetScaleResultAtom(cloudflareInput),
 	)
 	const planetscaleInventoryResult = useAtomValue(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "databases", {
+		retainedQueryV2("planetscaleIntegration", "databases", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	const hyperdriveInventoryResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "cloudflareHyperdrives", {
+		retainedQuery("integrations", "cloudflareHyperdrives", {
 			reactivityKeys: ["cloudflareIntegrationStatus"],
 		}),
 	)

@@ -22,7 +22,7 @@ import { useAnomalyMutations } from "@/components/anomalies/use-anomaly-mutation
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { SectionHeader } from "@/components/layout/section-header"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import {
@@ -54,7 +54,7 @@ function AnomalyDetailPage() {
 	const { incidentId: rawIncidentId } = Route.useParams()
 	const incidentId = decodeIncidentId(rawIncidentId)
 
-	const incidentQueryAtom = MapleApiAtomClient.query("anomalies", "getIncident", {
+	const incidentQueryAtom = retainedQuery("anomalies", "getIncident", {
 		params: { incidentId },
 		reactivityKeys: ["anomalyIncidents", `anomalyIncident:${incidentId}`],
 	})
@@ -146,7 +146,7 @@ function AnomalyDetailBody({
 	const isStale = isStaleOpenIncident(incident)
 	const tone = severityToneFor(incident)
 
-	const timeseriesQueryAtom = MapleApiAtomClient.query("anomalies", "getIncidentTimeseries", {
+	const timeseriesQueryAtom = retainedQuery("anomalies", "getIncidentTimeseries", {
 		params: { incidentId },
 		query: {},
 		reactivityKeys: [`anomalyIncident:${incidentId}:timeseries`],

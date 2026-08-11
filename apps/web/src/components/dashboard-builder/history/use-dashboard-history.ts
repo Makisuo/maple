@@ -1,11 +1,11 @@
 import { useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { DashboardId, DashboardVersionId } from "@maple/domain/http"
 
 const dashboardVersionsKey = (dashboardId: DashboardId) => `dashboard:${dashboardId}:versions`
 
 export function useDashboardVersions(dashboardId: DashboardId) {
-	const queryAtom = MapleApiV2AtomClient.query("dashboards", "listVersions", {
+	const queryAtom = retainedQueryV2("dashboards", "listVersions", {
 		params: { id: dashboardId },
 		query: { limit: 100 },
 		reactivityKeys: [dashboardVersionsKey(dashboardId)],
@@ -18,7 +18,7 @@ export function useDashboardVersions(dashboardId: DashboardId) {
  * mount the consuming component — this hook is always called on mount.
  */
 export function useDashboardVersionDetail(dashboardId: DashboardId, versionId: DashboardVersionId) {
-	const queryAtom = MapleApiV2AtomClient.query("dashboards", "retrieveVersion", {
+	const queryAtom = retainedQueryV2("dashboards", "retrieveVersion", {
 		params: {
 			id: dashboardId,
 			version_id: versionId,

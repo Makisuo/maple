@@ -5,7 +5,7 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { hasBringYourOwnCloudAddOn } from "@/lib/billing/plan-gating"
 import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import { useIsOrgAdmin } from "@/hooks/use-is-org-admin"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 import {
 	BellIcon,
 	CircleCheckIcon,
@@ -149,7 +149,7 @@ export function useVisibleSettingsSections() {
 	// in the Clerk-auth path below. `isClerkAuthEnabled` is a build-time constant
 	// today, but keeping the hooks above the early return avoids a conditional-hook
 	// hazard if it ever becomes dynamic.
-	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
+	const sessionResult = useAtomValue(retainedQuery("auth", "session", {}))
 	const isAdmin = useIsOrgAdmin()
 	const { data: customer, isLoading: isCustomerLoading } = useMapleCustomer()
 	// Shared with the main sidebar and the flagged routes, so a flag can't be read

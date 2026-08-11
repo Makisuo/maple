@@ -1,6 +1,7 @@
 import { Atom } from "@/lib/effect-atom"
 import { Effect, Schema } from "effect"
-import { encodeOrgScopedKey, orgScopedKeyPayload } from "@/lib/cache-key"
+import { encodeOrgScopedKey, identityFromKey, orgScopedKeyPayload } from "@/lib/cache-key"
+import { nextRetentionNamespace, withRetention } from "@/lib/services/atoms/retained-atom"
 import { getActiveOrgId } from "@/lib/services/common/auth-headers"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { BackendError, WarehouseApiError } from "@/api/warehouse/effect-utils"
@@ -140,8 +141,17 @@ export type QueryAtomFailure = QueryError | QueryAtomError
 
 function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, options?: QueryAtomOptions) {
 	const UnknownFromJson = Schema.fromJsonString(Schema.Unknown)
+	// Namespaces this family's retained results. Without it, two queries taking
+	// only a time window would share a logical identity and hand each other's
+	// rows back as fallbacks.
+	const namespace = nextRetentionNamespace()
 
 	const family = Atom.family((key: string) => {
+		// The same query under a different time window, so a remount onto a
+		// rolled-over key renders the previous window's data immediately rather
+		// than an empty skeleton. See `withRetention`.
+		const identity = `${namespace}:${identityFromKey(key)}`
+
 		// Build on the mounted `MapleApiAtomClient.runtime` (not bare `Atom.make`,
 		// which runs on the default atom runtime). That runtime owns the Maple OTLP
 		// tracer that actually flushes, so the wrapper span each `query` opens — e.g.
@@ -167,7 +177,10 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 			resultAtom = Atom.setIdleTTL(resultAtom, options.staleTime)
 		}
 
-		return resultAtom
+		// Applied at the atom rather than in a hook so that every consumer gets it
+		// — `useAtomValue`, `useRefreshableAtomValue` and
+		// `useRetainedRefreshableResultValue` alike — with no call-site changes.
+		return withRetention(resultAtom, identity)
 	})
 
 	return (input: Input) => family(encodeOrgScopedKey(getActiveOrgId(), input))

@@ -24,7 +24,7 @@ import {
 } from "@/lib/alerts/form-utils"
 import { v2ErrorInfo } from "@/lib/error-messages"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -202,7 +202,7 @@ export function useDestinationManager(): DestinationManager {
 export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationManager; isAdmin: boolean }) {
 	const { result: destinationsResult } = useAlertDestinationsList()
 	const deliveryEventsResult = useAtomValue(
-		MapleApiV2AtomClient.query("alertDeliveries", "list", {
+		retainedQueryV2("alertDeliveries", "list", {
 			query: { limit: 100 },
 			reactivityKeys: ["alertDeliveryEvents"],
 		}),

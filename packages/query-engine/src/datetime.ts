@@ -186,6 +186,82 @@ export function resolveRelativeRangeToWarehouse(
 	}
 }
 
+// Cache-key snap grid — single source of truth
+//
+// A relative preset ("12h") has no absolute endpoint in the URL, so every fresh
+// mount re-resolves it against `Date.now()` and produces a slightly different
+// range. Cache keys are built from that range, so the key rolls over as fast as
+// the clock moves — and a client-side idle TTL of 30s never gets to fire,
+// because the key it was keeping alive no longer exists. Navigating away and
+// back re-fetches from cold.
+//
+// The fix is to floor the endpoint to a grid coarse enough that the key holds
+// still between navigations, and fine enough that the data is still current.
+// A flat grid can't do both: 15s is right for "last 1 hour" and pointless for
+// "last 7 days". So the grid scales with the window.
+//
+// Drift is worst just above a rung boundary, where the wider grid has kicked in
+// but the window has not yet grown to match; the peak is 1h+ε on the 1m rung,
+// at 1.7% of the window. In absolute terms it is never more than a minute on a
+// window of 6h or less, 5 minutes on a day, 15 on a week, 30 beyond that.
+// Explicit refresh and auto-refresh re-resolve against the real clock, so this
+// bounds staleness while idle, not staleness overall.
+//
+// This is a *cache-key* concern, not a display one. Callers that materialize a
+// preset into an absolute range the user will see (the time-range picker
+// writing to the URL) should record the true instant and skip this.
+
+const CACHE_SNAP_LADDER: ReadonlyArray<readonly [maxRangeMs: number, snapSeconds: number]> = [
+	[60 * 60 * 1000, 15], // <= 1h  → 15s
+	[6 * 60 * 60 * 1000, 60], // <= 6h  → 1m
+	[24 * 60 * 60 * 1000, 300], // <= 24h → 5m
+	[7 * 24 * 60 * 60 * 1000, 900], // <= 7d  → 15m
+] as const
+
+const CACHE_SNAP_FALLBACK_SECONDS = 1800 // > 7d → 30m
+
+/**
+ * Cache-key snap grid (seconds) for a window of the given width. Wider windows
+ * tolerate a coarser grid because the same absolute drift is a smaller share of
+ * the range. Non-finite or non-positive widths fall back to the finest rung.
+ */
+export function cacheSnapSecondsForRange(rangeMs: number): number {
+	if (!Number.isFinite(rangeMs) || rangeMs <= 0) return CACHE_SNAP_LADDER[0][1]
+	for (const [maxRangeMs, snapSeconds] of CACHE_SNAP_LADDER) {
+		if (rangeMs <= maxRangeMs) return snapSeconds
+	}
+	return CACHE_SNAP_FALLBACK_SECONDS
+}
+
+/**
+ * Floor a resolved range's endpoint to the grid from `cacheSnapSecondsForRange`,
+ * holding the window width exactly constant.
+ *
+ * Width is preserved by deriving the start from the snapped end rather than
+ * flooring both independently — independent floors make the width oscillate by
+ * one grid step as `now` crosses a boundary, which changes the bucket count and
+ * defeats the point of snapping.
+ *
+ * Unparseable input is returned untouched, so a malformed timestamp degrades to
+ * the previous (unsnapped) behaviour instead of throwing on the cache-key path.
+ */
+export function snapRangeForCache(range: { readonly startTime: string; readonly endTime: string }): {
+	startTime: string
+	endTime: string
+} {
+	const startMs = parseWarehouseDateTime(range.startTime)
+	const endMs = parseWarehouseDateTime(range.endTime)
+	if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return range
+
+	const gridMs = cacheSnapSecondsForRange(endMs - startMs) * 1000
+	const snappedEndMs = Math.floor(endMs / gridMs) * gridMs
+
+	return {
+		startTime: formatWarehouseDateTime(snappedEndMs - (endMs - startMs)),
+		endTime: formatWarehouseDateTime(snappedEndMs),
+	}
+}
+
 // Time-series bucketing — single source of truth
 //
 // Both the web app and the query engine pick an auto bucket size and build

@@ -22,7 +22,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { EyeIcon } from "@/components/icons"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 
 const HOSTED_INGEST_URL = "https://ingest.maple.dev"
 const DOCS_URL = "https://maple.dev/docs/guides/kubernetes-infrastructure"
@@ -60,7 +60,7 @@ function helmCommand(token: string) {
 export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 	const [revealed, setRevealed] = useState(false)
 
-	const keysResult = useAtomValue(MapleApiV2AtomClient.query("ingestKeys", "retrieve", {}))
+	const keysResult = useAtomValue(retainedQueryV2("ingestKeys", "retrieve", {}))
 
 	const token = useMemo(
 		() =>

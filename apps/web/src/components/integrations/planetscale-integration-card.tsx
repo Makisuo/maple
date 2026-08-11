@@ -21,7 +21,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { isExcluded } from "@/components/infra/planetscale/branch-selection"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { showErrorToast } from "@/lib/error-toast"
 import { IntegrationIconPlate, catalogEntry } from "./integration-catalog"
 import { useIntegrationConnect } from "./integration-connect"
@@ -55,7 +55,7 @@ const parsePatternList = (value: string): string[] =>
  * as a single status row — the machinery stays out of the UI.
  */
 export function PlanetScaleIntegrationCard() {
-	const statusQuery = MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+	const statusQuery = retainedQueryV2("planetscaleIntegration", "status", {
 		reactivityKeys: ["planetscaleIntegration"],
 	})
 	const statusResult = useAtomValue(statusQuery)
@@ -429,14 +429,14 @@ function PlanetScaleOrgPicker(props: {
 	cancelLabel: string
 }) {
 	const organizationsResult = useAtomValue(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "organizations", {
+		retainedQueryV2("planetscaleIntegration", "organizations", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	// Powers the live filter preview. Empty before the first inventory poll, which
 	// is exactly the pending-org-selection case — the preview then stays quiet.
 	const inventoryResult = useAtomValue(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "databases", {
+		retainedQueryV2("planetscaleIntegration", "databases", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
@@ -617,7 +617,7 @@ function PlanetScaleWebhookSetup() {
 
 function PlanetScaleWebhookConfig() {
 	const configResult = useAtomValue(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "webhookConfig", {
+		retainedQueryV2("planetscaleIntegration", "webhookConfig", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)

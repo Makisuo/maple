@@ -23,7 +23,8 @@ export type WidgetDataSourceLike = {
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
-import { encodeKey, encodeOrgScopedKey, orgScopedKeyPayload } from "@/lib/cache-key"
+import { encodeKey, encodeOrgScopedKey, identityFromKey, orgScopedKeyPayload } from "@/lib/cache-key"
+import { nextRetentionNamespace, withRetention } from "@/lib/services/atoms/retained-atom"
 import { getActiveOrgId } from "@/lib/services/common/auth-headers"
 import { formatBackendError } from "@/lib/error-messages"
 import { Cause, Option } from "effect"
@@ -341,8 +342,19 @@ const fetchWidgetData = Effect.fnUntraced(
 // with its retry/`peer.service` transforms, tracer, logger — on every fetch *and* every
 // retry. On an N-tile dashboard that was N+ full layer builds per load. The runtime also
 // puts the real tracer in scope, so logs and span annotations here no longer no-op.
+//
+// Namespaced like the warehouse query families. This one family serves every
+// endpoint, but the endpoint is part of the payload and so already part of the
+// identity; the namespace only has to keep it clear of the query atoms.
+const WIDGET_RETENTION_NAMESPACE = nextRetentionNamespace()
+
 const widgetFetchFamily = Atom.family((key: string) =>
-	MapleApiAtomClient.runtime.atom(fetchWidgetData(key)).pipe(Atom.setIdleTTL(120_000)),
+	// Retained so a tile whose dashboard range has rolled onto a new grid cell
+	// re-renders its previous values while the new window loads.
+	withRetention(
+		MapleApiAtomClient.runtime.atom(fetchWidgetData(key)).pipe(Atom.setIdleTTL(120_000)),
+		`${WIDGET_RETENTION_NAMESPACE}:${identityFromKey(key)}`,
+	),
 )
 
 const widgetFetchAtom = (input: { endpoint: string; params: Record<string, unknown> }) =>
