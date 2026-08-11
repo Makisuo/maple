@@ -53,7 +53,9 @@ jobs:
                         - '.github/actions/**'
                       ts:
                         - *base
+                        - 'alchemy.run.ts'
                         - 'apps/**'
+                        - 'examples/**'
                         - 'packages/**'
                         - 'lib/**'
                         - 'scripts/**'

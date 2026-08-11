@@ -38,11 +38,12 @@ export const resolveHttpMcpTenant = Effect.gen(function* () {
 export const resolveTenant = CurrentMcpTenant
 
 /** Infrastructure binding: resolves tenant and provides WarehouseExecutor layer. */
-export const withTenantExecutor = <A, E>(effect: Effect.Effect<A, E, WarehouseExecutor>) =>
-	Effect.fn("withTenantExecutor")(function* () {
-		const tenant = yield* resolveTenant
-		return yield* Effect.provide(effect, makeWarehouseExecutorFromTenant(tenant))
-	})()
+export const withTenantExecutor = Effect.fn("withTenantExecutor")(function* <A, E>(
+	effect: Effect.Effect<A, E, WarehouseExecutor>,
+) {
+	const tenant = yield* resolveTenant
+	return yield* Effect.provide(effect, makeWarehouseExecutorFromTenant(tenant))
+})
 
 export const queryWarehouse = Effect.fn("queryWarehouse")(function* <T = any>(
 	pipe: WarehouseQueryName,

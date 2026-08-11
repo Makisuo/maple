@@ -175,9 +175,7 @@ function createBackoffOnError(
 			return
 		}
 
-		const delay = backoffConfig.jitter
-			? currentDelay * (0.5 + Math.random())
-			: currentDelay
+		const delay = backoffConfig.jitter ? currentDelay * (0.5 + Math.random()) : currentDelay
 
 		logVia(runtime, "warning", "Connection error, retrying", {
 			collectionId,
@@ -219,6 +217,12 @@ export interface EffectElectricCollectionUtils extends ElectricCollectionUtils {
 		timeout?: number,
 	) => Effect.Effect<boolean, TxIdTimeoutError | InvalidTxIdError | AwaitTxIdError>
 }
+
+type AnyEffectElectricCollectionConfig =
+	| (EffectElectricCollectionConfig<any, any, any, any, any> & {
+			runtime: ManagedRuntime.ManagedRuntime<any, unknown>
+	  })
+	| (EffectElectricCollectionConfig<any, any, any, any, never> & { runtime?: never })
 
 /** Creates Electric collection options with Effect-based handlers. */
 export function effectElectricCollectionOptions<T extends StandardSchemaV1, R>(
@@ -277,16 +281,25 @@ export function effectElectricCollectionOptions<T extends Row<unknown>>(
 	schema?: never
 }
 
-export function effectElectricCollectionOptions(
-	config: EffectElectricCollectionConfig<any, any, any, any, any>,
-): CollectionConfig<any, string | number, any, any> & {
+export function effectElectricCollectionOptions(config: AnyEffectElectricCollectionConfig): CollectionConfig<
+	any,
+	string | number,
+	any,
+	any
+> & {
 	id?: string
 	utils: EffectElectricCollectionUtils
 	schema?: any
 } {
-	const promiseOnInsert = convertInsertHandler(config.onInsert, config.runtime)
-	const promiseOnUpdate = convertUpdateHandler(config.onUpdate, config.runtime)
-	const promiseOnDelete = convertDeleteHandler(config.onDelete, config.runtime)
+	const promiseOnInsert = config.runtime
+		? convertInsertHandler(config.onInsert, config.runtime)
+		: convertInsertHandler(config.onInsert)
+	const promiseOnUpdate = config.runtime
+		? convertUpdateHandler(config.onUpdate, config.runtime)
+		: convertUpdateHandler(config.onUpdate)
+	const promiseOnDelete = config.runtime
+		? convertDeleteHandler(config.onDelete, config.runtime)
+		: convertDeleteHandler(config.onDelete)
 
 	const backoffEnabled = config.backoff !== false
 	const backoffConfig: Required<BackoffConfig> = backoffEnabled
@@ -415,7 +428,7 @@ export function createEffectCollection<A extends Row<unknown>, TRuntime>(
 	const options = effectElectricCollectionOptions({
 		...config,
 		schema: standardSchema,
-	} as Parameters<typeof effectElectricCollectionOptions>[0])
+	} as unknown as Parameters<typeof effectElectricCollectionOptions>[0])
 
 	const collection = tanstackCreateCollection(options as any)
 	return collection as unknown as EffectCollection<A>
