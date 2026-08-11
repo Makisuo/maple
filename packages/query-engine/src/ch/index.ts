@@ -228,6 +228,7 @@ export {
 	errorFingerprintsQuery,
 	errorIssueTimeseriesQuery,
 	errorIssueSampleTracesQuery,
+	ErrorIssueSampleTracesOutputSchema,
 	type ErrorsByTypeOpts,
 	type ErrorsByTypeOutput,
 	type ErrorsTimeseriesOpts,
@@ -281,6 +282,7 @@ export {
 	activeOrgsByErrorEventsQuery,
 	activeOrgsByTracesQuery,
 	activeOrgsByLogsQuery,
+	ActiveOrgsOutputSchema,
 	type ActiveOrgsOutput,
 } from "./queries/activity"
 

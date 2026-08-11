@@ -72,8 +72,11 @@ export type TanStackDBErrorReason = "load-failed" | "cleaned-up"
  * atoms. Carries a `reason` so a consumer can discriminate a load failure from
  * a cleaned-up collection by tag/field rather than by parsing the message.
  */
-export class TanStackDBError extends Schema.TaggedError<TanStackDBError>()("TanStackDBError", {
-	message: Schema.String,
-	reason: Schema.Literals(["load-failed", "cleaned-up"]),
-	cause: Schema.optional(Schema.Unknown),
-}) {}
+export class TanStackDBError extends Schema.TaggedError<TanStackDBError>()(
+	"@maple/effect-db/TanStackDBError",
+	{
+		message: Schema.String,
+		reason: Schema.Literals(["load-failed", "cleaned-up"]),
+		cause: Schema.optional(Schema.Unknown),
+	},
+) {}

@@ -1,3 +1,4 @@
+import type { OrgId } from "@maple/domain"
 import { integer, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core"
 
 /**
@@ -12,7 +13,7 @@ import { integer, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-or
 export const orgClickHouseSchemaApplyRuns = pgTable(
 	"org_clickhouse_schema_apply_runs",
 	{
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		// Cloudflare Workflow instance id (for status()/dedup), null before kickoff.
 		workflowInstanceId: text("workflow_instance_id"),
 		// "queued" | "running" | "succeeded" | "failed"

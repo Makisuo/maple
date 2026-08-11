@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Data, Effect, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { autumnHandler, type CustomerData } from "autumn-js/backend"
 import type { EdgeCacheServiceShape } from "@maple/cache"
@@ -49,12 +49,9 @@ export const responseHasActivePlan = (response: unknown): boolean => {
 // Sentinel keeping non-200 Autumn responses out of the edge cache: the compute
 // fails with this so `getOrCompute` never stores it, then the caller recovers it
 // into the normal path. Mirrors `AutumnResult` so `.result` stays typed.
-class UncacheableAutumnResult extends Schema.TaggedError<UncacheableAutumnResult>()(
-	"@maple/api/billing/UncacheableAutumnResult",
-	{
-		result: Schema.Struct({ statusCode: Schema.Number, response: Schema.Unknown }),
-	},
-) {}
+class UncacheableAutumnResult extends Data.TaggedError("@maple/api/billing/UncacheableAutumnResult")<{
+	readonly result: AutumnResult
+}> {}
 
 /**
  * Run `getOrCreateCustomer` through the per-org edge cache (200-only). Active-plan

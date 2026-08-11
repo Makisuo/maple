@@ -228,23 +228,19 @@ const makeLayer = (
 	)
 
 	const alertsLive = AlertsService.layer.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				envLive,
-				databaseLive,
-				queryEngineLive,
-				warehouseLive,
-				runtimeLive,
-				hazelOAuthLive,
-				emailLive,
-				orgMembersLive,
-				orgChSettingsLive,
-				investigationsLive,
-				alertDestinationsLive,
-				alertReadModelsLive,
-				alertRulesLive,
-			),
-		),
+		Layer.provide(envLive),
+		Layer.provide(databaseLive),
+		Layer.provide(queryEngineLive),
+		Layer.provide(warehouseLive),
+		Layer.provide(runtimeLive),
+		Layer.provide(hazelOAuthLive),
+		Layer.provide(emailLive),
+		Layer.provide(orgMembersLive),
+		Layer.provide(orgChSettingsLive),
+		Layer.provide(investigationsLive),
+		Layer.provide(alertDestinationsLive),
+		Layer.provide(alertReadModelsLive),
+		Layer.provide(alertRulesLive),
 	)
 	return Layer.mergeAll(alertDestinationsLive, alertReadModelsLive, alertRulesLive, alertsLive)
 }

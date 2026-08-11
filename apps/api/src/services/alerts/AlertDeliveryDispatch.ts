@@ -4,6 +4,7 @@ import {
 	type AlertComparator,
 	type AlertDestinationType,
 	type AlertEventType,
+	type OrgId,
 	type AlertSignalType,
 	type AlertSeverity,
 } from "@maple/domain/http"
@@ -669,7 +670,7 @@ export interface DispatchDeps {
 	 * dependency-free — only the `slack-bot` destination arm invokes it. Fails
 	 * (AlertDeliveryError) when the org has no active Slack installation.
 	 */
-	readonly resolveSlackBotToken: (orgId: string) => Effect.Effect<string, AlertDeliveryError>
+	readonly resolveSlackBotToken: (orgId: OrgId) => Effect.Effect<string, AlertDeliveryError>
 }
 
 export const dispatchDelivery = (

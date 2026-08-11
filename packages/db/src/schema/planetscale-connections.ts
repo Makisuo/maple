@@ -1,3 +1,4 @@
+import type { OrgId } from "@maple/domain"
 import { jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 /**
@@ -14,7 +15,7 @@ export const planetscaleConnections = pgTable(
 	"planetscale_connections",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		/** PlanetScale organization slug the connection is bound to. */
 		psOrganization: text("ps_organization").notNull(),
 		connectedByUserId: text("connected_by_user_id").notNull(),

@@ -58,6 +58,7 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				cycle: { readonly startMs: number; readonly endMs: number },
 			) {
 				const orgId = tenant.orgId
+				yield* Effect.annotateCurrentSpan("orgId", orgId)
 				const params = {
 					orgId,
 					startTime: formatWarehouseDateTime(cycle.startMs),

@@ -45,48 +45,56 @@ const callMcpToolUnscoped = Effect.fn("McpToolDispatcher.call")(function* (name:
 		),
 		Effect.catchTags({
 			"@maple/mcp/errors/McpQueryError": (error) =>
-				Effect.logError(`Tool error: ${error.message}`).pipe(
-					Effect.annotateLogs({ errorTag: error._tag, pipe: error.pipeName }),
+				Effect.logError("MCP tool execution failed").pipe(
+					Effect.annotateLogs({
+						"error.message": error.message,
+						"error.type": error._tag,
+						"maple.mcp.pipe": error.pipeName,
+					}),
 					Effect.as({
 						isError: true,
 						content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
 					} satisfies McpToolResult),
 				),
 			"@maple/mcp/errors/McpTenantError": (error) =>
-				Effect.logError(`Tool error: ${error.message}`).pipe(
-					Effect.annotateLogs({ errorTag: error._tag }),
+				Effect.logError("MCP tool execution failed").pipe(
+					Effect.annotateLogs({ "error.message": error.message, "error.type": error._tag }),
 					Effect.as({
 						isError: true,
 						content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
 					} satisfies McpToolResult),
 				),
 			"@maple/mcp/errors/McpAuthMissingError": (error) =>
-				Effect.logError(`Auth error: ${error.message}`).pipe(
-					Effect.annotateLogs({ errorTag: error._tag }),
+				Effect.logError("MCP authentication failed").pipe(
+					Effect.annotateLogs({ "error.message": error.message, "error.type": error._tag }),
 					Effect.as({
 						isError: true,
 						content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
 					} satisfies McpToolResult),
 				),
 			"@maple/mcp/errors/McpAuthInvalidError": (error) =>
-				Effect.logError(`Auth error: ${error.message}`).pipe(
-					Effect.annotateLogs({ errorTag: error._tag }),
+				Effect.logError("MCP authentication failed").pipe(
+					Effect.annotateLogs({ "error.message": error.message, "error.type": error._tag }),
 					Effect.as({
 						isError: true,
 						content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
 					} satisfies McpToolResult),
 				),
 			"@maple/mcp/errors/McpAuthUnavailableError": (error) =>
-				Effect.logError(`Auth dependency error: ${error.message}`).pipe(
-					Effect.annotateLogs({ errorTag: error._tag }),
+				Effect.logError("MCP authentication dependency failed").pipe(
+					Effect.annotateLogs({ "error.message": error.message, "error.type": error._tag }),
 					Effect.as({
 						isError: true,
 						content: [{ type: "text", text: "Authentication is temporarily unavailable." }],
 					} satisfies McpToolResult),
 				),
 			"@maple/mcp/errors/McpInvalidTenantError": (error) =>
-				Effect.logError(`Tenant validation error [${error.field}]: ${error.message}`).pipe(
-					Effect.annotateLogs({ errorTag: error._tag, field: error.field }),
+				Effect.logError("MCP tenant validation failed").pipe(
+					Effect.annotateLogs({
+						"error.message": error.message,
+						"error.type": error._tag,
+						"maple.mcp.field": error.field,
+					}),
 					Effect.as({
 						isError: true,
 						content: [
@@ -98,7 +106,7 @@ const callMcpToolUnscoped = Effect.fn("McpToolDispatcher.call")(function* (name:
 					} satisfies McpToolResult),
 				),
 		}),
-		Effect.annotateLogs({ tool: name }),
+		Effect.annotateLogs({ "maple.mcp.tool": name }),
 	)
 })
 

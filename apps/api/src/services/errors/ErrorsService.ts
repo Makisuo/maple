@@ -262,25 +262,27 @@ const make: Effect.Effect<
 	// keeps working even when discovery is down.
 
 	const resolveActiveOrgs = Effect.fn("ErrorsService.resolveActiveOrgs")(function* (
-		knownOrgs: ReadonlyArray<string>,
+		knownOrgs: ReadonlyArray<OrgId>,
 		nowMs: number,
 	) {
 		yield* Effect.annotateCurrentSpan("knownOrgs", knownOrgs.length)
 		const byoRows = yield* dbExecute((db) =>
 			db.selectDistinct({ orgId: orgClickHouseSettings.orgId }).from(orgClickHouseSettings),
-		).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ orgId: string }>))
-		const byo = new Set<string>(byoRows.map((r) => r.orgId))
+		).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ orgId: OrgId }>))
+		const byo = new Set<OrgId>(byoRows.map((r) => r.orgId))
 
 		if (knownOrgs.length === 0) {
 			yield* Effect.annotateCurrentSpan({ activeOrgs: byo.size, failedClosed: false })
-			return byo as ReadonlySet<string>
+			return byo as ReadonlySet<OrgId>
 		}
 
-		const compiled = CH.compile(CH.activeOrgsByErrorEventsQuery(), {
-			startTime: formatWarehouseDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS),
-		})
+		const compiled = CH.compile(
+			CH.activeOrgsByErrorEventsQuery(),
+			{ startTime: formatWarehouseDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS) },
+			{ rowSchema: CH.ActiveOrgsOutputSchema },
+		)
 		return yield* warehouse
-			.crossOrgQuery(systemTenant(knownOrgs[0] as OrgId), compiled, {
+			.crossOrgQuery(systemTenant(knownOrgs[0]!), compiled, {
 				// Bound the one cross-org scan (no OrgId predicate ⇒ can't prune the
 				// primary key): abort server-side at 5s instead of riding the ~30s
 				// client timeout when the warehouse is slow.
@@ -291,12 +293,11 @@ const make: Effect.Effect<
 			})
 			.pipe(
 				Effect.map((rows) => {
-					const active = new Set<string>(byo)
+					const active = new Set<OrgId>(byo)
 					for (const row of rows) {
-						const orgId = String((row as { orgId?: unknown }).orgId ?? "")
-						if (orgId) active.add(orgId)
+						active.add(row.orgId)
 					}
-					return active as ReadonlySet<string>
+					return active as ReadonlySet<OrgId>
 				}),
 				Effect.tap((active) =>
 					Effect.annotateCurrentSpan({ activeOrgs: active.size, failedClosed: false }),
@@ -1245,15 +1246,15 @@ const make: Effect.Effect<
 		const ingestOrgs = yield* dbExecute((db) =>
 			db.selectDistinct({ orgId: orgIngestKeys.orgId }).from(orgIngestKeys),
 		)
-		const knownOrgs = new Set<string>([...stateOrgs, ...issueOrgs, ...ingestOrgs.map((r) => r.orgId)])
+		const knownOrgs = new Set<OrgId>([...stateOrgs, ...issueOrgs, ...ingestOrgs.map((r) => r.orgId)])
 
 		const activeOrgs = yield* resolveActiveOrgs([...knownOrgs], nowMs)
 		// Orgs that hold issue/incident state must be scanned even with no recent
 		// errors: the scan returning empty is what drives auto-resolution and
 		// aging. Only pure ingest-key-only orgs with neither recent errors nor
 		// existing state are skipped.
-		const withState = new Set<string>([...stateOrgs, ...issueOrgs])
-		const isActive = (org: string) => activeOrgs.has(org) || withState.has(org)
+		const withState = new Set<OrgId>([...stateOrgs, ...issueOrgs])
+		const isActive = (org: OrgId) => activeOrgs.has(org) || withState.has(org)
 		// Everything `processOrg` does for an inactive org is a no-op read: lease
 		// expiry, snooze wake-up and stale-incident resolution can only match rows
 		// in error_issues / error_issue_states / error_incidents, and an org holding
@@ -1286,7 +1287,7 @@ const make: Effect.Effect<
 						)
 						return emptyResult
 					}
-					return yield* processOrg(org as OrgId, cutoffMs, nowMs, retentionRan)
+					return yield* processOrg(org, cutoffMs, nowMs, retentionRan)
 				}).pipe(
 					// Isolate genuine per-org failures/defects so one bad org can't fail the
 					// whole tick. Interrupts (isolate teardown) are NOT per-org failures —

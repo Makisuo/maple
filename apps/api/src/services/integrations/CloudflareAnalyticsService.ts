@@ -52,6 +52,7 @@ import {
 	Cause,
 	Clock,
 	Context,
+	Data,
 	Effect,
 	Layer,
 	Match,
@@ -824,15 +825,14 @@ interface DatasetPollFailure {
  * `find_errors` / the errors page through the SAME pipeline as every other error, instead of being
  * buried in `cloudflare_analytics_state.lastError` where nothing watches it.
  */
-class CloudflareAnalyticsPollError extends Schema.TaggedError<CloudflareAnalyticsPollError>()(
-	"@maple/cloudflare/AnalyticsPollError",
-	{
-		message: Schema.String,
-		orgId: OrgId,
-		dataset: Schema.String,
-		kind: Schema.Literals(["authz", "upstream", "revoked", "billing", "other"]),
-	},
-) {}
+class CloudflareAnalyticsPollError extends Data.TaggedError(
+	"@maple/api/integrations/CloudflareAnalyticsPollError",
+)<{
+	readonly message: string
+	readonly orgId: OrgId
+	readonly dataset: string
+	readonly kind: DatasetPollFailure["kind"]
+}> {}
 
 type PollOutcome =
 	| { readonly kind: "advanced"; readonly ingested: number }

@@ -466,6 +466,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				incidentOpenedAtMs: number,
 				timestamp: number,
 			) {
+				yield* Effect.annotateCurrentSpan("orgId", orgId)
 				const windowMs = Math.max(normalized.windowMinutes, 1) * 60_000
 				return yield* probeLiveness({
 					warehouse,
@@ -526,6 +527,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				ReadonlyArray<{ evaluation: EvaluatedRule; groupKey: string }>,
 				AlertValidationError | AlertDeliveryError | WarehouseError
 			> {
+				yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": rule.id })
 				const endMs = yield* now
 				const startMs = endMs - rule.windowMinutes * 60_000
 				const plan = rule.compiledPlan
@@ -675,6 +677,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				deliveryKey: string,
 				attemptNumber: number,
 			) {
+				yield* Effect.annotateCurrentSpan({
+					orgId,
+					"maple.alert.rule_id": ruleId,
+					"maple.alert.destination_id": destinationId,
+				})
 				yield* dbExecute((db) =>
 					insertDeliveryEventRecord(
 						db,
@@ -816,6 +823,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				ruleId: AlertRuleDocument["id"],
 				request: AlertRuleUpsertRequest,
 			) {
+				yield* Effect.annotateCurrentSpan({
+					orgId,
+					"tenant.userId": userId,
+					"maple.alert.rule_id": ruleId,
+				})
 				yield* requireAdmin(roles)
 				const oldRow = yield* requireRuleRow(orgId, ruleId)
 				const result = yield* upsertRuleRow(orgId, userId, ruleId, request)
@@ -854,6 +866,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				request: AlertRuleUpsertRequest,
 				sendNotification = false,
 			) {
+				yield* Effect.annotateCurrentSpan({ orgId, "tenant.userId": userId })
 				yield* requireAdmin(roles)
 				const normalized = yield* normalizeRule(orgId, request)
 				yield* requireDestinationIds(orgId, normalized.destinationIds)
@@ -995,6 +1008,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				| AlertPersistenceError
 				| WarehouseError
 			> {
+				yield* Effect.annotateCurrentSpan("orgId", orgId)
 				const normalized = yield* normalizeRule(orgId, request.rule, {
 					forPreview: true,
 				})
@@ -1572,7 +1586,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// sequential writes (no transaction) and stay idempotent on retry: state
 				// upsert via onConflictDoUpdate, incident insert keyed on unique
 				// incidentKey, delivery events via onConflictDoNothing on deliveryKey.
-				const outcome = yield* Effect.gen(function* () {
+				const evaluateTransition = Effect.fnUntraced(function* () {
 					// Both reads come from the tick-head prefetch rather than a query per
 					// group. Safe because this function is the only writer of either key
 					// and runs at most once per key per tick — see `loadTickPrefetch`.
@@ -1939,6 +1953,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						consecutiveHealthy,
 					}
 				})
+				const outcome = yield* evaluateTransition()
 
 				if (outcome.transition === "opened") {
 					yield* Metric.update(AlertingMetrics.incidentsOpenedTotal, 1)
@@ -2101,6 +2116,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					readonly resolveAll?: boolean
 				},
 			) {
+				yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": ruleId })
 				const openIncidents = yield* dbExecute((db) =>
 					db
 						.select()

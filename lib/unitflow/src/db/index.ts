@@ -38,7 +38,7 @@ import * as Store from "../core/store.js"
  * - `load-timeout` — the collection sat in `loading` with no emissions for the
  *   configured `stuckTimeoutMs` (see {@link CollectionWatchOptions}).
  */
-export class CollectionError extends Data.TaggedError("unitflow/db/CollectionError")<{
+export class CollectionError extends Data.TaggedError("@unitflow/db/CollectionError")<{
 	readonly reason: "load-failed" | "cleaned-up" | "load-timeout"
 	readonly message: string
 }> {}

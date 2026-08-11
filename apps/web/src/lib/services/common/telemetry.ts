@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Data, Effect } from "effect"
 import { runtime } from "./runtime"
 
 const requestUrl = (input: RequestInfo | URL): string =>
@@ -38,6 +38,10 @@ export const isCancellation = (cause: unknown, signal: AbortSignal | null | unde
 type FetchOutcome =
 	| { readonly ok: true; readonly response: Response }
 	| { readonly ok: false; readonly cause: unknown }
+
+class TracedFetchError extends Data.TaggedError("@maple/web/TracedFetchError")<{
+	readonly cause: unknown
+}> {}
 
 export const tracedFetch = (
 	peerService: string,
@@ -84,7 +88,7 @@ export const tracedFetch = (
 						yield* Effect.annotateCurrentSpan("maple.http.cancelled", true)
 						return outcome
 					}
-					return yield* Effect.fail(outcome.cause)
+					return yield* new TracedFetchError({ cause: outcome.cause })
 				}).pipe(
 					Effect.withSpan("http.client", {
 						kind: "client",
@@ -100,19 +104,23 @@ export const tracedFetch = (
 			// Cancellations resolved the effect to keep the span `Ok`, so rethrow the
 			// original rejection verbatim here — Electric's pause/resume and every other
 			// caller must see exactly the value `fetch` rejected with.
-			.then((outcome) => (outcome.ok ? outcome.response : Promise.reject(outcome.cause)))
+			.then(
+				(outcome) => (outcome.ok ? outcome.response : Promise.reject(outcome.cause)),
+				(error) => Promise.reject(error instanceof TracedFetchError ? error.cause : error),
+			)
 	)
 }
 
 export const logClientError = (
-	message: string,
+	event: string,
 	error: unknown,
 	attributes: Record<string, string | number | boolean> = {},
 ): void => {
 	runtime.runFork(
-		Effect.logError(message).pipe(
+		Effect.logError("Client operation failed").pipe(
 			Effect.annotateLogs({
 				...attributes,
+				"maple.client.event": event,
 				"error.type": error instanceof Error ? error.name : "UnknownError",
 				"error.message": error instanceof Error ? error.message : String(error),
 			}),
@@ -121,14 +129,15 @@ export const logClientError = (
 }
 
 export const logClientWarning = (
-	message: string,
+	event: string,
 	error: unknown,
 	attributes: Record<string, string | number | boolean> = {},
 ): void => {
 	runtime.runFork(
-		Effect.logWarning(message).pipe(
+		Effect.logWarning("Client operation degraded").pipe(
 			Effect.annotateLogs({
 				...attributes,
+				"maple.client.event": event,
 				"error.type": error instanceof Error ? error.name : "UnknownError",
 				"error.message": error instanceof Error ? error.message : String(error),
 			}),

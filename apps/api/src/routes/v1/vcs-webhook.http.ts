@@ -9,7 +9,7 @@ import { VcsSyncQueue } from "@/services/integrations/vcs/VcsSyncQueue"
  * 500. Failed immediately after the span annotation, then caught outside the
  * span (never serialized).
  */
-class EnqueueFailure extends Data.TaggedError("EnqueueFailure")<{
+class EnqueueFailure extends Data.TaggedError("@maple/api/routes/VcsWebhookEnqueueFailure")<{
 	readonly message: string
 }> {}
 
@@ -108,7 +108,7 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 						attributes: { "vcs.provider": provider.id },
 					}),
 					// Catch OUTSIDE the span so the span exits Error but HTTP gets a 500.
-					Effect.catchTag("EnqueueFailure", () =>
+					Effect.catchTag("@maple/api/routes/VcsWebhookEnqueueFailure", () =>
 						Effect.succeed(textResponse("enqueue failed", 500)),
 					),
 				)

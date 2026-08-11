@@ -2,6 +2,7 @@ import {
 	Cause,
 	Clock,
 	Context,
+	Data,
 	Duration,
 	Effect,
 	Fiber,
@@ -76,24 +77,16 @@ export interface ScrapeOutcome {
 	readonly retryAfterMs: number | null
 }
 
-class ScrapeAttemptFailed extends Schema.TaggedError<ScrapeAttemptFailed>()("ScrapeAttemptFailed", {
+class ScrapeAttemptFailed extends Data.TaggedError("@maple/scraper/ScrapeAttemptFailed")<{
 	/**
 	 * The SDK derives a span's `status.message` from the failure's `Error.message`
 	 * (`Cause.prettyErrors`), so without this field every failed scrape produced an
 	 * Error span with a blank description and the reason lived only in the log line
 	 * emitted after the span had already closed.
 	 */
-	message: Schema.String,
-	outcome: Schema.Struct({
-		error: Schema.NullOr(Schema.String),
-		samplesScraped: Schema.optional(Schema.Number),
-		samplesPostMetricRelabeling: Schema.optional(Schema.Number),
-		rateLimited: Schema.Boolean,
-		authFailed: Schema.Boolean,
-		deliveryBlocked: Schema.Boolean,
-		retryAfterMs: Schema.NullOr(Schema.Number),
-	}),
-}) {}
+	readonly message: string
+	readonly outcome: ScrapeOutcome
+}> {}
 
 /** A scrape outcome that must escalate the delay instead of holding cadence. */
 export const shouldBackOff = (outcome: ScrapeOutcome): boolean =>
@@ -352,7 +345,9 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 										: {}),
 								},
 							}),
-							Effect.catchTag("ScrapeAttemptFailed", ({ outcome }) => Effect.succeed(outcome)),
+							Effect.catchTag("@maple/scraper/ScrapeAttemptFailed", ({ outcome }) =>
+								Effect.succeed(outcome),
+							),
 						)
 
 						const durationMs = (yield* Clock.currentTimeMillis) - scrapeTimeMs

@@ -112,8 +112,8 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 			return undefined
 		}
 
-		const listTargets = (req: HttpServerRequest.HttpServerRequest) =>
-			Effect.gen(function* () {
+		const listTargets = Effect.fn("ScraperInternal.listTargets")(
+			function* (req: HttpServerRequest.HttpServerRequest) {
 				const denied = unauthorized(req)
 				if (denied) return denied
 
@@ -195,15 +195,14 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 				)
 
 				return yield* HttpServerResponse.json(targets)
-			}).pipe(
-				Effect.catch((error) =>
-					Effect.logError("Failed to build scraper target list").pipe(
-						Effect.annotateLogs({ error: error.message }),
-						Effect.as(errorText("Scraper target list unavailable", 503)),
-					),
+			},
+			Effect.catch((error) =>
+				Effect.logError("Failed to build scraper target list").pipe(
+					Effect.annotateLogs({ error: error.message }),
+					Effect.as(errorText("Scraper target list unavailable", 503)),
 				),
-				Effect.withSpan("ScraperInternal.listTargets"),
-			)
+			),
+		)
 
 		const recordResults = (req: HttpServerRequest.HttpServerRequest) =>
 			Effect.gen(function* () {

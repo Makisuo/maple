@@ -1,3 +1,4 @@
+import type { OrgId } from "@maple/domain"
 import { boolean, index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 // Poll-state for the Cloudflare GraphQL Analytics collector. One row per (org, dataset, zone):
@@ -9,7 +10,7 @@ export const cloudflareAnalyticsState = pgTable(
 	"cloudflare_analytics_state",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		dataset: text("dataset").notNull(),
 		// "" for account-scoped datasets — kept NOT NULL so the (org, dataset, zone) unique index
 		// treats the account row like any other.

@@ -1,10 +1,11 @@
+import type { OrgId } from "@maple/domain"
 import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core"
 
 export const orgIngestAttributeMappings = pgTable(
 	"org_ingest_attribute_mappings",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		name: text("name").notNull(),
 		sourceContext: text("source_context").notNull(),
 		sourceKey: text("source_key").notNull(),

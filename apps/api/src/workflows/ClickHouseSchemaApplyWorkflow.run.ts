@@ -28,8 +28,9 @@ import {
 	type ActualTable,
 	type DesiredTable,
 } from "@maple/domain/clickhouse"
+import { OrgId } from "@maple/domain/http"
 import { eq } from "drizzle-orm"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
 import { makeTracedPgConnection, type TracedPgConnection } from "@/platform/pg-execute"
@@ -46,7 +47,7 @@ import { invalidateOrgRuntimeConfigMemo } from "@/services/org/OrgClickHouseSett
  * exactly as they do for every other writer. This call keeps the invariant
  * "every writer of the row busts its own memo" true at every write site.
  */
-const bustRuntimeConfigCache = (orgId: string): void => invalidateOrgRuntimeConfigMemo(orgId)
+const bustRuntimeConfigCache = (orgId: OrgId): void => invalidateOrgRuntimeConfigMemo(orgId)
 
 /**
  * This workflow runs outside the worker's layer graph, so it owns its telemetry
@@ -228,7 +229,7 @@ const normalizeExpression = (value: string): string =>
 
 // --- config load + decrypt (imperative mirror of the service helper) --------
 
-const loadConfig = async (dbStep: DbStep, orgId: string, encryptionKey: Buffer): Promise<ChConfig> => {
+const loadConfig = async (dbStep: DbStep, orgId: OrgId, encryptionKey: Buffer): Promise<ChConfig> => {
 	const rows = await dbStep((db) =>
 		db.select().from(orgClickHouseSettings).where(eq(orgClickHouseSettings.orgId, orgId)).limit(1),
 	)
@@ -280,7 +281,7 @@ type RunPatch = Partial<{
 	finishedAt: Date | null
 }>
 
-const updateRun = async (dbStep: DbStep, orgId: string, patch: RunPatch, now: number): Promise<void> => {
+const updateRun = async (dbStep: DbStep, orgId: OrgId, patch: RunPatch, now: number): Promise<void> => {
 	await dbStep((db) =>
 		db
 			.update(orgClickHouseSchemaApplyRuns)
@@ -371,7 +372,7 @@ async function runWithDb(
 	event: WorkflowEventLike<SchemaApplyWorkflowPayload>,
 	step: WorkflowStepLike,
 ): Promise<SchemaApplyWorkflowResult> {
-	const orgId = event.payload.orgId
+	const orgId = Schema.decodeUnknownSync(OrgId)(event.payload.orgId)
 	const dbStep: DbStep = (fn) =>
 		Effect.runPromise(connection.step(fn).pipe(Effect.provide(schemaApplyTelemetry.layer)))
 	const encryptionKey = Buffer.from(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY.trim(), "base64")
