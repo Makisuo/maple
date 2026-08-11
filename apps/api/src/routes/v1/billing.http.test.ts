@@ -7,8 +7,8 @@ import {
 	CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS,
 	readCustomerCached,
 	responseHasActivePlan,
-	updateCustomerBillingControls,
 } from "@/services/billing/autumn-client"
+import { updateCustomerBillingControls } from "@/services/billing/autumn-http"
 import {
 	BillingCustomer,
 	UpdateBillingControlsRequest,

@@ -1,26 +1,17 @@
 import { Data, Effect, Schema } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { autumnHandler, type CustomerData } from "autumn-js/backend"
 import type { EdgeCacheServiceShape } from "@maple/cache"
 import { isActivePlanSubscription } from "@maple/domain/billing"
 import { BillingUpstreamError } from "@maple/domain/http"
-import type { UpdateBillingControlsRequest } from "@maple/domain/http"
-import { AUTUMN_API_VERSION } from "./autumn-api"
+import type { AutumnResult } from "./autumn-http"
 
 /**
- * Autumn plumbing shared by the billing routes.
+ * Caching and decoding plumbing shared by the billing routes.
  *
- * Lives outside `routes/billing.http.ts` so the customer cache and canonical
- * Autumn REST mutations share one boundary. Everything here is a plain function:
- * the caller owns the secret key and cache instance.
+ * Lives outside `routes/billing.http.ts` so the customer cache and the upstream
+ * result handling share one boundary; the calls themselves live in
+ * `autumn-http.ts`. Everything here is a plain function: the caller owns the
+ * secret key and cache instance.
  */
-
-export type AutumnResult = Awaited<ReturnType<typeof autumnHandler>>
-
-// `autumnHandler` matches its route by `method` + `path`, always POST against
-// `${DEFAULT_PATH_PREFIX}/${route}` (= /api/autumn/<route>) regardless of which
-// Maple endpoint fronts it, so every call here speaks that internal contract.
-const AUTUMN_PATH_PREFIX = "/api/autumn"
 
 // getOrCreateCustomer fires on every page load (hot path) and its latency is
 // dominated by the upstream Autumn call. Cache its success response per org for
@@ -88,86 +79,6 @@ export const readCustomerCached = (
 				Effect.succeed({ result: error.result, hit: false }),
 			),
 		)
-
-export const makeCallAutumn =
-	(secretKey: string | undefined) =>
-	(
-		route: string,
-		body: unknown,
-		customerId: string | undefined,
-		customerData?: CustomerData,
-	): Effect.Effect<AutumnResult, BillingUpstreamError> =>
-		secretKey === undefined
-			? Effect.fail(new BillingUpstreamError({ message: "Billing is not configured" }))
-			: Effect.tryPromise({
-					try: () =>
-						autumnHandler({
-							request: { url: `${AUTUMN_PATH_PREFIX}/${route}`, method: "POST", body },
-							customerId,
-							customerData,
-							clientOptions: { secretKey },
-						}),
-					catch: (error) =>
-						new BillingUpstreamError({
-							message: error instanceof Error ? error.message : String(error),
-						}),
-				})
-
-const toBillingUpstreamError = (error: unknown) =>
-	new BillingUpstreamError({
-		message: error instanceof Error ? error.message : String(error),
-	})
-
-/**
- * `autumnHandler` intentionally exposes only its RPC route list; customer
- * billing controls live on the canonical REST surface instead.
- */
-export const updateCustomerBillingControls = (
-	secretKey: string | undefined,
-	apiUrl: string,
-	orgId: string,
-	controls: UpdateBillingControlsRequest,
-): Effect.Effect<AutumnResult, BillingUpstreamError> =>
-	secretKey === undefined
-		? Effect.fail(new BillingUpstreamError({ message: "Billing is not configured" }))
-		: Effect.gen(function* () {
-				const client = yield* HttpClient.HttpClient
-				const request = yield* HttpClientRequest.bodyJson(
-					HttpClientRequest.post(`${apiUrl.replace(/\/+$/, "")}/v1/customers.update`, {
-						headers: {
-							Authorization: `Bearer ${secretKey}`,
-							"x-api-version": AUTUMN_API_VERSION,
-						},
-					}),
-					{
-						customer_id: orgId,
-						billing_controls: {
-							spend_limits: controls.spendLimits.map((limit) => ({
-								feature_id: limit.featureId,
-								enabled: limit.enabled,
-								limit_type: limit.limitType,
-								overage_limit: limit.overageLimit,
-							})),
-							usage_alerts: controls.usageAlerts.map((alert) => ({
-								feature_id: alert.featureId,
-								enabled: alert.enabled,
-								threshold: alert.threshold,
-								threshold_type: alert.thresholdType,
-								...(alert.name ? { name: alert.name } : {}),
-							})),
-						},
-					},
-				).pipe(Effect.mapError(toBillingUpstreamError))
-				const response = yield* client.execute(request).pipe(Effect.mapError(toBillingUpstreamError))
-				const text = yield* response.text.pipe(Effect.mapError(toBillingUpstreamError))
-				const responseBody =
-					text.length === 0
-						? {}
-						: yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
-								Effect.mapError(toBillingUpstreamError),
-							)
-				return { statusCode: response.status, response: responseBody } as AutumnResult
-			}).pipe(Effect.provide(FetchHttpClient.layer))
 
 // Surface a readable message for a non-2xx Autumn response (it carries a
 // `{ message }` / `{ error }` body) so the client error isn't an opaque 502.
