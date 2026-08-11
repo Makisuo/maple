@@ -1,11 +1,13 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, ErrorForbiddenError, MapleApi } from "@maple/domain/http"
 import { Effect } from "effect"
+import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { requireAdmin } from "@/services/auth/auth"
 
 export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers) =>
 	Effect.gen(function* () {
+		const actors = yield* ErrorActorsService
 		const errors = yield* ErrorsService
 
 		return handlers
@@ -52,7 +54,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 			.handle("transitionIssue", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId)
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
 					yield* Effect.annotateCurrentSpan({
 						orgId: tenant.orgId,
 						issueId: params.issueId,
@@ -73,7 +75,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 			.handle("claimIssue", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId)
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
 					const leaseDurationMs =
 						payload.leaseDurationSeconds !== undefined
 							? payload.leaseDurationSeconds * 1000
@@ -89,14 +91,14 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 			.handle("heartbeatIssue", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId)
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
 					return yield* errors.heartbeatIssue(tenant.orgId, actor.id, params.issueId)
 				}).pipe(Effect.withSpan("HttpErrors.heartbeatIssue")),
 			)
 			.handle("releaseIssue", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId)
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
 					return yield* errors.releaseIssue(tenant.orgId, actor.id, params.issueId, {
 						transitionTo: payload.transitionTo,
 						note: payload.note,
@@ -106,7 +108,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 			.handle("commentOnIssue", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId)
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
 					return yield* errors.commentOnIssue(
 						tenant.orgId,
 						actor.id,
@@ -122,7 +124,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 			.handle("proposeFix", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId)
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
 					return yield* errors.proposeFix(tenant.orgId, actor.id, params.issueId, {
 						patchSummary: payload.patchSummary,
 						prUrl: payload.prUrl,
@@ -133,14 +135,14 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 			.handle("assignIssue", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId)
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
 					return yield* errors.assignIssue(tenant.orgId, actor.id, params.issueId, payload.actorId)
 				}).pipe(Effect.withSpan("HttpErrors.assignIssue")),
 			)
 			.handle("setIssueSeverity", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId)
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
 					yield* Effect.annotateCurrentSpan({
 						orgId: tenant.orgId,
 						issueId: params.issueId,
@@ -200,7 +202,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						orgId: tenant.orgId,
 						agentName: payload.name,
 					})
-					return yield* errors.registerAgent(tenant.orgId, tenant.userId, {
+					return yield* actors.registerAgent(tenant.orgId, tenant.userId, {
 						name: payload.name,
 						model: payload.model,
 						capabilities: payload.capabilities,
@@ -211,7 +213,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-					return yield* errors.listAgents(tenant.orgId)
+					return yield* actors.listAgents(tenant.orgId)
 				}).pipe(Effect.withSpan("HttpErrors.listAgents")),
 			)
 			.handle("getNotificationPolicy", () =>

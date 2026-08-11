@@ -2,13 +2,10 @@ import { randomUUID } from "node:crypto"
 import {
 	ActorDocument,
 	type ActorId,
-	ActorId as ActorIdSchema,
 	ActorNotFoundError,
-	ActorsListResponse,
 	type AlertDestinationId,
 	ErrorIncidentDocument,
 	ErrorIncidentsListResponse,
-	type ErrorIncidentReason,
 	ErrorIssueDetailResponse,
 	ErrorIssueDocument,
 	ErrorIssueEventId as ErrorIssueEventIdSchema,
@@ -55,8 +52,6 @@ import {
 } from "@maple/domain/http"
 import {
 	actors,
-	type ActorInsert,
-	type ActorRow,
 	errorIncidents,
 	type ErrorIncidentRow,
 	errorNotificationDeliveries,
@@ -97,23 +92,20 @@ import {
 	Match,
 	Option,
 	Ref,
-	Schedule,
 	Schema,
 } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { isErrorTickClaimLost, persistErrorTickWindow } from "@/services/errors/error-tick-persistence"
 import { escalationDedupeKey, escalationReasonFor } from "@/services/errors/issue-severity"
-import { SYSTEM_ERRORS_AGENT_NAME, isReservedAgentName } from "@/services/auth/system-actors"
+import { SYSTEM_ERRORS_AGENT_NAME } from "@/services/auth/system-actors"
 import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
-import { isRetryablePostgresContention } from "@/platform/postgres-errors"
+import { Database } from "@/platform/DatabaseLive"
 import { selectDistinctOrgIds } from "@/platform/distinct-org-ids"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
-import { describeCause } from "@/platform/describe-cause"
 import { NotificationDispatcher, type NotificationRequest } from "@/services/alerts/NotificationDispatcher"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/cache"
@@ -121,6 +113,10 @@ import {
 	isOrgWarehouseQuarantined,
 	quarantineOnConfigClassCause,
 } from "@/services/warehouse/warehouse-org-quarantine"
+import { actorRowToDocument, ErrorActorsService, type ErrorActorsPublicShape } from "./ErrorActorsService"
+import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
+
+export { describeCause, makePersistenceError } from "./error-persistence"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const encodeIssueListCursor = Schema.encodeSync(IssueListCursor)
@@ -128,7 +124,6 @@ const encodeIssueSeverityListCursorRaw = Schema.encodeSync(IssueSeverityListCurs
 const encodeIssueSeverityListCursor = (fields: IssueSeverityListCursorFields): string =>
 	`sev_${encodeIssueSeverityListCursorRaw(fields)}`
 const decodeErrorIncidentIdSync = Schema.decodeUnknownSync(ErrorIncidentDocument.fields.id)
-const decodeActorIdSync = Schema.decodeUnknownSync(ActorIdSchema)
 const decodeEventIdSync = Schema.decodeUnknownSync(ErrorIssueEventIdSchema)
 const decodeIssueEscalationIdSync = Schema.decodeUnknownSync(IssueEscalationIdSchema)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.firstSeenAt)
@@ -233,25 +228,7 @@ const severitySortRank = (severity: IssueSeverity | null): number =>
 		Match.exhaustive,
 	)
 
-export { describeCause } from "@/platform/describe-cause"
-
-export const makePersistenceError = (error: unknown): ErrorPersistenceError => {
-	const baseFor = (message: string, raw: unknown) => {
-		const cause = describeCause(raw)
-		return cause === undefined ? { message } : { message, cause }
-	}
-	if (error instanceof DatabaseError) {
-		return new ErrorPersistenceError(baseFor(error.message, error.cause))
-	}
-	if (error instanceof Error) {
-		return new ErrorPersistenceError(baseFor(error.message, error.cause))
-	}
-	return new ErrorPersistenceError(baseFor("Error persistence failure", error))
-}
-
-const CONTENTION_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
-
-export interface ErrorsServiceShape {
+export interface ErrorsServiceShape extends ErrorActorsPublicShape {
 	readonly listIssues: (
 		orgId: OrgId,
 		opts: {
@@ -381,24 +358,6 @@ export interface ErrorsServiceShape {
 		issueId: ErrorIssueId,
 		opts?: { readonly limit?: number },
 	) => Effect.Effect<ErrorIssueEventsResponse, ErrorPersistenceError | ErrorIssueNotFoundError>
-	readonly registerAgent: (
-		orgId: OrgId,
-		byUserId: UserId,
-		request: {
-			readonly name: string
-			readonly model?: string
-			readonly capabilities?: ReadonlyArray<string>
-		},
-	) => Effect.Effect<ActorDocument, ErrorPersistenceError | ErrorValidationError>
-	readonly listAgents: (orgId: OrgId) => Effect.Effect<ActorsListResponse, ErrorPersistenceError>
-	readonly lookupActor: (
-		orgId: OrgId,
-		actorId: ActorId,
-	) => Effect.Effect<ActorDocument, ErrorPersistenceError | ActorNotFoundError>
-	readonly ensureUserActor: (
-		orgId: OrgId,
-		userId: UserId,
-	) => Effect.Effect<ActorDocument, ErrorPersistenceError>
 	readonly recordAnomalyLinkEvent: (
 		orgId: OrgId,
 		issueId: ErrorIssueId,
@@ -465,9 +424,10 @@ export interface ErrorsServiceShape {
 const make: Effect.Effect<
 	ErrorsServiceShape,
 	never,
-	Database | WarehouseQueryService | EdgeCacheService | Env | NotificationDispatcher
+	Database | WarehouseQueryService | EdgeCacheService | Env | NotificationDispatcher | ErrorActorsService
 > = Effect.gen(function* () {
 	const database = yield* Database
+	const actorService = yield* ErrorActorsService
 	const warehouse = yield* WarehouseQueryService
 	const edgeCache = yield* EdgeCacheService
 	const env = yield* Env
@@ -482,32 +442,10 @@ const make: Effect.Effect<
 
 	const newErrorIssueId = () => decodeErrorIssueIdSync(randomUUID())
 	const newErrorIncidentId = () => decodeErrorIncidentIdSync(randomUUID())
-	const newActorId = () => decodeActorIdSync(randomUUID())
 	const newEventId = () => decodeEventIdSync(randomUUID())
 	const newIssueEscalationId = () => decodeIssueEscalationIdSync(randomUUID())
 
-	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-		database.execute(fn).pipe(
-			Effect.retry({
-				schedule: CONTENTION_RETRY_SCHEDULE,
-				while: isRetryablePostgresContention,
-			}),
-			Effect.tapError((error) =>
-				Effect.gen(function* () {
-					// Every service method runs inside an Effect.fn span — its name says
-					// which operation's query failed without threading a label through.
-					const span = yield* Effect.currentSpan.pipe(Effect.catch(() => Effect.succeed(null)))
-					yield* Effect.logError("ErrorsService dbExecute failed").pipe(
-						Effect.annotateLogs({
-							operation: span?.name ?? "(unknown)",
-							message: error.message,
-							cause: describeCause(error.cause) ?? "(none)",
-						}),
-					)
-				}),
-			),
-			Effect.mapError(makePersistenceError),
-		)
+	const dbExecute = makeErrorDatabaseExecute(database)
 
 	const isoFromDate = (date: Date) => decodeIsoDateTimeStringSync(date.toISOString())
 
@@ -618,265 +556,19 @@ const make: Effect.Effect<
 	})
 
 	// Actors
-
-	const parseCapabilities = (raw: unknown): ReadonlyArray<string> =>
-		Option.getOrElse(decodeStoredJsonArray(raw), (): ReadonlyArray<unknown> => []).filter(
-			(v): v is string => typeof v === "string",
-		)
-
-	const rowToActor = (row: ActorRow): ActorDocument =>
-		new ActorDocument({
-			id: row.id,
-			type: row.type,
-			userId: row.userId ?? null,
-			agentName: row.agentName ?? null,
-			model: row.model ?? null,
-			capabilities: parseCapabilities(row.capabilitiesJson),
-			lastActiveAt: row.lastActiveAt == null ? null : isoFromDate(row.lastActiveAt),
-		})
-
-	const selectActorRow = (orgId: OrgId, actorId: ActorId) =>
-		dbExecute((db) =>
-			db
-				.select()
-				.from(actors)
-				.where(and(eq(actors.orgId, orgId), eq(actors.id, actorId)))
-				.limit(1),
-		).pipe(Effect.map((rows) => rows[0] ?? null))
-
-	const lookupActor: ErrorsServiceShape["lookupActor"] = Effect.fn("ErrorsService.lookupActor")(
-		function* (orgId, actorId) {
-			const row = yield* selectActorRow(orgId, actorId)
-			if (!row) {
-				return yield* Effect.fail(
-					new ActorNotFoundError({
-						message: `Actor '${actorId}' not found`,
-						actorId,
-					}),
-				)
-			}
-			return rowToActor(row)
-		},
-	)
-
-	// Best-effort: a failed lastActiveAt bump must never fail the calling
-	// mutation, but persistent failures should still be diagnosable.
-	const touchActor = (orgId: OrgId, actorId: ActorId, timestamp: number) =>
-		dbExecute((db) =>
-			db
-				.update(actors)
-				.set({ lastActiveAt: new Date(timestamp) })
-				.where(and(eq(actors.orgId, orgId), eq(actors.id, actorId))),
-		).pipe(
-			Effect.tapCause((cause) =>
-				Effect.logWarning("ErrorsService.touchActor failed to update lastActiveAt").pipe(
-					Effect.annotateLogs({ orgId, actorId, cause: Cause.pretty(cause) }),
-				),
-			),
-			Effect.ignore,
-		)
-
-	const ensureUserActor: ErrorsServiceShape["ensureUserActor"] = Effect.fn("ErrorsService.ensureUserActor")(
-		function* (orgId, userId) {
-			const existing = yield* dbExecute((db) =>
-				db
-					.select()
-					.from(actors)
-					.where(and(eq(actors.orgId, orgId), eq(actors.type, "user"), eq(actors.userId, userId)))
-					.limit(1),
-			)
-			if (existing[0]) return rowToActor(existing[0])
-
-			const timestamp = yield* Clock.currentTimeMillis
-			const id = newActorId()
-			const insert: ActorInsert = {
-				id,
-				orgId,
-				type: "user",
-				userId,
-				agentName: null,
-				model: null,
-				capabilitiesJson: [],
-				createdBy: userId,
-				createdAt: new Date(timestamp),
-				lastActiveAt: new Date(timestamp),
-			}
-			yield* dbExecute((db) => db.insert(actors).values(insert).onConflictDoNothing())
-			const after = yield* dbExecute((db) =>
-				db
-					.select()
-					.from(actors)
-					.where(and(eq(actors.orgId, orgId), eq(actors.type, "user"), eq(actors.userId, userId)))
-					.limit(1),
-			)
-			const row = after[0]
-			if (!row) {
-				return yield* Effect.fail(
-					new ErrorPersistenceError({
-						message: "Failed to ensure user actor row",
-					}),
-				)
-			}
-			return rowToActor(row)
-		},
-	)
-
-	const ensureSystemActor = Effect.fn("ErrorsService.ensureSystemActor")(function* (orgId: OrgId) {
-		const existing = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(actors)
-				.where(
-					and(
-						eq(actors.orgId, orgId),
-						eq(actors.type, "agent"),
-						eq(actors.agentName, SYSTEM_AGENT_NAME),
-					),
-				)
-				.limit(1),
-		)
-		if (existing[0]) return rowToActor(existing[0])
-
-		const timestamp = yield* Clock.currentTimeMillis
-		const id = newActorId()
-		const insert: ActorInsert = {
-			id,
-			orgId,
-			type: "agent",
-			userId: null,
-			agentName: SYSTEM_AGENT_NAME,
-			model: null,
-			capabilitiesJson: ["system", "auto-triage"],
-			createdBy: null,
-			createdAt: new Date(timestamp),
-			lastActiveAt: new Date(timestamp),
-		}
-		yield* dbExecute((db) => db.insert(actors).values(insert).onConflictDoNothing())
-		const after = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(actors)
-				.where(
-					and(
-						eq(actors.orgId, orgId),
-						eq(actors.type, "agent"),
-						eq(actors.agentName, SYSTEM_AGENT_NAME),
-					),
-				)
-				.limit(1),
-		)
-		const row = after[0]
-		if (!row) {
-			return yield* Effect.fail(
-				new ErrorPersistenceError({
-					message: "Failed to ensure system actor row",
-				}),
-			)
-		}
-		return rowToActor(row)
-	})
-
-	const registerAgent: ErrorsServiceShape["registerAgent"] = Effect.fn("ErrorsService.registerAgent")(
-		function* (orgId, byUserId, request) {
-			const name = request.name.trim()
-			if (name.length === 0) {
-				return yield* Effect.fail(
-					new ErrorValidationError({
-						message: "Agent name must not be empty",
-						details: [request.name],
-					}),
-				)
-			}
-			// Every platform-authored actor name, not just the errors tick: an org
-			// registering as one of these would author audit events that read as
-			// Maple's own.
-			if (isReservedAgentName(name)) {
-				return yield* Effect.fail(
-					new ErrorValidationError({
-						message: `Agent name '${name}' is reserved`,
-						details: [name],
-					}),
-				)
-			}
-
-			const timestamp = yield* Clock.currentTimeMillis
-			const id = newActorId()
-			const capabilities = request.capabilities ?? []
-			const insert: ActorInsert = {
-				id,
-				orgId,
-				type: "agent",
-				userId: null,
-				agentName: name,
-				model: request.model ?? null,
-				capabilitiesJson: capabilities,
-				createdBy: byUserId,
-				createdAt: new Date(timestamp),
-				lastActiveAt: new Date(timestamp),
-			}
-
-			yield* dbExecute((db) => db.insert(actors).values(insert).onConflictDoNothing())
-
-			const rows = yield* dbExecute((db) =>
-				db
-					.select()
-					.from(actors)
-					.where(and(eq(actors.orgId, orgId), eq(actors.type, "agent"), eq(actors.agentName, name)))
-					.limit(1),
-			)
-			const row = rows[0]
-			if (!row) {
-				return yield* Effect.fail(
-					new ErrorPersistenceError({
-						message: "Failed to register agent",
-					}),
-				)
-			}
-			if (row.id !== id) {
-				return yield* Effect.fail(
-					new ErrorValidationError({
-						message: `An agent named '${name}' already exists for this org`,
-						details: [name],
-					}),
-				)
-			}
-			return rowToActor(row)
-		},
-	)
-
-	const listAgents: ErrorsServiceShape["listAgents"] = Effect.fn("ErrorsService.listAgents")(
-		function* (orgId) {
-			const rows = yield* dbExecute((db) =>
-				db
-					.select()
-					.from(actors)
-					.where(and(eq(actors.orgId, orgId), eq(actors.type, "agent")))
-					.orderBy(desc(actors.createdAt)),
-			)
-			return new ActorsListResponse({
-				actors: rows.map(rowToActor),
-			})
-		},
-	)
+	const {
+		registerAgent,
+		listAgents,
+		lookupActor,
+		actorExists,
+		ensureUserActor,
+		ensureSystemActor,
+		touchActor,
+		collectActorDocs,
+	} = actorService
+	const rowToActor = actorRowToDocument
 
 	// Issue row -> document mapping
-
-	const collectActorDocs = (orgId: OrgId, actorIds: ReadonlyArray<ActorId | null>) => {
-		const filtered = Arr.dedupe(Arr.filter(actorIds, (id): id is ActorId => id != null))
-		if (filtered.length === 0) return Effect.succeed(new Map<ActorId, ActorDocument>())
-		return dbExecute((db) =>
-			db
-				.select()
-				.from(actors)
-				.where(and(eq(actors.orgId, orgId), inArray(actors.id, filtered))),
-		).pipe(
-			Effect.map((rows) => {
-				const map = new Map<ActorId, ActorDocument>()
-				for (const row of rows) map.set(row.id, rowToActor(row))
-				return map
-			}),
-		)
-	}
 
 	const parseSourceRef = (json: unknown): Record<string, unknown> | null => {
 		if (json == null) return null
@@ -1674,8 +1366,8 @@ const make: Effect.Effect<
 			const timestamp = yield* Clock.currentTimeMillis
 			const current = yield* requireIssue(orgId, issueId)
 			if (toActorId !== null) {
-				const actorRow = yield* selectActorRow(orgId, toActorId)
-				if (!actorRow) {
+				const exists = yield* actorExists(orgId, toActorId)
+				if (!exists) {
 					return yield* Effect.fail(
 						new ActorNotFoundError({
 							message: `Actor '${toActorId}' not found`,

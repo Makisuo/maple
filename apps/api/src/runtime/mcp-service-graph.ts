@@ -10,6 +10,7 @@ import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsSer
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
@@ -81,6 +82,8 @@ const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
 	Layer.provide(Layer.mergeAll(InfraLive, EmailServiceLive)),
 )
 
+const ErrorActorsServiceLive = ErrorActorsService.layer
+
 const ErrorsServiceLive = ErrorsService.layer.pipe(
 	Layer.provide(
 		Layer.mergeAll(
@@ -88,6 +91,7 @@ const ErrorsServiceLive = ErrorsService.layer.pipe(
 			WarehouseQueryServiceLive,
 			EdgeCacheServiceLive,
 			NotificationDispatcherLive,
+			ErrorActorsServiceLive,
 		),
 	),
 )
@@ -111,6 +115,7 @@ const VcsSourceServiceLive = VcsSourceService.layer.pipe(
 const McpRuntimeServicesLive = Layer.mergeAll(
 	AlertsServiceLive,
 	DashboardPersistenceService.layer,
+	ErrorActorsServiceLive,
 	ErrorsServiceLive,
 	QueryEngineServiceLive,
 	RecommendationIssueServiceLive,
