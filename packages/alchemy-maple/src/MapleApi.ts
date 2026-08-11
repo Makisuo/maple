@@ -137,8 +137,18 @@ export const make = Effect.gen(function* () {
 	}
 })
 
-/** Live client: {@link MapleEnvironment} + the runtime's global `fetch`. */
-export const MapleApiLive = () => Layer.effect(MapleApi, make).pipe(Layer.provide(FetchHttpClient.layer))
+/**
+ * Construct the Maple API client from caller-supplied {@link MapleEnvironment}
+ * and {@link HttpClient.HttpClient} services.
+ *
+ * This is the open composition seam used by `providersWithDependencies()`.
+ * Use {@link MapleApiLive} when the runtime's global `fetch` is the desired
+ * transport.
+ */
+export const MapleApiFromHttpClient = () => Layer.effect(MapleApi, make)
+
+/** Live client: caller-supplied {@link MapleEnvironment} + the runtime's global `fetch`. */
+export const MapleApiLive = () => MapleApiFromHttpClient().pipe(Layer.provide(FetchHttpClient.layer))
 
 /**
  * Fetch every page of a v2 list endpoint (`{ object: "list", data, has_more,
