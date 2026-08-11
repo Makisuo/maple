@@ -42,7 +42,6 @@ import {
 	Ref,
 	Schedule,
 	Schema,
-	Scope,
 } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
@@ -53,6 +52,7 @@ import {
 } from "@/platform/Crypto"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
+import { forkRequestScoped } from "@/platform/fork-request-scoped"
 import { dateToMs } from "@/platform/time"
 import { validateExternalUrl } from "@/http/url-validator"
 
@@ -129,6 +129,29 @@ interface RuntimeConfigMemoEntry {
 }
 const runtimeConfigMemo = new Map<string, RuntimeConfigMemoEntry>()
 
+/**
+ * Recent failures of the blocking read, so one unreachable origin is not
+ * re-discovered by every caller.
+ *
+ * Only successes were ever memoized, which meant a failing Postgres cost every
+ * branch of an in-request fan-out its own full dial budget — the 22-per-trace
+ * shape described below, at ~10s each. Giving each request a single socket did
+ * not help: that reduced how many dials a HEALTHY request makes, not how many a
+ * failing one retries.
+ *
+ * Held for seconds, not the success TTL. The cost of being wrong is bounded and
+ * symmetric: an org whose database recovers within the window waits it out, and
+ * in exchange a degraded origin stops being hammered by callers that would each
+ * spend 10s failing. Failing fast also returns outbound connection slots, which
+ * is what lets the isolate recover at all.
+ */
+const ORG_CH_CONFIG_FAILURE_TTL_MS = 2_000
+interface RuntimeConfigFailureEntry {
+	readonly error: OrgClickHouseSettingsPersistenceError
+	readonly atMs: number
+}
+const runtimeConfigFailures = new Map<string, RuntimeConfigFailureEntry>()
+
 // Dedup marker for in-flight background refreshes, so N concurrent widget
 // requests that all find the same stale entry fork ONE Postgres read rather
 // than N.
@@ -163,6 +186,9 @@ const REFRESH_MARKER_STALE_MS = 10_000
 export const invalidateOrgRuntimeConfigMemo = (orgId: string): void => {
 	runtimeConfigMemo.delete(orgId)
 	refreshInFlight.delete(orgId)
+	// Third map, same rule: a stale failure must not outlive an explicit
+	// invalidation and turn a fresh write into a spurious read error.
+	runtimeConfigFailures.delete(orgId)
 }
 
 /**
@@ -1440,15 +1466,10 @@ export class OrgClickHouseSettingsService extends Context.Service<
 				Effect.ensuring(Effect.sync(() => refreshInFlight.delete(orgId))),
 			)
 
-			const scope = yield* Effect.serviceOption(Scope.Scope)
-			// HTTP routes always have a request scope (HttpRouter provides one).
-			// Non-HTTP callers — crons, queue consumers, workflows — do not, and there
-			// the calling fiber IS the whole job, so it is a safe parent.
-			if (Option.isSome(scope)) {
-				yield* Effect.forkIn(work, scope.value)
-			} else {
-				yield* Effect.forkChild(work)
-			}
+			// Scoped rather than detached — see `forkRequestScoped` for why anything
+			// that touches Postgres must not outlive the invocation that owns the
+			// socket. This call site is where that rule was first worked out.
+			yield* forkRequestScoped(work)
 			return true
 		})
 
@@ -1516,11 +1537,30 @@ export class OrgClickHouseSettingsService extends Context.Service<
 					return memoized.value
 				}
 
+				// Reuse a very recent failure rather than re-discovering it. Checked
+				// only on this branch: a usable memo above never reaches Postgres, so
+				// a blip can never take a served org offline — only callers that were
+				// going to make the blocking read anyway are short-circuited.
+				const failed = runtimeConfigFailures.get(orgId)
+				if (failed !== undefined && nowMs - failed.atMs < ORG_CH_CONFIG_FAILURE_TTL_MS) {
+					yield* Effect.annotateCurrentSpan({
+						"clickhouse.config.source": "postgres_failed",
+						"clickhouse.config.memoHit": false,
+						"clickhouse.config.failure_reused": true,
+					})
+					return yield* Effect.fail(failed.error)
+				}
+
 				yield* Effect.annotateCurrentSpan({
 					"clickhouse.config.source": "postgres",
 					"clickhouse.config.memoHit": false,
 				})
-				const cached = yield* readSettingsFromPostgres(orgId)
+				const cached = yield* readSettingsFromPostgres(orgId).pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() => runtimeConfigFailures.set(orgId, { error, atMs: nowMs })),
+					),
+				)
+				runtimeConfigFailures.delete(orgId)
 				storeCachedSettings(orgId, cached, nowMs)
 				return cached
 			},

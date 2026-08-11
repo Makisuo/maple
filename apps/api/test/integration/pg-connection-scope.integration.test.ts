@@ -76,21 +76,21 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 		await waitForBackends(0)
 		const scope = makePgConnectionScope(url)
 
+		// Sampled AFTER each execute, not inside it: the client is lazy, so before
+		// the first statement runs there is legitimately no connection yet.
 		const observed: Array<number> = []
-		for (let i = 0; i < 5; i++) {
-			await Effect.runPromise(
-				scope.run(async (db: DatabaseClient) => {
-					observed.push(await backends())
-					return db.execute(sql`select 1 as one`)
-				}),
-			)
+		try {
+			for (let i = 0; i < 5; i++) {
+				await Effect.runPromise(scope.run((db: DatabaseClient) => db.execute(sql`select 1 as one`)))
+				observed.push(await backends())
+			}
+		} finally {
+			await scope.close()
 		}
 
-		// The claim the whole PR rests on: five executes, one connection. Before
-		// this change each of these was its own handshake and its own slot.
+		// The claim this rests on: five executes, one connection. Each of these
+		// used to be its own handshake and its own outbound slot.
 		assert.deepStrictEqual(observed, [1, 1, 1, 1, 1])
-
-		await scope.close()
 		assert.strictEqual(await waitForBackends(0), 0)
 	})
 
@@ -109,7 +109,7 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 			).pipe(Effect.withTracer(tracer)),
 		)
 
-		assert.strictEqual(await backends(), 1)
+		const backendsDuring = await backends()
 
 		// The real test of the per-call `wrapMaplePgClient`. Drizzle fixes its
 		// logger at construction, so a single shared wrapper would put both
@@ -123,6 +123,7 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 		assert.strictEqual(beta.length, 1)
 		assert.notInclude(alpha[0], "beta_marker")
 		assert.notInclude(beta[0], "alpha_marker")
+		assert.strictEqual(backendsDuring, 1)
 
 		await scope.close()
 	})
@@ -167,10 +168,10 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 		await scope.close()
 	})
 
-	it("classifies a refused dial as a connection error on a real socket", async () => {
-		// Port 1 is refused immediately, so both attempt budgets are spent in
-		// milliseconds. This closes the loop on postgres-errors.ts, which the unit
-		// suite only exercises against hand-built error objects.
+	it("classifies a refused connection as a connection error on a real socket", async () => {
+		// Port 1 is refused immediately. This closes the loop on postgres-errors.ts,
+		// which the unit suite only exercises against hand-built error objects, and
+		// is the diagnostic that replaced the connect/query duration split.
 		const scope = makePgConnectionScope("postgres://maple:maple@127.0.0.1:1/never")
 		const { spans, tracer } = makeRecordingTracer()
 
@@ -186,8 +187,49 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 		}
 		const [span] = dbSpans(spans)
 		assert.isDefined(span)
-		assert.strictEqual(span.attributes.get("db.connect.completed"), false)
+		assert.strictEqual(span.attributes.get("db.connect.failed"), true)
 		assert.isDefined(span.attributes.get("error.type"))
+
+		await scope.close()
+	})
+
+	it("opens one connection for a whole fan-out against an unreachable origin", async () => {
+		// The production shape this exists for: a request whose branches all miss
+		// the org-config memo, against an origin that cannot be reached. Each branch
+		// must reuse the scope's one client rather than creating its own — an
+		// unreachable origin should cost one connection attempt's worth of outbound
+		// slot, not N.
+		//
+		// Real clients, counted: `openSocket` wraps the production constructor
+		// rather than replacing it, so this measures the same code path the unit
+		// test fakes.
+		let creations = 0
+		const scope = makePgConnectionScope("postgres://maple:maple@127.0.0.1:1/never", undefined, {
+			openSocket: () => {
+				creations += 1
+				return createMaplePgSocket("postgres://maple:maple@127.0.0.1:1/never", {
+					maxConnections: 1,
+				})
+			},
+		})
+
+		// Sequential on purpose: a concurrent version would pass trivially. The case
+		// that matters is the branch arriving after the previous failure resolved,
+		// which must not decide to start over with a new client.
+		const results: Array<"ok" | "rejected"> = []
+		for (let i = 0; i < 10; i++) {
+			results.push(
+				await Effect.runPromise(scope.run((db: DatabaseClient) => db.execute(sql`select 1`)))
+					.then(() => "ok" as const)
+					.catch(() => "rejected" as const),
+			)
+		}
+
+		assert.deepStrictEqual(
+			results,
+			Array.from({ length: 10 }, () => "rejected" as const),
+		)
+		assert.strictEqual(creations, 1)
 
 		await scope.close()
 	})
