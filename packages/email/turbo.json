@@ -6,7 +6,7 @@
 		// rather than a dist/ directory, so the root task's outputs don't apply.
 		"build": {
 			"dependsOn": ["^build"],
-			"inputs": ["emails/**", "scripts/build.ts", "package.json"],
+			"inputs": ["emails/**", "components/**", "scripts/build.ts", "package.json"],
 			"outputs": ["src/generated/**"]
 		}
 	}
