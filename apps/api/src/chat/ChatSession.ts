@@ -117,7 +117,7 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 	 * into. Reader and writer are different requests but the *same object*, so the writer can simply
 	 * tap the reader on the shoulder.
 	 */
-	private waiters: Array<() => void> = []
+	private waiters = new Set<() => void>()
 
 	constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
 		super(ctx, env)
@@ -233,9 +233,9 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 
 	/** Wake every parked subscriber. Cheap and unconditional — the list is empty when nobody reads. */
 	private notify(): void {
-		if (this.waiters.length === 0) return
+		if (this.waiters.size === 0) return
 		const parked = this.waiters
-		this.waiters = []
+		this.waiters = new Set()
 		for (const wake of parked) wake()
 	}
 
@@ -243,15 +243,17 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 	private waitForAppend(timeoutMs: number): Promise<boolean> {
 		return new Promise<boolean>((resolve) => {
 			let settled = false
+			const wake = () => settle(true)
 			const settle = (appended: boolean) => {
 				if (settled) return
 				settled = true
 				resolve(appended)
 			}
-			this.waiters.push(() => settle(true))
-			// A timed-out waiter is left in the list; its closure is a no-op once settled, and
-			// `notify` clears the array wholesale on the next append.
-			void scheduler.wait(timeoutMs).then(() => settle(false))
+			this.waiters.add(wake)
+			void scheduler.wait(timeoutMs).then(() => {
+				this.waiters.delete(wake)
+				settle(false)
+			})
 		})
 	}
 
