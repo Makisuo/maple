@@ -46,6 +46,7 @@ jobs:
                         - 'package.json'
                         - 'turbo.json'
                         - 'tsconfig*.json'
+                        - '.oxlintrc*.json'
                         - 'mise.toml'
                         - '.github/workflows/ci.yml'
                         - '.github/actions/**'
@@ -181,6 +182,8 @@ jobs:
                 include:
                     - shard: quality
                       install-filters: "@maple/api"
+                    - shard: effect-lint
+                      install-filters: ""
                     - shard: build-web
                       install-filters: "@maple/web"
                     - shard: build-other
@@ -264,21 +267,19 @@ jobs:
               if: ${{ matrix.shard == 'quality' }}
               run: bun run check:tokens
 
-            # Raw MCP handlers carry Effect requirements. Type-aware Effect rules
-            # prevent `any`/`unknown` or assertions from erasing that environment,
-            # which would otherwise turn a missing tenant into a runtime defect.
-            #
-            # The rules are only as good as the types they see: @maple-dev/effect-sdk
-            # resolves through its built dist, and an unbuilt dist makes every value
-            # from it `any` — which both fires false positives (the SDK's telemetry
-            # layer poisoning a ManagedRuntime) and silently erases real requirements.
-            # Build it first so the gate lints the same types a developer does.
-            - name: Build Effect SDK for type-aware lint
-              if: ${{ matrix.shard == 'quality' }}
-              run: bun turbo build --filter=@maple-dev/effect-sdk
-            - name: Lint Effect boundaries
-              if: ${{ matrix.shard == 'quality' }}
-              run: bun run lint:effect-boundaries
+            # Type-aware lint resolves the four workspace packages whose exports point
+            # at dist/. Build them before linting so Effect requirement/error channels
+            # cannot silently degrade to `any` through missing declarations.
+            - name: Build workspace libraries for type-aware Effect lint
+              if: ${{ matrix.shard == 'effect-lint' }}
+              run: >-
+                  bun turbo build --filter=@maple-dev/effect-sdk
+                  --filter=@maple-dev/clickhouse-builder --filter=@maple-dev/alchemy
+                  --filter=@maple-dev/browser --concurrency=2
+
+            - name: Lint Effect code
+              if: ${{ matrix.shard == 'effect-lint' }}
+              run: bun run lint:effect
 
             - name: Build web production bundle
               if: ${{ matrix.shard == 'build-web' }}

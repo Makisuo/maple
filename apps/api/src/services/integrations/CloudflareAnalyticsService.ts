@@ -917,7 +917,7 @@ const observeDatasetFailure = (orgId: OrgId, failure: DatasetPollFailure) =>
 		// Failing inside the span below is what records the exception event that error_events /
 		// find_errors unwrap. Caught immediately after the span boundary so a single bad dataset
 		// never fails the org poll.
-		yield* Effect.fail(
+		return yield* Effect.fail(
 			new CloudflareAnalyticsPollError({
 				message: failure.message,
 				orgId,

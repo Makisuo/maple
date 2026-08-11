@@ -1,4 +1,4 @@
-// Copied verbatim from alchemy-effect to stay API-compatible for a future
+// Adapted from alchemy-effect to stay API-compatible for a future
 // migration:
 //   https://github.com/alchemy-run/alchemy-effect/blob/main/packages/alchemy/src/Cloudflare/Workers/ScheduledEvents.ts
 //
@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_alchemy_scheduled_events_run_at
 
 const ensureTable = Effect.gen(function* () {
 	const ctx = yield* DurableObjectState
-	yield* ctx.storage.sql.exec(INIT_TABLE_SQL)
+	yield* ctx.storage.sql.exec(INIT_TABLE_SQL).pipe(Effect.asVoid)
 })
 
 export interface ScheduledEvent {
@@ -60,14 +60,16 @@ export const scheduleEvent = Effect.fnUntraced(function* (
 	yield* ensureTable
 	const ctx = yield* DurableObjectState
 
-	yield* ctx.storage.sql.exec(
-		`INSERT OR REPLACE INTO alchemy_scheduled_events (id, run_at, repeat_ms, payload)
+	yield* ctx.storage.sql
+		.exec(
+			`INSERT OR REPLACE INTO alchemy_scheduled_events (id, run_at, repeat_ms, payload)
      VALUES (?, ?, ?, ?)`,
-		id,
-		runAt.getTime(),
-		repeatMs ?? null,
-		JSON.stringify(payload),
-	)
+			id,
+			runAt.getTime(),
+			repeatMs ?? null,
+			JSON.stringify(payload),
+		)
+		.pipe(Effect.asVoid)
 
 	yield* reconcileAlarm
 })
@@ -76,7 +78,7 @@ export const cancelEvent = Effect.fnUntraced(function* (id: string) {
 	yield* ensureTable
 	const ctx = yield* DurableObjectState
 
-	yield* ctx.storage.sql.exec(`DELETE FROM alchemy_scheduled_events WHERE id = ?`, id)
+	yield* ctx.storage.sql.exec(`DELETE FROM alchemy_scheduled_events WHERE id = ?`, id).pipe(Effect.asVoid)
 
 	yield* reconcileAlarm
 })

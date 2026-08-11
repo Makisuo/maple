@@ -1,0 +1,141 @@
+{
+	"$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
+	"options": {
+		"typeAware": true
+	},
+	"plugins": ["effecttsgo"],
+	"rules": {
+		"effecttsgo/abort-controller-in-effect": "warn",
+		"effecttsgo/async-function": "warn",
+		"effecttsgo/catch-all-to-map-error": "warn",
+		"effecttsgo/catch-chain-to-first-success-of": "warn",
+		"effecttsgo/catch-tag-to-catch-reason": "warn",
+		"effecttsgo/catch-to-ignore": "warn",
+		"effecttsgo/catch-to-or-else-succeed": "warn",
+		"effecttsgo/catch-unfailable-effect": "warn",
+		"effecttsgo/class-self-mismatch": "error",
+		"effecttsgo/crypto-random-uuid": "warn",
+		"effecttsgo/crypto-random-uuid-in-effect": "warn",
+		"effecttsgo/duplicate-package": "warn",
+		"effecttsgo/effect-fn-iife": "warn",
+		"effecttsgo/effect-fn-implicit-any": "error",
+		"effecttsgo/effect-fn-opportunity": "warn",
+		"effecttsgo/effect-gen-uses-adapter": "warn",
+		"effecttsgo/effect-in-failure": "warn",
+		"effecttsgo/effect-in-void-success": "warn",
+		"effecttsgo/effect-map-flatten": "warn",
+		"effecttsgo/effect-map-void": "warn",
+		"effecttsgo/effect-succeed-with-void": "warn",
+		"effecttsgo/extends-native-error": "warn",
+		"effecttsgo/flat-map-to-map": "warn",
+		"effecttsgo/floating-effect": "error",
+		"effecttsgo/floating-effect-in-vitest": "error",
+		"effecttsgo/generic-effect-services": "warn",
+		"effecttsgo/global-console": "warn",
+		"effecttsgo/global-console-in-effect": "warn",
+		"effecttsgo/global-date": "warn",
+		"effecttsgo/global-date-in-effect": "warn",
+		"effecttsgo/global-error-in-effect-catch": "warn",
+		"effecttsgo/global-error-in-effect-failure": "warn",
+		"effecttsgo/global-fetch": "warn",
+		"effecttsgo/global-fetch-in-effect": "warn",
+		"effecttsgo/global-random": "warn",
+		"effecttsgo/global-random-in-effect": "warn",
+		"effecttsgo/global-timers": "warn",
+		"effecttsgo/global-timers-in-effect": "warn",
+		"effecttsgo/instance-of-schema": "warn",
+		"effecttsgo/layer-merge-all-with-dependencies": "warn",
+		"effecttsgo/lazy-effect": "warn",
+		"effecttsgo/lazy-promise-in-effect-sync": "warn",
+		"effecttsgo/leaking-requirements": "warn",
+		"effecttsgo/missing-effect-context": "error",
+		"effecttsgo/missing-effect-error": "error",
+		"effecttsgo/missing-layer-context": "error",
+		"effecttsgo/missing-return-yield-star": "error",
+		"effecttsgo/missing-star-in-yield-effect-gen": "error",
+		"effecttsgo/multiple-catch-tag": "warn",
+		"effecttsgo/multiple-effect-provide": "warn",
+		"effecttsgo/new-promise": "warn",
+		"effecttsgo/node-builtin-import": "warn",
+		"effecttsgo/non-object-effect-service-type": "error",
+		"effecttsgo/outdated-api": "warn",
+		"effecttsgo/overridden-schema-constructor": "error",
+		"effecttsgo/prefer-schema-over-json": "warn",
+		"effecttsgo/prefer-typed-schema-decoder": "warn",
+		"effecttsgo/prefer-unsafe-constructor": "warn",
+		"effecttsgo/process-env": "warn",
+		"effecttsgo/process-env-in-effect": "warn",
+		"effecttsgo/promise-in-effect-success": "warn",
+		"effecttsgo/redundant-map-error": "warn",
+		"effecttsgo/redundant-or-die": "warn",
+		"effecttsgo/redundant-schema-tag-identifier": "warn",
+		"effecttsgo/return-effect-in-gen": "warn",
+		"effecttsgo/run-effect-inside-effect": "warn",
+		"effecttsgo/schema-literal-non-finite": "error",
+		"effecttsgo/schema-number": "warn",
+		"effecttsgo/schema-opaque-instance-member": "error",
+		"effecttsgo/schema-struct-with-tag": "warn",
+		"effecttsgo/schema-sync-in-effect": "warn",
+		"effecttsgo/scope-in-layer-effect": "warn",
+		"effecttsgo/sync-to-succeed": "warn",
+		"effecttsgo/try-catch-in-effect-gen": "warn",
+		"effecttsgo/unknown-in-effect-catch": "warn",
+		"effecttsgo/unnecessary-effect-gen": "warn",
+		"effecttsgo/unnecessary-fail-yieldable-error": "warn",
+		"effecttsgo/unnecessary-pipe": "warn",
+		"effecttsgo/unnecessary-pipe-chain": "warn",
+		"effecttsgo/unnecessary-typeof-type": "warn",
+		"effecttsgo/unsafe-effect-type-assertion": "warn",
+		"require-yield": "off"
+	},
+	"ignorePatterns": [".context/**", "apps/slack-agent/**", "lib/llm/**", "lib/thinking-orbs/**"],
+	"overrides": [
+		{
+			"files": [
+				"apps/api/src/mcp/tools/*.ts",
+				"apps/api/src/mcp/dispatcher.ts",
+				"apps/api/src/mcp/lib/query-warehouse.ts",
+				"apps/api/src/mcp/server.ts",
+				"apps/api/src/chat/tools.ts",
+				"apps/api/src/chat/loop/types.ts",
+				"apps/api/src/chat/loop/turn.ts",
+				"apps/api/src/chat/turn-runner.ts",
+				"apps/api/src/internal-rpc.ts",
+				"apps/api/src/workflows/agent-pass.ts",
+				"apps/api/src/routes/v1/chat.http.ts"
+			],
+			"rules": {
+				"effecttsgo/any-unknown-in-error-context": "error",
+				"effecttsgo/unsafe-effect-type-assertion": "error"
+			}
+		},
+		{
+			"files": [
+				"apps/api/src/mcp/tools/types.ts",
+				"apps/api/src/mcp/tools/registry.ts",
+				"apps/api/src/mcp/dispatcher.ts",
+				"apps/api/src/routes/v1/chat.http.ts"
+			],
+			"rules": {
+				"effecttsgo/missing-effect-context": "error",
+				"effecttsgo/missing-layer-context": "error",
+				"typescript/no-unsafe-type-assertion": "error"
+			}
+		},
+		{
+			"files": ["apps/api/src/mcp/tools/**/*.test.ts", "apps/api/src/mcp/tools/**/__tests__/**"],
+			"rules": {
+				"effecttsgo/any-unknown-in-error-context": "off",
+				"effecttsgo/unsafe-effect-type-assertion": "off",
+				"typescript/no-unsafe-type-assertion": "off"
+			}
+		},
+		{
+			"files": ["apps/api/src/worker.ts"],
+			"rules": {
+				"effecttsgo/any-unknown-in-error-context": "off",
+				"effecttsgo/unsafe-effect-type-assertion": "error"
+			}
+		}
+	]
+}
