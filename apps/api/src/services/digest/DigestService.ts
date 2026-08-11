@@ -23,6 +23,7 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/cache"
+import { clerkRequest } from "@/services/auth/clerk-request"
 import {
 	isOrgWarehouseQuarantined,
 	quarantineOnConfigClassCause,
@@ -194,6 +195,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 		 * orgId on any error or when Clerk isn't configured.
 		 */
 		const resolveOrgName = Effect.fn("DigestService.resolveOrgName")(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			if (env.MAPLE_AUTH_MODE.toLowerCase() !== "clerk") return String(orgId)
 			if (Option.isNone(env.CLERK_SECRET_KEY)) return String(orgId)
 
@@ -201,10 +203,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 				secretKey: Redacted.value(env.CLERK_SECRET_KEY.value),
 			})
 
-			return yield* Effect.tryPromise({
-				try: () => clerk.organizations.getOrganization({ organizationId: orgId }),
-				catch: (error) => error,
-			}).pipe(
+			return yield* clerkRequest("Clerk.organizations.getOrganization", { orgId }, () =>
+				clerk.organizations.getOrganization({ organizationId: orgId }),
+			).pipe(
 				Effect.map((org) => org.name || String(orgId)),
 				Effect.orElseSucceed(() => String(orgId)),
 			)
@@ -506,6 +507,8 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 		const lastSyncAt = yield* Ref.make<number | null>(null)
 
 		const paginateClerk = <T>(
+			spanName: string,
+			attributes: Readonly<Record<string, string>>,
 			fetchPage: (params: {
 				limit: number
 				offset: number
@@ -523,10 +526,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 				// (beta) ships neither `iterate` nor `loop`, so an imperative
 				// while-loop driving sequential `yield*`s is the clearest form here.
 				while (true) {
-					const page = yield* Effect.tryPromise({
-						try: () => fetchPage({ limit: PAGE_SIZE, offset }),
-						catch: () => new DigestPersistenceError({ message: errorMessage }),
-					})
+					const page = yield* clerkRequest(spanName, attributes, () =>
+						fetchPage({ limit: PAGE_SIZE, offset }),
+					).pipe(Effect.mapError(() => new DigestPersistenceError({ message: errorMessage })))
 					all.push(...page.data)
 					offset += page.data.length
 					if (offset >= page.totalCount || page.data.length === 0) break
@@ -539,6 +541,8 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			clerk: ReturnType<typeof createClerkClient>,
 		) {
 			const orgs = yield* paginateClerk(
+				"Clerk.organizations.getOrganizationList",
+				{},
 				(params) => clerk.organizations.getOrganizationList(params),
 				"Failed to list Clerk organizations",
 			)
@@ -546,6 +550,8 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			const perOrgMemberships = yield* Effect.forEach(orgs, (org) =>
 				Effect.gen(function* () {
 					const members = yield* paginateClerk(
+						"Clerk.organizations.getOrganizationMembershipList",
+						{ orgId: org.id },
 						(params) =>
 							clerk.organizations.getOrganizationMembershipList({
 								organizationId: org.id,

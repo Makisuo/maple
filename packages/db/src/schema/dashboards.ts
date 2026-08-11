@@ -1,16 +1,17 @@
 import { index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import type { DashboardId, DashboardVersionId, OrgId, UserId } from "@maple/domain/primitives"
 
 export const dashboards = pgTable(
 	"dashboards",
 	{
-		orgId: text("org_id").notNull(),
-		id: text("id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		id: text("id").$type<DashboardId>().notNull(),
 		name: text("name").notNull(),
 		payloadJson: jsonb("payload_json").$type<unknown>().notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
-		createdBy: text("created_by").notNull(),
-		updatedBy: text("updated_by").notNull(),
+		createdBy: text("created_by").$type<UserId>().notNull(),
+		updatedBy: text("updated_by").$type<UserId>().notNull(),
 		// Optimistic-concurrency token. Bumped on every upsert; mutations use a
 		// compare-and-swap on (id, version) and retry on conflict so concurrent
 		// writers can no longer silently clobber each other.
@@ -34,16 +35,16 @@ export type DashboardInsert = typeof dashboards.$inferInsert
 export const dashboardVersions = pgTable(
 	"dashboard_versions",
 	{
-		orgId: text("org_id").notNull(),
-		id: text("id").notNull(),
-		dashboardId: text("dashboard_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		id: text("id").$type<DashboardVersionId>().notNull(),
+		dashboardId: text("dashboard_id").$type<DashboardId>().notNull(),
 		versionNumber: integer("version_number").notNull(),
 		snapshotJson: jsonb("snapshot_json").$type<unknown>().notNull(),
 		changeKind: text("change_kind").notNull(),
 		changeSummary: text("change_summary"),
-		sourceVersionId: text("source_version_id"),
+		sourceVersionId: text("source_version_id").$type<DashboardVersionId>(),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
-		createdBy: text("created_by").notNull(),
+		createdBy: text("created_by").$type<UserId>().notNull(),
 	},
 	(table) => [
 		primaryKey({ columns: [table.orgId, table.id] }),

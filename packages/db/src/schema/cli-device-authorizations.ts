@@ -1,4 +1,5 @@
 import { index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import type { ApiKeyId, OrgId, UserId } from "@maple/domain/primitives"
 
 export const cliDeviceAuthorizations = pgTable(
 	"cli_device_authorizations",
@@ -6,11 +7,11 @@ export const cliDeviceAuthorizations = pgTable(
 		deviceCodeHash: text("device_code_hash").primaryKey(),
 		userCodeHash: text("user_code_hash").notNull(),
 		deviceName: text("device_name").notNull(),
-		approvedOrgId: text("approved_org_id"),
-		approvedUserId: text("approved_user_id"),
+		approvedOrgId: text("approved_org_id").$type<OrgId>(),
+		approvedUserId: text("approved_user_id").$type<UserId>(),
 		approvedRoles: jsonb("approved_roles").$type<string[]>(),
 		approvedUserEmail: text("approved_user_email"),
-		apiKeyId: text("api_key_id"),
+		apiKeyId: text("api_key_id").$type<ApiKeyId>(),
 		tokenCiphertext: text("token_ciphertext"),
 		tokenIv: text("token_iv"),
 		tokenTag: text("token_tag"),

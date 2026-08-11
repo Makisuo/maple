@@ -6,7 +6,7 @@ export { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 export class EdgeCacheIOError extends Schema.TaggedError<EdgeCacheIOError>()(
 	"@maple/cache/EdgeCacheIOError",
 	{
-		op: Schema.Literals(["get", "put"]),
+		op: Schema.Literals(["get", "put", "delete"]),
 		bucket: Schema.String,
 		key: Schema.String,
 		cause: Schema.String,
@@ -275,7 +275,13 @@ export const makeEdgeCacheService = (
 			const writeNowMs = yield* Clock.currentTimeMillis
 			yield* Effect.tryPromise({
 				try: () => backend.put(options.bucket, hash, stored, ttlSeconds, writeNowMs),
-				catch: (error) => error,
+				catch: (cause) =>
+					new EdgeCacheIOError({
+						op: "put",
+						bucket: options.bucket,
+						key: options.key,
+						cause: cause instanceof Error ? cause.message : String(cause),
+					}),
 			}).pipe(
 				Effect.tapError((error) =>
 					Effect.logWarning("Edge cache put failed; continuing without cache").pipe(
@@ -304,7 +310,13 @@ export const makeEdgeCacheService = (
 				? { value: undefined, timedOut: false as const }
 				: yield* Effect.tryPromise({
 						try: () => readBackend(options.bucket, hash, nowMs, timeoutMs),
-						catch: (error) => error,
+						catch: (cause) =>
+							new EdgeCacheIOError({
+								op: "get",
+								bucket: options.bucket,
+								key: options.key,
+								cause: cause instanceof Error ? cause.message : String(cause),
+							}),
 					}).pipe(
 						Effect.tapError((error) =>
 							Effect.logWarning("Edge cache get failed; treating as miss").pipe(
@@ -375,7 +387,13 @@ export const makeEdgeCacheService = (
 		const hash = yield* Effect.promise(() => sha256Hex(options.key))
 		yield* Effect.tryPromise({
 			try: () => backend.delete(options.bucket, hash),
-			catch: (error) => error,
+			catch: (cause) =>
+				new EdgeCacheIOError({
+					op: "delete",
+					bucket: options.bucket,
+					key: options.key,
+					cause: cause instanceof Error ? cause.message : String(cause),
+				}),
 		}).pipe(
 			Effect.tapError((error) =>
 				Effect.logWarning("Edge cache delete failed; entry will expire via TTL").pipe(

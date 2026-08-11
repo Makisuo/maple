@@ -1,4 +1,5 @@
 import { index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import type { ApiKeyId, OrgId, UserId } from "@maple/domain/primitives"
 
 export const mcpOAuthClients = pgTable("mcp_oauth_clients", {
 	clientId: text("client_id").primaryKey(),
@@ -20,8 +21,8 @@ export const mcpOAuthAuthorizations = pgTable(
 		scopes: jsonb("scopes").$type<string[]>().notNull(),
 		codeChallenge: text("code_challenge").notNull(),
 		authorizationCodeHash: text("authorization_code_hash"),
-		approvedOrgId: text("approved_org_id"),
-		approvedUserId: text("approved_user_id"),
+		approvedOrgId: text("approved_org_id").$type<OrgId>(),
+		approvedUserId: text("approved_user_id").$type<UserId>(),
 		approvedRoles: jsonb("approved_roles").$type<string[]>(),
 		approvedUserEmail: text("approved_user_email"),
 		approvedAt: timestamp("approved_at", { withTimezone: true, mode: "date" }),
@@ -45,11 +46,11 @@ export const mcpOAuthRefreshTokens = pgTable(
 		clientId: text("client_id").notNull(),
 		resource: text("resource").notNull(),
 		scopes: jsonb("scopes").$type<string[]>().notNull(),
-		orgId: text("org_id").notNull(),
-		userId: text("user_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		userId: text("user_id").$type<UserId>().notNull(),
 		roles: jsonb("roles").$type<string[]>().notNull(),
 		userEmail: text("user_email"),
-		accessKeyId: text("access_key_id").notNull(),
+		accessKeyId: text("access_key_id").$type<ApiKeyId>().notNull(),
 		replacedById: text("replaced_by_id"),
 		revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),

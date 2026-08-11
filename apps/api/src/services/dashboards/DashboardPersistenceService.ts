@@ -29,7 +29,6 @@ import { summarizeDashboardChange } from "./dashboard-changes"
 const decodeDashboardIdSync = Schema.decodeUnknownSync(DashboardId)
 const decodeDashboardVersionIdSync = Schema.decodeUnknownSync(DashboardVersionId)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
-const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 
 const COALESCE_WINDOW_MS = 5_000
 
@@ -126,14 +125,14 @@ const createDashboardDocument = (portableDashboard: PortableDashboardDocument, n
 
 const versionRowToSummary = (row: DashboardVersionRow): DashboardVersionSummary =>
 	new DashboardVersionSummary({
-		id: decodeDashboardVersionIdSync(row.id),
-		dashboardId: decodeDashboardIdSync(row.dashboardId),
+		id: row.id,
+		dashboardId: row.dashboardId,
 		versionNumber: row.versionNumber,
 		changeKind: row.changeKind as DashboardVersionSummary["changeKind"],
 		changeSummary: row.changeSummary ?? null,
-		sourceVersionId: row.sourceVersionId ? decodeDashboardVersionIdSync(row.sourceVersionId) : null,
+		sourceVersionId: row.sourceVersionId ?? null,
 		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
-		createdBy: decodeUserIdSync(row.createdBy),
+		createdBy: row.createdBy,
 	})
 
 type VersionOptions = {
@@ -222,6 +221,7 @@ export class DashboardPersistenceService extends Context.Service<
 			orgId: OrgId,
 			dashboardId: DashboardId,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.dashboard.id": dashboardId })
 			const rows: ReadonlyArray<{
 				readonly payloadJson: unknown
 				readonly version: number
@@ -250,6 +250,11 @@ export class DashboardPersistenceService extends Context.Service<
 			previous: DashboardDocument | null,
 			options: VersionOptions = {},
 		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"tenant.userId": userId,
+				"maple.dashboard.id": dashboard.id,
+			})
 			const summary = summarizeDashboardChange(previous, dashboard)
 			const kind = options.forceKind ?? summary.kind
 			const summaryText = options.forceSummary ?? summary.summary
@@ -308,7 +313,7 @@ export class DashboardPersistenceService extends Context.Service<
 				.execute((db) =>
 					db.insert(dashboardVersions).values({
 						orgId,
-						id: randomUUID(),
+						id: decodeDashboardVersionIdSync(randomUUID()),
 						dashboardId: dashboard.id,
 						versionNumber,
 						snapshotJson,
@@ -323,6 +328,7 @@ export class DashboardPersistenceService extends Context.Service<
 		})
 
 		const list = Effect.fn("DashboardPersistenceService.list")(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			const rows: ReadonlyArray<{ readonly payloadJson: unknown }> = yield* database
 				.execute((db) =>
 					db
@@ -344,6 +350,7 @@ export class DashboardPersistenceService extends Context.Service<
 			orgId: OrgId,
 			dashboardId: DashboardId,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.dashboard.id": dashboardId })
 			const current = yield* loadCurrent(orgId, dashboardId)
 			if (current === null) {
 				return yield* Effect.fail(
@@ -367,6 +374,11 @@ export class DashboardPersistenceService extends Context.Service<
 			updatedAt: number,
 			payloadJson: DashboardDocument,
 		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"tenant.userId": userId,
+				"maple.dashboard.id": dashboard.id,
+			})
 			const updated: ReadonlyArray<{ readonly id: string; readonly txid: string }> = yield* database
 				.execute((db) =>
 					db
@@ -425,6 +437,11 @@ export class DashboardPersistenceService extends Context.Service<
 			dashboard: DashboardDocument,
 			versionOptions: VersionOptions = {},
 		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"tenant.userId": userId,
+				"maple.dashboard.id": dashboard.id,
+			})
 			const payloadJson = yield* validatePayload(dashboard)
 			const createdAt = yield* parseTimestamp("createdAt", dashboard.createdAt)
 			const updatedAt = yield* parseTimestamp("updatedAt", dashboard.updatedAt)
@@ -477,6 +494,11 @@ export class DashboardPersistenceService extends Context.Service<
 			userId: UserId,
 			dashboard: DashboardDocument,
 		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"tenant.userId": userId,
+				"maple.dashboard.id": dashboard.id,
+			})
 			return yield* upsertInternal(orgId, userId, dashboard)
 		})
 
@@ -485,8 +507,10 @@ export class DashboardPersistenceService extends Context.Service<
 			userId: UserId,
 			dashboard: PortableDashboardDocument,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "tenant.userId": userId })
 			const nowMillis = yield* Clock.currentTimeMillis
 			const createdDashboard = createDashboardDocument(dashboard, nowMillis)
+			yield* Effect.annotateCurrentSpan("maple.dashboard.id", createdDashboard.id)
 			return yield* upsertInternal(orgId, userId, createdDashboard)
 		})
 
@@ -505,6 +529,11 @@ export class DashboardPersistenceService extends Context.Service<
 			transform: (dashboard: DashboardDocument) => Effect.Effect<DashboardDocument, E, R>,
 			versionOptions: VersionOptions = {},
 		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"tenant.userId": userId,
+				"maple.dashboard.id": dashboardId,
+			})
 			for (let attempt = 0; attempt < MUTATE_MAX_ATTEMPTS; attempt++) {
 				const current = yield* loadCurrent(orgId, dashboardId)
 				if (current === null) {
@@ -557,6 +586,7 @@ export class DashboardPersistenceService extends Context.Service<
 			orgId: OrgId,
 			dashboardId: DashboardId,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.dashboard.id": dashboardId })
 			const rows = yield* database
 				.execute((db) =>
 					db
@@ -595,13 +625,14 @@ export class DashboardPersistenceService extends Context.Service<
 				.pipe(Effect.mapError(toPersistenceError))
 
 			return new DashboardDeleteResponse({
-				id: decodeDashboardIdSync(deleted.value.id),
+				id: deleted.value.id,
 				...(txid !== undefined && { txid }),
 			})
 		})
 
 		const ensureDashboardExists = Effect.fn("DashboardPersistenceService.ensureDashboardExists")(
 			function* (orgId: OrgId, dashboardId: DashboardId) {
+				yield* Effect.annotateCurrentSpan({ orgId, "maple.dashboard.id": dashboardId })
 				const current = yield* loadCurrent(orgId, dashboardId)
 				if (current === null) {
 					return yield* Effect.fail(
@@ -623,6 +654,7 @@ export class DashboardPersistenceService extends Context.Service<
 				readonly before?: number
 			} = {},
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.dashboard.id": dashboardId })
 			yield* ensureDashboardExists(orgId, dashboardId)
 
 			const limit = Math.min(options.limit ?? 50, 200)
@@ -659,6 +691,11 @@ export class DashboardPersistenceService extends Context.Service<
 			dashboardId: DashboardId,
 			versionId: DashboardVersionId,
 		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"maple.dashboard.id": dashboardId,
+				"maple.dashboard.version_id": versionId,
+			})
 			yield* ensureDashboardExists(orgId, dashboardId)
 
 			const rows: ReadonlyArray<DashboardVersionRow> = yield* database
@@ -685,16 +722,14 @@ export class DashboardPersistenceService extends Context.Service<
 			const snapshot = yield* parsePayload(row.snapshotJson)
 
 			return new DashboardVersionDetail({
-				id: decodeDashboardVersionIdSync(row.id),
-				dashboardId: decodeDashboardIdSync(row.dashboardId),
+				id: row.id,
+				dashboardId: row.dashboardId,
 				versionNumber: row.versionNumber,
 				changeKind: row.changeKind as DashboardVersionSummary["changeKind"],
 				changeSummary: row.changeSummary ?? null,
-				sourceVersionId: row.sourceVersionId
-					? decodeDashboardVersionIdSync(row.sourceVersionId)
-					: null,
+				sourceVersionId: row.sourceVersionId ?? null,
 				createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
-				createdBy: decodeUserIdSync(row.createdBy),
+				createdBy: row.createdBy,
 				snapshot,
 			})
 		})
@@ -705,6 +740,12 @@ export class DashboardPersistenceService extends Context.Service<
 			dashboardId: DashboardId,
 			versionId: DashboardVersionId,
 		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"tenant.userId": userId,
+				"maple.dashboard.id": dashboardId,
+				"maple.dashboard.version_id": versionId,
+			})
 			const detail = yield* getVersion(orgId, dashboardId, versionId)
 
 			const nowIso = decodeIsoDateTimeStringSync(new Date(yield* Clock.currentTimeMillis).toISOString())

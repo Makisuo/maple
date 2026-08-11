@@ -52,8 +52,8 @@ export interface Log {
 	severityNumber: number
 	serviceName: string
 	body: string
-	traceId: TraceId
-	spanId: SpanId
+	traceId: TraceId | undefined
+	spanId: SpanId | undefined
 	logAttributes: Record<string, string>
 	resourceAttributes: Record<string, string>
 }
@@ -87,8 +87,8 @@ function transformLog(raw: Record<string, unknown>): Log {
 		severityNumber: Number(raw.severityNumber ?? 0),
 		serviceName: String(raw.serviceName ?? ""),
 		body: String(raw.body ?? ""),
-		traceId: raw.traceId ? toTraceId(String(raw.traceId)) : ("" as TraceId),
-		spanId: raw.spanId ? toSpanId(String(raw.spanId)) : ("" as SpanId),
+		traceId: raw.traceId ? toTraceId(String(raw.traceId)) : undefined,
+		spanId: raw.spanId ? toSpanId(String(raw.spanId)) : undefined,
 		logAttributes: parseAttributes(raw.logAttributes as string),
 		resourceAttributes: parseAttributes(raw.resourceAttributes as string),
 	}

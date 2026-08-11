@@ -20,8 +20,8 @@ export interface LogKey {
 interface EncodableLog {
 	timestamp: string
 	serviceName: string
-	traceId: string
-	spanId: string
+	traceId: string | undefined
+	spanId: string | undefined
 }
 
 function toBase64Url(str: string): string {
