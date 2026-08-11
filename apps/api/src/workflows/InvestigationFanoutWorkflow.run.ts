@@ -152,19 +152,19 @@ const fanoutTelemetry = MapleCloudflareSDK.make({
  * One runtime for the whole instance, built lazily and shared by every step.
  *
  * The dynamic-import gymnastics in this file and in `turn-runner.ts` exist
- * because building `MainLive` constructs hundreds of Schema ASTs and blows
+ * because building the service graph constructs hundreds of Schema ASTs and blows
  * Cloudflare's startup-CPU budget (error 10021). Building five of them
  * concurrently, one per lane step, would take that cost and multiply it against
  * a 30s per-step CPU limit — so the lane steps share one.
  */
 const makeRuntime = async (env: InvestigationFanoutWorkflowEnv) => {
-	const [{ MainLive }, { layerPg }, { layerLlm }] = await Promise.all([
-		import("../runtime/service-graph"),
+	const [{ McpServicesLive }, { layerPg }, { layerLlm }] = await Promise.all([
+		import("../runtime/mcp-service-graph"),
 		import("../platform/DatabasePgLive"),
 		import("../platform/Llm"),
 	])
 	return ManagedRuntime.make(
-		MainLive.pipe(
+		McpServicesLive.pipe(
 			Layer.provideMerge(layerLlm(env)),
 			Layer.provideMerge(layerPg),
 			Layer.provideMerge(layerFromEnvRecord(env)),
