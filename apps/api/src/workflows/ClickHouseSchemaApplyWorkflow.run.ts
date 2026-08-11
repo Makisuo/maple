@@ -30,24 +30,41 @@ import {
 } from "@maple/domain/clickhouse"
 import { OrgId } from "@maple/domain/http"
 import { eq } from "drizzle-orm"
-import { Effect, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
 import { makePgConnectionScope, type PgConnectionScopeShape } from "@/platform/pg-connection-scope"
-import { invalidateOrgRuntimeConfigMemo } from "@/services/org/OrgClickHouseSettingsService"
+import { EdgeCacheService } from "@maple/cache"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import {
+	invalidateOrgRuntimeConfigMemo,
+	ORG_CH_CONFIG_CACHE_BUCKET,
+} from "@/services/org/OrgClickHouseSettingsService"
 
 /**
- * Bust this isolate's cached runtime config after the workflow writes to
+ * Bust the cached runtime config after the workflow writes to
  * `org_clickhouse_settings` (it stamps `schema_version`, part of the cached
  * projection).
  *
- * Isolate-local, and that is the whole story now that the durable tier is gone:
- * the workflow runs in its own isolate, so API isolates converge on the new
- * `schema_version` at the memo's soft TTL (`ORG_CH_CONFIG_MEMO_TTL_MS`, 300s)
- * exactly as they do for every other writer. This call keeps the invariant
- * "every writer of the row busts its own memo" true at every write site.
+ * Both tiers. The memo call is isolate-local and therefore almost decorative
+ * here — the workflow runs in its own isolate, so it clears a memo no API
+ * request will ever read — but the shared edge-cache entry is the one that
+ * matters: it is what every API isolate reads on a memo miss, and at a 6h TTL
+ * it would otherwise hand back the pre-apply `schema_version` (and so a wrong
+ * `clickhouse.schemaDrift`) for the rest of the day.
+ *
+ * Best-effort by design: `invalidate` already swallows backend failures, and
+ * `Effect.ignore` covers the case where this isolate has no Cache API at all.
+ * A missed eviction costs an annotation, never a routing decision.
  */
-const bustRuntimeConfigCache = (orgId: OrgId): void => invalidateOrgRuntimeConfigMemo(orgId)
+const bustRuntimeConfigCache = (orgId: OrgId): Promise<void> =>
+	Effect.runPromise(
+		Effect.gen(function* () {
+			invalidateOrgRuntimeConfigMemo(orgId)
+			const cache = yield* EdgeCacheService
+			yield* cache.invalidate({ bucket: ORG_CH_CONFIG_CACHE_BUCKET, key: orgId })
+		}).pipe(Effect.provide(EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))), Effect.ignore),
+	)
 
 /**
  * This workflow runs outside the worker's layer graph, so it owns its telemetry
@@ -475,7 +492,7 @@ async function runWithDb(
 					})
 					.where(eq(orgClickHouseSettings.orgId, orgId)),
 			)
-			bustRuntimeConfigCache(orgId)
+			await bustRuntimeConfigCache(orgId)
 		})
 
 		for (const migration of clickHouseMigrations) {
@@ -634,7 +651,7 @@ async function runWithDb(
 				.set({ syncStatus: "error", lastSyncError: message, updatedAt: new Date(finishedAt) })
 				.where(eq(orgClickHouseSettings.orgId, orgId)),
 		).catch(() => undefined)
-		bustRuntimeConfigCache(orgId)
+		await bustRuntimeConfigCache(orgId)
 		throw error
 	}
 }
