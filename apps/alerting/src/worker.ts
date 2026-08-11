@@ -44,7 +44,9 @@ interface AlertingWorkerEnv {
 	readonly [key: string]: unknown
 }
 
-const buildLayer = (env: AlertingWorkerEnv) => {
+export const buildLayer = (env: AlertingWorkerEnv) => {
+	// Keep config and binding services on the same invocation-scoped env record;
+	// scheduled handlers already receive the authoritative Cloudflare bindings.
 	const ConfigLive = layerFromEnv(env)
 	const WorkerEnvironmentLive = layerFromEnvRecord(env)
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
@@ -183,7 +185,7 @@ const buildLayer = (env: AlertingWorkerEnv) => {
  * `runScheduledEffect`'s `onInterrupt: "graceful"` handling instead of logging a phantom
  * tick failure. Mirrors the per-org guards inside the tick services.
  */
-const catchTickFailure = (label: string) =>
+export const catchTickFailure = (label: string) =>
 	Effect.catchCause((cause: Cause.Cause<unknown>) =>
 		Cause.hasInterruptsOnly(cause)
 			? Effect.interrupt
@@ -332,10 +334,70 @@ const planetScaleTick = makeTick(
 			: undefined,
 )
 
-const everyMinuteTick = Effect.all([alertTick, errorTick, escalationTick], {
-	concurrency: 2,
-	discard: true,
-})
+export interface ScheduledTickPrograms<R = never> {
+	readonly alert: Effect.Effect<void, never, R>
+	readonly anomaly: Effect.Effect<void, never, R>
+	readonly cloudflareAnalytics: Effect.Effect<void, never, R>
+	readonly digest: Effect.Effect<void, never, R>
+	readonly error: Effect.Effect<void, never, R>
+	readonly escalation: Effect.Effect<void, never, R>
+	readonly planetScale: Effect.Effect<void, never, R>
+	readonly serviceMapRollup: Effect.Effect<void, never, R>
+}
+
+/**
+ * Keep cron routing separate from the Worker shell so the schedule and its
+ * concurrency groups can be characterized without acquiring production
+ * drivers. The concrete tick Effects remain module-scoped and unchanged.
+ */
+export const selectScheduledProgram = <R>(
+	cron: string,
+	ticks: ScheduledTickPrograms<R>,
+): Effect.Effect<void, never, R> =>
+	Match.value(cron).pipe(
+		Match.when("*/5 * * * *", () =>
+			Effect.all([ticks.anomaly, ticks.cloudflareAnalytics, ticks.planetScale], {
+				concurrency: 3,
+				discard: true,
+			}),
+		),
+		Match.when("*/15 * * * *", () => ticks.digest),
+		Match.when("0 * * * *", () => ticks.serviceMapRollup),
+		Match.when("* * * * *", () =>
+			Effect.all([ticks.alert, ticks.error, ticks.escalation], {
+				concurrency: 2,
+				discard: true,
+			}),
+		),
+		// Fail closed: a newly configured cron must not silently inherit the
+		// every-minute alert/error/escalation fan-out.
+		Match.orElse((unknownCron) =>
+			Effect.logWarning("Skipping unknown alerting cron schedule").pipe(
+				Effect.annotateLogs({ cron: unknownCron }),
+			),
+		),
+	)
+
+type ScheduledServices =
+	| AlertsService
+	| AnomalyDetectionService
+	| CloudflareAnalyticsService
+	| DigestService
+	| ErrorsService
+	| EscalationService
+	| PlanetScaleService
+	| ServiceMapRollupService
+
+const scheduledTicks: ScheduledTickPrograms<ScheduledServices> = {
+	alert: alertTick,
+	anomaly: anomalyTick,
+	cloudflareAnalytics: cloudflareAnalyticsTick,
+	digest: digestTick,
+	error: errorTick,
+	escalation: escalationTick,
+	planetScale: planetScaleTick,
+	serviceMapRollup: serviceMapRollupTick,
+}
 
 interface ScheduledEventLike {
 	readonly cron: string
@@ -366,23 +428,7 @@ export default {
 			)
 			return
 		}
-		const program = Match.value(event.cron).pipe(
-			Match.when("*/5 * * * *", () =>
-				Effect.all([anomalyTick, cloudflareAnalyticsTick, planetScaleTick], {
-					concurrency: 3,
-					discard: true,
-				}),
-			),
-			Match.when("*/15 * * * *", () => digestTick),
-			Match.when("0 * * * *", () => serviceMapRollupTick),
-			Match.when("* * * * *", () => everyMinuteTick),
-			// Unknown schedules must not inherit the every-minute fan-out.
-			Match.orElse((cron) =>
-				Effect.logWarning("Skipping unknown alerting cron schedule").pipe(
-					Effect.annotateLogs({ cron }),
-				),
-			),
-		)
+		const program = selectScheduledProgram(event.cron, scheduledTicks)
 		try {
 			// Cron ticks cancel gracefully on isolate teardown — the schedule reruns
 			// anyway, and re-raised interrupts (see the per-org catchCause guards in the
