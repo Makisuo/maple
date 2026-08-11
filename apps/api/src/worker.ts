@@ -13,6 +13,7 @@ import { HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
+import { serverErrorSpanMiddleware } from "./http/server-error-span"
 import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
 import { classifyWorkerQueue } from "./queue-dispatch"
 
@@ -114,9 +115,15 @@ const buildHandler = async () => {
 		// on Workers when `toWebHandler` is given NO middleware (1101 in prod,
 		// miniflare "worker hung" locally — suspected Effect RpcServer / HttpRouter
 		// scope-propagation bug), so this slot must never go back to empty.
+		// `serverErrorSpanMiddleware` sits outermost — directly under
+		// `HttpMiddleware.tracer` — so a 5xx response records an Error-status server
+		// span (the connection scope has already been released by then).
 		// `disableLogger: true` stops Effect's default logger double-logging;
 		// application logs flow through the OTLP logger from `telemetry.layer`.
-		{ middleware: pgConnectionMiddleware, disableLogger: true },
+		{
+			middleware: (httpApp) => serverErrorSpanMiddleware(pgConnectionMiddleware(httpApp)),
+			disableLogger: true,
+		},
 	)
 }
 
