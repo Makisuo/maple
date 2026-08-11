@@ -170,6 +170,18 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
 			workersDev: true,
+			// alchemy ≥ beta.70 sets rolldown `strictExecutionOrder: true`, which wraps
+			// ~every chunk in a lazy `__esmMin` initializer. The DB module graph (drizzle
+			// pgTable schemas + Effect Schema ASTs) then evaluates on first use — inside
+			// the first Postgres call of each fresh isolate — instead of at script
+			// startup. That is what stepped the cold dial from ~2s to ~9-11s on
+			// 2026-08-08 (deploy 2679ba80) and produced the CONNECT_TIMEOUT incident;
+			// see the 2026-08-11 investigation. Eager evaluation moves that cost back to
+			// script startup, off the request path. If chunking ever regresses into
+			// upstream #749 (`ScriptStartupError: Cannot access '<minified>' before
+			// initialization`), the deploy fails loudly at upload — remove this override
+			// and instead warm the DB graph off the request path.
+			build: { output: { strictExecutionOrder: false } },
 			// Custom domain (not a zone route): routes don't create DNS records, so
 			// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains
 			// provision DNS + edge certs automatically.
