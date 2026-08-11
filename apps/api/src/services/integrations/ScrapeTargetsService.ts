@@ -259,7 +259,7 @@ const validateAuthCredentials = (authType: string, authCredentials: string | nul
 			: authType === "token"
 				? TokenCredentialsSchema
 				: BasicCredentialsSchema
-	return Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(authCredentials).pipe(
+	return Schema.decodeEffect(Schema.fromJsonString(schema))(authCredentials).pipe(
 		Effect.mapError(
 			() =>
 				new ScrapeTargetValidationError({
@@ -341,7 +341,7 @@ const validateInterval = (seconds: number | undefined) => {
  */
 const validateLabelsJson = (labelsJson: string | null | undefined) => {
 	if (labelsJson === undefined || labelsJson === null) return Effect.succeed(labelsJson)
-	return Schema.decodeUnknownEffect(Schema.fromJsonString(ScrapeLabelsSchema))(labelsJson).pipe(
+	return Schema.decodeEffect(Schema.fromJsonString(ScrapeLabelsSchema))(labelsJson).pipe(
 		Effect.mapError(
 			() =>
 				new ScrapeTargetValidationError({
@@ -486,8 +486,9 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				if (row.authType !== "planetscale_oauth") {
 					return yield* buildScrapeAuthHeaders(row, encryptionKey)
 				}
+				const orgId = yield* Schema.decodeEffect(OrgId)(row.orgId).pipe(Effect.orDie)
 				const { accessToken } = yield* psOAuth
-					.getValidAccessToken(Schema.decodeUnknownSync(OrgId)(row.orgId))
+					.getValidAccessToken(orgId)
 					.pipe(Effect.catchTags(catchOAuthTokenFailure))
 				return { Authorization: planetScaleBearerHeader(accessToken) }
 			})

@@ -91,9 +91,7 @@ export function registerUpdateErrorNotificationPolicyTool(server: McpToolRegistr
 			if (min_occurrence_count !== undefined) patch.minOccurrenceCount = min_occurrence_count
 			if (decodedSeverity !== undefined) patch.severity = decodedSeverity
 
-			const decodedPatch = yield* Schema.decodeUnknownEffect(ErrorNotificationPolicyUpsertRequest)(
-				patch,
-			).pipe(
+			const decodedPatch = yield* Schema.decodeEffect(ErrorNotificationPolicyUpsertRequest)(patch).pipe(
 				Effect.mapError(
 					(error) =>
 						new McpQueryError({

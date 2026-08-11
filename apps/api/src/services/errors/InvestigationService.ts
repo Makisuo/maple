@@ -223,7 +223,7 @@ export interface InvestigationServiceShape {
 }
 
 /** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
-const internalServiceUserId = Schema.decodeUnknownSync(UserIdSchema)("internal-service")
+const internalServiceUserId = Schema.decodeSync(UserIdSchema)("internal-service")
 
 export class InvestigationService extends Context.Service<InvestigationService, InvestigationServiceShape>()(
 	"@maple/api/services/InvestigationService",

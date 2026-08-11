@@ -57,8 +57,8 @@ export const makeEvalRuntime = (): EvalRuntime => {
 	const runtime = ManagedRuntime.make(layer as any) as ManagedRuntime.ManagedRuntime<any, never>
 
 	const tenant: TenantContext = {
-		orgId: Schema.decodeUnknownSync(OrgId)(FIXTURES.orgId),
-		userId: Schema.decodeUnknownSync(UserId)("internal-service"),
+		orgId: Schema.decodeSync(OrgId)(FIXTURES.orgId),
+		userId: Schema.decodeSync(UserId)("internal-service"),
 		roles: [],
 		authMode: "self_hosted",
 	}

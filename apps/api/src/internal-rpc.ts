@@ -10,7 +10,7 @@ import type { TenantContext } from "@/services/auth/tenant-context"
 import { McpToolExecutor, listMcpTools } from "./mcp/dispatcher"
 import { InvestigationService } from "./services/errors/InvestigationService"
 
-const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
+const internalServiceUserId = Schema.decodeSync(UserId)("internal-service")
 
 const invalidInput = (method: "callMcpTool" | "submitDiagnosis") => (error: { message: string }) =>
 	new InternalRpcInvalidInputError({ method, message: error.message })

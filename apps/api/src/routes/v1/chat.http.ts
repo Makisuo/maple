@@ -110,14 +110,15 @@ export const HttpChatLive = HttpApiBuilder.group(MapleApi, "chat", (handlers) =>
 				return yield* new ChatToolNotFoundError({ tool, message: `Unknown tool "${tool}".` })
 			}
 
-			yield* Effect.try({
-				try: () => Schema.decodeUnknownSync(definition.schema)(payload.input),
-				catch: (error) =>
-					new ChatToolInvalidInputError({
-						tool,
-						message: `Invalid input for "${tool}": ${String(error)}`,
-					}),
-			})
+			yield* Schema.decodeUnknownEffect(definition.schema)(payload.input).pipe(
+				Effect.mapError(
+					(error) =>
+						new ChatToolInvalidInputError({
+							tool,
+							message: `Invalid input for "${tool}": ${String(error)}`,
+						}),
+				),
+			)
 
 			// Domain-level tool failures are encoded as `isError` by the shared dispatcher.
 			// A defect remains a transport failure, but it is declared and serialized instead

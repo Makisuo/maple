@@ -38,27 +38,21 @@ const jsonDecodeError = (field: string, tool: string) => (error: unknown) =>
 	})
 
 export const decodeWidgetJson = (json: string, tool: string) =>
-	Schema.decodeUnknownEffect(WidgetFromJson)(json).pipe(
-		Effect.mapError(jsonDecodeError("widget_json", tool)),
-	)
+	Schema.decodeEffect(WidgetFromJson)(json).pipe(Effect.mapError(jsonDecodeError("widget_json", tool)))
 
 export const decodeDataSourceJson = (json: string, tool: string) =>
-	Schema.decodeUnknownEffect(DataSourceFromJson)(json).pipe(
+	Schema.decodeEffect(DataSourceFromJson)(json).pipe(
 		Effect.mapError(jsonDecodeError("data_source_json", tool)),
 	)
 
 export const decodeDisplayJson = (json: string, tool: string) =>
-	Schema.decodeUnknownEffect(DisplayFromJson)(json).pipe(
-		Effect.mapError(jsonDecodeError("display_json", tool)),
-	)
+	Schema.decodeEffect(DisplayFromJson)(json).pipe(Effect.mapError(jsonDecodeError("display_json", tool)))
 
 export const decodeLayoutJson = (json: string, tool: string) =>
-	Schema.decodeUnknownEffect(LayoutFromJson)(json).pipe(
-		Effect.mapError(jsonDecodeError("layout_json", tool)),
-	)
+	Schema.decodeEffect(LayoutFromJson)(json).pipe(Effect.mapError(jsonDecodeError("layout_json", tool)))
 
 export const decodeTimeRangeJson = (json: string, tool: string) =>
-	Schema.decodeUnknownEffect(TimeRangeFromJson)(json).pipe(
+	Schema.decodeEffect(TimeRangeFromJson)(json).pipe(
 		Effect.mapError(jsonDecodeError("time_range_json", tool)),
 	)
 

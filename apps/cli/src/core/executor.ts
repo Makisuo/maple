@@ -8,8 +8,8 @@ import { debugLog } from "../lib/debug"
 // Local mode is single-tenant: the local binary writes every row under this
 // OrgId, and every compiled query filters on it. `OrgId` is a non-empty trimmed
 // branded string, so "local" decodes cleanly (no cast needed).
-const LOCAL_ORG_ID = Schema.decodeUnknownSync(OrgId)("local")
-const LOCAL_USER_ID = Schema.decodeUnknownSync(UserId)("local")
+const LOCAL_ORG_ID = Schema.decodeSync(OrgId)("local")
+const LOCAL_USER_ID = Schema.decodeSync(UserId)("local")
 
 const LOCAL_TENANT = { orgId: LOCAL_ORG_ID, userId: LOCAL_USER_ID, authMode: "local" }
 

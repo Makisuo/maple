@@ -39,8 +39,8 @@ import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 
-const ROOT_ROLE = Schema.decodeUnknownSync(RoleName)("root")
-const ORG_ADMIN_ROLE = Schema.decodeUnknownSync(RoleName)("org:admin")
+const ROOT_ROLE = Schema.decodeSync(RoleName)("root")
+const ORG_ADMIN_ROLE = Schema.decodeSync(RoleName)("org:admin")
 
 const isOrgAdmin = (roles: ReadonlyArray<RoleName>) =>
 	roles.includes(ROOT_ROLE) || roles.includes(ORG_ADMIN_ROLE)

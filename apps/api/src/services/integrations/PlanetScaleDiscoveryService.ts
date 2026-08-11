@@ -259,8 +259,9 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 			if (row.authType !== "planetscale_oauth") {
 				return yield* buildScrapeAuthHeaders(row, encryptionKey)
 			}
+			const orgId = yield* Schema.decodeEffect(OrgId)(row.orgId).pipe(Effect.orDie)
 			const { accessToken } = yield* psOAuth
-				.getValidAccessToken(Schema.decodeUnknownSync(OrgId)(row.orgId))
+				.getValidAccessToken(orgId)
 				.pipe(Effect.catchTags(catchOAuthTokenFailure))
 			return { Authorization: planetScaleBearerHeader(accessToken) }
 		})
@@ -307,7 +308,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				)
 			}
 
-			const groups = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(HttpSdResponse))(
+			const groups = yield* Schema.decodeEffect(Schema.fromJsonString(HttpSdResponse))(
 				response.text,
 			).pipe(
 				Effect.mapError(() =>

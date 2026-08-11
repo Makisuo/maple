@@ -361,9 +361,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 					}
 				}
 
-				portable = yield* Schema.decodeUnknownEffect(PortableDashboardFromJson)(
-					params.dashboard_json,
-				).pipe(
+				portable = yield* Schema.decodeEffect(PortableDashboardFromJson)(params.dashboard_json).pipe(
 					Effect.mapError(
 						(cause) =>
 							new McpQueryError({

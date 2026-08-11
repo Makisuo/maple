@@ -94,7 +94,7 @@ const decodeReport = Schema.decodeUnknownSync(AiTriageResult)
 const decodeReportOption = Schema.decodeUnknownOption(AiTriageResult)
 
 /** Internal actor the lane tools run as — same identity the internal MCP RPC path uses. */
-const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
+const internalServiceUserId = Schema.decodeSync(UserId)("internal-service")
 
 /**
  * Wall-clock for the planning pass. Still short, because planning is scoping —

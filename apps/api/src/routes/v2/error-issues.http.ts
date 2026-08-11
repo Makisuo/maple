@@ -127,7 +127,7 @@ const decodeCursor = (
 				invalidRequest("cursor_sort_mismatch", "Cursor does not match the selected sort.", "cursor"),
 			)
 		}
-		return Schema.decodeUnknownEffect(IssueSeverityListCursor)(cursor.slice(4)).pipe(
+		return Schema.decodeEffect(IssueSeverityListCursor)(cursor.slice(4)).pipe(
 			Effect.mapError(() => invalidRequest("cursor_invalid", "Invalid pagination cursor.", "cursor")),
 		)
 	}
@@ -136,7 +136,7 @@ const decodeCursor = (
 			invalidRequest("cursor_sort_mismatch", "Cursor does not match the selected sort.", "cursor"),
 		)
 	}
-	return Schema.decodeUnknownEffect(IssueListCursor)(cursor).pipe(
+	return Schema.decodeEffect(IssueListCursor)(cursor).pipe(
 		Effect.mapError(() => invalidRequest("cursor_invalid", "Invalid pagination cursor.", "cursor")),
 	)
 }

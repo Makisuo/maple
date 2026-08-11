@@ -69,7 +69,7 @@ export const catchOAuthTokenFailure = {
 } as const
 
 const decodeCredentials = <S extends Schema.Top>(schema: S, credentialsJson: string) =>
-	Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(credentialsJson).pipe(
+	Schema.decodeEffect(Schema.fromJsonString(schema))(credentialsJson).pipe(
 		Effect.mapError(() => toEncryptionError("Failed to decode auth credentials")),
 	)
 
