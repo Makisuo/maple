@@ -9,7 +9,7 @@ import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { exploreAttributeKeys, exploreAttributeValues } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerExploreAttributesTool(server: McpToolRegistrar) {
 	server.tool(
@@ -43,7 +43,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 			const lim = clampLimit(params.limit, { defaultValue: 50, max: 500 })
 			const scope = (params.scope ?? "span") as "span" | "resource"
 			const tenant = yield* CurrentMcpTenant
-			const executorLayer = makeWarehouseExecutorFromTenant(tenant)
+			const provideExecutor = provideWarehouseExecutorFromTenant(tenant)
 			const mapError = toMcpQueryError("explore_attributes")
 
 			const baseInput = {
@@ -56,7 +56,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 
 			if (params.key) {
 				const values = yield* exploreAttributeValues({ ...baseInput, key: params.key }).pipe(
-					Effect.provide(executorLayer),
+					provideExecutor,
 					Effect.mapError(mapError),
 				)
 
@@ -174,7 +174,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 
 			// List keys for traces or metrics
 			const keys = yield* exploreAttributeKeys(baseInput).pipe(
-				Effect.provide(executorLayer),
+				provideExecutor,
 				Effect.mapError(mapError),
 			)
 

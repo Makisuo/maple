@@ -13,7 +13,7 @@ import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { errorDetail } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerErrorDetailTool(server: McpToolRegistrar) {
 	server.tool(
@@ -49,7 +49,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
 				includeTimeseries: include_timeseries ?? false,
 				limit: limit ?? 5,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("error_detail_traces")),
 			)
 

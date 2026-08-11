@@ -8,7 +8,7 @@ import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { searchLogs } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerSearchLogsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -64,7 +64,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 				limit: lim,
 				offset: off,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("search_logs")),
 			)
 

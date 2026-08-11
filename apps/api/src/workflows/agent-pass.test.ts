@@ -91,7 +91,7 @@ const pass = (
 		submitToolDescription: "Record the candidate.",
 		schema: SCHEMA,
 		...(options.deadlineAtMs === undefined ? {} : { deadlineAtMs: options.deadlineAtMs }),
-	}).pipe(Effect.provide(stub(steps)), Effect.provide(ToolExecutorStubLayer))
+	}).pipe(Effect.provide(Layer.mergeAll(stub(steps), ToolExecutorStubLayer)))
 
 /** Every step calls a tool, so the agent never voluntarily stops. */
 const grinding = (count: number): ReadonlyArray<ReadonlyArray<LLMEvent>> =>

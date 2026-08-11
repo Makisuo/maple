@@ -93,7 +93,13 @@ const runWithToken = <A, E>(
 	accessToken: string,
 	effect: Effect.Effect<A, E, CloudflareRequirements>,
 	apiBaseUrl?: string,
-): Effect.Effect<A, E, never> => effect.pipe(Effect.provide(runtimeLayer(accessToken, apiBaseUrl)))
+): Effect.Effect<A, E, never> =>
+	effect.pipe(
+		// The token and API base are per invocation, so this cannot be hoisted into
+		// the static service graph; the layer closes the distilled SDK operation.
+		// oxlint-disable-next-line effecttsgo/strict-effect-provide
+		Effect.provide(runtimeLayer(accessToken, apiBaseUrl)),
+	)
 
 /** Like {@link runWithToken} but collapses the distilled error union to a Maple domain error. */
 const runMapped = <A, E>(

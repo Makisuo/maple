@@ -325,6 +325,8 @@ const handle = async (
 					method: request.method,
 					url: request.url,
 				}),
+				// One-shot recovery fiber after the main handler runtime rejected.
+				// oxlint-disable-next-line effecttsgo/strict-effect-provide
 				Effect.provide(telemetry.layer),
 			),
 		)

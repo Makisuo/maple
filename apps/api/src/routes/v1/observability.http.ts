@@ -9,7 +9,7 @@ import {
 	diagnoseService,
 	searchLogs,
 } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 // Warehouse errors propagate with their canonical per-tag HTTP statuses (503
 // transient, 429 quota, 400 validation, 502 otherwise) — declared on the
@@ -31,7 +31,7 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const services = yield* listServices(payload).pipe(
-						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+						provideWarehouseExecutorFromTenant(tenant),
 					)
 					return { services: [...services] }
 				}),
@@ -40,7 +40,7 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					return yield* searchTraces(payload).pipe(
-						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+						provideWarehouseExecutorFromTenant(tenant),
 						Effect.map((r) => ({
 							...r,
 							spans: [...r.spans].map((s) => ({ ...s, attributes: { ...s.attributes } })),
@@ -52,7 +52,7 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const result = yield* inspectTrace(payload.traceId).pipe(
-						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+						provideWarehouseExecutorFromTenant(tenant),
 					)
 					return {
 						traceId: result.traceId,
@@ -67,9 +67,7 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 			.handle("findErrors", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const errors = yield* findErrors(payload).pipe(
-						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
-					)
+					const errors = yield* findErrors(payload).pipe(provideWarehouseExecutorFromTenant(tenant))
 					return { errors: [...errors] }
 				}),
 			)
@@ -77,7 +75,7 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const result = yield* diagnoseService(payload).pipe(
-						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+						provideWarehouseExecutorFromTenant(tenant),
 					)
 					return {
 						serviceName: result.serviceName,
@@ -95,9 +93,7 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 			.handle("searchLogs", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const result = yield* searchLogs(payload).pipe(
-						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
-					)
+					const result = yield* searchLogs(payload).pipe(provideWarehouseExecutorFromTenant(tenant))
 					return {
 						timeRange: result.timeRange,
 						total: result.total,

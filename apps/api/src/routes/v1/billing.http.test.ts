@@ -1,5 +1,6 @@
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe, it, layer } from "@effect/vitest"
 import { Effect, Schema } from "effect"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { type EdgeCacheBackend, makeEdgeCacheService, makeMemoryBackend } from "@maple/cache"
 import {
 	CUSTOMER_CACHE_BUCKET,
@@ -44,46 +45,45 @@ const activePlanResponse = {
 }
 const noPlanResponse = { id: ORG, subscriptions: [] }
 
-describe("updateCustomerBillingControls", () => {
-	it("uses Autumn's canonical customer update route and v2.3 wire shape", async () => {
-		const originalFetch = globalThis.fetch
-		let request: { readonly url: string; readonly init?: RequestInit } | undefined
-		globalThis.fetch = (async (input, init) => {
-			request = { url: String(input), init }
-			return new Response(JSON.stringify({ id: ORG }), { status: 200 })
-		}) as typeof globalThis.fetch
+layer(FetchHttpClient.layer)("updateCustomerBillingControls", (it) => {
+	it.effect("uses Autumn's canonical customer update route and v2.3 wire shape", () =>
+		Effect.gen(function* () {
+			let request: { readonly url: string; readonly init?: RequestInit } | undefined
+			const fetchImpl = (async (input, init) => {
+				request = { url: String(input), init }
+				return new Response(JSON.stringify({ id: ORG }), { status: 200 })
+			}) as typeof globalThis.fetch
+			const httpClient = yield* HttpClient.HttpClient
 
-		try {
-			const result = await Effect.runPromise(
-				updateCustomerBillingControls(
-					"am_sk_test",
-					"https://api.useautumn.com/",
-					ORG,
-					new UpdateBillingControlsRequest({
-						spendLimits: [
-							new UpdateBillingSpendLimit({
-								featureId: "logs",
-								enabled: true,
-								limitType: "absolute",
-								overageLimit: 250,
-							}),
-							new UpdateBillingSpendLimit({
-								featureId: "traces",
-								enabled: false,
-							}),
-						],
-						usageAlerts: [
-							new UpdateBillingUsageAlert({
-								featureId: "logs",
-								enabled: true,
-								threshold: 80,
-								thresholdType: "usage_percentage",
-								name: "Maple billing warning",
-							}),
-						],
-					}),
-				),
-			)
+			const result = yield* updateCustomerBillingControls(
+				httpClient,
+				"am_sk_test",
+				"https://api.useautumn.com/",
+				ORG,
+				new UpdateBillingControlsRequest({
+					spendLimits: [
+						new UpdateBillingSpendLimit({
+							featureId: "logs",
+							enabled: true,
+							limitType: "absolute",
+							overageLimit: 250,
+						}),
+						new UpdateBillingSpendLimit({
+							featureId: "traces",
+							enabled: false,
+						}),
+					],
+					usageAlerts: [
+						new UpdateBillingUsageAlert({
+							featureId: "logs",
+							enabled: true,
+							threshold: 80,
+							thresholdType: "usage_percentage",
+							name: "Maple billing warning",
+						}),
+					],
+				}),
+			).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchImpl))
 
 			assert.strictEqual(result.statusCode, 200)
 			assert.strictEqual(request?.url, "https://api.useautumn.com/v1/customers.update")
@@ -92,7 +92,7 @@ describe("updateCustomerBillingControls", () => {
 			assert.strictEqual(headers.get("authorization"), "Bearer am_sk_test")
 			assert.strictEqual(headers.get("content-type"), "application/json")
 			assert.strictEqual(headers.get("x-api-version"), "2.3.0")
-			const requestBody = await new Response(request?.init?.body).text()
+			const requestBody = yield* Effect.promise(() => new Response(request?.init?.body).text())
 			assert.deepStrictEqual(JSON.parse(requestBody), {
 				customer_id: ORG,
 				billing_controls: {
@@ -119,10 +119,8 @@ describe("updateCustomerBillingControls", () => {
 					],
 				},
 			})
-		} finally {
-			globalThis.fetch = originalFetch
-		}
-	})
+		}),
+	)
 })
 
 describe("readCustomerCached", () => {

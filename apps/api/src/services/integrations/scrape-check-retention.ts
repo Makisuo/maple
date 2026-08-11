@@ -1,7 +1,9 @@
+import type { ScrapeTargetId } from "@maple/domain"
 import { scrapeTargetChecks, scrapeTargets } from "@maple/db"
 import { and, desc, eq, inArray, lt } from "drizzle-orm"
 import { Clock, Effect } from "effect"
 import { Database } from "@/platform/DatabaseLive"
+import { msToDate } from "@/platform/time"
 
 /**
  * Check-history retention for `scrape_target_checks`.
@@ -23,7 +25,7 @@ const CHECK_MAX_ROWS_PER_TARGET = 10_000
 
 /** What retention needs to know about a target to prune its check history. */
 export interface RetentionTarget {
-	readonly id: string
+	readonly id: ScrapeTargetId
 	readonly targetType: string
 	readonly scrapeIntervalSeconds: number
 }
@@ -60,7 +62,7 @@ export const pruneChecksForTargets = Effect.fn("ScrapeCheckRetention.pruneForTar
 ) {
 	if (targets.length === 0) return
 	const now = yield* Clock.currentTimeMillis
-	const cutoff = new Date(now - CHECK_RETENTION_MS)
+	const cutoff = msToDate(now - CHECK_RETENTION_MS)
 	const ids = targets.map((target) => target.id)
 	const capCandidates = targets.filter(canExceedRowCap)
 	const database = yield* Database

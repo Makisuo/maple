@@ -168,6 +168,8 @@ export type MigrationResolutionErrorKind =
 	| "missing-path"
 	| "chdb-mismatch"
 
+// Migration planning is synchronous throw/catch code; this error does not enter an Effect failure channel.
+// oxlint-disable-next-line effecttsgo/extends-native-error
 export class MigrationResolutionError extends Error {
 	readonly kind: MigrationResolutionErrorKind
 	constructor(kind: MigrationResolutionErrorKind, message: string) {

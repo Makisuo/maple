@@ -500,12 +500,13 @@ export class WarehouseQueryService extends Context.Service<
 }
 
 /**
- * Layer that provides the package-level `WarehouseExecutor` for a tenant,
- * backed by `WarehouseQueryService`. The executor name is a public contract
- * from `@maple/query-engine`; only the wiring lives here.
+ * Provides the package-level `WarehouseExecutor` for a tenant from the
+ * request's existing `WarehouseQueryService`. The executor is a pure facade,
+ * so installing the service directly avoids constructing a request-local
+ * Layer (and the extra scope that comes with it).
  */
-export const makeWarehouseExecutorFromTenant = (tenant: TenantContext) =>
-	Layer.effect(
+export const provideWarehouseExecutorFromTenant = (tenant: TenantContext) =>
+	Effect.provideServiceEffect(
 		WarehouseExecutor,
 		Effect.map(WarehouseQueryService, (warehouse) => warehouse.asExecutor(tenant)),
 	)
