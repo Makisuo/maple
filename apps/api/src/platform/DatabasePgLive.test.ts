@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { layerFromEnvRecord } from "@maple/effect-cloudflare"
+import { sql } from "drizzle-orm"
 import { Cause, Effect, Exit, Layer, Tracer } from "effect"
 import { Database, type DatabaseClient } from "./DatabaseLive"
 import { layerPg } from "./DatabasePgLive"
@@ -58,24 +59,25 @@ describe("layerPg", () => {
 		}),
 	)
 
-	it.effect("dials per execute when no connection scope is installed", () =>
+	it.effect("uses a per-call client when no connection scope is installed", () =>
 		Effect.gen(function* () {
 			const { spans, tracer } = makeRecordingTracer()
 			const database = yield* databaseFor(closedPortBinding)
 
+			// The callback must issue a statement: the client is lazy, so a callback
+			// that never queries would never reach the closed port and would succeed.
 			const exit = yield* Effect.exit(
-				database.execute(() => Promise.resolve("unreachable")).pipe(Effect.withTracer(tracer)),
+				database.execute((db) => db.execute(sql`select 1`)).pipe(Effect.withTracer(tracer)),
 			)
 
 			assert.isTrue(Exit.isFailure(exit))
 			const span = dbSpan(spans)
 			assert.isDefined(span)
-			// `db.retry.attempts` is only emitted by `executeOnFreshPgClient`, so its
-			// presence is what proves the fallback ran — Workflow entrypoints and
-			// tests depend on this branch still working.
-			assert.isDefined(span.attributes.get("db.retry.attempts"))
-			assert.isUndefined(span.attributes.get("db.connect.dials"))
-			assert.strictEqual(span.attributes.get("db.connect.completed"), false)
+			// `db.connect.reused` is only emitted by the scope, so its ABSENCE is what
+			// proves the fallback ran — Workflow entrypoints and tests depend on this
+			// branch still working.
+			assert.isUndefined(span.attributes.get("db.connect.reused"))
+			assert.strictEqual(span.attributes.get("db.connect.failed"), true)
 		}),
 	)
 
