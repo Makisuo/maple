@@ -8,7 +8,7 @@ import {
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 
 const decodeStringArray = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
 
@@ -39,9 +39,9 @@ export function registerRegisterAgentTool(server: McpToolRegistrar) {
 				return validationError("Agent name must not be empty.")
 			}
 
-			const errors = yield* ErrorsService
+			const actors = yield* ErrorActorsService
 			const capabilities = parseCapabilities(capabilities_json)
-			const actor = yield* errors
+			const actor = yield* actors
 				.registerAgent(tenant.orgId, tenant.userId, {
 					name,
 					model,
