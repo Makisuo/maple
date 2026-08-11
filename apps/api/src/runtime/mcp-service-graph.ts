@@ -7,6 +7,7 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
+import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
@@ -62,6 +63,10 @@ const AlertDestinationsServiceLive = AlertDestinationsService.layer.pipe(
 	),
 )
 
+const AlertReadModelsServiceLive = AlertReadModelsService.layer.pipe(
+	Layer.provide(Layer.mergeAll(InfraLive, WarehouseQueryServiceLive)),
+)
+
 const AlertsServiceLive = AlertsService.layer.pipe(
 	Layer.provide(
 		Layer.mergeAll(
@@ -74,6 +79,7 @@ const AlertsServiceLive = AlertsService.layer.pipe(
 			OrgMembersServiceLive,
 			OrgClickHouseSettingsServiceLive,
 			AlertDestinationsServiceLive,
+			AlertReadModelsServiceLive,
 		),
 	),
 )
@@ -113,6 +119,7 @@ const VcsSourceServiceLive = VcsSourceService.layer.pipe(
 )
 
 const McpRuntimeServicesLive = Layer.mergeAll(
+	AlertReadModelsServiceLive,
 	AlertsServiceLive,
 	DashboardPersistenceService.layer,
 	ErrorActorsServiceLive,

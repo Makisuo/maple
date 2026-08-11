@@ -18,6 +18,7 @@ import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
+import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { OrgMembersService } from "@/services/org/OrgMembersService"
@@ -106,6 +107,9 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 			Layer.mergeAll(envLive, testDb.layer, runtimeLive, hazelOAuthLive, emailLive, orgMembersLive),
 		),
 	)
+	const alertReadModelsLive = AlertReadModelsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(testDb.layer, warehouseLive)),
+	)
 	const alertsLive = AlertsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -120,6 +124,7 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 				orgChSettingsLive,
 				investigationsLive,
 				alertDestinationsLive,
+				alertReadModelsLive,
 			),
 		),
 	)
@@ -128,6 +133,7 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 		AuthService.layer,
 		DashboardPersistenceService.layer,
 		alertDestinationsLive,
+		alertReadModelsLive,
 		alertsLive,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 
