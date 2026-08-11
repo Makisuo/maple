@@ -112,8 +112,6 @@ function truncateCommitSha(sha: string, length = 7): string {
 	return sha.slice(0, length)
 }
 
-// Health lane
-
 const HEALTH_DOT_CLASS: Record<ServiceHealth, string> = {
 	healthy: "bg-success",
 	degraded: "bg-severity-warn",
@@ -132,8 +130,6 @@ function HealthDot({ health }: { health: ServiceHealth | undefined }) {
 		/>
 	)
 }
-
-// P95 baseline delta
 
 // Mirrors MIN_BASELINE_SPANS in service-health.ts: a baseline computed from
 // fewer spans is noise, so the delta line is withheld entirely.
@@ -163,8 +159,6 @@ function baselineDelta(
 					: "text-muted-foreground",
 	}
 }
-
-// Last deploy cell
 
 // Below this many spans on either side of the split, the errors-since-deploy
 // comparison is too noisy to flag.
@@ -358,8 +352,6 @@ const DeployCell = React.memo(function DeployCell({ commits }: { commits: Commit
 	)
 })
 
-// Environment group header
-
 function EnvironmentBadge({ environment }: { environment: string }) {
 	const getVariant = () => {
 		switch (environment.toLowerCase()) {
@@ -380,8 +372,6 @@ function EnvironmentBadge({ environment }: { environment: string }) {
 		</Badge>
 	)
 }
-
-// Row
 
 interface ServiceRowProps {
 	service: ServiceOverview

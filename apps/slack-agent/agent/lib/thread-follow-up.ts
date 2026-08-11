@@ -67,8 +67,6 @@ import { createTtlCache } from "./ttl-cache.js"
  * for channels it is a member of, which naturally bounds the event volume.
  */
 
-// Bounds
-
 /**
  * Engagement expires. Without a bound, one @mention makes every later human
  * reply in that thread — by anyone, forever — dispatch a full agent turn: a

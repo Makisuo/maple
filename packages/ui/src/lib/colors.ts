@@ -134,24 +134,19 @@ export function getServiceColor(serviceName: string): string {
 export function getSpanColorStyle(spanName: string, serviceName: string): React.CSSProperties {
 	const baseHue = getServiceHueFromName(serviceName)
 
-	// Extract class name for variation within service
 	const className = extractClassName(spanName)
 
-	// Calculate lightness and chroma variations based on class
 	let lightness = 0.55
 	let chroma = 0.15
 
 	if (className) {
 		const classHash = hashString(className)
-		// Vary lightness between 0.45 and 0.65
 		lightness = 0.45 + (classHash % 20) / 100
-		// Vary chroma between 0.12 and 0.18
 		chroma = 0.12 + (classHash % 6) / 100
 	}
 
 	const bgColor = `oklch(${lightness} ${chroma} ${baseHue})`
 
-	// Determine text color based on lightness
 	const textColor = lightness > 0.55 ? "oklch(0.2 0 0)" : "oklch(0.98 0 0)"
 
 	return {

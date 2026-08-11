@@ -18,7 +18,6 @@ use opentelemetry::{global, KeyValue};
 
 static METER: LazyLock<Meter> = LazyLock::new(|| global::meter("maple-ingest"));
 
-// --- Counters -------------------------------------------------------------
 
 static REQUESTS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
@@ -204,7 +203,6 @@ static AUTUMN_FLUSHES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
-// --- Up/down counter ------------------------------------------------------
 
 static REQUESTS_IN_FLIGHT: LazyLock<UpDownCounter<i64>> = LazyLock::new(|| {
     METER
@@ -213,7 +211,6 @@ static REQUESTS_IN_FLIGHT: LazyLock<UpDownCounter<i64>> = LazyLock::new(|| {
         .build()
 });
 
-// --- Gauges ---------------------------------------------------------------
 
 static ORG_REQUESTS_IN_FLIGHT: LazyLock<Gauge<u64>> = LazyLock::new(|| {
     METER
@@ -245,7 +242,6 @@ static AUTUMN_PENDING_GB: LazyLock<Gauge<f64>> = LazyLock::new(|| {
         .build()
 });
 
-// --- Histograms -----------------------------------------------------------
 
 static REQUEST_DURATION_SECONDS: LazyLock<Histogram<f64>> = LazyLock::new(|| {
     METER
@@ -343,7 +339,6 @@ static AUTUMN_FLUSH_DURATION_SECONDS: LazyLock<Histogram<f64>> = LazyLock::new(|
         .build()
 });
 
-// --- Facade ---------------------------------------------------------------
 
 /// A request entered the gateway; pair with [`request_finished`].
 pub fn request_started() {

@@ -180,8 +180,6 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 	make: Effect.gen(function* () {
 		const database = yield* Database
 
-		// ---- Installations ------------------------------------------------
-
 		const selectInstallationRow = (provider: VcsProviderId, externalInstallationId: string) =>
 			database
 				.execute((db) =>
@@ -317,8 +315,6 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 				)
 				.pipe(Effect.mapError(toPersistenceError))
 		})
-
-		// ---- Repositories -------------------------------------------------
 
 		const listRepositoriesByInstallation = Effect.fn("VcsRepository.listRepositoriesByInstallation")(
 			function* (installationId: VcsInstallationId, scope: RepoQueryScope) {
@@ -575,8 +571,6 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 				.pipe(Effect.mapError(toPersistenceError))
 		})
 
-		// ---- Commits ------------------------------------------------------
-
 		// Persist commits for an already-resolved repository. Commits belong to the
 		// repo only (no commit↔branch link — a repo tracks one branch at a time).
 		// Idempotent: upsert on (repository_id, sha). The commit row denormalizes
@@ -683,8 +677,6 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 				.pipe(Effect.mapError(toPersistenceError))
 			return yield* Effect.forEach(rows, (row) => decodeOne("vcs_commits", row, rowToCommit))
 		})
-
-		// ---- Branches -----------------------------------------------------
 
 		// Bulk upsert a repo's branches from a provider listing — just the picker's
 		// list of names. `isDefault` is a display hint derived here (the provider is
@@ -897,8 +889,6 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			yield* deleteBranchesByIds([id])
 			return true
 		})
-
-		// ---- Cascade delete -----------------------------------------------
 
 		// Remove an installation and everything beneath it (its repositories and
 		// their commits), in dependency order. The dashboard disconnect flow uses

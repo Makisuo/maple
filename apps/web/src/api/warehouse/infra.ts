@@ -147,8 +147,6 @@ export function hostInfraTimeseries({ data }: { data: HostInfraTimeseriesInput }
 	)
 }
 
-// Pods
-
 export interface ListPodsInput {
 	startTime: string
 	endTime: string
@@ -331,8 +329,6 @@ export function podInfraTimeseries({ data }: { data: PodInfraTimeseriesInput }) 
 		}),
 	)
 }
-
-// Nodes
 
 export interface ListNodesInput {
 	startTime: string

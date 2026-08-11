@@ -2,7 +2,7 @@ import { assert, beforeEach, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { vi } from "vitest"
 
-// --- Mock effect-utils BEFORE importing anything that uses it ---
+// This mock must be registered before importing its consumers.
 const executeQueryEngineMock = vi.fn()
 const runWarehouseQueryMock = vi.fn()
 
@@ -73,7 +73,6 @@ beforeEach(() => {
 	runWarehouseQueryMock.mockImplementation(defaultRunWarehouseQuery)
 })
 
-// --- Now import production code ---
 import { listTraces } from "@/api/warehouse/traces"
 import { listLogs } from "@/api/warehouse/logs"
 import { serverFunctionMap } from "@/components/dashboard-builder/data-source-registry"

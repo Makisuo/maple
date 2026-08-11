@@ -42,8 +42,6 @@ const GITHUB_PROVIDER = "github" as const
 const GITHUB_WEB_BASE = "https://github.com"
 const STATE_TTL_MS = 10 * 60_000 // 10 minutes
 
-// ---- Service shape --------------------------------------------------------
-
 interface GithubBranchStatus {
 	readonly name: string
 	readonly isDefault: boolean

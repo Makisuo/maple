@@ -100,7 +100,6 @@ export const DashboardProvider = () =>
 					return undefined
 				}),
 				reconcile: Effect.fn(function* ({ news, output }) {
-					// Observe — re-fetch by id; recover from out-of-band deletes.
 					let observed: Schema.Schema.Type<typeof WireDashboard> | undefined
 					if (output?.dashboardId) {
 						const fetched = yield* api
@@ -109,12 +108,10 @@ export const DashboardProvider = () =>
 						if (fetched !== undefined) observed = yield* decodeWireDashboard(fetched)
 					}
 
-					// Ensure — create if missing.
 					if (observed === undefined) {
 						const created = yield* api.post("/v2/dashboards", desiredBody(news))
 						observed = yield* decodeWireDashboard(created)
 					} else if (drifted(news, observed)) {
-						// Sync — PATCH only when the declared fields drift.
 						const updated = yield* api.patch(`/v2/dashboards/${observed.id}`, desiredBody(news))
 						observed = yield* decodeWireDashboard(updated)
 					}

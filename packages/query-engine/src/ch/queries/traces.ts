@@ -783,7 +783,6 @@ export function tracesListQuery(opts: TracesListOpts) {
 	const limit = opts.limit ?? 25
 	const offset = opts.offset ?? 0
 
-	// Parse requested columns to determine which attribute keys are needed
 	const requestedSpanAttrKeys: string[] = []
 	const requestedResourceAttrKeys: string[] = []
 	let needsFullMaps = !opts.columns

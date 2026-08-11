@@ -33,8 +33,6 @@ const PROVIDER: VcsProviderId = "github"
 // jobs is safe and order-independent.
 const PUSH_JOB_MAX_BYTES = QUEUE_MESSAGE_LIMIT_BYTES - 16 * 1024 // 16 KB reserve ⇒ 112 KB target
 
-// ---- Webhook payload schemas (minimal, permissive) ------------------------
-
 const PushAuthor = Schema.Struct({
 	name: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	email: Schema.optionalKey(Schema.NullOr(Schema.String)),

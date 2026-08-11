@@ -241,7 +241,6 @@ export function PricingCards() {
 
 	const plans = plansResult.value.plans
 
-	// Filter out add-on and auto-enabled (free) plans for the main grid
 	const visiblePlans = plans.filter((p) => !p.addOn && !p.autoEnable)
 
 	async function handleCheckout(planId: string) {

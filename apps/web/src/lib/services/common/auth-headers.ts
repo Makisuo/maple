@@ -5,20 +5,8 @@ type MapleAuthHeadersProvider = () => Promise<MapleAuthHeaders> | MapleAuthHeade
 let authHeaders: MapleAuthHeaders = {}
 let authHeadersProvider: MapleAuthHeadersProvider | undefined
 
-// Bearer-token cache
-//
-// Every outbound API request awaits this module (see http-client.ts), and the
-// Clerk provider below resolves to `getToken()` — a cross-origin round-trip to
-// Clerk whenever the 60s session JWT is near expiry. Uncached, that landed on
-// the critical path of every request in the app: production traces showed p50
-// 580ms / p90 3.2s elapsing between the browser issuing a request and the API
-// Worker's server span starting, against a ~200ms handler.
-//
-// So: cache the resolved headers until the token is nearly spent, and refresh
-// ahead of that so no request ever blocks on the identity provider. Only
-// JWT-shaped bearer tokens are cached — an opaque token has no expiry we can
-// trust, and the providers that issue one (self-hosted, reading sessionStorage)
-// are synchronous anyway.
+// Cache JWT-derived headers off the request path and refresh before expiry.
+// Opaque tokens stay uncached because their lifetime cannot be inferred.
 
 /** Inside this much remaining life, a request must wait for a fresh token. */
 const TOKEN_MIN_REMAINING_MS = 10_000

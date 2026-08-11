@@ -796,8 +796,6 @@ describe("SlackIntegrationService", () => {
 		}).pipe(Effect.provide(databaseLayer(testDb)))
 	})
 
-	// --- In-place re-auth (permissions refresh) -------------------------------
-
 	it.effect(
 		"completeInstall over an active same-org install keeps the API key and refreshes the scope (zero-downtime re-auth)",
 		() => {
@@ -909,8 +907,6 @@ describe("SlackIntegrationService", () => {
 		}).pipe(Effect.provide(withFetch(testDb, slackInstallAndRevokeFetch(teamRef, revokeCalls))))
 	})
 
-	// --- Scope drift (getStatus.missingScopes) ---------------------------------
-
 	it.effect("getStatus reports required scopes the stored grant is missing", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
@@ -948,8 +944,6 @@ describe("SlackIntegrationService", () => {
 			assert.deepStrictEqual([...unknown.missingScopes], [])
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
-
-	// --- Cross-org rebind rejection -----------------------------------------
 
 	it.effect("completeInstall rejects binding a team actively installed on another org (pre-check)", () => {
 		const testDb = createTestDb(trackedDbs)
@@ -1071,8 +1065,6 @@ describe("SlackIntegrationService", () => {
 		},
 	)
 
-	// --- exchangeCode failure paths (via completeInstall) ---------------------
-
 	it.effect(
 		"completeInstall surfaces Slack's ok:false as a validation error carrying Slack's error string",
 		() => {
@@ -1139,8 +1131,6 @@ describe("SlackIntegrationService", () => {
 			),
 		)
 	})
-
-	// --- listChannels ----------------------------------------------------------
 
 	it.effect("listChannels fails not-connected when the org has no active workspace", () => {
 		const testDb = createTestDb(trackedDbs)
@@ -1593,8 +1583,6 @@ describe("SlackIntegrationService", () => {
 		)
 	})
 
-	// --- revokeByTeamId (the Slack-side-uninstall / reconciliation path) ------
-
 	describe("revokeByTeamId", () => {
 		it.effect("revokes locally on a bare team id — no auth.revoke call, unlike uninstall", () => {
 			const testDb = createTestDb(trackedDbs)
@@ -1706,8 +1694,6 @@ describe("SlackIntegrationService", () => {
 			}).pipe(Effect.provide(withFetch(testDb, neverFetch)))
 		})
 	})
-
-	// --- reconcileWorkspaces (the cron backstop) -------------------------------
 
 	describe("reconcileWorkspaces", () => {
 		it.effect("revokes only workspaces whose auth.test reports a dead-token error", () => {

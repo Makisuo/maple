@@ -704,7 +704,6 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			const todayStartMs = now - (now % 86_400_000)
 			const currentDayOfWeek = new Date(now).getUTCDay()
 
-			// Find subscriptions due for sending
 			const subs = yield* database
 				.execute((db) =>
 					db.select().from(digestSubscriptions).where(eq(digestSubscriptions.enabled, true)),
@@ -721,7 +720,6 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 				return { sentCount: 0, errorCount: 0, skipped: false }
 			}
 
-			// Group by org to avoid duplicate Tinybird queries
 			const byOrg = Arr.groupBy(dueSubs, (s) => s.orgId)
 
 			const results = yield* Effect.forEach(

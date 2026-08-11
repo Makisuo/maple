@@ -235,7 +235,6 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 			Effect.gen(function* () {
 				const provider = yield* Dashboard.Provider
 
-				// Create.
 				const created = yield* provider.reconcile({
 					id: "ops",
 					instanceId: "i-1",
@@ -272,7 +271,6 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				expect(renamed.dashboardId).toBe(created.dashboardId)
 				expect(renamed.name).toBe("Operations v2")
 
-				// Read observes the renamed dashboard.
 				const observed = yield* provider.read!({
 					id: "ops",
 					instanceId: "i-1",
@@ -363,7 +361,6 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				})
 				expect(adopted.ruleId).toBe(rule.ruleId)
 
-				// Update threshold via PATCH.
 				const updated = yield* rules.reconcile({
 					id: "checkout-errors",
 					instanceId: "i-1",

@@ -96,7 +96,7 @@ export function TraceTimeline() {
 	const containerSize = useContainerSize(scrollRef)
 	const timelineWidthPx = Math.max(0, containerSize.width - sidebarWidth)
 
-	// --- Viewport animation (DevTools-style tween; Sentry-style eased zoom-to-span) ---
+	// DevTools-style viewport tween with Sentry-style eased zoom-to-span.
 	// Direct gestures (wheel, drags) stay instant; keyboard and programmatic zooms animate.
 	const viewportRef = React.useRef(state.viewport)
 	viewportRef.current = state.viewport
@@ -211,7 +211,7 @@ export function TraceTimeline() {
 
 	const handleCollapseAll = React.useCallback(() => dispatch({ type: "COLLAPSE_ALL" }), [dispatch])
 
-	// --- Search match navigation (Enter/⇧Enter cycles; focused-row ring marks the current match) ---
+	// Enter/Shift+Enter cycle matches; the focused-row ring marks the current one.
 	const matchRowIndices = React.useMemo(() => {
 		const rows: number[] = []
 		bars.forEach((b, i) => {

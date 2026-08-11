@@ -93,7 +93,6 @@ function SpanRowImpl({
 		)
 	}
 
-	// Calculate waterfall bar position and width
 	const traceStartMs = new Date(traceStartTime).getTime()
 	const spanStartMs = new Date(span.startTime).getTime()
 

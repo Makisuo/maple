@@ -13,8 +13,6 @@
  */
 import { Semaphore } from "effect"
 
-// Steps
-
 /**
  * Hard cap on *tool-calling* assistant turns per submission.
  *
@@ -53,8 +51,6 @@ export const REPEATED_TOOL_CALLS = 3
  */
 export const TURN_STEP_BUDGET = 30
 
-// Retry
-
 /** 1 initial attempt + 3 retries. */
 export const MAX_STEP_ATTEMPTS = 4
 
@@ -77,8 +73,6 @@ export const STEP_RETRY_MAX_MS = 8_000
  * costs nothing but patience. Here the turn holds the session's single turn slot the entire time.
  */
 export const STEP_RETRY_BUDGET_MS = 60_000
-
-// Delegation
 
 /**
  * How deep nesting may go. 1 means the conversation's turn may spawn, and sub-agents may not.

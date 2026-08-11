@@ -108,7 +108,6 @@ export function TraceTimelineMinimap({
 	const pitch = Math.max(1, Math.min(4, Math.floor((MINIMAP_HEIGHT - 4) / (maxDepth + 1))))
 	const rowH = Math.max(1, pitch - 1)
 
-	// Viewport rectangle position
 	const vpLeftPercent = ((viewport.startMs - traceStartMs) / traceDuration) * 100
 	const vpWidthPercent = ((viewport.endMs - viewport.startMs) / traceDuration) * 100
 
@@ -123,7 +122,6 @@ export function TraceTimelineMinimap({
 			if (!containerRef.current) return
 			const clickPercent = pctFromEvent(e.clientX)
 
-			// Check if clicking on viewport edges (resize) or inside viewport (pan)
 			const edgeThreshold = 2 // percent
 			if (
 				clickPercent >= vpLeftPercent - edgeThreshold &&

@@ -122,7 +122,6 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 		Effect.fn("McpTool.queryData")(function* (params) {
 			const { st, et } = resolveTimeRange(params.start_time, params.end_time)
 
-			// Validate attribute params
 			if (params.attribute_value && !params.attribute_key) {
 				return validationError(
 					"`attribute_value` requires `attribute_key`. Use explore_attributes to discover available keys.",
@@ -137,7 +136,6 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 				)
 			}
 
-			// Validate metrics-specific required params
 			if (params.source === "metrics") {
 				if (!params.metric_name || !params.metric_type) {
 					return validationError(
@@ -147,7 +145,6 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 				}
 			}
 
-			// Track defaults applied for transparency
 			const decisions: string[] = []
 
 			if (!params.start_time) decisions.push(`start_time: defaulted to 1 hour ago (${st})`)

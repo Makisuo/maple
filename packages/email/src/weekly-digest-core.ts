@@ -57,8 +57,6 @@ export interface WeeklyDigestProps {
 	unsubscribeUrl: string
 }
 
-// -- Formatters (self-contained, no external deps) --
-
 export function fmtNum(num: number): string {
 	if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
 	if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
@@ -93,8 +91,6 @@ export function deltaArrow(delta: number): string {
 	if (Math.abs(delta) < 0.05) return "→" // →
 	return delta > 0 ? "↑" : "↓" // ↑ ↓
 }
-
-// -- Status derivation (shared with the subject line) --
 
 export type DigestStatusLevel = "healthy" | "watch" | "critical"
 

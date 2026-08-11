@@ -254,8 +254,6 @@ export function buildWidgetDisplay(
 	})
 }
 
-// Validation
-
 export function validateQueries(state: QueryBuilderWidgetState): string | null {
 	const definition = definitionForState(state)
 

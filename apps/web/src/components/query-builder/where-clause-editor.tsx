@@ -59,7 +59,6 @@ export function WhereClauseEditor({
 	)
 	const isHighlighting = highlight && value.length > 0
 
-	// Use context directly when available and no explicit props provided
 	const autocompleteCtx = useAutocompleteContextOptional()
 	const autocompleteValuesCtx = useAutocompleteValuesContextOptional()
 	const resolvedValues = values ?? autocompleteValuesCtx?.[dataSource]

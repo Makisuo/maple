@@ -105,7 +105,6 @@ function SignInForm() {
 		}
 	}
 
-	// Verification code screen
 	if (signIn.status === "needs_client_trust") {
 		return (
 			<KeyboardAvoidingView className="flex-1" behavior={Platform.OS === "ios" ? "padding" : "height"}>
@@ -156,7 +155,6 @@ function SignInForm() {
 		)
 	}
 
-	// Main sign-in screen
 	return (
 		<KeyboardAvoidingView className="flex-1" behavior={Platform.OS === "ios" ? "padding" : "height"}>
 			<ScrollView

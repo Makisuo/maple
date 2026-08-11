@@ -97,11 +97,9 @@ export function getSemanticSeriesColor(seriesKey: string): string | null {
 	const trimmed = seriesKey.trim()
 	if (!trimmed) return null
 
-	// Try direct match first
 	const direct = detectColor(trimmed)
 	if (direct) return direct
 
-	// Try stripping multi-query prefix (e.g., "A: Error" → "Error")
 	const colonIndex = trimmed.indexOf(": ")
 	if (colonIndex > 0) {
 		return detectColor(trimmed.slice(colonIndex + 2).trim())

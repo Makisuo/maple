@@ -450,7 +450,6 @@ function HazelOAuthFields({
 							hazelOrganizationId: value ?? "",
 							hazelOrganizationName: org?.name ?? "",
 							hazelOrganizationLogoUrl: org?.logoUrl ?? null,
-							// Reset channel when org changes.
 							hazelChannelId: "",
 							hazelChannelName: "",
 						}))

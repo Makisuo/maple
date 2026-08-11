@@ -26,8 +26,6 @@ export {
 	type WeeklyDigestProps,
 } from "./weekly-digest-core"
 
-// -- Brand palette (Maple dark theme, OKLCH → hex) --
-
 const C = {
 	bg: "#141210",
 	surface: "#1e1b18",
@@ -42,8 +40,6 @@ const C = {
 	red: "#e85d4a",
 	amber: "#e8a02a",
 }
-
-// -- Tailwind config matching Maple dark theme --
 
 const tailwindConfig = {
 	theme: {
@@ -92,8 +88,6 @@ const STATUS_THEME: Record<
 	watch: { accent: C.amber, bg: "rgba(232,160,42,0.09)", pillBg: "#7a5410", pillFg: "#f7e6c4" },
 	critical: { accent: C.red, bg: "rgba(232,93,74,0.10)", pillBg: "#8b3530", pillFg: "#f8d8d2" },
 }
-
-// -- Sub-components --
 
 function DeltaPill({ delta, invertColor = false }: { delta: number; invertColor?: boolean }) {
 	if (!Number.isFinite(delta)) return null
@@ -305,8 +299,6 @@ function statusDotColor(rate: number): string {
 function truncate(text: string, max: number): string {
 	return text.length > max ? `${text.slice(0, max)}…` : text
 }
-
-// -- Main template --
 
 export function WeeklyDigest(props: WeeklyDigestProps) {
 	const {
