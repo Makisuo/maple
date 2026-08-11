@@ -1,4 +1,5 @@
 import { AlertDeliveryError } from "@maple/domain/http"
+import { renderAlertNotification } from "@maple/email/alert-notification"
 import { Effect } from "effect"
 import {
 	eventTypeEmoji,
@@ -26,32 +27,24 @@ export const buildAlertEmailContent = (
 	linkUrl: string,
 	chatUrl: string,
 ): Effect.Effect<AlertEmailContent, AlertDeliveryError> =>
-	Effect.tryPromise({
-		try: async () => {
-			// Dynamically imported so @react-email (tailwind/prettier/prism, ~2MB of
-			// module eval) stays out of the request-path module graph — it loads only
-			// when an email alert actually fires.
-			const [{ render }, { AlertNotification }] = await Promise.all([
-				import("@react-email/components"),
-				import("@maple/email/alert-notification"),
-			])
+	Effect.try({
+		// Synchronous: the template is a compiled string, spliced in place.
+		try: () => {
 			const eventLabel = formatEventTypeLabel(context.eventType)
 			const emoji = eventTypeEmoji(context.eventType)
-			const html = await render(
-				AlertNotification({
-					ruleName: context.ruleName,
-					eventLabel,
-					eventEmoji: emoji,
-					severity: context.severity,
-					signalLabel: formatSignalLabel(context.signalType),
-					group: context.groupKey ?? "all",
-					observedSummary: formatObservedSummary(context),
-					window: formatWindow(context.windowMinutes),
-					accentColor: slackAttachmentColor(context.eventType, context.severity),
-					linkUrl,
-					chatUrl,
-				}),
-			)
+			const html = renderAlertNotification({
+				ruleName: context.ruleName,
+				eventLabel,
+				eventEmoji: emoji,
+				severity: context.severity,
+				signalLabel: formatSignalLabel(context.signalType),
+				group: context.groupKey ?? "all",
+				observedSummary: formatObservedSummary(context),
+				window: formatWindow(context.windowMinutes),
+				accentColor: slackAttachmentColor(context.eventType, context.severity),
+				linkUrl,
+				chatUrl,
+			})
 			return {
 				subject: `${emoji} ${context.ruleName} — ${eventLabel}`,
 				html,

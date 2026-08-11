@@ -9,5 +9,16 @@
 	// migration-snapshot diff.
 	// lib/llm and lib/thinking-orbs are vendored upstream source in prettier style;
 	// reformatting them would turn every future upstream sync into a whole-file conflict.
-	"ignorePatterns": [".context", "deploy", "skills", "packages/db/drizzle", "lib/llm", "lib/thinking-orbs"],
+	// packages/email/emails are Maizzle sources whose whitespace is load-bearing — a
+	// newline inserted between two inline elements becomes a rendered space in the
+	// email, and the files are authored in the exact shape they compile to.
+	"ignorePatterns": [
+		".context",
+		"deploy",
+		"skills",
+		"packages/db/drizzle",
+		"lib/llm",
+		"lib/thinking-orbs",
+		"packages/email/emails",
+	],
 }

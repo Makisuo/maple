@@ -1,9 +1,8 @@
 /**
- * React-free core of the weekly digest: prop types, formatters, and the
- * status/subject derivation. Split out of `weekly-digest.tsx` so DigestService
- * can compute subjects and content checks without statically pulling
- * `@react-email/components` (and its tailwind/prettier/prism machinery, ~2MB)
- * into the API's request-path module graph — rendering is dynamically imported.
+ * Markup-free core of the weekly digest: prop types, formatters, and the
+ * status/subject derivation. Split out of `weekly-digest.ts` so callers that
+ * only need subjects or content checks never pull in the compiled email
+ * templates.
  */
 
 export interface DigestService {
