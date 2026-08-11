@@ -4,6 +4,7 @@ import schemaV2Sql from "./schema/local-schema-v2.sql" with { type: "text" }
 import schemaV3Sql from "./schema/local-schema-v3.sql" with { type: "text" }
 import schemaV4Sql from "./schema/local-schema-v4.sql" with { type: "text" }
 import schemaV5Sql from "./schema/local-schema-v5.sql" with { type: "text" }
+import schemaV6Sql from "./schema/local-schema-v6.sql" with { type: "text" }
 import { schemaDigest as digestSchema, schemaFingerprint as fingerprintSchema } from "./store-version"
 import { buildLocalSchemaManifest, type LocalSchemaManifest } from "./schema-manifest"
 import { LOCAL_SCHEMA_VERSION } from "./local-schema-version"
@@ -27,7 +28,7 @@ export const LEGACY_SCHEMA_PROJECT_REVISION =
 export const LEGACY_SCHEMA_FINGERPRINT = "428701854f9fd30e"
 
 export const CURRENT_SCHEMA_PROJECT_REVISION =
-	"09513d18e8cdea657efa56dbe764defebe66a28e5397411dc03fadb7f19f1c58"
+	"097d8372a0ca33858cbd526a20931d50432f5a5a858544787df5db35daa770a7"
 /** Revision recorded by the issue-297 recovery report. The refreshed upstream
  * generator currently emits CURRENT_SCHEMA_PROJECT_REVISION; the structural
  * fingerprint is the compatibility identity used by the migration. */
@@ -63,6 +64,11 @@ export const LOCAL_SCHEMA_V4_MANIFEST_DIGEST = LOCAL_SCHEMA_V4_MANIFEST.digest
 export const LOCAL_SCHEMA_V5_SQL = schemaV5Sql
 export const LOCAL_SCHEMA_V5_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV5Sql)
 export const LOCAL_SCHEMA_V5_MANIFEST_DIGEST = LOCAL_SCHEMA_V5_MANIFEST.digest
+/** Immutable v6 DDL/manifest snapshot used by the v5 -> v6 module after the
+ * generated current schema advances. */
+export const LOCAL_SCHEMA_V6_SQL = schemaV6Sql
+export const LOCAL_SCHEMA_V6_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV6Sql)
+export const LOCAL_SCHEMA_V6_MANIFEST_DIGEST = LOCAL_SCHEMA_V6_MANIFEST.digest
 export interface LocalSchemaIdentity {
 	readonly version: number
 	readonly fingerprint: string
@@ -120,6 +126,15 @@ export const LOCAL_SCHEMA_V5: LocalSchemaIdentity = Object.freeze({
 	manifestDigest: LOCAL_SCHEMA_HISTORY[5]!.manifestDigest,
 	chdb: CHDB_VERSION,
 	projectRevision: LOCAL_SCHEMA_HISTORY[5]!.projectRevision,
+})
+
+export const LOCAL_SCHEMA_V6: LocalSchemaIdentity = Object.freeze({
+	version: LOCAL_SCHEMA_HISTORY[6]!.version,
+	fingerprint: LOCAL_SCHEMA_HISTORY[6]!.fingerprint,
+	digest: LOCAL_SCHEMA_HISTORY[6]!.digest,
+	manifestDigest: LOCAL_SCHEMA_HISTORY[6]!.manifestDigest,
+	chdb: CHDB_VERSION,
+	projectRevision: LOCAL_SCHEMA_HISTORY[6]!.projectRevision,
 })
 
 export const CURRENT_LOCAL_SCHEMA: LocalSchemaIdentity = Object.freeze({

@@ -32,6 +32,11 @@ export {
 } from "./schema"
 
 export {
+	AI_VENDORS_ROLLUP_ENABLEMENT_HOUR_ENV,
+	AI_VENDORS_ROLLUP_TABLE,
+} from "./rollup-enablement"
+
+export {
 	PRIORITY_BANDS,
 	UNKNOWN_VENDOR_PREFIX,
 	formatRegistryViolations,

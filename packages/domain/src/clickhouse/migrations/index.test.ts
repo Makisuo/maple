@@ -18,6 +18,9 @@ import { migration_0012_session_event_attribute_keys } from "./0012_session_even
 import { migration_0013_service_map_ingest_bridge } from "./0013_service_map_ingest_bridge"
 import { migration_0014_web_events, webEventsBackfill } from "./0014_web_events"
 import { migration_0015_ai_classification_columns } from "./0015_ai_classification_columns"
+import { migration_0016_service_ai_vendors_hourly } from "./0016_service_ai_vendors_hourly"
+import { SERVICE_AI_VENDORS_HOURLY_SELECT_SQL } from "../../tinybird/ai-vendors-rollup-sql"
+import { latestSnapshotStatements } from "../../generated/clickhouse-schema"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -33,10 +36,10 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
 		expect(migrations.map((m) => m.version)).toEqual([
-			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 		])
-		expect(migrations.at(-1)).toBe(migration_0015_ai_classification_columns)
-		expect(latestMigrationVersion).toBe(15)
+		expect(migrations.at(-1)).toBe(migration_0016_service_ai_vendors_hourly)
+		expect(latestMigrationVersion).toBe(16)
 		// 0010 and 0014 are performance/storage-only, so the ingest-gating version
 		// skips both — nothing writes `web_events` directly and search indexes
 		// change nothing the gateway sends, and bumping for either would un-ready
@@ -50,7 +53,106 @@ describe("ClickHouse migrations", () => {
 		// `clickhouse_ready = false` and routes to the managed pipeline until its
 		// schema syncs.
 		expect(migration_0015_ai_classification_columns.requiredForIngest).toBe(true)
+
+		// 0016 adds a read-path rollup and touches nothing the gateway inserts, so
+		// the ingest gate stays at 15. Bumping it would un-ready every BYO-CH org
+		// over a table their ingest path never writes.
+		expect(migration_0016_service_ai_vendors_hourly.requiredForIngest).toBe(false)
 		expect(clickHouseSchemaVersion).toBe("15")
+	})
+
+	it("installs the AI vendor rollup and its live-write MV with no POPULATE and no backfill", () => {
+		const sql = migration_0016_service_ai_vendors_hourly.statements.join("\n\n")
+
+		expect(sql).toContain("CREATE TABLE IF NOT EXISTS service_ai_vendors_hourly")
+		expect(sql).toContain("ENGINE = AggregatingMergeTree")
+		// Daily partitions: a registry-fix rebuild is a per-closed-day atomic
+		// REPLACE PARTITION, which monthly partitions would make unaffordable.
+		expect(sql).toContain("PARTITION BY toYYYYMMDD(Hour)")
+		// OrgId first so the one sanctioned mutation (org deletion) prunes.
+		expect(sql).toContain("ORDER BY (OrgId, ServiceName, AiVendor, Hour)")
+		// 400 days against a 30-day source — deliberate asymmetry, see the migration doc.
+		expect(sql).toContain("TTL Hour + INTERVAL 400 DAY")
+
+		// State types are not cast-compatible, so the value types are pinned to the
+		// source columns: TraceId is String, AiSessionKeyHash is UInt64.
+		expect(sql).toContain("TracesTotal AggregateFunction(uniqCombined(12), String)")
+		expect(sql).toContain("TracesWithKey AggregateFunction(uniqCombined(12), String)")
+		expect(sql).toContain("SessionsApprox AggregateFunction(uniqCombined(12), UInt64)")
+
+		expect(sql).toContain(
+			"CREATE MATERIALIZED VIEW IF NOT EXISTS service_ai_vendors_hourly_mv TO service_ai_vendors_hourly",
+		)
+		// The filter is the cost model and the semantics: non-AI spans never reach
+		// the HLL states, and post-enablement "no rows" means "no AI spans".
+		expect(sql).toContain("WHERE AiVendor != ''")
+		// The stored clamped hour, not toStartOfHour(Timestamp) — a skewed client
+		// must not be able to open a partition in 2038.
+		expect(sql).toContain("AiRollupHour AS Hour")
+		// Adjusted-count convention with the zero/unset floor.
+		expect(sql).toContain("sum(if(SampleRate > 0, SampleRate, 1.0)) AS WeightedSpanCount")
+
+		// Correctness here depends on the source rows having been classified, not
+		// on the view having existed, so there is nothing safe to backfill and the
+		// §8 runbook gate (flag at 100% for a full clock hour) covers the boundary.
+		expect(sql).not.toContain("POPULATE")
+		expect(migration_0016_service_ai_vendors_hourly.statements.filter(isBackfill)).toHaveLength(0)
+	})
+
+	it("keeps the migrated AI rollup view identical to the deployed one", () => {
+		// A BYO cluster migrated to 16 and a freshly bootstrapped one must compute
+		// the same coverage ratio. Both bodies come from one exported constant;
+		// this asserts neither copy drifted away from it.
+		const migrationMv = migration_0016_service_ai_vendors_hourly.statements.find((statement) =>
+			statement.includes("CREATE MATERIALIZED VIEW"),
+		)
+		const snapshotMv = latestSnapshotStatements.find((statement) =>
+			statement.includes("CREATE MATERIALIZED VIEW IF NOT EXISTS service_ai_vendors_hourly_mv"),
+		)
+
+		expect(migrationMv).toContain(SERVICE_AI_VENDORS_HOURLY_SELECT_SQL)
+		expect(snapshotMv).toContain(SERVICE_AI_VENDORS_HOURLY_SELECT_SQL)
+	})
+
+	it("keeps the AI rollup MV projection in the target's column order", () => {
+		// An MV writes into its target positionally. Every counter here is one of
+		// two ClickHouse types, so a reordered SELECT transposes columns silently —
+		// KeyAbsentCount and KeyInvalidCount would simply swap meanings.
+		const expectedOrder = [
+			"OrgId",
+			"ServiceName",
+			"AiVendor",
+			"Hour",
+			"SpanCount",
+			"WeightedSpanCount",
+			"EligibleSpanCount",
+			"KeyAbsentCount",
+			"KeyInvalidCount",
+			"KeySubSessionCount",
+			"KeySessionCount",
+			"TracesTotal",
+			"TracesWithKey",
+			"SessionsApprox",
+			"RowRulesVersionMin",
+			"RowRulesVersionMax",
+			"RollupRulesVersion",
+		]
+
+		const createTable = migration_0016_service_ai_vendors_hourly.statements.find((statement) =>
+			statement.startsWith("CREATE TABLE"),
+		)!
+		const tableColumns = createTable
+			.split("\n")
+			.slice(1, expectedOrder.length + 1)
+			.map((line) => line.trim().split(" ")[0]!)
+
+		const selectColumns = SERVICE_AI_VENDORS_HOURLY_SELECT_SQL.split("\n")
+			.slice(1, expectedOrder.length + 1)
+			.map((line) => line.trim().replace(/,$/, ""))
+			.map((line) => (line.includes(" AS ") ? line.slice(line.lastIndexOf(" AS ") + 4) : line))
+
+		expect(tableColumns).toEqual(expectedOrder)
+		expect(selectColumns).toEqual(expectedOrder)
 	})
 
 	it("adds the AI classification columns as defaulted trailing columns with no mutation", () => {
