@@ -2,7 +2,7 @@ import { McpQueryError, optionalNumberParam, optionalStringParam, type McpToolRe
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 
 const comparatorLabel: Record<string, string> = {
@@ -41,7 +41,7 @@ export function registerGetIncidentTimelineTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max incidents to return (default 20)"),
 		}),
 		Effect.fn("McpTool.getIncidentTimeline")(function* ({ rule_id, status, severity, group_key, limit }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const readModels = yield* AlertReadModelsService
 
 			const result = yield* readModels.listIncidents(tenant.orgId).pipe(

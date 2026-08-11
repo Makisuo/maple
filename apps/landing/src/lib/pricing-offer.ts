@@ -19,7 +19,7 @@ import * as m from "../paraglide/messages"
 const AUTUMN_API_VERSION = "2.3.0"
 
 /** browser_sessions is metered per session; every other signal is per GB. */
-export type Unit = "gb" | "count"
+type Unit = "gb" | "count"
 
 export interface Allotment {
 	featureId: string
@@ -162,7 +162,7 @@ export async function getOffer(): Promise<Offer> {
 // Every number on the pricing surface is money or volume, so it all runs
 // through one of these three.
 
-export const round2 = (n: number) => Math.round(n * 100) / 100
+const round2 = (n: number) => Math.round(n * 100) / 100
 
 export const money = (n: number) => {
 	const r = round2(n)

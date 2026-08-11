@@ -14,7 +14,7 @@ import { ArchiveProbe } from "../archive-probe-helpers"
 import { parseArchiveGenerationManifest } from "../../src/server/archives/manifest"
 import { randomUUID } from "node:crypto"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../src/version"
-import { SCHEMA_FINGERPRINT } from "../../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../../src/server/schema-identity"
 
 const h = ArchiveProbe.create("timezone-bound")
 

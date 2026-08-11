@@ -13,8 +13,8 @@ import {
 	dispatchDelivery,
 	type DispatchContext,
 	type DispatchDeps,
-	type TemplateRenderContext,
 } from "./AlertDeliveryDispatch"
+import type { TemplateRenderContext } from "./alert-formatting"
 import { renderTemplate } from "./alert-templating/renderer"
 import { DEFAULT_BODY_TEMPLATE, DEFAULT_TITLE_TEMPLATE } from "./alert-templating/defaultTemplates"
 

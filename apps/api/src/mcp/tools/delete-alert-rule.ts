@@ -1,7 +1,7 @@
 import { McpQueryError, requiredBooleanParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AlertRuleId } from "@maple/domain"
 
@@ -45,7 +45,7 @@ export function registerDeleteAlertRuleTool(server: McpToolRegistrar) {
 				}
 			}
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const alerts = yield* AlertRulesService
 
 			const result = yield* alerts.deleteRule(tenant.orgId, tenant.roles, ruleId.value).pipe(

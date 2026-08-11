@@ -180,10 +180,7 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 		// later.
 		const replayR2Endpoint = process.env.INGEST_REPLAY_R2_ENDPOINT?.trim()
 		const replayR2Secret = replayR2Endpoint
-			? yield* secret(
-					"replay-r2-secret-access-key",
-					requireEnv("INGEST_REPLAY_R2_SECRET_ACCESS_KEY"),
-				)
+			? yield* secret("replay-r2-secret-access-key", requireEnv("INGEST_REPLAY_R2_SECRET_ACCESS_KEY"))
 			: undefined
 
 		// An ALB can only use a certificate from its OWN region, and the ACM

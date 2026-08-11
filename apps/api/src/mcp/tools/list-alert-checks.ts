@@ -9,7 +9,7 @@ import { formatTable, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { AlertRuleId } from "@maple/domain/http"
 
@@ -28,7 +28,7 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max checks to return (default 100, max 2000)"),
 		}),
 		Effect.fn("McpTool.listAlertChecks")(function* ({ rule_id, group_key, status, since, until, limit }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const readModels = yield* AlertReadModelsService
 
 			const ruleId = yield* Effect.try({

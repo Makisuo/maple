@@ -1,6 +1,6 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { queryWarehouse } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
@@ -42,7 +42,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 			if (range.exceeded) return rangeExceededResult(range, "explore_attributes")
 			const lim = clampLimit(params.limit, { defaultValue: 50, max: 500 })
 			const scope = (params.scope ?? "span") as "span" | "resource"
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const executorLayer = makeWarehouseExecutorFromTenant(tenant)
 			const mapError = toMcpQueryError("explore_attributes")
 

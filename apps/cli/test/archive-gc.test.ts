@@ -23,7 +23,7 @@ import {
 import { promoteGeneration, selectActiveGeneration } from "../src/server/archives/generation"
 import { type ArchiveGenerationManifest, parseArchiveActivePointer } from "../src/server/archives/manifest"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 import { rebuildCatalog } from "../src/server/archives/listing"
 import { planArchiveGc, runArchiveGc, verifyCompletedGcInvariants } from "../src/server/archives/gc"
 import { writeInitialIntent, type GcOperationIntent } from "../src/server/archives/journal"

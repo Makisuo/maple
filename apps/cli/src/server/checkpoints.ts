@@ -18,8 +18,7 @@ import {
 	syncDirectory,
 	syncTree,
 } from "./durable-files"
-import { SCHEMA_FINGERPRINT } from "./serve"
-import { CURRENT_LOCAL_SCHEMA } from "./schema-identity"
+import { CURRENT_LOCAL_SCHEMA, SCHEMA_FINGERPRINT } from "./schema-identity"
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
 import {
 	markStoreClosedDurable,

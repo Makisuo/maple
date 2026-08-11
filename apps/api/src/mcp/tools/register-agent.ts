@@ -7,7 +7,7 @@ import {
 } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 
 const decodeStringArray = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
@@ -29,7 +29,7 @@ export function registerRegisterAgentTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.registerAgent")(function* ({ name, model, capabilities_json }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			if (tenant.actorId) {
 				return validationError(
 					"register_agent must be called from a human session, not an agent API key.",

@@ -34,10 +34,6 @@ import {
 	retireLiveDayInServer,
 } from "./archives/retention"
 
-/** Fingerprint of the schema this build bootstraps stores with. Re-exported
- * from this module for the existing archive/checkpoint metadata seam. */
-export { SCHEMA_FINGERPRINT }
-
 /** Resolves a request path to a static asset (the bundled SPA). Returns
  *  `undefined` to fall through to the SPA shell (client-side routing). */
 export interface AssetResolver {

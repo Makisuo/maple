@@ -1,6 +1,6 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange, rangeExceededResult, MCP_LOG_PATTERN_MAX_HOURS } from "@/mcp/lib/time"
 import { truncate, formatNumber } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -42,7 +42,7 @@ export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 			if (range.exceeded) return rangeExceededResult(range, "mine_log_patterns")
 			const sampleSize = Math.min(Math.max(Number(sample_size) || 10_000, 1), 50_000)
 			const lim = Math.min(Math.max(Number(limit) || 50, 1), 200)
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				service: service ?? "all",

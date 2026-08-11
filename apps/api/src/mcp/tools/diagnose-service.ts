@@ -1,5 +1,5 @@
 import { optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { formatDurationFromMs, formatPercent, formatNumber, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -21,7 +21,7 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
 		}),
 		Effect.fn("McpTool.diagnoseService")(function* ({ service_name, start_time, end_time, environment }) {
 			const { st, et } = resolveTimeRange(start_time, end_time)
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 
 			const result = yield* diagnoseService({
 				serviceName: service_name,

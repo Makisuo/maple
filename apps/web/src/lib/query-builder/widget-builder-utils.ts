@@ -1,8 +1,5 @@
 import { buildTimeseriesQuerySpec, createQueryDraft } from "@maple/query-engine/query-builder"
-import {
-	TRACE_DEFAULT_COLUMNS,
-	type ListColumnDraft,
-} from "@/components/dashboard-builder/config/list-config-panel"
+import { TRACE_DEFAULT_COLUMNS, type ListColumnDraft } from "@/lib/query-builder/list-widget-config"
 import type {
 	DashboardWidget,
 	WidgetDataSource,

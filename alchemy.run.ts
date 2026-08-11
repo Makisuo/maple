@@ -93,10 +93,9 @@ type StackProviderServices =
 	| Layer.Services<ReturnType<typeof Cloudflare.providers>>
 	| Layer.Services<ReturnType<typeof AWS.providers>>
 
-const providers: Layer.Layer<StackProviderServices, never, Alchemy.StackServices> =
-	DEPLOY_AWS_INGEST
-		? Cloudflare.providers().pipe(Layer.provideMerge(AWS.providers()))
-		: Cloudflare.providers()
+const providers: Layer.Layer<StackProviderServices, never, Alchemy.StackServices> = DEPLOY_AWS_INGEST
+	? Cloudflare.providers().pipe(Layer.provideMerge(AWS.providers()))
+	: Cloudflare.providers()
 
 export default Alchemy.Stack(
 	"maple",

@@ -9,7 +9,7 @@ import { formatNumber, formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
@@ -106,7 +106,7 @@ export function registerGetInstrumentationRecommendationsTool(server: McpToolReg
 			),
 		}),
 		Effect.fn("McpTool.getInstrumentationRecommendations")(function* ({ status, include_coverage }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				status: status ?? "open",

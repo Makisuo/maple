@@ -1,5 +1,5 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
-import { queryWarehouse, resolveTenant } from "@/mcp/lib/query-warehouse"
+import { queryWarehouse, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
 import { formatNumber, formatTable } from "@/mcp/lib/format"
@@ -36,7 +36,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
 			if (range.exceeded) return rangeExceededResult(range, "list_metrics")
 			const lim = clampLimit(limit, { defaultValue: 50, max: 500 })
 			const off = clampOffset(offset, { max: 10_000 })
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				service: service ?? "all",

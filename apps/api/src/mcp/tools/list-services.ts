@@ -1,5 +1,5 @@
 import { optionalStringParam, type McpToolRegistrar } from "./types"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { formatPercent, formatDurationFromMs, formatNumber, formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -20,7 +20,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
 		}),
 		Effect.fn("McpTool.listServices")(function* ({ start_time, end_time, environment }) {
 			const { st, et } = resolveTimeRange(start_time, end_time)
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				environment: environment ?? "all",

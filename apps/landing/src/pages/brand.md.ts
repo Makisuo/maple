@@ -80,7 +80,7 @@ export const GET: APIRoute = ({ site }) => {
 
 			"## Terms",
 			blocks(
-				"Maple's source is FSL-1.1-ALv2, and each release converts to Apache 2.0 two years after we publish it. Neither one hands over the name or the artwork. The FSL says so in its own words, and Apache repeats it in its section 6. So a fork gets every line of the code and none of this page: ship it under your own name and your own mark. Saying what it is stays fine. \"A fork of Maple\", \"built on Maple\", \"compatible with Maple\" are all true, and none of them needs asking.",
+				'Maple\'s source is FSL-1.1-ALv2, and each release converts to Apache 2.0 two years after we publish it. Neither one hands over the name or the artwork. The FSL says so in its own words, and Apache repeats it in its section 6. So a fork gets every line of the code and none of this page: ship it under your own name and your own mark. Saying what it is stays fine. "A fork of Maple", "built on Maple", "compatible with Maple" are all true, and none of them needs asking.',
 				"What isn't fine is looking like us when you aren't: Maple in your product name, domain, or handle, or the mark placed so it reads as endorsement or partnership where there's no agreement. We can ask you to stop, and if we do, please stop.",
 				"Maple and the Maple mark are trademarks of Makisuo, Inc. Other names and logos on this site belong to their owners.",
 			),

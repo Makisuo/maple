@@ -38,7 +38,7 @@ import {
 	type ArchiveOperationPhase,
 } from "../src/server/archives/journal"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 import {
 	checkpointPinsRoot,
 	checkpointRoot,
