@@ -225,6 +225,3 @@ const MainServicesLive = Layer.mergeAll(
  * such as billing, demo, digest, OAuth, anomaly detection, and Slack integration.
  */
 export const HttpServicesLive = McpToolExecutor.layer.pipe(Layer.provideMerge(MainServicesLive))
-
-/** @deprecated Prefer an entrypoint-specific root. */
-export const MainLive = HttpServicesLive
