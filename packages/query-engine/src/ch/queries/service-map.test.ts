@@ -824,6 +824,9 @@ describe("servicePlatformsSQL", () => {
 					faasName: "",
 					mapleSdkType: "node",
 					processRuntimeName: "nodejs",
+					telemetrySdkLanguage: "nodejs",
+					browserPlatform: "",
+					deviceType: "",
 				},
 			])
 
@@ -832,6 +835,8 @@ describe("servicePlatformsSQL", () => {
 				k8sDeploymentName: "artifacts-api",
 				cloudProvider: "aws",
 				mapleSdkType: "node",
+				telemetrySdkLanguage: "nodejs",
+				browserPlatform: "",
 			})
 		}),
 	)
@@ -858,4 +863,22 @@ describe("servicePlatformsSQL", () => {
 			expect(Exit.isFailure(exit)).toBe(true)
 		}),
 	)
+
+	it("selects the app-kind signal columns", () => {
+		const sql = servicePlatformsSQL({}, baseParams).sql
+
+		// `maple.sdk.type` alone only classifies services on a Maple SDK; these
+		// three are what let the classifier see a vanilla-OTel browser or mobile app.
+		expect(sql).toContain("TelemetrySdkLanguage")
+		expect(sql).toContain("BrowserPlatform")
+		expect(sql).toContain("DeviceType")
+	})
+
+	it("narrows to one service when asked", () => {
+		const all = servicePlatformsSQL({}, baseParams).sql
+		const one = servicePlatformsSQL({ serviceName: "artifacts-api" }, baseParams).sql
+
+		expect(all).not.toContain("artifacts-api")
+		expect(one).toContain("artifacts-api")
+	})
 })

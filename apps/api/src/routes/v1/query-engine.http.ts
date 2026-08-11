@@ -71,6 +71,12 @@ import {
 	TraceId,
 	SpanId,
 } from "@maple/domain/http"
+import {
+	apdexThresholdMsForAppKind,
+	classifyServiceAppKind,
+	DEFAULT_APDEX_THRESHOLD_MS,
+	type ServiceAppKind,
+} from "@maple/domain/service-app-kind"
 import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { makeDirectRouteCachePolicy, makeExecuteRawSql } from "@maple/query-engine/runtime"
@@ -233,9 +239,16 @@ const toServicePlatformRow = (row: CH.ServicePlatformsOutput) => {
 	const faasName = String(row.faasName ?? "")
 	const mapleSdkType = String(row.mapleSdkType ?? "")
 	const processRuntimeName = String(row.processRuntimeName ?? "")
+	// App-kind signals. Optional on the row so a query compiled before migration
+	// 0015 (or a cluster that has not applied it) decodes as "no signal".
+	const telemetrySdkLanguage = String(row.telemetrySdkLanguage ?? "")
+	const browserPlatform = String(row.browserPlatform ?? "")
+	const deviceType = String(row.deviceType ?? "")
 	// cluster.name alone does not prove the service runs in Kubernetes.
 	const isKubernetes = k8sPodName !== "" || k8sDeploymentName !== ""
-	// Host infrastructure takes precedence over SDK self-report.
+	// Host infrastructure takes precedence over SDK self-report. `browser` is
+	// what Maple's own browser SDK reports (packages/browser); `client` is the
+	// Effect client SDK.
 	const platform: "kubernetes" | "cloudflare" | "lambda" | "web" | "unknown" =
 		cloudPlatform === "cloudflare.workers" || cloudProvider === "cloudflare"
 			? "cloudflare"
@@ -243,12 +256,23 @@ const toServicePlatformRow = (row: CH.ServicePlatformsOutput) => {
 				? "lambda"
 				: isKubernetes
 					? "kubernetes"
-					: mapleSdkType === "client"
+					: mapleSdkType === "client" || mapleSdkType === "browser"
 						? "web"
 						: "unknown"
 	return {
 		serviceName: decodeServiceName(String(row.serviceName ?? "")),
 		platform,
+		appKind: classifyServiceAppKind({
+			browserPlatform,
+			telemetrySdkLanguage,
+			mapleSdkType,
+			deviceType,
+			cloudPlatform,
+			cloudProvider,
+			faasName,
+			k8sPodName,
+			k8sDeploymentName,
+		}),
 		k8sCluster,
 		cloudPlatform,
 		cloudProvider,
@@ -922,7 +946,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// execute-path cache; releases is uncached (mirrors the standalone
 					// handler); environments is edge-cached on a service-scoped key.
 					yield* warehouse.warmRoute(tenant)
-					const [timeseries, releaseRows, environmentRows] = yield* Effect.all(
+					const [timeseries, releaseRows, environmentRows, appKindRows] = yield* Effect.all(
 						[
 							queryEngine.execute(tenant, payload.timeseries),
 							runQuery(Queries.serviceReleases, tenant, payload),
@@ -931,9 +955,51 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								startTime: payload.startTime,
 								endTime: payload.endTime,
 							}),
+							// What kind of app this is, which is what picks the Apdex
+							// target below. Runs alongside the rest — it gates only the
+							// optional override query, not the primary chart.
+							runQuery(Queries.serviceAppKind, tenant, {
+								serviceName: payload.serviceName,
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+							}),
 						],
-						{ concurrency: 3 },
+						{ concurrency: 4 },
 					)
+
+					const appKind: ServiceAppKind =
+						appKindRows.length > 0 ? toServicePlatformRow(appKindRows[0]!).appKind : "unknown"
+					const apdexThresholdMs = apdexThresholdMsForAppKind(appKind)
+
+					// `payload.timeseries` is forwarded untouched so it keeps the
+					// annual service-overview rollup, whose stored Apdex counters are
+					// baked at 500 ms (`canUseAnnualServiceOverview` enforces that).
+					// Threading a different threshold through it would knock
+					// throughput, latency, AND error rate onto the 30-day raw path for
+					// the sake of one series — so a non-default target is re-scored by
+					// this second, narrower query instead.
+					const apdexOverride =
+						apdexThresholdMs === DEFAULT_APDEX_THRESHOLD_MS
+							? undefined
+							: yield* runQuery(Queries.serviceApdex, tenant, {
+									serviceName: payload.serviceName,
+									startTime: payload.startTime,
+									endTime: payload.endTime,
+									bucketSeconds:
+										payload.timeseries.query.kind === "timeseries"
+											? payload.timeseries.query.bucketSeconds
+											: payload.releasesBucketSeconds,
+									apdexThresholdMs,
+								}).pipe(
+									Effect.map((rows) =>
+										rows.map((row) => ({
+											bucket: String(row.bucket),
+											apdexScore: Number(row.apdexScore),
+											totalCount: Number(row.totalCount),
+										})),
+									),
+								)
+
 					return new ServiceDetailOverviewResponse({
 						timeseries,
 						releases: releaseRows.map((row) => ({
@@ -945,6 +1011,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						environments: environmentRows
 							.map((row) => String(row.environment ?? ""))
 							.filter((env) => env !== ""),
+						appKind,
+						apdexThresholdMs,
+						...(apdexOverride === undefined ? {} : { apdexOverride }),
 					})
 				}),
 			)
