@@ -1,5 +1,5 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { Effect, Option, Redacted, Schema } from "effect"
+import { Data, Effect, Option, Redacted, Schema } from "effect"
 import {
 	InternalScrapeTarget,
 	OrgId,
@@ -50,6 +50,12 @@ export interface SubTargetOverride {
 	readonly labels: Record<string, string>
 }
 
+class InvalidScrapeTargetRow extends Data.TaggedError("@maple/api/routes/InvalidScrapeTargetRow")<{
+	readonly message: string
+	readonly targetId: string
+	readonly cause: unknown
+}> {}
+
 /**
  * Marshal a DB row into the internal wire shape. Unparseable labels degrade
  * to `{}`; a row that fails the schema brands (interval out of range, bad id)
@@ -82,7 +88,12 @@ export const toInternalScrapeTarget = (
 					labels,
 					ingestKey,
 				}),
-			catch: () => new Error("invalid scrape target row"),
+			catch: (cause) =>
+				new InvalidScrapeTargetRow({
+					message: "Invalid scrape target row",
+					targetId: row.id,
+					cause,
+				}),
 		}).pipe(Effect.option)
 	})
 

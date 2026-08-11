@@ -1,6 +1,6 @@
 import { datasources, pipes, projectRevision } from "../generated/tinybird-project-manifest"
 import { TinybirdApi, TinybirdApiError } from "@tinybirdco/sdk"
-import { Duration, Effect, Schema } from "effect"
+import { Data, Duration, Effect, Schema } from "effect"
 import {
 	applyRawTtlOverrides,
 	computeEffectiveRevision,
@@ -72,6 +72,12 @@ type FeedbackEntry = typeof FeedbackEntrySchema.Type
 
 const READY_STATUSES = new Set(["data_ready", "live"])
 const FAILURE_STATUSES = new Set(["failed", "error", "deleting", "deleted"])
+
+class StaleDeploymentCleanupError extends Data.TaggedError("@maple/tinybird/StaleDeploymentCleanupError")<{
+	readonly message: string
+	readonly deploymentId: string
+	readonly cause: unknown
+}> {}
 
 export interface TinybirdProjectSyncParams {
 	readonly baseUrl: string
@@ -425,7 +431,12 @@ export const makeTinybirdProjectSync = (options: TinybirdProjectSyncOptions): Ti
 			(deployment) =>
 				Effect.tryPromise({
 					try: () => api.request(`/v1/deployments/${deployment.id}`, { method: "DELETE" }),
-					catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+					catch: (cause) =>
+						new StaleDeploymentCleanupError({
+							message: "Tinybird stale-deployment cleanup failed",
+							deploymentId: deployment.id,
+							cause,
+						}),
 				}).pipe(
 					Effect.tapError((error) =>
 						Effect.logWarning("Tinybird stale-deployment cleanup failed").pipe(
