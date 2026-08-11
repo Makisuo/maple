@@ -63,7 +63,13 @@ const bustRuntimeConfigCache = (orgId: OrgId): Promise<void> =>
 			invalidateOrgRuntimeConfigMemo(orgId)
 			const cache = yield* EdgeCacheService
 			yield* cache.invalidate({ bucket: ORG_CH_CONFIG_CACHE_BUCKET, key: orgId })
-		}).pipe(Effect.provide(EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))), Effect.ignore),
+		}).pipe(
+			// Promise bridge for the standalone workflow isolate; no application
+			// runtime exists here to own this cache layer.
+			// oxlint-disable-next-line effecttsgo/strict-effect-provide
+			Effect.provide(EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))),
+			Effect.ignore,
+		),
 	)
 
 /**
@@ -391,7 +397,14 @@ async function runWithDb(
 ): Promise<SchemaApplyWorkflowResult> {
 	const orgId = Schema.decodeUnknownSync(OrgId)(event.payload.orgId)
 	const dbStep: DbStep = (fn) =>
-		Effect.runPromise(connection.run(fn).pipe(Effect.provide(schemaApplyTelemetry.layer)))
+		Effect.runPromise(
+			connection.run(fn).pipe(
+				// Each durable workflow step crosses back into Effect from Promise-land
+				// and owns the telemetry context for that isolated run.
+				// oxlint-disable-next-line effecttsgo/strict-effect-provide
+				Effect.provide(schemaApplyTelemetry.layer),
+			),
+		)
 	const encryptionKey = Buffer.from(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY.trim(), "base64")
 	const startedAt = Date.now()
 	const appliedVersions: number[] = []

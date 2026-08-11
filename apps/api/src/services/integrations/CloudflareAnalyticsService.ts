@@ -1005,6 +1005,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 	make: Effect.gen(function* () {
 		const database = yield* Database
 		const env = yield* Env
+		const httpClient = yield* HttpClient.HttpClient
 		const warehouse = yield* WarehouseQueryService
 		const oauth = yield* CloudflareOAuthService
 		const ingestKeys = yield* OrgIngestKeysService
@@ -1403,11 +1404,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 				const total = rows.sumRows.length + rows.gaugeRows.length
 				if (total === 0) return 0
 				const payload = metricRowsToOtlp(rows.sumRows, rows.gaugeRows)
-				const client = yield* HttpClient.HttpClient
 				const request = HttpClientRequest.post(ingestMetricsUrl, {
 					headers: { authorization: `Bearer ${ingestKey}`, "content-type": "application/json" },
 				}).pipe(HttpClientRequest.bodyJsonUnsafe(payload))
-				const response = yield* client
+				const response = yield* httpClient
 					.execute(request)
 					.pipe(Effect.annotateSpans("peer.service", "ingest"))
 				if (response.status >= 300) {
@@ -1423,7 +1423,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 			},
 			(effect) =>
 				effect.pipe(
-					Effect.provide(FetchHttpClient.layer),
 					Effect.mapError((error) =>
 						error instanceof IntegrationsUpstreamError
 							? error
@@ -2403,5 +2402,5 @@ export class CloudflareAnalyticsService extends Context.Service<
 		} satisfies CloudflareAnalyticsServiceShape
 	}),
 }) {
-	static readonly layer = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 }

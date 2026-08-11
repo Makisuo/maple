@@ -7,7 +7,7 @@ import { createDualContent } from "@/mcp/lib/structured-output"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { Array as Arr, Effect, Schema } from "effect"
 import { listServices } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerListServicesTool(server: McpToolRegistrar) {
 	server.tool(
@@ -30,7 +30,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
 				timeRange: { startTime: st, endTime: et },
 				environment: environment ?? undefined,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("service_overview")),
 			)
 

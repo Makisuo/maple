@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "@effect/vitest"
+import { afterEach, describe, expect, it, layer } from "@effect/vitest"
 import {
 	OrgClickHouseSettingsUpstreamRejectedError,
 	OrgClickHouseSettingsUpstreamUnavailableError,
@@ -158,7 +158,7 @@ describe("isRetryableUpstream", () => {
 	})
 })
 
-describe("execClickHouse", () => {
+layer(FetchHttpClient.layer, { excludeTestServices: true })("execClickHouse", (it) => {
 	it.effect("uses manual redirects and rejects every 3xx without following it", () =>
 		Effect.gen(function* () {
 			let redirectMode: RequestRedirect | undefined
@@ -180,7 +180,7 @@ describe("execClickHouse", () => {
 		}),
 	)
 
-	it.live("maps a Cloudflare 524 to a clear, actionable message (and retries 52x)", () =>
+	it.effect("maps a Cloudflare 524 to a clear, actionable message (and retries 52x)", () =>
 		Effect.gen(function* () {
 			const { state, fetchImpl } = makeFetch(() =>
 				Promise.resolve(mockResponse("error code: 524", 524)),
@@ -199,7 +199,7 @@ describe("execClickHouse", () => {
 		}),
 	)
 
-	it.live("retries a transient 503 then succeeds", () =>
+	it.effect("retries a transient 503 then succeeds", () =>
 		Effect.gen(function* () {
 			const { state, fetchImpl } = makeFetch(() =>
 				Promise.resolve(

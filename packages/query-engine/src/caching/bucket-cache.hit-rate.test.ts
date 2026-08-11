@@ -122,6 +122,9 @@ const makeLive = (backend: EdgeCacheBackend, readTimeoutMs?: number) =>
 		Layer.provide(Layer.succeed(EdgeCacheService, makeEdgeCacheService(backend, readTimeoutMs))),
 	)
 
+const makeTestLive = (backend: EdgeCacheBackend, config = makeConfig(), readTimeoutMs?: number) =>
+	makeLive(backend, readTimeoutMs).pipe(Layer.provide(config))
+
 interface Request {
 	readonly startMs: number
 	readonly endMs: number
@@ -160,7 +163,7 @@ const runSequence = (requests: ReadonlyArray<Request>, backend: EdgeCacheBackend
 		}
 
 		return { outcomes, warehouseCalls }
-	}).pipe(Effect.provide(makeLive(backend)), Effect.provide(config))
+	}).pipe(Effect.provide(makeTestLive(backend, config)))
 
 /** The same sequence with the cache bypassed — ground truth for the points. */
 const oracle = (requests: ReadonlyArray<Request>) =>
@@ -338,7 +341,7 @@ describe("bucket cache hit rate — dashboard access patterns", () => {
 			for (const point of b.points) {
 				assert.strictEqual(point.series.owner, 2)
 			}
-		}).pipe(Effect.provide(makeLive(backend)), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(makeTestLive(backend)))
 	})
 
 	it.live("refills from the warehouse after the entries expire", () => {
@@ -444,10 +447,7 @@ describe("bucket cache hit rate — degraded backends", () => {
 					{ orgId, query: DEFAULT_QUERY, bucketSeconds: BUCKET_SECONDS, ...fixed },
 					compute,
 				)
-			}).pipe(
-				Effect.provide(makeLive(hangingReads(inner), READ_TIMEOUT_MS)),
-				Effect.provide(makeConfig()),
-			)
+			}).pipe(Effect.provide(makeTestLive(hangingReads(inner), makeConfig(), READ_TIMEOUT_MS)))
 
 			assert.strictEqual(degraded.segmentsTimedOut, 1)
 			assert.deepStrictEqual(degraded.points, warehousePointsFor(fixed.startMs, fixed.endMs))
@@ -461,7 +461,7 @@ describe("bucket cache hit rate — degraded backends", () => {
 					{ orgId, query: DEFAULT_QUERY, bucketSeconds: BUCKET_SECONDS, ...fixed },
 					compute,
 				)
-			}).pipe(Effect.provide(makeLive(inner)), Effect.provide(makeConfig()))
+			}).pipe(Effect.provide(makeTestLive(inner)))
 
 			assert.strictEqual(recovered.bucketsMissed, 0)
 			assert.strictEqual(recovered.warehouseQueryCount, 0)
@@ -493,7 +493,7 @@ describe("bucket cache hit rate — degraded backends", () => {
 
 			assert.deepStrictEqual(outcome.points, warehousePointsFor(fixed.startMs, fixed.endMs))
 			assert.strictEqual(outcome.segmentsErrored, 1)
-		}).pipe(Effect.provide(makeLive(exploding)), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(makeTestLive(exploding)))
 	})
 
 	it.live("round-trips a segment payload through JSON without losing buckets", () => {
@@ -576,6 +576,6 @@ describe("bucket cache hit rate — concurrency", () => {
 					`widget ${index} received points from a different window`,
 				)
 			})
-		}).pipe(Effect.provide(makeLive(backend)), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(makeTestLive(backend)))
 	})
 })

@@ -10,7 +10,7 @@
  * - `toggle` fails ~15% of the time with `ToggleFailedError` so Maple's Errors
  *   view and error-rate metrics have data.
  */
-import { Context, Duration, Effect, Layer, Ref } from "effect"
+import { Context, Duration, Effect, Layer, Random, Ref } from "effect"
 import { Todo, TodoNotFoundError, ToggleFailedError } from "../shared/api.ts"
 
 const seedTodos: ReadonlyArray<Todo> = [
@@ -36,7 +36,9 @@ const seedTodos: ReadonlyArray<Todo> = [
 
 /** Sleep a random number of ms in [min, max] to make spans visibly wide. */
 const jitter = (minMs: number, maxMs: number) =>
-	Effect.suspend(() => Effect.sleep(Duration.millis(minMs + Math.floor(Math.random() * (maxMs - minMs)))))
+	Random.nextBetween(minMs, maxMs).pipe(
+		Effect.flatMap((delayMs) => Effect.sleep(Duration.millis(Math.floor(delayMs)))),
+	)
 
 export class TodoService extends Context.Service<TodoService>()("@maple-examples/todo/TodoService", {
 	make: Effect.gen(function* () {
@@ -82,7 +84,7 @@ export class TodoService extends Context.Service<TodoService>()("@maple-examples
 
 			// The simulated flake: a slow write that occasionally loses a race.
 			yield* jitter(40, 160)
-			if (Math.random() < 0.15) {
+			if ((yield* Random.next) < 0.15) {
 				yield* Effect.logWarning("todo.toggle.conflict").pipe(Effect.annotateLogs({ "todo.id": id }))
 				return yield* new ToggleFailedError({ message: `Transient write conflict toggling ${id}` })
 			}

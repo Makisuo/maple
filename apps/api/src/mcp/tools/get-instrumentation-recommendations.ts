@@ -15,7 +15,7 @@ import { resolveTimeRange } from "@/mcp/lib/time"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import { RecommendationIssueStatus, type RecommendationIssueKind } from "@maple/domain/http"
 import { exploreAttributeKeys } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 const decodeStatus = Schema.decodeUnknownOption(RecommendationIssueStatus)
 
@@ -155,7 +155,7 @@ export function registerGetInstrumentationRecommendationsTool(server: McpToolReg
 						timeRange: { startTime: range.st, endTime: range.et },
 						limit: 500,
 					}).pipe(
-						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+						provideWarehouseExecutorFromTenant(tenant),
 						Effect.mapError(toMcpQueryError("get_instrumentation_recommendations")),
 						Effect.option,
 					)

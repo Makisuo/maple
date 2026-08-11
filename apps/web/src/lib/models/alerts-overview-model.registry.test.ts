@@ -77,6 +77,11 @@ interface UpdateRuleReq {
 	readonly payload: { readonly enabled?: boolean }
 }
 
+class TestUpdateRuleError extends Schema.TaggedError<TestUpdateRuleError>()(
+	"@maple/web/test/TestUpdateRuleError",
+	{ message: Schema.String },
+) {}
+
 /**
  * A fake MapleApiV2AtomClient exposing only `alertRules.update` (all the
  * handler touches), recording every call. The real client is a large generated
@@ -137,7 +142,7 @@ describe("AlertsOverviewModel toggle mutation", () => {
 	})
 
 	it.effect("records a failed toggle in `state` and surfaces the typed error", () => {
-		const fake = makeFakeClient(() => Effect.fail(new Error("nope")))
+		const fake = makeFakeClient(() => Effect.fail(new TestUpdateRuleError({ message: "nope" })))
 		return Effect.gen(function* () {
 			const ports = yield* Model.get(ToggleTestModel)
 			const exit = yield* Mutation.call(ports.inputs.toggle, makeRule()).pipe(Effect.exit)

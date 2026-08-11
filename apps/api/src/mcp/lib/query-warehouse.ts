@@ -7,7 +7,7 @@ import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { McpAuthMissingError } from "@/mcp/tools/types"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseExecutor } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export class CurrentMcpTenant extends Context.Service<CurrentMcpTenant, TenantContext>()(
 	"@maple/api/mcp/CurrentMcpTenant",
@@ -35,12 +35,12 @@ export const resolveHttpMcpTenant = Effect.gen(function* () {
 	return yield* resolveMcpTenantContext(nativeReq)
 })
 
-/** Infrastructure binding: resolves tenant and provides WarehouseExecutor layer. */
+/** Infrastructure binding: resolves the tenant and installs its WarehouseExecutor facade. */
 export const withTenantExecutor = Effect.fn("withTenantExecutor")(function* <A, E>(
 	effect: Effect.Effect<A, E, WarehouseExecutor>,
 ) {
 	const tenant = yield* CurrentMcpTenant
-	return yield* Effect.provide(effect, makeWarehouseExecutorFromTenant(tenant))
+	return yield* effect.pipe(provideWarehouseExecutorFromTenant(tenant))
 })
 
 export const queryWarehouse = Effect.fn("queryWarehouse")(function* <T = any>(

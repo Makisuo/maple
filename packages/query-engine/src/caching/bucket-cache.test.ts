@@ -326,6 +326,11 @@ const makeBucketLive = (backend: EdgeCacheBackend, readTimeoutMs?: number) =>
 		Layer.provide(Layer.succeed(EdgeCacheService, makeEdgeCacheService(backend, readTimeoutMs))),
 	)
 
+const BucketTestLive = BucketLive.pipe(Layer.provide(makeConfig()))
+
+const makeBucketTestLive = (backend: EdgeCacheBackend, config = makeConfig(), readTimeoutMs?: number) =>
+	makeBucketLive(backend, readTimeoutMs).pipe(Layer.provide(config))
+
 // These exercise the live cache backend and compute flux boundaries relative to
 // the real clock, so they run under it.live rather than the default TestClock.
 describe("BucketCacheService.getOrComputeBuckets", () => {
@@ -365,7 +370,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.strictEqual(second.missingRangeCount, 0)
 			assert.strictEqual(second.warehouseQueryCount, 0)
 			assert.strictEqual(second.points.length, 3)
-		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(BucketTestLive))
 	})
 
 	it.live("refetches only the tail slice when the window shifts forward", () => {
@@ -400,7 +405,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.deepStrictEqual(computeCalls[1], { startMs: 3 * MIN, endMs: 4 * MIN })
 			assert.strictEqual(second.missingRangeCount, 1)
 			assert.strictEqual(second.points.length, 3)
-		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(BucketTestLive))
 	})
 
 	it.live("issues one warehouse query when the cached buckets are fragmented", () => {
@@ -441,7 +446,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 
 			// Over-fetching the cached middle must not corrupt the result set.
 			assert.strictEqual(outcome.points.length, 6)
-		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(BucketTestLive))
 	})
 
 	it.live("propagates errors from compute and does not poison the cache", () => {
@@ -479,7 +484,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.strictEqual(computeAttempt, 2) // first failed, second recomputed (no poison)
 			assert.strictEqual(ok.points.length, 3)
 			assert.isTrue(ok.bucketsMissed > 0)
-		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(BucketTestLive))
 	})
 
 	it.live("bypasses cache on a bucketSeconds mismatch (different fingerprint)", () => {
@@ -512,7 +517,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.strictEqual(computeCalls[0]!.bucketSeconds, 60)
 			assert.strictEqual(computeCalls[1]!.bucketSeconds, 180)
 			assert.isTrue(second.bucketsMissed > 0)
-		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(BucketTestLive))
 	})
 
 	it.live("treats a version-skewed cache payload as a miss", () => {
@@ -562,7 +567,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.strictEqual(computed, 1)
 			assert.isTrue(outcome.bucketsMissed > 0)
 			assert.strictEqual(outcome.points.length, 3)
-		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(BucketTestLive))
 	})
 
 	it.live("treats a malformed segment payload as a miss instead of defecting", () => {
@@ -591,7 +596,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.strictEqual(computed, 1)
 			assert.strictEqual(outcome.segmentsMissed, 1)
 			assert.strictEqual(outcome.points.length, 1)
-		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(BucketTestLive))
 	})
 
 	it.live("stores bounded fixed-size segments instead of one growing query blob", () => {
@@ -636,8 +641,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 				assert.strictEqual(segment.segmentEndMs - segment.segmentStartMs, 2 * MIN)
 			}
 		}).pipe(
-			Effect.provide(makeBucketLive(backend)),
-			Effect.provide(makeConfig({ QE_BUCKET_CACHE_SEGMENT_BUCKETS: "2" })),
+			Effect.provide(makeBucketTestLive(backend, makeConfig({ QE_BUCKET_CACHE_SEGMENT_BUCKETS: "2" }))),
 		)
 	})
 
@@ -681,11 +685,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 				writes[0]!.buckets.map((b) => b.startMs),
 				[0, MIN],
 			)
-		}).pipe(
-			Effect.provide(makeBucketLive(backend, 10)),
-			Effect.provide(makeConfig()),
-			Effect.timeout(200),
-		)
+		}).pipe(Effect.provide(makeBucketTestLive(backend, makeConfig(), 10)), Effect.timeout(200))
 	})
 
 	it.live("caches explicit empty-bucket coverage for sparse query results", () => {
@@ -712,7 +712,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.strictEqual(second.bucketsHit, 3)
 			assert.strictEqual(second.warehouseQueryCount, 0)
 			assert.deepStrictEqual(second.points, [])
-		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(BucketTestLive))
 	})
 
 	// Uses a real wall-clock sleep to keep both fibers in-flight simultaneously,
@@ -746,6 +746,6 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.strictEqual(computeCalls, 2)
 			assert.strictEqual(a.points.length, 3)
 			assert.strictEqual(b.points.length, 3)
-		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+		}).pipe(Effect.provide(BucketTestLive))
 	})
 })

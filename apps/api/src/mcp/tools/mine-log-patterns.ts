@@ -7,7 +7,7 @@ import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { mineLogPatterns } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -60,7 +60,7 @@ export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 				sampleSize,
 				limit: lim,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("mine_log_patterns")),
 			)
 

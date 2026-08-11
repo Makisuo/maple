@@ -16,7 +16,7 @@ import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { Effect, Option, Schema } from "effect"
 import { topOperations } from "@maple/query-engine/observability"
 import { TracesMetric } from "@maple/query-engine"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 const decodeTracesMetric = Schema.decodeUnknownOption(TracesMetric)
 
@@ -66,7 +66,7 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 				timeRange: { startTime: st, endTime: et },
 				limit: resolvedLimit,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("top_operations")),
 			)
 

@@ -7,7 +7,7 @@ import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { findErrors } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerFindErrorsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -30,7 +30,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
 				environment: environment ?? undefined,
 				limit: limit ?? 20,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("errors_by_type")),
 			)
 
