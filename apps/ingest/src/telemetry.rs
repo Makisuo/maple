@@ -3132,6 +3132,12 @@ fn count_log_rows(request: &ExportLogsServiceRequest) -> usize {
         .sum()
 }
 
+/// Rust↔SQL equivalence fixtures. A child of this module, not of `tests`, because it
+/// drives [`encode_traces`] — the real row writer — and that is private here.
+#[cfg(test)]
+#[path = "ai_equivalence_fixtures.rs"]
+mod ai_equivalence_fixtures;
+
 #[cfg(test)]
 mod tests {
     use super::*;
