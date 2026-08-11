@@ -9,7 +9,7 @@ import {
 } from "@maple/effect-cloudflare"
 import { WorkerEntrypoint } from "cloudflare:workers"
 import { Cause, Context, Effect, Exit, FileSystem, Layer, ManagedRuntime, Path } from "effect"
-import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
+import { HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
@@ -73,14 +73,17 @@ const flushTelemetry = async (env: Record<string, unknown>): Promise<void> => {
 	await telemetry.flush(env)
 }
 
-// POST /mcp hangs indefinitely on Cloudflare Workers when `toWebHandler` is
-// called with no middleware (1101 in prod, miniflare "worker hung" locally).
-// Suspected Effect RpcServer / HttpRouter scope-propagation bug. Providing
-// ANY middleware — even a pass-through — unsticks it. Paired with
-// `disableLogger: true` so Effect's default `HttpMiddleware.logger` does not
-// double-log; application logs flow through the OTLP logger installed by
-// `telemetry.layer`.
-const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
+/**
+ * Install one Postgres connection for the whole of `program`.
+ *
+ * The scope module is imported dynamically for the same reason the route graph
+ * is: keeping it off module scope protects the worker's fixed startup-CPU
+ * budget.
+ */
+const scoped = async <A, E, R>(program: Effect.Effect<A, E, R>) => {
+	const { withPgConnectionScope } = await import("@/platform/pg-connection-scope")
+	return withPgConnectionScope(program)
+}
 
 // The route graph (`./app`) and database layer are imported DYNAMICALLY, not at
 // module scope. The static import graph reachable from `./app` eagerly builds
@@ -93,6 +96,7 @@ const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpAp
 const buildHandler = async () => {
 	const { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } = await import("./app")
 	const { layerPg } = await import("@/platform/DatabasePgLive")
+	const { pgConnectionMiddleware } = await import("@/platform/pg-connection-scope")
 	return HttpRouter.toWebHandler(
 		AllRoutes.pipe(
 			Layer.provideMerge(MainLive),
@@ -104,7 +108,14 @@ const buildHandler = async () => {
 			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLayer),
 		),
-		{ middleware: passThroughMiddleware, disableLogger: true },
+		// `pgConnectionMiddleware` gives the request its single Postgres socket. It
+		// also keeps a standing requirement satisfied: POST /mcp hangs indefinitely
+		// on Workers when `toWebHandler` is given NO middleware (1101 in prod,
+		// miniflare "worker hung" locally — suspected Effect RpcServer / HttpRouter
+		// scope-propagation bug), so this slot must never go back to empty.
+		// `disableLogger: true` stops Effect's default logger double-logging;
+		// application logs flow through the OTLP logger from `telemetry.layer`.
+		{ middleware: pgConnectionMiddleware, disableLogger: true },
 	)
 }
 
@@ -166,15 +177,17 @@ const runInternalRpc = async (
 ) => {
 	const [runtime, rpc] = await Promise.all([getRpcRuntime(env), import("./internal-rpc")])
 	let exit: Exit.Exit<unknown, unknown>
+	// The RPC runtime is isolate-wide, so the scope goes around each call rather
+	// than around the runtime — one socket per RPC invocation, released with it.
 	switch (method) {
 		case "listMcpTools":
-			exit = await runtime.runPromiseExit(rpc.listMcpToolsRpc)
+			exit = await runtime.runPromiseExit(await scoped(rpc.listMcpToolsRpc))
 			break
 		case "callMcpTool":
-			exit = await runtime.runPromiseExit(rpc.callMcpToolRpc(input))
+			exit = await runtime.runPromiseExit(await scoped(rpc.callMcpToolRpc(input)))
 			break
 		case "submitDiagnosis":
-			exit = await runtime.runPromiseExit(rpc.submitDiagnosisRpc(input))
+			exit = await runtime.runPromiseExit(await scoped(rpc.submitDiagnosisRpc(input)))
 			break
 	}
 	ctx.waitUntil(flushTelemetry(env))
@@ -341,7 +354,7 @@ const handleQueue = async (
 		try {
 			await runScheduledEffect(
 				buildPlanetScaleWebhookLayer(env),
-				processPlanetScaleWebhookBatch(batch),
+				await scoped(processPlanetScaleWebhookBatch(batch)),
 				ctx,
 			)
 		} finally {
@@ -355,7 +368,7 @@ const handleQueue = async (
 
 	const { buildVcsSyncLayer, processBatch, flushVcsTelemetry } = await import("./vcs-sync-runtime")
 	try {
-		await runScheduledEffect(buildVcsSyncLayer(env), processBatch(batch), ctx)
+		await runScheduledEffect(buildVcsSyncLayer(env), await scoped(processBatch(batch)), ctx)
 	} finally {
 		ctx.waitUntil(flushVcsTelemetry(env))
 	}
@@ -388,11 +401,11 @@ const handleScheduled = async (
 		try {
 			// Both sweeps ride this one cron: each new cron string costs an entry in
 			// wrangler.jsonc and alchemy.run.ts, and neither needs its own beat.
-			// Sequential, not concurrent — they share a Database layer whose
-			// `execute` dials a client per call.
+			// Sequential, not concurrent — they share one Postgres socket for the
+			// whole tick, so running them concurrently would only queue on it.
 			await runScheduledEffect(
 				buildScrapeRetentionLayer(env),
-				Effect.andThen(runScrapeCheckRetention, runPlanetScaleEventRetention),
+				await scoped(Effect.andThen(runScrapeCheckRetention, runPlanetScaleEventRetention)),
 				ctx,
 				{ onInterrupt: "graceful" },
 			)
@@ -406,9 +419,12 @@ const handleScheduled = async (
 		const { buildSlackReconcileLayer, runSlackReconciliation, flushSlackTelemetry } =
 			await import("./slack-reconcile-runtime")
 		try {
-			await runScheduledEffect(buildSlackReconcileLayer(env), runSlackReconciliation, ctx, {
-				onInterrupt: "graceful",
-			})
+			await runScheduledEffect(
+				buildSlackReconcileLayer(env),
+				await scoped(runSlackReconciliation),
+				ctx,
+				{ onInterrupt: "graceful" },
+			)
 		} finally {
 			ctx.waitUntil(flushSlackTelemetry(env))
 		}
@@ -420,7 +436,7 @@ const handleScheduled = async (
 		// Graceful on interrupt: a teardown mid-cron is expected lifecycle, and the
 		// schedule reruns — only the queue consumer above must keep rejecting so an
 		// interrupted batch redelivers instead of acking.
-		await runScheduledEffect(buildVcsScheduledLayer(env), runScheduledSync, ctx, {
+		await runScheduledEffect(buildVcsScheduledLayer(env), await scoped(runScheduledSync), ctx, {
 			onInterrupt: "graceful",
 		})
 	} finally {

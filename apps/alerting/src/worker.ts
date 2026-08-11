@@ -24,6 +24,7 @@ import {
 	ServiceMapRollupService,
 	TinybirdOrgTokenService,
 	WarehouseQueryService,
+	withPgConnectionScope,
 } from "@maple/api/alerting"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { layerFromEnv, layerFromEnvRecord, runScheduledEffect } from "@maple/effect-cloudflare"
@@ -169,6 +170,9 @@ const buildLayer = (env: AlertingWorkerEnv) => {
 		ErrorsServiceLive,
 		EscalationServiceLive,
 		ServiceMapRollupServiceLive,
+		// Exposed in the output, not just provided inward: `withPgConnectionScope`
+		// resolves the `MAPLE_DB` binding from it when it opens the tick's socket.
+		WorkerEnvironmentLive,
 	).pipe(Layer.provideMerge(telemetry.layer), Layer.provideMerge(ConfigLive))
 }
 
@@ -383,7 +387,13 @@ export default {
 			// Cron ticks cancel gracefully on isolate teardown — the schedule reruns
 			// anyway, and re-raised interrupts (see the per-org catchCause guards in the
 			// tick services) must not surface as failed invocations.
-			await runScheduledEffect(buildLayer(env), program, ctx, { onInterrupt: "graceful" })
+			// One Postgres socket for the whole tick. Alerting is ~97% of the
+			// workers' Postgres traffic and a single anomaly tick was measured at
+			// 628 dials, each spending one of the Worker's six outbound connection
+			// slots on a handshake; the tick's statements now pipeline over one.
+			await runScheduledEffect(buildLayer(env), withPgConnectionScope(program), ctx, {
+				onInterrupt: "graceful",
+			})
 		} finally {
 			ctx.waitUntil(telemetry.flush(env))
 		}

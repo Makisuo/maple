@@ -33,6 +33,7 @@ jobs:
             archive: ${{ steps.filter.outputs.archive == 'true' }}
             web: ${{ steps.filter.outputs.web == 'true' }}
             clickhouse: ${{ steps.filter.outputs.clickhouse == 'true' }}
+            postgres: ${{ steps.filter.outputs.postgres == 'true' }}
             slack: ${{ steps.filter.outputs.slack == 'true' }}
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -126,6 +127,18 @@ jobs:
                         - 'packages/domain/src/clickhouse/**'
                         - 'packages/domain/src/tinybird/**'
                         - 'packages/domain/src/generated/**'
+                      postgres:
+                        - *base
+                        # The connection layer and everything that decides how many
+                        # sockets a request opens. The unit suite replaces the dial
+                        # with a fake and the rest of the api suite runs on PGlite,
+                        # so this job is the ONLY place `layerPg` meets a real
+                        # server — narrow these and the per-request socket
+                        # guarantee stops being checked.
+                        - 'apps/api/src/platform/**'
+                        - 'apps/api/test/integration/**'
+                        - 'apps/api/vitest.integration.config.ts'
+                        - 'packages/db/**'
                       shell:
                         - *base
                         - 'scripts/*.sh'
@@ -388,6 +401,66 @@ jobs:
             # ungated to Slack.
             - run: bun test
               working-directory: apps/slack-agent
+
+    # The only job where `layerPg` meets a real Postgres. Everything else that
+    # touches the Database service runs on PGlite (in-process, single-connection,
+    # marks connected immediately), and the connection-scope unit tests inject a
+    # fake dial — so "one socket per request" is asserted here against
+    # pg_stat_activity, or nowhere. Port 5499 matches
+    # docker-compose.development.yml so the same command works locally after
+    # `bun db:up`.
+    postgres-connection-e2e:
+        name: Postgres connection scope E2E
+        needs: changes
+        if: ${{ needs.changes.outputs.postgres == 'true' }}
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        services:
+            postgres:
+                image: postgres:17-alpine
+                env:
+                    POSTGRES_USER: maple
+                    POSTGRES_PASSWORD: maple
+                    POSTGRES_DB: maple
+                ports:
+                    - 5499:5432
+                options: >-
+                    --health-cmd "pg_isready -U maple -d maple"
+                    --health-interval 5s
+                    --health-timeout 5s
+                    --health-retries 20
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+            - uses: ./.github/actions/bun-install
+
+            - name: Restore turbo cache
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: .turbo/cache
+                  key: turbo-v1-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+                  restore-keys: |
+                      turbo-v1-${{ runner.os }}-${{ github.job }}-
+                      turbo-v1-${{ runner.os }}-
+
+            # `@maple-dev/clickhouse-builder` resolves only through `dist/`, and the
+            # suite reaches it transitively: DatabaseLive imports
+            # `@maple/query-engine/execution`, which imports `ch/index.ts`. Without
+            # this the run dies at import with "Failed to resolve entry for package"
+            # before a single test starts. Same step, same reason, as the typescript
+            # and clickhouse jobs.
+            - name: Build ClickHouse query DSL
+              run: bun turbo build --filter=@maple-dev/clickhouse-builder
+
+            # No migrations: the suite creates the one scratch table it needs and
+            # drops it. Keeping it schema-independent means a migration change can
+            # never make this job red for a reason unrelated to connections.
+            - name: Connection scope against a real Postgres
+              env:
+                  MAPLE_TEST_PG_URL: postgres://maple:maple@127.0.0.1:5499/maple
+              run: bun run --cwd apps/api test:integration
 
     # Single version, not a matrix. Two legs cost ~380s of setup each to run ~50s of
     # actual work, so the second version was ~88% overhead. Pinned to the same tag as
@@ -763,6 +836,7 @@ jobs:
             - changes
             - typescript
             - slack-agent
+            - postgres-connection-e2e
             - clickhouse-schema-e2e
             - local-checkpoint-native
             - local-archive-native

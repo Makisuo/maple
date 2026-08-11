@@ -49,7 +49,14 @@ export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(VcsRepositoryLive, VcsProviderRegistryLive, VcsSyncQueueLive)),
 	)
 
-	return VcsSyncServiceLive.pipe(Layer.provideMerge(telemetry.layer), Layer.provideMerge(ConfigLive))
+	// `WorkerEnvironment` is merged into the output, not just provided inward, so
+	// `withPgConnectionScope` can resolve the `MAPLE_DB` binding when it opens
+	// the batch's single Postgres socket.
+	return VcsSyncServiceLive.pipe(
+		Layer.provideMerge(WorkerEnvironment.layer),
+		Layer.provideMerge(telemetry.layer),
+		Layer.provideMerge(ConfigLive),
+	)
 }
 
 // The periodic (cron) producer's layer graph. Deliberately lighter than the
@@ -68,6 +75,7 @@ export const buildVcsScheduledLayer = (_env: Record<string, unknown>) => {
 	)
 
 	return VcsScheduledSyncServiceLive.pipe(
+		Layer.provideMerge(WorkerEnvironment.layer),
 		Layer.provideMerge(telemetry.layer),
 		Layer.provideMerge(ConfigLive),
 	)

@@ -8,8 +8,22 @@ import { type DatabaseClient, type DatabaseError, executeWithSpan } from "./Data
  * Production measurement behind these numbers: `db.connect_ms` is bimodal —
  * p50 12ms, but >5% never complete — while `db.query_ms` p95 is 83ms. So the
  * query is never the problem and a dial either lands immediately or stalls;
- * there is no middle. `db.connect.in_flight` peaks at 3, so it is not our own
- * concurrency: Hyperdrive is failing to hand over a pooled connection.
+ * there is no middle.
+ *
+ * That shape is a slot budget, not a sick origin. Cloudflare caps a Worker at
+ * six simultaneous outbound connections, and a `cache.match()` holds one until
+ * response headers arrive and cannot be cancelled (lib/cache/src/edge-cache.ts
+ * measured this directly). A dial either finds a free slot or queues behind an
+ * uncancellable cache read and never lands.
+ *
+ * `db.connect.in_flight` was once read as evidence that "this is not our own
+ * concurrency". It is not evidence of that: it counts only Postgres dials in
+ * one isolate, so it cannot see the cache reads and warehouse fetches holding
+ * the other slots. Reaching the origin a different way cannot help either —
+ * dropping Hyperdrive for a direct PSBouncer socket moved dial failures
+ * 4.68% -> 1.57% but cost 800ms per request, because that socket spends the
+ * same slot. The lever that works is opening fewer sockets, which is what
+ * `pg-connection-scope.ts` does.
  *
  * A short first attempt catches the common case without waiting on a stall.
  * The retry is what makes that safe — a dial can fail for no reason attributable
@@ -25,7 +39,7 @@ import { type DatabaseClient, type DatabaseError, executeWithSpan } from "./Data
  * Retrying is safe **only because it is dial-only** — see the loop below, which
  * never re-runs `fn` once a statement could have been issued.
  */
-const CONNECT_ATTEMPT_TIMEOUT_SECONDS = [2, 8] as const
+export const CONNECT_ATTEMPT_TIMEOUT_SECONDS = [2, 8] as const
 
 /**
  * Workflow entrypoints run for minutes and dial once per run, so a
@@ -49,15 +63,18 @@ let dialsInFlight = 0
  * Run one callback against a freshly dialed Postgres client, inside the
  * standard `Database.execute` client span.
  *
- * This is the single instrumented Postgres entry point. `layerPg` uses it for
- * every request, and the Workflow entrypoints — which can't take the Effect
- * `Database` service, since they run outside the worker's layer graph — use it
- * too, so their queries produce the same spans instead of none at all.
+ * This is the fallback path, used where no `PgConnectionScope` is installed:
+ * the Workflow entrypoints (which can't take the Effect `Database` service,
+ * since they run outside the worker's layer graph), tests, and any entry point
+ * that has not been wrapped. Requests and cron ticks go through the scope
+ * instead and dial once for the whole invocation.
  *
- * Dial-per-call is deliberate, not a limitation: Workers tie TCP sockets to the
- * request that opened them. It also gives each call its own `onQuery` statement
- * collector, which is what keeps `db.query.text` correct under concurrency.
- * Transactions run inside one callback, so atomicity is unaffected.
+ * Dialing per call is safe but expensive. Workers tie TCP sockets to the
+ * request that opened them, so a socket may be reused freely WITHIN an
+ * invocation — it just must not outlive it. Every dial here spends one of the
+ * Worker's six outbound connection slots for a full handshake plus a `select 1`
+ * probe, so a route making five calls spends five. Transactions run inside one
+ * callback, so atomicity is unaffected either way.
  */
 export const executeOnFreshPgClient = <T>(
 	connectionString: string,

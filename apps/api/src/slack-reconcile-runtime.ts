@@ -43,6 +43,7 @@ export const buildSlackReconcileLayer = (_env: Record<string, unknown>) => {
 	)
 
 	return SlackIntegrationServiceLive.pipe(
+		Layer.provideMerge(WorkerEnvironment.layer),
 		Layer.provideMerge(telemetry.layer),
 		Layer.provideMerge(ConfigLive),
 	)
