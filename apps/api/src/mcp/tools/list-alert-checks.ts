@@ -10,7 +10,7 @@ import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/alerts/AlertsService"
+import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { AlertRuleId } from "@maple/domain/http"
 
 const decodeRuleId = Schema.decodeUnknownSync(AlertRuleId)
@@ -29,7 +29,7 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 		}),
 		Effect.fn("McpTool.listAlertChecks")(function* ({ rule_id, group_key, status, since, until, limit }) {
 			const tenant = yield* resolveTenant
-			const alerts = yield* AlertsService
+			const readModels = yield* AlertReadModelsService
 
 			const ruleId = yield* Effect.try({
 				try: () => decodeRuleId(rule_id),
@@ -41,7 +41,7 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 					}),
 			})
 
-			const result = yield* alerts
+			const result = yield* readModels
 				.listRuleChecks(tenant.orgId, ruleId, {
 					groupKey: group_key,
 					since,

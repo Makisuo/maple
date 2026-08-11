@@ -1,6 +1,7 @@
 import {
 	ANTICIPATED_ERROR_IDENTIFIERS,
 	AlertDestinationsService,
+	AlertReadModelsService,
 	AlertsService,
 	AnomalyDetectionService,
 	BucketCacheService,
@@ -93,6 +94,10 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 		),
 	)
 
+	const AlertReadModelsServiceLive = AlertReadModelsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(DatabaseLive, WarehouseQueryServiceLive)),
+	)
+
 	// WorkerEnvironment is merged in so the incident-open issue-hub hook can see
 	// the cross-script investigation workflow binding.
 	// AlertRuntime is a Context.Reference with defaults, so it needs no wiring here.
@@ -106,6 +111,7 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 				HazelOAuthServiceLive,
 				EmailServiceLive,
 				AlertDestinationsServiceLive,
+				AlertReadModelsServiceLive,
 				WorkerEnvironmentLive,
 			),
 		),

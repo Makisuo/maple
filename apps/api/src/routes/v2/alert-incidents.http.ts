@@ -4,7 +4,7 @@ import { CurrentTenant } from "@maple/domain/http"
 import type { V2AlertIncident } from "@maple/domain/http/v2"
 import { MapleApiV2, paginateOffsetQuery } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { AlertsService } from "@/services/alerts/AlertsService"
+import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { mapAlertError } from "./alerts-error-map"
 
 const toV2Incident = (doc: AlertIncidentDocument): V2AlertIncident => ({
@@ -32,14 +32,14 @@ const toV2Incident = (doc: AlertIncidentDocument): V2AlertIncident => ({
 
 export const HttpV2AlertIncidentsLive = HttpApiBuilder.group(MapleApiV2, "alertIncidents", (handlers) =>
 	Effect.gen(function* () {
-		const alerts = yield* AlertsService
+		const readModels = yield* AlertReadModelsService
 
 		return handlers
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
-						alerts
+						readModels
 							.listIncidents(tenant.orgId, {
 								...(query.status !== undefined ? { status: query.status } : {}),
 								...(query.rule_id !== undefined ? { ruleId: query.rule_id } : {}),
@@ -57,7 +57,7 @@ export const HttpV2AlertIncidentsLive = HttpApiBuilder.group(MapleApiV2, "alertI
 			.handle("retrieve", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const incident = yield* alerts
+					const incident = yield* readModels
 						.getIncident(tenant.orgId, params.id)
 						.pipe(mapAlertError("incident_retrieve"))
 					return toV2Incident(incident)

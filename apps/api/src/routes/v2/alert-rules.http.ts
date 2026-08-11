@@ -27,6 +27,7 @@ import {
 import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
 import { AlertsService } from "@/services/alerts/AlertsService"
+import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { mapAlertError } from "./alerts-error-map"
 
 const decodeIsoDateTime = Schema.decodeUnknownSync(IsoDateTimeString)
@@ -293,6 +294,7 @@ const toV2PreviewResult = (preview: AlertRulePreviewResponse): V2AlertRulePrevie
 export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules", (handlers) =>
 	Effect.gen(function* () {
 		const alerts = yield* AlertsService
+		const readModels = yield* AlertReadModelsService
 
 		const findRule = (orgId: Parameters<typeof alerts.listRules>[0], ruleId: AlertRuleDocument["id"]) =>
 			Effect.gen(function* () {
@@ -410,7 +412,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const tenant = yield* CurrentTenant.Context
 					const cursor = yield* decodeChecksCursor(query.cursor)
 					const limit = query.limit ?? 20
-					const response = yield* alerts
+					const response = yield* readModels
 						.listRuleChecks(tenant.orgId, params.id, {
 							...(query.group_key !== undefined ? { groupKey: query.group_key } : {}),
 							...(query.status !== undefined ? { status: query.status } : {}),
@@ -436,7 +438,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("checksSummary", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const summary = yield* alerts
+					const summary = yield* readModels
 						.summarizeRuleChecks(tenant.orgId, params.id, {
 							since: query.since,
 							until: query.until,

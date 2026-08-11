@@ -7,6 +7,7 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
+import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
 import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
@@ -124,6 +125,10 @@ const AlertDestinationsServiceLive = AlertDestinationsService.layer.pipe(
 	),
 )
 
+const AlertReadModelsServiceLive = AlertReadModelsService.layer.pipe(
+	Layer.provide(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
+)
+
 const AlertsServiceLive = AlertsService.layer.pipe(
 	Layer.provideMerge(
 		Layer.mergeAll(
@@ -133,6 +138,7 @@ const AlertsServiceLive = AlertsService.layer.pipe(
 			EmailServiceLive,
 			OrgMembersServiceLive,
 			AlertDestinationsServiceLive,
+			AlertReadModelsServiceLive,
 		),
 	),
 )
@@ -216,6 +222,7 @@ const MainServicesLive = Layer.mergeAll(
 	EdgeCacheServiceLive,
 	QueryEngineServiceLive,
 	AlertDestinationsServiceLive,
+	AlertReadModelsServiceLive,
 	AlertsServiceLive,
 	AnomalyDetectionServiceLive,
 	AiTriageServiceLive,

@@ -23,6 +23,7 @@ import {
 	interleaveAlertRulesByOrg,
 } from "./AlertsService"
 import { AlertDestinationsService } from "./AlertDestinationsService"
+import { AlertReadModelsService } from "./AlertReadModelsService"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService } from "@maple/cache"
 import { baselineWarehouseCapabilities } from "@maple/query-engine"
@@ -218,6 +219,9 @@ const makeLayer = (
 			Layer.mergeAll(envLive, databaseLive, runtimeLive, hazelOAuthLive, emailLive, orgMembersLive),
 		),
 	)
+	const alertReadModelsLive = AlertReadModelsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(databaseLive, warehouseLive)),
+	)
 
 	const alertsLive = AlertsService.layer.pipe(
 		Layer.provide(
@@ -233,10 +237,11 @@ const makeLayer = (
 				orgChSettingsLive,
 				investigationsLive,
 				alertDestinationsLive,
+				alertReadModelsLive,
 			),
 		),
 	)
-	return Layer.mergeAll(alertDestinationsLive, alertsLive)
+	return Layer.mergeAll(alertDestinationsLive, alertReadModelsLive, alertsLive)
 }
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -369,6 +374,19 @@ describe("AlertsService", () => {
 			assert.strictEqual(alerts.updateDestination, destinations.updateDestination)
 			assert.strictEqual(alerts.deleteDestination, destinations.deleteDestination)
 			assert.strictEqual(alerts.testDestination, destinations.testDestination)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}))))
+	})
+
+	it.effect("delegates the legacy read methods to AlertReadModelsService", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const readModels = yield* AlertReadModelsService
+			assert.strictEqual(alerts.listIncidents, readModels.listIncidents)
+			assert.strictEqual(alerts.getIncident, readModels.getIncident)
+			assert.strictEqual(alerts.listRuleChecks, readModels.listRuleChecks)
+			assert.strictEqual(alerts.summarizeRuleChecks, readModels.summarizeRuleChecks)
+			assert.strictEqual(alerts.listDeliveryEvents, readModels.listDeliveryEvents)
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}))))
 	})
 
