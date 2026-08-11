@@ -54,7 +54,7 @@ class InvalidScrapeTargetRow extends Schema.TaggedError<InvalidScrapeTargetRow>(
 	"@maple/api/routes/InvalidScrapeTargetRow",
 	{
 		message: Schema.String,
-		targetId: Schema.String,
+		rawTargetId: Schema.String,
 		cause: Schema.Defect(),
 	},
 ) {}
@@ -94,7 +94,7 @@ export const toInternalScrapeTarget = (
 			catch: (cause) =>
 				new InvalidScrapeTargetRow({
 					message: "Invalid scrape target row",
-					targetId: row.id,
+					rawTargetId: row.id,
 					cause,
 				}),
 		}).pipe(Effect.option)

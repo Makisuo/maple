@@ -131,7 +131,9 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   public failures in the domain contract and preserve their distinct tags until the route's existing
   error mapper/envelope handles them; use `catchTag`/`catchTags` for deliberate remapping. Plain
   `Error`, thrown failures, route-local `Data.TaggedError`, and early generic error/response mapping
-  bypass this flow. Unexpected defects alone belong in `catchDefect`/the unexpected-error envelope.
+  bypass this flow. Valid entity IDs in error context use their branded domain schemas; rejected
+  undecodable inputs use an explicitly named `raw*` string and must never be cast into a brand.
+  Unexpected defects alone belong in `catchDefect`/the unexpected-error envelope.
 - **Alchemy:** read `node_modules/alchemy/src/` — the package ships its own TypeScript source,
   so it always matches the version actually running. There is deliberately no vendored copy:
   `.context/alchemy-effect` held `alchemy-effect@0.11.0`, a package upstream renamed into
