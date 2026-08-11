@@ -11,6 +11,7 @@
 		"dev": "portless",
 		"dev:app": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --port ${PORT:-3472} --inspector-port=$((${PORT:-3472} + 10000))",
 		"test": "vitest run",
+		"test:integration": "vitest run --config vitest.integration.config.ts",
 		"eval": "vitest run --config vitest.eval.config.ts",
 		"eval:check": "bun run scripts/eval-runtime-check.ts",
 		"measure-tokens": "bun run scripts/measure-token-cost.ts",

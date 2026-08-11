@@ -1,8 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
 import { createMaplePgSocket, type MaplePgSocketHandle } from "@maple/db/client"
-import { Effect, Exit, Tracer } from "effect"
+import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { Effect, Exit, Fiber, Tracer } from "effect"
 import type { DatabaseClient } from "./DatabaseLive"
-import { makePgConnectionScope } from "./pg-connection-scope"
+import {
+	makePgConnectionScope,
+	PgConnectionScope,
+	type PgConnectionScopeShape,
+	withPgConnectionScope,
+	withPgConnectionScopeOf,
+} from "./pg-connection-scope"
 import { CONNECT_ATTEMPT_TIMEOUT_SECONDS } from "./pg-execute"
 
 /**
@@ -191,6 +198,55 @@ describe("PgConnectionScope", () => {
 		}),
 	)
 
+	it.effect("close waits for an in-flight dial instead of orphaning the socket", () =>
+		Effect.gen(function* () {
+			let releaseDial: (() => void) | undefined
+			let ends = 0
+			const scope = makePgConnectionScope("postgres://unused", undefined, () =>
+				fakeSocket({
+					onConnect: () =>
+						new Promise<void>((resolve) => {
+							releaseDial = resolve
+						}),
+					onEnd: () => {
+						ends += 1
+					},
+				}),
+			)
+
+			// Start a call, let it reach the dial, then close while it is still open —
+			// the request-aborted-mid-dial case. Without the `await pending` branch the
+			// socket lands after close and holds its slot with nobody to release it.
+			const running = yield* Effect.forkChild(scope.run(noop))
+			yield* Effect.yieldNow
+			assert.isDefined(releaseDial)
+
+			const closing = yield* Effect.forkChild(Effect.promise(() => scope.close()))
+			releaseDial?.()
+			yield* Fiber.await(running)
+			yield* Fiber.await(closing)
+
+			assert.strictEqual(ends, 1)
+		}),
+	)
+
+	it.effect("clears the memo after a total dial failure so a later call retries", () =>
+		Effect.gen(function* () {
+			// Both budgets fail on the first call; the second call must get its own
+			// budget rather than inheriting the rejected promise.
+			const rec = recorder(CONNECT_ATTEMPT_TIMEOUT_SECONDS.length)
+			const scope = makePgConnectionScope("postgres://unused", undefined, rec.openSocket)
+
+			const first = yield* Effect.exit(scope.run(noop))
+			const second = yield* scope.run(noop)
+
+			assert.isTrue(Exit.isFailure(first))
+			assert.strictEqual(second, "ok")
+			assert.strictEqual(rec.budgets.length, CONNECT_ATTEMPT_TIMEOUT_SECONDS.length + 1)
+			yield* Effect.promise(() => scope.close())
+		}),
+	)
+
 	it.effect("carries the connection-source attributes onto every span", () =>
 		Effect.gen(function* () {
 			const rec = recorder()
@@ -208,6 +264,105 @@ describe("PgConnectionScope", () => {
 			assert.strictEqual(span.attributes.get("db.namespace"), "maple")
 			assert.strictEqual(span.attributes.get("server.address"), "cfg.hyperdrive.local")
 			yield* Effect.promise(() => scope.close())
+		}),
+	)
+})
+
+/** A scope that records release without opening anything. */
+const countingScope = () => {
+	let closes = 0
+	const scope: PgConnectionScopeShape = {
+		run: () => Effect.succeed("unused" as never),
+		close: async () => {
+			closes += 1
+		},
+	}
+	return { scope, closes: () => closes }
+}
+
+describe("withPgConnectionScopeOf", () => {
+	it.effect("releases the socket when the program succeeds", () =>
+		Effect.gen(function* () {
+			const { scope, closes } = countingScope()
+
+			const result = yield* withPgConnectionScopeOf(scope, Effect.succeed("done"))
+
+			assert.strictEqual(result, "done")
+			assert.strictEqual(closes(), 1)
+		}),
+	)
+
+	it.effect("releases the socket when the program fails, and preserves the error", () =>
+		Effect.gen(function* () {
+			const { scope, closes } = countingScope()
+
+			const exit = yield* Effect.exit(withPgConnectionScopeOf(scope, Effect.fail("boom")))
+
+			// A leak here is the worst case: the request is over, but its socket is
+			// still holding one of the Worker's six outbound slots.
+			assert.strictEqual(closes(), 1)
+			assert.isTrue(Exit.isFailure(exit))
+		}),
+	)
+
+	it.effect("releases the socket when the program is interrupted", () =>
+		Effect.gen(function* () {
+			const { scope, closes } = countingScope()
+			const fiber = yield* Effect.forkChild(withPgConnectionScopeOf(scope, Effect.never))
+
+			yield* Effect.yieldNow
+			yield* Fiber.interrupt(fiber)
+
+			assert.strictEqual(closes(), 1)
+		}),
+	)
+
+	it.effect("makes the scope visible to code inside and invisible outside", () =>
+		Effect.gen(function* () {
+			const { scope } = countingScope()
+
+			const inside = yield* withPgConnectionScopeOf(scope, PgConnectionScope)
+			const outside = yield* PgConnectionScope
+
+			assert.strictEqual(inside, scope)
+			assert.isUndefined(outside)
+		}),
+	)
+})
+
+describe("withPgConnectionScope", () => {
+	const hyperdriveEnv = {
+		MAPLE_DB: {
+			connectionString: "postgres://maple:maple@cfg.hyperdrive.local:5432/maple",
+			host: "cfg.hyperdrive.local",
+			port: 5432,
+			database: "maple",
+		},
+	}
+
+	it.effect("installs a scope when the MAPLE_DB binding is present", () =>
+		Effect.gen(function* () {
+			const scope = yield* withPgConnectionScope(PgConnectionScope).pipe(
+				Effect.provideService(WorkerEnvironment, hyperdriveEnv),
+			)
+
+			// Lazy: resolving the binding must not dial. Nothing here reaches the
+			// network, and the host above does not resolve.
+			assert.isDefined(scope)
+		}),
+	)
+
+	it.effect("runs unwrapped on a stage with no application database", () =>
+		Effect.gen(function* () {
+			// PR previews bind no MAPLE_DB. Installing a scope here would have to
+			// invent a connection string; instead the program runs without one and
+			// DatabasePgLive keeps reporting the missing binding per execute, so
+			// DB-free routes still serve.
+			const scope = yield* withPgConnectionScope(PgConnectionScope).pipe(
+				Effect.provideService(WorkerEnvironment, {}),
+			)
+
+			assert.isUndefined(scope)
 		}),
 	)
 })

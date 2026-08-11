@@ -141,6 +141,21 @@ export const makePgConnectionScope = (
 }
 
 /**
+ * Run `program` against `scope`, releasing the socket however the program
+ * settles — success, failure, or interruption. Split from
+ * `withPgConnectionScope` so the release contract can be tested without a
+ * connection string or a live server.
+ */
+export const withPgConnectionScopeOf = <A, E, R>(
+	scope: PgConnectionScopeShape,
+	program: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+	program.pipe(
+		Effect.provideService(PgConnectionScope, scope),
+		Effect.ensuring(Effect.promise(() => scope.close())),
+	)
+
+/**
  * Install a connection scope for the duration of `program`.
  *
  * Stages with no application database resolve to `Unavailable`; those run
@@ -155,10 +170,9 @@ export const withPgConnectionScope = <A, E, R>(
 		const source = resolveDbConnectionSource(env)
 		if (source._tag === "Unavailable") return yield* program
 
-		const scope = makePgConnectionScope(source.connectionString, source.attributes)
-		return yield* program.pipe(
-			Effect.provideService(PgConnectionScope, scope),
-			Effect.ensuring(Effect.promise(() => scope.close())),
+		return yield* withPgConnectionScopeOf(
+			makePgConnectionScope(source.connectionString, source.attributes),
+			program,
 		)
 	})
 
