@@ -259,6 +259,25 @@ describe("QueryEngineService.execute — cache path selection", () => {
 })
 
 describe("QueryEngineService.execute — repeated dashboard load", () => {
+	it.live("caches log count by canonical definition identity", () => {
+		const counter = { n: 0 }
+		const edge = makeObservedEdgeCache()
+		const request = new QueryEngineExecuteRequest({
+			startTime: "2026-01-01 00:00:00",
+			endTime: "2026-01-01 00:15:00",
+			query: { kind: "count", source: "logs", filters: { severity: "ERROR" } },
+		})
+
+		return Effect.gen(function* () {
+			const qe = yield* QueryEngineService
+			yield* qe.execute(tenant, request)
+			yield* qe.execute(tenant, request)
+
+			assert.equal(edge.touched(BLOB_NAMESPACE), true)
+			assert.equal(counter.n, 1, "the repeat must reuse the definition-level result cache")
+		}).pipe(Effect.provide(makeLayer(counter, edge)))
+	})
+
 	it.live("costs one warehouse query no matter how many times the widget refreshes", () => {
 		const counter = { n: 0 }
 		const edge = makeObservedEdgeCache()

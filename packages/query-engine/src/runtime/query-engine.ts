@@ -27,12 +27,7 @@ import {
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "effect"
-import {
-	LOGS_BODY_SEARCH_SETTINGS,
-	type QueryProfileName,
-	type SqlQueryOptions,
-	type WarehouseQuerySettings,
-} from "../profiles"
+import type { QueryProfileName, SqlQueryOptions, WarehouseQuerySettings } from "../profiles"
 import { canonicalJSON } from "../canonical-json"
 import { computeBucketSeconds, formatWarehouseDateTime, parseWarehouseDateTime } from "../datetime"
 import {
@@ -45,6 +40,22 @@ import {
 } from "../limits"
 import { attributeIndexMode, logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeExecuteRawSql } from "./raw-sql"
+import {
+	logsCount,
+	logsQueryOptions,
+	logsTimeseries,
+	toLogsCountInput,
+	toLogsTimeseriesInput,
+} from "../registry/logs"
+import { runQueryDefinition } from "./query-definition-runner"
+import { resolveDirectRouteCachePolicy, type DirectRouteCachePolicyInput } from "./cache-policy"
+
+export {
+	makeDirectRouteCachePolicy,
+	resolveDirectRouteCachePolicy,
+	type DirectRouteCachePolicy,
+	type DirectRouteCachePolicyInput,
+} from "./cache-policy"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
 // `computeBucketSeconds` from here; the implementation now lives in the pure
@@ -320,42 +331,6 @@ const DIRECT_CACHE_SET_KEYS = new Set([
 	"services",
 	"spanNames",
 ])
-
-export interface DirectRouteCachePolicy {
-	/** Bump when response or key semantics change incompatibly. */
-	readonly version: number
-	readonly ttlSeconds: number
-	/** Time-key coalescing is independent from storage lifetime. */
-	readonly snapWindowSeconds: number
-}
-
-export type DirectRouteCachePolicyInput = number | DirectRouteCachePolicy
-
-export function makeDirectRouteCachePolicy(
-	options: {
-		readonly ttlSeconds?: number
-		readonly snapWindowSeconds?: number
-		readonly version?: number
-	} = {},
-): DirectRouteCachePolicy {
-	const ttlSeconds = Number.isFinite(options.ttlSeconds)
-		? Math.max(1, Math.floor(options.ttlSeconds!))
-		: CACHE_SNAP_S
-	const requestedSnap = options.snapWindowSeconds ?? ttlSeconds
-	const snapWindowSeconds = Number.isFinite(requestedSnap)
-		? Math.min(3600, Math.max(1, Math.floor(requestedSnap)))
-		: CACHE_SNAP_S
-	const version = Number.isFinite(options.version) ? Math.max(1, Math.floor(options.version!)) : 1
-	return { version, ttlSeconds, snapWindowSeconds }
-}
-
-export function resolveDirectRouteCachePolicy(
-	input: DirectRouteCachePolicyInput = CACHE_SNAP_S,
-): DirectRouteCachePolicy {
-	return typeof input === "number"
-		? makeDirectRouteCachePolicy({ ttlSeconds: input })
-		: makeDirectRouteCachePolicy(input)
-}
 
 function normalizeDirectCacheValue(value: unknown, snapWindowSeconds: number, parentKey?: string): unknown {
 	if (value == null) return value
@@ -1081,22 +1056,6 @@ function extractTracesOpts(filters: Record<string, unknown> | undefined) {
 	}
 }
 
-function extractLogsOpts(filters: Record<string, unknown> | undefined) {
-	return {
-		serviceName: filters?.serviceName as string | undefined,
-		severity: filters?.severity as string | undefined,
-		minSeverity: filters?.minSeverity as number | undefined,
-		traceId: filters?.traceId as string | undefined,
-		spanId: filters?.spanId as string | undefined,
-		search: filters?.search as string | undefined,
-		environments: filters?.environments as string[] | undefined,
-		namespaces: filters?.namespaces as string[] | undefined,
-		matchModes: logsMatchModes(filters),
-		attributeFilters: filters?.attributeFilters as AttrFilterArray | undefined,
-		resourceAttributeFilters: filters?.resourceAttributeFilters as AttrFilterArray | undefined,
-	}
-}
-
 /**
  * Map TracesFilters to the flat opts format expected by tracesFacetsQuery / tracesDurationStatsQuery.
  * TracesFilters stores http filters as attributeFilters entries; facets opts want them as top-level fields.
@@ -1139,21 +1098,6 @@ function extractTracesFacetsOpts(filters: Record<string, unknown> | undefined): 
 		resourceFilterValue: customRes?.value,
 		resourceFilterValueMatchMode: customRes?.mode === "contains" ? "contains" : undefined,
 	}
-}
-
-/**
- * Combine the deployment-env and service-namespace `contains` match modes into
- * the single `matchModes` object the logs queries expect.
- */
-function logsMatchModes(
-	filters: Record<string, unknown> | undefined,
-): { deploymentEnv?: "contains"; serviceNamespace?: "contains" } | undefined {
-	const deploymentEnv = filters?.deploymentEnvMatchMode as "contains" | undefined
-	const serviceNamespace = filters?.namespaceMatchMode as "contains" | undefined
-	return Match.value([deploymentEnv, serviceNamespace] as const).pipe(
-		Match.when([undefined, undefined], () => undefined),
-		Match.orElse(([deploymentEnv, serviceNamespace]) => ({ deploymentEnv, serviceNamespace })),
-	)
 }
 
 function extractTracesDurationStatsOpts(
@@ -1329,27 +1273,14 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		}
 
 		if (request.query.source === "logs" && request.query.kind === "timeseries") {
-			const logsQuery = request.query
-			const opts = extractLogsOpts(request.query.filters as Record<string, unknown> | undefined)
-			const rows = yield* executeCHQuery(
-				warehouse,
-				tenant,
-				(capabilities) =>
-					CH.logsTimeseriesQuery({
-						...opts,
-						attributeIndexMode: attributeIndexMode(capabilities, "logs"),
-						bodySearchMode: logBodySearchMode(capabilities),
-						groupBy: logsQuery.groupBy as string[] | undefined,
-						bucketSeconds: bucketSeconds!,
-						seriesLimit: logsQuery.seriesLimit,
-					}),
-				{
-					orgId: tenant.orgId,
-					startTime: request.startTime,
-					endTime: request.endTime,
-					bucketSeconds: bucketSeconds!,
-				},
-				"logsTimeseries",
+			const rows = yield* annotateWarehouseError(
+				runQueryDefinition(
+					warehouse,
+					logsTimeseries,
+					tenant,
+					toLogsTimeseriesInput(request.startTime, request.endTime, request.query, bucketSeconds!),
+				),
+				logsTimeseries.id,
 			)
 
 			return new QueryEngineExecuteResponse({
@@ -1530,7 +1461,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 		if (request.query.source === "logs" && request.query.kind === "breakdown") {
 			const logsQuery = request.query
-			const opts = extractLogsOpts(request.query.filters as Record<string, unknown> | undefined)
+			const opts = logsQueryOptions(request.query.filters)
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
@@ -1778,18 +1709,19 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			}
 
 			if (request.query.source === "logs") {
-				const filters = request.query.filters as Record<string, unknown> | undefined
+				const filters = request.query.filters
+				const options = logsQueryOptions(filters)
 				const facet = request.query.facet
 				const rows = yield* executeCHUnionQuery(
 					warehouse,
 					tenant,
 					CH.logsFacetsQuery(
 						{
-							serviceName: filters?.serviceName as string | undefined,
-							severity: filters?.severity as string | undefined,
-							environments: filters?.environments as readonly string[] | undefined,
-							namespaces: filters?.namespaces as readonly string[] | undefined,
-							matchModes: logsMatchModes(filters),
+							serviceName: options.serviceName,
+							severity: options.severity,
+							environments: options.environments,
+							namespaces: options.namespaces,
+							matchModes: options.matchModes,
 						},
 						facet,
 					),
@@ -1943,23 +1875,14 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 		// ---- Count ----
 		if (request.query.source === "logs" && request.query.kind === "count") {
-			const filters = request.query.filters as Record<string, unknown> | undefined
-			const opts = extractLogsOpts(filters)
-			const rows = yield* executeCHQuery(
-				warehouse,
-				tenant,
-				(capabilities) =>
-					CH.logsCountQuery({
-						...opts,
-						attributeIndexMode: attributeIndexMode(capabilities, "logs"),
-						bodySearchMode: logBodySearchMode(capabilities),
-					}),
-				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
-				"logsCount",
-				"discovery",
-				// Body search reads the wide Body column for the ILIKE filter —
-				// cap the read block size (see WarehouseQuerySettings.maxBlockSize).
-				filters?.search ? LOGS_BODY_SEARCH_SETTINGS : undefined,
+			const rows = yield* annotateWarehouseError(
+				runQueryDefinition(
+					warehouse,
+					logsCount,
+					tenant,
+					toLogsCountInput(request.startTime, request.endTime, request.query),
+				),
+				logsCount.id,
 			)
 			return new QueryEngineExecuteResponse({
 				result: {
@@ -2126,25 +2049,14 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 			})
 		}
 	} else if (query.source === "logs") {
-		const opts = extractLogsOpts(query.filters as Record<string, unknown> | undefined)
-		const rows = yield* executeCHQuery(
-			warehouse,
-			tenant,
-			(capabilities) =>
-				CH.logsTimeseriesQuery({
-					...opts,
-					attributeIndexMode: attributeIndexMode(capabilities, "logs"),
-					bodySearchMode: logBodySearchMode(capabilities),
-					groupBy: query.groupBy as readonly string[] | undefined,
-					bucketSeconds,
-				}),
-			{
-				orgId: tenant.orgId,
-				startTime: request.startTime,
-				endTime: request.endTime,
-				bucketSeconds,
-			},
-			"logsAlertEval",
+		const rows = yield* annotateWarehouseError(
+			runQueryDefinition(
+				warehouse,
+				logsTimeseries,
+				tenant,
+				toLogsTimeseriesInput(request.startTime, request.endTime, query, bucketSeconds),
+			),
+			logsTimeseries.id,
 		)
 		for (const row of rows) {
 			const sampleCount = Number(row.count ?? 0)

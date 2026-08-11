@@ -43,18 +43,20 @@ import { attributeIndexMode, logBodySearchMode } from "../capabilities"
 import * as CH from "../ch"
 import { LOGS_BODY_SEARCH_SETTINGS } from "../profiles"
 import { makeDirectRouteCachePolicy } from "../runtime/query-engine"
-import { defineQuery } from "./query-def"
+import { defineQuery } from "./query-definition"
+
+export { logsCount, logsTimeseries } from "./logs"
 
 /**
  * The declarative warehouse query registry.
  *
  * Each entry replaces the profile/context/error-label/cache wiring that used to
  * be repeated inline in every handler in `apps/api/src/routes/v1/query-engine.http.ts`.
- * Handlers keep their own row-to-response mapping; see `QueryDef` for why
+ * Handlers keep their own row-to-response mapping; see `QueryDefinition` for why
  * decoding is deliberately out of scope here.
  *
  * Migration is incremental and the two surfaces coexist: a handler either takes
- * a `QueryDef` through `runQuery` or keeps its inline wiring. Nothing breaks
+ * a `QueryDefinition` through `runQuery` or keeps its inline wiring. Nothing breaks
  * while entries are added.
  *
  * ## Cache policy

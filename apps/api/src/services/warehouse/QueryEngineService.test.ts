@@ -11,6 +11,8 @@ import {
 	type TimeseriesPoint,
 } from "@maple/query-engine"
 import { makeQueryEngineEvaluate, makeQueryEngineExecute } from "@maple/query-engine/runtime"
+import type { SqlQueryOptions } from "@maple/query-engine/profiles"
+import type { CompiledQuery } from "@maple/query-engine/ch"
 import type { TenantContext } from "@/services/auth/AuthService"
 
 const assert: typeof nodeAssert & {
@@ -103,6 +105,101 @@ const timeseriesData = (result: QueryEngineResult): ReadonlyArray<TimeseriesPoin
 describe("makeQueryEngineExecute", () => {
 	const getFailure = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
 		Option.getOrUndefined(Exit.findErrorOption(exit))
+
+	it.effect("executes log timeseries through its canonical definition", () =>
+		Effect.gen(function* () {
+			let context: string | undefined
+			let profile: string | undefined
+			let receivedSql = ""
+			const execute = makeQueryEngineExecute(
+				makeTinybirdStub({
+					compiledQueryWithCapabilities: <Output>(
+						_tenant: unknown,
+						compile: (
+							capabilities: ReturnType<typeof baselineWarehouseCapabilities>,
+						) => CompiledQuery<Output>,
+						options?: SqlQueryOptions,
+					) => {
+						const compiled = compile(baselineWarehouseCapabilities())
+						receivedSql = compiled.sql
+						context = options?.context
+						profile = options?.profile
+						return compiled
+							.decodeRows([{ bucket: "2026-01-01 00:00:00", groupName: "checkout", count: 7 }])
+							.pipe(Effect.orDie)
+					},
+				}),
+			)
+
+			const response = yield* execute(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				query: {
+					kind: "timeseries",
+					source: "logs",
+					metric: "count",
+					groupBy: ["service"],
+					bucketSeconds: 300,
+				},
+			})
+
+			assert.strictEqual(context, "logsTimeseries")
+			assert.strictEqual(profile, "aggregation")
+			assert.include(receivedSql, "OrgId = 'org_test'")
+			assert.deepStrictEqual(response.result, {
+				kind: "timeseries",
+				source: "logs",
+				data: [
+					{ bucket: "2026-01-01T00:00:00.000Z", series: { checkout: 7 } },
+					{ bucket: "2026-01-01T00:05:00.000Z", series: {} },
+				],
+			})
+		}),
+	)
+
+	it.effect("keeps log count execution policy on the definition", () =>
+		Effect.gen(function* () {
+			let context: string | undefined
+			let profile: string | undefined
+			let maxBlockSize: number | undefined
+			const execute = makeQueryEngineExecute(
+				makeTinybirdStub({
+					compiledQueryWithCapabilities: <Output>(
+						_tenant: unknown,
+						compile: (
+							capabilities: ReturnType<typeof baselineWarehouseCapabilities>,
+						) => CompiledQuery<Output>,
+						options?: SqlQueryOptions,
+					) => {
+						const compiled = compile(baselineWarehouseCapabilities())
+						context = options?.context
+						profile = options?.profile
+						maxBlockSize = options?.settings?.maxBlockSize
+						return compiled.decodeRows([{ total: 42 }]).pipe(Effect.orDie)
+					},
+				}),
+			)
+
+			const response = yield* execute(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				query: {
+					kind: "count",
+					source: "logs",
+					filters: { search: "timeout" },
+				},
+			})
+
+			assert.strictEqual(context, "logsCount")
+			assert.strictEqual(profile, "discovery")
+			assert.strictEqual(maxBlockSize, 512)
+			assert.deepStrictEqual(response.result, {
+				kind: "count",
+				source: "logs",
+				data: { total: 42 },
+			})
+		}),
+	)
 
 	it.effect("fills missing buckets while preserving existing traces values", () =>
 		Effect.gen(function* () {
