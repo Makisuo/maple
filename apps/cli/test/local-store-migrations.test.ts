@@ -12,6 +12,9 @@ import {
 	LOCAL_SCHEMA_V3,
 	LOCAL_SCHEMA_V3_MANIFEST,
 	LOCAL_SCHEMA_V4,
+	LOCAL_SCHEMA_V4_MANIFEST,
+	LOCAL_SCHEMA_V5,
+	LOCAL_SCHEMA_V5_MANIFEST,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -53,16 +56,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v4 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("75ac856927d88d56")
-		expect(SCHEMA_DIGEST).toBe("75ac856927d88d56518f12c68407a8f2a199d000b6eeb8576f9c97000138f5a4")
+	it("matches the generated v5 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("b3059dd34e85858f")
+		expect(SCHEMA_DIGEST).toBe("b3059dd34e85858f8893cd7fc88d9c28f489992c39fb2a334f8caf1747a69c21")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(4)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V4)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(5)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V5)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -97,8 +100,36 @@ describe("current local schema identity", () => {
 		const v3Names = new Set(LOCAL_SCHEMA_V3_MANIFEST.objects.map((object) => object.name))
 		expect(v3Names.has("web_events")).toBe(false)
 		expect(
-			LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name).filter((name) => !v3Names.has(name)),
+			LOCAL_SCHEMA_V4_MANIFEST.objects
+				.map((object) => object.name)
+				.filter((name) => !v3Names.has(name)),
 		).toEqual(["web_events", "web_events_mv"])
+
+		// v5 adds no objects at all — it is five trailing defaulted columns and two
+		// skip indexes on traces. Asserted as a column/index delta against the
+		// frozen v4 manifest so a stray table or a rewritten column can't ride along.
+		const v4Names = new Set(LOCAL_SCHEMA_V4_MANIFEST.objects.map((object) => object.name))
+		expect(
+			LOCAL_SCHEMA_V5_MANIFEST.objects.map((object) => object.name).filter((name) => !v4Names.has(name)),
+		).toEqual([])
+		const v4Traces = LOCAL_SCHEMA_V4_MANIFEST.objects.find((object) => object.name === "traces")
+		const traces = LOCAL_SCHEMA_V5_MANIFEST.objects.find((object) => object.name === "traces")
+		const v4TraceColumns = new Set(v4Traces?.columns.map((column) => column.name))
+		expect(
+			traces?.columns.map((column) => column.name).filter((name) => !v4TraceColumns.has(name)),
+		).toEqual(["AiVendor", "AiSessionKeyState", "AiSessionKeyHash", "AiRulesVersion", "AiRollupHour"])
+		// Every new column is default-computed: that is what keeps them out of the
+		// generated ingest INSERT column list until the classifier stage lands.
+		expect(
+			traces?.columns
+				.filter((column) => column.name.startsWith("Ai"))
+				.every((column) => column.defaultKind === "DEFAULT"),
+		).toBe(true)
+		expect(traces?.columns.find((column) => column.name === "AiRollupHour")?.type).toBe("DateTime('UTC')")
+		expect(traces?.indexes.filter((index) => !(v4Traces?.indexes ?? []).includes(index))).toEqual([
+			"idx_ai_vendor",
+			"idx_scope_name",
+		])
 	})
 })
 
@@ -110,12 +141,14 @@ describe("local migration registry", () => {
 			"local-0001-to-0002-error-rollup",
 			"local-0002-to-0003-service-map-ingest-bridge",
 			"local-0003-to-0004-web-events",
+			"local-0004-to-0005-ai-classification-columns",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
 		expect(chain[1]?.to).toEqual(LOCAL_SCHEMA_V2)
 		expect(chain[2]?.to).toEqual(LOCAL_SCHEMA_V3)
 		expect(chain[3]?.to).toEqual(LOCAL_SCHEMA_V4)
+		expect(chain[4]?.to).toEqual(LOCAL_SCHEMA_V5)
 		expect(typeof chain[0]?.apply).toBe("function")
 	})
 
@@ -137,12 +170,12 @@ describe("local migration registry", () => {
 				maple: "dev",
 				createdAt: "2026-01-01T00:00:00.000Z",
 				createdByMaple: "dev",
-				schemaVersion: 4,
+				schemaVersion: 5,
 				schemaDigest: SCHEMA_DIGEST,
 				schema: SCHEMA_FINGERPRINT,
 				activation: "active",
 			}),
-		).toMatchObject({ version: 4, fingerprint: SCHEMA_FINGERPRINT, digest: SCHEMA_DIGEST })
+		).toMatchObject({ version: 5, fingerprint: SCHEMA_FINGERPRINT, digest: SCHEMA_DIGEST })
 	})
 
 	it("rejects unknown, future, downgrade, and ambiguous paths", () => {
@@ -151,7 +184,7 @@ describe("local migration registry", () => {
 		).toThrow(/no registered/)
 		expect(() =>
 			resolveMigrationChain(
-				{ ...CURRENT_LOCAL_SCHEMA, version: 5, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 6, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)

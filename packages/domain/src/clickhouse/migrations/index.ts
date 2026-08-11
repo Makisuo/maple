@@ -13,6 +13,7 @@ import { migration_0011_session_analytics_columns } from "./0011_session_analyti
 import { migration_0012_session_event_attribute_keys } from "./0012_session_event_attribute_keys"
 import { migration_0013_service_map_ingest_bridge } from "./0013_service_map_ingest_bridge"
 import { migration_0014_web_events } from "./0014_web_events"
+import { migration_0015_ai_classification_columns } from "./0015_ai_classification_columns"
 
 /**
  * A migration statement is either a raw SQL string (structural DDL) or a
@@ -58,6 +59,7 @@ export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0012_session_event_attribute_keys,
 	migration_0013_service_map_ingest_bridge,
 	migration_0014_web_events,
+	migration_0015_ai_classification_columns,
 ] as const
 
 /** Highest migration `version` bundled — i.e. the schema level a fully-applied

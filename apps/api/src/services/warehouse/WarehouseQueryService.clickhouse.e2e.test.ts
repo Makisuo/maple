@@ -22,6 +22,9 @@ import {
 const enabled = clickhouseE2eEnabled
 const database = uniqueDatabase("maple_raw_sql_e2e")
 const orgId = "org_raw_sql_e2e"
+/** Isolates the migration-0015 default-readback probe row from the row-level
+ * fixtures the query tests assert on. */
+const aiProbeOrgId = "org_raw_sql_e2e_ai_probe"
 
 const assertSearchSchemaApplied = async (): Promise<void> => {
 	const migrationRevision = (
@@ -140,6 +143,88 @@ SETTINGS enable_full_text_index = 1`,
 	assert.include(explain, "idx_lower_body_text")
 }
 
+/**
+ * Migration 0015 is storage-only — nothing writes these columns yet — so the
+ * only thing that can prove it applied is the physical schema. Asserted against
+ * a real server because `set(0)` and `tokenbf_v1` are the kind of DDL a
+ * SQL-text test happily accepts and ClickHouse rejects.
+ */
+const assertAiClassificationSchemaApplied = async (): Promise<void> => {
+	const migrationRevision = (
+		await clickhouseExec(
+			"SELECT count() FROM _maple_schema_migrations WHERE version = 15 FORMAT TabSeparated",
+			database,
+		)
+	).trim()
+	assert.strictEqual(migrationRevision, "1", "AI classification migration 15 was not recorded")
+
+	const columns = (
+		await clickhouseExec(
+			`SELECT name, type, default_kind
+FROM system.columns
+WHERE database = currentDatabase()
+  AND table = 'traces'
+  AND name IN ('AiVendor', 'AiSessionKeyState', 'AiSessionKeyHash', 'AiRulesVersion', 'AiRollupHour')
+ORDER BY name
+FORMAT TabSeparated`,
+			database,
+		)
+	)
+		.trim()
+		// TabSeparated escapes single quotes, so `DateTime('UTC')` arrives as
+		// `DateTime(\'UTC\')`. Unescape rather than encode the escaping into the
+		// expectation, which would read as a typo.
+		.replaceAll("\\'", "'")
+	assert.strictEqual(
+		columns,
+		[
+			"AiRollupHour\tDateTime('UTC')\tDEFAULT",
+			"AiRulesVersion\tUInt32\tDEFAULT",
+			"AiSessionKeyHash\tUInt64\tDEFAULT",
+			"AiSessionKeyState\tUInt8\tDEFAULT",
+			"AiVendor\tLowCardinality(String)\tDEFAULT",
+		].join("\n"),
+		"AI classification columns are missing, mistyped, or not default-computed",
+	)
+
+	const indexes = (
+		await clickhouseExec(
+			`SELECT name, type_full, granularity
+FROM system.data_skipping_indices
+WHERE database = currentDatabase()
+  AND table = 'traces'
+  AND name IN ('idx_ai_vendor', 'idx_scope_name')
+ORDER BY name
+FORMAT TabSeparated`,
+			database,
+		)
+	).trim()
+	assert.strictEqual(
+		indexes,
+		["idx_ai_vendor\tset(0)\t4", "idx_scope_name\ttokenbf_v1(4096, 3, 0)\t4"].join("\n"),
+		"AI classification skip indexes are missing or declared with the wrong type",
+	)
+
+	// A writer that names none of the new columns — which is every writer until
+	// the classifier ships — must still land a readable row. Written under its own
+	// org so it stays out of the row-level fixtures the tests below assert on.
+	await clickhouseExec(
+		`INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, SpanName, SpanKind, ServiceName, Duration, StatusCode)
+		 VALUES ('${aiProbeOrgId}', now64(9), 'trace-ai-default', 'span-ai-default', 'GET /ai', 'Server', 'api', 1, 'Ok')`,
+		database,
+	)
+	const defaults = (
+		await clickhouseExec(
+			`SELECT AiVendor = '', AiSessionKeyState, AiSessionKeyHash, AiRulesVersion, toUnixTimestamp(AiRollupHour)
+FROM traces
+WHERE OrgId = '${aiProbeOrgId}' AND TraceId = 'trace-ai-default'
+FORMAT TabSeparated`,
+			database,
+		)
+	).trim()
+	assert.strictEqual(defaults, "1\t0\t0\t0\t0", "AI classification defaults do not read back")
+}
+
 const trackedDbs: TestDb[] = []
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asUserId = Schema.decodeUnknownSync(UserId)
@@ -196,6 +281,7 @@ describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => 
 		await clickhouseExec(`CREATE DATABASE ${database}`)
 		await applyRealMigrations(database)
 		await assertSearchSchemaApplied()
+		await assertAiClassificationSchemaApplied()
 		await clickhouseExec(
 			`INSERT INTO traces
 			 (OrgId, Timestamp, TraceId, SpanId, SpanName, SpanKind, ServiceName, Duration, StatusCode)

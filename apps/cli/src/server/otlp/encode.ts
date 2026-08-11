@@ -200,6 +200,46 @@ export function formatTimestampNano(nanos: string | number | undefined): string 
 	return `${calendar}.${frac9}`
 }
 
+/** Seconds in the clamp window's past and future halves (write-side plan §3). */
+const ROLLUP_CLAMP_PAST_SECS = 7 * 24 * 60 * 60
+const ROLLUP_CLAMP_FUTURE_SECS = 24 * 60 * 60
+
+/**
+ * Port of Rust `rollup_hour_secs` + `format_datetime_secs` (see
+ * `apps/ingest/src/telemetry.rs`). `AiRollupHour` is `toStartOfHour(start time)`
+ * when the span's start is within `[receive − 7d, receive + 1d]`, else
+ * `toStartOfHour(receive time)`, rendered as `DateTime('UTC')`'s
+ * `YYYY-MM-DD HH:MM:SS`.
+ *
+ * Local mode has no classifier, so the other four AI columns stay at their
+ * "never examined" defaults — but this one is written for real on every span,
+ * exactly as the gateway does. It is `service_ai_vendors_hourly`'s partition
+ * key, so an unclamped client timestamp means unbounded partition creation and
+ * rows whose TTL never fires. Clamping at write time is also what keeps a later
+ * partition rebuild from relocating rows: an MV-side clamp would need `now()`,
+ * re-evaluated at rebuild time.
+ */
+export function formatRollupHour(
+	spanStartUnixNano: string | number | undefined,
+	receiveTimeSecs: number,
+): string {
+	let spanSecs = 0
+	try {
+		spanSecs = Number(BigInt(spanStartUnixNano ?? 0) / 1_000_000_000n)
+	} catch {
+		spanSecs = 0
+	}
+	const inWindow =
+		Number.isFinite(spanSecs) &&
+		spanSecs >= receiveTimeSecs - ROLLUP_CLAMP_PAST_SECS &&
+		spanSecs <= receiveTimeSecs + ROLLUP_CLAMP_FUTURE_SECS
+	const chosen = inWindow ? spanSecs : receiveTimeSecs
+	const hour = chosen - (((chosen % 3600) + 3600) % 3600)
+	const date = new Date(hour * 1000)
+	if (Number.isNaN(date.getTime())) return "1970-01-01 00:00:00"
+	return date.toISOString().slice(0, 19).replace("T", " ")
+}
+
 /**
  * Port of Rust `any_value_string`: coerce an OTLP `AnyValue` to a string
  * exactly as the Rust encoder does.
@@ -540,6 +580,9 @@ interface Span {
 export function encodeTraces(req: unknown): EncodedBatch[] {
 	const request = (req ?? {}) as TraceRequest
 	const rows: Record<string, unknown>[] = []
+	// One receive time for the whole batch, matching the gateway: two spans in
+	// the same request must not be able to land on different clamp anchors.
+	const receiveTimeSecs = Math.floor(Date.now() / 1000)
 
 	for (const resourceSpans of request.resourceSpans ?? []) {
 		const resourceAttrs = attrMap(resourceSpans.resource?.attributes)
@@ -586,6 +629,17 @@ export function encodeTraces(req: unknown): EncodedBatch[] {
 					links_span_id: links.map((link, i) => spanIdHex(link.spanId, `span.links[${i}].spanId`)),
 					links_trace_state: links.map((link) => link.traceState ?? ""),
 					links_attributes: links.map((link) => attrMap(link.attributes)),
+					// Local mode runs no classifier, so these four stay at the
+					// "never examined" defaults the ClickHouse columns declare:
+					// AiVendor '' = not classified as AI, AiRulesVersion 0 = never
+					// looked at. `service_ai_vendors_hourly` filters on AiVendor != '',
+					// so a local store's rollup stays empty rather than reporting a
+					// confident zero — which is the honest answer here.
+					ai_vendor: "",
+					ai_session_key_state: 0,
+					ai_session_key_hash: 0,
+					ai_rules_version: 0,
+					ai_rollup_hour: formatRollupHour(span.startTimeUnixNano, receiveTimeSecs),
 				})
 			}
 		}

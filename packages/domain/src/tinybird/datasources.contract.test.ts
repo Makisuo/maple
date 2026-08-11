@@ -69,6 +69,13 @@ const EXPECTED_TOPLEVEL_KEYS = {
 		"links_span_id",
 		"links_trace_state",
 		"links_attributes",
+		// AI classification, emitted on every span by the ingest row builder.
+		// `ai_rollup_hour` is written whether or not classification is enabled.
+		"ai_vendor",
+		"ai_session_key_state",
+		"ai_session_key_hash",
+		"ai_rules_version",
+		"ai_rollup_hour",
 	]),
 	metrics_sum: new Set([...metricCommonKeys(), "value", "aggregation_temporality", "is_monotonic"]),
 	metrics_gauge: new Set([...metricCommonKeys(), "value"]),
@@ -132,7 +139,7 @@ function topLevelKey(jsonPath: string): string | null {
 
 function emittedTopLevelKeys(datasource: DatasourceDefinition): Set<string> {
 	const keys = new Set<string>()
-	for (const column of Object.values(datasource.options.schema)) {
+	for (const [name, column] of Object.entries(datasource.options.schema)) {
 		const defaultExpression = (
 			column as {
 				readonly type?: {
@@ -140,9 +147,18 @@ function emittedTopLevelKeys(datasource: DatasourceDefinition): Set<string> {
 				}
 			}
 		).type?.modifiers?.defaultExpression
-		if (defaultExpression !== undefined) continue
 		const path = getColumnJsonPath(column)
 		if (!path) continue
+		// The same rule `scripts/generate-clickhouse-insert-mappings.ts` applies:
+		// a column is treated as warehouse-computed — and so not something the
+		// gateway sends — only when it has a DEFAULT *expression* **and** an
+		// identity JSONPath (`$.<Column>`), which is what a column with no
+		// declared path falls back to. A DEFAULT expression paired with an
+		// explicitly declared path (`AiRollupHour` → `$.ai_rollup_hour`) is a
+		// column the gateway does emit, and keeps its DEFAULT only for rows
+		// written before it existed.
+		const isComputedIdentityPath = path === `$.${name}` || path === `$.${name}[:]`
+		if (defaultExpression !== undefined && isComputedIdentityPath) continue
 		const top = topLevelKey(path)
 		if (top) keys.add(top)
 	}
