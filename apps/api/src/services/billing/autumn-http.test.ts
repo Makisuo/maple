@@ -53,6 +53,11 @@ const withFetch = async (
 	}) as typeof globalThis.fetch
 
 	const result = await Effect.runPromise(provideFetch(run(makeAutumnClient(KEY, API_URL)), fetch))
+	// Pinned here rather than per-route so every call in this file asserts it:
+	// `autumn-js`'s env schema DEFAULTED `AUTUMN_X_API_VERSION` to "2.3.0"
+	// (`z._default(z.string(), "2.3.0")`), so production has always sent this
+	// header on all six routes.
+	assert.strictEqual(captured?.headers.get("x-api-version"), "2.3.0")
 	return { captured, result }
 }
 
@@ -67,8 +72,6 @@ describe("makeAutumnClient request construction", () => {
 		assert.strictEqual(captured?.headers.get("authorization"), `Bearer ${KEY}`)
 		assert.strictEqual(captured?.headers.get("content-type"), "application/json")
 		assert.strictEqual(captured?.headers.get("accept"), "application/json")
-		// The SDK sent no x-api-version on the RPC routes; neither do we.
-		assert.isNull(captured?.headers.get("x-api-version") ?? null)
 		assert.deepStrictEqual(captured?.body, {
 			customer_id: ORG,
 			expand: ["subscriptions.plan", "balances.feature"],
@@ -371,6 +374,32 @@ describe("makeAutumnClient response handling", () => {
 		assert.strictEqual(error.message, "Billing request failed (502)")
 	})
 
+	it("fails an empty 2xx body rather than reporting a hollow success", async () => {
+		// The SDK's `JSON.parse("")` threw and the call surfaced as a synthetic
+		// 500 → 502. A `{}` here would decode as a valid all-optional
+		// `AttachResult` — a 200 checkout with no payment URL — and would poison
+		// the customer cache on the other routes.
+		const fetch = (async () => new Response("", { status: 200 })) as typeof globalThis.fetch
+
+		const error = await Effect.runPromise(
+			Effect.flip(
+				provideFetch(makeAutumnClient(KEY, API_URL).attach(ORG, { planId: "startup" }), fetch),
+			),
+		)
+		assert.strictEqual(error._tag, "@maple/http/errors/BillingUpstreamError")
+		assert.include(error.message, "attach")
+		assert.include(error.message, "empty body")
+	})
+
+	it("keeps 204 as an explicit null body", async () => {
+		const fetch = (async () => new Response(null, { status: 204 })) as typeof globalThis.fetch
+
+		const result = await Effect.runPromise(
+			provideFetch(makeAutumnClient(KEY, API_URL).attach(ORG, { planId: "startup" }), fetch),
+		)
+		assert.deepStrictEqual(result, { statusCode: 204, response: null })
+	})
+
 	it("maps a transport failure to BillingUpstreamError, not a defect or a fake status", async () => {
 		// The SDK turned a rejected fetch into a synthetic `555 Network Error`
 		// response; a typed failure is strictly better.
@@ -405,10 +434,41 @@ describe("camelizeKeys", () => {
 		assert.strictEqual(camelizeKeys(7), 7)
 	})
 
-	it("protects record-keyed containers one level down, but not deeper", () => {
+	it("protects a model record's own keys, then camelizes the model under them", () => {
 		assert.deepStrictEqual(
 			camelizeKeys({ balances: { browser_sessions: { next_reset_at: 1, breakdown: [] } } }),
 			{ balances: { browser_sessions: { nextResetAt: 1, breakdown: [] } } },
 		)
+	})
+
+	it("camelizes model arrays nested under a model record (the SDK remapped them)", () => {
+		assert.deepStrictEqual(
+			camelizeKeys({
+				balances: { ai_input_tokens: { breakdown: [{ plan_id: "startup", included_grant: 5 }] } },
+			}),
+			{ balances: { ai_input_tokens: { breakdown: [{ planId: "startup", includedGrant: 5 }] } } },
+		)
+	})
+
+	it("passes free-form metadata through verbatim at every depth", () => {
+		// `metadata` is `record(string, any)` in the SDK — it never descended, so
+		// renaming a user's own keys here would corrupt their data.
+		assert.deepStrictEqual(camelizeKeys({ metadata: { user_prefs: { some_flag: true } } }), {
+			metadata: { user_prefs: { some_flag: true } },
+		})
+	})
+
+	it("renames grouped_values itself but leaves both levels of keys under it", () => {
+		// `record(string, record(string, number))`: feature id outside, group label
+		// inside. Both are data; only the field's own key is schema.
+		assert.deepStrictEqual(camelizeKeys({ grouped_values: { ai_input_tokens: { some_group: 3 } } }), {
+			groupedValues: { ai_input_tokens: { some_group: 3 } },
+		})
+	})
+
+	it("leaves anything under values verbatim", () => {
+		assert.deepStrictEqual(camelizeKeys({ values: { ai_input_tokens: 12, some_group: [{ a_b: 1 }] } }), {
+			values: { ai_input_tokens: 12, some_group: [{ a_b: 1 }] },
+		})
 	})
 })

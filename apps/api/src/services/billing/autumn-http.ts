@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { BillingUpstreamError } from "@maple/domain/http"
 import type { UpdateBillingControlsRequest } from "@maple/domain/http"
@@ -15,9 +15,10 @@ import { AUTUMN_API_VERSION } from "./autumn-api"
  * eagerly-constructed Zod schemas it pulled into the worker's module graph.
  *
  * Wire fidelity is deliberate: the request bodies below (including the defaults
- * the SDK's outbound schemas injected) are byte-for-byte what production sends
- * today. The one intentional divergence is that an Autumn 5xx is no longer
- * rewritten into a synthetic 200 — see `callAutumn`.
+ * the SDK's outbound schemas injected) and the `x-api-version` pin are
+ * byte-for-byte what production sends today. The one intentional divergence is
+ * that an Autumn 5xx is no longer rewritten into a synthetic 200 — see
+ * `callAutumn`.
  */
 
 /** What `autumnHandler` used to return, declared locally now that it's gone. */
@@ -75,34 +76,45 @@ const ROUTE_PATHS: Record<AutumnRoute, string> = {
  * `.transform(remap(...))`). Every remap in that SDK was exactly snake→camel,
  * so one deep transform reproduces all of them.
  *
- * `RECORD_KEYED_FIELDS` names fields whose own keys are DATA, not schema —
- * feature ids like `browser_sessions` / `ai_input_tokens`, and free-form
- * metadata. Camelizing those would silently break every feature lookup, so we
- * descend into their values without touching their keys (which is what the SDK
- * did too: `balances` is `record(string, Balance)`, and `Balance` is remapped
- * while its key is not).
+ * Some fields carry keys that are DATA, not schema — feature ids like
+ * `browser_sessions` / `ai_input_tokens`, group labels, free-form metadata.
+ * Camelizing those would silently break every feature lookup, so they are held
+ * back. The SDK's inbound Zod schemas draw the line in two distinct places, and
+ * so do we (the field's OWN key is always renamed either way — the SDK remapped
+ * `grouped_values` → `groupedValues` while leaving everything under it alone):
+ *
+ * (a) `MODEL_RECORD_FIELDS` — `record(string, <remapped model>)`. The record's
+ *     keys are data, its values are models the SDK remapped, so we keep the keys
+ *     and camelize exactly one level down. `balances` is
+ *     `record(string, Balance)` and `Balance` remaps `feature_id` → `featureId`;
+ *     `flags` is `record(string, Flags)`; `total` (events.aggregate) is
+ *     `record(string, { count, sum })`.
+ *
+ * (b) `OPAQUE_FIELDS` — records of free-form values, scalars, or further
+ *     records-of-data. The SDK never descended into these at all, so the whole
+ *     subtree passes through verbatim. `metadata` and `properties` are
+ *     `record(string, any)` (renaming keys inside them corrupts user data),
+ *     `grouped_values` is `record(string, record(string, number))` where BOTH
+ *     levels are data, `values` is `record(string, number)`, and `filter_by` is
+ *     `record(string, string)` (outbound-only in the SDK — listed for symmetry
+ *     so a future inbound echo can't be mangled).
  */
-const RECORD_KEYED_FIELDS = new Set([
-	"balances",
-	"flags",
-	"metadata",
-	"total",
-	"values",
-	"grouped_values",
-	"properties",
-	"filter_by",
-])
+const MODEL_RECORD_FIELDS = new Set(["balances", "flags", "total"])
+
+const OPAQUE_FIELDS = new Set(["metadata", "properties", "grouped_values", "values", "filter_by"])
 
 const toCamel = (key: string): string => key.replace(/_([a-z0-9])/g, (_, char: string) => char.toUpperCase())
 
 export const camelizeKeys = (value: unknown, renameOwnKeys = true): unknown => {
 	// An array has no own keys to protect, so its items rename normally even when
-	// it sits under a record-keyed field.
+	// it sits under a model-record field.
 	if (Array.isArray(value)) return value.map((item) => camelizeKeys(item, true))
 	if (value === null || typeof value !== "object") return value
 	const out: Record<string, unknown> = {}
 	for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-		out[renameOwnKeys ? toCamel(key) : key] = camelizeKeys(child, !RECORD_KEYED_FIELDS.has(key))
+		out[renameOwnKeys ? toCamel(key) : key] = OPAQUE_FIELDS.has(key)
+			? child
+			: camelizeKeys(child, !MODEL_RECORD_FIELDS.has(key))
 	}
 	return out
 }
@@ -112,7 +124,12 @@ const toBillingUpstreamError = (error: unknown) =>
 		message: error instanceof Error ? error.message : String(error),
 	})
 
-const decodeJson = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))
+const JsonBody = Schema.fromJsonString(Schema.Unknown)
+
+const decodeJson = Schema.decodeEffect(JsonBody)
+
+/** Total, synchronous JSON parse: `None` where `JSON.parse` would have thrown. */
+const parseJsonOption = Schema.decodeUnknownOption(JsonBody)
 
 const trimTrailingSlash = (url: string) => url.replace(/\/+$/, "")
 
@@ -129,12 +146,7 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
  * `Billing request failed (<status>)`.
  */
 const errorResponse = (statusCode: number, text: string): Record<string, unknown> => {
-	let parsed: Record<string, unknown> | undefined
-	try {
-		parsed = asRecord(JSON.parse(text))
-	} catch {
-		parsed = undefined
-	}
+	const parsed = asRecord(Option.getOrUndefined(parseJsonOption(text)))
 	const raw = parsed?.message ?? parsed?.error
 	const code = parsed?.code
 	return {
@@ -156,11 +168,15 @@ const callAutumn = (
 				const client = yield* HttpClient.HttpClient
 				const request = yield* HttpClientRequest.bodyJson(
 					HttpClientRequest.post(`${trimTrailingSlash(apiUrl)}${ROUTE_PATHS[route]}`, {
-						// No `x-api-version`: the SDK never sent one on these routes
-						// (the header is only populated from AUTUMN_X_API_VERSION, which
-						// is unset), and pinning a version here would be an untested
-						// change to the response shapes we decode.
-						headers: { Authorization: `Bearer ${secretKey}` },
+						// The SDK put `x-api-version` on every one of these routes: its
+						// env schema DEFAULTED `AUTUMN_X_API_VERSION` to "2.3.0"
+						// (`z._default(z.string(), "2.3.0")`), so an unset variable still
+						// pinned the version. Production has been sending 2.3.0 all along
+						// — dropping the header would be the untested change, not keeping it.
+						headers: {
+							Authorization: `Bearer ${secretKey}`,
+							"x-api-version": AUTUMN_API_VERSION,
+						},
 						acceptJson: true,
 					}),
 					body,
@@ -174,10 +190,18 @@ const callAutumn = (
 				if (response.status === 204) return { statusCode: 204, response: null }
 
 				if (response.status >= 200 && response.status < 300) {
-					const json =
-						text.length === 0
-							? {}
-							: yield* decodeJson(text).pipe(Effect.mapError(toBillingUpstreamError))
+					// An empty 2xx body is a failure, not an empty success. The SDK's
+					// `JSON.parse("")` threw and the call surfaced as a synthetic 500,
+					// which every caller's `ensureOk` turned into a 502. Returning `{}`
+					// would instead poison the 5s `getOrCreateCustomer` cache entry and
+					// let `attach` answer 200 with no `paymentUrl` (`AttachResult` is
+					// all-optional, so `{}` decodes cleanly).
+					if (text.length === 0) {
+						return yield* new BillingUpstreamError({
+							message: `Autumn returned an empty body for ${route} (HTTP ${response.status})`,
+						})
+					}
+					const json = yield* decodeJson(text).pipe(Effect.mapError(toBillingUpstreamError))
 					return { statusCode: response.status, response: camelizeKeys(json) }
 				}
 
@@ -288,9 +312,9 @@ export const makeAutumnClient = (secretKey: string | undefined, apiUrl: string):
 
 /**
  * Customer billing controls live on the canonical REST surface — `autumnHandler`
- * never exposed an RPC route for them, so this call was always hand-rolled. It
- * keeps its explicit `x-api-version` pin (the RPC-equivalent routes above send
- * none, matching what the SDK did).
+ * never exposed an RPC route for them, so this call was always hand-rolled. Its
+ * explicit `x-api-version` pin now matches the routes above, which send the same
+ * version the SDK defaulted to.
  */
 export const updateCustomerBillingControls = (
 	secretKey: string | undefined,
@@ -330,9 +354,15 @@ export const updateCustomerBillingControls = (
 				).pipe(Effect.mapError(toBillingUpstreamError))
 				const response = yield* client.execute(request).pipe(Effect.mapError(toBillingUpstreamError))
 				const text = yield* response.text.pipe(Effect.mapError(toBillingUpstreamError))
+				yield* Effect.annotateCurrentSpan({ "http.response.status_code": response.status })
 				const responseBody =
 					text.length === 0
 						? {}
 						: yield* decodeJson(text).pipe(Effect.mapError(toBillingUpstreamError))
 				return { statusCode: response.status, response: responseBody } satisfies AutumnResult
-			}).pipe(Effect.provide(FetchHttpClient.layer))
+			}).pipe(
+				Effect.withSpan("autumn.request", {
+					attributes: { "autumn.route": "updateCustomerBillingControls" },
+				}),
+				Effect.provide(FetchHttpClient.layer),
+			)
