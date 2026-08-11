@@ -349,13 +349,25 @@ export class WarehouseQueryService extends Context.Service<
 			// already tenant-isolated).
 			const override = yield* orgClickHouseSettings.resolveRuntimeConfig(tenant.orgId).pipe(
 				Effect.catchTags({
+					// A Postgres read of org_clickhouse_settings failed — not a warehouse
+					// outage. The 503 contract (WarehouseUpstreamError) is kept for
+					// clients, but the span carries the original tag so trace inspection
+					// can tell DB failures from genuine warehouse failures. (Span
+					// attributes don't reach error_events_mv — the error page still shows
+					// the re-tagged error; this discriminator is for trace search.) The
+					// sibling Encryption/Validation branches below stay unannotated on
+					// purpose: their WarehouseConfigError re-tag is not misleading.
 					"@maple/http/errors/OrgClickHouseSettingsPersistenceError": (error) =>
-						Effect.fail(
-							new WarehouseUpstreamError({
-								pipeName: label,
-								message: error.message,
-								cause: error,
-							}),
+						Effect.annotateCurrentSpan("warehouse.error.origin", error._tag).pipe(
+							Effect.andThen(
+								Effect.fail(
+									new WarehouseUpstreamError({
+										pipeName: label,
+										message: error.message,
+										cause: error,
+									}),
+								),
+							),
 						),
 					"@maple/http/errors/OrgClickHouseSettingsEncryptionError": (error) =>
 						Effect.fail(
