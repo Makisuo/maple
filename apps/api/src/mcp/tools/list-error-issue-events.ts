@@ -9,7 +9,7 @@ import { Effect, Option, Schema } from "effect"
 import { formatTable } from "@/mcp/lib/format"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorIssueId } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
@@ -31,8 +31,8 @@ export function registerListErrorIssueEventsTool(server: McpToolRegistrar) {
 				)
 			}
 
-			const errors = yield* ErrorsService
-			const response = yield* errors
+			const workflow = yield* ErrorIssueWorkflowService
+			const response = yield* workflow
 				.listIssueEvents(tenant.orgId, decodedIssueId.value, { limit })
 				.pipe(
 					Effect.mapError(

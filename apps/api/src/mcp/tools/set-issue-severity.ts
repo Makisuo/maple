@@ -9,7 +9,7 @@ import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { resolveActorId } from "@/mcp/lib/resolve-actor"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorIssueId, IssueSeverity } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
@@ -50,8 +50,8 @@ export function registerSetIssueSeverityTool(server: McpToolRegistrar) {
 			// never clobber a human's manual override; interactive user sessions
 			// write the sticky manual override itself.
 			const source = tenant.actorId ? ("ai" as const) : ("manual" as const)
-			const errors = yield* ErrorsService
-			const issue = yield* errors
+			const workflow = yield* ErrorIssueWorkflowService
+			const issue = yield* workflow
 				.setSeverity(tenant.orgId, actorId, decodedIssueId.value, target, { note, source })
 				.pipe(
 					Effect.mapError(

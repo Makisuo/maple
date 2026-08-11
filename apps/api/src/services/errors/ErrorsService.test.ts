@@ -40,6 +40,7 @@ import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglit
 import type { SqlQueryOptions, WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { ErrorActorsService } from "./ErrorActorsService"
+import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
 import { describeCause, ErrorsService, makePersistenceError } from "./ErrorsService"
 import { isErrorTickClaimLost, persistErrorTickWindow } from "./error-tick-persistence"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
@@ -195,6 +196,9 @@ const makeErrorsLayer = (
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const databaseLive = testDb.layer
 	const errorActorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
+	const errorIssueWorkflowLive = ErrorIssueWorkflowService.layer.pipe(
+		Layer.provide(Layer.mergeAll(databaseLive, errorActorsLive)),
+	)
 	// Held only so the service can hand an autonomous investigation turn its `submit_diagnosis`
 	// tool; no test here starts one. The real layer is cheap — it depends on nothing beyond Env
 	// and the database already wired above.
@@ -216,11 +220,14 @@ const makeErrorsLayer = (
 				Layer.succeed(EdgeCacheService, makeEdgeCacheService(edgeBackend ?? makeMemoryBackend())),
 				dispatcherStub,
 				errorActorsLive,
+				errorIssueWorkflowLive,
 				investigationsLive,
 			),
 		),
 	)
-	return Layer.mergeAll(errorsLive, errorActorsLive).pipe(Layer.provideMerge(databaseLive))
+	return Layer.mergeAll(errorsLive, errorActorsLive, errorIssueWorkflowLive).pipe(
+		Layer.provideMerge(databaseLive),
+	)
 }
 
 /**
@@ -263,6 +270,9 @@ const makeGatingLayer = (opts: {
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const databaseLive = testDb.layer
 	const errorActorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
+	const errorIssueWorkflowLive = ErrorIssueWorkflowService.layer.pipe(
+		Layer.provide(Layer.mergeAll(databaseLive, errorActorsLive)),
+	)
 	// Held only so the service can hand an autonomous investigation turn its `submit_diagnosis`
 	// tool; no test here starts one. The real layer is cheap — it depends on nothing beyond Env
 	// and the database already wired above.
@@ -318,6 +328,7 @@ const makeGatingLayer = (opts: {
 				Layer.succeed(EdgeCacheService, makeEdgeCacheService(makeMemoryBackend())),
 				dispatcherStub,
 				errorActorsLive,
+				errorIssueWorkflowLive,
 				investigationsLive,
 			),
 		),
@@ -384,15 +395,22 @@ const seedIngestKey = (orgId: string) =>
 	})
 
 describe("ErrorsService actor compatibility facade", () => {
-	it.effect("delegates every actor operation to ErrorActorsService", () =>
+	it.effect("delegates extracted actor and workflow operations by exact reference", () =>
 		Effect.gen(function* () {
 			const errors = yield* ErrorsService
 			const actors = yield* ErrorActorsService
+			const workflow = yield* ErrorIssueWorkflowService
 
 			expect(errors.registerAgent).toBe(actors.registerAgent)
 			expect(errors.listAgents).toBe(actors.listAgents)
 			expect(errors.lookupActor).toBe(actors.lookupActor)
 			expect(errors.ensureUserActor).toBe(actors.ensureUserActor)
+			expect(errors.heartbeatIssue).toBe(workflow.heartbeatIssue)
+			expect(errors.releaseIssue).toBe(workflow.releaseIssue)
+			expect(errors.assignIssue).toBe(workflow.assignIssue)
+			expect(errors.setSeverity).toBe(workflow.setSeverity)
+			expect(errors.commentOnIssue).toBe(workflow.commentOnIssue)
+			expect(errors.listIssueEvents).toBe(workflow.listIssueEvents)
 		}).pipe(Effect.provide(makeErrorsLayer())),
 	)
 })

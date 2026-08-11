@@ -3,7 +3,7 @@ import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { resolveActorId } from "@/mcp/lib/resolve-actor"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorIssueId } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
@@ -25,8 +25,8 @@ export function registerHeartbeatErrorIssueTool(server: McpToolRegistrar) {
 			}
 
 			const actorId = yield* resolveActorId(tenant)
-			const errors = yield* ErrorsService
-			const issue = yield* errors.heartbeatIssue(tenant.orgId, actorId, decodedIssueId.value).pipe(
+			const workflow = yield* ErrorIssueWorkflowService
+			const issue = yield* workflow.heartbeatIssue(tenant.orgId, actorId, decodedIssueId.value).pipe(
 				Effect.mapError(
 					(error) =>
 						new McpQueryError({

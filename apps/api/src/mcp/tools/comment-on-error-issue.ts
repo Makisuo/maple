@@ -9,7 +9,7 @@ import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { resolveActorId } from "@/mcp/lib/resolve-actor"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorIssueId } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
@@ -40,8 +40,8 @@ export function registerCommentOnErrorIssueTool(server: McpToolRegistrar) {
 				visibility === "public" ? "public" : visibility === "internal" ? "internal" : undefined
 
 			const actorId = yield* resolveActorId(tenant)
-			const errors = yield* ErrorsService
-			const event = yield* errors
+			const workflow = yield* ErrorIssueWorkflowService
+			const event = yield* workflow
 				.commentOnIssue(tenant.orgId, actorId, decodedIssueId.value, body, {
 					kind: kindTyped,
 					visibility: visibilityTyped,

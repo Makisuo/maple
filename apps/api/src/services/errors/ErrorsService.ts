@@ -2,16 +2,12 @@ import { randomUUID } from "node:crypto"
 import {
 	ActorDocument,
 	type ActorId,
-	ActorNotFoundError,
 	type AlertDestinationId,
 	ErrorIncidentDocument,
 	ErrorIncidentsListResponse,
 	ErrorIssueDetailResponse,
 	ErrorIssueDocument,
 	ErrorIssueEventId as ErrorIssueEventIdSchema,
-	ErrorIssueEventDocument,
-	ErrorIssueEventsResponse,
-	type ErrorIssueEventType,
 	type ErrorIssueId,
 	ErrorIssueLeaseConflictError,
 	ErrorIssueNotFoundError,
@@ -29,7 +25,6 @@ import {
 	EscalationSkipReason,
 	IssueEscalationAttemptDocument,
 	IssueEscalationAttemptsResponse,
-	IssueEscalationId as IssueEscalationIdSchema,
 	IssueEscalationPolicyDocument,
 	IssueEscalationPolicyRule,
 	type IssueEscalationPolicyUpsertRequest,
@@ -39,7 +34,6 @@ import {
 	type IssueSeverityListCursorFields,
 	type IssueKind,
 	type IssueSeverity,
-	type IssueSeveritySource,
 	type OrgId,
 	RoleName,
 	SpanId as SpanIdSchema,
@@ -47,7 +41,6 @@ import {
 	type UserId,
 	UserId as UserIdSchema,
 	type WorkflowState,
-	WORKFLOW_TRANSITIONS,
 	TERMINAL_WORKFLOW_STATES,
 } from "@maple/domain/http"
 import {
@@ -58,11 +51,8 @@ import {
 	type ErrorNotificationDeliveryRow,
 	errorIssues,
 	errorIssueEvents,
-	type ErrorIssueEventInsert,
-	type ErrorIssueEventRow,
 	type ErrorIssueRow,
 	alertDestinations,
-	alertIncidents,
 	errorIssueStates,
 	errorNotificationPolicies,
 	type ErrorNotificationPolicyRow,
@@ -97,15 +87,12 @@ import {
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { isErrorTickClaimLost, persistErrorTickWindow } from "@/services/errors/error-tick-persistence"
-import { escalationDedupeKey, escalationReasonFor } from "@/services/errors/issue-severity"
 import { SYSTEM_ERRORS_AGENT_NAME } from "@/services/auth/system-actors"
 import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database } from "@/platform/DatabaseLive"
 import { selectDistinctOrgIds } from "@/platform/distinct-org-ids"
-import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { Env } from "@/platform/Env"
-import { dateToMs, msToDate } from "@/platform/time"
 import { NotificationDispatcher, type NotificationRequest } from "@/services/alerts/NotificationDispatcher"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/cache"
@@ -114,6 +101,7 @@ import {
 	quarantineOnConfigClassCause,
 } from "@/services/warehouse/warehouse-org-quarantine"
 import { actorRowToDocument, ErrorActorsService, type ErrorActorsPublicShape } from "./ErrorActorsService"
+import { ErrorIssueWorkflowService, type ErrorIssueWorkflowPublicShape } from "./ErrorIssueWorkflowService"
 import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
 
 export { describeCause, makePersistenceError } from "./error-persistence"
@@ -125,7 +113,6 @@ const encodeIssueSeverityListCursor = (fields: IssueSeverityListCursorFields): s
 	`sev_${encodeIssueSeverityListCursorRaw(fields)}`
 const decodeErrorIncidentIdSync = Schema.decodeUnknownSync(ErrorIncidentDocument.fields.id)
 const decodeEventIdSync = Schema.decodeUnknownSync(ErrorIssueEventIdSchema)
-const decodeIssueEscalationIdSync = Schema.decodeUnknownSync(IssueEscalationIdSchema)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.firstSeenAt)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
@@ -134,7 +121,6 @@ const decodeSpanIdSync = Schema.decodeUnknownSync(SpanIdSchema)
 
 // Lenient decoders for JSON stored in jsonb columns. Decode failures fall back
 // to an empty/null value at each call site — stored blobs are best-effort.
-const decodeStoredJsonRecord = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))
 const decodeStoredJsonArray = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown))
 const ErrorNotificationOutboxPayload = Schema.Struct({
 	kind: Schema.Literals(["open", "resolve"]),
@@ -153,7 +139,6 @@ const DEFAULT_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000
 /** Fallback fingerprint-scan window for the issue list's env filter when the
  *  caller provides no time range (30d ≈ the issue-list retention horizon). */
 const ENV_FINGERPRINT_DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
-const DEFAULT_EVENTS_LIMIT = 100
 const AUTO_RESOLVE_MINUTES = 30
 const TICK_MINUTE_MS = 60_000
 /** Wait one full minute beyond bucket close so ordinary OTLP/exporter lag lands
@@ -228,7 +213,7 @@ const severitySortRank = (severity: IssueSeverity | null): number =>
 		Match.exhaustive,
 	)
 
-export interface ErrorsServiceShape extends ErrorActorsPublicShape {
+export interface ErrorsServiceShape extends ErrorActorsPublicShape, ErrorIssueWorkflowPublicShape {
 	readonly listIssues: (
 		orgId: OrgId,
 		opts: {
@@ -294,52 +279,6 @@ export interface ErrorsServiceShape extends ErrorActorsPublicShape {
 		| ErrorIssueLeaseConflictError
 		| ErrorIssueTransitionError
 	>
-	readonly heartbeatIssue: (
-		orgId: OrgId,
-		actorId: ActorId,
-		issueId: ErrorIssueId,
-	) => Effect.Effect<
-		ErrorIssueDocument,
-		ErrorPersistenceError | ErrorIssueNotFoundError | ErrorIssueLeaseConflictError
-	>
-	readonly releaseIssue: (
-		orgId: OrgId,
-		actorId: ActorId,
-		issueId: ErrorIssueId,
-		opts?: { readonly transitionTo?: WorkflowState; readonly note?: string },
-	) => Effect.Effect<
-		ErrorIssueDocument,
-		| ErrorPersistenceError
-		| ErrorIssueNotFoundError
-		| ErrorIssueLeaseConflictError
-		| ErrorIssueTransitionError
-	>
-	readonly assignIssue: (
-		orgId: OrgId,
-		byActorId: ActorId,
-		issueId: ErrorIssueId,
-		toActorId: ActorId | null,
-	) => Effect.Effect<
-		ErrorIssueDocument,
-		ErrorPersistenceError | ErrorIssueNotFoundError | ActorNotFoundError
-	>
-	readonly setSeverity: (
-		orgId: OrgId,
-		actorId: ActorId,
-		issueId: ErrorIssueId,
-		severity: IssueSeverity | null,
-		opts?: { readonly note?: string; readonly source?: "ai" | "manual" },
-	) => Effect.Effect<ErrorIssueDocument, ErrorPersistenceError | ErrorIssueNotFoundError>
-	readonly commentOnIssue: (
-		orgId: OrgId,
-		actorId: ActorId,
-		issueId: ErrorIssueId,
-		body: string,
-		opts?: {
-			readonly visibility?: "internal" | "public"
-			readonly kind?: "comment" | "agent_note"
-		},
-	) => Effect.Effect<ErrorIssueEventDocument, ErrorPersistenceError | ErrorIssueNotFoundError>
 	readonly proposeFix: (
 		orgId: OrgId,
 		actorId: ActorId,
@@ -353,11 +292,6 @@ export interface ErrorsServiceShape extends ErrorActorsPublicShape {
 		ErrorIssueDocument,
 		ErrorPersistenceError | ErrorIssueNotFoundError | ErrorIssueTransitionError
 	>
-	readonly listIssueEvents: (
-		orgId: OrgId,
-		issueId: ErrorIssueId,
-		opts?: { readonly limit?: number },
-	) => Effect.Effect<ErrorIssueEventsResponse, ErrorPersistenceError | ErrorIssueNotFoundError>
 	readonly recordAnomalyLinkEvent: (
 		orgId: OrgId,
 		issueId: ErrorIssueId,
@@ -424,10 +358,17 @@ export interface ErrorsServiceShape extends ErrorActorsPublicShape {
 const make: Effect.Effect<
 	ErrorsServiceShape,
 	never,
-	Database | WarehouseQueryService | EdgeCacheService | Env | NotificationDispatcher | ErrorActorsService
+	| Database
+	| WarehouseQueryService
+	| EdgeCacheService
+	| Env
+	| NotificationDispatcher
+	| ErrorActorsService
+	| ErrorIssueWorkflowService
 > = Effect.gen(function* () {
 	const database = yield* Database
 	const actorService = yield* ErrorActorsService
+	const workflow = yield* ErrorIssueWorkflowService
 	const warehouse = yield* WarehouseQueryService
 	const edgeCache = yield* EdgeCacheService
 	const env = yield* Env
@@ -443,7 +384,6 @@ const make: Effect.Effect<
 	const newErrorIssueId = () => decodeErrorIssueIdSync(randomUUID())
 	const newErrorIncidentId = () => decodeErrorIncidentIdSync(randomUUID())
 	const newEventId = () => decodeEventIdSync(randomUUID())
-	const newIssueEscalationId = () => decodeIssueEscalationIdSync(randomUUID())
 
 	const dbExecute = makeErrorDatabaseExecute(database)
 
@@ -560,57 +500,28 @@ const make: Effect.Effect<
 		registerAgent,
 		listAgents,
 		lookupActor,
-		actorExists,
 		ensureUserActor,
 		ensureSystemActor,
 		touchActor,
 		collectActorDocs,
 	} = actorService
 	const rowToActor = actorRowToDocument
+	const {
+		rowToIssue,
+		requireIssue,
+		issuesWithOpenIncidents,
+		hydrateIssue,
+		recordEvent,
+		applyTransition,
+		heartbeatIssue,
+		releaseIssue,
+		assignIssue,
+		setSeverity,
+		commentOnIssue,
+		listIssueEvents,
+	} = workflow
 
 	// Issue row -> document mapping
-
-	const parseSourceRef = (json: unknown): Record<string, unknown> | null => {
-		if (json == null) return null
-		return Option.match(decodeStoredJsonRecord(json), {
-			onNone: () => null,
-			onSome: (parsed) => ({ ...parsed }),
-		})
-	}
-
-	const rowToIssue = (
-		row: ErrorIssueRow,
-		hasOpenIncident: boolean,
-		actorMap: Map<ActorId, ActorDocument>,
-	) =>
-		new ErrorIssueDocument({
-			id: row.id,
-			kind: row.kind,
-			fingerprintHash: row.fingerprintHash,
-			serviceName: row.serviceName,
-			exceptionType: row.exceptionType,
-			exceptionMessage: row.exceptionMessage,
-			errorLabel: row.errorLabel,
-			topFrame: row.topFrame,
-			workflowState: row.workflowState,
-			priority: row.priority,
-			severity: row.severity ?? null,
-			severitySource: row.severitySource ?? null,
-			sourceRef: parseSourceRef(row.sourceRefJson),
-			assignedActor: row.assignedActorId == null ? null : (actorMap.get(row.assignedActorId) ?? null),
-			leaseHolder:
-				row.leaseHolderActorId == null ? null : (actorMap.get(row.leaseHolderActorId) ?? null),
-			leaseExpiresAt: row.leaseExpiresAt == null ? null : isoFromDate(row.leaseExpiresAt),
-			claimedAt: row.claimedAt == null ? null : isoFromDate(row.claimedAt),
-			notes: row.notes ?? null,
-			firstSeenAt: isoFromDate(row.firstSeenAt),
-			lastSeenAt: isoFromDate(row.lastSeenAt),
-			occurrenceCount: row.occurrenceCount,
-			resolvedAt: row.resolvedAt == null ? null : isoFromDate(row.resolvedAt),
-			snoozeUntil: row.snoozeUntil == null ? null : isoFromDate(row.snoozeUntil),
-			archivedAt: row.archivedAt == null ? null : isoFromDate(row.archivedAt),
-			hasOpenIncident,
-		})
 
 	const rowToIncident = (row: ErrorIncidentRow) =>
 		new ErrorIncidentDocument({
@@ -624,128 +535,7 @@ const make: Effect.Effect<
 			occurrenceCount: row.occurrenceCount,
 		})
 
-	const rowToEvent = (
-		row: ErrorIssueEventRow,
-		actorMap: Map<ActorId, ActorDocument>,
-	): ErrorIssueEventDocument =>
-		new ErrorIssueEventDocument({
-			id: row.id,
-			issueId: row.issueId,
-			actor: row.actorId == null ? null : (actorMap.get(row.actorId) ?? null),
-			type: row.type,
-			fromState: row.fromState ?? null,
-			toState: row.toState ?? null,
-			payload: Option.match(decodeStoredJsonRecord(row.payloadJson), {
-				onNone: (): Record<string, unknown> => ({}),
-				onSome: (parsed) => ({ ...parsed }),
-			}),
-			createdAt: isoFromDate(row.createdAt),
-		})
-
-	const requireIssue = Effect.fn("ErrorsService.requireIssue")(function* (
-		orgId: OrgId,
-		issueId: ErrorIssueId,
-	) {
-		const rows = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(errorIssues)
-				.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
-				.limit(1),
-		)
-		const row = rows[0]
-		if (!row)
-			return yield* Effect.fail(
-				new ErrorIssueNotFoundError({
-					message: "Error issue not found",
-					resourceType: "issue",
-					resourceId: issueId,
-				}),
-			)
-		return row
-	})
-
-	const issuesWithOpenIncidents = (orgId: OrgId, issueIds: ReadonlyArray<ErrorIssueId>) => {
-		if (issueIds.length === 0) return Effect.succeed(new Set<ErrorIssueId>())
-		// Two sources of "open incident": error_incidents for fingerprint
-		// issues, and open alert_incidents linked via errorIssueId for
-		// alert-backed issues. An issue id only ever appears in one of them.
-		return Effect.all([
-			dbExecute((db) =>
-				db
-					.select({ issueId: errorIncidents.issueId })
-					.from(errorIncidents)
-					.where(
-						and(
-							eq(errorIncidents.orgId, orgId),
-							eq(errorIncidents.status, "open"),
-							inArray(errorIncidents.issueId, issueIds),
-						),
-					),
-			),
-			dbExecute((db) =>
-				db
-					.select({ issueId: alertIncidents.errorIssueId })
-					.from(alertIncidents)
-					.where(
-						and(
-							eq(alertIncidents.orgId, orgId),
-							eq(alertIncidents.status, "open"),
-							inArray(alertIncidents.errorIssueId, issueIds),
-						),
-					),
-			),
-		]).pipe(
-			Effect.map(
-				([errorRows, alertRows]) =>
-					new Set([
-						...errorRows.map((r) => r.issueId),
-						...alertRows.flatMap((r) => (r.issueId == null ? [] : [r.issueId as ErrorIssueId])),
-					]),
-			),
-		)
-	}
-
-	const hydrateIssue = Effect.fn("ErrorsService.hydrateIssue")(function* (
-		orgId: OrgId,
-		row: ErrorIssueRow,
-	) {
-		const openSet = yield* issuesWithOpenIncidents(orgId, [row.id])
-		const actorMap = yield* collectActorDocs(orgId, [
-			row.assignedActorId ?? null,
-			row.leaseHolderActorId ?? null,
-		])
-		return rowToIssue(row, openSet.has(row.id), actorMap)
-	})
-
 	// Events / audit log
-
-	const recordEvent = Effect.fn("ErrorsService.recordEvent")(function* (
-		orgId: OrgId,
-		issueId: ErrorIssueId,
-		actorId: ActorId | null,
-		type: ErrorIssueEventType,
-		opts: {
-			readonly fromState?: WorkflowState | null
-			readonly toState?: WorkflowState | null
-			readonly payload?: Record<string, unknown>
-			readonly timestamp?: number
-		} = {},
-	) {
-		const timestamp = opts.timestamp ?? (yield* Clock.currentTimeMillis)
-		const insert: ErrorIssueEventInsert = {
-			id: newEventId(),
-			orgId,
-			issueId,
-			actorId: actorId ?? null,
-			type,
-			fromState: opts.fromState ?? null,
-			toState: opts.toState ?? null,
-			payloadJson: opts.payload ?? {},
-			createdAt: new Date(timestamp),
-		}
-		return yield* dbExecute((db) => db.insert(errorIssueEvents).values(insert))
-	})
 
 	const recordAnomalyLinkEvent: ErrorsServiceShape["recordAnomalyLinkEvent"] = Effect.fn(
 		"ErrorsService.recordAnomalyLinkEvent",
@@ -753,29 +543,6 @@ const make: Effect.Effect<
 		yield* Effect.annotateCurrentSpan({ orgId, issueId, action: payload.action })
 		yield* recordEvent(orgId, issueId, actorId, "anomaly_linked", { payload: { ...payload } })
 	})
-
-	const listIssueEvents: ErrorsServiceShape["listIssueEvents"] = Effect.fn("ErrorsService.listIssueEvents")(
-		function* (orgId, issueId, opts) {
-			yield* Effect.annotateCurrentSpan({ orgId, issueId })
-			yield* requireIssue(orgId, issueId)
-			const limit = Math.min(Math.max(opts?.limit ?? DEFAULT_EVENTS_LIMIT, 1), 500)
-			const rows = yield* dbExecute((db) =>
-				db
-					.select()
-					.from(errorIssueEvents)
-					.where(and(eq(errorIssueEvents.orgId, orgId), eq(errorIssueEvents.issueId, issueId)))
-					.orderBy(desc(errorIssueEvents.createdAt))
-					.limit(limit),
-			)
-			const actorMap = yield* collectActorDocs(
-				orgId,
-				rows.map((r) => r.actorId ?? null),
-			)
-			return new ErrorIssueEventsResponse({
-				events: rows.map((row) => rowToEvent(row, actorMap)),
-			})
-		},
-	)
 
 	// Issue list + detail
 
@@ -1042,114 +809,6 @@ const make: Effect.Effect<
 
 	// State transitions
 
-	const validateTransition = (issueId: ErrorIssueId, from: WorkflowState, to: WorkflowState) => {
-		const allowed = WORKFLOW_TRANSITIONS[from]
-		if (!allowed.includes(to)) {
-			return Effect.fail(
-				new ErrorIssueTransitionError({
-					message: `Illegal transition from '${from}' to '${to}'`,
-					issueId,
-					fromState: from,
-					toState: to,
-				}),
-			)
-		}
-		return Effect.void
-	}
-
-	const applyTransition = Effect.fn("ErrorsService.applyTransition")(function* (
-		orgId: OrgId,
-		actorId: ActorId | null,
-		row: ErrorIssueRow,
-		toState: WorkflowState,
-		opts: {
-			readonly note?: string
-			readonly snoozeUntilMs?: number | null
-			readonly timestamp?: number
-			readonly payload?: Record<string, unknown>
-		} = {},
-	) {
-		const timestamp = opts.timestamp ?? (yield* Clock.currentTimeMillis)
-		const fromState = row.workflowState
-		if (fromState === toState) {
-			return row
-		}
-		yield* validateTransition(row.id, fromState, toState)
-
-		const update: Partial<ErrorIssueRow> = {
-			workflowState: toState,
-			updatedAt: new Date(timestamp),
-		}
-
-		if (toState === "done") {
-			update.resolvedAt = new Date(timestamp)
-			update.resolvedByActorId = actorId ?? null
-		} else if (fromState === "done") {
-			update.resolvedAt = null
-			update.resolvedByActorId = null
-		}
-
-		if (toState === "wontfix") {
-			if (opts.snoozeUntilMs !== undefined) {
-				update.snoozeUntil = msToDate(opts.snoozeUntilMs)
-			}
-		} else if (fromState === "wontfix") {
-			update.snoozeUntil = null
-		}
-
-		if (TERMINAL_WORKFLOW_STATES.has(toState)) {
-			update.leaseHolderActorId = null
-			update.leaseExpiresAt = null
-			update.claimedAt = null
-		}
-
-		yield* dbExecute((db) =>
-			db
-				.update(errorIssues)
-				.set(update)
-				.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, row.id))),
-		)
-
-		if (toState === "done") {
-			yield* dbExecute((db) =>
-				db
-					.update(errorIncidents)
-					.set({
-						status: "resolved",
-						resolvedAt: new Date(timestamp),
-						updatedAt: new Date(timestamp),
-					})
-					.where(
-						and(
-							eq(errorIncidents.orgId, orgId),
-							eq(errorIncidents.issueId, row.id),
-							eq(errorIncidents.status, "open"),
-						),
-					),
-			)
-			yield* dbExecute((db) =>
-				db
-					.update(errorIssueStates)
-					.set({ openIncidentId: null, updatedAt: new Date(timestamp) })
-					.where(and(eq(errorIssueStates.orgId, orgId), eq(errorIssueStates.issueId, row.id))),
-			)
-		}
-
-		const notePayload: Record<string, unknown> = { ...opts.payload }
-		if (opts.note) notePayload.note = opts.note
-
-		yield* recordEvent(orgId, row.id, actorId, "state_change", {
-			fromState,
-			toState,
-			payload: notePayload,
-			timestamp,
-		})
-
-		if (actorId) yield* touchActor(orgId, actorId, timestamp)
-
-		return yield* requireIssue(orgId, row.id)
-	})
-
 	const transitionIssue: ErrorsServiceShape["transitionIssue"] = Effect.fn("ErrorsService.transitionIssue")(
 		function* (orgId, actorId, issueId, toState, opts) {
 			yield* Effect.annotateCurrentSpan({ orgId, issueId, toState })
@@ -1282,250 +941,6 @@ const make: Effect.Effect<
 			yield* maybeNotifyClaim(orgId, actorId, next)
 
 			return yield* hydrateIssue(orgId, next)
-		},
-	)
-
-	const heartbeatIssue: ErrorsServiceShape["heartbeatIssue"] = Effect.fn("ErrorsService.heartbeatIssue")(
-		function* (orgId, actorId, issueId) {
-			const timestamp = yield* Clock.currentTimeMillis
-			const current = yield* requireIssue(orgId, issueId)
-			if (current.leaseHolderActorId !== actorId) {
-				return yield* Effect.fail(leaseConflict(issueId, current))
-			}
-			const previous = dateToMs(current.leaseExpiresAt) ?? timestamp
-			const leaseMs = Math.max(
-				DEFAULT_LEASE_DURATION_MS,
-				previous - (dateToMs(current.claimedAt) ?? previous),
-			)
-			const leaseExpiresAt = timestamp + leaseMs
-			const heartbeatRows = yield* dbExecute((db) =>
-				db
-					.update(errorIssues)
-					.set({ leaseExpiresAt: new Date(leaseExpiresAt), updatedAt: new Date(timestamp) })
-					.where(
-						and(
-							eq(errorIssues.orgId, orgId),
-							eq(errorIssues.id, issueId),
-							eq(errorIssues.leaseHolderActorId, actorId),
-						),
-					)
-					.returning(txidColumn),
-			)
-			yield* touchActor(orgId, actorId, timestamp)
-			const next = yield* requireIssue(orgId, issueId)
-			const doc = yield* hydrateIssue(orgId, next)
-			const txid = readTxid(heartbeatRows)
-			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
-		},
-	)
-
-	const releaseIssue: ErrorsServiceShape["releaseIssue"] = Effect.fn("ErrorsService.releaseIssue")(
-		function* (orgId, actorId, issueId, opts) {
-			const timestamp = yield* Clock.currentTimeMillis
-			const current = yield* requireIssue(orgId, issueId)
-			if (current.leaseHolderActorId !== null && current.leaseHolderActorId !== actorId) {
-				return yield* Effect.fail(leaseConflict(issueId, current))
-			}
-
-			yield* dbExecute((db) =>
-				db
-					.update(errorIssues)
-					.set({
-						leaseHolderActorId: null,
-						leaseExpiresAt: null,
-						claimedAt: null,
-						updatedAt: new Date(timestamp),
-					})
-					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId))),
-			)
-
-			yield* recordEvent(orgId, issueId, actorId, "release", {
-				payload: opts?.note ? { note: opts.note } : {},
-				timestamp,
-			})
-
-			const target: WorkflowState =
-				opts?.transitionTo ??
-				(current.workflowState === "in_progress" ? "todo" : current.workflowState)
-
-			let next = yield* requireIssue(orgId, issueId)
-			if (target !== next.workflowState) {
-				next = yield* applyTransition(orgId, actorId, next, target, {
-					payload: { viaRelease: true },
-					timestamp,
-				})
-			}
-
-			yield* touchActor(orgId, actorId, timestamp)
-			return yield* hydrateIssue(orgId, next)
-		},
-	)
-
-	const assignIssue: ErrorsServiceShape["assignIssue"] = Effect.fn("ErrorsService.assignIssue")(
-		function* (orgId, byActorId, issueId, toActorId) {
-			const timestamp = yield* Clock.currentTimeMillis
-			const current = yield* requireIssue(orgId, issueId)
-			if (toActorId !== null) {
-				const exists = yield* actorExists(orgId, toActorId)
-				if (!exists) {
-					return yield* Effect.fail(
-						new ActorNotFoundError({
-							message: `Actor '${toActorId}' not found`,
-							actorId: toActorId,
-						}),
-					)
-				}
-			}
-			const assignedRows = yield* dbExecute((db) =>
-				db
-					.update(errorIssues)
-					.set({ assignedActorId: toActorId, updatedAt: new Date(timestamp) })
-					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
-					.returning(txidColumn),
-			)
-			yield* recordEvent(orgId, issueId, byActorId, "assignment", {
-				payload: {
-					fromActorId: current.assignedActorId,
-					toActorId,
-				},
-				timestamp,
-			})
-			yield* touchActor(orgId, byActorId, timestamp)
-			const next = yield* requireIssue(orgId, issueId)
-			const doc = yield* hydrateIssue(orgId, next)
-			const txid = readTxid(assignedRows)
-			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
-		},
-	)
-
-	// Inserts an escalation-outbox row when severity is newly set or strictly
-	// escalates; the alerting worker's escalation tick drains the outbox.
-	// Detector-initial severity never escalates — only triage outcomes do.
-	const enqueueSeverityEscalation = Effect.fn("ErrorsService.enqueueSeverityEscalation")(function* (
-		orgId: OrgId,
-		issueId: ErrorIssueId,
-		from: IssueSeverity | null,
-		to: IssueSeverity,
-		source: "ai" | "manual",
-	) {
-		const reason = escalationReasonFor(from, to)
-		if (reason === null) return
-		const timestamp = yield* Clock.currentTimeMillis
-		yield* dbExecute((db) =>
-			db
-				.insert(issueEscalations)
-				.values({
-					id: newIssueEscalationId(),
-					orgId,
-					issueId,
-					severity: to,
-					source,
-					reason,
-					runId: null,
-					investigationId: null,
-					payloadJson: {},
-					deliveryResultsJson: [],
-					status: "queued",
-					attempts: 0,
-					dedupeKey: escalationDedupeKey(orgId, issueId, to),
-					error: null,
-					createdAt: new Date(timestamp),
-					processedAt: null,
-				})
-				.onConflictDoNothing(),
-		)
-	})
-
-	const setSeverity: ErrorsServiceShape["setSeverity"] = Effect.fn("ErrorsService.setSeverity")(
-		function* (orgId, actorId, issueId, severity, opts) {
-			const timestamp = yield* Clock.currentTimeMillis
-			const source = opts?.source ?? "manual"
-			yield* Effect.annotateCurrentSpan({ orgId, issueId, severity: severity ?? "null", source })
-			const current = yield* requireIssue(orgId, issueId)
-
-			// Precedence: manual > ai. An AI write never clobbers a manual
-			// severity; the human's call stands until a human changes it.
-			if (source === "ai" && current.severitySource === "manual") {
-				return yield* hydrateIssue(orgId, current)
-			}
-
-			const nextSource: IssueSeveritySource | null = severity === null ? null : source
-			const changed = current.severity !== severity || current.severitySource !== nextSource
-			if (!changed) {
-				return yield* hydrateIssue(orgId, current)
-			}
-
-			const severityRows = yield* dbExecute((db) =>
-				db
-					.update(errorIssues)
-					.set({ severity, severitySource: nextSource, updatedAt: new Date(timestamp) })
-					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
-					.returning(txidColumn),
-			)
-
-			if (current.severity !== severity) {
-				const payload: Record<string, unknown> = {
-					from: current.severity,
-					to: severity,
-					source,
-				}
-				if (opts?.note) payload.note = opts.note
-				yield* recordEvent(orgId, issueId, actorId, "severity_change", {
-					payload,
-					timestamp,
-				})
-			}
-
-			if (severity !== null) {
-				yield* enqueueSeverityEscalation(orgId, issueId, current.severity, severity, source)
-			}
-
-			yield* touchActor(orgId, actorId, timestamp)
-			const next = yield* requireIssue(orgId, issueId)
-			const doc = yield* hydrateIssue(orgId, next)
-			const txid = readTxid(severityRows)
-			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
-		},
-	)
-
-	const commentOnIssue: ErrorsServiceShape["commentOnIssue"] = Effect.fn("ErrorsService.commentOnIssue")(
-		function* (orgId, actorId, issueId, body, opts) {
-			const timestamp = yield* Clock.currentTimeMillis
-			yield* requireIssue(orgId, issueId)
-			const type: ErrorIssueEventType = opts?.kind === "agent_note" ? "agent_note" : "comment"
-			const payload: Record<string, unknown> = {
-				body,
-				visibility: opts?.visibility ?? "internal",
-			}
-			const id = newEventId()
-			const insert: ErrorIssueEventInsert = {
-				id,
-				orgId,
-				issueId,
-				actorId,
-				type,
-				fromState: null,
-				toState: null,
-				payloadJson: payload,
-				createdAt: new Date(timestamp),
-			}
-			yield* dbExecute((db) => db.insert(errorIssueEvents).values(insert))
-			yield* touchActor(orgId, actorId, timestamp)
-			const actorMap = yield* collectActorDocs(orgId, [actorId])
-			return rowToEvent(
-				{
-					id,
-					orgId,
-					issueId,
-					actorId,
-					type,
-					fromState: null,
-					toState: null,
-					payloadJson: payload,
-					createdAt: new Date(timestamp),
-				},
-				actorMap,
-			)
 		},
 	)
 

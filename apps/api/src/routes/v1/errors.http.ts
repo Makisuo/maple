@@ -2,12 +2,14 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, ErrorForbiddenError, MapleApi } from "@maple/domain/http"
 import { Effect } from "effect"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
+import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { requireAdmin } from "@/services/auth/auth"
 
 export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers) =>
 	Effect.gen(function* () {
 		const actors = yield* ErrorActorsService
+		const workflow = yield* ErrorIssueWorkflowService
 		const errors = yield* ErrorsService
 
 		return handlers
@@ -92,14 +94,14 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
-					return yield* errors.heartbeatIssue(tenant.orgId, actor.id, params.issueId)
+					return yield* workflow.heartbeatIssue(tenant.orgId, actor.id, params.issueId)
 				}).pipe(Effect.withSpan("HttpErrors.heartbeatIssue")),
 			)
 			.handle("releaseIssue", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
-					return yield* errors.releaseIssue(tenant.orgId, actor.id, params.issueId, {
+					return yield* workflow.releaseIssue(tenant.orgId, actor.id, params.issueId, {
 						transitionTo: payload.transitionTo,
 						note: payload.note,
 					})
@@ -109,7 +111,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
-					return yield* errors.commentOnIssue(
+					return yield* workflow.commentOnIssue(
 						tenant.orgId,
 						actor.id,
 						params.issueId,
@@ -136,7 +138,12 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
-					return yield* errors.assignIssue(tenant.orgId, actor.id, params.issueId, payload.actorId)
+					return yield* workflow.assignIssue(
+						tenant.orgId,
+						actor.id,
+						params.issueId,
+						payload.actorId,
+					)
 				}).pipe(Effect.withSpan("HttpErrors.assignIssue")),
 			)
 			.handle("setIssueSeverity", ({ params, payload }) =>
@@ -148,7 +155,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						issueId: params.issueId,
 						severity: payload.severity ?? "null",
 					})
-					return yield* errors.setSeverity(
+					return yield* workflow.setSeverity(
 						tenant.orgId,
 						actor.id,
 						params.issueId,
@@ -167,7 +174,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						orgId: tenant.orgId,
 						issueId: params.issueId,
 					})
-					const response = yield* errors.listIssueEvents(tenant.orgId, params.issueId, {
+					const response = yield* workflow.listIssueEvents(tenant.orgId, params.issueId, {
 						limit: query.limit,
 					})
 					yield* Effect.annotateCurrentSpan("eventCount", response.events.length)
