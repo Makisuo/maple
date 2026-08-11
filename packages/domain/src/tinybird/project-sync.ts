@@ -1,6 +1,6 @@
 import { datasources, pipes, projectRevision } from "../generated/tinybird-project-manifest"
 import { TinybirdApi, TinybirdApiError } from "@tinybirdco/sdk"
-import { Duration, Effect, Layer, Schema, Context } from "effect"
+import { Duration, Effect, Schema } from "effect"
 import {
 	applyRawTtlOverrides,
 	computeEffectiveRevision,
@@ -260,11 +260,15 @@ const toNumberOrNull = (value: unknown): number | null => {
 	return null
 }
 
-const makeApi = (params: TinybirdProjectSyncParams) =>
+export interface TinybirdProjectSyncOptions {
+	readonly fetch: typeof globalThis.fetch
+}
+
+const makeApi = (params: TinybirdProjectSyncParams, fetch: typeof globalThis.fetch) =>
 	new TinybirdApi({
 		baseUrl: normalizeBaseUrl(params.baseUrl),
 		token: params.token,
-		fetch: globalThis.fetch,
+		fetch,
 		timeout: Duration.toMillis(REQUEST_TIMEOUT),
 	})
 
@@ -319,445 +323,435 @@ export interface TinybirdProjectSyncShape {
 	readonly getCurrentProjectRevision: () => Effect.Effect<string>
 }
 
-export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, TinybirdProjectSyncShape>()(
-	"@maple/domain/tinybird/TinybirdProjectSync",
-	{
-		make: Effect.gen(function* () {
-			const fetchDeploymentStatusInternal = Effect.fn("TinybirdProjectSync.fetchDeploymentStatus")(
-				function* (params: TinybirdProjectSyncParams & { readonly deploymentId: string }) {
-					yield* Effect.annotateCurrentSpan("deploymentId", params.deploymentId)
-					const api = makeApi(params)
-					const response = yield* Effect.tryPromise({
-						try: () => api.request(`/v1/deployments/${params.deploymentId}`),
-						catch: (error) => mapApiFailure(error, "Deployment status check failed"),
-					})
+export const makeTinybirdProjectSync = (options: TinybirdProjectSyncOptions): TinybirdProjectSyncShape => {
+	const fetchDeploymentStatusInternal = Effect.fn("TinybirdProjectSync.fetchDeploymentStatus")(function* (
+		params: TinybirdProjectSyncParams & { readonly deploymentId: string },
+	) {
+		yield* Effect.annotateCurrentSpan("deploymentId", params.deploymentId)
+		const api = makeApi(params, options.fetch)
+		const response = yield* Effect.tryPromise({
+			try: () => api.request(`/v1/deployments/${params.deploymentId}`),
+			catch: (error) => mapApiFailure(error, "Deployment status check failed"),
+		})
 
-					const rawBody = yield* Effect.promise(() => response.text()).pipe(
-						Effect.orElseSucceed(() => ""),
-					)
+		const rawBody = yield* Effect.promise(() => response.text()).pipe(Effect.orElseSucceed(() => ""))
 
-					if (response.status === 404) {
-						return {
-							deploymentId: params.deploymentId,
-							status: "deleted",
-							isTerminal: true,
-							isReady: false,
-							errorMessage: `Deployment ${params.deploymentId} was deleted.\nResponse: ${rawBody}`,
-						} satisfies TinybirdDeploymentReadiness
-					}
-					if (response.status >= 400) {
-						return yield* Effect.fail(
-							classifyHttpError(
-								response.status,
-								`Deployment status check failed (HTTP ${response.status}).\nResponse: ${rawBody}`,
-							),
-						)
-					}
-
-					const body = yield* Schema.decodeEffect(DeploymentStatusBodyFromJson)(rawBody).pipe(
-						Effect.mapError(() =>
-							toUnavailableError(
-								`Tinybird returned invalid JSON from deployment status.\nResponse: ${rawBody}`,
-								response.status,
-							),
-						),
-					)
-					const status = body.deployment?.status ?? "unknown"
-					const isReady = READY_STATUSES.has(status)
-					const isTerminal = status === "live" || FAILURE_STATUSES.has(status)
-					const errorMessage = extractStatusErrorMessage(body, status)
-
-					return {
-						deploymentId: params.deploymentId,
-						status,
-						isTerminal,
-						isReady,
-						errorMessage,
-					} satisfies TinybirdDeploymentReadiness
-				},
+		if (response.status === 404) {
+			return {
+				deploymentId: params.deploymentId,
+				status: "deleted",
+				isTerminal: true,
+				isReady: false,
+				errorMessage: `Deployment ${params.deploymentId} was deleted.\nResponse: ${rawBody}`,
+			} satisfies TinybirdDeploymentReadiness
+		}
+		if (response.status >= 400) {
+			return yield* Effect.fail(
+				classifyHttpError(
+					response.status,
+					`Deployment status check failed (HTTP ${response.status}).\nResponse: ${rawBody}`,
+				),
 			)
+		}
 
-			const cleanupStaleDeployments = Effect.fn("TinybirdProjectSync.cleanupStaleDeployments")(
-				function* (params: TinybirdProjectSyncParams) {
-					yield* Effect.annotateCurrentSpan("baseUrl", params.baseUrl)
-					const api = makeApi(params)
+		const body = yield* Schema.decodeEffect(DeploymentStatusBodyFromJson)(rawBody).pipe(
+			Effect.mapError(() =>
+				toUnavailableError(
+					`Tinybird returned invalid JSON from deployment status.\nResponse: ${rawBody}`,
+					response.status,
+				),
+			),
+		)
+		const status = body.deployment?.status ?? "unknown"
+		const isReady = READY_STATUSES.has(status)
+		const isTerminal = status === "live" || FAILURE_STATUSES.has(status)
+		const errorMessage = extractStatusErrorMessage(body, status)
 
-					const listResponse = yield* Effect.tryPromise({
-						try: () => api.request(`/v1/deployments`),
-						catch: (error) => mapApiFailure(error, "Deployments list failed"),
-					})
+		return {
+			deploymentId: params.deploymentId,
+			status,
+			isTerminal,
+			isReady,
+			errorMessage,
+		} satisfies TinybirdDeploymentReadiness
+	})
 
-					if (listResponse.status === 404) return
-					const rawBody = yield* Effect.promise(() => listResponse.text()).pipe(
-						Effect.orElseSucceed(() => ""),
-					)
-					if (listResponse.status >= 400) {
-						return yield* Effect.fail(
-							classifyHttpError(
-								listResponse.status,
-								`Deployments list failed (HTTP ${listResponse.status}).\nResponse: ${rawBody}`,
-							),
-						)
-					}
+	const cleanupStaleDeployments = Effect.fn("TinybirdProjectSync.cleanupStaleDeployments")(function* (
+		params: TinybirdProjectSyncParams,
+	) {
+		yield* Effect.annotateCurrentSpan("baseUrl", params.baseUrl)
+		const api = makeApi(params, options.fetch)
 
-					const body = yield* Schema.decodeEffect(DeploymentsListBodyFromJson)(rawBody).pipe(
-						Effect.mapError(() =>
-							toUnavailableError(
-								`Tinybird returned invalid JSON from deployments list.\nResponse: ${rawBody}`,
-								listResponse.status,
-							),
-						),
-					)
+		const listResponse = yield* Effect.tryPromise({
+			try: () => api.request(`/v1/deployments`),
+			catch: (error) => mapApiFailure(error, "Deployments list failed"),
+		})
 
-					// Only delete deployments in known terminal-failed states. The
-					// previous filter (`!d.live && d.status !== "live"`) also matched
-					// in-flight states like `deploying`, `data_ready`, and any
-					// unrecognised status string from a future Tinybird release —
-					// deleting an active deployment that's still being promoted
-					// disrupts schema rollout. Restrict to `failed` / `error` and
-					// require `live === false` (or unset) as defense in depth.
-					const TERMINAL_FAILED_STATUSES = new Set(["failed", "error"])
-					const stale = body.deployments.filter(
-						(d) =>
-							d.live !== true &&
-							typeof d.status === "string" &&
-							TERMINAL_FAILED_STATUSES.has(d.status),
-					)
-					if (stale.length === 0) return
-
-					yield* Effect.forEach(
-						stale,
-						(deployment) =>
-							Effect.tryPromise({
-								try: () =>
-									api.request(`/v1/deployments/${deployment.id}`, { method: "DELETE" }),
-								catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-							}).pipe(
-								Effect.tapError((error) =>
-									Effect.logWarning("Tinybird stale-deployment cleanup failed").pipe(
-										Effect.annotateLogs({
-											deploymentId: deployment.id,
-											deploymentStatus: deployment.status ?? "unknown",
-											error: error.message,
-										}),
-									),
-								),
-								Effect.ignore,
-							),
-						{ concurrency: STALE_DEPLOYMENT_DELETE_CONCURRENCY, discard: true },
-					)
-				},
+		if (listResponse.status === 404) return
+		const rawBody = yield* Effect.promise(() => listResponse.text()).pipe(Effect.orElseSucceed(() => ""))
+		if (listResponse.status >= 400) {
+			return yield* Effect.fail(
+				classifyHttpError(
+					listResponse.status,
+					`Deployments list failed (HTTP ${listResponse.status}).\nResponse: ${rawBody}`,
+				),
 			)
+		}
 
-			const startDeployment = Effect.fn("TinybirdProjectSync.startDeployment")(function* (
-				params: TinybirdDeployParams,
-			) {
-				yield* Effect.annotateCurrentSpan("baseUrl", params.baseUrl)
-				const api = makeApi(params)
-				const overrides = params.overrides ?? EMPTY_TTL_OVERRIDES
-				const formData = buildDeployFormData(overrides)
-				const effectiveRevision = computeEffectiveRevision(projectRevision, overrides)
+		const body = yield* Schema.decodeEffect(DeploymentsListBodyFromJson)(rawBody).pipe(
+			Effect.mapError(() =>
+				toUnavailableError(
+					`Tinybird returned invalid JSON from deployments list.\nResponse: ${rawBody}`,
+					listResponse.status,
+				),
+			),
+		)
 
-				const deployResponse = yield* Effect.tryPromise({
-					try: () =>
-						api.request("/v1/deploy?allow_destructive_operations=true", {
-							method: "POST",
-							body: formData,
-						}),
-					catch: (error) => mapApiFailure(error, "Tinybird project sync failed"),
-				})
+		// Only delete deployments in known terminal-failed states. The
+		// previous filter (`!d.live && d.status !== "live"`) also matched
+		// in-flight states like `deploying`, `data_ready`, and any
+		// unrecognised status string from a future Tinybird release —
+		// deleting an active deployment that's still being promoted
+		// disrupts schema rollout. Restrict to `failed` / `error` and
+		// require `live === false` (or unset) as defense in depth.
+		const TERMINAL_FAILED_STATUSES = new Set(["failed", "error"])
+		const stale = body.deployments.filter(
+			(d) => d.live !== true && typeof d.status === "string" && TERMINAL_FAILED_STATUSES.has(d.status),
+		)
+		if (stale.length === 0) return
 
-				const deployRawBody = yield* Effect.promise(() => deployResponse.text()).pipe(
-					Effect.orElseSucceed(() => ""),
-				)
-
-				if (deployResponse.status >= 400) {
-					const parsedDeployBody = yield* parseJsonSafe(DeployResponseSchema)(deployRawBody)
-					return yield* Effect.fail(
-						classifyHttpError(
-							deployResponse.status,
-							parsedDeployBody
-								? toDeployErrorMessage(
-										parsedDeployBody,
-										`Tinybird project sync failed (HTTP ${deployResponse.status}).\nResponse: ${deployRawBody}`,
-									)
-								: `Tinybird project sync failed (HTTP ${deployResponse.status}).\nResponse: ${deployRawBody}`,
-						),
-					)
-				}
-
-				const deployBody = yield* Schema.decodeEffect(DeployResponseFromJson)(deployRawBody).pipe(
-					Effect.mapError(() =>
-						toUnavailableError(
-							`Tinybird returned invalid JSON from /v1/deploy.\nResponse: ${deployRawBody}`,
-							deployResponse.status,
+		yield* Effect.forEach(
+			stale,
+			(deployment) =>
+				Effect.tryPromise({
+					try: () => api.request(`/v1/deployments/${deployment.id}`, { method: "DELETE" }),
+					catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+				}).pipe(
+					Effect.tapError((error) =>
+						Effect.logWarning("Tinybird stale-deployment cleanup failed").pipe(
+							Effect.annotateLogs({
+								deploymentId: deployment.id,
+								deploymentStatus: deployment.status ?? "unknown",
+								error: error.message,
+							}),
 						),
 					),
-				)
+					Effect.ignore,
+				),
+			{ concurrency: STALE_DEPLOYMENT_DELETE_CONCURRENCY, discard: true },
+		)
+	})
 
-				if (deployBody.result === "failed") {
-					return yield* Effect.fail(
-						toRejectedError(
-							toDeployErrorMessage(
-								deployBody,
-								`Tinybird project sync failed.\nResponse: ${deployRawBody}`,
-							),
-							deployResponse.status,
-						),
-					)
-				}
+	const startDeployment = Effect.fn("TinybirdProjectSync.startDeployment")(function* (
+		params: TinybirdDeployParams,
+	) {
+		yield* Effect.annotateCurrentSpan("baseUrl", params.baseUrl)
+		const api = makeApi(params, options.fetch)
+		const overrides = params.overrides ?? EMPTY_TTL_OVERRIDES
+		const formData = buildDeployFormData(overrides)
+		const effectiveRevision = computeEffectiveRevision(projectRevision, overrides)
 
-				const feedback = deployBody.deployment?.feedback ?? []
+		const deployResponse = yield* Effect.tryPromise({
+			try: () =>
+				api.request("/v1/deploy?allow_destructive_operations=true", {
+					method: "POST",
+					body: formData,
+				}),
+			catch: (error) => mapApiFailure(error, "Tinybird project sync failed"),
+		})
 
-				return {
-					projectRevision: effectiveRevision,
-					result: deployBody.result,
-					deploymentId: deployBody.deployment?.id ?? null,
-					deploymentStatus: deployBody.deployment?.status ?? null,
-					errorMessage: formatFeedback(feedback),
-				} satisfies TinybirdStartDeploymentResult
-			})
+		const deployRawBody = yield* Effect.promise(() => deployResponse.text()).pipe(
+			Effect.orElseSucceed(() => ""),
+		)
 
-			const pollDeployment = Effect.fn("TinybirdProjectSync.pollDeployment")(function* (
-				params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-			) {
-				const status = yield* fetchDeploymentStatusInternal(params)
-
-				if (status.isReady) return status
-
-				if (status.isTerminal) {
-					return yield* Effect.fail(
-						toRejectedError(
-							status.errorMessage
-								? `Tinybird deployment ${status.status}: ${status.errorMessage}`
-								: `Tinybird deployment ${status.status} before reaching data_ready.`,
-						),
-					)
-				}
-
-				return yield* Effect.fail(
-					TinybirdDeploymentNotReadyError.from(params.deploymentId, status.status),
-				)
-			})
-
-			const setDeploymentLive = Effect.fn("TinybirdProjectSync.setDeploymentLive")(function* (
-				params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-			) {
-				yield* Effect.annotateCurrentSpan("deploymentId", params.deploymentId)
-				const api = makeApi(params)
-				const liveResponse = yield* Effect.tryPromise({
-					try: () =>
-						api.request(`/v1/deployments/${params.deploymentId}/set-live`, {
-							method: "POST",
-						}),
-					catch: (error) =>
-						mapApiFailure(error, `Failed to set Tinybird deployment ${params.deploymentId} live`),
-				})
-
-				if (liveResponse.status >= 400) {
-					const liveRawBody = yield* Effect.promise(() => liveResponse.text()).pipe(
-						Effect.orElseSucceed(() => ""),
-					)
-					return yield* Effect.fail(
-						classifyHttpError(
-							liveResponse.status,
-							`Failed to set Tinybird deployment ${params.deploymentId} live (HTTP ${liveResponse.status}).\nResponse: ${liveRawBody}`,
-						),
-					)
-				}
-			})
-
-			const cleanupOwnedDeployment = Effect.fn("TinybirdProjectSync.cleanupOwnedDeployment")(function* (
-				params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-			) {
-				yield* Effect.annotateCurrentSpan("deploymentId", params.deploymentId)
-				const status = yield* fetchDeploymentStatusInternal(params)
-				if (!status.isTerminal || status.status === "live" || status.status === "data_ready") {
-					return
-				}
-				if (status.status === "deleted") {
-					return
-				}
-
-				const api = makeApi(params)
-				const response = yield* Effect.tryPromise({
-					try: () =>
-						api.request(`/v1/deployments/${params.deploymentId}`, {
-							method: "DELETE",
-						}),
-					catch: (error) =>
-						mapApiFailure(error, `Failed to delete Tinybird deployment ${params.deploymentId}`),
-				})
-
-				if (response.status === 404) return
-				if (response.status >= 400) {
-					const rawBody = yield* Effect.promise(() => response.text()).pipe(
-						Effect.orElseSucceed(() => ""),
-					)
-					return yield* Effect.fail(
-						classifyHttpError(
-							response.status,
-							`Failed to delete Tinybird deployment ${params.deploymentId} (HTTP ${response.status}).\nResponse: ${rawBody}`,
-						),
-					)
-				}
-			})
-
-			const fetchInstanceHealth = Effect.fn("TinybirdProjectSync.fetchInstanceHealth")(function* (
-				params: TinybirdProjectSyncParams,
-			) {
-				yield* Effect.annotateCurrentSpan("baseUrl", params.baseUrl)
-				const api = makeApi(params)
-
-				const requestJsonBestEffort = <A, I>(
-					schema: Schema.Codec<A, I>,
-					path: string,
-					init?: RequestInit,
-				): Effect.Effect<A | null> => {
-					const parse = parseJsonSafe(schema)
-					return Effect.promise(() => api.request(path, init)).pipe(
-						Effect.flatMap((response) =>
-							Effect.promise(() => response.text()).pipe(
-								Effect.flatMap((rawBody) =>
-									response.ok ? parse(rawBody) : Effect.succeed(null),
-								),
-							),
-						),
-						Effect.orElseSucceed(() => null),
-					)
-				}
-
-				const querySql = (sql: string) =>
-					requestJsonBestEffort(
-						SqlResponseSchema,
-						`/v0/sql?q=${encodeURIComponent(`${sql} FORMAT JSON`)}`,
-					)
-
-				// Raw SQL against Tinybird's `tinybird.*` admin schema — fixed strings,
-				// no interpolation. Kept raw because @maple/domain cannot depend on
-				// @maple/query-engine (the DSL) without inverting the existing
-				// query-engine → domain dependency. These three queries have no
-				// dynamic input, so there's no injection surface to protect.
-				const DATASOURCES_STORAGE_SQL =
-					"SELECT datasource_name, bytes, rows FROM tinybird.datasources_storage WHERE timestamp = (SELECT max(timestamp) FROM tinybird.datasources_storage) ORDER BY bytes DESC"
-				const ENDPOINT_ERRORS_24H_SQL =
-					"SELECT count() as cnt FROM tinybird.endpoint_errors WHERE start_datetime >= now() - interval 1 day"
-				const PIPE_LATENCY_24H_SQL =
-					"SELECT avg(duration) as avg_ms FROM tinybird.pipe_stats_rt WHERE start_datetime >= now() - interval 1 day"
-
-				const [workspace, datasourcesResult, errorsResult, latencyResult] = yield* Effect.all(
-					[
-						requestJsonBestEffort(WorkspaceProbeSchema, "/v1/workspace"),
-						querySql(DATASOURCES_STORAGE_SQL),
-						querySql(ENDPOINT_ERRORS_24H_SQL),
-						querySql(PIPE_LATENCY_24H_SQL),
-					],
-					{ concurrency: "unbounded" },
-				)
-
-				const ds = (datasourcesResult?.data ?? []).map((row) => ({
-					name: String(row.datasource_name ?? ""),
-					rowCount: Number(row.rows ?? 0),
-					bytes: Number(row.bytes ?? 0),
-				}))
-
-				const totalRows = ds.reduce((sum, d) => sum + d.rowCount, 0)
-				const totalBytes = ds.reduce((sum, d) => sum + d.bytes, 0)
-
-				const recentErrorCount = Number(errorsResult?.data?.[0]?.cnt ?? 0)
-				const avgLatencyRaw = toNumberOrNull(latencyResult?.data?.[0]?.avg_ms)
-				const avgQueryLatencyMs = avgLatencyRaw == null ? null : avgLatencyRaw * 1000
-
-				return {
-					workspaceName: workspace?.name ?? null,
-					datasources: ds,
-					totalRows,
-					totalBytes,
-					recentErrorCount,
-					avgQueryLatencyMs,
-				}
-			})
-
-			const getCurrentProjectRevision = Effect.fn("TinybirdProjectSync.getCurrentProjectRevision")(
-				function* () {
-					return projectRevision
-				},
+		if (deployResponse.status >= 400) {
+			const parsedDeployBody = yield* parseJsonSafe(DeployResponseSchema)(deployRawBody)
+			return yield* Effect.fail(
+				classifyHttpError(
+					deployResponse.status,
+					parsedDeployBody
+						? toDeployErrorMessage(
+								parsedDeployBody,
+								`Tinybird project sync failed (HTTP ${deployResponse.status}).\nResponse: ${deployRawBody}`,
+							)
+						: `Tinybird project sync failed (HTTP ${deployResponse.status}).\nResponse: ${deployRawBody}`,
+				),
 			)
+		}
 
-			return {
-				cleanupStaleDeployments,
-				startDeployment,
-				pollDeployment,
-				getDeploymentStatus: fetchDeploymentStatusInternal,
-				setDeploymentLive,
-				cleanupOwnedDeployment,
-				fetchInstanceHealth,
-				getCurrentProjectRevision,
-			} satisfies TinybirdProjectSyncShape
-		}),
-	},
-) {
-	static readonly layer = Layer.effect(this, this.make)
+		const deployBody = yield* Schema.decodeEffect(DeployResponseFromJson)(deployRawBody).pipe(
+			Effect.mapError(() =>
+				toUnavailableError(
+					`Tinybird returned invalid JSON from /v1/deploy.\nResponse: ${deployRawBody}`,
+					deployResponse.status,
+				),
+			),
+		)
 
-	static readonly cleanupStaleDeployments = (params: TinybirdProjectSyncParams) =>
-		this.use((service) => service.cleanupStaleDeployments(params))
+		if (deployBody.result === "failed") {
+			return yield* Effect.fail(
+				toRejectedError(
+					toDeployErrorMessage(
+						deployBody,
+						`Tinybird project sync failed.\nResponse: ${deployRawBody}`,
+					),
+					deployResponse.status,
+				),
+			)
+		}
 
-	static readonly startDeployment = (params: TinybirdDeployParams) =>
-		this.use((service) => service.startDeployment(params))
+		const feedback = deployBody.deployment?.feedback ?? []
 
-	static readonly pollDeployment = (
+		return {
+			projectRevision: effectiveRevision,
+			result: deployBody.result,
+			deploymentId: deployBody.deployment?.id ?? null,
+			deploymentStatus: deployBody.deployment?.status ?? null,
+			errorMessage: formatFeedback(feedback),
+		} satisfies TinybirdStartDeploymentResult
+	})
+
+	const pollDeployment = Effect.fn("TinybirdProjectSync.pollDeployment")(function* (
 		params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-	) => this.use((service) => service.pollDeployment(params))
+	) {
+		const status = yield* fetchDeploymentStatusInternal(params)
 
-	static readonly getDeploymentStatus = (
+		if (status.isReady) return status
+
+		if (status.isTerminal) {
+			return yield* Effect.fail(
+				toRejectedError(
+					status.errorMessage
+						? `Tinybird deployment ${status.status}: ${status.errorMessage}`
+						: `Tinybird deployment ${status.status} before reaching data_ready.`,
+				),
+			)
+		}
+
+		return yield* Effect.fail(TinybirdDeploymentNotReadyError.from(params.deploymentId, status.status))
+	})
+
+	const setDeploymentLive = Effect.fn("TinybirdProjectSync.setDeploymentLive")(function* (
 		params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-	) => this.use((service) => service.getDeploymentStatus(params))
+	) {
+		yield* Effect.annotateCurrentSpan("deploymentId", params.deploymentId)
+		const api = makeApi(params, options.fetch)
+		const liveResponse = yield* Effect.tryPromise({
+			try: () =>
+				api.request(`/v1/deployments/${params.deploymentId}/set-live`, {
+					method: "POST",
+				}),
+			catch: (error) =>
+				mapApiFailure(error, `Failed to set Tinybird deployment ${params.deploymentId} live`),
+		})
 
-	static readonly setDeploymentLive = (
+		if (liveResponse.status >= 400) {
+			const liveRawBody = yield* Effect.promise(() => liveResponse.text()).pipe(
+				Effect.orElseSucceed(() => ""),
+			)
+			return yield* Effect.fail(
+				classifyHttpError(
+					liveResponse.status,
+					`Failed to set Tinybird deployment ${params.deploymentId} live (HTTP ${liveResponse.status}).\nResponse: ${liveRawBody}`,
+				),
+			)
+		}
+	})
+
+	const cleanupOwnedDeployment = Effect.fn("TinybirdProjectSync.cleanupOwnedDeployment")(function* (
 		params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-	) => this.use((service) => service.setDeploymentLive(params))
+	) {
+		yield* Effect.annotateCurrentSpan("deploymentId", params.deploymentId)
+		const status = yield* fetchDeploymentStatusInternal(params)
+		if (!status.isTerminal || status.status === "live" || status.status === "data_ready") {
+			return
+		}
+		if (status.status === "deleted") {
+			return
+		}
 
-	static readonly cleanupOwnedDeployment = (
-		params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-	) => this.use((service) => service.cleanupOwnedDeployment(params))
+		const api = makeApi(params, options.fetch)
+		const response = yield* Effect.tryPromise({
+			try: () =>
+				api.request(`/v1/deployments/${params.deploymentId}`, {
+					method: "DELETE",
+				}),
+			catch: (error) =>
+				mapApiFailure(error, `Failed to delete Tinybird deployment ${params.deploymentId}`),
+		})
 
-	static readonly fetchInstanceHealth = (params: TinybirdProjectSyncParams) =>
-		this.use((service) => service.fetchInstanceHealth(params))
+		if (response.status === 404) return
+		if (response.status >= 400) {
+			const rawBody = yield* Effect.promise(() => response.text()).pipe(Effect.orElseSucceed(() => ""))
+			return yield* Effect.fail(
+				classifyHttpError(
+					response.status,
+					`Failed to delete Tinybird deployment ${params.deploymentId} (HTTP ${response.status}).\nResponse: ${rawBody}`,
+				),
+			)
+		}
+	})
 
-	static readonly getCurrentProjectRevision = () =>
-		this.use((service) => service.getCurrentProjectRevision())
+	const fetchInstanceHealth = Effect.fn("TinybirdProjectSync.fetchInstanceHealth")(function* (
+		params: TinybirdProjectSyncParams,
+	) {
+		yield* Effect.annotateCurrentSpan("baseUrl", params.baseUrl)
+		const api = makeApi(params, options.fetch)
+
+		const requestJsonBestEffort = <A, I>(
+			schema: Schema.Codec<A, I>,
+			path: string,
+			init?: RequestInit,
+		): Effect.Effect<A | null> => {
+			const parse = parseJsonSafe(schema)
+			return Effect.promise(() => api.request(path, init)).pipe(
+				Effect.flatMap((response) =>
+					Effect.promise(() => response.text()).pipe(
+						Effect.flatMap((rawBody) => (response.ok ? parse(rawBody) : Effect.succeed(null))),
+					),
+				),
+				Effect.orElseSucceed(() => null),
+			)
+		}
+
+		const querySql = (sql: string) =>
+			requestJsonBestEffort(SqlResponseSchema, `/v0/sql?q=${encodeURIComponent(`${sql} FORMAT JSON`)}`)
+
+		// Raw SQL against Tinybird's `tinybird.*` admin schema — fixed strings,
+		// no interpolation. Kept raw because @maple/domain cannot depend on
+		// @maple/query-engine (the DSL) without inverting the existing
+		// query-engine → domain dependency. These three queries have no
+		// dynamic input, so there's no injection surface to protect.
+		const DATASOURCES_STORAGE_SQL =
+			"SELECT datasource_name, bytes, rows FROM tinybird.datasources_storage WHERE timestamp = (SELECT max(timestamp) FROM tinybird.datasources_storage) ORDER BY bytes DESC"
+		const ENDPOINT_ERRORS_24H_SQL =
+			"SELECT count() as cnt FROM tinybird.endpoint_errors WHERE start_datetime >= now() - interval 1 day"
+		const PIPE_LATENCY_24H_SQL =
+			"SELECT avg(duration) as avg_ms FROM tinybird.pipe_stats_rt WHERE start_datetime >= now() - interval 1 day"
+
+		const [workspace, datasourcesResult, errorsResult, latencyResult] = yield* Effect.all(
+			[
+				requestJsonBestEffort(WorkspaceProbeSchema, "/v1/workspace"),
+				querySql(DATASOURCES_STORAGE_SQL),
+				querySql(ENDPOINT_ERRORS_24H_SQL),
+				querySql(PIPE_LATENCY_24H_SQL),
+			],
+			{ concurrency: "unbounded" },
+		)
+
+		const ds = (datasourcesResult?.data ?? []).map((row) => ({
+			name: String(row.datasource_name ?? ""),
+			rowCount: Number(row.rows ?? 0),
+			bytes: Number(row.bytes ?? 0),
+		}))
+
+		const totalRows = ds.reduce((sum, d) => sum + d.rowCount, 0)
+		const totalBytes = ds.reduce((sum, d) => sum + d.bytes, 0)
+
+		const recentErrorCount = Number(errorsResult?.data?.[0]?.cnt ?? 0)
+		const avgLatencyRaw = toNumberOrNull(latencyResult?.data?.[0]?.avg_ms)
+		const avgQueryLatencyMs = avgLatencyRaw == null ? null : avgLatencyRaw * 1000
+
+		return {
+			workspaceName: workspace?.name ?? null,
+			datasources: ds,
+			totalRows,
+			totalBytes,
+			recentErrorCount,
+			avgQueryLatencyMs,
+		}
+	})
+
+	const getCurrentProjectRevision = Effect.fn("TinybirdProjectSync.getCurrentProjectRevision")(
+		function* () {
+			return projectRevision
+		},
+	)
+
+	return {
+		cleanupStaleDeployments,
+		startDeployment,
+		pollDeployment,
+		getDeploymentStatus: fetchDeploymentStatusInternal,
+		setDeploymentLive,
+		cleanupOwnedDeployment,
+		fetchInstanceHealth,
+		getCurrentProjectRevision,
+	} satisfies TinybirdProjectSyncShape
 }
 
 // Promise-returning wrappers for non-Effect callers (Cloudflare Workflow steps)
 
-const provideSync = <A, E>(effect: Effect.Effect<A, E, TinybirdProjectSync>): Promise<A> =>
-	Effect.runPromise(Effect.provide(effect, TinybirdProjectSync.layer))
+export interface TinybirdProjectSyncRuntime {
+	readonly cleanupStaleTinybirdDeployments: (params: TinybirdProjectSyncParams) => Promise<void>
+	readonly startTinybirdDeploymentStep: (
+		params: TinybirdDeployParams,
+	) => Promise<TinybirdStartDeploymentResult>
+	readonly pollTinybirdDeploymentStep: (
+		params: TinybirdProjectSyncParams & { readonly deploymentId: string },
+	) => Promise<TinybirdDeploymentReadiness>
+	readonly getTinybirdDeploymentStatus: (
+		params: TinybirdProjectSyncParams & { readonly deploymentId: string },
+	) => Promise<TinybirdDeploymentReadiness>
+	readonly setTinybirdDeploymentLiveStep: (
+		params: TinybirdProjectSyncParams & { readonly deploymentId: string },
+	) => Promise<void>
+	readonly cleanupOwnedTinybirdDeployment: (
+		params: TinybirdProjectSyncParams & { readonly deploymentId: string },
+	) => Promise<void>
+	readonly fetchInstanceHealth: (params: TinybirdProjectSyncParams) => Promise<TinybirdInstanceHealth>
+	readonly getCurrentTinybirdProjectRevision: () => Promise<string>
+}
+
+export const makeTinybirdProjectSyncRuntime = (
+	options: TinybirdProjectSyncOptions,
+): TinybirdProjectSyncRuntime => {
+	const sync = makeTinybirdProjectSync(options)
+	const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect)
+
+	return {
+		cleanupStaleTinybirdDeployments: (params) => run(sync.cleanupStaleDeployments(params)),
+		startTinybirdDeploymentStep: (params) => run(sync.startDeployment(params)),
+		pollTinybirdDeploymentStep: (params) => run(sync.pollDeployment(params)),
+		getTinybirdDeploymentStatus: (params) => run(sync.getDeploymentStatus(params)),
+		setTinybirdDeploymentLiveStep: (params) => run(sync.setDeploymentLive(params)),
+		cleanupOwnedTinybirdDeployment: (params) => run(sync.cleanupOwnedDeployment(params)),
+		fetchInstanceHealth: (params) => run(sync.fetchInstanceHealth(params)),
+		getCurrentTinybirdProjectRevision: () => run(sync.getCurrentProjectRevision()),
+	} satisfies TinybirdProjectSyncRuntime
+}
+
+// Resolve the platform fetch at call time so runtimes that install it after
+// module evaluation still use the platform implementation.
+const defaultRuntime = makeTinybirdProjectSyncRuntime({
+	fetch: (input, init) => globalThis.fetch(input, init),
+})
 
 export const cleanupStaleTinybirdDeployments = (params: TinybirdProjectSyncParams): Promise<void> =>
-	provideSync(TinybirdProjectSync.cleanupStaleDeployments(params))
+	defaultRuntime.cleanupStaleTinybirdDeployments(params)
 
 export const startTinybirdDeploymentStep = (
 	params: TinybirdDeployParams,
-): Promise<TinybirdStartDeploymentResult> => provideSync(TinybirdProjectSync.startDeployment(params))
+): Promise<TinybirdStartDeploymentResult> => defaultRuntime.startTinybirdDeploymentStep(params)
 
 export const pollTinybirdDeploymentStep = (
 	params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-): Promise<TinybirdDeploymentReadiness> => provideSync(TinybirdProjectSync.pollDeployment(params))
+): Promise<TinybirdDeploymentReadiness> => defaultRuntime.pollTinybirdDeploymentStep(params)
 
 export const getTinybirdDeploymentStatus = (
 	params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-): Promise<TinybirdDeploymentReadiness> => provideSync(TinybirdProjectSync.getDeploymentStatus(params))
+): Promise<TinybirdDeploymentReadiness> => defaultRuntime.getTinybirdDeploymentStatus(params)
 
 export const setTinybirdDeploymentLiveStep = (
 	params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-): Promise<void> => provideSync(TinybirdProjectSync.setDeploymentLive(params))
+): Promise<void> => defaultRuntime.setTinybirdDeploymentLiveStep(params)
 
 export const cleanupOwnedTinybirdDeployment = (
 	params: TinybirdProjectSyncParams & { readonly deploymentId: string },
-): Promise<void> => provideSync(TinybirdProjectSync.cleanupOwnedDeployment(params))
+): Promise<void> => defaultRuntime.cleanupOwnedTinybirdDeployment(params)
 
 export const fetchInstanceHealth = (params: TinybirdProjectSyncParams): Promise<TinybirdInstanceHealth> =>
-	provideSync(TinybirdProjectSync.fetchInstanceHealth(params))
+	defaultRuntime.fetchInstanceHealth(params)
 
 export const getCurrentTinybirdProjectRevision = (): Promise<string> =>
-	provideSync(TinybirdProjectSync.getCurrentProjectRevision())
+	defaultRuntime.getCurrentTinybirdProjectRevision()
