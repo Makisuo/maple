@@ -28,25 +28,43 @@ import {
 	type ActualTable,
 	type DesiredTable,
 } from "@maple/domain/clickhouse"
+import { OrgId } from "@maple/domain/http"
 import { eq } from "drizzle-orm"
-import { Effect } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
-import { makeTracedPgConnection, type TracedPgConnection } from "@/platform/pg-execute"
-import { invalidateOrgRuntimeConfigMemo } from "@/services/org/OrgClickHouseSettingsService"
+import { makePgConnectionScope, type PgConnectionScopeShape } from "@/platform/pg-connection-scope"
+import { EdgeCacheService } from "@maple/cache"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import {
+	invalidateOrgRuntimeConfigMemo,
+	ORG_CH_CONFIG_CACHE_BUCKET,
+} from "@/services/org/OrgClickHouseSettingsService"
 
 /**
- * Bust this isolate's cached runtime config after the workflow writes to
+ * Bust the cached runtime config after the workflow writes to
  * `org_clickhouse_settings` (it stamps `schema_version`, part of the cached
  * projection).
  *
- * Isolate-local, and that is the whole story now that the durable tier is gone:
- * the workflow runs in its own isolate, so API isolates converge on the new
- * `schema_version` at the memo's soft TTL (`ORG_CH_CONFIG_MEMO_TTL_MS`, 300s)
- * exactly as they do for every other writer. This call keeps the invariant
- * "every writer of the row busts its own memo" true at every write site.
+ * Both tiers. The memo call is isolate-local and therefore almost decorative
+ * here — the workflow runs in its own isolate, so it clears a memo no API
+ * request will ever read — but the shared edge-cache entry is the one that
+ * matters: it is what every API isolate reads on a memo miss, and at a 6h TTL
+ * it would otherwise hand back the pre-apply `schema_version` (and so a wrong
+ * `clickhouse.schemaDrift`) for the rest of the day.
+ *
+ * Best-effort by design: `invalidate` already swallows backend failures, and
+ * `Effect.ignore` covers the case where this isolate has no Cache API at all.
+ * A missed eviction costs an annotation, never a routing decision.
  */
-const bustRuntimeConfigCache = (orgId: string): void => invalidateOrgRuntimeConfigMemo(orgId)
+const bustRuntimeConfigCache = (orgId: OrgId): Promise<void> =>
+	Effect.runPromise(
+		Effect.gen(function* () {
+			invalidateOrgRuntimeConfigMemo(orgId)
+			const cache = yield* EdgeCacheService
+			yield* cache.invalidate({ bucket: ORG_CH_CONFIG_CACHE_BUCKET, key: orgId })
+		}).pipe(Effect.provide(EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))), Effect.ignore),
+	)
 
 /**
  * This workflow runs outside the worker's layer graph, so it owns its telemetry
@@ -228,7 +246,7 @@ const normalizeExpression = (value: string): string =>
 
 // --- config load + decrypt (imperative mirror of the service helper) --------
 
-const loadConfig = async (dbStep: DbStep, orgId: string, encryptionKey: Buffer): Promise<ChConfig> => {
+const loadConfig = async (dbStep: DbStep, orgId: OrgId, encryptionKey: Buffer): Promise<ChConfig> => {
 	const rows = await dbStep((db) =>
 		db.select().from(orgClickHouseSettings).where(eq(orgClickHouseSettings.orgId, orgId)).limit(1),
 	)
@@ -280,7 +298,7 @@ type RunPatch = Partial<{
 	finishedAt: Date | null
 }>
 
-const updateRun = async (dbStep: DbStep, orgId: string, patch: RunPatch, now: number): Promise<void> => {
+const updateRun = async (dbStep: DbStep, orgId: OrgId, patch: RunPatch, now: number): Promise<void> => {
 	await dbStep((db) =>
 		db
 			.update(orgClickHouseSchemaApplyRuns)
@@ -354,11 +372,11 @@ export async function runClickHouseSchemaApply(
 	if (source._tag === "Unavailable") {
 		throw new Error(source.reason)
 	}
-	const connection = makeTracedPgConnection(source.connectionString, source.attributes)
+	const connection = makePgConnectionScope(source.connectionString, source.attributes)
 	try {
 		return await runWithDb(connection, env, event, step)
 	} finally {
-		await connection.end()
+		await connection.close()
 		// This module owns its telemetry instance (the workflow runs outside the
 		// worker's layer graph), so nothing else will drain the span buffer.
 		await schemaApplyTelemetry.flush(env).catch(() => undefined)
@@ -366,14 +384,14 @@ export async function runClickHouseSchemaApply(
 }
 
 async function runWithDb(
-	connection: TracedPgConnection,
+	connection: PgConnectionScopeShape,
 	env: SchemaApplyWorkflowEnv,
 	event: WorkflowEventLike<SchemaApplyWorkflowPayload>,
 	step: WorkflowStepLike,
 ): Promise<SchemaApplyWorkflowResult> {
-	const orgId = event.payload.orgId
+	const orgId = Schema.decodeUnknownSync(OrgId)(event.payload.orgId)
 	const dbStep: DbStep = (fn) =>
-		Effect.runPromise(connection.step(fn).pipe(Effect.provide(schemaApplyTelemetry.layer)))
+		Effect.runPromise(connection.run(fn).pipe(Effect.provide(schemaApplyTelemetry.layer)))
 	const encryptionKey = Buffer.from(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY.trim(), "base64")
 	const startedAt = Date.now()
 	const appliedVersions: number[] = []
@@ -474,7 +492,7 @@ async function runWithDb(
 					})
 					.where(eq(orgClickHouseSettings.orgId, orgId)),
 			)
-			bustRuntimeConfigCache(orgId)
+			await bustRuntimeConfigCache(orgId)
 		})
 
 		for (const migration of clickHouseMigrations) {
@@ -633,7 +651,7 @@ async function runWithDb(
 				.set({ syncStatus: "error", lastSyncError: message, updatedAt: new Date(finishedAt) })
 				.where(eq(orgClickHouseSettings.orgId, orgId)),
 		).catch(() => undefined)
-		bustRuntimeConfigCache(orgId)
+		await bustRuntimeConfigCache(orgId)
 		throw error
 	}
 }

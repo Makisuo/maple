@@ -1,12 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
-import { createMaplePgSocket, type MaplePgSocketHandle } from "@maple/db/client"
+import { createMaplePgSocket, type MaplePgSocketHandle, type MaplePgSocketOptions } from "@maple/db/client"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Effect, Exit, Fiber, Tracer } from "effect"
 import type { DatabaseClient } from "./DatabaseLive"
 import {
+	executeOnFreshPgClient,
 	makePgConnectionScope,
 	PgConnectionScope,
 	type PgConnectionScopeShape,
+	pgConnectionScopeFrom,
 	withPgConnectionScope,
 	withPgConnectionScopeOf,
 } from "./pg-connection-scope"
@@ -33,19 +35,23 @@ const fakeSocket = (onEnd: () => void): MaplePgSocketHandle => {
 }
 
 interface Recorder {
-	readonly openSocket: () => MaplePgSocketHandle
+	readonly openSocket: (options: MaplePgSocketOptions) => MaplePgSocketHandle
 	readonly creations: () => number
 	readonly ends: () => number
+	readonly lastOptions: () => MaplePgSocketOptions | undefined
 }
 
 const recorder = (): Recorder => {
 	let creations = 0
 	let ends = 0
+	let lastOptions: MaplePgSocketOptions | undefined
 	return {
 		creations: () => creations,
 		ends: () => ends,
-		openSocket: () => {
+		lastOptions: () => lastOptions,
+		openSocket: (options) => {
 			creations += 1
+			lastOptions = options
 			return fakeSocket(() => {
 				ends += 1
 			})
@@ -189,6 +195,113 @@ describe("PgConnectionScope", () => {
 			assert.isTrue(Exit.isFailure(exit))
 			assert.strictEqual(rec.creations(), 1)
 			yield* Effect.promise(() => scope.close())
+		}),
+	)
+
+	it.effect("opens the pool at Cloudflare's ceiling rather than serializing on one connection", () =>
+		Effect.gen(function* () {
+			const rec = recorder()
+			const scope = makePgConnectionScope("postgres://unused", undefined, {
+				openSocket: rec.openSocket,
+			})
+
+			yield* scope.run(noop)
+
+			// This was 1 for one day and serialized every statement in a cron tick
+			// behind a single connection — `SELECT actors` p50 928ms -> 5687ms at flat
+			// volume. `max` is a ceiling, not a reservation.
+			assert.strictEqual(rec.lastOptions()?.maxConnections, 5)
+			yield* Effect.promise(() => scope.close())
+		}),
+	)
+
+	it.effect("bounds the dial so a stall is classifiable instead of unbounded", () =>
+		Effect.gen(function* () {
+			const rec = recorder()
+			const scope = makePgConnectionScope("postgres://unused", undefined, {
+				openSocket: rec.openSocket,
+			})
+
+			yield* scope.run(noop)
+
+			// postgres.js only raises CONNECT_TIMEOUT from connectTimedOut(), and its
+			// timer() is a no-op when the option is absent — unset, a stalled dial
+			// hangs for the whole invocation and lands with no error.type at all.
+			const connectTimeoutSeconds = rec.lastOptions()?.connectTimeoutSeconds
+			assert.isDefined(connectTimeoutSeconds)
+			assert.isAbove(connectTimeoutSeconds, 0)
+			yield* Effect.promise(() => scope.close())
+		}),
+	)
+
+	it.effect("closes twice without opening a second connection", () =>
+		Effect.gen(function* () {
+			const rec = recorder()
+			const scope = makePgConnectionScope("postgres://unused", undefined, {
+				openSocket: rec.openSocket,
+			})
+
+			yield* scope.run(noop)
+			yield* Effect.promise(() => scope.close())
+			yield* Effect.promise(() => scope.close())
+
+			assert.strictEqual(rec.creations(), 1)
+			assert.strictEqual(rec.ends(), 1)
+		}),
+	)
+})
+
+describe("executeOnFreshPgClient", () => {
+	it.effect("runs the callback and releases its connection", () =>
+		Effect.gen(function* () {
+			// No seam: this builds a real postgres.js client, which connects lazily.
+			// Nothing here issues a statement, so the unroutable port is never dialed.
+			const result = yield* executeOnFreshPgClient("postgres://maple:maple@127.0.0.1:1/never", noop)
+
+			assert.strictEqual(result, "ok")
+		}),
+	)
+
+	it.effect("releases its connection when the callback fails, and preserves the error", () =>
+		Effect.gen(function* () {
+			const exit = yield* Effect.exit(
+				executeOnFreshPgClient("postgres://maple:maple@127.0.0.1:1/never", () =>
+					Promise.reject(new Error("boom")),
+				),
+			)
+
+			assert.isTrue(Exit.isFailure(exit))
+		}),
+	)
+})
+
+describe("pgConnectionScopeFrom", () => {
+	it.effect("spans a client someone else owns and never closes it", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			let closed = false
+			const owned = {
+				end: () => {
+					closed = true
+				},
+			} as unknown as DatabaseClient
+			const scope = pgConnectionScopeFrom(owned)
+
+			const seen: Array<DatabaseClient> = []
+			const result = yield* scope
+				.run((db) => {
+					seen.push(db)
+					return Promise.resolve("ok")
+				})
+				.pipe(Effect.withTracer(tracer))
+			yield* Effect.promise(() => scope.close())
+
+			assert.strictEqual(result, "ok")
+			assert.strictEqual(seen[0], owned)
+			assert.strictEqual(dbSpans(spans).length, 1)
+			// The caller owns the connection; closing it here would pull it out from
+			// under the Workflow that handed it over.
+			assert.isFalse(closed)
 		}),
 	)
 })

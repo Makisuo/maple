@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Data, Effect } from "effect"
 
 export interface V2Page<T> {
 	readonly data: ReadonlyArray<T>
@@ -6,13 +6,12 @@ export interface V2Page<T> {
 	readonly next_cursor: string | null
 }
 
-export class V2PaginationCursorLoopError extends Schema.TaggedError<V2PaginationCursorLoopError>()(
+export class V2PaginationCursorLoopError extends Data.TaggedError(
 	"@maple/web/services/V2PaginationCursorLoopError",
-	{
-		cursor: Schema.String,
-		message: Schema.String,
-	},
-) {
+)<{
+	readonly cursor: string
+	readonly message: string
+}> {
 	static repeated(cursor: string): V2PaginationCursorLoopError {
 		return new V2PaginationCursorLoopError({
 			cursor,

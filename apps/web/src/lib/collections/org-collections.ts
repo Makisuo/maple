@@ -195,7 +195,7 @@ const scheduleBoundedHeal = (source: HealSource): void => {
 		// paths' recreate has no other trace, so log it here for dev consoles/telemetry.
 		if (source === "stuck-loading" || source === "auth-error") {
 			mapleRuntime.runFork(
-				Effect.logWarning(`Electric sync self-heal: recreating org collections (${source})`).pipe(
+				Effect.logWarning("Electric sync self-heal is recreating organization collections").pipe(
 					Effect.annotateLogs({
 						source,
 						attempt: schemaHealAttempts,

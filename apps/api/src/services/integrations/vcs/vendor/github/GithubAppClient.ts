@@ -10,7 +10,7 @@ import { GithubHttp } from "./GithubHttp"
 // `GithubAppError` is internal to the GitHub layer; `GithubProvider` maps it to
 // the generic `VcsProviderError` at the port boundary.
 
-export class GithubAppError extends Data.TaggedError("GithubAppError")<{
+export class GithubAppError extends Data.TaggedError("@maple/api/vcs/GithubAppError")<{
 	message: string
 	status?: number
 	// Which resource the failing call addressed, so the provider can tell an

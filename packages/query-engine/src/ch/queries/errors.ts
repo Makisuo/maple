@@ -10,6 +10,8 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
+import { SpanId, TraceId } from "@maple/domain"
+import { Schema } from "effect"
 import {
 	ErrorEvents,
 	ErrorEventsByTime,
@@ -27,6 +29,7 @@ import {
 	type FacetOutput,
 } from "./query-helpers"
 import { httpDisplaySpanName } from "../../traces-shared"
+import { CHNumber } from "../schema"
 
 function errorEventsTableForRecentScan(opts: {
 	fingerprintHashes?: readonly string[]
@@ -960,14 +963,15 @@ export function errorIssueTimeseriesQuery() {
 
 // Error Issue sample traces — most recent occurrences for one issue
 
-export interface ErrorIssueSampleTracesOutput {
-	readonly traceId: string
-	readonly spanId: string
-	readonly serviceName: string
-	readonly timestamp: string
-	readonly exceptionMessage: string
-	readonly durationMicros: number
-}
+export const ErrorIssueSampleTracesOutputSchema = Schema.Struct({
+	traceId: TraceId,
+	spanId: SpanId,
+	serviceName: Schema.String,
+	timestamp: Schema.String,
+	exceptionMessage: Schema.String,
+	durationMicros: CHNumber,
+})
+export type ErrorIssueSampleTracesOutput = Schema.Schema.Type<typeof ErrorIssueSampleTracesOutputSchema>
 
 export function errorIssueSampleTracesQuery(opts: { limit?: number }) {
 	return from(ErrorEvents)

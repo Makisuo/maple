@@ -1,3 +1,4 @@
+import type { OrgId } from "@maple/domain"
 import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 /**
@@ -19,7 +20,7 @@ export const planetscalePollState = pgTable(
 	"planetscale_poll_state",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		dataset: text("dataset").notNull(),
 		// "" for the org-wide inventory anchor row — kept NOT NULL so the unique
 		// index treats it like any other row.
@@ -68,7 +69,7 @@ export const planetscaleDatabases = pgTable(
 	"planetscale_databases",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		/** PlanetScale's database id. */
 		databaseId: text("database_id").notNull(),
 		name: text("name").notNull(),
@@ -118,7 +119,7 @@ export const planetscaleEvents = pgTable(
 	"planetscale_events",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		/** PlanetScale's database id when resolvable; "" for webhooks that carry only the name. */
 		databaseId: text("database_id").notNull().default(""),
 		databaseName: text("database_name").notNull(),

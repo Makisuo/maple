@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { InternalRpcInvalidInputError } from "@maple/domain/internal-rpc"
 import { callMcpToolRpc, submitDiagnosisRpc } from "./internal-rpc"
+import { McpToolExecutor, type McpToolExecutorShape } from "./mcp/dispatcher"
 import { InvestigationService, type InvestigationServiceShape } from "./services/errors/InvestigationService"
 
 const investigationId = "00000000-0000-4000-8000-000000000001"
@@ -32,17 +32,22 @@ const unusedInvestigationService: InvestigationServiceShape = {
 	submitDiagnosis: () => Effect.die("unused"),
 }
 
+const unusedMcpToolExecutor: McpToolExecutorShape = {
+	execute: () => Effect.die("unused"),
+}
+
 describe("internal RPC boundary", () => {
 	it.effect("rejects invalid org IDs before MCP dispatch", () =>
 		Effect.gen(function* () {
 			const error = yield* Effect.flip(
-				callMcpToolRpc({ orgId: " ", name: "inspect_trace", input: {} }) as Effect.Effect<
-					never,
-					InternalRpcInvalidInputError,
-					never
-				>,
+				callMcpToolRpc({ orgId: " ", name: "inspect_trace", input: {} }).pipe(
+					Effect.provideService(McpToolExecutor, unusedMcpToolExecutor),
+				),
 			)
 			expect(error._tag).toBe("@maple/internal-rpc/InvalidInputError")
+			if (error._tag !== "@maple/internal-rpc/InvalidInputError") {
+				throw new Error(`Expected invalid input, received ${error._tag}`)
+			}
 			expect(error.method).toBe("callMcpTool")
 		}),
 	)

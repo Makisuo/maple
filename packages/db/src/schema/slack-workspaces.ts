@@ -1,3 +1,4 @@
+import type { OrgId } from "@maple/domain"
 import { sql } from "drizzle-orm"
 import { index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
@@ -22,7 +23,7 @@ export const slackWorkspaces = pgTable(
 	"slack_workspaces",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		/** Slack workspace (team) id, e.g. `T0123ABCD`. Unique across all orgs. */
 		teamId: text("team_id").notNull(),
 		teamName: text("team_name"),

@@ -231,8 +231,8 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 					return yield* new VcsWebhookSignatureError({ message })
 				})
 
-			const verifySignature = (rawBody: string, signatureHeader: string | undefined) =>
-				Effect.gen(function* () {
+			const verifySignature = Effect.fn("GithubProvider.verifySignature")(
+				function* (rawBody: string, signatureHeader: string | undefined) {
 					const secret = env.GITHUB_APP_WEBHOOK_SECRET
 					if (Option.isNone(secret)) {
 						yield* Effect.logWarning(
@@ -290,11 +290,9 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 						return yield* signatureRejected("mismatch", "Webhook signature mismatch")
 					}
 					yield* Effect.annotateCurrentSpan({ "vcs.webhook.signature_result": "ok" })
-				}).pipe(
-					Effect.withSpan("GithubProvider.verifySignature", {
-						attributes: { "vcs.provider": PROVIDER },
-					}),
-				)
+				},
+				Effect.annotateSpans({ "vcs.provider": PROVIDER }),
+			)
 
 			const mapPush = (raw: unknown, now: number) =>
 				Effect.gen(function* () {
@@ -600,7 +598,7 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 							// A 404 means this repo doesn't contain the SHA (or access was lost) —
 							// for a SHA-only probe that's "look in the next repo", not a failure.
 							// Every other GitHub failure is mapped to the port's semantic errors.
-							Effect.catchTag("GithubAppError", (error) =>
+							Effect.catchTag("@maple/api/vcs/GithubAppError", (error) =>
 								error.status === 404
 									? Effect.succeed(Option.none<CommitUpsertInput>())
 									: Effect.fail(toVcsCommitError(error)),
@@ -664,7 +662,7 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 										: file.content,
 							}),
 						),
-						Effect.catchTag("GithubAppError", (error) =>
+						Effect.catchTag("@maple/api/vcs/GithubAppError", (error) =>
 							error.status === 404
 								? Effect.succeed(Option.none())
 								: Effect.fail(toVcsCommitError(error)),

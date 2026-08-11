@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest"
-import type { SpanId } from "@maple/domain"
+import { SpanId } from "@maple/domain"
 import type { SpanNode } from "@maple/query-engine/observability"
+import { Schema } from "effect"
 import { renderTraceOverview, type TraceOverviewLog } from "./render-trace"
+
+const decodeSpanId = Schema.decodeSync(SpanId)
 
 function span(
 	id: string,
 	opts: Partial<Omit<SpanNode, "spanId" | "children">> & { children?: SpanNode[] } = {},
 ): SpanNode {
 	return {
-		spanId: id as unknown as SpanId,
+		spanId: decodeSpanId(id),
 		parentSpanId: opts.parentSpanId ?? "",
 		spanName: opts.spanName ?? id,
 		serviceName: opts.serviceName ?? "svc",

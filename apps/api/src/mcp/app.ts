@@ -1,5 +1,5 @@
 import { McpProtocol, McpServer } from "effect/unstable/ai"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Layer } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { McpToolsLive } from "./server"
 import { DebugErrorsPrompt } from "./prompts/debug-errors"
@@ -7,6 +7,7 @@ import { LatencyAnalysisPrompt } from "./prompts/latency-analysis"
 import { IncidentTriagePrompt } from "./prompts/incident-triage"
 import { InstructionsResource } from "./resources/instructions"
 import { sessionStore } from "./lib/session-store"
+import type { McpToolExecutor } from "./dispatcher"
 import { CurrentMcpRequestTenant, CurrentMcpTenant, resolveHttpMcpTenant } from "./lib/query-warehouse"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
@@ -78,7 +79,11 @@ const McpHttpLive = McpServer.layerHttp({
 	clientSessions: sessionStore,
 }).pipe(Layer.provide(McpAuthorizationMiddleware.layer))
 
-export const McpLive = Layer.mergeAll(
+export const McpLive: Layer.Layer<
+	never,
+	Cause.IllegalArgumentError,
+	HttpRouter.HttpRouter | ApiKeysService | AuthService | Env | McpToolExecutor
+> = Layer.mergeAll(
 	McpToolsLive,
 	DebugErrorsPrompt,
 	LatencyAnalysisPrompt,

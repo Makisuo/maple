@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest"
+import { describe, it } from "@effect/vitest"
+import { expect } from "vitest"
 import { Effect, Layer, Redacted } from "effect"
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli"
 import { ApiKey, ApiKeyProvider } from "../src/ApiKey"
@@ -51,130 +52,138 @@ const wireDashboard = {
 	updated_at: "2026-07-01T12:00:00.000Z",
 }
 
-const runWithProvider = <A>(api: MapleApiShape, program: Effect.Effect<A, unknown, any>): Promise<A> =>
-	Effect.runPromise(
-		program.pipe(
-			Effect.provide(DashboardProvider().pipe(Layer.provide(Layer.succeed(MapleApi, api)))),
-			Effect.provide(ApiKeyProvider().pipe(Layer.provide(Layer.succeed(MapleApi, api)))),
-		) as Effect.Effect<A>,
+const runWithProvider = <A, E, R>(api: MapleApiShape, program: Effect.Effect<A, E, R>) =>
+	program.pipe(
+		Effect.provide(DashboardProvider().pipe(Layer.provide(Layer.succeed(MapleApi, api)))),
+		Effect.provide(ApiKeyProvider().pipe(Layer.provide(Layer.succeed(MapleApi, api)))),
 	)
 
 describe("DashboardProvider", () => {
-	it("creates when there is no prior state", async () => {
-		const stub = makeStub({
-			"POST /v2/dashboards": () => Effect.succeed(wireDashboard),
-		})
-		const attributes = await runWithProvider(
-			stub.api,
-			Effect.gen(function* () {
-				const provider = yield* Dashboard.Provider
-				return yield* provider.reconcile({
-					id: "service-health",
-					fqn: "test/service-health",
-					instanceId: "i-1",
-					news: { name: "Service health" },
-					olds: undefined,
-					output: undefined,
-					session,
-					bindings: [],
-				})
-			}),
-		)
-		expect(attributes).toEqual({ dashboardId: "dash_abc", name: "Service health" })
-		expect(stub.calls).toEqual(["POST /v2/dashboards"])
-	})
+	it.live("creates when there is no prior state", () =>
+		Effect.gen(function* () {
+			const stub = makeStub({
+				"POST /v2/dashboards": () => Effect.succeed(wireDashboard),
+			})
+			const attributes = yield* runWithProvider(
+				stub.api,
+				Effect.gen(function* () {
+					const provider = yield* Dashboard.Provider
+					return yield* provider.reconcile({
+						id: "service-health",
+						fqn: "test/service-health",
+						instanceId: "i-1",
+						news: { name: "Service health" },
+						olds: undefined,
+						output: undefined,
+						session,
+						bindings: [],
+					})
+				}),
+			)
+			expect(attributes).toEqual({ dashboardId: "dash_abc", name: "Service health" })
+			expect(stub.calls).toEqual(["POST /v2/dashboards"])
+		}),
+	)
 
-	it("observes without mutating when nothing drifted", async () => {
-		const stub = makeStub({
-			"GET /v2/dashboards/dash_abc": () => Effect.succeed(wireDashboard),
-		})
-		await runWithProvider(
-			stub.api,
-			Effect.gen(function* () {
-				const provider = yield* Dashboard.Provider
-				return yield* provider.reconcile({
-					id: "service-health",
-					fqn: "test/service-health",
-					instanceId: "i-1",
-					news: { name: "Service health" },
-					olds: { name: "Service health" },
-					output: { dashboardId: "dash_abc", name: "Service health" },
-					session,
-					bindings: [],
-				})
-			}),
-		)
-		expect(stub.calls).toEqual(["GET /v2/dashboards/dash_abc"])
-	})
+	it.live("observes without mutating when nothing drifted", () =>
+		Effect.gen(function* () {
+			const stub = makeStub({
+				"GET /v2/dashboards/dash_abc": () => Effect.succeed(wireDashboard),
+			})
+			yield* runWithProvider(
+				stub.api,
+				Effect.gen(function* () {
+					const provider = yield* Dashboard.Provider
+					return yield* provider.reconcile({
+						id: "service-health",
+						fqn: "test/service-health",
+						instanceId: "i-1",
+						news: { name: "Service health" },
+						olds: { name: "Service health" },
+						output: { dashboardId: "dash_abc", name: "Service health" },
+						session,
+						bindings: [],
+					})
+				}),
+			)
+			expect(stub.calls).toEqual(["GET /v2/dashboards/dash_abc"])
+		}),
+	)
 
-	it("patches when a declared field drifted", async () => {
-		const stub = makeStub({
-			"GET /v2/dashboards/dash_abc": () => Effect.succeed(wireDashboard),
-			"PATCH /v2/dashboards/dash_abc": (body) =>
-				Effect.succeed({ ...wireDashboard, ...(body as object) }),
-		})
-		const attributes = await runWithProvider(
-			stub.api,
-			Effect.gen(function* () {
-				const provider = yield* Dashboard.Provider
-				return yield* provider.reconcile({
-					id: "service-health",
-					fqn: "test/service-health",
-					instanceId: "i-1",
-					news: { name: "Renamed", tags: ["golden"] },
-					olds: { name: "Service health" },
-					output: { dashboardId: "dash_abc", name: "Service health" },
-					session,
-					bindings: [],
-				})
-			}),
-		)
-		expect(attributes.name).toBe("Renamed")
-		expect(stub.calls).toEqual(["GET /v2/dashboards/dash_abc", "PATCH /v2/dashboards/dash_abc"])
-	})
+	it.live("patches when a declared field drifted", () =>
+		Effect.gen(function* () {
+			const stub = makeStub({
+				"GET /v2/dashboards/dash_abc": () => Effect.succeed(wireDashboard),
+				"PATCH /v2/dashboards/dash_abc": (body) =>
+					Effect.succeed({ ...wireDashboard, ...(body as object) }),
+			})
+			const attributes = yield* runWithProvider(
+				stub.api,
+				Effect.gen(function* () {
+					const provider = yield* Dashboard.Provider
+					return yield* provider.reconcile({
+						id: "service-health",
+						fqn: "test/service-health",
+						instanceId: "i-1",
+						news: { name: "Renamed", tags: ["golden"] },
+						olds: { name: "Service health" },
+						output: { dashboardId: "dash_abc", name: "Service health" },
+						session,
+						bindings: [],
+					})
+				}),
+			)
+			expect(attributes.name).toBe("Renamed")
+			expect(stub.calls).toEqual(["GET /v2/dashboards/dash_abc", "PATCH /v2/dashboards/dash_abc"])
+		}),
+	)
 
-	it("recreates after an out-of-band delete", async () => {
-		const stub = makeStub({
-			"POST /v2/dashboards": () => Effect.succeed(wireDashboard),
-		})
-		await runWithProvider(
-			stub.api,
-			Effect.gen(function* () {
-				const provider = yield* Dashboard.Provider
-				return yield* provider.reconcile({
-					id: "service-health",
-					fqn: "test/service-health",
-					instanceId: "i-1",
-					news: { name: "Service health" },
-					olds: { name: "Service health" },
-					output: { dashboardId: "dash_gone", name: "Service health" },
-					session,
-					bindings: [],
-				})
-			}),
-		)
-		expect(stub.calls).toEqual(["GET /v2/dashboards/dash_gone", "POST /v2/dashboards"])
-	})
+	it.live("recreates after an out-of-band delete", () =>
+		Effect.gen(function* () {
+			const stub = makeStub({
+				"POST /v2/dashboards": () => Effect.succeed(wireDashboard),
+			})
+			yield* runWithProvider(
+				stub.api,
+				Effect.gen(function* () {
+					const provider = yield* Dashboard.Provider
+					return yield* provider.reconcile({
+						id: "service-health",
+						fqn: "test/service-health",
+						instanceId: "i-1",
+						news: { name: "Service health" },
+						olds: { name: "Service health" },
+						output: { dashboardId: "dash_gone", name: "Service health" },
+						session,
+						bindings: [],
+					})
+				}),
+			)
+			expect(stub.calls).toEqual(["GET /v2/dashboards/dash_gone", "POST /v2/dashboards"])
+		}),
+	)
 
-	it("delete tolerates 404", async () => {
-		const stub = makeStub({})
-		await runWithProvider(
-			stub.api,
-			Effect.gen(function* () {
-				const provider = yield* Dashboard.Provider
-				yield* provider.delete({
-					id: "service-health",
-					fqn: "test/service-health",
-					instanceId: "i-1",
-					olds: { name: "Service health" },
-					output: { dashboardId: "dash_gone", name: "Service health" },
-					session,
-					bindings: [],
-				})
-			}),
-		)
-		expect(stub.calls).toEqual(["DELETE /v2/dashboards/dash_gone"])
-	})
+	it.live("delete tolerates 404", () =>
+		Effect.gen(function* () {
+			const stub = makeStub({})
+			yield* runWithProvider(
+				stub.api,
+				Effect.gen(function* () {
+					const provider = yield* Dashboard.Provider
+					yield* provider.delete({
+						id: "service-health",
+						fqn: "test/service-health",
+						instanceId: "i-1",
+						olds: { name: "Service health" },
+						output: { dashboardId: "dash_gone", name: "Service health" },
+						session,
+						bindings: [],
+					})
+				}),
+			)
+			expect(stub.calls).toEqual(["DELETE /v2/dashboards/dash_gone"])
+		}),
+	)
 })
 
 const wireApiKey = {
@@ -186,112 +195,120 @@ const wireApiKey = {
 }
 
 describe("ApiKeyProvider", () => {
-	it("captures the one-time secret on create", async () => {
-		const stub = makeStub({
-			"POST /v2/api_keys": () => Effect.succeed({ ...wireApiKey, secret: "maple_ak_secret1" }),
-		})
-		const attributes = await runWithProvider(
-			stub.api,
-			Effect.gen(function* () {
-				const provider = yield* ApiKey.Provider
-				return yield* provider.reconcile({
-					id: "ci",
-					fqn: "test/ci",
-					instanceId: "i-1",
-					news: { name: "ci" },
-					olds: undefined,
-					output: undefined,
-					session,
-					bindings: [],
-				})
-			}),
-		)
-		expect(Redacted.value(attributes.secret)).toBe("maple_ak_secret1")
-	})
+	it.live("captures the one-time secret on create", () =>
+		Effect.gen(function* () {
+			const stub = makeStub({
+				"POST /v2/api_keys": () => Effect.succeed({ ...wireApiKey, secret: "maple_ak_secret1" }),
+			})
+			const attributes = yield* runWithProvider(
+				stub.api,
+				Effect.gen(function* () {
+					const provider = yield* ApiKey.Provider
+					return yield* provider.reconcile({
+						id: "ci",
+						fqn: "test/ci",
+						instanceId: "i-1",
+						news: { name: "ci" },
+						olds: undefined,
+						output: undefined,
+						session,
+						bindings: [],
+					})
+				}),
+			)
+			expect(Redacted.value(attributes.secret)).toBe("maple_ak_secret1")
+		}),
+	)
 
-	it("preserves the stored secret on steady-state reconcile", async () => {
-		const stub = makeStub({
-			"GET /v2/api_keys/key_abc": () => Effect.succeed(wireApiKey),
-		})
-		const secret = Redacted.make("maple_ak_secret1")
-		const attributes = await runWithProvider(
-			stub.api,
-			Effect.gen(function* () {
-				const provider = yield* ApiKey.Provider
-				return yield* provider.reconcile({
-					id: "ci",
-					fqn: "test/ci",
-					instanceId: "i-1",
-					news: { name: "ci" },
-					olds: { name: "ci" },
-					output: { keyId: "key_abc", name: "ci", keyPrefix: "maple_ak_9f2c", secret },
-					session,
-					bindings: [],
-				})
-			}),
-		)
-		expect(Redacted.value(attributes.secret)).toBe("maple_ak_secret1")
-		expect(stub.calls).toEqual(["GET /v2/api_keys/key_abc"])
-	})
+	it.live("preserves the stored secret on steady-state reconcile", () =>
+		Effect.gen(function* () {
+			const stub = makeStub({
+				"GET /v2/api_keys/key_abc": () => Effect.succeed(wireApiKey),
+			})
+			const secret = Redacted.make("maple_ak_secret1")
+			const attributes = yield* runWithProvider(
+				stub.api,
+				Effect.gen(function* () {
+					const provider = yield* ApiKey.Provider
+					return yield* provider.reconcile({
+						id: "ci",
+						fqn: "test/ci",
+						instanceId: "i-1",
+						news: { name: "ci" },
+						olds: { name: "ci" },
+						output: { keyId: "key_abc", name: "ci", keyPrefix: "maple_ak_9f2c", secret },
+						session,
+						bindings: [],
+					})
+				}),
+			)
+			expect(Redacted.value(attributes.secret)).toBe("maple_ak_secret1")
+			expect(stub.calls).toEqual(["GET /v2/api_keys/key_abc"])
+		}),
+	)
 
-	it("rolls in place when `rotate` is bumped", async () => {
-		const stub = makeStub({
-			"GET /v2/api_keys/key_abc": () => Effect.succeed(wireApiKey),
-			"POST /v2/api_keys/key_abc/roll": () =>
-				Effect.succeed({ ...wireApiKey, id: "key_new", secret: "maple_ak_secret2" }),
-		})
-		const attributes = await runWithProvider(
-			stub.api,
-			Effect.gen(function* () {
-				const provider = yield* ApiKey.Provider
-				return yield* provider.reconcile({
-					id: "ci",
-					fqn: "test/ci",
-					instanceId: "i-1",
-					news: { name: "ci", rotate: 2 },
-					olds: { name: "ci", rotate: 1 },
-					output: {
-						keyId: "key_abc",
-						name: "ci",
-						keyPrefix: "maple_ak_9f2c",
-						secret: Redacted.make("maple_ak_secret1"),
-					},
-					session,
-					bindings: [],
-				})
-			}),
-		)
-		expect(attributes.keyId).toBe("key_new")
-		expect(Redacted.value(attributes.secret)).toBe("maple_ak_secret2")
-	})
+	it.live("rolls in place when `rotate` is bumped", () =>
+		Effect.gen(function* () {
+			const stub = makeStub({
+				"GET /v2/api_keys/key_abc": () => Effect.succeed(wireApiKey),
+				"POST /v2/api_keys/key_abc/roll": () =>
+					Effect.succeed({ ...wireApiKey, id: "key_new", secret: "maple_ak_secret2" }),
+			})
+			const attributes = yield* runWithProvider(
+				stub.api,
+				Effect.gen(function* () {
+					const provider = yield* ApiKey.Provider
+					return yield* provider.reconcile({
+						id: "ci",
+						fqn: "test/ci",
+						instanceId: "i-1",
+						news: { name: "ci", rotate: 2 },
+						olds: { name: "ci", rotate: 1 },
+						output: {
+							keyId: "key_abc",
+							name: "ci",
+							keyPrefix: "maple_ak_9f2c",
+							secret: Redacted.make("maple_ak_secret1"),
+						},
+						session,
+						bindings: [],
+					})
+				}),
+			)
+			expect(attributes.keyId).toBe("key_new")
+			expect(Redacted.value(attributes.secret)).toBe("maple_ak_secret2")
+		}),
+	)
 
-	it("recreates when the key was revoked out-of-band", async () => {
-		const stub = makeStub({
-			"GET /v2/api_keys/key_abc": () => Effect.succeed({ ...wireApiKey, revoked: true }),
-			"POST /v2/api_keys": () =>
-				Effect.succeed({ ...wireApiKey, id: "key_new", secret: "maple_ak_secret2" }),
-		})
-		const attributes = await runWithProvider(
-			stub.api,
-			Effect.gen(function* () {
-				const provider = yield* ApiKey.Provider
-				return yield* provider.reconcile({
-					id: "ci",
-					fqn: "test/ci",
-					instanceId: "i-1",
-					news: { name: "ci" },
-					olds: { name: "ci" },
-					output: {
-						keyId: "key_abc",
-						name: "ci",
-						keyPrefix: "maple_ak_9f2c",
-						secret: Redacted.make("maple_ak_secret1"),
-					},
-					session,
-					bindings: [],
-				})
-			}),
-		)
-		expect(attributes.keyId).toBe("key_new")
-	})
+	it.live("recreates when the key was revoked out-of-band", () =>
+		Effect.gen(function* () {
+			const stub = makeStub({
+				"GET /v2/api_keys/key_abc": () => Effect.succeed({ ...wireApiKey, revoked: true }),
+				"POST /v2/api_keys": () =>
+					Effect.succeed({ ...wireApiKey, id: "key_new", secret: "maple_ak_secret2" }),
+			})
+			const attributes = yield* runWithProvider(
+				stub.api,
+				Effect.gen(function* () {
+					const provider = yield* ApiKey.Provider
+					return yield* provider.reconcile({
+						id: "ci",
+						fqn: "test/ci",
+						instanceId: "i-1",
+						news: { name: "ci" },
+						olds: { name: "ci" },
+						output: {
+							keyId: "key_abc",
+							name: "ci",
+							keyPrefix: "maple_ak_9f2c",
+							secret: Redacted.make("maple_ak_secret1"),
+						},
+						session,
+						bindings: [],
+					})
+				}),
+			)
+			expect(attributes.keyId).toBe("key_new")
+		}),
+	)
 })

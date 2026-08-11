@@ -89,6 +89,15 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
  */
 const DEPLOY_AWS_INGEST = process.env.MAPLE_DEPLOY_AWS_INGEST === "1"
 
+type StackProviderServices =
+	| Layer.Services<ReturnType<typeof Cloudflare.providers>>
+	| Layer.Services<ReturnType<typeof AWS.providers>>
+
+const providers: Layer.Layer<StackProviderServices, never, Alchemy.StackServices> =
+	DEPLOY_AWS_INGEST
+		? Cloudflare.providers().pipe(Layer.provideMerge(AWS.providers()))
+		: Cloudflare.providers()
+
 export default Alchemy.Stack(
 	"maple",
 	{
@@ -104,9 +113,7 @@ export default Alchemy.Stack(
 		// they deploy in the same run. Unset, this stack is byte-identical to the
 		// last one that shipped (2m05s), so production keeps deploying while the
 		// hang is investigated with the flag on.
-		providers: DEPLOY_AWS_INGEST
-			? Layer.mergeAll(Cloudflare.providers(), AWS.providers())
-			: Cloudflare.providers(),
+		providers,
 		// Shared account-wide state store (Worker + DO SQLite) — bootstrapped once
 		// per Cloudflare account (`alchemy bootstrap cloudflare` or the first
 		// `deploy --yes`). ALCHEMY_LOCAL_STATE=1 opts into .alchemy/ file state for

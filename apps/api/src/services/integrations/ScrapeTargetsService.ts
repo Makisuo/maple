@@ -923,9 +923,8 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				// PlanetScale targets send no Authorization header at all, and that is
 				// the point: `authHeadersForRow` resolves the org's OAuth grant through
 				// `getValidConnectionToken`, which is uncached and therefore one fresh
-				// Postgres dial on *every* scrape — measured at ~1.2k dials/hour, each
-				// exposed to the 2s/8s dial ladder in `pg-execute.ts`. The data plane
-				// ignores the header (see below), so the whole read bought nothing.
+				// Postgres read on *every* scrape — measured at ~1.2k/hour. The data
+				// plane ignores the header (see below), so the whole read bought nothing.
 				//
 				// Branch on `targetType`, not on "did we end up with a signed URL": if
 				// PlanetScale ever starts honouring the header, this should fail to

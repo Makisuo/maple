@@ -1,10 +1,10 @@
-import type { MapleDatabaseClient } from "@maple/db/client"
+import type { MaplePgClient } from "@maple/db/client"
 import { fingerprintSql, SQL_TRACE_MAX, summarizeSql, truncateSql } from "@maple/query-engine/execution"
 import { Clock, Context, Effect, Schema } from "effect"
 import { isPostgresConnectionError, postgresErrorType, postgresSqlState } from "./postgres-errors"
 import { updateCurrentSpanName } from "./span-name"
 
-export type DatabaseClient = MapleDatabaseClient
+export type DatabaseClient = MaplePgClient
 
 export class DatabaseError extends Schema.TaggedError<DatabaseError>()("@maple/api/lib/DatabaseError", {
 	message: Schema.String,

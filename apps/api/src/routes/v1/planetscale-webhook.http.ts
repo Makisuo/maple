@@ -2,7 +2,7 @@ import { HttpRouter, HttpServerResponse, type HttpServerRequest } from "effect/u
 import { IntegrationsPersistenceError, OrgId } from "@maple/domain/http"
 import { planetscaleConnections } from "@maple/db"
 import { eq } from "drizzle-orm"
-import { Clock, Effect, Option, Redacted, Schema } from "effect"
+import { Clock, Data, Effect, Option, Redacted, Schema } from "effect"
 import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -28,10 +28,9 @@ const textResponse = (body: string, status: number) => HttpServerResponse.text(b
 
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 
-class PlanetScaleWebhookUnavailable extends Schema.TaggedError<PlanetScaleWebhookUnavailable>()(
-	"PlanetScaleWebhookUnavailable",
-	{ body: Schema.String },
-) {
+class PlanetScaleWebhookUnavailable extends Data.TaggedError(
+	"@maple/api/routes/PlanetScaleWebhookUnavailable",
+)<{ readonly body: string }> {
 	override get message(): string {
 		return this.body
 	}
@@ -71,7 +70,7 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 				Effect.gen(function* () {
 					yield* Effect.annotateCurrentSpan({
 						"http.response.status_code": 503,
-						"error.type": "PlanetScaleWebhookUnavailable",
+						"error.type": "@maple/api/routes/PlanetScaleWebhookUnavailable",
 						"maple.planetscale.webhook.outcome": "enqueue_failed",
 						"maple.planetscale.webhook.reason": reason,
 					})
@@ -217,7 +216,7 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 
 		yield* router.add("POST", ROUTE, (req) =>
 			handle(req).pipe(
-				Effect.catchTag("PlanetScaleWebhookUnavailable", ({ body }) =>
+				Effect.catchTag("@maple/api/routes/PlanetScaleWebhookUnavailable", ({ body }) =>
 					Effect.succeed(textResponse(body, 503)),
 				),
 			),

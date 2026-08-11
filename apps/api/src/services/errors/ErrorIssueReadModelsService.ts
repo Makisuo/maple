@@ -18,8 +18,6 @@ import {
 	type IssueSeverity,
 	type OrgId,
 	RoleName,
-	SpanId as SpanIdSchema,
-	TraceId as TraceIdSchema,
 	UserId as UserIdSchema,
 	type WorkflowState,
 } from "@maple/domain/http"
@@ -47,8 +45,6 @@ const encodeIssueSeverityListCursor = (fields: IssueSeverityListCursorFields): s
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.firstSeenAt)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
-const decodeTraceIdSync = Schema.decodeUnknownSync(TraceIdSchema)
-const decodeSpanIdSync = Schema.decodeUnknownSync(SpanIdSchema)
 
 const DEFAULT_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000
 /** Fallback fingerprint-scan window for the issue list's env filter when the
@@ -346,12 +342,16 @@ const make: Effect.Effect<
 						.pipe(Effect.mapError(makePersistenceError))
 				: Effect.succeed([])
 
-			const samplesCompiled = CH.compile(CH.errorIssueSampleTracesQuery({ limit: sampleLimit }), {
-				orgId,
-				fingerprintHash: issueRow.fingerprintHash,
-				startTime: formatWarehouseDateTime(startMs),
-				endTime: formatWarehouseDateTime(endMs),
-			})
+			const samplesCompiled = CH.compile(
+				CH.errorIssueSampleTracesQuery({ limit: sampleLimit }),
+				{
+					orgId,
+					fingerprintHash: issueRow.fingerprintHash,
+					startTime: formatWarehouseDateTime(startMs),
+					endTime: formatWarehouseDateTime(endMs),
+				},
+				{ rowSchema: CH.ErrorIssueSampleTracesOutputSchema },
+			)
 			const samplesEffect = isErrorKind
 				? warehouse
 						.compiledQuery(tenant, samplesCompiled, {
@@ -384,12 +384,12 @@ const make: Effect.Effect<
 			const sampleTraces = sampleRows.map(
 				(row) =>
 					new ErrorIssueSampleTrace({
-						traceId: decodeTraceIdSync(String(row.traceId ?? "")),
-						spanId: decodeSpanIdSync(String(row.spanId ?? "")),
-						serviceName: String(row.serviceName ?? ""),
+						traceId: row.traceId,
+						spanId: row.spanId,
+						serviceName: row.serviceName,
 						timestamp: decodeIsoDateTimeStringSync(warehouseDateTimeToIso(String(row.timestamp))),
-						exceptionMessage: String(row.exceptionMessage ?? ""),
-						durationMicros: Number(row.durationMicros ?? 0),
+						exceptionMessage: row.exceptionMessage,
+						durationMicros: row.durationMicros,
 					}),
 			)
 

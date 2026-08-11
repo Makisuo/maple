@@ -1,8 +1,7 @@
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Effect, Layer } from "effect"
 import { Database, type DatabaseClient, DatabaseError, type DatabaseShape } from "./DatabaseLive"
-import { PgConnectionScope } from "./pg-connection-scope"
-import { executeOnFreshPgClient } from "./pg-execute"
+import { executeOnFreshPgClient, PgConnectionScope } from "./pg-connection-scope"
 import { resolveDbConnectionSource } from "./pg-connection-source"
 
 // Worker TCP sockets are request-bound, so this layer holds only the connection

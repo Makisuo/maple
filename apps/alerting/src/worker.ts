@@ -229,7 +229,12 @@ export const catchTickFailure = (label: string) =>
 	Effect.catchCause((cause: Cause.Cause<unknown>) =>
 		Cause.hasInterruptsOnly(cause)
 			? Effect.interrupt
-			: Effect.logError(label).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) })),
+			: Effect.logError("Alerting tick failed").pipe(
+					Effect.annotateLogs({
+						"error.message": Cause.pretty(cause),
+						"maple.alerting.tick": label,
+					}),
+				),
 	)
 
 interface TickAnnotations {
@@ -239,25 +244,34 @@ interface TickAnnotations {
 const makeTick = <A, E, R>(
 	run: Effect.Effect<A, E, R>,
 	spanKey: string,
-	label: string,
 	annotationsFor: (result: A) => TickAnnotations | undefined,
 ): Effect.Effect<void, never, R> =>
 	run.pipe(
 		Effect.tap((result) => {
 			const annotations = annotationsFor(result)
-			return annotations === undefined
+			const namespacedAnnotations =
+				annotations === undefined
+					? undefined
+					: Object.fromEntries(
+							Object.entries(annotations).map(([key, value]) => [
+								`maple.alerting.${key}`,
+								value,
+							]),
+						)
+			return namespacedAnnotations === undefined
 				? Effect.succeed(undefined)
-				: Effect.logInfo(`${label} complete`).pipe(Effect.annotateLogs(annotations))
+				: Effect.logInfo("Alerting tick completed").pipe(
+						Effect.annotateLogs({ ...namespacedAnnotations, "maple.alerting.tick": spanKey }),
+					)
 		}),
 		Effect.asVoid,
 		Effect.withSpan(`alerting.${spanKey}_tick`),
-		catchTickFailure(`${label} failed`),
+		catchTickFailure(spanKey),
 	)
 
 const alertTick = makeTick(
 	AlertsService.use((alerts) => alerts.runSchedulerTick()),
 	"scheduler",
-	"Alerting worker tick",
 	(result) => ({
 		evaluatedCount: result.evaluatedCount,
 		processedCount: result.processedCount,
@@ -269,7 +283,6 @@ const alertTick = makeTick(
 const errorTick = makeTick(
 	ErrorsService.use((errors) => errors.runTick()),
 	"error",
-	"Errors worker tick",
 	(result) => ({
 		orgsProcessed: result.orgsProcessed,
 		issuesTouched: result.issuesTouched,
@@ -285,7 +298,6 @@ const errorTick = makeTick(
 const escalationTick = makeTick(
 	EscalationService.use((escalations) => escalations.runEscalationTick()),
 	"escalation",
-	"Escalation tick",
 	(result) =>
 		result.processed > 0
 			? {
@@ -301,7 +313,6 @@ const escalationTick = makeTick(
 const digestTick = makeTick(
 	DigestService.use((digest) => digest.runDigestTick()),
 	"digest",
-	"Digest tick",
 	(result) => ({
 		sentCount: result.sentCount,
 		errorCount: result.errorCount,
@@ -317,7 +328,6 @@ const digestTick = makeTick(
 const serviceMapRollupTick = makeTick(
 	ServiceMapRollupService.use((rollup) => rollup.runRollupTick()),
 	"service_map_rollup",
-	"Service map rollup tick",
 	(result) => ({
 		orgsProcessed: result.orgsProcessed,
 		hoursRolledUp: result.hoursRolledUp,
@@ -332,7 +342,6 @@ const serviceMapRollupTick = makeTick(
 const anomalyTick = makeTick(
 	AnomalyDetectionService.use((anomalies) => anomalies.runTick()),
 	"anomaly",
-	"Anomaly detection tick",
 	(result) => ({
 		orgsProcessed: result.orgsProcessed,
 		seriesEvaluated: result.seriesEvaluated,
@@ -348,7 +357,6 @@ const anomalyTick = makeTick(
 const cloudflareAnalyticsTick = makeTick(
 	CloudflareAnalyticsService.use((analytics) => analytics.pollAllOrgs()),
 	"cloudflare_analytics",
-	"Cloudflare analytics tick",
 	(result) => ({
 		orgs: result.orgs,
 		rowsIngested: result.rowsIngested,
@@ -361,7 +369,6 @@ const cloudflareAnalyticsTick = makeTick(
 const planetScaleTick = makeTick(
 	PlanetScaleService.use((planetscale) => planetscale.pollAllOrgs()),
 	"planetscale",
-	"PlanetScale poll tick",
 	(result) =>
 		result.orgs > 0
 			? {

@@ -1,7 +1,8 @@
+import type { OrgId } from "@maple/domain"
 import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core"
 
 export const orgOnboardingState = pgTable("org_onboarding_state", {
-	orgId: text("org_id").notNull().primaryKey(),
+	orgId: text("org_id").$type<OrgId>().notNull().primaryKey(),
 	userId: text("user_id"),
 	email: text("email"),
 	role: text("role"),

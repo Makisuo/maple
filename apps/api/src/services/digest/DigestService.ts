@@ -564,7 +564,13 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 						const memberEmail = member.publicUserData?.identifier
 						const memberUserId = member.publicUserData?.userId
 						if (!memberEmail || !memberUserId) return []
-						return [{ orgId: org.id, userId: memberUserId, email: memberEmail }]
+						return [
+							{
+								orgId: OrgId.make(org.id),
+								userId: UserId.make(memberUserId),
+								email: memberEmail,
+							},
+						]
 					})
 				}),
 			)
@@ -573,7 +579,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 		})
 
 		const reconcileSubscriptions = Effect.fn("DigestService.reconcileSubscriptions")(function* (
-			clerkMemberships: Array<{ orgId: string; userId: string; email: string }>,
+			clerkMemberships: Array<{ orgId: OrgId; userId: UserId; email: string }>,
 		) {
 			const now = yield* Clock.currentTimeMillis
 

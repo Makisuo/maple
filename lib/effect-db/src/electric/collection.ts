@@ -84,22 +84,15 @@ function dispatchSyncFailed(collectionId: string | undefined): void {
  */
 function logVia(
 	runtime: ManagedRuntime.ManagedRuntime<unknown, unknown> | undefined,
-	level: "warning" | "error" | "debug",
-	message: string,
+	log: Effect.Effect<void>,
 	annotations: Record<string, unknown>,
 ): void {
-	const log = (
-		level === "warning"
-			? Effect.logWarning(message)
-			: level === "error"
-				? Effect.logError(message)
-				: Effect.logDebug(message)
-	).pipe(Effect.annotateLogs(annotations))
+	const annotatedLog = log.pipe(Effect.annotateLogs(annotations))
 	if (runtime) {
-		runtime.runFork(log)
+		runtime.runFork(annotatedLog)
 		return
 	}
-	Effect.runFork(log)
+	Effect.runFork(annotatedLog)
 }
 
 /**
@@ -136,8 +129,7 @@ function createBackoffOnError(
 		if (errorStatus === 401) {
 			logVia(
 				runtime,
-				"warning",
-				"Authentication error (401), stopping stream and requesting recovery",
+				Effect.logWarning("Authentication error (401), stopping stream and requesting recovery"),
 				{
 					collectionId,
 					status: 401,
@@ -152,7 +144,7 @@ function createBackoffOnError(
 		// A schema mismatch usually means the client retained a pre-deploy shape.
 		const errorName = (error as Error)?.name || (error as { _tag?: string })?._tag
 		if (errorName === "SchemaValidationError") {
-			logVia(runtime, "warning", "Schema validation error, dispatching recovery event", {
+			logVia(runtime, Effect.logWarning("Schema validation error, dispatching recovery event"), {
 				collectionId,
 				errorName,
 			})
@@ -163,7 +155,7 @@ function createBackoffOnError(
 		}
 
 		if (retryCount > backoffConfig.maxRetries) {
-			logVia(runtime, "error", "Max retries exceeded, stopping sync", {
+			logVia(runtime, Effect.logError("Max retries exceeded, stopping sync"), {
 				collectionId,
 				maxRetries: backoffConfig.maxRetries,
 				retryCount,
@@ -177,7 +169,7 @@ function createBackoffOnError(
 
 		const delay = backoffConfig.jitter ? currentDelay * (0.5 + Math.random()) : currentDelay
 
-		logVia(runtime, "warning", "Connection error, retrying", {
+		logVia(runtime, Effect.logWarning("Connection error, retrying"), {
 			collectionId,
 			delayMs: Math.round(delay),
 			retryCount,
