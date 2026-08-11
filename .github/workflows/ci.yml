@@ -436,6 +436,24 @@ jobs:
 
             - uses: ./.github/actions/bun-install
 
+            - name: Restore turbo cache
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: .turbo/cache
+                  key: turbo-v1-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+                  restore-keys: |
+                      turbo-v1-${{ runner.os }}-${{ github.job }}-
+                      turbo-v1-${{ runner.os }}-
+
+            # `@maple-dev/clickhouse-builder` resolves only through `dist/`, and the
+            # suite reaches it transitively: DatabaseLive imports
+            # `@maple/query-engine/execution`, which imports `ch/index.ts`. Without
+            # this the run dies at import with "Failed to resolve entry for package"
+            # before a single test starts. Same step, same reason, as the typescript
+            # and clickhouse jobs.
+            - name: Build ClickHouse query DSL
+              run: bun turbo build --filter=@maple-dev/clickhouse-builder
+
             # No migrations: the suite creates the one scratch table it needs and
             # drops it. Keeping it schema-independent means a migration change can
             # never make this job red for a reason unrelated to connections.
