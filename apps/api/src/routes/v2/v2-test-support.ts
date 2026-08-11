@@ -1,6 +1,7 @@
 import { Effect, Layer } from "effect"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { AlertsService } from "@/services/alerts/AlertsService"
+import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
@@ -265,23 +266,36 @@ export const SlackIntegrationServiceStubLayer = Layer.succeed(
 	}),
 )
 
-/** Inert AlertsService for harnesses that never touch the alert groups. */
-export const AlertsServiceStubLayer = Layer.succeed(AlertsService, {
+const alertDestinationStubs = {
 	listDestinations: die,
 	createDestination: die,
 	updateDestination: die,
 	deleteDestination: die,
 	testDestination: die,
-	listRules: die,
-	createRule: die,
-	updateRule: die,
-	deleteRule: die,
-	testRule: die,
-	previewRule: die,
-	listIncidents: die,
-	getIncident: die,
-	listRuleChecks: die,
-	summarizeRuleChecks: die,
-	listDeliveryEvents: die,
-	runSchedulerTick: die,
-})
+}
+
+/** Inert destination capability for harnesses that never touch the alert destination group. */
+export const AlertDestinationsServiceStubLayer = Layer.succeed(
+	AlertDestinationsService,
+	alertDestinationStubs,
+)
+
+/** Inert AlertsService facade for harnesses that never touch the alert groups. */
+export const AlertsServiceStubLayer = Layer.mergeAll(
+	AlertDestinationsServiceStubLayer,
+	Layer.succeed(AlertsService, {
+		...alertDestinationStubs,
+		listRules: die,
+		createRule: die,
+		updateRule: die,
+		deleteRule: die,
+		testRule: die,
+		previewRule: die,
+		listIncidents: die,
+		getIncident: die,
+		listRuleChecks: die,
+		summarizeRuleChecks: die,
+		listDeliveryEvents: die,
+		runSchedulerTick: die,
+	}),
+)

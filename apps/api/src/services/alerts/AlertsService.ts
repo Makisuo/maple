@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto"
 import {
 	CompiledAlertQueryPlan,
 	QueryEngineAlertReducer,
@@ -16,11 +15,7 @@ import {
 	AlertDeliveryEventDocument,
 	AlertDeliveryEventsListResponse,
 	AlertDeliveryStatus,
-	AlertDestinationDeleteResponse,
 	AlertDestinationDocument,
-	AlertDestinationInUseError,
-	AlertDestinationTestResponse,
-	AlertDestinationsListResponse,
 	AlertEvaluationResult,
 	AlertEventType as AlertEventTypeSchema,
 	AlertForbiddenError,
@@ -49,9 +44,7 @@ import {
 	AlertNotificationTemplate,
 	type AlertComparator,
 	AlertDestinationType as AlertDestinationTypeSchema,
-	type AlertDestinationCreateRequest,
 	type AlertDestinationType,
-	type AlertDestinationUpdateRequest,
 	type AlertEventType as AlertEventTypeValue,
 	type AlertRuleUpsertRequest,
 	type QueryBuilderQueryDraftPayload,
@@ -113,38 +106,24 @@ import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import type { TenantContext } from "@/services/auth/AuthService"
-import { encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "@/platform/Crypto"
 import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
-import {
-	buildAlertChatUrl,
-	dispatchDelivery as dispatchDeliveryImpl,
-	formatComparator,
-	PAGERDUTY_ROUTING_KEY_PATTERN,
-	type DispatchContext as DeliveryDispatchContext,
-	type DispatchResult,
-	verifyPagerDutyRoutingKey,
-} from "./AlertDeliveryDispatch"
+import { formatComparator } from "./AlertDeliveryDispatch"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
-import { OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
-import { describeCause } from "@/services/errors/ErrorsService"
-import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
+import { describeCause } from "@/platform/describe-cause"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
-import { validateExternalUrl } from "@/http/url-validator"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
-import {
-	DestinationPublicConfigSchema,
-	hydrateDestinationRow,
-	type DestinationPublicConfig,
-	type DestinationSecretConfig,
-	type EnrichedDestinationSecretConfig,
-} from "./AlertDestinationHydration"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
 import { dateToMs } from "@/platform/time"
+import { AlertRuntime } from "./AlertRuntime"
+import { AlertDestinationsService, type AlertDestinationsServiceShape } from "./AlertDestinationsService"
+import { makeAlertDestinationDelivery, parseAlertDestinationEncryptionKey } from "./AlertDestinationDelivery"
+
+export { AlertRuntime, type AlertRuntimeShape } from "./AlertRuntime"
 
 /**
  * Persisted evaluation-failure category per warehouse tag (`ErrorCategory` on
@@ -215,22 +194,6 @@ interface EvaluatedRule {
 	readonly derivedFromNoData: boolean
 }
 
-type DispatchContext = Omit<
-	DeliveryDispatchContext,
-	"ruleId" | "incidentId" | "incidentStatus" | "sentAtMs"
-> & {
-	readonly ruleId: AlertRuleId
-	readonly incidentId: AlertIncidentId | null
-	readonly incidentStatus: Schema.Schema.Type<typeof AlertIncidentStatus>
-	readonly linkUrl: string
-	readonly sentAtMs: number
-}
-
-type DeliveryPayloadContext = Omit<
-	DispatchContext,
-	"deliveryKey" | "destination" | "publicConfig" | "secretConfig"
->
-
 interface DeliveryAttemptFailure {
 	readonly message: string
 	readonly kind: "transport" | "timeout" | "payload" | "destination" | "unknown"
@@ -243,7 +206,6 @@ const ALERT_CHECK_INGEST_CONCURRENCY = 4
 // Storm fuse: cap issue-hub upserts per scheduler tick so a pathological
 // group-by rule opening hundreds of incidents can't stall the per-minute tick.
 const ISSUE_UPSERTS_PER_TICK = 50
-const DELIVERY_TIMEOUT_MS_DEFAULT = 15_000
 const DELIVERY_LEASE_TTL_MS = 30_000
 
 type DatabaseTransaction = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0]
@@ -383,27 +345,6 @@ type IsoDateTimeValue = Schema.Schema.Type<typeof AlertDestinationDocument.field
 
 const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
 
-export interface AlertRuntimeShape {
-	/** Current wall-clock time in epoch ms, sourced from Effect's `Clock` so tests drive it via `TestClock`. */
-	readonly now: Effect.Effect<number>
-	readonly makeUuid: () => string
-	readonly fetch: typeof fetch
-	readonly deliveryTimeoutMs: () => number
-}
-
-export class AlertRuntime extends Context.Reference<AlertRuntimeShape>("@maple/api/services/AlertRuntime", {
-	defaultValue: (): AlertRuntimeShape => ({
-		now: Clock.currentTimeMillis,
-		makeUuid: () => randomUUID(),
-		fetch: globalThis.fetch,
-		deliveryTimeoutMs: () => DELIVERY_TIMEOUT_MS_DEFAULT,
-	}),
-}) {
-	// Reference defaults make explicit wiring optional; kept for hosts that
-	// still merge it into their layer stack.
-	static readonly layer = Layer.succeed(this, this.defaultValue())
-}
-
 const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
 	value == null ? null : decodeIsoDateTimeStringSync(value.toISOString())
 
@@ -488,54 +429,6 @@ const makeDeliveryError = (message: string, destinationType?: AlertDestinationTy
 
 const isAdmin = (roles: ReadonlyArray<RoleName>) => roles.some((role) => adminRoles.includes(role))
 
-const validateDestinationUrl = (rawUrl: string, field: string): Effect.Effect<string, AlertValidationError> =>
-	validateExternalUrl(rawUrl).pipe(
-		Effect.as(rawUrl.trim()),
-		Effect.mapError((error) => makeValidationError(`${field}: ${error.message}`, [], error)),
-	)
-
-/** Resolved member recipients — display label from names, address in channelLabel. */
-const summarizeMembers = (members: ReadonlyArray<OrgMember>): string => {
-	const first = members[0]
-	if (first === undefined) return "Email"
-	const label = first.name ?? first.email
-	return members.length === 1 ? label : `${label} +${members.length - 1} more`
-}
-
-const emailPublicConfig = (members: ReadonlyArray<OrgMember>): DestinationPublicConfig => ({
-	summary: summarizeMembers(members),
-	channelLabel: members[0]?.email ?? null,
-	memberUserIds: members.map((member) => member.userId),
-})
-
-const emailSecretConfig = (members: ReadonlyArray<OrgMember>): DestinationSecretConfig => ({
-	type: "email" as const,
-	members: members.map((member) => ({
-		userId: member.userId,
-		email: member.email,
-		name: member.name,
-	})),
-})
-
-const parseEncryptionKey = (raw: string): Effect.Effect<Buffer, AlertValidationError> =>
-	parseBase64Aes256GcmKey(raw, (message) =>
-		makeValidationError(
-			message === "Expected a non-empty base64 encryption key"
-				? "MAPLE_INGEST_KEY_ENCRYPTION_KEY is required"
-				: message === "Expected base64 for exactly 32 bytes"
-					? "MAPLE_INGEST_KEY_ENCRYPTION_KEY must be base64 for exactly 32 bytes"
-					: message,
-		),
-	)
-
-const encryptSecret = (
-	plaintext: string,
-	encryptionKey: Buffer,
-): Effect.Effect<EncryptedValue, AlertValidationError> =>
-	encryptAes256Gcm(plaintext, encryptionKey, () =>
-		makeValidationError("Failed to encrypt destination secret"),
-	)
-
 type StoredDeliveryPayloadType = Schema.Schema.Type<typeof StoredDeliveryPayloadSchema>
 
 const parseDeliveryPayload = (
@@ -544,83 +437,6 @@ const parseDeliveryPayload = (
 	Schema.decodeUnknownEffect(StoredDeliveryPayloadSchema)(value).pipe(
 		Effect.mapError((cause) => makeValidationError("Stored delivery payload is invalid", [], cause)),
 	)
-
-const summarizeWebhookUrl = (url: string) =>
-	Option.match(Option.liftThrowable(() => new URL(url))(), {
-		onNone: () => "Webhook endpoint",
-		onSome: (parsed) => `POST ${parsed.host}`,
-	})
-
-// Email requires resolving member ids → emails via the auth provider first, so
-// its public/secret configs are built inline (emailPublicConfig/emailSecretConfig)
-// after that effect — the type excludes it here, like hazel-oauth below.
-const buildPublicConfig = (
-	request: Exclude<AlertDestinationCreateRequest, { readonly type: "email" }>,
-): DestinationPublicConfig =>
-	Match.value(request).pipe(
-		Match.discriminatorsExhaustive("type")({
-			"slack-bot": (r) => ({
-				summary: r.channelName?.trim() ? `#${r.channelName.trim()}` : "Slack channel",
-				channelLabel: r.channelName?.trim() ? `#${r.channelName.trim()}` : null,
-			}),
-			pagerduty: () => ({
-				summary: "PagerDuty Events API v2" as string,
-				channelLabel: null,
-			}),
-			webhook: (r) => ({
-				summary: summarizeWebhookUrl(r.url),
-				channelLabel: null,
-			}),
-			"hazel-oauth": (r) => ({
-				summary: `${r.hazelOrganizationName} · #${r.hazelChannelName}`,
-				channelLabel: `#${r.hazelChannelName}`,
-				hazelOrganizationId: r.hazelOrganizationId,
-				hazelOrganizationName: r.hazelOrganizationName,
-				hazelOrganizationLogoUrl: r.hazelOrganizationLogoUrl ?? null,
-				hazelChannelId: r.hazelChannelId,
-				hazelChannelName: r.hazelChannelName,
-			}),
-			discord: (r) => ({
-				summary: summarizeWebhookUrl(r.webhookUrl),
-				channelLabel: null,
-			}),
-		}),
-	)
-
-// Hazel-OAuth requires provisioning a channel webhook on Hazel first, so its
-// secret config is built inline after that side effect — the type excludes it
-// here so this stays a pure, total function over the remaining variants.
-const buildSecretConfig = (
-	request: Exclude<AlertDestinationCreateRequest, { readonly type: "hazel-oauth" | "email" }>,
-): DestinationSecretConfig =>
-	Match.value(request).pipe(
-		Match.discriminatorsExhaustive("type")({
-			"slack-bot": (r) => ({
-				type: "slack-bot" as const,
-				channelId: r.channelId.trim(),
-				channelName: normalizeOptionalString(r.channelName) ?? null,
-			}),
-			pagerduty: (r) => ({
-				type: "pagerduty" as const,
-				integrationKey: r.integrationKey.trim(),
-			}),
-			webhook: (r) => ({
-				type: "webhook" as const,
-				url: r.url.trim(),
-				signingSecret: normalizeOptionalString(r.signingSecret),
-			}),
-			discord: (r) => ({
-				type: "discord" as const,
-				webhookUrl: r.webhookUrl.trim(),
-			}),
-		}),
-	)
-
-const safeParsePublicConfig = (row: AlertDestinationRow): DestinationPublicConfig =>
-	Option.getOrElse(Schema.decodeUnknownOption(DestinationPublicConfigSchema)(row.configJson), () => ({
-		summary: "Invalid destination config",
-		channelLabel: null,
-	}))
 
 const safeParseStringArray = (value: unknown): ReadonlyArray<string> =>
 	Option.getOrElse(Schema.decodeUnknownOption(StringArraySchema)(value), () => [] as ReadonlyArray<string>)
@@ -834,21 +650,6 @@ const parseCompiledPlan = (
 	)
 }
 
-const rowToDestinationDocument = (row: AlertDestinationRow, publicConfig: DestinationPublicConfig) =>
-	new AlertDestinationDocument({
-		id: decodeAlertDestinationIdSync(row.id),
-		name: row.name,
-		type: decodeAlertDestinationTypeSync(row.type),
-		enabled: row.enabled,
-		summary: publicConfig.summary,
-		channelLabel: publicConfig.channelLabel,
-		memberUserIds: publicConfig.memberUserIds != null ? [...publicConfig.memberUserIds] : null,
-		lastTestedAt: toIso(row.lastTestedAt),
-		lastTestError: row.lastTestError,
-		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
-		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
-	})
-
 const serviceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
 	row.serviceNamesJson ? safeParseStringArray(row.serviceNamesJson) : []
 
@@ -954,50 +755,7 @@ const rowToIncidentDocument = (row: AlertIncidentRow) =>
 
 // Formatting helpers imported from AlertDeliveryDispatch
 
-export interface AlertsServiceShape {
-	readonly listDestinations: (
-		orgId: OrgId,
-	) => Effect.Effect<AlertDestinationsListResponse, AlertPersistenceError>
-	readonly createDestination: (
-		orgId: OrgId,
-		userId: UserId,
-		roles: ReadonlyArray<RoleName>,
-		request: AlertDestinationCreateRequest,
-	) => Effect.Effect<
-		AlertDestinationDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertDeliveryError
-	>
-	readonly updateDestination: (
-		orgId: OrgId,
-		userId: UserId,
-		roles: ReadonlyArray<RoleName>,
-		destinationId: AlertDestinationDocument["id"],
-		request: AlertDestinationUpdateRequest,
-	) => Effect.Effect<
-		AlertDestinationDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertNotFoundError
-	>
-	readonly deleteDestination: (
-		orgId: OrgId,
-		roles: ReadonlyArray<RoleName>,
-		destinationId: AlertDestinationDocument["id"],
-	) => Effect.Effect<
-		AlertDestinationDeleteResponse,
-		AlertForbiddenError | AlertPersistenceError | AlertNotFoundError | AlertDestinationInUseError
-	>
-	readonly testDestination: (
-		orgId: OrgId,
-		userId: UserId,
-		roles: ReadonlyArray<RoleName>,
-		destinationId: AlertDestinationDocument["id"],
-	) => Effect.Effect<
-		AlertDestinationTestResponse,
-		| AlertForbiddenError
-		| AlertPersistenceError
-		| AlertNotFoundError
-		| AlertDeliveryError
-		| AlertValidationError
-	>
+export interface AlertsServiceShape extends AlertDestinationsServiceShape {
 	readonly listRules: (orgId: OrgId) => Effect.Effect<AlertRulesListResponse, AlertPersistenceError>
 	readonly createRule: (
 		orgId: OrgId,
@@ -1150,32 +908,31 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 		make: Effect.gen(function* () {
 			const database = yield* Database
 			const env = yield* Env
+			const destinations = yield* AlertDestinationsService
 			const queryEngine = yield* QueryEngineService
 			const warehouse = yield* WarehouseQueryService
 			const runtime = yield* AlertRuntime
-			const hazelOAuth = yield* HazelOAuthService
 			const email = yield* EmailService
-			const orgMembers = yield* OrgMembersService
 			const orgChSettings = yield* OrgClickHouseSettingsService
 			const slackBotToken = yield* SlackBotTokenResolver
-
-			const resolveEmailMembers = (
-				orgId: OrgId,
-				memberUserIds: ReadonlyArray<string>,
-			): Effect.Effect<ReadonlyArray<OrgMember>, AlertValidationError> =>
-				orgMembers.resolveMembers(orgId, memberUserIds).pipe(
-					Effect.mapError((error) =>
-						makeValidationError(error.message, error.unknownUserIds ?? []),
-					),
-					Effect.flatMap((members) =>
-						members.length === 0
-							? Effect.fail(makeValidationError("At least one workspace member is required"))
-							: Effect.succeed(members),
-					),
-				)
-			const encryptionKey = yield* parseEncryptionKey(
+			const encryptionKey = yield* parseAlertDestinationEncryptionKey(
 				Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			)
+			const destinationDelivery = makeAlertDestinationDelivery({
+				encryptionKey,
+				appBaseUrl: env.MAPLE_APP_BASE_URL,
+				runtime,
+				email,
+				resolveSlackBotToken: slackBotToken.resolve,
+			})
+			const {
+				hydrateDestination,
+				enrichSecretForDispatch,
+				composeLinkUrl,
+				dispatchDelivery,
+				buildPayload,
+				sendImmediateNotification,
+			} = destinationDelivery
 			// Optional: present only inside a Worker isolate. Used to kick off the
 			// AI triage Workflow for issues created from freshly opened incidents.
 			const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
@@ -1185,7 +942,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			})
 			const now = runtime.now
 			const makeUuid = () => runtime.makeUuid()
-			const deliveryTimeoutMs = () => runtime.deliveryTimeoutMs()
 			const workerId = makeUuid()
 
 			const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
@@ -1212,55 +968,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}),
 				)
 			})
-
-			const requireDestinationRow = Effect.fn("AlertsService.requireDestinationRow")(function* (
-				orgId: OrgId,
-				destinationId: AlertDestinationDocument["id"],
-			) {
-				const rows = yield* dbExecute((db) =>
-					db
-						.select()
-						.from(alertDestinations)
-						.where(
-							and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId)),
-						)
-						.limit(1),
-				)
-				if (rows[0]) return rows[0]
-				return yield* Effect.fail(
-					new AlertNotFoundError({
-						message: "Alert destination not found",
-						resourceType: "destination",
-						resourceId: destinationId,
-					}),
-				)
-			})
-
-			const hydrateDestination = Effect.fn("AlertsService.hydrateDestination")(function* (
-				row: AlertDestinationRow,
-			) {
-				const { publicConfig, secretConfig } = yield* hydrateDestinationRow(row, encryptionKey, {
-					onPublicConfigInvalid: (cause) =>
-						makeValidationError("Stored destination config is invalid", [], cause),
-					onDecryptFailure: () => makeValidationError("Failed to decrypt destination secret"),
-					onSecretConfigInvalid: (cause) =>
-						makeValidationError("Stored destination secret is invalid", [], cause),
-				})
-				return {
-					row,
-					publicConfig,
-					secretConfig,
-					document: rowToDestinationDocument(row, publicConfig),
-				} as const
-			})
-
-			const enrichSecretForDispatch = (
-				_row: AlertDestinationRow,
-				secretConfig: DestinationSecretConfig,
-			): Effect.Effect<EnrichedDestinationSecretConfig, AlertDeliveryError> =>
-				// Hazel-OAuth webhooks embed their delivery token in the URL path, so
-				// there's nothing to enrich at dispatch time.
-				Effect.succeed(secretConfig)
 
 			const requireRuleRow = Effect.fn("AlertsService.requireRuleRow")(function* (
 				orgId: OrgId,
@@ -1773,83 +1480,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				)
 			})
 
-			const markDestinationTest = Effect.fn("AlertsService.markDestinationTest")(function* (
-				orgId: OrgId,
-				destinationId: AlertDestinationId,
-				errorMessage: string | null,
-			) {
-				const timestamp = yield* now
-				yield* dbExecute((db) =>
-					db
-						.update(alertDestinations)
-						.set({
-							lastTestedAt: new Date(timestamp),
-							lastTestError: errorMessage,
-							updatedAt: new Date(timestamp),
-						})
-						.where(
-							and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId)),
-						),
-				)
-			})
-
-			const composeLinkUrl = (serviceLinkName: string | null) =>
-				serviceLinkName
-					? `${env.MAPLE_APP_BASE_URL}/services/${encodeURIComponent(serviceLinkName)}`
-					: `${env.MAPLE_APP_BASE_URL}/alerts`
-
 			const resolveNotificationLinkUrl = (
 				rule: Pick<NormalizedRule, "serviceNames" | "groupBy">,
 				groupKey: string | null,
 			) => composeLinkUrl(resolveServiceLinkName(rule, groupKey))
-
-			const composeChatUrl = (context: DispatchContext): string =>
-				buildAlertChatUrl(env.MAPLE_APP_BASE_URL, context)
-
-			const sendEmail = (to: string, subject: string, html: string) =>
-				email
-					.send(to, subject, html)
-					.pipe(Effect.mapError((error) => makeDeliveryError(error.message, "email")))
-
-			const dispatchDelivery = (
-				context: DispatchContext,
-				payloadJson: string,
-			): Effect.Effect<DispatchResult, AlertDeliveryError> =>
-				dispatchDeliveryImpl(
-					context,
-					payloadJson,
-					runtime.fetch,
-					deliveryTimeoutMs(),
-					context.linkUrl,
-					composeChatUrl(context),
-					{ sendEmail, resolveSlackBotToken: slackBotToken.resolve },
-				)
-
-			const buildPayload = (context: DeliveryPayloadContext) => ({
-				eventType: context.eventType,
-				incidentId: context.incidentId,
-				incidentStatus: context.incidentStatus,
-				dedupeKey: context.dedupeKey,
-				rule: {
-					id: context.ruleId,
-					name: context.ruleName,
-					signalType: context.signalType,
-					severity: context.severity,
-					groupKey: context.groupKey,
-					comparator: context.comparator,
-					threshold: context.threshold,
-					thresholdUpper: context.thresholdUpper,
-					windowMinutes: context.windowMinutes,
-				},
-				observed: {
-					value: context.value,
-					sampleCount: context.sampleCount,
-				},
-				template: context.template ?? null,
-				linkUrl: context.linkUrl,
-				chatUrl: buildAlertChatUrl(env.MAPLE_APP_BASE_URL, context),
-				sentAt: new Date(context.sentAtMs).toISOString(),
-			})
 
 			const toDeliveryAttemptFailure = (
 				error: AlertValidationError | AlertDeliveryError | AlertNotFoundError | AlertPersistenceError,
@@ -1880,23 +1514,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						}),
 					}),
 				)
-
-			const sendImmediateNotification = Effect.fn("AlertsService.sendImmediateNotification")(function* (
-				destinationRow: AlertDestinationRow,
-				context: Omit<DispatchContext, "destination" | "publicConfig" | "secretConfig">,
-			) {
-				const hydrated = yield* hydrateDestination(destinationRow)
-				const enrichedSecret = yield* enrichSecretForDispatch(hydrated.row, hydrated.secretConfig)
-				const fullContext: DispatchContext = {
-					destination: hydrated.row,
-					publicConfig: hydrated.publicConfig,
-					secretConfig: enrichedSecret,
-					...context,
-				}
-				const payload = buildPayload(fullContext)
-				const payloadJson = JSON.stringify(payload)
-				return yield* dispatchDelivery(fullContext, payloadJson)
-			})
 
 			const queueIncidentNotifications = Effect.fn("AlertsService.queueIncidentNotifications")(
 				function* (
@@ -1979,528 +1596,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const base = Math.min(60_000 * Math.pow(2, attemptNumber - 1), 15 * 60_000)
 				const jitter = yield* Random.nextIntBetween(0, 1_000)
 				return base + jitter
-			})
-
-			const listDestinations = Effect.fn("AlertsService.listDestinations")(function* (orgId: OrgId) {
-				const rows = yield* dbExecute((db) =>
-					db
-						.select()
-						.from(alertDestinations)
-						.where(eq(alertDestinations.orgId, orgId))
-						.orderBy(desc(alertDestinations.createdAt), desc(alertDestinations.id)),
-				)
-
-				const destinations = rows.map((row) =>
-					rowToDestinationDocument(row, safeParsePublicConfig(row)),
-				)
-
-				return new AlertDestinationsListResponse({ destinations })
-			})
-
-			// Reject a PagerDuty routing key that can't possibly work before we persist
-			// it, so a wrong key surfaces at connect time instead of at first page.
-			// Format check is instant; the live check enqueues a no-op resolve event and
-			// only rejects on a definitive "invalid key" — it fails open on outages.
-			const validatePagerDutyKey = Effect.fn("AlertsService.validatePagerDutyKey")(function* (
-				integrationKey: string,
-			) {
-				if (!PAGERDUTY_ROUTING_KEY_PATTERN.test(integrationKey)) {
-					return yield* Effect.fail(
-						makeValidationError(
-							"PagerDuty integration key must be a 32-character Events API v2 routing key — a REST API token won't work.",
-						),
-					)
-				}
-				const result = yield* verifyPagerDutyRoutingKey(
-					integrationKey,
-					runtime.fetch,
-					deliveryTimeoutMs(),
-					`maple-keycheck-${makeUuid()}`,
-				)
-				if (result.status === "invalid") {
-					return yield* Effect.fail(
-						makeValidationError(`PagerDuty rejected this routing key: ${result.reason}`),
-					)
-				}
-			})
-
-			const createDestination = Effect.fn("AlertsService.createDestination")(function* (
-				orgId: OrgId,
-				userId: UserId,
-				roles: ReadonlyArray<RoleName>,
-				request: AlertDestinationCreateRequest,
-			) {
-				yield* requireAdmin(roles)
-				// Reject URLs pointing at internal/loopback/metadata networks before we
-				// persist them. The dispatcher will later POST to whatever we store.
-				if (request.type === "webhook") {
-					yield* validateDestinationUrl(request.url, "url")
-				} else if (request.type === "discord") {
-					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
-				}
-				const destinationId = decodeAlertDestinationIdSync(makeUuid())
-				let publicConfig: DestinationPublicConfig
-				let secretConfig: DestinationSecretConfig
-				if (request.type === "email") {
-					// Email recipients are workspace members: resolve the selected ids
-					// to emails via the auth provider so clients can never route alerts
-					// to arbitrary addresses.
-					const members = yield* resolveEmailMembers(orgId, request.memberUserIds)
-					publicConfig = emailPublicConfig(members)
-					secretConfig = emailSecretConfig(members)
-				} else {
-					publicConfig = buildPublicConfig(request)
-					secretConfig =
-						request.type === "hazel-oauth"
-							? yield* hazelOAuth
-									.createChannelWebhook(orgId, {
-										channelId: request.hazelChannelId.trim(),
-										name: request.name.trim(),
-									})
-									.pipe(
-										Effect.map((webhook) => ({
-											type: "hazel-oauth" as const,
-											hazelOrganizationId: request.hazelOrganizationId.trim(),
-											hazelOrganizationName: request.hazelOrganizationName.trim(),
-											hazelChannelId: request.hazelChannelId.trim(),
-											hazelChannelName: request.hazelChannelName.trim(),
-											webhookId: webhook.id,
-											webhookUrl: webhook.webhookUrl,
-											webhookToken: webhook.token,
-										})),
-										Effect.catchTags({
-											"@maple/http/errors/IntegrationsNotConnectedError": (error) =>
-												Effect.fail(
-													makeValidationError(
-														`Could not provision Hazel channel webhook: ${error.message}`,
-													),
-												),
-											"@maple/http/errors/IntegrationsRevokedError": (error) =>
-												Effect.fail(
-													makeValidationError(
-														`Could not provision Hazel channel webhook: ${error.message}`,
-													),
-												),
-											"@maple/http/errors/IntegrationsValidationError": (error) =>
-												Effect.fail(
-													makeValidationError(
-														`Could not provision Hazel channel webhook: ${error.message}`,
-													),
-												),
-											"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-												Effect.fail(makePersistenceError(error)),
-											"@maple/http/errors/IntegrationsUpstreamError": (error) =>
-												Effect.fail(
-													makeDeliveryError(
-														"Could not provision Hazel channel webhook",
-														"hazel-oauth",
-														error,
-													),
-												),
-										}),
-									)
-							: buildSecretConfig(request)
-				}
-				if (secretConfig.type === "pagerduty") {
-					yield* validatePagerDutyKey(secretConfig.integrationKey)
-				}
-				const encryptedSecret = yield* encryptSecret(JSON.stringify(secretConfig), encryptionKey)
-				const timestamp = yield* now
-
-				const row = {
-					id: destinationId,
-					orgId,
-					name: request.name.trim(),
-					type: request.type,
-					enabled: request.enabled !== false,
-					configJson: publicConfig,
-					secretCiphertext: encryptedSecret.ciphertext,
-					secretIv: encryptedSecret.iv,
-					secretTag: encryptedSecret.tag,
-					lastTestedAt: null,
-					lastTestError: null,
-					createdAt: new Date(timestamp),
-					updatedAt: new Date(timestamp),
-					createdBy: userId,
-					updatedBy: userId,
-				}
-
-				const writeRows = yield* dbExecute((db) =>
-					db.insert(alertDestinations).values(row).returning(txidColumn),
-				)
-				const txid = readTxid(writeRows)
-				const document = rowToDestinationDocument(row, publicConfig)
-				return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
-			})
-
-			const updateDestination = Effect.fn("AlertsService.updateDestination")(function* (
-				orgId: OrgId,
-				userId: UserId,
-				roles: ReadonlyArray<RoleName>,
-				destinationId: AlertDestinationDocument["id"],
-				request: AlertDestinationUpdateRequest,
-			) {
-				yield* requireAdmin(roles)
-				const existing = yield* requireDestinationRow(orgId, destinationId)
-				if (existing.type !== request.type) {
-					return yield* Effect.fail(makeValidationError("Destination type cannot be changed"))
-				}
-
-				const hydrated = yield* hydrateDestination(existing)
-
-				// Validate any URL the request supplies before we persist it. Each
-				// branch only validates when the field is non-empty so the existing
-				// (already-validated) stored URL can stay unchanged on partial updates.
-				if (request.type === "webhook" && request.url != null && request.url.trim().length > 0) {
-					yield* validateDestinationUrl(request.url, "url")
-				} else if (
-					request.type === "discord" &&
-					request.webhookUrl != null &&
-					request.webhookUrl.trim().length > 0
-				) {
-					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
-				}
-
-				const { nextPublicConfig, nextSecretConfig } = yield* Match.value(request).pipe(
-					Match.discriminatorsExhaustive("type")({
-						"slack-bot": (r) => {
-							const channelName = normalizeOptionalString(r.channelName)
-							return Effect.succeed({
-								nextPublicConfig: {
-									summary:
-										channelName != null
-											? `#${channelName}`
-											: hydrated.publicConfig.summary,
-									channelLabel:
-										channelName != null
-											? `#${channelName}`
-											: hydrated.publicConfig.channelLabel,
-								} satisfies DestinationPublicConfig,
-								nextSecretConfig: {
-									type: "slack-bot" as const,
-									channelId:
-										normalizeOptionalString(r.channelId) ??
-										(hydrated.secretConfig.type === "slack-bot"
-											? hydrated.secretConfig.channelId
-											: ""),
-									channelName:
-										r.channelName === undefined
-											? hydrated.secretConfig.type === "slack-bot"
-												? hydrated.secretConfig.channelName
-												: null
-											: (channelName ?? null),
-								} satisfies DestinationSecretConfig,
-							})
-						},
-						pagerduty: (r) =>
-							Effect.succeed({
-								nextPublicConfig: hydrated.publicConfig,
-								nextSecretConfig: {
-									type: "pagerduty" as const,
-									integrationKey:
-										normalizeOptionalString(r.integrationKey) ??
-										(hydrated.secretConfig.type === "pagerduty"
-											? hydrated.secretConfig.integrationKey
-											: ""),
-								} satisfies DestinationSecretConfig,
-							}),
-						webhook: (r) =>
-							Effect.succeed({
-								nextPublicConfig: {
-									summary:
-										r.url != null && r.url.trim().length > 0
-											? summarizeWebhookUrl(r.url)
-											: hydrated.publicConfig.summary,
-									channelLabel: null,
-								} satisfies DestinationPublicConfig,
-								nextSecretConfig: {
-									type: "webhook" as const,
-									url:
-										normalizeOptionalString(r.url) ??
-										(hydrated.secretConfig.type === "webhook"
-											? hydrated.secretConfig.url
-											: ""),
-									signingSecret:
-										r.signingSecret === undefined
-											? hydrated.secretConfig.type === "webhook"
-												? hydrated.secretConfig.signingSecret
-												: null
-											: normalizeOptionalString(r.signingSecret),
-								} satisfies DestinationSecretConfig,
-							}),
-						"hazel-oauth": (r) =>
-							Effect.gen(function* () {
-								const previousSecret =
-									hydrated.secretConfig.type === "hazel-oauth"
-										? hydrated.secretConfig
-										: null
-								const nextOrganizationId =
-									normalizeOptionalString(r.hazelOrganizationId) ??
-									previousSecret?.hazelOrganizationId ??
-									""
-								const nextOrganizationName =
-									normalizeOptionalString(r.hazelOrganizationName) ??
-									previousSecret?.hazelOrganizationName ??
-									""
-								const requestLogoUrl = r.hazelOrganizationLogoUrl
-								const nextOrganizationLogoUrl =
-									requestLogoUrl === undefined
-										? (hydrated.publicConfig.hazelOrganizationLogoUrl ?? null)
-										: requestLogoUrl
-								const nextChannelId =
-									normalizeOptionalString(r.hazelChannelId) ??
-									previousSecret?.hazelChannelId ??
-									""
-								const nextChannelName =
-									normalizeOptionalString(r.hazelChannelName) ??
-									previousSecret?.hazelChannelName ??
-									""
-								const nextName = normalizeOptionalString(r.name) ?? existing.name
-								const channelChanged =
-									previousSecret == null || previousSecret.hazelChannelId !== nextChannelId
-
-								// TODO: when Hazel exposes DELETE /api/v1/channel-webhooks/:id,
-								// revoke the old webhook here on channel change.
-								const provisioned = channelChanged
-									? yield* hazelOAuth
-											.createChannelWebhook(orgId, {
-												channelId: nextChannelId,
-												name: nextName,
-											})
-											.pipe(
-												Effect.mapError((error) =>
-													makeValidationError(
-														`Could not provision Hazel channel webhook: ${error.message}`,
-													),
-												),
-											)
-									: null
-
-								const webhookId = provisioned?.id ?? previousSecret!.webhookId
-								const webhookUrl = provisioned?.webhookUrl ?? previousSecret!.webhookUrl
-								const webhookToken = provisioned?.token ?? previousSecret!.webhookToken
-
-								return {
-									nextPublicConfig: {
-										summary: `${nextOrganizationName} · #${nextChannelName}`,
-										channelLabel: `#${nextChannelName}`,
-										hazelOrganizationId: nextOrganizationId,
-										hazelOrganizationName: nextOrganizationName,
-										hazelOrganizationLogoUrl: nextOrganizationLogoUrl,
-										hazelChannelId: nextChannelId,
-										hazelChannelName: nextChannelName,
-									} satisfies DestinationPublicConfig,
-									nextSecretConfig: {
-										type: "hazel-oauth" as const,
-										hazelOrganizationId: nextOrganizationId,
-										hazelOrganizationName: nextOrganizationName,
-										hazelChannelId: nextChannelId,
-										hazelChannelName: nextChannelName,
-										webhookId,
-										webhookUrl,
-										webhookToken,
-									} satisfies DestinationSecretConfig,
-								}
-							}),
-						discord: (r) =>
-							Effect.succeed({
-								nextPublicConfig: {
-									summary:
-										r.webhookUrl != null && r.webhookUrl.trim().length > 0
-											? summarizeWebhookUrl(r.webhookUrl)
-											: hydrated.publicConfig.summary,
-									channelLabel: null,
-								} satisfies DestinationPublicConfig,
-								nextSecretConfig: {
-									type: "discord" as const,
-									webhookUrl:
-										normalizeOptionalString(r.webhookUrl) ??
-										(hydrated.secretConfig.type === "discord"
-											? hydrated.secretConfig.webhookUrl
-											: ""),
-								} satisfies DestinationSecretConfig,
-							}),
-						email: (r) =>
-							Effect.gen(function* () {
-								// Member ids supplied → re-resolve via the auth provider and
-								// replace wholesale; omitted (or empty) → keep the stored
-								// recipient snapshot.
-								const supplied =
-									r.memberUserIds != null && r.memberUserIds.length > 0
-										? r.memberUserIds
-										: null
-								if (supplied === null) {
-									return {
-										nextPublicConfig: hydrated.publicConfig,
-										nextSecretConfig:
-											hydrated.secretConfig.type === "email"
-												? hydrated.secretConfig
-												: emailSecretConfig([]),
-									}
-								}
-								const members = yield* resolveEmailMembers(orgId, supplied)
-								return {
-									nextPublicConfig: emailPublicConfig(members),
-									nextSecretConfig: emailSecretConfig(members),
-								}
-							}),
-					}),
-				)
-
-				// Validate only a newly-supplied key; a blank key keeps the stored one.
-				if (
-					request.type === "pagerduty" &&
-					normalizeOptionalString(request.integrationKey) != null &&
-					nextSecretConfig.type === "pagerduty"
-				) {
-					yield* validatePagerDutyKey(nextSecretConfig.integrationKey)
-				}
-				const encryptedSecret = yield* encryptSecret(JSON.stringify(nextSecretConfig), encryptionKey)
-				const timestamp = yield* now
-				const nextName = normalizeOptionalString(request.name) ?? existing.name
-				const nextEnabled = request.enabled === undefined ? existing.enabled : request.enabled
-
-				const writeRows = yield* dbExecute((db) =>
-					db
-						.update(alertDestinations)
-						.set({
-							name: nextName,
-							enabled: nextEnabled,
-							configJson: nextPublicConfig,
-							secretCiphertext: encryptedSecret.ciphertext,
-							secretIv: encryptedSecret.iv,
-							secretTag: encryptedSecret.tag,
-							updatedAt: new Date(timestamp),
-							updatedBy: userId,
-						})
-						.where(
-							and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId)),
-						)
-						.returning(txidColumn),
-				)
-
-				const txid = readTxid(writeRows)
-				const document = rowToDestinationDocument(
-					{
-						...existing,
-						name: nextName,
-						enabled: nextEnabled,
-						configJson: nextPublicConfig,
-						secretCiphertext: encryptedSecret.ciphertext,
-						secretIv: encryptedSecret.iv,
-						secretTag: encryptedSecret.tag,
-						updatedAt: new Date(timestamp),
-						updatedBy: userId,
-					},
-					nextPublicConfig,
-				)
-				return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
-			})
-
-			const deleteDestination = Effect.fn("AlertsService.deleteDestination")(function* (
-				orgId: OrgId,
-				roles: ReadonlyArray<RoleName>,
-				destinationId: AlertDestinationDocument["id"],
-			) {
-				yield* requireAdmin(roles)
-				yield* requireDestinationRow(orgId, destinationId)
-				const dependentRules = yield* dbExecute((db) =>
-					db
-						.select({
-							id: alertRules.id,
-							name: alertRules.name,
-							destinationIdsJson: alertRules.destinationIdsJson,
-						})
-						.from(alertRules)
-						.where(eq(alertRules.orgId, orgId)),
-				).pipe(
-					Effect.map((rows) =>
-						rows.filter((row) =>
-							safeParseStringArray(row.destinationIdsJson).includes(destinationId),
-						),
-					),
-				)
-
-				if (dependentRules.length > 0) {
-					const ruleIds = dependentRules.map((row) => decodeAlertRuleIdSync(row.id))
-					const ruleNames = dependentRules.map((row) => row.name)
-					return yield* Effect.fail(
-						new AlertDestinationInUseError({
-							message: `Destination is still used by alert rules: ${ruleNames.join(", ")}`,
-							destinationId,
-							ruleIds,
-							ruleNames,
-						}),
-					)
-				}
-
-				const deleted = yield* dbExecute((db) =>
-					db
-						.delete(alertDestinations)
-						.where(
-							and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId)),
-						)
-						.returning(txidColumn),
-				)
-				const txid = readTxid(deleted)
-				return new AlertDestinationDeleteResponse({
-					id: destinationId,
-					...(txid !== undefined && { txid }),
-				})
-			})
-
-			const testDestination = Effect.fn("AlertsService.testDestination")(function* (
-				orgId: OrgId,
-				userId: UserId,
-				roles: ReadonlyArray<RoleName>,
-				destinationId: AlertDestinationDocument["id"],
-			) {
-				yield* requireAdmin(roles)
-				const row = yield* requireDestinationRow(orgId, destinationId)
-				yield* sendImmediateNotification(row, {
-					deliveryKey: `${orgId}:${destinationId}:test`,
-					ruleId: decodeAlertRuleIdSync(makeUuid()),
-					ruleName: "Test alert",
-					groupKey: null,
-					signalType: "throughput",
-					severity: "warning",
-					comparator: "lt",
-					threshold: 1,
-					thresholdUpper: null,
-					windowMinutes: 5,
-					eventType: "test",
-					incidentId: null,
-					incidentStatus: "resolved",
-					dedupeKey: `${orgId}:${destinationId}:test`,
-					value: 0,
-					sampleCount: 0,
-					linkUrl: composeLinkUrl(null),
-					sentAtMs: yield* now,
-				}).pipe(
-					Effect.tapError((error) => {
-						const message =
-							error instanceof AlertDeliveryError
-								? error.message
-								: error instanceof Error
-									? error.message
-									: "Destination test failed"
-						return markDestinationTest(orgId, destinationId, message)
-					}),
-					Effect.mapError((error) =>
-						error instanceof AlertDeliveryError
-							? error
-							: makeDeliveryError(
-									error instanceof Error ? error.message : "Destination test failed",
-									decodeAlertDestinationTypeSync(row.type),
-								),
-					),
-				)
-
-				yield* markDestinationTest(orgId, destinationId, null)
-				return new AlertDestinationTestResponse({
-					success: true,
-					message: "Test notification sent",
-				})
 			})
 
 			const upsertRuleRow = Effect.fn("AlertsService.upsertRuleRow")(function* (
@@ -5297,11 +4392,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			// `AlertsService.of(...)` can't be used here — referencing the class inside
 			// its own `make` is a TS2506 circular base-expression error.
 			return {
-				listDestinations,
-				createDestination,
-				updateDestination,
-				deleteDestination,
-				testDestination,
+				listDestinations: destinations.listDestinations,
+				createDestination: destinations.createDestination,
+				updateDestination: destinations.updateDestination,
+				deleteDestination: destinations.deleteDestination,
+				testDestination: destinations.testDestination,
 				listRules,
 				createRule,
 				updateRule,
@@ -5318,8 +4413,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 		}),
 	},
 ) {
-	// The resolver is self-provided (it needs only Database + Env, which every
-	// caller already supplies) so wiring stays unchanged in app.ts and the
-	// alerting worker.
+	// The resolver remains private to alert delivery; the destination capability
+	// is explicit so composition roots can expose it without the evaluator graph.
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SlackBotTokenResolver.layer))
 }

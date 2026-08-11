@@ -6,6 +6,7 @@ import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
+import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
 import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
@@ -116,6 +117,12 @@ const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
 
 const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(Env.layer))
 
+const AlertDestinationsServiceLive = AlertDestinationsService.layer.pipe(
+	Layer.provide(
+		Layer.mergeAll(CoreServicesLive, AlertRuntime.layer, EmailServiceLive, OrgMembersServiceLive),
+	),
+)
+
 const AlertsServiceLive = AlertsService.layer.pipe(
 	Layer.provideMerge(
 		Layer.mergeAll(
@@ -124,6 +131,7 @@ const AlertsServiceLive = AlertsService.layer.pipe(
 			AlertRuntime.layer,
 			EmailServiceLive,
 			OrgMembersServiceLive,
+			AlertDestinationsServiceLive,
 		),
 	),
 )
@@ -203,6 +211,7 @@ const MainServicesLive = Layer.mergeAll(
 	WarehouseQueryServiceLive,
 	EdgeCacheServiceLive,
 	QueryEngineServiceLive,
+	AlertDestinationsServiceLive,
 	AlertsServiceLive,
 	AnomalyDetectionServiceLive,
 	AiTriageServiceLive,

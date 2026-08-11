@@ -1,5 +1,6 @@
 export { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 export { AlertRuntime, AlertsService } from "./services/alerts/AlertsService"
+export { AlertDestinationsService } from "./services/alerts/AlertDestinationsService"
 export { AnomalyDetectionService } from "./services/alerts/AnomalyDetectionService"
 export { BucketCacheService } from "@maple/query-engine/caching"
 export { CacheBackendLive } from "@/platform/CacheBackendLive"
