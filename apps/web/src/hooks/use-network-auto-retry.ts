@@ -2,24 +2,12 @@ import * as React from "react"
 
 import { useMountEffect } from "@/hooks/use-mount-effect"
 
-/** Poll backoff: 5s → 10s → 20s, then every 30s (±10% jitter). */
 const POLL_DELAYS_MS = [5_000, 10_000, 20_000, 30_000]
 const MAX_POLL_ATTEMPTS = 6
 
 /**
- * While `enabled`, invokes `onRetry` automatically:
- *
- * - immediately when the browser fires the window `online` event (or the tab
- *   becomes visible again),
- * - on a bounded backoff poll per {@link POLL_DELAYS_MS}, with jitter so several error
- *   panels on one screen don't probe in lockstep.
- *
- * Poll ticks are skipped while the tab is hidden or the browser reports
- * offline (the `online`/`visibilitychange` listeners fire the probe instead).
- * The timer chain is mount-scoped; `enabled` and `onRetry` are read fresh at
- * fire time. If a probe unmounts the host (error → loading → error remount),
- * the backoff resets to 5s — effectively a steady poll during a long outage,
- * which the 5s floor keeps cheap.
+ * Retries on reconnect, visibility, and bounded jittered backoff. Hidden or
+ * offline poll ticks wait for their corresponding browser event.
  */
 export function useNetworkAutoRetry(enabled: boolean, onRetry: (() => void) | undefined): boolean {
 	const [exhausted, setExhausted] = React.useState(false)
@@ -30,8 +18,7 @@ export function useNetworkAutoRetry(enabled: boolean, onRetry: (() => void) | un
 	})
 
 	useMountEffect(() => {
-		// React Doctor cannot infer that useMountEffect is an Effect; this is the
-		// canonical Effect Event pattern for a mount-scoped external subscription.
+		// React Doctor cannot infer useMountEffect.
 		// oxlint-disable-next-line react-doctor/rules-of-hooks
 		const probe = () => fire()
 

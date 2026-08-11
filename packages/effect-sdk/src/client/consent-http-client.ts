@@ -9,9 +9,7 @@ import {
 } from "effect/unstable/http"
 
 /**
- * The slice of the OTLP/JSON envelope this filter walks. Unlisted fields (resource
- * attributes, scope metadata, span bodies) ride along through the spreads untouched,
- * so they deliberately go unmodelled — only the timestamps we compare are named.
+ * Only timestamps are modeled; all other OTLP fields pass through via spreads.
  */
 interface OtlpSpan {
 	readonly startTimeUnixNano?: unknown
@@ -78,10 +76,8 @@ const pruneLogs = (body: OtlpBody, threshold: bigint): OtlpBody | undefined => {
 }
 
 /**
- * Keep only signals captured under the current consent grant. Effect metrics
- * are cumulative and cannot be separated at this HTTP boundary, so the
- * built-in OTLP preset suppresses them when explicit consent gating is used;
- * MapleFlush uses its gated registry and can export post-grant metrics safely.
+ * Keeps signals captured under the current grant. Cumulative Effect metrics
+ * cannot be separated here, so explicit-consent installs suppress them.
  */
 export const filterOtlpRequestForConsent = (
 	request: HttpClientRequest.HttpClientRequest,
@@ -111,7 +107,6 @@ export const filterOtlpRequestForConsent = (
 	}
 }
 
-/** HTTP client used only by Effect's OTLP exporters. */
 export const consentHttpClientLayer = (requireConsent: boolean) =>
 	Layer.effect(
 		HttpClient.HttpClient,

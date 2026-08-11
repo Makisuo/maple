@@ -26,8 +26,6 @@ describe("resolveDbConnectionSource", () => {
 	it("never leaks credentials into span attributes", () => {
 		const source = resolveDbConnectionSource({ [HYPERDRIVE_BINDING]: hyperdriveBinding })
 
-		// The connection string necessarily carries the password (the driver
-		// needs it); the ATTRIBUTES are what reach a span, and must not.
 		expect(source._tag).toBe("Available")
 		const serialized = JSON.stringify(source._tag === "Available" ? source.attributes : {})
 		expect(serialized).not.toContain("pw")

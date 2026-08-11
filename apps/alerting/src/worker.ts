@@ -44,8 +44,6 @@ interface AlertingWorkerEnv {
 }
 
 const buildLayer = (env: AlertingWorkerEnv) => {
-	// Keep config and binding services on the same invocation-scoped env record;
-	// scheduled handlers already receive the authoritative Cloudflare bindings.
 	const ConfigLive = layerFromEnv(env)
 	const WorkerEnvironmentLive = layerFromEnvRecord(env)
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
@@ -374,8 +372,7 @@ export default {
 			Match.when("*/15 * * * *", () => digestTick),
 			Match.when("0 * * * *", () => serviceMapRollupTick),
 			Match.when("* * * * *", () => everyMinuteTick),
-			// Fail closed: a newly configured cron must not silently inherit the
-			// every-minute alert/error/escalation fan-out.
+			// Unknown schedules must not inherit the every-minute fan-out.
 			Match.orElse((cron) =>
 				Effect.logWarning("Skipping unknown alerting cron schedule").pipe(
 					Effect.annotateLogs({ cron }),

@@ -350,9 +350,6 @@ export async function runClickHouseSchemaApply(
 	event: WorkflowEventLike<SchemaApplyWorkflowPayload>,
 	step: WorkflowStepLike,
 ): Promise<SchemaApplyWorkflowResult> {
-	// Same resolver the request path uses, rather than a second hand-rolled
-	// narrow of the binding. Passing the attributes also fixes a pre-existing
-	// gap: these spans carried no `db.namespace`/`server.address`.
 	const source = resolveDbConnectionSource(env)
 	if (source._tag === "Unavailable") {
 		throw new Error(source.reason)

@@ -500,9 +500,6 @@ export const getQueryBuilderBreakdownResultAtom = makeQueryAtomFamily(getQueryBu
 	staleTime: 30_000,
 })
 
-// Service-map page bundle: edges + overview + DB edges + platforms + workloads
-// in one fetch (replaces four concurrent atoms plus the edge-dependent
-// workloads atom that could only fire after them).
 export const getServiceMapBundleResultAtom = makeQueryAtomFamily(getServiceMapBundle, {
 	staleTime: 15_000,
 })

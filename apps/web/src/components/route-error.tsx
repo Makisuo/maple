@@ -20,7 +20,6 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 		reset()
 		router.invalidate()
 	}
-	// Route-loader transport failures self-heal without a manual reload.
 	const autoRetrying = useNetworkAutoRetry(
 		formatted.recovery.kind === "retry" && formatted.recovery.automatic && !isStaleChunk,
 		retry,

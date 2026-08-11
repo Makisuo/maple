@@ -36,7 +36,7 @@ jobs:
             # workspaces accounted for roughly half of this job's wall time.
             - uses: ./.github/actions/bun-install
               with:
-                  filters: "@maple/api"
+                  filters: "@maple/api @maple-dev/effect-sdk @maple-dev/browser @maple-dev/clickhouse-builder"
 
             - name: Restore turbo cache
               uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

@@ -2481,9 +2481,6 @@ export function ServiceMapView({
 		[startTime, endTime],
 	)
 
-	// The whole env-scoped map in ONE fetch: edges, overview, db edges, platforms
-	// and workloads. Was five atoms — four concurrent, plus workloads, which could
-	// only fire after the edges came back to name the services it needed.
 	const bundleResult = useRefreshableAtomValue(getServiceMapBundleResultAtom(mapInput))
 	const cloudflareResult = useRefreshableAtomValue(getServiceMapCloudflareResultAtom(cloudflareInput))
 	// PlanetScale scraped metrics carry no deployment.environment either — share
@@ -2582,15 +2579,8 @@ export function ServiceMapView({
 		return map
 	}, [bundleResult])
 
-	// Workloads arrive with the bundle. The service set they key off (every service
-	// on an edge, plus every service with overview rows) is derived server-side
-	// now — that derivation is why this used to be a second round-trip.
 	const workloads = Result.isSuccess(bundleResult) ? bundleResult.value.workloads : []
 
-	// The `topologyPending` gate this replaced existed because edges, db edges and
-	// overviews arrived on separate queries, so the layout would re-flow as each
-	// landed. One bundle settles them together, so reaching `onSuccess` already
-	// means the graph is complete.
 	return Result.builder(bundleResult)
 		.onInitial(() => <ServiceMapLoading />)
 		.onError((error) => {

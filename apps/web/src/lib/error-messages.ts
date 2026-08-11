@@ -32,13 +32,12 @@ export type ErrorRecovery =
 	| { readonly kind: "reload" }
 
 export interface ErrorDiagnostics {
-	/** Original value for telemetry and development tooling. Never render this directly. */
+	/** Raw telemetry-only value; never render. */
 	readonly value: unknown
 	readonly tag?: string
 	readonly technicalMessage?: string
 }
 
-/** Canonical application error. UI code should branch on this shape, never on raw failures. */
 export interface NormalizedAppError {
 	readonly category: ErrorCategory
 	readonly code?: string
@@ -52,7 +51,6 @@ export interface NormalizedAppError {
 	readonly diagnostics: ErrorDiagnostics
 }
 
-/** Stable presentation contract retained by existing error-state callers. */
 export interface FormattedError {
 	readonly title: string
 	readonly description: string
@@ -63,7 +61,7 @@ export interface FormattedError {
 	readonly docUrl?: string
 	readonly recovery: ErrorRecovery
 	readonly recognized: boolean
-	/** Compatibility signal for callers that have not moved to `recovery` yet. */
+	/** Compatibility signal for callers not yet using `recovery`. */
 	readonly kind?: "network"
 }
 
@@ -112,7 +110,6 @@ export interface V2ErrorInfo {
 	readonly docUrl?: string
 }
 
-/** Extract a v2 API error envelope, including its actionable optional fields. */
 export const v2ErrorInfo = (input: unknown): V2ErrorInfo | null => {
 	const error = unwrap(input)
 	if (typeof error !== "object" || error === null || !("error" in error)) return null
@@ -557,6 +554,5 @@ export const presentAppError = (error: NormalizedAppError): FormattedError => ({
 	...(error.recovery.kind === "retry" && error.recovery.automatic ? { kind: "network" as const } : {}),
 })
 
-/** Normalize once, then return safe copy and recovery metadata for any UI surface. */
 export const formatBackendError = (input: unknown): FormattedError =>
 	presentAppError(normalizeAppError(input))

@@ -48,43 +48,14 @@ import { defineQuery } from "./query-definition"
 export { logsCount, logsTimeseries } from "./logs"
 
 /**
- * The declarative warehouse query registry.
- *
- * Each entry replaces the profile/context/error-label/cache wiring that used to
- * be repeated inline in every handler in `apps/api/src/routes/v1/query-engine.http.ts`.
- * Handlers keep their own row-to-response mapping; see `QueryDefinition` for why
- * decoding is deliberately out of scope here.
- *
- * Migration is incremental and the two surfaces coexist: a handler either takes
- * a `QueryDefinition` through `runQuery` or keeps its inline wiring. Nothing breaks
- * while entries are added.
- *
- * ## Cache policy
- *
- * Every entry states a TTL. Two values do almost all the work:
- *
- * - **15s** — the house default, already proven on `serviceOverview`,
- *   `serviceHealthSnapshot`, `serviceApdex` and `listLogs`. Short enough that a
- *   panel never looks frozen, long enough to absorb the repeat loads that come
- *   from navigating between tabs of the same service.
- * - **60s** — dimension lists (facets, metric catalogues). These move on the
- *   scale of deploys, not requests, so a minute of staleness is invisible while
- *   the queries themselves are UNION fan-outs over wide Map columns.
- *
- * `cache: undefined` now means exactly one thing: the query runs inside an
- * outer `cachedDirect` in its handler, so caching it here would double-cache.
- * For `spanHierarchy`'s probes that is not merely redundant but wrong — they
- * exist to fire only on an outer miss, and caching them would run a probe on
- * every request. The seven such entries are commented individually.
- *
- * Anything that needs a different number should say why in a comment next to
- * it, the way `serviceUsage` (60s) and `serviceOverview` (15s, version 2) do.
+ * Declarative compile, execution, and cache policy. Handlers retain response
+ * shaping. Most TTLs are 15s; slow-changing discovery dimensions use 60s.
+ * `cache: undefined` means an outer `cachedDirect` owns the operation.
  */
 
 export const errorsByType = defineQuery({
 	id: "errorsByType",
 	profile: "aggregation",
-	// Was uncached inline. Preserved as-is: changing it belongs in its own commit.
 	cache: 15,
 	compile: (payload: ErrorsByTypeRequest, orgId: string) =>
 		CH.compile(
@@ -113,14 +84,12 @@ export const errorsTimeseries = defineQuery({
 				orgId,
 				startTime: payload.startTime,
 				endTime: payload.endTime,
-				// Matches the handler's previous inline default. The builder needs a
-				// bucket width and the request treats it as optional.
+				// Optional buckets default to one hour.
 				bucketSeconds: payload.bucketSeconds ?? 3600,
 			},
 		),
 })
 
-/** Single-row: the handler reads this through `runQueryFirst`. */
 export const errorsSummary = defineQuery({
 	id: "errorsSummary",
 	profile: "aggregation",
@@ -141,8 +110,6 @@ export const errorRateByService = defineQuery({
 	id: "errorRateByService",
 	profile: "aggregation",
 	cache: 15,
-	// The builder takes no options — this query is scoped entirely by org and
-	// time range. The payload still carries the range.
 	compile: (payload: ErrorRateByServiceRequest, orgId: string) =>
 		CH.compile(CH.errorRateByServiceQuery(), {
 			orgId,
@@ -154,9 +121,7 @@ export const errorRateByService = defineQuery({
 export const serviceOverview = defineQuery({
 	id: "serviceOverview",
 	profile: "aggregation",
-	// v2: rows gained per-commit `firstSeen`; the version bump keeps pre-upgrade
-	// cached rows (missing the field) from being served. Carried over verbatim
-	// from the handler — do not renumber without the same reasoning.
+	// v2 prevents cached rows without firstSeen from being served.
 	cache: makeDirectRouteCachePolicy({ ttlSeconds: 15, version: 2 }),
 	compile: (payload: ServiceOverviewRequest, orgId: string) =>
 		CH.compile(
@@ -266,20 +231,11 @@ export const serviceDbEdgesForService = defineQuery({
 		),
 })
 
-/**
- * Log search.
- *
- * `capabilityAware` closes a real gap rather than adding a nicety. The pipe path
- * (`list_logs`, which the `maple` CLI uses) has always passed these two modes,
- * so CLI log search gets bloom/tokenbf index acceleration while the dashboard's
- * HTTP path — compiling without capabilities — silently did full scans of the
- * same data. Same builder, same table, different plans.
- */
+/** Capability-aware so dashboard search uses the same bloom/tokenbf plan as the CLI. */
 export const listLogs = defineQuery({
 	id: "listLogs",
 	profile: "list",
-	// Annotated rather than inferred: with a three-parameter `compile`, TS
-	// resolves this callback before it can pin `Payload` from `compile`.
+	// TS resolves this before inferring Payload from the three-argument compile.
 	settings: (payload: ListLogsRequest) => (payload.search ? LOGS_BODY_SEARCH_SETTINGS : undefined),
 	cache: 15,
 	capabilityAware: true,
@@ -463,20 +419,7 @@ export const workloadDetailSummary = defineQuery({
 		),
 })
 
-// --- Sub-queries of composite (bundle) handlers ---------------------------
-//
-// Bundle endpoints run several queries in one Worker invocation so per-org
-// config resolves once and the browser makes one round-trip instead of three.
-// Each sub-query keeps its own id, because that id is both its span context and
-// its cache-key prefix -- collapsing them under the bundle's name would merge
-// unrelated cache entries.
-//
-// Their payload types are the MINIMAL input each needs rather than the bundle's
-// full payload. That is load-bearing: `runQuery` keys the cache on whatever
-// payload it is handed, so typing these narrowly reproduces the exact key the
-// hand-written `cachedDirect` calls used.
-
-/** Release markers for the service detail overview chart. Uncached, mirroring the standalone path. */
+// Bundle subqueries keep distinct ids and minimal payloads to preserve standalone cache keys.
 export const serviceReleases = defineQuery({
 	id: "serviceReleases",
 	profile: "list",
@@ -498,7 +441,6 @@ export const serviceReleases = defineQuery({
 		}),
 })
 
-/** Environments a service reported in the window. Edge-cached on a service-scoped key. */
 export const serviceEnvironments = defineQuery({
 	id: "serviceEnvironments",
 	profile: "discovery",
@@ -514,12 +456,6 @@ export const serviceEnvironments = defineQuery({
 		}),
 })
 
-/**
- * External (non-service) edges for the dependencies tab.
- *
- * Built by `serviceExternalEdgesSQL`, which returns a CompiledQuery directly
- * rather than going through `CH.compile`.
- */
 export const serviceExternalEdges = defineQuery({
 	id: "serviceExternalEdges",
 	profile: "aggregation",
@@ -539,19 +475,10 @@ export const serviceExternalEdges = defineQuery({
 		),
 })
 
-/**
- * Service usage totals.
- *
- * Two builders behind one id: with both previous-window bounds the query
- * returns current-vs-previous in a single scan, otherwise just the current
- * window. The branch lives in `compile` so the id, profile and TTL stay one
- * decision.
- */
 export const serviceUsage = defineQuery({
 	id: "serviceUsage",
 	profile: "aggregation",
-	// Usage totals (GB / session counts) tolerate a minute of staleness; a 60s
-	// TTL cuts repeat-load recomputes ~4x vs 15s.
+	// Usage totals tolerate a minute of staleness.
 	cache: 60,
 	compile: (payload: ServiceUsageRequest, orgId: string) => {
 		const prevStart = payload.previousStartTime
@@ -571,10 +498,6 @@ export const serviceUsage = defineQuery({
 				})
 	},
 })
-
-// --- Service-map edge queries ---------------------------------------------
-// These use `*SQL(opts, params)` builders, which return a CompiledQuery
-// directly instead of going through `CH.compile`.
 
 export const serviceDependencies = defineQuery({
 	id: "serviceDependencies",
@@ -598,13 +521,6 @@ export const serviceDbEdges = defineQuery({
 		),
 })
 
-/**
- * Workloads backing a set of services.
- *
- * The caller must skip this entirely for an empty service list — that guard
- * stays in the handler because it avoids issuing a query at all, which a def
- * cannot express.
- */
 export const serviceWorkloads = defineQuery({
 	id: "serviceWorkloads",
 	profile: "aggregation",
@@ -627,10 +543,6 @@ export const servicePlatforms = defineQuery({
 		),
 })
 
-// --- serviceDbQuerySummary's three sub-queries ----------------------------
-// All three take the identical params object, so it is built once per def from
-// the payload rather than threaded in from the handler.
-
 const dbQueryParams = (payload: ServiceDbQuerySummaryRequest, orgId: string) => ({
 	orgId,
 	dbSystem: payload.dbSystem,
@@ -643,7 +555,6 @@ const dbQueryParams = (payload: ServiceDbQuerySummaryRequest, orgId: string) => 
 	topN: payload.topN,
 })
 
-/** Single-row: read through `runQueryFirst`. */
 export const serviceDbQuerySummary = defineQuery({
 	id: "serviceDbQuerySummary",
 	profile: "aggregation",
@@ -667,16 +578,6 @@ export const serviceDbTopQueries = defineQuery({
 	compile: (payload: ServiceDbQuerySummaryRequest, orgId: string) =>
 		CH.serviceDbTopQueriesSQL(dbQueryParams(payload, orgId)),
 })
-
-// --- Web analytics --------------------------------------------------------
-//
-// Five queries behind one page, so they share a filter surface. `webAnalytics*`
-// payloads carry the filters flat; `webAnalyticsFilters` picks them off so each
-// entry below stays a one-line pass-through and the five can't drift apart.
-//
-// All 15s: this is a live dashboard people watch during a launch, and the
-// breakdown fan-out is over a 30-day-TTL table small enough that 60s buys
-// nothing but a page that looks stuck after a filter click.
 
 const webAnalyticsFilters = (
 	payload: {
@@ -710,21 +611,7 @@ const webAnalyticsFilters = (
 	useWebEvents,
 })
 
-// Each of the five is defined twice, differing only in which table page views
-// resolve against. The `id` is shared within a pair — it names the route, and
-// therefore the cache key and the `query.context` span label, neither of which
-// should shift when the flag flips. That's the same arrangement as
-// `serviceOperationsSummary` / `serviceOperationsSummaryRaw` below.
-//
-// A shared cache key across the pair is safe *because* the two are required to
-// return identical numbers: if a 15s-old entry written by one variant were wrong
-// for the other, parity is already broken and that is the bug to fix.
-//
-// Summary/timeseries/breakdowns read `session_replays` either way — they touch
-// the page-view source only through the semi-join, i.e. only when a host or
-// pagePath filter is set, which is precisely the case the rollup exists for.
-// They still come in pairs so the flag means one thing across the whole page
-// rather than being silently payload-dependent.
+// Rollup/raw pairs share ids and cache keys because parity tests require identical results.
 
 const webAnalyticsSummaryDef = (useWebEvents: boolean) => ({
 	id: "webAnalyticsSummary" as const,
@@ -739,7 +626,6 @@ const webAnalyticsSummaryDef = (useWebEvents: boolean) => ({
 })
 
 export const webAnalyticsSummary = defineQuery(webAnalyticsSummaryDef(true))
-/** Rollback path, used when `web_events` is absent or the flag is off. */
 export const webAnalyticsSummaryRaw = defineQuery(webAnalyticsSummaryDef(false))
 
 const webAnalyticsTimeseriesDef = (useWebEvents: boolean) => ({
@@ -796,8 +682,7 @@ export const webAnalyticsPagesRaw = defineQuery(webAnalyticsPagesDef(false))
 const webAnalyticsBreakdownsDef = (useWebEvents: boolean) => ({
 	id: "webAnalyticsBreakdowns" as const,
 	profile: "aggregation" as const,
-	// Same read-thread cap as the other UNION fan-outs: 12 branches over one
-	// table, and unbounded threads buy latency at the cost of memory spikes.
+	// Bound memory across the UNION fan-out.
 	settings: { maxThreads: 4 },
 	cache: 15,
 	compile: (payload: WebAnalyticsBreakdownsRequest, orgId: string) =>
@@ -813,13 +698,10 @@ const webAnalyticsBreakdownsDef = (useWebEvents: boolean) => ({
 export const webAnalyticsBreakdowns = defineQuery(webAnalyticsBreakdownsDef(true))
 export const webAnalyticsBreakdownsRaw = defineQuery(webAnalyticsBreakdownsDef(false))
 
-// --- Facet queries (UNION of per-dimension branches) ----------------------
-
 export const podFacets = defineQuery({
 	id: "podFacets",
 	profile: "discovery",
-	// Cap read-thread concurrency to bound Map-column decompression memory
-	// across the fan-out of UNION branches.
+	// Bound Map-column decompression memory across the UNION fan-out.
 	settings: { maxThreads: 4 },
 	cache: 60,
 	compile: (payload: PodFacetsRequest, orgId: string) =>
@@ -844,8 +726,7 @@ export const podFacets = defineQuery({
 export const nodeFacets = defineQuery({
 	id: "nodeFacets",
 	profile: "discovery",
-	// Cap read-thread concurrency to bound Map-column decompression memory
-	// across the fan-out of UNION branches.
+	// Bound Map-column decompression memory across the UNION fan-out.
 	settings: { maxThreads: 4 },
 	cache: 60,
 	compile: (payload: NodeFacetsRequest, orgId: string) =>
@@ -863,8 +744,7 @@ export const nodeFacets = defineQuery({
 export const workloadFacets = defineQuery({
 	id: "workloadFacets",
 	profile: "discovery",
-	// Cap read-thread concurrency to bound Map-column decompression memory
-	// across the fan-out of UNION branches.
+	// Bound Map-column decompression memory across the UNION fan-out.
 	settings: { maxThreads: 4 },
 	cache: 60,
 	compile: (payload: WorkloadFacetsRequest, orgId: string) =>
@@ -882,11 +762,7 @@ export const workloadFacets = defineQuery({
 		),
 })
 
-// --- listPods: page + denominator -----------------------------------------
-// Both run the same WHERE clause, so the "N of M" the list prints can never
-// disagree with the rows above it. The shared filter projection keeps that
-// true by construction rather than by two hand-kept copies.
-
+// Keep page and denominator filters identical.
 const listPodsFilters = (payload: ListPodsRequest) => ({
 	search: payload.search,
 	podNames: payload.podNames,
@@ -921,7 +797,6 @@ export const listPods = defineQuery({
 		),
 })
 
-/** Single-row denominator for listPods. Read through `runQueryFirst`. */
 export const listPodsCount = defineQuery({
 	id: "listPodsCount",
 	profile: "aggregation",
@@ -934,19 +809,8 @@ export const listPodsCount = defineQuery({
 		),
 })
 
-// --- spanHierarchy: probe, then the pruned hierarchy read -----------------
-//
-// `trace_detail_spans` is partitioned by toDate(Timestamp); without a time
-// predicate the hierarchy query seeks every daily partition (~30) — p95 ~8.8s
-// vs ~2.3s when pruned to one. When the caller has no timestamp (direct URL,
-// shared link, AI link) a cheap LIMIT-1 probe resolves one.
-//
-// All three carry `cache: undefined` ON PURPOSE. The handler wraps the whole
-// probe-then-read sequence in a single `cachedDirect`, so the probe only fires
-// on an outer cache miss. Caching them individually would run the probe on
-// every request and cache a result nobody asked for.
-
-/** Probe restricted to the recent window — tries ~2 daily partitions first. */
+// Probes resolve a time bound so hierarchy reads avoid ~30 daily partitions.
+// An outer cache owns the full sequence, so these definitions remain uncached.
 export const spanHierarchyProbeRecent = defineQuery({
 	id: "spanHierarchyProbeRecent",
 	profile: "discovery",
@@ -958,7 +822,6 @@ export const spanHierarchyProbeRecent = defineQuery({
 		}),
 })
 
-/** Unbounded fallback probe: every partition, only when the recent one missed. */
 export const spanHierarchyProbe = defineQuery({
 	id: "spanHierarchyProbe",
 	profile: "discovery",
@@ -994,19 +857,7 @@ export const spanHierarchy = defineQuery({
 	},
 })
 
-// --- serviceOperations: rollup and raw variants ---------------------------
-//
-// Four defs, two logical queries. Each has a rollup form and a raw form, and
-// the CHOICE between them stays in the handler because it is policy, not query
-// construction: the handler always reads the rollup and falls back to raw on a
-// typed `isMissingServiceOperationsRollup` error — a per-org degrade for BYO
-// clusters that never applied migration 0008. There is no flag.
-//
-// Rollup/raw pairs share an id, matching the context their spans already
-// report — the fallback is recorded separately as `query.rollup.fallback`.
-//
-// All four are `cache: undefined`; the handler wraps the whole sequence in one
-// `cachedDirect`.
+// Rollup/raw pairs share ids and an outer cache; handlers fall back per org when migration 0008 is absent.
 
 const serviceOperationsSummaryOptions = (payload: ServiceOperationsRequest) => ({
 	serviceName: payload.serviceName,
@@ -1033,22 +884,11 @@ export const serviceOperationsSummary = defineQuery({
 })
 
 /**
- * Ceiling for the two all-raw rollback shapes.
- *
- * These full-scan `traces` and compute the display-name rewrite per row, so on a
- * cluster without the 0008 rollup they are unbounded in practice: measured on a
- * BYO org, `serviceOperations` ran a p50 of 12.8s and 8 of 19 requests were
- * killed outright by the `aggregation` profile's 30s cap — returning nothing
- * after holding the tab for the full budget.
- *
- * 10s converts that into a fast, visible failure. It is deliberately below the
- * profile default rather than above it: a raw scan that has not finished in 10s
- * is not going to produce a usable interactive result, and the actionable fix is
- * applying migration 0008 to that cluster, not waiting longer.
+ * Raw fallback measured p50 12.8s with frequent 30s failures. Fail at 10s so
+ * clusters missing migration 0008 receive a fast, actionable error.
  */
 const SERVICE_OPERATIONS_RAW_SETTINGS = { maxExecutionTime: 10 }
 
-/** Rollback path, used when the rollup table is absent or the flag is off. */
 export const serviceOperationsSummaryRaw = defineQuery({
 	id: "serviceOperations",
 	profile: "aggregation",
@@ -1062,12 +902,7 @@ export const serviceOperationsSummaryRaw = defineQuery({
 		),
 })
 
-/**
- * `spanNames` and `bucketSeconds` ride in the payload: both are derived from the
- * summary rows and the requested window, so `compile` cannot see them. The
- * rollup is minute-grain, which is why the caller rounds the bucket to a whole
- * minute before passing it here.
- */
+// Derived after the summary; callers align buckets to the minute-grain rollup.
 type ServiceOperationsTimeseriesInput = ServiceOperationsRequest & {
 	readonly spanNames: ReadonlyArray<string>
 	readonly bucketSeconds: number

@@ -1,9 +1,6 @@
 /**
- * Narrow accessors for the browser globals this package reads.
- *
- * The client SDK ships without the DOM lib (it also runs in Workers and Node), so
- * these are declared by hand rather than pulled from `lib.dom`. Each accessor names
- * exactly the fields we touch — an untyped `globalThis` bag would let a typo through.
+ * Narrow optional globals for the DOM-free SDK build, which also runs in
+ * Workers and Node.
  */
 
 interface BrowserNavigator {
