@@ -1,0 +1,10 @@
+{
+	"repo": "https://github.com/MapleTechLabs/trace-capture",
+	"ref": "main",
+	"sha": "cb29d8434a5919fd106278947ed3e262456407e5",
+	"generatedBy": "bun scripts/compile-registry.ts",
+	"compiledFrom": "frameworks/<name>/registry-seed.yaml (20 seeds + 1 synthesized vendor)",
+	"artifact": "registry.json",
+	"sha256": "226031079a9b273a3f799998ad8152c727a62f1c0a45593d1b884f52e2718595",
+	"syncedAt": "2026-08-11"
+}
