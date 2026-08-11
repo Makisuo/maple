@@ -1,11 +1,11 @@
 import * as React from "react"
-import { Effect } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
 import { listReplays } from "@/api/warehouse/replays"
 import { listReplaysResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { SessionRow } from "@/components/replays/sessions-list"
 import { logClientError } from "@/lib/services/common/telemetry"
+import { mapleRuntime } from "@/lib/registry"
 
 /** Exported so the route loader prefetches the exact first-page key this hook reads. */
 export const REPLAYS_PAGE_SIZE = 50
@@ -92,7 +92,8 @@ export function useInfiniteReplays(filterInputs: ReplaysFilterInputs) {
 		const currentKey = filterKeyRef.current
 		const offset = allData.length
 
-		Effect.runPromise(listReplays({ data: { ...filterInputs, limit: PAGE_SIZE, offset } }))
+		mapleRuntime
+			.runPromise(listReplays({ data: { ...filterInputs, limit: PAGE_SIZE, offset } }))
 			.then((result) => {
 				if (filterKeyRef.current !== currentKey) return
 				setAdditionalPages((prev) => [...prev, { data: result.data }])

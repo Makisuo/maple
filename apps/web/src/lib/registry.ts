@@ -1,10 +1,11 @@
 import { Atom, scheduleTask } from "@/lib/effect-atom"
-import { Layer, ManagedRuntime } from "effect"
+import { Layer } from "effect"
 import { AtomRegistry } from "effect/unstable/reactivity"
 import { MapleApiAtomClient } from "./services/common/atom-client"
 import { MapleFetchHttpClientLive } from "./services/common/http-client"
 import { mapleOtelLayer } from "./services/common/otel-layer"
 import { MapleApiV2AtomClient } from "./services/common/v2-atom-client"
+import { makeAppRuntime } from "./make-app-runtime"
 
 // Register the fetch layer FIRST so the Effect Layer memoMap caches
 // FetchHttpClient.layer with mapleFetch substituted. mapleOtelLayer's internal
@@ -38,4 +39,9 @@ export const mapleApiV2ClientLayer: Layer.Layer<MapleApiV2AtomClient> = appRegis
 // the `optimisticAction` atoms in @maple/effect-db. Building it once avoids
 // rebuilding the client layers on every call, and gives the
 // Effect-native collection factory a runtime for its handlers + backoff logging.
-export const mapleRuntime = ManagedRuntime.make(Layer.mergeAll(mapleApiClientLayer, mapleApiV2ClientLayer))
+// Sharing the registry memo map is load-bearing: nested `Effect.provide` calls
+// reuse the atom-owned client and tracer instances instead of rebuilding them.
+export const mapleRuntime = makeAppRuntime(
+	Layer.mergeAll(mapleApiClientLayer, mapleApiV2ClientLayer),
+	appMemoMap,
+)
