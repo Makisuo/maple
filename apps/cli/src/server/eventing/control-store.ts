@@ -61,8 +61,17 @@ CREATE TABLE outbox_events (
     ready_at TEXT
 ) STRICT;
 
-CREATE INDEX outbox_events_ready_sequence
+CREATE INDEX outbox_events_staged_sequence
     ON outbox_events (state, sequence);
+
+CREATE TABLE outbox_ready_events (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    ready_at TEXT NOT NULL,
+    FOREIGN KEY (event_id)
+        REFERENCES outbox_events (event_id)
+        ON DELETE RESTRICT
+) STRICT;
 
 CREATE TABLE projection_failures (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -226,6 +235,21 @@ const validateOpenDatabase = (db: Database): EventingControlSnapshotValidation =
 	if (!revisions) throw new Error("eventing projection count query returned no row")
 	const failures = db.query<CountRow, []>("SELECT count(*) AS count FROM projection_failures").get()
 	if (!failures) throw new Error("eventing projection-failure count query returned no row")
+	const invalidReadiness = db
+		.query<CountRow, []>(
+			`SELECT count(*) AS count
+			 FROM outbox_events AS event
+			 LEFT JOIN outbox_ready_events AS readiness ON readiness.event_id = event.event_id
+			 WHERE (event.state = 'ready' AND (
+			     readiness.event_id IS NULL OR event.ready_at IS NULL OR event.ready_at <> readiness.ready_at
+			 )) OR (event.state = 'staged' AND (
+			     readiness.event_id IS NOT NULL OR event.ready_at IS NOT NULL
+			 ))`,
+		)
+		.get()
+	if (!invalidReadiness) throw new Error("eventing readiness validation query returned no row")
+	if (asNumber(invalidReadiness.count) !== 0)
+		throw new Error("eventing control database has inconsistent outbox readiness state")
 	return {
 		schemaVersion,
 		projectionRevisions: asNumber(revisions.count),
@@ -422,6 +446,10 @@ export class LocalEventingControlStore {
 						.get(eventId)
 					if (!row) throw new Error(`cannot mark unknown event ready: ${eventId}`)
 					if (row.state === "ready") continue
+					this.#db.run("INSERT INTO outbox_ready_events (event_id, ready_at) VALUES (?, ?)", [
+						eventId,
+						readyAt,
+					])
 					this.#db.run(
 						"UPDATE outbox_events SET state = 'ready', ready_at = ? WHERE event_id = ? AND state = 'staged'",
 						[readyAt, eventId],
@@ -436,11 +464,27 @@ export class LocalEventingControlStore {
 			throw new Error("outbox-event limit must be between 1 and 1000")
 		if (!Number.isSafeInteger(after) || after < 0)
 			throw new Error("outbox cursor must be a non-negative safe integer")
-		const rows = this.#db
-			.query<EventJsonRow, [string, number, number]>(
-				"SELECT sequence, event_json, staged_at, ready_at FROM outbox_events WHERE state = ? AND sequence > ? ORDER BY sequence LIMIT ?",
-			)
-			.all(state, after, limit + 1)
+		const rows =
+			state === "ready"
+				? this.#db
+						.query<EventJsonRow, [number, number]>(
+							`SELECT readiness.sequence, event.event_json, event.staged_at, readiness.ready_at
+							 FROM outbox_ready_events AS readiness
+							 INNER JOIN outbox_events AS event ON event.event_id = readiness.event_id
+							 WHERE event.state = 'ready' AND readiness.sequence > ?
+							 ORDER BY readiness.sequence
+							 LIMIT ?`,
+						)
+						.all(after, limit + 1)
+				: this.#db
+						.query<EventJsonRow, [number, number]>(
+							`SELECT sequence, event_json, staged_at, ready_at
+							 FROM outbox_events
+							 WHERE state = 'staged' AND sequence > ?
+							 ORDER BY sequence
+							 LIMIT ?`,
+						)
+						.all(after, limit + 1)
 		const hasMore = rows.length > limit
 		const pageRows = hasMore ? rows.slice(0, limit) : rows
 		const page = pageRows.map(({ sequence, event_json, staged_at, ready_at }) => ({

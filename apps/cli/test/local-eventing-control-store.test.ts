@@ -217,6 +217,35 @@ describe("LocalEventingControlStore", () => {
 			}
 		}))
 
+	it("pages recovered events by first readiness transition instead of staging order", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir)
+			try {
+				const first = event({ id: "event-a" })
+				const second = event({ id: "event-b" })
+				store.stageEvents([first])
+				store.stageEvents([second])
+				store.markReady([second.id])
+
+				const initialPage = store.listReady(1)
+				deepStrictEqual(
+					initialPage.events.map(({ event }) => event.id),
+					[second.id],
+				)
+				const cursor = initialPage.events[0]!.sequence
+
+				store.markReady([first.id])
+				const recoveredPage = store.listReady(1, cursor)
+				deepStrictEqual(
+					recoveredPage.events.map(({ event }) => event.id),
+					[first.id],
+				)
+				strictEqual(recoveredPage.events[0]!.sequence > cursor, true)
+			} finally {
+				store.close()
+			}
+		}))
+
 	it("refuses a symlink in place of the database", async () =>
 		withDataDir(async (dataDir) => {
 			const controlPath = eventingControlPath(dataDir)

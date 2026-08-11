@@ -6,6 +6,8 @@ export const MAX_IN_VALUES = 100
 export const MAX_STRING_LITERAL_BYTES = 4 * 1024
 export const MAX_DECIMAL_INT64_LENGTH = 20
 
+const utf8Bytes = (value: string): number => new TextEncoder().encode(value).byteLength
+
 const NonEmptyIdentifier = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(256),
@@ -23,7 +25,21 @@ const Rfc3339Timestamp = Schema.String.check(
 
 export const StringSignalScalar = Schema.Struct({
 	type: Schema.Literal("string"),
-	value: Schema.String.check(Schema.isMaxLength(MAX_STRING_LITERAL_BYTES)),
+	value: Schema.String,
+})
+
+const StringLiteralValue = Schema.String.annotate({
+	description: `Predicate string literal limited to ${MAX_STRING_LITERAL_BYTES} UTF-8 bytes; JSON Schema cannot express this byte-count constraint`,
+}).check(
+	Schema.makeFilter((value) => utf8Bytes(value) <= MAX_STRING_LITERAL_BYTES, {
+		expected: `a string no larger than ${MAX_STRING_LITERAL_BYTES} UTF-8 bytes`,
+		description: `Predicate string literal limited to ${MAX_STRING_LITERAL_BYTES} UTF-8 bytes`,
+	}),
+)
+
+export const StringSignalLiteral = Schema.Struct({
+	type: Schema.Literal("string"),
+	value: StringLiteralValue,
 })
 
 export const BooleanSignalScalar = Schema.Struct({
@@ -62,6 +78,16 @@ export const SignalScalarSchema = Schema.Union([
 export type SignalScalar = Schema.Schema.Type<typeof SignalScalarSchema>
 export type SignalScalarType = SignalScalar["type"]
 
+export const SignalLiteralSchema = Schema.Union([
+	StringSignalLiteral,
+	BooleanSignalScalar,
+	Int64SignalScalar,
+	Float64SignalScalar,
+	TimestampSignalScalar,
+	DurationSignalScalar,
+]).annotate({ identifier: "SignalLiteral" })
+export type SignalLiteral = Schema.Schema.Type<typeof SignalLiteralSchema>
+
 export const FieldNamespaceSchema = Schema.Literals(["signal", "resource", "scope", "attribute", "body"])
 export type FieldNamespace = Schema.Schema.Type<typeof FieldNamespaceSchema>
 
@@ -95,13 +121,13 @@ export interface ExistsPredicate {
 export interface ComparisonPredicate {
 	readonly op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains"
 	readonly field: FieldRef
-	readonly value: SignalScalar
+	readonly value: SignalLiteral
 }
 
 export interface InPredicate {
 	readonly op: "in"
 	readonly field: FieldRef
-	readonly values: readonly SignalScalar[]
+	readonly values: readonly SignalLiteral[]
 }
 
 export type SignalPredicate =
@@ -140,12 +166,12 @@ export const SignalPredicateSchema: Schema.Codec<SignalPredicate, SignalPredicat
 			Schema.Struct({
 				op: Schema.Literals(["eq", "neq", "gt", "gte", "lt", "lte", "contains"]),
 				field: FieldRefSchema,
-				value: SignalScalarSchema,
+				value: SignalLiteralSchema,
 			}),
 			Schema.Struct({
 				op: Schema.Literal("in"),
 				field: FieldRefSchema,
-				values: Schema.Array(SignalScalarSchema).check(
+				values: Schema.Array(SignalLiteralSchema).check(
 					Schema.isMinLength(1),
 					Schema.isMaxLength(MAX_IN_VALUES),
 				),

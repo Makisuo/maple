@@ -1,6 +1,7 @@
 import type {
 	FieldRef,
 	NormalizedSignal,
+	SignalLiteral,
 	SignalPredicate,
 	SignalProjectionSpec,
 	SignalScalar,
@@ -173,9 +174,6 @@ export const validateSignalScalar = (scalar: SignalScalar, path = "value"): read
 	const issues: ValidationIssue[] = []
 	switch (scalar.type) {
 		case "string":
-			if (stringBytes(scalar.value) > MAX_STRING_LITERAL_BYTES)
-				issues.push({ path, message: `string exceeds ${MAX_STRING_LITERAL_BYTES} UTF-8 bytes` })
-			break
 		case "boolean":
 			break
 		case "int64":
@@ -196,6 +194,13 @@ export const validateSignalScalar = (scalar: SignalScalar, path = "value"): read
 	}
 	return issues
 }
+
+export const validateSignalLiteral = (literal: SignalLiteral, path = "value"): readonly ValidationIssue[] => [
+	...validateSignalScalar(literal, path),
+	...(literal.type === "string" && stringBytes(literal.value) > MAX_STRING_LITERAL_BYTES
+		? [{ path, message: `string exceeds ${MAX_STRING_LITERAL_BYTES} UTF-8 bytes` }]
+		: []),
+]
 
 export const validateSignalPredicate = (predicate: SignalPredicate): readonly ValidationIssue[] => {
 	const issues: ValidationIssue[] = []
@@ -228,7 +233,7 @@ export const validateSignalPredicate = (predicate: SignalPredicate): readonly Va
 			case "contains":
 				if (node.field.type !== "string" || node.value.type !== "string")
 					issues.push({ path, message: "contains requires a string field and string literal" })
-				issues.push(...validateSignalScalar(node.value, `${path}.value`))
+				issues.push(...validateSignalLiteral(node.value, `${path}.value`))
 				break
 			case "gt":
 			case "gte":
@@ -238,13 +243,13 @@ export const validateSignalPredicate = (predicate: SignalPredicate): readonly Va
 					issues.push({ path, message: `${node.op} is not supported for ${node.field.type}` })
 				if (node.field.type !== node.value.type)
 					issues.push({ path, message: "field and literal types must match" })
-				issues.push(...validateSignalScalar(node.value, `${path}.value`))
+				issues.push(...validateSignalLiteral(node.value, `${path}.value`))
 				break
 			case "eq":
 			case "neq":
 				if (node.field.type !== node.value.type)
 					issues.push({ path, message: "field and literal types must match" })
-				issues.push(...validateSignalScalar(node.value, `${path}.value`))
+				issues.push(...validateSignalLiteral(node.value, `${path}.value`))
 				break
 			case "in":
 				if (node.values.length === 0)
@@ -258,7 +263,7 @@ export const validateSignalPredicate = (predicate: SignalPredicate): readonly Va
 							path: `${path}.values[${i}]`,
 							message: "field and literal types must match",
 						})
-					issues.push(...validateSignalScalar(value, `${path}.values[${i}]`))
+					issues.push(...validateSignalLiteral(value, `${path}.values[${i}]`))
 				}
 				break
 		}

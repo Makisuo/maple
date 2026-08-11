@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert"
+import { deepStrictEqual, strictEqual, throws } from "node:assert"
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -140,6 +140,37 @@ describe("LocalEventingRuntime", () => {
 		strictEqual(signalA?.occurrenceId?.startsWith("derived:sha256:"), true)
 		strictEqual(signalA?.occurrenceId === signalB?.occurrenceId, false)
 	})
+
+	it("catalogs only the scalar body field that the OTLP adapter can populate", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir)
+			try {
+				const runtime = new LocalEventingRuntime(store)
+				throws(
+					() =>
+						runtime.prepareActivation(
+							projection({
+								selector: {
+									op: "exists",
+									field: { namespace: "body", key: "text", type: "string" },
+								},
+							}),
+						),
+					/unknown field body:text/,
+				)
+				const activation = runtime.prepareActivation(
+					projection({
+						selector: {
+							op: "exists",
+							field: { namespace: "body", key: "value", type: "boolean" },
+						},
+					}),
+				)
+				strictEqual(activation.spec.selector.op, "exists")
+			} finally {
+				store.close()
+			}
+		}))
 
 	it("projects before storage, deduplicates retry delivery, and makes the event ready after commit", async () =>
 		withDataDir(async (dataDir) => {

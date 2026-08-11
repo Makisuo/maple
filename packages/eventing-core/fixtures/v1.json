@@ -14,6 +14,20 @@
 			"output": "sha256:061c0b5d99b92ef65ab8813c6d84988e4b1582e705e0077c952e62a0e84b6b08"
 		}
 	],
+	"stringLiteralByteVectors": [
+		{
+			"name": "multibyte literal exactly at the UTF-8 byte limit",
+			"unit": "é",
+			"repeat": 2048,
+			"valid": true
+		},
+		{
+			"name": "multibyte literal one code point beyond the UTF-8 byte limit",
+			"unit": "é",
+			"repeat": 2049,
+			"valid": false
+		}
+	],
 	"predicateVectors": [
 		{
 			"name": "int64 remains exact above JavaScript safe integer range",

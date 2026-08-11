@@ -33,7 +33,6 @@ import {
 	AlertSignalType as AlertSignalTypeSchema,
 	AlertValidationError,
 	AlertNotificationTemplate,
-	type AlertComparator,
 	type AlertDestinationType,
 	type AlertEventType as AlertEventTypeValue,
 	type AlertRuleUpsertRequest,

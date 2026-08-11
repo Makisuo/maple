@@ -82,6 +82,13 @@ export const OTLP_LOG_SOURCE: SignalSourceDefinition = {
 		catalog("span.id", "string", equalityOperators),
 		catalog("time", "timestamp"),
 		catalog("observed_time", "timestamp"),
+		{
+			field: { namespace: "body", key: "value" },
+			types: ["string", "boolean", "int64", "float64"],
+			operators: allOperators,
+			sensitivity: "public",
+			replay: "coerced",
+		},
 	],
 	openFields: [
 		{
@@ -100,13 +107,6 @@ export const OTLP_LOG_SOURCE: SignalSourceDefinition = {
 		},
 		{
 			namespace: "attribute",
-			types: ["string", "boolean", "int64", "float64"],
-			operators: allOperators,
-			sensitivity: "public",
-			replay: "coerced",
-		},
-		{
-			namespace: "body",
 			types: ["string", "boolean", "int64", "float64"],
 			operators: allOperators,
 			sensitivity: "public",

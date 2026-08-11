@@ -29,7 +29,7 @@
 			"required": ["namespace", "key", "type"],
 			"additionalProperties": false
 		},
-		"SignalScalar": {
+		"SignalLiteral": {
 			"anyOf": [
 				{
 					"type": "object",
@@ -40,11 +40,7 @@
 						},
 						"value": {
 							"type": "string",
-							"allOf": [
-								{
-									"maxLength": 4096
-								}
-							]
+							"description": "Predicate string literal limited to 4096 UTF-8 bytes; JSON Schema cannot express this byte-count constraint"
 						}
 					},
 					"required": ["type", "value"],
@@ -234,7 +230,7 @@
 							"$ref": "#/$defs/SignalFieldRef"
 						},
 						"value": {
-							"$ref": "#/$defs/SignalScalar"
+							"$ref": "#/$defs/SignalLiteral"
 						}
 					},
 					"required": ["op", "field", "value"],
@@ -253,7 +249,7 @@
 						"values": {
 							"type": "array",
 							"items": {
-								"$ref": "#/$defs/SignalScalar"
+								"$ref": "#/$defs/SignalLiteral"
 							},
 							"allOf": [
 								{

@@ -8,6 +8,7 @@ import {
 	fieldKey,
 	makeEventId,
 	MAX_PREDICATE_DEPTH,
+	SignalLiteralSchema,
 	SignalPredicateSchema,
 	SignalScalarSchema,
 	timestampToEpochNanos,
@@ -23,6 +24,12 @@ interface ConformanceFixture {
 		readonly name: string
 		readonly input: EventIdentityInput
 		readonly output: string
+	}>
+	readonly stringLiteralByteVectors: ReadonlyArray<{
+		readonly name: string
+		readonly unit: string
+		readonly repeat: number
+		readonly valid: boolean
 	}>
 	readonly predicateVectors: ReadonlyArray<{
 		readonly name: string
@@ -67,6 +74,15 @@ describe("cross-language conformance vectors", () => {
 	for (const vector of fixture.eventIdVectors) {
 		it(`event ID: ${vector.name}`, () => {
 			expect(makeEventId(vector.input)).toBe(vector.output)
+		})
+	}
+
+	for (const vector of fixture.stringLiteralByteVectors) {
+		it(`string literal bytes: ${vector.name}`, () => {
+			const candidate = { type: "string", value: vector.unit.repeat(vector.repeat) }
+			if (vector.valid)
+				expect(() => Schema.decodeUnknownSync(SignalLiteralSchema)(candidate)).not.toThrow()
+			else expect(() => Schema.decodeUnknownSync(SignalLiteralSchema)(candidate)).toThrow()
 		})
 	}
 
@@ -158,6 +174,31 @@ describe("selector validation", () => {
 })
 
 describe("total runtime behavior", () => {
+	it("accepts valid large source strings for exists and small contains literals", () => {
+		const largeValue = `${"a".repeat(5 * 1024)}needle`
+		const signal = signalFor([
+			{
+				namespace: "attribute",
+				key: "large.description",
+				value: { type: "string", value: largeValue },
+			},
+		])
+		const field = {
+			namespace: "attribute" as const,
+			key: "large.description",
+			type: "string" as const,
+		}
+
+		expect(compileSignalPredicate({ op: "exists", field })(signal).matches).toBe(true)
+		expect(
+			compileSignalPredicate({
+				op: "contains",
+				field,
+				value: { type: "string", value: "needle" },
+			})(signal).matches,
+		).toBe(true)
+	})
+
 	it("treats malformed source scalars as mismatches rather than throwing", () => {
 		const field: FieldRef = { namespace: "attribute", key: "n", type: "int64" }
 		const evaluate = compileSignalPredicate({

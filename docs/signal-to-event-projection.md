@@ -261,7 +261,7 @@ interface FieldRef {
 Each source adapter exposes a field catalog for known fields. A catalog entry
 declares:
 
-- logical name and scalar type;
+- logical name and one or more scalar types;
 - allowed selector operators;
 - sensitivity and whether a projector may expose it by default;
 - whether historical replay is `exact`, `coerced`, or `unavailable`;
@@ -272,7 +272,11 @@ reference an uncatalogued attribute by explicitly declaring its expected scalar
 type. At runtime a differently typed value does not get coerced; it does not
 match, and a bounded type-mismatch metric is recorded. Source-specific modules
 should publish catalogs for common attributes so users do not need to repeat
-those declarations.
+those declarations. OTLP log bodies are deliberately closed in version 1: only
+the polymorphic `body:value` field is selectable, and only when the entire body
+is a scalar. Structured body objects and arrays remain available to projectors
+through normalized signal data but do not advertise child selector fields that
+the adapter cannot populate.
 
 ### Selector AST
 
@@ -285,12 +289,12 @@ type SignalPredicate =
 	| {
 			readonly op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains"
 			readonly field: FieldRef
-			readonly value: SignalScalar
+			readonly value: SignalLiteral
 	  }
 	| {
 			readonly op: "in"
 			readonly field: FieldRef
-			readonly values: readonly SignalScalar[]
+			readonly values: readonly SignalLiteral[]
 	  }
 ```
 
@@ -325,7 +329,12 @@ selector to:
 - no regular expressions, functions, arithmetic, joins, or user code.
 
 These bounds keep evaluation predictable and leave room for indexing active
-projections by source kind and simple discriminating fields.
+projections by source kind and simple discriminating fields. `SignalScalar`
+describes normalized source data and does not inherit the literal-only 4 KiB
+limit; the OTLP adapter accepts source strings up to its separate 16 KiB bound.
+The literal limit is normative in UTF-8 bytes. Because JSON Schema `maxLength`
+counts characters rather than encoded bytes, the generated schema documents the
+constraint and the shared multibyte conformance vectors enforce its exact edge.
 
 ### Signal projection
 
@@ -878,15 +887,17 @@ FULL`. While ingest is quiesced, backup first completes and verifies a blocking
 Maple Local activates immutable revisions with authenticated
 `POST /local/eventing/projections`. The same maintenance credential protects
 `GET /local/eventing/projections`, `/local/eventing/health`, and
-`/local/eventing/outbox`. The outbox endpoint returns ready records with their
-monotonic `sequence` by default; `?after=<sequence>&limit=<n>` pages beyond the
-oldest page, while `?state=staged` exposes bounded inspection of records stranded
-before the chDB commit point. The Local store defaults to at most 10,000 events
-and 256 MiB of canonical event JSON. Staging fails closed with a retryable ingest
-error before either cap can be exceeded. These endpoints are an operable
-inspection/recovery surface, not yet a delivery protocol: durable consumer
-claim/acknowledgement and deletion/retention begin with the first downstream
-consumer rather than being implied by a destructive read API in this PR.
+`/local/eventing/outbox`. Ready records receive a separate, append-only
+readiness `sequence` on their first staged-to-ready transition;
+`?after=<sequence>&limit=<n>` therefore cannot skip an older staged event that is
+recovered after newer events were already read. `?state=staged` uses the original
+staging sequence for bounded inspection of records stranded before the chDB
+commit point. The Local store defaults to at most 10,000 events and 256 MiB of
+canonical event JSON. Staging fails closed with a retryable ingest error before
+either cap can be exceeded. These endpoints are an operable inspection/recovery
+surface, not yet a delivery protocol: durable consumer claim/acknowledgement and
+deletion/retention begin with the first downstream consumer rather than being
+implied by a destructive read API in this PR.
 
 Re-delivery is the safe recovery operation: it deduplicates the same staged event
 ID and promotes it only after the warehouse write succeeds. Maple never blindly

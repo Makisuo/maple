@@ -5,12 +5,20 @@ import type { ValidationIssue } from "./predicate"
 export type SignalLeafOperator = "exists" | "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains" | "in"
 export type ReplayCapability = "exact" | "coerced" | "unavailable"
 
-export interface SignalFieldCatalogEntry {
-	readonly field: FieldRef
+interface SignalFieldCatalogEntryBase {
 	readonly operators: readonly SignalLeafOperator[]
 	readonly sensitivity: "public" | "sensitive"
 	readonly replay: ReplayCapability
 }
+
+export type SignalFieldCatalogEntry = SignalFieldCatalogEntryBase &
+	(
+		| { readonly field: FieldRef; readonly types?: never }
+		| {
+				readonly field: Pick<FieldRef, "namespace" | "key">
+				readonly types: readonly SignalScalarType[]
+		  }
+	)
 
 export interface OpenFieldNamespacePolicy {
 	readonly namespace: FieldNamespace
@@ -37,6 +45,11 @@ interface RegisteredSignalSource {
 	readonly openFields: ReadonlyMap<FieldNamespace, OpenFieldNamespacePolicy>
 }
 
+const catalogEntryTypes = (entry: SignalFieldCatalogEntry): readonly SignalScalarType[] => {
+	if (entry.types !== undefined) return entry.types
+	return [entry.field.type]
+}
+
 export class SignalSourceRegistry {
 	readonly #sources = new Map<string, RegisteredSignalSource>()
 
@@ -51,6 +64,8 @@ export class SignalSourceRegistry {
 			if (fields.has(key))
 				throw new Error(`duplicate field catalog entry: ${definition.sourceKind}:${key}`)
 			if (entry.operators.length === 0) throw new Error(`field catalog entry has no operators: ${key}`)
+			if (entry.types !== undefined && entry.types.length === 0)
+				throw new Error(`field catalog entry has no types: ${key}`)
 			fields.set(key, entry)
 		}
 
@@ -105,10 +120,11 @@ export const validatePredicateAgainstSource = (
 	for (const leaf of leafFields(predicate)) {
 		const catalogEntry = source.fields.get(fieldKey(leaf.field))
 		if (catalogEntry) {
-			if (catalogEntry.field.type !== leaf.field.type)
+			const catalogTypes = catalogEntryTypes(catalogEntry)
+			if (!catalogTypes.includes(leaf.field.type))
 				issues.push({
 					path: `${leaf.path}.field.type`,
-					message: `catalog field ${fieldKey(leaf.field)} has type ${catalogEntry.field.type}`,
+					message: `catalog field ${fieldKey(leaf.field)} allows ${catalogTypes.join(", ")}`,
 				})
 			if (!catalogEntry.operators.includes(leaf.operator))
 				issues.push({
