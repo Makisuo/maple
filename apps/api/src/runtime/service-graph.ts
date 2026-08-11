@@ -24,6 +24,7 @@ import { DigestService } from "@/services/digest/DigestService"
 import { AiTriageService } from "@/services/errors/AiTriageService"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
+import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
@@ -160,6 +161,7 @@ const ErrorActorsServiceLive = ErrorActorsService.layer
 const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
 	Layer.provideMerge(ErrorActorsServiceLive),
 )
+const ErrorPolicyServiceLive = ErrorPolicyService.layer
 
 // Slack integration: OAuth install/callback, status, channels, uninstall, and
 // the internal bot-resolve endpoint. Needs ApiKeysService (mint the bot key) +
@@ -177,6 +179,7 @@ const ErrorsServiceLive = ErrorsService.layer.pipe(
 			NotificationDispatcherLive,
 			ErrorActorsServiceLive,
 			ErrorIssueWorkflowServiceLive,
+			ErrorPolicyServiceLive,
 		),
 	),
 )
@@ -242,6 +245,7 @@ const MainServicesLive = Layer.mergeAll(
 	AiTriageServiceLive,
 	InvestigationServiceLive,
 	ErrorIssueWorkflowServiceLive,
+	ErrorPolicyServiceLive,
 	ErrorsServiceLive,
 	RecommendationIssueServiceLive,
 	SetupAuditServiceLive,

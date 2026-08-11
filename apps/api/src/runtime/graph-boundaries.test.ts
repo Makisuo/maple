@@ -74,6 +74,7 @@ describe("API runtime graph boundaries", () => {
 			"DashboardPersistenceService.layer",
 			"ErrorActorsServiceLive",
 			"ErrorIssueWorkflowServiceLive",
+			"ErrorPolicyServiceLive",
 			"ErrorsServiceLive",
 			"QueryEngineServiceLive",
 			"RecommendationIssueServiceLive",

@@ -10,6 +10,7 @@ export { CloudflareAnalyticsService } from "./services/integrations/CloudflareAn
 export { CloudflareOAuthService } from "./services/auth/CloudflareOAuthService"
 export { ErrorActorsService } from "./services/errors/ErrorActorsService"
 export { ErrorIssueWorkflowService } from "./services/errors/ErrorIssueWorkflowService"
+export { ErrorPolicyService } from "./services/errors/ErrorPolicyService"
 export { ErrorsService } from "./services/errors/ErrorsService"
 export { NotificationDispatcher } from "./services/alerts/NotificationDispatcher"
 export { Database } from "@/platform/DatabaseLive"

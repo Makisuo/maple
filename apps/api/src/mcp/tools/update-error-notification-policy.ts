@@ -9,7 +9,7 @@ import {
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { AlertDestinationId, AlertSeverity, ErrorNotificationPolicyUpsertRequest } from "@maple/domain/http"
 
 const decodeSeverity = Schema.decodeUnknownOption(AlertSeverity)
@@ -55,7 +55,7 @@ export function registerUpdateErrorNotificationPolicyTool(server: McpToolRegistr
 			const decodedSeverity = Option.getOrUndefined(parsedSeverity)
 
 			const tenant = yield* resolveTenant
-			const errors = yield* ErrorsService
+			const policies = yield* ErrorPolicyService
 
 			const patch: Partial<{
 				enabled: boolean
@@ -102,7 +102,7 @@ export function registerUpdateErrorNotificationPolicyTool(server: McpToolRegistr
 				),
 			)
 
-			const policy = yield* errors
+			const policy = yield* policies
 				.upsertNotificationPolicy(tenant.orgId, tenant.userId, decodedPatch)
 				.pipe(
 					Effect.catchTags({

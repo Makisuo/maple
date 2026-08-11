@@ -4,6 +4,7 @@ import type { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import type { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import type { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import type { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
+import type { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import type { ErrorsService } from "@/services/errors/ErrorsService"
 import type { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import type { VcsSourceService } from "@/services/integrations/vcs/VcsSourceService"
@@ -24,6 +25,7 @@ export type McpToolRuntimeRequirements =
 	| DashboardPersistenceService
 	| ErrorActorsService
 	| ErrorIssueWorkflowService
+	| ErrorPolicyService
 	| ErrorsService
 	| QueryEngineService
 	| RecommendationIssueService
