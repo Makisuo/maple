@@ -8,35 +8,21 @@ import * as schema from "./schema"
 export type MaplePgSocket = ReturnType<typeof postgres>
 
 /**
- * One dialed socket, without any drizzle wrapper bound to it.
+ * One client, without any drizzle wrapper bound to it.
  *
- * Split out from `MaplePgConnection` so a caller can hold ONE socket across
- * many logical calls while still giving each call its own `onQuery` collector —
+ * Split out from `MaplePgConnection` so a caller can hold ONE client across many
+ * logical calls while still giving each call its own `onQuery` collector —
  * drizzle fixes its logger at construction, so collector isolation has to come
- * from a per-call `wrapMaplePgClient`, not from a per-call socket. That is what
- * lets the request path dial once instead of once per `execute`.
+ * from a per-call `wrapMaplePgClient`, not from a per-call client.
+ *
+ * There is deliberately no "wait until connected" member. postgres.js connects
+ * lazily on the first query, so a separate connect step can only be synthesized
+ * with a `select 1`, and that round trip bought nothing but a telemetry split.
+ * Its absence is what lets the request path create a client synchronously.
  */
 export interface MaplePgSocketHandle {
 	/** The raw postgres.js client. Wrap it per call with `wrapMaplePgClient`. */
 	readonly sql: MaplePgSocket
-	/**
-	 * Resolves once the connection is usable, so callers can time the dial
-	 * separately from the query.
-	 *
-	 * This costs one `select 1` round-trip, which is not free and is not the
-	 * first design we tried. postgres.js' `reserve()` looks like the zero-cost
-	 * answer but silently never resolves under `fetch_types: false`: it passes
-	 * the reservation as the connection's `initial` query, and the ReadyForQuery
-	 * handler only re-enters (and so only calls `onopen`, which is what resolves
-	 * the reservation) via the `needsTypes` branch. With type fetching off that
-	 * branch is skipped, `initial` is dropped, and the promise hangs forever.
-	 * Verified against postgres 3.4.9, src/connection.js:554-570.
-	 *
-	 * The probe goes through the raw postgres.js client rather than drizzle, so
-	 * it never reaches the `onQuery` collector and cannot pollute
-	 * `db.query.text`.
-	 */
-	readonly awaitConnected: () => Promise<void>
 	/** Closes the underlying postgres.js connection pool. */
 	readonly end: () => Promise<void>
 }
@@ -74,11 +60,15 @@ const toDrizzleLogger = (onQuery: ((query: string) => void) | undefined) =>
 	onQuery ? { logQuery: (query: string, _params: unknown[]) => onQuery(query) } : undefined
 
 /**
- * Dial one postgres.js socket, for real Postgres (PlanetScale via Hyperdrive in
- * Workers, docker-compose Postgres in `wrangler dev`, direct URLs in scripts).
+ * Create one postgres.js client, for real Postgres (PlanetScale via Hyperdrive
+ * in Workers, docker-compose Postgres in `wrangler dev`, direct URLs in
+ * scripts).
+ *
+ * Creating one costs nothing: postgres.js connects lazily on the first query,
+ * so this is synchronous and does not touch the network.
  *
  * Workers note: TCP sockets are tied to the request that opened them, so a
- * socket may be reused freely WITHIN a request but must never outlive it. The
+ * client may be reused freely WITHIN a request but must never outlive it. The
  * request path holds one of these per request (`maxConnections: 1`) and `end()`s
  * it at the boundary — see apps/api/src/platform/pg-connection-scope.ts.
  * `fetch_types: false` skips the pg_types round-trip (we only use built-in
@@ -104,13 +94,7 @@ export const createMaplePgSocket = (
 		// back to the driver default.
 		...(connectTimeoutSeconds === undefined ? {} : { connect_timeout: connectTimeoutSeconds }),
 	})
-	return {
-		sql,
-		awaitConnected: async () => {
-			await sql`select 1`
-		},
-		end: () => sql.end(),
-	}
+	return { sql, end: () => sql.end() }
 }
 
 /**

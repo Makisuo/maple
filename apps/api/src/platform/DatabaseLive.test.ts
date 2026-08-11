@@ -187,58 +187,44 @@ describe("Database execute span instrumentation", () => {
  * a slow query — the ambiguity that made the production p95 investigation
  * guesswork. These cover the split that resolves it.
  */
-describe("Database execute connect/query split", () => {
-	it.effect("reports both phases when the body marks the handshake", () =>
-		Effect.gen(function* () {
-			const { spans, tracer } = makeRecordingTracer()
-			const database = yield* Database
-
-			yield* database
-				.execute((db) => db.execute(sql`select 1 as probe`))
-				.pipe(Effect.withTracer(tracer))
-
-			const [span] = dbSpans(spans)
-			assert.isDefined(span)
-			assert.strictEqual(span.attributes.get("db.connect.completed"), true)
-			assert.isNumber(span.attributes.get("db.connect_ms"))
-			assert.isNumber(span.attributes.get("db.query_ms"))
-		}).pipe(Effect.provide(createTestDb(trackedDbs).layer)),
-	)
-
-	it.effect("attributes time before the handshake to connect, not to the query", () =>
-		Effect.gen(function* () {
-			const { spans, tracer } = makeRecordingTracer()
-
-			yield* executeWithSpan(async (hooks) => {
-				await new Promise((resolve) => setTimeout(resolve, 30))
-				hooks.markConnected()
-				hooks.collect("select 1")
-				return "ok"
-			}).pipe(Effect.withTracer(tracer))
-
-			const [span] = dbSpans(spans)
-			assert.isDefined(span)
-			// Margin for timer imprecision; the point is that the pre-mark wait
-			// landed in connect instead of being folded into query time.
-			assert.isAtLeast(span.attributes.get("db.connect_ms") as number, 25)
-		}),
-	)
-
-	it.effect("flags a dial that never completed and omits query time", () =>
+describe("Database execute failure classification", () => {
+	// There is no connect/query split any more. postgres.js connects on the first
+	// statement, so the split could only ever be synthesized by a `select 1` probe
+	// that cost a round trip on every request. What it was used to infer — is this
+	// a connection problem or a query problem — `error.type` states outright.
+	it.effect("classifies a connection failure by class rather than by duration", () =>
 		Effect.gen(function* () {
 			const { spans, tracer } = makeRecordingTracer()
 
 			const exit = yield* executeWithSpan(() =>
-				Promise.reject(new Error("write CONNECT_TIMEOUT")),
+				Promise.reject(
+					Object.assign(new Error("write CONNECT_TIMEOUT"), { code: "CONNECT_TIMEOUT" }),
+				),
 			).pipe(Effect.withTracer(tracer), Effect.exit)
 
 			assert.isTrue(Exit.isFailure(exit))
 			const [span] = dbSpans(spans)
 			assert.isDefined(span)
-			assert.strictEqual(span.attributes.get("db.connect.completed"), false)
-			// Still reports the time burned before giving up.
-			assert.isNumber(span.attributes.get("db.connect_ms"))
-			assert.isUndefined(span.attributes.get("db.query_ms"))
+			assert.strictEqual(span.attributes.get("error.type"), "CONNECT_TIMEOUT")
+			assert.strictEqual(span.attributes.get("db.connect.failed"), true)
+			assert.isNumber(span.attributes.get("db.duration_ms"))
+		}),
+	)
+
+	it.effect("classifies a statement failure separately, with its SQLSTATE", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+
+			const exit = yield* executeWithSpan(() =>
+				Promise.reject(Object.assign(new Error("duplicate key"), { code: "23505" })),
+			).pipe(Effect.withTracer(tracer), Effect.exit)
+
+			assert.isTrue(Exit.isFailure(exit))
+			const [span] = dbSpans(spans)
+			assert.isDefined(span)
+			assert.strictEqual(span.attributes.get("error.type"), "23505")
+			assert.strictEqual(span.attributes.get("db.response.status_code"), "23505")
+			assert.strictEqual(span.attributes.get("db.connect.failed"), false)
 		}),
 	)
 
@@ -247,14 +233,13 @@ describe("Database execute connect/query split", () => {
 			const { spans, tracer } = makeRecordingTracer()
 
 			yield* executeWithSpan((hooks) => {
-				hooks.record({ "db.connect.in_flight": 3 })
-				hooks.markConnected()
+				hooks.record({ "db.connect.reused": true })
 				return Promise.resolve("ok")
 			}).pipe(Effect.withTracer(tracer))
 
 			const [span] = dbSpans(spans)
 			assert.isDefined(span)
-			assert.strictEqual(span.attributes.get("db.connect.in_flight"), 3)
+			assert.strictEqual(span.attributes.get("db.connect.reused"), true)
 		}),
 	)
 })

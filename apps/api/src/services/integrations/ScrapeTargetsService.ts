@@ -23,6 +23,7 @@ import { scrapeTargetChecks, scrapeTargets, type ScrapeTargetCheckRow } from "@m
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm"
 import { Cause, Clock, Context, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "@/platform/Crypto"
+import { forkRequestScoped } from "@/platform/fork-request-scoped"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import {
@@ -665,13 +666,20 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				// before it can record a result (e.g. a revoked/not-connected OAuth
 				// grant → ScrapeTargetAuthError) would otherwise leave the fresh target
 				// looking healthy with no log and no lastScrapeError row.
-				yield* probe(orgId, id).pipe(
-					Effect.catchCause((cause) =>
-						Effect.logWarning("Initial scrape probe failed").pipe(
-							Effect.annotateLogs({ orgId, scrapeTargetId: id, error: Cause.pretty(cause) }),
+				// Scoped, not detached: the probe records its result through the
+				// request's Postgres socket, which is released when the request ends.
+				yield* forkRequestScoped(
+					probe(orgId, id).pipe(
+						Effect.catchCause((cause) =>
+							Effect.logWarning("Initial scrape probe failed").pipe(
+								Effect.annotateLogs({
+									orgId,
+									scrapeTargetId: id,
+									error: Cause.pretty(cause),
+								}),
+							),
 						),
 					),
-					Effect.forkDetach,
 				)
 
 				return rowToResponse(row.value)

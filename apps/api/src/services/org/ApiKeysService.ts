@@ -18,6 +18,7 @@ import { and, desc, eq, isNull, lt, or } from "drizzle-orm"
 import { Clock, Effect, Layer, Option, Redacted, Schema, Context } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
+import { forkRequestScoped } from "@/platform/fork-request-scoped"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
 
@@ -452,7 +453,9 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 					"tenant.userId": resolved.value.userId,
 					"maple.api_key.id": resolved.value.keyId,
 				})
-				yield* touchLastUsed(resolved.value.keyId).pipe(Effect.ignore, Effect.forkDetach)
+				// Scoped, not detached: this write shares the request's single Postgres
+				// connection, and a detached fiber can outlive its release.
+				yield* forkRequestScoped(touchLastUsed(resolved.value.keyId).pipe(Effect.ignore))
 			}
 			return resolved
 		})
