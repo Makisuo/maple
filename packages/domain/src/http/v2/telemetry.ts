@@ -101,6 +101,7 @@ const TraceFilters = Schema.Struct({
 	attributes: Schema.optionalKey(AttributeFilterCollection),
 	resource_attributes: Schema.optionalKey(AttributeFilterCollection),
 }).annotate({ identifier: "TraceFilters", title: "Trace filters" })
+export type V2TraceFilters = Schema.Schema.Type<typeof TraceFilters>
 
 const LogFilters = Schema.Struct({
 	service_name: Schema.optionalKey(ServiceName),
@@ -116,6 +117,7 @@ const LogFilters = Schema.Struct({
 	attributes: Schema.optionalKey(AttributeFilterCollection),
 	resource_attributes: Schema.optionalKey(AttributeFilterCollection),
 }).annotate({ identifier: "LogFilters", title: "Log filters" })
+export type V2LogFilters = Schema.Schema.Type<typeof LogFilters>
 
 const MetricType = Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])
 const MetricFilters = Schema.Struct({
@@ -123,6 +125,7 @@ const MetricFilters = Schema.Struct({
 	metric_type: MetricType,
 	service_name: Schema.optionalKey(ServiceName),
 }).annotate({ identifier: "MetricFilters", title: "Metric filters" })
+export type V2MetricFilters = Schema.Schema.Type<typeof MetricFilters>
 
 export const V2TimeseriesValuePoint = Schema.Struct({
 	timestamp: Timestamp,

@@ -24,7 +24,7 @@ describe("Maple.layer (client) — session linking after refactor", () => {
 
 	it("records the trace id and stamps session.id via the published session sink", async () => {
 		const restoreFetch = setupFetch()
-		const g = globalThis as Record<string, any>
+		const g = globalThis as Record<string, unknown>
 		const recordTraceId = vi.fn()
 		g.__MAPLE_BROWSER_SESSION__ = { sessionId: "sess-xyz", recordTraceId }
 		restore = () => {
@@ -50,7 +50,7 @@ describe("Maple.layer (client) — session linking after refactor", () => {
 
 	it("no-ops cleanly when no session sink is published", async () => {
 		const restoreFetch = setupFetch()
-		const g = globalThis as Record<string, any>
+		const g = globalThis as Record<string, unknown>
 		delete g.__MAPLE_BROWSER_SESSION__
 		restore = restoreFetch
 

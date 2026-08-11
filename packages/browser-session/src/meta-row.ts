@@ -1,3 +1,4 @@
+import { browserLocation, browserNavigator } from "./browser-globals"
 import type { ResolvedIdentity } from "./identity"
 import type { EntryContext } from "./session"
 import { parseUserAgent } from "./user-agent"
@@ -66,11 +67,10 @@ export interface SessionMetaRowInput {
  * exotic embedders) they fall back to empty strings.
  */
 export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, unknown> {
-	const g = globalThis as Record<string, any>
-	const userAgent: string = g["navigator"]?.userAgent ?? ""
+	const userAgent: string = browserNavigator()?.userAgent ?? ""
 	const ua = parseUserAgent(userAgent)
 	const now = new Date()
-	const location = g["window"]?.location
+	const location = browserLocation()
 	const identity = input.identity
 	const entryUrl = input.entry?.entryUrl ?? location?.href ?? ""
 	const referrer = input.entry?.referrer ?? ""
@@ -135,7 +135,7 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, 
 		host: location?.host ?? "",
 		entry_path: pathOf(entryUrl),
 		exit_path: pathOf(input.lastUrl ?? location?.href ?? ""),
-		language: g["navigator"]?.language ?? "",
+		language: browserNavigator()?.language ?? "",
 		last_activity_at: formatCHDateTime(now),
 		click_count: input.clickCount ?? 0,
 		page_views: input.pageViews ?? 0,

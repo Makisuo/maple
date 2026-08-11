@@ -10,9 +10,23 @@ import { identify } from "./user.js"
 // `/v1/sessionReplays/meta` rows (active on setup, ended with observed trace
 // ids on tab-hide) when no `@maple-dev/browser` sink is on the page.
 
+/** The fields these assertions read off a `/v1/sessionReplays/meta` row. */
+interface MetaRowView {
+	readonly session_id: string
+	readonly status: string
+	readonly version: number
+	readonly service_name: string
+	readonly url_initial: string
+	readonly user_id: string
+	readonly click_count: number
+	readonly error_count: number
+	readonly trace_ids: ReadonlyArray<string>
+	readonly resource_attributes: Record<string, string>
+}
+
 interface MetaPost {
 	readonly url: string
-	readonly row: Record<string, any>
+	readonly row: MetaRowView
 	readonly keepalive: boolean | undefined
 }
 
@@ -178,7 +192,7 @@ describe("standalone session emission (client)", () => {
 
 	it("posts nothing when the @maple-dev/browser sink owns the session", async () => {
 		const { metaPosts, restore: rf } = setupFetch()
-		const g = globalThis as Record<string, any>
+		const g = globalThis as Record<string, unknown>
 		g.__MAPLE_BROWSER_SESSION__ = { sessionId: "sess-1", recordTraceId: () => {} }
 		restore = () => {
 			rf()

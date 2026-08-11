@@ -109,6 +109,13 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
 - **Schemas:** Effect Schema, not Zod, for everything new. Wrap with `Schema.toStandardSchemaV1()`
   for TanStack Router `validateSearch`. `Schema.optionalKey()` for JSON-decoded HTTP/domain schemas;
   `Schema.optional()` only where `undefined` is a real JS value (search params, MCP tool params).
+- **Types:** `Record<string, any>` is banned at `error` (`maple/no-record-string-any`, a local oxlint
+  JS plugin in `scripts/oxlint-plugins/maple.mjs`) and the repo is at zero — keep it there. Generic
+  constraints (`<T extends Record<string, any>>`) are exempt: `unknown` does not work in that
+  position. `typescript/no-explicit-any` is `warn` (75 left, all outside `lib/`). Both rules are off
+  under `lib/**`, whose builder DSLs (`clickhouse-builder`, `unitflow`, `effect-cloudflare`) use
+  `any` as a type-level placeholder in variance positions. `Record<string, unknown>` is _not_ banned —
+  it forces narrowing at every read, which is the point.
 - **Effect:** source is vendored at `.context/effect/` (subtree of Effect-TS/effect-smol).
 - **Alchemy:** read `node_modules/alchemy/src/` — the package ships its own TypeScript source,
   so it always matches the version actually running. There is deliberately no vendored copy:

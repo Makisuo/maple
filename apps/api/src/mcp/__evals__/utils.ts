@@ -29,8 +29,7 @@ export const predictToolCalls = async (input: string): Promise<TaskResult> => {
 	})
 	const toolCalls: ToolCall[] = result.toolCalls.map((call) => ({
 		name: call.toolName,
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		arguments: (call.input ?? {}) as Record<string, any>,
+		arguments: (call.input ?? {}) as Record<string, unknown>,
 	}))
 	return { result: result.text, toolCalls }
 }

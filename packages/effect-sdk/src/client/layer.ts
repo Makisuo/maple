@@ -1,6 +1,7 @@
 import type { Duration } from "effect"
 import { Effect, Layer } from "effect"
 import { Otlp } from "effect/unstable/observability"
+import { browserNavigator } from "./browser-globals.js"
 import { consentHttpClientLayer } from "./consent-http-client.js"
 import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
 import { withSessionLink } from "./session-link.js"
@@ -81,9 +82,8 @@ export const layer = (config: MapleClientConfig) => {
 	const attributes: Record<string, unknown> = {
 		"maple.sdk.type": "client",
 	}
-	const g = globalThis as Record<string, any>
-	if (typeof g["navigator"] !== "undefined") {
-		const nav = g["navigator"]
+	const nav = browserNavigator()
+	if (nav) {
 		if (nav.userAgent) attributes["browser.user_agent"] = nav.userAgent
 		if (nav.language) attributes["browser.language"] = nav.language
 	}

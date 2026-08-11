@@ -9,10 +9,13 @@ import {
 	timestamp,
 	type Timestamp,
 	type V2Log,
+	type V2LogFilters,
 	type V2Metric,
+	type V2MetricFilters,
 	type V2Service,
 	type V2ServiceMapEdge,
 	type V2Span,
+	type V2TraceFilters,
 	type V2TraceSummary,
 } from "@maple/domain/http/v2"
 import {
@@ -327,7 +330,7 @@ const attributeFilters = (
 		...(filter.negated !== undefined ? { negated: filter.negated } : {}),
 	}))
 
-const traceFilters = (filters: Record<string, any> | undefined, groupByAttributeKey?: string) => {
+const traceFilters = (filters: V2TraceFilters | undefined, groupByAttributeKey?: string) => {
 	if (!filters && !groupByAttributeKey) return undefined
 	const httpFilters = [
 		...(filters?.http_method
@@ -356,7 +359,7 @@ const traceFilters = (filters: Record<string, any> | undefined, groupByAttribute
 	}
 }
 
-const logFilters = (filters: Record<string, any> | undefined) =>
+const logFilters = (filters: V2LogFilters | undefined) =>
 	filters
 		? {
 				serviceName: filters.service_name,
@@ -373,7 +376,7 @@ const logFilters = (filters: Record<string, any> | undefined) =>
 		: undefined
 
 const metricFilters = (
-	filters: Record<string, any>,
+	filters: V2MetricFilters,
 	groupByAttributeKey?: string,
 	groupByResourceAttributeKey?: string,
 ) => ({

@@ -5,6 +5,7 @@
 // suspends and resumes the rrweb recorder, which is what `onStart`/`onSuspend`
 // are for. Keeping one driver is what stops the two SDKs (and the recorded and
 // unrecorded paths within one SDK) from disagreeing about which sessions exist.
+import { browserDocument } from "./browser-globals"
 import { getActiveSink } from "./events-sink"
 import type { ResolvedIdentity } from "./identity"
 import { buildSessionMetaRow } from "./meta-row"
@@ -249,7 +250,7 @@ export function startSessionLifecycle(
 
 	const onPageHide = (): void => void endRun({ flush: true, keepalive: true })
 	const onVisibilityChange = (): void => {
-		const doc = (globalThis as Record<string, any>)["document"]
+		const doc = browserDocument()
 		if (!doc) return
 		if (doc.visibilityState === "hidden") {
 			void endRun({ flush: true, keepalive: true })

@@ -56,8 +56,7 @@ describeMapleEval("observability tool execution (fake warehouse)", {
 		const toolCalls: ToolCall[] = steps.flatMap((step) =>
 			(step.toolCalls ?? []).map((call: { toolName: string; input?: unknown }) => ({
 				name: call.toolName,
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				arguments: (call.input ?? {}) as Record<string, any>,
+				arguments: (call.input ?? {}) as Record<string, unknown>,
 			})),
 		)
 		// Fold rendered tool output into `result` so OutputContainsScorer (which

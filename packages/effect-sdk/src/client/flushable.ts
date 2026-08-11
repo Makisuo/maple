@@ -16,6 +16,7 @@ import {
 import { type LogBuffer, makeLogBuffer } from "../shared/flushable-logger.js"
 import { makeMetricBuffer } from "../shared/flushable-metrics.js"
 import { makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
+import { browserDocument, browserNavigator } from "./browser-globals.js"
 import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
 import { withSessionLink } from "./session-link.js"
 import type { PrivacyOptions } from "./track.js"
@@ -124,9 +125,8 @@ const buildBrowserAttributes = (config: MapleClientFlushableConfig): Record<stri
 		"maple.sdk.type": "client",
 		"service.instance.id": browserInstanceId,
 	}
-	const g = globalThis as Record<string, any>
-	if (typeof g["navigator"] !== "undefined") {
-		const nav = g["navigator"]
+	const nav = browserNavigator()
+	if (nav) {
 		if (nav.userAgent) attributes["browser.user_agent"] = nav.userAgent
 		if (nav.language) attributes["browser.language"] = nav.language
 	}
@@ -257,8 +257,7 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 		void flush()
 	}
 	const onVisibilityChange = (): void => {
-		const doc = (globalThis as Record<string, any>)["document"]
-		if (doc && doc.visibilityState === "hidden") void flush()
+		if (browserDocument()?.visibilityState === "hidden") void flush()
 	}
 	const canListen = (config.flushOnUnload ?? true) && typeof globalThis.addEventListener === "function"
 	if (canListen) {

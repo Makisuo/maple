@@ -30,7 +30,7 @@ const { variant = "section" } = Astro.props;
 
 // Entry id (filename) → brand mark. Add a new customer by dropping a
 // src/content/logos/<id>.md file and registering its logo component here.
-const LOGOS: Record<string, any> = {
+const LOGOS: Record<string, typeof HazelLogo> = {
 	hazel: HazelLogo,
 	sakura: SakuraLogo,
 	gymscore: GymscoreLogo,

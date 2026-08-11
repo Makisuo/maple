@@ -10,9 +10,19 @@ const traceRequest = (spans: Array<{ name: string; startTimeUnixNano: string }>)
 		}),
 	)
 
-const readJson = (request: HttpClientRequest.HttpClientRequest): Record<string, any> => {
+interface ReadSpan {
+	readonly name: string
+	readonly startTimeUnixNano?: unknown
+}
+interface ReadOtlpBody {
+	readonly resourceSpans: ReadonlyArray<{
+		readonly scopeSpans: ReadonlyArray<{ readonly spans: ReadonlyArray<ReadSpan> }>
+	}>
+}
+
+const readJson = (request: HttpClientRequest.HttpClientRequest): ReadOtlpBody => {
 	if (request.body._tag !== "Uint8Array") throw new Error("expected JSON body")
-	return JSON.parse(new TextDecoder().decode(request.body.body))
+	return JSON.parse(new TextDecoder().decode(request.body.body)) as ReadOtlpBody
 }
 
 afterEach(() => {
@@ -44,7 +54,7 @@ describe("consent OTLP transport", () => {
 
 		expect(filtered).toBeDefined()
 		const spans = readJson(filtered!).resourceSpans[0].scopeSpans[0].spans
-		expect(spans.map((span: { name: string }) => span.name)).toEqual(["after"])
+		expect(spans.map((span) => span.name)).toEqual(["after"])
 	})
 
 	it("removes spans from a previous grant after a revoke/re-grant cycle", () => {
@@ -72,7 +82,7 @@ describe("consent OTLP transport", () => {
 
 		expect(filtered).toBeDefined()
 		const spans = readJson(filtered!).resourceSpans[0].scopeSpans[0].spans
-		expect(spans.map((span: { name: string }) => span.name)).toEqual(["second-grant"])
+		expect(spans.map((span) => span.name)).toEqual(["second-grant"])
 	})
 
 	it("fails closed for cumulative metrics under explicit consent gating", () => {

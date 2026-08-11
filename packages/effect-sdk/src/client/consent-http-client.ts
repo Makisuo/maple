@@ -8,7 +8,34 @@ import {
 	HttpClientResponse,
 } from "effect/unstable/http"
 
-type JsonObject = Record<string, any>
+/**
+ * The slice of the OTLP/JSON envelope this filter walks. Unlisted fields (resource
+ * attributes, scope metadata, span bodies) ride along through the spreads untouched,
+ * so they deliberately go unmodelled — only the timestamps we compare are named.
+ */
+interface OtlpSpan {
+	readonly startTimeUnixNano?: unknown
+}
+interface OtlpLogRecord {
+	readonly timeUnixNano?: unknown
+	readonly observedTimeUnixNano?: unknown
+}
+interface OtlpScopeSpans {
+	readonly spans?: ReadonlyArray<OtlpSpan>
+}
+interface OtlpScopeLogs {
+	readonly logRecords?: ReadonlyArray<OtlpLogRecord>
+}
+interface OtlpResourceSpans {
+	readonly scopeSpans?: ReadonlyArray<OtlpScopeSpans>
+}
+interface OtlpResourceLogs {
+	readonly scopeLogs?: ReadonlyArray<OtlpScopeLogs>
+}
+interface OtlpBody {
+	readonly resourceSpans?: ReadonlyArray<OtlpResourceSpans>
+	readonly resourceLogs?: ReadonlyArray<OtlpResourceLogs>
+}
 
 const after = (value: unknown, threshold: bigint): boolean => {
 	try {
@@ -18,37 +45,35 @@ const after = (value: unknown, threshold: bigint): boolean => {
 	}
 }
 
-const pruneTraces = (body: JsonObject, threshold: bigint): JsonObject | undefined => {
+const pruneTraces = (body: OtlpBody, threshold: bigint): OtlpBody | undefined => {
 	const resourceSpans = (body.resourceSpans ?? [])
-		.map((resource: JsonObject) => ({
+		.map((resource) => ({
 			...resource,
 			scopeSpans: (resource.scopeSpans ?? [])
-				.map((scope: JsonObject) => ({
+				.map((scope) => ({
 					...scope,
-					spans: (scope.spans ?? []).filter((span: JsonObject) =>
-						after(span.startTimeUnixNano, threshold),
-					),
+					spans: (scope.spans ?? []).filter((span) => after(span.startTimeUnixNano, threshold)),
 				}))
-				.filter((scope: JsonObject) => scope.spans.length > 0),
+				.filter((scope) => scope.spans.length > 0),
 		}))
-		.filter((resource: JsonObject) => resource.scopeSpans.length > 0)
+		.filter((resource) => resource.scopeSpans.length > 0)
 	return resourceSpans.length > 0 ? { ...body, resourceSpans } : undefined
 }
 
-const pruneLogs = (body: JsonObject, threshold: bigint): JsonObject | undefined => {
+const pruneLogs = (body: OtlpBody, threshold: bigint): OtlpBody | undefined => {
 	const resourceLogs = (body.resourceLogs ?? [])
-		.map((resource: JsonObject) => ({
+		.map((resource) => ({
 			...resource,
 			scopeLogs: (resource.scopeLogs ?? [])
-				.map((scope: JsonObject) => ({
+				.map((scope) => ({
 					...scope,
-					logRecords: (scope.logRecords ?? []).filter((record: JsonObject) =>
+					logRecords: (scope.logRecords ?? []).filter((record) =>
 						after(record.timeUnixNano ?? record.observedTimeUnixNano, threshold),
 					),
 				}))
-				.filter((scope: JsonObject) => scope.logRecords.length > 0),
+				.filter((scope) => scope.logRecords.length > 0),
 		}))
-		.filter((resource: JsonObject) => resource.scopeLogs.length > 0)
+		.filter((resource) => resource.scopeLogs.length > 0)
 	return resourceLogs.length > 0 ? { ...body, resourceLogs } : undefined
 }
 
@@ -70,7 +95,7 @@ export const filterOtlpRequestForConsent = (
 	const since = consentAllowedSince()
 	if (!Number.isFinite(since)) return undefined
 	try {
-		const decoded = JSON.parse(new TextDecoder().decode(request.body.body)) as JsonObject
+		const decoded = JSON.parse(new TextDecoder().decode(request.body.body)) as OtlpBody
 		const threshold = BigInt(Math.trunc(since)) * 1_000_000n
 		const filtered = request.url.endsWith("/v1/traces")
 			? pruneTraces(decoded, threshold)

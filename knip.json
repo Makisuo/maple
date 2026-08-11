@@ -12,7 +12,7 @@
 	"ignoreExportsUsedInFile": true,
 	"workspaces": {
 		".": {
-			"entry": ["alchemy.run.ts", "scripts/**/*.ts"],
+			"entry": ["alchemy.run.ts", "scripts/**/*.ts", "scripts/oxlint-plugins/*.mjs"],
 			"ignoreBinaries": ["wrangler", "tb", "pscale"]
 		},
 		"apps/web": {

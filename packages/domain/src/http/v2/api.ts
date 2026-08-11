@@ -28,15 +28,27 @@ import { V2UnexpectedErrors } from "./auth"
 
 const HTTP_OPERATION_METHODS = ["get", "post", "put", "patch", "delete", "head"] as const
 
+/** The slice of the generated OpenAPI document this post-pass mutates. */
+interface OpenApiResponse {
+	headers?: Record<string, unknown>
+}
+interface OpenApiOperation {
+	readonly responses?: Record<string, OpenApiResponse | undefined>
+}
+type OpenApiPathItem = Partial<Record<(typeof HTTP_OPERATION_METHODS)[number], OpenApiOperation>>
+interface OpenApiSpec {
+	readonly paths?: Record<string, OpenApiPathItem | undefined>
+}
+
 /** Add the rate-limit retry contract to every generated 429 response. */
-const addRateLimitResponseHeaders = (spec: Record<string, any>): Record<string, any> => {
+const addRateLimitResponseHeaders = <S extends OpenApiSpec>(spec: S): S => {
 	for (const pathItem of Object.values(spec.paths ?? {})) {
 		if (typeof pathItem !== "object" || pathItem === null) continue
 		for (const method of HTTP_OPERATION_METHODS) {
-			const operation = (pathItem as Record<string, any>)[method]
+			const operation = pathItem[method]
 			if (typeof operation !== "object" || operation === null) continue
 			const response = operation.responses?.["429"]
-			if (typeof response !== "object" || response === null) continue
+			if (typeof response !== "object" || response === null || response === undefined) continue
 			response.headers = {
 				...response.headers,
 				"Retry-After": {

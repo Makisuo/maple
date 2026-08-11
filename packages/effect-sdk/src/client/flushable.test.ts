@@ -36,7 +36,7 @@ const setupFetch = (responder: (url: string) => Response = () => new Response(nu
 // EventTarget. Lets us drive `pagehide` / `visibilitychange` without jsdom.
 const setupDom = () => {
 	const listeners: Record<string, Set<EventListenerOrEventListenerObject>> = {}
-	const g = globalThis as Record<string, any>
+	const g = globalThis as Record<string, unknown>
 	const orig = {
 		add: g.addEventListener,
 		remove: g.removeEventListener,
@@ -235,7 +235,7 @@ describe("MapleFlush.make (client)", () => {
 
 	it("links the active replay session: records the trace id + stamps session.id", async () => {
 		const { calls, restore: rf } = setupFetch()
-		const g = globalThis as Record<string, any>
+		const g = globalThis as Record<string, unknown>
 		const recordTraceId = vi.fn()
 		g.__MAPLE_BROWSER_SESSION__ = { sessionId: "sess-123", recordTraceId }
 		restore = () => {

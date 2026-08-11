@@ -46,8 +46,7 @@ export const makeEvalRuntime = (): EvalRuntime => {
 	const configLive = ConfigProvider.layer(ConfigProvider.fromUnknown(env))
 	const envLive = Env.layer.pipe(Layer.provide(configLive))
 	const databaseLive = testDb.layer
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const workerEnvLive = Layer.succeed(WorkerEnvironment, env as Record<string, any>)
+	const workerEnvLive = Layer.succeed(WorkerEnvironment, env as Record<string, unknown>)
 
 	const layer = MainLive.pipe(
 		Layer.provide(Layer.mergeAll(configLive, envLive, databaseLive, workerEnvLive)),
