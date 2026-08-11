@@ -24,6 +24,7 @@ import {
 } from "./AlertsService"
 import { AlertDestinationsService } from "./AlertDestinationsService"
 import { AlertReadModelsService } from "./AlertReadModelsService"
+import { AlertRulesService } from "./AlertRulesService"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService } from "@maple/cache"
 import { baselineWarehouseCapabilities } from "@maple/query-engine"
@@ -222,6 +223,9 @@ const makeLayer = (
 	const alertReadModelsLive = AlertReadModelsService.layer.pipe(
 		Layer.provide(Layer.mergeAll(databaseLive, warehouseLive)),
 	)
+	const alertRulesLive = AlertRulesService.layer.pipe(
+		Layer.provide(Layer.mergeAll(databaseLive, runtimeLive)),
+	)
 
 	const alertsLive = AlertsService.layer.pipe(
 		Layer.provide(
@@ -238,10 +242,11 @@ const makeLayer = (
 				investigationsLive,
 				alertDestinationsLive,
 				alertReadModelsLive,
+				alertRulesLive,
 			),
 		),
 	)
-	return Layer.mergeAll(alertDestinationsLive, alertReadModelsLive, alertsLive)
+	return Layer.mergeAll(alertDestinationsLive, alertReadModelsLive, alertRulesLive, alertsLive)
 }
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -387,6 +392,17 @@ describe("AlertsService", () => {
 			assert.strictEqual(alerts.listRuleChecks, readModels.listRuleChecks)
 			assert.strictEqual(alerts.summarizeRuleChecks, readModels.summarizeRuleChecks)
 			assert.strictEqual(alerts.listDeliveryEvents, readModels.listDeliveryEvents)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}))))
+	})
+
+	it.effect("delegates the narrow rule methods to AlertRulesService", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const rules = yield* AlertRulesService
+			assert.strictEqual(alerts.listRules, rules.listRules)
+			assert.strictEqual(alerts.createRule, rules.createRule)
+			assert.strictEqual(alerts.deleteRule, rules.deleteRule)
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}))))
 	})
 

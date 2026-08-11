@@ -1,5 +1,6 @@
 import type { AlertsService } from "@/services/alerts/AlertsService"
 import type { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
+import type { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import type { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import type { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import type { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
@@ -19,6 +20,7 @@ import type { CurrentMcpTenant } from "../lib/query-warehouse"
 export type McpToolRuntimeRequirements =
 	| AlertsService
 	| AlertReadModelsService
+	| AlertRulesService
 	| DashboardPersistenceService
 	| ErrorActorsService
 	| ErrorIssueWorkflowService

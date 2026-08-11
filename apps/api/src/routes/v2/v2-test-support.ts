@@ -3,6 +3,7 @@ import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
@@ -292,17 +293,25 @@ const alertReadModelStubs = {
 /** Inert read-model capability for harnesses that never touch alert history. */
 export const AlertReadModelsServiceStubLayer = Layer.succeed(AlertReadModelsService, alertReadModelStubs)
 
+const alertRuleStubs = {
+	listRules: die,
+	createRule: die,
+	deleteRule: die,
+}
+
+/** Inert rule capability for harnesses that never touch alert-rule CRUD. */
+export const AlertRulesServiceStubLayer = Layer.succeed(AlertRulesService, alertRuleStubs)
+
 /** Inert AlertsService facade for harnesses that never touch the alert groups. */
 export const AlertsServiceStubLayer = Layer.mergeAll(
 	AlertDestinationsServiceStubLayer,
 	AlertReadModelsServiceStubLayer,
+	AlertRulesServiceStubLayer,
 	Layer.succeed(AlertsService, {
 		...alertDestinationStubs,
 		...alertReadModelStubs,
-		listRules: die,
-		createRule: die,
+		...alertRuleStubs,
 		updateRule: die,
-		deleteRule: die,
 		testRule: die,
 		previewRule: die,
 		runSchedulerTick: die,

@@ -36,6 +36,7 @@ import { DashboardPersistenceService } from "@/services/dashboards/DashboardPers
 import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { OrgMembersService } from "@/services/org/OrgMembersService"
@@ -133,6 +134,9 @@ const makeHarness = () => {
 	const alertReadModelsLive = AlertReadModelsService.layer.pipe(
 		Layer.provide(Layer.mergeAll(testDb.layer, warehouseLive)),
 	)
+	const alertRulesLive = AlertRulesService.layer.pipe(
+		Layer.provide(Layer.mergeAll(testDb.layer, runtimeLive)),
+	)
 	const alertsLive = AlertsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -148,6 +152,7 @@ const makeHarness = () => {
 				investigationsLive,
 				alertDestinationsLive,
 				alertReadModelsLive,
+				alertRulesLive,
 			),
 		),
 	)
@@ -157,6 +162,7 @@ const makeHarness = () => {
 		DashboardPersistenceService.layer,
 		alertDestinationsLive,
 		alertReadModelsLive,
+		alertRulesLive,
 		alertsLive,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 

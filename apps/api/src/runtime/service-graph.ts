@@ -8,6 +8,7 @@ import { Env } from "@/platform/Env"
 import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
 import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
@@ -120,9 +121,11 @@ const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
 
 const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(Env.layer))
 
+const AlertRuntimeLive = AlertRuntime.layer
+
 const AlertDestinationsServiceLive = AlertDestinationsService.layer.pipe(
 	Layer.provide(
-		Layer.mergeAll(CoreServicesLive, AlertRuntime.layer, EmailServiceLive, OrgMembersServiceLive),
+		Layer.mergeAll(CoreServicesLive, AlertRuntimeLive, EmailServiceLive, OrgMembersServiceLive),
 	),
 )
 
@@ -130,16 +133,21 @@ const AlertReadModelsServiceLive = AlertReadModelsService.layer.pipe(
 	Layer.provide(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
 )
 
+const AlertRulesServiceLive = AlertRulesService.layer.pipe(
+	Layer.provide(Layer.mergeAll(CoreServicesLive, AlertRuntimeLive)),
+)
+
 const AlertsServiceLive = AlertsService.layer.pipe(
 	Layer.provideMerge(
 		Layer.mergeAll(
 			CoreServicesLive,
 			QueryEngineServiceLive,
-			AlertRuntime.layer,
+			AlertRuntimeLive,
 			EmailServiceLive,
 			OrgMembersServiceLive,
 			AlertDestinationsServiceLive,
 			AlertReadModelsServiceLive,
+			AlertRulesServiceLive,
 		),
 	),
 )
@@ -228,6 +236,7 @@ const MainServicesLive = Layer.mergeAll(
 	QueryEngineServiceLive,
 	AlertDestinationsServiceLive,
 	AlertReadModelsServiceLive,
+	AlertRulesServiceLive,
 	AlertsServiceLive,
 	AnomalyDetectionServiceLive,
 	AiTriageServiceLive,
