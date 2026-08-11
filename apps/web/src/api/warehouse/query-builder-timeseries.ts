@@ -1,7 +1,11 @@
 import { Effect, Result, Schema } from "effect"
-import { QueryEngineExecuteRequest, type QuerySpec } from "@maple/query-engine"
+import {
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+	QueryEngineExecuteRequest,
+	type QuerySpec,
+} from "@maple/query-engine"
 import { NO_QUERY_DATA_MESSAGE } from "@/lib/alerts/preview-failure"
-import { formatForTinybird } from "@/lib/time-utils"
 import {
 	buildFormulaResults,
 	type FormulaDraft,
@@ -114,7 +118,7 @@ interface QueryBuilderTimeseriesResponse {
 	debug?: QueryBuilderTimeseriesDebug
 }
 
-const toEpochMs = (value: string): number => new Date(value.replace(" ", "T") + "Z").getTime()
+const toEpochMs = parseWarehouseDateTime
 
 function computeAutoBucketSeconds(startTime: string, endTime: string): number {
 	return computeBucketSeconds(startTime, endTime)
@@ -232,8 +236,8 @@ function buildExecutionWindows(
 		}
 
 		const windowStartMs = endMs - seconds * 1000
-		const nextStart = formatForTinybird(new Date(windowStartMs))
-		const nextEnd = formatForTinybird(new Date(endMs))
+		const nextStart = formatWarehouseDateTime(windowStartMs)
+		const nextEnd = formatWarehouseDateTime(endMs)
 		const key = `${nextStart}|${nextEnd}`
 
 		if (seen.has(key)) {
@@ -809,8 +813,8 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 	let previousDebug: QueryExecutionDebug[] = []
 
 	if (comparison.mode === "previous_period" && shiftMs > 0) {
-		previousStartTime = formatForTinybird(new Date(startMs - shiftMs))
-		previousEndTime = formatForTinybird(new Date(endMs - shiftMs))
+		previousStartTime = formatWarehouseDateTime(startMs - shiftMs)
+		previousEndTime = formatWarehouseDateTime(endMs - shiftMs)
 
 		const previousWindow = yield* runQueryWindow(
 			previousStartTime,

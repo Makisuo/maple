@@ -50,6 +50,15 @@ export interface SubTargetOverride {
 	readonly labels: Record<string, string>
 }
 
+class InvalidScrapeTargetRow extends Schema.TaggedError<InvalidScrapeTargetRow>()(
+	"@maple/api/routes/InvalidScrapeTargetRow",
+	{
+		message: Schema.String,
+		rawTargetId: Schema.String,
+		cause: Schema.Defect(),
+	},
+) {}
+
 /**
  * Marshal a DB row into the internal wire shape. Unparseable labels degrade
  * to `{}`; a row that fails the schema brands (interval out of range, bad id)
@@ -82,7 +91,12 @@ export const toInternalScrapeTarget = (
 					labels,
 					ingestKey,
 				}),
-			catch: () => new Error("invalid scrape target row"),
+			catch: (cause) =>
+				new InvalidScrapeTargetRow({
+					message: "Invalid scrape target row",
+					rawTargetId: row.id,
+					cause,
+				}),
 		}).pipe(Effect.option)
 	})
 

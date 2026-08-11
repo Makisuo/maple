@@ -72,6 +72,9 @@ export const tracedFetch = (
 					// to walk an `Error` back once the effect has failed. Cancellations
 					// therefore return normally and only real failures are re-failed below.
 					const outcome: FetchOutcome = yield* Effect.promise(() =>
+						// This function is Electric's injectable fetch port; preserving the platform
+						// rejection value is required for pause-stream cancellation semantics.
+						// oxlint-disable-next-line effecttsgo/global-fetch-in-effect
 						globalThis.fetch(input, { ...init, headers }).then(
 							(response) => ({ ok: true, response }) as const,
 							(cause) => ({ ok: false, cause }) as const,
