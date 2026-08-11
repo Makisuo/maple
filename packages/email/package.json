@@ -4,6 +4,7 @@
 	"type": "module",
 	"exports": {
 		"./weekly-digest": "./src/weekly-digest.tsx",
+		"./weekly-digest-core": "./src/weekly-digest-core.ts",
 		"./alert-notification": "./src/alert-notification.tsx"
 	},
 	"scripts": {
