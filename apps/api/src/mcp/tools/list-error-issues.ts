@@ -10,7 +10,7 @@ import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { IssueKind, IssueSeverity, WorkflowState } from "@maple/domain/http"
 
 const decodeWorkflowState = Schema.decodeUnknownOption(WorkflowState)
@@ -51,7 +51,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				service: service ?? "all",
 				limit: limit ?? 50,
 			})
-			const errors = yield* ErrorsService
+			const readModels = yield* ErrorIssueReadModelsService
 
 			let typedState: WorkflowState | undefined
 			if (workflow_state) {
@@ -88,7 +88,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				typedKind = decoded.value
 			}
 
-			const result = yield* errors
+			const result = yield* readModels
 				.listIssues(tenant.orgId, {
 					workflowState: typedState,
 					severity: typedSeverity,

@@ -6,6 +6,7 @@ import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { OrganizationService } from "@/services/org/OrganizationService"
@@ -115,6 +116,13 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 		getSettings: die,
 		updateSettings: die,
 	}),
+	Layer.succeed(ErrorIssueReadModelsService, {
+		listIssues: die,
+		countOpenIssuesByService: die,
+		getIssue: die,
+		listIssueIncidents: die,
+		listOpenIncidents: die,
+	}),
 	Layer.succeed(ErrorsService, {
 		listIssues: die,
 		countOpenIssuesByService: die,
@@ -180,7 +188,9 @@ export const TelemetryServiceStubsLayer = Layer.mergeAll(
  * so harnesses that build the real config services — and would be shadowed by that bundle — can still
  * satisfy the `instrumentationAudit` group.
  */
-export const SetupAuditServiceStubLayer = Layer.succeed(SetupAuditService, { run: die })
+export const SetupAuditServiceStubLayer = Layer.succeed(SetupAuditService, {
+	run: die,
+})
 
 /** Inert config-resource services for harnesses that never touch those groups. */
 export const ConfigResourceServiceStubsLayer = Layer.mergeAll(
