@@ -1,6 +1,6 @@
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect"
 import { OrgId, UserId } from "@maple/domain/http"
-import { MainLive } from "@/app"
+import { MainLive } from "@/runtime/service-graph"
 import { Env } from "@/platform/Env"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { createTestDb } from "@/platform/test-pglite"

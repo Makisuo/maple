@@ -1,0 +1,219 @@
+import { EdgeCacheService } from "@maple/cache"
+import { BucketCacheService } from "@maple/query-engine/caching"
+import { Layer } from "effect"
+import { McpToolExecutor } from "@/mcp/dispatcher"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import { EmailService } from "@/platform/EmailService"
+import { Env } from "@/platform/Env"
+import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
+import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
+import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
+import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
+import { AuthService } from "@/services/auth/AuthService"
+import { CliDeviceAuthService } from "@/services/auth/CliDeviceAuthService"
+import { CloudflareOAuthService } from "@/services/auth/CloudflareOAuthService"
+import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
+import { McpOAuthService } from "@/services/auth/McpOAuthService"
+import { OAuthStateRepository } from "@/services/auth/OAuthStateRepository"
+import { DailySpendService } from "@/services/billing/DailySpendService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { DigestService } from "@/services/digest/DigestService"
+import { AiTriageService } from "@/services/errors/AiTriageService"
+import { ErrorsService } from "@/services/errors/ErrorsService"
+import { InvestigationService } from "@/services/errors/InvestigationService"
+import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
+import { CloudflareAnalyticsService } from "@/services/integrations/CloudflareAnalyticsService"
+import { PlanetScaleConnectionService } from "@/services/integrations/PlanetScaleConnectionService"
+import { PlanetScaleDiscoveryService } from "@/services/integrations/PlanetScaleDiscoveryService"
+import { PlanetScaleService } from "@/services/integrations/PlanetScaleService"
+import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
+import { SlackIntegrationService } from "@/services/integrations/SlackIntegrationService"
+import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgTokenService"
+import { PlanetScaleWebhookQueue } from "@/services/integrations/planetscale/PlanetScaleWebhookQueue"
+import { VcsCommitService } from "@/services/integrations/vcs/VcsCommitService"
+import { VcsProviderRegistry } from "@/services/integrations/vcs/VcsProviderRegistry"
+import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
+import { VcsSourceService } from "@/services/integrations/vcs/VcsSourceService"
+import { VcsSyncQueue } from "@/services/integrations/vcs/VcsSyncQueue"
+import { GithubAppClient } from "@/services/integrations/vcs/vendor/github/GithubAppClient"
+import { GithubConnectService } from "@/services/integrations/vcs/vendor/github/GithubConnectService"
+import { GithubHttp } from "@/services/integrations/vcs/vendor/github/GithubHttp"
+import { GithubProvider } from "@/services/integrations/vcs/vendor/github/GithubProvider"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { DemoService } from "@/services/org/DemoService"
+import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
+import { OnboardingService } from "@/services/org/OnboardingService"
+import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
+import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
+import { OrgMembersService } from "@/services/org/OrgMembersService"
+import { OrganizationService } from "@/services/org/OrganizationService"
+import { SetupAuditService } from "@/services/org/SetupAuditService"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+
+const InfraLive = Env.layer
+
+// PlanetScale layer composition: the OAuth grant (token lifecycle) feeds
+// discovery, scrape-time auth, the org binding, and the inventory poller.
+// Compose each wired layer once so memoization resolves them to single
+// instances (one discovery cache, one refresh single-flight).
+const PlanetScaleOAuthLive = PlanetScaleOAuthService.layer
+const PlanetScaleDiscoveryLive = PlanetScaleDiscoveryService.layer.pipe(Layer.provide(PlanetScaleOAuthLive))
+const ScrapeTargetsLive = ScrapeTargetsService.layer.pipe(
+	Layer.provide(Layer.mergeAll(PlanetScaleDiscoveryLive, PlanetScaleOAuthLive)),
+)
+
+const CoreServicesLive = Layer.mergeAll(
+	AuthService.layer,
+	ApiKeysService.layer,
+	CliDeviceAuthService.layer,
+	McpOAuthService.layer,
+	CloudflareOAuthService.layer,
+	DashboardPersistenceService.layer,
+	HazelOAuthService.layer,
+	OnboardingService.layer,
+	OrgIngestKeysService.layer,
+	OrgClickHouseSettingsService.layer,
+	TinybirdOrgTokenService.layer,
+	OrganizationService.layer,
+	PlanetScaleOAuthLive,
+	PlanetScaleDiscoveryLive,
+	PlanetScaleWebhookQueue.layer,
+	ScrapeTargetsLive,
+	PlanetScaleConnectionService.layer.pipe(
+		Layer.provide(Layer.mergeAll(ScrapeTargetsLive, PlanetScaleDiscoveryLive, PlanetScaleOAuthLive)),
+	),
+	PlanetScaleService.layer.pipe(Layer.provide(PlanetScaleOAuthLive)),
+	IngestAttributeMappingService.layer,
+).pipe(Layer.provideMerge(InfraLive))
+
+const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provideMerge(CoreServicesLive))
+
+// Serves the integration page's per-zone collection status; the poll loop itself
+// runs in the alerting worker's cron, not here.
+const CloudflareAnalyticsServiceLive = CloudflareAnalyticsService.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
+)
+
+const DemoServiceLive = DemoService.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
+)
+
+// EdgeCacheService's storage backend (Workers KV / in-memory) is injected via
+// the CacheBackend port. Define the wired layer once so it memoizes to a single
+// instance shared by the bucket cache and the direct edge cache.
+const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
+
+const BucketCacheServiceLive = BucketCacheService.layer.pipe(Layer.provideMerge(EdgeCacheServiceLive))
+
+const QueryEngineServiceLive = QueryEngineService.layer.pipe(
+	Layer.provideMerge(WarehouseQueryServiceLive),
+	Layer.provideMerge(EdgeCacheServiceLive),
+	Layer.provideMerge(BucketCacheServiceLive),
+)
+
+const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
+
+const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(Env.layer))
+
+const AlertsServiceLive = AlertsService.layer.pipe(
+	Layer.provideMerge(
+		Layer.mergeAll(
+			CoreServicesLive,
+			QueryEngineServiceLive,
+			AlertRuntime.layer,
+			EmailServiceLive,
+			OrgMembersServiceLive,
+		),
+	),
+)
+
+const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, EmailServiceLive)),
+)
+
+// Slack integration: OAuth install/callback, status, channels, uninstall, and
+// the internal bot-resolve endpoint. Needs ApiKeysService (mint the bot key) +
+// OAuthStateRepository (CSRF state) on top of the core services.
+const SlackIntegrationServiceLive = SlackIntegrationService.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, OAuthStateRepository.layer)),
+)
+
+const ErrorsServiceLive = ErrorsService.layer.pipe(
+	Layer.provideMerge(
+		Layer.mergeAll(
+			CoreServicesLive,
+			WarehouseQueryServiceLive,
+			EdgeCacheServiceLive,
+			NotificationDispatcherLive,
+		),
+	),
+)
+
+const RecommendationIssueServiceLive = RecommendationIssueService.layer.pipe(
+	Layer.provideMerge(WarehouseQueryServiceLive),
+)
+
+const SetupAuditServiceLive = SetupAuditService.layer.pipe(Layer.provideMerge(WarehouseQueryServiceLive))
+
+// WorkerEnvironment is intentionally NOT wired here (unlike the alerting worker):
+// AnomalyDetectionService reads it via Effect.serviceOption, so it degrades
+// gracefully when absent and is provided at worker scope where needed.
+const AnomalyDetectionServiceLive = AnomalyDetectionService.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive, EdgeCacheServiceLive)),
+)
+
+const AiTriageServiceLive = AiTriageService.layer.pipe(Layer.provideMerge(CoreServicesLive))
+
+const InvestigationServiceLive = InvestigationService.layer.pipe(Layer.provideMerge(CoreServicesLive))
+
+const DigestServiceLive = DigestService.layer.pipe(
+	Layer.provideMerge(
+		Layer.mergeAll(InfraLive, WarehouseQueryServiceLive, EdgeCacheServiceLive, EmailServiceLive),
+	),
+)
+
+// VCS service wiring for the fetch-path worker. VcsSyncService (the sync
+// orchestrator) lives only in vcs-sync-runtime.ts — not here. Database /
+// WorkerEnvironment are provided at worker scope (like CoreServicesLive).
+const GithubAppClientLive = GithubAppClient.layer.pipe(Layer.provide(GithubHttp.layer))
+const GithubProviderLive = GithubProvider.layer.pipe(Layer.provide(GithubAppClientLive))
+
+const VcsDataLive = Layer.mergeAll(VcsRepository.layer, OAuthStateRepository.layer, VcsSyncQueue.layer)
+
+const VcsProviderRegistryLive = VcsProviderRegistry.layer.pipe(Layer.provide(GithubProviderLive))
+
+const VcsServicesLive = Layer.mergeAll(
+	VcsDataLive,
+	VcsProviderRegistryLive,
+	// OAuth connect flow — needs VcsDataLive + GithubAppClient for App-JWT installation lookup.
+	GithubConnectService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, GithubAppClientLive))),
+	// Routed via VcsProviderRegistry so no provider module is imported directly.
+	VcsCommitService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
+	VcsSourceService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
+).pipe(Layer.provideMerge(InfraLive))
+
+// Warehouse-backed daily volume for the billing spend chart.
+const DailySpendServiceLive = DailySpendService.layer.pipe(Layer.provideMerge(WarehouseQueryServiceLive))
+
+const MainServicesLive = Layer.mergeAll(
+	CoreServicesLive,
+	DailySpendServiceLive,
+	CloudflareAnalyticsServiceLive,
+	WarehouseQueryServiceLive,
+	EdgeCacheServiceLive,
+	QueryEngineServiceLive,
+	AlertsServiceLive,
+	AnomalyDetectionServiceLive,
+	AiTriageServiceLive,
+	InvestigationServiceLive,
+	ErrorsServiceLive,
+	RecommendationIssueServiceLive,
+	SetupAuditServiceLive,
+	DigestServiceLive,
+	DemoServiceLive,
+	VcsServicesLive,
+	SlackIntegrationServiceLive,
+)
+
+export const MainLive = McpToolExecutor.layer.pipe(Layer.provideMerge(MainServicesLive))

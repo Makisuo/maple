@@ -159,7 +159,7 @@ const fanoutTelemetry = MapleCloudflareSDK.make({
  */
 const makeRuntime = async (env: InvestigationFanoutWorkflowEnv) => {
 	const [{ MainLive }, { layerPg }, { layerLlm }] = await Promise.all([
-		import("../app"),
+		import("../runtime/service-graph"),
 		import("../platform/DatabasePgLive"),
 		import("../platform/Llm"),
 	])

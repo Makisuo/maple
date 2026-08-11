@@ -85,8 +85,8 @@ const scoped = async <A, E, R>(program: Effect.Effect<A, E, R>) => {
 	return withPgConnectionScope(program)
 }
 
-// The route graph (`./app`) and database layer are imported DYNAMICALLY, not at
-// module scope. The static import graph reachable from `./app` eagerly builds
+// The service graph, HTTP graph, and database layer are imported DYNAMICALLY,
+// not at module scope. The static import graph reachable from the HTTP graph eagerly builds
 // hundreds of Effect Schema ASTs (`@maple/domain` + 47 MCP tool schemas) at
 // module-evaluation time. Cloudflare runs only the top-level module scope
 // during upload validation, so pulling that work in statically blew the fixed
@@ -94,7 +94,8 @@ const scoped = async <A, E, R>(program: Effect.Effect<A, E, R>) => {
 // the top level near-empty; the cost moves to the first request, which runs
 // under the far larger per-request CPU budget.
 const buildHandler = async () => {
-	const { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } = await import("./app")
+	const { MainLive } = await import("./runtime/service-graph")
+	const { AllRoutes, ApiAuthLive, ApiObservabilityLive } = await import("./runtime/http-graph")
 	const { layerPg } = await import("@/platform/DatabasePgLive")
 	const { pgConnectionMiddleware } = await import("@/platform/pg-connection-scope")
 	return HttpRouter.toWebHandler(
@@ -131,7 +132,7 @@ const getHandler = () => (handlerPromise ??= buildHandler())
 // it gets a sibling isolate-wide ManagedRuntime. The heavy route/service graph
 // stays behind a dynamic import, preserving the worker's startup-CPU budget.
 const buildRpcRuntime = async (env: Record<string, unknown>) => {
-	const { MainLive } = await import("./app")
+	const { MainLive } = await import("./runtime/service-graph")
 	const { layerPg } = await import("@/platform/DatabasePgLive")
 	return ManagedRuntime.make(
 		MainLive.pipe(
@@ -175,19 +176,22 @@ const runInternalRpc = async (
 	env: Record<string, unknown>,
 	ctx: ExecutionContext,
 ) => {
-	const [runtime, rpc] = await Promise.all([getRpcRuntime(env), import("./internal-rpc")])
+	const [runtime, { callMcpToolRpc, listMcpToolsRpc, submitDiagnosisRpc }] = await Promise.all([
+		getRpcRuntime(env),
+		import("./internal-rpc"),
+	])
 	let exit: Exit.Exit<unknown, unknown>
 	// The RPC runtime is isolate-wide, so the scope goes around each call rather
 	// than around the runtime — one socket per RPC invocation, released with it.
 	switch (method) {
 		case "listMcpTools":
-			exit = await runtime.runPromiseExit(await scoped(rpc.listMcpToolsRpc))
+			exit = await runtime.runPromiseExit(await scoped(listMcpToolsRpc))
 			break
 		case "callMcpTool":
-			exit = await runtime.runPromiseExit(await scoped(rpc.callMcpToolRpc(input)))
+			exit = await runtime.runPromiseExit(await scoped(callMcpToolRpc(input)))
 			break
 		case "submitDiagnosis":
-			exit = await runtime.runPromiseExit(await scoped(rpc.submitDiagnosisRpc(input)))
+			exit = await runtime.runPromiseExit(await scoped(submitDiagnosisRpc(input)))
 			break
 	}
 	ctx.waitUntil(flushTelemetry(env))
