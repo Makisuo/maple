@@ -1,5 +1,5 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { Data, Effect, Option, Redacted, Schema } from "effect"
+import { Effect, Option, Redacted, Schema } from "effect"
 import {
 	InternalScrapeTarget,
 	OrgId,
@@ -50,11 +50,14 @@ export interface SubTargetOverride {
 	readonly labels: Record<string, string>
 }
 
-class InvalidScrapeTargetRow extends Data.TaggedError("@maple/api/routes/InvalidScrapeTargetRow")<{
-	readonly message: string
-	readonly targetId: string
-	readonly cause: unknown
-}> {}
+class InvalidScrapeTargetRow extends Schema.TaggedError<InvalidScrapeTargetRow>()(
+	"@maple/api/routes/InvalidScrapeTargetRow",
+	{
+		message: Schema.String,
+		targetId: Schema.String,
+		cause: Schema.Defect(),
+	},
+) {}
 
 /**
  * Marshal a DB row into the internal wire shape. Unparseable labels degrade

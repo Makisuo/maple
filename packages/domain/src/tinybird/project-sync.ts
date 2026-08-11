@@ -1,6 +1,6 @@
 import { datasources, pipes, projectRevision } from "../generated/tinybird-project-manifest"
 import { TinybirdApi, TinybirdApiError } from "@tinybirdco/sdk"
-import { Data, Duration, Effect, Schema } from "effect"
+import { Duration, Effect, Schema } from "effect"
 import {
 	applyRawTtlOverrides,
 	computeEffectiveRevision,
@@ -73,11 +73,14 @@ type FeedbackEntry = typeof FeedbackEntrySchema.Type
 const READY_STATUSES = new Set(["data_ready", "live"])
 const FAILURE_STATUSES = new Set(["failed", "error", "deleting", "deleted"])
 
-class StaleDeploymentCleanupError extends Data.TaggedError("@maple/tinybird/StaleDeploymentCleanupError")<{
-	readonly message: string
-	readonly deploymentId: string
-	readonly cause: unknown
-}> {}
+class StaleDeploymentCleanupError extends Schema.TaggedError<StaleDeploymentCleanupError>()(
+	"@maple/tinybird/StaleDeploymentCleanupError",
+	{
+		message: Schema.String,
+		deploymentId: Schema.String,
+		cause: Schema.Defect(),
+	},
+) {}
 
 export interface TinybirdProjectSyncParams {
 	readonly baseUrl: string

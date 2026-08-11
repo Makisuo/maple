@@ -60,7 +60,7 @@ describe("sendTestEventEffect", () => {
 		}),
 	)
 
-	it.effect("fails with a tagged rejection on a non-2xx response", () =>
+	it.effect("fails with a schema-backed rejection on a non-2xx response", () =>
 		Effect.gen(function* () {
 			const error = yield* runWithResponse([], new Response(null, { status: 401 })).pipe(Effect.flip)
 			if (error._tag !== "@maple/web/TestEventIngestRejected") {

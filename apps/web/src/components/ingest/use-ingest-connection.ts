@@ -1,4 +1,4 @@
-import { Clock, Data, Effect } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
@@ -72,10 +72,13 @@ function randomHex(byteLength: number): string {
 
 const TEST_EVENT_SERVICE = "maple-onboarding-test"
 
-class TestEventIngestRejected extends Data.TaggedError("@maple/web/TestEventIngestRejected")<{
-	readonly message: string
-	readonly status: number
-}> {}
+class TestEventIngestRejected extends Schema.TaggedError<TestEventIngestRejected>()(
+	"@maple/web/TestEventIngestRejected",
+	{
+		message: Schema.String,
+		status: Schema.Number,
+	},
+) {}
 
 export const sendTestEventEffect = Effect.fn("Onboarding.sendTestEvent")(function* (apiKey: string) {
 	const now = yield* Clock.currentTimeMillis
