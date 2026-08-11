@@ -16,7 +16,30 @@ Maple stores relational application state in PostgreSQL with a schema defined by
   need `Database` fail normally; DB-free routes such as health checks continue to work.
 
 Application code keeps timestamps as epoch-millisecond numbers and converts at the Drizzle
-boundary (`new Date(ms)` on write, `.getTime()` on read).
+boundary — use `msToDate` / `dateToMs` from `apps/api/src/platform/time.ts` rather than bare
+`new Date(ms)` / `.getTime()`, including inside Promise-land helpers.
+
+## Connections on Workers
+
+One connection per invocation — request, cron tick, or Workflow run — created lazily on the first
+query and closed at the boundary. This is Cloudflare's documented Hyperdrive shape, and
+`makePgConnectionScope` (`apps/api/src/platform/pg-connection-scope.ts`) is the only implementation
+of it: `pgConnectionMiddleware` installs a scope for HTTP, `withPgConnectionScope` for cron, and
+`executeOnFreshPgClient` is the same scope one call long for entry points that have none.
+
+Workers tie TCP sockets to the invocation that opened them, so a connection may be reused freely
+within one but must never outlive it. Two settings carry hard-won history:
+
+- **`max: 5`** — Cloudflare's documented value. `max` is a ceiling, not a reservation: postgres.js
+  opens a second socket only when a second statement is genuinely in flight. It was 1 for one day
+  on the theory that Postgres should hold at most one of the Worker's six outbound slots, which
+  serialized every statement in a cron tick behind one connection (`SELECT actors` p50 928ms →
+  5687ms at flat volume).
+- **A bounded `connect_timeout`** — postgres.js only raises `CONNECT_TIMEOUT` from
+  `connectTimedOut()`, and its `timer()` is a no-op when the option is unset, so an unbounded dial
+  hangs for the whole invocation and lands with no `error.type` to classify. The bound is generous
+  and single: a 2s cap alone once took production 5xx from 0.06% to 5.01%, and the retry ladder
+  that followed existed only to compensate for it.
 
 ## Local development
 

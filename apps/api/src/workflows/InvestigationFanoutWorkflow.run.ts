@@ -49,10 +49,10 @@ import type { TenantContext } from "@/services/auth/tenant-context"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
 import {
-	makeTracedPgConnection,
-	type TracedPgConnection,
-	tracedPgConnectionFrom,
-} from "@/platform/pg-execute"
+	makePgConnectionScope,
+	type PgConnectionScopeShape,
+	pgConnectionScopeFrom,
+} from "@/platform/pg-connection-scope"
 import type { WorkflowEventLike, WorkflowStepLike } from "./ClickHouseSchemaApplyWorkflow.run"
 import { normalizePlan, widthFor, type NormalizedPlan, type PlannedHypothesis } from "./plan-normalize"
 
@@ -576,25 +576,25 @@ export async function runInvestigationFanout(
 	step: WorkflowStepLike,
 	deps: InvestigationFanoutDeps = {},
 ): Promise<InvestigationFanoutWorkflowResult> {
-	const connection = deps.db !== undefined ? tracedPgConnectionFrom(deps.db) : dialWorkflowDb(env)
+	const connection = deps.db !== undefined ? pgConnectionScopeFrom(deps.db) : dialWorkflowDb(env)
 	try {
 		return await runWithDb(connection, env, event, step, deps)
 	} finally {
-		await connection.end()
+		await connection.close()
 		await fanoutTelemetry.flush(env).catch(() => undefined)
 	}
 }
 
-const dialWorkflowDb = (env: InvestigationFanoutWorkflowEnv): TracedPgConnection => {
+const dialWorkflowDb = (env: InvestigationFanoutWorkflowEnv): PgConnectionScopeShape => {
 	const source = resolveDbConnectionSource(env)
 	if (source._tag === "Unavailable") {
 		throw new Error(source.reason)
 	}
-	return makeTracedPgConnection(source.connectionString, source.attributes)
+	return makePgConnectionScope(source.connectionString, source.attributes)
 }
 
 async function runWithDb(
-	connection: TracedPgConnection,
+	connection: PgConnectionScopeShape,
 	env: InvestigationFanoutWorkflowEnv,
 	event: WorkflowEventLike<InvestigationFanoutWorkflowPayload>,
 	step: WorkflowStepLike,
@@ -606,7 +606,7 @@ async function runWithDb(
 	const idTyped = decodeInvestigationId(investigationId)
 
 	const dbStep = <T>(fn: (db: MaplePgClient) => Promise<T>): Promise<T> =>
-		Effect.runPromise(connection.step(fn).pipe(Effect.provide(fanoutTelemetry.layer)))
+		Effect.runPromise(connection.run(fn).pipe(Effect.provide(fanoutTelemetry.layer)))
 
 	const laneRows = () =>
 		dbStep((db) =>

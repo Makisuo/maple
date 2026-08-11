@@ -10,9 +10,9 @@ import { PgConnectionScope, type PgConnectionScopeShape } from "./pg-connection-
  * A binding pointed at a closed local port.
  *
  * The fallback path really dials, so the test needs a dial that fails
- * immediately: 127.0.0.1:1 is refused by the OS rather than timing out, so both
- * attempt budgets are spent in milliseconds instead of the 2s + 8s a
- * blackholed host would cost.
+ * immediately: 127.0.0.1:1 is refused by the OS rather than timing out, so the
+ * test costs milliseconds instead of the `CONNECT_TIMEOUT_SECONDS` a blackholed
+ * host would.
  */
 const closedPortBinding = {
 	MAPLE_DB: {
@@ -73,11 +73,13 @@ describe("layerPg", () => {
 			assert.isTrue(Exit.isFailure(exit))
 			const span = dbSpan(spans)
 			assert.isDefined(span)
-			// `db.connect.reused` is only emitted by the scope, so its ABSENCE is what
-			// proves the fallback ran — Workflow entrypoints and tests depend on this
+			// A real dial against a closed port is what proves the fallback ran rather
+			// than an installed scope — Workflow entrypoints and tests depend on this
 			// branch still working.
-			assert.isUndefined(span.attributes.get("db.connect.reused"))
 			assert.strictEqual(span.attributes.get("db.connect.failed"), true)
+			// The fallback is a scope one call long, so it always reports a fresh
+			// connection. Reuse here would mean a socket outlived its invocation.
+			assert.strictEqual(span.attributes.get("db.connect.reused"), false)
 		}),
 	)
 

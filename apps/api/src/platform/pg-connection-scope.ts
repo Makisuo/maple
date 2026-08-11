@@ -1,4 +1,9 @@
-import { createMaplePgSocket, type MaplePgSocketHandle, wrapMaplePgClient } from "@maple/db/client"
+import {
+	createMaplePgSocket,
+	type MaplePgSocketHandle,
+	type MaplePgSocketOptions,
+	wrapMaplePgClient,
+} from "@maple/db/client"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Context, Effect } from "effect"
 import type { HttpMiddleware } from "effect/unstable/http"
@@ -7,26 +12,51 @@ import { executeWithSpan } from "./DatabaseLive"
 import { resolveDbConnectionSource } from "./pg-connection-source"
 
 /**
- * One connection per scope, never more.
+ * Cloudflare's documented value for postgres.js behind Hyperdrive.
  *
- * Deliberately not the `max: 5` Cloudflare's Hyperdrive example uses. A Worker
- * gets six simultaneous outbound connections in total, and `cache.match()` holds
- * one until response headers arrive and cannot be cancelled, while warehouse
- * `fetch()` calls hold theirs for 110ms to several seconds — measured, with
- * numbers, in lib/cache/src/edge-cache.ts. Postgres competes with those for the
- * same six, so the pool size is capped independently of anything to do with
- * dialing. Concurrent statements pipeline over the single connection instead.
+ * `max` is a CEILING, not an allocation: postgres.js opens a second socket only
+ * when a second statement is genuinely in flight, so a request that makes one
+ * DB call still costs one connection. That is why a single value serves both
+ * the request path (mostly one call per invocation) and the cron path (a tick
+ * issuing thousands).
+ *
+ * This was 1 for one day, on the theory that Postgres should reserve at most
+ * one of the Worker's six outbound slots. Reserving is not what `max` does, and
+ * capping it serialized every statement in a cron tick behind one connection —
+ * measured on identical queries, `SELECT actors` p50 928ms -> 5687ms and
+ * `INSERT alert_rule_claims` p50 536ms -> 2989ms at flat volume. Head-of-line
+ * blocking cost far more than the contention it was avoiding.
  */
-const SCOPE_MAX_CONNECTIONS = 1
+export const MAX_CONNECTIONS = 5
 
 /**
- * A per-request (or per-tick) Postgres connection, created at most once and
- * shared by every `Database.execute` inside the scope.
+ * One dial attempt, bounded. No retry, no ladder.
+ *
+ * The bound exists for diagnosis as much as for latency: postgres.js only
+ * raises `CONNECT_TIMEOUT` from `connectTimedOut()`, and its `timer()` is a
+ * no-op when `connect_timeout` is unset — so with no bound a stalled dial hangs
+ * for the whole invocation and lands with no `error.type` at all.
+ *
+ * 10s rather than the 2s that shipped briefly: 2s alone took production 5xx
+ * from 0.06% to 5.01%, and the retry that followed existed only to compensate
+ * for it. Dial latency is bimodal (p50 ~11ms, or dead), so a generous single
+ * bound kills essentially only the dead ones.
+ */
+const CONNECT_TIMEOUT_SECONDS = 10
+
+/**
+ * A Postgres connection scoped to one invocation — a request, a cron tick, or a
+ * Workflow run — created at most once and shared by every call inside it.
+ *
+ * This is the one primitive. `Database.execute` reaches it through
+ * `PgConnectionScope`; `executeOnFreshPgClient` is it with a scope of one call;
+ * the Workflow entrypoints hold one directly. There is no second implementation
+ * of "open a socket, wrap it per call, put a span around it".
  */
 export interface PgConnectionScopeShape {
 	/** Run one logical DB call on the scope's connection, inside the standard client span. */
 	readonly run: <T>(fn: (db: DatabaseClient) => Promise<T>) => Effect.Effect<T, DatabaseError>
-	/** Release the connection. Safe when nothing was ever created. */
+	/** Release the connection. Safe when nothing was ever created, and safe to call twice. */
 	readonly close: () => Promise<void>
 }
 
@@ -34,8 +64,8 @@ export interface PgConnectionScopeShape {
  * The scope in force for the current fiber, or `undefined` outside one.
  *
  * A reference rather than a service so `DatabasePgLive` can read it at call
- * time and fall back to a per-call client where no scope was installed
- * (Workflow entrypoints, tests, any future entry point that forgets to wrap).
+ * time and fall back to a per-call scope where none was installed (Workflow
+ * entrypoints, tests, any future entry point that forgets to wrap).
  */
 export class PgConnectionScope extends Context.Reference<PgConnectionScopeShape | undefined>(
 	"@maple/api/platform/PgConnectionScope",
@@ -43,51 +73,54 @@ export class PgConnectionScope extends Context.Reference<PgConnectionScopeShape 
 ) {}
 
 /**
- * Test seam: how to create the scope's client. Real callers pass nothing.
- * Same precedent as `tracedPgConnectionFrom`, which exists so the Workflow
- * tests can drive a connection they own.
+ * Test seam: how to create the scope's socket. Real callers pass nothing.
+ *
+ * It receives the options the real factory would have been given, so a test can
+ * assert the pool ceiling and the dial bound without dialing anything. Both
+ * have regressed in production before.
  */
 export interface PgConnectionScopeSeams {
-	readonly openSocket?: () => MaplePgSocketHandle
+	readonly openSocket?: (options: MaplePgSocketOptions) => MaplePgSocketHandle
 }
 
 /**
  * Build a scope over one connection string.
  *
- * This is Cloudflare's documented Hyperdrive shape — one client per request,
- * created lazily, closed at the boundary — reached through a `Context.Reference`
+ * Cloudflare's documented Hyperdrive shape — one client per invocation, created
+ * lazily, closed at the boundary — reached through a `Context.Reference`
  * because `Database.execute` is called from ~200 places that cannot each be
  * handed the client.
  *
- * There is no dial step, no retry and no failure latch. postgres.js connects on
- * the first query, so creating the client is synchronous and cannot fail; a
- * connection problem surfaces as that query's error, classified by
- * `postgres-errors.ts`. The machinery that used to live here — a 2s/8s dial
- * budget, a retry for the budget, and a cooldown for the retry — was a chain of
- * compensations for a cap we imposed ourselves.
+ * There is no dial step and no retry. postgres.js connects on the first query,
+ * so creating the client is synchronous and cannot fail; a connection problem
+ * surfaces as that query's error, classified by `postgres-errors.ts`.
  */
 export const makePgConnectionScope = (
 	connectionString: string,
 	extraAttributes?: Record<string, unknown>,
 	seams?: PgConnectionScopeSeams,
 ): PgConnectionScopeShape => {
-	const openSocket =
-		seams?.openSocket ??
-		(() => createMaplePgSocket(connectionString, { maxConnections: SCOPE_MAX_CONNECTIONS }))
+	const options: MaplePgSocketOptions = {
+		maxConnections: MAX_CONNECTIONS,
+		connectTimeoutSeconds: CONNECT_TIMEOUT_SECONDS,
+	}
+	const create =
+		seams?.openSocket ?? ((opts: MaplePgSocketOptions) => createMaplePgSocket(connectionString, opts))
+	const openSocket = () => create(options)
 
 	let socket: MaplePgSocketHandle | undefined
 
 	return {
 		run: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 			executeWithSpan(async (hooks) => {
-				// Lazy: a request that never touches the database never creates one.
+				// Lazy: an invocation that never touches the database never creates one.
 				const reused = socket !== undefined
-				socket ??= openSocket()
+				const open = (socket ??= openSocket())
 				hooks.record({ "db.connect.reused": reused })
 				// Wrapped per call so each call's statements land in its own span.
 				// One shared wrapper would cross-attribute `db.query.text` between
-				// concurrent executes; the wrapper is cheap (relational config only).
-				return await fn(wrapMaplePgClient(socket.sql, { onQuery: hooks.collect }))
+				// concurrent calls; the wrapper is cheap (relational config only).
+				return await fn(wrapMaplePgClient(open.sql, { onQuery: hooks.collect }))
 			}, extraAttributes),
 
 		close: async () => {
@@ -97,6 +130,41 @@ export const makePgConnectionScope = (
 		},
 	}
 }
+
+/**
+ * A scope over a client someone else owns — the Workflow test seams pass a
+ * PGlite-backed drizzle. No statement collector is available, so spans carry
+ * kind, identity and timing but no `db.query.text`; `close` is a no-op because
+ * the caller owns the connection.
+ */
+export const pgConnectionScopeFrom = (
+	db: DatabaseClient,
+	extraAttributes?: Record<string, unknown>,
+): PgConnectionScopeShape => ({
+	run: (fn) => executeWithSpan(() => fn(db), extraAttributes),
+	close: () => Promise.resolve(),
+})
+
+/**
+ * Run one callback against its own connection, for callers with no scope
+ * installed. A scope of exactly one call — same span, same socket handling,
+ * released immediately.
+ *
+ * A connection per call is correct but wasteful, so entry points should install
+ * a scope instead where they can. Workers tie TCP sockets to the invocation
+ * that opened them, so a connection may be reused freely WITHIN one but must
+ * never outlive it.
+ */
+export const executeOnFreshPgClient = <T>(
+	connectionString: string,
+	fn: (db: DatabaseClient) => Promise<T>,
+	extraAttributes?: Record<string, unknown>,
+): Effect.Effect<T, DatabaseError> =>
+	Effect.suspend(() => {
+		const scope = makePgConnectionScope(connectionString, extraAttributes)
+		// Never let a socket-teardown error shadow the real DB error from fn(db).
+		return scope.run(fn).pipe(Effect.ensuring(Effect.promise(() => scope.close())))
+	})
 
 /**
  * Run `program` against `scope`, releasing the connection however the program

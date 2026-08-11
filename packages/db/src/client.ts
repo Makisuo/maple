@@ -10,10 +10,10 @@ export type MaplePgSocket = ReturnType<typeof postgres>
 /**
  * One client, without any drizzle wrapper bound to it.
  *
- * Split out from `MaplePgConnection` so a caller can hold ONE client across many
- * logical calls while still giving each call its own `onQuery` collector —
- * drizzle fixes its logger at construction, so collector isolation has to come
- * from a per-call `wrapMaplePgClient`, not from a per-call client.
+ * A caller holds ONE of these across many logical calls while still giving each
+ * call its own `onQuery` collector — drizzle fixes its logger at construction,
+ * so collector isolation has to come from a per-call `wrapMaplePgClient`, not
+ * from a per-call client.
  *
  * There is deliberately no "wait until connected" member. postgres.js connects
  * lazily on the first query, so a separate connect step can only be synthesized
@@ -27,20 +27,18 @@ export interface MaplePgSocketHandle {
 	readonly end: () => Promise<void>
 }
 
-/** A socket plus a drizzle client bound to it, for callers that want both at once. */
-export interface MaplePgConnection extends MaplePgSocketHandle {
-	readonly db: MaplePgClient
-}
-
 export interface MaplePgSocketOptions {
 	readonly maxConnections?: number
 	/**
-	 * postgres.js `connect_timeout`, in SECONDS. Left unset the driver default of
-	 * 30s applies, which is far longer than any Worker request should wait — see
-	 * the caller in apps/api/src/platform/pg-execute.ts for why a bounded dial
-	 * matters. This is the driver option rather than an `Effect.timeout` on
-	 * purpose: interrupting the fiber does not cancel the underlying promise, so
-	 * the socket would keep dialing and keep holding its connection slot. Only
+	 * postgres.js `connect_timeout`, in SECONDS. Unset, the driver default of 30s
+	 * applies — but worse, postgres.js's `timer()` is a no-op when the option is
+	 * absent, so `connectTimedOut()` never fires and a stalled dial has no bound
+	 * at all and produces no `CONNECT_TIMEOUT` to classify. Always pass this; see
+	 * `CONNECT_TIMEOUT_SECONDS` in apps/api/src/platform/pg-connection-scope.ts.
+	 *
+	 * This is the driver option rather than an `Effect.timeout` on purpose:
+	 * interrupting the fiber does not cancel the underlying promise, so the socket
+	 * would keep dialing and keep holding its connection slot. Only
 	 * `connect_timeout` calls `socket.destroy()` and frees the slot.
 	 */
 	readonly connectTimeoutSeconds?: number
@@ -79,6 +77,9 @@ const toDrizzleLogger = (onQuery: ((query: string) => void) | undefined) =>
  * next request anyway, and named statements are the classic way to pin a
  * connection in a pooler. Hyperdrive multiplexes client connections over its
  * origin pool, so the unnamed extended protocol is the safer default.
+ * Cloudflare's own example now suggests `prepare: true`; that only pays off
+ * across reuse of one long-lived connection, which a request-lived client by
+ * definition does not have. Do not flip it back without measuring.
  */
 export const createMaplePgSocket = (
 	connectionString: string,
@@ -111,15 +112,10 @@ export const wrapMaplePgClient = (
 	options?: Pick<MaplePgClientOptions, "onQuery">,
 ): MaplePgClient => drizzlePostgres(sql, { schema, logger: toDrizzleLogger(options?.onQuery) })
 
-/** A freshly dialed socket with one drizzle client already bound to it. */
-export const createMaplePgClient = (
-	connectionString: string,
-	options?: MaplePgClientOptions,
-): MaplePgConnection => {
-	const socket = createMaplePgSocket(connectionString, options)
-	return { ...socket, db: wrapMaplePgClient(socket.sql, options) }
-}
-
+/**
+ * The canonical client type the app codes against. PostgresJsDatabase and
+ * PgliteDatabase share the PgDatabase core; the PGlite layer casts into this.
+ */
 export type MaplePgClient = ReturnType<typeof drizzlePostgres<typeof schema>>
 
 /** Drizzle over an embedded PGlite instance — local dev and vitest. */
@@ -127,12 +123,5 @@ export const createMaplePgliteClient = (pglite: PGlite, options?: Pick<MaplePgCl
 	drizzlePglite(pglite, { schema, logger: toDrizzleLogger(options?.onQuery) })
 
 export type MaplePgliteClient = ReturnType<typeof createMaplePgliteClient>
-
-/**
- * Canonical client type the app codes against. PostgresJsDatabase and
- * PgliteDatabase share the PgDatabase core; the PGlite layer casts into this
- * (same precedent as the deployed Postgres layer).
- */
-export type MapleDatabaseClient = MaplePgClient
 
 export type MapleDatabaseTransaction = Parameters<Parameters<MaplePgClient["transaction"]>[0]>[0]

@@ -87,8 +87,15 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   `dateToMs` from `apps/api/src/platform/time.ts` rather than bare `new Date(ms)` /
   `.getTime()`, including inside Promise-land helpers. Never read driver write-result shapes
   — use `.returning()` + length. `count(*)` needs `::int` (bigint → string).
-- Layers: `DatabasePgLive` (Workers, short-lived postgres.js client per `execute`) and
-  `DatabasePgliteLive` (tests/local; `createTestDb()` in `apps/api/src/platform/test-pglite.ts`).
+- Layers: `DatabasePgLive` (Workers) and `DatabasePgliteLive` (tests/local; `createTestDb()` in
+  `apps/api/src/platform/test-pglite.ts`).
+- One Postgres connection per invocation — request, cron tick, or Workflow run — created lazily and
+  closed at the boundary, which is Cloudflare's documented Hyperdrive shape. The single primitive is
+  `makePgConnectionScope` in `apps/api/src/platform/pg-connection-scope.ts`; `pgConnectionMiddleware`
+  installs it for HTTP, `withPgConnectionScope` for cron. Sockets are request-bound on Workers, so a
+  connection may be reused freely WITHIN an invocation but must never outlive it. `max` is 5
+  (a ceiling, not a reservation — capping it at 1 serialized cron ticks and cost 3–6x on p50) and the
+  dial is bounded so a stall lands as `error.type = CONNECT_TIMEOUT` instead of hanging.
 - Migrations: `bun run --cwd packages/db db:generate`; CI applies them against the branch's DIRECT
   port 5432 (never a pooler) before `alchemy deploy`. PGlite applies them at layer build.
 - **PR preview deploys are disabled** (2026-08, cost). `deploy-pr-preview.yml` triggers on the

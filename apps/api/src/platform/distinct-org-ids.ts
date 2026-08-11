@@ -52,7 +52,7 @@ export const selectDistinctOrgIds = async (
 
 /**
  * `db.execute` hands back driver-shaped results: postgres.js yields a row array,
- * PGlite yields `{ rows }`. `MapleDatabaseClient` is typed as the postgres.js
+ * PGlite yields `{ rows }`. `MaplePgClient` is typed as the postgres.js
  * client and the PGlite layer casts into it, so the declared array type is a lie
  * under test — normalize both shapes instead of trusting it.
  */
