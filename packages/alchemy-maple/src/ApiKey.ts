@@ -110,7 +110,6 @@ export const ApiKeyProvider = () =>
 					return undefined
 				}),
 				reconcile: Effect.fn(function* ({ news, olds, output }) {
-					// Observe — confirm the key still exists and is not revoked.
 					let observed: Schema.Schema.Type<typeof WireApiKey> | undefined
 					if (output?.keyId) {
 						const fetched = yield* api
@@ -122,20 +121,18 @@ export const ApiKeyProvider = () =>
 						}
 					}
 
-					// Ensure — create if missing/revoked. The secret is returned exactly
-					// once; it lives in Alchemy state from here on.
+					// The secret is returned once, then retained in Alchemy state.
 					if (observed === undefined || output === undefined) {
 						const created = yield* api.post("/v2/api_keys", createBody(news))
 						return fromSecretResponse(yield* decodeWireApiKeyWithSecret(created))
 					}
 
-					// Roll — `rotate` bumped: replace the secret in place.
 					if (olds !== undefined && olds.rotate !== news.rotate) {
 						const rolled = yield* api.post(`/v2/api_keys/${observed.id}/roll`)
 						return fromSecretResponse(yield* decodeWireApiKeyWithSecret(rolled))
 					}
 
-					// Steady state — preserve the stored secret (GET never returns it).
+					// Preserve the stored secret because GET never returns it.
 					return {
 						keyId: observed.id,
 						name: observed.name,

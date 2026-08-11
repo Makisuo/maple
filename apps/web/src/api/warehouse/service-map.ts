@@ -207,8 +207,6 @@ function transformDbEdge(row: Record<string, unknown>, durationSeconds: number):
 	}
 }
 
-// Cloudflare direct-integration Worker analytics
-//
 // The analytics poller writes Worker metrics under the synthetic service name
 // `cloudflare-worker/{script}` with no spans. The map overlays these onto the
 // matching instrumented service node (by service name or faas.name); scripts
@@ -281,8 +279,6 @@ export const getServiceMapCloudflare = Effect.fn("QueryEngine.getServiceMapCloud
 	}
 })
 
-// PlanetScale scraped-metrics rollups
-//
 // The scraper collects PlanetScale's Prometheus metrics per branch; the map
 // overlays the per-database rollup onto the matching trace-derived DB node
 // (matched by database name against the org's polled inventory). PlanetScale

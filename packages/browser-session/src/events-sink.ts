@@ -226,8 +226,6 @@ function installNavigationObserver(onNavigate: (url: string) => void): () => voi
 	}
 }
 
-// --- Pre-init queue ---------------------------------------------------------
-//
 // `track()` is a public API, so an app will call it from a click handler that
 // fires before the SDK finished initializing (or before the lazily-imported
 // replay chunk landed). Queue those instead of dropping them. Lives on

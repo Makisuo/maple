@@ -143,7 +143,6 @@ export const AlertDestinationProvider = () =>
 					return undefined
 				}),
 				reconcile: Effect.fn(function* ({ news, olds, output }) {
-					// Observe — re-fetch by id; recover from out-of-band deletes.
 					let observed: Schema.Schema.Type<typeof WireDestination> | undefined
 					if (output?.destinationId) {
 						const fetched = yield* api
@@ -152,7 +151,6 @@ export const AlertDestinationProvider = () =>
 						if (fetched !== undefined) observed = yield* decodeWireDestination(fetched)
 					}
 
-					// Ensure — create if missing.
 					if (observed === undefined) {
 						const created = yield* api.post("/v2/alerts/destinations", desiredBody(news))
 						observed = yield* decodeWireDestination(created)
@@ -161,8 +159,7 @@ export const AlertDestinationProvider = () =>
 						olds === undefined ||
 						!deepEqual(olds, news, { stripNullish: true })
 					) {
-						// Sync — PATCH when observable fields drift OR declared props changed
-						// (write-only secrets can only be pushed, never compared).
+						// Write-only secrets must be pushed because they cannot be compared.
 						const updated = yield* api.patch(
 							`/v2/alerts/destinations/${observed.id}`,
 							desiredBody(news),

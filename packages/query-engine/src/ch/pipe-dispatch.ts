@@ -109,7 +109,6 @@ export function compilePipeQuery(
 
 	return Match.value(pipe)
 		.pipe(
-			// ----- Traces -----
 			Match.when("list_traces", () =>
 				eraseType(
 					CH.compile(
@@ -379,7 +378,6 @@ export function compilePipeQuery(
 			),
 		)
 		.pipe(
-			// ----- Errors -----
 			Match.when("errors_by_type", () =>
 				eraseType(
 					CH.compile(
@@ -479,7 +477,6 @@ export function compilePipeQuery(
 					}),
 				),
 			),
-			// ----- Metrics -----
 			Match.when("list_metrics", () =>
 				eraseType(
 					CH.compile(
@@ -505,7 +502,6 @@ export function compilePipeQuery(
 			),
 		)
 		.pipe(
-			// ----- Attributes -----
 			Match.when("span_attribute_keys", () =>
 				eraseType(
 					CH.compile(CH.attributeKeysQuery({ scope: "span", limit: int("limit", 200) }), {
@@ -597,7 +593,6 @@ export function compilePipeQuery(
 					),
 				)
 			}),
-			// ----- Custom charts -----
 			Match.when("custom_traces_timeseries", () => {
 				const tsOpts = {
 					...pipeParamsToTracesTimeseriesOpts(params),

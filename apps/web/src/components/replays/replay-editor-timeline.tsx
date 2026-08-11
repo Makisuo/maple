@@ -120,8 +120,6 @@ export function ReplayEditorTimeline({
 	)
 }
 
-// --- Header ----------------------------------------------------------------
-
 function TimelineHeader() {
 	// Slim header: the play / scrub / speed controls live in the transport docked
 	// to the player above, so this strip just labels the timeline and carries the
@@ -135,8 +133,6 @@ function TimelineHeader() {
 		</div>
 	)
 }
-
-// --- Ruler ----------------------------------------------------------------
 
 function TimeRuler({ totalMs }: { totalMs: number }) {
 	const ticks = React.useMemo(() => {
@@ -167,8 +163,6 @@ function TimeRuler({ totalMs }: { totalMs: number }) {
 		</div>
 	)
 }
-
-// --- Scrub surface (master scrub) -----------------------------------------
 
 /**
  * Transparent drag surface covering the ruler + activity rows (everything right
@@ -219,8 +213,6 @@ function ScrubSurface({ player }: { player: ReplayPlayerContextValue }) {
 		/>
 	)
 }
-
-// --- Activity track (visual) ----------------------------------------------
 
 function ActivityTrack({ player }: { player: ReplayPlayerContextValue }) {
 	const { displayTotalMs, markers, idleBands } = player
@@ -278,8 +270,6 @@ function ActivityTrack({ player }: { player: ReplayPlayerContextValue }) {
 		</div>
 	)
 }
-
-// --- Traces track ---------------------------------------------------------
 
 const TracesTrack = React.memo(function TracesTrack({
 	traceIds,
@@ -473,8 +463,6 @@ function TraceBar({
 	)
 }
 
-// --- Span lane (lazy, on expand) ------------------------------------------
-
 interface SpanRow {
 	readonly spanId: string
 	readonly spanName: string
@@ -588,8 +576,6 @@ function SpanRowItem({ span, seek }: { span: SpanRow; seek: SeekContext }) {
 		</div>
 	)
 }
-
-// --- Playhead -------------------------------------------------------------
 
 function Playhead({ player }: { player: ReplayPlayerContextValue }) {
 	const position = pct(player.displayCurrentMs, player.displayTotalMs)

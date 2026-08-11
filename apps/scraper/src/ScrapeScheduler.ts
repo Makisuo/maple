@@ -342,6 +342,16 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 							return attempt
 						}).pipe(
 							Effect.withSpan("scraper.scrape_target", {
+								// Each scrape is its own trace. Target loops are forked from
+								// inside `reconcile`, so the forked fiber inherits the
+								// `scraper.reconcile` span as its ambient parent and keeps it
+								// for the fiber's whole (unbounded) lifetime. Without `root`
+								// every scrape — across every target of that reconcile, for
+								// hours — became a child of that one span and propagated its
+								// traceparent to the API, collapsing thousands of independent
+								// scrapes into a single trace (prod: 10.8k `Server` spans on
+								// /api/internal/prometheus-scrape under one TraceId over 9h).
+								root: true,
 								attributes: {
 									orgId: target.orgId,
 									"maple.scraper.target_id": target.id,

@@ -1678,7 +1678,6 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			})
 		}
 
-		// ---- Facets ----
 		if (request.query.kind === "facets") {
 			const baseParams = { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime }
 
@@ -1803,7 +1802,6 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			}
 		}
 
-		// ---- Stats ----
 		if (request.query.source === "traces" && request.query.kind === "stats") {
 			const opts = extractTracesDurationStatsOpts(
 				request.query.filters as Record<string, unknown> | undefined,
@@ -1832,7 +1830,6 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			})
 		}
 
-		// ---- Attribute Values ----
 		if (request.query.kind === "attributeValues") {
 			// Per-metric scoping reads the raw metric table (see attributeKeys above).
 			const metricScoped =
@@ -1873,7 +1870,6 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			})
 		}
 
-		// ---- Count ----
 		if (request.query.source === "logs" && request.query.kind === "count") {
 			const rows = yield* annotateWarehouseError(
 				runQueryDefinition(

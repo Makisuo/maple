@@ -82,8 +82,6 @@ export function SidebarProvider({
 	const isMobile = useMediaQuery("max-md")
 	const [openMobile, setOpenMobile] = React.useState(false)
 
-	// This is the internal state of the sidebar.
-	// We use openProp and setOpenProp for control from outside the component.
 	const [_open, _setOpen] = React.useState(defaultOpen)
 	const open = openProp ?? _open
 	const setOpen = React.useCallback(
@@ -95,7 +93,6 @@ export function SidebarProvider({
 				_setOpen(openState)
 			}
 
-			// This sets the cookie to keep the sidebar state.
 			await cookieStore.set({
 				expires: Date.now() + SIDEBAR_COOKIE_MAX_AGE * 1000,
 				name: SIDEBAR_COOKIE_NAME,
@@ -106,12 +103,10 @@ export function SidebarProvider({
 		[setOpenProp, open],
 	)
 
-	// Helper to toggle the sidebar.
 	const toggleSidebar = React.useCallback(() => {
 		return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
 	}, [isMobile, setOpen])
 
-	// Adds a keyboard shortcut to toggle the sidebar.
 	React.useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent): void => {
 			if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
@@ -124,8 +119,6 @@ export function SidebarProvider({
 		return () => window.removeEventListener("keydown", handleKeyDown)
 	}, [toggleSidebar])
 
-	// We add a state so that we can do data-state="expanded" or "collapsed".
-	// This makes it easier to style the sidebar with Tailwind classes.
 	const state = open ? "expanded" : "collapsed"
 
 	const contextValue = React.useMemo<SidebarContextProps>(
@@ -245,7 +238,6 @@ export function Sidebar({
 					side === "left"
 						? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
 						: "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
-					// Adjust the padding for floating and inset variants.
 					variant === "floating" || variant === "inset"
 						? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
 						: "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
@@ -321,15 +313,8 @@ export function SidebarRail({ className, ...props }: React.ComponentProps<"butto
 export function SidebarInset({ className, ...props }: React.ComponentProps<"main">): React.ReactElement {
 	return (
 		<main
-			// `h-svh` + `min-h-0` is what makes the flex chain
-			// SidebarProvider (min-h-svh) → SidebarInset → PageLayout.Root →
-			// PageLayout.Body → PageLayout.Content → PageLayout.ScrollArea
-			// actually constrain height. Without an explicit height, the
-			// wrapper's `min-h-svh` is only a floor — SidebarInset's children
-			// stretch the whole layout past the viewport, breaking
-			// `position: sticky` and forcing the window (not
-			// PageLayout.ScrollArea) to scroll. `min-h-0` then lets descendant
-			// `flex-1` items shrink against this bounded parent.
+			// `h-svh` bounds the flex chain so PageLayout.ScrollArea, not the window,
+			// scrolls; `min-h-0` lets descendant flex items shrink within that bound.
 			className={cn(
 				"relative flex h-svh w-full min-h-0 min-w-0 flex-1 flex-col bg-background",
 				"md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ms-2 md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ms-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm/5",
@@ -611,7 +596,6 @@ export function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
 	showIcon?: boolean
 }): React.ReactElement {
-	// Random width between 50 to 90%.
 	const width = React.useMemo(() => {
 		return `${Math.floor(Math.random() * 40) + 50}%`
 	}, [])

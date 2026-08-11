@@ -176,8 +176,6 @@ describe("makeQueryEngineEvaluateSeries (per-bucket preview core)", () => {
 	)
 })
 
-// --- Raw SQL is just a fourth source of the same bucket observations. ---
-
 const rawStub = (rows: ReadonlyArray<Record<string, unknown>>) =>
 	({
 		sqlQuery: () => Effect.die(new Error("sqlQuery is not used by raw SQL tests")),
@@ -287,8 +285,6 @@ const makeFullStub = (
 		ingest: () => Effect.void,
 		sql: () => Promise.resolve({ data: [] }),
 	}) as unknown as WarehouseQueryServiceShape
-
-// --- cachedDirect: per-route TTL plumbing. ---
 
 // Records cache options so we can assert both TTL plumbing and the matching
 // time-snap window used by each direct route key.
@@ -441,8 +437,6 @@ describe("QueryEngineService.cachedDirect TTL", () => {
 		}).pipe(Effect.provide(layer))
 	})
 })
-
-// --- trace-detail cache TTL: age-conditional tiers. ---
 
 describe("traceCacheTtlSeconds", () => {
 	const nowMs = Date.parse("2026-07-17T12:00:00Z")

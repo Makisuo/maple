@@ -306,8 +306,6 @@ describe("computeBucketSeconds", () => {
 	})
 })
 
-// --- Service-level integration: in-memory EdgeCache backing. ---
-
 const makeConfig = (overrides: Record<string, string> = {}) =>
 	ConfigProvider.layer(
 		ConfigProvider.fromUnknown({

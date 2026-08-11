@@ -19,7 +19,6 @@ import {
 } from "@/api/warehouse/effect-utils"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
-// List sessions
 
 const ListReplaysInput = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),
@@ -150,8 +149,6 @@ export const getReplaysFacets = Effect.fn("SessionReplays.facets")(function* ({
 		durationP95: result.durationP95,
 	}
 })
-
-// Session detail
 
 const GetReplayInput = Schema.Struct({
 	sessionId: SessionId,

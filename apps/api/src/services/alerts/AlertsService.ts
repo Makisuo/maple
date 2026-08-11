@@ -835,7 +835,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						resolveAll: true,
 					})
 				} else {
-					// Check for services that fell out of scope
 					const staleGroupKeys = computeStaleGroupKeys(oldNormalized, newNormalized)
 					if (HashSet.size(staleGroupKeys) > 0) {
 						yield* resolveStaleIncidents(orgId, ruleId, newNormalized, {

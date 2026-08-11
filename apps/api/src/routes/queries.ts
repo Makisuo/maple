@@ -33,35 +33,9 @@ import {
 } from "@/routes/query-helpers"
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
 
-/**
- * App-side half of the warehouse query registry.
- *
- * Most entries live in `@maple/query-engine/registry`. These do not, for two
- * reasons that are both about dependency direction rather than taste:
- *
- *  * The Cloudflare and PlanetScale queries are built by
- *    `@maple/query-engine-integrations`, which itself depends on
- *    `@maple/query-engine`. Declaring them in the core registry would invert
- *    that edge.
- *  * A few queries need helpers or services that belong to the API app —
- *    `partitionWindowAround`, `traceCacheTtlSeconds` — and pulling those down
- *    into the query-engine package would drag app concerns into a shared lib.
- *
- * Handlers import `Queries` from here, so the split is invisible at the call
- * site and an entry can move between the two halves without touching handlers.
- */
-// --- Cloudflare / PlanetScale integration queries -------------------------
-//
-// These live app-side rather than in the core registry because
-// `@maple/query-engine-integrations` depends on `@maple/query-engine`;
-// declaring them there would invert that edge.
-//
-// Each entry inlines the small payload-derived prologue (`params`, `filters`,
-// `base`) that used to sit in the handler. Handlers that report
-// `ignoredFilters` keep their own `toCloudflareFilters` call — it is a pure
-// function of the payload, so computing it in both places cannot drift, and
-// which filters a metric family could not honor is presentation, not query
-// construction.
+// App-side queries depend on integrations or API-only helpers, so moving them
+// into the core registry would invert dependencies. Entries own query inputs;
+// handlers retain only response metadata such as `ignoredFilters`.
 
 const cloudflareInfraZoneCounters = defineQuery({
 	id: "cloudflareInfraZoneCounters",
@@ -307,8 +281,6 @@ const planetscaleInfraTimeseries = defineQuery({
 	},
 })
 
-// --- cloudflareInfraZoneDetail sub-queries --------------------------------
-
 const zoneDetailParams = (payload: CloudflareInfraZoneDetailRequest, orgId: string) => ({
 	orgId,
 	serviceName: payload.serviceName,
@@ -352,8 +324,6 @@ const cloudflareInfraZoneDetailLatency = defineQuery({
 		}),
 })
 
-// --- servicePlanetScaleStats sub-queries ----------------------------------
-//
 // Each reads either the database-level or the branch-level rollup depending on
 // whether a database was requested. The branch lives inside `compile` so the id,
 // profile and row schema stay one decision per sub-query rather than two.
@@ -432,8 +402,6 @@ const cloudflareInfraZoneFacets = defineQuery({
 		}),
 })
 
-// --- hostInfraTimeseries: two query families behind one endpoint ----------
-//
 // Network reads a counter family, everything else a gauge family, so they are
 // separate defs rather than one def with a branch — the row shapes differ and
 // the handler maps them differently. Both keep the id "hostInfraTimeseries",
@@ -474,8 +442,6 @@ const hostInfraGaugeTimeseries = defineQuery({
 		)
 	},
 })
-
-// --- cloudflareInfraZoneBreakdown: three parallel, then one dependent -----
 
 const zoneBreakdownParams = (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) => ({
 	orgId,

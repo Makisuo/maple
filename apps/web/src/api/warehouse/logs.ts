@@ -343,7 +343,6 @@ const getLogsFacetValuesEffect = Effect.fn("QueryEngine.getLogsFacetValues")(fun
 	}
 })
 
-// Log attribute keys / values
 // Backed by `log_attribute_keys_mv` and `log_attribute_values_mv` →
 // `attribute_keys_hourly` / `attribute_values_hourly`. Reads the rollup, not
 // the raw `logs` table — autocomplete on log attribute name/value stays fast

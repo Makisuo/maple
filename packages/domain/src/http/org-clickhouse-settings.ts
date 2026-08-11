@@ -58,8 +58,6 @@ export class OrgClickHouseSettingsDeleteResponse extends Schema.Class<OrgClickHo
 	configured: Schema.Literal(false),
 }) {}
 
-// --- Schema diff & apply -----------------------------------------------------
-
 export const ClickHouseTableKind = Schema.Literals(["table", "materialized_view"])
 export type ClickHouseTableKind = Schema.Schema.Type<typeof ClickHouseTableKind>
 
@@ -198,8 +196,6 @@ export class OrgClickHouseCollectorConfigResponse extends Schema.Class<OrgClickH
 	passwordEnvVar: Schema.String,
 }) {}
 
-// --- Errors ------------------------------------------------------------------
-
 export class OrgClickHouseSettingsForbiddenError extends Schema.TaggedError<OrgClickHouseSettingsForbiddenError>()(
 	"@maple/http/errors/OrgClickHouseSettingsForbiddenError",
 	{ message: Schema.String },
@@ -241,8 +237,6 @@ export class OrgClickHouseSettingsUpstreamUnavailableError extends Schema.Tagged
 	},
 	{ httpApiStatus: 503 },
 ) {}
-
-// --- API group ---------------------------------------------------------------
 
 export class OrgClickHouseSettingsApiGroup extends HttpApiGroup.make("orgClickHouseSettings")
 	.add(

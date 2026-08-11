@@ -211,7 +211,6 @@ export function aggregateByServiceEnvironment(
 		})
 	}
 
-	// Sort by throughput descending (same as SQL ORDER BY)
 	results.sort((a, b) => b.throughput - a.throughput)
 	return results
 }

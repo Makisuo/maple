@@ -10,8 +10,6 @@ import {
 } from "@/components/filters/filter-sidebar"
 import type { PodFacetsResponse, NodeFacetsResponse, WorkloadFacetsResponse } from "@maple/domain/http"
 
-// Pods
-
 export interface PodFilters {
 	podNames?: ReadonlyArray<string>
 	namespaces?: ReadonlyArray<string>
@@ -135,8 +133,6 @@ export function PodsFilterSidebarView({
 		})
 		.render()
 }
-
-// Nodes
 
 export interface NodeFilters {
 	nodeNames?: ReadonlyArray<string>

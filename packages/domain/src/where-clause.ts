@@ -122,7 +122,7 @@ export function parseWhereClause(expression: string): ParseWhereClauseResult {
 	const warnings: WhereClauseParseWarning[] = []
 
 	for (const part of parts) {
-		// Try "!exists" operator (no value) BEFORE "exists" so the longer prefix wins
+		// Match negated operators first so the shorter prefix cannot consume them.
 		const notExistsMatch = part.match(/^([a-zA-Z0-9_.-]+)\s+!\s*exists$/i)
 		if (notExistsMatch) {
 			clauses.push({
@@ -133,7 +133,6 @@ export function parseWhereClause(expression: string): ParseWhereClauseResult {
 			continue
 		}
 
-		// Try "exists" operator (no value)
 		const existsMatch = part.match(/^([a-zA-Z0-9_.-]+)\s+exists$/i)
 		if (existsMatch) {
 			clauses.push({
@@ -144,7 +143,6 @@ export function parseWhereClause(expression: string): ParseWhereClauseResult {
 			continue
 		}
 
-		// Try "!contains" operator BEFORE "contains" so the longer prefix wins
 		const notContainsMatch = part.match(
 			/^([a-zA-Z0-9_.-]+)\s+!\s*contains\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))$/i,
 		)
@@ -157,7 +155,6 @@ export function parseWhereClause(expression: string): ParseWhereClauseResult {
 			continue
 		}
 
-		// Try "contains" operator
 		const containsMatch = part.match(/^([a-zA-Z0-9_.-]+)\s+contains\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))$/i)
 		if (containsMatch) {
 			clauses.push({
@@ -168,13 +165,11 @@ export function parseWhereClause(expression: string): ParseWhereClauseResult {
 			continue
 		}
 
-		// Try comparison operators: !=, <=, >=, <, >, =
 		const compMatch = part.match(
 			/^([a-zA-Z0-9_.-]+)\s*(!=|<=|>=|<|>|=)\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))$/,
 		)
 		if (compMatch) {
 			const unquotedToken = compMatch[5]
-			// Detect unclosed quote in unquoted capture
 			if (unquotedToken && (unquotedToken.startsWith('"') || unquotedToken.startsWith("'"))) {
 				warnings.push(
 					new WhereClauseParseWarning({

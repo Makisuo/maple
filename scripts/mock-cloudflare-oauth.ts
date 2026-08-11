@@ -24,7 +24,6 @@ Bun.serve({
 		const url = new URL(req.url)
 		console.log(`[mock-cf] ${req.method} ${url.pathname}${url.search}`)
 
-		// --- OAuth authorize: immediately "grant" and bounce back with code+state ---
 		if (url.pathname === "/oauth2/auth") {
 			const redirectUri = url.searchParams.get("redirect_uri")
 			const state = url.searchParams.get("state")
@@ -42,7 +41,6 @@ Bun.serve({
 			return Response.redirect(target.toString(), 302)
 		}
 
-		// --- OAuth token: verify PKCE verifier against the stored challenge ---
 		if (url.pathname === "/oauth2/token" && req.method === "POST") {
 			const form = new URLSearchParams(await req.text())
 			const grant = form.get("grant_type")
@@ -79,14 +77,12 @@ Bun.serve({
 			return json({ error: "unsupported_grant_type" }, 400)
 		}
 
-		// --- OAuth revoke ---
 		if (url.pathname === "/oauth2/revoke" && req.method === "POST") {
 			revoked += 1
 			console.log(`[mock-cf] token revoked (total ${revoked})`)
 			return new Response(null, { status: 200 })
 		}
 
-		// --- Cloudflare API: list accounts (client/v4 envelope) ---
 		if (url.pathname === "/accounts") {
 			return json({
 				success: true,
@@ -97,7 +93,6 @@ Bun.serve({
 			})
 		}
 
-		// --- Cloudflare API: list zones (paginated; page 2+ is empty) ---
 		if (url.pathname === "/zones") {
 			const page = Number(url.searchParams.get("page") ?? "1")
 			const zones = page === 1 ? MOCK_ZONES : []
@@ -110,7 +105,6 @@ Bun.serve({
 			})
 		}
 
-		// --- GraphQL Analytics: settings + httpRequestsAdaptiveGroups + workersInvocationsAdaptive ---
 		if (url.pathname === "/graphql" && req.method === "POST") {
 			const body = (await req.json()) as { query?: string; variables?: Record<string, unknown> }
 			const query = body.query ?? ""

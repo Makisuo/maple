@@ -206,7 +206,6 @@ function pickXTicks(count: number, cellStridePx: number, minLabelPx: number): nu
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Layout constants. Every dimension here is in CSS pixels.
 // ──────────────────────────────────────────────────────────────────────────────
 
 const X_AXIS_H = 20

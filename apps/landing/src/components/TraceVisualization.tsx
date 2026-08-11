@@ -40,7 +40,6 @@ function span(
 	}
 }
 
-// Build the span tree (checkout flow)
 const chargeCard = span({
 	spanId: "span-7",
 	spanName: "chargeCard",

@@ -67,8 +67,6 @@ export class AiTriageResult extends Schema.Class<AiTriageResult>("AiTriageResult
 	unchecked: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
-// Settings
-
 export class AiTriageSettingsDocument extends Schema.Class<AiTriageSettingsDocument>(
 	"AiTriageSettingsDocument",
 )({

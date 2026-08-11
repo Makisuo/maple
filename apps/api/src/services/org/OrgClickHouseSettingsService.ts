@@ -582,8 +582,6 @@ const decodeStatus = (raw: string | null | undefined): "connected" | "error" | n
 	return null
 }
 
-// --- Desired-schema parsing --------------------------------------------------
-//
 // We parse the bundled snapshot statements from the static migration snapshot.
 // Parsing is cheap, but the snapshot is also static across the process
 // lifetime so the service memoizes the result in a `Ref` (created in `make`)
@@ -612,8 +610,6 @@ const parseDesiredTables = (): ReadonlyArray<DesiredTable> => {
 	}
 	return out
 }
-
-// --- ClickHouse HTTP exec helpers --------------------------------------------
 
 export interface ClickHouseExecConfig {
 	readonly url: string
@@ -857,8 +853,6 @@ const parseJsonEachRow = <T>(text: string): ReadonlyArray<T> => {
 // schema-apply Workflow (apps/api/src/workflows/ClickHouseSchemaApplyWorkflow.run.ts),
 // which `applySchema` kicks off. The `_maple_schema_migrations` bookkeeping
 // protocol is shared with `@maple/clickhouse-cli`.
-
-// --- Service -----------------------------------------------------------------
 
 export class OrgClickHouseSettingsService extends Context.Service<
 	OrgClickHouseSettingsService,

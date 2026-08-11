@@ -26,8 +26,6 @@ export interface AlertNotificationProps {
 	chatUrl: string
 }
 
-// -- Brand palette (Maple dark theme — mirrors weekly-digest.tsx) --
-
 const C = {
 	bg: "#141210",
 	surface: "#1e1b18",

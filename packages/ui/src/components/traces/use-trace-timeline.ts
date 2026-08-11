@@ -12,8 +12,6 @@ import { getValueHue } from "../../lib/colors"
 import { resolveColorValue, isStatusCodePreset, type ColorByField } from "./color-by"
 import { computeDefaultExpandedSpanIds, countDescendants } from "./auto-collapse"
 
-// --- Color palette (kept muted to preserve current aesthetic) ---
-
 const ERROR_HUE = 25
 const NEUTRAL_FILL = "oklch(0.22 0.005 0)"
 const NEUTRAL_BORDER = "oklch(0.45 0.02 0)"
@@ -29,8 +27,6 @@ function barBorderFromHue(hue: number | null, isError: boolean, statusPreset: bo
 	if (hue === null) return NEUTRAL_BORDER
 	return `oklch(0.55 0.18 ${hue})`
 }
-
-// --- Layout ---
 
 export interface LayoutResult {
 	bars: TimelineBar[]
@@ -98,8 +94,6 @@ export function layoutSpans(
 
 	return { bars, totalRows: currentRow, barIndexBySpanId, parentIndexById }
 }
-
-// --- State reducer ---
 
 export function clampViewport(vp: ViewportState, traceStartMs: number, traceEndMs: number): ViewportState {
 	const traceDuration = Math.max(0, traceEndMs - traceStartMs)
@@ -259,8 +253,6 @@ export function timelineReducer(state: TimelineState, action: TimelineAction): T
 	}
 }
 
-// --- Time axis ticks ---
-
 const NICE_INTERVALS = [
 	0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000,
 	5000, 10000, 20000, 60000,
@@ -274,7 +266,6 @@ export function computeTimeAxisTicks(
 	const visibleDuration = viewport.endMs - viewport.startMs
 	const rawInterval = visibleDuration / targetTickCount
 
-	// Find the nearest "nice" interval
 	let interval = NICE_INTERVALS[NICE_INTERVALS.length - 1]
 	for (const nice of NICE_INTERVALS) {
 		if (nice >= rawInterval) {
@@ -293,8 +284,6 @@ export function computeTimeAxisTicks(
 	return ticks
 }
 
-// --- Search ---
-
 export function computeSearchMatches(bars: TimelineBar[], query: string): Set<string> {
 	if (!query.trim()) return new Set()
 	const q = query.toLowerCase()
@@ -310,8 +299,6 @@ export function computeSearchMatches(bars: TimelineBar[], query: string): Set<st
 	}
 	return matches
 }
-
-// --- Main hook ---
 
 export interface UseTraceTimelineOptions {
 	rootSpans: SpanNode[]
@@ -395,7 +382,6 @@ export function useTraceTimeline({
 		)
 	}, [traceStartMs, traceEndMs, traceDurationMs])
 
-	// Initialize with default expanded spans (auto-collapses big subtrees on long traces).
 	const defaultExpanded = React.useMemo(
 		() => computeDefaultExpandedSpanIds(rootSpans, { keepVisibleSpanId }),
 		[rootSpans, keepVisibleSpanId],
@@ -408,7 +394,6 @@ export function useTraceTimeline({
 		expandedSpanIds: defaultExpanded,
 	})
 
-	// Reset state when trace data changes
 	const rootSpanIdsKey = rootSpans.map((s) => s.spanId).join(",")
 	React.useEffect(() => {
 		dispatch({
@@ -422,22 +407,18 @@ export function useTraceTimeline({
 		})
 	}, [rootSpanIdsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Layout bars
 	const { bars, totalRows, barIndexBySpanId, parentIndexById } = React.useMemo(
 		() => layoutSpans(rootSpans, state.expandedSpanIds, colorBy),
 		[rootSpans, state.expandedSpanIds, colorBy],
 	)
 
-	// Viewport derived values
 	const visibleDurationMs = state.viewport.endMs - state.viewport.startMs
 
-	// Time axis ticks
 	const timeAxisTicks = React.useMemo(
 		() => computeTimeAxisTicks(state.viewport, traceStartMs),
 		[state.viewport, traceStartMs],
 	)
 
-	// Search
 	const searchMatches = React.useMemo(
 		() => computeSearchMatches(bars, state.searchQuery),
 		[bars, state.searchQuery],

@@ -180,8 +180,6 @@ const decodeApiKeyIdOption = Schema.decodeUnknownOption(ApiKeyId)
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
 const decodeUserId = Schema.decodeUnknownEffect(UserId)
 
-// --- Slack API response shapes ---------------------------------------------
-
 const SlackOAuthAccessSchema = Schema.Struct({
 	ok: Schema.Boolean,
 	error: Schema.optionalKey(Schema.String),
@@ -259,8 +257,6 @@ const SlackConversationsListSchema = Schema.Struct({
 })
 const decodeConversationsList = Schema.decodeUnknownEffect(SlackConversationsListSchema)
 
-// --- Public types -----------------------------------------------------------
-
 export interface SlackInstallStatus {
 	readonly installed: boolean
 	readonly teamId: string | null
@@ -295,8 +291,6 @@ export interface SlackChannelList {
 	/** Slack still had a cursor when the page-capped walk stopped. */
 	readonly truncated: boolean
 }
-
-// --- Service ----------------------------------------------------------------
 
 export interface SlackIntegrationServiceShape {
 	readonly startInstall: (

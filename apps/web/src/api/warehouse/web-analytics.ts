@@ -1,5 +1,3 @@
-// Web Analytics query wrappers
-//
 // One filter schema shared by all five queries, so the /analytics route builds a
 // single filter object and every panel narrows identically. See
 // packages/query-engine/src/ch/queries/web-analytics.ts for why the page reads

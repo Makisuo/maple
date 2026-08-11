@@ -939,8 +939,6 @@ const observeDatasetFailure = (orgId: OrgId, failure: DatasetPollFailure) =>
 		Effect.ignore,
 	)
 
-// Service
-
 interface CloudflareAnalyticsZoneStatusShape {
 	readonly id: string
 	readonly name: string
@@ -1025,8 +1023,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 			roles: [decodeRoleNameSync("root")],
 			authMode: "self_hosted",
 		})
-
-		// State-row helpers
 
 		const loadStateRows = (orgId: OrgId) =>
 			dbExecute((db) =>
@@ -1264,8 +1260,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 			return [...rows, ...inserted]
 		})
 
-		// Settings refresh (per-plan limits discovery)
-
 		/**
 		 * Refresh stale per-plan dataset settings. Returns true when anything was written — the
 		 * caller then reloads its row set (and skips the reload otherwise).
@@ -1440,8 +1434,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 					),
 				),
 		)
-
-		// Generic dataset polling
 
 		/**
 		 * One poll step: query a batched document's window, attribute GraphQL-level errors to their
@@ -1738,8 +1730,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 			},
 		)
 
-		// Per-org poll
-
 		const pollOrg = Effect.fn("CloudflareAnalyticsService.pollOrg")(function* (orgId: OrgId) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			// A skip used to be silent — the reason only ever landed in the returned summary, which
@@ -2030,8 +2020,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 				),
 			)
 		})
-
-		// All-orgs tick + status
 
 		const pollAllOrgs = Effect.fn("CloudflareAnalyticsService.pollAllOrgs")(function* () {
 			const orgRows = yield* dbExecute((db) =>
