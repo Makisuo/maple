@@ -587,7 +587,7 @@ export const verifyPagerDutyRoutingKey = (
 			}
 			return Effect.succeed<PagerDutyKeyVerification>({ status: "unknown" })
 		}),
-		Effect.catch(() => Effect.succeed<PagerDutyKeyVerification>({ status: "unknown" })),
+		Effect.orElseSucceed(() => ({ status: "unknown" as const })),
 	)
 
 /**

@@ -107,6 +107,8 @@ export function compilePipeQuery(
 		})
 	}
 
+	// Kept in four groups because Pipeable.pipe's typed overloads stop at 20 transformations.
+	// oxlint-disable-next-line effecttsgo/unnecessary-pipe-chain
 	return Match.value(pipe)
 		.pipe(
 			Match.when("list_traces", () =>

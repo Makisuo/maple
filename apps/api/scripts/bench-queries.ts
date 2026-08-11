@@ -956,10 +956,11 @@ const rootCommand = Command.make("bench-queries").pipe(
 	Command.withSubcommands([fetchCommand, runCommand, inspectCommand, compareCommand]),
 )
 
-const BenchLive = Layer.mergeAll(ClickHouse.layer, Tinybird.layer)
+const BenchLive = Layer.mergeAll(ClickHouse.layer, Tinybird.layer, BunServices.layer)
 
 Command.run(rootCommand, { version: "0.1.0" }).pipe(
+	// Application root: this is the one runtime boundary that owns the complete layer graph.
+	// oxlint-disable-next-line effecttsgo/strict-effect-provide
 	Effect.provide(BenchLive),
-	Effect.provide(BunServices.layer),
 	BunRuntime.runMain,
 )

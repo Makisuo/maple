@@ -2,7 +2,7 @@ import { Effect, Option, Schema } from "effect"
 import { FileSystem } from "effect/FileSystem"
 import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { HttpClient } from "effect/unstable/http"
 import { openSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
@@ -232,11 +232,10 @@ const logFilePath = (dataDir: string): string => join(dirname(dataDir), "maple.l
 
 /** Non-fatal `/health` probe used while waiting for a detached server to bind.
  *  A transport error or a >300ms timeout collapses to `false` (not yet up). */
-const probeHealth = (addr: string): Effect.Effect<boolean> =>
+const probeHealth = (addr: string) =>
 	HttpClient.get(`${addr}/health`).pipe(
 		Effect.map((res) => res.status >= 200 && res.status < 300),
 		Effect.timeout("300 millis"),
-		Effect.provide(FetchHttpClient.layer),
 		Effect.orElseSucceed(() => false),
 	)
 
@@ -255,7 +254,7 @@ const startDetached = (
 	chdbConfigFile: string | undefined,
 	onDirtyStore: DirtyStorePolicy,
 	minimumRawTelemetryRetentionDays: number | undefined,
-): Effect.Effect<void, ServerError> =>
+) =>
 	Effect.gen(function* () {
 		const logPath = logFilePath(dataDir)
 		// Rebuild the command explicitly rather than slicing argv: a Bun-compiled

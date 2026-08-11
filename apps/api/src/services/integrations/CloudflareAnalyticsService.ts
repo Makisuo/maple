@@ -1323,18 +1323,18 @@ export class CloudflareAnalyticsService extends Context.Service<
 				).pipe(
 					// Token died mid-refresh: stop burning settings calls — every further one
 					// would 401 too. The poll loop records the revoke on its first chunk.
-					Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
-						Effect.logWarning("cloudflare-analytics settings query failed", {
-							errorTag: error._tag,
-							error: error.message,
-						}).pipe(Effect.as("revoked" as const)),
-					),
-					Effect.catchTag("@maple/http/errors/IntegrationsUpstreamError", (error) =>
-						Effect.logWarning("cloudflare-analytics settings query failed", {
-							errorTag: error._tag,
-							error: error.message,
-						}).pipe(Effect.as(null)),
-					),
+					Effect.catchTags({
+						"@maple/http/errors/IntegrationsRevokedError": (error) =>
+							Effect.logWarning("cloudflare-analytics settings query failed", {
+								errorTag: error._tag,
+								error: error.message,
+							}).pipe(Effect.as("revoked" as const)),
+						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+							Effect.logWarning("cloudflare-analytics settings query failed", {
+								errorTag: error._tag,
+								error: error.message,
+							}).pipe(Effect.as(null)),
+					}),
 				)
 				if (result === "revoked") return wrote
 				if (result == null || result.errors.length > 0) continue
@@ -1900,32 +1900,32 @@ export class CloudflareAnalyticsService extends Context.Service<
 							{ orgId, accountId, accessToken, ingestKey, liveScripts },
 							now,
 						).pipe(
-							Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
-								// Stop this org's loop; the seam disables + records health org-wide.
-								// Also stamp the connection so pollAllOrgs skips it until reconnect
-								// (a mid-poll 401 never goes through the refresh path that stamps).
-								oauth.markConnectionRevoked(orgId).pipe(
-									Effect.andThen(Ref.set(revokedRef, true)),
-									Effect.as(
-										allPartsFailed(item, "revoked", error.message, {
-											orgWide: true,
-											disable: true,
-										}),
+							Effect.catchTags({
+								"@maple/http/errors/IntegrationsRevokedError": (error) =>
+									// Stop this org's loop; the seam disables + records health org-wide.
+									// Also stamp the connection so pollAllOrgs skips it until reconnect
+									// (a mid-poll 401 never goes through the refresh path that stamps).
+									oauth.markConnectionRevoked(orgId).pipe(
+										Effect.andThen(Ref.set(revokedRef, true)),
+										Effect.as(
+											allPartsFailed(item, "revoked", error.message, {
+												orgWide: true,
+												disable: true,
+											}),
+										),
 									),
-								),
-							),
-							Effect.catchTag("@maple/http/errors/IntegrationsUpstreamError", (error) =>
-								// A 402 is the gateway refusing this org's metrics on billing grounds.
-								// It is org-wide and cannot clear mid-tick, so stop the loop the way a
-								// revoke does: continuing would re-fetch windows from Cloudflare that
-								// have nowhere to land, and — because the frontier only advances on
-								// acceptance — replay the same windows on every future tick forever.
-								error.status === 402
-									? Ref.set(deliveryBlockedRef, true).pipe(
-											Effect.as(documentFailed(item, "billing", error.message)),
-										)
-									: Effect.succeed(allPartsFailed(item, "upstream", error.message)),
-							),
+								"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+									// A 402 is the gateway refusing this org's metrics on billing grounds.
+									// It is org-wide and cannot clear mid-tick, so stop the loop the way a
+									// revoke does: continuing would re-fetch windows from Cloudflare that
+									// have nowhere to land, and — because the frontier only advances on
+									// acceptance — replay the same windows on every future tick forever.
+									error.status === 402
+										? Ref.set(deliveryBlockedRef, true).pipe(
+												Effect.as(documentFailed(item, "billing", error.message)),
+											)
+										: Effect.succeed(allPartsFailed(item, "upstream", error.message)),
+							}),
 						)
 
 						// Mirror the DB writes onto the in-memory rows so the next round re-plans

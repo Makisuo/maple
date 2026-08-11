@@ -1907,15 +1907,14 @@ describe("AlertsService", () => {
 					adminRoles,
 					{ type: "pagerduty", name: "Paging", enabled: true, integrationKey: REST_API_TOKEN },
 				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
-							fetch: fetchImpl,
-						}),
-					),
-				)
-				.pipe(Effect.exit)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
+						fetch: fetchImpl,
+					}),
+				),
+				Effect.exit,
+			)
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
@@ -1950,15 +1949,14 @@ describe("AlertsService", () => {
 					adminRoles,
 					{ type: "pagerduty", name: "Paging", enabled: true, integrationKey: VALID_PD_KEY },
 				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
-							fetch: fetchImpl,
-						}),
-					),
-				)
-				.pipe(Effect.exit)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
+						fetch: fetchImpl,
+					}),
+				),
+				Effect.exit,
+			)
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
@@ -2191,13 +2189,12 @@ describe("AlertsService", () => {
 					adminRoles,
 					{ type: "email", name: "Bad", enabled: true, memberUserIds: ["user_stranger"] },
 				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
-					),
-				)
-				.pipe(Effect.exit)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
+				),
+				Effect.exit,
+			)
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
@@ -2634,17 +2631,14 @@ describe("AlertsService", () => {
 				const orgId = asOrgId("org_delete_guard")
 				const userId = asUserId("user_delete_guard")
 				const destination = yield* createWebhookDestination(alerts, orgId, userId)
-
 				yield* createErrorRateRule(alerts, orgId, userId, destination.id)
-
 				return yield* alerts.deleteDestination(orgId, adminRoles, destination.id)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
-					),
-				)
-				.pipe(Effect.exit)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
+				),
+				Effect.exit,
+			)
 
 			const failure = getError(exit)
 			assert.isTrue(Exit.isFailure(exit))
@@ -2673,13 +2667,12 @@ describe("AlertsService", () => {
 						url: "https://example.com/member",
 					},
 				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
-					),
-				)
-				.pipe(Effect.exit)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
+				),
+				Effect.exit,
+			)
 
 			const failure = getError(exit)
 

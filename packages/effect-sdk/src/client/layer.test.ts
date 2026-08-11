@@ -38,9 +38,7 @@ describe("Maple.layer (client) — session linking after refactor", () => {
 			ingestKey: "secret",
 		})
 
-		await Effect.runPromise(
-			Effect.sync(() => undefined).pipe(Effect.withSpan("page-load"), Effect.provide(TracerLive)),
-		)
+		await Effect.runPromise(Effect.void.pipe(Effect.withSpan("page-load"), Effect.provide(TracerLive)))
 
 		// The session sink saw this span's trace id — proves the decorator is
 		// still wired into Maple.layer post-extraction.
@@ -60,8 +58,6 @@ describe("Maple.layer (client) — session linking after refactor", () => {
 		})
 
 		// Just has to run without throwing — proves the layer still composes.
-		await Effect.runPromise(
-			Effect.sync(() => undefined).pipe(Effect.withSpan("page-load"), Effect.provide(TracerLive)),
-		)
+		await Effect.runPromise(Effect.void.pipe(Effect.withSpan("page-load"), Effect.provide(TracerLive)))
 	})
 })

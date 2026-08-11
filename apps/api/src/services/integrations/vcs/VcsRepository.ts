@@ -504,31 +504,27 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			orgId: OrgId,
 			repositoryId: VcsRepositoryId,
 		) {
-			const repoRows = yield* database
-				.execute((db) =>
-					db
-						.select({ id: vcsRepositories.id })
-						.from(vcsRepositories)
-						.where(and(eq(vcsRepositories.orgId, orgId), eq(vcsRepositories.id, repositoryId)))
-						.limit(1),
-				)
-				.pipe(Effect.mapError(toPersistenceError))
+			const repoRows = yield* database.execute((db) =>
+				db
+					.select({ id: vcsRepositories.id })
+					.from(vcsRepositories)
+					.where(and(eq(vcsRepositories.orgId, orgId), eq(vcsRepositories.id, repositoryId)))
+					.limit(1),
+			)
 			if (repoRows[0]?.id === undefined) return false
 			// Delete branches, commits, then the repo in one atomic transaction, so a
 			// failure part-way can't leave child rows behind a deleted repo.
-			yield* database
-				.execute((db) =>
-					db.transaction(async (tx) => {
-						await tx
-							.delete(vcsRepositoryBranches)
-							.where(eq(vcsRepositoryBranches.repositoryId, repositoryId))
-						await tx.delete(vcsCommits).where(eq(vcsCommits.repositoryId, repositoryId))
-						await tx.delete(vcsRepositories).where(eq(vcsRepositories.id, repositoryId))
-					}),
-				)
-				.pipe(Effect.mapError(toPersistenceError))
+			yield* database.execute((db) =>
+				db.transaction(async (tx) => {
+					await tx
+						.delete(vcsRepositoryBranches)
+						.where(eq(vcsRepositoryBranches.repositoryId, repositoryId))
+					await tx.delete(vcsCommits).where(eq(vcsCommits.repositoryId, repositoryId))
+					await tx.delete(vcsRepositories).where(eq(vcsRepositories.id, repositoryId))
+				}),
+			)
 			return true
-		})
+		}, Effect.mapError(toPersistenceError))
 
 		// Write a sync-status transition. `last_synced_at` is touched ONLY when the
 		// caller passes `syncedAt` (i.e. a sync actually completed) — so marking a repo
@@ -902,54 +898,47 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			orgId: OrgId,
 			installationId: VcsInstallationId,
 		) {
-			const repoRows = yield* database
-				.execute((db) =>
-					db
-						.select({ id: vcsRepositories.id })
-						.from(vcsRepositories)
+			const repoRows = yield* database.execute((db) =>
+				db
+					.select({ id: vcsRepositories.id })
+					.from(vcsRepositories)
+					.where(
+						and(
+							eq(vcsRepositories.orgId, orgId),
+							eq(vcsRepositories.installationId, installationId),
+						),
+					),
+			)
+
+			const repoIds = repoRows.map((r) => r.id)
+			// One atomic transaction, children before parents: branches + commits (chunked
+			// to stay under the bind-variable cap), then the repos, then the installation.
+			yield* database.execute((db) =>
+				db.transaction(async (tx) => {
+					for (const chunk of Arr.chunksOf(repoIds, INARRAY_CHUNK_SIZE)) {
+						await tx
+							.delete(vcsRepositoryBranches)
+							.where(inArray(vcsRepositoryBranches.repositoryId, chunk))
+					}
+					for (const chunk of Arr.chunksOf(repoIds, INARRAY_CHUNK_SIZE)) {
+						await tx.delete(vcsCommits).where(inArray(vcsCommits.repositoryId, chunk))
+					}
+					await tx
+						.delete(vcsRepositories)
 						.where(
 							and(
 								eq(vcsRepositories.orgId, orgId),
 								eq(vcsRepositories.installationId, installationId),
 							),
-						),
-				)
-				.pipe(Effect.mapError(toPersistenceError))
-
-			const repoIds = repoRows.map((r) => r.id)
-			// One atomic transaction, children before parents: branches + commits (chunked
-			// to stay under the bind-variable cap), then the repos, then the installation.
-			yield* database
-				.execute((db) =>
-					db.transaction(async (tx) => {
-						for (const chunk of Arr.chunksOf(repoIds, INARRAY_CHUNK_SIZE)) {
-							await tx
-								.delete(vcsRepositoryBranches)
-								.where(inArray(vcsRepositoryBranches.repositoryId, chunk))
-						}
-						for (const chunk of Arr.chunksOf(repoIds, INARRAY_CHUNK_SIZE)) {
-							await tx.delete(vcsCommits).where(inArray(vcsCommits.repositoryId, chunk))
-						}
-						await tx
-							.delete(vcsRepositories)
-							.where(
-								and(
-									eq(vcsRepositories.orgId, orgId),
-									eq(vcsRepositories.installationId, installationId),
-								),
-							)
-						await tx
-							.delete(vcsInstallations)
-							.where(
-								and(
-									eq(vcsInstallations.orgId, orgId),
-									eq(vcsInstallations.id, installationId),
-								),
-							)
-					}),
-				)
-				.pipe(Effect.mapError(toPersistenceError))
-		})
+						)
+					await tx
+						.delete(vcsInstallations)
+						.where(
+							and(eq(vcsInstallations.orgId, orgId), eq(vcsInstallations.id, installationId)),
+						)
+				}),
+			)
+		}, Effect.mapError(toPersistenceError))
 
 		return {
 			resolveInstallation,

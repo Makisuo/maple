@@ -170,9 +170,7 @@ const toPlanetScaleDatabase = (row: PlanetScaleDatabaseRow): V2PlanetScaleDataba
 	})),
 })
 
-const toQueryInsightList = (
-	response: PlanetScaleQueryInsightsResponse,
-): typeof V2PlanetScaleQueryInsightList.Type => ({
+const toQueryInsightList = (response: PlanetScaleQueryInsightsResponse): V2PlanetScaleQueryInsightList => ({
 	object: "planetscale_integration.query_insight_list",
 	branch: response.branch,
 	data: Arr.map(response.rows, (row) => ({

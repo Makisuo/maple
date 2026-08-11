@@ -647,7 +647,15 @@ const make: Effect.Effect<
 		const priorKeyLive = Option.isSome(reusableKeyId)
 			? yield* apiKeys.get(orgId, reusableKeyId.value).pipe(
 					Effect.map((key) => !key.revoked && (key.expiresAt === null || key.expiresAt > now)),
-					Effect.catch(() => Effect.succeed(false)),
+					Effect.catchTags({
+						"@maple/http/errors/ApiKeyNotFoundError": () => Effect.succeed(false),
+						"@maple/http/errors/ApiKeyPersistenceError": (error) =>
+							Effect.fail(
+								new IntegrationsPersistenceError({
+									message: `Failed to validate the existing Slack API key: ${error.message}`,
+								}),
+							),
+					}),
 				)
 			: false
 		const reusedKey = priorKeyLive ? reusableSecret : undefined

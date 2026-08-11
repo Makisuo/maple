@@ -205,7 +205,14 @@ export class PlanetScaleConnectionService extends Context.Service<
 					if (sd.status === 401 || sd.status === 403) return "rejected" as const
 					if (sd.status < 200 || sd.status >= 300) return "inconclusive" as const
 
-					const groups = yield* decodeHttpSd(sd.text).pipe(Effect.catch(() => Effect.succeed(null)))
+					const groups = yield* decodeHttpSd(sd.text).pipe(
+						Effect.tapError((error) =>
+							Effect.logWarning(
+								"PlanetScale metrics discovery payload could not be decoded",
+							).pipe(Effect.annotateLogs({ error: String(error) })),
+						),
+						Effect.orElseSucceed(() => null),
+					)
 					if (groups === null) return "inconclusive" as const
 
 					// subTargetsFromGroup already SSRF-validates the discovered URLs.
@@ -227,6 +234,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 						),
 					),
 				)
+				yield* Effect.annotateCurrentSpan("maple.planetscale.probe_outcome", outcome)
 				if (outcome !== "ok") {
 					yield* Effect.logInfo("PlanetScale data-plane scrape probe outcome").pipe(
 						Effect.annotateLogs({ organization, outcome }),
@@ -701,7 +709,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 				if (target !== null && target.managedBy === managedByForConnection(connection.id)) {
 					yield* scrapeTargetsService.delete(orgId, decodeScrapeTargetIdSync(target.id)).pipe(
 						Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
-							Effect.succeed(undefined),
+							Effect.annotateCurrentSpan("maple.planetscale.disconnect_target_missing", true),
 						),
 						Effect.mapError(toPersistenceError),
 					)

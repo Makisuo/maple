@@ -259,7 +259,7 @@ const makeTick = <A, E, R>(
 							]),
 						)
 			return namespacedAnnotations === undefined
-				? Effect.succeed(undefined)
+				? Effect.void
 				: Effect.logInfo("Alerting tick completed").pipe(
 						Effect.annotateLogs({ ...namespacedAnnotations, "maple.alerting.tick": spanKey }),
 					)

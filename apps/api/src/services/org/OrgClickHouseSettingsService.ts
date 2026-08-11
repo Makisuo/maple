@@ -906,6 +906,11 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// Optional for the same reason: the shared cache tier is an optimisation,
 		// and every path below still resolves correctly without it.
 		const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
+		if (Option.isSome(workerEnv) && Option.isNone(edgeCache)) {
+			yield* Effect.logWarning(
+				"OrgClickHouseSettingsService is running in a Worker without the shared edge cache",
+			)
+		}
 
 		// Memoize the parsed desired-schema snapshot per service instance. The
 		// snapshot is static, so we parse it at most once and reuse it.
