@@ -13,6 +13,7 @@ import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
+import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
@@ -102,6 +103,9 @@ const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
 	Layer.provide(ErrorActorsServiceLive),
 )
 const ErrorPolicyServiceLive = ErrorPolicyService.layer
+const ErrorIssueReadModelsServiceLive = ErrorIssueReadModelsService.layer.pipe(
+	Layer.provide(Layer.mergeAll(WarehouseQueryServiceLive, ErrorIssueWorkflowServiceLive)),
+)
 
 const ErrorsServiceLive = ErrorsService.layer.pipe(
 	Layer.provide(
@@ -111,6 +115,7 @@ const ErrorsServiceLive = ErrorsService.layer.pipe(
 			EdgeCacheServiceLive,
 			NotificationDispatcherLive,
 			ErrorActorsServiceLive,
+			ErrorIssueReadModelsServiceLive,
 			ErrorIssueWorkflowServiceLive,
 			ErrorPolicyServiceLive,
 		),
@@ -139,6 +144,7 @@ const McpRuntimeServicesLive = Layer.mergeAll(
 	AlertsServiceLive,
 	DashboardPersistenceService.layer,
 	ErrorActorsServiceLive,
+	ErrorIssueReadModelsServiceLive,
 	ErrorIssueWorkflowServiceLive,
 	ErrorPolicyServiceLive,
 	ErrorsServiceLive,

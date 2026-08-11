@@ -25,7 +25,7 @@ import type {
 } from "@maple/domain/http/v2"
 import { dependencyUnavailable, invalidRequest, MapleApiV2, resourceNotFound } from "@maple/domain/http/v2"
 import { Effect, Schema } from "effect"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 
 const toV2Actor = (actor: ActorDocument): V2ErrorIssueActor => ({
 	id: actor.id,
@@ -80,7 +80,10 @@ const toV2Incident = (incident: ErrorIncidentDocument): V2ErrorIncident => ({
 
 export const toV2IssueDetail = (detail: ErrorIssueDetailResponse): V2ErrorIssueDetail => ({
 	...toV2Issue(detail.issue),
-	timeseries: detail.timeseries.map((point) => ({ bucket: point.bucket, count: point.count })),
+	timeseries: detail.timeseries.map((point) => ({
+		bucket: point.bucket,
+		count: point.count,
+	})),
 	sample_traces: detail.sampleTraces.map((trace) => ({
 		trace_id: trace.traceId,
 		span_id: trace.spanId,
@@ -143,14 +146,14 @@ const decodeCursor = (
 
 export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssues", (handlers) =>
 	Effect.gen(function* () {
-		const errors = yield* ErrorsService
+		const readModels = yield* ErrorIssueReadModelsService
 		return handlers
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const sort = query.sort ?? "last_seen"
 					const cursor = yield* decodeCursor(query.cursor, sort)
-					const response = yield* errors
+					const response = yield* readModels
 						.listIssues(tenant.orgId, {
 							workflowState: query.workflow_state,
 							severity: query.severity,
@@ -176,7 +179,7 @@ export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssu
 			.handle("serviceCounts", () =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const counts = yield* errors
+					const counts = yield* readModels
 						.countOpenIssuesByService(tenant.orgId)
 						.pipe(mapPersistenceError)
 					return {
@@ -193,7 +196,7 @@ export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssu
 			.handle("retrieve", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const detail = yield* errors
+					const detail = yield* readModels
 						.getIssue(tenant.orgId, params.id, {
 							startTime: query.start_time,
 							endTime: query.end_time,

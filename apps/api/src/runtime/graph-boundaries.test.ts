@@ -73,6 +73,7 @@ describe("API runtime graph boundaries", () => {
 			"AlertsServiceLive",
 			"DashboardPersistenceService.layer",
 			"ErrorActorsServiceLive",
+			"ErrorIssueReadModelsServiceLive",
 			"ErrorIssueWorkflowServiceLive",
 			"ErrorPolicyServiceLive",
 			"ErrorsServiceLive",

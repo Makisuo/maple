@@ -2,6 +2,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, ErrorForbiddenError, MapleApi } from "@maple/domain/http"
 import { Effect } from "effect"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
+import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
@@ -10,6 +11,7 @@ import { requireAdmin } from "@/services/auth/auth"
 export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers) =>
 	Effect.gen(function* () {
 		const actors = yield* ErrorActorsService
+		const readModels = yield* ErrorIssueReadModelsService
 		const workflow = yield* ErrorIssueWorkflowService
 		const policies = yield* ErrorPolicyService
 		const errors = yield* ErrorsService
@@ -23,7 +25,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						workflowState: query.workflowState ?? "all",
 						limit: query.limit ?? 100,
 					})
-					const response = yield* errors.listIssues(tenant.orgId, {
+					const response = yield* readModels.listIssues(tenant.orgId, {
 						workflowState: query.workflowState,
 						severity: query.severity,
 						kind: query.kind,
@@ -47,7 +49,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						orgId: tenant.orgId,
 						issueId: params.issueId,
 					})
-					return yield* errors.getIssue(tenant.orgId, params.issueId, {
+					return yield* readModels.getIssue(tenant.orgId, params.issueId, {
 						startTime: query.startTime,
 						endTime: query.endTime,
 						bucketSeconds: query.bucketSeconds,
@@ -190,7 +192,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						orgId: tenant.orgId,
 						issueId: params.issueId,
 					})
-					const response = yield* errors.listIssueIncidents(tenant.orgId, params.issueId)
+					const response = yield* readModels.listIssueIncidents(tenant.orgId, params.issueId)
 					yield* Effect.annotateCurrentSpan("incidentCount", response.incidents.length)
 					return response
 				}).pipe(Effect.withSpan("HttpErrors.listIssueIncidents")),
@@ -199,7 +201,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-					const response = yield* errors.listOpenIncidents(tenant.orgId)
+					const response = yield* readModels.listOpenIncidents(tenant.orgId)
 					yield* Effect.annotateCurrentSpan("incidentCount", response.incidents.length)
 					return response
 				}).pipe(Effect.withSpan("HttpErrors.listOpenIncidents")),

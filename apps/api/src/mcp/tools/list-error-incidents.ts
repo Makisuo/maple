@@ -3,7 +3,7 @@ import { formatTable } from "@/mcp/lib/format"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { ErrorIssueId } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
@@ -23,7 +23,7 @@ export function registerListErrorIncidentsTool(server: McpToolRegistrar) {
 				orgId: tenant.orgId,
 				issueId: issue_id ?? "all",
 			})
-			const errors = yield* ErrorsService
+			const readModels = yield* ErrorIssueReadModelsService
 
 			let issueId: ErrorIssueId | undefined
 			if (issue_id) {
@@ -37,7 +37,7 @@ export function registerListErrorIncidentsTool(server: McpToolRegistrar) {
 			}
 
 			const result = issueId
-				? yield* errors.listIssueIncidents(tenant.orgId, issueId).pipe(
+				? yield* readModels.listIssueIncidents(tenant.orgId, issueId).pipe(
 						Effect.mapError(
 							(error) =>
 								new McpQueryError({
@@ -47,7 +47,7 @@ export function registerListErrorIncidentsTool(server: McpToolRegistrar) {
 								}),
 						),
 					)
-				: yield* errors.listOpenIncidents(tenant.orgId).pipe(
+				: yield* readModels.listOpenIncidents(tenant.orgId).pipe(
 						Effect.mapError(
 							(error) =>
 								new McpQueryError({

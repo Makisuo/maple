@@ -121,6 +121,11 @@ export interface ErrorIssueWorkflowServiceShape extends ErrorIssueWorkflowPublic
 		orgId: OrgId,
 		issueIds: ReadonlyArray<ErrorIssueId>,
 	) => Effect.Effect<Set<ErrorIssueId>, ErrorPersistenceError>
+	/** Batch issue hydration shared by read models and mutation responses. */
+	readonly hydrateIssueRows: (
+		orgId: OrgId,
+		rows: ReadonlyArray<ErrorIssueRow>,
+	) => Effect.Effect<ReadonlyArray<ErrorIssueDocument>, ErrorPersistenceError>
 	readonly hydrateIssue: (
 		orgId: OrgId,
 		row: ErrorIssueRow,
@@ -287,15 +292,25 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			)
 		}
 
+		const hydrateIssueRows: ErrorIssueWorkflowServiceShape["hydrateIssueRows"] = (orgId, rows) =>
+			Effect.gen(function* () {
+				if (rows.length === 0) return []
+				const openSet = yield* issuesWithOpenIncidents(
+					orgId,
+					rows.map((row) => row.id),
+				)
+				const actorMap = yield* actors.collectActorDocs(
+					orgId,
+					rows.flatMap((row) => [row.assignedActorId ?? null, row.leaseHolderActorId ?? null]),
+				)
+				return rows.map((row) => rowToIssue(row, openSet.has(row.id), actorMap))
+			})
+
 		const hydrateIssue: ErrorIssueWorkflowServiceShape["hydrateIssue"] = Effect.fn(
 			"ErrorsService.hydrateIssue",
 		)(function* (orgId, row) {
-			const openSet = yield* issuesWithOpenIncidents(orgId, [row.id])
-			const actorMap = yield* actors.collectActorDocs(orgId, [
-				row.assignedActorId ?? null,
-				row.leaseHolderActorId ?? null,
-			])
-			return rowToIssue(row, openSet.has(row.id), actorMap)
+			const hydrated = yield* hydrateIssueRows(orgId, [row])
+			return hydrated[0]!
 		})
 
 		const recordEvent: ErrorIssueWorkflowServiceShape["recordEvent"] = Effect.fn(
@@ -429,7 +444,10 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			const heartbeatRows = yield* dbExecute((db) =>
 				db
 					.update(errorIssues)
-					.set({ leaseExpiresAt: msToDate(leaseExpiresAt), updatedAt: msToDate(timestamp) })
+					.set({
+						leaseExpiresAt: msToDate(leaseExpiresAt),
+						updatedAt: msToDate(timestamp),
+					})
 					.where(
 						and(
 							eq(errorIssues.orgId, orgId),
@@ -554,7 +572,12 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 		)(function* (orgId, actorId, issueId, severity, opts) {
 			const timestamp = yield* Clock.currentTimeMillis
 			const source = opts?.source ?? "manual"
-			yield* Effect.annotateCurrentSpan({ orgId, issueId, severity: severity ?? "null", source })
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				issueId,
+				severity: severity ?? "null",
+				source,
+			})
 			const current = yield* requireIssue(orgId, issueId)
 			if (source === "ai" && current.severitySource === "manual") {
 				return yield* hydrateIssue(orgId, current)
@@ -566,7 +589,11 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			const severityRows = yield* dbExecute((db) =>
 				db
 					.update(errorIssues)
-					.set({ severity, severitySource: nextSource, updatedAt: msToDate(timestamp) })
+					.set({
+						severity,
+						severitySource: nextSource,
+						updatedAt: msToDate(timestamp),
+					})
 					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
 					.returning(txidColumn),
 			)
@@ -574,7 +601,10 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				const payload: StoredJsonRecord = opts?.note
 					? { from: current.severity, to: severity, source, note: opts.note }
 					: { from: current.severity, to: severity, source }
-				yield* recordEvent(orgId, issueId, actorId, "severity_change", { payload, timestamp })
+				yield* recordEvent(orgId, issueId, actorId, "severity_change", {
+					payload,
+					timestamp,
+				})
 			}
 			if (severity !== null) {
 				yield* enqueueSeverityEscalation(orgId, issueId, current.severity, severity, source)
@@ -632,13 +662,16 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				orgId,
 				rows.map((row) => row.actorId ?? null),
 			)
-			return new ErrorIssueEventsResponse({ events: rows.map((row) => rowToEvent(row, actorMap)) })
+			return new ErrorIssueEventsResponse({
+				events: rows.map((row) => rowToEvent(row, actorMap)),
+			})
 		})
 
 		return ErrorIssueWorkflowService.of({
 			rowToIssue,
 			requireIssue,
 			issuesWithOpenIncidents,
+			hydrateIssueRows,
 			hydrateIssue,
 			recordEvent,
 			applyTransition,

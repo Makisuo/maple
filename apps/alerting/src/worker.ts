@@ -15,6 +15,7 @@ import {
 	EmailService,
 	Env,
 	ErrorActorsService,
+	ErrorIssueReadModelsService,
 	ErrorIssueWorkflowService,
 	ErrorPolicyService,
 	ErrorsService,
@@ -142,6 +143,9 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 		Layer.provide(Layer.mergeAll(BaseLive, ErrorActorsServiceLive)),
 	)
 	const ErrorPolicyServiceLive = ErrorPolicyService.layer.pipe(Layer.provide(BaseLive))
+	const ErrorIssueReadModelsServiceLive = ErrorIssueReadModelsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(DatabaseLive, WarehouseQueryServiceLive, ErrorIssueWorkflowServiceLive)),
+	)
 
 	// WorkerEnvironment is merged in so incident-open investigations can see the
 	// cross-script fan-out workflow binding.
@@ -153,6 +157,7 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 				EdgeCacheServiceLive,
 				NotificationDispatcherLive,
 				ErrorActorsServiceLive,
+				ErrorIssueReadModelsServiceLive,
 				ErrorIssueWorkflowServiceLive,
 				ErrorPolicyServiceLive,
 				WorkerEnvironmentLive,
