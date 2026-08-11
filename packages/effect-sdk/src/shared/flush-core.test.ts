@@ -160,4 +160,47 @@ describe("runFlush", () => {
 		expect(exported.name).toBe("test.requests_total")
 		expect(exported.sum.dataPoints[0]!.asDouble).toBe(3)
 	})
+
+	it("retries a changed metric after a failed export", async () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date("2026-01-01T00:00:00Z"))
+		const spans = makeSpanBuffer()
+		const logs = makeLogBuffer()
+		const metrics = makeMetricBuffer()
+		const counter = Metric.counter("test.retry_total")
+		await Effect.runPromise(Metric.update(counter, 1).pipe(Effect.provide(metrics.layer)))
+
+		let attempts = 0
+		const tracesState: SignalState = { disabledUntil: 0 }
+		const logsState: SignalState = { disabledUntil: 0 }
+		const metricsState: SignalState = { disabledUntil: 0 }
+		const flush = () =>
+			runFlush({
+				resolved,
+				spans,
+				logs,
+				metrics,
+				tracesState,
+				logsState,
+				metricsState,
+				transport: {
+					post: async (url) => {
+						if (!url.endsWith("/v1/metrics")) return
+						attempts += 1
+						if (attempts === 1) throw new Error("collector unavailable")
+					},
+				},
+				logPrefix: "[test]",
+				onNoOp: () => undefined,
+			})
+
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		await flush()
+		await flush()
+		vi.advanceTimersByTime(60_000)
+		await flush()
+		errorSpy.mockRestore()
+
+		expect(attempts).toBe(2)
+	})
 })

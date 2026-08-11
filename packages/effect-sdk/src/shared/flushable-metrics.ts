@@ -10,12 +10,15 @@ export interface MetricBuffer {
 /**
  * Isolated Effect metric registry shared by a telemetry runtime and its
  * flush hook. Metric values are cumulative, so a flush snapshots rather than
- * clearing the registry; `restore` is intentionally a no-op.
+ * clearing the registry. A snapshot is pending only after a metric changes;
+ * failed exports mark it pending again through `restore`.
  */
 export const makeMetricBuffer = (): MetricBuffer => {
 	let disabled = false
 	/** Whether anything has actually been recorded under a live grant. */
 	let captured = false
+	/** Whether the cumulative registry changed since the last drain. */
+	let dirty = false
 	/**
 	 * Set when consent is withdrawn *after* something was recorded, and never
 	 * cleared.
@@ -49,11 +52,13 @@ export const makeMetricBuffer = (): MetricBuffer => {
 				if (disabled) return
 				captured = true
 				hooks.update(input, context)
+				dirty = true
 			},
 			modify: (input, context) => {
 				if (disabled) return
 				captured = true
 				hooks.modify(input, context)
+				dirty = true
 			},
 		}
 		return set(key, metadata)
@@ -61,8 +66,14 @@ export const makeMetricBuffer = (): MetricBuffer => {
 	const snapshotContext = Context.make(Metric.MetricRegistry, registry)
 	return {
 		layer: Layer.succeed(Metric.MetricRegistry, registry),
-		drain: () => (disabled || revoked ? [] : [...Metric.snapshotUnsafe(snapshotContext)]),
-		restore: () => undefined,
+		drain: () => {
+			if (disabled || revoked || !dirty) return []
+			dirty = false
+			return [...Metric.snapshotUnsafe(snapshotContext)]
+		},
+		restore: (items) => {
+			if (items.length > 0) dirty = true
+		},
 		setDisabled: (value) => {
 			if (value && captured) revoked = true
 			disabled = value

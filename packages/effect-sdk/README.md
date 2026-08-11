@@ -190,9 +190,7 @@ export interface FlushableTelemetry {
 }
 ```
 
-Both presets run a background auto-flush every 5s by default (configurable via `autoFlushInterval`, or `false` to flush purely on demand), so it's a safe drop-in for `Maple.layer` with manual flush layered on top.
-
-> **Limitation:** the flushable presets export traces + logs only — no metrics (unlike `Maple.layer`'s `Otlp.layerJson`).
+Both presets run a background auto-flush every 5s by default (configurable via `autoFlushInterval`, or `false` to flush purely on demand), so it's a safe drop-in for `Maple.layer` with manual flush layered on top. Effect metrics are cumulative, but the flushable presets only post a new snapshot after a metric changes; an unchanged registry does not generate a metrics request on every flush tick.
 
 ### Server / Node
 

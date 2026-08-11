@@ -353,6 +353,30 @@ describe("MapleFlush.make (client)", () => {
 		expect(calls.length).toBe(afterAuto)
 	})
 
+	it("does not re-export unchanged cumulative metrics on every interval", async () => {
+		vi.useFakeTimers()
+		const { calls, restore: r } = setupFetch()
+		restore = r
+		const telemetry = make({ ...baseConfig, autoFlushInterval: 5_000 })
+		const counter = Metric.counter("rare_browser_metric")
+
+		await Effect.runPromise(Metric.update(counter, 1).pipe(Effect.provide(telemetry.layer)))
+		await vi.advanceTimersByTimeAsync(5_000)
+		expect(calls.filter((call) => call.url.endsWith("/v1/metrics"))).toHaveLength(1)
+
+		// The metric is cumulative, but it has not changed. Subsequent trace/log
+		// flush ticks must not generate duplicate metrics requests.
+		await vi.advanceTimersByTimeAsync(15_000)
+		expect(calls.filter((call) => call.url.endsWith("/v1/metrics"))).toHaveLength(1)
+
+		await Effect.runPromise(Metric.update(counter, 1).pipe(Effect.provide(telemetry.layer)))
+		await vi.advanceTimersByTimeAsync(5_000)
+		expect(calls.filter((call) => call.url.endsWith("/v1/metrics"))).toHaveLength(2)
+
+		await telemetry.dispose()
+		expect(calls.filter((call) => call.url.endsWith("/v1/metrics"))).toHaveLength(2)
+	})
+
 	it("runs in no-op mode when no ingest key is configured", async () => {
 		const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {})
 		const { calls, restore: rf } = setupFetch()
