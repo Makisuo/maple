@@ -3,6 +3,7 @@ import { CurrentTenant, ErrorForbiddenError, MapleApi } from "@maple/domain/http
 import { Effect } from "effect"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
+import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { requireAdmin } from "@/services/auth/auth"
 
@@ -10,6 +11,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 	Effect.gen(function* () {
 		const actors = yield* ErrorActorsService
 		const workflow = yield* ErrorIssueWorkflowService
+		const policies = yield* ErrorPolicyService
 		const errors = yield* ErrorsService
 
 		return handlers
@@ -227,7 +229,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-					return yield* errors.getNotificationPolicy(tenant.orgId)
+					return yield* policies.getNotificationPolicy(tenant.orgId)
 				}).pipe(Effect.withSpan("HttpErrors.getNotificationPolicy")),
 			)
 			.handle("upsertNotificationPolicy", ({ payload }) =>
@@ -241,14 +243,14 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 								message: "Only org admins can manage error notification policy",
 							}),
 					)
-					return yield* errors.upsertNotificationPolicy(tenant.orgId, tenant.userId, payload)
+					return yield* policies.upsertNotificationPolicy(tenant.orgId, tenant.userId, payload)
 				}).pipe(Effect.withSpan("HttpErrors.upsertNotificationPolicy")),
 			)
 			.handle("getEscalationPolicy", () =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-					return yield* errors.getEscalationPolicy(tenant.orgId)
+					return yield* policies.getEscalationPolicy(tenant.orgId)
 				}).pipe(Effect.withSpan("HttpErrors.getEscalationPolicy")),
 			)
 			.handle("upsertEscalationPolicy", ({ payload }) =>
@@ -262,14 +264,14 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 								message: "Only org admins can manage the escalation policy",
 							}),
 					)
-					return yield* errors.upsertEscalationPolicy(tenant.orgId, tenant.userId, payload)
+					return yield* policies.upsertEscalationPolicy(tenant.orgId, tenant.userId, payload)
 				}).pipe(Effect.withSpan("HttpErrors.upsertEscalationPolicy")),
 			)
 			.handle("evaluateEscalationPolicy", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-					return yield* errors.evaluateEscalationPolicy(tenant.orgId, payload)
+					return yield* policies.evaluateEscalationPolicy(tenant.orgId, payload)
 				}).pipe(Effect.withSpan("HttpErrors.evaluateEscalationPolicy")),
 			)
 			.handle("listIssueEscalations", ({ params }) =>
@@ -279,14 +281,14 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						orgId: tenant.orgId,
 						"maple.issue.id": params.issueId,
 					})
-					return yield* errors.listIssueEscalations(tenant.orgId, params.issueId)
+					return yield* policies.listIssueEscalations(tenant.orgId, params.issueId)
 				}).pipe(Effect.withSpan("HttpErrors.listIssueEscalations")),
 			)
 			.handle("listRecentEscalations", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-					return yield* errors.listRecentEscalations(tenant.orgId, query.limit)
+					return yield* policies.listRecentEscalations(tenant.orgId, query.limit)
 				}).pipe(Effect.withSpan("HttpErrors.listRecentEscalations")),
 			)
 	}),

@@ -41,6 +41,7 @@ import type { SqlQueryOptions, WarehouseQueryServiceShape } from "@/services/war
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { ErrorActorsService } from "./ErrorActorsService"
 import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
+import { ErrorPolicyService } from "./ErrorPolicyService"
 import { describeCause, ErrorsService, makePersistenceError } from "./ErrorsService"
 import { isErrorTickClaimLost, persistErrorTickWindow } from "./error-tick-persistence"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
@@ -199,6 +200,7 @@ const makeErrorsLayer = (
 	const errorIssueWorkflowLive = ErrorIssueWorkflowService.layer.pipe(
 		Layer.provide(Layer.mergeAll(databaseLive, errorActorsLive)),
 	)
+	const errorPolicyLive = ErrorPolicyService.layer.pipe(Layer.provide(databaseLive))
 	// Held only so the service can hand an autonomous investigation turn its `submit_diagnosis`
 	// tool; no test here starts one. The real layer is cheap — it depends on nothing beyond Env
 	// and the database already wired above.
@@ -221,11 +223,12 @@ const makeErrorsLayer = (
 				dispatcherStub,
 				errorActorsLive,
 				errorIssueWorkflowLive,
+				errorPolicyLive,
 				investigationsLive,
 			),
 		),
 	)
-	return Layer.mergeAll(errorsLive, errorActorsLive, errorIssueWorkflowLive).pipe(
+	return Layer.mergeAll(errorsLive, errorActorsLive, errorIssueWorkflowLive, errorPolicyLive).pipe(
 		Layer.provideMerge(databaseLive),
 	)
 }
@@ -273,6 +276,7 @@ const makeGatingLayer = (opts: {
 	const errorIssueWorkflowLive = ErrorIssueWorkflowService.layer.pipe(
 		Layer.provide(Layer.mergeAll(databaseLive, errorActorsLive)),
 	)
+	const errorPolicyLive = ErrorPolicyService.layer.pipe(Layer.provide(databaseLive))
 	// Held only so the service can hand an autonomous investigation turn its `submit_diagnosis`
 	// tool; no test here starts one. The real layer is cheap — it depends on nothing beyond Env
 	// and the database already wired above.
@@ -329,6 +333,7 @@ const makeGatingLayer = (opts: {
 				dispatcherStub,
 				errorActorsLive,
 				errorIssueWorkflowLive,
+				errorPolicyLive,
 				investigationsLive,
 			),
 		),
@@ -394,12 +399,13 @@ const seedIngestKey = (orgId: string) =>
 		)
 	})
 
-describe("ErrorsService actor compatibility facade", () => {
-	it.effect("delegates extracted actor and workflow operations by exact reference", () =>
+describe("ErrorsService compatibility facade", () => {
+	it.effect("delegates extracted actor, workflow, and policy operations by exact reference", () =>
 		Effect.gen(function* () {
 			const errors = yield* ErrorsService
 			const actors = yield* ErrorActorsService
 			const workflow = yield* ErrorIssueWorkflowService
+			const policies = yield* ErrorPolicyService
 
 			expect(errors.registerAgent).toBe(actors.registerAgent)
 			expect(errors.listAgents).toBe(actors.listAgents)
@@ -411,6 +417,13 @@ describe("ErrorsService actor compatibility facade", () => {
 			expect(errors.setSeverity).toBe(workflow.setSeverity)
 			expect(errors.commentOnIssue).toBe(workflow.commentOnIssue)
 			expect(errors.listIssueEvents).toBe(workflow.listIssueEvents)
+			expect(errors.getNotificationPolicy).toBe(policies.getNotificationPolicy)
+			expect(errors.upsertNotificationPolicy).toBe(policies.upsertNotificationPolicy)
+			expect(errors.getEscalationPolicy).toBe(policies.getEscalationPolicy)
+			expect(errors.upsertEscalationPolicy).toBe(policies.upsertEscalationPolicy)
+			expect(errors.evaluateEscalationPolicy).toBe(policies.evaluateEscalationPolicy)
+			expect(errors.listIssueEscalations).toBe(policies.listIssueEscalations)
+			expect(errors.listRecentEscalations).toBe(policies.listRecentEscalations)
 		}).pipe(Effect.provide(makeErrorsLayer())),
 	)
 })

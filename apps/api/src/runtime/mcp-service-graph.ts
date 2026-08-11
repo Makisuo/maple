@@ -14,6 +14,7 @@ import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
+import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
@@ -100,6 +101,7 @@ const ErrorActorsServiceLive = ErrorActorsService.layer
 const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
 	Layer.provide(ErrorActorsServiceLive),
 )
+const ErrorPolicyServiceLive = ErrorPolicyService.layer
 
 const ErrorsServiceLive = ErrorsService.layer.pipe(
 	Layer.provide(
@@ -110,6 +112,7 @@ const ErrorsServiceLive = ErrorsService.layer.pipe(
 			NotificationDispatcherLive,
 			ErrorActorsServiceLive,
 			ErrorIssueWorkflowServiceLive,
+			ErrorPolicyServiceLive,
 		),
 	),
 )
@@ -137,6 +140,7 @@ const McpRuntimeServicesLive = Layer.mergeAll(
 	DashboardPersistenceService.layer,
 	ErrorActorsServiceLive,
 	ErrorIssueWorkflowServiceLive,
+	ErrorPolicyServiceLive,
 	ErrorsServiceLive,
 	QueryEngineServiceLive,
 	RecommendationIssueServiceLive,

@@ -16,6 +16,7 @@ import {
 	Env,
 	ErrorActorsService,
 	ErrorIssueWorkflowService,
+	ErrorPolicyService,
 	ErrorsService,
 	EscalationService,
 	HazelOAuthService,
@@ -140,6 +141,7 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 	const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
 		Layer.provide(Layer.mergeAll(BaseLive, ErrorActorsServiceLive)),
 	)
+	const ErrorPolicyServiceLive = ErrorPolicyService.layer.pipe(Layer.provide(BaseLive))
 
 	// WorkerEnvironment is merged in so incident-open investigations can see the
 	// cross-script fan-out workflow binding.
@@ -152,6 +154,7 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 				NotificationDispatcherLive,
 				ErrorActorsServiceLive,
 				ErrorIssueWorkflowServiceLive,
+				ErrorPolicyServiceLive,
 				WorkerEnvironmentLive,
 			),
 		),

@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto"
 import {
 	ActorDocument,
 	type ActorId,
-	type AlertDestinationId,
 	ErrorIncidentDocument,
 	ErrorIncidentsListResponse,
 	ErrorIssueDetailResponse,
@@ -15,19 +14,8 @@ import {
 	ErrorIssueTransitionError,
 	ErrorIssuesListResponse,
 	ErrorIssueTimeseriesPoint,
-	ErrorNotificationPolicyDocument,
-	type ErrorNotificationPolicyUpsertRequest,
 	ErrorPersistenceError,
 	ErrorValidationError,
-	EscalationDestinationOutcome,
-	EscalationPolicyEvaluationDocument,
-	type EscalationPolicyEvaluationRequest,
-	EscalationSkipReason,
-	IssueEscalationAttemptDocument,
-	IssueEscalationAttemptsResponse,
-	IssueEscalationPolicyDocument,
-	IssueEscalationPolicyRule,
-	type IssueEscalationPolicyUpsertRequest,
 	IssueListCursor,
 	type IssueListCursorFields,
 	IssueSeverityListCursor,
@@ -38,7 +26,6 @@ import {
 	RoleName,
 	SpanId as SpanIdSchema,
 	TraceId as TraceIdSchema,
-	type UserId,
 	UserId as UserIdSchema,
 	type WorkflowState,
 	TERMINAL_WORKFLOW_STATES,
@@ -52,15 +39,9 @@ import {
 	errorIssues,
 	errorIssueEvents,
 	type ErrorIssueRow,
-	alertDestinations,
 	errorIssueStates,
 	errorNotificationPolicies,
-	type ErrorNotificationPolicyRow,
 	errorTickStates,
-	issueEscalationPolicies,
-	type IssueEscalationPolicyRow,
-	type IssueEscalationRow,
-	issueEscalations,
 	orgClickHouseSettings,
 	orgIngestKeys,
 } from "@maple/db"
@@ -71,24 +52,11 @@ import {
 	warehouseDateTimeToIso,
 	formatWarehouseDateTime,
 } from "@maple/query-engine"
-import {
-	Array as Arr,
-	Cause,
-	Clock,
-	Context,
-	Effect,
-	HashSet,
-	Layer,
-	Match,
-	Option,
-	Ref,
-	Schema,
-} from "effect"
+import { Cause, Clock, Context, Effect, Layer, Match, Option, Ref, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { isErrorTickClaimLost, persistErrorTickWindow } from "@/services/errors/error-tick-persistence"
 import { SYSTEM_ERRORS_AGENT_NAME } from "@/services/auth/system-actors"
-import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database } from "@/platform/DatabaseLive"
 import { selectDistinctOrgIds } from "@/platform/distinct-org-ids"
@@ -102,6 +70,7 @@ import {
 } from "@/services/warehouse/warehouse-org-quarantine"
 import { actorRowToDocument, ErrorActorsService, type ErrorActorsPublicShape } from "./ErrorActorsService"
 import { ErrorIssueWorkflowService, type ErrorIssueWorkflowPublicShape } from "./ErrorIssueWorkflowService"
+import { ErrorPolicyService, type ErrorPolicyPublicShape } from "./ErrorPolicyService"
 import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
 
 export { describeCause, makePersistenceError } from "./error-persistence"
@@ -121,7 +90,6 @@ const decodeSpanIdSync = Schema.decodeUnknownSync(SpanIdSchema)
 
 // Lenient decoders for JSON stored in jsonb columns. Decode failures fall back
 // to an empty/null value at each call site — stored blobs are best-effort.
-const decodeStoredJsonArray = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown))
 const ErrorNotificationOutboxPayload = Schema.Struct({
 	kind: Schema.Literals(["open", "resolve"]),
 	issueId: Schema.String,
@@ -213,7 +181,8 @@ const severitySortRank = (severity: IssueSeverity | null): number =>
 		Match.exhaustive,
 	)
 
-export interface ErrorsServiceShape extends ErrorActorsPublicShape, ErrorIssueWorkflowPublicShape {
+export interface ErrorsServiceShape
+	extends ErrorActorsPublicShape, ErrorIssueWorkflowPublicShape, ErrorPolicyPublicShape {
 	readonly listIssues: (
 		orgId: OrgId,
 		opts: {
@@ -311,34 +280,6 @@ export interface ErrorsServiceShape extends ErrorActorsPublicShape, ErrorIssueWo
 	readonly listOpenIncidents: (
 		orgId: OrgId,
 	) => Effect.Effect<ErrorIncidentsListResponse, ErrorPersistenceError>
-	readonly getNotificationPolicy: (
-		orgId: OrgId,
-	) => Effect.Effect<ErrorNotificationPolicyDocument, ErrorPersistenceError>
-	readonly upsertNotificationPolicy: (
-		orgId: OrgId,
-		userId: UserId,
-		request: ErrorNotificationPolicyUpsertRequest,
-	) => Effect.Effect<ErrorNotificationPolicyDocument, ErrorPersistenceError | ErrorValidationError>
-	readonly getEscalationPolicy: (
-		orgId: OrgId,
-	) => Effect.Effect<IssueEscalationPolicyDocument, ErrorPersistenceError>
-	readonly upsertEscalationPolicy: (
-		orgId: OrgId,
-		userId: UserId,
-		request: IssueEscalationPolicyUpsertRequest,
-	) => Effect.Effect<IssueEscalationPolicyDocument, ErrorPersistenceError | ErrorValidationError>
-	readonly evaluateEscalationPolicy: (
-		orgId: OrgId,
-		request: EscalationPolicyEvaluationRequest,
-	) => Effect.Effect<EscalationPolicyEvaluationDocument, ErrorPersistenceError>
-	readonly listIssueEscalations: (
-		orgId: OrgId,
-		issueId: ErrorIssueId,
-	) => Effect.Effect<IssueEscalationAttemptsResponse, ErrorPersistenceError>
-	readonly listRecentEscalations: (
-		orgId: OrgId,
-		limit?: number,
-	) => Effect.Effect<IssueEscalationAttemptsResponse, ErrorPersistenceError>
 	readonly runTick: () => Effect.Effect<
 		{
 			readonly orgsProcessed: number
@@ -365,10 +306,15 @@ const make: Effect.Effect<
 	| NotificationDispatcher
 	| ErrorActorsService
 	| ErrorIssueWorkflowService
+	| ErrorPolicyService
 > = Effect.gen(function* () {
 	const database = yield* Database
 	const actorService = yield* ErrorActorsService
 	const workflow = yield* ErrorIssueWorkflowService
+	const policies = yield* ErrorPolicyService
+	const loadPolicyRow = policies.loadNotificationPolicyRow
+	const defaultPolicy = policies.defaultNotificationPolicy
+	const parsePolicyDestinations = policies.parseNotificationDestinationIds
 	const warehouse = yield* WarehouseQueryService
 	const edgeCache = yield* EdgeCacheService
 	const env = yield* Env
@@ -1008,336 +954,6 @@ const make: Effect.Effect<
 		return new ErrorIncidentsListResponse({
 			incidents: rows.map(rowToIncident),
 		})
-	})
-
-	// Notification policy (per-org) controlling incident delivery.
-
-	const decodeAlertDestinationIds = Schema.decodeUnknownOption(
-		ErrorNotificationPolicyDocument.fields.destinationIds,
-	)
-
-	// Mirrors the column defaults on `error_notification_policies` — an org with no
-	// row must behave exactly like an org that just got one. Notifications are
-	// enabled but route nowhere until a destination is picked, so the empty
-	// `destinationIdsJson` (not `enabled`) is what holds delivery back. Setting
-	// `enabled: false` here instead made CFG-NOTIF-01 report "turned off" for
-	// row-less orgs and hid the real reason.
-	const defaultPolicy = (orgId: OrgId, timestamp: number): ErrorNotificationPolicyRow => ({
-		orgId,
-		enabled: true,
-		destinationIdsJson: [],
-		notifyOnFirstSeen: true,
-		notifyOnRegression: true,
-		notifyOnResolve: false,
-		notifyOnTransitionInReview: false,
-		notifyOnTransitionDone: false,
-		notifyOnClaim: false,
-		minOccurrenceCount: 1,
-		severity: "warning",
-		updatedAt: new Date(timestamp),
-		updatedBy: "system",
-	})
-
-	const parsePolicyDestinations = (raw: unknown): ReadonlyArray<AlertDestinationId> =>
-		Option.getOrElse(
-			Option.flatMap(decodeStoredJsonArray(raw), (parsed) =>
-				decodeAlertDestinationIds(parsed.filter((v) => typeof v === "string")),
-			),
-			() => [],
-		)
-
-	const rowToPolicy = (row: ErrorNotificationPolicyRow) =>
-		new ErrorNotificationPolicyDocument({
-			enabled: row.enabled,
-			destinationIds: parsePolicyDestinations(row.destinationIdsJson),
-			notifyOnFirstSeen: row.notifyOnFirstSeen,
-			notifyOnRegression: row.notifyOnRegression,
-			notifyOnResolve: row.notifyOnResolve,
-			notifyOnTransitionInReview: row.notifyOnTransitionInReview,
-			notifyOnTransitionDone: row.notifyOnTransitionDone,
-			notifyOnClaim: row.notifyOnClaim,
-			minOccurrenceCount: row.minOccurrenceCount,
-			severity: row.severity,
-			updatedAt: isoFromDate(row.updatedAt),
-			updatedBy: decodeUserIdSync(row.updatedBy),
-		})
-
-	const loadPolicyRow = Effect.fn("ErrorsService.loadPolicyRow")(function* (orgId: OrgId) {
-		const rows = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(errorNotificationPolicies)
-				.where(eq(errorNotificationPolicies.orgId, orgId))
-				.limit(1),
-		)
-		return rows[0] ?? null
-	})
-
-	const getNotificationPolicy: ErrorsServiceShape["getNotificationPolicy"] = Effect.fn(
-		"ErrorsService.getNotificationPolicy",
-	)(function* (orgId) {
-		yield* Effect.annotateCurrentSpan({ orgId })
-		const row = yield* loadPolicyRow(orgId)
-		const nowMs = yield* Clock.currentTimeMillis
-		return rowToPolicy(row ?? defaultPolicy(orgId, nowMs))
-	})
-
-	const upsertNotificationPolicy: ErrorsServiceShape["upsertNotificationPolicy"] = Effect.fn(
-		"ErrorsService.upsertNotificationPolicy",
-	)(function* (orgId, userId, request) {
-		yield* Effect.annotateCurrentSpan({ orgId })
-		const existing = yield* loadPolicyRow(orgId)
-		const timestamp = yield* Clock.currentTimeMillis
-		const base = existing ?? defaultPolicy(orgId, timestamp)
-
-		const nextDestinations =
-			request.destinationIds !== undefined ? request.destinationIds : base.destinationIdsJson
-
-		const toFlag = (value: boolean | undefined, fallback: boolean): boolean =>
-			value === undefined ? fallback : value
-
-		const merged: ErrorNotificationPolicyRow = {
-			orgId,
-			enabled: toFlag(request.enabled, base.enabled),
-			destinationIdsJson: nextDestinations,
-			notifyOnFirstSeen: toFlag(request.notifyOnFirstSeen, base.notifyOnFirstSeen),
-			notifyOnRegression: toFlag(request.notifyOnRegression, base.notifyOnRegression),
-			notifyOnResolve: toFlag(request.notifyOnResolve, base.notifyOnResolve),
-			notifyOnTransitionInReview: toFlag(
-				request.notifyOnTransitionInReview,
-				base.notifyOnTransitionInReview,
-			),
-			notifyOnTransitionDone: toFlag(request.notifyOnTransitionDone, base.notifyOnTransitionDone),
-			notifyOnClaim: toFlag(request.notifyOnClaim, base.notifyOnClaim),
-			minOccurrenceCount:
-				request.minOccurrenceCount !== undefined
-					? request.minOccurrenceCount
-					: base.minOccurrenceCount,
-			severity: request.severity !== undefined ? request.severity : base.severity,
-			updatedAt: new Date(timestamp),
-			updatedBy: userId,
-		}
-
-		yield* dbExecute((db) =>
-			db
-				.insert(errorNotificationPolicies)
-				.values(merged)
-				.onConflictDoUpdate({
-					target: errorNotificationPolicies.orgId,
-					set: {
-						enabled: merged.enabled,
-						destinationIdsJson: merged.destinationIdsJson,
-						notifyOnFirstSeen: merged.notifyOnFirstSeen,
-						notifyOnRegression: merged.notifyOnRegression,
-						notifyOnResolve: merged.notifyOnResolve,
-						notifyOnTransitionInReview: merged.notifyOnTransitionInReview,
-						notifyOnTransitionDone: merged.notifyOnTransitionDone,
-						notifyOnClaim: merged.notifyOnClaim,
-						minOccurrenceCount: merged.minOccurrenceCount,
-						severity: merged.severity,
-						updatedAt: merged.updatedAt,
-						updatedBy: merged.updatedBy,
-					},
-				}),
-		)
-
-		return rowToPolicy(merged)
-	})
-
-	// Escalation policy (per-org severity → destination routing).
-
-	const decodeEscalationRules = Schema.decodeUnknownOption(Schema.Array(IssueEscalationPolicyRule))
-
-	const escalationRowToDocument = (row: IssueEscalationPolicyRow | null) =>
-		new IssueEscalationPolicyDocument({
-			enabled: row?.enabled ?? false,
-			rules: row == null ? [] : Option.getOrElse(decodeEscalationRules(row.rulesJson), () => []),
-			updatedAt: row == null ? null : isoFromDate(row.updatedAt),
-			updatedBy: row == null || row.updatedBy === "system" ? null : decodeUserIdSync(row.updatedBy),
-		})
-
-	const loadEscalationPolicyRow = Effect.fn("ErrorsService.loadEscalationPolicyRow")(function* (
-		orgId: OrgId,
-	) {
-		const rows = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(issueEscalationPolicies)
-				.where(eq(issueEscalationPolicies.orgId, orgId))
-				.limit(1),
-		)
-		return rows[0] ?? null
-	})
-
-	const getEscalationPolicy: ErrorsServiceShape["getEscalationPolicy"] = Effect.fn(
-		"ErrorsService.getEscalationPolicy",
-	)(function* (orgId) {
-		yield* Effect.annotateCurrentSpan({ orgId })
-		return escalationRowToDocument(yield* loadEscalationPolicyRow(orgId))
-	})
-
-	const upsertEscalationPolicy: ErrorsServiceShape["upsertEscalationPolicy"] = Effect.fn(
-		"ErrorsService.upsertEscalationPolicy",
-	)(function* (orgId, userId, request) {
-		yield* Effect.annotateCurrentSpan({ orgId })
-		const existing = yield* loadEscalationPolicyRow(orgId)
-		const timestamp = yield* Clock.currentTimeMillis
-
-		if (request.rules !== undefined) {
-			const seen = new Set<string>()
-			for (const rule of request.rules) {
-				if (seen.has(rule.severity)) {
-					return yield* Effect.fail(
-						new ErrorValidationError({
-							message: "Escalation policy has duplicate severity rules",
-							details: [rule.severity],
-						}),
-					)
-				}
-				seen.add(rule.severity)
-			}
-
-			// Reject destination IDs that don't belong to this org at write time.
-			// Dispatch re-filters by org anyway (no cross-org leak), but a typo'd
-			// or foreign ID would otherwise only surface much later as a silently
-			// "skipped" escalation with reason no_enabled_destinations.
-			const referencedIds = Arr.dedupe(Arr.flatMap(request.rules, (rule) => rule.destinationIds))
-			if (referencedIds.length > 0) {
-				const ownedRows = yield* dbExecute((db) =>
-					db
-						.select({ id: alertDestinations.id })
-						.from(alertDestinations)
-						.where(
-							and(
-								eq(alertDestinations.orgId, orgId),
-								inArray(alertDestinations.id, referencedIds),
-							),
-						),
-				)
-				const owned = HashSet.fromIterable(Arr.map(ownedRows, (row) => row.id))
-				const unknown = Arr.filter(referencedIds, (id) => !HashSet.has(owned, id))
-				if (unknown.length > 0) {
-					return yield* Effect.fail(
-						new ErrorValidationError({
-							message: "Escalation policy references unknown destinations",
-							details: unknown,
-						}),
-					)
-				}
-			}
-		}
-
-		const merged: IssueEscalationPolicyRow = {
-			orgId,
-			enabled: request.enabled !== undefined ? request.enabled : (existing?.enabled ?? false),
-			rulesJson: request.rules !== undefined ? request.rules : (existing?.rulesJson ?? []),
-			updatedAt: new Date(timestamp),
-			updatedBy: userId,
-		}
-
-		yield* dbExecute((db) =>
-			db
-				.insert(issueEscalationPolicies)
-				.values(merged)
-				.onConflictDoUpdate({
-					target: issueEscalationPolicies.orgId,
-					set: {
-						enabled: merged.enabled,
-						rulesJson: merged.rulesJson,
-						updatedAt: merged.updatedAt,
-						updatedBy: merged.updatedBy,
-					},
-				}),
-		)
-
-		return escalationRowToDocument(merged)
-	})
-
-	const decodeEscalationDeliveries = Schema.decodeUnknownOption(Schema.Array(EscalationDestinationOutcome))
-	const decodeEscalationSkipReason = Schema.decodeUnknownOption(EscalationSkipReason)
-
-	const escalationAttemptDocument = (row: IssueEscalationRow) =>
-		new IssueEscalationAttemptDocument({
-			id: row.id,
-			issueId: row.issueId,
-			investigationId: row.investigationId,
-			severity: row.severity,
-			source: row.source,
-			reason: row.reason,
-			status: row.status,
-			attempts: row.attempts,
-			skipReason:
-				row.status === "skipped" ? Option.getOrNull(decodeEscalationSkipReason(row.error)) : null,
-			deliveries: Option.getOrElse(decodeEscalationDeliveries(row.deliveryResultsJson), () => []),
-			createdAt: isoFromDate(row.createdAt),
-			processedAt: row.processedAt ? isoFromDate(row.processedAt) : null,
-		})
-
-	const evaluatePolicy: ErrorsServiceShape["evaluateEscalationPolicy"] = Effect.fn(
-		"ErrorsService.evaluateEscalationPolicy",
-	)(function* (orgId, request) {
-		yield* Effect.annotateCurrentSpan({ orgId })
-		const policy = yield* loadEscalationPolicyRow(orgId)
-		const rules =
-			policy == null ? [] : Option.getOrElse(decodeEscalationRules(policy.rulesJson), () => [])
-		const referencedIds = Arr.dedupe(Arr.flatMap(rules, (rule) => rule.destinationIds))
-		const enabledRows =
-			referencedIds.length === 0
-				? []
-				: yield* dbExecute((db) =>
-						db
-							.select({ id: alertDestinations.id })
-							.from(alertDestinations)
-							.where(
-								and(
-									eq(alertDestinations.orgId, orgId),
-									eq(alertDestinations.enabled, true),
-									inArray(alertDestinations.id, referencedIds),
-								),
-							),
-					)
-		const decision = evaluateEscalationPolicy({
-			enabled: policy?.enabled ?? false,
-			rules,
-			severity: request.severity,
-			source: request.source,
-			...(request.confidence === undefined ? {} : { confidence: request.confidence }),
-			enabledDestinationIds: new Set(enabledRows.map((row) => row.id)),
-		})
-		return new EscalationPolicyEvaluationDocument({
-			outcome: decision.outcome,
-			destinationIds: [...decision.destinationIds],
-			skipReason: decision.skipReason,
-		})
-	})
-
-	const listIssueEscalations: ErrorsServiceShape["listIssueEscalations"] = Effect.fn(
-		"ErrorsService.listIssueEscalations",
-	)(function* (orgId, issueId) {
-		yield* Effect.annotateCurrentSpan({ orgId, issueId })
-		const rows = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(issueEscalations)
-				.where(and(eq(issueEscalations.orgId, orgId), eq(issueEscalations.issueId, issueId)))
-				.orderBy(desc(issueEscalations.createdAt)),
-		)
-		return new IssueEscalationAttemptsResponse({ attempts: rows.map(escalationAttemptDocument) })
-	})
-
-	const listRecentEscalations: ErrorsServiceShape["listRecentEscalations"] = Effect.fn(
-		"ErrorsService.listRecentEscalations",
-	)(function* (orgId, limit) {
-		yield* Effect.annotateCurrentSpan({ orgId })
-		const rows = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(issueEscalations)
-				.where(eq(issueEscalations.orgId, orgId))
-				.orderBy(desc(issueEscalations.createdAt))
-				.limit(limit ?? 25),
-		)
-		return new IssueEscalationAttemptsResponse({ attempts: rows.map(escalationAttemptDocument) })
 	})
 
 	const issueLinkUrl = (issueId: string) =>
@@ -2181,13 +1797,13 @@ const make: Effect.Effect<
 		ensureUserActor,
 		listIssueIncidents,
 		listOpenIncidents,
-		getNotificationPolicy,
-		upsertNotificationPolicy,
-		getEscalationPolicy,
-		upsertEscalationPolicy,
-		evaluateEscalationPolicy: evaluatePolicy,
-		listIssueEscalations,
-		listRecentEscalations,
+		getNotificationPolicy: policies.getNotificationPolicy,
+		upsertNotificationPolicy: policies.upsertNotificationPolicy,
+		getEscalationPolicy: policies.getEscalationPolicy,
+		upsertEscalationPolicy: policies.upsertEscalationPolicy,
+		evaluateEscalationPolicy: policies.evaluateEscalationPolicy,
+		listIssueEscalations: policies.listIssueEscalations,
+		listRecentEscalations: policies.listRecentEscalations,
 		runTick,
 	})
 })
