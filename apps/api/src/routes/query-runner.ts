@@ -1,6 +1,14 @@
-import { baselineWarehouseCapabilities } from "@maple/query-engine"
-import type { QueryDef } from "@maple/query-engine/registry"
-import type { QueryEngineDirectError } from "@maple/query-engine/runtime"
+import {
+	isTimeBucketQueryCachePolicy,
+	queryDefinitionCacheIdentity,
+	resolveQueryDefinitionCache,
+	type QueryDefinition,
+} from "@maple/query-engine/registry"
+import {
+	runQueryDefinition,
+	runQueryDefinitionFirst,
+	type QueryEngineDirectError,
+} from "@maple/query-engine/runtime"
 import { Clock, Effect, Option } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import type { QueryEngineServiceShape } from "@/services/warehouse/QueryEngineService"
@@ -9,7 +17,7 @@ import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQ
 /**
  * Execute registry-declared warehouse queries.
  *
- * This is the single place that applies a `QueryDef`'s cost profile, settings,
+ * This is the API adapter for a `QueryDefinition`: it applies the definition's
  * span context, error label and cache policy — the five things that used to be
  * hand-repeated in each of 61 handlers, where the cache in particular was
  * silently omitted 50 times.
@@ -32,16 +40,6 @@ export interface QueryRunnerDeps {
 
 export const makeQueryRunners = ({ warehouse, queryEngine }: QueryRunnerDeps) => {
 	/**
-	 * Settings may be static or payload-dependent. Resolved to a spread so an
-	 * absent result omits the key entirely rather than passing an explicit
-	 * `settings: undefined`, which would read as "clear the profile defaults".
-	 */
-	const resolveSettings = <Payload, Row>(def: QueryDef<Payload, Row>, payload: Payload) => {
-		const settings = typeof def.settings === "function" ? def.settings(payload) : def.settings
-		return settings === undefined ? {} : { settings }
-	}
-
-	/**
 	 * Annotate failures with the query id, then apply the declared cache policy
 	 * (or don't). `cachedDirect` wraps the whole execution so a hit skips the
 	 * warehouse entirely, and it takes the raw payload as key input — it snaps
@@ -49,7 +47,7 @@ export const makeQueryRunners = ({ warehouse, queryEngine }: QueryRunnerDeps) =>
 	 * in unnormalized.
 	 */
 	const withPolicy = <Payload, Row, A, E extends QueryEngineDirectError>(
-		def: QueryDef<Payload, Row>,
+		def: QueryDefinition<Payload, Row>,
 		tenant: TenantContext,
 		payload: Payload,
 		execute: Effect.Effect<A, E>,
@@ -57,10 +55,8 @@ export const makeQueryRunners = ({ warehouse, queryEngine }: QueryRunnerDeps) =>
 		Effect.gen(function* () {
 			// Only read the clock when a def actually needs it — a static policy
 			// must not pay for, or depend on, a Clock read.
-			const cache =
-				typeof def.cache === "function"
-					? def.cache(payload, yield* Clock.currentTimeMillis)
-					: def.cache
+			const nowMs = typeof def.cache === "function" ? yield* Clock.currentTimeMillis : 0
+			const cache = resolveQueryDefinitionCache(def, payload, nowMs)
 			const labelled = execute.pipe(
 				// Same annotation the old inline `mapExecError` produced, with the
 				// label derived from `def.id` rather than a hand-written string that
@@ -71,55 +67,40 @@ export const makeQueryRunners = ({ warehouse, queryEngine }: QueryRunnerDeps) =>
 					}),
 				),
 			)
-			if (cache === undefined) {
+			if (cache === undefined || isTimeBucketQueryCachePolicy(cache)) {
 				return yield* labelled
 			}
-			return yield* queryEngine.cachedDirect(tenant, def.id, payload, labelled, cache)
+			return yield* queryEngine.cachedDirect(
+				tenant,
+				def.id,
+				queryDefinitionCacheIdentity(def, payload),
+				labelled,
+				cache,
+			)
 		})
 
 	/**
-	 * Run a `QueryDef` that returns many rows.
+	 * Run a `QueryDefinition` that returns many rows.
 	 *
 	 * Rows-vs-first-row is a call-site concern rather than a field on the def:
 	 * the same compiled query legitimately supports both, and
 	 * `compiledQueryFirst` takes the identical `CompiledQuery`. Putting it in the
 	 * def would only let a caller disagree with it.
 	 */
-	const runQuery = <Payload, Row>(def: QueryDef<Payload, Row>, tenant: TenantContext, payload: Payload) => {
-		const options = {
-			profile: def.profile,
-			...resolveSettings(def, payload),
-			context: def.id,
-		}
-		return withPolicy(
-			def,
-			tenant,
-			payload,
-			// Capability-aware defs get the backend's real index support, which
-			// costs a `system.*` probe on BYO ClickHouse; everything else compiles
-			// against the baseline and so emits exactly the SQL it did before.
-			def.capabilityAware
-				? warehouse.compiledQueryWithCapabilities(
-						tenant,
-						(capabilities) => def.compile(payload, tenant.orgId, capabilities),
-						options,
-					)
-				: warehouse.compiledQuery(
-						tenant,
-						def.compile(payload, tenant.orgId, baselineWarehouseCapabilities()),
-						options,
-					),
-		)
-	}
+	const runQuery = <Payload, Row>(
+		def: QueryDefinition<Payload, Row>,
+		tenant: TenantContext,
+		payload: Payload,
+	) => withPolicy(def, tenant, payload, runQueryDefinition(warehouse, def, tenant, payload))
 
 	/**
-	 * Run a `QueryDef` that returns at most one row, as `Row | null`.
+	 * Run a `QueryDefinition` that returns at most one row, as `Row | null`.
 	 *
 	 * Null rather than `Option` because every current caller immediately does
 	 * `Option.getOrNull` to build a nullable response field.
 	 */
 	const runQueryFirst = <Payload, Row>(
-		def: QueryDef<Payload, Row>,
+		def: QueryDefinition<Payload, Row>,
 		tenant: TenantContext,
 		payload: Payload,
 	) =>
@@ -127,17 +108,7 @@ export const makeQueryRunners = ({ warehouse, queryEngine }: QueryRunnerDeps) =>
 			def,
 			tenant,
 			payload,
-			warehouse
-				.compiledQueryFirst(
-					tenant,
-					def.compile(payload, tenant.orgId, baselineWarehouseCapabilities()),
-					{
-						profile: def.profile,
-						...resolveSettings(def, payload),
-						context: def.id,
-					},
-				)
-				.pipe(Effect.map(Option.getOrNull)),
+			runQueryDefinitionFirst(warehouse, def, tenant, payload).pipe(Effect.map(Option.getOrNull)),
 		)
 
 	return { runQuery, runQueryFirst } as const
