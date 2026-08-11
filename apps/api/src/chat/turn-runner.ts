@@ -198,14 +198,14 @@ const CHAT_TURN_FAILED = "Maple couldn't complete this response."
  */
 export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promise<void> => {
 	const [
-		{ MainLive },
+		{ InvestigationServicesLive },
 		{ layerPg },
 		{ layerLlm, resolveTriageModel },
 		loop,
 		{ buildSubmitDiagnosisTool },
 		{ McpToolExecutor },
 	] = await Promise.all([
-		import("../runtime/service-graph"),
+		import("../runtime/mcp-service-graph"),
 		import("../platform/DatabasePgLive"),
 		import("../platform/Llm"),
 		import("./loop"),
@@ -215,7 +215,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	const { InvestigationService } = await import("@/services/errors/InvestigationService")
 
 	const runtime = ManagedRuntime.make(
-		MainLive.pipe(
+		InvestigationServicesLive.pipe(
 			Layer.provideMerge(layerLlm(input.env)),
 			Layer.provideMerge(layerPg),
 			Layer.provideMerge(layerFromEnvRecord(input.env)),

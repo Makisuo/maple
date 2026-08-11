@@ -165,7 +165,7 @@ const AnomalyDetectionServiceLive = AnomalyDetectionService.layer.pipe(
 
 const AiTriageServiceLive = AiTriageService.layer.pipe(Layer.provideMerge(CoreServicesLive))
 
-const InvestigationServiceLive = InvestigationService.layer.pipe(Layer.provideMerge(CoreServicesLive))
+const InvestigationServiceLive = InvestigationService.layer.pipe(Layer.provide(InfraLive))
 
 const DigestServiceLive = DigestService.layer.pipe(
 	Layer.provideMerge(
@@ -216,4 +216,12 @@ const MainServicesLive = Layer.mergeAll(
 	SlackIntegrationServiceLive,
 )
 
-export const MainLive = McpToolExecutor.layer.pipe(Layer.provideMerge(MainServicesLive))
+/**
+ * Complete service graph for the HTTP worker.
+ *
+ * HTTP exposes every product surface plus MCP, so this is intentionally the
+ * broadest root. Non-HTTP entrypoints use the smaller roots in
+ * `mcp-service-graph.ts` instead of importing or acquiring route-only services
+ * such as billing, demo, digest, OAuth, anomaly detection, and Slack integration.
+ */
+export const HttpServicesLive = McpToolExecutor.layer.pipe(Layer.provideMerge(MainServicesLive))

@@ -94,13 +94,13 @@ const scoped = async <A, E, R>(program: Effect.Effect<A, E, R>) => {
 // the top level near-empty; the cost moves to the first request, which runs
 // under the far larger per-request CPU budget.
 const buildHandler = async () => {
-	const { MainLive } = await import("./runtime/service-graph")
+	const { HttpServicesLive } = await import("./runtime/service-graph")
 	const { AllRoutes, ApiAuthLive, ApiObservabilityLive } = await import("./runtime/http-graph")
 	const { layerPg } = await import("@/platform/DatabasePgLive")
 	const { pgConnectionMiddleware } = await import("@/platform/pg-connection-scope")
 	return HttpRouter.toWebHandler(
 		AllRoutes.pipe(
-			Layer.provideMerge(MainLive),
+			Layer.provideMerge(HttpServicesLive),
 			Layer.provideMerge(ApiAuthLive),
 			Layer.provideMerge(ApiObservabilityLive),
 			Layer.provideMerge(WorkerPlatformLive),
@@ -129,13 +129,13 @@ let handlerPromise: ReturnType<typeof buildHandler> | undefined
 const getHandler = () => (handlerPromise ??= buildHandler())
 
 // RPC has no HttpApi request to construct the application services for it, so
-// it gets a sibling isolate-wide ManagedRuntime. The heavy route/service graph
+// it gets a sibling isolate-wide ManagedRuntime. Its headless service graph
 // stays behind a dynamic import, preserving the worker's startup-CPU budget.
 const buildRpcRuntime = async (env: Record<string, unknown>) => {
-	const { MainLive } = await import("./runtime/service-graph")
+	const { InvestigationServicesLive } = await import("./runtime/mcp-service-graph")
 	const { layerPg } = await import("@/platform/DatabasePgLive")
 	return ManagedRuntime.make(
-		MainLive.pipe(
+		InvestigationServicesLive.pipe(
 			Layer.provideMerge(WorkerPlatformLive),
 			Layer.provideMerge(layerPg),
 			Layer.provideMerge(layerFromEnvRecord(env)),
