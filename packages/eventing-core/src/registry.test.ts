@@ -4,6 +4,7 @@ import {
 	canonicalJson,
 	defineSignalFields,
 	makeEventId,
+	MAX_CLOUD_EVENT_BYTES,
 	ProjectorRegistry,
 	SignalSourceRegistry,
 	type NormalizedSignal,
@@ -162,6 +163,56 @@ describe("CompiledProjectionRegistry", () => {
 				message: "projector invariant failed",
 			}),
 		])
+	})
+
+	it("isolates complete-envelope schema and size failures from successful siblings", () => {
+		const registryDefinitions = projectors()
+			.register({
+				id: "oversized",
+				version: 1,
+				sourceKinds: ["otel.log"],
+				outputType: "dev.maple.oversized.v1",
+				dataSchema: "urn:maple:event-schema:oversized:v1",
+				decodeConfig: () => ({}),
+				project: () => ({ data: { payload: "x".repeat(MAX_CLOUD_EVENT_BYTES) } }),
+			})
+			.register({
+				id: "invalid-envelope",
+				version: 1,
+				sourceKinds: ["otel.log"],
+				outputType: "x".repeat(257),
+				dataSchema: "urn:maple:event-schema:invalid-envelope:v1",
+				decodeConfig: () => ({}),
+				project: () => ({ data: {} }),
+			})
+		const registry = CompiledProjectionRegistry.compile(
+			[
+				projection(),
+				projection({
+					id: "oversized-projection",
+					projector: { id: "oversized", version: 1, config: {} },
+				}),
+				projection({
+					id: "invalid-envelope-projection",
+					projector: { id: "invalid-envelope", version: 1, config: {} },
+				}),
+			],
+			sources(),
+			registryDefinitions,
+		)
+		const result = registry.evaluate(signal())
+		expect(result.events.map(({ projectionid }) => projectionid)).toEqual(["gitlab-issue-created"])
+		expect(result.failures).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					projectionId: "oversized-projection",
+					message: expect.stringContaining("CloudEvent exceeds"),
+				}),
+				expect.objectContaining({
+					projectionId: "invalid-envelope-projection",
+				}),
+			]),
+		)
 	})
 
 	it("isolates tenants, source kinds, activation time, and disabled revisions", () => {

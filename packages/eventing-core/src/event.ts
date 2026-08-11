@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto"
-import type { JsonValue, MapleCloudEvent, NormalizedSignal, SignalProjectionSpec } from "./model"
+import { Schema } from "effect"
+import {
+	MapleCloudEventSchema,
+	type JsonValue,
+	type MapleCloudEvent,
+	type NormalizedSignal,
+	type SignalProjectionSpec,
+} from "./model"
 import { timestampToEpochNanos } from "./predicate"
+
+export const MAX_CLOUD_EVENT_BYTES = 256 * 1024
 
 export interface EventIdentityInput {
 	readonly tenantId: string
@@ -70,6 +79,23 @@ export const canonicalJson = (value: JsonValue): string => {
 	return JSON.stringify(canonicalizeJson(value))
 }
 
+export interface ValidatedMapleCloudEvent {
+	readonly event: MapleCloudEvent
+	readonly canonicalJson: string
+	readonly byteLength: number
+}
+
+/** Validate the complete persisted envelope, including its canonical byte budget. */
+export const validateMapleCloudEvent = (candidate: unknown): ValidatedMapleCloudEvent => {
+	const event = Schema.decodeUnknownSync(MapleCloudEventSchema)(candidate)
+	if (!isJsonValue(event as unknown)) throw new Error("CloudEvent must be finite JSON")
+	const eventJson = canonicalJson(event as unknown as JsonValue)
+	const byteLength = Buffer.byteLength(eventJson, "utf8")
+	if (byteLength > MAX_CLOUD_EVENT_BYTES)
+		throw new Error(`CloudEvent exceeds ${MAX_CLOUD_EVENT_BYTES} UTF-8 bytes`)
+	return { event: event as MapleCloudEvent, canonicalJson: eventJson, byteLength }
+}
+
 export const makeCloudEvent = (input: {
 	readonly signal: NormalizedSignal
 	readonly projection: SignalProjectionSpec
@@ -81,17 +107,21 @@ export const makeCloudEvent = (input: {
 	readonly time?: string
 	readonly data: JsonValue
 }): MapleCloudEvent => {
-	if (input.signal.occurrenceId === null || input.signal.identityQuality === "none")
+	if (
+		input.signal.occurrenceId === null ||
+		input.signal.occurrenceId.trim().length === 0 ||
+		input.signal.identityQuality === "none"
+	)
 		throw new Error("durable event projection requires stable or derived occurrence identity")
 	if (!isJsonValue(input.data)) throw new Error("projected event data must be finite JSON")
-	if (input.outputType.length === 0) throw new Error("projected event type must not be empty")
-	if (input.dataSchema.length === 0) throw new Error("projected event data schema must not be empty")
-	if (input.signal.source.length === 0) throw new Error("signal source must not be empty")
+	if (input.outputType.trim().length === 0) throw new Error("projected event type must not be empty")
+	if (input.dataSchema.trim().length === 0) throw new Error("projected event data schema must not be empty")
+	if (input.signal.source.trim().length === 0) throw new Error("signal source must not be empty")
 
 	const subject = input.subject ?? input.signal.subject
 	const time = input.time ?? input.signal.occurredAt
 	if (timestampToEpochNanos(time) === null) throw new Error("projected event time must be a valid instant")
-	return {
+	return validateMapleCloudEvent({
 		specversion: "1.0",
 		id: makeEventId({
 			tenantId: input.signal.tenantId,
@@ -113,5 +143,5 @@ export const makeCloudEvent = (input: {
 		projectorid: input.projectorId,
 		projectorversion: input.projectorVersion,
 		data: input.data,
-	}
+	}).event
 }

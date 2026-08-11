@@ -7,15 +7,29 @@ import { PlanetScaleWebhookPayload } from "./webhook-events"
 
 const QUEUE_BINDING = "PLANETSCALE_WEBHOOK_QUEUE"
 
-export const PlanetScaleWebhookJob = Schema.Struct({
+const PlanetScaleWebhookJobFields = {
 	kind: Schema.Literal("planetscale-webhook"),
 	orgId: OrgId,
 	connectionId: Schema.String,
 	payload: PlanetScaleWebhookPayload,
 	receivedAt: Schema.Number,
+} as const
+
+/** Exact queue body emitted before the typed CloudEvent migration. */
+export const LegacyPlanetScaleWebhookJob = Schema.Struct(PlanetScaleWebhookJobFields)
+
+/** Current producer contract. New writers must always include the event. */
+export const PlanetScaleWebhookJob = Schema.Struct({
+	...PlanetScaleWebhookJobFields,
 	event: MapleCloudEventSchema,
 })
 export type PlanetScaleWebhookJob = Schema.Schema.Type<typeof PlanetScaleWebhookJob>
+
+/** Consumer contract kept backward-compatible during rolling deployments. */
+export const PlanetScaleWebhookQueueMessage = Schema.Struct({
+	...PlanetScaleWebhookJobFields,
+	event: Schema.optionalKey(MapleCloudEventSchema),
+})
 
 export class PlanetScaleWebhookQueueError extends Data.TaggedError(
 	"@maple/api/services/planetscale/PlanetScaleWebhookQueueError",

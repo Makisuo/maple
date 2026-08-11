@@ -84,6 +84,32 @@ describe("PlanetScale webhook queue consumer", () => {
 		}).pipe(Effect.provide(testDb.layer))
 	})
 
+	it.effect("processes the exact pre-event-envelope queue body during rolling upgrades", () => {
+		const testDb = createTestDb(trackedDbs)
+		const legacyJob = {
+			kind: "planetscale-webhook",
+			orgId,
+			connectionId: "connection_1",
+			payload: job.payload,
+			receivedAt: 1_000,
+		}
+		const delivery = makeBatch(legacyJob)
+		return Effect.gen(function* () {
+			yield* processPlanetScaleWebhookBatch(delivery.batch)
+			assert.isTrue(delivery.acknowledged())
+			assert.isFalse(delivery.retried())
+			const row = yield* Effect.promise(() =>
+				queryFirstRow<{ workflow_state: string; occurrence_count: number }>(
+					testDb,
+					"SELECT workflow_state, occurrence_count FROM error_issues WHERE org_id = $1",
+					["org_1"],
+				),
+			)
+			assert.strictEqual(row?.workflow_state, "triage")
+			assert.strictEqual(row?.occurrence_count, 1)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
 	it.effect("acknowledges terminal malformed jobs", () => {
 		const testDb = createTestDb(trackedDbs)
 		const delivery = makeBatch({ kind: "not-a-planetscale-job" })

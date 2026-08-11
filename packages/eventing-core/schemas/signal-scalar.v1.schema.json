@@ -13,7 +13,12 @@
 							"enum": ["string"]
 						},
 						"value": {
-							"type": "string"
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 4096
+								}
+							]
 						}
 					},
 					"required": ["type", "value"],
@@ -43,6 +48,9 @@
 						"value": {
 							"type": "string",
 							"allOf": [
+								{
+									"maxLength": 20
+								},
 								{
 									"pattern": "^-?(?:0|[1-9][0-9]*)$"
 								}
@@ -95,6 +103,9 @@
 						"value": {
 							"type": "string",
 							"allOf": [
+								{
+									"maxLength": 20
+								},
 								{
 									"pattern": "^-?(?:0|[1-9][0-9]*)$"
 								}

@@ -9,6 +9,7 @@ import {
 	type AlertLifecycleInput,
 } from "@maple/alerting-core"
 import { formatWarehouseDateTime } from "@maple/query-engine"
+import { MapleCloudEventSchema } from "@maple/eventing-core"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -158,6 +159,7 @@ type DatabaseExecutor = DatabaseClient | DatabaseTransaction
 /* -------------------------------------------------------------------------- */
 
 const StoredDeliveryPayloadSchema = Schema.Struct({
+	event: Schema.optionalKey(MapleCloudEventSchema),
 	eventType: Schema.optionalKey(Schema.String),
 	incidentId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	incidentStatus: Schema.optionalKey(Schema.String),
@@ -1418,9 +1420,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						// payloads here would force the next attempt to fall back on
 						// rule-row defaults, losing observed value, sample count,
 						// dedupe context, and links.
-						const retryPayload = (yield* parseDeliveryPayload(row.payloadJson).pipe(
+						const retryPayload = yield* parseDeliveryPayload(row.payloadJson).pipe(
+							// Validate known fields, but retain the original object so additive
+							// payload fields (including the CloudEvent) survive every retry.
+							Effect.map(() => row.payloadJson as Record<string, unknown>),
 							Effect.orElseSucceed(() => ({})),
-						)) as Record<string, unknown>
+						)
 						yield* insertDeliveryEvent(
 							row.orgId,
 							row.incidentId,

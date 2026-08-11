@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
+	assertSignalProjectionInputBudget,
 	compileSignalPredicate,
 	defineSignalFields,
 	fieldKey,
@@ -119,6 +120,40 @@ describe("selector validation", () => {
 		).toContainEqual(
 			expect.objectContaining({ message: "int64 must be a signed 64-bit decimal integer" }),
 		)
+	})
+
+	it("rejects hostile raw predicate topology before recursive schema decoding", () => {
+		let deeplyNested: unknown = {
+			op: "exists",
+			field: { namespace: "attribute", key: "x", type: "string" },
+		}
+		for (let index = 0; index < MAX_PREDICATE_DEPTH; index++)
+			deeplyNested = { op: "not", clause: deeplyNested }
+		expect(() => assertSignalProjectionInputBudget({ selector: deeplyNested })).toThrow(
+			"predicate depth exceeds",
+		)
+
+		expect(() =>
+			assertSignalProjectionInputBudget({
+				selector: {
+					op: "all",
+					clauses: Array.from({ length: 65 }, () => ({
+						op: "exists",
+						field: { namespace: "attribute", key: "x", type: "string" },
+					})),
+				},
+			}),
+		).toThrow("clause list exceeds")
+
+		expect(() =>
+			assertSignalProjectionInputBudget({
+				selector: {
+					op: "eq",
+					field: { namespace: "attribute", key: "n", type: "int64" },
+					value: { type: "int64", value: "1".repeat(21) },
+				},
+			}),
+		).toThrow("int64 literal exceeds")
 	})
 })
 

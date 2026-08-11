@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert"
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert"
 import { describe, it } from "vitest"
 import { __testables } from "../src/server/serve"
 
@@ -7,8 +7,11 @@ describe("Local eventing ingest seam", () => {
 		const eventing = {
 			health: () => ({ activeProjections: 1 }),
 			listActive: () => [],
-			listReady: () => [{ id: "ready" }],
-			listStaged: () => [{ id: "staged" }],
+			listReady: () => ({ events: [{ sequence: 1, event: { id: "ready" } }], nextCursor: null }),
+			listStaged: (_limit: number, after: number) => ({
+				events: [{ sequence: after + 1, event: { id: "staged" } }],
+				nextCursor: null,
+			}),
 		}
 		const unauthorized = __testables.handleEventingRead(
 			eventing as never,
@@ -18,7 +21,7 @@ describe("Local eventing ingest seam", () => {
 		)
 		strictEqual(unauthorized.status, 403)
 
-		const request = new Request("http://127.0.0.1/local/eventing/outbox?state=staged", {
+		const request = new Request("http://127.0.0.1/local/eventing/outbox?state=staged&after=41", {
 			headers: { "x-maple-maintenance-token": "maintenance-secret" },
 		})
 		const authorized = __testables.handleEventingRead(
@@ -28,10 +31,113 @@ describe("Local eventing ingest seam", () => {
 			new URL(request.url),
 		)
 		strictEqual(authorized.status, 200)
-		deepStrictEqual(await authorized.json(), [{ id: "staged" }])
+		deepStrictEqual(await authorized.json(), {
+			events: [{ sequence: 42, event: { id: "staged" } }],
+			nextCursor: null,
+		})
 	})
 
-	it("evaluates and stages before chDB write, then marks ready before acknowledging", async () => {
+	it("authenticates and reads activation bodies before closing admission", async () => {
+		const gate = new __testables.RequestQuiescenceGate()
+		const neverClosed = new ReadableStream<Uint8Array>()
+		const unauthorized = await __testables.handleProjectionActivation(
+			{} as never,
+			gate,
+			"maintenance-secret",
+			{
+				headers: new Headers(),
+				body: neverClosed,
+			} as Request,
+		)
+		strictEqual(unauthorized.status, 403)
+		const afterUnauthorized = gate.enter()
+		ok(afterUnauthorized, "invalid authorization must not close admission")
+		afterUnauthorized()
+
+		const checkpointUnauthorized = await __testables.handleCheckpointBackup(
+			{} as never,
+			{} as never,
+			"/unused",
+			gate,
+			"maintenance-secret",
+			{ headers: new Headers(), body: neverClosed } as Request,
+		)
+		strictEqual(checkpointUnauthorized.status, 403)
+		const afterCheckpointUnauthorized = gate.enter()
+		ok(afterCheckpointUnauthorized, "checkpoint authorization must precede exclusivity")
+		afterCheckpointUnauthorized()
+
+		let controller!: ReadableStreamDefaultController<Uint8Array>
+		const slowBody = new ReadableStream<Uint8Array>({
+			start(value) {
+				controller = value
+			},
+		})
+		let committed = false
+		const pending = __testables.handleProjectionActivation(
+			{
+				prepareActivation: (body: unknown) => ({ body }),
+				commitActivation: () => {
+					committed = true
+				},
+				listActive: () => [],
+			} as never,
+			gate,
+			"maintenance-secret",
+			{
+				headers: new Headers({ "x-maple-maintenance-token": "maintenance-secret" }),
+				body: slowBody,
+			} as Request,
+		)
+		await Promise.resolve()
+		const whileReading = gate.enter()
+		ok(whileReading, "an incomplete request body must not close admission")
+		whileReading()
+		controller.enqueue(new TextEncoder().encode("{}"))
+		controller.close()
+		strictEqual((await pending).status, 200)
+		strictEqual(committed, true)
+	})
+
+	it("bounds activation bodies and reports concurrent maintenance intentionally", async () => {
+		const oversized = new Request("http://127.0.0.1/local/eventing/projections", {
+			method: "POST",
+			body: "123456789",
+		})
+		await rejects(() => __testables.readBoundedJson(oversized, 8), /exceeds 8 bytes/)
+
+		const gate = new __testables.RequestQuiescenceGate()
+		let releaseMaintenance!: () => void
+		const maintenance = gate.exclusive(
+			() =>
+				new Promise<void>((resolve) => {
+					releaseMaintenance = resolve
+				}),
+		)
+		await Promise.resolve()
+		const response = await __testables.handleProjectionActivation(
+			{
+				prepareActivation: () => ({}),
+				commitActivation: () => undefined,
+				listActive: () => [],
+			} as never,
+			gate,
+			"maintenance-secret",
+			new Request("http://127.0.0.1/local/eventing/projections", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-maple-maintenance-token": "maintenance-secret",
+				},
+				body: "{}",
+			}),
+		)
+		strictEqual(response.status, 409)
+		releaseMaintenance()
+		await maintenance
+	})
+
+	it("isolates projection failures, stores telemetry, and makes sibling events ready", async () => {
 		const order: string[] = []
 		const event = { id: "event-1" }
 		const db = {
@@ -49,7 +155,18 @@ describe("Local eventing ingest seam", () => {
 		const eventing = {
 			evaluateOtlp: () => {
 				order.push("evaluate")
-				return { events: [event], failures: [], typeMismatchFields: [] }
+				return {
+					events: [event],
+					failures: [
+						{
+							projectionId: "oversized-projector",
+							projectionRevision: 1,
+							occurrenceId: "occurrence-1",
+							message: "CloudEvent exceeds 262144 UTF-8 bytes",
+						},
+					],
+					typeMismatchFields: [],
+				}
 			},
 			persistFailures: () => order.push("persist-failures"),
 			stage: () => {

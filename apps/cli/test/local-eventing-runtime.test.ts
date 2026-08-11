@@ -64,6 +64,9 @@ const gitlabIssueCreated = {
 	],
 }
 
+const firstLogRecord = (request: typeof gitlabIssueCreated) =>
+	request.resourceLogs[0]!.scopeLogs[0]!.logRecords[0]!
+
 const projection = (overrides: Partial<SignalProjectionSpec> = {}): SignalProjectionSpec => ({
 	id: "gitlab-issue-created",
 	revision: 1,
@@ -106,6 +109,38 @@ describe("LocalEventingRuntime", () => {
 		strictEqual(JSON.parse(batches[0]!.ndjson).log_attributes["gitlab.issue.iid"], "42")
 	})
 
+	it("uses the first nonblank occurrence alias and derives identity when every alias is blank", () => {
+		const aliased = structuredClone(gitlabIssueCreated)
+		const aliasedRecord = firstLogRecord(aliased)
+		aliasedRecord.attributes = [
+			attr("event.id", { stringValue: "   " }),
+			attr("cloudevents.id", { stringValue: " cloud-event-42 " }),
+			attr("gitlab.event.id", { stringValue: "gitlab-event-42" }),
+			...aliasedRecord.attributes.filter(
+				({ key }) => !["event.id", "cloudevents.id", "gitlab.event.id"].includes(key),
+			),
+		]
+		const [aliasedSignal] = normalizeOtlpLogs(aliased, "2026-08-07T20:00:00Z")
+		strictEqual(aliasedSignal?.occurrenceId, "cloud-event-42")
+		strictEqual(aliasedSignal?.identityQuality, "source")
+
+		const derivedA = structuredClone(aliased)
+		const derivedARecord = firstLogRecord(derivedA)
+		derivedARecord.attributes = derivedARecord.attributes.map((entry) =>
+			["event.id", "cloudevents.id", "gitlab.event.id"].includes(entry.key)
+				? attr(entry.key, { stringValue: entry.key === "event.id" ? "" : " \t " })
+				: entry,
+		)
+		const derivedB = structuredClone(derivedA)
+		firstLogRecord(derivedB).body = { stringValue: "A different issue occurrence" }
+		const [signalA] = normalizeOtlpLogs(derivedA, "2026-08-07T20:00:00Z")
+		const [signalB] = normalizeOtlpLogs(derivedB, "2026-08-07T20:00:00Z")
+		strictEqual(signalA?.identityQuality, "derived")
+		strictEqual(signalB?.identityQuality, "derived")
+		strictEqual(signalA?.occurrenceId?.startsWith("derived:sha256:"), true)
+		strictEqual(signalA?.occurrenceId === signalB?.occurrenceId, false)
+	})
+
 	it("projects before storage, deduplicates retry delivery, and makes the event ready after commit", async () =>
 		withDataDir(async (dataDir) => {
 			const store = await LocalEventingControlStore.open(dataDir)
@@ -144,14 +179,20 @@ describe("LocalEventingRuntime", () => {
 				})
 				const staged = runtime.stage(first.events)
 				strictEqual(staged.inserted, 1)
-				strictEqual(runtime.listReady().length, 0)
-				deepStrictEqual(runtime.listStaged(), first.events)
+				strictEqual(runtime.listReady().events.length, 0)
+				deepStrictEqual(
+					runtime.listStaged().events.map(({ event }) => event),
+					first.events,
+				)
 				const retry = runtime.evaluateOtlp("logs", gitlabIssueCreated)
 				strictEqual(retry.events[0]?.id, first.events[0]?.id)
 				strictEqual(runtime.stage(retry.events).deduplicated, 1)
 				runtime.markReady(staged.eventIds)
-				deepStrictEqual(runtime.listReady(), first.events)
-				deepStrictEqual(runtime.listStaged(), [])
+				deepStrictEqual(
+					runtime.listReady().events.map(({ event }) => event),
+					first.events,
+				)
+				deepStrictEqual(runtime.listStaged().events, [])
 			} finally {
 				store.close()
 			}

@@ -819,7 +819,10 @@ follows:
 
 - Maple Local stores projection revisions, failures, and the staged/ready outbox
   in SQLite at `<dataDir>/control/eventing.sqlite`, using WAL and `synchronous =
-FULL`. A version-2 Maple checkpoint contains `control.sqlite` beside the chDB
+FULL`. While ingest is quiesced, backup first completes and verifies a blocking
+  `wal_checkpoint(TRUNCATE)` so the serialized database contains every committed
+  control-store transaction rather than only the main SQLite file. A version-2
+  Maple checkpoint contains `control.sqlite` beside the chDB
   backup and binds its byte count, SHA-256 digest, schema version, and row counts
   in the checkpoint manifest. Version-1 checkpoints remain readable and restore
   an empty control store.
@@ -849,11 +852,16 @@ FULL`. A version-2 Maple checkpoint contains `control.sqlite` beside the chDB
   acknowledges them. The dedicated Cloudflare Queue durably carries
   `dev.maple.planetscale.webhook.received.v1`; its temporary provider payload
   keeps the existing issue and timeline consumers behaviorally unchanged while
-  they migrate to the event contract.
+  they migrate to the event contract. Queue consumers accept both the new
+  event-bearing message and the exact pre-migration message shape, reconstructing
+  the deterministic event from the older message's durable fields during rolling
+  upgrades.
 - Hosted query-alert delivery rows remain that producer's durable outbox. Their
   payload now includes an additive deterministic
   `dev.maple.alert.lifecycle.{trigger,resolve,renotify,test}.v1` CloudEvent while
-  retaining every legacy top-level delivery field.
+  retaining every legacy top-level delivery field. Retry creation preserves the
+  originally stored JSON, including the CloudEvent ID and future additive fields,
+  instead of round-tripping it through a lossy legacy schema.
 - Historical replay execution remains deliberately unimplemented in this
   change. Field catalogs already declare `exact`, `coerced`, or `unavailable`,
   but Local's current arbitrary attribute maps have lost source scalar type and
@@ -870,12 +878,23 @@ FULL`. A version-2 Maple checkpoint contains `control.sqlite` beside the chDB
 Maple Local activates immutable revisions with authenticated
 `POST /local/eventing/projections`. The same maintenance credential protects
 `GET /local/eventing/projections`, `/local/eventing/health`, and
-`/local/eventing/outbox`. The outbox endpoint returns ready events by default;
-`?state=staged` exposes bounded inspection of records stranded before the chDB
-commit point. Re-delivery is the safe recovery operation: it deduplicates the
-same staged event ID and promotes it only after the warehouse write succeeds.
-Maple never blindly promotes an old staged record because, after a crash, the
-control store alone cannot prove whether the corresponding chDB write committed.
-Activation compiles the entire candidate registry
-before the SQLite commit and swaps the immutable runtime snapshot while ingest
-is quiesced, so a request observes exactly one registry version.
+`/local/eventing/outbox`. The outbox endpoint returns ready records with their
+monotonic `sequence` by default; `?after=<sequence>&limit=<n>` pages beyond the
+oldest page, while `?state=staged` exposes bounded inspection of records stranded
+before the chDB commit point. The Local store defaults to at most 10,000 events
+and 256 MiB of canonical event JSON. Staging fails closed with a retryable ingest
+error before either cap can be exceeded. These endpoints are an operable
+inspection/recovery surface, not yet a delivery protocol: durable consumer
+claim/acknowledgement and deletion/retention begin with the first downstream
+consumer rather than being implied by a destructive read API in this PR.
+
+Re-delivery is the safe recovery operation: it deduplicates the same staged event
+ID and promotes it only after the warehouse write succeeds. Maple never blindly
+promotes an old staged record because, after a crash, the control store alone
+cannot prove whether the corresponding chDB write committed. Activation requires
+authentication, a bounded request body, structural budget validation, and full
+registry compilation before acquiring global quiescence. Only the projection
+revision commit and immutable runtime-registry swap occur while ingest is
+quiesced, so invalid credentials, incomplete bodies, and expensive validation do
+not close admission and every ingest request still observes exactly one registry
+version. Concurrent maintenance requests receive an intentional conflict response.

@@ -6,12 +6,14 @@ import type {
 	SignalScalar,
 	SignalScalarType,
 } from "./model"
-import { fieldKey } from "./model"
-
-export const MAX_PREDICATE_DEPTH = 8
-export const MAX_PREDICATE_NODES = 64
-export const MAX_IN_VALUES = 100
-export const MAX_STRING_LITERAL_BYTES = 4 * 1024
+import {
+	fieldKey,
+	MAX_DECIMAL_INT64_LENGTH,
+	MAX_IN_VALUES,
+	MAX_PREDICATE_DEPTH,
+	MAX_PREDICATE_NODES,
+	MAX_STRING_LITERAL_BYTES,
+} from "./model"
 
 const INT64_MIN = -(1n << 63n)
 const INT64_MAX = (1n << 63n) - 1n
@@ -33,6 +35,72 @@ export class SignalPredicateValidationError extends Error {
 }
 
 const stringBytes = (value: string): number => new TextEncoder().encode(value).byteLength
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
+const assertScalarInputBudget = (value: unknown): void => {
+	if (!isRecord(value) || typeof value.type !== "string") return
+	if (value.type === "string" && typeof value.value === "string") {
+		if (stringBytes(value.value) > MAX_STRING_LITERAL_BYTES)
+			throw new Error(`selector string exceeds ${MAX_STRING_LITERAL_BYTES} UTF-8 bytes`)
+		return
+	}
+	if (
+		(value.type === "int64" || value.type === "duration") &&
+		typeof value.value === "string" &&
+		value.value.length > MAX_DECIMAL_INT64_LENGTH
+	)
+		throw new Error(`${value.type} literal exceeds ${MAX_DECIMAL_INT64_LENGTH} characters`)
+}
+
+/**
+ * Reject hostile selector topology before the recursive runtime schema sees it.
+ * HTTP hosts should additionally bound the serialized request body.
+ */
+export const assertSignalProjectionInputBudget = (candidate: unknown): void => {
+	if (!isRecord(candidate) || candidate.selector === undefined) return
+	const stack: Array<{ readonly value: unknown; readonly depth: number }> = [
+		{ value: candidate.selector, depth: 1 },
+	]
+	const seen = new Set<object>()
+	let nodes = 0
+	while (stack.length > 0) {
+		const current = stack.pop()!
+		if (current.depth > MAX_PREDICATE_DEPTH)
+			throw new Error(`predicate depth exceeds ${MAX_PREDICATE_DEPTH}`)
+		nodes += 1
+		if (nodes > MAX_PREDICATE_NODES) throw new Error(`predicate exceeds ${MAX_PREDICATE_NODES} nodes`)
+		if (!isRecord(current.value)) continue
+		if (seen.has(current.value)) throw new Error("predicate must be acyclic JSON")
+		seen.add(current.value)
+
+		switch (current.value.op) {
+			case "all":
+			case "any": {
+				const clauses = current.value.clauses
+				if (!Array.isArray(clauses)) break
+				if (clauses.length > MAX_PREDICATE_NODES)
+					throw new Error(`predicate clause list exceeds ${MAX_PREDICATE_NODES} entries`)
+				for (let index = clauses.length - 1; index >= 0; index--)
+					stack.push({ value: clauses[index], depth: current.depth + 1 })
+				break
+			}
+			case "not":
+				stack.push({ value: current.value.clause, depth: current.depth + 1 })
+				break
+			case "in": {
+				const values = current.value.values
+				if (!Array.isArray(values)) break
+				if (values.length > MAX_IN_VALUES) throw new Error(`in exceeds ${MAX_IN_VALUES} values`)
+				for (const value of values) assertScalarInputBudget(value)
+				break
+			}
+			default:
+				assertScalarInputBudget(current.value.value)
+		}
+	}
+}
 
 const parseInt64 = (value: string): bigint | null => {
 	try {

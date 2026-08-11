@@ -2,6 +2,7 @@ import {
 	CompiledProjectionRegistry,
 	ProjectorRegistry,
 	SignalSourceRegistry,
+	assertSignalProjectionInputBudget,
 	fieldKey,
 	isJsonValue,
 	SignalProjectionSpecSchema,
@@ -120,6 +121,13 @@ export interface LocalProjectionEvaluation {
 	readonly typeMismatchFields: readonly string[]
 }
 
+export interface LocalProjectionActivation {
+	readonly spec: SignalProjectionSpec
+	readonly next: readonly SignalProjectionSpec[]
+	readonly compiled: CompiledProjectionRegistry
+	readonly generation: number
+}
+
 const emptyEvaluation = (): LocalProjectionEvaluation => ({
 	events: [],
 	failures: [],
@@ -132,6 +140,7 @@ export class LocalEventingRuntime {
 	readonly #projectors: ProjectorRegistry
 	#compiled: CompiledProjectionRegistry
 	#activeSourceKinds = new Set<string>()
+	#generation = 0
 
 	constructor(store: LocalEventingControlStore) {
 		this.#store = store
@@ -146,7 +155,8 @@ export class LocalEventingRuntime {
 		return this.#activeSourceKinds.has(sourceKind)
 	}
 
-	activate(candidate: unknown): void {
+	prepareActivation(candidate: unknown): LocalProjectionActivation {
+		assertSignalProjectionInputBudget(candidate)
 		const spec = Schema.decodeUnknownSync(SignalProjectionSpecSchema)(candidate)
 		if (spec.tenantId !== TENANT_ID)
 			throw new Error(`Maple Local only accepts projections for tenant ${TENANT_ID}`)
@@ -155,9 +165,20 @@ export class LocalEventingRuntime {
 			.filter((candidate) => candidate.id !== spec.id)
 		const next = spec.enabled ? [...active, spec] : active
 		const compiled = CompiledProjectionRegistry.compile(next, this.#sources, this.#projectors)
-		this.#store.saveProjection(spec)
-		this.#compiled = compiled
-		this.#activeSourceKinds = new Set(next.map(({ sourceKind }) => sourceKind))
+		return { spec, next, compiled, generation: this.#generation }
+	}
+
+	commitActivation(activation: LocalProjectionActivation): void {
+		if (activation.generation !== this.#generation)
+			throw new Error("projection registry changed during activation; retry the request")
+		this.#store.saveProjection(activation.spec)
+		this.#compiled = activation.compiled
+		this.#activeSourceKinds = new Set(activation.next.map(({ sourceKind }) => sourceKind))
+		this.#generation += 1
+	}
+
+	activate(candidate: unknown): void {
+		this.commitActivation(this.prepareActivation(candidate))
 	}
 
 	listActive(): readonly SignalProjectionSpec[] {
@@ -200,17 +221,18 @@ export class LocalEventingRuntime {
 		this.#store.markReady(eventIds)
 	}
 
-	listReady(limit?: number): readonly MapleCloudEvent[] {
-		return this.#store.listReady(limit)
+	listReady(limit?: number, after?: number) {
+		return this.#store.listReady(limit, after)
 	}
 
-	listStaged(limit?: number): readonly MapleCloudEvent[] {
-		return this.#store.listStaged(limit)
+	listStaged(limit?: number, after?: number) {
+		return this.#store.listStaged(limit, after)
 	}
 
 	health() {
 		return {
 			activeProjections: this.listActive().length,
+			outboxCapacity: this.#store.outboxCapacity(),
 			...this.#store.validate(),
 		}
 	}

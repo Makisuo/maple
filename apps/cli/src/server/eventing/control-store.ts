@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url"
 import {
 	canonicalJson,
 	isJsonValue,
-	MapleCloudEventSchema,
 	SignalProjectionSpecSchema,
+	validateMapleCloudEvent,
 	type MapleCloudEvent,
 	type JsonValue,
 	type ProjectionFailure,
@@ -18,8 +18,9 @@ import { durableWrite, ensurePrivateDirectory } from "../durable-files"
 const CONTROL_SCHEMA_VERSION = 1
 const CONTROL_DIRECTORY = "control"
 const CONTROL_DATABASE = "eventing.sqlite"
-const MAX_EVENT_BYTES = 256 * 1024
 const MAX_FAILURES_PER_TENANT = 10_000
+export const DEFAULT_MAX_OUTBOX_EVENTS = 10_000
+export const DEFAULT_MAX_OUTBOX_BYTES = 256 * 1024 * 1024
 
 export const eventingControlDirectory = (dataDir: string): string => join(resolve(dataDir), CONTROL_DIRECTORY)
 export const eventingControlPath = (dataDir: string): string =>
@@ -99,7 +100,10 @@ interface EventRow {
 }
 
 interface EventJsonRow {
+	readonly sequence: number | bigint
 	readonly event_json: string
+	readonly staged_at: string
+	readonly ready_at: string | null
 }
 
 interface CountRow {
@@ -108,6 +112,17 @@ interface CountRow {
 
 interface QuickCheckRow {
 	readonly quick_check: string
+}
+
+interface WalCheckpointRow {
+	readonly busy: number | bigint
+	readonly log: number | bigint
+	readonly checkpointed: number | bigint
+}
+
+interface OutboxUsageRow {
+	readonly count: number | bigint
+	readonly bytes: number | bigint
 }
 
 export interface StageEventsResult {
@@ -124,6 +139,23 @@ export interface EventingControlSnapshotValidation {
 	readonly readyEvents: number
 }
 
+export interface LocalEventingControlLimits {
+	readonly maxOutboxEvents: number
+	readonly maxOutboxBytes: number
+}
+
+export interface EventingOutboxRecord {
+	readonly sequence: number
+	readonly event: MapleCloudEvent
+	readonly stagedAt: string
+	readonly readyAt: string | null
+}
+
+export interface EventingOutboxPage {
+	readonly events: readonly EventingOutboxRecord[]
+	readonly nextCursor: number | null
+}
+
 const asNumber = (value: number | bigint): number => {
 	const number = Number(value)
 	if (!Number.isSafeInteger(number) || number < 0) throw new Error(`invalid SQLite integer: ${value}`)
@@ -134,9 +166,7 @@ const decodeProjection = (json: string): SignalProjectionSpec =>
 	Schema.decodeUnknownSync(SignalProjectionSpecSchema)(JSON.parse(json) as unknown)
 
 const decodeEvent = (json: string): MapleCloudEvent => {
-	const value = Schema.decodeUnknownSync(MapleCloudEventSchema)(JSON.parse(json) as unknown)
-	if (!isJsonValue(value.data)) throw new Error("stored CloudEvent data is not finite JSON")
-	return value as MapleCloudEvent
+	return validateMapleCloudEvent(JSON.parse(json) as unknown).event
 }
 
 const assertRealDatabaseFile = (path: string): void => {
@@ -155,6 +185,26 @@ const configure = (db: Database): void => {
 	db.exec("PRAGMA foreign_keys = ON")
 	db.exec("PRAGMA trusted_schema = OFF")
 	db.exec("PRAGMA busy_timeout = 5000")
+}
+
+const checkpointWal = (db: Database): void => {
+	const result = db.query<WalCheckpointRow, []>("PRAGMA wal_checkpoint(TRUNCATE)").get()
+	if (!result) throw new Error("eventing control WAL checkpoint returned no result")
+	const busy = asNumber(result.busy)
+	const log = asNumber(result.log)
+	const checkpointed = asNumber(result.checkpointed)
+	if (busy !== 0 || log !== 0)
+		throw new Error(
+			`eventing control WAL checkpoint incomplete (busy=${busy}, log=${log}, checkpointed=${checkpointed})`,
+		)
+}
+
+const validateLimits = (limits: LocalEventingControlLimits): LocalEventingControlLimits => {
+	if (!Number.isSafeInteger(limits.maxOutboxEvents) || limits.maxOutboxEvents < 1)
+		throw new Error("maxOutboxEvents must be a positive safe integer")
+	if (!Number.isSafeInteger(limits.maxOutboxBytes) || limits.maxOutboxBytes < 1)
+		throw new Error("maxOutboxBytes must be a positive safe integer")
+	return limits
 }
 
 const validateOpenDatabase = (db: Database): EventingControlSnapshotValidation => {
@@ -187,14 +237,23 @@ const validateOpenDatabase = (db: Database): EventingControlSnapshotValidation =
 
 export class LocalEventingControlStore {
 	readonly #db: Database
+	readonly #limits: LocalEventingControlLimits
 	readonly path: string
 
-	private constructor(path: string, db: Database) {
+	private constructor(path: string, db: Database, limits: LocalEventingControlLimits) {
 		this.path = path
 		this.#db = db
+		this.#limits = limits
 	}
 
-	static async open(dataDir: string): Promise<LocalEventingControlStore> {
+	static async open(
+		dataDir: string,
+		limits: LocalEventingControlLimits = {
+			maxOutboxEvents: DEFAULT_MAX_OUTBOX_EVENTS,
+			maxOutboxBytes: DEFAULT_MAX_OUTBOX_BYTES,
+		},
+	): Promise<LocalEventingControlStore> {
+		validateLimits(limits)
 		const directory = eventingControlDirectory(dataDir)
 		await ensurePrivateDirectory(directory)
 		const path = eventingControlPath(dataDir)
@@ -214,7 +273,7 @@ export class LocalEventingControlStore {
 				)
 			chmodSync(path, 0o600)
 			validateOpenDatabase(db)
-			return new LocalEventingControlStore(path, db)
+			return new LocalEventingControlStore(path, db, limits)
 		} catch (error) {
 			db.close()
 			throw error
@@ -222,7 +281,7 @@ export class LocalEventingControlStore {
 	}
 
 	close(): void {
-		this.#db.exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		checkpointWal(this.#db)
 		this.#db.close(true)
 	}
 
@@ -302,12 +361,17 @@ export class LocalEventingControlStore {
 		const eventIds: string[] = []
 		this.#db
 			.transaction(() => {
+				const usage = this.#db
+					.query<OutboxUsageRow, []>(
+						"SELECT count(*) AS count, coalesce(sum(length(CAST(event_json AS BLOB))), 0) AS bytes FROM outbox_events",
+					)
+					.get()
+				if (!usage) throw new Error("event outbox usage query returned no row")
+				let outboxEvents = asNumber(usage.count)
+				let outboxBytes = asNumber(usage.bytes)
 				for (const candidate of events) {
-					const event = Schema.decodeUnknownSync(MapleCloudEventSchema)(candidate)
-					if (!isJsonValue(event as unknown)) throw new Error("CloudEvent must be finite JSON")
-					const eventJson = canonicalJson(event as unknown as JsonValue)
-					if (Buffer.byteLength(eventJson, "utf8") > MAX_EVENT_BYTES)
-						throw new Error(`CloudEvent exceeds ${MAX_EVENT_BYTES} UTF-8 bytes`)
+					const validated = validateMapleCloudEvent(candidate)
+					const { event, canonicalJson: eventJson, byteLength: eventBytes } = validated
 					const existing = this.#db
 						.query<EventRow, [string]>(
 							"SELECT event_id, event_json, state FROM outbox_events WHERE event_id = ?",
@@ -318,6 +382,13 @@ export class LocalEventingControlStore {
 							throw new Error(`event ID collision with different payload: ${event.id}`)
 						deduplicated += 1
 					} else {
+						if (
+							outboxEvents + 1 > this.#limits.maxOutboxEvents ||
+							outboxBytes + eventBytes > this.#limits.maxOutboxBytes
+						)
+							throw new Error(
+								`event outbox capacity exceeded (${outboxEvents}/${this.#limits.maxOutboxEvents} events, ${outboxBytes}/${this.#limits.maxOutboxBytes} bytes)`,
+							)
 						this.#db.run(
 							"INSERT INTO outbox_events (event_id, tenant_id, projection_id, projection_revision, state, event_json, staged_at) VALUES (?, ?, ?, ?, 'staged', ?, ?)",
 							[
@@ -330,6 +401,8 @@ export class LocalEventingControlStore {
 							],
 						)
 						inserted += 1
+						outboxEvents += 1
+						outboxBytes += eventBytes
 					}
 					eventIds.push(event.id)
 				}
@@ -358,26 +431,53 @@ export class LocalEventingControlStore {
 			.immediate()
 	}
 
-	listReady(limit = 100): readonly MapleCloudEvent[] {
+	#listOutbox(state: "ready" | "staged", limit = 100, after = 0): EventingOutboxPage {
 		if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000)
-			throw new Error("ready-event limit must be between 1 and 1000")
-		return this.#db
-			.query<EventJsonRow, [number]>(
-				"SELECT event_json FROM outbox_events WHERE state = 'ready' ORDER BY sequence LIMIT ?",
+			throw new Error("outbox-event limit must be between 1 and 1000")
+		if (!Number.isSafeInteger(after) || after < 0)
+			throw new Error("outbox cursor must be a non-negative safe integer")
+		const rows = this.#db
+			.query<EventJsonRow, [string, number, number]>(
+				"SELECT sequence, event_json, staged_at, ready_at FROM outbox_events WHERE state = ? AND sequence > ? ORDER BY sequence LIMIT ?",
 			)
-			.all(limit)
-			.map(({ event_json }) => decodeEvent(event_json))
+			.all(state, after, limit + 1)
+		const hasMore = rows.length > limit
+		const pageRows = hasMore ? rows.slice(0, limit) : rows
+		const page = pageRows.map(({ sequence, event_json, staged_at, ready_at }) => ({
+			sequence: asNumber(sequence),
+			event: decodeEvent(event_json),
+			stagedAt: staged_at,
+			readyAt: ready_at,
+		}))
+		return {
+			events: page,
+			nextCursor: hasMore ? (page.at(-1)?.sequence ?? null) : null,
+		}
 	}
 
-	listStaged(limit = 100): readonly MapleCloudEvent[] {
-		if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000)
-			throw new Error("staged-event limit must be between 1 and 1000")
-		return this.#db
-			.query<EventJsonRow, [number]>(
-				"SELECT event_json FROM outbox_events WHERE state = 'staged' ORDER BY sequence LIMIT ?",
+	listReady(limit = 100, after = 0): EventingOutboxPage {
+		return this.#listOutbox("ready", limit, after)
+	}
+
+	listStaged(limit = 100, after = 0): EventingOutboxPage {
+		return this.#listOutbox("staged", limit, after)
+	}
+
+	outboxCapacity(): LocalEventingControlLimits & {
+		readonly currentEvents: number
+		readonly currentBytes: number
+	} {
+		const usage = this.#db
+			.query<OutboxUsageRow, []>(
+				"SELECT count(*) AS count, coalesce(sum(length(CAST(event_json AS BLOB))), 0) AS bytes FROM outbox_events",
 			)
-			.all(limit)
-			.map(({ event_json }) => decodeEvent(event_json))
+			.get()
+		if (!usage) throw new Error("event outbox usage query returned no row")
+		return {
+			...this.#limits,
+			currentEvents: asNumber(usage.count),
+			currentBytes: asNumber(usage.bytes),
+		}
 	}
 
 	recordProjectionFailures(
@@ -412,6 +512,10 @@ export class LocalEventingControlStore {
 	}
 
 	async backupTo(path: string): Promise<EventingControlSnapshotValidation> {
+		// sqlite3_serialize() snapshots the main database file. In WAL mode a
+		// committed transaction may still live only in the sidecar, so force and
+		// verify a complete checkpoint before copying the file image.
+		checkpointWal(this.#db)
 		const bytes = this.#db.serialize()
 		await durableWrite(path, bytes)
 		return LocalEventingControlStore.validateSnapshot(path)

@@ -506,7 +506,7 @@ export class RequestQuiescenceGate {
 	}
 
 	async exclusive<A>(work: () => Promise<A>): Promise<A> {
-		if (this.#closed) throw new Error("another server maintenance operation is active")
+		if (this.#closed) throw new MaintenanceInProgressError()
 		this.#closed = true
 		try {
 			if (this.#active > 0) await new Promise<void>((resolve) => this.#drained.push(resolve))
@@ -516,6 +516,57 @@ export class RequestQuiescenceGate {
 		}
 	}
 }
+
+class MaintenanceInProgressError extends Error {
+	constructor() {
+		super("another server maintenance operation is active")
+		this.name = "MaintenanceInProgressError"
+	}
+}
+
+class RequestBodyTooLargeError extends Error {
+	constructor(readonly maximumBytes: number) {
+		super(`request body exceeds ${maximumBytes} bytes`)
+		this.name = "RequestBodyTooLargeError"
+	}
+}
+
+const readBoundedJson = async (req: Request, maximumBytes: number): Promise<unknown> => {
+	const contentLength = req.headers.get("content-length")
+	if (contentLength !== null && /^[0-9]+$/.test(contentLength)) {
+		const declared = Number(contentLength)
+		if (!Number.isSafeInteger(declared) || declared > maximumBytes)
+			throw new RequestBodyTooLargeError(maximumBytes)
+	}
+	if (req.body === null) return JSON.parse("") as unknown
+	const reader = req.body.getReader()
+	const chunks: Uint8Array[] = []
+	let total = 0
+	try {
+		while (true) {
+			const { done, value } = await reader.read()
+			if (done) break
+			total += value.byteLength
+			if (total > maximumBytes) {
+				await reader.cancel()
+				throw new RequestBodyTooLargeError(maximumBytes)
+			}
+			chunks.push(value)
+		}
+	} finally {
+		reader.releaseLock()
+	}
+	const bytes = new Uint8Array(total)
+	let offset = 0
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset)
+		offset += chunk.byteLength
+	}
+	return JSON.parse(new TextDecoder().decode(bytes)) as unknown
+}
+
+const invalidJsonResponse = (error: unknown): Response =>
+	error instanceof RequestBodyTooLargeError ? text(error.message, 413) : text("invalid JSON body", 400)
 
 const admitted = async (gate: RequestQuiescenceGate, work: () => Promise<Response>): Promise<Response> => {
 	const leave = gate.enter()
@@ -569,12 +620,15 @@ const handleRetirement = async (
 }
 
 const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const MAX_CHECKPOINT_BODY_BYTES = 4 * 1024
+const MAX_PROJECTION_BODY_BYTES = 512 * 1024
 
 /** Typed, authenticated replacement for sending BACKUP through /local/query. */
 const handleCheckpointBackup = async (
 	db: Chdb,
 	controlStore: LocalEventingControlStore,
 	dataDir: string,
+	gate: RequestQuiescenceGate,
 	token: string,
 	req: Request,
 ): Promise<Response> => {
@@ -582,9 +636,9 @@ const handleCheckpointBackup = async (
 		return text("maintenance authorization required", 403)
 	let body: unknown
 	try {
-		body = await req.json()
-	} catch {
-		return text("invalid JSON body", 400)
+		body = await readBoundedJson(req, MAX_CHECKPOINT_BODY_BYTES)
+	} catch (error) {
+		return invalidJsonResponse(error)
 	}
 	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
 	const record = body as Record<string, unknown>
@@ -593,10 +647,13 @@ const handleCheckpointBackup = async (
 	if (!CHECKPOINT_ID.test(record.checkpointId)) return text("invalid checkpoint ID", 400)
 	try {
 		const checkpointId = record.checkpointId.toLowerCase()
-		const control = await controlStore.backupTo(eventingControlSnapshotPath(dataDir, checkpointId))
-		db.exec(`BACKUP DATABASE default TO Disk('default', 'backups/snapshots/${checkpointId}/backup')`)
-		return json({ checkpointId, control })
+		return await gate.exclusive(async () => {
+			const control = await controlStore.backupTo(eventingControlSnapshotPath(dataDir, checkpointId))
+			db.exec(`BACKUP DATABASE default TO Disk('default', 'backups/snapshots/${checkpointId}/backup')`)
+			return json({ checkpointId, control })
+		})
 	} catch (error) {
+		if (error instanceof MaintenanceInProgressError) return text(error.message, 409)
 		return text(
 			`checkpoint backup failed: ${error instanceof Error ? error.message : String(error)}`,
 			400,
@@ -611,6 +668,7 @@ const eventingAuthorized = (token: string, req: Request): Response | null =>
 
 const handleProjectionActivation = async (
 	eventing: LocalEventingRuntime,
+	gate: RequestQuiescenceGate,
 	token: string,
 	req: Request,
 ): Promise<Response> => {
@@ -618,14 +676,26 @@ const handleProjectionActivation = async (
 	if (unauthorized) return unauthorized
 	let body: unknown
 	try {
-		body = await req.json()
-	} catch {
-		return text("invalid JSON body", 400)
+		body = await readBoundedJson(req, MAX_PROJECTION_BODY_BYTES)
+	} catch (error) {
+		return invalidJsonResponse(error)
+	}
+	let activation
+	try {
+		// Recursive schema validation and full registry compilation happen while
+		// normal ingest/query admission remains open.
+		activation = eventing.prepareActivation(body)
+	} catch (error) {
+		return text(
+			`invalid event projection: ${error instanceof Error ? error.message : String(error)}`,
+			400,
+		)
 	}
 	try {
-		eventing.activate(body)
+		await gate.exclusive(async () => eventing.commitActivation(activation))
 		return json({ active: eventing.listActive() })
 	} catch (error) {
+		if (error instanceof MaintenanceInProgressError) return text(error.message, 409)
 		return text(
 			`invalid event projection: ${error instanceof Error ? error.message : String(error)}`,
 			400,
@@ -646,10 +716,12 @@ const handleEventingRead = (
 	if (url.pathname === "/local/eventing/outbox") {
 		const rawLimit = url.searchParams.get("limit")
 		const limit = rawLimit === null ? 100 : Number(rawLimit)
+		const rawAfter = url.searchParams.get("after")
+		const after = rawAfter === null ? 0 : Number(rawAfter)
 		const state = url.searchParams.get("state") ?? "ready"
 		try {
-			if (state === "ready") return json(eventing.listReady(limit))
-			if (state === "staged") return json(eventing.listStaged(limit))
+			if (state === "ready") return json(eventing.listReady(limit, after))
+			if (state === "staged") return json(eventing.listStaged(limit, after))
 			return text("outbox state must be ready or staged", 400)
 		} catch (error) {
 			return text(error instanceof Error ? error.message : String(error), 400)
@@ -699,14 +771,17 @@ const makeFetch =
 				return respond(await admitted(gate, () => querySpan(runSpan, db, authority, req)))
 			if (url.pathname === "/local/checkpoint/backup")
 				return respond(
-					await gate.exclusive(() =>
-						handleCheckpointBackup(db, controlStore, options.dataDir, maintenanceToken, req),
+					await handleCheckpointBackup(
+						db,
+						controlStore,
+						options.dataDir,
+						gate,
+						maintenanceToken,
+						req,
 					),
 				)
 			if (url.pathname === "/local/eventing/projections")
-				return respond(
-					await gate.exclusive(() => handleProjectionActivation(eventing, maintenanceToken, req)),
-				)
+				return respond(await handleProjectionActivation(eventing, gate, maintenanceToken, req))
 			if (url.pathname === "/local/retention/retire")
 				return respond(await handleRetirement(db, authority, gate, maintenanceToken, req))
 		}
@@ -861,4 +936,12 @@ export const startServer = (
 		return { port: server.port ?? options.port }
 	})
 
-export const __testables = { handleEventingRead, ingest, recordServerResponse }
+export const __testables = {
+	handleCheckpointBackup,
+	handleEventingRead,
+	handleProjectionActivation,
+	ingest,
+	readBoundedJson,
+	recordServerResponse,
+	RequestQuiescenceGate,
+}

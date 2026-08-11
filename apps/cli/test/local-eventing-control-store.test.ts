@@ -1,5 +1,5 @@
-import { deepStrictEqual, rejects, strictEqual, throws } from "node:assert"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, it } from "vitest"
@@ -96,8 +96,11 @@ describe("LocalEventingControlStore", () => {
 				throws(() => store.markReady(["unknown"]), /unknown event/)
 				store.markReady([event().id])
 				store.markReady([event().id])
-				deepStrictEqual(store.listStaged(), [])
-				deepStrictEqual(store.listReady(), [event()])
+				deepStrictEqual(store.listStaged().events, [])
+				deepStrictEqual(
+					store.listReady().events.map(({ event }) => event),
+					[event()],
+				)
 			} finally {
 				store.close()
 			}
@@ -121,7 +124,10 @@ describe("LocalEventingControlStore", () => {
 
 			store = await LocalEventingControlStore.open(dataDir)
 			deepStrictEqual(store.loadEnabledProjections("tenant-a"), [projection()])
-			deepStrictEqual(store.listReady(), [event()])
+			deepStrictEqual(
+				store.listReady().events.map(({ event }) => event),
+				[event()],
+			)
 			const snapshot = join(dataDir, "backups", "snapshot", "control.sqlite")
 			const validation = await store.backupTo(snapshot)
 			deepStrictEqual(validation, {
@@ -142,9 +148,72 @@ describe("LocalEventingControlStore", () => {
 			const restoredStore = await LocalEventingControlStore.open(restored)
 			try {
 				deepStrictEqual(restoredStore.loadEnabledProjections("tenant-a"), [projection()])
-				deepStrictEqual(restoredStore.listReady(), [event()])
+				deepStrictEqual(
+					restoredStore.listReady().events.map(({ event }) => event),
+					[event()],
+				)
 			} finally {
 				restoredStore.close()
+			}
+		}))
+
+	it("checkpoints committed live WAL state before serializing", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir)
+			try {
+				store.saveProjection(projection())
+				store.stageEvents([event()])
+				store.markReady([event().id])
+				const walPath = `${eventingControlPath(dataDir)}-wal`
+				ok(existsSync(walPath))
+				ok(statSync(walPath).size > 0, "test requires uncheckpointed WAL frames")
+
+				const snapshot = join(dataDir, "backups", "live-wal", "control.sqlite")
+				await store.backupTo(snapshot)
+				strictEqual(statSync(walPath).size, 0)
+
+				const restored = join(dataDir, "restored-live-wal")
+				await LocalEventingControlStore.restoreSnapshot(snapshot, restored)
+				const restoredStore = await LocalEventingControlStore.open(restored)
+				try {
+					deepStrictEqual(restoredStore.loadEnabledProjections("tenant-a"), [projection()])
+					deepStrictEqual(
+						restoredStore.listReady().events.map(({ event }) => event),
+						[event()],
+					)
+				} finally {
+					restoredStore.close()
+				}
+			} finally {
+				store.close()
+			}
+		}))
+
+	it("paginates every ready event and applies fail-closed outbox capacity", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir, {
+				maxOutboxEvents: 2,
+				maxOutboxBytes: 1024 * 1024,
+			})
+			try {
+				const second = event({ id: "event-2", data: { iid: 43, title: "Second" } })
+				const third = event({ id: "event-3", data: { iid: 44, title: "Third" } })
+				const staged = store.stageEvents([event(), second])
+				store.markReady(staged.eventIds)
+
+				const firstPage = store.listReady(1)
+				strictEqual(firstPage.events.length, 1)
+				strictEqual(firstPage.nextCursor, firstPage.events[0]?.sequence)
+				const secondPage = store.listReady(1, firstPage.nextCursor!)
+				deepStrictEqual(
+					[...firstPage.events, ...secondPage.events].map(({ event }) => event.id),
+					[event().id, second.id],
+				)
+				strictEqual(secondPage.nextCursor, null)
+				deepStrictEqual(store.stageEvents([event()]).deduplicated, 1)
+				throws(() => store.stageEvents([third]), /outbox capacity exceeded/)
+			} finally {
+				store.close()
 			}
 		}))
 

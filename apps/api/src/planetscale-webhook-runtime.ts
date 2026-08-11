@@ -10,9 +10,10 @@ import {
 	deployRequestNumber,
 	insertPlanetScaleEvent,
 	planetScaleBranchName,
+	projectPlanetScaleWebhookEvent,
 	upsertPlanetScaleIssue,
 } from "./services/integrations/planetscale/webhook-events"
-import { PlanetScaleWebhookJob } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
+import { PlanetScaleWebhookQueueMessage } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
@@ -32,7 +33,7 @@ export const buildPlanetScaleWebhookLayer = (_env: Record<string, unknown>) => {
 
 export const flushPlanetScaleWebhookTelemetry = (env: Record<string, unknown>) => telemetry.flush(env)
 
-const decodeJob = Schema.decodeUnknownEffect(PlanetScaleWebhookJob)
+const decodeJob = Schema.decodeUnknownEffect(PlanetScaleWebhookQueueMessage)
 
 export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 	Effect.forEach(
@@ -54,7 +55,16 @@ export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 							),
 						),
 					onSuccess: (job) => {
-						const event = job.event
+						// Old jobs can remain in Cloudflare Queue across a deploy. Rebuild the
+						// event from the durable legacy fields instead of malformed-acking them.
+						const event =
+							job.event ??
+							projectPlanetScaleWebhookEvent({
+								orgId: job.orgId,
+								connectionId: job.connectionId,
+								payload: job.payload,
+								receivedAt: job.receivedAt,
+							})
 						const eventData =
 							typeof event.data === "object" &&
 							event.data !== null &&

@@ -39,7 +39,12 @@
 							"enum": ["string"]
 						},
 						"value": {
-							"type": "string"
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 4096
+								}
+							]
 						}
 					},
 					"required": ["type", "value"],
@@ -69,6 +74,9 @@
 						"value": {
 							"type": "string",
 							"allOf": [
+								{
+									"maxLength": 20
+								},
 								{
 									"pattern": "^-?(?:0|[1-9][0-9]*)$"
 								}
@@ -122,6 +130,9 @@
 							"type": "string",
 							"allOf": [
 								{
+									"maxLength": 20
+								},
+								{
 									"pattern": "^-?(?:0|[1-9][0-9]*)$"
 								}
 							]
@@ -145,7 +156,15 @@
 							"type": "array",
 							"items": {
 								"$ref": "#/$defs/SignalPredicate"
-							}
+							},
+							"allOf": [
+								{
+									"minItems": 1
+								},
+								{
+									"maxItems": 64
+								}
+							]
 						}
 					},
 					"required": ["op", "clauses"],
@@ -162,7 +181,15 @@
 							"type": "array",
 							"items": {
 								"$ref": "#/$defs/SignalPredicate"
-							}
+							},
+							"allOf": [
+								{
+									"minItems": 1
+								},
+								{
+									"maxItems": 64
+								}
+							]
 						}
 					},
 					"required": ["op", "clauses"],
@@ -227,7 +254,15 @@
 							"type": "array",
 							"items": {
 								"$ref": "#/$defs/SignalScalar"
-							}
+							},
+							"allOf": [
+								{
+									"minItems": 1
+								},
+								{
+									"maxItems": 100
+								}
+							]
 						}
 					},
 					"required": ["op", "field", "values"],

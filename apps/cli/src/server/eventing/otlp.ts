@@ -231,9 +231,11 @@ const boundedIdentity = (value: string, prefix: string): string =>
 		: `${prefix}:sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`
 
 const sourceUri = (resource: NormalizedAttributes, record: NormalizedAttributes): string => {
-	const explicit = stringAttribute(record, "event.source") ?? stringAttribute(record, "cloudevents.source")
+	const explicit = (
+		stringAttribute(record, "event.source") ?? stringAttribute(record, "cloudevents.source")
+	)?.trim()
 	if (explicit) return boundedIdentity(assertStringBound(explicit, "event source"), "urn:maple:source")
-	const service = stringAttribute(resource, "service.name")
+	const service = stringAttribute(resource, "service.name")?.trim()
 	const source = service
 		? `urn:maple:source:otel:${encodeURIComponent(service)}`
 		: "urn:maple:source:otel:local"
@@ -241,11 +243,11 @@ const sourceUri = (resource: NormalizedAttributes, record: NormalizedAttributes)
 }
 
 const sourceOccurrenceId = (record: NormalizedAttributes): string | null => {
-	const value =
-		stringAttribute(record, "event.id") ??
-		stringAttribute(record, "cloudevents.id") ??
-		stringAttribute(record, "gitlab.event.id")
-	return value === null ? null : boundedIdentity(value, "source")
+	for (const key of ["event.id", "cloudevents.id", "gitlab.event.id"]) {
+		const value = stringAttribute(record, key)?.trim()
+		if (value) return boundedIdentity(value, "source")
+	}
+	return null
 }
 
 const derivedOccurrenceId = (input: JsonValue): string =>
@@ -301,7 +303,7 @@ export const normalizeOtlpLogs = (
 					occurrenceId:
 						occurrenceId ??
 						derivedOccurrenceId({ source, occurredAt, signalKind: "otel.log", data }),
-					identityQuality: occurrenceId ? "source" : "derived",
+					identityQuality: occurrenceId === null ? "derived" : "source",
 					occurredAt,
 					observedAt: acceptedAt,
 					subject,

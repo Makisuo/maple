@@ -1,12 +1,21 @@
 import { Schema } from "effect"
 
+export const MAX_PREDICATE_DEPTH = 8
+export const MAX_PREDICATE_NODES = 64
+export const MAX_IN_VALUES = 100
+export const MAX_STRING_LITERAL_BYTES = 4 * 1024
+export const MAX_DECIMAL_INT64_LENGTH = 20
+
 const NonEmptyIdentifier = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(256),
 	Schema.isTrimmed(),
 )
 
-const DecimalInt64 = Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9][0-9]*)$/))
+const DecimalInt64 = Schema.String.check(
+	Schema.isMaxLength(MAX_DECIMAL_INT64_LENGTH),
+	Schema.isPattern(/^-?(?:0|[1-9][0-9]*)$/),
+)
 
 const Rfc3339Timestamp = Schema.String.check(
 	Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/),
@@ -14,7 +23,7 @@ const Rfc3339Timestamp = Schema.String.check(
 
 export const StringSignalScalar = Schema.Struct({
 	type: Schema.Literal("string"),
-	value: Schema.String,
+	value: Schema.String.check(Schema.isMaxLength(MAX_STRING_LITERAL_BYTES)),
 })
 
 export const BooleanSignalScalar = Schema.Struct({
@@ -108,11 +117,17 @@ export const SignalPredicateSchema: Schema.Codec<SignalPredicate, SignalPredicat
 		Schema.Union([
 			Schema.Struct({
 				op: Schema.Literal("all"),
-				clauses: Schema.Array(SignalPredicateSchema),
+				clauses: Schema.Array(SignalPredicateSchema).check(
+					Schema.isMinLength(1),
+					Schema.isMaxLength(MAX_PREDICATE_NODES),
+				),
 			}),
 			Schema.Struct({
 				op: Schema.Literal("any"),
-				clauses: Schema.Array(SignalPredicateSchema),
+				clauses: Schema.Array(SignalPredicateSchema).check(
+					Schema.isMinLength(1),
+					Schema.isMaxLength(MAX_PREDICATE_NODES),
+				),
 			}),
 			Schema.Struct({
 				op: Schema.Literal("not"),
@@ -130,7 +145,10 @@ export const SignalPredicateSchema: Schema.Codec<SignalPredicate, SignalPredicat
 			Schema.Struct({
 				op: Schema.Literal("in"),
 				field: FieldRefSchema,
-				values: Schema.Array(SignalScalarSchema),
+				values: Schema.Array(SignalScalarSchema).check(
+					Schema.isMinLength(1),
+					Schema.isMaxLength(MAX_IN_VALUES),
+				),
 			}),
 		]) as Schema.Codec<SignalPredicate, SignalPredicate>,
 ).annotate({ identifier: "SignalPredicate" })
