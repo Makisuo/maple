@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import * as m from "../paraglide/messages"
+import * as m from "../paraglide/messages.js"
 import { SIGNED_IN_EVENT } from "./auth-signal"
 
 /**

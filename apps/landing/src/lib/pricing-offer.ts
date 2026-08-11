@@ -14,7 +14,7 @@
  * other locale inherits it.
  */
 import { Autumn } from "autumn-js"
-import * as m from "../paraglide/messages"
+import * as m from "../paraglide/messages.js"
 
 const AUTUMN_API_VERSION = "2.3.0"
 
