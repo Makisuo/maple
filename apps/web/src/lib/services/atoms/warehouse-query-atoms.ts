@@ -151,7 +151,7 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 		// shipped). The inner query spans already export by re-providing this same
 		// (memoized) layer; this lifts the parent onto the same tracer.
 		let resultAtom = MapleApiAtomClient.runtime.atom(
-			Schema.decodeUnknownEffect(UnknownFromJson)(orgScopedKeyPayload(key)).pipe(
+			Schema.decodeEffect(UnknownFromJson)(orgScopedKeyPayload(key)).pipe(
 				Effect.mapError(
 					(cause) =>
 						new QueryAtomError({

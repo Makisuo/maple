@@ -28,7 +28,7 @@ import {
 import { UserId } from "@maple/domain/primitives"
 
 /** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
-const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
+const internalServiceUserId = Schema.decodeSync(UserId)("internal-service")
 
 /** Cloudflare Workflow binding that runs a fan-out. Present only in a Worker isolate. */
 export const INVESTIGATION_FANOUT_BINDING = "INVESTIGATION_FANOUT_WORKFLOW"

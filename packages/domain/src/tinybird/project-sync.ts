@@ -354,9 +354,7 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
 						)
 					}
 
-					const body = yield* Schema.decodeUnknownEffect(DeploymentStatusBodyFromJson)(
-						rawBody,
-					).pipe(
+					const body = yield* Schema.decodeEffect(DeploymentStatusBodyFromJson)(rawBody).pipe(
 						Effect.mapError(() =>
 							toUnavailableError(
 								`Tinybird returned invalid JSON from deployment status.\nResponse: ${rawBody}`,
@@ -402,7 +400,7 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
 						)
 					}
 
-					const body = yield* Schema.decodeUnknownEffect(DeploymentsListBodyFromJson)(rawBody).pipe(
+					const body = yield* Schema.decodeEffect(DeploymentsListBodyFromJson)(rawBody).pipe(
 						Effect.mapError(() =>
 							toUnavailableError(
 								`Tinybird returned invalid JSON from deployments list.\nResponse: ${rawBody}`,
@@ -488,9 +486,7 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
 					)
 				}
 
-				const deployBody = yield* Schema.decodeUnknownEffect(DeployResponseFromJson)(
-					deployRawBody,
-				).pipe(
+				const deployBody = yield* Schema.decodeEffect(DeployResponseFromJson)(deployRawBody).pipe(
 					Effect.mapError(() =>
 						toUnavailableError(
 							`Tinybird returned invalid JSON from /v1/deploy.\nResponse: ${deployRawBody}`,

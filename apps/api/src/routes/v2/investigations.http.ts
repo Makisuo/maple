@@ -82,7 +82,7 @@ const toWireSubject = Effect.fn("HttpV2Investigations.toWireSubject")(function* 
 		})
 	return yield* Match.value(subject.incidentKind).pipe(
 		Match.when("error", () =>
-			Schema.decodeUnknownEffect(ErrorIncidentId)(subject.incidentId).pipe(
+			Schema.decodeEffect(ErrorIncidentId)(subject.incidentId).pipe(
 				Effect.catchTag("SchemaError", () => Effect.fail(decodeFailure())),
 				Effect.map((incidentId) => ({
 					...shared,
@@ -92,7 +92,7 @@ const toWireSubject = Effect.fn("HttpV2Investigations.toWireSubject")(function* 
 			),
 		),
 		Match.when("anomaly", () =>
-			Schema.decodeUnknownEffect(AnomalyIncidentId)(subject.incidentId).pipe(
+			Schema.decodeEffect(AnomalyIncidentId)(subject.incidentId).pipe(
 				Effect.catchTag("SchemaError", () => Effect.fail(decodeFailure())),
 				Effect.map((incidentId) => ({
 					...shared,
@@ -102,7 +102,7 @@ const toWireSubject = Effect.fn("HttpV2Investigations.toWireSubject")(function* 
 			),
 		),
 		Match.when("alert", () =>
-			Schema.decodeUnknownEffect(AlertIncidentId)(subject.incidentId).pipe(
+			Schema.decodeEffect(AlertIncidentId)(subject.incidentId).pipe(
 				Effect.catchTag("SchemaError", () => Effect.fail(decodeFailure())),
 				Effect.map((incidentId) => ({
 					...shared,
@@ -131,14 +131,14 @@ const toInternalSubject = (subject: V2InvestigationCreateSubject): Investigation
 			})
 
 const toInternalSnapshot = (snapshot: V2InvestigationCreateParams["snapshot"] | undefined) =>
-	snapshot === undefined ? undefined : Schema.decodeUnknownSync(InvestigationSubjectSnapshot)(snapshot)
+	snapshot === undefined ? undefined : Schema.decodeSync(InvestigationSubjectSnapshot)(snapshot)
 
 const toV2Investigation = Effect.fn("HttpV2Investigations.toV2Investigation")(function* (
 	doc: InvestigationDocument,
 ): Effect.fn.Return<V2Investigation, InvestigationSubjectDecodeError> {
 	yield* Effect.annotateCurrentSpan("investigationId", doc.id)
 	const decodeReportTraceId = (traceId: string) =>
-		Schema.decodeUnknownEffect(TraceId)(traceId).pipe(
+		Schema.decodeEffect(TraceId)(traceId).pipe(
 			Effect.catchTag("SchemaError", () =>
 				Effect.fail(
 					new InvestigationSubjectDecodeError({

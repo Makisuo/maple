@@ -1,8 +1,8 @@
 import { Effect, Schema } from "effect"
 import { RoleName } from "@maple/domain/http"
 
-const ROOT_ROLE = Schema.decodeUnknownSync(RoleName)("root")
-const ORG_ADMIN_ROLE = Schema.decodeUnknownSync(RoleName)("org:admin")
+const ROOT_ROLE = Schema.decodeSync(RoleName)("root")
+const ORG_ADMIN_ROLE = Schema.decodeSync(RoleName)("org:admin")
 
 const ADMIN_ROLES: ReadonlyArray<RoleName> = [ROOT_ROLE, ORG_ADMIN_ROLE]
 

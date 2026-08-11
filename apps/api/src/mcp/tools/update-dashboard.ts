@@ -50,7 +50,7 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 			const persistence = yield* DashboardPersistenceService
 
 			const portable = dashboard_json
-				? yield* Schema.decodeUnknownEffect(PortableDashboardFromJson)(dashboard_json).pipe(
+				? yield* Schema.decodeEffect(PortableDashboardFromJson)(dashboard_json).pipe(
 						Effect.mapError(
 							(cause) =>
 								new McpQueryError({

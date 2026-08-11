@@ -9,10 +9,10 @@ import type { TemplateParameterValues, WidgetDef } from "./types"
 // Brand makers — used inside template definitions for compile-time correctness
 
 export const templateId = (value: string): DashboardTemplateId =>
-	Schema.decodeUnknownSync(DashboardTemplateId)(value)
+	Schema.decodeSync(DashboardTemplateId)(value)
 
 export const paramKey = (value: string): DashboardTemplateParameterKey =>
-	Schema.decodeUnknownSync(DashboardTemplateParameterKey)(value)
+	Schema.decodeSync(DashboardTemplateParameterKey)(value)
 
 const decodePortableDashboard = Schema.decodeUnknownSync(PortableDashboardDocument)
 
