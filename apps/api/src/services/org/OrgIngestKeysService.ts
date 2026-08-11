@@ -16,7 +16,7 @@ import {
 	parseIngestKeyLookupHmacKey,
 	type ResolvedIngestKey,
 } from "@maple/db"
-import { eq } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import {
 	decryptAes256Gcm,
@@ -84,8 +84,58 @@ const decryptPrivateKey = (
 		toEncryptionError("Failed to decrypt private ingest key"),
 	)
 
+const encryptSessionSalt = (
+	plaintext: string,
+	encryptionKey: Buffer,
+): Effect.Effect<EncryptedValue, IngestKeyEncryptionError> =>
+	encryptAes256Gcm(plaintext, encryptionKey, () => toEncryptionError("Failed to encrypt org session salt"))
+
+const decryptSessionSalt = (
+	encrypted: EncryptedValue,
+	encryptionKey: Buffer,
+): Effect.Effect<string, IngestKeyEncryptionError> =>
+	decryptAes256Gcm(encrypted, encryptionKey, () => toEncryptionError("Failed to decrypt org session salt"))
+
 const generatePublicKey = () => `maple_pk_${randomBytes(24).toString("base64url")}`
 const generatePrivateKey = () => `maple_sk_${randomBytes(24).toString("base64url")}`
+
+const SESSION_SALT_BYTES = 32
+
+/**
+ * Generates a per-org secret salt for AI session-key hashing.
+ *
+ * The ingest gateway hashes every inbound session key as
+ * `cityHash64(concat(salt, '\0', value))`, so the raw session key never reaches
+ * the warehouse and the same key under two orgs produces two unrelated hashes.
+ * Ingest reads the encrypted triple from its existing `org_ingest_keys` SELECT
+ * on the cached auth path and decrypts it with the same
+ * `MAPLE_INGEST_KEY_ENCRYPTION_KEY` — that read is wired up in a later stage;
+ * this service only provisions the value.
+ *
+ * The salt is deliberately AAD-free (like the private-key triple) so the Rust
+ * side decrypts with a plain AES-256-GCM primitive, and the plaintext is the
+ * base64url text itself — ingest concatenates the decrypted string verbatim,
+ * with no decoding step, so both languages agree on the bytes without a
+ * shared codec.
+ *
+ * **There is no rotation path, on purpose.** Re-salting changes every hash, so
+ * the SessionsApprox HLL sketches stop deduplicating across the boundary: one
+ * live session counts twice, and every session-count series gets a permanent
+ * step at the rotation instant. Treat the salt as write-once per org; if it must
+ * ever change (key compromise), accept the discontinuity explicitly rather than
+ * adding a reroll button. It is never exposed over HTTP and never enters the
+ * AI registry.
+ */
+const generateSessionSalt = () => randomBytes(SESSION_SALT_BYTES).toString("base64url")
+
+const readSessionSalt = (row: typeof orgIngestKeys.$inferSelect): Option.Option<EncryptedValue> =>
+	row.sessionSaltCiphertext === null || row.sessionSaltIv === null || row.sessionSaltTag === null
+		? Option.none()
+		: Option.some({
+				ciphertext: row.sessionSaltCiphertext,
+				iv: row.sessionSaltIv,
+				tag: row.sessionSaltTag,
+			})
 
 export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>()(
 	"@maple/api/services/OrgIngestKeysService",
@@ -145,6 +195,58 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 				})
 			})
 
+			/**
+			 * Backfills the session salt for rows created before the column existed.
+			 *
+			 * Race safety: the fill is a conditional `UPDATE … WHERE
+			 * session_salt_ciphertext IS NULL` with `RETURNING`, so at most one writer
+			 * ever lands a salt for an org — Postgres serializes the concurrent
+			 * updates on the row lock and the loser's predicate no longer matches, so
+			 * it returns zero rows and re-reads the winner's value instead of keeping
+			 * its own. Two simultaneous fills therefore cannot hand two readers
+			 * different salts, which would silently split an org's session hashes.
+			 *
+			 * `updatedAt`/`updatedBy` are intentionally left alone: this is a system
+			 * backfill, not an edit by whichever user's request happened to trigger it.
+			 */
+			const ensureSessionSalt = Effect.fnUntraced(function* (row: typeof orgIngestKeys.$inferSelect) {
+				if (Option.isSome(readSessionSalt(row))) return row
+
+				const encryptedSalt = yield* encryptSessionSalt(generateSessionSalt(), encryptionKey)
+				const claimed = yield* database
+					.execute((db) =>
+						db
+							.update(orgIngestKeys)
+							.set({
+								sessionSaltCiphertext: encryptedSalt.ciphertext,
+								sessionSaltIv: encryptedSalt.iv,
+								sessionSaltTag: encryptedSalt.tag,
+							})
+							.where(
+								and(
+									eq(orgIngestKeys.orgId, row.orgId),
+									isNull(orgIngestKeys.sessionSaltCiphertext),
+								),
+							)
+							.returning(),
+					)
+					.pipe(Effect.mapError(toPersistenceError))
+
+				const won = Option.fromNullishOr(claimed[0])
+				if (Option.isSome(won)) return won.value
+
+				const reread = yield* selectRow(row.orgId)
+				if (Option.isNone(reread)) {
+					return yield* Effect.fail(
+						new IngestKeyPersistenceError({
+							message: "Failed to load org session salt after backfill",
+						}),
+					)
+				}
+
+				return reread.value
+			})
+
 			// Untraced for the same reason as `selectRow`: on the steady-state path it
 			// early-returns and contributes nothing but a duplicate span.
 			const ensureRow = Effect.fnUntraced(function* (orgId: OrgId, userId: UserId) {
@@ -158,11 +260,14 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 
 				const existing = yield* selectRow(orgId)
 				if (Option.isSome(existing)) {
+					// Backfill BEFORE memoizing, so the memo never caches a saltless row
+					// and re-runs the fill for the rest of the TTL.
+					const filled = yield* ensureSessionSalt(existing.value)
 					ingestKeysMemo.set(orgId, {
-						row: existing.value,
+						row: filled,
 						expiresAt: now + ORG_INGEST_KEYS_MEMO_TTL_MS,
 					})
-					return existing.value
+					return filled
 				}
 
 				const publicKey = generatePublicKey()
@@ -170,6 +275,7 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 				const publicKeyHash = hashIngestKey(publicKey, lookupHmacKey)
 				const privateKeyHash = hashIngestKey(privateKey, lookupHmacKey)
 				const encryptedPrivate = yield* encryptPrivateKey(privateKey, encryptionKey)
+				const encryptedSalt = yield* encryptSessionSalt(generateSessionSalt(), encryptionKey)
 
 				yield* database
 					.execute((db) =>
@@ -183,6 +289,9 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 								privateKeyIv: encryptedPrivate.iv,
 								privateKeyTag: encryptedPrivate.tag,
 								privateKeyHash,
+								sessionSaltCiphertext: encryptedSalt.ciphertext,
+								sessionSaltIv: encryptedSalt.iv,
+								sessionSaltTag: encryptedSalt.tag,
 								publicRotatedAt: new Date(now),
 								privateRotatedAt: new Date(now),
 								createdAt: new Date(now),
@@ -202,12 +311,16 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 						}),
 					)
 				}
+				// Our own insert always carries a salt, but `onConflictDoNothing` may
+				// have lost to an isolate still running pre-salt code mid-deploy — in
+				// which case the row we just read has none. No-op otherwise.
+				const filled = yield* ensureSessionSalt(row.value)
 				ingestKeysMemo.set(orgId, {
-					row: row.value,
+					row: filled,
 					expiresAt: now + ORG_INGEST_KEYS_MEMO_TTL_MS,
 				})
 
-				return row.value
+				return filled
 			})
 
 			const getOrCreate = Effect.fn("OrgIngestKeysService.getOrCreate")(function* (
@@ -216,6 +329,29 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 			) {
 				const row = yield* ensureRow(orgId, userId)
 				return yield* toResponse(row)
+			})
+
+			/**
+			 * The org's decrypted session salt, provisioning it if the row predates the
+			 * column. Server-internal only — see {@link generateSessionSalt} for what
+			 * it salts and why it must not be rotated. Returned `Redacted` because it
+			 * has no user-facing surface and must never reach a log or a response.
+			 */
+			const getSessionSalt = Effect.fn("OrgIngestKeysService.getSessionSalt")(function* (
+				orgId: OrgId,
+				userId: UserId,
+			) {
+				const row = yield* ensureRow(orgId, userId)
+				const encrypted = readSessionSalt(row)
+				if (Option.isNone(encrypted)) {
+					return yield* Effect.fail(
+						new IngestKeyPersistenceError({
+							message: "Org session salt is missing after provisioning",
+						}),
+					)
+				}
+
+				return Redacted.make(yield* decryptSessionSalt(encrypted.value, encryptionKey))
 			})
 
 			const rerollPublic = Effect.fn("OrgIngestKeysService.rerollPublic")(function* (
@@ -336,6 +472,7 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 
 			return {
 				getOrCreate,
+				getSessionSalt,
 				rerollPublic,
 				rerollPrivate,
 				resolveIngestKey,
@@ -347,6 +484,9 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 
 	static readonly getOrCreate = (orgId: OrgId, userId: UserId) =>
 		this.use((service) => service.getOrCreate(orgId, userId))
+
+	static readonly getSessionSalt = (orgId: OrgId, userId: UserId) =>
+		this.use((service) => service.getSessionSalt(orgId, userId))
 
 	static readonly rerollPublic = (orgId: OrgId, userId: UserId) =>
 		this.use((service) => service.rerollPublic(orgId, userId))

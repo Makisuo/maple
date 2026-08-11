@@ -202,6 +202,7 @@ export const ConfigResourceServiceStubsLayer = Layer.mergeAll(
 	}),
 	Layer.succeed(OrgIngestKeysService, {
 		getOrCreate: die,
+		getSessionSalt: die,
 		rerollPublic: die,
 		rerollPrivate: die,
 		resolveIngestKey: die,
