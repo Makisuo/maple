@@ -86,7 +86,20 @@ import {
 	warehouseDateTimeToIso,
 	formatWarehouseDateTime,
 } from "@maple/query-engine"
-import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
+import {
+	Array as Arr,
+	Cause,
+	Clock,
+	Context,
+	Effect,
+	HashSet,
+	Layer,
+	Match,
+	Option,
+	Ref,
+	Schedule,
+	Schema,
+} from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { isErrorTickClaimLost, persistErrorTickWindow } from "@/services/errors/error-tick-persistence"
@@ -209,20 +222,15 @@ const issueSeverityOrder = sql<number>`CASE ${errorIssues.severity}
 	ELSE 4
 END`
 
-const severitySortRank = (severity: IssueSeverity | null): number => {
-	switch (severity) {
-		case "critical":
-			return 0
-		case "high":
-			return 1
-		case "medium":
-			return 2
-		case "low":
-			return 3
-		case null:
-			return 4
-	}
-}
+const severitySortRank = (severity: IssueSeverity | null): number =>
+	Match.value(severity).pipe(
+		Match.when("critical", () => 0),
+		Match.when("high", () => 1),
+		Match.when("medium", () => 2),
+		Match.when("low", () => 3),
+		Match.when(null, () => 4),
+		Match.exhaustive,
+	)
 
 export const describeCause = (cause: unknown): string | undefined => {
 	if (cause == null) return undefined
@@ -862,7 +870,7 @@ const make: Effect.Effect<
 	// Issue row -> document mapping
 
 	const collectActorDocs = (orgId: OrgId, actorIds: ReadonlyArray<ActorId | null>) => {
-		const filtered = Array.from(new Set(actorIds.filter((v): v is ActorId => v != null)))
+		const filtered = Arr.dedupe(Arr.filter(actorIds, (id): id is ActorId => id != null))
 		if (filtered.length === 0) return Effect.succeed(new Map<ActorId, ActorDocument>())
 		return dbExecute((db) =>
 			db
@@ -2094,7 +2102,7 @@ const make: Effect.Effect<
 			// Dispatch re-filters by org anyway (no cross-org leak), but a typo'd
 			// or foreign ID would otherwise only surface much later as a silently
 			// "skipped" escalation with reason no_enabled_destinations.
-			const referencedIds = Array.from(new Set(request.rules.flatMap((rule) => rule.destinationIds)))
+			const referencedIds = Arr.dedupe(Arr.flatMap(request.rules, (rule) => rule.destinationIds))
 			if (referencedIds.length > 0) {
 				const ownedRows = yield* dbExecute((db) =>
 					db
@@ -2107,8 +2115,8 @@ const make: Effect.Effect<
 							),
 						),
 				)
-				const owned = new Set(ownedRows.map((row) => row.id))
-				const unknown = referencedIds.filter((id) => !owned.has(id))
+				const owned = HashSet.fromIterable(Arr.map(ownedRows, (row) => row.id))
+				const unknown = Arr.filter(referencedIds, (id) => !HashSet.has(owned, id))
 				if (unknown.length > 0) {
 					return yield* Effect.fail(
 						new ErrorValidationError({
@@ -2173,7 +2181,7 @@ const make: Effect.Effect<
 		const policy = yield* loadEscalationPolicyRow(orgId)
 		const rules =
 			policy == null ? [] : Option.getOrElse(decodeEscalationRules(policy.rulesJson), () => [])
-		const referencedIds = Array.from(new Set(rules.flatMap((rule) => rule.destinationIds)))
+		const referencedIds = Arr.dedupe(Arr.flatMap(rules, (rule) => rule.destinationIds))
 		const enabledRows =
 			referencedIds.length === 0
 				? []

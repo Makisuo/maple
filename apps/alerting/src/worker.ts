@@ -26,7 +26,7 @@ import {
 	WarehouseQueryService,
 } from "@maple/api/alerting"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
-import { runScheduledEffect, WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
+import { layerFromEnv, layerFromEnvRecord, runScheduledEffect } from "@maple/effect-cloudflare"
 import { Cause, Effect, Layer, Match } from "effect"
 
 // Module-scope construction; `flush(env)` resolves env on first call. The
@@ -39,11 +39,18 @@ const telemetry = MapleCloudflareSDK.make({
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
-const buildLayer = (_env: Record<string, unknown>) => {
-	const ConfigLive = WorkerConfigProviderLayer
+interface AlertingWorkerEnv {
+	readonly [key: string]: unknown
+}
+
+const buildLayer = (env: AlertingWorkerEnv) => {
+	// Keep config and binding services on the same invocation-scoped env record;
+	// scheduled handlers already receive the authoritative Cloudflare bindings.
+	const ConfigLive = layerFromEnv(env)
+	const WorkerEnvironmentLive = layerFromEnvRecord(env)
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
 
-	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
+	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironmentLive))
 
 	const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
 
@@ -72,7 +79,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 	// EmailService resolves the Cloudflare Email Service `EMAIL` binding from
 	// WorkerEnvironment (delivery binding) in addition to EnvLive (EMAIL_FROM).
 	const EmailServiceLive = EmailService.layer.pipe(
-		Layer.provide(Layer.mergeAll(EnvLive, WorkerEnvironment.layer)),
+		Layer.provide(Layer.mergeAll(EnvLive, WorkerEnvironmentLive)),
 	)
 
 	const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(EnvLive))
@@ -90,7 +97,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 				HazelOAuthServiceLive,
 				EmailServiceLive,
 				OrgMembersServiceLive,
-				WorkerEnvironment.layer,
+				WorkerEnvironmentLive,
 			),
 		),
 	)
@@ -112,19 +119,14 @@ const buildLayer = (_env: Record<string, unknown>) => {
 				WarehouseQueryServiceLive,
 				EdgeCacheServiceLive,
 				NotificationDispatcherLive,
-				WorkerEnvironment.layer,
+				WorkerEnvironmentLive,
 			),
 		),
 	)
 
 	const AnomalyDetectionServiceLive = AnomalyDetectionService.layer.pipe(
 		Layer.provide(
-			Layer.mergeAll(
-				BaseLive,
-				WarehouseQueryServiceLive,
-				EdgeCacheServiceLive,
-				WorkerEnvironment.layer,
-			),
+			Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, EdgeCacheServiceLive, WorkerEnvironmentLive),
 		),
 	)
 
@@ -186,137 +188,152 @@ const catchTickFailure = (label: string) =>
 			: Effect.logError(label).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) })),
 	)
 
-const alertTick = Effect.gen(function* () {
-	const alerts = yield* AlertsService
-	const result = yield* alerts.runSchedulerTick()
-	yield* Effect.logInfo("Alerting worker tick complete").pipe(
-		Effect.annotateLogs({
-			evaluatedCount: result.evaluatedCount,
-			processedCount: result.processedCount,
-			evaluationFailureCount: result.evaluationFailureCount,
-			deliveryFailureCount: result.deliveryFailureCount,
-		}),
-	)
-}).pipe(Effect.withSpan("alerting.scheduler_tick"), catchTickFailure("Alerting worker tick failed"))
+interface TickAnnotations {
+	readonly [key: string]: unknown
+}
 
-const errorTick = Effect.gen(function* () {
-	const errors = yield* ErrorsService
-	const result = yield* errors.runTick()
-	yield* Effect.logInfo("Errors worker tick complete").pipe(
-		Effect.annotateLogs({
-			orgsProcessed: result.orgsProcessed,
-			issuesTouched: result.issuesTouched,
-			incidentsOpened: result.incidentsOpened,
-			incidentsResolved: result.incidentsResolved,
-			issuesReopened: result.issuesReopened,
-			issuesArchived: result.issuesArchived,
-			issuesDeleted: result.issuesDeleted,
-			retentionRan: result.retentionRan,
+const makeTick = <A, E, R>(
+	run: Effect.Effect<A, E, R>,
+	spanKey: string,
+	label: string,
+	annotationsFor: (result: A) => TickAnnotations | undefined,
+): Effect.Effect<void, never, R> =>
+	run.pipe(
+		Effect.tap((result) => {
+			const annotations = annotationsFor(result)
+			return annotations === undefined
+				? Effect.succeed(undefined)
+				: Effect.logInfo(`${label} complete`).pipe(Effect.annotateLogs(annotations))
 		}),
+		Effect.asVoid,
+		Effect.withSpan(`alerting.${spanKey}_tick`),
+		catchTickFailure(`${label} failed`),
 	)
-}).pipe(Effect.withSpan("alerting.error_tick"), catchTickFailure("Errors worker tick failed"))
 
-const escalationTick = Effect.gen(function* () {
-	const escalations = yield* EscalationService
-	const result = yield* escalations.runEscalationTick()
-	if (result.processed > 0) {
-		yield* Effect.logInfo("Escalation tick complete").pipe(
-			Effect.annotateLogs({
-				processed: result.processed,
-				sent: result.sent,
-				skipped: result.skipped,
-				failed: result.failed,
-				retried: result.retried,
-			}),
-		)
-	}
-}).pipe(Effect.withSpan("alerting.escalation_tick"), catchTickFailure("Escalation tick failed"))
+const alertTick = makeTick(
+	AlertsService.use((alerts) => alerts.runSchedulerTick()),
+	"scheduler",
+	"Alerting worker tick",
+	(result) => ({
+		evaluatedCount: result.evaluatedCount,
+		processedCount: result.processedCount,
+		evaluationFailureCount: result.evaluationFailureCount,
+		deliveryFailureCount: result.deliveryFailureCount,
+	}),
+)
 
-const digestTick = Effect.gen(function* () {
-	const digest = yield* DigestService
-	const result = yield* digest.runDigestTick()
-	yield* Effect.logInfo("Digest tick complete").pipe(
-		Effect.annotateLogs({
-			sentCount: result.sentCount,
-			errorCount: result.errorCount,
-			skipped: result.skipped,
-		}),
-	)
-}).pipe(Effect.withSpan("alerting.digest_tick"), catchTickFailure("Digest tick failed"))
+const errorTick = makeTick(
+	ErrorsService.use((errors) => errors.runTick()),
+	"error",
+	"Errors worker tick",
+	(result) => ({
+		orgsProcessed: result.orgsProcessed,
+		issuesTouched: result.issuesTouched,
+		incidentsOpened: result.incidentsOpened,
+		incidentsResolved: result.incidentsResolved,
+		issuesReopened: result.issuesReopened,
+		issuesArchived: result.issuesArchived,
+		issuesDeleted: result.issuesDeleted,
+		retentionRan: result.retentionRan,
+	}),
+)
+
+const escalationTick = makeTick(
+	EscalationService.use((escalations) => escalations.runEscalationTick()),
+	"escalation",
+	"Escalation tick",
+	(result) =>
+		result.processed > 0
+			? {
+					processed: result.processed,
+					sent: result.sent,
+					skipped: result.skipped,
+					failed: result.failed,
+					retried: result.retried,
+				}
+			: undefined,
+)
+
+const digestTick = makeTick(
+	DigestService.use((digest) => digest.runDigestTick()),
+	"digest",
+	"Digest tick",
+	(result) => ({
+		sentCount: result.sentCount,
+		errorCount: result.errorCount,
+		skipped: result.skipped,
+	}),
+)
 
 // The onboarding drip moved to maple-portal (`camp_onboarding`), which owns the
 // sequence, its send log and its suppression list. `org_onboarding_state` stays
 // here — the in-app checklist still uses the rest of that table — and so do its
 // four `*_email_sent_at` columns, which are what the portal's backfill reads.
 
-const serviceMapRollupTick = Effect.gen(function* () {
-	const rollup = yield* ServiceMapRollupService
-	const result = yield* rollup.runRollupTick()
-	yield* Effect.logInfo("Service map rollup tick complete").pipe(
-		Effect.annotateLogs({
-			orgsProcessed: result.orgsProcessed,
-			hoursRolledUp: result.hoursRolledUp,
-			edgesWritten: result.edgesWritten,
-			resolutionsWritten: result.resolutionsWritten,
-			resolutionHoursChecked: result.resolutionHoursChecked,
-			emptyResolutionHours: result.emptyResolutionHours,
-			orgFailures: result.orgFailures,
-		}),
-	)
-}).pipe(
-	Effect.withSpan("alerting.service_map_rollup_tick"),
-	catchTickFailure("Service map rollup tick failed"),
+const serviceMapRollupTick = makeTick(
+	ServiceMapRollupService.use((rollup) => rollup.runRollupTick()),
+	"service_map_rollup",
+	"Service map rollup tick",
+	(result) => ({
+		orgsProcessed: result.orgsProcessed,
+		hoursRolledUp: result.hoursRolledUp,
+		edgesWritten: result.edgesWritten,
+		resolutionsWritten: result.resolutionsWritten,
+		resolutionHoursChecked: result.resolutionHoursChecked,
+		emptyResolutionHours: result.emptyResolutionHours,
+		orgFailures: result.orgFailures,
+	}),
 )
 
-const anomalyTick = Effect.gen(function* () {
-	const anomalies = yield* AnomalyDetectionService
-	const result = yield* anomalies.runTick()
-	yield* Effect.logInfo("Anomaly detection tick complete").pipe(
-		Effect.annotateLogs({
-			orgsProcessed: result.orgsProcessed,
-			seriesEvaluated: result.seriesEvaluated,
-			incidentsOpened: result.incidentsOpened,
-			incidentsAttached: result.incidentsAttached,
-			incidentsReopened: result.incidentsReopened,
-			incidentsContinued: result.incidentsContinued,
-			incidentsResolved: result.incidentsResolved,
-			orgFailures: result.orgFailures,
-		}),
-	)
-}).pipe(Effect.withSpan("alerting.anomaly_tick"), catchTickFailure("Anomaly detection tick failed"))
-
-const cloudflareAnalyticsTick = Effect.gen(function* () {
-	const analytics = yield* CloudflareAnalyticsService
-	const result = yield* analytics.pollAllOrgs()
-	yield* Effect.logInfo("Cloudflare analytics tick complete").pipe(
-		Effect.annotateLogs({
-			orgs: result.orgs,
-			rowsIngested: result.rowsIngested,
-			skipped: result.skipped,
-			failures: result.failures,
-			perOrg: result.perOrg,
-		}),
-	)
-}).pipe(
-	Effect.withSpan("alerting.cloudflare_analytics_tick"),
-	catchTickFailure("Cloudflare analytics tick failed"),
+const anomalyTick = makeTick(
+	AnomalyDetectionService.use((anomalies) => anomalies.runTick()),
+	"anomaly",
+	"Anomaly detection tick",
+	(result) => ({
+		orgsProcessed: result.orgsProcessed,
+		seriesEvaluated: result.seriesEvaluated,
+		incidentsOpened: result.incidentsOpened,
+		incidentsAttached: result.incidentsAttached,
+		incidentsReopened: result.incidentsReopened,
+		incidentsContinued: result.incidentsContinued,
+		incidentsResolved: result.incidentsResolved,
+		orgFailures: result.orgFailures,
+	}),
 )
 
-const planetScaleTick = Effect.gen(function* () {
-	const planetscale = yield* PlanetScaleService
-	const result = yield* planetscale.pollAllOrgs()
-	if (result.orgs > 0) {
-		yield* Effect.logInfo("PlanetScale poll tick complete").pipe(
-			Effect.annotateLogs({
-				orgs: result.orgs,
-				refreshed: result.refreshed,
-				skipped: result.skipped,
-				failures: result.failures,
-				deployEvents: result.deployEvents,
-			}),
-		)
-	}
-}).pipe(Effect.withSpan("alerting.planetscale_tick"), catchTickFailure("PlanetScale poll tick failed"))
+const cloudflareAnalyticsTick = makeTick(
+	CloudflareAnalyticsService.use((analytics) => analytics.pollAllOrgs()),
+	"cloudflare_analytics",
+	"Cloudflare analytics tick",
+	(result) => ({
+		orgs: result.orgs,
+		rowsIngested: result.rowsIngested,
+		skipped: result.skipped,
+		failures: result.failures,
+		perOrg: result.perOrg,
+	}),
+)
+
+const planetScaleTick = makeTick(
+	PlanetScaleService.use((planetscale) => planetscale.pollAllOrgs()),
+	"planetscale",
+	"PlanetScale poll tick",
+	(result) =>
+		result.orgs > 0
+			? {
+					orgs: result.orgs,
+					refreshed: result.refreshed,
+					skipped: result.skipped,
+					failures: result.failures,
+					deployEvents: result.deployEvents,
+				}
+			: undefined,
+)
+
+const everyMinuteTick = Effect.all([alertTick, errorTick, escalationTick], {
+	concurrency: 2,
+	discard: true,
+})
 
 interface ScheduledEventLike {
 	readonly cron: string
@@ -329,7 +346,7 @@ interface ExecutionContextLike {
 export default {
 	async scheduled(
 		event: ScheduledEventLike,
-		env: Record<string, unknown>,
+		env: AlertingWorkerEnv,
 		ctx: ExecutionContextLike,
 	): Promise<void> {
 		// Non-prod stages (stg, PR previews) share live org data — stg's Hyperdrive
@@ -356,11 +373,13 @@ export default {
 			),
 			Match.when("*/15 * * * *", () => digestTick),
 			Match.when("0 * * * *", () => serviceMapRollupTick),
-			Match.orElse(() =>
-				Effect.all([alertTick, errorTick, escalationTick], {
-					concurrency: 2,
-					discard: true,
-				}),
+			Match.when("* * * * *", () => everyMinuteTick),
+			// Fail closed: a newly configured cron must not silently inherit the
+			// every-minute alert/error/escalation fan-out.
+			Match.orElse((cron) =>
+				Effect.logWarning("Skipping unknown alerting cron schedule").pipe(
+					Effect.annotateLogs({ cron }),
+				),
 			),
 		)
 		try {

@@ -1201,7 +1201,7 @@ const make = Effect.gen(function* () {
 		)
 
 		// firstSeenAt per fingerprint so young issues stay with first_seen handling.
-		const fingerprints = [...new Set(spikes.observations.map((o) => o.fingerprintHash))]
+		const fingerprints = Arr.dedupe(Arr.map(spikes.observations, (o) => o.fingerprintHash))
 		const issueRows =
 			fingerprints.length === 0
 				? []

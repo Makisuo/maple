@@ -90,6 +90,7 @@ import {
 	Array as Arr,
 	Cause,
 	Clock,
+	Chunk,
 	Effect,
 	HashSet,
 	Layer,
@@ -866,15 +867,12 @@ const tagsFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
  */
 const normalizeTags = (tags: ReadonlyArray<string> | undefined): ReadonlyArray<string> => {
 	if (!tags || tags.length === 0) return []
-	const seen = new Set<string>()
-	const result: string[] = []
-	for (const raw of tags) {
-		const tag = raw.trim().toLowerCase()
-		if (tag.length === 0 || seen.has(tag)) continue
-		seen.add(tag)
-		result.push(tag)
-	}
-	return result
+	return Arr.dedupe(
+		Arr.filter(
+			Arr.map(tags, (tag) => tag.trim().toLowerCase()),
+			(tag) => tag.length > 0,
+		),
+	)
 }
 
 /** Most recent evaluation error for a rule, aggregated across its group states. */
@@ -3797,7 +3795,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				evaluation: EvaluatedRule,
 				groupKey: string,
 				timestamp: number,
-				pendingChecks: Ref.Ref<AlertChecksRow[]>,
+				pendingChecks: Ref.Ref<Chunk.Chunk<AlertChecksRow>>,
 				issueBudget: Ref.Ref<number>,
 				prefetch: TickPrefetch,
 			) {
@@ -4252,10 +4250,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// Buffer instead of POSTing per-evaluation; the scheduler tick flushes
 				// all rows once at the end (one POST per orgId). Awaited flush keeps
 				// the Cloudflare Worker isolate alive across the batch write.
-				yield* Ref.update(pendingChecks, (rows) => {
-					rows.push(checkRow)
-					return rows
-				})
+				yield* Ref.update(pendingChecks, Chunk.append(checkRow))
 			})
 
 			/* -------------------------------------------------------------------------- */
@@ -4906,7 +4901,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// Incremented from fibers running under the concurrent per-rule forEach
 				// below, so it must be a Ref rather than a mutable closure variable.
 				const evaluationFailureCount = yield* Ref.make(0)
-				const pendingChecks = yield* Ref.make<AlertChecksRow[]>([])
+				// Chunk keeps concurrent Ref appends immutable without copying the whole
+				// tick buffer on every write; flatten only at the existing flush boundary.
+				const pendingChecks = yield* Ref.make(Chunk.empty<AlertChecksRow>())
 				const issueBudget = yield* Ref.make(ISSUE_UPSERTS_PER_TICK)
 
 				// Two housekeeping statements used to run per rule, inside the loop.
@@ -4921,12 +4918,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// the same rules: the self-heal delete is skipped on the multi-service
 				// path (which returns early), while the error clear applies to every
 				// rule that evaluated cleanly.
-				const selfHealTargets = yield* Ref.make<
-					Array<{ readonly orgId: OrgId; readonly ruleId: AlertRuleId; readonly grouped: boolean }>
-				>([])
-				const clearErrorTargets = yield* Ref.make<
-					Array<{ readonly orgId: OrgId; readonly ruleId: AlertRuleId }>
-				>([])
+				const selfHealTargets = yield* Ref.make(
+					Chunk.empty<{
+						readonly orgId: OrgId
+						readonly ruleId: AlertRuleId
+						readonly grouped: boolean
+					}>(),
+				)
+				const clearErrorTargets = yield* Ref.make(
+					Chunk.empty<{ readonly orgId: OrgId; readonly ruleId: AlertRuleId }>(),
+				)
 
 				const recordEvaluationFailure = Effect.fnUntraced(function* (
 					row: AlertRuleRow,
@@ -4963,8 +4964,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 					// Audit row: a failed evaluation is a check that produced no
 					// observation — record it so the check history has no silent gaps.
-					yield* Ref.update(pendingChecks, (checks) => {
-						checks.push({
+					yield* Ref.update(
+						pendingChecks,
+						Chunk.append({
 							OrgId: row.orgId,
 							RuleId: row.id,
 							GroupKey: UNGROUPED_GROUP_KEY,
@@ -4985,9 +4987,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							EvaluationDurationMs: 0,
 							ErrorMessage: message,
 							ErrorCategory: failureCategory,
-						})
-						return checks
-					})
+						}),
+					)
 
 					// Persist the failure to alert_rule_states so listRules/Electric can
 					// surface it. Churn-gated (the states shape is Electric-synced): skip
@@ -5164,10 +5165,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								// defer: it is scoped to this rule and this rule's own writes are
 								// already done, so end-of-tick is the same state it would have seen
 								// here.
-								yield* Ref.update(selfHealTargets, (targets) => {
-									targets.push({ orgId: row.orgId, ruleId: row.id, grouped })
-									return targets
-								})
+								yield* Ref.update(
+									selfHealTargets,
+									Chunk.append({ orgId: row.orgId, ruleId: row.id, grouped }),
+								)
 
 								yield* Metric.update(
 									AlertingMetrics.ruleEvaluationDurationMs,
@@ -5184,10 +5185,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								// reach here are cleared, so a rule that failed this tick keeps the
 								// `lastError` that `recordEvaluationFailure` just wrote for it.
 								Effect.tap(() =>
-									Ref.update(clearErrorTargets, (targets) => {
-										targets.push({ orgId: row.orgId, ruleId: row.id })
-										return targets
-									}),
+									Ref.update(
+										clearErrorTargets,
+										Chunk.append({ orgId: row.orgId, ruleId: row.id }),
+									),
 								),
 								Effect.catchTags({
 									"@maple/http/errors/AlertValidationError": (error) =>
@@ -5222,8 +5223,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				)
 
 				yield* flushRuleStateHousekeeping(
-					yield* Ref.get(selfHealTargets),
-					yield* Ref.get(clearErrorTargets),
+					Chunk.toReadonlyArray(yield* Ref.get(selfHealTargets)),
+					Chunk.toReadonlyArray(yield* Ref.get(clearErrorTargets)),
 					tickStart,
 				)
 
@@ -5252,7 +5253,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// orgId. Awaited so the Cloudflare Worker isolate stays alive until
 				// the writes complete; errors are logged then swallowed because the
 				// authoritative state already lives in Postgres above.
-				const accumulatedChecks = yield* Ref.getAndSet(pendingChecks, [])
+				const accumulatedChecks = yield* Ref.getAndSet(pendingChecks, Chunk.empty())
 				if (accumulatedChecks.length > 0) {
 					const byOrg = new Map<string, AlertChecksRow[]>()
 					for (const check of accumulatedChecks) {

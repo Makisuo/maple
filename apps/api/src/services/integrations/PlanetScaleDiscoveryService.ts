@@ -7,7 +7,20 @@ import {
 } from "@maple/domain/http"
 import { globToRegExp } from "@maple/domain/glob"
 import type { scrapeTargets } from "@maple/db"
-import { Clock, Context, Deferred, Duration, Effect, Layer, Redacted, Ref, Schema } from "effect"
+import {
+	Clock,
+	Context,
+	Deferred,
+	Duration,
+	Effect,
+	HashMap,
+	Layer,
+	Option,
+	Redacted,
+	Ref,
+	Result,
+	Schema,
+} from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Env } from "@/platform/Env"
@@ -227,7 +240,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 			(message) => new ScrapeTargetEncryptionError({ message }),
 		)
 
-		const cache = yield* Ref.make(new Map<string, CacheEntry>())
+		const cache = yield* Ref.make(HashMap.empty<string, CacheEntry>())
 
 		// In-flight refresh dedup keyed by target id (the bucket-cache/edge-cache
 		// idiom): N per-branch scrapes that miss the TTL together must share one
@@ -369,7 +382,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 		const discover = Effect.fn("PlanetScaleDiscoveryService.discover")(function* (row: ScrapeTargetRow) {
 			yield* Effect.annotateCurrentSpan({ orgId: row.orgId })
 			const now = yield* Clock.currentTimeMillis
-			const cached = (yield* Ref.get(cache)).get(row.id)
+			const cached = Option.getOrUndefined(HashMap.get(yield* Ref.get(cache), row.id))
 			if (cached && now - cached.fetchedAt < DISCOVERY_TTL_MS) {
 				return cached.entries
 			}
@@ -386,18 +399,19 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 			inFlight.set(row.id, { await: Deferred.await(deferred) })
 
 			const refresh = Effect.gen(function* () {
-				const fresh = yield* fetchSubTargets(row).pipe(
-					Effect.map((entries) => ({ ok: true as const, entries })),
-					Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
-				)
-				if (fresh.ok) {
-					yield* Ref.update(cache, (map) =>
-						new Map(map).set(row.id, { fetchedAt: now, entries: fresh.entries, lastError: null }),
+				const fresh = yield* Effect.result(fetchSubTargets(row))
+				if (Result.isSuccess(fresh)) {
+					yield* Ref.update(cache, (entries) =>
+						HashMap.set(entries, row.id, {
+							fetchedAt: now,
+							entries: fresh.success,
+							lastError: null,
+						}),
 					)
-					return fresh.entries
+					return fresh.success
 				}
 
-				const message = fresh.error.message
+				const message = fresh.failure.message
 
 				if (cached) {
 					// Serve stale entries through transient discovery failures; keep the
@@ -405,13 +419,13 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 					yield* Effect.logWarning("PlanetScale discovery failed; serving stale targets").pipe(
 						Effect.annotateLogs({ scrapeTargetId: row.id, error: message }),
 					)
-					yield* Ref.update(cache, (map) =>
-						new Map(map).set(row.id, { ...cached, lastError: message }),
+					yield* Ref.update(cache, (entries) =>
+						HashMap.set(entries, row.id, { ...cached, lastError: message }),
 					)
 					return cached.entries
 				}
 
-				return yield* Effect.fail(fresh.error)
+				return yield* Effect.fail(fresh.failure)
 			})
 
 			return yield* refresh.pipe(
@@ -427,14 +441,17 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 		})
 
 		const lastError = (targetId: string) =>
-			Ref.get(cache).pipe(Effect.map((map) => map.get(targetId)?.lastError ?? null))
+			Ref.get(cache).pipe(
+				Effect.map((map) =>
+					Option.match(HashMap.get(map, targetId), {
+						onNone: () => null,
+						onSome: (entry) => entry.lastError,
+					}),
+				),
+			)
 
 		const invalidate = (targetId: string) =>
-			Ref.update(cache, (map) => {
-				const next = new Map(map)
-				next.delete(targetId)
-				return next
-			}).pipe(
+			Ref.update(cache, HashMap.remove(targetId)).pipe(
 				// Callers invalidate after credential/org changes — a later discover
 				// must start a fresh fetch, not join one issued with the old creds.
 				Effect.tap(Effect.sync(() => inFlight.delete(targetId))),

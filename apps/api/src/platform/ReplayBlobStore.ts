@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option } from "effect"
+import { Array as Arr, Context, Effect, Layer, Option } from "effect"
 import { R2Bucket, type R2BucketClient } from "@maple/effect-cloudflare/r2-bucket"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 
@@ -97,7 +97,7 @@ const makeHydrate =
 				)
 			},
 			{ concurrency: FETCH_CONCURRENCY },
-		).pipe(Effect.map((results) => results.filter(Option.isSome).map((result) => result.value)))
+		).pipe(Effect.map(Arr.getSomes))
 
 export class ReplayBlobStore extends Context.Service<ReplayBlobStore, ReplayBlobStoreShape>()(
 	"@maple/api/platform/ReplayBlobStore",

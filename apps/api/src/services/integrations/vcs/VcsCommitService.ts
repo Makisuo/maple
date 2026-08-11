@@ -13,7 +13,7 @@ import {
 	type VcsProviderId,
 	type VcsRepo,
 } from "@maple/domain/http"
-import { Clock, Context, Effect, Layer, Option, Result, Schema } from "effect"
+import { Array as Arr, Clock, Context, Effect, Layer, Option, Result, Schema } from "effect"
 import { VcsProviderRegistry } from "./VcsProviderRegistry"
 import { VcsRepository } from "./VcsRepository"
 
@@ -368,14 +368,9 @@ export class VcsCommitService extends Context.Service<VcsCommitService, VcsCommi
 				// dropped silently here. The singular endpoint still reports them as
 				// VcsCommitShaInvalidError; in a list they're just rows that render
 				// their raw reference, which is what the table does anyway.
-				const shas: Array<GitCommitSha> = []
-				const seen = new Set<string>()
-				for (const raw of rawShas) {
-					if (seen.has(raw)) continue
-					seen.add(raw)
-					const decoded = yield* decodeSha(raw).pipe(Effect.option)
-					if (Option.isSome(decoded)) shas.push(decoded.value)
-				}
+				const shas = Arr.getSomes(
+					yield* Effect.forEach(Arr.dedupe(rawShas), (raw) => decodeSha(raw).pipe(Effect.option)),
+				)
 				if (shas.length === 0) return [] as ReadonlyArray<VcsCommitDetail>
 
 				// 1. One read for every stored commit, then one read for the repos they
@@ -408,7 +403,7 @@ export class VcsCommitService extends Context.Service<VcsCommitService, VcsCommi
 					{ concurrency: BULK_PROBE_CONCURRENCY },
 				)
 
-				return [...details, ...probed.filter(Option.isSome).map((option) => option.value)]
+				return [...details, ...Arr.getSomes(probed)]
 			})
 
 			return { resolveCommitDetail, resolveCommitDetails } satisfies VcsCommitServiceShape
