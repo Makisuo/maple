@@ -6,14 +6,16 @@ import {
 	InvestigationCreateRequest,
 	InvestigationDocument,
 	InvestigationFanout,
+	InvestigationAgentUnavailableError,
+	InvestigationAutomationDisabledError,
 	InvestigationLensRun,
 	InvestigationNotFoundError,
 	InvestigationPersistenceError,
 	InvestigationQuotaError,
 	InvestigationRejectedError,
+	InvestigationStartFailedError,
 	InvestigationSnapshotFact,
 	InvestigationSubjectSnapshot,
-	InvestigationUnavailableError,
 	InvestigationValidator,
 	InvestigationsListResponse,
 	type InvestigationStatus,
@@ -197,7 +199,9 @@ export interface InvestigationServiceShape {
 		| InvestigationPersistenceError
 		| InvestigationQuotaError
 		| InvestigationRejectedError
-		| InvestigationUnavailableError
+		| InvestigationAutomationDisabledError
+		| InvestigationAgentUnavailableError
+		| InvestigationStartFailedError
 	>
 	readonly restartInvestigation: (
 		orgId: OrgId,
@@ -208,7 +212,9 @@ export interface InvestigationServiceShape {
 		| InvestigationNotFoundError
 		| InvestigationQuotaError
 		| InvestigationRejectedError
-		| InvestigationUnavailableError
+		| InvestigationAutomationDisabledError
+		| InvestigationAgentUnavailableError
+		| InvestigationStartFailedError
 	>
 	readonly updateStatus: (
 		orgId: OrgId,
@@ -447,10 +453,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				const settings = yield* loadSettings(orgId)
 				if (automatic && (settings === undefined || !settings.enabled)) {
 					return yield* Effect.fail(
-						new InvestigationUnavailableError({
+						new InvestigationAutomationDisabledError({
 							message: "Automatic investigations are disabled for this organization.",
-							reason: "automation_disabled",
-							retryable: false,
 						}),
 					)
 				}
@@ -537,10 +541,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						nowMs,
 					)
 					return yield* Effect.fail(
-						new InvestigationUnavailableError({
+						new InvestigationAgentUnavailableError({
 							message: "The investigation fan-out workflow is not configured.",
-							reason: "agent_unavailable",
-							retryable: true,
 						}),
 					)
 				}
@@ -602,10 +604,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						nowMs,
 					)
 					return yield* Effect.fail(
-						new InvestigationUnavailableError({
+						new InvestigationStartFailedError({
 							message: "The investigation fan-out could not be started.",
-							reason: "start_failed",
-							retryable: true,
 						}),
 					)
 				}
@@ -644,10 +644,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						nowMs,
 					)
 					return yield* Effect.fail(
-						new InvestigationUnavailableError({
+						new InvestigationAgentUnavailableError({
 							message: "The investigation agent is temporarily unavailable.",
-							reason: "agent_unavailable",
-							retryable: true,
 						}),
 					)
 				}
@@ -682,10 +680,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					// means the pass is already under way — or the Durable Object could not be
 					// reached. Both are retryable: the caller's restart path sees the row next time.
 					return yield* Effect.fail(
-						new InvestigationUnavailableError({
+						new InvestigationStartFailedError({
 							message: "This investigation already has a turn in flight.",
-							reason: "start_failed",
-							retryable: true,
 						}),
 					)
 				}

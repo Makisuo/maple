@@ -360,9 +360,13 @@ describe("v2 slack integration over HTTP", () => {
 		)
 		expect(status).toBe(403)
 		expect(body.error).toEqual({
+			_tag: "@maple/http/v2/insufficient_permissions",
 			type: "permission_error",
 			code: "insufficient_permissions",
+			title: "Permission required",
 			message: "Only org admins can install the Slack app",
+			retryable: false,
+			recovery: "request_access",
 		})
 		expect(called).toBe(false)
 		await harness.dispose()
@@ -449,9 +453,13 @@ describe("v2 slack integration over HTTP", () => {
 		const { status, body } = await harness.request("DELETE", "/v2/integrations/slack", member.secret)
 		expect(status).toBe(403)
 		expect(body.error).toEqual({
+			_tag: "@maple/http/v2/insufficient_permissions",
 			type: "permission_error",
 			code: "insufficient_permissions",
+			title: "Permission required",
 			message: "Only org admins can uninstall the Slack app",
+			retryable: false,
+			recovery: "request_access",
 		})
 		expect(called).toBe(false)
 		await harness.dispose()
@@ -538,9 +546,13 @@ describe("v2 slack integration over HTTP", () => {
 		)
 		expect(status).toBe(403)
 		expect(body.error).toEqual({
+			_tag: "@maple/http/v2/insufficient_permissions",
 			type: "permission_error",
 			code: "insufficient_permissions",
+			title: "Permission required",
 			message: "Only org admins can list Slack channels",
+			retryable: false,
+			recovery: "request_access",
 		})
 		expect(called).toBe(false)
 		await harness.dispose()

@@ -41,6 +41,38 @@ describe("formatBackendError", () => {
 		expect(result.recovery).toEqual({ kind: "retry", automatic: false })
 	})
 
+	it("trusts the backend tag, title, and recovery instead of inferring from status", () => {
+		const result = normalizeAppError({
+			error: {
+				_tag: "@maple/http/errors/WarehouseQuotaExceededError",
+				type: "rate_limit_error",
+				code: "rate_limited",
+				title: "Query was too expensive",
+				message: "Narrow the time range or add filters.",
+				retryable: false,
+				recovery: "fix_request",
+				retry_after_seconds: 15,
+			},
+		})
+		expect(result.title).toBe("Query was too expensive")
+		expect(result.recovery).toEqual({ kind: "fix-input" })
+		expect(result.retryAfterSeconds).toBe(15)
+		expect(result.tag).toBe("@maple/http/errors/WarehouseQuotaExceededError")
+		expect(result.diagnostics.tag).toBe("@maple/http/errors/WarehouseQuotaExceededError")
+	})
+
+	it("uses an explicit non-retryable flag even during a partial metadata rollout", () => {
+		const result = formatBackendError({
+			error: {
+				type: "rate_limit_error",
+				code: "query_limit",
+				message: "Narrow the query before trying again.",
+				retryable: false,
+			},
+		})
+		expect(result.recovery).toEqual({ kind: "none" })
+	})
+
 	it("keeps v2 parameter and documentation metadata for field-level UI", () => {
 		const input = {
 			error: {

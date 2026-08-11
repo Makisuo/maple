@@ -1,4 +1,4 @@
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpServerRequest } from "effect/unstable/http"
 import { CurrentTenant, RoleName } from "@maple/domain/http"
 import {
 	AuthorizationV2,
@@ -92,16 +92,9 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						})
 
 						if (rateLimitOutcome === "limited") {
-							yield* HttpEffect.appendPreResponseHandler((_request, response) =>
-								Effect.succeed(
-									HttpServerResponse.setHeader(
-										response,
-										"Retry-After",
-										String(API_V2_RATE_LIMIT_PERIOD_SECONDS),
-									),
-								),
+							return yield* Effect.fail(
+								rateLimited({ retryAfterSeconds: API_V2_RATE_LIMIT_PERIOD_SECONDS }),
 							)
-							return yield* Effect.fail(rateLimited())
 						}
 
 						const required = requiredScopeForRequest(request.method, requestPath(request.url))

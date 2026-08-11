@@ -436,18 +436,36 @@ describe("v2 error envelope", () => {
 		expect(String(error)).toContain("No such api_key")
 	})
 
-	it("encodes exactly the Stripe envelope with no _tag", () => {
+	it("encodes the semantic tag and recovery contract inside the public envelope", () => {
 		const error = notFound("No such api_key", "id")
 		const wire = Schema.encodeSync(V2NotFoundError)(error) as Record<string, unknown>
 		expect(wire).toEqual({
 			error: {
+				_tag: "@maple/http/v2/resource_missing",
 				type: "not_found_error",
 				code: "resource_missing",
+				title: "Not found",
 				message: "No such api_key",
+				retryable: false,
+				recovery: "none",
 				param: "id",
 			},
 		})
+		// `_tag` is part of the nested public contract, not an Effect class tag
+		// injected at the outer envelope level.
 		expect("_tag" in wire).toBe(false)
+	})
+
+	it("decodes the pre-metadata envelope during rolling upgrades", () => {
+		const decoded = Schema.decodeUnknownSync(V2NotFoundError)({
+			error: {
+				type: "not_found_error",
+				code: "resource_missing",
+				message: "gone",
+			},
+		})
+		expect(decoded.error._tag).toBeUndefined()
+		expect(decoded.error.retryable).toBeUndefined()
 	})
 
 	it("omits param when not provided", () => {
@@ -464,9 +482,14 @@ describe("v2 error envelope", () => {
 	it("rateLimited has the stable public 429 envelope", () => {
 		expect(Schema.encodeSync(V2RateLimitError)(rateLimited())).toEqual({
 			error: {
+				_tag: "@maple/http/v2/rate_limited",
 				type: "rate_limit_error",
 				code: "rate_limited",
+				title: "Too many requests",
 				message: "Too many requests. Retry after 60 seconds.",
+				retryable: true,
+				recovery: "retry",
+				retry_after_seconds: 60,
 			},
 		})
 	})

@@ -51,8 +51,11 @@ const addRateLimitResponseHeaders = <S extends OpenApiSpec>(spec: S): S => {
 			response.headers = {
 				...response.headers,
 				"Retry-After": {
-					description: "Seconds to wait before retrying the request.",
-					schema: { type: "integer", minimum: 1 },
+					description:
+						"Seconds to wait or an HTTP-date indicating when the request may be retried.",
+					schema: {
+						oneOf: [{ type: "integer", minimum: 1 }, { type: "string" }],
+					},
 					example: 60,
 				},
 			}
@@ -111,7 +114,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 				"- **Object IDs** are opaque, prefixed strings (`key_…`, `dash_…`) — reversible encodings of internal IDs.",
 				"- **Wire format** is snake_case JSON with an `object` type field on every resource and ISO-8601 UTC timestamps.",
 				'- **Lists** use cursor pagination and a uniform `{ object: "list", data, has_more, next_cursor }` envelope.',
-				"- **Errors** use a uniform `{ error: { type, code, message } }` envelope with a closed set of `type`s and stable `code`s.",
+				"- **Errors** use a uniform `{ error: { _tag, type, code, title, message, retryable, recovery } }` envelope. `_tag` is the semantic Maple error identity; `code` remains the stable public integration key.",
 				"- **Auth** is a Bearer API key (`maple_ak_…`) or dashboard session token; keys can be restricted with scopes.",
 				"",
 				"See `docs/api-v2.md` for the full conventions.",

@@ -10,25 +10,20 @@ import {
 	InvestigationId,
 	InvestigationIncidentSubject,
 	InvestigationSubjectSnapshot,
-	type InvestigationNotFoundError,
-	type InvestigationPersistenceError,
-	type InvestigationQuotaError,
-	type InvestigationRejectedError,
-	type InvestigationUnavailableError,
+	type InvestigationHttpError,
 	TraceId,
 } from "@maple/domain/http"
 import {
-	MapleApiV2,
 	dependencyUnavailable,
-	investigationQuotaReached,
+	investigationErrorToV2,
+	MapleApiV2,
 	paginateOffsetQuery,
-	resourceNotFound,
-	upstreamError,
 } from "@maple/domain/http/v2"
 import type {
 	V2Investigation,
 	V2InvestigationCreateParams,
 	V2InvestigationCreateSubject,
+	V2InvestigationErrorFor,
 	V2InvestigationSubject,
 } from "@maple/domain/http/v2"
 import { Effect, Match, Schema } from "effect"
@@ -210,80 +205,13 @@ const toV2Investigation = Effect.fn("HttpV2Investigations.toV2Investigation")(fu
 	}
 })
 
-/** Service tagged errors → v2 envelope errors (no 404 on the contract). */
-const mapPersistenceError =
+/** One domain boundary for every typed investigation failure. */
+const mapInvestigationErrors =
 	(operation: string) =>
-	<A, R>(effect: Effect.Effect<A, InvestigationPersistenceError, R>) =>
-		effect.pipe(
-			Effect.catchTag("@maple/http/investigations/InvestigationPersistenceError", () =>
-				Effect.fail(dependencyUnavailable(`investigation_${operation}_unavailable`)),
-			),
-		)
-
-/** Service tagged errors → v2 envelope errors (endpoints with a 404). */
-const mapWith404 =
-	(operation: string) =>
-	<A, R>(effect: Effect.Effect<A, InvestigationPersistenceError | InvestigationNotFoundError, R>) =>
-		effect.pipe(
-			Effect.catchTags({
-				"@maple/http/investigations/InvestigationNotFoundError": () =>
-					Effect.fail(resourceNotFound("investigation", "No such investigation.")),
-				"@maple/http/investigations/InvestigationPersistenceError": () =>
-					Effect.fail(dependencyUnavailable(`investigation_${operation}_unavailable`)),
-			}),
-		)
-
-const startErrorHandlers = {
-	"@maple/http/investigations/InvestigationPersistenceError": () =>
-		Effect.fail(dependencyUnavailable("investigation_start_unavailable")),
-	"@maple/http/investigations/InvestigationQuotaError": (error: InvestigationQuotaError) =>
-		Effect.fail(
-			investigationQuotaReached({
-				dimension: error.dimension,
-				limit: error.limit,
-				retryableAt: error.retryableAt,
-			}),
-		),
-	"@maple/http/investigations/InvestigationRejectedError": (error: InvestigationRejectedError) =>
-		Effect.fail(
-			upstreamError(
-				"investigation_start_rejected",
-				`The investigation agent rejected the start request with HTTP ${error.status}.`,
-			),
-		),
-	"@maple/http/investigations/InvestigationUnavailableError": (error: InvestigationUnavailableError) =>
-		Effect.fail(dependencyUnavailable(`investigation_${error.reason}`)),
-} as const
-
-const mapStartErrors = <A, R>(
-	effect: Effect.Effect<
-		A,
-		| InvestigationPersistenceError
-		| InvestigationNotFoundError
-		| InvestigationQuotaError
-		| InvestigationRejectedError
-		| InvestigationUnavailableError,
-		R
-	>,
-) =>
-	effect.pipe(
-		Effect.catchTags({
-			...startErrorHandlers,
-			"@maple/http/investigations/InvestigationNotFoundError": () =>
-				Effect.fail(resourceNotFound("investigation", "No such investigation.")),
-		}),
-	)
-
-const mapCreateStartErrors = <A, R>(
-	effect: Effect.Effect<
-		A,
-		| InvestigationPersistenceError
-		| InvestigationQuotaError
-		| InvestigationRejectedError
-		| InvestigationUnavailableError,
-		R
-	>,
-) => effect.pipe(Effect.catchTags(startErrorHandlers))
+	<A, E extends InvestigationHttpError, R>(
+		effect: Effect.Effect<A, E, R>,
+	): Effect.Effect<A, V2InvestigationErrorFor<E>, R> =>
+		effect.pipe(Effect.mapError(investigationErrorToV2(operation)))
 
 const mapSubjectDecodeError = (error: InvestigationSubjectDecodeError) =>
 	Effect.logError(error.message).pipe(
@@ -318,7 +246,7 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 								offset,
 							})
 							.pipe(
-								mapPersistenceError("list"),
+								mapInvestigationErrors("list"),
 								Effect.flatMap((response) =>
 									Effect.forEach(response.investigations, toV2Investigation),
 								),
@@ -336,7 +264,7 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 					const tenant = yield* CurrentTenant.Context
 					const doc = yield* service
 						.getInvestigation(tenant.orgId, params.id)
-						.pipe(mapWith404("retrieve"))
+						.pipe(mapInvestigationErrors("retrieve"))
 					return yield* toV2Investigation(doc).pipe(
 						Effect.catchTag(
 							"@maple/api/routes/v2/InvestigationSubjectDecodeError",
@@ -360,7 +288,7 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 							}),
 							{ automatic: false },
 						)
-						.pipe(mapCreateStartErrors)
+						.pipe(mapInvestigationErrors("start"))
 					return yield* toV2Investigation(doc).pipe(
 						Effect.catchTag(
 							"@maple/api/routes/v2/InvestigationSubjectDecodeError",
@@ -374,7 +302,7 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 					const tenant = yield* CurrentTenant.Context
 					const doc = yield* service
 						.restartInvestigation(tenant.orgId, params.id)
-						.pipe(mapStartErrors)
+						.pipe(mapInvestigationErrors("restart"))
 					return yield* toV2Investigation(doc).pipe(
 						Effect.catchTag(
 							"@maple/api/routes/v2/InvestigationSubjectDecodeError",
@@ -388,7 +316,7 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 					const tenant = yield* CurrentTenant.Context
 					const doc = yield* service
 						.updateStatus(tenant.orgId, params.id, payload.status)
-						.pipe(mapWith404("update_status"))
+						.pipe(mapInvestigationErrors("update_status"))
 					return yield* toV2Investigation(doc).pipe(
 						Effect.catchTag(
 							"@maple/api/routes/v2/InvestigationSubjectDecodeError",

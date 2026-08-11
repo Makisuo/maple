@@ -463,9 +463,13 @@ describe("v2 unexpected-error envelope", () => {
 		expect(response.status).toBe(500)
 		expect(response.body).toEqual({
 			error: {
+				_tag: "@maple/http/v2/organization/retrieve/UnexpectedError",
 				type: "api_error",
 				code: "internal_error",
+				title: "Something went wrong",
 				message: "An unexpected error occurred on our end.",
+				retryable: false,
+				recovery: "contact_support",
 			},
 		})
 		expect(JSON.stringify(response.body)).not.toContain("not available in this test harness")

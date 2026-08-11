@@ -1,5 +1,6 @@
 import { Effect, Layer, Schema } from "effect"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
+import { HttpEffect, HttpServerResponse } from "effect/unstable/http"
 import { apiError, invalidRequest, V2SchemaErrors, V2UnexpectedErrors } from "@maple/domain/http/v2"
 import { describeSchemaIssue } from "@/routes/schema-error-detail"
 
@@ -26,13 +27,21 @@ class V2RouteExecutionDefect extends Schema.TaggedError<V2RouteExecutionDefect>(
  */
 const V2SchemaErrorTransformLive = HttpApiMiddleware.layerSchemaErrorTransform(
 	V2SchemaErrors,
-	(schemaError) =>
+	(schemaError, { endpoint, group }) =>
 		Effect.suspend(() => {
+			const metadata = {
+				tag: `@maple/http/v2/${group.identifier}/${endpoint.identifier}/InvalidRequestError`,
+			} as const
 			const details = describeSchemaIssue(schemaError.cause.issue)
 			const first = details[0]
 			if (first === undefined) {
 				return Effect.fail(
-					invalidRequest("parameter_invalid", `Invalid request ${schemaError.kind.toLowerCase()}.`),
+					invalidRequest(
+						"parameter_invalid",
+						`Invalid request ${schemaError.kind.toLowerCase()}.`,
+						undefined,
+						metadata,
+					),
 				)
 			}
 			const remaining = details.length - 1
@@ -45,20 +54,44 @@ const V2SchemaErrorTransformLive = HttpApiMiddleware.layerSchemaErrorTransform(
 					"parameter_invalid",
 					`${first.line}${suffix}`,
 					first.path === "" ? undefined : first.path,
+					metadata,
 				),
 			)
 		}),
 )
 
+const retryAfterHeader = (failure: unknown): string | undefined => {
+	if (typeof failure !== "object" || failure === null || !("error" in failure)) return undefined
+	const error = (failure as { readonly error: unknown }).error
+	if (typeof error !== "object" || error === null) return undefined
+	if ("retry_after_seconds" in error && typeof error.retry_after_seconds === "number") {
+		return String(Math.max(1, Math.ceil(error.retry_after_seconds)))
+	}
+	if ("retry_at" in error && typeof error.retry_at === "string") {
+		const retryAt = new Date(error.retry_at)
+		if (Number.isFinite(retryAt.getTime())) return retryAt.toUTCString()
+	}
+	return undefined
+}
+
+const appendRetryAfter = (failure: unknown) => {
+	const value = retryAfterHeader(failure)
+	if (value === undefined) return Effect.void
+	return HttpEffect.appendPreResponseHandler((_request, response) =>
+		Effect.succeed(HttpServerResponse.setHeader(response, "Retry-After", value)),
+	)
+}
+
 export const V2UnexpectedErrorsLive = Layer.succeed(
 	V2UnexpectedErrors,
 	V2UnexpectedErrors.of((httpEffect, { endpoint, group }) =>
 		httpEffect.pipe(
+			Effect.tapError(appendRetryAfter),
 			Effect.catchDefect((cause) => {
 				const defectType = cause instanceof Error ? cause.name : typeof cause
 				const error = new V2RouteExecutionDefect({
 					group: group.identifier,
-					operation: endpoint.name,
+					operation: endpoint.identifier,
 					message: "Unexpected v2 route execution defect",
 					cause,
 				})
@@ -70,7 +103,13 @@ export const V2UnexpectedErrorsLive = Layer.succeed(
 						defectType,
 						cause: error.cause,
 					}),
-					Effect.andThen(Effect.fail(apiError())),
+					Effect.andThen(
+						Effect.fail(
+							apiError({
+								tag: `@maple/http/v2/${group.identifier}/${endpoint.identifier}/UnexpectedError`,
+							}),
+						),
+					),
 				)
 			}),
 		),
