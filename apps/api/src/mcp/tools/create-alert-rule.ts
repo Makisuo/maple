@@ -9,7 +9,7 @@ import {
 import { Effect, Match, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/alerts/AlertsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AlertRuleUpsertRequest } from "@maple/domain/http"
 
 const decodeAlertRuleRequest = Schema.decodeUnknownEffect(AlertRuleUpsertRequest)
@@ -330,7 +330,7 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			)
 
 			const tenant = yield* resolveTenant
-			const alerts = yield* AlertsService
+			const alerts = yield* AlertRulesService
 
 			const rule = yield* alerts.createRule(tenant.orgId, tenant.userId, tenant.roles, decoded).pipe(
 				Effect.catchTag("@maple/http/errors/AlertValidationError", (error) =>

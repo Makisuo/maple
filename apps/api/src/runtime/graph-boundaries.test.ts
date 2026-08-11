@@ -69,6 +69,7 @@ describe("API runtime graph boundaries", () => {
 
 		expect(layerMembers(source, "McpRuntimeServicesLive")).toEqual([
 			"AlertReadModelsServiceLive",
+			"AlertRulesServiceLive",
 			"AlertsServiceLive",
 			"DashboardPersistenceService.layer",
 			"ErrorActorsServiceLive",

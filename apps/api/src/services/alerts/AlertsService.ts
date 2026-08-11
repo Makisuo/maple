@@ -1,13 +1,4 @@
-import {
-	CompiledAlertQueryPlan,
-	QueryEngineAlertReducer,
-	QueryEngineNoDataBehavior,
-	type QueryEngineSampleCountStrategy,
-	QuerySpec,
-	formatWarehouseDateTime,
-} from "@maple/query-engine"
-import { buildTimeseriesQuerySpec, resolveGroupBy } from "@maple/query-engine/query-builder"
-import { prepareRawSql, type AlertBucketSource } from "@maple/query-engine/runtime"
+import { formatWarehouseDateTime } from "@maple/query-engine"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -21,26 +12,20 @@ import {
 	AlertIncidentStatus,
 	AlertNotFoundError,
 	AlertPersistenceError,
-	AlertRuleDeleteResponse,
 	AlertRuleDocument,
 	AlertRulePreviewFiringSpan,
 	AlertRulePreviewPoint,
 	AlertRulePreviewResponse,
 	AlertRulePreviewSeries,
 	type AlertRulePreviewRequest,
-	AlertRulesListResponse,
 	AlertSeverity as AlertSeveritySchema,
 	AlertSignalType as AlertSignalTypeSchema,
 	AlertValidationError,
-	QueryBuilderQueryDraftSchema,
 	AlertNotificationTemplate,
 	type AlertComparator,
 	type AlertDestinationType,
 	type AlertEventType as AlertEventTypeValue,
 	type AlertRuleUpsertRequest,
-	type QueryBuilderQueryDraftPayload,
-	type AlertSeverity,
-	type AlertSignalType,
 	type AlertGroupBy,
 	UNGROUPED_GROUP_KEY,
 	OrgId,
@@ -69,7 +54,7 @@ import {
 	alertRuleStates,
 	type AlertRuleStateRow,
 } from "@maple/db"
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or } from "drizzle-orm"
 import {
 	Array as Arr,
 	Cause,
@@ -97,7 +82,6 @@ import { probeLiveness } from "@/services/alerts/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
-import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { formatComparator } from "./AlertDeliveryDispatch"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
@@ -108,11 +92,19 @@ import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
-import { dateToMs } from "@/platform/time"
 import { AlertRuntime } from "./AlertRuntime"
 import { AlertDestinationsService, type AlertDestinationsServiceShape } from "./AlertDestinationsService"
 import { makeAlertDestinationDelivery, parseAlertDestinationEncryptionKey } from "./AlertDestinationDelivery"
 import { AlertReadModelsService, type AlertReadModelsServiceShape } from "./AlertReadModelsService"
+import { AlertRulesService, makeAlertRulePersistence, type AlertRulesServiceShape } from "./AlertRulesService"
+import {
+	compileRulePlan,
+	isGroupedPlan,
+	makeAlertValidationError as makeValidationError,
+	planEvaluateSource,
+	serviceNamesFromRow,
+	type NormalizedRule,
+} from "./AlertRuleModel"
 
 export { AlertRuntime, type AlertRuntimeShape } from "./AlertRuntime"
 
@@ -134,38 +126,6 @@ const WAREHOUSE_FAILURE_CATEGORIES = {
 	"@maple/http/errors/WarehouseQuotaExceededError": "tinybird_quota",
 	"@maple/http/errors/WarehouseValidationError": "tinybird_validation",
 } satisfies Record<WarehouseErrorTag, string>
-
-interface NormalizedRule {
-	readonly id: AlertRuleId
-	readonly name: string
-	readonly notificationTemplate: AlertNotificationTemplate | null
-	readonly enabled: boolean
-	readonly severity: AlertSeverity
-	readonly serviceName: string | null
-	readonly serviceNames: ReadonlyArray<string>
-	readonly excludeServiceNames: ReadonlyArray<string>
-	/** Deployment environments the rule is scoped to. Empty means all. */
-	readonly environments: ReadonlyArray<string>
-	readonly tags: ReadonlyArray<string>
-	readonly groupBy: AlertGroupBy | null
-	readonly signalType: AlertSignalType
-	readonly comparator: AlertComparator
-	readonly threshold: number
-	readonly thresholdUpper: number | null
-	readonly windowMinutes: number
-	readonly minimumSampleCount: number
-	readonly consecutiveBreachesRequired: number
-	readonly consecutiveHealthyRequired: number
-	readonly renotifyIntervalMinutes: number
-	readonly apdexThresholdMs: number | null
-	readonly queryBuilderDraft: QueryBuilderQueryDraftPayload | null
-	readonly rawQuerySql: string | null
-	readonly rawQueryReducer: QueryEngineAlertReducer | null
-	readonly destinationIds: ReadonlyArray<AlertDestinationId>
-	readonly compiledPlan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>
-	readonly createdAt: number
-	readonly updatedAt: number
-}
 
 interface EvaluatedRule {
 	readonly status: Schema.Schema.Type<typeof AlertEvaluationResult.fields.status>
@@ -233,16 +193,11 @@ const StoredDeliveryPayloadSchema = Schema.Struct({
 	template: Schema.optionalKey(Schema.NullOr(AlertNotificationTemplate)),
 })
 
-const StringArraySchema = Schema.Array(Schema.String)
-const DestinationIdArraySchema = Schema.Array(AlertDestinationDocument.fields.id)
-
 const AlertGroupByFromJson = Schema.fromJsonString(AlertGroupBySchema)
 
-const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.id)
 const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.id)
 const decodeAlertIncidentIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.id)
 const decodeAlertDeliveryEventIdSync = Schema.decodeUnknownSync(AlertDeliveryEventDocument.fields.id)
-const decodeQuerySpecSync = Schema.decodeUnknownSync(QuerySpec)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.createdAt)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
@@ -261,47 +216,6 @@ const parseStoredGroupBy = (raw: string | null): AlertGroupBy | null =>
 const isServiceGroupBy = (groupBy: AlertGroupBy | null): boolean =>
 	groupBy != null && groupBy.length === 1 && groupBy[0] === "service.name"
 
-/**
- * The compiled plan is the single authority on whether a rule evaluates
- * grouped. Rule-level `groupBy` and a builder draft's `groupBy` both funnel
- * into the compiled spec's tokens (`["none"]` when ungrouped), so evaluation
- * code must never consult those source representations — a builder_query rule
- * stores its grouping only in the draft and keeps rule-level `groupBy` null.
- */
-const planGroupingTokens = (
-	plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>,
-): ReadonlyArray<string> | null => {
-	if (plan.kind !== "spec" || plan.query == null || plan.query.kind !== "timeseries") return null
-	const groupBy = plan.query.groupBy
-	if (groupBy == null || groupBy.length === 0 || groupBy.includes("none")) return null
-	return groupBy
-}
-
-const isGroupedPlan = (plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>): boolean =>
-	plan.kind === "raw_sql" || planGroupingTokens(plan) != null
-
-/**
- * Turn a compiled plan into the query engine's evaluate source. This is the only
- * place the plan's `kind` is inspected on the evaluation path — everything
- * downstream (`evaluate`, `evaluateSeries`, preview, testRule) takes the source
- * and never branches on the rule kind again.
- */
-const planEvaluateSource = (
-	plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>,
-	windowMinutes: number,
-): Effect.Effect<AlertBucketSource, AlertValidationError> => {
-	if (plan.kind === "raw_sql") {
-		if (plan.rawSql == null) {
-			return Effect.fail(makeValidationError("Compiled alert plan is missing its SQL query"))
-		}
-		return Effect.succeed({ kind: "raw_sql", sql: plan.rawSql, windowMinutes })
-	}
-	if (plan.query == null || plan.sampleCountStrategy == null) {
-		return Effect.fail(makeValidationError("Compiled alert plan is missing its query spec"))
-	}
-	return Effect.succeed({ kind: "spec", query: plan.query })
-}
-
 const resolveServiceLinkName = (
 	rule: Pick<NormalizedRule, "serviceNames" | "groupBy">,
 	groupKey: string | null,
@@ -312,31 +226,14 @@ const resolveServiceLinkName = (
 	}
 	return null
 }
-const decodeQueryEngineAlertReducerSync = Schema.decodeUnknownSync(QueryEngineAlertReducer)
-const decodeNoDataBehaviorSync = Schema.decodeUnknownSync(QueryEngineNoDataBehavior)
-
-/** Parse the stored query-builder draft value; returns null when absent/invalid. */
-const parseStoredQueryBuilderDraft = (raw: unknown): QueryBuilderQueryDraftPayload | null => {
-	if (raw == null) return null
-	return Option.getOrElse(Schema.decodeUnknownOption(QueryBuilderQueryDraftSchema)(raw), () => null)
-}
-
 /** Parse the stored notification-template value; returns null when absent/invalid. */
 const parseStoredNotificationTemplate = (raw: unknown): AlertNotificationTemplate | null => {
 	if (raw == null) return null
 	return Option.getOrElse(Schema.decodeUnknownOption(AlertNotificationTemplate)(raw), () => null)
 }
 
-type IsoDateTimeValue = Schema.Schema.Type<typeof AlertDestinationDocument.fields.createdAt>
-
-const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
-
-const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
-	value == null ? null : decodeIsoDateTimeStringSync(value.toISOString())
-
 // Cap on how many evaluation windows a structured rule preview replays.
 const MAX_PREVIEW_BUCKETS = 200
-const MAX_ACTIVE_ALERT_RULES_PER_ORG = 100
 
 /** Preserve each org's oldest-first order while preventing one org from monopolizing a tick. */
 export const interleaveAlertRulesByOrg = <T extends { readonly orgId: string }>(
@@ -390,11 +287,6 @@ const compareThreshold = (
 		Match.exhaustive,
 	)
 
-const normalizeOptionalString = (value: string | null | undefined) => {
-	const trimmed = value?.trim()
-	return trimmed && trimmed.length > 0 ? trimmed : null
-}
-
 const makePersistenceError = (error: unknown) => {
 	const cause = describeCause(error instanceof Error ? error.cause : error)
 	return new AlertPersistenceError({
@@ -403,17 +295,12 @@ const makePersistenceError = (error: unknown) => {
 	})
 }
 
-const makeValidationError = (message: string, details: ReadonlyArray<string> = [], cause?: unknown) =>
-	new AlertValidationError({ message, details, ...(cause === undefined ? {} : { cause }) })
-
 const makeDeliveryError = (message: string, destinationType?: AlertDestinationType, cause?: unknown) =>
 	new AlertDeliveryError({
 		message,
 		destinationType,
 		...(cause === undefined ? {} : { cause }),
 	})
-
-const isAdmin = (roles: ReadonlyArray<RoleName>) => roles.some((role) => adminRoles.includes(role))
 
 type StoredDeliveryPayloadType = Schema.Schema.Type<typeof StoredDeliveryPayloadSchema>
 
@@ -424,310 +311,10 @@ const parseDeliveryPayload = (
 		Effect.mapError((cause) => makeValidationError("Stored delivery payload is invalid", [], cause)),
 	)
 
-const safeParseStringArray = (value: unknown): ReadonlyArray<string> =>
-	Option.getOrElse(Schema.decodeUnknownOption(StringArraySchema)(value), () => [] as ReadonlyArray<string>)
-
-const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (rule: {
-	readonly signalType: AlertSignalType
-	readonly serviceName: string | null
-	readonly environments: ReadonlyArray<string>
-	readonly apdexThresholdMs: number | null
-	readonly queryBuilderDraft: QueryBuilderQueryDraftPayload | null
-	readonly rawQuerySql: string | null
-	readonly rawQueryReducer: QueryEngineAlertReducer | null
-	readonly comparator: AlertComparator
-	readonly windowMinutes: number
-	readonly groupBy: AlertGroupBy | null
-}): Effect.fn.Return<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> {
-	const bucketSeconds = Math.max(rule.windowMinutes * 60, 60)
-	// Rule-level scope shared by the trace built-ins.
-	// `environments` is empty for builder_query / raw_query — those carry their
-	// own filters — so it never reaches those branches.
-	const envFilter = rule.environments.length > 0 ? { environments: rule.environments } : {}
-	const baseTraceFilters = {
-		...(rule.serviceName == null ? {} : { serviceName: rule.serviceName }),
-		...envFilter,
-	}
-
-	const noDataBehavior: QueryEngineNoDataBehavior =
-		rule.signalType === "throughput" && ["lt", "lte"].includes(rule.comparator) ? "zero" : "skip"
-
-	const traceSignalMetrics: Record<string, string> = {
-		error_rate: "error_rate",
-		p95_latency: "p95_duration",
-		p99_latency: "p99_duration",
-		throughput: "count",
-		apdex: "apdex",
-	}
-
-	/**
-	 * Resolve the rule's user-facing group_by tokens (e.g. ["service.name",
-	 * "attr.http.route"]) into the internal QuerySpec representation. Returns
-	 * null when there is no grouping (the spec then uses ["none"]).
-	 */
-	const resolveRuleGroupBy = (
-		source: "traces" | "logs" | "metrics",
-	): Effect.Effect<
-		{
-			tokens: ReadonlyArray<string>
-			attributeKeys: ReadonlyArray<string>
-			resourceAttributeKeys: ReadonlyArray<string>
-		} | null,
-		AlertValidationError
-	> => {
-		if (rule.groupBy == null || rule.groupBy.length === 0) return Effect.succeed(null)
-		const resolved = resolveGroupBy(source, rule.groupBy)
-		if (resolved.warnings.length > 0) {
-			return Effect.fail(
-				makeValidationError(`Invalid groupBy for ${source} alert`, [...resolved.warnings]),
-			)
-		}
-		if (resolved.tokens.length === 0) {
-			return Effect.fail(
-				makeValidationError(`groupBy did not resolve to any usable dimension for ${source}`),
-			)
-		}
-		if (source === "metrics" && resolved.attributeKeys.length > 1) {
-			return Effect.fail(
-				makeValidationError(
-					"Metrics alerts support at most one attr.* groupBy dimension",
-					resolved.attributeKeys.map(
-						(key) => `Unsupported additional metrics groupBy attribute: ${key}`,
-					),
-				),
-			)
-		}
-		if (source === "metrics" && resolved.resourceAttributeKeys.length > 1) {
-			return Effect.fail(
-				makeValidationError(
-					"Metrics alerts support at most one resource.* groupBy dimension",
-					resolved.resourceAttributeKeys.map(
-						(key) => `Unsupported additional metrics groupBy resource attribute: ${key}`,
-					),
-				),
-			)
-		}
-		if (
-			source === "metrics" &&
-			resolved.attributeKeys.length > 0 &&
-			resolved.resourceAttributeKeys.length > 0
-		) {
-			// The metrics queries carry a single attribute group column — the
-			// engine rejects combining both dimensions, so fail at compile time.
-			return Effect.fail(
-				makeValidationError("Metrics alerts cannot combine attr.* and resource.* groupBy dimensions"),
-			)
-		}
-		return Effect.succeed({
-			tokens: resolved.tokens,
-			attributeKeys: resolved.attributeKeys,
-			resourceAttributeKeys: resolved.resourceAttributeKeys,
-		})
-	}
-
-	let query: QuerySpec
-	let sampleCountStrategy: QueryEngineSampleCountStrategy
-
-	const traceMetric = traceSignalMetrics[rule.signalType]
-	if (traceMetric) {
-		const groupResolved = yield* resolveRuleGroupBy("traces")
-		const filters: Record<string, unknown> = { ...baseTraceFilters, rootSpansOnly: true }
-		if (groupResolved && groupResolved.attributeKeys.length > 0) {
-			filters.groupByAttributeKeys = [...groupResolved.attributeKeys]
-		}
-		query = decodeQuerySpecSync({
-			kind: "timeseries",
-			source: "traces",
-			metric: traceMetric,
-			groupBy: groupResolved ? [...groupResolved.tokens] : ["none"],
-			bucketSeconds,
-			...(rule.signalType === "apdex" ? { apdexThresholdMs: rule.apdexThresholdMs ?? 500 } : {}),
-			filters,
-		})
-		sampleCountStrategy = "trace_count"
-	} else if (rule.signalType === "builder_query") {
-		// Reuse the exact compiler that dashboard query-builder charts use, so
-		// an alert and a chart built from the same draft evaluate identically.
-		if (rule.queryBuilderDraft == null) {
-			return yield* Effect.fail(makeValidationError("builder_query alerts require a queryBuilderDraft"))
-		}
-		const built = buildTimeseriesQuerySpec(rule.queryBuilderDraft)
-		if (built.error != null || built.query == null) {
-			return yield* Effect.fail(
-				makeValidationError(built.error ?? "Failed to build query builder spec", [...built.warnings]),
-			)
-		}
-		// Force the evaluation window's bucket size; the draft's stepInterval is
-		// a chart-rendering concern and irrelevant to threshold evaluation.
-		query = decodeQuerySpecSync({ ...built.query, bucketSeconds })
-		sampleCountStrategy =
-			rule.queryBuilderDraft.dataSource === "logs"
-				? "log_count"
-				: rule.queryBuilderDraft.dataSource === "metrics"
-					? "metric_data_points"
-					: "trace_count"
-	} else if (rule.signalType === "raw_query") {
-		const sql = rule.rawQuerySql?.trim() ?? ""
-		if (sql.length === 0) {
-			return yield* Effect.fail(makeValidationError("raw_query alerts require rawQuerySql"))
-		}
-		if (!sql.includes("$__orgFilter")) {
-			return yield* Effect.fail(
-				makeValidationError("raw_query SQL must reference $__orgFilter for org scoping"),
-			)
-		}
-		return new CompiledAlertQueryPlan({
-			kind: "raw_sql",
-			query: null,
-			rawSql: sql,
-			reducer: rule.rawQueryReducer ?? "identity",
-			sampleCountStrategy: null,
-			noDataBehavior,
-		})
-	} else {
-		return yield* Effect.fail(makeValidationError(`Unsupported signal type: ${rule.signalType}`))
-	}
-
-	return new CompiledAlertQueryPlan({
-		kind: "spec",
-		query,
-		rawSql: null,
-		reducer: "identity",
-		sampleCountStrategy,
-		noDataBehavior,
-	})
-})
-
-const parseCompiledPlan = (
-	row: Pick<
-		AlertRuleRow,
-		"signalType" | "querySpecJson" | "rawQuerySql" | "reducer" | "sampleCountStrategy" | "noDataBehavior"
-	>,
-): Effect.Effect<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> => {
-	if (row.signalType === "raw_query") {
-		if (row.rawQuerySql == null) {
-			return Effect.fail(makeValidationError("Stored raw alert is missing its SQL query"))
-		}
-		return Schema.decodeUnknownEffect(CompiledAlertQueryPlan)({
-			kind: "raw_sql",
-			query: null,
-			rawSql: row.rawQuerySql,
-			reducer: row.reducer,
-			sampleCountStrategy: null,
-			noDataBehavior: row.noDataBehavior,
-		}).pipe(
-			Effect.mapError((cause) =>
-				makeValidationError("Stored compiled alert plan is invalid", [], cause),
-			),
-		)
-	}
-	return Schema.decodeUnknownEffect(QuerySpec)(row.querySpecJson).pipe(
-		Effect.flatMap((query) =>
-			Schema.decodeUnknownEffect(CompiledAlertQueryPlan)({
-				kind: "spec",
-				query,
-				rawSql: null,
-				reducer: row.reducer,
-				sampleCountStrategy: row.sampleCountStrategy,
-				noDataBehavior: row.noDataBehavior,
-			}),
-		),
-		Effect.mapError((cause) => makeValidationError("Stored compiled alert plan is invalid", [], cause)),
-	)
-}
-
-const serviceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
-	row.serviceNamesJson ? safeParseStringArray(row.serviceNamesJson) : []
-
-const excludeServiceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
-	row.excludeServiceNamesJson ? safeParseStringArray(row.excludeServiceNamesJson) : []
-
-const environmentsFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
-	row.environmentsJson ? safeParseStringArray(row.environmentsJson) : []
-
-const tagsFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
-	row.tagsJson ? safeParseStringArray(row.tagsJson) : []
-
-/**
- * Canonical tag form: trim, lowercase, drop empties, dedupe (order preserved).
- * Lowercasing keeps `Prod` and `prod` from splitting into two groups in the UI.
- */
-const normalizeTags = (tags: ReadonlyArray<string> | undefined): ReadonlyArray<string> => {
-	if (!tags || tags.length === 0) return []
-	return Arr.dedupe(
-		Arr.filter(
-			Arr.map(tags, (tag) => tag.trim().toLowerCase()),
-			(tag) => tag.length > 0,
-		),
-	)
-}
-
-/** Most recent evaluation error for a rule, aggregated across its group states. */
-interface RuleEvaluationState {
-	readonly error: string | null
-	readonly evaluatedAt: number | null
-}
-
-const rowToRuleDocument = (
-	row: AlertRuleRow,
-	destinationIds: ReadonlyArray<string>,
-	evaluationState?: RuleEvaluationState,
-) => {
-	const serviceNames = serviceNamesFromRow(row)
-	return new AlertRuleDocument({
-		id: decodeAlertRuleIdSync(row.id),
-		name: row.name,
-		notes: row.notes ?? null,
-		notificationTemplate: parseStoredNotificationTemplate(row.notificationTemplateJson),
-		enabled: row.enabled,
-		severity: decodeAlertSeveritySync(row.severity),
-		serviceNames: [...serviceNames],
-		excludeServiceNames: [...excludeServiceNamesFromRow(row)],
-		environments: [...environmentsFromRow(row)],
-		tags: [...tagsFromRow(row)],
-		groupBy: parseStoredGroupBy(row.groupBy),
-		signalType: decodeAlertSignalTypeSync(row.signalType),
-		comparator: decodeAlertComparatorSync(row.comparator),
-		threshold: row.threshold,
-		thresholdUpper: row.thresholdUpper,
-		windowMinutes: row.windowMinutes,
-		minimumSampleCount: row.minimumSampleCount,
-		consecutiveBreachesRequired: row.consecutiveBreachesRequired,
-		consecutiveHealthyRequired: row.consecutiveHealthyRequired,
-		renotifyIntervalMinutes: row.renotifyIntervalMinutes,
-		apdexThresholdMs: row.apdexThresholdMs,
-		queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
-		rawQuerySql: row.signalType === "raw_query" ? (row.rawQuerySql ?? null) : null,
-		rawQueryReducer:
-			row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null,
-		destinationIds: destinationIds.map((id) => decodeAlertDestinationIdSync(id)),
-		noDataBehavior: decodeNoDataBehaviorSync(row.noDataBehavior),
-		lastEvaluationError: evaluationState?.error ?? null,
-		lastEvaluatedAt:
-			evaluationState?.evaluatedAt != null
-				? decodeIsoDateTimeStringSync(new Date(evaluationState.evaluatedAt).toISOString())
-				: null,
-		lastScheduledAt: toIso(row.lastScheduledAt),
-		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
-		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
-		createdBy: decodeUserIdSync(row.createdBy),
-		updatedBy: decodeUserIdSync(row.updatedBy),
-	})
-}
-
 // Formatting helpers imported from AlertDeliveryDispatch
 
-export interface AlertsServiceShape extends AlertDestinationsServiceShape, AlertReadModelsServiceShape {
-	readonly listRules: (orgId: OrgId) => Effect.Effect<AlertRulesListResponse, AlertPersistenceError>
-	readonly createRule: (
-		orgId: OrgId,
-		userId: UserId,
-		roles: ReadonlyArray<RoleName>,
-		request: AlertRuleUpsertRequest,
-	) => Effect.Effect<
-		AlertRuleDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertNotFoundError
-	>
+export interface AlertsServiceShape
+	extends AlertDestinationsServiceShape, AlertReadModelsServiceShape, AlertRulesServiceShape {
 	readonly updateRule: (
 		orgId: OrgId,
 		userId: UserId,
@@ -737,14 +324,6 @@ export interface AlertsServiceShape extends AlertDestinationsServiceShape, Alert
 	) => Effect.Effect<
 		AlertRuleDocument,
 		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertNotFoundError
-	>
-	readonly deleteRule: (
-		orgId: OrgId,
-		roles: ReadonlyArray<RoleName>,
-		ruleId: AlertRuleDocument["id"],
-	) => Effect.Effect<
-		AlertRuleDeleteResponse,
-		AlertForbiddenError | AlertPersistenceError | AlertNotFoundError
 	>
 	readonly testRule: (
 		orgId: OrgId,
@@ -800,6 +379,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const env = yield* Env
 			const destinations = yield* AlertDestinationsService
 			const readModels = yield* AlertReadModelsService
+			const rules = yield* AlertRulesService
 			const queryEngine = yield* QueryEngineService
 			const warehouse = yield* WarehouseQueryService
 			const runtime = yield* AlertRuntime
@@ -834,6 +414,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const now = runtime.now
 			const makeUuid = () => runtime.makeUuid()
 			const workerId = makeUuid()
+			const rulePersistence = makeAlertRulePersistence({ database, runtime })
+			const {
+				normalizeRule,
+				normalizeRuleRow,
+				requireAdmin,
+				requireDestinationIds,
+				requireRuleRow,
+				upsertRuleRow,
+			} = rulePersistence
 
 			const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 				database.execute(fn).pipe(
@@ -847,275 +436,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					),
 					Effect.mapError(makePersistenceError),
 				)
-
-			const requireAdmin = Effect.fn("AlertsService.requireAdmin")(function* (
-				roles: ReadonlyArray<RoleName>,
-			) {
-				if (isAdmin(roles)) return
-				return yield* Effect.fail(
-					new AlertForbiddenError({
-						message: "Only org admins can manage alerts",
-						...(roles.length > 0 ? { roles: [...roles] } : {}),
-					}),
-				)
-			})
-
-			const requireRuleRow = Effect.fn("AlertsService.requireRuleRow")(function* (
-				orgId: OrgId,
-				ruleId: AlertRuleDocument["id"],
-			) {
-				const rows = yield* dbExecute((db) =>
-					db
-						.select()
-						.from(alertRules)
-						.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
-						.limit(1),
-				)
-				if (rows[0]) return rows[0]
-				return yield* Effect.fail(
-					new AlertNotFoundError({
-						message: "Alert rule not found",
-						resourceType: "rule",
-						resourceId: ruleId,
-					}),
-				)
-			})
-
-			const parseDestinationIds = (
-				value: unknown,
-			): Effect.Effect<ReadonlyArray<AlertDestinationId>, AlertValidationError> =>
-				Schema.decodeUnknownEffect(DestinationIdArraySchema)(value).pipe(
-					Effect.mapError((cause) =>
-						makeValidationError("Stored rule destinations are invalid", [], cause),
-					),
-				)
-
-			const normalizeRuleRow = Effect.fn("AlertsService.normalizeRuleRow")(function* (
-				row: AlertRuleRow,
-			): Effect.fn.Return<NormalizedRule, AlertValidationError> {
-				const serviceNames = serviceNamesFromRow(row)
-				const serviceName = serviceNames.length === 1 ? serviceNames[0] : null
-				const environments = environmentsFromRow(row)
-				const groupBy = parseStoredGroupBy(row.groupBy)
-				const signalType = decodeAlertSignalTypeSync(row.signalType)
-				const comparator = decodeAlertComparatorSync(row.comparator)
-				const queryBuilderDraft = parseStoredQueryBuilderDraft(row.queryBuilderDraftJson)
-				const rawQuerySql = row.rawQuerySql ?? null
-				const rawQueryReducer =
-					row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null
-				const compiledPlan = yield* parseCompiledPlan(row)
-				return {
-					id: decodeAlertRuleIdSync(row.id),
-					name: row.name,
-					notificationTemplate: parseStoredNotificationTemplate(row.notificationTemplateJson),
-					enabled: row.enabled,
-					severity: decodeAlertSeveritySync(row.severity),
-					serviceName,
-					serviceNames,
-					excludeServiceNames: excludeServiceNamesFromRow(row),
-					environments,
-					tags: tagsFromRow(row),
-					groupBy,
-					signalType,
-					comparator,
-					threshold: row.threshold,
-					thresholdUpper: row.thresholdUpper,
-					windowMinutes: row.windowMinutes,
-					minimumSampleCount: row.minimumSampleCount,
-					consecutiveBreachesRequired: row.consecutiveBreachesRequired,
-					consecutiveHealthyRequired: row.consecutiveHealthyRequired,
-					renotifyIntervalMinutes: row.renotifyIntervalMinutes,
-					apdexThresholdMs: row.apdexThresholdMs,
-					queryBuilderDraft,
-					rawQuerySql,
-					rawQueryReducer,
-					destinationIds: yield* parseDestinationIds(row.destinationIdsJson),
-					compiledPlan,
-					createdAt: row.createdAt.getTime(),
-					updatedAt: row.updatedAt.getTime(),
-				}
-			})
-
-			const normalizeRule = Effect.fn("AlertsService.normalizeRule")(function* (
-				orgId: OrgId,
-				request: AlertRuleUpsertRequest,
-				options?: {
-					// Preview evaluates a form draft that may not have a name or
-					// destinations yet — neither affects what the chart shows.
-					readonly forPreview?: boolean
-				},
-			): Effect.fn.Return<NormalizedRule, AlertValidationError> {
-				const name = request.name.trim()
-				const serviceNames =
-					request.serviceNames && request.serviceNames.length > 0
-						? request.serviceNames.map((s) => s.trim()).filter((s) => s.length > 0)
-						: []
-				const serviceName = serviceNames.length === 1 ? serviceNames[0] : null
-				const excludeServiceNames = request.excludeServiceNames
-					? request.excludeServiceNames.map((s) => s.trim()).filter((s) => s.length > 0)
-					: []
-				// builder_query / raw_query express environment scope inside their own
-				// query, so the rule-level filter is dropped for them rather than
-				// silently AND-ing a second, invisible predicate onto the user's query.
-				const queryOwnsScope =
-					request.signalType === "builder_query" || request.signalType === "raw_query"
-				const environments =
-					request.environments && !queryOwnsScope
-						? Arr.dedupe(
-								Arr.filterMap(request.environments, (s) => {
-									const trimmed = s.trim()
-									return trimmed.length > 0 ? Result.succeed(trimmed) : Result.failVoid
-								}),
-							)
-						: []
-				const tags = normalizeTags(request.tags)
-				const groupBy = request.groupBy ?? null
-				// Dedupe while preserving selection order — a destination listed twice still
-				// notifies once, so we persist each id at most once. This is the authoritative
-				// fix; the editor also dedupes on submit for UX (see buildRuleRequest).
-				const destinationIds = Arr.dedupe(request.destinationIds)
-
-				const details: string[] = []
-				if (name.length === 0 && !options?.forPreview) details.push("name is required")
-				if (destinationIds.length === 0 && !options?.forPreview) {
-					details.push("at least one destination must be selected")
-				}
-				if (request.threshold == null || !Number.isFinite(request.threshold)) {
-					details.push("threshold must be a finite number")
-				}
-				const isRange = request.comparator === "between" || request.comparator === "not_between"
-				if (isRange) {
-					if (request.thresholdUpper == null || !Number.isFinite(request.thresholdUpper)) {
-						details.push("thresholdUpper is required for between / not_between comparators")
-					} else if (request.threshold != null && request.thresholdUpper < request.threshold) {
-						details.push("thresholdUpper must be greater than or equal to threshold")
-					}
-				} else if (request.thresholdUpper != null) {
-					details.push("thresholdUpper is only supported for between / not_between comparators")
-				}
-				if (request.signalType === "builder_query") {
-					if (!request.queryBuilderDraft) {
-						details.push("queryBuilderDraft is required for builder_query alerts")
-					}
-				}
-				if (request.signalType === "raw_query") {
-					const sql = request.rawQuerySql?.trim() ?? ""
-					if (sql.length === 0) {
-						details.push("rawQuerySql is required for raw_query alerts")
-					}
-					if (serviceNames.length > 0) {
-						details.push("serviceNames is not supported for raw_query alerts")
-					}
-					if (groupBy != null) {
-						details.push(
-							"groupBy is not supported for raw_query alerts; return a group column instead",
-						)
-					}
-				} else {
-					if (normalizeOptionalString(request.rawQuerySql) != null) {
-						details.push("rawQuerySql is only supported for raw_query alerts")
-					}
-					if (request.rawQueryReducer != null) {
-						details.push("rawQueryReducer is only supported for raw_query alerts")
-					}
-				}
-				if (groupBy != null && serviceNames.length > 0) {
-					details.push("groupBy is only supported when no service is specified")
-				}
-				if (excludeServiceNames.length > 0 && serviceNames.length > 0) {
-					details.push(
-						"excludeServiceNames is only supported when no specific services are selected",
-					)
-				}
-				if (excludeServiceNames.length > 0 && !isServiceGroupBy(groupBy)) {
-					details.push('excludeServiceNames requires groupBy=["service.name"]')
-				}
-
-				if (details.length > 0) {
-					return yield* Effect.fail(makeValidationError("Invalid alert rule", details))
-				}
-				if (request.signalType === "raw_query") {
-					yield* prepareRawSql({
-						sql: request.rawQuerySql ?? "",
-						orgId,
-						startTime: "2000-01-01 00:00:00",
-						endTime: "2000-01-01 00:05:00",
-						granularitySeconds: 60,
-						workload: "alert",
-					}).pipe(
-						Effect.mapError((error) =>
-							makeValidationError("Invalid raw SQL alert query", [error.message], error),
-						),
-					)
-				}
-
-				const nowMs = yield* now
-				const normalizedBase = {
-					id: decodeAlertRuleIdSync(makeUuid()),
-					name,
-					notificationTemplate: request.notificationTemplate ?? null,
-					enabled: request.enabled ?? true,
-					severity: request.severity,
-					serviceName,
-					serviceNames,
-					excludeServiceNames,
-					environments,
-					tags,
-					groupBy,
-					signalType: request.signalType,
-					comparator: request.comparator,
-					threshold: request.threshold,
-					thresholdUpper: request.thresholdUpper ?? null,
-					windowMinutes: request.windowMinutes,
-					minimumSampleCount: request.minimumSampleCount ?? 0,
-					consecutiveBreachesRequired: request.consecutiveBreachesRequired ?? 2,
-					consecutiveHealthyRequired: request.consecutiveHealthyRequired ?? 2,
-					renotifyIntervalMinutes: request.renotifyIntervalMinutes ?? 30,
-					apdexThresholdMs:
-						request.apdexThresholdMs ?? (request.signalType === "apdex" ? 500 : null),
-					queryBuilderDraft: request.queryBuilderDraft ?? null,
-					rawQuerySql:
-						request.signalType === "raw_query"
-							? normalizeOptionalString(request.rawQuerySql)
-							: null,
-					rawQueryReducer:
-						request.signalType === "raw_query" ? (request.rawQueryReducer ?? null) : null,
-					destinationIds,
-					createdAt: nowMs,
-					updatedAt: nowMs,
-				}
-				const compiledPlan = yield* compileRulePlan(normalizedBase)
-
-				return {
-					...normalizedBase,
-					compiledPlan,
-				}
-			})
-
-			const requireDestinationIds = Effect.fn("AlertsService.requireDestinationIds")(function* (
-				orgId: OrgId,
-				destinationIds: ReadonlyArray<AlertDestinationId>,
-			) {
-				if (destinationIds.length === 0) return
-
-				const rows = yield* dbExecute((db) =>
-					db
-						.select({ id: alertDestinations.id })
-						.from(alertDestinations)
-						.where(
-							and(
-								eq(alertDestinations.orgId, orgId),
-								inArray(alertDestinations.id, [...destinationIds]),
-							),
-						),
-				)
-
-				const existingIds = HashSet.fromIterable(Arr.map(rows, (row) => row.id))
-				const missing = Arr.filter(destinationIds, (id) => !HashSet.has(existingIds, id))
-				if (missing.length > 0) {
-					return yield* Effect.fail(makeValidationError("Unknown destination IDs", missing))
-				}
-			})
 
 			const systemTenant = (orgId: OrgId): TenantContext => ({
 				orgId,
@@ -1489,163 +809,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				return base + jitter
 			})
 
-			const upsertRuleRow = Effect.fn("AlertsService.upsertRuleRow")(function* (
-				orgId: OrgId,
-				userId: UserId,
-				existingId: AlertRuleId | null,
-				request: AlertRuleUpsertRequest,
-			) {
-				const normalized = yield* normalizeRule(orgId, request)
-				yield* requireDestinationIds(orgId, normalized.destinationIds)
-				const ruleId = existingId ?? normalized.id
-				const timestamp = yield* now
-
-				const ruleFields = {
-					name: normalized.name,
-					notes: normalizeOptionalString(request.notes),
-					notificationTemplateJson: normalized.notificationTemplate ?? null,
-					enabled: normalized.enabled,
-					severity: normalized.severity,
-					serviceNamesJson: normalized.serviceNames.length > 0 ? normalized.serviceNames : null,
-					excludeServiceNamesJson:
-						normalized.excludeServiceNames.length > 0 ? normalized.excludeServiceNames : null,
-					environmentsJson: normalized.environments.length > 0 ? normalized.environments : null,
-					tagsJson: normalized.tags.length > 0 ? normalized.tags : null,
-					groupBy: normalized.groupBy != null ? JSON.stringify(normalized.groupBy) : null,
-					signalType: normalized.signalType,
-					comparator: normalized.comparator,
-					threshold: normalized.threshold,
-					thresholdUpper: normalized.thresholdUpper,
-					windowMinutes: normalized.windowMinutes,
-					minimumSampleCount: normalized.minimumSampleCount,
-					consecutiveBreachesRequired: normalized.consecutiveBreachesRequired,
-					consecutiveHealthyRequired: normalized.consecutiveHealthyRequired,
-					renotifyIntervalMinutes: normalized.renotifyIntervalMinutes,
-					apdexThresholdMs: normalized.apdexThresholdMs,
-					queryBuilderDraftJson: normalized.queryBuilderDraft ?? null,
-					rawQuerySql: normalized.rawQuerySql,
-					destinationIdsJson: normalized.destinationIds,
-					querySpecJson: normalized.compiledPlan.query ?? null,
-					reducer: normalized.compiledPlan.reducer,
-					sampleCountStrategy: normalized.compiledPlan.sampleCountStrategy,
-					noDataBehavior: normalized.compiledPlan.noDataBehavior,
-					updatedAt: new Date(timestamp),
-					updatedBy: userId,
-				} as const
-
-				const writeResult = yield* dbExecute((db) =>
-					db.transaction(async (tx) => {
-						// Serialize quota checks per organization. Without the transaction-scoped
-						// advisory lock, concurrent creates can both observe 99 active rows and
-						// commit the 100th and 101st rules.
-						await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${orgId}))`)
-						if (normalized.enabled) {
-							const activeRows = await tx
-								.select({ id: alertRules.id })
-								.from(alertRules)
-								.where(and(eq(alertRules.orgId, orgId), eq(alertRules.enabled, true)))
-							const alreadyActive =
-								existingId != null && activeRows.some((row) => row.id === existingId)
-							if (!alreadyActive && activeRows.length >= MAX_ACTIVE_ALERT_RULES_PER_ORG) {
-								return { limitExceeded: true as const, writeRows: [] }
-							}
-						}
-
-						const writeRows =
-							existingId == null
-								? await tx
-										.insert(alertRules)
-										.values({
-											id: ruleId,
-											orgId,
-											...ruleFields,
-											createdAt: new Date(timestamp),
-											createdBy: userId,
-										})
-										.returning(txidColumn)
-								: await tx
-										.update(alertRules)
-										.set(ruleFields)
-										.where(
-											and(eq(alertRules.orgId, orgId), eq(alertRules.id, existingId)),
-										)
-										.returning(txidColumn)
-						return { limitExceeded: false as const, writeRows }
-					}),
-				)
-				if (writeResult.limitExceeded) {
-					return yield* Effect.fail(
-						makeValidationError(
-							`Organizations may have at most ${MAX_ACTIVE_ALERT_RULES_PER_ORG} active alert rules`,
-						),
-					)
-				}
-				const txid = readTxid(writeResult.writeRows)
-
-				const row = yield* requireRuleRow(orgId, ruleId)
-				const destinationIds = safeParseStringArray(row.destinationIdsJson)
-				const document = rowToRuleDocument(row, destinationIds)
-				return txid === undefined ? document : new AlertRuleDocument({ ...document, txid })
-			})
-
-			const listRules = Effect.fn("AlertsService.listRules")(function* (orgId: OrgId) {
-				const rows = yield* dbExecute((db) =>
-					db
-						.select()
-						.from(alertRules)
-						.where(eq(alertRules.orgId, orgId))
-						.orderBy(desc(alertRules.createdAt), desc(alertRules.id)),
-				)
-
-				// Surface the most recent evaluation error per rule. `lastError` is
-				// cleared to null on a healthy evaluation, so a non-null value means
-				// that group is currently failing; pick the freshest one.
-				const stateRows = yield* dbExecute((db) =>
-					db
-						.select({
-							ruleId: alertRuleStates.ruleId,
-							lastError: alertRuleStates.lastError,
-							lastEvaluatedAt: alertRuleStates.lastEvaluatedAt,
-						})
-						.from(alertRuleStates)
-						.where(eq(alertRuleStates.orgId, orgId)),
-				)
-				const errorByRule = new Map<string, RuleEvaluationState>()
-				for (const state of stateRows) {
-					if (state.lastError == null) continue
-					const existing = errorByRule.get(state.ruleId)
-					if (
-						existing == null ||
-						(dateToMs(state.lastEvaluatedAt) ?? 0) > (existing.evaluatedAt ?? 0)
-					) {
-						errorByRule.set(state.ruleId, {
-							error: state.lastError,
-							evaluatedAt: dateToMs(state.lastEvaluatedAt),
-						})
-					}
-				}
-
-				const rules = rows.map((row) =>
-					rowToRuleDocument(
-						row,
-						safeParseStringArray(row.destinationIdsJson),
-						errorByRule.get(row.id),
-					),
-				)
-
-				return new AlertRulesListResponse({ rules })
-			})
-
-			const createRule = Effect.fn("AlertsService.createRule")(function* (
-				orgId: OrgId,
-				userId: UserId,
-				roles: ReadonlyArray<RoleName>,
-				request: AlertRuleUpsertRequest,
-			) {
-				yield* requireAdmin(roles)
-				return yield* upsertRuleRow(orgId, userId, null, request)
-			})
-
 			const updateRule = Effect.fn("AlertsService.updateRule")(function* (
 				orgId: OrgId,
 				userId: UserId,
@@ -1663,59 +826,25 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 				if (oldNormalized.enabled && !newNormalized.enabled) {
 					// Rule was disabled — resolve all open incidents
-					yield* resolveStaleIncidents(orgId, ruleId, newNormalized, { resolveAll: true })
+					yield* resolveStaleIncidents(orgId, ruleId, newNormalized, {
+						resolveAll: true,
+					})
 				} else if (ruleStructureChanged(oldNormalized, newNormalized)) {
 					// Evaluation mode changed — resolve all and let scheduler re-evaluate fresh
-					yield* resolveStaleIncidents(orgId, ruleId, newNormalized, { resolveAll: true })
+					yield* resolveStaleIncidents(orgId, ruleId, newNormalized, {
+						resolveAll: true,
+					})
 				} else {
 					// Check for services that fell out of scope
 					const staleGroupKeys = computeStaleGroupKeys(oldNormalized, newNormalized)
 					if (HashSet.size(staleGroupKeys) > 0) {
-						yield* resolveStaleIncidents(orgId, ruleId, newNormalized, { staleGroupKeys })
+						yield* resolveStaleIncidents(orgId, ruleId, newNormalized, {
+							staleGroupKeys,
+						})
 					}
 				}
 
 				return result
-			})
-
-			const deleteRule = Effect.fn("AlertsService.deleteRule")(function* (
-				orgId: OrgId,
-				roles: ReadonlyArray<RoleName>,
-				ruleId: AlertRuleDocument["id"],
-			) {
-				yield* requireAdmin(roles)
-				yield* requireRuleRow(orgId, ruleId)
-				// All deletes run in one transaction, so a single txid (captured on the
-				// alert_rules delete — the only synced table here) covers the whole
-				// change for the Electric alert_rules collection.
-				const deleted = yield* dbExecute((db) =>
-					db.transaction(async (tx) => {
-						await tx
-							.delete(alertDeliveryEvents)
-							.where(
-								and(
-									eq(alertDeliveryEvents.orgId, orgId),
-									eq(alertDeliveryEvents.ruleId, ruleId),
-								),
-							)
-						await tx
-							.delete(alertIncidents)
-							.where(and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.ruleId, ruleId)))
-						await tx
-							.delete(alertRuleStates)
-							.where(and(eq(alertRuleStates.orgId, orgId), eq(alertRuleStates.ruleId, ruleId)))
-						await tx.delete(alertRuleClaims).where(eq(alertRuleClaims.ruleId, ruleId))
-						return tx
-							.delete(alertRules)
-							.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
-							.returning(txidColumn)
-					}),
-				)
-				const txid = readTxid(deleted)
-				return new AlertRuleDeleteResponse({
-					id: ruleId,
-					...(txid !== undefined && { txid }),
-				})
 			})
 
 			const testRule = Effect.fn("AlertsService.testRule")(function* (
@@ -1866,7 +995,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				| AlertPersistenceError
 				| WarehouseError
 			> {
-				const normalized = yield* normalizeRule(orgId, request.rule, { forPreview: true })
+				const normalized = yield* normalizeRule(orgId, request.rule, {
+					forPreview: true,
+				})
 				const plan = normalized.compiledPlan
 
 				// Preview only needs `alerts:read`, but a raw-SQL rule executes
@@ -2014,7 +1145,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					obsByGroup.set(UNGROUPED_GROUP_KEY, new Map())
 				}
 
-				const NO_DATA: PreviewObs = { value: null, sampleCount: 0, hasData: false }
+				const NO_DATA: PreviewObs = {
+					value: null,
+					sampleCount: 0,
+					hasData: false,
+				}
 				const iso = (ms: number) => decodeIsoDateTimeStringSync(new Date(ms).toISOString())
 
 				const series: AlertRulePreviewSeries[] = []
@@ -3412,7 +2547,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					readonly ruleId: AlertRuleId
 					readonly grouped: boolean
 				}>,
-				clearError: ReadonlyArray<{ readonly orgId: OrgId; readonly ruleId: AlertRuleId }>,
+				clearError: ReadonlyArray<{
+					readonly orgId: OrgId
+					readonly ruleId: AlertRuleId
+				}>,
 				timestamp: number,
 			) {
 				const bestEffort =
@@ -3552,7 +2690,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}>(),
 				)
 				const clearErrorTargets = yield* Ref.make(
-					Chunk.empty<{ readonly orgId: OrgId; readonly ruleId: AlertRuleId }>(),
+					Chunk.empty<{
+						readonly orgId: OrgId
+						readonly ruleId: AlertRuleId
+					}>(),
 				)
 
 				const recordEvaluationFailure = Effect.fnUntraced(function* (
@@ -3677,7 +2818,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}).pipe(
 						Effect.tapError((persistError) =>
 							Effect.logWarning("Failed to persist alert evaluation error").pipe(
-								Effect.annotateLogs({ ruleId: row.id, message: persistError.message }),
+								Effect.annotateLogs({
+									ruleId: row.id,
+									message: persistError.message,
+								}),
 							),
 						),
 						Effect.ignore,
@@ -3857,7 +3001,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// Resolve stale incidents for disabled rules
 				const disabledRulesWithOpenIncidents = yield* dbExecute((db) =>
 					db
-						.selectDistinct({ ruleId: alertIncidents.ruleId, orgId: alertIncidents.orgId })
+						.selectDistinct({
+							ruleId: alertIncidents.ruleId,
+							orgId: alertIncidents.orgId,
+						})
 						.from(alertIncidents)
 						.innerJoin(alertRules, eq(alertIncidents.ruleId, alertRules.id))
 						.where(and(eq(alertIncidents.status, "open"), eq(alertRules.enabled, false))),
@@ -3929,10 +3076,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				updateDestination: destinations.updateDestination,
 				deleteDestination: destinations.deleteDestination,
 				testDestination: destinations.testDestination,
-				listRules,
-				createRule,
+				listRules: rules.listRules,
+				createRule: rules.createRule,
 				updateRule,
-				deleteRule,
+				deleteRule: rules.deleteRule,
 				testRule,
 				previewRule,
 				listIncidents: readModels.listIncidents,

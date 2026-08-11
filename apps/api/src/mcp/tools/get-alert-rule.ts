@@ -3,7 +3,7 @@ import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/alerts/AlertsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 
 const comparatorLabel: Record<string, string> = {
 	gt: ">",
@@ -21,7 +21,7 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 		}),
 		Effect.fn("McpTool.getAlertRule")(function* ({ rule_id }) {
 			const tenant = yield* resolveTenant
-			const alerts = yield* AlertsService
+			const alerts = yield* AlertRulesService
 
 			const result = yield* alerts.listRules(tenant.orgId).pipe(
 				Effect.mapError(

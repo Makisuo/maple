@@ -28,6 +28,7 @@ import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
 import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { mapAlertError } from "./alerts-error-map"
 
 const decodeIsoDateTime = Schema.decodeUnknownSync(IsoDateTimeString)
@@ -295,10 +296,11 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 	Effect.gen(function* () {
 		const alerts = yield* AlertsService
 		const readModels = yield* AlertReadModelsService
+		const rules = yield* AlertRulesService
 
-		const findRule = (orgId: Parameters<typeof alerts.listRules>[0], ruleId: AlertRuleDocument["id"]) =>
+		const findRule = (orgId: Parameters<typeof rules.listRules>[0], ruleId: AlertRuleDocument["id"]) =>
 			Effect.gen(function* () {
-				const response = yield* alerts.listRules(orgId).pipe(mapAlertError("rule_list"))
+				const response = yield* rules.listRules(orgId).pipe(mapAlertError("rule_list"))
 				const rule = response.rules.find((doc) => doc.id === ruleId)
 				if (rule === undefined)
 					return yield* Effect.fail(resourceNotFound("alert_rule", "No such alert rule."))
@@ -309,7 +311,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* alerts.listRules(tenant.orgId).pipe(mapAlertError("rule_list"))
+					const response = yield* rules.listRules(tenant.orgId).pipe(mapAlertError("rule_list"))
 					const page = yield* paginateArray(response.rules.map(toV2Rule), query)
 					return { object: "list" as const, ...page }
 				}),
@@ -325,7 +327,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const request = yield* toUpsertRequest(payload)
-					const created = yield* alerts
+					const created = yield* rules
 						.createRule(tenant.orgId, tenant.userId, tenant.roles, request)
 						.pipe(mapAlertError("rule_create"))
 					return toV2RuleMutationResponse(created)
@@ -345,7 +347,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const deleted = yield* alerts
+					const deleted = yield* rules
 						.deleteRule(tenant.orgId, tenant.roles, params.id)
 						.pipe(mapAlertError("rule_delete"))
 					return {

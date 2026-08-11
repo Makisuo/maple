@@ -2,6 +2,8 @@ import {
 	ANTICIPATED_ERROR_IDENTIFIERS,
 	AlertDestinationsService,
 	AlertReadModelsService,
+	AlertRuntime,
+	AlertRulesService,
 	AlertsService,
 	AnomalyDetectionService,
 	BucketCacheService,
@@ -58,6 +60,7 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironmentLive))
 
 	const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
+	const AlertRuntimeLive = AlertRuntime.layer
 
 	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.layer.pipe(Layer.provide(BaseLive))
 
@@ -99,9 +102,14 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 		Layer.provide(Layer.mergeAll(DatabaseLive, WarehouseQueryServiceLive)),
 	)
 
+	const AlertRulesServiceLive = AlertRulesService.layer.pipe(
+		Layer.provide(Layer.mergeAll(DatabaseLive, AlertRuntimeLive)),
+	)
+
 	// WorkerEnvironment is merged in so the incident-open issue-hub hook can see
-	// the cross-script investigation workflow binding.
-	// AlertRuntime is a Context.Reference with defaults, so it needs no wiring here.
+	// the cross-script investigation workflow binding. The hoisted AlertRuntime
+	// layer is shared with the narrow rules capability even though the reference
+	// also has production defaults.
 	const AlertsServiceLive = AlertsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -109,10 +117,12 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 				QueryEngineServiceLive,
 				WarehouseQueryServiceLive,
 				OrgClickHouseSettingsLive,
+				AlertRuntimeLive,
 				HazelOAuthServiceLive,
 				EmailServiceLive,
 				AlertDestinationsServiceLive,
 				AlertReadModelsServiceLive,
+				AlertRulesServiceLive,
 				WorkerEnvironmentLive,
 			),
 		),

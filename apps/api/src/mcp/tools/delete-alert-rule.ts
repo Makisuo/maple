@@ -2,7 +2,7 @@ import { McpQueryError, requiredBooleanParam, requiredStringParam, type McpToolR
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/alerts/AlertsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AlertRuleId } from "@maple/domain"
 
 const decodeAlertRuleId = Schema.decodeUnknownOption(AlertRuleId)
@@ -46,7 +46,7 @@ export function registerDeleteAlertRuleTool(server: McpToolRegistrar) {
 			}
 
 			const tenant = yield* resolveTenant
-			const alerts = yield* AlertsService
+			const alerts = yield* AlertRulesService
 
 			const result = yield* alerts.deleteRule(tenant.orgId, tenant.roles, ruleId.value).pipe(
 				Effect.catchTags({

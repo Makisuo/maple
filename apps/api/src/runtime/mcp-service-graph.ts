@@ -8,6 +8,7 @@ import { Env } from "@/platform/Env"
 import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
@@ -51,12 +52,13 @@ const QueryEngineServiceLive = QueryEngineService.layer.pipe(
 
 const EmailServiceLive = EmailService.layer.pipe(Layer.provide(InfraLive))
 const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(InfraLive))
+const AlertRuntimeLive = AlertRuntime.layer
 
 const AlertDestinationsServiceLive = AlertDestinationsService.layer.pipe(
 	Layer.provide(
 		Layer.mergeAll(
 			InfraLive,
-			AlertRuntime.layer,
+			AlertRuntimeLive,
 			HazelOAuthServiceLive,
 			EmailServiceLive,
 			OrgMembersServiceLive,
@@ -68,19 +70,24 @@ const AlertReadModelsServiceLive = AlertReadModelsService.layer.pipe(
 	Layer.provide(Layer.mergeAll(InfraLive, WarehouseQueryServiceLive)),
 )
 
+const AlertRulesServiceLive = AlertRulesService.layer.pipe(
+	Layer.provide(Layer.mergeAll(InfraLive, AlertRuntimeLive)),
+)
+
 const AlertsServiceLive = AlertsService.layer.pipe(
 	Layer.provide(
 		Layer.mergeAll(
 			InfraLive,
 			QueryEngineServiceLive,
 			WarehouseQueryServiceLive,
-			AlertRuntime.layer,
+			AlertRuntimeLive,
 			HazelOAuthServiceLive,
 			EmailServiceLive,
 			OrgMembersServiceLive,
 			OrgClickHouseSettingsServiceLive,
 			AlertDestinationsServiceLive,
 			AlertReadModelsServiceLive,
+			AlertRulesServiceLive,
 		),
 	),
 )
@@ -125,6 +132,7 @@ const VcsSourceServiceLive = VcsSourceService.layer.pipe(
 
 const McpRuntimeServicesLive = Layer.mergeAll(
 	AlertReadModelsServiceLive,
+	AlertRulesServiceLive,
 	AlertsServiceLive,
 	DashboardPersistenceService.layer,
 	ErrorActorsServiceLive,
