@@ -420,6 +420,19 @@ describe("ChatSession.subscribe", () => {
 
 		assert.equal(outcome, "still-open")
 	})
+
+	it("removes a timed-out waiter before the next idle reconnect", async () => {
+		const { session } = makeSession()
+		const waitForAppend: unknown = Reflect.get(session, "waitForAppend")
+		if (typeof waitForAppend !== "function") assert.fail("waitForAppend must be a function")
+
+		for (let reconnect = 0; reconnect < 3; reconnect++) {
+			assert.isFalse(await Reflect.apply(waitForAppend, session, [0]))
+			const waiters: unknown = Reflect.get(session, "waiters")
+			assert.instanceOf(waiters, Set)
+			assert.equal(waiters.size, 0)
+		}
+	})
 })
 
 describe("ChatSession.history — sub-agent transcripts", () => {
