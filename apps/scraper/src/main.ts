@@ -34,6 +34,7 @@ const MainLayer = ScrapeScheduler.layer.pipe(
 const healthServer = Effect.gen(function* () {
 	const env = yield* ScraperEnv
 	const scheduler = yield* ScrapeScheduler
+	const runPromise = Effect.runPromiseWith(yield* Effect.context())
 
 	const server = yield* Effect.acquireRelease(
 		Effect.sync(() =>
@@ -43,7 +44,7 @@ const healthServer = Effect.gen(function* () {
 				fetch: async (request) => {
 					const url = new URL(request.url)
 					if (url.pathname === "/health") {
-						const stats = await Effect.runPromise(scheduler.stats)
+						const stats = await runPromise(scheduler.stats)
 						return new Response(JSON.stringify({ status: "ok", ...stats }), {
 							headers: { "content-type": "application/json" },
 						})

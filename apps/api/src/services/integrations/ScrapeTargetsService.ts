@@ -1119,22 +1119,39 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				// signal plus a fixed 10s `Effect.timeout`; the timeout lands as a failure
 				// in the captured Exit (→ success: false), matching the old abort path.
 				const requestExit = yield* Effect.tryPromise({
-					try: async (signal) => {
-						const response = await safeFetch(row.url, {
+					try: (signal) =>
+						safeFetch(row.url, {
 							method: "GET",
 							headers,
 							signal,
-						})
-						if (!response.ok) {
-							throw new Error(`HTTP ${response.status} ${response.statusText}`)
-						}
-					},
-					catch: (error) => (error instanceof Error ? error : new Error("Connection failed")),
+						}),
+					catch: (cause) =>
+						new ScrapeTargetUpstreamError({
+							message: cause instanceof Error ? cause.message : "Connection failed",
+						}),
 				}).pipe(
+					Effect.flatMap((response) =>
+						response.ok
+							? Effect.void
+							: Effect.fail(
+									new ScrapeTargetUpstreamError({
+										message: `HTTP ${response.status} ${response.statusText}`,
+										status: response.status,
+									}),
+								),
+					),
 					Effect.timeout(10_000),
-					Effect.catchTag("TimeoutError", () => Effect.fail(new Error("Connection failed"))),
+					Effect.catchTag("TimeoutError", () =>
+						Effect.fail(new ScrapeTargetUpstreamError({ message: "Connection failed" })),
+					),
 					Effect.exit,
 				)
+				const requestError = Exit.isFailure(requestExit)
+					? Option.match(Cause.findErrorOption(requestExit.cause), {
+							onNone: () => "Connection failed",
+							onSome: (error) => error.message,
+						})
+					: null
 
 				// Manual probes update lastScrapeAt/lastScrapeError but must not
 				// fabricate scheduled-check history rows.
@@ -1143,7 +1160,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 						{
 							targetId,
 							scrapedAt: now,
-							error: Exit.isSuccess(requestExit) ? null : Cause.pretty(requestExit.cause),
+							error: requestError,
 						},
 					],
 					{ recordChecks: false },
