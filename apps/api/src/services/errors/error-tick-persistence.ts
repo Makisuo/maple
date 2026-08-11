@@ -11,7 +11,7 @@ import {
 	type ErrorNotificationPolicyRow,
 } from "@maple/db"
 import type { DatabaseClient } from "@/platform/DatabaseLive"
-import { msToDate } from "@/platform/time"
+import { msToDate, msToSqlTimestamp } from "@/platform/time"
 import type {
 	ActorId,
 	AlertDestinationId,
@@ -200,6 +200,9 @@ export const persistErrorTickWindow = (
 ): Promise<PersistErrorTickWindowResult> =>
 	db.transaction(async (tx) => {
 		const windowEnd = msToDate(input.windowEndMs)
+		// The raw `sql` bulk updates below bind this with no column type behind it,
+		// so it has to reach the driver as a string — see `msToSqlTimestamp`.
+		const windowEndSql = msToSqlTimestamp(input.windowEndMs)
 
 		// Lock the cursor row for the life of the transaction. `claimTickWindow`
 		// skips locked rows, so an in-flight apply can no longer be stolen by the
@@ -403,7 +406,7 @@ export const persistErrorTickWindow = (
 			const incidentValues = sql.join(
 				refreshing.map(
 					(item) =>
-						sql`(${item.incidentId}::text, ${msToDate(item.row.lastSeenMs)}::timestamptz, ${item.row.count}::integer)`,
+						sql`(${item.incidentId}::text, ${msToSqlTimestamp(item.row.lastSeenMs)}::timestamptz, ${item.row.count}::integer)`,
 				),
 				sql`, `,
 			)
@@ -411,22 +414,23 @@ export const persistErrorTickWindow = (
 				update ${errorIncidents} as t
 				set last_triggered_at = greatest(t.last_triggered_at, v.last_seen),
 				    occurrence_count = t.occurrence_count + v.cnt,
-				    updated_at = ${windowEnd}::timestamptz
+				    updated_at = ${windowEndSql}::timestamptz
 				from (values ${incidentValues}) as v(incident_id, last_seen, cnt)
 				where t.id = v.incident_id
 			`)
 
 			const stateValues = sql.join(
 				refreshing.map(
-					(item) => sql`(${item.issueId}::text, ${msToDate(item.row.lastSeenMs)}::timestamptz)`,
+					(item) =>
+						sql`(${item.issueId}::text, ${msToSqlTimestamp(item.row.lastSeenMs)}::timestamptz)`,
 				),
 				sql`, `,
 			)
 			await tx.execute(sql`
 				update ${errorIssueStates} as t
 				set last_observed_occurrence_at = greatest(t.last_observed_occurrence_at, v.last_seen),
-				    last_evaluated_at = ${windowEnd}::timestamptz,
-				    updated_at = ${windowEnd}::timestamptz
+				    last_evaluated_at = ${windowEndSql}::timestamptz,
+				    updated_at = ${windowEndSql}::timestamptz
 				from (values ${stateValues}) as v(issue_id, last_seen)
 				where t.org_id = ${input.orgId} and t.issue_id = v.issue_id
 			`)
