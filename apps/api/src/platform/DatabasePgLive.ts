@@ -1,13 +1,20 @@
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Effect, Layer } from "effect"
 import { Database, type DatabaseClient, DatabaseError, type DatabaseShape } from "./DatabaseLive"
+import { PgConnectionScope } from "./pg-connection-scope"
 import { executeOnFreshPgClient } from "./pg-execute"
 import { resolveDbConnectionSource } from "./pg-connection-source"
 
 // Workers constraint: this layer lives for the isolate, but TCP sockets are
 // tied to the request that opened them. So the layer holds only the connection
-// string and defers the dial to `executeOnFreshPgClient` — see pg-execute.ts
-// for why that is per-call.
+// string and defers the dial to whatever owns the current invocation.
+//
+// `PgConnectionScope` is that owner on the request and cron paths — one socket
+// per invocation, reused by every `execute`. It is read per call rather than
+// injected because it is installed at the entry-point boundary, not in the
+// layer graph. Where no scope is installed (Workflow entrypoints, tests), this
+// falls back to dialing per call, which is correct but spends one of the
+// Worker's six outbound connection slots per statement.
 //
 // The env record is read directly rather than through `Env`/`Config` so this
 // layer's only requirement stays `WorkerEnvironment`: apps/alerting wires
@@ -31,7 +38,11 @@ const makePgDatabase = Effect.gen(function* () {
 
 	return Database.of({
 		execute: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			executeOnFreshPgClient(source.connectionString, fn, source.attributes),
+			Effect.flatMap(PgConnectionScope, (scope) =>
+				scope === undefined
+					? executeOnFreshPgClient(source.connectionString, fn, source.attributes)
+					: scope.run(fn),
+			),
 	} satisfies DatabaseShape)
 })
 

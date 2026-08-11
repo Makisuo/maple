@@ -1,6 +1,7 @@
 import type { MapleDatabaseClient } from "@maple/db/client"
 import { fingerprintSql, SQL_TRACE_MAX, summarizeSql, truncateSql } from "@maple/query-engine/execution"
 import { Clock, Context, Effect, Schema } from "effect"
+import { isPostgresConnectionError, postgresErrorType, postgresSqlState } from "./postgres-errors"
 import { updateCurrentSpanName } from "./span-name"
 
 export type DatabaseClient = MapleDatabaseClient
@@ -123,6 +124,23 @@ export const executeWithSpan = Effect.fn("Database.execute", {
 			yield* Effect.annotateCurrentSpan("db.collection.name", collection)
 		}
 	})
+	// `error.type` is what separates a stalled dial from a constraint violation
+	// once the span lands — the message alone cannot, since `toDatabaseError`
+	// flattens the driver's code into prose. `db.response.status_code` carries
+	// SQLSTATE where there is one, per OTel's database conventions.
+	const annotateFailure = (error: DatabaseError) =>
+		Effect.gen(function* () {
+			const errorType = postgresErrorType(error)
+			if (errorType !== undefined) {
+				yield* Effect.annotateCurrentSpan("error.type", errorType)
+			}
+			const sqlState = postgresSqlState(error)
+			if (sqlState !== undefined) {
+				yield* Effect.annotateCurrentSpan("db.response.status_code", sqlState)
+			}
+			yield* Effect.annotateCurrentSpan("db.connect.failed", isPostgresConnectionError(error))
+			yield* annotate
+		})
 	const result = yield* Effect.tryPromise({
 		try: () =>
 			run({
@@ -135,7 +153,7 @@ export const executeWithSpan = Effect.fn("Database.execute", {
 				record: (attributes) => Object.assign(recorded, attributes),
 			}),
 		catch: toDatabaseError,
-	}).pipe(Effect.tapError(() => annotate))
+	}).pipe(Effect.tapError(annotateFailure))
 	yield* annotate
 	if (Array.isArray(result)) {
 		// `db.response.returned_rows` is what the span-detail database panel reads

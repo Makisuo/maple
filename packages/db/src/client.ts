@@ -4,8 +4,21 @@ import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import * as schema from "./schema"
 
-export interface MaplePgConnection {
-	readonly db: MaplePgClient
+/** The raw postgres.js client — one TCP socket's worth of connection state. */
+export type MaplePgSocket = ReturnType<typeof postgres>
+
+/**
+ * One dialed socket, without any drizzle wrapper bound to it.
+ *
+ * Split out from `MaplePgConnection` so a caller can hold ONE socket across
+ * many logical calls while still giving each call its own `onQuery` collector —
+ * drizzle fixes its logger at construction, so collector isolation has to come
+ * from a per-call `wrapMaplePgClient`, not from a per-call socket. That is what
+ * lets the request path dial once instead of once per `execute`.
+ */
+export interface MaplePgSocketHandle {
+	/** The raw postgres.js client. Wrap it per call with `wrapMaplePgClient`. */
+	readonly sql: MaplePgSocket
 	/**
 	 * Resolves once the connection is usable, so callers can time the dial
 	 * separately from the query.
@@ -28,7 +41,12 @@ export interface MaplePgConnection {
 	readonly end: () => Promise<void>
 }
 
-export interface MaplePgClientOptions {
+/** A socket plus a drizzle client bound to it, for callers that want both at once. */
+export interface MaplePgConnection extends MaplePgSocketHandle {
+	readonly db: MaplePgClient
+}
+
+export interface MaplePgSocketOptions {
 	readonly maxConnections?: number
 	/**
 	 * postgres.js `connect_timeout`, in SECONDS. Left unset the driver default of
@@ -40,6 +58,9 @@ export interface MaplePgClientOptions {
 	 * `connect_timeout` calls `socket.destroy()` and frees the slot.
 	 */
 	readonly connectTimeoutSeconds?: number
+}
+
+export interface MaplePgClientOptions extends MaplePgSocketOptions {
 	/**
 	 * Called once per executed statement with the parameterized SQL ($1
 	 * placeholders — params are never inlined). Fires for statements inside
@@ -53,24 +74,26 @@ const toDrizzleLogger = (onQuery: ((query: string) => void) | undefined) =>
 	onQuery ? { logQuery: (query: string, _params: unknown[]) => onQuery(query) } : undefined
 
 /**
- * Drizzle over postgres.js, for real Postgres (PlanetScale via Hyperdrive in
+ * Dial one postgres.js socket, for real Postgres (PlanetScale via Hyperdrive in
  * Workers, docker-compose Postgres in `wrangler dev`, direct URLs in scripts).
  *
- * Workers note: TCP sockets are tied to the request that opened them, so
- * deployed Workers create a connection per `execute` (`maxConnections: 1`)
- * and `end()` it when done. `fetch_types: false` skips the pg_types
- * round-trip (we only use built-in types).
+ * Workers note: TCP sockets are tied to the request that opened them, so a
+ * socket may be reused freely WITHIN a request but must never outlive it. The
+ * request path holds one of these per request (`maxConnections: 1`) and `end()`s
+ * it at the boundary — see apps/api/src/platform/pg-connection-scope.ts.
+ * `fetch_types: false` skips the pg_types round-trip (we only use built-in
+ * types).
  *
  * `prepare: false` because the named-statement cache is per connection: a
- * client torn down after one `execute` writes the cache and discards it, so it
- * can never produce a second hit, and named statements are the classic way to
- * pin a connection in a pooler. Hyperdrive multiplexes client connections over
- * its origin pool, so the unnamed extended protocol is the safer default.
+ * request-lived client would have to re-issue every statement's Parse on the
+ * next request anyway, and named statements are the classic way to pin a
+ * connection in a pooler. Hyperdrive multiplexes client connections over its
+ * origin pool, so the unnamed extended protocol is the safer default.
  */
-export const createMaplePgClient = (
+export const createMaplePgSocket = (
 	connectionString: string,
-	options?: MaplePgClientOptions,
-): MaplePgConnection => {
+	options?: MaplePgSocketOptions,
+): MaplePgSocketHandle => {
 	const connectTimeoutSeconds = options?.connectTimeoutSeconds
 	const sql = postgres(connectionString, {
 		max: options?.maxConnections ?? 5,
@@ -82,12 +105,35 @@ export const createMaplePgClient = (
 		...(connectTimeoutSeconds === undefined ? {} : { connect_timeout: connectTimeoutSeconds }),
 	})
 	return {
-		db: drizzlePostgres(sql, { schema, logger: toDrizzleLogger(options?.onQuery) }),
+		sql,
 		awaitConnected: async () => {
 			await sql`select 1`
 		},
 		end: () => sql.end(),
 	}
+}
+
+/**
+ * Bind a drizzle client to an already-dialed socket.
+ *
+ * Cheap enough to call per logical DB call — it only re-derives drizzle's
+ * relational config, it does not touch the network. Calling it per call is what
+ * keeps each call's `onQuery` collector isolated while they share one socket;
+ * `DatabasePgliteLive` does the same thing over a shared PGlite instance for
+ * exactly this reason.
+ */
+export const wrapMaplePgClient = (
+	sql: MaplePgSocket,
+	options?: Pick<MaplePgClientOptions, "onQuery">,
+): MaplePgClient => drizzlePostgres(sql, { schema, logger: toDrizzleLogger(options?.onQuery) })
+
+/** A freshly dialed socket with one drizzle client already bound to it. */
+export const createMaplePgClient = (
+	connectionString: string,
+	options?: MaplePgClientOptions,
+): MaplePgConnection => {
+	const socket = createMaplePgSocket(connectionString, options)
+	return { ...socket, db: wrapMaplePgClient(socket.sql, options) }
 }
 
 export type MaplePgClient = ReturnType<typeof drizzlePostgres<typeof schema>>
