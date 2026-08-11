@@ -227,13 +227,14 @@ export const executeRegisteredMcpToolUnscoped = Effect.fn("McpToolRegistry.execu
 	}
 
 	yield* Effect.annotateCurrentSpan({ tool: definition.name })
-	const decoded = yield* Effect.try({
-		try: () => Schema.decodeUnknownSync(definition.schema)(input),
-		catch: (error) =>
-			new McpDecodeError({
-				errorMessage: toDecodeErrorMessage(definition, error),
-			}),
-	})
+	const decoded = yield* Schema.decodeUnknownEffect(definition.schema)(input).pipe(
+		Effect.mapError(
+			(error) =>
+				new McpDecodeError({
+					errorMessage: toDecodeErrorMessage(definition, error),
+				}),
+		),
+	)
 
 	return yield* definition.handler(decoded).pipe(Effect.tap(() => Effect.logInfo("Tool completed")))
 })

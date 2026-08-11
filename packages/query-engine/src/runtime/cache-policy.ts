@@ -4,7 +4,6 @@ export interface DirectRouteCachePolicy {
 	/** Bump when response or key semantics change incompatibly. */
 	readonly version: number
 	readonly ttlSeconds: number
-	/** Time-key coalescing is independent from storage lifetime. */
 	readonly snapWindowSeconds: number
 }
 

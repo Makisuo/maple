@@ -94,7 +94,7 @@ const decodeReport = Schema.decodeUnknownSync(AiTriageResult)
 const decodeReportOption = Schema.decodeUnknownOption(AiTriageResult)
 
 /** Internal actor the lane tools run as — same identity the internal MCP RPC path uses. */
-const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
+const internalServiceUserId = Schema.decodeSync(UserId)("internal-service")
 
 /**
  * Wall-clock for the planning pass. Still short, because planning is scoping —
@@ -585,11 +585,6 @@ export async function runInvestigationFanout(
 	}
 }
 
-/**
- * Dial Postgres through the same resolver the request path uses, rather than a
- * second hand-rolled narrow of the binding. Passing the attributes also fixes a
- * pre-existing gap: these spans carried no `db.namespace`/`server.address`.
- */
 const dialWorkflowDb = (env: InvestigationFanoutWorkflowEnv): TracedPgConnection => {
 	const source = resolveDbConnectionSource(env)
 	if (source._tag === "Unavailable") {

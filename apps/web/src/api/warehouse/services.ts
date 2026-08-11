@@ -82,8 +82,7 @@ interface CoercedRow {
 	firstSeen: string
 }
 
-// Exported so `getServiceMapBundle` runs the identical overview transform on
-// the bundle's rows instead of forking a second copy of it.
+// Shared with the bundled service-map response path.
 export function coerceRow(raw: Record<string, unknown>): CoercedRow {
 	return {
 		serviceName: String(raw.serviceName ?? ""),

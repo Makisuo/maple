@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { Cause, Exit } from "effect"
+import { Exit } from "effect"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -22,6 +22,7 @@ import { isExcluded } from "@/components/infra/planetscale/branch-selection"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { showErrorToast } from "@/lib/error-toast"
 import { IntegrationIconPlate, catalogEntry } from "./integration-catalog"
 import { useIntegrationConnect } from "./integration-connect"
 import {
@@ -485,11 +486,7 @@ function PlanetScaleOrgPicker(props: {
 			toastManager.add({ title: `PlanetScale organization ${selected} connected`, type: "success" })
 			props.onDone()
 		} else {
-			// Surface the API's message (missing scope, org outside the grant, …) — actionable.
-			toastManager.add({
-				title: extractErrorMessage(result) ?? "Failed to connect PlanetScale organization",
-				type: "error",
-			})
+			showErrorToast(result, { fallbackTitle: "Failed to connect PlanetScale organization" })
 		}
 	}
 
@@ -663,12 +660,4 @@ function PlanetScaleWebhookConfig() {
 			</p>
 		</div>
 	)
-}
-
-/** Best-effort human message from a failed mutation Exit (tagged API errors carry one). */
-function extractErrorMessage(result: Exit.Exit<unknown, unknown>): string | null {
-	if (Exit.isSuccess(result)) return null
-	const first = Cause.prettyErrors(result.cause)[0]
-	if (first?.message) return first.message
-	return null
 }

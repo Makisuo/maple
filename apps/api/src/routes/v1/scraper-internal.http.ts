@@ -22,7 +22,7 @@ const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 const decodeScrapeIntervalSecondsSync = Schema.decodeUnknownSync(ScrapeIntervalSeconds)
 
 /** Audit identity for lazily-created ingest keys (org_ingest_keys.created_by). */
-const SCRAPER_SYSTEM_USER = Schema.decodeUnknownSync(UserId)("system-prometheus-scraper")
+const SCRAPER_SYSTEM_USER = Schema.decodeSync(UserId)("system-prometheus-scraper")
 const decodeScrapeResultsEffect = Schema.decodeUnknownEffect(ScrapeResultReportList)
 const decodeLabelsEffect = Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.String))
 

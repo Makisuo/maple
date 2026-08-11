@@ -193,8 +193,8 @@ const toCachedChSettings = (row: CachedSettingsRow): CachedChSettings => ({
 	chPasswordTag: row.chPasswordTag,
 })
 
-const ROOT_ROLE = Schema.decodeUnknownSync(RoleName)("root")
-const ORG_ADMIN_ROLE = Schema.decodeUnknownSync(RoleName)("org:admin")
+const ROOT_ROLE = Schema.decodeSync(RoleName)("root")
+const ORG_ADMIN_ROLE = Schema.decodeSync(RoleName)("org:admin")
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 
 export interface OrgClickHouseSettingsServiceShape {

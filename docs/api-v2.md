@@ -82,23 +82,30 @@ Offset-backed endpoints fetch `limit + 1` rows from their backing store to deter
 
 ### Errors
 
-Every error response body is exactly:
+Every error response body uses this envelope:
 
 ```json
 {
 	"error": {
+		"_tag": "@maple/http/investigations/InvestigationNotFoundError",
 		"type": "not_found_error",
-		"code": "api_key_not_found",
-		"message": "API key not found",
+		"code": "investigation_not_found",
+		"title": "Investigation not found",
+		"message": "No such investigation.",
+		"retryable": false,
+		"recovery": "none",
 		"param": "id"
 	}
 }
 ```
 
 - `type` is closed: `invalid_request_error` (400), `authentication_error` (401), `permission_error` (403), `not_found_error` (404), `conflict_error` (409), `rate_limit_error` (429), `api_error` (5xx).
+- `_tag` is the stable semantic identity of the failure. Maple clients branch on it directly; registered domain adapters keep the same tag from the Effect error channel through the HTTP boundary. Errors created at the v2 boundary receive a namespaced tag derived from their stable code or endpoint.
 - `code` is a stable machine-readable string (`api_key_not_found`, `alert_destination_in_use`, `api_key_lookup_unavailable`, `insufficient_scope`, `parameter_invalid`, …). Resource and dependency failures identify the affected resource and operation. Codes are append-only.
+- `title` and `message` are safe, human-readable presentation copy. `retryable` says whether the same logical request can plausibly succeed later without correcting its input; automatic mutation replay still requires an idempotency key. `recovery` is one of `none`, `fix_request`, `reauthenticate`, `request_access`, `reconnect`, `refresh`, `retry`, or `contact_support`.
+- `retry_after_seconds` carries a relative delay; `retry_at` carries a known absolute reset time. When either is present the response also emits the standard `Retry-After` header.
 - `param` names the offending parameter when applicable; `doc_url` may link to reference docs. On a request-decode failure it carries the full JSON path of the bad value (`widgets[3].display.chart_presentation.fill_nulls`), and for a path inside a `widgets[]` array the `message` also names the enclosing widget's `id`.
-- No internal tags or stack traces ever appear on the wire.
+- Stack traces, driver messages, raw provider responses, and diagnostic causes never appear on the wire. `_tag` is an intentionally public semantic tag, not a leaked runtime class name.
 - Expected internal failures use operation-specific tagged errors. Unexpected defects are logged with the group and operation, then returned as a sanitized `api_error` / `internal_error`; dependency messages are never copied to public 5xx responses.
 
 Implementation: `packages/domain/src/http/v2/errors.ts`; request-decode failures are rewritten into the envelope with a structured `param` by `V2SchemaErrors`, and `V2UnexpectedErrors` provides the defect boundary (`apps/api/src/routes/v2/error-envelope.ts`).

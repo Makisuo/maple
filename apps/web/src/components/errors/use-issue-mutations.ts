@@ -1,4 +1,4 @@
-import { Cause, Exit } from "effect"
+import { Exit } from "effect"
 import { toastManager } from "@maple/ui/components/ui/toast"
 import { useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -13,16 +13,9 @@ import {
 } from "@maple/domain/http"
 import { WORKFLOW_LABEL } from "@/components/icons/workflow-ring"
 import { logClientError } from "@/lib/services/common/telemetry"
+import { showErrorToast } from "@/lib/error-toast"
 
 const INVALIDATE = ["errorIssues"] as const
-
-function describeFailure(result: Exit.Exit<unknown, unknown>): string {
-	if (Exit.isSuccess(result)) return ""
-	const errors = Cause.prettyErrors(result.cause)
-	const first = errors[0]
-	if (first?.message) return first.message
-	return Cause.pretty(result.cause).slice(0, 300)
-}
 
 function logFailure(label: string, result: Exit.Exit<unknown, unknown>) {
 	if (Exit.isSuccess(result)) return
@@ -52,11 +45,7 @@ export function useIssueMutations(onSuccess?: () => void) {
 			toastManager.add({ title: `Moved to ${WORKFLOW_LABEL[toState]}`, type: "success" })
 		} else {
 			logFailure("transitionTo", result)
-			toastManager.add({
-				title: "State change failed",
-				description: describeFailure(result),
-				type: "error",
-			})
+			showErrorToast(result, { title: "State change failed" })
 		}
 		return result
 	}
@@ -83,17 +72,12 @@ export function useIssueMutations(onSuccess?: () => void) {
 			})
 		} else if (failed < issueIds.length) {
 			onSuccess?.()
-			toastManager.add({
+			showErrorToast(failures[0]!, {
 				title: `Moved ${issueIds.length - failed} of ${issueIds.length}; ${failed} failed`,
-				description: describeFailure(failures[0]!),
 				type: "warning",
 			})
 		} else {
-			toastManager.add({
-				title: "State change failed",
-				description: describeFailure(failures[0]!),
-				type: "error",
-			})
+			showErrorToast(failures[0]!, { title: "State change failed" })
 		}
 	}
 
@@ -108,7 +92,7 @@ export function useIssueMutations(onSuccess?: () => void) {
 			toastManager.add({ title: "Claimed", type: "success" })
 		} else {
 			logFailure("claim", result)
-			toastManager.add({ title: "Claim failed", description: describeFailure(result), type: "error" })
+			showErrorToast(result, { title: "Claim failed" })
 		}
 		return result
 	}
@@ -129,9 +113,8 @@ export function useIssueMutations(onSuccess?: () => void) {
 			onSuccess?.()
 			toastManager.add({ title: `Claimed ${issueIds.length} issues`, type: "success" })
 		} else {
-			toastManager.add({
+			showErrorToast(failed[0]!, {
 				title: `Claimed ${issueIds.length - failed.length} of ${issueIds.length}`,
-				type: "error",
 			})
 		}
 	}
@@ -147,7 +130,7 @@ export function useIssueMutations(onSuccess?: () => void) {
 			toastManager.add({ title: "Released", type: "success" })
 		} else {
 			logFailure("release", result)
-			toastManager.add({ title: "Release failed", description: describeFailure(result), type: "error" })
+			showErrorToast(result, { title: "Release failed" })
 		}
 		return result
 	}
@@ -166,11 +149,7 @@ export function useIssueMutations(onSuccess?: () => void) {
 			})
 		} else {
 			logFailure("setSeverity", result)
-			toastManager.add({
-				title: "Severity change failed",
-				description: describeFailure(result),
-				type: "error",
-			})
+			showErrorToast(result, { title: "Severity change failed" })
 		}
 		return result
 	}
@@ -191,9 +170,8 @@ export function useIssueMutations(onSuccess?: () => void) {
 			onSuccess?.()
 			toastManager.add({ title: `Updated severity for ${issueIds.length} issues`, type: "success" })
 		} else {
-			toastManager.add({
+			showErrorToast(failed[0]!, {
 				title: `Updated ${issueIds.length - failed.length} of ${issueIds.length} issues`,
-				type: "error",
 			})
 		}
 	}

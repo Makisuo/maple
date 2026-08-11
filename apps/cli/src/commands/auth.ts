@@ -2,6 +2,7 @@ import * as os from "node:os"
 import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
 import { Console, Duration, Effect, Option, Redacted, Schema } from "effect"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { MapleConfig } from "../core/config"
 import { deleteNativeCredential } from "../core/credential-store"
 import { Mode } from "../core/mode"
@@ -64,28 +65,55 @@ const normalizeApiUrl = (value: string) =>
 		catch: () => new CliAuthError({ message: `Invalid Maple API URL: ${value}` }),
 	})
 
-const requestJson = <A>(url: string, init?: RequestInit): Effect.Effect<A, CliAuthError> =>
-	Effect.tryPromise({
-		try: async () => {
-			const response = await fetch(url, init)
-			const body = (await response.json().catch(() => null)) as ({ message?: unknown } & A) | null
-			if (!response.ok) {
-				throw new Error(
+interface JsonRequestInit {
+	readonly method?: "GET" | "POST" | "DELETE"
+	readonly headers?: Readonly<Record<string, string>>
+	readonly body?: string
+}
+
+const requestJson = <A>(
+	url: string,
+	init?: JsonRequestInit,
+): Effect.Effect<A, CliAuthError, HttpClient.HttpClient> =>
+	Effect.gen(function* () {
+		const client = yield* HttpClient.HttpClient
+		let request = HttpClientRequest.make(init?.method ?? "GET")(url)
+		if (init?.headers !== undefined) {
+			request = HttpClientRequest.setHeaders(request, init.headers)
+		}
+		if (init?.body !== undefined) {
+			request = HttpClientRequest.bodyText(request, init.body, "application/json")
+		}
+
+		const response = yield* client.execute(request).pipe(
+			Effect.mapError(
+				(error) =>
+					new CliAuthError({
+						message: error instanceof Error ? error.message : "Maple API request failed",
+					}),
+			),
+		)
+		const body = (yield* response.json.pipe(Effect.orElseSucceed(() => null))) as
+			| ({ message?: unknown } & A)
+			| null
+		if (response.status < 200 || response.status >= 300) {
+			return yield* new CliAuthError({
+				message:
 					typeof body?.message === "string"
 						? body.message
 						: `Maple API returned HTTP ${response.status}`,
-				)
-			}
-			if (body === null) throw new Error("Maple API returned an empty response")
-			return body
-		},
-		catch: (error) =>
-			new CliAuthError({
-				message: error instanceof Error ? error.message : "Maple API request failed",
-			}),
+			})
+		}
+		if (body === null) {
+			return yield* new CliAuthError({ message: "Maple API returned an empty response" })
+		}
+		return body
 	})
 
-const validateToken = (apiUrl: string, token: string): Effect.Effect<Session, CliAuthError> =>
+const validateToken = (
+	apiUrl: string,
+	token: string,
+): Effect.Effect<Session, CliAuthError, HttpClient.HttpClient> =>
 	requestJson<Session>(`${apiUrl}/api/auth/session`, {
 		headers: { authorization: `Bearer ${token}` },
 	}).pipe(

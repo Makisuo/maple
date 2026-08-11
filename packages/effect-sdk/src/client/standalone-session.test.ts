@@ -10,7 +10,6 @@ import { identify } from "./user.js"
 // `/v1/sessionReplays/meta` rows (active on setup, ended with observed trace
 // ids on tab-hide) when no `@maple-dev/browser` sink is on the page.
 
-/** The fields these assertions read off a `/v1/sessionReplays/meta` row. */
 interface MetaRowView {
 	readonly session_id: string
 	readonly status: string

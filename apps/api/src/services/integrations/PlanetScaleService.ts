@@ -383,17 +383,17 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				return items
 			})
 
-			const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
-
 			/**
 			 * Bearer Authorization for the org's OAuth grant, refreshed as needed.
 			 * A revoked/missing grant surfaces as-is — the poller records it per-org
 			 * and moves on; queryInsights lets the endpoint error union carry it.
 			 */
 			const authorizationFor = (connection: PlanetScaleConnectionRow) =>
-				psOAuth
-					.getValidAccessToken(decodeOrgIdSync(connection.orgId))
-					.pipe(Effect.map(({ accessToken }) => planetScaleBearerHeader(accessToken)))
+				Schema.decodeEffect(OrgId)(connection.orgId).pipe(
+					Effect.orDie,
+					Effect.flatMap((orgId) => psOAuth.getValidAccessToken(orgId)),
+					Effect.map(({ accessToken }) => planetScaleBearerHeader(accessToken)),
+				)
 
 			/**
 			 * Claim the org's inventory anchor row for this tick. A non-"claimed"
@@ -749,6 +749,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 						yield* Effect.annotateCurrentSpan({ "maple.planetscale.skip_reason": claim })
 						return 0
 					}
+					const orgId = yield* Schema.decodeEffect(OrgId)(connection.orgId).pipe(Effect.orDie)
 
 					const state = yield* readPollState(
 						connection.orgId,
@@ -781,7 +782,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 						for (const row of deployRequestTimelineRows(request)) {
 							if (row.occurredAtMs < now - DEPLOY_REQUESTS_FLOOR_MS) continue
 							const result = yield* appendTimelineEvent({
-								orgId: decodeOrgIdSync(connection.orgId),
+								orgId,
 								databaseName: database_.name,
 								// A deploy request spans two branches; pinning the marker to
 								// one of them would be a guess the payload doesn't support.
@@ -1082,7 +1083,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					})
 				}
 
-				const decoded = yield* Schema.decodeUnknownEffect(
+				const decoded = yield* Schema.decodeEffect(
 					Schema.fromJsonString(PageSchema(InsightRowSchema)),
 				)(response.text).pipe(
 					Effect.mapError(

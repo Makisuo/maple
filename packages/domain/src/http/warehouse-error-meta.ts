@@ -19,6 +19,7 @@
 
 import type { WarehouseError } from "./warehouse-errors"
 import { warehouseHttpErrors } from "./warehouse-errors"
+import type { HttpErrorPolicy } from "./error-policy"
 
 export type WarehouseErrorTag = WarehouseError["_tag"]
 
@@ -54,15 +55,11 @@ export const warehouseErrorStatus: ReadonlyMap<WarehouseErrorTag, number> = new 
 	}),
 )
 
-export interface WarehouseErrorMeta {
+export interface WarehouseErrorMeta extends HttpErrorPolicy {
 	/** Stable machine-readable slug for envelopes/failure categories. */
 	readonly code: string
 	/** Whose fault this is — drives copy tone, alerting, and on-call routing. */
 	readonly blame: "maple" | "customer" | "upstream"
-	/** Whether an identical retry can plausibly succeed. */
-	readonly retryable: boolean
-	/** Human title shown by UIs when no more specific copy applies. */
-	readonly title: string
 }
 
 /**
@@ -74,56 +71,83 @@ export const warehouseErrorMeta: Record<WarehouseErrorTag, WarehouseErrorMeta> =
 	"@maple/http/errors/WarehouseQueryError": {
 		code: "warehouse_query_failed",
 		blame: "upstream",
-		retryable: false,
 		title: "Database query failed",
+		retry: "never",
+		recovery: "contact_support",
+		origin: "dependency",
+		exposure: "redacted",
 	},
 	"@maple/http/errors/WarehouseUpstreamError": {
 		code: "warehouse_unavailable",
 		blame: "upstream",
-		retryable: true,
 		title: "Database is temporarily unavailable",
+		retry: "backoff",
+		recovery: "retry",
+		origin: "dependency",
+		exposure: "redacted",
 	},
 	"@maple/http/errors/WarehouseAuthError": {
 		code: "warehouse_auth_failed",
 		blame: "customer",
-		retryable: false,
 		title: "Database rejected our credentials",
+		retry: "never",
+		recovery: "reconnect",
+		origin: "client",
+		exposure: "redacted",
 	},
 	"@maple/http/errors/WarehouseConfigError": {
 		code: "warehouse_config_invalid",
 		blame: "customer",
-		retryable: false,
 		title: "Database is not configured correctly",
+		retry: "never",
+		recovery: "reconnect",
+		origin: "client",
+		exposure: "redacted",
 	},
 	"@maple/http/errors/WarehouseClientError": {
 		code: "warehouse_client_error",
 		blame: "upstream",
-		retryable: false,
 		title: "Database response could not be decoded",
+		retry: "never",
+		recovery: "contact_support",
+		origin: "dependency",
+		exposure: "redacted",
 	},
 	"@maple/http/errors/WarehouseSchemaDriftError": {
 		code: "warehouse_schema_drift",
 		blame: "customer",
-		retryable: false,
 		title: "Database schema is out of date",
+		retry: "never",
+		recovery: "reconnect",
+		origin: "client",
+		exposure: "redacted",
 	},
 	"@maple/http/errors/WarehouseMalformedQueryError": {
 		code: "warehouse_malformed_query",
 		blame: "maple",
-		retryable: false,
 		title: "This chart hit a bug in Maple",
+		retry: "never",
+		recovery: "contact_support",
+		origin: "maple",
+		exposure: "redacted",
 	},
 	"@maple/http/errors/WarehouseQuotaExceededError": {
 		code: "warehouse_quota_exceeded",
 		blame: "customer",
-		retryable: false,
 		title: "Query was too expensive",
+		retry: "never",
+		recovery: "fix_request",
+		origin: "client",
+		exposure: "redacted",
 	},
 	"@maple/http/errors/WarehouseValidationError": {
 		code: "warehouse_validation_failed",
 		blame: "customer",
-		retryable: false,
 		title: "Invalid query",
+		retry: "never",
+		recovery: "fix_request",
+		origin: "client",
+		exposure: "public_message",
 	},
 }
 
@@ -262,7 +286,8 @@ export const presentWarehouseError = (error: WarehouseErrorLike): PresentedWareh
 	}
 }
 
-export const isWarehouseErrorTag = (tag: string): tag is WarehouseErrorTag => tag in warehouseErrorMeta
+export const isWarehouseErrorTag = (tag: string): tag is WarehouseErrorTag =>
+	Object.hasOwn(warehouseErrorMeta, tag)
 
 /**
  * Presentation with the raw upstream message REDACTED — every description

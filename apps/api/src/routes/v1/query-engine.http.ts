@@ -224,12 +224,6 @@ const coerceStatusCode = (value: string): StatusCode =>
 // probe.
 const PROBE_RECENT_WINDOW_MS = 48 * 3_600_000
 
-/**
- * Row shapes for `servicePlatforms` / `serviceWorkloads`, shared by the standalone
- * handlers and `serviceMapBundle`. Extracted when the bundle landed: the platform
- * classification below is the kind of ordered rule set that silently diverges if
- * it exists in two places.
- */
 const toServicePlatformRow = (row: CH.ServicePlatformsOutput) => {
 	const k8sCluster = String(row.k8sCluster ?? "")
 	const k8sPodName = String(row.k8sPodName ?? "")
@@ -239,11 +233,9 @@ const toServicePlatformRow = (row: CH.ServicePlatformsOutput) => {
 	const faasName = String(row.faasName ?? "")
 	const mapleSdkType = String(row.mapleSdkType ?? "")
 	const processRuntimeName = String(row.processRuntimeName ?? "")
-	// Require pod/deployment, not just cluster.name — see SQL comment.
+	// cluster.name alone does not prove the service runs in Kubernetes.
 	const isKubernetes = k8sPodName !== "" || k8sDeploymentName !== ""
-	// Infrastructure signals win over SDK self-report so a server SDK on
-	// cloudflare/lambda still classifies by host. Pure browser apps never
-	// set k8s/cloud/faas, so they fall through to web.
+	// Host infrastructure takes precedence over SDK self-report.
 	const platform: "kubernetes" | "cloudflare" | "lambda" | "web" | "unknown" =
 		cloudPlatform === "cloudflare.workers" || cloudProvider === "cloudflare"
 			? "cloudflare"
@@ -981,9 +973,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceMapBundle", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					// The whole service-map page in one Worker invocation: four env-scoped
-					// queries concurrently behind a single config resolution, then the
-					// workload read the browser could only issue after the edges landed.
+					// Resolve warehouse routing once before the fan-out.
 					yield* warehouse.warmRoute(tenant)
 					const [dependencyRows, overviewRows, dbEdgeRows, platformRows] = yield* Effect.all(
 						[
@@ -995,10 +985,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ concurrency: 4 },
 					)
 
-					// Workloads are keyed by the service set the map actually draws —
-					// every service touching an edge, plus every service with overview
-					// rows. Derived here rather than in the browser, which is what turns
-					// this from a second round-trip into a second server-side query.
 					const services = new Set<string>()
 					for (const row of dependencyRows) {
 						services.add(String(row.sourceService ?? ""))
@@ -1007,8 +993,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					for (const row of overviewRows) services.add(String(row.serviceName ?? ""))
 					services.delete("")
 
-					// Matches the standalone handler: an empty service set short-circuits
-					// rather than issuing a guaranteed-empty query.
 					const workloadRows =
 						services.size === 0
 							? []

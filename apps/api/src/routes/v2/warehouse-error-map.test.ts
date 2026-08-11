@@ -28,6 +28,8 @@ describe("warehouseToV2", () => {
 		)
 		expect(mapped).toBeInstanceOf(V2InvalidRequestError)
 		expect(mapped.error.message).toContain("start_time")
+		expect(mapped.error._tag).toBe("@maple/http/errors/WarehouseValidationError")
+		expect(mapped.error.retryable).toBe(false)
 	})
 
 	it("maps a quota breach to a 429, not a 503", () => {
@@ -39,6 +41,9 @@ describe("warehouseToV2", () => {
 			}),
 		)
 		expect(mapped).toBeInstanceOf(V2RateLimitError)
+		expect(mapped.error._tag).toBe("@maple/http/errors/WarehouseQuotaExceededError")
+		expect(mapped.error.retryable).toBe(false)
+		expect(mapped.error.recovery).toBe("fix_request")
 	})
 
 	it("keeps a genuine outage a 503 with the operation code", () => {
@@ -47,6 +52,8 @@ describe("warehouseToV2", () => {
 		)
 		expect(mapped).toBeInstanceOf(V2ServiceUnavailableError)
 		expect(mapped.error.code).toBe("trace_search_unavailable")
+		expect(mapped.error._tag).toBe("@maple/http/errors/WarehouseUpstreamError")
+		expect(mapped.error.retryable).toBe(true)
 	})
 
 	it("maps a Maple SQL bug to a 502 under its own code", () => {

@@ -1,7 +1,7 @@
 import { HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { describe, expect, it } from "vitest"
 import { WAREHOUSE_ERROR_TAGS } from "@maple/domain"
-import { formatBackendError, humanizeInstants } from "./error-messages"
+import { formatBackendError, humanizeInstants, normalizeAppError, v2ErrorInfo } from "./error-messages"
 
 describe("humanizeInstants", () => {
 	const NOW = Date.parse("2026-08-09T17:00:00.000Z")
@@ -33,9 +33,66 @@ describe("formatBackendError", () => {
 				message: "Daily limit of 90 model passes reached. Resets at 2026-08-10T00:00:00.000Z.",
 			},
 		})
-		expect(result.title).toBe("Rate limited")
+		expect(result.title).toBe("Investigation limit reached")
 		expect(result.description).toContain("Daily limit of 90 model passes reached")
 		expect(result.description).not.toContain("2026-08-10T00:00:00.000Z")
+		expect(result.category).toBe("rate-limit")
+		expect(result.code).toBe("investigation_daily_quota")
+		expect(result.recovery).toEqual({ kind: "retry", automatic: false })
+	})
+
+	it("trusts the backend tag, title, and recovery instead of inferring from status", () => {
+		const result = normalizeAppError({
+			error: {
+				_tag: "@maple/http/errors/WarehouseQuotaExceededError",
+				type: "rate_limit_error",
+				code: "rate_limited",
+				title: "Query was too expensive",
+				message: "Narrow the time range or add filters.",
+				retryable: false,
+				recovery: "fix_request",
+				retry_after_seconds: 15,
+			},
+		})
+		expect(result.title).toBe("Query was too expensive")
+		expect(result.recovery).toEqual({ kind: "fix-input" })
+		expect(result.retryAfterSeconds).toBe(15)
+		expect(result.tag).toBe("@maple/http/errors/WarehouseQuotaExceededError")
+		expect(result.diagnostics.tag).toBe("@maple/http/errors/WarehouseQuotaExceededError")
+	})
+
+	it("uses an explicit non-retryable flag even during a partial metadata rollout", () => {
+		const result = formatBackendError({
+			error: {
+				type: "rate_limit_error",
+				code: "query_limit",
+				message: "Narrow the query before trying again.",
+				retryable: false,
+			},
+		})
+		expect(result.recovery).toEqual({ kind: "none" })
+	})
+
+	it("keeps v2 parameter and documentation metadata for field-level UI", () => {
+		const input = {
+			error: {
+				type: "invalid_request_error",
+				code: "invalid_time_range",
+				message: "End time must be after start time.",
+				param: "end_time",
+				doc_url: "https://api.maple.dev/v2/docs#time-range",
+			},
+		}
+		expect(v2ErrorInfo(input)).toMatchObject({
+			code: "invalid_time_range",
+			param: "end_time",
+			docUrl: "https://api.maple.dev/v2/docs#time-range",
+		})
+		expect(formatBackendError(input)).toMatchObject({
+			category: "validation",
+			param: "end_time",
+			recovery: { kind: "fix-input", param: "end_time" },
+		})
 	})
 
 	it("formats WarehouseQuotaExceededError with execution time setting", () => {
@@ -93,15 +150,15 @@ describe("formatBackendError", () => {
 		expect(result.description).toBe("Invalid time range")
 	})
 
-	it("formats QueryEngineExecutionError with causeMessage", () => {
+	it("redacts QueryEngineExecutionError causeMessage from display copy", () => {
 		const result = formatBackendError({
 			_tag: "@maple/http/errors/QueryEngineExecutionError",
 			message: "errorsByType query failed",
 			causeMessage: "Code: 226. DB::Exception: Syntax error",
 		})
 		expect(result.title).toBe("Query failed")
-		expect(result.description).toContain("errorsByType query failed")
-		expect(result.description).toContain("Syntax error")
+		expect(result.description).not.toContain("errorsByType")
+		expect(result.description).not.toContain("Syntax error")
 	})
 
 	it("formats WarehouseQueryError without leaking the internal pipe label", () => {
@@ -111,7 +168,8 @@ describe("formatBackendError", () => {
 			pipe: "spanHierarchy",
 		})
 		expect(result.title).toBe("Database query failed")
-		expect(result.description).toBe("DB::Exception: syntax error")
+		expect(result.description).toBe("Database query failed")
+		expect(result.description).not.toContain("DB::Exception")
 		expect(result.description).not.toContain("spanHierarchy")
 	})
 
@@ -145,7 +203,8 @@ describe("formatBackendError", () => {
 			clickhouseType: "UNKNOWN_DATABASE",
 		})
 		expect(result.title).toBe("Database is not configured correctly")
-		expect(result.description).toContain("Database default does not exist")
+		expect(result.description).toBe("Database is not configured correctly.")
+		expect(result.description).not.toContain("default")
 	})
 
 	it("formats WarehouseClientError as a decode issue", () => {
@@ -155,7 +214,8 @@ describe("formatBackendError", () => {
 			pipe: "sqlQuery",
 		})
 		expect(result.title).toBe("Database response could not be decoded")
-		expect(result.description).toContain("Unexpected token")
+		expect(result.description).toBe("Database response could not be decoded.")
+		expect(result.description).not.toContain("Unexpected token")
 	})
 
 	it("formats WarehouseSchemaDriftError with a schema-apply hint", () => {
@@ -224,7 +284,8 @@ describe("formatBackendError", () => {
 			pipe: "sqlQuery",
 		})
 		expect(result.description).not.toContain("sqlQuery")
-		expect(result.description).toBe("DB::Exception: out of memory")
+		expect(result.description).toBe("Database query failed")
+		expect(result.description).not.toContain("DB::Exception")
 	})
 
 	it("strips raw nginx HTML and converts leaked 503 to a friendly message", () => {
@@ -244,7 +305,8 @@ describe("formatBackendError", () => {
 		const result = formatBackendError({
 			_tag: "@maple/http/errors/UnauthorizedError",
 		})
-		expect(result.title).toBe("Not authorized")
+		expect(result.title).toBe("Sign in required")
+		expect(result.recovery).toEqual({ kind: "reauth" })
 	})
 
 	it("tags transport HttpClientError as a network error", () => {
@@ -256,6 +318,20 @@ describe("formatBackendError", () => {
 		const result = formatBackendError(error)
 		expect(result.title).toBe("Cannot reach Maple API")
 		expect(result.kind).toBe("network")
+		expect(result.recovery).toEqual({ kind: "retry", automatic: true })
+	})
+
+	it("treats client abort timeouts as manual retry, not connectivity polling", () => {
+		const error = new HttpClientError.HttpClientError({
+			reason: new HttpClientError.TransportError({
+				request: HttpClientRequest.get("https://api.maple.dev/v1/services"),
+				cause: new DOMException("timed out", "TimeoutError"),
+			}),
+		})
+		const result = formatBackendError(error)
+		expect(result.category).toBe("timeout")
+		expect(result.kind).toBeUndefined()
+		expect(result.recovery).toEqual({ kind: "retry", automatic: false })
 	})
 
 	it("tags fetch-failure Error messages as network errors", () => {
@@ -271,11 +347,12 @@ describe("formatBackendError", () => {
 	it("falls back for plain Error", () => {
 		const result = formatBackendError(new Error("boom"))
 		expect(result.title).toBe("Something went wrong")
-		expect(result.description).toBe("boom")
+		expect(result.description).not.toContain("boom")
+		expect(result.recognized).toBe(false)
 	})
 
 	it("falls back for unknown shapes", () => {
-		expect(formatBackendError("string error").description).toBe("string error")
+		expect(formatBackendError("string error").description).not.toContain("string error")
 		expect(formatBackendError(null).title).toBe("Something went wrong")
 		expect(formatBackendError(undefined).title).toBe("Something went wrong")
 	})
@@ -283,6 +360,33 @@ describe("formatBackendError", () => {
 	it("reads message from object-shaped errors without _tag", () => {
 		const result = formatBackendError({ message: "raw message" })
 		expect(result.title).toBe("Something went wrong")
-		expect(result.description).toBe("raw message")
+		expect(result.description).not.toContain("raw message")
+	})
+
+	it("retains raw technical text only in diagnostics", () => {
+		const result = normalizeAppError({
+			_tag: "@maple/http/errors/DatabaseError",
+			message: "postgres://secret@internal:5432 failed",
+		})
+		expect(result.description).not.toContain("postgres")
+		expect(result.diagnostics.technicalMessage).toContain("postgres://secret")
+	})
+
+	it("finds a structured API failure nested under a generic cause", () => {
+		const result = formatBackendError({
+			message: "request wrapper failed",
+			cause: {
+				error: {
+					type: "not_found_error",
+					code: "dashboard_not_found",
+					message: "No such dashboard.",
+				},
+			},
+		})
+		expect(result).toMatchObject({
+			title: "Not found",
+			category: "not-found",
+			code: "dashboard_not_found",
+		})
 	})
 })

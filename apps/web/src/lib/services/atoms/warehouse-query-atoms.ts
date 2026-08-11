@@ -151,7 +151,7 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 		// shipped). The inner query spans already export by re-providing this same
 		// (memoized) layer; this lifts the parent onto the same tracer.
 		let resultAtom = MapleApiAtomClient.runtime.atom(
-			Schema.decodeUnknownEffect(UnknownFromJson)(orgScopedKeyPayload(key)).pipe(
+			Schema.decodeEffect(UnknownFromJson)(orgScopedKeyPayload(key)).pipe(
 				Effect.mapError(
 					(cause) =>
 						new QueryAtomError({
@@ -500,9 +500,6 @@ export const getQueryBuilderBreakdownResultAtom = makeQueryAtomFamily(getQueryBu
 	staleTime: 30_000,
 })
 
-// Service-map page bundle: edges + overview + DB edges + platforms + workloads
-// in one fetch (replaces four concurrent atoms plus the edge-dependent
-// workloads atom that could only fire after them).
 export const getServiceMapBundleResultAtom = makeQueryAtomFamily(getServiceMapBundle, {
 	staleTime: 15_000,
 })

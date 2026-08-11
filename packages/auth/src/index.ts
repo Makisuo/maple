@@ -66,13 +66,13 @@ const unauthorized = (message: string) =>
 // callers — that's an oracle for credential stuffing. Do not refactor these to
 // preserve `cause`.
 const decodeOrgId = (value: string, message: string): Effect.Effect<OrgId, UnauthorizedError> =>
-	Schema.decodeUnknownEffect(OrgId)(value).pipe(Effect.mapError(() => unauthorized(message)))
+	Schema.decodeEffect(OrgId)(value).pipe(Effect.mapError(() => unauthorized(message)))
 
 const decodeUserId = (value: string, message: string): Effect.Effect<UserId, UnauthorizedError> =>
-	Schema.decodeUnknownEffect(UserId)(value).pipe(Effect.mapError(() => unauthorized(message)))
+	Schema.decodeEffect(UserId)(value).pipe(Effect.mapError(() => unauthorized(message)))
 
 const decodeRoleName = (value: string, message: string): Effect.Effect<RoleName, UnauthorizedError> =>
-	Schema.decodeUnknownEffect(RoleName)(value).pipe(Effect.mapError(() => unauthorized(message)))
+	Schema.decodeEffect(RoleName)(value).pipe(Effect.mapError(() => unauthorized(message)))
 
 const getHeader = (headers: HeaderRecord, key: string): string | undefined => {
 	const exact = headers[key]
@@ -128,7 +128,7 @@ const verifyHs256Jwt = Effect.fn("AuthService.verifyHs256Jwt")(function* (
 	}
 
 	const [encodedHeader, encodedPayload, encodedSignature] = parts
-	const header = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(JwtHeaderSchema))(
+	const header = yield* Schema.decodeEffect(Schema.fromJsonString(JwtHeaderSchema))(
 		decodeBase64Url(encodedHeader),
 	).pipe(Effect.mapError(() => unauthorized("Invalid JWT header")))
 	if (header.alg !== "HS256") {
@@ -144,7 +144,7 @@ const verifyHs256Jwt = Effect.fn("AuthService.verifyHs256Jwt")(function* (
 		return yield* unauthorized("Invalid JWT signature")
 	}
 
-	const payload = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(JwtPayloadSchema))(
+	const payload = yield* Schema.decodeEffect(Schema.fromJsonString(JwtPayloadSchema))(
 		decodeBase64Url(encodedPayload),
 	).pipe(Effect.mapError(() => unauthorized("Invalid JWT payload")))
 	// JWT exp/nbf are in seconds since epoch (RFC 7519); divide Clock millis.

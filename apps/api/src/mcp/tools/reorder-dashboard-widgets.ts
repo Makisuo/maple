@@ -72,7 +72,7 @@ export function registerReorderDashboardWidgetsTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.reorderDashboardWidgets")(function* ({ dashboard_id, layouts_json }) {
-			const layouts = yield* Schema.decodeUnknownEffect(LayoutsFromJson)(layouts_json).pipe(
+			const layouts = yield* Schema.decodeEffect(LayoutsFromJson)(layouts_json).pipe(
 				Effect.mapError(
 					(error) =>
 						new McpQueryError({

@@ -229,9 +229,14 @@ describe("v2 api_keys over HTTP", () => {
 		expect(response.status).toBe(429)
 		expect(response.body).toEqual({
 			error: {
+				_tag: "@maple/http/v2/rate_limited",
 				type: "rate_limit_error",
 				code: "rate_limited",
+				title: "Too many requests",
 				message: "Too many requests. Retry after 60 seconds.",
+				retryable: true,
+				recovery: "retry",
+				retry_after_seconds: 60,
 			},
 		})
 		expect(response.headers.get("retry-after")).toBe("60")
@@ -308,9 +313,13 @@ describe("v2 api_keys over HTTP", () => {
 		const { status, body } = await harness.request("GET", "/v2/api_keys", { token: key.secret })
 		expect(status).toBe(503)
 		expect(body.error).toEqual({
+			_tag: "@maple/http/v2/api_key_lookup_unavailable",
 			type: "api_error",
 			code: "api_key_lookup_unavailable",
+			title: "Service temporarily unavailable",
 			message: "A service required for this operation is temporarily unavailable; retry with backoff.",
+			retryable: true,
+			recovery: "retry",
 		})
 		await harness.dispose()
 	})
@@ -328,9 +337,13 @@ describe("v2 api_keys over HTTP", () => {
 		})
 		expect(create.status).toBe(403)
 		expect(create.body.error).toEqual({
+			_tag: "@maple/http/v2/insufficient_scope",
 			type: "permission_error",
 			code: "insufficient_scope",
+			title: "Permission required",
 			message: 'This API key does not have the "api_keys:write" scope required for this request.',
+			retryable: false,
+			recovery: "request_access",
 		})
 
 		const writeKey = await harness.bootstrapKey(["api_keys:write"])
@@ -406,9 +419,13 @@ describe("v2 api_keys over HTTP", () => {
 		})
 		expect(status).toBe(403)
 		expect(body.error).toEqual({
+			_tag: "@maple/http/v2/insufficient_permissions",
 			type: "permission_error",
 			code: "insufficient_permissions",
+			title: "Permission required",
 			message: "Only org admins can create API keys",
+			retryable: false,
+			recovery: "request_access",
 		})
 		await harness.dispose()
 	})
@@ -451,6 +468,7 @@ describe("v2 api_keys over HTTP", () => {
 		expect(malformed.body.error.type).toBe("invalid_request_error")
 		expect(malformed.body.error.param).toBe("id")
 		expect(malformed.body.error.code).toBe("parameter_invalid")
+		expect(malformed.body.error._tag).toBe("@maple/http/v2/apiKeys/retrieve/InvalidRequestError")
 
 		// valid key_ encoding of a UUID that doesn't exist
 		const { encodePublicId } = await import("@maple/domain/http/v2")

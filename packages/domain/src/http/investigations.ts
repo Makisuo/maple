@@ -533,12 +533,29 @@ export class InvestigationQuotaError extends Schema.TaggedError<InvestigationQuo
 	{ httpApiStatus: 429 },
 ) {}
 
-export class InvestigationUnavailableError extends Schema.TaggedError<InvestigationUnavailableError>()(
-	"@maple/http/investigations/InvestigationUnavailableError",
+/** Automatic starts are disabled by organization policy. Retrying unchanged cannot help. */
+export class InvestigationAutomationDisabledError extends Schema.TaggedError<InvestigationAutomationDisabledError>()(
+	"@maple/http/investigations/InvestigationAutomationDisabledError",
 	{
 		message: Schema.String,
-		reason: Schema.Literals(["automation_disabled", "agent_unavailable", "start_failed"]),
-		retryable: Schema.Boolean,
+	},
+	{ httpApiStatus: 503 },
+) {}
+
+/** The investigation agent/workflow binding cannot currently be reached. */
+export class InvestigationAgentUnavailableError extends Schema.TaggedError<InvestigationAgentUnavailableError>()(
+	"@maple/http/investigations/InvestigationAgentUnavailableError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 503 },
+) {}
+
+/** A configured agent was reached, but the investigation turn could not be started. */
+export class InvestigationStartFailedError extends Schema.TaggedError<InvestigationStartFailedError>()(
+	"@maple/http/investigations/InvestigationStartFailedError",
+	{
+		message: Schema.String,
 	},
 	{ httpApiStatus: 503 },
 ) {}
@@ -551,6 +568,27 @@ export class InvestigationRejectedError extends Schema.TaggedError<Investigation
 	},
 	{ httpApiStatus: 502 },
 ) {}
+
+export type InvestigationHttpError =
+	| InvestigationPersistenceError
+	| InvestigationValidationError
+	| InvestigationNotFoundError
+	| InvestigationQuotaError
+	| InvestigationAutomationDisabledError
+	| InvestigationAgentUnavailableError
+	| InvestigationStartFailedError
+	| InvestigationRejectedError
+
+export const investigationHttpErrors = [
+	InvestigationPersistenceError,
+	InvestigationValidationError,
+	InvestigationNotFoundError,
+	InvestigationQuotaError,
+	InvestigationAutomationDisabledError,
+	InvestigationAgentUnavailableError,
+	InvestigationStartFailedError,
+	InvestigationRejectedError,
+] as const
 
 // Query schemas
 
@@ -593,7 +631,9 @@ export class InvestigationApiGroup extends HttpApiGroup.make("investigations")
 				InvestigationNotFoundError,
 				InvestigationQuotaError,
 				InvestigationRejectedError,
-				InvestigationUnavailableError,
+				InvestigationAutomationDisabledError,
+				InvestigationAgentUnavailableError,
+				InvestigationStartFailedError,
 			],
 		}),
 	)
@@ -606,7 +646,9 @@ export class InvestigationApiGroup extends HttpApiGroup.make("investigations")
 				InvestigationNotFoundError,
 				InvestigationQuotaError,
 				InvestigationRejectedError,
-				InvestigationUnavailableError,
+				InvestigationAutomationDisabledError,
+				InvestigationAgentUnavailableError,
+				InvestigationStartFailedError,
 			],
 		}),
 	)

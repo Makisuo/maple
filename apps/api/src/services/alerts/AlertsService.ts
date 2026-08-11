@@ -4901,8 +4901,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// Incremented from fibers running under the concurrent per-rule forEach
 				// below, so it must be a Ref rather than a mutable closure variable.
 				const evaluationFailureCount = yield* Ref.make(0)
-				// Chunk keeps concurrent Ref appends immutable without copying the whole
-				// tick buffer on every write; flatten only at the existing flush boundary.
+				// Chunk makes concurrent appends immutable without copying the full buffer.
 				const pendingChecks = yield* Ref.make(Chunk.empty<AlertChecksRow>())
 				const issueBudget = yield* Ref.make(ISSUE_UPSERTS_PER_TICK)
 

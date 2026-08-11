@@ -1,5 +1,6 @@
 import { Match } from "effect"
 import {
+	httpErrorMetadata,
 	presentWarehouseErrorPublic,
 	warehouseErrorMeta,
 	type QueryEngineExecutionError,
@@ -7,7 +8,7 @@ import {
 	type QueryEngineValidationError,
 	type WarehouseError,
 } from "@maple/domain/http"
-import { dependencyUnavailable, invalidRequest, rateLimited, upstreamError } from "@maple/domain/http/v2"
+import { dependencyUnavailable, invalidRequest, rateLimitError, upstreamError } from "@maple/domain/http/v2"
 import type {
 	V2InvalidRequestError,
 	V2RateLimitError,
@@ -43,14 +44,31 @@ export type QueryEngineRouteError =
  */
 export const warehouseToV2 = (operation: string): ((error: WarehouseError) => V2WarehouseError) => {
 	const fault = (error: WarehouseError): V2WarehouseError =>
-		upstreamError(warehouseErrorMeta[error._tag].code, presentWarehouseErrorPublic(error).description)
+		upstreamError(
+			warehouseErrorMeta[error._tag].code,
+			presentWarehouseErrorPublic(error).description,
+			httpErrorMetadata(error._tag, warehouseErrorMeta[error._tag]),
+		)
 	return Match.type<WarehouseError>().pipe(
 		Match.tagsExhaustive({
 			"@maple/http/errors/WarehouseValidationError": (error) =>
-				invalidRequest("parameter_invalid", error.message),
-			"@maple/http/errors/WarehouseQuotaExceededError": () => rateLimited(),
-			"@maple/http/errors/WarehouseUpstreamError": () =>
-				dependencyUnavailable(`${operation}_unavailable`),
+				invalidRequest(
+					"parameter_invalid",
+					error.message,
+					undefined,
+					httpErrorMetadata(error._tag, warehouseErrorMeta[error._tag]),
+				),
+			"@maple/http/errors/WarehouseQuotaExceededError": (error) =>
+				rateLimitError(
+					"rate_limited",
+					presentWarehouseErrorPublic(error).description,
+					httpErrorMetadata(error._tag, warehouseErrorMeta[error._tag]),
+				),
+			"@maple/http/errors/WarehouseUpstreamError": (error) =>
+				dependencyUnavailable(
+					`${operation}_unavailable`,
+					httpErrorMetadata(error._tag, warehouseErrorMeta[error._tag]),
+				),
 			"@maple/http/errors/WarehouseQueryError": fault,
 			"@maple/http/errors/WarehouseAuthError": fault,
 			"@maple/http/errors/WarehouseConfigError": fault,
@@ -71,12 +89,22 @@ export const queryEngineToV2 = (operation: string): ((error: QueryEngineRouteErr
 	const warehouse = warehouseToV2(operation)
 	return Match.type<QueryEngineRouteError>().pipe(
 		Match.tagsExhaustive({
-			"@maple/http/errors/QueryEngineValidationError": () =>
-				invalidRequest(`${operation}_invalid`, "The aggregation request is invalid.", "aggregation"),
-			"@maple/http/errors/QueryEngineExecutionError": () =>
-				upstreamError(`${operation}_failed`, "The aggregation query could not be completed."),
-			"@maple/http/errors/QueryEngineTimeoutError": () =>
-				dependencyUnavailable(`${operation}_unavailable`),
+			"@maple/http/errors/QueryEngineValidationError": (error) =>
+				invalidRequest(`${operation}_invalid`, "The aggregation request is invalid.", "aggregation", {
+					tag: error._tag,
+					title: "Invalid query",
+				}),
+			"@maple/http/errors/QueryEngineExecutionError": (error) =>
+				upstreamError(`${operation}_failed`, "The aggregation query could not be completed.", {
+					tag: error._tag,
+					title: "Query failed",
+					recovery: "contact_support",
+				}),
+			"@maple/http/errors/QueryEngineTimeoutError": (error) =>
+				dependencyUnavailable(`${operation}_unavailable`, {
+					tag: error._tag,
+					title: "Query timed out",
+				}),
 			"@maple/http/errors/WarehouseValidationError": warehouse,
 			"@maple/http/errors/WarehouseQuotaExceededError": warehouse,
 			"@maple/http/errors/WarehouseUpstreamError": warehouse,

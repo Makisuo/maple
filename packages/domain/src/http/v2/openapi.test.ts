@@ -214,7 +214,9 @@ describe("MapleApiV2 OpenAPI", () => {
 			const rateLimitResponse = op.responses["429"] as Record<string, any>
 			expect(rateLimitResponse.headers?.["Retry-After"]).toMatchObject({
 				description: expect.any(String),
-				schema: { type: "integer", minimum: 1 },
+				schema: {
+					oneOf: [{ type: "integer", minimum: 1 }, { type: "string" }],
+				},
 				example: 60,
 			})
 		}
