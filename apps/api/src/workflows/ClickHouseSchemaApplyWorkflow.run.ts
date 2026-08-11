@@ -66,8 +66,6 @@ type DbStep = <T>(fn: (db: MaplePgClient) => Promise<T>) => Promise<T>
 
 export interface SchemaApplyWorkflowEnv extends Record<string, unknown> {
 	readonly MAPLE_DB: unknown
-	/** Direct PSBouncer URL; when set it wins over MAPLE_DB (see pg-connection-source.ts). */
-	readonly MAPLE_DB_DIRECT_URL?: string
 	readonly MAPLE_INGEST_KEY_ENCRYPTION_KEY: string
 }
 
@@ -352,10 +350,9 @@ export async function runClickHouseSchemaApply(
 	event: WorkflowEventLike<SchemaApplyWorkflowPayload>,
 	step: WorkflowStepLike,
 ): Promise<SchemaApplyWorkflowResult> {
-	// Same resolver the request path uses, so a worker flipped to the direct
-	// PSBouncer transport does not leave its Workflows dialing Hyperdrive.
-	// Passing the attributes also fixes a pre-existing gap: these spans carried
-	// no `db.namespace`/`server.address` at all.
+	// Same resolver the request path uses, rather than a second hand-rolled
+	// narrow of the binding. Passing the attributes also fixes a pre-existing
+	// gap: these spans carried no `db.namespace`/`server.address`.
 	const source = resolveDbConnectionSource(env)
 	if (source._tag === "Unavailable") {
 		throw new Error(source.reason)

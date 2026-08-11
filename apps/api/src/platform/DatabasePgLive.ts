@@ -9,14 +9,12 @@ import { resolveDbConnectionSource } from "./pg-connection-source"
 // string and defers the dial to `executeOnFreshPgClient` — see pg-execute.ts
 // for why that is per-call.
 //
-// The env record is read directly rather than through `Env`/`Config` on
-// purpose. This layer's only requirement must stay `WorkerEnvironment`:
-// apps/alerting wires `WorkerConfigProviderLayer` into `EnvLive` alone, not
-// globally (apps/alerting/src/worker.ts), so a `Config` read here would fall
-// through to the default provider (`process.env`, empty in a Worker), resolve
-// to nothing, and silently stay on Hyperdrive while you believed you had
-// flipped it — a silent-wrong-answer bug in the exact code whose job is
-// producing trustworthy telemetry.
+// The env record is read directly rather than through `Env`/`Config` so this
+// layer's only requirement stays `WorkerEnvironment`: apps/alerting wires
+// `WorkerConfigProviderLayer` into `EnvLive` alone, not globally
+// (apps/alerting/src/worker.ts), so a `Config` read here would fall through to
+// the default provider (`process.env`, empty in a Worker) and silently resolve
+// to nothing.
 const makePgDatabase = Effect.gen(function* () {
 	const env = yield* WorkerEnvironment
 	const source = resolveDbConnectionSource(env)
