@@ -1,10 +1,11 @@
 import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import type { ApiKeyId, OrgId, UserId } from "@maple/domain/primitives"
 
 export const apiKeys = pgTable(
 	"api_keys",
 	{
-		id: text("id").primaryKey(),
-		orgId: text("org_id").notNull(),
+		id: text("id").$type<ApiKeyId>().primaryKey(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		name: text("name").notNull(),
 		description: text("description"),
 		keyHash: text("key_hash").notNull(),
@@ -20,7 +21,7 @@ export const apiKeys = pgTable(
 			.notNull()
 			.default("standard"),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
-		createdBy: text("created_by").notNull(),
+		createdBy: text("created_by").$type<UserId>().notNull(),
 		createdByEmail: text("created_by_email"),
 	},
 	(table) => [

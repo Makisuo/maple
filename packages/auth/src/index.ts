@@ -18,7 +18,7 @@ import {
 	UnauthorizedError,
 	UserId,
 } from "@maple/domain/http"
-import { Clock, Effect, Option, Redacted, Schema } from "effect"
+import { Clock, Data, Effect, Option, Redacted, Schema } from "effect"
 
 export interface TenantContext {
 	readonly orgId: OrgId
@@ -436,6 +436,26 @@ export const makeResolveMcpTenant = (
 
 type ClerkUser = Awaited<ReturnType<ReturnType<typeof createClerkClient>["users"]["getUser"]>>
 
+class ClerkLookupError extends Data.TaggedError("@maple/auth/ClerkLookupError")<{
+	readonly operation: string
+	readonly cause: unknown
+}> {}
+
+const clerkLookup = <A>(
+	spanName: string,
+	attributes: Readonly<Record<string, string>>,
+	request: () => Promise<A>,
+): Effect.Effect<A, ClerkLookupError> =>
+	Effect.tryPromise({
+		try: request,
+		catch: (cause) => new ClerkLookupError({ operation: spanName, cause }),
+	}).pipe(
+		Effect.withSpan(spanName, {
+			kind: "client",
+			attributes: { "peer.service": "clerk", ...attributes },
+		}),
+	)
+
 const extractPrimaryEmail = (u: ClerkUser): string | null => {
 	const primary = u.emailAddresses?.find((e) => e.id === u.primaryEmailAddressId)
 	return primary?.emailAddress ?? u.emailAddresses?.[0]?.emailAddress ?? null
@@ -465,10 +485,10 @@ export const makeGetUserEmail = (
 	}
 
 	return Effect.fn("AuthService.getUserEmail")(function* (userId: string) {
-		const user = yield* Effect.tryPromise({
-			try: () => clerkClient.users.getUser(userId),
-			catch: (error) => error,
-		}).pipe(Effect.option)
+		yield* Effect.annotateCurrentSpan("tenant.userId", userId)
+		const user = yield* clerkLookup("Clerk.users.getUser", { "tenant.userId": userId }, () =>
+			clerkClient.users.getUser(userId),
+		).pipe(Effect.option)
 
 		return Option.match(user, {
 			onNone: () => null as string | null,
@@ -488,16 +508,17 @@ export const makeGetCustomerData = (
 	}
 
 	return Effect.fn("AuthService.getCustomerData")(function* (tenant: TenantContext) {
+		yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, "tenant.userId": tenant.userId })
 		const [user, org] = yield* Effect.all(
 			[
-				Effect.tryPromise({
-					try: () => clerkClient.users.getUser(tenant.userId),
-					catch: (error) => error,
-				}).pipe(Effect.option),
-				Effect.tryPromise({
-					try: () => clerkClient.organizations.getOrganization({ organizationId: tenant.orgId }),
-					catch: (error) => error,
-				}).pipe(Effect.option),
+				clerkLookup(
+					"Clerk.users.getUser",
+					{ orgId: tenant.orgId, "tenant.userId": tenant.userId },
+					() => clerkClient.users.getUser(tenant.userId),
+				).pipe(Effect.option),
+				clerkLookup("Clerk.organizations.getOrganization", { orgId: tenant.orgId }, () =>
+					clerkClient.organizations.getOrganization({ organizationId: tenant.orgId }),
+				).pipe(Effect.option),
 			],
 			{ concurrency: "unbounded" },
 		)

@@ -408,7 +408,12 @@ const runStep = (
 				// Some protocols report a failed response as a normal stream event rather than failing
 				// the Effect. Route those through the same bounded policy as thrown model failures.
 				if (providerFailure !== undefined) {
-					console.error(`[chat.turn] ProviderError: ${providerFailure.message}`)
+					yield* Effect.logError("Chat provider returned an error event").pipe(
+						Effect.annotateLogs({
+							failureReason: "ProviderError",
+							errorMessage: providerFailure.message,
+						}),
+					)
 					const failureReason =
 						providerFailure.classification === "context-overflow"
 							? "ContextOverflow"

@@ -105,8 +105,6 @@ const readKeyRoleMetadata = (metadata: unknown): Option.Option<KeyRoleMetadata> 
 }
 
 const decodeApiKeyIdSync = Schema.decodeUnknownSync(ApiKeyId)
-const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
-const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 
 const toPersistenceError = (error: unknown) =>
 	new ApiKeyPersistenceError({
@@ -115,7 +113,7 @@ const toPersistenceError = (error: unknown) =>
 
 const rowToResponse = (row: typeof apiKeys.$inferSelect, txid?: PostgresTransactionId): ApiKeyResponse =>
 	new ApiKeyResponse({
-		id: decodeApiKeyIdSync(row.id),
+		id: row.id,
 		name: row.name,
 		description: row.description ?? null,
 		keyPrefix: row.keyPrefix,
@@ -126,7 +124,7 @@ const rowToResponse = (row: typeof apiKeys.$inferSelect, txid?: PostgresTransact
 		lastUsedAt: dateToMs(row.lastUsedAt),
 		expiresAt: dateToMs(row.expiresAt),
 		createdAt: row.createdAt.getTime(),
-		createdBy: decodeUserIdSync(row.createdBy),
+		createdBy: row.createdBy,
 		createdByEmail: row.createdByEmail ?? null,
 		...(txid !== undefined ? { txid } : {}),
 	})
@@ -138,6 +136,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 		const hmacKey = parseIngestKeyLookupHmacKey(Redacted.value(env.MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY))
 
 		const selectById = Effect.fn("ApiKeysService.selectById")(function* (orgId: OrgId, keyId: ApiKeyId) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.api_key.id": keyId })
 			const rows = yield* database
 				.execute((db) =>
 					db
@@ -155,6 +154,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			orgId: OrgId,
 			keyId: ApiKeyId,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.api_key.id": keyId })
 			const row = yield* selectById(orgId, keyId)
 			if (Option.isSome(row)) return row.value
 
@@ -162,11 +162,13 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 		})
 
 		const get = Effect.fn("ApiKeysService.get")(function* (orgId: OrgId, keyId: ApiKeyId) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.api_key.id": keyId })
 			const row = yield* requireById(orgId, keyId)
 			return rowToResponse(row)
 		})
 
 		const list = Effect.fn("ApiKeysService.list")(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			const rows = yield* database
 				.execute((db) =>
 					db
@@ -195,7 +197,9 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				metadataJson?: unknown
 			},
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "tenant.userId": userId })
 			const id = decodeApiKeyIdSync(randomUUID())
+			yield* Effect.annotateCurrentSpan("maple.api_key.id", id)
 			const rawKey = generateApiKey()
 			const keyHash = hashApiKey(rawKey, hmacKey)
 			const keyPrefix = rawKey.slice(0, 12) + "..."
@@ -256,6 +260,11 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				createdByEmail?: string | null
 			},
 		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"tenant.userId": userId,
+				"maple.api_key.id": keyId,
+			})
 			const existing = yield* requireById(orgId, keyId)
 			if (existing.revoked) {
 				return yield* Effect.fail(
@@ -321,6 +330,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 		})
 
 		const revoke = Effect.fn("ApiKeysService.revoke")(function* (orgId: OrgId, keyId: ApiKeyId) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.api_key.id": keyId })
 			const now = yield* Clock.currentTimeMillis
 			const row = yield* requireById(orgId, keyId)
 
@@ -356,11 +366,16 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 
 			const roleMetadata = readKeyRoleMetadata(row.value.metadataJson)
 			if (Option.isNone(roleMetadata)) return Option.none()
+			yield* Effect.annotateCurrentSpan({
+				orgId: row.value.orgId,
+				"tenant.userId": row.value.createdBy,
+				"maple.api_key.id": row.value.id,
+			})
 
 			return Option.some({
-				orgId: decodeOrgIdSync(row.value.orgId),
-				userId: decodeUserIdSync(row.value.createdBy),
-				keyId: decodeApiKeyIdSync(row.value.id),
+				orgId: row.value.orgId,
+				userId: row.value.createdBy,
+				keyId: row.value.id,
 				kind: row.value.kind,
 				metadataJson: row.value.metadataJson == null ? null : JSON.stringify(row.value.metadataJson),
 				scopes: row.value.scopes ?? null,
@@ -390,14 +405,15 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 		const lastUsedTouchMemo = new Map<string, number>()
 
 		const touchLastUsed = Effect.fn("ApiKeysService.touchLastUsed")(function* (keyId: ApiKeyId) {
+			yield* Effect.annotateCurrentSpan("maple.api_key.id", keyId)
 			const now = yield* Clock.currentTimeMillis
 
 			const touchedAt = lastUsedTouchMemo.get(keyId)
 			if (touchedAt !== undefined && touchedAt > now - LAST_USED_HEARTBEAT_MS) {
-				yield* Effect.annotateCurrentSpan("apiKey.lastUsedMemoHit", true)
+				yield* Effect.annotateCurrentSpan("maple.api_key.last_used_memo_hit", true)
 				return
 			}
-			yield* Effect.annotateCurrentSpan("apiKey.lastUsedMemoHit", false)
+			yield* Effect.annotateCurrentSpan("maple.api_key.last_used_memo_hit", false)
 
 			yield* database
 				.execute((db) =>
@@ -432,8 +448,13 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				),
 			)
 			if (Option.isSome(resolved)) {
+				yield* Effect.annotateCurrentSpan({
+					orgId: resolved.value.orgId,
+					"tenant.userId": resolved.value.userId,
+					"maple.api_key.id": resolved.value.keyId,
+				})
 				// Scoped, not detached: this write shares the request's single Postgres
-				// socket, and a detached fiber can outlive the socket's release.
+				// connection, and a detached fiber can outlive its release.
 				yield* forkRequestScoped(touchLastUsed(resolved.value.keyId).pipe(Effect.ignore))
 			}
 			return resolved

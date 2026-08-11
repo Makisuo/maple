@@ -345,7 +345,7 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 
 				yield* asPersistence(
 					repo.upsertInstallation({
-						orgId: stateRow.orgId as OrgId,
+						orgId: stateRow.orgId,
 						provider: GITHUB_PROVIDER,
 						externalInstallationId: installationId,
 						accountLogin: account.login,
@@ -353,7 +353,7 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 						externalAccountId: String(account.id),
 						accountAvatarUrl: account.avatar_url ?? null,
 						repositorySelection,
-						installedByUserId: stateRow.initiatedByUserId as UserId,
+						installedByUserId: stateRow.initiatedByUserId,
 					}),
 				)
 
@@ -373,7 +373,7 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 					"vcs.account.type": accountType,
 					"vcs.repository.selection": repositorySelection,
 				})
-				return { orgId: stateRow.orgId as OrgId, returnTo: stateRow.returnTo ?? null }
+				return { orgId: stateRow.orgId, returnTo: stateRow.returnTo ?? null }
 			})
 
 			// Resolve an installation's repositories into the dashboard summary shape

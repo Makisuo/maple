@@ -138,9 +138,24 @@ Source: `apps/api/src/lib/EmailService.ts`
 
 ---
 
-## `maple.*` vendor namespace (ingest gateway)
+## `maple.*` vendor namespace
 
-Custom domain attributes for the Rust ingest gateway. All `maple.*` keys are reserved for Maple-specific metadata that has no OTel semconv equivalent.
+All `maple.*` keys are reserved for Maple-specific metadata that has no OTel semconv equivalent.
+
+### API entity attributes
+
+| Key | Type | Set at | Meaning |
+|---|---|---|---|
+| `maple.api_key.id` | string | `ApiKeysService.ts` | API key entity involved in an operation. |
+| `maple.api_key.last_used_memo_hit` | bool | `ApiKeysService.ts` | Whether a last-used write was skipped by the per-isolate memo. |
+| `maple.dashboard.id` | string | `DashboardPersistenceService.ts` | Dashboard entity involved in an operation. |
+| `maple.dashboard.version_id` | string | `DashboardPersistenceService.ts` | Dashboard history version involved in an operation. |
+| `maple.ingest_attribute_mapping.id` | string | `IngestAttributeMappingService.ts` | Ingest attribute mapping involved in an operation. |
+| `maple.organization.member.requested_count` | int | `OrgMembersService.ts` | Number of member ids requested for resolution. |
+
+### Ingest gateway
+
+Custom domain attributes for the Rust ingest gateway.
 
 Source: `apps/ingest/src/main.rs:843-861` (inbound signal span), `:920-937` (Cloudflare logpush), `:1132-1145` (downstream forward).
 

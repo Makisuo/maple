@@ -38,6 +38,7 @@ import { eq } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
+import { clerkRequest } from "@/services/auth/clerk-request"
 
 const ROOT_ROLE = Schema.decodeSync(RoleName)("root")
 const ORG_ADMIN_ROLE = Schema.decodeSync(RoleName)("org:admin")
@@ -146,13 +147,13 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 
 			const deleteClerkOrganization = Effect.fn("OrganizationService.deleteClerkOrganization")(
 				function* (orgId: OrgId) {
+					yield* Effect.annotateCurrentSpan("orgId", orgId)
 					const clerk = clerkClient()
 					if (Option.isNone(clerk)) return
 
-					yield* Effect.tryPromise({
-						try: () => clerk.value.organizations.deleteOrganization(orgId),
-						catch: toProviderError,
-					})
+					yield* clerkRequest("Clerk.organizations.deleteOrganization", { orgId }, () =>
+						clerk.value.organizations.deleteOrganization(orgId),
+					).pipe(Effect.mapError((error) => toProviderError(error.cause)))
 				},
 			)
 
@@ -167,10 +168,9 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 				if (Option.isNone(clerk)) {
 					return { id: orgId, name: null, slug: null, createdAtMs: null } satisfies OrganizationInfo
 				}
-				const org = yield* Effect.tryPromise({
-					try: () => clerk.value.organizations.getOrganization({ organizationId: orgId }),
-					catch: toProviderError,
-				})
+				const org = yield* clerkRequest("Clerk.organizations.getOrganization", { orgId }, () =>
+					clerk.value.organizations.getOrganization({ organizationId: orgId }),
+				).pipe(Effect.mapError((error) => toProviderError(error.cause)))
 				return {
 					id: orgId,
 					name: org.name,

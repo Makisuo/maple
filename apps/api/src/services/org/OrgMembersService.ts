@@ -2,6 +2,7 @@ import { createClerkClient } from "@clerk/backend"
 import type { OrgId } from "@maple/domain/http"
 import { Context, Data, Effect, Layer, Option, Redacted } from "effect"
 import { Env } from "@/platform/Env"
+import { clerkRequest } from "@/services/auth/clerk-request"
 
 export class OrgMembersError extends Data.TaggedError("@maple/api/services/OrgMembersError")<{
 	readonly message: string
@@ -35,49 +36,56 @@ const make = Effect.gen(function* () {
 			? createClerkClient({ secretKey: Redacted.value(env.CLERK_SECRET_KEY.value) })
 			: null
 
-	const listMembers = (orgId: OrgId) =>
-		Effect.gen(function* () {
-			if (clerk === null) {
-				return yield* Effect.fail(
-					new OrgMembersError({
-						message: "Workspace member lookup requires Clerk authentication",
+	const listMembers = Effect.fn("OrgMembersService.listMembers")(function* (orgId: OrgId) {
+		yield* Effect.annotateCurrentSpan("orgId", orgId)
+		if (clerk === null) {
+			return yield* Effect.fail(
+				new OrgMembersError({
+					message: "Workspace member lookup requires Clerk authentication",
+				}),
+			)
+		}
+		const PAGE_SIZE = 100
+		let offset = 0
+		const all: Array<OrgMember> = []
+		while (true) {
+			const page = yield* clerkRequest(
+				"Clerk.organizations.getOrganizationMembershipList",
+				{ orgId },
+				() =>
+					clerk.organizations.getOrganizationMembershipList({
+						organizationId: orgId,
+						limit: PAGE_SIZE,
+						offset,
 					}),
-				)
+			).pipe(
+				Effect.mapError(
+					() => new OrgMembersError({ message: `Failed to list workspace members for ${orgId}` }),
+				),
+			)
+			for (const member of page.data) {
+				const userId = member.publicUserData?.userId
+				const email = member.publicUserData?.identifier
+				if (!userId || !email) continue
+				const name =
+					[member.publicUserData?.firstName, member.publicUserData?.lastName]
+						.filter(Boolean)
+						.join(" ") || null
+				all.push({ userId, email, name })
 			}
-			const PAGE_SIZE = 100
-			let offset = 0
-			const all: Array<OrgMember> = []
-			while (true) {
-				const page = yield* Effect.tryPromise({
-					try: () =>
-						clerk.organizations.getOrganizationMembershipList({
-							organizationId: orgId,
-							limit: PAGE_SIZE,
-							offset,
-						}),
-					catch: () =>
-						new OrgMembersError({ message: `Failed to list workspace members for ${orgId}` }),
-				})
-				for (const member of page.data) {
-					const userId = member.publicUserData?.userId
-					const email = member.publicUserData?.identifier
-					if (!userId || !email) continue
-					const name =
-						[member.publicUserData?.firstName, member.publicUserData?.lastName]
-							.filter(Boolean)
-							.join(" ") || null
-					all.push({ userId, email, name })
-				}
-				offset += page.data.length
-				if (offset >= page.totalCount || page.data.length === 0) break
-			}
-			return all
-		})
+			offset += page.data.length
+			if (offset >= page.totalCount || page.data.length === 0) break
+		}
+		return all
+	})
 
 	const resolveMembers: OrgMembersServiceShape["resolveMembers"] = Effect.fn(
 		"OrgMembersService.resolveMembers",
 	)(function* (orgId: OrgId, userIds: ReadonlyArray<string>) {
-		yield* Effect.annotateCurrentSpan("orgId", orgId)
+		yield* Effect.annotateCurrentSpan({
+			orgId,
+			"maple.organization.member.requested_count": userIds.length,
+		})
 		const members = yield* listMembers(orgId)
 		const byUserId = new Map(members.map((member) => [member.userId, member]))
 		const resolved: Array<OrgMember> = []
@@ -99,6 +107,7 @@ const make = Effect.gen(function* () {
 				}),
 			)
 		}
+		yield* Effect.annotateCurrentSpan("result.member_count", resolved.length)
 		return resolved
 	})
 

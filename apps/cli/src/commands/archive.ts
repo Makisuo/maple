@@ -19,8 +19,6 @@ import {
 	loadTuningConfig,
 	TUNING_CONFIG_FORMAT_VERSION,
 	type ArchiveTuningOverrides,
-	type TuningConfigIdentity,
-	type LoadedTuningConfig,
 } from "../server/archives/config"
 import { ARCHIVE_SIGNALS, isArchiveSignalName, type ArchiveSignalName } from "../server/archives/signals"
 import { expireArchiveDay, readRetiredDayLedger, retireLiveDay } from "../server/archives/retention"
@@ -267,14 +265,13 @@ export const archiveCreate = Command.make("create", {
 					message: `unknown signal '${a.signal}'; expected one of ${ARCHIVE_SIGNALS.map((s) => s.name).join(", ")}`,
 				})
 			}
-			let rangeDate: string
-			try {
-				rangeDate = validateRangeDate(a.rangeDate)
-			} catch (error) {
-				return yield* new ArchiveError({
-					message: error instanceof Error ? error.message : String(error),
-				})
-			}
+			const rangeDate = yield* Effect.try({
+				try: () => validateRangeDate(a.rangeDate),
+				catch: (error) =>
+					new ArchiveError({
+						message: error instanceof Error ? error.message : String(error),
+					}),
+			})
 			const { dataDir, archiveDir, scratchRoot } = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
 			if (readRetiredDayLedger(dataDir).retiredDays.some((day) => day.rangeDate === rangeDate)) {
 				return yield* new ArchiveError({
@@ -291,23 +288,27 @@ export const archiveCreate = Command.make("create", {
 			// overrides (archiveDir/scratchRoot in config) are not applied — roots
 			// always come from the CLI/defaults.
 			const configPath = Option.getOrUndefined(a.config)
-			let tuning
-			let tuningConfigIdentity: TuningConfigIdentity | null = null
-			let loadedTuningConfig: LoadedTuningConfig | null = null
-			try {
-				if (configPath) {
-					const loaded = loadTuningConfig(configPath)
-					loadedTuningConfig = loaded
-					tuningConfigIdentity = loaded.identity
-					tuning = resolveArchiveTuning({ ...loaded.overrides, archiveDir, scratchRoot })
-				} else {
-					tuning = resolveArchiveTuning(tuningOverrides(archiveDir, scratchRoot))
-				}
-			} catch (error) {
-				return yield* new ArchiveError({
-					message: error instanceof Error ? error.message : String(error),
-				})
-			}
+			const { tuning, tuningConfigIdentity, loadedTuningConfig } = yield* Effect.try({
+				try: () => {
+					if (configPath) {
+						const loaded = loadTuningConfig(configPath)
+						return {
+							tuning: resolveArchiveTuning({ ...loaded.overrides, archiveDir, scratchRoot }),
+							tuningConfigIdentity: loaded.identity,
+							loadedTuningConfig: loaded,
+						}
+					}
+					return {
+						tuning: resolveArchiveTuning(tuningOverrides(archiveDir, scratchRoot)),
+						tuningConfigIdentity: null,
+						loadedTuningConfig: null,
+					}
+				},
+				catch: (error) =>
+					new ArchiveError({
+						message: error instanceof Error ? error.message : String(error),
+					}),
+			})
 			yield* Effect.sync(() =>
 				process.stderr.write(
 					`${amber("⟳")} archiving ${bold(a.signal)} for ${bold(rangeDate)} ` +
@@ -726,31 +727,30 @@ export const archiveCalibrate = Command.make("calibrate", {
 	),
 	Command.withHandler(
 		Effect.fnUntraced(function* (a) {
-			let rangeDate: string
-			try {
-				rangeDate = validateRangeDate(a.rangeDate)
-			} catch (error) {
-				return yield* new ArchiveError({
-					message: error instanceof Error ? error.message : String(error),
-				})
-			}
-			let budget: CalibrationBudget
-			try {
-				budget = validateCalibrationBudget({
-					memoryBudget: a.memoryBudget,
-					timeBudget: a.timeBudget,
-					sampleRows: a.sampleRows,
-					maxCandidateWallMs: a.maxCandidateWallMs,
-					minThroughputBytesPerSec: a.minThroughput,
-					maxTempDiskBytes: a.maxTempDisk,
-					freeSpaceReserve: a.freeSpaceReserve,
-					safetyMargin: a.safetyMarginMilli / 1000,
-				})
-			} catch (error) {
-				return yield* new ArchiveError({
-					message: error instanceof Error ? error.message : String(error),
-				})
-			}
+			const rangeDate = yield* Effect.try({
+				try: () => validateRangeDate(a.rangeDate),
+				catch: (error) =>
+					new ArchiveError({
+						message: error instanceof Error ? error.message : String(error),
+					}),
+			})
+			const budget = yield* Effect.try({
+				try: () =>
+					validateCalibrationBudget({
+						memoryBudget: a.memoryBudget,
+						timeBudget: a.timeBudget,
+						sampleRows: a.sampleRows,
+						maxCandidateWallMs: a.maxCandidateWallMs,
+						minThroughputBytesPerSec: a.minThroughput,
+						maxTempDiskBytes: a.maxTempDisk,
+						freeSpaceReserve: a.freeSpaceReserve,
+						safetyMargin: a.safetyMarginMilli / 1000,
+					}),
+				catch: (error) =>
+					new ArchiveError({
+						message: error instanceof Error ? error.message : String(error),
+					}),
+			})
 			const { dataDir, archiveDir, scratchRoot } = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
 			const checkpointId = Option.getOrUndefined(a.checkpointId) ?? "current"
 			yield* Effect.sync(() =>
@@ -1495,14 +1495,13 @@ export const archiveCalibrateRun = Command.make("calibrate-run", {
 			if (!isArchiveSignalName(a.signal)) {
 				return yield* new ArchiveError({ message: `unknown signal '${a.signal}'` })
 			}
-			let rangeDate: string
-			try {
-				rangeDate = validateRangeDate(a.rangeDate)
-			} catch (error) {
-				return yield* new ArchiveError({
-					message: error instanceof Error ? error.message : String(error),
-				})
-			}
+			const rangeDate = yield* Effect.try({
+				try: () => validateRangeDate(a.rangeDate),
+				catch: (error) =>
+					new ArchiveError({
+						message: error instanceof Error ? error.message : String(error),
+					}),
+			})
 			const { dataDir, archiveDir, scratchRoot } = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
 			const checkpointSelector = Option.getOrUndefined(a.checkpointId) ?? "current"
 			yield* Effect.tryPromise({

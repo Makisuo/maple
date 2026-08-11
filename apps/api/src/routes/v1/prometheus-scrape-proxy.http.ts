@@ -62,20 +62,18 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 					Effect.tap((response) =>
 						Effect.annotateCurrentSpan({ "maple.scrape.upstream_status": response.status }),
 					),
-					Effect.flatMap((response) =>
-						Effect.succeed(
-							HttpServerResponse.text(response.body, {
-								status: response.status,
-								headers: {
-									"content-type": response.contentType,
-									// Forward the upstream rate-limit hint so the scraper can
-									// back off precisely on 429/503.
-									...(response.retryAfterSeconds !== null
-										? { "retry-after": String(response.retryAfterSeconds) }
-										: {}),
-								},
-							}),
-						),
+					Effect.map((response) =>
+						HttpServerResponse.text(response.body, {
+							status: response.status,
+							headers: {
+								"content-type": response.contentType,
+								// Forward the upstream rate-limit hint so the scraper can
+								// back off precisely on 429/503.
+								...(response.retryAfterSeconds !== null
+									? { "retry-after": String(response.retryAfterSeconds) }
+									: {}),
+							},
+						}),
 					),
 					// Map each concrete scrape error to its HTTP status: missing/disabled
 					// target → 404, decryption failure → 500, persistence (our DB) → 502,

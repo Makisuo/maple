@@ -125,7 +125,10 @@ export function LogTraceTimeline({ currentLog, onLogSelect }: LogTraceTimelinePr
 									const isCurrent = isCurrentLog(log, currentLog)
 									const relativeMs = new Date(log.timestamp).getTime() - traceStart
 									const prevLog = i > 0 ? logs[i - 1] : null
-									const spanChanged = prevLog && prevLog.spanId !== log.spanId && log.spanId
+									const spanChanged =
+										prevLog !== null && prevLog.spanId !== log.spanId
+											? log.spanId
+											: undefined
 
 									return (
 										<div key={`${log.timestamp}-${log.spanId}-${log.body.slice(0, 20)}`}>
@@ -133,8 +136,8 @@ export function LogTraceTimeline({ currentLog, onLogSelect }: LogTraceTimelinePr
 												<div className="flex items-center gap-2 px-2 py-0.5 bg-muted/30">
 													<div className="h-px flex-1 bg-border" />
 													<span className="text-[9px] font-mono text-muted-foreground/60 shrink-0 truncate max-w-[200px]">
-														{spanNameMap.get(log.spanId) ??
-															log.spanId.slice(0, 8)}
+														{spanNameMap.get(spanChanged) ??
+															spanChanged.slice(0, 8)}
 													</span>
 													<div className="h-px flex-1 bg-border" />
 												</div>

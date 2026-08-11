@@ -211,7 +211,12 @@ const executeQueryEngineEffect = Effect.fn("QueryEngine.execute")(function* (
 ) {
 	return yield* Effect.tryPromise({
 		try: () => executeBatcher.enqueue(payload),
-		catch: (cause) => cause,
+		catch: (cause) =>
+			new WarehouseQueryError({
+				operation: "QueryEngine.executeBatch",
+				message: toMessage(cause, "Warehouse batch request failed"),
+				cause,
+			}),
 	})
 })
 
