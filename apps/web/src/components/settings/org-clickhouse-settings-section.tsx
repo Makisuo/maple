@@ -31,7 +31,7 @@ import {
 	CircleXmarkIcon,
 	LoaderIcon,
 } from "@/components/icons"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
 import { OrgClickHouseSettingsUpsertRequest } from "@maple/domain/http"
 import { DataPlatformUsageSection } from "@/components/settings/data-platform-usage-section"
 
@@ -81,15 +81,15 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 	const [isDisabling, setIsDisabling] = useState(false)
 	const [expandedDrifts, setExpandedDrifts] = useState<ReadonlySet<string>>(new Set())
 
-	const settingsQueryAtom = MapleApiAtomClient.query("orgClickHouseSettings", "get", {})
+	const settingsQueryAtom = retainedQuery("orgClickHouseSettings", "get", {})
 	const settingsResult = useAtomValue(settingsQueryAtom)
 	const refreshSettings = useAtomRefresh(settingsQueryAtom)
 
-	const diffQueryAtom = MapleApiAtomClient.query("orgClickHouseSettings", "schemaDiff", {})
+	const diffQueryAtom = retainedQuery("orgClickHouseSettings", "schemaDiff", {})
 	const diffResult = useAtomValue(diffQueryAtom)
 	const refreshDiff = useAtomRefresh(diffQueryAtom)
 
-	const statusQueryAtom = MapleApiAtomClient.query("orgClickHouseSettings", "applySchemaStatus", {})
+	const statusQueryAtom = retainedQuery("orgClickHouseSettings", "applySchemaStatus", {})
 	const statusResult = useAtomValue(statusQueryAtom)
 	const refreshStatus = useAtomRefresh(statusQueryAtom)
 

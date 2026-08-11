@@ -28,7 +28,7 @@ import {
 } from "@/components/investigations/investigation-table"
 import { InvestigateBar } from "@/components/investigations/investigate-bar"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 
 type HubView = "active" | "history"
 
@@ -95,7 +95,7 @@ function InvestigationsHub() {
 	const isFiltered = query.trim().length > 0 || search.kind !== undefined
 
 	const [creating, setCreating] = useState(false)
-	const listQuery = MapleApiV2AtomClient.query("investigations", "list", {
+	const listQuery = retainedQueryV2("investigations", "list", {
 		query: { limit: PAGE_SIZE },
 		reactivityKeys: ["investigations"],
 	})

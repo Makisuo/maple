@@ -34,7 +34,7 @@ import {
 	cloudflareZonesResultAtom,
 	cloudflareZoneTimeseriesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
@@ -73,7 +73,7 @@ function CloudflarePage() {
 	// Integration-gated (not infra-agent-gated): the page is useful exactly when
 	// the org has the Cloudflare integration connected with analytics scopes.
 	const statusResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "cloudflareStatus", {
+		retainedQuery("integrations", "cloudflareStatus", {
 			reactivityKeys: ["cloudflareIntegrationStatus"],
 		}),
 	)
