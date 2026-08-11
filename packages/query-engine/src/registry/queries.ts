@@ -543,6 +543,29 @@ export const servicePlatforms = defineQuery({
 		),
 })
 
+/**
+ * The same platform/app-kind row for a single service — the service-detail
+ * lookup that picks the page's Apdex threshold.
+ *
+ * Cached for 5 minutes rather than the usual 15 seconds: a service's app kind
+ * is a property of how it is instrumented, so it changes on deploy at most, and
+ * this read sits in front of the Overview tab's timeseries. On a cold key it
+ * costs one small aggregate-table scan; on every other load it costs nothing.
+ */
+export const serviceAppKind = defineQuery({
+	id: "serviceAppKind",
+	profile: "aggregation",
+	cache: 300,
+	compile: (
+		payload: { serviceName: string; startTime: string; endTime: string; deploymentEnv?: string },
+		orgId: string,
+	) =>
+		CH.servicePlatformsSQL(
+			{ serviceName: payload.serviceName, deploymentEnv: payload.deploymentEnv },
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
 const dbQueryParams = (payload: ServiceDbQuerySummaryRequest, orgId: string) => ({
 	orgId,
 	dbSystem: payload.dbSystem,

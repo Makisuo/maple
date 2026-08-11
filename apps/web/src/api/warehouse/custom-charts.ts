@@ -31,6 +31,7 @@ import {
 	invalidWarehouseInput,
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
+import { DEFAULT_APDEX_THRESHOLD_MS, type ServiceAppKind } from "@maple/domain/service-app-kind"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { ServiceDetailTimeSeriesPoint, ServiceTimeSeriesPoint } from "@/api/warehouse/services"
 const dateTimeString = WarehouseDateTimeString
@@ -837,6 +838,31 @@ export interface ServiceDetailOverviewResult {
 	data: ServiceDetailTimeSeriesPoint[]
 	releases: ReadonlyArray<{ bucket: string; commitSha: CommitSha; count: number; errorCount: number }>
 	environments: string[]
+	/** What kind of app this service is — drives the header badge. */
+	appKind: ServiceAppKind
+	/** The Apdex target `data[].apdexScore` was scored against, in ms. Shown on
+	 * the chart: a score is uninterpretable without the T that produced it. */
+	apdexThresholdMs: number
+}
+
+/**
+ * Replace the 500 ms-scored Apdex series with one re-scored at the service's own
+ * target, as returned by the `serviceDetailOverview` handler.
+ *
+ * Buckets the override does not cover become `null`, not 0. The override reads
+ * `service_overview_spans` (30-day TTL) while the rest of the chart can reach a
+ * year back, so on a long range the early buckets genuinely have no score —
+ * carrying the 500 ms number through for those would silently mix two
+ * thresholds in one series, and zero would draw a crater.
+ */
+export function mergeApdexOverride(
+	points: ReadonlyArray<ServiceDetailTimeSeriesPoint>,
+	overrideByBucket: ReadonlyMap<string, number>,
+): ServiceDetailTimeSeriesPoint[] {
+	return points.map((point) => ({
+		...point,
+		apdexScore: overrideByBucket.get(point.bucket) ?? null,
+	}))
 }
 
 export function getServiceDetailOverview({ data }: { data: GetCustomChartServiceDetailInput }) {
@@ -879,8 +905,20 @@ const getServiceDetailOverviewEffect = Effect.fn("QueryEngine.getServiceDetailOv
 		}),
 	)
 
+	const points = buildServiceDetailPoints(result.timeseries, startTime, endTime, bucketSeconds, nowMs)
+	// Present only when the service's app kind sets a target other than the
+	// 500 ms the primary timeseries is scored at. Absent on an older API build,
+	// which is the same as "the default applies".
+	const apdexOverride = result.apdexOverride
+
 	return {
-		data: buildServiceDetailPoints(result.timeseries, startTime, endTime, bucketSeconds, nowMs),
+		data:
+			apdexOverride === undefined
+				? points
+				: mergeApdexOverride(
+						points,
+						new Map(apdexOverride.map((row) => [toIsoBucket(row.bucket), row.apdexScore])),
+					),
 		releases: result.releases.map((r) => ({
 			bucket: toIsoBucket(r.bucket),
 			commitSha: r.commitSha,
@@ -889,6 +927,8 @@ const getServiceDetailOverviewEffect = Effect.fn("QueryEngine.getServiceDetailOv
 			errorCount: Number(r.errorCount ?? 0),
 		})),
 		environments: [...result.environments],
+		appKind: result.appKind ?? "unknown",
+		apdexThresholdMs: result.apdexThresholdMs ?? DEFAULT_APDEX_THRESHOLD_MS,
 	} satisfies ServiceDetailOverviewResult
 })
 

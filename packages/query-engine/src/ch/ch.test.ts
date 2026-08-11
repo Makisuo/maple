@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest"
 import * as CH from "./index"
 import { compileCH, compileUnion } from "@maple-dev/clickhouse-builder"
-import { tracesTimeseriesQuery, tracesBreakdownQuery, tracesListQuery } from "./queries/traces"
+import {
+	canUseAnnualServiceOverview,
+	tracesTimeseriesQuery,
+	tracesBreakdownQuery,
+	tracesListQuery,
+} from "./queries/traces"
 import { logsFacetsQuery } from "./queries/logs"
 import { servicesFacetsQuery } from "./queries/services"
 import { sessionReplaysFacetsQuery } from "./queries/session-replays"
@@ -356,6 +361,30 @@ describe("tracesTimeseriesQuery", () => {
 			"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount",
 		)
 		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles)")
+	})
+
+	// The service-detail Overview tab is exactly the request above, and it must
+	// stay that way. `service_overview_hourly.ApdexSatisfiedCount` is computed at
+	// a hardcoded 500 ms, so a kind-aware Apdex target cannot be threaded through
+	// this request — it would drop throughput, latency, AND error rate onto the
+	// 30-day raw path for the sake of one series. The handler re-scores Apdex with
+	// a second, narrower query instead; this asserts the fork it depends on.
+	it("drops the annual rollup when a non-default apdex threshold is requested", () => {
+		const base = {
+			metric: "count" as const,
+			needsSampling: true,
+			allMetrics: true,
+			rootOnly: true,
+			bucketSeconds: 3600,
+			serviceName: "api",
+		}
+		expect(canUseAnnualServiceOverview(base)).toBe(true)
+		expect(canUseAnnualServiceOverview({ ...base, apdexThresholdMs: 500 })).toBe(true)
+		// A browser service's 2500 ms target.
+		expect(canUseAnnualServiceOverview({ ...base, apdexThresholdMs: 2500 })).toBe(false)
+
+		const { sql } = compileCH(tracesTimeseriesQuery({ ...base, apdexThresholdMs: 2500 }), baseParams)
+		expect(sql).not.toContain("FROM service_overview_hourly")
 	})
 
 	// `service_overview_spans` stores only entry-point spans (Server/Consumer OR

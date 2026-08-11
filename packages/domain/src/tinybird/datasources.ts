@@ -679,11 +679,18 @@ export type ServiceAddressResolutionsHourlyRow = InferRow<typeof serviceAddressR
  * wins on merge, which matches "did *any* span in this window carry this
  * attribute" semantics — exactly what the platform classifier needs.
  *
+ * Carries two orthogonal classifications' worth of signal: *where* a service
+ * runs (k8s / cloud / faas — the service map's hosting icon) and *what kind of
+ * app it is (`TelemetrySdkLanguage` / `BrowserPlatform` / `DeviceType` /
+ * `MapleSdkType` — browser vs mobile vs backend). The latter is what picks a
+ * service's Apdex threshold: 500 ms is a backend target and scores a browser
+ * app as permanently frustrated.
+ *
  * Populated by materialized view, not direct ingestion.
  */
 export const servicePlatformsHourly = defineDatasource("service_platforms_hourly", {
 	description:
-		"Pre-aggregated hourly per-service platform/runtime attributes (k8s, cloud, faas) for the service map's hosting-icon resolver. Populated by materialized view.",
+		"Pre-aggregated hourly per-service platform/runtime attributes (k8s, cloud, faas) plus app-kind signals (telemetry.sdk.language, browser.platform, device.type) for the service map's hosting-icon resolver and the service-detail app-kind classifier. Populated by materialized view.",
 	jsonPaths: false,
 	schema: {
 		OrgId: t.string().lowCardinality(),
@@ -701,6 +708,9 @@ export const servicePlatformsHourly = defineDatasource("service_platforms_hourly
 		FaasName: t.simpleAggregateFunction("max", t.string()),
 		MapleSdkType: t.simpleAggregateFunction("max", t.string()),
 		ProcessRuntimeName: t.simpleAggregateFunction("max", t.string()),
+		TelemetrySdkLanguage: t.simpleAggregateFunction("max", t.string()),
+		BrowserPlatform: t.simpleAggregateFunction("max", t.string()),
+		DeviceType: t.simpleAggregateFunction("max", t.string()),
 		SpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
 	engine: engine.aggregatingMergeTree({

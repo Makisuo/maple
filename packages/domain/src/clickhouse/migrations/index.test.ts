@@ -17,6 +17,7 @@ import { migration_0011_session_analytics_columns } from "./0011_session_analyti
 import { migration_0012_session_event_attribute_keys } from "./0012_session_event_attribute_keys"
 import { migration_0013_service_map_ingest_bridge } from "./0013_service_map_ingest_bridge"
 import { migration_0014_web_events, webEventsBackfill } from "./0014_web_events"
+import { migration_0015_service_app_kind } from "./0015_service_app_kind"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -31,15 +32,44 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
-		expect(migrations.at(-1)).toBe(migration_0014_web_events)
-		expect(latestMigrationVersion).toBe(14)
-		// 0010 and 0014 are performance-only, so the ingest-gating version skips
-		// both and stays at 13 — nothing writes `web_events` directly, and bumping
-		// it would un-ready every BYO-CH org's ingest routing for a read-path change.
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+		expect(migrations.at(-1)).toBe(migration_0015_service_app_kind)
+		expect(latestMigrationVersion).toBe(15)
+		// 0010, 0014 and 0015 are read-path-only, so the ingest-gating version skips
+		// all three and stays at 13 — nothing writes `web_events` or
+		// `service_platforms_hourly` directly, and bumping it would un-ready every
+		// BYO-CH org's ingest routing for a read-path change.
 		expect(clickHouseSchemaVersion).toBe("13")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
+		expect(migration_0015_service_app_kind.requiredForIngest).toBe(false)
+	})
+
+	it("appends the app-kind signal columns without rewriting service_platforms_hourly", () => {
+		const sql = migration_0015_service_app_kind.statements.filter((stmt) => !isBackfill(stmt)).join("\n")
+
+		// The vendor-neutral markers: `maple.sdk.type` alone only ever classifies
+		// services instrumented with a Maple SDK.
+		expect(sql).toContain(
+			"ALTER TABLE service_platforms_hourly ADD COLUMN IF NOT EXISTS TelemetrySdkLanguage",
+		)
+		expect(sql).toContain("max(ResourceAttributes['telemetry.sdk.language']) AS TelemetrySdkLanguage")
+		expect(sql).toContain("max(ResourceAttributes['browser.platform']) AS BrowserPlatform")
+		expect(sql).toContain("max(ResourceAttributes['device.type']) AS DeviceType")
+
+		// The table already exists, so the view has to be swapped for the columns
+		// to ever be written — but nothing existing is dropped or rewritten.
+		expect(sql).toContain("DROP VIEW IF EXISTS service_platforms_hourly_mv")
+		expect(sql).toContain(
+			"CREATE MATERIALIZED VIEW IF NOT EXISTS service_platforms_hourly_mv TO service_platforms_hourly",
+		)
+		expect(sql).not.toContain("DROP TABLE")
+		expect(sql).not.toContain("POPULATE")
+
+		// No backfill: `max()` over the viewed window means one hour of fresh
+		// telemetry classifies the service, and the only `sum` column on the table
+		// (SpanCount) would double-count if re-inserted.
+		expect(migration_0015_service_app_kind.statements.some(isBackfill)).toBe(false)
 	})
 
 	it("installs web_events with a live-write MV and no POPULATE", () => {

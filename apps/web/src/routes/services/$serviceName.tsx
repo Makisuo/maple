@@ -15,6 +15,7 @@ import {
 	getServiceDetailThroughputRefinementResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { mergeExactThroughput } from "@/api/warehouse/custom-charts"
+import { DEFAULT_APDEX_THRESHOLD_MS } from "@maple/domain/service-app-kind"
 import type { ServiceDetailTimeSeriesPoint } from "@/api/warehouse/services"
 import { useCommitMarkers } from "@/components/vcs/commit-markers/use-commit-markers"
 import type { ReleasePoint } from "@/components/vcs/commit-markers/marker-layout"
@@ -26,6 +27,7 @@ import { BellIcon } from "@/components/icons"
 import { ServiceDependenciesTab } from "@/components/services/service-dependencies-tab"
 import { ServiceOperationsTab } from "@/components/services/service-operations-tab"
 import { ServiceDependencyStrip } from "@/components/services/service-dependency-strip"
+import { ServiceAppKindBadge } from "@/components/services/service-app-kind-badge"
 import { ServiceEnvironmentSwitcher } from "@/components/services/service-environment-switcher"
 import { ServiceErrorsPanel } from "@/components/services/service-errors-panel"
 import { ServiceRecentDeploys } from "@/components/services/service-recent-deploys"
@@ -107,6 +109,13 @@ const SERVICE_CHARTS: ServiceChartConfig[] = [
 		tooltip: "visible",
 	},
 ]
+
+/** "500ms" / "2.5s" — sub-second targets stay in ms, the rest read as seconds. */
+function formatApdexTarget(thresholdMs: number): string {
+	if (thresholdMs < 1000) return `${thresholdMs}ms`
+	const seconds = thresholdMs / 1000
+	return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`
+}
 
 function ServiceDetailPage() {
 	const search = Route.useSearch()
@@ -194,6 +203,14 @@ function ServiceDetailContent() {
 								<PageLayout.Title className="flex items-center gap-2.5" title={serviceName}>
 									<ServiceDot serviceName={serviceName} className="size-3" />
 									<span className="truncate">{serviceName}</span>
+									{/* Reads the same bundle atom key as the env switcher, so
+									    it shares that fetch instead of adding a round-trip. */}
+									<ServiceAppKindBadge
+										serviceName={serviceName}
+										startTime={effectiveStartTime}
+										endTime={effectiveEndTime}
+										environments={search.environments}
+									/>
 								</PageLayout.Title>
 							}
 						>
@@ -404,6 +421,14 @@ function OverviewTab({
 	const chartBuckets = useMemo(() => detailPoints.map((point) => String(point.bucket)), [detailPoints])
 	const commitMarkers = useCommitMarkers(releases, chartBuckets)
 
+	// An Apdex score means nothing without the target T it was scored against,
+	// and T is no longer a constant — it follows the service's app kind (500 ms
+	// for a backend, 2.5 s for a browser app). So the active target is stated on
+	// the card, in the header slot the grid already provides.
+	const apdexThresholdMs = Result.builder(overviewResult)
+		.onSuccess((response) => response.apdexThresholdMs)
+		.orElse(() => DEFAULT_APDEX_THRESHOLD_MS)
+
 	// Stable identity so the memoized chart components under MetricsGrid skip
 	// rerenders when this tab rerenders for unrelated reasons (sibling panel
 	// atoms settling, root-level churn).
@@ -419,8 +444,17 @@ function OverviewTab({
 				tooltip: chart.tooltip,
 				rateMode: chart.rateMode,
 				isLoading: isDetailLoading,
+				...(chart.id === "apdex"
+					? {
+							headerValue: (
+								<span className="text-xs font-normal text-muted-foreground">
+									Target &lt; {formatApdexTarget(apdexThresholdMs)}
+								</span>
+							),
+						}
+					: {}),
 			})),
-		[detailPoints, isDetailLoading],
+		[detailPoints, isDetailLoading, apdexThresholdMs],
 	)
 
 	if (Result.isFailure(overviewResult)) {

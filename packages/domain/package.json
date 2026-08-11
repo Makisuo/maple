@@ -16,6 +16,7 @@
 		"./primitives": "./src/primitives.ts",
 		"./query-engine": "./src/query-engine.ts",
 		"./recommendations": "./src/recommendations.ts",
+		"./service-app-kind": "./src/service-app-kind.ts",
 		"./setup-audit": "./src/setup-audit.ts",
 		"./tinybird-project-sync": "./src/tinybird/project-sync.ts",
 		"./warehouse-queries": "./src/warehouse-queries.ts",

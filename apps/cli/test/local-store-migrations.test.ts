@@ -12,6 +12,8 @@ import {
 	LOCAL_SCHEMA_V3,
 	LOCAL_SCHEMA_V3_MANIFEST,
 	LOCAL_SCHEMA_V4,
+	LOCAL_SCHEMA_V4_MANIFEST,
+	LOCAL_SCHEMA_V5,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -53,16 +55,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v4 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("75ac856927d88d56")
-		expect(SCHEMA_DIGEST).toBe("75ac856927d88d56518f12c68407a8f2a199d000b6eeb8576f9c97000138f5a4")
+	it("matches the generated v5 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("3099929d42b2ce8b")
+		expect(SCHEMA_DIGEST).toBe("3099929d42b2ce8b18c06a428a8e32a51ce9724300138241110e08a3f09e8193")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(4)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V4)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(5)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V5)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -85,7 +87,7 @@ describe("current local schema identity", () => {
 		)
 		expect(v2TimeOrderedErrors?.definition).toContain("FROM error_events")
 
-		// v4 is exactly v3 plus the web analytics fact table and its view. Asserted
+		// v4 was exactly v3 plus the web analytics fact table and its view. Asserted
 		// against the frozen v3 manifest rather than the diff so a later structural
 		// change can't quietly ride along on this version.
 		const webEvents = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "web_events")
@@ -99,6 +101,22 @@ describe("current local schema identity", () => {
 		expect(
 			LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name).filter((name) => !v3Names.has(name)),
 		).toEqual(["web_events", "web_events_mv"])
+
+		// v5 adds no objects at all — only three app-kind signal columns on an
+		// existing table. Asserting the object sets are identical is what stops a
+		// structural change riding along on a column-only version.
+		expect(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name)).toEqual(
+			LOCAL_SCHEMA_V4_MANIFEST.objects.map((object) => object.name),
+		)
+		const appKindColumns = ["TelemetrySdkLanguage", "BrowserPlatform", "DeviceType"]
+		const platformsColumnsOf = (manifest: LocalSchemaManifest) =>
+			manifest.objects
+				.find((object) => object.name === "service_platforms_hourly")
+				?.columns.map((column) => column.name) ?? []
+		expect(platformsColumnsOf(LOCAL_SCHEMA_MANIFEST)).toEqual(expect.arrayContaining(appKindColumns))
+		expect(platformsColumnsOf(LOCAL_SCHEMA_V4_MANIFEST)).not.toEqual(
+			expect.arrayContaining(appKindColumns),
+		)
 	})
 })
 
@@ -110,12 +128,14 @@ describe("local migration registry", () => {
 			"local-0001-to-0002-error-rollup",
 			"local-0002-to-0003-service-map-ingest-bridge",
 			"local-0003-to-0004-web-events",
+			"local-0004-to-0005-service-app-kind",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
 		expect(chain[1]?.to).toEqual(LOCAL_SCHEMA_V2)
 		expect(chain[2]?.to).toEqual(LOCAL_SCHEMA_V3)
 		expect(chain[3]?.to).toEqual(LOCAL_SCHEMA_V4)
+		expect(chain[4]?.to).toEqual(LOCAL_SCHEMA_V5)
 		expect(typeof chain[0]?.apply).toBe("function")
 	})
 
@@ -151,7 +171,7 @@ describe("local migration registry", () => {
 		).toThrow(/no registered/)
 		expect(() =>
 			resolveMigrationChain(
-				{ ...CURRENT_LOCAL_SCHEMA, version: 5, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 6, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)

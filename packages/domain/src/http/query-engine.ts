@@ -18,6 +18,7 @@ import {
 	QueryEngineExecuteResponse,
 	TinybirdDateTime,
 } from "../query-engine"
+import { ServiceAppKind } from "../service-app-kind"
 import { Authorization } from "./current-tenant"
 import { warehouseHttpErrors } from "./warehouse"
 
@@ -654,6 +655,28 @@ export class ServiceDetailOverviewResponse extends Schema.Class<ServiceDetailOve
 	// window — feeds the environment switcher dropdown (previously an all-services
 	// overview scan).
 	environments: Schema.Array(Schema.String),
+	// What kind of app this service is, and the Apdex target that follows from
+	// it. Optional so a web build deployed ahead of the API tolerates their
+	// absence (falls back to "unknown" / 500 ms — today's behaviour).
+	appKind: Schema.optional(ServiceAppKind),
+	apdexThresholdMs: Schema.optional(Schema.Number),
+	// Apdex re-scored at `apdexThresholdMs`, present only when that differs from
+	// the 500 ms default baked into the rollup columns. `timeseries` deliberately
+	// stays on the annual-rollup path (which is only valid at 500 ms), so this is
+	// a second, narrower query rather than a parameter on the first — the
+	// alternative knocks throughput, latency, and error rate off the rollup too.
+	//
+	// Sourced from `service_overview_spans` (30-day TTL), so on a longer range it
+	// covers fewer buckets than `timeseries`. Absent buckets are absent, not zero.
+	apdexOverride: Schema.optional(
+		Schema.Array(
+			Schema.Struct({
+				bucket: Schema.String,
+				apdexScore: Schema.Number,
+				totalCount: Schema.Number,
+			}),
+		),
+	),
 }) {}
 
 export class ServiceDependenciesBundleRequest extends Schema.Class<ServiceDependenciesBundleRequest>(
@@ -747,7 +770,10 @@ export class ServicePlatformsRequest extends Schema.Class<ServicePlatformsReques
 
 const ServicePlatformRow = Schema.Struct({
 	serviceName: ServiceName,
+	// Where the service runs. Orthogonal to `appKind`, which is what it is.
 	platform: ServicePlatformLiteral,
+	// Optional so a web build deployed ahead of the API keeps decoding.
+	appKind: Schema.optional(ServiceAppKind),
 	k8sCluster: Schema.String,
 	cloudPlatform: Schema.String,
 	cloudProvider: Schema.String,

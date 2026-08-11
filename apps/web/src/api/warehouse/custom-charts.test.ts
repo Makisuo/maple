@@ -16,6 +16,7 @@ import {
 	fillServiceDetailPoints,
 	getCustomChartServiceDetail,
 	getServiceDetailThroughputRefinement,
+	mergeApdexOverride,
 	mergeExactThroughput,
 } from "@/api/warehouse/custom-charts"
 import type { ServiceDetailTimeSeriesPoint } from "@/api/warehouse/services"
@@ -180,5 +181,50 @@ describe("fillServiceDetailPoints", () => {
 
 		expect(result.length).toBeGreaterThan(1)
 		expect(result.every((p) => p.partial === false)).toBe(true)
+	})
+})
+
+describe("mergeApdexOverride", () => {
+	const point = (bucket: string, apdexScore: number | null): ServiceDetailTimeSeriesPoint => ({
+		bucket,
+		throughput: 10,
+		tracedThroughput: 10,
+		hasSampling: false,
+		samplingWeight: 1,
+		errorRate: 0,
+		p50LatencyMs: 0,
+		p95LatencyMs: 0,
+		p99LatencyMs: 0,
+		apdexScore,
+		totalCount: 10,
+		partial: false,
+	})
+
+	it("replaces the 500ms-scored series with the kind-aware one", () => {
+		const points = [point("2026-02-01T00:00:00.000Z", 0.2), point("2026-02-01T01:00:00.000Z", 0.3)]
+		const merged = mergeApdexOverride(
+			points,
+			new Map([
+				["2026-02-01T00:00:00.000Z", 0.94],
+				["2026-02-01T01:00:00.000Z", 0.91],
+			]),
+		)
+
+		expect(merged.map((p) => p.apdexScore)).toEqual([0.94, 0.91])
+		// Only apdex is re-scored — the rest of the point still comes from the
+		// annual rollup the primary timeseries stayed on.
+		expect(merged[0].throughput).toBe(10)
+	})
+
+	// The override reads `service_overview_spans` (30-day TTL) while the rest of
+	// the chart reaches a year back. Carrying the 500ms number through for the
+	// uncovered buckets would mix two thresholds in one series; 0 would draw a
+	// crater that reads as "every user was frustrated".
+	it("nulls buckets the override does not cover rather than keeping or zeroing them", () => {
+		const points = [point("2026-01-01T00:00:00.000Z", 0.2), point("2026-02-01T00:00:00.000Z", 0.3)]
+		const merged = mergeApdexOverride(points, new Map([["2026-02-01T00:00:00.000Z", 0.88]]))
+
+		expect(merged[0].apdexScore).toBe(null)
+		expect(merged[1].apdexScore).toBe(0.88)
 	})
 })

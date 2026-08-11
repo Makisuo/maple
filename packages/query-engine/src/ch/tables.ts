@@ -480,6 +480,9 @@ export const ServicePlatformsHourly = table("service_platforms_hourly", {
 	FaasName: T.string,
 	MapleSdkType: T.string,
 	ProcessRuntimeName: T.string,
+	TelemetrySdkLanguage: T.string,
+	BrowserPlatform: T.string,
+	DeviceType: T.string,
 	SpanCount: T.uint64,
 })
 

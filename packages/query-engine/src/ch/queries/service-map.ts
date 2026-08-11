@@ -1189,6 +1189,8 @@ export function serviceExternalEdgesSQL(
 
 export interface ServicePlatformsOpts {
 	deploymentEnv?: string
+	/** Narrow to one service — the service-detail app-kind lookup. */
+	serviceName?: string
 }
 
 export interface ServicePlatformsOutput {
@@ -1201,6 +1203,9 @@ export interface ServicePlatformsOutput {
 	readonly faasName: string
 	readonly mapleSdkType: string
 	readonly processRuntimeName: string
+	readonly telemetrySdkLanguage: string
+	readonly browserPlatform: string
+	readonly deviceType: string
 }
 
 const ServicePlatformsOutputSchema: CompiledQueryRowSchema<ServicePlatformsOutput> = Schema.Struct({
@@ -1213,6 +1218,9 @@ const ServicePlatformsOutputSchema: CompiledQueryRowSchema<ServicePlatformsOutpu
 	faasName: Schema.String,
 	mapleSdkType: Schema.String,
 	processRuntimeName: Schema.String,
+	telemetrySdkLanguage: Schema.String,
+	browserPlatform: Schema.String,
+	deviceType: Schema.String,
 })
 
 export function servicePlatformsSQL(
@@ -1234,12 +1242,19 @@ export function servicePlatformsSQL(
 			faasName: CH.max_($.FaasName),
 			mapleSdkType: CH.max_($.MapleSdkType),
 			processRuntimeName: CH.max_($.ProcessRuntimeName),
+			// App-kind signals. `browser.platform` and `telemetry.sdk.language`
+			// are the vendor-neutral markers — `maple.sdk.type` alone only ever
+			// classifies services instrumented with a Maple SDK.
+			telemetrySdkLanguage: CH.max_($.TelemetrySdkLanguage),
+			browserPlatform: CH.max_($.BrowserPlatform),
+			deviceType: CH.max_($.DeviceType),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
 			$.Hour.lte(param.dateTime("endTime")),
 			$.ServiceName.neq(""),
+			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
 			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
 		])
 		.groupBy("serviceName")

@@ -36,6 +36,7 @@ import { legacyToCurrentModule } from "./local-store-migrations/legacy-to-curren
 import { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
 import { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
 import { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
+import { v4ToV5ServiceAppKindModule } from "./local-store-migrations/v4-to-v5-service-app-kind"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -119,6 +120,7 @@ export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> =
 	v1ToV2ErrorRollupModule,
 	v2ToV3ServiceMapIngestBridgeModule,
 	v3ToV4WebEventsModule,
+	v4ToV5ServiceAppKindModule,
 ]
 
 export const validateMigrationRegistry = (

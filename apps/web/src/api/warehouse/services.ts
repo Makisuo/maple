@@ -546,7 +546,13 @@ export interface ServiceDetailTimeSeriesPoint {
 	p50LatencyMs: number
 	p95LatencyMs: number
 	p99LatencyMs: number
-	apdexScore: number
+	/**
+	 * `null` where the score is unknown rather than zero. A service whose app
+	 * kind sets a non-default Apdex target is re-scored from
+	 * `service_overview_spans` (30-day TTL), so on a longer range the early
+	 * buckets have no score — and 0 would render as "everyone was frustrated".
+	 */
+	apdexScore: number | null
 	totalCount: number
 	/**
 	 * The bucket is still settling — its window ends within the ingestion-lag

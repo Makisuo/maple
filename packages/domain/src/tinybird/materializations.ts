@@ -588,11 +588,13 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
  * Materialized view pre-aggregating per-service hosting-platform attributes per hour.
  * Picks `max()` per attribute string so non-empty values dominate empty ones —
  * "did any span in this window carry this resource attribute" semantics, which
- * is what the platform classifier needs (kubernetes / cloudflare / lambda).
+ * is what the platform classifier needs (kubernetes / cloudflare / lambda) and
+ * equally what the app-kind classifier needs (browser / mobile / backend) from
+ * `telemetry.sdk.language`, `browser.platform`, and `device.type`.
  */
 export const servicePlatformsHourlyMv = defineMaterializedView("service_platforms_hourly_mv", {
 	description:
-		"Pre-aggregates per-service hosting-platform resource attributes (k8s.*, cloud.*, faas.*) into hourly buckets for the service map's runtime-icon resolver.",
+		"Pre-aggregates per-service hosting-platform resource attributes (k8s.*, cloud.*, faas.*) and app-kind signals (telemetry.sdk.language, browser.platform, device.type) into hourly buckets for the service map's runtime-icon resolver and the app-kind classifier.",
 	datasource: servicePlatformsHourly,
 	nodes: [
 		node({
@@ -614,6 +616,9 @@ export const servicePlatformsHourlyMv = defineMaterializedView("service_platform
           max(ResourceAttributes['faas.name']) AS FaasName,
           max(ResourceAttributes['maple.sdk.type']) AS MapleSdkType,
           max(ResourceAttributes['process.runtime.name']) AS ProcessRuntimeName,
+          max(ResourceAttributes['telemetry.sdk.language']) AS TelemetrySdkLanguage,
+          max(ResourceAttributes['browser.platform']) AS BrowserPlatform,
+          max(ResourceAttributes['device.type']) AS DeviceType,
           count() AS SpanCount
         FROM traces
         WHERE ServiceName != ''
