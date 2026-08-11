@@ -8,7 +8,7 @@
 		"lib/llm",
 		"lib/thinking-orbs"
 	],
-	"ignore": ["**/routeTree.gen.ts", ".context/**", ".deepsec/**"],
+	"ignore": ["**/routeTree.gen.ts", ".context/**", ".deepsec/**", "**/*.type-test.ts"],
 	"ignoreExportsUsedInFile": true,
 	"workspaces": {
 		".": {
