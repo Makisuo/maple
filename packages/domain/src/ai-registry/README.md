@@ -106,3 +106,30 @@ Consequently:
   Rust evaluators must agree span-for-span, and the algebra's invariants
   (unique priorities, band ordering, `value_prefix` pseudo-key restriction, session-state reduction)
   are asserted directly against `registry.json`.
+
+## TypeScript consumers
+
+The files next to this README are Maple's typed view of the artifact; they never modify it.
+
+- **`schema.ts`** — Effect Schema for the whole document, plus the decode. `registry.json` is decoded
+  at module load and exported deep-frozen as `aiRegistry`, so a re-sync that changes the shape fails
+  the import rather than the first classification. Also exports `AI_SESSION_KEY_STATE`, the frozen
+  0–6 ladder.
+- **`validate.ts`** — the semantic invariants Schema cannot express: globally unique integer
+  priorities, the D4 bands, the closed slug set with `unknown:` reserved, `value_prefix` confined to
+  pseudo-keys, justification on sufficient resource matchers. Run as assertions over the real
+  artifact in `validate.test.ts` — **that test is the gate a future re-sync must pass**. It reports
+  violations; it never repairs them. A violation means the upstream compiler in trace-capture
+  produced a bad artifact and must be fixed there.
+- **`compile-sql.ts`** — compiles the registry to ClickHouse expressions over a `traces` row
+  (`compileAiRegistrySql`, `renderAiRegistrySelect`). Two consumers: the Rust/SQL differential
+  tests, and the rollup rebuild job, which cannot read the stored `AiVendor` because that is the
+  column being fixed. No hash SQL is emitted: `sessionKeyValueExpr` yields the raw value and the
+  caller wraps it in `cityHash64` if it wants the hash.
+- **`compile-sql.clickhouse.e2e.test.ts`** — runs the generated SQL through a real ClickHouse
+  (`bun ch:up`, then `CLICKHOUSE_E2E=1`). Parse/type-check/execute only; per-span semantics belong
+  to the differential suite.
+
+Imported as `@maple/domain/ai-registry`. Deliberately not re-exported from the root `@maple/domain`
+barrel: everything here is pure data and string building and is safe for web/cli, but nobody should
+pay ~280 KB of vendored JSON implicitly.

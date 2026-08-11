@@ -7,6 +7,8 @@
 		"types": ["node"],
 		"moduleResolution": "bundler",
 		"allowImportingTsExtensions": true,
+		// `src/ai-registry/registry.json` is a vendored artifact imported as data.
+		"resolveJsonModule": true,
 		"verbatimModuleSyntax": true,
 		"noEmit": true,
 		"skipLibCheck": true,
