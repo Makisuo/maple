@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { ANTICIPATED_ERROR_IDENTIFIERS, isAnticipatedErrorIdentifier } from "./anticipated-errors"
-import { deriveAnticipatedIdentifiers } from "./anticipated-errors-derive"
 
 describe("ANTICIPATED_ERROR_IDENTIFIERS", () => {
-	it("matches the reflection-derived set (regenerate with `bun run gen:anticipated-errors`)", () => {
-		expect([...ANTICIPATED_ERROR_IDENTIFIERS].sort()).toEqual(
-			[...deriveAnticipatedIdentifiers()].sort(),
-		)
-	})
-
 	it("includes legacy tags and v2 Schema.Error names for 4xx business errors", () => {
 		for (const identifier of [
 			"@maple/http/errors/UnauthorizedError",

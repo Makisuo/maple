@@ -12,25 +12,61 @@
 // `StatusCode='Error'`). Mirrors the ingest gateway's `otel_status_for_rejection`
 // rule (4xx → Ok, 5xx → Error).
 //
-// Derived (not hand-maintained) from the error classes themselves — but at
-// CODEGEN time, not module eval: the worker entrypoint imports this module at
-// isolate startup, and deriving by reflection meant evaluating the entire
-// domain HTTP schema surface (~600KB of Schema construction) inside
-// Cloudflare's startup CPU budget. The reflection lives in
-// `./anticipated-errors-derive.ts`; its output is checked in at
-// `./generated/anticipated-error-identifiers.ts` (regenerate with
-// `bun run gen:anticipated-errors`), and the drift test in
-// `anticipated-errors.test.ts` keeps the two in sync — so a new 4xx error is
-// still picked up automatically.
-import { ANTICIPATED_ERROR_IDENTIFIER_LIST } from "./generated/anticipated-error-identifiers"
+// Derived (not hand-maintained) from the error classes themselves: every
+// Both `Schema.TaggedError` and `Schema.Error` carry a stable
+// identifier plus an `httpApiStatus` annotation, so a new 4xx error is picked
+// up automatically. A 5xx error (persistence/upstream failures) is intentionally
+// excluded and keeps tracing.
+import * as Http from "./http/index"
+import * as HttpV2 from "./http/v2/index"
+
+/** Read `obj[key]` when `obj` is an object/function that has it; `undefined` otherwise. */
+const prop = (obj: unknown, key: string): unknown =>
+	(typeof obj === "object" || typeof obj === "function") && obj !== null && key in obj
+		? (obj as Record<string, unknown>)[key]
+		: undefined
+
+/** Stable runtime identifier: tagged errors use `_tag`; Schema.Error uses its class identifier/name. */
+const readIdentifier = (value: unknown): string | undefined => {
+	const literal = prop(prop(prop(prop(value, "fields"), "_tag"), "schema"), "literal")
+	if (typeof literal === "string") return literal
+	const identifier = prop(value, "identifier")
+	return typeof identifier === "string" ? identifier : undefined
+}
+
+/** The `httpApiStatus` annotation on a schema's AST, when present. */
+const readHttpStatus = (value: unknown): number | undefined => {
+	const status = prop(prop(prop(value, "ast"), "annotations"), "httpApiStatus")
+	return typeof status === "number" ? status : undefined
+}
+
+/**
+ * Identifiers that can't be derived from our own exports because Effect owns the
+ * class. `HttpApiSchemaError` is Effect's request-decode failure — it always
+ * responds 400, so by the 4xx→Ok rule above it belongs here. It was also the
+ * worst offender for legibility: its `message` is its `kind`, so a failed decode
+ * arrived as an Error span whose entire description was the word "Payload".
+ */
+const EXTERNAL_ANTICIPATED_IDENTIFIERS = ["HttpApiSchemaError"] as const
+
+const deriveAnticipatedIdentifiers = (): ReadonlySet<string> => {
+	const identifiers = new Set<string>(EXTERNAL_ANTICIPATED_IDENTIFIERS)
+	for (const value of [...Object.values(Http), ...Object.values(HttpV2)]) {
+		if (typeof value !== "function") continue
+		const identifier = readIdentifier(value)
+		if (identifier === undefined) continue
+		const status = readHttpStatus(value)
+		if (status === undefined) continue
+		if (status >= 400 && status < 500) identifiers.add(identifier)
+	}
+	return identifiers
+}
 
 /**
  * Stable identifiers of all domain HTTP errors annotated with a 4xx `httpApiStatus`.
  * Tagged errors contribute `_tag`; v2 Schema.Error values contribute `Error.name`.
  */
-export const ANTICIPATED_ERROR_IDENTIFIERS: ReadonlySet<string> = new Set(
-	ANTICIPATED_ERROR_IDENTIFIER_LIST,
-)
+export const ANTICIPATED_ERROR_IDENTIFIERS: ReadonlySet<string> = deriveAnticipatedIdentifiers()
 
 export const isAnticipatedErrorIdentifier = (identifier: string): boolean =>
 	ANTICIPATED_ERROR_IDENTIFIERS.has(identifier)

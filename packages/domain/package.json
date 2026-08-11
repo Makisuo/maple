@@ -32,8 +32,7 @@
 	},
 	"scripts": {
 		"test": "vitest run",
-		"typecheck": "tsc --noEmit",
-		"gen:anticipated-errors": "bun scripts/gen-anticipated-errors.ts"
+		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@maple-dev/clickhouse-builder": "workspace:*",
