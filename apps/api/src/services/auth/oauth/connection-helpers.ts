@@ -35,12 +35,12 @@ export const OAUTH_REFRESH_LEEWAY_MS = 60_000 // refresh when the access token i
  * How long `getValidConnectionToken` may serve a connection row from the
  * in-isolate memo instead of re-reading Postgres.
  *
- * Why this exists: on Workers every `database.execute` opens a fresh
- * postgres.js client over Hyperdrive, so an uncached read on a hot path is a
- * ~200ms network call that is also exposed to the 2s/8s dial ladder in
- * `pg-execute.ts` — measured at p50 11ms but with ~4% of dials stalling out to
- * 10s. Poller and scrape paths call this once per tick per org, which made it
- * one of the largest sources of dial volume on the api worker.
+ * Why this exists: an uncached read on a hot path is a network call exposed to
+ * the dial itself — measured at p50 11ms but with ~4% of dials stalling out.
+ * Poller and scrape paths call this once per tick per org, which made it one of
+ * the largest sources of dial volume on the api worker. Requests now share one
+ * connection per invocation (`pg-connection-scope.ts`), which amortizes the
+ * dial but not the round trip.
  *
  * 60s is deliberately far tighter than the token's own lifetime: the memo is
  * about collapsing a burst of same-tick reads, not about holding credentials.

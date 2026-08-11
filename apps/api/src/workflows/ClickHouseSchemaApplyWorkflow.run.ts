@@ -33,7 +33,7 @@ import { eq } from "drizzle-orm"
 import { Effect, Schema } from "effect"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
-import { makeTracedPgConnection, type TracedPgConnection } from "@/platform/pg-execute"
+import { makePgConnectionScope, type PgConnectionScopeShape } from "@/platform/pg-connection-scope"
 import { invalidateOrgRuntimeConfigMemo } from "@/services/org/OrgClickHouseSettingsService"
 
 /**
@@ -355,11 +355,11 @@ export async function runClickHouseSchemaApply(
 	if (source._tag === "Unavailable") {
 		throw new Error(source.reason)
 	}
-	const connection = makeTracedPgConnection(source.connectionString, source.attributes)
+	const connection = makePgConnectionScope(source.connectionString, source.attributes)
 	try {
 		return await runWithDb(connection, env, event, step)
 	} finally {
-		await connection.end()
+		await connection.close()
 		// This module owns its telemetry instance (the workflow runs outside the
 		// worker's layer graph), so nothing else will drain the span buffer.
 		await schemaApplyTelemetry.flush(env).catch(() => undefined)
@@ -367,14 +367,14 @@ export async function runClickHouseSchemaApply(
 }
 
 async function runWithDb(
-	connection: TracedPgConnection,
+	connection: PgConnectionScopeShape,
 	env: SchemaApplyWorkflowEnv,
 	event: WorkflowEventLike<SchemaApplyWorkflowPayload>,
 	step: WorkflowStepLike,
 ): Promise<SchemaApplyWorkflowResult> {
 	const orgId = Schema.decodeUnknownSync(OrgId)(event.payload.orgId)
 	const dbStep: DbStep = (fn) =>
-		Effect.runPromise(connection.step(fn).pipe(Effect.provide(schemaApplyTelemetry.layer)))
+		Effect.runPromise(connection.run(fn).pipe(Effect.provide(schemaApplyTelemetry.layer)))
 	const encryptionKey = Buffer.from(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY.trim(), "base64")
 	const startedAt = Date.now()
 	const appliedVersions: number[] = []
