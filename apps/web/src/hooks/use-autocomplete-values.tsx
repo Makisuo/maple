@@ -74,7 +74,6 @@ function AutocompleteValuesInner({
 }) {
 	const { activeAttributeKey, activeResourceAttributeKey } = useAutocompleteContext()
 
-	// --- Facets ---
 	const tracesFacetsResult = useGatedAtomValue(
 		getTracesFacetsResultAtom({ data: { startTime, endTime } }),
 		activated,
@@ -84,7 +83,6 @@ function AutocompleteValuesInner({
 		activated,
 	)
 
-	// --- Attribute keys ---
 	const spanAttributeKeysResult = useGatedAtomValue(
 		getSpanAttributeKeysResultAtom({ data: { startTime, endTime } }),
 		activated,
@@ -98,7 +96,6 @@ function AutocompleteValuesInner({
 		activated,
 	)
 
-	// --- Attribute values (lazy, driven by active key) ---
 	const spanAttributeValuesResult = useGatedAtomValue(
 		getSpanAttributeValuesResultAtom({
 			data: { startTime, endTime, attributeKey: activeAttributeKey ?? "" },
@@ -112,7 +109,6 @@ function AutocompleteValuesInner({
 		activated,
 	)
 
-	// --- Derived arrays ---
 	const attributeKeys = React.useMemo(
 		() =>
 			Result.builder(spanAttributeKeysResult)
@@ -157,7 +153,6 @@ function AutocompleteValuesInner({
 		[metricAttributeKeysResult],
 	)
 
-	// --- Assemble autocomplete values ---
 	const value = React.useMemo((): AutocompleteValuesContextType => {
 		const tracesFacets = Result.builder(tracesFacetsResult)
 			.onSuccess((r) => r.data)

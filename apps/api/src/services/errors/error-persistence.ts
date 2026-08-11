@@ -47,7 +47,7 @@ export const makeErrorDatabaseExecute =
 				Effect.gen(function* () {
 					// Every service method runs inside an Effect.fn span — its name says
 					// which operation's query failed without threading a label through.
-					const span = yield* Effect.currentSpan.pipe(Effect.catch(() => Effect.succeed(null)))
+					const span = yield* Effect.currentSpan.pipe(Effect.orElseSucceed(() => null))
 					yield* Effect.logError("ErrorsService dbExecute failed").pipe(
 						Effect.annotateLogs({
 							operation: span?.name ?? "(unknown)",

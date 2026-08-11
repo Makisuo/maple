@@ -44,8 +44,6 @@ describe("hostDetailSummaryQuery (sanity)", () => {
 	})
 })
 
-// Pods
-
 describe("listPodsQuery", () => {
 	it("compiles with required filters and pod metric whitelist", () => {
 		const { sql } = compileCH(listPodsQuery({}), baseParams)
@@ -272,8 +270,6 @@ describe("podGaugeTimeseriesQuery", () => {
 		expect(sql).toContain("MetricName = 'k8s.pod.cpu.usage'")
 	})
 })
-
-// Nodes
 
 describe("listNodesQuery", () => {
 	it("filters out pod-scoped rows so node aggregates are clean", () => {

@@ -45,7 +45,6 @@ export interface SessionRecord {
 	 */
 	metaVersion?: number
 
-	// --- Analytics context -------------------------------------------------
 	// All optional: `readRecord`'s validator deliberately still accepts records
 	// written by older SDKs, which have none of these.
 	//

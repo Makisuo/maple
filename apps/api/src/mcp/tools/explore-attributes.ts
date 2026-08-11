@@ -55,7 +55,6 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 			}
 
 			if (params.key) {
-				// Return values for a specific key
 				const values = yield* exploreAttributeValues({ ...baseInput, key: params.key }).pipe(
 					Effect.provide(executorLayer),
 					Effect.mapError(mapError),

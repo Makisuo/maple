@@ -146,8 +146,6 @@ const edgeTypes = {
 	serviceEdge: ServiceMapEdge,
 }
 
-// --- Detail Panel ---
-
 function formatRate(value: number): string {
 	if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
 	if (value >= 1) return value.toFixed(1)
@@ -1542,8 +1540,6 @@ function DatabaseDetailPanel({
 	)
 }
 
-// --- Main Canvas ---
-
 interface ServiceMapViewProps {
 	startTime: string
 	endTime: string
@@ -1553,8 +1549,6 @@ interface ServiceMapViewProps {
 	focus?: DeclutterFocus | null
 	onFocusChange?: (focus: DeclutterFocus | null) => void
 }
-
-// --- Debug Layout Sliders ---
 
 const SLIDER_DEFS: Array<{ key: keyof LayoutConfig; label: string; min: number; max: number; step: number }> =
 	[

@@ -104,7 +104,6 @@ const FINGERPRINT = "11640393269246331608"
  * `assertPipeCoverage`, so adding a pipe without a fixture breaks the build.
  */
 export const pipeFixtures: ReadonlyArray<PipeFixture> = [
-	// ----- Traces -----
 	{ pipe: "list_traces", label: "default", params: {}, allCapabilities: true },
 	{
 		pipe: "list_traces",
@@ -159,7 +158,6 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "span_search", label: "default", params: { search: "timeout" }, allCapabilities: true },
 	{ pipe: "top_operations", label: "default", params: { service_name: "api", metric: "p95_duration" } },
 
-	// ----- Custom charts: the routed timeseries. -----
 	// NB: the pipe adapter never forwards `bucket_seconds` into the query opts,
 	// so none of these can reach the annual service-overview rollup — see
 	// `pipePathReachesAnnualRoute`. The annual route lives in the QuerySpec
@@ -195,7 +193,6 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 		allCapabilities: true,
 	},
 
-	// ----- Logs -----
 	{ pipe: "list_logs", label: "default", params: {}, allCapabilities: true },
 	{
 		pipe: "list_logs",
@@ -207,7 +204,6 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "logs_count", label: "searched", params: { search: "timeout" }, allCapabilities: true },
 	{ pipe: "logs_facets", label: "default", params: {}, allCapabilities: true },
 
-	// ----- Services -----
 	{ pipe: "error_rate_by_service", label: "default", params: {} },
 	{ pipe: "service_overview", label: "default", params: {} },
 	{
@@ -255,7 +251,6 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	},
 	{ pipe: "service_dependencies", label: "default", params: { deployment_env: "production" } },
 
-	// ----- Errors -----
 	{ pipe: "errors_by_type", label: "default", params: {} },
 	{ pipe: "errors_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "errors_facets", label: "default", params: {} },
@@ -265,11 +260,9 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "error_issue_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "error_issue_sample_traces", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 
-	// ----- Metrics -----
 	{ pipe: "list_metrics", label: "default", params: {} },
 	{ pipe: "metrics_summary", label: "default", params: {} },
 
-	// ----- Attribute discovery -----
 	{ pipe: "span_attribute_keys", label: "default", params: {}, allCapabilities: true },
 	{ pipe: "resource_attribute_keys", label: "default", params: {}, allCapabilities: true },
 	{ pipe: "metric_attribute_keys", label: "default", params: {} },
@@ -399,7 +392,6 @@ const METRICS_FILTERS = {
 } as const
 
 export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
-	// --- traces timeseries: every branch of the routed function ---
 	{
 		label: "traces-timeseries-annual",
 		route: "traces_timeseries:annual",
@@ -503,7 +495,6 @@ export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
 		allCapabilities: true,
 	},
 
-	// --- the other sources ---
 	{
 		label: "logs-timeseries",
 		query: {

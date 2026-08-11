@@ -95,8 +95,6 @@ export interface LivenessProbeInput {
 	readonly baselineEndMs: number
 }
 
-// I/O
-
 const EMPTY_TOTALS: ServiceWindowTotals = { spanCount: 0, estimatedSpanCount: 0 }
 
 /**

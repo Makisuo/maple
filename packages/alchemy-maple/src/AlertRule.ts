@@ -145,8 +145,7 @@ export const AlertRuleProvider = () =>
 					return undefined
 				}),
 				reconcile: Effect.fn(function* ({ news, output }) {
-					// Observe — re-fetch by id, falling back to the org-unique name so we
-					// recover from partial state-persistence failures without duplicating.
+					// The unique name prevents duplicates after partial state persistence.
 					let observedRaw: unknown
 					if (output?.ruleId) {
 						observedRaw = yield* api
@@ -160,11 +159,9 @@ export const AlertRuleProvider = () =>
 						}
 					}
 
-					// Ensure — create if missing.
 					if (observedRaw === undefined) {
 						observedRaw = yield* api.post("/v2/alerts/rules", desiredBody(news))
 					} else if (drifted(news, observedRaw as Record<string, unknown>)) {
-						// Sync — PATCH only on drift of declared fields.
 						const current = yield* decodeWireRule(observedRaw)
 						observedRaw = yield* api.patch(`/v2/alerts/rules/${current.id}`, desiredBody(news))
 					}

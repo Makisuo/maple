@@ -1,7 +1,5 @@
 import { Metric } from "effect"
 
-// --- Counters ---
-
 export const rulesEvaluatedTotal = Metric.counter("alerting.rules_evaluated_total", {
 	description: "Total number of alert rules evaluated",
 	incremental: true,
@@ -57,8 +55,6 @@ export const deliveriesFailedTotal = Metric.counter("alerting.deliveries_failed_
 	incremental: true,
 })
 
-// --- Histograms ---
-
 export const tickDurationMs = Metric.histogram("alerting.tick_duration_ms", {
 	description: "Duration of a full scheduler tick in milliseconds",
 	boundaries: [100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000],
@@ -73,8 +69,6 @@ export const deliveryAttemptDurationMs = Metric.histogram("alerting.delivery_att
 	description: "Duration of a single delivery attempt in milliseconds",
 	boundaries: [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
 })
-
-// --- Gauges ---
 
 export const activeRulesGauge = Metric.gauge("alerting.active_rules", {
 	description: "Number of enabled alert rules found in the current tick",

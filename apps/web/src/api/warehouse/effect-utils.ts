@@ -152,6 +152,8 @@ export function runWarehouseQuery<A>(
 ): Effect.Effect<A, WarehouseApiError | BackendError> {
 	return Effect.suspend(execute).pipe(
 		Effect.withSpan(operation),
+		// Warehouse adapters are imperative server-function entrypoints and own this runtime layer.
+		// oxlint-disable-next-line effecttsgo/strict-effect-provide
 		Effect.provide(mapleApiClientLayer),
 		Effect.mapError((cause) => normalizeWarehouseError(operation, cause)),
 	)
@@ -172,6 +174,8 @@ export function runWarehouseQueryV2<A, E>(
 ): Effect.Effect<A, WarehouseApiError | BackendError> {
 	return Effect.suspend(execute).pipe(
 		Effect.withSpan(operation),
+		// Warehouse adapters are imperative server-function entrypoints and own this runtime layer.
+		// oxlint-disable-next-line effecttsgo/strict-effect-provide
 		Effect.provide(mapleApiV2ClientLayer),
 		Effect.mapError((cause) => normalizeWarehouseError(operation, cause)),
 	)

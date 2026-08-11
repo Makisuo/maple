@@ -1,6 +1,6 @@
 import { Data, Effect, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { autumnHandler, type CustomerData } from "autumn-js/backend"
+import type { autumnHandler, CustomerData } from "autumn-js/backend"
 import type { EdgeCacheServiceShape } from "@maple/cache"
 import { isActivePlanSubscription } from "@maple/domain/billing"
 import { BillingUpstreamError } from "@maple/domain/http"
@@ -100,13 +100,18 @@ export const makeCallAutumn =
 		secretKey === undefined
 			? Effect.fail(new BillingUpstreamError({ message: "Billing is not configured" }))
 			: Effect.tryPromise({
-					try: () =>
-						autumnHandler({
+					// autumn-js (plus its zod dependency, ~1.6MB of module eval) is
+					// dynamically imported so the billing SDK stays out of the
+					// request-path module graph until a billing call actually runs.
+					try: async () => {
+						const { autumnHandler } = await import("autumn-js/backend")
+						return await autumnHandler({
 							request: { url: `${AUTUMN_PATH_PREFIX}/${route}`, method: "POST", body },
 							customerId,
 							customerData,
 							clientOptions: { secretKey },
-						}),
+						})
+					},
 					catch: (error) =>
 						new BillingUpstreamError({
 							message: error instanceof Error ? error.message : String(error),

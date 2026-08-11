@@ -158,7 +158,6 @@ function ratioStat(opts: {
 function widgets(zoneName?: string): WidgetDef[] {
 	const where = zoneWhere(zoneName)
 	return [
-		// -- KPI row -----------------------------------------------------------
 		metricStat({
 			id: "kpi-requests",
 			name: "Requests",
@@ -194,7 +193,6 @@ function widgets(zoneName?: string): WidgetDef[] {
 			layout: { x: 9, y: 0, w: 3, h: 2 },
 		}),
 
-		// -- Traffic & cache ---------------------------------------------------
 		{
 			id: "requests-by-status",
 			visualization: "chart",
@@ -240,7 +238,6 @@ function widgets(zoneName?: string): WidgetDef[] {
 			layout: { x: 6, y: 8, w: 6, h: 6 },
 		},
 
-		// -- Latency -----------------------------------------------------------
 		{
 			id: "edge-ttfb",
 			visualization: "chart",
@@ -274,7 +271,6 @@ function widgets(zoneName?: string): WidgetDef[] {
 			layout: { x: 6, y: 14, w: 6, h: 6 },
 		},
 
-		// -- Bandwidth & Workers ----------------------------------------------
 		{
 			id: "bytes-served",
 			visualization: "chart",

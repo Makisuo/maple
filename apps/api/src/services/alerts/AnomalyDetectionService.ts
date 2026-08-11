@@ -273,8 +273,6 @@ const make = Effect.gen(function* () {
 		authMode: "self_hosted",
 	})
 
-	// Active-org gating
-	//
 	// The tick historically evaluated every org with an ingest key, scanning a
 	// 7-day window for each — overwhelmingly idle orgs, which dominated Tinybird
 	// CPU. Instead, run ONE cross-org scan of the recent hourly MVs (pinned to
@@ -376,8 +374,6 @@ const make = Effect.gen(function* () {
 		)
 	})
 
-	// Settings
-
 	const parseMutedSignals = (raw: ReadonlyArray<string>): ReadonlyArray<AnomalySignalType> =>
 		Arr.filterMap(raw, (value) => decodeMutedSignalResult(value))
 
@@ -458,8 +454,6 @@ const make = Effect.gen(function* () {
 		const refreshed = yield* loadSettingsRow(orgId)
 		return settingsToDocument(refreshed ?? { ...existing, ...next })
 	})
-
-	// Incident reads
 
 	const incidentToDocument = (row: AnomalyIncidentRow): AnomalyIncidentDocument =>
 		new AnomalyIncidentDocument({
@@ -570,8 +564,6 @@ const make = Effect.gen(function* () {
 		const row = yield* requireIncidentRow(orgId, incidentId)
 		return incidentToDocument(row)
 	})
-
-	// Incident mutations
 
 	const resolveIncidentManually: AnomalyDetectionServiceShape["resolveIncidentManually"] = Effect.fn(
 		"AnomalyDetectionService.resolveIncidentManually",

@@ -1,7 +1,5 @@
 import { Metric } from "effect"
 
-// --- Counters ---
-
 export const cacheHitsTotal = Metric.counter("query_engine.cache.hits_total", {
 	description: "Total number of query engine cache hits",
 	incremental: true,
@@ -69,8 +67,6 @@ export const cacheBackendMemoryFallback = Metric.counter("query_engine.cache.mem
 	description: "Isolates that fell back to the per-isolate in-memory cache backend",
 	incremental: true,
 })
-
-// --- Histograms ---
 
 export const executeDurationMs = Metric.histogram("query_engine.execute_duration_ms", {
 	description: "Duration of a cached execute call in milliseconds",

@@ -104,8 +104,6 @@ function tighterCookieDomain(current: string | undefined, next: string): string 
 	return next.length > current.length ? next : current
 }
 
-// --- Cookie plumbing -------------------------------------------------------
-
 function readRawCookie(name: string): string | undefined {
 	if (typeof document === "undefined") return undefined
 	try {
@@ -172,8 +170,6 @@ function cookieDomain(): string {
 	if (probedCookieDomain === undefined) probedCookieDomain = probeCookieDomain()
 	return probedCookieDomain
 }
-
-// --- Record read/write -----------------------------------------------------
 
 function parseRecord(raw: string | undefined): VisitorRecord | undefined {
 	if (!raw) return undefined

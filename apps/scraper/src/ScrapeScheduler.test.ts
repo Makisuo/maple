@@ -200,6 +200,33 @@ describe("ScrapeScheduler", () => {
 		}),
 	)
 
+	it.effect("starts a fresh trace per scrape instead of inheriting the reconcile span", () =>
+		Effect.gen(function* () {
+			const traceIds: Array<string> = []
+			const harness = makeHarness([mkTarget(TARGET_A, 5)])
+			// The stub runs inside `scraper.scrape_target`, so the current span's
+			// trace is exactly what the proxy request would propagate as traceparent.
+			harness.scrapeImpl = () =>
+				Effect.gen(function* () {
+					const span = yield* Effect.currentSpan
+					traceIds.push(span.traceId)
+					return proxyResponse({ status: 200, body: GAUGE_BODY })
+				}).pipe(Effect.orDie)
+
+			// Target loops are forked from inside `scraper.reconcile`, so they
+			// inherit an ambient parent span; an outer span makes that explicit.
+			const outer = yield* Effect.makeSpan("test.outer")
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)), Effect.withParentSpan(outer))
+
+			yield* TestClock.adjust(Duration.seconds(15))
+
+			// 5s interval → t=0,5,10,15.
+			assert.lengthOf(traceIds, 4)
+			assert.lengthOf(new Set(traceIds), 4)
+			for (const traceId of traceIds) assert.notStrictEqual(traceId, outer.traceId)
+		}),
+	)
+
 	it.effect("reports check metadata (duration + sample counts) with each result", () =>
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 60)])

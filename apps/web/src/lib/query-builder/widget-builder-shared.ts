@@ -54,18 +54,15 @@ export interface QueryBuilderWidgetState {
 	tableLimit: string
 	// Threshold lines (chart) / threshold coloring (stat, gauge)
 	thresholds: Array<{ value: number; color: string }>
-	// Gauge-specific
 	gaugeMin: string
 	gaugeMax: string
 	// Stat-specific: render a trend sparkline behind the value
 	sparklineEnabled: boolean
-	// List-specific
 	listDataSource: ListDataSource
 	listWhereClause: string
 	listLimit: string
 	listColumns: ListColumnDraft[]
 	listRootOnly: boolean
-	// Heatmap-specific
 	heatmapColorScale: HeatmapColorScale
 	heatmapScaleType: HeatmapScaleType
 	// Markdown-specific: the note body. Static — never hits the warehouse.

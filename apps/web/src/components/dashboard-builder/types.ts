@@ -1,9 +1,4 @@
-// Dashboard Type System
-//
-// The widget shape is owned by the Effect schemas in @maple/domain. The types
-// below derive from those schemas so the web client cannot drift from the HTTP
-// boundary. Only web-only concerns (data-source endpoint registry keys, render
-// state) are defined here.
+// Widget shapes derive from @maple/domain; only web-only registry and render state lives here.
 
 import type {
 	DashboardRefreshIntervalSeconds,
@@ -24,13 +19,9 @@ type DeepMutable<T> =
 			? { -readonly [K in keyof T]: DeepMutable<T[K]> }
 			: T
 
-// --- Time Range ---
-
 export type TimeRange =
 	| { type: "relative"; value: string }
 	| { type: "absolute"; startTime: string; endTime: string }
-
-// --- Data Source Endpoints ---
 
 export type DataSourceEndpoint =
 	| "service_usage"
@@ -59,15 +50,11 @@ export type DataSourceEndpoint =
 	| "raw_sql_chart"
 	| "markdown_static"
 
-// --- Widget Data Source ---
-
 // `endpoint` is narrowed to the registry key union so the data-source registry
 // stays statically indexable; everything else comes straight from the schema.
 export type WidgetDataSource = Omit<DeepMutable<typeof WidgetDataSourceSchema.Type>, "endpoint"> & {
 	endpoint: DataSourceEndpoint
 }
-
-// --- Widget Display ---
 
 export type ValueUnit =
 	| "none"
@@ -85,11 +72,7 @@ export type ValueUnit =
 
 export type WidgetDisplayConfig = DeepMutable<typeof WidgetDisplayConfigSchema.Type>
 
-// --- Widget Layout ---
-
 export type WidgetLayout = DeepMutable<typeof WidgetLayoutSchema.Type>
-
-// --- Visualization ---
 
 /**
  * The persisted `visualization` values this build knows how to render. Derived
@@ -115,8 +98,6 @@ export type WidgetDataState =
 	| { status: "error"; title?: string; message?: string; kind?: WidgetErrorKind }
 	| { status: "ready"; data: unknown }
 
-// --- Dashboard Widget ---
-
 // `timeRange` is re-typed for the same reason `Dashboard["timeRange"]` is: the
 // schema brands its ISO strings, and every producer in the UI (the time-range
 // picker, the builder form) deals in plain strings. Branding happens once, at
@@ -130,11 +111,7 @@ export type DashboardWidget = Omit<
 	timeRange?: TimeRange
 }
 
-// --- Dashboard Variables ---
-
 export type DashboardVariable = DeepMutable<typeof DashboardVariableSchema.Type>
-
-// --- Dashboard ---
 
 export interface Dashboard {
 	id: string

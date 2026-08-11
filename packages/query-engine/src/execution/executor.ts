@@ -624,8 +624,6 @@ WHERE name = 'enable_full_text_index'`,
 			"maple.query.plan.full_text_setting": capabilities.fullTextSearchSetting,
 		})
 
-	// --- Response-limit narrowing ------------------------------------------
-	//
 	// `executeSql` can raise WarehouseResponseLimitError, but only when a caller
 	// passed `responseLimits`. `compiledQueryBounded` is the one entry point that
 	// does; every other one strips the option (`withoutResponseLimits`) and then

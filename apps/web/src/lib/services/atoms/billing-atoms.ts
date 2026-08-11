@@ -39,7 +39,6 @@ export const billingDailySpendAtom = MapleApiAtomClient.query("billing", "getDai
 	reactivityKeys: [BILLING_CUSTOMER_KEY],
 })
 
-// Mutations.
 export const attachMutation = MapleApiAtomClient.mutation("billing", "attach")
 export const previewAttachMutation = MapleApiAtomClient.mutation("billing", "previewAttach")
 export const openCustomerPortalMutation = MapleApiAtomClient.mutation("billing", "openCustomerPortal")

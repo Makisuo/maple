@@ -195,7 +195,6 @@ export function evaluateGoldenSignals(
 	const insufficientBaseline = baseline.length < MIN_BASELINE_SAMPLES
 	const currentCount = current.requestCount
 
-	// --- Error rate -----------------------------------------------------------
 	{
 		const signal: AnomalySignalType = "error_rate"
 		if (insufficientBaseline || currentCount < GOLDEN_MIN_VOLUME) {
@@ -227,7 +226,6 @@ export function evaluateGoldenSignals(
 		}
 	}
 
-	// --- p95 latency -----------------------------------------------------------
 	{
 		const signal: AnomalySignalType = "latency_p95"
 		if (insufficientBaseline || currentCount < GOLDEN_MIN_VOLUME) {
@@ -250,7 +248,6 @@ export function evaluateGoldenSignals(
 		}
 	}
 
-	// --- Throughput (drops only) -----------------------------------------------
 	{
 		const signal: AnomalySignalType = "throughput"
 		const ratePerMin = config.elapsedMinutes > 0 ? currentCount / config.elapsedMinutes : currentCount

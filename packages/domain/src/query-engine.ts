@@ -487,8 +487,6 @@ export class QueryEngineExecuteResponse extends Schema.Class<QueryEngineExecuteR
 	result: QueryEngineResult,
 }) {}
 
-// ---- Batched execution ----------------------------------------------------
-//
 // The dashboard fans out one query per widget, and each used to be its own
 // POST — plus its own CORS preflight — against a worker pinned to us-east-1.
 // The batch endpoint collapses a render pass into a single round trip.

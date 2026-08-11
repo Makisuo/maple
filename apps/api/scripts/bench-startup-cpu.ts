@@ -33,12 +33,10 @@ import { join, resolve } from "node:path"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
-// --- Cloudflare reference points (for the verdict) -------------------------
 const CF_STARTUP_BUDGET_MS = 400 // documented startup CPU ceiling
 const OBSERVED_BLOWUP_MS = 1000 // what the team saw blow up (per the fix session)
 const POST_FIX_STARTUP_MS = 25 // post lazy-import startup CPU (per memory)
 
-// --- tiny measurement harness ----------------------------------------------
 type Sample = { wallMs: number; cpuMs: number }
 
 const measureOnce = (fn: () => unknown): Sample => {
@@ -74,8 +72,6 @@ const bench = (label: string, reps: number, fn: () => unknown): BenchResult => {
 // mirrors how every real class has a distinct tag string.
 let _uid = 0
 const uid = (prefix: string): string => `__bench/${prefix}/${_uid++}`
-
-// --- workloads -------------------------------------------------------------
 
 // A TaggedError shaped exactly like the real WarehouseQueryError (6 fields, one
 // a 6-member Literals union) — the unit the comment says is expensive.
@@ -135,7 +131,6 @@ const buildApiGroup = (endpoints: number, errorsPerEndpoint: number, pool: Reado
 	return g
 }
 
-// --- micro mode ------------------------------------------------------------
 const runMicro = (opts: {
 	reps: number
 	classes: number
@@ -234,7 +229,6 @@ const runMicro = (opts: {
 	console.log(`  Authoritative V8/workerd number: \`bun run scripts/bench-startup-cpu.ts worker\`.\n`)
 }
 
-// --- cpuprofile parsing (V8 .cpuprofile format) ----------------------------
 type CpuProfile = {
 	nodes: Array<{
 		id: number
@@ -322,7 +316,6 @@ const parseProfile = (path: string, json: boolean) => {
 	console.log()
 }
 
-// --- worker mode (authoritative) -------------------------------------------
 const newestCpuProfile = (since: number): string | undefined => {
 	const roots = [process.cwd(), join(process.cwd(), ".wrangler"), join(process.cwd(), "dist")]
 	let best: { path: string; mtime: number } | undefined
@@ -389,7 +382,6 @@ const runWorker = (explicitProfile: string | undefined, json: boolean) => {
 	parseProfile(profile, json)
 }
 
-// --- arg parsing -----------------------------------------------------------
 const argv = process.argv.slice(2)
 const mode = argv[0] && !argv[0].startsWith("-") ? argv[0] : "micro"
 const flag = (name: string, dflt: number): number => {

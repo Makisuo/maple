@@ -521,7 +521,6 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 				return repositoryOpt
 			})
 
-			// ---- One handler per job kind ----------------------------------------
 			// Each owns its own decision-making (the gate, repo resolution, and any
 			// reason-specific branching); processMessage only resolves the installation
 			// and dispatches by kind.
@@ -883,7 +882,7 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 						),
 					),
 					Effect.withSpan("VcsSyncService.recordExhaustedFailure"),
-					Effect.catchCause(() => Effect.void),
+					Effect.ignoreCause,
 				)
 
 			return { processMessage, recordExhaustedFailure } satisfies VcsSyncServiceShape

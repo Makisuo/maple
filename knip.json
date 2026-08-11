@@ -26,7 +26,7 @@
 			]
 		},
 		"apps/api": {
-			"entry": ["alchemy.run.ts", "autumn.config.ts"],
+			"entry": ["alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
 			"ignoreDependencies": ["cloudflare"]
 		},
 		"apps/alerting": {

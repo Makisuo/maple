@@ -1,5 +1,9 @@
 import { Clock, Effect, Schema } from "effect"
-import { QueryEngineExecuteRequest, formatWarehouseDateTime } from "@maple/query-engine"
+import {
+	QueryEngineExecuteRequest,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+} from "@maple/query-engine"
 import {
 	CommitSha,
 	DeploymentEnvironment,
@@ -211,7 +215,6 @@ export function aggregateByServiceEnvironment(
 		})
 	}
 
-	// Sort by throughput descending (same as SQL ORDER BY)
 	results.sort((a, b) => b.throughput - a.throughput)
 	return results
 }
@@ -251,8 +254,8 @@ const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(fun
 		}),
 	)
 
-	const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
-	const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
+	const startMs = input.startTime ? parseWarehouseDateTime(input.startTime) : 0
+	const endMs = input.endTime ? parseWarehouseDateTime(input.endTime) : 0
 	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
 
 	const coercedRows = result.data.map(coerceRow)
@@ -359,7 +362,7 @@ const BASELINE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 // stable for up to an hour regardless of small range changes.
 const floorToHour = (dateTime: string) => `${dateTime.slice(0, 13)}:00:00`
 
-const warehouseDateTimeToMs = (dateTime: string) => new Date(`${dateTime.replace(" ", "T")}Z`).getTime()
+const warehouseDateTimeToMs = parseWarehouseDateTime
 
 export function getServiceHealthBaseline({ data }: { data: GetServiceHealthBaselineInput }) {
 	return getServiceHealthBaselineEffect({ data })

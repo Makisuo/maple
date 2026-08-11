@@ -147,7 +147,6 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 	),
 	columns: Schema.optional(Schema.Array(WidgetDisplayColumnSchema)),
 
-	// List-specific
 	listDataSource: Schema.optional(Schema.String),
 	listWhereClause: Schema.optional(Schema.String),
 	listLimit: Schema.optional(Schema.Number),
@@ -179,7 +178,6 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 		}),
 	),
 
-	// Heatmap-specific
 	heatmap: Schema.optional(
 		Schema.Struct({
 			colorScale: Schema.optional(Schema.Literals(HEATMAP_COLOR_SCALES)),
@@ -187,7 +185,6 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 		}),
 	),
 
-	// Gauge-specific
 	gauge: Schema.optional(
 		Schema.Struct({
 			min: Schema.optional(Schema.Number),

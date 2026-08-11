@@ -110,7 +110,6 @@ function arcPath(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Layout constants.
 // ──────────────────────────────────────────────────────────────────────────────
 
 const LEGEND_GAP = 6
@@ -178,7 +177,6 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 		return { slices: out, total: sum }
 	}, [source, valueField])
 
-	// Measure container.
 	const containerRef = React.useRef<HTMLDivElement | null>(null)
 	const containerSize = useContainerSize(containerRef)
 	const size = { w: Math.floor(containerSize.width), h: Math.floor(containerSize.height) }

@@ -87,8 +87,6 @@ export function makeQueryBuilderBreakdownDataSource(queries: Record<string, unkn
 	}
 }
 
-// Chart display presets
-
 // `seriesStats` (the Min/Max/Mean/Last table) is opt-in and costs up to 45% of a
 // widget's height. Every preset states it outright rather than leaning on the
 // default, so an exported dashboard renders the same wherever it is imported.
@@ -141,8 +139,6 @@ export function chartDisplayForMetric(aggregation: string): Record<string, unkno
 	return CHART_DISPLAY_BAR
 }
 
-// Where clause helpers
-
 // Escape a user-supplied value before it is interpolated into a double-quoted
 // metric where-clause literal, so a value containing `"` (or `\`) can't break
 // out of the string. Metric where-clauses are ClickHouse-dialect string literals.
@@ -157,8 +153,6 @@ export function serviceWhereClause(serviceName?: string): string {
 export function combineWhere(...clauses: Array<string | undefined>): string {
 	return clauses.filter((clause) => clause && clause.trim().length > 0).join(" AND ")
 }
-
-// Metrics chart helpers
 
 export function metricsTimeseries(opts: {
 	id: string
@@ -207,8 +201,6 @@ export function metricsBreakdown(opts: {
 		}),
 	])
 }
-
-// Build PortableDashboardDocument from a template's widget list
 
 export function buildPortableDashboard(opts: {
 	name: string

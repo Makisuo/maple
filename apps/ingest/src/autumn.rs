@@ -179,7 +179,6 @@ async fn flush_loop(
                     }
                 }
 
-                // Remove successfully flushed entries
                 for key in &flushed_keys {
                     if let Some(completed) = accumulator.remove(key) {
                         if completed.queued_value > 0.0 {
@@ -750,7 +749,7 @@ mod tests {
         );
     }
 
-    // --- Nested SDK shape: `balance` is an object carrying `remaining`. ---
+    // The SDK shape nests `remaining` under `balance`.
 
     #[test]
     fn nested_balance_object_with_remaining_allows() {
@@ -783,7 +782,7 @@ mod tests {
         assert_eq!(decide(json), Some(false));
     }
 
-    // --- No balance / no subscription: defer to `allowed`. ---
+    // Without a balance or subscription, defer to `allowed`.
 
     #[test]
     fn null_balance_no_subscription_blocks() {
@@ -799,7 +798,7 @@ mod tests {
         assert_eq!(decide(r#"{"allowed": false}"#), Some(false));
     }
 
-    // --- Unrecognized shape: None so the caller logs + fails open. ---
+    // Unknown shapes return None so the caller logs and fails open.
 
     #[test]
     fn unrecognized_shape_returns_none() {
@@ -916,7 +915,7 @@ mod tests {
         assert_eq!(finalize["action"], "confirm");
     }
 
-    // --- Idempotency: one key per accumulated entry, stable across retries. ---
+    // One stable idempotency key per accumulated entry across retries.
 
     /// Stand-in for Autumn's `/v1/balances.track`. Records every body and API
     /// version it receives and answers with `status`, so a test can drive the

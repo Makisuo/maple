@@ -8,7 +8,7 @@ import {
 	CurrentTenant,
 	MapleApi,
 } from "@maple/domain/http"
-import { Effect, Schema } from "effect"
+import { Cause, Effect, Schema } from "effect"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
 import { orgIdFromChatSessionId } from "@maple/domain/chat-session"
 import { chatSessionStub } from "@/chat/session"
@@ -135,7 +135,24 @@ export const HttpChatLive = HttpApiBuilder.group(MapleApi, "chat", (handlers) =>
 			// Best-effort: the mutation has already run and its outcome is the response. A session
 			// that cannot be reached must not turn a successful apply into a failed request.
 			yield* recordApplyOutcome(payload, tenant.orgId, content, result.isError === true).pipe(
-				Effect.catchCause(() => Effect.void),
+				Effect.catchCause((cause) =>
+					Cause.hasInterruptsOnly(cause)
+						? Effect.interrupt
+						: Effect.annotateCurrentSpan("maple.chat.apply_outcome_record_failed", true).pipe(
+								Effect.andThen(
+									Effect.logWarning("Failed to record a chat approval outcome").pipe(
+										Effect.annotateLogs({
+											orgId: tenant.orgId,
+											tool,
+											sessionId: payload.sessionId ?? "(none)",
+											messageId: payload.messageId ?? "(none)",
+											toolCallId: payload.toolCallId ?? "(none)",
+											cause: Cause.pretty(cause),
+										}),
+									),
+								),
+							),
+				),
 			)
 
 			return new ChatApplyResponse({

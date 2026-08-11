@@ -247,8 +247,6 @@ const make: Effect.Effect<
 		authMode: "self_hosted",
 	})
 
-	// Active-org gating
-	//
 	// The tick historically scanned the warehouse for every org that ever held
 	// an ingest key — overwhelmingly idle orgs with zero recent errors, which
 	// dominated Tinybird CPU. Instead, run ONE cross-org scan of recent error

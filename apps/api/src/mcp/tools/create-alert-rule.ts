@@ -66,8 +66,6 @@ const ALERT_TEMPLATES: Record<string, AlertTemplate> = {
 	},
 }
 
-// Build request from raw params (custom mode)
-
 interface CreateAlertRuleParams {
 	name: string
 	severity?: string
