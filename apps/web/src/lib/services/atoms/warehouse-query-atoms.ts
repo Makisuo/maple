@@ -56,13 +56,11 @@ import { getServiceUsage } from "@/api/warehouse/service-usage"
 import { getServiceOperations } from "@/api/warehouse/service-operations"
 import {
 	getServiceDependenciesBundle,
-	getServiceMap,
+	getServiceMapBundle,
 	getPlanetScaleBranchStats,
 	getServiceMapCloudflare,
 	getServiceMapPlanetScale,
-	getServiceMapDbEdges,
 	getServiceDbQuerySummary,
-	getServicePlatforms,
 } from "@/api/warehouse/service-map"
 import { getServiceWorkloads } from "@/api/warehouse/service-infra"
 import {
@@ -502,17 +500,16 @@ export const getQueryBuilderBreakdownResultAtom = makeQueryAtomFamily(getQueryBu
 	staleTime: 30_000,
 })
 
-export const getServiceMapResultAtom = makeQueryAtomFamily(getServiceMap, {
+// Service-map page bundle: edges + overview + DB edges + platforms + workloads
+// in one fetch (replaces four concurrent atoms plus the edge-dependent
+// workloads atom that could only fire after them).
+export const getServiceMapBundleResultAtom = makeQueryAtomFamily(getServiceMapBundle, {
 	staleTime: 15_000,
 })
 
 // Service-detail Dependencies tab bundle: service edges + DB edges + external
 // edges in one fetch (replaces the three separate *ForService atoms).
 export const getServiceDependenciesBundleResultAtom = makeQueryAtomFamily(getServiceDependenciesBundle, {
-	staleTime: 15_000,
-})
-
-export const getServiceMapDbEdgesResultAtom = makeQueryAtomFamily(getServiceMapDbEdges, {
 	staleTime: 15_000,
 })
 
@@ -545,10 +542,6 @@ export const getPlanetScaleBranchStatsResultAtom = makeQueryAtomFamily(getPlanet
 
 export const getServiceDbQuerySummaryResultAtom = makeQueryAtomFamily(getServiceDbQuerySummary, {
 	staleTime: 15_000,
-})
-
-export const getServicePlatformsResultAtom = makeQueryAtomFamily(getServicePlatforms, {
-	staleTime: 60_000,
 })
 
 export const getServiceWorkloadsResultAtom = makeQueryAtomFamily(getServiceWorkloads, {

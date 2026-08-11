@@ -66,13 +66,9 @@ import {
 import {
 	getPlanetScaleBranchStatsResultAtom,
 	getServiceDbQuerySummaryResultAtom,
+	getServiceMapBundleResultAtom,
 	getServiceMapCloudflareResultAtom,
 	getServiceMapPlanetScaleResultAtom,
-	getServiceMapDbEdgesResultAtom,
-	getServiceMapResultAtom,
-	getServiceOverviewResultAtom,
-	getServicePlatformsResultAtom,
-	getServiceWorkloadsResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import type {
 	CloudflareService,
@@ -83,7 +79,7 @@ import type {
 	ServiceEdge,
 	ServicePlatform,
 } from "@/api/warehouse/service-map"
-import type { GetServiceOverviewInput, ServiceOverview } from "@/api/warehouse/services"
+import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
 import { ServiceMapNode } from "./service-map-node"
 import { ServiceMapLoading } from "./service-map-loading"
@@ -2476,12 +2472,6 @@ export function ServiceMapView({
 		[startTime, endTime, deploymentEnv],
 	)
 
-	const overviewInput: { data: GetServiceOverviewInput } = useMemo(
-		// getServiceOverview scopes by an environments array, not the singular field.
-		() => ({ data: { startTime, endTime, environments: deploymentEnv ? [deploymentEnv] : undefined } }),
-		[startTime, endTime, deploymentEnv],
-	)
-
 	// Cloudflare worker stats come from Cloudflare's own analytics (keyed by script,
 	// with no Maple deployment.environment dimension), so they can't be env-scoped —
 	// keep them on an env-less input so switching environments doesn't refetch the
@@ -2491,9 +2481,10 @@ export function ServiceMapView({
 		[startTime, endTime],
 	)
 
-	const mapResult = useRefreshableAtomValue(getServiceMapResultAtom(mapInput))
-	const overviewResult = useRefreshableAtomValue(getServiceOverviewResultAtom(overviewInput))
-	const dbEdgesResult = useRefreshableAtomValue(getServiceMapDbEdgesResultAtom(mapInput))
+	// The whole env-scoped map in ONE fetch: edges, overview, db edges, platforms
+	// and workloads. Was five atoms — four concurrent, plus workloads, which could
+	// only fire after the edges came back to name the services it needed.
+	const bundleResult = useRefreshableAtomValue(getServiceMapBundleResultAtom(mapInput))
 	const cloudflareResult = useRefreshableAtomValue(getServiceMapCloudflareResultAtom(cloudflareInput))
 	// PlanetScale scraped metrics carry no deployment.environment either — share
 	// the env-less input so environment switches don't refetch.
@@ -2510,13 +2501,12 @@ export function ServiceMapView({
 			reactivityKeys: ["cloudflareIntegrationStatus"],
 		}),
 	)
-	const platformsResult = useRefreshableAtomValue(getServicePlatformsResultAtom(mapInput))
 
 	// Node DATA that streams in after the canvas mounts and refines nodes in place
 	// (colors, icons, pod badges, detail-panel overlays) without moving them —
 	// topology-determining results (edges, db edges, overviews) are gated below.
-	const overviews = Result.isSuccess(overviewResult) ? overviewResult.value.data : []
-	const dbEdges = Result.isSuccess(dbEdgesResult) ? dbEdgesResult.value.edges : []
+	const overviews = Result.isSuccess(bundleResult) ? bundleResult.value.overview : []
+	const dbEdges = Result.isSuccess(bundleResult) ? bundleResult.value.dbEdges : []
 	const cloudflareServices = Result.isSuccess(cloudflareResult) ? cloudflareResult.value.services : []
 	const planetscaleStats = Result.isSuccess(planetscaleStatsResult)
 		? planetscaleStatsResult.value.databases
@@ -2564,64 +2554,44 @@ export function ServiceMapView({
 	)
 	const platforms = useMemo(() => {
 		const map = new Map<string, ServicePlatform>()
-		if (Result.isSuccess(platformsResult)) {
-			for (const p of platformsResult.value.platforms) {
+		if (Result.isSuccess(bundleResult)) {
+			for (const p of bundleResult.value.platforms) {
 				map.set(p.serviceName, p.platform)
 			}
 		}
 		return map
-	}, [platformsResult])
+	}, [bundleResult])
 	const runtimes = useMemo(() => {
 		const map = new Map<string, string>()
-		if (Result.isSuccess(platformsResult)) {
-			for (const p of platformsResult.value.platforms) {
+		if (Result.isSuccess(bundleResult)) {
+			for (const p of bundleResult.value.platforms) {
 				if (p.runtime) map.set(p.serviceName, p.runtime)
 			}
 		}
 		return map
-	}, [platformsResult])
+	}, [bundleResult])
 	// service.name → faas.name, so a `cloudflare-worker/{script}` from the direct
 	// integration can be matched to (and overlaid onto) its instrumented node.
 	const faasNames = useMemo(() => {
 		const map = new Map<string, string>()
-		if (Result.isSuccess(platformsResult)) {
-			for (const p of platformsResult.value.platforms) {
+		if (Result.isSuccess(bundleResult)) {
+			for (const p of bundleResult.value.platforms) {
 				if (p.faasName) map.set(p.serviceName, p.faasName)
 			}
 		}
 		return map
-	}, [platformsResult])
+	}, [bundleResult])
 
-	// Bulk fetch workloads keyed off the same set of services that appear in edges.
-	// An empty services array short-circuits to no rows.
-	const services = useMemo(() => {
-		if (!Result.isSuccess(mapResult)) return [] as string[]
-		const set = new Set<string>()
-		for (const edge of mapResult.value.edges) {
-			set.add(edge.sourceService)
-			set.add(edge.targetService)
-		}
-		for (const o of overviews) set.add(o.serviceName)
-		return Array.from(set).sort()
-	}, [mapResult, overviews])
+	// Workloads arrive with the bundle. The service set they key off (every service
+	// on an edge, plus every service with overview rows) is derived server-side
+	// now — that derivation is why this used to be a second round-trip.
+	const workloads = Result.isSuccess(bundleResult) ? bundleResult.value.workloads : []
 
-	const workloadsInput = useMemo(
-		() => ({ data: { startTime, endTime, services } }),
-		[startTime, endTime, services],
-	)
-	const workloadsResult = useRefreshableAtomValue(getServiceWorkloadsResultAtom(workloadsInput))
-	// Don't block first paint on workloads — fall back to empty until it lands.
-	const workloads = Result.isSuccess(workloadsResult) ? workloadsResult.value.workloads : []
-
-	// Keep the skeleton until every result that determines the NODE SET / namespaces
-	// has settled (resolved once — success or error), so the layout is computed a
-	// single time from a complete graph rather than re-flowing as db nodes and
-	// namespaces arrive on separate queries. A failing db-edges/overview query is
-	// "settled" too, so it proceeds with the empty-array fallback above instead of
-	// pinning the skeleton forever.
-	const topologyPending = Result.isInitial(dbEdgesResult) || Result.isInitial(overviewResult)
-
-	return Result.builder(mapResult)
+	// The `topologyPending` gate this replaced existed because edges, db edges and
+	// overviews arrived on separate queries, so the layout would re-flow as each
+	// landed. One bundle settles them together, so reaching `onSuccess` already
+	// means the graph is complete.
+	return Result.builder(bundleResult)
 		.onInitial(() => <ServiceMapLoading />)
 		.onError((error) => {
 			const formatted = formatBackendError(error)
@@ -2634,31 +2604,27 @@ export function ServiceMapView({
 				</div>
 			)
 		})
-		.onSuccess((mapResponse) =>
-			topologyPending ? (
-				<ServiceMapLoading />
-			) : (
-				<ServiceMapCanvas
-					edges={mapResponse.edges}
-					dbEdges={dbEdges}
-					cloudflareServices={cloudflareServices}
-					faasNames={faasNames}
-					planetscaleDatabases={planetscaleDatabases}
-					planetscaleStats={planetscaleStats}
-					hyperdriveConfigs={hyperdriveConfigs}
-					platforms={platforms}
-					runtimes={runtimes}
-					overviews={overviews}
-					workloads={workloads}
-					durationSeconds={durationSeconds}
-					startTime={startTime}
-					endTime={endTime}
-					deploymentEnv={deploymentEnv}
-					layoutKey={orgId ?? "default"}
-					focus={focus}
-					onFocusChange={onFocusChange}
-				/>
-			),
-		)
+		.onSuccess((mapResponse) => (
+			<ServiceMapCanvas
+				edges={mapResponse.edges}
+				dbEdges={dbEdges}
+				cloudflareServices={cloudflareServices}
+				faasNames={faasNames}
+				planetscaleDatabases={planetscaleDatabases}
+				planetscaleStats={planetscaleStats}
+				hyperdriveConfigs={hyperdriveConfigs}
+				platforms={platforms}
+				runtimes={runtimes}
+				overviews={overviews}
+				workloads={workloads}
+				durationSeconds={durationSeconds}
+				startTime={startTime}
+				endTime={endTime}
+				deploymentEnv={deploymentEnv}
+				layoutKey={orgId ?? "default"}
+				focus={focus}
+				onFocusChange={onFocusChange}
+			/>
+		))
 		.render()
 }

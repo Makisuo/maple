@@ -32,6 +32,7 @@ import {
 	ServiceDbQuerySummaryResponse,
 	ServiceDetailOverviewResponse,
 	ServiceDependenciesBundleResponse,
+	ServiceMapBundleResponse,
 	ServicePlatformsResponse,
 	ServiceWorkloadsResponse,
 	ServiceUsageResponse,
@@ -222,6 +223,60 @@ const coerceStatusCode = (value: string): StatusCode =>
 // partitions; only older traces fall back to the unbounded every-partition
 // probe.
 const PROBE_RECENT_WINDOW_MS = 48 * 3_600_000
+
+/**
+ * Row shapes for `servicePlatforms` / `serviceWorkloads`, shared by the standalone
+ * handlers and `serviceMapBundle`. Extracted when the bundle landed: the platform
+ * classification below is the kind of ordered rule set that silently diverges if
+ * it exists in two places.
+ */
+const toServicePlatformRow = (row: CH.ServicePlatformsOutput) => {
+	const k8sCluster = String(row.k8sCluster ?? "")
+	const k8sPodName = String(row.k8sPodName ?? "")
+	const k8sDeploymentName = String(row.k8sDeploymentName ?? "")
+	const cloudPlatform = String(row.cloudPlatform ?? "")
+	const cloudProvider = String(row.cloudProvider ?? "")
+	const faasName = String(row.faasName ?? "")
+	const mapleSdkType = String(row.mapleSdkType ?? "")
+	const processRuntimeName = String(row.processRuntimeName ?? "")
+	// Require pod/deployment, not just cluster.name — see SQL comment.
+	const isKubernetes = k8sPodName !== "" || k8sDeploymentName !== ""
+	// Infrastructure signals win over SDK self-report so a server SDK on
+	// cloudflare/lambda still classifies by host. Pure browser apps never
+	// set k8s/cloud/faas, so they fall through to web.
+	const platform: "kubernetes" | "cloudflare" | "lambda" | "web" | "unknown" =
+		cloudPlatform === "cloudflare.workers" || cloudProvider === "cloudflare"
+			? "cloudflare"
+			: faasName !== "" || cloudPlatform === "aws_lambda"
+				? "lambda"
+				: isKubernetes
+					? "kubernetes"
+					: mapleSdkType === "client"
+						? "web"
+						: "unknown"
+	return {
+		serviceName: decodeServiceName(String(row.serviceName ?? "")),
+		platform,
+		k8sCluster,
+		cloudPlatform,
+		cloudProvider,
+		faasName,
+		mapleSdkType,
+		processRuntimeName,
+	}
+}
+
+const toServiceWorkloadRow = (row: CH.ServiceWorkloadsOutput) => ({
+	serviceName: decodeServiceName(String(row.serviceName ?? "")),
+	workloadKind: row.workloadKind,
+	workloadName: String(row.workloadName ?? ""),
+	namespace: String(row.namespace ?? ""),
+	clusterName: String(row.clusterName ?? ""),
+	podCount: Number(row.podCount) || 0,
+	avgCpuLimitUtilization: row.avgCpuLimitUtilization == null ? null : Number(row.avgCpuLimitUtilization),
+	avgMemoryLimitUtilization:
+		row.avgMemoryLimitUtilization == null ? null : Number(row.avgMemoryLimitUtilization),
+})
 
 export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine", (handlers) =>
 	Effect.gen(function* () {
@@ -923,6 +978,57 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					})
 				}),
 			)
+			.handle("serviceMapBundle", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					// The whole service-map page in one Worker invocation: four env-scoped
+					// queries concurrently behind a single config resolution, then the
+					// workload read the browser could only issue after the edges landed.
+					yield* warehouse.warmRoute(tenant)
+					const [dependencyRows, overviewRows, dbEdgeRows, platformRows] = yield* Effect.all(
+						[
+							runQuery(Queries.serviceDependencies, tenant, payload),
+							runQuery(Queries.serviceOverview, tenant, payload),
+							runQuery(Queries.serviceDbEdges, tenant, payload),
+							runQuery(Queries.servicePlatforms, tenant, payload),
+						],
+						{ concurrency: 4 },
+					)
+
+					// Workloads are keyed by the service set the map actually draws —
+					// every service touching an edge, plus every service with overview
+					// rows. Derived here rather than in the browser, which is what turns
+					// this from a second round-trip into a second server-side query.
+					const services = new Set<string>()
+					for (const row of dependencyRows) {
+						services.add(String(row.sourceService ?? ""))
+						services.add(String(row.targetService ?? ""))
+					}
+					for (const row of overviewRows) services.add(String(row.serviceName ?? ""))
+					services.delete("")
+
+					// Matches the standalone handler: an empty service set short-circuits
+					// rather than issuing a guaranteed-empty query.
+					const workloadRows =
+						services.size === 0
+							? []
+							: yield* runQuery(Queries.serviceWorkloads, tenant, {
+									startTime: payload.startTime,
+									endTime: payload.endTime,
+									services: Array.from(services)
+										.sort()
+										.map((name) => decodeServiceName(name)),
+								})
+
+					return new ServiceMapBundleResponse({
+						dependencies: dependencyRows.map((row) => ({ ...row })),
+						dbEdges: dbEdgeRows.map((row) => ({ ...row })),
+						overview: overviewRows.map((row) => ({ ...row })),
+						platforms: platformRows.map(toServicePlatformRow),
+						workloads: workloadRows.map(toServiceWorkloadRow),
+					})
+				}),
+			)
 			.handle("serviceDbQuerySummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
@@ -985,43 +1091,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const rows = yield* runQuery(Queries.servicePlatforms, tenant, payload)
-					return new ServicePlatformsResponse({
-						data: rows.map((row) => {
-							const k8sCluster = String(row.k8sCluster ?? "")
-							const k8sPodName = String(row.k8sPodName ?? "")
-							const k8sDeploymentName = String(row.k8sDeploymentName ?? "")
-							const cloudPlatform = String(row.cloudPlatform ?? "")
-							const cloudProvider = String(row.cloudProvider ?? "")
-							const faasName = String(row.faasName ?? "")
-							const mapleSdkType = String(row.mapleSdkType ?? "")
-							const processRuntimeName = String(row.processRuntimeName ?? "")
-							// Require pod/deployment, not just cluster.name — see SQL comment.
-							const isKubernetes = k8sPodName !== "" || k8sDeploymentName !== ""
-							// Infrastructure signals win over SDK self-report so a server SDK on
-							// cloudflare/lambda still classifies by host. Pure browser apps never
-							// set k8s/cloud/faas, so they fall through to web.
-							const platform: "kubernetes" | "cloudflare" | "lambda" | "web" | "unknown" =
-								cloudPlatform === "cloudflare.workers" || cloudProvider === "cloudflare"
-									? "cloudflare"
-									: faasName !== "" || cloudPlatform === "aws_lambda"
-										? "lambda"
-										: isKubernetes
-											? "kubernetes"
-											: mapleSdkType === "client"
-												? "web"
-												: "unknown"
-							return {
-								serviceName: decodeServiceName(String(row.serviceName ?? "")),
-								platform,
-								k8sCluster,
-								cloudPlatform,
-								cloudProvider,
-								faasName,
-								mapleSdkType,
-								processRuntimeName,
-							}
-						}),
-					})
+					return new ServicePlatformsResponse({ data: rows.map(toServicePlatformRow) })
 				}),
 			)
 			.handle("serviceWorkloads", ({ payload }) =>
@@ -1031,24 +1101,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						return new ServiceWorkloadsResponse({ data: [] })
 					}
 					const rows = yield* runQuery(Queries.serviceWorkloads, tenant, payload)
-					return new ServiceWorkloadsResponse({
-						data: rows.map((row) => ({
-							serviceName: decodeServiceName(String(row.serviceName ?? "")),
-							workloadKind: row.workloadKind,
-							workloadName: String(row.workloadName ?? ""),
-							namespace: String(row.namespace ?? ""),
-							clusterName: String(row.clusterName ?? ""),
-							podCount: Number(row.podCount) || 0,
-							avgCpuLimitUtilization:
-								row.avgCpuLimitUtilization == null
-									? null
-									: Number(row.avgCpuLimitUtilization),
-							avgMemoryLimitUtilization:
-								row.avgMemoryLimitUtilization == null
-									? null
-									: Number(row.avgMemoryLimitUtilization),
-						})),
-					})
+					return new ServiceWorkloadsResponse({ data: rows.map(toServiceWorkloadRow) })
 				}),
 			)
 			.handle("serviceUsage", ({ payload }) =>

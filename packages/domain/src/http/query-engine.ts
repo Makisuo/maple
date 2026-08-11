@@ -745,21 +745,22 @@ export class ServicePlatformsRequest extends Schema.Class<ServicePlatformsReques
 	},
 ) {}
 
+/** One `servicePlatforms` row. Named so `serviceMapBundle` can reuse it verbatim. */
+const ServicePlatformRow = Schema.Struct({
+	serviceName: ServiceName,
+	platform: ServicePlatformLiteral,
+	k8sCluster: Schema.String,
+	cloudPlatform: Schema.String,
+	cloudProvider: Schema.String,
+	faasName: Schema.String,
+	mapleSdkType: Schema.String,
+	processRuntimeName: Schema.String,
+})
+
 export class ServicePlatformsResponse extends Schema.Class<ServicePlatformsResponse>(
 	"ServicePlatformsResponse",
 )({
-	data: Schema.Array(
-		Schema.Struct({
-			serviceName: ServiceName,
-			platform: ServicePlatformLiteral,
-			k8sCluster: Schema.String,
-			cloudPlatform: Schema.String,
-			cloudProvider: Schema.String,
-			faasName: Schema.String,
-			mapleSdkType: Schema.String,
-			processRuntimeName: Schema.String,
-		}),
-	),
+	data: Schema.Array(ServicePlatformRow),
 }) {}
 
 const ServiceWorkloadKindLiteral = Schema.Literals(["deployment", "statefulset", "daemonset", "unknown"])
@@ -772,21 +773,65 @@ export class ServiceWorkloadsRequest extends Schema.Class<ServiceWorkloadsReques
 	},
 ) {}
 
+/** One `serviceWorkloads` row. Named so `serviceMapBundle` can reuse it verbatim. */
+const ServiceWorkloadRow = Schema.Struct({
+	serviceName: ServiceName,
+	workloadKind: ServiceWorkloadKindLiteral,
+	workloadName: Schema.String,
+	namespace: Schema.String,
+	clusterName: Schema.String,
+	podCount: Schema.Number,
+	avgCpuLimitUtilization: Schema.NullOr(Schema.Number),
+	avgMemoryLimitUtilization: Schema.NullOr(Schema.Number),
+})
+
 export class ServiceWorkloadsResponse extends Schema.Class<ServiceWorkloadsResponse>(
 	"ServiceWorkloadsResponse",
 )({
-	data: Schema.Array(
-		Schema.Struct({
-			serviceName: ServiceName,
-			workloadKind: ServiceWorkloadKindLiteral,
-			workloadName: Schema.String,
-			namespace: Schema.String,
-			clusterName: Schema.String,
-			podCount: Schema.Number,
-			avgCpuLimitUtilization: Schema.NullOr(Schema.Number),
-			avgMemoryLimitUtilization: Schema.NullOr(Schema.Number),
-		}),
-	),
+	data: Schema.Array(ServiceWorkloadRow),
+}) {}
+
+/**
+ * The service-map page in ONE request.
+ *
+ * Same motivation as `serviceDependenciesBundle`: the four env-scoped map
+ * queries run concurrently under a single tenant/config resolution instead of
+ * four independent browser→Worker round-trips, each of which can land on a cold
+ * isolate and block on the Postgres config read.
+ *
+ * It also folds in `serviceWorkloads`, which the browser could only issue AFTER
+ * the edges came back (it keys off the service set derived from them) — a
+ * genuine second round-trip that disappears when the derivation happens
+ * server-side.
+ *
+ * Deliberately EXCLUDES:
+ * - `serviceCloudflareStats` / `servicePlanetScaleStats` — those take an
+ *   env-less input on purpose so switching environments doesn't refetch them.
+ *   Folding them in here would put them behind an env-keyed cache entry and
+ *   undo that.
+ * - `servicesFacets` — the environment dropdown queries a stable 24h window,
+ *   independent of the map's time range, so it stays its own cached request.
+ */
+export class ServiceMapBundleRequest extends Schema.Class<ServiceMapBundleRequest>("ServiceMapBundleRequest")(
+	{
+		startTime: TinybirdDateTime,
+		endTime: TinybirdDateTime,
+		deploymentEnv: Schema.optional(DeploymentEnvironment),
+		// `serviceOverview` scopes by an array, and the map passes at most the one
+		// environment above. Kept separate rather than derived so the handler stays a
+		// straight pass-through to each query's own payload.
+		environments: OptionalDeploymentEnvs,
+	},
+) {}
+
+export class ServiceMapBundleResponse extends Schema.Class<ServiceMapBundleResponse>(
+	"ServiceMapBundleResponse",
+)({
+	dependencies: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+	dbEdges: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+	overview: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+	platforms: Schema.Array(ServicePlatformRow),
+	workloads: Schema.Array(ServiceWorkloadRow),
 }) {}
 
 export class ServiceUsageRequest extends Schema.Class<ServiceUsageRequest>("ServiceUsageRequest")({
@@ -1908,6 +1953,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceDependenciesBundle", "/service-dependencies-bundle", {
 			payload: ServiceDependenciesBundleRequest,
 			success: ServiceDependenciesBundleResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("serviceMapBundle", "/service-map-bundle", {
+			payload: ServiceMapBundleRequest,
+			success: ServiceMapBundleResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

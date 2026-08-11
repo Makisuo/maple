@@ -82,7 +82,9 @@ interface CoercedRow {
 	firstSeen: string
 }
 
-function coerceRow(raw: Record<string, unknown>): CoercedRow {
+// Exported so `getServiceMapBundle` runs the identical overview transform on
+// the bundle's rows instead of forking a second copy of it.
+export function coerceRow(raw: Record<string, unknown>): CoercedRow {
 	return {
 		serviceName: String(raw.serviceName ?? ""),
 		serviceNamespace: String(raw.serviceNamespace ?? ""),
@@ -100,7 +102,10 @@ function coerceRow(raw: Record<string, unknown>): CoercedRow {
 	}
 }
 
-function aggregateByServiceEnvironment(rows: CoercedRow[], durationSeconds: number): ServiceOverview[] {
+export function aggregateByServiceEnvironment(
+	rows: CoercedRow[],
+	durationSeconds: number,
+): ServiceOverview[] {
 	const groups = new Map<string, CoercedRow[]>()
 
 	for (const row of rows) {

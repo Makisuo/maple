@@ -2,18 +2,17 @@ import { Clock, Effect, Schema } from "effect"
 import {
 	DeploymentEnvironment,
 	ServiceCloudflareStatsRequest,
-	ServiceDbEdgesRequest,
 	ServiceDbQuerySummaryRequest,
 	ServiceDependenciesBundleRequest,
-	ServiceDependenciesRequest,
+	ServiceMapBundleRequest,
 	ServiceName,
 	ServicePlanetScaleStatsRequest,
-	ServicePlatformsRequest,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { summarizeSampling } from "@/lib/sampling"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 import { transformExternalEdge } from "@/api/warehouse/service-external-edges"
+import { aggregateByServiceEnvironment, coerceRow } from "@/api/warehouse/services"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
 export interface ServiceEdge {
@@ -148,36 +147,6 @@ const defaultTimeRange = (nowMillis: number) => {
 	}
 }
 
-export const getServiceMap = Effect.fn("QueryEngine.getServiceMap")(function* ({
-	data,
-}: {
-	data: GetServiceMapInput
-}) {
-	const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServiceMap")
-	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
-
-	const result = yield* runWarehouseQuery("serviceDependencies", () =>
-		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.queryEngine.serviceDependencies({
-				payload: new ServiceDependenciesRequest({
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
-					deploymentEnv: input.deploymentEnv,
-				}),
-			})
-		}),
-	)
-
-	const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
-	const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
-	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
-
-	return {
-		edges: result.data.map((row) => transformEdge(row, durationSeconds)),
-	}
-})
-
 // Service-detail Dependencies tab in one request: the service-map edges, the
 // DB edges, and the external edges run server-side under a single tenant/config
 // resolution (see the `serviceDependenciesBundle` handler), replacing three
@@ -237,36 +206,6 @@ function transformDbEdge(row: Record<string, unknown>, durationSeconds: number):
 		samplingWeight: sampling.weight,
 	}
 }
-
-export const getServiceMapDbEdges = Effect.fn("QueryEngine.getServiceMapDbEdges")(function* ({
-	data,
-}: {
-	data: GetServiceMapInput
-}) {
-	const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServiceMapDbEdges")
-	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
-
-	const result = yield* runWarehouseQuery("serviceDbEdges", () =>
-		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.queryEngine.serviceDbEdges({
-				payload: new ServiceDbEdgesRequest({
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
-					deploymentEnv: input.deploymentEnv,
-				}),
-			})
-		}),
-	)
-
-	const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
-	const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
-	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
-
-	return {
-		edges: result.data.map((row) => transformDbEdge(row, durationSeconds)),
-	}
-})
 
 // Cloudflare direct-integration Worker analytics
 //
@@ -480,29 +419,52 @@ export const getServiceDbQuerySummary = Effect.fn("QueryEngine.getServiceDbQuery
 	} satisfies ServiceDbQuerySummaryResponse
 })
 
-export const getServicePlatforms = Effect.fn("QueryEngine.getServicePlatforms")(function* ({
+/**
+ * The service-map page in ONE request (see the `serviceMapBundle` handler).
+ *
+ * Replaces four concurrent browser→Worker round-trips (edges, overview, db
+ * edges, platforms) plus a fifth that could only start once the edges landed
+ * (workloads keys off the service set derived from them). Each of those five
+ * could hit a cold isolate and block on the Postgres config read; now at most
+ * one does.
+ *
+ * The per-row transforms below are the same ones the standalone functions
+ * apply, imported rather than re-derived so the two paths can't drift.
+ */
+export const getServiceMapBundle = Effect.fn("QueryEngine.getServiceMapBundle")(function* ({
 	data,
 }: {
 	data: GetServiceMapInput
 }) {
-	const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServicePlatforms")
+	const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServiceMapBundle")
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
+	const startTime = input.startTime ?? fallback.startTime
+	const endTime = input.endTime ?? fallback.endTime
 
-	const result = yield* runWarehouseQuery("servicePlatforms", () =>
+	const result = yield* runWarehouseQuery("serviceMapBundle", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleApiAtomClient
-			return yield* client.queryEngine.servicePlatforms({
-				payload: new ServicePlatformsRequest({
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
+			return yield* client.queryEngine.serviceMapBundle({
+				payload: new ServiceMapBundleRequest({
+					startTime,
+					endTime,
 					deploymentEnv: input.deploymentEnv,
+					// `serviceOverview` scopes by an array; the map only ever selects one.
+					environments: input.deploymentEnv ? [input.deploymentEnv] : undefined,
 				}),
 			})
 		}),
 	)
 
+	const startMs = new Date(`${startTime.replace(" ", "T")}Z`).getTime()
+	const endMs = new Date(`${endTime.replace(" ", "T")}Z`).getTime()
+	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
+
 	return {
-		platforms: result.data.map((row) => ({
+		edges: result.dependencies.map((row) => transformEdge(row, durationSeconds)),
+		dbEdges: result.dbEdges.map((row) => transformDbEdge(row, durationSeconds)),
+		overview: aggregateByServiceEnvironment(result.overview.map(coerceRow), durationSeconds),
+		platforms: result.platforms.map((row) => ({
 			serviceName: row.serviceName,
 			platform: row.platform,
 			k8sCluster: row.k8sCluster,
@@ -511,6 +473,16 @@ export const getServicePlatforms = Effect.fn("QueryEngine.getServicePlatforms")(
 			faasName: row.faasName,
 			mapleSdkType: row.mapleSdkType,
 			runtime: row.processRuntimeName,
+		})),
+		workloads: result.workloads.map((row) => ({
+			serviceName: row.serviceName,
+			workloadKind: row.workloadKind,
+			workloadName: row.workloadName,
+			namespace: row.namespace,
+			clusterName: row.clusterName,
+			podCount: row.podCount,
+			avgCpuLimitUtilization: row.avgCpuLimitUtilization,
+			avgMemoryLimitUtilization: row.avgMemoryLimitUtilization,
 		})),
 	}
 })
