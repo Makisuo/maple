@@ -419,18 +419,6 @@ export const getServiceDbQuerySummary = Effect.fn("QueryEngine.getServiceDbQuery
 	} satisfies ServiceDbQuerySummaryResponse
 })
 
-/**
- * The service-map page in ONE request (see the `serviceMapBundle` handler).
- *
- * Replaces four concurrent browser→Worker round-trips (edges, overview, db
- * edges, platforms) plus a fifth that could only start once the edges landed
- * (workloads keys off the service set derived from them). Each of those five
- * could hit a cold isolate and block on the Postgres config read; now at most
- * one does.
- *
- * The per-row transforms below are the same ones the standalone functions
- * apply, imported rather than re-derived so the two paths can't drift.
- */
 export const getServiceMapBundle = Effect.fn("QueryEngine.getServiceMapBundle")(function* ({
 	data,
 }: {
@@ -449,7 +437,6 @@ export const getServiceMapBundle = Effect.fn("QueryEngine.getServiceMapBundle")(
 					startTime,
 					endTime,
 					deploymentEnv: input.deploymentEnv,
-					// `serviceOverview` scopes by an array; the map only ever selects one.
 					environments: input.deploymentEnv ? [input.deploymentEnv] : undefined,
 				}),
 			})

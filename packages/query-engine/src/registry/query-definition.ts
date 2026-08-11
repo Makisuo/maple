@@ -7,15 +7,11 @@ import {
 	type DirectRouteCachePolicyInput,
 } from "../runtime/cache-policy"
 
-/**
- * A timeseries cache stores independently reusable time buckets. Its identity
- * deliberately excludes the requested range; the bucket cache owns that part
- * of the key and can therefore reuse an overlapping window.
- */
+/** Range-independent identity lets overlapping windows reuse stored buckets. */
 export interface TimeBucketQueryCachePolicy<Payload> {
 	readonly kind: "time-buckets"
 	readonly identity: (payload: Payload) => unknown
-	/** Whole-result policy used when bucket caching cannot serve the request. */
+	/** Whole-result fallback when bucket caching cannot serve the request. */
 	readonly fallback: DirectRouteCachePolicy
 }
 
@@ -25,18 +21,14 @@ export type QueryCachePolicy<Payload> =
 	| undefined
 	| ((payload: Payload, nowMs: number) => DirectRouteCachePolicyInput | undefined)
 
-/**
- * One semantic warehouse query, independent of the HTTP/RPC adapter that
- * supplied its input. The definition is the shared unit of compilation,
- * execution policy, observability, and cache identity.
- */
+/** Compile and execution policy for one semantic warehouse query. */
 export interface QueryDefinition<Payload, Row> {
 	readonly id: string
 	/** Bump when compilation or decoded-row semantics change incompatibly. */
 	readonly revision: number
 	readonly profile: QueryProfileName
 	readonly settings?: WarehouseQuerySettings | ((payload: Payload) => WarehouseQuerySettings | undefined)
-	/** Required: `undefined` is an explicit decision to leave this query uncached. */
+	/** Required; `undefined` explicitly disables caching. */
 	readonly cache: QueryCachePolicy<Payload>
 	/** Resolve live skip-index capabilities only when the compiled plan can use them. */
 	readonly capabilityAware?: boolean
@@ -51,7 +43,6 @@ type QueryDefinitionInput<Payload, Row> = Omit<QueryDefinition<Payload, Row>, "r
 	readonly revision?: number
 }
 
-/** Definitions start at revision 1 without repeating that noise at every declaration. */
 export const defineQuery = <Payload, Row>(
 	definition: QueryDefinitionInput<Payload, Row>,
 ): QueryDefinition<Payload, Row> => ({ revision: 1, ...definition })
@@ -81,7 +72,6 @@ export const resolveQueryDefinitionCache = <Payload, Row>(
 	return resolveDirectRouteCachePolicy(policy)
 }
 
-/** Canonical cache identity shared by every transport adapter for a definition. */
 export const queryDefinitionCacheIdentity = <Payload, Row>(
 	definition: QueryDefinition<Payload, Row>,
 	payload: Payload,

@@ -28,7 +28,6 @@ import { V2UnexpectedErrors } from "./auth"
 
 const HTTP_OPERATION_METHODS = ["get", "post", "put", "patch", "delete", "head"] as const
 
-/** The slice of the generated OpenAPI document this post-pass mutates. */
 interface OpenApiResponse {
 	headers?: Record<string, unknown>
 }

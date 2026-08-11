@@ -86,8 +86,6 @@ export const logsTimeseries = defineQuery({
 	revision: 1,
 	profile: "aggregation",
 	cache: makeTimeBucketQueryCachePolicy<LogsTimeseriesInput>({
-		// The cache service owns the time range and bucket width. Keeping them out
-		// of this identity lets overlapping dashboard windows reuse stored buckets.
 		identity: ({ filters, groupBy, seriesLimit }) => ({ filters, groupBy, seriesLimit }),
 		fallback: 15,
 	}),

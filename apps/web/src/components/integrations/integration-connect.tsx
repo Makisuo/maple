@@ -16,34 +16,18 @@ import { showErrorToast } from "@/lib/error-toast"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import type { IntegrationId } from "./integration-catalog"
 
-/**
- * The lifted connect flow for an integration drill-in. Provided once per
- * drill-in by `IntegrationConnectProvider` so the header's Connect button and
- * the card's in-card action share one handler and one busy flag.
- */
 export interface IntegrationConnect {
 	readonly connect: () => void
-	/** True while the start call is in flight — disables every Connect affordance at once. */
 	readonly busy: boolean
-	/**
-	 * True while the OAuth popup is open (GitHub: plus a grace window after it
-	 * closes) — the flow may still complete server-side, so pollers key off this.
-	 */
 	readonly popupActive: boolean
 }
 
 const IntegrationConnectContext = createContext<IntegrationConnect | null>(null)
 
-/** Null for integrations without an OAuth connect flow (prometheus/warpstream). */
 export function useIntegrationConnect(): IntegrationConnect | null {
 	return use(IntegrationConnectContext)
 }
 
-/**
- * Mounts the matching OAuth connect flow for the drill-in. Scrape-based
- * integrations render children bare — `useIntegrationConnect()` stays null,
- * which is also the header's "no Connect button" signal.
- */
 export function IntegrationConnectProvider({
 	integration,
 	children,
@@ -65,14 +49,7 @@ export function IntegrationConnectProvider({
 	}
 }
 
-/**
- * Shared popup choreography for the OAuth flows: open the popup synchronously
- * (inside the click) so the browser doesn't block it, point it at the authorize
- * URL once the start call returns, and poll the handle for closure —
- * cross-origin popups fire no "closed" event, and the refresh-on-close covers
- * the case where the success message never arrives (popup closed manually or
- * blocked) so the drill-in can't get stuck on a stale view.
- */
+// Open synchronously to avoid popup blocking; cross-origin closure must be polled.
 function useOAuthPopupFlow({
 	windowName,
 	windowFeatures,
@@ -86,7 +63,6 @@ function useOAuthPopupFlow({
 	start: () => Promise<Exit.Exit<{ readonly redirectUrl: string }, unknown>>
 	startErrorTitle: string
 	onClosed: () => void
-	/** Keeps `popupActive` true for this long after close (GitHub's backfill-enqueue gap). */
 	closeGraceMs?: number
 }): IntegrationConnect {
 	const [busy, setBusy] = useState(false)
@@ -109,10 +85,8 @@ function useOAuthPopupFlow({
 		onClosed()
 	})
 
-	// A mount-scoped interval is intentional: it watches a cross-origin popup,
-	// including while the opener is hidden. Effect Event keeps current state/copy.
 	useMountEffect(() => {
-		// React Doctor cannot infer that useMountEffect is an Effect.
+		// React Doctor cannot infer useMountEffect.
 		// oxlint-disable-next-line react-doctor/rules-of-hooks
 		const poll = () => checkPopup()
 		const id = setInterval(poll, 500)
@@ -151,22 +125,19 @@ function useOAuthPopupFlow({
 	return { connect: () => void connect(), busy, popupActive: popupOpen || inCloseGrace }
 }
 
-/** The OAuth popup returns to this same SPA and posts a message before closing. */
 function useIntegrationMessage(
 	type: string,
 	onMessage: (data: { status?: string; message?: string }) => void,
 ) {
 	const handleMessage = useEffectEvent((event: MessageEvent) => {
 		if (event.data?.type !== type) return
-		// Every provider's popup posts back through here, so the activation event
-		// is recorded once rather than in each card's success branch.
 		if (event.data?.status === "success") {
 			trackProduct("integration_connected", { provider: type.split(":").pop() ?? type })
 		}
 		onMessage(event.data)
 	})
 	useMountEffect(() => {
-		// React Doctor cannot infer that useMountEffect is an Effect.
+		// React Doctor cannot infer useMountEffect.
 		// oxlint-disable-next-line react-doctor/rules-of-hooks
 		const listener = (event: MessageEvent) => handleMessage(event)
 		window.addEventListener("message", listener)
@@ -280,8 +251,7 @@ function GithubConnectBoundary({ children }: { children: React.ReactNode }) {
 			}),
 		startErrorTitle: "Failed to start GitHub connect flow",
 		onClosed: refreshStatus,
-		// Repos backfill server-side after install with no push channel — keep the
-		// card's status polling alive through the enqueue gap after the popup closes.
+		// Keep polling through the server-side repository backfill enqueue gap.
 		closeGraceMs: 10_000,
 	})
 
@@ -309,8 +279,6 @@ function PlanetscaleConnectBoundary({ children }: { children: React.ReactNode })
 	const value = useOAuthPopupFlow({
 		windowName: "maple-planetscale-connect",
 		windowFeatures: "popup,width=520,height=680",
-		// PlanetScale is the one provider on v2, whose wire format is snake_case —
-		// adapt at the boundary rather than teaching the shared hook two shapes.
 		start: () =>
 			startConnect({
 				payload: { return_to: window.location.href },

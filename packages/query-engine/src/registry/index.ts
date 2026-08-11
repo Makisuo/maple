@@ -1,9 +1,4 @@
-/**
- * Declarative warehouse query registry.
- *
- * Kept out of the root barrel deliberately: definitions include runtime policy
- * and execution metadata, while the root barrel stays driver-free for web/cli.
- */
+// Separate from the driver-free root barrel used by web and CLI consumers.
 export {
 	defineQuery,
 	isTimeBucketQueryCachePolicy,

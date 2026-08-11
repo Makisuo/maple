@@ -8,7 +8,6 @@ export interface QueryDefinitionTenant {
 	readonly orgId: string
 }
 
-/** The two warehouse operations needed by ordinary, tenant-scoped definitions. */
 export interface QueryDefinitionWarehouse<Tenant extends QueryDefinitionTenant, Error> {
 	readonly compiledQuery: <Row>(
 		tenant: Tenant,
@@ -43,11 +42,7 @@ const queryDefinitionOptions = <Payload, Row>(
 	}
 }
 
-/**
- * Execute a definition without applying a cache. Cache orchestration sits one
- * level above this function so whole-result and time-bucket stores can both
- * reuse the exact same compilation path.
- */
+/** Executes a definition without caching; cache orchestration is caller-owned. */
 export const runQueryDefinition = <Payload, Row, Tenant extends QueryDefinitionTenant, Error>(
 	warehouse: QueryDefinitionWarehouse<Tenant, Error>,
 	definition: QueryDefinition<Payload, Row>,

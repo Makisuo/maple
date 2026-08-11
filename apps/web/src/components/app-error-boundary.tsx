@@ -1,19 +1,6 @@
 /**
- * Last-resort crash screen for errors that escape the router.
- *
- * The router's `RouteError` catches errors inside route boundaries; anything
- * thrown outside them (Clerk bridge, auth settling, providers) used to unmount
- * the whole tree and leave a blank white page. This boundary wraps the entire
- * app in `main.tsx` and renders a branded crash state instead.
- *
- * Visually it is the BootSplash's trace waterfall frozen at the moment of
- * failure: the first spans landed, the fourth errored (red, where the playhead
- * stopped), and the fifth never arrived — Maple's own material standing in for
- * a generic error illustration. Keep the row geometry in sync with the
- * `.boot-*` / `.crash-*` rules in `styles.css`.
- *
- * No router context exists here, so navigation uses plain anchors and
- * `window.location`. Stale-chunk errors auto-reload, same as `RouteError`.
+ * Last-resort boundary for errors outside router boundaries. It has no router
+ * context; crash artwork geometry is coupled to `.boot-*`/`.crash-*` in styles.css.
  */
 import { Component, type ReactNode } from "react"
 
@@ -46,8 +33,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 		if (this.state.error !== undefined) {
 			return <CrashScreen error={this.state.error} />
 		}
-		// Dev-only preview: append ?__crash to any URL to render the crash screen
-		// without breaking the app (the boundary only fires on real render errors).
+		// Append ?__crash in development to preview the crash screen.
 		if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("__crash")) {
 			return (
 				<CrashScreen error={new TypeError("Cannot read properties of undefined (reading 'spans')")} />

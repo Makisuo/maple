@@ -1,9 +1,6 @@
 /**
- * Narrow accessors for the browser globals this package reads.
- *
- * Session code also runs in tests and non-DOM embedders, so these are declared by
- * hand and every accessor may return `undefined`. Each names exactly the fields we
- * touch — an untyped `globalThis` bag would let a typo through as `any`.
+ * Narrow optional globals for tests and non-DOM embedders, without pulling in
+ * the full DOM types.
  */
 
 interface BrowserNavigator {
