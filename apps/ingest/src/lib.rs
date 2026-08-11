@@ -1,3 +1,6 @@
+pub mod ai_classifier;
+pub mod ai_registry;
+pub mod cityhash102;
 pub mod clickhouse_insert_mappings;
 pub mod metrics;
 pub mod otel;

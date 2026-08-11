@@ -2798,7 +2798,10 @@ fn attr_map(attributes: &[KeyValue]) -> Map<String, Value> {
     out
 }
 
-fn any_value_string(value: &AnyValue) -> String {
+/// `pub(crate)` so the AI classifier canonicalizes attribute values through the
+/// *same* function the row writer uses — the premise of the write-side plan's
+/// Rust/SQL alignment contract (§6). Behavior is unchanged.
+pub(crate) fn any_value_string(value: &AnyValue) -> String {
     match value.value.as_ref() {
         Some(any_value::Value::StringValue(value)) => value.clone(),
         Some(any_value::Value::BoolValue(value)) => value.to_string(),
