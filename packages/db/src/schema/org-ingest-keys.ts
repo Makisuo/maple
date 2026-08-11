@@ -1,9 +1,10 @@
+import type { OrgId } from "@maple/domain"
 import { pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 export const orgIngestKeys = pgTable(
 	"org_ingest_keys",
 	{
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		publicKey: text("public_key").notNull(),
 		publicKeyHash: text("public_key_hash").notNull(),
 		privateKeyCiphertext: text("private_key_ciphertext").notNull(),

@@ -42,6 +42,7 @@
 	},
 	"devDependencies": {
 		"@effect/language-service": "catalog:effect",
+		"@effect/vitest": "4.0.0-beta.105",
 		"@maple/domain": "workspace:*",
 		"@types/node": "catalog:tooling",
 		"alchemy": "2.0.0-beta.70",

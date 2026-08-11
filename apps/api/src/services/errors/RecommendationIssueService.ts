@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import {
 	IsoDateTimeString,
+	OrgId,
 	RecommendationIssue,
 	RecommendationIssueId,
 	RecommendationIssueKind,
@@ -85,7 +86,7 @@ export class RecommendationIssueService extends Context.Service<
 				Effect.mapError(toPersistenceError),
 			)
 
-		const selectAll = (orgId: string) =>
+		const selectAll = (orgId: OrgId) =>
 			runDb(
 				"list",
 				database.execute((db) =>
@@ -97,7 +98,7 @@ export class RecommendationIssueService extends Context.Service<
 				),
 			)
 
-		const listResponse = (orgId: string) =>
+		const listResponse = (orgId: OrgId) =>
 			selectAll(orgId).pipe(
 				Effect.map((rows) => new RecommendationIssuesListResponse({ issues: rows.map(rowToIssue) })),
 			)
@@ -137,6 +138,7 @@ export class RecommendationIssueService extends Context.Service<
 			tenant: TenantContext,
 		) {
 			const orgId = tenant.orgId
+			yield* Effect.annotateCurrentSpan("orgId", orgId)
 
 			// Reconcile needs live span keys. If the warehouse is unavailable, degrade gracefully:
 			// return the stored issues unchanged rather than failing the whole settings page.
@@ -235,6 +237,7 @@ export class RecommendationIssueService extends Context.Service<
 			fields: Record<string, unknown>,
 		) {
 			const orgId = tenant.orgId
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.recommendation_issue.id": id })
 			const existing = yield* runDb(
 				"selectById",
 				database.execute((db) =>

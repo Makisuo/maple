@@ -12,7 +12,8 @@
 import { LLM, type Model } from "@maple/llm"
 import { Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { describe, expect, it } from "vitest"
+import { describe, it } from "@effect/vitest"
+import { expect } from "vitest"
 import {
 	contextLimitOf,
 	layerLlm,
@@ -35,166 +36,189 @@ interface CapturedRequest {
  * `resolve` picks which resolver builds the model, because the lens stage differs from triage in its
  * defaults and the only honest way to check a default is to watch what leaves.
  */
-const captureRequest = async (
+const captureRequest = (
 	env: LlmEnv,
 	tags?: LlmCallTags,
 	resolve: (env: LlmEnv, tags?: LlmCallTags) => Model = resolveTriageModel,
-): Promise<CapturedRequest> => {
-	let captured: CapturedRequest | undefined
+): Effect.Effect<CapturedRequest> =>
+	Effect.gen(function* () {
+		let captured: CapturedRequest | undefined
 
-	const fakeFetch: typeof globalThis.fetch = async (input, init) => {
-		const headers: Record<string, string> = {}
-		new Headers(init?.headers).forEach((value, key) => {
-			headers[key.toLowerCase()] = value
-		})
-		// The body arrives as bytes, not a string — `Response` is the cheapest correct decoder.
-		const bodyText = await new Response(init?.body ?? "{}").text()
-		captured = {
-			url: String(input),
-			headers,
-			body: JSON.parse(bodyText) as Record<string, unknown>,
+		const fakeFetch: typeof globalThis.fetch = async (input, init) => {
+			const headers: Record<string, string> = {}
+			new Headers(init?.headers).forEach((value, key) => {
+				headers[key.toLowerCase()] = value
+			})
+			// The body arrives as bytes, not a string — `Response` is the cheapest correct decoder.
+			const bodyText = await new Response(init?.body ?? "{}").text()
+			captured = {
+				url: String(input),
+				headers,
+				body: JSON.parse(bodyText) as Record<string, unknown>,
+			}
+			return new Response(JSON.stringify({ error: "captured" }), { status: 400 })
 		}
-		return new Response(JSON.stringify({ error: "captured" }), { status: 400 })
-	}
 
-	const request = LLM.request({
-		model: resolve(env, tags),
-		system: "You are concise.",
-		prompt: "hi",
-	})
+		const request = LLM.request({
+			model: resolve(env, tags),
+			system: "You are concise.",
+			prompt: "hi",
+		})
 
-	await Effect.runPromise(
-		LLM.generate(request).pipe(
+		yield* LLM.generate(request).pipe(
 			Effect.ignore,
 			Effect.provide(
 				layerLlm(env).pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fakeFetch))),
 			),
-		),
-	)
+		)
 
-	if (captured === undefined) throw new Error("no request reached the transport")
-	return captured
-}
+		if (captured === undefined) return yield* Effect.die("no request reached the transport")
+		return captured
+	})
 
 const openRouterEnv: LlmEnv = { OPENROUTER_API_KEY: "test-key" }
 
 const tags: LlmCallTags = { surface: "chat", orgId: "org_123", sessionId: "chat_abc" }
 
 describe("resolveTriageModel — OpenRouter attribution", () => {
-	it("sends the app-attribution headers on every OpenRouter call", async () => {
-		const captured = await captureRequest(openRouterEnv)
+	it.live("sends the app-attribution headers on every OpenRouter call", () =>
+		Effect.gen(function* () {
+			const captured = yield* captureRequest(openRouterEnv)
 
-		expect(captured.url).toContain("openrouter.ai")
-		// `HTTP-Referer` is what creates the app page — a title alone does nothing.
-		expect(captured.headers["http-referer"]).toBe("https://maple.dev")
-		expect(captured.headers["x-title"]).toBe("Maple")
-	})
+			expect(captured.url).toContain("openrouter.ai")
+			// `HTTP-Referer` is what creates the app page — a title alone does nothing.
+			expect(captured.headers["http-referer"]).toBe("https://maple.dev")
+			expect(captured.headers["x-title"]).toBe("Maple")
+		}),
+	)
 
-	it("tags the request body with surface, org and session", async () => {
-		const captured = await captureRequest(openRouterEnv, tags)
+	it.live("tags the request body with surface, org and session", () =>
+		Effect.gen(function* () {
+			const captured = yield* captureRequest(openRouterEnv, tags)
 
-		expect(captured.body).toMatchObject({
-			user: "org_123",
-			session_id: "chat_abc",
-			trace: { trace_name: "chat" },
-		})
-	})
+			expect(captured.body).toMatchObject({
+				user: "org_123",
+				session_id: "chat_abc",
+				trace: { trace_name: "chat" },
+			})
+		}),
+	)
 
-	it("omits session_id when the caller has no session to group by", async () => {
-		const captured = await captureRequest(openRouterEnv, { surface: "ai-triage", orgId: "org_123" })
+	it.live("omits session_id when the caller has no session to group by", () =>
+		Effect.gen(function* () {
+			const captured = yield* captureRequest(openRouterEnv, { surface: "ai-triage", orgId: "org_123" })
 
-		expect(captured.body).toMatchObject({ user: "org_123", trace: { trace_name: "ai-triage" } })
-		expect(captured.body).not.toHaveProperty("session_id")
-	})
+			expect(captured.body).toMatchObject({ user: "org_123", trace: { trace_name: "ai-triage" } })
+			expect(captured.body).not.toHaveProperty("session_id")
+		}),
+	)
 
-	it("truncates an over-long session id to OpenRouter's 256-character limit", async () => {
-		const captured = await captureRequest(openRouterEnv, { ...tags, sessionId: "s".repeat(400) })
+	it.live("truncates an over-long session id to OpenRouter's 256-character limit", () =>
+		Effect.gen(function* () {
+			const captured = yield* captureRequest(openRouterEnv, { ...tags, sessionId: "s".repeat(400) })
 
-		expect(captured.body.session_id).toHaveLength(256)
-	})
+			expect(captured.body.session_id).toHaveLength(256)
+		}),
+	)
 
-	it("keeps the headers and tags off the Workers AI path", async () => {
-		const captured = await captureRequest(
-			{ MAPLE_LLM_PROVIDER: "workers-ai", CLOUDFLARE_API_KEY: "test-key" },
-			tags,
-		)
+	it.live("keeps the headers and tags off the Workers AI path", () =>
+		Effect.gen(function* () {
+			const captured = yield* captureRequest(
+				{ MAPLE_LLM_PROVIDER: "workers-ai", CLOUDFLARE_API_KEY: "test-key" },
+				tags,
+			)
 
-		expect(captured.url).not.toContain("openrouter.ai")
-		expect(captured.headers).not.toHaveProperty("http-referer")
-		expect(captured.headers).not.toHaveProperty("x-title")
-		// These are OpenRouter's body fields; Cloudflare must never be sent them.
-		expect(captured.body).not.toHaveProperty("user")
-		expect(captured.body).not.toHaveProperty("session_id")
-		expect(captured.body).not.toHaveProperty("trace")
-	})
+			expect(captured.url).not.toContain("openrouter.ai")
+			expect(captured.headers).not.toHaveProperty("http-referer")
+			expect(captured.headers).not.toHaveProperty("x-title")
+			// These are OpenRouter's body fields; Cloudflare must never be sent them.
+			expect(captured.body).not.toHaveProperty("user")
+			expect(captured.body).not.toHaveProperty("session_id")
+			expect(captured.body).not.toHaveProperty("trace")
+		}),
+	)
 })
 
 describe("reasoning effort", () => {
-	it("sends no reasoning field for triage unless one is configured", async () => {
-		// This resolver serves chat, AI triage and the validator at once. Adding the knob must not
-		// retune three stages as a side effect.
-		const captured = await captureRequest(openRouterEnv, tags)
+	it.live("sends no reasoning field for triage unless one is configured", () =>
+		Effect.gen(function* () {
+			// This resolver serves chat, AI triage and the validator at once. Adding the knob must not
+			// retune three stages as a side effect.
+			const captured = yield* captureRequest(openRouterEnv, tags)
 
-		expect(captured.body).not.toHaveProperty("reasoning")
-	})
+			expect(captured.body).not.toHaveProperty("reasoning")
+		}),
+	)
 
-	it("sends the configured triage effort", async () => {
-		const captured = await captureRequest(
-			{ ...openRouterEnv, MAPLE_TRIAGE_REASONING_EFFORT: "high" },
-			tags,
-		)
+	it.live("sends the configured triage effort", () =>
+		Effect.gen(function* () {
+			const captured = yield* captureRequest(
+				{ ...openRouterEnv, MAPLE_TRIAGE_REASONING_EFFORT: "high" },
+				tags,
+			)
 
-		expect(captured.body).toMatchObject({ reasoning: { effort: "high" } })
-	})
+			expect(captured.body).toMatchObject({ reasoning: { effort: "high" } })
+		}),
+	)
 
-	it("defaults a lens pass to low, because a fan-out of five multiplies whatever it spends", async () => {
-		const captured = await captureRequest(openRouterEnv, tags, resolveLensModel)
+	it.live("defaults a lens pass to low, because a fan-out of five multiplies whatever it spends", () =>
+		Effect.gen(function* () {
+			const captured = yield* captureRequest(openRouterEnv, tags, resolveLensModel)
 
-		expect(captured.body).toMatchObject({ reasoning: { effort: "low" } })
-	})
+			expect(captured.body).toMatchObject({ reasoning: { effort: "low" } })
+		}),
+	)
 
-	it("lets a lens be raised past the default", async () => {
-		const captured = await captureRequest(
-			{ ...openRouterEnv, MAPLE_LENS_REASONING_EFFORT: "medium" },
-			tags,
-			resolveLensModel,
-		)
+	it.live("lets a lens be raised past the default", () =>
+		Effect.gen(function* () {
+			const captured = yield* captureRequest(
+				{ ...openRouterEnv, MAPLE_LENS_REASONING_EFFORT: "medium" },
+				tags,
+				resolveLensModel,
+			)
 
-		expect(captured.body).toMatchObject({ reasoning: { effort: "medium" } })
-	})
+			expect(captured.body).toMatchObject({ reasoning: { effort: "medium" } })
+		}),
+	)
 
-	it("omits the field entirely on `off`, rather than sending a zero budget", async () => {
-		// The escape hatch: a model that does not support reasoning must see no `reasoning` key.
-		const captured = await captureRequest(
-			{ ...openRouterEnv, MAPLE_LENS_REASONING_EFFORT: "off" },
-			tags,
-			resolveLensModel,
-		)
+	it.live("omits the field entirely on `off`, rather than sending a zero budget", () =>
+		Effect.gen(function* () {
+			// The escape hatch: a model that does not support reasoning must see no `reasoning` key.
+			const captured = yield* captureRequest(
+				{ ...openRouterEnv, MAPLE_LENS_REASONING_EFFORT: "off" },
+				tags,
+				resolveLensModel,
+			)
 
-		expect(captured.body).not.toHaveProperty("reasoning")
-	})
+			expect(captured.body).not.toHaveProperty("reasoning")
+		}),
+	)
 
-	it("falls back to the default on an unrecognized value rather than failing the call", async () => {
-		// Read on a request path in a Worker: a typo'd env var must not take the agent down.
-		const captured = await captureRequest(
-			{ ...openRouterEnv, MAPLE_LENS_REASONING_EFFORT: "maximum" },
-			tags,
-			resolveLensModel,
-		)
+	it.live("falls back to the default on an unrecognized value rather than failing the call", () =>
+		Effect.gen(function* () {
+			// Read on a request path in a Worker: a typo'd env var must not take the agent down.
+			const captured = yield* captureRequest(
+				{ ...openRouterEnv, MAPLE_LENS_REASONING_EFFORT: "maximum" },
+				tags,
+				resolveLensModel,
+			)
 
-		expect(captured.body).toMatchObject({ reasoning: { effort: "low" } })
-	})
+			expect(captured.body).toMatchObject({ reasoning: { effort: "low" } })
+		}),
+	)
 
-	it("keeps reasoning off the Workers AI path", async () => {
-		const captured = await captureRequest(
-			{ MAPLE_LLM_PROVIDER: "workers-ai", CLOUDFLARE_API_KEY: "test-key" },
-			tags,
-			resolveLensModel,
-		)
+	it.live("keeps reasoning off the Workers AI path", () =>
+		Effect.gen(function* () {
+			const captured = yield* captureRequest(
+				{ MAPLE_LLM_PROVIDER: "workers-ai", CLOUDFLARE_API_KEY: "test-key" },
+				tags,
+				resolveLensModel,
+			)
 
-		// `reasoning` is OpenRouter's field, namespaced under its own provider options.
-		expect(captured.body).not.toHaveProperty("reasoning")
-	})
+			// `reasoning` is OpenRouter's field, namespaced under its own provider options.
+			expect(captured.body).not.toHaveProperty("reasoning")
+		}),
+	)
 })
 
 describe("resolveTriageModel — context limits", () => {

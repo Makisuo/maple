@@ -1,7 +1,7 @@
 import { slackWorkspaces } from "@maple/db"
-import { AlertDeliveryError } from "@maple/domain/http"
+import { AlertDeliveryError, OrgId } from "@maple/domain/http"
 import { and, eq, isNull } from "drizzle-orm"
-import { Context, Data, Effect, Layer, Option, Redacted } from "effect"
+import { Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Database, type DatabaseShape } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -28,7 +28,7 @@ export const slackSecretAad = (orgId: string, teamId: string, column: SlackSecre
 	Buffer.from(`slack_workspaces:v1:${orgId}:${teamId}:${column}`, "utf8")
 
 /** The single active (non-revoked) installation for an org, if any. */
-export const loadActiveWorkspaceByOrg = Effect.fnUntraced(function* (database: DatabaseShape, orgId: string) {
+export const loadActiveWorkspaceByOrg = Effect.fnUntraced(function* (database: DatabaseShape, orgId: OrgId) {
 	const rows = yield* database.execute((db) =>
 		db
 			.select()
@@ -50,8 +50,9 @@ export const resolveSlackBotTokenForDispatch = Effect.fn("SlackBotTokenResolver.
 	encryptionKey: Buffer,
 	orgId: string,
 ) {
-	yield* Effect.annotateCurrentSpan({ orgId })
-	const rowOption = yield* loadActiveWorkspaceByOrg(database, orgId).pipe(
+	const decodedOrgId = yield* Schema.decodeEffect(OrgId)(orgId).pipe(Effect.orDie)
+	yield* Effect.annotateCurrentSpan({ orgId: decodedOrgId })
+	const rowOption = yield* loadActiveWorkspaceByOrg(database, decodedOrgId).pipe(
 		Effect.mapError((error) => notConnected(`Failed to load Slack installation: ${error.message}`)),
 	)
 	if (Option.isNone(rowOption)) {
@@ -78,7 +79,7 @@ class SlackBotTokenConfigError extends Data.TaggedError("@maple/api/services/Sla
 }> {}
 
 export interface SlackBotTokenResolverShape {
-	readonly resolve: (orgId: string) => Effect.Effect<string, AlertDeliveryError>
+	readonly resolve: (orgId: OrgId) => Effect.Effect<string, AlertDeliveryError>
 }
 
 const make: Effect.Effect<SlackBotTokenResolverShape, SlackBotTokenConfigError, Database | Env> = Effect.gen(

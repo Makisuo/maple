@@ -272,6 +272,7 @@ export class AlertReadModelsService extends Context.Service<
 				readonly beforeGroupKey?: string
 			},
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": ruleId })
 			// Verify the rule exists and belongs to this org before querying Tinybird.
 			const ruleRow = yield* dbExecute((db) =>
 				db
@@ -397,6 +398,7 @@ export class AlertReadModelsService extends Context.Service<
 			ruleId: AlertRuleId,
 			options: { readonly since: string; readonly until: string },
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": ruleId })
 			const ruleRow = yield* dbExecute((db) =>
 				db
 					.select({ id: alertRules.id })
@@ -506,6 +508,7 @@ export class AlertReadModelsService extends Context.Service<
 			orgId: OrgId,
 			options: ListAlertDeliveryEventsOptions = {},
 		) {
+			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			const rows = yield* dbExecute((db) =>
 				db
 					.select()

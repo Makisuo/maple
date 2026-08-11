@@ -203,7 +203,8 @@ const makeErrorsLayer = (
 	const databaseLive = testDb.layer
 	const errorActorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
 	const errorIssueWorkflowLive = ErrorIssueWorkflowService.layer.pipe(
-		Layer.provide(Layer.mergeAll(databaseLive, errorActorsLive)),
+		Layer.provide(databaseLive),
+		Layer.provide(errorActorsLive),
 	)
 	const errorPolicyLive = ErrorPolicyService.layer.pipe(Layer.provide(databaseLive))
 	const warehouseLive = Layer.succeed(
@@ -211,13 +212,16 @@ const makeErrorsLayer = (
 		makeWarehouseStub(scanRows, onScan, fingerprintRows),
 	)
 	const errorIssueReadModelsLive = ErrorIssueReadModelsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(databaseLive, warehouseLive, errorIssueWorkflowLive)),
+		Layer.provide(databaseLive),
+		Layer.provide(warehouseLive),
+		Layer.provide(errorIssueWorkflowLive),
 	)
 	// Held only so the service can hand an autonomous investigation turn its `submit_diagnosis`
 	// tool; no test here starts one. The real layer is cheap — it depends on nothing beyond Env
 	// and the database already wired above.
 	const investigationsLive = InvestigationService.layer.pipe(
-		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
+		Layer.provide(envLive),
+		Layer.provide(databaseLive),
 	)
 	const dispatcherStub = Layer.succeed(
 		NotificationDispatcher,
@@ -226,20 +230,18 @@ const makeErrorsLayer = (
 		},
 	)
 	const errorsLive = ErrorsService.layer.pipe(
+		Layer.provide(envLive),
+		Layer.provide(databaseLive),
+		Layer.provide(warehouseLive),
 		Layer.provide(
-			Layer.mergeAll(
-				envLive,
-				databaseLive,
-				warehouseLive,
-				Layer.succeed(EdgeCacheService, makeEdgeCacheService(edgeBackend ?? makeMemoryBackend())),
-				dispatcherStub,
-				errorActorsLive,
-				errorIssueReadModelsLive,
-				errorIssueWorkflowLive,
-				errorPolicyLive,
-				investigationsLive,
-			),
+			Layer.succeed(EdgeCacheService, makeEdgeCacheService(edgeBackend ?? makeMemoryBackend())),
 		),
+		Layer.provide(dispatcherStub),
+		Layer.provide(errorActorsLive),
+		Layer.provide(errorIssueReadModelsLive),
+		Layer.provide(errorIssueWorkflowLive),
+		Layer.provide(errorPolicyLive),
+		Layer.provide(investigationsLive),
 	)
 	return Layer.mergeAll(
 		errorsLive,
@@ -291,7 +293,8 @@ const makeGatingLayer = (opts: {
 	const databaseLive = testDb.layer
 	const errorActorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
 	const errorIssueWorkflowLive = ErrorIssueWorkflowService.layer.pipe(
-		Layer.provide(Layer.mergeAll(databaseLive, errorActorsLive)),
+		Layer.provide(databaseLive),
+		Layer.provide(errorActorsLive),
 	)
 	const errorPolicyLive = ErrorPolicyService.layer.pipe(Layer.provide(databaseLive))
 	// Held only so the service can hand an autonomous investigation turn its `submit_diagnosis`
@@ -342,23 +345,21 @@ const makeGatingLayer = (opts: {
 	}
 	const warehouseLive = Layer.succeed(WarehouseQueryService, warehouseStub)
 	const errorIssueReadModelsLive = ErrorIssueReadModelsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(databaseLive, warehouseLive, errorIssueWorkflowLive)),
+		Layer.provide(databaseLive),
+		Layer.provide(warehouseLive),
+		Layer.provide(errorIssueWorkflowLive),
 	)
 	return ErrorsService.layer.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				envLive,
-				databaseLive,
-				warehouseLive,
-				Layer.succeed(EdgeCacheService, makeEdgeCacheService(makeMemoryBackend())),
-				dispatcherStub,
-				errorActorsLive,
-				errorIssueReadModelsLive,
-				errorIssueWorkflowLive,
-				errorPolicyLive,
-				investigationsLive,
-			),
-		),
+		Layer.provide(envLive),
+		Layer.provide(databaseLive),
+		Layer.provide(warehouseLive),
+		Layer.provide(Layer.succeed(EdgeCacheService, makeEdgeCacheService(makeMemoryBackend()))),
+		Layer.provide(dispatcherStub),
+		Layer.provide(errorActorsLive),
+		Layer.provide(errorIssueReadModelsLive),
+		Layer.provide(errorIssueWorkflowLive),
+		Layer.provide(errorPolicyLive),
+		Layer.provide(investigationsLive),
 		Layer.provideMerge(databaseLive),
 	)
 }

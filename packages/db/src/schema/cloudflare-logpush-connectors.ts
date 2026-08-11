@@ -1,3 +1,4 @@
+import type { OrgId } from "@maple/domain"
 import { boolean, index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 // NOTE: the manual connector CRUD (CloudflareLogpushService + UI) was removed in favor of the
@@ -9,7 +10,7 @@ export const cloudflareLogpushConnectors = pgTable(
 	"cloudflare_logpush_connectors",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		name: text("name").notNull(),
 		zoneName: text("zone_name").notNull(),
 		serviceName: text("service_name").notNull(),

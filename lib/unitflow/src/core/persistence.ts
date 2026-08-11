@@ -48,8 +48,9 @@ export const makeSlot = <A, I>(
 			return Option.some(entry.value.value)
 		}).pipe(
 			Effect.catchCause((cause) =>
-				Effect.map(Effect.logWarning(`persist(${options.key}): restore failed`, cause), () =>
-					Option.none<A>(),
+				Effect.logWarning("Persisted state restore failed", cause).pipe(
+					Effect.annotateLogs({ "unitflow.persistence.key": options.key }),
+					Effect.as(Option.none<A>()),
 				),
 			),
 		)
@@ -59,7 +60,9 @@ export const makeSlot = <A, I>(
 				store.set(options.key, { savedAt, value }),
 			).pipe(
 				Effect.catchCause((cause) =>
-					Effect.logWarning(`persist(${options.key}): save failed`, cause),
+					Effect.logWarning("Persisted state save failed", cause).pipe(
+						Effect.annotateLogs({ "unitflow.persistence.key": options.key }),
+					),
 				),
 			)
 

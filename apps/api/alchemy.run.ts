@@ -41,6 +41,34 @@ export interface CreateMapleApiOptions {
 /** Alchemy resource type for the API Worker, carrying its internal RPC surface. */
 export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcShape>
 
+const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
+	const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
+	return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
+		name: resolveHyperdriveName(stage),
+		origin: {
+			scheme: "postgres",
+			host: pgUrl.hostname,
+			port: Number(pgUrl.port || "5432"),
+			// Connect-time db (`postgres`, the PlanetScale cluster default),
+			// not the PS resource name.
+			database: pgUrl.pathname.replace(/^\//, "") || "postgres",
+			user: decodeURIComponent(pgUrl.username),
+			password: Redacted.make(decodeURIComponent(pgUrl.password)),
+		},
+		// Read-after-write everywhere (alert state CAS, dashboard versioning) —
+		// revisit caching once read paths that tolerate staleness are identified.
+		caching: { disabled: true },
+		dev: {
+			scheme: "postgres",
+			host: "localhost",
+			port: 5499,
+			database: "maple",
+			user: "maple",
+			password: Redacted.make("maple"),
+		},
+	})
+})
+
 export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 	Effect.gen(function* () {
 		// MAPLE_DB Hyperdrive comes in two flavors:
@@ -64,36 +92,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 		//   dying — so DB-backed routes 500 while everything else works.
 		const databaseMode = resolveDatabaseMode(stage)
 		const hyperdriveRefId = resolveHyperdriveRefId(stage, "api")
-		const mapleDb =
-			databaseMode !== "managed"
-				? undefined
-				: yield* Effect.gen(function* () {
-						const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
-						return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
-							name: resolveHyperdriveName(stage),
-							origin: {
-								scheme: "postgres",
-								host: pgUrl.hostname,
-								port: Number(pgUrl.port || "5432"),
-								// Connect-time db (`postgres`, the PlanetScale cluster default),
-								// not the PS resource name.
-								database: pgUrl.pathname.replace(/^\//, "") || "postgres",
-								user: decodeURIComponent(pgUrl.username),
-								password: Redacted.make(decodeURIComponent(pgUrl.password)),
-							},
-							// Read-after-write everywhere (alert state CAS, dashboard versioning) —
-							// revisit caching once read paths that tolerate staleness are identified.
-							caching: { disabled: true },
-							dev: {
-								scheme: "postgres",
-								host: "localhost",
-								port: 5499,
-								database: "maple",
-								user: "maple",
-								password: Redacted.make("maple"),
-							},
-						})
-					})
+		const mapleDb = databaseMode !== "managed" ? undefined : yield* createManagedMapleDb(stage)
 
 		const mcpSessions = yield* Cloudflare.KV.Namespace("MCP_SESSIONS", {
 			title: resolveWorkerName("mcp-sessions", stage),

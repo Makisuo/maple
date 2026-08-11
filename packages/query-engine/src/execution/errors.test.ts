@@ -113,7 +113,7 @@ describe("mapWarehouseError", () => {
 		it("classifies a 401 leaked in the message and keeps the status", () => {
 			const mapped = mapWarehouseError("p", "Request failed with status 401")
 			expect(mapped).toBeInstanceOf(WarehouseAuthError)
-			expect((mapped as WarehouseAuthError).upstreamStatus).toBe(401)
+			expect(mapped).toMatchObject({ upstreamStatus: 401 })
 		})
 
 		it("classifies Tinybird's invalid-token workspace-not-found message", () => {
@@ -129,7 +129,7 @@ describe("mapWarehouseError", () => {
 		it("classifies a 503 and extracts the upstream status", () => {
 			const mapped = mapWarehouseError("p", "Request failed with status 503")
 			expect(mapped).toBeInstanceOf(WarehouseUpstreamError)
-			expect((mapped as WarehouseUpstreamError).upstreamStatus).toBe(503)
+			expect(mapped).toMatchObject({ upstreamStatus: 503 })
 		})
 
 		it("classifies a transient ClickHouse type", () => {

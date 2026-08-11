@@ -167,7 +167,7 @@ export const missingBotScopes = (grantedScope: string | null): ReadonlyArray<str
  * `DatabaseError` wrapping the failed `execute`, where `completeInstall`
  * branches on it — it never leaves `completeInstall`.
  */
-class SlackCrossOrgConflict extends Data.TaggedError("SlackCrossOrgConflict")<{
+class SlackCrossOrgConflict extends Data.TaggedError("@maple/api/integrations/SlackCrossOrgConflict")<{
 	readonly teamId: string
 	readonly orgId: string
 }> {

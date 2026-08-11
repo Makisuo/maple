@@ -42,6 +42,7 @@
 	},
 	"devDependencies": {
 		"@effect/language-service": "catalog:effect",
+		"@effect/vitest": "4.0.0-beta.105",
 		"@maple/browser-session": "workspace:*",
 		"@types/node": "catalog:tooling",
 		"effect": "catalog:effect",

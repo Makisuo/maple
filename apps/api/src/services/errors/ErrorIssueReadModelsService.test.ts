@@ -64,9 +64,13 @@ const makeWarehouseStub = (contexts: Array<string>): WarehouseQueryServiceShape 
 const makeLayer = (contexts: Array<string>) => {
 	const database = createTestDb(createdDbs).layer
 	const actors = ErrorActorsService.layer.pipe(Layer.provide(database))
-	const workflow = ErrorIssueWorkflowService.layer.pipe(Layer.provide(Layer.mergeAll(database, actors)))
+	const workflow = ErrorIssueWorkflowService.layer.pipe(Layer.provide(database), Layer.provide(actors))
 	const warehouse = Layer.succeed(WarehouseQueryService, makeWarehouseStub(contexts))
-	const readModels = readRequirements.pipe(Layer.provide(Layer.mergeAll(database, warehouse, workflow)))
+	const readModels = readRequirements.pipe(
+		Layer.provide(database),
+		Layer.provide(warehouse),
+		Layer.provide(workflow),
+	)
 	return Layer.mergeAll(readModels, workflow, actors).pipe(Layer.provideMerge(database))
 }
 

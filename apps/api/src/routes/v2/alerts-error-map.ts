@@ -40,20 +40,15 @@ type V2ReachableAlertError =
 	| AlertDeliveryError
 	| WarehouseError
 
-type UpstreamMappedWarehouseError = Exclude<
-	WarehouseError,
-	WarehouseValidationError | WarehouseQuotaExceededError | WarehouseUpstreamError
->
+type V2AlertReadError = V2InvalidRequestError | V2RateLimitError | V2ServiceUnavailableError
 
-type MappedV2AlertError<E> =
-	| (E extends AlertForbiddenError ? V2PermissionError : never)
-	| (E extends AlertValidationError | WarehouseValidationError ? V2InvalidRequestError : never)
-	| (E extends AlertNotFoundError ? V2NotFoundError : never)
-	| (E extends AlertDestinationInUseError ? V2ConflictError : never)
-	| (E extends WarehouseQuotaExceededError ? V2RateLimitError : never)
-	| (E extends WarehouseUpstreamError ? V2ServiceUnavailableError : never)
-	| (E extends AlertDeliveryError | UpstreamMappedWarehouseError ? V2UpstreamError : never)
-	| (E extends AlertPersistenceError ? V2ServiceUnavailableError : never)
+type V2AlertCommonError = V2AlertReadError | V2UpstreamError
+
+type V2AlertWriteError = V2AlertCommonError | V2PermissionError
+
+type V2AlertMutationError = V2AlertWriteError | V2NotFoundError
+
+type V2AlertMappedError = V2AlertMutationError | V2ConflictError | V2RateLimitError
 
 const normalizeAlertResourceType = (resourceType: string) =>
 	Match.value(resourceType).pipe(
@@ -78,9 +73,9 @@ const makeAlertErrorMatcher = (operation: string) => {
 					"insufficient_permissions",
 					"You do not have permission to perform this alert operation.",
 				),
-			"@maple/http/errors/AlertValidationError": (error) =>
+			"@maple/http/errors/AlertValidationError": (error: AlertValidationError) =>
 				invalidRequest("parameter_invalid", error.message),
-			"@maple/http/errors/AlertNotFoundError": (error) => {
+			"@maple/http/errors/AlertNotFoundError": (error: AlertNotFoundError) => {
 				const resource = normalizeAlertResourceType(error.resourceType)
 				return resourceNotFound(resource, `No such ${resource.replaceAll("_", " ")}.`)
 			},
@@ -103,23 +98,63 @@ const makeAlertErrorMatcher = (operation: string) => {
 			// Maple generated SQL its own warehouse refused to plan: a server fault,
 			// not the caller's, so it stays a 5xx rather than becoming a 400 — but
 			// under its own code so on-call stops chasing the customer's warehouse.
-			"@maple/http/errors/WarehouseMalformedQueryError": (error) =>
+			"@maple/http/errors/WarehouseMalformedQueryError": (error: WarehouseErrorLike) =>
 				upstreamError(`alert_${operation}_query_bug`, presentWarehouseErrorPublic(error).description),
 			// A quota breach is the caller exceeding cost limits (429), and a
 			// validation failure is a malformed request (400) — neither is an
 			// upstream outage.
 			"@maple/http/errors/WarehouseQuotaExceededError": () => rateLimited(),
-			"@maple/http/errors/WarehouseValidationError": (error) =>
+			"@maple/http/errors/WarehouseValidationError": (error: WarehouseValidationError) =>
 				invalidRequest("parameter_invalid", error.message),
 		}),
 	)
 }
 
 /** Exhaustive, tag-local v1 alert error translation for v2 handlers. */
-export const mapAlertError = (operation: string) => {
+export function mapAlertError(
+	operation: "delivery_list" | "incident_list",
+): <A, E extends V2ReachableAlertError, R>(
+	effect: Effect.Effect<A, E, R>,
+) => Effect.Effect<A, V2AlertReadError, R>
+export function mapAlertError(
+	operation: "incident_retrieve",
+): <A, E extends V2ReachableAlertError, R>(
+	effect: Effect.Effect<A, E, R>,
+) => Effect.Effect<A, V2AlertReadError | V2NotFoundError, R>
+export function mapAlertError(
+	operation: "destination_list" | "rule_list",
+): <A, E extends V2ReachableAlertError, R>(
+	effect: Effect.Effect<A, E, R>,
+) => Effect.Effect<A, V2AlertCommonError, R>
+export function mapAlertError(
+	operation:
+		| "destination_update"
+		| "destination_test"
+		| "rule_create"
+		| "rule_update"
+		| "rule_delete"
+		| "rule_test",
+): <A, E extends V2ReachableAlertError, R>(
+	effect: Effect.Effect<A, E, R>,
+) => Effect.Effect<A, V2AlertMutationError, R>
+export function mapAlertError(
+	operation: "destination_create",
+): <A, E extends V2ReachableAlertError, R>(
+	effect: Effect.Effect<A, E, R>,
+) => Effect.Effect<A, V2AlertWriteError, R>
+export function mapAlertError(
+	operation: "destination_delete",
+): <A, E extends V2ReachableAlertError, R>(
+	effect: Effect.Effect<A, E, R>,
+) => Effect.Effect<A, V2AlertMutationError | V2ConflictError, R>
+export function mapAlertError(
+	operation: "rule_preview" | "rule_checks_list",
+): <A, E extends V2ReachableAlertError, R>(
+	effect: Effect.Effect<A, E, R>,
+) => Effect.Effect<A, V2AlertCommonError | V2NotFoundError, R>
+export function mapAlertError(operation: string) {
 	const match = makeAlertErrorMatcher(operation)
 	return <A, E extends V2ReachableAlertError, R>(
 		effect: Effect.Effect<A, E, R>,
-	): Effect.Effect<A, MappedV2AlertError<E>, R> =>
-		effect.pipe(Effect.mapError((error) => match(error) as MappedV2AlertError<E>))
+	): Effect.Effect<A, V2AlertMappedError, R> => effect.pipe(Effect.mapError(match))
 }

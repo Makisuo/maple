@@ -1,4 +1,6 @@
+import { OrgId, type OrgId as OrgIdType } from "@maple/domain"
 import { sql } from "drizzle-orm"
+import { Schema } from "effect"
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core"
 import type { DatabaseClient } from "./DatabaseLive"
 
@@ -22,7 +24,7 @@ export const selectDistinctOrgIds = async (
 	db: DatabaseClient,
 	table: PgTable,
 	column: PgColumn,
-): Promise<ReadonlyArray<string>> => {
+): Promise<ReadonlyArray<OrgIdType>> => {
 	const result = await db.execute(sql`
 		with recursive t as (
 			(
@@ -54,11 +56,13 @@ export const selectDistinctOrgIds = async (
  * client and the PGlite layer casts into it, so the declared array type is a lie
  * under test — normalize both shapes instead of trusting it.
  */
-const toOrgIds = (result: unknown): ReadonlyArray<string> => {
+const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
+
+const toOrgIds = (result: unknown): ReadonlyArray<OrgIdType> => {
 	const rows: ReadonlyArray<unknown> = Array.isArray(result) ? result : hasRows(result) ? result.rows : []
 	return rows.flatMap((row) =>
 		typeof row === "object" && row !== null && "org_id" in row && typeof row.org_id === "string"
-			? [row.org_id]
+			? [decodeOrgIdSync(row.org_id)]
 			: [],
 	)
 }

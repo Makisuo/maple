@@ -1,9 +1,10 @@
+import type { OrgId } from "@maple/domain"
 import { pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core"
 
 export const orgClickHouseSettings = pgTable(
 	"org_clickhouse_settings",
 	{
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		chUrl: text("ch_url").notNull(),
 		chUser: text("ch_user").notNull(),
 		chPasswordCiphertext: text("ch_password_ciphertext"),
