@@ -8,6 +8,7 @@ import {
 	dedupeByFingerprint,
 	pipeFixtures,
 	pipePathReachesAnnualRoute,
+	querySpecFixtures,
 	routeCoverage,
 	uncoveredPipes,
 } from "./sql-catalog"
@@ -112,8 +113,34 @@ describe("sql catalog", () => {
 		const annual = specEntries.filter((entry) => entry.route === "traces_timeseries:annual")
 		expect(annual.length).toBeGreaterThan(0)
 		for (const entry of annual) {
-			expect(entry.sql, entry.id).toContain("service_overview_hourly")
+			// Always spliced, never a single-tier read.
 			expect(entry.sql, entry.id).toContain("UNION ALL")
+			expect(entry.sql, entry.id).toContain("service_overview_spans")
+
+			// Which interior tiers appear is decided by the bucket width, and the
+			// rule is not cosmetic: an hourly row carries no position inside an hour,
+			// so letting it answer a sub-hour bucket piles the whole hour onto the
+			// bucket containing `:00`.
+			// Longest match: several labels are prefixes of each other
+			// (`traces-timeseries-annual` prefixes `…-annual-minutely-grouped`), and a
+			// first-match lookup silently reads the wrong fixture's bucket width.
+			const fixture = querySpecFixtures
+				.filter((candidate) => entry.id.startsWith(`spec:${candidate.label}`))
+				.sort((a, b) => b.label.length - a.label.length)[0]
+			const query = fixture?.query
+			const bucketSeconds =
+				query && "bucketSeconds" in query && typeof query.bucketSeconds === "number"
+					? query.bucketSeconds
+					: 0
+			expect(bucketSeconds, `${entry.id} has no bucketSeconds`).toBeGreaterThan(0)
+
+			if (bucketSeconds % 3600 === 0) {
+				expect(entry.sql, entry.id).toContain("service_overview_hourly")
+				expect(entry.sql, entry.id).toContain("service_overview_minutely")
+			} else {
+				expect(entry.sql, entry.id).toContain("service_overview_minutely")
+				expect(entry.sql, entry.id).not.toContain("service_overview_hourly")
+			}
 		}
 	})
 

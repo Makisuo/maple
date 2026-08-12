@@ -70,153 +70,78 @@ const GetServiceOverviewInput = Schema.Struct({
 
 export type GetServiceOverviewInput = (typeof GetServiceOverviewInput)["Encoded"]
 
-interface CoercedRow {
-	serviceName: string
-	serviceNamespace: string
-	environment: string
-	commitSha: string
-	spanCount: number
-	errorCount: number
-	estimatedErrorCount?: number
-	totalCount: number
-	p50LatencyMs: number
-	p95LatencyMs: number
-	p99LatencyMs: number
-	estimatedSpanCount: number
-	firstSeen: string
-}
+/**
+ * ClickHouse serializes `tuple(...)` as a positional array in `FORMAT JSON`:
+ * `[sha, spanCount, errorCount, firstSeen]`.
+ */
+type RawCommitTuple = readonly [unknown, unknown, unknown, unknown]
 
-// Shared with the bundled service-map response path.
-export function coerceRow(raw: Record<string, unknown>): CoercedRow {
+const isCommitTuple = (value: unknown): value is RawCommitTuple => Array.isArray(value) && value.length === 4
+
+/**
+ * One services-list row, already collapsed to (service, environment) by
+ * `serviceOverviewQuery`.
+ *
+ * There used to be a re-aggregation step here — the server returned one row per
+ * (service, namespace, env, commit) and the client regrouped them, taking a
+ * span-count-weighted MEAN of p50/p95/p99. A weighted mean of quantiles is not a
+ * quantile. The tDigest states live in ClickHouse, so the merge happens there
+ * now and this is a straight decode.
+ *
+ * `resolveThroughput` / `summarizeSampling` stay here: they need the window
+ * duration, which is a property of the request rather than of the row.
+ */
+export function coerceRow(raw: Record<string, unknown>, durationSeconds: number): ServiceOverview {
+	const spanCount = Number(raw.spanCount ?? 0)
+	const errorCount = Number(raw.errorCount ?? 0)
+	const estimatedSpanCount = Number(raw.estimatedSpanCount ?? 0)
+	const estimatedErrorCount = raw.estimatedErrorCount == null ? undefined : Number(raw.estimatedErrorCount)
+
+	const resolvedCount = resolveThroughput(spanCount, estimatedSpanCount, undefined)
+	const sampling = summarizeSampling(resolvedCount, spanCount, durationSeconds)
+
+	const rawCommits = Array.isArray(raw.commits) ? raw.commits : []
+	const commits: CommitBreakdown[] = rawCommits.filter(isCommitTuple).map((tuple) => {
+		const commitSpanCount = Number(tuple[1] ?? 0)
+		return {
+			commitSha: String(tuple[0] ?? "N/A"),
+			spanCount: commitSpanCount,
+			percentage: spanCount > 0 ? Math.round((commitSpanCount / spanCount) * 100) : 0,
+			errorCount: Number(tuple[2] ?? 0),
+			firstSeen: String(tuple[3] ?? ""),
+		}
+	})
+
 	return {
 		serviceName: String(raw.serviceName ?? ""),
 		serviceNamespace: String(raw.serviceNamespace ?? ""),
 		environment: String(raw.environment ?? "unknown"),
-		commitSha: String(raw.commitSha ?? "N/A"),
-		spanCount: Number(raw.spanCount ?? 0),
-		errorCount: Number(raw.errorCount ?? 0),
-		estimatedErrorCount: raw.estimatedErrorCount == null ? undefined : Number(raw.estimatedErrorCount),
-		totalCount: Number(raw.throughput ?? 0),
+		commits,
 		p50LatencyMs: Number(raw.p50LatencyMs ?? 0),
 		p95LatencyMs: Number(raw.p95LatencyMs ?? 0),
 		p99LatencyMs: Number(raw.p99LatencyMs ?? 0),
-		estimatedSpanCount: Number(raw.estimatedSpanCount ?? 0),
-		firstSeen: String(raw.firstSeen ?? ""),
+		// Prefer the sampling-corrected ratio; fall back to the raw one when the
+		// weighted error count is absent.
+		errorRate:
+			estimatedErrorCount != null && Number.isFinite(estimatedErrorCount) && estimatedSpanCount > 0
+				? estimatedErrorCount / estimatedSpanCount
+				: spanCount > 0
+					? errorCount / spanCount
+					: 0,
+		throughput: sampling.hasSampling ? sampling.estimated : sampling.traced,
+		tracedThroughput: sampling.traced,
+		hasSampling: sampling.hasSampling,
+		samplingWeight: sampling.weight,
+		spanCount,
 	}
 }
 
-export function aggregateByServiceEnvironment(
-	rows: CoercedRow[],
+/** Rows arrive pre-sorted by throughput from the query's `ORDER BY`. */
+export function coerceOverviewRows(
+	rows: ReadonlyArray<Record<string, unknown>>,
 	durationSeconds: number,
 ): ServiceOverview[] {
-	const groups = new Map<string, CoercedRow[]>()
-
-	for (const row of rows) {
-		// The web UI routes and filters service detail by service name +
-		// environment; namespace is display metadata, not part of that identity.
-		// Collapse namespace variants here so a tiny legacy/missing-namespace slice
-		// cannot surface as a second, misleading row that links to the combined
-		// service detail page.
-		const key = `${row.serviceName}::${row.environment}`
-		const group = groups.get(key)
-		if (group) {
-			group.push(row)
-		} else {
-			groups.set(key, [row])
-		}
-	}
-
-	const results: ServiceOverview[] = []
-
-	for (const group of groups.values()) {
-		const representative = group.reduce((best, row) =>
-			row.estimatedSpanCount > best.estimatedSpanCount ? row : best,
-		)
-		const totalSpans = group.reduce((sum, r) => sum + r.spanCount, 0)
-		const totalErrors = group.reduce((sum, r) => sum + r.errorCount, 0)
-		const totalEstimated = group.reduce((sum, r) => sum + r.estimatedSpanCount, 0)
-		const hasEstimatedErrors = group.every(
-			(r) => r.estimatedErrorCount != null && Number.isFinite(r.estimatedErrorCount),
-		)
-		const totalEstimatedErrors = group.reduce((sum, r) => sum + (r.estimatedErrorCount ?? 0), 0)
-
-		// Resolve throughput as sum(SampleRate) (pre-sampling estimate) → raw traced
-		// count. Each row is environment-specific, and the per-env detail page it
-		// links to resolves throughput the same way, so both agree. We deliberately
-		// do NOT use the SpanMetrics `calls` counter here: it's a service-level,
-		// ALL-environment value (it can't be filtered by `DeploymentEnv`), so on a
-		// per-environment row it would attribute the entire service's volume to each
-		// env (e.g. a tiny staging row inheriting the huge production count) and
-		// disagree with the env-scoped detail charts.
-		const resolvedCount = resolveThroughput(totalSpans, totalEstimated, undefined)
-		const sampling = summarizeSampling(resolvedCount, totalSpans, durationSeconds)
-
-		// Weighted average of latencies by span count
-		let p50 = 0
-		let p95 = 0
-		let p99 = 0
-		if (totalSpans > 0) {
-			for (const r of group) {
-				const weight = r.spanCount / totalSpans
-				p50 += r.p50LatencyMs * weight
-				p95 += r.p95LatencyMs * weight
-				p99 += r.p99LatencyMs * weight
-			}
-		}
-
-		// Merge namespace variants of the same commit so a sha never appears twice
-		// and its firstSeen/error totals cover every variant.
-		const commitTotals = new Map<string, { spanCount: number; errorCount: number; firstSeen: string }>()
-		for (const r of group) {
-			const existing = commitTotals.get(r.commitSha)
-			if (existing) {
-				existing.spanCount += r.spanCount
-				existing.errorCount += r.errorCount
-				if (r.firstSeen !== "" && (existing.firstSeen === "" || r.firstSeen < existing.firstSeen)) {
-					existing.firstSeen = r.firstSeen
-				}
-			} else {
-				commitTotals.set(r.commitSha, {
-					spanCount: r.spanCount,
-					errorCount: r.errorCount,
-					firstSeen: r.firstSeen,
-				})
-			}
-		}
-		const commits: CommitBreakdown[] = Array.from(commitTotals, ([commitSha, totals]) => ({
-			commitSha,
-			spanCount: totals.spanCount,
-			percentage: totalSpans > 0 ? Math.round((totals.spanCount / totalSpans) * 100) : 0,
-			errorCount: totals.errorCount,
-			firstSeen: totals.firstSeen,
-		})).sort((a, b) => b.percentage - a.percentage)
-
-		results.push({
-			serviceName: representative.serviceName,
-			// Keep the dominant namespace for display and baseline matching while
-			// the metrics above represent every namespace variant of this service.
-			serviceNamespace: representative.serviceNamespace,
-			environment: representative.environment,
-			commits,
-			p50LatencyMs: p50,
-			p95LatencyMs: p95,
-			p99LatencyMs: p99,
-			errorRate:
-				hasEstimatedErrors && totalEstimated > 0
-					? totalEstimatedErrors / totalEstimated
-					: totalSpans > 0
-						? totalErrors / totalSpans
-						: 0,
-			throughput: sampling.hasSampling ? sampling.estimated : sampling.traced,
-			tracedThroughput: sampling.traced,
-			hasSampling: sampling.hasSampling,
-			samplingWeight: sampling.weight,
-			spanCount: totalSpans,
-		})
-	}
-
-	results.sort((a, b) => b.throughput - a.throughput)
-	return results
+	return rows.map((row) => coerceRow(row, durationSeconds))
 }
 
 export function getServiceOverview({ data }: { data: GetServiceOverviewInput }) {
@@ -235,10 +160,10 @@ const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(fun
 	const endTime = input.endTime ?? fallback.endTime
 
 	// Throughput resolves from the env-scoped sum(SampleRate) estimate (see
-	// `aggregateByServiceEnvironment`). The SpanMetrics `calls` counter is
-	// deliberately NOT consulted here: it's service-level and all-environment (it
-	// can't be filtered by `DeploymentEnv`), so on these per-environment rows it
-	// would over-report and disagree with the env-scoped detail page.
+	// `coerceRow`). The SpanMetrics `calls` counter is deliberately NOT consulted
+	// here: it's service-level and all-environment (it can't be filtered by
+	// `DeploymentEnv`), so on these per-environment rows it would over-report and
+	// disagree with the env-scoped detail page.
 	const result = yield* runWarehouseQuery("serviceOverview", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleApiAtomClient
@@ -258,9 +183,8 @@ const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(fun
 	const endMs = input.endTime ? parseWarehouseDateTime(input.endTime) : 0
 	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
 
-	const coercedRows = result.data.map(coerceRow)
 	return {
-		data: aggregateByServiceEnvironment(coercedRows, durationSeconds),
+		data: coerceOverviewRows(result.data, durationSeconds),
 	}
 })
 
