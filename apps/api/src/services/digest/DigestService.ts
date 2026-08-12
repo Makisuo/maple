@@ -16,6 +16,7 @@ import { createClerkClient } from "@clerk/backend"
 import { and, eq, inArray, isNull, lt, or } from "drizzle-orm"
 import { Clock, Array as Arr, Cause, Effect, Layer, Option, Redacted, Ref, Context } from "effect"
 import { deriveDigestStatus, type WeeklyDigestProps } from "@maple/email/weekly-digest-core"
+import { renderWeeklyDigest } from "@maple/email/weekly-digest"
 import { Database } from "@/platform/DatabaseLive"
 import { dateToMs } from "@/platform/time"
 import { EmailService } from "@/platform/EmailService"
@@ -479,17 +480,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 		const renderDigestHtml = Effect.fn("DigestService.renderDigestHtml")(function* (
 			props: WeeklyDigestProps,
 		) {
-			return yield* Effect.tryPromise({
-				// Dynamically imported so @react-email (tailwind/prettier/prism, ~2MB
-				// of module eval) stays out of the request-path module graph — it
-				// loads only when a digest is actually rendered.
-				try: async () => {
-					const [{ render }, { WeeklyDigest }] = await Promise.all([
-						import("@react-email/components"),
-						import("@maple/email/weekly-digest"),
-					])
-					return await render(WeeklyDigest(props))
-				},
+			return yield* Effect.try({
+				// Synchronous: the template is a compiled string, spliced in place.
+				try: () => renderWeeklyDigest(props),
 				catch: (error) =>
 					new DigestRenderError({
 						message: error instanceof Error ? error.message : "Failed to render digest email",

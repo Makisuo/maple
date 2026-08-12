@@ -1,0 +1,13 @@
+{
+	"$schema": "https://turborepo.com/schema.json",
+	"extends": ["//"],
+	"tasks": {
+		// The Maizzle compile writes checked-in modules under src/generated/
+		// rather than a dist/ directory, so the root task's outputs don't apply.
+		"build": {
+			"dependsOn": ["^build"],
+			"inputs": ["emails/**", "components/**", "scripts/build.ts", "package.json"],
+			"outputs": ["src/generated/**"]
+		}
+	}
+}
