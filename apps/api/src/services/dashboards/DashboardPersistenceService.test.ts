@@ -276,4 +276,44 @@ describe("DashboardPersistenceService", () => {
 			assert.isFalse("sections" in listed.dashboards[0]!)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
+
+	// Regression: `createDashboardDocument` enumerates portable fields explicitly,
+	// so a newly-added one is silently dropped unless it is listed there. This
+	// path backs v2 POST, JSON import and template instantiate alike — all three
+	// lost their groups.
+	it.effect("carries sections through the portable create path", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			const created = yield* DashboardPersistenceService.create(
+				asOrgId("org_a"),
+				asUserId("user_a"),
+				makePortableDashboard({
+					name: "Grouped import",
+					sections: [
+						{ id: "s1", title: "Overview", tabs: [{ id: "t1", title: "Latency" }] },
+					],
+					widgets: [
+						{
+							id: "w1",
+							visualization: "chart",
+							dataSource: { endpoint: "custom_query_builder_timeseries" },
+							display: {},
+							layout: { x: 0, y: 0, w: 6, h: 4 },
+							sectionId: "s1",
+							tabId: "t1",
+						},
+					],
+				}),
+			)
+
+			assert.strictEqual(created.sections?.length, 1)
+			assert.strictEqual(created.sections?.[0]?.title, "Overview")
+			assert.strictEqual(created.widgets[0]?.sectionId, "s1")
+
+			// And it survives the round-trip through storage, not just the response.
+			const listed = yield* DashboardPersistenceService.list(asOrgId("org_a"))
+			assert.strictEqual(listed.dashboards[0]?.sections?.length, 1)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
 })

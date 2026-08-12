@@ -121,6 +121,7 @@ const createDashboardDocument = (portableDashboard: PortableDashboardDocument, n
 			description: portableDashboard.description,
 		}),
 		...(portableDashboard.tags !== undefined && { tags: portableDashboard.tags }),
+		...(portableDashboard.sections !== undefined && { sections: portableDashboard.sections }),
 		...(portableDashboard.variables !== undefined && { variables: portableDashboard.variables }),
 		...(portableDashboard.refreshIntervalSeconds !== undefined && {
 			refreshIntervalSeconds: portableDashboard.refreshIntervalSeconds,

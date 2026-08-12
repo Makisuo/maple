@@ -8,8 +8,10 @@ import {
 	resolveSectionView,
 	withActiveTab,
 	withSectionCollapsed,
+	type SectionViewSearch,
 } from "./section-view-state"
 import type { DashboardSection, DashboardWidget } from "@/components/dashboard-builder/types"
+import { pickDashboardControlParams } from "@/lib/dashboard-controls/search-params"
 
 const section = (
 	id: string,
@@ -167,5 +169,50 @@ describe("resolveSectionView", () => {
 		const view = resolveSectionView(sections, widgets, { widget: "w1", collapsed: "s1,s2" })
 		expect(view.collapsed.has("s2")).toBe(false)
 		expect(view.collapsed.has("s1")).toBe(true)
+	})
+})
+
+// The route applies these helpers on top of `pickDashboardControlParams`. That
+// composition — not the helper alone — is where the "id ends up in both lists"
+// bug lived: spreading the base *over* the update silently undoes a deletion,
+// because a deleted key isn't present to overwrite the stale value.
+describe("route composition", () => {
+	// Mirrors `applySectionView` in routes/dashboards/$dashboardId.tsx.
+	const apply = (
+		prev: Record<string, unknown>,
+		update: (p: SectionViewSearch) => SectionViewSearch,
+	) => ({
+		...update(pickDashboardControlParams(prev)),
+		...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
+	})
+
+	it("drops the opposite list key instead of resurrecting it", () => {
+		const expanded = apply({ collapsed: "s1" }, (p) => withSectionCollapsed(p, "s1", false))
+		expect(expanded).toEqual({ expanded: "s1" })
+
+		const recollapsed = apply(expanded, (p) => withSectionCollapsed(p, "s1", true))
+		expect(recollapsed).toEqual({ collapsed: "s1" })
+		expect(recollapsed).not.toHaveProperty("expanded")
+	})
+
+	it("survives repeated toggles without accumulating both keys", () => {
+		let search: Record<string, unknown> = {}
+		for (let i = 0; i < 5; i += 1) {
+			search = apply(search, (p) => withSectionCollapsed(p, "s1", true))
+			search = apply(search, (p) => withSectionCollapsed(p, "s1", false))
+		}
+		expect(search).toEqual({ expanded: "s1" })
+	})
+
+	it("keeps edit mode and variable selections across a collapse", () => {
+		const next = apply({ mode: "edit", "var-service": "api" }, (p) =>
+			withSectionCollapsed(p, "s1", true),
+		)
+		expect(next).toEqual({ mode: "edit", "var-service": "api", collapsed: "s1" })
+	})
+
+	it("keeps edit mode across a tab switch", () => {
+		const next = apply({ mode: "edit" }, (p) => withActiveTab(p, "s1", "t2"))
+		expect(next).toMatchObject({ mode: "edit", tab: "s1:t2" })
 	})
 })

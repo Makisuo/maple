@@ -169,12 +169,26 @@ function DashboardViewPage() {
 	// Section view state is per-viewer: it rides the URL with `replace` so
 	// collapsing a group doesn't fill the back button with layout noise, and it
 	// never touches the stored document.
+	//
+	// The update is applied *to* the picked params rather than spread over them.
+	// `withSectionCollapsed` signals "drop this key" by deleting it from the
+	// object it returns, and `{...base, ...update(prev)}` silently undoes that —
+	// the deleted key simply isn't there to overwrite the stale value, so an id
+	// toggled twice ends up in both `collapsed` and `expanded`, and `expanded`
+	// wins, pinning the group open forever.
+	//
+	// `mode` is re-added for the same class of reason: `pickDashboardControlParams`
+	// deliberately drops it, so without this, collapsing a group while editing
+	// would quietly kick the user out of edit mode.
 	const applySectionView = (update: (prev: SectionViewSearch) => SectionViewSearch) => {
 		navigate({
 			to: "/dashboards/$dashboardId",
 			params: { dashboardId },
 			replace: true,
-			search: (prev) => ({ ...pickDashboardControlParams(prev), ...update(prev) }),
+			search: (prev) => ({
+				...update(pickDashboardControlParams(prev)),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
+			}),
 		})
 	}
 
