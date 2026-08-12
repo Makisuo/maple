@@ -2,6 +2,7 @@ import { formatDuration } from "../../lib/format"
 import { getServiceColor, calculateSelfTime } from "../../lib/colors"
 import { getHttpInfo } from "../../lib/http"
 import { getSpanKindLabel } from "../../lib/span-kind"
+import { spanStartMs } from "../../lib/span-tree"
 import type { SpanNode } from "../../lib/types"
 
 interface TraceTimelineTooltipProps {
@@ -22,9 +23,7 @@ export function TraceTimelineTooltipContent({
 	const selfTimePercent = span.durationMs > 0 ? (selfTime / span.durationMs) * 100 : 0
 	const durationPercent = totalDurationMs ? (span.durationMs / totalDurationMs) * 100 : null
 
-	const startOffset = traceStartTime
-		? new Date(span.startTime).getTime() - new Date(traceStartTime).getTime()
-		: null
+	const startOffset = traceStartTime ? spanStartMs(span) - new Date(traceStartTime).getTime() : null
 
 	const httpInfo = getHttpInfo(span)
 

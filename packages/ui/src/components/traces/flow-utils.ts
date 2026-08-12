@@ -1,5 +1,6 @@
 import type { Node, Edge } from "@xyflow/react"
 import { describeSpan } from "../../lib/span-category"
+import { spanStartMs } from "../../lib/span-tree"
 import type { SpanNode } from "../../lib/types"
 
 export interface AggregatedDuration {
@@ -47,11 +48,11 @@ export type FlowNode = Node<FlowNodeData, "span">
 export type FlowEdge = Edge<FlowEdgeData>
 
 function computeStartOffsetMs(parentSpan: SpanNode, spans: SpanNode[]): number | undefined {
-	const parentStart = new Date(parentSpan.startTime).getTime()
+	const parentStart = spanStartMs(parentSpan)
 	if (!Number.isFinite(parentStart)) return undefined
 	let earliest = Infinity
 	for (const s of spans) {
-		const t = new Date(s.startTime).getTime()
+		const t = spanStartMs(s)
 		if (Number.isFinite(t) && t < earliest) earliest = t
 	}
 	if (!Number.isFinite(earliest)) return undefined
@@ -96,7 +97,7 @@ function createCombinedNode(spans: SpanNode[]): CombinedNode {
 	for (const span of spans) {
 		allChildren.push(...span.children)
 	}
-	allChildren.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+	allChildren.sort((a, b) => spanStartMs(a) - spanStartMs(b))
 
 	const combinedChildren = combineConsecutiveDuplicates(allChildren)
 

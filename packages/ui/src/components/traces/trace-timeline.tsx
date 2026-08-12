@@ -4,6 +4,9 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 
 import { ChevronExpandYIcon, ChevronDownIcon, ChevronRightIcon } from "../icons"
 import { Button } from "../ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
+import { formatDuration } from "../../lib/format"
+import { summarizeClockSkew } from "../../lib/span-tree"
 import { getServiceColor } from "../../lib/colors"
 import { isEditableTarget } from "../../lib/keyboard"
 import { useContainerSize } from "../../hooks/use-container-size"
@@ -54,6 +57,9 @@ export function TraceTimeline() {
 		colorBy,
 		setColorBy,
 	} = useTraceView()
+	// Surfaced in the toolbar: a correction the user cannot see in the bars themselves
+	// should still be visible as a fact about the trace.
+	const skewSummary = React.useMemo(() => summarizeClockSkew(rootSpans), [rootSpans])
 	const containerRef = React.useRef<HTMLDivElement>(null)
 	const scrollRef = React.useRef<HTMLDivElement>(null)
 	const gridRef = React.useRef<HTMLDivElement>(null)
@@ -451,6 +457,28 @@ export function TraceTimeline() {
 				<div className="flex items-center gap-2 text-[11px] text-muted-foreground">
 					<span className="font-medium">Timeline</span>
 					<span className="tabular-nums">{bars.length} spans</span>
+					{skewSummary && (
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<span className="cursor-default rounded border border-border px-1.5 py-px tabular-nums">
+										clock skew adjusted
+									</span>
+								}
+							/>
+							{/* Below the trigger: the toolbar sits directly under the tab bar, and a
+							    top-side tooltip would open behind it. */}
+							<TooltipContent side="bottom" className="max-w-xs text-xs">
+								{skewSummary.adjustedCount === 1
+									? "One span was recorded outside its parent"
+									: `${skewSummary.adjustedCount} spans were recorded outside their parents`}{" "}
+								— impossible in real time, so the services' clocks disagree, here by up to{" "}
+								{formatDuration(Math.abs(skewSummary.maxSkewMs))}. Positions are corrected to
+								nest inside the parent; reported start times in the detail panel are
+								untouched.
+							</TooltipContent>
+						</Tooltip>
+					)}
 				</div>
 				<div className="flex items-center gap-1">
 					<Button

@@ -6,6 +6,7 @@ import { Button } from "../ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip"
 import { FlamegraphTooltipContent } from "./flamegraph-tooltip"
 import { FlamegraphMinimap } from "./flamegraph-minimap"
+import { spanStartMs as spanStartMsOf } from "../../lib/span-tree"
 import { cn } from "../../lib/utils"
 import { formatDuration } from "../../lib/format"
 import { getSpanColorStyle, getServiceColor } from "../../lib/colors"
@@ -36,13 +37,11 @@ function calculateBars(
 ): FlamegraphBar[] {
 	const barsByDepth = new Map<number, FlamegraphBar[]>()
 
-	const refStartMs = focusedSpan
-		? new Date(focusedSpan.startTime).getTime()
-		: new Date(traceStartTime).getTime()
+	const refStartMs = focusedSpan ? spanStartMsOf(focusedSpan) : new Date(traceStartTime).getTime()
 	const refDurationMs = focusedSpan ? focusedSpan.durationMs : totalDurationMs
 
 	function traverse(node: SpanNode, baseDepth: number = 0) {
-		const spanStartMs = new Date(node.startTime).getTime()
+		const spanStartMs = spanStartMsOf(node)
 		const leftPercent = ((spanStartMs - refStartMs) / refDurationMs) * 100
 		const widthPercent = (node.durationMs / refDurationMs) * 100
 
