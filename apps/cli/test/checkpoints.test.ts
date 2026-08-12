@@ -805,6 +805,21 @@ describe("live restore transaction reconciliation", () => {
 		})
 	})
 
+	// `maple start` reconciles recovery before it creates any directory, so on a
+	// clean machine this runs with `~/.maple` itself absent — and every path it
+	// touches (transaction journal, quarantine, maintenance lock) is a sibling of
+	// the data dir, living in that missing parent.
+	it("is a no-op on first run, when the data dir's parent does not exist yet", async () => {
+		const root = mkdtempSync(join(tmpdir(), "maple-first-run-recovery-test-"))
+		const dataDir = join(root, ".maple", "data")
+		try {
+			ok(!existsSync(dirname(dataDir)), "precondition: the maple home is absent")
+			await Effect.runPromise(reconcileCheckpointRecovery(dataDir))
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
 	it("preserves an interrupted pre-ready restore and leaves the old live store selected", async () => {
 		await withDataDir(async (dataDir) => {
 			const operationId = newCheckpointOperationId()

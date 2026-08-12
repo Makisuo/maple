@@ -241,6 +241,23 @@ describe("maintenance lock", () => {
 		})
 	})
 
+	// First run on a clean machine: `~/.maple` does not exist, so the lock — a
+	// *sibling* of `~/.maple/data` — has no parent to be created in. `maple start`
+	// reconciles checkpoint recovery under this lock before it creates any
+	// directory, so an ENOENT here is a hard startup failure, not a warning.
+	it("acquires the lock when the data dir's parent does not exist yet", async () => {
+		const root = mkdtempSync(join(tmpdir(), "maple-first-run-lock-test-"))
+		const dataDir = join(root, ".maple", "data")
+		try {
+			ok(!existsSync(dirname(dataDir)), "precondition: the maple home is absent")
+			const result = await withMaintenanceLock(dataDir, newCheckpointId(), async () => "done")
+			strictEqual(result, "done")
+			ok(!existsSync(`${dataDir}.maple-maintenance-lock`), "maintenance lock released")
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
 	it("releases the lock even when the task throws", async () => {
 		await withDataDir(async (dataDir) => {
 			await rejects(
