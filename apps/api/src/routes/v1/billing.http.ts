@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpServerRequest } from "effect/unstable/http"
-import { Clock, Effect, Option, Redacted, Schema } from "effect"
+import { Clock, Effect, Option, Schema } from "effect"
 import { EdgeCacheService } from "@maple/cache"
 import {
 	AttachResult,
@@ -17,18 +17,13 @@ import {
 	MapleApi,
 	PreviewAttachResult,
 } from "@maple/domain/http"
-import { Env } from "@/platform/Env"
 import {
 	CUSTOMER_CACHE_BUCKET,
 	decodeUpstream,
 	ensureOk,
 	readCustomerCached,
 } from "@/services/billing/autumn-client"
-import {
-	makeAutumnClient,
-	type AutumnResult,
-	updateCustomerBillingControls,
-} from "@/services/billing/autumn-http"
+import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
 import { AuthService } from "@/services/auth/AuthService"
 import { requireAdmin } from "@/services/auth/auth"
 import { DailySpendService } from "@/services/billing/DailySpendService"
@@ -74,14 +69,9 @@ export const resolveCycleWindow = (
 
 export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handlers) =>
 	Effect.gen(function* () {
-		const env = yield* Env
 		const edgeCache = yield* EdgeCacheService
 		const dailySpend = yield* DailySpendService
-		const secretKey = Option.match(env.AUTUMN_SECRET_KEY, {
-			onNone: () => undefined,
-			onSome: (value) => Redacted.value(value),
-		})
-		const autumn = makeAutumnClient(secretKey, env.AUTUMN_API_URL)
+		const autumn = yield* AutumnClient
 
 		// Invalidate on any 2xx, matching `ensureOk` — otherwise a 201/204 from
 		// attach/openCustomerPortal would decode as success yet leave the stale
@@ -169,12 +159,7 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 								}),
 						)
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-						const result = yield* updateCustomerBillingControls(
-							secretKey,
-							env.AUTUMN_API_URL,
-							tenant.orgId,
-							payload,
-						)
+						const result = yield* autumn.updateCustomerBillingControls(tenant.orgId, payload)
 						yield* ensureOk(result)
 						yield* invalidateCustomer(tenant.orgId, result)
 						const refreshed = yield* autumn.getOrCreateCustomer(tenant.orgId, {
@@ -227,13 +212,8 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 
 export const HttpBillingPublicLive = HttpApiBuilder.group(MapleApi, "billingPublic", (handlers) =>
 	Effect.gen(function* () {
-		const env = yield* Env
 		const auth = yield* AuthService
-		const secretKey = Option.match(env.AUTUMN_SECRET_KEY, {
-			onNone: () => undefined,
-			onSome: (value) => Redacted.value(value),
-		})
-		const autumn = makeAutumnClient(secretKey, env.AUTUMN_API_URL)
+		const autumn = yield* AutumnClient
 
 		return handlers.handle("listPlans", () =>
 			Effect.gen(function* () {

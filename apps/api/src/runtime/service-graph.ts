@@ -19,6 +19,7 @@ import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { McpOAuthService } from "@/services/auth/McpOAuthService"
 import { OAuthStateRepository } from "@/services/auth/OAuthStateRepository"
 import { DailySpendService } from "@/services/billing/DailySpendService"
+import { AutumnClient } from "@/services/billing/autumn-http"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { DigestService } from "@/services/digest/DigestService"
 import { AiTriageService } from "@/services/errors/AiTriageService"
@@ -246,8 +247,15 @@ const VcsServicesLive = Layer.mergeAll(
 // Warehouse-backed daily volume for the billing spend chart.
 const DailySpendServiceLive = DailySpendService.layer.pipe(Layer.provideMerge(WarehouseQueryServiceLive))
 
+// Autumn's REST surface for the billing routes. Only needs Env — the HttpClient
+// comes from its own `Layer.provide(FetchHttpClient.layer)` — and it builds fine
+// with no `AUTUMN_SECRET_KEY` (each call then fails as "Billing is not
+// configured"), so an unconfigured local worker still boots.
+const AutumnClientLive = AutumnClient.layer.pipe(Layer.provide(InfraLive))
+
 const MainServicesLive = Layer.mergeAll(
 	CoreServicesLive,
+	AutumnClientLive,
 	DailySpendServiceLive,
 	CloudflareAnalyticsServiceLive,
 	WarehouseQueryServiceLive,

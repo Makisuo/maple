@@ -1,7 +1,8 @@
-import { Effect, Option, Schema } from "effect"
+import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { BillingUpstreamError } from "@maple/domain/http"
 import type { UpdateBillingControlsRequest } from "@maple/domain/http"
+import { Env } from "@/platform/Env"
 import { AUTUMN_API_VERSION } from "./autumn-api"
 
 /**
@@ -157,6 +158,7 @@ const errorResponse = (statusCode: number, text: string): Record<string, unknown
 }
 
 const callAutumn = (
+	client: HttpClient.HttpClient,
 	secretKey: string | undefined,
 	apiUrl: string,
 	route: AutumnRoute,
@@ -165,9 +167,8 @@ const callAutumn = (
 	secretKey === undefined
 		? Effect.fail(new BillingUpstreamError({ message: "Billing is not configured" }))
 		: Effect.gen(function* () {
-				const client = yield* HttpClient.HttpClient
 				const request = yield* HttpClientRequest.bodyJson(
-					HttpClientRequest.post(`${trimTrailingSlash(apiUrl)}${ROUTE_PATHS[route]}`, {
+					HttpClientRequest.post(`${apiUrl}${ROUTE_PATHS[route]}`, {
 						// The SDK put `x-api-version` on every one of these routes: its
 						// env schema DEFAULTED `AUTUMN_X_API_VERSION` to "2.3.0"
 						// (`z._default(z.string(), "2.3.0")`), so an unset variable still
@@ -210,17 +211,11 @@ const callAutumn = (
 				// we do not fail open — a 5xx stays a 5xx instead of being rewritten
 				// into a synthetic 200 with a stub customer.
 				return { statusCode: response.status, response: errorResponse(response.status, text) }
-			}).pipe(
-				Effect.withSpan("autumn.request", { attributes: { "autumn.route": route } }),
-				// Provided inline (rather than required from context) so the billing
-				// route layers keep their current requirements and `readCustomerCached`
-				// keeps taking an `Effect<AutumnResult, BillingUpstreamError>`.
-				Effect.provide(FetchHttpClient.layer),
-			)
+			}).pipe(Effect.withSpan("autumn.request", { attributes: { "autumn.route": route } }))
 
 type AutumnCall = Effect.Effect<AutumnResult, BillingUpstreamError>
 
-export interface AutumnClient {
+export interface AutumnClientShape {
 	readonly getOrCreateCustomer: (
 		customerId: string,
 		options: {
@@ -239,6 +234,16 @@ export interface AutumnClient {
 		options: { readonly returnUrl?: string | undefined },
 	) => AutumnCall
 	readonly listPlans: (customerId: string | undefined) => AutumnCall
+	/**
+	 * Customer billing controls live on the canonical REST surface — `autumnHandler`
+	 * never exposed an RPC route for them, so this call was always hand-rolled. Its
+	 * explicit `x-api-version` pin matches the routes above, which send the same
+	 * version the SDK defaulted to.
+	 */
+	readonly updateCustomerBillingControls: (
+		orgId: string,
+		controls: UpdateBillingControlsRequest,
+	) => AutumnCall
 }
 
 const customerDataFields = (data: AutumnCustomerData | undefined): Record<string, unknown> =>
@@ -252,71 +257,13 @@ const customerDataFields = (data: AutumnCustomerData | undefined): Record<string
 			}
 
 /**
- * Bind the credentials once; the routes are plain functions returning the same
- * `{ statusCode, response }` result the old `callAutumn` did.
- */
-export const makeAutumnClient = (secretKey: string | undefined, apiUrl: string): AutumnClient => {
-	const call = (route: AutumnRoute, body: Record<string, unknown>) =>
-		callAutumn(secretKey, apiUrl, route, body)
-
-	return {
-		getOrCreateCustomer: (customerId, { expand, customerData }) =>
-			call("getOrCreateCustomer", {
-				customer_id: customerId,
-				...customerDataFields(customerData),
-				// The SDK's custom handler appended this unconditionally, and the
-				// billing UI reads `balances` — keep appending it.
-				expand: [...expand, "balances.feature"],
-			}),
-
-		aggregateEvents: (customerId, { featureId, range }) =>
-			call("aggregateEvents", {
-				customer_id: customerId,
-				feature_id: featureId,
-				range,
-				// Zod default on the SDK's outbound params — genuinely on the wire.
-				bin_size: "day",
-			}),
-
-		// `customer_data` is deliberately absent: `/v1/billing.attach` has no
-		// identity fields in API 2.3.0, and the SDK silently discarded the
-		// `customerData` we handed it here. Pre-identifying the buyer would need a
-		// separate `customers.get_or_create` call on the checkout path — a real
-		// change, not a port.
-		attach: (customerId, { planId }) =>
-			call("attach", {
-				customer_id: customerId,
-				plan_id: planId,
-				redirect_mode: "if_required", // Zod default on the SDK's outbound params.
-			}),
-
-		previewAttach: (customerId, { planId }) =>
-			call("previewAttach", {
-				customer_id: customerId,
-				plan_id: planId,
-				redirect_mode: "if_required",
-			}),
-
-		openCustomerPortal: (customerId, { returnUrl }) =>
-			call("openCustomerPortal", {
-				customer_id: customerId,
-				...(returnUrl !== undefined ? { return_url: returnUrl } : {}),
-			}),
-
-		// The only route Autumn marks customer-optional: an onboarding token gap
-		// still serves the public catalog.
-		listPlans: (customerId) =>
-			call("listPlans", customerId === undefined ? {} : { customer_id: customerId }),
-	}
-}
-
-/**
  * Customer billing controls live on the canonical REST surface — `autumnHandler`
  * never exposed an RPC route for them, so this call was always hand-rolled. Its
  * explicit `x-api-version` pin now matches the routes above, which send the same
  * version the SDK defaulted to.
  */
-export const updateCustomerBillingControls = (
+const callUpdateBillingControls = (
+	client: HttpClient.HttpClient,
 	secretKey: string | undefined,
 	apiUrl: string,
 	orgId: string,
@@ -325,9 +272,8 @@ export const updateCustomerBillingControls = (
 	secretKey === undefined
 		? Effect.fail(new BillingUpstreamError({ message: "Billing is not configured" }))
 		: Effect.gen(function* () {
-				const client = yield* HttpClient.HttpClient
 				const request = yield* HttpClientRequest.bodyJson(
-					HttpClientRequest.post(`${trimTrailingSlash(apiUrl)}/v1/customers.update`, {
+					HttpClientRequest.post(`${apiUrl}/v1/customers.update`, {
 						headers: {
 							Authorization: `Bearer ${secretKey}`,
 							"x-api-version": AUTUMN_API_VERSION,
@@ -364,5 +310,89 @@ export const updateCustomerBillingControls = (
 				Effect.withSpan("autumn.request", {
 					attributes: { "autumn.route": "updateCustomerBillingControls" },
 				}),
-				Effect.provide(FetchHttpClient.layer),
 			)
+
+/**
+ * Autumn's REST routes, bound to the worker's credentials and one `HttpClient`.
+ *
+ * The client is captured at layer build (`Layer.provide(FetchHttpClient.layer)`),
+ * so every returned effect is an `Effect<AutumnResult, BillingUpstreamError>`
+ * with `R = never` — which is what lets `readCustomerCached` take the call
+ * itself, and keeps the billing route groups free of an `HttpClient` requirement.
+ *
+ * A missing `AUTUMN_SECRET_KEY` is deliberately NOT a layer failure: local dev
+ * runs unconfigured and boot must not depend on billing. The unwrap happens once
+ * here, the check stays per call.
+ */
+export class AutumnClient extends Context.Service<AutumnClient, AutumnClientShape>()(
+	"@maple/api/services/billing/AutumnClient",
+	{
+		make: Effect.gen(function* () {
+			const env = yield* Env
+			const httpClient = yield* HttpClient.HttpClient
+			const secretKey = Option.match(env.AUTUMN_SECRET_KEY, {
+				onNone: () => undefined,
+				onSome: (value) => Redacted.value(value),
+			})
+			const apiUrl = trimTrailingSlash(env.AUTUMN_API_URL)
+
+			const call = (route: AutumnRoute, body: Record<string, unknown>) =>
+				callAutumn(httpClient, secretKey, apiUrl, route, body)
+
+			return {
+				getOrCreateCustomer: (customerId, { expand, customerData }) =>
+					call("getOrCreateCustomer", {
+						customer_id: customerId,
+						...customerDataFields(customerData),
+						// The SDK's custom handler appended this unconditionally, and the
+						// billing UI reads `balances` — keep appending it.
+						expand: [...expand, "balances.feature"],
+					}),
+
+				aggregateEvents: (customerId, { featureId, range }) =>
+					call("aggregateEvents", {
+						customer_id: customerId,
+						feature_id: featureId,
+						range,
+						// Zod default on the SDK's outbound params — genuinely on the wire.
+						bin_size: "day",
+					}),
+
+				// `customer_data` is deliberately absent: `/v1/billing.attach` has no
+				// identity fields in API 2.3.0, and the SDK silently discarded the
+				// `customerData` we handed it here. Pre-identifying the buyer would need a
+				// separate `customers.get_or_create` call on the checkout path — a real
+				// change, not a port.
+				attach: (customerId, { planId }) =>
+					call("attach", {
+						customer_id: customerId,
+						plan_id: planId,
+						redirect_mode: "if_required", // Zod default on the SDK's outbound params.
+					}),
+
+				previewAttach: (customerId, { planId }) =>
+					call("previewAttach", {
+						customer_id: customerId,
+						plan_id: planId,
+						redirect_mode: "if_required",
+					}),
+
+				openCustomerPortal: (customerId, { returnUrl }) =>
+					call("openCustomerPortal", {
+						customer_id: customerId,
+						...(returnUrl !== undefined ? { return_url: returnUrl } : {}),
+					}),
+
+				// The only route Autumn marks customer-optional: an onboarding token gap
+				// still serves the public catalog.
+				listPlans: (customerId) =>
+					call("listPlans", customerId === undefined ? {} : { customer_id: customerId }),
+
+				updateCustomerBillingControls: (orgId, controls) =>
+					callUpdateBillingControls(httpClient, secretKey, apiUrl, orgId, controls),
+			} satisfies AutumnClientShape
+		}),
+	},
+) {
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
+}

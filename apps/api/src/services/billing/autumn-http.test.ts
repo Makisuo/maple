@@ -1,13 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { ConfigProvider, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { BillingCustomer, BillingUsage } from "@maple/domain/http"
+import { Env } from "@/platform/Env"
 import { decodeUpstream, ensureOk } from "@/services/billing/autumn-client"
 import {
-	camelizeKeys,
-	makeAutumnClient,
-	type AutumnClient,
+	AutumnClient,
+	type AutumnClientShape,
 	type AutumnResult,
+	camelizeKeys,
 } from "@/services/billing/autumn-http"
 
 const ORG = "org_test_123"
@@ -21,23 +22,57 @@ interface Captured {
 	readonly body: unknown
 }
 
+/** Everything `Env` needs to build, plus the billing keys under test. */
+const testEnv = (autumn: Record<string, string>) =>
+	Env.layer.pipe(
+		Layer.provide(
+			ConfigProvider.layer(
+				ConfigProvider.fromUnknown({
+					TINYBIRD_HOST: "https://api.tinybird.co",
+					TINYBIRD_TOKEN: "test-token",
+					MAPLE_AUTH_MODE: "self_hosted",
+					MAPLE_ROOT_PASSWORD: "test-root-password",
+					MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
+					MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+					...autumn,
+				}),
+			),
+		),
+	)
+
+const clientLayer = (autumn: Record<string, string> = { AUTUMN_SECRET_KEY: KEY, AUTUMN_API_URL: API_URL }) =>
+	AutumnClient.layer.pipe(Layer.provide(testEnv(autumn)))
+
 /**
  * Substitute the fetch the client transport calls.
  *
  * `FetchHttpClient` reads its fetch from the `Fetch` context reference, whose
  * `globalThis.fetch` default is memoized on first read — so swapping
  * `globalThis.fetch` per test would silently keep serving the FIRST test's stub.
- * Providing the reference is the order-independent seam. (The layer itself stays
- * inline in the client, which is what keeps `readCustomerCached`'s
- * `Effect<AutumnResult, BillingUpstreamError>` free of an `HttpClient`
- * requirement.)
+ * Providing the reference is the order-independent seam, and it still reaches a
+ * client built EARLIER by `AutumnClient.layer`: `FetchHttpClient.layer` merges
+ * the request-time context over the layer-build one (`Context.merge(build,
+ * input)` — `input` wins), and the fetch itself is read per request from the
+ * running fiber. That indirection is also why the service's effects stay
+ * `R = never`, which is what `readCustomerCached` requires.
  */
 const provideFetch = <A, E>(effect: Effect.Effect<A, E>, fetch: typeof globalThis.fetch) =>
 	Effect.provideService(effect, FetchHttpClient.Fetch, fetch)
 
+/** Resolve the service from its layer, then run the call with the stub ambient. */
+const runWithClient = <A, E>(
+	fetch: typeof globalThis.fetch,
+	run: (client: AutumnClientShape) => Effect.Effect<A, E>,
+	layer = clientLayer(),
+) =>
+	Effect.gen(function* () {
+		const autumn = yield* AutumnClient
+		return yield* provideFetch(run(autumn), fetch)
+	}).pipe(Effect.provide(layer))
+
 const withFetch = async (
 	respond: { readonly status?: number; readonly body?: string },
-	run: (client: AutumnClient) => Effect.Effect<AutumnResult, unknown>,
+	run: (client: AutumnClientShape) => Effect.Effect<AutumnResult, unknown>,
 ): Promise<{ readonly captured: Captured | undefined; readonly result: AutumnResult }> => {
 	let captured: Captured | undefined
 	const fetch = (async (input, init) => {
@@ -52,7 +87,7 @@ const withFetch = async (
 		return new Response(respond.body ?? JSON.stringify({}), { status: respond.status ?? 200 })
 	}) as typeof globalThis.fetch
 
-	const result = await Effect.runPromise(provideFetch(run(makeAutumnClient(KEY, API_URL)), fetch))
+	const result = await Effect.runPromise(runWithClient(fetch, run))
 	// Pinned here rather than per-route so every call in this file asserts it:
 	// `autumn-js`'s env schema DEFAULTED `AUTUMN_X_API_VERSION` to "2.3.0"
 	// (`z._default(z.string(), "2.3.0")`), so production has always sent this
@@ -61,7 +96,7 @@ const withFetch = async (
 	return { captured, result }
 }
 
-describe("makeAutumnClient request construction", () => {
+describe("AutumnClient request construction", () => {
 	it("getOrCreateCustomer posts to customers.get_or_create and always appends balances.feature", async () => {
 		const { captured } = await withFetch({}, (autumn) =>
 			autumn.getOrCreateCustomer(ORG, { expand: ["subscriptions.plan"] }),
@@ -180,18 +215,32 @@ describe("makeAutumnClient request construction", () => {
 		}) as typeof globalThis.fetch
 
 		await Effect.runPromise(
-			provideFetch(makeAutumnClient(KEY, "https://api.useautumn.com/").listPlans(undefined), fetch),
+			runWithClient(
+				fetch,
+				(autumn) => autumn.listPlans(undefined),
+				clientLayer({ AUTUMN_SECRET_KEY: KEY, AUTUMN_API_URL: "https://api.useautumn.com/" }),
+			),
 		)
 		assert.strictEqual(url, "https://api.useautumn.com/v1/plans.list")
 	})
 
-	it("fails with BillingUpstreamError when no secret key is configured", async () => {
-		const exit = await Effect.runPromiseExit(makeAutumnClient(undefined, API_URL).listPlans(undefined))
-		assert.isTrue(exit._tag === "Failure")
+	it("builds the layer with no secret key, then fails each call with BillingUpstreamError", async () => {
+		// Local dev runs unconfigured: a missing AUTUMN_SECRET_KEY must not fail
+		// the layer (and so must not fail worker boot), only the calls.
+		const fetch = (async () => new Response("{}", { status: 200 })) as typeof globalThis.fetch
+		const error = await Effect.runPromise(
+			runWithClient(
+				fetch,
+				(autumn) => Effect.flip(autumn.listPlans(undefined)),
+				clientLayer({ AUTUMN_API_URL: API_URL }),
+			),
+		)
+		assert.strictEqual(error._tag, "@maple/http/errors/BillingUpstreamError")
+		assert.strictEqual(error.message, "Billing is not configured")
 	})
 })
 
-describe("makeAutumnClient response handling", () => {
+describe("AutumnClient response handling", () => {
 	it("camelizes a realistic customer payload while preserving feature-keyed records", async () => {
 		const wire = {
 			id: ORG,
@@ -382,9 +431,7 @@ describe("makeAutumnClient response handling", () => {
 		const fetch = (async () => new Response("", { status: 200 })) as typeof globalThis.fetch
 
 		const error = await Effect.runPromise(
-			Effect.flip(
-				provideFetch(makeAutumnClient(KEY, API_URL).attach(ORG, { planId: "startup" }), fetch),
-			),
+			runWithClient(fetch, (autumn) => Effect.flip(autumn.attach(ORG, { planId: "startup" }))),
 		)
 		assert.strictEqual(error._tag, "@maple/http/errors/BillingUpstreamError")
 		assert.include(error.message, "attach")
@@ -395,7 +442,7 @@ describe("makeAutumnClient response handling", () => {
 		const fetch = (async () => new Response(null, { status: 204 })) as typeof globalThis.fetch
 
 		const result = await Effect.runPromise(
-			provideFetch(makeAutumnClient(KEY, API_URL).attach(ORG, { planId: "startup" }), fetch),
+			runWithClient(fetch, (autumn) => autumn.attach(ORG, { planId: "startup" })),
 		)
 		assert.deepStrictEqual(result, { statusCode: 204, response: null })
 	})
@@ -408,9 +455,7 @@ describe("makeAutumnClient response handling", () => {
 		}) as typeof globalThis.fetch
 
 		const error = await Effect.runPromise(
-			Effect.flip(
-				provideFetch(makeAutumnClient(KEY, API_URL).getOrCreateCustomer(ORG, { expand: [] }), fetch),
-			),
+			runWithClient(fetch, (autumn) => Effect.flip(autumn.getOrCreateCustomer(ORG, { expand: [] }))),
 		)
 		assert.strictEqual(error._tag, "@maple/http/errors/BillingUpstreamError")
 	})
