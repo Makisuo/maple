@@ -231,11 +231,11 @@ function calculateMaple(values: Record<string, number>, competitor: Competitor) 
 	let metricsGB = 0
 
 	if (competitor === "datadog") {
-		// Trace volume from APM hosts is a rough estimate: ~5 GB of spans per
-		// host per month (≈2 spans/sec at ~1 KB/span). Real per-host volume
+		// Trace volume from APM hosts is a rough estimate: ~50 GB of spans per
+		// host per month (≈19 spans/sec at ~1 KB/span). Real per-host volume
 		// varies widely — Datadog's own included allotment is 150 GB/host.
 		logsGB = values.logVolume
-		tracesGB = values.apmHosts * 5
+		tracesGB = values.apmHosts * 50
 	} else if (competitor === "grafana") {
 		// Grafana bills active series, which assumes 1 data point per minute
 		// per series. 1k series × 43,200 min/mo × ~0.1 KB/point ≈ 4.32 GB.
@@ -488,7 +488,7 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 				{competitor === "grafana" &&
 					" Grafana bills active series (1 data point per minute per series), so the Maple estimate converts 1k active series to ~4.32 GB/mo assuming ~0.1 KB per decoded metric data point — your real ratio depends on attribute sizes. Grafana log and trace rates model ingest (process + write); retention and query fees are not included."}
 				{competitor === "datadog" &&
-					" Trace volume is estimated at ~5 GB of spans per APM host per month, and Datadog log indexing assumes ~1 KB per event with ~15% of events indexed; actual volumes depend on request rate and instrumentation density."}
+					" Trace volume is estimated at ~50 GB of spans per APM host per month, and Datadog log indexing assumes ~1 KB per event with ~15% of events indexed; actual volumes depend on request rate and instrumentation density."}
 				{competitor === "new-relic" &&
 					" New Relic modeled on Standard ($10 first user + $99/user, max 5) up to 5 full platform users and Pro ($349/user/mo, annual commitment) above, with the Original Data option ($0.40/GB beyond 100 GB free); data is assumed to split evenly across logs, traces, and metrics."}
 				{competitor === "dash0" &&
