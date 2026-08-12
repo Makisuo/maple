@@ -19,6 +19,7 @@ import {
 	sanitizeDashboardSections,
 	UserId,
 } from "@maple/domain/http"
+import { parseStoredDashboard, stampCurrentVersion } from "@maple/widgets/dashboard"
 import { dashboards, dashboardVersions, type DashboardVersionRow } from "@maple/db"
 import { and, desc, eq, lt } from "drizzle-orm"
 import { Clock, Effect, Layer, Option, Schema, Context } from "effect"
@@ -60,15 +61,36 @@ const parseTimestamp = (field: "createdAt" | "updatedAt", value: string) => {
 	return Effect.succeed(timestamp)
 }
 
-const parsePayload = (payloadJson: unknown) =>
-	Schema.decodeUnknownEffect(DashboardDocument)(payloadJson).pipe(
-		Effect.mapError(
-			() =>
-				new DashboardPersistenceError({
-					message: "Stored dashboard payload is invalid JSON",
-				}),
-		),
-	)
+/**
+ * Reads a stored payload: migrate the raw JSON up to the current schema version,
+ * then decode.
+ *
+ * A rejection is a hard failure here because this is the *writable* path — every
+ * document read through it can be handed to `mutate`, which writes it back. A
+ * partially-decoded document would be silently persisted by that round trip and
+ * the original lost, so the only safe answer to "this payload doesn't decode" is
+ * to refuse it. The read-only version-history path may degrade instead.
+ */
+const parsePayload = Effect.fnUntraced(function* (payloadJson: unknown) {
+	const outcome = yield* parseStoredDashboard(payloadJson)
+
+	if (outcome._tag === "Rejected") {
+		yield* Effect.logError("Stored dashboard payload failed schema decode", {
+			fromVersion: outcome.fromVersion,
+			issue: outcome.issue,
+		})
+		return yield* new DashboardPersistenceError({
+			message: "Stored dashboard payload is invalid JSON",
+		})
+	}
+
+	yield* Effect.annotateCurrentSpan({
+		"maple.dashboard.schema_version_read": outcome.fromVersion,
+		"maple.dashboard.degraded_widgets": outcome.degradedWidgetIds.length,
+	})
+
+	return outcome.document
+})
 
 // jsonb columns take the document object directly; this guard preserves the
 // pre-Postgres validation that the payload is JSON-serializable before write.
@@ -95,11 +117,12 @@ const validatePayload = Effect.fnUntraced(function* (dashboard: DashboardDocumen
 			// never be persisted into `payload_json` (nor a version snapshot). Strip
 			// it here so a client that echoes it back in an upsert payload can't
 			// leak it into storage.
-			if (repaired.txid === undefined) {
-				return repaired === dashboard ? dashboard : new DashboardDocument({ ...repaired })
-			}
 			const { txid: _txid, ...rest } = repaired
-			return new DashboardDocument({ ...rest })
+			// Stamp the schema version every writer's document is being stored in.
+			// This is the only place it happens, which is why upgrades are lazy: a
+			// legacy document is migrated in memory on every read and only recorded
+			// at its next natural write. No backfill job, and so nothing to undo.
+			return new DashboardDocument(stampCurrentVersion(rest))
 		},
 		catch: () =>
 			new DashboardValidationError({

@@ -13,7 +13,8 @@ import {
 import { Database, DatabaseError } from "@/platform/DatabaseLive"
 import { DashboardPersistenceService } from "./DashboardPersistenceService"
 import { Env } from "@/platform/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { CURRENT_DASHBOARD_SCHEMA_VERSION } from "@maple/widgets/dashboard"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 
 const trackedDbs: TestDb[] = []
 
@@ -290,9 +291,7 @@ describe("DashboardPersistenceService", () => {
 				asUserId("user_a"),
 				makePortableDashboard({
 					name: "Grouped import",
-					sections: [
-						{ id: "s1", title: "Overview", tabs: [{ id: "t1", title: "Latency" }] },
-					],
+					sections: [{ id: "s1", title: "Overview", tabs: [{ id: "t1", title: "Latency" }] }],
 					widgets: [
 						{
 							id: "w1",
@@ -315,5 +314,132 @@ describe("DashboardPersistenceService", () => {
 			const listed = yield* DashboardPersistenceService.list(asOrgId("org_a"))
 			assert.strictEqual(listed.dashboards[0]?.sections?.length, 1)
 		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	describe("schema versioning", () => {
+		const readStoredPayload = (testDb: TestDb, id: string) =>
+			Effect.promise(() =>
+				queryFirstRow<{ payload_json: Record<string, unknown> }>(
+					testDb,
+					"SELECT payload_json FROM dashboards WHERE id = $1",
+					[id],
+				),
+			)
+
+		/** Inserts a row straight into storage, bypassing the write path's stamping. */
+		const insertRawDashboard = (testDb: TestDb, id: string, payload: unknown) =>
+			Effect.promise(() =>
+				executeSql(
+					testDb,
+					`INSERT INTO dashboards (org_id, id, name, payload_json, created_at, updated_at, created_by, updated_by, version)
+					 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+					[
+						"org_a",
+						id,
+						"Legacy",
+						JSON.stringify(payload),
+						new Date("2026-01-01T00:00:00.000Z"),
+						new Date("2026-01-01T00:00:00.000Z"),
+						"user_a",
+						"user_a",
+						1,
+					],
+				),
+			)
+
+		const legacyPayload = (id: string) => ({
+			// No `schemaVersion` key: exactly how every pre-versioning row is stored.
+			id,
+			name: "Legacy",
+			timeRange: { type: "relative", value: "12h" },
+			widgets: [
+				{
+					id: "w1",
+					visualization: "chart",
+					dataSource: {
+						endpoint: "custom_query_builder_timeseries",
+						params: { queries: [{ id: "a", name: "A", dataSource: "traces" }] },
+					},
+					display: {},
+					layout: { x: 0, y: 0, w: 6, h: 4 },
+				},
+			],
+			createdAt: "2026-01-01T00:00:00.000Z",
+			updatedAt: "2026-01-01T00:00:00.000Z",
+		})
+
+		it.effect("stamps the current schema version into the stored payload", () => {
+			const testDb = createTestDb(trackedDbs)
+
+			return Effect.gen(function* () {
+				yield* DashboardPersistenceService.upsert(
+					asOrgId("org_a"),
+					asUserId("user_a"),
+					makeDashboard({ id: asDashboardId("dash-stamp") }),
+				)
+
+				const row = yield* readStoredPayload(testDb, "dash-stamp")
+				assert.strictEqual(row?.payload_json.schemaVersion, CURRENT_DASHBOARD_SCHEMA_VERSION)
+			}).pipe(Effect.provide(makeLayer(testDb)))
+		})
+
+		it.effect("reads a legacy payload that predates the version marker", () => {
+			const testDb = createTestDb(trackedDbs)
+
+			return Effect.gen(function* () {
+				yield* insertRawDashboard(testDb, "dash-legacy", legacyPayload("dash-legacy"))
+
+				const dashboard = yield* DashboardPersistenceService.get(
+					asOrgId("org_a"),
+					asDashboardId("dash-legacy"),
+				)
+
+				assert.strictEqual(dashboard.name, "Legacy")
+				// Params are carried through the migration byte-for-byte.
+				assert.deepStrictEqual(dashboard.widgets[0]?.dataSource.params, {
+					queries: [{ id: "a", name: "A", dataSource: "traces" }],
+				})
+			}).pipe(Effect.provide(makeLayer(testDb)))
+		})
+
+		it.effect("upgrades a legacy row lazily — on its next write, not on read", () => {
+			const testDb = createTestDb(trackedDbs)
+
+			return Effect.gen(function* () {
+				yield* insertRawDashboard(testDb, "dash-lazy", legacyPayload("dash-lazy"))
+
+				yield* DashboardPersistenceService.get(asOrgId("org_a"), asDashboardId("dash-lazy"))
+				const afterRead = yield* readStoredPayload(testDb, "dash-lazy")
+				assert.strictEqual(
+					afterRead?.payload_json.schemaVersion,
+					undefined,
+					"a read must not rewrite storage",
+				)
+
+				yield* DashboardPersistenceService.upsert(
+					asOrgId("org_a"),
+					asUserId("user_a"),
+					makeDashboard({ id: asDashboardId("dash-lazy"), name: "Rewritten" }),
+				)
+				const afterWrite = yield* readStoredPayload(testDb, "dash-lazy")
+				assert.strictEqual(afterWrite?.payload_json.schemaVersion, CURRENT_DASHBOARD_SCHEMA_VERSION)
+			}).pipe(Effect.provide(makeLayer(testDb)))
+		})
+
+		it.effect("refuses a stored payload it cannot fully decode", () => {
+			const testDb = createTestDb(trackedDbs)
+
+			return Effect.gen(function* () {
+				const corrupt = { ...legacyPayload("dash-corrupt"), widgets: [{ id: "no-layout" }] }
+				yield* insertRawDashboard(testDb, "dash-corrupt", corrupt)
+
+				const exit = yield* Effect.exit(
+					DashboardPersistenceService.get(asOrgId("org_a"), asDashboardId("dash-corrupt")),
+				)
+
+				assert.isTrue(Exit.isFailure(exit))
+				assert.instanceOf(getError(exit), DashboardPersistenceError)
+			}).pipe(Effect.provide(makeLayer(testDb)))
+		})
 	})
 })

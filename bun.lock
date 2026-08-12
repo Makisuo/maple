@@ -62,6 +62,7 @@
         "@maple/llm": "workspace:*",
         "@maple/query-engine": "workspace:*",
         "@maple/query-engine-integrations": "workspace:*",
+        "@maple/widgets": "workspace:*",
         "@react-email/components": "^1.0.11",
         "@tinybirdco/sdk": "catalog:tinybird",
         "autumn-js": "^1.2.51",
@@ -591,6 +592,8 @@
       "version": "0.0.0",
       "dependencies": {
         "@maple-dev/clickhouse-builder": "workspace:*",
+        "@maple/primitives": "workspace:*",
+        "@maple/widgets": "workspace:*",
         "@tinybirdco/sdk": "catalog:tinybird",
         "effect": "catalog:effect",
       },
@@ -648,6 +651,17 @@
     "packages/otel-collector-maple-exporter": {
       "name": "otel-collector-maple-exporter",
       "version": "0.0.0",
+    },
+    "packages/primitives": {
+      "name": "@maple/primitives",
+      "dependencies": {
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+      },
     },
     "packages/query-engine": {
       "name": "@maple/query-engine",
@@ -712,6 +726,19 @@
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "tailwindcss": "^4.0.0",
+      },
+    },
+    "packages/widgets": {
+      "name": "@maple/widgets",
+      "dependencies": {
+        "@maple/primitives": "workspace:*",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
       },
     },
   },
@@ -1555,6 +1582,8 @@
 
     "@maple/otel-helpers": ["@maple/otel-helpers@workspace:lib/otel-helpers"],
 
+    "@maple/primitives": ["@maple/primitives@workspace:packages/primitives"],
+
     "@maple/query-engine": ["@maple/query-engine@workspace:packages/query-engine"],
 
     "@maple/query-engine-integrations": ["@maple/query-engine-integrations@workspace:packages/query-engine-integrations"],
@@ -1568,6 +1597,8 @@
     "@maple/unitflow": ["@maple/unitflow@workspace:lib/unitflow"],
 
     "@maple/web": ["@maple/web@workspace:apps/web"],
+
+    "@maple/widgets": ["@maple/widgets@workspace:packages/widgets"],
 
     "@mdx-js/mdx": ["@mdx-js/mdx@3.1.1", "", { "dependencies": { "@types/estree": "^1.0.0", "@types/estree-jsx": "^1.0.0", "@types/hast": "^3.0.0", "@types/mdx": "^2.0.0", "acorn": "^8.0.0", "collapse-white-space": "^2.0.0", "devlop": "^1.0.0", "estree-util-is-identifier-name": "^3.0.0", "estree-util-scope": "^1.0.0", "estree-walker": "^3.0.0", "hast-util-to-jsx-runtime": "^2.0.0", "markdown-extensions": "^2.0.0", "recma-build-jsx": "^1.0.0", "recma-jsx": "^1.0.0", "recma-stringify": "^1.0.0", "rehype-recma": "^1.0.0", "remark-mdx": "^3.0.0", "remark-parse": "^11.0.0", "remark-rehype": "^11.0.0", "source-map": "^0.7.0", "unified": "^11.0.0", "unist-util-position-from-estree": "^2.0.0", "unist-util-stringify-position": "^4.0.0", "unist-util-visit": "^5.0.0", "vfile": "^6.0.0" } }, "sha512-f6ZO2ifpwAQIpzGWaBQT2TXxPv6z3RBzQKpVftEWN78Vl/YweF1uwussDx8ECAXVtr3Rs89fKyG9YlzUs9DyGQ=="],
 

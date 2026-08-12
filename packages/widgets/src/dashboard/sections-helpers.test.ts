@@ -8,8 +8,12 @@ import {
 	sanitizeDashboardSections,
 	widgetsInTab,
 	withSectionTarget,
-} from "./dashboard-sections"
-import { DASHBOARD_MAX_SECTIONS, DASHBOARD_MAX_TABS_PER_SECTION, type DashboardSection } from "./dashboards"
+} from "./sections-helpers"
+import {
+	DASHBOARD_MAX_SECTIONS,
+	DASHBOARD_MAX_TABS_PER_SECTION,
+	type DashboardSection,
+} from "./shared/sections"
 
 interface TestWidget {
 	id: string
@@ -189,14 +193,21 @@ describe("sanitizeDashboardSections", () => {
 		expect("sectionId" in sanitizeDashboardSections(doc).widgets[0]!).toBe(false)
 	})
 
-
 	// "Collapsed by default" + "can never be collapsed" would render the group
 	// folded with no chevron to unfold it. `collapsible: false` is the stronger
 	// claim, so it wins and the stale default is dropped.
 	it("clears `collapsed` on a section that cannot be collapsed", () => {
 		const doc = {
 			widgets: [],
-			sections: [{ id: "s1", title: "S", collapsed: true, collapsible: false, tabs: [{ id: "t1", title: "T" }] }],
+			sections: [
+				{
+					id: "s1",
+					title: "S",
+					collapsed: true,
+					collapsible: false,
+					tabs: [{ id: "t1", title: "T" }],
+				},
+			],
 		}
 		const repaired = sanitizeDashboardSections(doc).sections?.[0]
 		expect("collapsed" in repaired!).toBe(false)
