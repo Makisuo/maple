@@ -50,7 +50,8 @@
 			"ignoreBinaries": ["pscale"]
 		},
 		"packages/email": {
-			"entry": ["src/render-preview.tsx"]
+			"entry": ["scripts/**/*.ts"],
+			"ignoreDependencies": ["tailwindcss"]
 		},
 		"lib/effect-cloudflare": {
 			"ignoreDependencies": ["cloudflare"]
