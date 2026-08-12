@@ -60,7 +60,12 @@ const WireDashboard = Schema.Struct({
 	tags: Schema.Array(Schema.String),
 	time_range: Schema.Record(Schema.String, Schema.Unknown),
 	widgets: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
-	sections: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+	// Optional, unlike its siblings: an IaC client has its own release cadence and
+	// routinely runs against a Maple API older than itself. A required field here
+	// would make `alchemy deploy` fail to decode every dashboard served by a
+	// deployment that predates sections. `drifted` reads it as `[]` when absent,
+	// which is what such an API means anyway.
+	sections: Schema.optional(Schema.Array(Schema.Record(Schema.String, Schema.Unknown))),
 	variables: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 })
 const decodeWireDashboard = Schema.decodeUnknownEffect(WireDashboard)
@@ -79,11 +84,14 @@ const desiredBody = (props: DashboardProps) => ({
 /** Compare only the fields the user declared against the observed wire object. */
 const drifted = (props: DashboardProps, observed: Schema.Schema.Type<typeof WireDashboard>): boolean => {
 	const body = desiredBody(props) as Record<string, unknown>
+	// An API that predates sections omits the key entirely; treat that as "no
+	// groups" so declaring `sections: []` doesn't read as perpetual drift.
+	const seen: Record<string, unknown> = {
+		...(observed as unknown as Record<string, unknown>),
+		sections: observed.sections ?? [],
+	}
 	return Object.keys(body).some(
-		(key) =>
-			!deepEqual(body[key], (observed as unknown as Record<string, unknown>)[key], {
-				stripNullish: true,
-			}),
+		(key) => !deepEqual(body[key], seen[key], { stripNullish: true }),
 	)
 }
 
