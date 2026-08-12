@@ -223,9 +223,8 @@ function calculateMaple(values: Record<string, number>, competitor: Competitor) 
 	// Maple Startup (autumn.config.ts): $39/mo with 100 GB included per signal
 	// (logs, traces, metrics) and $0.30/GB overage billed per signal — the
 	// allowances are not a fungible 300 GB pool. Maple meters decoded OTLP
-	// payload bytes, so all conversions below estimate decoded sizes on one
-	// shared basis: ~1 KB per span and per log record, ~0.1 KB per metric
-	// data point.
+	// payload bytes; where a competitor bills in counts instead of volume, the
+	// branch converts using a per-item byte estimate documented at that branch.
 	const baseCost = 39
 	let logsGB = 0
 	let tracesGB = 0
@@ -244,12 +243,15 @@ function calculateMaple(values: Record<string, number>, competitor: Competitor) 
 		tracesGB = values.traceVolume
 		metricsGB = values.metricSeries * 4.32
 	} else if (competitor === "dash0") {
+		// Dash0 bills per item; convert counts to decoded OTLP volume at
+		// ~1 KB per span and per log record, ~0.1 KB per metric data point.
 		tracesGB = values.spans * 1
 		logsGB = values.logs * 1
 		metricsGB = values.metricPoints * 0.1
 	} else {
 		// New Relic's slider is one total volume; assume it splits evenly
-		// across the three signals, which makes the pooled math exact.
+		// across the three signals (under an even split the per-signal
+		// overage sum equals max(0, total − 300)).
 		logsGB = values.dataVolume / 3
 		tracesGB = values.dataVolume / 3
 		metricsGB = values.dataVolume / 3
@@ -406,9 +408,6 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 								</span>
 							</div>
 						))}
-						{mapleCost.breakdown.map((item) => (
-							<div key={`${item.label}-detail`} className="hidden" />
-						))}
 					</div>
 					<div className="mt-3 space-y-1">
 						{mapleCost.breakdown.map((item) => (
@@ -485,16 +484,15 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 				Estimates based on published pricing as of August 2026. Actual costs may vary based on
 				contract terms, volume discounts, and additional features. Maple pricing based on the
 				Startup plan ($39/mo with 100 GB included per signal — logs, traces, metrics — then
-				$0.30/GB, billed per signal). Maple meters uncompressed (decoded OTLP) bytes; conversions
-				assume roughly 1 KB per span and log record and 0.1 KB per metric data point.
+				$0.30/GB, billed per signal), metered on uncompressed (decoded OTLP) bytes.
 				{competitor === "grafana" &&
-					" Grafana bills active series (1 data point per minute per series), so the Maple estimate converts 1k active series to ~4.32 GB/mo of metric data. Grafana log and trace rates model ingest (process + write); retention and query fees are not included."}
+					" Grafana bills active series (1 data point per minute per series), so the Maple estimate converts 1k active series to ~4.32 GB/mo assuming ~0.1 KB per decoded metric data point — your real ratio depends on attribute sizes. Grafana log and trace rates model ingest (process + write); retention and query fees are not included."}
 				{competitor === "datadog" &&
-					" Trace volume is estimated at ~5 GB of spans per APM host per month; your actual span volume depends on request rate and instrumentation density."}
+					" Trace volume is estimated at ~5 GB of spans per APM host per month, and Datadog log indexing assumes ~1 KB per event with ~15% of events indexed; actual volumes depend on request rate and instrumentation density."}
 				{competitor === "new-relic" &&
 					" New Relic modeled on Standard ($10 first user + $99/user, max 5) up to 5 full platform users and Pro ($349/user/mo, annual commitment) above, with the Original Data option ($0.40/GB beyond 100 GB free); data is assumed to split evenly across logs, traces, and metrics."}
 				{competitor === "dash0" &&
-					" Dash0 bills per data point (spans & logs $0.60/M, metrics $0.20/M); Maple bills per GB, so the Maple estimate converts data points to volume using the byte sizes above. Your real ratio depends on attribute and payload sizes."}
+					" Dash0 bills per data point (spans & logs $0.60/M, metrics $0.20/M); Maple bills per GB, so the Maple estimate converts at roughly 1 KB per span and log record and 0.1 KB per metric data point. Your real ratio depends on attribute and payload sizes."}
 			</p>
 		</div>
 	)
