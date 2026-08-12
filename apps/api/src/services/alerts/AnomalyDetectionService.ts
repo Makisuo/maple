@@ -50,14 +50,13 @@ import {
 	MutableHashMap,
 	Option,
 	Ref,
-	Schedule,
 	Schema,
 } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
-import { isRetryablePostgresContention } from "@/platform/postgres-errors"
+import { Database } from "@/platform/DatabaseLive"
+import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -126,29 +125,10 @@ const ANOMALY_ACTIVE_DISCOVERY_WINDOW_MS = 2 * HOUR_MS
 const ANOMALY_ACTIVE_ORGS_CACHE_BUCKET = "anomaly-active-orgs"
 const ANOMALY_ACTIVE_ORGS_CACHE_KEY = "active"
 const ANOMALY_ACTIVE_ORGS_CACHE_TTL_S = 6 * 60 * 60
-const describeCause = (cause: unknown): string | undefined => {
-	if (cause == null) return undefined
-	if (cause instanceof Error) return cause.stack ?? cause.message
-	if (typeof cause === "string") return cause
-	try {
-		return JSON.stringify(cause)
-	} catch {
-		return String(cause)
-	}
-}
-
-const makePersistenceError = (error: unknown): AnomalyPersistenceError => {
-	const message =
-		error instanceof DatabaseError || error instanceof Error
-			? error.message
-			: "Anomaly persistence failure"
-	const cause = describeCause(error instanceof Error ? error.cause : error)
-	return cause === undefined
-		? new AnomalyPersistenceError({ message })
-		: new AnomalyPersistenceError({ message, cause })
-}
-
-const CONTENTION_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
+const makePersistenceError = makePersistenceErrorMapper(
+	AnomalyPersistenceError,
+	"Anomaly persistence failure",
+)
 
 /**
  * Adapt a drizzle incident row (timestamptz → Date, jsonb → unknown[]) to the
@@ -245,22 +225,7 @@ const make = Effect.gen(function* () {
 		onSome: (e) => e[INVESTIGATION_FANOUT_BINDING],
 	})
 
-	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-		database.execute(fn).pipe(
-			Effect.retry({
-				schedule: CONTENTION_RETRY_SCHEDULE,
-				while: isRetryablePostgresContention,
-			}),
-			Effect.tapError((error) =>
-				Effect.logError("AnomalyDetectionService dbExecute failed").pipe(
-					Effect.annotateLogs({
-						message: error.message,
-						cause: describeCause(error.cause) ?? "(none)",
-					}),
-				),
-			),
-			Effect.mapError(makePersistenceError),
-		)
+	const dbExecute = makeDbExecute(database, "AnomalyDetectionService", makePersistenceError)
 
 	const isoFromEpoch = (ms: number) => decodeIsoSync(new Date(ms).toISOString())
 

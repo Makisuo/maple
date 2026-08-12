@@ -23,8 +23,8 @@ import {
 } from "@maple/db"
 import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { Array as Arr, Context, Effect, HashSet, Layer, Schema } from "effect"
-import { Database, type DatabaseClient, type DatabaseShape } from "@/platform/DatabaseLive"
-import { describeCause } from "@/platform/describe-cause"
+import { Database, type DatabaseShape } from "@/platform/DatabaseLive"
+import { makeDbExecute } from "@/platform/db-execute"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { dateToMs, msToDate } from "@/platform/time"
 import {
@@ -35,19 +35,12 @@ import {
 	safeParseStringArray,
 	type RuleEvaluationState,
 } from "./AlertRuleModel"
+import { makePersistenceError } from "./alert-persistence"
 import { AlertRuntime, type AlertRuntimeShape } from "./AlertRuntime"
 
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
 const MAX_ACTIVE_ALERT_RULES_PER_ORG = 100
-
-const makePersistenceError = (error: unknown) => {
-	const cause = describeCause(error instanceof Error ? error.cause : error)
-	return new AlertPersistenceError({
-		message: error instanceof Error ? error.message : "Alert persistence failed",
-		...(cause === undefined ? {} : { cause }),
-	})
-}
 
 const isAdmin = (roles: ReadonlyArray<RoleName>) => roles.some((role) => adminRoles.includes(role))
 
@@ -79,18 +72,7 @@ export const makeAlertRulePersistence = (options: {
 	const { database, runtime } = options
 	const { normalizeRule, normalizeRuleRow } = makeAlertRuleNormalizer(runtime)
 
-	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-		database.execute(fn).pipe(
-			Effect.tapError((error) =>
-				Effect.logError("AlertsService dbExecute failed").pipe(
-					Effect.annotateLogs({
-						message: error.message,
-						cause: describeCause(error.cause) ?? "(none)",
-					}),
-				),
-			),
-			Effect.mapError(makePersistenceError),
-		)
+	const dbExecute = makeDbExecute(database, "AlertRulesService", makePersistenceError)
 
 	const requireAdmin = Effect.fn("AlertsService.requireAdmin")(function* (roles: ReadonlyArray<RoleName>) {
 		if (isAdmin(roles)) return

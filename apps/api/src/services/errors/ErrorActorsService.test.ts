@@ -43,7 +43,7 @@ describe("ErrorActorsService", () => {
 			}
 
 			const fiber = yield* Effect.forkChild(
-				makeErrorDatabaseExecute(database)(async () => "unused"),
+				makeErrorDatabaseExecute(database, "ErrorActorsService")(async () => "unused"),
 				{ startImmediately: true },
 			)
 			yield* TestClock.adjust("1 second")
