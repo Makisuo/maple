@@ -46,10 +46,25 @@ const decodeDashboardDocument = (payloadJson: unknown) =>
  * arrays. Shared by `rowToDashboard` (Electric path) and `ensureDashboard`
  * (use-dashboard-store) — they decode from different sources but widen identically.
  */
+/**
+ * Sections need a deep copy, not a spread: both the section array and each
+ * section's `tabs` array decode readonly. Written out field by field so the
+ * widening is checked rather than asserted, and so `collapsed` stays absent
+ * (it is `optionalKey`, and a present `undefined` fails the re-encode).
+ */
+const widenSections = (sections: DashboardDocument["sections"] | undefined): Dashboard["sections"] =>
+	sections?.map((section) => ({
+		id: section.id,
+		title: section.title,
+		...(section.collapsed !== undefined ? { collapsed: section.collapsed } : {}),
+		tabs: section.tabs.map((tab) => ({ id: tab.id, title: tab.title })),
+	}))
+
 export const documentToDashboard = (document: DashboardDocument): Dashboard => ({
 	...document,
 	tags: document.tags ? [...document.tags] : undefined,
 	widgets: [...document.widgets] as Dashboard["widgets"],
+	sections: widenSections(document.sections),
 	variables: document.variables ? ([...document.variables] as Dashboard["variables"]) : undefined,
 })
 
@@ -93,6 +108,7 @@ export const v2DashboardToDashboard = (value: V2Dashboard): Dashboard => ({
 	tags: [...value.tags],
 	timeRange: value.timeRange,
 	widgets: [...value.widgets] as Dashboard["widgets"],
+	sections: widenSections(value.sections),
 	variables: [...value.variables] as Dashboard["variables"],
 	...(value.refreshIntervalSeconds !== null
 		? { refreshIntervalSeconds: value.refreshIntervalSeconds }
@@ -113,6 +129,10 @@ const rowToUpdateRequest = (row: DashboardRow): V2DashboardUpdateParams => {
 		tags: dashboard.tags ?? [],
 		timeRange: dashboard.timeRange,
 		widgets: dashboard.widgets,
+		// Must be sent, not omitted: `applyUpdate` retains the current value for an
+		// omitted key, so leaving this out would make deleting a group silently
+		// never persist. `?? []` matches how `tags`/`variables` behave here.
+		sections: dashboard.sections ?? [],
 		variables: dashboard.variables ?? [],
 		refreshIntervalSeconds: dashboard.refreshIntervalSeconds ?? null,
 	}

@@ -267,7 +267,35 @@ export const V2DashboardWidget = Schema.Struct({
 	// Optional per-widget window. Omit it — the overwhelmingly common case — and
 	// the widget follows the dashboard's `time_range`.
 	timeRange: optional(V2TimeRange),
-}).pipe(Schema.encodeKeys({ dataSource: "data_source", timeRange: "time_range" }))
+	// Section membership. Omit both — the common case — and the widget sits on
+	// the root canvas. `layout` is relative to whichever container these name, so
+	// two widgets in different sections may both be at `x: 0, y: 0`.
+	sectionId: optional(Schema.String),
+	tabId: optional(Schema.String),
+}).pipe(
+	Schema.encodeKeys({
+		dataSource: "data_source",
+		timeRange: "time_range",
+		sectionId: "section_id",
+		tabId: "tab_id",
+	}),
+)
+
+const V2DashboardSectionTab = Schema.Struct({ id: Schema.String, title: Schema.String })
+
+export const V2DashboardSection = Schema.Struct({
+	id: Schema.String,
+	title: Schema.String,
+	// The stored default. Individual viewers override it in their own URL without
+	// changing what anyone else sees.
+	collapsed: optional(Schema.Boolean),
+	tabs: Schema.Array(V2DashboardSectionTab),
+}).annotate({
+	identifier: "DashboardSection",
+	title: "Dashboard section",
+	description:
+		"A collapsible group of widgets. A section with one tab renders as a plain header; two or more render a tab bar. Widgets join a section by setting `section_id` and `tab_id`.",
+})
 
 const V2DashboardVariableSource = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("facet"), facet: DashboardQueryVariableFacet }),
@@ -307,6 +335,9 @@ const dashboardFields = {
 	tags: Schema.Array(Schema.String),
 	timeRange: V2TimeRange,
 	widgets: Schema.Array(V2DashboardWidget),
+	// Always present, `[]` when the dashboard is one flat canvas — matching how
+	// `tags` and `variables` read on this resource.
+	sections: Schema.Array(V2DashboardSection),
 	variables: Schema.Array(V2DashboardVariable),
 	// `null` is off, matching `description`'s absence convention on this resource.
 	refreshIntervalSeconds: Schema.NullOr(DashboardRefreshIntervalSeconds),
@@ -356,6 +387,7 @@ export const V2DashboardCreateParams = Schema.Struct({
 	tags: optional(Schema.Array(Schema.String)),
 	timeRange: optional(V2TimeRange),
 	widgets: optional(Schema.Array(V2DashboardWidget)),
+	sections: optional(Schema.Array(V2DashboardSection)),
 	variables: optional(Schema.Array(V2DashboardVariable)),
 	refreshIntervalSeconds: optional(Schema.NullOr(DashboardRefreshIntervalSeconds)),
 })
@@ -378,6 +410,7 @@ export const V2DashboardUpdateParams = Schema.Struct({
 	tags: optional(Schema.Array(Schema.String)),
 	timeRange: optional(V2TimeRange),
 	widgets: optional(Schema.Array(V2DashboardWidget)),
+	sections: optional(Schema.Array(V2DashboardSection)),
 	variables: optional(Schema.Array(V2DashboardVariable)),
 	refreshIntervalSeconds: optional(Schema.NullOr(DashboardRefreshIntervalSeconds)),
 })

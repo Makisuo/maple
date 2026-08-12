@@ -212,6 +212,46 @@ export const WidgetLayoutSchema = Schema.Struct({
 	maxH: Schema.optional(Schema.Number),
 })
 
+// Sections (collapsible widget groups, optionally tabbed)
+
+export const DASHBOARD_MAX_SECTIONS = 50
+export const DASHBOARD_MAX_TABS_PER_SECTION = 20
+
+export const DashboardSectionTabSchema = Schema.Struct({
+	id: Schema.String,
+	title: Schema.String,
+})
+export type DashboardSectionTab = typeof DashboardSectionTabSchema.Type
+
+/**
+ * A collapsible group of widgets, optionally split into tabs.
+ *
+ * Invariants — enforced by `sanitizeDashboardSections` on write, deliberately
+ * NOT by schema `check`s: `tabs` is non-empty, and every widget carrying this
+ * section's id also carries one of its tab ids. A document that violates them
+ * must still decode (a widget pointing at a deleted section becomes ungrouped)
+ * rather than failing the whole dashboard read.
+ *
+ * One tab renders as a plain group header; two or more render a tab bar.
+ */
+export const DashboardSectionSchema = Schema.Struct({
+	id: Schema.String,
+	title: Schema.String,
+	// The *stored default* collapse state. Per-viewer overrides ride the URL
+	// (`?collapsed=`/`?expanded=`), so one person collapsing a group on their
+	// screen never changes what the next person sees.
+	collapsed: Schema.optionalKey(Schema.Boolean),
+	tabs: Schema.Array(DashboardSectionTabSchema).check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(DASHBOARD_MAX_TABS_PER_SECTION),
+	),
+})
+export type DashboardSection = typeof DashboardSectionSchema.Type
+
+const DashboardSectionsSchema = Schema.Array(DashboardSectionSchema).check(
+	Schema.isMaxLength(DASHBOARD_MAX_SECTIONS),
+)
+
 export const DashboardWidgetSchema = Schema.Struct({
 	id: Schema.String,
 	visualization: Schema.String,
@@ -226,6 +266,12 @@ export const DashboardWidgetSchema = Schema.Struct({
 	// interpolate normally, and the board's auto-refresh still rebases a relative
 	// override against "now".
 	timeRange: Schema.optionalKey(TimeRangeSchema),
+	// Group membership. Absent means the widget lives on the root canvas, which
+	// renders above every section. `layout.x/y` are relative to the widget's
+	// *container* — the root canvas, or the (section, tab) named here — never to
+	// one global canvas, so every container's coordinate space starts at (0, 0).
+	sectionId: Schema.optionalKey(Schema.String),
+	tabId: Schema.optionalKey(Schema.String),
 })
 
 // Dashboard variables
@@ -309,6 +355,7 @@ export class PortableDashboardDocument extends Schema.Class<PortableDashboardDoc
 	tags: Schema.optionalKey(Schema.Array(Schema.String)),
 	timeRange: TimeRangeSchema,
 	widgets: Schema.Array(DashboardWidgetSchema),
+	sections: Schema.optionalKey(DashboardSectionsSchema),
 	variables: Schema.optionalKey(Schema.Array(DashboardVariableSchema)),
 	refreshIntervalSeconds: Schema.optionalKey(DashboardRefreshIntervalSeconds),
 }) {}
@@ -320,6 +367,7 @@ export class DashboardDocument extends Schema.Class<DashboardDocument>("Dashboar
 	tags: Schema.optionalKey(Schema.Array(Schema.String)),
 	timeRange: TimeRangeSchema,
 	widgets: Schema.Array(DashboardWidgetSchema),
+	sections: Schema.optionalKey(DashboardSectionsSchema),
 	variables: Schema.optionalKey(Schema.Array(DashboardVariableSchema)),
 	refreshIntervalSeconds: Schema.optionalKey(DashboardRefreshIntervalSeconds),
 	createdAt: IsoDateTimeString,
@@ -384,6 +432,14 @@ export const DashboardVersionChangeKind = Schema.Literals([
 	"widget_removed",
 	"widget_updated",
 	"layout_changed",
+	// Section edits collapse into three kinds. Renames, tab add/rename/delete,
+	// reordering and the stored collapse default all read as `section_updated`:
+	// the history panel shows a summary line, not a structural diff, so finer
+	// granularity would add enum members nothing renders differently. Moving a
+	// widget between sections is `layout_changed` — it genuinely is a layout act.
+	"section_added",
+	"section_removed",
+	"section_updated",
 	"restored",
 	"multiple",
 ]).annotate({

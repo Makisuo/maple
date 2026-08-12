@@ -1,8 +1,13 @@
 import { createContext, use, useMemo, type ReactNode } from "react"
 import { useNavigate } from "@tanstack/react-router"
 
+import type { SectionTarget } from "@maple/domain/http"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
-import type { DashboardWidget, WidgetDataState } from "@/components/dashboard-builder/types"
+import type {
+	DashboardSection,
+	DashboardWidget,
+	WidgetDataState,
+} from "@/components/dashboard-builder/types"
 import {
 	encodeWidgetFixContextToSearchParam,
 	type WidgetFixContext,
@@ -23,6 +28,16 @@ export interface WidgetActions {
 	narrowRange?: () => void
 	/** Label for `narrowRange`, e.g. "Show last 7 days". */
 	narrowRangeLabel?: string
+	/**
+	 * Re-home the widget into a group, or `null` for the root canvas. Present
+	 * only in edit mode on a board that actually has groups — separate grids
+	 * can't share a drag context, so this menu is how a tile changes group.
+	 */
+	moveToSection?: (target: SectionTarget) => void
+	/** Destinations for `moveToSection`, in board order. */
+	moveTargets?: DashboardSection[]
+	/** Where the widget currently lives, so its own container reads as disabled. */
+	moveCurrent?: SectionTarget
 }
 
 const WidgetActionsContext = createContext<WidgetActions | null>(null)
@@ -66,7 +81,8 @@ export function WidgetActionsProvider({
 	narrowRangeLabel,
 	children,
 }: WidgetActionsProviderProps) {
-	const { readOnly, removeWidget, cloneWidget, configureWidget, dashboardId } = useDashboardActions()
+	const { readOnly, removeWidget, cloneWidget, configureWidget, dashboardId, sections, moveWidgetToSection } =
+		useDashboardActions()
 	const navigate = useNavigate()
 
 	const errorTitle = dataState.status === "error" ? (dataState.title ?? null) : null
@@ -138,13 +154,41 @@ export function WidgetActionsProvider({
 					}
 				: undefined
 
-		return { remove, clone, configure, createAlert, fix, narrowRange, narrowRangeLabel }
+		// Offered only when there is somewhere to move to: on a board with no
+		// groups the submenu would list nothing but "Ungrouped", which is where
+		// the widget already is.
+		const canMove = !readOnly && sections.length > 0
+		const moveToSection = canMove
+			? (target: SectionTarget) => moveWidgetToSection(widget.id, target)
+			: undefined
+
+		return {
+			remove,
+			clone,
+			configure,
+			createAlert,
+			fix,
+			narrowRange,
+			narrowRangeLabel,
+			...(moveToSection
+				? {
+						moveToSection,
+						moveTargets: sections,
+						moveCurrent:
+							widget.sectionId !== undefined && widget.tabId !== undefined
+								? { sectionId: widget.sectionId, tabId: widget.tabId }
+								: null,
+					}
+				: {}),
+		}
 	}, [
 		widget,
 		readOnly,
 		removeWidget,
 		cloneWidget,
 		configureWidget,
+		sections,
+		moveWidgetToSection,
 		dashboardId,
 		errorKind,
 		errorTitle,

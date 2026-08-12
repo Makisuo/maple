@@ -12,11 +12,18 @@ const widgetTitle = (widget: Widget): string =>
 
 const sameJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 
+// Section membership counts as layout: `layout.x/y` are relative to whichever
+// container the widget names, so moving a tile between groups genuinely is a
+// repositioning and "Layout changed" is the honest summary for it. Deliberately
+// not its own change kind — the history panel renders a line of prose, not a
+// structural diff.
 const layoutEqual = (a: Widget, b: Widget): boolean =>
 	a.layout.x === b.layout.x &&
 	a.layout.y === b.layout.y &&
 	a.layout.w === b.layout.w &&
-	a.layout.h === b.layout.h
+	a.layout.h === b.layout.h &&
+	a.sectionId === b.sectionId &&
+	a.tabId === b.tabId
 
 const widgetContentEqual = (a: Widget, b: Widget): boolean =>
 	a.visualization === b.visualization &&
@@ -64,6 +71,38 @@ export const summarizeDashboardChange = (
 		kinds.add("refresh_interval_changed")
 		const seconds = next.refreshIntervalSeconds ?? 0
 		detail = detail ?? (seconds === 0 ? "Auto-refresh turned off" : `Auto-refresh set to ${seconds}s`)
+	}
+
+	const prevSections = prev.sections ?? []
+	const nextSections = next.sections ?? []
+	if (!sameJson(prevSections, nextSections)) {
+		const prevSectionIds = new Set(prevSections.map((section) => section.id))
+		const nextSectionIds = new Set(nextSections.map((section) => section.id))
+		const addedSections = nextSections.filter((section) => !prevSectionIds.has(section.id))
+		const removedSections = prevSections.filter((section) => !nextSectionIds.has(section.id))
+
+		if (addedSections.length > 0) {
+			kinds.add("section_added")
+			detail =
+				detail ??
+				(addedSections.length === 1
+					? `Added group "${addedSections[0]!.title}"`
+					: `Added ${addedSections.length} groups`)
+		}
+		if (removedSections.length > 0) {
+			kinds.add("section_removed")
+			detail =
+				detail ??
+				(removedSections.length === 1
+					? `Removed group "${removedSections[0]!.title}"`
+					: `Removed ${removedSections.length} groups`)
+		}
+		// Renames, tab edits, reordering and the stored collapse default all land
+		// here — one kind, because the panel shows a summary line either way.
+		if (addedSections.length === 0 && removedSections.length === 0) {
+			kinds.add("section_updated")
+			detail = detail ?? "Groups updated"
+		}
 	}
 
 	const prevById = new Map(prev.widgets.map((w) => [w.id, w] as const))

@@ -16,6 +16,7 @@ import {
 	OrgId,
 	PortableDashboardDocument,
 	type PostgresTransactionId,
+	sanitizeDashboardSections,
 	UserId,
 } from "@maple/domain/http"
 import { dashboards, dashboardVersions, type DashboardVersionRow } from "@maple/db"
@@ -84,12 +85,20 @@ const validatePayload = Effect.fnUntraced(function* (dashboard: DashboardDocumen
 	return yield* Effect.try({
 		try: () => {
 			JSON.stringify(dashboard)
+			// Repair the section invariants here — the single choke point for every
+			// jsonb write — so v1 upsert, v2 PATCH, MCP, template instantiate,
+			// Perses import and version restore all get it, and every reader can
+			// trust that storage is consistent. A no-op by reference on any
+			// document without sections, which is every pre-sections dashboard.
+			const repaired = sanitizeDashboardSections(dashboard)
 			// `txid` is a transport-only field carried on mutation responses; it must
 			// never be persisted into `payload_json` (nor a version snapshot). Strip
-			// it here — the single choke point for every jsonb write — so a client
-			// that echoes it back in an upsert payload can't leak it into storage.
-			if (dashboard.txid === undefined) return dashboard
-			const { txid: _txid, ...rest } = dashboard
+			// it here so a client that echoes it back in an upsert payload can't
+			// leak it into storage.
+			if (repaired.txid === undefined) {
+				return repaired === dashboard ? dashboard : new DashboardDocument({ ...repaired })
+			}
+			const { txid: _txid, ...rest } = repaired
 			return new DashboardDocument({ ...rest })
 		},
 		catch: () =>

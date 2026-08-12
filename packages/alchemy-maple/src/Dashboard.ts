@@ -8,8 +8,8 @@ import type { Providers } from "./Providers"
 
 /**
  * Dashboard props, authored in the v2 wire shape (snake_case, exactly as
- * documented at `/v2/docs`). `widgets`, `variables`, and `time_range` are
- * passed through verbatim.
+ * documented at `/v2/docs`). `widgets`, `sections`, `variables`, and
+ * `time_range` are passed through verbatim.
  */
 export interface DashboardProps {
 	/** Dashboard name (unique-ish label shown in the UI). */
@@ -19,6 +19,11 @@ export interface DashboardProps {
 	/** e.g. `{ type: "relative", value: "12h" }`. */
 	time_range?: Record<string, unknown>
 	widgets?: Array<Record<string, unknown>>
+	/**
+	 * Collapsible widget groups. Widgets join one by setting `section_id` and
+	 * `tab_id`, and their `layout` is relative to that group's own grid.
+	 */
+	sections?: Array<Record<string, unknown>>
 	variables?: Array<Record<string, unknown>>
 }
 
@@ -55,6 +60,7 @@ const WireDashboard = Schema.Struct({
 	tags: Schema.Array(Schema.String),
 	time_range: Schema.Record(Schema.String, Schema.Unknown),
 	widgets: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+	sections: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 	variables: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 })
 const decodeWireDashboard = Schema.decodeUnknownEffect(WireDashboard)
@@ -66,6 +72,7 @@ const desiredBody = (props: DashboardProps) => ({
 	...(props.tags !== undefined ? { tags: props.tags } : {}),
 	...(props.time_range !== undefined ? { time_range: props.time_range } : {}),
 	...(props.widgets !== undefined ? { widgets: props.widgets } : {}),
+	...(props.sections !== undefined ? { sections: props.sections } : {}),
 	...(props.variables !== undefined ? { variables: props.variables } : {}),
 })
 

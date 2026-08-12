@@ -9,6 +9,7 @@ import {
 	GRID_ROW_HEIGHT,
 	projectLayout,
 	tierForWidth,
+	type GridTier,
 } from "@/components/dashboard-builder/canvas/grid-breakpoints"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
@@ -114,8 +115,94 @@ const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: Dashbo
 	)
 })
 
+interface DashboardGridProps {
+	widgets: DashboardWidget[]
+	/** Measured container width in px. The caller owns measurement. */
+	width: number
+	tier: GridTier
+	editable: boolean
+}
+
+/**
+ * One react-grid-layout instance over one container's widgets.
+ *
+ * Deliberately measurement-free: a sectioned board renders several of these, and
+ * they must all agree on the same tier or a group could decide it is on a
+ * narrower breakpoint than its neighbour. The parent measures once and passes
+ * `width`/`tier` down.
+ *
+ * Every widget's `layout.x/y` is relative to *this* grid, so each instance is an
+ * independent coordinate space starting at (0, 0).
+ */
+export function DashboardGrid({ widgets, width, tier, editable }: DashboardGridProps) {
+	const { updateWidgetLayouts } = useDashboardActions()
+
+	const layout = useMemo(() => projectLayout(widgets, tier), [widgets, tier])
+
+	// react-grid-layout fires onLayoutChange with the post-compaction layout
+	// after every re-layout, not just on user edits — a tier crossing produces
+	// one, and an upsert from a plain window resize would invalidate the
+	// dashboards list and cascade a re-render of every widget.
+	//
+	// Comparing against the layout we handed the grid is what separates the two,
+	// rather than counting callbacks: this version of react-grid-layout does not
+	// fire on mount, so a "drop the first call per tier" rule swallows the user's
+	// first real edit instead of the re-layout it was aiming at.
+	//
+	// The reported items are only this container's, and `updateWidgetLayouts`
+	// matches by widget id, so sibling containers are untouched.
+	const handleLayoutChange = useCallback(
+		(next: Layout) => {
+			if (!editable) return
+			if (sameLayout(next, layout)) return
+			updateWidgetLayouts(next.map((l) => ({ i: l.i, x: l.x, y: l.y, w: l.w, h: l.h })))
+		},
+		[editable, layout, updateWidgetLayouts],
+	)
+
+	return (
+		<GridLayout
+			width={width}
+			layout={layout}
+			gridConfig={{
+				cols: tier.cols,
+				rowHeight: GRID_ROW_HEIGHT,
+				margin: tier.margin,
+			}}
+			dragConfig={{
+				enabled: editable,
+				handle: ".widget-drag-handle",
+				bounded: false,
+				threshold: 3,
+			}}
+			resizeConfig={{
+				enabled: editable,
+				handles: ["se"],
+			}}
+			// Derived tiers ship exact row-packed positions; letting the
+			// vertical compactor run would float short tiles up into the
+			// gaps beside taller neighbours and break the rows apart.
+			compactor={tier.canonical ? verticalCompactor : noCompactor}
+			onLayoutChange={handleLayoutChange}
+		>
+			{widgets.map((widget) => (
+				<div key={widget.id}>
+					<WidgetRenderer widget={widget} />
+				</div>
+			))}
+		</GridLayout>
+	)
+}
+
+/**
+ * A single measured grid over a flat widget list.
+ *
+ * Still the entry point for the surfaces that render a board without sections —
+ * the history preview and the template live preview. The sectioned dashboard
+ * route goes through `DashboardSections`, which measures once for every group.
+ */
 export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasProps) {
-	const { mode, updateWidgetLayouts } = useDashboardActions()
+	const { mode } = useDashboardActions()
 	// Deliberately not react-grid-layout's own `useContainerWidth`: it seeds
 	// width at a hardcoded 1280 and its ResizeObserver was observed failing to
 	// correct that here, so the grid laid every tile out for a 1280px canvas and
@@ -134,34 +221,6 @@ export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasPr
 	const tier = tierForWidth(width)
 	const editable = mode === "edit" && !readOnly && tier.canonical
 
-	const layout = useMemo(() => projectLayout(widgets, tier), [widgets, tier])
-
-	// react-grid-layout fires onLayoutChange with the post-compaction layout
-	// after every re-layout, not just on user edits — a tier crossing produces
-	// one, and an upsert from a plain window resize would invalidate the
-	// dashboards list and cascade a re-render of every widget.
-	//
-	// Comparing against the layout we handed the grid is what separates the two,
-	// rather than counting callbacks: this version of react-grid-layout does not
-	// fire on mount, so a "drop the first call per tier" rule swallows the user's
-	// first real edit instead of the re-layout it was aiming at.
-	const handleLayoutChange = useCallback(
-		(next: Layout) => {
-			if (!editable) return
-			if (sameLayout(next, layout)) return
-			updateWidgetLayouts(
-				next.map((l) => ({
-					i: l.i,
-					x: l.x,
-					y: l.y,
-					w: l.w,
-					h: l.h,
-				})),
-			)
-		},
-		[editable, layout, updateWidgetLayouts],
-	)
-
 	return (
 		// `is-layout-locked` lets WidgetShell hide its drag grip when the grid is
 		// showing a generated layout — a grip that can't be dragged reads as a
@@ -174,36 +233,7 @@ export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasPr
 				</p>
 			)}
 			{measured && (
-				<GridLayout
-					width={width}
-					layout={layout}
-					gridConfig={{
-						cols: tier.cols,
-						rowHeight: GRID_ROW_HEIGHT,
-						margin: tier.margin,
-					}}
-					dragConfig={{
-						enabled: editable,
-						handle: ".widget-drag-handle",
-						bounded: false,
-						threshold: 3,
-					}}
-					resizeConfig={{
-						enabled: editable,
-						handles: ["se"],
-					}}
-					// Derived tiers ship exact row-packed positions; letting the
-					// vertical compactor run would float short tiles up into the
-					// gaps beside taller neighbours and break the rows apart.
-					compactor={tier.canonical ? verticalCompactor : noCompactor}
-					onLayoutChange={handleLayoutChange}
-				>
-					{widgets.map((widget) => (
-						<div key={widget.id}>
-							<WidgetRenderer widget={widget} />
-						</div>
-					))}
-				</GridLayout>
+				<DashboardGrid widgets={widgets} width={width} tier={tier} editable={editable} />
 			)}
 		</div>
 	)

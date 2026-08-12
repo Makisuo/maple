@@ -219,4 +219,61 @@ describe("DashboardPersistenceService", () => {
 			assert.instanceOf(failure, DashboardPersistenceError)
 		}).pipe(Effect.provide(failingLayer))
 	})
+
+	// `validatePayload` is the single jsonb write choke point, so repairing the
+	// section invariants there covers v1 upsert, v2 PATCH, MCP, template
+	// instantiate, Perses import and version restore at once.
+	it.effect("repairs dangling section membership before persisting", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		const widget = (id: string, membership: Record<string, string>) => ({
+			id,
+			visualization: "chart",
+			dataSource: { endpoint: "custom_query_builder_timeseries" },
+			display: {},
+			layout: { x: 0, y: 0, w: 4, h: 4 },
+			...membership,
+		})
+
+		return Effect.gen(function* () {
+			yield* DashboardPersistenceService.upsert(
+				asOrgId("org_a"),
+				asUserId("user_a"),
+				makeDashboard({
+					id: asDashboardId("dash-sections"),
+					widgets: [
+						widget("orphan", { sectionId: "deleted", tabId: "t1" }),
+						widget("dangling-tab", { sectionId: "s1", tabId: "gone" }),
+					],
+					sections: [{ id: "s1", title: "Overview", tabs: [{ id: "t1", title: "Latency" }] }],
+				}),
+			)
+
+			const listed = yield* DashboardPersistenceService.list(asOrgId("org_a"))
+			const stored = listed.dashboards[0]!
+			const [orphan, dangling] = stored.widgets
+
+			// A widget pointing at a section that is gone becomes ungrouped, and
+			// the keys are absent rather than `undefined` — they are optionalKey.
+			assert.isFalse("sectionId" in orphan!)
+			assert.isFalse("tabId" in orphan!)
+			// A dangling tab snaps to the section's first tab rather than vanishing.
+			assert.strictEqual(dangling!.sectionId, "s1")
+			assert.strictEqual(dangling!.tabId, "t1")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("leaves a dashboard without sections byte-identical", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			yield* DashboardPersistenceService.upsert(
+				asOrgId("org_a"),
+				asUserId("user_a"),
+				makeDashboard({ id: asDashboardId("dash-flat"), name: "Flat" }),
+			)
+			const listed = yield* DashboardPersistenceService.list(asOrgId("org_a"))
+			assert.isFalse("sections" in listed.dashboards[0]!)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
 })
