@@ -1,0 +1,27 @@
+# Single-origin reverse proxy for the self-hosted stack. Fronts the SPA and the
+# two HTTP workers on one port so the browser talks to one origin (no CORS).
+#
+#   /api/*  -> api worker           (workerd:3472)  — prefix preserved
+#   /sync/* -> electric-sync worker (workerd:3476)  — /sync stripped
+#   /*      -> SPA                   (web:80)
+#
+# The api worker serves its own routes under /api, so /api is passed through
+# unchanged. electric-sync serves /api/sync/shape and the SPA reaches it under
+# /sync (VITE_ELECTRIC_SYNC_URL=<origin>/sync), so /sync is stripped first.
+#
+# In front of a public domain, terminate TLS here (Caddy does it automatically
+# for a real hostname) or at your own ingress.
+
+:3471 {
+	handle_path /sync/* {
+		reverse_proxy workerd:3476
+	}
+
+	handle /api/* {
+		reverse_proxy workerd:3472
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+}

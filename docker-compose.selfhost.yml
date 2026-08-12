@@ -1,0 +1,185 @@
+# Full self-hosted Maple stack — no Cloudflare, no Tinybird.
+#
+# Telemetry lands in ClickHouse via Maple's prebuilt OTel collector. The control
+# plane (orgs, users, ingest keys, dashboards, alerts) lives in Postgres, with
+# ElectricSQL streaming control-plane tables to the web app in real time. The
+# three Cloudflare Workers (api, alerting, electric-sync) run under Miniflare in
+# the `workerd` container — see deploy/workerd/ and docs/self-hosting.md.
+#
+# Quick start:
+#   cp .env.selfhost.example .env      # then fill in the secrets it lists
+#   docker compose -f docker-compose.selfhost.yml up -d --build
+#   open http://localhost:3471         # log in with MAPLE_ROOT_PASSWORD
+#
+# Apps send OTLP to http://localhost:4318 (HTTP) or :4317 (gRPC).
+
+name: maple
+
+services:
+  # Control-plane database. wal_level=logical lets Electric tail the WAL for
+  # shape sync; the publication itself is created by a drizzle migration on
+  # workerd boot.
+  postgres:
+    image: postgres:17-alpine
+    command: ["postgres", "-c", "wal_level=logical"]
+    environment:
+      POSTGRES_USER: maple
+      POSTGRES_PASSWORD: ${MAPLE_POSTGRES_PASSWORD:?set MAPLE_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: maple
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maple -d maple"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Serves per-table "shapes" from the Postgres WAL. Internal only — the
+  # electric-sync worker (in workerd) authenticates and org-scopes every request.
+  electric:
+    image: electricsql/electric:latest
+    environment:
+      DATABASE_URL: postgresql://maple:${MAPLE_POSTGRES_PASSWORD}@postgres:5432/maple?sslmode=disable
+      ELECTRIC_INSECURE: "true"
+      ELECTRIC_MANUAL_TABLE_PUBLISHING: "true"
+    volumes:
+      - electric-data:/app/persistent
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Telemetry store.
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.2-alpine
+    environment:
+      CLICKHOUSE_DB: maple
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${MAPLE_CLICKHOUSE_PASSWORD:?set MAPLE_CLICKHOUSE_PASSWORD in .env}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse/
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      # 127.0.0.1, not localhost: the container has IPv6 disabled, so `localhost`
+      # can resolve to ::1 and refuse while ClickHouse is listening on IPv4.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # One-shot: applies the ClickHouse schema via the CLI baked into the workerd
+  # image, then exits. Re-running is idempotent (tracked in _maple_schema_migrations).
+  ch-migrate:
+    build:
+      context: .
+      dockerfile: deploy/workerd/Dockerfile
+    command: ["bun", "/app/clickhouse-cli.js", "apply"]
+    environment:
+      MAPLE_CH_URL: http://clickhouse:8123
+      MAPLE_CH_USER: default
+      MAPLE_CH_PASSWORD: ${MAPLE_CLICKHOUSE_PASSWORD}
+      MAPLE_CH_DATABASE: maple
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: on-failure
+
+  # OTLP receiver → mapleexporter → ClickHouse base tables.
+  collector:
+    image: ghcr.io/makisuo/maple/otel-collector-maple:0.1.5
+    # The image runs as nonroot (uid 65532), which can't write the durable
+    # file-storage queue on a fresh root-owned named volume. Run as root so the
+    # on-disk queue (which survives ClickHouse blips without dropping telemetry)
+    # is writable.
+    user: "0:0"
+    environment:
+      MAPLE_CLICKHOUSE_PASSWORD: ${MAPLE_CLICKHOUSE_PASSWORD}
+    volumes:
+      - ./deploy/workerd/collector-config.yaml:/etc/otel/config.yaml:ro
+      - otel-queue-data:/var/lib/otelcol/file_storage
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      ch-migrate:
+        condition: service_completed_successfully
+
+  # api + alerting + electric-sync under one Miniflare process. Reaches Postgres
+  # through a Hyperdrive binding and drizzle-migrates it (incl. the Electric
+  # publication) on boot.
+  workerd:
+    build:
+      context: .
+      dockerfile: deploy/workerd/Dockerfile
+    environment:
+      MAPLE_PG_URL: postgres://maple:${MAPLE_POSTGRES_PASSWORD}@postgres:5432/maple
+      MAPLE_AUTH_MODE: self_hosted
+      MAPLE_ROOT_PASSWORD: ${MAPLE_ROOT_PASSWORD:?set MAPLE_ROOT_PASSWORD in .env}
+      MAPLE_DEFAULT_ORG_ID: default
+      MAPLE_INGEST_KEY_ENCRYPTION_KEY: ${MAPLE_INGEST_KEY_ENCRYPTION_KEY:?generate with openssl rand -base64 32}
+      MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: ${MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY:?generate with openssl rand -base64 32}
+      # Vanilla ClickHouse (not Tinybird's gateway). Only valid in single-org
+      # self_hosted mode — keeps CLICKHOUSE_PASSWORD on the raw SQL path.
+      CLICKHOUSE_PROVIDER: clickhouse
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${MAPLE_CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DATABASE: maple
+      ELECTRIC_URL: http://electric:3000
+      # Chat + AI triage run on OpenRouter (no Workers AI outside Cloudflare).
+      # Optional: leave unset to run everything except those two features.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      MAPLE_APP_BASE_URL: ${MAPLE_APP_BASE_URL:-http://localhost:3471}
+      MAPLE_ENVIRONMENT: production
+      # Parsed as required by the api's Env schema, but never used with
+      # CLICKHOUSE_PROVIDER=clickhouse and no per-org BYO row.
+      TINYBIRD_HOST: http://unused.invalid
+      TINYBIRD_TOKEN: unused
+    volumes:
+      - workerd-data:/data
+    depends_on:
+      ch-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      electric:
+        condition: service_started
+
+  # Static SPA. VITE_* are baked at build time, so changing MAPLE_APP_BASE_URL
+  # (your public origin) needs a `--build` rebuild of this service.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_MAPLE_AUTH_MODE: self_hosted
+        VITE_ELECTRIC_SYNC_URL: ${MAPLE_APP_BASE_URL:-http://localhost:3471}/sync
+    depends_on:
+      workerd:
+        condition: service_started
+
+  # Single-origin reverse proxy: /api → api worker, /sync → electric-sync
+  # worker, /* → SPA. This is the one port you open.
+  proxy:
+    image: caddy:2-alpine
+    volumes:
+      - ./deploy/workerd/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "3471:3471"
+    depends_on:
+      web:
+        condition: service_started
+      workerd:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  clickhouse-data:
+  electric-data:
+  otel-queue-data:
+  workerd-data:

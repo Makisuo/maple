@@ -1,0 +1,16 @@
+{
+  "name": "@maple/workerd-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "miniflare": "5.20260730.0-alpha",
+    "drizzle-orm": "^0.45.1",
+    "postgres": "^3.4.9",
+    "cron": "^4.3.0",
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

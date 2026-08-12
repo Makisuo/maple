@@ -1,0 +1,76 @@
+# OpenTelemetry Collector configuration for Maple's prebuilt
+# `otel-collector-maple` image. The mapleexporter writes Maple-shaped
+# JSONEachRow directly into ClickHouse base tables — no shim required.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 5000
+    send_batch_max_size: 10000
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+exporters:
+  maple:
+    endpoint: "http://clickhouse:8123"
+    database: "maple"
+    username: "default"
+    password: "${env:MAPLE_CLICKHOUSE_PASSWORD}"
+    org_id: "default"
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 8
+      queue_size: 10000
+      storage: file_storage/queue
+
+extensions:
+  file_storage/queue:
+    directory: /var/lib/otelcol/file_storage
+    create_directory: true
+    timeout: 10s
+    compaction:
+      on_start: true
+      on_rebound: true
+
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check, file_storage/queue]
+
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [maple]
+
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [maple]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [maple]
+
+  telemetry:
+    logs:
+      level: info
