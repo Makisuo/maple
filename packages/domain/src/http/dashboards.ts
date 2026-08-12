@@ -241,6 +241,11 @@ export const DashboardSectionSchema = Schema.Struct({
 	// (`?collapsed=`/`?expanded=`), so one person collapsing a group on their
 	// screen never changes what the next person sees.
 	collapsed: Schema.optionalKey(Schema.Boolean),
+	// Absent or `true`: the group has a chevron and any viewer may fold it away.
+	// `false` pins it open — no chevron, and a `?collapsed=` override naming it is
+	// ignored rather than hiding a group the viewer has no control to reopen.
+	// Use it for the band a dashboard is *about*, which should never be hidden.
+	collapsible: Schema.optionalKey(Schema.Boolean),
 	tabs: Schema.Array(DashboardSectionTabSchema).check(
 		Schema.isMinLength(1),
 		Schema.isMaxLength(DASHBOARD_MAX_TABS_PER_SECTION),

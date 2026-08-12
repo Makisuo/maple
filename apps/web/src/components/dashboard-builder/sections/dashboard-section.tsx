@@ -70,6 +70,7 @@ export function DashboardSectionView({
 	const {
 		renameSection,
 		setSectionCollapsedDefault,
+		setSectionCollapsible,
 		reorderSections,
 		deleteSection,
 		addTab,
@@ -83,24 +84,33 @@ export function DashboardSectionView({
 	// A tab bar only earns its space at two or more tabs. With one, the section
 	// header *is* the tab label, and the store keeps the two titles in sync.
 	const hasTabs = section.tabs.length >= 2
+	// Absent means collapsible — only an explicit `false` pins the group open.
+	const collapsible = section.collapsible !== false
 	const pendingTab = section.tabs.find((tab) => tab.id === tabPendingDelete)
 	const destinationTab = section.tabs.find((tab) => tab.id !== tabPendingDelete)
 
 	return (
 		<section className="mb-2">
 			<div className="flex items-center gap-2 border-b py-2">
-				<Button
-					variant="ghost"
-					size="icon-xs"
-					aria-expanded={!collapsed}
-					aria-label={collapsed ? `Expand ${section.title}` : `Collapse ${section.title}`}
-					onClick={() => onToggleCollapsed(!collapsed)}
-				>
-					<ChevronDownIcon
-						className={cn("transition-transform duration-150", collapsed && "-rotate-90")}
-						size={14}
-					/>
-				</Button>
+				{/* A pinned-open group has no chevron at all rather than a disabled one:
+				    a control that can't do anything reads as broken. The spacer keeps
+				    its title aligned with every collapsible sibling's. */}
+				{collapsible ? (
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						aria-expanded={!collapsed}
+						aria-label={collapsed ? `Expand ${section.title}` : `Collapse ${section.title}`}
+						onClick={() => onToggleCollapsed(!collapsed)}
+					>
+						<ChevronDownIcon
+							className={cn("transition-transform duration-150", collapsed && "-rotate-90")}
+							size={14}
+						/>
+					</Button>
+				) : (
+					<div className="size-6 shrink-0" aria-hidden />
+				)}
 
 				<InlineEditableText
 					value={section.title}
@@ -166,13 +176,19 @@ export function DashboardSectionView({
 								<DropdownMenuSeparator />
 								{/* The stored default, distinct from this viewer's own
 								    collapse — which lives in their URL and changes nothing
-								    for anyone else. */}
-								<DropdownMenuItem
-									onClick={() =>
-										setSectionCollapsedDefault(section.id, !(section.collapsed ?? false))
-									}
-								>
-									{section.collapsed ? "Expanded by default" : "Collapsed by default"}
+								    for anyone else. Meaningless on a pinned-open group, so
+								    it is hidden rather than left there doing nothing. */}
+								{collapsible && (
+									<DropdownMenuItem
+										onClick={() =>
+											setSectionCollapsedDefault(section.id, !(section.collapsed ?? false))
+										}
+									>
+										{section.collapsed ? "Expanded by default" : "Collapsed by default"}
+									</DropdownMenuItem>
+								)}
+								<DropdownMenuItem onClick={() => setSectionCollapsible(section.id, !collapsible)}>
+									{collapsible ? "Always expanded" : "Allow collapsing"}
 								</DropdownMenuItem>
 								<DropdownMenuSeparator />
 								<DropdownMenuItem variant="destructive" onClick={() => setDeleteSectionOpen(true)}>

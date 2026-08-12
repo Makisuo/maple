@@ -57,6 +57,7 @@ const widenSections = (sections: DashboardDocument["sections"] | undefined): Das
 		id: section.id,
 		title: section.title,
 		...(section.collapsed !== undefined ? { collapsed: section.collapsed } : {}),
+		...(section.collapsible !== undefined ? { collapsible: section.collapsible } : {}),
 		tabs: section.tabs.map((tab) => ({ id: tab.id, title: tab.title })),
 	}))
 

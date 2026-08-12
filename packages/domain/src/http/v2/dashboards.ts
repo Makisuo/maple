@@ -289,6 +289,9 @@ export const V2DashboardSection = Schema.Struct({
 	// The stored default. Individual viewers override it in their own URL without
 	// changing what anyone else sees.
 	collapsed: optional(Schema.Boolean),
+	// `false` pins the section open: no collapse control, and a viewer's collapse
+	// override naming it is ignored. Omit for the default (collapsible).
+	collapsible: optional(Schema.Boolean),
 	tabs: Schema.Array(V2DashboardSectionTab),
 }).annotate({
 	identifier: "DashboardSection",

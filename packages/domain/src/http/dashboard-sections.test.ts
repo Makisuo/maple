@@ -189,6 +189,36 @@ describe("sanitizeDashboardSections", () => {
 		expect("sectionId" in sanitizeDashboardSections(doc).widgets[0]!).toBe(false)
 	})
 
+
+	// "Collapsed by default" + "can never be collapsed" would render the group
+	// folded with no chevron to unfold it. `collapsible: false` is the stronger
+	// claim, so it wins and the stale default is dropped.
+	it("clears `collapsed` on a section that cannot be collapsed", () => {
+		const doc = {
+			widgets: [],
+			sections: [{ id: "s1", title: "S", collapsed: true, collapsible: false, tabs: [{ id: "t1", title: "T" }] }],
+		}
+		const repaired = sanitizeDashboardSections(doc).sections?.[0]
+		expect("collapsed" in repaired!).toBe(false)
+		expect(repaired!.collapsible).toBe(false)
+	})
+
+	it("leaves a collapsible section's stored default alone", () => {
+		const doc = {
+			widgets: [],
+			sections: [{ id: "s1", title: "S", collapsed: true, tabs: [{ id: "t1", title: "T" }] }],
+		}
+		expect(sanitizeDashboardSections(doc)).toBe(doc)
+	})
+
+	it("allows a pinned-open section that was never collapsed", () => {
+		const doc = {
+			widgets: [],
+			sections: [{ id: "s1", title: "S", collapsible: false, tabs: [{ id: "t1", title: "T" }] }],
+		}
+		expect(sanitizeDashboardSections(doc)).toBe(doc)
+	})
+
 	it("is idempotent", () => {
 		const doc = {
 			widgets: [widget("a", "s1", "gone"), widget("b", "missing", "t1")],

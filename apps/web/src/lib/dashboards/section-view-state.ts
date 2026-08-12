@@ -61,11 +61,17 @@ const formatActiveTabs = (pairs: ReadonlyMap<string, string>): string =>
 /**
  * Whether a section renders collapsed for this viewer.
  *
- * Precedence: an explicit expand wins, then an explicit collapse, then the
+ * A non-collapsible section is never collapsed — checked *before* the URL, not
+ * after. A stale `?collapsed=` naming it (shared link, or the flag flipped after
+ * someone folded it) would otherwise hide a group whose chevron no longer
+ * exists, leaving no way to reopen it.
+ *
+ * Otherwise: an explicit expand wins, then an explicit collapse, then the
  * document's stored default. `expanded` beating `collapsed` matters for the
  * widget deep link, which force-expands the section holding the target tile.
  */
 export function isSectionCollapsed(section: DashboardSection, search: SectionViewSearch): boolean {
+	if (section.collapsible === false) return false
 	if (parseIdList(search.expanded).has(section.id)) return false
 	if (parseIdList(search.collapsed).has(section.id)) return true
 	return section.collapsed ?? false

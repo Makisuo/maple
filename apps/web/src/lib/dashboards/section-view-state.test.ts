@@ -216,3 +216,32 @@ describe("route composition", () => {
 		expect(next).toMatchObject({ mode: "edit", tab: "s1:t2" })
 	})
 })
+
+describe("non-collapsible sections", () => {
+	const pinned = (id = "s1"): DashboardSection => ({
+		id,
+		title: id,
+		collapsible: false,
+		tabs: [{ id: "t1", title: "t1" }],
+	})
+
+	// The trap: a shared link, or flipping the flag after someone folded the
+	// group, would otherwise hide a section whose chevron no longer exists.
+	it("ignores a stale `?collapsed=` naming a pinned-open section", () => {
+		expect(isSectionCollapsed(pinned(), { collapsed: "s1" })).toBe(false)
+	})
+
+	it("ignores a stored `collapsed: true` on a pinned-open section", () => {
+		expect(isSectionCollapsed({ ...pinned(), collapsed: true }, {})).toBe(false)
+	})
+
+	it("still collapses ordinary sections in the same document", () => {
+		const view = resolveSectionView(
+			[pinned("pinned"), { id: "normal", title: "normal", tabs: [{ id: "t", title: "t" }] }],
+			[],
+			{ collapsed: "pinned,normal" },
+		)
+		expect(view.collapsed.has("pinned")).toBe(false)
+		expect(view.collapsed.has("normal")).toBe(true)
+	})
+})

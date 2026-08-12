@@ -42,6 +42,8 @@ interface DashboardActionsContextValue {
 	addSection: (title?: string) => string | undefined
 	renameSection: (sectionId: string, title: string) => void
 	setSectionCollapsedDefault: (sectionId: string, collapsed: boolean) => void
+	/** `false` pins the group open: no chevron, and `?collapsed=` naming it is ignored. */
+	setSectionCollapsible: (sectionId: string, collapsible: boolean) => void
 	reorderSections: (fromIndex: number, toIndex: number) => void
 	deleteSection: (sectionId: string, action: "ungroup" | "delete") => void
 	addTab: (sectionId: string) => string | undefined
@@ -69,6 +71,7 @@ interface DashboardActionsProviderProps {
 		addSection: (dashboardId: string, title?: string) => string | undefined
 		renameSection: (dashboardId: string, sectionId: string, title: string) => void
 		setSectionCollapsedDefault: (dashboardId: string, sectionId: string, collapsed: boolean) => void
+		setSectionCollapsible: (dashboardId: string, sectionId: string, collapsible: boolean) => void
 		reorderSections: (dashboardId: string, fromIndex: number, toIndex: number) => void
 		deleteSection: (
 			dashboardId: string,
@@ -219,6 +222,10 @@ export function DashboardActionsProvider({
 			setSectionCollapsedDefault: (sectionId, collapsed) => {
 				if (readOnly) return
 				store.setSectionCollapsedDefault(dashboardId, sectionId, collapsed)
+			},
+			setSectionCollapsible: (sectionId, collapsible) => {
+				if (readOnly) return
+				store.setSectionCollapsible(dashboardId, sectionId, collapsible)
 			},
 			reorderSections: (fromIndex, toIndex) => {
 				if (readOnly) return

@@ -511,6 +511,22 @@ function makeWidgetMutators(deps: {
 		mapSection(dashboardId, sectionId, (section) => ({ ...section, collapsed }))
 	}
 
+	/**
+	 * Pin a group open, or hand its chevron back.
+	 *
+	 * Pinning clears `collapsed`: "collapsed by default" and "can never be
+	 * collapsed" would leave the group folded with nothing to unfold it. The
+	 * server sanitizer enforces the same rule, so a document written by any other
+	 * client can't reintroduce the contradiction.
+	 */
+	const setSectionCollapsible = (dashboardId: string, sectionId: string, collapsible: boolean) => {
+		mapSection(dashboardId, sectionId, (section) => {
+			const next = { ...section, collapsible }
+			if (!collapsible) delete next.collapsed
+			return next
+		})
+	}
+
 	const reorderSections = (dashboardId: string, fromIndex: number, toIndex: number) => {
 		if (readOnly) return
 		push(dashboardId, (dashboard) => {
@@ -689,6 +705,7 @@ function makeWidgetMutators(deps: {
 		addSection,
 		renameSection,
 		setSectionCollapsedDefault,
+		setSectionCollapsible,
 		reorderSections,
 		deleteSection,
 		addTab,
