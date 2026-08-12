@@ -1,7 +1,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { FetchHttpClient, HttpClient, HttpServerRequest } from "effect/unstable/http"
-import { Clock, Effect, Layer, Option, Redacted, Schema } from "effect"
-import type { CustomerData } from "autumn-js/backend"
+import { HttpServerRequest } from "effect/unstable/http"
+import { Clock, Effect, Option, Schema } from "effect"
 import { EdgeCacheService } from "@maple/cache"
 import {
 	AttachResult,
@@ -18,17 +17,14 @@ import {
 	MapleApi,
 	PreviewAttachResult,
 } from "@maple/domain/http"
-import { Env } from "@/platform/Env"
 import {
 	CUSTOMER_CACHE_BUCKET,
 	decodeUpstream,
 	ensureOk,
-	makeCallAutumn,
 	readCustomerCached,
-	type AutumnResult,
-	updateCustomerBillingControls,
 } from "@/services/billing/autumn-client"
-import { AuthService, type AuthServiceShape } from "@/services/auth/AuthService"
+import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
+import { AuthService } from "@/services/auth/AuthService"
 import { requireAdmin } from "@/services/auth/auth"
 import { DailySpendService } from "@/services/billing/DailySpendService"
 
@@ -43,26 +39,6 @@ export const decodeInvoices = (
 		Effect.map((decoded) => new BillingInvoicesResponse({ invoices: decoded })),
 	)
 }
-
-// Enrich checkout (attach) with Clerk-resolved identity so the customer is
-// identified before Stripe and the buyer's email is pre-filled. Ported verbatim
-// from the retired proxy's ENRICHED_ROUTES handling.
-const resolveCustomerData = (
-	auth: AuthServiceShape,
-	tenant: Parameters<AuthServiceShape["getCustomerData"]>[0],
-): Effect.Effect<CustomerData | undefined> =>
-	auth.getCustomerData(tenant).pipe(
-		Effect.map(({ email, orgName }) =>
-			email || orgName
-				? {
-						email,
-						name: orgName,
-						fingerprint: tenant.orgId,
-						metadata: { maple_user_id: String(tenant.userId), maple_user_email: email },
-					}
-				: undefined,
-		),
-	)
 
 /**
  * The FULL billing cycle for the spend series. Prefers the active subscription's
@@ -93,16 +69,9 @@ export const resolveCycleWindow = (
 
 export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handlers) =>
 	Effect.gen(function* () {
-		const env = yield* Env
-		const auth = yield* AuthService
-		const httpClient = yield* HttpClient.HttpClient
 		const edgeCache = yield* EdgeCacheService
 		const dailySpend = yield* DailySpendService
-		const secretKey = Option.match(env.AUTUMN_SECRET_KEY, {
-			onNone: () => undefined,
-			onSome: (value) => Redacted.value(value),
-		})
-		const callAutumn = makeCallAutumn(secretKey)
+		const autumn = yield* AutumnClient
 
 		// Invalidate on any 2xx, matching `ensureOk` — otherwise a 201/204 from
 		// attach/openCustomerPortal would decode as success yet leave the stale
@@ -120,15 +89,11 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 						const { result, hit } = yield* readCustomerCached(
 							edgeCache,
 							tenant.orgId,
-							callAutumn(
-								"getOrCreateCustomer",
-								// The customer's OWN plan: for a custom-priced or
-								// grandfathered plan it is the only source of their real
-								// price and allotments. Without it the page would quote the
-								// public catalog's rates at them.
-								{ expand: ["subscriptions.plan"] },
-								tenant.orgId,
-							),
+							// The customer's OWN plan: for a custom-priced or grandfathered
+							// plan it is the only source of their real price and allotments.
+							// Without it the page would quote the public catalog's rates at
+							// them.
+							autumn.getOrCreateCustomer(tenant.orgId, { expand: ["subscriptions.plan"] }),
 						)
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, "cache.hit": hit })
 						const response = yield* ensureOk(result)
@@ -138,11 +103,10 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 				.handle("getUsage", ({ query }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const result = yield* callAutumn(
-							"aggregateEvents",
-							{ featureId: query.featureId, range: query.range },
-							tenant.orgId,
-						)
+						const result = yield* autumn.aggregateEvents(tenant.orgId, {
+							featureId: query.featureId,
+							range: query.range,
+						})
 						const response = yield* ensureOk(result)
 						return yield* decodeUpstream(BillingUsage, response)
 					}),
@@ -154,11 +118,9 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 				.handle("listInvoices", () =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const result = yield* callAutumn(
-							"getOrCreateCustomer",
-							{ expand: ["invoices"] },
-							tenant.orgId,
-						)
+						const result = yield* autumn.getOrCreateCustomer(tenant.orgId, {
+							expand: ["invoices"],
+						})
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
 						const response = yield* ensureOk(result)
 						return yield* decodeInvoices(response)
@@ -173,15 +135,11 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 						const { result } = yield* readCustomerCached(
 							edgeCache,
 							tenant.orgId,
-							callAutumn(
-								"getOrCreateCustomer",
-								// The customer's OWN plan: for a custom-priced or
-								// grandfathered plan it is the only source of their real
-								// price and allotments. Without it the page would quote the
-								// public catalog's rates at them.
-								{ expand: ["subscriptions.plan"] },
-								tenant.orgId,
-							),
+							// The customer's OWN plan: for a custom-priced or grandfathered
+							// plan it is the only source of their real price and allotments.
+							// Without it the page would quote the public catalog's rates at
+							// them.
+							autumn.getOrCreateCustomer(tenant.orgId, { expand: ["subscriptions.plan"] }),
 						)
 						const response = yield* ensureOk(result)
 						const customer = yield* decodeUpstream(BillingCustomer, response)
@@ -201,20 +159,12 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 								}),
 						)
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-						const result = yield* updateCustomerBillingControls(
-							httpClient,
-							secretKey,
-							env.AUTUMN_API_URL,
-							tenant.orgId,
-							payload,
-						)
+						const result = yield* autumn.updateCustomerBillingControls(tenant.orgId, payload)
 						yield* ensureOk(result)
 						yield* invalidateCustomer(tenant.orgId, result)
-						const refreshed = yield* callAutumn(
-							"getOrCreateCustomer",
-							{ expand: ["subscriptions.plan"] },
-							tenant.orgId,
-						)
+						const refreshed = yield* autumn.getOrCreateCustomer(tenant.orgId, {
+							expand: ["subscriptions.plan"],
+						})
 						return yield* ensureOk(refreshed).pipe(
 							Effect.flatMap((response) => decodeUpstream(BillingCustomer, response)),
 						)
@@ -223,13 +173,13 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 				.handle("attach", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const customerData = yield* resolveCustomerData(auth, tenant)
-						const result = yield* callAutumn(
-							"attach",
-							{ planId: payload.planId },
-							tenant.orgId,
-							customerData,
-						)
+						// No buyer identity rides along: `/v1/billing.attach` carries no
+						// identity fields in Autumn 2.3.0, and the `customerData` we used to
+						// hand `autumnHandler` here was silently discarded by it. Seeding
+						// the Stripe checkout with the Clerk email would need a separate
+						// `customers.get_or_create` on this path — a behaviour change, not
+						// part of this port.
+						const result = yield* autumn.attach(tenant.orgId, { planId: payload.planId })
 						const response = yield* ensureOk(result)
 						yield* invalidateCustomer(tenant.orgId, result)
 						return yield* decodeUpstream(AttachResult, response)
@@ -238,11 +188,9 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 				.handle("previewAttach", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const result = yield* callAutumn(
-							"previewAttach",
-							{ planId: payload.planId },
-							tenant.orgId,
-						)
+						const result = yield* autumn.previewAttach(tenant.orgId, {
+							planId: payload.planId,
+						})
 						const response = yield* ensureOk(result)
 						return yield* decodeUpstream(PreviewAttachResult, response)
 					}),
@@ -250,11 +198,9 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 				.handle("openCustomerPortal", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const result = yield* callAutumn(
-							"openCustomerPortal",
-							{ returnUrl: payload.returnUrl },
-							tenant.orgId,
-						)
+						const result = yield* autumn.openCustomerPortal(tenant.orgId, {
+							returnUrl: payload.returnUrl,
+						})
 						const response = yield* ensureOk(result)
 						yield* invalidateCustomer(tenant.orgId, result)
 						return yield* decodeUpstream(CustomerPortalResult, response)
@@ -262,17 +208,12 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 				)
 		)
 	}),
-).pipe(Layer.provide(FetchHttpClient.layer))
+)
 
 export const HttpBillingPublicLive = HttpApiBuilder.group(MapleApi, "billingPublic", (handlers) =>
 	Effect.gen(function* () {
-		const env = yield* Env
 		const auth = yield* AuthService
-		const secretKey = Option.match(env.AUTUMN_SECRET_KEY, {
-			onNone: () => undefined,
-			onSome: (value) => Redacted.value(value),
-		})
-		const callAutumn = makeCallAutumn(secretKey)
+		const autumn = yield* AutumnClient
 
 		return handlers.handle("listPlans", () =>
 			Effect.gen(function* () {
@@ -282,9 +223,9 @@ export const HttpBillingPublicLive = HttpApiBuilder.group(MapleApi, "billingPubl
 				const req = yield* HttpServerRequest.HttpServerRequest
 				const tenant = yield* Effect.option(auth.resolveTenant(req.headers as Record<string, string>))
 				const customerId = Option.getOrUndefined(tenant)?.orgId
-				const result = yield* callAutumn("listPlans", {}, customerId)
+				const result = yield* autumn.listPlans(customerId)
 				const response = yield* ensureOk(result)
-				// The autumn SDK wraps the catalog as `{ list: [...] }`.
+				// Autumn wraps the catalog as `{ list: [...] }`.
 				const list = (response as { list?: unknown })?.list ?? response
 				const plans = yield* decodeUpstream(Schema.Array(CatalogPlan), list)
 				return new CatalogPlansResponse({ plans })
