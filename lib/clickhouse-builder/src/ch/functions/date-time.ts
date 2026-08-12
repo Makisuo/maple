@@ -24,6 +24,15 @@ export function toStartOfHour(col: Expr<string>): Expr<string> {
 }
 
 /**
+ * `toStartOfMinute(expr)` — floor a DateTime to its minute boundary. The
+ * minute-grain counterpart of {@link toStartOfHour}, for queries spliced against
+ * a `*_minutely` rollup.
+ */
+export function toStartOfMinute(col: Expr<string>): Expr<string> {
+	return makeExpr<string>(raw(`toStartOfMinute(${compile(col.toFragment())})`))
+}
+
+/**
  * `toHour(expr)` — extract the hour-of-day (0–23) from a DateTime. Used by the
  * anomaly detector's seasonal-naive baseline to select "matched hours" (same
  * hour-of-day ±1) across the trailing week without storing baselines anywhere.

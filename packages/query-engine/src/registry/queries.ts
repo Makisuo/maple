@@ -121,8 +121,12 @@ export const errorRateByService = defineQuery({
 export const serviceOverview = defineQuery({
 	id: "serviceOverview",
 	profile: "aggregation",
-	// v2 prevents cached rows without firstSeen from being served.
-	cache: makeDirectRouteCachePolicy({ ttlSeconds: 15, version: 2 }),
+	// v2 prevented cached rows without firstSeen from being served. v3 is the
+	// (service, environment) collapse: the response schema is a permissive
+	// `Schema.Record(String, Unknown)`, so a stale v2 row deserializes cleanly and
+	// renders a services list with no commits and no latency. The bump is the only
+	// thing standing between a deploy and that.
+	cache: makeDirectRouteCachePolicy({ ttlSeconds: 15, version: 3 }),
 	compile: (payload: ServiceOverviewRequest, orgId: string) =>
 		CH.compile(
 			CH.serviceOverviewQuery({
@@ -180,19 +184,22 @@ export const serviceApdex = defineQuery({
 	id: "serviceApdex",
 	profile: "aggregation",
 	cache: 15,
-	compile: (payload: ServiceApdexRequest, orgId: string) =>
-		CH.compile(
+	compile: (payload: ServiceApdexRequest, orgId: string) => {
+		const bucketSeconds = payload.bucketSeconds ?? 60
+		return CH.compile(
 			CH.serviceApdexTimeseriesQuery({
 				serviceName: payload.serviceName,
 				apdexThresholdMs: payload.apdexThresholdMs,
+				bucketSeconds,
 			}),
 			{
 				orgId,
 				startTime: payload.startTime,
 				endTime: payload.endTime,
-				bucketSeconds: payload.bucketSeconds ?? 60,
+				bucketSeconds,
 			},
-		),
+		)
+	},
 })
 
 export const serviceDependenciesForService = defineQuery({
@@ -432,13 +439,18 @@ export const serviceReleases = defineQuery({
 			readonly releasesBucketSeconds?: number | undefined
 		},
 		orgId: string,
-	) =>
-		CH.compile(CH.serviceReleasesTimelineQuery({ serviceName: payload.serviceName }), {
-			orgId,
-			startTime: payload.startTime,
-			endTime: payload.endTime,
-			bucketSeconds: payload.releasesBucketSeconds ?? 300,
-		}),
+	) => {
+		const bucketSeconds = payload.releasesBucketSeconds ?? 300
+		return CH.compile(
+			CH.serviceReleasesTimelineQuery({ serviceName: payload.serviceName, bucketSeconds }),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				bucketSeconds,
+			},
+		)
+	},
 })
 
 export const serviceEnvironments = defineQuery({

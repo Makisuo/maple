@@ -372,27 +372,33 @@ export function compilePipeQuery(
 			Match.when("services_facets", () =>
 				eraseType(compileUnion(servicesFacetsQuery(), { orgId, startTime, endTime })),
 			),
-			Match.when("service_releases_timeline", () =>
-				eraseType(
+			Match.when("service_releases_timeline", () => {
+				const bucketSeconds = int("bucket_seconds", 300)!
+				return eraseType(
 					compile(
-						serviceReleasesTimelineQuery({ serviceName: String(params.service_name) }),
-						{ orgId, startTime, endTime, bucketSeconds: int("bucket_seconds", 300)! },
+						serviceReleasesTimelineQuery({
+							serviceName: String(params.service_name),
+							bucketSeconds,
+						}),
+						{ orgId, startTime, endTime, bucketSeconds },
 						{ rowSchema: serviceReleasesTimelineRowSchema },
 					),
-				),
-			),
-			Match.when("service_apdex_time_series", () =>
-				eraseType(
+				)
+			}),
+			Match.when("service_apdex_time_series", () => {
+				const bucketSeconds = int("bucket_seconds", 60)!
+				return eraseType(
 					compile(
 						serviceApdexTimeseriesQuery({
 							serviceName: String(params.service_name),
 							apdexThresholdMs: int("apdex_threshold_ms", 500),
+							bucketSeconds,
 						}),
-						{ orgId, startTime, endTime, bucketSeconds: int("bucket_seconds", 60)! },
+						{ orgId, startTime, endTime, bucketSeconds },
 						{ rowSchema: serviceApdexTimeseriesRowSchema },
 					),
-				),
-			),
+				)
+			}),
 			Match.when("get_service_usage", () =>
 				eraseType(
 					compile(serviceUsageQuery({ serviceName: str("service") }), {

@@ -7,6 +7,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import {
 	from,
+	fromQuery,
 	fromUnion,
 	type CHQuery,
 	type ColumnAccessor,
@@ -14,10 +15,16 @@ import {
 } from "@maple-dev/clickhouse-builder"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
-import { ServiceOverviewHourly, ServiceOverviewSpans, ServiceUsage, TracesAggregatesHourly } from "../tables"
+import {
+	ServiceOverviewHourly,
+	ServiceOverviewMinutely,
+	ServiceOverviewSpans,
+	ServiceUsage,
+	TracesAggregatesHourly,
+} from "../tables"
 import { CHNumber } from "../schema"
 import { apdexExprs, serviceOverviewWhereConditions, hourFloor, type FacetOutput } from "./query-helpers"
-import { edgeCondition, interiorConditions } from "./rollup-splice"
+import { edgeCondition, hourGrain, interiorConditions, minuteGrain } from "./rollup-splice"
 
 // Service overview
 
@@ -32,16 +39,90 @@ interface ServiceWindowFilters {
 }
 
 /**
- * One logical service-history stream: exact raw rows for the two partial
- * boundary hours, plus hourly aggregate states for every complete interior
- * hour. The raw projection is intentionally retained for only 30 days; an old
- * partial first hour can therefore be absent while all reconstructible full
- * hours remain exact.
+ * The bucket grain a service-history stream is reconstructed at.
+ *
+ * `"hour"` is the two-tier splice: raw partial boundary hours + the hourly
+ * rollup's interior. Correct for any query that aggregates the whole window, and
+ * for timeseries whose bucket is a whole multiple of an hour.
+ *
+ * `"minute"` adds the minutely rollup between them, so a sub-hour bucket does
+ * not have to fall back to scanning raw spans for the entire window. Callers
+ * that bucket the result with `toStartOfInterval` MUST use this grain whenever
+ * `bucketSeconds` is not a multiple of 3600 — an hour-floored row landing in a
+ * sub-hour bucket puts a whole hour of traffic on the bucket containing `:00`
+ * and leaves the rest of the hour reading zero.
  */
-function serviceOverviewWindows(filters: ServiceWindowFilters) {
+export type OverviewGrain = "hour" | "minute"
+
+export interface ServiceWindowTiers {
+	readonly grain?: OverviewGrain
+	/**
+	 * Include the hourly tier. Must be `false` when the caller buckets the result
+	 * with a `bucketSeconds` that is not a whole multiple of 3600 — an hourly row
+	 * carries no sub-hour position, so `toStartOfInterval` would pile the whole
+	 * hour onto the bucket containing `:00`.
+	 */
+	readonly includeHourly?: boolean
+}
+
+/**
+ * Tier selection for a caller that buckets the stream by `bucketSeconds`.
+ *
+ * Returns `"raw"` for buckets finer than a minute: no rollup tier can place a
+ * row inside a minute, so those callers must scan the entry-point projection
+ * directly (and are bounded by its 30-day retention).
+ */
+export function serviceWindowTiersForBucket(bucketSeconds: number): ServiceWindowTiers | "raw" {
+	if (bucketSeconds < 60 || bucketSeconds % 60 !== 0) return "raw"
+	if (bucketSeconds % 3600 === 0) return { grain: "hour", includeHourly: true }
+	return { grain: "minute", includeHourly: false }
+}
+
+const SERVICE_WINDOW_GROUP_KEYS = [
+	"bBucket",
+	"bServiceName",
+	"bServiceNamespace",
+	"bEnvironment",
+	"bCommitSha",
+] as const
+
+/**
+ * One logical service-history stream: exact raw rows for the two partial
+ * boundary buckets, plus pre-aggregated states for every complete interior
+ * bucket. The raw projection is intentionally retained for only 30 days; an old
+ * partial first bucket can therefore be absent while all reconstructible full
+ * buckets remain exact.
+ *
+ * The tiers tile the window exactly once. At `"minute"` grain, with the window
+ * `10:30:30 → 14:15:30`: raw covers `[10:30:30, 10:31) ∪ [14:15, 14:15:30]`,
+ * minutely covers `[10:31, 14:15) \ [11:00, 14:00)`, hourly covers
+ * `[11:00, 14:00)`. Disjoint, and their union is the window — the same argument
+ * `serviceOperationsSummaryQuery` rests on, using the same two helpers.
+ */
+function serviceOverviewWindows(filters: ServiceWindowFilters, tiers: ServiceWindowTiers = {}) {
+	const grain = tiers.grain ?? "hour"
+	const includeHourly = tiers.includeHourly ?? true
+	const rollupFilters = <
+		A extends {
+			OrgId: CH.Expr<string>
+			ServiceName: CH.Expr<string>
+			DeploymentEnv: CH.Expr<string>
+			ServiceNamespace: CH.Expr<string>
+			CommitSha: CH.Expr<string>
+		},
+	>(
+		$: A,
+	) => [
+		$.OrgId.eq(param.string("orgId")),
+		CH.when(filters.serviceName, (value: string) => $.ServiceName.eq(value)),
+		filters.environments?.length ? CH.inList($.DeploymentEnv, filters.environments) : undefined,
+		filters.namespaces?.length ? CH.inList($.ServiceNamespace, filters.namespaces) : undefined,
+		filters.commitShas?.length ? CH.inList($.CommitSha, filters.commitShas) : undefined,
+	]
+
 	const rawEdges = from(ServiceOverviewSpans)
 		.select(($) => ({
-			bHour: CH.toStartOfHour($.Timestamp),
+			bBucket: grain === "minute" ? CH.toStartOfMinute($.Timestamp) : CH.toStartOfHour($.Timestamp),
 			bServiceName: $.ServiceName,
 			bServiceNamespace: $.ServiceNamespace,
 			bEnvironment: $.DeploymentEnv,
@@ -58,12 +139,48 @@ function serviceOverviewWindows(filters: ServiceWindowFilters) {
 				$.StatusCode.neq("Error").and($.Duration.gte(500_000_000)).and($.Duration.lt(2_000_000_000)),
 			),
 		}))
-		.where(($) => [...serviceOverviewWhereConditions($, filters), edgeCondition("Timestamp")])
-		.groupBy("bHour", "bServiceName", "bServiceNamespace", "bEnvironment", "bCommitSha")
+		.where(($) => [
+			...serviceOverviewWhereConditions($, filters),
+			grain === "minute" ? edgeCondition("Timestamp", minuteGrain) : edgeCondition("Timestamp"),
+		])
+		.groupBy(...SERVICE_WINDOW_GROUP_KEYS)
 
 	const hourlyInterior = from(ServiceOverviewHourly)
 		.select(($) => ({
-			bHour: $.Hour,
+			bBucket: $.Hour,
+			bServiceName: $.ServiceName,
+			bServiceNamespace: $.ServiceNamespace,
+			bEnvironment: $.DeploymentEnv,
+			bCommitSha: $.CommitSha,
+			bSpanCount: CH.sum($.SpanCount),
+			bEstimatedSpanCount: CH.sum($.EstimatedSpanCount),
+			bErrorCount: CH.sum($.ErrorCount),
+			bEstimatedErrorCount: CH.sum($.EstimatedErrorCount),
+			bDurationSum: CH.sum($.DurationSum),
+			bDurationQuantiles: CH.rawExpr<string>(SERVICE_ROLLUP_DURATION_STATE),
+			bFirstSeen: CH.min_($.FirstSeen),
+			bApdexSatisfiedCount: CH.sum($.ApdexSatisfiedCount),
+			bApdexToleratingCount: CH.sum($.ApdexToleratingCount),
+		}))
+		.where(($) => [...rollupFilters($), ...interiorConditions($.Hour)])
+		.groupBy(...SERVICE_WINDOW_GROUP_KEYS)
+
+	if (grain === "hour") {
+		if (!includeHourly) {
+			throw new Error("serviceOverviewWindows: hour grain requires the hourly tier")
+		}
+		return fromUnion(unionAll(rawEdges, hourlyInterior), "service_windows")
+	}
+
+	// With the hourly tier present, this reads only the sub-hour remainder at each
+	// end of the hourly interior — `edgeCondition("Minute", hourGrain)` is exactly
+	// the complement of the hourly branch's predicate, so the two never overlap.
+	// Without it, the minute tier covers the whole interior on its own, and the
+	// window is bounded by this table's 90-day retention rather than the hourly
+	// table's year.
+	const minutelyInterior = from(ServiceOverviewMinutely)
+		.select(($) => ({
+			bBucket: $.Minute,
 			bServiceName: $.ServiceName,
 			bServiceNamespace: $.ServiceNamespace,
 			bEnvironment: $.DeploymentEnv,
@@ -79,16 +196,15 @@ function serviceOverviewWindows(filters: ServiceWindowFilters) {
 			bApdexToleratingCount: CH.sum($.ApdexToleratingCount),
 		}))
 		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			...interiorConditions($.Hour),
-			CH.when(filters.serviceName, (value: string) => $.ServiceName.eq(value)),
-			filters.environments?.length ? CH.inList($.DeploymentEnv, filters.environments) : undefined,
-			filters.namespaces?.length ? CH.inList($.ServiceNamespace, filters.namespaces) : undefined,
-			filters.commitShas?.length ? CH.inList($.CommitSha, filters.commitShas) : undefined,
+			...rollupFilters($),
+			...interiorConditions($.Minute, minuteGrain),
+			includeHourly ? edgeCondition("Minute", hourGrain) : undefined,
 		])
-		.groupBy("bHour", "bServiceName", "bServiceNamespace", "bEnvironment", "bCommitSha")
+		.groupBy(...SERVICE_WINDOW_GROUP_KEYS)
 
-	return fromUnion(unionAll(rawEdges, hourlyInterior), "service_windows")
+	return includeHourly
+		? fromUnion(unionAll(rawEdges, minutelyInterior, hourlyInterior), "service_windows")
+		: fromUnion(unionAll(rawEdges, minutelyInterior), "service_windows")
 }
 
 export interface ServiceOverviewOpts {
@@ -99,11 +215,24 @@ export interface ServiceOverviewOpts {
 	limit?: number
 }
 
+/**
+ * One commit's slice of a (service, environment) row: `[sha, spanCount,
+ * errorCount, firstSeen]`.
+ *
+ * A positional tuple because that is how ClickHouse serializes `tuple(...)` in
+ * `FORMAT JSON` — a nested array, not an object.
+ */
+export type ServiceCommitTuple = readonly [
+	commitSha: string,
+	spanCount: number,
+	errorCount: number,
+	firstSeen: string,
+]
+
 export interface ServiceOverviewOutput {
 	readonly serviceName: string
 	readonly serviceNamespace: string
 	readonly environment: string
-	readonly commitSha: string
 	readonly throughput: number
 	readonly errorCount: number
 	readonly estimatedErrorCount: number
@@ -113,13 +242,14 @@ export interface ServiceOverviewOutput {
 	readonly p99LatencyMs: number
 	readonly estimatedSpanCount: number
 	readonly firstSeen: string
+	/** Sorted by span count descending, capped at {@link SERVICE_OVERVIEW_COMMIT_CAP}. */
+	readonly commits: readonly ServiceCommitTuple[]
 }
 
 export const serviceOverviewRowSchema = Schema.Struct({
 	serviceName: Schema.String,
 	serviceNamespace: Schema.String,
 	environment: Schema.String,
-	commitSha: Schema.String,
 	throughput: CHNumber,
 	errorCount: CHNumber,
 	estimatedErrorCount: CHNumber,
@@ -129,6 +259,10 @@ export const serviceOverviewRowSchema = Schema.Struct({
 	p99LatencyMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 	firstSeen: Schema.String,
+	// `CHNumber`, never `Schema.Number`: the counts are UInt64, and a
+	// gateway/readonly cluster that refuses `output_format_json_quote_64bit_integers=0`
+	// returns them as quoted strings.
+	commits: Schema.Array(Schema.Tuple([Schema.String, CHNumber, CHNumber, Schema.String])),
 }) satisfies CompiledQueryRowSchema<ServiceOverviewOutput>
 
 export interface ServiceCatalogOpts {
@@ -188,38 +322,94 @@ export function serviceCatalogQuery(opts: ServiceCatalogOpts) {
 		.format("JSON")
 }
 
+/**
+ * At most this many commits per (service, environment) row.
+ *
+ * Not optional. A service with a high deploy frequency can accumulate thousands
+ * of distinct SHAs inside a long window, and an uncapped `groupArray` would put
+ * every one of them in a single row of the services-list response.
+ */
+const SERVICE_OVERVIEW_COMMIT_CAP = 20
+
+/**
+ * Services-list overview, collapsed to the grain the UI actually renders.
+ *
+ * Two levels rather than one. The inner level keeps the commit dimension so the
+ * per-commit breakdown survives; the outer level collapses namespace variants
+ * and commits into one row per (service, environment) — the identity the web app
+ * routes and filters by.
+ *
+ * The collapse is done here rather than in the browser for two reasons:
+ *
+ *  - **Quantiles.** The client used to take a span-count-weighted MEAN of the
+ *    per-commit p50/p95/p99. A weighted mean of quantiles is not a quantile;
+ *    with one namespace carrying 10x the spans and 10x the latency it is not
+ *    even close. The tDigest states are right here, so merge them.
+ *  - **Truncation.** The old `LIMIT 100` applied to
+ *    (service, namespace, env, sha) rows, so a handful of frequently-deployed
+ *    services could consume the whole budget and silently drop other services
+ *    off the list entirely. The limit now applies to the rendered grain.
+ */
 export function serviceOverviewQuery(opts: ServiceOverviewOpts) {
-	return serviceOverviewWindows(opts)
+	const commitRows = serviceOverviewWindows(opts)
 		.select(($) => ({
-			serviceName: $.bServiceName,
-			serviceNamespace: $.bServiceNamespace,
-			environment: $.bEnvironment,
-			commitSha: $.bCommitSha,
-			throughput: CH.sum($.bSpanCount),
-			errorCount: CH.sum($.bErrorCount),
-			estimatedErrorCount: CH.sum($.bEstimatedErrorCount),
-			spanCount: CH.sum($.bSpanCount),
-			p50LatencyMs: CH.rawExpr<number>(
-				"arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000",
-			),
-			p95LatencyMs: CH.rawExpr<number>(
-				"arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000",
-			),
-			p99LatencyMs: CH.rawExpr<number>(
-				"arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000",
-			),
+			cServiceName: $.bServiceName,
+			cServiceNamespace: $.bServiceNamespace,
+			cEnvironment: $.bEnvironment,
+			cCommitSha: $.bCommitSha,
+			cSpanCount: CH.sum($.bSpanCount),
+			cErrorCount: CH.sum($.bErrorCount),
+			cEstimatedErrorCount: CH.sum($.bEstimatedErrorCount),
 			// Per-span weighted sum: each row's `SampleRate` is 1.0 for unsampled
 			// rows or `1 / acceptanceProbability` for spans carrying a `th:` value.
 			// Replaces the broken `sampledSpanCount * dominantWeight` approximation.
-			estimatedSpanCount: CH.sum($.bEstimatedSpanCount),
+			cEstimatedSpanCount: CH.sum($.bEstimatedSpanCount),
+			// Carried as an unfinalized state so the outer level can merge it. A
+			// finalized quantile here could only be averaged, which is the bug.
+			cDurationQuantiles: CH.rawExpr<string>(
+				"quantilesTDigestMergeState(0.5, 0.95, 0.99)(bDurationQuantiles)",
+			),
 			// Earliest span per (service, env, commit) inside the window — the
 			// list page derives deploy age / errors-since-deploy from this, so it
 			// is window-clamped by construction.
-			firstSeen: CH.min_($.bFirstSeen),
+			cFirstSeen: CH.min_($.bFirstSeen),
 		}))
-		.groupBy("serviceName", "serviceNamespace", "environment", "commitSha")
+		.groupBy("cServiceName", "cServiceNamespace", "cEnvironment", "cCommitSha")
+
+	return fromQuery(commitRows, "service_commit_rows")
+		.select(($) => ({
+			serviceName: $.cServiceName,
+			environment: $.cEnvironment,
+			// The dominant namespace, in SQL. Namespace is display metadata rather
+			// than part of the routing identity, and the metrics beside it now cover
+			// every namespace variant of this service.
+			serviceNamespace: CH.rawExpr<string>("argMax(cServiceNamespace, cEstimatedSpanCount)"),
+			throughput: CH.sum($.cSpanCount),
+			errorCount: CH.sum($.cErrorCount),
+			estimatedErrorCount: CH.sum($.cEstimatedErrorCount),
+			spanCount: CH.sum($.cSpanCount),
+			p50LatencyMs: CH.rawExpr<number>(
+				"arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 1) / 1000000",
+			),
+			p95LatencyMs: CH.rawExpr<number>(
+				"arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 2) / 1000000",
+			),
+			p99LatencyMs: CH.rawExpr<number>(
+				"arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 3) / 1000000",
+			),
+			estimatedSpanCount: CH.sum($.cEstimatedSpanCount),
+			firstSeen: CH.min_($.cFirstSeen),
+			// Sorted by span count descending and capped, so the caller can treat
+			// element 1 as the dominant commit without re-sorting. `arrayReverseSort`
+			// rather than `arraySort(x -> -x.2)`: the counts are UInt64 and negating
+			// an unsigned integer wraps instead of ordering.
+			commits: CH.rawExpr<readonly (readonly [string, number, number, string])[]>(
+				`arraySlice(arrayReverseSort(x -> x.2, groupArray(tuple(cCommitSha, cSpanCount, cErrorCount, toString(cFirstSeen)))), 1, ${SERVICE_OVERVIEW_COMMIT_CAP})`,
+			),
+		}))
+		.groupBy("serviceName", "environment")
 		.orderBy(["throughput", "desc"])
-		.limit(opts.limit ?? 100)
+		.limit(opts.limit ?? 500)
 		.format("JSON")
 }
 
@@ -329,6 +519,12 @@ export function serviceHealthBaselineQuery(opts: ServiceHealthBaselineOpts) {
 
 export interface ServiceReleasesTimelineOpts {
 	serviceName: string
+	/**
+	 * The bucket width the result is grouped into. Needed at build time, not just
+	 * as a compile parameter: it selects which rollup tiers can answer, because a
+	 * tier coarser than the bucket has no position inside it.
+	 */
+	bucketSeconds: number
 }
 
 export interface ServiceReleasesTimelineOutput {
@@ -346,10 +542,44 @@ export const serviceReleasesTimelineRowSchema: CompiledQueryRowSchema<ServiceRel
 		errorCount: CHNumber,
 	})
 
-export function serviceReleasesTimelineQuery(opts: ServiceReleasesTimelineOpts) {
-	return serviceOverviewWindows({ serviceName: opts.serviceName })
+/**
+ * Sub-minute buckets, which no rollup tier can place a row inside. Scans the
+ * entry-point projection directly and is therefore bounded by its 30-day
+ * retention rather than the hourly rollup's year.
+ */
+function serviceReleasesTimelineRawQuery(
+	opts: ServiceReleasesTimelineOpts,
+): CHQuery<ColumnDefs, ServiceReleasesTimelineOutput, {}> {
+	return from(ServiceOverviewSpans)
 		.select(($) => ({
-			bucket: CH.toStartOfInterval($.bHour, param.int("bucketSeconds")),
+			bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
+			commitSha: $.CommitSha,
+			count: CH.count(),
+			errorCount: CH.countIf($.StatusCode.eq("Error")),
+		}))
+		.where(($) => [
+			...serviceOverviewWhereConditions($, { serviceName: opts.serviceName }),
+			$.CommitSha.neq(""),
+		])
+		.groupBy("bucket", "commitSha")
+		.orderBy(["bucket", "asc"])
+		.limit(1000)
+		.format("JSON") as unknown as CHQuery<ColumnDefs, ServiceReleasesTimelineOutput, {}>
+}
+
+export function serviceReleasesTimelineQuery(
+	opts: ServiceReleasesTimelineOpts,
+): CHQuery<ColumnDefs, ServiceReleasesTimelineOutput, {}> {
+	// Sub-hour buckets (the default here is 300s) cannot read the hourly tier: an
+	// hour-floored row carries no position inside the hour, so `toStartOfInterval`
+	// would put every interior hour on the bucket containing `:00` and leave the
+	// rest of that hour reading zero.
+	const tiers = serviceWindowTiersForBucket(opts.bucketSeconds)
+	if (tiers === "raw") return serviceReleasesTimelineRawQuery(opts)
+
+	return serviceOverviewWindows({ serviceName: opts.serviceName }, tiers)
+		.select(($) => ({
+			bucket: CH.toStartOfInterval($.bBucket, param.int("bucketSeconds")),
 			commitSha: $.bCommitSha,
 			count: CH.sum($.bSpanCount),
 			errorCount: CH.sum($.bErrorCount),
@@ -358,7 +588,7 @@ export function serviceReleasesTimelineQuery(opts: ServiceReleasesTimelineOpts) 
 		.groupBy("bucket", "commitSha")
 		.orderBy(["bucket", "asc"])
 		.limit(1000)
-		.format("JSON")
+		.format("JSON") as unknown as CHQuery<ColumnDefs, ServiceReleasesTimelineOutput, {}>
 }
 
 // Service environments
@@ -394,6 +624,12 @@ export function serviceEnvironmentsQuery(opts: ServiceEnvironmentsOpts) {
 export interface ServiceApdexTimeseriesOpts {
 	serviceName: string
 	apdexThresholdMs?: number
+	/**
+	 * The bucket width the result is grouped into. Needed at build time, not just
+	 * as a compile parameter: it selects which rollup tiers can answer, because a
+	 * tier coarser than the bucket has no position inside it.
+	 */
+	bucketSeconds: number
 }
 
 export interface ServiceApdexTimeseriesOutput {
@@ -418,14 +654,20 @@ export function serviceApdexTimeseriesQuery(
 ): CHQuery<ColumnDefs, ServiceApdexTimeseriesOutput, {}> {
 	const thresholdMs = opts.apdexThresholdMs ?? 500
 
-	if (thresholdMs === 500) {
-		return serviceOverviewWindows({ serviceName: opts.serviceName })
+	// Sub-hour buckets (the default here is 60s) cannot read the hourly tier: an
+	// hour-floored row carries no position inside the hour, so `toStartOfInterval`
+	// would put every interior hour on the bucket containing `:00` and leave the
+	// rest of that hour reading zero.
+	const tiers = serviceWindowTiersForBucket(opts.bucketSeconds)
+
+	if (thresholdMs === 500 && tiers !== "raw") {
+		return serviceOverviewWindows({ serviceName: opts.serviceName }, tiers)
 			.select(($) => {
 				const total = CH.sum($.bSpanCount)
 				const satisfied = CH.sum($.bApdexSatisfiedCount)
 				const tolerating = CH.sum($.bApdexToleratingCount)
 				return {
-					bucket: CH.toStartOfInterval($.bHour, param.int("bucketSeconds")),
+					bucket: CH.toStartOfInterval($.bBucket, param.int("bucketSeconds")),
 					totalCount: total,
 					satisfiedCount: satisfied,
 					toleratingCount: tolerating,

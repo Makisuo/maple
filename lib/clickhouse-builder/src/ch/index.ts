@@ -110,6 +110,7 @@ export {
 	// Date/time
 	toStartOfInterval,
 	toStartOfHour,
+	toStartOfMinute,
 	toUnixTimestamp,
 	toUnixTimestamp64Nano,
 	intervalSub,
