@@ -1,8 +1,8 @@
 import * as React from "react"
 
 import { formatDuration } from "../../lib/format"
-import type { TimelineAction, ViewportState } from "./trace-timeline-types"
 import { DRAG_ZOOM_THRESHOLD_PX } from "./trace-timeline-types"
+import type { ViewportController } from "./use-viewport-controller"
 
 interface UseTimelineInteractionsOptions {
 	/**
@@ -12,12 +12,7 @@ interface UseTimelineInteractionsOptions {
 	 */
 	bodyRef: React.RefObject<HTMLElement | null>
 	sidebarWidth: number
-	viewport: ViewportState
-	traceStartMs: number
-	traceEndMs: number
-	dispatch: (action: TimelineAction) => void
-	/** Called at the start of any direct gesture (pointer drag, wheel) so callers can cancel in-flight viewport animations. */
-	onGestureStart?: () => void
+	controller: ViewportController
 }
 
 /** A marquee rectangle, in px relative to `bodyRef`'s left edge. */
@@ -63,28 +58,26 @@ interface DragState {
 	timelineLeft: number
 	timelineWidth: number
 	bodyLeft: number
-	startViewport: ViewportState
+	startStartMs: number
+	startEndMs: number
 }
 
 /**
- * Pointer + wheel gestures for the DOM timeline:
- * - drag across the timeline → marquee → ZOOM_TO_RANGE (a tap stays a span click)
- * - shift-drag / middle-button drag → PAN
- * - ctrl/⌘ + wheel → cursor-anchored ZOOM
- * - shift + wheel / horizontal wheel → PAN; plain vertical wheel → native row scroll
+ * Pointer + wheel gestures for the timeline:
+ * - drag across the timeline → marquee → zoom to range (a tap stays a span click)
+ * - shift-drag / middle-button drag → pan
+ * - ctrl/⌘ + wheel → cursor-anchored zoom
+ * - shift + wheel / horizontal wheel → pan; plain vertical wheel → native row scroll
  *
- * The visible window is captured at pointer-down: a marquee dispatches nothing until release,
- * and a pan dispatches *relative* deltas, so neither needs the live viewport mid-drag — which
- * keeps the window listeners free of stale-closure bugs.
+ * Every gesture writes straight through the `ViewportController`, which clamps, updates the CSS
+ * custom properties the bars read, and notifies the minimap and ruler — no `setState`, so a
+ * drag or a wheel-zoom produces no React commits at all. Only the marquee rectangle, which has
+ * no CSS-var representation, is React state.
  */
 export function useTimelineInteractions({
 	bodyRef,
 	sidebarWidth,
-	viewport,
-	traceStartMs,
-	traceEndMs,
-	dispatch,
-	onGestureStart,
+	controller,
 }: UseTimelineInteractionsOptions): TimelineInteractions {
 	const [marquee, setMarquee] = React.useState<MarqueeRect | null>(null)
 	const [dragMode, setDragMode] = React.useState<DragMode | null>(null)
@@ -92,12 +85,8 @@ export function useTimelineInteractions({
 	const dragRef = React.useRef<DragState | null>(null)
 
 	// Live refs so imperative handlers (crosshair label, cursor-time queries) never go stale.
-	const viewportRef = React.useRef(viewport)
-	viewportRef.current = viewport
 	const sidebarWidthRef = React.useRef(sidebarWidth)
 	sidebarWidthRef.current = sidebarWidth
-	const traceStartMsRef = React.useRef(traceStartMs)
-	traceStartMsRef.current = traceStartMs
 
 	const pxToTimeMs = React.useCallback(
 		(x: number): number | null => {
@@ -106,10 +95,10 @@ export function useTimelineInteractions({
 			const sw = sidebarWidthRef.current
 			const width = el.clientWidth - sw
 			if (width <= 0 || x < sw) return null
-			const vp = viewportRef.current
+			const vp = controller.get()
 			return vp.startMs + ((x - sw) / width) * (vp.endMs - vp.startMs)
 		},
-		[bodyRef],
+		[bodyRef, controller],
 	)
 
 	// Crosshair is positioned imperatively — mousemove must not re-render the component.
@@ -135,14 +124,14 @@ export function useTimelineInteractions({
 				label.style.display = "none"
 			} else {
 				label.style.display = "block"
-				label.textContent = `+${formatDuration(timeMs - traceStartMsRef.current)}`
+				label.textContent = `+${formatDuration(timeMs - controller.traceStartMs)}`
 				// Flip to the left side of the line near the right edge so it stays readable.
 				const el = bodyRef.current
 				const nearRightEdge = el ? x > el.clientWidth - 80 : false
 				label.style.transform = nearRightEdge ? "translateX(calc(-100% - 6px))" : "translateX(6px)"
 			}
 		}
-	}, [bodyRef, pxToTimeMs])
+	}, [bodyRef, controller, pxToTimeMs])
 
 	const setCrosshairX = React.useCallback(
 		(x: number | null) => {
@@ -159,6 +148,13 @@ export function useTimelineInteractions({
 
 	React.useEffect(() => () => cancelAnimationFrame(crosshairRafRef.current), [])
 
+	// The crosshair readout is relative to the window, so it goes stale when the viewport moves
+	// under a parked cursor (keyboard zoom, minimap drag). Repaint it with everything else.
+	React.useEffect(
+		() => controller.subscribe(() => (crosshairXRef.current === null ? undefined : applyCrosshair())),
+		[controller, applyCrosshair],
+	)
+
 	const onPointerDown = React.useCallback(
 		(e: React.PointerEvent) => {
 			if (e.button !== 0 && e.button !== 1) return
@@ -169,8 +165,9 @@ export function useTimelineInteractions({
 			// Gestures only originate in the timeline column.
 			if (x < sidebarWidth) return
 			suppressClickRef.current = false
-			onGestureStart?.()
+			controller.cancelAnimation()
 
+			const vp = controller.get()
 			const mode: DragMode = e.shiftKey || e.button === 1 ? "pan" : "zoom"
 			dragRef.current = {
 				mode,
@@ -180,7 +177,8 @@ export function useTimelineInteractions({
 				timelineLeft: sidebarWidth,
 				timelineWidth: el.clientWidth - sidebarWidth,
 				bodyLeft: rect.left,
-				startViewport: viewport,
+				startStartMs: vp.startMs,
+				startEndMs: vp.endMs,
 			}
 
 			const handleMove = (ev: PointerEvent) => {
@@ -195,9 +193,11 @@ export function useTimelineInteractions({
 				if (d.mode === "pan") {
 					const deltaPx = px - d.lastX
 					d.lastX = px
-					const visible = d.startViewport.endMs - d.startViewport.startMs
-					const deltaMs = -(deltaPx / d.timelineWidth) * visible
-					dispatch({ type: "PAN", deltaMs, traceStartMs, traceEndMs })
+					// Against the *live* window, not the one captured at pointer-down: a pan that
+					// hits the clamp must not accumulate phantom offset the cursor has to undo.
+					const live = controller.get()
+					const deltaMs = -(deltaPx / d.timelineWidth) * (live.endMs - live.startMs)
+					controller.panBy(deltaMs)
 				} else {
 					const lo = Math.max(d.timelineLeft, Math.min(d.startX, px))
 					const hi = Math.min(d.timelineLeft + d.timelineWidth, Math.max(d.startX, px))
@@ -214,17 +214,14 @@ export function useTimelineInteractions({
 				setMarquee(null)
 				if (!d || !d.moved) return
 				if (d.mode === "zoom") {
+					// The marquee was drawn against the window as it stood at pointer-down, which
+					// hasn't moved during the drag, so resolve both edges against that snapshot.
+					const start = { startMs: d.startStartMs, endMs: d.startEndMs }
 					const px = ev.clientX - d.bodyLeft
-					const a = pxToMsStatic(d.startX, d.timelineLeft, d.timelineWidth, d.startViewport)
-					const b = pxToMsStatic(px, d.timelineLeft, d.timelineWidth, d.startViewport)
+					const a = pxToMsStatic(d.startX, d.timelineLeft, d.timelineWidth, start)
+					const b = pxToMsStatic(px, d.timelineLeft, d.timelineWidth, start)
 					suppressClickRef.current = true
-					dispatch({
-						type: "ZOOM_TO_RANGE",
-						startMs: a,
-						endMs: b,
-						traceStartMs,
-						traceEndMs,
-					})
+					controller.zoomToRange(a, b)
 				} else {
 					// A pan still ends on a row; swallow the trailing click.
 					suppressClickRef.current = true
@@ -236,7 +233,7 @@ export function useTimelineInteractions({
 			// No preventDefault here — a plain press must still reach the row's onClick. Text
 			// selection during a drag is suppressed via `select-none` on the container.
 		},
-		[bodyRef, dispatch, sidebarWidth, viewport, traceStartMs, traceEndMs, onGestureStart],
+		[bodyRef, controller, sidebarWidth],
 	)
 
 	const onPointerMove = React.useCallback(
@@ -259,25 +256,21 @@ export function useTimelineInteractions({
 		const el = bodyRef.current
 		if (!el) return
 		const sw = sidebarWidth
-		const vp = viewport
 		const rect = el.getBoundingClientRect()
 		const x = e.clientX - rect.left
 		if (x < sw) return // over the sidebar → let rows scroll natively
-		const timelineLeft = sw
 		const timelineWidth = el.clientWidth - sw
-		const visible = vp.endMs - vp.startMs
 		if (e.ctrlKey || e.metaKey) {
 			e.preventDefault()
-			onGestureStart?.()
-			const centerMs = pxToMsStatic(x, timelineLeft, timelineWidth, vp)
-			const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
-			dispatch({ type: "ZOOM", centerMs, factor, traceStartMs, traceEndMs })
+			controller.cancelAnimation()
+			const centerMs = pxToMsStatic(x, sw, timelineWidth, controller.get())
+			controller.zoomAt(centerMs, e.deltaY < 0 ? 1.15 : 1 / 1.15)
 		} else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
 			e.preventDefault()
-			onGestureStart?.()
+			controller.cancelAnimation()
+			const vp = controller.get()
 			const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY
-			const deltaMs = (delta / Math.max(1, timelineWidth)) * visible
-			dispatch({ type: "PAN", deltaMs, traceStartMs, traceEndMs })
+			controller.panBy((delta / Math.max(1, timelineWidth)) * (vp.endMs - vp.startMs))
 		}
 		// else: plain vertical wheel → native scroll (don't preventDefault)
 	})
@@ -306,7 +299,12 @@ export function useTimelineInteractions({
 	}
 }
 
-function pxToMsStatic(px: number, left: number, width: number, vp: ViewportState): number {
+function pxToMsStatic(
+	px: number,
+	left: number,
+	width: number,
+	vp: { startMs: number; endMs: number },
+): number {
 	const visible = vp.endMs - vp.startMs
 	const frac = width > 0 ? (px - left) / width : 0
 	return vp.startMs + frac * visible
