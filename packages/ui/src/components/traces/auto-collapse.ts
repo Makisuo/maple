@@ -62,6 +62,73 @@ function collectAncestorIdsFromIndex(nodeById: Map<string, SpanNode>, spanId: st
 	return ancestors
 }
 
+/** Every descendant id of `node` that could itself be expanded (i.e. has children). */
+export function collectDescendantParentIds(node: SpanNode): string[] {
+	const ids: string[] = []
+	const visit = (n: SpanNode) => {
+		for (const child of n.children) {
+			if (child.children.length > 0) {
+				ids.push(child.spanId)
+				visit(child)
+			}
+		}
+	}
+	visit(node)
+	return ids
+}
+
+/**
+ * Expand the shallowest level that still has a collapsed parent, leaving everything above it
+ * untouched. Returns the same set when there is nothing left to open, so callers can skip the
+ * dispatch.
+ */
+export function computeExpandOneLevel(
+	expanded: Set<string>,
+	parentIdsByLevel: Map<number, Set<string>>,
+): Set<string> {
+	const levels = [...parentIdsByLevel.keys()].sort((a, b) => a - b)
+	for (const level of levels) {
+		const ids = parentIdsByLevel.get(level)
+		if (!ids) continue
+		let hasCollapsed = false
+		for (const id of ids) {
+			if (!expanded.has(id)) {
+				hasCollapsed = true
+				break
+			}
+		}
+		if (!hasCollapsed) continue
+		const next = new Set(expanded)
+		for (const id of ids) next.add(id)
+		return next
+	}
+	return expanded
+}
+
+/** Collapse the deepest level that still has an expanded parent. */
+export function computeCollapseOneLevel(
+	expanded: Set<string>,
+	parentIdsByLevel: Map<number, Set<string>>,
+): Set<string> {
+	const levels = [...parentIdsByLevel.keys()].sort((a, b) => b - a)
+	for (const level of levels) {
+		const ids = parentIdsByLevel.get(level)
+		if (!ids) continue
+		let hasExpanded = false
+		for (const id of ids) {
+			if (expanded.has(id)) {
+				hasExpanded = true
+				break
+			}
+		}
+		if (!hasExpanded) continue
+		const next = new Set(expanded)
+		for (const id of ids) next.delete(id)
+		return next
+	}
+	return expanded
+}
+
 export interface ComputeDefaultExpandedOptions {
 	/** Keep this span's ancestor chain expanded so it's never hidden by auto-collapse. */
 	keepVisibleSpanId?: string

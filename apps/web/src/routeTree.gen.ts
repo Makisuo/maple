@@ -33,6 +33,7 @@ import { Route as ServiceMapBenchRouteImport } from './routes/service-map-bench'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
+import { Route as TimelineLabRouteImport } from './routes/timeline-lab'
 import { Route as WidgetLabRouteImport } from './routes/widget-lab'
 import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
@@ -193,6 +194,11 @@ const SignInRoute = SignInRouteImport.update({
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
   path: '/sign-up',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TimelineLabRoute = TimelineLabRouteImport.update({
+  id: '/timeline-lab',
+  path: '/timeline-lab',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WidgetLabRoute = WidgetLabRouteImport.update({
@@ -435,6 +441,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/timeline-lab': typeof TimelineLabRoute
   '/widget-lab': typeof WidgetLabRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
@@ -502,6 +509,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/timeline-lab': typeof TimelineLabRoute
   '/widget-lab': typeof WidgetLabRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
@@ -570,6 +578,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/timeline-lab': typeof TimelineLabRoute
   '/widget-lab': typeof WidgetLabRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
@@ -639,6 +648,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/timeline-lab'
     | '/widget-lab'
     | '/alerts/$ruleId'
     | '/alerts/create'
@@ -706,6 +716,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/timeline-lab'
     | '/widget-lab'
     | '/alerts/$ruleId'
     | '/alerts/create'
@@ -773,6 +784,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/timeline-lab'
     | '/widget-lab'
     | '/alerts/$ruleId'
     | '/alerts/create'
@@ -841,6 +853,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
+  TimelineLabRoute: typeof TimelineLabRoute
   WidgetLabRoute: typeof WidgetLabRoute
   AlertsRuleIdRoute: typeof AlertsRuleIdRoute
   AlertsCreateRoute: typeof AlertsCreateRoute
@@ -1052,6 +1065,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-up'
       fullPath: '/sign-up'
       preLoaderRoute: typeof SignUpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/timeline-lab': {
+      id: '/timeline-lab'
+      path: '/timeline-lab'
+      fullPath: '/timeline-lab'
+      preLoaderRoute: typeof TimelineLabRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/widget-lab': {
@@ -1369,6 +1389,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
+  TimelineLabRoute: TimelineLabRoute,
   WidgetLabRoute: WidgetLabRoute,
   AlertsRuleIdRoute: AlertsRuleIdRoute,
   AlertsCreateRoute: AlertsCreateRoute,

@@ -5,17 +5,13 @@ import { cn } from "../../lib/utils"
 import { getServiceColor } from "../../lib/colors"
 import { formatDuration } from "../../lib/format"
 import { getCacheInfo } from "../../lib/cache"
-import type { TimelineBar, ViewportState } from "./trace-timeline-types"
+import type { TimelineBar } from "./trace-timeline-types"
 import { DEPTH_INDENT, ROW_HEIGHT } from "./trace-timeline-types"
 
 interface TraceTimelineRowProps {
 	bar: TimelineBar
 	/** y offset from the virtualizer (px). */
 	top: number
-	sidebarWidth: number
-	/** Measured px width of the timeline column — decides which in-bar labels fit. */
-	timelineWidthPx: number
-	viewport: ViewportState
 	selected: boolean
 	focused: boolean
 	hovered: boolean
@@ -24,17 +20,30 @@ interface TraceTimelineRowProps {
 	/** Search active and this row matches → ring it. */
 	matched: boolean
 	onSelect: (spanId: string) => void
-	onToggleCollapse: (spanId: string) => void
+	/** `wholeSubtree` comes from an Alt/Option-click. */
+	onToggleCollapse: (spanId: string, wholeSubtree: boolean) => void
 	onZoomSpan: (spanId: string) => void
 	onHover: (spanId: string | null, pos: { x: number; y: number } | null) => void
 }
 
+/**
+ * Position of the bar inside the timeline cell, entirely in CSS.
+ *
+ * `--b0`/`--b1` are this span's start/end in trace-relative ms and never change with the
+ * viewport; `--vp0`/`--vpk` come from the nearest time surface (see `writeTimeSurface`) and are
+ * rewritten by the viewport controller on every gesture frame. So a pan or zoom repositions
+ * every bar through the style engine, without React rendering anything.
+ *
+ * `clamp()` replaces what used to be a JS `Math.max(left, -50)`: zoomed in hard, a trace-long
+ * span would otherwise resolve to a multi-million-percent box. The cell clips at its own edges,
+ * so bounding the rect is visually identical and keeps the layout box sane.
+ */
+const BAR_LEFT = "clamp(-50%, calc((var(--b0) - var(--vp0)) * var(--vpk) * 1%), 150%)"
+const BAR_RIGHT = "calc(100% - clamp(-50%, calc((var(--b1) - var(--vp0)) * var(--vpk) * 1%), 150%))"
+
 function TraceTimelineRowImpl({
 	bar,
 	top,
-	sidebarWidth,
-	timelineWidthPx,
-	viewport,
 	selected,
 	focused,
 	hovered,
@@ -47,6 +56,7 @@ function TraceTimelineRowImpl({
 }: TraceTimelineRowProps) {
 	const spanId = bar.span.spanId
 	const cacheInfo = getCacheInfo(bar.span.spanAttributes)
+	const durationLabel = formatDuration(bar.span.durationMs)
 
 	return (
 		<div
@@ -66,10 +76,11 @@ function TraceTimelineRowImpl({
 			onMouseMove={(e) => onHover(spanId, { x: e.clientX, y: e.clientY })}
 			onMouseLeave={() => onHover(null, null)}
 		>
-			{/* Sidebar cell */}
+			{/* Label cell. Sticky so it survives any horizontal scroll of the timeline column,
+			    and sized from `--sidebar-w` so a resize drag doesn't re-render a single row. */}
 			<div
-				className="relative flex items-center gap-1 shrink-0 border-r border-border pr-2 text-[11px]"
-				style={{ width: sidebarWidth, paddingLeft: bar.depth * DEPTH_INDENT + 4 }}
+				className="sticky left-0 z-10 relative flex items-center gap-1 shrink-0 border-r border-border bg-inherit pr-2 text-[11px]"
+				style={{ width: "var(--sidebar-w)", paddingLeft: bar.depth * DEPTH_INDENT + 4 }}
 			>
 				{/* Ancestor indent guides */}
 				{bar.depth > 0 &&
@@ -90,10 +101,11 @@ function TraceTimelineRowImpl({
 						type="button"
 						tabIndex={-1}
 						aria-label={bar.isCollapsed ? "Expand" : "Collapse"}
+						title={`${bar.isCollapsed ? "Expand" : "Collapse"} — ⌥ for the whole subtree`}
 						className="flex items-center justify-center size-4 shrink-0 text-muted-foreground hover:text-foreground"
 						onClick={(e) => {
 							e.stopPropagation()
-							onToggleCollapse(spanId)
+							onToggleCollapse(spanId, e.altKey)
 						}}
 					>
 						{bar.isCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}
@@ -130,119 +142,78 @@ function TraceTimelineRowImpl({
 					<span className="text-[9px] text-muted-foreground/70 shrink-0">+{bar.childCount}</span>
 				)}
 				<span className="ml-auto shrink-0 pl-1 font-mono text-[10px] tabular-nums text-muted-foreground">
-					{formatDuration(bar.span.durationMs)}
+					{durationLabel}
 				</span>
 			</div>
 
 			{/* Timeline cell */}
-			<div className="relative flex-1 min-w-0 overflow-hidden">
-				<SpanBar bar={bar} viewport={viewport} timelineWidthPx={timelineWidthPx} />
-			</div>
-		</div>
-	)
-}
-
-function SpanBar({
-	bar,
-	viewport,
-	timelineWidthPx,
-}: {
-	bar: TimelineBar
-	viewport: ViewportState
-	timelineWidthPx: number
-}) {
-	const visible = viewport.endMs - viewport.startMs
-	if (visible <= 0) return null
-	const leftPct = ((bar.startMs - viewport.startMs) / visible) * 100
-	const rawWidthPct = (Math.max(bar.endMs - bar.startMs, 0) / visible) * 100
-	// Off-screen → don't render (overflow-hidden also clips, this skips the node entirely).
-	if (leftPct > 100 || leftPct + rawWidthPct < 0) return null
-
-	// Bar continues beyond the visible window? Show edge chevrons (Jaeger's clipping-left/right).
-	const clipLeft = leftPct < 0
-	const clipRight = leftPct + rawWidthPct > 100
-
-	// Clamp the rendered rect to a bounded range around the visible column. When zoomed in
-	// hard, a span spanning the whole trace would otherwise resolve to a multi-million-percent
-	// (gigapixel) node; overflow-hidden clips anything past the column, so this is visually
-	// identical while keeping the DOM node a sane size.
-	const left = Math.max(leftPct, -50)
-	const right = Math.min(leftPct + rawWidthPct, 150)
-	const widthPct = Math.max(0, right - left)
-
-	const barPx = (widthPct / 100) * timelineWidthPx
-	// Label room is what's actually on screen, not the bar's full width — a bar whose
-	// tail barely enters the view must not try to fit its name inside.
-	const visiblePx = ((Math.min(right, 100) - Math.max(left, 0)) / 100) * timelineWidthPx
-	const showName = visiblePx > 56
-	const showDuration = visiblePx > 140
-	// A clipped-left bar keeps its label pinned to the visible edge (Sentry's sticky label).
-	// px, not % — CSS percentage padding resolves against the parent cell, not the bar.
-	// Capped so at least ~60px of label room remains inside the bar.
-	const offscreenLeftPx = clipLeft ? ((0 - left) / 100) * timelineWidthPx : 0
-	const labelIndentPx = Math.min(offscreenLeftPx, Math.max(0, barPx - 60))
-
-	// Too small for an inside name → put it beside the bar, on the side with more room
-	// (Jaeger's hintSide heuristic). Rendered as a sibling so it isn't clipped by the bar.
-	const outsideLabelSide: "right" | "left" | null = showName
-		? null
-		: right < 70
-			? "right"
-			: left > 30
-				? "left"
-				: null
-
-	return (
-		<>
-			<div
-				className="absolute top-1/2 -translate-y-1/2 flex items-center overflow-hidden whitespace-nowrap font-mono text-[11px]"
-				style={{
-					left: `${left}%`,
-					width: `max(2px, ${widthPct}%)`,
-					height: ROW_HEIGHT - 8,
-					backgroundColor: bar.fill,
-					borderLeft: `3px solid ${bar.borderColor}`,
-					paddingLeft: labelIndentPx > 0 ? labelIndentPx : undefined,
-				}}
-			>
-				{showName && <span className="truncate px-1.5 text-foreground/90">{bar.span.spanName}</span>}
-				{showDuration && (
-					<span className="ml-auto shrink-0 px-1.5 text-foreground/50 tabular-nums">
-						{formatDuration(bar.span.durationMs)}
-					</span>
-				)}
-			</div>
-			{outsideLabelSide && (
-				<span
-					className="pointer-events-none absolute top-1/2 -translate-y-1/2 whitespace-nowrap font-mono text-[10px] text-muted-foreground/80"
-					style={
-						outsideLabelSide === "right"
-							? { left: `${right}%`, marginLeft: 5 }
-							: { left: `${left}%`, transform: "translate(calc(-100% - 5px), -50%)" }
-					}
+			<div className="group/cell relative flex-1 min-w-0 overflow-hidden">
+				<div
+					data-span-bar=""
+					className={cn(
+						"@container/bar absolute top-1/2 -translate-y-1/2 flex items-center",
+						// Not overflow-hidden: the outside label is a child and has to escape the box.
+						"whitespace-nowrap font-mono text-[11px]",
+					)}
+					style={{
+						left: BAR_LEFT,
+						right: BAR_RIGHT,
+						minWidth: 2,
+						height: ROW_HEIGHT - 8,
+						backgroundColor: bar.fill,
+						borderLeft: `3px solid ${bar.borderColor}`,
+						// Read back by the row-decoration pass; also what the CSS above interpolates.
+						["--b0" as string]: bar.offsetStartMs,
+						["--b1" as string]: bar.offsetEndMs,
+					}}
 				>
-					{bar.span.spanName} · {formatDuration(bar.span.durationMs)}
-				</span>
-			)}
-			{clipLeft && (
+					{/* Inside labels. Container queries replace what used to be a JS px measurement
+					    per bar per frame: the name appears once the bar itself is ≥56px wide, the
+					    duration at ≥140px. The style engine re-evaluates them on zoom for free. */}
+					<div className="flex min-w-0 flex-1 items-center overflow-hidden">
+						<span className="hidden truncate px-1.5 text-foreground/90 @min-[56px]/bar:inline">
+							{bar.span.spanName}
+						</span>
+						<span className="ml-auto hidden shrink-0 px-1.5 text-foreground/50 tabular-nums @min-[140px]/bar:inline">
+							{durationLabel}
+						</span>
+					</div>
+
+					{/* Outside label for bars too narrow to hold one. Sits on the right by default;
+					    the decoration pass flips it left near the right edge of the column. */}
+					<span
+						data-outside-label=""
+						className={cn(
+							"pointer-events-none absolute top-1/2 hidden -translate-y-1/2 whitespace-nowrap",
+							"font-mono text-[10px] text-muted-foreground/80 @max-[56px]/bar:block",
+							"left-full ml-[5px] data-[side=left]:left-auto data-[side=left]:right-full",
+							"data-[side=left]:ml-0 data-[side=left]:mr-[5px]",
+						)}
+					>
+						{bar.span.spanName} · {durationLabel}
+					</span>
+				</div>
+
+				{/* Clipping chevrons, pinned to the cell edges (Jaeger). Toggled by the decoration
+				    pass — CSS can't tell whether the clamp above actually bit. */}
 				<span
-					className="pointer-events-none absolute left-0.5 top-1/2 -translate-y-1/2 font-mono text-[9px] leading-none"
+					data-clip-left=""
+					className="pointer-events-none absolute left-0.5 top-1/2 hidden -translate-y-1/2 font-mono text-[9px] leading-none"
 					style={{ color: bar.borderColor }}
 					aria-hidden
 				>
 					‹
 				</span>
-			)}
-			{clipRight && (
 				<span
-					className="pointer-events-none absolute right-0.5 top-1/2 -translate-y-1/2 font-mono text-[9px] leading-none"
+					data-clip-right=""
+					className="pointer-events-none absolute right-0.5 top-1/2 hidden -translate-y-1/2 font-mono text-[9px] leading-none"
 					style={{ color: bar.borderColor }}
 					aria-hidden
 				>
 					›
 				</span>
-			)}
-		</>
+			</div>
+		</div>
 	)
 }
 
