@@ -4,12 +4,12 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { cn } from "@maple/ui/lib/utils"
 
 import { SectionHeader } from "@/components/layout/section-header"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 import { AnomalyRow } from "./anomaly-row"
 import { SEVERITY_TONE } from "./anomaly-format"
 
 function useRelatedAnomalies(issueId: ErrorIssueId) {
-	const incidentsQueryAtom = MapleApiAtomClient.query("anomalies", "listIncidents", {
+	const incidentsQueryAtom = retainedQuery("anomalies", "listIncidents", {
 		query: { errorIssueId: issueId, limit: 50 },
 		reactivityKeys: ["anomalyIncidents", `errorIssue:${issueId}:anomalies`],
 	})

@@ -21,7 +21,7 @@ function pseudoRandom(seed: number): number {
 	return x - Math.floor(x)
 }
 
-export function generateBuckets(): LogBucket[] {
+function generateBuckets(): LogBucket[] {
 	const out: LogBucket[] = []
 	for (let i = 0; i < COUNT; i++) {
 		const t = new Date(NOW - (COUNT - 1 - i) * BUCKET_MS)

@@ -3,7 +3,7 @@ import { formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 
 const comparatorLabel: Record<string, string> = {
@@ -31,7 +31,7 @@ export function registerListAlertRulesTool(server: McpToolRegistrar) {
 			severity,
 			enabled_only,
 		}) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const alerts = yield* AlertRulesService
 
 			const result = yield* alerts.listRules(tenant.orgId).pipe(

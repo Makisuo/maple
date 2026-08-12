@@ -185,8 +185,6 @@ function useClockAt() {
 	)
 }
 
-// --- Events tab -------------------------------------------------------------
-
 function EventsTab({ sessionId, window }: { sessionId: string; window?: ReplayPartitionWindow }) {
 	const result = useAtomValue(getSessionTranscriptResultAtom({ data: { sessionId, ...window } }))
 	const [filter, setFilter] = React.useState<EventFilter>("all")
@@ -435,8 +433,6 @@ function NetDurationBar({ durationMs, failed }: { durationMs: number; failed: bo
 	)
 }
 
-// --- Traces tab -------------------------------------------------------------
-
 function TracesTab({
 	traceIds,
 	window,
@@ -557,8 +553,6 @@ function TraceListRow({ summary }: { summary: SessionTraceSummary }) {
 		</li>
 	)
 }
-
-// --- Session tab ------------------------------------------------------------
 
 function SessionTab({ sessionId, session }: { sessionId: string; session: SessionRailSession }) {
 	return (

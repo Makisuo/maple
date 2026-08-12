@@ -1,12 +1,11 @@
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { useCallback, useState } from "react"
-import { useNavigate } from "@tanstack/react-router"
+import { getRouteApi } from "@tanstack/react-router"
 import { XmarkIcon, MagnifierIcon } from "@/components/icons"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useDebouncedCallback } from "@maple/ui/hooks/use-debounced-callback"
 import { FilterSection, SearchableFilterSection, serviceColorMap } from "@/components/filters/filter-section"
-import { Route } from "@/routes/logs"
 import { FILTER_SECTION_LABEL } from "@maple/ui/components/filters/filter-styles"
 import { Kbd } from "@maple/ui/components/ui/kbd"
 import {
@@ -25,13 +24,15 @@ import {
 } from "@/components/filters/filter-sidebar"
 import { SEVERITY_COLORS } from "@maple/ui/lib/severity"
 
+const routeApi = getRouteApi("/logs/")
+
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={3} />
 }
 
 export function LogsFilterSidebar() {
-	const navigate = useNavigate({ from: Route.fullPath })
-	const search = Route.useSearch()
+	const navigate = routeApi.useNavigate()
+	const search = routeApi.useSearch()
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,

@@ -12,9 +12,9 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { summarizeSampling } from "@/lib/sampling"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 import { transformExternalEdge } from "@/api/warehouse/service-external-edges"
-import { aggregateByServiceEnvironment, coerceRow } from "@/api/warehouse/services"
+import { coerceOverviewRows } from "@/api/warehouse/services"
 
-import { formatWarehouseDateTime } from "@maple/query-engine"
+import { formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-engine"
 export interface ServiceEdge {
 	sourceService: string
 	targetService: string
@@ -175,8 +175,8 @@ export const getServiceDependenciesBundle = Effect.fn("QueryEngine.getServiceDep
 		}),
 	)
 
-	const startMs = new Date(startTime.replace(" ", "T") + "Z").getTime()
-	const endMs = new Date(endTime.replace(" ", "T") + "Z").getTime()
+	const startMs = parseWarehouseDateTime(startTime)
+	const endMs = parseWarehouseDateTime(endTime)
 	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
 
 	return {
@@ -207,8 +207,6 @@ function transformDbEdge(row: Record<string, unknown>, durationSeconds: number):
 	}
 }
 
-// Cloudflare direct-integration Worker analytics
-//
 // The analytics poller writes Worker metrics under the synthetic service name
 // `cloudflare-worker/{script}` with no spans. The map overlays these onto the
 // matching instrumented service node (by service name or faas.name); scripts
@@ -272,8 +270,8 @@ export const getServiceMapCloudflare = Effect.fn("QueryEngine.getServiceMapCloud
 		}),
 	)
 
-	const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
-	const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
+	const startMs = input.startTime ? parseWarehouseDateTime(input.startTime) : 0
+	const endMs = input.endTime ? parseWarehouseDateTime(input.endTime) : 0
 	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
 
 	return {
@@ -281,8 +279,6 @@ export const getServiceMapCloudflare = Effect.fn("QueryEngine.getServiceMapCloud
 	}
 })
 
-// PlanetScale scraped-metrics rollups
-//
 // The scraper collects PlanetScale's Prometheus metrics per branch; the map
 // overlays the per-database rollup onto the matching trace-derived DB node
 // (matched by database name against the org's polled inventory). PlanetScale
@@ -443,14 +439,14 @@ export const getServiceMapBundle = Effect.fn("QueryEngine.getServiceMapBundle")(
 		}),
 	)
 
-	const startMs = new Date(`${startTime.replace(" ", "T")}Z`).getTime()
-	const endMs = new Date(`${endTime.replace(" ", "T")}Z`).getTime()
+	const startMs = parseWarehouseDateTime(startTime)
+	const endMs = parseWarehouseDateTime(endTime)
 	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
 
 	return {
 		edges: result.dependencies.map((row) => transformEdge(row, durationSeconds)),
 		dbEdges: result.dbEdges.map((row) => transformDbEdge(row, durationSeconds)),
-		overview: aggregateByServiceEnvironment(result.overview.map(coerceRow), durationSeconds),
+		overview: coerceOverviewRows(result.overview, durationSeconds),
 		platforms: result.platforms.map((row) => ({
 			serviceName: row.serviceName,
 			platform: row.platform,

@@ -1,6 +1,6 @@
 import { requiredStringParam, optionalNumberParam, type McpToolRegistrar } from "./types"
 import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
-import { withTenantExecutor, resolveTenant } from "@/mcp/lib/query-warehouse"
+import { withTenantExecutor, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatTable, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -19,7 +19,7 @@ export function registerGetSessionTracesTool(server: McpToolRegistrar) {
 		Effect.fn("McpTool.getSessionTraces")(function* ({ session_id, limit }) {
 			const lim = clampLimit(limit, { defaultValue: 50, max: 100 })
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				sessionId: session_id,

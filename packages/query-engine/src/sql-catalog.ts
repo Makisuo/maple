@@ -104,7 +104,6 @@ const FINGERPRINT = "11640393269246331608"
  * `assertPipeCoverage`, so adding a pipe without a fixture breaks the build.
  */
 export const pipeFixtures: ReadonlyArray<PipeFixture> = [
-	// ----- Traces -----
 	{ pipe: "list_traces", label: "default", params: {}, allCapabilities: true },
 	{
 		pipe: "list_traces",
@@ -159,7 +158,6 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "span_search", label: "default", params: { search: "timeout" }, allCapabilities: true },
 	{ pipe: "top_operations", label: "default", params: { service_name: "api", metric: "p95_duration" } },
 
-	// ----- Custom charts: the routed timeseries. -----
 	// NB: the pipe adapter never forwards `bucket_seconds` into the query opts,
 	// so none of these can reach the annual service-overview rollup — see
 	// `pipePathReachesAnnualRoute`. The annual route lives in the QuerySpec
@@ -195,7 +193,6 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 		allCapabilities: true,
 	},
 
-	// ----- Logs -----
 	{ pipe: "list_logs", label: "default", params: {}, allCapabilities: true },
 	{
 		pipe: "list_logs",
@@ -207,7 +204,6 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "logs_count", label: "searched", params: { search: "timeout" }, allCapabilities: true },
 	{ pipe: "logs_facets", label: "default", params: {}, allCapabilities: true },
 
-	// ----- Services -----
 	{ pipe: "error_rate_by_service", label: "default", params: {} },
 	{ pipe: "service_overview", label: "default", params: {} },
 	{
@@ -255,7 +251,6 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	},
 	{ pipe: "service_dependencies", label: "default", params: { deployment_env: "production" } },
 
-	// ----- Errors -----
 	{ pipe: "errors_by_type", label: "default", params: {} },
 	{ pipe: "errors_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "errors_facets", label: "default", params: {} },
@@ -265,11 +260,9 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "error_issue_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "error_issue_sample_traces", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 
-	// ----- Metrics -----
 	{ pipe: "list_metrics", label: "default", params: {} },
 	{ pipe: "metrics_summary", label: "default", params: {} },
 
-	// ----- Attribute discovery -----
 	{ pipe: "span_attribute_keys", label: "default", params: {}, allCapabilities: true },
 	{ pipe: "resource_attribute_keys", label: "default", params: {}, allCapabilities: true },
 	{ pipe: "metric_attribute_keys", label: "default", params: {} },
@@ -399,7 +392,6 @@ const METRICS_FILTERS = {
 } as const
 
 export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
-	// --- traces timeseries: every branch of the routed function ---
 	{
 		label: "traces-timeseries-annual",
 		route: "traces_timeseries:annual",
@@ -425,6 +417,73 @@ export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
 		},
 		startTime: "2025-11-01 00:00:00",
 		endTime: "2025-11-25 00:00:00",
+	},
+	{
+		// The services list's sparkline request, verbatim. Sub-hour bucket + a real
+		// groupBy: before the minute tier existed this combination was rejected and
+		// every services-list load scanned raw `traces`.
+		label: "traces-timeseries-annual-minutely-grouped",
+		route: "traces_timeseries:annual",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 300,
+			groupBy: ["service"],
+			filters: { ...TRACES_FILTERS, rootSpansOnly: true },
+		},
+		startTime: SHORT_START_TIME,
+		endTime: SHORT_END_TIME,
+	},
+	{
+		// Hour-multiple bucket WITH a groupBy: all three tiers, and the group key
+		// has to survive the three-way UNION with identical types on every branch.
+		label: "traces-timeseries-annual-grouped-all-tiers",
+		route: "traces_timeseries:annual",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 3600,
+			groupBy: ["service"],
+			filters: { rootSpansOnly: true },
+		},
+	},
+	{
+		// `seriesLimit` was unreachable on this route until the groupBy predicate
+		// was relaxed — `hasRealGroupBy` was always false. This is the
+		// CTE-over-three-way-union that no fixture had ever executed.
+		label: "traces-timeseries-annual-grouped-series-cap",
+		route: "traces_timeseries:annual",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 300,
+			groupBy: ["service"],
+			seriesLimit: 10,
+			filters: { rootSpansOnly: true },
+		},
+		startTime: SHORT_START_TIME,
+		endTime: SHORT_END_TIME,
+	},
+	{
+		// The rejecting side of the predicate: `status_code` is aggregated away by
+		// both rollups, so this must fall through to another route. Keeps
+		// `canUseAnnualServiceOverview` covered in both directions.
+		label: "traces-timeseries-annual-rejected-status-code",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 3600,
+			groupBy: ["status_code"],
+			filters: { rootSpansOnly: true },
+		},
 	},
 	{
 		label: "traces-timeseries-aggregates-mv",
@@ -503,7 +562,6 @@ export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
 		allCapabilities: true,
 	},
 
-	// --- the other sources ---
 	{
 		label: "logs-timeseries",
 		query: {

@@ -12,7 +12,7 @@ import {
 	defaultWidgetLayout,
 	widgetTypeByVisualization,
 } from "@maple/domain/http"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { McpQueryError } from "@/mcp/tools/types"
 
@@ -114,7 +114,7 @@ export const withDashboardMutation = Effect.fn("withDashboardMutation")(function
 		existingWidgets: ReadonlyArray<DashboardWidget>,
 	) => Effect.Effect<ReadonlyArray<DashboardWidget>, McpQueryError, R>,
 ) {
-	const tenant = yield* resolveTenant
+	const tenant = yield* CurrentMcpTenant
 	const persistence = yield* DashboardPersistenceService
 
 	// `mutate` reports "not found" via a typed `DashboardNotFoundError` and

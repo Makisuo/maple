@@ -1,18 +1,18 @@
 import * as React from "react"
+
+import { spanStartMs } from "../../lib/span-tree"
 import type { SpanNode } from "../../lib/types"
-import type { ViewportState } from "./trace-timeline-types"
-import { MINIMAP_HEIGHT } from "./trace-timeline-types"
+import { HANDLE_HIT_AREA, MINIMAP_HEIGHT, MIN_RANGE_FRAC } from "./trace-timeline-types"
 import { formatDuration } from "../../lib/format"
 import { getValueHue } from "../../lib/colors"
 import { resolveColorValue, isStatusCodePreset, type ColorByField } from "./color-by"
+import { viewportBounds } from "./clamp-viewport"
+import type { ViewportController } from "./use-viewport-controller"
 
 interface TraceTimelineMinimapProps {
 	rootSpans: SpanNode[]
-	traceStartMs: number
-	traceEndMs: number
 	colorBy: ColorByField
-	viewport: ViewportState
-	onViewportChange: (viewport: ViewportState) => void
+	controller: ViewportController
 }
 
 interface MinimapSpan {
@@ -32,8 +32,8 @@ const REFRAME_THRESHOLD_PX = 3
 
 function collectMinimapSpans(
 	rootSpans: SpanNode[],
-	traceStartMs: number,
-	traceDurationMs: number,
+	domainStartMs: number,
+	domainDurationMs: number,
 	colorBy: ColorByField,
 ): { spans: MinimapSpan[]; maxDepth: number } {
 	const spans: MinimapSpan[] = []
@@ -41,11 +41,11 @@ function collectMinimapSpans(
 	const statusPreset = isStatusCodePreset(colorBy)
 
 	function visit(node: SpanNode) {
-		const startMs = new Date(node.startTime).getTime()
-		// traceDurationMs spans the full extent of the trace (max end − min start), so every
-		// span maps into 0–100% — no skewed span flies off the minimap.
-		const leftPercent = ((startMs - traceStartMs) / traceDurationMs) * 100
-		const widthPercent = (node.durationMs / traceDurationMs) * 100
+		const startMs = spanStartMs(node)
+		// Positioned against the padded viewport bounds, the same space the ruler and the span
+		// bars use, so a given instant lands at the same x in the strip and in the column.
+		const leftPercent = ((startMs - domainStartMs) / domainDurationMs) * 100
+		const widthPercent = (node.durationMs / domainDurationMs) * 100
 		maxDepth = Math.max(maxDepth, node.depth)
 
 		const isError = node.statusCode === "Error"
@@ -77,30 +77,25 @@ function collectMinimapSpans(
 	return { spans, maxDepth }
 }
 
-export function TraceTimelineMinimap({
+/**
+ * The span silhouette. One node per span and no virtualization, so on a 2000-span trace this is
+ * 2000 elements — which is exactly why it is split out and memoized: it depends on the tree and
+ * the colour scheme, never on the viewport, so a pan or zoom must not re-render it.
+ */
+const MinimapBars = React.memo(function MinimapBars({
 	rootSpans,
-	traceStartMs,
-	traceEndMs,
+	domainStartMs,
+	domainDurationMs,
 	colorBy,
-	viewport,
-	onViewportChange,
-}: TraceTimelineMinimapProps) {
-	const containerRef = React.useRef<HTMLDivElement>(null)
-	const guideRef = React.useRef<HTMLDivElement>(null)
-	const dragRef = React.useRef<{
-		type: "pan" | "resize-left" | "resize-right" | "reframe"
-		startX: number
-		moved: boolean
-		startViewport: ViewportState
-	} | null>(null)
-	/** Live reframe preview, in minimap % — anchor and cursor ends, unordered. */
-	const [reframePreview, setReframePreview] = React.useState<{ a: number; b: number } | null>(null)
-
-	const traceDuration = traceEndMs - traceStartMs
-
+}: {
+	rootSpans: SpanNode[]
+	domainStartMs: number
+	domainDurationMs: number
+	colorBy: ColorByField
+}) {
 	const { spans, maxDepth } = React.useMemo(
-		() => collectMinimapSpans(rootSpans, traceStartMs, traceDuration, colorBy),
-		[rootSpans, traceStartMs, traceDuration, colorBy],
+		() => collectMinimapSpans(rootSpans, domainStartMs, domainDurationMs, colorBy),
+		[rootSpans, domainStartMs, domainDurationMs, colorBy],
 	)
 
 	// Fit every depth level inside the strip: deep traces compress the row pitch evenly
@@ -108,222 +103,289 @@ export function TraceTimelineMinimap({
 	const pitch = Math.max(1, Math.min(4, Math.floor((MINIMAP_HEIGHT - 4) / (maxDepth + 1))))
 	const rowH = Math.max(1, pitch - 1)
 
-	// Viewport rectangle position
-	const vpLeftPercent = ((viewport.startMs - traceStartMs) / traceDuration) * 100
-	const vpWidthPercent = ((viewport.endMs - viewport.startMs) / traceDuration) * 100
+	return (
+		<div className="pointer-events-none absolute inset-0" style={{ paddingTop: 2, paddingBottom: 2 }}>
+			{spans.map((s) => (
+				<div
+					key={s.spanId}
+					className="absolute"
+					style={{
+						top: Math.min(2 + s.depth * pitch, MINIMAP_HEIGHT - rowH - 2),
+						left: `${s.leftPercent}%`,
+						width: `${Math.max(s.widthPercent, 0.2)}%`,
+						height: rowH,
+						backgroundColor: s.bgColor,
+					}}
+				/>
+			))}
+		</div>
+	)
+})
 
-	const pctFromEvent = React.useCallback((clientX: number) => {
-		const rect = containerRef.current?.getBoundingClientRect()
-		if (!rect || rect.width === 0) return 0
-		return ((clientX - rect.left) / rect.width) * 100
-	}, [])
+type DragType = "pan" | "resize-left" | "resize-right" | "reframe"
 
-	const handleMouseDown = React.useCallback(
-		(e: React.MouseEvent) => {
-			if (!containerRef.current) return
-			const clickPercent = pctFromEvent(e.clientX)
+/** Pointer x as a 0–100 percentage of the strip, clamped to it. */
+function pctInStrip(clientX: number, rect: DOMRect): number {
+	return Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100))
+}
 
-			// Check if clicking on viewport edges (resize) or inside viewport (pan)
-			const edgeThreshold = 2 // percent
-			if (
-				clickPercent >= vpLeftPercent - edgeThreshold &&
-				clickPercent <= vpLeftPercent + edgeThreshold
-			) {
-				dragRef.current = {
-					type: "resize-left",
-					startX: e.clientX,
-					moved: false,
-					startViewport: { ...viewport },
-				}
-			} else if (
-				clickPercent >= vpLeftPercent + vpWidthPercent - edgeThreshold &&
-				clickPercent <= vpLeftPercent + vpWidthPercent + edgeThreshold
-			) {
-				dragRef.current = {
-					type: "resize-right",
-					startX: e.clientX,
-					moved: false,
-					startViewport: { ...viewport },
-				}
-			} else if (clickPercent >= vpLeftPercent && clickPercent <= vpLeftPercent + vpWidthPercent) {
-				dragRef.current = {
-					type: "pan",
-					startX: e.clientX,
-					moved: false,
-					startViewport: { ...viewport },
-				}
-			} else {
-				// Outside the viewport rect: a drag draws a new range (Jaeger's reframe);
-				// a plain click (no movement) jumps the viewport center — resolved on mouseup.
-				dragRef.current = {
-					type: "reframe",
-					startX: e.clientX,
-					moved: false,
-					startViewport: { ...viewport },
-				}
-			}
+export function TraceTimelineMinimap({ rootSpans, colorBy, controller }: TraceTimelineMinimapProps) {
+	const containerRef = React.useRef<HTMLDivElement>(null)
+	const guideRef = React.useRef<HTMLDivElement>(null)
+	// The viewport rect and the two dimming masks, driven imperatively by the controller
+	// subscription below — the whole point is that a gesture re-renders nothing here either.
+	const rectRef = React.useRef<HTMLDivElement>(null)
+	const dimLeftRef = React.useRef<HTMLDivElement>(null)
+	const dimRightRef = React.useRef<HTMLDivElement>(null)
+	const brushRef = React.useRef<HTMLDivElement>(null)
 
-			e.preventDefault()
+	const dragRef = React.useRef<{
+		type: DragType
+		startX: number
+		moved: boolean
+		startStartMs: number
+		startEndMs: number
+		rect: DOMRect
+	} | null>(null)
+
+	const traceStartMs = controller.traceStartMs
+
+	// The strip spans the padded viewport bounds, not the bare trace — identical to the space the
+	// ruler and the span bars are drawn in, so trace-zero lands at the same x in both. It also
+	// means the viewport can never exceed the strip, so the clamp in `fracs` is a guard rather
+	// than the thing holding the rect inside its container.
+	const { loMs: domainStartMs, durationMs: domainDuration } = React.useMemo(
+		() => viewportBounds(controller.traceStartMs, controller.traceEndMs),
+		[controller.traceStartMs, controller.traceEndMs],
+	)
+
+	/** Current viewport as [0,1] fractions of the strip. */
+	const fracs = React.useCallback(
+		(vp: { startMs: number; endMs: number }) => {
+			const start = (vp.startMs - domainStartMs) / domainDuration
+			const end = (vp.endMs - domainStartMs) / domainDuration
+			return { start: Math.max(0, Math.min(1, start)), end: Math.max(0, Math.min(1, end)) }
 		},
-		[viewport, vpLeftPercent, vpWidthPercent, pctFromEvent],
+		[domainStartMs, domainDuration],
 	)
 
 	React.useEffect(() => {
-		const handleMouseMove = (e: MouseEvent) => {
+		const paint = (vp: { startMs: number; endMs: number }) => {
+			const { start, end } = fracs(vp)
+			const leftPct = start * 100
+			// Keep a hairline visible at extreme zoom, but never let it push past the right edge.
+			const widthPct = Math.min(Math.max((end - start) * 100, 0.5), 100 - leftPct)
+			const rect = rectRef.current
+			if (rect) {
+				rect.style.left = `${leftPct}%`
+				rect.style.width = `${widthPct}%`
+			}
+			if (dimLeftRef.current) dimLeftRef.current.style.width = `${leftPct}%`
+			if (dimRightRef.current) dimRightRef.current.style.left = `${leftPct + widthPct}%`
+		}
+		return controller.subscribe(paint)
+	}, [controller, fracs])
+
+	const setCursor = React.useCallback((cursor: string) => {
+		if (containerRef.current) containerRef.current.style.cursor = cursor
+	}, [])
+
+	const handlePointerDown = React.useCallback(
+		(e: React.PointerEvent) => {
+			if (e.button !== 0) return
+			const el = containerRef.current
+			if (!el) return
+			const rect = el.getBoundingClientRect()
+			if (rect.width === 0) return
+			controller.cancelAnimation()
+
+			const vp = controller.get()
+			const { start, end } = fracs(vp)
+			const x = (e.clientX - rect.left) / rect.width
+			// Hit-test in px, not percent. A percent threshold that looks right at a 50% viewport
+			// swallows the whole rect at 3%, which is exactly when you most want to resize it.
+			const handleFrac = HANDLE_HIT_AREA / rect.width
+
+			let type: DragType
+			if (Math.abs(x - start) <= handleFrac) type = "resize-left"
+			else if (Math.abs(x - end) <= handleFrac) type = "resize-right"
+			else if (x > start && x < end) type = "pan"
+			else type = "reframe"
+
+			dragRef.current = {
+				type,
+				startX: e.clientX,
+				moved: false,
+				// Seed from the *clamped* window, matching where the handle is actually drawn.
+				// Seeding from the raw window makes a handle grabbed at a strip edge sit up to
+				// 5% of the trace away from the value it's dragging, so the first slice of the
+				// drag reads as a dead zone. Identical to `vp` for any mid-trace window.
+				startStartMs: domainStartMs + start * domainDuration,
+				startEndMs: domainStartMs + end * domainDuration,
+				rect,
+			}
+			el.setPointerCapture(e.pointerId)
+			setCursor(type === "pan" ? "grabbing" : type === "reframe" ? "crosshair" : "col-resize")
+			if (guideRef.current) guideRef.current.style.display = "none"
+			e.preventDefault()
+		},
+		[controller, fracs, setCursor, domainStartMs, domainDuration],
+	)
+
+	const handlePointerMove = React.useCallback(
+		(e: React.PointerEvent) => {
 			const d = dragRef.current
-			if (!d || !containerRef.current) return
-			const rect = containerRef.current.getBoundingClientRect()
-			const deltaPercent = ((e.clientX - d.startX) / rect.width) * 100
-			const deltaMs = (deltaPercent / 100) * traceDuration
-			const sv = d.startViewport
+			const el = containerRef.current
+			if (!el) return
+
+			if (!d) {
+				// Idle: hover guide (line + readout), written imperatively — no re-render per pixel.
+				const rect = el.getBoundingClientRect()
+				if (rect.width === 0) return
+				const x = e.clientX - rect.left
+				const frac = x / rect.width
+				const vp = controller.get()
+				const { start, end } = fracs(vp)
+				const handleFrac = HANDLE_HIT_AREA / rect.width
+				setCursor(
+					Math.abs(frac - start) <= handleFrac || Math.abs(frac - end) <= handleFrac
+						? "col-resize"
+						: frac > start && frac < end
+							? "grab"
+							: "crosshair",
+				)
+				const node = guideRef.current
+				if (node) {
+					node.style.display = "block"
+					node.style.transform = `translateX(${x}px)`
+					const label = node.firstElementChild as HTMLElement | null
+					if (label) {
+						// Readout stays relative to the *trace* start, matching the ruler's "+Nms" —
+						// the strip's own origin sits 5% before it and would report negative time.
+						const offsetMs = domainStartMs + frac * domainDuration - traceStartMs
+						label.textContent = `+${formatDuration(offsetMs)}`
+						label.style.transform =
+							x > rect.width - 70 ? "translateX(calc(-100% - 5px))" : "translateX(5px)"
+					}
+				}
+				return
+			}
+
+			const deltaMs = ((e.clientX - d.startX) / d.rect.width) * domainDuration
+			// The smallest window the minimap will hand over. Matched to what clampViewport will
+			// accept, so a resize handle can't be dragged into a range the clamp then widens —
+			// which reads as the handle fighting the cursor.
+			const minRangeMs = Math.max(domainDuration * MIN_RANGE_FRAC, 0)
 
 			switch (d.type) {
 				case "pan":
-					onViewportChange({
-						startMs: sv.startMs + deltaMs,
-						endMs: sv.endMs + deltaMs,
-					})
+					controller.set({ startMs: d.startStartMs + deltaMs, endMs: d.startEndMs + deltaMs })
 					break
 				case "resize-left":
-					onViewportChange({
-						startMs: Math.min(sv.startMs + deltaMs, sv.endMs - traceDuration * 0.01),
-						endMs: sv.endMs,
+					controller.set({
+						startMs: Math.min(d.startStartMs + deltaMs, d.startEndMs - minRangeMs),
+						endMs: d.startEndMs,
 					})
 					break
 				case "resize-right":
-					onViewportChange({
-						startMs: sv.startMs,
-						endMs: Math.max(sv.endMs + deltaMs, sv.startMs + traceDuration * 0.01),
+					controller.set({
+						startMs: d.startStartMs,
+						endMs: Math.max(d.startEndMs + deltaMs, d.startStartMs + minRangeMs),
 					})
 					break
 				case "reframe": {
 					if (!d.moved && Math.abs(e.clientX - d.startX) <= REFRAME_THRESHOLD_PX) return
 					d.moved = true
-					const a = ((d.startX - rect.left) / rect.width) * 100
-					const b = ((e.clientX - rect.left) / rect.width) * 100
-					setReframePreview({ a, b })
+					// Clamped: a brush dragged off the end of the strip would otherwise paint a
+					// preview wider than its container and push the page sideways.
+					const a = pctInStrip(d.startX, d.rect)
+					const b = pctInStrip(e.clientX, d.rect)
+					const brush = brushRef.current
+					if (brush) {
+						brush.style.display = "block"
+						brush.style.left = `${Math.min(a, b)}%`
+						brush.style.width = `${Math.abs(b - a)}%`
+					}
 					break
 				}
 			}
-		}
-
-		const handleMouseUp = (e: MouseEvent) => {
-			const d = dragRef.current
-			dragRef.current = null
-			if (!d) return
-			if (d.type !== "reframe") return
-			setReframePreview(null)
-			const rect = containerRef.current?.getBoundingClientRect()
-			if (!rect || rect.width === 0) return
-			if (d.moved) {
-				// Commit the previewed range (either drag direction).
-				const aPct = ((d.startX - rect.left) / rect.width) * 100
-				const bPct = ((e.clientX - rect.left) / rect.width) * 100
-				const lo = Math.min(aPct, bPct)
-				const hi = Math.max(aPct, bPct)
-				onViewportChange({
-					startMs: traceStartMs + (lo / 100) * traceDuration,
-					endMs: traceStartMs + (hi / 100) * traceDuration,
-				})
-			} else {
-				// Plain click: jump viewport center to the clicked position.
-				const clickPercent = ((e.clientX - rect.left) / rect.width) * 100
-				const clickMs = traceStartMs + (clickPercent / 100) * traceDuration
-				const vpDuration = d.startViewport.endMs - d.startViewport.startMs
-				onViewportChange({
-					startMs: clickMs - vpDuration / 2,
-					endMs: clickMs + vpDuration / 2,
-				})
-			}
-		}
-
-		window.addEventListener("mousemove", handleMouseMove)
-		window.addEventListener("mouseup", handleMouseUp)
-		return () => {
-			window.removeEventListener("mousemove", handleMouseMove)
-			window.removeEventListener("mouseup", handleMouseUp)
-		}
-	}, [traceDuration, traceStartMs, onViewportChange])
-
-	// Hover guide: vertical line + time readout, written imperatively (no re-render per pixel).
-	const handleHoverMove = React.useCallback(
-		(e: React.MouseEvent) => {
-			const node = guideRef.current
-			const rect = containerRef.current?.getBoundingClientRect()
-			if (!node || !rect || rect.width === 0) return
-			if (dragRef.current) {
-				node.style.display = "none"
-				return
-			}
-			const x = e.clientX - rect.left
-			node.style.display = "block"
-			node.style.transform = `translateX(${x}px)`
-			const label = node.firstElementChild as HTMLElement | null
-			if (label) {
-				label.textContent = `+${formatDuration((x / rect.width) * traceDuration)}`
-				label.style.transform =
-					x > rect.width - 70 ? "translateX(calc(-100% - 5px))" : "translateX(5px)"
-			}
 		},
-		[traceDuration],
+		[controller, fracs, setCursor, domainStartMs, domainDuration, traceStartMs],
 	)
 
-	const handleHoverLeave = React.useCallback(() => {
-		if (guideRef.current) guideRef.current.style.display = "none"
+	const handlePointerUp = React.useCallback(
+		(e: React.PointerEvent) => {
+			const d = dragRef.current
+			dragRef.current = null
+			containerRef.current?.releasePointerCapture?.(e.pointerId)
+			setCursor("crosshair")
+			if (brushRef.current) brushRef.current.style.display = "none"
+			if (!d || d.type !== "reframe") return
+
+			const frac = (clientX: number) => (clientX - d.rect.left) / d.rect.width
+			if (d.moved) {
+				// Commit the brushed range (either drag direction).
+				const a = frac(d.startX)
+				const b = frac(e.clientX)
+				controller.zoomToRange(
+					domainStartMs + Math.min(a, b) * domainDuration,
+					domainStartMs + Math.max(a, b) * domainDuration,
+				)
+			} else {
+				// Plain click: jump the viewport centre to the clicked position, same width.
+				const clickMs = domainStartMs + frac(e.clientX) * domainDuration
+				const width = d.startEndMs - d.startStartMs
+				controller.set({ startMs: clickMs - width / 2, endMs: clickMs + width / 2 })
+			}
+		},
+		[controller, setCursor, domainStartMs, domainDuration],
+	)
+
+	const handlePointerLeave = React.useCallback(() => {
+		if (!dragRef.current && guideRef.current) guideRef.current.style.display = "none"
 	}, [])
-
-	const handleDoubleClick = React.useCallback(() => {
-		onViewportChange({ startMs: traceStartMs, endMs: traceEndMs })
-	}, [onViewportChange, traceStartMs, traceEndMs])
-
-	const previewLo = reframePreview ? Math.min(reframePreview.a, reframePreview.b) : null
-	const previewHi = reframePreview ? Math.max(reframePreview.a, reframePreview.b) : null
 
 	return (
 		<div
 			ref={containerRef}
-			className="relative border-b border-border bg-muted/10 cursor-crosshair select-none"
+			// overflow-hidden: the strip is the trace, and nothing positioned against it — rect,
+			// masks, brush, hover guide — has any business painting outside. Without it an
+			// out-of-range child widens the flex row and the whole page gains a scrollbar.
+			className="relative overflow-hidden border-b border-border bg-muted/10 cursor-crosshair select-none touch-none"
 			style={{ height: MINIMAP_HEIGHT }}
-			onMouseDown={handleMouseDown}
-			onMouseMove={handleHoverMove}
-			onMouseLeave={handleHoverLeave}
-			onDoubleClick={handleDoubleClick}
-			title="Drag to select a range · click to jump · double-click to fit"
+			onPointerDown={handlePointerDown}
+			onPointerMove={handlePointerMove}
+			onPointerUp={handlePointerUp}
+			onPointerCancel={handlePointerUp}
+			onPointerLeave={handlePointerLeave}
+			onDoubleClick={() => controller.fit()}
+			title="Drag to select a range · click to jump · drag the edges to resize · double-click to fit"
 		>
-			{/* Minimap bars */}
-			<div className="absolute inset-x-0 inset-y-0 px-0" style={{ paddingTop: 2, paddingBottom: 2 }}>
-				{spans.map((s) => (
-					<div
-						key={s.spanId}
-						className="absolute"
-						style={{
-							top: Math.min(2 + s.depth * pitch, MINIMAP_HEIGHT - rowH - 2),
-							left: `${s.leftPercent}%`,
-							width: `${Math.max(s.widthPercent, 0.2)}%`,
-							height: rowH,
-							backgroundColor: s.bgColor,
-						}}
-					/>
-				))}
-			</div>
-
-			{/* Dimmed areas outside viewport */}
-			<div
-				className="absolute inset-y-0 bg-background/60"
-				style={{ left: 0, width: `${Math.max(0, vpLeftPercent)}%` }}
-			/>
-			<div
-				className="absolute inset-y-0 bg-background/60"
-				style={{ left: `${vpLeftPercent + vpWidthPercent}%`, right: 0 }}
+			<MinimapBars
+				rootSpans={rootSpans}
+				domainStartMs={domainStartMs}
+				domainDurationMs={domainDuration}
+				colorBy={colorBy}
 			/>
 
-			{/* Reframe preview (drag-in-progress) */}
-			{previewLo !== null && previewHi !== null && (
-				<div
-					className="absolute inset-y-0 border-x border-primary/70 bg-primary/15 pointer-events-none"
-					style={{ left: `${previewLo}%`, width: `${previewHi - previewLo}%` }}
-				/>
-			)}
+			{/* Dimmed areas outside the viewport */}
+			<div
+				ref={dimLeftRef}
+				className="pointer-events-none absolute inset-y-0 left-0 bg-background/60"
+				style={{ width: 0 }}
+			/>
+			<div
+				ref={dimRightRef}
+				className="pointer-events-none absolute inset-y-0 right-0 bg-background/60"
+				style={{ left: "100%" }}
+			/>
+
+			{/* Brush preview while reframing */}
+			<div
+				ref={brushRef}
+				className="pointer-events-none absolute inset-y-0 border-x border-primary/70 bg-primary/15"
+				style={{ display: "none" }}
+			/>
 
 			{/* Hover guide: line + time readout (imperative) */}
 			<div
@@ -334,18 +396,13 @@ export function TraceTimelineMinimap({
 				<span className="absolute top-0 whitespace-nowrap bg-background/90 px-1 font-mono text-[9px] leading-3 text-muted-foreground" />
 			</div>
 
-			{/* Viewport indicator */}
+			{/* Viewport rect. Pointer-transparent: hit-testing happens against the container so the
+			    8px edge zones straddle the border instead of being split by it. */}
 			<div
-				className="absolute inset-y-0 border-x-2 border-primary/60 cursor-grab active:cursor-grabbing"
-				style={{
-					left: `${vpLeftPercent}%`,
-					width: `${Math.max(vpWidthPercent, 1)}%`,
-				}}
-			>
-				{/* Resize affordances — hit detection lives in handleMouseDown; these only set the cursor. */}
-				<div className="absolute inset-y-0 -left-1 w-2 cursor-ew-resize" />
-				<div className="absolute inset-y-0 -right-1 w-2 cursor-ew-resize" />
-			</div>
+				ref={rectRef}
+				className="pointer-events-none absolute inset-y-0 border-x-2 border-primary/60"
+				style={{ left: 0, width: "100%" }}
+			/>
 		</div>
 	)
 }

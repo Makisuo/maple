@@ -9,7 +9,7 @@ import type * as cf from "@cloudflare/workers-types"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { fromDurableObjectStorage, type DurableObjectStorage } from "./durable-object-storage.ts"
-import { fromWebSocket, type DurableWebSocket } from "./websocket.ts"
+import { fromWebSocket, type DurableWebSocket } from "./durable-websocket.ts"
 
 export class DurableObjectState extends Context.Service<
 	DurableObjectState,

@@ -13,10 +13,9 @@ import {
 } from "@maple/domain/http"
 import type { RoleName as RoleNameType } from "@maple/domain/http"
 import { createClerkClient } from "@clerk/backend"
-import { render } from "@react-email/components"
 import { and, eq, inArray, isNull, lt, or } from "drizzle-orm"
 import { Clock, Array as Arr, Cause, Effect, Layer, Option, Redacted, Ref, Context } from "effect"
-import { deriveDigestStatus, WeeklyDigest, type WeeklyDigestProps } from "@maple/email/weekly-digest"
+import { deriveDigestStatus, type WeeklyDigestProps } from "@maple/email/weekly-digest-core"
 import { Database } from "@/platform/DatabaseLive"
 import { dateToMs } from "@/platform/time"
 import { EmailService } from "@/platform/EmailService"
@@ -481,7 +480,16 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			props: WeeklyDigestProps,
 		) {
 			return yield* Effect.tryPromise({
-				try: () => render(WeeklyDigest(props)),
+				// Dynamically imported so @react-email (tailwind/prettier/prism, ~2MB
+				// of module eval) stays out of the request-path module graph — it
+				// loads only when a digest is actually rendered.
+				try: async () => {
+					const [{ render }, { WeeklyDigest }] = await Promise.all([
+						import("@react-email/components"),
+						import("@maple/email/weekly-digest"),
+					])
+					return await render(WeeklyDigest(props))
+				},
 				catch: (error) =>
 					new DigestRenderError({
 						message: error instanceof Error ? error.message : "Failed to render digest email",
@@ -696,7 +704,6 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			const todayStartMs = now - (now % 86_400_000)
 			const currentDayOfWeek = new Date(now).getUTCDay()
 
-			// Find subscriptions due for sending
 			const subs = yield* database
 				.execute((db) =>
 					db.select().from(digestSubscriptions).where(eq(digestSubscriptions.enabled, true)),
@@ -713,7 +720,6 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 				return { sentCount: 0, errorCount: 0, skipped: false }
 			}
 
-			// Group by org to avoid duplicate Tinybird queries
 			const byOrg = Arr.groupBy(dueSubs, (s) => s.orgId)
 
 			const results = yield* Effect.forEach(

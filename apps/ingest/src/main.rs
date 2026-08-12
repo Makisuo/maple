@@ -2107,7 +2107,7 @@ async fn handle_metrics(
     handle_signal(state, headers, body, Signal::Metrics).await
 }
 
-// --- Session replay ingest -------------------------------------------------
+// Session replay ingest
 
 /// Running total of decompressed rrweb bytes per in-flight replay session, used
 /// to stop a runaway recording from writing an unbounded amount into
@@ -3041,7 +3041,6 @@ async fn handle_signal_inner(
     body: Bytes,
     signal: Signal,
 ) -> Result<(Response, usize, String, usize, bool), (ApiError, &'static str)> {
-    // --- Auth ---
     let ingest_key = extract_ingest_key(headers).ok_or_else(|| {
         warn!("Missing ingest key");
         (ApiError::unauthorized("Missing ingest key"), "auth")
@@ -3125,7 +3124,6 @@ async fn handle_signal_inner(
             )
         })?;
 
-    // --- Payload validation ---
     if body.len() > state.config.max_request_body_bytes {
         warn!(
             body_bytes = body.len(),
@@ -3162,7 +3160,6 @@ async fn handle_signal_inner(
 
     metrics::request_body_bytes(signal.path(), body.len() as u64);
 
-    // --- Decode ---
     let encoding_label = content_encoding.as_deref().unwrap_or("identity");
     // Synchronous, so the span is entered rather than instrumented. Scoped so the
     // span closes on the decompress itself and not on the rest of the handler.
@@ -3187,7 +3184,6 @@ async fn handle_signal_inner(
     );
     metrics::decoded_body_bytes(signal.path(), decoded_payload.len() as u64);
 
-    // --- Enrich ---
     let decoded = {
         let parse_span = parse_internal_span(payload_format.label(), signal.path());
         let _guard = parse_span.enter();

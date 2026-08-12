@@ -18,7 +18,7 @@
  * first three slugs and left four features with no inbound links at all. Each
  * slug below appears in at least two others' lists.
  */
-import * as m from "../paraglide/messages"
+import * as m from "../paraglide/messages.js"
 import type { Feature } from "./page-registry"
 
 export const features: Feature[] = [

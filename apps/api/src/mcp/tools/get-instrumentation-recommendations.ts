@@ -9,13 +9,13 @@ import { formatNumber, formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import { RecommendationIssueStatus, type RecommendationIssueKind } from "@maple/domain/http"
 import { exploreAttributeKeys } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 const decodeStatus = Schema.decodeUnknownOption(RecommendationIssueStatus)
 
@@ -106,7 +106,7 @@ export function registerGetInstrumentationRecommendationsTool(server: McpToolReg
 			),
 		}),
 		Effect.fn("McpTool.getInstrumentationRecommendations")(function* ({ status, include_coverage }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				status: status ?? "open",
@@ -155,7 +155,7 @@ export function registerGetInstrumentationRecommendationsTool(server: McpToolReg
 						timeRange: { startTime: range.st, endTime: range.et },
 						limit: 500,
 					}).pipe(
-						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+						provideWarehouseExecutorFromTenant(tenant),
 						Effect.mapError(toMcpQueryError("get_instrumentation_recommendations")),
 						Effect.option,
 					)

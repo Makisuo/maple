@@ -13,9 +13,10 @@
 import { BunHttpServer } from "@effect/platform-bun"
 import { Maple } from "@maple-dev/effect-sdk/server"
 import { Effect, Layer } from "effect"
-import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
+import { FetchHttpClient, HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { TodoApi } from "../shared/api.ts"
+import { NotifierClient, notifierBaseUrl } from "./NotifierClient.ts"
 import { TodoService } from "./TodoService.ts"
 
 const PORT = Number(process.env.PORT ?? 4500)
@@ -29,6 +30,7 @@ const telemetryLayer = Maple.layer({
 	endpoint: process.env.MAPLE_ENDPOINT ?? "http://127.0.0.1:4318",
 	tracerExportInterval: "2 seconds",
 	loggerExportInterval: "2 seconds",
+	metricsExportInterval: "10 seconds",
 })
 
 // Implement the contract. Path params arrive as `params`, bodies as `payload`.
@@ -57,6 +59,11 @@ const AppLive = HttpApiBuilder.layer(TodoApi).pipe(
 	// browser span and this server's span into ONE distributed trace.
 	Layer.provideMerge(HttpRouter.cors({ allowedMethods: ["GET", "POST", "DELETE", "OPTIONS"] })),
 	Layer.provideMerge(TodoService.layer),
+	// The outbound hop to `todo-notifier`. `FetchHttpClient` is what wraps the
+	// call in a CLIENT span and injects `traceparent`, so the notifier's spans
+	// join the same trace the browser started.
+	Layer.provideMerge(NotifierClient.layer),
+	Layer.provideMerge(FetchHttpClient.layer),
 	Layer.provideMerge(telemetryLayer),
 	Layer.provideMerge(ObservabilityLive),
 	// HttpApiBuilder needs HttpPlatform/Etag/FileSystem/Path; toWebHandler only
@@ -77,6 +84,7 @@ const server = Bun.serve({
 
 console.log(`🌳  Todo API listening on http://localhost:${server.port}`)
 console.log(`    telemetry → ${process.env.MAPLE_ENDPOINT ?? "http://127.0.0.1:4318"} (run \`maple start\`)`)
+console.log(`    notifier  → ${notifierBaseUrl} (run \`bun run notifier\`)`)
 
 const shutdown = () => {
 	void dispose()

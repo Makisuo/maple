@@ -26,6 +26,10 @@ const RETENTION_DAYS = {
 	service_operations_hourly: 365,
 	service_operations_minutely: 90,
 	service_overview_hourly: 365,
+	// Only reachable for windows under ~5 days (sub-hour buckets), so 90 is
+	// generous rather than tight. A second annual tier here would be a second
+	// table that cannot be rebuilt past the 30-day source retention.
+	service_overview_minutely: 90,
 	service_overview_spans: 30,
 	service_platforms_hourly: 365,
 	service_usage: 365,

@@ -75,8 +75,6 @@ export class HazelDisconnectResponse extends Schema.Class<HazelDisconnectRespons
 	},
 ) {}
 
-// ---- Cloudflare (account OAuth + telemetry auto-provisioning) --------------
-
 /** Per-zone edge-analytics collection state (from the GraphQL Analytics poller). */
 export class CloudflareAnalyticsZoneStatus extends Schema.Class<CloudflareAnalyticsZoneStatus>(
 	"CloudflareAnalyticsZoneStatus",
@@ -236,8 +234,6 @@ export class CloudflareDisconnectResponse extends Schema.Class<CloudflareDisconn
 	disconnected: Schema.Boolean,
 }) {}
 
-// ---- PlanetScale (OAuth integration) ----------------------------------------
-//
 // These shapes now serve two callers at once, which is why they are camelCase
 // with epoch-ms timestamps and the v2 file is not:
 //
@@ -563,8 +559,6 @@ export class PlanetScaleEventsResponse extends Schema.Class<PlanetScaleEventsRes
 	nextCursor: Schema.NullOr(Schema.String),
 }) {}
 
-// ---- GitHub (VCS App installation) ----------------------------------------
-
 /** One branch a repo knows about — an option in the tracked-branch picker. */
 export class GithubBranchSummary extends Schema.Class<GithubBranchSummary>("GithubBranchSummary")({
 	name: Schema.String,
@@ -662,8 +656,6 @@ export class GithubSetTrackedBranchResponse extends Schema.Class<GithubSetTracke
 	// True when the change enqueued a historical backfill of the new branch.
 	backfillQueued: Schema.Boolean,
 }) {}
-
-// ---- Commit hover cards (vendor-agnostic) ---------------------------------
 
 /**
  * A single resolved commit, for the dashboard's commit-SHA hover card. Provider-

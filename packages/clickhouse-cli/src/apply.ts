@@ -300,8 +300,6 @@ export async function listApplied(config: ClickHouseConfig): Promise<ReadonlyArr
 	return parseJsonEachRow<AppliedRow>(text)
 }
 
-// --- internals -------------------------------------------------------------
-
 async function ensureMigrationsTable(config: ClickHouseConfig): Promise<void> {
 	await exec(
 		config,

@@ -4,7 +4,7 @@ import { lstat, rm, statfs } from "node:fs/promises"
 import { dirname, join, parse, relative, resolve, sep } from "node:path"
 import { arch, cpus, platform, totalmem, userInfo } from "node:os"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
-import { SCHEMA_FINGERPRINT } from "../serve"
+import { SCHEMA_FINGERPRINT } from "../schema-identity"
 import {
 	acquireCheckpointPin,
 	parseCheckpointSelector,

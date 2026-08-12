@@ -63,7 +63,6 @@ const NAMESPACE_POOL = [
 ]
 const namespaceName = (group: number): string => NAMESPACE_POOL[group] ?? `team-${group}`
 
-// --- deterministic PRNG (mulberry32) ---
 function makeRng(seed: number): () => number {
 	let a = seed >>> 0
 	return () => {
@@ -244,8 +243,6 @@ function generateBenchGraph(params: BenchParams): BenchGraph {
 
 	return { edges, dbEdges, overviews, workloads, platforms, runtimes }
 }
-
-// --- window perf harness ------------------------------------------------------
 
 interface BenchMetrics {
 	durationMs: number

@@ -134,24 +134,19 @@ export function getServiceColor(serviceName: string): string {
 export function getSpanColorStyle(spanName: string, serviceName: string): React.CSSProperties {
 	const baseHue = getServiceHueFromName(serviceName)
 
-	// Extract class name for variation within service
 	const className = extractClassName(spanName)
 
-	// Calculate lightness and chroma variations based on class
 	let lightness = 0.55
 	let chroma = 0.15
 
 	if (className) {
 		const classHash = hashString(className)
-		// Vary lightness between 0.45 and 0.65
 		lightness = 0.45 + (classHash % 20) / 100
-		// Vary chroma between 0.12 and 0.18
 		chroma = 0.12 + (classHash % 6) / 100
 	}
 
 	const bgColor = `oklch(${lightness} ${chroma} ${baseHue})`
 
-	// Determine text color based on lightness
 	const textColor = lightness > 0.55 ? "oklch(0.2 0 0)" : "oklch(0.98 0 0)"
 
 	return {
@@ -182,18 +177,18 @@ export function getValueHue(value: string | undefined | null): number | null {
  * Calculate self-time for a span (duration minus overlapping children time)
  */
 export function calculateSelfTime(
-	span: { startTime: string; durationMs: number },
-	children: Array<{ startTime: string; durationMs: number }>,
+	span: { startTime: string; durationMs: number; clockSkewMs?: number },
+	children: Array<{ startTime: string; durationMs: number; clockSkewMs?: number }>,
 ): number {
 	if (children.length === 0) return span.durationMs
 
-	const spanStartMs = new Date(span.startTime).getTime()
+	const spanStartMs = new Date(span.startTime).getTime() + (span.clockSkewMs ?? 0)
 	const spanEndMs = spanStartMs + span.durationMs
 
 	// Calculate total time covered by children (accounting for overlaps)
 	const childIntervals = children
 		.map((child) => {
-			const childStartMs = new Date(child.startTime).getTime()
+			const childStartMs = new Date(child.startTime).getTime() + (child.clockSkewMs ?? 0)
 			const childEndMs = childStartMs + child.durationMs
 			// Clamp to parent span boundaries
 			return {

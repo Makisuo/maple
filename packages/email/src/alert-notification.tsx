@@ -1,4 +1,5 @@
 import { Body, Container, Head, Html, Link, Preview, Section, Tailwind, Text } from "@react-email/components"
+import { BrandMark } from "./brand-mark"
 
 /**
  * All values are pre-formatted strings — the api layer formats via the same
@@ -25,8 +26,6 @@ export interface AlertNotificationProps {
 	/** Deep link to Maple AI for this alert. */
 	chatUrl: string
 }
-
-// -- Brand palette (Maple dark theme — mirrors weekly-digest.tsx) --
 
 const C = {
 	bg: "#141210",
@@ -124,31 +123,7 @@ export function AlertNotification(props: AlertNotificationProps) {
 								<tbody>
 									<tr>
 										<td className="w-[36px] pr-3 align-middle">
-											{/* Maple "M" logo mark — table cell for email compat */}
-											<table cellPadding={0} cellSpacing={0} role="presentation">
-												<tbody>
-													<tr>
-														<td
-															style={{
-																width: "32px",
-																height: "32px",
-																backgroundColor: C.orange,
-																borderRadius: "8px",
-																textAlign: "center",
-																verticalAlign: "middle",
-																fontFamily:
-																	"system-ui, -apple-system, sans-serif",
-																fontSize: "18px",
-																fontWeight: 700,
-																color: "#ffffff",
-																lineHeight: "32px",
-															}}
-														>
-															M
-														</td>
-													</tr>
-												</tbody>
-											</table>
+											<BrandMark />
 										</td>
 										<td className="align-middle">
 											<Text className="m-0 font-mono text-base font-semibold text-maple-fg">

@@ -56,6 +56,7 @@ function renderAttributeValue(attrKey: string, value: string) {
 const FIXTURE_PATHS = [
 	"/widget-lab",
 	"/node-lab",
+	"/timeline-lab",
 	"/service-map-bench",
 	"/service-detail-bench",
 	"/infra-bench",

@@ -24,7 +24,8 @@ import {
 import { rebuildCatalog } from "../src/server/archives/listing"
 import type { ArchiveGenerationManifest } from "../src/server/archives/manifest"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
-import { RequestQuiescenceGate, SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { RequestQuiescenceGate } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex")
 

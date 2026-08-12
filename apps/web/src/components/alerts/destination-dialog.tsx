@@ -24,8 +24,8 @@ import {
 	channelPickerView,
 	resolveSearchQuery,
 } from "@/components/alerts/slack-channel-search"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { v2ErrorInfo } from "@/lib/error-messages"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
@@ -284,11 +284,11 @@ function HazelOAuthFields({
 	isEditing: boolean
 }) {
 	const statusResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "hazelStatus", {
+		retainedQuery("integrations", "hazelStatus", {
 			reactivityKeys: ["hazelIntegrationStatus"],
 		}),
 	)
-	const organizationsAtom = MapleApiAtomClient.query("integrations", "hazelOrganizations", {
+	const organizationsAtom = retainedQuery("integrations", "hazelOrganizations", {
 		reactivityKeys: ["hazelIntegrationStatus", "hazelOrganizations"],
 	})
 	const organizationsResult = useAtomValue(organizationsAtom)
@@ -296,7 +296,7 @@ function HazelOAuthFields({
 	const orgIdForChannels = form.hazelOrganizationId.trim()
 	const channelsAtom =
 		orgIdForChannels.length > 0
-			? MapleApiAtomClient.query("integrations", "hazelChannels", {
+			? retainedQuery("integrations", "hazelChannels", {
 					params: { organizationId: orgIdForChannels },
 					reactivityKeys: ["hazelIntegrationStatus", "hazelChannels", orgIdForChannels],
 				})
@@ -450,7 +450,6 @@ function HazelOAuthFields({
 							hazelOrganizationId: value ?? "",
 							hazelOrganizationName: org?.name ?? "",
 							hazelOrganizationLogoUrl: org?.logoUrl ?? null,
-							// Reset channel when org changes.
 							hazelChannelId: "",
 							hazelChannelName: "",
 						}))
@@ -560,7 +559,7 @@ function SlackBotFields({
 	isEditing: boolean
 }) {
 	const statusResult = useAtomValue(
-		MapleApiV2AtomClient.query("slackIntegration", "status", {
+		retainedQueryV2("slackIntegration", "status", {
 			reactivityKeys: ["slackIntegration"],
 		}),
 	)
@@ -577,7 +576,7 @@ function SlackBotFields({
 	const installed = status?.installed === true
 
 	const channelsAtom = installed
-		? MapleApiV2AtomClient.query("slackIntegration", "channels", {
+		? retainedQueryV2("slackIntegration", "channels", {
 				reactivityKeys: ["slackIntegration", "slackChannels"],
 			})
 		: disabledResultAtom<V2SlackChannelList>()

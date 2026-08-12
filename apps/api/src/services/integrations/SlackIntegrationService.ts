@@ -180,8 +180,6 @@ const decodeApiKeyIdOption = Schema.decodeUnknownOption(ApiKeyId)
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
 const decodeUserId = Schema.decodeUnknownEffect(UserId)
 
-// --- Slack API response shapes ---------------------------------------------
-
 const SlackOAuthAccessSchema = Schema.Struct({
 	ok: Schema.Boolean,
 	error: Schema.optionalKey(Schema.String),
@@ -259,8 +257,6 @@ const SlackConversationsListSchema = Schema.Struct({
 })
 const decodeConversationsList = Schema.decodeUnknownEffect(SlackConversationsListSchema)
 
-// --- Public types -----------------------------------------------------------
-
 export interface SlackInstallStatus {
 	readonly installed: boolean
 	readonly teamId: string | null
@@ -295,8 +291,6 @@ export interface SlackChannelList {
 	/** Slack still had a cursor when the page-capped walk stopped. */
 	readonly truncated: boolean
 }
-
-// --- Service ----------------------------------------------------------------
 
 export interface SlackIntegrationServiceShape {
 	readonly startInstall: (
@@ -653,7 +647,15 @@ const make: Effect.Effect<
 		const priorKeyLive = Option.isSome(reusableKeyId)
 			? yield* apiKeys.get(orgId, reusableKeyId.value).pipe(
 					Effect.map((key) => !key.revoked && (key.expiresAt === null || key.expiresAt > now)),
-					Effect.catch(() => Effect.succeed(false)),
+					Effect.catchTags({
+						"@maple/http/errors/ApiKeyNotFoundError": () => Effect.succeed(false),
+						"@maple/http/errors/ApiKeyPersistenceError": (error) =>
+							Effect.fail(
+								new IntegrationsPersistenceError({
+									message: `Failed to validate the existing Slack API key: ${error.message}`,
+								}),
+							),
+					}),
 				)
 			: false
 		const reusedKey = priorKeyLive ? reusableSecret : undefined

@@ -98,6 +98,22 @@ export function computeBucketSeconds(
 	return computeBucketSecondsMs(startMs, endMs, { targetPoints })
 }
 
+/**
+ * Round a bucket width up to a whole minute.
+ *
+ * The service-overview rollup tiers are minute- and hour-grain, so a bucket that
+ * is not a minute multiple has no tier that can place a row inside it and the
+ * query falls back to scanning raw spans. Callers that can tolerate a slightly
+ * coarser bucket use this to stay on the rollup.
+ *
+ * Rounds UP, never below 60: rounding down would produce more points than the
+ * caller asked for, and 0 is not a bucket.
+ */
+export function quantizeToMinute(bucketSeconds: number): number {
+	if (!Number.isFinite(bucketSeconds) || bucketSeconds <= 60) return 60
+	return Math.ceil(bucketSeconds / 60) * 60
+}
+
 export function buildBucketTimeline(
 	startTime: string | undefined,
 	endTime: string | undefined,

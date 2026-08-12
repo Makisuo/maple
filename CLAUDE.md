@@ -124,6 +124,16 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   `any` as a type-level placeholder in variance positions. `Record<string, unknown>` is _not_ banned —
   it forces narrowing at every read, which is the point.
 - **Effect:** source is vendored at `.context/effect/` (subtree of Effect-TS/effect-smol).
+- **Effect errors:** new expected failures always use `Schema.TaggedError`, including internal-only
+  failures; `Data.TaggedError` is legacy and is not a precedent for new Maple code. Give every
+  failure a namespaced tag, `message`, and useful schema-backed context (`Schema.Defect()` for an
+  unknown cause), then keep it in the typed Effect error channel. At HTTP/RPC boundaries, define
+  public failures in the domain contract and preserve their distinct tags until the route's existing
+  error mapper/envelope handles them; use `catchTag`/`catchTags` for deliberate remapping. Plain
+  `Error`, thrown failures, route-local `Data.TaggedError`, and early generic error/response mapping
+  bypass this flow. Valid entity IDs in error context use their branded domain schemas; rejected
+  undecodable inputs use an explicitly named `raw*` string and must never be cast into a brand.
+  Unexpected defects alone belong in `catchDefect`/the unexpected-error envelope.
 - **Alchemy:** read `node_modules/alchemy/src/` — the package ships its own TypeScript source,
   so it always matches the version actually running. There is deliberately no vendored copy:
   `.context/alchemy-effect` held `alchemy-effect@0.11.0`, a package upstream renamed into

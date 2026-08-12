@@ -6,7 +6,7 @@ import { Fragment, useCallback, useMemo, useRef, useState } from "react"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { useAlertRuleChecks } from "@/hooks/use-alert-rule-checks"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -152,7 +152,7 @@ function RuleDetailContent() {
 	const ruleStates = useAlertRuleStates(ruleId)
 	const { result: destinationsResult } = useAlertDestinationsList()
 	const deliveryEventsResult = useAtomValue(
-		MapleApiV2AtomClient.query("alertDeliveries", "list", {
+		retainedQueryV2("alertDeliveries", "list", {
 			query: { limit: 100 },
 			reactivityKeys: ["alertDeliveryEvents"],
 		}),

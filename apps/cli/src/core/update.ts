@@ -35,8 +35,6 @@ export const CHECK_TTL_MS = 24 * 60 * 60 * 1000
 const CHECKSUM_TIMEOUT = Duration.seconds(30)
 const DOWNLOAD_TIMEOUT = Duration.minutes(2)
 
-// --- pure helpers (unit-tested) ----------------------------------------------
-
 /** Drop a leading "v" so release tags ("v0.6.0") compare against MAPLE_VERSION
  *  ("0.6.0", already stripped in version.ts). */
 export const stripV = (v: string): string => v.replace(/^v/, "")
@@ -91,8 +89,6 @@ export const shouldCheck = (
 	if (Number.isNaN(last)) return true
 	return nowMs - last >= ttlMs
 }
-
-// --- IO ----------------------------------------------------------------------
 
 const resolveTarget: Effect.Effect<string, UpdateError> = Effect.suspend(() => {
 	const t = targetTripleFor(process.platform, process.arch)
@@ -340,8 +336,6 @@ export const performUpdate = (
 		return { tag, installDir }
 	})
 
-// --- startup notice ----------------------------------------------------------
-
 const NOTIFY_SKIP_FLAGS = new Set(["--version", "-v", "--help", "-h"])
 
 /** Whether the throttled startup check should run at all. Skips dev builds, the
@@ -380,7 +374,7 @@ export const maybeNotifyUpdate: Effect.Effect<void, never, MapleConfig | HttpCli
 		if (shouldCheck(Option.getOrUndefined(config.lastUpdateCheck), now)) {
 			const fetched = yield* fetchLatestTag(1500).pipe(
 				Effect.map((tag) => Option.some(tag)),
-				Effect.catch(() => Effect.succeed(Option.none<string>())),
+				Effect.orElseSucceed(() => Option.none<string>()),
 			)
 			if (Option.isSome(fetched)) {
 				latest = fetched.value

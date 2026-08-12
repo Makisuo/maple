@@ -118,7 +118,6 @@ const toPersistenceError = (error: unknown) =>
 	})
 
 const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
-const decodeScrapeTargetIdSync = Schema.decodeUnknownSync(ScrapeTargetId)
 
 export class PlanetScaleConnectionService extends Context.Service<
 	PlanetScaleConnectionService,
@@ -205,7 +204,14 @@ export class PlanetScaleConnectionService extends Context.Service<
 					if (sd.status === 401 || sd.status === 403) return "rejected" as const
 					if (sd.status < 200 || sd.status >= 300) return "inconclusive" as const
 
-					const groups = yield* decodeHttpSd(sd.text).pipe(Effect.catch(() => Effect.succeed(null)))
+					const groups = yield* decodeHttpSd(sd.text).pipe(
+						Effect.tapError((error) =>
+							Effect.logWarning(
+								"PlanetScale metrics discovery payload could not be decoded",
+							).pipe(Effect.annotateLogs({ error: String(error) })),
+						),
+						Effect.orElseSucceed(() => null),
+					)
 					if (groups === null) return "inconclusive" as const
 
 					// subTargetsFromGroup already SSRF-validates the discovered URLs.
@@ -227,6 +233,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 						),
 					),
 				)
+				yield* Effect.annotateCurrentSpan("maple.planetscale.probe_outcome", outcome)
 				if (outcome !== "ok") {
 					yield* Effect.logInfo("PlanetScale data-plane scrape probe outcome").pipe(
 						Effect.annotateLogs({ organization, outcome }),
@@ -345,7 +352,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 				detectedPermissions: connection.detectedPermissionsJson ?? null,
 				scrapeTarget: target
 					? new PlanetScaleScrapeTargetSummary({
-							id: decodeScrapeTargetIdSync(target.id),
+							id: target.id,
 							enabled: target.enabled,
 							scrapeIntervalSeconds: target.scrapeIntervalSeconds,
 							includeBranches: discoveryConfig?.includeBranches ?? [],
@@ -467,7 +474,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 				// targets carry no credentials — the scraper resolves the OAuth grant at
 				// scrape time (authType "planetscale_oauth").
 				const adoptable = yield* findAdoptableTarget(orgId, organization)
-				let scrapeTargetId: string
+				let scrapeTargetId: ScrapeTargetId
 				let createdTarget = false
 				if (adoptable !== null) {
 					// An adopted row with working service-token credentials keeps them —
@@ -477,7 +484,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 					const keepsToken =
 						adoptable.authType === "token" && adoptable.authCredentialsCiphertext !== null
 					yield* scrapeTargetsService
-						.update(orgId, decodeScrapeTargetIdSync(adoptable.id), {
+						.update(orgId, adoptable.id, {
 							...(keepsToken ? {} : { authType: "planetscale_oauth" }),
 							...(request.includeBranches !== undefined
 								? { includeBranches: request.includeBranches }
@@ -602,25 +609,23 @@ export class PlanetScaleConnectionService extends Context.Service<
 						Effect.mapError(toPersistenceError),
 						Effect.tapError(() =>
 							createdTarget
-								? scrapeTargetsService
-										.delete(orgId, decodeScrapeTargetIdSync(scrapeTargetId))
-										.pipe(
-											Effect.catchTag(
-												"@maple/http/errors/ScrapeTargetNotFoundError",
-												() => Effect.void,
+								? scrapeTargetsService.delete(orgId, scrapeTargetId).pipe(
+										Effect.catchTag(
+											"@maple/http/errors/ScrapeTargetNotFoundError",
+											() => Effect.void,
+										),
+										Effect.catch((error) =>
+											Effect.logWarning(
+												"Failed to compensate newly created PlanetScale target after binding failure",
+											).pipe(
+												Effect.annotateLogs({
+													orgId,
+													scrapeTargetId,
+													error: String(error),
+												}),
 											),
-											Effect.catch((error) =>
-												Effect.logWarning(
-													"Failed to compensate newly created PlanetScale target after binding failure",
-												).pipe(
-													Effect.annotateLogs({
-														orgId,
-														scrapeTargetId,
-														error: String(error),
-													}),
-												),
-											),
-										)
+										),
+									)
 								: Effect.void,
 						),
 					)
@@ -680,7 +685,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 				)
 			}
 			yield* scrapeTargetsService
-				.update(orgId, decodeScrapeTargetIdSync(target.id), {
+				.update(orgId, target.id, {
 					authType: "token",
 					authCredentials: JSON.stringify({ tokenId, tokenSecret: request.tokenSecret }),
 					enabled: true,
@@ -699,9 +704,9 @@ export class PlanetScaleConnectionService extends Context.Service<
 				// owns it (a user-created row adopted by a *different* connection stays).
 				const target = yield* selectManagedTarget(connection)
 				if (target !== null && target.managedBy === managedByForConnection(connection.id)) {
-					yield* scrapeTargetsService.delete(orgId, decodeScrapeTargetIdSync(target.id)).pipe(
+					yield* scrapeTargetsService.delete(orgId, target.id).pipe(
 						Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
-							Effect.succeed(undefined),
+							Effect.annotateCurrentSpan("maple.planetscale.disconnect_target_missing", true),
 						),
 						Effect.mapError(toPersistenceError),
 					)

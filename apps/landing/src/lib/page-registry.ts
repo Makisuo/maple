@@ -21,11 +21,10 @@
  *    built by the pure helpers below rather than by `getRelativeLocaleUrl`.
  */
 
-export type Locale = "en" | "ja" | "ko"
-export const LOCALES: readonly Locale[] = ["en", "ja", "ko"]
+type Locale = "en" | "ja" | "ko"
 
 /** A Paraglide message, uncalled. See rule 1 above. */
-export type Msg = () => string
+type Msg = () => string
 
 /**
  * Ids resolved to components in `components/page/slots.ts`. Strings rather
@@ -51,7 +50,7 @@ export type SectionId = "k8s-console" | "k8s-views" | "k8s-correlation" | "k8s-i
  * They describe what a capture shows rather than making an argument, and the
  * screenshots themselves are English-only.
  */
-export interface Plate {
+interface Plate {
 	src?: string
 	/** The capture's intrinsic size — MediaFrame never crops, so this is the aspect. */
 	width: number
@@ -62,13 +61,13 @@ export interface Plate {
 }
 
 /** One row of the operator gutter. `op` is a literal product string. */
-export interface Capability {
+interface Capability {
 	op: string
 	title: Msg
 	body: Msg
 }
 
-export interface SurfacePanelSpec {
+interface SurfacePanelSpec {
 	/** Frame head, left: the route. Literal. */
 	route: string
 	/** Frame head, right: one real constant from the shot. Literal. */
@@ -80,7 +79,7 @@ export interface SurfacePanelSpec {
 	lede: Msg
 }
 
-export interface ArtifactSpec {
+interface ArtifactSpec {
 	id: ArtifactId
 	title: Msg
 	lede: Msg
@@ -151,7 +150,7 @@ export interface UseCase {
  * use them and agree — NavBar builds hrefs with the same `/${locale}${path}`
  * shape, and `getRelativeLocaleUrl` produces the same strings for these routes.
  */
-export const localePath = (locale: string, path: string) => (locale === "en" ? path : `/${locale}${path}`)
+const localePath = (locale: string, path: string) => (locale === "en" ? path : `/${locale}${path}`)
 
 export const featurePath = (locale: string, slug: string) => localePath(locale, `/features/${slug}`)
 

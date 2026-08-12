@@ -1,7 +1,7 @@
 import { McpQueryError, requiredStringParam, validationError, type McpToolRegistrar } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveActorId } from "@/mcp/lib/resolve-actor"
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorIssueId } from "@maple/domain/http"
@@ -16,7 +16,7 @@ export function registerHeartbeatErrorIssueTool(server: McpToolRegistrar) {
 			issue_id: requiredStringParam("The error issue ID (from list_error_issues)"),
 		}),
 		Effect.fn("McpTool.heartbeatErrorIssue")(function* ({ issue_id }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const decodedIssueId = decodeIssueId(issue_id)
 			if (Option.isNone(decodedIssueId)) {
 				return validationError(

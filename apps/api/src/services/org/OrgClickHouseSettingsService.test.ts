@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "@effect/vitest"
+import { afterEach, describe, expect, it, layer } from "@effect/vitest"
 import {
 	OrgClickHouseSettingsUpstreamRejectedError,
 	OrgClickHouseSettingsUpstreamUnavailableError,
@@ -7,6 +7,12 @@ import {
 	OrgId,
 	RoleName,
 } from "@maple/domain/http"
+import {
+	EdgeCacheService,
+	type EdgeCacheBackend,
+	makeEdgeCacheService,
+	MemoryCacheBackendLive,
+} from "@maple/cache"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -152,7 +158,7 @@ describe("isRetryableUpstream", () => {
 	})
 })
 
-describe("execClickHouse", () => {
+layer(FetchHttpClient.layer, { excludeTestServices: true })("execClickHouse", (it) => {
 	it.effect("uses manual redirects and rejects every 3xx without following it", () =>
 		Effect.gen(function* () {
 			let redirectMode: RequestRedirect | undefined
@@ -174,7 +180,7 @@ describe("execClickHouse", () => {
 		}),
 	)
 
-	it.live("maps a Cloudflare 524 to a clear, actionable message (and retries 52x)", () =>
+	it.effect("maps a Cloudflare 524 to a clear, actionable message (and retries 52x)", () =>
 		Effect.gen(function* () {
 			const { state, fetchImpl } = makeFetch(() =>
 				Promise.resolve(mockResponse("error code: 524", 524)),
@@ -193,7 +199,7 @@ describe("execClickHouse", () => {
 		}),
 	)
 
-	it.live("retries a transient 503 then succeeds", () =>
+	it.effect("retries a transient 503 then succeeds", () =>
 		Effect.gen(function* () {
 			const { state, fetchImpl } = makeFetch(() =>
 				Promise.resolve(
@@ -277,9 +283,29 @@ describe("resolveRuntimeConfig caching", () => {
 		}),
 	)
 
+	// Most tests below isolate the in-isolate memo. Keep EdgeCacheService present
+	// (it is a required dependency) while making its backend a deliberate miss.
+	const missOnlyBackend: EdgeCacheBackend = {
+		name: "memory",
+		get: () => Promise.resolve(undefined),
+		put: () => Promise.resolve(),
+		delete: () => Promise.resolve(),
+	}
+
 	const buildLayer = (testDb: TestDb) => {
 		const envLive = Env.layer.pipe(Layer.provide(configLive))
-		return OrgClickHouseSettingsService.layer.pipe(Layer.provide(Layer.mergeAll(envLive, testDb.layer)))
+		const edgeCacheLive = Layer.succeed(EdgeCacheService)(makeEdgeCacheService(missOnlyBackend))
+		return OrgClickHouseSettingsService.layer.pipe(
+			Layer.provide(Layer.mergeAll(envLive, testDb.layer, edgeCacheLive)),
+		)
+	}
+
+	const buildCachedLayer = (testDb: TestDb) => {
+		const envLive = Env.layer.pipe(Layer.provide(configLive))
+		const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(MemoryCacheBackendLive))
+		return OrgClickHouseSettingsService.layer.pipe(
+			Layer.provide(Layer.mergeAll(envLive, testDb.layer, edgeCacheLive)),
+		)
 	}
 
 	const seedRow = (db: TestDb, orgId: string, chUrl: string) =>
@@ -408,6 +434,160 @@ describe("resolveRuntimeConfig caching", () => {
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 
+	// --- shared edge-cache tier ---------------------------------------------
+	//
+	// The tier between the memo and Postgres. What makes these tests meaningful
+	// is `invalidateOrgRuntimeConfigMemo`, which drops ONLY the memo — so it
+	// simulates the case the tier exists for: a second, cold isolate resolving
+	// the same org while the shared entry is already warm.
+	//
+	// Every assertion is therefore "Postgres moved and the resolve did not see
+	// it", which is only possible if the value came from the shared cache.
+	it.effect("a managed org is a shared-cache hit on a cold isolate, not a Postgres read", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_edge_managed"
+		return Effect.gen(function* () {
+			// No settings row at all — the common case, and the one that caches
+			// `null`. If the envelope ever stopped round-tripping, this is the test
+			// that catches it: the majority of orgs would silently never cache.
+			const first = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(Option.isNone(first)).toBe(true)
+
+			// Cold isolate: memo gone, shared entry still warm.
+			invalidateOrgRuntimeConfigMemo(orgId)
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://appeared.example"))
+
+			const second = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			// Still none → the cached `null` answered, Postgres was never dialled.
+			expect(Option.isNone(second)).toBe(true)
+		}).pipe(Effect.provide(buildCachedLayer(testDb)))
+	})
+
+	it.effect("a BYO org is a shared-cache hit on a cold isolate", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_edge_byo"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://cached.example"))
+			const first = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(first).url).toBe("https://cached.example")
+
+			invalidateOrgRuntimeConfigMemo(orgId)
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					orgId,
+					"https://moved.example",
+				]),
+			)
+
+			const second = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(second).url).toBe("https://cached.example")
+		}).pipe(Effect.provide(buildCachedLayer(testDb)))
+	})
+
+	it.effect("a settings write busts the SHARED entry, not just the writing isolate's memo", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_edge_invalidate"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://a.example"))
+			expect(
+				Option.isSome(yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))),
+			).toBe(true)
+
+			yield* OrgClickHouseSettingsService.delete(asOrgId(orgId), [asRole("org:admin")])
+
+			// Drop the memo the write just cleared anyway, so this resolve can only
+			// be answered by the shared tier or Postgres. If the write had evicted
+			// the memo alone, the stale `Some` would come straight back here — and
+			// every other isolate would serve it for the full 6h TTL.
+			invalidateOrgRuntimeConfigMemo(orgId)
+
+			const after = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(Option.isNone(after)).toBe(true)
+		}).pipe(Effect.provide(buildCachedLayer(testDb)))
+	})
+
+	// The memory backend stores the encoded value BY REFERENCE, so it cannot
+	// catch a value that survives `Schema.encode` but not the wire. The real
+	// Workers backend round-trips through `JSON.stringify` / `response.json()`
+	// and returns `undefined` — never `null` — for a miss
+	// (`makeWorkersBackend` in `platform/CacheBackendLive.ts`). This backend
+	// reproduces exactly that, which is what actually exercises the envelope.
+	const makeJsonRoundTripBackend = () => {
+		const store = new Map<string, string>()
+		const stats = { puts: 0, hits: 0, misses: 0 }
+		const backend: EdgeCacheBackend = {
+			name: "memory",
+			get: async (bucket, hash) => {
+				const raw = store.get(`${bucket}/${hash}`)
+				if (raw === undefined) {
+					stats.misses += 1
+					return undefined
+				}
+				stats.hits += 1
+				return JSON.parse(raw) as unknown
+			},
+			put: async (bucket, hash, value) => {
+				stats.puts += 1
+				store.set(`${bucket}/${hash}`, JSON.stringify(value))
+			},
+			delete: async (bucket, hash) => {
+				store.delete(`${bucket}/${hash}`)
+			},
+		}
+		return { backend, stats }
+	}
+
+	it.effect("survives the JSON wire format the Workers cache actually uses", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const managedOrg = "org_ch_wire_managed"
+		const byoOrg = "org_ch_wire_byo"
+		const { backend, stats } = makeJsonRoundTripBackend()
+		const layer = (() => {
+			const envLive = Env.layer.pipe(Layer.provide(configLive))
+			const edgeCacheLive = Layer.succeed(EdgeCacheService)(makeEdgeCacheService(backend))
+			return OrgClickHouseSettingsService.layer.pipe(
+				Layer.provide(Layer.mergeAll(envLive, testDb.layer, edgeCacheLive)),
+			)
+		})()
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedPasswordRow(testDb, byoOrg, "https://wire.example"))
+
+			// Populate both shapes: the `null` envelope and a fully-populated one
+			// carrying the encrypted password material.
+			expect(
+				Option.isNone(yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(managedOrg))),
+			).toBe(true)
+			expect(
+				expectSome(yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(byoOrg))).url,
+			).toBe("https://wire.example")
+			expect(stats.puts).toBe(2)
+
+			// Cold isolates. Move Postgres so a fallthrough would be visible.
+			invalidateOrgRuntimeConfigMemo(managedOrg)
+			invalidateOrgRuntimeConfigMemo(byoOrg)
+			yield* Effect.promise(() => seedRow(testDb, managedOrg, "https://appeared.example"))
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					byoOrg,
+					"https://moved.example",
+				]),
+			)
+
+			const managed = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(managedOrg))
+			expect(Option.isNone(managed)).toBe(true)
+
+			// Decodes back to the same config, password included — proof the
+			// encrypted material survived the round trip and still decrypts.
+			const byo = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(byoOrg))
+			expect(expectSome(byo).url).toBe("https://wire.example")
+			expect(expectSome(byo).password).toBe("legacy-password")
+
+			// Both reads were served by the cache; nothing was recomputed.
+			expect(stats.puts).toBe(2)
+			expect(stats.hits).toBe(2)
+		}).pipe(Effect.provide(layer))
+	})
+
 	// The memo's soft TTL (5min) and hard ceiling (6h), mirrored from the
 	// service. Tests drive TestClock across them rather than reaching into the
 	// module's private state.
@@ -522,10 +702,9 @@ describe("resolveRuntimeConfig caching", () => {
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 
-	// The memo is the only tier, so a memo bust IS a complete invalidation. This
-	// was not true while a durable tier sat underneath it (#387, removed) — the
-	// read fell through to a shared entry that outlived every isolate.
-	it.effect("a memo bust is a complete invalidation", () => {
+	// This group uses a miss-only shared backend to exercise the memo in
+	// isolation, so a memo bust must force a Postgres read.
+	it.effect("a memo bust reads through when the shared tier misses", () => {
 		const testDb = createTestDb(cacheTrackedDbs)
 		const orgId = "org_ch_memo_module_bust"
 		return Effect.gen(function* () {
@@ -546,11 +725,8 @@ describe("resolveRuntimeConfig caching", () => {
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 
-	// A cold isolate has no memo entry and must read Postgres. This is the cost
-	// two separate shared-cache attempts tried and failed to remove (see the note
-	// above `resolveCachedSettings`); the fix is to warm the config once before a
-	// fan-out, not to add a third tier.
-	it.effect("a cold isolate reads through to Postgres", () => {
+	// A cold isolate whose shared lookup misses must read Postgres.
+	it.effect("a cold isolate reads Postgres after a shared-cache miss", () => {
 		const testDb = createTestDb(cacheTrackedDbs)
 		const orgId = "org_ch_cold_isolate"
 		return Effect.gen(function* () {

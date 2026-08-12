@@ -74,8 +74,6 @@ const rateLimitWaitSeconds = (response: Response, nowMs: number): number => {
 	return 60
 }
 
-// ---- REST response schemas ------------------------------------------------
-
 const GithubInstallationTokenResponse = Schema.Struct({
 	token: Schema.String,
 	expires_at: Schema.String,
@@ -200,8 +198,6 @@ const decodeCommit = Schema.decodeUnknownEffect(GithubApiCommitSchema)
 const decodeBranchList = Schema.decodeUnknownEffect(GithubApiBranchList)
 const decodeCodeSearch = Schema.decodeUnknownEffect(GithubCodeSearchResponseSchema)
 const decodeContentFile = Schema.decodeUnknownEffect(GithubContentFileSchema)
-
-// ---- JWT (RS256 via Web Crypto) -------------------------------------------
 
 const base64UrlString = (value: string) => Buffer.from(value, "utf8").toString("base64url")
 const base64UrlBytes = (value: ArrayBuffer) => Buffer.from(value).toString("base64url")
@@ -344,8 +340,6 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				})
 				return `${signingInput}.${base64UrlBytes(signature)}`
 			})
-
-			// ---- HTTP helpers ---------------------------------------------
 
 			const failure = (response: Response, context: string, scope?: "installation" | "repository") =>
 				Effect.gen(function* () {
@@ -699,7 +693,6 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				)
 			})
 
-			// ---- User OAuth leg ----
 			// The two calls below prove the user owns the installation they're connecting.
 
 			// Trade the callback `code` for a short-lived user token.

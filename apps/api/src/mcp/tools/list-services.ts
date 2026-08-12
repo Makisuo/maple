@@ -1,5 +1,5 @@
 import { optionalStringParam, type McpToolRegistrar } from "./types"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { formatPercent, formatDurationFromMs, formatNumber, formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -7,7 +7,7 @@ import { createDualContent } from "@/mcp/lib/structured-output"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { Array as Arr, Effect, Schema } from "effect"
 import { listServices } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerListServicesTool(server: McpToolRegistrar) {
 	server.tool(
@@ -20,7 +20,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
 		}),
 		Effect.fn("McpTool.listServices")(function* ({ start_time, end_time, environment }) {
 			const { st, et } = resolveTimeRange(start_time, end_time)
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				environment: environment ?? "all",
@@ -30,7 +30,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
 				timeRange: { startTime: st, endTime: et },
 				environment: environment ?? undefined,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("service_overview")),
 			)
 

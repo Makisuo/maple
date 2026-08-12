@@ -1,3 +1,4 @@
+import { warmAtoms } from "@effect-router/core"
 import * as React from "react"
 import { useNavigate, useRouterState, createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -43,14 +44,14 @@ export const Route = createFileRoute("/traces/$traceId")({
 	validateSearch: Schema.toStandardSchemaV1(TraceDetailSearchSchema),
 	loaderDeps: ({ search }) => ({ t: search.t }),
 	loader: ({ context, params, deps }) => {
-		context.effectRegistry.mount(
+		warmAtoms(context.effectRegistry, [
 			getSpanHierarchyResultAtom({
 				data: {
 					traceId: Schema.decodeSync(TraceId)(params.traceId),
 					timestamp: deps.t,
 				},
 			}),
-		)
+		])
 	},
 })
 

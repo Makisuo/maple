@@ -46,8 +46,8 @@ interface DashboardCanvasProps {
 /**
  * Latches `true` the first time the element scrolls into (near) the viewport,
  * then stays latched. Tiles fetch their data lazily on first reveal and keep it
- * — the widget fetch atoms set no staleTime, so a non-sticky flag would refetch
- * every time a tile scrolled back into view. The 200ms debounce absorbs
+ * — unlatching would unmount the tile's atom, and a non-sticky flag would then
+ * refetch every time it scrolled back into view. The 200ms debounce absorbs
  * react-grid-layout's mount-time reflow, where tiles can briefly flash into
  * view before the layout settles.
  */

@@ -112,8 +112,6 @@ export const V2AlertDestinationMutationResponse = Schema.Struct({
 })
 export type V2AlertDestinationMutationResponse = Schema.Schema.Type<typeof V2AlertDestinationMutationResponse>
 
-// --- Create params: discriminated union on `type`, one arm per channel. ---
-
 const enabledField = Schema.optionalKey(
 	Schema.Boolean.annotate({
 		description: "Whether the destination starts enabled. Defaults to `true`.",
@@ -230,8 +228,6 @@ export const V2AlertDestinationCreateParams = Schema.Union([
 	],
 })
 export type V2AlertDestinationCreateParams = Schema.Schema.Type<typeof V2AlertDestinationCreateParams>
-
-// --- Update params: same discriminant, every config field optional. ---
 
 const optionalNameField = Schema.optionalKey(
 	NonEmptyString.annotate({ description: "New label for the destination." }),

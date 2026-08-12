@@ -9,7 +9,7 @@
 import type { APIRoute } from "astro"
 import { blocks, docHeader, markdown, table } from "../lib/page-markdown"
 import { getOffer, money, platformFeatures, rateLabel } from "../lib/pricing-offer"
-import * as m from "../paraglide/messages"
+import * as m from "../paraglide/messages.js"
 
 const unitLabel = (unit: "gb" | "count") => (unit === "gb" ? "GB" : "session")
 

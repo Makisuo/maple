@@ -1,7 +1,7 @@
-import { Effect } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
@@ -36,7 +36,7 @@ interface UseIngestConnectionOptions {
 export function useIngestConnection({ poll = true }: UseIngestConnectionOptions = {}): IngestConnection {
 	const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "1h")
 
-	const keysResult = useAtomValue(MapleApiV2AtomClient.query("ingestKeys", "retrieve", {}))
+	const keysResult = useAtomValue(retainedQueryV2("ingestKeys", "retrieve", {}))
 	const apiKey = Result.isSuccess(keysResult) ? keysResult.value.public_key : ""
 
 	const overviewAtom = getServiceOverviewResultAtom({ data: { startTime, endTime } })
@@ -72,9 +72,16 @@ function randomHex(byteLength: number): string {
 
 const TEST_EVENT_SERVICE = "maple-onboarding-test"
 
-/** POST a single synthetic trace to the ingest gateway to prove the key works. */
-export async function sendTestEvent(apiKey: string): Promise<void> {
-	const now = Date.now()
+class TestEventIngestRejected extends Schema.TaggedError<TestEventIngestRejected>()(
+	"@maple/web/TestEventIngestRejected",
+	{
+		message: Schema.String,
+		status: Schema.Number,
+	},
+) {}
+
+export const sendTestEventEffect = Effect.fn("Onboarding.sendTestEvent")(function* (apiKey: string) {
+	const now = yield* Clock.currentTimeMillis
 	const endNano = `${now}000000`
 	const startNano = `${now - 87}000000`
 	const payload = {
@@ -111,17 +118,29 @@ export async function sendTestEvent(apiKey: string): Promise<void> {
 		],
 	}
 
-	await Effect.gen(function* () {
-		const client = yield* HttpClient.HttpClient
-		const response = yield* client.execute(
-			HttpClientRequest.post(`${ingestUrl}/v1/traces`, {
-				headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-			}).pipe(HttpClientRequest.bodyText(JSON.stringify(payload))),
-		)
-		// HttpClient does not fail on non-2xx, so surface it explicitly — runPromise
-		// rejects, preserving the throw-on-failure contract the click handler relies on.
-		if (response.status < 200 || response.status >= 300) {
-			return yield* Effect.fail(new Error(`Ingest gateway returned ${response.status}`))
-		}
-	}).pipe(Effect.provide(FetchHttpClient.layer), Effect.runPromise)
-}
+	const client = yield* HttpClient.HttpClient
+	const request = yield* HttpClientRequest.bodyJson(
+		HttpClientRequest.post(`${ingestUrl}/v1/traces`, {
+			headers: { Authorization: `Bearer ${apiKey}` },
+		}),
+		payload,
+	)
+	const response = yield* client.execute(request)
+	// HttpClient does not fail on non-2xx, so surface it explicitly — runPromise
+	// rejects, preserving the throw-on-failure contract the click handler relies on.
+	if (response.status < 200 || response.status >= 300) {
+		return yield* new TestEventIngestRejected({
+			message: `Ingest gateway returned ${response.status}`,
+			status: response.status,
+		})
+	}
+})
+
+/** POST a single synthetic trace to the ingest gateway to prove the key works. */
+export const sendTestEvent = (apiKey: string): Promise<void> =>
+	sendTestEventEffect(apiKey).pipe(
+		// This is the Promise bridge used by click handlers, so it owns the HTTP layer.
+		// oxlint-disable-next-line effecttsgo/strict-effect-provide
+		Effect.provide(FetchHttpClient.layer),
+		Effect.runPromise,
+	)

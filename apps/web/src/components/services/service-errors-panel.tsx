@@ -4,7 +4,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
 import { SeverityBadge } from "@/components/errors/severity-badge"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { buildServiceOpenIssuesQuery, errorIssueFromV2 } from "@/lib/services/error-issues"
 import { formatNumber } from "@maple/ui/lib/format"
 import { SectionCard } from "./section-card"
@@ -114,7 +114,7 @@ export function ServiceErrorsPanel({
 		? new Date(Date.parse(effectiveEndTime) - 90 * 24 * 60 * 60 * 1000).toISOString()
 		: effectiveStartTime
 	const result = useAtomValue(
-		MapleApiV2AtomClient.query("errorIssues", "list", {
+		retainedQueryV2("errorIssues", "list", {
 			query: buildServiceOpenIssuesQuery(serviceName, {
 				environment,
 				startTime: detailStartTime,

@@ -13,8 +13,6 @@ import { warehouseHttpErrors } from "./warehouse"
 // inline; the API hydrates them from R2 first when the row is blob-backed, so
 // the wire shape is the same either way — no signed URLs, no client-side fetch.
 
-// --- List ---
-
 export class ListReplaysRequest extends Schema.Class<ListReplaysRequest>("ListReplaysRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -91,8 +89,6 @@ export class ListReplaysResponse extends Schema.Class<ListReplaysResponse>("List
 	data: Schema.Array(SessionReplayListItem),
 }) {}
 
-// --- Facets (filter sidebar option counts) ---
-
 export class ReplaysFacetsRequest extends Schema.Class<ReplaysFacetsRequest>("ReplaysFacetsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -132,8 +128,6 @@ export class ReplaysFacetsResponse extends Schema.Class<ReplaysFacetsResponse>("
 	durationP50: Schema.Number,
 	durationP95: Schema.Number,
 }) {}
-
-// --- Detail ---
 
 export class GetReplayRequest extends Schema.Class<GetReplayRequest>("GetReplayRequest")({
 	sessionId: SessionId,
@@ -201,8 +195,6 @@ export class GetReplayResponse extends Schema.Class<GetReplayResponse>("GetRepla
 
 // Replay chunk payloads are not served here — see the API group below.
 
-// --- Reverse correlation (trace → sessions) ---
-
 export class ReplaysForTraceRequest extends Schema.Class<ReplaysForTraceRequest>("ReplaysForTraceRequest")({
 	traceId: TraceId,
 	startTime: TinybirdDateTime,
@@ -220,8 +212,6 @@ export class ReplaysForTraceResponse extends Schema.Class<ReplaysForTraceRespons
 		),
 	},
 ) {}
-
-// --- Trace summaries (one bar per correlated trace) ---
 
 export class SessionTraceSummariesRequest extends Schema.Class<SessionTraceSummariesRequest>(
 	"SessionTraceSummariesRequest",
@@ -253,8 +243,6 @@ export class SessionTraceSummariesResponse extends Schema.Class<SessionTraceSumm
 )({
 	data: Schema.Array(SessionTraceSummary),
 }) {}
-
-// --- Session transcript (distilled events) ---
 
 export class SessionTranscriptRequest extends Schema.Class<SessionTranscriptRequest>(
 	"SessionTranscriptRequest",

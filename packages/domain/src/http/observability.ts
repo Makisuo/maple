@@ -6,8 +6,6 @@ import { warehouseHttpErrors } from "./warehouse-errors"
 
 export { UnauthorizedError } from "./current-tenant"
 
-// --- Shared schemas ---
-
 const TimeRange = Schema.Struct({
 	startTime: Schema.String,
 	endTime: Schema.String,
@@ -18,8 +16,6 @@ const AttributeFilter = Schema.Struct({
 	value: Schema.String,
 	mode: Schema.optionalKey(Schema.String),
 })
-
-// --- List Services ---
 
 const ListServicesRequest = Schema.Struct({
 	timeRange: TimeRange,
@@ -39,8 +35,6 @@ const ServiceSummary = Schema.Struct({
 const ListServicesResponse = Schema.Struct({
 	services: Schema.Array(ServiceSummary),
 })
-
-// --- Search Traces ---
 
 const SearchTracesRequest = Schema.Struct({
 	timeRange: TimeRange,
@@ -80,8 +74,6 @@ const SearchTracesResponse = Schema.Struct({
 		hasMore: Schema.Boolean,
 	}),
 })
-
-// --- Inspect Trace ---
 
 const InspectTraceRequest = Schema.Struct({
 	traceId: TraceId,
@@ -144,8 +136,6 @@ const InspectTraceResponse = Schema.Struct({
 	logs: Schema.Array(LogEntry),
 })
 
-// --- Find Errors ---
-
 const FindErrorsRequest = Schema.Struct({
 	timeRange: TimeRange,
 	service: Schema.optionalKey(Schema.String),
@@ -164,8 +154,6 @@ const ErrorSummary = Schema.Struct({
 const FindErrorsResponse = Schema.Struct({
 	errors: Schema.Array(ErrorSummary),
 })
-
-// --- Diagnose Service ---
 
 const DiagnoseServiceRequest = Schema.Struct({
 	serviceName: Schema.String,
@@ -203,8 +191,6 @@ const DiagnoseServiceResponse = Schema.Struct({
 	recentLogs: Schema.Array(LogEntry),
 })
 
-// --- Search Logs ---
-
 const SearchLogsRequest = Schema.Struct({
 	timeRange: TimeRange,
 	service: Schema.optionalKey(Schema.String),
@@ -226,8 +212,6 @@ const SearchLogsResponse = Schema.Struct({
 	}),
 })
 
-// --- Error class ---
-
 export class ObservabilityApiError extends Schema.TaggedError<ObservabilityApiError>()(
 	"@maple/http/errors/ObservabilityApiError",
 	{
@@ -237,8 +221,6 @@ export class ObservabilityApiError extends Schema.TaggedError<ObservabilityApiEr
 	},
 	{ httpApiStatus: 500 },
 ) {}
-
-// --- API Group ---
 
 export class ObservabilityApiGroup extends HttpApiGroup.make("observability")
 	.add(

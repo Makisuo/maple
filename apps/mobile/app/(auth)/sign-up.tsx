@@ -81,7 +81,6 @@ export default function SignUpScreen() {
 		signUp.unverifiedFields?.includes("email_address") &&
 		signUp.missingFields?.length === 0
 
-	// Email verification screen
 	if (needsVerification) {
 		return (
 			<SafeAreaView className="flex-1 bg-background">
@@ -141,7 +140,6 @@ export default function SignUpScreen() {
 		)
 	}
 
-	// Main sign-up screen
 	return (
 		<SafeAreaView className="flex-1 bg-background">
 			<KeyboardAvoidingView className="flex-1" behavior={Platform.OS === "ios" ? "padding" : "height"}>

@@ -1,4 +1,4 @@
-import { activeTraceId } from "../events"
+import { activeTraceId } from "../../events-sink"
 import { type Emit, safeEmit } from "./shared"
 
 /**

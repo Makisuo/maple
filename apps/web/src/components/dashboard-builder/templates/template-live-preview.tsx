@@ -5,7 +5,7 @@ import { useContainerSize } from "@maple/ui/hooks/use-container-size"
 import type { V2DashboardTemplate } from "@maple/domain/http/v2"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { DashboardTimeRangeWrapper } from "@/components/dashboard-builder/dashboard-providers"
 import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
 import { WidgetTimeRangeProvider } from "@/components/dashboard-builder/widgets/widget-time-range-context"
@@ -188,7 +188,7 @@ export function TemplateLivePreview({ template, parameters, className }: Templat
 
 	const result = useAtomValue(
 		armed
-			? MapleApiV2AtomClient.query("dashboards", "previewTemplate", {
+			? retainedQueryV2("dashboards", "previewTemplate", {
 					params: { template_id: template.id },
 					payload,
 					// Abandoned parameter variants shouldn't accumulate.

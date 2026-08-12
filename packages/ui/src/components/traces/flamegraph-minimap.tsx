@@ -1,5 +1,6 @@
 import * as React from "react"
 import { getSpanColorStyle } from "../../lib/colors"
+import { spanStartMs as spanStartMsOf } from "../../lib/span-tree"
 import type { SpanNode } from "../../lib/types"
 
 interface FlamegraphMinimapProps {
@@ -28,7 +29,7 @@ function calculateMinimapBars(
 	const traceStartMs = new Date(traceStartTime).getTime()
 
 	function traverse(node: SpanNode) {
-		const spanStartMs = new Date(node.startTime).getTime()
+		const spanStartMs = spanStartMsOf(node)
 		const leftPercent = ((spanStartMs - traceStartMs) / totalDurationMs) * 100
 		const widthPercent = (node.durationMs / totalDurationMs) * 100
 
@@ -67,7 +68,7 @@ export function FlamegraphMinimap({
 	const viewportStyle = React.useMemo(() => {
 		if (!focusedSpan) return null
 		const traceStartMs = new Date(traceStartTime).getTime()
-		const spanStartMs = new Date(focusedSpan.startTime).getTime()
+		const spanStartMs = spanStartMsOf(focusedSpan)
 		const leftPercent = ((spanStartMs - traceStartMs) / totalDurationMs) * 100
 		const widthPercent = (focusedSpan.durationMs / totalDurationMs) * 100
 		return { left: `${leftPercent}%`, width: `${Math.max(widthPercent, 2)}%` }

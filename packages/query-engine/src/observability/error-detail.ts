@@ -69,7 +69,6 @@ export const errorDetail = Effect.fn("Observability.errorDetail")(function* (inp
 	const traces = tracesResult.data
 	yield* Effect.annotateCurrentSpan("traceCount", traces.length)
 
-	// Fetch logs for first 3 traces in parallel
 	const logsResults = yield* pipe(
 		traces,
 		Arr.take(3),

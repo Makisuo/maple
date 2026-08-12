@@ -33,11 +33,14 @@ import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
 const InfraLive = Env.layer
+const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 
 // MCP handlers use a finite service context (see runtime-requirements.ts).
 // Keep this graph independent from the HTTP composition root so headless
 // entrypoints do not evaluate or acquire route-only product services.
-const OrgClickHouseSettingsServiceLive = OrgClickHouseSettingsService.layer.pipe(Layer.provide(InfraLive))
+const OrgClickHouseSettingsServiceLive = OrgClickHouseSettingsService.layer.pipe(
+	Layer.provide(Layer.mergeAll(InfraLive, EdgeCacheServiceLive)),
+)
 const TinybirdOrgTokenServiceLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(InfraLive))
 const HazelOAuthServiceLive = HazelOAuthService.layer.pipe(Layer.provide(InfraLive))
 
@@ -45,7 +48,6 @@ const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(
 	Layer.provide(Layer.mergeAll(InfraLive, OrgClickHouseSettingsServiceLive, TinybirdOrgTokenServiceLive)),
 )
 
-const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 const BucketCacheServiceLive = BucketCacheService.layer.pipe(Layer.provideMerge(EdgeCacheServiceLive))
 
 const QueryEngineServiceLive = QueryEngineService.layer.pipe(

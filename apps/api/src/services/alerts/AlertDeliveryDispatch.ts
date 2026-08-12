@@ -9,12 +9,26 @@ import {
 	type AlertSeverity,
 } from "@maple/domain/http"
 import type { AlertDestinationRow } from "@maple/db"
-import { Clock, Duration, Effect, Match, Option, Schema } from "effect"
+import { Clock, Duration, Effect, Match, Schema } from "effect"
 import type { EnrichedDestinationSecretConfig } from "./AlertDestinationHydration"
 import { safeFetch } from "@/http/url-validator"
-// Circular with ./alert-email (it imports our formatting helpers); safe — both
-// sides only reference the other's exports inside function bodies.
 import { buildAlertEmailContent } from "./alert-email"
+import {
+	comparatorBreachPhrase,
+	discordEmbedColor,
+	eventTypeEmoji,
+	formatComparator,
+	formatEventTypeLabel,
+	formatObservedSummary,
+	formatSeverityLabel,
+	formatSignalLabel,
+	formatSignalMetric,
+	formatThresholdSummary,
+	formatWindow,
+	severityEmoji,
+	slackAttachmentColor,
+	type TemplateRenderContext,
+} from "./alert-formatting"
 import { DEFAULT_BODY_TEMPLATE, DEFAULT_TITLE_TEMPLATE } from "./alert-templating/defaultTemplates"
 import {
 	hasCustomTemplate,
@@ -126,150 +140,6 @@ export const buildAlertChatUrl = (baseUrl: string, context: ChatUrlContext): str
 		alert: encoded,
 	})
 	return `${baseUrl}/chat?${params.toString()}`
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Formatting helpers                                                        */
-/* -------------------------------------------------------------------------- */
-
-const round = (value: number, decimals = 2): string => {
-	const factor = 10 ** decimals
-	return (Math.round(value * factor) / factor).toString()
-}
-
-export const formatComparator = (
-	value: AlertComparator,
-	threshold?: number,
-	thresholdUpper?: number | null,
-): string => {
-	const operator = Match.value(value).pipe(
-		Match.when("gt", () => ">"),
-		Match.when("gte", () => ">="),
-		Match.when("lt", () => "<"),
-		Match.when("lte", () => "<="),
-		Match.when("eq", () => "="),
-		Match.when("neq", () => "!="),
-		Match.when("between", () => "between"),
-		Match.when("not_between", () => "not between"),
-		Match.exhaustive,
-	)
-	if (threshold == null) return operator
-	if (value === "between" || value === "not_between") {
-		const upper = thresholdUpper ?? threshold
-		return `${operator} ${threshold} and ${upper}`
-	}
-	return `${operator} ${threshold}`
-}
-
-export const formatSignalLabel = (signal: string) => {
-	const labels: Record<string, string> = {
-		error_rate: "Error Rate",
-		p95_latency: "P95 Latency",
-		p99_latency: "P99 Latency",
-		apdex: "Apdex",
-		throughput: "Throughput",
-		metric: "Metric",
-	}
-	return labels[signal] ?? signal
-}
-
-export const eventTypeEmoji = (type: string) => {
-	const map: Record<string, string> = {
-		trigger: "\u{1F6A8}",
-		resolve: "\u2705",
-		renotify: "\u{1F514}",
-		test: "\u{1F9EA}",
-	}
-	return map[type] ?? "\u{1F4E2}"
-}
-
-export const formatEventTypeLabel = (type: string) => {
-	const map: Record<string, string> = {
-		trigger: "Triggered",
-		resolve: "Resolved",
-		renotify: "Re-notification",
-		test: "Test",
-	}
-	return map[type] ?? type
-}
-
-const formatSignalMetric = (value: number | null, signalType: string): string =>
-	Option.match(Option.fromNullishOr(value), {
-		onNone: () => "n/a",
-		onSome: (v) =>
-			Match.value(signalType).pipe(
-				Match.when("error_rate", () => `${round(v * 100, 1)}%`),
-				Match.whenOr("p95_latency", "p99_latency", () => `${round(v)}ms`),
-				Match.when("apdex", () => `${round(v, 3)}`),
-				Match.when("throughput", () => `${round(v)} rpm`),
-				Match.orElse(() => `${round(v)}`),
-			),
-	})
-
-export const formatWindow = (minutes: number): string => {
-	if (minutes < 60) return `${minutes}m`
-	const hours = minutes / 60
-	return hours % 1 === 0 ? `${hours}h` : `${minutes}m`
-}
-
-export const severityEmoji = (severity: AlertSeverity): string =>
-	Match.value(severity).pipe(
-		Match.when("critical", () => "\u{1F534}"),
-		Match.when("warning", () => "\u{1F7E0}"),
-		Match.exhaustive,
-	)
-
-export const formatSeverityLabel = (severity: AlertSeverity): string =>
-	Match.value(severity).pipe(
-		Match.when("critical", () => "Critical"),
-		Match.when("warning", () => "Warning"),
-		Match.exhaustive,
-	)
-
-export const slackAttachmentColor = (eventType: string, severity: string): string => {
-	if (eventType === "resolve") return "#2eb67d"
-	if (eventType === "test") return "#36c5f0"
-	if (severity === "critical") return "#e01e5a"
-	return "#ecb22e" // warning
-}
-
-/** Discord embed colors are decimal ints — the int forms of the Slack hexes. */
-const discordEmbedColor = (eventType: string, severity: string): number => {
-	if (eventType === "resolve") return 0x2eb67d
-	if (eventType === "test") return 0x36c5f0
-	if (severity === "critical") return 0xe01e5a
-	return 0xecb22e // warning
-}
-
-type ObservedContext = Pick<
-	DispatchContext,
-	"value" | "signalType" | "comparator" | "threshold" | "thresholdUpper"
->
-
-type ThresholdContext = Omit<ObservedContext, "value">
-
-/** The comparator + formatted threshold(s), e.g. `> 5%` or `between 5% and 10%`. */
-export const formatThresholdSummary = (context: ThresholdContext): string =>
-	context.comparator === "between" || context.comparator === "not_between"
-		? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)}`
-		: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`
-
-export const formatObservedSummary = (context: ObservedContext): string =>
-	`${formatSignalMetric(context.value, context.signalType)} ${formatThresholdSummary(context)}`
-
-/** Prose form of the breach condition, e.g. "above the 5% threshold". */
-const comparatorBreachPhrase = (context: ThresholdContext): string => {
-	const threshold = formatSignalMetric(context.threshold, context.signalType)
-	const upper = formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)
-	return Match.value(context.comparator).pipe(
-		Match.whenOr("gt", "gte", () => `above the ${threshold} threshold`),
-		Match.whenOr("lt", "lte", () => `below the ${threshold} threshold`),
-		Match.when("eq", () => `at the ${threshold} threshold`),
-		Match.when("neq", () => `away from the ${threshold} target`),
-		Match.when("between", () => `inside the ${threshold}–${upper} range`),
-		Match.when("not_between", () => `outside the ${threshold}–${upper} range`),
-		Match.exhaustive,
-	)
 }
 
 /* -------------------------------------------------------------------------- */
@@ -446,27 +316,6 @@ const buildDiscordEmbeds = (context: DispatchContext, linkUrl: string, chatUrl: 
  * it can be exercised in tests without constructing a destination row / secret
  * config (which a full `DispatchContext` requires). The full context satisfies it.
  */
-export type TemplateRenderContext = Pick<
-	DispatchContext,
-	| "ruleId"
-	| "ruleName"
-	| "eventType"
-	| "severity"
-	| "signalType"
-	| "comparator"
-	| "threshold"
-	| "thresholdUpper"
-	| "value"
-	| "sampleCount"
-	| "groupKey"
-	| "windowMinutes"
-	| "incidentId"
-	| "incidentStatus"
-	| "dedupeKey"
-	| "template"
-	| "sentAtMs"
->
-
 /**
  * Build the flat `{{ variable }}` context for templated notifications. Every
  * value is a pre-formatted string, reusing the same helpers the hardcoded
@@ -587,7 +436,7 @@ export const verifyPagerDutyRoutingKey = (
 			}
 			return Effect.succeed<PagerDutyKeyVerification>({ status: "unknown" })
 		}),
-		Effect.catch(() => Effect.succeed<PagerDutyKeyVerification>({ status: "unknown" })),
+		Effect.orElseSucceed(() => ({ status: "unknown" as const })),
 	)
 
 /**
@@ -682,358 +531,346 @@ export const dispatchDelivery = (
 	chatUrl: string,
 	deps: DispatchDeps,
 ): Effect.Effect<DispatchResult, AlertDeliveryError> =>
-	Effect.gen(function* () {
-		return yield* Match.value(context.secretConfig).pipe(
-			Match.discriminatorsExhaustive("type")({
-				"slack-bot": (config) =>
-					Effect.gen(function* () {
-						const botToken = yield* deps.resolveSlackBotToken(context.destination.orgId)
-						const templated = renderTitleBody(context, "slack-bot", linkUrl, chatUrl)
-						const blocks = templated
-							? buildSlackBlocksFromTemplate(
-									templated.title,
-									templated.body,
-									context,
-									linkUrl,
-									chatUrl,
-								)
-							: buildSlackBlocks(context, linkUrl, chatUrl)
-						const response = yield* runTimedFetch("slack-bot", "Slack", fetchFn, timeoutMs, () =>
-							fetchFn("https://slack.com/api/chat.postMessage", {
-								method: "POST",
-								headers: {
-									"content-type": "application/json; charset=utf-8",
-									authorization: `Bearer ${botToken}`,
-								},
-								body: JSON.stringify({
-									channel: config.channelId,
-									// Blocks ride inside a colored attachment so the message
-									// carries the severity color bar — same as the webhook
-									// destination (the bar has no Block Kit equivalent). No
-									// top-level `text`: alongside attachments Slack renders it
-									// as a duplicate line above the bar; `fallback` carries
-									// the notification-preview one-liner instead.
-									attachments: [
-										{
-											color: slackAttachmentColor(context.eventType, context.severity),
-											fallback: templated?.title ?? buildSlackFallbackText(context),
-											blocks,
-										},
-									],
-								}),
-							}),
-						)
-						if (!response.ok) {
-							const detail = yield* readErrorBody(response)
-							return yield* Effect.fail(
-								makeDeliveryError(
-									`Slack delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
-									"slack-bot",
-								),
+	Match.value(context.secretConfig).pipe(
+		Match.discriminatorsExhaustive("type")({
+			"slack-bot": (config) =>
+				Effect.gen(function* () {
+					const botToken = yield* deps.resolveSlackBotToken(context.destination.orgId)
+					const templated = renderTitleBody(context, "slack-bot", linkUrl, chatUrl)
+					const blocks = templated
+						? buildSlackBlocksFromTemplate(
+								templated.title,
+								templated.body,
+								context,
+								linkUrl,
+								chatUrl,
 							)
-						}
-						// Slack Web API returns HTTP 200 with `{ ok: false, error }` on
-						// logical failures, so the JSON body — not the status — is the
-						// source of truth.
-						const rawPayload = yield* Effect.tryPromise({
-							try: () => response.json(),
-							catch: (error) =>
-								makeDeliveryError("Slack returned a non-JSON response", "slack-bot", error),
-						})
-						const payload = yield* decodeSlackPostMessageResponse(rawPayload).pipe(
-							Effect.mapError((error) =>
-								makeDeliveryError(
-									`Slack returned an unexpected response payload: ${error.message}`,
-									"slack-bot",
-								),
-							),
-						)
-						if (!payload.ok) {
-							const error = payload.error ?? "unknown_error"
-							// HTTP 200 + `ok:false` is the dominant operational failure here
-							// (`not_in_channel` after a rename/kick). NotificationDispatcher
-							// only records outcome "failed", so annotate the Slack error code
-							// on the span to make it aggregatable.
-							yield* Effect.annotateCurrentSpan({
-								"maple.delivery.destination_type": "slack-bot",
-								"maple.delivery.provider_error": error,
-							})
-							const message =
-								error === "not_in_channel" || error === "channel_not_found"
-									? `Slack rejected the message (${error}) — invite the Maple bot to the channel and try again`
-									: `Slack rejected the message: ${error}`
-							return yield* Effect.fail(makeDeliveryError(message, "slack-bot"))
-						}
-						return {
-							providerMessage: `Delivered to Slack #${config.channelName ?? config.channelId}`,
-							providerReference: payload.ts ?? null,
-							responseCode: response.status,
-						} as DispatchResult
-					}),
-				pagerduty: (config) =>
-					Effect.gen(function* () {
-						const templated = renderTitleBody(context, "pagerduty", linkUrl, chatUrl)
-						const body = {
-							routing_key: config.integrationKey,
-							event_action: context.eventType === "resolve" ? "resolve" : "trigger",
-							dedup_key: context.dedupeKey,
-							payload: {
-								summary: truncate(
-									templated?.title ?? `${context.ruleName} ${context.eventType}`,
-									1024,
-								),
-								source: context.groupKey ?? "maple-alerts",
-								severity: context.severity === "critical" ? "critical" : "warning",
-								custom_details: {
-									...(templated ? { message: templated.body } : {}),
-									ruleName: context.ruleName,
-									signalType: context.signalType,
-									value: context.value,
-									threshold: context.threshold,
-									thresholdUpper: context.thresholdUpper,
-									comparator: context.comparator,
-									groupKey: context.groupKey,
-									linkUrl,
-									chatUrl,
-								},
+						: buildSlackBlocks(context, linkUrl, chatUrl)
+					const response = yield* runTimedFetch("slack-bot", "Slack", fetchFn, timeoutMs, () =>
+						fetchFn("https://slack.com/api/chat.postMessage", {
+							method: "POST",
+							headers: {
+								"content-type": "application/json; charset=utf-8",
+								authorization: `Bearer ${botToken}`,
 							},
-							links: [
-								{ href: linkUrl, text: "Open in Maple" },
-								{ href: chatUrl, text: "Ask Maple AI" },
-							],
-						}
-						const response = yield* runTimedFetch(
-							"pagerduty",
-							"PagerDuty",
-							fetchFn,
-							timeoutMs,
-							() =>
-								fetchFn("https://events.pagerduty.com/v2/enqueue", {
-									method: "POST",
-									headers: { "content-type": "application/json" },
-									body: JSON.stringify(body),
-								}),
-						)
-						if (!response.ok) {
-							const detail = yield* readErrorBody(response)
-							return yield* Effect.fail(
-								makeDeliveryError(
-									`PagerDuty delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
-									"pagerduty",
-								),
-							)
-						}
-						return {
-							providerMessage: "Delivered to PagerDuty",
-							providerReference: context.dedupeKey,
-							responseCode: response.status,
-						} as DispatchResult
-					}),
-				webhook: (config) =>
-					Effect.gen(function* () {
-						const headers: Record<string, string> = {
-							"content-type": "application/json",
-							"x-maple-event-type": context.eventType,
-							"x-maple-delivery-key": context.deliveryKey,
-						}
-						if (config.signingSecret) {
-							headers["x-maple-signature"] = createHmac("sha256", config.signingSecret)
-								.update(payloadJson)
-								.digest("hex")
-						}
-						const response = yield* runTimedFetch("webhook", "Webhook", fetchFn, timeoutMs, () =>
-							safeFetch(config.url, { method: "POST", headers, body: payloadJson, fetchFn }),
-						)
-						if (!response.ok) {
-							const detail = yield* readErrorBody(response)
-							return yield* Effect.fail(
-								makeDeliveryError(
-									`Webhook delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
-									"webhook",
-								),
-							)
-						}
-						return {
-							providerMessage: "Delivered to webhook",
-							providerReference: context.dedupeKey,
-							responseCode: response.status,
-						} as DispatchResult
-					}),
-				"hazel-oauth": (config) =>
-					Effect.gen(function* () {
-						// Hazel exposes per-integration sibling endpoints under the same
-						// `:webhookId/:token` prefix (see hazel
-						// packages/domain/src/http/incoming-webhooks.ts). The stored
-						// webhookUrl is the base; we append `/maple` to hit the
-						// `executeMaple` handler — without it, the payload routes to the
-						// Discord-style `execute` endpoint and is rejected.
-						const hazelUrl = `${config.webhookUrl.replace(/\/$/, "")}/maple`
-						const incidentStatus = context.eventType === "resolve" ? "resolved" : "open"
-						const body = JSON.stringify({
-							eventType: context.eventType,
-							incidentId: context.incidentId,
-							incidentStatus,
-							dedupeKey: context.dedupeKey,
-							rule: {
-								id: context.ruleId,
-								name: context.ruleName,
-								signalType: context.signalType,
-								severity: context.severity,
-								groupKey: context.groupKey,
-								comparator: context.comparator,
-								threshold: context.threshold,
-								windowMinutes: context.windowMinutes,
-							},
-							observed: {
-								value: context.value,
-								sampleCount: context.sampleCount,
-							},
-							template: context.template ?? null,
-							linkUrl,
-							chatUrl,
-							sentAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
-						})
-						const response = yield* runTimedFetch(
-							"hazel-oauth",
-							"Hazel",
-							fetchFn,
-							timeoutMs,
-							() =>
-								safeFetch(hazelUrl, {
-									method: "POST",
-									headers: {
-										"content-type": "application/json",
-										"x-maple-event-type": context.eventType,
-										"x-maple-delivery-key": context.deliveryKey,
+							body: JSON.stringify({
+								channel: config.channelId,
+								// Blocks ride inside a colored attachment so the message
+								// carries the severity color bar — same as the webhook
+								// destination (the bar has no Block Kit equivalent). No
+								// top-level `text`: alongside attachments Slack renders it
+								// as a duplicate line above the bar; `fallback` carries
+								// the notification-preview one-liner instead.
+								attachments: [
+									{
+										color: slackAttachmentColor(context.eventType, context.severity),
+										fallback: templated?.title ?? buildSlackFallbackText(context),
+										blocks,
 									},
-									body,
-									fetchFn,
-								}),
-						)
-						if (response.status === 401 || response.status === 403) {
-							return yield* Effect.fail(
-								makeDeliveryError(
-									"Hazel rejected the webhook token — reconfigure the channel",
-									"hazel-oauth",
-								),
-							)
-						}
-						if (response.status === 404) {
-							return yield* Effect.fail(
-								makeDeliveryError(
-									"Hazel webhook no longer exists — pick a different channel",
-									"hazel-oauth",
-								),
-							)
-						}
-						if (!response.ok) {
-							const detail = yield* readErrorBody(response)
-							return yield* Effect.fail(
-								makeDeliveryError(
-									`Hazel delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
-									"hazel-oauth",
-								),
-							)
-						}
-						return {
-							providerMessage: `Delivered to Hazel #${config.hazelChannelName}`,
-							providerReference: context.dedupeKey,
-							responseCode: response.status,
-						} as DispatchResult
-					}),
-				discord: (config) =>
-					Effect.gen(function* () {
-						const templated = renderTitleBody(context, "discord", linkUrl, chatUrl)
-						const embeds = templated
-							? buildDiscordEmbedsFromTemplate(
-									templated.title,
-									templated.body,
-									context,
-									linkUrl,
-									chatUrl,
-								)
-							: buildDiscordEmbeds(context, linkUrl, chatUrl)
-						const response = yield* runTimedFetch("discord", "Discord", fetchFn, timeoutMs, () =>
-							safeFetch(config.webhookUrl, {
-								method: "POST",
-								headers: { "content-type": "application/json" },
-								body: JSON.stringify({
-									username: "Maple Alerts",
-									content:
-										templated?.title ??
-										`**${context.ruleName}**: ${formatEventTypeLabel(context.eventType)}`,
-									embeds,
-								}),
-								fetchFn,
+								],
 							}),
-						)
-						if (!response.ok) {
-							const detail = yield* readErrorBody(response)
-							return yield* Effect.fail(
-								makeDeliveryError(
-									`Discord delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
-									"discord",
-								),
-							)
-						}
-						return {
-							providerMessage: "Delivered to Discord",
-							providerReference: null,
-							responseCode: response.status,
-						} as DispatchResult
-					}),
-				email: (config) =>
-					Effect.gen(function* () {
-						const { subject, html } = yield* buildAlertEmailContent(context, linkUrl, chatUrl)
-						const outcomes = yield* Effect.forEach(config.members, (member) =>
-							deps.sendEmail(member.email, subject, html).pipe(
-								Effect.match({
-									onSuccess: () => ({ member, error: null as string | null }),
-									onFailure: (error) => ({ member, error: error.message }),
-								}),
+						}),
+					)
+					if (!response.ok) {
+						const detail = yield* readErrorBody(response)
+						return yield* Effect.fail(
+							makeDeliveryError(
+								`Slack delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
+								"slack-bot",
 							),
 						)
-						const failures = outcomes.filter((o) => o.error != null)
-						const count = config.members.length
-
-						if (failures.length === count && count > 0) {
-							// Nobody received the email — safe to fail retryable; the retry
-							// re-sends to members who all got nothing. Keep the first failure
-							// message verbatim so timeout classification survives aggregation.
-							return yield* Effect.fail(
-								makeDeliveryError(
-									`Email delivery failed for all ${count} member${count === 1 ? "" : "s"}: ${failures[0]!.error}`,
-									"email",
-								),
+					}
+					// Slack Web API returns HTTP 200 with `{ ok: false, error }` on
+					// logical failures, so the JSON body — not the status — is the
+					// source of truth.
+					const rawPayload = yield* Effect.tryPromise({
+						try: () => response.json(),
+						catch: (error) =>
+							makeDeliveryError("Slack returned a non-JSON response", "slack-bot", error),
+					})
+					const payload = yield* decodeSlackPostMessageResponse(rawPayload).pipe(
+						Effect.mapError((error) =>
+							makeDeliveryError(
+								`Slack returned an unexpected response payload: ${error.message}`,
+								"slack-bot",
+							),
+						),
+					)
+					if (!payload.ok) {
+						const error = payload.error ?? "unknown_error"
+						// HTTP 200 + `ok:false` is the dominant operational failure here
+						// (`not_in_channel` after a rename/kick). NotificationDispatcher
+						// only records outcome "failed", so annotate the Slack error code
+						// on the span to make it aggregatable.
+						yield* Effect.annotateCurrentSpan({
+							"maple.delivery.destination_type": "slack-bot",
+							"maple.delivery.provider_error": error,
+						})
+						const message =
+							error === "not_in_channel" || error === "channel_not_found"
+								? `Slack rejected the message (${error}) — invite the Maple bot to the channel and try again`
+								: `Slack rejected the message: ${error}`
+						return yield* Effect.fail(makeDeliveryError(message, "slack-bot"))
+					}
+					return {
+						providerMessage: `Delivered to Slack #${config.channelName ?? config.channelId}`,
+						providerReference: payload.ts ?? null,
+						responseCode: response.status,
+					} as DispatchResult
+				}),
+			pagerduty: (config) =>
+				Effect.gen(function* () {
+					const templated = renderTitleBody(context, "pagerduty", linkUrl, chatUrl)
+					const body = {
+						routing_key: config.integrationKey,
+						event_action: context.eventType === "resolve" ? "resolve" : "trigger",
+						dedup_key: context.dedupeKey,
+						payload: {
+							summary: truncate(
+								templated?.title ?? `${context.ruleName} ${context.eventType}`,
+								1024,
+							),
+							source: context.groupKey ?? "maple-alerts",
+							severity: context.severity === "critical" ? "critical" : "warning",
+							custom_details: {
+								...(templated ? { message: templated.body } : {}),
+								ruleName: context.ruleName,
+								signalType: context.signalType,
+								value: context.value,
+								threshold: context.threshold,
+								thresholdUpper: context.thresholdUpper,
+								comparator: context.comparator,
+								groupKey: context.groupKey,
+								linkUrl,
+								chatUrl,
+							},
+						},
+						links: [
+							{ href: linkUrl, text: "Open in Maple" },
+							{ href: chatUrl, text: "Ask Maple AI" },
+						],
+					}
+					const response = yield* runTimedFetch("pagerduty", "PagerDuty", fetchFn, timeoutMs, () =>
+						fetchFn("https://events.pagerduty.com/v2/enqueue", {
+							method: "POST",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify(body),
+						}),
+					)
+					if (!response.ok) {
+						const detail = yield* readErrorBody(response)
+						return yield* Effect.fail(
+							makeDeliveryError(
+								`PagerDuty delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
+								"pagerduty",
+							),
+						)
+					}
+					return {
+						providerMessage: "Delivered to PagerDuty",
+						providerReference: context.dedupeKey,
+						responseCode: response.status,
+					} as DispatchResult
+				}),
+			webhook: (config) =>
+				Effect.gen(function* () {
+					const headers: Record<string, string> = {
+						"content-type": "application/json",
+						"x-maple-event-type": context.eventType,
+						"x-maple-delivery-key": context.deliveryKey,
+					}
+					if (config.signingSecret) {
+						headers["x-maple-signature"] = createHmac("sha256", config.signingSecret)
+							.update(payloadJson)
+							.digest("hex")
+					}
+					const response = yield* runTimedFetch("webhook", "Webhook", fetchFn, timeoutMs, () =>
+						safeFetch(config.url, { method: "POST", headers, body: payloadJson, fetchFn }),
+					)
+					if (!response.ok) {
+						const detail = yield* readErrorBody(response)
+						return yield* Effect.fail(
+							makeDeliveryError(
+								`Webhook delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
+								"webhook",
+							),
+						)
+					}
+					return {
+						providerMessage: "Delivered to webhook",
+						providerReference: context.dedupeKey,
+						responseCode: response.status,
+					} as DispatchResult
+				}),
+			"hazel-oauth": (config) =>
+				Effect.gen(function* () {
+					// Hazel exposes per-integration sibling endpoints under the same
+					// `:webhookId/:token` prefix (see hazel
+					// packages/domain/src/http/incoming-webhooks.ts). The stored
+					// webhookUrl is the base; we append `/maple` to hit the
+					// `executeMaple` handler — without it, the payload routes to the
+					// Discord-style `execute` endpoint and is rejected.
+					const hazelUrl = `${config.webhookUrl.replace(/\/$/, "")}/maple`
+					const incidentStatus = context.eventType === "resolve" ? "resolved" : "open"
+					const body = JSON.stringify({
+						eventType: context.eventType,
+						incidentId: context.incidentId,
+						incidentStatus,
+						dedupeKey: context.dedupeKey,
+						rule: {
+							id: context.ruleId,
+							name: context.ruleName,
+							signalType: context.signalType,
+							severity: context.severity,
+							groupKey: context.groupKey,
+							comparator: context.comparator,
+							threshold: context.threshold,
+							windowMinutes: context.windowMinutes,
+						},
+						observed: {
+							value: context.value,
+							sampleCount: context.sampleCount,
+						},
+						template: context.template ?? null,
+						linkUrl,
+						chatUrl,
+						sentAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
+					})
+					const response = yield* runTimedFetch("hazel-oauth", "Hazel", fetchFn, timeoutMs, () =>
+						safeFetch(hazelUrl, {
+							method: "POST",
+							headers: {
+								"content-type": "application/json",
+								"x-maple-event-type": context.eventType,
+								"x-maple-delivery-key": context.deliveryKey,
+							},
+							body,
+							fetchFn,
+						}),
+					)
+					if (response.status === 401 || response.status === 403) {
+						return yield* Effect.fail(
+							makeDeliveryError(
+								"Hazel rejected the webhook token — reconfigure the channel",
+								"hazel-oauth",
+							),
+						)
+					}
+					if (response.status === 404) {
+						return yield* Effect.fail(
+							makeDeliveryError(
+								"Hazel webhook no longer exists — pick a different channel",
+								"hazel-oauth",
+							),
+						)
+					}
+					if (!response.ok) {
+						const detail = yield* readErrorBody(response)
+						return yield* Effect.fail(
+							makeDeliveryError(
+								`Hazel delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
+								"hazel-oauth",
+							),
+						)
+					}
+					return {
+						providerMessage: `Delivered to Hazel #${config.hazelChannelName}`,
+						providerReference: context.dedupeKey,
+						responseCode: response.status,
+					} as DispatchResult
+				}),
+			discord: (config) =>
+				Effect.gen(function* () {
+					const templated = renderTitleBody(context, "discord", linkUrl, chatUrl)
+					const embeds = templated
+						? buildDiscordEmbedsFromTemplate(
+								templated.title,
+								templated.body,
+								context,
+								linkUrl,
+								chatUrl,
 							)
-						}
+						: buildDiscordEmbeds(context, linkUrl, chatUrl)
+					const response = yield* runTimedFetch("discord", "Discord", fetchFn, timeoutMs, () =>
+						safeFetch(config.webhookUrl, {
+							method: "POST",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify({
+								username: "Maple Alerts",
+								content:
+									templated?.title ??
+									`**${context.ruleName}**: ${formatEventTypeLabel(context.eventType)}`,
+								embeds,
+							}),
+							fetchFn,
+						}),
+					)
+					if (!response.ok) {
+						const detail = yield* readErrorBody(response)
+						return yield* Effect.fail(
+							makeDeliveryError(
+								`Discord delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
+								"discord",
+							),
+						)
+					}
+					return {
+						providerMessage: "Delivered to Discord",
+						providerReference: null,
+						responseCode: response.status,
+					} as DispatchResult
+				}),
+			email: (config) =>
+				Effect.gen(function* () {
+					const { subject, html } = yield* buildAlertEmailContent(context, linkUrl, chatUrl)
+					const outcomes = yield* Effect.forEach(config.members, (member) =>
+						deps.sendEmail(member.email, subject, html).pipe(
+							Effect.match({
+								onSuccess: () => ({ member, error: null as string | null }),
+								onFailure: (error) => ({ member, error: error.message }),
+							}),
+						),
+					)
+					const failures = outcomes.filter((o) => o.error != null)
+					const count = config.members.length
 
-						if (failures.length > 0) {
-							// Partial success is terminal: there is no per-member attempt
-							// state, so retrying the event would re-email the members who
-							// already received it. Report success and surface the failures.
-							yield* Effect.logWarning("Alert email delivered to a subset of members").pipe(
-								Effect.annotateLogs({
-									failedCount: failures.length,
-									memberCount: count,
-									firstError: failures[0]!.error,
-								}),
-							)
-							return {
-								providerMessage: `Emailed ${count - failures.length} of ${count} members; failed: ${failures
-									.map((f) => `${f.member.email} (${f.error})`)
-									.join(", ")}`,
-								providerReference: null,
-								responseCode: null,
-							} as DispatchResult
-						}
+					if (failures.length === count && count > 0) {
+						// Nobody received the email — safe to fail retryable; the retry
+						// re-sends to members who all got nothing. Keep the first failure
+						// message verbatim so timeout classification survives aggregation.
+						return yield* Effect.fail(
+							makeDeliveryError(
+								`Email delivery failed for all ${count} member${count === 1 ? "" : "s"}: ${failures[0]!.error}`,
+								"email",
+							),
+						)
+					}
 
+					if (failures.length > 0) {
+						// Partial success is terminal: there is no per-member attempt
+						// state, so retrying the event would re-email the members who
+						// already received it. Report success and surface the failures.
+						yield* Effect.logWarning("Alert email delivered to a subset of members").pipe(
+							Effect.annotateLogs({
+								failedCount: failures.length,
+								memberCount: count,
+								firstError: failures[0]!.error,
+							}),
+						)
 						return {
-							providerMessage: `Emailed ${count} member${count === 1 ? "" : "s"}`,
+							providerMessage: `Emailed ${count - failures.length} of ${count} members; failed: ${failures
+								.map((f) => `${f.member.email} (${f.error})`)
+								.join(", ")}`,
 							providerReference: null,
 							responseCode: null,
 						} as DispatchResult
-					}),
-			}),
-		)
-	})
+					}
+
+					return {
+						providerMessage: `Emailed ${count} member${count === 1 ? "" : "s"}`,
+						providerReference: null,
+						responseCode: null,
+					} as DispatchResult
+				}),
+		}),
+	)

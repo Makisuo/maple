@@ -8,7 +8,7 @@ import {
 } from "./types"
 import { Effect, Match, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AlertRuleUpsertRequest } from "@maple/domain/http"
 
@@ -65,8 +65,6 @@ const ALERT_TEMPLATES: Record<string, AlertTemplate> = {
 		defaults: {},
 	},
 }
-
-// Build request from raw params (custom mode)
 
 interface CreateAlertRuleParams {
 	name: string
@@ -329,7 +327,7 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 				),
 			)
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const alerts = yield* AlertRulesService
 
 			const rule = yield* alerts.createRule(tenant.orgId, tenant.userId, tenant.roles, decoded).pipe(

@@ -12,7 +12,7 @@
  * Every story here runs at least two real plates, so none falls back to the
  * inline layout (see `storyIsPinnable`).
  */
-import * as m from "../paraglide/messages"
+import * as m from "../paraglide/messages.js"
 import type { UseCase } from "./page-registry"
 
 export const useCases: UseCase[] = [

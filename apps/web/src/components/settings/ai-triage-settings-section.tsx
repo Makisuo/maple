@@ -10,7 +10,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Switch } from "@maple/ui/components/ui/switch"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
 import { AiTriageSettingsUpdateRequest } from "@maple/domain/http"
 
 interface AiTriageSettingsSectionProps {
@@ -73,7 +73,7 @@ function DailyLimitField({
 }
 
 export function AiTriageSettingsSection({ isAdmin, hasEntitlement }: AiTriageSettingsSectionProps) {
-	const settingsQueryAtom = MapleApiAtomClient.query("aiTriage", "getSettings", {
+	const settingsQueryAtom = retainedQuery("aiTriage", "getSettings", {
 		reactivityKeys: SETTINGS_REACTIVITY_KEYS,
 	})
 	const settingsResult = useAtomValue(settingsQueryAtom)

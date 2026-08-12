@@ -16,7 +16,7 @@ import {
 } from "@/components/anomalies/anomaly-group"
 import { AnomalyLiveIndicator } from "@/components/anomalies/anomaly-live-indicator"
 import { ListToolbar } from "@/components/common/list-toolbar"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { ErrorState } from "@/components/common/error-state"
@@ -61,7 +61,7 @@ function AnomaliesPage() {
 	const status: StatusTab = search.status ?? "open"
 	const live = search.live ?? status === "open"
 
-	const incidentsQueryAtom = MapleApiAtomClient.query("anomalies", "listIncidents", {
+	const incidentsQueryAtom = retainedQuery("anomalies", "listIncidents", {
 		query: status === "all" ? { limit: INCIDENTS_PAGE_LIMIT } : { status, limit: INCIDENTS_PAGE_LIMIT },
 		reactivityKeys: ["anomalyIncidents"],
 	})

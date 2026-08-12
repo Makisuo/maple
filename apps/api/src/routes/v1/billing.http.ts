@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { HttpServerRequest } from "effect/unstable/http"
-import { Clock, Effect, Option, Redacted, Schema } from "effect"
+import { FetchHttpClient, HttpClient, HttpServerRequest } from "effect/unstable/http"
+import { Clock, Effect, Layer, Option, Redacted, Schema } from "effect"
 import type { CustomerData } from "autumn-js/backend"
 import { EdgeCacheService } from "@maple/cache"
 import {
@@ -95,6 +95,7 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 	Effect.gen(function* () {
 		const env = yield* Env
 		const auth = yield* AuthService
+		const httpClient = yield* HttpClient.HttpClient
 		const edgeCache = yield* EdgeCacheService
 		const dailySpend = yield* DailySpendService
 		const secretKey = Option.match(env.AUTUMN_SECRET_KEY, {
@@ -201,6 +202,7 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 						)
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
 						const result = yield* updateCustomerBillingControls(
+							httpClient,
 							secretKey,
 							env.AUTUMN_API_URL,
 							tenant.orgId,
@@ -260,7 +262,7 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 				)
 		)
 	}),
-)
+).pipe(Layer.provide(FetchHttpClient.layer))
 
 export const HttpBillingPublicLive = HttpApiBuilder.group(MapleApi, "billingPublic", (handlers) =>
 	Effect.gen(function* () {

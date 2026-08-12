@@ -162,6 +162,7 @@ export const make = <R, ER>(
 		// The model's service identifier cannot be tied to the runtime's `R`
 		// statically — the runtime layer must include the model's layer.
 		// eslint-disable-next-line revizo/no-type-assertion
+		// oxlint-disable-next-line effecttsgo/unsafe-effect-type-assertion
 		const load = Model.get(model, ...keyArgs) as Effect.Effect<Model.PortsOf<M>, Model.ErrorOf<M>>
 		runtime.runFork(
 			load.pipe(

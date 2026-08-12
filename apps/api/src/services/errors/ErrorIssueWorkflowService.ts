@@ -163,7 +163,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 	function* () {
 		const database = yield* Database
 		const actors = yield* ErrorActorsService
-		const dbExecute = makeErrorDatabaseExecute(database)
+		const dbExecute = makeErrorDatabaseExecute(database, "ErrorIssueWorkflowService")
 
 		const newEventId = () => decodeEventIdSync(randomUUID())
 		const newIssueEscalationId = () => decodeIssueEscalationIdSync(randomUUID())

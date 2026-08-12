@@ -5,7 +5,7 @@
 import type { Dot, ModeDraw } from './types';
 import { angleDelta, hashD, makeProj, paint, radiusScale } from './core';
 
-// --- the shared solver heartbeat (rubik) ------------------------------
+// Shared Rubik solver heartbeat.
 // Rapid eased moves scramble, then replay in reverse (palindrome) so
 // everything clicks back to solved, rests, repeats.
 
@@ -84,7 +84,7 @@ function makeMoves(count: number): Move[] {
   return moves;
 }
 
-// --- Globe: lat/long field, a scan meridian sweeps — searching --------
+// Globe search: a meridian sweeps a latitude/longitude field.
 
 export const drawGlobe: ModeDraw = (ctx, size, t, dark, o) => {
   const spin = 0.5;
@@ -127,7 +127,7 @@ export const drawGlobe: ModeDraw = (ctx, size, t, dark, o) => {
   paint(ctx, dots, dark, o.rMin);
 };
 
-// --- Rubik: bands twist in quarter turns, scramble → solve — solving --
+// Rubik solve: bands twist in quarter turns from scramble to solved.
 
 export const drawRubik: ModeDraw = (ctx, size, t, dark, o) => {
   const cx = size / 2;
@@ -165,7 +165,7 @@ export const drawRubik: ModeDraw = (ctx, size, t, dark, o) => {
   paint(ctx, dots, dark, o.rMin);
 };
 
-// --- Wave: a waveform rolls through the rings — listening -------------
+// Wave listening: a waveform rolls through the rings.
 
 export const drawWave: ModeDraw = (ctx, size, t, dark, o) => {
   const cx = size / 2;

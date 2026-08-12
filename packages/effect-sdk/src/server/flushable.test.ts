@@ -288,9 +288,7 @@ describe("MapleFlush.make (server)", () => {
 		})
 
 		await Effect.runPromise(
-			Effect.gen(function* () {
-				yield* Effect.logInfo("hi")
-			}).pipe(Effect.withSpan("op"), Effect.provide(telemetry.layer)),
+			Effect.logInfo("hi").pipe(Effect.withSpan("op"), Effect.provide(telemetry.layer)),
 		)
 		await telemetry.flush()
 
@@ -325,9 +323,10 @@ describe("MapleFlush.make (server)", () => {
 		const telemetry = make(baseConfig)
 
 		await Effect.runPromise(
-			Effect.gen(function* () {
-				yield* Effect.logInfo("inside the span")
-			}).pipe(Effect.withSpan("parent-span"), Effect.provide(telemetry.layer)),
+			Effect.logInfo("inside the span").pipe(
+				Effect.withSpan("parent-span"),
+				Effect.provide(telemetry.layer),
+			),
 		)
 		await telemetry.flush()
 

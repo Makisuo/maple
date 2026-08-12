@@ -70,7 +70,7 @@ import {
 import { archiveSignal } from "../server/archives/signals"
 import { ensurePrivateDirectory } from "../server/archives/paths"
 import { CHDB_VERSION, MAPLE_VERSION } from "../version"
-import { SCHEMA_FINGERPRINT } from "../server/serve"
+import { SCHEMA_FINGERPRINT } from "../server/schema-identity"
 import { amber, bold, dim, green, red } from "../lib/style"
 import {
 	collectChildOutputAfterClose,

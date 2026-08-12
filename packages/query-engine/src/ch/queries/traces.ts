@@ -12,6 +12,7 @@ import {
 	ServiceMapSpans,
 	ServiceOverviewSpans,
 	ServiceOverviewHourly,
+	ServiceOverviewMinutely,
 	TraceDetailSpans,
 	TraceListMv,
 	Traces,
@@ -21,7 +22,7 @@ import { METRIC_NEEDS } from "../../traces-shared"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import * as T from "@maple-dev/clickhouse-builder/types"
 import { finalizeTimeseries } from "./series-cap"
-import { edgeCondition, interiorBounds, interiorConditions } from "./rollup-splice"
+import { edgeCondition, hourGrain, interiorBounds, interiorConditions, minuteGrain } from "./rollup-splice"
 import {
 	apdexExprs,
 	buildProjectedMapExpr,
@@ -308,6 +309,16 @@ export interface TracesTimeseriesOpts extends TracesQueryOpts {
 	 * tail is dropped server-side to avoid OOMing the browser tab.
 	 */
 	seriesLimit?: number
+	/**
+	 * Restricts which service-overview rollup tiers may answer. `"hour"` excludes
+	 * the minutely tier, which makes sub-hour buckets fall through to another
+	 * route entirely rather than silently reading an hour-grain row.
+	 *
+	 * This is the retry knob for an org whose ClickHouse has not applied migration
+	 * 0015 — not a rollout switch. See `makeRollupFallback` in
+	 * `apps/api/src/routes/v1/query-engine.http.ts`.
+	 */
+	overviewTiers?: "hour" | "minute"
 }
 
 export interface TracesTimeseriesOutput {
@@ -348,9 +359,28 @@ const TRACES_TS_COLUMNS: ColumnDefs = {
 }
 
 /**
- * Whether a timeseries request can be served by the one-year service-overview
- * rollup (raw partial edge hours + `service_overview_hourly` interior) instead
- * of scanning `traces`.
+ * Group-by keys the service-overview rollup tiers can carry.
+ *
+ * `service` maps to `ServiceName`, which exists on all three tiers. The other
+ * keys in the contract's groupBy enum do not: `status_code` is pre-aggregated
+ * away into `ErrorCount` by both rollups, and `span_name` / `http_method` /
+ * `attribute` never reach the entry-point projection at all. Those must fall
+ * through to another route.
+ */
+const OVERVIEW_ROLLUP_GROUP_KEYS: ReadonlySet<string> = new Set(["service", "none"])
+
+/**
+ * Whether a timeseries request can be served by the service-overview rollup
+ * tiers (raw partial edge buckets + `service_overview_minutely` and/or
+ * `service_overview_hourly` interiors) instead of scanning `traces`.
+ *
+ * The bucket rule is the load-bearing part. A tier can only answer a bucket it
+ * can place a row inside, so:
+ *   - `bucketSeconds % 3600 == 0` → all three tiers
+ *   - `bucketSeconds % 60 == 0`   → raw edge + minutely (bounded by its 90d TTL)
+ *   - anything finer               → no rollup tier; fall through
+ * Reading the hourly tier for a sub-hour bucket would pile every interior hour
+ * onto the bucket containing `:00` and leave the rest of the hour reading zero.
  *
  * Exported because it names a distinct SQL *route*: the SQL it selects is
  * structurally unlike every other branch of `tracesTimeseriesQuery`, so the
@@ -359,12 +389,17 @@ const TRACES_TS_COLUMNS: ColumnDefs = {
  * exactly how a `NO_COMMON_TYPE` shipped to prod here.
  */
 export function canUseAnnualServiceOverview(opts: TracesTimeseriesOpts): boolean {
+	const bucketSeconds = opts.bucketSeconds ?? 0
+	const tierIsAvailable =
+		opts.overviewTiers === "hour" ? bucketSeconds % 3600 === 0 : bucketSeconds % 60 === 0
+
 	return (
 		opts.allMetrics === true &&
 		(opts.apdexThresholdMs ?? 500) === 500 &&
 		opts.rootOnly === true &&
-		(opts.bucketSeconds ?? 0) >= 3600 &&
-		(opts.groupBy == null || opts.groupBy.length === 0) &&
+		bucketSeconds >= 60 &&
+		tierIsAvailable &&
+		(opts.groupBy ?? []).every((key) => OVERVIEW_ROLLUP_GROUP_KEYS.has(key)) &&
 		opts.spanName == null &&
 		opts.statusCode == null &&
 		!opts.errorsOnly &&
@@ -377,15 +412,78 @@ export function canUseAnnualServiceOverview(opts: TracesTimeseriesOpts): boolean
 	)
 }
 
+/**
+ * The group-name expression for every tier of the service-overview route.
+ *
+ * Structurally typed on just the two columns it reads, so the raw projection and
+ * both rollups share one implementation — which is the point. The three are
+ * UNION ALL'd, and the emitted expression must be byte-identical across them:
+ * a `LowCardinality(String)` on one branch against a `String` on another is a
+ * `NO_COMMON_TYPE` at query time, not a type error here. One function is the
+ * only way to guarantee that; `buildMvGroupNameExpr` stays separate because it
+ * also handles `status_code`, which the rollups aggregate away.
+ */
+function buildOverviewRollupGroupNameExpr(
+	$: { readonly ServiceName: CH.Expr<string> },
+	groupBy: readonly string[] | undefined,
+): CH.Expr<string> {
+	if (!groupBy?.includes("service")) return CH.lit("all")
+	return CH.coalesce(CH.nullIf(CH.toString_($.ServiceName), ""), CH.lit("all"))
+}
+
 export function tracesTimeseriesQuery(
 	opts: TracesTimeseriesOpts,
 ): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
 	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
 
 	if (canUseAnnualServiceOverview(opts)) {
+		// An hour-multiple bucket can be placed inside the hourly tier; anything
+		// finer must stop at the minute tier (and is bounded by its 90d retention).
+		const includeHourly = (opts.bucketSeconds ?? 0) % 3600 === 0
+		// `"hour"` is the degraded retry for a cluster without migration 0015.
+		const includeMinutely = opts.overviewTiers !== "hour"
+
+		// The raw edge covers the partial buckets of the FINEST tier present, and
+		// nothing more. Widening it to the hour grain while the minute tier is also
+		// reading those minutes makes the two overlap, and every span in the first
+		// and last partial hour gets counted twice — which is not visible in the SQL
+		// and produces a perfectly plausible number.
+		const edgeGrain = includeMinutely ? minuteGrain : hourGrain
+
+		// Shared by both rollup branches — they carry the same dimension columns,
+		// so a filter that diverged between them would skew one tier's slice of
+		// the window against the other's.
+		const rollupWhere = <
+			A extends {
+				OrgId: CH.Expr<string>
+				ServiceName: CH.Expr<string>
+				DeploymentEnv: CH.Expr<string>
+				ServiceNamespace: CH.Expr<string>
+				CommitSha: CH.Expr<string>
+			},
+		>(
+			$: A,
+		) => [
+			$.OrgId.eq(param.string("orgId")),
+			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
+			opts.environments?.length ? CH.inList($.DeploymentEnv, opts.environments) : undefined,
+			opts.namespaces?.length ? CH.inList($.ServiceNamespace, opts.namespaces) : undefined,
+			opts.commitShas?.length ? CH.inList($.CommitSha, opts.commitShas) : undefined,
+			opts.excludedServiceNames?.length
+				? CH.notInList($.ServiceName, opts.excludedServiceNames)
+				: undefined,
+			opts.excludedEnvironments?.length
+				? CH.notInList($.DeploymentEnv, opts.excludedEnvironments)
+				: undefined,
+			opts.excludedNamespaces?.length
+				? CH.notInList($.ServiceNamespace, opts.excludedNamespaces)
+				: undefined,
+		]
+
 		const rawEdges = from(ServiceOverviewSpans)
 			.select(($) => ({
 				bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
+				groupName: buildOverviewRollupGroupNameExpr($, opts.groupBy),
 				bCount: CH.count(),
 				bEstimatedSpanCount: CH.sum($.SampleRate),
 				bErrorCount: CH.countIf($.StatusCode.eq("Error")),
@@ -398,12 +496,13 @@ export function tracesTimeseriesQuery(
 						.and($.Duration.lt(2_000_000_000)),
 				),
 			}))
-			.where(($) => [...serviceOverviewWhereConditions($, opts), edgeCondition("Timestamp")])
-			.groupBy("bucket")
+			.where(($) => [...serviceOverviewWhereConditions($, opts), edgeCondition("Timestamp", edgeGrain)])
+			.groupBy("bucket", "groupName")
 
-		const hourlyInterior = from(ServiceOverviewHourly)
+		const minutelyInterior = from(ServiceOverviewMinutely)
 			.select(($) => ({
-				bucket: CH.toStartOfInterval($.Hour, param.int("bucketSeconds")),
+				bucket: CH.toStartOfInterval($.Minute, param.int("bucketSeconds")),
+				groupName: buildOverviewRollupGroupNameExpr($, opts.groupBy),
 				bCount: CH.sum($.SpanCount),
 				bEstimatedSpanCount: CH.sum($.EstimatedSpanCount),
 				bErrorCount: CH.sum($.ErrorCount),
@@ -415,25 +514,38 @@ export function tracesTimeseriesQuery(
 				bToleratingCount: CH.sum($.ApdexToleratingCount),
 			}))
 			.where(($) => [
-				$.OrgId.eq(param.string("orgId")),
-				...interiorConditions($.Hour),
-				opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
-				opts.environments?.length ? CH.inList($.DeploymentEnv, opts.environments) : undefined,
-				opts.namespaces?.length ? CH.inList($.ServiceNamespace, opts.namespaces) : undefined,
-				opts.commitShas?.length ? CH.inList($.CommitSha, opts.commitShas) : undefined,
-				opts.excludedServiceNames?.length
-					? CH.notInList($.ServiceName, opts.excludedServiceNames)
-					: undefined,
-				opts.excludedEnvironments?.length
-					? CH.notInList($.DeploymentEnv, opts.excludedEnvironments)
-					: undefined,
-				opts.excludedNamespaces?.length
-					? CH.notInList($.ServiceNamespace, opts.excludedNamespaces)
-					: undefined,
+				...rollupWhere($),
+				...interiorConditions($.Minute, minuteGrain),
+				// Only the sub-hour remainder when the hourly tier covers the middle;
+				// the whole interior otherwise.
+				includeHourly ? edgeCondition("Minute", hourGrain) : undefined,
 			])
-			.groupBy("bucket")
+			.groupBy("bucket", "groupName")
 
-		const annual = fromUnion(unionAll(rawEdges, hourlyInterior), "service_metric_windows")
+		const hourlyInterior = from(ServiceOverviewHourly)
+			.select(($) => ({
+				bucket: CH.toStartOfInterval($.Hour, param.int("bucketSeconds")),
+				groupName: buildOverviewRollupGroupNameExpr($, opts.groupBy),
+				bCount: CH.sum($.SpanCount),
+				bEstimatedSpanCount: CH.sum($.EstimatedSpanCount),
+				bErrorCount: CH.sum($.ErrorCount),
+				bDurationSum: CH.sum($.DurationSum),
+				bDurationQuantiles: CH.rawExpr<string>(
+					"quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles)",
+				),
+				bSatisfiedCount: CH.sum($.ApdexSatisfiedCount),
+				bToleratingCount: CH.sum($.ApdexToleratingCount),
+			}))
+			.where(($) => [...rollupWhere($), ...interiorConditions($.Hour)])
+			.groupBy("bucket", "groupName")
+
+		const tiers = !includeMinutely
+			? unionAll(rawEdges, hourlyInterior)
+			: includeHourly
+				? unionAll(rawEdges, minutelyInterior, hourlyInterior)
+				: unionAll(rawEdges, minutelyInterior)
+
+		const annual = fromUnion(tiers, "service_metric_windows")
 			.select(($) => {
 				// `rawTotal` is the stored-row count; it stays the apdex denominator
 				// because the satisfied/tolerating numerators are raw counts too.
@@ -453,7 +565,7 @@ export function tracesTimeseriesQuery(
 				const quantiles = "quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles)"
 				return {
 					bucket: $.bucket,
-					groupName: CH.lit("all"),
+					groupName: $.groupName,
 					count: weightedTotal,
 					spanCount: rawTotal,
 					avgDuration: CH.rawExpr<number>(
@@ -783,7 +895,6 @@ export function tracesListQuery(opts: TracesListOpts) {
 	const limit = opts.limit ?? 25
 	const offset = opts.offset ?? 0
 
-	// Parse requested columns to determine which attribute keys are needed
 	const requestedSpanAttrKeys: string[] = []
 	const requestedResourceAttrKeys: string[] = []
 	let needsFullMaps = !opts.columns

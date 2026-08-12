@@ -1,6 +1,6 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
 import { truncate, formatNumber } from "@/mcp/lib/format"
@@ -8,7 +8,7 @@ import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { searchLogs } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerSearchLogsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -45,7 +45,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 			if (range.exceeded) return rangeExceededResult(range, "search_logs")
 			const lim = clampLimit(limit, { defaultValue: 30, max: 200 })
 			const off = clampOffset(offset, { max: 10_000 })
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				service: service ?? "all",
@@ -64,7 +64,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 				limit: lim,
 				offset: off,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("search_logs")),
 			)
 

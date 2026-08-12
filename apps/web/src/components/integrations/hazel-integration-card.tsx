@@ -8,7 +8,7 @@ import { toastManager } from "@maple/ui/components/ui/toast"
 import { ErrorState } from "@/components/common/error-state"
 import { HazelIcon, LoaderIcon } from "@/components/icons"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
 import { HAZEL_ACCENT, IntegrationIconPlate } from "./integration-catalog"
 import { useIntegrationConnect } from "./integration-connect"
 import {
@@ -22,7 +22,7 @@ import {
 } from "./integration-empty-state"
 
 export function HazelIntegrationCard() {
-	const statusAtom = MapleApiAtomClient.query("integrations", "hazelStatus", {
+	const statusAtom = retainedQuery("integrations", "hazelStatus", {
 		reactivityKeys: ["hazelIntegrationStatus"],
 	})
 	const statusResult = useAtomValue(statusAtom)

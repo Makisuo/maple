@@ -10,6 +10,7 @@ import {
 	orgClickHouseSettings,
 } from "@maple/db"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { eq } from "drizzle-orm"
@@ -379,7 +380,11 @@ const makeLayer = (
 	CloudflareAnalyticsService.layer.pipe(
 		Layer.provideMerge(CloudflareOAuthService.layer),
 		Layer.provideMerge(OrgIngestKeysService.layer),
-		Layer.provideMerge(OrgClickHouseSettingsService.layer),
+		Layer.provideMerge(
+			OrgClickHouseSettingsService.layer.pipe(
+				Layer.provide(EdgeCacheService.layer.pipe(Layer.provide(MemoryCacheBackendLive))),
+			),
+		),
 		Layer.provideMerge(Layer.succeed(WarehouseQueryService, makeWarehouseStub(captured, queryStub))),
 		Layer.provideMerge(testDb.layer),
 		Layer.provideMerge(Env.layer),

@@ -70,6 +70,8 @@ const ScrapeTargetsLive = ScrapeTargetsService.layer.pipe(
 	Layer.provide(Layer.mergeAll(PlanetScaleDiscoveryLive, PlanetScaleOAuthLive)),
 )
 
+const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
+
 const CoreServicesLive = Layer.mergeAll(
 	AuthService.layer,
 	ApiKeysService.layer,
@@ -80,7 +82,7 @@ const CoreServicesLive = Layer.mergeAll(
 	HazelOAuthService.layer,
 	OnboardingService.layer,
 	OrgIngestKeysService.layer,
-	OrgClickHouseSettingsService.layer,
+	OrgClickHouseSettingsService.layer.pipe(Layer.provide(EdgeCacheServiceLive)),
 	TinybirdOrgTokenService.layer,
 	OrganizationService.layer,
 	PlanetScaleOAuthLive,
@@ -105,11 +107,6 @@ const CloudflareAnalyticsServiceLive = CloudflareAnalyticsService.layer.pipe(
 const DemoServiceLive = DemoService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
 )
-
-// EdgeCacheService's storage backend (Workers KV / in-memory) is injected via
-// the CacheBackend port. Define the wired layer once so it memoizes to a single
-// instance shared by the bucket cache and the direct edge cache.
-const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 
 const BucketCacheServiceLive = BucketCacheService.layer.pipe(Layer.provideMerge(EdgeCacheServiceLive))
 
