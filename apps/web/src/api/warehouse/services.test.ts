@@ -10,7 +10,7 @@ const runWarehouseQueryMock = vi.fn()
 vi.mock("@/api/warehouse/effect-utils", () => ({
 	WarehouseDateTimeString: Schema.String,
 	decodeInput: (_schema: unknown, data: unknown) => Effect.succeed(data),
-	invalidWarehouseInput: () => Effect.fail(new Error("invalid")),
+	invalidWarehouseInput: () => Effect.fail("invalid"),
 	extractFacets: () => [],
 	executeQueryEngine: (...args: unknown[]) => executeQueryEngineMock(...args),
 	runWarehouseQuery: (_operation: string, execute: () => unknown) =>
@@ -34,7 +34,6 @@ const overviewRow = {
 	serviceName: "frontend",
 	serviceNamespace: "web",
 	environment: "production",
-	commitSha: "abc1234",
 	throughput: 100,
 	errorCount: 0,
 	estimatedErrorCount: 0,
@@ -43,6 +42,10 @@ const overviewRow = {
 	p95LatencyMs: 2,
 	p99LatencyMs: 3,
 	estimatedSpanCount: 100,
+	firstSeen: "2026-02-01 00:00:00",
+	// ClickHouse serializes `tuple(...)` as a positional array:
+	// [sha, spanCount, errorCount, firstSeen].
+	commits: [["abc1234", 100, 0, "2026-02-01 00:00:00"]],
 }
 
 describe("getServiceOverview throughput resolution", () => {
@@ -207,7 +210,10 @@ describe("getServiceOverview throughput resolution", () => {
 		}),
 	)
 
-	it.effect("collapses namespace variants that route to the same service detail", () =>
+	// Namespace variants are now collapsed by `serviceOverviewQuery` (argMax on
+	// estimated span count) rather than in the browser, so the client receives one
+	// already-merged row. What it still owns is the sampling-corrected error rate.
+	it.effect("prefers the sampling-corrected error rate over the raw ratio", () =>
 		Effect.gen(function* () {
 			runWarehouseQueryMock.mockReturnValue(
 				Effect.succeed({
@@ -216,22 +222,11 @@ describe("getServiceOverview throughput resolution", () => {
 							...overviewRow,
 							serviceName: "dash-api",
 							serviceNamespace: "api",
-							throughput: 19_413,
-							spanCount: 19_413,
-							errorCount: 0,
-							estimatedErrorCount: 0,
-							estimatedSpanCount: 194_118.15196827185,
-						},
-						{
-							...overviewRow,
-							serviceName: "dash-api",
-							serviceNamespace: "",
-							commitSha: "legacy-deploy",
-							throughput: 17,
-							spanCount: 17,
+							throughput: 19_430,
+							spanCount: 19_430,
 							errorCount: 17,
 							estimatedErrorCount: 169.9896246566982,
-							estimatedSpanCount: 169.9896246566982,
+							estimatedSpanCount: 194_288.14159293,
 						},
 					],
 				}),
@@ -244,11 +239,52 @@ describe("getServiceOverview throughput resolution", () => {
 			assert.strictEqual(data.length, 1)
 			assert.strictEqual(data[0].serviceName, "dash-api")
 			assert.strictEqual(data[0].serviceNamespace, "api")
-			assert.ok(data[0].errorRate < 0.001, `errorRate=${data[0].errorRate}`)
+			// Weighted, not raw: 17/19_430 would read ~10x higher.
 			assert.ok(
-				Math.abs(data[0].errorRate - 169.9896246566982 / (194_118.15196827185 + 169.9896246566982)) <
-					1e-12,
+				Math.abs(data[0].errorRate - 169.9896246566982 / 194_288.14159293) < 1e-12,
+				`errorRate=${data[0].errorRate}`,
 			)
+		}),
+	)
+
+	it.effect("decodes the commit tuple array into a percentage breakdown", () =>
+		Effect.gen(function* () {
+			runWarehouseQueryMock.mockReturnValue(
+				Effect.succeed({
+					data: [
+						{
+							...overviewRow,
+							spanCount: 200,
+							commits: [
+								["newsha", 150, 3, "2026-02-01 00:30:00"],
+								// UInt64 counts arrive quoted from a gateway/readonly cluster.
+								["oldsha", "50", "1", "2026-02-01 00:00:00"],
+							],
+						},
+					],
+				}),
+			)
+
+			const { data } = yield* getServiceOverview({
+				data: { startTime: START, endTime: END },
+			})
+
+			assert.deepStrictEqual(data[0].commits, [
+				{
+					commitSha: "newsha",
+					spanCount: 150,
+					percentage: 75,
+					errorCount: 3,
+					firstSeen: "2026-02-01 00:30:00",
+				},
+				{
+					commitSha: "oldsha",
+					spanCount: 50,
+					percentage: 25,
+					errorCount: 1,
+					firstSeen: "2026-02-01 00:00:00",
+				},
+			])
 		}),
 	)
 })

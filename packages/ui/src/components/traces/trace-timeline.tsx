@@ -2,15 +2,24 @@ import * as React from "react"
 import * as ReactDOM from "react-dom"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
-import { ChevronExpandYIcon } from "../icons"
+import { ChevronExpandYIcon, ChevronDownIcon, ChevronRightIcon } from "../icons"
 import { Button } from "../ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
+import { formatDuration } from "../../lib/format"
+import { summarizeClockSkew } from "../../lib/span-tree"
 import { getServiceColor } from "../../lib/colors"
 import { isEditableTarget } from "../../lib/keyboard"
 import { useContainerSize } from "../../hooks/use-container-size"
 import { useTraceView } from "./trace-view-context"
-import { clampViewport, useTraceTimeline } from "./use-trace-timeline"
-import type { ViewportState } from "./trace-timeline-types"
-import { collectAllCollapsibleIds } from "./auto-collapse"
+import { useTraceTimeline } from "./use-trace-timeline"
+import {
+	collectAllCollapsibleIds,
+	collectDescendantParentIds,
+	computeCollapseOneLevel,
+	computeExpandOneLevel,
+} from "./auto-collapse"
+import { useViewportController } from "./use-viewport-controller"
+import { useRowDecorations } from "./use-row-decorations"
 import { useTimelineInteractions } from "./use-timeline-interactions"
 import { TraceTimelineSearch } from "./trace-timeline-search"
 import { TraceTimelineMinimap } from "./trace-timeline-minimap"
@@ -48,8 +57,12 @@ export function TraceTimeline() {
 		colorBy,
 		setColorBy,
 	} = useTraceView()
+	// Surfaced in the toolbar: a correction the user cannot see in the bars themselves
+	// should still be visible as a fact about the trace.
+	const skewSummary = React.useMemo(() => summarizeClockSkew(rootSpans), [rootSpans])
 	const containerRef = React.useRef<HTMLDivElement>(null)
 	const scrollRef = React.useRef<HTMLDivElement>(null)
+	const gridRef = React.useRef<HTMLDivElement>(null)
 	const searchInputRef = React.useRef<HTMLInputElement>(null)
 	const [hoveredSpanId, setHoveredSpanId] = React.useState<string | null>(null)
 	const [sidebarWidth, setSidebarWidth] = React.useState<number>(() => readSidebarWidth())
@@ -78,11 +91,12 @@ export function TraceTimeline() {
 	const {
 		bars,
 		barIndexBySpanId,
+		parentIdsByLevel,
 		state,
 		dispatch,
 		traceStartMs,
 		traceEndMs,
-		timeAxisTicks,
+		defaultViewport,
 		searchMatches,
 		isSearchActive,
 	} = useTraceTimeline({
@@ -93,40 +107,12 @@ export function TraceTimeline() {
 		keepVisibleSpanId: selectedSpanId,
 	})
 
+	// The visible window. Lives in a ref inside the controller and reaches the DOM as CSS custom
+	// properties, so pan and zoom never re-render this component or any row.
+	const controller = useViewportController({ traceStartMs, traceEndMs, initialViewport: defaultViewport })
+
 	const containerSize = useContainerSize(scrollRef)
 	const timelineWidthPx = Math.max(0, containerSize.width - sidebarWidth)
-
-	// DevTools-style viewport tween with Sentry-style eased zoom-to-span.
-	// Direct gestures (wheel, drags) stay instant; keyboard and programmatic zooms animate.
-	const viewportRef = React.useRef(state.viewport)
-	viewportRef.current = state.viewport
-	const viewportAnimRef = React.useRef(0)
-	const cancelViewportAnimation = React.useCallback(() => cancelAnimationFrame(viewportAnimRef.current), [])
-	const animateViewportTo = React.useCallback(
-		(target: ViewportState, durationMs = 160) => {
-			cancelAnimationFrame(viewportAnimRef.current)
-			const clamped = clampViewport(target, traceStartMs, traceEndMs)
-			const from = { ...viewportRef.current }
-			const t0 = performance.now()
-			const step = (now: number) => {
-				const t = Math.min(1, (now - t0) / durationMs)
-				const k = Math.sin((t * Math.PI) / 2) // easeOutSine
-				dispatch({
-					type: "SET_VIEWPORT",
-					viewport: {
-						startMs: from.startMs + (clamped.startMs - from.startMs) * k,
-						endMs: from.endMs + (clamped.endMs - from.endMs) * k,
-					},
-					traceStartMs,
-					traceEndMs,
-				})
-				if (t < 1) viewportAnimRef.current = requestAnimationFrame(step)
-			}
-			viewportAnimRef.current = requestAnimationFrame(step)
-		},
-		[dispatch, traceStartMs, traceEndMs],
-	)
-	React.useEffect(() => () => cancelAnimationFrame(viewportAnimRef.current), [])
 
 	const rowVirtualizer = useVirtualizer({
 		count: bars.length,
@@ -135,15 +121,10 @@ export function TraceTimeline() {
 		overscan: OVERSCAN,
 	})
 
-	const interactions = useTimelineInteractions({
-		bodyRef: scrollRef,
-		sidebarWidth,
-		viewport: state.viewport,
-		traceStartMs,
-		traceEndMs,
-		dispatch,
-		onGestureStart: cancelViewportAnimation,
-	})
+	const interactions = useTimelineInteractions({ bodyRef: scrollRef, sidebarWidth, controller })
+
+	const rowsContainerRef = React.useRef<HTMLDivElement>(null)
+	const repaintRowDecorations = useRowDecorations(controller, rowsContainerRef)
 
 	const handleSelect = React.useCallback(
 		(spanId: string) => {
@@ -158,16 +139,22 @@ export function TraceTimeline() {
 		(spanId: string) => {
 			const idx = barIndexBySpanId.get(spanId)
 			if (idx === undefined) return
-			const bar = bars[idx]
-			const padding = Math.max((bar.endMs - bar.startMs) * 0.1, 0.001)
-			animateViewportTo({ startMs: bar.startMs - padding, endMs: bar.endMs + padding }, 220)
+			controller.zoomToSpan(bars[idx].startMs, bars[idx].endMs)
 		},
-		[bars, barIndexBySpanId, animateViewportTo],
+		[bars, barIndexBySpanId, controller],
 	)
 
 	const handleToggleCollapse = React.useCallback(
-		(spanId: string) => dispatch({ type: "TOGGLE_COLLAPSE", spanId }),
-		[dispatch],
+		(spanId: string, wholeSubtree: boolean) => {
+			const idx = barIndexBySpanId.get(spanId)
+			const node = idx === undefined ? undefined : bars[idx].span
+			dispatch({
+				type: "TOGGLE_COLLAPSE",
+				spanId,
+				descendantIds: wholeSubtree && node ? collectDescendantParentIds(node) : undefined,
+			})
+		},
+		[bars, barIndexBySpanId, dispatch],
 	)
 
 	const isDragging = interactions.isDragging
@@ -193,23 +180,23 @@ export function TraceTimeline() {
 		if (hoveredSpanId) applyTooltipPos()
 	}, [hoveredSpanId, applyTooltipPos])
 
-	const handleMinimapViewportChange = React.useCallback(
-		(viewport: { startMs: number; endMs: number }) =>
-			dispatch({ type: "SET_VIEWPORT", viewport, traceStartMs, traceEndMs }),
-		[dispatch, traceStartMs, traceEndMs],
-	)
-
-	const handleZoomToFit = React.useCallback(() => {
-		const padding = (traceEndMs - traceStartMs) * 0.02
-		animateViewportTo({ startMs: traceStartMs - padding, endMs: traceEndMs + padding }, 220)
-	}, [animateViewportTo, traceStartMs, traceEndMs])
-
 	const handleExpandAll = React.useCallback(
 		() => dispatch({ type: "EXPAND_ALL", spanIds: [...collectAllCollapsibleIds(rootSpans)] }),
 		[dispatch, rootSpans],
 	)
 
 	const handleCollapseAll = React.useCallback(() => dispatch({ type: "COLLAPSE_ALL" }), [dispatch])
+
+	const expandedRef = React.useRef(state.expandedSpanIds)
+	expandedRef.current = state.expandedSpanIds
+	const handleExpandOneLevel = React.useCallback(() => {
+		const next = computeExpandOneLevel(expandedRef.current, parentIdsByLevel)
+		if (next !== expandedRef.current) dispatch({ type: "SET_EXPANDED", spanIds: next })
+	}, [dispatch, parentIdsByLevel])
+	const handleCollapseOneLevel = React.useCallback(() => {
+		const next = computeCollapseOneLevel(expandedRef.current, parentIdsByLevel)
+		if (next !== expandedRef.current) dispatch({ type: "SET_EXPANDED", spanIds: next })
+	}, [dispatch, parentIdsByLevel])
 
 	// Enter/Shift+Enter cycle matches; the focused-row ring marks the current one.
 	const matchRowIndices = React.useMemo(() => {
@@ -256,7 +243,6 @@ export function TraceTimeline() {
 
 	// Kill hover work while scrolling (Sentry pattern): rows ignore the pointer during a
 	// scroll burst and for 150ms after it settles. Imperative — no state, no re-render.
-	const rowsContainerRef = React.useRef<HTMLDivElement>(null)
 	React.useEffect(() => {
 		const el = scrollRef.current
 		if (!el) return
@@ -287,18 +273,18 @@ export function TraceTimeline() {
 			// Cursor-anchored zoom + pan (Perfetto/DevTools WASD cluster). Falls back to the
 			// viewport center when the cursor isn't over the timeline.
 			const zoomAtCursor = (factor: number) => {
-				const vp = viewportRef.current
+				const vp = controller.get()
 				const currentDuration = vp.endMs - vp.startMs
 				const centerMs = interactions.getCursorTimeMs() ?? (vp.startMs + vp.endMs) / 2
 				const newDuration = currentDuration / factor
 				const ratio = (centerMs - vp.startMs) / currentDuration
 				const newStart = centerMs - ratio * newDuration
-				animateViewportTo({ startMs: newStart, endMs: newStart + newDuration }, 120)
+				controller.animateTo({ startMs: newStart, endMs: newStart + newDuration }, 120)
 			}
 			const panBy = (frac: number) => {
-				const vp = viewportRef.current
+				const vp = controller.get()
 				const delta = (vp.endMs - vp.startMs) * frac
-				animateViewportTo({ startMs: vp.startMs + delta, endMs: vp.endMs + delta }, 120)
+				controller.animateTo({ startMs: vp.startMs + delta, endMs: vp.endMs + delta }, 120)
 			}
 
 			// The timeline owns these keys while focused — consume them so app-global
@@ -323,7 +309,7 @@ export function TraceTimeline() {
 					if (state.focusedIndex !== null) {
 						const bar = bars[state.focusedIndex]
 						if (bar?.hasChildren && bar.isCollapsed) {
-							dispatch({ type: "TOGGLE_COLLAPSE", spanId: bar.span.spanId })
+							handleToggleCollapse(bar.span.spanId, e.altKey)
 						}
 					}
 					return
@@ -332,7 +318,7 @@ export function TraceTimeline() {
 					if (state.focusedIndex !== null) {
 						const bar = bars[state.focusedIndex]
 						if (bar?.hasChildren && !bar.isCollapsed) {
-							dispatch({ type: "TOGGLE_COLLAPSE", spanId: bar.span.spanId })
+							handleToggleCollapse(bar.span.spanId, e.altKey)
 						}
 					}
 					return
@@ -364,6 +350,11 @@ export function TraceTimeline() {
 					consume()
 					panBy(e.shiftKey ? 0.4 : 0.15)
 					return
+				case "e":
+					consume()
+					if (e.shiftKey) handleCollapseOneLevel()
+					else handleExpandOneLevel()
+					return
 				case "f": {
 					// Fit the focused/selected span; with neither, fit the whole trace.
 					consume()
@@ -373,12 +364,8 @@ export function TraceTimeline() {
 							: selectedSpanId !== undefined
 								? bars[barIndexBySpanId.get(selectedSpanId) ?? -1]
 								: undefined
-					if (bar) {
-						const padding = Math.max((bar.endMs - bar.startMs) * 0.1, 0.001)
-						animateViewportTo({ startMs: bar.startMs - padding, endMs: bar.endMs + padding }, 220)
-					} else {
-						handleZoomToFit()
-					}
+					if (bar) controller.zoomToSpan(bar.startMs, bar.endMs)
+					else controller.fit()
 					return
 				}
 				case "/":
@@ -412,8 +399,12 @@ export function TraceTimeline() {
 			dispatch,
 			onSelectSpan,
 			interactions,
-			animateViewportTo,
-			handleZoomToFit,
+			controller,
+			handleToggleCollapse,
+			handleExpandOneLevel,
+			handleCollapseOneLevel,
+			traceStartMs,
+			traceEndMs,
 			showShortcuts,
 		],
 	)
@@ -424,6 +415,15 @@ export function TraceTimeline() {
 		return idx === undefined ? null : bars[idx].span
 	}, [bars, barIndexBySpanId, hoveredSpanId])
 
+	const virtualItems = rowVirtualizer.getVirtualItems()
+
+	// Rows that just mounted (a scroll burst, a collapse) carry no clip chevrons or label side
+	// yet — the viewport hasn't moved, so no subscriber fired. Re-run the pass after they paint.
+	const virtualRangeKey = `${virtualItems[0]?.index ?? -1}:${virtualItems.length}:${bars.length}`
+	React.useLayoutEffect(() => {
+		repaintRowDecorations()
+	}, [virtualRangeKey, repaintRowDecorations])
+
 	if (rootSpans.length === 0) {
 		return (
 			<div className="border p-8 text-center">
@@ -432,15 +432,14 @@ export function TraceTimeline() {
 		)
 	}
 
-	const fullDuration = traceEndMs - traceStartMs
-	const visibleDuration = state.viewport.endMs - state.viewport.startMs
-	const isZoomed = visibleDuration < fullDuration * 0.95
-	const virtualItems = rowVirtualizer.getVirtualItems()
-
 	return (
 		<div
 			ref={containerRef}
 			className="border flex flex-col h-full outline-none relative"
+			// One source of truth for the label-column width. The rows, the minimap spacer and the
+			// ruler spacer all read it, so they cannot drift out of alignment, and a resize drag
+			// updates one property instead of re-rendering every row through a prop.
+			style={{ ["--sidebar-w" as string]: `${sidebarWidth}px` }}
 			tabIndex={0}
 			onKeyDown={handleKeyDown}
 		>
@@ -458,8 +457,50 @@ export function TraceTimeline() {
 				<div className="flex items-center gap-2 text-[11px] text-muted-foreground">
 					<span className="font-medium">Timeline</span>
 					<span className="tabular-nums">{bars.length} spans</span>
+					{skewSummary && (
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<span className="cursor-default rounded border border-border px-1.5 py-px tabular-nums">
+										clock skew adjusted
+									</span>
+								}
+							/>
+							{/* Below the trigger: the toolbar sits directly under the tab bar, and a
+							    top-side tooltip would open behind it. */}
+							<TooltipContent side="bottom" className="max-w-xs text-xs">
+								{skewSummary.adjustedCount === 1
+									? "One span was recorded outside its parent"
+									: `${skewSummary.adjustedCount} spans were recorded outside their parents`}{" "}
+								— impossible in real time, so the services' clocks disagree, here by up to{" "}
+								{formatDuration(Math.abs(skewSummary.maxSkewMs))}. Positions are corrected to
+								nest inside the parent; reported start times in the detail panel are
+								untouched.
+							</TooltipContent>
+						</Tooltip>
+					)}
 				</div>
 				<div className="flex items-center gap-1">
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={handleCollapseOneLevel}
+						title="Collapse one level (⇧E)"
+						aria-label="Collapse one level"
+						className="h-5 w-5 p-0"
+					>
+						<ChevronRightIcon size={12} />
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={handleExpandOneLevel}
+						title="Expand one level (E)"
+						aria-label="Expand one level"
+						className="h-5 w-5 p-0"
+					>
+						<ChevronDownIcon size={12} />
+					</Button>
 					<Button
 						variant="ghost"
 						size="sm"
@@ -477,46 +518,37 @@ export function TraceTimeline() {
 						Collapse all
 					</Button>
 					<ColorByPicker value={colorBy} onChange={setColorBy} rootSpans={rootSpans} />
-					{isZoomed && (
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={handleZoomToFit}
-							className="h-5 gap-1 text-[10px] px-2"
-						>
-							<ChevronExpandYIcon size={11} />
-							Fit
-						</Button>
-					)}
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={() => controller.fit()}
+						className="h-5 gap-1 text-[10px] px-2"
+					>
+						<ChevronExpandYIcon size={11} />
+						Fit
+					</Button>
 				</div>
 			</div>
 
 			{/* Minimap, aligned under the timeline column via a sidebar-width spacer. */}
 			<div className="flex shrink-0">
 				<div
-					style={{ width: sidebarWidth }}
+					style={{ width: "var(--sidebar-w)" }}
 					className="shrink-0 border-b border-r border-border bg-muted/10"
 				/>
 				<div className="flex-1 min-w-0">
-					<TraceTimelineMinimap
-						rootSpans={rootSpans}
-						traceStartMs={traceStartMs}
-						traceEndMs={traceEndMs}
-						colorBy={colorBy}
-						viewport={state.viewport}
-						onViewportChange={handleMinimapViewportChange}
-					/>
+					<TraceTimelineMinimap rootSpans={rootSpans} colorBy={colorBy} controller={controller} />
 				</div>
 			</div>
 
 			{/* Time-axis ruler, aligned the same way. */}
 			<div className="flex border-b border-border shrink-0">
-				<div style={{ width: sidebarWidth }} className="shrink-0 border-r border-border" />
-				<div className="flex-1 min-w-0 relative">
+				<div style={{ width: "var(--sidebar-w)" }} className="shrink-0 border-r border-border" />
+				<div className="flex-1 min-w-0 relative bg-background">
 					<TraceTimelineTimeAxis
-						viewport={state.viewport}
-						ticks={timeAxisTicks}
-						traceStartMs={traceStartMs}
+						controller={controller}
+						columnWidthPx={timelineWidthPx}
+						gridRef={gridRef}
 					/>
 				</div>
 			</div>
@@ -544,10 +576,22 @@ export function TraceTimeline() {
 					}}
 				>
 					<div
-						ref={rowsContainerRef}
+						ref={(el) => {
+							rowsContainerRef.current = el
+							// The rows container is a "time surface": the controller writes
+							// --vp0/--vpk here and every bar below derives its rect from them.
+							return controller.bindTimeSurface(el)
+						}}
 						className="relative w-full"
 						style={{ height: rowVirtualizer.getTotalSize() }}
 					>
+						{/* Tick gridlines, painted behind the rows from the ruler's own spacing. */}
+						<div
+							ref={gridRef}
+							aria-hidden
+							className="pointer-events-none absolute inset-y-0 right-0 z-0"
+							style={{ left: "var(--sidebar-w)" }}
+						/>
 						{virtualItems.map((vi) => {
 							const bar = bars[vi.index]
 							if (!bar) return null
@@ -558,9 +602,6 @@ export function TraceTimeline() {
 									key={id}
 									bar={bar}
 									top={vi.start}
-									sidebarWidth={sidebarWidth}
-									timelineWidthPx={timelineWidthPx}
-									viewport={state.viewport}
 									selected={selectedSpanId === id}
 									focused={state.focusedIndex === vi.index}
 									hovered={hoveredSpanId === id}
@@ -669,12 +710,14 @@ export function TraceTimeline() {
 									["W / S", "Zoom in / out at cursor (⇧ faster)"],
 									["A / D", "Pan left / right (⇧ faster)"],
 									["F", "Fit focused span — or whole trace"],
+									["E / ⇧E", "Expand / collapse one level"],
 									["Drag", "Zoom to selection"],
 									["⇧ Drag / middle-drag", "Pan"],
 									["⌘ Scroll", "Zoom at cursor"],
 									["Double-click", "Zoom to span"],
 									["↑ ↓", "Move row focus"],
-									["← →", "Collapse / expand span"],
+									["← →", "Collapse / expand span (⌥ whole subtree)"],
+									["⌥ Click chevron", "Collapse / expand whole subtree"],
 									["Enter / Space", "Select focused span"],
 									["/", "Search · Enter next · ⇧Enter previous"],
 									["Esc", "Clear search / focus · close this"],

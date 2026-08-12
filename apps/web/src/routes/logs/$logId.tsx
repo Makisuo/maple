@@ -1,3 +1,4 @@
+import { warmAtoms } from "@effect-router/core"
 import type { ReactNode } from "react"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -40,7 +41,7 @@ export const Route = createFileRoute("/logs/$logId")({
 	component: LogDetailPage,
 	loader: ({ context, params }) => {
 		const key = decodeLogKey(params.logId)
-		if (key) context.effectRegistry.mount(getLogResultAtom({ data: keyToInput(key) }))
+		if (key) warmAtoms(context.effectRegistry, [getLogResultAtom({ data: keyToInput(key) })])
 	},
 })
 

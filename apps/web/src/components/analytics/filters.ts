@@ -111,12 +111,3 @@ export const activeFilterChips = (filters: AnalyticsFilters): ReadonlyArray<Acti
  */
 export const toggleFilterValue = (current: string | undefined, value: string): string | undefined =>
 	current === value ? undefined : value
-
-/**
- * `ReferrerHost` and friends are `''` for sessions that never populated them,
- * and those rows are dropped server-side rather than shown as a blank label. A
- * dimension nobody sends therefore arrives as an empty list — which is the
- * signal the panels use to say "not collected" instead of "zero".
- */
-export const DIRECT_REFERRER_NOTE =
-	"Sessions with no referrer are excluded rather than bucketed as direct — an empty referrer also covers internal navigation and Referrer-Policy suppression."

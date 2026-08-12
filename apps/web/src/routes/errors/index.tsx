@@ -1,7 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { warmAtoms } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { BooleanFromStringParam, OptionalStringArrayParam } from "@/lib/search-params"
+import { resolveEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import {
+	getErrorsByTypeResultAtom,
+	getErrorsSummaryResultAtom,
+} from "@/lib/services/atoms/warehouse-query-atoms"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ErrorsSummaryCards } from "@/components/errors/errors-summary-cards"
 import { ErrorsByTypeTable } from "@/components/errors/errors-by-type-table"
@@ -22,9 +28,43 @@ const errorsSearchSchema = Schema.Struct({
 
 export type ErrorsSearchParams = Schema.Schema.Type<typeof errorsSearchSchema>
 
+/**
+ * Filters shared by the loader and the page, so the atoms warmed on hover are
+ * the exact ones `ErrorsSummaryCards` and `ErrorsByTypeTable` go on to read.
+ * A mismatch here does not fail loudly — it just fetches everything twice.
+ */
+function errorsApiFilters(
+	search: ErrorsSearchParams,
+	range: { startTime: string; endTime: string },
+) {
+	return {
+		startTime: range.startTime,
+		endTime: range.endTime,
+		services: search.services,
+		deploymentEnvs: search.deploymentEnvs,
+		errorTypes: search.errorTypes,
+		showSpam: search.showSpam,
+		rootOnly: search.rootOnly !== false,
+	}
+}
+
 export const Route = createFileRoute("/errors/")({
 	component: ErrorsPage,
 	validateSearch: Schema.toStandardSchemaV1(errorsSearchSchema),
+	loaderDeps: ({ search }) => search,
+	loader: ({ context, deps }) => {
+		// The loader has no refresh context, so it resolves the range directly.
+		// The component goes through `useEffectiveTimeRange`, which additionally
+		// re-resolves against the real clock once the user hits Reload.
+		const filters = errorsApiFilters(
+			deps,
+			resolveEffectiveTimeRange(deps.startTime, deps.endTime, deps.timePreset ?? "12h"),
+		)
+		warmAtoms(context.effectRegistry, [
+			getErrorsSummaryResultAtom({ data: filters }),
+			getErrorsByTypeResultAtom({ data: filters }),
+		])
+	},
 })
 
 function ErrorsPage() {
@@ -39,12 +79,11 @@ function ErrorsPage() {
 function ErrorsContent() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
-	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
+	const effectiveRange = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
 		search.timePreset ?? "12h",
 	)
-
 	const handleTimeChange = (
 		range: {
 			startTime?: string
@@ -59,15 +98,9 @@ function ErrorsContent() {
 		})
 	}
 
-	const apiFilters = {
-		startTime: effectiveStartTime,
-		endTime: effectiveEndTime,
-		services: search.services,
-		deploymentEnvs: search.deploymentEnvs,
-		errorTypes: search.errorTypes,
-		showSpam: search.showSpam,
-		rootOnly: search.rootOnly !== false,
-	}
+	// Same builder the loader uses, so hover-warmed atoms and mounted atoms are
+	// the same entries.
+	const apiFilters = errorsApiFilters(search, effectiveRange)
 
 	return (
 		<DashboardLayout.Root>

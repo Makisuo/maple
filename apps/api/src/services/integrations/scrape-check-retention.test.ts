@@ -1,8 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
+import { ScrapeTargetId } from "@maple/domain"
+import { Schema } from "effect"
 import { canExceedRowCap, type RetentionTarget } from "@/services/integrations/scrape-check-retention"
 
+const targetId = Schema.decodeSync(ScrapeTargetId)("11111111-1111-4111-8111-111111111111")
+
 const target = (overrides: Partial<RetentionTarget> = {}): RetentionTarget => ({
-	id: "tgt_1",
+	id: targetId,
 	targetType: "prometheus",
 	scrapeIntervalSeconds: 15,
 	...overrides,

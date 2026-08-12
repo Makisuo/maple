@@ -92,6 +92,8 @@ export const isErrorTickClaimLost = (error: { readonly message: string }): boole
  * worker stalled long enough for the crash-recovery TTL to elapse and another
  * invocation took over, so the window must roll back rather than double-apply.
  */
+// Database.execute rewraps transaction throws, so the marker-bearing native message is the intentional boundary.
+// oxlint-disable-next-line effecttsgo/extends-native-error
 export class ErrorTickClaimLost extends Error {
 	readonly _tag = "ErrorTickClaimLost"
 	constructor(
@@ -102,8 +104,6 @@ export class ErrorTickClaimLost extends Error {
 		this.name = "ErrorTickClaimLost"
 	}
 }
-
-type TickTransaction = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0]
 
 /**
  * The scan groups by fingerprint, so duplicates are not expected — but a

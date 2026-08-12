@@ -9,7 +9,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { useMediaQuery } from "@maple/ui/hooks/use-media-query"
 import { LIST_LIMIT_MAX } from "@maple/domain/http/v2"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { useDashboardMutationSync } from "@/hooks/use-dashboard-store"
 import { formatBackendError } from "@/lib/error-messages"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -61,7 +61,7 @@ function TemplatesPage() {
 	// so an unbounded request silently drops the tail of the array.
 	const listAtom = useMemo(
 		() =>
-			MapleApiV2AtomClient.query("dashboards", "listTemplates", {
+			retainedQueryV2("dashboards", "listTemplates", {
 				query: { limit: LIST_LIMIT_MAX },
 				reactivityKeys: ["dashboard-templates"],
 			}),

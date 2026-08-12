@@ -58,6 +58,8 @@ if (checkpointProbeDataDir !== undefined) {
 		process.exitCode = 1
 	}
 } else {
+	/* oxlint-disable effecttsgo/multiple-effect-provide */
+	/* oxlint-disable effecttsgo/strict-effect-provide */
 	maybeNotifyUpdate.pipe(
 		Effect.flatMap(() =>
 			Command.run(cli, { version: MAPLE_VERSION }).pipe(
@@ -78,4 +80,6 @@ if (checkpointProbeDataDir !== undefined) {
 		Effect.provide(TelemetryLayer),
 		BunRuntime.runMain,
 	)
+	/* oxlint-enable effecttsgo/strict-effect-provide */
+	/* oxlint-enable effecttsgo/multiple-effect-provide */
 }

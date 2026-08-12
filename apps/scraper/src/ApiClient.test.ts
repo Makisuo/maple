@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Redacted } from "effect"
+import { Effect, Layer, Redacted, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
+import { ScrapeTargetId } from "@maple/domain/http"
 import { ApiClient } from "./ApiClient"
 import { ScraperEnv, type ScraperEnvShape } from "./Env"
 
@@ -16,6 +17,8 @@ const testEnv: ScraperEnvShape = {
 const TestLayer = ApiClient.layer.pipe(
 	Layer.provide(Layer.mergeAll(FetchHttpClient.layer, Layer.succeed(ScraperEnv, testEnv))),
 )
+
+const TARGET_ID = Schema.decodeSync(ScrapeTargetId)("11111111-1111-4111-8111-111111111111")
 
 interface RecordedRequest {
 	url: string
@@ -114,7 +117,7 @@ describe("ApiClient", () => {
 		Effect.gen(function* () {
 			const recorded: Array<RecordedRequest> = []
 			const client = yield* ApiClient
-			const response = yield* client.scrapeTarget("target-1").pipe(
+			const response = yield* client.scrapeTarget(TARGET_ID).pipe(
 				Effect.provideService(
 					FetchHttpClient.Fetch,
 					stubFetch(recorded, () => new Response("# TYPE up gauge\nup 1", { status: 200 })),
@@ -123,7 +126,7 @@ describe("ApiClient", () => {
 
 			assert.strictEqual(
 				recorded[0]?.url,
-				"http://api.test/api/internal/prometheus-scrape?targetId=target-1",
+				`http://api.test/api/internal/prometheus-scrape?targetId=${TARGET_ID}`,
 			)
 			assert.strictEqual(recorded[0]?.headers.authorization, "Bearer internal-token")
 			assert.strictEqual(response.status, 200)
@@ -135,7 +138,7 @@ describe("ApiClient", () => {
 		Effect.gen(function* () {
 			const recorded: Array<RecordedRequest> = []
 			const client = yield* ApiClient
-			yield* client.scrapeTarget("target-1", "branch a/1").pipe(
+			yield* client.scrapeTarget(TARGET_ID, "branch a/1").pipe(
 				Effect.provideService(
 					FetchHttpClient.Fetch,
 					stubFetch(recorded, () => new Response("up 1", { status: 200 })),
@@ -144,7 +147,7 @@ describe("ApiClient", () => {
 
 			assert.strictEqual(
 				recorded[0]?.url,
-				"http://api.test/api/internal/prometheus-scrape?targetId=target-1&sub=branch%20a%2F1",
+				`http://api.test/api/internal/prometheus-scrape?targetId=${TARGET_ID}&sub=branch%20a%2F1`,
 			)
 		}).pipe(Effect.provide(TestLayer)),
 	)

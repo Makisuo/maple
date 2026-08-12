@@ -6,7 +6,7 @@ import {
 	type McpToolResult,
 } from "./types"
 import { Effect, Schema } from "effect"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { autoBucketSeconds, runRawSql } from "@/mcp/lib/run-raw-sql"
 import { createDualContent } from "@/mcp/lib/structured-output"
@@ -53,7 +53,7 @@ export function registerRunSqlTool(server: McpToolRegistrar) {
 		runSqlDescription,
 		runSqlSchema,
 		Effect.fn("McpTool.runSql")(function* (params) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const { st, et } = resolveTimeRange(params.start_time, params.end_time)
 			const granularitySeconds = params.granularity_seconds ?? autoBucketSeconds(st, et)
 

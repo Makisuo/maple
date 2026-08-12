@@ -17,7 +17,7 @@ import {
 } from "./session-lifecycle"
 import { getObservedTraceIds, publishSessionSink } from "./sink"
 
-export { setActiveTraceIdProvider } from "./replay/events"
+export { setActiveTraceIdProvider } from "./events-sink"
 
 export interface ReplaySessionOptions extends SessionLifecycleOptions {
 	readonly endpoint: string

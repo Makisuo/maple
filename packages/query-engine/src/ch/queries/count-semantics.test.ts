@@ -75,14 +75,29 @@ const TIMESERIES_ROUTES: ReadonlyArray<{
 		opts: { metric: "count", needsSampling: false, groupBy: ["service"], bucketSeconds: 3600 },
 	},
 	{
-		name: "annual service_overview_hourly union",
-		table: "service_overview_hourly+service_overview_spans",
+		// All three tiers: raw partial-minute edges, the minutely rollup for the
+		// sub-hour remainder, and the hourly rollup for the whole-hour interior.
+		name: "annual service overview union",
+		table: "service_overview_hourly+service_overview_minutely+service_overview_spans",
 		opts: {
 			metric: "count",
 			needsSampling: true,
 			allMetrics: true,
 			rootOnly: true,
 			bucketSeconds: 3600,
+		},
+	},
+	{
+		// Sub-hour bucket: the hourly tier is dropped, because an hour-floored row
+		// has no position inside the hour. Weighting must survive that too.
+		name: "annual service overview union (sub-hour bucket)",
+		table: "service_overview_minutely+service_overview_spans",
+		opts: {
+			metric: "count",
+			needsSampling: true,
+			allMetrics: true,
+			rootOnly: true,
+			bucketSeconds: 300,
 		},
 	},
 ]

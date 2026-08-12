@@ -45,6 +45,8 @@ export async function exec(config: ClickHouseConfig, sql: string): Promise<strin
 	return body
 }
 
+// This dependency-free Promise client throws across its CLI boundary; it never enters an Effect error channel.
+// oxlint-disable-next-line effecttsgo/extends-native-error
 export class ClickHouseError extends Error {
 	readonly status: number
 	readonly body: string

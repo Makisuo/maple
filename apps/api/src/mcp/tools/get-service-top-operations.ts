@@ -5,7 +5,7 @@ import {
 	validationError,
 	type McpToolRegistrar,
 } from "./types"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatTable } from "@/mcp/lib/format"
@@ -16,7 +16,7 @@ import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { Effect, Option, Schema } from "effect"
 import { topOperations } from "@maple/query-engine/observability"
 import { TracesMetric } from "@maple/query-engine"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 const decodeTracesMetric = Schema.decodeUnknownOption(TracesMetric)
 
@@ -52,7 +52,7 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 			}
 			const resolvedMetric = metricOption.value
 			const resolvedLimit = clampLimit(limit, { defaultValue: 20, max: 500 })
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				service: service_name,
@@ -66,7 +66,7 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 				timeRange: { startTime: st, endTime: et },
 				limit: resolvedLimit,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("top_operations")),
 			)
 

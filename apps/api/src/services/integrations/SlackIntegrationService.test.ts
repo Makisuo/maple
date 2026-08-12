@@ -3,7 +3,7 @@ import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Fiber, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
-import { OrgId, UserId } from "@maple/domain/http"
+import { ApiKeyPersistenceError, OrgId, UserId } from "@maple/domain/http"
 import { Env } from "@/platform/Env"
 import { SLACK_BOT_SCOPES, SlackIntegrationService } from "./SlackIntegrationService"
 import {
@@ -122,6 +122,17 @@ const apiKeysWithInjectedCreate = (inject: () => Promise<void>) =>
 			return { ...real, create } as typeof real
 		}),
 	).pipe(Layer.provide(ApiKeysService.layer)) as typeof ApiKeysService.layer
+
+/** Simulate a transient API-key store failure at the re-auth reuse check. */
+const apiKeysWithFailingGet = Layer.effect(
+	ApiKeysService,
+	Effect.gen(function* () {
+		const real = yield* ApiKeysService
+		const get: typeof real.get = () =>
+			Effect.fail(new ApiKeyPersistenceError({ message: "simulated API-key lookup failure" }))
+		return { ...real, get } as typeof real
+	}),
+).pipe(Layer.provide(ApiKeysService.layer)) as typeof ApiKeysService.layer
 
 /** The pure dispatch helper needs only Database — build a minimal layer for it. */
 const databaseLayer = (testDb: TestDb) => testDb.layer
@@ -873,6 +884,124 @@ describe("SlackIntegrationService", () => {
 			)
 		},
 	)
+
+	it.effect("completeInstall does not rotate the API key when the reuse lookup fails", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const slack = yield* SlackIntegrationService
+
+			const firstStart = yield* slack.startInstall(
+				asOrgId("org_re_lookup"),
+				asUserId("user_re_lookup"),
+				"https://cb",
+			)
+			yield* slack.completeInstall("code_1", stateFromInstallUrl(firstStart.url))
+			const before = yield* Effect.promise(() =>
+				queryFirstRow<{ api_key_id: string; scope: string }>(
+					testDb,
+					"SELECT api_key_id, scope FROM slack_workspaces WHERE team_id = 'T-RE-LOOKUP'",
+				),
+			)
+
+			const secondStart = yield* slack.startInstall(
+				asOrgId("org_re_lookup"),
+				asUserId("user_re_lookup"),
+				"https://cb",
+			)
+			const error = yield* slack
+				.completeInstall("code_2", stateFromInstallUrl(secondStart.url))
+				.pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsPersistenceError")
+
+			const after = yield* Effect.promise(() =>
+				queryFirstRow<{ api_key_id: string; scope: string }>(
+					testDb,
+					"SELECT api_key_id, scope FROM slack_workspaces WHERE team_id = 'T-RE-LOOKUP'",
+				),
+			)
+			const keyCount = yield* Effect.promise(() =>
+				queryFirstRow<{ count: number }>(
+					testDb,
+					"SELECT count(*)::int AS count FROM api_keys WHERE org_id = 'org_re_lookup'",
+				),
+			)
+			assert.deepStrictEqual(after, before)
+			assert.strictEqual(keyCount?.count, 1)
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(OAUTH_URL, (_url, call) =>
+						jsonResponse({
+							ok: true,
+							access_token: "xoxb-T-RE-LOOKUP",
+							token_type: "bot",
+							scope: call === 0 ? "chat:write" : "chat:write,reactions:write",
+							bot_user_id: "U0BOT",
+							team: { id: "T-RE-LOOKUP", name: "ReAuth Lookup" },
+						}),
+					),
+					apiKeysWithFailingGet,
+				),
+			),
+		)
+	})
+
+	it.effect("completeInstall replaces an active binding's missing API key", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const slack = yield* SlackIntegrationService
+
+			const firstStart = yield* slack.startInstall(
+				asOrgId("org_re_missing"),
+				asUserId("user_re_missing"),
+				"https://cb",
+			)
+			yield* slack.completeInstall("code_1", stateFromInstallUrl(firstStart.url))
+			const firstRow = yield* Effect.promise(() =>
+				queryFirstRow<{ api_key_id: string }>(
+					testDb,
+					"SELECT api_key_id FROM slack_workspaces WHERE team_id = 'T-RE-MISSING'",
+				),
+			)
+			yield* Effect.promise(() =>
+				executeSql(testDb, "DELETE FROM api_keys WHERE id = $1", [firstRow!.api_key_id]),
+			)
+
+			const secondStart = yield* slack.startInstall(
+				asOrgId("org_re_missing"),
+				asUserId("user_re_missing"),
+				"https://cb",
+			)
+			const second = yield* slack.completeInstall("code_2", stateFromInstallUrl(secondStart.url))
+			assert.strictEqual(second.updated, true)
+
+			const secondRow = yield* Effect.promise(() =>
+				queryFirstRow<{ api_key_id: string; scope: string }>(
+					testDb,
+					"SELECT api_key_id, scope FROM slack_workspaces WHERE team_id = 'T-RE-MISSING'",
+				),
+			)
+			assert.notStrictEqual(secondRow?.api_key_id, firstRow?.api_key_id)
+			assert.strictEqual(secondRow?.scope, "chat:write,reactions:write")
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(OAUTH_URL, (_url, call) =>
+						jsonResponse({
+							ok: true,
+							access_token: "xoxb-T-RE-MISSING",
+							token_type: "bot",
+							scope: call === 0 ? "chat:write" : "chat:write,reactions:write",
+							bot_user_id: "U0BOT",
+							team: { id: "T-RE-MISSING", name: "ReAuth Missing" },
+						}),
+					),
+				),
+			),
+		)
+	})
 
 	it.effect("completeInstall after an uninstall mints a fresh API key (no reuse of a revoked key)", () => {
 		const testDb = createTestDb(trackedDbs)

@@ -4,6 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "portless",
+		"sync:i18n": "astro sync",
 		"sync:cli": "mkdir -p public/cli && cp ../../scripts/install.sh public/cli/install && cp ../../scripts/uninstall.sh public/cli/uninstall",
 		"dev:app": "bun run sync:cli && astro dev --port ${PORT:-3391} --host ${HOST:-127.0.0.1}",
 		"build": "bun run sync:cli && astro build",

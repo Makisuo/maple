@@ -476,7 +476,7 @@ const normalizeTaggedError = (value: { _tag: string; [key: string]: unknown }): 
 			technicalMessage: rawStringField(value, "causeMessage") ?? technicalMessage,
 		})
 	}
-	if (tag.endsWith("/UnauthorizedError") || /AuthenticationError$/.test(tag)) {
+	if (tag.endsWith("/UnauthorizedError") || tag.endsWith('AuthenticationError')) {
 		return normalized(value, {
 			category: "authentication",
 			title: "Sign in required",
@@ -503,7 +503,7 @@ const normalizeTaggedError = (value: { _tag: string; [key: string]: unknown }): 
 			technicalMessage,
 		})
 	}
-	if (/NotFoundError$/.test(tag)) {
+	if (tag.endsWith('NotFoundError')) {
 		return normalized(value, {
 			category: "not-found",
 			title: "Not found",

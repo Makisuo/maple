@@ -58,6 +58,7 @@ export {
 export {
 	toStartOfInterval,
 	toStartOfHour,
+	toStartOfMinute,
 	toHour,
 	toUnixTimestamp,
 	toUnixTimestamp64Nano,

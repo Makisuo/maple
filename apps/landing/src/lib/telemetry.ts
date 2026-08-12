@@ -36,7 +36,7 @@ const COOKIE_DOMAIN = import.meta.env.PUBLIC_MAPLE_COOKIE_DOMAIN
  * below are strings in markup that no compiler ever sees. The type is derived
  * from it so the two cannot drift.
  */
-export const LANDING_EVENTS = [
+const LANDING_EVENTS = [
 	"cta_click",
 	"pricing_plan_selected",
 	"pricing_calculator_changed",

@@ -294,11 +294,23 @@ export interface TracesDurationStatsParams {
 
 // service_overview
 
+/**
+ * One commit's slice of a (service, environment) row: `[sha, spanCount,
+ * errorCount, firstSeen]`. A positional tuple because that is how ClickHouse
+ * serializes `tuple(...)` in `FORMAT JSON` — a nested array, not an object.
+ */
+export type ServiceCommitTuple = readonly [
+	commitSha: string,
+	spanCount: number,
+	errorCount: number,
+	firstSeen: string,
+]
+
 export interface ServiceOverviewOutput {
 	readonly serviceName: string
+	/** The dominant namespace; the metrics beside it cover every namespace variant. */
 	readonly serviceNamespace: string
 	readonly environment: string
-	readonly commitSha: string
 	readonly throughput: number
 	readonly errorCount: number
 	readonly estimatedErrorCount: number
@@ -307,6 +319,14 @@ export interface ServiceOverviewOutput {
 	readonly p95LatencyMs: number
 	readonly p99LatencyMs: number
 	readonly estimatedSpanCount: number
+	readonly firstSeen: string
+	/**
+	 * Per-commit breakdown, sorted by span count descending and capped. Replaces
+	 * the former one-row-per-commit shape: rows are now collapsed to the
+	 * (service, environment) grain the UI renders, with quantiles merged in
+	 * ClickHouse rather than averaged in the client.
+	 */
+	readonly commits: readonly ServiceCommitTuple[]
 }
 
 export interface ServiceOverviewParams {

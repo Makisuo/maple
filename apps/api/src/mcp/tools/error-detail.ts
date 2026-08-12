@@ -5,7 +5,7 @@ import {
 	requiredStringParam,
 	type McpToolRegistrar,
 } from "./types"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { formatDurationFromMs, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -13,7 +13,7 @@ import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { errorDetail } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerErrorDetailTool(server: McpToolRegistrar) {
 	server.tool(
@@ -40,7 +40,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
 			limit,
 		}) {
 			const { st, et } = resolveTimeRange(start_time, end_time)
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 
 			const result = yield* errorDetail({
 				fingerprintHash: fingerprint,
@@ -49,7 +49,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
 				includeTimeseries: include_timeseries ?? false,
 				limit: limit ?? 5,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("error_detail_traces")),
 			)
 

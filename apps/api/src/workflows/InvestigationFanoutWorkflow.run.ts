@@ -606,7 +606,14 @@ async function runWithDb(
 	const idTyped = decodeInvestigationId(investigationId)
 
 	const dbStep = <T>(fn: (db: MaplePgClient) => Promise<T>): Promise<T> =>
-		Effect.runPromise(connection.run(fn).pipe(Effect.provide(fanoutTelemetry.layer)))
+		Effect.runPromise(
+			connection.run(fn).pipe(
+				// Each durable workflow step crosses back into Effect from Promise-land
+				// and owns the telemetry context for that isolated run.
+				// oxlint-disable-next-line effecttsgo/strict-effect-provide
+				Effect.provide(fanoutTelemetry.layer),
+			),
+		)
 
 	const laneRows = () =>
 		dbStep((db) =>

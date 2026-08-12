@@ -58,11 +58,3 @@ export const getInvestigationCollections = (
 	}
 	return current
 }
-
-/** Drops the cached pair without waiting for a navigation. Exported for tests. */
-export const resetInvestigationCollections = (): void => {
-	if (!current) return
-	cleanupCollectionWhenIdle(current.investigation)
-	cleanupCollectionWhenIdle(current.lensRuns)
-	current = null
-}

@@ -52,11 +52,17 @@ const wireDashboard = {
 	updated_at: "2026-07-01T12:00:00.000Z",
 }
 
-const runWithProvider = <A, E, R>(api: MapleApiShape, program: Effect.Effect<A, E, R>) =>
-	program.pipe(
-		Effect.provide(DashboardProvider().pipe(Layer.provide(Layer.succeed(MapleApi, api)))),
-		Effect.provide(ApiKeyProvider().pipe(Layer.provide(Layer.succeed(MapleApi, api)))),
+const runWithProvider = <A, E, R>(api: MapleApiShape, program: Effect.Effect<A, E, R>) => {
+	const apiLayer = Layer.succeed(MapleApi, api)
+	return program.pipe(
+		Effect.provide(
+			Layer.mergeAll(
+				DashboardProvider().pipe(Layer.provide(apiLayer)),
+				ApiKeyProvider().pipe(Layer.provide(apiLayer)),
+			),
+		),
 	)
+}
 
 describe("DashboardProvider", () => {
 	it.live("creates when there is no prior state", () =>

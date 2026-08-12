@@ -42,7 +42,7 @@ export function TraceViewTabs({
 			colorBy={colorBy}
 			setColorBy={setColorBy}
 		>
-			<Tabs defaultValue="waterfall" className="flex flex-col h-full">
+			<Tabs defaultValue="timeline" className="flex flex-col h-full">
 				<TabsList variant="underline" className="shrink-0">
 					<TabsTrigger value="waterfall">
 						<MenuIcon size={14} />

@@ -35,6 +35,7 @@ import {
 	Schema,
 } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { CH } from "@maple/query-engine"
 import * as Integrations from "@maple/query-engine-integrations"
@@ -235,6 +236,7 @@ interface ClickHouseShape {
 export class ClickHouse extends Context.Service<ClickHouse, ClickHouseShape>()("bench/ClickHouse", {
 	make: Effect.gen(function* () {
 		const { clickhouse } = yield* BenchConfig
+		const httpClient = yield* HttpClient.HttpClient
 
 		const requireConfig = Option.match(clickhouse, {
 			onNone: () =>
@@ -265,23 +267,22 @@ export class ClickHouse extends Context.Service<ClickHouse, ClickHouseShape>()("
 			url.searchParams.set("wait_end_of_query", "1")
 
 			const start = performance.now()
-			const response = yield* Effect.tryPromise({
-				try: (signal) =>
-					fetch(url, {
-						method: "POST",
-						headers: {
-							Authorization: authHeader(cfg),
-							"Content-Type": "text/plain; charset=utf-8",
-						},
-						body: sql,
-						signal,
-					}),
-				catch: (cause) => new HttpRequestError({ url: cfg.url, message: String(cause) }),
-			})
-			const body = yield* Effect.tryPromise({
-				try: () => response.text(),
-				catch: (cause) => new HttpRequestError({ url: cfg.url, message: String(cause) }),
-			})
+			const request = HttpClientRequest.post(url, {
+				headers: {
+					Authorization: authHeader(cfg),
+					"Content-Type": "text/plain; charset=utf-8",
+				},
+			}).pipe(HttpClientRequest.bodyText(sql))
+			const response = yield* httpClient
+				.execute(request)
+				.pipe(
+					Effect.mapError(
+						(cause) => new HttpRequestError({ url: cfg.url, message: String(cause) }),
+					),
+				)
+			const body = yield* response.text.pipe(
+				Effect.mapError((cause) => new HttpRequestError({ url: cfg.url, message: String(cause) })),
+			)
 			const wallMs = performance.now() - start
 
 			return {
@@ -347,6 +348,7 @@ interface TinybirdShape {
 export class Tinybird extends Context.Service<Tinybird, TinybirdShape>()("bench/Tinybird", {
 	make: Effect.gen(function* () {
 		const { tinybird } = yield* BenchConfig
+		const httpClient = yield* HttpClient.HttpClient
 
 		const requireConfig = Option.match(tinybird, {
 			onNone: () =>
@@ -364,14 +366,19 @@ export class Tinybird extends Context.Service<Tinybird, TinybirdShape>()("bench/
 		const query = Effect.fn("Tinybird.query")(function* (sql: string) {
 			const cfg = yield* requireConfig
 			const url = `${cfg.host}/v0/sql?q=${encodeURIComponent(sql)}`
-			const response = yield* Effect.tryPromise({
-				try: (signal) => fetch(url, { headers: { Authorization: `Bearer ${cfg.token}` }, signal }),
-				catch: (cause) => new HttpRequestError({ url: cfg.host, message: String(cause) }),
+			const request = HttpClientRequest.get(url, {
+				headers: { Authorization: `Bearer ${cfg.token}` },
 			})
-			const text = yield* Effect.tryPromise({
-				try: () => response.text(),
-				catch: (cause) => new HttpRequestError({ url: cfg.host, message: String(cause) }),
-			})
+			const response = yield* httpClient
+				.execute(request)
+				.pipe(
+					Effect.mapError(
+						(cause) => new HttpRequestError({ url: cfg.host, message: String(cause) }),
+					),
+				)
+			const text = yield* response.text.pipe(
+				Effect.mapError((cause) => new HttpRequestError({ url: cfg.host, message: String(cause) })),
+			)
 			if (!response.ok) {
 				return yield* Effect.fail(
 					new UpstreamStatusError({
@@ -956,10 +963,14 @@ const rootCommand = Command.make("bench-queries").pipe(
 	Command.withSubcommands([fetchCommand, runCommand, inspectCommand, compareCommand]),
 )
 
-const BenchLive = Layer.mergeAll(ClickHouse.layer, Tinybird.layer)
+const BenchServicesLive = Layer.mergeAll(ClickHouse.layer, Tinybird.layer).pipe(
+	Layer.provide(FetchHttpClient.layer),
+)
+const BenchLive = Layer.mergeAll(BenchServicesLive, BunServices.layer)
 
 Command.run(rootCommand, { version: "0.1.0" }).pipe(
+	// Application root: this is the one runtime boundary that owns the complete layer graph.
+	// oxlint-disable-next-line effecttsgo/strict-effect-provide
 	Effect.provide(BenchLive),
-	Effect.provide(BunServices.layer),
 	BunRuntime.runMain,
 )

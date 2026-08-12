@@ -12,30 +12,14 @@ import { Switch } from "@maple/ui/components/ui/switch"
 import { getListPerformanceHints } from "@/lib/query-builder/performance-hints"
 import { GripDotsIcon } from "@/components/icons"
 
-type ListDataSource = "traces" | "logs"
-
-interface ListColumnDraft {
-	field: string
-	header: string
-	unit?: ValueUnit
-	align?: "left" | "center" | "right"
-}
+import {
+	LOG_DEFAULT_COLUMNS,
+	TRACE_DEFAULT_COLUMNS,
+	type ListColumnDraft,
+	type ListDataSource,
+} from "@/lib/query-builder/list-widget-config"
 
 // Props interface removed — ListConfigPanel now reads from context
-
-const TRACE_DEFAULT_COLUMNS: ListColumnDraft[] = [
-	{ field: "serviceName", header: "Service" },
-	{ field: "spanName", header: "Span" },
-	{ field: "durationMs", header: "Duration", unit: "duration_ms", align: "right" },
-	{ field: "statusCode", header: "Status" },
-]
-
-const LOG_DEFAULT_COLUMNS: ListColumnDraft[] = [
-	{ field: "timestamp", header: "Time" },
-	{ field: "severityText", header: "Severity" },
-	{ field: "serviceName", header: "Service" },
-	{ field: "body", header: "Message" },
-]
 
 // These are the fields returned by the query engine's list query
 // (raw traces table, not the materialized view)
@@ -63,9 +47,6 @@ const UNIT_OPTIONS: Array<{ value: string; label: string }> = [
 	{ value: "bytes", label: "Bytes" },
 	{ value: "requests_per_sec", label: "Req/s" },
 ]
-
-export { TRACE_DEFAULT_COLUMNS, LOG_DEFAULT_COLUMNS }
-export type { ListColumnDraft, ListDataSource }
 
 function DraggableColumnRow({
 	id,
@@ -253,7 +234,7 @@ export function ListConfigPanel() {
 	const resourcePrefix = "resourceAttributes."
 
 	const dynamicAttributeKeys = useMemo(() => {
-		const vals = autocompleteValues[listDataSource]
+		const vals = listDataSource === "traces" ? autocompleteValues.traces : autocompleteValues.logs
 		const keys: string[] = []
 		if (vals && "attributeKeys" in vals && Array.isArray(vals.attributeKeys)) {
 			for (const k of vals.attributeKeys) {

@@ -419,6 +419,73 @@ export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
 		endTime: "2025-11-25 00:00:00",
 	},
 	{
+		// The services list's sparkline request, verbatim. Sub-hour bucket + a real
+		// groupBy: before the minute tier existed this combination was rejected and
+		// every services-list load scanned raw `traces`.
+		label: "traces-timeseries-annual-minutely-grouped",
+		route: "traces_timeseries:annual",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 300,
+			groupBy: ["service"],
+			filters: { ...TRACES_FILTERS, rootSpansOnly: true },
+		},
+		startTime: SHORT_START_TIME,
+		endTime: SHORT_END_TIME,
+	},
+	{
+		// Hour-multiple bucket WITH a groupBy: all three tiers, and the group key
+		// has to survive the three-way UNION with identical types on every branch.
+		label: "traces-timeseries-annual-grouped-all-tiers",
+		route: "traces_timeseries:annual",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 3600,
+			groupBy: ["service"],
+			filters: { rootSpansOnly: true },
+		},
+	},
+	{
+		// `seriesLimit` was unreachable on this route until the groupBy predicate
+		// was relaxed — `hasRealGroupBy` was always false. This is the
+		// CTE-over-three-way-union that no fixture had ever executed.
+		label: "traces-timeseries-annual-grouped-series-cap",
+		route: "traces_timeseries:annual",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 300,
+			groupBy: ["service"],
+			seriesLimit: 10,
+			filters: { rootSpansOnly: true },
+		},
+		startTime: SHORT_START_TIME,
+		endTime: SHORT_END_TIME,
+	},
+	{
+		// The rejecting side of the predicate: `status_code` is aggregated away by
+		// both rollups, so this must fall through to another route. Keeps
+		// `canUseAnnualServiceOverview` covered in both directions.
+		label: "traces-timeseries-annual-rejected-status-code",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 3600,
+			groupBy: ["status_code"],
+			filters: { rootSpansOnly: true },
+		},
+	},
+	{
 		label: "traces-timeseries-aggregates-mv",
 		route: "traces_timeseries:aggregates-mv",
 		query: {

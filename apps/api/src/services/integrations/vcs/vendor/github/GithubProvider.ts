@@ -475,22 +475,20 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 			// skip_reason / identifiers) are made by each mapper onto the surrounding
 			// `webhookToJobs` span.
 			const mapEvent = (event: string | undefined, parsed: unknown, now: number) =>
-				Effect.gen(function* () {
-					return yield* Match.value(event).pipe(
-						Match.when("push", () => mapPush(parsed, now)),
-						Match.when("installation", () => mapInstallation(parsed)),
-						Match.when("installation_repositories", () => mapInstallationRepositories(parsed)),
-						Match.when("create", () => mapRefEvent("created")(parsed)),
-						Match.when("delete", () => mapRefEvent("deleted")(parsed)),
-						Match.orElse(() =>
-							// ping and unhandled events are accepted no-ops.
-							Effect.annotateCurrentSpan({
-								"vcs.webhook.outcome": "skipped",
-								"vcs.webhook.skip_reason": "unhandled_event",
-							}).pipe(Effect.as([])),
-						),
-					)
-				})
+				Match.value(event).pipe(
+					Match.when("push", () => mapPush(parsed, now)),
+					Match.when("installation", () => mapInstallation(parsed)),
+					Match.when("installation_repositories", () => mapInstallationRepositories(parsed)),
+					Match.when("create", () => mapRefEvent("created")(parsed)),
+					Match.when("delete", () => mapRefEvent("deleted")(parsed)),
+					Match.orElse(() =>
+						// ping and unhandled events are accepted no-ops.
+						Effect.annotateCurrentSpan({
+							"vcs.webhook.outcome": "skipped",
+							"vcs.webhook.skip_reason": "unhandled_event",
+						}).pipe(Effect.as([])),
+					),
+				)
 
 			const webhookToJobs = (input: VcsWebhookRequest) =>
 				Effect.gen(function* () {

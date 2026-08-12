@@ -8,7 +8,7 @@ import {
 } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AlertRuleUpsertRequest, type AlertRuleDocument } from "@maple/domain/http"
@@ -191,7 +191,7 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.updateAlertRule")(function* (params) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const alerts = yield* AlertsService
 			const rules = yield* AlertRulesService
 

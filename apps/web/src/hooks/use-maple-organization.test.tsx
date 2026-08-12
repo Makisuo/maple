@@ -11,6 +11,7 @@ vi.mock("@/lib/effect-atom", async () => {
 })
 vi.mock("@/lib/services/common/atom-client", () => ({
 	MapleApiAtomClient: { query: () => ({}) },
+	retainedQuery: () => ({}),
 }))
 
 const { Result } = await import("@/lib/effect-atom")

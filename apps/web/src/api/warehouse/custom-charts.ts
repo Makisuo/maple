@@ -11,6 +11,7 @@ import { Clock, Effect, Schema } from "effect"
 import {
 	buildBucketTimeline,
 	computeBucketSeconds,
+	quantizeToMinute,
 	firstFullBucketIso,
 	toIsoBucket,
 	trimSparseLeadingBuckets,
@@ -982,7 +983,17 @@ const getCustomChartServiceSparklinesEffect = Effect.fn("QueryEngine.getCustomCh
 			"getCustomChartServiceSparklines",
 		)
 
-		const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
+		// Round to a whole minute so the request can be served by the
+		// service-overview rollup tiers instead of scanning raw `traces` — the
+		// finest tier is minute-grain, so a bucket that isn't a minute multiple has
+		// no rollup that can place a row inside it.
+		//
+		// Quantizing here rather than server-side is deliberate: this goes through
+		// the generic `/execute` route, and the timeline below is built from the
+		// same value. If the server rounded and the client didn't, the returned
+		// buckets would miss the client's timeline and every sparkline would render
+		// empty.
+		const bucketSeconds = quantizeToMinute(computeBucketSeconds(input.startTime, input.endTime))
 		const reqOpts = {
 			startTime: input.startTime,
 			endTime: input.endTime,

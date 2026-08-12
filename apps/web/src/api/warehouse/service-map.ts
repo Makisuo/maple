@@ -12,7 +12,7 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { summarizeSampling } from "@/lib/sampling"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 import { transformExternalEdge } from "@/api/warehouse/service-external-edges"
-import { aggregateByServiceEnvironment, coerceRow } from "@/api/warehouse/services"
+import { coerceOverviewRows } from "@/api/warehouse/services"
 
 import { formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-engine"
 export interface ServiceEdge {
@@ -446,7 +446,7 @@ export const getServiceMapBundle = Effect.fn("QueryEngine.getServiceMapBundle")(
 	return {
 		edges: result.dependencies.map((row) => transformEdge(row, durationSeconds)),
 		dbEdges: result.dbEdges.map((row) => transformDbEdge(row, durationSeconds)),
-		overview: aggregateByServiceEnvironment(result.overview.map(coerceRow), durationSeconds),
+		overview: coerceOverviewRows(result.overview, durationSeconds),
 		platforms: result.platforms.map((row) => ({
 			serviceName: row.serviceName,
 			platform: row.platform,

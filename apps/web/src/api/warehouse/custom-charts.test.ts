@@ -8,7 +8,7 @@ const executeQueryEngineMock = vi.fn()
 vi.mock("@/api/warehouse/effect-utils", () => ({
 	WarehouseDateTimeString: Schema.String,
 	decodeInput: (_schema: unknown, data: unknown) => Effect.succeed(data),
-	invalidWarehouseInput: () => Effect.fail(new Error("invalid")),
+	invalidWarehouseInput: () => Effect.fail("invalid"),
 	executeQueryEngine: (...args: unknown[]) => executeQueryEngineMock(...args),
 }))
 

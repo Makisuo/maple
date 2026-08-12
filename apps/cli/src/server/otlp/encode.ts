@@ -96,6 +96,8 @@ function base64ToBytes(b64: string): Uint8Array {
  * 400 from the ingest handler rather than the generic 500 an encoder crash
  * would produce.
  */
+// The pure encoder throws this sentinel for its HTTP adapter to translate into a 400 response.
+// oxlint-disable-next-line effecttsgo/extends-native-error
 export class OtlpFieldError extends Error {
 	constructor(message: string) {
 		super(message)

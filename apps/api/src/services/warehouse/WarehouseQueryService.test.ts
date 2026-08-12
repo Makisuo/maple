@@ -13,6 +13,7 @@ import {
 	UserId,
 } from "@maple/domain/http"
 import { unsafeCompiledQuery } from "@maple/query-engine/ch"
+import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { makeWarehouseExecutor, type ResolvedWarehouseConfig } from "@maple/query-engine/execution"
 import { __testables, WarehouseQueryService } from "./WarehouseQueryService"
 import {
@@ -58,8 +59,9 @@ const buildLayer = (testDb: TestDb, extra: Record<string, string> = {}, includeT
 	const configLive = makeConfig(extra, includeTinybirdSigning)
 	const envLive = Env.layer.pipe(Layer.provide(configLive))
 	const databaseLive = testDb.layer
+	const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(MemoryCacheBackendLive))
 	const orgSettingsLive = OrgClickHouseSettingsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
+		Layer.provide(Layer.mergeAll(envLive, databaseLive, edgeCacheLive)),
 	)
 	const tinybirdTokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(envLive))
 	return WarehouseQueryService.layer.pipe(

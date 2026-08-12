@@ -9,7 +9,7 @@ import {
 	formatWindow,
 	slackAttachmentColor,
 	type TemplateRenderContext,
-} from "./AlertDeliveryDispatch"
+} from "./alert-formatting"
 
 export interface AlertEmailContent {
 	readonly subject: string

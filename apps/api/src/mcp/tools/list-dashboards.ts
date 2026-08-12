@@ -3,7 +3,7 @@ import { formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 
 export function registerListDashboardsTool(server: McpToolRegistrar) {
@@ -14,7 +14,7 @@ export function registerListDashboardsTool(server: McpToolRegistrar) {
 			search: optionalStringParam("Filter dashboards by name (case-insensitive contains)"),
 		}),
 		Effect.fn("McpTool.listDashboards")(function* ({ search }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const persistence = yield* DashboardPersistenceService
 
 			const result = yield* persistence.list(tenant.orgId).pipe(

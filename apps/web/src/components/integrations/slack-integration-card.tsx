@@ -19,8 +19,8 @@ import { ErrorState } from "@/components/common/error-state"
 import { LoaderIcon, SlackIcon, SlackMonoIcon } from "@/components/icons"
 import { useIsOrgAdmin } from "@/hooks/use-is-org-admin"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { getExitErrorMessage } from "@/lib/alerts/form-utils"
@@ -134,7 +134,7 @@ function LoadingState() {
  * this, so a non-admin only ever sees a disabled affordance.
  */
 export function SlackIntegrationCard() {
-	const statusAtom = MapleApiV2AtomClient.query("slackIntegration", "status", {
+	const statusAtom = retainedQueryV2("slackIntegration", "status", {
 		reactivityKeys: ["slackIntegration"],
 	})
 	const statusResult = useAtomValue(statusAtom)
@@ -146,7 +146,7 @@ export function SlackIntegrationCard() {
 	// `useIsOrgAdmin` reports false until the session lands, so the admin-only copy
 	// would briefly tell an admin they aren't one. The controls still stay disabled
 	// while unknown — only the explanation waits for a settled session.
-	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
+	const sessionResult = useAtomValue(retainedQuery("auth", "session", {}))
 	const adminKnown = !isClerkAuthEnabled || !Result.isInitial(sessionResult)
 	const showNotAdmin = adminKnown && !isAdmin
 

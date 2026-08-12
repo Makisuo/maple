@@ -47,6 +47,10 @@ export function useTableRefreshTimeRange({
 	let refreshedRange = refreshState.range
 
 	if (refreshState.source !== source) {
+		// Deliberately unsnapped: this branch only runs on an explicit reload, and
+		// the point of a reload is to advance the window to the real "now". The
+		// snapped, cache-friendly range comes back on the next mount via
+		// `baseRange`.
 		const nextRange =
 			pageRefresh && relativePreset ? (relativeToAbsolute(relativePreset) ?? baseRange) : baseRange
 		refreshedRange = nextRange

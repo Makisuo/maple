@@ -2,7 +2,7 @@ import { McpQueryError, optionalStringParam, validationError, type McpToolRegist
 import { formatTable } from "@/mcp/lib/format"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { ErrorIssueId } from "@maple/domain/http"
 
@@ -18,7 +18,7 @@ export function registerListErrorIncidentsTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.listErrorIncidents")(function* ({ issue_id }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				issueId: issue_id ?? "all",
