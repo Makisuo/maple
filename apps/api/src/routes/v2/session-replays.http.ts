@@ -6,13 +6,12 @@ import {
 	MAX_REPLAY_MANIFEST_CHUNKS,
 	LIST_LIMIT_DEFAULT,
 	MapleApiV2,
-	dependencyUnavailable,
-	invalidRequest,
-	paginateArray,
 	paginateOffsetQuery,
-	payloadTooLarge,
-	resourceNotFound,
 	timestamp,
+	toV2Error,
+	V2ParameterInvalid,
+	V2SessionReplayNotFound,
+	V2SessionReplayRangeTooLarge,
 } from "@maple/domain/http/v2"
 import type { Timestamp } from "@maple/domain/http/v2"
 import type { WarehouseError } from "@maple/domain/http"
@@ -30,13 +29,9 @@ import { CH, formatWarehouseDateTime } from "@maple/query-engine"
 import { Effect, Layer, Option, Schema } from "effect"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { ReplayBlobStore, ReplayBlobStoreLive } from "@/platform/ReplayBlobStore"
-import { warehouseToV2 } from "./warehouse-error-map"
 
 const decodeSessionId = Schema.decodeSync(SessionId)
 const decodeTraceId = Schema.decodeSync(TraceId)
-
-/** Warehouse errors → the proper v2 envelope (400/429/502/503 per tag). */
-const mapWarehouseError = warehouseToV2("session_replay_query")
 
 /**
  * Refuse a chunk range whose payload would blow the response budget, before a
@@ -53,12 +48,7 @@ const assertRangeFitsBudget = (rows: ReadonlyArray<{ readonly byteSize: number }
 	const total = rows.reduce((sum, row) => sum + Number(row.byteSize), 0)
 	return total <= MAX_REPLAY_EVENTS_RESPONSE_BYTES
 		? Effect.void
-		: Effect.fail(
-				payloadTooLarge(
-					"That part of the recording is too large to load in one request. Request a narrower chunk range.",
-					"to_chunk_seq",
-				),
-			)
+		: Effect.fail(V2SessionReplayRangeTooLarge.make(undefined, { param: "to_chunk_seq" }))
 }
 
 /**
@@ -71,17 +61,14 @@ const assertRangeFitsBudget = (rows: ReadonlyArray<{ readonly byteSize: number }
  */
 const mapReplayReadError = (error: WarehouseError | WarehouseResponseLimitError) =>
 	error._tag === "@maple/query-engine/execution/WarehouseResponseLimitError"
-		? payloadTooLarge(
-				"That part of the recording is too large to load in one request. Request a narrower chunk range.",
-				"to_chunk_seq",
-			)
-		: mapWarehouseError(error)
+		? V2SessionReplayRangeTooLarge.make(undefined, { param: "to_chunk_seq" })
+		: toV2Error(error)
 
 /** ISO-8601 → Tinybird `YYYY-MM-DD HH:mm:ss` (UTC), validated. */
 const toTinybird = (value: string, param: string) => {
 	const ms = Date.parse(value)
 	return Number.isNaN(ms)
-		? Effect.fail(invalidRequest("parameter_invalid", `Invalid ISO-8601 timestamp for ${param}.`, param))
+		? Effect.fail(V2ParameterInvalid.make(`Invalid ISO-8601 timestamp for ${param}.`, { param }))
 		: Effect.succeed(formatWarehouseDateTime(ms))
 }
 
@@ -118,9 +105,9 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 			)
 			const replay = yield* warehouse
 				.compiledQueryFirst(tenant, compiled, { profile: "discovery", context: "v2RequireReplay" })
-				.pipe(Effect.mapError(mapWarehouseError))
+				.pipe(Effect.mapError(toV2Error))
 			if (Option.isNone(replay)) {
-				return yield* resourceNotFound("session_replay", "No such session replay.")
+				return yield* Effect.fail(V2SessionReplayNotFound.make())
 			}
 		})
 
@@ -172,7 +159,7 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 						return warehouse
 							.compiledQuery(tenant, compiled, { profile: "list", context: "v2SearchReplays" })
 							.pipe(
-								Effect.mapError(mapWarehouseError),
+								Effect.mapError(toV2Error),
 								Effect.map(
 									(rows): ReadonlyArray<V2SessionReplayListItem> =>
 										rows.map((row) => ({
@@ -235,12 +222,10 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 							}),
 						],
 						{ concurrency: 2 },
-					).pipe(Effect.mapError(mapWarehouseError))
+					).pipe(Effect.mapError(toV2Error))
 					const data = Option.getOrNull(maybeData)
 					if (!data) {
-						return yield* Effect.fail(
-							resourceNotFound("session_replay", "No such session replay."),
-						)
+						return yield* Effect.fail(V2SessionReplayNotFound.make())
 					}
 					const activity = Option.getOrNull(maybeActivity)
 					const replay = {
@@ -292,7 +277,7 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 							profile: "discovery",
 							context: "v2GetReplayManifest",
 						})
-						.pipe(Effect.mapError(mapWarehouseError))
+						.pipe(Effect.mapError(toV2Error))
 					if (rows.length === 0) {
 						yield* requireSession(tenant, params.id, windowStart, windowEnd)
 					}
@@ -437,7 +422,7 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 								context: "v2SessionTranscript",
 							})
 							.pipe(
-								Effect.mapError(mapWarehouseError),
+								Effect.mapError(toV2Error),
 								Effect.tap((rows) =>
 									rows.length === 0 && offset === 0
 										? requireSession(tenant, params.id, windowStart, windowEnd)
@@ -495,7 +480,7 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 								context: "v2ReplaysForTrace",
 							})
 							.pipe(
-								Effect.mapError(mapWarehouseError),
+								Effect.mapError(toV2Error),
 								Effect.map(
 									(rows): ReadonlyArray<V2SessionReplayRef> =>
 										rows.map((row) => ({

@@ -3,6 +3,7 @@ import type { AlertCheckDocument, AlertRuleDocument, AlertRulePreviewResponse } 
 import {
 	AlertRulePreviewRequest,
 	AlertRuleUpsertRequest,
+	AlertNotFoundError,
 	CurrentTenant,
 	IsoDateTimeString,
 	QueryBuilderQueryDraftSchema,
@@ -14,22 +15,20 @@ import type {
 	V2AlertRuleMutationResponse,
 	V2AlertRulePreviewResult,
 	V2AlertRuleUpdateParams,
-	V2InvalidRequestError,
 } from "@maple/domain/http/v2"
 import {
 	MapleApiV2,
-	invalidRequest,
 	paginateArray,
-	resourceNotFound,
 	scopeAllows,
 	timestamp,
+	toV2Error,
+	V2ParameterInvalid,
 } from "@maple/domain/http/v2"
 import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
 import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
-import { mapAlertError } from "./alerts-error-map"
 
 const decodeIsoDateTime = Schema.decodeUnknownSync(IsoDateTimeString)
 
@@ -39,11 +38,11 @@ const encodeChecksCursor = (check: AlertCheckDocument): string =>
 const decodeChecksCursor = (value: string | undefined) => {
 	if (value === undefined) return Effect.succeed<readonly [string, string] | undefined>(undefined)
 	if (!value.startsWith("chk_")) {
-		return Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+		return Effect.fail(V2ParameterInvalid.make("Invalid pagination cursor.", { param: "cursor" }))
 	}
 	const decoded = Encoding.decodeBase64UrlString(value.slice(4))
 	if (Result.isFailure(decoded)) {
-		return Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+		return Effect.fail(V2ParameterInvalid.make("Invalid pagination cursor.", { param: "cursor" }))
 	}
 	try {
 		const parts = JSON.parse(decoded.success) as unknown
@@ -58,7 +57,7 @@ const decodeChecksCursor = (value: string | undefined) => {
 		}
 		return Effect.succeed([parts[0], parts[1]] as const)
 	} catch {
-		return Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+		return Effect.fail(V2ParameterInvalid.make("Invalid pagination cursor.", { param: "cursor" }))
 	}
 }
 
@@ -137,17 +136,15 @@ const toV2Check = (check: AlertCheckDocument): V2AlertCheck => ({
 const decodeDraft = (draft: Record<string, unknown>) =>
 	Schema.decodeUnknownEffect(QueryBuilderQueryDraftSchema)(draft).pipe(
 		Effect.mapError(() =>
-			invalidRequest(
-				"parameter_invalid",
-				"query_builder_draft is not a valid query-builder draft document.",
-				"query_builder_draft",
-			),
+			V2ParameterInvalid.make("query_builder_draft is not a valid query-builder draft document.", {
+				param: "query_builder_draft",
+			}),
 		),
 	)
 
 const toUpsertRequest = (
 	params: V2AlertRuleCreateParams,
-): Effect.Effect<AlertRuleUpsertRequest, V2InvalidRequestError> =>
+): Effect.Effect<AlertRuleUpsertRequest, ReturnType<typeof V2ParameterInvalid.make>> =>
 	Effect.gen(function* () {
 		const draftField =
 			params.query_builder_draft === undefined
@@ -205,7 +202,7 @@ const toUpsertRequest = (
 const mergeUpsertRequest = (
 	doc: AlertRuleDocument,
 	patch: V2AlertRuleUpdateParams,
-): Effect.Effect<AlertRuleUpsertRequest, V2InvalidRequestError> =>
+): Effect.Effect<AlertRuleUpsertRequest, ReturnType<typeof V2ParameterInvalid.make>> =>
 	Effect.gen(function* () {
 		const signalType = patch.signal_type ?? doc.signalType
 		const queryBuilderDraft =
@@ -300,10 +297,18 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 
 		const findRule = (orgId: Parameters<typeof rules.listRules>[0], ruleId: AlertRuleDocument["id"]) =>
 			Effect.gen(function* () {
-				const response = yield* rules.listRules(orgId).pipe(mapAlertError("rule_list"))
+				const response = yield* rules.listRules(orgId).pipe(Effect.mapError(toV2Error))
 				const rule = response.rules.find((doc) => doc.id === ruleId)
 				if (rule === undefined)
-					return yield* Effect.fail(resourceNotFound("alert_rule", "No such alert rule."))
+					return yield* Effect.fail(
+						toV2Error(
+							new AlertNotFoundError({
+								message: "No such alert rule.",
+								resourceType: "alert_rule",
+								resourceId: ruleId,
+							}),
+						),
+					)
 				return rule
 			})
 
@@ -311,7 +316,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* rules.listRules(tenant.orgId).pipe(mapAlertError("rule_list"))
+					const response = yield* rules.listRules(tenant.orgId).pipe(Effect.mapError(toV2Error))
 					const page = yield* paginateArray(response.rules.map(toV2Rule), query)
 					return { object: "list" as const, ...page }
 				}),
@@ -329,7 +334,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const request = yield* toUpsertRequest(payload)
 					const created = yield* rules
 						.createRule(tenant.orgId, tenant.userId, tenant.roles, request)
-						.pipe(mapAlertError("rule_create"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2RuleMutationResponse(created)
 				}),
 			)
@@ -340,7 +345,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const request = yield* mergeUpsertRequest(current, payload)
 					const updated = yield* alerts
 						.updateRule(tenant.orgId, tenant.userId, tenant.roles, params.id, request)
-						.pipe(mapAlertError("rule_update"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2RuleMutationResponse(updated)
 				}),
 			)
@@ -349,7 +354,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* rules
 						.deleteRule(tenant.orgId, tenant.roles, params.id)
-						.pipe(mapAlertError("rule_delete"))
+						.pipe(Effect.mapError(toV2Error))
 					return {
 						id: deleted.id,
 						object: "alert_rule" as const,
@@ -364,7 +369,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const rule = yield* toUpsertRequest(payload.rule)
 					const result = yield* alerts
 						.testRule(tenant.orgId, tenant.userId, tenant.roles, rule, payload.send_notification)
-						.pipe(mapAlertError("rule_test"))
+						.pipe(Effect.mapError(toV2Error))
 					return {
 						object: "alert_rule.test_result" as const,
 						status: result.status,
@@ -393,7 +398,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 						return yield* new AlertForbiddenError({
 							message:
 								'Previewing a raw SQL alert requires the "alerts:write" scope, because it executes your query against the warehouse.',
-						}).pipe(mapAlertError("rule_preview"))
+						}).pipe(Effect.mapError(toV2Error))
 					}
 					const preview = yield* alerts
 						.previewRule(
@@ -405,7 +410,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 								endTime: decodeIsoDateTime(payload.end_time),
 							}),
 						)
-						.pipe(mapAlertError("rule_preview"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2PreviewResult(preview)
 				}),
 			)
@@ -425,7 +430,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 								: {}),
 							limit: limit + 1,
 						})
-						.pipe(mapAlertError("rule_checks_list"))
+						.pipe(Effect.mapError(toV2Error))
 					const hasMore = response.checks.length > limit
 					const checks = hasMore ? response.checks.slice(0, limit) : response.checks
 					const last = checks.at(-1)
@@ -445,7 +450,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 							since: query.since,
 							until: query.until,
 						})
-						.pipe(mapAlertError("rule_checks_list"))
+						.pipe(Effect.mapError(toV2Error))
 					return {
 						object: "alert_check.summary" as const,
 						bucket_seconds: summary.bucketSeconds,

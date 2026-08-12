@@ -1,9 +1,10 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { AlertDeliveryStatus, AlertDestinationType, AlertEventType } from "../alerts"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import { AlertDeliveryStatus, AlertDestinationType, AlertEventType, AlertPersistenceError } from "../alerts"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2ServiceUnavailableError } from "./errors"
+import { V2ParameterInvalid } from "./errors"
+import { publicError } from "./public-error"
 import {
 	AlertDeliveryEventPublicId,
 	AlertDestinationPublicId,
@@ -48,7 +49,7 @@ export class V2AlertDeliveriesApiGroup extends HttpApiGroup.make("alertDeliverie
 		HttpApiEndpoint.get("list", "/", {
 			query: ListQuery,
 			success: AlertDeliveryList,
-			error: [V2InvalidRequestError, V2ServiceUnavailableError],
+			error: [V2ParameterInvalid.schema, publicError(AlertPersistenceError)],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listAlertDeliveries",
@@ -60,7 +61,6 @@ export class V2AlertDeliveriesApiGroup extends HttpApiGroup.make("alertDeliverie
 	)
 	.prefix("/v2/alerts/deliveries")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Alert Deliveries",

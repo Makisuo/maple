@@ -35,6 +35,25 @@ const doc = spec as unknown as Record<string, any>
 const schemas = doc.components.schemas as Record<string, any>
 const operation = (method: string, path: string): Record<string, any> =>
 	(spec.paths as Record<string, any>)[path][method]
+const resolveSchema = (schema: Record<string, any>): Record<string, any> => {
+	const ref = schema.$ref as string | undefined
+	return ref === undefined ? schema : schemas[ref.slice(ref.lastIndexOf("/") + 1)]
+}
+const schemaBranches = (schema: Record<string, any>): ReadonlyArray<Record<string, any>> => {
+	const resolved = resolveSchema(schema)
+	const alternatives = (resolved.anyOf ?? resolved.oneOf) as ReadonlyArray<Record<string, any>> | undefined
+	return alternatives === undefined ? [resolved] : alternatives.flatMap(schemaBranches)
+}
+const responseErrorTags = (method: string, path: string, status: string): ReadonlyArray<string> => {
+	const response = operation(method, path).responses[status] as Record<string, any>
+	const responseSchema = response.content["application/json"].schema as Record<string, any>
+	return schemaBranches(responseSchema).map((branch) => {
+		const tag = resolveSchema(branch).properties.error.properties._tag
+		expect(tag.type).toBe("string")
+		expect(tag.enum).toHaveLength(1)
+		return tag.enum[0] as string
+	})
+}
 
 const OpenApiOperationMetadata = Schema.Struct({
 	operationId: Schema.String,
@@ -237,11 +256,11 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(names).toEqual(
 			expect.arrayContaining([
 				"InvalidRequestError",
-				"AuthenticationError",
-				"PermissionError",
-				"NotFoundError",
+				"InvalidCredentialsError",
+				"InsufficientScopeError",
+				"ApiKeyNotFoundError",
 				"RateLimitError",
-				"ServiceUnavailableError",
+				"ApiKeyPersistenceError",
 			]),
 		)
 		// No internal / v2-prefixed / namespaced identifiers leaked into the public spec.
@@ -394,13 +413,13 @@ describe("MapleApiV2 OpenAPI", () => {
 			"500",
 			"503",
 		])
-		// Only `channels` can 404 (not connected) or 502 (Slack rejected us).
+		// Only `channels` can 409 (not connected) or 502 (Slack rejected us).
 		expect(declared("get", "/v2/integrations/slack/channels")).toEqual([
 			"200",
 			"400",
 			"401",
 			"403",
-			"404",
+			"409",
 			"429",
 			"500",
 			"502",
@@ -408,30 +427,74 @@ describe("MapleApiV2 OpenAPI", () => {
 		])
 	})
 
-	it("marks the admin-gated Slack operations' 403 as handler-declared, not just middleware", () => {
-		// Every operation carries the middleware's 403 (insufficient scope), so the
-		// status-code set alone can't tell an admin-gated endpoint from an open one.
-		// An endpoint that *also* declares `V2PermissionError` renders its 403 as an
-		// `anyOf` of two PermissionError refs — that duplication is the tell.
-		const permissionSchema = (method: string, path: string) =>
-			operation(method, path).responses["403"].content["application/json"].schema
-		const isHandlerDeclared = (method: string, path: string) =>
-			Array.isArray(permissionSchema(method, path).anyOf)
-
+	it("documents the distinct scope and org-admin tags on Slack operations", () => {
 		// install / uninstall / channels all call `requireAdmin`: `channels`
 		// enumerates the workspace's channels, private ones included, so it is not
 		// something any org member may read.
-		expect(isHandlerDeclared("post", "/v2/integrations/slack/install")).toBe(true)
-		expect(isHandlerDeclared("delete", "/v2/integrations/slack")).toBe(true)
-		expect(isHandlerDeclared("get", "/v2/integrations/slack/channels")).toBe(true)
+		const adminTags = [
+			"@maple/http/v2/InsufficientPermissionsError",
+			"@maple/http/v2/InsufficientScopeError",
+		]
+		expect([...responseErrorTags("post", "/v2/integrations/slack/install", "403")].sort()).toEqual(
+			adminTags,
+		)
+		expect([...responseErrorTags("delete", "/v2/integrations/slack", "403")].sort()).toEqual(adminTags)
+		expect([...responseErrorTags("get", "/v2/integrations/slack/channels", "403")].sort()).toEqual(
+			adminTags,
+		)
 		expect(operation("get", "/v2/integrations/slack/channels").description).toContain("org-admin")
 
 		// `status` stays UNGATED — the dashboard's Slack card renders install state
 		// for every member, so its 403 comes from the scope middleware alone.
-		expect(isHandlerDeclared("get", "/v2/integrations/slack")).toBe(false)
-		expect(permissionSchema("get", "/v2/integrations/slack").$ref).toBe(
-			"#/components/schemas/PermissionError",
-		)
+		expect(responseErrorTags("get", "/v2/integrations/slack", "403")).toEqual([
+			"@maple/http/v2/InsufficientScopeError",
+		])
+	})
+
+	it("gives every error response an exhaustive literal-tag union", () => {
+		for (const [path, item] of Object.entries(spec.paths ?? {})) {
+			for (const [method, candidate] of Object.entries(item ?? {})) {
+				if (!["get", "post", "put", "patch", "delete"].includes(method)) continue
+				const op = candidate as Record<string, any>
+				for (const status of Object.keys(op.responses)) {
+					if (Number(status) < 400) continue
+					const tags = responseErrorTags(method, path, status)
+					expect(tags.length, `${method.toUpperCase()} ${path} ${status} has tags`).toBeGreaterThan(
+						0,
+					)
+					expect(
+						new Set(tags).size,
+						`${method.toUpperCase()} ${path} ${status} tags are unique`,
+					).toBe(tags.length)
+					for (const tag of tags) {
+						expect(tag, `${method.toUpperCase()} ${path} ${status} tag`).toMatch(/^@maple\//)
+					}
+				}
+			}
+		}
+	})
+
+	it("publishes operation-specific tags for previously collapsed failures", () => {
+		expect(responseErrorTags("get", "/v2/api_keys/{id}", "404")).toEqual([
+			"@maple/http/errors/ApiKeyNotFoundError",
+		])
+		expect(responseErrorTags("get", "/v2/integrations/planetscale/organizations", "401")).toEqual([
+			"@maple/http/errors/IntegrationsRevokedError",
+			"@maple/http/v2/InvalidCredentialsError",
+		])
+		expect(responseErrorTags("get", "/v2/session_replays/{id}/events", "413")).toEqual([
+			"@maple/http/v2/SessionReplayRangeTooLargeError",
+		])
+		expect(responseErrorTags("post", "/v2/alerts/rules/test", "429")).toEqual([
+			"@maple/http/errors/WarehouseQuotaExceededError",
+			"@maple/http/v2/RateLimitError",
+		])
+		expect(responseErrorTags("post", "/v2/traces/timeseries", "500")).toEqual([
+			"@maple/http/errors/WarehouseMalformedQueryError",
+			"@maple/http/errors/QueryEngineResultMismatchError",
+			"@maple/http/v2/ResponseSchemaError",
+			"@maple/http/v2/UnexpectedError",
+		])
 	})
 
 	it("decodes slack-bot destination create/update params and rejects a blank channel_id", () => {
@@ -539,8 +602,10 @@ describe("MapleApiV2 OpenAPI", () => {
 	})
 
 	it("documents error responses with a stable code example", () => {
-		const notFound = schemas["NotFoundError"]
-		expect(notFound.properties.error.properties.code.examples).toEqual(["api_key_not_found"])
+		const notFound = schemas["ApiKeyNotFoundError"]
+		expect(notFound.properties.error.properties._tag.enum).toEqual([
+			"@maple/http/errors/ApiKeyNotFoundError",
+		])
 		expect(notFound.properties.error.properties.message.description).toEqual(expect.any(String))
 	})
 })

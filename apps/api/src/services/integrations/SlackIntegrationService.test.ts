@@ -320,7 +320,7 @@ describe("SlackIntegrationService", () => {
 			const error = yield* Effect.flip(
 				slack.startInstall(asOrgId("org_a"), asUserId("user_a"), "https://cb"),
 			)
-			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsConfigurationError")
 		}).pipe(Effect.provide(makeLayer(testDb, false)))
 	})
 

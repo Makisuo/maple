@@ -48,10 +48,11 @@ const readHttpStatus = (value: unknown): number | undefined => {
  * arrived as an Error span whose entire description was the word "Payload".
  */
 const EXTERNAL_ANTICIPATED_IDENTIFIERS = ["HttpApiSchemaError"] as const
+const exportedValues = (namespace: object): ReadonlyArray<unknown> => Object.values(namespace)
 
 const deriveAnticipatedIdentifiers = (): ReadonlySet<string> => {
 	const identifiers = new Set<string>(EXTERNAL_ANTICIPATED_IDENTIFIERS)
-	for (const value of [...Object.values(Http), ...Object.values(HttpV2)]) {
+	for (const value of [...exportedValues(Http), ...exportedValues(HttpV2)]) {
 		if (typeof value !== "function") continue
 		const identifier = readIdentifier(value)
 		if (identifier === undefined) continue

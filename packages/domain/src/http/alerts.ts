@@ -14,6 +14,7 @@ import {
 	UserId,
 } from "../primitives"
 import { QueryBuilderQueryDraftSchema } from "./query-engine"
+import { HttpTaggedError } from "./error-policy"
 
 export const AlertDestinationType = Schema.Literals([
 	"slack-bot",
@@ -643,55 +644,125 @@ export class AlertDestinationTestResponse extends Schema.Class<AlertDestinationT
 	message: Schema.String,
 }) {}
 
-export class AlertForbiddenError extends Schema.TaggedError<AlertForbiddenError>()(
+export class AlertForbiddenError extends HttpTaggedError<AlertForbiddenError>()(
 	"@maple/http/errors/AlertForbiddenError",
 	{
 		message: Schema.String,
 		roles: Schema.optionalKey(Schema.Array(RoleName)),
 	},
-	{ httpApiStatus: 403 },
+	{
+		status: 403,
+		code: "alert_forbidden",
+		title: "Permission required",
+		message: "You do not have permission to perform this alert operation.",
+		retry: "never",
+		recovery: "request_access",
+		exposure: "redacted",
+	},
 ) {}
 
-export class AlertValidationError extends Schema.TaggedError<AlertValidationError>()(
+export class AlertValidationError extends HttpTaggedError<AlertValidationError>()(
 	"@maple/http/errors/AlertValidationError",
 	{
 		message: Schema.String,
 		details: Schema.Array(Schema.String),
 		cause: Schema.optionalKey(Schema.Defect()),
 	},
-	{ httpApiStatus: 400 },
+	{
+		status: 400,
+		code: "alert_invalid",
+		title: "Invalid alert request",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
 ) {}
 
-export class AlertPersistenceError extends Schema.TaggedError<AlertPersistenceError>()(
+export class AlertPersistenceError extends HttpTaggedError<AlertPersistenceError>()(
 	"@maple/http/errors/AlertPersistenceError",
 	{
 		message: Schema.String,
 		cause: Schema.optionalKey(Schema.String),
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "alerts_unavailable",
+		title: "Alerts are temporarily unavailable",
+		message: "Alerts are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class AlertNotFoundError extends Schema.TaggedError<AlertNotFoundError>()(
+const alertResource = (resourceType: string): { code: string; title: string; message: string } => {
+	switch (resourceType) {
+		case "destination":
+			return {
+				code: "alert_destination_not_found",
+				title: "Alert destination not found",
+				message: "No such alert destination.",
+			}
+		case "rule":
+		case "alert_rule":
+			return {
+				code: "alert_rule_not_found",
+				title: "Alert rule not found",
+				message: "No such alert rule.",
+			}
+		case "alert_incident":
+			return {
+				code: "alert_incident_not_found",
+				title: "Alert incident not found",
+				message: "No such alert incident.",
+			}
+		default:
+			return {
+				code: "alert_resource_not_found",
+				title: "Alert resource not found",
+				message: "No such alert resource.",
+			}
+	}
+}
+
+export class AlertNotFoundError extends HttpTaggedError<AlertNotFoundError>()(
 	"@maple/http/errors/AlertNotFoundError",
 	{
 		message: Schema.String,
 		resourceType: Schema.String,
 		resourceId: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: (error) => alertResource(error.resourceType).code,
+		title: (error) => alertResource(error.resourceType).title,
+		message: (error) => alertResource(error.resourceType).message,
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
-export class AlertDeliveryError extends Schema.TaggedError<AlertDeliveryError>()(
+export class AlertDeliveryError extends HttpTaggedError<AlertDeliveryError>()(
 	"@maple/http/errors/AlertDeliveryError",
 	{
 		message: Schema.String,
 		destinationType: Schema.optionalKey(AlertDestinationType),
 		cause: Schema.optionalKey(Schema.Defect()),
 	},
-	{ httpApiStatus: 502 },
+	{
+		status: 502,
+		code: "alert_delivery_failed",
+		title: "Alert provider request failed",
+		message: "The alert provider request failed.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class AlertDestinationInUseError extends Schema.TaggedError<AlertDestinationInUseError>()(
+export class AlertDestinationInUseError extends HttpTaggedError<AlertDestinationInUseError>()(
 	"@maple/http/errors/AlertDestinationInUseError",
 	{
 		message: Schema.String,
@@ -699,7 +770,15 @@ export class AlertDestinationInUseError extends Schema.TaggedError<AlertDestinat
 		ruleIds: Schema.Array(AlertRuleId),
 		ruleNames: Schema.Array(Schema.String),
 	},
-	{ httpApiStatus: 409 },
+	{
+		status: 409,
+		code: "alert_destination_in_use",
+		title: "Alert destination is in use",
+		message: "The alert destination is currently used by one or more alert rules.",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "redacted",
+	},
 ) {}
 
 export const AlertIncidentTransition = Schema.Literals(["none", "opened", "continued", "resolved"]).annotate({

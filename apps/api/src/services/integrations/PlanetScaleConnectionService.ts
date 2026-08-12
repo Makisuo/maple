@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import {
+	IntegrationsConfigurationError,
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
 	IntegrationsRevokedError,
@@ -75,6 +76,7 @@ export interface PlanetScaleConnectionServiceShape {
 		| IntegrationsNotConnectedError
 		| IntegrationsRevokedError
 		| IntegrationsValidationError
+		| IntegrationsConfigurationError
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
 	>

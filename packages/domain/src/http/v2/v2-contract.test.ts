@@ -477,16 +477,16 @@ describe("v2 error envelope", () => {
 		expect("_tag" in wire).toBe(false)
 	})
 
-	it("decodes the pre-metadata envelope during rolling upgrades", () => {
-		const decoded = Schema.decodeUnknownSync(V2NotFoundError)({
-			error: {
-				type: "not_found_error",
-				code: "resource_missing",
-				message: "gone",
-			},
-		})
-		expect(decoded.error._tag).toBeUndefined()
-		expect(decoded.error.retryable).toBeUndefined()
+	it("requires a semantic tag on every public error", () => {
+		expect(() =>
+			Schema.decodeUnknownSync(V2NotFoundError)({
+				error: {
+					type: "not_found_error",
+					code: "resource_missing",
+					message: "gone",
+				},
+			}),
+		).toThrow()
 	})
 
 	it("omits param when not provided", () => {

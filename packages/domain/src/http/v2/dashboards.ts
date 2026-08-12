@@ -11,17 +11,24 @@ import {
 } from "../../primitives"
 import {
 	DashboardQueryVariableFacet,
+	DashboardConcurrencyError,
+	DashboardNotFoundError,
+	DashboardPersistenceError,
 	DashboardRefreshIntervalSeconds,
+	DashboardTemplateNotFoundError,
 	DashboardTemplatePreviewKind,
+	DashboardValidationError,
 	DashboardVariableName,
+	DashboardVersionNotFoundError,
 	DashboardVersionChangeKind,
 } from "../dashboards"
 import { SORT_DIRECTIONS, STAT_AGGREGATES } from "@maple/widgets/dashboard"
 import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES, WIDGET_VISUALIZATIONS } from "../widget-types"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2ConflictError, V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
+import { V2ParameterInvalid, V2ParameterMissing } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
+import { publicErrors } from "./public-error"
 
 export const DashboardPublicId = PublicId(PublicIdPrefixes.dashboard, DashboardId)
 export const DashboardVersionPublicId = PublicId(PublicIdPrefixes.dashboardVersion, DashboardVersionId)
@@ -627,15 +634,30 @@ const DashboardList = ListOf(V2Dashboard).annotate({ identifier: "DashboardList"
 const DashboardVersionList = ListOf(V2DashboardVersion).annotate({ identifier: "DashboardVersionList" })
 const DashboardTemplateList = ListOf(V2DashboardTemplate).annotate({ identifier: "DashboardTemplateList" })
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
-const mutationErrors = [...commonErrors, V2ConflictError] as const
+const [
+	dashboardVersionNotFound,
+	dashboardPersistence,
+	dashboardNotFound,
+	dashboardValidation,
+	dashboardConcurrency,
+	dashboardTemplateNotFound,
+] = publicErrors(
+	DashboardVersionNotFoundError,
+	DashboardPersistenceError,
+	DashboardNotFoundError,
+	DashboardValidationError,
+	DashboardConcurrencyError,
+	DashboardTemplateNotFoundError,
+)
+
+const dashboardMutationErrors = [dashboardValidation, dashboardPersistence, dashboardConcurrency] as const
 
 export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 	.add(
 		HttpApiEndpoint.get("list", "/", {
 			query: ListQuery,
 			success: DashboardList,
-			error: commonErrors,
+			error: [V2ParameterInvalid.schema, dashboardPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listDashboards",
@@ -648,7 +670,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.post("create", "/", {
 			payload: V2DashboardCreateParams,
 			success: V2DashboardMutation,
-			error: mutationErrors,
+			error: dashboardMutationErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "createDashboard",
@@ -662,7 +684,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.post("importPerses", "/import/perses", {
 			payload: V2DashboardPersesImportParams,
 			success: V2DashboardPersesImportResponse,
-			error: mutationErrors,
+			error: dashboardMutationErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "importPersesDashboard",
@@ -676,7 +698,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.get("listTemplates", "/templates", {
 			query: ListQuery,
 			success: DashboardTemplateList,
-			error: [V2InvalidRequestError],
+			error: V2ParameterInvalid.schema,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listDashboardTemplates",
@@ -691,7 +713,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			params: { template_id: DashboardTemplatePublicId },
 			payload: V2DashboardTemplatePreviewParams,
 			success: V2DashboardTemplatePreview,
-			error: [V2InvalidRequestError, V2NotFoundError],
+			error: [V2ParameterInvalid.schema, dashboardTemplateNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "previewDashboardTemplate",
@@ -706,7 +728,12 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			params: { template_id: DashboardTemplatePublicId },
 			payload: V2DashboardTemplateInstantiateParams,
 			success: V2DashboardMutation,
-			error: [...mutationErrors, V2NotFoundError],
+			error: [
+				V2ParameterInvalid.schema,
+				V2ParameterMissing.schema,
+				dashboardTemplateNotFound,
+				...dashboardMutationErrors,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "instantiateDashboardTemplate",
@@ -720,7 +747,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: DashboardPublicId },
 			success: V2Dashboard,
-			error: [...commonErrors, V2NotFoundError],
+			error: [dashboardPersistence, dashboardNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getDashboard",
@@ -734,7 +761,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			params: { id: DashboardPublicId },
 			payload: V2DashboardUpdateParams,
 			success: V2DashboardMutation,
-			error: [...mutationErrors, V2NotFoundError],
+			error: [dashboardNotFound, ...dashboardMutationErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "updateDashboard",
@@ -747,7 +774,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.delete("delete", "/:id", {
 			params: { id: DashboardPublicId },
 			success: V2DashboardDeleteResponse,
-			error: [...commonErrors, V2NotFoundError],
+			error: [dashboardPersistence, dashboardNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "deleteDashboard",
@@ -762,7 +789,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			params: { id: DashboardPublicId },
 			query: ListQuery,
 			success: DashboardVersionList,
-			error: [...commonErrors, V2NotFoundError],
+			error: [V2ParameterInvalid.schema, dashboardPersistence, dashboardNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listDashboardVersions",
@@ -775,7 +802,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.get("retrieveVersion", "/:id/versions/:version_id", {
 			params: { id: DashboardPublicId, version_id: DashboardVersionPublicId },
 			success: V2DashboardVersionDetail,
-			error: [...commonErrors, V2NotFoundError],
+			error: [dashboardPersistence, dashboardNotFound, dashboardVersionNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getDashboardVersion",
@@ -788,7 +815,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.post("restoreVersion", "/:id/versions/:version_id/restore", {
 			params: { id: DashboardPublicId, version_id: DashboardVersionPublicId },
 			success: V2DashboardMutation,
-			error: [...mutationErrors, V2NotFoundError],
+			error: [dashboardNotFound, dashboardVersionNotFound, ...dashboardMutationErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "restoreDashboardVersion",
@@ -799,7 +826,6 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 	)
 	.prefix("/v2/dashboards")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Dashboards",

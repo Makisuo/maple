@@ -10,19 +10,9 @@ import type {
 import {
 	AnomalyDetectorSettingsUpdateRequest,
 	AnomalyForbiddenError,
-	type AnomalyIncidentNotFoundError,
-	type AnomalyLinkedIssueNotFoundError,
-	AnomalyPersistenceError,
 	CurrentTenant,
-	type ErrorPersistenceError,
 } from "@maple/domain/http"
-import {
-	MapleApiV2,
-	dependencyUnavailable,
-	paginateOffsetQuery,
-	permissionError,
-	resourceNotFound,
-} from "@maple/domain/http/v2"
+import { MapleApiV2, paginateOffsetQuery, toV2Error } from "@maple/domain/http/v2"
 import type { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { requireAdmin } from "@/services/auth/auth"
@@ -83,53 +73,6 @@ const toV2Settings = (s: AnomalyDetectorSettingsDocument): V2AnomalySettings => 
 	updated_by: s.updatedBy,
 })
 
-/** Service tagged errors → v2 envelope errors (no 404). */
-const mapCommonError =
-	(operation: string) =>
-	<A, R>(effect: Effect.Effect<A, AnomalyPersistenceError | ErrorPersistenceError, R>) =>
-		effect.pipe(
-			Effect.catchTags({
-				"@maple/http/anomalies/AnomalyPersistenceError": () =>
-					Effect.fail(dependencyUnavailable(`anomaly_${operation}_unavailable`)),
-				"@maple/http/errors/ErrorPersistenceError": () =>
-					Effect.fail(dependencyUnavailable(`anomaly_${operation}_unavailable`)),
-			}),
-		)
-
-/** Service tagged errors → v2 envelope errors (incident/linked-issue 404s). */
-const mapWith404 =
-	(operation: string) =>
-	<A, R>(
-		effect: Effect.Effect<
-			A,
-			AnomalyPersistenceError | AnomalyIncidentNotFoundError | AnomalyLinkedIssueNotFoundError,
-			R
-		>,
-	) =>
-		effect.pipe(
-			Effect.catchTags({
-				"@maple/http/anomalies/AnomalyIncidentNotFoundError": () =>
-					Effect.fail(resourceNotFound("anomaly_incident", "No such anomaly incident.")),
-				"@maple/http/anomalies/AnomalyLinkedIssueNotFoundError": () =>
-					Effect.fail(resourceNotFound("error_issue", "No such error issue.", "issue_id")),
-				"@maple/http/anomalies/AnomalyPersistenceError": () =>
-					Effect.fail(dependencyUnavailable(`anomaly_${operation}_unavailable`)),
-			}),
-		)
-
-/** Settings mutation: forbidden → 403, else 503. */
-const mapSettingsError = <A, R>(
-	effect: Effect.Effect<A, AnomalyForbiddenError | AnomalyPersistenceError, R>,
-) =>
-	effect.pipe(
-		Effect.catchTags({
-			"@maple/http/anomalies/AnomalyForbiddenError": (error) =>
-				Effect.fail(permissionError("insufficient_permissions", error.message)),
-			"@maple/http/anomalies/AnomalyPersistenceError": () =>
-				Effect.fail(dependencyUnavailable("anomaly_settings_update_unavailable")),
-		}),
-	)
-
 export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies", (handlers) =>
 	Effect.gen(function* () {
 		const anomalies = yield* AnomalyDetectionService
@@ -182,7 +125,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 								offset,
 							})
 							.pipe(
-								mapCommonError("list"),
+								Effect.mapError(toV2Error),
 								Effect.map((response) => response.incidents.map(toV2Incident)),
 							),
 					)
@@ -194,7 +137,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 					const tenant = yield* CurrentTenant.Context
 					const incident = yield* anomalies
 						.getIncident(tenant.orgId, params.id)
-						.pipe(mapWith404("retrieve"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2Incident(incident)
 				}),
 			)
@@ -206,7 +149,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 							...(query.start_time !== undefined ? { startTime: query.start_time } : {}),
 							...(query.end_time !== undefined ? { endTime: query.end_time } : {}),
 						})
-						.pipe(mapWith404("timeseries"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2Timeseries(response)
 				}),
 			)
@@ -215,7 +158,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 					const tenant = yield* CurrentTenant.Context
 					const incident = yield* anomalies
 						.resolveIncidentManually(tenant.orgId, params.id)
-						.pipe(mapWith404("resolve"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2Incident(incident)
 				}),
 			)
@@ -224,10 +167,10 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 					const tenant = yield* CurrentTenant.Context
 					const actor = yield* errors
 						.ensureUserActor(tenant.orgId, tenant.userId)
-						.pipe(mapCommonError("link_issue"))
+						.pipe(Effect.mapError(toV2Error))
 					const { incident, previousIssueId } = yield* anomalies
 						.setIncidentIssue(tenant.orgId, params.id, payload.issue_id)
-						.pipe(mapWith404("link_issue"))
+						.pipe(Effect.mapError(toV2Error))
 					if (previousIssueId !== null && previousIssueId !== payload.issue_id) {
 						yield* recordLinkEvent(tenant.orgId, actor.id, previousIssueId, "unlinked", incident)
 					}
@@ -242,7 +185,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 					const tenant = yield* CurrentTenant.Context
 					const settings = yield* anomalies
 						.getSettings(tenant.orgId)
-						.pipe(mapCommonError("settings_retrieve"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2Settings(settings)
 				}),
 			)
@@ -255,7 +198,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 							new AnomalyForbiddenError({
 								message: "Only org admins can manage anomaly detector settings",
 							}),
-					).pipe(mapSettingsError)
+					).pipe(Effect.mapError(toV2Error))
 					const settings = yield* anomalies
 						.updateSettings(
 							tenant.orgId,
@@ -270,7 +213,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 									: {}),
 							}),
 						)
-						.pipe(mapSettingsError)
+						.pipe(Effect.mapError(toV2Error))
 					return toV2Settings(settings)
 				}),
 			)

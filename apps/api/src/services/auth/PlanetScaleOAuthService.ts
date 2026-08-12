@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto"
 import {
+	IntegrationsConfigurationError,
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
 	IntegrationsRevokedError,
@@ -58,7 +59,7 @@ const resolveConfig = Effect.fn("PlanetScaleOAuthService.resolveConfig")(functio
 	const clientId = yield* Option.match(env.PLANETSCALE_OAUTH_CLIENT_ID, {
 		onNone: () =>
 			Effect.fail(
-				new IntegrationsValidationError({
+				new IntegrationsConfigurationError({
 					message: "PLANETSCALE_OAUTH_CLIENT_ID is required to use the PlanetScale integration",
 				}),
 			),
@@ -67,7 +68,7 @@ const resolveConfig = Effect.fn("PlanetScaleOAuthService.resolveConfig")(functio
 	const clientSecret = yield* Option.match(env.PLANETSCALE_OAUTH_CLIENT_SECRET, {
 		onNone: () =>
 			Effect.fail(
-				new IntegrationsValidationError({
+				new IntegrationsConfigurationError({
 					message: "PLANETSCALE_OAUTH_CLIENT_SECRET is required to use the PlanetScale integration",
 				}),
 			),
@@ -122,7 +123,7 @@ export interface PlanetScaleOAuthServiceShape {
 		options: { readonly callbackUrl: string; readonly returnTo?: string },
 	) => Effect.Effect<
 		{ readonly redirectUrl: string; readonly state: string },
-		IntegrationsValidationError | IntegrationsPersistenceError
+		IntegrationsConfigurationError | IntegrationsPersistenceError
 	>
 	/**
 	 * Exchange the callback code and persist the grant. Does NOT bind a
@@ -141,6 +142,7 @@ export interface PlanetScaleOAuthServiceShape {
 			readonly organizations: ReadonlyArray<PlanetScaleOrganization>
 		},
 		| IntegrationsValidationError
+		| IntegrationsConfigurationError
 		| IntegrationsRevokedError
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
@@ -154,6 +156,7 @@ export interface PlanetScaleOAuthServiceShape {
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
 		| IntegrationsValidationError
+		| IntegrationsConfigurationError
 	>
 	/** Organizations the stored grant can access — org-picker material. */
 	readonly listOrganizations: (
@@ -165,6 +168,7 @@ export interface PlanetScaleOAuthServiceShape {
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
 		| IntegrationsValidationError
+		| IntegrationsConfigurationError
 	>
 	/** Whether a grant is stored for the org (drives pendingOrgSelection). */
 	readonly hasConnection: (orgId: OrgId) => Effect.Effect<boolean, IntegrationsPersistenceError>

@@ -41,7 +41,7 @@ import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { OrgMembersService } from "@/services/org/OrgMembersService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
-import { V2SchemaErrorsLive } from "./error-envelope"
+import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
@@ -170,7 +170,7 @@ const makeHarness = () => {
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(ConfigResourceServiceStubsLayer),
 		Layer.provide(TelemetryServiceStubsLayer),
-		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(V2TransportErrorBoundaryLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),

@@ -1,7 +1,6 @@
-import { HttpApiBuilder, HttpApiMiddleware } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CurrentTenant,
-	DashboardSchemaErrors,
 	DashboardTemplateMetadata,
 	DashboardTemplateNotFoundError,
 	DashboardTemplatesListResponse,
@@ -11,30 +10,10 @@ import {
 	PortableDashboardDocument,
 } from "@maple/domain/http"
 import { Effect } from "effect"
-import { describeSchemaIssue, summarizeSchemaError } from "@/routes/schema-error-detail"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { getTemplateById, listTemplateMetadata } from "@/dashboard-templates"
 import type { TemplateParameterValues } from "@/dashboard-templates"
 import { convertPersesDashboardToPortable } from "@/services/dashboards/perses-dashboard-import"
-
-/**
- * Renders a dashboard request-decode failure as a `DashboardValidationError`
- * whose `details` name the widget and field at fault, instead of the runtime's
- * default empty 400 (see `./schema-error-detail`).
- */
-export const HttpDashboardSchemaErrorsLive = HttpApiMiddleware.layerSchemaErrorTransform(
-	DashboardSchemaErrors,
-	(schemaError) =>
-		Effect.suspend(() => {
-			const details = describeSchemaIssue(schemaError.cause.issue)
-			return Effect.fail(
-				new DashboardValidationError({
-					message: summarizeSchemaError(schemaError.kind, details),
-					details: details.map(({ line }) => line),
-				}),
-			)
-		}),
-)
 
 export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (handlers) =>
 	Effect.gen(function* () {

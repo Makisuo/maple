@@ -5,7 +5,8 @@ import {
 	isWarehouseErrorTag,
 	presentWarehouseError,
 	presentWarehouseErrorPublic,
-	warehouseErrorMeta,
+	warehouseErrorCode,
+	warehouseErrorTitle,
 	type WarehouseErrorLike,
 } from "@maple/domain"
 import { formatRelativeFrom } from "@maple/ui/lib/time-format"
@@ -330,21 +331,21 @@ const normalizeWarehouse = (
 	}
 	const withDetails = presentWarehouseError(like)
 	const withoutDetails = presentWarehouseErrorPublic(like)
+	const ownTitle = warehouseErrorTitle(like)
 	// Validation copy is authored by Maple and directly helps the user. A generic
 	// query error may also be reclassified from an embedded status into safe,
 	// Maple-authored outage copy. Everything else drops driver/SQL/decoder text.
 	const presentation =
-		tag === "@maple/http/errors/WarehouseValidationError" ||
-		withDetails.title !== warehouseErrorMeta[tag].title
+		tag === "@maple/http/errors/WarehouseValidationError" || withDetails.title !== ownTitle
 			? withDetails
 			: withoutDetails
 	const category =
-		withDetails.title === warehouseErrorMeta["@maple/http/errors/WarehouseUpstreamError"].title
+		withDetails.title === warehouseErrorTitle({ _tag: "@maple/http/errors/WarehouseUpstreamError" })
 			? "upstream"
 			: warehouseCategory(tag)
 	return normalized(value, {
 		category,
-		code: warehouseErrorMeta[tag].code,
+		code: warehouseErrorCode(like),
 		title: presentation.title,
 		description: presentation.description,
 		tag,
@@ -476,7 +477,7 @@ const normalizeTaggedError = (value: { _tag: string; [key: string]: unknown }): 
 			technicalMessage: rawStringField(value, "causeMessage") ?? technicalMessage,
 		})
 	}
-	if (tag.endsWith("/UnauthorizedError") || tag.endsWith('AuthenticationError')) {
+	if (tag.endsWith("/UnauthorizedError") || tag.endsWith("AuthenticationError")) {
 		return normalized(value, {
 			category: "authentication",
 			title: "Sign in required",
@@ -503,7 +504,7 @@ const normalizeTaggedError = (value: { _tag: string; [key: string]: unknown }): 
 			technicalMessage,
 		})
 	}
-	if (tag.endsWith('NotFoundError')) {
+	if (tag.endsWith("NotFoundError")) {
 		return normalized(value, {
 			category: "not-found",
 			title: "Not found",

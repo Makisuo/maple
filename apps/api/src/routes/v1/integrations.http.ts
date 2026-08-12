@@ -1296,6 +1296,10 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 					),
 				),
 				Effect.catchTags({
+					"@maple/http/errors/IntegrationsConfigurationError": () =>
+						Effect.succeed(
+							planetscaleErrorPage("PlanetScale integration is not configured in Maple"),
+						),
 					// Validation/upstream messages are our own sanitized strings — showing
 					// them turns "it failed" into something actionable.
 					"@maple/http/errors/IntegrationsValidationError": (error) =>

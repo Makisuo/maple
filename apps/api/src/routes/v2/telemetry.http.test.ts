@@ -16,7 +16,7 @@ import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { QueryEngineService, type QueryEngineServiceShape } from "@/services/warehouse/QueryEngineService"
-import { V2SchemaErrorsLive } from "./error-envelope"
+import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
@@ -235,7 +235,7 @@ const makeHarness = (
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(telemetryLive),
-		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(V2TransportErrorBoundaryLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(AlertsServiceStubLayer),

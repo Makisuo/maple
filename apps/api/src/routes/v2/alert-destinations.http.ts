@@ -5,6 +5,7 @@ import {
 	DiscordAlertDestinationConfig,
 	EmailAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
+	AlertNotFoundError,
 	PagerDutyAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
@@ -15,10 +16,9 @@ import type {
 	V2AlertDestinationMutationResponse,
 	V2AlertDestinationUpdateParams,
 } from "@maple/domain/http/v2"
-import { MapleApiV2, paginateArray, resourceNotFound } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray, toV2Error } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
-import { mapAlertError } from "./alerts-error-map"
 
 const toV2Destination = (doc: AlertDestinationDocument): V2AlertDestination => ({
 	id: doc.id,
@@ -164,7 +164,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 					const tenant = yield* CurrentTenant.Context
 					const response = yield* destinations
 						.listDestinations(tenant.orgId)
-						.pipe(mapAlertError("destination_list"))
+						.pipe(Effect.mapError(toV2Error))
 					const page = yield* paginateArray(response.destinations.map(toV2Destination), query)
 					return { object: "list" as const, ...page }
 				}),
@@ -174,11 +174,17 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 					const tenant = yield* CurrentTenant.Context
 					const response = yield* destinations
 						.listDestinations(tenant.orgId)
-						.pipe(mapAlertError("destination_list"))
+						.pipe(Effect.mapError(toV2Error))
 					const destination = response.destinations.find((doc) => doc.id === params.id)
 					if (destination === undefined)
 						return yield* Effect.fail(
-							resourceNotFound("alert_destination", "No such alert destination."),
+							toV2Error(
+								new AlertNotFoundError({
+									message: "No such alert destination.",
+									resourceType: "destination",
+									resourceId: params.id,
+								}),
+							),
 						)
 					return toV2Destination(destination)
 				}),
@@ -193,7 +199,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 							tenant.roles,
 							toCreateRequest(payload),
 						)
-						.pipe(mapAlertError("destination_create"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2DestinationMutation(created)
 				}),
 			)
@@ -208,7 +214,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 							params.id,
 							toUpdateRequest(payload),
 						)
-						.pipe(mapAlertError("destination_update"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2DestinationMutation(updated)
 				}),
 			)
@@ -217,7 +223,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* destinations
 						.deleteDestination(tenant.orgId, tenant.roles, params.id)
-						.pipe(mapAlertError("destination_delete"))
+						.pipe(Effect.mapError(toV2Error))
 					return {
 						id: deleted.id,
 						object: "alert_destination" as const,
@@ -231,7 +237,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 					const tenant = yield* CurrentTenant.Context
 					const result = yield* destinations
 						.testDestination(tenant.orgId, tenant.userId, tenant.roles, params.id)
-						.pipe(mapAlertError("destination_test"))
+						.pipe(Effect.mapError(toV2Error))
 					return {
 						object: "alert_destination.test_result" as const,
 						success: result.success,

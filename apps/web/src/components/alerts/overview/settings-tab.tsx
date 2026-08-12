@@ -88,7 +88,7 @@ export function useDestinationManager(): DestinationManager {
 		// `as never`: the generated client collapses the discriminated-union payload
 		// to a single member in its inferred signature; the builders return the
 		// correctly-typed union, so the cast only bridges that inference gap.
-		const result = editing
+		const result: unknown = editing
 			? await updateDestination({
 					params: { id: editing.id },
 					payload: buildDestinationUpdateParamsV2(form) as never,
@@ -99,7 +99,7 @@ export function useDestinationManager(): DestinationManager {
 					reactivityKeys: ["alertDestinations"],
 				})
 
-		if (Exit.isSuccess(result)) {
+		if (Exit.isExit(result) && Exit.isSuccess(result)) {
 			toastManager.add({
 				title: editing ? "Destination updated" : "Destination created",
 				type: "success",

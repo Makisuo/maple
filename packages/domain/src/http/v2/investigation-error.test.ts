@@ -1,9 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
-import { IsoDateTimeString } from "../../primitives"
+import { InvestigationId, IsoDateTimeString } from "../../primitives"
 import {
 	InvestigationAgentUnavailableError,
 	InvestigationAutomationDisabledError,
+	InvestigationDataCorruptionError,
 	InvestigationNotFoundError,
 	InvestigationPersistenceError,
 	InvestigationQuotaError,
@@ -11,12 +12,13 @@ import {
 	InvestigationStartFailedError,
 	InvestigationValidationError,
 } from "../investigations"
-import { investigationErrorToV2 } from "./investigation-error"
+import { toV2Error } from "./public-error"
 
-const map = investigationErrorToV2("restart")
+const map = toV2Error
 const retryableAt = Schema.decodeUnknownSync(IsoDateTimeString)("2026-08-12T00:00:00.000Z")
+const investigationId = Schema.decodeUnknownSync(InvestigationId)("00000000-0000-0000-0000-000000000000")
 
-describe("investigationErrorToV2", () => {
+describe("investigation public errors", () => {
 	it("preserves each unique domain tag in the public envelope", () => {
 		const errors = [
 			new InvestigationPersistenceError({ message: "db failed" }),
@@ -32,6 +34,12 @@ describe("investigationErrorToV2", () => {
 			new InvestigationAgentUnavailableError({ message: "agent unavailable" }),
 			new InvestigationStartFailedError({ message: "start failed" }),
 			new InvestigationRejectedError({ message: "rejected", status: 401 }),
+			new InvestigationDataCorruptionError({
+				message: "invalid stored trace id",
+				investigationId,
+				field: "report.trace_id",
+				value: "invalid",
+			}),
 		] as const
 
 		for (const error of errors) {
@@ -53,9 +61,9 @@ describe("investigationErrorToV2", () => {
 		expect(rejected.error.recovery).toBe("reconnect")
 	})
 
-	it("retains operation codes and the absolute quota reset", () => {
+	it("uses tag-owned codes and retains the absolute quota reset", () => {
 		const persistence = map(new InvestigationPersistenceError({ message: "private db url" }))
-		expect(persistence.error.code).toBe("investigation_restart_unavailable")
+		expect(persistence.error.code).toBe("investigations_unavailable")
 		expect(persistence.error.message).not.toContain("private db url")
 
 		const quota = map(

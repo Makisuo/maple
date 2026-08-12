@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import {
+	IntegrationsConfigurationError,
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
 	IntegrationsRevokedError,
@@ -123,6 +124,7 @@ export interface PlanetScaleServiceShape {
 		options: PlanetScaleQueryInsightsOptions,
 	) => Effect.Effect<
 		PlanetScaleQueryInsightsResponse,
+		| IntegrationsConfigurationError
 		| IntegrationsNotConnectedError
 		| IntegrationsRevokedError
 		| IntegrationsValidationError

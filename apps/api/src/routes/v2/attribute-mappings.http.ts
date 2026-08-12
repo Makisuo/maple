@@ -1,30 +1,13 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import type {
-	IngestAttributeMapping,
-	IngestAttributeMappingId,
-	IngestAttributeMappingNotFoundError,
-	IngestAttributeMappingPersistenceError,
-	IngestAttributeMappingValidationError,
-	OrgId,
-} from "@maple/domain/http"
+import type { IngestAttributeMapping, IngestAttributeMappingId, OrgId } from "@maple/domain/http"
 import {
 	CreateIngestAttributeMappingRequest,
 	CurrentTenant,
+	IngestAttributeMappingNotFoundError,
 	UpdateIngestAttributeMappingRequest,
 } from "@maple/domain/http"
-import {
-	MapleApiV2,
-	dependencyUnavailable,
-	invalidRequest,
-	paginateArray,
-	resourceNotFound,
-} from "@maple/domain/http/v2"
-import type {
-	V2AttributeMapping,
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2ServiceUnavailableError,
-} from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray, toV2Error } from "@maple/domain/http/v2"
+import type { V2AttributeMapping } from "@maple/domain/http/v2"
 import { Array as Arr, Effect, Option } from "effect"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 
@@ -41,62 +24,11 @@ const toV2AttributeMapping = (mapping: IngestAttributeMapping): V2AttributeMappi
 	updated_at: mapping.updatedAt,
 })
 
-/** Service tagged errors → v2 envelope errors (endpoints without a 404). */
-const mapCommonError =
-	(operation: string) =>
-	<A, R>(
-		effect: Effect.Effect<
-			A,
-			IngestAttributeMappingValidationError | IngestAttributeMappingPersistenceError,
-			R
-		>,
-	): Effect.Effect<A, V2InvalidRequestError | V2ServiceUnavailableError, R> =>
-		effect.pipe(
-			Effect.catchTags({
-				"@maple/http/errors/IngestAttributeMappingValidationError": (error) =>
-					Effect.fail(invalidRequest("parameter_invalid", error.message)),
-				"@maple/http/errors/IngestAttributeMappingPersistenceError": () =>
-					Effect.fail(dependencyUnavailable(`attribute_mapping_${operation}_unavailable`)),
-			}),
-		)
-
-/** Service tagged errors → v2 envelope errors (endpoints with a 404). */
-const mapMutationError =
-	(operation: string) =>
-	<A, R>(
-		effect: Effect.Effect<
-			A,
-			| IngestAttributeMappingNotFoundError
-			| IngestAttributeMappingValidationError
-			| IngestAttributeMappingPersistenceError,
-			R
-		>,
-	): Effect.Effect<A, V2NotFoundError | V2InvalidRequestError | V2ServiceUnavailableError, R> =>
-		effect.pipe(
-			Effect.catchTags({
-				"@maple/http/errors/IngestAttributeMappingNotFoundError": () =>
-					Effect.fail(resourceNotFound("attribute_mapping", "No such attribute mapping.")),
-				"@maple/http/errors/IngestAttributeMappingValidationError": (error) =>
-					Effect.fail(invalidRequest("parameter_invalid", error.message)),
-				"@maple/http/errors/IngestAttributeMappingPersistenceError": () =>
-					Effect.fail(dependencyUnavailable(`attribute_mapping_${operation}_unavailable`)),
-			}),
-		)
-
-const mapPersistenceError = <A, R>(
-	effect: Effect.Effect<A, IngestAttributeMappingPersistenceError, R>,
-): Effect.Effect<A, V2ServiceUnavailableError, R> =>
-	effect.pipe(
-		Effect.catchTag("@maple/http/errors/IngestAttributeMappingPersistenceError", () =>
-			Effect.fail(dependencyUnavailable("attribute_mapping_list_unavailable")),
-		),
-	)
-
 export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "attributeMappings", (handlers) =>
 	Effect.gen(function* () {
 		const service = yield* IngestAttributeMappingService
 
-		const listMappings = (orgId: OrgId) => service.list(orgId).pipe(mapPersistenceError)
+		const listMappings = (orgId: OrgId) => service.list(orgId).pipe(Effect.mapError(toV2Error))
 
 		const findMapping = (orgId: OrgId, id: IngestAttributeMappingId) =>
 			listMappings(orgId).pipe(
@@ -106,7 +38,12 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 						{
 							onNone: () =>
 								Effect.fail(
-									resourceNotFound("attribute_mapping", "No such attribute mapping."),
+									toV2Error(
+										new IngestAttributeMappingNotFoundError({
+											mappingId: id,
+											message: "No such attribute mapping.",
+										}),
+									),
 								),
 							onSome: Effect.succeed,
 						},
@@ -145,7 +82,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
 							}),
 						)
-						.pipe(mapCommonError("create"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2AttributeMapping(created)
 				}),
 			)
@@ -171,7 +108,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
 							}),
 						)
-						.pipe(mapMutationError("update"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2AttributeMapping(updated)
 				}),
 			)
@@ -180,7 +117,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* service
 						.delete(tenant.orgId, params.id)
-						.pipe(mapMutationError("delete"))
+						.pipe(Effect.mapError(toV2Error))
 					return { id: deleted.id, object: "attribute_mapping" as const, deleted: true as const }
 				}),
 			)

@@ -8,8 +8,7 @@
 //
 // - `WAREHOUSE_ERROR_TAGS` / `warehouseErrorStatus` are DERIVED from the error
 //   classes themselves (same annotation-reading as `anticipated-errors.ts`).
-// - `warehouseErrorMeta` is a `Record` keyed by the tag union, so a tenth tag
-//   is a compile error HERE and nowhere else.
+// - Public HTTP codes/titles live on the error classes themselves.
 // - `presentWarehouseError` is the shared human-facing formatter. It is
 //   structural (works on wire-decoded objects, not just class instances) so
 //   the web app can feed it errors that crossed the HTTP boundary.
@@ -19,7 +18,12 @@
 
 import type { WarehouseError } from "./warehouse-errors"
 import { warehouseHttpErrors } from "./warehouse-errors"
-import type { HttpErrorPolicy } from "./error-policy"
+import {
+	publicHttpErrorPolicyFor,
+	type PublicHttpErrorPolicy,
+	type PublicHttpErrorStatus,
+	type PublicTaggedError,
+} from "./error-policy"
 
 export type WarehouseErrorTag = WarehouseError["_tag"]
 
@@ -55,100 +59,38 @@ export const warehouseErrorStatus: ReadonlyMap<WarehouseErrorTag, number> = new 
 	}),
 )
 
-export interface WarehouseErrorMeta extends HttpErrorPolicy {
-	/** Stable machine-readable slug for envelopes/failure categories. */
-	readonly code: string
-	/** Whose fault this is — drives copy tone, alerting, and on-call routing. */
-	readonly blame: "maple" | "customer" | "upstream"
+const warehouseErrorClassByTag = new Map<WarehouseErrorTag, Function>(
+	warehouseHttpErrors.map((cls) => [readTag(cls) as WarehouseErrorTag, cls]),
+)
+
+type WarehousePublicError = PublicTaggedError & WarehouseErrorLike
+
+const warehouseErrorPolicy = (
+	error: WarehouseErrorLike,
+): PublicHttpErrorPolicy<WarehousePublicError, PublicHttpErrorStatus> => {
+	const errorClass = warehouseErrorClassByTag.get(error._tag)
+	if (errorClass === undefined) throw new Error(`Unknown warehouse error tag: ${error._tag}`)
+	return publicHttpErrorPolicyFor<WarehousePublicError>(errorClass)
 }
 
-/**
- * Per-tag presentation metadata. Keyed by the tag UNION, so adding a warehouse
- * error class without extending this table is a compile error — in exactly one
- * file.
- */
-export const warehouseErrorMeta: Record<WarehouseErrorTag, WarehouseErrorMeta> = {
-	"@maple/http/errors/WarehouseQueryError": {
-		code: "warehouse_query_failed",
-		blame: "upstream",
-		title: "Database query failed",
-		retry: "never",
-		recovery: "contact_support",
-		origin: "dependency",
-		exposure: "redacted",
-	},
-	"@maple/http/errors/WarehouseUpstreamError": {
-		code: "warehouse_unavailable",
-		blame: "upstream",
-		title: "Database is temporarily unavailable",
-		retry: "backoff",
-		recovery: "retry",
-		origin: "dependency",
-		exposure: "redacted",
-	},
-	"@maple/http/errors/WarehouseAuthError": {
-		code: "warehouse_auth_failed",
-		blame: "customer",
-		title: "Database rejected our credentials",
-		retry: "never",
-		recovery: "reconnect",
-		origin: "client",
-		exposure: "redacted",
-	},
-	"@maple/http/errors/WarehouseConfigError": {
-		code: "warehouse_config_invalid",
-		blame: "customer",
-		title: "Database is not configured correctly",
-		retry: "never",
-		recovery: "reconnect",
-		origin: "client",
-		exposure: "redacted",
-	},
-	"@maple/http/errors/WarehouseClientError": {
-		code: "warehouse_client_error",
-		blame: "upstream",
-		title: "Database response could not be decoded",
-		retry: "never",
-		recovery: "contact_support",
-		origin: "dependency",
-		exposure: "redacted",
-	},
-	"@maple/http/errors/WarehouseSchemaDriftError": {
-		code: "warehouse_schema_drift",
-		blame: "customer",
-		title: "Database schema is out of date",
-		retry: "never",
-		recovery: "reconnect",
-		origin: "client",
-		exposure: "redacted",
-	},
-	"@maple/http/errors/WarehouseMalformedQueryError": {
-		code: "warehouse_malformed_query",
-		blame: "maple",
-		title: "This chart hit a bug in Maple",
-		retry: "never",
-		recovery: "contact_support",
-		origin: "maple",
-		exposure: "redacted",
-	},
-	"@maple/http/errors/WarehouseQuotaExceededError": {
-		code: "warehouse_quota_exceeded",
-		blame: "customer",
-		title: "Query was too expensive",
-		retry: "never",
-		recovery: "fix_request",
-		origin: "client",
-		exposure: "redacted",
-	},
-	"@maple/http/errors/WarehouseValidationError": {
-		code: "warehouse_validation_failed",
-		blame: "customer",
-		title: "Invalid query",
-		retry: "never",
-		recovery: "fix_request",
-		origin: "client",
-		exposure: "public_message",
-	},
+const resolvePolicyValue = <Value>(
+	value: Value | ((error: WarehousePublicError) => Value),
+	error: WarehouseErrorLike,
+): Value =>
+	typeof value === "function"
+		? (value as (error: WarehousePublicError) => Value)({ message: error.message ?? "", ...error })
+		: value
+
+/** Stable machine-readable code owned by the warehouse error class. */
+export const warehouseErrorCode = (error: WarehouseErrorLike): string => {
+	const policy = warehouseErrorPolicy(error)
+	return resolvePolicyValue(policy.code, error)
+}
+
+/** Public title owned by the warehouse error class. */
+export const warehouseErrorTitle = (error: WarehouseErrorLike): string => {
+	const policy = warehouseErrorPolicy(error)
+	return resolvePolicyValue(policy.title, error)
 }
 
 /**
@@ -212,32 +154,32 @@ export interface PresentedWarehouseError {
  * instances; both get identical copy.
  */
 export const presentWarehouseError = (error: WarehouseErrorLike): PresentedWarehouseError => {
-	const meta = warehouseErrorMeta[error._tag]
+	const title = warehouseErrorTitle(error)
 	const message = error.message !== undefined ? cleanErrorMessage(error.message) : undefined
 	switch (error._tag) {
 		case "@maple/http/errors/WarehouseQuotaExceededError": {
 			const setting = error.setting ?? "limit"
 			return {
-				title: meta.title,
+				title,
 				description:
 					QUOTA_DESCRIPTIONS[setting] ??
 					`Query exceeded the ${setting} limit. Narrow the time range or add filters.`,
 			}
 		}
 		case "@maple/http/errors/WarehouseAuthError":
-			return { title: meta.title, description: authDescription(error.upstreamStatus) }
+			return { title, description: authDescription(error.upstreamStatus) }
 		case "@maple/http/errors/WarehouseUpstreamError":
 			return {
-				title: meta.title,
+				title,
 				description:
 					error.upstreamStatus !== undefined
 						? `The query backend returned ${error.upstreamStatus}. Retry in a few seconds.`
 						: "The query backend is unreachable. Retry in a few seconds.",
 			}
 		case "@maple/http/errors/WarehouseConfigError":
-			return { title: meta.title, description: message ?? "Database is not configured correctly." }
+			return { title, description: message ?? "Database is not configured correctly." }
 		case "@maple/http/errors/WarehouseClientError":
-			return { title: meta.title, description: message ?? "Database response could not be decoded." }
+			return { title, description: message ?? "Database response could not be decoded." }
 		case "@maple/http/errors/WarehouseSchemaDriftError": {
 			// `kind: "decode"` = the CLUSTER answered fine but the rows failed
 			// Maple's own row schema — schema apply cannot fix that, so don't
@@ -249,7 +191,7 @@ export const presentWarehouseError = (error: WarehouseErrorLike): PresentedWareh
 				}
 			}
 			return {
-				title: meta.title,
+				title,
 				description: `${message ?? "A column Maple expects is missing from the cluster."} Run schema apply from your ClickHouse settings.`,
 			}
 		}
@@ -257,12 +199,12 @@ export const presentWarehouseError = (error: WarehouseErrorLike): PresentedWareh
 			// Maple generated SQL the database refused to plan. Nothing the user
 			// can do — do not send them to their database settings.
 			return {
-				title: meta.title,
+				title,
 				description:
 					"Maple built a query its own database rejected. This is our fault, not a problem with your data or your cluster — we have been alerted.",
 			}
 		case "@maple/http/errors/WarehouseValidationError":
-			return { title: meta.title, description: message ?? "The query was rejected before running." }
+			return { title, description: message ?? "The query was rejected before running." }
 		case "@maple/http/errors/WarehouseQueryError": {
 			// Generic SQL/query failure. Some transient failures still arrive with
 			// only a status code embedded in the message (e.g. a 5xx HTML body), so
@@ -271,23 +213,23 @@ export const presentWarehouseError = (error: WarehouseErrorLike): PresentedWareh
 			const upstreamStatus = extractUpstreamStatus(text)
 			if (upstreamStatus === 401 || upstreamStatus === 403) {
 				return {
-					title: warehouseErrorMeta["@maple/http/errors/WarehouseAuthError"].title,
+					title: warehouseErrorTitle({ _tag: "@maple/http/errors/WarehouseAuthError" }),
 					description: authDescription(upstreamStatus),
 				}
 			}
 			if (upstreamStatus !== undefined && upstreamStatus >= 500 && upstreamStatus < 600) {
 				return {
-					title: warehouseErrorMeta["@maple/http/errors/WarehouseUpstreamError"].title,
+					title: warehouseErrorTitle({ _tag: "@maple/http/errors/WarehouseUpstreamError" }),
 					description: `The query backend returned ${upstreamStatus}. Retry in a few seconds.`,
 				}
 			}
-			return { title: meta.title, description: text }
+			return { title, description: text }
 		}
 	}
 }
 
 export const isWarehouseErrorTag = (tag: string): tag is WarehouseErrorTag =>
-	Object.hasOwn(warehouseErrorMeta, tag)
+	warehouseErrorClassByTag.has(tag as WarehouseErrorTag)
 
 /**
  * Presentation with the raw upstream message REDACTED — every description

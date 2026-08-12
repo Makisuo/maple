@@ -2,10 +2,9 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { AlertIncidentDocument } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import type { V2AlertIncident } from "@maple/domain/http/v2"
-import { MapleApiV2, paginateOffsetQuery } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateOffsetQuery, toV2Error } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
-import { mapAlertError } from "./alerts-error-map"
 
 const toV2Incident = (doc: AlertIncidentDocument): V2AlertIncident => ({
 	id: doc.id,
@@ -47,7 +46,7 @@ export const HttpV2AlertIncidentsLive = HttpApiBuilder.group(MapleApiV2, "alertI
 								offset,
 							})
 							.pipe(
-								mapAlertError("incident_list"),
+								Effect.mapError(toV2Error),
 								Effect.map((response) => response.incidents.map(toV2Incident)),
 							),
 					)
@@ -59,7 +58,7 @@ export const HttpV2AlertIncidentsLive = HttpApiBuilder.group(MapleApiV2, "alertI
 					const tenant = yield* CurrentTenant.Context
 					const incident = yield* readModels
 						.getIncident(tenant.orgId, params.id)
-						.pipe(mapAlertError("incident_retrieve"))
+						.pipe(Effect.mapError(toV2Error))
 					return toV2Incident(incident)
 				}),
 			)

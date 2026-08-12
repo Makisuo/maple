@@ -20,6 +20,7 @@ import {
 	TinybirdDateTime,
 } from "../query-engine"
 import { Authorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 import { warehouseHttpErrors } from "./warehouse"
 
 // Dedicated endpoint schemas
@@ -1666,31 +1667,74 @@ export class RawSqlValidationError extends Schema.TaggedError<RawSqlValidationEr
 	{ httpApiStatus: 400 },
 ) {}
 
-export class QueryEngineValidationError extends Schema.TaggedError<QueryEngineValidationError>()(
+export class QueryEngineValidationError extends HttpTaggedError<QueryEngineValidationError>()(
 	"@maple/http/errors/QueryEngineValidationError",
 	{
 		message: Schema.String,
 		details: Schema.Array(Schema.String),
 	},
-	{ httpApiStatus: 400 },
+	{
+		status: 400,
+		code: "query_engine_invalid",
+		title: "Invalid query",
+		param: "aggregation",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
 ) {}
 
-export class QueryEngineExecutionError extends Schema.TaggedError<QueryEngineExecutionError>()(
+export class QueryEngineExecutionError extends HttpTaggedError<QueryEngineExecutionError>()(
 	"@maple/http/errors/QueryEngineExecutionError",
 	{
 		message: Schema.String,
 		causeMessage: Schema.optional(Schema.String),
 		pipeName: Schema.optional(Schema.String),
 	},
-	{ httpApiStatus: 502 },
+	{
+		status: 502,
+		code: "query_engine_failed",
+		title: "Query failed",
+		message: "The aggregation query could not be completed.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
 ) {}
 
-export class QueryEngineTimeoutError extends Schema.TaggedError<QueryEngineTimeoutError>()(
+export class QueryEngineTimeoutError extends HttpTaggedError<QueryEngineTimeoutError>()(
 	"@maple/http/errors/QueryEngineTimeoutError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 504 },
+	{
+		status: 504,
+		code: "query_engine_timeout",
+		title: "Query timed out",
+		message: "The aggregation query timed out. Retry with a narrower time range.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
+) {}
+
+/** The query engine returned a result variant that cannot satisfy the requested operation. */
+export class QueryEngineResultMismatchError extends HttpTaggedError<QueryEngineResultMismatchError>()(
+	"@maple/http/errors/QueryEngineResultMismatchError",
+	{
+		message: Schema.String,
+		expectedKind: Schema.String,
+		actualKind: Schema.String,
+	},
+	{
+		status: 500,
+		code: "query_engine_result_mismatch",
+		title: "Maple returned an invalid query result",
+		message: "Maple returned an invalid result for this query.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
 ) {}
 
 // Shared arrays — passing the same reference to every endpoint avoids

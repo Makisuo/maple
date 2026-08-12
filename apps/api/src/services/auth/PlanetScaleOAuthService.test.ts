@@ -175,7 +175,7 @@ describe("PlanetScaleOAuthService", () => {
 			const error = yield* service
 				.startConnect(asOrgId("org_a"), asUserId("user_a"), { callbackUrl: CALLBACK_URL })
 				.pipe(Effect.flip)
-			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsConfigurationError")
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -186,8 +186,8 @@ describe("PlanetScaleOAuthService", () => {
 			const error = yield* service
 				.startConnect(asOrgId("org_a"), asUserId("user_a"), { callbackUrl: CALLBACK_URL })
 				.pipe(Effect.flip)
-			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
-			if (error._tag === "@maple/http/errors/IntegrationsValidationError") {
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsConfigurationError")
+			if (error._tag === "@maple/http/errors/IntegrationsConfigurationError") {
 				assert.include(error.message, "PLANETSCALE_OAUTH_CLIENT_SECRET")
 			}
 		}).pipe(Effect.provide(makeLayer(testDb, { PLANETSCALE_OAUTH_CLIENT_ID: "ps-client-id" })))

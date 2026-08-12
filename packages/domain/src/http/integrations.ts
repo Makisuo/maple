@@ -2,6 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ExternalUserId, ScrapeTargetId, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 import {
 	GitCommitSha,
 	VcsAccountType,
@@ -694,55 +695,126 @@ export class VcsCommitDetailsResponse extends Schema.Class<VcsCommitDetailsRespo
 /** Upper bound on SHAs per bulk commit lookup — one page of a list view. */
 export const VCS_COMMIT_DETAILS_MAX_SHAS = 50
 
-export class IntegrationsForbiddenError extends Schema.TaggedError<IntegrationsForbiddenError>()(
+export class IntegrationsForbiddenError extends HttpTaggedError<IntegrationsForbiddenError>()(
 	"@maple/http/errors/IntegrationsForbiddenError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 403 },
+	{
+		status: 403,
+		code: "integration_forbidden",
+		title: "Permission required",
+		retry: "never",
+		recovery: "request_access",
+		exposure: "public_message",
+	},
 ) {}
 
-export class IntegrationsValidationError extends Schema.TaggedError<IntegrationsValidationError>()(
+export class IntegrationsValidationError extends HttpTaggedError<IntegrationsValidationError>()(
 	"@maple/http/errors/IntegrationsValidationError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 400 },
+	{
+		status: 400,
+		code: "integration_request_invalid",
+		title: "Invalid integration request",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
 ) {}
 
-export class IntegrationsNotConnectedError extends Schema.TaggedError<IntegrationsNotConnectedError>()(
+/** Maple cannot start an integration because its server-side configuration is incomplete. */
+export class IntegrationsConfigurationError extends HttpTaggedError<IntegrationsConfigurationError>()(
+	"@maple/http/errors/IntegrationsConfigurationError",
+	{
+		message: Schema.String,
+	},
+	{
+		status: 503,
+		code: "integration_not_configured",
+		title: "Integration is not configured",
+		message: "This integration is not configured in Maple. Contact support.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+export class IntegrationsNotConnectedError extends HttpTaggedError<IntegrationsNotConnectedError>()(
 	"@maple/http/errors/IntegrationsNotConnectedError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 409 },
+	{
+		status: 409,
+		code: "integration_not_connected",
+		title: "Integration not connected",
+		retry: "never",
+		recovery: "reconnect",
+		exposure: "public_message",
+	},
 ) {}
 
-export class IntegrationsRevokedError extends Schema.TaggedError<IntegrationsRevokedError>()(
+export class IntegrationsRevokedError extends HttpTaggedError<IntegrationsRevokedError>()(
 	"@maple/http/errors/IntegrationsRevokedError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 401 },
+	{
+		status: 401,
+		code: "integration_authorization_revoked",
+		title: "Integration authorization revoked",
+		message: "The integration authorization was revoked. Reconnect and try again.",
+		retry: "never",
+		recovery: "reconnect",
+		exposure: "redacted",
+	},
 ) {}
 
-export class IntegrationsUpstreamError extends Schema.TaggedError<IntegrationsUpstreamError>()(
+export class IntegrationsUpstreamError extends HttpTaggedError<IntegrationsUpstreamError>()(
 	"@maple/http/errors/IntegrationsUpstreamError",
 	{
 		message: Schema.String,
 		status: Schema.optionalKey(Schema.Number),
 		cause: Schema.optionalKey(Schema.Defect()),
 	},
-	{ httpApiStatus: 502 },
+	{
+		status: 502,
+		code: "integration_upstream_error",
+		title: "Integration provider is unavailable",
+		message: "The integration provider could not complete the request.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class IntegrationsPersistenceError extends Schema.TaggedError<IntegrationsPersistenceError>()(
+export class IntegrationsPersistenceError extends HttpTaggedError<IntegrationsPersistenceError>()(
 	"@maple/http/errors/IntegrationsPersistenceError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "integration_persistence_unavailable",
+		title: "Integrations are temporarily unavailable",
+		message: "Integrations are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
+
+export type IntegrationHttpError =
+	| IntegrationsForbiddenError
+	| IntegrationsConfigurationError
+	| IntegrationsNotConnectedError
+	| IntegrationsRevokedError
+	| IntegrationsValidationError
+	| IntegrationsUpstreamError
+	| IntegrationsPersistenceError
 
 /**
  * Every `/api/integrations/planetscale/*` operation below is superseded by the
@@ -870,12 +942,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 		HttpApiEndpoint.post("planetscaleStart", "/planetscale/start", {
 			payload: PlanetScaleStartConnectRequest,
 			success: PlanetScaleStartConnectResponse,
-			error: [
-				IntegrationsForbiddenError,
-				IntegrationsValidationError,
-				IntegrationsUpstreamError,
-				IntegrationsPersistenceError,
-			],
+			error: [IntegrationsForbiddenError, IntegrationsConfigurationError, IntegrationsPersistenceError],
 		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
@@ -885,6 +952,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			success: PlanetScaleOrganizationsResponse,
 			error: [
 				IntegrationsForbiddenError,
+				IntegrationsConfigurationError,
 				IntegrationsValidationError,
 				IntegrationsNotConnectedError,
 				IntegrationsRevokedError,
@@ -902,6 +970,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			success: PlanetScaleIntegrationStatus,
 			error: [
 				IntegrationsForbiddenError,
+				IntegrationsConfigurationError,
 				IntegrationsValidationError,
 				IntegrationsNotConnectedError,
 				IntegrationsRevokedError,
@@ -918,6 +987,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			success: PlanetScaleIntegrationStatus,
 			error: [
 				IntegrationsForbiddenError,
+				IntegrationsConfigurationError,
 				IntegrationsNotConnectedError,
 				IntegrationsValidationError,
 				IntegrationsUpstreamError,
@@ -950,6 +1020,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			payload: PlanetScaleQueryInsightsRequest,
 			success: PlanetScaleQueryInsightsResponse,
 			error: [
+				IntegrationsConfigurationError,
 				IntegrationsNotConnectedError,
 				IntegrationsValidationError,
 				IntegrationsRevokedError,

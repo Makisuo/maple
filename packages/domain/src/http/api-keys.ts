@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
+import { HttpTaggedError } from "./error-policy"
 import { ApiKeyId, PostgresTransactionId, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
 
@@ -56,38 +57,70 @@ export class CreateApiKeyRequest extends Schema.Class<CreateApiKeyRequest>("Crea
 	scopes: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
-export class ApiKeyPersistenceError extends Schema.TaggedError<ApiKeyPersistenceError>()(
+export class ApiKeyPersistenceError extends HttpTaggedError<ApiKeyPersistenceError>()(
 	"@maple/http/errors/ApiKeyPersistenceError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "api_keys_unavailable",
+		title: "API keys are temporarily unavailable",
+		message: "API keys are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class ApiKeyLookupPersistenceError extends Schema.TaggedError<ApiKeyLookupPersistenceError>()(
+export class ApiKeyLookupPersistenceError extends HttpTaggedError<ApiKeyLookupPersistenceError>()(
 	"@maple/http/errors/ApiKeyLookupPersistenceError",
 	{
 		message: Schema.String,
 		cause: Schema.Defect(),
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "api_key_lookup_unavailable",
+		title: "Service temporarily unavailable",
+		message: "A service required for this operation is temporarily unavailable; retry with backoff.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class ApiKeyForbiddenError extends Schema.TaggedError<ApiKeyForbiddenError>()(
+export class ApiKeyForbiddenError extends HttpTaggedError<ApiKeyForbiddenError>()(
 	"@maple/http/errors/ApiKeyForbiddenError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 403 },
+	{
+		status: 403,
+		code: "api_key_forbidden",
+		title: "Permission required",
+		retry: "never",
+		recovery: "request_access",
+		exposure: "public_message",
+	},
 ) {}
 
-export class ApiKeyNotFoundError extends Schema.TaggedError<ApiKeyNotFoundError>()(
+export class ApiKeyNotFoundError extends HttpTaggedError<ApiKeyNotFoundError>()(
 	"@maple/http/errors/ApiKeyNotFoundError",
 	{
 		keyId: ApiKeyId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "api_key_not_found",
+		title: "API key not found",
+		message: "No such API key.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
 export class ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")

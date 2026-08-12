@@ -163,10 +163,9 @@ export function runWarehouseQuery<A>(
  * `runWarehouseQuery` against the v2 client.
  *
  * Same span + error normalization, different client layer and a wider input
- * error type: the v2 endpoints fail with the public envelope union
- * (`V2InvalidRequestError`, `V2PayloadTooLargeError`, …) rather than the v1
- * warehouse tags. Both forms pass through unchanged so the UI retains the
- * server's status, code, and remediation copy.
+ * error type: each v2 endpoint exposes its own literal `_tag` envelope union.
+ * Those envelopes pass through unchanged so the UI retains the server's exact
+ * semantic tag, status, code, and remediation copy.
  */
 export function runWarehouseQueryV2<A, E>(
 	operation: string,
