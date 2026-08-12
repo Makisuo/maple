@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
 	bucketTimeline,
+	cacheSnapSecondsForRange,
 	computeBucketSeconds,
 	formatWarehouseDateTime,
 	formatWarehouseDateTimeMs,
@@ -8,6 +9,7 @@ import {
 	relativeRangeSeconds,
 	resolveRelativeRange,
 	resolveRelativeRangeToWarehouse,
+	snapRangeForCache,
 	warehouseDateTimeToIso,
 } from "./datetime"
 
@@ -238,5 +240,117 @@ describe("resolveRelativeRangeToWarehouse", () => {
 
 	it("propagates null for invalid shorthand", () => {
 		expect(resolveRelativeRangeToWarehouse("nope")).toBeNull()
+	})
+})
+
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
+
+describe("cacheSnapSecondsForRange", () => {
+	it("coarsens the grid as the window widens", () => {
+		expect(cacheSnapSecondsForRange(30 * 60 * 1000)).toBe(15)
+		expect(cacheSnapSecondsForRange(HOUR_MS)).toBe(15)
+		expect(cacheSnapSecondsForRange(6 * HOUR_MS)).toBe(60)
+		expect(cacheSnapSecondsForRange(12 * HOUR_MS)).toBe(300)
+		expect(cacheSnapSecondsForRange(DAY_MS)).toBe(300)
+		expect(cacheSnapSecondsForRange(7 * DAY_MS)).toBe(900)
+		expect(cacheSnapSecondsForRange(30 * DAY_MS)).toBe(1800)
+	})
+
+	// Worst case is just above a rung boundary, where the wider grid has just
+	// kicked in but the window has not grown to match. The peak is 1h+ε on the
+	// 1m rung (1.67%); each later boundary is milder (6h+ε 1.39%, 24h+ε 1.04%,
+	// 7d+ε 0.30%).
+	it("keeps drift under 2% of the window at every rung boundary", () => {
+		for (const rangeMs of [
+			HOUR_MS,
+			HOUR_MS + 1,
+			6 * HOUR_MS,
+			6 * HOUR_MS + 1,
+			12 * HOUR_MS,
+			DAY_MS,
+			DAY_MS + 1,
+			7 * DAY_MS,
+			7 * DAY_MS + 1,
+			30 * DAY_MS,
+		]) {
+			expect((cacheSnapSecondsForRange(rangeMs) * 1000) / rangeMs).toBeLessThan(0.02)
+		}
+	})
+
+	it("bounds absolute drift by window class", () => {
+		// The guarantee users actually feel, in wall-clock terms.
+		expect(cacheSnapSecondsForRange(6 * HOUR_MS)).toBeLessThanOrEqual(60)
+		expect(cacheSnapSecondsForRange(DAY_MS)).toBeLessThanOrEqual(300)
+		expect(cacheSnapSecondsForRange(7 * DAY_MS)).toBeLessThanOrEqual(900)
+		expect(cacheSnapSecondsForRange(90 * DAY_MS)).toBeLessThanOrEqual(1800)
+	})
+
+	it("falls back to the finest rung for degenerate widths", () => {
+		expect(cacheSnapSecondsForRange(0)).toBe(15)
+		expect(cacheSnapSecondsForRange(-1)).toBe(15)
+		expect(cacheSnapSecondsForRange(Number.NaN)).toBe(15)
+	})
+})
+
+describe("snapRangeForCache", () => {
+	// The point of the whole exercise: `now` drifting within one grid cell must
+	// produce a byte-identical range, because that range becomes the cache key.
+	it("collapses clock drift inside a grid cell to one key", () => {
+		const at = (iso: string) => resolveRelativeRangeToWarehouse("12h", Date.parse(iso))!
+
+		const early = snapRangeForCache(at("2026-03-08T14:31:02.000Z"))
+		const late = snapRangeForCache(at("2026-03-08T14:34:59.000Z"))
+
+		expect(early).toEqual(late)
+		expect(early.endTime).toBe("2026-03-08 14:30:00")
+		expect(early.startTime).toBe("2026-03-08 02:30:00")
+	})
+
+	it("advances once the next cell is reached", () => {
+		const at = (iso: string) => resolveRelativeRangeToWarehouse("12h", Date.parse(iso))!
+
+		expect(snapRangeForCache(at("2026-03-08T14:34:59.000Z")).endTime).toBe("2026-03-08 14:30:00")
+		expect(snapRangeForCache(at("2026-03-08T14:35:00.000Z")).endTime).toBe("2026-03-08 14:35:00")
+	})
+
+	it("holds the window width exactly constant across the ladder", () => {
+		for (const shorthand of ["30m", "1h", "6h", "12h", "1d", "7d", "30d"]) {
+			// Sweep offsets that straddle grid boundaries — flooring both bounds
+			// independently would make the width oscillate by one grid step here.
+			for (const offsetMs of [0, 1000, 61_000, 299_000, 899_000, 1_799_000]) {
+				const resolved = resolveRelativeRangeToWarehouse(
+					shorthand,
+					Date.parse("2026-03-08T14:30:00.000Z") + offsetMs,
+				)!
+				const before =
+					parseWarehouseDateTime(resolved.endTime) - parseWarehouseDateTime(resolved.startTime)
+
+				const snapped = snapRangeForCache(resolved)
+				const after =
+					parseWarehouseDateTime(snapped.endTime) - parseWarehouseDateTime(snapped.startTime)
+
+				expect(after).toBe(before)
+			}
+		}
+	})
+
+	it("never moves the endpoint forward", () => {
+		const resolved = resolveRelativeRangeToWarehouse("12h", Date.parse("2026-03-08T14:34:59.000Z"))!
+		const snapped = snapRangeForCache(resolved)
+
+		expect(parseWarehouseDateTime(snapped.endTime)).toBeLessThanOrEqual(
+			parseWarehouseDateTime(resolved.endTime),
+		)
+	})
+
+	it("passes unparseable input through untouched", () => {
+		const garbage = { startTime: "not-a-date", endTime: "also-not" }
+		expect(snapRangeForCache(garbage)).toBe(garbage)
+	})
+
+	it("passes an inverted range through untouched", () => {
+		const inverted = { startTime: "2026-03-08 14:30:00", endTime: "2026-03-08 02:30:00" }
+		expect(snapRangeForCache(inverted)).toBe(inverted)
 	})
 })

@@ -1160,10 +1160,39 @@ function shapeMetricsGroupRows<
 	)
 }
 
+/**
+ * Per-call routing overrides. Not part of the request contract: these are retry
+ * knobs a caller sets after a first attempt failed, never something a client
+ * sends.
+ */
+export interface QueryEngineExecuteOptions {
+	/**
+	 * Restricts which service-overview rollup tiers may answer a traces
+	 * timeseries. Set to `"hour"` to retry on a cluster missing migration 0015.
+	 */
+	readonly overviewTiers?: "hour" | "minute"
+}
+
+/**
+ * A ClickHouse cluster that has not applied migration 0015 answers any read of
+ * `service_overview_minutely` with `UNKNOWN_TABLE`, and the table name is always
+ * in the message. Matching the name rather than the error tag keeps this working
+ * across every layer the warehouse error is re-wrapped by on its way here.
+ */
+const isMissingServiceOverviewMinutely = (error: unknown): boolean => {
+	if (typeof error !== "object" || error === null) return false
+	const candidate = error as { readonly clickhouseType?: unknown; readonly message?: unknown }
+	if (typeof candidate.message === "string" && /service_overview_minutely/i.test(candidate.message)) {
+		return true
+	}
+	return candidate.clickhouseType === "UNKNOWN_TABLE"
+}
+
 export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
 	Effect.fn("QueryEngineService.execute")(function* (
 		tenant: T,
 		request: QueryEngineExecuteRequest,
+		options?: QueryEngineExecuteOptions,
 	): Effect.fn.Return<
 		QueryEngineExecuteResponse,
 		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
@@ -1204,29 +1233,61 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
 
 			if (tracesQuery.allMetrics) {
-				const rows = yield* executeCHQuery(
-					warehouse,
-					tenant,
-					(capabilities) =>
-						CH.tracesTimeseriesQuery({
-							...opts,
-							attributeIndexMode: attributeIndexMode(capabilities, "traces"),
-							metric: tracesQuery.metric,
-							allMetrics: true,
-							needsSampling: true,
-							groupBy: tracesQuery.groupBy as string[] | undefined,
-							apdexThresholdMs:
-								tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
+				const runAllMetrics = (overviewTiers: "hour" | "minute" | undefined) =>
+					executeCHQuery(
+						warehouse,
+						tenant,
+						(capabilities) =>
+							CH.tracesTimeseriesQuery({
+								...opts,
+								attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+								metric: tracesQuery.metric,
+								allMetrics: true,
+								needsSampling: true,
+								groupBy: tracesQuery.groupBy as string[] | undefined,
+								apdexThresholdMs:
+									tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
+								bucketSeconds: bucketSeconds!,
+								seriesLimit: tracesQuery.seriesLimit,
+								overviewTiers,
+							}),
+						{
+							orgId: tenant.orgId,
+							startTime: request.startTime,
+							endTime: request.endTime,
 							bucketSeconds: bucketSeconds!,
-							seriesLimit: tracesQuery.seriesLimit,
-						}),
-					{
-						orgId: tenant.orgId,
-						startTime: request.startTime,
-						endTime: request.endTime,
-						bucketSeconds: bucketSeconds!,
-					},
-					"tracesAllMetricsTimeseries",
+						},
+						"tracesAllMetricsTimeseries",
+					)
+
+				// `service_overview_minutely` ships in a `requiredForIngest: false`
+				// migration, so a healthy BYO cluster can simply not have it yet — the
+				// org just hasn't re-applied schema. There is no global moment when
+				// every cluster has migrated, so the only correct response is to notice
+				// at query time and retry without that tier.
+				//
+				// The retry is not "read raw": it restricts to `"hour"`, which makes
+				// `canUseAnnualServiceOverview` reject any sub-hour bucket so the request
+				// falls through to the pre-existing raw route. The hourly tier must never
+				// answer a sub-hour bucket — an hour-floored row has no position inside
+				// the hour.
+				//
+				// This sits inside the runtime rather than beside the HTTP handler's
+				// other rollup fallbacks so the retry happens *before* the response
+				// cache: the value stored is the one that succeeded.
+				const rows = yield* runAllMetrics(options?.overviewTiers).pipe(
+					Effect.catch((error) => {
+						if (options?.overviewTiers === "hour" || !isMissingServiceOverviewMinutely(error)) {
+							return Effect.fail(error)
+						}
+						return Effect.gen(function* () {
+							yield* Effect.logWarning(
+								"service_overview_minutely is absent on this cluster; restricting to the hourly tier. Apply ClickHouse schema to restore the fast path.",
+							).pipe(Effect.annotateLogs({ orgId: tenant.orgId }))
+							yield* Effect.annotateCurrentSpan("query.rollup.fallback", true)
+							return yield* runAllMetrics("hour")
+						})
+					}),
 				)
 
 				return new QueryEngineExecuteResponse({

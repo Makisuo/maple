@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { VcsSourceService } from "@/services/integrations/vcs/VcsSourceService"
 import { optionalNumberParam, optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { McpQueryError, validationError } from "./types"
@@ -22,7 +22,7 @@ export function registerSourceCodeTools(server: McpToolRegistrar) {
 		"List source repositories connected to this Maple organization. Use before source investigation when telemetry does not identify an exact vcs.repository.url.full. Returns only repositories the organization's GitHub App installation can access.",
 		EmptyToolInput,
 		Effect.fn("McpTool.listSourceRepositories")(function* () {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const source = yield* VcsSourceService
 			const repositories = yield* source
 				.listRepositories(tenant.orgId)
@@ -62,7 +62,7 @@ export function registerSourceCodeTools(server: McpToolRegistrar) {
 				MAX_SEARCH_RESULTS,
 				Math.max(1, Math.floor(limit ?? DEFAULT_SEARCH_RESULTS)),
 			)
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const source = yield* VcsSourceService
 			const matches = yield* source
 				.searchCode(tenant.orgId, repository.trim(), query.trim(), {
@@ -100,7 +100,7 @@ export function registerSourceCodeTools(server: McpToolRegistrar) {
 			if (requestedEnd < start)
 				return validationError("end_line must be greater than or equal to start_line")
 			const end = Math.min(requestedEnd, start + MAX_FILE_LINES - 1)
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const source = yield* VcsSourceService
 			const file = yield* source
 				.readFile(tenant.orgId, repository.trim(), path.trim(), ref?.trim() || undefined)

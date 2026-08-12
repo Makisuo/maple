@@ -14,7 +14,7 @@ import {
 	formatValidationSummary,
 	inspectWidgetsAfterMutation,
 } from "@/mcp/lib/inspect-widget"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 
 const TOOL = "replace_dashboard_widgets"
 
@@ -118,7 +118,7 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 			}
 
 			const { dashboard } = result
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const validation = yield* inspectWidgetsAfterMutation({
 				tenant,
 				dashboard,

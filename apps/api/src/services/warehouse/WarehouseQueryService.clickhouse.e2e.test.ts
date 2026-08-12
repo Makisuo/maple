@@ -3,6 +3,7 @@ import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { clickHouseVersionAtLeast } from "@maple/domain/clickhouse"
 import { OrgId, RawSqlValidationError, UserId } from "@maple/domain/http"
 import { prepareRawSql } from "@maple/query-engine/runtime"
+import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgTokenService"
 import type { TenantContext } from "@/services/auth/AuthService"
@@ -172,8 +173,9 @@ const buildLayer = () => {
 		}),
 	)
 	const envLive = Env.layer.pipe(Layer.provide(configLive))
+	const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(MemoryCacheBackendLive))
 	const orgSettingsLive = OrgClickHouseSettingsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(envLive, testDb.layer)),
+		Layer.provide(Layer.mergeAll(envLive, testDb.layer, edgeCacheLive)),
 	)
 	const tokensLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(envLive))
 	return WarehouseQueryService.layer.pipe(

@@ -2,7 +2,7 @@ import { describe, it } from "@effect/vitest"
 import { ok, rejects, strictEqual } from "node:assert"
 import { createHash, randomUUID } from "node:crypto"
 import { MAPLE_VERSION, CHDB_VERSION } from "../src/version"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 import {
 	existsSync,
 	lstatSync,

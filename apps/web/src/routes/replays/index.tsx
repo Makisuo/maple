@@ -1,3 +1,4 @@
+import { warmAtoms } from "@effect-router/core"
 import { useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
@@ -59,10 +60,10 @@ export const Route = createFileRoute("/replays/")({
 	// component reads the same entries and renders its skeleton meanwhile.
 	loader: ({ context, deps }) => {
 		const filterInputs = replaysFilterInputs(deps)
-		context.effectRegistry.mount(
+		warmAtoms(context.effectRegistry, [
 			listReplaysResultAtom({ data: { ...filterInputs, limit: REPLAYS_PAGE_SIZE, offset: 0 } }),
-		)
-		context.effectRegistry.mount(replaysFacetsResultAtom({ data: filterInputs }))
+			replaysFacetsResultAtom({ data: filterInputs }),
+		])
 	},
 })
 

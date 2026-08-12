@@ -29,7 +29,7 @@ import { CopyIndicator } from "@maple/ui/components/ui/copy-button"
 import { useCopy } from "@maple/ui/hooks/use-copy"
 import { formatNumber } from "@maple/ui/lib/format"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { maskKey } from "@maple/ui/components/ui/copyable-field"
 import { ConnectInstructions, FrameworkPicker, useGuidedFramework } from "@/components/ingest/guided-setup"
 import {
@@ -225,7 +225,7 @@ export function IngestionSection() {
 	const [regenerateKeyType, setRegenerateKeyType] = useState<"public" | "private" | null>(null)
 	const [submittingKeyType, setSubmittingKeyType] = useState<"public" | "private" | null>(null)
 
-	const keysQueryAtom = MapleApiV2AtomClient.query("ingestKeys", "retrieve", {})
+	const keysQueryAtom = retainedQueryV2("ingestKeys", "retrieve", {})
 	const keysResult = useAtomValue(keysQueryAtom)
 	const refreshKeys = useAtomRefresh(keysQueryAtom)
 

@@ -8,7 +8,7 @@ import {
 import { Effect, Option, Schema } from "effect"
 import { formatTable } from "@/mcp/lib/format"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorIssueId } from "@maple/domain/http"
 
@@ -23,7 +23,7 @@ export function registerListErrorIssueEventsTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max events (default 100, max 500)"),
 		}),
 		Effect.fn("McpTool.listErrorIssueEvents")(function* ({ issue_id, limit }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const decodedIssueId = decodeIssueId(issue_id)
 			if (Option.isNone(decodedIssueId)) {
 				return validationError(

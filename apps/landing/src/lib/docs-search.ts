@@ -22,7 +22,7 @@ export interface SearchDoc {
 }
 
 /** Per-doc body cap. Bodies are small; this just bounds the worst case. */
-export const CONTENT_CHAR_CAP = 6000
+const CONTENT_CHAR_CAP = 6000
 
 /**
  * Strip markdown/MDX syntax down to searchable plain text while KEEPING code

@@ -5,7 +5,7 @@ import {
 	LOG_DEFAULT_COLUMNS,
 	TRACE_DEFAULT_COLUMNS,
 	type ListColumnDraft,
-} from "@/components/dashboard-builder/config/list-config-panel"
+} from "@/lib/query-builder/list-widget-config"
 import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
 import { listPresets } from "@/components/dashboard-builder/widgets/widget-definitions"
 import type { WidgetTypeDefinition } from "@/components/dashboard-builder/widgets/widget-type-registry"

@@ -9,10 +9,11 @@ import {
 } from "@maple/effect-cloudflare"
 import { WorkerEntrypoint } from "cloudflare:workers"
 import { Cause, Context, Effect, Exit, FileSystem, Layer, ManagedRuntime, Path } from "effect"
-import { HttpRouter } from "effect/unstable/http"
+import { HttpRouter, type HttpMiddleware } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
+import { serverErrorSpanMiddleware } from "./http/server-error-span"
 import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
 import { classifyWorkerQueue } from "./queue-dispatch"
 
@@ -98,6 +99,17 @@ const buildHandler = async () => {
 	const { AllRoutes, ApiAuthLive, ApiObservabilityLive } = await import("./runtime/http-graph")
 	const { layerPg } = await import("@/platform/DatabasePgLive")
 	const { pgConnectionMiddleware } = await import("@/platform/pg-connection-scope")
+	// The worker's one per-request middleware stack. Ordering is load-bearing:
+	// `serverErrorSpanMiddleware` must stay OUTERMOST (directly under
+	// `HttpMiddleware.tracer`) so it converts a 5xx success into the failure the
+	// tracer records — after `pgConnectionMiddleware`'s exit-agnostic `ensuring`
+	// has already released the request's Postgres socket. It also keeps a
+	// standing requirement satisfied: POST /mcp hangs indefinitely on Workers
+	// when `toWebHandler` is given NO middleware (1101 in prod, miniflare
+	// "worker hung" locally — suspected Effect RpcServer / HttpRouter
+	// scope-propagation bug), so this slot must never go back to empty.
+	const apiRequestMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) =>
+		serverErrorSpanMiddleware(pgConnectionMiddleware(httpApp))
 	return HttpRouter.toWebHandler(
 		AllRoutes.pipe(
 			Layer.provideMerge(HttpServicesLive),
@@ -109,14 +121,9 @@ const buildHandler = async () => {
 			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLayer),
 		),
-		// `pgConnectionMiddleware` gives the request its single Postgres socket. It
-		// also keeps a standing requirement satisfied: POST /mcp hangs indefinitely
-		// on Workers when `toWebHandler` is given NO middleware (1101 in prod,
-		// miniflare "worker hung" locally — suspected Effect RpcServer / HttpRouter
-		// scope-propagation bug), so this slot must never go back to empty.
 		// `disableLogger: true` stops Effect's default logger double-logging;
 		// application logs flow through the OTLP logger from `telemetry.layer`.
-		{ middleware: pgConnectionMiddleware, disableLogger: true },
+		{ middleware: apiRequestMiddleware, disableLogger: true },
 	)
 }
 
@@ -318,6 +325,8 @@ const handle = async (
 					method: request.method,
 					url: request.url,
 				}),
+				// One-shot recovery fiber after the main handler runtime rejected.
+				// oxlint-disable-next-line effecttsgo/strict-effect-provide
 				Effect.provide(telemetry.layer),
 			),
 		)

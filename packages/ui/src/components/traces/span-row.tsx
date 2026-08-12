@@ -5,6 +5,7 @@ import { Badge } from "../ui/badge"
 import { Button } from "../ui/button"
 import { cn } from "../../lib/utils"
 import { formatDuration } from "../../lib/format"
+import { spanStartMs as spanStartMsOf } from "../../lib/span-tree"
 import { getServiceColor } from "../../lib/colors"
 import { getCacheInfo, cacheResultStyles } from "../../lib/cache"
 import { getHttpInfo, HTTP_METHOD_COLORS } from "../../lib/http"
@@ -94,7 +95,7 @@ function SpanRowImpl({
 	}
 
 	const traceStartMs = new Date(traceStartTime).getTime()
-	const spanStartMs = new Date(span.startTime).getTime()
+	const spanStartMs = spanStartMsOf(span)
 
 	const leftPercent = totalDurationMs > 0 ? ((spanStartMs - traceStartMs) / totalDurationMs) * 100 : 0
 

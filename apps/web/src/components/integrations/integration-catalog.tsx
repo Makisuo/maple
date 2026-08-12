@@ -14,8 +14,8 @@ import {
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { scrapeTargetsListAtom } from "@/lib/services/atoms/scrape-target-atoms"
 
 export type IntegrationId =
@@ -173,28 +173,28 @@ const STATUS_UNAVAILABLE: CardStatus = { label: "Status unavailable", variant: "
  */
 export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStatus | null>> {
 	const cloudflareAccountResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "cloudflareStatus", {
+		retainedQuery("integrations", "cloudflareStatus", {
 			reactivityKeys: ["cloudflareIntegrationStatus"],
 		}),
 	)
 	const scrapeResult = useAtomValue(scrapeTargetsListAtom)
 	const planetscaleResult = useAtomValue(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+		retainedQueryV2("planetscaleIntegration", "status", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	const hazelResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "hazelStatus", {
+		retainedQuery("integrations", "hazelStatus", {
 			reactivityKeys: ["hazelIntegrationStatus"],
 		}),
 	)
 	const githubResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "githubStatus", {
+		retainedQuery("integrations", "githubStatus", {
 			reactivityKeys: ["githubIntegrationStatus"],
 		}),
 	)
 	const slackResult = useAtomValue(
-		MapleApiV2AtomClient.query("slackIntegration", "status", {
+		retainedQueryV2("slackIntegration", "status", {
 			reactivityKeys: ["slackIntegration"],
 		}),
 	)
@@ -387,34 +387,34 @@ const maxMs = (values: ReadonlyArray<number | null | undefined>): number | null 
 
 export function useIntegrationOverviews(): Record<IntegrationId, IntegrationOverview> {
 	const cloudflareResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "cloudflareStatus", {
+		retainedQuery("integrations", "cloudflareStatus", {
 			reactivityKeys: ["cloudflareIntegrationStatus"],
 		}),
 	)
 	const scrapeResult = useAtomValue(scrapeTargetsListAtom)
 	const planetscaleResult = useAtomValue(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+		retainedQueryV2("planetscaleIntegration", "status", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	// Poller-inventory read (no warehouse) — feeds the "N databases tracked" stat.
 	const planetscaleDbResult = useAtomValue(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "databases", {
+		retainedQueryV2("planetscaleIntegration", "databases", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	const hazelResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "hazelStatus", {
+		retainedQuery("integrations", "hazelStatus", {
 			reactivityKeys: ["hazelIntegrationStatus"],
 		}),
 	)
 	const githubResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "githubStatus", {
+		retainedQuery("integrations", "githubStatus", {
 			reactivityKeys: ["githubIntegrationStatus"],
 		}),
 	)
 	const slackResult = useAtomValue(
-		MapleApiV2AtomClient.query("slackIntegration", "status", {
+		retainedQueryV2("slackIntegration", "status", {
 			reactivityKeys: ["slackIntegration"],
 		}),
 	)

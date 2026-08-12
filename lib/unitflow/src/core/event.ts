@@ -226,8 +226,7 @@ const closeHandlerEntry = (registry: RegistryService, id: string, entry: Handler
 /**
  * INTERNAL. One synchronous dispatch step: counting, pubsub publication, and
  * direct handler delivery — the order every emit path must keep (a subscriber
- * woken by the publish must already find its item accounted for). The store
- * layer feeds `Store.changed` events through this without a watcher pipeline.
+ * woken by the publish must already find its item accounted for).
  */
 export const dispatchUnsafe = <A>(
 	registry: RegistryService,

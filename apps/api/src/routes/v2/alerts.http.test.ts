@@ -101,7 +101,7 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 		Layer.provide(Layer.mergeAll(envLive, testDb.layer)),
 	)
 	const orgChSettingsLive = OrgClickHouseSettingsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(envLive, testDb.layer)),
+		Layer.provide(Layer.mergeAll(envLive, testDb.layer, edgeCacheLive)),
 	)
 	const alertDestinationsLive = AlertDestinationsService.layer.pipe(
 		Layer.provide(

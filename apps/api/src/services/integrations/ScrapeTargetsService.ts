@@ -34,7 +34,7 @@ import {
 	TokenCredentialsSchema,
 } from "@/services/auth/scrape-auth"
 import { safeFetch, validateExternalUrl } from "@/http/url-validator"
-import { decodeDiscoveryConfig, DiscoveryConfigSchema } from "./planetscale/discovery-config"
+import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
 import { PlanetScaleDiscoveryService, planetScaleDiscoveryUrl } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "@/services/auth/PlanetScaleOAuthService"
 
@@ -244,7 +244,7 @@ const isCredentialLessAuthType = (authType: string): boolean =>
 	authType === "none" || authType === "planetscale_oauth"
 
 const validateAuthCredentials = (authType: string, authCredentials: string | null | undefined) => {
-	if (isCredentialLessAuthType(authType)) return Effect.succeed(undefined)
+	if (isCredentialLessAuthType(authType)) return Effect.void
 
 	if (!authCredentials) {
 		return Effect.fail(
@@ -272,7 +272,7 @@ const validateAuthCredentials = (authType: string, authCredentials: string | nul
 								: 'Basic auth credentials must include "username" and "password" string fields',
 				}),
 		),
-		Effect.as(authCredentials),
+		Effect.asVoid,
 	)
 }
 
@@ -325,7 +325,7 @@ const validateUrl = (url: string) => {
 }
 
 const validateInterval = (seconds: number | undefined) => {
-	if (seconds === undefined) return Effect.succeed(undefined)
+	if (seconds === undefined) return Effect.void
 	if (!Number.isInteger(seconds) || seconds < MIN_SCRAPE_INTERVAL || seconds > MAX_SCRAPE_INTERVAL) {
 		return Effect.fail(
 			new ScrapeTargetValidationError({
@@ -333,7 +333,7 @@ const validateInterval = (seconds: number | undefined) => {
 			}),
 		)
 	}
-	return Effect.succeed(seconds)
+	return Effect.void
 }
 
 /**

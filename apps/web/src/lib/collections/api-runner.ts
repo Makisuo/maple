@@ -5,6 +5,5 @@ import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 export type MapleApiV2Client = Effect.Success<typeof MapleApiV2AtomClient>
 
 /** Runs a public v2 API call on the same shared runtime used by Electric writes. */
-export const runMapleApiV2 = <A, E>(
-	use: (client: MapleApiV2Client) => Effect.Effect<A, E>,
-): Promise<A> => mapleRuntime.runPromise(Effect.flatMap(MapleApiV2AtomClient, use))
+export const runMapleApiV2 = <A, E>(use: (client: MapleApiV2Client) => Effect.Effect<A, E>): Promise<A> =>
+	mapleRuntime.runPromise(Effect.flatMap(MapleApiV2AtomClient, use))

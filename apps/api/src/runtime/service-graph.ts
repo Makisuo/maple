@@ -71,16 +71,6 @@ const ScrapeTargetsLive = ScrapeTargetsService.layer.pipe(
 	Layer.provide(Layer.mergeAll(PlanetScaleDiscoveryLive, PlanetScaleOAuthLive)),
 )
 
-// Hoisted above `CoreServicesLive` because `OrgClickHouseSettingsService` needs
-// it, and `CoreServicesLive` closes its inputs with `provideMerge(InfraLive)` —
-// anything not supplied by then is simply absent for every service inside it.
-//
-// That mattered silently: the settings service reads this with
-// `Effect.serviceOption`, so an unwired cache is not a build error, it is an
-// `Option.none()` and a straight fall-through to Postgres. Its shared tier sat
-// dormant in `maple-api` while working correctly in `apps/alerting`, whose
-// graph happens to compose the two in the other order — zero `edge_cache`
-// resolutions against 21 Postgres reads in the first 15 minutes after deploy.
 const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 
 const CoreServicesLive = Layer.mergeAll(
@@ -119,10 +109,6 @@ const DemoServiceLive = DemoService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
 )
 
-// `EdgeCacheServiceLive` is defined above, ahead of `CoreServicesLive`, so the
-// single memoized instance is shared by the bucket cache, the direct edge cache
-// and the org-config tier. Its storage backend is injected via the CacheBackend
-// port.
 const BucketCacheServiceLive = BucketCacheService.layer.pipe(Layer.provideMerge(EdgeCacheServiceLive))
 
 const QueryEngineServiceLive = QueryEngineService.layer.pipe(

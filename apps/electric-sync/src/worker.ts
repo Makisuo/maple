@@ -138,6 +138,8 @@ const handle = async (
 		Effect.runFork(
 			Effect.logError("electric-sync handler failed").pipe(
 				Effect.annotateLogs({ error: message }),
+				// One-shot recovery fiber after the main handler runtime rejected.
+				// oxlint-disable-next-line effecttsgo/strict-effect-provide
 				Effect.provide(telemetry.layer),
 			),
 		)

@@ -208,18 +208,21 @@
 }
 
 /* Cold-boot splash — branded self-assembling trace waterfall (see boot-splash.tsx
-   and the inline copy in index.html). The amber mark sits still; five span bars
-   grow in, in start-time order, while a thin amber playhead scans across them so
-   it reads as a trace being collected in real time, not a skeleton shimmering.
-   Keep this in sync with the inline copy in index.html. */
+   and the inline copy in index.html). The Maple tree on an amber tile sits still;
+   five span bars grow in, in start-time order, while a thin amber playhead scans
+   across them so it reads as a trace being collected in real time, not a skeleton
+   shimmering. Keep this in sync with the inline copy in index.html.
+
+   The tile fill stays flat: the tree's eyes and the notch beside the trunk are
+   evenodd knockouts, so the tile reads THROUGH them, and a gradient shows through
+   at a different value than at the silhouette edge — the eyes stop reading as
+   eyes. Same rule the favicon variants are built on (see public/favicon.svg). */
 .boot-mark {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: linear-gradient(155deg, color-mix(in oklab, var(--primary) 86%, white), var(--primary));
-	box-shadow:
-		0 10px 30px -8px color-mix(in oklab, var(--primary) 50%, transparent),
-		inset 0 1px 0 color-mix(in oklab, white 35%, transparent);
+	background: var(--primary);
+	box-shadow: 0 10px 30px -8px color-mix(in oklab, var(--primary) 50%, transparent);
 }
 
 .boot-trace {

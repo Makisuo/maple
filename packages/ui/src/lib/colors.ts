@@ -177,18 +177,18 @@ export function getValueHue(value: string | undefined | null): number | null {
  * Calculate self-time for a span (duration minus overlapping children time)
  */
 export function calculateSelfTime(
-	span: { startTime: string; durationMs: number },
-	children: Array<{ startTime: string; durationMs: number }>,
+	span: { startTime: string; durationMs: number; clockSkewMs?: number },
+	children: Array<{ startTime: string; durationMs: number; clockSkewMs?: number }>,
 ): number {
 	if (children.length === 0) return span.durationMs
 
-	const spanStartMs = new Date(span.startTime).getTime()
+	const spanStartMs = new Date(span.startTime).getTime() + (span.clockSkewMs ?? 0)
 	const spanEndMs = spanStartMs + span.durationMs
 
 	// Calculate total time covered by children (accounting for overlaps)
 	const childIntervals = children
 		.map((child) => {
-			const childStartMs = new Date(child.startTime).getTime()
+			const childStartMs = new Date(child.startTime).getTime() + (child.clockSkewMs ?? 0)
 			const childEndMs = childStartMs + child.durationMs
 			// Clamp to parent span boundaries
 			return {

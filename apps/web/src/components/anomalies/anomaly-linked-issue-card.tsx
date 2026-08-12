@@ -10,7 +10,7 @@ import { shortIssueId } from "@/components/errors/issue-id"
 import { WorkflowBadge } from "@/components/errors/workflow-badge"
 import { ArrowRightIcon, LinkIcon, XmarkIcon } from "@/components/icons"
 import { formatNumber } from "@maple/ui/lib/format"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 
 export function AnomalyLinkedIssueCard({
@@ -71,7 +71,7 @@ function LinkedIssueBody({
 	onUnlink: () => void
 	busy: boolean
 }) {
-	const issueQueryAtom = MapleApiAtomClient.query("errors", "getIssue", {
+	const issueQueryAtom = retainedQuery("errors", "getIssue", {
 		params: { issueId },
 		query: {},
 		reactivityKeys: ["errorIssues", `errorIssue:${issueId}`],

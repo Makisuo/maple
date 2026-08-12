@@ -1,7 +1,7 @@
 import { McpQueryError, optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import {
 	DashboardTemplateParameterKey,
@@ -476,7 +476,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 				}
 			}
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const persistence = yield* DashboardPersistenceService
 
 			const dashboard = yield* persistence.create(tenant.orgId, tenant.userId, portable).pipe(

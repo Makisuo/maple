@@ -23,7 +23,7 @@
  * Both of those depend on `closingSubmit`: the tool-less closing step that serves
  * attended chat has nothing to say for an agent whose answer *is* a tool call.
  */
-import { Schema, Stream, Effect, Option } from "effect"
+import { Cause, Schema, Stream, Effect, Option } from "effect"
 import { Tool, type Model, type Tools } from "@maple/llm"
 import { Message } from "@maple/llm"
 import { runChatTurn, makeTurnUsage, type TurnUsage } from "@/chat/loop"
@@ -118,7 +118,23 @@ export const runAgentPass = <S extends Schema.Top>(
 				}),
 			),
 			// A pass that dies mid-turn still reports whatever it managed to submit.
-			Effect.catchCause(() => Effect.void),
+			// Workflow cancellation remains an interruption rather than a false successful pass.
+			Effect.catchCause((cause) =>
+				Cause.hasInterruptsOnly(cause)
+					? Effect.interrupt
+					: Effect.logWarning("Agent pass failed; returning the partial result").pipe(
+							Effect.annotateLogs({
+								agent: input.agent.name,
+								messageId: input.id,
+								submitted: Option.isSome(answer),
+								toolCallCount: toolCalls,
+								cause: Cause.pretty(cause),
+							}),
+							Effect.tap(() =>
+								Effect.annotateCurrentSpan("maple.agent.recovered_failure", true),
+							),
+						),
+			),
 		)
 
 		return { answer, usage, toolCalls, deadlineHit }

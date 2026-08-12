@@ -22,13 +22,14 @@ import { alertDestinations, alertRules, type AlertDestinationRow } from "@maple/
 import { and, desc, eq } from "drizzle-orm"
 import { Context, Effect, Layer, Match, Option, Redacted, Schema } from "effect"
 import { encryptAes256Gcm, type EncryptedValue } from "@/platform/Crypto"
-import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
+import { Database } from "@/platform/DatabaseLive"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { validateExternalUrl } from "@/http/url-validator"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
-import { describeCause } from "@/platform/describe-cause"
+import { makeDbExecute } from "@/platform/db-execute"
+import { makePersistenceError } from "./alert-persistence"
 import { OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
 import { PAGERDUTY_ROUTING_KEY_PATTERN, verifyPagerDutyRoutingKey } from "./AlertDeliveryDispatch"
@@ -48,14 +49,6 @@ const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(AlertDestinationDoc
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 
 const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
-
-const makePersistenceError = (error: unknown) => {
-	const cause = describeCause(error instanceof Error ? error.cause : error)
-	return new AlertPersistenceError({
-		message: error instanceof Error ? error.message : "Alert persistence failed",
-		...(cause === undefined ? {} : { cause }),
-	})
-}
 
 const makeValidationError = (message: string, details: ReadonlyArray<string> = [], cause?: unknown) =>
 	new AlertValidationError({ message, details, ...(cause === undefined ? {} : { cause }) })
@@ -252,18 +245,7 @@ export class AlertDestinationsService extends Context.Service<
 			resolveSlackBotToken: slackBotToken.resolve,
 		})
 
-		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			database.execute(fn).pipe(
-				Effect.tapError((error) =>
-					Effect.logError("AlertsService dbExecute failed").pipe(
-						Effect.annotateLogs({
-							message: error.message,
-							cause: describeCause(error.cause) ?? "(none)",
-						}),
-					),
-				),
-				Effect.mapError(makePersistenceError),
-			)
+		const dbExecute = makeDbExecute(database, "AlertDestinationsService", makePersistenceError)
 
 		const requireAdmin = Effect.fn("AlertsService.requireAdmin")(function* (
 			roles: ReadonlyArray<RoleName>,

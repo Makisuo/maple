@@ -9,7 +9,7 @@ import {
 } from "./types"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { Effect, Match, Schema } from "effect"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import {
 	MetricType,
@@ -338,7 +338,7 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 					}),
 			})
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const queryEngine = yield* QueryEngineService
 
 			yield* Effect.annotateCurrentSpan({

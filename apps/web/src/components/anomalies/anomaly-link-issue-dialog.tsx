@@ -17,7 +17,7 @@ import { Spinner } from "@maple/ui/components/ui/spinner"
 import { shortIssueId } from "@/components/errors/issue-id"
 import { WorkflowRingIcon } from "@/components/icons"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 
 export function AnomalyLinkIssueDialog({
 	incident,
@@ -49,7 +49,7 @@ function DialogContent({
 	const [query, setQuery] = useState("")
 	const [allServices, setAllServices] = useState(false)
 
-	const issuesQueryAtom = MapleApiAtomClient.query("errors", "listIssues", {
+	const issuesQueryAtom = retainedQuery("errors", "listIssues", {
 		query: allServices ? { limit: 100 } : { service: incident.serviceName, limit: 100 },
 		reactivityKeys: ["errorIssues"],
 	})

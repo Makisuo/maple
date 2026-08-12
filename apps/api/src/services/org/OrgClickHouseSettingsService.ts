@@ -778,9 +778,8 @@ const mapStatusToError = (
 	)
 }
 
-export const execClickHouse = (config: ClickHouseExecConfig, sql: string) =>
+const execClickHouseWithClient = (client: HttpClient.HttpClient, config: ClickHouseExecConfig, sql: string) =>
 	Effect.gen(function* () {
-		const client = yield* HttpClient.HttpClient
 		const request = HttpClientRequest.post(buildClickHouseUrl(config), {
 			headers: buildClickHouseHeaders(config),
 		}).pipe(HttpClientRequest.bodyText(sql))
@@ -829,8 +828,10 @@ export const execClickHouse = (config: ClickHouseExecConfig, sql: string) =>
 				),
 		}),
 		Effect.retry({ schedule: CLICKHOUSE_RETRY_SCHEDULE, while: isRetryableUpstream }),
-		Effect.provide(FetchHttpClient.layer),
 	)
+
+export const execClickHouse = (config: ClickHouseExecConfig, sql: string) =>
+	HttpClient.HttpClient.use((client) => execClickHouseWithClient(client, config, sql))
 
 interface ClickHouseTableRow {
 	readonly name: string
@@ -842,15 +843,15 @@ interface ClickHouseColumnRow {
 	readonly type: string
 }
 
-const fetchActualSchema = (config: ClickHouseExecConfig) =>
+const fetchActualSchema = (client: HttpClient.HttpClient, config: ClickHouseExecConfig) =>
 	Effect.gen(function* () {
 		// Tables: name + engine. Engine="MaterializedView" → MV; everything else → table.
 		const tablesSql = `SELECT name, engine FROM system.tables WHERE database = '${config.database.replace(/'/g, "''")}' FORMAT JSONEachRow`
-		const tablesText = yield* execClickHouse(config, tablesSql)
+		const tablesText = yield* execClickHouseWithClient(client, config, tablesSql)
 		const tableRows = parseJsonEachRow<ClickHouseTableRow>(tablesText)
 
 		const columnsSql = `SELECT table, name, type FROM system.columns WHERE database = '${config.database.replace(/'/g, "''")}' FORMAT JSONEachRow`
-		const columnsText = yield* execClickHouse(config, columnsSql)
+		const columnsText = yield* execClickHouseWithClient(client, config, columnsSql)
 		const columnRows = parseJsonEachRow<ClickHouseColumnRow>(columnsText)
 
 		const colsByTable = new Map<string, Array<{ name: string; type: string }>>()
@@ -898,14 +899,13 @@ export class OrgClickHouseSettingsService extends Context.Service<
 	make: Effect.gen(function* () {
 		const database = yield* Database
 		const env = yield* Env
+		const httpClient = yield* HttpClient.HttpClient
 		const encryptionKey = yield* parseEncryptionKey(Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY))
 		// Optional: present only inside a Worker isolate. Used to kick off the
 		// background schema-apply Workflow. Read optionally so non-worker/test
 		// contexts (where the binding is absent) still construct the service.
 		const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
-		// Optional for the same reason: the shared cache tier is an optimisation,
-		// and every path below still resolves correctly without it.
-		const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
+		const edgeCache = yield* EdgeCacheService
 
 		// Memoize the parsed desired-schema snapshot per service instance. The
 		// snapshot is static, so we parse it at most once and reuse it.
@@ -978,9 +978,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		 * its TTL regardless.
 		 */
 		const invalidateSharedRuntimeConfig = (orgId: OrgId): Effect.Effect<void> =>
-			Option.isSome(edgeCache)
-				? edgeCache.value.invalidate({ bucket: ORG_CH_CONFIG_CACHE_BUCKET, key: orgId })
-				: Effect.void
+			edgeCache.invalidate({ bucket: ORG_CH_CONFIG_CACHE_BUCKET, key: orgId })
 
 		// Bust the cached runtime config for an org after any write to its settings
 		// row, so the next warehouse query re-resolves rather than serving a stale
@@ -1115,7 +1113,11 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			// host or token surfaces here rather than after the user closes the
 			// dialog. No DDL is run — applying the schema is a separate explicit
 			// action via the diff/apply endpoints.
-			yield* execClickHouse({ url, user, password: plainPassword, database: dbName }, "SELECT 1")
+			yield* execClickHouseWithClient(
+				httpClient,
+				{ url, user, password: plainPassword, database: dbName },
+				"SELECT 1",
+			)
 
 			const encryptedPassword =
 				plainPassword.length > 0 ? yield* encryptToken(plainPassword, encryptionKey) : null
@@ -1207,7 +1209,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			yield* requireAdmin(roles)
 			const row = yield* requireActiveRow(orgId)
 			const config = yield* loadConfigForRow(row)
-			const actual = yield* fetchActualSchema(config)
+			const actual = yield* fetchActualSchema(httpClient, config)
 			const entries = computeSchemaDiff({ tables: yield* getDesiredTables }, actual)
 
 			// Self-heal the recorded schema version. The ingest gateway only routes an
@@ -1582,27 +1584,25 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// past that is hung rather than slow. A longer deadline would buy almost no
 		// extra hits and charge the full deadline to every hung read.
 		const readSharedOrPostgres = (orgId: OrgId) =>
-			Option.isNone(edgeCache)
-				? readSettingsFromPostgres(orgId)
-				: edgeCache.value
-						.getOrCompute(
-							{
-								bucket: ORG_CH_CONFIG_CACHE_BUCKET,
-								key: orgId,
-								ttlSeconds: ORG_CH_CONFIG_CACHE_TTL_SECONDS,
-								schema: CachedChSettingsEnvelope,
-							},
-							readSettingsFromPostgres(orgId).pipe(Effect.map((settings) => ({ settings }))),
-						)
-						.pipe(
-							Effect.tap((result) =>
-								Effect.annotateCurrentSpan(
-									"clickhouse.config.source",
-									result.hit ? "edge_cache" : "postgres",
-								),
-							),
-							Effect.map((result) => result.value.settings),
-						)
+			edgeCache
+				.getOrCompute(
+					{
+						bucket: ORG_CH_CONFIG_CACHE_BUCKET,
+						key: orgId,
+						ttlSeconds: ORG_CH_CONFIG_CACHE_TTL_SECONDS,
+						schema: CachedChSettingsEnvelope,
+					},
+					readSettingsFromPostgres(orgId).pipe(Effect.map((settings) => ({ settings }))),
+				)
+				.pipe(
+					Effect.tap((result) =>
+						Effect.annotateCurrentSpan(
+							"clickhouse.config.source",
+							result.hit ? "edge_cache" : "postgres",
+						),
+					),
+					Effect.map((result) => result.value.settings),
+				)
 
 		const resolveCachedSettings = Effect.fn("OrgClickHouseSettingsService.resolveCachedSettings")(
 			function* (orgId: OrgId) {
@@ -1645,9 +1645,8 @@ export class OrgClickHouseSettingsService extends Context.Service<
 					return yield* Effect.fail(failed.error)
 				}
 
-				// Overwritten by `readSharedOrPostgres` with `edge_cache` on a hit; set
-				// here so the uncached path (no `EdgeCacheService`) still reports a
-				// source, and so a failure below leaves an accurate one.
+				// Overwritten by `readSharedOrPostgres` on success; setting it first
+				// leaves failures attributed to the Postgres compute path.
 				yield* Effect.annotateCurrentSpan({
 					"clickhouse.config.source": "postgres",
 					"clickhouse.config.memoHit": false,
@@ -1760,7 +1759,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		} satisfies OrgClickHouseSettingsServiceShape
 	}),
 }) {
-	static readonly layer = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 
 	static readonly get = (orgId: OrgId, roles: ReadonlyArray<RoleName>) =>
 		this.use((service) => service.get(orgId, roles))

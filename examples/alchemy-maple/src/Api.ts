@@ -83,6 +83,7 @@ export default class Api extends Cloudflare.Worker<Api>()(
 				// handler's requirements — and it is cheap: the layer is a few
 				// references over buffers that live in `telemetry`, so the per-event
 				// build keeps nothing of its own.
+				// oxlint-disable-next-line effecttsgo/strict-effect-provide
 				Effect.provide(telemetry.layer),
 			),
 		}

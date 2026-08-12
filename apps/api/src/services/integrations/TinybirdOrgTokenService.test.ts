@@ -133,9 +133,7 @@ describe("TinybirdOrgTokenService", () => {
 			Layer.provide(Env.layer),
 			Layer.provide(testConfig({ TINYBIRD_WORKSPACE_ID: "" })),
 		)
-		return Effect.gen(function* () {
-			yield* TinybirdOrgTokenService
-		}).pipe(
+		return Effect.asVoid(TinybirdOrgTokenService).pipe(
 			Effect.provide(malformedLayer),
 			Effect.exit,
 			Effect.map((exit) => {
@@ -152,9 +150,7 @@ describe("TinybirdOrgTokenService", () => {
 			Layer.provide(Env.layer),
 			Layer.provide(testConfig({ TINYBIRD_RAW_SQL_JWT_RPS_LIMIT: "0" })),
 		)
-		return Effect.gen(function* () {
-			yield* TinybirdOrgTokenService
-		}).pipe(
+		return Effect.asVoid(TinybirdOrgTokenService).pipe(
 			Effect.provide(malformedLayer),
 			Effect.exit,
 			Effect.map((exit) => {

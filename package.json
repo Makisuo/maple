@@ -43,8 +43,8 @@
 		"check:tokens": "bun run ./scripts/check-token-drift.ts",
 		"llm:sync": "bun run ./scripts/sync-llm-upstream.ts",
 		"llm:sync:check": "bun run ./scripts/sync-llm-upstream.ts --check",
-		"knip": "knip",
-		"knip:fix": "knip --fix --allow-remove-files",
+		"knip": "bun run --cwd apps/landing sync:i18n && knip",
+		"knip:fix": "bun run --cwd apps/landing sync:i18n && knip --fix --allow-remove-files",
 		"typecheck": "turbo typecheck && tsc -p tsconfig.alchemy.json"
 	},
 	"dependencies": {},

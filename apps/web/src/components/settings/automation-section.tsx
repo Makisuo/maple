@@ -14,7 +14,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { AiTriageSettingsSection } from "./ai-triage-settings-section"
 import { EscalationPolicySection } from "./escalation-policy-section"
 import { SectionHeader } from "@/components/layout/section-header"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
@@ -170,7 +170,7 @@ function SimulatorField({ label, children }: { label: string; children: ReactNod
 
 function RecentDeliveries() {
 	const result = useAtomValue(
-		MapleApiAtomClient.query("errors", "listRecentEscalations", {
+		retainedQuery("errors", "listRecentEscalations", {
 			query: { limit: 20 },
 			reactivityKeys: ["issueEscalations"],
 		}),

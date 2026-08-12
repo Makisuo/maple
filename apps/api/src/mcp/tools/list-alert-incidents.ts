@@ -3,7 +3,7 @@ import { formatTable, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 
 const comparatorLabel: Record<string, string> = {
@@ -24,7 +24,7 @@ export function registerListAlertIncidentsTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max results to return (default 50)"),
 		}),
 		Effect.fn("McpTool.listAlertIncidents")(function* ({ status, severity, group_key, limit }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const readModels = yield* AlertReadModelsService
 
 			const result = yield* readModels.listIncidents(tenant.orgId).pipe(

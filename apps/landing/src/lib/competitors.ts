@@ -1,24 +1,24 @@
-export interface CompetitorFeature {
+interface CompetitorFeature {
 	maple: string | boolean
 	competitor: string | boolean
 }
 
-export interface PainPoint {
+interface PainPoint {
 	problem: string
 	solution: string
 }
 
-export interface MigrationStep {
+interface MigrationStep {
 	title: string
 	description: string
 }
 
-export interface FAQ {
+interface FAQ {
 	question: string
 	answer: string
 }
 
-export interface Stat {
+interface Stat {
 	value: string
 	label: string
 	detail: string

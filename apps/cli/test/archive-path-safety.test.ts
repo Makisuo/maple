@@ -19,7 +19,7 @@ import { appendCatalog, promoteGeneration } from "../src/server/archives/generat
 import { rebuildCatalog, listActiveGenerations } from "../src/server/archives/listing"
 import { type ArchiveGenerationManifest } from "../src/server/archives/manifest"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 
 // External-sentinel tests proving archive-root path escapes are closed (C-1).
 // These mirror the reviewer's deterministic probes: a symlinked descendant must

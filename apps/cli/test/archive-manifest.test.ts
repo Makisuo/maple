@@ -13,7 +13,7 @@ import {
 import { parseArchiveActivePointer, parseArchiveGenerationManifest } from "../src/server/archives/manifest"
 import { TUNING_CONFIG_FORMAT_VERSION } from "../src/server/archives/config"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 import { randomUUID } from "node:crypto"
 
 const withArchive = async (run: (archiveDir: string) => Promise<void> | void): Promise<void> => {

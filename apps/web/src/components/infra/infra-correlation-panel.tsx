@@ -2,7 +2,7 @@ import { addMinutes, subMinutes } from "date-fns"
 import { Link } from "@tanstack/react-router"
 
 import { ExternalLinkIcon } from "@/components/icons"
-import { formatForTinybird, relativeToAbsolute } from "@/lib/time-utils"
+import { formatForTinybird, relativeToAbsolute, snapRangeForCache } from "@/lib/time-utils"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 import { NodeDetailChart, PodDetailChart } from "./k8s-detail-chart"
@@ -28,7 +28,9 @@ export function infraCorrelationWindow(
 ): { startTime: string; endTime: string } {
 	const date = new Date(normalizeTimestampInput(anchor))
 	if (Number.isNaN(date.getTime())) {
-		return relativeToAbsolute("30m")!
+		// Snapped: unlike the anchored window below, this fallback is clock-derived
+		// and would otherwise give every mount a fresh cache key.
+		return snapRangeForCache(relativeToAbsolute("30m")!)
 	}
 	const pad = opts?.padMinutes ?? DEFAULT_PAD_MINUTES
 	const end = addMinutes(new Date(date.getTime() + (opts?.spanDurationMs ?? 0)), pad)

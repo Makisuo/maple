@@ -146,12 +146,7 @@ const makeHarness = (warehouse: WarehouseQueryServiceShape = warehouseStub()) =>
 
 	// `testDb.layer` applies the migrations when it is first built, so raw seed SQL must wait for it.
 	let migrated: Promise<void> | undefined
-	const ensureSchema = () =>
-		(migrated ??= runtime.runPromise(
-			Effect.gen(function* () {
-				yield* Database
-			}),
-		))
+	const ensureSchema = () => (migrated ??= runtime.runPromise(Effect.asVoid(Database)))
 
 	const request = async (method: string, path: string, options: { token?: string } = {}) => {
 		const response = await handler(

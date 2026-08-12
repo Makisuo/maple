@@ -66,4 +66,9 @@ const program = Effect.gen(function* () {
 	return yield* scheduler.run
 })
 
+// Telemetry intentionally owns the outer scope so its exporter flushes after MainLayer closes.
+/* oxlint-disable effecttsgo/multiple-effect-provide */
+/* oxlint-disable effecttsgo/strict-effect-provide */
 program.pipe(Effect.scoped, Effect.provide(MainLayer), Effect.provide(TelemetryLayer), BunRuntime.runMain)
+/* oxlint-enable effecttsgo/strict-effect-provide */
+/* oxlint-enable effecttsgo/multiple-effect-provide */

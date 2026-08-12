@@ -9,7 +9,7 @@ import { formatNumber, formatTable, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { IssueKind, IssueSeverity, WorkflowState } from "@maple/domain/http"
 
@@ -43,7 +43,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 			limit,
 			include_archived,
 		}) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				workflowState: workflow_state ?? "all",

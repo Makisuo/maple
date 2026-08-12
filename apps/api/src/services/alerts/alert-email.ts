@@ -1,6 +1,4 @@
 import { AlertDeliveryError } from "@maple/domain/http"
-import { AlertNotification } from "@maple/email/alert-notification"
-import { render } from "@react-email/components"
 import { Effect } from "effect"
 import {
 	eventTypeEmoji,
@@ -10,7 +8,7 @@ import {
 	formatWindow,
 	slackAttachmentColor,
 	type TemplateRenderContext,
-} from "./AlertDeliveryDispatch"
+} from "./alert-formatting"
 
 export interface AlertEmailContent {
 	readonly subject: string
@@ -30,6 +28,13 @@ export const buildAlertEmailContent = (
 ): Effect.Effect<AlertEmailContent, AlertDeliveryError> =>
 	Effect.tryPromise({
 		try: async () => {
+			// Dynamically imported so @react-email (tailwind/prettier/prism, ~2MB of
+			// module eval) stays out of the request-path module graph — it loads only
+			// when an email alert actually fires.
+			const [{ render }, { AlertNotification }] = await Promise.all([
+				import("@react-email/components"),
+				import("@maple/email/alert-notification"),
+			])
 			const eventLabel = formatEventTypeLabel(context.eventType)
 			const emoji = eventTypeEmoji(context.eventType)
 			const html = await render(

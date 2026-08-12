@@ -1,7 +1,6 @@
-import { useNavigate } from "@tanstack/react-router"
+import { getRouteApi } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
-import { Route } from "@/routes/logs"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useLogsViewPreferences } from "@/hooks/use-logs-view-preferences"
 import { getLogAttributeKeysResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -11,6 +10,8 @@ import { Toggle } from "@maple/ui/components/ui/toggle"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
+
+const routeApi = getRouteApi("/logs/")
 
 interface ColumnOption {
 	name: string
@@ -23,8 +24,8 @@ interface ColumnOption {
  * columns live in the URL (shareable) under `?columns`.
  */
 export function LogsTableToolbar() {
-	const navigate = useNavigate({ from: Route.fullPath })
-	const search = Route.useSearch()
+	const navigate = routeApi.useNavigate()
+	const search = routeApi.useSearch()
 	const { wrap, setWrap, density, setDensity } = useLogsViewPreferences()
 
 	const pinnedColumns = search.columns ?? []

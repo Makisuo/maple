@@ -220,6 +220,58 @@ export const chdbArgv = (options: Pick<ChdbOptions, "dataDir" | "configFile">): 
 	...(options.configFile ? [`--config-file=${options.configFile}`] : []),
 ]
 
+/** libc, for `setenv`. Bun keeps `process.env` in its own map and never calls
+ *  through to libc, so an assignment there is invisible to a dlopened library. */
+const LIBC_CANDIDATES =
+	process.platform === "darwin" ? ["libSystem.B.dylib"] : ["libc.so.6", "libc.so", "libc.musl-x86_64.so.1"]
+
+let timezonePinned = false
+
+/**
+ * Force the embedded engine's SERVER timezone to UTC, before libchdb loads.
+ *
+ * `SET session_timezone = 'UTC'` (in `Chdb.open`) is not enough: every
+ * `DateTime64(n)` column in the local schema is declared without an explicit
+ * zone, and ClickHouse resolves *those* against the server timezone, which
+ * libchdb reads from the host environment when it initialises. On a machine in,
+ * say, `Europe/Berlin` that meant stored timestamps rendered in local time
+ * and — the part that actually broke — every datetime **string literal** in a
+ * `WHERE` clause parsed as local time, while the UI and CLI build their window
+ * bounds as UTC strings (`toClickHouseDateTime`). Every window landed one UTC
+ * offset in the past: freshly ingested traces were invisible while hours-old
+ * ones looked current, and the hourly service-map rollups bucketed into shifted
+ * hours, so recent edges went missing.
+ *
+ * The stored instants were always correct and the column type carries no baked
+ * timezone — it is resolved per query — so pinning the zone repairs existing
+ * stores as well as new ones.
+ *
+ * Hosts already on UTC see no change, which is exactly why CI never caught it.
+ */
+export const pinProcessTimezoneToUtc = (): void => {
+	if (timezonePinned) return
+	timezonePinned = true
+	// Keep Bun's own view in sync, so JS `Date` formatting in this process
+	// matches what the engine reports.
+	process.env.TZ = "UTC"
+	const key = cstr("TZ")
+	const value = cstr("UTC")
+	for (const lib of LIBC_CANDIDATES) {
+		try {
+			const libc = dlopen(lib, {
+				setenv: { args: [FFIType.ptr, FFIType.ptr, FFIType.int], returns: FFIType.int },
+				tzset: { args: [], returns: FFIType.void },
+			})
+			libc.symbols.setenv(ptr(key), ptr(value), 1)
+			libc.symbols.tzset()
+			return
+		} catch {
+			// Try the next candidate; a host we cannot reach libc on simply keeps
+			// its previous behaviour rather than failing to start.
+		}
+	}
+}
+
 /**
  * A live chDB connection. `query` runs read SQL and returns the raw result
  * bytes (in whatever `format` was requested — default JSONEachRow). `exec` runs
@@ -237,6 +289,7 @@ export class Chdb {
 	}
 
 	static open(options: ChdbOptions): Chdb {
+		pinProcessTimezoneToUtc()
 		const sym = symbols()
 		const args = chdbArgv(options)
 		const argBufs = args.map(cstr)

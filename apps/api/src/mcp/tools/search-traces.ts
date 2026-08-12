@@ -14,7 +14,7 @@ import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, Schema, pipe } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { searchTraces } from "@maple/query-engine/observability"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 
 export function registerSearchTracesTool(server: McpToolRegistrar) {
 	server.tool(
@@ -53,7 +53,7 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
 			const lim = clampLimit(params.limit, { defaultValue: 20, max: 200 })
 			const off = clampOffset(params.offset, { max: 10_000 })
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				service: params.service ?? "all",

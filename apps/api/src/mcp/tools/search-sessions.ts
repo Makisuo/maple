@@ -5,7 +5,7 @@ import {
 	type McpToolRegistrar,
 } from "./types"
 import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
-import { withTenantExecutor, resolveTenant } from "@/mcp/lib/query-warehouse"
+import { withTenantExecutor, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
 import { formatTable, truncate } from "@/mcp/lib/format"
@@ -76,7 +76,7 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 				params.message_contains != null ||
 				params.trace_id != null
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				userId: params.user_id ?? "any",

@@ -374,7 +374,7 @@ export const maybeNotifyUpdate: Effect.Effect<void, never, MapleConfig | HttpCli
 		if (shouldCheck(Option.getOrUndefined(config.lastUpdateCheck), now)) {
 			const fetched = yield* fetchLatestTag(1500).pipe(
 				Effect.map((tag) => Option.some(tag)),
-				Effect.catch(() => Effect.succeed(Option.none<string>())),
+				Effect.orElseSucceed(() => Option.none<string>()),
 			)
 			if (Option.isSome(fetched)) {
 				latest = fetched.value

@@ -63,18 +63,17 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 
 	const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
 	const AlertRuntimeLive = AlertRuntime.layer
+	const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 
-	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.layer.pipe(Layer.provide(BaseLive))
+	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(BaseLive, EdgeCacheServiceLive)),
+	)
 
 	const TinybirdOrgTokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(EnvLive))
 
 	const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(
 		Layer.provide(Layer.mergeAll(EnvLive, OrgClickHouseSettingsLive, TinybirdOrgTokenLive)),
 	)
-
-	// EdgeCacheService's storage backend is injected via the CacheBackend port.
-	// Define the wired layer once so it memoizes to a single shared instance.
-	const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 
 	const BucketCacheServiceLive = BucketCacheService.layer.pipe(Layer.provide(EdgeCacheServiceLive))
 
@@ -259,7 +258,7 @@ const makeTick = <A, E, R>(
 							]),
 						)
 			return namespacedAnnotations === undefined
-				? Effect.succeed(undefined)
+				? Effect.void
 				: Effect.logInfo("Alerting tick completed").pipe(
 						Effect.annotateLogs({ ...namespacedAnnotations, "maple.alerting.tick": spanKey }),
 					)
