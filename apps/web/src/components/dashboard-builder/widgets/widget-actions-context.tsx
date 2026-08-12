@@ -3,11 +3,7 @@ import { useNavigate } from "@tanstack/react-router"
 
 import type { SectionTarget } from "@maple/domain/http"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
-import type {
-	DashboardSection,
-	DashboardWidget,
-	WidgetDataState,
-} from "@/components/dashboard-builder/types"
+import type { DashboardSection, DashboardWidget, WidgetDataState } from "@/components/dashboard-builder/types"
 import {
 	encodeWidgetFixContextToSearchParam,
 	type WidgetFixContext,
@@ -81,8 +77,15 @@ export function WidgetActionsProvider({
 	narrowRangeLabel,
 	children,
 }: WidgetActionsProviderProps) {
-	const { readOnly, removeWidget, cloneWidget, configureWidget, dashboardId, sections, moveWidgetToSection } =
-		useDashboardActions()
+	const {
+		readOnly,
+		removeWidget,
+		cloneWidget,
+		configureWidget,
+		dashboardId,
+		sections,
+		moveWidgetToSection,
+	} = useDashboardActions()
 	const navigate = useNavigate()
 
 	const errorTitle = dataState.status === "error" ? (dataState.title ?? null) : null
