@@ -86,7 +86,8 @@ import { formatComparator } from "./alert-formatting"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
-import { describeCause } from "@/platform/describe-cause"
+import { makeDbExecute } from "@/platform/db-execute"
+import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -287,14 +288,6 @@ const compareThreshold = (
 		Match.exhaustive,
 	)
 
-const makePersistenceError = (error: unknown) => {
-	const cause = describeCause(error instanceof Error ? error.cause : error)
-	return new AlertPersistenceError({
-		message: error instanceof Error ? error.message : "Alert persistence failed",
-		...(cause === undefined ? {} : { cause }),
-	})
-}
-
 const makeDeliveryError = (message: string, destinationType?: AlertDestinationType, cause?: unknown) =>
 	new AlertDeliveryError({
 		message,
@@ -424,18 +417,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				upsertRuleRow,
 			} = rulePersistence
 
-			const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-				database.execute(fn).pipe(
-					Effect.tapError((error) =>
-						Effect.logError("AlertsService dbExecute failed").pipe(
-							Effect.annotateLogs({
-								message: error.message,
-								cause: describeCause(error.cause) ?? "(none)",
-							}),
-						),
-					),
-					Effect.mapError(makePersistenceError),
-				)
+			const dbExecute = makeDbExecute(database, "AlertsService", makePersistenceError)
 
 			const systemTenant = (orgId: OrgId): TenantContext => ({
 				orgId,

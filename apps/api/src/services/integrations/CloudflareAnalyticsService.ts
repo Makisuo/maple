@@ -72,7 +72,8 @@ import {
 	type CloudflareHyperdriveConfig,
 	type CloudflareZone,
 } from "@/services/integrations/CloudflareApi"
-import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
+import { Database } from "@/platform/DatabaseLive"
+import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
 import { Env } from "@/platform/Env"
 import { dateToMs } from "@/platform/time"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -184,10 +185,10 @@ const decodeOrgId = Schema.decodeUnknownSync(OrgId)
 /** Synthetic actor stamped on rows the poller writes on the org's behalf (ingest keys, state). */
 const SYSTEM_USER_ID = decodeUserIdSync("system-cloudflare-analytics")
 
-const toPersistenceError = (cause: unknown) =>
-	new IntegrationsPersistenceError({
-		message: cause instanceof Error ? cause.message : "Cloudflare analytics database error",
-	})
+const toPersistenceError = makePersistenceErrorMapper(
+	IntegrationsPersistenceError,
+	"Cloudflare analytics database error",
+)
 
 /** Integrations-page usage window: last 24h in hourly buckets. */
 const USAGE_WINDOW_MS = 24 * 60 * 60_000
@@ -1015,8 +1016,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 		/** The ingest gateway's OTLP metrics endpoint — poller metrics flow through it like all telemetry. */
 		const ingestMetricsUrl = `${env.MAPLE_INGEST_PUBLIC_URL.replace(/\/+$/, "")}/v1/metrics`
 
-		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			database.execute(fn).pipe(Effect.mapError(toPersistenceError))
+		const dbExecute = makeDbExecute(database, "CloudflareAnalyticsService", toPersistenceError)
 
 		const systemTenant = (orgId: OrgId): TenantContext => ({
 			orgId,

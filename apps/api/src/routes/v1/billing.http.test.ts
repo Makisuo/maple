@@ -1,15 +1,16 @@
-import { assert, describe, it, layer } from "@effect/vitest"
-import { Effect, Schema } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { assert, describe, it } from "@effect/vitest"
+import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { type EdgeCacheBackend, makeEdgeCacheService, makeMemoryBackend } from "@maple/cache"
+import { Env } from "@/platform/Env"
 import {
 	CUSTOMER_CACHE_BUCKET,
 	CUSTOMER_CACHE_TTL_SECONDS,
 	CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS,
 	readCustomerCached,
 	responseHasActivePlan,
-	updateCustomerBillingControls,
 } from "@/services/billing/autumn-client"
+import { AutumnClient } from "@/services/billing/autumn-http"
 import {
 	BillingCustomer,
 	UpdateBillingControlsRequest,
@@ -45,82 +46,110 @@ const activePlanResponse = {
 }
 const noPlanResponse = { id: ORG, subscriptions: [] }
 
-layer(FetchHttpClient.layer)("updateCustomerBillingControls", (it) => {
-	it.effect("uses Autumn's canonical customer update route and v2.3 wire shape", () =>
-		Effect.gen(function* () {
-			let request: { readonly url: string; readonly init?: RequestInit } | undefined
-			const fetchImpl = (async (input, init) => {
-				request = { url: String(input), init }
-				return new Response(JSON.stringify({ id: ORG }), { status: 200 })
-			}) as typeof globalThis.fetch
-			const httpClient = yield* HttpClient.HttpClient
+// `AutumnClient` reads its credentials from `Env` and captures the HttpClient at
+// layer build; the fetch stub is provided as the `FetchHttpClient.Fetch`
+// reference (order-independent — swapping `globalThis.fetch` races the
+// reference's memoized default).
+const autumnClientLayer = AutumnClient.layer.pipe(
+	Layer.provide(
+		Env.layer.pipe(
+			Layer.provide(
+				ConfigProvider.layer(
+					ConfigProvider.fromUnknown({
+						TINYBIRD_HOST: "https://api.tinybird.co",
+						TINYBIRD_TOKEN: "test-token",
+						MAPLE_AUTH_MODE: "self_hosted",
+						MAPLE_ROOT_PASSWORD: "test-root-password",
+						MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
+						MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+						AUTUMN_SECRET_KEY: "am_sk_test",
+						AUTUMN_API_URL: "https://api.useautumn.com/",
+					}),
+				),
+			),
+		),
+	),
+)
 
-			const result = yield* updateCustomerBillingControls(
-				httpClient,
-				"am_sk_test",
-				"https://api.useautumn.com/",
-				ORG,
-				new UpdateBillingControlsRequest({
-					spendLimits: [
-						new UpdateBillingSpendLimit({
-							featureId: "logs",
-							enabled: true,
-							limitType: "absolute",
-							overageLimit: 250,
-						}),
-						new UpdateBillingSpendLimit({
-							featureId: "traces",
-							enabled: false,
-						}),
-					],
-					usageAlerts: [
-						new UpdateBillingUsageAlert({
-							featureId: "logs",
-							enabled: true,
-							threshold: 80,
-							thresholdType: "usage_percentage",
-							name: "Maple billing warning",
-						}),
-					],
-				}),
-			).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchImpl))
+describe("AutumnClient.updateCustomerBillingControls", () => {
+	it("uses Autumn's canonical customer update route and v2.3 wire shape", async () => {
+		let request: { readonly url: string; readonly init?: RequestInit } | undefined
+		const fetch = (async (input, init) => {
+			request = { url: String(input), init }
+			return new Response(JSON.stringify({ id: ORG }), { status: 200 })
+		}) as typeof globalThis.fetch
 
-			assert.strictEqual(result.statusCode, 200)
-			assert.strictEqual(request?.url, "https://api.useautumn.com/v1/customers.update")
-			assert.strictEqual(request?.init?.method, "POST")
-			const headers = new Headers(request?.init?.headers)
-			assert.strictEqual(headers.get("authorization"), "Bearer am_sk_test")
-			assert.strictEqual(headers.get("content-type"), "application/json")
-			assert.strictEqual(headers.get("x-api-version"), "2.3.0")
-			const requestBody = yield* Effect.promise(() => new Response(request?.init?.body).text())
-			assert.deepStrictEqual(JSON.parse(requestBody), {
-				customer_id: ORG,
-				billing_controls: {
-					spend_limits: [
-						{
-							feature_id: "logs",
-							enabled: true,
-							limit_type: "absolute",
-							overage_limit: 250,
-						},
-						{
-							feature_id: "traces",
-							enabled: false,
-						},
-					],
-					usage_alerts: [
-						{
-							feature_id: "logs",
-							enabled: true,
-							threshold: 80,
-							threshold_type: "usage_percentage",
-							name: "Maple billing warning",
-						},
-					],
-				},
-			})
-		}),
-	)
+		const result = await Effect.runPromise(
+			Effect.gen(function* () {
+				const autumn = yield* AutumnClient
+				return yield* autumn
+					.updateCustomerBillingControls(
+						ORG,
+						new UpdateBillingControlsRequest({
+							spendLimits: [
+								new UpdateBillingSpendLimit({
+									featureId: "logs",
+									enabled: true,
+									limitType: "absolute",
+									overageLimit: 250,
+								}),
+								new UpdateBillingSpendLimit({
+									featureId: "traces",
+									enabled: false,
+								}),
+							],
+							usageAlerts: [
+								new UpdateBillingUsageAlert({
+									featureId: "logs",
+									enabled: true,
+									threshold: 80,
+									thresholdType: "usage_percentage",
+									name: "Maple billing warning",
+								}),
+							],
+						}),
+					)
+					.pipe(Effect.provideService(FetchHttpClient.Fetch, fetch))
+			}).pipe(Effect.provide(autumnClientLayer)),
+		)
+
+		assert.strictEqual(result.statusCode, 200)
+		// The configured AUTUMN_API_URL carries a trailing slash — it must not
+		// survive into the path.
+		assert.strictEqual(request?.url, "https://api.useautumn.com/v1/customers.update")
+		assert.strictEqual(request?.init?.method, "POST")
+		const headers = new Headers(request?.init?.headers)
+		assert.strictEqual(headers.get("authorization"), "Bearer am_sk_test")
+		assert.strictEqual(headers.get("content-type"), "application/json")
+		assert.strictEqual(headers.get("x-api-version"), "2.3.0")
+		const requestBody = await new Response(request?.init?.body).text()
+		assert.deepStrictEqual(JSON.parse(requestBody), {
+			customer_id: ORG,
+			billing_controls: {
+				spend_limits: [
+					{
+						feature_id: "logs",
+						enabled: true,
+						limit_type: "absolute",
+						overage_limit: 250,
+					},
+					{
+						feature_id: "traces",
+						enabled: false,
+					},
+				],
+				usage_alerts: [
+					{
+						feature_id: "logs",
+						enabled: true,
+						threshold: 80,
+						threshold_type: "usage_percentage",
+						name: "Maple billing warning",
+					},
+				],
+			},
+		})
+	})
 })
 
 describe("readCustomerCached", () => {

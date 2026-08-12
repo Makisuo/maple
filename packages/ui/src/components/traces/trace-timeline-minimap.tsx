@@ -1,5 +1,6 @@
 import * as React from "react"
 
+import { spanStartMs } from "../../lib/span-tree"
 import type { SpanNode } from "../../lib/types"
 import { HANDLE_HIT_AREA, MINIMAP_HEIGHT, MIN_RANGE_FRAC } from "./trace-timeline-types"
 import { formatDuration } from "../../lib/format"
@@ -40,7 +41,7 @@ function collectMinimapSpans(
 	const statusPreset = isStatusCodePreset(colorBy)
 
 	function visit(node: SpanNode) {
-		const startMs = new Date(node.startTime).getTime()
+		const startMs = spanStartMs(node)
 		// Positioned against the padded viewport bounds, the same space the ruler and the span
 		// bars use, so a given instant lands at the same x in the strip and in the column.
 		const leftPercent = ((startMs - domainStartMs) / domainDurationMs) * 100

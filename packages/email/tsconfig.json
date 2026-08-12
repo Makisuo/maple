@@ -1,11 +1,10 @@
 {
-	"include": ["**/*.ts", "**/*.tsx"],
-	"exclude": ["**/render-preview*"],
+	"include": ["**/*.ts"],
+	"exclude": ["node_modules"],
 	"compilerOptions": {
 		"target": "ES2022",
 		"module": "ESNext",
-		"lib": ["ES2022", "DOM", "DOM.Iterable"],
-		"jsx": "react-jsx",
+		"lib": ["ES2022"],
 		"moduleResolution": "bundler",
 		"allowImportingTsExtensions": true,
 		"verbatimModuleSyntax": true,

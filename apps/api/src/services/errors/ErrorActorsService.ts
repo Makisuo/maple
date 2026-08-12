@@ -76,7 +76,7 @@ export interface ErrorActorsServiceShape extends ErrorActorsPublicShape {
 
 const make: Effect.Effect<ErrorActorsServiceShape, never, Database> = Effect.gen(function* () {
 	const database = yield* Database
-	const dbExecute = makeErrorDatabaseExecute(database)
+	const dbExecute = makeErrorDatabaseExecute(database, "ErrorActorsService")
 	const newActorId = () => decodeActorIdSync(randomUUID())
 
 	const selectActorRow = (orgId: OrgId, actorId: ActorId) =>

@@ -45,9 +45,7 @@
 		"@maple/query-engine": "workspace:*",
 		"@maple/query-engine-integrations": "workspace:*",
 		"@maple/widgets": "workspace:*",
-		"@react-email/components": "^1.0.11",
 		"@tinybirdco/sdk": "catalog:tinybird",
-		"autumn-js": "^1.2.51",
 		"drizzle-orm": "^0.45.1",
 		"effect": "catalog:effect"
 	},

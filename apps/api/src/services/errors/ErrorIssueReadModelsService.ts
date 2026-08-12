@@ -135,7 +135,7 @@ const make: Effect.Effect<
 	const database = yield* Database
 	const warehouse = yield* WarehouseQueryService
 	const workflow = yield* ErrorIssueWorkflowService
-	const dbExecute = makeErrorDatabaseExecute(database)
+	const dbExecute = makeErrorDatabaseExecute(database, "ErrorIssueReadModelsService")
 
 	const systemTenant = (orgId: OrgId): TenantContext => ({
 		orgId,

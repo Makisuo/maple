@@ -1,4 +1,5 @@
 import * as React from "react"
+import { spanStartMs } from "../../lib/span-tree"
 import type { SpanNode } from "../../lib/types"
 import type { TimelineBar, ViewportState, TimelineState, TimelineAction } from "./trace-timeline-types"
 import { ROW_HEIGHT, ROW_GAP, OVERSCAN, MIN_TICK_PX, DEFAULT_MAX_WINDOW_MS } from "./trace-timeline-types"
@@ -44,7 +45,7 @@ export function layoutSpans(
 	const statusPreset = isStatusCodePreset(colorBy)
 
 	function visit(node: SpanNode) {
-		const startMs = new Date(node.startTime).getTime()
+		const startMs = spanStartMs(node)
 		const endMs = startMs + node.durationMs
 		const hasChildren = node.children.length > 0
 		const isCollapsed = hasChildren && !expandedSpanIds.has(node.spanId)
@@ -282,7 +283,7 @@ export function useTraceTimeline({
 		let minStart = Number.POSITIVE_INFINITY
 		let maxEnd = Number.NEGATIVE_INFINITY
 		const visit = (node: SpanNode) => {
-			const s = new Date(node.startTime).getTime()
+			const s = spanStartMs(node)
 			if (Number.isFinite(s)) {
 				if (s < minStart) minStart = s
 				const e = s + node.durationMs

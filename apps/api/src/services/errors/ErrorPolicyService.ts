@@ -92,7 +92,7 @@ export interface ErrorPolicyServiceShape extends ErrorPolicyPublicShape {
 
 const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen(function* () {
 	const database = yield* Database
-	const dbExecute = makeErrorDatabaseExecute(database)
+	const dbExecute = makeErrorDatabaseExecute(database, "ErrorPolicyService")
 	const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 
 	// Mirrors the column defaults on `error_notification_policies` — an org with no

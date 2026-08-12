@@ -35,8 +35,9 @@ import {
 } from "@maple/db"
 import { and, desc, eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
-import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
-import { describeCause } from "@/platform/describe-cause"
+import { Database } from "@/platform/DatabaseLive"
+import { makeDbExecute } from "@/platform/db-execute"
+import { makePersistenceError } from "./alert-persistence"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
@@ -138,14 +139,6 @@ type IsoDateTimeValue = Schema.Schema.Type<typeof AlertDestinationDocument.field
 const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
 	value == null ? null : decodeIsoDateTimeStringSync(value.toISOString())
 
-const makePersistenceError = (error: unknown) => {
-	const cause = describeCause(error instanceof Error ? error.cause : error)
-	return new AlertPersistenceError({
-		message: error instanceof Error ? error.message : "Alert persistence failed",
-		...(cause === undefined ? {} : { cause }),
-	})
-}
-
 const makeValidationError = (message: string) => new AlertValidationError({ message, details: [] })
 
 const rowToIncidentDocument = (row: AlertIncidentRow) =>
@@ -187,18 +180,7 @@ export class AlertReadModelsService extends Context.Service<
 		const database = yield* Database
 		const warehouse = yield* WarehouseQueryService
 
-		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			database.execute(fn).pipe(
-				Effect.tapError((error) =>
-					Effect.logError("AlertsService dbExecute failed").pipe(
-						Effect.annotateLogs({
-							message: error.message,
-							cause: describeCause(error.cause) ?? "(none)",
-						}),
-					),
-				),
-				Effect.mapError(makePersistenceError),
-			)
+		const dbExecute = makeDbExecute(database, "AlertReadModelsService", makePersistenceError)
 
 		const systemTenant = (orgId: OrgId): TenantContext => ({
 			orgId,

@@ -50,7 +50,8 @@ import {
 	isInvestigationStale,
 	staleTimeoutMessage,
 } from "@/services/errors/investigation-stale"
-import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
+import { Database } from "@/platform/DatabaseLive"
+import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
 import { Env } from "@/platform/Env"
 
 /**
@@ -143,23 +144,10 @@ const validatorFor = (
 	})
 }
 
-const describeCause = (cause: unknown): string | undefined => {
-	if (cause == null) return undefined
-	if (cause instanceof Error) return cause.stack ?? cause.message
-	if (typeof cause === "string") return cause
-	try {
-		return JSON.stringify(cause)
-	} catch {
-		return String(cause)
-	}
-}
-
-const makePersistenceError = (error: DatabaseError): InvestigationPersistenceError => {
-	const cause = describeCause(error.cause)
-	return cause === undefined
-		? new InvestigationPersistenceError({ message: error.message })
-		: new InvestigationPersistenceError({ message: error.message, cause })
-}
+const makePersistenceError = makePersistenceErrorMapper(
+	InvestigationPersistenceError,
+	"Investigation persistence failure",
+)
 
 export interface ListInvestigationsOptions {
 	readonly issueId?: ErrorIssueId
@@ -239,8 +227,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			const env = yield* Env
 			const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
 
-			const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-				database.execute(fn).pipe(Effect.mapError(makePersistenceError))
+			const dbExecute = makeDbExecute(database, "InvestigationService", makePersistenceError)
 
 			const iso = (date: Date) => decodeIsoSync(date.toISOString())
 
