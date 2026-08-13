@@ -342,6 +342,64 @@ export function computeBucketSeconds(
 }
 
 /**
+ * The bucket-sizing policies, one per surface that asks for an auto granularity.
+ *
+ * These numbers are NOT interchangeable and must not be collapsed into one
+ * default — that is the whole reason they are named here rather than passed as
+ * literals at each call site:
+ *
+ *   - `chart` targets 100 points because a dashboard or explore chart is read by
+ *     a human looking for spikes, and 30 points averages them away.
+ *   - `alert` targets 30 because bucket width changes per-bucket values, and
+ *     therefore changes `minimumSampleCount` behaviour, for every auto-sized
+ *     rule. Making rules denser would silently re-tune every one of them.
+ *   - `rawSql` backs `$__interval_s` and carries a 300s floor: a sub-5-minute
+ *     bucket there produces exactly the scan the granularity was chosen to
+ *     avoid.
+ *
+ * `fallbackSeconds` is what a caller gets for an unparseable or inverted range —
+ * see {@link computeBucketSecondsForRange}.
+ */
+export const BUCKET_POLICIES = {
+	chart: { targetPoints: 100, fallbackSeconds: 300 },
+	alert: { targetPoints: 30, fallbackSeconds: 300 },
+	rawSql: { targetPoints: 30, minBucketSeconds: 300, fallbackSeconds: 300 },
+} as const satisfies Record<string, ComputeBucketSecondsOptions & { fallbackSeconds: number }>
+
+export type BucketPolicyName = keyof typeof BUCKET_POLICIES
+
+/**
+ * {@link computeBucketSeconds} for callers holding warehouse DateTime *strings*
+ * rather than epoch milliseconds, which is most of them.
+ *
+ * Exists because the string parse plus the "unparseable range falls back to a
+ * fixed width" rule were open-coded twice — once in the web app's
+ * `timeseries-utils`, once as `computeAutoBucketSeconds` in the raw-SQL route —
+ * with the same two behaviours and no shared home. `targetPoints` overrides the
+ * policy's own target for the few callers that want a denser histogram.
+ */
+export function computeBucketSecondsForRange(
+	startTime: string | undefined,
+	endTime: string | undefined,
+	policyName: BucketPolicyName = "chart",
+	targetPoints?: number,
+): number {
+	const policy = BUCKET_POLICIES[policyName]
+	if (!startTime || !endTime) return policy.fallbackSeconds
+
+	const startMs = parseWarehouseDateTime(startTime)
+	const endMs = parseWarehouseDateTime(endTime)
+	if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
+		return policy.fallbackSeconds
+	}
+
+	return computeBucketSeconds(startMs, endMs, {
+		...policy,
+		...(targetPoints === undefined ? {} : { targetPoints }),
+	})
+}
+
+/**
  * Bucket width for an alert rule's evaluation window.
  *
  * A rule compares one value per window against a threshold, so the bucket IS the

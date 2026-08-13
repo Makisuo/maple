@@ -31,6 +31,7 @@ import type { QueryProfileName, SqlQueryOptions, WarehouseQuerySettings } from "
 import { canonicalJSON } from "../canonical-json"
 import {
 	alertWindowBucketSeconds,
+	BUCKET_POLICIES,
 	computeBucketSeconds,
 	formatWarehouseDateTime,
 	parseWarehouseDateTime,
@@ -214,6 +215,18 @@ export const msToTinybirdDateTime = (ms: number): string => {
 
 const CACHE_SNAP_S = 15
 const TRACE_SERVICE_PARTITION_BUFFER_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The engine's name for "this result has no grouping dimension".
+ *
+ * Storage, the wire and the UI spell the same thing `UNGROUPED_GROUP_KEY`
+ * (`"__total__"`), and `toStorageGroupKey` in the alerts service is the one
+ * boundary that translates between them. That translation was already named;
+ * this side was a bare `"all"` repeated at a dozen sites, which is what made it
+ * possible to write one of them as `"__total__"` by mistake and produce an
+ * `alert_rule_states` row no reader can see.
+ */
+export const ENGINE_UNGROUPED_GROUP_KEY = "all"
 
 /**
  * Bound the service-enrichment lookup to the daily partitions surrounding the
@@ -697,9 +710,9 @@ function groupAllMetricsTimeSeriesRows<
 	const bucketOrder: string[] = fillOptions
 		? buildBucketTimeline(fillOptions.startMs, fillOptions.endMs, fillOptions.bucketSeconds)
 		: []
-	const isGrouped = rows.some((row) => row.groupName !== "all")
+	const isGrouped = rows.some((row) => row.groupName !== ENGINE_UNGROUPED_GROUP_KEY)
 	const metricKey = (metric: string, groupName: string) =>
-		isGrouped ? `${metric}::${groupName || "all"}` : metric
+		isGrouped ? `${metric}::${groupName || ENGINE_UNGROUPED_GROUP_KEY}` : metric
 
 	for (const row of rows) {
 		const bucket = normalizeBucket(row.bucket)
@@ -738,7 +751,7 @@ function groupAllMetricsTimeSeriesRows<
 function collapseMetricTimeseriesRows(
 	rows: ReadonlyArray<MetricTimeseriesRow>,
 	metric: Extract<QuerySpec, { metric: string }>["metric"],
-): Array<{ bucket: string; groupName: "all"; value: number }> {
+): Array<{ bucket: string; groupName: typeof ENGINE_UNGROUPED_GROUP_KEY; value: number }> {
 	const bucketMap = new Map<
 		string,
 		{
@@ -771,7 +784,7 @@ function collapseMetricTimeseriesRows(
 		.sort(([left], [right]) => left.localeCompare(right))
 		.map(([bucket, value]) => ({
 			bucket,
-			groupName: "all" as const,
+			groupName: ENGINE_UNGROUPED_GROUP_KEY,
 			value:
 				metric === "count"
 					? value.dataPointCount
@@ -1140,7 +1153,7 @@ function shapeMetricsGroupRows<
 		return groupTimeSeriesRows(
 			rows.map((row) => ({
 				bucket: row.bucket,
-				groupName: "all" as const,
+				groupName: ENGINE_UNGROUPED_GROUP_KEY,
 				value: valueExtractor(row),
 			})),
 			(r) => r.value,
@@ -1992,7 +2005,7 @@ const composeMetricsGroupKey = (
 	serviceName: string,
 	attributeValue: string,
 ): string => {
-	if (!groupBy || groupBy.length === 0 || groupBy.includes("none")) return "all"
+	if (!groupBy || groupBy.length === 0 || groupBy.includes("none")) return ENGINE_UNGROUPED_GROUP_KEY
 	const parts: string[] = []
 	for (const dim of groupBy) {
 		if (dim === "service") parts.push(serviceName || "")
@@ -2001,7 +2014,7 @@ const composeMetricsGroupKey = (
 		else if (dim === "attribute" || dim === "resource_attribute") parts.push(attributeValue || "")
 	}
 	const filtered = parts.filter((p) => p.length > 0)
-	if (filtered.length === 0) return "all"
+	if (filtered.length === 0) return ENGINE_UNGROUPED_GROUP_KEY
 	return filtered.join(" \u00b7 ")
 }
 
@@ -2105,7 +2118,7 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 			const value = sampleCount > 0 ? tracesAggregateValueForMetric(query.metric, row) : null
 			obs.push({
 				bucket: normalizeBucket(row.bucket),
-				groupKey: row.groupName || "all",
+				groupKey: row.groupName || ENGINE_UNGROUPED_GROUP_KEY,
 				value,
 				sampleCount,
 			})
@@ -2124,7 +2137,7 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 			const sampleCount = Number(row.count ?? 0)
 			obs.push({
 				bucket: normalizeBucket(row.bucket),
-				groupKey: row.groupName || "all",
+				groupKey: row.groupName || ENGINE_UNGROUPED_GROUP_KEY,
 				value: sampleCount > 0 ? sampleCount : null,
 				sampleCount,
 			})
@@ -2179,7 +2192,11 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 	range: { readonly startTime: string; readonly endTime: string },
 ) {
 	const executeRawSql = makeExecuteRawSql<T, WarehouseError | RawSqlValidationError>(warehouse)
-	const granularitySeconds = Math.max(source.windowMinutes * 60, 60)
+	// The same rule `prepareAlertEvaluation` applies to a spec source, and it has
+	// to stay the same rule: a raw-SQL rule whose `$__timeGroup` width disagreed
+	// with its evaluation bucket would reduce over a different window than the one
+	// it was saved with.
+	const granularitySeconds = alertWindowBucketSeconds(source.windowMinutes)
 
 	const { rows: rawRows } = yield* executeRawSql(tenant, {
 		sql: source.sql,
@@ -2214,7 +2231,8 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 	const seenGroups = new Set<string>()
 	for (const row of rows) {
 		const rawGroup = row.group
-		const groupKey = typeof rawGroup === "string" && rawGroup.length > 0 ? rawGroup : "all"
+		const groupKey =
+			typeof rawGroup === "string" && rawGroup.length > 0 ? rawGroup : ENGINE_UNGROUPED_GROUP_KEY
 		if (groupKey.length > MAX_RAW_SQL_GROUP_KEY_LENGTH) {
 			return yield* new QueryEngineValidationError({
 				message: "Invalid raw SQL alert query",
@@ -2277,7 +2295,7 @@ export const reduceAlertBuckets = (
 		else byGroup.set(o.groupKey, [entry])
 	}
 	if (byGroup.size === 0) {
-		byGroup.set("all", [{ value: null, sampleCount: 0, hasData: false }])
+		byGroup.set(ENGINE_UNGROUPED_GROUP_KEY, [{ value: null, sampleCount: 0, hasData: false }])
 	}
 	return reducePerGroupObservations(byGroup, reducer)
 }
@@ -2332,10 +2350,11 @@ const prepareAlertEvaluation = Effect.fnUntraced(function* (request: AlertEvalua
 	}
 
 	// Use the spec's bucketSeconds when present, otherwise auto-compute from the
-	// time range. Pinned to the historical 30-point target: the chart default is
-	// denser, but finer buckets would change per-bucket observation values (and
-	// `minimumSampleCount` behavior) for every rule that relies on auto sizing.
-	return query.bucketSeconds ?? computeBucketSeconds(startMs, endMs, { targetPoints: 30 })
+	// time range. `BUCKET_POLICIES.alert` pins the historical 30-point target: the
+	// chart default is denser, but finer buckets would change per-bucket
+	// observation values (and `minimumSampleCount` behavior) for every rule that
+	// relies on auto sizing.
+	return query.bucketSeconds ?? computeBucketSeconds(startMs, endMs, BUCKET_POLICIES.alert)
 })
 
 export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>

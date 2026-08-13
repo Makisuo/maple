@@ -78,7 +78,7 @@ import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryServic
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
 import {
 	CH,
-	computeBucketSeconds,
+	computeBucketSecondsForRange,
 	formatWarehouseDateTime,
 	parseWarehouseDateTime,
 	QueryEngineExecuteBatchResponse,
@@ -1793,17 +1793,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
  * Auto-bucket for raw-SQL `$__interval_s` when the caller didn't supply
  * `granularitySeconds`.
  *
- * Was a private ladder duplicating `computeBucketSeconds`; the only two
- * differences were a 30-point target and a 300s floor, both of which the shared
- * one now expresses. The floor is load-bearing: a sub-5-minute `$__interval_s`
- * produces exactly the scan the granularity was chosen to avoid.
+ * Was a private ladder duplicating `computeBucketSeconds`, then a private copy of
+ * the string-parse-and-fall-back rule. Both now live in `BUCKET_POLICIES.rawSql`,
+ * whose 300s floor is load-bearing: a sub-5-minute `$__interval_s` produces
+ * exactly the scan the granularity was chosen to avoid.
  */
 function computeAutoBucketSeconds(startTime: string, endTime: string): number {
-	const toEpochMs = (value: string) => new Date(value.replace(" ", "T") + "Z").getTime()
-	const startMs = toEpochMs(startTime)
-	const endMs = toEpochMs(endTime)
-	if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
-		return 300
-	}
-	return computeBucketSeconds(startMs, endMs, { targetPoints: 30, minBucketSeconds: 300 })
+	return computeBucketSecondsForRange(startTime, endTime, "rawSql")
 }

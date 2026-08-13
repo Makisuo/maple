@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import {
 	bucketTimeline,
+	BUCKET_POLICIES,
 	cacheSnapSecondsForRange,
 	alertWindowBucketSeconds,
 	computeBucketSeconds,
+	computeBucketSecondsForRange,
 	formatWarehouseDateTime,
 	formatWarehouseDateTimeMs,
 	parseWarehouseDateTime,
@@ -135,6 +137,60 @@ describe("computeBucketSeconds", () => {
 		it("leaves the default (unfloored) ladder alone", () => {
 			expect(computeBucketSeconds(0, 3600_000)).toBe(computeBucketSeconds(0, 3600_000, {}))
 		})
+	})
+})
+
+describe("BUCKET_POLICIES", () => {
+	/**
+	 * These three targets are NOT interchangeable, and a well-meaning "why do we
+	 * have three of these?" cleanup is exactly what this guards. `alert` in
+	 * particular re-tunes `minimumSampleCount` for every auto-sized rule if it
+	 * moves.
+	 */
+	it("keeps the three surfaces on their own targets", () => {
+		expect(BUCKET_POLICIES.chart.targetPoints).toBe(100)
+		expect(BUCKET_POLICIES.alert.targetPoints).toBe(30)
+		expect(BUCKET_POLICIES.rawSql.targetPoints).toBe(30)
+		expect(BUCKET_POLICIES.rawSql.minBucketSeconds).toBe(300)
+	})
+
+	it("gives chart and alert measurably different granularity on the same window", () => {
+		const sixHours = 6 * 3600_000
+		expect(computeBucketSeconds(0, sixHours, BUCKET_POLICIES.chart)).toBe(300)
+		expect(computeBucketSeconds(0, sixHours, BUCKET_POLICIES.alert)).toBe(900)
+	})
+})
+
+describe("computeBucketSecondsForRange", () => {
+	it("parses warehouse DateTime strings under the chart policy", () => {
+		expect(computeBucketSecondsForRange("2026-02-01 00:00:00", "2026-02-01 00:30:00")).toBe(60)
+		expect(computeBucketSecondsForRange("2026-02-01 00:00:00", "2026-02-01 06:00:00")).toBe(300)
+		expect(computeBucketSecondsForRange("2026-02-01 00:00:00", "2026-02-08 00:00:00")).toBe(3600)
+	})
+
+	it("falls back rather than throwing on absent, unparseable or inverted ranges", () => {
+		expect(computeBucketSecondsForRange(undefined, "2026-02-01 00:00:00")).toBe(300)
+		expect(computeBucketSecondsForRange("2026-02-01 00:00:00", undefined)).toBe(300)
+		expect(computeBucketSecondsForRange("not a date", "2026-02-01 00:00:00")).toBe(300)
+		// endTime <= startTime is inverted, not a zero-width window.
+		expect(computeBucketSecondsForRange("2026-02-01 06:00:00", "2026-02-01 00:00:00")).toBe(300)
+	})
+
+	it("honors the rawSql floor through the policy name", () => {
+		expect(computeBucketSecondsForRange("2026-02-01 00:00:00", "2026-02-01 00:30:00", "rawSql")).toBe(300)
+		expect(computeBucketSecondsForRange("2026-02-01 00:00:00", "2026-02-01 06:00:00", "rawSql")).toBe(900)
+	})
+
+	it("lets a caller override the target for a denser histogram", () => {
+		expect(computeBucketSecondsForRange("2026-02-01 00:00:00", "2026-02-01 01:00:00", "chart", 60)).toBe(
+			60,
+		)
+	})
+
+	it("treats a tz-marked string the same as its tz-less spelling", () => {
+		expect(computeBucketSecondsForRange("2026-02-01T00:00:00Z", "2026-02-01T06:00:00Z")).toBe(
+			computeBucketSecondsForRange("2026-02-01 00:00:00", "2026-02-01 06:00:00"),
+		)
 	})
 })
 
