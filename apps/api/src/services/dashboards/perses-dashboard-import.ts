@@ -5,7 +5,10 @@ import {
 	PortableDashboardDocument,
 	type RawSqlDisplayType,
 	defaultWidgetLayout,
+	findNextPosition,
 	widgetTypeByPersesKind,
+	widgetTypeByVisualization,
+	type WidgetVisualization,
 } from "@maple/domain/http"
 
 type UnknownRecord = Record<string, unknown>
@@ -95,7 +98,7 @@ function getPanelPlugin(panel: unknown) {
 // (`persesKinds`), so adding a widget kind can't leave the importer behind.
 // Unknown kinds fall back to a line chart, as they always have.
 
-const defaultVisualizationForPanelKind = (kind: string | undefined): string =>
+const defaultVisualizationForPanelKind = (kind: string | undefined): WidgetVisualization =>
 	widgetTypeByPersesKind(kind).visualization
 
 const displayTypeForPanelKind = (kind: string | undefined): RawSqlDisplayType =>
@@ -172,20 +175,7 @@ function defaultLayoutForVisualization(visualization: string) {
 
 function nextLayout(widgets: readonly DashboardWidget[], visualization: string) {
 	const defaults = defaultLayoutForVisualization(visualization)
-	if (widgets.length === 0) return { x: 0, y: 0, ...defaults }
-
-	const maxY = Math.max(...widgets.map((widget) => widget.layout.y))
-	const rowWidgets = widgets.filter((widget) => widget.layout.y === maxY)
-	const rightEdge = Math.max(...rowWidgets.map((widget) => widget.layout.x + widget.layout.w))
-	if (rightEdge + defaults.w <= 12) {
-		return { x: rightEdge, y: maxY, ...defaults }
-	}
-
-	return {
-		x: 0,
-		y: Math.max(...widgets.map((widget) => widget.layout.y + widget.layout.h)),
-		...defaults,
-	}
+	return { ...findNextPosition(widgets, defaults.w), ...defaults }
 }
 
 function gridLayoutFromItem(
@@ -296,7 +286,10 @@ function rawSqlDataSource(args: {
 		},
 	}
 
-	if (args.displayType === "stat" || args.visualization === "stat" || args.visualization === "gauge") {
+	// `displayType === "stat"` is kept alongside the panel's own scalar flag: a
+	// Perses panel can import as a non-scalar type while its query still yields
+	// the single-row shape a stat renders.
+	if (args.displayType === "stat" || widgetTypeByVisualization(args.visualization)?.isScalar === true) {
 		return {
 			...base,
 			transform: { reduceToValue: { field: "value", aggregate: "first" } },

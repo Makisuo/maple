@@ -21,7 +21,7 @@ import {
 	updateIssueSelection,
 } from "@/lib/models/issue-selection"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { runMapleApiV2 } from "@/lib/collections/api-runner"
 import {
 	appendUniqueErrorIssues,
@@ -185,13 +185,13 @@ function IssuesPage() {
 		kind: kindFilter,
 	})
 	const result = useAtomValue(
-		MapleApiV2AtomClient.query("errorIssues", "list", {
+		retainedQueryV2("errorIssues", "list", {
 			query: listQuery,
 			reactivityKeys: ["errorIssues"],
 		}),
 	)
 	const refresh = useAtomRefresh(
-		MapleApiV2AtomClient.query("errorIssues", "list", {
+		retainedQueryV2("errorIssues", "list", {
 			query: listQuery,
 			reactivityKeys: ["errorIssues"],
 		}),

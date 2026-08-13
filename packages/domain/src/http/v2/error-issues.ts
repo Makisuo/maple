@@ -1,10 +1,20 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { ActorType, IssueKind, IssueSeverity, IssueSeveritySource, WorkflowState } from "../errors"
+import {
+	ActorType,
+	ErrorIssueNotFoundError,
+	ErrorPersistenceError,
+	IssueKind,
+	IssueSeverity,
+	IssueSeveritySource,
+	WorkflowState,
+} from "../errors"
 import { SpanId, TraceId, UserId } from "../../primitives"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
+import { V2CursorInvalid, V2CursorSortMismatch } from "./errors"
+import { publicErrors } from "./public-error"
+import { V2WarehouseReadErrors } from "./query-errors"
 import { ActorPublicId, ErrorIncidentPublicId, ErrorIssuePublicId } from "./resource-ids"
 
 export const V2ErrorIssueActor = Schema.Struct({
@@ -148,14 +158,20 @@ const ErrorIssueServiceCountList = ListOf(V2ErrorIssueServiceCount).annotate({
 	identifier: "ErrorIssueServiceCountList",
 	title: "Error issue service count list",
 })
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+
+const [errorIssueNotFound, errorPersistence] = publicErrors(ErrorIssueNotFoundError, ErrorPersistenceError)
 
 export class V2ErrorIssuesApiGroup extends HttpApiGroup.make("errorIssues")
 	.add(
 		HttpApiEndpoint.get("list", "/", {
 			query: V2ErrorIssueListQuery,
 			success: ErrorIssueList,
-			error: [...commonErrors],
+			error: [
+				V2CursorInvalid.schema,
+				V2CursorSortMismatch.schema,
+				errorPersistence,
+				...V2WarehouseReadErrors,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listErrorIssues",
@@ -169,7 +185,7 @@ export class V2ErrorIssuesApiGroup extends HttpApiGroup.make("errorIssues")
 		// Static path — must be registered before the `/:id` param route.
 		HttpApiEndpoint.get("serviceCounts", "/service_counts", {
 			success: ErrorIssueServiceCountList,
-			error: [...commonErrors],
+			error: errorPersistence,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listErrorIssueServiceCounts",
@@ -184,7 +200,7 @@ export class V2ErrorIssuesApiGroup extends HttpApiGroup.make("errorIssues")
 			params: { id: ErrorIssuePublicId },
 			query: V2ErrorIssueDetailQuery,
 			success: V2ErrorIssueDetail,
-			error: [...commonErrors, V2NotFoundError],
+			error: [errorIssueNotFound, errorPersistence, ...V2WarehouseReadErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getErrorIssue",
@@ -196,7 +212,6 @@ export class V2ErrorIssuesApiGroup extends HttpApiGroup.make("errorIssues")
 	)
 	.prefix("/v2/error_issues")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Error Issues",

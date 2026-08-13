@@ -299,7 +299,7 @@ describe("display key ownership across type switches", () => {
 	})
 
 	it("clears per-visualization keys the new visualization does not own", () => {
-		const widget = {
+		const widget: DashboardWidget = {
 			...makeWidget(),
 			visualization: "markdown",
 			display: {

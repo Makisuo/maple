@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { CopyableValue } from "@maple/ui/components/attributes"
@@ -8,10 +8,7 @@ import { LinkIcon } from "@/components/icons"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import type { WidgetMode } from "@/components/dashboard-builder/types"
 
-import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleton"
 import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkline"
-import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
-import { formatValue, getThresholdColor } from "@/components/dashboard-builder/widgets/stat-widget"
 import {
 	ChartWidget,
 	FunnelWidget,
@@ -20,6 +17,7 @@ import {
 	HistogramWidget,
 	PieWidget,
 } from "@/components/dashboard-builder/widgets/make-chart-widget"
+import { SparklineSeriesScope } from "@/components/dashboard-builder/widgets/stat-widget"
 import { WidgetActionsScope } from "@/components/dashboard-builder/widgets/widget-actions-context"
 import { widgetTypes } from "@/components/dashboard-builder/widgets/types"
 
@@ -446,9 +444,20 @@ function StatScenarioCard({ scenario, mode }: { scenario: WidgetScenario; mode: 
 	)
 }
 
-// Mirrors the sparkline branch of StatWidget (stat-widget.tsx). The real
-// widget fetches the sparkline series live from a derived data source; here it
-// renders static lab data so the composed layout can be polished.
+/**
+ * Any data source will do — the scope below answers for it instead of the
+ * warehouse. It only has to be present, because `StatWidget` reaches the
+ * sparkline branch on `display.sparkline.dataSource` being set.
+ */
+const LAB_SPARKLINE_SOURCE = { endpoint: "custom_query_builder_timeseries", params: {} } as const
+
+/**
+ * The real `StatWidget`, with its sparkline series supplied instead of fetched.
+ *
+ * This used to be a hand-rebuilt copy of the widget's sparkline branch, which
+ * meant the one renderer that fetches something was also the one renderer the
+ * lab never actually verified.
+ */
 function StatSparklineScenarioCard({
 	scenario,
 	mode,
@@ -456,39 +465,28 @@ function StatSparklineScenarioCard({
 	scenario: StatSparklineScenario
 	mode: WidgetMode
 }) {
-	const { value, display } = scenario
-	const formatted = formatValue(value, display.unit, display.prefix, display.suffix)
-	const thresholdColor = getThresholdColor(value, display.thresholds)
+	const display = useMemo(
+		() => ({
+			...scenario.display,
+			sparkline: { enabled: true, dataSource: LAB_SPARKLINE_SOURCE },
+		}),
+		[scenario.display],
+	)
+	// Stable per scenario: an unstable resolver remounts the sparkline every render.
+	const resolve = useMemo(
+		() => () => ({ status: "ready", data: scenario.sparklineData }) as const,
+		[scenario.sparklineData],
+	)
+
 	return (
 		<ScenarioCell label={scenario.label} height={220}>
-			<WidgetFrame
-				title={display.title || "Untitled"}
-				dataState={{ status: "ready", data: value }}
-				mode={mode}
-				loadingSkeleton={
-					<div className="flex h-full w-full flex-col">
-						<div className="flex flex-1 items-center justify-center">
-							<ChartSkeleton variant="stat" />
-						</div>
-						<ChartSkeleton variant="line" className="h-10 shrink-0" />
-					</div>
-				}
-				contentClassName="flex-1 min-h-0 flex flex-col"
-			>
-				<div className="flex flex-1 items-center justify-center px-4 pt-4">
-					<span
-						className="text-2xl font-bold"
-						style={thresholdColor ? { color: thresholdColor } : undefined}
-					>
-						{formatted}
-					</span>
-				</div>
-				<StatSparkline
-					data={scenario.sparklineData}
-					color={thresholdColor ?? scenario.sparklineColor ?? "var(--chart-1)"}
-					className="h-10 w-full shrink-0"
+			<SparklineSeriesScope resolve={resolve}>
+				<StatWidget
+					dataState={{ status: "ready", data: scenario.value }}
+					display={display}
+					mode={mode}
 				/>
-			</WidgetFrame>
+			</SparklineSeriesScope>
 		</ScenarioCell>
 	)
 }

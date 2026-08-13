@@ -2,12 +2,11 @@ import { HttpServerRequest } from "effect/unstable/http"
 import { CurrentTenant, RoleName } from "@maple/domain/http"
 import {
 	AuthorizationV2,
-	authenticationError,
-	dependencyUnavailable,
-	permissionError,
-	rateLimited,
 	requiredScopeForRequest,
 	scopeAllows,
+	V2InsufficientScope,
+	V2InvalidCredentials,
+	V2RateLimited,
 } from "@maple/domain/http/v2"
 import { Effect, Layer, Option, Schema } from "effect"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
@@ -57,22 +56,13 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 					const request = yield* HttpServerRequest.HttpServerRequest
 
 					const token = getBearerToken(request.headers)
-					const apiKeyResolved = yield* apiKeys
-						.resolveByBearer(token)
-						.pipe(
-							Effect.catchTag("@maple/http/errors/ApiKeyLookupPersistenceError", () =>
-								Effect.fail(dependencyUnavailable("api_key_lookup_unavailable")),
-							),
-						)
+					const apiKeyResolved = yield* apiKeys.resolveByBearer(token)
 
 					if (Option.isSome(apiKeyResolved)) {
 						const resolved = apiKeyResolved.value
 						if (resolved.kind !== "standard") {
 							return yield* Effect.fail(
-								authenticationError(
-									"invalid_credentials",
-									"This API key is only valid for the MCP server.",
-								),
+								V2InvalidCredentials.make("This API key is only valid for the MCP server."),
 							)
 						}
 
@@ -93,15 +83,16 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 
 						if (rateLimitOutcome === "limited") {
 							return yield* Effect.fail(
-								rateLimited({ retryAfterSeconds: API_V2_RATE_LIMIT_PERIOD_SECONDS }),
+								V2RateLimited.make(undefined, {
+									retryAfterSeconds: API_V2_RATE_LIMIT_PERIOD_SECONDS,
+								}),
 							)
 						}
 
 						const required = requiredScopeForRequest(request.method, requestPath(request.url))
 						if (required !== null && !scopeAllows(resolved.scopes, required)) {
 							return yield* Effect.fail(
-								permissionError(
-									"insufficient_scope",
+								V2InsufficientScope.make(
 									`This API key does not have the "${required.family}:${required.access}" scope required for this request.`,
 								),
 							)
@@ -117,11 +108,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						return yield* Effect.provideService(httpEffect, CurrentTenant.Context, tenant)
 					}
 
-					const tenant = yield* resolveTenant(request.headers).pipe(
-						Effect.mapError(() =>
-							authenticationError("invalid_credentials", "Invalid or missing credentials."),
-						),
-					)
+					const tenant = yield* resolveTenant(request.headers)
 					yield* annotateAuthSpan("session", { orgId: tenant.orgId, userId: tenant.userId })
 					return yield* Effect.provideService(
 						httpEffect,

@@ -24,7 +24,8 @@ import {
 	parseBase64Aes256GcmKey,
 	type EncryptedValue,
 } from "@/platform/Crypto"
-import type { DatabaseClient, DatabaseShape } from "@/platform/DatabaseLive"
+import type { DatabaseShape } from "@/platform/DatabaseLive"
+import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
 import type { EnvShape } from "@/platform/Env"
 import { msToDate } from "@/platform/time"
 
@@ -108,14 +109,12 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 				}),
 		)
 
-		const toPersistenceError = (cause: unknown) =>
-			new IntegrationsPersistenceError({
-				message:
-					cause instanceof Error ? cause.message : `${providerLabel} integration database error`,
-			})
+		const toPersistenceError = makePersistenceErrorMapper(
+			IntegrationsPersistenceError,
+			`${providerLabel} integration database error`,
+		)
 
-		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			database.execute(fn).pipe(Effect.mapError(toPersistenceError))
+		const dbExecute = makeDbExecute(database, `${providerLabel} integration`, toPersistenceError)
 
 		const encryptValue = (plaintext: string) =>
 			encryptAes256Gcm(

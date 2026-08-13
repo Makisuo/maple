@@ -92,6 +92,23 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 							Effect.annotateCurrentSpan({
 								"maple.scrape.auth_failure_reason": error.reason,
 							}).pipe(Effect.as(errorText(`[auth:${error.reason}] ${error.message}`, 502))),
+						"@maple/http/errors/IntegrationsConfigurationError": (error) =>
+							Effect.succeed(errorText(`[auth:config] ${error.message}`, 502)),
+						"@maple/http/errors/IntegrationsNotConnectedError": (error) =>
+							Effect.succeed(errorText(`[auth:not_connected] ${error.message}`, 502)),
+						"@maple/http/errors/IntegrationsRevokedError": (error) =>
+							Effect.succeed(errorText(`[auth:revoked] ${error.message}`, 502)),
+						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+							Effect.succeed(
+								errorText(
+									`[auth:upstream] PlanetScale token refresh failed upstream: ${error.message}`,
+									502,
+								),
+							),
+						"@maple/http/errors/IntegrationsValidationError": (error) =>
+							Effect.succeed(errorText(`[auth:config] ${error.message}`, 502)),
+						"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+							Effect.succeed(errorText(error.message, 502)),
 					}),
 				)
 			})

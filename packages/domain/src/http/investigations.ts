@@ -3,6 +3,7 @@ import { Schema } from "effect"
 import { ErrorIssueId, InvestigationId, IsoDateTimeString, UserId } from "../primitives"
 import { AiTriageEvidence, AiTriageIncidentKind, AiTriageResult } from "./ai-triage"
 import { Authorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 import { IssueSeverity } from "./errors"
 
 // Literals
@@ -492,32 +493,56 @@ export class SubmitDiagnosisRequest extends Schema.Class<SubmitDiagnosisRequest>
 
 // Errors
 
-export class InvestigationPersistenceError extends Schema.TaggedError<InvestigationPersistenceError>()(
+export class InvestigationPersistenceError extends HttpTaggedError<InvestigationPersistenceError>()(
 	"@maple/http/investigations/InvestigationPersistenceError",
 	{
 		message: Schema.String,
 		cause: Schema.optionalKey(Schema.String),
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "investigations_unavailable",
+		title: "Investigations are temporarily unavailable",
+		message: "Investigations are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class InvestigationValidationError extends Schema.TaggedError<InvestigationValidationError>()(
+export class InvestigationValidationError extends HttpTaggedError<InvestigationValidationError>()(
 	"@maple/http/investigations/InvestigationValidationError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 400 },
+	{
+		status: 400,
+		code: "investigation_invalid",
+		title: "Invalid investigation",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
 ) {}
 
-export class InvestigationNotFoundError extends Schema.TaggedError<InvestigationNotFoundError>()(
+export class InvestigationNotFoundError extends HttpTaggedError<InvestigationNotFoundError>()(
 	"@maple/http/investigations/InvestigationNotFoundError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "investigation_not_found",
+		title: "Investigation not found",
+		message: "No such investigation.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
-export class InvestigationQuotaError extends Schema.TaggedError<InvestigationQuotaError>()(
+export class InvestigationQuotaError extends HttpTaggedError<InvestigationQuotaError>()(
 	"@maple/http/investigations/InvestigationQuotaError",
 	{
 		message: Schema.String,
@@ -530,43 +555,109 @@ export class InvestigationQuotaError extends Schema.TaggedError<InvestigationQuo
 		limit: Schema.Number,
 		retryableAt: IsoDateTimeString,
 	},
-	{ httpApiStatus: 429 },
+	{
+		status: 429,
+		code: "investigation_daily_quota",
+		title: "Investigation limit reached",
+		message: (error) =>
+			error.dimension === "runs"
+				? `Daily limit of ${error.limit} investigations reached. Resets at ${error.retryableAt}.`
+				: `Daily limit of ${error.limit} model passes reached. Resets at ${error.retryableAt}.`,
+		retry: "after",
+		retryAt: (error) => error.retryableAt,
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
 /** Automatic starts are disabled by organization policy. Retrying unchanged cannot help. */
-export class InvestigationAutomationDisabledError extends Schema.TaggedError<InvestigationAutomationDisabledError>()(
+export class InvestigationAutomationDisabledError extends HttpTaggedError<InvestigationAutomationDisabledError>()(
 	"@maple/http/investigations/InvestigationAutomationDisabledError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "investigation_automation_disabled",
+		title: "Automatic investigations are disabled",
+		retry: "never",
+		recovery: "none",
+		exposure: "public_message",
+	},
 ) {}
 
 /** The investigation agent/workflow binding cannot currently be reached. */
-export class InvestigationAgentUnavailableError extends Schema.TaggedError<InvestigationAgentUnavailableError>()(
+export class InvestigationAgentUnavailableError extends HttpTaggedError<InvestigationAgentUnavailableError>()(
 	"@maple/http/investigations/InvestigationAgentUnavailableError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "investigation_agent_unavailable",
+		title: "Investigation agent is temporarily unavailable",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "public_message",
+	},
 ) {}
 
 /** A configured agent was reached, but the investigation turn could not be started. */
-export class InvestigationStartFailedError extends Schema.TaggedError<InvestigationStartFailedError>()(
+export class InvestigationStartFailedError extends HttpTaggedError<InvestigationStartFailedError>()(
 	"@maple/http/investigations/InvestigationStartFailedError",
 	{
 		message: Schema.String,
+		cause: Schema.optionalKey(Schema.Defect()),
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "investigation_start_failed",
+		title: "Investigation could not be started",
+		retry: "backoff",
+		recovery: "retry",
+		message: "The investigation could not be started. Retry in a few seconds.",
+		exposure: "redacted",
+	},
 ) {}
 
-export class InvestigationRejectedError extends Schema.TaggedError<InvestigationRejectedError>()(
+export class InvestigationRejectedError extends HttpTaggedError<InvestigationRejectedError>()(
 	"@maple/http/investigations/InvestigationRejectedError",
 	{
 		message: Schema.String,
 		status: Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 400, maximum: 499 })),
 	},
-	{ httpApiStatus: 502 },
+	{
+		status: 502,
+		code: "investigation_start_rejected",
+		title: "Investigation agent rejected the request",
+		message: (error) => `The investigation agent rejected the start request with HTTP ${error.status}.`,
+		retry: "never",
+		recovery: "reconnect",
+		exposure: "redacted",
+	},
+) {}
+
+/** Stored investigation data no longer decodes into its current public schema. */
+export class InvestigationDataCorruptionError extends HttpTaggedError<InvestigationDataCorruptionError>()(
+	"@maple/http/investigations/InvestigationDataCorruptionError",
+	{
+		message: Schema.String,
+		investigationId: InvestigationId,
+		field: Schema.String,
+		value: Schema.String,
+		incidentKind: Schema.optionalKey(Schema.String),
+		incidentId: Schema.optionalKey(Schema.String),
+		cause: Schema.optionalKey(Schema.Defect()),
+	},
+	{
+		status: 500,
+		code: "investigation_data_corrupt",
+		title: "Stored investigation data is invalid",
+		message: "Maple could not decode the stored investigation.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
 ) {}
 
 export type InvestigationHttpError =
@@ -578,6 +669,7 @@ export type InvestigationHttpError =
 	| InvestigationAgentUnavailableError
 	| InvestigationStartFailedError
 	| InvestigationRejectedError
+	| InvestigationDataCorruptionError
 
 export const investigationHttpErrors = [
 	InvestigationPersistenceError,
@@ -588,6 +680,7 @@ export const investigationHttpErrors = [
 	InvestigationAgentUnavailableError,
 	InvestigationStartFailedError,
 	InvestigationRejectedError,
+	InvestigationDataCorruptionError,
 ] as const
 
 // Query schemas

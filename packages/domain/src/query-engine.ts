@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { PublicHttpErrorBodySchema } from "./http/error-policy"
 import {
 	CommitSha,
 	DeploymentEnvironment,
@@ -507,15 +508,8 @@ export class QueryEngineExecuteResponse extends Schema.Class<QueryEngineExecuteR
  */
 export const QUERY_ENGINE_BATCH_MAX = 4
 
-/**
- * A per-item failure. Carries the original error's `_tag` so the client can
- * hand it straight to its existing error normalization — `@maple/http/errors/*`
- * tags pass through untouched and keep their UI copy.
- */
-export const QueryEngineBatchFailure = Schema.Struct({
-	_tag: Schema.String,
-	message: Schema.String,
-})
+/** A per-item failure uses the same complete public body as a failed HTTP response. */
+export const QueryEngineBatchFailure = PublicHttpErrorBodySchema
 export type QueryEngineBatchFailure = Schema.Schema.Type<typeof QueryEngineBatchFailure>
 
 /**

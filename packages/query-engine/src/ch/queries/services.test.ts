@@ -101,20 +101,36 @@ describe("serviceOverviewQuery", () => {
 		const q = serviceOverviewQuery({})
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM service_overview_spans")
-		expect(sql).toContain("bServiceName AS serviceName")
-		expect(sql).toContain("bServiceNamespace AS serviceNamespace")
-		expect(sql).toContain("bEnvironment AS environment")
-		expect(sql).toContain("bCommitSha AS commitSha")
 		expect(sql).toContain("FROM service_overview_hourly")
 		expect(sql).toContain("UNION ALL")
-		expect(sql).toContain("sum(bSpanCount) AS throughput")
-		expect(sql).toContain("sum(bErrorCount) AS errorCount")
-		expect(sql).toContain("sum(bEstimatedErrorCount) AS estimatedErrorCount")
-		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles)")
-		expect(sql).toContain("min(bFirstSeen) AS firstSeen")
-		expect(sql).toContain("GROUP BY serviceName, serviceNamespace, environment, commitSha")
+
+		// Inner level keeps the commit dimension so the breakdown survives...
+		expect(sql).toContain("GROUP BY cServiceName, cServiceNamespace, cEnvironment, cCommitSha")
+		// ...carrying the quantiles as an unfinalized state. A finalized quantile
+		// here could only be averaged by the outer level, which is the bug this
+		// query exists to fix.
+		expect(sql).toContain("quantilesTDigestMergeState(0.5, 0.95, 0.99)(bDurationQuantiles)")
+
+		// Outer level collapses to the grain the UI renders.
+		expect(sql).toContain("GROUP BY serviceName, environment")
+		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles)")
+		expect(sql).toContain("argMax(cServiceNamespace, cEstimatedSpanCount)")
+		expect(sql).toContain("sum(cSpanCount) AS throughput")
+		expect(sql).toContain("sum(cErrorCount) AS errorCount")
+		expect(sql).toContain("sum(cEstimatedErrorCount) AS estimatedErrorCount")
+		expect(sql).toContain("min(cFirstSeen) AS firstSeen")
+
+		// Commits ride along as a capped, count-descending tuple array rather than
+		// one row per commit. `arrayReverseSort`, not `arraySort(x -> -x.2)`: the
+		// counts are UInt64 and negating an unsigned integer wraps.
+		expect(sql).toContain("arrayReverseSort(x -> x.2, groupArray(tuple(")
+		expect(sql).toContain("), 1, 20) AS commits")
+		expect(sql).not.toContain("AS commitSha")
+
 		expect(sql).toContain("ORDER BY throughput DESC")
-		expect(sql).toContain("LIMIT 100")
+		// On the collapsed grain, so a few frequently-deployed services can no
+		// longer consume the budget and silently drop other services off the list.
+		expect(sql).toContain("LIMIT 500")
 		expect(sql).toContain("FORMAT JSON")
 	})
 
@@ -154,7 +170,6 @@ describe("serviceOverviewQuery", () => {
 					serviceName: "api",
 					serviceNamespace: "checkout",
 					environment: "production",
-					commitSha: "abc123",
 					throughput: "100",
 					errorCount: "2",
 					estimatedErrorCount: "4",
@@ -164,11 +179,19 @@ describe("serviceOverviewQuery", () => {
 					p99LatencyMs: "80",
 					estimatedSpanCount: "200",
 					firstSeen: "2024-01-01 00:00:00",
+					// The counts inside the tuple are UInt64, so a gateway/readonly
+					// cluster returns them quoted here too — CHNumber, not Schema.Number.
+					commits: [
+						["abc123", "80", "2", "2024-01-01 00:00:00"],
+						["def456", "20", "0", "2024-01-01 06:00:00"],
+					],
 				},
 			]),
 		)
 		expect(decoded.estimatedSpanCount).toBe(200)
 		expect(decoded.p95LatencyMs).toBe(42)
+		expect(decoded.commits).toHaveLength(2)
+		expect(decoded.commits[0]).toEqual(["abc123", 80, 2, "2024-01-01 00:00:00"])
 	})
 })
 
@@ -204,8 +227,8 @@ describe("serviceHealthBaselineQuery", () => {
 // serviceReleasesTimelineQuery
 
 describe("serviceReleasesTimelineQuery", () => {
-	it("compiles releases timeline", () => {
-		const q = serviceReleasesTimelineQuery({ serviceName: "api" })
+	it("compiles releases timeline on the hourly tier for hour-multiple buckets", () => {
+		const q = serviceReleasesTimelineQuery({ serviceName: "api", bucketSeconds: 3600 })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM service_overview_spans")
 		expect(sql).toContain("FROM service_overview_hourly")
@@ -217,6 +240,28 @@ describe("serviceReleasesTimelineQuery", () => {
 		expect(sql).toContain("GROUP BY bucket, commitSha")
 		expect(sql).toContain("ORDER BY bucket ASC")
 		expect(sql).toContain("LIMIT 1000")
+	})
+
+	it("drops the hourly tier for the sub-hour default bucket", () => {
+		// 300s is this query's production default. An hour-floored row carries no
+		// position inside the hour, so reading the hourly tier here would pile every
+		// interior hour onto the bucket containing `:00` — one spike per hour with
+		// zeros between.
+		const q = serviceReleasesTimelineQuery({ serviceName: "api", bucketSeconds: 300 })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("FROM service_overview_minutely")
+		expect(sql).not.toContain("FROM service_overview_hourly")
+		// The raw edge floors to the minute too, so every tier agrees on grain.
+		expect(sql).toContain("toStartOfMinute(Timestamp) AS bBucket")
+	})
+
+	it("falls back to a raw scan for sub-minute buckets", () => {
+		// No rollup tier can place a row inside a minute.
+		const q = serviceReleasesTimelineQuery({ serviceName: "api", bucketSeconds: 30 })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).not.toContain("FROM service_overview_minutely")
+		expect(sql).not.toContain("FROM service_overview_hourly")
 	})
 })
 
@@ -246,7 +291,7 @@ describe("serviceEnvironmentsQuery", () => {
 
 describe("serviceApdexTimeseriesQuery", () => {
 	it("compiles apdex timeseries with default threshold", () => {
-		const q = serviceApdexTimeseriesQuery({ serviceName: "api" })
+		const q = serviceApdexTimeseriesQuery({ serviceName: "api", bucketSeconds: 3600 })
 		const { sql } = compileCH(q, baseParams)
 		// Exact raw partial hours surround complete hourly aggregate buckets.
 		expect(sql).toContain("FROM service_overview_spans")
@@ -271,7 +316,11 @@ describe("serviceApdexTimeseriesQuery", () => {
 	})
 
 	it("compiles with custom threshold", () => {
-		const q = serviceApdexTimeseriesQuery({ serviceName: "api", apdexThresholdMs: 250 })
+		const q = serviceApdexTimeseriesQuery({
+			serviceName: "api",
+			apdexThresholdMs: 250,
+			bucketSeconds: 3600,
+		})
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("Duration / 1000000 < 250")
 		// Tolerating = 4x threshold
@@ -285,7 +334,7 @@ describe("serviceApdexTimeseriesQuery", () => {
 		// evaluates as `satisfied + ((tolerating*0.5)/count())` ≈ satisfied,
 		// producing 6-digit "Apdex" values instead of a 0–1 ratio.
 		// The split-term form below is unambiguous left-to-right.
-		const q = serviceApdexTimeseriesQuery({ serviceName: "api" })
+		const q = serviceApdexTimeseriesQuery({ serviceName: "api", bucketSeconds: 3600 })
 		const { sql } = compileCH(q, baseParams)
 		// The Apdex SELECT must contain the split-term form: each countIf is
 		// divided by count() before being summed, instead of summed first.
@@ -297,9 +346,13 @@ describe("serviceApdexTimeseriesQuery", () => {
 	})
 
 	it("coerces BYO ClickHouse string-encoded Apdex aggregates", () => {
-		const compiled = compileCH(serviceApdexTimeseriesQuery({ serviceName: "api" }), baseParams, {
-			rowSchema: serviceApdexTimeseriesRowSchema,
-		})
+		const compiled = compileCH(
+			serviceApdexTimeseriesQuery({ serviceName: "api", bucketSeconds: 3600 }),
+			baseParams,
+			{
+				rowSchema: serviceApdexTimeseriesRowSchema,
+			},
+		)
 		const [decoded] = Effect.runSync(
 			compiled.decodeRows([
 				{

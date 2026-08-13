@@ -21,12 +21,12 @@ import {
 import "@xyflow/react/dist/style.css"
 
 import { Result, useAtom, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { serviceMapLayoutAtomFamily, upsertSnapshot } from "@/atoms/service-map-layout-atoms"
 import { serviceMapViewPrefsAtomFamily } from "@/atoms/service-map-view-prefs-atoms"
 import { Link } from "@tanstack/react-router"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { logClientError } from "@/lib/services/common/telemetry"
 import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts"
 
@@ -1053,11 +1053,11 @@ function PlanetScaleSection({
 
 			{Result.builder(branchStatsResult)
 				.onError((error) => {
-					const formatted = formatBackendError(error)
+					const formatted = displayError(error)
 					return (
 						<div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs">
 							<p className="font-medium text-destructive">{formatted.title}</p>
-							<p className="mt-1 text-muted-foreground">{formatted.description}</p>
+							<p className="mt-1 text-muted-foreground">{formatted.message}</p>
 						</div>
 					)
 				})
@@ -1409,11 +1409,11 @@ function DatabaseDetailPanel({
 						</div>
 						{Result.builder(summaryResult)
 							.onError((error) => {
-								const formatted = formatBackendError(error)
+								const formatted = displayError(error)
 								return (
 									<div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs">
 										<p className="font-medium text-destructive">{formatted.title}</p>
-										<p className="mt-1 text-muted-foreground">{formatted.description}</p>
+										<p className="mt-1 text-muted-foreground">{formatted.message}</p>
 									</div>
 								)
 							})
@@ -2483,12 +2483,12 @@ export function ServiceMapView({
 		getServiceMapPlanetScaleResultAtom(cloudflareInput),
 	)
 	const planetscaleInventoryResult = useAtomValue(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "databases", {
+		retainedQueryV2("planetscaleIntegration", "databases", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	const hyperdriveInventoryResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "cloudflareHyperdrives", {
+		retainedQuery("integrations", "cloudflareHyperdrives", {
 			reactivityKeys: ["cloudflareIntegrationStatus"],
 		}),
 	)
@@ -2578,12 +2578,12 @@ export function ServiceMapView({
 	return Result.builder(bundleResult)
 		.onInitial(() => <ServiceMapLoading />)
 		.onError((error) => {
-			const formatted = formatBackendError(error)
+			const formatted = displayError(error)
 			return (
 				<div className="flex items-center justify-center h-full">
 					<div className="text-center space-y-2">
 						<p className="text-sm font-medium text-destructive">{formatted.title}</p>
-						<p className="text-xs text-muted-foreground">{formatted.description}</p>
+						<p className="text-xs text-muted-foreground">{formatted.message}</p>
 					</div>
 				</div>
 			)

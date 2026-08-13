@@ -1,5 +1,6 @@
-import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi"
+import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
+import { DashboardDocument, PortableDashboardDocument } from "@maple/widgets/dashboard"
 import {
 	DashboardId,
 	DashboardTemplateCategory,
@@ -11,327 +12,46 @@ import {
 	UserId,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
-import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "./widget-types"
+import { HttpTaggedError } from "./error-policy"
 
-export const TimeRangeSchema = Schema.Union([
-	Schema.Struct({
-		type: Schema.Literal("relative"),
-		value: Schema.String,
-	}),
-	Schema.Struct({
-		type: Schema.Literal("absolute"),
-		startTime: IsoDateTimeString,
-		endTime: IsoDateTimeString,
-	}),
-])
-export type TimeRange = typeof TimeRangeSchema.Type
-
-const UnknownRecord = Schema.Record(Schema.String, Schema.Unknown)
-const StringRecord = Schema.Record(Schema.String, Schema.String)
-
-export const WidgetDataSourceSchema = Schema.Struct({
-	endpoint: Schema.String,
-	params: Schema.optional(UnknownRecord),
-	transform: Schema.optional(
-		Schema.Struct({
-			fieldMap: Schema.optional(StringRecord),
-			hideSeries: Schema.optional(
-				Schema.Struct({
-					baseNames: Schema.Array(Schema.String),
-				}),
-			),
-			flattenSeries: Schema.optional(
-				Schema.Struct({
-					valueField: Schema.String,
-				}),
-			),
-			reduceToValue: Schema.optional(
-				Schema.Struct({
-					field: Schema.String,
-					aggregate: Schema.optional(Schema.String),
-				}),
-			),
-			computeRatio: Schema.optional(
-				Schema.Struct({
-					numeratorName: Schema.String,
-					denominatorNames: Schema.Array(Schema.String),
-				}),
-			),
-			limit: Schema.optional(Schema.Number),
-			sortBy: Schema.optional(
-				Schema.Struct({
-					field: Schema.String,
-					direction: Schema.String,
-				}),
-			),
-		}),
-	),
-})
-
-const WidgetDisplayColumnSchema = Schema.Struct({
-	field: Schema.String,
-	header: Schema.String,
-	unit: Schema.optional(Schema.String),
-	width: Schema.optional(Schema.Number),
-	align: Schema.optional(Schema.Literals(["left", "center", "right"])),
-	hidden: Schema.optional(Schema.Boolean),
-	thresholds: Schema.optional(
-		Schema.Array(
-			Schema.Struct({
-				value: Schema.Number,
-				color: Schema.String,
-			}),
-		),
-	),
-})
-
-export const WidgetDisplayConfigSchema = Schema.Struct({
-	title: Schema.optional(Schema.String),
-	description: Schema.optional(Schema.String),
-	chartId: Schema.optional(Schema.String),
-	chartPresentation: Schema.optional(
-		Schema.Struct({
-			legend: Schema.optional(Schema.Literals(["visible", "hidden", "right"])),
-			seriesStats: Schema.optional(Schema.Boolean),
-			tooltip: Schema.optional(Schema.Literals(["visible", "hidden"])),
-			showPoints: Schema.optional(Schema.Boolean),
-			fillNulls: Schema.optional(Schema.Union([Schema.Number, Schema.Literal(false)])),
-			compareToPreviousPeriod: Schema.optional(Schema.Boolean),
-		}),
-	),
-	xAxis: Schema.optional(
-		Schema.Struct({
-			label: Schema.optional(Schema.String),
-			unit: Schema.optional(Schema.String),
-			visible: Schema.optional(Schema.Boolean),
-		}),
-	),
-	yAxis: Schema.optional(
-		Schema.Struct({
-			label: Schema.optional(Schema.String),
-			unit: Schema.optional(Schema.String),
-			min: Schema.optional(Schema.Number),
-			max: Schema.optional(Schema.Number),
-			softMin: Schema.optional(Schema.Number),
-			softMax: Schema.optional(Schema.Number),
-			logScale: Schema.optional(Schema.Boolean),
-			// When true, the y-axis lower bound follows the minimum of the
-			// displayed data (with padding) instead of being pinned at zero,
-			// making small fluctuations between series easier to see. Ignored
-			// when `softMin`/`min` or `logScale` are set.
-			fitYAxisToData: Schema.optional(Schema.Boolean),
-			visible: Schema.optional(Schema.Boolean),
-		}),
-	),
-	seriesMapping: Schema.optional(StringRecord),
-	colorOverrides: Schema.optional(StringRecord),
-	stacked: Schema.optional(Schema.Boolean),
-	curveType: Schema.optional(Schema.Literals(["linear", "monotone"])),
-	unit: Schema.optional(Schema.String),
-	thresholds: Schema.optional(
-		Schema.Array(
-			Schema.Struct({
-				value: Schema.Number,
-				color: Schema.String,
-				label: Schema.optional(Schema.String),
-			}),
-		),
-	),
-	prefix: Schema.optional(Schema.String),
-	suffix: Schema.optional(Schema.String),
-	sparkline: Schema.optional(
-		Schema.Struct({
-			enabled: Schema.Boolean,
-			dataSource: Schema.optional(WidgetDataSourceSchema),
-		}),
-	),
-	columns: Schema.optional(Schema.Array(WidgetDisplayColumnSchema)),
-
-	listDataSource: Schema.optional(Schema.String),
-	listWhereClause: Schema.optional(Schema.String),
-	listLimit: Schema.optional(Schema.Number),
-	listRootOnly: Schema.optional(Schema.Boolean),
-
-	// Pie-specific
-	pie: Schema.optional(
-		Schema.Struct({
-			donut: Schema.optional(Schema.Boolean),
-			innerRadius: Schema.optional(Schema.Number),
-			showLabels: Schema.optional(Schema.Boolean),
-			showPercent: Schema.optional(Schema.Boolean),
-		}),
-	),
-
-	// Funnel-specific
-	funnel: Schema.optional(
-		Schema.Struct({
-			showStepPercent: Schema.optional(Schema.Boolean),
-		}),
-	),
-
-	// Histogram-specific
-	histogram: Schema.optional(
-		Schema.Struct({
-			bucketCount: Schema.optional(Schema.Number),
-			bucketWidth: Schema.optional(Schema.Number),
-			logScaleY: Schema.optional(Schema.Boolean),
-		}),
-	),
-
-	heatmap: Schema.optional(
-		Schema.Struct({
-			colorScale: Schema.optional(Schema.Literals(HEATMAP_COLOR_SCALES)),
-			scaleType: Schema.optional(Schema.Literals(HEATMAP_SCALE_TYPES)),
-		}),
-	),
-
-	gauge: Schema.optional(
-		Schema.Struct({
-			min: Schema.optional(Schema.Number),
-			max: Schema.optional(Schema.Number),
-			style: Schema.optional(Schema.Literals(["radial", "bar"])),
-		}),
-	),
-
-	// Markdown-specific
-	markdown: Schema.optional(
-		Schema.Struct({
-			content: Schema.String,
-		}),
-	),
-})
-
-export const WidgetLayoutSchema = Schema.Struct({
-	x: Schema.Number,
-	y: Schema.Number,
-	w: Schema.Number,
-	h: Schema.Number,
-	minW: Schema.optional(Schema.Number),
-	minH: Schema.optional(Schema.Number),
-	maxW: Schema.optional(Schema.Number),
-	maxH: Schema.optional(Schema.Number),
-})
-
-export const DashboardWidgetSchema = Schema.Struct({
-	id: Schema.String,
-	visualization: Schema.String,
-	dataSource: WidgetDataSourceSchema,
-	display: WidgetDisplayConfigSchema,
-	layout: WidgetLayoutSchema,
-	// Per-widget time range. Absent (the common case) means "follow the
-	// dashboard's range" — the tile re-queries whenever the board's picker moves.
-	// When set, the tile is pinned to its own window regardless of the board's,
-	// which is how a "last 30 minutes" health stat lives on a 7-day board. The
-	// override only replaces the time window: dashboard variables still
-	// interpolate normally, and the board's auto-refresh still rebases a relative
-	// override against "now".
-	timeRange: Schema.optionalKey(TimeRangeSchema),
-})
-
-// Dashboard variables
-
-// Must not start with an underscore so `$name` references can never collide
-// with the `$__` built-in macros ($__startTime, $__timeFilter, ...).
-export const DashboardVariableName = Schema.String.check(
-	Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]*$/),
-).annotate({ identifier: "@maple/DashboardVariableName", title: "Dashboard Variable Name" })
-export type DashboardVariableName = Schema.Schema.Type<typeof DashboardVariableName>
-
-/**
- * Auto-refresh cadence in seconds; `0` or absent means off. A closed literal set
- * rather than a free number so a hand-edited document (or `?refresh=`) can't ask
- * the browser to re-query every 100ms.
- */
-export const DashboardRefreshIntervalSeconds = Schema.Literals([0, 5, 10, 30, 60, 300, 900]).annotate({
-	identifier: "@maple/DashboardRefreshIntervalSeconds",
-	title: "Dashboard Refresh Interval Seconds",
-})
-export type DashboardRefreshIntervalSeconds = typeof DashboardRefreshIntervalSeconds.Type
-
-export const DashboardQueryVariableFacet = Schema.Literals([
-	"service",
-	"environment",
-	"span_name",
-	"http_method",
-	"http_status_code",
-	"log_severity",
-])
-export type DashboardQueryVariableFacet = typeof DashboardQueryVariableFacet.Type
-
-export const DashboardQueryVariableSourceSchema = Schema.Union([
-	Schema.Struct({
-		kind: Schema.Literal("facet"),
-		facet: DashboardQueryVariableFacet,
-	}),
-	Schema.Struct({
-		kind: Schema.Literal("attribute"),
-		scope: Schema.Literals(["span", "resource"]),
-		attributeKey: Schema.String,
-	}),
-])
-export type DashboardQueryVariableSource = typeof DashboardQueryVariableSourceSchema.Type
-
-const dashboardVariableBaseFields = {
-	name: DashboardVariableName,
-	label: Schema.optionalKey(Schema.String),
-	includeAll: Schema.optionalKey(Schema.Boolean),
-	defaultValue: Schema.optionalKey(Schema.String),
-}
-
-export const DashboardVariableSchema = Schema.Union([
-	Schema.Struct({
-		...dashboardVariableBaseFields,
-		type: Schema.Literal("query"),
-		source: DashboardQueryVariableSourceSchema,
-	}),
-	Schema.Struct({
-		...dashboardVariableBaseFields,
-		type: Schema.Literal("custom"),
-		options: Schema.Array(
-			Schema.Struct({
-				value: Schema.String,
-				label: Schema.optionalKey(Schema.String),
-			}),
-		),
-	}),
-	Schema.Struct({
-		...dashboardVariableBaseFields,
-		type: Schema.Literal("textbox"),
-	}),
-])
-export type DashboardVariable = typeof DashboardVariableSchema.Type
-
-export class PortableDashboardDocument extends Schema.Class<PortableDashboardDocument>(
-	"PortableDashboardDocument",
-)({
-	name: Schema.String,
-	description: Schema.optionalKey(Schema.String),
-	tags: Schema.optionalKey(Schema.Array(Schema.String)),
-	timeRange: TimeRangeSchema,
-	widgets: Schema.Array(DashboardWidgetSchema),
-	variables: Schema.optionalKey(Schema.Array(DashboardVariableSchema)),
-	refreshIntervalSeconds: Schema.optionalKey(DashboardRefreshIntervalSeconds),
-}) {}
-
-export class DashboardDocument extends Schema.Class<DashboardDocument>("DashboardDocument")({
-	id: DashboardId,
-	name: Schema.String,
-	description: Schema.optionalKey(Schema.String),
-	tags: Schema.optionalKey(Schema.Array(Schema.String)),
-	timeRange: TimeRangeSchema,
-	widgets: Schema.Array(DashboardWidgetSchema),
-	variables: Schema.optionalKey(Schema.Array(DashboardVariableSchema)),
-	refreshIntervalSeconds: Schema.optionalKey(DashboardRefreshIntervalSeconds),
-	createdAt: IsoDateTimeString,
-	updatedAt: IsoDateTimeString,
-	// Postgres transaction id of the write that produced this response, present
-	// only on mutation responses (create/upsert/restore/import). The web's
-	// ElectricSQL collection write handlers pass it to `awaitTxId` to resolve
-	// optimistic state on the exact synced transaction. Never persisted into
-	// `payload_json` (stripped at the storage boundary) and never present on
-	// list/read responses.
-	txid: Schema.optionalKey(PostgresTransactionId),
-}) {}
+// The dashboard *document* schema lives in `../dashboard`, which is versioned.
+// This module keeps the HTTP surface: request/response envelopes, tagged errors
+// and the endpoint group — all of which reference the `Authorization` middleware
+// and so must stay under `http/` to keep `http/api.ts` acyclic.
+//
+// Every document-shape name is re-exported below so importing from
+// `@maple/domain/http` keeps working unchanged. New code should prefer
+// `@maple/domain/dashboard`.
+export {
+	DASHBOARD_MAX_SECTIONS,
+	DASHBOARD_MAX_TABS_PER_SECTION,
+	DashboardDocument,
+	DashboardQueryVariableFacet,
+	type DashboardQueryVariableSource,
+	DashboardQueryVariableSourceSchema,
+	DashboardRefreshIntervalSeconds,
+	type DashboardSection,
+	DashboardSectionSchema,
+	type DashboardSectionTab,
+	DashboardSectionTabSchema,
+	type DashboardVariable,
+	DashboardVariableName,
+	DashboardVariableSchema,
+	DashboardWidgetSchema,
+	DASHBOARD_GRID_COLS,
+	findNextPosition,
+	// Any reader that decodes a *stored* payload must migrate it first: a
+	// document is only stamped with the current schema version at its next write,
+	// so Electric hands the browser whatever version it was last written in.
+	migrateToLatest,
+	PortableDashboardDocument,
+	type TimeRange,
+	TimeRangeSchema,
+	WidgetDataSourceSchema,
+	WidgetDisplayConfigSchema,
+	WidgetLayoutSchema,
+	withWidgets,
+} from "@maple/widgets/dashboard"
 
 export class DashboardsListResponse extends Schema.Class<DashboardsListResponse>("DashboardsListResponse")({
 	dashboards: Schema.Array(DashboardDocument),
@@ -384,6 +104,14 @@ export const DashboardVersionChangeKind = Schema.Literals([
 	"widget_removed",
 	"widget_updated",
 	"layout_changed",
+	// Section edits collapse into three kinds. Renames, tab add/rename/delete,
+	// reordering and the stored collapse default all read as `section_updated`:
+	// the history panel shows a summary line, not a structural diff, so finer
+	// granularity would add enum members nothing renders differently. Moving a
+	// widget between sections is `layout_changed` — it genuinely is a layout act.
+	"section_added",
+	"section_removed",
+	"section_updated",
 	"restored",
 	"multiple",
 ]).annotate({
@@ -431,64 +159,110 @@ const DashboardVersionsListQuery = Schema.Struct({
 	before: Schema.optional(Schema.NumberFromString.check(Schema.isInt())),
 })
 
-export class DashboardVersionNotFoundError extends Schema.TaggedError<DashboardVersionNotFoundError>()(
+export class DashboardVersionNotFoundError extends HttpTaggedError<DashboardVersionNotFoundError>()(
 	"@maple/http/errors/DashboardVersionNotFoundError",
 	{
 		dashboardId: DashboardId,
 		versionId: DashboardVersionId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "dashboard_version_not_found",
+		title: "Dashboard version not found",
+		message: "No such dashboard version.",
+		param: "version_id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
-export class DashboardPersistenceError extends Schema.TaggedError<DashboardPersistenceError>()(
+export class DashboardPersistenceError extends HttpTaggedError<DashboardPersistenceError>()(
 	"@maple/http/errors/DashboardPersistenceError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "dashboards_unavailable",
+		title: "Dashboards are temporarily unavailable",
+		message: "Dashboards are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class DashboardNotFoundError extends Schema.TaggedError<DashboardNotFoundError>()(
+/** A saved dashboard or version snapshot no longer decodes as a Maple dashboard document. */
+export class DashboardStoredConfigInvalidError extends HttpTaggedError<DashboardStoredConfigInvalidError>()(
+	"@maple/http/errors/DashboardStoredConfigInvalidError",
+	{
+		message: Schema.String,
+		dashboardId: DashboardId,
+		component: Schema.Literals(["document", "version_snapshot"]),
+		versionId: Schema.optionalKey(DashboardVersionId),
+		cause: Schema.Defect(),
+	},
+	{
+		status: 500,
+		code: "dashboard_stored_config_invalid",
+		title: "Stored dashboard is invalid",
+		message: "The stored dashboard configuration could not be read.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+export class DashboardNotFoundError extends HttpTaggedError<DashboardNotFoundError>()(
 	"@maple/http/errors/DashboardNotFoundError",
 	{
 		dashboardId: DashboardId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "dashboard_not_found",
+		title: "Dashboard not found",
+		message: "No such dashboard.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
-export class DashboardValidationError extends Schema.TaggedError<DashboardValidationError>()(
+export class DashboardValidationError extends HttpTaggedError<DashboardValidationError>()(
 	"@maple/http/errors/DashboardValidationError",
 	{
 		message: Schema.String,
 		details: Schema.Array(Schema.String),
 	},
-	{ httpApiStatus: 400 },
+	{
+		status: 400,
+		code: "dashboard_invalid",
+		title: "Invalid dashboard",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
 ) {}
 
-/**
- * Rewrites request-decode failures on the dashboards group into a
- * `DashboardValidationError` carrying the JSON path, the enclosing widget id
- * and the expected-vs-received message for every offending field.
- *
- * Without it the runtime answers a schema failure with a bare empty 400, so the
- * only way to find one bad key in a 14-widget document is to bisect it. The
- * error class is already in every endpoint's error list, so attaching this
- * widens no client contract.
- */
-export class DashboardSchemaErrors extends HttpApiMiddleware.Service<DashboardSchemaErrors>()(
-	"DashboardSchemaErrors",
-	{ error: DashboardValidationError },
-) {}
-
-export class DashboardConcurrencyError extends Schema.TaggedError<DashboardConcurrencyError>()(
+export class DashboardConcurrencyError extends HttpTaggedError<DashboardConcurrencyError>()(
 	"@maple/http/errors/DashboardConcurrencyError",
 	{
 		dashboardId: DashboardId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 409 },
+	{
+		status: 409,
+		code: "dashboard_concurrent_update",
+		title: "Dashboard changed while saving",
+		retry: "never",
+		recovery: "refresh",
+		exposure: "public_message",
+	},
 ) {}
 
 // Templates
@@ -599,13 +373,22 @@ export class DashboardTemplateInstantiateRequest extends Schema.Class<DashboardT
 	name: Schema.optionalKey(Schema.String),
 }) {}
 
-export class DashboardTemplateNotFoundError extends Schema.TaggedError<DashboardTemplateNotFoundError>()(
+export class DashboardTemplateNotFoundError extends HttpTaggedError<DashboardTemplateNotFoundError>()(
 	"@maple/http/errors/DashboardTemplateNotFoundError",
 	{
 		templateId: DashboardTemplateId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "dashboard_template_not_found",
+		title: "Dashboard template not found",
+		message: "No such dashboard template.",
+		param: "template_id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
 export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
@@ -700,5 +483,4 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		}),
 	)
 	.prefix("/api/dashboards")
-	.middleware(Authorization)
-	.middleware(DashboardSchemaErrors) {}
+	.middleware(Authorization) {}

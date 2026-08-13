@@ -1,5 +1,5 @@
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 
 /**
  * The organization the **API** resolved this session to, or `null` while that is
@@ -18,7 +18,7 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
  * read this same atom, so this costs no extra request.
  */
 export function useMapleOrganizationId(): string | null {
-	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
+	const sessionResult = useAtomValue(retainedQuery("auth", "session", {}))
 
 	return Result.builder(sessionResult)
 		.onSuccess((session) => session.orgId as string)

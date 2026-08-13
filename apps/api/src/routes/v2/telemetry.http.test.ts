@@ -16,12 +16,13 @@ import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { QueryEngineService, type QueryEngineServiceShape } from "@/services/warehouse/QueryEngineService"
-import { V2SchemaErrorsLive } from "./error-envelope"
+import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	makeWarehouseServiceStub,
 	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 } from "./v2-test-support"
@@ -175,19 +176,15 @@ const rowsForSql = (sql: string): ReadonlyArray<Record<string, unknown>> => {
 	return []
 }
 
-const warehouseStub: WarehouseQueryServiceShape = {
+const warehouseStub = makeWarehouseServiceStub({
 	query: () => Effect.die(new Error("unexpected named query")),
-	sqlQuery: () => Effect.succeed([{ bucket: "2026-07-15 12:00:00", value: 1 }]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows(rowsForSql(compiled.sql)),
 	compiledQueryFirst: (_tenant, compiled) =>
 		compiled
 			.decodeRows(rowsForSql(compiled.sql))
 			.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]))),
 	ingest: () => Effect.void,
-	asExecutor: () => {
-		throw new Error("not used")
-	},
-}
+})
 
 const queryEngineStub = {
 	execute: (_tenant, request) => {
@@ -235,7 +232,7 @@ const makeHarness = (
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(telemetryLive),
-		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(V2TransportErrorBoundaryLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(AlertsServiceStubLayer),

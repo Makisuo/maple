@@ -1,15 +1,25 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { UserId } from "../../primitives"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
-import { Timestamp } from "./envelopes"
 import {
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2PermissionError,
-	V2ServiceUnavailableError,
-	V2UpstreamError,
-} from "./errors"
+	IntegrationsConfigurationError,
+	IntegrationsNotConnectedError,
+	IntegrationsPersistenceError,
+	IntegrationsRevokedError,
+	IntegrationsUpstreamError,
+	IntegrationsValidationError,
+} from "../integrations"
+import {
+	ScrapeTargetEncryptionError,
+	ScrapeTargetNotFoundError,
+	ScrapeTargetPersistenceError,
+	ScrapeTargetStoredConfigInvalidError,
+	ScrapeTargetValidationError,
+} from "../scrape-targets"
+import { AuthorizationV2 } from "./auth"
+import { Timestamp } from "./envelopes"
+import { V2CallbackHostUnavailable, V2InsufficientPermissions, V2TimeRangeInvalid } from "./errors"
+import { publicErrors } from "./public-error"
 import { ScrapeTargetPublicId } from "./scrape-targets"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
@@ -762,15 +772,57 @@ export const V2PlanetScaleEventList = Schema.Struct({
 })
 export type V2PlanetScaleEventList = Schema.Schema.Type<typeof V2PlanetScaleEventList>
 
-// Errors are declared per endpoint rather than from a shared tuple, matching the
-// Slack group: each handler maps a small, fixed set of service failures, and a
-// wider list would publish responses the API can never return. 400/401/403/429/503
-// come from the middleware.
+const [
+	integrationConfiguration,
+	integrationNotConnected,
+	integrationRevoked,
+	integrationValidation,
+	integrationUpstream,
+	integrationPersistence,
+] = publicErrors(
+	IntegrationsConfigurationError,
+	IntegrationsNotConnectedError,
+	IntegrationsRevokedError,
+	IntegrationsValidationError,
+	IntegrationsUpstreamError,
+	IntegrationsPersistenceError,
+)
+
+const organizationErrors = [
+	integrationConfiguration,
+	integrationNotConnected,
+	integrationRevoked,
+	integrationValidation,
+	integrationUpstream,
+	integrationPersistence,
+] as const
+
+const [
+	scrapeTargetNotFound,
+	scrapeTargetValidation,
+	scrapeTargetPersistence,
+	scrapeTargetEncryption,
+	scrapeTargetStoredConfigInvalid,
+] = publicErrors(
+	ScrapeTargetNotFoundError,
+	ScrapeTargetValidationError,
+	ScrapeTargetPersistenceError,
+	ScrapeTargetEncryptionError,
+	ScrapeTargetStoredConfigInvalidError,
+)
+const scrapeTargetMutationErrors = [
+	scrapeTargetNotFound,
+	scrapeTargetValidation,
+	scrapeTargetPersistence,
+	scrapeTargetEncryption,
+	scrapeTargetStoredConfigInvalid,
+] as const
+
 export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planetscaleIntegration")
 	.add(
 		HttpApiEndpoint.get("status", "/", {
 			success: V2PlanetScaleIntegration,
-			error: [V2ServiceUnavailableError],
+			error: [integrationPersistence, scrapeTargetStoredConfigInvalid],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getPlanetScaleIntegration",
@@ -786,7 +838,12 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 			// No upstream error: nothing is sent to PlanetScale until the browser
 			// follows the returned authorize URL.
 			success: V2PlanetScaleConnectResponse,
-			error: [V2PermissionError, V2ServiceUnavailableError],
+			error: [
+				V2InsufficientPermissions.schema,
+				V2CallbackHostUnavailable.schema,
+				integrationConfiguration,
+				integrationPersistence,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "connectPlanetScaleIntegration",
@@ -799,13 +856,7 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 	.add(
 		HttpApiEndpoint.get("organizations", "/organizations", {
 			success: V2PlanetScaleOrganizationList,
-			error: [
-				V2PermissionError,
-				V2NotFoundError,
-				V2InvalidRequestError,
-				V2UpstreamError,
-				V2ServiceUnavailableError,
-			],
+			error: [V2InsufficientPermissions.schema, ...organizationErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listPlanetScaleOrganizations",
@@ -819,13 +870,7 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 		HttpApiEndpoint.post("selectOrganization", "/select_organization", {
 			payload: V2PlanetScaleSelectOrganizationRequest,
 			success: V2PlanetScaleIntegration,
-			error: [
-				V2PermissionError,
-				V2NotFoundError,
-				V2InvalidRequestError,
-				V2UpstreamError,
-				V2ServiceUnavailableError,
-			],
+			error: [V2InsufficientPermissions.schema, ...organizationErrors, ...scrapeTargetMutationErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "selectPlanetScaleOrganization",
@@ -840,11 +885,12 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 			payload: V2PlanetScaleMetricsTokenRequest,
 			success: V2PlanetScaleIntegration,
 			error: [
-				V2PermissionError,
-				V2NotFoundError,
-				V2InvalidRequestError,
-				V2UpstreamError,
-				V2ServiceUnavailableError,
+				V2InsufficientPermissions.schema,
+				integrationNotConnected,
+				integrationValidation,
+				integrationUpstream,
+				integrationPersistence,
+				...scrapeTargetMutationErrors,
 			],
 		}).annotateMerge(
 			OpenApi.annotations({
@@ -858,7 +904,7 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 	.add(
 		HttpApiEndpoint.delete("disconnect", "/", {
 			success: V2PlanetScaleDisconnectResponse,
-			error: [V2PermissionError, V2ServiceUnavailableError],
+			error: [V2InsufficientPermissions.schema, integrationPersistence, scrapeTargetPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "disconnectPlanetScaleIntegration",
@@ -871,7 +917,7 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 	.add(
 		HttpApiEndpoint.get("databases", "/databases", {
 			success: V2PlanetScaleDatabaseList,
-			error: [V2ServiceUnavailableError],
+			error: [integrationPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listPlanetScaleDatabases",
@@ -884,7 +930,7 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 	.add(
 		HttpApiEndpoint.get("webhookConfig", "/webhook_config", {
 			success: V2PlanetScaleWebhookConfig,
-			error: [V2PermissionError, V2ServiceUnavailableError],
+			error: [V2InsufficientPermissions.schema, integrationPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getPlanetScaleWebhookConfig",
@@ -898,7 +944,7 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 		HttpApiEndpoint.post("queryInsights", "/query_insights", {
 			payload: V2PlanetScaleQueryInsightsRequest,
 			success: V2PlanetScaleQueryInsightList,
-			error: [V2NotFoundError, V2InvalidRequestError, V2UpstreamError, V2ServiceUnavailableError],
+			error: [V2TimeRangeInvalid.schema, ...organizationErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "queryPlanetScaleQueryInsights",
@@ -912,7 +958,7 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 		HttpApiEndpoint.post("events", "/events", {
 			payload: V2PlanetScaleEventsRequest,
 			success: V2PlanetScaleEventList,
-			error: [V2InvalidRequestError, V2ServiceUnavailableError],
+			error: [V2TimeRangeInvalid.schema, integrationPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listPlanetScaleEvents",
@@ -924,7 +970,6 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 	)
 	.prefix("/v2/integrations/planetscale")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "PlanetScale Integration",

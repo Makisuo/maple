@@ -9,6 +9,7 @@ import {
 	HistoryIcon,
 	BracketsCurlyIcon,
 	TagIcon,
+	LayersIcon,
 } from "@/components/icons"
 
 import { Button } from "@maple/ui/components/ui/button"
@@ -44,7 +45,7 @@ export function DashboardToolbar({
 	onAddWidget,
 	onOpenHistory,
 }: DashboardToolbarProps) {
-	const { mode, readOnly, autoLayoutWidgets } = useDashboardActions()
+	const { mode, readOnly, autoLayoutWidgets, addSection } = useDashboardActions()
 	const {
 		state: { timeRange, resolvedTimeRange },
 		actions: { setTimeRange },
@@ -136,6 +137,16 @@ export function DashboardToolbar({
 							>
 								<GridIcon size={14} />
 								Auto Layout
+							</DropdownMenuItem>
+						)}
+						{isEdit && (
+							<DropdownMenuItem
+								onClick={() => addSection()}
+								disabled={readOnly}
+								className="whitespace-nowrap"
+							>
+								<LayersIcon size={14} />
+								Add group
 							</DropdownMenuItem>
 						)}
 						{isEdit && (

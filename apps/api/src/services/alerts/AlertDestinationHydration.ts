@@ -88,15 +88,15 @@ const parseSecretConfig = <E>(
 ): Effect.Effect<DestinationSecretConfig, E> =>
 	Schema.decodeEffect(SecretConfigFromJson)(json).pipe(Effect.mapError(onError))
 
-export const hydrateDestinationRow = <E>(
+export const hydrateDestinationRow = <PublicConfigError, DecryptionError, SecretConfigError>(
 	row: AlertDestinationRow,
 	encryptionKey: Buffer,
 	errors: {
-		onPublicConfigInvalid: (cause: unknown) => E
-		onDecryptFailure: () => E
-		onSecretConfigInvalid: (cause: unknown) => E
+		onPublicConfigInvalid: (cause: unknown) => PublicConfigError
+		onDecryptFailure: () => DecryptionError
+		onSecretConfigInvalid: (cause: unknown) => SecretConfigError
 	},
-): Effect.Effect<HydratedDestination, E> =>
+): Effect.Effect<HydratedDestination, PublicConfigError | DecryptionError | SecretConfigError> =>
 	Effect.gen(function* () {
 		const publicConfig = yield* parsePublicConfig(row, errors.onPublicConfigInvalid)
 		const secretJson = yield* decryptAes256Gcm(

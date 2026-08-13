@@ -1,6 +1,6 @@
 import { useDeferredValue, useMemo } from "react"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { IsoDateTimeString, isRangeComparator, type AlertRulePreviewResponse } from "@maple/domain/http"
 import type { V2AlertRulePreviewParams } from "@maple/domain/http/v2"
@@ -11,7 +11,7 @@ import {
 	type RuleFormState,
 } from "@/lib/alerts/form-utils"
 import { mapBuilderChartFailure } from "@/lib/alerts/preview-failure"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 const emptyPreviewAtom = Atom.make(Result.initial())
@@ -80,7 +80,7 @@ export function useAlertRulePreview(
 
 	const result = useAtomValue(
 		payload
-			? MapleApiV2AtomClient.query("alertRules", "preview", {
+			? retainedQueryV2("alertRules", "preview", {
 					payload,
 					reactivityKeys: ["alertPreview"],
 					// Idle TTL so abandoned keystroke variants don't accumulate.
@@ -108,7 +108,7 @@ export function useAlertRulePreview(
 				(error): AlertRulePreviewState => ({
 					preview: null,
 					previewLoading: false,
-					previewError: mapBuilderChartFailure(formatBackendError(error).description),
+					previewError: mapBuilderChartFailure(displayError(error).message),
 				}),
 			)
 			.orElse(

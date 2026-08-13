@@ -9,6 +9,7 @@
  * upward-only (enforced by the writers via escalationReasonFor).
  */
 import {
+	AlertPersistenceError,
 	AlertSignalType,
 	EscalationConfidence,
 	IssueEscalationPolicyRule,
@@ -26,9 +27,11 @@ import {
 } from "@maple/db"
 import { and, asc, eq, inArray } from "drizzle-orm"
 import { Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
-import { Database, type DatabaseClient, DatabaseError } from "@/platform/DatabaseLive"
+import { Database } from "@/platform/DatabaseLive"
+import { makeDbExecute } from "@/platform/db-execute"
 import { Env } from "@/platform/Env"
 import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
+import { makePersistenceError } from "./alert-persistence"
 import { NotificationDispatcher, type NotificationRequest } from "./NotificationDispatcher"
 
 const ESCALATIONS_PER_TICK = 50
@@ -51,7 +54,7 @@ interface EscalationTickResult {
 }
 
 export interface EscalationServiceShape {
-	readonly runEscalationTick: () => Effect.Effect<EscalationTickResult, DatabaseError>
+	readonly runEscalationTick: () => Effect.Effect<EscalationTickResult, AlertPersistenceError>
 }
 
 /*
@@ -65,7 +68,7 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 		const dispatcher = yield* NotificationDispatcher
 		const env = yield* Env
 
-		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) => database.execute(fn)
+		const dbExecute = makeDbExecute(database, "EscalationService", makePersistenceError)
 
 		const loadPolicy = (orgId: OrgId) =>
 			dbExecute((db) =>

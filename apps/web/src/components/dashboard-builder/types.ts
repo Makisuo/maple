@@ -2,6 +2,7 @@
 
 import type {
 	DashboardRefreshIntervalSeconds,
+	DashboardSectionSchema,
 	DashboardVariableSchema,
 	DashboardWidgetSchema,
 	WidgetDataSourceSchema,
@@ -113,6 +114,9 @@ export type DashboardWidget = Omit<
 
 export type DashboardVariable = DeepMutable<typeof DashboardVariableSchema.Type>
 
+export type DashboardSection = DeepMutable<typeof DashboardSectionSchema.Type>
+export type DashboardSectionTab = DashboardSection["tabs"][number]
+
 export interface Dashboard {
 	id: string
 	name: string
@@ -120,6 +124,11 @@ export interface Dashboard {
 	tags?: string[]
 	timeRange: TimeRange
 	widgets: DashboardWidget[]
+	/**
+	 * Collapsible widget groups. Absent means one flat canvas — every widget sits
+	 * on the root grid, which is exactly how every pre-sections dashboard reads.
+	 */
+	sections?: DashboardSection[]
 	variables?: DashboardVariable[]
 	/** Auto-refresh cadence in seconds. Absent or `0` means off. */
 	refreshIntervalSeconds?: DashboardRefreshIntervalSeconds

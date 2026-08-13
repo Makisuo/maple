@@ -236,7 +236,7 @@ const make: Effect.Effect<
 	const newErrorIncidentId = () => decodeErrorIncidentIdSync(randomUUID())
 	const newEventId = () => decodeEventIdSync(randomUUID())
 
-	const dbExecute = makeErrorDatabaseExecute(database)
+	const dbExecute = makeErrorDatabaseExecute(database, "ErrorsService")
 
 	const isoFromDate = (date: Date) => decodeIsoDateTimeStringSync(date.toISOString())
 

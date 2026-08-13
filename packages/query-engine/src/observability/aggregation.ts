@@ -9,6 +9,21 @@ export interface AggregatedService {
 	readonly weightedP99: number
 }
 
+/**
+ * Collapse `service_overview` rows to one entry per service name.
+ *
+ * The latency fields are a throughput-weighted MEAN of each row's quantiles,
+ * which is an approximation, not a quantile. It is bounded now in a way it was
+ * not before: `serviceOverviewQuery` already merges the tDigest states down to
+ * one row per (service, environment), so the only remaining averaging is ACROSS
+ * environments — and for the common single-environment service there is nothing
+ * left to average and the value is exact.
+ *
+ * Removing the approximation entirely means reading `serviceCatalogQuery`, which
+ * merges the states at name level. That is a pipe/route change for the MCP and
+ * v2 surfaces rather than a swap here, so it is deliberately not done in this
+ * pass.
+ */
 export const aggregateServiceRows = (
 	rows: ReadonlyArray<ServiceOverviewOutput>,
 	serviceName?: string,

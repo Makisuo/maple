@@ -20,11 +20,12 @@ import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
 import { SetupAuditService } from "@/services/org/SetupAuditService"
-import { V2SchemaErrorsLive } from "./error-envelope"
+import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
+	makeWarehouseServiceStub,
 	Phase1ResourceStubsLayer,
 	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
@@ -69,23 +70,20 @@ const testConfig = () =>
  */
 const warehouseStub = (
 	rowsByTable: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {},
-): WarehouseQueryServiceShape => ({
-	query: () => Effect.die(new Error("unexpected warehouse pipe query")),
-	sqlQuery: () => Effect.succeed([]),
-	rawSqlQuery: () => Effect.succeed([]),
-	compiledQuery: (_tenant, compiled) => {
-		const table = Object.keys(rowsByTable).find((name) => compiled.sql.includes(`FROM ${name}`))
-		return compiled.decodeRows(table === undefined ? [] : rowsByTable[table]!).pipe(Effect.orDie)
-	},
-	compiledQueryFirst: () => Effect.die(new Error("unexpected compiled query")),
-	// `fetchWarehouseInputs` / `fetchTraceCompleteness` warm the route before
-	// their fan-outs; nothing to resolve against a stub.
-	warmRoute: () => Effect.void,
-	ingest: () => Effect.void,
-	asExecutor: () => {
-		throw new Error("asExecutor is not supported by this test stub")
-	},
-})
+): WarehouseQueryServiceShape =>
+	makeWarehouseServiceStub({
+		query: () => Effect.die(new Error("unexpected warehouse pipe query")),
+		rawSqlQuery: () => Effect.succeed([]),
+		compiledQuery: (_tenant, compiled) => {
+			const table = Object.keys(rowsByTable).find((name) => compiled.sql.includes(`FROM ${name}`))
+			return compiled.decodeRows(table === undefined ? [] : rowsByTable[table]!).pipe(Effect.orDie)
+		},
+		compiledQueryFirst: () => Effect.die(new Error("unexpected compiled query")),
+		// `fetchWarehouseInputs` / `fetchTraceCompleteness` warm the route before
+		// their fan-outs; nothing to resolve against a stub.
+		warmRoute: () => Effect.void,
+		ingest: () => Effect.void,
+	})
 
 const unavailableWarehouse: WarehouseQueryServiceShape = {
 	...warehouseStub(),
@@ -129,7 +127,7 @@ const makeHarness = (warehouse: WarehouseQueryServiceShape = warehouseStub()) =>
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
-		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(V2TransportErrorBoundaryLive),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(Phase1ResourceStubsLayer),
 		Layer.provide(SlackIntegrationServiceStubLayer),

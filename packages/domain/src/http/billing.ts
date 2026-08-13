@@ -1,5 +1,5 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Authorization } from "./current-tenant"
 import { WarehouseQueryError } from "./warehouse-errors"
 
@@ -91,10 +91,21 @@ export const BillingAlertThresholdType = Schema.Literals([
 ])
 export type BillingAlertThresholdType = typeof BillingAlertThresholdType.Type
 
+/**
+ * Autumn omits `enabled` on a billing control whose value is the API default,
+ * and the two defaults differ: a spend limit is off unless said otherwise, a
+ * usage alert is on. `autumn-js` injected them in its inbound Zod schemas
+ * (`z._default(boolean(), false)` / `z._default(boolean(), true)`) before
+ * anything downstream saw the row, so the decoded field stays a required
+ * `boolean` and every consumer keeps reading it unconditionally.
+ */
+const SpendLimitEnabled = Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false)))
+const UsageAlertEnabled = Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true)))
+
 /** Autumn-native cap on paid overage for one feature. */
 export class BillingSpendLimit extends Schema.Class<BillingSpendLimit>("BillingSpendLimit")({
 	featureId: Schema.optionalKey(Schema.String),
-	enabled: Schema.Boolean,
+	enabled: SpendLimitEnabled,
 	limitType: Schema.optionalKey(BillingLimitType),
 	overageLimit: Schema.optionalKey(Schema.Number),
 	source: Schema.optionalKey(Schema.String),
@@ -103,7 +114,7 @@ export class BillingSpendLimit extends Schema.Class<BillingSpendLimit>("BillingS
 /** Autumn-native usage alert; delivery is driven by Autumn webhooks. */
 export class BillingUsageAlert extends Schema.Class<BillingUsageAlert>("BillingUsageAlert")({
 	featureId: Schema.optionalKey(Schema.String),
-	enabled: Schema.Boolean,
+	enabled: UsageAlertEnabled,
 	threshold: Schema.Number,
 	thresholdType: BillingAlertThresholdType,
 	name: Schema.optionalKey(Schema.String),

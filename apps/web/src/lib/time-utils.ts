@@ -3,6 +3,18 @@ import { formatWarehouseDateTime, resolveRelativeRangeToWarehouse } from "@maple
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 /**
+ * Floor a resolved range to the cache-key snap grid, scaled to the window
+ * width. Apply this wherever a relative preset is resolved into the range that
+ * feeds a query — without it the key moves with the clock and the atom idle
+ * TTLs never get to fire. See `snapRangeForCache` in `@maple/query-engine`.
+ *
+ * Do *not* apply it where a preset is materialized into an absolute range the
+ * user sees and keeps (the picker writing to the URL) — that should record the
+ * instant they actually chose.
+ */
+export { snapRangeForCache } from "@maple/query-engine"
+
+/**
  * Format a Date as the ClickHouse/Tinybird `YYYY-MM-DD HH:mm:ss` shape.
  * Thin Date-taking wrapper over the shared epoch-ms formatter.
  */

@@ -1,7 +1,8 @@
-import { HttpApiBuilder, HttpApiMiddleware } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CurrentTenant,
-	DashboardSchemaErrors,
+	DashboardPersistenceError,
+	DashboardStoredConfigInvalidError,
 	DashboardTemplateMetadata,
 	DashboardTemplateNotFoundError,
 	DashboardTemplatesListResponse,
@@ -11,30 +12,28 @@ import {
 	PortableDashboardDocument,
 } from "@maple/domain/http"
 import { Effect } from "effect"
-import { describeSchemaIssue, summarizeSchemaError } from "@/routes/schema-error-detail"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { getTemplateById, listTemplateMetadata } from "@/dashboard-templates"
 import type { TemplateParameterValues } from "@/dashboard-templates"
 import { convertPersesDashboardToPortable } from "@/services/dashboards/perses-dashboard-import"
 
-/**
- * Renders a dashboard request-decode failure as a `DashboardValidationError`
- * whose `details` name the widget and field at fault, instead of the runtime's
- * default empty 400 (see `./schema-error-detail`).
- */
-export const HttpDashboardSchemaErrorsLive = HttpApiMiddleware.layerSchemaErrorTransform(
-	DashboardSchemaErrors,
-	(schemaError) =>
-		Effect.suspend(() => {
-			const details = describeSchemaIssue(schemaError.cause.issue)
-			return Effect.fail(
-				new DashboardValidationError({
-					message: summarizeSchemaError(schemaError.kind, details),
-					details: details.map(({ line }) => line),
+// v1 keeps its existing generic persistence contract. v2 exposes the exact
+// non-retryable stored-document tag instead.
+const preserveV1DashboardErrors = <A, E, R>(
+	effect: Effect.Effect<A, E | DashboardStoredConfigInvalidError, R>,
+) =>
+	effect.pipe(
+		Effect.catchTag("@maple/http/errors/DashboardStoredConfigInvalidError", (error) =>
+			Effect.fail(
+				new DashboardPersistenceError({
+					message:
+						error instanceof DashboardStoredConfigInvalidError
+							? error.message
+							: "Stored dashboard payload is invalid",
 				}),
-			)
-		}),
-)
+			),
+		),
+	)
 
 export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (handlers) =>
 	Effect.gen(function* () {
@@ -50,7 +49,7 @@ export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (
 			.handle("list", () =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					return yield* persistence.list(tenant.orgId)
+					return yield* persistence.list(tenant.orgId).pipe(preserveV1DashboardErrors)
 				}),
 			)
 			.handle("importPerses", ({ payload }) =>
@@ -80,7 +79,9 @@ export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (
 					}
 
 					const tenant = yield* CurrentTenant.Context
-					return yield* persistence.upsert(tenant.orgId, tenant.userId, payload.dashboard)
+					return yield* persistence
+						.upsert(tenant.orgId, tenant.userId, payload.dashboard)
+						.pipe(preserveV1DashboardErrors)
 				}),
 			)
 			.handle("delete", ({ params }) =>
@@ -92,27 +93,28 @@ export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (
 			.handle("listVersions", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					return yield* persistence.listVersions(tenant.orgId, params.dashboardId, {
-						limit: query.limit,
-						before: query.before,
-					})
+					return yield* persistence
+						.listVersions(tenant.orgId, params.dashboardId, {
+							limit: query.limit,
+							before: query.before,
+						})
+						.pipe(preserveV1DashboardErrors)
 				}),
 			)
 			.handle("getVersion", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					return yield* persistence.getVersion(tenant.orgId, params.dashboardId, params.versionId)
+					return yield* persistence
+						.getVersion(tenant.orgId, params.dashboardId, params.versionId)
+						.pipe(preserveV1DashboardErrors)
 				}),
 			)
 			.handle("restoreVersion", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					return yield* persistence.restoreVersion(
-						tenant.orgId,
-						tenant.userId,
-						params.dashboardId,
-						params.versionId,
-					)
+					return yield* persistence
+						.restoreVersion(tenant.orgId, tenant.userId, params.dashboardId, params.versionId)
+						.pipe(preserveV1DashboardErrors)
 				}),
 			)
 			.handle("listTemplates", () =>

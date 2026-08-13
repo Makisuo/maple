@@ -1,17 +1,11 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { SessionId, TraceId } from "../../primitives"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import {
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2PayloadTooLargeError,
-	V2RateLimitError,
-	V2ServiceUnavailableError,
-	V2UpstreamError,
-} from "./errors"
+import { defineV2Error, V2ParameterInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
+import { V2WarehouseReadErrors } from "./query-errors"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
@@ -420,13 +414,30 @@ export const V2SessionReplaysForTraceParams = Schema.Struct({
 })
 export type V2SessionReplaysForTraceParams = Schema.Schema.Type<typeof V2SessionReplaysForTraceParams>
 
-// Full warehouse outcome range — see the matching comment in ./telemetry.ts.
-const commonErrors = [
-	V2InvalidRequestError,
-	V2RateLimitError,
-	V2ServiceUnavailableError,
-	V2UpstreamError,
-] as const
+export const V2SessionReplayNotFound = defineV2Error({
+	tag: "@maple/http/v2/SessionReplayNotFoundError",
+	status: 404,
+	code: "session_replay_not_found",
+	title: "Session replay not found",
+	message: "No such session replay.",
+	retry: "never",
+	recovery: "none",
+	identifier: "SessionReplayNotFoundError",
+})
+
+export const V2SessionReplayRangeTooLarge = defineV2Error({
+	tag: "@maple/http/v2/SessionReplayRangeTooLargeError",
+	status: 413,
+	code: "range_too_large",
+	title: "Session replay range too large",
+	message:
+		"That part of the recording is too large to load in one request. Request a narrower chunk range.",
+	retry: "never",
+	recovery: "fix_request",
+	identifier: "SessionReplayRangeTooLargeError",
+})
+
+const commonErrors = [V2ParameterInvalid.schema, ...V2WarehouseReadErrors] as const
 
 const SessionReplayList = ListOf(V2SessionReplayListItem).annotate({
 	identifier: "SessionReplayList",
@@ -472,7 +483,7 @@ export class V2SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays"
 			params: { id: SessionReplayPublicId },
 			query: V2SessionReplayWindowQuery,
 			success: V2SessionReplay,
-			error: [...commonErrors, V2NotFoundError],
+			error: [...commonErrors, V2SessionReplayNotFound.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getSessionReplay",
@@ -487,7 +498,7 @@ export class V2SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays"
 			params: { id: SessionReplayPublicId },
 			query: V2SessionReplayWindowQuery,
 			success: V2SessionReplayManifest,
-			error: [...commonErrors, V2NotFoundError],
+			error: [...commonErrors, V2SessionReplayNotFound.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getSessionReplayManifest",
@@ -502,7 +513,7 @@ export class V2SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays"
 			params: { id: SessionReplayPublicId },
 			query: V2SessionReplayEventsQuery,
 			success: SessionReplayChunkList,
-			error: [...commonErrors, V2NotFoundError, V2PayloadTooLargeError],
+			error: [...commonErrors, V2SessionReplayNotFound.schema, V2SessionReplayRangeTooLarge.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getSessionReplayEvents",
@@ -517,7 +528,7 @@ export class V2SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays"
 			params: { id: SessionReplayPublicId },
 			query: V2SessionReplayCollectionQuery,
 			success: SessionTranscriptList,
-			error: [...commonErrors, V2NotFoundError],
+			error: [...commonErrors, V2SessionReplayNotFound.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getSessionReplayTranscript",
@@ -543,7 +554,6 @@ export class V2SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays"
 	)
 	.prefix("/v2/session_replays")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Session Replays",

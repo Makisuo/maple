@@ -1,20 +1,37 @@
 import { HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
 import { Schema, Context as EffectContext } from "effect"
 import { AuthMode, OrgId, RoleName, UserId } from "../primitives"
+import { HttpTaggedError } from "./error-policy"
 
-export class UnauthorizedError extends Schema.TaggedError<UnauthorizedError>()(
+export class UnauthorizedError extends HttpTaggedError<UnauthorizedError>()(
 	"@maple/http/errors/UnauthorizedError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 401 },
+	{
+		status: 401,
+		code: "invalid_credentials",
+		title: "Sign in required",
+		message: "Invalid or missing credentials.",
+		retry: "never",
+		recovery: "reauthenticate",
+		exposure: "redacted",
+	},
 ) {}
 
 /** Credential storage could not be consulted; this is not an invalid token. */
-export class AuthorizationUnavailableError extends Schema.TaggedError<AuthorizationUnavailableError>()(
+export class AuthorizationUnavailableError extends HttpTaggedError<AuthorizationUnavailableError>()(
 	"@maple/http/errors/AuthorizationUnavailableError",
 	{ message: Schema.String },
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "authorization_unavailable",
+		title: "Authentication is temporarily unavailable",
+		message: "Authentication is temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
 export class TenantSchema extends Schema.Class<TenantSchema>("TenantSchema")({

@@ -1,4 +1,5 @@
 import * as React from "react"
+import { widgetTypeByVisualization } from "@maple/domain/http"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
@@ -107,7 +108,7 @@ function buildRawSqlDataSource(
 	// for the widget to read `data[0].value`. If the user already set a transform
 	// on the widget, keep theirs; otherwise inject the default.
 	const existingTransform = widget.dataSource.transform
-	const needsScalar = visualization === "stat" || visualization === "gauge"
+	const needsScalar = widgetTypeByVisualization(visualization)?.isScalar === true
 	const transform =
 		needsScalar && !existingTransform?.reduceToValue
 			? {

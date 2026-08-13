@@ -13,7 +13,8 @@ import {
 	AlertIncidentsListResponse,
 	AlertIncidentStatus,
 	AlertIncidentTransition as AlertIncidentTransitionSchema,
-	AlertNotFoundError,
+	AlertIncidentNotFoundError,
+	AlertRuleNotFoundError,
 	AlertPersistenceError,
 	AlertRuleDocument,
 	AlertSeverity as AlertSeveritySchema,
@@ -25,6 +26,7 @@ import {
 	UserId,
 	type AlertIncidentId,
 	type AlertRuleId,
+	type ManagedWarehouseError,
 } from "@maple/domain/http"
 import {
 	alertDeliveryEvents,
@@ -35,8 +37,9 @@ import {
 } from "@maple/db"
 import { and, desc, eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
-import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
-import { describeCause } from "@/platform/describe-cause"
+import { Database } from "@/platform/DatabaseLive"
+import { makeDbExecute } from "@/platform/db-execute"
+import { makePersistenceError } from "./alert-persistence"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
@@ -87,7 +90,7 @@ export interface AlertReadModelsServiceShape {
 	readonly getIncident: (
 		orgId: OrgId,
 		incidentId: AlertIncidentId,
-	) => Effect.Effect<AlertIncidentDocument, AlertPersistenceError | AlertNotFoundError>
+	) => Effect.Effect<AlertIncidentDocument, AlertPersistenceError | AlertIncidentNotFoundError>
 	readonly listRuleChecks: (
 		orgId: OrgId,
 		ruleId: AlertRuleId,
@@ -100,7 +103,10 @@ export interface AlertReadModelsServiceShape {
 			readonly beforeTimestamp?: string
 			readonly beforeGroupKey?: string
 		},
-	) => Effect.Effect<AlertChecksListResponse, AlertPersistenceError | AlertNotFoundError>
+	) => Effect.Effect<
+		AlertChecksListResponse,
+		AlertPersistenceError | AlertRuleNotFoundError | ManagedWarehouseError
+	>
 	readonly summarizeRuleChecks: (
 		orgId: OrgId,
 		ruleId: AlertRuleId,
@@ -108,7 +114,10 @@ export interface AlertReadModelsServiceShape {
 			readonly since: string
 			readonly until: string
 		},
-	) => Effect.Effect<AlertChecksSummary, AlertPersistenceError | AlertNotFoundError | AlertValidationError>
+	) => Effect.Effect<
+		AlertChecksSummary,
+		AlertPersistenceError | AlertRuleNotFoundError | AlertValidationError | ManagedWarehouseError
+	>
 	readonly listDeliveryEvents: (
 		orgId: OrgId,
 		options?: ListAlertDeliveryEventsOptions,
@@ -137,14 +146,6 @@ type IsoDateTimeValue = Schema.Schema.Type<typeof AlertDestinationDocument.field
 
 const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
 	value == null ? null : decodeIsoDateTimeStringSync(value.toISOString())
-
-const makePersistenceError = (error: unknown) => {
-	const cause = describeCause(error instanceof Error ? error.cause : error)
-	return new AlertPersistenceError({
-		message: error instanceof Error ? error.message : "Alert persistence failed",
-		...(cause === undefined ? {} : { cause }),
-	})
-}
 
 const makeValidationError = (message: string) => new AlertValidationError({ message, details: [] })
 
@@ -187,18 +188,7 @@ export class AlertReadModelsService extends Context.Service<
 		const database = yield* Database
 		const warehouse = yield* WarehouseQueryService
 
-		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			database.execute(fn).pipe(
-				Effect.tapError((error) =>
-					Effect.logError("AlertsService dbExecute failed").pipe(
-						Effect.annotateLogs({
-							message: error.message,
-							cause: describeCause(error.cause) ?? "(none)",
-						}),
-					),
-				),
-				Effect.mapError(makePersistenceError),
-			)
+		const dbExecute = makeDbExecute(database, "AlertReadModelsService", makePersistenceError)
 
 		const systemTenant = (orgId: OrgId): TenantContext => ({
 			orgId,
@@ -250,10 +240,9 @@ export class AlertReadModelsService extends Context.Service<
 			)
 			const incident = rows[0]
 			if (incident === undefined) {
-				return yield* new AlertNotFoundError({
+				return yield* new AlertIncidentNotFoundError({
 					message: `No such alert incident: '${incidentId}'`,
-					resourceType: "alert_incident",
-					resourceId: incidentId,
+					incidentId,
 				})
 			}
 			return rowToIncidentDocument(incident)
@@ -282,10 +271,9 @@ export class AlertReadModelsService extends Context.Service<
 					.limit(1),
 			)
 			if (ruleRow.length === 0) {
-				return yield* new AlertNotFoundError({
+				return yield* new AlertRuleNotFoundError({
 					message: "Alert rule not found",
-					resourceType: "alert_rule",
-					resourceId: ruleId,
+					ruleId,
 				})
 			}
 
@@ -327,21 +315,12 @@ export class AlertReadModelsService extends Context.Service<
 				},
 			)
 
-			const rows = yield* warehouse
-				// listRuleChecksQuery declares .routing("ingest") — alert_checks only
-				// exists in the managed Tinybird pipeline.
-				.compiledQuery(systemTenant(orgId), compiled, {
-					profile: "list",
-					context: "listAlertChecks",
-				})
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new AlertPersistenceError({
-								message: `Failed to list alert checks: ${error.message}`,
-							}),
-					),
-				)
+			// listRuleChecksQuery declares .routing("ingest") — alert_checks only
+			// exists in the managed Tinybird pipeline.
+			const rows = yield* warehouse.compiledQuery(systemTenant(orgId), compiled, {
+				profile: "list",
+				context: "listAlertChecks",
+			})
 
 			const checks = yield* Effect.try({
 				try: () =>
@@ -407,10 +386,9 @@ export class AlertReadModelsService extends Context.Service<
 					.limit(1),
 			)
 			if (ruleRow.length === 0) {
-				return yield* new AlertNotFoundError({
+				return yield* new AlertRuleNotFoundError({
 					message: "Alert rule not found",
-					resourceType: "alert_rule",
-					resourceId: ruleId,
+					ruleId,
 				})
 			}
 
@@ -437,46 +415,28 @@ export class AlertReadModelsService extends Context.Service<
 			// stable across refreshes and matches alert evaluation granularity.
 			const bucketSeconds = Math.max(1, Math.ceil((endMs - startMs) / 1000 / 720 / 60)) * 60
 			const tenant = systemTenant(orgId)
-			const groupRows = yield* warehouse
-				.compiledQuery(
-					tenant,
-					CH.compile(CH.alertCheckGroupTotalsQuery({ since, until, limit: 20 }), {
-						orgId,
-						ruleId,
-						since,
-						until,
-					}),
-					{ profile: "aggregation", context: "alertCheckSummaryGroups" },
-				)
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new AlertPersistenceError({
-								message: `Failed to summarize alert check groups: ${error.message}`,
-							}),
-					),
-				)
+			const groupRows = yield* warehouse.compiledQuery(
+				tenant,
+				CH.compile(CH.alertCheckGroupTotalsQuery({ since, until, limit: 20 }), {
+					orgId,
+					ruleId,
+					since,
+					until,
+				}),
+				{ profile: "aggregation", context: "alertCheckSummaryGroups" },
+			)
 			const topGroupKeys = groupRows.map((row) => String(row.groupKey ?? ""))
-			const rows = yield* warehouse
-				.compiledQuery(
-					tenant,
-					CH.compile(CH.alertChecksSummaryQuery({ topGroupKeys }), {
-						orgId,
-						ruleId,
-						since,
-						until,
-						bucketSeconds,
-					}),
-					{ profile: "aggregation", context: "alertCheckSummary" },
-				)
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new AlertPersistenceError({
-								message: `Failed to summarize alert checks: ${error.message}`,
-							}),
-					),
-				)
+			const rows = yield* warehouse.compiledQuery(
+				tenant,
+				CH.compile(CH.alertChecksSummaryQuery({ topGroupKeys }), {
+					orgId,
+					ruleId,
+					since,
+					until,
+					bucketSeconds,
+				}),
+				{ profile: "aggregation", context: "alertCheckSummary" },
+			)
 
 			const points: AlertChecksSummaryPoint[] = rows.map((row) => ({
 				bucket: String(row.bucket),

@@ -5,23 +5,27 @@ import {
 	interleaveAlertRulesByTenant,
 	makeAlertDeliveryKey,
 	planAlertLifecycle,
-	type AlertEvaluation as EvaluatedRule,
 	type AlertLifecycleInput,
 } from "@maple/alerting-core"
 import { formatWarehouseDateTime } from "@maple/query-engine"
 import { MapleCloudEventSchema } from "@maple/eventing-core"
 import {
 	AlertComparator as AlertComparatorSchema,
+	type AlertComparator,
 	AlertDeliveryError,
+	AlertDestinationDecryptionError,
 	AlertDeliveryEventDocument,
 	AlertDestinationDocument,
+	AlertDestinationStoredConfigInvalidError,
 	AlertEvaluationResult,
 	AlertEventType as AlertEventTypeSchema,
 	AlertForbiddenError,
-	AlertGroupBy as AlertGroupBySchema,
 	AlertIncidentDocument,
 	AlertIncidentStatus,
-	AlertNotFoundError,
+	type AlertDestinationNotFoundError,
+	type AlertRuleDestinationNotFoundError,
+	type AlertRuleNotFoundError,
+	type AlertRuleStoredConfigInvalidError,
 	AlertPersistenceError,
 	AlertRuleDocument,
 	AlertRulePreviewFiringSpan,
@@ -42,11 +46,9 @@ import {
 	type AlertRuleId,
 	type AlertDestinationId,
 	type AlertIncidentId,
-	QueryEngineExecutionError,
-	type WarehouseError,
-	type WarehouseErrorTag,
-	QueryEngineTimeoutError,
-	QueryEngineValidationError,
+	type WarehouseQueryPathError,
+	type QueryEngineTimeoutError,
+	type QueryEngineValidationError,
 	RoleName,
 	UserId as UserIdSchema,
 	type UserId,
@@ -85,7 +87,6 @@ import {
 	Context,
 } from "effect"
 import * as AlertingMetrics from "@/observability/AlertingMetrics"
-import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
 import { INVESTIGATION_FANOUT_BINDING } from "@/services/errors/ai-triage-enqueue"
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
@@ -96,7 +97,8 @@ import { formatComparator } from "./alert-formatting"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
-import { describeCause } from "@/platform/describe-cause"
+import { makeDbExecute } from "@/platform/db-execute"
+import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -109,37 +111,38 @@ import { AlertReadModelsService, type AlertReadModelsServiceShape } from "./Aler
 import { AlertRulesService, makeAlertRulePersistence, type AlertRulesServiceShape } from "./AlertRulesService"
 import {
 	compileRulePlan,
+	decodeStoredAlertRuleMetadata,
 	isGroupedPlan,
 	makeAlertValidationError as makeValidationError,
 	planEvaluateSource,
-	serviceNamesFromRow,
 	type NormalizedRule,
 } from "./AlertRuleModel"
 
 export { AlertRuntime, type AlertRuntimeShape } from "./AlertRuntime"
 
-/**
- * Persisted evaluation-failure category per warehouse tag (`ErrorCategory` on
- * alert_checks rows and `failureCategory` in logs). The legacy `tinybird_*`
- * names are kept stable on purpose — dashboards and stored rows key on them.
- * `satisfies Record<WarehouseErrorTag, string>` makes a new warehouse error
- * class a compile error here instead of a silently-uncategorized failure.
- */
-const WAREHOUSE_FAILURE_CATEGORIES = {
-	"@maple/http/errors/WarehouseQueryError": "tinybird_query",
-	"@maple/http/errors/WarehouseUpstreamError": "tinybird_upstream",
-	"@maple/http/errors/WarehouseAuthError": "tinybird_auth",
-	"@maple/http/errors/WarehouseConfigError": "tinybird_config",
-	"@maple/http/errors/WarehouseClientError": "tinybird_client",
-	"@maple/http/errors/WarehouseSchemaDriftError": "tinybird_schema_drift",
-	"@maple/http/errors/WarehouseMalformedQueryError": "malformed_query",
-	"@maple/http/errors/WarehouseQuotaExceededError": "tinybird_quota",
-	"@maple/http/errors/WarehouseValidationError": "tinybird_validation",
-} satisfies Record<WarehouseErrorTag, string>
+interface EvaluatedRule {
+	readonly status: Schema.Schema.Type<typeof AlertEvaluationResult.fields.status>
+	readonly value: number | null
+	readonly sampleCount: number
+	readonly threshold: number
+	readonly thresholdUpper: number | null
+	readonly comparator: AlertComparator
+	readonly reason: string
+	/**
+	 * The window returned nothing and `noDataBehavior: "zero"` synthesized the
+	 * value. Such a status is a statement about the absence of data, not about
+	 * the health of the system — a `gt` rule reads a total ingest outage as
+	 * `healthy` this way. Anything that acts on "healthy" destructively (i.e.
+	 * resolving an open incident) must prove telemetry is still flowing first.
+	 */
+	readonly derivedFromNoData: boolean
+}
+
+type AlertDestinationStorageError = AlertDestinationDecryptionError | AlertDestinationStoredConfigInvalidError
 
 interface DeliveryAttemptFailure {
 	readonly message: string
-	readonly kind: "transport" | "timeout" | "payload" | "destination" | "unknown"
+	readonly kind: string
 	readonly retryable: boolean
 }
 
@@ -185,8 +188,6 @@ const StoredDeliveryPayloadSchema = Schema.Struct({
 	template: Schema.optionalKey(Schema.NullOr(AlertNotificationTemplate)),
 })
 
-const AlertGroupByFromJson = Schema.fromJsonString(AlertGroupBySchema)
-
 const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.id)
 const decodeAlertIncidentIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.id)
 const decodeAlertDeliveryEventIdSync = Schema.decodeUnknownSync(AlertDeliveryEventDocument.fields.id)
@@ -199,11 +200,7 @@ const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema
 const decodeAlertIncidentStatusSync = Schema.decodeUnknownSync(AlertIncidentStatus)
 const decodeAlertEventTypeSync = Schema.decodeUnknownSync(AlertEventTypeSchema)
 
-const decodeAlertGroupByFromJsonSync = Schema.decodeUnknownSync(AlertGroupByFromJson)
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
-
-const parseStoredGroupBy = (raw: string | null): AlertGroupBy | null =>
-	raw == null ? null : decodeAlertGroupByFromJsonSync(raw)
 
 const isServiceGroupBy = (groupBy: AlertGroupBy | null): boolean =>
 	groupBy != null && groupBy.length === 1 && groupBy[0] === "service.name"
@@ -218,12 +215,6 @@ const resolveServiceLinkName = (
 	}
 	return null
 }
-/** Parse the stored notification-template value; returns null when absent/invalid. */
-const parseStoredNotificationTemplate = (raw: unknown): AlertNotificationTemplate | null => {
-	if (raw == null) return null
-	return Option.getOrElse(Schema.decodeUnknownOption(AlertNotificationTemplate)(raw), () => null)
-}
-
 // Cap on how many evaluation windows a structured rule preview replays.
 const MAX_PREVIEW_BUCKETS = 200
 
@@ -240,13 +231,6 @@ const toIngestDateTime64 = (epochMs: number) => {
 	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
 }
 
-const makePersistenceError = (error: unknown) => {
-	const cause = describeCause(error instanceof Error ? error.cause : error)
-	return new AlertPersistenceError({
-		message: error instanceof Error ? error.message : "Alert persistence failed",
-		...(cause === undefined ? {} : { cause }),
-	})
-}
 
 const makeDeliveryError = (message: string, destinationType?: AlertDestinationType, cause?: unknown) =>
 	new AlertDeliveryError({
@@ -276,7 +260,12 @@ export interface AlertsServiceShape
 		request: AlertRuleUpsertRequest,
 	) => Effect.Effect<
 		AlertRuleDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertNotFoundError
+		| AlertForbiddenError
+		| AlertValidationError
+		| AlertPersistenceError
+		| AlertRuleNotFoundError
+		| AlertRuleDestinationNotFoundError
+		| AlertRuleStoredConfigInvalidError
 	>
 	readonly testRule: (
 		orgId: OrgId,
@@ -289,9 +278,12 @@ export interface AlertsServiceShape
 		| AlertForbiddenError
 		| AlertValidationError
 		| AlertPersistenceError
-		| AlertNotFoundError
+		| AlertRuleDestinationNotFoundError
 		| AlertDeliveryError
-		| WarehouseError
+		| AlertDestinationStorageError
+		| QueryEngineValidationError
+		| QueryEngineTimeoutError
+		| WarehouseQueryPathError
 	>
 	/**
 	 * `roles` gates raw-SQL previews only: preview itself needs just `alerts:read`,
@@ -306,9 +298,9 @@ export interface AlertsServiceShape
 		AlertRulePreviewResponse,
 		| AlertValidationError
 		| AlertForbiddenError
-		| AlertDeliveryError
-		| AlertPersistenceError
-		| WarehouseError
+		| QueryEngineValidationError
+		| QueryEngineTimeoutError
+		| WarehouseQueryPathError
 	>
 	readonly runSchedulerTick: () => Effect.Effect<
 		{
@@ -317,7 +309,12 @@ export interface AlertsServiceShape
 			readonly evaluationFailureCount: number
 			readonly deliveryFailureCount: number
 		},
-		AlertPersistenceError | AlertDeliveryError | AlertValidationError | AlertNotFoundError
+		| AlertPersistenceError
+		| AlertDeliveryError
+		| AlertValidationError
+		| AlertRuleNotFoundError
+		| AlertDestinationNotFoundError
+		| AlertRuleStoredConfigInvalidError
 		// Note: warehouse tagged errors flow up from evaluateRule but are caught
 		// inside the per-rule Effect.catch in the scheduler tick, so the tick
 		// itself never surfaces them.
@@ -377,18 +374,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				upsertRuleRow,
 			} = rulePersistence
 
-			const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-				database.execute(fn).pipe(
-					Effect.tapError((error) =>
-						Effect.logError("AlertsService dbExecute failed").pipe(
-							Effect.annotateLogs({
-								message: error.message,
-								cause: describeCause(error.cause) ?? "(none)",
-							}),
-						),
-					),
-					Effect.mapError(makePersistenceError),
-				)
+			const dbExecute = makeDbExecute(database, "AlertsService", makePersistenceError)
 
 			const systemTenant = (orgId: OrgId): TenantContext => ({
 				orgId,
@@ -432,35 +418,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				})
 			})
 
-			// Collapse alert-domain semantic errors (validation/execution/timeout from
-			// the query engine layer) into AlertValidation/AlertDelivery, but let the
-			// Tinybird tagged errors (WarehouseQueryError + WarehouseQuotaExceededError)
-			// propagate so the client receives the tag + structured fields
-			// (upstreamStatus, setting, pipe). formatBackendError on the frontend
-			// handles them.
-			const catchQueryEngineErrors = <A, R>(
-				effect: Effect.Effect<
-					A,
-					| QueryEngineValidationError
-					| QueryEngineExecutionError
-					| QueryEngineTimeoutError
-					| WarehouseError,
-					R
-				>,
-			) =>
-				effect.pipe(
-					Effect.catchTags({
-						"@maple/http/errors/QueryEngineValidationError": (e) =>
-							Effect.fail(makeValidationError(e.message, e.details)),
-						"@maple/http/errors/QueryEngineExecutionError": (e) =>
-							Effect.fail(makeDeliveryError(e.message, undefined, e)),
-						"@maple/http/errors/QueryEngineTimeoutError": (e) =>
-							Effect.fail(
-								makeDeliveryError(e.message ?? "Alert evaluation timed out", undefined, e),
-							),
-					}),
-				)
-
 			/**
 			 * Evaluate the alert rule and return one outcome per group.
 			 *
@@ -478,22 +435,26 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				rule: NormalizedRule,
 			): Effect.fn.Return<
 				ReadonlyArray<{ evaluation: EvaluatedRule; groupKey: string }>,
-				AlertValidationError | AlertDeliveryError | WarehouseError
+				| AlertValidationError
+				| QueryEngineValidationError
+				| QueryEngineTimeoutError
+				| WarehouseQueryPathError
 			> {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": rule.id })
 				const endMs = yield* now
 				const startMs = endMs - rule.windowMinutes * 60_000
 				const plan = rule.compiledPlan
 				const source = yield* planEvaluateSource(plan, rule.windowMinutes)
-				const observations: ReadonlyArray<GroupedAlertObservation> = yield* queryEngine
-					.evaluate(systemTenant(orgId), {
+				const observations: ReadonlyArray<GroupedAlertObservation> = yield* queryEngine.evaluate(
+					systemTenant(orgId),
+					{
 						startTime: formatWarehouseDateTime(startMs),
 						endTime: formatWarehouseDateTime(endMs),
 						source,
 						reducer: plan.reducer,
 						sampleCountStrategy: plan.sampleCountStrategy,
-					})
-					.pipe(catchQueryEngineErrors)
+					},
+				)
 
 				const grouped = isGroupedPlan(plan)
 				return observations.map((obs) => ({
@@ -604,34 +565,17 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			) => composeLinkUrl(resolveServiceLinkName(rule, groupKey))
 
 			const toDeliveryAttemptFailure = (
-				error: AlertValidationError | AlertDeliveryError | AlertNotFoundError | AlertPersistenceError,
-			): DeliveryAttemptFailure =>
-				Match.value(error).pipe(
-					Match.discriminatorsExhaustive("_tag")({
-						"@maple/http/errors/AlertValidationError": (e) => ({
-							message: e.message,
-							kind: "payload" as const,
-							retryable: false,
-						}),
-						"@maple/http/errors/AlertDeliveryError": (e) => ({
-							message: e.message,
-							kind: e.message.includes("timed out")
-								? ("timeout" as const)
-								: ("transport" as const),
-							retryable: true,
-						}),
-						"@maple/http/errors/AlertNotFoundError": (e) => ({
-							message: e.message,
-							kind: "destination" as const,
-							retryable: false,
-						}),
-						"@maple/http/errors/AlertPersistenceError": (e) => ({
-							message: e.message,
-							kind: "unknown" as const,
-							retryable: false,
-						}),
-					}),
-				)
+				error:
+					| AlertValidationError
+					| AlertDeliveryError
+					| AlertPersistenceError
+					| AlertDestinationStorageError
+					| AlertRuleStoredConfigInvalidError,
+			): DeliveryAttemptFailure => ({
+				message: error.message,
+				kind: error.error.code,
+				retryable: error.error.retryable,
+			})
 
 			const queueIncidentNotifications = Effect.fn("AlertsService.queueIncidentNotifications")(
 				function* (
@@ -732,11 +676,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				})
 				yield* requireAdmin(roles)
 				const oldRow = yield* requireRuleRow(orgId, ruleId)
+				const oldNormalized = yield* normalizeRuleRow(oldRow)
+				const newNormalized = yield* normalizeRule(orgId, request)
 				const result = yield* upsertRuleRow(orgId, userId, ruleId, request)
 
 				// Resolve stale incidents caused by the configuration change
-				const oldNormalized = yield* normalizeRuleRow(oldRow)
-				const newNormalized = yield* normalizeRule(orgId, request)
 
 				if (oldNormalized.enabled && !newNormalized.enabled) {
 					// Rule was disabled — resolve all open incidents
@@ -905,9 +849,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				AlertRulePreviewResponse,
 				| AlertValidationError
 				| AlertForbiddenError
-				| AlertDeliveryError
-				| AlertPersistenceError
-				| WarehouseError
+				| QueryEngineValidationError
+				| QueryEngineTimeoutError
+				| WarehouseQueryPathError
 			> {
 				yield* Effect.annotateCurrentSpan("orgId", orgId)
 				const normalized = yield* normalizeRule(orgId, request.rule, {
@@ -1005,15 +949,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									perServicePlan,
 									normalized.windowMinutes,
 								)
-								const observations = yield* queryEngine
-									.evaluateSeries(systemTenant(orgId), {
-										startTime: formatWarehouseDateTime(startMs),
-										endTime: formatWarehouseDateTime(queryEndMs),
-										source: perServiceSource,
-										reducer: perServicePlan.reducer,
-										sampleCountStrategy: perServicePlan.sampleCountStrategy,
-									})
-									.pipe(catchQueryEngineErrors)
+								const observations = yield* queryEngine.evaluateSeries(systemTenant(orgId), {
+									startTime: formatWarehouseDateTime(startMs),
+									endTime: formatWarehouseDateTime(queryEndMs),
+									source: perServiceSource,
+									reducer: perServicePlan.reducer,
+									sampleCountStrategy: perServicePlan.sampleCountStrategy,
+								})
 								for (const obs of observations) {
 									record(svcName, Date.parse(obs.bucket), {
 										value: obs.value,
@@ -1026,15 +968,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					)
 				} else {
 					const source = yield* planEvaluateSource(plan, normalized.windowMinutes)
-					const observations = yield* queryEngine
-						.evaluateSeries(systemTenant(orgId), {
-							startTime: formatWarehouseDateTime(startMs),
-							endTime: formatWarehouseDateTime(queryEndMs),
-							source,
-							reducer: plan.reducer,
-							sampleCountStrategy: plan.sampleCountStrategy,
-						})
-						.pipe(catchQueryEngineErrors)
+					const observations = yield* queryEngine.evaluateSeries(systemTenant(orgId), {
+						startTime: formatWarehouseDateTime(startMs),
+						endTime: formatWarehouseDateTime(queryEndMs),
+						source,
+						reducer: plan.reducer,
+						sampleCountStrategy: plan.sampleCountStrategy,
+					})
 					const excludeSet = HashSet.fromIterable(normalized.excludeServiceNames)
 					// Preview must key its series exactly as the scheduler stores them,
 					// or the preview chart and the tracking chart disagree on the
@@ -1316,8 +1256,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						row.incidentId != null ? (incidentMap.get(row.incidentId) ?? null) : null
 					const ruleRow = ruleMap.get(row.ruleId) ?? null
 					const payloadRule = payload.rule
-					const ruleServiceNames = ruleRow ? serviceNamesFromRow(ruleRow) : []
-					const ruleGroupBy = ruleRow ? parseStoredGroupBy(ruleRow.groupBy) : null
+					const storedRule = ruleRow ? yield* decodeStoredAlertRuleMetadata(ruleRow) : null
 					const groupKey = incidentRow?.groupKey ?? payloadRule?.groupKey ?? null
 
 					const enrichedSecret = yield* enrichSecretForDispatch(hydrated.row, hydrated.secretConfig)
@@ -1350,11 +1289,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							dedupeKey: incidentRow?.dedupeKey ?? String(payload.dedupeKey ?? row.deliveryKey),
 							value: payload.observed?.value ?? null,
 							sampleCount: payload.observed?.sampleCount ?? null,
-							template:
-								payload.template ??
-								parseStoredNotificationTemplate(ruleRow?.notificationTemplateJson ?? null),
+							template: payload.template ?? storedRule?.notificationTemplate ?? null,
 							linkUrl: resolveNotificationLinkUrl(
-								{ serviceNames: ruleServiceNames, groupBy: ruleGroupBy },
+								{
+									serviceNames: storedRule?.serviceNames ?? [],
+									groupBy: storedRule?.groupBy ?? null,
+								},
 								groupKey,
 							),
 							sentAtMs: deliveryStart,
@@ -1402,7 +1342,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 				const recoverDeliveryFailure = Effect.fnUntraced(function* (
 					row: AlertDeliveryEventRow,
-					error: AlertValidationError | AlertDeliveryError | AlertPersistenceError,
+					error:
+						| AlertValidationError
+						| AlertDeliveryError
+						| AlertPersistenceError
+						| AlertDestinationStorageError
+						| AlertRuleStoredConfigInvalidError,
 				) {
 					const failure = toDeliveryAttemptFailure(error)
 					failureCount += 1
@@ -1452,16 +1397,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				})
 
 				yield* Effect.forEach(rows, (row) =>
-					processOneDelivery(row).pipe(
-						Effect.catchTags({
-							"@maple/http/errors/AlertValidationError": (error) =>
-								recoverDeliveryFailure(row, error),
-							"@maple/http/errors/AlertDeliveryError": (error) =>
-								recoverDeliveryFailure(row, error),
-							"@maple/http/errors/AlertPersistenceError": (error) =>
-								recoverDeliveryFailure(row, error),
-						}),
-					),
+					processOneDelivery(row).pipe(Effect.catch((error) => recoverDeliveryFailure(row, error))),
 				)
 
 				return {
@@ -2313,8 +2249,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const EMPTY_INCIDENTS: ReadonlyArray<AlertIncidentRow> = []
 
 			const groupCacheKey = (orgId: string, ruleId: string, groupKey: string) =>
-				`${orgId} ${ruleId} ${groupKey}`
-			const ruleCacheKey = (orgId: string, ruleId: string) => `${orgId} ${ruleId}`
+				`${orgId}\u0000${ruleId}\u0000${groupKey}`
+			const ruleCacheKey = (orgId: string, ruleId: string) => `${orgId}\u0000${ruleId}`
 
 			/**
 			 * Load the tick's state and open-incident rows in ONE `execute`.
@@ -2583,9 +2519,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					error:
 						| AlertValidationError
 						| AlertDeliveryError
-						| AlertNotFoundError
 						| AlertPersistenceError
-						| WarehouseError,
+						| AlertRuleStoredConfigInvalidError
+						| QueryEngineValidationError
+						| QueryEngineTimeoutError
+						| WarehouseQueryPathError,
 					failureCategory: string,
 					fields?: {
 						readonly upstreamStatus?: number
@@ -2842,33 +2780,27 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										Chunk.append({ orgId: row.orgId, ruleId: row.id }),
 									),
 								),
-								Effect.catchTags({
-									"@maple/http/errors/AlertValidationError": (error) =>
-										recordEvaluationFailure(row, error, "validation"),
-									"@maple/http/errors/AlertDeliveryError": (error) =>
-										recordEvaluationFailure(row, error, "evaluation"),
-									"@maple/http/errors/AlertPersistenceError": (error) =>
-										recordEvaluationFailure(row, error, "unknown"),
-									...warehouseHandlers((error) =>
-										recordEvaluationFailure(
-											row,
-											error,
-											WAREHOUSE_FAILURE_CATEGORIES[error._tag],
-											{
-												pipe: error.pipeName,
-												...(error._tag ===
-												"@maple/http/errors/WarehouseQuotaExceededError"
-													? { quotaSetting: error.setting }
-													: {}),
-												...(error._tag ===
-													"@maple/http/errors/WarehouseUpstreamError" ||
-												error._tag === "@maple/http/errors/WarehouseAuthError"
-													? { upstreamStatus: error.upstreamStatus }
-													: {}),
-											},
-										),
+								Effect.catch((error) =>
+									recordEvaluationFailure(
+										row,
+										error,
+										error.error.code,
+										"pipeName" in error
+											? {
+													pipe: error.pipeName,
+													...(error._tag ===
+													"@maple/http/errors/WarehouseQuotaExceededError"
+														? { quotaSetting: error.setting }
+														: {}),
+													...(error._tag ===
+														"@maple/http/errors/WarehouseUpstreamError" ||
+													error._tag === "@maple/http/errors/WarehouseAuthError"
+														? { upstreamStatus: error.upstreamStatus }
+														: {}),
+												}
+											: undefined,
 									),
-								}),
+								),
 							)
 						}),
 					{ concurrency: 5 },

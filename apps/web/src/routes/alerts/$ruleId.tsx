@@ -1,12 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
 import { Fragment, useCallback, useMemo, useRef, useState } from "react"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { useAlertRuleChecks } from "@/hooks/use-alert-rule-checks"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -152,7 +152,7 @@ function RuleDetailContent() {
 	const ruleStates = useAlertRuleStates(ruleId)
 	const { result: destinationsResult } = useAlertDestinationsList()
 	const deliveryEventsResult = useAtomValue(
-		MapleApiV2AtomClient.query("alertDeliveries", "list", {
+		retainedQueryV2("alertDeliveries", "list", {
 			query: { limit: 100 },
 			reactivityKeys: ["alertDeliveryEvents"],
 		}),
@@ -489,7 +489,7 @@ function RuleDetailContent() {
 									<EmptyTitle>Failed to load alert rule</EmptyTitle>
 									<EmptyDescription>
 										{Result.builder(rulesResult)
-											.onError((error) => formatBackendError(error).description)
+											.onError((error) => displayError(error).message)
 											.orElse(() => undefined) ?? "Try refreshing or check API logs."}
 									</EmptyDescription>
 								</EmptyHeader>
@@ -885,7 +885,7 @@ function RuleDetailContent() {
 													</EmptyMedia>
 													<EmptyTitle>Failed to load checks</EmptyTitle>
 													<EmptyDescription>
-														{formatBackendError(error).description}
+														{displayError(error).message}
 													</EmptyDescription>
 												</EmptyHeader>
 												<Button
@@ -934,9 +934,7 @@ function RuleDetailContent() {
 												<CircleWarningIcon size={18} />
 											</EmptyMedia>
 											<EmptyTitle>Failed to load incidents</EmptyTitle>
-											<EmptyDescription>
-												{formatBackendError(error).description}
-											</EmptyDescription>
+											<EmptyDescription>{displayError(error).message}</EmptyDescription>
 										</EmptyHeader>
 										<Button
 											variant="outline"

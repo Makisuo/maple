@@ -17,13 +17,13 @@ import {
 	type TimeseriesPoint,
 } from "@maple/domain/query-engine"
 import {
-	QueryEngineExecutionError,
 	QueryEngineTimeoutError,
 	QueryEngineValidationError,
 	MAX_RAW_SQL_ALERT_GROUPS,
 	MAX_RAW_SQL_GROUP_KEY_LENGTH,
 	type RawSqlValidationError,
-	type WarehouseError,
+	type WarehouseQueryPathError,
+	type WarehouseReadError,
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "effect"
@@ -93,18 +93,21 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 		tenant: T,
 		sql: string,
 		options: { readonly profile: QueryProfileName; readonly context: string },
-	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError | RawSqlValidationError>
+	) => Effect.Effect<
+		ReadonlyArray<Record<string, unknown>>,
+		WarehouseQueryPathError | RawSqlValidationError
+	>
 	readonly compiledQuery: <Output>(
 		tenant: T,
 		compiled: CH.CompiledQuery<Output>,
 		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<Output>, WarehouseError>
+	) => Effect.Effect<ReadonlyArray<Output>, WarehouseReadError>
 	/** Capability-aware execution; adapters may deliberately compile the baseline plan. */
 	readonly compiledQueryWithCapabilities: <Output>(
 		tenant: T,
 		compile: (capabilities: WarehouseCapabilities) => CH.CompiledQuery<Output>,
 		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<Output>, WarehouseError>
+	) => Effect.Effect<ReadonlyArray<Output>, WarehouseReadError>
 }
 
 export interface TimeRangeBounds {
@@ -159,9 +162,15 @@ export interface AlertEvaluateRequest {
 	readonly sampleCountStrategy: QueryEngineEvaluateRequest["sampleCountStrategy"] | null
 }
 
-export type QueryEngineDirectError = QueryEngineExecutionError | QueryEngineTimeoutError | WarehouseError
+export type QueryEngineDirectError = QueryEngineTimeoutError | WarehouseReadError
 
 export type QueryEngineRouteError = QueryEngineValidationError | QueryEngineDirectError
+
+/** Alert evaluation additionally accepts user-authored raw SQL. */
+export type QueryEngineEvaluationError =
+	| QueryEngineValidationError
+	| QueryEngineTimeoutError
+	| WarehouseQueryPathError
 
 const QUERY_ENGINE_TIMEOUT = Duration.seconds(30)
 
@@ -813,10 +822,10 @@ export const validateEvaluate = Effect.fn("QueryEngineService.validateEvaluate")
  * is `Effect.tapError`, not a transformation. Named explicitly so call sites
  * don't read like they're remapping errors.
  */
-const annotateWarehouseError = <A, R>(
-	effect: Effect.Effect<A, WarehouseError, R>,
+const annotateWarehouseError = <A, Error extends { readonly _tag: string; readonly message: string }, R>(
+	effect: Effect.Effect<A, Error, R>,
 	context: string,
-): Effect.Effect<A, WarehouseError, R> =>
+): Effect.Effect<A, Error, R> =>
 	effect.pipe(
 		Effect.tapError((error) =>
 			Effect.annotateCurrentSpan({
@@ -1160,14 +1169,40 @@ function shapeMetricsGroupRows<
 	)
 }
 
+/**
+ * Per-call routing overrides. Not part of the request contract: these are retry
+ * knobs a caller sets after a first attempt failed, never something a client
+ * sends.
+ */
+export interface QueryEngineExecuteOptions {
+	/**
+	 * Restricts which service-overview rollup tiers may answer a traces
+	 * timeseries. Set to `"hour"` to retry on a cluster missing migration 0015.
+	 */
+	readonly overviewTiers?: "hour" | "minute"
+}
+
+/**
+ * A ClickHouse cluster that has not applied migration 0015 answers any read of
+ * `service_overview_minutely` with `UNKNOWN_TABLE`, and the table name is always
+ * in the message. Matching the name rather than the error tag keeps this working
+ * across every layer the warehouse error is re-wrapped by on its way here.
+ */
+const isMissingServiceOverviewMinutely = (error: unknown): boolean => {
+	if (typeof error !== "object" || error === null) return false
+	const candidate = error as { readonly clickhouseType?: unknown; readonly message?: unknown }
+	if (typeof candidate.message === "string" && /service_overview_minutely/i.test(candidate.message)) {
+		return true
+	}
+	return candidate.clickhouseType === "UNKNOWN_TABLE"
+}
+
 export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
 	Effect.fn("QueryEngineService.execute")(function* (
 		tenant: T,
 		request: QueryEngineExecuteRequest,
-	): Effect.fn.Return<
-		QueryEngineExecuteResponse,
-		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
-	> {
+		options?: QueryEngineExecuteOptions,
+	): Effect.fn.Return<QueryEngineExecuteResponse, QueryEngineValidationError | WarehouseReadError> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		yield* Effect.annotateCurrentSpan("query.source", request.query.source)
 		yield* Effect.annotateCurrentSpan("query.kind", request.query.kind)
@@ -1204,29 +1239,61 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
 
 			if (tracesQuery.allMetrics) {
-				const rows = yield* executeCHQuery(
-					warehouse,
-					tenant,
-					(capabilities) =>
-						CH.tracesTimeseriesQuery({
-							...opts,
-							attributeIndexMode: attributeIndexMode(capabilities, "traces"),
-							metric: tracesQuery.metric,
-							allMetrics: true,
-							needsSampling: true,
-							groupBy: tracesQuery.groupBy as string[] | undefined,
-							apdexThresholdMs:
-								tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
+				const runAllMetrics = (overviewTiers: "hour" | "minute" | undefined) =>
+					executeCHQuery(
+						warehouse,
+						tenant,
+						(capabilities) =>
+							CH.tracesTimeseriesQuery({
+								...opts,
+								attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+								metric: tracesQuery.metric,
+								allMetrics: true,
+								needsSampling: true,
+								groupBy: tracesQuery.groupBy as string[] | undefined,
+								apdexThresholdMs:
+									tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
+								bucketSeconds: bucketSeconds!,
+								seriesLimit: tracesQuery.seriesLimit,
+								overviewTiers,
+							}),
+						{
+							orgId: tenant.orgId,
+							startTime: request.startTime,
+							endTime: request.endTime,
 							bucketSeconds: bucketSeconds!,
-							seriesLimit: tracesQuery.seriesLimit,
-						}),
-					{
-						orgId: tenant.orgId,
-						startTime: request.startTime,
-						endTime: request.endTime,
-						bucketSeconds: bucketSeconds!,
-					},
-					"tracesAllMetricsTimeseries",
+						},
+						"tracesAllMetricsTimeseries",
+					)
+
+				// `service_overview_minutely` ships in a `requiredForIngest: false`
+				// migration, so a healthy BYO cluster can simply not have it yet — the
+				// org just hasn't re-applied schema. There is no global moment when
+				// every cluster has migrated, so the only correct response is to notice
+				// at query time and retry without that tier.
+				//
+				// The retry is not "read raw": it restricts to `"hour"`, which makes
+				// `canUseAnnualServiceOverview` reject any sub-hour bucket so the request
+				// falls through to the pre-existing raw route. The hourly tier must never
+				// answer a sub-hour bucket — an hour-floored row has no position inside
+				// the hour.
+				//
+				// This sits inside the runtime rather than beside the HTTP handler's
+				// other rollup fallbacks so the retry happens *before* the response
+				// cache: the value stored is the one that succeeded.
+				const rows = yield* runAllMetrics(options?.overviewTiers).pipe(
+					Effect.catch((error) => {
+						if (options?.overviewTiers === "hour" || !isMissingServiceOverviewMinutely(error)) {
+							return Effect.fail(error)
+						}
+						return Effect.gen(function* () {
+							yield* Effect.logWarning(
+								"service_overview_minutely is absent on this cluster; restricting to the hourly tier. Apply ClickHouse schema to restore the fast path.",
+							).pipe(Effect.annotateLogs({ orgId: tenant.orgId }))
+							yield* Effect.annotateCurrentSpan("query.rollup.fallback", true)
+							return yield* runAllMetrics("hour")
+						})
+					}),
 				)
 
 				return new QueryEngineExecuteResponse({
@@ -2112,7 +2179,7 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 	source: Extract<AlertBucketSource, { kind: "raw_sql" }>,
 	range: { readonly startTime: string; readonly endTime: string },
 ) {
-	const executeRawSql = makeExecuteRawSql<T, WarehouseError | RawSqlValidationError>(warehouse)
+	const executeRawSql = makeExecuteRawSql<T, WarehouseQueryPathError | RawSqlValidationError>(warehouse)
 	const granularitySeconds = Math.max(source.windowMinutes * 60, 60)
 
 	const { rows: rawRows } = yield* executeRawSql(tenant, {
@@ -2275,7 +2342,7 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 		request: AlertEvaluateRequest,
 	): Effect.fn.Return<
 		ReadonlyArray<GroupedAlertObservation>,
-		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
+		QueryEngineValidationError | WarehouseQueryPathError
 	> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		const bucketSeconds = yield* prepareAlertEvaluation(request)
@@ -2304,10 +2371,7 @@ export const makeQueryEngineEvaluateSeries = <T extends QueryTenant>(warehouse: 
 	Effect.fn("QueryEngineService.evaluateSeries")(function* (
 		tenant: T,
 		request: AlertEvaluateRequest,
-	): Effect.fn.Return<
-		ReadonlyArray<BucketGroupObs>,
-		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
-	> {
+	): Effect.fn.Return<ReadonlyArray<BucketGroupObs>, QueryEngineValidationError | WarehouseQueryPathError> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		const bucketSeconds = yield* prepareAlertEvaluation(request)
 

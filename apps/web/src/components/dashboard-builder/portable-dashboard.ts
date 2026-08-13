@@ -1,7 +1,7 @@
 import { PortableDashboardDocument, defaultWidgetLayout } from "@maple/domain/http"
 import { Schema } from "effect"
 
-import { CANONICAL_COLS } from "@/components/dashboard-builder/canvas/grid-breakpoints"
+import { findNextPosition, widgetsInContainer } from "@/components/dashboard-builder/sections/section-layout"
 import type { Dashboard, DashboardWidget, WidgetLayout } from "@/components/dashboard-builder/types"
 
 export type PortableDashboard = Omit<Dashboard, "id" | "createdAt" | "updatedAt">
@@ -35,24 +35,6 @@ function isWidgetLayout(value: unknown): value is WidgetLayout {
 	)
 }
 
-function findNextWidgetPosition(widgets: DashboardWidget[], width: number) {
-	if (widgets.length === 0) {
-		return { x: 0, y: 0 }
-	}
-
-	const maxY = Math.max(...widgets.map((widget) => widget.layout.y))
-	const bottomRowWidgets = widgets.filter((widget) => widget.layout.y === maxY)
-	const rightEdge = Math.max(...bottomRowWidgets.map((widget) => widget.layout.x + widget.layout.w))
-
-	if (rightEdge + width <= CANONICAL_COLS) {
-		return { x: rightEdge, y: maxY }
-	}
-
-	const maxBottom = Math.max(...widgets.map((widget) => widget.layout.y + widget.layout.h))
-
-	return { x: 0, y: maxBottom }
-}
-
 function normalizeWidgetLayouts(widgets: DashboardWidget[]): DashboardWidget[] {
 	return widgets.reduce<DashboardWidget[]>((normalized, widget) => {
 		// The same grid size the "Add widget" store hands a click-added widget, so
@@ -62,7 +44,18 @@ function normalizeWidgetLayouts(widgets: DashboardWidget[]): DashboardWidget[] {
 		const layout = isWidgetLayout(widget.layout)
 			? widget.layout
 			: {
-					...findNextWidgetPosition(normalized, defaultLayout.w),
+					// Placed within the widget's own container: `layout.x/y` are
+					// container-relative, so measuring against every widget on the
+					// board would drop an imported grouped tile far below its group.
+					...findNextPosition(
+						widgetsInContainer(
+							normalized,
+							widget.sectionId !== undefined && widget.tabId !== undefined
+								? { sectionId: widget.sectionId, tabId: widget.tabId }
+								: null,
+						),
+						defaultLayout.w,
+					),
 					...defaultLayout,
 				}
 
@@ -82,6 +75,7 @@ export function toPortableDashboard(dashboard: Dashboard): PortableDashboard {
 		tags: dashboard.tags ? [...dashboard.tags] : undefined,
 		timeRange: clonePortableDashboard(dashboard.timeRange),
 		widgets: normalizeWidgetLayouts(clonePortableDashboard(dashboard.widgets)),
+		sections: dashboard.sections ? clonePortableDashboard(dashboard.sections) : undefined,
 		variables: dashboard.variables ? clonePortableDashboard(dashboard.variables) : undefined,
 		refreshIntervalSeconds: dashboard.refreshIntervalSeconds,
 	}
@@ -104,6 +98,11 @@ export function parsePortableDashboardJson(json: string): PortableDashboard {
 		tags: decoded.tags ? [...decoded.tags] : undefined,
 		variables: decoded.variables
 			? clonePortableDashboard(decoded.variables as PortableDashboard["variables"])
+			: undefined,
+		// Imported as-is; `sanitizeDashboardSections` repairs any widget whose
+		// membership doesn't match on the way into storage.
+		sections: decoded.sections
+			? clonePortableDashboard(decoded.sections as PortableDashboard["sections"])
 			: undefined,
 		refreshIntervalSeconds: decoded.refreshIntervalSeconds,
 		timeRange:

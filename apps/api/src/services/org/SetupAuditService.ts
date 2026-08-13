@@ -19,6 +19,7 @@ import { clickHouseSchemaVersion } from "@maple/domain/clickhouse"
 import type { OrgId } from "@maple/domain/primitives"
 import {
 	type ConfigAuditInputs,
+	SetupAuditUnavailableError,
 	type SetupAuditReport,
 	type TraceCompletenessInputs,
 	type WarehouseAuditInputs,
@@ -26,7 +27,7 @@ import {
 } from "@maple/domain/setup-audit"
 import { CH, formatWarehouseDateTime } from "@maple/query-engine"
 import { and, eq, sql } from "drizzle-orm"
-import { Clock, Context, Effect, Layer, Schema } from "effect"
+import { Clock, Context, Effect, Layer } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { Database, type DatabaseError } from "@/platform/DatabaseLive"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -44,14 +45,9 @@ const TRACE_WINDOW_MINUTES = 60
 const TRACE_WINDOW_LAG_MINUTES = 15
 const TRACE_PARENT_LOOKBACK_MINUTES = 60
 
-export class SetupAuditError extends Schema.TaggedError<SetupAuditError>()(
-	"@maple/api/services/SetupAuditError",
-	{ message: Schema.String },
-) {}
-
 export interface SetupAuditServiceShape {
 	/** Runs every check against a fresh snapshot of config + telemetry. */
-	readonly run: (tenant: TenantContext) => Effect.Effect<SetupAuditReport, SetupAuditError>
+	readonly run: (tenant: TenantContext) => Effect.Effect<SetupAuditReport, SetupAuditUnavailableError>
 }
 
 const msOrNull = (value: Date | null | undefined): number | null => value?.getTime() ?? null
@@ -64,14 +60,21 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 		const runDb = <A>(
 			operation: string,
 			effect: Effect.Effect<A, DatabaseError>,
-		): Effect.Effect<A, SetupAuditError> =>
+		): Effect.Effect<A, SetupAuditUnavailableError> =>
 			effect.pipe(
 				Effect.tapCause((cause) =>
 					Effect.logError("Setup audit database read failed").pipe(
 						Effect.annotateLogs({ operation, cause }),
 					),
 				),
-				Effect.mapError((error) => new SetupAuditError({ message: error.message })),
+				Effect.mapError(
+					(error) =>
+						new SetupAuditUnavailableError({
+							message: "Setup audit configuration could not be read",
+							operation,
+							cause: error,
+						}),
+				),
 			)
 
 		/**
@@ -408,10 +411,8 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 				endTime: formatWarehouseDateTime(now),
 			}
 
-			const run = <A>(
-				compiled: Parameters<typeof warehouse.compiledQuery<A>>[1],
-				profile: "discovery" | "list",
-			) => warehouse.compiledQuery(tenant, compiled, { profile, context: "setupAudit" })
+			const run = <A>(compiled: CH.CompiledQuery<A>, profile: "discovery" | "list") =>
+				warehouse.compiledQuery(tenant, compiled, { profile, context: "setupAudit" })
 
 			// Same reason as `fetchTraceCompleteness`. Both are independent entry
 			// points, so each warms; whichever runs second finds the memo warm and

@@ -5,7 +5,18 @@ import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli"
 import { ApiKey, ApiKeyProvider } from "../src/ApiKey"
 import { Dashboard, DashboardProvider } from "../src/Dashboard"
 import { MapleApi, type MapleApiShape } from "../src/MapleApi"
-import { MapleNotFoundError, type MapleError } from "../src/errors"
+import { makeMapleApiResponseError, type MapleError } from "../src/errors"
+
+const missingRoute = (message: string) =>
+	makeMapleApiResponseError(404, {
+		_tag: "@maple/http/errors/DashboardNotFoundError",
+		type: "not_found_error",
+		code: "resource_missing",
+		title: "Not found",
+		message,
+		retryable: false,
+		recovery: "none",
+	})
 
 /** In-memory stub of the v2 API: canned responses + a call log. */
 const makeStub = (
@@ -16,9 +27,7 @@ const makeStub = (
 		calls.push(`${method} ${path}`)
 		const handler = routes[`${method} ${path}`]
 		if (handler === undefined) {
-			return Effect.fail<MapleError>(
-				new MapleNotFoundError({ status: 404, message: `no route: ${method} ${path}` }),
-			)
+			return Effect.fail<MapleError>(missingRoute(`no route: ${method} ${path}`))
 		}
 		return handler(body)
 	}

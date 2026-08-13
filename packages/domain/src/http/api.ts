@@ -22,6 +22,7 @@ import { RecommendationIssuesApiGroup } from "./recommendation-issues"
 import { ScrapeTargetsApiGroup } from "./scrape-targets"
 import { SessionReplaysApiGroup } from "./session-replay"
 import { WarehouseApiGroup } from "./warehouse"
+import { V1SchemaErrors, V1UnexpectedErrors } from "./v1-boundary"
 export class MapleApi extends HttpApi.make("MapleApi")
 	.add(AuthPublicApiGroup)
 	.add(AuthApiGroup)
@@ -48,6 +49,8 @@ export class MapleApi extends HttpApi.make("MapleApi")
 	.add(ScrapeTargetsApiGroup)
 	.add(SessionReplaysApiGroup)
 	.add(WarehouseApiGroup)
+	.middleware(V1SchemaErrors)
+	.middleware(V1UnexpectedErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Maple API",

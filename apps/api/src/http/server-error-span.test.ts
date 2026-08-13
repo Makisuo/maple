@@ -119,8 +119,7 @@ const makeHarness = () => {
 	}
 	const serverSpan = (path: string): EndedSpan => {
 		const span = ended.find(
-			(candidate) =>
-				candidate.kind === "server" && candidate.attributes.get("url.path") === path,
+			(candidate) => candidate.kind === "server" && candidate.attributes.get("url.path") === path,
 		)
 		if (span === undefined) throw new Error(`no server span ended for ${path}`)
 		return span

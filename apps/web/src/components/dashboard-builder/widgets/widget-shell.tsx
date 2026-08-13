@@ -23,6 +23,7 @@ import {
 } from "@maple/ui/components/ui/dropdown-menu"
 import type { WidgetMode, WidgetDataState } from "@/components/dashboard-builder/types"
 import { useWidgetActions } from "@/components/dashboard-builder/widgets/widget-actions-context"
+import { MoveWidgetToSectionMenu } from "@/components/dashboard-builder/sections/move-widget-to-section-menu"
 import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
 import {
 	useWidgetTimeRangeOverride,
@@ -57,6 +58,8 @@ export function WidgetShell({
 	const clone = ctx?.clone
 	const configure = ctx?.configure
 	const createAlert = ctx?.createAlert
+	const moveToSection = ctx?.moveToSection
+	const moveTargets = ctx?.moveTargets
 	const isEditable = mode === "edit"
 	// The menu is also shown in view mode when "Create alert" is available, so
 	// alerts can be spun off a chart without entering dashboard edit mode.
@@ -175,6 +178,13 @@ export function WidgetShell({
 										<CopyIcon size={14} />
 										Clone
 									</DropdownMenuItem>
+								)}
+								{isEditable && moveToSection && moveTargets && (
+									<MoveWidgetToSectionMenu
+										sections={moveTargets}
+										current={ctx?.moveCurrent ?? null}
+										onMove={moveToSection}
+									/>
 								)}
 								{createAlert && (
 									<DropdownMenuItem onClick={createAlert}>

@@ -16,6 +16,27 @@
 // tested (delivery works fine without ever pressing Test), onboarding checklist incomplete (owned by
 // the onboarding surface). A check that fires on every healthy org is noise, not an audit.
 
+import { Schema } from "effect"
+import { HttpTaggedError } from "./http/error-policy"
+
+export class SetupAuditUnavailableError extends HttpTaggedError<SetupAuditUnavailableError>()(
+	"@maple/http/errors/SetupAuditUnavailableError",
+	{
+		message: Schema.String,
+		operation: Schema.String,
+		cause: Schema.Defect(),
+	},
+	{
+		status: 503,
+		code: "setup_audit_unavailable",
+		title: "Setup audit is temporarily unavailable",
+		message: "The setup audit is temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
+) {}
+
 export type AuditSeverity = "critical" | "warn" | "info"
 export type AuditStatus = "pass" | "fail" | "skip"
 

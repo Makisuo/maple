@@ -23,9 +23,10 @@ export type WidgetDataSourceLike = {
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
-import { encodeKey, encodeOrgScopedKey, orgScopedKeyPayload } from "@/lib/cache-key"
+import { encodeKey, encodeOrgScopedKey, identityFromKey, orgScopedKeyPayload } from "@/lib/cache-key"
+import { nextRetentionNamespace, withRetention } from "@/lib/services/atoms/retained-atom"
 import { getActiveOrgId } from "@/lib/services/common/auth-headers"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { Cause, Option } from "effect"
 import { WarehouseDecodeError, type BackendError, type WarehouseApiError } from "@/api/warehouse/effect-utils"
 import { QueryEngineValidationError } from "@maple/domain/http"
@@ -289,7 +290,7 @@ const isExpectedEmptyDataError = (error: unknown): boolean => {
 
 // The error channel the widget-fetch atom exposes: every failure is either a
 // `WidgetDataAtomError` (parse / unknown endpoint) or the server function's
-// existing local/v1/v2 error. Preserve those states for `formatBackendError`.
+// existing local/v1/v2 error. Preserve those states for `displayError`.
 type WidgetFetchError = WidgetDataAtomError | WarehouseApiError | BackendError
 
 const toWidgetDataAtomError = (error: unknown): WidgetDataAtomError => {
@@ -341,8 +342,19 @@ const fetchWidgetData = Effect.fnUntraced(
 // with its retry/`peer.service` transforms, tracer, logger — on every fetch *and* every
 // retry. On an N-tile dashboard that was N+ full layer builds per load. The runtime also
 // puts the real tracer in scope, so logs and span annotations here no longer no-op.
+//
+// Namespaced like the warehouse query families. This one family serves every
+// endpoint, but the endpoint is part of the payload and so already part of the
+// identity; the namespace only has to keep it clear of the query atoms.
+const WIDGET_RETENTION_NAMESPACE = nextRetentionNamespace()
+
 const widgetFetchFamily = Atom.family((key: string) =>
-	MapleApiAtomClient.runtime.atom(fetchWidgetData(key)).pipe(Atom.setIdleTTL(120_000)),
+	// Retained so a tile whose dashboard range has rolled onto a new grid cell
+	// re-renders its previous values while the new window loads.
+	withRetention(
+		MapleApiAtomClient.runtime.atom(fetchWidgetData(key)).pipe(Atom.setIdleTTL(120_000)),
+		`${WIDGET_RETENTION_NAMESPACE}:${identityFromKey(key)}`,
+	),
 )
 
 const widgetFetchAtom = (input: { endpoint: string; params: Record<string, unknown> }) =>
@@ -521,9 +533,9 @@ export function useWidgetDataSource(
 						message: "No query data found in selected time range",
 					} as const
 				}
-				const { title, description } = formatBackendError(error)
+				const { title, message } = displayError(error)
 				const kind = classifyWidgetErrorKind(error)
-				return { status: "error", title, message: description, kind } as const
+				return { status: "error", title, message, kind } as const
 			})
 			.onSuccess((rawData) => ({ status: "ready", data: applyTransform(rawData, transform) }) as const)
 			.orElse(() => ({ status: "error", message: "Unknown error" }) as const)

@@ -2,11 +2,12 @@ import { afterEach, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
-import { CurrentTenant, DashboardsApiGroup } from "@maple/domain/http"
+import { CurrentTenant, DashboardsApiGroup, V1SchemaErrors, V1UnexpectedErrors } from "@maple/domain/http"
 import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
-import { HttpDashboardSchemaErrorsLive, HttpDashboardsLive } from "./dashboards.http"
+import { HttpDashboardsLive } from "./dashboards.http"
+import { V1ErrorBoundaryLive } from "./error-boundary"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
@@ -17,7 +18,10 @@ afterEach(() => cleanupTestDbs(createdDbs))
  * layer on `(apiId, groupIdentifier)`, so this is what lets the real
  * `HttpDashboardsLive` satisfy it.
  */
-class DashboardsOnlyApi extends HttpApi.make("MapleApi").add(DashboardsApiGroup) {}
+class DashboardsOnlyApi extends HttpApi.make("MapleApi")
+	.add(DashboardsApiGroup)
+	.middleware(V1SchemaErrors)
+	.middleware(V1UnexpectedErrors) {}
 
 const TENANT = new CurrentTenant.TenantSchema({
 	orgId: "org_dashboards_schema_errors" as CurrentTenant.TenantSchema["orgId"],
@@ -58,7 +62,7 @@ const makeHarness = () => {
 
 	const routes = HttpApiBuilder.layer(DashboardsOnlyApi).pipe(
 		Layer.provide(HttpDashboardsLive),
-		Layer.provide(HttpDashboardSchemaErrorsLive),
+		Layer.provide(V1ErrorBoundaryLive),
 		Layer.provideMerge(AuthorizationStubLayer),
 		Layer.provideMerge(servicesLive),
 	)
@@ -82,7 +86,7 @@ const makeHarness = () => {
 
 const widget = (id: string, overrides: Record<string, unknown> = {}) => ({
 	id,
-	visualization: "line",
+	visualization: "chart",
 	dataSource: { endpoint: "traces_timeseries", params: {} },
 	display: { title: id, chartPresentation: { legend: "visible" } },
 	layout: { x: 0, y: 0, w: 6, h: 4 },
@@ -113,7 +117,7 @@ describe("v1 dashboards request-decode failures", () => {
 
 			expect(response.status).toBe(400)
 			expect(response.body).not.toBeNull()
-			expect(response.body._tag).toBe("@maple/http/errors/DashboardValidationError")
+			expect(response.body._tag).toBe("@maple/http/v1/V1RequestValidationError")
 			expect(response.body.message).toContain("payload is invalid")
 
 			const details: string[] = response.body.details

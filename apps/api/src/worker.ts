@@ -14,6 +14,7 @@ import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { serverErrorSpanMiddleware } from "./http/server-error-span"
+import { v2WorkerUnavailableResponse } from "./http/v2-worker-unavailable"
 import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
 import { classifyWorkerQueue } from "./queue-dispatch"
 
@@ -224,6 +225,15 @@ const isMcpPost = (request: Request): boolean => {
 	}
 }
 
+const isV2Request = (request: Request): boolean => {
+	try {
+		const pathname = new URL(request.url).pathname
+		return pathname === "/v2" || pathname.startsWith("/v2/")
+	} catch {
+		return false
+	}
+}
+
 const readMcpSessionsBinding = (env: Record<string, unknown>): SessionsBinding | undefined => {
 	const candidate = env.MCP_SESSIONS
 	if (candidate && typeof candidate === "object" && "get" in candidate && "put" in candidate) {
@@ -336,7 +346,9 @@ const handle = async (
 			)
 		}
 		ctx.waitUntil(flushTelemetry(env))
-		return new Response("The API worker is temporarily unavailable.", { status: 504 })
+		return isV2Request(request)
+			? v2WorkerUnavailableResponse()
+			: new Response("The API worker is temporarily unavailable.", { status: 504 })
 	}
 }
 

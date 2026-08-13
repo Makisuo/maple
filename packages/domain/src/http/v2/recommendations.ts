@@ -1,11 +1,17 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { RecommendationIssueId } from "../../primitives"
-import { RecommendationIssueKind, RecommendationIssueStatus } from "../recommendation-issues"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import {
+	RecommendationIssueKind,
+	RecommendationIssueNotFoundError,
+	RecommendationIssuePersistenceError,
+	RecommendationIssueStatus,
+} from "../recommendation-issues"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
+import { V2ParameterInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
+import { publicErrors } from "./public-error"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
@@ -80,7 +86,10 @@ export const V2Recommendation = Schema.Struct({
 })
 export type V2Recommendation = Schema.Schema.Type<typeof V2Recommendation>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+const [recommendationNotFound, recommendationPersistence] = publicErrors(
+	RecommendationIssueNotFoundError,
+	RecommendationIssuePersistenceError,
+)
 
 const RecommendationList = ListOf(V2Recommendation).annotate({
 	identifier: "RecommendationList",
@@ -95,7 +104,7 @@ export class V2InstrumentationRecommendationsApiGroup extends HttpApiGroup.make(
 		HttpApiEndpoint.get("list", "/", {
 			query: ListQuery,
 			success: RecommendationList,
-			error: [...commonErrors],
+			error: [V2ParameterInvalid.schema, recommendationPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listInstrumentationRecommendations",
@@ -109,7 +118,7 @@ export class V2InstrumentationRecommendationsApiGroup extends HttpApiGroup.make(
 		HttpApiEndpoint.post("dismiss", "/:id/dismiss", {
 			params: { id: RecommendationPublicId },
 			success: V2Recommendation,
-			error: [...commonErrors, V2NotFoundError],
+			error: [recommendationNotFound, recommendationPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "dismissInstrumentationRecommendation",
@@ -123,7 +132,7 @@ export class V2InstrumentationRecommendationsApiGroup extends HttpApiGroup.make(
 		HttpApiEndpoint.post("reopen", "/:id/reopen", {
 			params: { id: RecommendationPublicId },
 			success: V2Recommendation,
-			error: [...commonErrors, V2NotFoundError],
+			error: [recommendationNotFound, recommendationPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "reopenInstrumentationRecommendation",
@@ -135,7 +144,6 @@ export class V2InstrumentationRecommendationsApiGroup extends HttpApiGroup.make(
 	)
 	.prefix("/v2/instrumentation/recommendations")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Instrumentation Recommendations",

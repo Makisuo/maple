@@ -92,7 +92,15 @@ export const isBrowserOriginAllowed = (
 
 /** Build CORS headers for an origin that has already passed
  * `isBrowserOriginAllowed`. Echoing it preserves browser OTLP ingest between
- * loopback aliases and ports without restoring wildcard CORS. */
+ * loopback aliases and ports without restoring wildcard CORS.
+ *
+ * `authorization` is allowed because every browser SDK sends
+ * `Authorization: Bearer <ingest key>` once one is configured — the same bundle
+ * that ships to production is what people point at `maple start`. Rejecting the
+ * header in preflight blocked those pages entirely (and `@maple-dev/browser`,
+ * which requires an ingest key, could never reach local mode at all). Nothing
+ * is weakened by allowing it: this listener authenticates nothing, it gates on
+ * request origin, and `/v1/*` never reads the header's value. */
 export const corsHeadersForAllowedOrigin = (
 	origin: string | null,
 ): Readonly<Record<string, string>> | undefined =>
@@ -100,7 +108,8 @@ export const corsHeadersForAllowedOrigin = (
 		? {
 				"access-control-allow-origin": origin,
 				"access-control-allow-methods": "GET, POST, OPTIONS",
-				"access-control-allow-headers": "content-type, content-encoding, x-maple-maintenance-token",
+				"access-control-allow-headers":
+					"content-type, content-encoding, authorization, x-maple-maintenance-token",
 				"access-control-allow-private-network": "true",
 				vary: "Origin",
 			}

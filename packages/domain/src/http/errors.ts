@@ -16,6 +16,7 @@ import {
 } from "../primitives"
 import { Authorization } from "./current-tenant"
 import { AlertSeverity } from "./alerts"
+import { HttpTaggedError } from "./error-policy"
 
 // Workflow state machine literals
 
@@ -473,13 +474,21 @@ const IssueEventsQuery = Schema.Struct({
 
 // Errors
 
-export class ErrorPersistenceError extends Schema.TaggedError<ErrorPersistenceError>()(
+export class ErrorPersistenceError extends HttpTaggedError<ErrorPersistenceError>()(
 	"@maple/http/errors/ErrorPersistenceError",
 	{
 		message: Schema.String,
 		cause: Schema.optionalKey(Schema.String),
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "error_issues_unavailable",
+		title: "Error issues are temporarily unavailable",
+		message: "Error issues are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
 export const EscalationSkipReason = Schema.Literals([
@@ -559,20 +568,27 @@ export class ErrorForbiddenError extends Schema.TaggedError<ErrorForbiddenError>
 	{ httpApiStatus: 403 },
 ) {}
 
-export class ErrorIssueNotFoundError extends Schema.TaggedError<ErrorIssueNotFoundError>()(
+export class ErrorIssueNotFoundError extends HttpTaggedError<ErrorIssueNotFoundError>()(
 	"@maple/http/errors/ErrorIssueNotFoundError",
 	{
 		message: Schema.String,
-		resourceType: Schema.Literals(["issue", "incident"]),
-		resourceId: Schema.Union([ErrorIssueId, ErrorIncidentId]),
+		issueId: ErrorIssueId,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "error_issue_not_found",
+		title: "Error issue not found",
+		message: "No such error issue.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {
 	static forIssue(id: ErrorIssueId) {
 		return new ErrorIssueNotFoundError({
 			message: `No such error issue: '${id}'`,
-			resourceType: "issue",
-			resourceId: id,
+			issueId: id,
 		})
 	}
 }

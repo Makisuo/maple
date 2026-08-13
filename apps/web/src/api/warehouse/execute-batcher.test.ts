@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { QueryEngineTimeoutError } from "@maple/domain/http"
 import {
 	QueryEngineExecuteRequest,
 	QUERY_ENGINE_BATCH_MAX,
@@ -54,10 +55,7 @@ describe("makeExecuteBatcher", () => {
 				index === 1
 					? ({
 							outcome: "failure",
-							error: {
-								_tag: "@maple/http/errors/QueryEngineTimeoutError",
-								message: "too slow",
-							},
+							error: new QueryEngineTimeoutError({ message: "too slow" }).error,
 						} satisfies QueryEngineBatchOutcome)
 					: countOutcome(index),
 			),
@@ -74,10 +72,15 @@ describe("makeExecuteBatcher", () => {
 		expect(settled.map((s) => s.status)).toEqual(["fulfilled", "rejected", "fulfilled"])
 		const rejected = settled[1]
 		if (rejected?.status !== "rejected") throw new Error("expected a rejection")
-		// The server's tag survives, so normalizeWarehouseError passes it through.
+		// The server's complete public error body survives the successful batch response.
 		expect(rejected.reason).toEqual({
 			_tag: "@maple/http/errors/QueryEngineTimeoutError",
-			message: "too slow",
+			type: "api_error",
+			code: "query_engine_timeout",
+			title: "Query timed out",
+			message: "The aggregation query timed out. Retry with a narrower time range.",
+			retryable: true,
+			recovery: "retry",
 		})
 	})
 

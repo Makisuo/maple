@@ -5,6 +5,7 @@ import { projectAlertLifecycleEvent } from "@maple/alerting-core"
 import {
 	AlertDestinationInUseError,
 	AlertForbiddenError,
+	AlertRecipientSelectionError,
 	AlertValidationError,
 	type AlertDestinationId,
 	AlertRulePreviewRequest,
@@ -34,7 +35,7 @@ import { Env } from "@/platform/Env"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { EmailService } from "@/platform/EmailService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
-import { OrgMembersError, OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
+import { OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { Database } from "@/platform/DatabaseLive"
@@ -168,7 +169,7 @@ const stubOrgMembersService = (
 	resolveMembers: (_orgId, userIds) => {
 		const byId = new Map(members.map((member) => [member.userId, member]))
 		const resolved: Array<OrgMember> = []
-		const unknown: Array<string> = []
+		const unknown: Array<(typeof userIds)[number]> = []
 		for (const userId of userIds) {
 			const member = byId.get(userId)
 			if (member === undefined) unknown.push(userId)
@@ -176,7 +177,7 @@ const stubOrgMembersService = (
 		}
 		return unknown.length > 0
 			? Effect.fail(
-					new OrgMembersError({
+					new AlertRecipientSelectionError({
 						message: "Some selected users are not members of this workspace",
 						unknownUserIds: unknown,
 					}),
@@ -2233,8 +2234,9 @@ describe("AlertsService", () => {
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
-			assert.instanceOf(failure, AlertValidationError)
+			assert.instanceOf(failure, AlertRecipientSelectionError)
 			assert.include(failure.message, "not members")
+			assert.deepStrictEqual(failure.unknownUserIds, ["user_stranger"])
 		})
 	})
 
@@ -3060,7 +3062,7 @@ describe("AlertsService evaluation error persistence", () => {
 			const errorChecks = state.ingested.filter((row) => row.Status === "error")
 			assert.lengthOf(errorChecks, 1)
 			assert.strictEqual(errorChecks[0]?.ErrorMessage, "Unknown column FooBar in traces")
-			assert.strictEqual(errorChecks[0]?.ErrorCategory, "tinybird_query")
+			assert.strictEqual(errorChecks[0]?.ErrorCategory, "warehouse_query_failed")
 			assert.strictEqual(errorChecks[0]?.GroupKey, "__total__")
 
 			const stateAfterFirstFailure = yield* Effect.promise(() =>

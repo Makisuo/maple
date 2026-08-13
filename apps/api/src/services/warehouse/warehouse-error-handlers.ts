@@ -1,23 +1,23 @@
 import type { Effect } from "effect"
-import type { WarehouseError } from "@maple/domain"
+import {
+	warehouseErrorTags,
+	warehouseReadErrorTags,
+	type WarehouseError,
+	type WarehouseReadError,
+} from "@maple/domain"
+
+const handlersFor = <Error extends WarehouseError, A, E, R>(
+	tags: ReadonlyArray<Error["_tag"]>,
+	f: (error: Error) => Effect.Effect<A, E, R>,
+) => Object.fromEntries(tags.map((tag) => [tag, f])) as Record<Error["_tag"], typeof f>
 
 /**
- * The one place the warehouse error union is enumerated for `Effect.catchTags`.
- * Each consumer supplies its own conversion; adding a tag to `WarehouseError`
- * means updating this table (and the meta Record in `@maple/domain`) instead of
- * one hand-written 9-arm table per surface. The handler receives the union
- * (every member is assignable), so the residual error channel still infers
- * correctly at the call site.
+ * Derive an exhaustive `Effect.catchTags` table from the domain's canonical
+ * class tuple. Adding a warehouse error automatically updates every consumer.
  */
 export const warehouseHandlers = <A, E, R>(f: (error: WarehouseError) => Effect.Effect<A, E, R>) =>
-	({
-		"@maple/http/errors/WarehouseQueryError": f,
-		"@maple/http/errors/WarehouseUpstreamError": f,
-		"@maple/http/errors/WarehouseAuthError": f,
-		"@maple/http/errors/WarehouseConfigError": f,
-		"@maple/http/errors/WarehouseClientError": f,
-		"@maple/http/errors/WarehouseSchemaDriftError": f,
-		"@maple/http/errors/WarehouseMalformedQueryError": f,
-		"@maple/http/errors/WarehouseQuotaExceededError": f,
-		"@maple/http/errors/WarehouseValidationError": f,
-	}) as const
+	handlersFor(warehouseErrorTags, f)
+
+/** Exhaustive handler table for compiled/read queries, excluding raw-SQL token failures. */
+export const warehouseReadHandlers = <A, E, R>(f: (error: WarehouseReadError) => Effect.Effect<A, E, R>) =>
+	handlersFor(warehouseReadErrorTags, f)

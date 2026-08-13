@@ -1,5 +1,7 @@
 import {
 	AlertDeliveryError,
+	AlertDestinationDecryptionError,
+	AlertDestinationStoredConfigInvalidError,
 	AlertValidationError,
 	type AlertNotificationTemplate,
 	type AlertIncidentId,
@@ -69,20 +71,22 @@ export const makeAlertDestinationDelivery = (options: {
 	) {
 		const { publicConfig, secretConfig } = yield* hydrateDestinationRow(row, options.encryptionKey, {
 			onPublicConfigInvalid: (cause) =>
-				new AlertValidationError({
+				new AlertDestinationStoredConfigInvalidError({
 					message: "Stored destination config is invalid",
-					details: [],
+					destinationId: row.id,
+					component: "public_config",
 					cause,
 				}),
 			onDecryptFailure: () =>
-				new AlertValidationError({
+				new AlertDestinationDecryptionError({
 					message: "Failed to decrypt destination secret",
-					details: [],
+					destinationId: row.id,
 				}),
 			onSecretConfigInvalid: (cause) =>
-				new AlertValidationError({
+				new AlertDestinationStoredConfigInvalidError({
 					message: "Stored destination secret is invalid",
-					details: [],
+					destinationId: row.id,
+					component: "secret_config",
 					cause,
 				}),
 		})

@@ -86,6 +86,30 @@ const seed = (): DashboardDocument =>
 		updatedAt: NOW,
 	})
 
+// A dashboard using every field a widget mutation must carry forward but never
+// touches: sections with tabs, a variable, and an auto-refresh cadence.
+const grouped = (): DashboardDocument =>
+	new DashboardDocument({
+		id: DASHBOARD,
+		name: "Grouped dashboard",
+		timeRange: { type: "relative", value: "12h" },
+		widgets: [{ ...widget("w-1"), sectionId: "sec-1", tabId: "tab-1" }],
+		sections: [
+			{
+				id: "sec-1",
+				title: "Latency",
+				tabs: [
+					{ id: "tab-1", title: "Overview" },
+					{ id: "tab-2", title: "By route" },
+				],
+			},
+		],
+		variables: [{ type: "custom", name: "env", options: [{ value: "prod" }, { value: "stg" }] }],
+		refreshIntervalSeconds: 30,
+		createdAt: NOW,
+		updatedAt: NOW,
+	})
+
 type ToolHandler = (params: {
 	dashboard_id: string
 	name?: string
@@ -113,6 +137,42 @@ describe("dashboard mutations on tag-less / description-less dashboards", () => 
 			assert.deepStrictEqual(
 				listed.dashboards[0]!.widgets.map((w) => w.id),
 				["w-new"],
+			)
+		}).pipe(Effect.provide(layer))
+	})
+
+	// A widget mutation must carry the ENTIRE document forward. The rebuild used
+	// to name its fields, so `sections`, `variables` and `refreshIntervalSeconds`
+	// were dropped by every add/update/remove/reorder/replace — and because
+	// `sanitizeDashboardSections` then strips the newly-orphaned `sectionId` /
+	// `tabId` off each widget on write, the loss was unrecoverable.
+	it.effect("withDashboardMutation preserves sections, variables and refresh interval", () => {
+		const testDb = createTestDb(trackedDbs)
+		const layer = makeLayer(testDb)
+
+		return Effect.gen(function* () {
+			yield* DashboardPersistenceService.upsert(asOrgId(ORG), asUserId("seed-user"), grouped())
+
+			const result = yield* withDashboardMutation(DASHBOARD, "add_dashboard_widget", (widgets) =>
+				Effect.succeed([...widgets, { ...widget("w-new"), sectionId: "sec-1", tabId: "tab-1" }]),
+			)
+			assert.strictEqual(result.ok, true)
+
+			const [stored] = (yield* DashboardPersistenceService.list(asOrgId(ORG))).dashboards
+			assert.isDefined(stored)
+
+			assert.deepStrictEqual(stored.sections, grouped().sections)
+			assert.deepStrictEqual(stored.variables, grouped().variables)
+			assert.strictEqual(stored.refreshIntervalSeconds, 30)
+
+			// The pre-existing widget keeps its container, and the added one lands in
+			// the section it asked for rather than being flattened onto the root canvas.
+			assert.deepStrictEqual(
+				stored.widgets.map((w) => [w.id, w.sectionId, w.tabId]),
+				[
+					["w-1", "sec-1", "tab-1"],
+					["w-new", "sec-1", "tab-1"],
+				],
 			)
 		}).pipe(Effect.provide(layer))
 	})

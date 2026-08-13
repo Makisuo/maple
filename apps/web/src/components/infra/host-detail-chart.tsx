@@ -23,7 +23,7 @@ import {
 	UNNAMED_SERIES_KEY,
 } from "./chart-utils"
 import { InfraTooltipItem } from "./chart-tooltip"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { LinkedCursorOverlay, linkedCursorChartProps } from "@/hooks/use-linked-cursor"
 
 interface HostDetailChartProps {
@@ -71,7 +71,7 @@ export function HostDetailChart({
 		.onInitial(() => <Skeleton className="h-[220px] w-full rounded-none" />)
 		.onError((err) => (
 			<div className="flex h-[220px] items-center justify-center border border-destructive/40 bg-destructive/5 font-mono text-[11px] text-destructive">
-				{formatBackendError(err).description}
+				{displayError(err).message}
 			</div>
 		))
 		.onSuccess((response, holder) => (

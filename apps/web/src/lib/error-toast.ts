@@ -1,5 +1,5 @@
 import { toastManager } from "@maple/ui/components/ui/toast"
-import { formatBackendError } from "./error-messages"
+import { displayError, isUnexpectedError } from "./error-messages"
 
 interface ShowErrorToastOptions {
 	readonly title?: string
@@ -9,17 +9,19 @@ interface ShowErrorToastOptions {
 
 /** Keeps raw Cause/Exit/error messages in telemetry rather than UI copy. */
 export const showErrorToast = (error: unknown, options: ShowErrorToastOptions = {}): void => {
-	const presentation = formatBackendError(error)
+	const presentation = displayError(error)
 	toastManager.add({
 		title:
 			options.title ??
-			(presentation.recognized ? presentation.title : (options.fallbackTitle ?? presentation.title)),
-		description: presentation.description,
+			(isUnexpectedError(presentation)
+				? (options.fallbackTitle ?? presentation.title)
+				: presentation.title),
+		description: presentation.message,
 		type: options.type ?? "error",
 	})
 }
 
 export const errorMessage = (error: unknown, fallback: string): string => {
-	const presentation = formatBackendError(error)
-	return presentation.recognized ? presentation.description : fallback
+	const presentation = displayError(error)
+	return isUnexpectedError(presentation) ? fallback : presentation.message
 }

@@ -1,6 +1,6 @@
 # Maple v2 Public API
 
-The Maple v2 API is the public, documented, stability-committed HTTP surface for everything the dashboard can do. It follows Stripe's API design philosophy — resource-oriented URLs, prefixed object IDs, uniform list/error envelopes, scoped keys — modernized where Stripe's v1 mechanics are legacy (JSON PATCH updates instead of form-encoded POST, ISO-8601 timestamps instead of epoch seconds).
+The Maple v2 API is the public, documented, stability-committed HTTP surface for customer-stable Maple resources and workflows. It follows Stripe's API design philosophy — resource-oriented URLs, prefixed object IDs, uniform list/error envelopes, scoped keys — modernized where Stripe's v1 mechanics are legacy (JSON PATCH updates instead of form-encoded POST, ISO-8601 timestamps instead of epoch seconds).
 
 The **executable contract is the spec**: `MapleApiV2` in `packages/domain/src/http/v2/` (an Effect `HttpApi`). OpenAPI is derived from it automatically and served as an interactive reference at **`/v2/docs`**. This document is the design-guideline layer every v2 contract file must conform to, plus the roadmap for the full surface.
 
@@ -13,7 +13,7 @@ The **executable contract is the spec**: `MapleApiV2` in `packages/domain/src/ht
 
 Dashboard-only operations — billing checkout/portal, onboarding state, demo seeding, AI chat apply, digest subscription, AI-triage settings, raw warehouse queries, and the error-agent claim/heartbeat/release loop — belong in the internal RPC tier. They use the same tenant resolution and org scoping but are **not** HTTP API groups and never appear in the public OpenAPI. Everything else is public API, and the dashboard consumes the same `/v2` endpoints customers do.
 
-The v1 API (`/api/...`) stays mounted while the dashboard migrates group-by-group; each v1 group is deleted once nothing consumes it. **The RPC tier is Phase 3 and not built yet** — `packages/domain/src/internal-rpc.ts` holds service-to-service schemas, not `RpcGroup`s — so until it exists the only two real homes for a new operation are v2 or the legacy v1 group it would extend. New surface goes to v2; v1 only grows where an existing v1 group already owns the resource.
+The v1 API (`/api/...`) stays mounted while the dashboard migrates group-by-group; each v1 group is deleted once nothing consumes it. The audited group-by-group destination and removal gate live in [`http-api-migration.md`](http-api-migration.md). **The RPC tier is Phase 3 and not built yet** — `packages/domain/src/internal-rpc.ts` holds service-to-service schemas, not `RpcGroup`s — so until it exists the only two real homes for a new operation are v2 or the legacy v1 group it would extend. New surface goes to v2; v1 only grows where an existing v1 group already owns the resource.
 
 ### Integration endpoints: which tier
 
@@ -99,16 +99,18 @@ Every error response body uses this envelope:
 }
 ```
 
-- `type` is closed: `invalid_request_error` (400), `authentication_error` (401), `permission_error` (403), `not_found_error` (404), `conflict_error` (409), `rate_limit_error` (429), `api_error` (5xx).
-- `_tag` is the stable semantic identity of the failure. Maple clients branch on it directly; registered domain adapters keep the same tag from the Effect error channel through the HTTP boundary. Errors created at the v2 boundary receive a namespaced tag derived from their stable code or endpoint.
-- `code` is a stable machine-readable string (`api_key_not_found`, `alert_destination_in_use`, `api_key_lookup_unavailable`, `insufficient_scope`, `parameter_invalid`, …). Resource and dependency failures identify the affected resource and operation. Codes are append-only.
+- `type` is closed: `invalid_request_error` (400), `authentication_error` (401), `permission_error` (403), `not_found_error` (404), `conflict_error` (409), `rate_limit_error` (429), `api_error` (500/502/503/504).
+- `_tag` is required and is the stable semantic identity of the failure. Maple clients branch on it directly. Each operation's OpenAPI response is an `anyOf` of the literal tags that operation can actually return; `_tag: string` and generic status-family schemas are not valid endpoint contracts. Adding a new safe, documented tag is preferable to collapsing distinct failures into a generic unavailable/not-found error. Errors created at the v2 boundary use an explicit `defineV2Error` definition whose constructor and literal-tag schema cannot drift apart.
+- `code` is a compact presentation category (`api_key_not_found`, `alert_destination_in_use`, `integration_upstream_error`, `parameter_invalid`, …). Several semantic tags may share a code, and a code may change when errors are regrouped. Clients that need exact branching use `_tag`.
 - `title` and `message` are safe, human-readable presentation copy. `retryable` says whether the same logical request can plausibly succeed later without correcting its input; automatic mutation replay still requires an idempotency key. `recovery` is one of `none`, `fix_request`, `reauthenticate`, `request_access`, `reconnect`, `refresh`, `retry`, or `contact_support`.
 - `retry_after_seconds` carries a relative delay; `retry_at` carries a known absolute reset time. When either is present the response also emits the standard `Retry-After` header.
-- `param` names the offending parameter when applicable; `doc_url` may link to reference docs. On a request-decode failure it carries the full JSON path of the bad value (`widgets[3].display.chart_presentation.fill_nulls`), and for a path inside a `widgets[]` array the `message` also names the enclosing widget's `id`.
+- `param` names the offending parameter when applicable. On a request-decode failure it carries the full JSON path of the bad value (`widgets[3].display.chart_presentation.fill_nulls`), and for a path inside a `widgets[]` array the `message` also names the enclosing widget's `id`.
 - Stack traces, driver messages, raw provider responses, and diagnostic causes never appear on the wire. `_tag` is an intentionally public semantic tag, not a leaked runtime class name.
-- Expected internal failures use operation-specific tagged errors. Unexpected defects are logged with the group and operation, then returned as a sanitized `api_error` / `internal_error`; dependency messages are never copied to public 5xx responses.
+- Expected failures remain distinct tagged errors through the service and route. Unexpected defects are logged with the group and operation, then returned as a sanitized `api_error` / `internal_error`; dependency messages are never copied to public 5xx responses.
 
-Implementation: `packages/domain/src/http/v2/errors.ts`; request-decode failures are rewritten into the envelope with a structured `param` by `V2SchemaErrors`, and `V2UnexpectedErrors` provides the defect boundary (`apps/api/src/routes/v2/error-envelope.ts`).
+Implementation: `packages/domain/src/http/error-policy.ts`, `packages/domain/src/http/v2/public-error.ts`, and `packages/domain/src/http/v2/errors.ts`. Request-decode failures are rewritten into the envelope with a structured `param` by `V2SchemaErrors`, while response-encoding schema failures are logged and sanitized as 500 because they are server contract bugs, not bad requests. `V2UnexpectedErrors` provides the defect boundary (`apps/api/src/routes/v2/error-envelope.ts`). Both transport middleware are attached once by `MapleApiV2`, so a new group cannot accidentally omit either boundary.
+
+Each expected domain error class is created with `HttpTaggedError` and owns its tag, status, stable code, safe copy policy, retry behavior, and recovery action. The error instance exposes its own safe `error` body from that policy, and `publicError(ErrorClass)` derives the endpoint's exact wire schema from the same definition. Static code, title, safe message, retryability, and recovery values are literals in OpenAPI as well as at runtime. Handlers fail with the original tagged error; there is no generic route-level serializer, remapper, or second per-domain presentation table at the HTTP boundary. A route may still deliberately translate a parsing failure or a response-size limit into the endpoint-specific error that describes it. `exposure: "redacted"` requires separate Maple-authored copy at compile time, while the original internal failure remains available for logs and tracing. Boundary-only failures use `defineV2Error` and are emitted through that definition's `make` constructor.
 
 ### Authentication and scopes
 
@@ -128,7 +130,7 @@ Implementation: `packages/domain/src/http/v2/auth.ts` + `apps/api/src/services/A
 ### Versioning
 
 - The `/v2` path prefix is the major version. Breaking changes require `/v3`.
-- Within v2, changes are additive (new endpoints, new optional fields, new enum values documented as open sets, new error codes).
+- Within v2, resource shapes evolve additively. Error `_tag` values are the compatibility identity; `code`, title, message, recovery hints, and the broad HTTP category are presentation and may be corrected without minting a new API version.
 - A `Maple-Version: YYYY-MM-DD` header is reserved for future in-v2 evolution; until multiple versions exist, it is accepted and ignored.
 
 ### Idempotency (Phase 4 — reserved)
@@ -208,8 +210,9 @@ The dashboard can reconcile optimistic writes against ElectricSQL synced shapes 
 
 ## Adding a v2 resource (checklist)
 
-1. Contract in `packages/domain/src/http/v2/<resource>.ts`: snake_case wire schemas with an `object` literal and validated `Timestamp` fields; public IDs via `PublicId(prefix, InternalId)` (register the prefix in `public-id.ts`); lists use `ListQuery` + `ListOf`; errors from `v2/errors.ts` only; group `.prefix("/v2/<resource>")` + `.middleware(AuthorizationV2)` + `.middleware(V2SchemaErrors)`.
+1. Contract in `packages/domain/src/http/v2/<resource>.ts`: snake_case wire schemas with an `object` literal and validated `Timestamp` fields; public IDs via `PublicId(prefix, InternalId)` (register the prefix in `public-id.ts`); lists use `ListQuery` + `ListOf`; every endpoint lists its exact error schemas with `publicError(ErrorClass)` and/or explicit boundary definitions (shared exhaustive sets such as `V2WarehouseErrors` are fine); group `.prefix("/v2/<resource>")` + `.middleware(AuthorizationV2)`. Request-validation, authorization, and unexpected-error middleware contribute their own exact tags API-wide; do not attach them per group.
 2. Add the group to `MapleApiV2` in `v2/api.ts` and export from `v2/index.ts`.
-3. Handlers in `apps/api/src/routes/v2/<resource>.http.ts`: thin adapters over the existing service — map camelCase/epoch-ms service responses to the wire model, map service tagged errors to envelope errors. Register the layer in `ApiV2Routes` (`apps/api/src/app.ts`).
-4. Tests: wire-shape encode (snake_case, public ID, envelope), error mapping, and a PGlite service test if the service changed.
-5. Confirm the resource renders correctly at `/v2/docs`.
+3. Define expected failures with `HttpTaggedError` in the domain contract. Put their public status, code, safe-copy policy, retry behavior, and recovery action on the class.
+4. Handlers in `apps/api/src/routes/v2/<resource>.http.ts`: thin adapters over the existing service — map camelCase/epoch-ms service responses to the wire model and let expected tagged errors pass through unchanged. Register the layer in `ApiV2Routes` (`apps/api/src/runtime/http-graph.ts`).
+5. Tests: wire-shape encode (snake_case, public ID, envelope), public error serialization/redaction, and a PGlite service test if the service changed.
+6. Confirm the resource renders correctly at `/v2/docs`.

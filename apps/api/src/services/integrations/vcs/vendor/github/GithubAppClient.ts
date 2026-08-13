@@ -1,5 +1,5 @@
 import { GitCommitSha } from "@maple/domain/http"
-import { Clock, Context, Data, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Env } from "@/platform/Env"
 import { GithubHttp } from "./GithubHttp"
 
@@ -10,17 +10,17 @@ import { GithubHttp } from "./GithubHttp"
 // `GithubAppError` is internal to the GitHub layer; `GithubProvider` maps it to
 // the generic `VcsProviderError` at the port boundary.
 
-export class GithubAppError extends Data.TaggedError("@maple/api/vcs/GithubAppError")<{
-	message: string
-	status?: number
+export class GithubAppError extends Schema.TaggedError<GithubAppError>()("@maple/api/vcs/GithubAppError", {
+	message: Schema.String,
+	status: Schema.optionalKey(Schema.Number),
 	// Which resource the failing call addressed, so the provider can tell an
 	// installation-auth failure (the gone/suspended signal) from a repo-level one.
-	scope?: "installation" | "repository"
+	scope: Schema.optionalKey(Schema.Literals(["installation", "repository"])),
 	// Set when the failure is a rate limit too far out to wait through inline:
 	// seconds until the budget returns. The provider maps this to VcsRateLimitedError.
-	retryAfterSeconds?: number
-	cause?: unknown
-}> {}
+	retryAfterSeconds: Schema.optionalKey(Schema.Number),
+	cause: Schema.optionalKey(Schema.Defect()),
+}) {}
 
 const GITHUB_API_VERSION = "2022-11-28"
 const USER_AGENT = "maple-vcs-integration"

@@ -5,12 +5,12 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
 import { DashboardTemplatePublicId, MapleApiV2 } from "@maple/domain/http/v2"
 import { Env } from "@/platform/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
-import { V2SchemaErrorsLive } from "./error-envelope"
+import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
@@ -51,7 +51,7 @@ const makeHarness = () => {
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
-		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(V2TransportErrorBoundaryLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(AlertsServiceStubLayer),
@@ -95,6 +95,7 @@ const makeHarness = () => {
 	return {
 		bootstrapKey,
 		request,
+		testDb,
 		dispose: async () => {
 			await disposeHandler()
 			await runtime.dispose()
@@ -181,6 +182,34 @@ describe("v2 dashboards over HTTP", () => {
 			type: "not_found_error",
 			code: "dashboard_not_found",
 		})
+		await harness.dispose()
+	})
+
+	it("reports corrupt stored dashboards separately from retryable persistence failures", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const created = await harness.request("POST", "/v2/dashboards", key.secret, {
+			name: "Corrupt me",
+			widgets: [],
+		})
+		expect(created.status).toBe(200)
+
+		await executeSql(
+			harness.testDb,
+			"update dashboards set payload_json = '\"not-a-dashboard\"'::jsonb where org_id = $1",
+			["org_dashboard_e2e"],
+		)
+
+		const response = await harness.request("GET", `/v2/dashboards/${created.body.id}`, key.secret)
+		expect(response.status).toBe(500)
+		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/errors/DashboardStoredConfigInvalidError",
+			code: "dashboard_stored_config_invalid",
+			retryable: false,
+			recovery: "contact_support",
+		})
+		expect(JSON.stringify(response.body)).not.toContain("not-a-dashboard")
+
 		await harness.dispose()
 	})
 
@@ -344,7 +373,7 @@ describe("v2 dashboards over HTTP", () => {
 			widgets: [
 				{
 					id: "error-rate",
-					visualization: "line",
+					visualization: "chart",
 					data_source: { endpoint: "traces_timeseries", params: {} },
 					// `fill_nulls` is `number | false`; `true` is not a member.
 					display: { title: "error-rate", chart_presentation: { fill_nulls: true } },

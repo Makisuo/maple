@@ -1,15 +1,12 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { ApiKeyCreatedResponse, ApiKeyResponse } from "@maple/domain/http"
-import type { ApiKeyNotFoundError, ApiKeyPersistenceError } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import {
 	MapleApiV2,
-	dependencyUnavailable,
 	isoTimestamp,
 	isoTimestampOrNull,
 	paginateArray,
-	permissionError,
-	resourceNotFound,
+	V2InsufficientPermissions,
 } from "@maple/domain/http/v2"
 import type { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "@maple/domain/http/v2"
 import { Effect } from "effect"
@@ -18,7 +15,7 @@ import { AuthService } from "@/services/auth/AuthService"
 import { requireAdmin } from "@/services/auth/auth"
 
 const adminOnly = (action: string) => () =>
-	permissionError("insufficient_permissions", `Only org admins can ${action} API keys`)
+	V2InsufficientPermissions.make(`Only org admins can ${action} API keys`)
 
 type ApiKeyFields = Pick<
 	ApiKeyResponse,
@@ -65,22 +62,6 @@ const toV2ApiKeyMutationResponse = (key: ApiKeyResponse): V2ApiKeyMutationRespon
 	...(key.txid !== undefined ? { txid: key.txid } : {}),
 })
 
-/** Service tagged errors → v2 envelope errors. */
-const mapServiceError =
-	(operation: string) =>
-	<A, R>(effect: Effect.Effect<A, ApiKeyNotFoundError | ApiKeyPersistenceError, R>) =>
-		effect.pipe(
-			Effect.catchTags({
-				"@maple/http/errors/ApiKeyNotFoundError": () =>
-					Effect.fail(resourceNotFound("api_key", "No such API key.")),
-				"@maple/http/errors/ApiKeyPersistenceError": () =>
-					Effect.fail(dependencyUnavailable(`api_key_${operation}_unavailable`)),
-			}),
-		)
-
-const mapPersistenceError = (operation: string) => () =>
-	dependencyUnavailable(`api_key_${operation}_unavailable`)
-
 export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (handlers) =>
 	Effect.gen(function* () {
 		const apiKeysService = yield* ApiKeysService
@@ -90,9 +71,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* apiKeysService
-						.list(tenant.orgId)
-						.pipe(Effect.mapError(mapPersistenceError("list")))
+					const response = yield* apiKeysService.list(tenant.orgId)
 					const page = yield* paginateArray(response.keys.map(toV2ApiKey), query)
 					return { object: "list" as const, ...page }
 				}),
@@ -100,9 +79,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 			.handle("retrieve", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const key = yield* apiKeysService
-						.get(tenant.orgId, params.id)
-						.pipe(mapServiceError("retrieve"))
+					const key = yield* apiKeysService.get(tenant.orgId, params.id)
 					return toV2ApiKey(key)
 				}),
 			)
@@ -118,19 +95,17 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 						yield* requireAdmin(tenant.roles, adminOnly("create"))
 					}
 					const createdByEmail = yield* auth.getUserEmail(tenant.userId)
-					const created = yield* apiKeysService
-						.create(tenant.orgId, tenant.userId, {
-							name: payload.name,
-							description: payload.description,
-							expiresInSeconds: payload.expires_in_seconds,
-							kind: payload.kind,
-							scopes: payload.scopes,
-							createdByEmail,
-							...(isMcpKey
-								? { metadataJson: { source: "maple_mcp", roles: [...tenant.roles] } }
-								: {}),
-						})
-						.pipe(Effect.mapError(mapPersistenceError("create")))
+					const created = yield* apiKeysService.create(tenant.orgId, tenant.userId, {
+						name: payload.name,
+						description: payload.description,
+						expiresInSeconds: payload.expires_in_seconds,
+						kind: payload.kind,
+						scopes: payload.scopes,
+						createdByEmail,
+						...(isMcpKey
+							? { metadataJson: { source: "maple_mcp", roles: [...tenant.roles] } }
+							: {}),
+					})
 					return toV2ApiKeyWithSecret(created)
 				}),
 			)
@@ -139,9 +114,9 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 					const tenant = yield* CurrentTenant.Context
 					yield* requireAdmin(tenant.roles, adminOnly("roll"))
 					const createdByEmail = yield* auth.getUserEmail(tenant.userId)
-					const rolled = yield* apiKeysService
-						.roll(tenant.orgId, tenant.userId, params.id, { createdByEmail })
-						.pipe(mapServiceError("roll"))
+					const rolled = yield* apiKeysService.roll(tenant.orgId, tenant.userId, params.id, {
+						createdByEmail,
+					})
 					return toV2ApiKeyWithSecret(rolled)
 				}),
 			)
@@ -151,16 +126,12 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 					// Whoever can mint a key must be able to kill it: a member may
 					// revoke an MCP key they created themselves. Everything else
 					// stays admin-only.
-					const existing = yield* apiKeysService
-						.get(tenant.orgId, params.id)
-						.pipe(mapServiceError("revoke"))
+					const existing = yield* apiKeysService.get(tenant.orgId, params.id)
 					const isOwnMcpKey = existing.kind === "mcp" && existing.createdBy === tenant.userId
 					if (!isOwnMcpKey) {
 						yield* requireAdmin(tenant.roles, adminOnly("revoke"))
 					}
-					const revoked = yield* apiKeysService
-						.revoke(tenant.orgId, params.id)
-						.pipe(mapServiceError("revoke"))
+					const revoked = yield* apiKeysService.revoke(tenant.orgId, params.id)
 					return toV2ApiKeyMutationResponse(revoked)
 				}),
 			)

@@ -63,7 +63,9 @@ export const statScenarios: WidgetScenario[] = [
 	{
 		label: "Percent",
 		dataState: ready(3.42),
-		display: { title: "Error rate", unit: "percent" },
+		// `percent_100` because the value is already a whole-number percentage;
+		// `percent` would multiply by 100 and render "342.0%".
+		display: { title: "Error rate", unit: "percent_100" },
 	},
 	{
 		label: "Duration (ms)",
@@ -80,7 +82,9 @@ export const statScenarios: WidgetScenario[] = [
 		dataState: ready(0.4),
 		display: {
 			title: "Error rate",
-			unit: "percent",
+			// Thresholds below are on the 0–100 scale too, so the unit has to be
+			// `percent_100` for the value and its thresholds to agree.
+			unit: "percent_100",
 			thresholds: [
 				{ value: 0, color: "var(--color-emerald-500)" },
 				{ value: 1, color: "var(--color-amber-500)" },
@@ -93,7 +97,7 @@ export const statScenarios: WidgetScenario[] = [
 		dataState: ready(2.6),
 		display: {
 			title: "Error rate",
-			unit: "percent",
+			unit: "percent_100",
 			thresholds: [
 				{ value: 0, color: "var(--color-emerald-500)" },
 				{ value: 1, color: "var(--color-amber-500)" },
@@ -106,7 +110,7 @@ export const statScenarios: WidgetScenario[] = [
 		dataState: ready(8.1),
 		display: {
 			title: "Error rate",
-			unit: "percent",
+			unit: "percent_100",
 			thresholds: [
 				{ value: 0, color: "var(--color-emerald-500)" },
 				{ value: 1, color: "var(--color-amber-500)" },
@@ -127,7 +131,7 @@ export const statScenarios: WidgetScenario[] = [
 	{
 		label: "Negative",
 		dataState: ready(-12.5),
-		display: { title: "Δ vs previous", unit: "percent" },
+		display: { title: "Δ vs previous", unit: "percent_100" },
 	},
 	{
 		label: "Long title",
@@ -258,7 +262,10 @@ export const gaugeScenarios: WidgetScenario[] = [
 	{
 		label: "Loading",
 		dataState: loadingState,
-		display: { title: "Error rate", unit: "percent", gauge: { min: 0, max: 10 } },
+		// Invisible today (the loading skeleton replaces the dial), but the 0–10
+		// range is a whole-number percent one: with `percent` this fixture would
+		// label its arc ends "0.0%" / "1000.0%" the moment it gained a value.
+		display: { title: "Error rate", unit: "percent_100", gauge: { min: 0, max: 10 } },
 	},
 	{
 		label: "Empty",
@@ -340,7 +347,7 @@ export const statSparklineScenarios: StatSparklineScenario[] = [
 	{
 		label: "Sparkline — threshold (red)",
 		value: 8.1,
-		display: { title: "Error rate", unit: "percent", thresholds: statSparklineThresholds },
+		display: { title: "Error rate", unit: "percent_100", thresholds: statSparklineThresholds },
 		sparklineData: makeSeries([1, 1.2, 0.9, 2, 1.8, 6.4, 7.2, 8.1]),
 	},
 ]
@@ -835,7 +842,7 @@ export const tableScenarios: WidgetScenario[] = [
 				{ field: "service", header: "Service" },
 				{ field: "p99", header: "p99", unit: "duration_ms", align: "right" },
 				{ field: "throughput", header: "req/s", unit: "requests_per_sec", align: "right" },
-				{ field: "errorRate", header: "Error rate", unit: "percent", align: "right" },
+				{ field: "errorRate", header: "Error rate", unit: "percent_100", align: "right" },
 			],
 		},
 	},
@@ -849,7 +856,7 @@ export const tableScenarios: WidgetScenario[] = [
 				{
 					field: "errorRate",
 					header: "Error rate",
-					unit: "percent",
+					unit: "percent_100",
 					align: "right",
 					thresholds: [
 						{ value: 0, color: "var(--color-emerald-500)" },
@@ -886,7 +893,7 @@ export const tableScenarios: WidgetScenario[] = [
 				{ field: "p90", header: "p90", unit: "duration_ms", align: "right" },
 				{ field: "p95", header: "p95", unit: "duration_ms", align: "right" },
 				{ field: "p99", header: "p99", unit: "duration_ms", align: "right" },
-				{ field: "cpu", header: "CPU %", unit: "percent", align: "right" },
+				{ field: "cpu", header: "CPU %", unit: "percent_100", align: "right" },
 				{ field: "memory", header: "Mem (MB)", unit: "number", align: "right" },
 			],
 		},

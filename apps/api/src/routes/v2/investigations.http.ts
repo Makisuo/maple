@@ -6,45 +6,27 @@ import {
 	CurrentTenant,
 	ErrorIncidentId,
 	InvestigationCreateRequest,
+	InvestigationDataCorruptionError,
 	InvestigationFreeformSubject,
 	InvestigationId,
 	InvestigationIncidentSubject,
 	InvestigationSubjectSnapshot,
-	type InvestigationHttpError,
 	TraceId,
 } from "@maple/domain/http"
-import {
-	dependencyUnavailable,
-	investigationErrorToV2,
-	MapleApiV2,
-	paginateOffsetQuery,
-} from "@maple/domain/http/v2"
+import { MapleApiV2, paginateOffsetQuery } from "@maple/domain/http/v2"
 import type {
 	V2Investigation,
 	V2InvestigationCreateParams,
 	V2InvestigationCreateSubject,
-	V2InvestigationErrorFor,
 	V2InvestigationSubject,
 } from "@maple/domain/http/v2"
 import { Effect, Match, Schema } from "effect"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 
-class InvestigationSubjectDecodeError extends Schema.TaggedError<InvestigationSubjectDecodeError>()(
-	"@maple/api/routes/v2/InvestigationSubjectDecodeError",
-	{
-		investigationId: InvestigationId,
-		field: Schema.String,
-		value: Schema.String,
-		incidentKind: Schema.optionalKey(Schema.String),
-		incidentId: Schema.optionalKey(Schema.String),
-		message: Schema.String,
-	},
-) {}
-
 const toWireSubject = Effect.fn("HttpV2Investigations.toWireSubject")(function* (
 	investigationId: InvestigationId,
 	subject: InvestigationSubject,
-): Effect.fn.Return<V2InvestigationSubject, InvestigationSubjectDecodeError> {
+): Effect.fn.Return<V2InvestigationSubject, InvestigationDataCorruptionError> {
 	yield* Effect.annotateCurrentSpan(
 		subject.type === "incident"
 			? {
@@ -67,7 +49,7 @@ const toWireSubject = Effect.fn("HttpV2Investigations.toWireSubject")(function* 
 		issue_id: subject.issueId ?? null,
 	}
 	const decodeFailure = () =>
-		new InvestigationSubjectDecodeError({
+		new InvestigationDataCorruptionError({
 			investigationId,
 			field: "subject.incident_id",
 			value: subject.incidentId,
@@ -78,7 +60,7 @@ const toWireSubject = Effect.fn("HttpV2Investigations.toWireSubject")(function* 
 	return yield* Match.value(subject.incidentKind).pipe(
 		Match.when("error", () =>
 			Schema.decodeEffect(ErrorIncidentId)(subject.incidentId).pipe(
-				Effect.catchTag("SchemaError", () => Effect.fail(decodeFailure())),
+				Effect.mapError(decodeFailure),
 				Effect.map((incidentId) => ({
 					...shared,
 					incident_kind: "error" as const,
@@ -88,7 +70,7 @@ const toWireSubject = Effect.fn("HttpV2Investigations.toWireSubject")(function* 
 		),
 		Match.when("anomaly", () =>
 			Schema.decodeEffect(AnomalyIncidentId)(subject.incidentId).pipe(
-				Effect.catchTag("SchemaError", () => Effect.fail(decodeFailure())),
+				Effect.mapError(decodeFailure),
 				Effect.map((incidentId) => ({
 					...shared,
 					incident_kind: "anomaly" as const,
@@ -98,7 +80,7 @@ const toWireSubject = Effect.fn("HttpV2Investigations.toWireSubject")(function* 
 		),
 		Match.when("alert", () =>
 			Schema.decodeEffect(AlertIncidentId)(subject.incidentId).pipe(
-				Effect.catchTag("SchemaError", () => Effect.fail(decodeFailure())),
+				Effect.mapError(decodeFailure),
 				Effect.map((incidentId) => ({
 					...shared,
 					incident_kind: "alert" as const,
@@ -130,19 +112,18 @@ const toInternalSnapshot = (snapshot: V2InvestigationCreateParams["snapshot"] | 
 
 const toV2Investigation = Effect.fn("HttpV2Investigations.toV2Investigation")(function* (
 	doc: InvestigationDocument,
-): Effect.fn.Return<V2Investigation, InvestigationSubjectDecodeError> {
+): Effect.fn.Return<V2Investigation, InvestigationDataCorruptionError> {
 	yield* Effect.annotateCurrentSpan("investigationId", doc.id)
 	const decodeReportTraceId = (traceId: string) =>
 		Schema.decodeEffect(TraceId)(traceId).pipe(
-			Effect.catchTag("SchemaError", () =>
-				Effect.fail(
-					new InvestigationSubjectDecodeError({
+			Effect.mapError(
+				() =>
+					new InvestigationDataCorruptionError({
 						investigationId: doc.id,
 						field: "report.evidence.trace_ids",
 						value: traceId,
 						message: "Stored investigation report contains an invalid trace identifier",
 					}),
-				),
 			),
 		)
 	const report =
@@ -205,15 +186,7 @@ const toV2Investigation = Effect.fn("HttpV2Investigations.toV2Investigation")(fu
 	}
 })
 
-/** One domain boundary for every typed investigation failure. */
-const mapInvestigationErrors =
-	(operation: string) =>
-	<A, E extends InvestigationHttpError, R>(
-		effect: Effect.Effect<A, E, R>,
-	): Effect.Effect<A, V2InvestigationErrorFor<E>, R> =>
-		effect.pipe(Effect.mapError(investigationErrorToV2(operation)))
-
-const mapSubjectDecodeError = (error: InvestigationSubjectDecodeError) =>
+const logSubjectDecodeError = (error: InvestigationDataCorruptionError) =>
 	Effect.logError(error.message).pipe(
 		Effect.annotateLogs({
 			investigationId: error.investigationId,
@@ -222,8 +195,10 @@ const mapSubjectDecodeError = (error: InvestigationSubjectDecodeError) =>
 			...(error.incidentKind !== undefined ? { incidentKind: error.incidentKind } : {}),
 			...(error.incidentId !== undefined ? { incidentId: error.incidentId } : {}),
 		}),
-		Effect.andThen(Effect.fail(dependencyUnavailable("investigation_subject_decode_failed"))),
 	)
+
+const serializeInvestigation = (doc: InvestigationDocument) =>
+	toV2Investigation(doc).pipe(Effect.tapError(logSubjectDecodeError))
 
 export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "investigations", (handlers) =>
 	Effect.gen(function* () {
@@ -246,13 +221,8 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 								offset,
 							})
 							.pipe(
-								mapInvestigationErrors("list"),
 								Effect.flatMap((response) =>
-									Effect.forEach(response.investigations, toV2Investigation),
-								),
-								Effect.catchTag(
-									"@maple/api/routes/v2/InvestigationSubjectDecodeError",
-									mapSubjectDecodeError,
+									Effect.forEach(response.investigations, serializeInvestigation),
 								),
 							),
 					)
@@ -262,67 +232,42 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 			.handle("retrieve", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const doc = yield* service
-						.getInvestigation(tenant.orgId, params.id)
-						.pipe(mapInvestigationErrors("retrieve"))
-					return yield* toV2Investigation(doc).pipe(
-						Effect.catchTag(
-							"@maple/api/routes/v2/InvestigationSubjectDecodeError",
-							mapSubjectDecodeError,
-						),
-					)
+					const doc = yield* service.getInvestigation(tenant.orgId, params.id)
+
+					return yield* serializeInvestigation(doc)
 				}),
 			)
 			.handle("create", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const doc = yield* service
-						.createAndStartInvestigation(
-							tenant.orgId,
-							tenant.userId,
-							new InvestigationCreateRequest({
-								subject: toInternalSubject(payload.subject),
-								...(payload.snapshot !== undefined
-									? { snapshot: toInternalSnapshot(payload.snapshot) }
-									: {}),
-							}),
-							{ automatic: false },
-						)
-						.pipe(mapInvestigationErrors("start"))
-					return yield* toV2Investigation(doc).pipe(
-						Effect.catchTag(
-							"@maple/api/routes/v2/InvestigationSubjectDecodeError",
-							mapSubjectDecodeError,
-						),
+					const doc = yield* service.createAndStartInvestigation(
+						tenant.orgId,
+						tenant.userId,
+						new InvestigationCreateRequest({
+							subject: toInternalSubject(payload.subject),
+							...(payload.snapshot !== undefined
+								? { snapshot: toInternalSnapshot(payload.snapshot) }
+								: {}),
+						}),
 					)
+
+					return yield* serializeInvestigation(doc)
 				}),
 			)
 			.handle("restart", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const doc = yield* service
-						.restartInvestigation(tenant.orgId, params.id)
-						.pipe(mapInvestigationErrors("restart"))
-					return yield* toV2Investigation(doc).pipe(
-						Effect.catchTag(
-							"@maple/api/routes/v2/InvestigationSubjectDecodeError",
-							mapSubjectDecodeError,
-						),
-					)
+					const doc = yield* service.restartInvestigation(tenant.orgId, params.id)
+
+					return yield* serializeInvestigation(doc)
 				}),
 			)
 			.handle("updateStatus", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const doc = yield* service
-						.updateStatus(tenant.orgId, params.id, payload.status)
-						.pipe(mapInvestigationErrors("update_status"))
-					return yield* toV2Investigation(doc).pipe(
-						Effect.catchTag(
-							"@maple/api/routes/v2/InvestigationSubjectDecodeError",
-							mapSubjectDecodeError,
-						),
-					)
+					const doc = yield* service.updateStatus(tenant.orgId, params.id, payload.status)
+
+					return yield* serializeInvestigation(doc)
 				}),
 			)
 	}),

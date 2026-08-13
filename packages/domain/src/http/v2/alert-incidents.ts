@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
+import { AlertIncidentNotFoundError, AlertPersistenceError } from "../alerts"
 import {
 	AlertComparator,
 	AlertEventType,
@@ -7,9 +8,10 @@ import {
 	AlertSeverity,
 	AlertSignalType,
 } from "../alerts"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
+import { V2ParameterInvalid } from "./errors"
+import { publicError } from "./public-error"
 import { AlertIncidentPublicId, AlertRulePublicId, ErrorIssuePublicId } from "./resource-ids"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
@@ -129,7 +131,7 @@ const IncidentsQuery = Schema.Struct({
 	description: "Pagination plus optional status / rule filters.",
 })
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+const alertPersistence = publicError(AlertPersistenceError)
 
 const AlertIncidentList = ListOf(V2AlertIncident).annotate({
 	identifier: "AlertIncidentList",
@@ -142,7 +144,7 @@ export class V2AlertIncidentsApiGroup extends HttpApiGroup.make("alertIncidents"
 		HttpApiEndpoint.get("list", "/", {
 			query: IncidentsQuery,
 			success: AlertIncidentList,
-			error: [...commonErrors],
+			error: [V2ParameterInvalid.schema, alertPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listAlertIncidents",
@@ -156,7 +158,7 @@ export class V2AlertIncidentsApiGroup extends HttpApiGroup.make("alertIncidents"
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: AlertIncidentPublicId },
 			success: V2AlertIncident,
-			error: [...commonErrors, V2NotFoundError],
+			error: [publicError(AlertIncidentNotFoundError), alertPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAlertIncident",
@@ -168,7 +170,6 @@ export class V2AlertIncidentsApiGroup extends HttpApiGroup.make("alertIncidents"
 	)
 	.prefix("/v2/alerts/incidents")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Alert Incidents",

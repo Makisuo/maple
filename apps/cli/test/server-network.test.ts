@@ -171,7 +171,8 @@ describe("browser origin policy", () => {
 		deepStrictEqual(corsHeadersForAllowedOrigin(hostedOrigin), {
 			"access-control-allow-origin": hostedOrigin,
 			"access-control-allow-methods": "GET, POST, OPTIONS",
-			"access-control-allow-headers": "content-type, content-encoding, x-maple-maintenance-token",
+			"access-control-allow-headers":
+				"content-type, content-encoding, authorization, x-maple-maintenance-token",
 			"access-control-allow-private-network": "true",
 			vary: "Origin",
 		})
@@ -187,5 +188,17 @@ describe("browser origin policy", () => {
 			loopbackOrigin,
 		)
 		strictEqual(corsHeadersForAllowedOrigin(null), undefined)
+	})
+
+	it("allows the Authorization header browser SDKs send when an ingest key is set", () => {
+		// A page bundled for hosted Maple carries `Authorization: Bearer maple_pk_…`
+		// on every OTLP post. Omitting the header here failed preflight and blocked
+		// the page from reaching local mode at all.
+		strictEqual(
+			corsHeadersForAllowedOrigin("http://localhost:4501")
+				?.["access-control-allow-headers"].split(", ")
+				.includes("authorization"),
+			true,
+		)
 	})
 })

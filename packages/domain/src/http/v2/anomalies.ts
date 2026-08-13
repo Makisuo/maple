@@ -2,6 +2,13 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { UserId } from "../../primitives"
 import {
+	AnomalyForbiddenError,
+	AnomalyIncidentNotFoundError,
+	AnomalyLinkedIssueNotFoundError,
+	AnomalyPersistenceError,
+} from "../anomalies"
+import { ErrorPersistenceError } from "../errors"
+import {
 	AnomalyIncidentSeverity,
 	AnomalyIncidentStatus,
 	AnomalyResolveReason,
@@ -10,14 +17,11 @@ import {
 	AnomalyTimeseriesUnit,
 	AnomalyTriageStatus,
 } from "../anomalies"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import {
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2PermissionError,
-	V2ServiceUnavailableError,
-} from "./errors"
+import { V2ParameterInvalid } from "./errors"
+import { publicError, publicErrors } from "./public-error"
+import { V2WarehouseReadErrors } from "./query-errors"
 import { AnomalyIncidentPublicId, ErrorIssuePublicId } from "./resource-ids"
 
 export { AnomalyIncidentPublicId } from "./resource-ids"
@@ -282,7 +286,12 @@ export const V2AnomalyTimeseriesQuery = Schema.Struct({
 })
 export type V2AnomalyTimeseriesQuery = Schema.Schema.Type<typeof V2AnomalyTimeseriesQuery>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+const [anomalyPersistence, anomalyNotFound, anomalyLinkedIssueNotFound, anomalyForbidden] = publicErrors(
+	AnomalyPersistenceError,
+	AnomalyIncidentNotFoundError,
+	AnomalyLinkedIssueNotFoundError,
+	AnomalyForbiddenError,
+)
 
 const AnomalyIncidentList = ListOf(V2AnomalyIncident).annotate({
 	identifier: "AnomalyIncidentList",
@@ -295,7 +304,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 		HttpApiEndpoint.get("listIncidents", "/incidents", {
 			query: V2AnomalyIncidentsListQuery,
 			success: AnomalyIncidentList,
-			error: [...commonErrors],
+			error: [V2ParameterInvalid.schema, anomalyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listAnomalyIncidents",
@@ -309,7 +318,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 		HttpApiEndpoint.get("getIncident", "/incidents/:id", {
 			params: { id: AnomalyIncidentPublicId },
 			success: V2AnomalyIncident,
-			error: [...commonErrors, V2NotFoundError],
+			error: [anomalyPersistence, anomalyNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAnomalyIncident",
@@ -324,7 +333,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 			params: { id: AnomalyIncidentPublicId },
 			query: V2AnomalyTimeseriesQuery,
 			success: V2AnomalyIncidentTimeseries,
-			error: [...commonErrors, V2NotFoundError],
+			error: [anomalyPersistence, anomalyNotFound, ...V2WarehouseReadErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAnomalyIncidentTimeseries",
@@ -338,7 +347,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 		HttpApiEndpoint.post("resolveIncident", "/incidents/:id/resolve", {
 			params: { id: AnomalyIncidentPublicId },
 			success: V2AnomalyIncident,
-			error: [...commonErrors, V2NotFoundError],
+			error: [anomalyPersistence, anomalyNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "resolveAnomalyIncident",
@@ -353,7 +362,12 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 			params: { id: AnomalyIncidentPublicId },
 			payload: V2AnomalyLinkIssueParams,
 			success: V2AnomalyIncident,
-			error: [...commonErrors, V2NotFoundError],
+			error: [
+				publicError(ErrorPersistenceError),
+				anomalyPersistence,
+				anomalyNotFound,
+				anomalyLinkedIssueNotFound,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "setAnomalyIncidentIssue",
@@ -366,7 +380,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 	.add(
 		HttpApiEndpoint.get("getSettings", "/settings", {
 			success: V2AnomalySettings,
-			error: [...commonErrors],
+			error: anomalyPersistence,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAnomalySettings",
@@ -380,7 +394,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 		HttpApiEndpoint.patch("updateSettings", "/settings", {
 			payload: V2AnomalySettingsUpdateParams,
 			success: V2AnomalySettings,
-			error: [...commonErrors, V2PermissionError],
+			error: [anomalyForbidden, anomalyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "updateAnomalySettings",
@@ -392,7 +406,6 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 	)
 	.prefix("/v2/anomalies")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Anomalies",

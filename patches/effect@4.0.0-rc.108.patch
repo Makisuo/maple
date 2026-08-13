@@ -1,0 +1,155 @@
+diff --git a/dist/internal/redacted.js b/dist/internal/redacted.js
+index b71c514f6c36983a6fb94a663e9ff878d58a3c1b..6192bdac6f761aef3c8e1ed2f3b4747ffd55692f 100644
+--- a/dist/internal/redacted.js
++++ b/dist/internal/redacted.js
+@@ -1,5 +1,11 @@
+ /** @internal */
+-export const redactedRegistry = /*#__PURE__*/new WeakMap();
++// Patched (maple): share the registry across duplicate `effect` module
++// instances via a Symbol.for-keyed global (like effect v3's globalValue).
++// Bun's isolated linker gives the alchemy CLI and the user's alchemy.run.ts
++// two path-distinct copies of this module; a module-local WeakMap makes
++// `Redacted.value` throw "Unable to get redacted value" for a Redacted made
++// by the other copy.
++export const redactedRegistry = globalThis[Symbol.for("effect/Redacted/redactedRegistry")] ??= /*#__PURE__*/new WeakMap();
+ /** @internal */
+ export const value = self => {
+   if (redactedRegistry.has(self)) {
+diff --git a/dist/unstable/ai/McpServer.d.ts b/dist/unstable/ai/McpServer.d.ts
+index 58e3fd6cf9c4e4c3d3c970ebef5ae2e44a16da35..ccd5027e268bd4888d66b443c557a80dcb2569be 100644
+--- a/dist/unstable/ai/McpServer.d.ts
++++ b/dist/unstable/ai/McpServer.d.ts
+@@ -25,7 +25,7 @@ import * as RpcMessage from "../rpc/RpcMessage.ts";
+ import * as RpcServer from "../rpc/RpcServer.ts";
+ import type * as McpProtocol from "./McpProtocol.ts";
+ import { CallToolResult, ElicitationDeclined, GetPromptResult, InternalError, InvalidParams, McpErrorBase, McpServerClient, Prompt, Resource, ResourceTemplate, ServerNotificationRpcs, Tool as McpTool } from "./McpSchema.ts";
+-import type { CallTool, ClientCapabilities, Complete, CompleteResult, GetPrompt, Param, PromptMessage, ReadResourceResult } from "./McpSchema.ts";
++import type { CallTool, ClientCapabilities, Complete, CompleteResult, GetPrompt, Initialize, Param, PromptMessage, ReadResourceResult } from "./McpSchema.ts";
+ import * as Tool from "./Tool.ts";
+ import type * as Toolkit from "./Toolkit.ts";
+ type CompletionContext = typeof Complete.payloadSchema.Type["context"];
+@@ -167,6 +167,7 @@ export declare const run: (options: {
+     readonly version: string;
+     readonly protocols: Arr.NonEmptyReadonlyArray<McpProtocol.ProtocolAdapter>;
+     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
++    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
+ }) => Effect.Effect<never, Cause.IllegalArgumentError, McpServer | RpcServer.Protocol>;
+ /**
+  * Creates a layer that starts an MCP server over an existing
+@@ -202,6 +203,7 @@ export declare const layer: (options: {
+     readonly version: string;
+     readonly protocols: Arr.NonEmptyReadonlyArray<McpProtocol.ProtocolAdapter>;
+     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
++    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
+ }) => Layer.Layer<McpServer | McpServerClient, Cause.IllegalArgumentError, RpcServer.Protocol>;
+ /**
+  * Runs the McpServer, using stdio for input and output.
+@@ -254,6 +256,7 @@ export declare const layerStdio: (options: {
+     readonly version: string;
+     readonly protocols: Arr.NonEmptyReadonlyArray<McpProtocol.ProtocolAdapter>;
+     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
++    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
+ }) => Layer.Layer<McpServer | McpServerClient, Cause.IllegalArgumentError, Stdio>;
+ /**
+  * Registers a Streamable HTTP MCP endpoint at `options.path`.
+@@ -281,6 +284,7 @@ export declare const layerHttp: (options: {
+     readonly protocols: Arr.NonEmptyReadonlyArray<McpProtocol.ProtocolAdapter>;
+     readonly allowedOrigins?: ReadonlyArray<string> | undefined;
+     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
++    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
+ }) => Layer.Layer<McpServer | McpServerClient, Cause.IllegalArgumentError, HttpRouter.HttpRouter>;
+ /**
+  * Registers a `Toolkit` with the `McpServer`.
+diff --git a/dist/unstable/ai/McpServer.js b/dist/unstable/ai/McpServer.js
+index 073350187152036c2c8432428ea073645d8eb77d..51a027528d22a665b77e4bfef1a999a256efa475 100644
+--- a/dist/unstable/ai/McpServer.js
++++ b/dist/unstable/ai/McpServer.js
+@@ -228,16 +228,57 @@ const decodeCancelledNotification = /*#__PURE__*/Schema.decodeUnknownEffect(/*#_
+ const requestKey = requestId => `${typeof requestId}:${requestId}`;
+ class McpClientKey extends Data.Class {}
+ class McpProtocolState extends /*#__PURE__*/Context.Service()("effect/ai/McpServer/McpProtocolState") {}
+-const makeMcpProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (protocols) {
++class PersistedSessionMap extends Map {
++  constructor(clientSessions, protocolRegistry) {
++    super();
++    this.clientSessions = clientSessions;
++    this.protocolRegistry = protocolRegistry;
++  }
++  get(sessionId) {
++    const current = super.get(sessionId);
++    if (current !== undefined) {
++      return current;
++    }
++    const initializePayload = this.clientSessions.get(sessionId);
++    if (initializePayload === undefined) {
++      return undefined;
++    }
++    const session = {
++      initializePayload,
++      protocol: this.protocolRegistry.select(getOfferedProtocolVersion(initializePayload)),
++      resourceSubscriptions: undefined,
++      logLevel: {
++        _tag: "Effect",
++        level: "Info"
++      }
++    };
++    super.set(sessionId, session);
++    return session;
++  }
++  set(sessionId, session) {
++    this.clientSessions.set(sessionId, session.initializePayload);
++    return super.set(sessionId, session);
++  }
++  delete(sessionId) {
++    this.clientSessions.delete(sessionId);
++    return super.delete(sessionId);
++  }
++  clear() {
++    this.clientSessions.clear();
++    super.clear();
++  }
++}
++const makeMcpProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (protocols, clientSessions) {
++  const protocolRegistry = yield* McpProtocolRegistry.make(protocols);
+   return McpProtocolState.of({
+     sessions: {
+-      bySessionId: new Map(),
++      bySessionId: clientSessions === undefined ? new Map() : new PersistedSessionMap(clientSessions, protocolRegistry),
+       byClientId: new Map()
+     },
+-    protocolRegistry: yield* McpProtocolRegistry.make(protocols)
++    protocolRegistry
+   });
+ });
+-const layerMcpProtocolState = protocols => Layer.effect(McpProtocolState)(makeMcpProtocolState(protocols));
++const layerMcpProtocolState = (protocols, clientSessions) => Layer.effect(McpProtocolState)(makeMcpProtocolState(protocols, clientSessions));
+ /**
+  * Runs an MCP server over the current `RpcServer.Protocol`.
+  *
+@@ -252,7 +293,7 @@ const layerMcpProtocolState = protocols => Layer.effect(McpProtocolState)(makeMc
+  */
+ export const run = /*#__PURE__*/Effect.fnUntraced(function* (options) {
+   const protocolStateOption = yield* Effect.serviceOption(McpProtocolState);
+-  const protocolState = Option.isSome(protocolStateOption) ? protocolStateOption.value : yield* makeMcpProtocolState(options.protocols);
++  const protocolState = Option.isSome(protocolStateOption) ? protocolStateOption.value : yield* makeMcpProtocolState(options.protocols, options.clientSessions);
+   return yield* runWithProtocolState(options, protocolState);
+ });
+ const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options, protocolState) {
+@@ -579,7 +620,7 @@ const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options,
+  * @category layers
+  * @since 4.0.0
+  */
+-export const layer = options => layerWithProtocolState(options).pipe(Layer.provide(layerMcpProtocolState(options.protocols)));
++export const layer = options => layerWithProtocolState(options).pipe(Layer.provide(layerMcpProtocolState(options.protocols, options.clientSessions)));
+ const layerWithProtocolState = options => Layer.effectDiscard(Effect.gen(function* () {
+   const protocolState = yield* McpProtocolState;
+   yield* Effect.forkScoped(runWithProtocolState(options, protocolState));
+@@ -721,7 +762,7 @@ export const layerStdio = options => layer(options).pipe(Layer.provide(RpcServer
+  * @since 4.0.0
+  */
+ export const layerHttp = options => {
+-  const protocolState = layerMcpProtocolState(options.protocols);
++  const protocolState = layerMcpProtocolState(options.protocols, options.clientSessions);
+   const methodNotAllowedResponse = HttpServerResponse.empty({
+     status: 405,
+     headers: {

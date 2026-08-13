@@ -1284,7 +1284,7 @@ SELECT
         LIMIT 10000
         FORMAT JSON
 
--- builder:services:serviceCatalogQuery:default  [d5bf26ae]
+-- builder:services:serviceCatalogQuery:default  [4475276a]
 SELECT
           bServiceName AS serviceName,
           arraySort(arrayFilter(x -> x != '', arrayDistinct(groupArray(bServiceNamespace)))) AS serviceNamespaces,
@@ -1298,7 +1298,7 @@ SELECT
           arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99LatencyMs
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -1317,10 +1317,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -1338,7 +1338,7 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         GROUP BY serviceName
         ORDER BY estimatedSpanCount DESC, serviceName ASC
@@ -1346,7 +1346,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- builder:services:serviceCatalogQuery:filtered  [fc879e14]
+-- builder:services:serviceCatalogQuery:filtered  [4a803960]
 SELECT
           bServiceName AS serviceName,
           arraySort(arrayFilter(x -> x != '', arrayDistinct(groupArray(bServiceNamespace)))) AS serviceNamespaces,
@@ -1360,7 +1360,7 @@ SELECT
           arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99LatencyMs
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -1382,10 +1382,10 @@ SELECT
           AND DeploymentEnv IN ('production')
           AND ServiceNamespace IN ('backend')
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -1401,12 +1401,12 @@ SELECT
           sum(ApdexToleratingCount) AS bApdexToleratingCount
         FROM service_overview_hourly
         WHERE OrgId = 'org_sql_catalog'
-          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
-          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
           AND ServiceName = 'api'
           AND DeploymentEnv IN ('production')
           AND ServiceNamespace IN ('backend')
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         GROUP BY serviceName
         ORDER BY estimatedSpanCount DESC, serviceName ASC
@@ -5025,16 +5025,16 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- pipe:service_apdex_time_series:default:baseline  [cc0b4d44]
+-- pipe:service_apdex_time_series:default:baseline  [2ecafa98]
 SELECT
-          toStartOfInterval(bHour, INTERVAL 60 SECOND) AS bucket,
+          toStartOfInterval(bBucket, INTERVAL 60 SECOND) AS bucket,
           sum(bSpanCount) AS totalCount,
           sum(bApdexSatisfiedCount) AS satisfiedCount,
           sum(bApdexToleratingCount) AS toleratingCount,
           if(sum(bSpanCount) > 0, round(sum(bApdexSatisfiedCount) / sum(bSpanCount) + sum(bApdexToleratingCount) * 0.5 / sum(bSpanCount), 4), 0) AS apdexScore
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfMinute(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5053,11 +5053,11 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Minute AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5071,12 +5071,12 @@ SELECT
           min(FirstSeen) AS bFirstSeen,
           sum(ApdexSatisfiedCount) AS bApdexSatisfiedCount,
           sum(ApdexToleratingCount) AS bApdexToleratingCount
-        FROM service_overview_hourly
+        FROM service_overview_minutely
         WHERE OrgId = 'org_sql_catalog'
-          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
-          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
           AND ServiceName = 'api'
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+          AND Minute >= if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         GROUP BY bucket
         ORDER BY bucket ASC
@@ -5184,25 +5184,36 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- pipe:service_overview_compare:default:baseline  [ae5f3c76]
+-- pipe:service_overview_compare:default:baseline  [e5fa9dec]
 SELECT 'current' AS period, * FROM (
 SELECT
-          bServiceName AS serviceName,
-          bServiceNamespace AS serviceNamespace,
-          bEnvironment AS environment,
-          bCommitSha AS commitSha,
-          sum(bSpanCount) AS throughput,
-          sum(bErrorCount) AS errorCount,
-          sum(bEstimatedErrorCount) AS estimatedErrorCount,
-          sum(bSpanCount) AS spanCount,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
-          sum(bEstimatedSpanCount) AS estimatedSpanCount,
-          min(bFirstSeen) AS firstSeen
+          cServiceName AS serviceName,
+          cEnvironment AS environment,
+          argMax(cServiceNamespace, cEstimatedSpanCount) AS serviceNamespace,
+          sum(cSpanCount) AS throughput,
+          sum(cErrorCount) AS errorCount,
+          sum(cEstimatedErrorCount) AS estimatedErrorCount,
+          sum(cSpanCount) AS spanCount,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
+          sum(cEstimatedSpanCount) AS estimatedSpanCount,
+          min(cFirstSeen) AS firstSeen,
+          arraySlice(arrayReverseSort(x -> x.2, groupArray(tuple(cCommitSha, cSpanCount, cErrorCount, toString(cFirstSeen)))), 1, 20) AS commits
+        FROM (SELECT
+          bServiceName AS cServiceName,
+          bServiceNamespace AS cServiceNamespace,
+          bEnvironment AS cEnvironment,
+          bCommitSha AS cCommitSha,
+          sum(bSpanCount) AS cSpanCount,
+          sum(bErrorCount) AS cErrorCount,
+          sum(bEstimatedErrorCount) AS cEstimatedErrorCount,
+          sum(bEstimatedSpanCount) AS cEstimatedSpanCount,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(bDurationQuantiles) AS cDurationQuantiles,
+          min(bFirstSeen) AS cFirstSeen
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5221,10 +5232,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5242,31 +5253,43 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
-        GROUP BY serviceName, serviceNamespace, environment, commitSha
+        GROUP BY cServiceName, cServiceNamespace, cEnvironment, cCommitSha) AS service_commit_rows
+        GROUP BY serviceName, environment
         ORDER BY throughput DESC
-        LIMIT 100
+        LIMIT 500
 )
 UNION ALL
 SELECT 'previous' AS period, * FROM (
 SELECT
-          bServiceName AS serviceName,
-          bServiceNamespace AS serviceNamespace,
-          bEnvironment AS environment,
-          bCommitSha AS commitSha,
-          sum(bSpanCount) AS throughput,
-          sum(bErrorCount) AS errorCount,
-          sum(bEstimatedErrorCount) AS estimatedErrorCount,
-          sum(bSpanCount) AS spanCount,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
-          sum(bEstimatedSpanCount) AS estimatedSpanCount,
-          min(bFirstSeen) AS firstSeen
+          cServiceName AS serviceName,
+          cEnvironment AS environment,
+          argMax(cServiceNamespace, cEstimatedSpanCount) AS serviceNamespace,
+          sum(cSpanCount) AS throughput,
+          sum(cErrorCount) AS errorCount,
+          sum(cEstimatedErrorCount) AS estimatedErrorCount,
+          sum(cSpanCount) AS spanCount,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
+          sum(cEstimatedSpanCount) AS estimatedSpanCount,
+          min(cFirstSeen) AS firstSeen,
+          arraySlice(arrayReverseSort(x -> x.2, groupArray(tuple(cCommitSha, cSpanCount, cErrorCount, toString(cFirstSeen)))), 1, 20) AS commits
+        FROM (SELECT
+          bServiceName AS cServiceName,
+          bServiceNamespace AS cServiceNamespace,
+          bEnvironment AS cEnvironment,
+          bCommitSha AS cCommitSha,
+          sum(bSpanCount) AS cSpanCount,
+          sum(bErrorCount) AS cErrorCount,
+          sum(bEstimatedErrorCount) AS cEstimatedErrorCount,
+          sum(bEstimatedSpanCount) AS cEstimatedSpanCount,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(bDurationQuantiles) AS cDurationQuantiles,
+          min(bFirstSeen) AS cFirstSeen
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5285,10 +5308,10 @@ SELECT
           AND Timestamp >= '2025-12-30 10:30:00'
           AND Timestamp <= '2026-01-01 14:15:00'
           AND (Timestamp < if(toDateTime('2025-12-30 10:30:00') = toStartOfHour(toDateTime('2025-12-30 10:30:00')), toStartOfHour(toDateTime('2025-12-30 10:30:00')), toStartOfHour(toDateTime('2025-12-30 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-01 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5306,32 +5329,44 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2025-12-30 10:30:00') = toStartOfHour(toDateTime('2025-12-30 10:30:00')), toStartOfHour(toDateTime('2025-12-30 10:30:00')), toStartOfHour(toDateTime('2025-12-30 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-01 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
-        GROUP BY serviceName, serviceNamespace, environment, commitSha
+        GROUP BY cServiceName, cServiceNamespace, cEnvironment, cCommitSha) AS service_commit_rows
+        GROUP BY serviceName, environment
         ORDER BY throughput DESC
-        LIMIT 100
+        LIMIT 500
 )
 FORMAT JSON
 
--- pipe:service_overview:default:baseline  [0c02cf5d]
+-- pipe:service_overview:default:baseline  [90dbc028]
 SELECT
-          bServiceName AS serviceName,
-          bServiceNamespace AS serviceNamespace,
-          bEnvironment AS environment,
-          bCommitSha AS commitSha,
-          sum(bSpanCount) AS throughput,
-          sum(bErrorCount) AS errorCount,
-          sum(bEstimatedErrorCount) AS estimatedErrorCount,
-          sum(bSpanCount) AS spanCount,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
-          sum(bEstimatedSpanCount) AS estimatedSpanCount,
-          min(bFirstSeen) AS firstSeen
+          cServiceName AS serviceName,
+          cEnvironment AS environment,
+          argMax(cServiceNamespace, cEstimatedSpanCount) AS serviceNamespace,
+          sum(cSpanCount) AS throughput,
+          sum(cErrorCount) AS errorCount,
+          sum(cEstimatedErrorCount) AS estimatedErrorCount,
+          sum(cSpanCount) AS spanCount,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
+          sum(cEstimatedSpanCount) AS estimatedSpanCount,
+          min(cFirstSeen) AS firstSeen,
+          arraySlice(arrayReverseSort(x -> x.2, groupArray(tuple(cCommitSha, cSpanCount, cErrorCount, toString(cFirstSeen)))), 1, 20) AS commits
+        FROM (SELECT
+          bServiceName AS cServiceName,
+          bServiceNamespace AS cServiceNamespace,
+          bEnvironment AS cEnvironment,
+          bCommitSha AS cCommitSha,
+          sum(bSpanCount) AS cSpanCount,
+          sum(bErrorCount) AS cErrorCount,
+          sum(bEstimatedErrorCount) AS cEstimatedErrorCount,
+          sum(bEstimatedSpanCount) AS cEstimatedSpanCount,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(bDurationQuantiles) AS cDurationQuantiles,
+          min(bFirstSeen) AS cFirstSeen
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5350,10 +5385,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5371,31 +5406,43 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
-        GROUP BY serviceName, serviceNamespace, environment, commitSha
+        GROUP BY cServiceName, cServiceNamespace, cEnvironment, cCommitSha) AS service_commit_rows
+        GROUP BY serviceName, environment
         ORDER BY throughput DESC
-        LIMIT 100
+        LIMIT 500
         FORMAT JSON
 
--- pipe:service_overview:filtered:baseline  [e9509b63]
+-- pipe:service_overview:filtered:baseline  [b3ddd260]
 SELECT
-          bServiceName AS serviceName,
-          bServiceNamespace AS serviceNamespace,
-          bEnvironment AS environment,
-          bCommitSha AS commitSha,
-          sum(bSpanCount) AS throughput,
-          sum(bErrorCount) AS errorCount,
-          sum(bEstimatedErrorCount) AS estimatedErrorCount,
-          sum(bSpanCount) AS spanCount,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
-          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
-          sum(bEstimatedSpanCount) AS estimatedSpanCount,
-          min(bFirstSeen) AS firstSeen
+          cServiceName AS serviceName,
+          cEnvironment AS environment,
+          argMax(cServiceNamespace, cEstimatedSpanCount) AS serviceNamespace,
+          sum(cSpanCount) AS throughput,
+          sum(cErrorCount) AS errorCount,
+          sum(cEstimatedErrorCount) AS estimatedErrorCount,
+          sum(cSpanCount) AS spanCount,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(cDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
+          sum(cEstimatedSpanCount) AS estimatedSpanCount,
+          min(cFirstSeen) AS firstSeen,
+          arraySlice(arrayReverseSort(x -> x.2, groupArray(tuple(cCommitSha, cSpanCount, cErrorCount, toString(cFirstSeen)))), 1, 20) AS commits
+        FROM (SELECT
+          bServiceName AS cServiceName,
+          bServiceNamespace AS cServiceNamespace,
+          bEnvironment AS cEnvironment,
+          bCommitSha AS cCommitSha,
+          sum(bSpanCount) AS cSpanCount,
+          sum(bErrorCount) AS cErrorCount,
+          sum(bEstimatedErrorCount) AS cEstimatedErrorCount,
+          sum(bEstimatedSpanCount) AS cEstimatedSpanCount,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(bDurationQuantiles) AS cDurationQuantiles,
+          min(bFirstSeen) AS cFirstSeen
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5416,10 +5463,10 @@ SELECT
           AND DeploymentEnv IN ('production', 'staging')
           AND CommitSha IN ('abc123', 'def456')
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5435,26 +5482,27 @@ SELECT
           sum(ApdexToleratingCount) AS bApdexToleratingCount
         FROM service_overview_hourly
         WHERE OrgId = 'org_sql_catalog'
-          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
-          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
           AND DeploymentEnv IN ('production', 'staging')
           AND CommitSha IN ('abc123', 'def456')
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
-        GROUP BY serviceName, serviceNamespace, environment, commitSha
+        GROUP BY cServiceName, cServiceNamespace, cEnvironment, cCommitSha) AS service_commit_rows
+        GROUP BY serviceName, environment
         ORDER BY throughput DESC
-        LIMIT 100
+        LIMIT 500
         FORMAT JSON
 
--- pipe:service_releases_timeline:default:baseline  [d6b94f27]
+-- pipe:service_releases_timeline:default:baseline  [d8c35e6b]
 SELECT
-          toStartOfInterval(bHour, INTERVAL 300 SECOND) AS bucket,
+          toStartOfInterval(bBucket, INTERVAL 300 SECOND) AS bucket,
           bCommitSha AS commitSha,
           sum(bSpanCount) AS count,
           sum(bErrorCount) AS errorCount
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfMinute(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5473,11 +5521,11 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Minute AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5491,12 +5539,12 @@ SELECT
           min(FirstSeen) AS bFirstSeen,
           sum(ApdexSatisfiedCount) AS bApdexSatisfiedCount,
           sum(ApdexToleratingCount) AS bApdexToleratingCount
-        FROM service_overview_hourly
+        FROM service_overview_minutely
         WHERE OrgId = 'org_sql_catalog'
-          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
-          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
           AND ServiceName = 'api'
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+          AND Minute >= if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         WHERE bCommitSha != ''
         GROUP BY bucket, commitSha
@@ -5504,14 +5552,14 @@ SELECT
         LIMIT 1000
         FORMAT JSON
 
--- pipe:services_facets:default:baseline  [ced46564]
+-- pipe:services_facets:default:baseline  [d6b6158c]
 SELECT
           bEnvironment AS name,
           sum(bSpanCount) AS count,
           'environment' AS facetType
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5530,10 +5578,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5551,7 +5599,7 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         WHERE bEnvironment != ''
         GROUP BY name
@@ -5564,7 +5612,7 @@ SELECT
           'namespace' AS facetType
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5583,10 +5631,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5604,7 +5652,7 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         WHERE bServiceNamespace != ''
         GROUP BY name
@@ -5617,7 +5665,7 @@ SELECT
           'commit_sha' AS facetType
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5636,10 +5684,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5657,7 +5705,7 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         WHERE bCommitSha != ''
         GROUP BY name
@@ -5670,7 +5718,7 @@ SELECT
           'service' AS facetType
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5689,10 +5737,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -5710,7 +5758,7 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         WHERE bServiceName != ''
         GROUP BY name
@@ -7473,14 +7521,14 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- spec:services-facets:baseline  [ced46564]
+-- spec:services-facets:baseline  [d6b6158c]
 SELECT
           bEnvironment AS name,
           sum(bSpanCount) AS count,
           'environment' AS facetType
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -7499,10 +7547,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -7520,7 +7568,7 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         WHERE bEnvironment != ''
         GROUP BY name
@@ -7533,7 +7581,7 @@ SELECT
           'namespace' AS facetType
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -7552,10 +7600,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -7573,7 +7621,7 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         WHERE bServiceNamespace != ''
         GROUP BY name
@@ -7586,7 +7634,7 @@ SELECT
           'commit_sha' AS facetType
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -7605,10 +7653,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -7626,7 +7674,7 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         WHERE bCommitSha != ''
         GROUP BY name
@@ -7639,7 +7687,7 @@ SELECT
           'service' AS facetType
         FROM (
 SELECT
-          toStartOfHour(Timestamp) AS bHour,
+          toStartOfHour(Timestamp) AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -7658,10 +7706,10 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 UNION ALL
 SELECT
-          Hour AS bHour,
+          Hour AS bBucket,
           ServiceName AS bServiceName,
           ServiceNamespace AS bServiceNamespace,
           DeploymentEnv AS bEnvironment,
@@ -7679,7 +7727,7 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-        GROUP BY bHour, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
         WHERE bServiceName != ''
         GROUP BY name
@@ -8303,10 +8351,10 @@ SELECT
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-annual-daily-buckets:baseline  [a17db3e2]
+-- spec:traces-timeseries-annual-daily-buckets:baseline  [2ebc4087]
 SELECT
           bucket AS bucket,
-          'all' AS groupName,
+          groupName AS groupName,
           if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
           sum(bCount) AS spanCount,
           if(sum(bCount) > 0, sum(bDurationSum) / sum(bCount) / 1000000, 0) AS avgDuration,
@@ -8321,6 +8369,7 @@ SELECT
         FROM (
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 86400 SECOND) AS bucket,
+          'all' AS groupName,
           count() AS bCount,
           sum(SampleRate) AS bEstimatedSpanCount,
           countIf(StatusCode = 'Error') AS bErrorCount,
@@ -8332,11 +8381,29 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2025-11-01 00:00:00'
           AND Timestamp <= '2025-11-25 00:00:00'
-          AND (Timestamp < if(toDateTime('2025-11-01 00:00:00') = toStartOfHour(toDateTime('2025-11-01 00:00:00')), toStartOfHour(toDateTime('2025-11-01 00:00:00')), toStartOfHour(toDateTime('2025-11-01 00:00:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2025-11-25 00:00:00')))
-        GROUP BY bucket
+          AND (Timestamp < if(toDateTime('2025-11-01 00:00:00') = toStartOfMinute(toDateTime('2025-11-01 00:00:00')), toStartOfMinute(toDateTime('2025-11-01 00:00:00')), toStartOfMinute(toDateTime('2025-11-01 00:00:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2025-11-25 00:00:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 86400 SECOND) AS bucket,
+          'all' AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          sum(ApdexSatisfiedCount) AS bSatisfiedCount,
+          sum(ApdexToleratingCount) AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= if(toDateTime('2025-11-01 00:00:00') = toStartOfMinute(toDateTime('2025-11-01 00:00:00')), toStartOfMinute(toDateTime('2025-11-01 00:00:00')), toStartOfMinute(toDateTime('2025-11-01 00:00:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2025-11-25 00:00:00'))
+          AND (Minute < if(toDateTime('2025-11-01 00:00:00') = toStartOfHour(toDateTime('2025-11-01 00:00:00')), toStartOfHour(toDateTime('2025-11-01 00:00:00')), toStartOfHour(toDateTime('2025-11-01 00:00:00')) + INTERVAL 1 HOUR) OR Minute >= toStartOfHour(toDateTime('2025-11-25 00:00:00')))
+        GROUP BY bucket, groupName
 UNION ALL
 SELECT
           toStartOfInterval(Hour, INTERVAL 86400 SECOND) AS bucket,
+          'all' AS groupName,
           sum(SpanCount) AS bCount,
           sum(EstimatedSpanCount) AS bEstimatedSpanCount,
           sum(ErrorCount) AS bErrorCount,
@@ -8348,16 +8415,16 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2025-11-01 00:00:00') = toStartOfHour(toDateTime('2025-11-01 00:00:00')), toStartOfHour(toDateTime('2025-11-01 00:00:00')), toStartOfHour(toDateTime('2025-11-01 00:00:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2025-11-25 00:00:00'))
-        GROUP BY bucket
+        GROUP BY bucket, groupName
 ) AS service_metric_windows
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-annual:baseline  [85a5b7ae]
+-- spec:traces-timeseries-annual-grouped-all-tiers:baseline  [5045e3b6]
 SELECT
           bucket AS bucket,
-          'all' AS groupName,
+          groupName AS groupName,
           if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
           sum(bCount) AS spanCount,
           if(sum(bCount) > 0, sum(bDurationSum) / sum(bCount) / 1000000, 0) AS avgDuration,
@@ -8372,6 +8439,237 @@ SELECT
         FROM (
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          count() AS bCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS bErrorCount,
+          sum(toFloat64(Duration)) AS bDurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS bDurationQuantiles,
+          countIf((StatusCode != 'Error' AND Duration < 500000000)) AS bSatisfiedCount,
+          countIf(((StatusCode != 'Error' AND Duration >= 500000000) AND Duration < 2000000000)) AS bToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 3600 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          sum(ApdexSatisfiedCount) AS bSatisfiedCount,
+          sum(ApdexToleratingCount) AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+          AND (Minute < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Minute >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Hour, INTERVAL 3600 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          sum(ApdexSatisfiedCount) AS bSatisfiedCount,
+          sum(ApdexToleratingCount) AS bToleratingCount
+        FROM service_overview_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
+) AS service_metric_windows
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual-grouped-series-cap:baseline  [a922eaa3]
+WITH __series_base AS (
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
+          sum(bCount) AS spanCount,
+          if(sum(bCount) > 0, sum(bDurationSum) / sum(bCount) / 1000000, 0) AS avgDuration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99Duration,
+          if(sum(bCount) > 0, sum(bErrorCount) / sum(bCount), 0) AS errorRate,
+          sum(bSatisfiedCount) AS satisfiedCount,
+          sum(bToleratingCount) AS toleratingCount,
+          if(sum(bCount) > 0, round(sum(bSatisfiedCount) / sum(bCount) + sum(bToleratingCount) * 0.5 / sum(bCount), 4), 0) AS apdexScore,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount
+        FROM (
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          count() AS bCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS bErrorCount,
+          sum(toFloat64(Duration)) AS bDurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS bDurationQuantiles,
+          countIf((StatusCode != 'Error' AND Duration < 500000000)) AS bSatisfiedCount,
+          countIf(((StatusCode != 'Error' AND Duration >= 500000000) AND Duration < 2000000000)) AS bToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-03 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          sum(ApdexSatisfiedCount) AS bSatisfiedCount,
+          sum(ApdexToleratingCount) AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
+) AS service_metric_windows
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+)
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          count AS count,
+          spanCount AS spanCount,
+          avgDuration AS avgDuration,
+          p50Duration AS p50Duration,
+          p95Duration AS p95Duration,
+          p99Duration AS p99Duration,
+          errorRate AS errorRate,
+          satisfiedCount AS satisfiedCount,
+          toleratingCount AS toleratingCount,
+          apdexScore AS apdexScore,
+          estimatedSpanCount AS estimatedSpanCount
+        FROM __series_base
+        WHERE groupName IN (SELECT
+          groupName AS groupName
+        FROM (SELECT
+          groupName AS groupName,
+          max(count) AS rank
+        FROM __series_base
+        GROUP BY groupName
+        ORDER BY rank DESC
+        LIMIT 10) AS ranked)
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual-minutely-grouped:baseline  [0ec9c1af]
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
+          sum(bCount) AS spanCount,
+          if(sum(bCount) > 0, sum(bDurationSum) / sum(bCount) / 1000000, 0) AS avgDuration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99Duration,
+          if(sum(bCount) > 0, sum(bErrorCount) / sum(bCount), 0) AS errorRate,
+          sum(bSatisfiedCount) AS satisfiedCount,
+          sum(bToleratingCount) AS toleratingCount,
+          if(sum(bCount) > 0, round(sum(bSatisfiedCount) / sum(bCount) + sum(bToleratingCount) * 0.5 / sum(bCount), 4), 0) AS apdexScore,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount
+        FROM (
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          count() AS bCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS bErrorCount,
+          sum(toFloat64(Duration)) AS bDurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS bDurationQuantiles,
+          countIf((StatusCode != 'Error' AND Duration < 500000000)) AS bSatisfiedCount,
+          countIf(((StatusCode != 'Error' AND Duration >= 500000000) AND Duration < 2000000000)) AS bToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-03 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND DeploymentEnv IN ('production')
+          AND (Timestamp < if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          sum(ApdexSatisfiedCount) AS bSatisfiedCount,
+          sum(ApdexToleratingCount) AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'api'
+          AND DeploymentEnv IN ('production')
+          AND Minute >= if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
+) AS service_metric_windows
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual-rejected-status-code:baseline  [4541b40c]
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket,
+          coalesce(nullIf(toString(StatusCode), ''), 'all') AS groupName,
+          sum(SampleRate) AS count,
+          count() AS spanCount,
+          avg(Duration) / 1000000 AS avgDuration,
+          quantile(0.5)(Duration) / 1000000 AS p50Duration,
+          quantile(0.95)(Duration) / 1000000 AS p95Duration,
+          quantile(0.99)(Duration) / 1000000 AS p99Duration,
+          if(sum(SampleRate) > 0, sumIf(SampleRate, StatusCode = 'Error') / sum(SampleRate), 0) AS errorRate,
+          countIf((NOT (StatusCode = 'Error') AND Duration / 1000000 < 500)) AS satisfiedCount,
+          countIf((NOT (StatusCode = 'Error') AND (Duration / 1000000 >= 500 AND Duration / 1000000 < 2000))) AS toleratingCount,
+          if(count() > 0, round(countIf((NOT (StatusCode = 'Error') AND Duration / 1000000 < 500)) / count() + countIf((NOT (StatusCode = 'Error') AND (Duration / 1000000 >= 500 AND Duration / 1000000 < 2000))) * 0.5 / count(), 4), 0) AS apdexScore,
+          sum(SampleRate) AS estimatedSpanCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual:baseline  [503dc5ba]
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
+          sum(bCount) AS spanCount,
+          if(sum(bCount) > 0, sum(bDurationSum) / sum(bCount) / 1000000, 0) AS avgDuration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99Duration,
+          if(sum(bCount) > 0, sum(bErrorCount) / sum(bCount), 0) AS errorRate,
+          sum(bSatisfiedCount) AS satisfiedCount,
+          sum(bToleratingCount) AS toleratingCount,
+          if(sum(bCount) > 0, round(sum(bSatisfiedCount) / sum(bCount) + sum(bToleratingCount) * 0.5 / sum(bCount), 4), 0) AS apdexScore,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount
+        FROM (
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket,
+          'all' AS groupName,
           count() AS bCount,
           sum(SampleRate) AS bEstimatedSpanCount,
           countIf(StatusCode = 'Error') AS bErrorCount,
@@ -8385,11 +8683,31 @@ SELECT
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
           AND DeploymentEnv IN ('production')
-          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        GROUP BY bucket
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 3600 SECOND) AS bucket,
+          'all' AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          sum(ApdexSatisfiedCount) AS bSatisfiedCount,
+          sum(ApdexToleratingCount) AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'api'
+          AND DeploymentEnv IN ('production')
+          AND Minute >= if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+          AND (Minute < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Minute >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
 UNION ALL
 SELECT
           toStartOfInterval(Hour, INTERVAL 3600 SECOND) AS bucket,
+          'all' AS groupName,
           sum(SpanCount) AS bCount,
           sum(EstimatedSpanCount) AS bEstimatedSpanCount,
           sum(ErrorCount) AS bErrorCount,
@@ -8399,11 +8717,11 @@ SELECT
           sum(ApdexToleratingCount) AS bToleratingCount
         FROM service_overview_hourly
         WHERE OrgId = 'org_sql_catalog'
-          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
-          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
           AND ServiceName = 'api'
           AND DeploymentEnv IN ('production')
-        GROUP BY bucket
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
 ) AS service_metric_windows
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
