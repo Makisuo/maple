@@ -7,6 +7,12 @@ import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowS
 import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { requireAdmin } from "@/services/auth/auth"
+import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
+import { makePersistenceError } from "@/services/errors/error-persistence"
+
+// v1 keeps its historical generic persistence failure; v2 exposes each warehouse tag directly.
+const legacyPersistenceFailure = (error: { readonly message: string }) =>
+	Effect.fail(makePersistenceError(error))
 
 export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers) =>
 	Effect.gen(function* () {
@@ -25,19 +31,21 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						workflowState: query.workflowState ?? "all",
 						limit: query.limit ?? 100,
 					})
-					const response = yield* readModels.listIssues(tenant.orgId, {
-						workflowState: query.workflowState,
-						severity: query.severity,
-						kind: query.kind,
-						service: query.service,
-						deploymentEnv: query.deploymentEnv,
-						assignedActorId: query.assignedActorId,
-						includeArchived: query.includeArchived === "1",
-						startTime: query.startTime,
-						endTime: query.endTime,
-						limit: query.limit,
-						cursor: query.cursor,
-					})
+					const response = yield* readModels
+						.listIssues(tenant.orgId, {
+							workflowState: query.workflowState,
+							severity: query.severity,
+							kind: query.kind,
+							service: query.service,
+							deploymentEnv: query.deploymentEnv,
+							assignedActorId: query.assignedActorId,
+							includeArchived: query.includeArchived === "1",
+							startTime: query.startTime,
+							endTime: query.endTime,
+							limit: query.limit,
+							cursor: query.cursor,
+						})
+						.pipe(Effect.catchTags(warehouseHandlers(legacyPersistenceFailure)))
 					yield* Effect.annotateCurrentSpan("issueCount", response.issues.length)
 					return response
 				}).pipe(Effect.withSpan("HttpErrors.listIssues")),
@@ -49,12 +57,14 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						orgId: tenant.orgId,
 						issueId: params.issueId,
 					})
-					return yield* readModels.getIssue(tenant.orgId, params.issueId, {
-						startTime: query.startTime,
-						endTime: query.endTime,
-						bucketSeconds: query.bucketSeconds,
-						sampleLimit: query.sampleLimit,
-					})
+					return yield* readModels
+						.getIssue(tenant.orgId, params.issueId, {
+							startTime: query.startTime,
+							endTime: query.endTime,
+							bucketSeconds: query.bucketSeconds,
+							sampleLimit: query.sampleLimit,
+						})
+						.pipe(Effect.catchTags(warehouseHandlers(legacyPersistenceFailure)))
 				}).pipe(Effect.withSpan("HttpErrors.getIssue")),
 			)
 			.handle("transitionIssue", ({ params, payload }) =>

@@ -4,6 +4,7 @@ import {
 	WarehouseAuthError,
 	WarehouseClientError,
 	WarehouseConfigError,
+	WarehouseConfigLookupError,
 	WarehouseMalformedQueryError,
 	WarehouseQueryError,
 	WarehouseQuotaExceededError,
@@ -22,7 +23,7 @@ export { cleanErrorMessage, extractUpstreamStatus }
  * (`WarehouseValidationError`) are raised by the executor before a query runs,
  * not by this classifier, so they're intentionally absent here.
  */
-export type WarehouseSqlError =
+export type WarehouseClassifiedError =
 	| WarehouseQueryError
 	| WarehouseUpstreamError
 	| WarehouseAuthError
@@ -31,6 +32,15 @@ export type WarehouseSqlError =
 	| WarehouseSchemaDriftError
 	| WarehouseMalformedQueryError
 	| WarehouseQuotaExceededError
+
+/** Complete error channel for an executed warehouse operation. */
+export type WarehouseExecutionError = WarehouseClassifiedError | WarehouseConfigLookupError
+
+/**
+ * Backwards-compatible name for the complete warehouse operation error channel.
+ * New code should prefer `WarehouseExecutionError`.
+ */
+export type WarehouseSqlError = WarehouseExecutionError
 
 type ClickHouseErrorDetails = {
 	readonly message: string
@@ -86,7 +96,7 @@ type ClassificationRule = {
 	/** Restricts the rule to SQL with this authorship. Unset means either. */
 	readonly authoredBy?: SqlAuthorship
 	/** Construct the tagged error for this rule. `upstreamStatus` is only used by the rules that carry it. */
-	readonly make: (base: ClassifiedBase, upstreamStatus: number | undefined) => WarehouseSqlError
+	readonly make: (base: ClassifiedBase, upstreamStatus: number | undefined) => WarehouseClassifiedError
 }
 
 // Ordered rules — first match wins. A raw error can satisfy several patterns
@@ -196,7 +206,7 @@ export const mapWarehouseError = (
 	pipe: string,
 	error: unknown,
 	authoredBy: SqlAuthorship = "caller",
-): WarehouseSqlError => {
+): WarehouseClassifiedError => {
 	const { message: rawMessage, code, type } = getClickHouseErrorDetails(error)
 	const message = cleanErrorMessage(rawMessage)
 	const base: ClassifiedBase = {

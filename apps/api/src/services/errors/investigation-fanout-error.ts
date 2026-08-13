@@ -1,10 +1,18 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
 /** Internal workflow-start failure shared by both investigation entry points. */
-export class FanoutStartError extends Data.TaggedError("@maple/api/errors/FanoutStartError")<{
-	readonly cause: string
-}> {
-	override get message(): string {
-		return `Investigation fanout failed to start: ${this.cause}`
+export class FanoutStartError extends Schema.TaggedError<FanoutStartError>()(
+	"@maple/api/errors/FanoutStartError",
+	{
+		message: Schema.String,
+		cause: Schema.String,
+	},
+) {
+	static fromCause(cause: unknown): FanoutStartError {
+		const detail = String(cause)
+		return new FanoutStartError({
+			message: `Investigation fanout failed to start: ${detail}`,
+			cause: detail,
+		})
 	}
 }

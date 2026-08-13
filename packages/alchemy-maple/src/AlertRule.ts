@@ -150,7 +150,11 @@ export const AlertRuleProvider = () =>
 					if (output?.ruleId) {
 						observedRaw = yield* api
 							.get(`/v2/alerts/rules/${output.ruleId}`)
-							.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+							.pipe(
+								Effect.catchTag("@maple/http/errors/AlertNotFoundError", () =>
+									Effect.succeed(undefined),
+								),
+							)
 					}
 					if (observedRaw === undefined) {
 						const adopted = yield* findByName(news.name)
@@ -171,13 +175,17 @@ export const AlertRuleProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/alerts/rules/${output.ruleId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag("@maple/http/errors/AlertNotFoundError", () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ olds, output }) {
 					if (output?.ruleId) {
 						const fetched = yield* api
 							.get(`/v2/alerts/rules/${output.ruleId}`)
-							.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+							.pipe(
+								Effect.catchTag("@maple/http/errors/AlertNotFoundError", () =>
+									Effect.succeed(undefined),
+								),
+							)
 						if (fetched !== undefined) return toAttributes(yield* decodeWireRule(fetched))
 					}
 					if (olds?.name !== undefined) {

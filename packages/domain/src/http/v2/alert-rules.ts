@@ -22,7 +22,7 @@ import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
 import { publicErrors } from "./public-error"
-import { V2WarehouseErrors } from "./query-errors"
+import { V2ManagedWarehouseErrors, V2WarehouseErrors } from "./query-errors"
 import { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
 
 export { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
@@ -825,7 +825,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 			params: { id: AlertRulePublicId },
 			query: ChecksQuery,
 			success: AlertCheckList,
-			error: [V2ParameterInvalid.schema, alertPersistence, alertNotFound],
+			error: [V2ParameterInvalid.schema, alertPersistence, alertNotFound, ...V2ManagedWarehouseErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listAlertRuleChecks",
@@ -840,7 +840,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 			params: { id: AlertRulePublicId },
 			query: AlertCheckSummaryQuery,
 			success: AlertCheckSummary,
-			error: [alertValidation, alertPersistence, alertNotFound],
+			error: [alertValidation, alertPersistence, alertNotFound, ...V2ManagedWarehouseErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "summarizeAlertRuleChecks",

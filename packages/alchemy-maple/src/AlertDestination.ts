@@ -147,7 +147,11 @@ export const AlertDestinationProvider = () =>
 					if (output?.destinationId) {
 						const fetched = yield* api
 							.get(`/v2/alerts/destinations/${output.destinationId}`)
-							.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+							.pipe(
+								Effect.catchTag("@maple/http/errors/AlertNotFoundError", () =>
+									Effect.succeed(undefined),
+								),
+							)
 						if (fetched !== undefined) observed = yield* decodeWireDestination(fetched)
 					}
 
@@ -172,13 +176,17 @@ export const AlertDestinationProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/alerts/destinations/${output.destinationId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag("@maple/http/errors/AlertNotFoundError", () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ output }) {
 					if (!output?.destinationId) return undefined
 					const fetched = yield* api
 						.get(`/v2/alerts/destinations/${output.destinationId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+						.pipe(
+							Effect.catchTag("@maple/http/errors/AlertNotFoundError", () =>
+								Effect.succeed(undefined),
+							),
+						)
 					if (fetched === undefined) return undefined
 					return toAttributes(yield* decodeWireDestination(fetched))
 				}),

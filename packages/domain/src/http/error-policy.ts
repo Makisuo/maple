@@ -57,26 +57,61 @@ export interface PublicHttpErrorBody<Tag extends string, Status extends PublicHt
 	readonly doc_url?: string
 }
 
-/** Runtime contract for a public error body when its exact tag/status are not known statically. */
-export const PublicHttpErrorBodySchema = Schema.Struct({
-	_tag: Schema.String.check(Schema.isPattern(/^@maple\//)),
-	type: PublicHttpErrorType,
-	code: Schema.String,
-	title: Schema.String,
-	message: Schema.String,
-	retryable: Schema.Boolean,
-	recovery: HttpErrorRecovery,
-	retry_after_seconds: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+const publicHttpErrorBodyFields = {
+	code: Schema.String.annotate({
+		description: "Stable public category for presentation; branch on `_tag` for the exact failure.",
+	}),
+	title: Schema.String.annotate({
+		description: "Short, human-readable heading suitable for an error state or toast.",
+	}),
+	message: Schema.String.annotate({
+		description: "Human-readable explanation for people, not programmatic branching.",
+	}),
+	retryable: Schema.Boolean.annotate({
+		description: "Whether the same logical request can plausibly succeed later.",
+	}),
+	recovery: HttpErrorRecovery.annotate({
+		description: "Recommended next action for an API client or person.",
+	}),
+	retry_after_seconds: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)).annotate({
+			description: "Minimum delay before retrying, mirrored in the Retry-After header.",
+		}),
+	),
 	retry_at: Schema.optionalKey(
 		Schema.String.check(
 			Schema.makeFilter((value: string) => Number.isFinite(Date.parse(value)), {
 				description: "Expected an ISO date-time string",
 			}),
-		),
+		).annotate({ description: "Absolute ISO-8601 time at which a retry may succeed." }),
 	),
-	param: Schema.optionalKey(Schema.String),
-	doc_url: Schema.optionalKey(Schema.String),
-})
+	param: Schema.optionalKey(
+		Schema.String.annotate({ description: "Request parameter associated with the failure." }),
+	),
+	doc_url: Schema.optionalKey(
+		Schema.String.annotate({ description: "Reference documentation for this failure." }),
+	),
+}
+
+/**
+ * Build the one public error body contract with either broad or literal tag/type schemas.
+ * Runtime decoding and endpoint-specific OpenAPI branches share these fields so they cannot drift.
+ */
+export const makePublicHttpErrorBodySchema = <Tag extends string, Type extends PublicHttpErrorType>(
+	tag: Schema.Codec<Tag, Tag, never, never>,
+	type: Schema.Codec<Type, Type, never, never>,
+) =>
+	Schema.Struct({
+		_tag: tag,
+		type,
+		...publicHttpErrorBodyFields,
+	})
+
+/** Runtime contract for a public error body when its exact tag/status are not known statically. */
+export const PublicHttpErrorBodySchema = makePublicHttpErrorBodySchema(
+	Schema.String.check(Schema.isPattern(/^@maple\//)),
+	PublicHttpErrorType,
+)
 export type AnyPublicHttpErrorBody = Schema.Schema.Type<typeof PublicHttpErrorBodySchema>
 
 type ErrorValue<Error, Value> = Value | ((error: Error) => Value)

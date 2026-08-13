@@ -571,7 +571,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 									attempt,
 								},
 							}),
-						catch: (cause) => new FanoutStartError({ cause: String(cause) }),
+						catch: FanoutStartError.fromCause,
 					}),
 				)
 
@@ -914,7 +914,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 									const instance = await binding.get!(row.workflowInstanceId!)
 									await instance.terminate()
 								},
-								catch: (cause) => new FanoutStartError({ cause: String(cause) }),
+								catch: FanoutStartError.fromCause,
 							}),
 						).pipe(
 							// An instance that already finished cannot be terminated, and

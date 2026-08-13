@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { IngestKeyEncryptionError, IngestKeyForbiddenError, IngestKeyPersistenceError } from "../ingest-keys"
+import { IngestKeyEncryptionError, IngestKeyPersistenceError } from "../ingest-keys"
 import { AuthorizationV2 } from "./auth"
 import { Timestamp } from "./envelopes"
 import { V2InsufficientPermissions } from "./errors"
@@ -50,11 +50,7 @@ export const V2IngestKeys = Schema.Struct({
 })
 export type V2IngestKeys = Schema.Schema.Type<typeof V2IngestKeys>
 
-const ingestKeyErrors = publicErrors(
-	IngestKeyForbiddenError,
-	IngestKeyPersistenceError,
-	IngestKeyEncryptionError,
-)
+const ingestKeyErrors = publicErrors(IngestKeyPersistenceError, IngestKeyEncryptionError)
 
 export class V2IngestKeysApiGroup extends HttpApiGroup.make("ingestKeys")
 	.add(

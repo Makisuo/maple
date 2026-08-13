@@ -25,6 +25,8 @@ import {
 	UserId,
 	type AlertIncidentId,
 	type AlertRuleId,
+	type ManagedWarehouseError,
+	type WarehouseError,
 } from "@maple/domain/http"
 import {
 	alertDeliveryEvents,
@@ -101,7 +103,10 @@ export interface AlertReadModelsServiceShape {
 			readonly beforeTimestamp?: string
 			readonly beforeGroupKey?: string
 		},
-	) => Effect.Effect<AlertChecksListResponse, AlertPersistenceError | AlertNotFoundError>
+	) => Effect.Effect<
+		AlertChecksListResponse,
+		AlertPersistenceError | AlertNotFoundError | ManagedWarehouseError
+	>
 	readonly summarizeRuleChecks: (
 		orgId: OrgId,
 		ruleId: AlertRuleId,
@@ -109,7 +114,10 @@ export interface AlertReadModelsServiceShape {
 			readonly since: string
 			readonly until: string
 		},
-	) => Effect.Effect<AlertChecksSummary, AlertPersistenceError | AlertNotFoundError | AlertValidationError>
+	) => Effect.Effect<
+		AlertChecksSummary,
+		AlertPersistenceError | AlertNotFoundError | AlertValidationError | ManagedWarehouseError
+	>
 	readonly listDeliveryEvents: (
 		orgId: OrgId,
 		options?: ListAlertDeliveryEventsOptions,
@@ -140,6 +148,14 @@ const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
 	value == null ? null : decodeIsoDateTimeStringSync(value.toISOString())
 
 const makeValidationError = (message: string) => new AlertValidationError({ message, details: [] })
+
+/** Assert the `.routing("ingest")` invariant and remove its impossible config-lookup branch. */
+const managedWarehouseQuery = <A, R>(
+	effect: Effect.Effect<A, WarehouseError, R>,
+): Effect.Effect<A, ManagedWarehouseError, R> =>
+	effect.pipe(
+		Effect.catchTag("@maple/http/errors/WarehouseConfigLookupError", (error) => Effect.die(error)),
+	)
 
 const rowToIncidentDocument = (row: AlertIncidentRow) =>
 	new AlertIncidentDocument({
@@ -309,21 +325,14 @@ export class AlertReadModelsService extends Context.Service<
 				},
 			)
 
-			const rows = yield* warehouse
-				// listRuleChecksQuery declares .routing("ingest") — alert_checks only
-				// exists in the managed Tinybird pipeline.
-				.compiledQuery(systemTenant(orgId), compiled, {
+			// listRuleChecksQuery declares .routing("ingest") — alert_checks only
+			// exists in the managed Tinybird pipeline.
+			const rows = yield* managedWarehouseQuery(
+				warehouse.compiledQuery(systemTenant(orgId), compiled, {
 					profile: "list",
 					context: "listAlertChecks",
-				})
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new AlertPersistenceError({
-								message: `Failed to list alert checks: ${error.message}`,
-							}),
-					),
-				)
+				}),
+			)
 
 			const checks = yield* Effect.try({
 				try: () =>
@@ -419,8 +428,8 @@ export class AlertReadModelsService extends Context.Service<
 			// stable across refreshes and matches alert evaluation granularity.
 			const bucketSeconds = Math.max(1, Math.ceil((endMs - startMs) / 1000 / 720 / 60)) * 60
 			const tenant = systemTenant(orgId)
-			const groupRows = yield* warehouse
-				.compiledQuery(
+			const groupRows = yield* managedWarehouseQuery(
+				warehouse.compiledQuery(
 					tenant,
 					CH.compile(CH.alertCheckGroupTotalsQuery({ since, until, limit: 20 }), {
 						orgId,
@@ -429,18 +438,11 @@ export class AlertReadModelsService extends Context.Service<
 						until,
 					}),
 					{ profile: "aggregation", context: "alertCheckSummaryGroups" },
-				)
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new AlertPersistenceError({
-								message: `Failed to summarize alert check groups: ${error.message}`,
-							}),
-					),
-				)
+				),
+			)
 			const topGroupKeys = groupRows.map((row) => String(row.groupKey ?? ""))
-			const rows = yield* warehouse
-				.compiledQuery(
+			const rows = yield* managedWarehouseQuery(
+				warehouse.compiledQuery(
 					tenant,
 					CH.compile(CH.alertChecksSummaryQuery({ topGroupKeys }), {
 						orgId,
@@ -450,15 +452,8 @@ export class AlertReadModelsService extends Context.Service<
 						bucketSeconds,
 					}),
 					{ profile: "aggregation", context: "alertCheckSummary" },
-				)
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new AlertPersistenceError({
-								message: `Failed to summarize alert checks: ${error.message}`,
-							}),
-					),
-				)
+				),
+			)
 
 			const points: AlertChecksSummaryPoint[] = rows.map((row) => ({
 				bucket: String(row.bucket),

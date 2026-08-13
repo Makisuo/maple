@@ -1,6 +1,6 @@
 // Warehouse error presentation metadata — the single source of truth.
 //
-// The nine warehouse error classes used to be re-enumerated by hand in five
+// The warehouse error classes used to be re-enumerated by hand in five
 // places (two MCP tables, the alerts v2 map, AlertsService's failure
 // categories, and the web's error formatter), so adding a tag meant five
 // lockstep edits across five packages and any missed arm silently changed
@@ -178,6 +178,11 @@ export const presentWarehouseError = (error: WarehouseErrorLike): PresentedWareh
 			}
 		case "@maple/http/errors/WarehouseConfigError":
 			return { title, description: message ?? "Database is not configured correctly." }
+		case "@maple/http/errors/WarehouseConfigLookupError":
+			return {
+				title,
+				description: "Maple could not load the database settings. Retry in a few seconds.",
+			}
 		case "@maple/http/errors/WarehouseClientError":
 			return { title, description: message ?? "Database response could not be decoded." }
 		case "@maple/http/errors/WarehouseSchemaDriftError": {

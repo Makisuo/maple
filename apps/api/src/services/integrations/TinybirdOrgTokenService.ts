@@ -1,5 +1,5 @@
 import type { OrgId } from "@maple/domain"
-import { Clock, Context, Data, Effect, Layer, Option, Redacted } from "effect"
+import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { listOrgScopedDatasourceNames } from "@/services/warehouse/warehouse-catalog"
 import { mintOrgReadJwt } from "@/services/auth/tinybird-jwt"
 import { Env } from "@/platform/Env"
@@ -29,10 +29,13 @@ export interface TinybirdOrgTokenServiceShape {
 	readonly getOrgReadToken: (orgId: OrgId) => Effect.Effect<string, TinybirdOrgTokenError>
 }
 
-export class TinybirdOrgTokenError extends Data.TaggedError("@maple/api/services/TinybirdOrgTokenError")<{
-	readonly reason: "MissingSigningKey" | "MissingWorkspaceId" | "MintFailed"
-	readonly message: string
-}> {}
+export class TinybirdOrgTokenError extends Schema.TaggedError<TinybirdOrgTokenError>()(
+	"@maple/api/services/TinybirdOrgTokenError",
+	{
+		reason: Schema.Literals(["MissingSigningKey", "MissingWorkspaceId", "MintFailed"]),
+		message: Schema.String,
+	},
+) {}
 
 export class TinybirdOrgTokenService extends Context.Service<
 	TinybirdOrgTokenService,

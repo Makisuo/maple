@@ -94,6 +94,21 @@ export class WarehouseConfigError extends HttpTaggedError<WarehouseConfigError>(
 	},
 ) {}
 
+/** Maple could not read the per-org warehouse routing configuration. */
+export class WarehouseConfigLookupError extends HttpTaggedError<WarehouseConfigLookupError>()(
+	"@maple/http/errors/WarehouseConfigLookupError",
+	warehouseErrorBaseFields,
+	{
+		status: 503,
+		code: "warehouse_config_lookup_unavailable",
+		title: "Database settings are temporarily unavailable",
+		message: "Maple could not load the database settings. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
+) {}
+
 /** Maple's query client could not decode/consume the response. */
 export class WarehouseClientError extends HttpTaggedError<WarehouseClientError>()(
 	"@maple/http/errors/WarehouseClientError",
@@ -223,6 +238,10 @@ export type WarehouseError =
 	| WarehouseMalformedQueryError
 	| WarehouseQuotaExceededError
 	| WarehouseValidationError
+	| WarehouseConfigLookupError
+
+/** Errors possible on managed-only routes, which never read per-org routing config. */
+export type ManagedWarehouseError = Exclude<WarehouseError, WarehouseConfigLookupError>
 
 /**
  * The full set of warehouse error classes, for reuse in `HttpApiEndpoint`
@@ -240,4 +259,5 @@ export const warehouseHttpErrors = [
 	WarehouseMalformedQueryError,
 	WarehouseQuotaExceededError,
 	WarehouseValidationError,
+	WarehouseConfigLookupError,
 ] as const

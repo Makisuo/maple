@@ -5,10 +5,10 @@ import {
 	type SelfDescribingHttpError,
 } from "../error-policy"
 import { Schema } from "effect"
-import { makeV2ErrorSchema, type V2ErrorTypeForStatus, type V2PublicError } from "./errors"
+import { makeV2ErrorSchema, type V2PublicError } from "./errors"
 
 export type V2ErrorEnvelopeFor<Error extends SelfDescribingHttpError> = Error extends SelfDescribingHttpError
-	? V2PublicError<Error["_tag"], V2ErrorTypeForStatus<PublicHttpErrorStatusOf<Error>>>
+	? V2PublicError<Error["_tag"], PublicHttpErrorStatusOf<Error>>
 	: never
 
 export type V2PublicErrorSchema<Error extends SelfDescribingHttpError> = Schema.Codec<
@@ -50,6 +50,5 @@ const makePublicErrorSchema = <Error extends SelfDescribingHttpError>(errorClass
 		identifier: errorClass.name,
 		title: typeof policy.title === "string" ? policy.title : errorClass.name,
 		description: `The ${tag} failure. HTTP ${policy.status}.`,
-		...(typeof policy.code === "string" ? { codeExample: policy.code } : {}),
 	})
 }

@@ -90,9 +90,7 @@ const drifted = (props: DashboardProps, observed: Schema.Schema.Type<typeof Wire
 		...(observed as unknown as Record<string, unknown>),
 		sections: observed.sections ?? [],
 	}
-	return Object.keys(body).some(
-		(key) => !deepEqual(body[key], seen[key], { stripNullish: true }),
-	)
+	return Object.keys(body).some((key) => !deepEqual(body[key], seen[key], { stripNullish: true }))
 }
 
 const toAttributes = (observed: Schema.Schema.Type<typeof WireDashboard>) => ({
@@ -119,7 +117,11 @@ export const DashboardProvider = () =>
 					if (output?.dashboardId) {
 						const fetched = yield* api
 							.get(`/v2/dashboards/${output.dashboardId}`)
-							.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+							.pipe(
+								Effect.catchTag("@maple/http/errors/DashboardNotFoundError", () =>
+									Effect.succeed(undefined),
+								),
+							)
 						if (fetched !== undefined) observed = yield* decodeWireDashboard(fetched)
 					}
 
@@ -136,13 +138,17 @@ export const DashboardProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/dashboards/${output.dashboardId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag("@maple/http/errors/DashboardNotFoundError", () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ output }) {
 					if (!output?.dashboardId) return undefined
 					const fetched = yield* api
 						.get(`/v2/dashboards/${output.dashboardId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+						.pipe(
+							Effect.catchTag("@maple/http/errors/DashboardNotFoundError", () =>
+								Effect.succeed(undefined),
+							),
+						)
 					if (fetched === undefined) return undefined
 					return toAttributes(yield* decodeWireDashboard(fetched))
 				}),

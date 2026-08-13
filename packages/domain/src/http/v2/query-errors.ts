@@ -8,6 +8,7 @@ import {
 	WarehouseAuthError,
 	WarehouseClientError,
 	WarehouseConfigError,
+	WarehouseConfigLookupError,
 	WarehouseMalformedQueryError,
 	WarehouseQueryError,
 	WarehouseQuotaExceededError,
@@ -19,6 +20,20 @@ import { publicErrors } from "./public-error"
 
 /** Exact public schemas for the complete WarehouseError union. */
 export const V2WarehouseErrors = publicErrors(
+	WarehouseQueryError,
+	WarehouseUpstreamError,
+	WarehouseAuthError,
+	WarehouseConfigError,
+	WarehouseClientError,
+	WarehouseSchemaDriftError,
+	WarehouseMalformedQueryError,
+	WarehouseQuotaExceededError,
+	WarehouseValidationError,
+	WarehouseConfigLookupError,
+)
+
+/** Managed-only routes never consult the per-org warehouse configuration. */
+export const V2ManagedWarehouseErrors = publicErrors(
 	WarehouseQueryError,
 	WarehouseUpstreamError,
 	WarehouseAuthError,

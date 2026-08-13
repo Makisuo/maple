@@ -21,6 +21,7 @@ import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
 import { publicError, publicErrors } from "./public-error"
+import { V2WarehouseErrors } from "./query-errors"
 import { AnomalyIncidentPublicId, ErrorIssuePublicId } from "./resource-ids"
 
 export { AnomalyIncidentPublicId } from "./resource-ids"
@@ -332,7 +333,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 			params: { id: AnomalyIncidentPublicId },
 			query: V2AnomalyTimeseriesQuery,
 			success: V2AnomalyIncidentTimeseries,
-			error: [anomalyPersistence, anomalyNotFound],
+			error: [anomalyPersistence, anomalyNotFound, ...V2WarehouseErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAnomalyIncidentTimeseries",

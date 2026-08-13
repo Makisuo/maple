@@ -1,4 +1,4 @@
-import { Cause, Clock, Data, Duration, Effect, HashMap, Option, Ref, Schedule, Schema } from "effect"
+import { Cause, Clock, Duration, Effect, HashMap, Option, Ref, Schedule, Schema } from "effect"
 import {
 	MAX_RAW_SQL_RESULT_BYTES,
 	MAX_RAW_SQL_RESULT_ROWS,
@@ -62,13 +62,14 @@ const CAPABILITIES_INSPECTION_TIMEOUT = Duration.seconds(2)
 const WarehouseCapabilityMetadataTarget = Schema.Literals(["version", "indexes", "columns", "settings"])
 type WarehouseCapabilityMetadataTarget = Schema.Schema.Type<typeof WarehouseCapabilityMetadataTarget>
 
-class WarehouseCapabilityProbeError extends Data.TaggedError(
+class WarehouseCapabilityProbeError extends Schema.TaggedError<WarehouseCapabilityProbeError>()(
 	"@maple/query-engine/execution/WarehouseCapabilityProbeError",
-)<{
-	readonly target: WarehouseCapabilityMetadataTarget
-	readonly message: string
-	readonly cause: unknown
-}> {}
+	{
+		target: WarehouseCapabilityMetadataTarget,
+		message: Schema.String,
+		cause: Schema.Defect(),
+	},
+) {}
 
 const CAPABILITY_AWARE_PIPES: ReadonlySet<string> = new Set([
 	"list_logs",

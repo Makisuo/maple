@@ -1,15 +1,17 @@
 import * as Context from "effect/Context"
+import * as Clock from "effect/Clock"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
-import * as Schedule from "effect/Schedule"
+import * as Schema from "effect/Schema"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
-	MapleApiError,
-	MapleConflictError,
-	MapleNotFoundError,
-	MapleUnauthorizedError,
+	MapleApiClientError,
+	MaplePublicErrorBodySchema,
+	isMapleApiResponseError,
+	makeMapleApiResponseError,
+	type MapleApiResponseError,
 	type MapleError,
 } from "./errors"
 import { MapleEnvironment } from "./MapleEnvironment"
@@ -21,9 +23,8 @@ import { MapleEnvironment } from "./MapleEnvironment"
  * with zero runtime dependencies beyond `effect`. Responses are returned as
  * parsed JSON (`unknown`); each provider decodes just the fields it needs.
  *
- * Known statuses map to typed errors (404 / 409 / 401·403); everything else
- * non-2xx is a {@link MapleApiError}. 429s and 5xx are retried with bounded
- * exponential backoff (the v2 API allows 600 requests per 60s per key).
+ * Declared non-2xx responses retain the server's complete public error body.
+ * Retry behavior comes from that body rather than being inferred from status.
  */
 export interface MapleApiShape {
 	readonly get: (path: string) => Effect.Effect<unknown, MapleError>
@@ -34,100 +35,114 @@ export interface MapleApiShape {
 
 export class MapleApi extends Context.Service<MapleApi, MapleApiShape>()("Maple::Api") {}
 
+const ErrorEnvelope = Schema.Struct({ error: MaplePublicErrorBodySchema })
+const decodeErrorEnvelope = Schema.decodeUnknownSync(Schema.fromJsonString(ErrorEnvelope))
+
 const errorFromResponse = (status: number, bodyText: string): MapleError => {
-	let message = `Maple API request failed with status ${status}`
-	let errorType: string | undefined
-	let code: string | undefined
 	try {
-		const parsed = JSON.parse(bodyText) as { error?: { type?: string; code?: string; message?: string } }
-		if (parsed?.error?.message) message = parsed.error.message
-		errorType = parsed?.error?.type
-		code = parsed?.error?.code
-	} catch {
-		if (bodyText.length > 0) message = `${message}: ${bodyText.slice(0, 200)}`
+		return makeMapleApiResponseError(status, decodeErrorEnvelope(bodyText).error)
+	} catch (cause) {
+		return new MapleApiClientError({
+			status,
+			message: `Maple API returned an invalid error response with status ${status}`,
+			cause,
+		})
 	}
-	const fields = {
-		status,
-		message,
-		...(errorType !== undefined ? { errorType } : {}),
-		...(code !== undefined ? { code } : {}),
-	}
-	if (status === 404) return new MapleNotFoundError(fields)
-	if (status === 409) return new MapleConflictError(fields)
-	if (status === 401 || status === 403) return new MapleUnauthorizedError(fields)
-	return new MapleApiError(fields)
 }
 
-const isRetryable = (error: MapleError): boolean =>
-	error._tag === "Maple::ApiError" && (error.status === 429 || error.status >= 500)
-
-// Exponential backoff capped at 10s (`min` = fastest of the two), bounded to
-// six recurrences (`max` = continue only while every schedule still recurs).
-const retryPolicy = Schedule.max([
-	Schedule.min([Schedule.exponential(Duration.millis(500), 2), Schedule.spaced(Duration.seconds(10))]),
-	Schedule.recurs(6),
-])
+const retryDelay = Effect.fn("MapleApi.retryDelay")(function* (
+	error: MapleApiResponseError,
+	attempt: number,
+) {
+	if (error.error.retry_after_seconds !== undefined) {
+		return Duration.seconds(error.error.retry_after_seconds)
+	}
+	if (error.error.retry_at !== undefined) {
+		const retryAt = Date.parse(error.error.retry_at)
+		if (Number.isFinite(retryAt)) {
+			const now = yield* Clock.currentTimeMillis
+			return Duration.millis(Math.max(0, retryAt - now))
+		}
+	}
+	return Duration.millis(Math.min(500 * 2 ** attempt, 10_000))
+})
 
 export const make = Effect.gen(function* () {
 	const { baseUrl, apiKey } = yield* MapleEnvironment
 	const httpClient = yield* HttpClient.HttpClient
 
-	const request = (method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown) =>
-		Effect.gen(function* () {
-			let req = HttpClientRequest.make(method)(`${baseUrl}${path}`).pipe(
-				HttpClientRequest.setHeaders({
-					Authorization: `Bearer ${Redacted.value(apiKey)}`,
-					Accept: "application/json",
-				}),
-			)
-			if (body !== undefined) {
-				req = yield* HttpClientRequest.bodyJson(req, body).pipe(
+	const request = (method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown) => {
+		const canAutomaticallyRetry = method === "GET" || method === "DELETE"
+		const execute: (attempt: number) => Effect.Effect<unknown, MapleError> = Effect.fn(
+			"MapleApi.requestAttempt",
+		)(function* (attempt: number) {
+			return yield* Effect.gen(function* () {
+				let req = HttpClientRequest.make(method)(`${baseUrl}${path}`).pipe(
+					HttpClientRequest.setHeaders({
+						Authorization: `Bearer ${Redacted.value(apiKey)}`,
+						Accept: "application/json",
+					}),
+				)
+				if (body !== undefined) {
+					req = yield* HttpClientRequest.bodyJson(req, body).pipe(
+						Effect.mapError(
+							(error) =>
+								new MapleApiClientError({
+									status: 0,
+									message: `Failed to encode request body: ${String(error)}`,
+									cause: error,
+								}),
+						),
+					)
+				}
+				const response = yield* httpClient.execute(req).pipe(
 					Effect.mapError(
 						(error) =>
-							new MapleApiError({
+							new MapleApiClientError({
 								status: 0,
-								message: `Failed to encode request body: ${String(error)}`,
+								message: `Maple API request failed: ${error.message}`,
+								cause: error,
 							}),
 					),
 				)
-			}
-			const response = yield* httpClient.execute(req).pipe(
-				Effect.mapError(
-					(error) =>
-						new MapleApiError({
-							status: 0,
-							message: `Maple API request failed: ${error.message}`,
-						}),
+				// Drain the body either way so the connection is released.
+				const text = yield* response.text.pipe(
+					Effect.mapError(
+						(error) =>
+							new MapleApiClientError({
+								status: response.status,
+								message: `Failed to read response: ${error.message}`,
+								cause: error,
+							}),
+					),
+				)
+				if (response.status >= 200 && response.status < 300) {
+					if (text.length === 0) return undefined as unknown
+					return yield* Effect.try({
+						try: () => JSON.parse(text) as unknown,
+						catch: (cause) =>
+							new MapleApiClientError({
+								status: response.status,
+								message: `Maple API returned invalid JSON (status ${response.status})`,
+								cause,
+							}),
+					})
+				}
+				return yield* Effect.fail(errorFromResponse(response.status, text))
+			}).pipe(
+				Effect.catchIf(isMapleApiResponseError, (error) =>
+					canAutomaticallyRetry && error.error.retryable && attempt < 6
+						? retryDelay(error, attempt).pipe(
+								Effect.flatMap((delay) => Effect.sleep(delay)),
+								Effect.andThen(execute(attempt + 1)),
+							)
+						: Effect.fail(error),
 				),
 			)
-			// Drain the body either way so the connection is released.
-			const text = yield* response.text.pipe(
-				Effect.mapError(
-					(error) =>
-						new MapleApiError({
-							status: response.status,
-							message: `Failed to read response: ${error.message}`,
-						}),
-				),
-			)
-			if (response.status >= 200 && response.status < 300) {
-				if (text.length === 0) return undefined as unknown
-				return yield* Effect.try({
-					try: () => JSON.parse(text) as unknown,
-					catch: () =>
-						new MapleApiError({
-							status: response.status,
-							message: `Maple API returned invalid JSON (status ${response.status})`,
-						}),
-				})
-			}
-			return yield* Effect.fail(errorFromResponse(response.status, text))
-		}).pipe(
-			Effect.retry({
-				schedule: retryPolicy,
-				while: isRetryable,
-			}),
-		)
+		})
+
+		return execute(0)
+	}
 
 	return {
 		get: (path: string) => request("GET", path),

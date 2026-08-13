@@ -21,6 +21,7 @@ import {
 	RoleName,
 	type UserId,
 	UserId as UserIdSchema,
+	type WarehouseError,
 } from "@maple/domain/http"
 import {
 	anomalyDetectorSettings,
@@ -125,7 +126,7 @@ const ANOMALY_ACTIVE_DISCOVERY_WINDOW_MS = 2 * HOUR_MS
 const ANOMALY_ACTIVE_ORGS_CACHE_BUCKET = "anomaly-active-orgs"
 const ANOMALY_ACTIVE_ORGS_CACHE_KEY = "active"
 const ANOMALY_ACTIVE_ORGS_CACHE_TTL_S = 6 * 60 * 60
-const makePersistenceError = makePersistenceErrorMapper(
+export const makePersistenceError = makePersistenceErrorMapper(
 	AnomalyPersistenceError,
 	"Anomaly persistence failure",
 )
@@ -200,7 +201,7 @@ export interface AnomalyDetectionServiceShape {
 		opts: { readonly startTime?: string; readonly endTime?: string },
 	) => Effect.Effect<
 		AnomalyIncidentTimeseriesResponse,
-		AnomalyPersistenceError | AnomalyIncidentNotFoundError
+		AnomalyPersistenceError | AnomalyIncidentNotFoundError | WarehouseError
 	>
 	readonly getSettings: (
 		orgId: OrgId,
@@ -673,12 +674,10 @@ const make = Effect.gen(function* () {
 				deploymentEnv: row.deploymentEnv,
 				bucketSeconds,
 			})
-			const rows = yield* warehouse
-				.compiledQuery(tenant, compiled, {
-					profile: "list",
-					context: "anomalyIncidentTimeseries",
-				})
-				.pipe(Effect.mapError(makePersistenceError))
+			const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+				profile: "list",
+				context: "anomalyIncidentTimeseries",
+			})
 			buckets = rollingCountBuckets(
 				rows.map((r) => ({
 					bucketMs: parseWarehouseDateTime(String(r.bucket ?? "")),
@@ -706,12 +705,10 @@ const make = Effect.gen(function* () {
 				serviceName: row.serviceName,
 				deploymentEnv: row.deploymentEnv,
 			})
-			const rows = yield* warehouse
-				.compiledQuery(tenant, compiled, {
-					profile: "list",
-					context: "anomalyIncidentTimeseries",
-				})
-				.pipe(Effect.mapError(makePersistenceError))
+			const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+				profile: "list",
+				context: "anomalyIncidentTimeseries",
+			})
 			buckets = rows.map((r) => {
 				const hourMs = parseWarehouseDateTime(String(r.hour ?? ""))
 				const errorLogCount = Number(r.errorLogCount ?? 0)
@@ -728,12 +725,10 @@ const make = Effect.gen(function* () {
 				serviceName: row.serviceName,
 				deploymentEnv: row.deploymentEnv,
 			})
-			const rows = yield* warehouse
-				.compiledQuery(tenant, compiled, {
-					profile: "list",
-					context: "anomalyIncidentTimeseries",
-				})
-				.pipe(Effect.mapError(makePersistenceError))
+			const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+				profile: "list",
+				context: "anomalyIncidentTimeseries",
+			})
 			const signalType = row.signalType
 			unit =
 				signalType === "error_rate"

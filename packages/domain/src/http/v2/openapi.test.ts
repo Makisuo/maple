@@ -224,7 +224,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			expect(op.description.length).toBeGreaterThan(20)
 			expect(op.tags).toHaveLength(1)
 			expect(op.security).toEqual([{ bearer: [] }])
-			for (const status of ["400", "401", "403", "429", "500"]) {
+			for (const status of ["400", "401", "403", "429", "500", "504"]) {
 				expect(
 					op.responses[status],
 					`${method.toUpperCase()} ${path} declares ${status}`,
@@ -385,7 +385,7 @@ describe("MapleApiV2 OpenAPI", () => {
 		const declared = (method: string, path: string) =>
 			Object.keys(operation(method, path).responses).sort()
 
-		// 400/401/403/429/500 come from the middleware; 503 from the handlers.
+		// 400/401/403/429/500/504 come from shared boundaries; 503 from the handlers.
 		expect(declared("get", "/v2/integrations/slack")).toEqual([
 			"200",
 			"400",
@@ -394,6 +394,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"429",
 			"500",
 			"503",
+			"504",
 		])
 		expect(declared("post", "/v2/integrations/slack/install")).toEqual([
 			"200",
@@ -403,6 +404,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"429",
 			"500",
 			"503",
+			"504",
 		])
 		expect(declared("delete", "/v2/integrations/slack")).toEqual([
 			"200",
@@ -412,6 +414,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"429",
 			"500",
 			"503",
+			"504",
 		])
 		// Only `channels` can 409 (not connected) or 502 (Slack rejected us).
 		expect(declared("get", "/v2/integrations/slack/channels")).toEqual([
@@ -424,6 +427,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"500",
 			"502",
 			"503",
+			"504",
 		])
 	})
 
@@ -481,6 +485,7 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(responseErrorTags("get", "/v2/integrations/planetscale/organizations", "401")).toEqual([
 			"@maple/http/errors/IntegrationsRevokedError",
 			"@maple/http/v2/InvalidCredentialsError",
+			"@maple/http/errors/UnauthorizedError",
 		])
 		expect(responseErrorTags("get", "/v2/session_replays/{id}/events", "413")).toEqual([
 			"@maple/http/v2/SessionReplayRangeTooLargeError",
@@ -495,6 +500,40 @@ describe("MapleApiV2 OpenAPI", () => {
 			"@maple/http/v2/ResponseSchemaError",
 			"@maple/http/v2/UnexpectedError",
 		])
+	})
+
+	it("does not advertise service errors that v2 handlers cannot emit", () => {
+		expect(responseErrorTags("post", "/v2/api_keys", "403")).toEqual([
+			"@maple/http/v2/InsufficientPermissionsError",
+			"@maple/http/v2/InsufficientScopeError",
+		])
+		expect(responseErrorTags("get", "/v2/ingest_keys", "403")).toEqual([
+			"@maple/http/v2/InsufficientPermissionsError",
+			"@maple/http/v2/InsufficientScopeError",
+		])
+	})
+
+	it("preserves warehouse failures on v2 read-model endpoints", () => {
+		for (const [method, path] of [
+			["get", "/v2/error_issues"],
+			["get", "/v2/error_issues/{id}"],
+			["get", "/v2/anomalies/incidents/{id}/timeseries"],
+		] as const) {
+			expect(responseErrorTags(method, path, "429")).toContain(
+				"@maple/http/errors/WarehouseQuotaExceededError",
+			)
+			expect(responseErrorTags(method, path, "503")).toContain(
+				"@maple/http/errors/WarehouseConfigLookupError",
+			)
+		}
+		for (const path of ["/v2/alerts/rules/{id}/checks", "/v2/alerts/rules/{id}/checks/summary"]) {
+			expect(responseErrorTags("get", path, "429")).toContain(
+				"@maple/http/errors/WarehouseQuotaExceededError",
+			)
+			expect(responseErrorTags("get", path, "503")).not.toContain(
+				"@maple/http/errors/WarehouseConfigLookupError",
+			)
+		}
 	})
 
 	it("decodes slack-bot destination create/update params and rejects a blank channel_id", () => {

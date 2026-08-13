@@ -40,6 +40,7 @@ import {
 	SpanId,
 	TraceId,
 	UserId,
+	WarehouseConfigLookupError,
 } from "@maple/domain/http"
 import { MapleApiV2, encodePublicId } from "@maple/domain/http/v2"
 import { WarehouseResponseLimitError } from "@maple/query-engine/execution"
@@ -358,10 +359,11 @@ const ORG = Schema.decodeUnknownSync(OrgId)("org_phase1_e2e")
 const USER = Schema.decodeUnknownSync(UserId)("user_phase1_e2e")
 
 type InvestigationStartMode = "success" | "quota" | "unavailable" | "rejected" | "restart_not_found"
+type IssueReadFailure = "none" | "persistence" | "warehouse_config_lookup"
 
 const makeHarness = (
 	warehouseService: WarehouseQueryServiceShape = warehouseStub,
-	failIssueReads = false,
+	issueReadFailure: IssueReadFailure = "none",
 	investigationStartMode: InvestigationStartMode = "success",
 ) => {
 	const testDb = createTestDb(createdDbs)
@@ -377,6 +379,15 @@ const makeHarness = (
 		readonly orgId: string
 		readonly options: Record<string, unknown>
 	} | null = null
+	const issueReadFailureEffect = () =>
+		issueReadFailure === "warehouse_config_lookup"
+			? Effect.fail(
+					new WarehouseConfigLookupError({
+						pipeName: "errorIssues",
+						message: "SECRET_CONFIG_LOOKUP_FAILURE",
+					}),
+				)
+			: Effect.fail(new ErrorPersistenceError({ message: "database unavailable" }))
 	const startInvestigation = () => {
 		switch (investigationStartMode) {
 			case "quota":
@@ -474,15 +485,15 @@ const makeHarness = (
 		Layer.succeed(ErrorIssueReadModelsService, {
 			listIssues: (orgId, options) => {
 				lastIssueListCall = { orgId, options }
-				if (failIssueReads) {
-					return Effect.fail(new ErrorPersistenceError({ message: "database unavailable" }))
+				if (issueReadFailure !== "none") {
+					return issueReadFailureEffect()
 				}
 				return Effect.succeed(new ErrorIssuesListResponse({ issues: [errorIssueFixture] }))
 			},
 			getIssue: (orgId, issueId, options) => {
 				lastIssueDetailCall = { orgId, options }
-				return failIssueReads
-					? Effect.fail(new ErrorPersistenceError({ message: "warehouse unavailable" }))
+				return issueReadFailure !== "none"
+					? issueReadFailureEffect()
 					: issueId === errorIssueFixture.id
 						? Effect.succeed(errorIssueDetailFixture)
 						: Effect.fail(ErrorIssueNotFoundError.forIssue(issueId))
@@ -695,7 +706,7 @@ describe("v2 error_issues over HTTP", () => {
 	})
 
 	it("maps list and rich-retrieve dependency failures to v2 503 errors", async () => {
-		const harness = makeHarness(warehouseStub, true)
+		const harness = makeHarness(warehouseStub, "persistence")
 		const key = await harness.bootstrapKey(["error_issues:read"])
 		const list = await harness.request("GET", "/v2/error_issues", {
 			token: key.secret,
@@ -708,6 +719,22 @@ describe("v2 error_issues over HTTP", () => {
 		})
 		expect(detail.status).toBe(503)
 		expect(detail.body.error.type).toBe("api_error")
+		await harness.dispose()
+	})
+
+	it("preserves exact warehouse failures instead of relabeling them as persistence", async () => {
+		const harness = makeHarness(warehouseStub, "warehouse_config_lookup")
+		const key = await harness.bootstrapKey(["error_issues:read"])
+		const response = await harness.request("GET", "/v2/error_issues", { token: key.secret })
+
+		expect(response.status).toBe(503)
+		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/errors/WarehouseConfigLookupError",
+			code: "warehouse_config_lookup_unavailable",
+			retryable: true,
+			recovery: "retry",
+		})
+		expect(JSON.stringify(response.body)).not.toContain("SECRET_CONFIG_LOOKUP_FAILURE")
 		await harness.dispose()
 	})
 })

@@ -121,6 +121,7 @@ const WAREHOUSE_FAILURE_CATEGORIES = {
 	"@maple/http/errors/WarehouseUpstreamError": "tinybird_upstream",
 	"@maple/http/errors/WarehouseAuthError": "tinybird_auth",
 	"@maple/http/errors/WarehouseConfigError": "tinybird_config",
+	"@maple/http/errors/WarehouseConfigLookupError": "tinybird_config_lookup",
 	"@maple/http/errors/WarehouseClientError": "tinybird_client",
 	"@maple/http/errors/WarehouseSchemaDriftError": "tinybird_schema_drift",
 	"@maple/http/errors/WarehouseMalformedQueryError": "malformed_query",

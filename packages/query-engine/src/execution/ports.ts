@@ -12,7 +12,7 @@ import type { CompiledQuery } from "../ch"
 import type { WarehouseCapabilities } from "../capabilities"
 import type { WarehouseExecutorShape } from "../observability"
 import type { SqlQueryOptions } from "../profiles"
-import type { WarehouseSqlError } from "./errors"
+import type { WarehouseExecutionError } from "./errors"
 import type { WarehouseResponseLimitError } from "./response-limits"
 
 /** The minimal tenant surface the executor reads (org scope + identity for spans). */
@@ -79,7 +79,7 @@ export interface WarehouseExecutorDeps {
 		tenant: ExecutionTenant,
 		purpose: RoutePurpose,
 		label: string,
-	) => Effect.Effect<WarehouseRoute, WarehouseSqlError>
+	) => Effect.Effect<WarehouseRoute, WarehouseExecutionError>
 	/**
 	 * Drop whatever the host caches to answer `resolveRoute` for this tenant, and
 	 * report whether that actually invalidated a per-org routing override.
@@ -107,7 +107,7 @@ export interface WarehouseQueryServiceShape {
 		tenant: ExecutionTenant,
 		payload: WarehouseQueryRequest,
 		options?: SqlQueryOptions,
-	) => Effect.Effect<WarehouseQueryResponse, WarehouseSqlError | WarehouseValidationError>
+	) => Effect.Effect<WarehouseQueryResponse, WarehouseExecutionError | WarehouseValidationError>
 	/**
 	 * Execute a query that deliberately spans every tenant. The compiled query
 	 * must declare `.crossOrg()`, and `justification` is recorded on the span so
@@ -123,19 +123,22 @@ export interface WarehouseQueryServiceShape {
 		options: SqlQueryOptions & { readonly justification: string },
 	) => Effect.Effect<
 		ReadonlyArray<T>,
-		WarehouseSqlError | WarehouseValidationError | WarehouseSchemaDriftError
+		WarehouseExecutionError | WarehouseValidationError | WarehouseSchemaDriftError
 	>
 	/** Execute validated user-authored SQL with tenant-scoped credentials and hard response limits. */
 	readonly rawSqlQuery: (
 		tenant: ExecutionTenant,
 		sql: string,
 		options?: Pick<SqlQueryOptions, "profile" | "context">,
-	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseSqlError | RawSqlValidationError>
+	) => Effect.Effect<
+		ReadonlyArray<Record<string, unknown>>,
+		WarehouseExecutionError | RawSqlValidationError
+	>
 	readonly compiledQuery: <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<T>, WarehouseSqlError | WarehouseValidationError>
+	) => Effect.Effect<ReadonlyArray<T>, WarehouseExecutionError | WarehouseValidationError>
 	/**
 	 * `compiledQuery` with an explicit ceiling on how much of the response we are
 	 * willing to materialize, failing with `WarehouseResponseLimitError` past it.
@@ -152,18 +155,18 @@ export interface WarehouseQueryServiceShape {
 		},
 	) => Effect.Effect<
 		ReadonlyArray<T>,
-		WarehouseSqlError | WarehouseValidationError | WarehouseResponseLimitError
+		WarehouseExecutionError | WarehouseValidationError | WarehouseResponseLimitError
 	>
 	readonly compiledQueryWithCapabilities: <T>(
 		tenant: ExecutionTenant,
 		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
 		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<T>, WarehouseSqlError | WarehouseValidationError>
+	) => Effect.Effect<ReadonlyArray<T>, WarehouseExecutionError | WarehouseValidationError>
 	readonly compiledQueryFirst: <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
-	) => Effect.Effect<Option.Option<T>, WarehouseSqlError | WarehouseValidationError>
+	) => Effect.Effect<Option.Option<T>, WarehouseExecutionError | WarehouseValidationError>
 	/**
 	 * Resolve this tenant's route and capabilities once, so a fan-out that
 	 * follows finds them memoized instead of each branch deriving them itself.
@@ -186,7 +189,7 @@ export interface WarehouseQueryServiceShape {
 		tenant: ExecutionTenant,
 		datasource: string,
 		rows: ReadonlyArray<T>,
-	) => Effect.Effect<void, WarehouseSqlError>
+	) => Effect.Effect<void, WarehouseExecutionError>
 	/**
 	 * Present this service as the package-level `WarehouseExecutor` for a given
 	 * tenant — the single managed-warehouse implementation of that interface.

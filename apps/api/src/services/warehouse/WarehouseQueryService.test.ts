@@ -3,6 +3,7 @@ import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effe
 import {
 	WarehouseQueryError,
 	WarehouseConfigError,
+	WarehouseConfigLookupError,
 	MAX_RAW_SQL_RESULT_BYTES,
 	WarehouseSchemaDriftError,
 	WarehouseUpstreamError,
@@ -253,7 +254,7 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 		const cases = [
 			{
 				source: new OrgClickHouseSettingsPersistenceError({ message: "database unavailable" }),
-				expected: WarehouseUpstreamError,
+				expected: WarehouseConfigLookupError,
 			},
 			{
 				source: new OrgClickHouseSettingsEncryptionError({ message: "decrypt failed" }),
@@ -286,7 +287,7 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 					const mapped = getError(exit)
 					assert.instanceOf(mapped, expected)
 					assert.strictEqual(
-						(mapped as WarehouseConfigError | WarehouseUpstreamError).cause,
+						(mapped as WarehouseConfigError | WarehouseConfigLookupError).cause,
 						source,
 					)
 				}).pipe(Effect.provide(layer))

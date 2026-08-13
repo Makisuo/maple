@@ -1,14 +1,17 @@
 import { createClerkClient } from "@clerk/backend"
 import type { OrgId } from "@maple/domain/http"
-import { Context, Data, Effect, Layer, Option, Redacted } from "effect"
+import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Env } from "@/platform/Env"
 import { clerkRequest } from "@/services/auth/clerk-request"
 
-export class OrgMembersError extends Data.TaggedError("@maple/api/services/OrgMembersError")<{
-	readonly message: string
-	/** User ids the caller supplied that are not members of the org. */
-	readonly unknownUserIds?: ReadonlyArray<string>
-}> {}
+export class OrgMembersError extends Schema.TaggedError<OrgMembersError>()(
+	"@maple/api/services/OrgMembersError",
+	{
+		message: Schema.String,
+		/** User ids the caller supplied that are not members of the org. */
+		unknownUserIds: Schema.optionalKey(Schema.Array(Schema.String)),
+	},
+) {}
 
 export interface OrgMember {
 	readonly userId: string

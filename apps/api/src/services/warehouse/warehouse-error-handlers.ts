@@ -15,6 +15,7 @@ export const warehouseHandlers = <A, E, R>(f: (error: WarehouseError) => Effect.
 		"@maple/http/errors/WarehouseUpstreamError": f,
 		"@maple/http/errors/WarehouseAuthError": f,
 		"@maple/http/errors/WarehouseConfigError": f,
+		"@maple/http/errors/WarehouseConfigLookupError": f,
 		"@maple/http/errors/WarehouseClientError": f,
 		"@maple/http/errors/WarehouseSchemaDriftError": f,
 		"@maple/http/errors/WarehouseMalformedQueryError": f,

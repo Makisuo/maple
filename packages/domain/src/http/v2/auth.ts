@@ -1,7 +1,7 @@
 import { HttpApiMiddleware, HttpApiSecurity, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ApiKeyLookupPersistenceError } from "../api-keys"
-import { Context } from "../current-tenant"
+import { Context, UnauthorizedError } from "../current-tenant"
 import {
 	V2InsufficientScope,
 	V2InvalidCredentials,
@@ -9,6 +9,7 @@ import {
 	V2RateLimited,
 	V2ResponseSchemaFailure,
 	V2UnexpectedFailure,
+	V2WorkerUnavailable,
 } from "./errors"
 import { publicError } from "./public-error"
 
@@ -31,6 +32,7 @@ export class AuthorizationV2 extends HttpApiMiddleware.Service<
 		V2InsufficientScope.schema,
 		V2RateLimited.schema,
 		publicError(ApiKeyLookupPersistenceError),
+		publicError(UnauthorizedError),
 	],
 	security: {
 		bearer: HttpApiSecurity.bearer.pipe(
@@ -48,7 +50,7 @@ export class AuthorizationV2 extends HttpApiMiddleware.Service<
 /** Converts unexpected route defects into the public v2 API-error envelope. */
 export class V2UnexpectedErrors extends HttpApiMiddleware.Service<V2UnexpectedErrors>()(
 	"V2UnexpectedErrors",
-	{ error: V2UnexpectedFailure.schema },
+	{ error: [V2UnexpectedFailure.schema, V2WorkerUnavailable.schema] },
 ) {}
 
 /**
