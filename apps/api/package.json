@@ -44,6 +44,7 @@
 		"@maple/llm": "workspace:*",
 		"@maple/query-engine": "workspace:*",
 		"@maple/query-engine-integrations": "workspace:*",
+		"@maple/widgets": "workspace:*",
 		"@tinybirdco/sdk": "catalog:tinybird",
 		"drizzle-orm": "^0.45.1",
 		"effect": "catalog:effect"

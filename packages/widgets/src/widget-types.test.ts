@@ -1,42 +1,22 @@
 import { describe, expect, it } from "vitest"
 import {
-	defaultWidgetHeight,
 	defaultWidgetLayout,
+	isMcpVisualization,
+	isWidgetVisualization,
 	MCP_VISUALIZATIONS,
 	PANEL_TYPES,
 	rawSqlDisplayTypeFor,
 	widgetTypeByPersesKind,
 	widgetTypeByVisualization,
+	WIDGET_VISUALIZATIONS,
 } from "./widget-types"
 
-describe("defaultWidgetHeight", () => {
-	// The canvas is rowHeight 60 with a 12px gutter, so h:6 is a 420px tile.
-	// Pinned because nothing else in the repo asserts these numbers, and they
-	// used to be copy-pasted across six call sites that silently drifted apart.
-	it("gives charts the tall default", () => {
-		expect(defaultWidgetHeight("chart")).toEqual({ h: 6, minH: 2 })
-	})
-
-	it("treats every unrecognized visualization as a chart", () => {
-		for (const visualization of ["gauge", "pie", "heatmap", "funnel", "hbar", ""]) {
-			expect(defaultWidgetHeight(visualization).h).toBe(6)
-		}
-	})
-
-	it("keeps stats compact and row-based widgets at table height", () => {
-		expect(defaultWidgetHeight("stat")).toEqual({ h: 2, minH: 2 })
-		expect(defaultWidgetHeight("table")).toEqual({ h: 5, minH: 3 })
-		expect(defaultWidgetHeight("list")).toEqual({ h: 5, minH: 3 })
-		expect(defaultWidgetHeight("markdown")).toEqual({ h: 5, minH: 3 })
-	})
-})
-
 describe("defaultWidgetLayout", () => {
-	// The auto-place size, which is NOT the template height: a hand-added stat is
-	// h:4 so it has room for a sparkline, while a template stat row is h:2.
+	// The one auto-place size. There used to be a second, `templateHeight`, which
+	// packed stat rows to h:2 — but templates hand-write every layout literal and
+	// never called it, so it was removed rather than left half-connected.
 	it("gives a hand-added stat room for a sparkline", () => {
 		expect(defaultWidgetLayout("stat")).toEqual({ w: 3, h: 4, minW: 2, minH: 2 })
-		expect(defaultWidgetHeight("stat").h).toBe(2)
 	})
 
 	it("gives row-based widgets the wide slot", () => {
@@ -167,5 +147,44 @@ describe("MCP_VISUALIZATIONS", () => {
 			"stat",
 			"table",
 		])
+	})
+})
+
+// `WIDGET_VISUALIZATIONS` is the const tuple schema v2 closes the stored
+// `visualization` field against. `WIDGET_TYPES` is typed against it, so the
+// compiler already stops the table naming a member that isn't here; this covers
+// the direction the compiler can't — a member left behind after the panel type
+// that claimed it was removed, which would keep a dead kind decodable forever.
+describe("WIDGET_VISUALIZATIONS", () => {
+	it("is exactly the set the widget type table claims", () => {
+		expect([...WIDGET_VISUALIZATIONS].sort()).toEqual(
+			[...new Set(PANEL_TYPES.map((meta) => meta.visualization))].sort(),
+		)
+	})
+
+	it("narrows only its own members", () => {
+		for (const visualization of WIDGET_VISUALIZATIONS) {
+			expect(isWidgetVisualization(visualization)).toBe(true)
+		}
+		for (const notAVisualization of ["sankey", "Chart", "", "line", undefined, null, 7]) {
+			expect(isWidgetVisualization(notAVisualization)).toBe(false)
+		}
+	})
+
+	// `line` is a PanelType, not a visualization — it persists as `chart`. The
+	// guard must not accept it, or a widget could be stored under a kind the
+	// renderer registry has no entry for.
+	it("rejects panel types that are not themselves a visualization", () => {
+		expect(isWidgetVisualization("line")).toBe(false)
+		expect(isWidgetVisualization("bar")).toBe(false)
+		expect(isWidgetVisualization("area")).toBe(false)
+	})
+
+	it("scopes the MCP subset to the same set", () => {
+		for (const visualization of MCP_VISUALIZATIONS) {
+			expect(isWidgetVisualization(visualization)).toBe(true)
+			expect(isMcpVisualization(visualization)).toBe(true)
+		}
+		expect(isMcpVisualization("sankey")).toBe(false)
 	})
 })

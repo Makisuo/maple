@@ -36,6 +36,8 @@
 	},
 	"dependencies": {
 		"@maple-dev/clickhouse-builder": "workspace:*",
+		"@maple/primitives": "workspace:*",
+		"@maple/widgets": "workspace:*",
 		"@tinybirdco/sdk": "catalog:tinybird",
 		"effect": "catalog:effect"
 	},

@@ -1,7 +1,6 @@
 import { Clock, Effect, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import {
-	DashboardDocument,
 	DashboardId,
 	DashboardWidgetSchema,
 	IsoDateTimeString,
@@ -10,7 +9,9 @@ import {
 	WidgetDisplayConfigSchema,
 	WidgetLayoutSchema,
 	defaultWidgetLayout,
+	findNextPosition,
 	widgetTypeByVisualization,
+	withWidgets,
 } from "@maple/domain/http"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
@@ -19,8 +20,6 @@ import { McpQueryError } from "@/mcp/tools/types"
 const decodeDashboardId = Schema.decodeUnknownEffect(DashboardId)
 
 export type DashboardWidget = typeof DashboardWidgetSchema.Type
-
-const GRID_COLS = 12
 
 const decodeIsoDateTimeString = Schema.decodeUnknownSync(IsoDateTimeString)
 
@@ -69,29 +68,11 @@ export const defaultSizeForVisualization = (visualization: string): { w: number;
 }
 
 /**
- * Port of `findNextPosition` from
- * `findNextPosition` in `apps/web/src/hooks/use-dashboard-store.ts`. Keeps auto-layout
- * behavior identical between UI-added and MCP-added widgets.
+ * Auto-layout is the shared `findNextPosition` from `@maple/widgets`, so a
+ * widget an agent adds lands exactly where the "Add widget" button would put it.
+ * This used to be a hand-maintained port of the web copy.
  */
-export const findNextWidgetPosition = (
-	widgets: ReadonlyArray<DashboardWidget>,
-	newWidth: number,
-): { x: number; y: number } => {
-	if (widgets.length === 0) {
-		return { x: 0, y: 0 }
-	}
-
-	const maxY = Math.max(...widgets.map((w) => w.layout.y))
-	const bottomRowWidgets = widgets.filter((w) => w.layout.y === maxY)
-	const rightEdge = Math.max(...bottomRowWidgets.map((w) => w.layout.x + w.layout.w))
-
-	if (rightEdge + newWidth <= GRID_COLS) {
-		return { x: rightEdge, y: maxY }
-	}
-
-	const maxBottom = Math.max(...widgets.map((w) => w.layout.y + w.layout.h))
-	return { x: 0, y: maxBottom }
-}
+export { findNextPosition as findNextWidgetPosition }
 
 /**
  * Shared workflow: resolve tenant, load dashboard by id, run a pure transform
@@ -140,21 +121,11 @@ export const withDashboardMutation = Effect.fn("withDashboardMutation")(function
 				const nowMillis = yield* Clock.currentTimeMillis
 				const now = decodeIsoDateTimeString(new Date(nowMillis).toISOString())
 
-				return new DashboardDocument({
-					id: existing.id,
-					name: existing.name,
-					// `description`/`tags` are `Schema.optionalKey` — the Schema.Class
-					// constructor permits the key to be *absent* but rejects a present
-					// `undefined` ("Expected array, got undefined"). A dashboard stored
-					// without either field surfaces as `undefined` here, so omit the key
-					// rather than forwarding `undefined` and crashing the mutation.
-					...(existing.description !== undefined && { description: existing.description }),
-					...(existing.tags !== undefined && { tags: existing.tags }),
-					timeRange: existing.timeRange,
-					widgets: nextWidgets,
-					createdAt: existing.createdAt,
-					updatedAt: now,
-				})
+				// Everything but the widgets and `updatedAt` is carried forward
+				// wholesale. Naming the fields here is exactly what used to drop
+				// `sections`, `variables` and `refreshIntervalSeconds` from every
+				// dashboard an agent touched.
+				return withWidgets(existing, nextWidgets, now)
 			}),
 		)
 		.pipe(

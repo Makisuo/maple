@@ -248,7 +248,7 @@ describe("V2Dashboard wire format", () => {
 			widgets: [
 				{
 					id: "widget-1",
-					visualization: "line",
+					visualization: "chart",
 					data_source: {
 						endpoint: "queryBuilderTimeseries",
 						params: { start_time: "now-1h", nested_filter: { attribute_key: "service.name" } },
@@ -260,6 +260,18 @@ describe("V2Dashboard wire format", () => {
 						list_root_only: true,
 					},
 					layout: { x: 0, y: 0, w: 6, h: 4, min_w: 2 },
+					section_id: "section-1",
+					tab_id: "tab-1",
+				},
+			],
+			// Required with a possibly-empty value, like `tags` and `variables`: the
+			// server always emits it, `[]` meaning the dashboard is one flat canvas.
+			sections: [
+				{
+					id: "section-1",
+					title: "Overview",
+					collapsed: true,
+					tabs: [{ id: "tab-1", title: "Latency" }],
 				},
 			],
 			variables: [
@@ -293,6 +305,15 @@ describe("V2Dashboard wire format", () => {
 		expect(wire.widgets[0]?.data_source.transform).toHaveProperty("field_map")
 		expect(wire.widgets[0]?.data_source.params).toHaveProperty("nested_filter.attribute_key")
 		expect(wire.widgets[0]?.layout).toHaveProperty("min_w")
+		// Section membership snake_cases; `tabs` is already single-word throughout.
+		expect(wire.widgets[0]).toHaveProperty("section_id", "section-1")
+		expect(wire.widgets[0]).toHaveProperty("tab_id", "tab-1")
+		expect(wire.sections[0]).toEqual({
+			id: "section-1",
+			title: "Overview",
+			collapsed: true,
+			tabs: [{ id: "tab-1", title: "Latency" }],
+		})
 		expect(wire.variables[0]).toHaveProperty("include_all")
 		const variable = wire.variables[0]
 		if (variable?.type !== "query") throw new Error("Expected a query dashboard variable")

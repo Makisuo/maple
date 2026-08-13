@@ -82,7 +82,7 @@ const makeHarness = () => {
 
 const widget = (id: string, overrides: Record<string, unknown> = {}) => ({
 	id,
-	visualization: "line",
+	visualization: "chart",
 	dataSource: { endpoint: "traces_timeseries", params: {} },
 	display: { title: id, chartPresentation: { legend: "visible" } },
 	layout: { x: 0, y: 0, w: 6, h: 4 },

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import type { Dashboard, DashboardWidget, DataSourceEndpoint } from "@/components/dashboard-builder/types"
+import type {
+	Dashboard,
+	DashboardWidget,
+	DataSourceEndpoint,
+	VisualizationType,
+} from "@/components/dashboard-builder/types"
 import {
 	collectTags,
 	dashboardMatches,
@@ -13,7 +18,7 @@ import {
 
 let widgetSeq = 0
 
-const widget = (visualization: string, endpoint: DataSourceEndpoint): DashboardWidget => ({
+const widget = (visualization: VisualizationType, endpoint: DataSourceEndpoint): DashboardWidget => ({
 	id: `w${++widgetSeq}`,
 	visualization,
 	dataSource: { endpoint },

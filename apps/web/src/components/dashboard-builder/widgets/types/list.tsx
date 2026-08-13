@@ -1,4 +1,4 @@
-import { WIDGET_TYPES } from "@maple/domain/http"
+import { DEFAULT_LIST_LIMIT, WIDGET_TYPES } from "@maple/domain/http"
 
 import { MenuIcon } from "@/components/icons"
 import {
@@ -63,7 +63,7 @@ export const listWidgetType: WidgetTypeDefinition = {
 	},
 
 	buildDataSource: ({ state }) => {
-		const limit = parsePositiveNumber(state.listLimit) ?? 50
+		const limit = parsePositiveNumber(state.listLimit) ?? DEFAULT_LIST_LIMIT
 
 		// Logs without rich filtering fall back to the simple list_logs endpoint.
 		if (state.listDataSource === "logs") {
@@ -109,7 +109,7 @@ export const listWidgetType: WidgetTypeDefinition = {
 		description: state.description.trim() || undefined,
 		listDataSource: state.listDataSource,
 		listWhereClause: state.listWhereClause,
-		listLimit: parsePositiveNumber(state.listLimit) ?? 25,
+		listLimit: parsePositiveNumber(state.listLimit) ?? DEFAULT_LIST_LIMIT,
 		listRootOnly: state.listRootOnly,
 		columns: state.listColumns.length > 0 ? state.listColumns : undefined,
 	}),

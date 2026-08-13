@@ -62,6 +62,7 @@
         "@maple/llm": "workspace:*",
         "@maple/query-engine": "workspace:*",
         "@maple/query-engine-integrations": "workspace:*",
+        "@maple/widgets": "workspace:*",
         "@tinybirdco/sdk": "catalog:tinybird",
         "drizzle-orm": "^0.45.1",
         "effect": "catalog:effect",
@@ -589,6 +590,8 @@
       "version": "0.0.0",
       "dependencies": {
         "@maple-dev/clickhouse-builder": "workspace:*",
+        "@maple/primitives": "workspace:*",
+        "@maple/widgets": "workspace:*",
         "@tinybirdco/sdk": "catalog:tinybird",
         "effect": "catalog:effect",
       },
@@ -639,6 +642,17 @@
     "packages/otel-collector-maple-exporter": {
       "name": "otel-collector-maple-exporter",
       "version": "0.0.0",
+    },
+    "packages/primitives": {
+      "name": "@maple/primitives",
+      "dependencies": {
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+      },
     },
     "packages/query-engine": {
       "name": "@maple/query-engine",
@@ -703,6 +717,19 @@
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "tailwindcss": "^4.0.0",
+      },
+    },
+    "packages/widgets": {
+      "name": "@maple/widgets",
+      "dependencies": {
+        "@maple/primitives": "workspace:*",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
       },
     },
   },
@@ -1564,6 +1591,8 @@
 
     "@maple/otel-helpers": ["@maple/otel-helpers@workspace:lib/otel-helpers"],
 
+    "@maple/primitives": ["@maple/primitives@workspace:packages/primitives"],
+
     "@maple/query-engine": ["@maple/query-engine@workspace:packages/query-engine"],
 
     "@maple/query-engine-integrations": ["@maple/query-engine-integrations@workspace:packages/query-engine-integrations"],
@@ -1577,6 +1606,8 @@
     "@maple/unitflow": ["@maple/unitflow@workspace:lib/unitflow"],
 
     "@maple/web": ["@maple/web@workspace:apps/web"],
+
+    "@maple/widgets": ["@maple/widgets@workspace:packages/widgets"],
 
     "@mdit-vue/plugin-component": ["@mdit-vue/plugin-component@3.0.2", "", { "dependencies": { "@types/markdown-it": "^14.1.2", "markdown-it": "^14.1.0" } }, "sha512-Fu53MajrZMOAjOIPGMTdTXgHLgGU9KwTqKtYc6WNYtFZNKw04euSfJ/zFg8eBY/2MlciVngkF7Gyc2IL7e8Bsw=="],
 

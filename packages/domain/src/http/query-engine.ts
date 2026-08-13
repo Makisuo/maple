@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
+import { RawSqlDisplayType } from "@maple/widgets"
 import {
 	CommitSha,
 	DeploymentEnvironment,
@@ -1621,19 +1622,9 @@ export type QueryBuilderQueryDraftPayload = Schema.Schema.Type<typeof QueryBuild
 
 // Raw SQL chart (Hyperdx-style — user-authored ClickHouse SQL with macros)
 
-export const RawSqlDisplayType = Schema.Literals([
-	"line",
-	"area",
-	"bar",
-	"table",
-	"stat",
-	"pie",
-	"histogram",
-	"heatmap",
-	"funnel",
-	"hbar",
-])
-export type RawSqlDisplayType = Schema.Schema.Type<typeof RawSqlDisplayType>
+// Defined in `@maple/widgets` alongside the panel-type table that maps onto it;
+// re-exported here so `@maple/domain/http` keeps its existing surface.
+export { RawSqlDisplayType }
 
 export const MAX_RAW_SQL_LENGTH = 32_768
 export const MAX_RAW_SQL_RESULT_ROWS = 1_000

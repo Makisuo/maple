@@ -16,8 +16,10 @@ import {
 	OrgId,
 	PortableDashboardDocument,
 	type PostgresTransactionId,
+	sanitizeDashboardSections,
 	UserId,
 } from "@maple/domain/http"
+import { parseStoredDashboard, stampCurrentVersion } from "@maple/widgets/dashboard"
 import { dashboards, dashboardVersions, type DashboardVersionRow } from "@maple/db"
 import { and, desc, eq, lt } from "drizzle-orm"
 import { Clock, Effect, Layer, Option, Schema, Context } from "effect"
@@ -59,15 +61,36 @@ const parseTimestamp = (field: "createdAt" | "updatedAt", value: string) => {
 	return Effect.succeed(timestamp)
 }
 
-const parsePayload = (payloadJson: unknown) =>
-	Schema.decodeUnknownEffect(DashboardDocument)(payloadJson).pipe(
-		Effect.mapError(
-			() =>
-				new DashboardPersistenceError({
-					message: "Stored dashboard payload is invalid JSON",
-				}),
-		),
-	)
+/**
+ * Reads a stored payload: migrate the raw JSON up to the current schema version,
+ * then decode.
+ *
+ * A rejection is a hard failure here because this is the *writable* path — every
+ * document read through it can be handed to `mutate`, which writes it back. A
+ * partially-decoded document would be silently persisted by that round trip and
+ * the original lost, so the only safe answer to "this payload doesn't decode" is
+ * to refuse it. The read-only version-history path may degrade instead.
+ */
+const parsePayload = Effect.fnUntraced(function* (payloadJson: unknown) {
+	const outcome = yield* parseStoredDashboard(payloadJson)
+
+	if (outcome._tag === "Rejected") {
+		yield* Effect.logError("Stored dashboard payload failed schema decode", {
+			fromVersion: outcome.fromVersion,
+			issue: outcome.issue,
+		})
+		return yield* new DashboardPersistenceError({
+			message: "Stored dashboard payload is invalid JSON",
+		})
+	}
+
+	yield* Effect.annotateCurrentSpan({
+		"maple.dashboard.schema_version_read": outcome.fromVersion,
+		"maple.dashboard.degraded_widgets": outcome.degradedWidgetIds.length,
+	})
+
+	return outcome.document
+})
 
 // jsonb columns take the document object directly; this guard preserves the
 // pre-Postgres validation that the payload is JSON-serializable before write.
@@ -84,13 +107,22 @@ const validatePayload = Effect.fnUntraced(function* (dashboard: DashboardDocumen
 	return yield* Effect.try({
 		try: () => {
 			JSON.stringify(dashboard)
+			// Repair the section invariants here — the single choke point for every
+			// jsonb write — so v1 upsert, v2 PATCH, MCP, template instantiate,
+			// Perses import and version restore all get it, and every reader can
+			// trust that storage is consistent. A no-op by reference on any
+			// document without sections, which is every pre-sections dashboard.
+			const repaired = sanitizeDashboardSections(dashboard)
 			// `txid` is a transport-only field carried on mutation responses; it must
 			// never be persisted into `payload_json` (nor a version snapshot). Strip
-			// it here — the single choke point for every jsonb write — so a client
-			// that echoes it back in an upsert payload can't leak it into storage.
-			if (dashboard.txid === undefined) return dashboard
-			const { txid: _txid, ...rest } = dashboard
-			return new DashboardDocument({ ...rest })
+			// it here so a client that echoes it back in an upsert payload can't
+			// leak it into storage.
+			const { txid: _txid, ...rest } = repaired
+			// Stamp the schema version every writer's document is being stored in.
+			// This is the only place it happens, which is why upgrades are lazy: a
+			// legacy document is migrated in memory on every read and only recorded
+			// at its next natural write. No backfill job, and so nothing to undo.
+			return new DashboardDocument(stampCurrentVersion(rest))
 		},
 		catch: () =>
 			new DashboardValidationError({
@@ -103,21 +135,15 @@ const validatePayload = Effect.fnUntraced(function* (dashboard: DashboardDocumen
 const createDashboardDocument = (portableDashboard: PortableDashboardDocument, nowMillis: number) => {
 	const now = new Date(nowMillis).toISOString()
 
+	// A document is a portable document plus identity and timestamps, so spread
+	// the portable one rather than naming its fields: a field added to
+	// `makeDashboardDocumentFields`' portable half then reaches storage without a
+	// second edit here. Spreading is safe because an absent `Schema.optionalKey`
+	// field is not an own property of a decoded instance, so nothing forwards a
+	// present `undefined` (which the Schema.Class constructor rejects).
 	return new DashboardDocument({
+		...portableDashboard,
 		id: decodeDashboardIdSync(randomUUID()),
-		name: portableDashboard.name,
-		// `description`/`tags` are `Schema.optionalKey`; the Schema.Class constructor
-		// rejects a present `undefined`. Omit the key when the portable source has none.
-		...(portableDashboard.description !== undefined && {
-			description: portableDashboard.description,
-		}),
-		...(portableDashboard.tags !== undefined && { tags: portableDashboard.tags }),
-		...(portableDashboard.variables !== undefined && { variables: portableDashboard.variables }),
-		...(portableDashboard.refreshIntervalSeconds !== undefined && {
-			refreshIntervalSeconds: portableDashboard.refreshIntervalSeconds,
-		}),
-		timeRange: portableDashboard.timeRange,
-		widgets: portableDashboard.widgets,
 		createdAt: decodeIsoDateTimeStringSync(now),
 		updatedAt: decodeIsoDateTimeStringSync(now),
 	})

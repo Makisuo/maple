@@ -28,6 +28,7 @@ import {
 import type { PortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
 import type {
 	Dashboard,
+	DashboardSection,
 	DashboardVariable,
 	DashboardWidget,
 	TimeRange,
@@ -36,7 +37,15 @@ import type {
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
 import { persistenceErrorAtom } from "@/atoms/dashboard-store-atoms"
-import { CANONICAL_COLS } from "@/components/dashboard-builder/canvas/grid-breakpoints"
+import {
+	autoLayoutPerContainer,
+	findNextPosition,
+	sortWidgetsForLayout,
+	ungroupSectionWidgets,
+	widgetsInContainer,
+	withSectionTarget,
+	type SectionTarget,
+} from "@/components/dashboard-builder/sections/section-layout"
 
 const asDashboardId = Schema.decodeUnknownSync(DashboardId)
 const asIsoDateTimeString = Schema.decodeUnknownSync(IsoDateTimeString)
@@ -58,23 +67,6 @@ function messageFromError(error: unknown): string | null {
 	}
 
 	return null
-}
-
-function findNextPosition(widgets: DashboardWidget[], newWidth: number): { x: number; y: number } {
-	if (widgets.length === 0) {
-		return { x: 0, y: 0 }
-	}
-
-	const maxY = Math.max(...widgets.map((w) => w.layout.y))
-	const bottomRowWidgets = widgets.filter((w) => w.layout.y === maxY)
-	const rightEdge = Math.max(...bottomRowWidgets.map((w) => w.layout.x + w.layout.w))
-
-	if (rightEdge + newWidth <= CANONICAL_COLS) {
-		return { x: rightEdge, y: maxY }
-	}
-
-	const maxBottom = Math.max(...widgets.map((w) => w.layout.y + w.layout.h))
-	return { x: 0, y: maxBottom }
 }
 
 // Walk the `cause` chain for the most specific message. The Electric write
@@ -151,11 +143,12 @@ const toDocumentWidgets = (widgets: Dashboard["widgets"]): DashboardDocument["wi
 	})
 
 function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
-	// `description`/`tags`/`variables` are `Schema.optionalKey` on `DashboardDocument`;
-	// the Schema.Class constructor rejects a present `undefined`. The web `Dashboard`
-	// carries them as optional and `ensureDashboard` stamps an explicit
-	// `tags: undefined`, so destructure them out of the spread and re-add only when set.
-	const { description, tags, variables, refreshIntervalSeconds, ...rest } = dashboard
+	// `description`/`tags`/`sections`/`variables` are `Schema.optionalKey` on
+	// `DashboardDocument`; the Schema.Class constructor rejects a present
+	// `undefined`. The web `Dashboard` carries them as optional and
+	// `ensureDashboard` stamps an explicit `tags: undefined`, so destructure them
+	// out of the spread and re-add only when set.
+	const { description, tags, sections, variables, refreshIntervalSeconds, ...rest } = dashboard
 	return new DashboardDocument({
 		...rest,
 		id: asDashboardId(dashboard.id),
@@ -163,6 +156,7 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 		updatedAt: asIsoDateTimeString(dashboard.updatedAt),
 		...(description !== undefined && { description }),
 		...(tags !== undefined && { tags }),
+		...(sections !== undefined && { sections }),
 		...(variables !== undefined && { variables }),
 		...(refreshIntervalSeconds !== undefined && { refreshIntervalSeconds }),
 		widgets: toDocumentWidgets(dashboard.widgets),
@@ -176,13 +170,15 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 const jsonClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDashboardDocument {
-	// See `toDashboardDocument`: omit the optionalKey `description`/`tags`/`variables`
-	// rather than forwarding a present `undefined`, which the Schema.Class constructor rejects.
-	const { description, tags, variables, refreshIntervalSeconds, ...rest } = dashboard
+	// See `toDashboardDocument`: omit the optionalKey `description`/`tags`/`sections`/
+	// `variables` rather than forwarding a present `undefined`, which the
+	// Schema.Class constructor rejects.
+	const { description, tags, sections, variables, refreshIntervalSeconds, ...rest } = dashboard
 	return new PortableDashboardDocument({
 		...rest,
 		...(description !== undefined && { description }),
 		...(tags !== undefined && { tags: [...tags] }),
+		...(sections !== undefined && { sections: jsonClone(sections) }),
 		...(variables !== undefined && { variables: jsonClone(variables) }),
 		...(refreshIntervalSeconds !== undefined && { refreshIntervalSeconds }),
 		widgets: toDocumentWidgets(jsonClone(dashboard.widgets)),
@@ -259,6 +255,8 @@ function makeWidgetMutators(deps: {
 		visualization: VisualizationType,
 		dataSource: WidgetDataSource,
 		display: WidgetDisplayConfig,
+		/** Which grid to drop it into. `null` (the default) is the root canvas. */
+		target: SectionTarget = null,
 	): DashboardWidget => {
 		if (readOnly) {
 			throw new Error("Dashboards are read-only")
@@ -284,14 +282,18 @@ function makeWidgetMutators(deps: {
 			throw new Error("Couldn’t read this dashboard — it may still be loading. Try again.")
 		}
 
-		const position = findNextPosition(current.widgets, layoutDefaults.w)
-		const widget: DashboardWidget = {
+		// Scoped to the destination container: `layout.x/y` are container-relative,
+		// so placing against the whole board would drop a grouped widget below
+		// tiles it will never share a grid with.
+		const position = findNextPosition(widgetsInContainer(current.widgets, target), layoutDefaults.w)
+		const placed: DashboardWidget = {
 			id: generateId(),
 			visualization,
 			dataSource,
 			display,
 			layout: { ...position, ...layoutDefaults },
 		}
+		const widget = withSectionTarget(placed, target)
 
 		push(dashboardId, (dashboard) => ({
 			...dashboard,
@@ -315,14 +317,20 @@ function makeWidgetMutators(deps: {
 				minH: source.layout.minH ?? 2,
 			}
 
-			const position = findNextPosition(dashboard.widgets, layoutDefaults.w)
-			const clone: DashboardWidget = {
+			// A clone lands beside its source, in the same container.
+			const target: SectionTarget =
+				source.sectionId !== undefined && source.tabId !== undefined
+					? { sectionId: source.sectionId, tabId: source.tabId }
+					: null
+			const position = findNextPosition(widgetsInContainer(dashboard.widgets, target), layoutDefaults.w)
+			const placed: DashboardWidget = {
 				id: generateId(),
 				visualization: source.visualization,
 				dataSource: structuredClone(source.dataSource),
 				display: structuredClone(source.display),
 				layout: { ...position, ...layoutDefaults },
 			}
+			const clone = withSectionTarget(placed, target)
 
 			return {
 				...dashboard,
@@ -401,13 +409,12 @@ function makeWidgetMutators(deps: {
 			// Return same reference if nothing changed — mutateDashboard skips no-ops
 			if (!changed) return dashboard
 
-			// Sort by (y, x) so the array order matches visual order. The grid
-			// compactor uses array order as a tiebreaker when items share a row,
-			// so a stale order causes drag-to-swap to snap back.
-			const sorted = widgets.toSorted((a, b) => {
-				if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
-				return a.layout.x - b.layout.x
-			})
+			// Sort by (container, y, x) so the array order matches visual order. The
+			// grid compactor uses array order as a tiebreaker when items share a
+			// row, so a stale order causes drag-to-swap to snap back. Container rank
+			// leads because every container restarts at `y: 0` — a bare (y, x) sort
+			// would interleave section 2's top row with section 1's.
+			const sorted = sortWidgetsForLayout(widgets, dashboard.sections ?? [])
 
 			return { ...dashboard, widgets: sorted, updatedAt: new Date().toISOString() }
 		})
@@ -435,37 +442,250 @@ function makeWidgetMutators(deps: {
 		}))
 	}
 
+	// Re-flows every container independently, each restarting at (0, 0) — one
+	// section tidying up must not push another section's tiles around.
 	const autoLayoutWidgets = (dashboardId: string) => {
 		push(dashboardId, (dashboard) => {
 			if (dashboard.widgets.length === 0) return dashboard
+			return {
+				...dashboard,
+				widgets: autoLayoutPerContainer(dashboard.widgets, dashboard.sections ?? []),
+				updatedAt: new Date().toISOString(),
+			}
+		})
+	}
 
-			const sorted = dashboard.widgets.toSorted((a, b) => {
-				if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
-				return a.layout.x - b.layout.x
-			})
+	// Sections
+	//
+	// Every mutator goes through `push`, so a failed write reaches the persistence
+	// banner rather than vanishing. The "always >= 1 tab" invariant is maintained
+	// here and repaired server-side by `sanitizeDashboardSections`.
 
-			let currentX = 0
-			let currentY = 0
-			let rowHeight = 0
+	const touch = (dashboard: Dashboard, sections: DashboardSection[]): Dashboard => ({
+		...dashboard,
+		sections,
+		updatedAt: new Date().toISOString(),
+	})
 
-			const relaid = sorted.map((widget) => {
-				const w = widget.layout.w
-				const h = widget.layout.h
+	const mapSection = (
+		dashboardId: string,
+		sectionId: string,
+		update: (section: DashboardSection) => DashboardSection,
+	) => {
+		if (readOnly) return
+		push(dashboardId, (dashboard) => {
+			const sections = dashboard.sections ?? []
+			if (!sections.some((section) => section.id === sectionId)) return dashboard
+			return touch(
+				dashboard,
+				sections.map((section) => (section.id === sectionId ? update(section) : section)),
+			)
+		})
+	}
 
-				if (currentX + w > CANONICAL_COLS) {
-					currentX = 0
-					currentY += rowHeight
-					rowHeight = 0
-				}
+	/** Returns the new section id synchronously so the caller can focus its rename input. */
+	const addSection = (dashboardId: string, title = "New group"): string | undefined => {
+		if (readOnly) return undefined
+		const sectionId = generateId()
+		push(dashboardId, (dashboard) =>
+			touch(dashboard, [
+				...(dashboard.sections ?? []),
+				// One tab, so it renders as a plain header until the user asks for tabs.
+				{ id: sectionId, title, tabs: [{ id: generateId(), title }] },
+			]),
+		)
+		return sectionId
+	}
 
-				const newLayout = { ...widget.layout, x: currentX, y: currentY }
-				currentX += w
-				rowHeight = Math.max(rowHeight, h)
+	const renameSection = (dashboardId: string, sectionId: string, title: string) => {
+		mapSection(dashboardId, sectionId, (section) =>
+			// With a single tab the header *is* the tab label, so they must not drift.
+			section.tabs.length === 1
+				? { ...section, title, tabs: [{ ...section.tabs[0]!, title }] }
+				: { ...section, title },
+		)
+	}
 
-				return { ...widget, layout: newLayout }
-			})
+	/** The persisted default, distinct from a viewer's own URL-level collapse. */
+	const setSectionCollapsedDefault = (dashboardId: string, sectionId: string, collapsed: boolean) => {
+		mapSection(dashboardId, sectionId, (section) => ({ ...section, collapsed }))
+	}
 
-			return { ...dashboard, widgets: relaid, updatedAt: new Date().toISOString() }
+	/**
+	 * Pin a group open, or hand its chevron back.
+	 *
+	 * Pinning clears `collapsed`: "collapsed by default" and "can never be
+	 * collapsed" would leave the group folded with nothing to unfold it. The
+	 * server sanitizer enforces the same rule, so a document written by any other
+	 * client can't reintroduce the contradiction.
+	 */
+	const setSectionCollapsible = (dashboardId: string, sectionId: string, collapsible: boolean) => {
+		mapSection(dashboardId, sectionId, (section) => {
+			const next = { ...section, collapsible }
+			if (!collapsible) delete next.collapsed
+			return next
+		})
+	}
+
+	const reorderSections = (dashboardId: string, fromIndex: number, toIndex: number) => {
+		if (readOnly) return
+		push(dashboardId, (dashboard) => {
+			const sections = dashboard.sections ?? []
+			if (
+				fromIndex === toIndex ||
+				fromIndex < 0 ||
+				toIndex < 0 ||
+				fromIndex >= sections.length ||
+				toIndex >= sections.length
+			) {
+				return dashboard
+			}
+			const next = [...sections]
+			const [moved] = next.splice(fromIndex, 1)
+			next.splice(toIndex, 0, moved!)
+			return touch(dashboard, next)
+		})
+	}
+
+	/**
+	 * Delete a group, either keeping its widgets (re-flowed onto the root canvas
+	 * below whatever is already there) or removing them with it.
+	 *
+	 * Returns the widgets that were deleted so the caller can offer an undo,
+	 * snapshotted synchronously the way `removeWidget` does.
+	 */
+	const deleteSection = (
+		dashboardId: string,
+		sectionId: string,
+		action: "ungroup" | "delete",
+	): DashboardWidget[] | undefined => {
+		if (readOnly) return undefined
+		const removed =
+			action === "delete"
+				? readDashboard(dashboardId)?.widgets.filter((w) => w.sectionId === sectionId)
+				: []
+
+		push(dashboardId, (dashboard) => {
+			const sections = dashboard.sections ?? []
+			if (!sections.some((section) => section.id === sectionId)) return dashboard
+			const widgets =
+				action === "ungroup"
+					? ungroupSectionWidgets(dashboard.widgets, sectionId)
+					: dashboard.widgets.filter((widget) => widget.sectionId !== sectionId)
+			return {
+				...touch(
+					dashboard,
+					sections.filter((section) => section.id !== sectionId),
+				),
+				widgets,
+			}
+		})
+
+		return removed
+	}
+
+	const addTab = (dashboardId: string, sectionId: string, title = "New tab"): string | undefined => {
+		if (readOnly) return undefined
+		const tabId = generateId()
+		mapSection(dashboardId, sectionId, (section) => ({
+			...section,
+			tabs: [...section.tabs, { id: tabId, title }],
+		}))
+		return tabId
+	}
+
+	const renameTab = (dashboardId: string, sectionId: string, tabId: string, title: string) => {
+		mapSection(dashboardId, sectionId, (section) => {
+			const tabs = section.tabs.map((tab) => (tab.id === tabId ? { ...tab, title } : tab))
+			// Renaming the only tab renames the group with it — see `renameSection`.
+			return tabs.length === 1 ? { ...section, title, tabs } : { ...section, tabs }
+		})
+	}
+
+	/**
+	 * Delete a tab, either moving its widgets to the first remaining tab or
+	 * deleting them too. A no-op on the last tab: deleting that is deleting the
+	 * group, which has its own action and its own confirmation.
+	 */
+	const deleteTab = (dashboardId: string, sectionId: string, tabId: string, action: "move" | "delete") => {
+		if (readOnly) return
+		push(dashboardId, (dashboard) => {
+			const sections = dashboard.sections ?? []
+			const section = sections.find((candidate) => candidate.id === sectionId)
+			if (!section || section.tabs.length <= 1) return dashboard
+			if (!section.tabs.some((tab) => tab.id === tabId)) return dashboard
+
+			const remaining = section.tabs.filter((tab) => tab.id !== tabId)
+			const destination = remaining[0]!
+			const isDoomed = (widget: DashboardWidget) =>
+				widget.sectionId === sectionId && widget.tabId === tabId
+
+			const widgets =
+				action === "delete"
+					? dashboard.widgets.filter((widget) => !isDoomed(widget))
+					: (() => {
+							// Land the arrivals below whatever the destination tab already
+							// holds, rather than stacking them on top of it.
+							const offsetBase = widgetsInContainer(dashboard.widgets, {
+								sectionId,
+								tabId: destination.id,
+							})
+							const offset =
+								offsetBase.length === 0
+									? 0
+									: Math.max(...offsetBase.map((w) => w.layout.y + w.layout.h))
+							return dashboard.widgets.map((widget) =>
+								isDoomed(widget)
+									? {
+											...widget,
+											tabId: destination.id,
+											layout: { ...widget.layout, y: widget.layout.y + offset },
+										}
+									: widget,
+							)
+						})()
+
+			return {
+				...touch(
+					dashboard,
+					sections.map((candidate) =>
+						candidate.id === sectionId
+							? {
+									...candidate,
+									tabs: remaining,
+									// Falling back to one tab makes the header the label again.
+									...(remaining.length === 1 ? { title: destination.title } : {}),
+								}
+							: candidate,
+					),
+				),
+				widgets,
+			}
+		})
+	}
+
+	const moveWidgetToSection = (dashboardId: string, widgetId: string, target: SectionTarget) => {
+		if (readOnly) return
+		push(dashboardId, (dashboard) => {
+			const widget = dashboard.widgets.find((candidate) => candidate.id === widgetId)
+			if (!widget) return dashboard
+
+			// Rebase onto the destination's coordinate space; keeping the old x/y
+			// would drop the tile on top of whatever already sits there.
+			const position = findNextPosition(
+				widgetsInContainer(dashboard.widgets, target).filter((w) => w.id !== widgetId),
+				widget.layout.w,
+			)
+			const moved = withSectionTarget({ ...widget, layout: { ...widget.layout, ...position } }, target)
+
+			return {
+				...dashboard,
+				widgets: sortWidgetsForLayout(
+					dashboard.widgets.map((candidate) => (candidate.id === widgetId ? moved : candidate)),
+					dashboard.sections ?? [],
+				),
+				updatedAt: new Date().toISOString(),
+			}
 		})
 	}
 
@@ -482,6 +702,16 @@ function makeWidgetMutators(deps: {
 		updateWidgetLayouts,
 		updateWidget,
 		autoLayoutWidgets,
+		addSection,
+		renameSection,
+		setSectionCollapsedDefault,
+		setSectionCollapsible,
+		reorderSections,
+		deleteSection,
+		addTab,
+		renameTab,
+		deleteTab,
+		moveWidgetToSection,
 	}
 }
 

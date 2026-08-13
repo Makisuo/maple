@@ -1,7 +1,13 @@
+import { useState } from "react"
 import type { DashboardId } from "@maple/domain/http"
 import { Result } from "@/lib/effect-atom"
-import type { DashboardWidget } from "@/components/dashboard-builder/types"
-import { DashboardCanvas } from "@/components/dashboard-builder/canvas/dashboard-canvas"
+import {
+	withActiveTab,
+	withSectionCollapsed,
+	type SectionViewSearch,
+} from "@/lib/dashboards/section-view-state"
+import type { DashboardSection, DashboardWidget } from "@/components/dashboard-builder/types"
+import { DashboardSections } from "@/components/dashboard-builder/sections/dashboard-sections"
 import { PreviewBanner } from "./preview-banner"
 import { useDashboardVersionDetail } from "./use-dashboard-history"
 import type { PreviewedVersion } from "@/atoms/dashboard-history-atoms"
@@ -15,6 +21,7 @@ interface PreviewedCanvasProps {
 
 export function PreviewedCanvas({ dashboardId, preview, onCancel, onRestored }: PreviewedCanvasProps) {
 	const result = useDashboardVersionDetail(dashboardId, preview.versionId)
+	const [viewSearch, setViewSearch] = useState<SectionViewSearch>({})
 
 	return (
 		<div>
@@ -26,8 +33,27 @@ export function PreviewedCanvas({ dashboardId, preview, onCancel, onRestored }: 
 			/>
 
 			{Result.isSuccess(result) ? (
-				<DashboardCanvas
+				// Rendered through the sectioned canvas, not the flat one: a snapshot
+				// taken after groups existed would otherwise preview as one
+				// undifferentiated wall of tiles that looks nothing like what
+				// restoring it would actually produce. Read-only, and the view
+				// callbacks are inert — a preview has no URL state of its own.
+				<DashboardSections
 					widgets={result.value.snapshot.widgets as unknown as DashboardWidget[]}
+					sections={(result.value.snapshot.sections ?? []) as unknown as DashboardSection[]}
+					// Local, not URL-backed: browsing a preview's groups is throwaway
+					// state, and writing it to the URL would leave collapse/tab params
+					// behind after the preview is dismissed. Inert callbacks were the
+					// alternative, but a tab bar you can click and nothing happens
+					// reads as broken.
+					search={viewSearch}
+					onToggleCollapsed={(sectionId, collapsed) =>
+						setViewSearch((prev) => withSectionCollapsed(prev, sectionId, collapsed))
+					}
+					onSelectTab={(sectionId, tabId) =>
+						setViewSearch((prev) => withActiveTab(prev, sectionId, tabId))
+					}
+					onAddWidget={() => undefined}
 					readOnly
 				/>
 			) : Result.isFailure(result) ? (

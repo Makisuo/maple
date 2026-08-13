@@ -1,4 +1,4 @@
-import { rawSqlDisplayTypeFor } from "@maple/domain/http"
+import { rawSqlDisplayTypeFor, widgetTypeByVisualization } from "@maple/domain/http"
 import type { RawSqlDisplayType, WidgetDataSourceSchema } from "@maple/domain/http"
 
 // MCP-side mirror of the web's raw-SQL widget builder so agents can create
@@ -32,9 +32,9 @@ export function buildRawSqlDataSource(args: {
 		params,
 	}
 
-	// Stat and gauge widgets need a reduceToValue transform so the widget reads
-	// the scalar `data[0].value`. Mirrors buildRawSqlDataSource in the web app.
-	if (args.visualization === "stat" || args.visualization === "gauge") {
+	// A scalar widget needs a reduceToValue transform so the tile reads
+	// `data[0].value`. Mirrors buildRawSqlDataSource in the web app.
+	if (widgetTypeByVisualization(args.visualization)?.isScalar === true) {
 		return {
 			...base,
 			transform: { reduceToValue: { field: "value", aggregate: "first" } },

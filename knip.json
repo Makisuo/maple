@@ -51,6 +51,7 @@
 		},
 		"packages/email": {
 			"entry": ["scripts/**/*.ts"],
+			"ignore": ["src/generated/**"],
 			"ignoreDependencies": ["tailwindcss"]
 		},
 		"lib/effect-cloudflare": {
