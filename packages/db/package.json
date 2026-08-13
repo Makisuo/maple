@@ -19,12 +19,14 @@
 		"db:ensure-privileges": "bun scripts/ensure-privileges.ts",
 		"db:reset-preview": "bun scripts/reset-preview-branch.ts",
 		"db:normalize-preview": "bun scripts/normalize-preview-ownership.ts",
-		"ps:apply-schema": "bun scripts/planetscale-apply-schema.ts"
+		"ps:apply-schema": "bun scripts/planetscale-apply-schema.ts",
+		"db:backfill:dashboards-v3": "bun scripts/backfill-dashboard-datasource-v3.ts"
 	},
 	"dependencies": {
 		"@electric-sql/pglite": "^0.5.2",
 		"@maple/domain": "workspace:*",
 		"drizzle-orm": "^0.45.1",
+		"effect": "catalog:effect",
 		"postgres": "^3.4.9"
 	},
 	"devDependencies": {
@@ -33,6 +35,7 @@
 		"@types/node": "catalog:tooling",
 		"drizzle-kit": "^0.31.9",
 		"typescript": "catalog:tooling",
-		"vitest": "catalog:"
+		"vitest": "catalog:",
+		"@maple/widgets": "workspace:*"
 	}
 }
