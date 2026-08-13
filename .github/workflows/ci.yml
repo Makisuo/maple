@@ -213,7 +213,7 @@ jobs:
                     - shard: typecheck-rest
                       install-filters: >-
                           @maple/alerting @maple/cli @maple/electric-sync @maple/landing
-                          @maple/local-ui @maple/scraper mobile ./lib/* ./examples/*
+                          @maple/local-ui @maple/scraper ./lib/* ./examples/*
                     - shard: typecheck-packages
                       install-filters: "./packages/*"
                     - shard: test-api-1
@@ -231,7 +231,7 @@ jobs:
                     - shard: test-rest
                       install-filters: >-
                           @maple/alerting @maple/cli @maple/electric-sync @maple/landing
-                          @maple/local-ui @maple/scraper mobile ./lib/*
+                          @maple/local-ui @maple/scraper ./lib/*
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
