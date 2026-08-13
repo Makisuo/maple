@@ -1,0 +1,89 @@
+[
+	{
+		"specversion": "1.0",
+		"id": "sha256:0fac0a375c6f8a05fb5ec1a751cf9e3b55282f56c0d135bc8a8c50c6a2a7559f",
+		"source": "https://gitlab.internal",
+		"type": "dev.maple.gitlab.project.lifecycle.v1",
+		"subject": "rdev/maple",
+		"time": "2026-08-07T19:42:00.123456789Z",
+		"datacontenttype": "application/json",
+		"dataschema": "urn:maple:event-schema:gitlab-project-lifecycle:v1",
+		"tenantid": "local",
+		"projectionid": "gitlab-project-renamed",
+		"projectionrevision": 1,
+		"projectorid": "gitlab.project.lifecycle",
+		"projectorversion": 1,
+		"data": {
+			"project": { "id": "42", "path": "rdev/maple", "oldPath": "rdev/old-maple" },
+			"action": "renamed",
+			"sourceEvent": "project_rename",
+			"actor": { "id": "9", "name": "rdev" },
+			"result": "success",
+			"serviceName": "gitlab-repository-events"
+		}
+	},
+	{
+		"specversion": "1.0",
+		"id": "sha256:09992cc6804e056fb2a037b6c9db05c432c4733e229c963675a15a47445f745b",
+		"source": "https://gitlab.internal",
+		"type": "dev.maple.gitlab.merge-request.lifecycle.v1",
+		"subject": "rdev/maple/-/merge_requests/7",
+		"time": "2026-08-07T19:42:00.123456789Z",
+		"datacontenttype": "application/json",
+		"dataschema": "urn:maple:event-schema:gitlab-merge-request-lifecycle:v1",
+		"tenantid": "local",
+		"projectionid": "gitlab-mr-opened",
+		"projectionrevision": 1,
+		"projectorid": "gitlab.merge-request.lifecycle",
+		"projectorversion": 1,
+		"data": {
+			"project": { "id": "42", "path": "rdev/maple" },
+			"mergeRequest": {
+				"iid": "7",
+				"action": "open",
+				"sourceBranch": "feature/maple",
+				"targetBranch": "main",
+				"commit": "abc123"
+			},
+			"sourceEvent": "merge_request_open",
+			"actor": { "id": "9", "name": "rdev" },
+			"result": "success",
+			"serviceName": "gitlab-repository-events"
+		}
+	},
+	{
+		"specversion": "1.0",
+		"id": "sha256:f2bab7e420aa6b97d65f0478d16384b45d3bf61fb9ad9c111c614279cb42e24e",
+		"source": "https://gitlab.internal",
+		"type": "dev.maple.gitlab.pipeline.completed.v1",
+		"subject": "rdev/maple/-/pipelines/900",
+		"time": "2026-08-07T19:42:00.123456789Z",
+		"datacontenttype": "application/json",
+		"dataschema": "urn:maple:event-schema:gitlab-pipeline-completed:v1",
+		"tenantid": "local",
+		"projectionid": "gitlab-pipeline-completed",
+		"projectionrevision": 1,
+		"projectorid": "gitlab.pipeline.completed",
+		"projectorversion": 1,
+		"data": {
+			"project": { "id": "42", "path": "rdev/maple" },
+			"pipeline": {
+				"id": "900",
+				"iid": "12",
+				"status": "failed",
+				"name": "Maple CI",
+				"source": "push",
+				"detailedStatus": "failed",
+				"ref": "main",
+				"sha": "deadbeef",
+				"durationMs": "63000",
+				"queuedDurationMs": "10000",
+				"stageCount": "3"
+			},
+			"sourceEvent": "ci_pipeline_completed",
+			"actor": { "id": "9", "name": "rdev" },
+			"result": "failure",
+			"serviceName": "gitlab-repository-events"
+		}
+	}
+]
