@@ -36,6 +36,7 @@ import {
 	formatWarehouseDateTime,
 	parseWarehouseDateTime,
 } from "../datetime"
+import { ENGINE_UNGROUPED_GROUP_KEY } from "../group-key"
 import {
 	MAX_BREAKDOWN_RANGE_SECONDS,
 	MAX_LIST_RANGE_SECONDS,
@@ -216,17 +217,10 @@ export const msToTinybirdDateTime = (ms: number): string => {
 const CACHE_SNAP_S = 15
 const TRACE_SERVICE_PARTITION_BUFFER_MS = 24 * 60 * 60 * 1000
 
-/**
- * The engine's name for "this result has no grouping dimension".
- *
- * Storage, the wire and the UI spell the same thing `UNGROUPED_GROUP_KEY`
- * (`"__total__"`), and `toStorageGroupKey` in the alerts service is the one
- * boundary that translates between them. That translation was already named;
- * this side was a bare `"all"` repeated at a dozen sites, which is what made it
- * possible to write one of them as `"__total__"` by mistake and produce an
- * `alert_rule_states` row no reader can see.
- */
-export const ENGINE_UNGROUPED_GROUP_KEY = "all"
+// Re-exported so `@maple/query-engine/runtime` consumers keep one import site;
+// the definition is in the driver-free `../group-key` because the query-set merge
+// needs it too and runs in the browser.
+export { ENGINE_UNGROUPED_GROUP_KEY } from "../group-key"
 
 /**
  * Bound the service-enrichment lookup to the daily partitions surrounding the

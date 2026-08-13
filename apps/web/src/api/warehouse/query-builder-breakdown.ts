@@ -2,6 +2,7 @@ import { Effect, Result, Schema } from "effect"
 import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
 import { QueryEngineExecuteRequest } from "@maple/query-engine"
 import { buildBreakdownQuerySpec } from "@maple/query-engine/query-builder"
+import { type BreakdownQueryResult, mergeBreakdownResults } from "@maple/query-engine/query-set"
 import { decodeInput, executeQueryEngine, invalidWarehouseInput } from "@/api/warehouse/effect-utils"
 import { displayError } from "@/lib/error-messages"
 
@@ -21,14 +22,6 @@ const QueryBuilderBreakdownInputSchema = Schema.Struct({
 })
 
 export type QueryBuilderBreakdownInput = Schema.Schema.Type<typeof QueryBuilderBreakdownInputSchema>
-
-interface BreakdownQueryResult {
-	queryId: string
-	queryName: string
-	status: "success" | "error"
-	error: string | null
-	data: Array<{ name: string; value: number }>
-}
 
 const executeBreakdownQuery = Effect.fn("QueryEngine.executeBreakdownQuery")(function* (
 	startTime: string,
@@ -101,57 +94,6 @@ const executeBreakdownQuery = Effect.fn("QueryEngine.executeBreakdownQuery")(fun
 	} satisfies BreakdownQueryResult
 })
 
-function toDisplayName(query: { name: string; legend?: string }): string {
-	const trimmedLegend = (query.legend ?? "").trim()
-	return trimmedLegend || query.name
-}
-
-function mergeBreakdownResults(
-	results: BreakdownQueryResult[],
-	enabledQueries: QueryBuilderBreakdownInput["queries"],
-): Array<Record<string, string | number>> {
-	const successful = results.filter((r) => r.status === "success" && r.data.length > 0)
-	if (successful.length === 0) return []
-
-	// Single query: return simple { name, value } rows
-	if (successful.length === 1) {
-		return successful[0].data
-			.map((item) => ({ name: item.name, value: item.value }))
-			.sort((a, b) => b.value - a.value)
-	}
-
-	const rowsByName = new Map<string, Record<string, string | number>>()
-	const columnNames: string[] = []
-	const queriesById = new Map(enabledQueries.map((q) => [q.id, q]))
-
-	for (const result of successful) {
-		const query = queriesById.get(result.queryId)
-		const displayName = query ? toDisplayName(query) : result.queryName
-		columnNames.push(displayName)
-
-		for (const item of result.data) {
-			const row = rowsByName.get(item.name) ?? { name: item.name }
-			row[displayName] = item.value
-			rowsByName.set(item.name, row)
-		}
-	}
-
-	for (const row of rowsByName.values()) {
-		for (const col of columnNames) {
-			if (typeof row[col] !== "number") {
-				row[col] = 0
-			}
-		}
-	}
-
-	const firstCol = columnNames[0]
-	return Array.from(rowsByName.values()).toSorted((a, b) => {
-		const aVal = typeof a[firstCol] === "number" ? a[firstCol] : 0
-		const bVal = typeof b[firstCol] === "number" ? b[firstCol] : 0
-		return bVal - aVal
-	})
-}
-
 export function getQueryBuilderBreakdown({ data }: { data: QueryBuilderBreakdownInput }) {
 	return getQueryBuilderBreakdownEffect({ data })
 }
@@ -190,6 +132,7 @@ const getQueryBuilderBreakdownEffect = Effect.fn("QueryEngine.getQueryBuilderBre
 	}
 })
 
-export const __testables = {
-	mergeBreakdownResults,
-}
+// The merge itself moved to `@maple/query-engine/query-set` and is tested there;
+// what stays worth asserting here is that this module adds no rescaling of its
+// own on the way out.
+export const __testables = {}

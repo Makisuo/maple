@@ -20,6 +20,22 @@ import {
 } from "@maple/query-model"
 import { buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 import {
+	appendPercentChangeSeries,
+	buildExecutionWindows,
+	collectHiddenResultIds,
+	combineRows,
+	countSuccessfulQuerySeries,
+	type EmptyRangeFallbackStrategy,
+	hasAnySeriesData,
+	LAB_EMPTY_RANGE_STRATEGY,
+	mergeQueryRunResults,
+	resolveExecutionSpecForWindow,
+	resolveFallbackStrategy,
+	resolveTimeseriesBucketSpec,
+	shiftRunResults,
+	toDisplayNameById,
+} from "@maple/query-engine/query-set"
+import {
 	decodeInput,
 	executeQueryEngine,
 	invalidWarehouseInput,
@@ -27,17 +43,10 @@ import {
 	type WarehouseApiError,
 } from "@/api/warehouse/effect-utils"
 import { displayError } from "@/lib/error-messages"
-import { computeBucketSeconds } from "@/api/warehouse/timeseries-utils"
 
 type ExecuteError = WarehouseApiError | BackendError
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
-
-const DEFAULT_STRATEGY = {
-	enableEmptyRangeFallback: true,
-	fallbackWindowSeconds: [24 * 60 * 60, 7 * 24 * 60 * 60, 31 * 24 * 60 * 60],
-	maxFallbackRangeSeconds: 31 * 24 * 60 * 60,
-} as const
 
 const StrategySchema = Schema.Struct({
 	enableEmptyRangeFallback: Schema.optional(Schema.Boolean),
@@ -105,46 +114,6 @@ interface QueryBuilderTimeseriesResponse {
 
 const toEpochMs = parseWarehouseDateTime
 
-function resolveTimeseriesBucketSpec(spec: QuerySpec, startTime: string, endTime: string): QuerySpec {
-	if (spec.kind !== "timeseries" || spec.bucketSeconds) {
-		return spec
-	}
-
-	return {
-		...spec,
-		bucketSeconds: computeBucketSeconds(startTime, endTime),
-	} satisfies QuerySpec
-}
-
-function resolveExecutionSpecForWindow(
-	spec: QuerySpec,
-	window: { startTime: string; endTime: string; kind: "primary" | "fallback" },
-): QuerySpec {
-	const resolved = resolveTimeseriesBucketSpec(spec, window.startTime, window.endTime)
-	if (resolved.kind !== "timeseries") {
-		return resolved
-	}
-
-	if (window.kind !== "fallback") {
-		return resolved
-	}
-
-	const autoBucketSeconds = computeBucketSeconds(window.startTime, window.endTime)
-	const selectedBucketSeconds = Math.max(resolved.bucketSeconds ?? autoBucketSeconds, autoBucketSeconds)
-	return {
-		...resolved,
-		bucketSeconds: selectedBucketSeconds,
-	}
-}
-
-function hasAnySeriesData(points: TimeseriesPoint[]): boolean {
-	return points.some((point) => Object.keys(point.series).length > 0)
-}
-
-function countSuccessfulQuerySeries(results: QueryRunResult[]): number {
-	return results.filter((result) => result.status === "success" && hasAnySeriesData(result.data)).length
-}
-
 function noQueryDataMessage(queryResults: QueryRunResult[]): string {
 	const firstQueryError = queryResults.find(
 		(result) => typeof result.error === "string" && result.error.length > 0,
@@ -153,87 +122,28 @@ function noQueryDataMessage(queryResults: QueryRunResult[]): string {
 	return firstQueryError ?? NO_QUERY_DATA_MESSAGE
 }
 
-function shiftBucket(bucket: string, offsetMs: number): string {
-	const parsed = new Date(bucket).getTime()
-	if (Number.isNaN(parsed)) {
-		return bucket
-	}
-
-	return new Date(parsed + offsetMs).toISOString()
-}
-
-function shiftResultPoints(points: TimeseriesPoint[], offsetMs: number): TimeseriesPoint[] {
-	return points.map((point) => ({
-		bucket: shiftBucket(point.bucket, offsetMs),
-		series: { ...point.series },
-	}))
-}
-
-function resolveStrategy(input: QueryBuilderTimeseriesInput): {
-	enableEmptyRangeFallback: boolean
-	fallbackWindowSeconds: number[]
-	maxFallbackRangeSeconds: number
-} {
-	const uniqueWindows = new Set(
-		(input.strategy?.fallbackWindowSeconds ?? DEFAULT_STRATEGY.fallbackWindowSeconds).filter(
-			(seconds) => Number.isFinite(seconds) && seconds > 0,
-		),
+/**
+ * The wire strategy shape (`enableEmptyRangeFallback` / `fallbackWindowSeconds` /
+ * `maxFallbackRangeSeconds`) mapped onto the package's.
+ *
+ * The wire names stay as they are: `use-widget-data` sends them on every widget
+ * fetch, so renaming them would be a behaviour change dressed as a refactor.
+ */
+function resolveStrategy(input: QueryBuilderTimeseriesInput): EmptyRangeFallbackStrategy {
+	return resolveFallbackStrategy(
+		{
+			...(input.strategy?.enableEmptyRangeFallback === undefined
+				? {}
+				: { enabled: input.strategy.enableEmptyRangeFallback }),
+			...(input.strategy?.fallbackWindowSeconds === undefined
+				? {}
+				: { windowSeconds: input.strategy.fallbackWindowSeconds }),
+			...(input.strategy?.maxFallbackRangeSeconds === undefined
+				? {}
+				: { maxRangeSeconds: input.strategy.maxFallbackRangeSeconds }),
+		},
+		LAB_EMPTY_RANGE_STRATEGY,
 	)
-
-	return {
-		enableEmptyRangeFallback:
-			input.strategy?.enableEmptyRangeFallback ?? DEFAULT_STRATEGY.enableEmptyRangeFallback,
-		fallbackWindowSeconds: Array.from(uniqueWindows).toSorted((left, right) => left - right),
-		maxFallbackRangeSeconds:
-			input.strategy?.maxFallbackRangeSeconds ?? DEFAULT_STRATEGY.maxFallbackRangeSeconds,
-	}
-}
-
-function buildExecutionWindows(
-	startTime: string,
-	endTime: string,
-	strategy: ReturnType<typeof resolveStrategy>,
-	allowFallback: boolean,
-): Array<{ startTime: string; endTime: string; kind: "primary" | "fallback" }> {
-	const startMs = toEpochMs(startTime)
-	const endMs = toEpochMs(endTime)
-	if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
-		return [{ startTime, endTime, kind: "primary" }]
-	}
-
-	const rangeSeconds = Math.max((endMs - startMs) / 1000, 1)
-	const windows: Array<{ startTime: string; endTime: string; kind: "primary" | "fallback" }> = [
-		{ startTime, endTime, kind: "primary" },
-	]
-
-	if (!allowFallback || !strategy.enableEmptyRangeFallback) {
-		return windows
-	}
-
-	const seen = new Set([`${startTime}|${endTime}`])
-	for (const seconds of strategy.fallbackWindowSeconds) {
-		if (seconds <= rangeSeconds || seconds > strategy.maxFallbackRangeSeconds) {
-			continue
-		}
-
-		const windowStartMs = endMs - seconds * 1000
-		const nextStart = formatWarehouseDateTime(windowStartMs)
-		const nextEnd = formatWarehouseDateTime(endMs)
-		const key = `${nextStart}|${nextEnd}`
-
-		if (seen.has(key)) {
-			continue
-		}
-
-		seen.add(key)
-		windows.push({
-			startTime: nextStart,
-			endTime: nextEnd,
-			kind: "fallback",
-		})
-	}
-
-	return windows
 }
 
 const executeTimeseriesQuery = Effect.fn("QueryEngine.executeTimeseriesQuery")(function* (
@@ -347,199 +257,6 @@ const executeTimeseriesQueryWithFallbackUsing = Effect.fn("QueryEngine.executeTi
 		}
 	},
 )
-
-function toDisplayNameById(
-	entries: Array<{ id: string; name: string; legend?: string }>,
-): Map<string, string> {
-	const map = new Map<string, string>()
-
-	for (const entry of entries) {
-		const trimmedLegend = (entry.legend ?? "").trim()
-		map.set(entry.id, trimmedLegend || entry.name)
-	}
-
-	return map
-}
-
-function toSeriesDescriptor(
-	result: QueryRunResult,
-	displayName: string,
-	rawGroupName: string,
-	singleQuery: boolean,
-): {
-	stableGroupKey: string
-	seriesLabel: string
-} {
-	const normalizedGroupName = rawGroupName.trim() || "unnamed"
-	const isAllGroup = normalizedGroupName.toLowerCase() === "all"
-	const isFormulaSelfNamed = result.source === "formula" && normalizedGroupName === displayName
-
-	if (isAllGroup || isFormulaSelfNamed) {
-		return {
-			stableGroupKey: "__all__",
-			seriesLabel: displayName,
-		}
-	}
-
-	return {
-		stableGroupKey: normalizedGroupName,
-		seriesLabel: singleQuery ? normalizedGroupName : `${displayName}: ${normalizedGroupName}`,
-	}
-}
-
-function mergeQueryRunResults(
-	results: QueryRunResult[],
-	displayNameById: Map<string, string>,
-	options?: {
-		seriesSuffix?: string
-		usedSeriesNames?: Set<string>
-	},
-): {
-	rowsByBucket: Map<string, Record<string, string | number>>
-	seriesNameByStableKey: Map<string, string>
-	seriesNames: string[]
-} {
-	const rowsByBucket = new Map<string, Record<string, string | number>>()
-	const usedSeriesNames = options?.usedSeriesNames ?? new Set<string>()
-	const seriesNameByStableKey = new Map<string, string>()
-	const seriesNames: string[] = []
-	const suffix = options?.seriesSuffix ?? ""
-
-	const uniqueName = (base: string): string => {
-		if (!usedSeriesNames.has(base)) {
-			usedSeriesNames.add(base)
-			return base
-		}
-
-		let suffix = 2
-		while (usedSeriesNames.has(`${base} (${suffix})`)) {
-			suffix += 1
-		}
-
-		const next = `${base} (${suffix})`
-		usedSeriesNames.add(next)
-		return next
-	}
-
-	const successfulResultCount = results.filter(
-		(r) => r.status === "success" && r.data.length > 0 && hasAnySeriesData(r.data),
-	).length
-	const singleQuery = successfulResultCount <= 1
-
-	for (const result of results) {
-		if (result.status !== "success") {
-			continue
-		}
-
-		if (result.data.length === 0 || !hasAnySeriesData(result.data)) {
-			continue
-		}
-
-		const preferredName = displayNameById.get(result.queryId) ?? result.queryName
-
-		for (const point of result.data) {
-			const row = rowsByBucket.get(point.bucket) ?? { bucket: point.bucket }
-			if (Object.keys(point.series).length > 0) {
-				for (const [groupName, rawValue] of Object.entries(point.series)) {
-					const value = typeof rawValue === "number" ? rawValue : Number(rawValue)
-					if (!Number.isFinite(value)) {
-						continue
-					}
-
-					const descriptor = toSeriesDescriptor(result, preferredName, groupName, singleQuery)
-					const stableKey = `${result.queryId}::${descriptor.stableGroupKey}`
-					let seriesName = seriesNameByStableKey.get(stableKey)
-
-					if (!seriesName) {
-						seriesName = uniqueName(`${descriptor.seriesLabel}${suffix}`)
-						seriesNameByStableKey.set(stableKey, seriesName)
-						seriesNames.push(seriesName)
-					}
-
-					row[seriesName] = value
-				}
-			}
-			rowsByBucket.set(point.bucket, row)
-		}
-	}
-
-	for (const row of rowsByBucket.values()) {
-		for (const seriesName of seriesNames) {
-			if (typeof row[seriesName] !== "number") {
-				row[seriesName] = 0
-			}
-		}
-	}
-
-	return {
-		rowsByBucket,
-		seriesNameByStableKey,
-		seriesNames,
-	}
-}
-
-function combineRows(
-	mergedSets: Array<{
-		rowsByBucket: Map<string, Record<string, string | number>>
-		seriesNames: string[]
-	}>,
-): Array<Record<string, string | number>> {
-	const rowsByBucket = new Map<string, Record<string, string | number>>()
-	const allSeriesNames = new Set<string>()
-
-	for (const merged of mergedSets) {
-		for (const seriesName of merged.seriesNames) {
-			allSeriesNames.add(seriesName)
-		}
-
-		for (const [bucket, row] of merged.rowsByBucket.entries()) {
-			const existing = rowsByBucket.get(bucket) ?? { bucket }
-			rowsByBucket.set(bucket, { ...existing, ...row })
-		}
-	}
-
-	for (const row of rowsByBucket.values()) {
-		for (const seriesName of allSeriesNames) {
-			if (typeof row[seriesName] !== "number") {
-				row[seriesName] = 0
-			}
-		}
-	}
-
-	return Array.from(rowsByBucket.values()).toSorted((left, right) =>
-		String(left.bucket).localeCompare(String(right.bucket)),
-	)
-}
-
-function appendPercentChangeSeries(
-	rows: Array<Record<string, string | number>>,
-	currentSeriesByStableKey: Map<string, string>,
-	previousSeriesByStableKey: Map<string, string>,
-): void {
-	for (const [stableKey, currentSeriesName] of currentSeriesByStableKey.entries()) {
-		const previousSeriesName = previousSeriesByStableKey.get(stableKey)
-		if (!previousSeriesName) {
-			continue
-		}
-
-		const deltaSeriesName = `${currentSeriesName} (%Δ)`
-		for (const row of rows) {
-			const current = row[currentSeriesName]
-			const previous = row[previousSeriesName]
-
-			const currentValue = typeof current === "number" && Number.isFinite(current) ? current : 0
-			const previousValue = typeof previous === "number" && Number.isFinite(previous) ? previous : 0
-
-			// prev=0 & cur=0 is genuinely "unchanged"; prev=0 & cur>0 has no
-			// meaningful percent — omit the point (gap) instead of fabricating 0%.
-			if (previousValue === 0) {
-				if (currentValue === 0) row[deltaSeriesName] = 0
-				continue
-			}
-			row[deltaSeriesName] = ((currentValue - previousValue) / Math.abs(previousValue)) * 100
-		}
-	}
-}
 
 const runQueryWindow = Effect.fn("QueryEngine.runQueryWindow")(function* (
 	startTime: string,
@@ -655,45 +372,15 @@ const runQueryWindow = Effect.fn("QueryEngine.runQueryWindow")(function* (
 	}
 })
 
-/**
- * Ids of queries and formulas whose series must not be plotted.
- *
- * `hidden` means "feed the formulas, don't draw me" — a hidden query still runs, because the
- * formula that references it needs its numbers. The query-builder UI has always honored the flag
- * (`widget-builder-utils`) but this data source did not, so a saved widget built on a hidden
- * numerator/denominator plotted its raw operands next to the formula. On a ratio widget that also
- * means raw counts rendered with the ratio's unit — the Cloudflare cache-hit chart drew
- * "416849856400.0%" beside its real 0–1 hit rate.
- */
-function collectHiddenResultIds(input: {
-	queries: ReadonlyArray<{ id: string; hidden?: boolean }>
-	formulas?: ReadonlyArray<{ id: string; hidden?: boolean }>
-}): Set<string> {
-	return new Set([
-		...input.queries.filter((query) => query.hidden).map((query) => query.id),
-		...(input.formulas ?? []).filter((formula) => formula.hidden).map((formula) => formula.id),
-	])
-}
-
-function shiftRunResults(results: QueryRunResult[], shiftMs: number): QueryRunResult[] {
-	return results.map((result) => ({
-		...result,
-		data: shiftResultPoints(result.data, shiftMs),
-	}))
-}
-
+// The pure shaping — bucket sizing, execution windows, the series merge, percent
+// change, hidden-id collection — moved to `@maple/query-engine/query-set` and is
+// tested there. What remains here is this module's own: the wire strategy
+// mapping, the fallback loop that drives the HTTP executor, and the "why is
+// there no data" message.
 export const __testables = {
-	computeBucketSeconds,
-	resolveTimeseriesBucketSpec,
-	resolveExecutionSpecForWindow,
-	buildExecutionWindows,
 	resolveStrategy,
 	executeTimeseriesQueryWithFallbackUsing,
 	noQueryDataMessage,
-	countSuccessfulQuerySeries,
-	collectHiddenResultIds,
-	mergeQueryRunResults,
-	appendPercentChangeSeries,
 }
 
 export function getQueryBuilderTimeseries({ data }: { data: QueryBuilderTimeseriesInput }) {
@@ -836,10 +523,12 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 			previousStartTime,
 			previousEndTime,
 		},
+		// Reported under the wire spelling, which is what the caller sent and what
+		// the lab's debug panel labels its rows with.
 		strategy: {
-			enableEmptyRangeFallback: strategy.enableEmptyRangeFallback,
-			fallbackWindowSeconds: strategy.fallbackWindowSeconds,
-			maxFallbackRangeSeconds: strategy.maxFallbackRangeSeconds,
+			enableEmptyRangeFallback: strategy.enabled,
+			fallbackWindowSeconds: [...strategy.windowSeconds],
+			maxFallbackRangeSeconds: strategy.maxRangeSeconds,
 		},
 		queries: currentWindow.debug,
 		previousQueries: previousDebug,
