@@ -21,6 +21,7 @@ export {
 	type MigrationStatement,
 } from "./migrations"
 export { performanceOnlySearchColumns } from "./migrations/0010_search_indexes"
+export { AI_CLASSIFICATION_ALTER_STATEMENTS } from "./migrations/0016_ai_classification_columns"
 export {
 	type BackfillSpec,
 	isBackfill,

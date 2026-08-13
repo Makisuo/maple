@@ -21,6 +21,7 @@ import {
 	migration_0015_service_overview_minutely,
 	serviceOverviewMinutelyBackfill,
 } from "./0015_service_overview_minutely"
+import { migration_0016_ai_classification_columns } from "./0016_ai_classification_columns"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -35,17 +36,27 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
-		expect(migrations.at(-1)).toBe(migration_0015_service_overview_minutely)
-		expect(latestMigrationVersion).toBe(15)
-		// 0010, 0014 and 0015 are performance-only, so the ingest-gating version
-		// skips all three and stays at 13 — nothing writes `web_events` or
-		// `service_overview_minutely` directly, and bumping it would un-ready every
-		// BYO-CH org's ingest routing for a read-path change.
-		expect(clickHouseSchemaVersion).toBe("13")
+		expect(migrations.map((m) => m.version)).toEqual([
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+		])
+		expect(migrations.at(-1)).toBe(migration_0016_ai_classification_columns)
+		expect(latestMigrationVersion).toBe(16)
+		// 0010, 0014 and 0015 are performance/storage-only, so the ingest-gating
+		// version skips all three — nothing writes `web_events` or
+		// `service_overview_minutely` directly and search indexes change nothing the
+		// gateway sends, and bumping for any of them would un-ready every BYO-CH
+		// org's ingest routing for a read-path change.
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
 		expect(migration_0015_service_overview_minutely.requiredForIngest).toBe(false)
+
+		// 0016 is different: the gateway's INSERT now names all five AI columns,
+		// so a BYO cluster without them would reject every direct insert. Gating
+		// on it is the designed fallback — an org stamped below 16 resolves
+		// `clickhouse_ready = false` and routes to the managed pipeline until its
+		// schema syncs.
+		expect(migration_0016_ai_classification_columns.requiredForIngest).toBe(true)
+		expect(clickHouseSchemaVersion).toBe("16")
 	})
 
 	it("installs service_overview_minutely with a live-write MV and no POPULATE", () => {
@@ -115,6 +126,30 @@ describe("ClickHouse migrations", () => {
 		expect(serviceOverviewMinutelyBackfill.select).toContain(
 			"quantilesTDigestState(0.5, 0.95, 0.99)(Duration)",
 		)
+	})
+
+	it("adds the AI classification columns as defaulted trailing columns with no mutation", () => {
+		const sql = migration_0016_ai_classification_columns.statements.join("\n")
+
+		// Every column defaulted: that is what makes the ALTER metadata-only and
+		// keeps rows written before the classifier shipped readable
+		// (`AiRulesVersion = 0` = never examined).
+		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiVendor LowCardinality(String) DEFAULT ''")
+		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiSessionKeyState UInt8 DEFAULT 0")
+		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiSessionKeyHash UInt64 DEFAULT 0")
+		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiRulesVersion UInt32 DEFAULT 0")
+		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiRollupHour DateTime('UTC') DEFAULT toDateTime(0)")
+		expect(sql).toContain("ADD INDEX IF NOT EXISTS idx_ai_vendor AiVendor TYPE set(0) GRANULARITY 4")
+		expect(sql).toContain(
+			"ADD INDEX IF NOT EXISTS idx_scope_name ScopeName TYPE tokenbf_v1(4096, 3, 0) GRANULARITY 4",
+		)
+
+		// Nothing here may rewrite parts: the 30-day TTL retires unindexed parts on
+		// its own, and a whole-table mutation on `traces` is the expensive mistake.
+		expect(sql).not.toContain("MATERIALIZE INDEX")
+		expect(sql).not.toContain("MATERIALIZE COLUMN")
+		expect(sql).not.toContain("OPTIMIZE TABLE")
+		expect(migration_0016_ai_classification_columns.statements.filter(isBackfill)).toHaveLength(0)
 	})
 
 	it("installs web_events with a live-write MV and no POPULATE", () => {
