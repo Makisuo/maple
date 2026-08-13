@@ -17,6 +17,11 @@ const RETENTION_DAYS = {
 	metrics_histogram: 90,
 	metrics_sum: 90,
 	service_address_resolutions_hourly: 365,
+	// The one 400-day tier, and deliberately so: a year-over-year vendor-adoption
+	// view needs the year *plus* slack, and the row count is a few thousand per
+	// org. It also outlives its 30-day source, which is the constraint that comes
+	// with the privilege — past the raw horizon these rows cannot be rebuilt.
+	service_ai_vendors_hourly: 400,
 	service_external_edges_hourly: 365,
 	service_map_children: 30,
 	service_map_db_edges_hourly: 365,
@@ -49,7 +54,7 @@ const RETENTION_DAYS = {
 const ZERO_RETENTION_DATASOURCES = ["service_map_edges_hourly_ingest"] as const
 
 describe("Tinybird retention matrix", () => {
-	it("assigns every stored datasource to the intended 30/90/365-day tier", () => {
+	it("assigns every stored datasource to the intended 30/90/365/400-day tier", () => {
 		const actualNames = tinybirdProjectManifest.datasources.map(({ name }) => name).sort()
 		expect(actualNames).toEqual([...Object.keys(RETENTION_DAYS), ...ZERO_RETENTION_DATASOURCES].sort())
 

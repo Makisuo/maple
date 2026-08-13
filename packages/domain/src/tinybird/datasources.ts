@@ -2189,3 +2189,125 @@ export const webEvents = defineDatasource("web_events", {
 })
 
 export type WebEventsRow = InferRow<typeof webEvents>
+
+/**
+ * AI discovery rollup: one row per (org, service, vendor, hour).
+ *
+ * Purposes: read-path service pruning, vendor-per-service lookup, session-key
+ * health / education surface, and sampling-exemption suggestions. Its MV filters
+ * `AiVendor != ''`, so the HLL states and aggregate expressions never run on the
+ * platform's plain HTTP/DB traffic — non-AI spans never enter MV processing.
+ *
+ * The MV runs synchronously inside the INSERT pipeline: this target's part-count
+ * and merge-lag alerts are **trace-ingestion health**, not side-table health. A
+ * rollup target that hits `too many parts` fails the INSERT into `traces`.
+ *
+ * ## Reader contract
+ *
+ * Plain `sum()` / `min()` / `max()` with `GROUP BY` for the
+ * SimpleAggregateFunction columns, `uniqCombinedMerge(12)` for the
+ * AggregateFunction states. Parts are never guaranteed merged — **no reader may
+ * assume one row per key, and no reader may use `FINAL`**.
+ *
+ * Headline coverage is trace-level AND service-level:
+ * `uniqCombinedMerge(12)(TracesWithKey) / uniqCombinedMerge(12)(TracesTotal)`
+ * grouped by `(OrgId, ServiceName)`, **merging across vendor rows**. Per-vendor
+ * ratios are diagnostic only: a trace mixing langchain + litellm counts in both
+ * vendors' `TracesTotal` but only langchain's `TracesWithKey`, so a vendor-level
+ * ratio systematically understates co-occurring passthrough vendors. Span-level
+ * state counters stay for diagnostics; span-level coverage is uncorrelated with
+ * customer reality (openrouter: 26/1773 spans carry the key on a fully
+ * resolvable trace).
+ *
+ * AI share of a service = this table's `SpanCount` over the service's total span
+ * count from `service_usage` / `traces_aggregates_hourly` — the denominator
+ * already exists in the warehouse, which is why no all-traffic watermark table
+ * ships alongside this one.
+ *
+ * ## Boundaries
+ *
+ * Hours before the recorded enablement hour (see
+ * `AI_VENDORS_ROLLUP_ENABLEMENT_HOUR_ENV` in `@maple/domain/ai`) do not exist for
+ * readers. The boundary is **the hour `INGEST_AI_CLASSIFICATION_ENABLED` reaches
+ * 100% across the fleet** — not MV creation, which truncates an empty hour and
+ * costs nothing because `WHERE AiVendor != ''` matches no unclassified row. That
+ * hour is partly classified and partly not, and it looks perfectly healthy: every
+ * counter in it is internally consistent and nothing in the row says it is partial.
+ *
+ * `Timestamp` is span *start* time, so for hour-straddling traces the
+ * key-bearing entry span sits in the earlier hour and the later hour is
+ * denominator-only — late hours are systematically depressed, not
+ * double-counted. Rare (traces are seconds long) and documented, not corrected.
+ *
+ * SOURCE TTL: 30d (`traces`). This table keeps 400 days — a deliberate,
+ * documented retention asymmetry: the rollup outlives the raw spans it was
+ * derived from and therefore can never be rebuilt past the raw horizon.
+ * Org deletion is `ALTER TABLE … DELETE WHERE OrgId = …` (well-pruned, OrgId is
+ * the sort-key prefix) — the one sanctioned mutation on this table.
+ *
+ * Populated by materialized view, not direct ingestion.
+ */
+export const serviceAiVendorsHourly = defineDatasource("service_ai_vendors_hourly", {
+	description:
+		"Hourly per-service AI vendor discovery rollup: span/eligibility/session-key-state counters plus uniqCombined(12) trace and session states. AggregatingMergeTree MV target for AI service pruning, coverage and sampling-exemption suggestions.",
+	jsonPaths: false,
+	schema: {
+		/** Must match `traces.OrgId` exactly — an MV column type mismatch is a silent cast. */
+		OrgId: t.string().lowCardinality(),
+		ServiceName: t.string().lowCardinality(),
+		/** Normalized vendor slug from the closed allowlist. Never '' — the MV filters those out. */
+		AiVendor: t.string().lowCardinality(),
+		/** `traces.AiRollupHour`: receive-time-clamped and written by ingest, so deterministic. */
+		Hour: t.dateTime("UTC"),
+		SpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		/**
+		 * Sample-corrected span count. Maple's `SampleRate` is the **adjusted-count**
+		 * convention (the schema notes say "multiply counts by SampleRate for
+		 * unbiased throughput estimates"), so `sum(SampleRate)` is the unbiased
+		 * estimate — NOT `sum(1/SampleRate)`, which is the convention for
+		 * probability-semantics columns. The two invert each other; pinned here.
+		 * The MV floors unset/zero rows to 1.0.
+		 */
+		WeightedSpanCount: t.simpleAggregateFunction("sum", t.float64()),
+		/** States 3..6 — spans where a session key was actually expected. */
+		EligibleSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		/** State 3 — eligible, no key present. */
+		KeyAbsentCount: t.simpleAggregateFunction("sum", t.uint64()),
+		/** State 4 — a key was present but did not validate. */
+		KeyInvalidCount: t.simpleAggregateFunction("sum", t.uint64()),
+		/** State 5 — a valid key at sub-session granularity (thread/run, not session). */
+		KeySubSessionCount: t.simpleAggregateFunction("sum", t.uint64()),
+		/** State 6 — a valid session-granularity key. The only state that feeds coverage. */
+		KeySessionCount: t.simpleAggregateFunction("sum", t.uint64()),
+		/**
+		 * uniqCombined(12) ≈ 1.7% error, which caps HLL state size; a health ratio
+		 * does not need better. State types are not cast-compatible, so the value
+		 * type is pinned to `traces.TraceId`'s exact type (String).
+		 */
+		TracesTotal: t.aggregateFunction("uniqCombined(12)", t.string()),
+		/** Distinct traces with at least one state-6 span, same value type as TracesTotal. */
+		TracesWithKey: t.aggregateFunction("uniqCombined(12)", t.string()),
+		/** Distinct `AiSessionKeyHash` values over state-6 spans (`cityHash64` of the value). */
+		SessionsApprox: t.aggregateFunction("uniqCombined(12)", t.uint64()),
+		/** Provenance of the *rows*: the classifier versions that wrote them. */
+		RowRulesVersionMin: t.simpleAggregateFunction("min", t.uint32()),
+		RowRulesVersionMax: t.simpleAggregateFunction("max", t.uint32()),
+		/**
+		 * Provenance of the *counts*: the version of the writer that produced this
+		 * aggregate. For MV-written rows it equals `RowRulesVersionMax` by
+		 * construction; divergence means the partition was rebuilt by a later
+		 * registry version over older rows, which is exactly the fact a rebuild
+		 * needs to be able to state instead of hide.
+		 */
+		RollupRulesVersion: t.simpleAggregateFunction("max", t.uint32()),
+	},
+	engine: engine.aggregatingMergeTree({
+		// Daily partitions: rebuild after a registry fix is a per-closed-day
+		// `ALTER TABLE … REPLACE PARTITION … FROM <shadow>`, which is atomic.
+		partitionKey: "toYYYYMMDD(Hour)",
+		sortingKey: ["OrgId", "ServiceName", "AiVendor", "Hour"],
+		ttl: "Hour + INTERVAL 400 DAY",
+	}),
+})
+
+export type ServiceAiVendorsHourlyRow = InferRow<typeof serviceAiVendorsHourly>

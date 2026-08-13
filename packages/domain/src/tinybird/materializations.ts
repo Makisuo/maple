@@ -26,6 +26,7 @@ import {
 	serviceOperationsMinutely,
 	serviceOperationsHourly,
 	webEvents,
+	serviceAiVendorsHourly,
 } from "./datasources"
 import {
 	DB_NAMESPACE_ATTR_SQL,
@@ -35,6 +36,7 @@ import {
 	DB_SYSTEM_ATTR_SQL,
 } from "./db-query-shape-sql"
 import { NORMALIZED_SPAN_NAME_SQL } from "./span-display-name"
+import { SERVICE_AI_VENDORS_HOURLY_SELECT_SQL } from "./ai-vendors-rollup-sql"
 
 /**
  * Materialized view to aggregate log usage statistics per service per hour
@@ -1466,6 +1468,46 @@ export const webEventsMv = defineMaterializedView("web_events_mv", {
           Attributes
         FROM session_events
         WHERE Type IN ('navigation', 'custom')
+      `,
+		}),
+	],
+})
+
+/**
+ * Populates `service_ai_vendors_hourly` — one row per (org, service, vendor,
+ * hour) — from classified AI spans.
+ *
+ * `WHERE AiVendor != ''` is the whole cost story: the platform's HTTP/DB traffic
+ * never reaches the aggregate expressions or the HLL states, so this MV's cost
+ * scales with AI traffic, not total traffic. It is also what makes "no rows for a
+ * service-hour" mean *genuinely no AI spans* post-enablement, since production
+ * classifies unconditionally.
+ *
+ * `Hour` is `traces.AiRollupHour` — a receive-time-clamped hour that ingest
+ * writes for every span, flag on or off. Grouping on a stored column rather than
+ * `toStartOfHour(Timestamp)` is what keeps a clock-skewed client from opening
+ * partitions in 2038.
+ *
+ * `WeightedSpanCount` sums `SampleRate` because Maple's `SampleRate` is the
+ * adjusted-count convention (see the column docs on the target); the
+ * `if(> 0, …, 1.0)` floor guards unset/zero rows so the sum stays finite.
+ *
+ * No `POPULATE` — the emitter never emits one, and there is nothing safe to
+ * backfill anyway: correctness depends on the source rows having been classified,
+ * not on the view having existed. This view is deployed BEFORE the classification
+ * flag ramps (it is a no-op until then, since `WHERE AiVendor != ''` matches no
+ * unclassified row); the boundary readers must respect is the hour the flag
+ * reached 100%, recorded by an operator step. See migration 0017's header.
+ */
+export const serviceAiVendorsHourlyMv = defineMaterializedView("service_ai_vendors_hourly_mv", {
+	description:
+		"Aggregates classified AI spans hourly per service and vendor: span/eligibility/session-key-state counters plus uniqCombined(12) trace-coverage and session states. Filters AiVendor != '' so non-AI traffic never enters MV processing.",
+	datasource: serviceAiVendorsHourly,
+	nodes: [
+		node({
+			name: "service_ai_vendors_hourly_mv_node",
+			sql: `
+        ${SERVICE_AI_VENDORS_HOURLY_SELECT_SQL}
       `,
 		}),
 	],
