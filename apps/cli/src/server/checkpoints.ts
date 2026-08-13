@@ -1492,8 +1492,15 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 					createError(
 						isMissingBackupConfigurationError(error)
 							? new Error(
-									"checkpoints require the local server to be started with `--chdb-config-file` " +
-										"pointing at a ClickHouse backups config",
+									// `maple start` generates a backups-enabled config when
+									// `--chdb-config-file` is absent, so reaching this means the
+									// server was started with a custom config carrying no
+									// `<backups>` stanza — or with a build predating that default.
+									"the running server's chDB config has no `<backups>` stanza, so it " +
+										"cannot take checkpoints. Restart `maple start` without " +
+										"`--chdb-config-file` to use the generated default, or add " +
+										"`<backups><allowed_disk>default</allowed_disk>" +
+										"<allowed_path>backups</allowed_path></backups>` to your config.",
 									{ cause: error },
 								)
 							: error,
