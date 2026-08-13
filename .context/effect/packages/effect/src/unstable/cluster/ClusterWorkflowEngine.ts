@@ -83,7 +83,7 @@ export const make = Effect.gen(function*() {
       | Rpc.Rpc<
         "activity",
         Schema.Struct<
-          { name: typeof Schema.String; attempt: typeof Schema.Number; withTransaction: typeof Schema.Boolean }
+          { name: typeof Schema.String; attempt: typeof Schema.Int; withTransaction: typeof Schema.Boolean }
         >,
         Schema.declare<Workflow.Result<any, any>>
       >
@@ -97,7 +97,7 @@ export const make = Effect.gen(function*() {
       | Rpc.Rpc<"deferred", Schema.Struct<{ name: typeof Schema.String; exit: typeof ExitUnknown }>, typeof ExitUnknown>
       | Rpc.Rpc<
         "activity",
-        Schema.Struct<{ name: typeof Schema.String; attempt: typeof Schema.Number }>,
+        Schema.Struct<{ name: typeof Schema.String; attempt: typeof Schema.Int }>,
         Schema.declare<Workflow.Result<any, any>>
       >
       | Rpc.Rpc<"resume">
@@ -127,6 +127,7 @@ export const make = Effect.gen(function*() {
   }>()
   const interruptedActivities = new Set<string>()
   const activityLatches = new Map<string, Latch.Latch>()
+  const deferredState = WorkflowEngine.makeDeferredState()
   const clients = yield* RcMap.make({
     lookup: Effect.fnUntraced(function*(workflowName: string) {
       const entity = entities.get(workflowName)
@@ -167,12 +168,16 @@ export const make = Effect.gen(function*() {
     readonly payload: unknown
   }) {
     const payload = (options.rpc.payloadSchema as any).make(options.payload)
+    const span = yield* Effect.orDie(Effect.currentSpan)
     const envelope = Envelope.makeRequest<any>({
       requestId: yield* sharding.getSnowflake,
       address: options.address,
       tag: options.rpc._tag as any,
       payload,
-      headers: Headers.empty
+      headers: Headers.empty,
+      traceId: span.traceId,
+      spanId: span.spanId,
+      sampled: span.sampled
     })
     yield* sharding.sendOutgoing(
       new Message.OutgoingRequest({
@@ -382,7 +387,7 @@ export const make = Effect.gen(function*() {
                     )
                   }),
                   Workflow.intoResult,
-                  Effect.provideService(WorkflowEngine.WorkflowInstance, instance)
+                  (effect) => deferredState.trackRun(instance, effect)
                 ) as any
               },
 
@@ -430,13 +435,16 @@ export const make = Effect.gen(function*() {
 
               deferred: Effect.fnUntraced(function*(request: Entity.Request<any>) {
                 const payload = request.payload as any
+                yield* deferredState.deferredDone(executionId, payload.name, payload.exit)
                 yield* ensureSuccess(resume(workflow, executionId))
                 return payload.exit
               }),
 
               resume: () => ensureSuccess(resume(workflow, executionId))
             }
-          })
+          }),
+          // Reserve a slot for deferred completions to wake the active run.
+          { concurrency: 2 }
         ) as Effect.Effect<void, never, Scope.Scope>
       ),
 
@@ -545,24 +553,29 @@ export const make = Effect.gen(function*() {
 
     deferredResult: (deferred) =>
       WorkflowEngine.WorkflowInstance.pipe(
-        Effect.flatMap((instance) =>
-          requestReply({
+        Effect.flatMap((instance) => {
+          const exit = deferredState.pendingResult(instance.executionId, deferred.name)
+          if (exit) {
+            return Effect.succeedSome(exit)
+          }
+          return requestReply({
             workflow: instance.workflow,
             entityType: `Workflow/${instance.workflow._tag}`,
             executionId: instance.executionId,
             tag: "deferred",
             id: deferred.name
-          })
-        ),
-        Effect.map((reply) => {
-          if (Option.isNone(reply)) {
-            return Option.none<Exit.Exit<unknown, unknown>>()
-          }
-          const decoded = decodeDeferredWithExit(reply.value as any)
-          return Option.some(
-            decoded.exit._tag === "Success"
-              ? decoded.exit.value
-              : decoded.exit
+          }).pipe(
+            Effect.map((reply) => {
+              if (Option.isNone(reply)) {
+                return Option.none<Exit.Exit<unknown, unknown>>()
+              }
+              const decoded = decodeDeferredWithExit(reply.value as any)
+              return Option.some(
+                decoded.exit._tag === "Success"
+                  ? decoded.exit.value
+                  : decoded.exit
+              )
+            })
           )
         }),
         Effect.retry({
@@ -614,7 +627,10 @@ export const make = Effect.gen(function*() {
             payload: {
               name: options.clock.name,
               workflowName: workflow._tag,
-              wakeUp: DateTime.addDuration(now, options.clock.duration)
+              wakeUp: DateTime.mapEpochMillis(
+                DateTime.addDuration(now, options.clock.duration),
+                Math.ceil
+              )
             }
           })
         ),
@@ -644,7 +660,7 @@ const ExitUnknown = Schema.Exit(AnyOrVoid, AnyOrVoid, Schema.Any)
 const ActivityRpc = Rpc.make("activity", {
   payload: {
     name: Schema.String,
-    attempt: Schema.Number,
+    attempt: Schema.Int,
     withTransaction: Schema.Boolean.pipe(
       Schema.withDecodingDefault(Effect.succeed(false))
     )
