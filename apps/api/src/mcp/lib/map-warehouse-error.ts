@@ -1,9 +1,9 @@
 import { Effect } from "effect"
 import { type WarehouseError, WarehouseSchemaDriftError } from "@maple/domain"
-import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
+import { warehouseHandlers, warehouseReadHandlers } from "@/services/warehouse/warehouse-error-handlers"
 import { McpQueryError } from "@/mcp/tools/types"
 
-export { warehouseHandlers }
+export { warehouseHandlers, warehouseReadHandlers }
 
 const SCHEMA_DRIFT_HINT =
 	" — your ClickHouse cluster's schema is out of sync with what Maple expects. " +

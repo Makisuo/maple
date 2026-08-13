@@ -14,6 +14,7 @@ import {
 	WarehouseMalformedQueryError,
 	WarehouseQuotaExceededError,
 	WarehouseResultDecodeError,
+	WarehouseScopeError,
 	WarehouseSchemaDriftError,
 	WarehouseUpstreamError,
 	WarehouseValidationError,
@@ -71,11 +72,17 @@ describe("HttpTaggedError public body", () => {
 			pipeName: "traces_timeseries",
 			message: "NO_COMMON_TYPE",
 		})
+		const scope = new WarehouseScopeError({
+			pipeName: "compiledQuery",
+			message: "missing tenant scope",
+		})
 
 		expect(publicHttpErrorPolicy(validation).status).toBe(400)
 		expect(publicHttpErrorPolicy(quota).status).toBe(429)
 		expect(publicHttpErrorPolicy(upstream).status).toBe(503)
 		expect(publicHttpErrorPolicy(malformed).status).toBe(500)
+		expect(publicHttpErrorPolicy(scope).status).toBe(500)
+		expect(scope.error.message).not.toContain("missing tenant scope")
 	})
 
 	it("owns warehouse remediation copy without exposing diagnostics", () => {

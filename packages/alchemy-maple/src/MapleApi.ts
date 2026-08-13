@@ -12,7 +12,6 @@ import {
 	MapleApiResponseDecodeError,
 	MapleApiResponseReadError,
 	MapleApiTransportError,
-	MapleErrorTags,
 	MaplePublicErrorBodySchema,
 	isMapleApiResponseError,
 	makeMapleApiResponseError,
@@ -70,21 +69,18 @@ const errorTypeForStatus = (status: number): MaplePublicErrorType | undefined =>
 	}
 }
 
-const notFoundTagForPath = (path: string): string | undefined => {
-	const pathname = path.split("?", 1)[0] ?? path
-	if (pathname.startsWith("/v2/api_keys/")) return MapleErrorTags.apiKeyNotFound
-	if (pathname.startsWith("/v2/dashboards/")) return MapleErrorTags.dashboardNotFound
-	if (pathname.startsWith("/v2/alerts/rules/") || pathname.startsWith("/v2/alerts/destinations/")) {
-		return pathname.startsWith("/v2/alerts/rules/")
-			? MapleErrorTags.alertRuleNotFound
-			: MapleErrorTags.alertDestinationNotFound
-	}
-	return undefined
+const hasCoherentRetryPolicy = (error: {
+	readonly retryable: boolean
+	readonly recovery: string
+	readonly retry_after_seconds?: number
+	readonly retry_at?: string
+}): boolean => {
+	if (error.retryable !== (error.recovery === "retry")) return false
+	return error.retryable || (error.retry_after_seconds === undefined && error.retry_at === undefined)
 }
 
 const errorFromResponse = Effect.fn("MapleApi.errorFromResponse")(function* (
 	status: number,
-	path: string,
 	bodyText: string,
 ) {
 	const envelope = yield* decodeErrorEnvelope(bodyText).pipe(
@@ -103,15 +99,10 @@ const errorFromResponse = Effect.fn("MapleApi.errorFromResponse")(function* (
 			message: `Maple API error type ${envelope.error.type} does not match status ${status}`,
 		})
 	}
-	const expectedNotFoundTag = notFoundTagForPath(path)
-	if (
-		envelope.error.type === "not_found_error" &&
-		expectedNotFoundTag !== undefined &&
-		envelope.error._tag !== expectedNotFoundTag
-	) {
+	if (!hasCoherentRetryPolicy(envelope.error)) {
 		return yield* new MapleApiProtocolError({
 			status,
-			message: `Maple API returned ${envelope.error._tag} for ${path}; expected ${expectedNotFoundTag}`,
+			message: `Maple API returned contradictory retry metadata with status ${status}`,
 		})
 	}
 	return makeMapleApiResponseError(status, envelope.error)
@@ -193,7 +184,7 @@ export const make = Effect.gen(function* () {
 						),
 					)
 				}
-				return yield* Effect.fail(yield* errorFromResponse(response.status, path, text))
+				return yield* Effect.fail(yield* errorFromResponse(response.status, text))
 			}).pipe(
 				Effect.catchIf(isMapleApiResponseError, (error) =>
 					canAutomaticallyRetry && error.error.retryable && attempt < 6

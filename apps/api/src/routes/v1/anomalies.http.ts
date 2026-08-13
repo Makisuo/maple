@@ -16,7 +16,7 @@ import {
 } from "@/services/alerts/AnomalyDetectionService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { requireAdmin } from "@/services/auth/auth"
-import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
+import { warehouseReadHandlers } from "@/services/warehouse/warehouse-error-handlers"
 
 // Preserve v1's historical persistence envelope while v2 exposes warehouse tags directly.
 const legacyPersistenceFailure = (error: { readonly message: string }) =>
@@ -96,7 +96,7 @@ export const HttpAnomaliesLive = HttpApiBuilder.group(MapleApi, "anomalies", (ha
 							startTime: query.startTime,
 							endTime: query.endTime,
 						})
-						.pipe(Effect.catchTags(warehouseHandlers(legacyPersistenceFailure)))
+						.pipe(Effect.catchTags(warehouseReadHandlers(legacyPersistenceFailure)))
 				}).pipe(Effect.withSpan("HttpAnomalies.getIncidentTimeseries")),
 			)
 			.handle("resolveIncident", ({ params }) =>

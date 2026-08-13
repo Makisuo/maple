@@ -344,6 +344,7 @@ describe("makeWarehouseExecutor compiled-query defaults", () => {
 				.compiledQuery(tenant, withSchema, { context: "serviceOverview" })
 				.pipe(Effect.flip)
 			assert.strictEqual(error._tag, "@maple/http/errors/WarehouseResultDecodeError")
+			if (error._tag !== "@maple/http/errors/WarehouseResultDecodeError") return
 			// The real query identity, not the old constant "compiledQuery".
 			assert.strictEqual(error.pipeName, "serviceOverview")
 		}),

@@ -123,7 +123,7 @@ describe("TinybirdOrgTokenService", () => {
 		return Effect.gen(function* () {
 			const svc = yield* TinybirdOrgTokenService
 			const error = yield* Effect.flip(svc.getOrgReadToken(asOrgId("org_a")))
-			assert.strictEqual(error._tag, "@maple/api/services/TinybirdOrgTokenConfigError")
+			assert.strictEqual(error._tag, "@maple/http/errors/TinybirdOrgTokenConfigError")
 			assert.strictEqual(error.setting, "SigningKey")
 			assert.notInclude(error.message, "api-token-is-not-the-signing-key")
 		}).pipe(Effect.provide(missingLayer))

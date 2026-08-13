@@ -5,7 +5,7 @@ import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { defineV2Error, V2CursorInvalid, V2ParameterInvalid, V2TimeRangeInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
-import { V2QueryErrors, V2WarehouseErrors } from "./query-errors"
+import { V2QueryErrors, V2WarehouseReadErrors } from "./query-errors"
 
 const wireExample = <A>(example: object): A => example as A
 export const V2TelemetryRangeTooLarge = defineV2Error({
@@ -130,7 +130,7 @@ export const V2ServiceNotFound = defineV2Error({
 })
 
 const windowErrors = [V2TimeRangeInvalid.schema, V2TelemetryRangeTooLarge.schema] as const
-const warehouseWindowErrors = [...windowErrors, ...V2WarehouseErrors] as const
+const warehouseWindowErrors = [...windowErrors, ...V2WarehouseReadErrors] as const
 const traceTimeseriesErrors = [
 	...windowErrors,
 	V2TelemetryBucketCountTooLarge.schema,
@@ -741,7 +741,7 @@ export class V2TracesApiGroup extends HttpApiGroup.make("traces")
 		HttpApiEndpoint.get("retrieve", "/:trace_id", {
 			params: { trace_id: TraceId },
 			success: V2Trace,
-			error: [...V2WarehouseErrors, V2TraceNotFound.schema],
+			error: [...V2WarehouseReadErrors, V2TraceNotFound.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getTrace",
@@ -755,7 +755,7 @@ export class V2TracesApiGroup extends HttpApiGroup.make("traces")
 		HttpApiEndpoint.get("retrieveSpan", "/:trace_id/spans/:span_id", {
 			params: { trace_id: TraceId, span_id: SpanId },
 			success: V2Span,
-			error: [...V2WarehouseErrors, V2SpanNotFound.schema],
+			error: [...V2WarehouseReadErrors, V2SpanNotFound.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getSpan",
@@ -857,7 +857,7 @@ export class V2LogsApiGroup extends HttpApiGroup.make("logs")
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: LogPublicId },
 			success: V2Log,
-			error: [V2LogIdInvalid.schema, ...V2WarehouseErrors, V2LogNotFound.schema],
+			error: [V2LogIdInvalid.schema, ...V2WarehouseReadErrors, V2LogNotFound.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getLog",

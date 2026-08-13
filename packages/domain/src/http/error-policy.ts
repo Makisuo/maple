@@ -27,6 +27,7 @@ export type PublicHttpErrorType = Schema.Schema.Type<typeof PublicHttpErrorType>
 
 export type HttpErrorRetry = "never" | "backoff" | "after"
 export type PublicHttpErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 502 | 503 | 504
+export type PublicHttpErrorTag = `@maple/http/${string}`
 
 export type PublicHttpErrorTypeForStatus<Status extends PublicHttpErrorStatus> = Status extends 400 | 413
 	? "invalid_request_error"
@@ -146,22 +147,37 @@ interface PublicHttpErrorPolicyBase<Error, Status extends PublicHttpErrorStatus>
 	readonly status: Status
 	readonly code: ErrorValue<Error, string>
 	readonly title: ErrorValue<Error, string>
-	readonly retry: HttpErrorRetry
-	readonly recovery: HttpErrorRecovery
 	readonly param?: ErrorValue<Error, string | undefined>
 	readonly retryAfterSeconds?: ErrorValue<Error, number | undefined>
 	readonly retryAt?: ErrorValue<Error, string | undefined>
 }
 
-/** Public HTTP presentation owned by the tagged error class itself. */
-export type PublicHttpErrorPolicy<Error, Status extends PublicHttpErrorStatus> =
-	| (PublicHttpErrorPolicyBase<Error, Status> & {
+type PublicHttpRetryPolicy =
+	| {
+			readonly retry: "never"
+			readonly recovery: Exclude<HttpErrorRecovery, "retry">
+	  }
+	| {
+			readonly retry: Exclude<HttpErrorRetry, "never">
+			readonly recovery: "retry"
+	  }
+
+type PublicHttpMessagePolicy<Error> =
+	| {
 			readonly exposure: "public_message"
-	  })
-	| (PublicHttpErrorPolicyBase<Error, Status> & {
+	  }
+	| {
 			readonly exposure: "redacted"
 			readonly message: ErrorValue<Error, string>
-	  })
+	  }
+
+/** Public HTTP presentation owned by the tagged error class itself. */
+export type PublicHttpErrorPolicy<Error, Status extends PublicHttpErrorStatus> = PublicHttpErrorPolicyBase<
+	Error,
+	Status
+> &
+	PublicHttpRetryPolicy &
+	PublicHttpMessagePolicy<Error>
 
 /** Type-level and runtime link from an error to its class-owned HTTP definition. */
 export const PublicHttpErrorPolicyTypeId: unique symbol = Symbol.for("@maple/http/PublicHttpErrorPolicy")
@@ -213,7 +229,7 @@ export interface SelfDescribingHttpErrorClass<Error extends SelfDescribingHttpEr
 export const HttpTaggedError =
 	<Self>() =>
 	<
-		const Tag extends string,
+		const Tag extends PublicHttpErrorTag,
 		const Fields extends Schema.Struct.Fields,
 		const Policy extends PublicHttpErrorPolicy<
 			Schema.Struct.Type<Fields> & PublicTaggedError,

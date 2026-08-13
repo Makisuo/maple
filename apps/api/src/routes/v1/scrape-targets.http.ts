@@ -34,6 +34,11 @@ const v1PlanetScaleAccessTokenErrors = {
 		Effect.fail(new ScrapeTargetPersistenceError({ message: error.message })),
 } as const
 
+const v1StoredConfigError = {
+	"@maple/http/errors/ScrapeTargetStoredConfigInvalidError": (error: { readonly message: string }) =>
+		Effect.fail(new ScrapeTargetPersistenceError({ message: error.message })),
+} as const
+
 export const HttpScrapeTargetsLive = HttpApiBuilder.group(MapleApi, "scrapeTargets", (handlers) =>
 	Effect.gen(function* () {
 		const service = yield* ScrapeTargetsService
@@ -42,7 +47,7 @@ export const HttpScrapeTargetsLive = HttpApiBuilder.group(MapleApi, "scrapeTarge
 			.handle("list", () =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					return yield* service.list(tenant.orgId)
+					return yield* service.list(tenant.orgId).pipe(Effect.catchTags(v1StoredConfigError))
 				}),
 			)
 			.handle("create", ({ payload }) =>
@@ -54,7 +59,9 @@ export const HttpScrapeTargetsLive = HttpApiBuilder.group(MapleApi, "scrapeTarge
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					return yield* service.update(tenant.orgId, params.targetId, payload)
+					return yield* service
+						.update(tenant.orgId, params.targetId, payload)
+						.pipe(Effect.catchTags(v1StoredConfigError))
 				}),
 			)
 			.handle("delete", ({ params }) =>

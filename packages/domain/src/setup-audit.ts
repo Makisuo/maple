@@ -20,7 +20,7 @@ import { Schema } from "effect"
 import { HttpTaggedError } from "./http/error-policy"
 
 export class SetupAuditUnavailableError extends HttpTaggedError<SetupAuditUnavailableError>()(
-	"@maple/setup-audit/SetupAuditUnavailableError",
+	"@maple/http/errors/SetupAuditUnavailableError",
 	{
 		message: Schema.String,
 		operation: Schema.String,

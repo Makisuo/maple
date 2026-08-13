@@ -4,15 +4,13 @@ import {
 	AiTriageResult,
 	type InvestigationConfidence,
 	InvestigationCreateRequest,
+	InvestigationDataCorruptionError,
 	InvestigationDocument,
 	InvestigationFanout,
 	InvestigationAgentUnavailableError,
-	InvestigationAutomationDisabledError,
 	InvestigationLensRun,
 	InvestigationNotFoundError,
 	InvestigationPersistenceError,
-	InvestigationQuotaError,
-	InvestigationRejectedError,
 	InvestigationStartFailedError,
 	InvestigationSnapshotFact,
 	InvestigationSubjectSnapshot,
@@ -30,21 +28,19 @@ import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { chatSessionStub } from "@/chat/session"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import {
-	aiTriageSettings,
 	investigationLensRuns,
 	investigations,
 	type InvestigationLensRunRow,
 	type InvestigationRow,
 } from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
 import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
 import { routeInvestigation, type InvestigationRoute } from "@/services/errors/investigation-route"
 import { FanoutStartError } from "@/services/errors/investigation-fanout-error"
-import { evaluateInvestigationQuota, selectInvestigationUsage } from "@/services/errors/investigation-quota"
 import {
 	STALE_BUDGETS,
 	isInvestigationStale,
@@ -67,9 +63,6 @@ interface FanoutWorkflowBinding {
 }
 
 const decodeIdSync = Schema.decodeUnknownSync(InvestigationId)
-const decodeSubjectSync = Schema.decodeUnknownSync(InvestigationSubject)
-const decodeSnapshotOption = Schema.decodeUnknownOption(InvestigationSubjectSnapshot)
-const decodeResultOption = Schema.decodeUnknownOption(AiTriageResult)
 const decodeIsoSync = Schema.decodeUnknownSync(InvestigationDocument.fields.createdAt)
 
 export const newInvestigationId = () => decodeIdSync(randomUUID())
@@ -158,38 +151,39 @@ export interface ListInvestigationsOptions {
 	readonly offset?: number
 }
 
-export interface StartInvestigationOptions {
-	/** Automatic incident-open starts respect the per-org enabled flag. */
-	readonly automatic: boolean
-}
-
 export interface InvestigationServiceShape {
 	readonly listInvestigations: (
 		orgId: OrgId,
 		opts: ListInvestigationsOptions,
-	) => Effect.Effect<InvestigationsListResponse, InvestigationPersistenceError>
+	) => Effect.Effect<
+		InvestigationsListResponse,
+		InvestigationPersistenceError | InvestigationDataCorruptionError
+	>
 	readonly getInvestigation: (
 		orgId: OrgId,
 		id: InvestigationId,
-	) => Effect.Effect<InvestigationDocument, InvestigationPersistenceError | InvestigationNotFoundError>
+	) => Effect.Effect<
+		InvestigationDocument,
+		InvestigationPersistenceError | InvestigationNotFoundError | InvestigationDataCorruptionError
+	>
 	readonly createInvestigation: (
 		orgId: OrgId,
 		userId: UserId | null,
 		request: InvestigationCreateRequest,
-	) => Effect.Effect<InvestigationDocument, InvestigationPersistenceError>
+	) => Effect.Effect<
+		InvestigationDocument,
+		InvestigationPersistenceError | InvestigationDataCorruptionError
+	>
 	readonly createAndStartInvestigation: (
 		orgId: OrgId,
 		userId: UserId | null,
 		request: InvestigationCreateRequest,
-		options: StartInvestigationOptions,
 	) => Effect.Effect<
 		InvestigationDocument,
 		| InvestigationPersistenceError
-		| InvestigationQuotaError
-		| InvestigationRejectedError
-		| InvestigationAutomationDisabledError
 		| InvestigationAgentUnavailableError
 		| InvestigationStartFailedError
+		| InvestigationDataCorruptionError
 	>
 	readonly restartInvestigation: (
 		orgId: OrgId,
@@ -198,22 +192,26 @@ export interface InvestigationServiceShape {
 		InvestigationDocument,
 		| InvestigationPersistenceError
 		| InvestigationNotFoundError
-		| InvestigationQuotaError
-		| InvestigationRejectedError
-		| InvestigationAutomationDisabledError
 		| InvestigationAgentUnavailableError
 		| InvestigationStartFailedError
+		| InvestigationDataCorruptionError
 	>
 	readonly updateStatus: (
 		orgId: OrgId,
 		id: InvestigationId,
 		status: InvestigationStatus,
-	) => Effect.Effect<InvestigationDocument, InvestigationPersistenceError | InvestigationNotFoundError>
+	) => Effect.Effect<
+		InvestigationDocument,
+		InvestigationPersistenceError | InvestigationNotFoundError | InvestigationDataCorruptionError
+	>
 	readonly submitDiagnosis: (
 		orgId: OrgId,
 		id: InvestigationId,
 		request: SubmitDiagnosisRequest,
-	) => Effect.Effect<InvestigationDocument, InvestigationPersistenceError | InvestigationNotFoundError>
+	) => Effect.Effect<
+		InvestigationDocument,
+		InvestigationPersistenceError | InvestigationNotFoundError | InvestigationDataCorruptionError
+	>
 }
 
 /** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
@@ -254,20 +252,43 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					incidentEndedAt: null,
 				})
 
-			const parseReport = Effect.fnUntraced(function* (raw: unknown, investigationId: string) {
-				if (raw == null) return null
-				const decoded = decodeResultOption(raw)
-				if (Option.isNone(decoded)) {
-					// A stored report that no longer decodes (e.g. an `AiTriageResult`
-					// schema change) would otherwise blank silently — surface it on the
-					// Effect log/OTLP path so the data loss is observable rather than invisible.
-					yield* Effect.logWarning("report_json failed to decode; rendering report-less").pipe(
-						Effect.annotateLogs({ investigationId }),
-					)
-					return null
+			const storedValueLabel = (value: unknown): string => {
+				if (value === null) return "null"
+				if (value === undefined) return "undefined"
+				if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+					return String(value)
 				}
-				return decoded.value
-			})
+				return "[stored JSON]"
+			}
+
+			const storedDataCorruption = (
+				investigationId: InvestigationId,
+				field: string,
+				value: unknown,
+				cause: unknown,
+			) =>
+				new InvestigationDataCorruptionError({
+					message: `Stored investigation ${field} is invalid`,
+					investigationId,
+					field,
+					value: storedValueLabel(value),
+					cause,
+				})
+
+			const decodeStoredField = <S extends Schema.Top>(
+				investigationId: InvestigationId,
+				field: string,
+				schema: S,
+				value: unknown,
+			): Effect.Effect<S["Type"], InvestigationDataCorruptionError, S["DecodingServices"]> =>
+				Schema.decodeUnknownEffect(schema)(value).pipe(
+					Effect.mapError((cause) => storedDataCorruption(investigationId, field, value, cause)),
+				)
+
+			const parseReport = (row: InvestigationRow) =>
+				row.reportJson == null
+					? Effect.succeed(null)
+					: decodeStoredField(row.id, "report", AiTriageResult, row.reportJson)
 
 			/**
 			 * Lens rows arrive as a parameter rather than being fetched here: this runs
@@ -278,32 +299,47 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				row: InvestigationRow,
 				lensRows: ReadonlyArray<InvestigationLensRunRow> = [],
 			) {
-				const subject = decodeSubjectSync(row.subjectJson)
-				const storedSnapshot = decodeSnapshotOption(row.snapshotJson)
-				return new InvestigationDocument({
-					id: decodeIdSync(row.id),
-					status: row.status,
-					subject,
-					snapshot: Option.match(storedSnapshot, {
-						onNone: () => fallbackSnapshot(subject),
-						onSome: (snapshot) => snapshot,
-					}),
-					report: yield* parseReport(row.reportJson, row.id),
-					model: row.model ?? null,
-					severity: row.severity ?? null,
-					confidence: row.confidence ?? null,
-					seededBy: row.seededBy,
-					createdBy: row.createdBy ?? null,
-					inputTokens: row.inputTokens ?? null,
-					outputTokens: row.outputTokens ?? null,
-					error: row.error ?? null,
-					createdAt: iso(row.createdAt),
-					startedAt: row.startedAt ? iso(row.startedAt) : null,
-					diagnosedAt: row.diagnosedAt ? iso(row.diagnosedAt) : null,
-					updatedAt: iso(row.updatedAt),
-					lensRuns: lensRows.map(lensRowToDocument),
-					validator: validatorFor(row, lensRows),
-					fanout: new InvestigationFanout({ state: row.fanoutState, size: row.fanoutSize }),
+				const subject = yield* decodeStoredField(
+					row.id,
+					"subject",
+					InvestigationSubject,
+					row.subjectJson,
+				)
+				const snapshot =
+					row.snapshotJson == null
+						? fallbackSnapshot(subject)
+						: yield* decodeStoredField(
+								row.id,
+								"snapshot",
+								InvestigationSubjectSnapshot,
+								row.snapshotJson,
+							)
+				const report = yield* parseReport(row)
+				return yield* Effect.try({
+					try: () =>
+						new InvestigationDocument({
+							id: decodeIdSync(row.id),
+							status: row.status,
+							subject,
+							snapshot,
+							report,
+							model: row.model ?? null,
+							severity: row.severity ?? null,
+							confidence: row.confidence ?? null,
+							seededBy: row.seededBy,
+							createdBy: row.createdBy ?? null,
+							inputTokens: row.inputTokens ?? null,
+							outputTokens: row.outputTokens ?? null,
+							error: row.error ?? null,
+							createdAt: iso(row.createdAt),
+							startedAt: row.startedAt ? iso(row.startedAt) : null,
+							diagnosedAt: row.diagnosedAt ? iso(row.diagnosedAt) : null,
+							updatedAt: iso(row.updatedAt),
+							lensRuns: lensRows.map(lensRowToDocument),
+							validator: validatorFor(row, lensRows),
+							fanout: new InvestigationFanout({ state: row.fanoutState, size: row.fanoutSize }),
+						}),
+					catch: (cause) => storedDataCorruption(row.id, "document", row.id, cause),
 				})
 			})
 
@@ -406,82 +442,6 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								),
 							),
 					).pipe(Effect.asVoid)
-				}
-			})
-
-			/**
-			 * Settings drive two independent decisions: whether an automatic start is
-			 * allowed at all, and whether the org has budget left. How an investigation
-			 * *runs* is deliberately not among them — see `investigation-route.ts`.
-			 */
-			const loadSettings = (orgId: OrgId) =>
-				dbExecute((db) =>
-					db.select().from(aiTriageSettings).where(eq(aiTriageSettings.orgId, orgId)).limit(1),
-				).pipe(Effect.map((rows) => rows[0]))
-
-			/**
-			 * Both gates here are automatic-only.
-			 *
-			 * The daily budget exists to bound *unattended* spend — an incident storm
-			 * opening investigations while nobody is watching. A person clicking
-			 * Investigate or Retry is a deliberate act, and charging it to the same
-			 * counter made the Retry button permanently dead once the org was at its
-			 * ceiling, on a page whose failure copy tells the reader to press it. It
-			 * was also double-counting: the usage query counts rows started today, and
-			 * the row being restarted is already one of them.
-			 */
-			const ensureStartAllowed = Effect.fnUntraced(function* (
-				orgId: OrgId,
-				automatic: boolean,
-				nowMs: number,
-				/** Model passes this start will consume. A fan-out of five is six. */
-				passCount: number,
-			) {
-				const settings = yield* loadSettings(orgId)
-				if (automatic && (settings === undefined || !settings.enabled)) {
-					return yield* Effect.fail(
-						new InvestigationAutomationDisabledError({
-							message: "Automatic investigations are disabled for this organization.",
-						}),
-					)
-				}
-
-				// Manual starts are not budgeted — see this function's header. The check
-				// below is reached only by an automatic start, which today means nothing
-				// in production: the autonomous producer is `maybeEnqueueTriage`, which
-				// runs the same verdict itself and skips rather than failing. Kept wired
-				// (and declared 429 on the routes) so re-enabling is one flag, not a
-				// rebuild of the error path.
-				if (!automatic) return
-
-				// Two ceilings counted in two different units, which is the whole point
-				// of having two columns. Both the query and the verdict live in
-				// `investigation-quota.ts` so the enqueue path cannot drift back into
-				// comparing passes against the runs limit — see that module's header.
-				const usage = yield* dbExecute((db) => selectInvestigationUsage(db, orgId, nowMs))
-				const verdict = evaluateInvestigationQuota({
-					usage,
-					limits: settings,
-					passCount,
-					nowMs,
-				})
-				if (verdict.kind === "exceeded") {
-					yield* Effect.annotateCurrentSpan({
-						"maple.investigation.start_result": "quota_skipped",
-						"maple.investigation.quota_dimension": verdict.dimension,
-						"maple.investigation.quota_limit": verdict.limit,
-					})
-					return yield* Effect.fail(
-						new InvestigationQuotaError({
-							message:
-								verdict.dimension === "runs"
-									? `Daily limit of ${verdict.limit} investigations reached. Resets at midnight UTC.`
-									: `Daily limit of ${verdict.limit} model passes reached. Resets at midnight UTC.`,
-							dimension: verdict.dimension,
-							limit: verdict.limit,
-							retryableAt: decodeIsoSync(new Date(verdict.retryableAtMs).toISOString()),
-						}),
-					)
 				}
 			})
 
@@ -593,6 +553,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					return yield* Effect.fail(
 						new InvestigationStartFailedError({
 							message: "The investigation fan-out could not be started.",
+							cause: started.cause,
 						}),
 					)
 				}
@@ -659,8 +620,12 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								authMode: "self_hosted",
 							}),
 						}),
-					catch: () => undefined,
-				}).pipe(Effect.orElseSucceed(() => undefined))
+					catch: (cause) =>
+						new InvestigationStartFailedError({
+							message: "The investigation agent could not start a turn.",
+							cause,
+						}),
+				})
 
 				if (!claimed) {
 					// Either a turn is already running for this session — which for an investigation
@@ -817,11 +782,11 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 
 			const createAndStartInvestigation: InvestigationServiceShape["createAndStartInvestigation"] =
 				Effect.fn("InvestigationService.createAndStartInvestigation")(
-					function* (orgId, userId, request, options) {
+					function* (orgId, userId, request) {
 						yield* Effect.annotateCurrentSpan({
 							orgId,
 							"maple.investigation.subject_type": request.subject.type,
-							"maple.investigation.creation_source": options.automatic ? "automatic" : "manual",
+							"maple.investigation.creation_source": "manual",
 						})
 						const nowMs = yield* Clock.currentTimeMillis
 						yield* failStaleInvestigations(orgId, nowMs)
@@ -845,7 +810,6 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 							snapshot: request.snapshot ?? null,
 						})
 						const reservedPasses = route.kind === "planned" ? route.reservedPasses : 1
-						yield* ensureStartAllowed(orgId, options.automatic, nowMs, reservedPasses)
 						const doc = yield* createInvestigation(orgId, userId, request)
 						const claimed = yield* dbExecute((db) =>
 							db
@@ -897,8 +861,6 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					snapshot: existing.snapshot,
 				})
 				const reservedPasses = route.kind === "planned" ? route.reservedPasses : 1
-				yield* ensureStartAllowed(orgId, false, nowMs, reservedPasses)
-
 				const attempt = (row?.fanoutAttempt ?? 0) + 1
 
 				// Stop the run we are replacing. Without this the old instance keeps

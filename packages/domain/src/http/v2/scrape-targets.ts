@@ -13,6 +13,7 @@ import {
 	ScrapeTargetEncryptionError,
 	ScrapeTargetNotFoundError,
 	ScrapeTargetPersistenceError,
+	ScrapeTargetStoredConfigInvalidError,
 	ScrapeTargetValidationError,
 } from "../scrape-targets"
 import { AuthorizationV2 } from "./auth"
@@ -347,12 +348,14 @@ export const V2ScrapeTargetChecksQuery = Schema.Struct({
 })
 export type V2ScrapeTargetChecksQuery = Schema.Schema.Type<typeof V2ScrapeTargetChecksQuery>
 
-const [scrapeNotFound, scrapeValidation, scrapePersistence, scrapeEncryption] = publicErrors(
-	ScrapeTargetNotFoundError,
-	ScrapeTargetValidationError,
-	ScrapeTargetPersistenceError,
-	ScrapeTargetEncryptionError,
-)
+const [scrapeNotFound, scrapeValidation, scrapePersistence, scrapeEncryption, scrapeStoredConfigInvalid] =
+	publicErrors(
+		ScrapeTargetNotFoundError,
+		ScrapeTargetValidationError,
+		ScrapeTargetPersistenceError,
+		ScrapeTargetEncryptionError,
+		ScrapeTargetStoredConfigInvalidError,
+	)
 const planetScaleAccessTokenErrors = publicErrors(
 	IntegrationsNotConnectedError,
 	IntegrationsRevokedError,
@@ -379,7 +382,7 @@ export class V2ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 		HttpApiEndpoint.get("list", "/", {
 			query: ListQuery,
 			success: ScrapeTargetList,
-			error: [V2ParameterInvalid.schema, scrapePersistence],
+			error: [V2ParameterInvalid.schema, scrapePersistence, scrapeStoredConfigInvalid],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listScrapeTargets",
@@ -407,7 +410,7 @@ export class V2ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: ScrapeTargetPublicId },
 			success: V2ScrapeTarget,
-			error: [scrapeNotFound, scrapePersistence],
+			error: [scrapeNotFound, scrapePersistence, scrapeStoredConfigInvalid],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getScrapeTarget",
@@ -422,7 +425,13 @@ export class V2ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 			params: { id: ScrapeTargetPublicId },
 			payload: V2ScrapeTargetUpdateParams,
 			success: V2ScrapeTarget,
-			error: [scrapeNotFound, scrapeValidation, scrapePersistence, scrapeEncryption],
+			error: [
+				scrapeNotFound,
+				scrapeValidation,
+				scrapePersistence,
+				scrapeEncryption,
+				scrapeStoredConfigInvalid,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "updateScrapeTarget",

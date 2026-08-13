@@ -14,6 +14,7 @@ import { V2ApiKey, V2ApiKeyCreateParams, V2ApiKeyMutationResponse, V2ApiKeyWithS
 import { V2Investigation } from "./investigations"
 import { V2Organization } from "./organization"
 import { V2SessionReplay, V2SessionReplayListItem } from "./session-replays"
+import { errorTypeForStatus } from "./errors"
 
 /**
  * Contract freeze: the public v2 OpenAPI surface (paths + methods) is asserted
@@ -462,6 +463,12 @@ describe("MapleApiV2 OpenAPI", () => {
 				const op = candidate as Record<string, any>
 				for (const status of Object.keys(op.responses)) {
 					if (Number(status) < 400) continue
+					const response = (candidate as Record<string, any>).responses[status] as Record<
+						string,
+						any
+					>
+					const responseSchema = response.content["application/json"].schema as Record<string, any>
+					const branches = schemaBranches(responseSchema)
 					const tags = responseErrorTags(method, path, status)
 					expect(tags.length, `${method.toUpperCase()} ${path} ${status} has tags`).toBeGreaterThan(
 						0,
@@ -471,7 +478,46 @@ describe("MapleApiV2 OpenAPI", () => {
 						`${method.toUpperCase()} ${path} ${status} tags are unique`,
 					).toBe(tags.length)
 					for (const tag of tags) {
-						expect(tag, `${method.toUpperCase()} ${path} ${status} tag`).toMatch(/^@maple\//)
+						expect(tag, `${method.toUpperCase()} ${path} ${status} tag`).toMatch(
+							/^@maple\/http\//,
+						)
+					}
+					for (const branch of branches) {
+						const envelope = resolveSchema(branch)
+						const body = envelope.properties.error as Record<string, any>
+						const label = `${method.toUpperCase()} ${path} ${status}`
+						expect(envelope.required, `${label} envelope fields`).toEqual(["error"])
+						expect(envelope.additionalProperties, `${label} envelope is closed`).toBe(false)
+						expect(body.required, `${label} body fields`).toEqual([
+							"_tag",
+							"type",
+							"code",
+							"title",
+							"message",
+							"retryable",
+							"recovery",
+						])
+						expect(body.additionalProperties, `${label} body is closed`).toBe(false)
+						for (const field of ["_tag", "type", "code", "title", "retryable", "recovery"]) {
+							expect(body.properties[field].enum, `${label} ${field} is exact`).toHaveLength(1)
+						}
+						expect(body.properties.message.type, `${label} message`).toBe("string")
+						expect(body.properties.type.enum, `${label} status category`).toEqual([
+							errorTypeForStatus(
+								Number(status) as
+									| 400
+									| 401
+									| 403
+									| 404
+									| 409
+									| 413
+									| 429
+									| 500
+									| 502
+									| 503
+									| 504,
+							),
+						])
 					}
 				}
 			}
@@ -496,9 +542,8 @@ describe("MapleApiV2 OpenAPI", () => {
 		])
 		expect(responseErrorTags("post", "/v2/traces/timeseries", "500")).toEqual([
 			"@maple/http/errors/WarehouseMalformedQueryError",
-			"@maple/http/errors/WarehouseConfigDecryptionError",
-			"@maple/http/errors/WarehouseTokenConfigError",
-			"@maple/http/errors/WarehouseTokenMintError",
+			"@maple/http/errors/WarehouseScopeError",
+			"@maple/http/errors/OrgClickHouseSettingsEncryptionError",
 			"@maple/http/errors/QueryEngineResultMismatchError",
 			"@maple/http/v2/ResponseSchemaError",
 			"@maple/http/v2/UnexpectedError",
@@ -506,6 +551,9 @@ describe("MapleApiV2 OpenAPI", () => {
 	})
 
 	it("does not advertise service errors that v2 handlers cannot emit", () => {
+		const serializedSpec = JSON.stringify(spec)
+		expect(serializedSpec).not.toContain("@maple/http/errors/QueryEngineExecutionError")
+		expect(serializedSpec).not.toContain("@maple/http/errors/WarehouseValidationError")
 		expect(responseErrorTags("post", "/v2/api_keys", "403")).toEqual([
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
@@ -533,6 +581,48 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(declaredTags).not.toContain("@maple/http/errors/ScrapeTargetAuthError")
 	})
 
+	it("preserves managed scrape-target failures on PlanetScale mutations", () => {
+		for (const path of [
+			"/v2/integrations/planetscale/select_organization",
+			"/v2/integrations/planetscale/metrics_token",
+		]) {
+			expect(responseErrorTags("post", path, "400")).toContain(
+				"@maple/http/errors/ScrapeTargetValidationError",
+			)
+			expect(responseErrorTags("post", path, "404")).toContain(
+				"@maple/http/errors/ScrapeTargetNotFoundError",
+			)
+			expect(responseErrorTags("post", path, "500")).toContain(
+				"@maple/http/errors/ScrapeTargetEncryptionError",
+			)
+			expect(responseErrorTags("post", path, "502")).toContain(
+				"@maple/http/errors/ScrapeTargetStoredConfigInvalidError",
+			)
+			expect(responseErrorTags("post", path, "503")).toContain(
+				"@maple/http/errors/ScrapeTargetPersistenceError",
+			)
+		}
+		expect(responseErrorTags("delete", "/v2/integrations/planetscale", "503")).toContain(
+			"@maple/http/errors/ScrapeTargetPersistenceError",
+		)
+	})
+
+	it("distinguishes malformed stored scrape targets from persistence outages", () => {
+		for (const [method, path] of [
+			["get", "/v2/scrape_targets"],
+			["get", "/v2/scrape_targets/{id}"],
+			["patch", "/v2/scrape_targets/{id}"],
+		] as const) {
+			expect(responseErrorTags(method, path, "502"), path).toContain(
+				"@maple/http/errors/ScrapeTargetStoredConfigInvalidError",
+			)
+		}
+		expect(operation("post", "/v2/scrape_targets").responses["502"]).toBeUndefined()
+		expect(responseErrorTags("get", "/v2/integrations/planetscale", "502")).toContain(
+			"@maple/http/errors/ScrapeTargetStoredConfigInvalidError",
+		)
+	})
+
 	it("preserves warehouse failures on v2 read-model endpoints", () => {
 		for (const [method, path] of [
 			["get", "/v2/error_issues"],
@@ -543,8 +633,15 @@ describe("MapleApiV2 OpenAPI", () => {
 				"@maple/http/errors/WarehouseQuotaExceededError",
 			)
 			expect(responseErrorTags(method, path, "503")).toContain(
-				"@maple/http/errors/WarehouseConfigLookupError",
+				"@maple/http/errors/OrgClickHouseSettingsPersistenceError",
 			)
+			const declaredTags = ["400", "401", "403", "404", "409", "429", "500", "502", "503", "504"]
+				.filter((status) => operation(method, path).responses[status] !== undefined)
+				.flatMap((status) => responseErrorTags(method, path, status))
+			expect(declaredTags, path).not.toContain("@maple/http/errors/TinybirdOrgTokenConfigError")
+			expect(declaredTags, path).not.toContain("@maple/http/errors/TinybirdOrgTokenMintError")
+			expect(declaredTags, path).not.toContain("@maple/http/errors/WarehouseValidationError")
+			expect(declaredTags, path).toContain("@maple/http/errors/WarehouseScopeError")
 		}
 		for (const path of ["/v2/alerts/rules/{id}/checks", "/v2/alerts/rules/{id}/checks/summary"]) {
 			expect(responseErrorTags("get", path, "429")).toContain(
@@ -554,11 +651,11 @@ describe("MapleApiV2 OpenAPI", () => {
 				responseErrorTags("get", path, status),
 			)
 			for (const impossibleRoutingTag of [
-				"@maple/http/errors/WarehouseConfigLookupError",
-				"@maple/http/errors/WarehouseConfigDecryptionError",
-				"@maple/http/errors/WarehouseStoredConfigInvalidError",
-				"@maple/http/errors/WarehouseTokenConfigError",
-				"@maple/http/errors/WarehouseTokenMintError",
+				"@maple/http/errors/OrgClickHouseSettingsPersistenceError",
+				"@maple/http/errors/OrgClickHouseSettingsEncryptionError",
+				"@maple/http/errors/OrgClickHouseSettingsStoredConfigInvalidError",
+				"@maple/http/errors/TinybirdOrgTokenConfigError",
+				"@maple/http/errors/TinybirdOrgTokenMintError",
 			]) {
 				expect(declaredTags, path).not.toContain(impossibleRoutingTag)
 			}
@@ -566,8 +663,18 @@ describe("MapleApiV2 OpenAPI", () => {
 	})
 
 	it("declares exact alert not-found and query-engine failures", () => {
+		expect(responseErrorTags("post", "/v2/alerts/rules", "404")).toEqual([
+			"@maple/http/errors/AlertRuleDestinationNotFoundError",
+		])
 		expect(responseErrorTags("get", "/v2/alerts/rules/{id}", "404")).toEqual([
 			"@maple/http/errors/AlertRuleNotFoundError",
+		])
+		expect(responseErrorTags("patch", "/v2/alerts/rules/{id}", "404")).toEqual([
+			"@maple/http/errors/AlertRuleNotFoundError",
+			"@maple/http/errors/AlertRuleDestinationNotFoundError",
+		])
+		expect(responseErrorTags("post", "/v2/alerts/rules/test", "404")).toEqual([
+			"@maple/http/errors/AlertRuleDestinationNotFoundError",
 		])
 		expect(responseErrorTags("get", "/v2/alerts/destinations/{id}", "404")).toEqual([
 			"@maple/http/errors/AlertDestinationNotFoundError",
@@ -575,7 +682,7 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(responseErrorTags("get", "/v2/alerts/incidents/{id}", "404")).toEqual([
 			"@maple/http/errors/AlertIncidentNotFoundError",
 		])
-		expect(responseErrorTags("post", "/v2/alerts/rules/preview", "502")).toContain(
+		expect(responseErrorTags("post", "/v2/alerts/rules/preview", "502")).not.toContain(
 			"@maple/http/errors/QueryEngineExecutionError",
 		)
 		expect(responseErrorTags("post", "/v2/alerts/rules/preview", "502")).not.toContain(
@@ -584,6 +691,155 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(responseErrorTags("post", "/v2/alerts/rules/preview", "504")).toContain(
 			"@maple/http/errors/QueryEngineTimeoutError",
 		)
+		expect(responseErrorTags("post", "/v2/alerts/rules/preview", "500")).toContain(
+			"@maple/http/errors/TinybirdOrgTokenConfigError",
+		)
+		for (const [method, path] of [
+			["get", "/v2/alerts/rules"],
+			["get", "/v2/alerts/rules/{id}"],
+			["patch", "/v2/alerts/rules/{id}"],
+			["delete", "/v2/alerts/destinations/{id}"],
+		] as const) {
+			expect(responseErrorTags(method, path, "500")).toContain(
+				"@maple/http/errors/AlertRuleStoredConfigInvalidError",
+			)
+		}
+	})
+
+	it("distinguishes corrupt stored dashboards from persistence outages", () => {
+		for (const [method, path] of [
+			["get", "/v2/dashboards"],
+			["get", "/v2/dashboards/{id}"],
+			["patch", "/v2/dashboards/{id}"],
+			["get", "/v2/dashboards/{id}/versions"],
+			["get", "/v2/dashboards/{id}/versions/{version_id}"],
+			["post", "/v2/dashboards/{id}/versions/{version_id}/restore"],
+		] as const) {
+			expect(responseErrorTags(method, path, "500"), path).toContain(
+				"@maple/http/errors/DashboardStoredConfigInvalidError",
+			)
+		}
+
+		for (const [method, path] of [
+			["delete", "/v2/dashboards/{id}"],
+			["post", "/v2/dashboards"],
+			["post", "/v2/dashboards/import/perses"],
+			["post", "/v2/dashboards/templates/{template_id}/instantiate"],
+			["get", "/v2/dashboards/templates"],
+			["post", "/v2/dashboards/templates/{template_id}/preview"],
+		] as const) {
+			const tags = Object.keys(operation(method, path).responses)
+				.filter((status) => Number(status) >= 400)
+				.flatMap((status) => responseErrorTags(method, path, status))
+			expect(tags, path).not.toContain("@maple/http/errors/DashboardStoredConfigInvalidError")
+		}
+	})
+
+	it("keeps automatic-investigation policy errors off manual endpoints", () => {
+		for (const [method, path] of [
+			["post", "/v2/investigations"],
+			["post", "/v2/investigations/{id}/restart"],
+		] as const) {
+			const tags = Object.keys(operation(method, path).responses)
+				.filter((status) => Number(status) >= 400)
+				.flatMap((status) => responseErrorTags(method, path, status))
+			for (const impossibleTag of [
+				"@maple/http/investigations/InvestigationQuotaError",
+				"@maple/http/investigations/InvestigationAutomationDisabledError",
+				"@maple/http/investigations/InvestigationRejectedError",
+			]) {
+				expect(tags, path).not.toContain(impossibleTag)
+			}
+		}
+	})
+
+	it("preserves Hazel provisioning failures on alert destination mutations", () => {
+		for (const [method, path] of [
+			["post", "/v2/alerts/destinations"],
+			["patch", "/v2/alerts/destinations/{id}"],
+		] as const) {
+			expect(responseErrorTags(method, path, "401")).toContain(
+				"@maple/http/errors/IntegrationsRevokedError",
+			)
+			expect(responseErrorTags(method, path, "409")).toContain(
+				"@maple/http/errors/IntegrationsNotConnectedError",
+			)
+			expect(responseErrorTags(method, path, "502")).toContain(
+				"@maple/http/errors/IntegrationsUpstreamError",
+			)
+		}
+		expect(responseErrorTags("post", "/v2/alerts/destinations", "502")).not.toContain(
+			"@maple/http/errors/AlertDeliveryError",
+		)
+	})
+
+	it("declares exact alert-destination storage failures only where they can occur", () => {
+		expect(responseErrorTags("post", "/v2/alerts/destinations", "500")).toContain(
+			"@maple/http/errors/AlertDestinationEncryptionError",
+		)
+		for (const [method, path] of [
+			["get", "/v2/alerts/destinations"],
+			["get", "/v2/alerts/destinations/{id}"],
+		] as const) {
+			expect(responseErrorTags(method, path, "500")).toContain(
+				"@maple/http/errors/AlertDestinationStoredConfigInvalidError",
+			)
+		}
+
+		for (const [method, path] of [
+			["patch", "/v2/alerts/destinations/{id}"],
+			["post", "/v2/alerts/destinations/{id}/test"],
+			["post", "/v2/alerts/rules/test"],
+		] as const) {
+			const tags = responseErrorTags(method, path, "500")
+			expect(tags).toContain("@maple/http/errors/AlertDestinationDecryptionError")
+			expect(tags).toContain("@maple/http/errors/AlertDestinationStoredConfigInvalidError")
+		}
+
+		for (const [method, path, tag] of [
+			["post", "/v2/alerts/rules", "@maple/http/errors/AlertRuleStoredConfigInvalidError"],
+			[
+				"post",
+				"/v2/alerts/destinations",
+				"@maple/http/errors/AlertDestinationStoredConfigInvalidError",
+			],
+		] as const) {
+			const tags = Object.keys(operation(method, path).responses)
+				.filter((status) => Number(status) >= 400)
+				.flatMap((status) => responseErrorTags(method, path, status))
+			expect(tags, path).not.toContain(tag)
+		}
+
+		const previewTags = ["400", "401", "403", "404", "409", "429", "500", "502", "503", "504"]
+			.filter((status) => operation("post", "/v2/alerts/rules/preview").responses[status] !== undefined)
+			.flatMap((status) => responseErrorTags("post", "/v2/alerts/rules/preview", status))
+		expect(previewTags).not.toContain("@maple/http/errors/AlertPersistenceError")
+		expect(previewTags).not.toContain("@maple/http/errors/AlertDestinationDecryptionError")
+		expect(previewTags).not.toContain("@maple/http/errors/AlertDestinationStoredConfigInvalidError")
+		const destinationTestTags = ["400", "401", "403", "404", "409", "429", "500", "502", "503", "504"]
+			.filter(
+				(status) =>
+					operation("post", "/v2/alerts/destinations/{id}/test").responses[status] !== undefined,
+			)
+			.flatMap((status) => responseErrorTags("post", "/v2/alerts/destinations/{id}/test", status))
+		expect(destinationTestTags).not.toContain("@maple/http/errors/AlertValidationError")
+	})
+
+	it("distinguishes invalid email recipients from member-directory failures", () => {
+		for (const [method, path] of [
+			["post", "/v2/alerts/destinations"],
+			["patch", "/v2/alerts/destinations/{id}"],
+		] as const) {
+			expect(responseErrorTags(method, path, "400")).toContain(
+				"@maple/http/errors/AlertRecipientSelectionError",
+			)
+			expect(responseErrorTags(method, path, "500")).toContain(
+				"@maple/http/errors/AlertMemberDirectoryNotConfiguredError",
+			)
+			expect(responseErrorTags(method, path, "503")).toContain(
+				"@maple/http/errors/AlertMemberDirectoryUnavailableError",
+			)
+		}
 	})
 
 	it("decodes slack-bot destination create/update params and rejects a blank channel_id", () => {

@@ -4,7 +4,7 @@ import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, ScrapeTargetId, UserId } from "@maple/domain/http"
 import { decodePublicId, MapleApiV2 } from "@maple/domain/http/v2"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
 import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { Env } from "@/platform/Env"
@@ -23,6 +23,7 @@ import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
+	makeWarehouseServiceStub,
 	Phase1ResourceStubsLayer,
 	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
@@ -58,17 +59,13 @@ const testConfig = () =>
 const die = () => Effect.die(new Error("not available in this test harness"))
 
 /** Recommendations reconcile against the warehouse; an empty read is a valid state. */
-const warehouseStub: WarehouseQueryServiceShape = {
+const warehouseStub = makeWarehouseServiceStub({
 	query: () => Effect.die(new Error("unexpected warehouse pipe query")),
-	sqlQuery: () => Effect.succeed([]),
 	rawSqlQuery: () => Effect.succeed([]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected compiled query")),
 	ingest: () => Effect.void,
-	asExecutor: () => {
-		throw new Error("asExecutor is not supported by this test stub")
-	},
-}
+})
 
 /** PlanetScale integrations are only reached by `planetscale` targets. */
 const planetScaleStubs = Layer.mergeAll(
@@ -173,11 +170,21 @@ const makeHarness = () => {
 			}),
 		)
 	}
+	const corruptScrapeDiscoveryConfig = async (publicId: string) => {
+		const internalId = decodePublicId("scrp", publicId)
+		if (internalId === null) throw new Error(`Invalid scrape target public ID: ${publicId}`)
+		await executeSql(
+			testDb,
+			"UPDATE scrape_targets SET target_type = 'planetscale', discovery_config_json = '{}'::jsonb WHERE id = $1",
+			[internalId],
+		)
+	}
 
 	return {
 		request,
 		bootstrapKey,
 		seedScrapeChecks,
+		corruptScrapeDiscoveryConfig,
 		dispose: async () => {
 			await disposeHandler()
 			await runtime.dispose()
@@ -402,6 +409,35 @@ describe("v2 scrape_targets over HTTP", () => {
 		})
 		expect(invalid.status).toBe(400)
 		expect(invalid.body.error.type).toBe("invalid_request_error")
+		await harness.dispose()
+	})
+
+	it("returns the exact stored-config tag instead of fabricating PlanetScale defaults", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+		const created = await harness.request("POST", "/v2/scrape_targets", {
+			token: key.secret,
+			body: {
+				name: "corrupt target",
+				url: "https://example.com:1/metrics",
+				target_type: "prometheus",
+			},
+		})
+		expect(created.status).toBe(200)
+		await harness.corruptScrapeDiscoveryConfig(created.body.id)
+
+		const response = await harness.request("GET", `/v2/scrape_targets/${created.body.id}`, {
+			token: key.secret,
+		})
+		expect(response.status).toBe(502)
+		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/errors/ScrapeTargetStoredConfigInvalidError",
+			type: "api_error",
+			code: "scrape_target_stored_config_invalid",
+			retryable: false,
+			recovery: "reconnect",
+		})
+		expect(JSON.stringify(response.body)).not.toContain("discovery_config_json")
 		await harness.dispose()
 	})
 })

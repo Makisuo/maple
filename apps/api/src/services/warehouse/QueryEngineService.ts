@@ -1,5 +1,6 @@
 import { Clock, Context, Effect, Layer, Metric } from "effect"
 import { QueryEngineExecuteResponse, type QueryEngineExecuteRequest } from "@maple/query-engine"
+import type { QueryEngineTimeoutError } from "@maple/domain/http"
 import {
 	buildCacheKey,
 	buildDirectRouteCacheKey,
@@ -17,6 +18,7 @@ import {
 	type GroupedAlertObservation,
 	type DirectRouteCachePolicyInput,
 	type QueryEngineDirectError,
+	type QueryEngineEvaluationError,
 	type AlertEvaluateRequest,
 	type QueryEngineRouteError,
 	type TimeRangeBounds,
@@ -58,7 +60,7 @@ export interface QueryEngineServiceShape {
 	readonly evaluate: (
 		tenant: TenantContext,
 		request: AlertEvaluateRequest,
-	) => Effect.Effect<ReadonlyArray<GroupedAlertObservation>, QueryEngineRouteError>
+	) => Effect.Effect<ReadonlyArray<GroupedAlertObservation>, QueryEngineEvaluationError>
 	/**
 	 * Evaluate an alert query and return the per-(bucket, group) observations
 	 * instead of a reduced scalar per group. One bucket == one evaluation window,
@@ -68,20 +70,20 @@ export interface QueryEngineServiceShape {
 	readonly evaluateSeries: (
 		tenant: TenantContext,
 		request: AlertEvaluateRequest,
-	) => Effect.Effect<ReadonlyArray<BucketGroupObs>, QueryEngineRouteError>
+	) => Effect.Effect<ReadonlyArray<BucketGroupObs>, QueryEngineEvaluationError>
 	/**
 	 * Edge-cache a direct-route query keyed by `(orgId, routeName, payload)`.
 	 * A numeric policy preserves the legacy TTL-aligned snap behavior. Routes can
 	 * instead pass a versioned policy to tune TTL and time-key snapping
 	 * independently without changing the storage service.
 	 */
-	readonly cachedDirect: <A>(
+	readonly cachedDirect: <A, E extends QueryEngineDirectError>(
 		tenant: TenantContext,
 		routeName: string,
 		payload: unknown,
-		effect: Effect.Effect<A, QueryEngineDirectError>,
+		effect: Effect.Effect<A, E>,
 		policy?: DirectRouteCachePolicyInput,
-	) => Effect.Effect<A, QueryEngineDirectError>
+	) => Effect.Effect<A, E | QueryEngineTimeoutError>
 }
 export class QueryEngineService extends Context.Service<QueryEngineService, QueryEngineServiceShape>()(
 	"@maple/api/services/QueryEngineService",
@@ -361,11 +363,14 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				)
 			})
 
-			const cachedDirect = Effect.fn("QueryEngineService.cachedDirect")(function* <A>(
+			const cachedDirect = Effect.fn("QueryEngineService.cachedDirect")(function* <
+				A,
+				E extends QueryEngineDirectError,
+			>(
 				tenant: TenantContext,
 				routeName: string,
 				payload: unknown,
-				effect: Effect.Effect<A, QueryEngineDirectError>,
+				effect: Effect.Effect<A, E>,
 				policyInput: DirectRouteCachePolicyInput = 15,
 			) {
 				// Attributes go on the `Effect.fn` span, not an inner `withSpan` of the

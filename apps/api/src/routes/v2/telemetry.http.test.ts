@@ -22,6 +22,7 @@ import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	makeWarehouseServiceStub,
 	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 } from "./v2-test-support"
@@ -175,19 +176,15 @@ const rowsForSql = (sql: string): ReadonlyArray<Record<string, unknown>> => {
 	return []
 }
 
-const warehouseStub: WarehouseQueryServiceShape = {
+const warehouseStub = makeWarehouseServiceStub({
 	query: () => Effect.die(new Error("unexpected named query")),
-	sqlQuery: () => Effect.succeed([{ bucket: "2026-07-15 12:00:00", value: 1 }]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows(rowsForSql(compiled.sql)),
 	compiledQueryFirst: (_tenant, compiled) =>
 		compiled
 			.decodeRows(rowsForSql(compiled.sql))
 			.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]))),
 	ingest: () => Effect.void,
-	asExecutor: () => {
-		throw new Error("not used")
-	},
-}
+})
 
 const queryEngineStub = {
 	execute: (_tenant, request) => {

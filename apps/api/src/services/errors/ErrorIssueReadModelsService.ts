@@ -20,7 +20,7 @@ import {
 	RoleName,
 	UserId as UserIdSchema,
 	type WorkflowState,
-	type WarehouseError,
+	type WarehouseReadError,
 } from "@maple/domain/http"
 import { errorIncidents, type ErrorIncidentRow, errorIssues } from "@maple/db"
 import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm"
@@ -99,7 +99,7 @@ export interface ErrorIssueReadModelsPublicShape {
 			readonly actionable?: boolean
 			readonly sort?: "last_seen" | "severity"
 		},
-	) => Effect.Effect<ErrorIssuesListResponse, ErrorPersistenceError | WarehouseError>
+	) => Effect.Effect<ErrorIssuesListResponse, ErrorPersistenceError | WarehouseReadError>
 	/** Fleet-level open (actionable-state) error-issue counts grouped by service. */
 	readonly countOpenIssuesByService: (
 		orgId: OrgId,
@@ -118,7 +118,7 @@ export interface ErrorIssueReadModelsPublicShape {
 		},
 	) => Effect.Effect<
 		ErrorIssueDetailResponse,
-		ErrorPersistenceError | ErrorIssueNotFoundError | WarehouseError
+		ErrorPersistenceError | ErrorIssueNotFoundError | WarehouseReadError
 	>
 	readonly listIssueIncidents: (
 		orgId: OrgId,

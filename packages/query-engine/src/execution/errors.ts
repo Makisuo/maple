@@ -2,16 +2,15 @@ import {
 	WarehouseAuthError,
 	WarehouseClientError,
 	WarehouseConfigError,
-	WarehouseConfigLookupError,
 	WarehouseMalformedQueryError,
 	WarehouseQueryError,
 	WarehouseQuotaExceededError,
-	type WarehouseResultDecodeError,
 	WarehouseSchemaDriftError,
 	WarehouseUpstreamError,
-	type WarehouseError,
-	type WarehouseRouteError,
-	type WarehouseValidationError,
+	type WarehouseClassifiedError as DomainWarehouseClassifiedError,
+	type WarehouseReadError,
+	type WarehouseSettingsRouteError,
+	type WarehouseTokenRouteError,
 } from "@maple/domain/http"
 import { detectQuotaSetting } from "../profiles"
 
@@ -40,16 +39,16 @@ const extractUpstreamStatus = (message: string): number | undefined => {
  * Every warehouse error `mapWarehouseError` can produce. Precondition and row
  * decode failures are raised elsewhere in the executor, so they are absent.
  */
-export type WarehouseClassifiedError = Exclude<
-	WarehouseError,
-	WarehouseRouteError | WarehouseValidationError | WarehouseResultDecodeError
->
+export type WarehouseClassifiedError = DomainWarehouseClassifiedError
 
-/** Failures while routing or executing SQL, before decoding a declared row schema. */
-export type WarehouseExecutionError = WarehouseClassifiedError | WarehouseRouteError
+/** Failures while resolving settings or executing an ordinary read. */
+export type WarehouseReadExecutionError = WarehouseClassifiedError | WarehouseSettingsRouteError
+
+/** Raw SQL adds org-token failures to the normal read execution set. */
+export type WarehouseExecutionError = WarehouseReadExecutionError | WarehouseTokenRouteError
 
 /** SQL execution plus the result-schema failure unique to compiled queries. */
-export type WarehouseCompiledQueryError = WarehouseExecutionError | WarehouseResultDecodeError
+export type WarehouseCompiledQueryError = WarehouseReadError
 
 type ClickHouseErrorDetails = {
 	readonly message: string

@@ -196,6 +196,35 @@ export class ScrapeTargetEncryptionError extends HttpTaggedError<ScrapeTargetEnc
 	},
 ) {}
 
+/** A persisted scrape-target row no longer satisfies the domain schema. */
+export class ScrapeTargetStoredConfigInvalidError extends HttpTaggedError<ScrapeTargetStoredConfigInvalidError>()(
+	"@maple/http/errors/ScrapeTargetStoredConfigInvalidError",
+	{
+		rawTargetId: Schema.String,
+		component: Schema.Literals([
+			"id",
+			"target_type",
+			"discovery_config",
+			"scrape_interval",
+			"auth_type",
+			"last_scrape_at",
+			"created_at",
+			"updated_at",
+		]),
+		message: Schema.String,
+		cause: Schema.Defect(),
+	},
+	{
+		status: 502,
+		code: "scrape_target_stored_config_invalid",
+		title: "Saved scrape target is invalid",
+		message: "The saved scrape target configuration is invalid. Recreate the target.",
+		retry: "never",
+		recovery: "reconnect",
+		exposure: "redacted",
+	},
+) {}
+
 /**
  * Legacy v1 scrape-auth envelope. V2 preserves managed OAuth failures as their
  * exact integration tags; this remains for v1 compatibility and direct manual

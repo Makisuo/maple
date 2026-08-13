@@ -5,7 +5,7 @@ import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { defineV2Error, V2ParameterInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
-import { V2WarehouseErrors } from "./query-errors"
+import { V2WarehouseReadErrors } from "./query-errors"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
@@ -437,7 +437,7 @@ export const V2SessionReplayRangeTooLarge = defineV2Error({
 	identifier: "SessionReplayRangeTooLargeError",
 })
 
-const commonErrors = [V2ParameterInvalid.schema, ...V2WarehouseErrors] as const
+const commonErrors = [V2ParameterInvalid.schema, ...V2WarehouseReadErrors] as const
 
 const SessionReplayList = ListOf(V2SessionReplayListItem).annotate({
 	identifier: "SessionReplayList",

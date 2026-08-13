@@ -6,6 +6,7 @@ import {
 	type WarehouseQueryRequest,
 	WarehouseQueryResponse,
 	WarehouseResultDecodeError,
+	WarehouseScopeError,
 	WarehouseUpstreamError,
 	WarehouseValidationError,
 } from "@maple/domain/http"
@@ -18,8 +19,13 @@ import {
 	resolveSettings,
 	stripTinybirdRestrictedSettings,
 } from "../profiles"
-import { mapWarehouseError, toWarehouseQueryError } from "./errors"
-import { WarehouseResponseLimitError } from "./response-limits"
+import {
+	mapWarehouseError,
+	toWarehouseQueryError,
+	type WarehouseExecutionError,
+	type WarehouseReadExecutionError,
+} from "./errors"
+import { WarehouseResponseLimitError, type WarehouseResponseLimits } from "./response-limits"
 import {
 	SQL_LOG_MAX,
 	SQL_TRACE_MAX,
@@ -90,6 +96,10 @@ interface CachedCapabilities {
 	readonly cacheKey: string
 	readonly expiresAt: number
 }
+
+type TrustedSqlError = WarehouseReadExecutionError
+type BoundedTrustedSqlError = TrustedSqlError | WarehouseResponseLimitError
+type RawSqlError = WarehouseExecutionError | RawSqlValidationError
 
 const sqlClientCacheKey = (config: ResolvedWarehouseConfig): string =>
 	config.kind === "tinybird"
@@ -280,7 +290,7 @@ WHERE name = 'enable_full_text_index'`,
 		tenant: ExecutionTenant,
 		options?: SqlQueryOptions,
 	) {
-		const purpose: RoutePurpose = options?.route === "ingest" ? "ingest" : "read"
+		const purpose: "read" | "ingest" = options?.route === "ingest" ? "ingest" : "read"
 		const resolved = yield* deps.resolveRoute(tenant, purpose, "capabilities")
 
 		// Backends running the schema we deploy answer from the generated
@@ -357,12 +367,13 @@ WHERE name = 'enable_full_text_index'`,
 
 	// Client-kind is load-bearing: the service-map DB-edge MV
 	// (service_map_db_edges_hourly_mv) only counts SpanKind IN ('Client','Producer').
-	const executeSqlOnce = Effect.fn("WarehouseQueryService.executeSql", { kind: "client" })(function* (
+	const executeSqlOnceEffect = Effect.fn("WarehouseQueryService.executeSql", { kind: "client" })(function* (
 		tenant: ExecutionTenant,
 		sql: string,
 		pipe: string,
 		options?: SqlQueryOptions,
 		execution: "trusted" | "raw" = "trusted",
+		responseLimits?: WarehouseResponseLimits,
 	) {
 		const startedAtMs = yield* Clock.currentTimeMillis
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
@@ -450,13 +461,19 @@ WHERE name = 'enable_full_text_index'`,
 		// A caller-supplied budget wins: a trusted query that knows its own response
 		// can blow the Worker heap (session replay's rrweb payloads) opts in
 		// explicitly. Raw SQL keeps its standing caps.
-		const responseLimits =
-			options?.responseLimits ??
+		const effectiveResponseLimits =
+			responseLimits ??
 			(execution === "raw"
 				? { maxRows: MAX_RAW_SQL_RESULT_ROWS, maxBytes: MAX_RAW_SQL_RESULT_BYTES }
 				: undefined)
 		const queryAttempt = Effect.tryPromise({
-			try: () => client.sql(finalSql, responseLimits === undefined ? undefined : { responseLimits }),
+			try: () =>
+				client.sql(
+					finalSql,
+					effectiveResponseLimits === undefined
+						? undefined
+						: { responseLimits: effectiveResponseLimits },
+				),
 			catch: (error) =>
 				error instanceof WarehouseResponseLimitError
 					? // Only raw SQL restates this as a validation error — there the
@@ -546,6 +563,49 @@ WHERE name = 'enable_full_text_index'`,
 		return result.data
 	})
 
+	function executeSqlOnce(
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		execution: "trusted",
+		responseLimits?: undefined,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, TrustedSqlError>
+	function executeSqlOnce(
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		execution: "trusted",
+		responseLimits: WarehouseResponseLimits,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, BoundedTrustedSqlError>
+	function executeSqlOnce(
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		execution: "raw",
+		responseLimits?: undefined,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, RawSqlError>
+	function executeSqlOnce(
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		execution: "trusted" | "raw",
+		responseLimits?: WarehouseResponseLimits,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, BoundedTrustedSqlError | RawSqlError>
+	function executeSqlOnce(
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		execution: "trusted" | "raw",
+		responseLimits?: WarehouseResponseLimits,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, BoundedTrustedSqlError | RawSqlError> {
+		return executeSqlOnceEffect(tenant, sql, pipe, options, execution, responseLimits)
+	}
+
 	/**
 	 * `executeSqlOnce`, plus a single self-heal retry when the warehouse rejects
 	 * our credentials.
@@ -568,14 +628,15 @@ WHERE name = 'enable_full_text_index'`,
 	 * flagged operation. A non-zero rate here that doesn't line up with a
 	 * rotation means the staleness window is too long.
 	 */
-	const executeSql = (
+	const executeSqlEffect = (
 		tenant: ExecutionTenant,
 		sql: string,
 		pipe: string,
 		options?: SqlQueryOptions,
 		execution: "trusted" | "raw" = "trusted",
+		responseLimits?: WarehouseResponseLimits,
 	) => {
-		const attempt = executeSqlOnce(tenant, sql, pipe, options, execution)
+		const attempt = executeSqlOnce(tenant, sql, pipe, options, execution, responseLimits)
 		const invalidateRoute = deps.invalidateRoute
 		if (invalidateRoute === undefined) return attempt
 		return attempt.pipe(
@@ -584,7 +645,9 @@ WHERE name = 'enable_full_text_index'`,
 					Effect.flatMap((invalidated) =>
 						invalidated
 							? Effect.annotateCurrentSpan("warehouse.config.auth_retry", true).pipe(
-									Effect.andThen(executeSqlOnce(tenant, sql, pipe, options, execution)),
+									Effect.andThen(
+										executeSqlOnce(tenant, sql, pipe, options, execution, responseLimits),
+									),
 								)
 							: Effect.fail(error),
 					),
@@ -593,17 +656,65 @@ WHERE name = 'enable_full_text_index'`,
 		)
 	}
 
+	function executeSql(
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		execution: "trusted",
+		responseLimits?: undefined,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, TrustedSqlError>
+	function executeSql(
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		execution: "trusted",
+		responseLimits: WarehouseResponseLimits,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, BoundedTrustedSqlError>
+	function executeSql(
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		execution: "raw",
+		responseLimits?: undefined,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, RawSqlError>
+	function executeSql(
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		execution: "trusted" | "raw",
+		responseLimits?: WarehouseResponseLimits,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, BoundedTrustedSqlError | RawSqlError>
+	function executeSql(
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		execution: "trusted" | "raw",
+		responseLimits?: WarehouseResponseLimits,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, BoundedTrustedSqlError | RawSqlError> {
+		return executeSqlEffect(tenant, sql, pipe, options, execution, responseLimits)
+	}
+
 	const executeTrustedSql = (
 		tenant: ExecutionTenant,
 		sql: string,
 		pipe: string,
 		options?: SqlQueryOptions,
-	) =>
-		executeSql(tenant, sql, pipe, options, "trusted").pipe(
-			// A trusted driver call never receives response limits, so this branch is
-			// an impossible implementation defect rather than part of its error API.
-			Effect.catchTag("@maple/http/errors/RawSqlValidationError", Effect.die),
-		)
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, TrustedSqlError> =>
+		executeSql(tenant, sql, pipe, options, "trusted")
+
+	const executeTrustedSqlBounded = (
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options: SqlQueryOptions | undefined,
+		responseLimits: WarehouseResponseLimits,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, BoundedTrustedSqlError> =>
+		executeSql(tenant, sql, pipe, options, "trusted", responseLimits)
 
 	const withCapabilitySettings = (
 		capabilities: WarehouseCapabilities | undefined,
@@ -625,29 +736,6 @@ WHERE name = 'enable_full_text_index'`,
 			"maple.query.plan.full_text_setting": capabilities.fullTextSearchSetting,
 		})
 
-	// `executeSql` can raise WarehouseResponseLimitError, but only when a caller
-	// passed `responseLimits`. `compiledQueryBounded` is the one entry point that
-	// does; every other one strips the option (`withoutResponseLimits`) and then
-	// narrows the error away (`unbounded`). Types can't see that the strip makes
-	// the error unreachable, hence the explicit pair — and hence `Effect.die`
-	// rather than a mapping: if it ever fires, a caller reached the limit path
-	// without declaring it, which is a bug here and not a condition to handle.
-
-	const withoutResponseLimits = (options?: SqlQueryOptions): SqlQueryOptions | undefined => {
-		if (options?.responseLimits === undefined) return options
-		const { responseLimits: _optedOut, ...rest } = options
-		return rest
-	}
-
-	const unbounded = <A, E, R>(
-		effect: Effect.Effect<A, E | WarehouseResponseLimitError, R>,
-	): Effect.Effect<A, E, R> =>
-		Effect.catchIf(
-			effect,
-			(error): error is WarehouseResponseLimitError => error instanceof WarehouseResponseLimitError,
-			(error) => Effect.die(error),
-		)
-
 	const query = Effect.fn("WarehouseQueryService.query")(function* (
 		tenant: ExecutionTenant,
 		payload: WarehouseQueryRequest,
@@ -657,7 +745,7 @@ WHERE name = 'enable_full_text_index'`,
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 
 		if (!tenant.orgId || tenant.orgId.trim() === "") {
-			return yield* new WarehouseValidationError({
+			return yield* new WarehouseScopeError({
 				pipeName: payload.pipeName,
 				message: "org_id must not be empty",
 			})
@@ -718,6 +806,27 @@ WHERE name = 'enable_full_text_index'`,
 	 * so scoping is now decided by the builder when it sees an `OrgId` predicate
 	 * in a top-level WHERE, and this only enforces the decision.
 	 */
+	const validateTenantScope = Effect.fn("WarehouseQueryService.validateTenantScope")(function* (
+		tenant: ExecutionTenant,
+		tenantScope: TenantScope,
+		context: string,
+	) {
+		if (!tenant.orgId || tenant.orgId.trim() === "") {
+			return yield* new WarehouseScopeError({
+				pipeName: context,
+				message: `org_id must not be empty (${context})`,
+			})
+		}
+		if (tenantScope !== "org") {
+			return yield* new WarehouseScopeError({
+				pipeName: context,
+				message:
+					`compiled query is not tenant-scoped: no top-level OrgId predicate (${context}). ` +
+					`Deliberate cross-tenant reads must declare .crossOrg() and run through crossOrgQuery.`,
+			})
+		}
+	})
+
 	const executeScopedSql = Effect.fn("WarehouseQueryService.executeScopedSql")(function* (
 		tenant: ExecutionTenant,
 		sql: string,
@@ -725,21 +834,20 @@ WHERE name = 'enable_full_text_index'`,
 		context: string,
 		options?: SqlQueryOptions,
 	) {
-		if (!tenant.orgId || tenant.orgId.trim() === "") {
-			return yield* new WarehouseValidationError({
-				pipeName: context,
-				message: `org_id must not be empty (${context})`,
-			})
-		}
-		if (tenantScope !== "org") {
-			return yield* new WarehouseValidationError({
-				pipeName: context,
-				message:
-					`compiled query is not tenant-scoped: no top-level OrgId predicate (${context}). ` +
-					`Deliberate cross-tenant reads must declare .crossOrg() and run through crossOrgQuery.`,
-			})
-		}
+		yield* validateTenantScope(tenant, tenantScope, context)
 		return yield* executeTrustedSql(tenant, sql, context, options)
+	})
+
+	const executeScopedSqlBounded = Effect.fn("WarehouseQueryService.executeScopedSqlBounded")(function* (
+		tenant: ExecutionTenant,
+		sql: string,
+		tenantScope: TenantScope,
+		context: string,
+		options: SqlQueryOptions | undefined,
+		responseLimits: WarehouseResponseLimits,
+	) {
+		yield* validateTenantScope(tenant, tenantScope, context)
+		return yield* executeTrustedSqlBounded(tenant, sql, context, options, responseLimits)
 	})
 
 	const rawSqlQuery = Effect.fn("WarehouseQueryService.rawSqlQuery")(function* (
@@ -813,10 +921,7 @@ WHERE name = 'enable_full_text_index'`,
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
-	) =>
-		unbounded(
-			executeCompiledQuery(tenant, compiled, withoutResponseLimits(options)),
-		)) as WarehouseQueryServiceShape["compiledQuery"]
+	) => executeCompiledQuery(tenant, compiled, options)) as WarehouseQueryServiceShape["compiledQuery"]
 
 	/**
 	 * Read with an explicit ceiling on the response we're willing to materialize.
@@ -826,19 +931,41 @@ WHERE name = 'enable_full_text_index'`,
 	 * the same oversized response. Callers map it to a domain error that tells
 	 * the user to ask for less.
 	 */
-	const compiledQueryBounded = <T>(
+	const compiledQueryBounded = Effect.fn("WarehouseQueryService.compiledQueryBounded")(function* <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T>,
 		options: SqlQueryOptions & {
-			readonly responseLimits: { readonly maxRows: number; readonly maxBytes: number }
+			readonly responseLimits: WarehouseResponseLimits
 		},
-	) => executeCompiledQuery(tenant, compiled, options)
+	) {
+		const { responseLimits, ...queryOptions } = options
+		const normalizedOptions = withDefaultProfile(queryOptions)
+		const context = normalizedOptions.context ?? "compiledQueryBounded"
+		const rows = yield* executeScopedSqlBounded(
+			tenant,
+			compiled.sql,
+			compiled.tenantScope,
+			context,
+			withCompiledRouting(compiled, normalizedOptions),
+			responseLimits,
+		)
+		return yield* compiled.decodeRows(rows).pipe(
+			Effect.mapError(
+				(error) =>
+					new WarehouseResultDecodeError({
+						pipeName: context,
+						message: error.message,
+						cause: error,
+					}),
+			),
+		)
+	})
 
 	const compiledQueryWithCapabilities = <T>(
 		tenant: ExecutionTenant,
 		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
 		options?: SqlQueryOptions,
-	) => unbounded(executeCompiledQuery(tenant, compile, withoutResponseLimits(options)))
+	) => executeCompiledQuery(tenant, compile, options)
 
 	/**
 	 * Deliberately read across every tenant.
@@ -857,7 +984,7 @@ WHERE name = 'enable_full_text_index'`,
 		const options = withDefaultProfile(rawOptions)
 		const context = options.context ?? "crossOrgQuery"
 		if (compiled.tenantScope !== "cross-org") {
-			return yield* new WarehouseValidationError({
+			return yield* new WarehouseScopeError({
 				pipeName: context,
 				message:
 					`tenant-scoped query routed through crossOrgQuery (${context}). ` +
@@ -1016,40 +1143,26 @@ WHERE name = 'enable_full_text_index'`,
 	const asExecutor = (tenant: ExecutionTenant): WarehouseExecutorShape => ({
 		orgId: tenant.orgId,
 		query: <T>(pipe: WarehouseQueryName, params: Record<string, unknown>, options?: SqlQueryOptions) =>
-			unbounded(
-				query(
-					tenant,
-					{ pipeName: pipe, params },
-					{ context: `pipe:${pipe}`, ...withoutResponseLimits(options) },
-				),
-			).pipe(Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> }))),
+			query(tenant, { pipeName: pipe, params }, { context: `pipe:${pipe}`, ...options }).pipe(
+				Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> })),
+			),
 		compiledQuery: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
 			compiledQuery(tenant, compiled, { context: "warehouseExecutor.compiledQuery", ...options }),
 		compiledQueryFirst: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
-			unbounded(
-				compiledQueryFirst(tenant, compiled, {
-					context: "warehouseExecutor.compiledQueryFirst",
-					...withoutResponseLimits(options),
-				}),
-			),
+			compiledQueryFirst(tenant, compiled, {
+				context: "warehouseExecutor.compiledQueryFirst",
+				...options,
+			}),
 	})
 
 	return {
-		query: (tenant, payload, options) =>
-			unbounded(query(tenant, payload, withoutResponseLimits(options))),
-		crossOrgQuery: (tenant, compiled, options) =>
-			unbounded(
-				crossOrgQuery(tenant, compiled, {
-					...withoutResponseLimits(options),
-					justification: options.justification,
-				}),
-			),
-		rawSqlQuery: (tenant, sql, options) => unbounded(rawSqlQuery(tenant, sql, options)),
+		query,
+		crossOrgQuery: (tenant, compiled, options) => crossOrgQuery(tenant, compiled, options),
+		rawSqlQuery,
 		compiledQuery,
 		compiledQueryBounded,
 		compiledQueryWithCapabilities,
-		compiledQueryFirst: (tenant, compiled, options) =>
-			unbounded(compiledQueryFirst(tenant, compiled, withoutResponseLimits(options))),
+		compiledQueryFirst,
 		// `resolveCapabilities` resolves the route on its way through, so warming
 		// it warms both. `ignore` keeps a failed warm-up invisible — the real
 		// query behind it fails with its own context a moment later.

@@ -7,7 +7,7 @@ import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowS
 import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { requireAdmin } from "@/services/auth/auth"
-import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
+import { warehouseReadHandlers } from "@/services/warehouse/warehouse-error-handlers"
 import { makePersistenceError } from "@/services/errors/error-persistence"
 
 // Preserve v1's historical persistence envelope while v2 exposes warehouse tags directly.
@@ -45,7 +45,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 							limit: query.limit,
 							cursor: query.cursor,
 						})
-						.pipe(Effect.catchTags(warehouseHandlers(legacyPersistenceFailure)))
+						.pipe(Effect.catchTags(warehouseReadHandlers(legacyPersistenceFailure)))
 					yield* Effect.annotateCurrentSpan("issueCount", response.issues.length)
 					return response
 				}).pipe(Effect.withSpan("HttpErrors.listIssues")),
@@ -64,7 +64,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 							bucketSeconds: query.bucketSeconds,
 							sampleLimit: query.sampleLimit,
 						})
-						.pipe(Effect.catchTags(warehouseHandlers(legacyPersistenceFailure)))
+						.pipe(Effect.catchTags(warehouseReadHandlers(legacyPersistenceFailure)))
 				}).pipe(Effect.withSpan("HttpErrors.getIssue")),
 			)
 			.handle("transitionIssue", ({ params, payload }) =>

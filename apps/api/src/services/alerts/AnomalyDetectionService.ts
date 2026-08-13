@@ -21,7 +21,7 @@ import {
 	RoleName,
 	type UserId,
 	UserId as UserIdSchema,
-	type WarehouseError,
+	type WarehouseReadError,
 } from "@maple/domain/http"
 import {
 	anomalyDetectorSettings,
@@ -201,7 +201,7 @@ export interface AnomalyDetectionServiceShape {
 		opts: { readonly startTime?: string; readonly endTime?: string },
 	) => Effect.Effect<
 		AnomalyIncidentTimeseriesResponse,
-		AnomalyPersistenceError | AnomalyIncidentNotFoundError | WarehouseError
+		AnomalyPersistenceError | AnomalyIncidentNotFoundError | WarehouseReadError
 	>
 	readonly getSettings: (
 		orgId: OrgId,

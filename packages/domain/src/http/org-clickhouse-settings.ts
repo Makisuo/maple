@@ -1,8 +1,17 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { Authorization } from "./current-tenant"
-import { HttpTaggedError } from "./error-policy"
 import { IsoDateTimeString } from "../primitives"
+import {
+	OrgClickHouseSettingsEncryptionError,
+	OrgClickHouseSettingsForbiddenError,
+	OrgClickHouseSettingsPersistenceError,
+	OrgClickHouseSettingsUpstreamRejectedError,
+	OrgClickHouseSettingsUpstreamUnavailableError,
+	OrgClickHouseSettingsValidationError,
+} from "./org-clickhouse-settings-errors"
+
+export * from "./org-clickhouse-settings-errors"
 
 /**
  * Connection-level status for a per-org BYO ClickHouse row.
@@ -196,93 +205,6 @@ export class OrgClickHouseCollectorConfigResponse extends Schema.Class<OrgClickH
 	/** Name of the env var the customer must set with the CH password. */
 	passwordEnvVar: Schema.String,
 }) {}
-
-export class OrgClickHouseSettingsForbiddenError extends HttpTaggedError<OrgClickHouseSettingsForbiddenError>()(
-	"@maple/http/errors/OrgClickHouseSettingsForbiddenError",
-	{ message: Schema.String },
-	{
-		status: 403,
-		code: "clickhouse_settings_forbidden",
-		title: "Permission required",
-		retry: "never",
-		recovery: "request_access",
-		exposure: "public_message",
-	},
-) {}
-
-export class OrgClickHouseSettingsValidationError extends HttpTaggedError<OrgClickHouseSettingsValidationError>()(
-	"@maple/http/errors/OrgClickHouseSettingsValidationError",
-	{ message: Schema.String },
-	{
-		status: 400,
-		code: "clickhouse_settings_invalid",
-		title: "Invalid ClickHouse settings",
-		retry: "never",
-		recovery: "fix_request",
-		exposure: "public_message",
-	},
-) {}
-
-export class OrgClickHouseSettingsPersistenceError extends HttpTaggedError<OrgClickHouseSettingsPersistenceError>()(
-	"@maple/http/errors/OrgClickHouseSettingsPersistenceError",
-	{ message: Schema.String },
-	{
-		status: 503,
-		code: "clickhouse_settings_unavailable",
-		title: "ClickHouse settings are temporarily unavailable",
-		message: "ClickHouse settings are temporarily unavailable. Retry in a few seconds.",
-		retry: "backoff",
-		recovery: "retry",
-		exposure: "redacted",
-	},
-) {}
-
-export class OrgClickHouseSettingsEncryptionError extends HttpTaggedError<OrgClickHouseSettingsEncryptionError>()(
-	"@maple/http/errors/OrgClickHouseSettingsEncryptionError",
-	{ message: Schema.String },
-	{
-		status: 500,
-		code: "clickhouse_settings_encryption_failed",
-		title: "Maple could not read these settings",
-		message: "Maple could not securely read the saved ClickHouse settings.",
-		retry: "never",
-		recovery: "contact_support",
-		exposure: "redacted",
-	},
-) {}
-
-export class OrgClickHouseSettingsUpstreamRejectedError extends HttpTaggedError<OrgClickHouseSettingsUpstreamRejectedError>()(
-	"@maple/http/errors/OrgClickHouseSettingsUpstreamRejectedError",
-	{
-		message: Schema.String,
-		statusCode: Schema.NullOr(Schema.Number),
-	},
-	{
-		status: 400,
-		code: "clickhouse_connection_rejected",
-		title: "ClickHouse rejected the connection",
-		retry: "never",
-		recovery: "reconnect",
-		exposure: "public_message",
-	},
-) {}
-
-export class OrgClickHouseSettingsUpstreamUnavailableError extends HttpTaggedError<OrgClickHouseSettingsUpstreamUnavailableError>()(
-	"@maple/http/errors/OrgClickHouseSettingsUpstreamUnavailableError",
-	{
-		message: Schema.String,
-		statusCode: Schema.NullOr(Schema.Number),
-	},
-	{
-		status: 503,
-		code: "clickhouse_connection_unavailable",
-		title: "ClickHouse is temporarily unavailable",
-		message: "The configured ClickHouse service is temporarily unavailable. Retry in a few seconds.",
-		retry: "backoff",
-		recovery: "retry",
-		exposure: "redacted",
-	},
-) {}
 
 export class OrgClickHouseSettingsApiGroup extends HttpApiGroup.make("orgClickHouseSettings")
 	.add(

@@ -5,6 +5,7 @@ import {
 	PublicHttpErrorType,
 	publicHttpErrorTypeForStatus,
 	type HttpErrorRetry,
+	type PublicHttpErrorTag,
 	type PublicHttpErrorStatus,
 } from "../error-policy"
 import { publicError } from "./public-error"
@@ -22,8 +23,8 @@ export type V2ErrorRecovery = Schema.Schema.Type<typeof V2ErrorRecovery>
 
 export const errorTypeForStatus = publicHttpErrorTypeForStatus
 
-export interface V2ErrorDefinitionOptions<
-	Tag extends string,
+interface V2ErrorDefinitionBase<
+	Tag extends PublicHttpErrorTag,
 	Status extends PublicHttpErrorStatus,
 	Code extends string,
 > {
@@ -32,11 +33,25 @@ export interface V2ErrorDefinitionOptions<
 	readonly code: Code
 	readonly title: string
 	readonly message: string
-	readonly retry: HttpErrorRetry
-	readonly recovery: V2ErrorRecovery
 	readonly identifier: string
 	readonly retryAfterSeconds?: number
 }
+
+export type V2ErrorDefinitionOptions<
+	Tag extends PublicHttpErrorTag,
+	Status extends PublicHttpErrorStatus,
+	Code extends string,
+> = V2ErrorDefinitionBase<Tag, Status, Code> &
+	(
+		| {
+				readonly retry: "never"
+				readonly recovery: Exclude<V2ErrorRecovery, "retry">
+		  }
+		| {
+				readonly retry: Exclude<HttpErrorRetry, "never">
+				readonly recovery: "retry"
+		  }
+	)
 
 export interface V2ErrorMakeOptions {
 	readonly param?: string
@@ -49,13 +64,17 @@ export interface V2ErrorMakeOptions {
  * recovery metadata come from this one definition.
  */
 export const defineV2Error = <
-	const Tag extends string,
+	const Tag extends PublicHttpErrorTag,
 	const Status extends PublicHttpErrorStatus,
 	const Code extends string,
 >(
 	definition: V2ErrorDefinitionOptions<Tag, Status, Code>,
 ) => {
 	const type = errorTypeForStatus(definition.status)
+	const retryPolicy =
+		definition.retry === "never"
+			? { retry: "never" as const, recovery: definition.recovery }
+			: { retry: definition.retry, recovery: "retry" as const }
 	class BoundaryError extends HttpTaggedError<BoundaryError>()(
 		definition.tag,
 		{
@@ -70,8 +89,7 @@ export const defineV2Error = <
 			status: definition.status,
 			code: definition.code,
 			title: definition.title,
-			retry: definition.retry,
-			recovery: definition.recovery,
+			...retryPolicy,
 			exposure: "public_message",
 			param: (error) => error.param,
 			retryAfterSeconds: (error) => error.retryAfterSeconds,

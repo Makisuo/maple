@@ -9,7 +9,10 @@ import {
 	IntegrationsUpstreamError,
 	IntegrationsValidationError,
 	OrgId,
+	ScrapeTargetEncryptionError,
 	ScrapeTargetId,
+	ScrapeTargetNotFoundError,
+	ScrapeTargetStoredConfigInvalidError,
 	UserId,
 } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
@@ -757,6 +760,37 @@ describe("v2 planetscale integration over HTTP", () => {
 		await harness.dispose()
 	})
 
+	it("preserves a malformed managed-target tag on status", async () => {
+		const harness = makeHarness(
+			{},
+			{
+				connection: {
+					getStatus: () =>
+						Effect.fail(
+							new ScrapeTargetStoredConfigInvalidError({
+								rawTargetId: "broken-target",
+								component: "discovery_config",
+								message: "stored discovery config is malformed",
+								cause: new Error("organization is missing"),
+							}),
+						),
+				},
+			},
+		)
+		const key = await harness.bootstrapAdminKey()
+
+		const { status, body } = await harness.request("GET", "/v2/integrations/planetscale", key.secret)
+		expect(status).toBe(502)
+		expect(body.error).toMatchObject({
+			_tag: "@maple/http/errors/ScrapeTargetStoredConfigInvalidError",
+			code: "scrape_target_stored_config_invalid",
+			retryable: false,
+			recovery: "reconnect",
+		})
+		expect(JSON.stringify(body)).not.toContain("organization is missing")
+		await harness.dispose()
+	})
+
 	it("attaches a metrics token for an admin and answers with the refreshed status", async () => {
 		let received: { tokenId: string; tokenSecret: string } | null = null
 		const harness = makeHarness(
@@ -811,6 +845,71 @@ describe("v2 planetscale integration over HTTP", () => {
 		expect(body.error).toMatchObject({
 			type: "invalid_request_error",
 			code: "integration_request_invalid",
+		})
+		await harness.dispose()
+	})
+
+	it("preserves a managed scrape-target encryption failure", async () => {
+		const harness = makeHarness(
+			{},
+			{
+				connection: {
+					setMetricsToken: () =>
+						Effect.fail(
+							new ScrapeTargetEncryptionError({
+								message: "failed to encrypt token with key material",
+							}),
+						),
+				},
+			},
+		)
+		const key = await harness.bootstrapAdminKey()
+
+		const { status, body } = await harness.request(
+			"POST",
+			"/v2/integrations/planetscale/metrics_token",
+			key.secret,
+			{ body: { token_id: "tok_1", token_secret: "pscale_tkn_secret" } },
+		)
+
+		expect(status).toBe(500)
+		expect(body.error).toMatchObject({
+			_tag: "@maple/http/errors/ScrapeTargetEncryptionError",
+			code: "scrape_target_encryption_failed",
+		})
+		expect(JSON.stringify(body)).not.toContain("key material")
+		await harness.dispose()
+	})
+
+	it("preserves a missing managed scrape target as an exact 404", async () => {
+		const harness = makeHarness(
+			{},
+			{
+				connection: {
+					setMetricsToken: () =>
+						Effect.fail(
+							new ScrapeTargetNotFoundError({
+								targetId: connectedStatus.scrapeTarget.id,
+								message: "The managed PlanetScale scrape target no longer exists",
+							}),
+						),
+				},
+			},
+		)
+		const key = await harness.bootstrapAdminKey()
+
+		const { status, body } = await harness.request(
+			"POST",
+			"/v2/integrations/planetscale/metrics_token",
+			key.secret,
+			{ body: { token_id: "tok_1", token_secret: "pscale_tkn_secret" } },
+		)
+
+		expect(status).toBe(404)
+		expect(body.error).toMatchObject({
+			_tag: "@maple/http/errors/ScrapeTargetNotFoundError",
+			code: "scrape_target_not_found",
+			param: "id",
 		})
 		await harness.dispose()
 	})

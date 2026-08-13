@@ -1,20 +1,18 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import {
-	WarehouseQueryError,
-	WarehouseConfigError,
-	WarehouseConfigDecryptionError,
-	WarehouseConfigLookupError,
-	WarehouseStoredConfigInvalidError,
-	WarehouseTokenConfigError,
 	MAX_RAW_SQL_RESULT_BYTES,
-	WarehouseResultDecodeError,
-	WarehouseUpstreamError,
 	OrgClickHouseSettingsEncryptionError,
 	OrgClickHouseSettingsPersistenceError,
-	OrgClickHouseSettingsValidationError,
+	OrgClickHouseSettingsStoredConfigInvalidError,
 	OrgId,
+	TinybirdOrgTokenConfigError,
 	UserId,
+	WarehouseConfigError,
+	WarehouseQueryError,
+	WarehouseResultDecodeError,
+	WarehouseScopeError,
+	WarehouseUpstreamError,
 } from "@maple/domain/http"
 import { unsafeCompiledQuery } from "@maple/query-engine/ch"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
@@ -253,25 +251,25 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
-	it.effect("preserves runtime-config dependency and configuration semantics", () => {
+	it.effect("preserves exact runtime-config dependency failures", () => {
 		const cases = [
 			{
 				source: new OrgClickHouseSettingsPersistenceError({ message: "database unavailable" }),
-				expected: WarehouseConfigLookupError,
 			},
 			{
 				source: new OrgClickHouseSettingsEncryptionError({ message: "decrypt failed" }),
-				expected: WarehouseConfigDecryptionError,
 			},
 			{
-				source: new OrgClickHouseSettingsValidationError({ message: "invalid stored URL" }),
-				expected: WarehouseStoredConfigInvalidError,
+				source: new OrgClickHouseSettingsStoredConfigInvalidError({
+					message: "invalid stored URL",
+					cause: new Error("invalid stored URL"),
+				}),
 			},
 		] as const
 
 		return Effect.forEach(
 			cases,
-			({ source, expected }) => {
+			({ source }) => {
 				const configLive = makeConfig({}, false)
 				const envLive = Env.layer.pipe(Layer.provide(configLive))
 				const tokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(envLive))
@@ -287,17 +285,7 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 					const exit = yield* WarehouseQueryService.use((service) =>
 						service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
 					).pipe(Effect.exit)
-					const mapped = getError(exit)
-					assert.instanceOf(mapped, expected)
-					assert.strictEqual(
-						(
-							mapped as
-								| WarehouseConfigDecryptionError
-								| WarehouseConfigLookupError
-								| WarehouseStoredConfigInvalidError
-						).cause,
-						source,
-					)
+					assert.strictEqual(getError(exit), source)
 				}).pipe(Effect.provide(layer))
 			},
 			{ discard: true },
@@ -316,9 +304,9 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
 			).pipe(Effect.exit)
 			const failure = getError(exit)
-			assert.instanceOf(failure, WarehouseTokenConfigError)
-			assert.include((failure as WarehouseTokenConfigError).message, "TINYBIRD_SIGNING_KEY")
-			assert.notInclude((failure as WarehouseTokenConfigError).message, "managed-token")
+			assert.instanceOf(failure, TinybirdOrgTokenConfigError)
+			assert.include((failure as TinybirdOrgTokenConfigError).message, "TINYBIRD_SIGNING_KEY")
+			assert.notInclude((failure as TinybirdOrgTokenConfigError).message, "managed-token")
 		}).pipe(Effect.provide(layer))
 	})
 
@@ -530,6 +518,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
+			assert.instanceOf(failure, WarehouseScopeError)
 			assert.strictEqual(
 				(failure as { message?: string } | undefined)?.message,
 				"compiled query is not tenant-scoped: no top-level OrgId predicate (compiledQuery). " +

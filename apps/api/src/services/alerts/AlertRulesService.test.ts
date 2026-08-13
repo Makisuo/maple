@@ -120,8 +120,8 @@ describe("AlertRulesService", () => {
 					new AlertRuleUpsertRequest({ ...request, destinationIds: [unknown] }),
 				),
 			)
-			assert.strictEqual(error._tag, "@maple/http/errors/AlertValidationError")
-			assert.deepStrictEqual(error.details, [unknown])
+			assert.strictEqual(error._tag, "@maple/http/errors/AlertRuleDestinationNotFoundError")
+			assert.strictEqual(error.destinationId, unknown)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 })

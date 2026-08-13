@@ -205,14 +205,33 @@ describe("MapleApi errors", () => {
 		)
 	})
 
-	it.effect("rejects a not-found tag for the wrong endpoint", () => {
-		const wrong = errorEnvelope({ retryable: false })
-		wrong.error._tag = "@maple/http/errors/DashboardNotFoundError"
-		const http = clientLayer(() => new Response(JSON.stringify(wrong), { status: 404 }))
+	it.effect("rejects contradictory retry metadata", () => {
+		const inconsistent = errorEnvelope({
+			retryable: false,
+			retry_after_seconds: 5,
+		})
+		const http = clientLayer(() => new Response(JSON.stringify(inconsistent), { status: 404 }))
 		return Effect.gen(function* () {
 			const api = yield* MapleApi
 			const error = yield* Effect.flip(api.get("/v2/api_keys/key_missing"))
 			expect(error._tag).toBe("@maple/alchemy/errors/ProtocolError")
+			expect(isMapleApiResponseError(error)).toBe(false)
+		}).pipe(
+			Effect.provide(MapleApiFromHttpClient().pipe(Layer.provide(environment), Layer.provide(http))),
+		)
+	})
+
+	it.effect("preserves endpoint-specific tags without client-side remapping", () => {
+		const nested = errorEnvelope({ retryable: false })
+		nested.error._tag = "@maple/http/errors/DashboardVersionNotFoundError"
+		nested.error.code = "dashboard_version_not_found"
+		const http = clientLayer(() => new Response(JSON.stringify(nested), { status: 404 }))
+		return Effect.gen(function* () {
+			const api = yield* MapleApi
+			const error = yield* Effect.flip(api.get("/v2/dashboards/dash_123/versions/dbv_456"))
+			expect(isMapleApiResponseError(error)).toBe(true)
+			if (!isMapleApiResponseError(error)) return
+			expect(error._tag).toBe("@maple/http/errors/DashboardVersionNotFoundError")
 		}).pipe(
 			Effect.provide(MapleApiFromHttpClient().pipe(Layer.provide(environment), Layer.provide(http))),
 		)

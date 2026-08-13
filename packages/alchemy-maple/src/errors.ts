@@ -1,4 +1,11 @@
 import { Schema } from "effect"
+import type {
+	AlertDestinationNotFoundError,
+	AlertRuleNotFoundError,
+	ApiKeyNotFoundError,
+	DashboardNotFoundError,
+	PublicHttpErrorTag,
+} from "@maple/domain/http"
 
 export const MaplePublicErrorType = Schema.Literals([
 	"invalid_request_error",
@@ -24,7 +31,7 @@ export const MapleErrorRecovery = Schema.Literals([
 
 /** Public HTTP tags are disjoint from this package's client-side error tags. */
 export const MapleHttpErrorTagSchema = Schema.TemplateLiteral(["@maple/http/", Schema.String])
-export type MapleHttpErrorTag = Schema.Schema.Type<typeof MapleHttpErrorTagSchema>
+export type MapleHttpErrorTag = PublicHttpErrorTag
 
 /** Stable tags used for provider lifecycle decisions. */
 export const MapleErrorTags = {
@@ -32,7 +39,12 @@ export const MapleErrorTags = {
 	dashboardNotFound: "@maple/http/errors/DashboardNotFoundError",
 	alertRuleNotFound: "@maple/http/errors/AlertRuleNotFoundError",
 	alertDestinationNotFound: "@maple/http/errors/AlertDestinationNotFoundError",
-} as const satisfies Record<string, MapleHttpErrorTag>
+} as const satisfies {
+	readonly apiKeyNotFound: ApiKeyNotFoundError["_tag"]
+	readonly dashboardNotFound: DashboardNotFoundError["_tag"]
+	readonly alertRuleNotFound: AlertRuleNotFoundError["_tag"]
+	readonly alertDestinationNotFound: AlertDestinationNotFoundError["_tag"]
+}
 
 /** Published mirror of Maple's canonical v2 error body. Kept honest by contract tests. */
 export const MaplePublicErrorBodySchema = Schema.Struct({

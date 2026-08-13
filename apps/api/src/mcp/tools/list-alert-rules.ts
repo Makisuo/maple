@@ -1,5 +1,6 @@
-import { McpQueryError, optionalBooleanParam, optionalStringParam, type McpToolRegistrar } from "./types"
+import { optionalBooleanParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { formatTable } from "@/mcp/lib/format"
+import { toMcpHttpError } from "@/mcp/lib/map-http-error"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
@@ -34,16 +35,9 @@ export function registerListAlertRulesTool(server: McpToolRegistrar) {
 			const tenant = yield* CurrentMcpTenant
 			const alerts = yield* AlertRulesService
 
-			const result = yield* alerts.listRules(tenant.orgId).pipe(
-				Effect.mapError(
-					(error) =>
-						new McpQueryError({
-							message: error.message,
-							pipeName: "list_alert_rules",
-							cause: error,
-						}),
-				),
-			)
+			const result = yield* alerts
+				.listRules(tenant.orgId)
+				.pipe(Effect.mapError(toMcpHttpError("list_alert_rules")))
 
 			let rules = result.rules
 

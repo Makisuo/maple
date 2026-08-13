@@ -14,7 +14,7 @@ import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2CursorInvalid, V2CursorSortMismatch } from "./errors"
 import { publicErrors } from "./public-error"
-import { V2WarehouseErrors } from "./query-errors"
+import { V2WarehouseReadErrors } from "./query-errors"
 import { ActorPublicId, ErrorIncidentPublicId, ErrorIssuePublicId } from "./resource-ids"
 
 export const V2ErrorIssueActor = Schema.Struct({
@@ -170,7 +170,7 @@ export class V2ErrorIssuesApiGroup extends HttpApiGroup.make("errorIssues")
 				V2CursorInvalid.schema,
 				V2CursorSortMismatch.schema,
 				errorPersistence,
-				...V2WarehouseErrors,
+				...V2WarehouseReadErrors,
 			],
 		}).annotateMerge(
 			OpenApi.annotations({
@@ -200,7 +200,7 @@ export class V2ErrorIssuesApiGroup extends HttpApiGroup.make("errorIssues")
 			params: { id: ErrorIssuePublicId },
 			query: V2ErrorIssueDetailQuery,
 			success: V2ErrorIssueDetail,
-			error: [errorIssueNotFound, errorPersistence, ...V2WarehouseErrors],
+			error: [errorIssueNotFound, errorPersistence, ...V2WarehouseReadErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getErrorIssue",

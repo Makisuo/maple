@@ -8,6 +8,7 @@ import {
 } from "./types"
 import { Effect, Match, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
+import { toMcpHttpError } from "@/mcp/lib/map-http-error"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AlertRuleUpsertRequest } from "@maple/domain/http"
@@ -330,43 +331,9 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			const tenant = yield* CurrentMcpTenant
 			const alerts = yield* AlertRulesService
 
-			const rule = yield* alerts.createRule(tenant.orgId, tenant.userId, tenant.roles, decoded).pipe(
-				Effect.catchTag("@maple/http/errors/AlertValidationError", (error) =>
-					Effect.fail(
-						new McpQueryError({
-							message: `${error._tag}: ${error.message}\n${error.details.join("\n")}`,
-							pipeName: "create_alert_rule",
-							cause: error,
-						}),
-					),
-				),
-				Effect.catchTags({
-					"@maple/http/errors/AlertForbiddenError": (error) =>
-						Effect.fail(
-							new McpQueryError({
-								message: `${error._tag}: ${error.message}`,
-								pipeName: "create_alert_rule",
-								cause: error,
-							}),
-						),
-					"@maple/http/errors/AlertPersistenceError": (error) =>
-						Effect.fail(
-							new McpQueryError({
-								message: `${error._tag}: ${error.message}`,
-								pipeName: "create_alert_rule",
-								cause: error,
-							}),
-						),
-					"@maple/http/errors/AlertRuleNotFoundError": (error) =>
-						Effect.fail(
-							new McpQueryError({
-								message: `${error._tag}: ${error.message}`,
-								pipeName: "create_alert_rule",
-								cause: error,
-							}),
-						),
-				}),
-			)
+			const rule = yield* alerts
+				.createRule(tenant.orgId, tenant.userId, tenant.roles, decoded)
+				.pipe(Effect.mapError(toMcpHttpError("create_alert_rule")))
 
 			const lines: string[] = [
 				`## Alert Rule Created`,

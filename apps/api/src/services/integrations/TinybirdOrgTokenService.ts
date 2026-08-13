@@ -1,5 +1,5 @@
-import type { OrgId } from "@maple/domain"
-import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { TinybirdOrgTokenConfigError, TinybirdOrgTokenMintError, type OrgId } from "@maple/domain"
+import { Clock, Context, Effect, Layer, Option, Redacted } from "effect"
 import { listOrgScopedDatasourceNames } from "@/services/warehouse/warehouse-catalog"
 import { mintOrgReadJwt } from "@/services/auth/tinybird-jwt"
 import { Env } from "@/platform/Env"
@@ -30,22 +30,6 @@ export interface TinybirdOrgTokenServiceShape {
 		orgId: OrgId,
 	) => Effect.Effect<string, TinybirdOrgTokenConfigError | TinybirdOrgTokenMintError>
 }
-
-export class TinybirdOrgTokenConfigError extends Schema.TaggedError<TinybirdOrgTokenConfigError>()(
-	"@maple/api/services/TinybirdOrgTokenConfigError",
-	{
-		setting: Schema.Literals(["SigningKey", "WorkspaceId"]),
-		message: Schema.String,
-	},
-) {}
-
-export class TinybirdOrgTokenMintError extends Schema.TaggedError<TinybirdOrgTokenMintError>()(
-	"@maple/api/services/TinybirdOrgTokenMintError",
-	{
-		message: Schema.String,
-		cause: Schema.Defect(),
-	},
-) {}
 
 export class TinybirdOrgTokenService extends Context.Service<
 	TinybirdOrgTokenService,
