@@ -50,7 +50,7 @@
 			"ignoreBinaries": ["pscale"]
 		},
 		"packages/email": {
-			"entry": ["scripts/*.ts"],
+			"entry": ["scripts/**/*.ts"],
 			"ignore": ["src/generated/**"],
 			"ignoreDependencies": ["tailwindcss"]
 		},
