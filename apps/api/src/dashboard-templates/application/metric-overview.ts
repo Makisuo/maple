@@ -11,6 +11,7 @@ import {
 } from "@/dashboard-templates/helpers"
 import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 import { type QueryBuilderMetricType, toQueryBuilderMetricType } from "@maple/query-model"
+import { makeRouteDataSource } from "@maple/widgets/dashboard"
 
 function widgets(opts: {
 	metricName: string
@@ -29,42 +30,42 @@ function widgets(opts: {
 		{
 			id: "metric-current",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "custom_timeseries",
-				params: { source: "metrics", metric: agg, groupBy: "none", filters: metricsFilters },
-				transform: {
+			dataSource: makeRouteDataSource(
+				"custom_timeseries",
+				{ source: "metrics", metric: agg, groupBy: "none", filters: metricsFilters },
+				{
 					flattenSeries: { valueField: "value" },
 					reduceToValue: { field: "value", aggregate: "avg" },
 				},
-			},
+			),
 			display: { title: `${opts.metricName} (${agg})` },
 			layout: { x: 0, y: 0, w: 4, h: 2 },
 		},
 		{
 			id: "metric-max",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "custom_timeseries",
-				params: { source: "metrics", metric: "max", groupBy: "none", filters: metricsFilters },
-				transform: {
+			dataSource: makeRouteDataSource(
+				"custom_timeseries",
+				{ source: "metrics", metric: "max", groupBy: "none", filters: metricsFilters },
+				{
 					flattenSeries: { valueField: "value" },
 					reduceToValue: { field: "value", aggregate: "max" },
 				},
-			},
+			),
 			display: { title: `${opts.metricName} (max)` },
 			layout: { x: 4, y: 0, w: 4, h: 2 },
 		},
 		{
 			id: "metric-count",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "custom_timeseries",
-				params: { source: "metrics", metric: "count", groupBy: "none", filters: metricsFilters },
-				transform: {
+			dataSource: makeRouteDataSource(
+				"custom_timeseries",
+				{ source: "metrics", metric: "count", groupBy: "none", filters: metricsFilters },
+				{
 					flattenSeries: { valueField: "value" },
 					reduceToValue: { field: "value", aggregate: "sum" },
 				},
-			},
+			),
 			display: { title: "Data Points", unit: "number" },
 			layout: { x: 8, y: 0, w: 4, h: 2 },
 		},

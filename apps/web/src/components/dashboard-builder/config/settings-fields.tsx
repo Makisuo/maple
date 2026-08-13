@@ -581,12 +581,6 @@ function QueryOptions() {
 					disabled={state.comparisonMode === "none"}
 					onChange={(includePercentChange) => set({ includePercentChange })}
 				/>
-				<CheckboxRow
-					id="qb-debug"
-					label="Debug"
-					checked={state.debug}
-					onChange={(debug) => set({ debug })}
-				/>
 			</div>
 		</>
 	)

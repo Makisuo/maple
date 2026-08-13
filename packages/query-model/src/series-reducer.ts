@@ -42,3 +42,14 @@ export const ALERT_REDUCERS = REDUCER_TABLE.flatMap((entry) =>
 export const ALERT_REDUCER_TO_SERIES_REDUCER = Object.fromEntries(
 	REDUCER_TABLE.flatMap((entry) => (entry.alert === null ? [] : [[entry.alert, entry.series] as const])),
 ) as Record<AlertReducer, SeriesReducer>
+
+/**
+ * The other direction — PARTIAL, unlike the one above.
+ *
+ * `"count"` has no alert counterpart, so this returns `undefined` for it rather
+ * than a default. A chart reducer that silently became `identity` is the bug
+ * this exists to fix; a caller that gets `undefined` is expected to say so.
+ */
+export const SERIES_REDUCER_TO_ALERT_REDUCER = Object.fromEntries(
+	REDUCER_TABLE.flatMap((entry) => (entry.alert === null ? [] : [[entry.series, entry.alert] as const])),
+) as Partial<Record<SeriesReducer, AlertReducer>>

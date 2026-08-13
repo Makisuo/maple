@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { dataSourceTransform, type WidgetDataSourceTransformSchema } from "@maple/widgets/dashboard"
 import { Atom, Result } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { Effect, Schedule, Schema } from "effect"
@@ -82,7 +83,7 @@ function isSeriesNameHidden(seriesName: string, hiddenBaseNames: Set<string>): b
 
 function filterHiddenSeriesRows(
 	rows: Array<Record<string, unknown>>,
-	baseNames: string[],
+	baseNames: ReadonlyArray<string>,
 ): Array<Record<string, unknown>> {
 	if (baseNames.length === 0) return rows
 
@@ -125,7 +126,10 @@ function interpolateParams(
 function applyTransform(
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	data: any,
-	transform: WidgetDataSource["transform"],
+	// The readonly schema type, not the app's deep-mutable `WidgetDataSource`
+	// alias: this only reads the transform, and `dataSourceTransform` hands back
+	// a live slice of the stored document that nothing here may write to.
+	transform: typeof WidgetDataSourceTransformSchema.Type | undefined,
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): any {
 	if (!transform || !data) return data
@@ -509,7 +513,7 @@ export function useWidgetDataSource(
 
 	const result = useRefreshableAtomValue(fetchAtom)
 
-	const transform = dataSource?.transform
+	const transform = dataSourceTransform(dataSource)
 
 	const dataState: WidgetDataState = useMemo(() => {
 		if (isStatic) {

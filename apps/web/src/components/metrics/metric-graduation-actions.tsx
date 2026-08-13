@@ -17,14 +17,15 @@ import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { encodeAlertChartToSearchParam } from "@/lib/alerts/widget-chart-param"
 import type { WidgetDataSource } from "@/components/dashboard-builder/types"
 import type { MetricsQueryDraft } from "@maple/query-engine/query-builder"
+import { makeQueryDataSource } from "@maple/widgets/dashboard"
 
 function buildWidgetDataSource(draft: MetricsQueryDraft): WidgetDataSource {
-	return {
-		endpoint: "custom_query_builder_timeseries",
+	return makeQueryDataSource({
+		resultShape: "timeseries",
 		// A fresh query id: the explorer's stable atom-key id must not leak into
 		// persisted widgets, where two adds would otherwise share one id.
-		params: { queries: [{ ...draft, id: crypto.randomUUID() }] },
-	}
+		queries: [{ ...draft, id: crypto.randomUUID() }],
+	})
 }
 
 interface MetricGraduationActionsProps {

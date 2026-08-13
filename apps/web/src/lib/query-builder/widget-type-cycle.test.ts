@@ -59,7 +59,6 @@ function makeState(overrides: Partial<QueryBuilderWidgetState> = {}): QueryBuild
 		formulas: [],
 		comparisonMode: "none",
 		includePercentChange: true,
-		debug: false,
 		statAggregate: "first",
 		statValueField: "",
 		unit: "number",

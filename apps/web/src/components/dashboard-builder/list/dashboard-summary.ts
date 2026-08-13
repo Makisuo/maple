@@ -62,6 +62,12 @@ const DRAFT_SOURCE_DOMAIN: Record<string, DashboardDomain> = {
 	metrics: "Metrics",
 }
 
+/**
+ * What an empty query widget claims to read. Matches `createQueryDraft`'s own
+ * default source, so the lane agrees with the first draft the editor will make.
+ */
+const DEFAULT_QUERY_DOMAIN: DashboardDomain = "Traces"
+
 export type DashboardDomain = "Traces" | "Logs" | "Errors" | "Metrics" | "Raw SQL"
 
 /** Display order, so two dashboards reading the same signals label identically. */
@@ -75,7 +81,7 @@ const widgetDomains = (dataSource: unknown): ReadonlyArray<DashboardDomain> => {
 	if (dataSourceRawSql(dataSource) !== null) return ["Raw SQL"]
 
 	const querySet = dataSourceQuerySet(dataSource)
-	if (querySet !== null) {
+	if (querySet !== null && querySet.queries.length > 0) {
 		const domains: DashboardDomain[] = []
 		for (const query of querySet.queries) {
 			const domain = DRAFT_SOURCE_DOMAIN[query?.dataSource]
@@ -84,9 +90,15 @@ const widgetDomains = (dataSource: unknown): ReadonlyArray<DashboardDomain> => {
 		return domains
 	}
 
+	// Falls through for a query widget with no drafts yet — a chart freshly
+	// dropped on the canvas. Its shape still says which signal it will read, and
+	// reporting nothing would make a board of new charts read "static only".
 	const endpoint = dataSourceEndpoint(dataSource)
-	const domain = endpoint === null ? undefined : ENDPOINT_DOMAIN[endpoint]
-	return domain ? [domain] : []
+	if (endpoint !== null) {
+		const domain = ENDPOINT_DOMAIN[endpoint]
+		if (domain) return [domain]
+	}
+	return querySet === null ? [] : [DEFAULT_QUERY_DOMAIN]
 }
 
 export const dashboardDomains = (dashboard: Dashboard): ReadonlyArray<DashboardDomain> => {

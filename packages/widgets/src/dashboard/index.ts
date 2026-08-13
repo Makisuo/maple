@@ -24,10 +24,12 @@ export {
 	dataSourceQuerySet,
 	dataSourceRawSql,
 	dataSourceRouteParams,
+	dataSourceTransform,
 	isQueryDataSource,
 	QUERY_SHAPE_ENDPOINTS,
 	RAW_SQL_ENDPOINT,
 	type RawSqlDataSource,
+	type WidgetQuerySet,
 } from "./access"
 export {
 	makeQueryDataSource,

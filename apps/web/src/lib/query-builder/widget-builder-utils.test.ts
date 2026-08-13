@@ -38,7 +38,6 @@ function makeState(): QueryBuilderWidgetState {
 		formulas: [],
 		comparisonMode: "none",
 		includePercentChange: true,
-		debug: false,
 		statAggregate: "first",
 		statValueField: "",
 		unit: "number",
@@ -223,7 +222,7 @@ describe("funnel/heatmap endpoint routing (MAP-49)", () => {
 
 	it("sends breakdown params the endpoint schema accepts, and nothing more", () => {
 		// QueryBuilderBreakdownInputSchema accepts only startTime/endTime/queries
-		// and the optional defaultLimit. An extra key (formulas, comparison, debug)
+		// and the optional defaultLimit. An extra key (formulas, comparison)
 		// fails the request decode and leaves the widget stuck on its loading
 		// skeleton, so this is a contract test, not a style preference.
 		const state = {

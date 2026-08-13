@@ -1,4 +1,5 @@
 import type { QuerySet, QueryResultShape } from "@maple/query-model"
+import type { WidgetDataSourceTransformV2 } from "./shared/transform"
 
 /**
  * Reading a widget's data source without caring which schema version wrote it.
@@ -56,6 +57,28 @@ export const dataSourceEndpoint = (dataSource: unknown): string | null => {
 	return typeof dataSource.endpoint === "string" ? dataSource.endpoint : null
 }
 
+/**
+ * The client-side result reshaping (`reduceToValue`, `hideSeries`, `limit`, …).
+ *
+ * Version-independent by construction: `transform` describes what to do with the
+ * *response*, so it sits beside the data source's query on v2 and on every v3
+ * arm alike. The accessor exists anyway because `construct.ts` writes this field
+ * and readers were reaching for it by hand — an asymmetry that would go
+ * unnoticed until the one version where it stops being true.
+ *
+ * NOT validated, like every accessor here: a stored transform with a reducer
+ * name the runtime dropped still reads back, and `applyTransform` falls through
+ * to its documented default rather than the tile failing to render.
+ */
+export const dataSourceTransform = (
+	dataSource: unknown,
+): typeof WidgetDataSourceTransformV2.Type | undefined => {
+	if (!isRecord(dataSource)) return undefined
+	return isRecord(dataSource.transform)
+		? (dataSource.transform as typeof WidgetDataSourceTransformV2.Type)
+		: undefined
+}
+
 /** True when this data source carries a user-authored query set. */
 export const isQueryDataSource = (dataSource: unknown): boolean => dataSourceQuerySet(dataSource) !== null
 
@@ -68,37 +91,43 @@ export const isQueryDataSource = (dataSource: unknown): boolean => dataSourceQue
  * here: the MCP inspector and the template checker both want to report on what
  * is actually stored, not on what would survive a decode.
  */
-export const dataSourceQuerySet = (
-	dataSource: unknown,
-): (QuerySet & { resultShape: QueryResultShape }) | null => {
+export interface WidgetQuerySet extends QuerySet {
+	readonly resultShape: QueryResultShape
+	/** Request shaping — see `QueryDataSourceInput` in `construct.ts`. */
+	readonly defaultLimit?: number
+	readonly limit?: number
+	readonly columns?: ReadonlyArray<string>
+}
+
+export const dataSourceQuerySet = (dataSource: unknown): WidgetQuerySet | null => {
 	if (!isRecord(dataSource)) return null
 
-	if (typeof dataSource.kind === "string") {
-		if (dataSource.kind !== "query") return null
-		const shape = dataSource.resultShape
-		return {
-			resultShape: typeof shape === "string" ? (shape as QueryResultShape) : "timeseries",
-			queries: Array.isArray(dataSource.queries) ? (dataSource.queries as QuerySet["queries"]) : [],
-			formulas: Array.isArray(dataSource.formulas)
-				? (dataSource.formulas as QuerySet["formulas"])
-				: undefined,
-			comparison: isRecord(dataSource.comparison)
-				? (dataSource.comparison as QuerySet["comparison"])
-				: undefined,
+	const source = (() => {
+		if (typeof dataSource.kind === "string") {
+			if (dataSource.kind !== "query") return null
+			const shape = dataSource.resultShape
+			return {
+				resultShape: typeof shape === "string" ? (shape as QueryResultShape) : "timeseries",
+				fields: dataSource,
+			}
 		}
-	}
+		const endpoint = dataSource.endpoint
+		if (typeof endpoint !== "string") return null
+		const resultShape = QUERY_ENDPOINT_SHAPES[endpoint]
+		if (resultShape === undefined) return null
+		return { resultShape, fields: isRecord(dataSource.params) ? dataSource.params : {} }
+	})()
+	if (source === null) return null
 
-	const endpoint = dataSource.endpoint
-	if (typeof endpoint !== "string") return null
-	const resultShape = QUERY_ENDPOINT_SHAPES[endpoint]
-	if (resultShape === undefined) return null
-
-	const params = isRecord(dataSource.params) ? dataSource.params : {}
+	const { resultShape, fields } = source
 	return {
 		resultShape,
-		queries: Array.isArray(params.queries) ? (params.queries as QuerySet["queries"]) : [],
-		formulas: Array.isArray(params.formulas) ? (params.formulas as QuerySet["formulas"]) : undefined,
-		comparison: isRecord(params.comparison) ? (params.comparison as QuerySet["comparison"]) : undefined,
+		queries: Array.isArray(fields.queries) ? (fields.queries as QuerySet["queries"]) : [],
+		formulas: Array.isArray(fields.formulas) ? (fields.formulas as QuerySet["formulas"]) : undefined,
+		comparison: isRecord(fields.comparison) ? (fields.comparison as QuerySet["comparison"]) : undefined,
+		defaultLimit: typeof fields.defaultLimit === "number" ? fields.defaultLimit : undefined,
+		limit: typeof fields.limit === "number" ? fields.limit : undefined,
+		columns: Array.isArray(fields.columns) ? (fields.columns as ReadonlyArray<string>) : undefined,
 	}
 }
 

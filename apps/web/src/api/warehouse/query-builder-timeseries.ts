@@ -13,6 +13,11 @@ import {
 	type TimeseriesPoint,
 } from "@/components/query-builder/formula-results"
 import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
+import {
+	QueryBuilderFormulaSchema,
+	type QueryComparisonMode,
+	QueryComparisonSchema,
+} from "@maple/query-model"
 import { buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 import {
 	decodeInput,
@@ -28,26 +33,11 @@ type ExecuteError = WarehouseApiError | BackendError
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 
-const COMPARISON_MODES = ["none", "previous_period"] as const
-
 const DEFAULT_STRATEGY = {
 	enableEmptyRangeFallback: true,
 	fallbackWindowSeconds: [24 * 60 * 60, 7 * 24 * 60 * 60, 31 * 24 * 60 * 60],
 	maxFallbackRangeSeconds: 31 * 24 * 60 * 60,
 } as const
-
-const FormulaSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	expression: Schema.String,
-	legend: Schema.String,
-	hidden: Schema.optionalKey(Schema.Boolean),
-})
-
-const ComparisonSchema = Schema.Struct({
-	mode: Schema.optional(Schema.Literals(COMPARISON_MODES)),
-	includePercentChange: Schema.optional(Schema.Boolean),
-})
 
 const StrategySchema = Schema.Struct({
 	enableEmptyRangeFallback: Schema.optional(Schema.Boolean),
@@ -61,8 +51,8 @@ const QueryBuilderTimeseriesInputSchema = Schema.Struct({
 	startTime: dateTimeString,
 	endTime: dateTimeString,
 	queries: Schema.mutable(Schema.Array(QueryBuilderQueryDraftSchema)),
-	formulas: Schema.optional(Schema.mutable(Schema.Array(FormulaSchema))),
-	comparison: Schema.optional(ComparisonSchema),
+	formulas: Schema.optional(Schema.mutable(Schema.Array(QueryBuilderFormulaSchema))),
+	comparison: Schema.optional(QueryComparisonSchema),
 	strategy: Schema.optional(StrategySchema),
 	debug: Schema.optional(Schema.Boolean),
 })
@@ -93,7 +83,7 @@ interface QueryBuilderTimeseriesDebug {
 		endTime: string
 	}
 	comparison: {
-		mode: "none" | "previous_period"
+		mode: QueryComparisonMode
 		includePercentChange: boolean
 		shiftedByMs: number
 		previousStartTime: string | null

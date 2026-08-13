@@ -9,6 +9,7 @@ import {
 } from "@/components/dashboard-builder/widgets/widget-type-registry"
 import { PreviewFrame } from "@/components/dashboard-builder/widgets/types/preset-preview"
 import type { WidgetPresetDefinition } from "@/components/dashboard-builder/widgets/widget-definitions"
+import { makeRouteDataSource } from "@maple/widgets/dashboard"
 
 /** The note's first few lines, with markdown syntax stripped. */
 function MarkdownPresetPreview({ preset }: { preset: WidgetPresetDefinition }) {
@@ -45,7 +46,7 @@ export const markdownWidgetType: WidgetTypeDefinition = {
 
 	initialState: (widget) => ({ markdownContent: widget.display.markdown?.content ?? "" }),
 
-	buildDataSource: () => ({ endpoint: "markdown_static" }),
+	buildDataSource: () => makeRouteDataSource("markdown_static"),
 
 	buildDisplay: ({ base, state }) => extendDisplay(base, { markdown: { content: state.markdownContent } }),
 }

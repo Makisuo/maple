@@ -35,31 +35,23 @@ import type {
 	WidgetInspectionSummary,
 	WidgetInspectionVerdict,
 } from "@maple/domain"
-import { dataSourceEndpoint, dataSourceQuerySet, dataSourceRawSql } from "@maple/widgets/dashboard"
+import {
+	dataSourceEndpoint,
+	dataSourceQuerySet,
+	dataSourceRawSql,
+	dataSourceTransform,
+	QUERY_SHAPE_ENDPOINTS,
+	RAW_SQL_ENDPOINT,
+} from "@maple/widgets/dashboard"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
-/**
- * The label a raw-SQL inspection reports, NOT a dispatch key — dispatch goes
- * through `dataSourceRawSql`, which reads v2 and v3 alike. This name is part of
- * the MCP response contract, so it stays spelled the v2 way even once the stored
- * data source no longer has an endpoint.
- */
-const RAW_SQL_ENDPOINT = "raw_sql_chart"
-
-/**
- * The legacy endpoint name for a query result shape.
- *
- * `inspect_chart_data` reports `endpoint` as part of its response contract, but
- * a v3 `kind: "query"` data source has no endpoint — the shape is the identity.
- * Synthesising the v2 name here keeps the MCP payload stable for agents that
- * already branch on it. This is the ONLY place a legacy endpoint name is
- * produced from a typed data source; dispatch never goes through it.
- */
-const QUERY_SHAPE_ENDPOINTS = {
-	timeseries: "custom_query_builder_timeseries",
-	breakdown: "custom_query_builder_breakdown",
-	list: "custom_query_builder_list",
-} as const
+// `RAW_SQL_ENDPOINT` and `QUERY_SHAPE_ENDPOINTS` are used here as LABELS, not as
+// dispatch keys — dispatch goes through `dataSourceRawSql` / `dataSourceQuerySet`,
+// which read v2 and v3 alike. `inspect_chart_data` reports `endpoint` as part of
+// its response contract and a v3 `kind: "query"` data source has no endpoint, so
+// the shape is mapped back onto the legacy name to keep the MCP payload stable
+// for agents that already branch on it. Imported rather than re-declared so a
+// fourth result shape cannot compile in `access.ts` while silently missing here.
 
 const MAX_QUERIES = 5
 // Rows captured for a raw-SQL widget inspection — enough to spot-check, capped
@@ -459,10 +451,8 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 
 		const formulas = decodedParams.formulas ?? []
 		const hasFormulaWarning = formulas.length > 0
-		const transformObj = widget.dataSource.transform as Record<string, unknown> | undefined
-		const reduceToValue = transformObj?.reduceToValue as
-			| { field?: unknown; aggregate?: unknown }
-			| undefined
+		const transformObj = dataSourceTransform(widget.dataSource)
+		const reduceToValue = transformObj?.reduceToValue
 		const hasUnsupportedTransform =
 			transformObj !== undefined && Object.keys(transformObj).some((k) => k !== "reduceToValue")
 

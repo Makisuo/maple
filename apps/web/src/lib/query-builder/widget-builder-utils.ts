@@ -20,7 +20,7 @@ import {
 	type QueryBuilderWidgetState,
 } from "@/lib/query-builder/widget-builder-shared"
 import { WIDGET_TYPES } from "@maple/domain/http"
-import { dataSourceQuerySet, dataSourceRouteParams } from "@maple/widgets/dashboard"
+import { dataSourceQuerySet, dataSourceRouteParams, makeQueryDataSource } from "@maple/widgets/dashboard"
 
 // Lowering the widget editor's state to a persisted widget, and back.
 //
@@ -93,7 +93,6 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 			typeof rawComparison.includePercentChange === "boolean"
 				? rawComparison.includePercentChange
 				: true,
-		debug: routeParams.debug === true,
 		statAggregate: "first",
 		statValueField: "",
 		unit:
@@ -152,19 +151,16 @@ function timeseriesDataSource(state: QueryBuilderWidgetState): {
 
 	return {
 		sharedTransform,
-		base: {
-			endpoint: "custom_query_builder_timeseries",
-			params: {
-				queries: state.queries,
-				formulas: state.formulas,
-				comparison: {
-					mode: state.comparisonMode,
-					includePercentChange: state.includePercentChange,
-				},
-				debug: state.debug,
+		base: makeQueryDataSource({
+			resultShape: "timeseries",
+			queries: state.queries,
+			formulas: state.formulas,
+			comparison: {
+				mode: state.comparisonMode,
+				includePercentChange: state.includePercentChange,
 			},
-			transform: sharedTransform,
-		},
+			...(sharedTransform === undefined ? {} : { transform: sharedTransform }),
+		}),
 	}
 }
 

@@ -128,6 +128,9 @@ export function toWidgetRequest(
 				queries: querySet.queries,
 				...(querySet.formulas === undefined ? {} : { formulas: querySet.formulas }),
 				...(querySet.comparison === undefined ? {} : { comparison: querySet.comparison }),
+				...(querySet.defaultLimit === undefined ? {} : { defaultLimit: querySet.defaultLimit }),
+				...(querySet.limit === undefined ? {} : { limit: querySet.limit }),
+				...(querySet.columns === undefined ? {} : { columns: querySet.columns }),
 			},
 		}
 	}

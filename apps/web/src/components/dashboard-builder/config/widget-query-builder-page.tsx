@@ -1,6 +1,6 @@
 import * as React from "react"
 import { widgetTypeByVisualization } from "@maple/domain/http"
-import { dataSourceRawSql } from "@maple/widgets/dashboard"
+import { dataSourceRawSql, dataSourceTransform, makeRawSqlDataSource } from "@maple/widgets/dashboard"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
@@ -101,7 +101,7 @@ function buildRawSqlDataSource(
 	// Stat and gauge both render a scalar, so they need a reduceToValue transform
 	// for the widget to read `data[0].value`. If the user already set a transform
 	// on the widget, keep theirs; otherwise inject the default.
-	const existingTransform = widget.dataSource.transform
+	const existingTransform = dataSourceTransform(widget.dataSource)
 	const needsScalar = widgetTypeByVisualization(visualization)?.isScalar === true
 	const transform =
 		needsScalar && !existingTransform?.reduceToValue
@@ -111,15 +111,12 @@ function buildRawSqlDataSource(
 				}
 			: existingTransform
 
-	return {
-		endpoint: "raw_sql_chart",
-		params: {
-			sql: draft.sql,
-			displayType,
-			...(draft.granularitySeconds != null ? { granularitySeconds: draft.granularitySeconds } : {}),
-		},
-		...(transform ? { transform } : {}),
-	}
+	return makeRawSqlDataSource({
+		sql: draft.sql,
+		displayType,
+		...(draft.granularitySeconds == null ? {} : { granularitySeconds: draft.granularitySeconds }),
+		...(transform === undefined ? {} : { transform }),
+	})
 }
 
 export function WidgetQueryBuilderPage({

@@ -34,6 +34,7 @@ import type { AlertRuleRow } from "@maple/db"
 import { Array as Arr, Effect, Option, Result, Schema } from "effect"
 import { dateToMs, msToDate } from "@/platform/time"
 import type { AlertRuntimeShape } from "./AlertRuntime"
+import type { QueryBuilderDataSource } from "@maple/query-model"
 
 const StringArraySchema = Schema.Array(Schema.String)
 const DestinationIdArraySchema = Schema.Array(AlertDestinationDocument.fields.id)
@@ -217,7 +218,7 @@ export const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(functi
 	}
 
 	const resolveRuleGroupBy = (
-		source: "traces" | "logs" | "metrics",
+		source: QueryBuilderDataSource,
 	): Effect.Effect<
 		{
 			readonly tokens: ReadonlyArray<string>

@@ -17,6 +17,7 @@ import type {
 } from "@/components/dashboard-builder/types"
 import type { LegendPosition } from "@/components/dashboard-builder/config/settings-fields"
 import { STAT_AGGREGATES, type StatAggregate } from "@maple/domain/http"
+import type { QueryComparisonMode } from "@maple/query-model"
 import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } from "@maple/domain/where-clause"
 
@@ -45,9 +46,8 @@ export interface QueryBuilderWidgetState {
 	curveType: "linear" | "monotone"
 	queries: QueryBuilderQueryDraft[]
 	formulas: QueryBuilderFormulaDraft[]
-	comparisonMode: "none" | "previous_period"
+	comparisonMode: QueryComparisonMode
 	includePercentChange: boolean
-	debug: boolean
 	statAggregate: StatAggregate
 	statValueField: string
 	unit: ValueUnit

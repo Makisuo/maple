@@ -5,6 +5,7 @@ import {
 	ALERT_REDUCERS,
 	QuerySetSchema,
 	QueryBuilderQueryDraftSchema,
+	SERIES_REDUCER_TO_ALERT_REDUCER,
 	SERIES_REDUCERS,
 	TimeRangeSchema,
 } from "./index"
@@ -132,6 +133,21 @@ describe("series reducers", () => {
 		expect(ALERT_REDUCER_TO_SERIES_REDUCER.identity).toBe("first")
 		expect(SERIES_REDUCERS).toContain("count")
 		expect(ALERT_REDUCERS).not.toContain("count" as never)
+	})
+
+	it("round-trips every alert reducer through the series spelling and back", () => {
+		for (const reducer of ALERT_REDUCERS) {
+			expect(SERIES_REDUCER_TO_ALERT_REDUCER[ALERT_REDUCER_TO_SERIES_REDUCER[reducer]]).toBe(reducer)
+		}
+	})
+
+	it("leaves the widget-only reducer unmapped rather than defaulting it", () => {
+		// The whole point of the partial map: "create alert from chart" must be
+		// able to tell that a count tile has no alert equivalent, instead of
+		// silently sending `identity`.
+		expect(SERIES_REDUCER_TO_ALERT_REDUCER.count).toBeUndefined()
+		expect(SERIES_REDUCER_TO_ALERT_REDUCER.first).toBe("identity")
+		expect(SERIES_REDUCER_TO_ALERT_REDUCER.max).toBe("max")
 	})
 })
 

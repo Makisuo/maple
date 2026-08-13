@@ -24,10 +24,35 @@ type WidgetDataSourceTransform = typeof WidgetDataSourceTransformV2.Type
 export interface QueryDataSourceInput extends QuerySet {
 	readonly resultShape: QueryResultShape
 	readonly transform?: WidgetDataSourceTransform
+	/**
+	 * Per-shape request shaping: how many rows to fetch and which columns.
+	 *
+	 * NOT in `QuerySet` and NOT in `@maple/query-model`, deliberately. These
+	 * describe the *request* a widget makes, not the query it stores — an alert
+	 * rule shares the query and has no use for any of them. They live here
+	 * because the alternative is what this file exists to remove: three widget
+	 * types hand-assembling a params bag to smuggle one number through.
+	 *
+	 * `defaultLimit` is the breakdown's fetch-past-what-you-draw allowance (only
+	 * the pie collapses a long tail into "Other"); `limit`/`columns` are the list
+	 * shape's row cap and projection.
+	 */
+	readonly defaultLimit?: number
+	readonly limit?: number
+	readonly columns?: ReadonlyArray<string>
 }
 
-/** A widget backed by a user-authored query set. */
-export const makeQueryDataSource = (input: QueryDataSourceInput): WidgetDataSource => ({
+/**
+ * A widget backed by a user-authored query set.
+ *
+ * The endpoint stays a literal in the return type rather than widening to
+ * `string`: the web app narrows `WidgetDataSource["endpoint"]` to its registry's
+ * key union so `serverFunctionMap` is statically total, and a widened `string`
+ * would make every call site here unassignable to it.
+ */
+export const makeQueryDataSource = <S extends QueryResultShape>(
+	input: QueryDataSourceInput & { readonly resultShape: S },
+): WidgetDataSource & { endpoint: (typeof QUERY_SHAPE_ENDPOINTS)[S] } => ({
 	endpoint: QUERY_SHAPE_ENDPOINTS[input.resultShape],
 	params: {
 		queries: input.queries,
@@ -36,6 +61,9 @@ export const makeQueryDataSource = (input: QueryDataSourceInput): WidgetDataSour
 		// widget that never had formulas indistinguishable from one that lost them.
 		...(input.formulas === undefined ? {} : { formulas: input.formulas }),
 		...(input.comparison === undefined ? {} : { comparison: input.comparison }),
+		...(input.defaultLimit === undefined ? {} : { defaultLimit: input.defaultLimit }),
+		...(input.limit === undefined ? {} : { limit: input.limit }),
+		...(input.columns === undefined ? {} : { columns: input.columns }),
 	},
 	...(input.transform === undefined ? {} : { transform: input.transform }),
 })
@@ -45,7 +73,9 @@ export interface RawSqlDataSourceInput extends RawSqlDataSource {
 }
 
 /** A widget backed by user-authored ClickHouse SQL. */
-export const makeRawSqlDataSource = (input: RawSqlDataSourceInput): WidgetDataSource => ({
+export const makeRawSqlDataSource = (
+	input: RawSqlDataSourceInput,
+): WidgetDataSource & { endpoint: typeof RAW_SQL_ENDPOINT } => ({
 	endpoint: RAW_SQL_ENDPOINT,
 	params: {
 		sql: input.sql,
@@ -63,11 +93,11 @@ export const makeRawSqlDataSource = (input: RawSqlDataSourceInput): WidgetDataSo
  * exists for symmetry and to give the sweep one shape to grep for, not because
  * the call site would otherwise break at the flip.
  */
-export const makeRouteDataSource = (
-	endpoint: string,
+export const makeRouteDataSource = <E extends string>(
+	endpoint: E,
 	params?: Record<string, unknown>,
 	transform?: WidgetDataSourceTransform,
-): WidgetDataSource => ({
+): WidgetDataSource & { endpoint: E } => ({
 	endpoint,
 	...(params === undefined ? {} : { params }),
 	...(transform === undefined ? {} : { transform }),

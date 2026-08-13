@@ -2,7 +2,8 @@ import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 
 import { normalizeRuleQueryDraft, rawSqlHasValueColumn, type RuleFormState } from "@/lib/alerts/form-utils"
 import { buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
-import { dataSourceQuerySet, dataSourceRawSql } from "@maple/widgets/dashboard"
+import { SERIES_REDUCER_TO_ALERT_REDUCER, toQueryBuilderDataSource } from "@maple/query-model"
+import { dataSourceQuerySet, dataSourceRawSql, dataSourceTransform } from "@maple/widgets/dashboard"
 
 export type WidgetAlertPrefillNotice = {
 	severity: "warning" | "error"
@@ -40,11 +41,7 @@ function widgetAlertName(widget: AlertableDashboardWidget): string {
 
 function isQueryDraftPayload(value: unknown): value is QueryBuilderQueryDraftPayload {
 	const query = record(value)
-	const dataSource = query.dataSource
-	return (
-		(dataSource === "traces" || dataSource === "logs" || dataSource === "metrics") &&
-		typeof query.aggregation === "string"
-	)
+	return toQueryBuilderDataSource(query.dataSource) !== null && typeof query.aggregation === "string"
 }
 
 function isEnabledVisibleQuery(query: QueryBuilderQueryDraftPayload): boolean {
@@ -66,8 +63,7 @@ function hasHiddenSeries(
 	queries: QueryBuilderQueryDraftPayload[],
 ): boolean {
 	if (queries.some((query) => query.hidden === true)) return true
-	const transform = record(widget.dataSource?.transform)
-	const hideSeries = record(transform.hideSeries)
+	const hideSeries = record(dataSourceTransform(widget.dataSource)?.hideSeries)
 	return Array.isArray(hideSeries.baseNames) && hideSeries.baseNames.length > 0
 }
 
@@ -130,12 +126,26 @@ export function createWidgetAlertPrefill(
 			}
 		}
 
+		// The chart's own reducer, not the blank form's `identity`. A stat tile
+		// showing max(latency) produced an alert that evaluated the last bucket,
+		// silently and with nothing on screen to say so.
+		const chartReducer = dataSourceTransform(widget.dataSource)?.reduceToValue?.aggregate
+		const rawQueryReducer =
+			chartReducer === undefined ? undefined : SERIES_REDUCER_TO_ALERT_REDUCER[chartReducer]
+		if (chartReducer !== undefined && rawQueryReducer === undefined) {
+			notices.push({
+				severity: "warning",
+				message: `This chart reduces its series with "${chartReducer}", which alert rules cannot express; the alert evaluates the window's last value instead.`,
+			})
+		}
+
 		return {
 			form: {
 				...base,
 				name: widgetAlertName(widget),
 				signalType: "raw_query",
 				rawQuerySql: sql,
+				...(rawQueryReducer === undefined ? {} : { rawQueryReducer }),
 			},
 			notices,
 		}

@@ -30,6 +30,7 @@ import {
 import type { TemplateParameterValues, WidgetDef } from "@/dashboard-templates"
 import { validateDashboardTimeRange } from "@/mcp/lib/resolve-dashboard-time-range"
 import { MAX_LIST_RANGE_SECONDS, MAX_QUERY_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
+import { makeRouteDataSource } from "@maple/widgets/dashboard"
 
 const decodePortableDashboard = Schema.decodeUnknownEffect(PortableDashboardDocument)
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
@@ -172,13 +173,10 @@ function simpleSpecToWidget(
 			return {
 				id,
 				visualization: viz,
-				dataSource: {
-					endpoint: "list_logs",
-					params: {
-						...(spec.service_name && { service: spec.service_name }),
-						limit: 10,
-					},
-				},
+				dataSource: makeRouteDataSource("list_logs", {
+					...(spec.service_name && { service: spec.service_name }),
+					limit: 10,
+				}),
 				display: { title: spec.title, listDataSource: "logs", listLimit: 10 },
 				layout,
 			}
@@ -186,13 +184,10 @@ function simpleSpecToWidget(
 		return {
 			id,
 			visualization: viz,
-			dataSource: {
-				endpoint: "list_traces",
-				params: {
-					...(spec.service_name && { service: spec.service_name }),
-					limit: 10,
-				},
-			},
+			dataSource: makeRouteDataSource("list_traces", {
+				...(spec.service_name && { service: spec.service_name }),
+				limit: 10,
+			}),
 			display: { title: spec.title, listDataSource: "traces", listLimit: 10 },
 			layout,
 		}
