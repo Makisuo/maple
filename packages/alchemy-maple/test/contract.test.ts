@@ -29,7 +29,10 @@ describe("provider request bodies decode against the real v2 create-param schema
 			widgets: [
 				{
 					id: "w1",
-					visualization: "timeseries",
+					// A line chart persists as `chart` + a `chartId`; `timeseries` was
+					// never a real `visualization`, it just went unnoticed while the
+					// field was an open string.
+					visualization: "chart",
 					data_source: { endpoint: "query_builder", params: { granularity_seconds: 60 } },
 					display: { title: "Throughput" },
 					layout: { x: 0, y: 0, w: 6, h: 4 },
