@@ -1,4 +1,3 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import {
 	IngestAttributeMappingId,
@@ -6,7 +5,6 @@ import {
 	IngestMappingSourceContext,
 	IsoDateTimeString,
 } from "../primitives"
-import { Authorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 
 export class IngestAttributeMapping extends Schema.Class<IngestAttributeMapping>("IngestAttributeMapping")({
@@ -103,43 +101,3 @@ export class IngestAttributeMappingValidationError extends HttpTaggedError<Inges
 		exposure: "public_message",
 	},
 ) {}
-
-export class IngestAttributeMappingsApiGroup extends HttpApiGroup.make("ingestAttributeMappings")
-	.add(
-		HttpApiEndpoint.get("list", "/", {
-			success: IngestAttributeMappingsListResponse,
-			error: IngestAttributeMappingPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("create", "/", {
-			payload: CreateIngestAttributeMappingRequest,
-			success: IngestAttributeMapping,
-			error: [IngestAttributeMappingValidationError, IngestAttributeMappingPersistenceError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.patch("update", "/:mappingId", {
-			params: {
-				mappingId: IngestAttributeMappingId,
-			},
-			payload: UpdateIngestAttributeMappingRequest,
-			success: IngestAttributeMapping,
-			error: [
-				IngestAttributeMappingNotFoundError,
-				IngestAttributeMappingValidationError,
-				IngestAttributeMappingPersistenceError,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.delete("delete", "/:mappingId", {
-			params: {
-				mappingId: IngestAttributeMappingId,
-			},
-			success: IngestAttributeMappingDeleteResponse,
-			error: [IngestAttributeMappingNotFoundError, IngestAttributeMappingPersistenceError],
-		}),
-	)
-	.prefix("/api/ingest-attribute-mappings")
-	.middleware(Authorization) {}

@@ -1,8 +1,6 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ErrorIssueId, InvestigationId, IsoDateTimeString, UserId } from "../primitives"
 import { AiTriageEvidence, AiTriageIncidentKind, AiTriageResult } from "./ai-triage"
-import { Authorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 import { IssueSeverity } from "./errors"
 
@@ -472,12 +470,6 @@ export class InvestigationCreateRequest extends Schema.Class<InvestigationCreate
 	snapshot: Schema.optionalKey(InvestigationSubjectSnapshot),
 }) {}
 
-export class InvestigationStatusUpdateRequest extends Schema.Class<InvestigationStatusUpdateRequest>(
-	"InvestigationStatusUpdateRequest",
-)({
-	status: InvestigationStatus,
-}) {}
-
 /**
  * The internal write the `submit_diagnosis` tool posts once the
  * agent finishes its diagnostic pass. Carries the structured report plus the
@@ -659,99 +651,3 @@ export class InvestigationDataCorruptionError extends HttpTaggedError<Investigat
 		exposure: "redacted",
 	},
 ) {}
-
-export type InvestigationHttpError =
-	| InvestigationPersistenceError
-	| InvestigationValidationError
-	| InvestigationNotFoundError
-	| InvestigationQuotaError
-	| InvestigationAutomationDisabledError
-	| InvestigationAgentUnavailableError
-	| InvestigationStartFailedError
-	| InvestigationRejectedError
-	| InvestigationDataCorruptionError
-
-export const investigationHttpErrors = [
-	InvestigationPersistenceError,
-	InvestigationValidationError,
-	InvestigationNotFoundError,
-	InvestigationQuotaError,
-	InvestigationAutomationDisabledError,
-	InvestigationAgentUnavailableError,
-	InvestigationStartFailedError,
-	InvestigationRejectedError,
-	InvestigationDataCorruptionError,
-] as const
-
-// Query schemas
-
-const InvestigationsListQuery = Schema.Struct({
-	/** War-room filter: only investigations for this error issue. */
-	issueId: Schema.optional(ErrorIssueId),
-	incidentKind: Schema.optional(AiTriageIncidentKind),
-	incidentId: Schema.optional(Schema.String),
-	status: Schema.optional(InvestigationStatus),
-	limit: Schema.optional(
-		Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 })),
-	),
-})
-
-// API group (user-facing; diagnosis submission crosses the internal Worker RPC
-// boundary and is not part of this Clerk-authenticated HTTP group)
-
-export class InvestigationApiGroup extends HttpApiGroup.make("investigations")
-	.add(
-		HttpApiEndpoint.get("listInvestigations", "/", {
-			query: InvestigationsListQuery,
-			success: InvestigationsListResponse,
-			error: InvestigationPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("getInvestigation", "/:id", {
-			params: { id: InvestigationId },
-			success: InvestigationDocument,
-			error: [InvestigationPersistenceError, InvestigationNotFoundError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("createInvestigation", "/", {
-			payload: InvestigationCreateRequest,
-			success: InvestigationDocument,
-			error: [
-				InvestigationPersistenceError,
-				InvestigationValidationError,
-				InvestigationNotFoundError,
-				InvestigationQuotaError,
-				InvestigationRejectedError,
-				InvestigationAutomationDisabledError,
-				InvestigationAgentUnavailableError,
-				InvestigationStartFailedError,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("restartInvestigation", "/:id/restart", {
-			params: { id: InvestigationId },
-			success: InvestigationDocument,
-			error: [
-				InvestigationPersistenceError,
-				InvestigationNotFoundError,
-				InvestigationQuotaError,
-				InvestigationRejectedError,
-				InvestigationAutomationDisabledError,
-				InvestigationAgentUnavailableError,
-				InvestigationStartFailedError,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("updateInvestigationStatus", "/:id/status", {
-			params: { id: InvestigationId },
-			payload: InvestigationStatusUpdateRequest,
-			success: InvestigationDocument,
-			error: [InvestigationPersistenceError, InvestigationNotFoundError],
-		}),
-	)
-	.prefix("/api/investigations")
-	.middleware(Authorization) {}
