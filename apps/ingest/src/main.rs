@@ -43,9 +43,10 @@ use maple_ingest::session_analytics::{
     derive_referrer_host, sanitize_session_event, sanitize_session_meta,
 };
 use maple_ingest::telemetry::{
-    AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget, ClickHouseTargetProvider,
-    DatasourceNames, ExportDestination, MappingOperation, MappingSourceContext, PipelineError,
-    SamplingPolicy, TelemetryPipeline, TelemetrySignal, TinybirdConfig,
+    AiClassificationSettings, AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget,
+    ClickHouseTargetProvider, DatasourceNames, ExportDestination, MappingOperation,
+    MappingSourceContext, PipelineError, SamplingPolicy, TelemetryPipeline, TelemetrySignal,
+    TinybirdConfig,
 };
 use maple_ingest::usage_metrics::{billable_gb, usage_cardinality_view, UsageMetrics};
 use moka::future::Cache;
@@ -122,6 +123,12 @@ struct AppConfig {
     max_request_body_bytes: usize,
     org_max_in_flight: u64,
     require_tls: bool,
+    /// `INGEST_AI_CLASSIFICATION_ENABLED`. **Migration-window flag**, default
+    /// false: it exists only to ramp the write-side plan's §7 step 2 shadow
+    /// deploy and is removed once classification is unconditional in production
+    /// (§7 step 4). Read once per batch, never per span. `AiRollupHour` is
+    /// written on every row regardless of this flag.
+    ai_classification_enabled: bool,
     key_store_backend: KeyStoreBackend,
     clickhouse_encryption_key: Option<[u8; 32]>,
     lookup_hmac_key: String,
@@ -349,8 +356,8 @@ impl AppConfig {
 
         let key_store_backend = resolve_key_store_backend()?;
         let clickhouse_encryption_key = match &key_store_backend {
-            // The Postgres key store decrypts BYO-ClickHouse credentials from
-            // org_clickhouse_settings, so it needs the encryption key.
+            // MAPLE_INGEST_KEY_ENCRYPTION_KEY, for BYO-ClickHouse credentials
+            // from org_clickhouse_settings, encrypted by apps/api with the same key.
             KeyStoreBackend::Postgres { .. } => {
                 let raw = std::env::var("MAPLE_INGEST_KEY_ENCRYPTION_KEY")
                     .map_err(|_| "MAPLE_INGEST_KEY_ENCRYPTION_KEY is required".to_string())?;
@@ -460,6 +467,14 @@ impl AppConfig {
             }
         };
 
+        // Default off: the flag ramps classification per-deployment during the
+        // migration window and is deleted afterwards.
+        let ai_classification_enabled = parse_bool(
+            "INGEST_AI_CLASSIFICATION_ENABLED",
+            std::env::var("INGEST_AI_CLASSIFICATION_ENABLED").ok(),
+            false,
+        )?;
+
         // Default off — see the field doc. Set it on services that are only
         // reachable through Cloudflare.
         let trust_proxy_geo = parse_bool(
@@ -478,6 +493,7 @@ impl AppConfig {
             max_request_body_bytes,
             org_max_in_flight,
             require_tls,
+            ai_classification_enabled,
             key_store_backend,
             clickhouse_encryption_key,
             lookup_hmac_key,
@@ -1513,14 +1529,14 @@ async fn main() {
     // process exit, so a bad deploy never goes ready while a transient database
     // fault can no longer kill a healthy running fleet.
     let key_store_ready = Arc::new(AtomicBool::new(false));
-    let store: Arc<dyn KeyStore> = match build_key_store(&config, Arc::clone(&key_store_ready)).await
-    {
-        Ok(store) => store,
-        Err(error) => {
-            eprintln!("Key store init error: {error}");
-            std::process::exit(1);
-        }
-    };
+    let store: Arc<dyn KeyStore> =
+        match build_key_store(&config, Arc::clone(&key_store_ready)).await {
+            Ok(store) => store,
+            Err(error) => {
+                eprintln!("Key store init error: {error}");
+                std::process::exit(1);
+            }
+        };
 
     // The Postgres key store resolves BYO-ClickHouse export targets from
     // org_clickhouse_settings (the Static backend has no DB to resolve from).
@@ -2050,6 +2066,7 @@ async fn resolve_grpc_ingest_key(
             key_id: "sentinel".to_string(),
             self_managed: false,
             clickhouse_ready: false,
+            // Health-probe traffic is discarded, never classified.
         });
     }
 
@@ -2079,7 +2096,11 @@ async fn ready(State(state): State<Arc<AppState>>) -> Response {
     if state.key_store_ready.load(Ordering::Relaxed) {
         (StatusCode::OK, "READY").into_response()
     } else {
-        (StatusCode::SERVICE_UNAVAILABLE, "DEGRADED: key store unavailable").into_response()
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "DEGRADED: key store unavailable",
+        )
+            .into_response()
     }
 }
 
@@ -3410,7 +3431,9 @@ async fn handle_cloudflare_logpush_inner(
                 key_id: resolved.secret_key_id.clone(),
                 self_managed: resolved.self_managed,
                 clickhouse_ready: resolved.clickhouse_ready,
-            };
+                // Cloudflare Logpush is a logs-only connector; logs
+                // classification is v2 (write-side plan §3).
+                };
             let decoded = DecodedPayload::Logs(request);
             let reservation = reserve_autumn_usage(
                 state,
@@ -4241,12 +4264,17 @@ async fn accept_native_decoded_payload(
                 "maple.ingest.attribute_mapping_count",
                 attribute_mappings.len(),
             );
+            // The flag is already resolved from the env; this reads it once for
+            // the whole batch.
+            let ai = AiClassificationSettings::new(state.config.ai_classification_enabled);
+            Span::current().record("maple.ingest.ai.enabled", ai.enabled);
             pipeline
                 .accept_traces_to(
                     &resolved_key.org_id,
                     request,
                     &policy,
                     attribute_mappings.as_slice(),
+                    &ai,
                     destination,
                 )
                 .await
@@ -4282,6 +4310,13 @@ async fn accept_native_decoded_payload(
     metrics::native_rows(signal.path(), stats.rows as u64);
     if stats.dropped > 0 {
         metrics::native_sampled_dropped(signal.path(), stats.dropped as u64);
+    }
+    if stats.ai_spans_examined > 0 {
+        metrics::ai_spans_examined(signal.path(), stats.ai_spans_examined as u64);
+        Span::current().record(
+            "maple.ingest.ai.spans_examined",
+            stats.ai_spans_examined as u64,
+        );
     }
     Span::current().record("maple.ingest.native_rows", stats.rows as u64);
     Span::current().record("maple.ingest.sampled_dropped", stats.dropped as u64);
@@ -4758,7 +4793,12 @@ impl PostgresKeyStore {
                  WHERE k.private_key_hash = $1 LIMIT 1",
                 &[&"__ingest_probe_no_match__"],
             )
-            .instrument(postgres_client_span("probe", "SELECT", "org_ingest_keys", &self.target))
+            .instrument(postgres_client_span(
+                "probe",
+                "SELECT",
+                "org_ingest_keys",
+                &self.target,
+            ))
             .await
             .map(|_| ())
             .map_err(|error| format!("postgres probe query failed: {}", error_chain(&error)))
@@ -4793,7 +4833,9 @@ impl KeyStore for PostgresKeyStore {
                 &self.target,
             ))
             .await
-            .map_err(|error| format!("postgres fetch_ingest_key failed: {}", error_chain(&error)))?;
+            .map_err(|error| {
+                format!("postgres fetch_ingest_key failed: {}", error_chain(&error))
+            })?;
         let Some(row) = rows.into_iter().next() else {
             return Ok(None);
         };
@@ -6192,6 +6234,51 @@ mod tests {
         }
     }
 
+    /// One Spring AI span, mirroring `telemetry.rs`'s AI fixture: an app-chosen
+    /// (insufficient) scope promoted by a `spring.ai.` attribute hit, with
+    /// spring_ai's session-granularity key present.
+    fn test_ai_trace_request() -> ExportTraceServiceRequest {
+        use opentelemetry_proto::tonic::trace::v1::{span, ResourceSpans, ScopeSpans, Span};
+        let string_kv = |key: &str, value: &str| KeyValue {
+            key: key.to_string(),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::StringValue(value.to_string())),
+            }),
+        };
+        ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(Resource {
+                    attributes: vec![string_kv("service.name", "spring-ai-app")],
+                    dropped_attributes_count: 0,
+                    entity_refs: Vec::new(),
+                }),
+                scope_spans: vec![ScopeSpans {
+                    scope: Some(InstrumentationScope {
+                        name: "org.springframework.boot".to_string(),
+                        version: "4.1.0".to_string(),
+                        attributes: Vec::new(),
+                        dropped_attributes_count: 0,
+                    }),
+                    spans: vec![Span {
+                        trace_id: vec![0x77; 16],
+                        span_id: vec![0x88; 8],
+                        name: "chat_client".to_string(),
+                        kind: span::SpanKind::Internal as i32,
+                        start_time_unix_nano: 1_700_000_000_000_000_000,
+                        end_time_unix_nano: 1_700_000_000_500_000_000,
+                        attributes: vec![
+                            string_kv("spring.ai.kind", "chat_client"),
+                            string_kv("spring.ai.chat.client.conversation.id", "sess-e2e"),
+                        ],
+                        ..Default::default()
+                    }],
+                    schema_url: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+        }
+    }
+
     fn test_headers(raw_key: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -6209,6 +6296,18 @@ mod tests {
         queue_dir: PathBuf,
         forward_endpoint: String,
         routing_ttl: Duration,
+    ) -> AppState {
+        test_app_state_with_ai(store, queue_dir, forward_endpoint, routing_ttl, false).await
+    }
+
+    /// `test_app_state` with `INGEST_AI_CLASSIFICATION_ENABLED` settable, so the
+    /// flag's real path through `AppConfig` can be exercised.
+    async fn test_app_state_with_ai(
+        store: Arc<FakeKeyStore>,
+        queue_dir: PathBuf,
+        forward_endpoint: String,
+        routing_ttl: Duration,
+        ai_classification_enabled: bool,
     ) -> AppState {
         let tinybird = test_tinybird_config(queue_dir);
         let key_store: Arc<dyn KeyStore> = store.clone();
@@ -6246,6 +6345,7 @@ mod tests {
                 max_request_body_bytes: 1024 * 1024,
                 org_max_in_flight: 100,
                 require_tls: false,
+                ai_classification_enabled,
                 key_store_backend: KeyStoreBackend::Static {
                     org_id: "org_test".to_string(),
                 },
@@ -6441,11 +6541,7 @@ mod tests {
         walk(dir)
     }
 
-    async fn replay_blob_test_state(
-        raw_key: &str,
-        org_id: &str,
-        queue_dir: PathBuf,
-    ) -> AppState {
+    async fn replay_blob_test_state(raw_key: &str, org_id: &str, queue_dir: PathBuf) -> AppState {
         let store = Arc::new(FakeKeyStore::default());
         store.insert_private(
             raw_key,
@@ -6515,9 +6611,9 @@ mod tests {
         assert_eq!(captured.content_type, "application/json");
         assert_eq!(captured.content_encoding, "gzip");
         assert!(
-            captured.authorization.starts_with(
-                "AWS4-HMAC-SHA256 Credential=test-access-key/"
-            ),
+            captured
+                .authorization
+                .starts_with("AWS4-HMAC-SHA256 Credential=test-access-key/"),
             "expected a SigV4 authorization header, got {:?}",
             captured.authorization
         );
@@ -7211,6 +7307,99 @@ mod tests {
         )
         .expect("fixture decrypts");
         assert_eq!(plaintext, "ch-secret-123");
+    }
+
+    /// The whole write path with the flag on: HTTP request → key resolve →
+    /// `AppConfig.ai_classification_enabled` → classification → the NDJSON body
+    /// ClickHouse actually receives.
+    #[tokio::test]
+    async fn ai_classification_flag_reaches_the_clickhouse_row() {
+        let (ch_tx, mut ch_rx) = tokio::sync::mpsc::unbounded_channel();
+        let ch_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let ch_addr = ch_listener.local_addr().unwrap();
+        let ch_app = Router::new()
+            .route("/", post(fake_clickhouse_import))
+            .with_state(ch_tx);
+        tokio::spawn(async move {
+            axum::serve(ch_listener, ch_app).await.unwrap();
+        });
+
+        let queue_dir = unique_main_test_dir("ai-classification");
+        let store = Arc::new(FakeKeyStore::default());
+        let raw_key = "maple_sk_test_ai_flag";
+        store.insert_private(
+            raw_key,
+            KeyRow {
+                org_id: "org_ai_flag".to_string(),
+                self_managed: true,
+                clickhouse_ready: true,
+            },
+        );
+        store.insert_clickhouse_target(
+            "org_ai_flag",
+            ClickHouseTargetRow {
+                ch_url: format!("http://{ch_addr}"),
+                ch_user: "ingest".to_string(),
+                ch_password_ciphertext: None,
+                ch_password_iv: None,
+                ch_password_tag: None,
+                ch_database: "maple".to_string(),
+                schema_version: CLICKHOUSE_SCHEMA_VERSION.to_string(),
+            },
+        );
+        let state = test_app_state_with_ai(
+            Arc::clone(&store),
+            queue_dir.clone(),
+            "http://127.0.0.1:1".to_string(),
+            Duration::from_millis(5),
+            true,
+        )
+        .await;
+
+        let (response, item_count, _, _, _) = handle_signal_inner(
+            &state,
+            &test_headers(raw_key),
+            Bytes::from(test_ai_trace_request().encode_to_vec()),
+            Signal::Traces,
+        )
+        .await
+        .expect("request should be accepted through the native ClickHouse path");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(item_count, 1);
+
+        let import = tokio::time::timeout(Duration::from_secs(2), ch_rx.recv())
+            .await
+            .expect("ready org should write to ClickHouse")
+            .expect("ClickHouse channel should stay open");
+
+        // The INSERT must name the five columns, or the values below would land
+        // in the wrong ones.
+        assert!(import.query.contains("AiVendor"), "{}", import.query);
+        assert!(import.query.contains("AiRollupHour"), "{}", import.query);
+
+        let row: serde_json::Value = serde_json::from_str(import.body.trim()).expect("NDJSON row");
+        assert_eq!(row["ai_vendor"], "spring_ai");
+        assert_eq!(row["ai_session_key_state"], serde_json::json!(6));
+        assert_eq!(
+            row["ai_session_key_hash"],
+            serde_json::json!(maple_ingest::cityhash102::city_hash64(b"sess-e2e"))
+        );
+        assert_ne!(row["ai_rules_version"], serde_json::json!(0));
+        // The fixture's span start is a fixed 2023 timestamp, i.e. far outside
+        // the [receive − 7d, receive + 1d] window, so the clamp must relocate it
+        // to the hour this batch was received rather than minting a 2023
+        // partition. (The clamp's window arithmetic is covered exhaustively in
+        // `telemetry.rs` against an injected receive time.)
+        let now_secs = (current_time_millis() / 1000) as i64;
+        let this_hour = chrono::DateTime::from_timestamp(now_secs - now_secs.rem_euclid(3600), 0)
+            .expect("valid receive hour")
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        assert_eq!(row["ai_rollup_hour"], serde_json::json!(this_hour));
+
+        let _ = std::fs::remove_dir_all(queue_dir);
     }
 
     #[test]

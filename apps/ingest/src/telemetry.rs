@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::ai_classifier::{self, ResourceContext, SpanClassification};
+use crate::ai_registry::registry;
 use crate::clickhouse_insert_mappings::{self, InsertMapping};
 use crate::metrics;
 use crate::otel::{
@@ -602,6 +604,132 @@ impl PipelineError {
 pub struct AcceptStats {
     pub rows: usize,
     pub dropped: usize,
+    /// Spans the AI classifier examined in this batch. Zero when the migration
+    /// flag is off; otherwise equal to `rows` for traces (plan §4's
+    /// `spans_ingested` vs `spans_examined` completeness pair).
+    pub ai_spans_examined: usize,
+}
+
+/// Per-batch inputs for AI classification and rollup-hour clamping.
+///
+/// Built once per accepted payload, never per span: the flag is read once and
+/// `receive_time_secs` is captured a single time so every span in one payload
+/// clamps against the same instant.
+#[derive(Clone, Debug)]
+pub struct AiClassificationSettings {
+    /// `INGEST_AI_CLASSIFICATION_ENABLED`. **Migration-window flag only** — the
+    /// write-side plan (§7 step 4) ramps it to 100% across the fleet, records that
+    /// hour as `AI_VENDORS_ROLLUP_ENABLEMENT_HOUR`, and then removes the flag;
+    /// production classifies unconditionally. There is no full-clock-hour
+    /// condition and no ordering against MV creation — the MV ships with the
+    /// migration chain and is a no-op until the ramp. `AiRollupHour` is written
+    /// whether this is set or not.
+    pub enabled: bool,
+    /// Batch receive time, epoch seconds.
+    pub receive_time_secs: i64,
+}
+
+impl AiClassificationSettings {
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            receive_time_secs: unix_now_secs(),
+        }
+    }
+
+    /// Flag off. `AiRollupHour` is still computed and written.
+    pub fn disabled() -> Self {
+        Self::new(false)
+    }
+
+    /// Explicit receive time, for tests that assert the clamp windows.
+    #[cfg(test)]
+    pub fn at(enabled: bool, receive_time_secs: i64) -> Self {
+        Self {
+            enabled,
+            receive_time_secs,
+        }
+    }
+}
+
+fn unix_now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// The four classification columns as the row writes them. Extracted from a
+/// [`SpanClassification`] immediately so the row builder never has to hold a
+/// borrow of the span's attribute list.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct AiRowFields {
+    vendor: &'static str,
+    session_state: u8,
+    session_key_hash: u64,
+    rules_version: u32,
+}
+
+impl AiRowFields {
+    /// Flag-off values. `rules_version = 0` is the plan's pre-rollout marker:
+    /// `AiRulesVersion = 0` means "never examined", which is what a flag-off row
+    /// is, and is distinguishable from an examined-and-non-AI row (non-zero
+    /// version, empty vendor).
+    const UNEXAMINED: Self = Self {
+        vendor: "",
+        session_state: ai_classifier::session_state::NOT_EXAMINED,
+        session_key_hash: 0,
+        rules_version: 0,
+    };
+
+    fn from_classification(classification: &SpanClassification<'_>) -> Self {
+        Self {
+            vendor: classification.vendor_slug(),
+            session_state: classification.session_state,
+            session_key_hash: classification.session_key_hash(),
+            rules_version: classification.rules_version,
+        }
+    }
+}
+
+/// Seconds in the clamp window's past and future halves (write-side plan §3).
+const ROLLUP_CLAMP_PAST_SECS: i64 = 7 * 24 * 60 * 60;
+const ROLLUP_CLAMP_FUTURE_SECS: i64 = 24 * 60 * 60;
+
+/// `AiRollupHour`: `toStartOfHour(Timestamp)` when the span's start time is
+/// within `[receive − 7d, receive + 1d]`, else `toStartOfHour(receive_time)`.
+///
+/// Client timestamps are attacker- and replay-controlled, and this column is the
+/// rollup's partition key, so an unclamped value means unbounded partition
+/// creation and rows whose TTL never fires. Clamping at write time rather than
+/// in the MV is the only deterministic option: an MV-side clamp would need
+/// `now()`, which a later partition rebuild re-evaluates at rebuild time and
+/// would silently relocate rows across hours.
+fn rollup_hour_secs(span_start_unix_nano: u64, receive_time_secs: i64) -> i64 {
+    let span_secs = (span_start_unix_nano / 1_000_000_000) as i64;
+    let in_window = span_secs >= receive_time_secs - ROLLUP_CLAMP_PAST_SECS
+        && span_secs <= receive_time_secs + ROLLUP_CLAMP_FUTURE_SECS;
+    let chosen = if in_window {
+        span_secs
+    } else {
+        receive_time_secs
+    };
+    chosen - chosen.rem_euclid(3600)
+}
+
+/// `DateTime('UTC')` wire format: `YYYY-MM-DD HH:MM:SS`, the second-precision
+/// sibling of `format_timestamp_nano`'s `DateTime64(9)` rendering.
+///
+/// A string, not epoch seconds. Both destinations accept either — Tinybird's
+/// JSONPath ingestion and ClickHouse's `input('… AiRollupHour DateTime(\'UTC\')')`
+/// both parse a quoted datetime — but every other timestamp this row writer
+/// emits is a string in this shape, and a lone numeric column would make the
+/// JSON row's timestamps inconsistent to read and to diff.
+fn format_datetime_secs(unix_secs: i64) -> String {
+    match chrono::DateTime::from_timestamp(unix_secs, 0) {
+        Some(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+        None => "1970-01-01 00:00:00".to_string(),
+    }
 }
 
 #[derive(Clone)]
@@ -721,12 +849,14 @@ impl TelemetryPipeline {
         request: &ExportTraceServiceRequest,
         sampling_policy: &SamplingPolicy,
         attribute_mappings: &[AttributeMappingRule],
+        ai: &AiClassificationSettings,
     ) -> Result<AcceptStats, PipelineError> {
         self.accept_traces_to(
             org_id,
             request,
             sampling_policy,
             attribute_mappings,
+            ai,
             ExportDestination::Tinybird,
         )
         .await
@@ -738,6 +868,7 @@ impl TelemetryPipeline {
         request: &ExportTraceServiceRequest,
         sampling_policy: &SamplingPolicy,
         attribute_mappings: &[AttributeMappingRule],
+        ai: &AiClassificationSettings,
         destination: ExportDestination,
     ) -> Result<AcceptStats, PipelineError> {
         let (frames, stats) = {
@@ -749,6 +880,7 @@ impl TelemetryPipeline {
                 request,
                 sampling_policy,
                 attribute_mappings,
+                ai,
             )?;
             record_encode_stats(&span, &frames, &stats);
             (frames, stats)
@@ -841,6 +973,8 @@ impl TelemetryPipeline {
         let stats = AcceptStats {
             rows: rows.len(),
             dropped: 0,
+            // Session-replay rows, not spans — nothing to classify.
+            ai_spans_examined: 0,
         };
         let frames = rows_to_frames(org_id, hash64(org_id), signal, datasource, rows);
         self.commit_frames(frames, destination).await?;
@@ -2183,23 +2317,39 @@ fn encode_traces(
     request: &ExportTraceServiceRequest,
     policy: &SamplingPolicy,
     attribute_mappings: &[AttributeMappingRule],
+    ai: &AiClassificationSettings,
 ) -> Result<(Vec<EncodedFrame>, AcceptStats), PipelineError> {
     let mut rows = Vec::with_capacity(count_trace_rows(request));
     let mut dropped = 0usize;
+    let mut ai_spans_examined = 0usize;
     let mut routing_key = hash64(org_id);
     let sample_ratio = policy.clamped_ratio();
     let sample_rate = 1.0 / sample_ratio;
+    // Rules can add, rename or delete registry-referenced span attributes, so a
+    // span classified from the wire list would not be the span the row stores.
+    // With no rules configured — the overwhelmingly common case — the Map is a
+    // faithful canonicalization of the wire list, so the wire list *is* the row.
+    let remapped = !attribute_mappings.is_empty();
 
     for resource_spans in &request.resource_spans {
         let resource = resource_spans.resource.as_ref();
-        let resource_attrs = resource
-            .map(|resource| attr_map(&resource.attributes))
-            .unwrap_or_default();
+        let resource_attributes = resource
+            .map(|resource| resource.attributes.as_slice())
+            .unwrap_or(&[]);
+        let resource_attrs = attr_map(resource_attributes);
         let service_name = resource_attrs
             .get("service.name")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
+        // Hoisted once per ResourceSpans, per the plan's §2 batch algorithm —
+        // but only when a span will actually use it. With the flag off there is
+        // nothing to classify, so hoisting would be pure waste on the default
+        // (flag-off) path. Attribute mappings rewrite *span* attributes only, so
+        // the resource/scope contexts are valid for the remapped path too.
+        let ai_resource = ai
+            .enabled
+            .then(|| ResourceContext::new(registry(), resource_attributes));
 
         for scope_spans in &resource_spans.scope_spans {
             let scope = scope_spans.scope.as_ref();
@@ -2208,6 +2358,10 @@ fn encode_traces(
                 .unwrap_or_default();
             let scope_name = scope.map(|scope| scope.name.as_str()).unwrap_or("");
             let scope_version = scope.map(|scope| scope.version.as_str()).unwrap_or("");
+            // Hoisted once per ScopeSpans; every span below reuses it.
+            let ai_scope = ai_resource
+                .as_ref()
+                .map(|resource| resource.scope(scope, &scope_spans.schema_url));
 
             for span in &scope_spans.spans {
                 let trace_id = bytes_hex(&span.trace_id);
@@ -2222,16 +2376,64 @@ fn encode_traces(
                 }
 
                 let mut span_attrs = attr_map(&span.attributes);
+                // `attr_map` keeps the LAST duplicate (the storage rule); the
+                // classifier's contract is the FIRST occurrence. Without mapping
+                // rules the classifier reads the wire list and gets first-wins for
+                // free — with them it reads the remapped Map, so a span that
+                // actually carries a duplicate key needs a parallel first-wins view
+                // or the mere presence of an unrelated rule flips its verdict. The
+                // length comparison is exact: `attr_map` only ever collapses
+                // duplicates, so equal lengths mean the two rules agree and the
+                // common path allocates nothing.
+                let mut classify_attrs =
+                    (ai.enabled && remapped && span.attributes.len() != span_attrs.len())
+                        .then(|| attr_map_first_wins(&span.attributes));
                 if sample_ratio < 1.0
                     && !span_attrs.contains_key("SampleRate")
                     && !span.trace_state.contains("th:")
                 {
-                    span_attrs.insert(
-                        "SampleRate".to_string(),
-                        json!(format_sample_rate(sample_rate)),
-                    );
+                    let sample_rate = json!(format_sample_rate(sample_rate));
+                    if let Some(attrs) = classify_attrs.as_mut() {
+                        attrs.insert("SampleRate".to_string(), sample_rate.clone());
+                    }
+                    span_attrs.insert("SampleRate".to_string(), sample_rate);
                 }
                 apply_attribute_mappings(attribute_mappings, &resource_attrs, &mut span_attrs);
+                if let Some(attrs) = classify_attrs.as_mut() {
+                    apply_attribute_mappings(attribute_mappings, &resource_attrs, attrs);
+                }
+
+                // Classification runs here, after remapping: an org that remaps a
+                // custom key onto a rule key (a session id, a discriminator) must
+                // classify by the remapped shape. Flag-off skips the work entirely
+                // and writes the pre-rollout marker values; `AiRollupHour` below
+                // is written either way.
+                let ai_fields = if !ai.enabled {
+                    AiRowFields::UNEXAMINED
+                } else {
+                    ai_spans_examined += 1;
+                    let scope_context = ai_scope
+                        .as_ref()
+                        .expect("hoisted whenever classification is enabled");
+                    // The rewritten attribute list is per-span; the hoisted
+                    // context is not — it borrows the resource and scope, which
+                    // mapping rules never touch. Only the list differs.
+                    // `classify_attrs` is the first-wins view built above; it is
+                    // `None` unless this span carries a duplicate key, in which
+                    // case the last-wins Map is already the same list.
+                    let rewritten = remapped.then(|| {
+                        key_values_from_map(classify_attrs.as_ref().unwrap_or(&span_attrs))
+                    });
+                    AiRowFields::from_classification(&scope_context.classify_span_full(
+                        &span.name,
+                        rewritten.as_deref().unwrap_or(&span.attributes),
+                        &span.events,
+                    ))
+                };
+                let ai_rollup_hour = format_datetime_secs(rollup_hour_secs(
+                    span.start_time_unix_nano,
+                    ai.receive_time_secs,
+                ));
 
                 let events_timestamp: Vec<Value> = span
                     .events
@@ -2291,7 +2493,12 @@ fn encode_traces(
                     "links_trace_id": links_trace_id,
                     "links_span_id": links_span_id,
                     "links_trace_state": links_trace_state,
-                    "links_attributes": links_attributes
+                    "links_attributes": links_attributes,
+                    "ai_vendor": ai_fields.vendor,
+                    "ai_session_key_state": ai_fields.session_state,
+                    "ai_session_key_hash": ai_fields.session_key_hash,
+                    "ai_rules_version": ai_fields.rules_version,
+                    "ai_rollup_hour": ai_rollup_hour
                 }))?);
             }
         }
@@ -2300,6 +2507,7 @@ fn encode_traces(
     let stats = AcceptStats {
         rows: rows.len(),
         dropped,
+        ai_spans_examined,
     };
     let frames = rows_to_frames(
         org_id,
@@ -2360,6 +2568,8 @@ fn encode_logs(
     let stats = AcceptStats {
         rows: rows.len(),
         dropped: 0,
+        // Logs classification is v2 (write-side plan §3).
+        ai_spans_examined: 0,
     };
     let frames = rows_to_frames(
         org_id,
@@ -2573,6 +2783,8 @@ fn encode_metrics(
         AcceptStats {
             rows: row_count,
             dropped: 0,
+            // Metrics classification is v2 (write-side plan §3).
+            ai_spans_examined: 0,
         },
     ))
 }
@@ -2783,17 +2995,73 @@ fn format_sample_rate(sample_rate: f64) -> String {
     }
 }
 
+/// The written span-attribute Map back as an attribute list, so the classifier
+/// can be pointed at the post-remapping row.
+///
+/// Only built for orgs that actually configured attribute-mapping rules. Values
+/// are already canonical strings (they came out of [`any_value_string`]), so
+/// re-wrapping them as `StringValue` round-trips exactly.
+fn key_values_from_map(attributes: &Map<String, Value>) -> Vec<KeyValue> {
+    attributes
+        .iter()
+        .map(|(key, value)| KeyValue {
+            key: key.clone(),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::StringValue(
+                    value.as_str().unwrap_or_default().to_string(),
+                )),
+            }),
+        })
+        .collect()
+}
+
+/// Canonicalizes an attribute list into the row's Map column.
+///
+/// **Duplicate keys keep the last occurrence** — the historical JSON-object
+/// behavior, for every key. The classifier separately dedupes its *own* view of
+/// rule-referenced keys first-occurrence-wins (`ai_classifier`); that is a
+/// determinism rule for matching, not a storage rule. (v1 coupled the two so SQL
+/// over the written row could reproduce the Rust verdict; that contract is gone,
+/// and with it a registry probe on the duplicate-key path. Residual caveat: a
+/// future Rust retro-fit re-reading written rows would see the last duplicate
+/// value where the live classifier used the first — duplicate rule-keys within
+/// one span are pathological, and the caveat is cheaper than the coupling.)
+///
+/// The classifier never reads this Map: on the attribute-mapping path it reads
+/// [`attr_map_first_wins`] instead, so its verdict does not depend on whether the
+/// org happens to have mapping rules configured.
 fn attr_map(attributes: &[KeyValue]) -> Map<String, Value> {
     let mut out = Map::with_capacity(attributes.len());
     for attribute in attributes {
-        out.insert(
-            attribute.key.clone(),
-            json!(attribute
-                .value
-                .as_ref()
-                .map(any_value_string)
-                .unwrap_or_default()),
-        );
+        let value = json!(attribute
+            .value
+            .as_ref()
+            .map(any_value_string)
+            .unwrap_or_default());
+        out.insert(attribute.key.clone(), value);
+    }
+    out
+}
+
+/// [`attr_map`] under the **classifier's** duplicate rule: the FIRST occurrence of
+/// a key wins, matching `ai_classifier`'s dedup of its own view of the wire list.
+///
+/// Built only for the span that actually carries a duplicate key on an org that
+/// has attribute mappings — the one case where the two rules disagree and the
+/// classifier cannot read the wire list directly. Never stored: the row's Map
+/// keeps [`attr_map`]'s last-wins canonicalization.
+fn attr_map_first_wins(attributes: &[KeyValue]) -> Map<String, Value> {
+    let mut out = Map::with_capacity(attributes.len());
+    for attribute in attributes {
+        if out.contains_key(&attribute.key) {
+            continue;
+        }
+        let value = json!(attribute
+            .value
+            .as_ref()
+            .map(any_value_string)
+            .unwrap_or_default());
+        out.insert(attribute.key.clone(), value);
     }
     out
 }
@@ -2899,6 +3167,13 @@ fn count_log_rows(request: &ExportLogsServiceRequest) -> usize {
         .map(|sl| sl.log_records.len())
         .sum()
 }
+
+/// Adversarial classification fixtures. A child of this module, not of `tests`,
+/// because it drives [`encode_traces`] — the real row writer — and that is private
+/// here.
+#[cfg(test)]
+#[path = "ai_adversarial_fixtures.rs"]
+mod ai_adversarial_fixtures;
 
 #[cfg(test)]
 mod tests {
@@ -3310,6 +3585,7 @@ mod tests {
             &request,
             &SamplingPolicy::default(),
             &[],
+            &AiClassificationSettings::disabled(),
         )
         .unwrap();
         assert_eq!(stats.rows, 1);
@@ -3626,6 +3902,7 @@ mod tests {
                 &populated_trace_request(),
                 &SamplingPolicy::default(),
                 &[],
+                &AiClassificationSettings::disabled(),
                 ExportDestination::ClickHouse,
             )
             .await
@@ -4345,6 +4622,11 @@ mod tests {
             "links_span_id",
             "links_trace_state",
             "links_attributes",
+            "ai_vendor",
+            "ai_session_key_state",
+            "ai_session_key_hash",
+            "ai_rules_version",
+            "ai_rollup_hour",
         ];
 
         const METRIC_COMMON: &[&str] = &[
@@ -4508,6 +4790,374 @@ mod tests {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // AI classification (write-side plan §2/§3)
+    // -----------------------------------------------------------------------
+
+    /// Wall-clock instant every AI test clamps against: 2023-11-14 22:13:20 UTC,
+    /// the same second `populated_trace_request`'s span starts at.
+    const AI_RECEIVE_SECS: i64 = 1_700_000_000;
+
+    /// spring_ai's only session-key candidate, authoritative on spans with
+    /// `spring.ai.kind = chat_client`.
+    const SPRING_AI_SESSION_KEY: &str = "spring.ai.chat.client.conversation.id";
+
+    /// A Spring AI span: a scope that is only a *conditional* candidate
+    /// (`org.springframework.boot` is app-chosen, so insufficient on its own),
+    /// promoted by the `spring.ai.` attribute hit, carrying spring_ai's
+    /// session-granularity key on an authoritative `chat_client` span.
+    fn ai_trace_request(
+        span_attributes: Vec<KeyValue>,
+        start_unix_nano: u64,
+    ) -> ExportTraceServiceRequest {
+        ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(Resource {
+                    attributes: vec![
+                        string_kv("service.name", "spring-ai-app"),
+                        string_kv("maple_org_id", "org_ai"),
+                    ],
+                    dropped_attributes_count: 0,
+                    entity_refs: Vec::new(),
+                }),
+                scope_spans: vec![ScopeSpans {
+                    scope: Some(InstrumentationScope {
+                        name: "org.springframework.boot".to_string(),
+                        version: "4.1.0".to_string(),
+                        attributes: Vec::new(),
+                        dropped_attributes_count: 0,
+                    }),
+                    spans: vec![Span {
+                        trace_id: vec![0x44; 16],
+                        span_id: vec![0x55; 8],
+                        name: "chat_client".to_string(),
+                        kind: span::SpanKind::Internal as i32,
+                        start_time_unix_nano: start_unix_nano,
+                        end_time_unix_nano: start_unix_nano + 1_000_000,
+                        attributes: span_attributes,
+                        ..Default::default()
+                    }],
+                    schema_url: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+        }
+    }
+
+    fn spring_ai_attributes() -> Vec<KeyValue> {
+        vec![
+            string_kv("spring.ai.kind", "chat_client"),
+            string_kv("gen_ai.operation.name", "chat"),
+            string_kv(SPRING_AI_SESSION_KEY, "sess-abc"),
+        ]
+    }
+
+    fn encode_ai_row(request: &ExportTraceServiceRequest, ai: &AiClassificationSettings) -> Value {
+        let (frames, stats) = encode_traces(
+            &test_cfg().datasources,
+            "org_ai",
+            request,
+            &SamplingPolicy::default(),
+            &[],
+            ai,
+        )
+        .unwrap();
+        assert_eq!(stats.rows, 1);
+        frame_row(&frames[0])
+    }
+
+    #[test]
+    fn classification_on_writes_vendor_state_hash_and_version() {
+        let request = ai_trace_request(
+            spring_ai_attributes(),
+            AI_RECEIVE_SECS as u64 * 1_000_000_000,
+        );
+        let ai = AiClassificationSettings::at(true, AI_RECEIVE_SECS);
+        let row = encode_ai_row(&request, &ai);
+
+        assert_eq!(row["ai_vendor"], "spring_ai");
+        assert_eq!(
+            row["ai_session_key_state"],
+            json!(ai_classifier::session_state::SESSION)
+        );
+        assert_eq!(row["ai_rules_version"], json!(registry().version()));
+        // The construction the SQL leg reproduces: cityHash64 of the bare value.
+        let expected = crate::cityhash102::city_hash64(b"sess-abc");
+        assert_ne!(expected, 0);
+        assert_eq!(row["ai_session_key_hash"], json!(expected));
+        assert_eq!(row["ai_rollup_hour"], "2023-11-14 22:00:00");
+    }
+
+    #[test]
+    fn classification_examined_count_matches_row_count() {
+        let request = ai_trace_request(
+            spring_ai_attributes(),
+            AI_RECEIVE_SECS as u64 * 1_000_000_000,
+        );
+        let (_, on) = encode_traces(
+            &test_cfg().datasources,
+            "org_ai",
+            &request,
+            &SamplingPolicy::default(),
+            &[],
+            &AiClassificationSettings::at(true, AI_RECEIVE_SECS),
+        )
+        .unwrap();
+        assert_eq!(on.ai_spans_examined, on.rows);
+
+        let (_, off) = encode_traces(
+            &test_cfg().datasources,
+            "org_ai",
+            &request,
+            &SamplingPolicy::default(),
+            &[],
+            &AiClassificationSettings::at(false, AI_RECEIVE_SECS),
+        )
+        .unwrap();
+        assert_eq!(off.ai_spans_examined, 0);
+    }
+
+    #[test]
+    fn classification_off_writes_zeros_but_still_writes_the_rollup_hour() {
+        let request = ai_trace_request(
+            spring_ai_attributes(),
+            AI_RECEIVE_SECS as u64 * 1_000_000_000,
+        );
+        let ai = AiClassificationSettings::at(false, AI_RECEIVE_SECS);
+        let row = encode_ai_row(&request, &ai);
+
+        assert_eq!(row["ai_vendor"], "");
+        assert_eq!(row["ai_session_key_state"], json!(0));
+        assert_eq!(row["ai_session_key_hash"], json!(0));
+        // 0, not the registry version: a flag-off row is "never examined".
+        assert_eq!(row["ai_rules_version"], json!(0));
+        assert_eq!(row["ai_rollup_hour"], "2023-11-14 22:00:00");
+    }
+
+    #[test]
+    fn a_non_ai_span_is_examined_and_stamped_but_carries_no_vendor() {
+        let ai = AiClassificationSettings::at(true, AI_RECEIVE_SECS);
+        let (frames, stats) = encode_traces(
+            &test_cfg().datasources,
+            "org_contract",
+            &populated_trace_request(),
+            &SamplingPolicy::default(),
+            &[],
+            &ai,
+        )
+        .unwrap();
+        let row = frame_row(&frames[0]);
+        assert_eq!(stats.ai_spans_examined, 1);
+        assert_eq!(row["ai_vendor"], "");
+        assert_eq!(row["ai_session_key_state"], json!(0));
+        // Non-zero version with an empty vendor is the plan's "definitively
+        // classified non-AI" marker — the whole point of stamping non-AI spans.
+        assert_eq!(row["ai_rules_version"], json!(registry().version()));
+    }
+
+    #[test]
+    fn rollup_hour_clamps_stale_and_future_timestamps_to_receive_time() {
+        let receive_hour = "2023-11-14 22:00:00";
+        let ai = || AiClassificationSettings::at(true, AI_RECEIVE_SECS);
+
+        // In window, one hour before receive: the span's own hour is kept.
+        let in_window = ai_trace_request(
+            spring_ai_attributes(),
+            (AI_RECEIVE_SECS as u64 - 3_600) * 1_000_000_000,
+        );
+        assert_eq!(
+            encode_ai_row(&in_window, &ai())["ai_rollup_hour"],
+            "2023-11-14 21:00:00"
+        );
+
+        // In window, at the far edge of the past half (exactly 7 days back).
+        let edge_past = ai_trace_request(
+            spring_ai_attributes(),
+            (AI_RECEIVE_SECS as u64 - 7 * 86_400) * 1_000_000_000,
+        );
+        assert_eq!(
+            encode_ai_row(&edge_past, &ai())["ai_rollup_hour"],
+            "2023-11-07 22:00:00"
+        );
+
+        // Older than 7 days: clamped to the receive hour.
+        let too_old = ai_trace_request(
+            spring_ai_attributes(),
+            (AI_RECEIVE_SECS as u64 - 8 * 86_400) * 1_000_000_000,
+        );
+        assert_eq!(
+            encode_ai_row(&too_old, &ai())["ai_rollup_hour"],
+            receive_hour
+        );
+
+        // Further ahead than 1 day: clamped too. This is the replay/attacker case.
+        let too_new = ai_trace_request(
+            spring_ai_attributes(),
+            (AI_RECEIVE_SECS as u64 + 86_400 + 3_600) * 1_000_000_000,
+        );
+        assert_eq!(
+            encode_ai_row(&too_new, &ai())["ai_rollup_hour"],
+            receive_hour
+        );
+
+        // A zero timestamp is 1970 — far outside the window, so it clamps too
+        // rather than creating a 1970 partition.
+        let epoch_zero = ai_trace_request(spring_ai_attributes(), 0);
+        assert_eq!(
+            encode_ai_row(&epoch_zero, &ai())["ai_rollup_hour"],
+            receive_hour
+        );
+    }
+
+    #[test]
+    fn rollup_hour_matches_the_clickhouse_datetime_format() {
+        // `DateTime('UTC')` parses `YYYY-MM-DD HH:MM:SS` — 19 chars, no
+        // fractional part (that is `format_timestamp_nano`'s DateTime64(9)).
+        let request = ai_trace_request(
+            spring_ai_attributes(),
+            AI_RECEIVE_SECS as u64 * 1_000_000_000,
+        );
+        let row = encode_ai_row(
+            &request,
+            &AiClassificationSettings::at(false, AI_RECEIVE_SECS),
+        );
+        let hour = row["ai_rollup_hour"].as_str().unwrap();
+        assert_eq!(hour.len(), 19, "not DateTime('UTC'): {hour:?}");
+        assert!(hour.ends_with(":00:00"), "not an hour boundary: {hour:?}");
+        let parsed = chrono::NaiveDateTime::parse_from_str(hour, "%Y-%m-%d %H:%M:%S")
+            .expect("ClickHouse DateTime literal must round-trip");
+        assert_eq!(parsed.and_utc().timestamp() % 3600, 0);
+        // The generated insert mapping declares the leaf, so ClickHouse's
+        // `input()` schema is what parses this string.
+        let traces = clickhouse_insert_mappings::DATASOURCES
+            .iter()
+            .find(|mapping| mapping.datasource == "traces")
+            .unwrap();
+        assert!(traces.columns.contains(&"AiRollupHour"));
+        assert!(traces
+            .input_schema
+            .contains("ai_rollup_hour DateTime('UTC')"));
+        assert!(traces.columns.contains(&"AiVendor"));
+        assert!(traces.columns.contains(&"AiSessionKeyState"));
+        assert!(traces.columns.contains(&"AiSessionKeyHash"));
+        assert!(traces.columns.contains(&"AiRulesVersion"));
+    }
+
+    #[test]
+    fn classification_reads_the_row_after_attribute_remapping() {
+        // The org moves a custom key onto spring_ai's session-key attribute.
+        // Classifying the wire attributes would miss it and write state 3;
+        // classifying the remapped shape resolves it.
+        let attributes = vec![
+            string_kv("spring.ai.kind", "chat_client"),
+            string_kv("app.conversation", "sess-remapped"),
+        ];
+        let request = ai_trace_request(attributes, AI_RECEIVE_SECS as u64 * 1_000_000_000);
+        let rules = [AttributeMappingRule {
+            source_context: MappingSourceContext::Span,
+            source_key: "app.conversation".to_string(),
+            target_key: SPRING_AI_SESSION_KEY.to_string(),
+            operation: MappingOperation::Move,
+        }];
+        let ai = AiClassificationSettings::at(true, AI_RECEIVE_SECS);
+        let (frames, _) = encode_traces(
+            &test_cfg().datasources,
+            "org_ai",
+            &request,
+            &SamplingPolicy::default(),
+            &rules,
+            &ai,
+        )
+        .unwrap();
+        let row = frame_row(&frames[0]);
+
+        assert_eq!(
+            row["span_attributes"][SPRING_AI_SESSION_KEY],
+            "sess-remapped"
+        );
+        assert_eq!(
+            row["ai_session_key_state"],
+            json!(ai_classifier::session_state::SESSION)
+        );
+        assert_eq!(
+            row["ai_session_key_hash"],
+            json!(crate::cityhash102::city_hash64(b"sess-remapped"
+            ))
+        );
+    }
+
+    /// Determinism contract: the classifier's first-occurrence-wins duplicate rule
+    /// must not depend on whether the org has attribute mappings configured.
+    ///
+    /// The row writer's Map is last-wins by design, and with any mapping rule
+    /// present the classifier reads a list rebuilt from a Map rather than the wire
+    /// list. Before the first-wins view, two orgs sending byte-identical spans got
+    /// different `AiVendor`, `AiSessionKeyHash` and rollup rows because one of them
+    /// happened to have a rule configured — here a `Move` of a key no span carries,
+    /// which touches nothing.
+    #[test]
+    fn duplicate_keys_classify_the_same_with_and_without_mapping_rules() {
+        let duplicated = vec![
+            string_kv("gen_ai.system", "spring_ai"),
+            string_kv("gen_ai.system", "strands-agents"),
+            string_kv("gen_ai.operation.name", "chat"),
+        ];
+        let request = ai_trace_request(duplicated, AI_RECEIVE_SECS as u64 * 1_000_000_000);
+        let ai = AiClassificationSettings::at(true, AI_RECEIVE_SECS);
+        let no_op_rule = [AttributeMappingRule {
+            source_context: MappingSourceContext::Span,
+            source_key: "no.such.key".to_string(),
+            target_key: "no.such.target".to_string(),
+            operation: MappingOperation::Move,
+        }];
+
+        let classify = |rules: &[AttributeMappingRule]| {
+            let (frames, _) = encode_traces(
+                &test_cfg().datasources,
+                "org_ai",
+                &request,
+                &SamplingPolicy::default(),
+                rules,
+                &ai,
+            )
+            .unwrap();
+            let row = frame_row(&frames[0]);
+            (
+                row["ai_vendor"].clone(),
+                row["ai_session_key_state"].clone(),
+                row["ai_session_key_hash"].clone(),
+            )
+        };
+
+        let without = classify(&[]);
+        let with = classify(&no_op_rule);
+        // The first duplicate wins on both paths, not the last one.
+        assert_eq!(without.0, "spring_ai");
+        assert_eq!(
+            with, without,
+            "an unrelated mapping rule changed the verdict: the remapped view is \
+             not being built first-occurrence-wins"
+        );
+
+        // The stored Map stays last-wins on both paths — this is a classifier
+        // contract, not a change to what the row records.
+        for rules in [&[][..], &no_op_rule[..]] {
+            let (frames, _) = encode_traces(
+                &test_cfg().datasources,
+                "org_ai",
+                &request,
+                &SamplingPolicy::default(),
+                rules,
+                &ai,
+            )
+            .unwrap();
+            assert_eq!(
+                frame_row(&frames[0])["span_attributes"]["gen_ai.system"],
+                "strands-agents"
+            );
+        }
+    }
+
     fn one_of_each_metric_request() -> ExportMetricsServiceRequest {
         let base = NumberDataPoint {
             attributes: vec![string_kv("route", "/checkout")],
@@ -4639,6 +5289,7 @@ mod tests {
             &populated_trace_request(),
             &SamplingPolicy::default(),
             &[],
+            &AiClassificationSettings::disabled(),
         )
         .unwrap();
         let row = frame_row(&frames[0]);
@@ -4714,6 +5365,7 @@ mod tests {
             &populated_trace_request(),
             &SamplingPolicy::default(),
             &[],
+            &AiClassificationSettings::disabled(),
         )
         .unwrap();
         let trace_row = frame_row(&trace_frames[0]);
@@ -4768,6 +5420,7 @@ mod tests {
             &populated_trace_request(),
             &SamplingPolicy::default(),
             &[],
+            &AiClassificationSettings::disabled(),
         )
         .unwrap();
         assert_eq!(trace_frames[0].datasource, "tenant_traces_v2");
@@ -4946,7 +5599,13 @@ mod tests {
 
         let request = populated_trace_request();
         let stats = pipeline
-            .accept_traces("org_contract", &request, &SamplingPolicy::default(), &[])
+            .accept_traces(
+                "org_contract",
+                &request,
+                &SamplingPolicy::default(),
+                &[],
+                &AiClassificationSettings::disabled(),
+            )
             .await
             .unwrap();
         assert_eq!(stats.rows, 1);

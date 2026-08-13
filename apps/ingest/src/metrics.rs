@@ -140,6 +140,13 @@ static NATIVE_ROWS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
+static AI_SPANS_EXAMINED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_ai_spans_examined_total")
+        .with_description("Spans the AI classifier examined, by signal")
+        .build()
+});
+
 static NATIVE_SAMPLED_DROPPED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("ingest_native_sampled_dropped_total")
@@ -581,6 +588,18 @@ pub fn native_accept_duration(signal: &str, duration_secs: f64) {
 /// Rows accepted by the native warehouse pipeline.
 pub fn native_rows(signal: &str, count: u64) {
     NATIVE_ROWS_TOTAL.add(count, &[KeyValue::new("signal", signal.to_string())]);
+}
+
+/// Spans the AI classifier examined — write-side plan §4's completeness signal.
+///
+/// Labeled by `signal` only, exactly like `native_rows`, so the two are directly
+/// comparable: with classification enabled every accepted trace row is an
+/// examined span, and any divergence between these series is a bug (a code path
+/// building rows without classifying, or a partially-flagged fleet). It is
+/// deliberately *not* org-labeled — this counter moves constantly on a healthy
+/// fleet, which is the opposite of `org_data_loss`'s cardinality budget.
+pub fn ai_spans_examined(signal: &str, count: u64) {
+    AI_SPANS_EXAMINED_TOTAL.add(count, &[KeyValue::new("signal", signal.to_string())]);
 }
 
 /// Rows dropped by sampling in the native pipeline.

@@ -129,6 +129,12 @@ jobs:
                         - 'packages/domain/src/clickhouse/**'
                         - 'packages/domain/src/tinybird/**'
                         - 'packages/domain/src/generated/**'
+                        # The hash-contract E2E lives here (not in apps/api), and
+                        # the thing it pins — the in-crate CityHash 1.0.2 port —
+                        # is the one input this job cannot see change, so the
+                        # ingest source is a trigger too.
+                        - 'packages/domain/src/ai/**'
+                        - 'apps/ingest/src/cityhash102.rs'
                       postgres:
                         - *base
                         # The connection layer and everything that decides how many
@@ -541,6 +547,23 @@ jobs:
               run: >-
                   bun run --filter=@maple/api test --
                   src/services/warehouse/web-analytics-parity.clickhouse.e2e.test.ts
+
+            # `--filter=@maple/domain`, not `@maple/api`: this suite lives in
+            # packages/domain and was therefore skipped by every other step here.
+            # It pins `AiSessionKeyHash` = ClickHouse `cityHash64`, which is what
+            # keeps the read path's `WHERE AiSessionKeyHash = cityHash64({id})`
+            # and the column's repairability from `SpanAttributes` true. A
+            # divergence returns zero rows and puts a permanent discontinuity in
+            # a 400-day-TTL sketch, with nothing else failing.
+            - name: Verify the AI session-key hash contract
+              env:
+                  CLICKHOUSE_E2E: "1"
+                  CLICKHOUSE_E2E_URL: http://127.0.0.1:8123
+                  CLICKHOUSE_E2E_USER: maple
+                  CLICKHOUSE_E2E_PASSWORD: maple
+              run: >-
+                  bun run --filter=@maple/domain test --
+                  src/ai/hash-alignment.clickhouse.e2e.test.ts
 
     local-checkpoint-native:
         name: Local checkpoint native
