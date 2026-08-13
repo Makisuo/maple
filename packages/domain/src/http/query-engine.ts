@@ -1560,66 +1560,22 @@ export class WorkloadInfraTimeseriesResponse extends Schema.Class<WorkloadInfraT
 }) {}
 
 // Query Builder drafts (persisted by dashboards and alert rules)
-
-const QueryBuilderAddOnsSchema = Schema.Struct({
-	groupBy: Schema.Boolean,
-	having: Schema.Boolean,
-	orderBy: Schema.Boolean,
-	limit: Schema.Boolean,
-	legend: Schema.Boolean,
-})
-
-// Fields shared by every query-draft source. Metric-specific fields live only
-// on the metrics variant below — traces/logs queries never carry them.
-const queryDraftBaseFields = {
-	id: Schema.String,
-	name: Schema.String,
-	enabled: Schema.optional(Schema.Boolean),
-	hidden: Schema.optional(Schema.Boolean),
-	whereClause: Schema.optional(Schema.String),
-	aggregation: Schema.String,
-	stepInterval: Schema.optional(Schema.String),
-	orderByDirection: Schema.optional(Schema.Literals(["desc", "asc"])),
-	addOns: Schema.optional(QueryBuilderAddOnsSchema),
-	groupBy: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-	having: Schema.optional(Schema.String),
-	orderBy: Schema.optional(Schema.String),
-	limit: Schema.optional(Schema.String),
-	// Opt-in top-N series cap for group-by timeseries charts (entered as a string
-	// in the builder; parsed to a positive integer when lowering to a QuerySpec).
-	seriesLimit: Schema.optional(Schema.String),
-	legend: Schema.optional(Schema.String),
-}
-
-export const TracesQueryDraftSchema = Schema.Struct({
-	...queryDraftBaseFields,
-	dataSource: Schema.Literal("traces"),
-	// A non-empty `valueField` (e.g. "attr.result.rowCount") switches the traces
-	// query into numeric-attribute aggregation mode: `aggregation` becomes a
-	// numeric function over that span attribute instead of a duration-based metric.
-	valueField: Schema.optional(Schema.String),
-})
-
-export const LogsQueryDraftSchema = Schema.Struct({
-	...queryDraftBaseFields,
-	dataSource: Schema.Literal("logs"),
-})
-
-export const MetricsQueryDraftSchema = Schema.Struct({
-	...queryDraftBaseFields,
-	dataSource: Schema.Literal("metrics"),
-	signalSource: Schema.optional(Schema.Literals(["default", "meter"])),
-	metricName: Schema.optional(Schema.String),
-	metricType: Schema.optional(Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])),
-	isMonotonic: Schema.optional(Schema.Boolean),
-})
-
-export const QueryBuilderQueryDraftSchema = Schema.Union([
-	TracesQueryDraftSchema,
+//
+// Defined in `@maple/query-model`, the leaf both writers can import: alert rules
+// persist a draft and so do dashboard widgets, and `@maple/widgets` sits BELOW
+// this package (`MapleApi` embeds the widget schemas), so the widget document
+// schema cannot reach up here for it. Re-exported so `@maple/domain/http` keeps
+// its existing surface.
+export {
 	LogsQueryDraftSchema,
 	MetricsQueryDraftSchema,
-])
-export type QueryBuilderQueryDraftPayload = Schema.Schema.Type<typeof QueryBuilderQueryDraftSchema>
+	QueryBuilderAddOnsSchema,
+	QueryBuilderFormulaSchema,
+	type QueryBuilderFormulaPayload,
+	type QueryBuilderQueryDraftPayload,
+	QueryBuilderQueryDraftSchema,
+	TracesQueryDraftSchema,
+} from "@maple/query-model"
 
 // Raw SQL chart (Hyperdx-style — user-authored ClickHouse SQL with macros)
 

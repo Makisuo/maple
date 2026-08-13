@@ -38,6 +38,16 @@ export function getPreviousTimeRange(shorthand: TimeRangeKey): { startTime: stri
 	}
 }
 
+// A deliberate copy of `computeBucketSeconds` from `@maple/query-engine`.
+//
+// `apps/mobile` has no `@maple/*` dependencies at all — it is a standalone React
+// Native app that re-declares the wire shapes it needs (see the query-draft
+// types in `lib/api.ts`). Taking the workspace dependency to share one pure
+// function would pull the query engine's whole module graph into a Metro bundle.
+//
+// Keep the ladder and target in sync with `packages/query-engine/src/datetime.ts`
+// if either changes; this pair matches the 30-point / 300s-floor configuration
+// that the raw-SQL `$__interval_s` path also uses.
 const TARGET_POINTS = 30
 const AUTO_BUCKET_LADDER = [300, 900, 1800, 3600, 14400, 86400] as const
 

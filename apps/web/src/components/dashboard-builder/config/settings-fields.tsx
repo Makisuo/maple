@@ -14,6 +14,7 @@ import { WidgetBuilderForm } from "@/atoms/widget-query-builder-atoms"
 import { useAtom } from "@/lib/effect-atom"
 import { PANEL_TYPES, fromPanelType, toPanelType } from "@/lib/query-builder/panel-types"
 import {
+	STAT_AGGREGATES,
 	toSeriesFieldOptions,
 	type QueryBuilderWidgetState,
 	type StatAggregate,
@@ -375,8 +376,6 @@ function Legend({ seriesStats = true }: { seriesStats?: boolean }) {
 	)
 }
 
-const STAT_AGGREGATES: StatAggregate[] = ["first", "sum", "count", "avg", "max", "min"]
-
 /** How the timeseries a stat or gauge reads is reduced to one number. */
 function ScalarReduction() {
 	const { state, seriesFieldOptions, set } = useSettings()
@@ -581,12 +580,6 @@ function QueryOptions() {
 					checked={state.includePercentChange}
 					disabled={state.comparisonMode === "none"}
 					onChange={(includePercentChange) => set({ includePercentChange })}
-				/>
-				<CheckboxRow
-					id="qb-debug"
-					label="Debug"
-					checked={state.debug}
-					onChange={(debug) => set({ debug })}
 				/>
 			</div>
 		</>

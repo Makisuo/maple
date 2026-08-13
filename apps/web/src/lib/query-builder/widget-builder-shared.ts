@@ -16,6 +16,8 @@ import type {
 	WidgetDataSource,
 } from "@/components/dashboard-builder/types"
 import type { LegendPosition } from "@/components/dashboard-builder/config/settings-fields"
+import { STAT_AGGREGATES, type StatAggregate } from "@maple/domain/http"
+import type { QueryComparisonMode } from "@maple/query-model"
 import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } from "@maple/domain/where-clause"
 
@@ -27,7 +29,8 @@ import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } fro
 // definitions under `components/dashboard-builder/widgets/types/` can import it
 // without an import cycle through the registry those dispatchers read.
 
-export type StatAggregate = "sum" | "first" | "count" | "avg" | "max" | "min"
+// The single widget-side spelling of the shared reducer table.
+export { STAT_AGGREGATES, type StatAggregate } from "@maple/domain/http"
 
 export interface QueryBuilderWidgetState {
 	visualization: VisualizationType
@@ -43,9 +46,8 @@ export interface QueryBuilderWidgetState {
 	curveType: "linear" | "monotone"
 	queries: QueryBuilderQueryDraft[]
 	formulas: QueryBuilderFormulaDraft[]
-	comparisonMode: "none" | "previous_period"
+	comparisonMode: QueryComparisonMode
 	includePercentChange: boolean
-	debug: boolean
 	statAggregate: StatAggregate
 	statValueField: string
 	unit: ValueUnit
@@ -173,14 +175,7 @@ function toMetricType(input: unknown, fallback: QueryBuilderMetricType): QueryBu
 }
 
 export function toStatAggregate(value: unknown): StatAggregate {
-	return value === "sum" ||
-		value === "first" ||
-		value === "count" ||
-		value === "avg" ||
-		value === "max" ||
-		value === "min"
-		? value
-		: "first"
+	return STAT_AGGREGATES.find((candidate) => candidate === value) ?? "first"
 }
 
 function normalizeLoadedQuery(raw: QueryBuilderQueryDraft, index: number): QueryBuilderQueryDraft {
@@ -313,7 +308,14 @@ export function deriveDefaultWidgetTitle(queries: readonly QueryBuilderQueryDraf
 }
 
 /** Reads a persisted widget's `params.queries` back into editor drafts. */
-export function loadQueryDrafts(params: Record<string, unknown>): {
+/**
+ * Editor drafts from a stored query set.
+ *
+ * Takes `{ queries, formulas }` rather than a params bag so callers hand it the
+ * result of `dataSourceQuerySet` — the accessor that reads v2 and v3 alike —
+ * instead of reaching into `dataSource.params` themselves.
+ */
+export function loadQueryDrafts(params: { queries?: unknown; formulas?: unknown }): {
 	queries: QueryBuilderQueryDraft[]
 	formulas: QueryBuilderFormulaDraft[]
 } {

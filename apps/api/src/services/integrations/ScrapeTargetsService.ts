@@ -1011,6 +1011,90 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				return rows
 			})
 
+			// The upstream `/metrics` fetch is effectively the entire cost of the
+			// scrape-proxy route: by the time we get here the target row is memoized,
+			// PlanetScale discovery is cached and no Postgres read remains. Without its
+			// own span that time is invisible — it shows up only as the unexplained
+			// residual of `scrapeForCollector`, whose every instrumented child measures
+			// 0ms, which is what made a 2026-07 latency shift take raw SQL to explain.
+			//
+			// `server.address` + `url.path`, never `url.full`: PlanetScale authenticates
+			// the metrics data plane with `?sig=&exp=` query params, i.e. credentials.
+			// `pathname` drops the query, so the signed URL cannot leak into telemetry.
+			//
+			// `peer.service` is deliberately low-cardinality (two values, not one per
+			// target) — a per-target name would fragment the service map into a node
+			// per scrape target.
+			const fetchUpstream = Effect.fn("ScrapeTargetsService.fetchUpstream", { kind: "client" })(
+				function* (
+					scrapeUrl: string,
+					headers: Record<string, string>,
+					// The drizzle column is a plain string, not the domain union — keep it
+					// that way rather than casting a DB read into the branded type.
+					targetType: string,
+					timeoutMs: number,
+				) {
+					const parsed = Option.liftThrowable(() => new URL(scrapeUrl))()
+					// Annotated before the fetch so a failed or timed-out scrape still
+					// draws its service-map edge.
+					yield* Effect.annotateCurrentSpan({
+						"peer.service":
+							targetType === "planetscale" ? "planetscale-metrics" : "scrape-target",
+						"http.request.method": "GET",
+						"maple.scrape.target_type": targetType,
+						...(Option.isSome(parsed)
+							? { "server.address": parsed.value.host, "url.path": parsed.value.pathname }
+							: {}),
+					})
+
+					// `safeFetch` is retained for its SSRF protection + per-hop redirect
+					// re-validation (the Effect HttpClient transport has neither). The manual
+					// AbortController/setTimeout is replaced by the interruption-aware signal
+					// from `Effect.tryPromise` plus `Effect.timeout`: on timeout the fiber is
+					// interrupted, which aborts the in-flight fetch via that signal.
+					const result = yield* Effect.tryPromise({
+						try: async (signal) => {
+							const response = await safeFetch(scrapeUrl, {
+								method: "GET",
+								headers,
+								signal,
+							})
+							return {
+								status: response.status,
+								body: await response.text(),
+								contentType:
+									response.headers.get("content-type") ??
+									"text/plain; version=0.0.4; charset=utf-8",
+								retryAfterSeconds: parseRetryAfterSeconds(
+									response.headers.get("retry-after"),
+								),
+							} satisfies ScrapeTargetProxyResponse
+						},
+						// An upstream failure is the scrape TARGET's fault, not ours — a
+						// persistence error here would report someone else's unreachable
+						// endpoint as a Maple storage fault, which is what the exact v2
+						// error contracts (#458) set out to stop.
+						catch: (cause) =>
+							toUpstreamError(
+								cause instanceof Error ? cause.message : "Scrape target request failed",
+							),
+					}).pipe(
+						Effect.timeout(timeoutMs),
+						Effect.catchTag("TimeoutError", () =>
+							Effect.fail(toUpstreamError("Scrape target request timed out")),
+						),
+					)
+
+					yield* Effect.annotateCurrentSpan({
+						"http.response.status_code": result.status,
+						// Decoded character count, not wire bytes — hence the vendor
+						// namespace rather than `http.response.body.size`.
+						"maple.scrape.response_chars": result.body.length,
+					})
+					return result
+				},
+			)
+
 			const scrapeForCollector = Effect.fn("ScrapeTargetsService.scrapeForCollector")(function* (
 				targetId: ScrapeTargetId,
 				subTargetKey?: string,
@@ -1065,37 +1149,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					Math.max(1_000, (row.value.scrapeIntervalSeconds - 1) * 1000),
 				)
 
-				// `safeFetch` is retained for its SSRF protection + per-hop redirect
-				// re-validation (the Effect HttpClient transport has neither). The manual
-				// AbortController/setTimeout is replaced by the interruption-aware signal
-				// from `Effect.tryPromise` plus `Effect.timeout`: on timeout the fiber is
-				// interrupted, which aborts the in-flight fetch via that signal.
-				return yield* Effect.tryPromise({
-					try: async (signal) => {
-						const response = await safeFetch(scrapeUrl, {
-							method: "GET",
-							headers,
-							signal,
-						})
-						return {
-							status: response.status,
-							body: await response.text(),
-							contentType:
-								response.headers.get("content-type") ??
-								"text/plain; version=0.0.4; charset=utf-8",
-							retryAfterSeconds: parseRetryAfterSeconds(response.headers.get("retry-after")),
-						} satisfies ScrapeTargetProxyResponse
-					},
-					catch: (cause) =>
-						toUpstreamError(
-							cause instanceof Error ? cause.message : "Scrape target request failed",
-						),
-				}).pipe(
-					Effect.timeout(timeoutMs),
-					Effect.catchTag("TimeoutError", () =>
-						Effect.fail(toUpstreamError("Scrape target request timed out")),
-					),
-				)
+				return yield* fetchUpstream(scrapeUrl, headers, row.value.targetType, timeoutMs)
 			})
 
 			const recordScrapeResults = Effect.fn("ScrapeTargetsService.recordScrapeResults")(function* (

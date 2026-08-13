@@ -9,8 +9,9 @@ import {
 	extractAttributeValues,
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
+import { QUERY_BUILDER_METRIC_TYPES } from "@maple/query-model"
 
-const MetricTypeSchema = Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])
+const MetricTypeSchema = Schema.Literals(QUERY_BUILDER_METRIC_TYPES)
 
 const ListMetricsInputSchema = Schema.Struct({
 	limit: Schema.optional(

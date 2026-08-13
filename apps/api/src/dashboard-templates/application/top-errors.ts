@@ -9,6 +9,7 @@ import {
 	templateId,
 } from "@/dashboard-templates/helpers"
 import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
+import { makeRouteDataSource } from "@maple/widgets/dashboard"
 
 function widgets(serviceName?: string): WidgetDef[] {
 	const where = serviceWhereClause(serviceName)
@@ -16,46 +17,43 @@ function widgets(serviceName?: string): WidgetDef[] {
 		{
 			id: "total-errors",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "errors_summary",
-				params: serviceName ? { services: [serviceName] } : {},
-				transform: { reduceToValue: { field: "totalErrors", aggregate: "first" } },
-			},
+			dataSource: makeRouteDataSource(
+				"errors_summary",
+				serviceName ? { services: [serviceName] } : {},
+				{ reduceToValue: { field: "totalErrors", aggregate: "first" } },
+			),
 			display: { title: "Total Errors", unit: "number" },
 			layout: { x: 0, y: 0, w: 4, h: 2 },
 		},
 		{
 			id: "error-rate",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "errors_summary",
-				params: serviceName ? { services: [serviceName] } : {},
-				transform: { reduceToValue: { field: "errorRate", aggregate: "first" } },
-			},
+			dataSource: makeRouteDataSource(
+				"errors_summary",
+				serviceName ? { services: [serviceName] } : {},
+				{ reduceToValue: { field: "errorRate", aggregate: "first" } },
+			),
 			display: { title: "Error Rate", unit: "percent" },
 			layout: { x: 4, y: 0, w: 4, h: 2 },
 		},
 		{
 			id: "affected-services",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "errors_summary",
-				params: serviceName ? { services: [serviceName] } : {},
-				transform: { reduceToValue: { field: "affectedServicesCount", aggregate: "first" } },
-			},
+			dataSource: makeRouteDataSource(
+				"errors_summary",
+				serviceName ? { services: [serviceName] } : {},
+				{ reduceToValue: { field: "affectedServicesCount", aggregate: "first" } },
+			),
 			display: { title: "Affected Services", unit: "number" },
 			layout: { x: 8, y: 0, w: 4, h: 2 },
 		},
 		{
 			id: "errors-by-type",
 			visualization: "table",
-			dataSource: {
-				endpoint: "errors_by_type",
-				params: {
-					...(serviceName && { services: [serviceName] }),
-					limit: 20,
-				},
-			},
+			dataSource: makeRouteDataSource("errors_by_type", {
+				...(serviceName && { services: [serviceName] }),
+				limit: 20,
+			}),
 			display: {
 				title: "Errors by Type",
 				columns: [
@@ -85,14 +83,11 @@ function widgets(serviceName?: string): WidgetDef[] {
 		{
 			id: "recent-error-traces",
 			visualization: "list",
-			dataSource: {
-				endpoint: "list_traces",
-				params: {
-					...(serviceName && { service: serviceName }),
-					hasError: true,
-					limit: 10,
-				},
-			},
+			dataSource: makeRouteDataSource("list_traces", {
+				...(serviceName && { service: serviceName }),
+				hasError: true,
+				limit: 10,
+			}),
 			display: {
 				title: "Recent Error Traces",
 				listDataSource: "traces",

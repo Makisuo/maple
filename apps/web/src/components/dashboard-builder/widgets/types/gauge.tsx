@@ -1,4 +1,5 @@
 import { WIDGET_TYPES } from "@maple/domain/http"
+import { dataSourceTransform } from "@maple/widgets/dashboard"
 
 import { SlidersIcon } from "@/components/icons"
 import { WidgetSettings } from "@/components/dashboard-builder/config/settings-fields"
@@ -28,8 +29,8 @@ export const gaugeWidgetType: WidgetTypeDefinition = {
 	presets: [],
 
 	initialState: (widget) => ({
-		statAggregate: toStatAggregate(widget.dataSource.transform?.reduceToValue?.aggregate),
-		statValueField: widget.dataSource.transform?.reduceToValue?.field ?? "",
+		statAggregate: toStatAggregate(dataSourceTransform(widget.dataSource)?.reduceToValue?.aggregate),
+		statValueField: dataSourceTransform(widget.dataSource)?.reduceToValue?.field ?? "",
 		gaugeMin: widget.display.gauge?.min != null ? String(widget.display.gauge.min) : "",
 		gaugeMax: widget.display.gauge?.max != null ? String(widget.display.gauge.max) : "",
 	}),

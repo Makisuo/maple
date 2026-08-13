@@ -13,7 +13,7 @@ import {
 	type FormulaDraft,
 	type QueryRunResult,
 } from "@maple/query-engine/formula-results"
-import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
+import { QueryBuilderFormulaSchema, QueryBuilderQueryDraftSchema } from "@maple/domain/http"
 import {
 	computeBreakdownStats,
 	computeFlags,
@@ -35,11 +35,24 @@ import type {
 	WidgetInspectionSummary,
 	WidgetInspectionVerdict,
 } from "@maple/domain"
+import {
+	dataSourceEndpoint,
+	dataSourceQuerySet,
+	dataSourceRawSql,
+	dataSourceTransform,
+	QUERY_SHAPE_ENDPOINTS,
+	RAW_SQL_ENDPOINT,
+} from "@maple/widgets/dashboard"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
-const TIMESERIES_ENDPOINT = "custom_query_builder_timeseries"
-const BREAKDOWN_ENDPOINT = "custom_query_builder_breakdown"
-const RAW_SQL_ENDPOINT = "raw_sql_chart"
+// `RAW_SQL_ENDPOINT` and `QUERY_SHAPE_ENDPOINTS` are used here as LABELS, not as
+// dispatch keys — dispatch goes through `dataSourceRawSql` / `dataSourceQuerySet`,
+// which read v2 and v3 alike. `inspect_chart_data` reports `endpoint` as part of
+// its response contract and a v3 `kind: "query"` data source has no endpoint, so
+// the shape is mapped back onto the legacy name to keep the MCP payload stable
+// for agents that already branch on it. Imported rather than re-declared so a
+// fourth result shape cannot compile in `access.ts` while silently missing here.
+
 const MAX_QUERIES = 5
 // Rows captured for a raw-SQL widget inspection — enough to spot-check, capped
 // so a wide/long result doesn't bloat the response.
@@ -49,7 +62,11 @@ export type DashboardWidget = typeof DashboardWidgetSchema.Type
 
 const QueryBuilderParamsSchema = Schema.Struct({
 	queries: Schema.mutable(Schema.Array(QueryBuilderQueryDraftSchema)),
-	formulas: Schema.optional(Schema.mutable(Schema.Array(Schema.Unknown))),
+	// Typed rather than `Schema.Unknown`: the web timeseries server function — the
+	// path that actually renders these charts — already decodes formulas against
+	// the same required shape, so an inspection that tolerated a partial formula
+	// would report on a chart the renderer refuses to draw.
+	formulas: Schema.optional(Schema.mutable(Schema.Array(QueryBuilderFormulaSchema))),
 })
 
 const decodeQueryBuilderParams = Schema.decodeUnknownEffect(QueryBuilderParamsSchema)
@@ -73,15 +90,13 @@ const decodeQuerySpec = Schema.decodeUnknownEffect(QuerySpec)
 export const collectBlockingBuilderWarnings = Effect.fn("collectBlockingBuilderWarnings")(function* (
 	dataSource: DashboardWidget["dataSource"],
 ) {
-	const endpoint = dataSource.endpoint
-	const isTimeseries = endpoint === TIMESERIES_ENDPOINT
-	const isBreakdown = endpoint === BREAKDOWN_ENDPOINT
+	const querySet = dataSourceQuerySet(dataSource)
+	if (querySet === null) return [] as string[]
+	const isTimeseries = querySet.resultShape === "timeseries"
+	const isBreakdown = querySet.resultShape === "breakdown"
 	if (!isTimeseries && !isBreakdown) return [] as string[]
 
-	const rawParams = dataSource.params
-	if (!rawParams || typeof rawParams !== "object") return [] as string[]
-
-	const decoded = yield* Effect.result(decodeQueryBuilderParams(rawParams))
+	const decoded = yield* Effect.result(decodeQueryBuilderParams({ queries: querySet.queries }))
 	if (Result.isFailure(decoded)) return [] as string[]
 
 	const drafts = decoded.success.queries.filter((q) => q.enabled !== false)
@@ -320,10 +335,10 @@ const inspectRawSqlWidget = Effect.fn("inspectRawSqlWidget")(function* (
 	widget: DashboardWidget,
 	timeRange: InspectWidgetTimeRange,
 ) {
-	const rawParams = widget.dataSource.params as Record<string, unknown> | undefined
-	const sql = typeof rawParams?.sql === "string" ? rawParams.sql : undefined
+	const rawSql = dataSourceRawSql(widget.dataSource)
+	const sql = rawSql !== null && rawSql.sql.length > 0 ? rawSql.sql : undefined
 
-	if (!sql) {
+	if (rawSql === null || !sql) {
 		return {
 			kind: "skipped",
 			reason: "no_params",
@@ -332,9 +347,7 @@ const inspectRawSqlWidget = Effect.fn("inspectRawSqlWidget")(function* (
 	}
 
 	const granularitySeconds =
-		typeof rawParams?.granularitySeconds === "number"
-			? rawParams.granularitySeconds
-			: autoBucketSeconds(timeRange.startTime, timeRange.endTime)
+		rawSql.granularitySeconds ?? autoBucketSeconds(timeRange.startTime, timeRange.endTime)
 
 	const result = yield* runRawSql({
 		tenant,
@@ -393,28 +406,24 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 	function* (input: InspectWidgetInput) {
 		const { tenant, widget, timeRange } = input
 
-		const endpoint = widget.dataSource.endpoint
-		const isTimeseries = endpoint === TIMESERIES_ENDPOINT
-		const isBreakdown = endpoint === BREAKDOWN_ENDPOINT
-
-		if (endpoint === RAW_SQL_ENDPOINT) {
+		if (dataSourceRawSql(widget.dataSource) !== null) {
 			return yield* inspectRawSqlWidget(tenant, widget, timeRange)
 		}
 
-		if (!isTimeseries && !isBreakdown) {
-			return { kind: "unsupported", endpoint } satisfies InspectionOutcome
-		}
+		const querySet = dataSourceQuerySet(widget.dataSource)
+		const isTimeseries = querySet?.resultShape === "timeseries"
+		const isBreakdown = querySet?.resultShape === "breakdown"
 
-		const rawParams = widget.dataSource.params
-		if (!rawParams || typeof rawParams !== "object") {
+		if (querySet === null || (!isTimeseries && !isBreakdown)) {
 			return {
-				kind: "skipped",
-				reason: "no_params",
-				detail: "Widget has no dataSource.params; cannot inspect.",
+				kind: "unsupported",
+				endpoint: dataSourceEndpoint(widget.dataSource) ?? "unknown",
 			} satisfies InspectionOutcome
 		}
 
-		const decodedParamsResult = yield* Effect.result(decodeQueryBuilderParams(rawParams))
+		const decodedParamsResult = yield* Effect.result(
+			decodeQueryBuilderParams({ queries: querySet.queries, formulas: querySet.formulas }),
+		)
 		if (Result.isFailure(decodedParamsResult)) {
 			return {
 				kind: "skipped",
@@ -442,10 +451,8 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 
 		const formulas = decodedParams.formulas ?? []
 		const hasFormulaWarning = formulas.length > 0
-		const transformObj = widget.dataSource.transform as Record<string, unknown> | undefined
-		const reduceToValue = transformObj?.reduceToValue as
-			| { field?: unknown; aggregate?: unknown }
-			| undefined
+		const transformObj = dataSourceTransform(widget.dataSource)
+		const reduceToValue = transformObj?.reduceToValue
 		const hasUnsupportedTransform =
 			transformObj !== undefined && Object.keys(transformObj).some((k) => k !== "reduceToValue")
 
@@ -616,15 +623,11 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		// base timeseries by alias, so only the timeseries endpoint supports them.
 		const formulaEvaluated = hasFormulaWarning && isTimeseries
 		if (formulaEvaluated) {
-			const formulaDrafts: FormulaDraft[] = formulas.map((f, i) => {
-				const obj = (f ?? {}) as Record<string, unknown>
-				return {
-					id: typeof obj.id === "string" ? obj.id : `formula-${i}`,
-					name: typeof obj.name === "string" ? obj.name : `Formula ${i + 1}`,
-					expression: typeof obj.expression === "string" ? obj.expression : "",
-					legend: typeof obj.legend === "string" ? obj.legend : "",
-				}
-			})
+			// No per-field narrowing: `QueryBuilderFormulaSchema` already guarantees
+			// all four strings, and `FormulaDraft` asks for exactly them.
+			const formulaDrafts: FormulaDraft[] = formulas.map(
+				({ id, name, expression, legend }): FormulaDraft => ({ id, name, expression, legend }),
+			)
 
 			for (const fr of buildFormulaResults(formulaDrafts, formulaBaseInputs)) {
 				if (fr.status === "error") {
@@ -693,7 +696,8 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 				id: widget.id,
 				...(widget.display.title !== undefined && { title: widget.display.title }),
 				visualization: widget.visualization,
-				endpoint,
+				endpoint:
+					dataSourceEndpoint(widget.dataSource) ?? QUERY_SHAPE_ENDPOINTS[querySet.resultShape],
 				...(widget.display.unit !== undefined && { displayUnit: widget.display.unit }),
 				// True only when formulas are present but NOT evaluated (non-timeseries
 				// widgets). Timeseries formulas are now evaluated and appear as their

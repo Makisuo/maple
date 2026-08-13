@@ -6,6 +6,7 @@ import tanstackRouter from "@tanstack/router-plugin/vite"
 import viteReact from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { siblingUrl } from "../../packages/infra/src/dev-urls.ts"
+import { versionManifest } from "./vite-plugin-version-manifest.ts"
 
 const envDir = path.resolve(import.meta.dirname, "../..")
 
@@ -97,6 +98,11 @@ export default defineConfig(({ mode }) => {
 			}),
 			tailwindcss(),
 			viteReact(),
+			// Reads the same `process.env` the `define` block above does, rather than
+			// `import.meta.env`, because this runs in the Vite process and not in the
+			// bundle. An empty value (any build that is not a deploy) makes the
+			// client-side check inert — see `use-app-version.ts`.
+			versionManifest(process.env.VITE_COMMIT_SHA?.trim() || ""),
 		],
 		build: {
 			// The bundle budget reads Vite's static/dynamic import graph instead of

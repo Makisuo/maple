@@ -24,6 +24,12 @@ import {
 	DashboardVersionChangeKind,
 } from "../dashboards"
 import { SORT_DIRECTIONS, STAT_AGGREGATES } from "@maple/widgets/dashboard"
+import {
+	QUERY_RESULT_SHAPES,
+	QueryBuilderFormulaSchema,
+	QueryBuilderQueryDraftSchema,
+	QueryComparisonSchema,
+} from "@maple/query-model"
 import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES, WIDGET_VISUALIZATIONS } from "../widget-types"
 import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
@@ -69,6 +75,31 @@ const UnknownRecord = UnknownRecordWire.pipe(
 		encode: SchemaGetter.transform((value) => mapJsonKeys(value, toSnakeKey) as Record<string, unknown>),
 	}),
 )
+
+/**
+ * The same recursive snake_case convention, but decoding into a TYPED schema
+ * instead of an opaque record.
+ *
+ * Needed by the v3 data source. A query draft used to travel inside the untyped
+ * `params` bag, so its fields were snake_cased by `UnknownRecord` above and never
+ * validated. v3 hoists `queries` to a real field, which leaves two bad options
+ * and one good one: keep it opaque (the wire is preserved but the route cannot
+ * assign it into the stored type without a second decode), type it directly (the
+ * route works but every draft field silently renames on the published wire), or
+ * this — snake_case on the wire, typed after decode.
+ *
+ * The wire bytes are therefore identical to v2 while the decoded value is the
+ * real draft, which is what lets `toInternalWidgets` stay a plain field carry.
+ */
+const snakeCasedWire = <S extends Schema.Top>(schema: S) =>
+	UnknownRecordWire.pipe(
+		Schema.decodeTo(schema, {
+			decode: SchemaGetter.transform((value) => mapJsonKeys(value, toCamelKey)),
+			encode: SchemaGetter.transform(
+				(value) => mapJsonKeys(value, toSnakeKey) as Record<string, unknown>,
+			),
+		}),
+	)
 
 // The widget schemas below (transform, data source, display, layout, widget) are
 // a deliberate re-declaration of the stored schema in
@@ -123,11 +154,62 @@ const V2WidgetTransform = Schema.Struct({
 	}),
 )
 
-export const V2WidgetDataSource = Schema.Struct({
+/**
+ * The data source, as a discriminated union on `kind`.
+ *
+ * Schema v3 replaced the stored `{ endpoint, params }` bag with this union, and
+ * `/v2/dashboards` republishes the new shape rather than encoding back to the old
+ * one — a deliberate breaking change, taken so there is exactly one data-source
+ * shape in the system instead of a wire format kept alive by a translation layer.
+ *
+ * Re-declared here rather than aliased to `WidgetDataSourceSchema`, for the same
+ * reason as every other schema in this file: the v2 wire is snake_case
+ * throughout, and the stored schema is not. Aliasing compiles and silently ships
+ * `fieldMap` where the published spec says `field_map`.
+ *
+ * `queries`, `formulas` and `comparison` go through `snakeCasedWire`, so their
+ * wire representation is byte-identical to v2 — where they lived inside the
+ * untyped `params` bag and got the same recursive snake_case treatment — while
+ * decoding to the real stored types. Only the envelope around them moved.
+ */
+const V2QueryDataSource = Schema.Struct({
+	kind: Schema.Literal("query"),
+	resultShape: Schema.Literals(QUERY_RESULT_SHAPES),
+	queries: Schema.Array(snakeCasedWire(QueryBuilderQueryDraftSchema)),
+	formulas: optional(Schema.Array(snakeCasedWire(QueryBuilderFormulaSchema))),
+	comparison: optional(snakeCasedWire(QueryComparisonSchema)),
+	defaultLimit: optional(Schema.Number),
+	limit: optional(Schema.Number),
+	columns: optional(Schema.Array(Schema.String)),
+	transform: optional(V2WidgetTransform),
+}).pipe(Schema.encodeKeys({ resultShape: "result_shape", defaultLimit: "default_limit" }))
+
+const V2RawSqlDataSource = Schema.Struct({
+	kind: Schema.Literal("raw_sql"),
+	sql: Schema.String,
+	displayType: optional(Schema.String),
+	granularitySeconds: optional(Schema.Number),
+	transform: optional(V2WidgetTransform),
+}).pipe(Schema.encodeKeys({ displayType: "display_type", granularitySeconds: "granularity_seconds" }))
+
+const V2RouteDataSource = Schema.Struct({
+	kind: Schema.Literal("route"),
 	endpoint: Schema.String,
 	params: optional(UnknownRecord),
 	transform: optional(V2WidgetTransform),
-}).annotate({ identifier: "DashboardWidgetDataSource", title: "Dashboard widget data source" })
+})
+
+const V2StaticDataSource = Schema.Struct({
+	kind: Schema.Literal("static"),
+	transform: optional(V2WidgetTransform),
+})
+
+export const V2WidgetDataSource = Schema.Union([
+	V2QueryDataSource,
+	V2RawSqlDataSource,
+	V2RouteDataSource,
+	V2StaticDataSource,
+]).annotate({ identifier: "DashboardWidgetDataSource", title: "Dashboard widget data source" })
 
 const V2WidgetDisplayColumn = Schema.Struct({
 	field: Schema.String,

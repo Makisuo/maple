@@ -34,6 +34,7 @@ import {
 } from "@/api/warehouse/effect-utils"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { ServiceDetailTimeSeriesPoint, ServiceTimeSeriesPoint } from "@/api/warehouse/services"
+import { QUERY_BUILDER_DATA_SOURCES, QUERY_BUILDER_METRIC_TYPES } from "@maple/query-model"
 const dateTimeString = WarehouseDateTimeString
 
 const asMetricName = Schema.decodeUnknownSync(MetricName)
@@ -222,7 +223,7 @@ const SharedFiltersSchema = Schema.Struct({
 	spanName: Schema.optional(SpanName),
 	severity: Schema.optional(Schema.String),
 	metricName: Schema.optional(MetricName),
-	metricType: Schema.optional(Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])),
+	metricType: Schema.optional(Schema.Literals(QUERY_BUILDER_METRIC_TYPES)),
 	rootSpansOnly: Schema.optional(Schema.Boolean),
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
 	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
@@ -254,7 +255,7 @@ const SharedFiltersSchema = Schema.Struct({
 })
 
 const CustomChartTimeSeriesInputSchema = Schema.Struct({
-	source: Schema.Literals(["traces", "logs", "metrics"]),
+	source: Schema.Literals(QUERY_BUILDER_DATA_SOURCES),
 	metric: Schema.String,
 	groupBy: Schema.optional(
 		Schema.Literals([
@@ -444,7 +445,7 @@ const getCustomChartTimeSeriesEffect = Effect.fn("QueryEngine.getCustomChartTime
 })
 
 const CustomChartBreakdownInputSchema = Schema.Struct({
-	source: Schema.Literals(["traces", "logs", "metrics"]),
+	source: Schema.Literals(QUERY_BUILDER_DATA_SOURCES),
 	metric: Schema.String,
 	groupBy: Schema.Literals(["service", "span_name", "status_code", "http_method", "severity", "attribute"]),
 	filters: Schema.optional(SharedFiltersSchema),

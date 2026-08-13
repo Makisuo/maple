@@ -78,6 +78,7 @@ import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryServic
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
 import {
 	CH,
+	computeBucketSecondsForRange,
 	formatWarehouseDateTime,
 	parseWarehouseDateTime,
 	QueryEngineExecuteBatchResponse,
@@ -1789,24 +1790,15 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 	}),
 )
 
-// Auto-bucket helper for raw-SQL $__interval_s when the user didn't supply
-// granularitySeconds. Mirrors apps/web/src/api/tinybird/timeseries-utils.ts so
-// the backend can compute it without depending on the web package.
-
-const TARGET_POINTS = 30
-const AUTO_BUCKET_LADDER = [300, 900, 1800, 3600, 14400, 86400] as const
-
+/**
+ * Auto-bucket for raw-SQL `$__interval_s` when the caller didn't supply
+ * `granularitySeconds`.
+ *
+ * Was a private ladder duplicating `computeBucketSeconds`, then a private copy of
+ * the string-parse-and-fall-back rule. Both now live in `BUCKET_POLICIES.rawSql`,
+ * whose 300s floor is load-bearing: a sub-5-minute `$__interval_s` produces
+ * exactly the scan the granularity was chosen to avoid.
+ */
 function computeAutoBucketSeconds(startTime: string, endTime: string): number {
-	const toEpochMs = (value: string) => new Date(value.replace(" ", "T") + "Z").getTime()
-	const startMs = toEpochMs(startTime)
-	const endMs = toEpochMs(endTime)
-	if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
-		return 300
-	}
-	const rangeSeconds = Math.max((endMs - startMs) / 1000, 1)
-	const raw = Math.ceil(rangeSeconds / TARGET_POINTS)
-	return AUTO_BUCKET_LADDER.reduce(
-		(best, candidate) => (Math.abs(candidate - raw) < Math.abs(best - raw) ? candidate : best),
-		AUTO_BUCKET_LADDER[0],
-	)
+	return computeBucketSecondsForRange(startTime, endTime, "rawSql")
 }

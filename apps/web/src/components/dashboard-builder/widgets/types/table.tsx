@@ -1,4 +1,5 @@
 import { WIDGET_TYPES } from "@maple/domain/http"
+import { makeQueryDataSource, dataSourceTransform } from "@maple/widgets/dashboard"
 
 import { GridIcon } from "@/components/icons"
 import { WidgetSettings } from "@/components/dashboard-builder/config/settings-fields"
@@ -51,21 +52,20 @@ export const tableWidgetType: WidgetTypeDefinition = {
 	}),
 
 	initialState: (widget) => ({
-		tableLimit:
-			typeof widget.dataSource.transform?.limit === "number"
-				? String(widget.dataSource.transform.limit)
-				: "",
+		tableLimit: ((limit) => (typeof limit === "number" ? String(limit) : ""))(
+			dataSourceTransform(widget.dataSource)?.limit,
+		),
 	}),
 
 	buildDataSource: ({ base, state, sharedTransform, visibleQueries }) => {
 		const limit = parsePositiveNumber(state.tableLimit)
 
 		if (visibleQueries.some(hasActiveGroupBy)) {
-			return {
-				endpoint: "custom_query_builder_breakdown",
-				params: { queries: visibleQueries },
-				transform: limit ? { limit } : undefined,
-			}
+			return makeQueryDataSource({
+				resultShape: "breakdown",
+				queries: visibleQueries,
+				...(limit ? { transform: { limit } } : {}),
+			})
 		}
 
 		if (!limit) return base

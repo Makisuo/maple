@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { dataSourceTransform } from "@maple/widgets/dashboard"
 import { GridLayout, noCompactor, verticalCompactor } from "react-grid-layout"
 import type { Layout } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
@@ -94,7 +95,7 @@ const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: Dashbo
 						dataState={dataState}
 						display={widget.display}
 						mode={mode}
-						rowLimit={widget.dataSource.transform?.limit}
+						rowLimit={dataSourceTransform(widget.dataSource)?.limit}
 					/>
 				</WidgetActionsProvider>
 			</WidgetTimeRangeProvider>

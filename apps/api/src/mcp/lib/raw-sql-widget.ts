@@ -1,5 +1,6 @@
 import { rawSqlDisplayTypeFor, widgetTypeByVisualization } from "@maple/domain/http"
 import type { RawSqlDisplayType, WidgetDataSourceSchema } from "@maple/domain/http"
+import { makeRawSqlDataSource } from "@maple/widgets/dashboard"
 
 // MCP-side mirror of the web's raw-SQL widget builder so agents can create
 // raw-SQL widgets without hand-crafting the dataSource JSON.
@@ -19,29 +20,16 @@ export function buildRawSqlDataSource(args: {
 	displayType: RawSqlDisplayType
 	granularitySeconds?: number
 }): WidgetDataSource {
-	const params: Record<string, unknown> = {
+	return makeRawSqlDataSource({
 		sql: args.sql,
 		displayType: args.displayType,
-	}
-	if (args.granularitySeconds != null) {
-		params.granularitySeconds = args.granularitySeconds
-	}
-
-	const base: WidgetDataSource = {
-		endpoint: "raw_sql_chart",
-		params,
-	}
-
-	// A scalar widget needs a reduceToValue transform so the tile reads
-	// `data[0].value`. Mirrors buildRawSqlDataSource in the web app.
-	if (widgetTypeByVisualization(args.visualization)?.isScalar === true) {
-		return {
-			...base,
-			transform: { reduceToValue: { field: "value", aggregate: "first" } },
-		}
-	}
-
-	return base
+		...(args.granularitySeconds == null ? {} : { granularitySeconds: args.granularitySeconds }),
+		// A scalar widget needs a reduceToValue transform so the tile reads
+		// `data[0].value`. Mirrors buildRawSqlDataSource in the web app.
+		...(widgetTypeByVisualization(args.visualization)?.isScalar === true
+			? { transform: { reduceToValue: { field: "value", aggregate: "first" } } }
+			: {}),
+	})
 }
 
 export function validateRawSqlMacro(sql: string): string | null {

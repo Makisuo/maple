@@ -4,6 +4,13 @@ import {
 	DashboardTemplateParameterKey,
 	PortableDashboardDocument,
 } from "@maple/domain/http"
+import type {
+	QueryBuilderDataSource,
+	QueryBuilderFormulaPayload,
+	QueryBuilderMetricType,
+	QueryBuilderQueryDraftPayload,
+} from "@maple/query-model"
+import { makeQueryDataSource } from "@maple/widgets/dashboard"
 import type { TemplateParameterValues, WidgetDef } from "./types"
 
 /** The display half of a widget, so the shared chart presets are literal-typed. */
@@ -25,19 +32,18 @@ const decodePortableDashboard = Schema.decodeUnknownSync(PortableDashboardDocume
 export function makeQueryDraft(opts: {
 	id: string
 	name: string
-	dataSource: "traces" | "logs" | "metrics"
+	dataSource: QueryBuilderDataSource
 	aggregation: string
 	whereClause?: string
 	groupBy?: string[]
 	metricName?: string
-	metricType?: string
+	metricType?: QueryBuilderMetricType
 	isMonotonic?: boolean
-}): Record<string, unknown> {
-	const draft: Record<string, unknown> = {
+}): QueryBuilderQueryDraftPayload {
+	const base = {
 		id: opts.id,
 		name: opts.name,
 		enabled: true,
-		dataSource: opts.dataSource,
 		whereClause: opts.whereClause ?? "",
 		aggregation: opts.aggregation,
 		stepInterval: "",
@@ -54,40 +60,36 @@ export function makeQueryDraft(opts: {
 		orderBy: "",
 		limit: "",
 		legend: "",
-	}
+	} as const satisfies Omit<QueryBuilderQueryDraftPayload, "dataSource">
+
 	// Metric-only fields belong solely to the metrics source.
 	if (opts.dataSource === "metrics") {
-		draft.signalSource = "default"
-		draft.metricName = opts.metricName ?? ""
-		draft.metricType = opts.metricType ?? "gauge"
-		draft.isMonotonic = opts.isMonotonic ?? false
+		return {
+			...base,
+			dataSource: "metrics",
+			signalSource: "default",
+			metricName: opts.metricName ?? "",
+			metricType: opts.metricType ?? "gauge",
+			isMonotonic: opts.isMonotonic ?? false,
+		}
 	}
-	return draft
+	return { ...base, dataSource: opts.dataSource }
 }
 
-export function makeQueryBuilderTimeseriesDataSource(queries: Record<string, unknown>[]): {
-	endpoint: string
-	params: Record<string, unknown>
-} {
-	return {
-		endpoint: "custom_query_builder_timeseries",
-		params: {
-			queries,
-			formulas: [],
-			comparison: { mode: "none", includePercentChange: true },
-			debug: false,
-		},
-	}
+export function makeQueryBuilderTimeseriesDataSource(
+	queries: QueryBuilderQueryDraftPayload[],
+	formulas: QueryBuilderFormulaPayload[] = [],
+) {
+	return makeQueryDataSource({
+		resultShape: "timeseries",
+		queries,
+		formulas,
+		comparison: { mode: "none", includePercentChange: true },
+	})
 }
 
-export function makeQueryBuilderBreakdownDataSource(queries: Record<string, unknown>[]): {
-	endpoint: string
-	params: Record<string, unknown>
-} {
-	return {
-		endpoint: "custom_query_builder_breakdown",
-		params: { queries },
-	}
+export function makeQueryBuilderBreakdownDataSource(queries: QueryBuilderQueryDraftPayload[]) {
+	return makeQueryDataSource({ resultShape: "breakdown", queries })
 }
 
 // `seriesStats` (the Min/Max/Mean/Last table) is opt-in and costs up to 45% of a
@@ -161,12 +163,12 @@ export function metricsTimeseries(opts: {
 	id: string
 	name: string
 	metricName: string
-	metricType: string
+	metricType: QueryBuilderMetricType
 	aggregation?: string
 	whereClause?: string
 	groupBy?: string[]
 	isMonotonic?: boolean
-}): { endpoint: string; params: Record<string, unknown> } {
+}) {
 	return makeQueryBuilderTimeseriesDataSource([
 		makeQueryDraft({
 			id: opts.id,
@@ -186,11 +188,11 @@ export function metricsBreakdown(opts: {
 	id: string
 	name: string
 	metricName: string
-	metricType: string
+	metricType: QueryBuilderMetricType
 	aggregation?: string
 	whereClause?: string
 	groupBy: string[]
-}): { endpoint: string; params: Record<string, unknown> } {
+}) {
 	return makeQueryBuilderBreakdownDataSource([
 		makeQueryDraft({
 			id: opts.id,

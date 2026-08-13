@@ -65,10 +65,10 @@ const ListTracesInputSchema = Schema.Struct({
 	httpStatusCodes: Schema.optional(Schema.Array(Schema.String)),
 	deploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	namespaces: Schema.optional(Schema.Array(ServiceNamespace)),
-	// Singular aliases, folded into the arrays by `oneOrMany`. Saved dashboard
-	// widgets store their `dataSource.params` verbatim, so a dashboard created
-	// before this change still sends `service: "api-gw"` — dropping these keys
-	// would silently stop it filtering.
+	// Singular aliases, folded into the arrays by `oneOrMany`. A curated-route
+	// widget's params bag reaches the server function verbatim (see
+	// `toWidgetRequest`), so a dashboard created before this change still sends
+	// `service: "api-gw"` — dropping these keys would silently stop it filtering.
 	service: Schema.optional(ServiceName),
 	spanName: Schema.optional(SpanName),
 	httpMethod: Schema.optional(Schema.String),
@@ -510,10 +510,10 @@ const GetTracesFacetsInputSchema = Schema.Struct({
 	httpStatusCodes: Schema.optional(Schema.Array(Schema.String)),
 	deploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	namespaces: Schema.optional(Schema.Array(ServiceNamespace)),
-	// Singular aliases, folded into the arrays by `oneOrMany`. Saved dashboard
-	// widgets store their `dataSource.params` verbatim, so a dashboard created
-	// before this change still sends `service: "api-gw"` — dropping these keys
-	// would silently stop it filtering.
+	// Singular aliases, folded into the arrays by `oneOrMany`. A curated-route
+	// widget's params bag reaches the server function verbatim (see
+	// `toWidgetRequest`), so a dashboard created before this change still sends
+	// `service: "api-gw"` — dropping these keys would silently stop it filtering.
 	service: Schema.optional(ServiceName),
 	spanName: Schema.optional(SpanName),
 	httpMethod: Schema.optional(Schema.String),

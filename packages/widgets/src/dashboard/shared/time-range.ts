@@ -1,15 +1,5 @@
-import { Schema } from "effect"
-import { IsoDateTimeString } from "@maple/primitives"
-
-export const TimeRangeSchema = Schema.Union([
-	Schema.Struct({
-		type: Schema.Literal("relative"),
-		value: Schema.String,
-	}),
-	Schema.Struct({
-		type: Schema.Literal("absolute"),
-		startTime: IsoDateTimeString,
-		endTime: IsoDateTimeString,
-	}),
-])
-export type TimeRange = typeof TimeRangeSchema.Type
+// `TimeRangeSchema` moved to `@maple/query-model` — alert previews, MCP tools
+// and the explore pages all resolve the same shape, so it is not a dashboard
+// concept. Re-exported here so `shared/document.ts`, `shared/widget.ts` and
+// `@maple/domain/http` keep their existing surface.
+export { type TimeRange, TimeRangeSchema } from "@maple/query-model"

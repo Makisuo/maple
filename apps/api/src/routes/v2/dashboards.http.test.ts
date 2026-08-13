@@ -222,7 +222,7 @@ describe("v2 dashboards over HTTP", () => {
 		const widget = (id: string, timeRange?: unknown) => ({
 			id,
 			visualization: "stat",
-			data_source: { endpoint: "custom_query_builder_timeseries" },
+			data_source: { kind: "query", result_shape: "timeseries", queries: [] },
 			display: { title: id },
 			layout: { x: 0, y: 0, w: 3, h: 3 },
 			...(timeRange !== undefined ? { time_range: timeRange } : {}),
@@ -332,7 +332,8 @@ describe("v2 dashboards over HTTP", () => {
 		// One real widget per preview-metadata entry, carrying the data source the
 		// browser needs to evaluate it.
 		expect(preview.body.widgets.length).toBe(postgres.preview.length)
-		expect(preview.body.widgets[0].data_source.endpoint.length).toBeGreaterThan(0)
+		// v3: identity is `kind`, and only the `route` arm still carries an endpoint.
+		expect(preview.body.widgets[0].data_source.kind.length).toBeGreaterThan(0)
 		expect("timeRange" in preview.body).toBe(false)
 
 		// Nothing was persisted.
@@ -374,7 +375,7 @@ describe("v2 dashboards over HTTP", () => {
 				{
 					id: "error-rate",
 					visualization: "chart",
-					data_source: { endpoint: "traces_timeseries", params: {} },
+					data_source: { kind: "route", endpoint: "traces_timeseries" },
 					// `fill_nulls` is `number | false`; `true` is not a member.
 					display: { title: "error-rate", chart_presentation: { fill_nulls: true } },
 					layout: { x: 0, y: 0, w: 6, h: 4 },

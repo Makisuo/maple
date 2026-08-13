@@ -44,7 +44,7 @@ const displayWithSparkline: WidgetDisplayConfig = {
 	title: "Requests",
 	sparkline: {
 		enabled: true,
-		dataSource: { endpoint: "custom_query_builder_timeseries", params: {} },
+		dataSource: { kind: "query", resultShape: "timeseries", queries: [] },
 	},
 }
 

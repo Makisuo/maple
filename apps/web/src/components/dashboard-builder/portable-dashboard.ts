@@ -81,11 +81,20 @@ export function toPortableDashboard(dashboard: Dashboard): PortableDashboard {
 	}
 }
 
+// Defensive hygiene over hand-written or externally-produced portable JSON,
+// where a baked absolute window can appear in a params bag.
+//
+// v3 narrowed this on its own, exactly as the v2-era note here predicted: only
+// the `route` arm still carries an untyped bag, so the scrub now applies to that
+// arm and nothing else. The query and raw-SQL arms cannot smuggle a `startTime`
+// through an opaque bag any more, because they no longer have one.
 function stripWidgetTimeParams(widget: DashboardWidget): DashboardWidget {
-	const params = widget.dataSource.params
+	const dataSource = widget.dataSource
+	if (dataSource.kind !== "route") return widget
+	const params = dataSource.params
 	if (!params || !("startTime" in params || "endTime" in params)) return widget
 	const { startTime: _startTime, endTime: _endTime, ...rest } = params
-	return { ...widget, dataSource: { ...widget.dataSource, params: rest } }
+	return { ...widget, dataSource: { ...dataSource, params: rest } }
 }
 
 export function parsePortableDashboardJson(json: string): PortableDashboard {

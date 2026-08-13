@@ -12,6 +12,7 @@
 	},
 	"dependencies": {
 		"@maple/primitives": "workspace:*",
+		"@maple/query-model": "workspace:*",
 		"effect": "catalog:effect"
 	},
 	"devDependencies": {
