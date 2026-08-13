@@ -12,15 +12,19 @@
  * that has no counterpart fails to compile rather than falling through at
  * runtime.
  */
+/**
+ * Order is user-visible: the widget spelling drives the Aggregate picker, and
+ * `"first"` leads because it is the runtime default for an absent aggregate.
+ */
 const REDUCER_TABLE = [
 	{ series: "first", alert: "identity" },
 	{ series: "sum", alert: "sum" },
-	{ series: "avg", alert: "avg" },
-	{ series: "max", alert: "max" },
-	{ series: "min", alert: "min" },
 	// Widget-only: there is no alert reducer that counts buckets, because a rule
 	// compares a value against a threshold rather than a cardinality.
 	{ series: "count", alert: null },
+	{ series: "avg", alert: "avg" },
+	{ series: "max", alert: "max" },
+	{ series: "min", alert: "min" },
 ] as const satisfies ReadonlyArray<{ series: string; alert: string | null }>
 
 export type SeriesReducer = (typeof REDUCER_TABLE)[number]["series"]

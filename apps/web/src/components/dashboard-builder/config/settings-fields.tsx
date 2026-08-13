@@ -14,6 +14,7 @@ import { WidgetBuilderForm } from "@/atoms/widget-query-builder-atoms"
 import { useAtom } from "@/lib/effect-atom"
 import { PANEL_TYPES, fromPanelType, toPanelType } from "@/lib/query-builder/panel-types"
 import {
+	STAT_AGGREGATES,
 	toSeriesFieldOptions,
 	type QueryBuilderWidgetState,
 	type StatAggregate,
@@ -374,8 +375,6 @@ function Legend({ seriesStats = true }: { seriesStats?: boolean }) {
 		</Field>
 	)
 }
-
-const STAT_AGGREGATES: StatAggregate[] = ["first", "sum", "count", "avg", "max", "min"]
 
 /** How the timeseries a stat or gauge reads is reduced to one number. */
 function ScalarReduction() {

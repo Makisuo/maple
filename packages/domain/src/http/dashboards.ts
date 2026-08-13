@@ -45,6 +45,8 @@ export {
 	// so Electric hands the browser whatever version it was last written in.
 	migrateToLatest,
 	PortableDashboardDocument,
+	STAT_AGGREGATES,
+	type StatAggregate,
 	type TimeRange,
 	TimeRangeSchema,
 	WidgetDataSourceSchema,

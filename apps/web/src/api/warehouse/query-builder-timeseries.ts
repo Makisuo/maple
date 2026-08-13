@@ -115,10 +115,6 @@ interface QueryBuilderTimeseriesResponse {
 
 const toEpochMs = parseWarehouseDateTime
 
-function computeAutoBucketSeconds(startTime: string, endTime: string): number {
-	return computeBucketSeconds(startTime, endTime)
-}
-
 function resolveTimeseriesBucketSpec(spec: QuerySpec, startTime: string, endTime: string): QuerySpec {
 	if (spec.kind !== "timeseries" || spec.bucketSeconds) {
 		return spec
@@ -126,7 +122,7 @@ function resolveTimeseriesBucketSpec(spec: QuerySpec, startTime: string, endTime
 
 	return {
 		...spec,
-		bucketSeconds: computeAutoBucketSeconds(startTime, endTime),
+		bucketSeconds: computeBucketSeconds(startTime, endTime),
 	} satisfies QuerySpec
 }
 
@@ -143,7 +139,7 @@ function resolveExecutionSpecForWindow(
 		return resolved
 	}
 
-	const autoBucketSeconds = computeAutoBucketSeconds(window.startTime, window.endTime)
+	const autoBucketSeconds = computeBucketSeconds(window.startTime, window.endTime)
 	const selectedBucketSeconds = Math.max(resolved.bucketSeconds ?? autoBucketSeconds, autoBucketSeconds)
 	return {
 		...resolved,
@@ -697,7 +693,7 @@ function shiftRunResults(results: QueryRunResult[], shiftMs: number): QueryRunRe
 }
 
 export const __testables = {
-	computeAutoBucketSeconds,
+	computeBucketSeconds,
 	resolveTimeseriesBucketSpec,
 	resolveExecutionSpecForWindow,
 	buildExecutionWindows,

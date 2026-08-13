@@ -202,9 +202,9 @@ describe("query-builder timeseries strategy", () => {
 	)
 
 	it("uses the shared auto bucket ladder", () => {
-		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-01 00:30:00")).toBe(60)
-		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-01 06:00:00")).toBe(300)
-		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-08 00:00:00")).toBe(3600)
+		expect(__testables.computeBucketSeconds("2026-01-01 00:00:00", "2026-01-01 00:30:00")).toBe(60)
+		expect(__testables.computeBucketSeconds("2026-01-01 00:00:00", "2026-01-01 06:00:00")).toBe(300)
+		expect(__testables.computeBucketSeconds("2026-01-01 00:00:00", "2026-01-08 00:00:00")).toBe(3600)
 	})
 
 	it("counts only query results with real series data", () => {

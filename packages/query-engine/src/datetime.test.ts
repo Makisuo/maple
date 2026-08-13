@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
 	bucketTimeline,
 	cacheSnapSecondsForRange,
+	alertWindowBucketSeconds,
 	computeBucketSeconds,
 	formatWarehouseDateTime,
 	formatWarehouseDateTimeMs,
@@ -106,6 +107,46 @@ describe("computeBucketSeconds", () => {
 
 	it("honors an explicit targetPoints (denser histograms)", () => {
 		expect(computeBucketSeconds(0, 3600_000, { targetPoints: 60 })).toBe(60)
+	})
+
+	describe("minBucketSeconds", () => {
+		const rawSql = { targetPoints: 30, minBucketSeconds: 300 } as const
+
+		it("never returns a rung below the floor, even on a tiny window", () => {
+			// A sub-5-minute `$__interval_s` produces exactly the scan the raw-SQL
+			// granularity was chosen to avoid, so the floor holds regardless of how
+			// short the window is or how far `minBuckets` would otherwise step down.
+			expect(computeBucketSeconds(0, 30_000, rawSql)).toBe(300)
+			expect(computeBucketSeconds(0, 600_000, rawSql)).toBe(300)
+			expect(computeBucketSeconds(0, 0, rawSql)).toBe(300)
+		})
+
+		it("reproduces the ladder the raw-SQL path used before it was shared", () => {
+			// The deleted private ladder was [300, 900, 1800, 3600, 14400, 86400] at
+			// a 30-point target with no minBuckets clamp. These are its outputs.
+			const hour = 3600_000
+			expect(computeBucketSeconds(0, 0.5 * hour, rawSql)).toBe(300)
+			expect(computeBucketSeconds(0, 6 * hour, rawSql)).toBe(900)
+			expect(computeBucketSeconds(0, 24 * hour, rawSql)).toBe(3600)
+			expect(computeBucketSeconds(0, 7 * 24 * hour, rawSql)).toBe(14400)
+			expect(computeBucketSeconds(0, 30 * 24 * hour, rawSql)).toBe(86400)
+		})
+
+		it("leaves the default (unfloored) ladder alone", () => {
+			expect(computeBucketSeconds(0, 3600_000)).toBe(computeBucketSeconds(0, 3600_000, {}))
+		})
+	})
+})
+
+describe("alertWindowBucketSeconds", () => {
+	it("makes the evaluation window the bucket", () => {
+		expect(alertWindowBucketSeconds(5)).toBe(300)
+		expect(alertWindowBucketSeconds(60)).toBe(3600)
+	})
+
+	it("floors at 60s — a zero-width bucket is not a bucket", () => {
+		expect(alertWindowBucketSeconds(0)).toBe(60)
+		expect(alertWindowBucketSeconds(-1)).toBe(60)
 	})
 })
 

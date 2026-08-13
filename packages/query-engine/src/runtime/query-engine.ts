@@ -29,7 +29,12 @@ import type { OrgId } from "@maple/domain"
 import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "effect"
 import type { QueryProfileName, SqlQueryOptions, WarehouseQuerySettings } from "../profiles"
 import { canonicalJSON } from "../canonical-json"
-import { computeBucketSeconds, formatWarehouseDateTime, parseWarehouseDateTime } from "../datetime"
+import {
+	alertWindowBucketSeconds,
+	computeBucketSeconds,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+} from "../datetime"
 import {
 	MAX_BREAKDOWN_RANGE_SECONDS,
 	MAX_LIST_RANGE_SECONDS,
@@ -60,7 +65,7 @@ export {
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
 // `computeBucketSeconds` from here; the implementation now lives in the pure
 // `../datetime` module so the web app and the engine share one definition.
-export { computeBucketSeconds } from "../datetime"
+export { alertWindowBucketSeconds, computeBucketSeconds } from "../datetime"
 
 // Same arrangement for the range ceilings: they now live in the pure `../limits`
 // module so the MCP tools, the v2 API, and the web widget layer all bound
@@ -2308,8 +2313,11 @@ const prepareAlertEvaluation = Effect.fnUntraced(function* (request: AlertEvalua
 
 	if (request.source.kind === "raw_sql") {
 		// One evaluation window is one bucket; a query using `$__timeGroup` lines
-		// its rows up on exactly that grid.
-		return Math.max(request.source.windowMinutes * 60, 60)
+		// its rows up on exactly that grid. Shared with `compileRulePlan`, which
+		// bakes the same width into a spec-backed rule's stored query — the two
+		// disagreeing would evaluate a different window than the rule was saved
+		// with.
+		return alertWindowBucketSeconds(request.source.windowMinutes)
 	}
 
 	const query = request.source.query

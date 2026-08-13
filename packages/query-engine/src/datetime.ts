@@ -290,6 +290,18 @@ export interface ComputeBucketSecondsOptions {
 	 * near-empty charts on short windows.
 	 */
 	minBuckets?: number
+	/**
+	 * Drop every ladder rung below this before picking. Default 60 (the whole
+	 * ladder).
+	 *
+	 * This is what a caller with a coarser floor needs: raw-SQL `$__interval_s`
+	 * wants 300, because a sub-5-minute bucket there produces a scan the
+	 * granularity was chosen to avoid. Expressed as a ladder filter rather than a
+	 * post-hoc `Math.max` on purpose — clamping after the fact would round 120 up
+	 * to 300 while leaving the "nearest rung" choice computed against rungs the
+	 * caller cannot use.
+	 */
+	minBucketSeconds?: number
 }
 
 /**
@@ -305,23 +317,46 @@ export function computeBucketSeconds(
 ): number {
 	const targetPoints = options?.targetPoints ?? 100
 	const minBuckets = options?.minBuckets ?? 6
+	const minBucketSeconds = options?.minBucketSeconds ?? 0
 	const rangeSeconds = Math.max((endMs - startMs) / 1000, 1)
 	const raw = Math.max(Math.ceil(rangeSeconds / targetPoints), 1)
 
-	let bucket: number = AUTO_BUCKET_LADDER.reduce<number>(
+	const ladder = AUTO_BUCKET_LADDER.filter((candidate) => candidate >= minBucketSeconds)
+	const rungs = ladder.length > 0 ? ladder : [AUTO_BUCKET_LADDER[AUTO_BUCKET_LADDER.length - 1]]
+
+	let bucket: number = rungs.reduce<number>(
 		(best, candidate) => (Math.abs(candidate - raw) < Math.abs(best - raw) ? candidate : best),
-		AUTO_BUCKET_LADDER[0],
+		rungs[0],
 	)
 
 	// Never coarser than what keeps at least `minBuckets` buckets over the range.
 	const maxBucketForMin = Math.floor(rangeSeconds / minBuckets)
 	if (bucket > maxBucketForMin) {
-		const finer = AUTO_BUCKET_LADDER.filter((candidate) => candidate <= maxBucketForMin)
-		bucket = finer.length > 0 ? finer[finer.length - 1] : AUTO_BUCKET_LADDER[0]
+		const finer = rungs.filter((candidate) => candidate <= maxBucketForMin)
+		bucket = finer.length > 0 ? finer[finer.length - 1] : rungs[0]
+	}
+	// `minBuckets` may have stepped below the caller's floor on a short window.
+	if (bucket < minBucketSeconds) {
+		bucket = rungs[0]
 	}
 
 	return bucket
 }
+
+/**
+ * Bucket width for an alert rule's evaluation window.
+ *
+ * A rule compares one value per window against a threshold, so the bucket IS the
+ * window — not a fraction of it. Floored at 60s because sub-minute alert windows
+ * are not offered and a zero-width bucket is not a bucket.
+ *
+ * Named rather than inlined because it was previously spelled out at two sites
+ * (`compileRulePlan`, which bakes it into the stored spec, and
+ * `prepareAlertEvaluation`'s raw-SQL branch), and a rule whose stored spec
+ * disagreed with its evaluation-time bucket would silently evaluate a different
+ * window than the one it was saved with.
+ */
+export const alertWindowBucketSeconds = (windowMinutes: number): number => Math.max(windowMinutes * 60, 60)
 
 const floorToBucketMs = (epochMs: number, bucketSeconds: number): number => {
 	const bucketMs = bucketSeconds * 1000

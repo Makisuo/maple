@@ -1,4 +1,5 @@
 import {
+	alertWindowBucketSeconds,
 	CompiledAlertQueryPlan,
 	QueryEngineAlertReducer,
 	QueryEngineNoDataBehavior,
@@ -17,6 +18,7 @@ import {
 	AlertSignalType as AlertSignalTypeSchema,
 	AlertValidationError,
 	QueryBuilderQueryDraftSchema,
+	UNGROUPED_GROUP_KEY,
 	UserId,
 	type AlertComparator,
 	type AlertDestinationId,
@@ -151,6 +153,24 @@ const planGroupingTokens = (
 export const isGroupedPlan = (plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>): boolean =>
 	plan.kind === "raw_sql" || planGroupingTokens(plan) != null
 
+/**
+ * Translate a group key from the query engine's vocabulary into storage's.
+ *
+ * The engine emits a generic `"all"` for an ungrouped result; storage, the wire
+ * and the UI all spell that `UNGROUPED_GROUP_KEY` (`"__total__"`). The two must
+ * not be conflated — an `alert_rule_states` row keyed `"all"` is invisible to
+ * every reader — and the translation was previously open-coded at each of the
+ * three sites that needed it (scheduler evaluation, preview series, preview's
+ * empty-range seed), which is exactly the shape of bug that survives review.
+ *
+ * `evaluateRule` and `previewRule` are the only boundaries; everything
+ * downstream of them is already in storage vocabulary.
+ */
+export const toStorageGroupKey = (
+	plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>,
+	engineGroupKey: string,
+): string => (isGroupedPlan(plan) ? engineGroupKey : UNGROUPED_GROUP_KEY)
+
 export const planEvaluateSource = (
 	plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>,
 	windowMinutes: number,
@@ -179,7 +199,7 @@ export const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(functi
 	readonly windowMinutes: number
 	readonly groupBy: AlertGroupBy | null
 }): Effect.fn.Return<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> {
-	const bucketSeconds = Math.max(rule.windowMinutes * 60, 60)
+	const bucketSeconds = alertWindowBucketSeconds(rule.windowMinutes)
 	const envFilter = rule.environments.length > 0 ? { environments: rule.environments } : {}
 	const baseTraceFilters = {
 		...(rule.serviceName == null ? {} : { serviceName: rule.serviceName }),
