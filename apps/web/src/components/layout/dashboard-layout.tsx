@@ -20,6 +20,7 @@ import { openGlobalChat } from "@/components/chat/global-chat-sheet"
 import { ConnectButton } from "@/components/header/connect-button"
 import { QuotaBanner } from "@/components/billing/quota-banner"
 import { PaymentFailedBanner } from "@/components/billing/payment-failed-banner"
+import { AppUpdateBanner } from "@/components/layout/app-update-banner"
 import { Link, defaultParseSearch } from "@tanstack/react-router"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
@@ -155,10 +156,14 @@ function Breadcrumbs({ items, children }: { items: BreadcrumbEntry[]; children?:
 	)
 }
 
-/** Billing banners + the horizontal `Filters | Content | RightPanel` row. */
+/** App-shell banners + the horizontal `Filters | Content | RightPanel` row. */
 function Body({ children }: { children: React.ReactNode }) {
 	return (
 		<>
+			{/* Ungated, unlike the billing banners below: a stale bundle is stale
+			    whether or not the deployment uses Clerk, and self-hosted installs
+			    have the same long-lived-tab problem. */}
+			<AppUpdateBanner />
 			{isClerkAuthEnabled && <PaymentFailedBanner />}
 			{isClerkAuthEnabled && <QuotaBanner />}
 			<PageLayout.Body>{children}</PageLayout.Body>

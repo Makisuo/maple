@@ -14,7 +14,7 @@ import {
 import { Database, DatabaseError } from "@/platform/DatabaseLive"
 import { DashboardPersistenceService } from "./DashboardPersistenceService"
 import { Env } from "@/platform/Env"
-import { CURRENT_DASHBOARD_SCHEMA_VERSION } from "@maple/widgets/dashboard"
+import { CURRENT_DASHBOARD_SCHEMA_VERSION, upgradeStoredDocument } from "@maple/widgets/dashboard"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 
 const trackedDbs: TestDb[] = []
@@ -231,7 +231,7 @@ describe("DashboardPersistenceService", () => {
 		const widget = (id: string, membership: Record<string, string>) => ({
 			id,
 			visualization: "chart",
-			dataSource: { endpoint: "custom_query_builder_timeseries" },
+			dataSource: { kind: "query", resultShape: "timeseries", queries: [] },
 			display: {},
 			layout: { x: 0, y: 0, w: 4, h: 4 },
 			...membership,
@@ -297,7 +297,7 @@ describe("DashboardPersistenceService", () => {
 						{
 							id: "w1",
 							visualization: "chart",
-							dataSource: { endpoint: "custom_query_builder_timeseries" },
+							dataSource: { kind: "query", resultShape: "timeseries", queries: [] },
 							display: {},
 							layout: { x: 0, y: 0, w: 6, h: 4 },
 							sectionId: "s1",
@@ -359,7 +359,9 @@ describe("DashboardPersistenceService", () => {
 					visualization: "chart",
 					dataSource: {
 						endpoint: "custom_query_builder_timeseries",
-						params: { queries: [{ id: "a", name: "A", dataSource: "traces" }] },
+						params: {
+							queries: [{ id: "a", name: "A", dataSource: "traces", aggregation: "count" }],
+						},
 					},
 					display: {},
 					layout: { x: 0, y: 0, w: 6, h: 4 },
@@ -384,46 +386,51 @@ describe("DashboardPersistenceService", () => {
 			}).pipe(Effect.provide(makeLayer(testDb)))
 		})
 
-		it.effect("reads a legacy payload that predates the version marker", () => {
+		// These two tests used to assert lazy upgrade: a legacy row read fine and was
+		// rewritten at its next natural write. Schema v3 deliberately ends that. The
+		// v2 -> v3 step is a one-shot backfill rather than a migration-chain entry, so
+		// this build cannot read a row the backfill has not touched — and that gap IS
+		// the migration window. The pair below pins both halves of it so the window is
+		// a documented, tested property rather than a surprise in production.
+		it.effect("refuses a legacy row the backfill has not converted yet", () => {
 			const testDb = createTestDb(trackedDbs)
 
 			return Effect.gen(function* () {
 				yield* insertRawDashboard(testDb, "dash-legacy", legacyPayload("dash-legacy"))
 
-				const dashboard = yield* DashboardPersistenceService.get(
-					asOrgId("org_a"),
-					asDashboardId("dash-legacy"),
+				const outcome = yield* Effect.exit(
+					DashboardPersistenceService.get(asOrgId("org_a"), asDashboardId("dash-legacy")),
 				)
 
-				assert.strictEqual(dashboard.name, "Legacy")
-				// Params are carried through the migration byte-for-byte.
-				assert.deepStrictEqual(dashboard.widgets[0]?.dataSource.params, {
-					queries: [{ id: "a", name: "A", dataSource: "traces" }],
-				})
+				// Loudly, not silently. A half-decoded document would be persisted by
+				// the next read-modify-write and the original lost.
+				assert.strictEqual(outcome._tag, "Failure")
 			}).pipe(Effect.provide(makeLayer(testDb)))
 		})
 
-		it.effect("upgrades a legacy row lazily — on its next write, not on read", () => {
+		it.effect("reads that same row once the backfill transform has been applied", () => {
 			const testDb = createTestDb(trackedDbs)
 
 			return Effect.gen(function* () {
-				yield* insertRawDashboard(testDb, "dash-lazy", legacyPayload("dash-lazy"))
-
-				yield* DashboardPersistenceService.get(asOrgId("org_a"), asDashboardId("dash-lazy"))
-				const afterRead = yield* readStoredPayload(testDb, "dash-lazy")
-				assert.strictEqual(
-					afterRead?.payload_json.schemaVersion,
-					undefined,
-					"a read must not rewrite storage",
+				// Exactly what `backfill-dashboard-datasource-v3.ts` writes back.
+				yield* insertRawDashboard(
+					testDb,
+					"dash-backfilled",
+					upgradeStoredDocument(legacyPayload("dash-backfilled")) as Record<string, unknown>,
 				)
 
-				yield* DashboardPersistenceService.upsert(
+				const dashboard = yield* DashboardPersistenceService.get(
 					asOrgId("org_a"),
-					asUserId("user_a"),
-					makeDashboard({ id: asDashboardId("dash-lazy"), name: "Rewritten" }),
+					asDashboardId("dash-backfilled"),
 				)
-				const afterWrite = yield* readStoredPayload(testDb, "dash-lazy")
-				assert.strictEqual(afterWrite?.payload_json.schemaVersion, CURRENT_DASHBOARD_SCHEMA_VERSION)
+
+				assert.strictEqual(dashboard.name, "Legacy")
+				const dataSource = dashboard.widgets[0]?.dataSource
+				assert.strictEqual(dataSource?.kind, "query")
+				// The queries survive the reshaping; only the envelope changed.
+				assert.deepStrictEqual(dataSource.kind === "query" ? dataSource.queries : undefined, [
+					{ id: "a", name: "A", dataSource: "traces", aggregation: "count" },
+				])
 			}).pipe(Effect.provide(makeLayer(testDb)))
 		})
 

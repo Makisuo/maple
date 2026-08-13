@@ -37,14 +37,23 @@ describe("makeQueryDataSource", () => {
 	it("omits formulas and comparison rather than writing empty keys", () => {
 		// A widget that never had formulas must not become indistinguishable from
 		// one that lost them on the next read-modify-write.
-		const params = makeQueryDataSource({ resultShape: "list", queries: [] }).params
-		expect(params).toEqual({ queries: [] })
+		expect(makeQueryDataSource({ resultShape: "list", queries: [] })).toEqual({
+			kind: "query",
+			resultShape: "list",
+			queries: [],
+		})
 	})
 
-	it("still writes the v2 endpoint while the stored version is 2", () => {
-		expect(dataSourceEndpoint(makeQueryDataSource({ resultShape: "breakdown", queries: [] }))).toBe(
-			"custom_query_builder_breakdown",
-		)
+	// A query data source has no endpoint in v3 — its identity is `kind` plus
+	// `resultShape`. `dataSourceEndpoint` returning null here rather than
+	// synthesising `custom_query_builder_breakdown` is the property that stops the
+	// string-sniffing creeping back in.
+	it("writes no endpoint for a query source", () => {
+		const source = makeQueryDataSource({ resultShape: "breakdown", queries: [] })
+
+		expect(source.kind).toBe("query")
+		expect(source.resultShape).toBe("breakdown")
+		expect(dataSourceEndpoint(source)).toBeNull()
 	})
 
 	it("carries a transform through untouched", () => {
@@ -88,6 +97,9 @@ describe("makeRouteDataSource", () => {
 	})
 
 	it("omits an absent params bag rather than writing an empty one", () => {
-		expect(makeRouteDataSource("service_overview")).toEqual({ endpoint: "service_overview" })
+		expect(makeRouteDataSource("service_overview")).toEqual({
+			kind: "route",
+			endpoint: "service_overview",
+		})
 	})
 })

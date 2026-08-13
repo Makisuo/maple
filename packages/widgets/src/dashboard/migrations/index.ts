@@ -14,7 +14,10 @@ export const DASHBOARD_MIGRATIONS: ReadonlyArray<DashboardMigration> = [v1ToV2]
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
-const KNOWN_SCHEMA_VERSIONS: ReadonlySet<number> = new Set([1, 2])
+// Includes 3 even though no chain step produces it: `detectSchemaVersion` reads
+// an unrecognised version as 1, so leaving 3 out would make a backfilled document
+// look like a pre-versioning one and run it through `v1ToV2` again.
+const KNOWN_SCHEMA_VERSIONS: ReadonlySet<number> = new Set([1, 2, 3])
 
 /** Absent, non-numeric, or unrecognised `schemaVersion` all read as version 1. */
 export const detectSchemaVersion = (document: unknown): DashboardSchemaVersion => {
@@ -60,5 +63,17 @@ export const migrateToLatest = (document: unknown): Record<string, unknown> => {
 		version = step.to
 	}
 
-	return { ...current, schemaVersion: CURRENT_DASHBOARD_SCHEMA_VERSION }
+	// Stamped with the version actually REACHED, not with the current one.
+	//
+	// These differ during the v3 window: the chain ends at 2 while
+	// `CURRENT_DASHBOARD_SCHEMA_VERSION` is 3, because the v2 -> v3 transform is a
+	// one-shot backfill (`upgrade-to-v3.ts`) rather than a chain step. Stamping 3
+	// on a document still in v2 shape would be a lie that decode immediately
+	// catches — `parseStoredDashboard` returns `Rejected` and the writable path
+	// refuses it, so nothing corrupt reaches storage — but a lie the version
+	// history and the span annotation would both repeat.
+	//
+	// This whole module is deleted once the backfill has run; until then it should
+	// report what is true.
+	return { ...current, schemaVersion: version }
 }

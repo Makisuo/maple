@@ -1,4 +1,5 @@
 import type { QuerySet, QueryResultShape } from "@maple/query-model"
+import { QUERY_ENDPOINT_SHAPES, RAW_SQL_ENDPOINT } from "./legacy-endpoints"
 import type { WidgetDataSourceTransformV2 } from "./shared/transform"
 
 /**
@@ -20,25 +21,11 @@ import type { WidgetDataSourceTransformV2 } from "./shared/transform"
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
-/**
- * The v2 endpoints that carried a user-authored query rather than a fixed route,
- * keyed by the result shape that is the v3 identity of the same thing.
- *
- * Canonical in this direction because `construct.ts` writes it and the MCP
- * inspector reports it; the endpoint → shape lookup below is derived, so the two
- * cannot drift.
- */
-export const QUERY_SHAPE_ENDPOINTS = {
-	timeseries: "custom_query_builder_timeseries",
-	breakdown: "custom_query_builder_breakdown",
-	list: "custom_query_builder_list",
-} as const satisfies Record<QueryResultShape, string>
-
-const QUERY_ENDPOINT_SHAPES: Record<string, QueryResultShape> = Object.fromEntries(
-	Object.entries(QUERY_SHAPE_ENDPOINTS).map(([shape, endpoint]) => [endpoint, shape]),
-) as Record<string, QueryResultShape>
-
-export const RAW_SQL_ENDPOINT = "raw_sql_chart"
+// The endpoint tables moved to `legacy-endpoints.ts` — they are wire
+// vocabularies rather than schema, and they outlive this file, which is deleted
+// once v3 is the only stored shape. Re-exported here so the ~30 consumers that
+// import them from `access.ts` today keep working until then.
+export { QUERY_SHAPE_ENDPOINTS, RAW_SQL_ENDPOINT } from "./legacy-endpoints"
 
 /**
  * The endpoint name, for consumers that still dispatch on it.

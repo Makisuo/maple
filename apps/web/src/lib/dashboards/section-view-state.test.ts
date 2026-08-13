@@ -27,7 +27,7 @@ const section = (
 const widget = (id: string, membership?: { sectionId: string; tabId: string }): DashboardWidget => ({
 	id,
 	visualization: "chart",
-	dataSource: { endpoint: "custom_query_builder_timeseries" },
+	dataSource: { kind: "query", resultShape: "timeseries", queries: [] },
 	display: {},
 	layout: { x: 0, y: 0, w: 4, h: 4 },
 	...(membership ?? {}),
@@ -178,10 +178,7 @@ describe("resolveSectionView", () => {
 // because a deleted key isn't present to overwrite the stale value.
 describe("route composition", () => {
 	// Mirrors `applySectionView` in routes/dashboards/$dashboardId.tsx.
-	const apply = (
-		prev: Record<string, unknown>,
-		update: (p: SectionViewSearch) => SectionViewSearch,
-	) => ({
+	const apply = (prev: Record<string, unknown>, update: (p: SectionViewSearch) => SectionViewSearch) => ({
 		...update(pickDashboardControlParams(prev)),
 		...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
 	})
@@ -205,9 +202,7 @@ describe("route composition", () => {
 	})
 
 	it("keeps edit mode and variable selections across a collapse", () => {
-		const next = apply({ mode: "edit", "var-service": "api" }, (p) =>
-			withSectionCollapsed(p, "s1", true),
-		)
+		const next = apply({ mode: "edit", "var-service": "api" }, (p) => withSectionCollapsed(p, "s1", true))
 		expect(next).toEqual({ mode: "edit", "var-service": "api", collapsed: "s1" })
 	})
 

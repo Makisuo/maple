@@ -15,7 +15,7 @@ import type {
 	WidgetDataSource,
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
-import { makeQueryDataSource, makeRouteDataSource } from "@maple/widgets/dashboard"
+import { makeQueryDataSource, makeRouteDataSource, makeStaticDataSource } from "@maple/widgets/dashboard"
 
 export interface WidgetPresetDefinition {
 	id: string
@@ -585,7 +585,7 @@ export const markdownPresets: WidgetPresetDefinition[] = [
 		description: "Static markdown note for context, links, or runbooks",
 		icon: FileIcon,
 		visualization: "markdown",
-		dataSource: makeRouteDataSource("markdown_static"),
+		dataSource: makeStaticDataSource(),
 		display: {
 			title: "Note",
 			markdown: {

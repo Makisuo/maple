@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { QueryResultShape } from "@maple/query-model"
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 import { buildBreakdownQuerySpec, buildListQuerySpec } from "@maple/query-engine/query-builder"
 import {
@@ -30,14 +31,20 @@ const allPresets: WidgetPresetDefinition[] = [
 ]
 
 function presetQueries(preset: WidgetPresetDefinition): QueryBuilderQueryDraftPayload[] {
-	const params = preset.dataSource.params as { queries?: QueryBuilderQueryDraftPayload[] } | undefined
-	return params?.queries ?? []
+	const dataSource = preset.dataSource
+	return dataSource.kind === "query" ? [...dataSource.queries] : []
 }
 
+/**
+ * v3 replaced the `custom_query_builder_*` endpoint names with `kind: "query"`
+ * plus a `resultShape`, so the presets are selected by shape here rather than by
+ * endpoint string.
+ */
+const hasShape = (preset: WidgetPresetDefinition, shape: QueryResultShape): boolean =>
+	preset.dataSource.kind === "query" && preset.dataSource.resultShape === shape
+
 describe("widget preset query specs", () => {
-	for (const preset of allPresets.filter(
-		(p) => p.dataSource.endpoint === "custom_query_builder_breakdown",
-	)) {
+	for (const preset of allPresets.filter((p) => hasShape(p, "breakdown"))) {
 		it(`${preset.id} builds a valid breakdown spec for every query`, () => {
 			const queries = presetQueries(preset)
 			expect(queries.length).toBeGreaterThan(0)
@@ -49,7 +56,7 @@ describe("widget preset query specs", () => {
 		})
 	}
 
-	for (const preset of allPresets.filter((p) => p.dataSource.endpoint === "custom_query_builder_list")) {
+	for (const preset of allPresets.filter((p) => hasShape(p, "list"))) {
 		it(`${preset.id} builds a valid list spec`, () => {
 			const queries = presetQueries(preset)
 			expect(queries.length).toBeGreaterThan(0)
@@ -73,7 +80,7 @@ describe("widget preset query specs", () => {
 	it("every horizontal-bar preset groups by a category", () => {
 		expect(hbarPresets.length).toBeGreaterThan(0)
 		for (const preset of hbarPresets) {
-			expect(preset.dataSource.endpoint, preset.id).toBe("custom_query_builder_breakdown")
+			expect(hasShape(preset, "breakdown"), preset.id).toBe(true)
 			for (const query of presetQueries(preset)) {
 				expect(query.addOns?.groupBy, preset.id).toBe(true)
 				expect(query.groupBy?.length ?? 0, preset.id).toBeGreaterThan(0)
@@ -84,8 +91,10 @@ describe("widget preset query specs", () => {
 	it("histogram duration preset queries raw durations, not a category breakdown", () => {
 		const histogram = histogramPresets.find((p) => p.id === "histogram-trace-duration")
 		expect(histogram).toBeDefined()
-		expect(histogram!.dataSource.endpoint).toBe("custom_query_builder_list")
-		expect((histogram!.dataSource.params as { columns?: string[] }).columns).toEqual(["durationMs"])
+		const source = histogram!.dataSource
+		if (source.kind !== "query") throw new Error("expected a query data source")
+		expect(source.resultShape).toBe("list")
+		expect(source.columns).toEqual(["durationMs"])
 		expect(histogram!.display.unit).toBe("duration_ms")
 	})
 })

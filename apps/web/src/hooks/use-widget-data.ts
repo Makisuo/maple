@@ -12,15 +12,16 @@ import { hasUnresolvedVariableRefs, interpolateWidgetParams } from "@maple/query
 import type { DashboardWidget, TimeRange, WidgetDataSource } from "@/components/dashboard-builder/types"
 
 /**
- * The structural shape a data source must satisfy to be fetched. Both the
- * web `WidgetDataSource` and the JSON-decoded `display.sparkline.dataSource`
- * (whose `endpoint` is only typed as `string`) are assignable to this.
+ * Was a structural stand-in, back when a widget's own data source narrowed
+ * `endpoint` to the registry key union while the JSON-decoded
+ * `display.sparkline.dataSource` typed it as a bare `string` — so neither was
+ * assignable to the other and both had to be assignable to a third thing.
+ *
+ * v3 removed the discrepancy: both are the same union now. Kept as an alias only
+ * so the sparkline call sites keep reading as "any data source, not necessarily
+ * this widget's own".
  */
-export type WidgetDataSourceLike = {
-	endpoint: string
-	params?: Record<string, unknown>
-	transform?: WidgetDataSource["transform"]
-}
+export type WidgetDataSourceLike = WidgetDataSource
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"

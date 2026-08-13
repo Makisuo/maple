@@ -61,17 +61,26 @@ export type DataSourceEndpoint =
 	| "raw_sql_chart"
 	| "markdown_static"
 
-// `endpoint` is narrowed to the registry key union so the data-source registry
-// stays statically indexable; everything else comes straight from the schema.
+// A straight alias of the schema type, as of v3.
 //
-// Deliberately NOT `DeepMutable`, unlike the display/layout aliases below. A
-// data source is replaced wholesale — the builder never edits one field of it in
-// place — and keeping it readonly is what lets the constructors in
-// `@maple/widgets/dashboard` (which return the schema type) be assigned here
-// directly, instead of every call site fighting a variance mismatch.
-export type WidgetDataSource = Omit<typeof WidgetDataSourceSchema.Type, "endpoint"> & {
-	endpoint: DataSourceEndpoint
-}
+// This used to be `Omit<..., "endpoint"> & { endpoint: DataSourceEndpoint }`,
+// which bundled two unrelated jobs: keeping `serverFunctionMap` statically total,
+// and rejecting a typo'd endpoint at the widget-definition call site. Neither
+// survives contact with a discriminated union — `Omit` over a union collapses to
+// the keys every arm shares, so the result was a type that demanded `endpoint`
+// from arms that do not have one.
+//
+// Both jobs now live where they belong: `DataSourceEndpoint` below is its own
+// union and still keys the registry exhaustively, and the typo check moved to
+// `makeRouteDataSource`'s type parameter in `@maple/widgets/dashboard`.
+//
+// Still deliberately NOT `DeepMutable`, unlike the display/layout aliases below.
+// A data source is replaced wholesale — the builder never edits one field of it
+// in place — and keeping it readonly is what lets the constructors in
+// `@maple/widgets/dashboard` be assigned here directly, instead of every call
+// site fighting a variance mismatch. `DeepMutable` over a union would also strip
+// the readonly modifiers that make the arms discriminate cleanly.
+export type WidgetDataSource = typeof WidgetDataSourceSchema.Type
 
 export type ValueUnit =
 	| "none"

@@ -81,8 +81,9 @@ const makeRow = (id: string, widgets: ReadonlyArray<unknown> = []): DashboardRow
 })
 
 const chartDataSource: WidgetDataSource = {
-	endpoint: "custom_query_builder_timeseries",
-	params: { queries: [], formulas: [] },
+	kind: "query",
+	resultShape: "timeseries",
+	queries: [],
 }
 
 const widgetsOf = (id: string) =>

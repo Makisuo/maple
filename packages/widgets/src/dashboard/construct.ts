@@ -1,7 +1,12 @@
 import type { QueryResultShape, QuerySet } from "@maple/query-model"
-import { QUERY_SHAPE_ENDPOINTS, RAW_SQL_ENDPOINT, type RawSqlDataSource } from "./access"
+import type { RawSqlDataSource } from "./access"
 import type { WidgetDataSourceTransformV2 } from "./shared/transform"
-import type { WidgetDataSourceV2 } from "./v2/data-source"
+import type {
+	QueryWidgetDataSource,
+	RawSqlWidgetDataSource,
+	RouteWidgetDataSource,
+	StaticWidgetDataSource,
+} from "./v3/data-source"
 
 /**
  * Writing a widget's data source without caring which schema version stores it.
@@ -12,13 +17,16 @@ import type { WidgetDataSourceV2 } from "./v2/data-source"
  * a *meaning* ("a timeseries query set", "some raw SQL") to a function instead of
  * hand-assembling an endpoint string and an untyped bag.
  *
- * While `CURRENT_DASHBOARD_SCHEMA_VERSION` is 2 these emit `{ endpoint, params }`.
- * At the flip they emit the typed v3 union and no call site changes. The
- * round-trip tests in `construct.test.ts` are what hold that promise: every
+ * These now emit the typed v3 union. That switch happened here and NOWHERE ELSE:
+ * the ~40 call sites — every dashboard template, the Perses importer, the MCP
+ * widget builders, `widget-definitions.ts` — are untouched by the flip, because
+ * they were already handing over a meaning rather than assembling a bag. That was
+ * the whole point of extracting these, and it is the return on it.
+ *
+ * The round-trip tests in `construct.test.ts` are what hold the promise: every
  * constructor's output must read back through the matching accessor unchanged.
  */
 
-type WidgetDataSource = typeof WidgetDataSourceV2.Type
 type WidgetDataSourceTransform = typeof WidgetDataSourceTransformV2.Type
 
 export interface QueryDataSourceInput extends QuerySet {
@@ -45,26 +53,27 @@ export interface QueryDataSourceInput extends QuerySet {
 /**
  * A widget backed by a user-authored query set.
  *
- * The endpoint stays a literal in the return type rather than widening to
- * `string`: the web app narrows `WidgetDataSource["endpoint"]` to its registry's
- * key union so `serverFunctionMap` is statically total, and a widened `string`
- * would make every call site here unassignable to it.
+ * `resultShape` stays a type parameter rather than widening to
+ * `QueryResultShape`, so a caller that passes a literal gets it back in the
+ * return type. That is what lets the web app's chart picker narrow on the shape
+ * it just constructed without a cast.
  */
 export const makeQueryDataSource = <S extends QueryResultShape>(
 	input: QueryDataSourceInput & { readonly resultShape: S },
-): WidgetDataSource & { endpoint: (typeof QUERY_SHAPE_ENDPOINTS)[S] } => ({
-	endpoint: QUERY_SHAPE_ENDPOINTS[input.resultShape],
-	params: {
-		queries: input.queries,
-		// Absent rather than empty when the caller has none: `dataSourceQuerySet`
-		// reads both as "no formulas", and writing the empty key back would make a
-		// widget that never had formulas indistinguishable from one that lost them.
-		...(input.formulas === undefined ? {} : { formulas: input.formulas }),
-		...(input.comparison === undefined ? {} : { comparison: input.comparison }),
-		...(input.defaultLimit === undefined ? {} : { defaultLimit: input.defaultLimit }),
-		...(input.limit === undefined ? {} : { limit: input.limit }),
-		...(input.columns === undefined ? {} : { columns: input.columns }),
-	},
+): typeof QueryWidgetDataSource.Type & { readonly resultShape: S } => ({
+	kind: "query",
+	resultShape: input.resultShape,
+	queries: input.queries,
+	// Absent rather than empty when the caller has none: `dataSourceQuerySet`
+	// reads both as "no formulas", and writing the empty key back would make a
+	// widget that never had formulas indistinguishable from one that lost them.
+	// Mandatory under `optionalKey`, where a present `undefined` is a decode error
+	// — which is most of why these constructors still earn their place in v3.
+	...(input.formulas === undefined ? {} : { formulas: input.formulas }),
+	...(input.comparison === undefined ? {} : { comparison: input.comparison }),
+	...(input.defaultLimit === undefined ? {} : { defaultLimit: input.defaultLimit }),
+	...(input.limit === undefined ? {} : { limit: input.limit }),
+	...(input.columns === undefined ? {} : { columns: input.columns }),
 	...(input.transform === undefined ? {} : { transform: input.transform }),
 })
 
@@ -73,15 +82,11 @@ export interface RawSqlDataSourceInput extends RawSqlDataSource {
 }
 
 /** A widget backed by user-authored ClickHouse SQL. */
-export const makeRawSqlDataSource = (
-	input: RawSqlDataSourceInput,
-): WidgetDataSource & { endpoint: typeof RAW_SQL_ENDPOINT } => ({
-	endpoint: RAW_SQL_ENDPOINT,
-	params: {
-		sql: input.sql,
-		...(input.displayType === undefined ? {} : { displayType: input.displayType }),
-		...(input.granularitySeconds === undefined ? {} : { granularitySeconds: input.granularitySeconds }),
-	},
+export const makeRawSqlDataSource = (input: RawSqlDataSourceInput): typeof RawSqlWidgetDataSource.Type => ({
+	kind: "raw_sql",
+	sql: input.sql,
+	...(input.displayType === undefined ? {} : { displayType: input.displayType }),
+	...(input.granularitySeconds === undefined ? {} : { granularitySeconds: input.granularitySeconds }),
 	...(input.transform === undefined ? {} : { transform: input.transform }),
 })
 
@@ -89,16 +94,35 @@ export const makeRawSqlDataSource = (
  * A widget backed by one of the curated fixed routes (`service_overview`, …).
  *
  * These keep an endpoint name and an opaque params bag in v3 too — the bag is
- * per-route and closing it is a separate, much larger job — so this constructor
- * exists for symmetry and to give the sweep one shape to grep for, not because
- * the call site would otherwise break at the flip.
+ * per-route and closing it is a separate, much larger job.
+ *
+ * `E` stays a type parameter so the literal survives into the return type. That
+ * is now the ONLY compile-time check on a route name: `RouteWidgetDataSource`
+ * types `endpoint` as an open `Schema.String` on purpose, because closing the
+ * STORED schema would make one stale route name a decode failure that locks a
+ * whole dashboard out of editing. Open in storage, checked at authoring.
  */
 export const makeRouteDataSource = <E extends string>(
 	endpoint: E,
 	params?: Record<string, unknown>,
 	transform?: WidgetDataSourceTransform,
-): WidgetDataSource & { endpoint: E } => ({
+): typeof RouteWidgetDataSource.Type & { readonly endpoint: E } => ({
+	kind: "route",
 	endpoint,
 	...(params === undefined ? {} : { params }),
+	...(transform === undefined ? {} : { transform }),
+})
+
+/**
+ * A widget that issues no request at all — today, a markdown note.
+ *
+ * In v2 this was `makeRouteDataSource("markdown_static")`, a route pointing at a
+ * no-op server function that existed only so the registry lookup would succeed.
+ * The union answers "this widget fetches nothing" by its type instead.
+ */
+export const makeStaticDataSource = (
+	transform?: WidgetDataSourceTransform,
+): typeof StaticWidgetDataSource.Type => ({
+	kind: "static",
 	...(transform === undefined ? {} : { transform }),
 })

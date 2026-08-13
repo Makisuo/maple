@@ -1,5 +1,5 @@
 import type { IsoDateTimeString } from "@maple/primitives"
-import { DashboardDocumentV2 } from "./v2/document"
+import { DashboardDocumentV3 } from "./v3/document"
 
 /**
  * Carry a stored dashboard forward with a new widget array.
@@ -19,7 +19,7 @@ import { DashboardDocumentV2 } from "./v2/document"
  * rejects). Building the props by hand is what made that dance look necessary.
  */
 export const withWidgets = (
-	document: DashboardDocumentV2,
-	widgets: DashboardDocumentV2["widgets"],
+	document: DashboardDocumentV3,
+	widgets: DashboardDocumentV3["widgets"],
 	updatedAt: IsoDateTimeString,
-): DashboardDocumentV2 => new DashboardDocumentV2({ ...document, widgets, updatedAt })
+): DashboardDocumentV3 => new DashboardDocumentV3({ ...document, widgets, updatedAt })

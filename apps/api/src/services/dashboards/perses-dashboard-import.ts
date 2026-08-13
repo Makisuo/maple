@@ -10,7 +10,7 @@ import {
 	widgetTypeByVisualization,
 	type WidgetVisualization,
 } from "@maple/domain/http"
-import { makeRawSqlDataSource, makeRouteDataSource } from "@maple/widgets/dashboard"
+import { makeRawSqlDataSource, makeRouteDataSource, makeStaticDataSource } from "@maple/widgets/dashboard"
 
 type UnknownRecord = Record<string, unknown>
 type DashboardWidget = typeof DashboardWidgetSchema.Type
@@ -293,7 +293,7 @@ function rawSqlDataSource(args: {
 }
 
 function markdownDataSource(): DashboardWidget["dataSource"] {
-	return makeRouteDataSource("markdown_static")
+	return makeStaticDataSource()
 }
 
 function markdownWidgetContent(args: {

@@ -25,18 +25,19 @@ describe("visualizationToDisplayType", () => {
 })
 
 describe("buildRawSqlDataSource", () => {
-	it("returns a raw_sql_chart dataSource with required params", () => {
+	it("returns a raw_sql data source with its fields hoisted", () => {
 		const result = buildRawSqlDataSource({
 			visualization: "chart",
 			sql: "SELECT 1 WHERE $__orgFilter",
 			displayType: "line",
 		})
-		expect(result.endpoint).toBe("raw_sql_chart")
-		expect(result.params).toEqual({
+		// v3: no endpoint string, and the payload sits on the arm itself rather
+		// than inside an opaque `params` bag.
+		expect(result).toEqual({
+			kind: "raw_sql",
 			sql: "SELECT 1 WHERE $__orgFilter",
 			displayType: "line",
 		})
-		expect(result.transform).toBeUndefined()
 	})
 
 	it("includes granularitySeconds when provided", () => {
@@ -46,7 +47,7 @@ describe("buildRawSqlDataSource", () => {
 			displayType: "line",
 			granularitySeconds: 60,
 		})
-		expect(result.params?.granularitySeconds).toBe(60)
+		expect(result.granularitySeconds).toBe(60)
 	})
 
 	it("omits granularitySeconds when null/undefined", () => {
@@ -55,7 +56,7 @@ describe("buildRawSqlDataSource", () => {
 			sql: "SELECT 1 WHERE $__orgFilter",
 			displayType: "line",
 		})
-		expect(result.params).not.toHaveProperty("granularitySeconds")
+		expect(result).not.toHaveProperty("granularitySeconds")
 	})
 
 	it("auto-injects reduceToValue transform for stat widgets", () => {

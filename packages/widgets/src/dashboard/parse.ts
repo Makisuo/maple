@@ -1,6 +1,6 @@
 import { Effect, Schema, SchemaIssue } from "effect"
 import { detectSchemaVersion, migrateToLatest } from "./migrations"
-import { DashboardDocumentV2 } from "./v2/document"
+import { DashboardDocumentV3 } from "./v3/document"
 import { CURRENT_DASHBOARD_SCHEMA_VERSION, type DashboardSchemaVersion } from "./version"
 
 /**
@@ -16,7 +16,7 @@ import { CURRENT_DASHBOARD_SCHEMA_VERSION, type DashboardSchemaVersion } from ".
 export type DashboardParseOutcome =
 	| {
 			readonly _tag: "Decoded"
-			readonly document: DashboardDocumentV2
+			readonly document: DashboardDocumentV3
 			/** The version the payload was stored in, before migration. */
 			readonly fromVersion: DashboardSchemaVersion
 			/**
@@ -33,7 +33,7 @@ export type DashboardParseOutcome =
 			readonly issue: string
 	  }
 
-const decodeDocument = Schema.decodeUnknownEffect(DashboardDocumentV2)
+const decodeDocument = Schema.decodeUnknownEffect(DashboardDocumentV3)
 /** Path-anchored, newline-joined rendering of the issue tree. */
 const formatIssue = SchemaIssue.makeFormatterDefault()
 

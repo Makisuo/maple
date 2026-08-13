@@ -70,11 +70,12 @@ function unsupportedEndpointResult(
 	widget: {
 		id: string
 		visualization: string
-		dataSource: {
-			endpoint: string
-			params?: Record<string, unknown>
-			transform?: Record<string, unknown>
-		}
+		// `unknown`, because that is all this function needs: it hands the value to
+		// `dataSourceEndpoint` (which narrows internally) and to `JSON.stringify`.
+		// Spelling out a shape here only ever pinned it to one schema version — and
+		// this is the diagnostic path for a widget nothing else could read, so it is
+		// the last place that should care what shape the data source is in.
+		dataSource: unknown
 		display: { title?: string; unit?: string }
 	},
 	dashboardName: string,

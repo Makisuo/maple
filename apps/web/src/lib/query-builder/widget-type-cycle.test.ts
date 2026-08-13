@@ -12,6 +12,16 @@ import {
 } from "@/lib/query-builder/widget-builder-utils"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
 
+/**
+ * What a widget routed to, as one comparable value.
+ *
+ * v2 answered this with an endpoint string; v3 answers it with `kind` plus, for
+ * queries, `resultShape`. Collapsing them back into a single token keeps these
+ * routing assertions reading as routing assertions rather than as narrowing.
+ */
+const routedTo = (dataSource: DashboardWidget["dataSource"]): string =>
+	dataSource.kind === "query" ? dataSource.resultShape : dataSource.kind
+
 // Switching a widget's panel type, exhaustively.
 //
 // The editor's Type picker lets any widget become any other, and the lowering
@@ -85,7 +95,7 @@ function makeWidget(overrides: Partial<DashboardWidget> = {}): DashboardWidget {
 	return {
 		id: "widget-1",
 		visualization: "chart",
-		dataSource: { endpoint: "custom_query_builder_timeseries", params: {} },
+		dataSource: { kind: "query", resultShape: "timeseries", queries: [] },
 		display: {},
 		layout: { x: 0, y: 0, w: 6, h: 4 },
 		...overrides,
@@ -163,10 +173,11 @@ describe("endpoint routing", () => {
 	it("sends the categorical types to the breakdown endpoint", () => {
 		for (const panel of ["pie", "funnel", "heatmap", "hbar"] as const) {
 			const source = buildWidgetDataSource(makeWidget(), selectPanel(makeState(), panel), ["A"])
-			expect(source.endpoint, panel).toBe("custom_query_builder_breakdown")
+			expect(routedTo(source), panel).toBe("breakdown")
 			// A formula is a timeseries expression; the breakdown input schema
 			// rejects it, and the widget then hangs on its loading skeleton.
-			expect((source.params as Record<string, unknown>).formulas, panel).toBeUndefined()
+			if (source.kind !== "query") throw new Error("expected a query data source")
+			expect(source.formulas, panel).toBeUndefined()
 		}
 	})
 
@@ -175,16 +186,17 @@ describe("endpoint routing", () => {
 		// is the one type whose endpoint depends on its queries, not just its kind.
 		const ungrouped = makeState({ queries: [ungroupedQuery()] })
 		const listSource = buildWidgetDataSource(makeWidget(), selectPanel(ungrouped, "histogram"), ["A"])
-		expect(listSource.endpoint).toBe("custom_query_builder_list")
-		expect((listSource.params as Record<string, unknown>).columns).toEqual(["durationMs"])
+		expect(routedTo(listSource)).toBe("list")
+		if (listSource.kind !== "query") throw new Error("expected a query data source")
+		expect(listSource.columns).toEqual(["durationMs"])
 
 		const grouped = buildWidgetDataSource(makeWidget(), selectPanel(makeState(), "histogram"), ["A"])
-		expect(grouped.endpoint).toBe("custom_query_builder_breakdown")
+		expect(routedTo(grouped)).toBe("breakdown")
 	})
 
 	it("gives a note no query at all", () => {
 		const source = buildWidgetDataSource(makeWidget(), selectPanel(makeState(), "markdown"), ["A"])
-		expect(source).toEqual({ endpoint: "markdown_static" })
+		expect(source).toEqual({ kind: "static" })
 	})
 
 	it("reduces stat and gauge to a scalar", () => {
@@ -206,7 +218,7 @@ describe("stat sparkline", () => {
 
 		expect(display.sparkline?.enabled).toBe(true)
 		const nested = display.sparkline?.dataSource
-		expect(nested?.endpoint).toBe("custom_query_builder_timeseries")
+		expect(nested === undefined ? undefined : routedTo(nested)).toBe("timeseries")
 		// The sparkline is a trend, so it must NOT carry the stat's reduction.
 		expect(nested?.transform?.reduceToValue).toBeUndefined()
 	})

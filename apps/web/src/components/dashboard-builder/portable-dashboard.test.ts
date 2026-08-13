@@ -98,7 +98,7 @@ describe("portable-dashboard", () => {
 				{
 					id: "w1",
 					visualization: "chart",
-					dataSource: { endpoint: "custom_query_builder_timeseries" },
+					dataSource: { kind: "query", resultShape: "timeseries", queries: [] },
 					display: {},
 					layout: { x: 0, y: 0, w: 6, h: 4 },
 					sectionId: "s1",
