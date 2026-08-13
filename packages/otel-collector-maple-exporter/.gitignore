@@ -1,6 +1,0 @@
-# Go test binaries.
-*.test
-
-# OCB output is at the repo root (./bin), not here, but keep the conventional
-# Go ignore so future cmd/ subdirs don't accidentally check in binaries.
-bin/

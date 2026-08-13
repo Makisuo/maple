@@ -1,6 +1,8 @@
 {
-	"compilerOptions": {
-		"lib": ["esnext"],
-		"types": ["@cloudflare/workers-types"]
-	}
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "include": [],
+  "references": [
+    { "path": "tsconfig.packages.json" },
+    { "path": "tsconfig.tests.json" }
+  ]
 }

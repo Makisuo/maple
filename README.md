@@ -1,247 +1,73 @@
-<p align="center">
-  <img src=".github/assets/maple-hero.png" alt="Maple — open-source observability for traces, logs, and metrics, built on OpenTelemetry" width="100%" />
-</p>
+<!-- Use a static Shields badge because pkg.pr.new's dynamic badge times out while counting this repository's releases. -->
 
-<p align="center">
-  <strong>Open-source observability for traces, logs &amp; metrics — built on OpenTelemetry + ClickHouse.</strong>
-</p>
+[![pkg.pr.new](https://img.shields.io/badge/pkg.pr.new-Effect--TS%2Feffect-black)](https://pkg.pr.new/~/Effect-TS/effect)
 
-# Maple Monorepo
+# Effect
 
-Maple is now organized as a monorepo with a SPA frontend and an Effect-based backend API.
+Effect is a library for building robust, maintainable, type-safe, and production grade applications in TypeScript. It helps you handle the hard problems at scale: typed errors, dependency injection, structured concurrency, scheduling, tracing, and unified schema validation.
 
-## Workspace Layout
+> **Effect V4 is currently in beta.** The `main` branch contains v4 development.
 
-- `apps/web`: TanStack Router SPA (Vite)
-- `apps/api`: Effect HTTP API (Tinybird proxy + MCP server code)
-- `apps/ingest`: OTLP ingest gateway (key auth + org enrichment + collector forwarding)
-- `apps/landing`: Astro landing site
-- `apps/alerting`: Alert evaluation worker
-- `apps/chat-flue`: Flue + Workers AI chat backend (agent + triage workflow)
-- `apps/cli`: CLI utilities
-- `apps/mobile`: Expo mobile app
-- `packages/domain`: Shared Effect HTTP contracts and domain types
-- `packages/query-engine`: Shared query and observability logic
-- `packages/ui`: Shared UI primitives and components
+## Install V4 Beta
 
-## Prerequisites
-
-- Bun `>=1.3`
-
-## Install
-
-```bash
-bun install
+```sh
+npm install effect@beta
 ```
 
-## Try Maple Locally
+## Effect v3
 
-Run Maple as a single local binary with OTLP ingest, embedded ClickHouse, and
-the dashboard:
+The Effect v3 source code is available on the [`v3`](https://github.com/Effect-TS/effect/tree/v3) branch.
 
-```bash
-brew install Makisuo/tap/maple
-maple start
+```sh
+npm install effect@latest
 ```
 
-See [docs/local-mode.md](docs/local-mode.md) for Homebrew, manual installer,
-update, and uninstall details.
+Issues and pull requests meant for Effect v3 should target the [`v3`](https://github.com/Effect-TS/effect/tree/v3) branch.
 
-## Develop
+## Packages
 
-Run every available `dev` task in the monorepo:
+This monorepo contains the core `effect` package alongside integration packages that extend it. All v4 packages are published under the `beta` tag on npm.
 
-```bash
-bun run dev
-```
+| Package                                                               | Description                                              | API Reference                                                      |
+| --------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------ |
+| [`effect`](packages/effect)                                           | The core package                                         | [docs](https://effect.website/docs/v4/api/effect)                  |
+| [`@effect/platform-browser`](packages/platform/browser)               | Platform services for the browser                        | [docs](https://effect.website/docs/v4/api/platform-browser)        |
+| [`@effect/platform-bun`](packages/platform/bun)                       | Platform services for [Bun](https://bun.sh)              | [docs](https://effect.website/docs/v4/api/platform-bun)            |
+| [`@effect/platform-deno`](packages/platform/deno)                     | Platform services for [Deno](https://deno.com)           | [docs](https://effect.website/docs/v4/api/platform-deno)           |
+| [`@effect/platform-node`](packages/platform/node)                     | Platform services for [Node.js](https://nodejs.org)      | [docs](https://effect.website/docs/v4/api/platform-node)           |
+| [`@effect/platform-node-shared`](packages/platform/node-shared)       | Shared services for Node.js-compatible runtimes          | [docs](https://effect.website/docs/v4/api/platform-node-shared)    |
+| [`@effect/sql-clickhouse`](packages/sql/clickhouse)                   | SQL client for [ClickHouse](https://clickhouse.com)      | [docs](https://effect.website/docs/v4/api/sql-clickhouse)          |
+| [`@effect/sql-d1`](packages/sql/d1)                                   | SQL client for Cloudflare D1                             | [docs](https://effect.website/docs/v4/api/sql-d1)                  |
+| [`@effect/sql-libsql`](packages/sql/libsql)                           | SQL client for libSQL                                    | [docs](https://effect.website/docs/v4/api/sql-libsql)              |
+| [`@effect/sql-mssql`](packages/sql/mssql)                             | SQL client for Microsoft SQL Server                      | [docs](https://effect.website/docs/v4/api/sql-mssql)               |
+| [`@effect/sql-mysql2`](packages/sql/mysql2)                           | SQL client for MySQL                                     | [docs](https://effect.website/docs/v4/api/sql-mysql2)              |
+| [`@effect/sql-pg`](packages/sql/pg)                                   | SQL client for PostgreSQL                                | [docs](https://effect.website/docs/v4/api/sql-pg)                  |
+| [`@effect/sql-pglite`](packages/sql/pglite)                           | SQL client for [PGlite](https://pglite.dev)              | [docs](https://effect.website/docs/v4/api/sql-pglite)              |
+| [`@effect/sql-sqlite-bun`](packages/sql/sqlite-bun)                   | SQL client for SQLite via `bun:sqlite`                   | [docs](https://effect.website/docs/v4/api/sql-sqlite-bun)          |
+| [`@effect/sql-sqlite-do`](packages/sql/sqlite-do)                     | SQL client for Cloudflare Durable Objects SQLite         | [docs](https://effect.website/docs/v4/api/sql-sqlite-do)           |
+| [`@effect/sql-sqlite-node`](packages/sql/sqlite-node)                 | SQL client for SQLite via `node:sqlite`                  | [docs](https://effect.website/docs/v4/api/sql-sqlite-node)         |
+| [`@effect/sql-sqlite-react-native`](packages/sql/sqlite-react-native) | SQL client for SQLite in React Native                    | [docs](https://effect.website/docs/v4/api/sql-sqlite-react-native) |
+| [`@effect/sql-sqlite-wasm`](packages/sql/sqlite-wasm)                 | SQL client for SQLite compiled to WebAssembly            | [docs](https://effect.website/docs/v4/api/sql-sqlite-wasm)         |
+| [`@effect/ai-anthropic`](packages/ai/anthropic)                       | Anthropic provider for the Effect AI modules             | [docs](https://effect.website/docs/v4/api/ai-anthropic)            |
+| [`@effect/ai-openai`](packages/ai/openai)                             | OpenAI provider for the Effect AI modules                | [docs](https://effect.website/docs/v4/api/ai-openai)               |
+| [`@effect/ai-openai-compat`](packages/ai/openai-compat)               | OpenAI-compatible API provider for the Effect AI modules | [docs](https://effect.website/docs/v4/api/ai-openai-compat)        |
+| [`@effect/ai-openrouter`](packages/ai/openrouter)                     | OpenRouter provider for the Effect AI modules            | [docs](https://effect.website/docs/v4/api/ai-openrouter)           |
+| [`@effect/atom-react`](packages/atom/react)                           | React bindings for Effect Atom                           | [docs](https://effect.website/docs/v4/api/atom-react)              |
+| [`@effect/atom-solid`](packages/atom/solid)                           | SolidJS bindings for Effect Atom                         | [docs](https://effect.website/docs/v4/api/atom-solid)              |
+| [`@effect/atom-vue`](packages/atom/vue)                               | Vue bindings for Effect Atom                             | [docs](https://effect.website/docs/v4/api/atom-vue)                |
+| [`@effect/opentelemetry`](packages/opentelemetry)                     | [OpenTelemetry](https://opentelemetry.io) integration    | [docs](https://effect.website/docs/v4/api/opentelemetry)           |
+| [`@effect/vitest`](packages/vitest)                                   | Helpers for testing with [Vitest](https://vitest.dev)    | [docs](https://effect.website/docs/v4/api/vitest)                  |
+| [`@effect/docgen`](packages/tools/docgen)                             | Documentation generator for Effect projects              | [docs](https://effect.website/docs/v4/api/docgen)                  |
+| [`@effect/doctest`](packages/tools/doctest)                           | Runs JSDoc examples as Vitest tests                      | [docs](https://effect.website/docs/v4/api/doctest)                 |
+| [`@effect/openapi-generator`](packages/tools/openapi-generator)       | Generate Effect code from OpenAPI specifications         | [docs](https://effect.website/docs/v4/api/openapi-generator)       |
 
-Run individual apps from the repo root with workspace filters:
+## Resources
 
-```bash
-bun --filter=@maple/web dev
-bun --filter=@maple/api dev
-bun --filter=@maple/ingest dev
-bun --filter=@maple/landing dev
-```
+- Documentation (https://effect.website)
+- Discord (https://discord.gg/effect-ts)
+- Effect v3 source (https://github.com/Effect-TS/effect/tree/v3)
+- Effect v4 source (https://github.com/Effect-TS/effect/tree/main)
 
-There is also a dedicated root helper for alerting:
+## License
 
-```bash
-bun run dev:alerting
-```
-
-Turbo dev runs in TUI mode so interactive servers stay attached.
-
-## Validate
-
-```bash
-bun run typecheck
-bun run build
-bun run test
-```
-
-## Docker (Local)
-
-Run the local multi-service stack (API + web + ingest + otel collector):
-
-```bash
-docker compose -f docker-compose.yml up --build
-```
-
-Services:
-
-- API: `http://localhost:3472`
-- Web: `http://localhost:3471`
-- Ingest: `http://localhost:3474`
-- OTEL collector: `4317` (gRPC), `4318` (HTTP), `13133` (health/extensions)
-
-## Cloudflare Deploy (Alchemy)
-
-Deployments are per-app Alchemy runs pinned to Cloudflare Workers + D1:
-
-- `apps/api/alchemy.run.ts` — D1 database `MAPLE_DB` + api Worker with all env bindings
-- `apps/landing/alchemy.run.ts` — Astro build + Worker serving static assets
-- `apps/web/alchemy.run.ts` — TanStack Start app via the `Vite()` resource
-
-Stage grammar is `prd` / `stg` / `pr-<number>`, resolved via `@maple/infra/cloudflare` (`parseMapleStage`, `resolveMapleDomains`, `resolveWorkerName`, `resolveD1Name`).
-
-Run locally:
-
-```bash
-bun run alchemy:deploy:prd
-bun run alchemy:deploy:stg
-PR_NUMBER=123 bun run alchemy:deploy:pr
-```
-
-Tear down:
-
-```bash
-bun run alchemy:destroy:prd
-bun run alchemy:destroy:stg
-PR_NUMBER=123 bun run alchemy:destroy:pr
-```
-
-CI workflows:
-
-- STG (default on push to `main`): `.github/workflows/deploy-stg.yml`
-- PRD (manual only via `workflow_dispatch`): `.github/workflows/deploy-prd.yml`
-- PR preview lifecycle: `.github/workflows/deploy-pr-preview.yml` (`pull_request` opened/synchronize/reopened/closed)
-
-Secrets source model (CI):
-
-- Secrets are fetched from **Infisical** via `Infisical/secrets-action` using OIDC
-  (credential-less — GitHub's OIDC token authenticates a machine identity, no long-lived
-  token stored). CI needs:
-    - GitHub repo **variable** `INFISICAL_PROJECT_SLUG` (the project slug — a
-      **variable**, not a secret: GitHub masks secret values everywhere, and a
-      slug like `maple` would then blank out the PR-preview deployment URL
-      `app-pr-<n>.maple.dev`)
-    - GitHub repo **secret** `INFISICAL_MACHINE_IDENTITY_ID` (the machine identity ID)
-- Infisical environments (`prod`, `staging`, `dev` — mapped from the old Doppler
-  `prd`/`stg`/`pr` configs) must define:
-    - `ALCHEMY_PASSWORD`
-    - `ALCHEMY_STATE_TOKEN`
-    - `CLOUDFLARE_API_TOKEN`
-    - `CLOUDFLARE_DEFAULT_ACCOUNT_ID`
-    - `TINYBIRD_HOST`
-    - `TINYBIRD_TOKEN`
-    - `EMAIL_FROM` (sender address on an onboarded Cloudflare Email Service domain; delivery uses the `EMAIL` worker binding, no API key)
-    - `MAPLE_INGEST_KEY_ENCRYPTION_KEY`
-    - `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY`
-    - `MAPLE_AUTH_MODE`
-    - `MAPLE_ROOT_PASSWORD` (required in `self_hosted` mode)
-    - `CLERK_SECRET_KEY`
-    - `CLERK_PUBLISHABLE_KEY`
-    - `CLERK_JWT_KEY`
-
-Setup note: the machine identity must have a **GitHub OIDC** auth method configured in Infisical (scoped to this repo, ideally to the `production`/`staging`/`pr-preview` GitHub environments) and read access to the project. The workflows select secrets via `project-slug` (`INFISICAL_PROJECT_SLUG`) and per-stage `env-slug` (`prod`/`staging`/`dev`).
-
-Runtime API URL behavior:
-
-- Deploy-time web builds resolve `VITE_API_BASE_URL` from the Cloudflare api worker domain (`api.maple.dev` in `prd`, `api-staging.maple.dev` in `stg`, worker.dev URL for `pr-*`).
-- Local `bun --filter=@maple/web dev` can still use root `.env` `VITE_API_BASE_URL` for local API routing.
-
-## Environment
-
-- Canonical env example: `.env.example`
-- API-only env example: `apps/api/.env.example`
-- Real `.env` values are local-only and should stay untracked.
-
-The web app expects `VITE_API_BASE_URL` to point to the API (defaults to `http://localhost:3472`).
-
-For ingest + key auth, set these at minimum in your root `.env` when running the ingest gateway:
-
-- `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY`
-- `MAPLE_INGEST_KEY_ENCRYPTION_KEY` (required for D1-backed ingest deployments)
-- `INGEST_PORT`
-- `INGEST_FORWARD_OTLP_ENDPOINT`
-- `INGEST_FORWARD_TIMEOUT_MS`
-- `INGEST_MAX_REQUEST_BODY_BYTES`
-- `INGEST_REQUIRE_TLS`
-
-## Persistence (SQLite / Turso)
-
-Maple now persists dashboards in SQLite via libSQL:
-
-- Default local mode: no Turso CLI needed. If `MAPLE_DB_URL` is unset, Maple uses `apps/api/.data/maple.db`.
-- Turso cloud mode: set `MAPLE_DB_URL` to your Turso/libSQL URL and `MAPLE_DB_AUTH_TOKEN` to your token.
-- Self-hosting: persist the `apps/api/.data` directory as a volume so dashboard state survives container/restart cycles.
-
-Migration commands:
-
-```bash
-bun --filter=@maple/api db:migrate
-bun --filter=@maple/db db:generate
-bun --filter=@maple/db db:push
-bun --filter=@maple/db db:studio
-```
-
-When running the API (`bun --filter=@maple/api dev` or `bun --filter=@maple/api start`), migrations are applied automatically before boot.
-
-## Ingest Keys
-
-- Maple now manages per-org ingest keys in the database (`public` + `private`).
-- Keys are available in Settings and can be rerolled independently.
-- Reroll revokes the previous key immediately.
-- Private ingest keys are encrypted at rest with `MAPLE_INGEST_KEY_ENCRYPTION_KEY` (base64-encoded 32-byte key).
-- Ingest key lookup/auth uses non-reversible HMAC hashes via `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY`.
-
-## Auth Modes
-
-Maple supports exactly two auth modes via `MAPLE_AUTH_MODE`:
-
-1. `clerk`
-    - Create a Clerk application with Organizations enabled.
-    - Set `MAPLE_AUTH_MODE=clerk`
-    - Set `CLERK_SECRET_KEY`
-    - Optionally set `CLERK_JWT_KEY` for networkless verification
-    - Set `CLERK_PUBLISHABLE_KEY` for the web app
-    - Optionally override `VITE_CLERK_SIGN_IN_URL` and `VITE_CLERK_SIGN_UP_URL`
-2. `self_hosted`
-    - Set `MAPLE_AUTH_MODE=self_hosted`
-    - Set `MAPLE_ROOT_PASSWORD` (required)
-    - Set `MAPLE_DEFAULT_ORG_ID` (defaults to `default`)
-    - Users must sign in at `/sign-in` with the root password before accessing the dashboard/API.
-
-Start apps:
-
-```bash
-bun --filter=@maple/api dev
-bun --filter=@maple/web dev
-```
-
-Validate behavior:
-
-- Clerk mode:
-    - Signed-out users are redirected to `/sign-in`
-    - Signed-in users without an active org are redirected to `/org-required`
-    - Signed-in users with an active org can query the API with bearer auth
-- Self-hosted mode:
-    - Signed-out users are redirected to `/sign-in`
-    - `MAPLE_ROOT_PASSWORD` login issues a bearer session token
-    - Protected API routes reject requests without a valid bearer session token
-
-Breaking change:
-
-- Self-hosted multi-tenant JWT/API-key auth paths were removed.
-- `MAPLE_ROOT_PASSWORD` is now required when `MAPLE_AUTH_MODE=self_hosted`.
+MIT
