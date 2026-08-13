@@ -81,6 +81,12 @@ export function toPortableDashboard(dashboard: Dashboard): PortableDashboard {
 	}
 }
 
+// Deliberately NOT routed through `dataSourceRouteParams`: this is defensive
+// hygiene over hand-written or externally-produced portable JSON, where a baked
+// absolute window can appear under any endpoint, not just a curated route. It
+// reads the stored bag directly because it is a bag-level scrub. Once v3 lands
+// the query and raw-SQL arms carry no bag at all, so this narrows to routes on
+// its own — via the migration, not via a guard here.
 function stripWidgetTimeParams(widget: DashboardWidget): DashboardWidget {
 	const params = widget.dataSource.params
 	if (!params || !("startTime" in params || "endTime" in params)) return widget

@@ -2,6 +2,7 @@ import {
 	CHART_DISPLAY_BAR,
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
+	makeQueryBuilderTimeseriesDataSource,
 	makeQueryDraft,
 	metricsTimeseries,
 	paramKey,
@@ -77,49 +78,44 @@ function widgets(serviceName?: string): WidgetDef[] {
 			// bars make the excursions read as discrete incidents rather than a filled ribbon.
 			id: "partition-under-replicated",
 			visualization: "chart",
-			dataSource: {
-				endpoint: "custom_query_builder_timeseries",
-				params: {
-					queries: [
-						{
-							...makeQueryDraft({
-								id: "kafka-replicas",
-								name: "A",
-								dataSource: "metrics",
-								aggregation: "sum",
-								isMonotonic: false,
-								whereClause: where,
-								metricName: "kafka.partition.replicas",
-								metricType: "sum",
-							}),
-							hidden: true,
-						},
-						{
-							...makeQueryDraft({
-								id: "kafka-replicas-isr",
-								name: "B",
-								dataSource: "metrics",
-								aggregation: "sum",
-								isMonotonic: false,
-								whereClause: where,
-								metricName: "kafka.partition.replicas_in_sync",
-								metricType: "sum",
-							}),
-							hidden: true,
-						},
-					],
-					formulas: [
-						{
-							id: "kafka-under-replicated",
-							name: "Under-replicated",
-							expression: "A - B",
-							legend: "replicas out of sync",
-						},
-					],
-					comparison: { mode: "none", includePercentChange: true },
-					debug: false,
-				},
-			},
+			dataSource: makeQueryBuilderTimeseriesDataSource(
+				[
+					{
+						...makeQueryDraft({
+							id: "kafka-replicas",
+							name: "A",
+							dataSource: "metrics",
+							aggregation: "sum",
+							isMonotonic: false,
+							whereClause: where,
+							metricName: "kafka.partition.replicas",
+							metricType: "sum",
+						}),
+						hidden: true,
+					},
+					{
+						...makeQueryDraft({
+							id: "kafka-replicas-isr",
+							name: "B",
+							dataSource: "metrics",
+							aggregation: "sum",
+							isMonotonic: false,
+							whereClause: where,
+							metricName: "kafka.partition.replicas_in_sync",
+							metricType: "sum",
+						}),
+						hidden: true,
+					},
+				],
+				[
+					{
+						id: "kafka-under-replicated",
+						name: "Under-replicated",
+						expression: "A - B",
+						legend: "replicas out of sync",
+					},
+				],
+			),
 			display: { title: "Replicas Out of Sync", ...CHART_DISPLAY_BAR, unit: "number" },
 			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},

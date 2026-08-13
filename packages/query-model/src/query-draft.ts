@@ -20,6 +20,22 @@ export type QueryBuilderMetricType = (typeof QUERY_BUILDER_METRIC_TYPES)[number]
 export const QUERY_BUILDER_SIGNAL_SOURCES = ["default", "meter"] as const
 export type QueryBuilderSignalSource = (typeof QUERY_BUILDER_SIGNAL_SOURCES)[number]
 
+/**
+ * Narrow a free-form string onto the closed sets above.
+ *
+ * The inputs that need this are agent-authored (MCP tool params) and
+ * user-authored (dashboard template parameters), where a wrong value is a
+ * plausible mistake rather than a bug. Returning `null` rather than a default
+ * keeps the choice at the call site: the MCP tools reject with a message naming
+ * the valid values, while the template path falls back — an agent that asked for
+ * `metric_type: "counter"` should be told, not quietly given a gauge.
+ */
+export const toQueryBuilderDataSource = (value: unknown): QueryBuilderDataSource | null =>
+	QUERY_BUILDER_DATA_SOURCES.find((candidate) => candidate === value) ?? null
+
+export const toQueryBuilderMetricType = (value: unknown): QueryBuilderMetricType | null =>
+	QUERY_BUILDER_METRIC_TYPES.find((candidate) => candidate === value) ?? null
+
 export const QueryBuilderAddOnsSchema = Schema.Struct({
 	groupBy: Schema.Boolean,
 	having: Schema.Boolean,

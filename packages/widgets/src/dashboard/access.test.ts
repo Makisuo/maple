@@ -139,6 +139,21 @@ describe("dataSourceRouteParams", () => {
 		expect(dataSourceRouteParams({ kind: "query", resultShape: "list", queries: [] })).toBeUndefined()
 		expect(dataSourceRouteParams({ kind: "raw_sql", sql: "SELECT 1" })).toBeUndefined()
 	})
+
+	it("refuses the v2 bag of a query-builder or raw-SQL widget", () => {
+		// The asymmetry guard: on v2 these physically have a `params` bag, and
+		// handing it back would give v2 an answer v3 cannot give — a caller written
+		// against it would break at the version flip, silently.
+		expect(
+			dataSourceRouteParams({
+				endpoint: "custom_query_builder_timeseries",
+				params: { queries: [draft] },
+			}),
+		).toBeUndefined()
+		expect(
+			dataSourceRouteParams({ endpoint: "raw_sql_chart", params: { sql: "SELECT 1" } }),
+		).toBeUndefined()
+	})
 })
 
 describe("isQueryDataSource", () => {

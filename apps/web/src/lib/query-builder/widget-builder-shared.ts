@@ -308,7 +308,14 @@ export function deriveDefaultWidgetTitle(queries: readonly QueryBuilderQueryDraf
 }
 
 /** Reads a persisted widget's `params.queries` back into editor drafts. */
-export function loadQueryDrafts(params: Record<string, unknown>): {
+/**
+ * Editor drafts from a stored query set.
+ *
+ * Takes `{ queries, formulas }` rather than a params bag so callers hand it the
+ * result of `dataSourceQuerySet` — the accessor that reads v2 and v3 alike —
+ * instead of reaching into `dataSource.params` themselves.
+ */
+export function loadQueryDrafts(params: { queries?: unknown; formulas?: unknown }): {
 	queries: QueryBuilderQueryDraft[]
 	formulas: QueryBuilderFormulaDraft[]
 } {

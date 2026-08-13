@@ -117,11 +117,10 @@ export function WidgetActionsProvider({
 							widget: {
 								id: widget.id,
 								visualization: widget.visualization,
-								dataSource: {
-									endpoint: widget.dataSource.endpoint,
-									params: widget.dataSource.params,
-									transform: widget.dataSource.transform,
-								},
+								// The whole data source rather than three hand-picked fields:
+								// the prefill reads it through the version-agnostic accessors,
+								// and a field list here would have to grow with every v3 arm.
+								dataSource: widget.dataSource,
 								display: { title: widget.display.title },
 							},
 						})

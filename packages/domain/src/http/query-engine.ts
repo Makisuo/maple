@@ -1570,6 +1570,8 @@ export {
 	LogsQueryDraftSchema,
 	MetricsQueryDraftSchema,
 	QueryBuilderAddOnsSchema,
+	QueryBuilderFormulaSchema,
+	type QueryBuilderFormulaPayload,
 	type QueryBuilderQueryDraftPayload,
 	QueryBuilderQueryDraftSchema,
 	TracesQueryDraftSchema,

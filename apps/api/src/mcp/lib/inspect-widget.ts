@@ -13,7 +13,7 @@ import {
 	type FormulaDraft,
 	type QueryRunResult,
 } from "@maple/query-engine/formula-results"
-import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
+import { QueryBuilderFormulaSchema, QueryBuilderQueryDraftSchema } from "@maple/domain/http"
 import {
 	computeBreakdownStats,
 	computeFlags,
@@ -70,7 +70,11 @@ export type DashboardWidget = typeof DashboardWidgetSchema.Type
 
 const QueryBuilderParamsSchema = Schema.Struct({
 	queries: Schema.mutable(Schema.Array(QueryBuilderQueryDraftSchema)),
-	formulas: Schema.optional(Schema.mutable(Schema.Array(Schema.Unknown))),
+	// Typed rather than `Schema.Unknown`: the web timeseries server function — the
+	// path that actually renders these charts — already decodes formulas against
+	// the same required shape, so an inspection that tolerated a partial formula
+	// would report on a chart the renderer refuses to draw.
+	formulas: Schema.optional(Schema.mutable(Schema.Array(QueryBuilderFormulaSchema))),
 })
 
 const decodeQueryBuilderParams = Schema.decodeUnknownEffect(QueryBuilderParamsSchema)
@@ -629,15 +633,11 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		// base timeseries by alias, so only the timeseries endpoint supports them.
 		const formulaEvaluated = hasFormulaWarning && isTimeseries
 		if (formulaEvaluated) {
-			const formulaDrafts: FormulaDraft[] = formulas.map((f, i) => {
-				const obj = (f ?? {}) as Record<string, unknown>
-				return {
-					id: typeof obj.id === "string" ? obj.id : `formula-${i}`,
-					name: typeof obj.name === "string" ? obj.name : `Formula ${i + 1}`,
-					expression: typeof obj.expression === "string" ? obj.expression : "",
-					legend: typeof obj.legend === "string" ? obj.legend : "",
-				}
-			})
+			// No per-field narrowing: `QueryBuilderFormulaSchema` already guarantees
+			// all four strings, and `FormulaDraft` asks for exactly them.
+			const formulaDrafts: FormulaDraft[] = formulas.map(
+				({ id, name, expression, legend }): FormulaDraft => ({ id, name, expression, legend }),
+			)
 
 			for (const fr of buildFormulaResults(formulaDrafts, formulaBaseInputs)) {
 				if (fr.status === "error") {

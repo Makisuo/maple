@@ -19,14 +19,25 @@ import type { QuerySet, QueryResultShape } from "@maple/query-model"
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
-/** The 5 v2 endpoints that carried a user-authored query rather than a fixed route. */
-const QUERY_ENDPOINT_SHAPES: Record<string, QueryResultShape> = {
-	custom_query_builder_timeseries: "timeseries",
-	custom_query_builder_breakdown: "breakdown",
-	custom_query_builder_list: "list",
-}
+/**
+ * The v2 endpoints that carried a user-authored query rather than a fixed route,
+ * keyed by the result shape that is the v3 identity of the same thing.
+ *
+ * Canonical in this direction because `construct.ts` writes it and the MCP
+ * inspector reports it; the endpoint → shape lookup below is derived, so the two
+ * cannot drift.
+ */
+export const QUERY_SHAPE_ENDPOINTS = {
+	timeseries: "custom_query_builder_timeseries",
+	breakdown: "custom_query_builder_breakdown",
+	list: "custom_query_builder_list",
+} as const satisfies Record<QueryResultShape, string>
 
-const RAW_SQL_ENDPOINT = "raw_sql_chart"
+const QUERY_ENDPOINT_SHAPES: Record<string, QueryResultShape> = Object.fromEntries(
+	Object.entries(QUERY_SHAPE_ENDPOINTS).map(([shape, endpoint]) => [endpoint, shape]),
+) as Record<string, QueryResultShape>
+
+export const RAW_SQL_ENDPOINT = "raw_sql_chart"
 
 /**
  * The endpoint name, for consumers that still dispatch on it.
@@ -121,11 +132,24 @@ export const dataSourceRawSql = (dataSource: unknown): RawSqlDataSource | null =
 }
 
 /**
- * The opaque params bag, for the curated fixed-route endpoints that still have
- * one. Returns undefined for a typed v3 arm — there is nothing opaque left.
+ * The opaque params bag of a curated fixed route.
+ *
+ * Route data sources keep an endpoint plus an untyped bag in v3 too — closing
+ * that bag is per-route and a much larger job — so this is the one accessor
+ * whose result stays opaque. Its caller is the widget editor's legacy fallback,
+ * which reads pre-query-builder widgets (`custom_timeseries` and friends).
+ *
+ * Returns undefined for a query-builder or raw-SQL endpoint even on v2, where
+ * the bag physically exists: those have typed accessors above, and returning the
+ * bag here would give v2 an answer v3 cannot give, which is the version
+ * asymmetry these accessors exist to prevent.
  */
 export const dataSourceRouteParams = (dataSource: unknown): Record<string, unknown> | undefined => {
 	if (!isRecord(dataSource)) return undefined
-	if (typeof dataSource.kind === "string" && dataSource.kind !== "route") return undefined
+	if (typeof dataSource.kind === "string") {
+		if (dataSource.kind !== "route") return undefined
+	} else if (dataSourceQuerySet(dataSource) !== null || dataSourceRawSql(dataSource) !== null) {
+		return undefined
+	}
 	return isRecord(dataSource.params) ? dataSource.params : undefined
 }

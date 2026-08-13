@@ -2,6 +2,7 @@ import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 
 import { normalizeRuleQueryDraft, rawSqlHasValueColumn, type RuleFormState } from "@/lib/alerts/form-utils"
 import { buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
+import { dataSourceQuerySet, dataSourceRawSql } from "@maple/widgets/dashboard"
 
 export type WidgetAlertPrefillNotice = {
 	severity: "warning" | "error"
@@ -28,12 +29,6 @@ type DashboardWithWidgets = {
 	id: string
 	widgets: readonly AlertableDashboardWidget[]
 }
-
-const QUERY_BUILDER_ENDPOINTS = new Set([
-	"custom_query_builder_timeseries",
-	"custom_query_builder_breakdown",
-	"custom_query_builder_list",
-])
 
 function record(value: unknown): Record<string, unknown> {
 	return value != null && typeof value === "object" ? (value as Record<string, unknown>) : {}
@@ -76,9 +71,9 @@ function hasHiddenSeries(
 	return Array.isArray(hideSeries.baseNames) && hideSeries.baseNames.length > 0
 }
 
-function comparisonEnabled(params: Record<string, unknown>): boolean {
-	const comparison = record(params.comparison)
-	return typeof comparison.mode === "string" && comparison.mode !== "none"
+function comparisonEnabled(comparison: unknown): boolean {
+	const mode = record(comparison).mode
+	return typeof mode === "string" && mode !== "none"
 }
 
 function queryToForm(
@@ -104,12 +99,15 @@ export function createWidgetAlertPrefill(
 	widget: AlertableDashboardWidget,
 	base: RuleFormState,
 ): WidgetAlertPrefillResult {
-	const endpoint = widget.dataSource?.endpoint
-	const params = record(widget.dataSource?.params)
+	// Structural, not endpoint-string: this is the "create an alert from this
+	// chart" path, and it has to keep reading a widget once the stored data
+	// source flips to the typed v3 union.
+	const rawSql = dataSourceRawSql(widget.dataSource)
+	const querySet = dataSourceQuerySet(widget.dataSource)
 	const notices: WidgetAlertPrefillNotice[] = []
 
-	if (endpoint === "raw_sql_chart") {
-		const sql = typeof params.sql === "string" ? params.sql : ""
+	if (rawSql !== null) {
+		const sql = rawSql.sql
 		if (sql.trim().length === 0) {
 			notices.push({
 				severity: "warning",
@@ -143,8 +141,8 @@ export function createWidgetAlertPrefill(
 		}
 	}
 
-	if (endpoint != null && QUERY_BUILDER_ENDPOINTS.has(endpoint)) {
-		const queries = Array.isArray(params.queries) ? params.queries.filter(isQueryDraftPayload) : []
+	if (querySet !== null) {
+		const queries = querySet.queries.filter(isQueryDraftPayload)
 		const selectedIndex = queries.findIndex(isEnabledVisibleQuery)
 		const selected =
 			selectedIndex >= 0
@@ -171,7 +169,7 @@ export function createWidgetAlertPrefill(
 				message: `This chart has ${visibleEnabledCount} visible queries; the alert uses ${queryLabel(selected, selectedIndex)} only.`,
 			})
 		}
-		const formulas = Array.isArray(params.formulas) ? params.formulas : []
+		const formulas = querySet.formulas ?? []
 		if (formulas.length > 0) {
 			notices.push({
 				severity: "warning",
@@ -179,7 +177,7 @@ export function createWidgetAlertPrefill(
 					"Chart formulas are not represented in alert rules yet; the alert uses the selected base query.",
 			})
 		}
-		if (comparisonEnabled(params)) {
+		if (comparisonEnabled(querySet.comparison)) {
 			notices.push({
 				severity: "warning",
 				message:

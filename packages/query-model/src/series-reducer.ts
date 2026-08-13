@@ -42,8 +42,3 @@ export const ALERT_REDUCERS = REDUCER_TABLE.flatMap((entry) =>
 export const ALERT_REDUCER_TO_SERIES_REDUCER = Object.fromEntries(
 	REDUCER_TABLE.flatMap((entry) => (entry.alert === null ? [] : [[entry.alert, entry.series] as const])),
 ) as Record<AlertReducer, SeriesReducer>
-
-/** Partial in the other direction: `"count"` has no alert spelling. */
-export const SERIES_REDUCER_TO_ALERT_REDUCER = Object.fromEntries(
-	REDUCER_TABLE.flatMap((entry) => (entry.alert === null ? [] : [[entry.series, entry.alert] as const])),
-) as Partial<Record<SeriesReducer, AlertReducer>>

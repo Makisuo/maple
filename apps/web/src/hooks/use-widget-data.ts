@@ -6,7 +6,7 @@ import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-
 import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
 import { useWidgetTimeRangeOverride } from "@/components/dashboard-builder/widgets/widget-time-range-context"
 import { resolveTimeRange } from "@/atoms/dashboard-time-range-atoms"
-import { getServerFunction } from "@/components/dashboard-builder/data-source-registry"
+import { getServerFunction, toWidgetRequest } from "@/components/dashboard-builder/data-source-registry"
 import { hasUnresolvedVariableRefs, interpolateWidgetParams } from "@maple/query-engine"
 import type { DashboardWidget, TimeRange, WidgetDataSource } from "@/components/dashboard-builder/types"
 
@@ -387,6 +387,12 @@ export function useWidgetDataSource(
 	const override = timeRangeOverride ?? contextOverride ?? undefined
 	const overrideKey = override ? encodeKey(override) : null
 
+	// The stored data source resolved to an endpoint + params, once. Everything
+	// below reads `request` rather than `dataSource` so the fetch path never
+	// touches the stored shape — the v2 → v3 flip lands entirely inside
+	// `toWidgetRequest`. Null means no server function can serve it.
+	const request = useMemo(() => toWidgetRequest(dataSource), [dataSource])
+
 	const effectiveTimeRange = useMemo(
 		() => (override ? resolveTimeRange(override) : dashboardTimeRange),
 		// Keyed on the serialized override, not its identity: the dashboard object
@@ -403,8 +409,8 @@ export function useWidgetDataSource(
 	// here rather than left to the API so the tile never fires a request that is
 	// certain to 400 (and never burns the fetch's two retries on it).
 	const exceedsListCap =
-		dataSource !== undefined &&
-		LIST_ENDPOINTS.has(dataSource.endpoint) &&
+		request !== null &&
+		LIST_ENDPOINTS.has(request.endpoint) &&
 		effectiveTimeRange !== null &&
 		rangeSecondsOf(effectiveTimeRange) > MAX_LIST_RANGE_SECONDS
 
@@ -423,20 +429,22 @@ export function useWidgetDataSource(
 	}, [narrowed, effectiveTimeRange])
 	const variablesContext = useDashboardVariablesOptional()
 
-	const isStatic = dataSource?.endpoint === "markdown_static"
-	const hasServerFn = dataSource ? !!getServerFunction(dataSource.endpoint) : false
+	const isStatic = request?.endpoint === "markdown_static"
+	const hasServerFn = request !== null && !!getServerFunction(request.endpoint)
 
 	const disableReason = !dataSource
 		? "No data source configured"
-		: isStatic
-			? null
-			: !resolvedTimeRange
-				? override
-					? "Unable to resolve this widget's time range"
-					: "Unable to resolve dashboard time range"
-				: !hasServerFn
-					? `Unknown data source endpoint: ${dataSource.endpoint}`
-					: null
+		: request === null
+			? "Unsupported data source"
+			: isStatic
+				? null
+				: !resolvedTimeRange
+					? override
+						? "Unable to resolve this widget's time range"
+						: "Unable to resolve dashboard time range"
+					: !hasServerFn
+						? `Unknown data source endpoint: ${request.endpoint}`
+						: null
 
 	// A params blob referencing a defined dashboard variable whose value hasn't
 	// resolved yet (query-variable options still loading, no default) must not
@@ -446,11 +454,11 @@ export function useWidgetDataSource(
 		() =>
 			variablesContext !== null &&
 			hasUnresolvedVariableRefs(
-				dataSource?.params,
+				request?.params,
 				variablesContext.variables.map((variable) => variable.name),
 				variablesContext.values,
 			),
-		[dataSource?.params, variablesContext],
+		[request?.params, variablesContext],
 	)
 
 	const variableValues = variablesContext?.values
@@ -459,7 +467,7 @@ export function useWidgetDataSource(
 		if (!resolvedTimeRange) return {}
 		const base = interpolateParams(
 			{
-				...dataSource?.params,
+				...request?.params,
 				strategy: { enableEmptyRangeFallback: false },
 				startTime: resolvedTimeRange.startTime,
 				endTime: resolvedTimeRange.endTime,
@@ -467,7 +475,7 @@ export function useWidgetDataSource(
 			resolvedTimeRange,
 		)
 		return variableValues ? interpolateWidgetParams(base, variableValues) : base
-	}, [resolvedTimeRange, dataSource?.params, variableValues])
+	}, [resolvedTimeRange, request?.params, variableValues])
 
 	// Stabilise the atom reference across renders. Atom.family already dedupes
 	// by encoded key, but giving React the same Atom instance avoids any path
@@ -477,7 +485,7 @@ export function useWidgetDataSource(
 		if (
 			disableReason !== null ||
 			isStatic ||
-			!dataSource ||
+			request === null ||
 			!enabled ||
 			waitingOnVariables ||
 			(exceedsListCap && !narrowed)
@@ -485,13 +493,13 @@ export function useWidgetDataSource(
 			return disabledResultAtom<unknown, WidgetFetchError>()
 		}
 		return widgetFetchAtom({
-			endpoint: dataSource.endpoint,
+			endpoint: request.endpoint,
 			params: resolvedParams,
 		})
 	}, [
 		disableReason,
 		isStatic,
-		dataSource,
+		request,
 		resolvedParams,
 		enabled,
 		waitingOnVariables,

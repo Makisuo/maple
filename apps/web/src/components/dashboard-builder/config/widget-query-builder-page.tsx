@@ -1,5 +1,6 @@
 import * as React from "react"
 import { widgetTypeByVisualization } from "@maple/domain/http"
+import { dataSourceRawSql } from "@maple/widgets/dashboard"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
@@ -76,16 +77,9 @@ const WidgetPreview = React.memo(function WidgetPreview({ widget }: { widget: Da
 type SourceMode = "builder" | "rawSql"
 
 function readRawSqlDraftFromWidget(widget: DashboardWidget): RawSqlDraft {
-	const params = (widget.dataSource.params ?? {}) as {
-		sql?: unknown
-		granularitySeconds?: unknown
-	}
-	if (widget.dataSource.endpoint === "raw_sql_chart" && typeof params.sql === "string") {
-		return {
-			sql: params.sql,
-			granularitySeconds:
-				typeof params.granularitySeconds === "number" ? params.granularitySeconds : null,
-		}
+	const rawSql = dataSourceRawSql(widget.dataSource)
+	if (rawSql !== null && rawSql.sql.length > 0) {
+		return { sql: rawSql.sql, granularitySeconds: rawSql.granularitySeconds ?? null }
 	}
 	const displayType = visualizationToDisplayType(widget.visualization, widget.display.chartId)
 	return { sql: RAW_SQL_TEMPLATES[displayType], granularitySeconds: null }
@@ -163,7 +157,7 @@ export function WidgetQueryBuilderPage({
 		actions: { setTimeRange },
 	} = useDashboardTimeRange()
 
-	const initialMode: SourceMode = widget.dataSource.endpoint === "raw_sql_chart" ? "rawSql" : "builder"
+	const initialMode: SourceMode = dataSourceRawSql(widget.dataSource) !== null ? "rawSql" : "builder"
 	const [mode, setMode] = React.useState<SourceMode>(initialMode)
 	const initialModeRef = React.useRef<SourceMode>(initialMode)
 

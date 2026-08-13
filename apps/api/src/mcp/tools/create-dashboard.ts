@@ -11,6 +11,12 @@ import {
 } from "@maple/domain/http"
 import { DASHBOARD_TEMPLATES, getTemplate } from "@/dashboard-templates"
 import {
+	QUERY_BUILDER_DATA_SOURCES,
+	QUERY_BUILDER_METRIC_TYPES,
+	toQueryBuilderDataSource,
+	toQueryBuilderMetricType,
+} from "@maple/query-model"
+import {
 	collectBlockingBuilderWarnings,
 	formatValidationSummary,
 	inspectWidgetsAfterMutation,
@@ -93,12 +99,21 @@ function simpleSpecToWidget(
 		return `Widget "${spec.title}": visualization must be one of ${SIMPLE_SPEC_VISUALIZATIONS.join(", ")} for simplified specs. Use add_dashboard_widget for other kinds.`
 	}
 
-	if (!["traces", "logs", "metrics"].includes(source)) {
-		return `Widget "${spec.title}": source must be traces, logs, or metrics.`
+	const dataSource = toQueryBuilderDataSource(source)
+	if (dataSource === null) {
+		return `Widget "${spec.title}": source must be ${QUERY_BUILDER_DATA_SOURCES.join(", ")}.`
 	}
 
-	if (source === "metrics" && (!spec.metric_name || !spec.metric_type)) {
+	if (dataSource === "metrics" && (!spec.metric_name || !spec.metric_type)) {
 		return `Widget "${spec.title}": source=metrics requires metric_name and metric_type. Use list_metrics to discover.`
+	}
+
+	// Narrowed rather than passed through: an unrecognised `metric_type` used to
+	// be silently coerced to `gauge`, which draws a chart that looks fine and
+	// aggregates a counter wrong.
+	const metricType = spec.metric_type === undefined ? undefined : toQueryBuilderMetricType(spec.metric_type)
+	if (spec.metric_type !== undefined && metricType === null) {
+		return `Widget "${spec.title}": metric_type must be one of ${QUERY_BUILDER_METRIC_TYPES.join(", ")}.`
 	}
 
 	const metric = spec.metric ?? (source === "metrics" ? "avg" : "count")
@@ -116,12 +131,12 @@ function simpleSpecToWidget(
 	const queryDraft = makeQueryDraft({
 		id: `q-${id}`,
 		name: spec.title,
-		dataSource: source as "traces" | "logs" | "metrics",
+		dataSource,
 		aggregation: metric,
 		whereClause: where,
 		groupBy,
 		metricName: spec.metric_name,
-		metricType: spec.metric_type,
+		...(metricType === null || metricType === undefined ? {} : { metricType }),
 	})
 
 	const display: Record<string, unknown> = { title: spec.title }

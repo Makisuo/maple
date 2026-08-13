@@ -25,8 +25,17 @@ export {
 	dataSourceRawSql,
 	dataSourceRouteParams,
 	isQueryDataSource,
+	QUERY_SHAPE_ENDPOINTS,
+	RAW_SQL_ENDPOINT,
 	type RawSqlDataSource,
 } from "./access"
+export {
+	makeQueryDataSource,
+	makeRawSqlDataSource,
+	makeRouteDataSource,
+	type QueryDataSourceInput,
+	type RawSqlDataSourceInput,
+} from "./construct"
 export { type DashboardParseOutcome, parseStoredDashboard, stampCurrentVersion } from "./parse"
 export { CURRENT_DASHBOARD_SCHEMA_VERSION, DashboardSchemaVersion } from "./version"
 export { makeWidgetDisplayConfigSchema } from "./shared/display"

@@ -10,10 +10,11 @@ import {
 	templateId,
 } from "@/dashboard-templates/helpers"
 import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
+import { type QueryBuilderMetricType, toQueryBuilderMetricType } from "@maple/query-model"
 
 function widgets(opts: {
 	metricName: string
-	metricType: string
+	metricType: QueryBuilderMetricType
 	serviceName?: string
 	aggregation?: string
 }): WidgetDef[] {
@@ -154,7 +155,9 @@ export const metricOverviewTemplate: TemplateDefinition = {
 	],
 	build: (params) => {
 		const metricName = paramValue(params, "metric_name") ?? ""
-		const metricType = paramValue(params, "metric_type") ?? "sum"
+		// A template parameter is typed by a human into a text field, so an
+		// unrecognised metric type falls back rather than failing the build.
+		const metricType = toQueryBuilderMetricType(paramValue(params, "metric_type")) ?? "sum"
 		const serviceName = paramValue(params, "service_name")
 		const scope = serviceName ? ` for ${serviceName}` : ""
 		return buildPortableDashboard({

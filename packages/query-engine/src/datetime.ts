@@ -333,11 +333,9 @@ export function computeBucketSeconds(
 	const maxBucketForMin = Math.floor(rangeSeconds / minBuckets)
 	if (bucket > maxBucketForMin) {
 		const finer = rungs.filter((candidate) => candidate <= maxBucketForMin)
+		// `rungs[0]` rather than the raw ladder's floor: `minBuckets` must not be
+		// allowed to step below the caller's `minBucketSeconds`.
 		bucket = finer.length > 0 ? finer[finer.length - 1] : rungs[0]
-	}
-	// `minBuckets` may have stepped below the caller's floor on a short window.
-	if (bucket < minBucketSeconds) {
-		bucket = rungs[0]
 	}
 
 	return bucket

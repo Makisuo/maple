@@ -79,49 +79,44 @@ function widgets(serviceName?: string): WidgetDef[] {
 			// The number people actually act on. `unit: "percent"` is a 0–1 ratio, so no `* 100`.
 			id: "keyspace-hit-rate",
 			visualization: "chart",
-			dataSource: {
-				endpoint: "custom_query_builder_timeseries",
-				params: {
-					queries: [
-						{
-							...makeQueryDraft({
-								id: "redis-hit-rate-hits",
-								name: "A",
-								dataSource: "metrics",
-								aggregation: "rate",
-								isMonotonic: true,
-								whereClause: where,
-								metricName: "redis.keyspace.hits",
-								metricType: "sum",
-							}),
-							hidden: true,
-						},
-						{
-							...makeQueryDraft({
-								id: "redis-hit-rate-misses",
-								name: "B",
-								dataSource: "metrics",
-								aggregation: "rate",
-								isMonotonic: true,
-								whereClause: where,
-								metricName: "redis.keyspace.misses",
-								metricType: "sum",
-							}),
-							hidden: true,
-						},
-					],
-					formulas: [
-						{
-							id: "redis-hit-rate",
-							name: "Keyspace hit rate",
-							expression: "A / (A + B)",
-							legend: "hit rate",
-						},
-					],
-					comparison: { mode: "none", includePercentChange: true },
-					debug: false,
-				},
-			},
+			dataSource: makeQueryBuilderTimeseriesDataSource(
+				[
+					{
+						...makeQueryDraft({
+							id: "redis-hit-rate-hits",
+							name: "A",
+							dataSource: "metrics",
+							aggregation: "rate",
+							isMonotonic: true,
+							whereClause: where,
+							metricName: "redis.keyspace.hits",
+							metricType: "sum",
+						}),
+						hidden: true,
+					},
+					{
+						...makeQueryDraft({
+							id: "redis-hit-rate-misses",
+							name: "B",
+							dataSource: "metrics",
+							aggregation: "rate",
+							isMonotonic: true,
+							whereClause: where,
+							metricName: "redis.keyspace.misses",
+							metricType: "sum",
+						}),
+						hidden: true,
+					},
+				],
+				[
+					{
+						id: "redis-hit-rate",
+						name: "Keyspace hit rate",
+						expression: "A / (A + B)",
+						legend: "hit rate",
+					},
+				],
+			),
 			display: { title: "Keyspace Hit Rate", ...CHART_DISPLAY_LINE, unit: "percent" },
 			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},

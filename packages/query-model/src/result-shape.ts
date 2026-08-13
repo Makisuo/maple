@@ -1,5 +1,3 @@
-import { Schema } from "effect"
-
 /**
  * What a query set is asked to return.
  *
@@ -10,5 +8,3 @@ import { Schema } from "effect"
  */
 export const QUERY_RESULT_SHAPES = ["timeseries", "breakdown", "list"] as const
 export type QueryResultShape = (typeof QUERY_RESULT_SHAPES)[number]
-
-export const QueryResultShapeSchema = Schema.Literals(QUERY_RESULT_SHAPES)

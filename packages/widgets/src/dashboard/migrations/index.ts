@@ -43,7 +43,7 @@ export const migrateToLatest = (document: unknown): Record<string, unknown> => {
 	// current. Decode fails either way — but stamped, the next writer persists the
 	// lie and the original version is gone. Failing to decode a document we
 	// genuinely cannot read is recoverable; corrupting it is not.
-	const declared = isPlainObject(document) ? document.schemaVersion : undefined
+	const declared = document.schemaVersion
 	if (typeof declared === "number" && declared > CURRENT_DASHBOARD_SCHEMA_VERSION) {
 		return document
 	}
