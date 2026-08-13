@@ -1,44 +1,20 @@
 import { CURRENT_DASHBOARD_SCHEMA_VERSION, type DashboardSchemaVersion } from "../version"
+import type { DashboardMigration } from "./types"
+import { v1ToV2 } from "./v1-to-v2"
+
+export type { DashboardMigration } from "./types"
 
 /**
- * One step of the stored-document migration chain.
- *
- * Migrations operate on plain JSON, never on decoded class instances, because
- * they run *before* the current schema can decode a legacy document — that is
- * the whole point of having them.
- *
- * Three invariants keep the rollout of a new version reversible. Defend them in
- * review:
- *
- *   1. Pure and in-memory. A migration never writes to storage, and nothing
- *      rewrites a widget's `dataSource.params` — params are carried forward
- *      byte-for-byte so a rollback to the previous version still reads them.
- *   2. Idempotent. `migrate(migrate(x))` must equal `migrate(x)`; a document may
- *      be migrated on every read for as long as it goes unwritten.
- *   3. Total. A migration that does not understand its input returns the input
- *      unchanged rather than throwing. Decode is the only judge of validity, so
- *      a surprising document produces a decode error naming the field — not an
- *      opaque exception from a migration step.
+ * Ordered chain, one entry per version step. `migrations.test.ts` asserts the
+ * chain is contiguous and terminates at `CURRENT_DASHBOARD_SCHEMA_VERSION`, so a
+ * step added out of order fails there rather than silently skipping a document.
  */
-export interface DashboardMigration {
-	readonly from: DashboardSchemaVersion
-	readonly to: DashboardSchemaVersion
-	readonly description: string
-	readonly migrate: (document: Record<string, unknown>) => Record<string, unknown>
-}
-
-/**
- * Ordered chain, one entry per version step. Empty while only version 1 exists;
- * `migrations.test.ts` asserts the chain is contiguous and terminates at
- * `CURRENT_DASHBOARD_SCHEMA_VERSION`, so a step added out of order fails there
- * rather than silently skipping a document.
- */
-export const DASHBOARD_MIGRATIONS: ReadonlyArray<DashboardMigration> = []
+export const DASHBOARD_MIGRATIONS: ReadonlyArray<DashboardMigration> = [v1ToV2]
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
-const KNOWN_SCHEMA_VERSIONS: ReadonlySet<number> = new Set([1])
+const KNOWN_SCHEMA_VERSIONS: ReadonlySet<number> = new Set([1, 2])
 
 /** Absent, non-numeric, or unrecognised `schemaVersion` all read as version 1. */
 export const detectSchemaVersion = (document: unknown): DashboardSchemaVersion => {

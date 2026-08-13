@@ -1,4 +1,4 @@
-import { widgetTypeByVisualization } from "@maple/domain/http"
+import { chartFamilyForChartId, widgetTypeByVisualization } from "@maple/domain/http"
 import type { DashboardTemplateId, DashboardTemplatePreviewKind } from "@maple/domain/http"
 import { blankTemplate } from "./application/blank"
 import { errorTrackingTemplate } from "./application/error-tracking"
@@ -71,11 +71,7 @@ export function getTemplateById(id: DashboardTemplateId): TemplateDefinition | u
  */
 function previewKindForWidget(visualization: string, chartId: unknown): DashboardTemplatePreviewKind {
 	if (visualization === "chart") {
-		if (typeof chartId === "string") {
-			if (chartId.endsWith("-area")) return "area"
-			if (chartId.endsWith("-bar")) return "bar"
-		}
-		return "line"
+		return chartFamilyForChartId(typeof chartId === "string" ? chartId : undefined)
 	}
 	return widgetTypeByVisualization(visualization)?.panelType ?? "line"
 }

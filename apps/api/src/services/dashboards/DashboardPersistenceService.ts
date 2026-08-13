@@ -135,22 +135,15 @@ const validatePayload = Effect.fnUntraced(function* (dashboard: DashboardDocumen
 const createDashboardDocument = (portableDashboard: PortableDashboardDocument, nowMillis: number) => {
 	const now = new Date(nowMillis).toISOString()
 
+	// A document is a portable document plus identity and timestamps, so spread
+	// the portable one rather than naming its fields: a field added to
+	// `makeDashboardDocumentFields`' portable half then reaches storage without a
+	// second edit here. Spreading is safe because an absent `Schema.optionalKey`
+	// field is not an own property of a decoded instance, so nothing forwards a
+	// present `undefined` (which the Schema.Class constructor rejects).
 	return new DashboardDocument({
+		...portableDashboard,
 		id: decodeDashboardIdSync(randomUUID()),
-		name: portableDashboard.name,
-		// `description`/`tags` are `Schema.optionalKey`; the Schema.Class constructor
-		// rejects a present `undefined`. Omit the key when the portable source has none.
-		...(portableDashboard.description !== undefined && {
-			description: portableDashboard.description,
-		}),
-		...(portableDashboard.tags !== undefined && { tags: portableDashboard.tags }),
-		...(portableDashboard.sections !== undefined && { sections: portableDashboard.sections }),
-		...(portableDashboard.variables !== undefined && { variables: portableDashboard.variables }),
-		...(portableDashboard.refreshIntervalSeconds !== undefined && {
-			refreshIntervalSeconds: portableDashboard.refreshIntervalSeconds,
-		}),
-		timeRange: portableDashboard.timeRange,
-		widgets: portableDashboard.widgets,
 		createdAt: decodeIsoDateTimeStringSync(now),
 		updatedAt: decodeIsoDateTimeStringSync(now),
 	})

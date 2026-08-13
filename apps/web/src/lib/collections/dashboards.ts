@@ -1,4 +1,4 @@
-import { DashboardDocument, DashboardId } from "@maple/domain/http"
+import { DashboardDocument, DashboardId, migrateToLatest } from "@maple/domain/http"
 import type { V2Dashboard, V2DashboardUpdateParams } from "@maple/domain/http/v2"
 import { Effect, Schema } from "effect"
 import type { Dashboard } from "@/components/dashboard-builder/types"
@@ -37,8 +37,17 @@ const decodeDashboardDocumentUnknown = Schema.decodeUnknownSync(DashboardDocumen
 // The @electric-sql/client default parser JSON.parses jsonb columns, so
 // `payload_json` normally arrives as an object. Normalize defensively (a raw
 // string can appear if a non-default parser is ever configured) before decoding.
+//
+// `migrateToLatest` is not optional here. Electric streams `payload_json`
+// straight from Postgres, so the browser reads documents in whatever schema
+// version they were last *written* in — the API's lazy upgrade only stamps a
+// document at its next write. Decoding a stored v1 document against the current
+// schema without migrating it first would drop the whole dashboard from the
+// list the moment a closed field held a legacy value.
 const decodeDashboardDocument = (payloadJson: unknown) =>
-	decodeDashboardDocumentUnknown(typeof payloadJson === "string" ? JSON.parse(payloadJson) : payloadJson)
+	decodeDashboardDocumentUnknown(
+		migrateToLatest(typeof payloadJson === "string" ? JSON.parse(payloadJson) : payloadJson),
+	)
 
 /**
  * Widens a decoded domain {@link DashboardDocument} into the mutable web

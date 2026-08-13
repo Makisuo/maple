@@ -28,21 +28,7 @@ export type { SectionTarget }
  * whole board would place a grouped widget below unrelated tiles it will never
  * share a grid with.
  */
-export function findNextPosition(
-	widgets: ReadonlyArray<DashboardWidget>,
-	newWidth: number,
-): { x: number; y: number } {
-	if (widgets.length === 0) return { x: 0, y: 0 }
-
-	const maxY = Math.max(...widgets.map((w) => w.layout.y))
-	const bottomRowWidgets = widgets.filter((w) => w.layout.y === maxY)
-	const rightEdge = Math.max(...bottomRowWidgets.map((w) => w.layout.x + w.layout.w))
-
-	if (rightEdge + newWidth <= CANONICAL_COLS) return { x: rightEdge, y: maxY }
-
-	const maxBottom = Math.max(...widgets.map((w) => w.layout.y + w.layout.h))
-	return { x: 0, y: maxBottom }
-}
+export { findNextPosition } from "@maple/domain/http"
 
 /** The widgets sharing one container, in document order. */
 export function widgetsInContainer(
@@ -59,10 +45,7 @@ export function widgetsInContainer(
  *
  * Widgets whose container has vanished rank as root, matching where they render.
  */
-export function containerRank(
-	widget: DashboardWidget,
-	sections: ReadonlyArray<DashboardSection>,
-): number {
+export function containerRank(widget: DashboardWidget, sections: ReadonlyArray<DashboardSection>): number {
 	if (widget.sectionId === undefined || widget.tabId === undefined) return -1
 	const sectionIndex = sections.findIndex((section) => section.id === widget.sectionId)
 	if (sectionIndex === -1) return -1

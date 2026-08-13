@@ -344,7 +344,7 @@ describe("v2 dashboards over HTTP", () => {
 			widgets: [
 				{
 					id: "error-rate",
-					visualization: "line",
+					visualization: "chart",
 					data_source: { endpoint: "traces_timeseries", params: {} },
 					// `fill_nulls` is `number | false`; `true` is not a member.
 					display: { title: "error-rate", chart_presentation: { fill_nulls: true } },

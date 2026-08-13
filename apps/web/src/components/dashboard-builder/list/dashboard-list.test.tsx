@@ -8,14 +8,19 @@ vi.mock("@tanstack/react-router", () => ({
 	Link: ({ children, ...props }: { children?: React.ReactNode }) => <a {...props}>{children}</a>,
 }))
 
-import type { Dashboard, DashboardWidget, DataSourceEndpoint } from "@/components/dashboard-builder/types"
+import type {
+	Dashboard,
+	DashboardWidget,
+	DataSourceEndpoint,
+	VisualizationType,
+} from "@/components/dashboard-builder/types"
 import { DashboardList } from "./dashboard-list"
 
 afterEach(cleanup)
 
 let seq = 0
 
-const widget = (visualization: string, endpoint: DataSourceEndpoint): DashboardWidget => ({
+const widget = (visualization: VisualizationType, endpoint: DataSourceEndpoint): DashboardWidget => ({
 	id: `w${++seq}`,
 	visualization,
 	dataSource: { endpoint },

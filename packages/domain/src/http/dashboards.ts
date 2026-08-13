@@ -37,12 +37,19 @@ export {
 	DashboardVariableName,
 	DashboardVariableSchema,
 	DashboardWidgetSchema,
+	DASHBOARD_GRID_COLS,
+	findNextPosition,
+	// Any reader that decodes a *stored* payload must migrate it first: a
+	// document is only stamped with the current schema version at its next write,
+	// so Electric hands the browser whatever version it was last written in.
+	migrateToLatest,
 	PortableDashboardDocument,
 	type TimeRange,
 	TimeRangeSchema,
 	WidgetDataSourceSchema,
 	WidgetDisplayConfigSchema,
 	WidgetLayoutSchema,
+	withWidgets,
 } from "@maple/widgets/dashboard"
 
 export class DashboardsListResponse extends Schema.Class<DashboardsListResponse>("DashboardsListResponse")({

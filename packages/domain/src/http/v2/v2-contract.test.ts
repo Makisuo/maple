@@ -248,7 +248,7 @@ describe("V2Dashboard wire format", () => {
 			widgets: [
 				{
 					id: "widget-1",
-					visualization: "line",
+					visualization: "chart",
 					data_source: {
 						endpoint: "queryBuilderTimeseries",
 						params: { start_time: "now-1h", nested_filter: { attribute_key: "service.name" } },

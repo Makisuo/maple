@@ -11,7 +11,6 @@ import {
 import { DASHBOARD_TEMPLATES, getTemplate } from "@/dashboard-templates"
 import { formatValidationSummary, inspectWidgetsAfterMutation } from "@/mcp/lib/inspect-widget"
 import {
-	CHART_DISPLAY_AREA,
 	chartDisplayForMetric,
 	makeQueryBuilderBreakdownDataSource,
 	makeQueryBuilderTimeseriesDataSource,
@@ -199,8 +198,6 @@ function simpleSpecToWidget(
 
 	const ds = makeQueryBuilderTimeseriesDataSource([queryDraft])
 	Object.assign(display, chartDisplayForMetric(metric))
-	// Reference CHART_DISPLAY_AREA so static analyzers don't drop the import.
-	void CHART_DISPLAY_AREA
 
 	return {
 		id,

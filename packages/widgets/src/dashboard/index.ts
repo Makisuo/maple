@@ -32,7 +32,13 @@ export {
 	DashboardSectionTabSchema,
 } from "./shared/sections"
 export { type TimeRange, TimeRangeSchema } from "./shared/time-range"
-export { WidgetDataSourceTransformSchema } from "./shared/transform"
+export {
+	SORT_DIRECTIONS,
+	type SortDirection,
+	STAT_AGGREGATES,
+	type StatAggregate,
+	WidgetDataSourceTransformV2 as WidgetDataSourceTransformSchema,
+} from "./shared/transform"
 // These four are each a const *and* a type of the same name; re-exporting the
 // bare name carries both meanings, which is what consumers rely on.
 export {
@@ -52,12 +58,14 @@ export {
 // through a subclass of a `Schema.Class` still constructs the *parent*, so
 // `instanceof` on a decoded value would be false.
 export {
-	DashboardDocumentV1 as DashboardDocument,
-	PortableDashboardDocumentV1 as PortableDashboardDocument,
-} from "./v1/document"
-export { WidgetDataSourceV1 as WidgetDataSourceSchema } from "./v1/data-source"
-export { WidgetDisplayConfigV1 as WidgetDisplayConfigSchema } from "./v1/widget"
-export { DashboardWidgetV1 as DashboardWidgetSchema } from "./v1/widget"
+	DashboardDocumentV2 as DashboardDocument,
+	PortableDashboardDocumentV2 as PortableDashboardDocument,
+} from "./v2/document"
+export { withWidgets } from "./document-helpers"
+export { DASHBOARD_GRID_COLS, findNextPosition, type PlaceableWidget } from "./placement"
+export { WidgetDataSourceV2 as WidgetDataSourceSchema } from "./v2/data-source"
+export { WidgetDisplayConfigV2 as WidgetDisplayConfigSchema } from "./v2/widget"
+export { DashboardWidgetV2 as DashboardWidgetSchema } from "./v2/widget"
 
 // Section helpers: pure placement/repair logic shared by the API write path,
 // the web read path and the tests.

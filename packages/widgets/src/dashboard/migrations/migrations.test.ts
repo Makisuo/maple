@@ -25,7 +25,37 @@ const legacyDocument = {
 	updatedAt: "2026-01-01T00:00:00.000Z",
 }
 
+/**
+ * A v1 document carrying a value in each of the three fields v2 closes that is
+ * outside the closed set — the shape the migration exists to rescue.
+ */
+const looseDocument = {
+	...legacyDocument,
+	widgets: [
+		{
+			...legacyDocument.widgets[0],
+			visualization: "sankey",
+			dataSource: {
+				endpoint: "custom_query_builder_timeseries",
+				params: { queries: [{ id: "a", name: "A", dataSource: "traces", aggregation: "count" }] },
+				transform: {
+					reduceToValue: { field: "value", aggregate: "median" },
+					sortBy: { field: "value", direction: "descending" },
+				},
+			},
+		},
+	],
+}
+
 const parse = (payload: unknown) => Effect.runSync(parseStoredDashboard(payload))
+
+const firstWidget = (document: Record<string, unknown>): Record<string, unknown> => {
+	const widgets = document.widgets
+	if (!Array.isArray(widgets)) throw new Error("expected widgets to be an array")
+	const [widget] = widgets
+	if (typeof widget !== "object" || widget === null) throw new Error("expected a widget object")
+	return widget
+}
 
 describe("the migration chain", () => {
 	it("is contiguous and terminates at the current version", () => {
@@ -38,22 +68,139 @@ describe("the migration chain", () => {
 		expect(expected).toBe(CURRENT_DASHBOARD_SCHEMA_VERSION)
 	})
 
+	// Run idempotence over the *loose* document too: a step that coerces is only
+	// idempotent if its output is already a member of the set it coerces into,
+	// and a clean fixture cannot tell the difference.
 	it("is idempotent at every step", () => {
 		for (const migration of DASHBOARD_MIGRATIONS) {
-			const once = migration.migrate(legacyDocument)
-			expect(migration.migrate(once)).toEqual(once)
+			for (const fixture of [legacyDocument, looseDocument]) {
+				const once = migration.migrate(fixture)
+				expect(migration.migrate(once)).toEqual(once)
+			}
 		}
 	})
 
 	it("migrateToLatest is idempotent", () => {
-		const once = migrateToLatest(legacyDocument)
-		expect(migrateToLatest(once)).toEqual(once)
+		for (const fixture of [legacyDocument, looseDocument]) {
+			const once = migrateToLatest(fixture)
+			expect(migrateToLatest(once)).toEqual(once)
+		}
 	})
 
 	it("never throws on input it cannot understand", () => {
 		for (const payload of [null, undefined, 42, "nope", [], { widgets: "not an array" }]) {
 			expect(() => migrateToLatest(payload)).not.toThrow()
 		}
+	})
+})
+
+describe("the v1 -> v2 step", () => {
+	it("coerces each closed field to the value the old build already behaved as", () => {
+		const widget = firstWidget(migrateToLatest(looseDocument))
+
+		expect(widget.visualization).toBe("chart")
+
+		const dataSource = widget.dataSource
+		expect(dataSource).toMatchObject({
+			transform: {
+				reduceToValue: { field: "value", aggregate: "first" },
+				// `applyTransform` tests `=== "desc"`, so "descending" already sorted
+				// ascending — coercing to "asc" is what preserves the rendering.
+				sortBy: { field: "value", direction: "asc" },
+			},
+		})
+	})
+
+	it("leaves values that are already in the closed set alone", () => {
+		const widget = firstWidget(
+			migrateToLatest({
+				...legacyDocument,
+				widgets: [
+					{
+						...legacyDocument.widgets[0],
+						visualization: "heatmap",
+						dataSource: {
+							endpoint: "custom_query_builder_breakdown",
+							transform: {
+								reduceToValue: { field: "value", aggregate: "max" },
+								sortBy: { field: "value", direction: "desc" },
+							},
+						},
+					},
+				],
+			}),
+		)
+
+		expect(widget.visualization).toBe("heatmap")
+		expect(widget.dataSource).toMatchObject({
+			transform: {
+				reduceToValue: { aggregate: "max" },
+				sortBy: { direction: "desc" },
+			},
+		})
+	})
+
+	it("carries params byte-for-byte rather than rewriting them", () => {
+		const widget = firstWidget(migrateToLatest(looseDocument))
+		const dataSource = widget.dataSource
+		if (typeof dataSource !== "object" || dataSource === null) throw new Error("expected a dataSource")
+
+		expect(dataSource).toHaveProperty("params", looseDocument.widgets[0]!.dataSource.params)
+	})
+
+	// The whole reason the step coerces instead of rejecting: a rejected document
+	// is refused by the writable path, so one unrecognised widget would lock the
+	// entire dashboard out of editing.
+	it("makes a document with out-of-set values decode rather than reject", () => {
+		const outcome = parse(looseDocument)
+
+		expect(outcome._tag).toBe("Decoded")
+		if (outcome._tag !== "Decoded") return
+		expect(outcome.fromVersion).toBe(1)
+		expect(outcome.document.widgets[0]?.visualization).toBe("chart")
+	})
+
+	// The case that makes this migration more than a rename: `line`/`bar`/`area`
+	// are panel types v1 allowed to be stored in `visualization`, and folding
+	// them to "chart" without recording which one would turn every stored bar and
+	// area widget into a line chart.
+	it.each([
+		["line", "query-builder-line"],
+		["bar", "query-builder-bar"],
+		["area", "query-builder-area"],
+	])("folds the %s panel type into chart and preserves it as a chartId", (panel, chartId) => {
+		const widget = firstWidget(
+			migrateToLatest({
+				...legacyDocument,
+				widgets: [{ ...legacyDocument.widgets[0], visualization: panel, display: { title: "T" } }],
+			}),
+		)
+
+		expect(widget.visualization).toBe("chart")
+		expect(widget.display).toEqual({ title: "T", chartId })
+	})
+
+	it("never overwrites a chartId the widget already has", () => {
+		const widget = firstWidget(
+			migrateToLatest({
+				...legacyDocument,
+				widgets: [
+					{
+						...legacyDocument.widgets[0],
+						visualization: "area",
+						display: { chartId: "gradient-area" },
+					},
+				],
+			}),
+		)
+
+		expect(widget.display).toEqual({ chartId: "gradient-area" })
+	})
+
+	it("leaves a document whose widgets are not an array for decode to reject", () => {
+		const broken = { ...legacyDocument, widgets: "not an array" }
+		expect(migrateToLatest(broken).widgets).toBe("not an array")
+		expect(parse(broken)._tag).toBe("Rejected")
 	})
 })
 

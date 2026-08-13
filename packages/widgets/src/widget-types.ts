@@ -34,19 +34,29 @@ export type PanelType =
 /**
  * The persisted `visualization` field. Narrower than `PanelType`: line, bar and
  * area all persist as `"chart"` and are told apart by `display.chartId`.
+ *
+ * A const tuple rather than a bare union because schema v2 closes the stored
+ * field against it (`Schema.Literals(WIDGET_VISUALIZATIONS)`), and a union alone
+ * has no runtime value to close it with. This is still the single declaration:
+ * `WIDGET_TYPES` is typed `Record<PanelType, WidgetTypeMeta>`, so no entry can
+ * name a visualization missing from here, and `widget-types.test.ts` asserts the
+ * reverse — every member is claimed by at least one panel type.
  */
-export type WidgetVisualization =
-	| "chart"
-	| "hbar"
-	| "stat"
-	| "gauge"
-	| "table"
-	| "list"
-	| "pie"
-	| "histogram"
-	| "heatmap"
-	| "funnel"
-	| "markdown"
+export const WIDGET_VISUALIZATIONS = [
+	"chart",
+	"hbar",
+	"stat",
+	"gauge",
+	"table",
+	"list",
+	"pie",
+	"histogram",
+	"heatmap",
+	"funnel",
+	"markdown",
+] as const
+
+export type WidgetVisualization = (typeof WIDGET_VISUALIZATIONS)[number]
 
 /**
  * Display keys owned by exactly one panel type. `buildWidgetDisplay` clears the
@@ -110,6 +120,16 @@ export interface WidgetTypeMeta {
 	readonly mcpWidth?: number
 	/** Raw-SQL display type. `undefined` for types with no SQL rendering (notes). */
 	readonly rawSqlDisplayType?: RawSqlDisplayType
+	/**
+	 * Renders a single number, so its query must be reduced to one via a
+	 * `reduceToValue` transform for the tile to read `data[0].value`.
+	 *
+	 * A flag rather than a `visualization === "stat" || === "gauge"` test because
+	 * that test was written out in four places — the web raw-SQL builder, the MCP
+	 * one, the Perses importer and the widget editor — and the Perses copy had
+	 * already drifted (it also fires on `displayType === "stat"`).
+	 */
+	readonly isScalar: boolean
 	readonly ownedDisplayKeys: ReadonlyArray<OwnedDisplayKey>
 	/** Lowers to the breakdown endpoint, which is meaningless without a group-by. */
 	readonly requiresGroupBy: boolean
@@ -137,6 +157,7 @@ const chartPanel = (
 	defaultLayout: CHART_LAYOUT,
 	templateHeight: CHART_TEMPLATE_HEIGHT,
 	rawSqlDisplayType: panelType,
+	isScalar: false,
 	ownedDisplayKeys: ["chartId", "stacked", "curveType", "thresholds"],
 	requiresGroupBy: false,
 	// One `chart` entry covers line/bar/area for the MCP tools; the display type
@@ -165,6 +186,7 @@ const breakdownPanel = (
 	defaultLayout: CHART_LAYOUT,
 	templateHeight: CHART_TEMPLATE_HEIGHT,
 	rawSqlDisplayType: panelType,
+	isScalar: false,
 	ownedDisplayKeys: options.ownedDisplayKeys ?? ["chartId"],
 	requiresGroupBy: options.requiresGroupBy,
 	mcpExposed: true,
@@ -185,6 +207,7 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		defaultLayout: { w: 3, h: 4, minW: 2, minH: 2 },
 		templateHeight: { h: 2, minH: 2 },
 		rawSqlDisplayType: "stat",
+		isScalar: true,
 		ownedDisplayKeys: ["sparkline", "thresholds"],
 		requiresGroupBy: false,
 		mcpExposed: true,
@@ -201,6 +224,7 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		// A gauge is a scalar on an arc — the same single-row SQL shape as a stat,
 		// and there is no `gauge` member of `RawSqlDisplayType`.
 		rawSqlDisplayType: "stat",
+		isScalar: true,
 		ownedDisplayKeys: ["gauge", "thresholds"],
 		requiresGroupBy: false,
 		mcpExposed: true,
@@ -214,6 +238,7 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		defaultLayout: WIDE_LAYOUT,
 		templateHeight: WIDE_TEMPLATE_HEIGHT,
 		rawSqlDisplayType: "table",
+		isScalar: false,
 		ownedDisplayKeys: ["columns"],
 		requiresGroupBy: false,
 		mcpExposed: true,
@@ -231,6 +256,7 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		// raw-SQL rendering and falls back to `line` like every other type without
 		// one. Giving it `"table"` looks right but silently changes what an
 		// MCP-created `visualization: "list"` + `sql` widget renders as.
+		isScalar: false,
 		ownedDisplayKeys: ["columns", "listDataSource", "listWhereClause", "listLimit", "listRootOnly"],
 		requiresGroupBy: false,
 		mcpExposed: true,
@@ -273,6 +299,7 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		// scanned in a row of tiles.
 		defaultLayout: { w: 4, h: 5, minW: 2, minH: 3 },
 		templateHeight: WIDE_TEMPLATE_HEIGHT,
+		isScalar: false,
 		ownedDisplayKeys: ["markdown"],
 		requiresGroupBy: false,
 		mcpExposed: true,
@@ -315,10 +342,34 @@ export const widgetTypeByVisualization = (visualization: string): WidgetTypeMeta
 export const widgetTypeByPersesKind = (kind: string | undefined): WidgetTypeMeta =>
 	PANEL_TYPES.find((meta) => kind != null && meta.persesKinds.includes(kind)) ?? WIDGET_TYPES.line
 
+/**
+ * Rows a list widget shows when its limit is left blank.
+ *
+ * One constant because there were four different answers for one field: the
+ * fetch used `?? 50`, the save persisted `?? 25`, presets seeded `25`, and
+ * templates and the MCP tools wrote `10`. A list saved with an empty limit
+ * therefore fetched 50 rows, stored 25, and came back showing 25 — the row count
+ * changed across a reload with no edit.
+ *
+ * 50 rather than 25 because it is what the widget already fetches, so existing
+ * lists keep rendering the same number of rows and only the persisted value
+ * changes. An explicit limit — the `10`s in templates and presets — is a
+ * deliberate per-widget choice and is untouched; it simply stops being a default.
+ */
+export const DEFAULT_LIST_LIMIT = 50
+
+/** Narrows an arbitrary stored/user-supplied string to the closed set. */
+export const isWidgetVisualization = (value: unknown): value is WidgetVisualization =>
+	WIDGET_VISUALIZATIONS.some((candidate) => candidate === value)
+
 /** Distinct `visualization` values the MCP dashboard tools accept. */
-export const MCP_VISUALIZATIONS: ReadonlyArray<string> = [
+export const MCP_VISUALIZATIONS: ReadonlyArray<WidgetVisualization> = [
 	...new Set(PANEL_TYPES.filter((meta) => meta.mcpExposed).map((meta) => meta.visualization)),
 ]
+
+/** Narrows to the MCP-exposed subset — what `add_dashboard_widget` accepts. */
+export const isMcpVisualization = (value: unknown): value is WidgetVisualization =>
+	MCP_VISUALIZATIONS.some((candidate) => candidate === value)
 
 /**
  * Grid rows a widget occupies in a dashboard template, and the smallest it may be
@@ -338,15 +389,39 @@ export const defaultWidgetLayout = (
 })
 
 /**
+ * Which of line/bar/area a `visualization: "chart"` widget draws, from its
+ * `chartId`.
+ *
+ * One function because there were three, and they disagreed: this module matched
+ * `chartId.includes("bar")`, `dashboard-templates/index.ts` matched
+ * `endsWith("-bar")` (checking area first), and the web consulted the live chart
+ * registry. No id in the registry contains both "bar" and "area", so they agreed
+ * on every real input and differed only on hypotheticals — but the next id added
+ * decides which of three answers a widget gets, depending on who asks.
+ *
+ * Exact match against the canonical ids first, so the ids the builder actually
+ * writes never depend on substring luck. The suffix and substring passes are the
+ * legacy fallback, kept because non-canonical styles predate the canonical ids
+ * (`gradient-area`, `latency-line`, `default-bar`, …) and are still stored.
+ */
+export const chartFamilyForChartId = (chartId: string | undefined): "line" | "bar" | "area" => {
+	if (chartId === undefined) return "line"
+	if (chartId === WIDGET_TYPES.bar.chartId) return "bar"
+	if (chartId === WIDGET_TYPES.area.chartId) return "area"
+	if (chartId === WIDGET_TYPES.line.chartId) return "line"
+	if (chartId.endsWith("-bar")) return "bar"
+	if (chartId.endsWith("-area")) return "area"
+	if (chartId.includes("bar")) return "bar"
+	if (chartId.includes("area")) return "area"
+	return "line"
+}
+
+/**
  * The raw-SQL display type a widget renders with. `chartId` disambiguates the
  * three panel types that share `visualization: "chart"`.
  */
 export const rawSqlDisplayTypeFor = (visualization: string, chartId?: string): RawSqlDisplayType => {
-	if (visualization === "chart") {
-		if (chartId?.includes("bar")) return "bar"
-		if (chartId?.includes("area")) return "area"
-		return "line"
-	}
+	if (visualization === "chart") return chartFamilyForChartId(chartId)
 	return widgetTypeByVisualization(visualization)?.rawSqlDisplayType ?? "line"
 }
 

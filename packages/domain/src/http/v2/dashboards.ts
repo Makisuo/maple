@@ -16,7 +16,8 @@ import {
 	DashboardVariableName,
 	DashboardVersionChangeKind,
 } from "../dashboards"
-import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "../widget-types"
+import { SORT_DIRECTIONS, STAT_AGGREGATES } from "@maple/widgets/dashboard"
+import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES, WIDGET_VISUALIZATIONS } from "../widget-types"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ConflictError, V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
@@ -61,6 +62,17 @@ const UnknownRecord = UnknownRecordWire.pipe(
 	}),
 )
 
+// The widget schemas below (transform, data source, display, layout, widget) are
+// a deliberate re-declaration of the stored schema in
+// `packages/widgets/src/dashboard/shared/`, differing only by `encodeKeys` for
+// snake_case. Keeping them explicit rather than deriving them mechanically
+// preserves the OpenAPI `identifier`/`title` annotations that shape the published
+// v2 spec.
+//
+// The cost of a clone is drift, so it is guarded rather than trusted:
+// `dashboard-widget-parity.test.ts` asserts the two are assignable and that every
+// stored field reaches the wire under its mechanical snake_case name. Add a field
+// to the stored display and that test fails until it is mirrored here.
 const V2WidgetTransform = Schema.Struct({
 	fieldMap: optional(StringRecord),
 	hideSeries: optional(
@@ -72,9 +84,10 @@ const V2WidgetTransform = Schema.Struct({
 		Schema.Struct({ valueField: Schema.String }).pipe(Schema.encodeKeys({ valueField: "value_field" })),
 	),
 	reduceToValue: optional(
-		Schema.Struct({ field: Schema.String, aggregate: optional(Schema.String) }).pipe(
-			Schema.encodeKeys({}),
-		),
+		Schema.Struct({
+			field: Schema.String,
+			aggregate: optional(Schema.Literals(STAT_AGGREGATES)),
+		}).pipe(Schema.encodeKeys({})),
 	),
 	computeRatio: optional(
 		Schema.Struct({
@@ -86,7 +99,10 @@ const V2WidgetTransform = Schema.Struct({
 	),
 	limit: optional(Schema.Number),
 	sortBy: optional(
-		Schema.Struct({ field: Schema.String, direction: Schema.String }).pipe(Schema.encodeKeys({})),
+		Schema.Struct({
+			field: Schema.String,
+			direction: Schema.Literals(SORT_DIRECTIONS),
+		}).pipe(Schema.encodeKeys({})),
 	),
 }).pipe(
 	Schema.encodeKeys({
@@ -260,7 +276,10 @@ export const V2WidgetLayout = Schema.Struct({
 
 export const V2DashboardWidget = Schema.Struct({
 	id: Schema.String,
-	visualization: Schema.String,
+	// Closed against the widget-type table, matching the stored schema. An
+	// unrecognised kind is a 400 here rather than a widget that silently renders
+	// as a line chart via the renderer registry's fallback.
+	visualization: Schema.Literals(WIDGET_VISUALIZATIONS),
 	dataSource: V2WidgetDataSource,
 	display: V2WidgetDisplay,
 	layout: V2WidgetLayout,

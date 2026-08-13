@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest"
 import {
 	defaultWidgetHeight,
 	defaultWidgetLayout,
+	isMcpVisualization,
+	isWidgetVisualization,
 	MCP_VISUALIZATIONS,
 	PANEL_TYPES,
 	rawSqlDisplayTypeFor,
 	widgetTypeByPersesKind,
 	widgetTypeByVisualization,
+	WIDGET_VISUALIZATIONS,
 } from "./widget-types"
 
 describe("defaultWidgetHeight", () => {
@@ -167,5 +170,44 @@ describe("MCP_VISUALIZATIONS", () => {
 			"stat",
 			"table",
 		])
+	})
+})
+
+// `WIDGET_VISUALIZATIONS` is the const tuple schema v2 closes the stored
+// `visualization` field against. `WIDGET_TYPES` is typed against it, so the
+// compiler already stops the table naming a member that isn't here; this covers
+// the direction the compiler can't — a member left behind after the panel type
+// that claimed it was removed, which would keep a dead kind decodable forever.
+describe("WIDGET_VISUALIZATIONS", () => {
+	it("is exactly the set the widget type table claims", () => {
+		expect([...WIDGET_VISUALIZATIONS].sort()).toEqual(
+			[...new Set(PANEL_TYPES.map((meta) => meta.visualization))].sort(),
+		)
+	})
+
+	it("narrows only its own members", () => {
+		for (const visualization of WIDGET_VISUALIZATIONS) {
+			expect(isWidgetVisualization(visualization)).toBe(true)
+		}
+		for (const notAVisualization of ["sankey", "Chart", "", "line", undefined, null, 7]) {
+			expect(isWidgetVisualization(notAVisualization)).toBe(false)
+		}
+	})
+
+	// `line` is a PanelType, not a visualization — it persists as `chart`. The
+	// guard must not accept it, or a widget could be stored under a kind the
+	// renderer registry has no entry for.
+	it("rejects panel types that are not themselves a visualization", () => {
+		expect(isWidgetVisualization("line")).toBe(false)
+		expect(isWidgetVisualization("bar")).toBe(false)
+		expect(isWidgetVisualization("area")).toBe(false)
+	})
+
+	it("scopes the MCP subset to the same set", () => {
+		for (const visualization of MCP_VISUALIZATIONS) {
+			expect(isWidgetVisualization(visualization)).toBe(true)
+			expect(isMcpVisualization(visualization)).toBe(true)
+		}
+		expect(isMcpVisualization("sankey")).toBe(false)
 	})
 })
