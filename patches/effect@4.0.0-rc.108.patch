@@ -1,4 +1,5 @@
 diff --git a/dist/internal/redacted.js b/dist/internal/redacted.js
+index b71c514f6c36983a6fb94a663e9ff878d58a3c1b..6192bdac6f761aef3c8e1ed2f3b4747ffd55692f 100644
 --- a/dist/internal/redacted.js
 +++ b/dist/internal/redacted.js
 @@ -1,5 +1,11 @@
@@ -14,34 +15,11 @@ diff --git a/dist/internal/redacted.js b/dist/internal/redacted.js
  /** @internal */
  export const value = self => {
    if (redactedRegistry.has(self)) {
-diff --git a/dist/Schema.d.ts b/dist/Schema.d.ts
---- a/dist/Schema.d.ts
-+++ b/dist/Schema.d.ts
-@@ -9856,6 +9856,8 @@ export declare const TaggedError: {
-         } & S["fields"]]>, Cause_.YieldableError & Brand>;
-     };
- };
-+/** @deprecated Compatibility alias for dependencies that still target Effect beta.102. */
-+export declare const TaggedErrorClass: typeof TaggedError;
- /**
-  * A thunk that, given the `fast-check` module, returns an `Arbitrary<T>`.
-  * Use this type when you need to defer instantiation of the arbitrary,
-diff --git a/dist/Schema.js b/dist/Schema.js
---- a/dist/Schema.js
-+++ b/dist/Schema.js
-@@ -9211,6 +9211,8 @@ export const TaggedError = identifier => {
-     return Error(identifier ?? tagValue)(struct, annotations);
-   };
- };
-+/** @deprecated Compatibility alias for dependencies that still target Effect beta.102. */
-+export const TaggedErrorClass = TaggedError;
- /**
-  * Derives a {@link LazyArbitrary} from a schema. The result is memoized so
-  * repeated calls with the same schema are cheap.
 diff --git a/dist/unstable/ai/McpServer.d.ts b/dist/unstable/ai/McpServer.d.ts
+index 58e3fd6cf9c4e4c3d3c970ebef5ae2e44a16da35..ccd5027e268bd4888d66b443c557a80dcb2569be 100644
 --- a/dist/unstable/ai/McpServer.d.ts
 +++ b/dist/unstable/ai/McpServer.d.ts
-@@ -24,7 +24,7 @@ import * as RpcMessage from "../rpc/RpcMessage.ts";
+@@ -25,7 +25,7 @@ import * as RpcMessage from "../rpc/RpcMessage.ts";
  import * as RpcServer from "../rpc/RpcServer.ts";
  import type * as McpProtocol from "./McpProtocol.ts";
  import { CallToolResult, ElicitationDeclined, GetPromptResult, InternalError, InvalidParams, McpErrorBase, McpServerClient, Prompt, Resource, ResourceTemplate, ServerNotificationRpcs, Tool as McpTool } from "./McpSchema.ts";
@@ -83,9 +61,10 @@ diff --git a/dist/unstable/ai/McpServer.d.ts b/dist/unstable/ai/McpServer.d.ts
  /**
   * Registers a `Toolkit` with the `McpServer`.
 diff --git a/dist/unstable/ai/McpServer.js b/dist/unstable/ai/McpServer.js
+index 073350187152036c2c8432428ea073645d8eb77d..51a027528d22a665b77e4bfef1a999a256efa475 100644
 --- a/dist/unstable/ai/McpServer.js
 +++ b/dist/unstable/ai/McpServer.js
-@@ -228,15 +228,56 @@ const decodeCancelledNotification = /*#__PURE__*/Schema.decodeUnknownEffect(/*#
+@@ -228,16 +228,57 @@ const decodeCancelledNotification = /*#__PURE__*/Schema.decodeUnknownEffect(/*#_
  const requestKey = requestId => `${typeof requestId}:${requestId}`;
  class McpClientKey extends Data.Class {}
  class McpProtocolState extends /*#__PURE__*/Context.Service()("effect/ai/McpServer/McpProtocolState") {}
@@ -146,21 +125,26 @@ diff --git a/dist/unstable/ai/McpServer.js b/dist/unstable/ai/McpServer.js
 +const layerMcpProtocolState = (protocols, clientSessions) => Layer.effect(McpProtocolState)(makeMcpProtocolState(protocols, clientSessions));
  /**
   * Runs an MCP server over the current `RpcServer.Protocol`.
-@@ -253,5 +294,5 @@ const layerMcpProtocolState = protocols => Layer.effect(McpProtocolState)(makeMc
+  *
+@@ -252,7 +293,7 @@ const layerMcpProtocolState = protocols => Layer.effect(McpProtocolState)(makeMc
+  */
  export const run = /*#__PURE__*/Effect.fnUntraced(function* (options) {
    const protocolStateOption = yield* Effect.serviceOption(McpProtocolState);
 -  const protocolState = Option.isSome(protocolStateOption) ? protocolStateOption.value : yield* makeMcpProtocolState(options.protocols);
 +  const protocolState = Option.isSome(protocolStateOption) ? protocolStateOption.value : yield* makeMcpProtocolState(options.protocols, options.clientSessions);
    return yield* runWithProtocolState(options, protocolState);
  });
-@@ -568,5 +609,5 @@ const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options,
+ const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options, protocolState) {
+@@ -579,7 +620,7 @@ const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options,
+  * @category layers
   * @since 4.0.0
   */
 -export const layer = options => layerWithProtocolState(options).pipe(Layer.provide(layerMcpProtocolState(options.protocols)));
 +export const layer = options => layerWithProtocolState(options).pipe(Layer.provide(layerMcpProtocolState(options.protocols, options.clientSessions)));
  const layerWithProtocolState = options => Layer.effectDiscard(Effect.gen(function* () {
    const protocolState = yield* McpProtocolState;
-@@ -709,6 +750,6 @@ export const layerStdio = options => layer(options).pipe(Layer.provide(RpcServer
+   yield* Effect.forkScoped(runWithProtocolState(options, protocolState));
+@@ -721,7 +762,7 @@ export const layerStdio = options => layer(options).pipe(Layer.provide(RpcServer
   * @since 4.0.0
   */
  export const layerHttp = options => {
@@ -168,3 +152,4 @@ diff --git a/dist/unstable/ai/McpServer.js b/dist/unstable/ai/McpServer.js
 +  const protocolState = layerMcpProtocolState(options.protocols, options.clientSessions);
    const methodNotAllowedResponse = HttpServerResponse.empty({
      status: 405,
+     headers: {
