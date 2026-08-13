@@ -1,10 +1,4 @@
-import {
-	ROOT_CONTAINER_KEY,
-	containerKeyFor,
-	containerKeyOf,
-	withSectionTarget,
-	type SectionTarget,
-} from "@maple/domain/http"
+import { containerKeyFor, containerKeyOf, withSectionTarget, type SectionTarget } from "@maple/domain/http"
 
 import { CANONICAL_COLS } from "@/components/dashboard-builder/canvas/grid-breakpoints"
 import type { DashboardSection, DashboardWidget } from "@/components/dashboard-builder/types"
@@ -17,7 +11,7 @@ import type { DashboardSection, DashboardWidget } from "@/components/dashboard-b
 // Pure and React-free so the placement rules are testable without rendering a
 // grid.
 
-export { containerKeyFor, containerKeyOf, ROOT_CONTAINER_KEY, withSectionTarget }
+export { containerKeyFor, containerKeyOf, withSectionTarget }
 export type { SectionTarget }
 
 /**

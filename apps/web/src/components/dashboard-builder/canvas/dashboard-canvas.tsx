@@ -2,13 +2,10 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { GridLayout, noCompactor, verticalCompactor } from "react-grid-layout"
 import type { Layout } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
-import { useContainerSize } from "@maple/ui/hooks/use-container-size"
-import { cn } from "@maple/ui/lib/utils"
 
 import {
 	GRID_ROW_HEIGHT,
 	projectLayout,
-	tierForWidth,
 	type GridTier,
 } from "@/components/dashboard-builder/canvas/grid-breakpoints"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
@@ -32,16 +29,6 @@ function sameLayout(a: Layout, b: Layout): boolean {
 			other.h === item.h
 		)
 	})
-}
-
-interface DashboardCanvasProps {
-	widgets: DashboardWidget[]
-	/**
-	 * When true, the grid is read-only: drag/resize disabled, layout-change
-	 * callbacks suppressed. Used while previewing a historical version so
-	 * interactions don't accidentally mutate the live dashboard.
-	 */
-	readOnly?: boolean
 }
 
 /**
@@ -191,50 +178,5 @@ export function DashboardGrid({ widgets, width, tier, editable }: DashboardGridP
 				</div>
 			))}
 		</GridLayout>
-	)
-}
-
-/**
- * A single measured grid over a flat widget list.
- *
- * Still the entry point for the surfaces that render a board without sections —
- * the history preview and the template live preview. The sectioned dashboard
- * route goes through `DashboardSections`, which measures once for every group.
- */
-export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasProps) {
-	const { mode } = useDashboardActions()
-	// Deliberately not react-grid-layout's own `useContainerWidth`: it seeds
-	// width at a hardcoded 1280 and its ResizeObserver was observed failing to
-	// correct that here, so the grid laid every tile out for a 1280px canvas and
-	// overflowed the real ~1150px one. `useContainerSize` reads the box
-	// synchronously before observing, which is exactly the case that broke.
-	const containerRef = useRef<HTMLDivElement>(null)
-	const { width: measuredWidth } = useContainerSize(containerRef)
-	// Rounded so subpixel container widths don't re-lay-out the whole grid.
-	const width = Math.round(measuredWidth)
-	const measured = width > 0
-
-	// Only the canonical tier's layout is authored and persisted; narrower ones
-	// are projected from it at render time. Editing there would write a
-	// phone-shaped layout over the real one, so drag, resize and persistence are
-	// all gated on `tier.canonical`.
-	const tier = tierForWidth(width)
-	const editable = mode === "edit" && !readOnly && tier.canonical
-
-	return (
-		// `is-layout-locked` lets WidgetShell hide its drag grip when the grid is
-		// showing a generated layout — a grip that can't be dragged reads as a
-		// bug. Widget-level actions (configure, clone, delete) stay available;
-		// only the arrangement is locked.
-		<div ref={containerRef} className={cn("group/canvas", !tier.canonical && "is-layout-locked")}>
-			{mode === "edit" && !readOnly && !tier.canonical && (
-				<p className="mb-3 text-xs text-muted-foreground">
-					Showing a layout adapted to this width. Widen the window to rearrange widgets.
-				</p>
-			)}
-			{measured && (
-				<DashboardGrid widgets={widgets} width={width} tier={tier} editable={editable} />
-			)}
-		</div>
 	)
 }
