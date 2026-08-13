@@ -269,6 +269,7 @@
         "@maple/effect-db": "workspace:*",
         "@maple/infra": "workspace:*",
         "@maple/query-engine": "workspace:*",
+        "@maple/query-model": "workspace:*",
         "@maple/thinking-orbs": "workspace:*",
         "@maple/ui": "workspace:*",
         "@maple/unitflow": "workspace:*",
