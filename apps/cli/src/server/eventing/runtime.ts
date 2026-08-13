@@ -3,117 +3,17 @@ import {
 	ProjectorRegistry,
 	SignalSourceRegistry,
 	assertSignalProjectionInputBudget,
-	fieldKey,
-	isJsonValue,
 	SignalProjectionSpecSchema,
 	type MapleCloudEvent,
-	type NormalizedSignal,
 	type ProjectionFailure,
 	type SignalProjectionSpec,
-	type SignalScalar,
 } from "@maple/eventing-core"
 import { Schema } from "effect"
 import { LocalEventingControlStore } from "./control-store"
+import { registerGitLabProjectors } from "./gitlab-projectors"
 import { OTLP_LOG_ADAPTER } from "./otlp"
 
 const TENANT_ID = "local"
-
-interface GitLabIssueProjectorConfig {
-	readonly includeBody: boolean
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
-
-const gitlabProjectorConfig = (value: unknown): GitLabIssueProjectorConfig => {
-	if (!isRecord(value)) throw new Error("gitlab.issue.created projector config must be an object")
-	const keys = Object.keys(value)
-	if (keys.some((key) => key !== "includeBody"))
-		throw new Error("gitlab.issue.created projector config contains an unknown field")
-	if (value.includeBody !== undefined && typeof value.includeBody !== "boolean")
-		throw new Error("gitlab.issue.created includeBody must be boolean")
-	return { includeBody: value.includeBody === true }
-}
-
-const field = (signal: NormalizedSignal, namespace: "resource" | "attribute", key: string) =>
-	signal.fields.get(fieldKey({ namespace, key }))
-
-const scalarString = (value: SignalScalar | undefined, label: string, required = false) => {
-	if (value === undefined) {
-		if (required) throw new Error(`GitLab issue event is missing ${label}`)
-		return undefined
-	}
-	if (value.type !== "string") throw new Error(`GitLab issue event ${label} must be a string`)
-	return value.value
-}
-
-const scalarInt64 = (value: SignalScalar | undefined, label: string, required = false) => {
-	if (value === undefined) {
-		if (required) throw new Error(`GitLab issue event is missing ${label}`)
-		return undefined
-	}
-	if (value.type !== "int64") throw new Error(`GitLab issue event ${label} must be an int64`)
-	return value.value
-}
-
-const gitlabIssueProjector = {
-	id: "gitlab.issue.created",
-	version: 1,
-	sourceKinds: ["otel.log"],
-	outputType: "dev.maple.gitlab.issue.created.v1",
-	dataSchema: "urn:maple:event-schema:gitlab-issue-created:v1",
-	decodeConfig: gitlabProjectorConfig,
-	project: (signal: NormalizedSignal, config: GitLabIssueProjectorConfig) => {
-		const projectId = scalarInt64(field(signal, "attribute", "gitlab.project.id"), "gitlab.project.id")
-		const projectPath = scalarString(
-			field(signal, "attribute", "gitlab.project.path"),
-			"gitlab.project.path",
-			true,
-		)!
-		const issueId = scalarInt64(field(signal, "attribute", "gitlab.issue.id"), "gitlab.issue.id")
-		const issueIid = scalarInt64(
-			field(signal, "attribute", "gitlab.issue.iid"),
-			"gitlab.issue.iid",
-			true,
-		)!
-		const title = scalarString(field(signal, "attribute", "gitlab.issue.title"), "gitlab.issue.title")
-		const url = scalarString(field(signal, "attribute", "gitlab.issue.url"), "gitlab.issue.url")
-		const actorId = scalarInt64(field(signal, "attribute", "gitlab.user.id"), "gitlab.user.id")
-		const actorUsername = scalarString(
-			field(signal, "attribute", "gitlab.user.username"),
-			"gitlab.user.username",
-		)
-		const serviceName = scalarString(field(signal, "resource", "service.name"), "service.name")
-		const candidateBody =
-			isRecord(signal.data) && isRecord(signal.data.record) ? signal.data.record.body : undefined
-		const body = isJsonValue(candidateBody) ? candidateBody : undefined
-		return {
-			subject: `${projectPath}/issues/${issueIid}`,
-			data: {
-				project: {
-					...(projectId === undefined ? {} : { id: projectId }),
-					path: projectPath,
-				},
-				issue: {
-					...(issueId === undefined ? {} : { id: issueId }),
-					iid: issueIid,
-					...(title === undefined ? {} : { title }),
-					...(url === undefined ? {} : { url }),
-				},
-				...(actorId === undefined && actorUsername === undefined
-					? {}
-					: {
-							actor: {
-								...(actorId === undefined ? {} : { id: actorId }),
-								...(actorUsername === undefined ? {} : { username: actorUsername }),
-							},
-						}),
-				...(serviceName === undefined ? {} : { serviceName }),
-				...(config.includeBody && body !== undefined ? { body } : {}),
-			},
-		}
-	},
-} as const
 
 export interface LocalProjectionEvaluation {
 	readonly events: readonly MapleCloudEvent[]
@@ -145,7 +45,7 @@ export class LocalEventingRuntime {
 	constructor(store: LocalEventingControlStore) {
 		this.#store = store
 		this.#sources = new SignalSourceRegistry().register(OTLP_LOG_ADAPTER.definition)
-		this.#projectors = new ProjectorRegistry().register(gitlabIssueProjector)
+		this.#projectors = registerGitLabProjectors(new ProjectorRegistry())
 		const specs = store.loadEnabledProjections(TENANT_ID)
 		this.#compiled = CompiledProjectionRegistry.compile(specs, this.#sources, this.#projectors)
 		this.#activeSourceKinds = new Set(specs.map(({ sourceKind }) => sourceKind))
