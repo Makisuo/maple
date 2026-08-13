@@ -7,6 +7,9 @@ on:
             - "apps/ingest/**"
             - "packages/db/drizzle/**"
             - "packages/db/src/schema/**"
+            # The read path's slug mirror: `slug_set_mirrors_the_typescript_vendors`
+            # include_str!s it, so a TS-only edit must run cargo test too.
+            - "packages/domain/src/ai/vendors.ts"
             - ".github/scripts/format-ingest-benchmark-comment.py"
             - ".github/workflows/ingest-rust-tests.yml"
     pull_request:
@@ -14,6 +17,9 @@ on:
             - "apps/ingest/**"
             - "packages/db/drizzle/**"
             - "packages/db/src/schema/**"
+            # The read path's slug mirror: `slug_set_mirrors_the_typescript_vendors`
+            # include_str!s it, so a TS-only edit must run cargo test too.
+            - "packages/domain/src/ai/vendors.ts"
             - ".github/scripts/format-ingest-benchmark-comment.py"
             - ".github/workflows/ingest-rust-tests.yml"
     workflow_dispatch:

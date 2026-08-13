@@ -12,6 +12,8 @@ use axum::routing::post;
 use axum::Router;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use flate2::read::GzDecoder;
+use maple_ingest::ai_classifier::ResourceContext;
+use maple_ingest::ai_registry::registry;
 use maple_ingest::telemetry::{
     ClickHouseBreakerConfig, DatasourceNames, SamplingPolicy, TelemetryPipeline, TinybirdConfig,
 };
@@ -77,6 +79,129 @@ fn bench_ingest_accept(c: &mut Criterion) {
 
     group.finish();
     let _ = std::fs::remove_dir_all(&fixture.queue_dir);
+}
+
+/// Classifier cost in isolation (write-side plan constraint 2: ~50 ns/span mean,
+/// ~300 ns worst case on a 60-attribute AI span, out of a ~500 ns total per-span
+/// budget). Everything here is pure CPU — no pipeline, no I/O.
+fn bench_ai_classifier(c: &mut Criterion) {
+    let registry = registry();
+    let mut group = c.benchmark_group("ai_classifier");
+
+    // Typical non-AI server span: nothing survives the prefilter.
+    let http_resource = vec![
+        string_kv("service.name", "checkout-api"),
+        string_kv("telemetry.sdk.name", "opentelemetry"),
+        string_kv("telemetry.sdk.language", "nodejs"),
+        string_kv("deployment.environment.name", "production"),
+    ];
+    let http_scope = InstrumentationScope {
+        name: "@opentelemetry/instrumentation-http".to_string(),
+        version: "0.57.0".to_string(),
+        ..Default::default()
+    };
+    let http_attributes: Vec<KeyValue> = [
+        ("http.request.method", "POST"),
+        ("url.path", "/v2/checkout"),
+        ("url.scheme", "https"),
+        ("server.address", "api.example.com"),
+        ("http.response.status_code", "200"),
+    ]
+    .iter()
+    .map(|(k, v)| string_kv(k, v))
+    .collect();
+    let http_attributes_15: Vec<KeyValue> = http_attributes
+        .iter()
+        .cloned()
+        .chain((0..10).map(|i| string_kv(&format!("net.peer.detail_{i}"), "value")))
+        .collect();
+
+    // A fat AI span: 60 attributes, most of them registry-referenced.
+    let ai_resource = vec![
+        string_kv("service.name", "spring-ai-trace-capture"),
+        string_kv("telemetry.sdk.name", "opentelemetry"),
+    ];
+    let ai_scope = InstrumentationScope {
+        name: "org.springframework.boot".to_string(),
+        version: "4.1.0".to_string(),
+        ..Default::default()
+    };
+    let mut ai_attributes = vec![
+        string_kv("spring.ai.kind", "chat_client"),
+        string_kv("gen_ai.system", "spring_ai"),
+        string_kv("gen_ai.operation.name", "chat"),
+        string_kv("gen_ai.request.model", "gpt-4o-mini"),
+        string_kv("gen_ai.response.model", "gpt-4o-mini-2024-07-18"),
+        string_kv("session.id", "sess-4f9c1b2e-77aa-4c31-9d0e-3b8f1a6d2c55"),
+    ];
+    ai_attributes.extend((0..54).map(|i| {
+        string_kv(
+            &format!("gen_ai.request.parameter_{i}"),
+            "a moderately long attribute value, as vendors emit",
+        )
+    }));
+
+    group.bench_function("non_ai_span_5_attrs", |b| {
+        let resource = ResourceContext::new(registry, &http_resource);
+        let scope = resource.scope(Some(&http_scope), "");
+        b.iter(|| black_box(scope.classify_span("POST /v2/checkout", black_box(&http_attributes))));
+    });
+
+    group.bench_function("non_ai_span_15_attrs", |b| {
+        let resource = ResourceContext::new(registry, &http_resource);
+        let scope = resource.scope(Some(&http_scope), "");
+        b.iter(|| {
+            black_box(scope.classify_span("POST /v2/checkout", black_box(&http_attributes_15)))
+        });
+    });
+
+    group.bench_function("ai_span_60_attrs", |b| {
+        let resource = ResourceContext::new(registry, &ai_resource);
+        let scope = resource.scope(Some(&ai_scope), "");
+        b.iter(|| black_box(scope.classify_span("chat_client", black_box(&ai_attributes))));
+    });
+
+    // Per-batch hoisting: one ResourceSpans + one ScopeSpans. Amortized over the
+    // spans of that scope, so it is charged once per scope, not per span.
+    // Same span shape, but the 54 filler keys start with a byte no registry key or
+    // prefix begins with, so the prefilter rejects them on the byte screen alone.
+    // The delta against `ai_span_60_attrs` is the cost of hashing keys that survive
+    // the screen and miss the exact-key map — the classifier's main hotspot today.
+    let mut ai_attributes_screened = ai_attributes[..6].to_vec();
+    ai_attributes_screened.extend((0..54).map(|i| {
+        string_kv(
+            &format!("zzz.request.parameter_{i}"),
+            "a moderately long attribute value, as vendors emit",
+        )
+    }));
+    group.bench_function("ai_span_60_attrs_screened_out", |b| {
+        let resource = ResourceContext::new(registry, &ai_resource);
+        let scope = resource.scope(Some(&ai_scope), "");
+        b.iter(|| {
+            black_box(scope.classify_span("chat_client", black_box(&ai_attributes_screened)))
+        });
+    });
+
+    group.bench_function("hoist_resource_and_scope", |b| {
+        b.iter(|| {
+            let resource = ResourceContext::new(registry, black_box(&ai_resource));
+            black_box(resource.scope(Some(&ai_scope), ""));
+        });
+    });
+
+    // The realistic unit: hoist once, then classify 20 spans (the plan's spans/trace
+    // figure). Divide by 20 for the effective per-span cost including hoisting.
+    group.bench_function("hoisted_scope_20_ai_spans", |b| {
+        b.iter(|| {
+            let resource = ResourceContext::new(registry, black_box(&ai_resource));
+            let scope = resource.scope(Some(&ai_scope), "");
+            for _ in 0..20 {
+                black_box(scope.classify_span("chat_client", black_box(&ai_attributes)));
+            }
+        });
+    });
+
+    group.finish();
 }
 
 impl BenchFixture {
@@ -253,5 +378,5 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
 }
 
-criterion_group!(benches, bench_ingest_accept);
+criterion_group!(benches, bench_ingest_accept, bench_ai_classifier);
 criterion_main!(benches);

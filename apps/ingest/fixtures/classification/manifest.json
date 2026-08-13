@@ -1,0 +1,305 @@
+{
+  "format_version": 1,
+  "generated_by": "scripts/generate-classification-fixture.ts",
+  "source": {
+    "repo": "trace-capture",
+    "commit": "3b9a1a7b9f033ad460addaac628ed2bfa0c584ac",
+    "dirty": false,
+    "seeds_sha256": "a51ae86ad37bbf3f4158b54030cd51b608f0fde3cc98d0c09727f995964580ae",
+    "generator_sha256": "b62aedf2e25483a52dd7f54c52ea26144f0d4ac28579b40705fa8dc96162d739"
+  },
+  "truncate_limit": 256,
+  "dedup": {
+    "value_sensitive_keys": [
+      "agno.run.id",
+      "flue.instance.id",
+      "flue.operation.kind",
+      "gcp.vertex.agent.invocation_id",
+      "gcp.vertex.agent.session_id",
+      "gen_ai.agent.call.id",
+      "gen_ai.conversation.id",
+      "gen_ai.operation.name",
+      "gen_ai.provider.name",
+      "gen_ai.response.finish_reason",
+      "gen_ai.system",
+      "langsmith.internal_provider",
+      "langsmith.metadata.thread_id",
+      "llamaindex.run_id",
+      "mastra.metadata.resourceId",
+      "mastra.metadata.runId",
+      "metadata.user_api_key_end_user_id",
+      "metadata.user_api_key_user_id",
+      "openinference.span.kind",
+      "service.name",
+      "session.id",
+      "span.type",
+      "spring.ai.chat.client.conversation.id",
+      "spring.ai.kind",
+      "tags.llamaindex.run_id",
+      "telemetry.sdk.name",
+      "user.id"
+    ]
+  },
+  "redaction": {
+    "identifier_keys": [
+      "gcp.vertex.agent.invocation_id",
+      "gen_ai.conversation.id",
+      "mastra.metadata.runId",
+      "session.id",
+      "user.id"
+    ],
+    "identifier_prefixes": [
+      "ai.settings.context."
+    ],
+    "identifier_scheme": "sha256(salt \\0 value), rendered UUIDv7-shaped or `redacted-<32 hex>` by input shape; preserves distinctness, emptiness, seed decoy_values and strict-UUIDv7 shape",
+    "distinct_identifiers": 139,
+    "content_masked_captures": "non_seed",
+    "content_masked_values": 10906
+  },
+  "corpus": {
+    "captures": 57,
+    "seed_named_captures": 41,
+    "spans_total": 9945
+  },
+  "fixture": {
+    "lines": 2117,
+    "weighted_spans": 9945,
+    "kept_seed_capture": 1514,
+    "kept_seed_relevant": 445,
+    "dedup_representatives": 158,
+    "dedup_collapsed": 7828,
+    "bytes": 4668192,
+    "sha256": "4d9078964a45de1c48effa79b4fc57707813305640402b72b901d98b111e495c"
+  },
+  "expectations_sha256": "404dfe0d18a89f27765cdd08d6dc8d029bf8c5ff15edb9f4f4fcf9ebbd1bad11",
+  "per_capture": {
+    "agno_agents": {
+      "spans": 20,
+      "emitted": 20
+    },
+    "agno_user": {
+      "spans": 17,
+      "emitted": 17
+    },
+    "claude_agent_sdk_agents": {
+      "spans": 32,
+      "emitted": 32
+    },
+    "claude_agent_sdk_probe": {
+      "spans": 3,
+      "emitted": 3
+    },
+    "claude_agent_sdk_probe2": {
+      "spans": 3,
+      "emitted": 3
+    },
+    "claude_agent_sdk_user": {
+      "spans": 23,
+      "emitted": 23
+    },
+    "crewai_agents": {
+      "spans": 17,
+      "emitted": 17
+    },
+    "crewai_user": {
+      "spans": 25,
+      "emitted": 25
+    },
+    "dspy_agents": {
+      "spans": 73,
+      "emitted": 73
+    },
+    "dspy_user": {
+      "spans": 87,
+      "emitted": 87
+    },
+    "effect_ai_agents": {
+      "spans": 44,
+      "emitted": 44
+    },
+    "effect_ai_probe": {
+      "spans": 64,
+      "emitted": 64
+    },
+    "effect_ai_user": {
+      "spans": 62,
+      "emitted": 62
+    },
+    "eve_slack": {
+      "spans": 2311,
+      "emitted": 165
+    },
+    "eve_slack_no_messages": {
+      "spans": 1927,
+      "emitted": 126
+    },
+    "flue_agents": {
+      "spans": 21,
+      "emitted": 21
+    },
+    "flue_smoke": {
+      "spans": 2,
+      "emitted": 2
+    },
+    "flue_user": {
+      "spans": 25,
+      "emitted": 25
+    },
+    "google_adk_agents": {
+      "spans": 30,
+      "emitted": 30
+    },
+    "google_adk_agents_probe": {
+      "spans": 38,
+      "emitted": 38
+    },
+    "google_adk_hitl_probe": {
+      "spans": 20,
+      "emitted": 20
+    },
+    "google_adk_user": {
+      "spans": 39,
+      "emitted": 39
+    },
+    "haystack_agents": {
+      "spans": 42,
+      "emitted": 42
+    },
+    "haystack_user": {
+      "spans": 38,
+      "emitted": 38
+    },
+    "langgraph_agents": {
+      "spans": 17,
+      "emitted": 17
+    },
+    "langgraph_smoke": {
+      "spans": 3,
+      "emitted": 3
+    },
+    "langgraph_user": {
+      "spans": 42,
+      "emitted": 42
+    },
+    "litellm_agents": {
+      "spans": 16,
+      "emitted": 16
+    },
+    "litellm_semconv_probe": {
+      "spans": 7,
+      "emitted": 7
+    },
+    "litellm_user": {
+      "spans": 18,
+      "emitted": 18
+    },
+    "llamaindex_agents": {
+      "spans": 75,
+      "emitted": 75
+    },
+    "llamaindex_user": {
+      "spans": 79,
+      "emitted": 79
+    },
+    "mastra_agents": {
+      "spans": 37,
+      "emitted": 37
+    },
+    "mastra_hitl_probe": {
+      "spans": 21,
+      "emitted": 21
+    },
+    "mastra_user": {
+      "spans": 66,
+      "emitted": 66
+    },
+    "microsoft_agent_framework_agents": {
+      "spans": 32,
+      "emitted": 32
+    },
+    "microsoft_agent_framework_user": {
+      "spans": 21,
+      "emitted": 21
+    },
+    "openai_agents_sdk_agents": {
+      "spans": 32,
+      "emitted": 32
+    },
+    "openai_agents_sdk_user": {
+      "spans": 44,
+      "emitted": 44
+    },
+    "openrouter": {
+      "spans": 3968,
+      "emitted": 88
+    },
+    "pydantic_ai_agents": {
+      "spans": 20,
+      "emitted": 20
+    },
+    "pydantic_ai_user": {
+      "spans": 19,
+      "emitted": 19
+    },
+    "semantic_kernel_agents": {
+      "spans": 47,
+      "emitted": 47
+    },
+    "semantic_kernel_user": {
+      "spans": 28,
+      "emitted": 28
+    },
+    "smoke-adk": {
+      "spans": 4,
+      "emitted": 4
+    },
+    "smoke-test": {
+      "spans": 3,
+      "emitted": 2
+    },
+    "smolagents_agents": {
+      "spans": 33,
+      "emitted": 33
+    },
+    "smolagents_agents_probe": {
+      "spans": 37,
+      "emitted": 37
+    },
+    "smolagents_probe": {
+      "spans": 20,
+      "emitted": 20
+    },
+    "smolagents_user": {
+      "spans": 42,
+      "emitted": 42
+    },
+    "spring_ai_agents": {
+      "spans": 43,
+      "emitted": 43
+    },
+    "spring_ai_user": {
+      "spans": 75,
+      "emitted": 75
+    },
+    "strands_agents": {
+      "spans": 25,
+      "emitted": 25
+    },
+    "strands_user": {
+      "spans": 33,
+      "emitted": 33
+    },
+    "vercel_ai_sdk_agents": {
+      "spans": 29,
+      "emitted": 29
+    },
+    "vercel_ai_sdk_user": {
+      "spans": 28,
+      "emitted": 28
+    },
+    "vercel_ai_sdk_user_legacy": {
+      "spans": 18,
+      "emitted": 18
+    }
+  }
+}
