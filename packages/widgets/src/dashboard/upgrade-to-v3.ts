@@ -84,7 +84,9 @@ export const fromLegacyDataSource = (dataSource: unknown): V3DataSource => {
 		return {
 			kind: "query",
 			resultShape,
-			queries: Array.isArray(params.queries) ? (params.queries as QuerySet["queries"]) : [],
+			queries: Array.isArray(params.queries)
+				? (params.queries.map(repairQueryDraft) as QuerySet["queries"])
+				: [],
 			...put(
 				"formulas",
 				Array.isArray(params.formulas) ? (params.formulas as QuerySet["formulas"]) : undefined,
@@ -109,6 +111,28 @@ export const fromLegacyDataSource = (dataSource: unknown): V3DataSource => {
 		...put("params", isRecord(dataSource.params) ? dataSource.params : undefined),
 		...transform,
 	}
+}
+
+/**
+ * Repairs the one v2-era looseness that stops a stored draft decoding.
+ *
+ * `queries` lived inside the untyped `params` bag, so nothing ever validated the
+ * drafts inside it and the UI wrote `limit` as a number on some paths while the
+ * schema declares `string | undefined`. v3 hoists `queries` to a typed field, so
+ * those rows stop decoding — and a rejected document is refused by the writable
+ * path, which locks the entire dashboard out of editing over one widget.
+ *
+ * Coerce rather than reject, exactly as `v1ToV2` does for the three fields v2
+ * closed: `String(50)` is the value the builder round-trips to anyway, so a
+ * repaired draft behaves identically to how it rendered before.
+ *
+ * Deliberately narrow. This is not a general-purpose draft repair — it fixes the
+ * single field that the production dry run proved is stored off-type, and any
+ * other malformation still quarantines loudly rather than being papered over.
+ */
+const repairQueryDraft = (draft: unknown): unknown => {
+	if (!isRecord(draft) || typeof draft.limit !== "number") return draft
+	return { ...draft, limit: String(draft.limit) }
 }
 
 /**

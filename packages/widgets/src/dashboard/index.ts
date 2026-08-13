@@ -107,6 +107,7 @@ export {
 } from "./v3/document"
 export { withWidgets } from "./document-helpers"
 export { DASHBOARD_GRID_COLS, findNextPosition, type PlaceableWidget } from "./placement"
+export { DashboardDocumentV2 } from "./v2/document"
 export { WidgetDataSourceV3 as WidgetDataSourceSchema } from "./v3/data-source"
 export { WidgetDisplayConfigV3 as WidgetDisplayConfigSchema } from "./v3/widget"
 export { DashboardWidgetV3 as DashboardWidgetSchema } from "./v3/widget"

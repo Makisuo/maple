@@ -45,7 +45,12 @@
  */
 import { Option, Schema } from "effect"
 import postgres from "postgres"
-import { DashboardDocument, isDocumentV3, upgradeStoredDocument } from "@maple/widgets/dashboard"
+import {
+	DashboardDocument,
+	DashboardDocumentV2,
+	isDocumentV3,
+	upgradeStoredDocument,
+} from "@maple/widgets/dashboard"
 import { fail, withBranchConnection } from "./planetscale-connection"
 
 const BATCH_DEFAULT = 100
@@ -56,6 +61,16 @@ const BATCH_PAUSE_MS = 150
 // text comes from a second `decodeUnknownExit` on the failure path where it is
 // actually wanted.
 const decodeDocument = Schema.decodeUnknownOption(DashboardDocument)
+/**
+ * The PREVIOUS schema, and the only honest way to ask "was this row already
+ * broken?".
+ *
+ * Decoding the raw payload against the CURRENT schema cannot answer that: a v2
+ * row never decodes as v3, that being the entire point of the backfill. Getting
+ * this wrong made every unconvertible row look like pre-existing breakage and let
+ * the run exit 0 on rows the flip actually strands.
+ */
+const decodeV2Document = Schema.decodeUnknownOption(DashboardDocumentV2)
 const decodeIssue = (payload: unknown): string => {
 	const exit = Schema.decodeUnknownExit(DashboardDocument)(payload)
 	return exit._tag === "Failure" ? String(exit.cause) : ""
@@ -133,9 +148,10 @@ const classify = (payload: unknown) => {
 	const upgraded = upgradeStoredDocument(payload)
 	if (Option.isNone(decodeDocument(upgraded))) {
 		const issue = decodeIssue(upgraded)
-		// Did it decode BEFORE the transform? If not, this row is already broken in
-		// production and the flip is not what stranded it.
-		return Option.isNone(decodeDocument(payload))
+		// Did it decode under the OLD schema? If not, the row is already failing in
+		// production today and the flip is not what stranded it. If it did, the flip
+		// is what breaks it — that is a quarantine, and it gates the run.
+		return Option.isNone(decodeV2Document(payload))
 			? { kind: "broken_before" as const, issue }
 			: { kind: "quarantined" as const, issue }
 	}

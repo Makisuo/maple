@@ -212,3 +212,39 @@ describe("isDocumentV3", () => {
 		expect(isDocumentV3(document)).toBe(true)
 	})
 })
+
+// Found by the production dry run, not by inspection: 1 live dashboard and 3
+// version snapshots stored `queries[].limit` as a number, because v2 kept the
+// drafts inside an unvalidated `params` bag. Without the coercion those rows
+// quarantine, and a quarantined row is a dashboard nobody can open.
+describe("repairs v2-era drafts that were never validated", () => {
+	const withLimit = (limit: unknown) => ({
+		endpoint: QUERY_SHAPE_ENDPOINTS.breakdown,
+		params: { queries: [{ ...query, limit }] },
+	})
+
+	it("coerces a numeric limit to the string the schema declares", () => {
+		expect(migratedSource(withLimit(50))).toMatchObject({
+			queries: [{ ...query, limit: "50" }],
+		})
+	})
+
+	it("makes the repaired document decode, where it would otherwise quarantine", () => {
+		const decode = Schema.decodeUnknownSync(DashboardDocumentV3)
+		expect(() =>
+			decode({ ...upgraded(documentWith(withLimit(50))), schemaVersion: 3 }),
+		).not.toThrow()
+	})
+
+	it("leaves a well-formed string limit alone", () => {
+		expect(migratedSource(withLimit("25"))).toMatchObject({ queries: [{ ...query, limit: "25" }] })
+	})
+
+	// Narrow on purpose: anything else still fails loudly rather than being
+	// silently repaired into something that decodes but means nothing.
+	it("does not invent a repair for an unrelated malformation", () => {
+		expect(migratedSource(withLimit({ nested: true }))).toMatchObject({
+			queries: [{ ...query, limit: { nested: true } }],
+		})
+	})
+})
