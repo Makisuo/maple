@@ -1,5 +1,5 @@
 {
-	"projectRevision": "3bf63ab19fcba1a20ebaf6a97b49acfc2ecf00f1589c11438349bb87d21f77b7",
+	"projectRevision": "3e7d570ffbf917f749dfee58f5920c8cdfbff887366323da7249fc99cce0d349",
 	"orgPlaceholder": "__ORG__",
 	"datasources": {
 		"traces": {
@@ -30,7 +30,12 @@
 				"LinksTraceId",
 				"LinksSpanId",
 				"LinksTraceState",
-				"LinksAttributes"
+				"LinksAttributes",
+				"AiVendor",
+				"AiSessionKeyState",
+				"AiSessionKeyHash",
+				"AiRulesVersion",
+				"AiRollupHour"
 			],
 			"selects": [
 				"__ORG__",
@@ -58,9 +63,14 @@
 				"links_trace_id",
 				"links_span_id",
 				"links_trace_state",
-				"links_attributes"
+				"links_attributes",
+				"ai_vendor",
+				"ai_session_key_state",
+				"ai_session_key_hash",
+				"ai_rules_version",
+				"ai_rollup_hour"
 			],
-			"inputSchema": "start_time DateTime64(9), trace_id String, span_id String, parent_span_id String, trace_state String, span_name LowCardinality(String), span_kind LowCardinality(String), service_name LowCardinality(String), resource_schema_url String, resource_attributes Map(LowCardinality(String), String), scope_schema_url String, scope_name String, scope_version String, scope_attributes Map(LowCardinality(String), String), duration UInt64, status_code LowCardinality(String), status_message String, span_attributes Map(LowCardinality(String), String), events_timestamp Array(DateTime64(9)), events_name Array(LowCardinality(String)), events_attributes Array(Map(LowCardinality(String), String)), links_trace_id Array(String), links_span_id Array(String), links_trace_state Array(String), links_attributes Array(Map(LowCardinality(String), String))"
+			"inputSchema": "start_time DateTime64(9), trace_id String, span_id String, parent_span_id String, trace_state String, span_name LowCardinality(String), span_kind LowCardinality(String), service_name LowCardinality(String), resource_schema_url String, resource_attributes Map(LowCardinality(String), String), scope_schema_url String, scope_name String, scope_version String, scope_attributes Map(LowCardinality(String), String), duration UInt64, status_code LowCardinality(String), status_message String, span_attributes Map(LowCardinality(String), String), events_timestamp Array(DateTime64(9)), events_name Array(LowCardinality(String)), events_attributes Array(Map(LowCardinality(String), String)), links_trace_id Array(String), links_span_id Array(String), links_trace_state Array(String), links_attributes Array(Map(LowCardinality(String), String)), ai_vendor LowCardinality(String), ai_session_key_state UInt8, ai_session_key_hash UInt64, ai_rules_version UInt32, ai_rollup_hour DateTime('UTC')"
 		},
 		"logs": {
 			"table": "logs",

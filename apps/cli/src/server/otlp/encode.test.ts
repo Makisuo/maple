@@ -6,6 +6,7 @@ import {
 	encodeLogs,
 	encodeMetrics,
 	encodeTraces,
+	formatRollupHour,
 	formatTimestampNano,
 	OtlpFieldError,
 	spanIdHex,
@@ -254,6 +255,56 @@ describe("value-level spot checks", () => {
 		expect(anyValueString({ arrayValue: { values: [{ stringValue: "a" }, { intValue: 1 }] } })).toBe(
 			'["a","1"]',
 		)
+	})
+})
+
+// `formatRollupHour` is a hand-port of Rust `rollup_hour_secs` +
+// `format_datetime_secs` (`apps/ingest/src/telemetry.rs`), and a hand-port with no
+// boundary tests is a guess. The receive time and the expectations below are the
+// same ones `rollup_hour_clamps_stale_and_future_timestamps_to_receive_time`
+// asserts on the Rust side, so a divergence shows up as one of these failing
+// rather than as local stores partitioning differently from the gateway.
+describe("formatRollupHour clamp (port of the Rust rollup_hour_secs)", () => {
+	const RECEIVE_SECS = 1_700_000_000 // 2023-11-14 22:13:20 UTC
+	const RECEIVE_HOUR = "2023-11-14 22:00:00"
+	const DAY = 86_400
+	const nanos = (secs: number) => (BigInt(secs) * 1_000_000_000n).toString()
+	const at = (secs: number) => formatRollupHour(nanos(secs), RECEIVE_SECS)
+
+	it("keeps the span's own hour inside the window, including both edges", () => {
+		// The window is inclusive at both ends: `>=` past, `<=` future.
+		expect(at(RECEIVE_SECS - 3_600)).toBe("2023-11-14 21:00:00")
+		expect(at(RECEIVE_SECS - 7 * DAY)).toBe("2023-11-07 22:00:00") // exactly −7d
+		expect(at(RECEIVE_SECS + DAY)).toBe("2023-11-15 22:00:00") // exactly +1d
+	})
+
+	it("clamps to the receive hour one second outside either edge", () => {
+		// One second, not one hour: an off-by-one in the comparison would survive a
+		// coarser probe, and the past edge is exactly where a legitimate late
+		// backfill turns into unbounded partition creation.
+		expect(at(RECEIVE_SECS - 7 * DAY - 1)).toBe(RECEIVE_HOUR)
+		expect(at(RECEIVE_SECS + DAY + 1)).toBe(RECEIVE_HOUR)
+		// The replay/attacker case the clamp exists for, and the zero timestamp a
+		// span with no start time produces — 1970 is outside the window, so it
+		// clamps rather than creating a 1970 partition.
+		expect(at(RECEIVE_SECS + 30 * DAY)).toBe(RECEIVE_HOUR)
+		expect(formatRollupHour("0", RECEIVE_SECS)).toBe(RECEIVE_HOUR)
+		// The TS side alone has to survive a missing or unparseable field, where
+		// Rust has a `u64`. Both fall back to 0, hence to the receive hour.
+		expect(formatRollupHour(undefined, RECEIVE_SECS)).toBe(RECEIVE_HOUR)
+		expect(formatRollupHour("not-a-number", RECEIVE_SECS)).toBe(RECEIVE_HOUR)
+	})
+
+	it("renders DateTime('UTC'), not DateTime64(9)", () => {
+		// 19 chars on an hour boundary, no fractional part — that is
+		// `format_datetime_secs`, and it is what ClickHouse's
+		// `input('… AiRollupHour DateTime(\'UTC\')')` parses.
+		const hour = at(RECEIVE_SECS)
+		expect(hour).toHaveLength(19)
+		expect(hour).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:00:00$/)
+		expect((Date.parse(`${hour.replace(" ", "T")}Z`) / 1000) % 3600).toBe(0)
+		// The epoch itself, where the Rust `None` branch returns the same literal.
+		expect(formatRollupHour("0", 0)).toBe("1970-01-01 00:00:00")
 	})
 })
 

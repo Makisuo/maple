@@ -37,6 +37,7 @@ import { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error
 import { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
 import { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
 import { v4ToV5ServiceOverviewMinutelyModule } from "./local-store-migrations/v4-to-v5-service-overview-minutely"
+import { v5ToV6AiClassificationColumnsModule } from "./local-store-migrations/v5-to-v6-ai-classification-columns"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -56,6 +57,11 @@ export {
 } from "./local-store-migration-module"
 
 export { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
+export { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
+export { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
+export { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
+export { v4ToV5ServiceOverviewMinutelyModule } from "./local-store-migrations/v4-to-v5-service-overview-minutely"
+export { v5ToV6AiClassificationColumnsModule } from "./local-store-migrations/v5-to-v6-ai-classification-columns"
 
 const NONTERMINAL_PHASES = new Set<MigrationPhase>([
 	"planned",
@@ -121,6 +127,7 @@ export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> =
 	v2ToV3ServiceMapIngestBridgeModule,
 	v3ToV4WebEventsModule,
 	v4ToV5ServiceOverviewMinutelyModule,
+	v5ToV6AiClassificationColumnsModule,
 ]
 
 export const validateMigrationRegistry = (
