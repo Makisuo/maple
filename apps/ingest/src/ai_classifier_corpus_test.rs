@@ -11,28 +11,24 @@
 //! TRACE_CAPTURE_DIR=~/Documents/repos/trace-capture cargo test --lib corpus
 //! ```
 //!
-//! Unset, every test here skips cleanly — the corpus is a sibling repo, not a
-//! vendored fixture (the plan says to vendor it eventually; until then CI without
-//! the corpus still runs the unit invariants).
+//! Unset, every test here skips cleanly — the corpus is a sibling repo. CI runs
+//! the vendored-fixture twin (`ai_classification_fixture_test.rs`) instead.
 //!
 //! # How the goldens map onto a multi-vendor registry
 //!
-//! `verify-seed.ts` evaluates ONE seed's rules and separates *harness*-emitted spans
-//! (fixture scaffolding) from the framework's own. The compiled registry has no
-//! harness concept and all 21 vendors at once, so the identities checked here are:
+//! Each seed's goldens describe ONE vendor's rules and separate *harness*-emitted
+//! spans (fixture scaffolding) from the framework's own. The compiled registry has
+//! no harness concept and all 21 vendors at once, so the identities checked here
+//! are:
 //!
 //! * **vendor span count** = `vendor_span_counts[<seed vendor>] + harness_matched`.
-//!   The seed's hit set is `sufficient-hit OR attr-hit`, which is exactly the
-//!   registry's hit set for that vendor (a promoted conditional candidate requires a
-//!   same-vendor attr hit, which is already a hit). The counts can therefore only
-//!   diverge if another vendor outranks this one on some span — and the compile's
-//!   cross-fire audit found no same-span inter-vendor conflicts in the corpus, so any
-//!   divergence is a real finding, not an expected artifact.
+//!   The two can only diverge if another vendor outranks this one on some span, and
+//!   no corpus span is claimed by two vendors — so any divergence is a real finding.
 //! * **key-state histogram / unsessioned traces** are the seed's per-vendor view of
 //!   *every* span in the capture regardless of which vendor classified it, so they
 //!   are reproduced through `evaluate_session_for_vendor`.
 //!
-//! D2 (`langgraph` → `langchain`) is applied when looking the vendor up.
+//! The `langgraph` → `langchain` fold is applied when looking the vendor up.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -43,7 +39,7 @@ use crate::ai_classifier::{session_state, ResourceContext};
 use crate::ai_registry::registry;
 use crate::otlp_json;
 
-/// Seed vendor slug → compiled registry slug (write-side plan D2).
+/// Seed vendor slug → compiled registry slug.
 fn registry_slug(seed_vendor: &str) -> &str {
     match seed_vendor {
         "langgraph" => "langchain",
@@ -394,12 +390,11 @@ fn corpus_replay_never_panics_and_always_stamps_the_version() {
     );
 }
 
-/// At most one vendor's `detect` fires on any corpus span (plan v2 §1) — the
-/// invariant that keeps the `VENDORS` resolution order from being load-bearing
-/// on real wire data. Zero overlaps today, so no allowlist: the first corpus
-/// span two vendors both claim fails here and forces a deliberate ordering (or
-/// rules) decision. The vendored-fixture twin of this test runs on every plain
-/// `cargo test`.
+/// At most one vendor's `detect` fires on any corpus span — the invariant that
+/// keeps the `VENDORS` resolution order from being load-bearing on real wire data.
+/// Zero overlaps today, so no allowlist: the first corpus span two vendors both
+/// claim fails here and forces a deliberate ordering (or rules) decision. The
+/// vendored-fixture twin of this test runs on every plain `cargo test`.
 #[test]
 fn at_most_one_vendor_matches_any_corpus_span() {
     let Some(root) = corpus_root() else {

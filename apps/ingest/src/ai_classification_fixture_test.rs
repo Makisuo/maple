@@ -3,10 +3,10 @@
 //! Replays `fixtures/classification/` (the pruned corpus vendored from
 //! trace-capture, see its README) through the classifier's real entry points and
 //! asserts the hand-reviewed per-capture goldens, the false-positive ceiling over
-//! the negative sets, and the indexed-vs-direct differential (write-side plan
-//! §6.1–§6.3). Unlike the sibling `ai_classifier_corpus_test.rs` — which needs
-//! `TRACE_CAPTURE_DIR` pointing at the full corpus checkout and remains the
-//! full-fidelity local gate — this runs on every plain `cargo test`.
+//! the negative sets, and the indexed-vs-direct differential. Unlike the sibling
+//! `ai_classifier_corpus_test.rs` — which needs `TRACE_CAPTURE_DIR` pointing at
+//! the full corpus checkout and remains the full-fidelity local gate — this runs
+//! on every plain `cargo test`.
 //!
 //! Each fixture line is one span's classifier inputs in OTLP/JSON typed encoding,
 //! plus a `weight`: negatives were deduplicated onto representatives, and `weight`
@@ -407,7 +407,7 @@ fn value_read_keys_are_all_in_the_fixture_dedup_signature() {
 }
 
 // ---------------------------------------------------------------------------
-// per-capture goldens (plan §6.1)
+// per-capture goldens
 // ---------------------------------------------------------------------------
 
 /// Every hand-reviewed per-capture expectation reproduces through the real
@@ -423,9 +423,9 @@ fn value_read_keys_are_all_in_the_fixture_dedup_signature() {
 /// * `unsessioned_traces` is trace-level; the fixture strips trace ids, so it is
 ///   not replayable here (the TRACE_CAPTURE_DIR corpus test still asserts it).
 ///
-/// Expectations already speak maple's vendor set (the D2 `langgraph` →
-/// `langchain` rename is applied at generation and recorded as `renamed_from`),
-/// so no slug mapping happens here.
+/// Expectations already speak maple's vendor set (the `langgraph` → `langchain`
+/// fold is applied at generation and recorded as `renamed_from`), so no slug
+/// mapping happens here.
 #[test]
 fn fixture_replay_matches_every_expectation() {
     let expectations = fixture_json("expectations.json");
@@ -531,22 +531,15 @@ fn fixture_replay_matches_every_expectation() {
         failures.join("\n")
     );
 
-    // Six golden FIELDS are marked `v2_resolved` in trace-capture: the shipped rule is
-    // outside `verify-seed.ts`'s algebra, so those numbers were predicted by hand.
-    // Naming them keeps the tautology visible — a number refreshed by running this very
-    // classifier over the capture would make the assertion "the classifier equals
-    // itself", recorded nowhere. New entries are legitimate but must be deliberate.
-    //
-    // "THIS replay is their only check" is true of four of the six, and the exceptions
-    // are named here because nothing else names them:
-    //   * `pydantic_ai_agents.unsessioned_traces` is trace-level and this fixture strips
-    //     trace ids, so only `ai_classifier_corpus_test.rs` asserts it — and that needs
-    //     `TRACE_CAPTURE_DIR`, which no CI workflow sets (the corpus lives in the other
-    //     repo). Local-only gate.
-    //   * `pydantic_ai_agents.key_state_by_candidate` is not emitted into
-    //     `expectations.json` at all. It has no automated asserter anywhere.
-    // Both sit on the P1 ruling (decided 2026-08-13); if it is ever revisited,
-    // start here.
+    // Six golden FIELDS are marked `v2_resolved` in trace-capture: the shipped rule
+    // sits outside the generator's own evaluator, so those numbers were predicted by
+    // hand and THIS replay is their only check. Naming them keeps the tautology
+    // visible — a number refreshed by running this very classifier over the capture
+    // would make the assertion "the classifier equals itself". Two exceptions this
+    // replay does NOT cover: `pydantic_ai_agents.unsessioned_traces` is trace-level
+    // and this fixture strips trace ids (only the TRACE_CAPTURE_DIR corpus test
+    // asserts it), and `pydantic_ai_agents.key_state_by_candidate` is not emitted
+    // into `expectations.json` at all.
     println!(
         "algebra-unverified golden fields (v2_resolved): {:?}",
         algebra_unverified
@@ -567,7 +560,7 @@ fn fixture_replay_matches_every_expectation() {
 }
 
 // ---------------------------------------------------------------------------
-// whole-fixture vendor histogram (plan §6.1)
+// whole-fixture vendor histogram
 // ---------------------------------------------------------------------------
 
 /// The per-capture goldens above assert only the *entry* vendor's span count, so
@@ -649,24 +642,16 @@ fn fixture_vendor_histogram_is_exactly_the_golden_distribution() {
 ///
 /// **Two captures are live** — openrouter AND eve_slack — so regenerating legitimately
 /// moves `unknown:genai` (openrouter) and the non-AI residue `""` (both). A *vendor* row
-/// moving is a rules change and needs the same review as an FP ceiling bump — with one
+/// moving is a rules change and needs the same review as an FP ceiling bump, with one
 /// caveat the failure message repeats: eve_slack is an AI-SDK application, so its growth
 /// CAN land in `vercel_ai_sdk`. If a pure re-vendor moves that row and nothing else,
-/// that is drift wearing a rules change's clothes; the fix is freezing the negative sets
-/// (standing owner decision), not ratcheting on faith.
+/// that is drift wearing a rules change's clothes; the fix is freezing the negative sets,
+/// not ratcheting on faith.
 ///
-/// The two licensed rows carry 82% of the fixture's weight (`unknown:genai/1` 4,021 +
-/// the non-AI residue `/0` 4,153, of 9,945), which is more slack than a ratchet should
-/// have: a ~200-span bucketing regression landing in the same PR as a re-vendor reads as
-/// drift. The FP test pins what this table cannot — openrouter's unknown-bucket *set* is
-/// exactly `{unknown:genai}`, an assertion immune to live growth.
-///
-/// Re-measured 2026-08-13 against the reverted corpus (9,945 spans; the two live captures
-/// were rolled back to their committed state and the ingest URL moved at the origin, so
-/// they stop growing) and the S11 narrowing of `vercel_ai_sdk`. Both moves are visible in
-/// this table: the corpus revert took `unknown:genai/1` 5,153 → 3,968 and `/0` 4,170 →
-/// 4,153, and the narrowing then moved 53 spans `vercel_ai_sdk/1` 280 → 227 into
-/// `unknown:genai/1` 3,968 → 4,021.
+/// The two licensed rows carry 82% of the fixture's weight, which is more slack than a
+/// ratchet should have: a ~200-span bucketing regression landing in the same PR as a
+/// re-vendor reads as drift. The FP test pins what this table cannot — openrouter's
+/// unknown-bucket *set* is exactly `{unknown:genai}`, an assertion immune to growth.
 const FIXTURE_VENDOR_HISTOGRAM: &[(&str, usize)] = &[
     ("/0", 4153),
     ("agno/2", 26),
@@ -711,7 +696,7 @@ const FIXTURE_VENDOR_HISTOGRAM: &[(&str, usize)] = &[
 ];
 
 // ---------------------------------------------------------------------------
-// false-positive ceiling (plan §6.2)
+// false-positive ceiling
 // ---------------------------------------------------------------------------
 
 /// Over the vendor-negative populations, weighted so the numbers speak for the
@@ -797,16 +782,14 @@ fn expected_claims(
     eve_turn_unknown_other: usize,
 ) {
     match capture {
-        // openrouter is the canonical vendor-negative trap: 3,968 spans of
-        // legitimately unknown-tier AI traffic, the overwhelming majority of
-        // which carry the bare `span.type` key (values `span`/`generation`) that
-        // claude_agent_sdk's dialect clause reads — kept out structurally since
-        // phase-2 C2 (the clause is conjunctive with
-        // `service.name=claude-code`, on zero of these spans), not just by value
-        // disjointness. Phase 2 also aimed semantic_kernel's `FinishReason.`
-        // fallback and spring_ai's `gen_ai.system == "openai"` conjunct straight
-        // at this population; both stay out. No span may resolve to a specific
-        // vendor.
+        // The canonical vendor-negative trap: thousands of spans of legitimately
+        // unknown-tier AI traffic, most carrying the bare `span.type` key that
+        // claude_agent_sdk's dialect clause reads. They are kept out structurally
+        // (that clause is conjunctive with `service.name=claude-code`, on zero of
+        // these spans), not by value disjointness. semantic_kernel's
+        // `FinishReason.` fallback and spring_ai's `gen_ai.system == "openai"`
+        // conjunct are aimed straight at this population too. No span may resolve
+        // to a specific vendor.
         "openrouter" => {
             assert_eq!(
                 *claimed,
@@ -814,23 +797,16 @@ fn expected_claims(
                 "openrouter must never classify as a specific vendor"
             );
         }
-        // eve_slack genuinely contains Vercel AI SDK traffic (eve is built on
-        // it). Phase 2 replaced the unconditional `ai.` evidence with a
-        // scope-gated form, which eliminated 9 FALSE positives here: eve's own
-        // `ai.eve.turn` orchestration spans (scope `eve`, not an AI-SDK scope)
-        // were claimed by `vercel_ai_sdk` on the bare `ai.` prefix and now land
-        // `unknown:other`, asserted below so a regression in either direction
-        // (re-claiming them, or losing the unknown-tier reachability the X3 rule
-        // restored) is loud.
+        // eve_slack genuinely contains Vercel AI SDK traffic (eve is built on it),
+        // so the ceiling is not zero. The scope gate on the `ai.` evidence is what
+        // keeps eve's own `ai.eve.turn` orchestration spans (scope `eve`, not an
+        // AI-SDK scope) out of `vercel_ai_sdk`; they land in `unknown:other`,
+        // asserted below so a regression in either direction — re-claiming them, or
+        // losing the unknown-tier reachability — is loud.
         //
-        // The same phase-2 pass also briefly ADDED a `scope == "gen_ai"` clause
-        // that recovered 30 true positives here (92 -> 122). The owner removed it
-        // on 2026-08-13 (S11): the clause's only conjunct was a key OTel semconv
-        // requires on every GenAI span, so it reduced to "a tracer named `gen_ai`
-        // claims everything inside it" over customer-chosen data, and the corpus
-        // cannot witness that failure mode. The 30 spans are back in
-        // `unknown:genai` and this constant is back to 92 — narrow by choice. See
-        // `detect_vercel_ai_sdk`.
+        // The 30 default-config `chat` spans this capture holds are deliberately
+        // NOT claimed: recovering them would need a `scope == "gen_ai"` clause over
+        // a customer-chosen scope name. See `detect_vercel_ai_sdk`.
         "eve_slack" => {
             assert_eq!(eve_turn, EVE_TURN_FALSE_POSITIVES, "ai.eve.turn FPs");
             assert_eq!(
@@ -844,10 +820,9 @@ fn expected_claims(
                  the 30 default-config `chat` spans are unknown:genai by decision"
             );
         }
-        // Same service re-recorded without message payloads: the same 9-strong
-        // `ai.eve.turn` false-positive population eliminated by the same predicate
-        // change, and the same 23 default-config `chat` spans given up with S11
-        // (83 -> 60).
+        // Same service re-recorded without message payloads: the same `ai.eve.turn`
+        // population kept out by the same predicate, and the same default-config
+        // `chat` spans deliberately given up.
         "eve_slack_no_messages" => {
             assert_eq!(eve_turn, EVE_TURN_FALSE_POSITIVES, "ai.eve.turn FPs");
             assert_eq!(
@@ -865,21 +840,21 @@ fn expected_claims(
     }
 }
 
-/// `ai.eve.turn` spans per eve capture misclassified as `vercel_ai_sdk`. Was 9
-/// in v1 (the bare `ai.` prefix); phase 2's scope gate ratcheted it to zero.
-/// This is a floor as much as a ceiling — raising it needs a rule change and a
-/// deliberate decision, not a constant bump.
+/// `ai.eve.turn` spans per eve capture misclassified as `vercel_ai_sdk`. A bare
+/// `ai.` prefix rule claims 9; the scope gate ratchets it to zero. This is a floor
+/// as much as a ceiling — raising it needs a rule change and a deliberate
+/// decision, not a constant bump.
 const EVE_TURN_FALSE_POSITIVES: usize = 0;
 
 /// Where those 9 spans go instead: the `unknown:other` catch-all. Asserted
-/// explicitly (vercel spec X3) because "no longer a false positive" has two very
-/// different endings — correctly bucketed, or silently dropped out of the
-/// unknown tier entirely. The unit-test half of X3 lives in `ai_classifier.rs`
+/// explicitly because "no longer a false positive" has two very different endings
+/// — correctly bucketed, or silently dropped out of the unknown tier entirely. The
+/// unit-test half lives in `ai_classifier.rs`
 /// (`an_unclaimed_ai_prefixed_span_reaches_unknown_other`).
 const EVE_TURN_UNKNOWN_OTHER: usize = 9;
 
 // ---------------------------------------------------------------------------
-// indexed vs direct differential (plan §6.3)
+// indexed vs direct differential
 // ---------------------------------------------------------------------------
 
 /// The prefilter/candidate fast path agrees with naive evaluate-every-vendor
@@ -927,7 +902,7 @@ fn indexed_dispatch_agrees_with_direct_evaluation_over_the_fixture() {
 }
 
 // ---------------------------------------------------------------------------
-// at most one vendor matches any span (plan v2 §1)
+// at most one vendor matches any span
 // ---------------------------------------------------------------------------
 
 /// The resolution rule's supporting invariant: at most one vendor's `detect`

@@ -2,22 +2,20 @@
 //! the per-key/per-prefix candidate dispatch over the vendor tables in
 //! [`crate::ai_vendors`].
 //!
-//! The vendor knowledge itself — the `detect` predicates, session candidates,
-//! decoy values, and the seed review record — lives in `ai_vendors.rs` as plain
-//! Rust (write-side plan v2 §1: vendor knowledge is code; the corpus is the
-//! contract). Predicates are opaque functions, so the fast-path machinery is
-//! built from each vendor's **declared prefilter hints** (`keys`, `prefixes`,
-//! `span_names`) instead of being derived from matcher data: this module
-//! interns the declared keys and prefixes, generates the byte/length screens,
-//! and builds the key/prefix/span-name → candidate-detector masks the
-//! classifier uses for its fast exit.
+//! The vendor knowledge itself — the `detect` predicates, session candidates and
+//! decoy values — lives in `ai_vendors.rs` as plain Rust. Predicates are opaque
+//! functions, so the fast-path machinery is built from each vendor's **declared
+//! prefilter hints** (`keys`, `prefixes`, `span_names`) rather than derived from
+//! matcher data: this module interns the declared keys and prefixes, generates
+//! the byte/length screens, and builds the key/prefix/span-name →
+//! candidate-detector masks the classifier uses for its fast exit.
 //!
 //! What this module guarantees, structurally rather than by convention:
 //!
 //! * **Vendor slugs are a closed set.** A classification result is a
 //!   [`VendorId`] — a Rust enum. There is no constructor that takes a string, so
-//!   minting an unlisted slug — the LowCardinality-cardinality and
-//!   tenant-amplification bug the plan calls out — is not expressible.
+//!   minting an unlisted slug (unbounded `LowCardinality` values, cross-tenant
+//!   amplification) is not expressible.
 //! * **The prefilter is generated from the declared hints**, never
 //!   hand-maintained: it is the union of every exact key and key prefix any
 //!   vendor or unknown-tier rule declares, plus every session-candidate key
@@ -148,9 +146,9 @@ pub type KeyId = u16;
 /// Index into the interned key-prefix table.
 pub type PrefixId = u8;
 
-/// One compiled session-key candidate (plan §2 step 5). `key` stays in string
-/// form for the direct (unprefiltered) reference path; `key_id` is the interned
-/// form the indexed fast path reads.
+/// One compiled session-key candidate. `key` stays in string form for the direct
+/// (unprefiltered) reference path; `key_id` is the interned form the indexed fast
+/// path reads.
 pub struct SessionCandidate {
     pub key: &'static str,
     pub(crate) key_id: KeyId,
@@ -163,7 +161,7 @@ pub struct SessionCandidate {
     /// from the span's own attributes (see [`crate::ai_vendors::SessionCandidateDef`]).
     pub event_key: Option<&'static str>,
     pub granularity: Granularity,
-    /// Value-conditional granularity override (phase-2 P1; see
+    /// Value-conditional granularity override (see
     /// [`crate::ai_vendors::SessionCandidateDef::granularity_of_value`]).
     pub granularity_of_value: Option<fn(&str) -> Granularity>,
 }
@@ -171,7 +169,7 @@ pub struct SessionCandidate {
 pub struct Vendor {
     slug: &'static str,
     /// `unknown:*` buckets are verdicts for resolution purposes but carry no
-    /// session-key rules and are reserved: no seed may mint one.
+    /// session-key rules and are reserved: no vendor rule may mint one.
     unknown_bucket: bool,
     candidates: Vec<SessionCandidate>,
     decoy_values: &'static [&'static str],
@@ -497,7 +495,7 @@ impl Builder {
                 slug: def.id.slug(),
                 unknown_bucket: false,
                 candidates,
-                // `decoy_keys` are deliberately not compiled: the rule is "never
+                // Decoy KEYS are deliberately not compiled: the rule is "never
                 // consult", so the detector must not be able to read one. They
                 // live as doc comments on the vendor blocks.
                 decoy_values: def.decoy_values,
@@ -689,7 +687,7 @@ mod tests {
             assert_eq!(id.slug(), slug);
             assert!(!registry.vendor(id).is_unknown_bucket());
         }
-        // D2 applied in the vendor tables: the seed's slug is not producible.
+        // `langgraph` is folded into `langchain`, so its slug is not producible.
         assert!(registry.vendor_id("langgraph").is_none());
         for bucket in ["unknown:genai", "unknown:openinference", "unknown:other"] {
             let id = registry.vendor_id(bucket).expect("bucket");
@@ -698,9 +696,9 @@ mod tests {
         }
     }
 
-    /// Plan §6: "every rule key/prefix survives the generated prefilter".
-    /// `validate` enforces it at build; this states it as a test in its own right and
-    /// adds the negative direction.
+    /// Every rule key and prefix must survive the generated prefilter. `validate`
+    /// enforces it at build; this states it as a test in its own right and adds the
+    /// negative direction.
     #[test]
     fn prefilter_is_self_consistent() {
         let registry = registry();
@@ -731,11 +729,11 @@ mod tests {
         seen.dedup();
         assert_eq!(seen.len(), 21, "every vendor appears exactly once");
         assert!(seen.iter().all(|id| !id.is_unknown_bucket()));
-        // The unknown tier's internal order: v1's, plus the phase-2 X1
-        // `input.value`/`output.value` rule. Its slot is load-bearing — it must sit
-        // between the `openinference.span.kind` rule and the bare `llm.` rule, so an
-        // OpenInference-dialect span keeps the openinference bucket instead of falling
-        // into the `unknown:other` catch-all (see the rule's comment and
+        // The unknown tier's internal order. The `input.value`/`output.value`
+        // rule's slot is load-bearing — it must sit between the
+        // `openinference.span.kind` rule and the bare `llm.` rule, so an
+        // OpenInference-dialect span keeps the openinference bucket instead of
+        // falling into the `unknown:other` catch-all (see the rule's comment and
         // `input_output_values_with_llm_namespace_bucket_as_openinference`).
         let buckets: Vec<VendorId> = UNKNOWN_TIER.iter().map(|rule| rule.bucket).collect();
         assert_eq!(

@@ -1,9 +1,8 @@
 //! Per-span AI classification: vendor, session-key state, session-key hash.
 //!
-//! Pure functions over decoded OTLP. No I/O, no clock, no cross-span state — the
-//! write-side plan's first design constraint is that a span's classification depends
-//! on nothing but that span, its scope and its resource, because root spans arrive
-//! last in 18/19 multi-batch corpus traces.
+//! Pure functions over decoded OTLP. No I/O, no clock, no cross-span state: a
+//! span's classification depends on nothing but that span, its scope and its
+//! resource, because root spans arrive last in almost every multi-batch trace.
 //!
 //! # Shape
 //!
@@ -18,18 +17,16 @@
 //! `detect` against the scope-level evidence alone, leaving a per-span pass that
 //! touches the span's own attributes once.
 //!
-//! # Evaluation semantics (write-side plan v2 §1–§2)
+//! # Evaluation semantics
 //!
 //! The rules are plain Rust predicates in [`crate::ai_vendors`]: each vendor is a
 //! `detect: fn(&SpanCtx) -> bool` plus session-key candidates whose `authority` is
 //! likewise a function. Resolution is **ordered first-match**: vendors are evaluated
 //! in [`crate::ai_vendors::VENDORS`] slice order, the first match wins, and the
 //! unknown tier ([`crate::ai_vendors::UNKNOWN_TIER`], its own internal order) is
-//! evaluated only when no vendor matched. The v1 priority ladder, sufficiency flags
-//! and conditional-promotion bitmasks are gone; the negative behavior sufficiency
-//! encoded ("a generic scope alone must not classify") lives inside each vendor's
-//! own predicate as a conjunction, and the corpus replay in
-//! `ai_classification_fixture_test.rs` is the acceptance gate.
+//! evaluated only when no vendor matched. "A generic scope alone must not classify"
+//! lives inside each vendor's own predicate as a conjunction, and the fixture replay
+//! in `ai_classification_fixture_test.rs` is the acceptance gate.
 //!
 //! Invariants the [`SpanCtx`] accessors carry by construction:
 //!
@@ -43,9 +40,9 @@
 //!   accessor it calls — [`SpanCtx::attr`] reads the span's own attributes,
 //!   [`SpanCtx::resource`] the resource's, [`SpanCtx::scope_attr`] the scope's, and
 //!   [`SpanCtx::scope_name`]/[`SpanCtx::span_name`] the columns. There is no
-//!   fallback chain, no class table and no pseudo-key exemption list — the v1
-//!   near-miss this design closes (`langsmith.internal_provider` on the resource
-//!   satisfying langchain's attr-class prefix family) is inexpressible.
+//!   fallback chain, no class table and no pseudo-key exemption list, so a resource
+//!   attribute can never satisfy a span-attribute prefix family (the
+//!   `langsmith.internal_provider` hazard) — see the test of the same name.
 //!
 //! # The fast path, and its safety net
 //!
@@ -62,13 +59,12 @@
 //! [`crate::ai_vendors::VendorDef`]:
 //!
 //! * `detect` must be **monotone in span evidence** (true on scope evidence alone ⇒
-//!   true for every span). Every predicate is, after phase 2 as before it: they are
-//!   ORs of positive tests, and the phase-2 conjunctions only narrow a disjunct.
-//!   The two negations phase 2 introduced are safe by construction — crewai negates
-//!   SCOPE evidence (constant across the hoist) and flue negates a span attribute
-//!   inside a session-candidate `authority`, which is never hoisted. A `detect`
-//!   negating *span* evidence would need a per-vendor opt-out from the shortcut;
-//!   none exists because none is needed (deferred 2026-08-13, see
+//!   true for every span). Every predicate is: they are ORs of positive tests, and
+//!   conjunctions only narrow a disjunct. The two negations that exist are safe by
+//!   construction — crewai negates SCOPE evidence (constant across the hoist) and
+//!   flue negates a span attribute inside a session-candidate `authority`, which is
+//!   never hoisted. A `detect` negating *span* evidence would need a per-vendor
+//!   opt-out from the shortcut, which does not exist (see
 //!   [`crate::ai_vendors::VendorDef`]).
 //! * The declared `keys`/`prefixes` hints must cover everything the predicates
 //!   consult. A predicate reading an undeclared key sees "absent" on the fast path;
@@ -127,14 +123,11 @@ impl SpanClassification<'_> {
     /// `cityHash64(value)`, or 0 when no key resolved.
     ///
     /// The hash is a storage format, not a confidentiality boundary: the value it
-    /// digests came out of `SpanAttributes` and stays there in the clear on the same
-    /// row, so anything that can read `AiSessionKeyHash` can read the source value
-    /// beside it. What hashing buys is physical — 8 fixed bytes on a per-span column,
-    /// and a numeric input to `uniqCombined` in `service_ai_vendors_hourly`.
-    ///
-    /// 64 bits is matched to that consumer. At ~1M distinct sessions in an org the
-    /// birthday collision probability is ~1e-8, six orders of magnitude under the
-    /// ~1.6% standard error of the `uniqCombined(12)` sketch that consumes it.
+    /// digests stays in `SpanAttributes` in the clear on the same row. What it buys
+    /// is 8 fixed bytes on a per-span column and a numeric input to `uniqCombined`
+    /// in `service_ai_vendors_hourly`. 64 bits is matched to that consumer — at ~1M
+    /// distinct sessions per org the birthday collision probability is ~1e-8, six
+    /// orders of magnitude under the sketch's own ~1.6% standard error.
     pub fn session_key_hash(&self) -> u64 {
         match &self.session_key {
             Some(value) => city_hash64(value.as_bytes()),
@@ -169,11 +162,9 @@ const KEY_BITS_WORDS: usize = crate::ai_registry::MAX_KEYS / 64;
 /// plus which registry key-prefixes its keys satisfy.
 ///
 /// A flat `(KeyId, value)` list, **not** a `registry.keys().len()`-wide slot
-/// array. The slot array was O(1) to read but cost a 116-slot zeroing
-/// allocation on every span that carried a single registry key — one malloc and
-/// ~3.7 KiB of memset for typically three useful entries. Lookups are a linear
-/// scan over `len` instead, which for a handful of entries is a cache line, not
-/// a branch-predictor problem.
+/// array: the slot array is O(1) to read but costs a zeroing allocation on every
+/// span carrying a single registry key. Lookups scan `len` instead, which for a
+/// handful of entries is a cache line, not a branch-predictor problem.
 struct AttrView<'a> {
     inline: [Option<(KeyId, Cow<'a, str>)>; INLINE_ATTRS],
     inline_len: usize,
@@ -205,7 +196,7 @@ impl<'a> AttrView<'a> {
             let probe = registry.probe(&attribute.key);
             view.prefix_bits |= probe.prefix_bits;
             if let Some(key) = probe.key_id {
-                // First occurrence wins (plan §2), among registry keys only.
+                // First occurrence wins, among registry keys only.
                 if view.get(key).is_some() {
                     continue;
                 }
@@ -268,14 +259,13 @@ impl<'a> AttrView<'a> {
     }
 }
 
-/// The reference view: every attribute of one list, canonicalized, in wire
-/// order, with **no prefilter** — the raw list a predicate would see if the
-/// fast-path machinery did not exist. Lookups take the first occurrence by
-/// scanning, so first-occurrence-wins holds for every key, declared or not.
+/// The reference view: every attribute of one list, canonicalized, in wire order,
+/// with **no prefilter**. Lookups scan for the first occurrence, so
+/// first-occurrence-wins holds for every key, declared or not.
 ///
-/// Test-only: this is what makes the indexed-vs-direct differential a real
-/// safety net for hint drift (a predicate consulting an undeclared key finds it
-/// here and not in the [`AttrView`], and the divergence fails the test).
+/// Test-only: this is what makes the indexed-vs-direct differential a real safety
+/// net for hint drift — a predicate consulting an undeclared key finds it here and
+/// not in the [`AttrView`], and the divergence fails the test.
 #[cfg(test)]
 struct DirectAttrs<'a> {
     entries: Vec<(&'a str, Cow<'a, str>)>,
@@ -384,18 +374,15 @@ impl<'a> Attrs<'a, '_> {
 
 /// A span plus the scope/resource it hangs off — the unit every predicate reads.
 ///
-/// This is the rule-author API (write-side plan v2 §1): a vendor's `detect` and
-/// its session candidates' `authority` functions receive a `&SpanCtx` and say
-/// *where* they read by which accessor they call. Values are
-/// canonical-stringified, duplicate keys are first-occurrence-wins, and there is
-/// no fallback between the three attribute lists.
+/// The rule-author API: a vendor's `detect` and its session candidates'
+/// `authority` functions receive a `&SpanCtx` and say *where* they read by which
+/// accessor they call. Values are canonical-stringified, duplicate keys are
+/// first-occurrence-wins, and there is no fallback between the three lists.
 ///
 /// On the fast path, `attr`/`resource`/`scope_attr` see only keys the vendor
-/// tables **declare** (the prefilter drops the rest before they are ever
-/// stored); the direct reference path behind the differential tests sees every
-/// key. A predicate consulting an undeclared key therefore diverges between the
-/// two, which is the designed failure mode for hint drift — loud, in CI, on
-/// real data.
+/// tables **declare**; the direct reference path behind the differential tests
+/// sees every key. A predicate consulting an undeclared key therefore diverges
+/// between the two — the designed failure mode for hint drift.
 pub struct SpanCtx<'a, 'v> {
     registry: &'static Registry,
     scope_name: &'a str,
@@ -480,13 +467,11 @@ impl<'a> SpanCtx<'a, '_> {
 
     /// The span's events: name plus a canonical-stringified attribute accessor.
     ///
-    /// Event attribute keys feed the candidate dispatch through the same
-    /// declared `keys`/`prefixes` hints as span attributes (see
-    /// [`ScopeContext::classify_span_full`]), so an event-reading predicate —
-    /// llamaindex's `tags.llamaindex.` clause is the first — survives the fast
-    /// exit on spans whose only evidence is an event. Events themselves are
-    /// never prefiltered: both the indexed and the direct path read the raw
-    /// wire list through this accessor.
+    /// Event attribute keys feed the candidate dispatch through the same declared
+    /// `keys`/`prefixes` hints as span attributes (see
+    /// [`ScopeContext::classify_span_full`]), so an event-reading predicate
+    /// survives the fast exit on spans whose only evidence is an event. Events
+    /// themselves are never prefiltered — both paths read the raw wire list.
     pub fn events(&self) -> impl Iterator<Item = EventCtx<'a>> + '_ {
         self.events.iter().map(|event| EventCtx { event })
     }
@@ -656,12 +641,10 @@ impl<'a, 'r> ScopeContext<'a, 'r> {
             candidates |= self.registry.detectors_by_prefix(prefix);
         }
         candidates |= self.registry.detectors_by_span_name(span_name);
-        // Event-attribute keys feed the same dispatch (the event hint the module
-        // docs' events accessor promised): a predicate reading span events via a
-        // declared key/prefix — llamaindex's `tags.llamaindex.` clause is the
-        // first — must survive the fast exit on spans whose ONLY evidence is an
-        // event (its scope-rewritten zero-attribute `*.run` population). Runs
-        // only when the span carries events at all.
+        // Event-attribute keys feed the same dispatch: a predicate reading span
+        // events via a declared key/prefix — llamaindex's `tags.llamaindex.`
+        // clause — must survive the fast exit on spans whose ONLY evidence is an
+        // event. Runs only when the span carries events at all.
         for event in events {
             for attribute in &event.attributes {
                 let probe = self.registry.probe(&attribute.key);
@@ -677,8 +660,8 @@ impl<'a, 'r> ScopeContext<'a, 'r> {
             }
         }
 
-        // Fast exit (plan §2 step 3): no surviving evidence and nothing the
-        // scope decided → non-AI, one branch.
+        // Fast exit: no surviving evidence and nothing the scope decided → non-AI,
+        // one branch.
         if candidates == 0 {
             return SpanClassification {
                 vendor: None,
@@ -691,7 +674,7 @@ impl<'a, 'r> ScopeContext<'a, 'r> {
         let ctx = self.span_ctx(span_name, &facts, events);
 
         // Ordered first-match over the vendors; the unknown tier only in the
-        // `else` (plan v2 §1). A scope-decided vendor needs no re-evaluation.
+        // `else`. A scope-decided vendor needs no re-evaluation.
         let mut vendor = None;
         for def in VENDORS {
             let bit = 1u64 << def.id.index();
@@ -759,7 +742,7 @@ impl<'a, 'r> ScopeContext<'a, 'r> {
         let mut best_key: Option<Cow<'a, str>> = None;
         for candidate in entry.candidates() {
             let (state, value) = candidate_state(entry, candidate, ctx);
-            // Strictly greater: ties keep the earlier candidate's hash (plan §1).
+            // Strictly greater: ties keep the earlier candidate's hash.
             if state > best_state {
                 best_state = state;
                 best_key = if state >= session_state::SUB_SESSION {
@@ -801,9 +784,9 @@ fn candidate_state<'a>(
     if candidate.reject_decoy_values && vendor.is_decoy_value(&value) {
         return (session_state::KEY_INVALID, None);
     }
-    // Value-conditional granularity (phase-2 P1) runs over the VALIDATED value
-    // only — states 3/4 are decided above, so the override moves a resolved
-    // span between 5 and 6, never in or out of resolution.
+    // Value-conditional granularity runs over the VALIDATED value only — states
+    // 3/4 are decided above, so the override moves a resolved span between 5 and 6,
+    // never in or out of resolution.
     let granularity = match candidate.granularity_of_value {
         Some(granularity_of_value) => granularity_of_value(&value),
         None => candidate.granularity,
@@ -892,7 +875,7 @@ impl<'a, 'r> ScopeContext<'a, 'r> {
     }
 
     /// Every vendor whose `detect` fires on this span, in resolution order —
-    /// the at-most-one-vendor invariant's measurement (plan v2 §1).
+    /// the at-most-one-vendor invariant's measurement.
     pub(crate) fn firing_vendors(
         &self,
         span_name: &'a str,
@@ -969,7 +952,7 @@ mod tests {
         )
     }
 
-    // -- plan §2 correctness invariants -------------------------------------
+    // -- correctness invariants ---------------------------------------------
 
     /// "Spring's plain HTTP POST spans under org.springframework.boot → non-AI."
     /// The Boot scope is generic evidence: spring_ai's predicate gates it on the
@@ -1049,9 +1032,7 @@ mod tests {
     /// process — mastra's is standalone evidence in its predicate *by
     /// construction*: `@mastra/otel-exporter` mints its own resource per exported
     /// span inside Mastra's converter, so a co-loaded instrumentor's spans carry the
-    /// NodeSDK resource instead and never reach this branch. Stated as a test
-    /// because the write-side plan's §1 prose uses mastra as its example of an
-    /// *insufficient* resource matcher; the wire-verified seed overrode that.
+    /// NodeSDK resource instead and never reach this branch.
     #[test]
     fn a_sufficient_resource_matcher_applies_process_wide() {
         let registry = registry();
@@ -1182,13 +1163,12 @@ mod tests {
         assert_eq!(vendor, "mastra");
     }
 
-    /// llamaindex's scope-rewritten degradation shape (phase-2 LL1/LL2): a span
-    /// with ZERO attributes under a foreign scope whose only evidence is a
-    /// `workflow.output` event carrying `tags.llamaindex.run_id`. The
-    /// event-attribute candidate dispatch must carry it past the fast exit to
-    /// the vendor predicate, and the session candidate must resolve state 5
-    /// from the event-borne value — no corpus capture exercises the rewritten
-    /// scope, so this test is the guard the llamaindex spec requires.
+    /// llamaindex's scope-rewritten degradation shape: a span with ZERO attributes
+    /// under a foreign scope whose only evidence is a `workflow.output` event
+    /// carrying `tags.llamaindex.run_id`. The event-attribute candidate dispatch
+    /// must carry it past the fast exit to the vendor predicate, and the session
+    /// candidate must resolve state 5 from the event-borne value. No corpus capture
+    /// exercises a rewritten scope, so this test is the only guard.
     #[test]
     fn an_event_only_span_classifies_and_session_keys_through_event_dispatch() {
         let registry = registry();
@@ -1212,11 +1192,10 @@ mod tests {
         assert_eq!(both.session_key.as_deref(), Some("ATTRFIRST1"));
     }
 
-    /// haystack's content-off population (phase-2 X2/D-3): a span with ZERO
-    /// attributes under an app-chosen scope, carrying only a library-constant
-    /// name. The span-name candidate dispatch must carry it past the fast exit
-    /// to the vendor predicate — no corpus capture exercises this shape, so
-    /// this test is the guard the haystack spec requires.
+    /// haystack's content-off population: a span with ZERO attributes under an
+    /// app-chosen scope, carrying only a library-constant name. The span-name
+    /// candidate dispatch must carry it past the fast exit to the vendor predicate.
+    /// No corpus capture exercises this shape, so this test is the only guard.
     #[test]
     fn a_zero_attribute_span_classifies_through_span_name_dispatch() {
         let (vendor, state) = classify(
@@ -1289,14 +1268,11 @@ mod tests {
         assert_eq!(span_local, session_state::SESSION);
     }
 
-    /// F2, the hazard list-directed lookup exists to close.
-    ///
-    /// `langsmith.internal_provider` is langchain's resource-read key and also lies
-    /// inside langchain's span-attr `langsmith.` prefix family. Under a cross-list
-    /// fallback the resource attribute satisfied the span-attr family — so one
-    /// resource attribute classified every span in the process as langchain, plain
-    /// HTTP included and whatever the value. The resource evidence must contribute
-    /// nothing on its own.
+    /// The hazard list-directed lookup exists to close: `langsmith.internal_provider`
+    /// is a resource key that also lies inside langchain's span-attribute
+    /// `langsmith.` prefix family. Under a cross-list fallback one resource
+    /// attribute would classify every span in the process as langchain, plain HTTP
+    /// included and whatever the value.
     #[test]
     fn an_insufficient_resource_key_does_not_promote_itself_through_its_vendors_prefix_family() {
         for value in ["false", "true"] {
@@ -1375,12 +1351,9 @@ mod tests {
         }
     }
 
-    /// Phase-2 X1 / decision D-4: the plan gates `input.value`/`output.value` on
-    /// co-occurrence with an OpenInference attribute, and v1 encoded that gate by
-    /// omitting the keys entirely (its algebra had no conjunction). The rule now
-    /// exists in [`crate::ai_vendors::UNKNOWN_TIER`]; the contract it has to keep is
-    /// unchanged for the standalone case — both keys are unnamespaced English and a
-    /// span carrying only them is not AI.
+    /// `input.value`/`output.value` are gated on co-occurrence with an
+    /// OpenInference attribute (see [`crate::ai_vendors::UNKNOWN_TIER`]): both keys
+    /// are unnamespaced English, so a span carrying only them is not AI.
     #[test]
     fn generic_input_output_values_do_not_fire_on_their_own() {
         let (standalone, _) = classify(
@@ -1403,12 +1376,11 @@ mod tests {
         assert_eq!(co_occurring, "unknown:openinference");
     }
 
-    /// The half of X1 that v1 could not express at all: with the *other*
-    /// OpenInference spelling as co-evidence — the `llm.*` namespace its semconv
-    /// defines — an `input.value`/`output.value` span is OpenInference dialect and
-    /// must land in `unknown:openinference`, not the `unknown:other` catch-all the
-    /// bare `llm.` rule would give it. Ordering inside the tier is what buys this,
-    /// so this test is also the guard on that ordering.
+    /// With the *other* OpenInference spelling as co-evidence — the `llm.*`
+    /// namespace its semconv defines — an `input.value`/`output.value` span is
+    /// OpenInference dialect and must land in `unknown:openinference`, not the
+    /// `unknown:other` catch-all the bare `llm.` rule would give it. Ordering inside
+    /// the tier is what buys this, so this test is also the guard on that ordering.
     #[test]
     fn input_output_values_with_llm_namespace_bucket_as_openinference() {
         let (with_llm, state) = classify(
@@ -1434,11 +1406,9 @@ mod tests {
         assert_eq!(llm_alone, "unknown:other");
     }
 
-    /// Phase-2 X3 reachability: `unknown:other` was dead in v1 because
-    /// vercel_ai_sdk's bare `ai.` prefix outranked it on 100% of spans. With that
-    /// evidence scope-gated (V1), an `ai.*`-carrying span under a scope no vendor
-    /// claims has to reach the bucket — the corpus case is eve_slack's 9
-    /// `ai.eve.turn` trace roots per capture, which is what the FP ratchet measures.
+    /// `unknown:other` reachability: because vercel_ai_sdk's `ai.` prefix evidence
+    /// is scope-gated, an `ai.*`-carrying span under a scope no vendor claims has to
+    /// reach the bucket — on the wire, eve_slack's `ai.eve.turn` trace roots.
     #[test]
     fn an_unclaimed_ai_prefixed_span_reaches_unknown_other() {
         let (vendor, state) = classify(
@@ -1461,13 +1431,11 @@ mod tests {
         assert_eq!(claimed, "vercel_ai_sdk");
     }
 
-    /// Phase-2 P2 (hardened): pydantic_ai's scope-loss fallback is the 3-way
-    /// logfire conjunction — the queue's 2-conjunct form
-    /// (logfire.json_schema && gen_ai.operation.name) must NOT fire on its own,
-    /// because logfire.* is the Logfire SDK's cross-vendor dialect and a future
-    /// Logfire first-party instrumentation adopting gen_ai semconv would
-    /// otherwise be claimed for pydantic. The third conjunct is
-    /// pydantic-unique co-evidence.
+    /// pydantic_ai's scope-loss fallback is a 3-way logfire conjunction. The
+    /// 2-conjunct form (`logfire.json_schema` && `gen_ai.operation.name`) must NOT
+    /// fire on its own: `logfire.*` is the Logfire SDK's cross-vendor dialect, so a
+    /// future Logfire first-party instrumentation adopting gen_ai semconv would
+    /// otherwise be claimed for pydantic.
     #[test]
     fn pydantic_ai_logfire_fallback_requires_pydantic_unique_co_evidence() {
         // Scope rewritten, full conjunction → pydantic_ai.
@@ -1575,14 +1543,10 @@ mod tests {
 
     /// pydantic_ai's `gen_ai.conversation.id` is always present and often per-run.
     ///
-    /// The write-side plan predicted this would be capped at state 5. The seed
-    /// overrode that with an explicit, documented trade-off: it labels the key
-    /// `session` granularity because a correctly-configured deployment
-    /// (`conversation_id=` passed, or `message_history` threaded) produces a genuine
-    /// cross-run session, and labelling it `run` would drive those deployments to
-    /// state 5 and 8/8 unsessioned traces. The cost — a default-configured app
-    /// reports one session per run and maple cannot tell the two apart span-locally
-    /// — is recorded in the seed's caveats. This test pins the *registry's* behavior.
+    /// The key is labelled `session` granularity because a correctly-configured
+    /// deployment (`conversation_id=` passed, or `message_history` threaded)
+    /// produces a genuine cross-run session, and labelling it `run` outright would
+    /// drive those deployments to state 5 and leave every trace unsessioned.
     #[test]
     fn pydantic_ai_conversation_id_resolves_at_session_granularity() {
         let (vendor, state) = classify(
@@ -1611,12 +1575,11 @@ mod tests {
         assert_eq!(run_only, session_state::SUB_SESSION);
     }
 
-    /// Phase-2 P1 (owner ruling, decided 2026-08-13): a strict-UUIDv7-shaped
-    /// `gen_ai.conversation.id` is pydantic's own auto-minted per-run default
-    /// (`str(uuid7())`) wearing a session key, so it resolves at run granularity
-    /// (state 5) — while the hash still comes from the conversation id (the
-    /// demoted candidate ties with the run-id candidate at 5 and candidate
-    /// order keeps the earlier one), so joins are unaffected by the demotion.
+    /// A strict-UUIDv7-shaped `gen_ai.conversation.id` is pydantic's own
+    /// auto-minted per-run default (`str(uuid7())`) wearing a session key, so it
+    /// resolves at run granularity (state 5). The hash still comes from the
+    /// conversation id — the demoted candidate ties with the run-id candidate at 5
+    /// and candidate order keeps the earlier one — so joins are unaffected.
     #[test]
     fn pydantic_ai_uuidv7_conversation_id_demotes_to_run_granularity() {
         let uuid7 = "01890a5d-ac96-774b-bcce-b302099a8057";
@@ -1738,7 +1701,7 @@ mod tests {
         let result = context.classify_span("claude_code.interaction", &attributes);
         assert_eq!(result.session_state, session_state::SESSION);
         // Exactly what `SELECT cityHash64('sess-42')` returns — single argument,
-        // no salt, no concat construction (plan §2 step 5).
+        // no salt, no concat construction.
         assert_eq!(
             result.session_key_hash(),
             crate::cityhash102::city_hash64(b"sess-42")
@@ -1771,8 +1734,8 @@ mod tests {
         }
     }
 
-    /// Plan §2: the same logical span delivered as OTLP protobuf and as OTLP/JSON
-    /// must classify identically. JSON carries int64s as decimal strings and the
+    /// The same logical span delivered as OTLP protobuf and as OTLP/JSON must
+    /// classify identically. JSON carries int64s as decimal strings and the
     /// span/trace ids as hex, and the crate's leniency pass normalizes both — the
     /// classifier must not be able to tell which transport it came from.
     #[test]

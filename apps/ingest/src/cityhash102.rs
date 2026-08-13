@@ -1,20 +1,17 @@
 //! CityHash64 as ClickHouse computes it — **CityHash v1.0.2**, not upstream HEAD.
 //!
-//! `AiSessionKeyHash` is `city_hash64(value)` over the resolved session-key value
-//! (write-side plan §2 step 5). This in-crate port is kept **deliberately**, for
-//! three reasons that survive the retirement of the Rust/SQL classifier
-//! equivalence contract:
+//! `AiSessionKeyHash` is `city_hash64(value)` over the resolved session-key value.
+//! This in-crate port is kept **deliberately**, for three reasons:
 //!
 //! * **Read-path ClickHouse-computability.** ClickHouse vendors
 //!   `contrib/cityhash102` — Google's 1.0.2 release, frozen in 2011 — so
 //!   `city_hash64(x)` == `SELECT cityHash64(x)` for every byte string. The
-//!   plaintext session key stays in `SpanAttributes` on the same row, which means
+//!   plaintext session key stays in `SpanAttributes` on the same row, so
 //!   `WHERE AiSessionKeyHash = cityHash64({sessionId})` finds a known session's
 //!   spans via the indexed column instead of a map probe, and the column is
-//!   verifiable/repairable from `SpanAttributes` in SQL. No SQL *classifier* is
-//!   involved in either.
+//!   verifiable/repairable from `SpanAttributes` in SQL.
 //! * **Zero dependencies, zero maintenance.** The algorithm froze in 2011; this
-//!   transcription is done and pinned by ground-truth vectors read out of a live
+//!   transcription is pinned by ground-truth vectors read out of a live
 //!   ClickHouse (26.7.2.59).
 //! * **crates.io is the riskier option.** Published CityHash crates track
 //!   upstream 1.1+, which changed `CityHash64` (different mixing for len ≤ 32,
@@ -256,9 +253,7 @@ mod tests {
     /// length class of the algorithm — 0, 1..3, 4..8, 9..16, 17..32, 33..64,
     /// and over-64 (an exact 64-byte loop multiple) — so a variant mismatch
     /// (1.1 vs 1.0.2 changed the ≤32 and over-64 branches) or a transcription
-    /// regression in any branch trips at least one pin. The original 47-vector
-    /// capture sweep lives in git history; regenerate against the container if
-    /// the table ever needs to grow.
+    /// regression in any branch trips at least one pin.
     const VECTORS: &[(&str, u64)] = &[
         // empty
         ("", 11160318154034397263u64),

@@ -81,9 +81,9 @@ fn bench_ingest_accept(c: &mut Criterion) {
     let _ = std::fs::remove_dir_all(&fixture.queue_dir);
 }
 
-/// Classifier cost in isolation (write-side plan constraint 2: ~50 ns/span mean,
-/// ~300 ns worst case on a 60-attribute AI span, out of a ~500 ns total per-span
-/// budget). Everything here is pure CPU — no pipeline, no I/O.
+/// Classifier cost in isolation. Budget: ~50 ns/span mean, ~300 ns worst case on a
+/// 60-attribute AI span, out of ~500 ns total per span. Pure CPU — no pipeline, no
+/// I/O.
 fn bench_ai_classifier(c: &mut Criterion) {
     let registry = registry();
     let mut group = c.benchmark_group("ai_classifier");
@@ -189,8 +189,8 @@ fn bench_ai_classifier(c: &mut Criterion) {
         });
     });
 
-    // The realistic unit: hoist once, then classify 20 spans (the plan's spans/trace
-    // figure). Divide by 20 for the effective per-span cost including hoisting.
+    // The realistic unit: hoist once, then classify a trace's worth of spans.
+    // Divide by 20 for the effective per-span cost including hoisting.
     group.bench_function("hoisted_scope_20_ai_spans", |b| {
         b.iter(|| {
             let resource = ResourceContext::new(registry, black_box(&ai_resource));
