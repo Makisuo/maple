@@ -222,6 +222,27 @@ describe("detectSchemaVersion", () => {
 	})
 })
 
+describe("migrateToLatest with a document from a newer build", () => {
+	// The rollback case. `detectSchemaVersion` reads an unknown version as 1, so
+	// without a guard the document is run through the entire chain as though it
+	// were the oldest shape and then stamped as current — decode fails either
+	// way, but stamped, the next writer persists the lie and the original
+	// version is gone. Failing to read is recoverable; corrupting is not.
+	const fromTheFuture = { ...legacyDocument, schemaVersion: 99, widgets: [] }
+
+	it("returns it untouched rather than restamping it downward", () => {
+		expect(migrateToLatest(fromTheFuture)).toEqual(fromTheFuture)
+	})
+
+	it("does not claim the current version on the way out", () => {
+		expect(migrateToLatest(fromTheFuture).schemaVersion).toBe(99)
+	})
+
+	it("still migrates a document at or below the current version", () => {
+		expect(migrateToLatest(legacyDocument).schemaVersion).toBe(CURRENT_DASHBOARD_SCHEMA_VERSION)
+	})
+})
+
 describe("parseStoredDashboard", () => {
 	it("decodes a legacy unstamped document and reports the version it came from", () => {
 		const outcome = parse(legacyDocument)

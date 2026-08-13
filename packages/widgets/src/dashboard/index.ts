@@ -19,6 +19,14 @@ export {
 	detectSchemaVersion,
 	migrateToLatest,
 } from "./migrations"
+export {
+	dataSourceEndpoint,
+	dataSourceQuerySet,
+	dataSourceRawSql,
+	dataSourceRouteParams,
+	isQueryDataSource,
+	type RawSqlDataSource,
+} from "./access"
 export { type DashboardParseOutcome, parseStoredDashboard, stampCurrentVersion } from "./parse"
 export { CURRENT_DASHBOARD_SCHEMA_VERSION, DashboardSchemaVersion } from "./version"
 export { makeWidgetDisplayConfigSchema } from "./shared/display"
