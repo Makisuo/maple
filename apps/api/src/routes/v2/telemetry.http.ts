@@ -11,7 +11,6 @@ import {
 	MapleApiV2,
 	paginateOffsetQuery,
 	timestamp,
-	toV2Error,
 	V2CursorInvalid,
 	V2LogIdInvalid,
 	V2LogNotFound,
@@ -400,13 +399,11 @@ const decodeQueryEngineRequest = <E>(input: unknown, onInvalid: () => E) =>
 	Schema.decodeUnknownEffect(QueryEngineExecuteRequest)(input).pipe(Effect.mapError(onInvalid))
 
 const queryResultMismatch = (expectedKind: string, actualKind: string) =>
-	toV2Error(
-		new QueryEngineResultMismatchError({
-			message: `Expected ${expectedKind} query result, received ${actualKind}`,
-			expectedKind,
-			actualKind,
-		}),
-	)
+	new QueryEngineResultMismatchError({
+		message: `Expected ${expectedKind} query result, received ${actualKind}`,
+		expectedKind,
+		actualKind,
+	})
 
 const validateTimeseriesBucket = (
 	startTime: string,
@@ -473,12 +470,10 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 					orgId: tenant.orgId,
 				},
 			)
-			return yield* warehouse
-				.compiledQuery(tenant, compiled, {
-					profile: "list",
-					context: "v2GetTrace",
-				})
-				.pipe(Effect.mapError(toV2Error))
+			return yield* warehouse.compiledQuery(tenant, compiled, {
+				profile: "list",
+				context: "v2GetTrace",
+			})
 		})
 
 		return handlers
@@ -516,9 +511,11 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 						}),
 						{ orgId: tenant.orgId, ...window },
 					)
-					const rows = yield* warehouse
-						.compiledQuery(tenant, compiled, { profile: "list", context: "v2TraceSearch" })
-						.pipe(Effect.mapError(toV2Error))
+					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+						profile: "list",
+						context: "v2TraceSearch",
+					})
+
 					const dataRows = rows.slice(0, limit)
 					const last = dataRows.at(-1)
 					const hasMore = rows.length > limit
@@ -566,9 +563,8 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 						},
 						() => V2TraceQueryInvalid.make(undefined, { param: "aggregation" }),
 					)
-					const response = yield* queryEngine
-						.execute(tenant, request)
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* queryEngine.execute(tenant, request)
+
 					if (response.result.kind !== "timeseries") {
 						return yield* Effect.fail(queryResultMismatch("timeseries", response.result.kind))
 					}
@@ -610,9 +606,8 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 						},
 						() => V2TraceQueryInvalid.make(undefined, { param: "aggregation" }),
 					)
-					const response = yield* queryEngine
-						.execute(tenant, request)
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* queryEngine.execute(tenant, request)
+
 					if (response.result.kind !== "breakdown") {
 						return yield* Effect.fail(queryResultMismatch("breakdown", response.result.kind))
 					}
@@ -668,7 +663,7 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 							),
 							{ profile: "discovery", context: "v2GetSpan" },
 						)
-						.pipe(Effect.mapError(toV2Error), Effect.map(Option.getOrNull))
+						.pipe(Effect.map(Option.getOrNull))
 					if (!detail) return yield* Effect.fail(V2SpanNotFound.make())
 					return toSpan(detail)
 				}),
@@ -708,13 +703,12 @@ export const HttpV2LogsLive = HttpApiBuilder.group(MapleApiV2, "logs", (handlers
 						}),
 						{ orgId: tenant.orgId, ...window },
 					)
-					const rows = yield* warehouse
-						.compiledQuery(tenant, compiled, {
-							profile: "list",
-							context: "v2LogSearch",
-							settings: filters?.body_search ? LOGS_BODY_SEARCH_SETTINGS : undefined,
-						})
-						.pipe(Effect.mapError(toV2Error))
+					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+						profile: "list",
+						context: "v2LogSearch",
+						settings: filters?.body_search ? LOGS_BODY_SEARCH_SETTINGS : undefined,
+					})
+
 					const dataRows = rows.slice(0, limit)
 					const last = dataRows.at(-1)
 					const hasMore = rows.length > limit
@@ -764,9 +758,8 @@ export const HttpV2LogsLive = HttpApiBuilder.group(MapleApiV2, "logs", (handlers
 						},
 						() => V2LogQueryInvalid.make(undefined, { param: "aggregation" }),
 					)
-					const response = yield* queryEngine
-						.execute(tenant, request)
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* queryEngine.execute(tenant, request)
+
 					if (response.result.kind !== "timeseries") {
 						return yield* Effect.fail(queryResultMismatch("timeseries", response.result.kind))
 					}
@@ -804,9 +797,8 @@ export const HttpV2LogsLive = HttpApiBuilder.group(MapleApiV2, "logs", (handlers
 						},
 						() => V2LogQueryInvalid.make(undefined, { param: "aggregation" }),
 					)
-					const response = yield* queryEngine
-						.execute(tenant, request)
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* queryEngine.execute(tenant, request)
+
 					if (response.result.kind !== "breakdown") {
 						return yield* Effect.fail(queryResultMismatch("breakdown", response.result.kind))
 					}
@@ -842,7 +834,7 @@ export const HttpV2LogsLive = HttpApiBuilder.group(MapleApiV2, "logs", (handlers
 							profile: "list",
 							context: "v2GetLog",
 						})
-						.pipe(Effect.mapError(toV2Error), Effect.map(Option.getOrNull))
+						.pipe(Effect.map(Option.getOrNull))
 					if (!row) return yield* Effect.fail(V2LogNotFound.make())
 					return toLog(row)
 				}),
@@ -877,7 +869,6 @@ export const HttpV2MetricsLive = HttpApiBuilder.group(MapleApiV2, "metrics", (ha
 								context: "v2ListMetrics",
 							})
 							.pipe(
-								Effect.mapError(toV2Error),
 								Effect.map(
 									(rows): ReadonlyArray<V2Metric> =>
 										rows.map((row) => ({
@@ -931,9 +922,8 @@ export const HttpV2MetricsLive = HttpApiBuilder.group(MapleApiV2, "metrics", (ha
 						},
 						() => V2MetricQueryInvalid.make(undefined, { param: "aggregation" }),
 					)
-					const response = yield* queryEngine
-						.execute(tenant, request)
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* queryEngine.execute(tenant, request)
+
 					if (response.result.kind !== "timeseries") {
 						return yield* Effect.fail(queryResultMismatch("timeseries", response.result.kind))
 					}
@@ -975,9 +965,8 @@ export const HttpV2MetricsLive = HttpApiBuilder.group(MapleApiV2, "metrics", (ha
 						},
 						() => V2MetricQueryInvalid.make(undefined, { param: "aggregation" }),
 					)
-					const response = yield* queryEngine
-						.execute(tenant, request)
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* queryEngine.execute(tenant, request)
+
 					if (response.result.kind !== "breakdown") {
 						return yield* Effect.fail(queryResultMismatch("breakdown", response.result.kind))
 					}
@@ -1051,10 +1040,7 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 					profile: "aggregation",
 					context: "v2ServiceCatalog",
 				})
-				.pipe(
-					Effect.mapError(toV2Error),
-					Effect.map((rows) => rows.map((row) => toService(row, window.rangeSeconds))),
-				)
+				.pipe(Effect.map((rows) => rows.map((row) => toService(row, window.rangeSeconds))))
 		}
 		return handlers
 			.handle("list", ({ query }) =>
@@ -1142,12 +1128,11 @@ export const HttpV2ServiceMapLive = HttpApiBuilder.group(MapleApiV2, "serviceMap
 							{ deploymentEnv: query.deployment_environment },
 							{ orgId: tenant.orgId, ...window },
 						)
-				const rows = yield* warehouse
-					.compiledQuery(tenant, compiled, {
-						profile: "aggregation",
-						context: "v2ServiceMap",
-					})
-					.pipe(Effect.mapError(toV2Error))
+				const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+					profile: "aggregation",
+					context: "v2ServiceMap",
+				})
+
 				return {
 					object: "service_map" as const,
 					start_time: timestamp(query.start_time),

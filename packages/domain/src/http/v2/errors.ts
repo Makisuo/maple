@@ -1,5 +1,10 @@
 import { Schema } from "effect"
-import { HttpErrorRecovery, type PublicHttpErrorStatus } from "../error-policy"
+import {
+	HttpErrorRecovery,
+	publicHttpErrorTypeForStatus,
+	type PublicHttpErrorStatus,
+	type PublicHttpErrorTypeForStatus,
+} from "../error-policy"
 
 /**
  * v2 error envelope (see docs/api-v2.md): every error response body is
@@ -8,8 +13,8 @@ import { HttpErrorRecovery, type PublicHttpErrorStatus } from "../error-policy"
  *
  * These remain `Schema.Error`s rather than tagged Effect failures: `_tag` is
  * deliberately nested inside the public envelope and identifies the semantic
- * failure that reached the boundary. Domain adapters preserve their original
- * tag; errors born at the v2 boundary derive one from their stable code.
+ * failure that reached the boundary. Domain errors expose their original tag
+ * directly; errors born at the v2 boundary derive one from their stable code.
  */
 
 export const V2ErrorType = Schema.Literals([
@@ -48,19 +53,7 @@ export type V2ErrorForStatus<Status extends PublicHttpErrorStatus> = Status exte
 										? V2ServiceUnavailableError
 										: V2GatewayTimeoutError
 
-export type V2ErrorTypeForStatus<Status extends PublicHttpErrorStatus> = Status extends 400 | 413
-	? "invalid_request_error"
-	: Status extends 401
-		? "authentication_error"
-		: Status extends 403
-			? "permission_error"
-			: Status extends 404
-				? "not_found_error"
-				: Status extends 409
-					? "conflict_error"
-					: Status extends 429
-						? "rate_limit_error"
-						: "api_error"
+export type V2ErrorTypeForStatus<Status extends PublicHttpErrorStatus> = PublicHttpErrorTypeForStatus<Status>
 
 export interface V2PublicError<Tag extends string, Type extends string> {
 	readonly error: {
@@ -78,31 +71,11 @@ export interface V2PublicError<Tag extends string, Type extends string> {
 	}
 }
 
-export const errorTypeForStatus = <const Status extends PublicHttpErrorStatus>(
-	status: Status,
-): V2ErrorTypeForStatus<Status> => {
-	switch (status) {
-		case 400:
-		case 413:
-			return "invalid_request_error" as V2ErrorTypeForStatus<Status>
-		case 401:
-			return "authentication_error" as V2ErrorTypeForStatus<Status>
-		case 403:
-			return "permission_error" as V2ErrorTypeForStatus<Status>
-		case 404:
-			return "not_found_error" as V2ErrorTypeForStatus<Status>
-		case 409:
-			return "conflict_error" as V2ErrorTypeForStatus<Status>
-		case 429:
-			return "rate_limit_error" as V2ErrorTypeForStatus<Status>
-		default:
-			return "api_error" as V2ErrorTypeForStatus<Status>
-	}
-}
+export const errorTypeForStatus = publicHttpErrorTypeForStatus
 
 /** Presentation/recovery metadata shared by every v2 error constructor. */
 export interface V2ErrorMetadata {
-	/** Stable semantic identity. Domain adapters pass the original Effect `_tag`. */
+	/** Stable semantic identity for errors created at the v2 boundary. */
 	readonly tag?: string
 	readonly title?: string
 	readonly retryable?: boolean
@@ -474,7 +447,7 @@ export class V2GatewayTimeoutError extends Schema.Error<V2GatewayTimeoutError>(
 	}
 }
 
-// Constructors — keep handler adapters one-liners.
+// Constructors for failures created at the v2 boundary.
 
 export const invalidRequest = (
 	code: string,

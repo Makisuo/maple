@@ -14,7 +14,7 @@ import type {
 	V2ErrorIssueActor,
 	V2ErrorIssueDetail,
 } from "@maple/domain/http/v2"
-import { MapleApiV2, toV2Error, V2CursorInvalid, V2CursorSortMismatch } from "@maple/domain/http/v2"
+import { MapleApiV2, V2CursorInvalid, V2CursorSortMismatch } from "@maple/domain/http/v2"
 import { Effect, Schema } from "effect"
 import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 
@@ -119,21 +119,20 @@ export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssu
 					const tenant = yield* CurrentTenant.Context
 					const sort = query.sort ?? "last_seen"
 					const cursor = yield* decodeCursor(query.cursor, sort)
-					const response = yield* readModels
-						.listIssues(tenant.orgId, {
-							workflowState: query.workflow_state,
-							severity: query.severity,
-							kind: query.kind,
-							service: query.service_name,
-							deploymentEnv: query.deployment_environment,
-							startTime: query.start_time,
-							endTime: query.end_time,
-							actionable: query.actionable === "true",
-							sort,
-							limit: query.limit ?? 20,
-							cursor,
-						})
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* readModels.listIssues(tenant.orgId, {
+						workflowState: query.workflow_state,
+						severity: query.severity,
+						kind: query.kind,
+						service: query.service_name,
+						deploymentEnv: query.deployment_environment,
+						startTime: query.start_time,
+						endTime: query.end_time,
+						actionable: query.actionable === "true",
+						sort,
+						limit: query.limit ?? 20,
+						cursor,
+					})
+
 					return {
 						object: "list" as const,
 						data: response.issues.map(toV2Issue),
@@ -145,9 +144,8 @@ export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssu
 			.handle("serviceCounts", () =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const counts = yield* readModels
-						.countOpenIssuesByService(tenant.orgId)
-						.pipe(Effect.mapError(toV2Error))
+					const counts = yield* readModels.countOpenIssuesByService(tenant.orgId)
+
 					return {
 						object: "list" as const,
 						data: counts.map((row) => ({
@@ -162,14 +160,13 @@ export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssu
 			.handle("retrieve", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const detail = yield* readModels
-						.getIssue(tenant.orgId, params.id, {
-							startTime: query.start_time,
-							endTime: query.end_time,
-							bucketSeconds: query.bucket_seconds,
-							sampleLimit: query.sample_limit,
-						})
-						.pipe(Effect.mapError(toV2Error))
+					const detail = yield* readModels.getIssue(tenant.orgId, params.id, {
+						startTime: query.start_time,
+						endTime: query.end_time,
+						bucketSeconds: query.bucket_seconds,
+						sampleLimit: query.sample_limit,
+					})
+
 					return toV2IssueDetail(detail)
 				}),
 			)

@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant } from "@maple/domain/http"
-import { MapleApiV2, PublicIdPrefixes, encodePublicId, toV2Error } from "@maple/domain/http/v2"
+import { MapleApiV2, PublicIdPrefixes, encodePublicId } from "@maple/domain/http/v2"
 import type { PublicIdPrefix, V2SetupAudit, V2SetupAuditAffectedEntity } from "@maple/domain/http/v2"
 import type { AuditAffectedEntity, AuditCheckResult, SetupAuditReport } from "@maple/domain/setup-audit"
 import { Effect } from "effect"
@@ -63,7 +63,7 @@ export const HttpV2InstrumentationAuditLive = HttpApiBuilder.group(
 					const tenant = yield* CurrentTenant.Context
 					// Only a configuration read failure reaches here — a warehouse outage degrades to
 					// skipped checks inside the service rather than failing the request.
-					const report = yield* service.run(tenant).pipe(Effect.mapError(toV2Error))
+					const report = yield* service.run(tenant)
 					return toV2SetupAudit(report)
 				}),
 			)

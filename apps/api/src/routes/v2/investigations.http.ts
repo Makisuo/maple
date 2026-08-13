@@ -13,7 +13,7 @@ import {
 	InvestigationSubjectSnapshot,
 	TraceId,
 } from "@maple/domain/http"
-import { MapleApiV2, paginateOffsetQuery, toV2Error } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateOffsetQuery } from "@maple/domain/http/v2"
 import type {
 	V2Investigation,
 	V2InvestigationCreateParams,
@@ -198,7 +198,7 @@ const logSubjectDecodeError = (error: InvestigationDataCorruptionError) =>
 	)
 
 const serializeInvestigation = (doc: InvestigationDocument) =>
-	toV2Investigation(doc).pipe(Effect.tapError(logSubjectDecodeError), Effect.mapError(toV2Error))
+	toV2Investigation(doc).pipe(Effect.tapError(logSubjectDecodeError))
 
 export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "investigations", (handlers) =>
 	Effect.gen(function* () {
@@ -221,7 +221,6 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 								offset,
 							})
 							.pipe(
-								Effect.mapError(toV2Error),
 								Effect.flatMap((response) =>
 									Effect.forEach(response.investigations, serializeInvestigation),
 								),
@@ -233,46 +232,42 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 			.handle("retrieve", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const doc = yield* service
-						.getInvestigation(tenant.orgId, params.id)
-						.pipe(Effect.mapError(toV2Error))
+					const doc = yield* service.getInvestigation(tenant.orgId, params.id)
+
 					return yield* serializeInvestigation(doc)
 				}),
 			)
 			.handle("create", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const doc = yield* service
-						.createAndStartInvestigation(
-							tenant.orgId,
-							tenant.userId,
-							new InvestigationCreateRequest({
-								subject: toInternalSubject(payload.subject),
-								...(payload.snapshot !== undefined
-									? { snapshot: toInternalSnapshot(payload.snapshot) }
-									: {}),
-							}),
-							{ automatic: false },
-						)
-						.pipe(Effect.mapError(toV2Error))
+					const doc = yield* service.createAndStartInvestigation(
+						tenant.orgId,
+						tenant.userId,
+						new InvestigationCreateRequest({
+							subject: toInternalSubject(payload.subject),
+							...(payload.snapshot !== undefined
+								? { snapshot: toInternalSnapshot(payload.snapshot) }
+								: {}),
+						}),
+						{ automatic: false },
+					)
+
 					return yield* serializeInvestigation(doc)
 				}),
 			)
 			.handle("restart", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const doc = yield* service
-						.restartInvestigation(tenant.orgId, params.id)
-						.pipe(Effect.mapError(toV2Error))
+					const doc = yield* service.restartInvestigation(tenant.orgId, params.id)
+
 					return yield* serializeInvestigation(doc)
 				}),
 			)
 			.handle("updateStatus", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const doc = yield* service
-						.updateStatus(tenant.orgId, params.id, payload.status)
-						.pipe(Effect.mapError(toV2Error))
+					const doc = yield* service.updateStatus(tenant.orgId, params.id, payload.status)
+
 					return yield* serializeInvestigation(doc)
 				}),
 			)

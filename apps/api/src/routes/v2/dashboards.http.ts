@@ -10,7 +10,6 @@ import {
 import {
 	MapleApiV2,
 	LIST_LIMIT_DEFAULT,
-	toV2Error,
 	paginateArray,
 	V2ParameterInvalid,
 	V2ParameterMissing,
@@ -174,9 +173,8 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 				.handle("list", ({ query }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const response = yield* persistence
-							.list(tenant.orgId)
-							.pipe(Effect.mapError(toV2Error))
+						const response = yield* persistence.list(tenant.orgId)
+
 						const page = yield* paginateArray(response.dashboards.map(toV2Dashboard), query)
 						return { object: "list" as const, ...page }
 					}),
@@ -184,18 +182,20 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 				.handle("retrieve", ({ params }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const dashboard = yield* persistence
-							.get(tenant.orgId, params.id)
-							.pipe(Effect.mapError(toV2Error))
+						const dashboard = yield* persistence.get(tenant.orgId, params.id)
+
 						return toV2Dashboard(dashboard)
 					}),
 				)
 				.handle("create", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const dashboard = yield* persistence
-							.create(tenant.orgId, tenant.userId, toPortable(payload))
-							.pipe(Effect.mapError(toV2Error))
+						const dashboard = yield* persistence.create(
+							tenant.orgId,
+							tenant.userId,
+							toPortable(payload),
+						)
+
 						return toV2DashboardMutation(dashboard)
 					}),
 				)
@@ -205,20 +205,21 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 						const updatedAt = asIsoDateTime(
 							new Date(yield* Clock.currentTimeMillis).toISOString(),
 						)
-						const dashboard = yield* persistence
-							.mutate(tenant.orgId, tenant.userId, params.id, (current) =>
-								Effect.succeed(applyUpdate(current, payload, updatedAt)),
-							)
-							.pipe(Effect.mapError(toV2Error))
+						const dashboard = yield* persistence.mutate(
+							tenant.orgId,
+							tenant.userId,
+							params.id,
+							(current) => Effect.succeed(applyUpdate(current, payload, updatedAt)),
+						)
+
 						return toV2DashboardMutation(dashboard)
 					}),
 				)
 				.handle("delete", ({ params }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const deleted = yield* persistence
-							.delete(tenant.orgId, params.id)
-							.pipe(Effect.mapError(toV2Error))
+						const deleted = yield* persistence.delete(tenant.orgId, params.id)
+
 						return {
 							id: deleted.id,
 							object: "dashboard" as const,
@@ -229,13 +230,14 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 				)
 				.handle("importPerses", ({ payload }) =>
 					Effect.gen(function* () {
-						const converted = yield* convertPersesDashboardToPortable(payload.dashboard).pipe(
-							Effect.mapError(toV2Error),
-						)
+						const converted = yield* convertPersesDashboardToPortable(payload.dashboard)
 						const tenant = yield* CurrentTenant.Context
-						const dashboard = yield* persistence
-							.create(tenant.orgId, tenant.userId, converted.dashboard)
-							.pipe(Effect.mapError(toV2Error))
+						const dashboard = yield* persistence.create(
+							tenant.orgId,
+							tenant.userId,
+							converted.dashboard,
+						)
+
 						return {
 							object: "dashboard_import" as const,
 							dashboard: toV2DashboardMutation(dashboard),
@@ -255,12 +257,11 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 							)
 						}
 						const tenant = yield* CurrentTenant.Context
-						const response = yield* persistence
-							.listVersions(tenant.orgId, params.id, {
-								limit: query.limit ?? LIST_LIMIT_DEFAULT,
-								...(before !== undefined && before !== null ? { before } : {}),
-							})
-							.pipe(Effect.mapError(toV2Error))
+						const response = yield* persistence.listVersions(tenant.orgId, params.id, {
+							limit: query.limit ?? LIST_LIMIT_DEFAULT,
+							...(before !== undefined && before !== null ? { before } : {}),
+						})
+
 						const data = response.versions.map(toV2Version)
 						return {
 							object: "list" as const,
@@ -276,18 +277,25 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 				.handle("retrieveVersion", ({ params }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const version = yield* persistence
-							.getVersion(tenant.orgId, params.id, params.version_id)
-							.pipe(Effect.mapError(toV2Error))
+						const version = yield* persistence.getVersion(
+							tenant.orgId,
+							params.id,
+							params.version_id,
+						)
+
 						return toV2VersionDetail(version)
 					}),
 				)
 				.handle("restoreVersion", ({ params }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const dashboard = yield* persistence
-							.restoreVersion(tenant.orgId, tenant.userId, params.id, params.version_id)
-							.pipe(Effect.mapError(toV2Error))
+						const dashboard = yield* persistence.restoreVersion(
+							tenant.orgId,
+							tenant.userId,
+							params.id,
+							params.version_id,
+						)
+
 						return toV2DashboardMutation(dashboard)
 					}),
 				)
@@ -311,12 +319,10 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 						const template = getTemplateById(params.template_id)
 						if (!template)
 							return yield* Effect.fail(
-								toV2Error(
-									new DashboardTemplateNotFoundError({
-										templateId: params.template_id,
-										message: "No such dashboard template.",
-									}),
-								),
+								new DashboardTemplateNotFoundError({
+									templateId: params.template_id,
+									message: "No such dashboard template.",
+								}),
 							)
 
 						const built = yield* Effect.try({
@@ -342,12 +348,10 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 						const template = getTemplateById(params.template_id)
 						if (!template)
 							return yield* Effect.fail(
-								toV2Error(
-									new DashboardTemplateNotFoundError({
-										templateId: params.template_id,
-										message: "No such dashboard template.",
-									}),
-								),
+								new DashboardTemplateNotFoundError({
+									templateId: params.template_id,
+									message: "No such dashboard template.",
+								}),
 							)
 
 						const provided: TemplateParameterValues = payload.parameters ?? {}
@@ -380,9 +384,8 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 							widgets: built.widgets,
 						})
 						const tenant = yield* CurrentTenant.Context
-						const dashboard = yield* persistence
-							.create(tenant.orgId, tenant.userId, portable)
-							.pipe(Effect.mapError(toV2Error))
+						const dashboard = yield* persistence.create(tenant.orgId, tenant.userId, portable)
+
 						return toV2DashboardMutation(dashboard)
 					}),
 				)

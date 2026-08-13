@@ -1,7 +1,7 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { RecommendationIssue, RecommendationIssueId } from "@maple/domain/http"
 import { CurrentTenant, RecommendationIssueNotFoundError } from "@maple/domain/http"
-import { MapleApiV2, paginateArray, toV2Error } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import type { V2Recommendation } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
@@ -30,12 +30,10 @@ const pickIssue = (issues: ReadonlyArray<RecommendationIssue>, id: Recommendatio
 	const issue = issues.find((candidate) => candidate.id === id)
 	return issue === undefined
 		? Effect.fail(
-				toV2Error(
-					new RecommendationIssueNotFoundError({
-						message: "No such recommendation.",
-						id,
-					}),
-				),
+				new RecommendationIssueNotFoundError({
+					message: "No such recommendation.",
+					id,
+				}),
 			)
 		: Effect.succeed(issue)
 }
@@ -51,9 +49,8 @@ export const HttpV2InstrumentationRecommendationsLive = HttpApiBuilder.group(
 				.handle("list", ({ query }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const response = yield* service
-							.listReconciled(tenant)
-							.pipe(Effect.mapError(toV2Error))
+						const response = yield* service.listReconciled(tenant)
+
 						const page = yield* paginateArray(response.issues.map(toV2Recommendation), query)
 						return { object: "list" as const, ...page }
 					}),
@@ -61,9 +58,8 @@ export const HttpV2InstrumentationRecommendationsLive = HttpApiBuilder.group(
 				.handle("dismiss", ({ params }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const response = yield* service
-							.dismiss(tenant, params.id)
-							.pipe(Effect.mapError(toV2Error))
+						const response = yield* service.dismiss(tenant, params.id)
+
 						const issue = yield* pickIssue(response.issues, params.id)
 						return toV2Recommendation(issue)
 					}),
@@ -71,9 +67,8 @@ export const HttpV2InstrumentationRecommendationsLive = HttpApiBuilder.group(
 				.handle("reopen", ({ params }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const response = yield* service
-							.reopen(tenant, params.id)
-							.pipe(Effect.mapError(toV2Error))
+						const response = yield* service.reopen(tenant, params.id)
+
 						const issue = yield* pickIssue(response.issues, params.id)
 						return toV2Recommendation(issue)
 					}),

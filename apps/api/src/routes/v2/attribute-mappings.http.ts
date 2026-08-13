@@ -6,7 +6,7 @@ import {
 	IngestAttributeMappingNotFoundError,
 	UpdateIngestAttributeMappingRequest,
 } from "@maple/domain/http"
-import { MapleApiV2, paginateArray, toV2Error } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import type { V2AttributeMapping } from "@maple/domain/http/v2"
 import { Array as Arr, Effect, Option } from "effect"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
@@ -28,7 +28,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 	Effect.gen(function* () {
 		const service = yield* IngestAttributeMappingService
 
-		const listMappings = (orgId: OrgId) => service.list(orgId).pipe(Effect.mapError(toV2Error))
+		const listMappings = (orgId: OrgId) => service.list(orgId)
 
 		const findMapping = (orgId: OrgId, id: IngestAttributeMappingId) =>
 			listMappings(orgId).pipe(
@@ -38,12 +38,10 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 						{
 							onNone: () =>
 								Effect.fail(
-									toV2Error(
-										new IngestAttributeMappingNotFoundError({
-											mappingId: id,
-											message: "No such attribute mapping.",
-										}),
-									),
+									new IngestAttributeMappingNotFoundError({
+										mappingId: id,
+										message: "No such attribute mapping.",
+									}),
 								),
 							onSome: Effect.succeed,
 						},
@@ -70,54 +68,47 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 			.handle("create", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const created = yield* service
-						.create(
-							tenant.orgId,
-							new CreateIngestAttributeMappingRequest({
-								name: payload.name,
-								sourceContext: payload.source_context,
-								sourceKey: payload.source_key,
-								targetKey: payload.target_key,
-								operation: payload.operation,
-								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
-							}),
-						)
-						.pipe(Effect.mapError(toV2Error))
+					const created = yield* service.create(
+						tenant.orgId,
+						new CreateIngestAttributeMappingRequest({
+							name: payload.name,
+							sourceContext: payload.source_context,
+							sourceKey: payload.source_key,
+							targetKey: payload.target_key,
+							operation: payload.operation,
+							...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
+						}),
+					)
+
 					return toV2AttributeMapping(created)
 				}),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const updated = yield* service
-						.update(
-							tenant.orgId,
-							params.id,
-							new UpdateIngestAttributeMappingRequest({
-								...(payload.name !== undefined ? { name: payload.name } : {}),
-								...(payload.source_context !== undefined
-									? { sourceContext: payload.source_context }
-									: {}),
-								...(payload.source_key !== undefined
-									? { sourceKey: payload.source_key }
-									: {}),
-								...(payload.target_key !== undefined
-									? { targetKey: payload.target_key }
-									: {}),
-								...(payload.operation !== undefined ? { operation: payload.operation } : {}),
-								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
-							}),
-						)
-						.pipe(Effect.mapError(toV2Error))
+					const updated = yield* service.update(
+						tenant.orgId,
+						params.id,
+						new UpdateIngestAttributeMappingRequest({
+							...(payload.name !== undefined ? { name: payload.name } : {}),
+							...(payload.source_context !== undefined
+								? { sourceContext: payload.source_context }
+								: {}),
+							...(payload.source_key !== undefined ? { sourceKey: payload.source_key } : {}),
+							...(payload.target_key !== undefined ? { targetKey: payload.target_key } : {}),
+							...(payload.operation !== undefined ? { operation: payload.operation } : {}),
+							...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
+						}),
+					)
+
 					return toV2AttributeMapping(updated)
 				}),
 			)
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const deleted = yield* service
-						.delete(tenant.orgId, params.id)
-						.pipe(Effect.mapError(toV2Error))
+					const deleted = yield* service.delete(tenant.orgId, params.id)
+
 					return { id: deleted.id, object: "attribute_mapping" as const, deleted: true as const }
 				}),
 			)

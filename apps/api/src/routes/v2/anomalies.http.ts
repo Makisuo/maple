@@ -12,7 +12,7 @@ import {
 	AnomalyForbiddenError,
 	CurrentTenant,
 } from "@maple/domain/http"
-import { MapleApiV2, paginateOffsetQuery, toV2Error } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateOffsetQuery } from "@maple/domain/http/v2"
 import type { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { requireAdmin } from "@/services/auth/auth"
@@ -124,10 +124,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 								limit,
 								offset,
 							})
-							.pipe(
-								Effect.mapError(toV2Error),
-								Effect.map((response) => response.incidents.map(toV2Incident)),
-							),
+							.pipe(Effect.map((response) => response.incidents.map(toV2Incident))),
 					)
 					return { object: "list" as const, ...page }
 				}),
@@ -135,42 +132,41 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 			.handle("getIncident", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const incident = yield* anomalies
-						.getIncident(tenant.orgId, params.id)
-						.pipe(Effect.mapError(toV2Error))
+					const incident = yield* anomalies.getIncident(tenant.orgId, params.id)
+
 					return toV2Incident(incident)
 				}),
 			)
 			.handle("getIncidentTimeseries", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* anomalies
-						.getIncidentTimeseries(tenant, params.id, {
-							...(query.start_time !== undefined ? { startTime: query.start_time } : {}),
-							...(query.end_time !== undefined ? { endTime: query.end_time } : {}),
-						})
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* anomalies.getIncidentTimeseries(tenant, params.id, {
+						...(query.start_time !== undefined ? { startTime: query.start_time } : {}),
+						...(query.end_time !== undefined ? { endTime: query.end_time } : {}),
+					})
+
 					return toV2Timeseries(response)
 				}),
 			)
 			.handle("resolveIncident", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const incident = yield* anomalies
-						.resolveIncidentManually(tenant.orgId, params.id)
-						.pipe(Effect.mapError(toV2Error))
+					const incident = yield* anomalies.resolveIncidentManually(tenant.orgId, params.id)
+
 					return toV2Incident(incident)
 				}),
 			)
 			.handle("setIncidentIssue", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors
-						.ensureUserActor(tenant.orgId, tenant.userId)
-						.pipe(Effect.mapError(toV2Error))
-					const { incident, previousIssueId } = yield* anomalies
-						.setIncidentIssue(tenant.orgId, params.id, payload.issue_id)
-						.pipe(Effect.mapError(toV2Error))
+					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId)
+
+					const { incident, previousIssueId } = yield* anomalies.setIncidentIssue(
+						tenant.orgId,
+						params.id,
+						payload.issue_id,
+					)
+
 					if (previousIssueId !== null && previousIssueId !== payload.issue_id) {
 						yield* recordLinkEvent(tenant.orgId, actor.id, previousIssueId, "unlinked", incident)
 					}
@@ -183,9 +179,8 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 			.handle("getSettings", () =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const settings = yield* anomalies
-						.getSettings(tenant.orgId)
-						.pipe(Effect.mapError(toV2Error))
+					const settings = yield* anomalies.getSettings(tenant.orgId)
+
 					return toV2Settings(settings)
 				}),
 			)
@@ -198,22 +193,21 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 							new AnomalyForbiddenError({
 								message: "Only org admins can manage anomaly detector settings",
 							}),
-					).pipe(Effect.mapError(toV2Error))
-					const settings = yield* anomalies
-						.updateSettings(
-							tenant.orgId,
-							tenant.userId,
-							new AnomalyDetectorSettingsUpdateRequest({
-								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
-								...(payload.sensitivity !== undefined
-									? { sensitivity: payload.sensitivity }
-									: {}),
-								...(payload.muted_signals !== undefined
-									? { mutedSignals: payload.muted_signals }
-									: {}),
-							}),
-						)
-						.pipe(Effect.mapError(toV2Error))
+					)
+					const settings = yield* anomalies.updateSettings(
+						tenant.orgId,
+						tenant.userId,
+						new AnomalyDetectorSettingsUpdateRequest({
+							...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
+							...(payload.sensitivity !== undefined
+								? { sensitivity: payload.sensitivity }
+								: {}),
+							...(payload.muted_signals !== undefined
+								? { mutedSignals: payload.muted_signals }
+								: {}),
+						}),
+					)
+
 					return toV2Settings(settings)
 				}),
 			)

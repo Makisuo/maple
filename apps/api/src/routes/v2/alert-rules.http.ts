@@ -16,14 +16,7 @@ import type {
 	V2AlertRulePreviewResult,
 	V2AlertRuleUpdateParams,
 } from "@maple/domain/http/v2"
-import {
-	MapleApiV2,
-	paginateArray,
-	scopeAllows,
-	timestamp,
-	toV2Error,
-	V2ParameterInvalid,
-} from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray, scopeAllows, timestamp, V2ParameterInvalid } from "@maple/domain/http/v2"
 import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
 import { AlertsService } from "@/services/alerts/AlertsService"
@@ -297,17 +290,15 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 
 		const findRule = (orgId: Parameters<typeof rules.listRules>[0], ruleId: AlertRuleDocument["id"]) =>
 			Effect.gen(function* () {
-				const response = yield* rules.listRules(orgId).pipe(Effect.mapError(toV2Error))
+				const response = yield* rules.listRules(orgId)
 				const rule = response.rules.find((doc) => doc.id === ruleId)
 				if (rule === undefined)
 					return yield* Effect.fail(
-						toV2Error(
-							new AlertNotFoundError({
-								message: "No such alert rule.",
-								resourceType: "alert_rule",
-								resourceId: ruleId,
-							}),
-						),
+						new AlertNotFoundError({
+							message: "No such alert rule.",
+							resourceType: "alert_rule",
+							resourceId: ruleId,
+						}),
 					)
 				return rule
 			})
@@ -316,7 +307,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* rules.listRules(tenant.orgId).pipe(Effect.mapError(toV2Error))
+					const response = yield* rules.listRules(tenant.orgId)
 					const page = yield* paginateArray(response.rules.map(toV2Rule), query)
 					return { object: "list" as const, ...page }
 				}),
@@ -332,9 +323,13 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const request = yield* toUpsertRequest(payload)
-					const created = yield* rules
-						.createRule(tenant.orgId, tenant.userId, tenant.roles, request)
-						.pipe(Effect.mapError(toV2Error))
+					const created = yield* rules.createRule(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						request,
+					)
+
 					return toV2RuleMutationResponse(created)
 				}),
 			)
@@ -343,18 +338,22 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const tenant = yield* CurrentTenant.Context
 					const current = yield* findRule(tenant.orgId, params.id)
 					const request = yield* mergeUpsertRequest(current, payload)
-					const updated = yield* alerts
-						.updateRule(tenant.orgId, tenant.userId, tenant.roles, params.id, request)
-						.pipe(Effect.mapError(toV2Error))
+					const updated = yield* alerts.updateRule(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						params.id,
+						request,
+					)
+
 					return toV2RuleMutationResponse(updated)
 				}),
 			)
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const deleted = yield* rules
-						.deleteRule(tenant.orgId, tenant.roles, params.id)
-						.pipe(Effect.mapError(toV2Error))
+					const deleted = yield* rules.deleteRule(tenant.orgId, tenant.roles, params.id)
+
 					return {
 						id: deleted.id,
 						object: "alert_rule" as const,
@@ -367,9 +366,14 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const rule = yield* toUpsertRequest(payload.rule)
-					const result = yield* alerts
-						.testRule(tenant.orgId, tenant.userId, tenant.roles, rule, payload.send_notification)
-						.pipe(Effect.mapError(toV2Error))
+					const result = yield* alerts.testRule(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						rule,
+						payload.send_notification,
+					)
+
 					return {
 						object: "alert_rule.test_result" as const,
 						status: result.status,
@@ -398,19 +402,18 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 						return yield* new AlertForbiddenError({
 							message:
 								'Previewing a raw SQL alert requires the "alerts:write" scope, because it executes your query against the warehouse.',
-						}).pipe(Effect.mapError(toV2Error))
+						})
 					}
-					const preview = yield* alerts
-						.previewRule(
-							tenant.orgId,
-							tenant.roles,
-							new AlertRulePreviewRequest({
-								rule,
-								startTime: decodeIsoDateTime(payload.start_time),
-								endTime: decodeIsoDateTime(payload.end_time),
-							}),
-						)
-						.pipe(Effect.mapError(toV2Error))
+					const preview = yield* alerts.previewRule(
+						tenant.orgId,
+						tenant.roles,
+						new AlertRulePreviewRequest({
+							rule,
+							startTime: decodeIsoDateTime(payload.start_time),
+							endTime: decodeIsoDateTime(payload.end_time),
+						}),
+					)
+
 					return toV2PreviewResult(preview)
 				}),
 			)
@@ -419,18 +422,17 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const tenant = yield* CurrentTenant.Context
 					const cursor = yield* decodeChecksCursor(query.cursor)
 					const limit = query.limit ?? 20
-					const response = yield* readModels
-						.listRuleChecks(tenant.orgId, params.id, {
-							...(query.group_key !== undefined ? { groupKey: query.group_key } : {}),
-							...(query.status !== undefined ? { status: query.status } : {}),
-							...(query.since !== undefined ? { since: query.since } : {}),
-							...(query.until !== undefined ? { until: query.until } : {}),
-							...(cursor !== undefined
-								? { beforeTimestamp: cursor[0], beforeGroupKey: cursor[1] }
-								: {}),
-							limit: limit + 1,
-						})
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* readModels.listRuleChecks(tenant.orgId, params.id, {
+						...(query.group_key !== undefined ? { groupKey: query.group_key } : {}),
+						...(query.status !== undefined ? { status: query.status } : {}),
+						...(query.since !== undefined ? { since: query.since } : {}),
+						...(query.until !== undefined ? { until: query.until } : {}),
+						...(cursor !== undefined
+							? { beforeTimestamp: cursor[0], beforeGroupKey: cursor[1] }
+							: {}),
+						limit: limit + 1,
+					})
+
 					const hasMore = response.checks.length > limit
 					const checks = hasMore ? response.checks.slice(0, limit) : response.checks
 					const last = checks.at(-1)
@@ -445,12 +447,11 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("checksSummary", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const summary = yield* readModels
-						.summarizeRuleChecks(tenant.orgId, params.id, {
-							since: query.since,
-							until: query.until,
-						})
-						.pipe(Effect.mapError(toV2Error))
+					const summary = yield* readModels.summarizeRuleChecks(tenant.orgId, params.id, {
+						since: query.since,
+						until: query.until,
+					})
+
 					return {
 						object: "alert_check.summary" as const,
 						bucket_seconds: summary.bucketSeconds,

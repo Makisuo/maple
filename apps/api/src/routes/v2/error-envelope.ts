@@ -144,7 +144,7 @@ export const V2UnexpectedErrorsLive = Layer.succeed(
 
 /**
  * Transport-only failures and response headers, provided once for the API.
- * Expected domain errors never pass through this layer; their classes own
- * their public policy and handlers serialize them with `toV2Error`.
+ * Expected domain errors never pass through this layer; their classes expose
+ * their safe public body and endpoint schemas serialize them directly.
  */
 export const V2TransportErrorBoundaryLive = Layer.merge(V2SchemaErrorTransformLive, V2UnexpectedErrorsLive)

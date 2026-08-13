@@ -26,7 +26,6 @@ import {
 	V2PlanetScaleQueryInsightList,
 	isoTimestamp,
 	isoTimestampOrNull,
-	toV2Error,
 	V2CallbackHostUnavailable,
 	V2InsufficientPermissions,
 	V2TimeRangeInvalid,
@@ -190,7 +189,6 @@ const mapIntegrationErrors =
 	<A, Error extends IntegrationHttpError, R>(effect: Effect.Effect<A, Error, R>) =>
 		effect.pipe(
 			Effect.tapError((error) => Effect.logError(context, { tag: error._tag, message: error.message })),
-			Effect.mapError(toV2Error),
 		)
 
 /**

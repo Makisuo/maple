@@ -16,6 +16,35 @@ export type HttpErrorRecovery = Schema.Schema.Type<typeof HttpErrorRecovery>
 export type HttpErrorRetry = "never" | "backoff" | "after"
 export type PublicHttpErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 502 | 503 | 504
 
+export type PublicHttpErrorTypeForStatus<Status extends PublicHttpErrorStatus> = Status extends 400 | 413
+	? "invalid_request_error"
+	: Status extends 401
+		? "authentication_error"
+		: Status extends 403
+			? "permission_error"
+			: Status extends 404
+				? "not_found_error"
+				: Status extends 409
+					? "conflict_error"
+					: Status extends 429
+						? "rate_limit_error"
+						: "api_error"
+
+/** The public representation every self-describing HTTP error exposes itself. */
+export interface PublicHttpErrorBody<Tag extends string, Status extends PublicHttpErrorStatus> {
+	readonly _tag: Tag
+	readonly type: PublicHttpErrorTypeForStatus<Status>
+	readonly code: string
+	readonly title: string
+	readonly message: string
+	readonly retryable: boolean
+	readonly recovery: HttpErrorRecovery
+	readonly retry_after_seconds?: number
+	readonly retry_at?: string
+	readonly param?: string
+	readonly doc_url?: string
+}
+
 type ErrorValue<Error, Value> = Value | ((error: Error) => Value)
 
 interface PublicHttpErrorPolicyBase<Error, Status extends PublicHttpErrorStatus> {
@@ -49,6 +78,8 @@ export interface PublicHttpErrorDefinition<Tag extends string, Status extends Pu
 
 export interface WithPublicHttpErrorPolicy<Tag extends string, Status extends PublicHttpErrorStatus> {
 	readonly [PublicHttpErrorPolicyTypeId]: PublicHttpErrorDefinition<Tag, Status>
+	/** Public HTTP body read directly by the endpoint error schema during encoding. */
+	readonly error: PublicHttpErrorBody<Tag, Status>
 }
 
 export interface PublicTaggedError {
@@ -103,15 +134,22 @@ export const HttpTaggedError =
 			fields,
 			{ httpApiStatus: policy.status },
 		)
-		return Object.assign(ErrorClass, {
+		const SelfDescribingErrorClass = class extends (ErrorClass as unknown as new (
+			...args: Array<unknown>
+		) => SelfDescribingHttpError) {
+			override readonly error: PublicHttpErrorBody<string, PublicHttpErrorStatus> =
+				publicHttpErrorBody(this)
+		} as unknown as typeof ErrorClass
+
+		return Object.assign(SelfDescribingErrorClass, {
 			[PublicHttpErrorPolicyTypeId]: { tag, policy },
 		} as const)
 	}
 
 export const publicHttpErrorPolicy = <Error extends SelfDescribingHttpError>(
 	error: Error,
-): PublicHttpErrorPolicy<Error, PublicHttpErrorStatus> =>
-	publicHttpErrorDefinitionFor(error.constructor).policy
+): PublicHttpErrorPolicy<Error, PublicHttpErrorStatusOf<Error>> =>
+	publicHttpErrorDefinitionFor<Error>(error.constructor).policy
 
 /** Read the tag and public policy owned by an error class. */
 export function publicHttpErrorDefinitionFor<Error extends SelfDescribingHttpError>(
@@ -141,3 +179,56 @@ export const publicHttpErrorPolicyFor = <Error extends PublicTaggedError>(
 	errorClass: Function,
 ): PublicHttpErrorPolicy<Error, PublicHttpErrorStatus> =>
 	publicHttpErrorDefinitionFor<Error>(errorClass).policy
+
+const resolve = <Error, Value>(value: Value | ((error: Error) => Value), error: Error): Value =>
+	typeof value === "function" ? (value as (error: Error) => Value)(error) : value
+
+export const publicHttpErrorTypeForStatus = <const Status extends PublicHttpErrorStatus>(
+	status: Status,
+): PublicHttpErrorTypeForStatus<Status> => {
+	switch (status) {
+		case 400:
+		case 413:
+			return "invalid_request_error" as PublicHttpErrorTypeForStatus<Status>
+		case 401:
+			return "authentication_error" as PublicHttpErrorTypeForStatus<Status>
+		case 403:
+			return "permission_error" as PublicHttpErrorTypeForStatus<Status>
+		case 404:
+			return "not_found_error" as PublicHttpErrorTypeForStatus<Status>
+		case 409:
+			return "conflict_error" as PublicHttpErrorTypeForStatus<Status>
+		case 429:
+			return "rate_limit_error" as PublicHttpErrorTypeForStatus<Status>
+		default:
+			return "api_error" as PublicHttpErrorTypeForStatus<Status>
+	}
+}
+
+/**
+ * Materialize the safe public body owned by a tagged error. `HttpTaggedError`
+ * installs it on the instance, so handlers can fail with the original tagged
+ * error and let the endpoint schema serialize it directly.
+ */
+export const publicHttpErrorBody = <Error extends SelfDescribingHttpError>(
+	error: Error,
+): PublicHttpErrorBody<Error["_tag"], PublicHttpErrorStatusOf<Error>> => {
+	const policy = publicHttpErrorPolicy(error)
+	const retryAfterSeconds =
+		policy.retryAfterSeconds === undefined ? undefined : resolve(policy.retryAfterSeconds, error)
+	const retryAt = policy.retryAt === undefined ? undefined : resolve(policy.retryAt, error)
+	const param = policy.param === undefined ? undefined : resolve(policy.param, error)
+
+	return {
+		_tag: error._tag,
+		type: publicHttpErrorTypeForStatus(policy.status),
+		code: resolve(policy.code, error),
+		title: resolve(policy.title, error),
+		message: policy.exposure === "public_message" ? error.message : resolve(policy.message, error),
+		retryable: policy.retry !== "never",
+		recovery: policy.recovery,
+		...(retryAfterSeconds === undefined ? {} : { retry_after_seconds: retryAfterSeconds }),
+		...(retryAt === undefined ? {} : { retry_at: retryAt }),
+		...(param === undefined ? {} : { param }),
+	}
+}

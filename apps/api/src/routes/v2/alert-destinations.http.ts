@@ -16,7 +16,7 @@ import type {
 	V2AlertDestinationMutationResponse,
 	V2AlertDestinationUpdateParams,
 } from "@maple/domain/http/v2"
-import { MapleApiV2, paginateArray, toV2Error } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 
@@ -162,9 +162,8 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* destinations
-						.listDestinations(tenant.orgId)
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* destinations.listDestinations(tenant.orgId)
+
 					const page = yield* paginateArray(response.destinations.map(toV2Destination), query)
 					return { object: "list" as const, ...page }
 				}),
@@ -172,19 +171,16 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("retrieve", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* destinations
-						.listDestinations(tenant.orgId)
-						.pipe(Effect.mapError(toV2Error))
+					const response = yield* destinations.listDestinations(tenant.orgId)
+
 					const destination = response.destinations.find((doc) => doc.id === params.id)
 					if (destination === undefined)
 						return yield* Effect.fail(
-							toV2Error(
-								new AlertNotFoundError({
-									message: "No such alert destination.",
-									resourceType: "destination",
-									resourceId: params.id,
-								}),
-							),
+							new AlertNotFoundError({
+								message: "No such alert destination.",
+								resourceType: "destination",
+								resourceId: params.id,
+							}),
 						)
 					return toV2Destination(destination)
 				}),
@@ -192,38 +188,39 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("create", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const created = yield* destinations
-						.createDestination(
-							tenant.orgId,
-							tenant.userId,
-							tenant.roles,
-							toCreateRequest(payload),
-						)
-						.pipe(Effect.mapError(toV2Error))
+					const created = yield* destinations.createDestination(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						toCreateRequest(payload),
+					)
+
 					return toV2DestinationMutation(created)
 				}),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const updated = yield* destinations
-						.updateDestination(
-							tenant.orgId,
-							tenant.userId,
-							tenant.roles,
-							params.id,
-							toUpdateRequest(payload),
-						)
-						.pipe(Effect.mapError(toV2Error))
+					const updated = yield* destinations.updateDestination(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						params.id,
+						toUpdateRequest(payload),
+					)
+
 					return toV2DestinationMutation(updated)
 				}),
 			)
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const deleted = yield* destinations
-						.deleteDestination(tenant.orgId, tenant.roles, params.id)
-						.pipe(Effect.mapError(toV2Error))
+					const deleted = yield* destinations.deleteDestination(
+						tenant.orgId,
+						tenant.roles,
+						params.id,
+					)
+
 					return {
 						id: deleted.id,
 						object: "alert_destination" as const,
@@ -235,9 +232,13 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("test", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const result = yield* destinations
-						.testDestination(tenant.orgId, tenant.userId, tenant.roles, params.id)
-						.pipe(Effect.mapError(toV2Error))
+					const result = yield* destinations.testDestination(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						params.id,
+					)
+
 					return {
 						object: "alert_destination.test_result" as const,
 						success: result.success,

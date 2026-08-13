@@ -8,14 +8,11 @@ import {
 	MapleApiV2,
 	paginateOffsetQuery,
 	timestamp,
-	toV2Error,
 	V2ParameterInvalid,
 	V2SessionReplayNotFound,
 	V2SessionReplayRangeTooLarge,
 } from "@maple/domain/http/v2"
 import type { Timestamp } from "@maple/domain/http/v2"
-import type { WarehouseError } from "@maple/domain/http"
-import type { WarehouseResponseLimitError } from "@maple/query-engine/execution"
 import type {
 	V2SessionReplay,
 	V2SessionReplayChunk,
@@ -50,19 +47,6 @@ const assertRangeFitsBudget = (rows: ReadonlyArray<{ readonly byteSize: number }
 		? Effect.void
 		: Effect.fail(V2SessionReplayRangeTooLarge.make(undefined, { param: "to_chunk_seq" }))
 }
-
-/**
- * Warehouse errors → the v2 envelope, plus the bounded-read refusal.
- *
- * `range_too_large` keeps its message verbatim across the public boundary: it
- * carries no database diagnostics — only the range asked for — and unlike the
- * warehouse faults it is entirely actionable, so redacting it would strip the
- * one useful thing it says.
- */
-const mapReplayReadError = (error: WarehouseError | WarehouseResponseLimitError) =>
-	error._tag === "@maple/query-engine/execution/WarehouseResponseLimitError"
-		? V2SessionReplayRangeTooLarge.make(undefined, { param: "to_chunk_seq" })
-		: toV2Error(error)
 
 /** ISO-8601 → Tinybird `YYYY-MM-DD HH:mm:ss` (UTC), validated. */
 const toTinybird = (value: string, param: string) => {
@@ -103,9 +87,11 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 				CH.getSessionReplayQuery({ startTime: windowStart, endTime: windowEnd }),
 				{ orgId: tenant.orgId, sessionId },
 			)
-			const replay = yield* warehouse
-				.compiledQueryFirst(tenant, compiled, { profile: "discovery", context: "v2RequireReplay" })
-				.pipe(Effect.mapError(toV2Error))
+			const replay = yield* warehouse.compiledQueryFirst(tenant, compiled, {
+				profile: "discovery",
+				context: "v2RequireReplay",
+			})
+
 			if (Option.isNone(replay)) {
 				return yield* Effect.fail(V2SessionReplayNotFound.make())
 			}
@@ -159,7 +145,6 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 						return warehouse
 							.compiledQuery(tenant, compiled, { profile: "list", context: "v2SearchReplays" })
 							.pipe(
-								Effect.mapError(toV2Error),
 								Effect.map(
 									(rows): ReadonlyArray<V2SessionReplayListItem> =>
 										rows.map((row) => ({
@@ -222,7 +207,7 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 							}),
 						],
 						{ concurrency: 2 },
-					).pipe(Effect.mapError(toV2Error))
+					)
 					const data = Option.getOrNull(maybeData)
 					if (!data) {
 						return yield* Effect.fail(V2SessionReplayNotFound.make())
@@ -272,12 +257,11 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					// `discovery` is enough — this never reads the `Events` column, and
 					// with payloads in R2 there is nothing to hydrate here either: the
 					// manifest is a pure index read whatever the storage backend.
-					const rows = yield* warehouse
-						.compiledQuery(tenant, compiled, {
-							profile: "discovery",
-							context: "v2GetReplayManifest",
-						})
-						.pipe(Effect.mapError(toV2Error))
+					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+						profile: "discovery",
+						context: "v2GetReplayManifest",
+					})
+
 					if (rows.length === 0) {
 						yield* requireSession(tenant, params.id, windowStart, windowEnd)
 					}
@@ -373,7 +357,15 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 								},
 							})
 							.pipe(
-								Effect.mapError(mapReplayReadError),
+								Effect.catchTag(
+									"@maple/query-engine/execution/WarehouseResponseLimitError",
+									() =>
+										Effect.fail(
+											V2SessionReplayRangeTooLarge.make(undefined, {
+												param: "to_chunk_seq",
+											}),
+										),
+								),
 								Effect.tap((rows) =>
 									rows.length === 0 && offset === 0
 										? requireSession(tenant, params.id, windowStart, windowEnd)
@@ -422,7 +414,6 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 								context: "v2SessionTranscript",
 							})
 							.pipe(
-								Effect.mapError(toV2Error),
 								Effect.tap((rows) =>
 									rows.length === 0 && offset === 0
 										? requireSession(tenant, params.id, windowStart, windowEnd)
@@ -480,7 +471,6 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 								context: "v2ReplaysForTrace",
 							})
 							.pipe(
-								Effect.mapError(toV2Error),
 								Effect.map(
 									(rows): ReadonlyArray<V2SessionReplayRef> =>
 										rows.map((row) => ({

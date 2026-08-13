@@ -4,7 +4,6 @@ import {
 	AuthorizationV2,
 	requiredScopeForRequest,
 	scopeAllows,
-	toV2Error,
 	V2InsufficientScope,
 	V2InvalidCredentials,
 	V2RateLimited,
@@ -57,9 +56,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 					const request = yield* HttpServerRequest.HttpServerRequest
 
 					const token = getBearerToken(request.headers)
-					const apiKeyResolved = yield* apiKeys
-						.resolveByBearer(token)
-						.pipe(Effect.mapError(toV2Error))
+					const apiKeyResolved = yield* apiKeys.resolveByBearer(token)
 
 					if (Option.isSome(apiKeyResolved)) {
 						const resolved = apiKeyResolved.value
