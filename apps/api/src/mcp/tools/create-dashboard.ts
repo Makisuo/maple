@@ -6,10 +6,15 @@ import { DashboardPersistenceService } from "@/services/dashboards/DashboardPers
 import {
 	DashboardTemplateParameterKey,
 	PortableDashboardDocument,
-	defaultWidgetHeight,
+	defaultWidgetLayout,
+	findNextPosition,
 } from "@maple/domain/http"
 import { DASHBOARD_TEMPLATES, getTemplate } from "@/dashboard-templates"
-import { formatValidationSummary, inspectWidgetsAfterMutation } from "@/mcp/lib/inspect-widget"
+import {
+	collectBlockingBuilderWarnings,
+	formatValidationSummary,
+	inspectWidgetsAfterMutation,
+} from "@/mcp/lib/inspect-widget"
 import {
 	chartDisplayForMetric,
 	makeQueryBuilderBreakdownDataSource,
@@ -49,6 +54,13 @@ function validateGroupBy(rawGroupBy: string, source: string, widgetTitle: string
 	return `Widget "${widgetTitle}": invalid group_by "${rawGroupBy}" for source=${source}. Valid: ${optsList.join(", ")}. ${source === "metrics" ? "Example: attr.signal" : ""}`
 }
 
+/** The kinds `simpleSpecToWidget` actually knows how to build. */
+const SIMPLE_SPEC_VISUALIZATIONS = ["chart", "stat", "table", "list"] as const
+type SimpleSpecVisualization = (typeof SIMPLE_SPEC_VISUALIZATIONS)[number]
+
+const isSimpleSpecVisualization = (value: string): value is SimpleSpecVisualization =>
+	SIMPLE_SPEC_VISUALIZATIONS.some((candidate) => candidate === value)
+
 interface SimpleWidgetSpec {
 	title: string
 	visualization?: string
@@ -71,6 +83,14 @@ function simpleSpecToWidget(
 
 	if (!spec.title || !source) {
 		return `Widget "${spec.title ?? "(untitled)"}": title and source are required.`
+	}
+
+	// The simplified path builds four shapes and falls through to a timeseries
+	// chart for anything else, so a `pie` or `heatmap` here would previously be
+	// persisted with a timeseries data source it cannot draw. Reject instead of
+	// silently mis-wiring; richer kinds go through `add_dashboard_widget`.
+	if (!isSimpleSpecVisualization(viz)) {
+		return `Widget "${spec.title}": visualization must be one of ${SIMPLE_SPEC_VISUALIZATIONS.join(", ")} for simplified specs. Use add_dashboard_widget for other kinds.`
 	}
 
 	if (!["traces", "logs", "metrics"].includes(source)) {
@@ -164,32 +184,23 @@ function simpleSpecToWidget(
 	}
 
 	if (viz === "stat") {
-		const metricsFilters: Record<string, unknown> | undefined =
-			source === "metrics"
-				? {
-						metricName: spec.metric_name,
-						metricType: spec.metric_type,
-						...(spec.service_name && { serviceName: spec.service_name }),
-					}
-				: spec.service_name
-					? { serviceName: spec.service_name }
-					: undefined
-
+		// Same endpoint and query draft as every other kind here. This used to
+		// build the legacy `custom_timeseries` shape with its own filter bag and a
+		// `flattenSeries` step, so an agent-made stat was the one widget on a
+		// dashboard that did not go through the query builder — and so the only one
+		// `collectBlockingBuilderWarnings` could never inspect.
+		//
+		// `custom_query_builder_timeseries` returns wide rows (`{ bucket, <series>:
+		// value }`), which `reduceToValue` reads directly — no flattening. Naming
+		// the series after the widget title is a best effort; `resolveField` falls
+		// back to the first numeric column, which for a single-query stat is the
+		// only series.
 		return {
 			id,
 			visualization: viz,
 			dataSource: {
-				endpoint: "custom_timeseries",
-				params: {
-					source,
-					metric,
-					groupBy: "none",
-					...(metricsFilters && { filters: metricsFilters }),
-				},
-				transform: {
-					flattenSeries: { valueField: "value" },
-					reduceToValue: { field: "value", aggregate: "avg" },
-				},
+				...makeQueryBuilderTimeseriesDataSource([queryDraft]),
+				transform: { reduceToValue: { field: spec.title, aggregate: "avg" } },
 			},
 			display,
 			layout,
@@ -208,38 +219,27 @@ function simpleSpecToWidget(
 	}
 }
 
+/**
+ * Grid rectangles for a run of simplified specs.
+ *
+ * Placement is the shared `findNextPosition`, so this agrees with the web store,
+ * the MCP widget tools and the Perses importer instead of being a fourth
+ * algorithm. What stays local is the *width* policy, which is genuinely this
+ * tool's own: stats are quarter-width so a row of them reads as a strip of KPIs,
+ * everything else is full-bleed because a simplified spec carries no layout
+ * intent to honour.
+ */
 function computeAutoLayout(specs: SimpleWidgetSpec[]): Array<{ x: number; y: number; w: number; h: number }> {
-	const layouts: Array<{ x: number; y: number; w: number; h: number }> = []
-	// Stats are the only kind that shares a row, so its height is what advances
-	// `y` whenever an in-progress stat row is closed out.
-	const statHeight = defaultWidgetHeight("stat").h
-	let y = 0
-	let x = 0
+	const placed: Array<{ layout: { x: number; y: number; w: number; h: number } }> = []
 
 	for (const spec of specs) {
 		const viz = spec.visualization ?? "chart"
-		const { h } = defaultWidgetHeight(viz)
-
-		if (viz === "stat") {
-			if (x + 4 > 12) {
-				y += statHeight
-				x = 0
-			}
-			layouts.push({ x, y, w: 4, h })
-			x += 4
-			continue
-		}
-
-		// Everything else is full-bleed, so close any open stat row first.
-		if (x > 0) {
-			y += statHeight
-			x = 0
-		}
-		layouts.push({ x: 0, y, w: 12, h })
-		y += h
+		const { h } = defaultWidgetLayout(viz)
+		const w = viz === "stat" ? 4 : 12
+		placed.push({ layout: { ...findNextPosition(placed, w), w, h } })
 	}
 
-	return layouts
+	return placed.map((widget) => widget.layout)
 }
 
 function parseSimpleWidgets(json: string): WidgetDef[] | string {
@@ -374,6 +374,31 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 					return {
 						isError: true,
 						content: [{ type: "text" as const, text: result }],
+					}
+				}
+
+				// The same pre-persist gate the widget mutation tools run. It never
+				// ran here because this is a create rather than a mutate, so a
+				// simplified spec that silently dropped a clause — an unsupported
+				// group-by, an over-cap filter set — was persisted and only surfaced
+				// as a confidently wrong chart in the browser.
+				const blocking = yield* Effect.forEach(result, (widget) =>
+					collectBlockingBuilderWarnings(widget.dataSource).pipe(
+						Effect.map((warnings) =>
+							warnings.map((w) => `${widget.display.title ?? widget.id}: ${w}`),
+						),
+					),
+				).pipe(Effect.map((all) => all.flat()))
+
+				if (blocking.length > 0) {
+					return {
+						isError: true,
+						content: [
+							{
+								type: "text" as const,
+								text: `These widgets would not query what they describe:\n${blocking.map((w) => `  - ${w}`).join("\n")}`,
+							},
+						],
 					}
 				}
 

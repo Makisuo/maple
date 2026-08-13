@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-	defaultWidgetHeight,
 	defaultWidgetLayout,
 	isMcpVisualization,
 	isWidgetVisualization,
@@ -12,34 +11,12 @@ import {
 	WIDGET_VISUALIZATIONS,
 } from "./widget-types"
 
-describe("defaultWidgetHeight", () => {
-	// The canvas is rowHeight 60 with a 12px gutter, so h:6 is a 420px tile.
-	// Pinned because nothing else in the repo asserts these numbers, and they
-	// used to be copy-pasted across six call sites that silently drifted apart.
-	it("gives charts the tall default", () => {
-		expect(defaultWidgetHeight("chart")).toEqual({ h: 6, minH: 2 })
-	})
-
-	it("treats every unrecognized visualization as a chart", () => {
-		for (const visualization of ["gauge", "pie", "heatmap", "funnel", "hbar", ""]) {
-			expect(defaultWidgetHeight(visualization).h).toBe(6)
-		}
-	})
-
-	it("keeps stats compact and row-based widgets at table height", () => {
-		expect(defaultWidgetHeight("stat")).toEqual({ h: 2, minH: 2 })
-		expect(defaultWidgetHeight("table")).toEqual({ h: 5, minH: 3 })
-		expect(defaultWidgetHeight("list")).toEqual({ h: 5, minH: 3 })
-		expect(defaultWidgetHeight("markdown")).toEqual({ h: 5, minH: 3 })
-	})
-})
-
 describe("defaultWidgetLayout", () => {
-	// The auto-place size, which is NOT the template height: a hand-added stat is
-	// h:4 so it has room for a sparkline, while a template stat row is h:2.
+	// The one auto-place size. There used to be a second, `templateHeight`, which
+	// packed stat rows to h:2 — but templates hand-write every layout literal and
+	// never called it, so it was removed rather than left half-connected.
 	it("gives a hand-added stat room for a sparkline", () => {
 		expect(defaultWidgetLayout("stat")).toEqual({ w: 3, h: 4, minW: 2, minH: 2 })
-		expect(defaultWidgetHeight("stat").h).toBe(2)
 	})
 
 	it("gives row-based widgets the wide slot", () => {

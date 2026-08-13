@@ -9,7 +9,6 @@
 export {
 	chartFamilyForChartId,
 	DEFAULT_LIST_LIMIT,
-	defaultWidgetHeight,
 	defaultWidgetLayout,
 	HEATMAP_COLOR_SCALES,
 	HEATMAP_SCALE_TYPES,

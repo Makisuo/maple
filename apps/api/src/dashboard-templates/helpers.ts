@@ -6,6 +6,9 @@ import {
 } from "@maple/domain/http"
 import type { TemplateParameterValues, WidgetDef } from "./types"
 
+/** The display half of a widget, so the shared chart presets are literal-typed. */
+type WidgetDisplay = WidgetDef["display"]
+
 // Brand makers — used inside template definitions for compile-time correctness
 
 export const templateId = (value: string): DashboardTemplateId =>
@@ -100,14 +103,14 @@ export function makeQueryBuilderBreakdownDataSource(queries: Record<string, unkn
 // sparse-data heuristic and stipple every dense series in the same chart with
 // point markers. Hovering still gives the active dot, and a reader who wants
 // permanent points can turn them back on per widget.
-export const CHART_DISPLAY_AREA = {
+export const CHART_DISPLAY_AREA: WidgetDisplay = {
 	chartId: "query-builder-area",
 	chartPresentation: { legend: "visible", seriesStats: false, showPoints: false },
 	stacked: true,
 	curveType: "monotone",
 }
 
-export const CHART_DISPLAY_LINE = {
+export const CHART_DISPLAY_LINE: WidgetDisplay = {
 	chartId: "query-builder-line",
 	chartPresentation: { legend: "visible", seriesStats: true, showPoints: false },
 	stacked: false,
@@ -118,14 +121,14 @@ export const CHART_DISPLAY_LINE = {
 // evictions, slow queries, dropped messages. A stacked area over those draws a
 // continuous ribbon between two isolated incidents and reads as sustained
 // pressure; discrete bars read as "three restarts, at these three times".
-export const CHART_DISPLAY_BAR = {
+export const CHART_DISPLAY_BAR: WidgetDisplay = {
 	chartId: "query-builder-bar",
 	chartPresentation: { legend: "visible", seriesStats: false, showPoints: false },
 	stacked: true,
 	curveType: "linear",
 }
 
-export function chartDisplayForMetric(aggregation: string): Record<string, unknown> {
+export function chartDisplayForMetric(aggregation: string): WidgetDisplay {
 	if (["count", "error_rate", "rate", "increase"].includes(aggregation)) {
 		return CHART_DISPLAY_AREA
 	}

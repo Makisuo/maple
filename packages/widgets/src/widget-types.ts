@@ -110,12 +110,6 @@ export interface WidgetTypeMeta {
 		readonly minW: number
 		readonly minH: number
 	}
-	/**
-	 * Compact height used by dashboard templates, which pack stat rows tighter
-	 * than a hand-added stat (`h: 2` vs the `h: 4` that leaves room for a
-	 * sparkline). Reconciling the two is a separate change.
-	 */
-	readonly templateHeight: { readonly h: number; readonly minH: number }
 	/** Width override for MCP-added widgets, where a gauge is deliberately narrow. */
 	readonly mcpWidth?: number
 	/** Raw-SQL display type. `undefined` for types with no SQL rendering (notes). */
@@ -140,9 +134,7 @@ export interface WidgetTypeMeta {
 }
 
 const CHART_LAYOUT = { w: 4, h: 6, minW: 2, minH: 2 } as const
-const CHART_TEMPLATE_HEIGHT = { h: 6, minH: 2 } as const
 const WIDE_LAYOUT = { w: 6, h: 5, minW: 3, minH: 3 } as const
-const WIDE_TEMPLATE_HEIGHT = { h: 5, minH: 3 } as const
 
 const chartPanel = (
 	panelType: "line" | "bar" | "area",
@@ -155,7 +147,6 @@ const chartPanel = (
 	chartId: `query-builder-${panelType}`,
 	chartCategory: panelType,
 	defaultLayout: CHART_LAYOUT,
-	templateHeight: CHART_TEMPLATE_HEIGHT,
 	rawSqlDisplayType: panelType,
 	isScalar: false,
 	ownedDisplayKeys: ["chartId", "stacked", "curveType", "thresholds"],
@@ -184,7 +175,6 @@ const breakdownPanel = (
 	chartId: `query-builder-${panelType}`,
 	chartCategory: panelType,
 	defaultLayout: CHART_LAYOUT,
-	templateHeight: CHART_TEMPLATE_HEIGHT,
 	rawSqlDisplayType: panelType,
 	isScalar: false,
 	ownedDisplayKeys: options.ownedDisplayKeys ?? ["chartId"],
@@ -202,10 +192,8 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		panelType: "stat",
 		label: "Stat",
 		visualization: "stat",
-		// Deliberately taller than the `h: 2` template tiles — a hand-added stat
-		// gets room for a sparkline.
+		// Taller than the other compact tiles: a stat gets room for a sparkline.
 		defaultLayout: { w: 3, h: 4, minW: 2, minH: 2 },
-		templateHeight: { h: 2, minH: 2 },
 		rawSqlDisplayType: "stat",
 		isScalar: true,
 		ownedDisplayKeys: ["sparkline", "thresholds"],
@@ -219,7 +207,6 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		label: "Gauge",
 		visualization: "gauge",
 		defaultLayout: CHART_LAYOUT,
-		templateHeight: CHART_TEMPLATE_HEIGHT,
 		mcpWidth: 3,
 		// A gauge is a scalar on an arc — the same single-row SQL shape as a stat,
 		// and there is no `gauge` member of `RawSqlDisplayType`.
@@ -236,7 +223,6 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		label: "Table",
 		visualization: "table",
 		defaultLayout: WIDE_LAYOUT,
-		templateHeight: WIDE_TEMPLATE_HEIGHT,
 		rawSqlDisplayType: "table",
 		isScalar: false,
 		ownedDisplayKeys: ["columns"],
@@ -250,7 +236,6 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		label: "List",
 		visualization: "list",
 		defaultLayout: WIDE_LAYOUT,
-		templateHeight: WIDE_TEMPLATE_HEIGHT,
 		// Deliberately absent. A list is configured by `ListConfigPanel`, never by
 		// SQL — the widget editor hides the Raw SQL toggle for it — so it has no
 		// raw-SQL rendering and falls back to `line` like every other type without
@@ -298,7 +283,6 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		// Notes sit at the chart width but the wide height — they are read, not
 		// scanned in a row of tiles.
 		defaultLayout: { w: 4, h: 5, minW: 2, minH: 3 },
-		templateHeight: WIDE_TEMPLATE_HEIGHT,
 		isScalar: false,
 		ownedDisplayKeys: ["markdown"],
 		requiresGroupBy: false,
@@ -370,16 +354,6 @@ export const MCP_VISUALIZATIONS: ReadonlyArray<WidgetVisualization> = [
 /** Narrows to the MCP-exposed subset — what `add_dashboard_widget` accepts. */
 export const isMcpVisualization = (value: unknown): value is WidgetVisualization =>
 	MCP_VISUALIZATIONS.some((candidate) => candidate === value)
-
-/**
- * Grid rows a widget occupies in a dashboard template, and the smallest it may be
- * resized to. Auto-placing paths want {@link WidgetTypeMeta.defaultLayout} instead
- * — this is the tighter packing templates use.
- */
-export const defaultWidgetHeight = (visualization: string): { h: number; minH: number } => {
-	const meta = widgetTypeByVisualization(visualization)
-	return meta ? { ...meta.templateHeight } : { ...CHART_TEMPLATE_HEIGHT }
-}
 
 /** Grid size for an auto-placed widget, by persisted `visualization`. */
 export const defaultWidgetLayout = (
