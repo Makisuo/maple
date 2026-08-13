@@ -591,6 +591,7 @@
       "dependencies": {
         "@maple-dev/clickhouse-builder": "workspace:*",
         "@maple/primitives": "workspace:*",
+        "@maple/query-model": "workspace:*",
         "@maple/widgets": "workspace:*",
         "@tinybirdco/sdk": "catalog:tinybird",
         "effect": "catalog:effect",
@@ -660,6 +661,7 @@
         "@maple-dev/clickhouse-builder": "workspace:*",
         "@maple/cache": "workspace:*",
         "@maple/domain": "workspace:*",
+        "@maple/query-model": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {
@@ -675,6 +677,19 @@
       "dependencies": {
         "@maple-dev/clickhouse-builder": "workspace:*",
         "@maple/query-engine": "workspace:*",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/query-model": {
+      "name": "@maple/query-model",
+      "dependencies": {
+        "@maple/primitives": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {
@@ -723,6 +738,7 @@
       "name": "@maple/widgets",
       "dependencies": {
         "@maple/primitives": "workspace:*",
+        "@maple/query-model": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {
@@ -1591,6 +1607,8 @@
     "@maple/query-engine": ["@maple/query-engine@workspace:packages/query-engine"],
 
     "@maple/query-engine-integrations": ["@maple/query-engine-integrations@workspace:packages/query-engine-integrations"],
+
+    "@maple/query-model": ["@maple/query-model@workspace:packages/query-model"],
 
     "@maple/scraper": ["@maple/scraper@workspace:apps/scraper"],
 

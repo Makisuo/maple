@@ -3,11 +3,35 @@ import type { QuerySpec } from "@maple/domain/query-engine"
 import { normalizeKey, parseBoolean, parseWhereClause, splitCsv } from "@maple/domain/where-clause"
 import { Match } from "effect"
 
-export type QueryBuilderDataSource = "traces" | "logs" | "metrics"
-export type QueryBuilderAddOnKey = "groupBy" | "having" | "orderBy" | "limit" | "legend"
-export type QueryBuilderMetricType = "sum" | "gauge" | "histogram" | "exponential_histogram"
-export type QueryBuilderSignalSource = "default" | "meter"
+export type {
+	QueryBuilderDataSource,
+	QueryBuilderMetricType,
+	QueryBuilderSignalSource,
+} from "@maple/query-model"
+import { QUERY_BUILDER_METRIC_TYPES } from "@maple/query-model"
+import type {
+	QueryBuilderDataSource,
+	QueryBuilderFormulaPayload,
+	QueryBuilderMetricType,
+	QueryBuilderSignalSource,
+} from "@maple/query-model"
 
+export type QueryBuilderAddOnKey = "groupBy" | "having" | "orderBy" | "limit" | "legend"
+
+/**
+ * EDITOR state, not the stored payload.
+ *
+ * Every field is required here and `Schema.optional` in
+ * `QueryBuilderQueryDraftSchema` (`@maple/query-model`), and that difference is
+ * the point: the builder always holds a fully-populated draft — an empty
+ * where-clause is `""`, not absent — while a stored or wire draft omits what the
+ * user never set. Collapsing this into the schema's inferred type would make
+ * `query.whereClause` possibly-undefined at every read in the builder to buy
+ * nothing.
+ *
+ * `normalizeRuleQueryDraft` / `toInitialState` are the boundary that fills a
+ * payload out into this shape.
+ */
 interface QueryBuilderQueryDraftBase {
 	id: string
 	name: string
@@ -123,12 +147,7 @@ export function resetAggregationForMetricType(
 	return validOptions[0]?.value ?? "avg"
 }
 
-export const QUERY_BUILDER_METRIC_TYPES: readonly QueryBuilderMetricType[] = [
-	"sum",
-	"gauge",
-	"histogram",
-	"exponential_histogram",
-] as const
+export { QUERY_BUILDER_METRIC_TYPES }
 
 export const GROUP_BY_OPTIONS: Record<QueryBuilderDataSource, Array<{ label: string; value: string }>> = {
 	traces: [
@@ -197,11 +216,12 @@ export function createQueryDraft(index: number): TracesQueryDraft {
 	}
 }
 
-export interface QueryBuilderFormulaDraft {
-	id: string
-	name: string
-	expression: string
-	legend: string
+/**
+ * Editor state for a formula, same total-vs-partial split as
+ * `QueryBuilderQueryDraft`: `hidden` is always set here and optional in the
+ * stored `QueryBuilderFormulaSchema`.
+ */
+export interface QueryBuilderFormulaDraft extends QueryBuilderFormulaPayload {
 	hidden: boolean
 }
 

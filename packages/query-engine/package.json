@@ -30,6 +30,7 @@
 		"@maple-dev/clickhouse-builder": "workspace:*",
 		"@maple/cache": "workspace:*",
 		"@maple/domain": "workspace:*",
+		"@maple/query-model": "workspace:*",
 		"effect": "catalog:effect"
 	},
 	"devDependencies": {

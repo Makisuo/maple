@@ -1,10 +1,9 @@
 {
-	"name": "@maple/widgets",
+	"name": "@maple/query-model",
 	"private": true,
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts",
-		"./dashboard": "./src/dashboard/index.ts"
+		".": "./src/index.ts"
 	},
 	"scripts": {
 		"test": "vitest run",
@@ -12,7 +11,6 @@
 	},
 	"dependencies": {
 		"@maple/primitives": "workspace:*",
-		"@maple/query-model": "workspace:*",
 		"effect": "catalog:effect"
 	},
 	"devDependencies": {
