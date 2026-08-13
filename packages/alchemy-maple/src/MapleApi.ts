@@ -7,12 +7,18 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
-	MapleApiClientError,
+	MapleApiProtocolError,
+	MapleApiRequestEncodingError,
+	MapleApiResponseDecodeError,
+	MapleApiResponseReadError,
+	MapleApiTransportError,
+	MapleErrorTags,
 	MaplePublicErrorBodySchema,
 	isMapleApiResponseError,
 	makeMapleApiResponseError,
 	type MapleApiResponseError,
 	type MapleError,
+	type MaplePublicErrorType,
 } from "./errors"
 import { MapleEnvironment } from "./MapleEnvironment"
 
@@ -36,19 +42,80 @@ export interface MapleApiShape {
 export class MapleApi extends Context.Service<MapleApi, MapleApiShape>()("Maple::Api") {}
 
 const ErrorEnvelope = Schema.Struct({ error: MaplePublicErrorBodySchema })
-const decodeErrorEnvelope = Schema.decodeUnknownSync(Schema.fromJsonString(ErrorEnvelope))
+const decodeErrorEnvelope = Schema.decodeUnknownEffect(Schema.fromJsonString(ErrorEnvelope))
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
-const errorFromResponse = (status: number, bodyText: string): MapleError => {
-	try {
-		return makeMapleApiResponseError(status, decodeErrorEnvelope(bodyText).error)
-	} catch (cause) {
-		return new MapleApiClientError({
-			status,
-			message: `Maple API returned an invalid error response with status ${status}`,
-			cause,
-		})
+const errorTypeForStatus = (status: number): MaplePublicErrorType | undefined => {
+	switch (status) {
+		case 400:
+		case 413:
+			return "invalid_request_error"
+		case 401:
+			return "authentication_error"
+		case 403:
+			return "permission_error"
+		case 404:
+			return "not_found_error"
+		case 409:
+			return "conflict_error"
+		case 429:
+			return "rate_limit_error"
+		case 500:
+		case 502:
+		case 503:
+		case 504:
+			return "api_error"
+		default:
+			return undefined
 	}
 }
+
+const notFoundTagForPath = (path: string): string | undefined => {
+	const pathname = path.split("?", 1)[0] ?? path
+	if (pathname.startsWith("/v2/api_keys/")) return MapleErrorTags.apiKeyNotFound
+	if (pathname.startsWith("/v2/dashboards/")) return MapleErrorTags.dashboardNotFound
+	if (pathname.startsWith("/v2/alerts/rules/") || pathname.startsWith("/v2/alerts/destinations/")) {
+		return pathname.startsWith("/v2/alerts/rules/")
+			? MapleErrorTags.alertRuleNotFound
+			: MapleErrorTags.alertDestinationNotFound
+	}
+	return undefined
+}
+
+const errorFromResponse = Effect.fn("MapleApi.errorFromResponse")(function* (
+	status: number,
+	path: string,
+	bodyText: string,
+) {
+	const envelope = yield* decodeErrorEnvelope(bodyText).pipe(
+		Effect.mapError(
+			() =>
+				new MapleApiProtocolError({
+					status,
+					message: `Maple API returned an invalid error envelope with status ${status}`,
+				}),
+		),
+	)
+	const expectedType = errorTypeForStatus(status)
+	if (expectedType === undefined || envelope.error.type !== expectedType) {
+		return yield* new MapleApiProtocolError({
+			status,
+			message: `Maple API error type ${envelope.error.type} does not match status ${status}`,
+		})
+	}
+	const expectedNotFoundTag = notFoundTagForPath(path)
+	if (
+		envelope.error.type === "not_found_error" &&
+		expectedNotFoundTag !== undefined &&
+		envelope.error._tag !== expectedNotFoundTag
+	) {
+		return yield* new MapleApiProtocolError({
+			status,
+			message: `Maple API returned ${envelope.error._tag} for ${path}; expected ${expectedNotFoundTag}`,
+		})
+	}
+	return makeMapleApiResponseError(status, envelope.error)
+})
 
 const retryDelay = Effect.fn("MapleApi.retryDelay")(function* (
 	error: MapleApiResponseError,
@@ -87,9 +154,8 @@ export const make = Effect.gen(function* () {
 					req = yield* HttpClientRequest.bodyJson(req, body).pipe(
 						Effect.mapError(
 							(error) =>
-								new MapleApiClientError({
-									status: 0,
-									message: `Failed to encode request body: ${String(error)}`,
+								new MapleApiRequestEncodingError({
+									message: "Failed to encode Maple API request body",
 									cause: error,
 								}),
 						),
@@ -98,8 +164,7 @@ export const make = Effect.gen(function* () {
 				const response = yield* httpClient.execute(req).pipe(
 					Effect.mapError(
 						(error) =>
-							new MapleApiClientError({
-								status: 0,
+							new MapleApiTransportError({
 								message: `Maple API request failed: ${error.message}`,
 								cause: error,
 							}),
@@ -109,7 +174,7 @@ export const make = Effect.gen(function* () {
 				const text = yield* response.text.pipe(
 					Effect.mapError(
 						(error) =>
-							new MapleApiClientError({
+							new MapleApiResponseReadError({
 								status: response.status,
 								message: `Failed to read response: ${error.message}`,
 								cause: error,
@@ -117,18 +182,18 @@ export const make = Effect.gen(function* () {
 					),
 				)
 				if (response.status >= 200 && response.status < 300) {
-					if (text.length === 0) return undefined as unknown
-					return yield* Effect.try({
-						try: () => JSON.parse(text) as unknown,
-						catch: (cause) =>
-							new MapleApiClientError({
-								status: response.status,
-								message: `Maple API returned invalid JSON (status ${response.status})`,
-								cause,
-							}),
-					})
+					if (text.length === 0) return undefined
+					return yield* decodeJson(text).pipe(
+						Effect.mapError(
+							() =>
+								new MapleApiResponseDecodeError({
+									status: response.status,
+									message: `Maple API returned invalid JSON (status ${response.status})`,
+								}),
+						),
+					)
 				}
-				return yield* Effect.fail(errorFromResponse(response.status, text))
+				return yield* Effect.fail(yield* errorFromResponse(response.status, path, text))
 			}).pipe(
 				Effect.catchIf(isMapleApiResponseError, (error) =>
 					canAutomaticallyRetry && error.error.retryable && attempt < 6

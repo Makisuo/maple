@@ -267,7 +267,7 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 									cause: error,
 								}),
 							),
-						"@maple/http/errors/AlertNotFoundError": (error) =>
+						"@maple/http/errors/AlertRuleNotFoundError": (error) =>
 							Effect.fail(
 								new McpQueryError({
 									message: `${error._tag}: ${error.message}`,

@@ -4,6 +4,7 @@ import { deepEqual, isResolved } from "alchemy/Diff"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
 import { listAll, MapleApi } from "./MapleApi"
+import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
 
 export type AlertSignalType =
@@ -151,7 +152,7 @@ export const AlertRuleProvider = () =>
 						observedRaw = yield* api
 							.get(`/v2/alerts/rules/${output.ruleId}`)
 							.pipe(
-								Effect.catchTag("@maple/http/errors/AlertNotFoundError", () =>
+								Effect.catchTag(MapleErrorTags.alertRuleNotFound, () =>
 									Effect.succeed(undefined),
 								),
 							)
@@ -175,14 +176,14 @@ export const AlertRuleProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/alerts/rules/${output.ruleId}`)
-						.pipe(Effect.catchTag("@maple/http/errors/AlertNotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag(MapleErrorTags.alertRuleNotFound, () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ olds, output }) {
 					if (output?.ruleId) {
 						const fetched = yield* api
 							.get(`/v2/alerts/rules/${output.ruleId}`)
 							.pipe(
-								Effect.catchTag("@maple/http/errors/AlertNotFoundError", () =>
+								Effect.catchTag(MapleErrorTags.alertRuleNotFound, () =>
 									Effect.succeed(undefined),
 								),
 							)

@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { HttpTaggedError } from "./error-policy"
+import { HttpTaggedError, publicHttpErrorDefinitionFor } from "./error-policy"
 
 // Pure error definitions for warehouse queries. This module imports ONLY
 // `effect` Schema — never `effect/unstable/httpapi` — so non-HTTP consumers
@@ -109,6 +109,66 @@ export class WarehouseConfigLookupError extends HttpTaggedError<WarehouseConfigL
 	},
 ) {}
 
+/** Maple could not decrypt the credentials stored for a per-org warehouse. */
+export class WarehouseConfigDecryptionError extends HttpTaggedError<WarehouseConfigDecryptionError>()(
+	"@maple/http/errors/WarehouseConfigDecryptionError",
+	warehouseErrorBaseFields,
+	{
+		status: 500,
+		code: "warehouse_config_decryption_failed",
+		title: "Maple could not read database credentials",
+		message: "Maple could not securely read the saved database credentials.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+/** A saved per-org warehouse configuration no longer passes runtime validation. */
+export class WarehouseStoredConfigInvalidError extends HttpTaggedError<WarehouseStoredConfigInvalidError>()(
+	"@maple/http/errors/WarehouseStoredConfigInvalidError",
+	warehouseErrorBaseFields,
+	{
+		status: 502,
+		code: "warehouse_stored_config_invalid",
+		title: "Saved database settings are invalid",
+		message: "The saved database settings are invalid. Reconnect the database in settings.",
+		retry: "never",
+		recovery: "reconnect",
+		exposure: "redacted",
+	},
+) {}
+
+/** The deployment is missing configuration required to mint an org-scoped token. */
+export class WarehouseTokenConfigError extends HttpTaggedError<WarehouseTokenConfigError>()(
+	"@maple/http/errors/WarehouseTokenConfigError",
+	warehouseErrorBaseFields,
+	{
+		status: 500,
+		code: "warehouse_token_config_invalid",
+		title: "Maple warehouse access is not configured",
+		message: "Maple could not configure secure access to the database.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+/** Maple failed while minting an org-scoped warehouse access token. */
+export class WarehouseTokenMintError extends HttpTaggedError<WarehouseTokenMintError>()(
+	"@maple/http/errors/WarehouseTokenMintError",
+	warehouseErrorBaseFields,
+	{
+		status: 500,
+		code: "warehouse_token_mint_failed",
+		title: "Maple could not authorize database access",
+		message: "Maple could not authorize secure access to the database.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
 /** Maple's query client could not decode/consume the response. */
 export class WarehouseClientError extends HttpTaggedError<WarehouseClientError>()(
 	"@maple/http/errors/WarehouseClientError",
@@ -124,33 +184,34 @@ export class WarehouseClientError extends HttpTaggedError<WarehouseClientError>(
 	},
 ) {}
 
-/**
- * A BYO ClickHouse cluster is missing a column or has the wrong type for one
- * Maple expects; remediated by running schema apply on the cluster. The MCP
- * layer enriches this with an actionable hint.
- *
- * `kind` splits two failure modes that need opposite advice: `"cluster"`
- * (absent = cluster, for wire compatibility) means the cluster itself rejected
- * the query — run schema apply; `"decode"` means the cluster answered but the
- * rows failed Maple's own row schema — schema apply cannot fix that and the
- * presenter must not suggest it.
- */
+/** A customer-managed cluster is missing schema Maple requires. */
 export class WarehouseSchemaDriftError extends HttpTaggedError<WarehouseSchemaDriftError>()(
 	"@maple/http/errors/WarehouseSchemaDriftError",
-	{ ...warehouseErrorBaseFields, kind: Schema.optional(Schema.Literals(["cluster", "decode"])) },
+	warehouseErrorBaseFields,
 	{
 		status: 502,
 		code: "warehouse_schema_drift",
-		title: (error) =>
-			error.kind === "decode"
-				? "Query results did not match what Maple expected"
-				: "Database schema is out of date",
-		message: (error) =>
-			error.kind === "decode"
-				? "The database answered with rows Maple could not decode. This is likely a Maple bug, not a problem with your cluster."
-				: "A column Maple expects is missing from the cluster. Run schema apply from your ClickHouse settings.",
+		title: "Database schema is out of date",
+		message:
+			"A column Maple expects is missing from the cluster. Run schema apply from your ClickHouse settings.",
 		retry: "never",
 		recovery: "reconnect",
+		exposure: "redacted",
+	},
+) {}
+
+/** The database returned rows that did not match Maple's declared result schema. */
+export class WarehouseResultDecodeError extends HttpTaggedError<WarehouseResultDecodeError>()(
+	"@maple/http/errors/WarehouseResultDecodeError",
+	warehouseErrorBaseFields,
+	{
+		status: 502,
+		code: "warehouse_result_decode_failed",
+		title: "Database response did not match the expected schema",
+		message:
+			"The database returned a response Maple could not decode. This is likely a Maple bug, not a problem with your cluster.",
+		retry: "never",
+		recovery: "contact_support",
 		exposure: "redacted",
 	},
 ) {}
@@ -227,37 +288,50 @@ export class WarehouseValidationError extends HttpTaggedError<WarehouseValidatio
 	},
 ) {}
 
-/** Every warehouse error. Use this as the error channel of warehouse-facing effects. */
-export type WarehouseError =
-	| WarehouseQueryError
-	| WarehouseUpstreamError
-	| WarehouseAuthError
-	| WarehouseConfigError
-	| WarehouseClientError
-	| WarehouseSchemaDriftError
-	| WarehouseMalformedQueryError
-	| WarehouseQuotaExceededError
-	| WarehouseValidationError
-	| WarehouseConfigLookupError
-
-/** Errors possible on managed-only routes, which never read per-org routing config. */
-export type ManagedWarehouseError = Exclude<WarehouseError, WarehouseConfigLookupError>
-
 /**
- * The full set of warehouse error classes, for reuse in `HttpApiEndpoint`
- * `error:` arrays. Every endpoint that can surface a warehouse error must list
- * all of them, or the HttpApi client throws when it decodes an unrecognized
- * `_tag`. Spread this (`...warehouseHttpErrors`) into each endpoint's array.
+ * Managed-query errors are defined once as classes, then both the union and
+ * endpoint schemas derive from this tuple. This prevents a new tagged error
+ * from being added to execution without being added to OpenAPI as well.
  */
-export const warehouseHttpErrors = [
+export const managedWarehouseHttpErrors = [
 	WarehouseQueryError,
 	WarehouseUpstreamError,
 	WarehouseAuthError,
 	WarehouseConfigError,
 	WarehouseClientError,
 	WarehouseSchemaDriftError,
+	WarehouseResultDecodeError,
 	WarehouseMalformedQueryError,
 	WarehouseQuotaExceededError,
 	WarehouseValidationError,
-	WarehouseConfigLookupError,
 ] as const
+
+/** Errors added by resolving a per-org warehouse route. */
+export const warehouseRouteHttpErrors = [
+	WarehouseConfigLookupError,
+	WarehouseConfigDecryptionError,
+	WarehouseStoredConfigInvalidError,
+	WarehouseTokenConfigError,
+	WarehouseTokenMintError,
+] as const
+
+/** Full query error set, including failures while resolving a per-org route. */
+export const warehouseHttpErrors = [...managedWarehouseHttpErrors, ...warehouseRouteHttpErrors] as const
+
+type ErrorInstance<ErrorClass> = ErrorClass extends abstract new (...args: never[]) => infer Error
+	? Error
+	: never
+
+/** Every warehouse error. Use this as the error channel of warehouse-facing effects. */
+export type WarehouseError = ErrorInstance<(typeof warehouseHttpErrors)[number]>
+export type WarehouseErrorTag = WarehouseError["_tag"]
+
+/** Errors possible on managed-only routes, which never read per-org routing config. */
+export type ManagedWarehouseError = ErrorInstance<(typeof managedWarehouseHttpErrors)[number]>
+
+export type WarehouseRouteError = ErrorInstance<(typeof warehouseRouteHttpErrors)[number]>
+
+/** Exact tags derived from the class tuple for tag-based consumers. */
+export const warehouseErrorTags = warehouseHttpErrors.map(
+	(errorClass) => publicHttpErrorDefinitionFor(errorClass).tag,
+) as ReadonlyArray<WarehouseErrorTag>

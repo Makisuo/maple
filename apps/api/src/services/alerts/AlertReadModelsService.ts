@@ -13,7 +13,8 @@ import {
 	AlertIncidentsListResponse,
 	AlertIncidentStatus,
 	AlertIncidentTransition as AlertIncidentTransitionSchema,
-	AlertNotFoundError,
+	AlertIncidentNotFoundError,
+	AlertRuleNotFoundError,
 	AlertPersistenceError,
 	AlertRuleDocument,
 	AlertSeverity as AlertSeveritySchema,
@@ -26,7 +27,6 @@ import {
 	type AlertIncidentId,
 	type AlertRuleId,
 	type ManagedWarehouseError,
-	type WarehouseError,
 } from "@maple/domain/http"
 import {
 	alertDeliveryEvents,
@@ -90,7 +90,7 @@ export interface AlertReadModelsServiceShape {
 	readonly getIncident: (
 		orgId: OrgId,
 		incidentId: AlertIncidentId,
-	) => Effect.Effect<AlertIncidentDocument, AlertPersistenceError | AlertNotFoundError>
+	) => Effect.Effect<AlertIncidentDocument, AlertPersistenceError | AlertIncidentNotFoundError>
 	readonly listRuleChecks: (
 		orgId: OrgId,
 		ruleId: AlertRuleId,
@@ -105,7 +105,7 @@ export interface AlertReadModelsServiceShape {
 		},
 	) => Effect.Effect<
 		AlertChecksListResponse,
-		AlertPersistenceError | AlertNotFoundError | ManagedWarehouseError
+		AlertPersistenceError | AlertRuleNotFoundError | ManagedWarehouseError
 	>
 	readonly summarizeRuleChecks: (
 		orgId: OrgId,
@@ -116,7 +116,7 @@ export interface AlertReadModelsServiceShape {
 		},
 	) => Effect.Effect<
 		AlertChecksSummary,
-		AlertPersistenceError | AlertNotFoundError | AlertValidationError | ManagedWarehouseError
+		AlertPersistenceError | AlertRuleNotFoundError | AlertValidationError | ManagedWarehouseError
 	>
 	readonly listDeliveryEvents: (
 		orgId: OrgId,
@@ -148,14 +148,6 @@ const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
 	value == null ? null : decodeIsoDateTimeStringSync(value.toISOString())
 
 const makeValidationError = (message: string) => new AlertValidationError({ message, details: [] })
-
-/** Assert the `.routing("ingest")` invariant and remove its impossible config-lookup branch. */
-const managedWarehouseQuery = <A, R>(
-	effect: Effect.Effect<A, WarehouseError, R>,
-): Effect.Effect<A, ManagedWarehouseError, R> =>
-	effect.pipe(
-		Effect.catchTag("@maple/http/errors/WarehouseConfigLookupError", (error) => Effect.die(error)),
-	)
 
 const rowToIncidentDocument = (row: AlertIncidentRow) =>
 	new AlertIncidentDocument({
@@ -248,10 +240,9 @@ export class AlertReadModelsService extends Context.Service<
 			)
 			const incident = rows[0]
 			if (incident === undefined) {
-				return yield* new AlertNotFoundError({
+				return yield* new AlertIncidentNotFoundError({
 					message: `No such alert incident: '${incidentId}'`,
-					resourceType: "alert_incident",
-					resourceId: incidentId,
+					incidentId,
 				})
 			}
 			return rowToIncidentDocument(incident)
@@ -280,10 +271,9 @@ export class AlertReadModelsService extends Context.Service<
 					.limit(1),
 			)
 			if (ruleRow.length === 0) {
-				return yield* new AlertNotFoundError({
+				return yield* new AlertRuleNotFoundError({
 					message: "Alert rule not found",
-					resourceType: "alert_rule",
-					resourceId: ruleId,
+					ruleId,
 				})
 			}
 
@@ -327,12 +317,10 @@ export class AlertReadModelsService extends Context.Service<
 
 			// listRuleChecksQuery declares .routing("ingest") — alert_checks only
 			// exists in the managed Tinybird pipeline.
-			const rows = yield* managedWarehouseQuery(
-				warehouse.compiledQuery(systemTenant(orgId), compiled, {
-					profile: "list",
-					context: "listAlertChecks",
-				}),
-			)
+			const rows = yield* warehouse.compiledQuery(systemTenant(orgId), compiled, {
+				profile: "list",
+				context: "listAlertChecks",
+			})
 
 			const checks = yield* Effect.try({
 				try: () =>
@@ -398,10 +386,9 @@ export class AlertReadModelsService extends Context.Service<
 					.limit(1),
 			)
 			if (ruleRow.length === 0) {
-				return yield* new AlertNotFoundError({
+				return yield* new AlertRuleNotFoundError({
 					message: "Alert rule not found",
-					resourceType: "alert_rule",
-					resourceId: ruleId,
+					ruleId,
 				})
 			}
 
@@ -428,31 +415,27 @@ export class AlertReadModelsService extends Context.Service<
 			// stable across refreshes and matches alert evaluation granularity.
 			const bucketSeconds = Math.max(1, Math.ceil((endMs - startMs) / 1000 / 720 / 60)) * 60
 			const tenant = systemTenant(orgId)
-			const groupRows = yield* managedWarehouseQuery(
-				warehouse.compiledQuery(
-					tenant,
-					CH.compile(CH.alertCheckGroupTotalsQuery({ since, until, limit: 20 }), {
-						orgId,
-						ruleId,
-						since,
-						until,
-					}),
-					{ profile: "aggregation", context: "alertCheckSummaryGroups" },
-				),
+			const groupRows = yield* warehouse.compiledQuery(
+				tenant,
+				CH.compile(CH.alertCheckGroupTotalsQuery({ since, until, limit: 20 }), {
+					orgId,
+					ruleId,
+					since,
+					until,
+				}),
+				{ profile: "aggregation", context: "alertCheckSummaryGroups" },
 			)
 			const topGroupKeys = groupRows.map((row) => String(row.groupKey ?? ""))
-			const rows = yield* managedWarehouseQuery(
-				warehouse.compiledQuery(
-					tenant,
-					CH.compile(CH.alertChecksSummaryQuery({ topGroupKeys }), {
-						orgId,
-						ruleId,
-						since,
-						until,
-						bucketSeconds,
-					}),
-					{ profile: "aggregation", context: "alertCheckSummary" },
-				),
+			const rows = yield* warehouse.compiledQuery(
+				tenant,
+				CH.compile(CH.alertChecksSummaryQuery({ topGroupKeys }), {
+					orgId,
+					ruleId,
+					since,
+					until,
+					bucketSeconds,
+				}),
+				{ profile: "aggregation", context: "alertCheckSummary" },
 			)
 
 			const points: AlertChecksSummaryPoint[] = rows.map((row) => ({

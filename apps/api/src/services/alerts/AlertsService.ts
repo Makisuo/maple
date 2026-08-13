@@ -10,7 +10,8 @@ import {
 	AlertGroupBy as AlertGroupBySchema,
 	AlertIncidentDocument,
 	AlertIncidentStatus,
-	AlertNotFoundError,
+	type AlertDestinationNotFoundError,
+	type AlertRuleNotFoundError,
 	AlertPersistenceError,
 	AlertRuleDocument,
 	AlertRulePreviewFiringSpan,
@@ -32,11 +33,11 @@ import {
 	type AlertRuleId,
 	type AlertDestinationId,
 	type AlertIncidentId,
-	QueryEngineExecutionError,
+	type QueryEngineExecutionError,
 	type WarehouseError,
 	type WarehouseErrorTag,
-	QueryEngineTimeoutError,
-	QueryEngineValidationError,
+	type QueryEngineTimeoutError,
+	type QueryEngineValidationError,
 	RoleName,
 	UserId as UserIdSchema,
 	type UserId,
@@ -122,8 +123,13 @@ const WAREHOUSE_FAILURE_CATEGORIES = {
 	"@maple/http/errors/WarehouseAuthError": "tinybird_auth",
 	"@maple/http/errors/WarehouseConfigError": "tinybird_config",
 	"@maple/http/errors/WarehouseConfigLookupError": "tinybird_config_lookup",
+	"@maple/http/errors/WarehouseConfigDecryptionError": "warehouse_config_decryption",
+	"@maple/http/errors/WarehouseStoredConfigInvalidError": "warehouse_config_invalid",
+	"@maple/http/errors/WarehouseTokenConfigError": "warehouse_token_config",
+	"@maple/http/errors/WarehouseTokenMintError": "warehouse_token_mint",
 	"@maple/http/errors/WarehouseClientError": "tinybird_client",
 	"@maple/http/errors/WarehouseSchemaDriftError": "tinybird_schema_drift",
+	"@maple/http/errors/WarehouseResultDecodeError": "warehouse_result_decode",
 	"@maple/http/errors/WarehouseMalformedQueryError": "malformed_query",
 	"@maple/http/errors/WarehouseQuotaExceededError": "tinybird_quota",
 	"@maple/http/errors/WarehouseValidationError": "tinybird_validation",
@@ -317,7 +323,7 @@ export interface AlertsServiceShape
 		request: AlertRuleUpsertRequest,
 	) => Effect.Effect<
 		AlertRuleDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertNotFoundError
+		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertRuleNotFoundError
 	>
 	readonly testRule: (
 		orgId: OrgId,
@@ -330,8 +336,11 @@ export interface AlertsServiceShape
 		| AlertForbiddenError
 		| AlertValidationError
 		| AlertPersistenceError
-		| AlertNotFoundError
+		| AlertDestinationNotFoundError
 		| AlertDeliveryError
+		| QueryEngineValidationError
+		| QueryEngineExecutionError
+		| QueryEngineTimeoutError
 		| WarehouseError
 	>
 	/**
@@ -347,8 +356,10 @@ export interface AlertsServiceShape
 		AlertRulePreviewResponse,
 		| AlertValidationError
 		| AlertForbiddenError
-		| AlertDeliveryError
 		| AlertPersistenceError
+		| QueryEngineValidationError
+		| QueryEngineExecutionError
+		| QueryEngineTimeoutError
 		| WarehouseError
 	>
 	readonly runSchedulerTick: () => Effect.Effect<
@@ -358,7 +369,11 @@ export interface AlertsServiceShape
 			readonly evaluationFailureCount: number
 			readonly deliveryFailureCount: number
 		},
-		AlertPersistenceError | AlertDeliveryError | AlertValidationError | AlertNotFoundError
+		| AlertPersistenceError
+		| AlertDeliveryError
+		| AlertValidationError
+		| AlertRuleNotFoundError
+		| AlertDestinationNotFoundError
 		// Note: warehouse tagged errors flow up from evaluateRule but are caught
 		// inside the per-rule Effect.catch in the scheduler tick, so the tick
 		// itself never surfaces them.
@@ -462,33 +477,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				})
 			})
 
-			// Collapse alert-domain semantic errors (validation/execution/timeout from
-			// the query engine layer) into AlertValidation/AlertDelivery. Warehouse
-			// errors keep their safe public body, so their tag and recovery contract
-			// reach the client unchanged.
-			const catchQueryEngineErrors = <A, R>(
-				effect: Effect.Effect<
-					A,
-					| QueryEngineValidationError
-					| QueryEngineExecutionError
-					| QueryEngineTimeoutError
-					| WarehouseError,
-					R
-				>,
-			) =>
-				effect.pipe(
-					Effect.catchTags({
-						"@maple/http/errors/QueryEngineValidationError": (e) =>
-							Effect.fail(makeValidationError(e.message, e.details)),
-						"@maple/http/errors/QueryEngineExecutionError": (e) =>
-							Effect.fail(makeDeliveryError(e.message, undefined, e)),
-						"@maple/http/errors/QueryEngineTimeoutError": (e) =>
-							Effect.fail(
-								makeDeliveryError(e.message ?? "Alert evaluation timed out", undefined, e),
-							),
-					}),
-				)
-
 			/**
 			 * Evaluate the alert rule and return one outcome per group.
 			 *
@@ -506,22 +494,27 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				rule: NormalizedRule,
 			): Effect.fn.Return<
 				ReadonlyArray<{ evaluation: EvaluatedRule; groupKey: string }>,
-				AlertValidationError | AlertDeliveryError | WarehouseError
+				| AlertValidationError
+				| QueryEngineValidationError
+				| QueryEngineExecutionError
+				| QueryEngineTimeoutError
+				| WarehouseError
 			> {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": rule.id })
 				const endMs = yield* now
 				const startMs = endMs - rule.windowMinutes * 60_000
 				const plan = rule.compiledPlan
 				const source = yield* planEvaluateSource(plan, rule.windowMinutes)
-				const observations: ReadonlyArray<GroupedAlertObservation> = yield* queryEngine
-					.evaluate(systemTenant(orgId), {
+				const observations: ReadonlyArray<GroupedAlertObservation> = yield* queryEngine.evaluate(
+					systemTenant(orgId),
+					{
 						startTime: formatWarehouseDateTime(startMs),
 						endTime: formatWarehouseDateTime(endMs),
 						source,
 						reducer: plan.reducer,
 						sampleCountStrategy: plan.sampleCountStrategy,
-					})
-					.pipe(catchQueryEngineErrors)
+					},
+				)
 
 				const grouped = isGroupedPlan(plan)
 				return observations.map((obs) => ({
@@ -685,7 +678,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			) => composeLinkUrl(resolveServiceLinkName(rule, groupKey))
 
 			const toDeliveryAttemptFailure = (
-				error: AlertValidationError | AlertDeliveryError | AlertNotFoundError | AlertPersistenceError,
+				error: AlertValidationError | AlertDeliveryError | AlertPersistenceError,
 			): DeliveryAttemptFailure =>
 				Match.value(error).pipe(
 					Match.discriminatorsExhaustive("_tag")({
@@ -700,11 +693,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								? ("timeout" as const)
 								: ("transport" as const),
 							retryable: true,
-						}),
-						"@maple/http/errors/AlertNotFoundError": (e) => ({
-							message: e.message,
-							kind: "destination" as const,
-							retryable: false,
 						}),
 						"@maple/http/errors/AlertPersistenceError": (e) => ({
 							message: e.message,
@@ -984,8 +972,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				AlertRulePreviewResponse,
 				| AlertValidationError
 				| AlertForbiddenError
-				| AlertDeliveryError
 				| AlertPersistenceError
+				| QueryEngineValidationError
+				| QueryEngineExecutionError
+				| QueryEngineTimeoutError
 				| WarehouseError
 			> {
 				yield* Effect.annotateCurrentSpan("orgId", orgId)
@@ -1084,15 +1074,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									perServicePlan,
 									normalized.windowMinutes,
 								)
-								const observations = yield* queryEngine
-									.evaluateSeries(systemTenant(orgId), {
-										startTime: formatWarehouseDateTime(startMs),
-										endTime: formatWarehouseDateTime(queryEndMs),
-										source: perServiceSource,
-										reducer: perServicePlan.reducer,
-										sampleCountStrategy: perServicePlan.sampleCountStrategy,
-									})
-									.pipe(catchQueryEngineErrors)
+								const observations = yield* queryEngine.evaluateSeries(systemTenant(orgId), {
+									startTime: formatWarehouseDateTime(startMs),
+									endTime: formatWarehouseDateTime(queryEndMs),
+									source: perServiceSource,
+									reducer: perServicePlan.reducer,
+									sampleCountStrategy: perServicePlan.sampleCountStrategy,
+								})
 								for (const obs of observations) {
 									record(svcName, Date.parse(obs.bucket), {
 										value: obs.value,
@@ -1105,15 +1093,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					)
 				} else {
 					const source = yield* planEvaluateSource(plan, normalized.windowMinutes)
-					const observations = yield* queryEngine
-						.evaluateSeries(systemTenant(orgId), {
-							startTime: formatWarehouseDateTime(startMs),
-							endTime: formatWarehouseDateTime(queryEndMs),
-							source,
-							reducer: plan.reducer,
-							sampleCountStrategy: plan.sampleCountStrategy,
-						})
-						.pipe(catchQueryEngineErrors)
+					const observations = yield* queryEngine.evaluateSeries(systemTenant(orgId), {
+						startTime: formatWarehouseDateTime(startMs),
+						endTime: formatWarehouseDateTime(queryEndMs),
+						source,
+						reducer: plan.reducer,
+						sampleCountStrategy: plan.sampleCountStrategy,
+					})
 					const excludeSet = HashSet.fromIterable(normalized.excludeServiceNames)
 					// Preview must key its series exactly as the scheduler stores them,
 					// or the preview chart and the tracking chart disagree on the
@@ -2697,8 +2683,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					error:
 						| AlertValidationError
 						| AlertDeliveryError
-						| AlertNotFoundError
 						| AlertPersistenceError
+						| QueryEngineValidationError
+						| QueryEngineExecutionError
+						| QueryEngineTimeoutError
 						| WarehouseError,
 					failureCategory: string,
 					fields?: {
@@ -2959,10 +2947,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								Effect.catchTags({
 									"@maple/http/errors/AlertValidationError": (error) =>
 										recordEvaluationFailure(row, error, "validation"),
-									"@maple/http/errors/AlertDeliveryError": (error) =>
-										recordEvaluationFailure(row, error, "evaluation"),
 									"@maple/http/errors/AlertPersistenceError": (error) =>
 										recordEvaluationFailure(row, error, "unknown"),
+									"@maple/http/errors/QueryEngineValidationError": (error) =>
+										recordEvaluationFailure(row, error, "query_engine_validation"),
+									"@maple/http/errors/QueryEngineExecutionError": (error) =>
+										recordEvaluationFailure(row, error, "query_engine_execution"),
+									"@maple/http/errors/QueryEngineTimeoutError": (error) =>
+										recordEvaluationFailure(row, error, "query_engine_timeout"),
 									...warehouseHandlers((error) =>
 										recordEvaluationFailure(
 											row,

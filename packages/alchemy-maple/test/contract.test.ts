@@ -5,7 +5,14 @@
  */
 import { describe, expect, it } from "vitest"
 import { Effect, Schema } from "effect"
-import { PublicHttpErrorBodySchema, type AnyPublicHttpErrorBody } from "@maple/domain/http"
+import {
+	ApiKeyNotFoundError,
+	AlertDestinationNotFoundError,
+	AlertRuleNotFoundError,
+	DashboardNotFoundError,
+	PublicHttpErrorBodySchema,
+	type AnyPublicHttpErrorBody,
+} from "@maple/domain/http"
 import {
 	V2AlertDestinationCreateParams,
 	V2AlertRuleCreateParams,
@@ -17,12 +24,20 @@ import { _alertDestinationCreateBody } from "../src/AlertDestination"
 import { _alertRuleCreateBody } from "../src/AlertRule"
 import { _apiKeyCreateBody } from "../src/ApiKey"
 import { _dashboardCreateBody } from "../src/Dashboard"
-import { MaplePublicErrorBodySchema, type MaplePublicErrorBody } from "../src/errors"
+import { MapleErrorTags, MaplePublicErrorBodySchema, type MaplePublicErrorBody } from "../src/errors"
 
 const _clientErrorBodySatisfiesDomain = (body: MaplePublicErrorBody): AnyPublicHttpErrorBody => body
-const _domainErrorBodySatisfiesClient = (body: AnyPublicHttpErrorBody): MaplePublicErrorBody => body
 void _clientErrorBodySatisfiesDomain
-void _domainErrorBodySatisfiesClient
+
+const _apiKeyNotFoundTag: ApiKeyNotFoundError["_tag"] = MapleErrorTags.apiKeyNotFound
+const _dashboardNotFoundTag: DashboardNotFoundError["_tag"] = MapleErrorTags.dashboardNotFound
+const _alertRuleNotFoundTag: AlertRuleNotFoundError["_tag"] = MapleErrorTags.alertRuleNotFound
+const _alertDestinationNotFoundTag: AlertDestinationNotFoundError["_tag"] =
+	MapleErrorTags.alertDestinationNotFound
+void _apiKeyNotFoundTag
+void _dashboardNotFoundTag
+void _alertRuleNotFoundTag
+void _alertDestinationNotFoundTag
 
 const decodes = <S extends Schema.Codec<unknown, unknown, never, never>>(schema: S, wire: unknown) =>
 	Effect.runSync(Schema.decodeUnknownEffect(schema)(wire).pipe(Effect.asVoid))

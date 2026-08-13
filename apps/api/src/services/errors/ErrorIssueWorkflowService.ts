@@ -241,8 +241,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				return yield* Effect.fail(
 					new ErrorIssueNotFoundError({
 						message: "Error issue not found",
-						resourceType: "issue",
-						resourceId: issueId,
+						issueId,
 					}),
 				)
 			}

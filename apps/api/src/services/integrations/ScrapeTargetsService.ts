@@ -30,13 +30,16 @@ import {
 	BasicCredentialsSchema,
 	BearerCredentialsSchema,
 	buildScrapeAuthHeaders,
-	catchOAuthTokenFailure,
 	TokenCredentialsSchema,
 } from "@/services/auth/scrape-auth"
 import { safeFetch, validateExternalUrl } from "@/http/url-validator"
 import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
 import { PlanetScaleDiscoveryService, planetScaleDiscoveryUrl } from "./PlanetScaleDiscoveryService"
-import { PlanetScaleOAuthService, planetScaleBearerHeader } from "@/services/auth/PlanetScaleOAuthService"
+import {
+	PlanetScaleOAuthService,
+	planetScaleBearerHeader,
+	type PlanetScaleAccessTokenError,
+} from "@/services/auth/PlanetScaleOAuthService"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
@@ -111,6 +114,7 @@ export interface ScrapeTargetsServiceShape {
 		| ScrapeTargetEncryptionError
 		| ScrapeTargetAuthError
 		| ScrapeTargetUpstreamError
+		| PlanetScaleAccessTokenError
 	>
 	readonly recordScrapeResults: (
 		results: ReadonlyArray<{
@@ -151,7 +155,7 @@ export interface ScrapeTargetsServiceShape {
 		| ScrapeTargetNotFoundError
 		| ScrapeTargetPersistenceError
 		| ScrapeTargetEncryptionError
-		| ScrapeTargetAuthError
+		| PlanetScaleAccessTokenError
 	>
 }
 
@@ -183,6 +187,9 @@ const toPersistenceError = (error: unknown) =>
 	new ScrapeTargetPersistenceError({
 		message: error instanceof Error ? error.message : "Scrape target persistence failed",
 	})
+
+const toUpstreamError = (message: string, status?: number) =>
+	new ScrapeTargetUpstreamError({ message, ...(status === undefined ? {} : { status }) })
 
 const toEncryptionError = (message: string) => new ScrapeTargetEncryptionError({ message })
 
@@ -488,9 +495,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					return yield* buildScrapeAuthHeaders(row, encryptionKey)
 				}
 				const orgId = yield* Schema.decodeEffect(OrgId)(row.orgId).pipe(Effect.orDie)
-				const { accessToken } = yield* psOAuth
-					.getValidAccessToken(orgId)
-					.pipe(Effect.catchTags(catchOAuthTokenFailure))
+				const { accessToken } = yield* psOAuth.getValidAccessToken(orgId)
 				return { Authorization: planetScaleBearerHeader(accessToken) }
 			})
 
@@ -664,7 +669,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				// Fire the first scrape in the background so target creation returns
 				// promptly, but never swallow its failure silently: a probe that fails
 				// before it can record a result (e.g. a revoked/not-connected OAuth
-				// grant → ScrapeTargetAuthError) would otherwise leave the fresh target
+				// grant) would otherwise leave the fresh target
 				// looking healthy with no log and no lastScrapeError row.
 				// Scoped, not detached: the probe records its result through the
 				// request's Postgres socket, which is released when the request ends.
@@ -976,13 +981,14 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 							retryAfterSeconds: parseRetryAfterSeconds(response.headers.get("retry-after")),
 						} satisfies ScrapeTargetProxyResponse
 					},
-					catch: toPersistenceError,
+					catch: (cause) =>
+						toUpstreamError(
+							cause instanceof Error ? cause.message : "Scrape target request failed",
+						),
 				}).pipe(
 					Effect.timeout(timeoutMs),
-					// A timeout surfaces as the same persistence error a fetch abort
-					// produced before, so callers see no new error type.
 					Effect.catchTag("TimeoutError", () =>
-						Effect.fail(toPersistenceError(new Error("The operation was aborted"))),
+						Effect.fail(toUpstreamError("Scrape target request timed out")),
 					),
 				)
 			})

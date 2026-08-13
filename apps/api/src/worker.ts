@@ -227,7 +227,8 @@ const isMcpPost = (request: Request): boolean => {
 
 const isV2Request = (request: Request): boolean => {
 	try {
-		return new URL(request.url).pathname.startsWith("/v2/")
+		const pathname = new URL(request.url).pathname
+		return pathname === "/v2" || pathname.startsWith("/v2/")
 	} catch {
 		return false
 	}

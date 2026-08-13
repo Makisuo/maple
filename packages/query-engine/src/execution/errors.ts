@@ -1,6 +1,4 @@
 import {
-	cleanErrorMessage,
-	extractUpstreamStatus,
 	WarehouseAuthError,
 	WarehouseClientError,
 	WarehouseConfigError,
@@ -8,39 +6,50 @@ import {
 	WarehouseMalformedQueryError,
 	WarehouseQueryError,
 	WarehouseQuotaExceededError,
+	type WarehouseResultDecodeError,
 	WarehouseSchemaDriftError,
 	WarehouseUpstreamError,
+	type WarehouseError,
+	type WarehouseRouteError,
+	type WarehouseValidationError,
 } from "@maple/domain/http"
 import { detectQuotaSetting } from "../profiles"
 
-// The message sanitizer and status sniffer moved to `@maple/domain/http`
-// (warehouse-error-meta) so the web formatter shares one implementation;
-// re-exported here for existing consumers/tests.
-export { cleanErrorMessage, extractUpstreamStatus }
+/** Strip HTML error pages and whitespace noise before classifying/logging an upstream failure. */
+export const cleanErrorMessage = (raw: string): string => {
+	let cleaned = raw
+	const htmlIndex = cleaned.search(/<\s*(html|head|body|center|h1|hr|title)\b/i)
+	if (htmlIndex >= 0) cleaned = cleaned.slice(0, htmlIndex)
+	cleaned = cleaned
+		.replace(/<[^>]+>/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+	if (cleaned.endsWith(":")) cleaned = cleaned.slice(0, -1).trim()
+	return cleaned || raw.slice(0, 200)
+}
+
+const extractUpstreamStatus = (message: string): number | undefined => {
+	const match = message.match(/(?:status|HTTP status|response status code)[:\s]+(\d{3})/i)
+	if (match) return Number(match[1])
+	const titleMatch = message.match(/\b(\d{3})\s+(?:error|service temporarily unavailable)\b/i)
+	if (titleMatch) return Number(titleMatch[1])
+	return undefined
+}
 
 /**
- * Every warehouse error `mapWarehouseError` can produce. Precondition failures
- * (`WarehouseValidationError`) are raised by the executor before a query runs,
- * not by this classifier, so they're intentionally absent here.
+ * Every warehouse error `mapWarehouseError` can produce. Precondition and row
+ * decode failures are raised elsewhere in the executor, so they are absent.
  */
-export type WarehouseClassifiedError =
-	| WarehouseQueryError
-	| WarehouseUpstreamError
-	| WarehouseAuthError
-	| WarehouseConfigError
-	| WarehouseClientError
-	| WarehouseSchemaDriftError
-	| WarehouseMalformedQueryError
-	| WarehouseQuotaExceededError
+export type WarehouseClassifiedError = Exclude<
+	WarehouseError,
+	WarehouseRouteError | WarehouseValidationError | WarehouseResultDecodeError
+>
 
-/** Complete error channel for an executed warehouse operation. */
-export type WarehouseExecutionError = WarehouseClassifiedError | WarehouseConfigLookupError
+/** Failures while routing or executing SQL, before decoding a declared row schema. */
+export type WarehouseExecutionError = WarehouseClassifiedError | WarehouseRouteError
 
-/**
- * Backwards-compatible name for the complete warehouse operation error channel.
- * New code should prefer `WarehouseExecutionError`.
- */
-export type WarehouseSqlError = WarehouseExecutionError
+/** SQL execution plus the result-schema failure unique to compiled queries. */
+export type WarehouseCompiledQueryError = WarehouseExecutionError | WarehouseResultDecodeError
 
 type ClickHouseErrorDetails = {
 	readonly message: string

@@ -1,6 +1,6 @@
 import {
 	AlertForbiddenError,
-	AlertNotFoundError,
+	AlertRuleNotFoundError,
 	AlertPersistenceError,
 	AlertRuleDeleteResponse,
 	AlertRuleDocument,
@@ -53,7 +53,7 @@ export interface AlertRulesServiceShape {
 		request: AlertRuleUpsertRequest,
 	) => Effect.Effect<
 		AlertRuleDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertNotFoundError
+		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertRuleNotFoundError
 	>
 	readonly deleteRule: (
 		orgId: OrgId,
@@ -61,7 +61,7 @@ export interface AlertRulesServiceShape {
 		ruleId: AlertRuleDocument["id"],
 	) => Effect.Effect<
 		AlertRuleDeleteResponse,
-		AlertForbiddenError | AlertPersistenceError | AlertNotFoundError
+		AlertForbiddenError | AlertPersistenceError | AlertRuleNotFoundError
 	>
 }
 
@@ -97,10 +97,9 @@ export const makeAlertRulePersistence = (options: {
 		)
 		if (rows[0]) return rows[0]
 		return yield* Effect.fail(
-			new AlertNotFoundError({
+			new AlertRuleNotFoundError({
 				message: "Alert rule not found",
-				resourceType: "rule",
-				resourceId: ruleId,
+				ruleId,
 			}),
 		)
 	})

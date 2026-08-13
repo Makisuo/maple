@@ -420,7 +420,7 @@ export const V2SessionReplayNotFound = defineV2Error({
 	code: "session_replay_not_found",
 	title: "Session replay not found",
 	message: "No such session replay.",
-	retryable: false,
+	retry: "never",
 	recovery: "none",
 	identifier: "SessionReplayNotFoundError",
 })
@@ -432,7 +432,7 @@ export const V2SessionReplayRangeTooLarge = defineV2Error({
 	title: "Session replay range too large",
 	message:
 		"That part of the recording is too large to load in one request. Request a narrower chunk range.",
-	retryable: false,
+	retry: "never",
 	recovery: "fix_request",
 	identifier: "SessionReplayRangeTooLargeError",
 })

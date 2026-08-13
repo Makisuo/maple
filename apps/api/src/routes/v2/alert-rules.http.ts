@@ -3,7 +3,7 @@ import type { AlertCheckDocument, AlertRuleDocument, AlertRulePreviewResponse } 
 import {
 	AlertRulePreviewRequest,
 	AlertRuleUpsertRequest,
-	AlertNotFoundError,
+	AlertRuleNotFoundError,
 	CurrentTenant,
 	IsoDateTimeString,
 	QueryBuilderQueryDraftSchema,
@@ -294,10 +294,9 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				const rule = response.rules.find((doc) => doc.id === ruleId)
 				if (rule === undefined)
 					return yield* Effect.fail(
-						new AlertNotFoundError({
+						new AlertRuleNotFoundError({
 							message: "No such alert rule.",
-							resourceType: "alert_rule",
-							resourceId: ruleId,
+							ruleId,
 						}),
 					)
 				return rule

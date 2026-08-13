@@ -5,7 +5,7 @@ import {
 	RawSqlValidationError,
 	type WarehouseQueryRequest,
 	WarehouseQueryResponse,
-	WarehouseSchemaDriftError,
+	WarehouseResultDecodeError,
 	WarehouseUpstreamError,
 	WarehouseValidationError,
 } from "@maple/domain/http"
@@ -696,10 +696,9 @@ WHERE name = 'enable_full_text_index'`,
 		const decodedRows = yield* compiled.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
-					new WarehouseSchemaDriftError({
+					new WarehouseResultDecodeError({
 						pipeName: payload.pipeName,
 						message: error.message,
-						kind: "decode",
 						cause: error,
 					}),
 			),
@@ -801,21 +800,23 @@ WHERE name = 'enable_full_text_index'`,
 		return yield* selected.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
-					new WarehouseSchemaDriftError({
+					new WarehouseResultDecodeError({
 						pipeName: options.context ?? "compiledQuery",
 						message: error.message,
-						kind: "decode",
 						cause: error,
 					}),
 			),
 		)
 	})
 
-	const compiledQuery = <T>(
+	const compiledQuery = (<T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
-	) => unbounded(executeCompiledQuery(tenant, compiled, withoutResponseLimits(options)))
+	) =>
+		unbounded(
+			executeCompiledQuery(tenant, compiled, withoutResponseLimits(options)),
+		)) as WarehouseQueryServiceShape["compiledQuery"]
 
 	/**
 	 * Read with an explicit ceiling on the response we're willing to materialize.
@@ -876,10 +877,9 @@ WHERE name = 'enable_full_text_index'`,
 		return yield* compiled.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
-					new WarehouseSchemaDriftError({
+					new WarehouseResultDecodeError({
 						pipeName: context,
 						message: error.message,
-						kind: "decode",
 						cause: error,
 					}),
 			),
@@ -911,10 +911,9 @@ WHERE name = 'enable_full_text_index'`,
 		return yield* selected.decodeFirstRow(rows).pipe(
 			Effect.mapError(
 				(error) =>
-					new WarehouseSchemaDriftError({
+					new WarehouseResultDecodeError({
 						pipeName: options.context ?? "compiledQueryFirst",
 						message: error.message,
-						kind: "decode",
 						cause: error,
 					}),
 			),

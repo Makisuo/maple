@@ -8,6 +8,7 @@ export class OrgMembersError extends Schema.TaggedError<OrgMembersError>()(
 	"@maple/api/services/OrgMembersError",
 	{
 		message: Schema.String,
+		cause: Schema.optionalKey(Schema.Defect()),
 		/** User ids the caller supplied that are not members of the org. */
 		unknownUserIds: Schema.optionalKey(Schema.Array(Schema.String)),
 	},
@@ -63,7 +64,11 @@ const make = Effect.gen(function* () {
 					}),
 			).pipe(
 				Effect.mapError(
-					() => new OrgMembersError({ message: `Failed to list workspace members for ${orgId}` }),
+					(cause) =>
+						new OrgMembersError({
+							message: `Failed to list workspace members for ${orgId}`,
+							cause,
+						}),
 				),
 			)
 			for (const member of page.data) {

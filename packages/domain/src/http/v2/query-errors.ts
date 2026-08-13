@@ -4,53 +4,25 @@ import {
 	QueryEngineTimeoutError,
 	QueryEngineValidationError,
 } from "../query-engine"
-import {
-	WarehouseAuthError,
-	WarehouseClientError,
-	WarehouseConfigError,
-	WarehouseConfigLookupError,
-	WarehouseMalformedQueryError,
-	WarehouseQueryError,
-	WarehouseQuotaExceededError,
-	WarehouseSchemaDriftError,
-	WarehouseUpstreamError,
-	WarehouseValidationError,
-} from "../warehouse-errors"
+import { managedWarehouseHttpErrors, warehouseHttpErrors } from "../warehouse-errors"
 import { publicErrors } from "./public-error"
 
 /** Exact public schemas for the complete WarehouseError union. */
-export const V2WarehouseErrors = publicErrors(
-	WarehouseQueryError,
-	WarehouseUpstreamError,
-	WarehouseAuthError,
-	WarehouseConfigError,
-	WarehouseClientError,
-	WarehouseSchemaDriftError,
-	WarehouseMalformedQueryError,
-	WarehouseQuotaExceededError,
-	WarehouseValidationError,
-	WarehouseConfigLookupError,
-)
+export const V2WarehouseErrors = publicErrors(...warehouseHttpErrors)
 
 /** Managed-only routes never consult the per-org warehouse configuration. */
-export const V2ManagedWarehouseErrors = publicErrors(
-	WarehouseQueryError,
-	WarehouseUpstreamError,
-	WarehouseAuthError,
-	WarehouseConfigError,
-	WarehouseClientError,
-	WarehouseSchemaDriftError,
-	WarehouseMalformedQueryError,
-	WarehouseQuotaExceededError,
-	WarehouseValidationError,
-)
+export const V2ManagedWarehouseErrors = publicErrors(...managedWarehouseHttpErrors)
 
 /** Exact public schemas for failures added by the higher-level query engine. */
-export const V2QueryEngineErrors = publicErrors(
+export const V2QueryEngineRouteErrors = publicErrors(
 	QueryEngineValidationError,
 	QueryEngineExecutionError,
 	QueryEngineTimeoutError,
-	QueryEngineResultMismatchError,
 )
+
+export const V2QueryEngineErrors = [
+	...V2QueryEngineRouteErrors,
+	...publicErrors(QueryEngineResultMismatchError),
+] as const
 
 export const V2QueryErrors = [...V2WarehouseErrors, ...V2QueryEngineErrors] as const

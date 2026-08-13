@@ -355,6 +355,29 @@ describe("PlanetScaleDiscoveryService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
+	it.effect("preserves a missing managed OAuth grant as IntegrationsNotConnectedError", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const targets = yield* ScrapeTargetsService
+			const discovery = yield* PlanetScaleDiscoveryService
+			const created = yield* targets.create(
+				asOrgId("org_1"),
+				new CreateScrapeTargetRequest({
+					name: "Managed PlanetScale",
+					targetType: "planetscale",
+					organization: "my-org",
+					authType: "planetscale_oauth",
+				}),
+			)
+			const rows = yield* targets.listAllEnabled()
+			const row = rows.find((candidate) => candidate.id === created.id)
+			if (!row) return yield* Effect.die("created row not found")
+
+			const error = yield* discovery.discover(row).pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsNotConnectedError")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
 	it.effect("maps a non-auth upstream failure to ScrapeTargetUpstreamError with the status", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {

@@ -3,13 +3,36 @@ import {
 	CurrentTenant,
 	IsoDateTimeString,
 	MapleApi,
+	ScrapeTargetAuthError,
 	ScrapeTargetCheckResponse,
 	ScrapeTargetChecksListResponse,
+	ScrapeTargetPersistenceError,
 } from "@maple/domain/http"
 import { Effect, Schema } from "effect"
 import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
 
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
+
+/** Preserve v1's collapsed scrape-auth response while v2 exposes the source tags directly. */
+const v1PlanetScaleAccessTokenErrors = {
+	"@maple/http/errors/IntegrationsConfigurationError": (error: { readonly message: string }) =>
+		Effect.fail(new ScrapeTargetAuthError({ reason: "config", message: error.message })),
+	"@maple/http/errors/IntegrationsNotConnectedError": (error: { readonly message: string }) =>
+		Effect.fail(new ScrapeTargetAuthError({ reason: "not_connected", message: error.message })),
+	"@maple/http/errors/IntegrationsRevokedError": (error: { readonly message: string }) =>
+		Effect.fail(new ScrapeTargetAuthError({ reason: "revoked", message: error.message })),
+	"@maple/http/errors/IntegrationsUpstreamError": (error: { readonly message: string }) =>
+		Effect.fail(
+			new ScrapeTargetAuthError({
+				reason: "upstream",
+				message: `PlanetScale token refresh failed upstream: ${error.message}`,
+			}),
+		),
+	"@maple/http/errors/IntegrationsValidationError": (error: { readonly message: string }) =>
+		Effect.fail(new ScrapeTargetAuthError({ reason: "config", message: error.message })),
+	"@maple/http/errors/IntegrationsPersistenceError": (error: { readonly message: string }) =>
+		Effect.fail(new ScrapeTargetPersistenceError({ message: error.message })),
+} as const
 
 export const HttpScrapeTargetsLive = HttpApiBuilder.group(MapleApi, "scrapeTargets", (handlers) =>
 	Effect.gen(function* () {
@@ -43,7 +66,9 @@ export const HttpScrapeTargetsLive = HttpApiBuilder.group(MapleApi, "scrapeTarge
 			.handle("probe", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					return yield* service.probe(tenant.orgId, params.targetId)
+					return yield* service
+						.probe(tenant.orgId, params.targetId)
+						.pipe(Effect.catchTags(v1PlanetScaleAccessTokenErrors))
 				}),
 			)
 			.handle("listChecks", ({ params, query }) =>

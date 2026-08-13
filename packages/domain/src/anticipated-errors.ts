@@ -2,8 +2,8 @@
 //
 // The set of stable domain HTTP error identifiers that represent *expected*
 // client-facing outcomes (4xx): validation, not-found, unauthorized, forbidden,
-// conflict, … Tagged errors contribute `_tag`; v2 Error values contribute
-// their class identifier / `Error.name`.
+// conflict, … Tagged errors contribute `_tag`; v2 definitions contribute their
+// exact public `tag`.
 //
 // These are not bugs — they're normal business results. The telemetry SDK uses
 // this set to record spans that fail *entirely* with one of these errors as
@@ -12,11 +12,11 @@
 // `StatusCode='Error'`). Mirrors the ingest gateway's `otel_status_for_rejection`
 // rule (4xx → Ok, 5xx → Error).
 //
-// Derived (not hand-maintained) from the error classes themselves: every
-// Both `Schema.TaggedError` and `Schema.Error` carry a stable
-// identifier plus an `httpApiStatus` annotation, so a new 4xx error is picked
-// up automatically. A 5xx error (persistence/upstream failures) is intentionally
-// excluded and keeps tracing.
+// Derived (not hand-maintained) from the exported error classes and v2
+// definitions. Every class has a schema identifier plus an `httpApiStatus`
+// annotation; every v2 definition exposes the same tag/status pair directly.
+// A 5xx error (persistence/upstream failures) is intentionally excluded and
+// keeps tracing.
 import * as Http from "./http/index"
 import * as HttpV2 from "./http/v2/index"
 
@@ -26,8 +26,10 @@ const prop = (obj: unknown, key: string): unknown =>
 		? (obj as Record<string, unknown>)[key]
 		: undefined
 
-/** Stable runtime identifier: tagged errors use `_tag`; Schema.Error uses its class identifier/name. */
+/** Stable runtime identifier from a v2 definition or tagged-error class. */
 const readIdentifier = (value: unknown): string | undefined => {
+	const tag = prop(value, "tag")
+	if (typeof tag === "string") return tag
 	const literal = prop(prop(prop(prop(value, "fields"), "_tag"), "schema"), "literal")
 	if (typeof literal === "string") return literal
 	const identifier = prop(value, "identifier")
@@ -36,8 +38,10 @@ const readIdentifier = (value: unknown): string | undefined => {
 
 /** The `httpApiStatus` annotation on a schema's AST, when present. */
 const readHttpStatus = (value: unknown): number | undefined => {
-	const status = prop(prop(prop(value, "ast"), "annotations"), "httpApiStatus")
-	return typeof status === "number" ? status : undefined
+	const status = prop(value, "status")
+	if (typeof status === "number") return status
+	const annotation = prop(prop(prop(value, "ast"), "annotations"), "httpApiStatus")
+	return typeof annotation === "number" ? annotation : undefined
 }
 
 /**
@@ -53,7 +57,6 @@ const exportedValues = (namespace: object): ReadonlyArray<unknown> => Object.val
 const deriveAnticipatedIdentifiers = (): ReadonlySet<string> => {
 	const identifiers = new Set<string>(EXTERNAL_ANTICIPATED_IDENTIFIERS)
 	for (const value of [...exportedValues(Http), ...exportedValues(HttpV2)]) {
-		if (typeof value !== "function") continue
 		const identifier = readIdentifier(value)
 		if (identifier === undefined) continue
 		const status = readHttpStatus(value)
@@ -65,7 +68,7 @@ const deriveAnticipatedIdentifiers = (): ReadonlySet<string> => {
 
 /**
  * Stable identifiers of all domain HTTP errors annotated with a 4xx `httpApiStatus`.
- * Tagged errors contribute `_tag`; v2 Schema.Error values contribute `Error.name`.
+ * Tagged errors and v2 definitions both contribute their exact public `_tag`.
  */
 export const ANTICIPATED_ERROR_IDENTIFIERS: ReadonlySet<string> = deriveAnticipatedIdentifiers()
 

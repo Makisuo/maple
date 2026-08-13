@@ -572,17 +572,13 @@ export class ErrorIssueNotFoundError extends HttpTaggedError<ErrorIssueNotFoundE
 	"@maple/http/errors/ErrorIssueNotFoundError",
 	{
 		message: Schema.String,
-		resourceType: Schema.Literals(["issue", "incident"]),
-		resourceId: Schema.Union([ErrorIssueId, ErrorIncidentId]),
+		issueId: ErrorIssueId,
 	},
 	{
 		status: 404,
-		code: (error) =>
-			error.resourceType === "issue" ? "error_issue_not_found" : "error_incident_not_found",
-		title: (error) =>
-			error.resourceType === "issue" ? "Error issue not found" : "Error incident not found",
-		message: (error) =>
-			error.resourceType === "issue" ? "No such error issue." : "No such error incident.",
+		code: "error_issue_not_found",
+		title: "Error issue not found",
+		message: "No such error issue.",
 		param: "id",
 		retry: "never",
 		recovery: "none",
@@ -592,8 +588,7 @@ export class ErrorIssueNotFoundError extends HttpTaggedError<ErrorIssueNotFoundE
 	static forIssue(id: ErrorIssueId) {
 		return new ErrorIssueNotFoundError({
 			message: `No such error issue: '${id}'`,
-			resourceType: "issue",
-			resourceId: id,
+			issueId: id,
 		})
 	}
 }

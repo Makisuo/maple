@@ -14,7 +14,7 @@ export const V2TelemetryRangeTooLarge = defineV2Error({
 	code: "time_range_too_large",
 	title: "Time range too large",
 	message: "The requested time range exceeds this operation's limit.",
-	retryable: false,
+	retry: "never",
 	recovery: "fix_request",
 	identifier: "TelemetryRangeTooLargeError",
 })
@@ -25,7 +25,7 @@ export const V2TelemetryBucketCountTooLarge = defineV2Error({
 	code: "bucket_count_too_large",
 	title: "Too many time buckets",
 	message: "bucket_seconds produces too many buckets.",
-	retryable: false,
+	retry: "never",
 	recovery: "fix_request",
 	identifier: "TelemetryBucketCountTooLargeError",
 })
@@ -36,7 +36,7 @@ export const V2TelemetryBreakdownFilterRequired = defineV2Error({
 	code: "breakdown_filter_required",
 	title: "Breakdown filter required",
 	message: "This breakdown range requires at least one narrowing filter.",
-	retryable: false,
+	retry: "never",
 	recovery: "fix_request",
 	identifier: "TelemetryBreakdownFilterRequiredError",
 })
@@ -47,7 +47,7 @@ export const V2TraceQueryInvalid = defineV2Error({
 	code: "trace_query_invalid",
 	title: "Invalid trace query",
 	message: "The trace aggregation request is invalid.",
-	retryable: false,
+	retry: "never",
 	recovery: "fix_request",
 	identifier: "TraceQueryInvalidError",
 })
@@ -58,7 +58,7 @@ export const V2LogQueryInvalid = defineV2Error({
 	code: "log_query_invalid",
 	title: "Invalid log query",
 	message: "The log aggregation request is invalid.",
-	retryable: false,
+	retry: "never",
 	recovery: "fix_request",
 	identifier: "LogQueryInvalidError",
 })
@@ -69,7 +69,7 @@ export const V2MetricQueryInvalid = defineV2Error({
 	code: "metric_query_invalid",
 	title: "Invalid metric query",
 	message: "The metric aggregation request is invalid.",
-	retryable: false,
+	retry: "never",
 	recovery: "fix_request",
 	identifier: "MetricQueryInvalidError",
 })
@@ -80,7 +80,7 @@ export const V2TraceNotFound = defineV2Error({
 	code: "trace_not_found",
 	title: "Trace not found",
 	message: "No such trace.",
-	retryable: false,
+	retry: "never",
 	recovery: "none",
 	identifier: "TraceNotFoundError",
 })
@@ -91,7 +91,7 @@ export const V2SpanNotFound = defineV2Error({
 	code: "span_not_found",
 	title: "Span not found",
 	message: "No such span.",
-	retryable: false,
+	retry: "never",
 	recovery: "none",
 	identifier: "SpanNotFoundError",
 })
@@ -102,7 +102,7 @@ export const V2LogIdInvalid = defineV2Error({
 	code: "log_id_invalid",
 	title: "Invalid log ID",
 	message: "Malformed log ID.",
-	retryable: false,
+	retry: "never",
 	recovery: "fix_request",
 	identifier: "LogIdInvalidError",
 })
@@ -113,7 +113,7 @@ export const V2LogNotFound = defineV2Error({
 	code: "log_not_found",
 	title: "Log not found",
 	message: "No such log.",
-	retryable: false,
+	retry: "never",
 	recovery: "none",
 	identifier: "LogNotFoundError",
 })
@@ -124,7 +124,7 @@ export const V2ServiceNotFound = defineV2Error({
 	code: "service_not_found",
 	title: "Service not found",
 	message: "No such service.",
-	retryable: false,
+	retry: "never",
 	recovery: "none",
 	identifier: "ServiceNotFoundError",
 })

@@ -5,14 +5,13 @@ export class FanoutStartError extends Schema.TaggedError<FanoutStartError>()(
 	"@maple/api/errors/FanoutStartError",
 	{
 		message: Schema.String,
-		cause: Schema.String,
+		cause: Schema.Defect(),
 	},
 ) {
 	static fromCause(cause: unknown): FanoutStartError {
-		const detail = String(cause)
 		return new FanoutStartError({
-			message: `Investigation fanout failed to start: ${detail}`,
-			cause: detail,
+			message: "Investigation fanout failed to start",
+			cause,
 		})
 	}
 }

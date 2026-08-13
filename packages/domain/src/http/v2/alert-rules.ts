@@ -9,9 +9,10 @@ import {
 	AlertIncidentTransition,
 	AlertNotificationTemplate,
 	AlertDeliveryError,
+	AlertDestinationNotFoundError,
 	AlertForbiddenError,
-	AlertNotFoundError,
 	AlertPersistenceError,
+	AlertRuleNotFoundError,
 	AlertSeverity,
 	AlertSignalType,
 	AlertValidationError,
@@ -21,8 +22,8 @@ import { AlertDestinationPublicId } from "./alert-destinations"
 import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
-import { publicErrors } from "./public-error"
-import { V2ManagedWarehouseErrors, V2WarehouseErrors } from "./query-errors"
+import { publicError, publicErrors } from "./public-error"
+import { V2ManagedWarehouseErrors, V2QueryEngineRouteErrors, V2WarehouseErrors } from "./query-errors"
 import { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
 
 export { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
@@ -626,13 +627,14 @@ const ChecksQuery = Schema.Struct({
 	description: "Pagination plus optional group/time filters for a rule's check history.",
 })
 
-const [alertForbidden, alertValidation, alertPersistence, alertNotFound, alertDelivery] = publicErrors(
+const [alertForbidden, alertValidation, alertPersistence, alertRuleNotFound, alertDelivery] = publicErrors(
 	AlertForbiddenError,
 	AlertValidationError,
 	AlertPersistenceError,
-	AlertNotFoundError,
+	AlertRuleNotFoundError,
 	AlertDeliveryError,
 )
+const alertDestinationNotFound = publicError(AlertDestinationNotFoundError)
 
 const AlertRuleList = ListOf(V2AlertRule).annotate({
 	identifier: "AlertRuleList",
@@ -717,7 +719,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				alertForbidden,
 				alertValidation,
 				alertPersistence,
-				alertNotFound,
+				alertRuleNotFound,
 			],
 		}).annotateMerge(
 			OpenApi.annotations({
@@ -732,7 +734,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: AlertRulePublicId },
 			success: V2AlertRule,
-			error: [alertPersistence, alertNotFound],
+			error: [alertPersistence, alertRuleNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAlertRule",
@@ -752,7 +754,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				alertForbidden,
 				alertValidation,
 				alertPersistence,
-				alertNotFound,
+				alertRuleNotFound,
 			],
 		}).annotateMerge(
 			OpenApi.annotations({
@@ -767,7 +769,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 		HttpApiEndpoint.delete("delete", "/:id", {
 			params: { id: AlertRulePublicId },
 			success: V2AlertRuleDeleteResponse,
-			error: [alertForbidden, alertPersistence, alertNotFound],
+			error: [alertForbidden, alertPersistence, alertRuleNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "deleteAlertRule",
@@ -786,9 +788,10 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				alertForbidden,
 				alertValidation,
 				alertPersistence,
-				alertNotFound,
+				alertDestinationNotFound,
 				alertDelivery,
 				...V2WarehouseErrors,
+				...V2QueryEngineRouteErrors,
 			],
 		}).annotateMerge(
 			OpenApi.annotations({
@@ -808,8 +811,8 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				alertForbidden,
 				alertValidation,
 				alertPersistence,
-				alertDelivery,
 				...V2WarehouseErrors,
+				...V2QueryEngineRouteErrors,
 			],
 		}).annotateMerge(
 			OpenApi.annotations({
@@ -825,7 +828,12 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 			params: { id: AlertRulePublicId },
 			query: ChecksQuery,
 			success: AlertCheckList,
-			error: [V2ParameterInvalid.schema, alertPersistence, alertNotFound, ...V2ManagedWarehouseErrors],
+			error: [
+				V2ParameterInvalid.schema,
+				alertPersistence,
+				alertRuleNotFound,
+				...V2ManagedWarehouseErrors,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listAlertRuleChecks",
@@ -840,7 +848,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 			params: { id: AlertRulePublicId },
 			query: AlertCheckSummaryQuery,
 			success: AlertCheckSummary,
-			error: [alertValidation, alertPersistence, alertNotFound, ...V2ManagedWarehouseErrors],
+			error: [alertValidation, alertPersistence, alertRuleNotFound, ...V2ManagedWarehouseErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "summarizeAlertRuleChecks",

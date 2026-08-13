@@ -18,7 +18,7 @@ import { ErrorsService } from "@/services/errors/ErrorsService"
 import { requireAdmin } from "@/services/auth/auth"
 import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
 
-// v1 keeps its historical generic persistence failure; v2 exposes each warehouse tag directly.
+// Preserve v1's historical persistence envelope while v2 exposes warehouse tags directly.
 const legacyPersistenceFailure = (error: { readonly message: string }) =>
 	Effect.fail(makeAnomalyPersistenceError(error))
 

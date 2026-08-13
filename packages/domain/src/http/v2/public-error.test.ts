@@ -13,6 +13,7 @@ import {
 import {
 	WarehouseMalformedQueryError,
 	WarehouseQuotaExceededError,
+	WarehouseResultDecodeError,
 	WarehouseSchemaDriftError,
 	WarehouseUpstreamError,
 	WarehouseValidationError,
@@ -86,6 +87,20 @@ describe("HttpTaggedError public body", () => {
 		expect(error.error.message).toContain("schema apply")
 		expect(error.error.message).not.toContain("SecretCustomerColumn")
 		expect(publicHttpErrorPolicy(error).status).toBe(502)
+	})
+
+	it("distinguishes cluster schema drift from Maple result decoding failures", () => {
+		const error = new WarehouseResultDecodeError({
+			pipeName: "service_overview",
+			message: "Secret wire-format mismatch",
+		})
+
+		expect(error.error).toMatchObject({
+			_tag: "@maple/http/errors/WarehouseResultDecodeError",
+			code: "warehouse_result_decode_failed",
+			recovery: "contact_support",
+		})
+		expect(error.error.message).not.toContain("Secret wire-format mismatch")
 	})
 
 	it("serializes query-engine failures directly", () => {

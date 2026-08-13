@@ -197,13 +197,9 @@ export class ScrapeTargetEncryptionError extends HttpTaggedError<ScrapeTargetEnc
 ) {}
 
 /**
- * Authenticating a scrape target against its provider failed — token
- * resolution for a managed (OAuth-backed) target, or the provider rejecting
- * the presented credentials (e.g. PlanetScale's SD endpoint answering
- * 401/403). `reason` preserves the actionable failure class:
- * `not_connected`/`revoked` need a reconnect, `upstream` is a transient
- * provider failure, `config` is a credential/OAuth-app misconfiguration
- * (bad service token, missing scope).
+ * Legacy v1 scrape-auth envelope. V2 preserves managed OAuth failures as their
+ * exact integration tags; this remains for v1 compatibility and direct manual
+ * credential rejection on the internal scrape proxy.
  */
 export class ScrapeTargetAuthError extends HttpTaggedError<ScrapeTargetAuthError>()(
 	"@maple/http/errors/ScrapeTargetAuthError",

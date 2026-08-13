@@ -7,7 +7,7 @@ import {
 	AlertDestinationTestResponse,
 	AlertDestinationsListResponse,
 	AlertForbiddenError,
-	AlertNotFoundError,
+	AlertDestinationNotFoundError,
 	AlertPersistenceError,
 	AlertRuleDocument,
 	AlertValidationError,
@@ -197,7 +197,7 @@ export interface AlertDestinationsServiceShape {
 		request: AlertDestinationUpdateRequest,
 	) => Effect.Effect<
 		AlertDestinationDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertNotFoundError
+		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertDestinationNotFoundError
 	>
 	readonly deleteDestination: (
 		orgId: OrgId,
@@ -205,7 +205,10 @@ export interface AlertDestinationsServiceShape {
 		destinationId: AlertDestinationDocument["id"],
 	) => Effect.Effect<
 		AlertDestinationDeleteResponse,
-		AlertForbiddenError | AlertPersistenceError | AlertNotFoundError | AlertDestinationInUseError
+		| AlertForbiddenError
+		| AlertPersistenceError
+		| AlertDestinationNotFoundError
+		| AlertDestinationInUseError
 	>
 	readonly testDestination: (
 		orgId: OrgId,
@@ -216,7 +219,7 @@ export interface AlertDestinationsServiceShape {
 		AlertDestinationTestResponse,
 		| AlertForbiddenError
 		| AlertPersistenceError
-		| AlertNotFoundError
+		| AlertDestinationNotFoundError
 		| AlertDeliveryError
 		| AlertValidationError
 	>
@@ -272,10 +275,9 @@ export class AlertDestinationsService extends Context.Service<
 			)
 			if (rows[0]) return rows[0]
 			return yield* Effect.fail(
-				new AlertNotFoundError({
+				new AlertDestinationNotFoundError({
 					message: "Alert destination not found",
-					resourceType: "destination",
-					resourceId: destinationId,
+					destinationId,
 				}),
 			)
 		})

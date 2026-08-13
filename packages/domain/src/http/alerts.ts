@@ -695,54 +695,55 @@ export class AlertPersistenceError extends HttpTaggedError<AlertPersistenceError
 	},
 ) {}
 
-const alertResource = (resourceType: string): { code: string; title: string; message: string } => {
-	switch (resourceType) {
-		case "destination":
-			return {
-				code: "alert_destination_not_found",
-				title: "Alert destination not found",
-				message: "No such alert destination.",
-			}
-		case "rule":
-		case "alert_rule":
-			return {
-				code: "alert_rule_not_found",
-				title: "Alert rule not found",
-				message: "No such alert rule.",
-			}
-		case "alert_incident":
-			return {
-				code: "alert_incident_not_found",
-				title: "Alert incident not found",
-				message: "No such alert incident.",
-			}
-		default:
-			return {
-				code: "alert_resource_not_found",
-				title: "Alert resource not found",
-				message: "No such alert resource.",
-			}
-	}
-}
-
-export class AlertNotFoundError extends HttpTaggedError<AlertNotFoundError>()(
-	"@maple/http/errors/AlertNotFoundError",
-	{
-		message: Schema.String,
-		resourceType: Schema.String,
-		resourceId: Schema.String,
-	},
+export class AlertRuleNotFoundError extends HttpTaggedError<AlertRuleNotFoundError>()(
+	"@maple/http/errors/AlertRuleNotFoundError",
+	{ message: Schema.String, ruleId: AlertRuleId },
 	{
 		status: 404,
-		code: (error) => alertResource(error.resourceType).code,
-		title: (error) => alertResource(error.resourceType).title,
-		message: (error) => alertResource(error.resourceType).message,
+		code: "alert_rule_not_found",
+		title: "Alert rule not found",
+		message: "No such alert rule.",
 		param: "id",
 		retry: "never",
 		recovery: "none",
 		exposure: "redacted",
 	},
 ) {}
+
+export class AlertDestinationNotFoundError extends HttpTaggedError<AlertDestinationNotFoundError>()(
+	"@maple/http/errors/AlertDestinationNotFoundError",
+	{ message: Schema.String, destinationId: AlertDestinationId },
+	{
+		status: 404,
+		code: "alert_destination_not_found",
+		title: "Alert destination not found",
+		message: "No such alert destination.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
+) {}
+
+export class AlertIncidentNotFoundError extends HttpTaggedError<AlertIncidentNotFoundError>()(
+	"@maple/http/errors/AlertIncidentNotFoundError",
+	{ message: Schema.String, incidentId: AlertIncidentId },
+	{
+		status: 404,
+		code: "alert_incident_not_found",
+		title: "Alert incident not found",
+		message: "No such alert incident.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
+) {}
+
+export type AlertNotFoundError =
+	| AlertRuleNotFoundError
+	| AlertDestinationNotFoundError
+	| AlertIncidentNotFoundError
 
 export class AlertDeliveryError extends HttpTaggedError<AlertDeliveryError>()(
 	"@maple/http/errors/AlertDeliveryError",

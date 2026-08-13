@@ -5,6 +5,7 @@ import { deepEqual, isResolved } from "alchemy/Diff"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
 import { listAll, MapleApi } from "./MapleApi"
+import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
 
 /**
@@ -115,7 +116,7 @@ export const ApiKeyProvider = () =>
 						const fetched = yield* api
 							.get(`/v2/api_keys/${output.keyId}`)
 							.pipe(
-								Effect.catchTag("@maple/http/errors/ApiKeyNotFoundError", () =>
+								Effect.catchTag(MapleErrorTags.apiKeyNotFound, () =>
 									Effect.succeed(undefined),
 								),
 							)
@@ -147,17 +148,13 @@ export const ApiKeyProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/api_keys/${output.keyId}`)
-						.pipe(Effect.catchTag("@maple/http/errors/ApiKeyNotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag(MapleErrorTags.apiKeyNotFound, () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ output }) {
 					if (!output?.keyId) return undefined
 					const fetched = yield* api
 						.get(`/v2/api_keys/${output.keyId}`)
-						.pipe(
-							Effect.catchTag("@maple/http/errors/ApiKeyNotFoundError", () =>
-								Effect.succeed(undefined),
-							),
-						)
+						.pipe(Effect.catchTag(MapleErrorTags.apiKeyNotFound, () => Effect.succeed(undefined)))
 					if (fetched === undefined) return undefined
 					const wire = yield* decodeWireApiKey(fetched)
 					if (wire.revoked) return undefined

@@ -94,7 +94,7 @@ import {
 import { Queries } from "@/routes/queries"
 import { makeQueryRunners } from "@/routes/query-runner"
 import { runQueryEngineBatch } from "@/routes/query-engine-batch"
-import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
+import type { ExecutionTenant, WarehouseExecutionError } from "@maple/query-engine/execution"
 import type { TenantContext } from "@/services/auth/AuthService"
 import * as Integrations from "@maple/query-engine-integrations"
 
@@ -276,9 +276,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 		const warehouse = yield* WarehouseQueryService
 		const { runQuery, runQueryFirst } = makeQueryRunners({ warehouse, queryEngine })
 
-		const executeRawSql = makeExecuteRawSql<ExecutionTenant, WarehouseSqlError | RawSqlValidationError>(
-			warehouse,
-		)
+		const executeRawSql = makeExecuteRawSql<
+			ExecutionTenant,
+			WarehouseExecutionError | RawSqlValidationError
+		>(warehouse)
 
 		return handlers
 			.handle("execute", ({ payload }) =>

@@ -54,7 +54,6 @@ export interface PublicHttpErrorBody<Tag extends string, Status extends PublicHt
 	readonly retry_after_seconds?: number
 	readonly retry_at?: string
 	readonly param?: string
-	readonly doc_url?: string
 }
 
 const publicHttpErrorBodyFields = {
@@ -88,9 +87,6 @@ const publicHttpErrorBodyFields = {
 	param: Schema.optionalKey(
 		Schema.String.annotate({ description: "Request parameter associated with the failure." }),
 	),
-	doc_url: Schema.optionalKey(
-		Schema.String.annotate({ description: "Reference documentation for this failure." }),
-	),
 }
 
 /**
@@ -105,6 +101,36 @@ export const makePublicHttpErrorBodySchema = <Tag extends string, Type extends P
 		_tag: tag,
 		type,
 		...publicHttpErrorBodyFields,
+	})
+
+/**
+ * Build an endpoint-specific body schema from the same policy that materializes
+ * the runtime body. Static policy fields become literals in OpenAPI; dynamic
+ * fields stay broad because their value depends on the error instance.
+ */
+export const makeExactPublicHttpErrorBodySchema = <
+	Error extends PublicTaggedError,
+	Tag extends string,
+	Type extends PublicHttpErrorType,
+	Status extends PublicHttpErrorStatus,
+>(
+	tag: Schema.Codec<Tag, Tag, never, never>,
+	type: Schema.Codec<Type, Type, never, never>,
+	policy: PublicHttpErrorPolicy<Error, Status>,
+) =>
+	Schema.Struct({
+		_tag: tag,
+		type,
+		...publicHttpErrorBodyFields,
+		code: typeof policy.code === "string" ? Schema.Literal(policy.code) : publicHttpErrorBodyFields.code,
+		title:
+			typeof policy.title === "string" ? Schema.Literal(policy.title) : publicHttpErrorBodyFields.title,
+		message:
+			policy.exposure === "redacted" && typeof policy.message === "string"
+				? Schema.Literal(policy.message)
+				: publicHttpErrorBodyFields.message,
+		retryable: Schema.Literal(policy.retry !== "never"),
+		recovery: Schema.Literal(policy.recovery),
 	})
 
 /** Runtime contract for a public error body when its exact tag/status are not known statically. */

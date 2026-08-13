@@ -457,7 +457,7 @@ describe("v2 error envelope", () => {
 		code: "resource_missing",
 		title: "Not found",
 		message: "The resource does not exist.",
-		retryable: false,
+		retry: "never",
 		recovery: "none",
 		identifier: "TestNotFoundError",
 	})
@@ -502,9 +502,7 @@ describe("v2 error envelope", () => {
 	})
 
 	it("omits param when not provided", () => {
-		const wire = Schema.encodeSync(TestNotFound.schema)(TestNotFound.make("gone")) as {
-			error: Record<string, unknown>
-		}
+		const wire = Schema.encodeSync(TestNotFound.schema)(TestNotFound.make("gone"))
 		expect("param" in wire.error).toBe(false)
 	})
 

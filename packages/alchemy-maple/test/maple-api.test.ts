@@ -27,6 +27,22 @@ const errorEnvelope = (overrides: {
 	},
 })
 
+const retryableErrorEnvelope = (overrides: {
+	readonly retry_after_seconds?: number
+	readonly retry_at?: string
+}) => ({
+	error: {
+		_tag: "@maple/http/errors/WarehouseUpstreamError",
+		type: "api_error",
+		code: "warehouse_unavailable",
+		title: "Database is temporarily unavailable",
+		message: "Retry in a few seconds.",
+		retryable: true,
+		recovery: "retry",
+		...overrides,
+	},
+})
+
 const clientLayer = (respond: (request: HttpClientRequest.HttpClientRequest) => Response) =>
 	Layer.succeed(
 		HttpClient.HttpClient,
@@ -60,9 +76,7 @@ describe("MapleApi errors", () => {
 			attempts += 1
 			return attempts === 1
 				? new Response(
-						JSON.stringify(
-							errorEnvelope({ retryable: true, retry_at: "1970-01-01T00:00:00.000Z" }),
-						),
+						JSON.stringify(retryableErrorEnvelope({ retry_at: "1970-01-01T00:00:00.000Z" })),
 						{ status: 503, headers: { "content-type": "application/json" } },
 					)
 				: new Response(JSON.stringify({ ok: true }), {
@@ -83,7 +97,7 @@ describe("MapleApi errors", () => {
 		let attempts = 0
 		const http = clientLayer(() => {
 			attempts += 1
-			return new Response(JSON.stringify(errorEnvelope({ retryable: true })), {
+			return new Response(JSON.stringify(retryableErrorEnvelope({})), {
 				status: 503,
 				headers: { "content-type": "application/json" },
 			})
@@ -105,8 +119,7 @@ describe("MapleApi errors", () => {
 			return attempts === 1
 				? new Response(
 						JSON.stringify(
-							errorEnvelope({
-								retryable: true,
+							retryableErrorEnvelope({
 								retry_after_seconds: 5,
 								retry_at: "1970-01-01T00:00:02.000Z",
 							}),
@@ -130,12 +143,38 @@ describe("MapleApi errors", () => {
 		)
 	})
 
+	it.effect("waits until a future retry_at before retrying", () => {
+		let attempts = 0
+		const http = clientLayer(() => {
+			attempts += 1
+			return attempts === 1
+				? new Response(
+						JSON.stringify(retryableErrorEnvelope({ retry_at: "1970-01-01T00:00:05.000Z" })),
+						{ status: 503 },
+					)
+				: new Response(JSON.stringify({ ok: true }), { status: 200 })
+		})
+		return Effect.gen(function* () {
+			const api = yield* MapleApi
+			const fiber = yield* Effect.forkChild(api.get("/v2/api_keys/key_retry"))
+			yield* TestClock.adjust(Duration.zero)
+			expect(attempts).toBe(1)
+			yield* TestClock.adjust(Duration.seconds(4))
+			expect(attempts).toBe(1)
+			yield* TestClock.adjust(Duration.seconds(1))
+			expect(yield* Fiber.join(fiber)).toEqual({ ok: true })
+			expect(attempts).toBe(2)
+		}).pipe(
+			Effect.provide(MapleApiFromHttpClient().pipe(Layer.provide(environment), Layer.provide(http))),
+		)
+	})
+
 	it.effect("stops after six retries", () => {
 		let attempts = 0
 		const http = clientLayer(() => {
 			attempts += 1
 			return new Response(
-				JSON.stringify(errorEnvelope({ retryable: true, retry_at: "1970-01-01T00:00:00.000Z" })),
+				JSON.stringify(retryableErrorEnvelope({ retry_at: "1970-01-01T00:00:00.000Z" })),
 				{ status: 503, headers: { "content-type": "application/json" } },
 			)
 		})
@@ -144,6 +183,50 @@ describe("MapleApi errors", () => {
 			const error = yield* Effect.flip(api.get("/v2/api_keys/key_retry"))
 			expect(isMapleApiResponseError(error)).toBe(true)
 			expect(attempts).toBe(7)
+		}).pipe(
+			Effect.provide(MapleApiFromHttpClient().pipe(Layer.provide(environment), Layer.provide(http))),
+		)
+	})
+
+	it.effect("rejects a body whose category does not match its HTTP status", () => {
+		const http = clientLayer(
+			() =>
+				new Response(JSON.stringify(errorEnvelope({ retryable: false })), {
+					status: 503,
+				}),
+		)
+		return Effect.gen(function* () {
+			const api = yield* MapleApi
+			const error = yield* Effect.flip(api.get("/v2/api_keys/key_missing"))
+			expect(error._tag).toBe("@maple/alchemy/errors/ProtocolError")
+			expect(isMapleApiResponseError(error)).toBe(false)
+		}).pipe(
+			Effect.provide(MapleApiFromHttpClient().pipe(Layer.provide(environment), Layer.provide(http))),
+		)
+	})
+
+	it.effect("rejects a not-found tag for the wrong endpoint", () => {
+		const wrong = errorEnvelope({ retryable: false })
+		wrong.error._tag = "@maple/http/errors/DashboardNotFoundError"
+		const http = clientLayer(() => new Response(JSON.stringify(wrong), { status: 404 }))
+		return Effect.gen(function* () {
+			const api = yield* MapleApi
+			const error = yield* Effect.flip(api.get("/v2/api_keys/key_missing"))
+			expect(error._tag).toBe("@maple/alchemy/errors/ProtocolError")
+		}).pipe(
+			Effect.provide(MapleApiFromHttpClient().pipe(Layer.provide(environment), Layer.provide(http))),
+		)
+	})
+
+	it.effect("rejects a client-side tag masquerading as a server failure", () => {
+		const wrong = errorEnvelope({ retryable: false })
+		wrong.error._tag = "@maple/alchemy/errors/ProtocolError"
+		const http = clientLayer(() => new Response(JSON.stringify(wrong), { status: 404 }))
+		return Effect.gen(function* () {
+			const api = yield* MapleApi
+			const error = yield* Effect.flip(api.get("/v2/api_keys/key_missing"))
+			expect(error._tag).toBe("@maple/alchemy/errors/ProtocolError")
+			expect(isMapleApiResponseError(error)).toBe(false)
 		}).pipe(
 			Effect.provide(MapleApiFromHttpClient().pipe(Layer.provide(environment), Layer.provide(http))),
 		)

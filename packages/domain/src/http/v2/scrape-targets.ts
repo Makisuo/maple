@@ -2,7 +2,14 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ScrapeAuthType, ScrapeIntervalSeconds, ScrapeTargetId, ScrapeTargetType } from "../../primitives"
 import {
-	ScrapeTargetAuthError,
+	IntegrationsConfigurationError,
+	IntegrationsNotConnectedError,
+	IntegrationsPersistenceError,
+	IntegrationsRevokedError,
+	IntegrationsUpstreamError,
+	IntegrationsValidationError,
+} from "../integrations"
+import {
 	ScrapeTargetEncryptionError,
 	ScrapeTargetNotFoundError,
 	ScrapeTargetPersistenceError,
@@ -340,12 +347,19 @@ export const V2ScrapeTargetChecksQuery = Schema.Struct({
 })
 export type V2ScrapeTargetChecksQuery = Schema.Schema.Type<typeof V2ScrapeTargetChecksQuery>
 
-const [scrapeNotFound, scrapeValidation, scrapePersistence, scrapeEncryption, scrapeAuth] = publicErrors(
+const [scrapeNotFound, scrapeValidation, scrapePersistence, scrapeEncryption] = publicErrors(
 	ScrapeTargetNotFoundError,
 	ScrapeTargetValidationError,
 	ScrapeTargetPersistenceError,
 	ScrapeTargetEncryptionError,
-	ScrapeTargetAuthError,
+)
+const planetScaleAccessTokenErrors = publicErrors(
+	IntegrationsNotConnectedError,
+	IntegrationsRevokedError,
+	IntegrationsUpstreamError,
+	IntegrationsPersistenceError,
+	IntegrationsValidationError,
+	IntegrationsConfigurationError,
 )
 
 const ScrapeTargetList = ListOf(V2ScrapeTarget).annotate({
@@ -436,7 +450,7 @@ export class V2ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 		HttpApiEndpoint.post("probe", "/:id/probe", {
 			params: { id: ScrapeTargetPublicId },
 			success: V2ScrapeTargetProbeResult,
-			error: [scrapeNotFound, scrapePersistence, scrapeEncryption, scrapeAuth],
+			error: [scrapeNotFound, scrapePersistence, scrapeEncryption, ...planetScaleAccessTokenErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "probeScrapeTarget",

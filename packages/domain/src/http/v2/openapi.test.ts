@@ -496,6 +496,9 @@ describe("MapleApiV2 OpenAPI", () => {
 		])
 		expect(responseErrorTags("post", "/v2/traces/timeseries", "500")).toEqual([
 			"@maple/http/errors/WarehouseMalformedQueryError",
+			"@maple/http/errors/WarehouseConfigDecryptionError",
+			"@maple/http/errors/WarehouseTokenConfigError",
+			"@maple/http/errors/WarehouseTokenMintError",
 			"@maple/http/errors/QueryEngineResultMismatchError",
 			"@maple/http/v2/ResponseSchemaError",
 			"@maple/http/v2/UnexpectedError",
@@ -511,6 +514,23 @@ describe("MapleApiV2 OpenAPI", () => {
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
 		])
+	})
+
+	it("preserves exact PlanetScale token failures on scrape probes", () => {
+		const path = "/v2/scrape_targets/{id}/probe"
+		expect(responseErrorTags("post", path, "409")).toContain(
+			"@maple/http/errors/IntegrationsNotConnectedError",
+		)
+		expect(responseErrorTags("post", path, "401")).toContain(
+			"@maple/http/errors/IntegrationsRevokedError",
+		)
+		expect(responseErrorTags("post", path, "502")).toContain(
+			"@maple/http/errors/IntegrationsUpstreamError",
+		)
+		const declaredTags = ["400", "401", "409", "500", "502", "503"].flatMap((status) =>
+			responseErrorTags("post", path, status),
+		)
+		expect(declaredTags).not.toContain("@maple/http/errors/ScrapeTargetAuthError")
 	})
 
 	it("preserves warehouse failures on v2 read-model endpoints", () => {
@@ -530,10 +550,40 @@ describe("MapleApiV2 OpenAPI", () => {
 			expect(responseErrorTags("get", path, "429")).toContain(
 				"@maple/http/errors/WarehouseQuotaExceededError",
 			)
-			expect(responseErrorTags("get", path, "503")).not.toContain(
-				"@maple/http/errors/WarehouseConfigLookupError",
+			const declaredTags = ["500", "502", "503"].flatMap((status) =>
+				responseErrorTags("get", path, status),
 			)
+			for (const impossibleRoutingTag of [
+				"@maple/http/errors/WarehouseConfigLookupError",
+				"@maple/http/errors/WarehouseConfigDecryptionError",
+				"@maple/http/errors/WarehouseStoredConfigInvalidError",
+				"@maple/http/errors/WarehouseTokenConfigError",
+				"@maple/http/errors/WarehouseTokenMintError",
+			]) {
+				expect(declaredTags, path).not.toContain(impossibleRoutingTag)
+			}
 		}
+	})
+
+	it("declares exact alert not-found and query-engine failures", () => {
+		expect(responseErrorTags("get", "/v2/alerts/rules/{id}", "404")).toEqual([
+			"@maple/http/errors/AlertRuleNotFoundError",
+		])
+		expect(responseErrorTags("get", "/v2/alerts/destinations/{id}", "404")).toEqual([
+			"@maple/http/errors/AlertDestinationNotFoundError",
+		])
+		expect(responseErrorTags("get", "/v2/alerts/incidents/{id}", "404")).toEqual([
+			"@maple/http/errors/AlertIncidentNotFoundError",
+		])
+		expect(responseErrorTags("post", "/v2/alerts/rules/preview", "502")).toContain(
+			"@maple/http/errors/QueryEngineExecutionError",
+		)
+		expect(responseErrorTags("post", "/v2/alerts/rules/preview", "502")).not.toContain(
+			"@maple/http/errors/AlertDeliveryError",
+		)
+		expect(responseErrorTags("post", "/v2/alerts/rules/preview", "504")).toContain(
+			"@maple/http/errors/QueryEngineTimeoutError",
+		)
 	})
 
 	it("decodes slack-bot destination create/update params and rejects a blank channel_id", () => {
@@ -640,11 +690,15 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(bearer.bearerFormat.length).toBeGreaterThan(0)
 	})
 
-	it("documents error responses with a stable code example", () => {
+	it("documents every static error policy field as a literal", () => {
 		const notFound = schemas["ApiKeyNotFoundError"]
-		expect(notFound.properties.error.properties._tag.enum).toEqual([
-			"@maple/http/errors/ApiKeyNotFoundError",
-		])
-		expect(notFound.properties.error.properties.message.description).toEqual(expect.any(String))
+		const properties = notFound.properties.error.properties
+		expect(properties._tag.enum).toEqual(["@maple/http/errors/ApiKeyNotFoundError"])
+		expect(properties.type.enum).toEqual(["not_found_error"])
+		expect(properties.code.enum).toEqual(["api_key_not_found"])
+		expect(properties.title.enum).toEqual(["API key not found"])
+		expect(properties.message.enum).toEqual(["No such API key."])
+		expect(properties.retryable.enum).toEqual([false])
+		expect(properties.recovery.enum).toEqual(["none"])
 	})
 })

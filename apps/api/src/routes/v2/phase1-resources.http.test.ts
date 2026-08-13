@@ -40,6 +40,7 @@ import {
 	SpanId,
 	TraceId,
 	UserId,
+	WarehouseConfigDecryptionError,
 	WarehouseConfigLookupError,
 } from "@maple/domain/http"
 import { MapleApiV2, encodePublicId } from "@maple/domain/http/v2"
@@ -359,7 +360,7 @@ const ORG = Schema.decodeUnknownSync(OrgId)("org_phase1_e2e")
 const USER = Schema.decodeUnknownSync(UserId)("user_phase1_e2e")
 
 type InvestigationStartMode = "success" | "quota" | "unavailable" | "rejected" | "restart_not_found"
-type IssueReadFailure = "none" | "persistence" | "warehouse_config_lookup"
+type IssueReadFailure = "none" | "persistence" | "warehouse_config_lookup" | "warehouse_config_decryption"
 
 const makeHarness = (
 	warehouseService: WarehouseQueryServiceShape = warehouseStub,
@@ -379,15 +380,26 @@ const makeHarness = (
 		readonly orgId: string
 		readonly options: Record<string, unknown>
 	} | null = null
-	const issueReadFailureEffect = () =>
-		issueReadFailure === "warehouse_config_lookup"
-			? Effect.fail(
+	const issueReadFailureEffect = () => {
+		switch (issueReadFailure) {
+			case "warehouse_config_lookup":
+				return Effect.fail(
 					new WarehouseConfigLookupError({
 						pipeName: "errorIssues",
 						message: "SECRET_CONFIG_LOOKUP_FAILURE",
 					}),
 				)
-			: Effect.fail(new ErrorPersistenceError({ message: "database unavailable" }))
+			case "warehouse_config_decryption":
+				return Effect.fail(
+					new WarehouseConfigDecryptionError({
+						pipeName: "errorIssues",
+						message: "SECRET_DECRYPTION_FAILURE",
+					}),
+				)
+			default:
+				return Effect.fail(new ErrorPersistenceError({ message: "database unavailable" }))
+		}
+	}
 	const startInvestigation = () => {
 		switch (investigationStartMode) {
 			case "quota":
@@ -735,6 +747,22 @@ describe("v2 error_issues over HTTP", () => {
 			recovery: "retry",
 		})
 		expect(JSON.stringify(response.body)).not.toContain("SECRET_CONFIG_LOOKUP_FAILURE")
+		await harness.dispose()
+	})
+
+	it("preserves and redacts a non-retryable warehouse configuration failure", async () => {
+		const harness = makeHarness(warehouseStub, "warehouse_config_decryption")
+		const key = await harness.bootstrapKey(["error_issues:read"])
+		const response = await harness.request("GET", "/v2/error_issues", { token: key.secret })
+
+		expect(response.status).toBe(500)
+		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/errors/WarehouseConfigDecryptionError",
+			code: "warehouse_config_decryption_failed",
+			retryable: false,
+			recovery: "contact_support",
+		})
+		expect(JSON.stringify(response.body)).not.toContain("SECRET_DECRYPTION_FAILURE")
 		await harness.dispose()
 	})
 })

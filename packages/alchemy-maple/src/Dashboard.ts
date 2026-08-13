@@ -4,6 +4,7 @@ import { deepEqual, isResolved } from "alchemy/Diff"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
 import { listAll, MapleApi } from "./MapleApi"
+import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
 
 /**
@@ -118,7 +119,7 @@ export const DashboardProvider = () =>
 						const fetched = yield* api
 							.get(`/v2/dashboards/${output.dashboardId}`)
 							.pipe(
-								Effect.catchTag("@maple/http/errors/DashboardNotFoundError", () =>
+								Effect.catchTag(MapleErrorTags.dashboardNotFound, () =>
 									Effect.succeed(undefined),
 								),
 							)
@@ -138,14 +139,14 @@ export const DashboardProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/dashboards/${output.dashboardId}`)
-						.pipe(Effect.catchTag("@maple/http/errors/DashboardNotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag(MapleErrorTags.dashboardNotFound, () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ output }) {
 					if (!output?.dashboardId) return undefined
 					const fetched = yield* api
 						.get(`/v2/dashboards/${output.dashboardId}`)
 						.pipe(
-							Effect.catchTag("@maple/http/errors/DashboardNotFoundError", () =>
+							Effect.catchTag(MapleErrorTags.dashboardNotFound, () =>
 								Effect.succeed(undefined),
 							),
 						)

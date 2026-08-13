@@ -10,6 +10,7 @@ describe("v2 worker fallback", () => {
 
 		expect(response.status).toBe(504)
 		expect(response.headers.get("retry-after")).toBe("1")
+		expect(body).toEqual({ error: V2WorkerUnavailable.make().error })
 		expect(() => Schema.decodeUnknownSync(V2WorkerUnavailable.schema)(body)).not.toThrow()
 	})
 })

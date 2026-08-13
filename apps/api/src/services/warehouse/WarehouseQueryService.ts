@@ -3,7 +3,11 @@ import { Tinybird } from "@tinybirdco/sdk"
 import { Context, Effect, Layer, Option, Redacted } from "effect"
 import {
 	WarehouseConfigError,
+	WarehouseConfigDecryptionError,
 	WarehouseConfigLookupError,
+	WarehouseStoredConfigInvalidError,
+	WarehouseTokenConfigError,
+	WarehouseTokenMintError,
 	type WarehouseQueryRequest,
 } from "@maple/domain/http"
 import {
@@ -363,7 +367,7 @@ export class WarehouseQueryService extends Context.Service<
 						),
 					"@maple/http/errors/OrgClickHouseSettingsEncryptionError": (error) =>
 						Effect.fail(
-							new WarehouseConfigError({
+							new WarehouseConfigDecryptionError({
 								pipeName: label,
 								message: error.message,
 								cause: error,
@@ -371,7 +375,7 @@ export class WarehouseQueryService extends Context.Service<
 						),
 					"@maple/http/errors/OrgClickHouseSettingsValidationError": (error) =>
 						Effect.fail(
-							new WarehouseConfigError({
+							new WarehouseStoredConfigInvalidError({
 								pipeName: label,
 								message: error.message,
 								cause: error,
@@ -405,14 +409,24 @@ export class WarehouseQueryService extends Context.Service<
 			const clientCacheKey = `raw:${tenant.orgId}`
 			if (managed.config.kind === "tinybird" || managed.config.kind === "tinybird-gateway") {
 				const jwt = yield* orgTokens.getOrgReadToken(tenant.orgId).pipe(
-					Effect.mapError(
-						(error) =>
-							new WarehouseConfigError({
-								pipeName: label,
-								message: error.message,
-								cause: error,
-							}),
-					),
+					Effect.catchTags({
+						"@maple/api/services/TinybirdOrgTokenConfigError": (error) =>
+							Effect.fail(
+								new WarehouseTokenConfigError({
+									pipeName: label,
+									message: error.message,
+									cause: error,
+								}),
+							),
+						"@maple/api/services/TinybirdOrgTokenMintError": (error) =>
+							Effect.fail(
+								new WarehouseTokenMintError({
+									pipeName: label,
+									message: error.message,
+									cause: error,
+								}),
+							),
+					}),
 				)
 				yield* Effect.annotateCurrentSpan("maple.tinybird.token.scope", "org_jwt")
 				return {

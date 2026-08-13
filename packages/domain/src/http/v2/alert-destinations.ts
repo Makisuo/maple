@@ -3,10 +3,10 @@ import { Schema } from "effect"
 import { HazelChannelId, HazelOrganizationId, PostgresTransactionId, UserId } from "../../primitives"
 import {
 	AlertDeliveryError,
+	AlertDestinationNotFoundError,
 	AlertDestinationInUseError,
 	AlertDestinationType,
 	AlertForbiddenError,
-	AlertNotFoundError,
 	AlertPersistenceError,
 	AlertValidationError,
 	MAX_EMAIL_RECIPIENTS,
@@ -345,7 +345,7 @@ const [alertForbidden, alertValidation, alertPersistence, alertNotFound, alertDe
 	AlertForbiddenError,
 	AlertValidationError,
 	AlertPersistenceError,
-	AlertNotFoundError,
+	AlertDestinationNotFoundError,
 	AlertDeliveryError,
 )
 

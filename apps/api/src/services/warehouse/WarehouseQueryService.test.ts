@@ -3,9 +3,12 @@ import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effe
 import {
 	WarehouseQueryError,
 	WarehouseConfigError,
+	WarehouseConfigDecryptionError,
 	WarehouseConfigLookupError,
+	WarehouseStoredConfigInvalidError,
+	WarehouseTokenConfigError,
 	MAX_RAW_SQL_RESULT_BYTES,
-	WarehouseSchemaDriftError,
+	WarehouseResultDecodeError,
 	WarehouseUpstreamError,
 	OrgClickHouseSettingsEncryptionError,
 	OrgClickHouseSettingsPersistenceError,
@@ -258,11 +261,11 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 			},
 			{
 				source: new OrgClickHouseSettingsEncryptionError({ message: "decrypt failed" }),
-				expected: WarehouseConfigError,
+				expected: WarehouseConfigDecryptionError,
 			},
 			{
 				source: new OrgClickHouseSettingsValidationError({ message: "invalid stored URL" }),
-				expected: WarehouseConfigError,
+				expected: WarehouseStoredConfigInvalidError,
 			},
 		] as const
 
@@ -287,7 +290,12 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 					const mapped = getError(exit)
 					assert.instanceOf(mapped, expected)
 					assert.strictEqual(
-						(mapped as WarehouseConfigError | WarehouseConfigLookupError).cause,
+						(
+							mapped as
+								| WarehouseConfigDecryptionError
+								| WarehouseConfigLookupError
+								| WarehouseStoredConfigInvalidError
+						).cause,
 						source,
 					)
 				}).pipe(Effect.provide(layer))
@@ -296,7 +304,7 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 		)
 	})
 
-	it.effect("maps missing Tinybird signing configuration to WarehouseConfigError", () => {
+	it.effect("preserves missing Tinybird signing configuration as its own tag", () => {
 		__testables.setClientFactory(() => ({
 			sql: async () => ({ data: [] }),
 			insert: async () => {},
@@ -308,9 +316,9 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
 			).pipe(Effect.exit)
 			const failure = getError(exit)
-			assert.instanceOf(failure, WarehouseConfigError)
-			assert.include((failure as WarehouseConfigError).message, "TINYBIRD_SIGNING_KEY")
-			assert.notInclude((failure as WarehouseConfigError).message, "managed-token")
+			assert.instanceOf(failure, WarehouseTokenConfigError)
+			assert.include((failure as WarehouseTokenConfigError).message, "TINYBIRD_SIGNING_KEY")
+			assert.notInclude((failure as WarehouseTokenConfigError).message, "managed-token")
 		}).pipe(Effect.provide(layer))
 	})
 
@@ -469,7 +477,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
-	it.effect("maps row decode failures to WarehouseSchemaDriftError", () => {
+	it.effect("maps row decode failures to WarehouseResultDecodeError", () => {
 		__testables.setClientFactory(() => ({
 			sql: async () => ({ data: [{ count: "not-a-number" }] }),
 			insert: async () => {},
@@ -492,7 +500,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
-			assert.instanceOf(failure, WarehouseSchemaDriftError)
+			assert.instanceOf(failure, WarehouseResultDecodeError)
 		}).pipe(Effect.provide(layer))
 	})
 
@@ -592,7 +600,7 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
-	it.effect("maps first-row decode failures to WarehouseSchemaDriftError", () => {
+	it.effect("maps first-row decode failures to WarehouseResultDecodeError", () => {
 		__testables.setClientFactory(() => ({
 			sql: async () => ({ data: [{ count: "not-a-number" }] }),
 			insert: async () => {},
@@ -615,7 +623,7 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
-			assert.instanceOf(failure, WarehouseSchemaDriftError)
+			assert.instanceOf(failure, WarehouseResultDecodeError)
 		}).pipe(Effect.provide(layer))
 	})
 })
