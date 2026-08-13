@@ -17,6 +17,8 @@ import {
 	LOCAL_SCHEMA_V5_MANIFEST,
 	LOCAL_SCHEMA_V6,
 	LOCAL_SCHEMA_V6_MANIFEST,
+	LOCAL_SCHEMA_V7,
+	LOCAL_SCHEMA_V7_MANIFEST,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -58,16 +60,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v6 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("daa45b39f38c7655")
-		expect(SCHEMA_DIGEST).toBe("daa45b39f38c7655c074781cd77dce68e90b60a175461197dcdb8bc8a13088a1")
+	it("matches the generated v7 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("99e630bfeda35fe3")
+		expect(SCHEMA_DIGEST).toBe("99e630bfeda35fe324a2319aa3f52d427035de6e771aca7db2821af525c828c2")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(6)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V6)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(7)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V7)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -156,6 +158,32 @@ describe("current local schema identity", () => {
 			"idx_ai_vendor",
 			"idx_scope_name",
 		])
+
+		// v7 is exactly v6 plus the AI vendor discovery rollup and its view — no
+		// column touched anywhere else. Asserted as a name delta against the frozen
+		// v6 manifest so a stray table can't ride along on this version.
+		const v6Names = new Set(LOCAL_SCHEMA_V6_MANIFEST.objects.map((object) => object.name))
+		expect(
+			LOCAL_SCHEMA_V7_MANIFEST.objects
+				.map((object) => object.name)
+				.filter((name) => !v6Names.has(name)),
+		).toEqual(["service_ai_vendors_hourly", "service_ai_vendors_hourly_mv"])
+		const aiVendors = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "service_ai_vendors_hourly",
+		)
+		expect(aiVendors?.engine).toBe("AggregatingMergeTree")
+		expect(aiVendors?.orderBy).toBe("(OrgId, ServiceName, AiVendor, Hour)")
+		// Daily partitions and a 400-day TTL against a 30-day source: the deliberate
+		// retention asymmetry, and the reason a rebuild can only repair closed days
+		// whose raw spans still exist.
+		expect(aiVendors?.partitionBy).toBe("toYYYYMMDD(Hour)")
+		expect(aiVendors?.ttl).toBe("Hour + INTERVAL 400 DAY")
+		const aiVendorsView = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "service_ai_vendors_hourly_mv",
+		)
+		expect(aiVendorsView?.definition).toContain("FROM traces")
+		// Without the filter, every span in a local store would enter the HLL states.
+		expect(aiVendorsView?.definition).toContain("WHERE AiVendor != ''")
 	})
 })
 
@@ -169,6 +197,7 @@ describe("local migration registry", () => {
 			"local-0003-to-0004-web-events",
 			"local-0004-to-0005-service-overview-minutely",
 			"local-0005-to-0006-ai-classification-columns",
+			"local-0006-to-0007-service-ai-vendors-hourly",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -177,6 +206,7 @@ describe("local migration registry", () => {
 		expect(chain[3]?.to).toEqual(LOCAL_SCHEMA_V4)
 		expect(chain[4]?.to).toEqual(LOCAL_SCHEMA_V5)
 		expect(chain[5]?.to).toEqual(LOCAL_SCHEMA_V6)
+		expect(chain[6]?.to).toEqual(LOCAL_SCHEMA_V7)
 		expect(typeof chain[0]?.apply).toBe("function")
 	})
 
@@ -198,12 +228,12 @@ describe("local migration registry", () => {
 				maple: "dev",
 				createdAt: "2026-01-01T00:00:00.000Z",
 				createdByMaple: "dev",
-				schemaVersion: 6,
+				schemaVersion: 7,
 				schemaDigest: SCHEMA_DIGEST,
 				schema: SCHEMA_FINGERPRINT,
 				activation: "active",
 			}),
-		).toMatchObject({ version: 6, fingerprint: SCHEMA_FINGERPRINT, digest: SCHEMA_DIGEST })
+		).toMatchObject({ version: 7, fingerprint: SCHEMA_FINGERPRINT, digest: SCHEMA_DIGEST })
 	})
 
 	it("rejects unknown, future, downgrade, and ambiguous paths", () => {
@@ -215,7 +245,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 7, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 8, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
