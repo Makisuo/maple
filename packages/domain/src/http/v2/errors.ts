@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import {
 	HttpErrorRecovery,
+	PublicHttpErrorType,
 	publicHttpErrorTypeForStatus,
 	type PublicHttpErrorStatus,
 	type PublicHttpErrorTypeForStatus,
@@ -17,15 +18,7 @@ import {
  * directly; errors born at the v2 boundary derive one from their stable code.
  */
 
-export const V2ErrorType = Schema.Literals([
-	"invalid_request_error",
-	"authentication_error",
-	"permission_error",
-	"not_found_error",
-	"conflict_error",
-	"rate_limit_error",
-	"api_error",
-])
+export const V2ErrorType = PublicHttpErrorType
 export type V2ErrorType = Schema.Schema.Type<typeof V2ErrorType>
 
 export const V2ErrorRecovery = HttpErrorRecovery
@@ -105,22 +98,16 @@ const errorBodyFields = <const T extends V2ErrorType>(type: T, example: ErrorExa
 			"Human-readable explanation of what went wrong. For humans, not for programmatic branching.",
 		examples: [example.message],
 	}),
-	title: Schema.optionalKey(
-		Schema.String.annotate({
-			description: "Short, human-readable heading suitable for an error state or toast.",
-		}),
-	),
-	retryable: Schema.optionalKey(
-		Schema.Boolean.annotate({
-			description:
-				"Whether the same logical request can plausibly succeed later without correcting its input. Automatic mutation replay still requires idempotency protection.",
-		}),
-	),
-	recovery: Schema.optionalKey(
-		V2ErrorRecovery.annotate({
-			description: "Recommended next action for a person or API client.",
-		}),
-	),
+	title: Schema.String.annotate({
+		description: "Short, human-readable heading suitable for an error state or toast.",
+	}),
+	retryable: Schema.Boolean.annotate({
+		description:
+			"Whether the same logical request can plausibly succeed later without correcting its input. Automatic mutation replay still requires idempotency protection.",
+	}),
+	recovery: V2ErrorRecovery.annotate({
+		description: "Recommended next action for a person or API client.",
+	}),
 	retry_after_seconds: Schema.optionalKey(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)).annotate({
 			description: "Minimum delay before retrying, mirrored in the Retry-After header.",

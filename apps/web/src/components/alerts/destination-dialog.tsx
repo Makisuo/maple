@@ -26,7 +26,7 @@ import {
 } from "@/components/alerts/slack-channel-search"
 import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
 import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
-import { v2ErrorInfo } from "@/lib/error-messages"
+import { publicError } from "@/lib/error-messages"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import type { HazelChannelsListResponse } from "@maple/domain/http"
@@ -635,10 +635,10 @@ function SlackBotFields({
 	// `GET /v2/integrations/slack/channels` is admin-gated (`requireAdmin`), so a
 	// regular member gets a 403 that no amount of retrying will clear. The v2
 	// envelope ({ error: { type, code, message } }) survives into the Result's
-	// cause, and `v2ErrorInfo` unwraps it — branch on the closed `type` enum, never
+	// cause, and `publicError` unwraps it — branch on the closed `type` enum, never
 	// on the human-readable message.
 	const channelsPermissionDenied =
-		Result.isFailure(channelsResult) && v2ErrorInfo(channelsResult.cause)?.type === "permission_error"
+		Result.isFailure(channelsResult) && publicError(channelsResult.cause)?.type === "permission_error"
 	// Requires no prior success, matching the `statusFailed` rule below: if we
 	// already have channels in hand (a role change mid-edit), keep the picker
 	// rather than yanking the user's selection away.

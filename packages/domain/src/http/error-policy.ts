@@ -13,6 +13,18 @@ export const HttpErrorRecovery = Schema.Literals([
 ])
 export type HttpErrorRecovery = Schema.Schema.Type<typeof HttpErrorRecovery>
 
+/** Closed public category shared by HTTP errors and every Maple client. */
+export const PublicHttpErrorType = Schema.Literals([
+	"invalid_request_error",
+	"authentication_error",
+	"permission_error",
+	"not_found_error",
+	"conflict_error",
+	"rate_limit_error",
+	"api_error",
+])
+export type PublicHttpErrorType = Schema.Schema.Type<typeof PublicHttpErrorType>
+
 export type HttpErrorRetry = "never" | "backoff" | "after"
 export type PublicHttpErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 502 | 503 | 504
 
@@ -44,6 +56,28 @@ export interface PublicHttpErrorBody<Tag extends string, Status extends PublicHt
 	readonly param?: string
 	readonly doc_url?: string
 }
+
+/** Runtime contract for a public error body when its exact tag/status are not known statically. */
+export const PublicHttpErrorBodySchema = Schema.Struct({
+	_tag: Schema.String.check(Schema.isPattern(/^@maple\//)),
+	type: PublicHttpErrorType,
+	code: Schema.String,
+	title: Schema.String,
+	message: Schema.String,
+	retryable: Schema.Boolean,
+	recovery: HttpErrorRecovery,
+	retry_after_seconds: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+	retry_at: Schema.optionalKey(
+		Schema.String.check(
+			Schema.makeFilter((value: string) => Number.isFinite(Date.parse(value)), {
+				description: "Expected an ISO date-time string",
+			}),
+		),
+	),
+	param: Schema.optionalKey(Schema.String),
+	doc_url: Schema.optionalKey(Schema.String),
+})
+export type AnyPublicHttpErrorBody = Schema.Schema.Type<typeof PublicHttpErrorBodySchema>
 
 type ErrorValue<Error, Value> = Value | ((error: Error) => Value)
 

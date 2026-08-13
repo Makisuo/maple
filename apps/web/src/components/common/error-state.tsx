@@ -1,6 +1,6 @@
 import { Button } from "@maple/ui/components/ui/button"
 import { useNetworkAutoRetry } from "@/hooks/use-network-auto-retry"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError, isAutomaticRetryError } from "@/lib/error-messages"
 import { cn } from "@maple/ui/lib/utils"
 
 /**
@@ -9,7 +9,7 @@ import { cn } from "@maple/ui/lib/utils"
  * Speaks the product's own language: a "dropped signal" readout — a live
  * signal line that cuts out mid-stream, with a dashed trail where the data
  * should be — the same mini-monitor idiom as the alerts empty state's
- * QuietMonitor. Copy comes from `formatBackendError`, plus a recovery action
+ * QuietMonitor. Copy comes from `displayError`, plus a recovery action
  * when the caller can offer one.
  *
  * - `panel` — centered block for main content areas (tables, detail views,
@@ -32,19 +32,14 @@ interface ErrorStateProps {
 }
 
 export function ErrorState({ error, title, onRetry, variant = "panel", className }: ErrorStateProps) {
-	const formatted = formatBackendError(error)
+	const formatted = displayError(error)
 	const heading = title ?? formatted.title
 	const canRetry =
 		onRetry !== undefined && (formatted.recovery === "retry" || formatted.recovery === "refresh")
 	// Connectivity blips self-heal: probe on a backoff poll + the `online`
 	// event, so recovery doesn't require the user to click or reload.
-	const autoRetrying = useNetworkAutoRetry(
-		formatted.recovery === "retry" && formatted.automaticRetry && canRetry,
-		onRetry,
-	)
-	const description = autoRetrying
-		? `${formatted.description} Retrying automatically…`
-		: formatted.description
+	const autoRetrying = useNetworkAutoRetry(isAutomaticRetryError(formatted) && canRetry, onRetry)
+	const description = autoRetrying ? `${formatted.message} Retrying automatically…` : formatted.message
 
 	if (variant === "inline") {
 		return (

@@ -18,18 +18,13 @@ import {
 	decodeInput,
 	executeQueryEngine,
 	invalidWarehouseInput,
-	type WarehouseApiError,
 	type BackendError,
+	type WarehouseApiError,
 } from "@/api/warehouse/effect-utils"
+import { displayError } from "@/lib/error-messages"
 import { computeBucketSeconds } from "@/api/warehouse/timeseries-utils"
 
 type ExecuteError = WarehouseApiError | BackendError
-
-// Read the message from either a local/tagged error or a public v2 envelope.
-function executeErrorMessage(error: ExecuteError, fallback: string): string {
-	if ("message" in error && typeof error.message === "string") return error.message
-	return "error" in error && typeof error.error.message === "string" ? error.error.message : fallback
-}
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 
@@ -321,7 +316,7 @@ const executeTimeseriesQueryWithFallbackUsing = Effect.fn("QueryEngine.executeTi
 
 			if (Result.isFailure(outcome)) {
 				const error = outcome.failure
-				const message = executeErrorMessage(error, "Query execution failed")
+				const message = displayError(error).message
 
 				attempts.push({
 					startTime: window.startTime,
@@ -625,7 +620,7 @@ const runQueryWindow = Effect.fn("QueryEngine.runQueryWindow")(function* (
 						queryName: query.name,
 						source: query.dataSource,
 						status: "error",
-						error: executeErrorMessage(error, "Query execution failed"),
+						error: displayError(error).message,
 						warnings: built.warnings,
 						data: [],
 					} satisfies QueryRunResult

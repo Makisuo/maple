@@ -14,7 +14,7 @@ import {
 	getQueryBuilderBreakdownResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import type { MetricsQueryDraft } from "@maple/query-engine/query-builder"
 
 const SERVICE_KEY = "service.name"
@@ -171,9 +171,7 @@ function BreakdownBars({
 			</div>
 		))
 		.onError((error) => (
-			<p className="py-4 text-center text-xs text-muted-foreground">
-				{formatBackendError(error).description}
-			</p>
+			<p className="py-4 text-center text-xs text-muted-foreground">{displayError(error).message}</p>
 		))
 		.onSuccess((response) => {
 			const rows = response.data

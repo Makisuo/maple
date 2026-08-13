@@ -8,7 +8,7 @@ import type { V2Recommendation } from "@maple/domain/http/v2"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
@@ -190,7 +190,7 @@ function RecommendationDetailPage() {
 
 	return Result.builder(listResult)
 		.onInitial(() => <LoadingShell />)
-		.onError((error) => <ErrorShell message={formatBackendError(error).description} />)
+		.onError((error) => <ErrorShell message={displayError(error).message} />)
 		.onSuccess(() => {
 			if (!issue) return <InactiveShell />
 			return (

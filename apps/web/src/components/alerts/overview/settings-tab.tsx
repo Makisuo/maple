@@ -22,7 +22,7 @@ import {
 	v2DeliveryToDocument,
 	type DestinationFormState,
 } from "@/lib/alerts/form-utils"
-import { v2ErrorInfo } from "@/lib/error-messages"
+import { publicError } from "@/lib/error-messages"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
@@ -164,7 +164,7 @@ export function useDestinationManager(): DestinationManager {
 			// A destination still referenced by rules deletes with a 409
 			// conflict_error whose message already names the referencing rules.
 			const failure = Option.getOrUndefined(Exit.findErrorOption(result))
-			const v2 = v2ErrorInfo(failure)
+			const v2 = publicError(failure)
 			if (v2 !== null && v2.type === "conflict_error") {
 				toastManager.add({ title: v2.message, type: "error" })
 			} else {

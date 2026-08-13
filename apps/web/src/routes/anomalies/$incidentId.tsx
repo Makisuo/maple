@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { Exit, Schema } from "effect"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
@@ -222,8 +222,8 @@ function AnomalyDetailBody({
 				await navigate({ to: "/investigations/$id", params: { id: result.value.id } })
 				return
 			}
-			const { title, description } = formatBackendError(result)
-			toastManager.add({ title, description, type: "error" })
+			const { title, message } = displayError(result)
+			toastManager.add({ title, description: message, type: "error" })
 		} finally {
 			setBusy(false)
 		}

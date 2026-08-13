@@ -26,7 +26,7 @@ import type { WidgetDataState } from "@/components/dashboard-builder/types"
 import { encodeKey, encodeOrgScopedKey, identityFromKey, orgScopedKeyPayload } from "@/lib/cache-key"
 import { nextRetentionNamespace, withRetention } from "@/lib/services/atoms/retained-atom"
 import { getActiveOrgId } from "@/lib/services/common/auth-headers"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { Cause, Option } from "effect"
 import { WarehouseDecodeError, type BackendError, type WarehouseApiError } from "@/api/warehouse/effect-utils"
 import { QueryEngineValidationError } from "@maple/domain/http"
@@ -290,7 +290,7 @@ const isExpectedEmptyDataError = (error: unknown): boolean => {
 
 // The error channel the widget-fetch atom exposes: every failure is either a
 // `WidgetDataAtomError` (parse / unknown endpoint) or the server function's
-// existing local/v1/v2 error. Preserve those states for `formatBackendError`.
+// existing local/v1/v2 error. Preserve those states for `displayError`.
 type WidgetFetchError = WidgetDataAtomError | WarehouseApiError | BackendError
 
 const toWidgetDataAtomError = (error: unknown): WidgetDataAtomError => {
@@ -533,9 +533,9 @@ export function useWidgetDataSource(
 						message: "No query data found in selected time range",
 					} as const
 				}
-				const { title, description } = formatBackendError(error)
+				const { title, message } = displayError(error)
 				const kind = classifyWidgetErrorKind(error)
-				return { status: "error", title, message: description, kind } as const
+				return { status: "error", title, message, kind } as const
 			})
 			.onSuccess((rawData) => ({ status: "ready", data: applyTransform(rawData, transform) }) as const)
 			.orElse(() => ({ status: "error", message: "Unknown error" }) as const)
