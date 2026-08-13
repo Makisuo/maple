@@ -1,23 +1,15 @@
 import { Effect, Schema } from "effect"
-import { QueryEngineExecuteRequest } from "@maple/query-engine"
 import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
 import { QueryBuilderFormulaSchema, QueryComparisonSchema } from "@maple/query-model"
 import {
 	LAB_EMPTY_RANGE_STRATEGY,
 	type EmptyRangeFallbackStrategy,
-	type QuerySetExecutor,
 	type TimeseriesQuerySetDiagnostics,
 	resolveFallbackStrategy,
 	runTimeseriesQuerySet,
 } from "@maple/query-engine/query-set"
-import {
-	decodeInput,
-	executeQueryEngine,
-	invalidWarehouseInput,
-	type BackendError,
-	type WarehouseApiError,
-} from "@/api/warehouse/effect-utils"
-import { displayError } from "@/lib/error-messages"
+import { decodeInput, invalidWarehouseInput } from "@/api/warehouse/effect-utils"
+import { makeWarehouseExecutor } from "@/api/warehouse/query-set-executor"
 
 /**
  * The browser-side adapter for `runTimeseriesQuerySet`.
@@ -27,13 +19,11 @@ import { displayError } from "@/lib/error-messages"
  * left here is the three things that are genuinely this app's:
  *
  *   1. decoding the wire input,
- *   2. building a `QuerySetExecutor` from the HTTP batcher,
+ *   2. naming the executor's span,
  *   3. mapping the runner's tagged failures back onto `WarehouseInvalidInputError`
  *      with byte-identical messages, because `mapBuilderChartFailure` in the
  *      alert-preview path still string-matches them.
  */
-
-type ExecuteError = WarehouseApiError | BackendError
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 
@@ -92,26 +82,7 @@ function resolveStrategy(input: QueryBuilderTimeseriesInput): EmptyRangeFallback
 	)
 }
 
-/**
- * The port, backed by the HTTP batcher.
- *
- * `executeQueryEngine` enqueues onto a per-tick batcher that coalesces every
- * request made in the same tick into one `POST /execute-batch`. That is why the
- * runner fans out at full concurrency rather than bounding itself.
- */
-const warehouseExecutor: QuerySetExecutor<ExecuteError> = {
-	execute: (request) =>
-		Effect.gen(function* () {
-			const decoded = yield* decodeInput(
-				QueryEngineExecuteRequest,
-				{ startTime: request.startTime, endTime: request.endTime, query: request.query },
-				"executeTimeseriesQuery.request",
-			)
-			const response = yield* executeQueryEngine("queryEngine.timeseriesQuery", decoded)
-			return response.result
-		}),
-	describeError: (error) => displayError(error).message,
-}
+const executor = makeWarehouseExecutor("queryEngine.timeseriesQuery")
 
 export function getQueryBuilderTimeseries({ data }: { data: QueryBuilderTimeseriesInput }) {
 	return getQueryBuilderTimeseriesEffect({ data })
@@ -125,7 +96,7 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 	const input = yield* decodeInput(QueryBuilderTimeseriesInputSchema, data, "getQueryBuilderTimeseries")
 	const strategy = resolveStrategy(input)
 
-	const outcome = yield* runTimeseriesQuerySet(warehouseExecutor, {
+	const outcome = yield* runTimeseriesQuerySet(executor, {
 		querySet: {
 			queries: input.queries,
 			...(input.formulas === undefined ? {} : { formulas: input.formulas }),

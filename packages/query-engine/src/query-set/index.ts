@@ -20,9 +20,12 @@
 //   - Raw SQL. It is not a query set; it goes through `executeRawSql` with its
 //     own reshaping.
 
+export * from "./breakdown"
 export * from "./breakdown-merge"
 export * from "./bucketing"
+export * from "./dispatch"
 export * from "./errors"
+export * from "./list"
 export * from "./port"
 export * from "./series-merge"
 export * from "./timeseries"
