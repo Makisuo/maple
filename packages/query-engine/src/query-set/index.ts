@@ -22,4 +22,8 @@
 
 export * from "./breakdown-merge"
 export * from "./bucketing"
+export * from "./errors"
+export * from "./port"
 export * from "./series-merge"
+export * from "./timeseries"
+export * from "./window"
