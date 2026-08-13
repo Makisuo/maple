@@ -196,6 +196,27 @@ export class DashboardPersistenceError extends HttpTaggedError<DashboardPersiste
 	},
 ) {}
 
+/** A saved dashboard or version snapshot no longer decodes as a Maple dashboard document. */
+export class DashboardStoredConfigInvalidError extends HttpTaggedError<DashboardStoredConfigInvalidError>()(
+	"@maple/http/errors/DashboardStoredConfigInvalidError",
+	{
+		message: Schema.String,
+		dashboardId: DashboardId,
+		component: Schema.Literals(["document", "version_snapshot"]),
+		versionId: Schema.optionalKey(DashboardVersionId),
+		cause: Schema.Defect(),
+	},
+	{
+		status: 500,
+		code: "dashboard_stored_config_invalid",
+		title: "Stored dashboard is invalid",
+		message: "The stored dashboard configuration could not be read.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
 export class DashboardNotFoundError extends HttpTaggedError<DashboardNotFoundError>()(
 	"@maple/http/errors/DashboardNotFoundError",
 	{

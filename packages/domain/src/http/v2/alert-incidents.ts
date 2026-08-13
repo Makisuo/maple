@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { AlertNotFoundError, AlertPersistenceError } from "../alerts"
+import { AlertIncidentNotFoundError, AlertPersistenceError } from "../alerts"
 import {
 	AlertComparator,
 	AlertEventType,
@@ -158,7 +158,7 @@ export class V2AlertIncidentsApiGroup extends HttpApiGroup.make("alertIncidents"
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: AlertIncidentPublicId },
 			success: V2AlertIncident,
-			error: [publicError(AlertNotFoundError), alertPersistence],
+			error: [publicError(AlertIncidentNotFoundError), alertPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAlertIncident",

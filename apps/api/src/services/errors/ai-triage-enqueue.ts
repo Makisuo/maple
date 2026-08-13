@@ -365,7 +365,7 @@ export const maybeEnqueueTriage: (
 							attempt: 0,
 						},
 					}),
-				catch: (cause) => new FanoutStartError({ cause: String(cause) }),
+				catch: FanoutStartError.fromCause,
 			}),
 		)
 		if (Exit.isFailure(created)) {

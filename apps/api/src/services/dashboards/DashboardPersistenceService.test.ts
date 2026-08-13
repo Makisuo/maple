@@ -5,6 +5,7 @@ import {
 	DashboardDocument,
 	DashboardNotFoundError,
 	DashboardPersistenceError,
+	DashboardStoredConfigInvalidError,
 	IsoDateTimeString,
 	OrgId,
 	PortableDashboardDocument,
@@ -438,7 +439,10 @@ describe("DashboardPersistenceService", () => {
 				)
 
 				assert.isTrue(Exit.isFailure(exit))
-				assert.instanceOf(getError(exit), DashboardPersistenceError)
+				const error = getError(exit)
+				assert.instanceOf(error, DashboardStoredConfigInvalidError)
+				assert.strictEqual(error.component, "document")
+				assert.strictEqual(error.error.retryable, false)
 			}).pipe(Effect.provide(makeLayer(testDb)))
 		})
 	})

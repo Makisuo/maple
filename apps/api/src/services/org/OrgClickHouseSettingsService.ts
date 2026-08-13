@@ -9,6 +9,7 @@ import {
 	OrgClickHouseSettingsForbiddenError,
 	OrgClickHouseSettingsPersistenceError,
 	OrgClickHouseSettingsResponse,
+	OrgClickHouseSettingsStoredConfigInvalidError,
 	OrgClickHouseSettingsUpstreamRejectedError,
 	OrgClickHouseSettingsUpstreamUnavailableError,
 	OrgClickHouseSettingsValidationError,
@@ -324,7 +325,7 @@ export interface OrgClickHouseSettingsServiceShape {
 		Option.Option<RuntimeBackendConfig>,
 		| OrgClickHouseSettingsPersistenceError
 		| OrgClickHouseSettingsEncryptionError
-		| OrgClickHouseSettingsValidationError
+		| OrgClickHouseSettingsStoredConfigInvalidError
 	>
 	/**
 	 * Warm the runtime-config memo for many orgs in ONE Postgres round-trip.
@@ -1681,7 +1682,15 @@ export class OrgClickHouseSettingsService extends Context.Service<
 					cached.schemaVersion !== clickHouseSchemaVersion,
 				)
 				const password = yield* decryptStoredPassword(cached)
-				yield* validateClickHouseCredentialTransport(cached.chUrl, password)
+				yield* validateClickHouseCredentialTransport(cached.chUrl, password).pipe(
+					Effect.mapError(
+						(cause) =>
+							new OrgClickHouseSettingsStoredConfigInvalidError({
+								message: cause.message,
+								cause,
+							}),
+					),
+				)
 				return Option.some<RuntimeBackendConfig>({
 					backend: "clickhouse",
 					url: cached.chUrl,

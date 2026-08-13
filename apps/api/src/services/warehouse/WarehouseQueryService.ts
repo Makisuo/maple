@@ -1,18 +1,23 @@
 import { createClient as createClickHouseClient } from "@clickhouse/client-web"
 import { Tinybird } from "@tinybirdco/sdk"
 import { Context, Effect, Layer, Option, Redacted } from "effect"
-import { WarehouseConfigError, WarehouseUpstreamError, type WarehouseQueryRequest } from "@maple/domain/http"
+import { WarehouseConfigError, type WarehouseQueryRequest } from "@maple/domain/http"
 import {
 	BackendDialect,
 	makeWarehouseExecutor,
 	WarehouseResponseLimitError,
 	type ClickHouseProtocolBackendConfig,
+	type ExecutionTenant,
 	type ResolvedWarehouseConfig,
+	type RoutePurpose,
 	type SqlQueryOptions,
 	type TinybirdBackendConfig,
 	type WarehouseExecutorDeps,
 	type WarehouseQueryServiceShape,
+	type WarehouseRawRouteError,
+	type WarehouseRoute,
 	type WarehouseSqlClient,
+	type WarehouseTrustedRouteError,
 } from "@maple/query-engine/execution"
 import type { CompiledQuery } from "@maple/query-engine/ch"
 import { WarehouseExecutor } from "@maple/query-engine/observability"
@@ -322,9 +327,11 @@ export class WarehouseQueryService extends Context.Service<
 		 * gateway); a shared vanilla ClickHouse credential has no DB-enforced OrgId
 		 * scope, so raw SQL there is allowed only in single-org self-hosted mode.
 		 */
-		const resolveRoute: WarehouseExecutorDeps["resolveRoute"] = Effect.fn(
-			"WarehouseQueryService.resolveRoute",
-		)(function* (tenant, purpose, label) {
+		const resolveRouteEffect = Effect.fn("WarehouseQueryService.resolveRoute")(function* (
+			tenant: ExecutionTenant,
+			purpose: RoutePurpose,
+			label: string,
+		) {
 			yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 			yield* Effect.annotateCurrentSpan("warehouse.route", purpose)
 
@@ -347,46 +354,7 @@ export class WarehouseQueryService extends Context.Service<
 			// A per-org BYO ClickHouse row (`org_clickhouse_settings`) overrides the
 			// managed upstream for that org's reads AND raw SQL (the credentials are
 			// already tenant-isolated).
-			const override = yield* orgClickHouseSettings.resolveRuntimeConfig(tenant.orgId).pipe(
-				Effect.catchTags({
-					// A Postgres read of org_clickhouse_settings failed — not a warehouse
-					// outage. The 503 contract (WarehouseUpstreamError) is kept for
-					// clients, but the span carries the original tag so trace inspection
-					// can tell DB failures from genuine warehouse failures. (Span
-					// attributes don't reach error_events_mv — the error page still shows
-					// the re-tagged error; this discriminator is for trace search.) The
-					// sibling Encryption/Validation branches below stay unannotated on
-					// purpose: their WarehouseConfigError re-tag is not misleading.
-					"@maple/http/errors/OrgClickHouseSettingsPersistenceError": (error) =>
-						Effect.annotateCurrentSpan("warehouse.error.origin", error._tag).pipe(
-							Effect.andThen(
-								Effect.fail(
-									new WarehouseUpstreamError({
-										pipeName: label,
-										message: error.message,
-										cause: error,
-									}),
-								),
-							),
-						),
-					"@maple/http/errors/OrgClickHouseSettingsEncryptionError": (error) =>
-						Effect.fail(
-							new WarehouseConfigError({
-								pipeName: label,
-								message: error.message,
-								cause: error,
-							}),
-						),
-					"@maple/http/errors/OrgClickHouseSettingsValidationError": (error) =>
-						Effect.fail(
-							new WarehouseConfigError({
-								pipeName: label,
-								message: error.message,
-								cause: error,
-							}),
-						),
-				}),
-			)
+			const override = yield* orgClickHouseSettings.resolveRuntimeConfig(tenant.orgId)
 			if (Option.isSome(override)) {
 				yield* Effect.annotateCurrentSpan("clientSource", "org_override")
 				yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
@@ -412,16 +380,7 @@ export class WarehouseQueryService extends Context.Service<
 			// both the SDK and Tinybird's ClickHouse-compatible gateway.
 			const clientCacheKey = `raw:${tenant.orgId}`
 			if (managed.config.kind === "tinybird" || managed.config.kind === "tinybird-gateway") {
-				const jwt = yield* orgTokens.getOrgReadToken(tenant.orgId).pipe(
-					Effect.mapError(
-						(error) =>
-							new WarehouseConfigError({
-								pipeName: label,
-								message: error.message,
-								cause: error,
-							}),
-					),
-				)
+				const jwt = yield* orgTokens.getOrgReadToken(tenant.orgId)
 				yield* Effect.annotateCurrentSpan("maple.tinybird.token.scope", "org_jwt")
 				return {
 					source: "org-jwt" as const,
@@ -444,6 +403,39 @@ export class WarehouseQueryService extends Context.Service<
 			}
 			return { source: "managed" as const, config: managed.config, clientCacheKey }
 		})
+
+		function resolveRoute(
+			tenant: ExecutionTenant,
+			purpose: "read",
+			label: string,
+		): Effect.Effect<WarehouseRoute, WarehouseTrustedRouteError>
+		function resolveRoute(
+			tenant: ExecutionTenant,
+			purpose: "ingest",
+			label: string,
+		): Effect.Effect<WarehouseRoute>
+		function resolveRoute(
+			tenant: ExecutionTenant,
+			purpose: "read" | "ingest",
+			label: string,
+		): Effect.Effect<WarehouseRoute, WarehouseTrustedRouteError>
+		function resolveRoute(
+			tenant: ExecutionTenant,
+			purpose: "raw",
+			label: string,
+		): Effect.Effect<WarehouseRoute, WarehouseRawRouteError>
+		function resolveRoute(
+			tenant: ExecutionTenant,
+			purpose: RoutePurpose,
+			label: string,
+		): Effect.Effect<WarehouseRoute, WarehouseRawRouteError>
+		function resolveRoute(
+			tenant: ExecutionTenant,
+			purpose: RoutePurpose,
+			label: string,
+		): Effect.Effect<WarehouseRoute, WarehouseRawRouteError> {
+			return resolveRouteEffect(tenant, purpose, label)
+		}
 
 		// Credential-rotation self-heal. `resolveRuntimeConfig` answers from a
 		// stale-tolerant memo, so a rotated BYO ClickHouse password keeps resolving

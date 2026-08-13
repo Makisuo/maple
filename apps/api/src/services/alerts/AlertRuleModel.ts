@@ -14,6 +14,7 @@ import {
 	AlertGroupBy as AlertGroupBySchema,
 	AlertNotificationTemplate,
 	AlertRuleDocument,
+	AlertRuleStoredConfigInvalidError,
 	AlertSeverity as AlertSeveritySchema,
 	AlertSignalType as AlertSignalTypeSchema,
 	AlertValidationError,
@@ -31,7 +32,7 @@ import {
 	type OrgId,
 } from "@maple/domain/http"
 import type { AlertRuleRow } from "@maple/db"
-import { Array as Arr, Effect, Option, Result, Schema } from "effect"
+import { Array as Arr, Effect, Result, Schema } from "effect"
 import { dateToMs, msToDate } from "@/platform/time"
 import type { AlertRuntimeShape } from "./AlertRuntime"
 import type { QueryBuilderDataSource } from "@maple/query-model"
@@ -40,7 +41,6 @@ const StringArraySchema = Schema.Array(Schema.String)
 const DestinationIdArraySchema = Schema.Array(AlertDestinationDocument.fields.id)
 const AlertGroupByFromJson = Schema.fromJsonString(AlertGroupBySchema)
 
-const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.id)
 const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.id)
 const decodeQuerySpecSync = Schema.decodeUnknownSync(QuerySpec)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.createdAt)
@@ -49,7 +49,6 @@ const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
 const decodeQueryEngineAlertReducerSync = Schema.decodeUnknownSync(QueryEngineAlertReducer)
 const decodeNoDataBehaviorSync = Schema.decodeUnknownSync(QueryEngineNoDataBehavior)
-const decodeAlertGroupByFromJsonSync = Schema.decodeUnknownSync(AlertGroupByFromJson)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 
 export interface NormalizedRule {
@@ -88,6 +87,54 @@ export interface RuleEvaluationState {
 	readonly evaluatedAt: number | null
 }
 
+export const normalizedRuleToDocument = (
+	rule: NormalizedRule,
+	options: {
+		readonly notes: string | null
+		readonly userId: Schema.Schema.Type<typeof UserId>
+		readonly timestamp: number
+		readonly txid?: AlertRuleDocument["txid"]
+	},
+): AlertRuleDocument => {
+	const timestamp = decodeIsoDateTimeStringSync(msToDate(options.timestamp).toISOString())
+	return new AlertRuleDocument({
+		id: rule.id,
+		name: rule.name,
+		notes: options.notes,
+		notificationTemplate: rule.notificationTemplate,
+		enabled: rule.enabled,
+		severity: rule.severity,
+		serviceNames: [...rule.serviceNames],
+		excludeServiceNames: [...rule.excludeServiceNames],
+		environments: [...rule.environments],
+		tags: [...rule.tags],
+		groupBy: rule.groupBy,
+		signalType: rule.signalType,
+		comparator: rule.comparator,
+		threshold: rule.threshold,
+		thresholdUpper: rule.thresholdUpper,
+		windowMinutes: rule.windowMinutes,
+		minimumSampleCount: rule.minimumSampleCount,
+		consecutiveBreachesRequired: rule.consecutiveBreachesRequired,
+		consecutiveHealthyRequired: rule.consecutiveHealthyRequired,
+		renotifyIntervalMinutes: rule.renotifyIntervalMinutes,
+		apdexThresholdMs: rule.apdexThresholdMs,
+		queryBuilderDraft: rule.queryBuilderDraft,
+		rawQuerySql: rule.rawQuerySql,
+		rawQueryReducer: rule.rawQueryReducer,
+		destinationIds: [...rule.destinationIds],
+		noDataBehavior: rule.compiledPlan.noDataBehavior,
+		lastEvaluationError: null,
+		lastEvaluatedAt: null,
+		lastScheduledAt: null,
+		createdAt: timestamp,
+		updatedAt: timestamp,
+		createdBy: options.userId,
+		updatedBy: options.userId,
+		...(options.txid === undefined ? {} : { txid: options.txid }),
+	})
+}
+
 export const normalizeOptionalString = (value: string | null | undefined) => {
 	const trimmed = value?.trim()
 	return trimmed && trimmed.length > 0 ? trimmed : null
@@ -103,34 +150,6 @@ export const makeAlertValidationError = (
 		details,
 		...(cause === undefined ? {} : { cause }),
 	})
-
-export const safeParseStringArray = (value: unknown): ReadonlyArray<string> =>
-	Option.getOrElse(Schema.decodeUnknownOption(StringArraySchema)(value), () => [] as ReadonlyArray<string>)
-
-const parseStoredGroupBy = (raw: string | null): AlertGroupBy | null =>
-	raw == null ? null : decodeAlertGroupByFromJsonSync(raw)
-
-const parseStoredQueryBuilderDraft = (raw: unknown): QueryBuilderQueryDraftPayload | null => {
-	if (raw == null) return null
-	return Option.getOrElse(Schema.decodeUnknownOption(QueryBuilderQueryDraftSchema)(raw), () => null)
-}
-
-const parseStoredNotificationTemplate = (raw: unknown): AlertNotificationTemplate | null => {
-	if (raw == null) return null
-	return Option.getOrElse(Schema.decodeUnknownOption(AlertNotificationTemplate)(raw), () => null)
-}
-
-export const serviceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
-	row.serviceNamesJson ? safeParseStringArray(row.serviceNamesJson) : []
-
-const excludeServiceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
-	row.excludeServiceNamesJson ? safeParseStringArray(row.excludeServiceNamesJson) : []
-
-const environmentsFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
-	row.environmentsJson ? safeParseStringArray(row.environmentsJson) : []
-
-const tagsFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
-	row.tagsJson ? safeParseStringArray(row.tagsJson) : []
 
 const normalizeTags = (tags: ReadonlyArray<string> | undefined): ReadonlyArray<string> => {
 	if (!tags || tags.length === 0) return []
@@ -355,12 +374,27 @@ export const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(functi
 const parseCompiledPlan = (
 	row: Pick<
 		AlertRuleRow,
-		"signalType" | "querySpecJson" | "rawQuerySql" | "reducer" | "sampleCountStrategy" | "noDataBehavior"
+		| "id"
+		| "signalType"
+		| "querySpecJson"
+		| "rawQuerySql"
+		| "reducer"
+		| "sampleCountStrategy"
+		| "noDataBehavior"
 	>,
-): Effect.Effect<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> => {
+): Effect.Effect<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertRuleStoredConfigInvalidError> => {
+	const invalid = (message: string, cause: unknown) =>
+		new AlertRuleStoredConfigInvalidError({
+			message,
+			ruleId: row.id,
+			component: "compiled_plan",
+			cause,
+		})
 	if (row.signalType === "raw_query") {
 		if (row.rawQuerySql == null) {
-			return Effect.fail(makeAlertValidationError("Stored raw alert is missing its SQL query"))
+			return Effect.fail(
+				invalid("Stored raw alert is missing its SQL query", new Error("rawQuerySql is null")),
+			)
 		}
 		return Schema.decodeUnknownEffect(CompiledAlertQueryPlan)({
 			kind: "raw_sql",
@@ -369,11 +403,7 @@ const parseCompiledPlan = (
 			reducer: row.reducer,
 			sampleCountStrategy: null,
 			noDataBehavior: row.noDataBehavior,
-		}).pipe(
-			Effect.mapError((cause) =>
-				makeAlertValidationError("Stored compiled alert plan is invalid", [], cause),
-			),
-		)
+		}).pipe(Effect.mapError((cause) => invalid("Stored compiled alert plan is invalid", cause)))
 	}
 	return Schema.decodeUnknownEffect(QuerySpec)(row.querySpecJson).pipe(
 		Effect.flatMap((query) =>
@@ -386,9 +416,7 @@ const parseCompiledPlan = (
 				noDataBehavior: row.noDataBehavior,
 			}),
 		),
-		Effect.mapError((cause) =>
-			makeAlertValidationError("Stored compiled alert plan is invalid", [], cause),
-		),
+		Effect.mapError((cause) => invalid("Stored compiled alert plan is invalid", cause)),
 	)
 }
 
@@ -397,83 +425,187 @@ type IsoDateTimeValue = Schema.Schema.Type<typeof AlertDestinationDocument.field
 const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
 	value == null ? null : decodeIsoDateTimeStringSync(value.toISOString())
 
+type StoredRuleComponent = AlertRuleStoredConfigInvalidError["component"]
+
+const decodeStoredRuleComponent = <S extends Schema.Top>(
+	ruleId: AlertRuleId,
+	component: StoredRuleComponent,
+	schema: S,
+	value: unknown,
+): Effect.Effect<S["Type"], AlertRuleStoredConfigInvalidError, S["DecodingServices"]> =>
+	Schema.decodeUnknownEffect(schema)(value).pipe(
+		Effect.mapError(
+			(cause) =>
+				new AlertRuleStoredConfigInvalidError({
+					message: `Stored alert rule ${component} is invalid`,
+					ruleId,
+					component,
+					cause,
+				}),
+		),
+	)
+
+const decodeStoredStringArray = (
+	ruleId: AlertRuleId,
+	component: "service_names" | "exclude_service_names" | "environments" | "tags",
+	value: unknown,
+): Effect.Effect<ReadonlyArray<string>, AlertRuleStoredConfigInvalidError> =>
+	value == null
+		? Effect.succeed([])
+		: decodeStoredRuleComponent(ruleId, component, StringArraySchema, value)
+
+const decodeNullableStoredRuleComponent = <S extends Schema.Top>(
+	ruleId: AlertRuleId,
+	component: StoredRuleComponent,
+	schema: S,
+	value: unknown,
+): Effect.Effect<S["Type"] | null, AlertRuleStoredConfigInvalidError, S["DecodingServices"]> =>
+	value == null ? Effect.succeed(null) : decodeStoredRuleComponent(ruleId, component, schema, value)
+
+export const decodeStoredAlertRuleMetadata = (row: AlertRuleRow) =>
+	Effect.all({
+		serviceNames: decodeStoredStringArray(row.id, "service_names", row.serviceNamesJson),
+		excludeServiceNames: decodeStoredStringArray(
+			row.id,
+			"exclude_service_names",
+			row.excludeServiceNamesJson,
+		),
+		environments: decodeStoredStringArray(row.id, "environments", row.environmentsJson),
+		tags: decodeStoredStringArray(row.id, "tags", row.tagsJson),
+		groupBy: decodeNullableStoredRuleComponent(row.id, "group_by", AlertGroupByFromJson, row.groupBy),
+		notificationTemplate: decodeNullableStoredRuleComponent(
+			row.id,
+			"notification_template",
+			AlertNotificationTemplate,
+			row.notificationTemplateJson,
+		),
+		queryBuilderDraft: decodeNullableStoredRuleComponent(
+			row.id,
+			"query_builder_draft",
+			QueryBuilderQueryDraftSchema,
+			row.queryBuilderDraftJson,
+		),
+	})
+
+export const decodeStoredAlertRuleDestinationIds = (
+	ruleId: AlertRuleId,
+	value: unknown,
+): Effect.Effect<ReadonlyArray<AlertDestinationId>, AlertRuleStoredConfigInvalidError> =>
+	Schema.decodeUnknownEffect(DestinationIdArraySchema)(value).pipe(
+		Effect.mapError(
+			(cause) =>
+				new AlertRuleStoredConfigInvalidError({
+					message: "Stored rule destinations are invalid",
+					ruleId,
+					component: "destination_ids",
+					cause,
+				}),
+		),
+	)
+
 export const rowToRuleDocument = (
 	row: AlertRuleRow,
-	destinationIds: ReadonlyArray<string>,
 	evaluationState?: RuleEvaluationState,
-) => {
-	const serviceNames = serviceNamesFromRow(row)
-	return new AlertRuleDocument({
-		id: decodeAlertRuleIdSync(row.id),
-		name: row.name,
-		notes: row.notes ?? null,
-		notificationTemplate: parseStoredNotificationTemplate(row.notificationTemplateJson),
-		enabled: row.enabled,
-		severity: decodeAlertSeveritySync(row.severity),
-		serviceNames: [...serviceNames],
-		excludeServiceNames: [...excludeServiceNamesFromRow(row)],
-		environments: [...environmentsFromRow(row)],
-		tags: [...tagsFromRow(row)],
-		groupBy: parseStoredGroupBy(row.groupBy),
-		signalType: decodeAlertSignalTypeSync(row.signalType),
-		comparator: decodeAlertComparatorSync(row.comparator),
-		threshold: row.threshold,
-		thresholdUpper: row.thresholdUpper,
-		windowMinutes: row.windowMinutes,
-		minimumSampleCount: row.minimumSampleCount,
-		consecutiveBreachesRequired: row.consecutiveBreachesRequired,
-		consecutiveHealthyRequired: row.consecutiveHealthyRequired,
-		renotifyIntervalMinutes: row.renotifyIntervalMinutes,
-		apdexThresholdMs: row.apdexThresholdMs,
-		queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
-		rawQuerySql: row.signalType === "raw_query" ? (row.rawQuerySql ?? null) : null,
-		rawQueryReducer:
-			row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null,
-		destinationIds: destinationIds.map((id) => decodeAlertDestinationIdSync(id)),
-		noDataBehavior: decodeNoDataBehaviorSync(row.noDataBehavior),
-		lastEvaluationError: evaluationState?.error ?? null,
-		lastEvaluatedAt:
-			evaluationState?.evaluatedAt != null
-				? decodeIsoDateTimeStringSync(msToDate(evaluationState.evaluatedAt).toISOString())
-				: null,
-		lastScheduledAt: toIso(row.lastScheduledAt),
-		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
-		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
-		createdBy: decodeUserIdSync(row.createdBy),
-		updatedBy: decodeUserIdSync(row.updatedBy),
+): Effect.Effect<AlertRuleDocument, AlertRuleStoredConfigInvalidError> =>
+	Effect.gen(function* () {
+		const stored = yield* decodeStoredAlertRuleMetadata(row)
+		const destinationIds = yield* decodeStoredAlertRuleDestinationIds(row.id, row.destinationIdsJson)
+		return yield* Effect.try({
+			try: () => {
+				return new AlertRuleDocument({
+					id: decodeAlertRuleIdSync(row.id),
+					name: row.name,
+					notes: row.notes ?? null,
+					notificationTemplate: stored.notificationTemplate,
+					enabled: row.enabled,
+					severity: decodeAlertSeveritySync(row.severity),
+					serviceNames: [...stored.serviceNames],
+					excludeServiceNames: [...stored.excludeServiceNames],
+					environments: [...stored.environments],
+					tags: [...stored.tags],
+					groupBy: stored.groupBy,
+					signalType: decodeAlertSignalTypeSync(row.signalType),
+					comparator: decodeAlertComparatorSync(row.comparator),
+					threshold: row.threshold,
+					thresholdUpper: row.thresholdUpper,
+					windowMinutes: row.windowMinutes,
+					minimumSampleCount: row.minimumSampleCount,
+					consecutiveBreachesRequired: row.consecutiveBreachesRequired,
+					consecutiveHealthyRequired: row.consecutiveHealthyRequired,
+					renotifyIntervalMinutes: row.renotifyIntervalMinutes,
+					apdexThresholdMs: row.apdexThresholdMs,
+					queryBuilderDraft: stored.queryBuilderDraft,
+					rawQuerySql: row.signalType === "raw_query" ? (row.rawQuerySql ?? null) : null,
+					rawQueryReducer:
+						row.signalType === "raw_query"
+							? decodeQueryEngineAlertReducerSync(row.reducer)
+							: null,
+					destinationIds,
+					noDataBehavior: decodeNoDataBehaviorSync(row.noDataBehavior),
+					lastEvaluationError: evaluationState?.error ?? null,
+					lastEvaluatedAt:
+						evaluationState?.evaluatedAt != null
+							? decodeIsoDateTimeStringSync(msToDate(evaluationState.evaluatedAt).toISOString())
+							: null,
+					lastScheduledAt: toIso(row.lastScheduledAt),
+					createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
+					updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
+					createdBy: decodeUserIdSync(row.createdBy),
+					updatedBy: decodeUserIdSync(row.updatedBy),
+				})
+			},
+			catch: (cause) =>
+				new AlertRuleStoredConfigInvalidError({
+					message: "Stored alert rule document is invalid",
+					ruleId: row.id,
+					component: "document",
+					cause,
+				}),
+		})
 	})
-}
 
 export const makeAlertRuleNormalizer = (runtime: AlertRuntimeShape) => {
-	const parseDestinationIds = (
-		value: unknown,
-	): Effect.Effect<ReadonlyArray<AlertDestinationId>, AlertValidationError> =>
-		Schema.decodeUnknownEffect(DestinationIdArraySchema)(value).pipe(
-			Effect.mapError((cause) =>
-				makeAlertValidationError("Stored rule destinations are invalid", [], cause),
-			),
-		)
-
 	const normalizeRuleRow = Effect.fn("AlertsService.normalizeRuleRow")(function* (
 		row: AlertRuleRow,
-	): Effect.fn.Return<NormalizedRule, AlertValidationError> {
-		const serviceNames = serviceNamesFromRow(row)
-		const serviceName = serviceNames.length === 1 ? (serviceNames[0] ?? null) : null
-		const signalType = decodeAlertSignalTypeSync(row.signalType)
+	): Effect.fn.Return<NormalizedRule, AlertRuleStoredConfigInvalidError> {
+		const stored = yield* decodeStoredAlertRuleMetadata(row)
+		const decoded = yield* Effect.try({
+			try: () => {
+				return {
+					id: decodeAlertRuleIdSync(row.id),
+					serviceName: stored.serviceNames.length === 1 ? (stored.serviceNames[0] ?? null) : null,
+					signalType: decodeAlertSignalTypeSync(row.signalType),
+					severity: decodeAlertSeveritySync(row.severity),
+					comparator: decodeAlertComparatorSync(row.comparator),
+					groupBy: stored.groupBy,
+					rawQueryReducer:
+						row.signalType === "raw_query"
+							? decodeQueryEngineAlertReducerSync(row.reducer)
+							: null,
+				}
+			},
+			catch: (cause) =>
+				new AlertRuleStoredConfigInvalidError({
+					message: "Stored alert rule fields are invalid",
+					ruleId: row.id,
+					component: "document",
+					cause,
+				}),
+		})
 		return {
-			id: decodeAlertRuleIdSync(row.id),
+			id: decoded.id,
 			name: row.name,
-			notificationTemplate: parseStoredNotificationTemplate(row.notificationTemplateJson),
+			notificationTemplate: stored.notificationTemplate,
 			enabled: row.enabled,
-			severity: decodeAlertSeveritySync(row.severity),
-			serviceName,
-			serviceNames,
-			excludeServiceNames: excludeServiceNamesFromRow(row),
-			environments: environmentsFromRow(row),
-			tags: tagsFromRow(row),
-			groupBy: parseStoredGroupBy(row.groupBy),
-			signalType,
-			comparator: decodeAlertComparatorSync(row.comparator),
+			severity: decoded.severity,
+			serviceName: decoded.serviceName,
+			serviceNames: stored.serviceNames,
+			excludeServiceNames: stored.excludeServiceNames,
+			environments: stored.environments,
+			tags: stored.tags,
+			groupBy: decoded.groupBy,
+			signalType: decoded.signalType,
+			comparator: decoded.comparator,
 			threshold: row.threshold,
 			thresholdUpper: row.thresholdUpper,
 			windowMinutes: row.windowMinutes,
@@ -482,11 +614,10 @@ export const makeAlertRuleNormalizer = (runtime: AlertRuntimeShape) => {
 			consecutiveHealthyRequired: row.consecutiveHealthyRequired,
 			renotifyIntervalMinutes: row.renotifyIntervalMinutes,
 			apdexThresholdMs: row.apdexThresholdMs,
-			queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
+			queryBuilderDraft: stored.queryBuilderDraft,
 			rawQuerySql: row.rawQuerySql ?? null,
-			rawQueryReducer:
-				row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null,
-			destinationIds: yield* parseDestinationIds(row.destinationIdsJson),
+			rawQueryReducer: decoded.rawQueryReducer,
+			destinationIds: yield* decodeStoredAlertRuleDestinationIds(row.id, row.destinationIdsJson),
 			compiledPlan: yield* parseCompiledPlan(row),
 			createdAt: dateToMs(row.createdAt),
 			updatedAt: dateToMs(row.updatedAt),

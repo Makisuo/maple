@@ -17,13 +17,13 @@ import {
 	type TimeseriesPoint,
 } from "@maple/domain/query-engine"
 import {
-	QueryEngineExecutionError,
 	QueryEngineTimeoutError,
 	QueryEngineValidationError,
 	MAX_RAW_SQL_ALERT_GROUPS,
 	MAX_RAW_SQL_GROUP_KEY_LENGTH,
 	type RawSqlValidationError,
-	type WarehouseError,
+	type WarehouseQueryPathError,
+	type WarehouseReadError,
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "effect"
@@ -100,18 +100,21 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 		tenant: T,
 		sql: string,
 		options: { readonly profile: QueryProfileName; readonly context: string },
-	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError | RawSqlValidationError>
+	) => Effect.Effect<
+		ReadonlyArray<Record<string, unknown>>,
+		WarehouseQueryPathError | RawSqlValidationError
+	>
 	readonly compiledQuery: <Output>(
 		tenant: T,
 		compiled: CH.CompiledQuery<Output>,
 		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<Output>, WarehouseError>
+	) => Effect.Effect<ReadonlyArray<Output>, WarehouseReadError>
 	/** Capability-aware execution; adapters may deliberately compile the baseline plan. */
 	readonly compiledQueryWithCapabilities: <Output>(
 		tenant: T,
 		compile: (capabilities: WarehouseCapabilities) => CH.CompiledQuery<Output>,
 		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<Output>, WarehouseError>
+	) => Effect.Effect<ReadonlyArray<Output>, WarehouseReadError>
 }
 
 export interface TimeRangeBounds {
@@ -166,9 +169,15 @@ export interface AlertEvaluateRequest {
 	readonly sampleCountStrategy: QueryEngineEvaluateRequest["sampleCountStrategy"] | null
 }
 
-export type QueryEngineDirectError = QueryEngineExecutionError | QueryEngineTimeoutError | WarehouseError
+export type QueryEngineDirectError = QueryEngineTimeoutError | WarehouseReadError
 
 export type QueryEngineRouteError = QueryEngineValidationError | QueryEngineDirectError
+
+/** Alert evaluation additionally accepts user-authored raw SQL. */
+export type QueryEngineEvaluationError =
+	| QueryEngineValidationError
+	| QueryEngineTimeoutError
+	| WarehouseQueryPathError
 
 const QUERY_ENGINE_TIMEOUT = Duration.seconds(30)
 
@@ -825,10 +834,10 @@ export const validateEvaluate = Effect.fn("QueryEngineService.validateEvaluate")
  * is `Effect.tapError`, not a transformation. Named explicitly so call sites
  * don't read like they're remapping errors.
  */
-const annotateWarehouseError = <A, R>(
-	effect: Effect.Effect<A, WarehouseError, R>,
+const annotateWarehouseError = <A, Error extends { readonly _tag: string; readonly message: string }, R>(
+	effect: Effect.Effect<A, Error, R>,
 	context: string,
-): Effect.Effect<A, WarehouseError, R> =>
+): Effect.Effect<A, Error, R> =>
 	effect.pipe(
 		Effect.tapError((error) =>
 			Effect.annotateCurrentSpan({
@@ -1205,10 +1214,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		tenant: T,
 		request: QueryEngineExecuteRequest,
 		options?: QueryEngineExecuteOptions,
-	): Effect.fn.Return<
-		QueryEngineExecuteResponse,
-		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
-	> {
+	): Effect.fn.Return<QueryEngineExecuteResponse, QueryEngineValidationError | WarehouseReadError> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		yield* Effect.annotateCurrentSpan("query.source", request.query.source)
 		yield* Effect.annotateCurrentSpan("query.kind", request.query.kind)
@@ -2185,7 +2191,7 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 	source: Extract<AlertBucketSource, { kind: "raw_sql" }>,
 	range: { readonly startTime: string; readonly endTime: string },
 ) {
-	const executeRawSql = makeExecuteRawSql<T, WarehouseError | RawSqlValidationError>(warehouse)
+	const executeRawSql = makeExecuteRawSql<T, WarehouseQueryPathError | RawSqlValidationError>(warehouse)
 	// The same rule `prepareAlertEvaluation` applies to a spec source, and it has
 	// to stay the same rule: a raw-SQL rule whose `$__timeGroup` width disagreed
 	// with its evaluation bucket would reduce over a different window than the one
@@ -2357,7 +2363,7 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 		request: AlertEvaluateRequest,
 	): Effect.fn.Return<
 		ReadonlyArray<GroupedAlertObservation>,
-		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
+		QueryEngineValidationError | WarehouseQueryPathError
 	> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		const bucketSeconds = yield* prepareAlertEvaluation(request)
@@ -2386,10 +2392,7 @@ export const makeQueryEngineEvaluateSeries = <T extends QueryTenant>(warehouse: 
 	Effect.fn("QueryEngineService.evaluateSeries")(function* (
 		tenant: T,
 		request: AlertEvaluateRequest,
-	): Effect.fn.Return<
-		ReadonlyArray<BucketGroupObs>,
-		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
-	> {
+	): Effect.fn.Return<ReadonlyArray<BucketGroupObs>, QueryEngineValidationError | WarehouseQueryPathError> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		const bucketSeconds = yield* prepareAlertEvaluation(request)
 

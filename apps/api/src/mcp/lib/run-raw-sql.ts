@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import type { RawSqlValidationError } from "@maple/domain/http"
-import type { WarehouseSqlError } from "@maple/query-engine/execution"
+import type { WarehouseExecutionError } from "@maple/query-engine/execution"
 import { makeExecuteRawSql } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -43,7 +43,7 @@ export interface RunRawSqlInput {
  */
 export const runRawSql = Effect.fn("runRawSql")(function* (input: RunRawSqlInput) {
 	const warehouse = yield* WarehouseQueryService
-	const executeRawSql = makeExecuteRawSql<TenantContext, WarehouseSqlError | RawSqlValidationError>(
+	const executeRawSql = makeExecuteRawSql<TenantContext, WarehouseExecutionError | RawSqlValidationError>(
 		warehouse,
 	)
 	return yield* executeRawSql(input.tenant, {

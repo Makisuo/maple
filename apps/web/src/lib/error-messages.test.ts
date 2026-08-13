@@ -38,7 +38,6 @@ const errorEnvelope = (
 		retry_after_seconds: number
 		retry_at: string
 		param: string
-		doc_url: string
 	}> = {},
 ) => ({
 	error: {
@@ -63,7 +62,6 @@ describe("publicError", () => {
 			message: "End time must be after start time.",
 			recovery: "fix_request",
 			param: "end_time",
-			doc_url: "https://api.maple.dev/v2/docs#time-range",
 			retry_after_seconds: 15,
 			retry_at: "2026-08-10T00:00:00.000Z",
 		})
@@ -162,7 +160,7 @@ describe("displayError", () => {
 		expect(isAutomaticRetryError(displayed)).toBe(true)
 	})
 
-	it("keeps typed transport timeouts manual", () => {
+	it("automatically retries typed transport timeouts declared retryable", () => {
 		const error = new HttpClientError.HttpClientError({
 			reason: new HttpClientError.TransportError({
 				request: HttpClientRequest.get("https://api.maple.dev/v2/services"),
@@ -176,7 +174,19 @@ describe("displayError", () => {
 			message: "The API did not respond in time. Try again when you're ready.",
 			recovery: "retry",
 		})
-		expect(isAutomaticRetryError(displayed)).toBe(false)
+		expect(isAutomaticRetryError(displayed)).toBe(true)
+	})
+
+	it("automatically retries decoded v2 failures only when the body opts in", () => {
+		const retryable = displayError(
+			errorEnvelope({
+				_tag: "@maple/http/errors/WarehouseUpstreamError",
+				retryable: true,
+				recovery: "retry",
+			}),
+		)
+		expect(isAutomaticRetryError(retryable)).toBe(true)
+		expect(isAutomaticRetryError(displayError(errorEnvelope()))).toBe(false)
 	})
 
 	it("does not interpret raw tags or human-readable messages", () => {

@@ -26,7 +26,7 @@ import {
 	type MetricsBreakdownQuery,
 } from "@maple/query-engine"
 import { formatQueryResult } from "@/mcp/lib/format-query-result"
-import { warehouseErrorText, warehouseHandlers } from "@/mcp/lib/map-warehouse-error"
+import { warehouseErrorText, warehouseReadHandlers } from "@/mcp/lib/map-warehouse-error"
 import {
 	CommitSha,
 	DeploymentEnvironment,
@@ -377,13 +377,11 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 						Effect.succeed(taggedErrorResult(error._tag, error.message, error.details)),
 					),
 					Effect.catchTags({
-						"@maple/http/errors/QueryEngineExecutionError": (error) =>
-							Effect.succeed(taggedErrorResult(error._tag, error.message)),
 						"@maple/http/errors/QueryEngineTimeoutError": (error) =>
 							Effect.succeed(taggedErrorResult(error._tag, error.message)),
-						// Shared 9-tag warehouse table; warehouseErrorText appends the
+						// Shared exact warehouse table; warehouseErrorText appends the
 						// schema-apply hint for schema drift, matching the other MCP tools.
-						...warehouseHandlers((error) =>
+						...warehouseReadHandlers((error) =>
 							Effect.succeed(taggedErrorResult(error._tag, warehouseErrorText(error))),
 						),
 					}),

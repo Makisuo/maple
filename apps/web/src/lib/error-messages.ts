@@ -129,7 +129,6 @@ const displayErrorInternal = (input: unknown, depth: number): AnyPublicHttpError
 /** Resolve any application failure to the single safe public error contract. */
 export const displayError = (input: unknown): AnyPublicHttpErrorBody => displayErrorInternal(input, 0)
 
-export const isAutomaticRetryError = (error: AnyPublicHttpErrorBody): boolean =>
-	error._tag === NetworkErrorTag
+export const isAutomaticRetryError = (error: AnyPublicHttpErrorBody): boolean => error.retryable
 
 export const isUnexpectedError = (error: AnyPublicHttpErrorBody): boolean => error._tag === UnexpectedErrorTag

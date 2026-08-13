@@ -15,7 +15,7 @@ import {
 import { slackWorkspaces, type SlackWorkspaceRow } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
 import { and, desc, eq, isNotNull, isNull, ne, or } from "drizzle-orm"
-import { Array as Arr, Clock, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Array as Arr, Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
 	decryptAes256Gcm,
@@ -168,14 +168,14 @@ export const missingBotScopes = (grantedScope: string | null): ReadonlyArray<str
  * `DatabaseError` wrapping the failed `execute`, where `completeInstall`
  * branches on it — it never leaves `completeInstall`.
  */
-class SlackCrossOrgConflict extends Data.TaggedError("@maple/api/integrations/SlackCrossOrgConflict")<{
-	readonly teamId: string
-	readonly orgId: string
-}> {
-	override get message(): string {
-		return `Slack team ${this.teamId} is already connected to org ${this.orgId}`
-	}
-}
+class SlackCrossOrgConflict extends Schema.TaggedError<SlackCrossOrgConflict>()(
+	"@maple/api/integrations/SlackCrossOrgConflict",
+	{
+		teamId: Schema.String,
+		orgId: OrgId,
+		message: Schema.String,
+	},
+) {}
 
 const decodeApiKeyIdOption = Schema.decodeUnknownOption(ApiKeyId)
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
@@ -789,7 +789,13 @@ const make: Effect.Effect<
 					// Zero rows means the same-team conflict hit an active row owned by a
 					// different org (the setWhere blocked it) — abort so revoke-others
 					// rolls back too.
-					if (upserted.length === 0) throw new SlackCrossOrgConflict({ teamId, orgId })
+					if (upserted.length === 0) {
+						throw new SlackCrossOrgConflict({
+							teamId,
+							orgId,
+							message: `Slack team ${teamId} is already connected to org ${orgId}`,
+						})
+					}
 
 					return { revokedOtherKeyIds: revokedOthers.map((r) => r.apiKeyId) }
 				}),

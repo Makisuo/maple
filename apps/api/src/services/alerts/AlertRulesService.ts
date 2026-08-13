@@ -1,6 +1,8 @@
 import {
 	AlertForbiddenError,
-	AlertNotFoundError,
+	AlertRuleDestinationNotFoundError,
+	AlertRuleNotFoundError,
+	AlertRuleStoredConfigInvalidError,
 	AlertPersistenceError,
 	AlertRuleDeleteResponse,
 	AlertRuleDocument,
@@ -30,9 +32,9 @@ import { dateToMs, msToDate } from "@/platform/time"
 import {
 	makeAlertRuleNormalizer,
 	makeAlertValidationError,
+	normalizedRuleToDocument,
 	normalizeOptionalString,
 	rowToRuleDocument,
-	safeParseStringArray,
 	type RuleEvaluationState,
 } from "./AlertRuleModel"
 import { makePersistenceError } from "./alert-persistence"
@@ -45,7 +47,9 @@ const MAX_ACTIVE_ALERT_RULES_PER_ORG = 100
 const isAdmin = (roles: ReadonlyArray<RoleName>) => roles.some((role) => adminRoles.includes(role))
 
 export interface AlertRulesServiceShape {
-	readonly listRules: (orgId: OrgId) => Effect.Effect<AlertRulesListResponse, AlertPersistenceError>
+	readonly listRules: (
+		orgId: OrgId,
+	) => Effect.Effect<AlertRulesListResponse, AlertPersistenceError | AlertRuleStoredConfigInvalidError>
 	readonly createRule: (
 		orgId: OrgId,
 		userId: UserId,
@@ -53,7 +57,7 @@ export interface AlertRulesServiceShape {
 		request: AlertRuleUpsertRequest,
 	) => Effect.Effect<
 		AlertRuleDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertNotFoundError
+		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertRuleDestinationNotFoundError
 	>
 	readonly deleteRule: (
 		orgId: OrgId,
@@ -61,7 +65,7 @@ export interface AlertRulesServiceShape {
 		ruleId: AlertRuleDocument["id"],
 	) => Effect.Effect<
 		AlertRuleDeleteResponse,
-		AlertForbiddenError | AlertPersistenceError | AlertNotFoundError
+		AlertForbiddenError | AlertPersistenceError | AlertRuleNotFoundError
 	>
 }
 
@@ -84,7 +88,7 @@ export const makeAlertRulePersistence = (options: {
 		)
 	})
 
-	const requireRuleRow = Effect.fn("AlertsService.requireRuleRow")(function* (
+	const findRuleRow = Effect.fn("AlertsService.findRuleRow")(function* (
 		orgId: OrgId,
 		ruleId: AlertRuleDocument["id"],
 	) {
@@ -95,12 +99,19 @@ export const makeAlertRulePersistence = (options: {
 				.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
 				.limit(1),
 		)
-		if (rows[0]) return rows[0]
+		return rows[0]
+	})
+
+	const requireRuleRow = Effect.fn("AlertsService.requireRuleRow")(function* (
+		orgId: OrgId,
+		ruleId: AlertRuleDocument["id"],
+	) {
+		const row = yield* findRuleRow(orgId, ruleId)
+		if (row !== undefined) return row
 		return yield* Effect.fail(
-			new AlertNotFoundError({
+			new AlertRuleNotFoundError({
 				message: "Alert rule not found",
-				resourceType: "rule",
-				resourceId: ruleId,
+				ruleId,
 			}),
 		)
 	})
@@ -123,12 +134,18 @@ export const makeAlertRulePersistence = (options: {
 		)
 		const existingIds = HashSet.fromIterable(Arr.map(rows, (row) => row.id))
 		const missing = Arr.filter(destinationIds, (id) => !HashSet.has(existingIds, id))
-		if (missing.length > 0) {
-			return yield* Effect.fail(makeAlertValidationError("Unknown destination IDs", missing))
+		const missingDestinationId = missing[0]
+		if (missingDestinationId !== undefined) {
+			return yield* Effect.fail(
+				new AlertRuleDestinationNotFoundError({
+					message: "Alert rule references an unknown destination",
+					destinationId: missingDestinationId,
+				}),
+			)
 		}
 	})
 
-	const upsertRuleRow = Effect.fn("AlertsService.upsertRuleRow")(function* (
+	const writeRuleRow = Effect.fn("AlertsService.writeRuleRow")(function* (
 		orgId: OrgId,
 		userId: UserId,
 		existingId: AlertRuleId | null,
@@ -213,9 +230,30 @@ export const makeAlertRulePersistence = (options: {
 				),
 			)
 		}
-		const txid = readTxid(writeResult.writeRows)
-		const row = yield* requireRuleRow(orgId, ruleId)
-		const document = rowToRuleDocument(row, safeParseStringArray(row.destinationIdsJson))
+		return {
+			normalized,
+			ruleId,
+			timestamp,
+			txid: readTxid(writeResult.writeRows),
+		}
+	})
+
+	const upsertRuleRow = Effect.fn("AlertsService.upsertRuleRow")(function* (
+		orgId: OrgId,
+		userId: UserId,
+		existingId: AlertRuleId,
+		request: AlertRuleUpsertRequest,
+	) {
+		const { ruleId, txid } = yield* writeRuleRow(orgId, userId, existingId, request)
+		const row = yield* findRuleRow(orgId, ruleId)
+		if (row === undefined) {
+			return yield* Effect.fail(
+				new AlertPersistenceError({
+					message: "Alert rule row was not readable after it was saved",
+				}),
+			)
+		}
+		const document = yield* rowToRuleDocument(row)
 		return txid === undefined ? document : new AlertRuleDocument({ ...document, txid })
 	})
 
@@ -248,11 +286,8 @@ export const makeAlertRulePersistence = (options: {
 				})
 			}
 		}
-		return new AlertRulesListResponse({
-			rules: rows.map((row) =>
-				rowToRuleDocument(row, safeParseStringArray(row.destinationIdsJson), errorByRule.get(row.id)),
-			),
-		})
+		const rules = yield* Effect.forEach(rows, (row) => rowToRuleDocument(row, errorByRule.get(row.id)))
+		return new AlertRulesListResponse({ rules })
 	})
 
 	const createRule = Effect.fn("AlertsService.createRule")(function* (
@@ -262,7 +297,13 @@ export const makeAlertRulePersistence = (options: {
 		request: AlertRuleUpsertRequest,
 	) {
 		yield* requireAdmin(roles)
-		return yield* upsertRuleRow(orgId, userId, null, request)
+		const { normalized, timestamp, txid } = yield* writeRuleRow(orgId, userId, null, request)
+		return normalizedRuleToDocument(normalized, {
+			notes: normalizeOptionalString(request.notes),
+			userId,
+			timestamp,
+			...(txid === undefined ? {} : { txid }),
+		})
 	})
 
 	const deleteRule = Effect.fn("AlertsService.deleteRule")(function* (

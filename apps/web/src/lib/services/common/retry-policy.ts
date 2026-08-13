@@ -22,9 +22,22 @@ export const isRetryableTransportError = (error: unknown): boolean => {
 	return isIdempotentRequest(error.request)
 }
 
-// 504 repeats expensive timed-out queries; 408/429 require visible pacing.
+const isV2Request = (request: HttpClientRequest.HttpClientRequest): boolean => {
+	try {
+		const pathname = new URL(request.url).pathname
+		return pathname === "/v2" || pathname.startsWith("/v2/")
+	} catch {
+		return false
+	}
+}
+
+// v2 retryability lives in the decoded public error body. This transport layer
+// cannot consume that body without stealing it from HttpApi decoding, so it
+// never infers v2 retry behavior from status. Legacy response behavior remains
+// unchanged until v1 is migrated separately.
 export const isRetryableResponse = (response: HttpClientResponse.HttpClientResponse): boolean =>
 	isIdempotentRequest(response.request) &&
+	!isV2Request(response.request) &&
 	(response.status === 500 || response.status === 502 || response.status === 503)
 
 export const mapleRetrySchedule = Schedule.exponential("300 millis")

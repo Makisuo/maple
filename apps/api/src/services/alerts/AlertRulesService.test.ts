@@ -98,7 +98,7 @@ describe("AlertRulesService", () => {
 			assert.deepStrictEqual((yield* rules.listRules(OTHER_ORG)).rules, [])
 
 			const wrongOrg = yield* Effect.flip(rules.deleteRule(OTHER_ORG, ADMIN_ROLES, RULE))
-			assert.strictEqual(wrongOrg._tag, "@maple/http/errors/AlertNotFoundError")
+			assert.strictEqual(wrongOrg._tag, "@maple/http/errors/AlertRuleNotFoundError")
 
 			const deleted = yield* rules.deleteRule(ORG, ADMIN_ROLES, RULE)
 			assert.strictEqual(deleted.id, RULE)
@@ -120,8 +120,8 @@ describe("AlertRulesService", () => {
 					new AlertRuleUpsertRequest({ ...request, destinationIds: [unknown] }),
 				),
 			)
-			assert.strictEqual(error._tag, "@maple/http/errors/AlertValidationError")
-			assert.deepStrictEqual(error.details, [unknown])
+			assert.strictEqual(error._tag, "@maple/http/errors/AlertRuleDestinationNotFoundError")
+			assert.strictEqual(error.destinationId, unknown)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 })

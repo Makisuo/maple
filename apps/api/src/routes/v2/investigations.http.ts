@@ -249,7 +249,6 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 								? { snapshot: toInternalSnapshot(payload.snapshot) }
 								: {}),
 						}),
-						{ automatic: false },
 					)
 
 					return yield* serializeInvestigation(doc)

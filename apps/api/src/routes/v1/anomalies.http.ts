@@ -10,9 +10,17 @@ import {
 	type OrgId,
 } from "@maple/domain/http"
 import { Effect } from "effect"
-import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
+import {
+	AnomalyDetectionService,
+	makePersistenceError as makeAnomalyPersistenceError,
+} from "@/services/alerts/AnomalyDetectionService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { requireAdmin } from "@/services/auth/auth"
+import { warehouseReadHandlers } from "@/services/warehouse/warehouse-error-handlers"
+
+// Preserve v1's historical persistence envelope while v2 exposes warehouse tags directly.
+const legacyPersistenceFailure = (error: { readonly message: string }) =>
+	Effect.fail(makeAnomalyPersistenceError(error))
 
 export const HttpAnomaliesLive = HttpApiBuilder.group(MapleApi, "anomalies", (handlers) =>
 	Effect.gen(function* () {
@@ -83,10 +91,12 @@ export const HttpAnomaliesLive = HttpApiBuilder.group(MapleApi, "anomalies", (ha
 						orgId: tenant.orgId,
 						incidentId: params.incidentId,
 					})
-					return yield* anomalies.getIncidentTimeseries(tenant, params.incidentId, {
-						startTime: query.startTime,
-						endTime: query.endTime,
-					})
+					return yield* anomalies
+						.getIncidentTimeseries(tenant, params.incidentId, {
+							startTime: query.startTime,
+							endTime: query.endTime,
+						})
+						.pipe(Effect.catchTags(warehouseReadHandlers(legacyPersistenceFailure)))
 				}).pipe(Effect.withSpan("HttpAnomalies.getIncidentTimeseries")),
 			)
 			.handle("resolveIncident", ({ params }) =>

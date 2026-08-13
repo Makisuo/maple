@@ -19,7 +19,10 @@ import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsServi
 import { SlackIntegrationService } from "@/services/integrations/SlackIntegrationService"
 import { SetupAuditService } from "@/services/org/SetupAuditService"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
-import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import {
+	WarehouseQueryService,
+	type WarehouseQueryServiceShape,
+} from "@/services/warehouse/WarehouseQueryService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { HttpV2AlertDeliveriesLive } from "./alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "./alert-destinations.http"
@@ -159,7 +162,9 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 )
 
 /** Inert WarehouseQueryService for harnesses that never touch warehouse-backed groups. */
-export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
+export const makeWarehouseServiceStub = (
+	overrides: Partial<WarehouseQueryServiceShape> = {},
+): WarehouseQueryServiceShape => ({
 	query: die,
 	crossOrgQuery: die,
 	rawSqlQuery: die,
@@ -172,7 +177,10 @@ export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
 	warmRoute: () => Effect.void,
 	ingest: die,
 	asExecutor: dieSync,
+	...overrides,
 })
+
+export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, makeWarehouseServiceStub())
 
 export const TelemetryServiceStubsLayer = Layer.mergeAll(
 	Layer.succeed(QueryEngineService, {

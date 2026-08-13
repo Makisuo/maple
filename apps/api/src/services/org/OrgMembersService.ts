@@ -1,14 +1,14 @@
 import { createClerkClient } from "@clerk/backend"
-import type { OrgId } from "@maple/domain/http"
-import { Context, Data, Effect, Layer, Option, Redacted } from "effect"
+import {
+	AlertMemberDirectoryNotConfiguredError,
+	AlertMemberDirectoryUnavailableError,
+	AlertRecipientSelectionError,
+	type OrgId,
+	type UserId,
+} from "@maple/domain/http"
+import { Context, Effect, Layer, Option, Redacted } from "effect"
 import { Env } from "@/platform/Env"
 import { clerkRequest } from "@/services/auth/clerk-request"
-
-export class OrgMembersError extends Data.TaggedError("@maple/api/services/OrgMembersError")<{
-	readonly message: string
-	/** User ids the caller supplied that are not members of the org. */
-	readonly unknownUserIds?: ReadonlyArray<string>
-}> {}
 
 export interface OrgMember {
 	readonly userId: string
@@ -24,8 +24,13 @@ export interface OrgMembersServiceShape {
 	 */
 	readonly resolveMembers: (
 		orgId: OrgId,
-		userIds: ReadonlyArray<string>,
-	) => Effect.Effect<ReadonlyArray<OrgMember>, OrgMembersError>
+		userIds: ReadonlyArray<UserId>,
+	) => Effect.Effect<
+		ReadonlyArray<OrgMember>,
+		| AlertMemberDirectoryNotConfiguredError
+		| AlertMemberDirectoryUnavailableError
+		| AlertRecipientSelectionError
+	>
 }
 
 const make = Effect.gen(function* () {
@@ -40,7 +45,7 @@ const make = Effect.gen(function* () {
 		yield* Effect.annotateCurrentSpan("orgId", orgId)
 		if (clerk === null) {
 			return yield* Effect.fail(
-				new OrgMembersError({
+				new AlertMemberDirectoryNotConfiguredError({
 					message: "Workspace member lookup requires Clerk authentication",
 				}),
 			)
@@ -60,7 +65,11 @@ const make = Effect.gen(function* () {
 					}),
 			).pipe(
 				Effect.mapError(
-					() => new OrgMembersError({ message: `Failed to list workspace members for ${orgId}` }),
+					(cause) =>
+						new AlertMemberDirectoryUnavailableError({
+							message: `Failed to list workspace members for ${orgId}`,
+							cause,
+						}),
 				),
 			)
 			for (const member of page.data) {
@@ -81,7 +90,7 @@ const make = Effect.gen(function* () {
 
 	const resolveMembers: OrgMembersServiceShape["resolveMembers"] = Effect.fn(
 		"OrgMembersService.resolveMembers",
-	)(function* (orgId: OrgId, userIds: ReadonlyArray<string>) {
+	)(function* (orgId: OrgId, userIds: ReadonlyArray<UserId>) {
 		yield* Effect.annotateCurrentSpan({
 			orgId,
 			"maple.organization.member.requested_count": userIds.length,
@@ -89,11 +98,10 @@ const make = Effect.gen(function* () {
 		const members = yield* listMembers(orgId)
 		const byUserId = new Map(members.map((member) => [member.userId, member]))
 		const resolved: Array<OrgMember> = []
-		const unknown: Array<string> = []
+		const unknown: Array<UserId> = []
 		const seen = new Set<string>()
-		for (const raw of userIds) {
-			const userId = raw.trim()
-			if (userId.length === 0 || seen.has(userId)) continue
+		for (const userId of userIds) {
+			if (seen.has(userId)) continue
 			seen.add(userId)
 			const member = byUserId.get(userId)
 			if (member === undefined) unknown.push(userId)
@@ -101,7 +109,7 @@ const make = Effect.gen(function* () {
 		}
 		if (unknown.length > 0) {
 			return yield* Effect.fail(
-				new OrgMembersError({
+				new AlertRecipientSelectionError({
 					message: "Some selected users are not members of this workspace",
 					unknownUserIds: unknown,
 				}),

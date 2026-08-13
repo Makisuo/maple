@@ -3,6 +3,7 @@ import {
 	OrgClickHouseSettingsUpstreamRejectedError,
 	OrgClickHouseSettingsUpstreamUnavailableError,
 	OrgClickHouseSettingsEncryptionError,
+	OrgClickHouseSettingsStoredConfigInvalidError,
 	OrgClickHouseSettingsValidationError,
 	OrgId,
 	RoleName,
@@ -335,6 +336,21 @@ describe("resolveRuntimeConfig caching", () => {
 		expect(Option.isSome(o)).toBe(true)
 		return (o as Option.Some<A>).value
 	}
+
+	it.effect("distinguishes invalid saved settings from invalid request input", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_invalid_saved_config"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "ftp://clickhouse.example.test"))
+			const exit = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId)).pipe(
+				Effect.exit,
+			)
+			const error = getError(exit)
+			expect(error).toBeInstanceOf(OrgClickHouseSettingsStoredConfigInvalidError)
+			if (!(error instanceof OrgClickHouseSettingsStoredConfigInvalidError)) return
+			expect(error.cause).toBeInstanceOf(OrgClickHouseSettingsValidationError)
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
 
 	it.effect("serves the config from cache — a direct Postgres mutation stays invisible", () => {
 		const testDb = createTestDb(cacheTrackedDbs)
@@ -819,7 +835,10 @@ describe("resolveRuntimeConfig caching", () => {
 			const exit = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId)).pipe(
 				Effect.exit,
 			)
-			expect(getError(exit)).toBeInstanceOf(OrgClickHouseSettingsValidationError)
+			const error = getError(exit)
+			expect(error).toBeInstanceOf(OrgClickHouseSettingsStoredConfigInvalidError)
+			if (!(error instanceof OrgClickHouseSettingsStoredConfigInvalidError)) return
+			expect(error.cause).toBeInstanceOf(OrgClickHouseSettingsValidationError)
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 

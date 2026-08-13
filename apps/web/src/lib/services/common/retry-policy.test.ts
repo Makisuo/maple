@@ -63,6 +63,12 @@ describe("isRetryableResponse", () => {
 		).toBe(false)
 	})
 
+	it.each([500, 502, 503])("leaves v2 %s retry decisions to the decoded error body", (status) => {
+		expect(
+			isRetryableResponse(response(HttpClientRequest.get("https://api.maple.dev/v2/services"), status)),
+		).toBe(false)
+	})
+
 	it.live("replays a raw transient response before API error decoding", () =>
 		Effect.gen(function* () {
 			let attempts = 0

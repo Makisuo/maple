@@ -214,7 +214,7 @@ export const MAX_EMAIL_RECIPIENTS = 10
  * each id to the member's email via the auth provider (Clerk) at save time, so
  * clients can never route alerts to arbitrary addresses.
  */
-const MemberUserIdList = Schema.Array(NonEmptyString).check(
+const MemberUserIdList = Schema.Array(UserId).check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_EMAIL_RECIPIENTS),
 )
@@ -678,6 +678,109 @@ export class AlertValidationError extends HttpTaggedError<AlertValidationError>(
 	},
 ) {}
 
+/** Maple could not encrypt a destination secret before storing it. */
+export class AlertDestinationEncryptionError extends HttpTaggedError<AlertDestinationEncryptionError>()(
+	"@maple/http/errors/AlertDestinationEncryptionError",
+	{
+		message: Schema.String,
+		destinationId: AlertDestinationId,
+	},
+	{
+		status: 500,
+		code: "alert_destination_encryption_failed",
+		title: "Alert destination could not be secured",
+		message: "Maple could not securely store the alert destination.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+/** Maple could not decrypt the secret already stored for a destination. */
+export class AlertDestinationDecryptionError extends HttpTaggedError<AlertDestinationDecryptionError>()(
+	"@maple/http/errors/AlertDestinationDecryptionError",
+	{
+		message: Schema.String,
+		destinationId: AlertDestinationId,
+	},
+	{
+		status: 500,
+		code: "alert_destination_decryption_failed",
+		title: "Alert destination credentials could not be read",
+		message: "Maple could not read the stored alert destination credentials.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+/** A saved destination no longer decodes as the configuration shape Maple expects. */
+export class AlertDestinationStoredConfigInvalidError extends HttpTaggedError<AlertDestinationStoredConfigInvalidError>()(
+	"@maple/http/errors/AlertDestinationStoredConfigInvalidError",
+	{
+		message: Schema.String,
+		destinationId: AlertDestinationId,
+		component: Schema.Literals(["document", "public_config", "secret_config"]),
+		cause: Schema.Defect(),
+	},
+	{
+		status: 500,
+		code: "alert_destination_stored_config_invalid",
+		title: "Stored alert destination is invalid",
+		message: "The stored alert destination configuration could not be read.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+/** One or more requested email recipients are not members of the workspace. */
+export class AlertRecipientSelectionError extends HttpTaggedError<AlertRecipientSelectionError>()(
+	"@maple/http/errors/AlertRecipientSelectionError",
+	{
+		message: Schema.String,
+		unknownUserIds: Schema.Array(UserId),
+	},
+	{
+		status: 400,
+		code: "alert_recipient_invalid",
+		title: "Invalid alert recipient",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
+) {}
+
+/** This deployment has no workspace-member directory for email destinations. */
+export class AlertMemberDirectoryNotConfiguredError extends HttpTaggedError<AlertMemberDirectoryNotConfiguredError>()(
+	"@maple/http/errors/AlertMemberDirectoryNotConfiguredError",
+	{ message: Schema.String },
+	{
+		status: 500,
+		code: "alert_member_directory_not_configured",
+		title: "Workspace member lookup is not configured",
+		message: "Workspace member lookup is not configured for this Maple deployment.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+/** The configured workspace-member directory could not be reached. */
+export class AlertMemberDirectoryUnavailableError extends HttpTaggedError<AlertMemberDirectoryUnavailableError>()(
+	"@maple/http/errors/AlertMemberDirectoryUnavailableError",
+	{ message: Schema.String, cause: Schema.Defect() },
+	{
+		status: 503,
+		code: "alert_member_directory_unavailable",
+		title: "Workspace members are temporarily unavailable",
+		message: "Workspace members could not be loaded. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
+) {}
+
 export class AlertPersistenceError extends HttpTaggedError<AlertPersistenceError>()(
 	"@maple/http/errors/AlertPersistenceError",
 	{
@@ -695,54 +798,102 @@ export class AlertPersistenceError extends HttpTaggedError<AlertPersistenceError
 	},
 ) {}
 
-const alertResource = (resourceType: string): { code: string; title: string; message: string } => {
-	switch (resourceType) {
-		case "destination":
-			return {
-				code: "alert_destination_not_found",
-				title: "Alert destination not found",
-				message: "No such alert destination.",
-			}
-		case "rule":
-		case "alert_rule":
-			return {
-				code: "alert_rule_not_found",
-				title: "Alert rule not found",
-				message: "No such alert rule.",
-			}
-		case "alert_incident":
-			return {
-				code: "alert_incident_not_found",
-				title: "Alert incident not found",
-				message: "No such alert incident.",
-			}
-		default:
-			return {
-				code: "alert_resource_not_found",
-				title: "Alert resource not found",
-				message: "No such alert resource.",
-			}
-	}
-}
-
-export class AlertNotFoundError extends HttpTaggedError<AlertNotFoundError>()(
-	"@maple/http/errors/AlertNotFoundError",
-	{
-		message: Schema.String,
-		resourceType: Schema.String,
-		resourceId: Schema.String,
-	},
+export class AlertRuleNotFoundError extends HttpTaggedError<AlertRuleNotFoundError>()(
+	"@maple/http/errors/AlertRuleNotFoundError",
+	{ message: Schema.String, ruleId: AlertRuleId },
 	{
 		status: 404,
-		code: (error) => alertResource(error.resourceType).code,
-		title: (error) => alertResource(error.resourceType).title,
-		message: (error) => alertResource(error.resourceType).message,
+		code: "alert_rule_not_found",
+		title: "Alert rule not found",
+		message: "No such alert rule.",
 		param: "id",
 		retry: "never",
 		recovery: "none",
 		exposure: "redacted",
 	},
 ) {}
+
+export class AlertDestinationNotFoundError extends HttpTaggedError<AlertDestinationNotFoundError>()(
+	"@maple/http/errors/AlertDestinationNotFoundError",
+	{ message: Schema.String, destinationId: AlertDestinationId },
+	{
+		status: 404,
+		code: "alert_destination_not_found",
+		title: "Alert destination not found",
+		message: "No such alert destination.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
+) {}
+
+/** An alert rule references a destination that does not exist in this organization. */
+export class AlertRuleDestinationNotFoundError extends HttpTaggedError<AlertRuleDestinationNotFoundError>()(
+	"@maple/http/errors/AlertRuleDestinationNotFoundError",
+	{ message: Schema.String, destinationId: AlertDestinationId },
+	{
+		status: 404,
+		code: "alert_rule_destination_not_found",
+		title: "Alert rule destination not found",
+		message: "An alert destination referenced by this rule does not exist.",
+		param: "destination_ids",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "redacted",
+	},
+) {}
+
+/** A saved alert rule no longer decodes as the configuration shape Maple expects. */
+export class AlertRuleStoredConfigInvalidError extends HttpTaggedError<AlertRuleStoredConfigInvalidError>()(
+	"@maple/http/errors/AlertRuleStoredConfigInvalidError",
+	{
+		message: Schema.String,
+		ruleId: AlertRuleId,
+		component: Schema.Literals([
+			"document",
+			"destination_ids",
+			"compiled_plan",
+			"service_names",
+			"exclude_service_names",
+			"environments",
+			"tags",
+			"group_by",
+			"notification_template",
+			"query_builder_draft",
+		]),
+		cause: Schema.Defect(),
+	},
+	{
+		status: 500,
+		code: "alert_rule_stored_config_invalid",
+		title: "Stored alert rule is invalid",
+		message: "The stored alert rule configuration could not be read.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+export class AlertIncidentNotFoundError extends HttpTaggedError<AlertIncidentNotFoundError>()(
+	"@maple/http/errors/AlertIncidentNotFoundError",
+	{ message: Schema.String, incidentId: AlertIncidentId },
+	{
+		status: 404,
+		code: "alert_incident_not_found",
+		title: "Alert incident not found",
+		message: "No such alert incident.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
+) {}
+
+export type AlertNotFoundError =
+	| AlertRuleNotFoundError
+	| AlertDestinationNotFoundError
+	| AlertIncidentNotFoundError
 
 export class AlertDeliveryError extends HttpTaggedError<AlertDeliveryError>()(
 	"@maple/http/errors/AlertDeliveryError",

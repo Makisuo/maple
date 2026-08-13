@@ -1,9 +1,9 @@
 import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type {
-	IntegrationHttpError,
 	PlanetScaleIntegrationStatus,
 	PlanetScaleQueryInsightsResponse,
+	SelfDescribingHttpError,
 } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import type { PlanetScaleDatabaseRow } from "@maple/db"
@@ -184,9 +184,9 @@ const toQueryInsightList = (response: PlanetScaleQueryInsightsResponse): V2Plane
 	unavailable_reason: response.unavailableReason,
 })
 
-const mapIntegrationErrors =
+const tapHttpErrors =
 	(context: string) =>
-	<A, Error extends IntegrationHttpError, R>(effect: Effect.Effect<A, Error, R>) =>
+	<A, Error extends SelfDescribingHttpError, R>(effect: Effect.Effect<A, Error, R>) =>
 		effect.pipe(
 			Effect.tapError((error) => Effect.logError(context, { tag: error._tag, message: error.message })),
 		)
@@ -234,7 +234,7 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 					const tenant = yield* CurrentTenant.Context
 					const status = yield* slack
 						.getStatus(tenant.orgId)
-						.pipe(mapIntegrationErrors("Slack integration status failed"))
+						.pipe(tapHttpErrors("Slack integration status failed"))
 					return toSlackStatus(status)
 				}),
 			)
@@ -257,7 +257,7 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 					const callbackUrl = `${origin}${SLACK_CALLBACK_PATH}`
 					const result = yield* slack
 						.startInstall(tenant.orgId, tenant.userId, callbackUrl)
-						.pipe(mapIntegrationErrors("Slack install failed"))
+						.pipe(tapHttpErrors("Slack install failed"))
 					return {
 						object: "slack_integration.install" as const,
 						url: result.url,
@@ -272,7 +272,7 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 					)
 					yield* slack
 						.uninstall(tenant.orgId)
-						.pipe(mapIntegrationErrors("Slack integration uninstall failed"))
+						.pipe(tapHttpErrors("Slack integration uninstall failed"))
 					return {
 						object: "slack_integration" as const,
 						installed: false as const,
@@ -292,7 +292,7 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 					)
 					const list = yield* slack
 						.listChannels(tenant.orgId)
-						.pipe(mapIntegrationErrors("Slack channel list failed"))
+						.pipe(tapHttpErrors("Slack channel list failed"))
 					return toChannelList(list)
 				}),
 			)
@@ -317,7 +317,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							const tenant = yield* CurrentTenant.Context
 							const status = yield* planetscale
 								.getStatus(tenant.orgId)
-								.pipe(mapIntegrationErrors("PlanetScale status failed"))
+								.pipe(tapHttpErrors("PlanetScale status failed"))
 							return toPlanetScaleStatus(status)
 						}),
 					)
@@ -352,7 +352,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									callbackUrl: `${origin}${PLANETSCALE_CALLBACK_PATH}`,
 									returnTo: payload.return_to,
 								})
-								.pipe(mapIntegrationErrors("PlanetScale connect failed"))
+								.pipe(tapHttpErrors("PlanetScale connect failed"))
 							return {
 								object: "planetscale_integration.connect" as const,
 								redirect_url: result.redirectUrl,
@@ -372,7 +372,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							)
 							const organizations = yield* planetscaleOAuth
 								.listOrganizations(tenant.orgId)
-								.pipe(mapIntegrationErrors("PlanetScale organization list failed"))
+								.pipe(tapHttpErrors("PlanetScale organization list failed"))
 							return {
 								object: "planetscale_integration.organization_list" as const,
 								organizations: Arr.map(organizations, (org) => ({
@@ -396,7 +396,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									includeBranches: payload.include_branches,
 									excludeBranches: payload.exclude_branches,
 								})
-								.pipe(mapIntegrationErrors("PlanetScale organization selection failed"))
+								.pipe(tapHttpErrors("PlanetScale organization selection failed"))
 							return toPlanetScaleStatus(status)
 						}),
 					)
@@ -413,7 +413,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									tokenId: payload.token_id,
 									tokenSecret: payload.token_secret,
 								})
-								.pipe(mapIntegrationErrors("PlanetScale metrics token update failed"))
+								.pipe(tapHttpErrors("PlanetScale metrics token update failed"))
 							return toPlanetScaleStatus(status)
 						}),
 					)
@@ -425,7 +425,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							)
 							yield* planetscale
 								.disconnect(tenant.orgId)
-								.pipe(mapIntegrationErrors("PlanetScale disconnect failed"))
+								.pipe(tapHttpErrors("PlanetScale disconnect failed"))
 							return {
 								object: "planetscale_integration" as const,
 								connected: false as const,
@@ -440,7 +440,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							const [rows, connection] = yield* Effect.all([
 								inventory.listDatabases(tenant.orgId),
 								planetscale.loadConnection(tenant.orgId),
-							]).pipe(mapIntegrationErrors("PlanetScale database list failed"))
+							]).pipe(tapHttpErrors("PlanetScale database list failed"))
 							return {
 								object: "planetscale_integration.database_list" as const,
 								databases: Arr.map(rows, toPlanetScaleDatabase),
@@ -462,7 +462,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							const req = yield* HttpServerRequest.HttpServerRequest
 							const config = yield* planetscale
 								.webhookConfig(tenant.orgId)
-								.pipe(mapIntegrationErrors("PlanetScale webhook config failed"))
+								.pipe(tapHttpErrors("PlanetScale webhook config failed"))
 							return {
 								object: "planetscale_integration.webhook_config" as const,
 								configured: config.configured,
@@ -505,7 +505,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									})
 									.pipe(
 										Effect.map(toQueryInsightList),
-										mapIntegrationErrors("PlanetScale query insights failed"),
+										tapHttpErrors("PlanetScale query insights failed"),
 									),
 							)
 							return cached.value
@@ -560,7 +560,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 											})),
 											next_cursor: nextCursor,
 										})),
-										mapIntegrationErrors("PlanetScale event list failed"),
+										tapHttpErrors("PlanetScale event list failed"),
 									),
 							)
 							return cached.value

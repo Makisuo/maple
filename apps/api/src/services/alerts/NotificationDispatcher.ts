@@ -10,7 +10,7 @@ import {
 	type OrgId,
 } from "@maple/domain/http"
 import { and, eq, inArray } from "drizzle-orm"
-import { Clock, Context, Data, Effect, Layer, Redacted } from "effect"
+import { Clock, Context, Effect, Layer, Redacted, Schema } from "effect"
 import {
 	buildAlertChatUrl,
 	dispatchDelivery as dispatchDeliveryImpl,
@@ -35,10 +35,13 @@ import { Env } from "@/platform/Env"
 const DELIVERY_TIMEOUT_MS = 15_000
 const NOTIFICATION_DELIVERY_CONCURRENCY = 5
 
-class NotificationDispatchError extends Data.TaggedError("@maple/api/services/NotificationDispatchError")<{
-	readonly message: string
-	readonly cause?: unknown
-}> {}
+class NotificationDispatchError extends Schema.TaggedError<NotificationDispatchError>()(
+	"@maple/api/services/NotificationDispatchError",
+	{
+		message: Schema.String,
+		cause: Schema.optionalKey(Schema.Defect()),
+	},
+) {}
 
 export interface NotificationRequest {
 	readonly deliveryKey: string

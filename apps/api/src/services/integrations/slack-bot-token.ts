@@ -1,7 +1,7 @@
 import { slackWorkspaces } from "@maple/db"
 import { AlertDeliveryError, OrgId } from "@maple/domain/http"
 import { and, eq, isNull } from "drizzle-orm"
-import { Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Database, type DatabaseShape } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -74,9 +74,10 @@ export const resolveSlackBotTokenForDispatch = Effect.fn("SlackBotTokenResolver.
 	)
 })
 
-class SlackBotTokenConfigError extends Data.TaggedError("@maple/api/services/SlackBotTokenConfigError")<{
-	readonly message: string
-}> {}
+class SlackBotTokenConfigError extends Schema.TaggedError<SlackBotTokenConfigError>()(
+	"@maple/api/services/SlackBotTokenConfigError",
+	{ message: Schema.String },
+) {}
 
 export interface SlackBotTokenResolverShape {
 	readonly resolve: (orgId: OrgId) => Effect.Effect<string, AlertDeliveryError>
