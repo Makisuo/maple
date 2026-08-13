@@ -18,7 +18,7 @@ import { PlanetScaleDiscoveryService } from "@/services/integrations/PlanetScale
 import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
-import { V2SchemaErrorsLive } from "./error-envelope"
+import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
@@ -105,7 +105,7 @@ const makeHarness = () => {
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
-		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(V2TransportErrorBoundaryLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(AlertsServiceStubLayer),
@@ -463,7 +463,7 @@ describe("v2 unexpected-error envelope", () => {
 		expect(response.status).toBe(500)
 		expect(response.body).toEqual({
 			error: {
-				_tag: "@maple/http/v2/organization/retrieve/UnexpectedError",
+				_tag: "@maple/http/v2/UnexpectedError",
 				type: "api_error",
 				code: "internal_error",
 				title: "Something went wrong",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { ChatApiGroup, CurrentTenant } from "@maple/domain/http"
+import { ChatApiGroup, CurrentTenant, V1SchemaErrors, V1UnexpectedErrors } from "@maple/domain/http"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
@@ -7,8 +7,12 @@ import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
 import { McpToolExecutor, type McpToolExecutorShape } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { HttpChatLive } from "./chat.http"
+import { V1ErrorBoundaryLive } from "./error-boundary"
 
-class ChatOnlyApi extends HttpApi.make("MapleApi").add(ChatApiGroup) {}
+class ChatOnlyApi extends HttpApi.make("MapleApi")
+	.add(ChatApiGroup)
+	.middleware(V1SchemaErrors)
+	.middleware(V1UnexpectedErrors) {}
 
 const TENANT = new CurrentTenant.TenantSchema({
 	orgId: "org_chat_approval" as CurrentTenant.TenantSchema["orgId"],
@@ -27,6 +31,7 @@ const AuthorizationStubLayer = Layer.succeed(
 const makeHarness = (executor: McpToolExecutorShape) => {
 	const routes = HttpApiBuilder.layer(ChatOnlyApi).pipe(
 		Layer.provide(HttpChatLive),
+		Layer.provide(V1ErrorBoundaryLive),
 		Layer.provideMerge(AuthorizationStubLayer),
 		Layer.provideMerge(Layer.succeed(McpToolExecutor, executor)),
 		// No session identifiers are sent in these requests, so the route never

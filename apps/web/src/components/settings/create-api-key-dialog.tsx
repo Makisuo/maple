@@ -21,7 +21,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import { useApiKeyMutationSync } from "@/hooks/use-api-keys"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { trackProduct } from "@/lib/analytics"
 import { buildApiKeyCreatePayload } from "./api-key-create-payload"
@@ -118,8 +118,8 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 			onCreated?.(result.value.secret)
 			void reconcileTxid(result.value.txid)
 		} else {
-			const { title, description } = formatBackendError(result)
-			toastManager.add({ title, description, type: "error" })
+			const { title, message } = displayError(result)
+			toastManager.add({ title, description: message, type: "error" })
 		}
 		setIsCreating(false)
 	}

@@ -68,6 +68,13 @@ export const SlackCallbackRouter = HttpRouter.use((router) =>
 					}),
 				),
 				Effect.catchTags({
+					"@maple/http/errors/IntegrationsConfigurationError": () =>
+						Effect.succeed(
+							redirect({
+								slack: "error",
+								slack_message: "Slack integration is not configured in Maple",
+							}),
+						),
 					"@maple/http/errors/IntegrationsValidationError": (error) =>
 						Effect.succeed(redirect({ slack: "error", slack_message: error.message })),
 					"@maple/http/errors/IntegrationsForbiddenError": (error) =>

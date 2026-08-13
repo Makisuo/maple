@@ -13,7 +13,8 @@ import { HttpAuthLive, HttpAuthPublicLive } from "@/routes/v1/auth.http"
 import { HttpBillingLive, HttpBillingPublicLive } from "@/routes/v1/billing.http"
 import { ChatSessionsRouter } from "@/routes/v1/chat-sessions.http"
 import { HttpChatLive } from "@/routes/v1/chat.http"
-import { HttpDashboardSchemaErrorsLive, HttpDashboardsLive } from "@/routes/v1/dashboards.http"
+import { HttpDashboardsLive } from "@/routes/v1/dashboards.http"
+import { V1ErrorBoundaryLive } from "@/routes/v1/error-boundary"
 import { HttpDemoLive } from "@/routes/v1/demo.http"
 import { HttpDigestLive } from "@/routes/v1/digest.http"
 import { HttpErrorsLive } from "@/routes/v1/errors.http"
@@ -44,7 +45,7 @@ import { HttpV2AnomaliesLive } from "@/routes/v2/anomalies.http"
 import { HttpV2ApiKeysLive } from "@/routes/v2/api-keys.http"
 import { HttpV2AttributeMappingsLive } from "@/routes/v2/attribute-mappings.http"
 import { HttpV2DashboardsLive } from "@/routes/v2/dashboards.http"
-import { V2SchemaErrorsLive } from "@/routes/v2/error-envelope"
+import { V2TransportErrorBoundaryLive } from "@/routes/v2/error-envelope"
 import { HttpV2ErrorIssuesLive } from "@/routes/v2/error-issues.http"
 import { HttpV2IngestKeysLive } from "@/routes/v2/ingest-keys.http"
 import { HttpV2PlanetScaleIntegrationsLive, HttpV2SlackIntegrationsLive } from "@/routes/v2/integrations.http"
@@ -90,7 +91,6 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
 	Layer.provide(HttpErrorsLive),
 	Layer.provide(HttpDashboardsLive),
-	Layer.provide(HttpDashboardSchemaErrorsLive),
 	Layer.provide(HttpDemoLive),
 	Layer.provide(HttpDigestLive),
 	Layer.provide(HttpIngestAttributeMappingsLive),
@@ -109,6 +109,7 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 			HttpWarehouseLive,
 		),
 	),
+	Layer.provide(V1ErrorBoundaryLive),
 )
 
 const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
@@ -139,7 +140,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2ServiceMapLive,
 		),
 	),
-	Layer.provide(V2SchemaErrorsLive),
+	Layer.provide(V2TransportErrorBoundaryLive),
 )
 
 export const AllRoutes = Layer.mergeAll(

@@ -7,6 +7,7 @@ import {
 	IsoDateTimeString,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 
 export class IngestAttributeMapping extends Schema.Class<IngestAttributeMapping>("IngestAttributeMapping")({
 	id: IngestAttributeMappingId,
@@ -54,29 +55,53 @@ export class IngestAttributeMappingDeleteResponse extends Schema.Class<IngestAtt
 	id: IngestAttributeMappingId,
 }) {}
 
-export class IngestAttributeMappingPersistenceError extends Schema.TaggedError<IngestAttributeMappingPersistenceError>()(
+export class IngestAttributeMappingPersistenceError extends HttpTaggedError<IngestAttributeMappingPersistenceError>()(
 	"@maple/http/errors/IngestAttributeMappingPersistenceError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "attribute_mappings_unavailable",
+		title: "Attribute mappings are temporarily unavailable",
+		message: "Attribute mappings are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class IngestAttributeMappingNotFoundError extends Schema.TaggedError<IngestAttributeMappingNotFoundError>()(
+export class IngestAttributeMappingNotFoundError extends HttpTaggedError<IngestAttributeMappingNotFoundError>()(
 	"@maple/http/errors/IngestAttributeMappingNotFoundError",
 	{
 		mappingId: IngestAttributeMappingId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "attribute_mapping_not_found",
+		title: "Attribute mapping not found",
+		message: "No such attribute mapping.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
-export class IngestAttributeMappingValidationError extends Schema.TaggedError<IngestAttributeMappingValidationError>()(
+export class IngestAttributeMappingValidationError extends HttpTaggedError<IngestAttributeMappingValidationError>()(
 	"@maple/http/errors/IngestAttributeMappingValidationError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 400 },
+	{
+		status: 400,
+		code: "attribute_mapping_invalid",
+		title: "Invalid attribute mapping",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
 ) {}
 
 export class IngestAttributeMappingsApiGroup extends HttpApiGroup.make("ingestAttributeMappings")

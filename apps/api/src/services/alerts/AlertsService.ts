@@ -462,11 +462,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			})
 
 			// Collapse alert-domain semantic errors (validation/execution/timeout from
-			// the query engine layer) into AlertValidation/AlertDelivery, but let the
-			// Tinybird tagged errors (WarehouseQueryError + WarehouseQuotaExceededError)
-			// propagate so the client receives the tag + structured fields
-			// (upstreamStatus, setting, pipe). formatBackendError on the frontend
-			// handles them.
+			// the query engine layer) into AlertValidation/AlertDelivery. Warehouse
+			// errors keep their safe public body, so their tag and recovery contract
+			// reach the client unchanged.
 			const catchQueryEngineErrors = <A, R>(
 				effect: Effect.Effect<
 					A,

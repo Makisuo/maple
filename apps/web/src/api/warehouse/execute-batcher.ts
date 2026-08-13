@@ -70,8 +70,7 @@ export const makeExecuteBatcher = (
 					if (outcome === undefined) {
 						entry.reject(new Error("Batch response was missing a result for this query."))
 					} else if (outcome.outcome === "failure") {
-						// Carries the server's original `_tag`, so normalizeWarehouseError
-						// passes it through and the UI keeps its specific error copy.
+						// Per-item failures already use the complete public error body.
 						entry.reject(outcome.error)
 					} else {
 						entry.resolve(new QueryEngineExecuteResponse({ result: outcome.result }))

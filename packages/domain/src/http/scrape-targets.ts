@@ -8,6 +8,7 @@ import {
 	ScrapeTargetType,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 
 export class ScrapeTargetResponse extends Schema.Class<ScrapeTargetResponse>("ScrapeTargetResponse")({
 	id: ScrapeTargetId,
@@ -130,37 +131,69 @@ export const ListScrapeTargetChecksQuery = Schema.Struct({
 	),
 })
 
-export class ScrapeTargetPersistenceError extends Schema.TaggedError<ScrapeTargetPersistenceError>()(
+export class ScrapeTargetPersistenceError extends HttpTaggedError<ScrapeTargetPersistenceError>()(
 	"@maple/http/errors/ScrapeTargetPersistenceError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "scrape_targets_unavailable",
+		title: "Scrape targets are temporarily unavailable",
+		message: "Scrape targets are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class ScrapeTargetNotFoundError extends Schema.TaggedError<ScrapeTargetNotFoundError>()(
+export class ScrapeTargetNotFoundError extends HttpTaggedError<ScrapeTargetNotFoundError>()(
 	"@maple/http/errors/ScrapeTargetNotFoundError",
 	{
 		targetId: ScrapeTargetId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "scrape_target_not_found",
+		title: "Scrape target not found",
+		message: "No such scrape target.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
-export class ScrapeTargetValidationError extends Schema.TaggedError<ScrapeTargetValidationError>()(
+export class ScrapeTargetValidationError extends HttpTaggedError<ScrapeTargetValidationError>()(
 	"@maple/http/errors/ScrapeTargetValidationError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 400 },
+	{
+		status: 400,
+		code: "scrape_target_invalid",
+		title: "Invalid scrape target",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
 ) {}
 
-export class ScrapeTargetEncryptionError extends Schema.TaggedError<ScrapeTargetEncryptionError>()(
+export class ScrapeTargetEncryptionError extends HttpTaggedError<ScrapeTargetEncryptionError>()(
 	"@maple/http/errors/ScrapeTargetEncryptionError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 500 },
+	{
+		status: 500,
+		code: "scrape_target_encryption_failed",
+		title: "Scrape target credentials could not be saved",
+		message: "Maple could not securely save the scrape target credentials.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
 ) {}
 
 /**
@@ -172,13 +205,21 @@ export class ScrapeTargetEncryptionError extends Schema.TaggedError<ScrapeTarget
  * provider failure, `config` is a credential/OAuth-app misconfiguration
  * (bad service token, missing scope).
  */
-export class ScrapeTargetAuthError extends Schema.TaggedError<ScrapeTargetAuthError>()(
+export class ScrapeTargetAuthError extends HttpTaggedError<ScrapeTargetAuthError>()(
 	"@maple/http/errors/ScrapeTargetAuthError",
 	{
 		message: Schema.String,
 		reason: Schema.Literals(["not_connected", "revoked", "upstream", "config"]),
 	},
-	{ httpApiStatus: 502 },
+	{
+		status: 502,
+		code: "scrape_target_auth_failed",
+		title: "Scrape target authentication failed",
+		message: "The scrape target rejected Maple's credentials.",
+		retry: "never",
+		recovery: "reconnect",
+		exposure: "redacted",
+	},
 ) {}
 
 /**
@@ -191,13 +232,21 @@ export class ScrapeTargetAuthError extends Schema.TaggedError<ScrapeTargetAuthEr
  * regex-sniffing the HTTP status back out of a persistence message. `status`
  * carries the upstream HTTP status when the failure reached one.
  */
-export class ScrapeTargetUpstreamError extends Schema.TaggedError<ScrapeTargetUpstreamError>()(
+export class ScrapeTargetUpstreamError extends HttpTaggedError<ScrapeTargetUpstreamError>()(
 	"@maple/http/errors/ScrapeTargetUpstreamError",
 	{
 		message: Schema.String,
 		status: Schema.optionalKey(Schema.Number),
 	},
-	{ httpApiStatus: 502 },
+	{
+		status: 502,
+		code: "scrape_target_upstream_failed",
+		title: "Scrape target is unavailable",
+		message: "The scrape target could not complete the request.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
 export class ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")

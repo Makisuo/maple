@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import {
 	ApiKeyId,
+	IntegrationsConfigurationError,
 	IntegrationsForbiddenError,
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
@@ -297,13 +298,17 @@ export interface SlackIntegrationServiceShape {
 		orgId: OrgId,
 		userId: UserId,
 		callbackUrl: string,
-	) => Effect.Effect<{ readonly url: string }, IntegrationsValidationError | IntegrationsPersistenceError>
+	) => Effect.Effect<
+		{ readonly url: string },
+		IntegrationsConfigurationError | IntegrationsPersistenceError
+	>
 	readonly completeInstall: (
 		code: string,
 		state: string,
 	) => Effect.Effect<
 		{ readonly orgId: OrgId; readonly teamName: string | null; readonly updated: boolean },
 		| IntegrationsValidationError
+		| IntegrationsConfigurationError
 		| IntegrationsForbiddenError
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
@@ -354,7 +359,7 @@ export interface SlackIntegrationServiceShape {
 // class's base expression circular.
 const make: Effect.Effect<
 	SlackIntegrationServiceShape,
-	IntegrationsValidationError,
+	IntegrationsConfigurationError,
 	Database | Env | ApiKeysService | OAuthStateRepository | HttpClient.HttpClient
 > = Effect.gen(function* () {
 	const database = yield* Database
@@ -366,7 +371,7 @@ const make: Effect.Effect<
 	const encryptionKey = yield* parseBase64Aes256GcmKey(
 		Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 		(message) =>
-			new IntegrationsValidationError({
+			new IntegrationsConfigurationError({
 				message:
 					message === "Expected a non-empty base64 encryption key"
 						? "MAPLE_INGEST_KEY_ENCRYPTION_KEY is required"
@@ -442,7 +447,7 @@ const make: Effect.Effect<
 		})
 		if (!clientId || !clientSecret) {
 			return yield* Effect.fail(
-				new IntegrationsValidationError({
+				new IntegrationsConfigurationError({
 					message: "Slack integration is not configured (SLACK_CLIENT_ID / SLACK_CLIENT_SECRET)",
 				}),
 			)

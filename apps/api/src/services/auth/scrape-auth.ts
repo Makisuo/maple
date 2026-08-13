@@ -2,6 +2,7 @@ import {
 	ScrapeTargetAuthError,
 	ScrapeTargetEncryptionError,
 	ScrapeTargetPersistenceError,
+	type IntegrationsConfigurationError,
 	type IntegrationsNotConnectedError,
 	type IntegrationsPersistenceError,
 	type IntegrationsRevokedError,
@@ -51,6 +52,8 @@ const toEncryptionError = (message: string) => new ScrapeTargetEncryptionError({
  * error dashboards.
  */
 export const catchOAuthTokenFailure = {
+	"@maple/http/errors/IntegrationsConfigurationError": (error: IntegrationsConfigurationError) =>
+		Effect.fail(new ScrapeTargetAuthError({ reason: "config", message: error.message })),
 	"@maple/http/errors/IntegrationsNotConnectedError": (error: IntegrationsNotConnectedError) =>
 		Effect.fail(new ScrapeTargetAuthError({ reason: "not_connected", message: error.message })),
 	"@maple/http/errors/IntegrationsRevokedError": (error: IntegrationsRevokedError) =>

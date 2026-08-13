@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { invalidRequest } from "./errors"
+import { V2ParameterInvalid } from "./errors"
 
 /**
  * Shared v2 wire-format primitives (see docs/api-v2.md).
@@ -113,7 +113,7 @@ export const decodeOffsetCursorEffect = (cursor: string | undefined) => {
 	if (cursor === undefined) return Effect.succeed(0)
 	const offset = decodeOffsetCursor(cursor)
 	return offset === null
-		? Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+		? Effect.fail(V2ParameterInvalid.make("Invalid pagination cursor.", { param: "cursor" }))
 		: Effect.succeed(offset)
 }
 

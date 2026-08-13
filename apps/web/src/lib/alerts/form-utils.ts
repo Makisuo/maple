@@ -142,8 +142,8 @@ export const isRangeComparator = (c: AlertComparator): c is "between" | "not_bet
 
 export { destinationTypeLabels } from "@/components/alerts/destination-provider"
 
-export function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
-	if (Exit.isSuccess(exit)) return fallback
+export function getExitErrorMessage(exit: unknown, fallback: string): string {
+	if (!Exit.isExit(exit) || Exit.isSuccess(exit)) return fallback
 	return errorMessage(exit, fallback)
 }
 

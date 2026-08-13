@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
 	WAREHOUSE_ERROR_TAGS,
-	warehouseErrorMeta,
+	warehouseErrorCode,
 	warehouseErrorStatus,
 	presentWarehouseError,
 	isWarehouseErrorTag,
@@ -14,10 +14,7 @@ describe("warehouse error meta", () => {
 		expect(new Set(WAREHOUSE_ERROR_TAGS).size).toBe(warehouseHttpErrors.length)
 	})
 
-	it("covers every derived tag in the meta table and the status map", () => {
-		// The Record type already fails compilation on a missing key; this guards
-		// the other direction — a stray key for a tag that no longer exists.
-		expect(Object.keys(warehouseErrorMeta).sort()).toEqual([...WAREHOUSE_ERROR_TAGS].sort())
+	it("covers every derived tag in the status map", () => {
 		for (const tag of WAREHOUSE_ERROR_TAGS) {
 			expect(warehouseErrorStatus.get(tag), tag).toBeTypeOf("number")
 			expect(isWarehouseErrorTag(tag)).toBe(true)
@@ -34,7 +31,7 @@ describe("warehouse error meta", () => {
 	})
 
 	it("unique codes per tag", () => {
-		const codes = Object.values(warehouseErrorMeta).map((meta) => meta.code)
+		const codes = WAREHOUSE_ERROR_TAGS.map((tag) => warehouseErrorCode({ _tag: tag }))
 		expect(new Set(codes).size).toBe(codes.length)
 	})
 

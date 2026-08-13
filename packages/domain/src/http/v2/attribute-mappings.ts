@@ -1,13 +1,19 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import {
+	IngestAttributeMappingNotFoundError,
+	IngestAttributeMappingPersistenceError,
+	IngestAttributeMappingValidationError,
+} from "../ingest-attribute-mappings"
+import {
 	IngestAttributeMappingId,
 	IngestMappingOperation,
 	IngestMappingSourceContext,
 } from "../../primitives"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
+import { V2ParameterInvalid } from "./errors"
+import { publicErrors } from "./public-error"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
@@ -151,7 +157,11 @@ export const V2AttributeMappingDeleteResponse = Schema.Struct({
 })
 export type V2AttributeMappingDeleteResponse = Schema.Schema.Type<typeof V2AttributeMappingDeleteResponse>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+const [mappingNotFound, mappingValidation, mappingPersistence] = publicErrors(
+	IngestAttributeMappingNotFoundError,
+	IngestAttributeMappingValidationError,
+	IngestAttributeMappingPersistenceError,
+)
 
 const AttributeMappingList = ListOf(V2AttributeMapping).annotate({
 	identifier: "AttributeMappingList",
@@ -164,7 +174,7 @@ export class V2AttributeMappingsApiGroup extends HttpApiGroup.make("attributeMap
 		HttpApiEndpoint.get("list", "/", {
 			query: ListQuery,
 			success: AttributeMappingList,
-			error: [...commonErrors],
+			error: [V2ParameterInvalid.schema, mappingPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listAttributeMappings",
@@ -178,7 +188,7 @@ export class V2AttributeMappingsApiGroup extends HttpApiGroup.make("attributeMap
 		HttpApiEndpoint.post("create", "/", {
 			payload: V2AttributeMappingCreateParams,
 			success: V2AttributeMapping,
-			error: [...commonErrors],
+			error: [mappingValidation, mappingPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "createAttributeMapping",
@@ -192,7 +202,7 @@ export class V2AttributeMappingsApiGroup extends HttpApiGroup.make("attributeMap
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: AttributeMappingPublicId },
 			success: V2AttributeMapping,
-			error: [...commonErrors, V2NotFoundError],
+			error: [mappingNotFound, mappingPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAttributeMapping",
@@ -207,7 +217,7 @@ export class V2AttributeMappingsApiGroup extends HttpApiGroup.make("attributeMap
 			params: { id: AttributeMappingPublicId },
 			payload: V2AttributeMappingUpdateParams,
 			success: V2AttributeMapping,
-			error: [...commonErrors, V2NotFoundError],
+			error: [mappingNotFound, mappingValidation, mappingPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "updateAttributeMapping",
@@ -221,7 +231,7 @@ export class V2AttributeMappingsApiGroup extends HttpApiGroup.make("attributeMap
 		HttpApiEndpoint.delete("delete", "/:id", {
 			params: { id: AttributeMappingPublicId },
 			success: V2AttributeMappingDeleteResponse,
-			error: [...commonErrors, V2NotFoundError],
+			error: [mappingNotFound, mappingPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "deleteAttributeMapping",
@@ -233,7 +243,6 @@ export class V2AttributeMappingsApiGroup extends HttpApiGroup.make("attributeMap
 	)
 	.prefix("/v2/attribute_mappings")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Attribute Mappings",

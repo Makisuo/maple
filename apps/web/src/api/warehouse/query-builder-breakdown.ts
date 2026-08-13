@@ -2,19 +2,8 @@ import { Effect, Result, Schema } from "effect"
 import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
 import { QueryEngineExecuteRequest } from "@maple/query-engine"
 import { buildBreakdownQuerySpec } from "@maple/query-engine/query-builder"
-import {
-	type BackendError,
-	type WarehouseQueryError,
-	decodeInput,
-	executeQueryEngine,
-	invalidWarehouseInput,
-} from "@/api/warehouse/effect-utils"
-
-// Read the message from either a local/tagged error or a public v2 envelope.
-function queryEngineErrorMessage(error: WarehouseQueryError | BackendError, fallback: string): string {
-	if ("message" in error && typeof error.message === "string") return error.message
-	return "error" in error && typeof error.error.message === "string" ? error.error.message : fallback
-}
+import { decodeInput, executeQueryEngine, invalidWarehouseInput } from "@/api/warehouse/effect-utils"
+import { displayError } from "@/lib/error-messages"
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 
@@ -79,7 +68,7 @@ const executeBreakdownQuery = Effect.fn("QueryEngine.executeBreakdownQuery")(fun
 			queryId: query.id,
 			queryName: query.name,
 			status: "error",
-			error: queryEngineErrorMessage(error, "Breakdown query failed"),
+			error: displayError(error).message,
 			data: [],
 		} satisfies BreakdownQueryResult
 	}

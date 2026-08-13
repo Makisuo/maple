@@ -56,7 +56,7 @@ import { ErrorsService } from "@/services/errors/ErrorsService"
 import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { OrganizationService } from "@/services/org/OrganizationService"
-import { V2SchemaErrorsLive } from "./error-envelope"
+import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
@@ -543,7 +543,7 @@ const makeHarness = (
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(functionalStubs),
-		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(V2TransportErrorBoundaryLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(AlertsServiceStubLayer),
@@ -774,10 +774,11 @@ describe("v2 investigations over HTTP", () => {
 		const response = await harness.request("GET", `/v2/investigations/${CORRUPT_INV_ID}`, {
 			token: key.secret,
 		})
-		expect(response.status).toBe(503)
+		expect(response.status).toBe(500)
 		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/investigations/InvestigationDataCorruptionError",
 			type: "api_error",
-			code: "investigation_subject_decode_failed",
+			code: "investigation_data_corrupt",
 		})
 		expect(JSON.stringify(response.body)).not.toContain("legacy-invalid-incident-id")
 		await harness.dispose()

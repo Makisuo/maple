@@ -191,7 +191,7 @@ describe("query-builder timeseries strategy", () => {
 			assert.deepStrictEqual(seenBucketSeconds, [60, 900, 3600])
 			assert.isTrue(result.fallbackUsed)
 			assert.lengthOf(result.attempts, 3)
-			assert.include(result.attempts[1]?.error ?? "", "too expensive")
+			assert.strictEqual(result.attempts[1]?.error, "Maple could not complete the warehouse query.")
 			assert.deepStrictEqual(result.points, [
 				{
 					bucket: "2026-01-01T00:00:00.000Z",

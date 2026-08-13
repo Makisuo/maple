@@ -1,28 +1,171 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { MetricName, ServiceName, SpanId, TraceId } from "../../primitives"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import {
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2RateLimitError,
-	V2ServiceUnavailableError,
-	V2UpstreamError,
-} from "./errors"
+import { defineV2Error, V2CursorInvalid, V2ParameterInvalid, V2TimeRangeInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
+import { V2QueryErrors, V2WarehouseErrors } from "./query-errors"
 
 const wireExample = <A>(example: object): A => example as A
-// Warehouse-backed endpoints surface the full outcome range: 400 for a bad
-// request, 429 for a quota breach, 502 for an upstream/query fault, 503 for a
-// genuine outage. These used to be collapsed into one 503 (see
-// telemetry.http.ts's mapWarehouseError), which told a user with a bad time
-// range that the service was down.
-const commonErrors = [
-	V2InvalidRequestError,
-	V2RateLimitError,
-	V2ServiceUnavailableError,
-	V2UpstreamError,
+export const V2TelemetryRangeTooLarge = defineV2Error({
+	tag: "@maple/http/v2/TelemetryRangeTooLargeError",
+	status: 400,
+	code: "time_range_too_large",
+	title: "Time range too large",
+	message: "The requested time range exceeds this operation's limit.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "TelemetryRangeTooLargeError",
+})
+
+export const V2TelemetryBucketCountTooLarge = defineV2Error({
+	tag: "@maple/http/v2/TelemetryBucketCountTooLargeError",
+	status: 400,
+	code: "bucket_count_too_large",
+	title: "Too many time buckets",
+	message: "bucket_seconds produces too many buckets.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "TelemetryBucketCountTooLargeError",
+})
+
+export const V2TelemetryBreakdownFilterRequired = defineV2Error({
+	tag: "@maple/http/v2/TelemetryBreakdownFilterRequiredError",
+	status: 400,
+	code: "breakdown_filter_required",
+	title: "Breakdown filter required",
+	message: "This breakdown range requires at least one narrowing filter.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "TelemetryBreakdownFilterRequiredError",
+})
+
+export const V2TraceQueryInvalid = defineV2Error({
+	tag: "@maple/http/v2/TraceQueryInvalidError",
+	status: 400,
+	code: "trace_query_invalid",
+	title: "Invalid trace query",
+	message: "The trace aggregation request is invalid.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "TraceQueryInvalidError",
+})
+
+export const V2LogQueryInvalid = defineV2Error({
+	tag: "@maple/http/v2/LogQueryInvalidError",
+	status: 400,
+	code: "log_query_invalid",
+	title: "Invalid log query",
+	message: "The log aggregation request is invalid.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "LogQueryInvalidError",
+})
+
+export const V2MetricQueryInvalid = defineV2Error({
+	tag: "@maple/http/v2/MetricQueryInvalidError",
+	status: 400,
+	code: "metric_query_invalid",
+	title: "Invalid metric query",
+	message: "The metric aggregation request is invalid.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "MetricQueryInvalidError",
+})
+
+export const V2TraceNotFound = defineV2Error({
+	tag: "@maple/http/v2/TraceNotFoundError",
+	status: 404,
+	code: "trace_not_found",
+	title: "Trace not found",
+	message: "No such trace.",
+	retryable: false,
+	recovery: "none",
+	identifier: "TraceNotFoundError",
+})
+
+export const V2SpanNotFound = defineV2Error({
+	tag: "@maple/http/v2/SpanNotFoundError",
+	status: 404,
+	code: "span_not_found",
+	title: "Span not found",
+	message: "No such span.",
+	retryable: false,
+	recovery: "none",
+	identifier: "SpanNotFoundError",
+})
+
+export const V2LogIdInvalid = defineV2Error({
+	tag: "@maple/http/v2/LogIdInvalidError",
+	status: 400,
+	code: "log_id_invalid",
+	title: "Invalid log ID",
+	message: "Malformed log ID.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "LogIdInvalidError",
+})
+
+export const V2LogNotFound = defineV2Error({
+	tag: "@maple/http/v2/LogNotFoundError",
+	status: 404,
+	code: "log_not_found",
+	title: "Log not found",
+	message: "No such log.",
+	retryable: false,
+	recovery: "none",
+	identifier: "LogNotFoundError",
+})
+
+export const V2ServiceNotFound = defineV2Error({
+	tag: "@maple/http/v2/ServiceNotFoundError",
+	status: 404,
+	code: "service_not_found",
+	title: "Service not found",
+	message: "No such service.",
+	retryable: false,
+	recovery: "none",
+	identifier: "ServiceNotFoundError",
+})
+
+const windowErrors = [V2TimeRangeInvalid.schema, V2TelemetryRangeTooLarge.schema] as const
+const warehouseWindowErrors = [...windowErrors, ...V2WarehouseErrors] as const
+const traceTimeseriesErrors = [
+	...windowErrors,
+	V2TelemetryBucketCountTooLarge.schema,
+	V2TraceQueryInvalid.schema,
+	...V2QueryErrors,
+] as const
+const traceBreakdownErrors = [
+	...windowErrors,
+	V2TelemetryBreakdownFilterRequired.schema,
+	V2TraceQueryInvalid.schema,
+	...V2QueryErrors,
+] as const
+const logTimeseriesErrors = [
+	...windowErrors,
+	V2TelemetryBucketCountTooLarge.schema,
+	V2LogQueryInvalid.schema,
+	...V2QueryErrors,
+] as const
+const logBreakdownErrors = [
+	...windowErrors,
+	V2TelemetryBreakdownFilterRequired.schema,
+	V2LogQueryInvalid.schema,
+	...V2QueryErrors,
+] as const
+const metricTimeseriesErrors = [
+	...windowErrors,
+	V2TelemetryBucketCountTooLarge.schema,
+	V2MetricQueryInvalid.schema,
+	...V2QueryErrors,
+] as const
+const metricBreakdownErrors = [
+	...windowErrors,
+	V2TelemetryBreakdownFilterRequired.schema,
+	V2MetricQueryInvalid.schema,
+	...V2QueryErrors,
 ] as const
 const PositiveInteger = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
 const PositiveFinite = Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0))
@@ -559,7 +702,7 @@ export class V2TracesApiGroup extends HttpApiGroup.make("traces")
 		HttpApiEndpoint.post("search", "/search", {
 			payload: V2TraceSearchParams,
 			success: TraceList,
-			error: [...commonErrors],
+			error: [V2CursorInvalid.schema, ...warehouseWindowErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "searchTraces",
@@ -572,7 +715,7 @@ export class V2TracesApiGroup extends HttpApiGroup.make("traces")
 		HttpApiEndpoint.post("timeseries", "/timeseries", {
 			payload: V2TraceTimeseriesParams,
 			success: V2TraceTimeseriesResult,
-			error: [...commonErrors],
+			error: traceTimeseriesErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "queryTraceTimeseries",
@@ -585,7 +728,7 @@ export class V2TracesApiGroup extends HttpApiGroup.make("traces")
 		HttpApiEndpoint.post("breakdown", "/breakdown", {
 			payload: V2TraceBreakdownParams,
 			success: V2TraceBreakdownResult,
-			error: [...commonErrors],
+			error: traceBreakdownErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "queryTraceBreakdown",
@@ -598,7 +741,7 @@ export class V2TracesApiGroup extends HttpApiGroup.make("traces")
 		HttpApiEndpoint.get("retrieve", "/:trace_id", {
 			params: { trace_id: TraceId },
 			success: V2Trace,
-			error: [...commonErrors, V2NotFoundError],
+			error: [...V2WarehouseErrors, V2TraceNotFound.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getTrace",
@@ -612,7 +755,7 @@ export class V2TracesApiGroup extends HttpApiGroup.make("traces")
 		HttpApiEndpoint.get("retrieveSpan", "/:trace_id/spans/:span_id", {
 			params: { trace_id: TraceId, span_id: SpanId },
 			success: V2Span,
-			error: [...commonErrors, V2NotFoundError],
+			error: [...V2WarehouseErrors, V2SpanNotFound.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getSpan",
@@ -623,7 +766,6 @@ export class V2TracesApiGroup extends HttpApiGroup.make("traces")
 	)
 	.prefix("/v2/traces")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Traces",
@@ -676,7 +818,7 @@ export class V2LogsApiGroup extends HttpApiGroup.make("logs")
 		HttpApiEndpoint.post("search", "/search", {
 			payload: V2LogSearchParams,
 			success: LogList,
-			error: [...commonErrors],
+			error: [V2CursorInvalid.schema, ...warehouseWindowErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "searchLogs",
@@ -689,7 +831,7 @@ export class V2LogsApiGroup extends HttpApiGroup.make("logs")
 		HttpApiEndpoint.post("timeseries", "/timeseries", {
 			payload: V2LogTimeseriesParams,
 			success: V2LogTimeseriesResult,
-			error: [...commonErrors],
+			error: logTimeseriesErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "queryLogTimeseries",
@@ -702,7 +844,7 @@ export class V2LogsApiGroup extends HttpApiGroup.make("logs")
 		HttpApiEndpoint.post("breakdown", "/breakdown", {
 			payload: V2LogBreakdownParams,
 			success: V2LogBreakdownResult,
-			error: [...commonErrors],
+			error: logBreakdownErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "queryLogBreakdown",
@@ -715,7 +857,7 @@ export class V2LogsApiGroup extends HttpApiGroup.make("logs")
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: LogPublicId },
 			success: V2Log,
-			error: [...commonErrors, V2NotFoundError],
+			error: [V2LogIdInvalid.schema, ...V2WarehouseErrors, V2LogNotFound.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getLog",
@@ -726,7 +868,6 @@ export class V2LogsApiGroup extends HttpApiGroup.make("logs")
 	)
 	.prefix("/v2/logs")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Logs",
@@ -769,7 +910,7 @@ export class V2MetricsApiGroup extends HttpApiGroup.make("metrics")
 		HttpApiEndpoint.get("list", "/", {
 			query: V2MetricListQuery,
 			success: MetricList,
-			error: [...commonErrors],
+			error: [V2ParameterInvalid.schema, ...warehouseWindowErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listMetrics",
@@ -783,7 +924,7 @@ export class V2MetricsApiGroup extends HttpApiGroup.make("metrics")
 		HttpApiEndpoint.post("timeseries", "/timeseries", {
 			payload: V2MetricsTimeseriesParams,
 			success: V2MetricTimeseriesResult,
-			error: [...commonErrors],
+			error: metricTimeseriesErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "queryMetricsTimeseries",
@@ -796,7 +937,7 @@ export class V2MetricsApiGroup extends HttpApiGroup.make("metrics")
 		HttpApiEndpoint.post("breakdown", "/breakdown", {
 			payload: V2MetricsBreakdownParams,
 			success: V2MetricBreakdownResult,
-			error: [...commonErrors],
+			error: metricBreakdownErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "queryMetricBreakdown",
@@ -807,7 +948,6 @@ export class V2MetricsApiGroup extends HttpApiGroup.make("metrics")
 	)
 	.prefix("/v2/metrics")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Metrics",
@@ -880,7 +1020,7 @@ export class V2ServicesApiGroup extends HttpApiGroup.make("services")
 		HttpApiEndpoint.get("list", "/", {
 			query: V2ServiceListQuery,
 			success: ServiceList,
-			error: [...commonErrors],
+			error: [V2ParameterInvalid.schema, ...warehouseWindowErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listServices",
@@ -895,7 +1035,7 @@ export class V2ServicesApiGroup extends HttpApiGroup.make("services")
 			params: { name: ServiceName },
 			query: V2TelemetryWindowQuery,
 			success: V2Service,
-			error: [...commonErrors, V2NotFoundError],
+			error: [...warehouseWindowErrors, V2ServiceNotFound.schema],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getService",
@@ -907,7 +1047,6 @@ export class V2ServicesApiGroup extends HttpApiGroup.make("services")
 	)
 	.prefix("/v2/services")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Services",
@@ -920,7 +1059,7 @@ export class V2ServiceMapApiGroup extends HttpApiGroup.make("serviceMap")
 		HttpApiEndpoint.get("retrieve", "/", {
 			query: V2ServiceMapQuery,
 			success: V2ServiceMap,
-			error: [...commonErrors],
+			error: warehouseWindowErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getServiceMap",
@@ -932,7 +1071,6 @@ export class V2ServiceMapApiGroup extends HttpApiGroup.make("serviceMap")
 	)
 	.prefix("/v2/service_map")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Service Map",

@@ -1,5 +1,11 @@
 import { Schema } from "effect"
-import { HttpErrorRecovery } from "../error-policy"
+import {
+	HttpErrorRecovery,
+	PublicHttpErrorType,
+	publicHttpErrorTypeForStatus,
+	type PublicHttpErrorStatus,
+	type PublicHttpErrorTypeForStatus,
+} from "../error-policy"
 
 /**
  * v2 error envelope (see docs/api-v2.md): every error response body is
@@ -8,27 +14,61 @@ import { HttpErrorRecovery } from "../error-policy"
  *
  * These remain `Schema.Error`s rather than tagged Effect failures: `_tag` is
  * deliberately nested inside the public envelope and identifies the semantic
- * failure that reached the boundary. Domain adapters preserve their original
- * tag; errors born at the v2 boundary derive one from their stable code.
+ * failure that reached the boundary. Domain errors expose their original tag
+ * directly; errors born at the v2 boundary derive one from their stable code.
  */
 
-export const V2ErrorType = Schema.Literals([
-	"invalid_request_error",
-	"authentication_error",
-	"permission_error",
-	"not_found_error",
-	"conflict_error",
-	"rate_limit_error",
-	"api_error",
-])
+export const V2ErrorType = PublicHttpErrorType
 export type V2ErrorType = Schema.Schema.Type<typeof V2ErrorType>
 
 export const V2ErrorRecovery = HttpErrorRecovery
 export type V2ErrorRecovery = Schema.Schema.Type<typeof V2ErrorRecovery>
 
+export type V2ErrorForStatus<Status extends PublicHttpErrorStatus> = Status extends 400
+	? V2InvalidRequestError
+	: Status extends 401
+		? V2AuthenticationError
+		: Status extends 403
+			? V2PermissionError
+			: Status extends 404
+				? V2NotFoundError
+				: Status extends 409
+					? V2ConflictError
+					: Status extends 413
+						? V2PayloadTooLargeError
+						: Status extends 429
+							? V2RateLimitError
+							: Status extends 500
+								? V2ApiError
+								: Status extends 502
+									? V2UpstreamError
+									: Status extends 503
+										? V2ServiceUnavailableError
+										: V2GatewayTimeoutError
+
+export type V2ErrorTypeForStatus<Status extends PublicHttpErrorStatus> = PublicHttpErrorTypeForStatus<Status>
+
+export interface V2PublicError<Tag extends string, Type extends string> {
+	readonly error: {
+		readonly _tag: Tag
+		readonly type: Type
+		readonly code: string
+		readonly title: string
+		readonly message: string
+		readonly retryable: boolean
+		readonly recovery: V2ErrorRecovery
+		readonly retry_after_seconds?: number
+		readonly retry_at?: string
+		readonly param?: string
+		readonly doc_url?: string
+	}
+}
+
+export const errorTypeForStatus = publicHttpErrorTypeForStatus
+
 /** Presentation/recovery metadata shared by every v2 error constructor. */
 export interface V2ErrorMetadata {
-	/** Stable semantic identity. Domain adapters pass the original Effect `_tag`. */
+	/** Stable semantic identity for errors created at the v2 boundary. */
 	readonly tag?: string
 	readonly title?: string
 	readonly retryable?: boolean
@@ -43,70 +83,67 @@ interface ErrorExample {
 	readonly param?: string
 }
 
+const errorBodyFields = <const T extends V2ErrorType>(type: T, example: ErrorExample) => ({
+	type: Schema.Literal(type).annotate({
+		description:
+			"Error category — a closed enum (`invalid_request_error`, `authentication_error`, `permission_error`, `not_found_error`, `conflict_error`, `rate_limit_error`, `api_error`). Branch on `code` for specifics.",
+	}),
+	code: Schema.String.annotate({
+		description:
+			"Compact presentation category. Multiple semantic tags may share a code; branch on `_tag` for the exact failure.",
+		examples: [example.code],
+	}),
+	message: Schema.String.annotate({
+		description:
+			"Human-readable explanation of what went wrong. For humans, not for programmatic branching.",
+		examples: [example.message],
+	}),
+	title: Schema.String.annotate({
+		description: "Short, human-readable heading suitable for an error state or toast.",
+	}),
+	retryable: Schema.Boolean.annotate({
+		description:
+			"Whether the same logical request can plausibly succeed later without correcting its input. Automatic mutation replay still requires idempotency protection.",
+	}),
+	recovery: V2ErrorRecovery.annotate({
+		description: "Recommended next action for a person or API client.",
+	}),
+	retry_after_seconds: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)).annotate({
+			description: "Minimum delay before retrying, mirrored in the Retry-After header.",
+		}),
+	),
+	retry_at: Schema.optionalKey(
+		Schema.String.check(
+			Schema.makeFilter((value: string) => Number.isFinite(Date.parse(value)), {
+				description: "Expected an ISO date-time string",
+			}),
+		).annotate({
+			description:
+				"Absolute ISO-8601 retry time when the backend knows a reset instant rather than a fixed delay.",
+		}),
+	),
+	param: Schema.optionalKey(
+		Schema.String.annotate({
+			description: "The request parameter that caused the error, when applicable.",
+			...(example.param !== undefined ? { examples: [example.param] } : {}),
+		}),
+	),
+	doc_url: Schema.optionalKey(
+		Schema.String.annotate({
+			description: "Link to reference documentation for this error, when available.",
+			examples: ["https://api.maple.dev/v2/docs#errors"],
+		}),
+	),
+})
+
 const errorBody = <const T extends V2ErrorType>(type: T, example: ErrorExample) =>
 	Schema.Struct({
-		_tag: Schema.optionalKey(
-			Schema.String.check(Schema.isPattern(/^@maple\//)).annotate({
-				description:
-					"Stable semantic error tag. Maple clients should branch on this; public integrations may continue branching on `code`.",
-			}),
-		),
-		type: Schema.Literal(type).annotate({
+		_tag: Schema.String.check(Schema.isPattern(/^@maple\//)).annotate({
 			description:
-				"Error category — a closed enum (`invalid_request_error`, `authentication_error`, `permission_error`, `not_found_error`, `conflict_error`, `rate_limit_error`, `api_error`). Branch on `code` for specifics.",
+				"Stable semantic error tag. Branch on this for the exact failure; new tags may be added without changing the envelope shape.",
 		}),
-		code: Schema.String.annotate({
-			description: "Stable, machine-readable error code. Codes are append-only; branch on this.",
-			examples: [example.code],
-		}),
-		message: Schema.String.annotate({
-			description:
-				"Human-readable explanation of what went wrong. For humans, not for programmatic branching.",
-			examples: [example.message],
-		}),
-		title: Schema.optionalKey(
-			Schema.String.annotate({
-				description: "Short, human-readable heading suitable for an error state or toast.",
-			}),
-		),
-		retryable: Schema.optionalKey(
-			Schema.Boolean.annotate({
-				description:
-					"Whether the same logical request can plausibly succeed later without correcting its input. Automatic mutation replay still requires idempotency protection.",
-			}),
-		),
-		recovery: Schema.optionalKey(
-			V2ErrorRecovery.annotate({
-				description: "Recommended next action for a person or API client.",
-			}),
-		),
-		retry_after_seconds: Schema.optionalKey(
-			Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)).annotate({
-				description: "Minimum delay before retrying, mirrored in the Retry-After header.",
-			}),
-		),
-		retry_at: Schema.optionalKey(
-			Schema.String.check(
-				Schema.makeFilter((value: string) => Number.isFinite(Date.parse(value)), {
-					description: "Expected an ISO date-time string",
-				}),
-			).annotate({
-				description:
-					"Absolute ISO-8601 retry time when the backend knows a reset instant rather than a fixed delay.",
-			}),
-		),
-		param: Schema.optionalKey(
-			Schema.String.annotate({
-				description: "The request parameter that caused the error, when applicable.",
-				...(example.param !== undefined ? { examples: [example.param] } : {}),
-			}),
-		),
-		doc_url: Schema.optionalKey(
-			Schema.String.annotate({
-				description: "Link to reference documentation for this error, when available.",
-				examples: ["https://api.maple.dev/v2/docs#errors"],
-			}),
-		),
+		...errorBodyFields(type, example),
 	})
 
 const defaultTitle: Record<V2ErrorType, string> = {
@@ -375,7 +412,29 @@ export class V2ServiceUnavailableError extends Schema.Error<V2ServiceUnavailable
 	}
 }
 
-// Constructors — keep handler adapters one-liners.
+/** `api_error` flavor for an operation that exceeded its server-side deadline (504). */
+export class V2GatewayTimeoutError extends Schema.Error<V2GatewayTimeoutError>(
+	"@maple/http/v2/GatewayTimeoutError",
+)(
+	Schema.Struct({
+		error: errorBody("api_error", {
+			code: "request_timeout",
+			message: "The operation timed out. Retry with a narrower request.",
+		}),
+	}).annotate({ identifier: "GatewayTimeoutError" }),
+	{
+		httpApiStatus: 504,
+		identifier: "GatewayTimeoutError",
+		title: "Gateway timeout error",
+		description: "The operation exceeded its server-side deadline. HTTP 504.",
+	},
+) {
+	override get message(): string {
+		return this.error.message
+	}
+}
+
+// Constructors for failures created at the v2 boundary.
 
 export const invalidRequest = (
 	code: string,
@@ -415,12 +474,20 @@ export const permissionError = (code: string, message: string, metadata: V2Error
 
 /** `resource_missing` matches Stripe's code for a bad object ID. */
 export const notFound = (message: string, param?: string, metadata: V2ErrorMetadata = {}) =>
+	notFoundError("resource_missing", message, param, metadata)
+
+export const notFoundError = (
+	code: string,
+	message: string,
+	param?: string,
+	metadata: V2ErrorMetadata = {},
+) =>
 	new V2NotFoundError({
 		error: {
 			type: "not_found_error",
-			code: "resource_missing",
+			code,
 			message,
-			...errorMetadata("not_found_error", "resource_missing", {}, metadata),
+			...errorMetadata("not_found_error", code, {}, metadata),
 			...(param !== undefined ? { param } : {}),
 		},
 	})
@@ -433,15 +500,7 @@ export const resourceNotFound = (
 	metadata: V2ErrorMetadata = {},
 ) => {
 	const code = `${resource}_not_found`
-	return new V2NotFoundError({
-		error: {
-			type: "not_found_error",
-			code,
-			message,
-			param,
-			...errorMetadata("not_found_error", code, {}, metadata),
-		},
-	})
+	return notFoundError(code, message, param, metadata)
 }
 
 export const conflict = (code: string, message: string, metadata: V2ErrorMetadata = {}) =>
@@ -461,12 +520,20 @@ export const conflict = (code: string, message: string, metadata: V2ErrorMetadat
  * telling the user exactly what to do is the whole value.
  */
 export const payloadTooLarge = (message: string, param?: string, metadata: V2ErrorMetadata = {}) =>
+	payloadTooLargeError("range_too_large", message, param, metadata)
+
+export const payloadTooLargeError = (
+	code: string,
+	message: string,
+	param?: string,
+	metadata: V2ErrorMetadata = {},
+) =>
 	new V2PayloadTooLargeError({
 		error: {
 			type: "invalid_request_error",
-			code: "range_too_large",
+			code,
 			message,
-			...errorMetadata("invalid_request_error", "range_too_large", {}, metadata),
+			...errorMetadata("invalid_request_error", code, {}, metadata),
 			...(param !== undefined ? { param } : {}),
 		},
 	})
@@ -541,17 +608,19 @@ export const upstreamError = (code: string, message: string, metadata: V2ErrorMe
 	})
 
 export const apiError = (metadata: V2ErrorMetadata = {}) =>
+	serverError("internal_error", "An unexpected error occurred on our end.", {
+		tag: "@maple/http/v2/UnexpectedApiError",
+		title: "Something went wrong",
+		...metadata,
+	})
+
+export const serverError = (code: string, message: string, metadata: V2ErrorMetadata = {}) =>
 	new V2ApiError({
 		error: {
 			type: "api_error",
-			code: "internal_error",
-			message: "An unexpected error occurred on our end.",
-			...errorMetadata(
-				"api_error",
-				"internal_error",
-				{ tag: "@maple/http/v2/UnexpectedApiError", title: "Something went wrong" },
-				metadata,
-			),
+			code,
+			message,
+			...errorMetadata("api_error", code, {}, metadata),
 		},
 	})
 
@@ -573,10 +642,332 @@ export const serviceError = (code: string, message: string, metadata: V2ErrorMet
 export const serviceUnavailable = (message: string, metadata: V2ErrorMetadata = {}) =>
 	serviceError("service_unavailable", message, metadata)
 
-/** Sanitized dependency failure with a stable operation-specific public code. */
+export const gatewayTimeoutError = (code: string, message: string, metadata: V2ErrorMetadata = {}) =>
+	new V2GatewayTimeoutError({
+		error: {
+			type: "api_error",
+			code,
+			message,
+			...errorMetadata(
+				"api_error",
+				code,
+				{ title: "Operation timed out", retryable: true, recovery: "retry" },
+				metadata,
+			),
+		},
+	})
+
+/** Sanitized dependency failure for boundary-created errors. */
 export const dependencyUnavailable = (code: string, metadata: V2ErrorMetadata = {}) =>
 	serviceError(
 		code,
 		"A service required for this operation is temporarily unavailable; retry with backoff.",
 		metadata,
 	)
+
+export interface V2ErrorDefinitionOptions<
+	Tag extends string,
+	Status extends PublicHttpErrorStatus,
+	Code extends string,
+> {
+	readonly tag: Tag
+	readonly status: Status
+	readonly code: Code
+	readonly title: string
+	readonly message: string
+	readonly retryable: boolean
+	readonly recovery: V2ErrorRecovery
+	readonly identifier: string
+}
+
+export interface V2ErrorMakeOptions {
+	readonly param?: string
+	readonly retryAfterSeconds?: number
+	readonly retryAt?: string
+}
+
+export interface V2ErrorSchemaOptions<Tag extends string, Status extends PublicHttpErrorStatus> {
+	readonly tag: Tag
+	readonly status: Status
+	readonly identifier: string
+	readonly title: string
+	readonly description?: string
+	readonly codeExample?: string
+}
+
+/** Build one exact OpenAPI branch for a single semantic error tag. */
+export const makeV2ErrorSchema = <const Tag extends string, const Status extends PublicHttpErrorStatus>(
+	options: V2ErrorSchemaOptions<Tag, Status>,
+) => {
+	const type = errorTypeForStatus(options.status)
+	return Schema.Struct({
+		error: Schema.Struct({
+			_tag: Schema.Literal(options.tag).annotate({
+				description: "Stable semantic error tag. Branch on this exact value.",
+			}),
+			type: Schema.Literal(type).annotate({
+				description: "Broad error category shared by related semantic tags.",
+			}),
+			code: Schema.String.annotate({
+				description:
+					"Compact presentation category. Branch on `_tag` when the exact failure matters.",
+				...(options.codeExample === undefined ? {} : { examples: [options.codeExample] }),
+			}),
+			title: Schema.String.annotate({
+				description: "Short, human-readable heading suitable for an error state or toast.",
+			}),
+			message: Schema.String.annotate({
+				description: "Human-readable explanation for people, not programmatic branching.",
+			}),
+			retryable: Schema.Boolean.annotate({
+				description: "Whether the same logical request can plausibly succeed later.",
+			}),
+			recovery: V2ErrorRecovery.annotate({
+				description: "Recommended next action for an API client or person.",
+			}),
+			retry_after_seconds: Schema.optionalKey(
+				Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)).annotate({
+					description: "Minimum delay before retrying, mirrored in the Retry-After header.",
+				}),
+			),
+			retry_at: Schema.optionalKey(
+				Schema.String.check(
+					Schema.makeFilter((value: string) => Number.isFinite(Date.parse(value)), {
+						description: "Expected an ISO date-time string",
+					}),
+				).annotate({ description: "Absolute ISO-8601 time at which a retry may succeed." }),
+			),
+			param: Schema.optionalKey(
+				Schema.String.annotate({ description: "Request parameter associated with the failure." }),
+			),
+			doc_url: Schema.optionalKey(
+				Schema.String.annotate({ description: "Reference documentation for this failure." }),
+			),
+		}),
+	}).annotate({
+		httpApiStatus: options.status,
+		identifier: options.identifier,
+		title: options.title,
+		description: options.description ?? `The ${options.tag} failure. HTTP ${options.status}.`,
+	})
+}
+
+/**
+ * Define an error that is born at the v2 boundary rather than in a domain
+ * service. Its literal tag schema and constructor are inseparable, so a route
+ * cannot document one tag and emit another.
+ */
+export const defineV2Error = <
+	const Tag extends string,
+	const Status extends PublicHttpErrorStatus,
+	const Code extends string,
+>(
+	definition: V2ErrorDefinitionOptions<Tag, Status, Code>,
+) => {
+	const type = errorTypeForStatus(definition.status)
+	const schema = makeV2ErrorSchema({
+		tag: definition.tag,
+		status: definition.status,
+		identifier: definition.identifier,
+		title: definition.title,
+		codeExample: definition.code,
+	})
+
+	const make = (
+		message: string = definition.message,
+		options: V2ErrorMakeOptions = {},
+	): V2ErrorForStatus<Status> & V2PublicError<Tag, V2ErrorTypeForStatus<Status>> => {
+		const metadata = {
+			tag: definition.tag,
+			title: definition.title,
+			retryable: definition.retryable,
+			recovery: definition.recovery,
+			...(options.retryAfterSeconds === undefined
+				? {}
+				: { retryAfterSeconds: options.retryAfterSeconds }),
+			...(options.retryAt === undefined ? {} : { retryAt: options.retryAt }),
+		}
+		let error: V2ErrorForStatus<PublicHttpErrorStatus>
+		switch (definition.status) {
+			case 400:
+				error = invalidRequest(definition.code, message, options.param, metadata)
+				break
+			case 401:
+				error = authenticationError(definition.code, message, metadata)
+				break
+			case 403:
+				error = permissionError(definition.code, message, metadata)
+				break
+			case 404:
+				error = notFoundError(definition.code, message, options.param, metadata)
+				break
+			case 409:
+				error = conflict(definition.code, message, metadata)
+				break
+			case 413:
+				error = payloadTooLargeError(definition.code, message, options.param, metadata)
+				break
+			case 429:
+				error = rateLimitError(definition.code, message, metadata)
+				break
+			case 500:
+				error = serverError(definition.code, message, metadata)
+				break
+			case 502:
+				error = upstreamError(definition.code, message, metadata)
+				break
+			case 503:
+				error = serviceError(definition.code, message, metadata)
+				break
+			case 504:
+				error = gatewayTimeoutError(definition.code, message, metadata)
+				break
+		}
+		return error as V2ErrorForStatus<Status> & V2PublicError<Tag, V2ErrorTypeForStatus<Status>>
+	}
+
+	return { ...definition, type, schema, make } as const
+}
+
+export const V2InvalidRequest = defineV2Error({
+	tag: "@maple/http/v2/InvalidRequestError",
+	status: 400,
+	code: "parameter_invalid",
+	title: "Invalid request",
+	message: "The request did not match the endpoint schema.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "InvalidRequestError",
+})
+
+export const V2InvalidCredentials = defineV2Error({
+	tag: "@maple/http/v2/InvalidCredentialsError",
+	status: 401,
+	code: "invalid_credentials",
+	title: "Sign in required",
+	message: "Invalid or missing credentials.",
+	retryable: false,
+	recovery: "reauthenticate",
+	identifier: "InvalidCredentialsError",
+})
+
+export const V2InsufficientScope = defineV2Error({
+	tag: "@maple/http/v2/InsufficientScopeError",
+	status: 403,
+	code: "insufficient_scope",
+	title: "Permission required",
+	message: "The API key does not have the scope required for this request.",
+	retryable: false,
+	recovery: "request_access",
+	identifier: "InsufficientScopeError",
+})
+
+export const V2InsufficientPermissions = defineV2Error({
+	tag: "@maple/http/v2/InsufficientPermissionsError",
+	status: 403,
+	code: "insufficient_permissions",
+	title: "Permission required",
+	message: "Only organization administrators can perform this operation.",
+	retryable: false,
+	recovery: "request_access",
+	identifier: "InsufficientPermissionsError",
+})
+
+export const V2ParameterInvalid = defineV2Error({
+	tag: "@maple/http/v2/ParameterInvalidError",
+	status: 400,
+	code: "parameter_invalid",
+	title: "Invalid request",
+	message: "A request parameter is invalid.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "ParameterInvalidError",
+})
+
+export const V2ParameterMissing = defineV2Error({
+	tag: "@maple/http/v2/ParameterMissingError",
+	status: 400,
+	code: "parameter_missing",
+	title: "Missing request parameter",
+	message: "A required request parameter is missing.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "ParameterMissingError",
+})
+
+export const V2TimeRangeInvalid = defineV2Error({
+	tag: "@maple/http/v2/TimeRangeInvalidError",
+	status: 400,
+	code: "invalid_time_range",
+	title: "Invalid time range",
+	message: "end_time must be after start_time.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "TimeRangeInvalidError",
+})
+
+export const V2CursorInvalid = defineV2Error({
+	tag: "@maple/http/v2/CursorInvalidError",
+	status: 400,
+	code: "cursor_invalid",
+	title: "Invalid pagination cursor",
+	message: "Invalid pagination cursor.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "CursorInvalidError",
+})
+
+export const V2CursorSortMismatch = defineV2Error({
+	tag: "@maple/http/v2/CursorSortMismatchError",
+	status: 400,
+	code: "cursor_sort_mismatch",
+	title: "Cursor does not match sort",
+	message: "Cursor does not match the selected sort.",
+	retryable: false,
+	recovery: "fix_request",
+	identifier: "CursorSortMismatchError",
+})
+
+export const V2CallbackHostUnavailable = defineV2Error({
+	tag: "@maple/http/v2/CallbackHostUnavailableError",
+	status: 503,
+	code: "callback_host_unavailable",
+	title: "Integration setup unavailable",
+	message: "Integration setup is not available from this host.",
+	retryable: false,
+	recovery: "contact_support",
+	identifier: "CallbackHostUnavailableError",
+})
+
+export const V2RateLimited = defineV2Error({
+	tag: "@maple/http/v2/RateLimitError",
+	status: 429,
+	code: "rate_limited",
+	title: "Too many requests",
+	message: "Too many requests. Retry after the interval in the Retry-After header.",
+	retryable: true,
+	recovery: "retry",
+	identifier: "RateLimitError",
+})
+
+export const V2ResponseSchemaFailure = defineV2Error({
+	tag: "@maple/http/v2/ResponseSchemaError",
+	status: 500,
+	code: "internal_error",
+	title: "Something went wrong",
+	message: "An unexpected error occurred on our end.",
+	retryable: false,
+	recovery: "contact_support",
+	identifier: "ResponseSchemaError",
+})
+
+export const V2UnexpectedFailure = defineV2Error({
+	tag: "@maple/http/v2/UnexpectedError",
+	status: 500,
+	code: "internal_error",
+	title: "Something went wrong",
+	message: "An unexpected error occurred on our end.",
+	retryable: false,
+	recovery: "contact_support",
+	identifier: "UnexpectedError",
+})

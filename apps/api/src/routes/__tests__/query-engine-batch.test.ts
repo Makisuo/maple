@@ -1,11 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { QueryEngineResult } from "@maple/query-engine"
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
+import { QueryEngineExecutionError } from "@maple/domain/http"
 import { runQueryEngineBatch } from "@/routes/query-engine-batch"
-
-class StubError extends Schema.TaggedError<StubError>()("@maple/http/errors/QueryEngineExecutionError", {
-	message: Schema.String,
-}) {}
 
 const countResult = (total: number): QueryEngineResult => ({
 	kind: "count",
@@ -38,7 +35,7 @@ describe("runQueryEngineBatch", () => {
 				requests: [1, 2, 3],
 				execute: (n: number) =>
 					n === 2
-						? Effect.fail(new StubError({ message: "boom" }))
+						? Effect.fail(new QueryEngineExecutionError({ message: "boom" }))
 						: Effect.succeed(countResult(n)),
 			})
 
@@ -48,9 +45,10 @@ describe("runQueryEngineBatch", () => {
 			)
 			const failed = outcomes[1]
 			assert.ok(failed !== undefined && failed.outcome === "failure")
-			// The original tag rides along so the client keeps its specific copy.
+			// The complete public body rides alongside the successful siblings.
 			assert.strictEqual(failed.error._tag, "@maple/http/errors/QueryEngineExecutionError")
-			assert.strictEqual(failed.error.message, "boom")
+			assert.strictEqual(failed.error.title, "Query failed")
+			assert.strictEqual(failed.error.message, "The aggregation query could not be completed.")
 		}),
 	)
 

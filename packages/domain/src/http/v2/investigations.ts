@@ -4,24 +4,27 @@ import { AiTriageIncidentKind } from "../ai-triage"
 import { IssueSeverity } from "../errors"
 import {
 	InvestigationConfidence,
+	InvestigationAgentUnavailableError,
+	InvestigationAutomationDisabledError,
+	InvestigationDataCorruptionError,
 	InvestigationFanoutState,
+	InvestigationNotFoundError,
+	InvestigationPersistenceError,
+	InvestigationQuotaError,
+	InvestigationRejectedError,
 	InvestigationSeededBy,
+	InvestigationStartFailedError,
 	InvestigationStatus,
 	LensId,
 	LensRunStatus,
 	LensVerdict,
 } from "../investigations"
 import { TraceId, UserId } from "../../primitives"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import {
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2RateLimitError,
-	V2ServiceUnavailableError,
-	V2UpstreamError,
-} from "./errors"
+import { V2ParameterInvalid } from "./errors"
 import { encodePublicId, PublicIdPrefixes } from "./public-id"
+import { publicErrors } from "./public-error"
 import {
 	AlertIncidentPublicId,
 	AnomalyIncidentPublicId,
@@ -494,8 +497,35 @@ export const V2InvestigationsListQuery = Schema.Struct({
 })
 export type V2InvestigationsListQuery = Schema.Schema.Type<typeof V2InvestigationsListQuery>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
-const startErrors = [...commonErrors, V2RateLimitError, V2UpstreamError] as const
+const [
+	investigationPersistence,
+	investigationNotFound,
+	investigationQuota,
+	investigationAutomationDisabled,
+	investigationAgentUnavailable,
+	investigationStartFailed,
+	investigationRejected,
+	investigationDataCorruption,
+] = publicErrors(
+	InvestigationPersistenceError,
+	InvestigationNotFoundError,
+	InvestigationQuotaError,
+	InvestigationAutomationDisabledError,
+	InvestigationAgentUnavailableError,
+	InvestigationStartFailedError,
+	InvestigationRejectedError,
+	InvestigationDataCorruptionError,
+)
+
+const investigationStartErrors = [
+	investigationPersistence,
+	investigationQuota,
+	investigationAutomationDisabled,
+	investigationAgentUnavailable,
+	investigationStartFailed,
+	investigationRejected,
+	investigationDataCorruption,
+] as const
 
 const InvestigationList = ListOf(V2Investigation).annotate({
 	identifier: "InvestigationList",
@@ -508,7 +538,7 @@ export class V2InvestigationsApiGroup extends HttpApiGroup.make("investigations"
 		HttpApiEndpoint.get("list", "/", {
 			query: V2InvestigationsListQuery,
 			success: InvestigationList,
-			error: [...commonErrors],
+			error: [V2ParameterInvalid.schema, investigationPersistence, investigationDataCorruption],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listInvestigations",
@@ -522,7 +552,7 @@ export class V2InvestigationsApiGroup extends HttpApiGroup.make("investigations"
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: InvestigationPublicId },
 			success: V2Investigation,
-			error: [...commonErrors, V2NotFoundError],
+			error: [investigationPersistence, investigationNotFound, investigationDataCorruption],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getInvestigation",
@@ -536,7 +566,7 @@ export class V2InvestigationsApiGroup extends HttpApiGroup.make("investigations"
 		HttpApiEndpoint.post("create", "/", {
 			payload: V2InvestigationCreateParams,
 			success: V2Investigation,
-			error: [...startErrors],
+			error: investigationStartErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "createInvestigation",
@@ -550,7 +580,7 @@ export class V2InvestigationsApiGroup extends HttpApiGroup.make("investigations"
 		HttpApiEndpoint.post("restart", "/:id/restart", {
 			params: { id: InvestigationPublicId },
 			success: V2Investigation,
-			error: [...startErrors, V2NotFoundError],
+			error: [investigationNotFound, ...investigationStartErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "restartInvestigation",
@@ -565,7 +595,7 @@ export class V2InvestigationsApiGroup extends HttpApiGroup.make("investigations"
 			params: { id: InvestigationPublicId },
 			payload: V2InvestigationStatusUpdateParams,
 			success: V2Investigation,
-			error: [...commonErrors, V2NotFoundError],
+			error: [investigationPersistence, investigationNotFound, investigationDataCorruption],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "updateInvestigationStatus",
@@ -577,7 +607,6 @@ export class V2InvestigationsApiGroup extends HttpApiGroup.make("investigations"
 	)
 	.prefix("/v2/investigations")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Investigations",

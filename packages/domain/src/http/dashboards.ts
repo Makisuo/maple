@@ -1,4 +1,4 @@
-import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi"
+import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { DashboardDocument, PortableDashboardDocument } from "@maple/widgets/dashboard"
 import {
@@ -12,6 +12,7 @@ import {
 	UserId,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 
 // The dashboard *document* schema lives in `../dashboard`, which is versioned.
 // This module keeps the HTTP surface: request/response envelopes, tagged errors
@@ -158,64 +159,89 @@ const DashboardVersionsListQuery = Schema.Struct({
 	before: Schema.optional(Schema.NumberFromString.check(Schema.isInt())),
 })
 
-export class DashboardVersionNotFoundError extends Schema.TaggedError<DashboardVersionNotFoundError>()(
+export class DashboardVersionNotFoundError extends HttpTaggedError<DashboardVersionNotFoundError>()(
 	"@maple/http/errors/DashboardVersionNotFoundError",
 	{
 		dashboardId: DashboardId,
 		versionId: DashboardVersionId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "dashboard_version_not_found",
+		title: "Dashboard version not found",
+		message: "No such dashboard version.",
+		param: "version_id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
-export class DashboardPersistenceError extends Schema.TaggedError<DashboardPersistenceError>()(
+export class DashboardPersistenceError extends HttpTaggedError<DashboardPersistenceError>()(
 	"@maple/http/errors/DashboardPersistenceError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "dashboards_unavailable",
+		title: "Dashboards are temporarily unavailable",
+		message: "Dashboards are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class DashboardNotFoundError extends Schema.TaggedError<DashboardNotFoundError>()(
+export class DashboardNotFoundError extends HttpTaggedError<DashboardNotFoundError>()(
 	"@maple/http/errors/DashboardNotFoundError",
 	{
 		dashboardId: DashboardId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "dashboard_not_found",
+		title: "Dashboard not found",
+		message: "No such dashboard.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
-export class DashboardValidationError extends Schema.TaggedError<DashboardValidationError>()(
+export class DashboardValidationError extends HttpTaggedError<DashboardValidationError>()(
 	"@maple/http/errors/DashboardValidationError",
 	{
 		message: Schema.String,
 		details: Schema.Array(Schema.String),
 	},
-	{ httpApiStatus: 400 },
+	{
+		status: 400,
+		code: "dashboard_invalid",
+		title: "Invalid dashboard",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
 ) {}
 
-/**
- * Rewrites request-decode failures on the dashboards group into a
- * `DashboardValidationError` carrying the JSON path, the enclosing widget id
- * and the expected-vs-received message for every offending field.
- *
- * Without it the runtime answers a schema failure with a bare empty 400, so the
- * only way to find one bad key in a 14-widget document is to bisect it. The
- * error class is already in every endpoint's error list, so attaching this
- * widens no client contract.
- */
-export class DashboardSchemaErrors extends HttpApiMiddleware.Service<DashboardSchemaErrors>()(
-	"DashboardSchemaErrors",
-	{ error: DashboardValidationError },
-) {}
-
-export class DashboardConcurrencyError extends Schema.TaggedError<DashboardConcurrencyError>()(
+export class DashboardConcurrencyError extends HttpTaggedError<DashboardConcurrencyError>()(
 	"@maple/http/errors/DashboardConcurrencyError",
 	{
 		dashboardId: DashboardId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 409 },
+	{
+		status: 409,
+		code: "dashboard_concurrent_update",
+		title: "Dashboard changed while saving",
+		retry: "never",
+		recovery: "refresh",
+		exposure: "public_message",
+	},
 ) {}
 
 // Templates
@@ -326,13 +352,22 @@ export class DashboardTemplateInstantiateRequest extends Schema.Class<DashboardT
 	name: Schema.optionalKey(Schema.String),
 }) {}
 
-export class DashboardTemplateNotFoundError extends Schema.TaggedError<DashboardTemplateNotFoundError>()(
+export class DashboardTemplateNotFoundError extends HttpTaggedError<DashboardTemplateNotFoundError>()(
 	"@maple/http/errors/DashboardTemplateNotFoundError",
 	{
 		templateId: DashboardTemplateId,
 		message: Schema.String,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "dashboard_template_not_found",
+		title: "Dashboard template not found",
+		message: "No such dashboard template.",
+		param: "template_id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
 export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
@@ -427,5 +462,4 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		}),
 	)
 	.prefix("/api/dashboards")
-	.middleware(Authorization)
-	.middleware(DashboardSchemaErrors) {}
+	.middleware(Authorization) {}
