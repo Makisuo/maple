@@ -35,11 +35,11 @@ export function ErrorState({ error, title, onRetry, variant = "panel", className
 	const formatted = formatBackendError(error)
 	const heading = title ?? formatted.title
 	const canRetry =
-		onRetry !== undefined && (formatted.recovery.kind === "retry" || formatted.recovery.kind === "reload")
+		onRetry !== undefined && (formatted.recovery === "retry" || formatted.recovery === "refresh")
 	// Connectivity blips self-heal: probe on a backoff poll + the `online`
 	// event, so recovery doesn't require the user to click or reload.
 	const autoRetrying = useNetworkAutoRetry(
-		formatted.recovery.kind === "retry" && formatted.recovery.automatic && canRetry,
+		formatted.recovery === "retry" && formatted.automaticRetry && canRetry,
 		onRetry,
 	)
 	const description = autoRetrying

@@ -21,14 +21,14 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 		router.invalidate()
 	}
 	const autoRetrying = useNetworkAutoRetry(
-		formatted.recovery.kind === "retry" && formatted.recovery.automatic && !isStaleChunk,
+		formatted.recovery === "retry" && formatted.automaticRetry && !isStaleChunk,
 		retry,
 	)
 	const description = autoRetrying
 		? `${formatted.description} Retrying automatically…`
 		: formatted.description
-	const canRetry = formatted.recovery.kind === "retry" || formatted.recovery.kind === "reload"
-	const shouldReload = isStaleChunk || formatted.recovery.kind === "reload"
+	const canRetry = formatted.recovery === "retry" || formatted.recovery === "refresh"
+	const shouldReload = isStaleChunk || formatted.recovery === "refresh"
 
 	return (
 		<Empty className="min-h-[60vh]" role="alert" aria-live="assertive" aria-atomic="true">
