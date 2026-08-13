@@ -1,7 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ApiKeyId, PostgresTransactionId, UserId } from "../../primitives"
-import { ApiKeyForbiddenError, ApiKeyKind, ApiKeyNotFoundError, ApiKeyPersistenceError } from "../api-keys"
+import { ApiKeyKind, ApiKeyNotFoundError, ApiKeyPersistenceError } from "../api-keys"
 import { AuthorizationV2, V2Scope } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2InsufficientPermissions, V2ParameterInvalid } from "./errors"
@@ -197,7 +197,6 @@ export const V2ApiKeyCreateParams = Schema.Struct({
 })
 export type V2ApiKeyCreateParams = Schema.Schema.Type<typeof V2ApiKeyCreateParams>
 
-const apiKeyForbidden = publicError(ApiKeyForbiddenError)
 const apiKeyNotFound = publicError(ApiKeyNotFoundError)
 const apiKeyPersistence = publicError(ApiKeyPersistenceError)
 
@@ -227,7 +226,7 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 		HttpApiEndpoint.post("create", "/", {
 			payload: V2ApiKeyCreateParams,
 			success: V2ApiKeyWithSecret,
-			error: [V2InsufficientPermissions.schema, apiKeyForbidden, apiKeyPersistence],
+			error: [V2InsufficientPermissions.schema, apiKeyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "createApiKey",
@@ -255,7 +254,7 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 		HttpApiEndpoint.post("roll", "/:id/roll", {
 			params: { id: ApiKeyPublicId },
 			success: V2ApiKeyWithSecret,
-			error: [V2InsufficientPermissions.schema, apiKeyForbidden, apiKeyNotFound, apiKeyPersistence],
+			error: [V2InsufficientPermissions.schema, apiKeyNotFound, apiKeyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "rollApiKey",
@@ -269,7 +268,7 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 		HttpApiEndpoint.delete("revoke", "/:id", {
 			params: { id: ApiKeyPublicId },
 			success: V2ApiKeyMutationResponse,
-			error: [V2InsufficientPermissions.schema, apiKeyForbidden, apiKeyNotFound, apiKeyPersistence],
+			error: [V2InsufficientPermissions.schema, apiKeyNotFound, apiKeyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "revokeApiKey",

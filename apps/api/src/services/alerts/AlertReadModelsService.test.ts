@@ -137,10 +137,10 @@ describe("AlertReadModelsService", () => {
 			const readModels = yield* AlertReadModelsService
 
 			const missingIncident = yield* Effect.flip(readModels.getIncident(OTHER_ORG, INCIDENT_NEW))
-			assert.strictEqual(missingIncident._tag, "@maple/http/errors/AlertNotFoundError")
+			assert.strictEqual(missingIncident._tag, "@maple/http/errors/AlertIncidentNotFoundError")
 
 			const missingChecks = yield* Effect.flip(readModels.listRuleChecks(OTHER_ORG, RULE, {}))
-			assert.strictEqual(missingChecks._tag, "@maple/http/errors/AlertNotFoundError")
+			assert.strictEqual(missingChecks._tag, "@maple/http/errors/AlertRuleNotFoundError")
 			assert.deepStrictEqual(contexts, [])
 
 			const checks = yield* readModels.listRuleChecks(ORG, RULE, { limit: 20 })

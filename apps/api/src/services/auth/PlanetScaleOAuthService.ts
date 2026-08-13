@@ -88,6 +88,15 @@ export interface PlanetScaleOrganization {
 	readonly name: string
 }
 
+/** Exact failures involved in resolving a usable PlanetScale OAuth token. */
+export type PlanetScaleAccessTokenError =
+	| IntegrationsNotConnectedError
+	| IntegrationsRevokedError
+	| IntegrationsUpstreamError
+	| IntegrationsPersistenceError
+	| IntegrationsValidationError
+	| IntegrationsConfigurationError
+
 // Lenient decoders: only the fields we consume. PlanetScale list endpoints wrap
 // results in a `{ data: [...] }` envelope.
 const OrganizationSchema = Schema.Struct({
@@ -149,15 +158,7 @@ export interface PlanetScaleOAuthServiceShape {
 	>
 	readonly getValidAccessToken: (
 		orgId: OrgId,
-	) => Effect.Effect<
-		{ readonly accessToken: string },
-		| IntegrationsNotConnectedError
-		| IntegrationsRevokedError
-		| IntegrationsUpstreamError
-		| IntegrationsPersistenceError
-		| IntegrationsValidationError
-		| IntegrationsConfigurationError
-	>
+	) => Effect.Effect<{ readonly accessToken: string }, PlanetScaleAccessTokenError>
 	/** Organizations the stored grant can access — org-picker material. */
 	readonly listOrganizations: (
 		orgId: OrgId,

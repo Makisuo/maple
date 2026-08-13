@@ -108,9 +108,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						return yield* Effect.provideService(httpEffect, CurrentTenant.Context, tenant)
 					}
 
-					const tenant = yield* resolveTenant(request.headers).pipe(
-						Effect.mapError(() => V2InvalidCredentials.make()),
-					)
+					const tenant = yield* resolveTenant(request.headers)
 					yield* annotateAuthSpan("session", { orgId: tenant.orgId, userId: tenant.userId })
 					return yield* Effect.provideService(
 						httpEffect,

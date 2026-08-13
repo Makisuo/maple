@@ -20,6 +20,7 @@ import {
 	RoleName,
 	UserId as UserIdSchema,
 	type WorkflowState,
+	type WarehouseReadError,
 } from "@maple/domain/http"
 import { errorIncidents, type ErrorIncidentRow, errorIssues } from "@maple/db"
 import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm"
@@ -35,7 +36,7 @@ import { dateToMs, msToDate } from "@/platform/time"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
-import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
+import { makeErrorDatabaseExecute } from "./error-persistence"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const encodeIssueListCursor = Schema.encodeSync(IssueListCursor)
@@ -98,7 +99,7 @@ export interface ErrorIssueReadModelsPublicShape {
 			readonly actionable?: boolean
 			readonly sort?: "last_seen" | "severity"
 		},
-	) => Effect.Effect<ErrorIssuesListResponse, ErrorPersistenceError>
+	) => Effect.Effect<ErrorIssuesListResponse, ErrorPersistenceError | WarehouseReadError>
 	/** Fleet-level open (actionable-state) error-issue counts grouped by service. */
 	readonly countOpenIssuesByService: (
 		orgId: OrgId,
@@ -115,7 +116,10 @@ export interface ErrorIssueReadModelsPublicShape {
 			readonly bucketSeconds?: number
 			readonly sampleLimit?: number
 		},
-	) => Effect.Effect<ErrorIssueDetailResponse, ErrorPersistenceError | ErrorIssueNotFoundError>
+	) => Effect.Effect<
+		ErrorIssueDetailResponse,
+		ErrorPersistenceError | ErrorIssueNotFoundError | WarehouseReadError
+	>
 	readonly listIssueIncidents: (
 		orgId: OrgId,
 		issueId: ErrorIssueId,
@@ -197,11 +201,9 @@ const make: Effect.Effect<
 						endTime: formatWarehouseDateTime(scanEndMs),
 					},
 				)
-				const fingerprintRows = yield* warehouse
-					.compiledQuery(systemTenant(orgId), compiled, {
-						context: "errorIssueEnvFingerprints",
-					})
-					.pipe(Effect.mapError(makePersistenceError))
+				const fingerprintRows = yield* warehouse.compiledQuery(systemTenant(orgId), compiled, {
+					context: "errorIssueEnvFingerprints",
+				})
 				const hashes = fingerprintRows
 					.map((row) => row.fingerprintHash)
 					.filter((hash) => hash.length > 0)
@@ -335,11 +337,9 @@ const make: Effect.Effect<
 				bucketSeconds,
 			})
 			const timeseriesEffect = isErrorKind
-				? warehouse
-						.compiledQuery(tenant, timeseriesCompiled, {
-							context: "errorIssueTimeseries",
-						})
-						.pipe(Effect.mapError(makePersistenceError))
+				? warehouse.compiledQuery(tenant, timeseriesCompiled, {
+						context: "errorIssueTimeseries",
+					})
 				: Effect.succeed([])
 
 			const samplesCompiled = CH.compile(
@@ -353,11 +353,9 @@ const make: Effect.Effect<
 				{ rowSchema: CH.ErrorIssueSampleTracesOutputSchema },
 			)
 			const samplesEffect = isErrorKind
-				? warehouse
-						.compiledQuery(tenant, samplesCompiled, {
-							context: "errorIssueSampleTraces",
-						})
-						.pipe(Effect.mapError(makePersistenceError))
+				? warehouse.compiledQuery(tenant, samplesCompiled, {
+						context: "errorIssueSampleTraces",
+					})
 				: Effect.succeed([])
 
 			const incidentsEffect = dbExecute((db) =>

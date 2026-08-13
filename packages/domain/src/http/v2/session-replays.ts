@@ -5,7 +5,7 @@ import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { defineV2Error, V2ParameterInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
-import { V2WarehouseErrors } from "./query-errors"
+import { V2WarehouseReadErrors } from "./query-errors"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
@@ -420,7 +420,7 @@ export const V2SessionReplayNotFound = defineV2Error({
 	code: "session_replay_not_found",
 	title: "Session replay not found",
 	message: "No such session replay.",
-	retryable: false,
+	retry: "never",
 	recovery: "none",
 	identifier: "SessionReplayNotFoundError",
 })
@@ -432,12 +432,12 @@ export const V2SessionReplayRangeTooLarge = defineV2Error({
 	title: "Session replay range too large",
 	message:
 		"That part of the recording is too large to load in one request. Request a narrower chunk range.",
-	retryable: false,
+	retry: "never",
 	recovery: "fix_request",
 	identifier: "SessionReplayRangeTooLargeError",
 })
 
-const commonErrors = [V2ParameterInvalid.schema, ...V2WarehouseErrors] as const
+const commonErrors = [V2ParameterInvalid.schema, ...V2WarehouseReadErrors] as const
 
 const SessionReplayList = ListOf(V2SessionReplayListItem).annotate({
 	identifier: "SessionReplayList",

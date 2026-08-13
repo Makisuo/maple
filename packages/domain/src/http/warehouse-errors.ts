@@ -1,8 +1,13 @@
 import { Schema } from "effect"
-import { HttpTaggedError } from "./error-policy"
+import { HttpTaggedError, publicHttpErrorDefinitionFor } from "./error-policy"
+import {
+	OrgClickHouseSettingsEncryptionError,
+	OrgClickHouseSettingsPersistenceError,
+	OrgClickHouseSettingsStoredConfigInvalidError,
+} from "./org-clickhouse-settings-errors"
 
-// Pure error definitions for warehouse queries. This module imports ONLY
-// `effect` Schema — never `effect/unstable/httpapi` — so non-HTTP consumers
+// Pure error definitions for warehouse queries. This module imports only
+// Effect Schema and other error-only modules — never `effect/unstable/httpapi` — so non-HTTP consumers
 // (`@maple/query-engine/observability`, the CLI executors) can import these
 // classes without pulling the HttpApi AST builder into their bundles.
 // `warehouse.ts` re-exports everything here and owns the `WarehouseApiGroup`.
@@ -18,8 +23,9 @@ import { HttpTaggedError } from "./error-policy"
 // pass never evaluates these Schema ASTs (they build on the first request,
 // under the far larger per-request budget).
 
-// Fields common to every warehouse error. `cause` carries the original thrown
-// defect; `clickhouse*` carry CH diagnostics extracted by the warehouse classifier.
+// Fields common to errors created by the SQL classifier/executor. Route
+// dependencies keep their own tagged errors instead of being copied into this
+// shape. `cause` carries the original defect; `clickhouse*` carry diagnostics.
 const warehouseErrorBaseFields = {
 	message: Schema.String,
 	pipeName: Schema.String,
@@ -94,6 +100,42 @@ export class WarehouseConfigError extends HttpTaggedError<WarehouseConfigError>(
 	},
 ) {}
 
+/** The deployment cannot mint the org-scoped token required by raw SQL. */
+export class TinybirdOrgTokenConfigError extends HttpTaggedError<TinybirdOrgTokenConfigError>()(
+	"@maple/http/errors/TinybirdOrgTokenConfigError",
+	{
+		setting: Schema.Literals(["SigningKey", "WorkspaceId"]),
+		message: Schema.String,
+	},
+	{
+		status: 500,
+		code: "tinybird_org_token_config_invalid",
+		title: "Maple warehouse access is not configured",
+		message: "Maple could not configure secure access to the database.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+/** Minting the org-scoped Tinybird token failed. */
+export class TinybirdOrgTokenMintError extends HttpTaggedError<TinybirdOrgTokenMintError>()(
+	"@maple/http/errors/TinybirdOrgTokenMintError",
+	{
+		message: Schema.String,
+		cause: Schema.Defect(),
+	},
+	{
+		status: 500,
+		code: "tinybird_org_token_mint_failed",
+		title: "Maple could not authorize database access",
+		message: "Maple could not authorize secure access to the database.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
 /** Maple's query client could not decode/consume the response. */
 export class WarehouseClientError extends HttpTaggedError<WarehouseClientError>()(
 	"@maple/http/errors/WarehouseClientError",
@@ -109,33 +151,52 @@ export class WarehouseClientError extends HttpTaggedError<WarehouseClientError>(
 	},
 ) {}
 
-/**
- * A BYO ClickHouse cluster is missing a column or has the wrong type for one
- * Maple expects; remediated by running schema apply on the cluster. The MCP
- * layer enriches this with an actionable hint.
- *
- * `kind` splits two failure modes that need opposite advice: `"cluster"`
- * (absent = cluster, for wire compatibility) means the cluster itself rejected
- * the query — run schema apply; `"decode"` means the cluster answered but the
- * rows failed Maple's own row schema — schema apply cannot fix that and the
- * presenter must not suggest it.
- */
+/** A customer-managed cluster is missing schema Maple requires. */
 export class WarehouseSchemaDriftError extends HttpTaggedError<WarehouseSchemaDriftError>()(
 	"@maple/http/errors/WarehouseSchemaDriftError",
-	{ ...warehouseErrorBaseFields, kind: Schema.optional(Schema.Literals(["cluster", "decode"])) },
+	warehouseErrorBaseFields,
 	{
 		status: 502,
 		code: "warehouse_schema_drift",
-		title: (error) =>
-			error.kind === "decode"
-				? "Query results did not match what Maple expected"
-				: "Database schema is out of date",
-		message: (error) =>
-			error.kind === "decode"
-				? "The database answered with rows Maple could not decode. This is likely a Maple bug, not a problem with your cluster."
-				: "A column Maple expects is missing from the cluster. Run schema apply from your ClickHouse settings.",
+		title: "Database schema is out of date",
+		message:
+			"A column Maple expects is missing from the cluster. Run schema apply from your ClickHouse settings.",
 		retry: "never",
 		recovery: "reconnect",
+		exposure: "redacted",
+	},
+) {}
+
+/** The database returned rows that did not match Maple's declared result schema. */
+export class WarehouseResultDecodeError extends HttpTaggedError<WarehouseResultDecodeError>()(
+	"@maple/http/errors/WarehouseResultDecodeError",
+	warehouseErrorBaseFields,
+	{
+		status: 502,
+		code: "warehouse_result_decode_failed",
+		title: "Database response did not match the expected schema",
+		message:
+			"The database returned a response Maple could not decode. This is likely a Maple bug, not a problem with your cluster.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+/**
+ * Maple attempted to execute trusted SQL through the wrong tenant-scope path.
+ * This is an internal safety invariant, never something an HTTP caller can fix.
+ */
+export class WarehouseScopeError extends HttpTaggedError<WarehouseScopeError>()(
+	"@maple/http/errors/WarehouseScopeError",
+	warehouseErrorBaseFields,
+	{
+		status: 500,
+		code: "warehouse_scope_invariant_failed",
+		title: "Maple could not safely run this query",
+		message: "Maple rejected a query that did not satisfy its tenant-scope invariant.",
+		retry: "never",
+		recovery: "contact_support",
 		exposure: "redacted",
 	},
 ) {}
@@ -195,9 +256,9 @@ export class WarehouseQuotaExceededError extends HttpTaggedError<WarehouseQuotaE
 ) {}
 
 /**
- * A precondition for running a warehouse query was not met (empty org scope,
- * missing OrgId filter, unsupported pipe). This is a bad request, not a backend
- * failure — mapped to 400.
+ * A caller-selected warehouse operation is invalid (for example an unsupported
+ * legacy pipe or an observability search shape the adapter cannot represent).
+ * Trusted compiled-query safety failures use `WarehouseScopeError` instead.
  */
 export class WarehouseValidationError extends HttpTaggedError<WarehouseValidationError>()(
 	"@maple/http/errors/WarehouseValidationError",
@@ -212,25 +273,12 @@ export class WarehouseValidationError extends HttpTaggedError<WarehouseValidatio
 	},
 ) {}
 
-/** Every warehouse error. Use this as the error channel of warehouse-facing effects. */
-export type WarehouseError =
-	| WarehouseQueryError
-	| WarehouseUpstreamError
-	| WarehouseAuthError
-	| WarehouseConfigError
-	| WarehouseClientError
-	| WarehouseSchemaDriftError
-	| WarehouseMalformedQueryError
-	| WarehouseQuotaExceededError
-	| WarehouseValidationError
-
 /**
- * The full set of warehouse error classes, for reuse in `HttpApiEndpoint`
- * `error:` arrays. Every endpoint that can surface a warehouse error must list
- * all of them, or the HttpApi client throws when it decodes an unrecognized
- * `_tag`. Spread this (`...warehouseHttpErrors`) into each endpoint's array.
+ * Managed-query errors are defined once as classes, then both the union and
+ * endpoint schemas derive from this tuple. This prevents a new tagged error
+ * from being added to execution without being added to OpenAPI as well.
  */
-export const warehouseHttpErrors = [
+export const classifiedWarehouseHttpErrors = [
 	WarehouseQueryError,
 	WarehouseUpstreamError,
 	WarehouseAuthError,
@@ -239,5 +287,72 @@ export const warehouseHttpErrors = [
 	WarehouseSchemaDriftError,
 	WarehouseMalformedQueryError,
 	WarehouseQuotaExceededError,
-	WarehouseValidationError,
 ] as const
+
+export const managedWarehouseHttpErrors = [
+	...classifiedWarehouseHttpErrors,
+	WarehouseResultDecodeError,
+	WarehouseScopeError,
+] as const
+
+/** Errors added while resolving the saved per-org read override. */
+export const warehouseSettingsRouteHttpErrors = [
+	OrgClickHouseSettingsPersistenceError,
+	OrgClickHouseSettingsEncryptionError,
+	OrgClickHouseSettingsStoredConfigInvalidError,
+] as const
+
+/** Errors unique to minting an org-scoped token for user-authored raw SQL. */
+export const warehouseTokenRouteHttpErrors = [TinybirdOrgTokenConfigError, TinybirdOrgTokenMintError] as const
+
+/** Normal reads resolve saved settings but never mint a raw-SQL token. */
+export const warehouseReadHttpErrors = [
+	...managedWarehouseHttpErrors,
+	...warehouseSettingsRouteHttpErrors,
+] as const
+
+/** Failures that can escape compiled or raw execution into public v2 query routes. */
+export const warehouseQueryHttpErrors = [
+	...warehouseReadHttpErrors,
+	...warehouseTokenRouteHttpErrors,
+] as const
+
+/**
+ * Compatibility superset for the legacy named-pipe and observability adapters,
+ * which also accept caller-selected operations and can reject those as invalid.
+ */
+export const warehouseHttpErrors = [...warehouseQueryHttpErrors, WarehouseValidationError] as const
+
+type ErrorInstance<ErrorClass> = ErrorClass extends abstract new (...args: never[]) => infer Error
+	? Error
+	: never
+
+/** Every warehouse error, including legacy caller-operation validation. */
+export type WarehouseError = ErrorInstance<(typeof warehouseHttpErrors)[number]>
+export type WarehouseErrorTag = WarehouseError["_tag"]
+
+/** Errors that can escape compiled or raw query execution into v2 endpoints. */
+export type WarehouseQueryPathError = ErrorInstance<(typeof warehouseQueryHttpErrors)[number]>
+
+/** Errors produced by classifying a driver/upstream SQL failure. */
+export type WarehouseClassifiedError = ErrorInstance<(typeof classifiedWarehouseHttpErrors)[number]>
+
+/** Errors possible on managed-only routes, which never read per-org routing config. */
+export type ManagedWarehouseError = ErrorInstance<(typeof managedWarehouseHttpErrors)[number]>
+
+/** Errors possible on ordinary tenant reads. */
+export type WarehouseReadError = ErrorInstance<(typeof warehouseReadHttpErrors)[number]>
+
+export type WarehouseSettingsRouteError = ErrorInstance<(typeof warehouseSettingsRouteHttpErrors)[number]>
+export type WarehouseTokenRouteError = ErrorInstance<(typeof warehouseTokenRouteHttpErrors)[number]>
+export type WarehouseRouteError = WarehouseSettingsRouteError | WarehouseTokenRouteError
+
+/** Exact tags derived from the class tuple for tag-based consumers. */
+export const warehouseErrorTags = warehouseHttpErrors.map(
+	(errorClass) => publicHttpErrorDefinitionFor(errorClass).tag,
+) as ReadonlyArray<WarehouseErrorTag>
+
+/** Exact tags for ordinary reads, derived from the same classes as the union and OpenAPI schemas. */
+export const warehouseReadErrorTags = warehouseReadHttpErrors.map(
+	(errorClass) => publicHttpErrorDefinitionFor(errorClass).tag,
+) as ReadonlyArray<WarehouseReadError["_tag"]>

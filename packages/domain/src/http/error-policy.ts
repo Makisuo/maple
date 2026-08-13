@@ -27,6 +27,7 @@ export type PublicHttpErrorType = Schema.Schema.Type<typeof PublicHttpErrorType>
 
 export type HttpErrorRetry = "never" | "backoff" | "after"
 export type PublicHttpErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 502 | 503 | 504
+export type PublicHttpErrorTag = `@maple/http/${string}`
 
 export type PublicHttpErrorTypeForStatus<Status extends PublicHttpErrorStatus> = Status extends 400 | 413
 	? "invalid_request_error"
@@ -54,29 +55,90 @@ export interface PublicHttpErrorBody<Tag extends string, Status extends PublicHt
 	readonly retry_after_seconds?: number
 	readonly retry_at?: string
 	readonly param?: string
-	readonly doc_url?: string
 }
 
-/** Runtime contract for a public error body when its exact tag/status are not known statically. */
-export const PublicHttpErrorBodySchema = Schema.Struct({
-	_tag: Schema.String.check(Schema.isPattern(/^@maple\//)),
-	type: PublicHttpErrorType,
-	code: Schema.String,
-	title: Schema.String,
-	message: Schema.String,
-	retryable: Schema.Boolean,
-	recovery: HttpErrorRecovery,
-	retry_after_seconds: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+const publicHttpErrorBodyFields = {
+	code: Schema.String.annotate({
+		description: "Stable public category for presentation; branch on `_tag` for the exact failure.",
+	}),
+	title: Schema.String.annotate({
+		description: "Short, human-readable heading suitable for an error state or toast.",
+	}),
+	message: Schema.String.annotate({
+		description: "Human-readable explanation for people, not programmatic branching.",
+	}),
+	retryable: Schema.Boolean.annotate({
+		description: "Whether the same logical request can plausibly succeed later.",
+	}),
+	recovery: HttpErrorRecovery.annotate({
+		description: "Recommended next action for an API client or person.",
+	}),
+	retry_after_seconds: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)).annotate({
+			description: "Minimum delay before retrying, mirrored in the Retry-After header.",
+		}),
+	),
 	retry_at: Schema.optionalKey(
 		Schema.String.check(
 			Schema.makeFilter((value: string) => Number.isFinite(Date.parse(value)), {
 				description: "Expected an ISO date-time string",
 			}),
-		),
+		).annotate({ description: "Absolute ISO-8601 time at which a retry may succeed." }),
 	),
-	param: Schema.optionalKey(Schema.String),
-	doc_url: Schema.optionalKey(Schema.String),
-})
+	param: Schema.optionalKey(
+		Schema.String.annotate({ description: "Request parameter associated with the failure." }),
+	),
+}
+
+/**
+ * Build the one public error body contract with either broad or literal tag/type schemas.
+ * Runtime decoding and endpoint-specific OpenAPI branches share these fields so they cannot drift.
+ */
+export const makePublicHttpErrorBodySchema = <Tag extends string, Type extends PublicHttpErrorType>(
+	tag: Schema.Codec<Tag, Tag, never, never>,
+	type: Schema.Codec<Type, Type, never, never>,
+) =>
+	Schema.Struct({
+		_tag: tag,
+		type,
+		...publicHttpErrorBodyFields,
+	})
+
+/**
+ * Build an endpoint-specific body schema from the same policy that materializes
+ * the runtime body. Static policy fields become literals in OpenAPI; dynamic
+ * fields stay broad because their value depends on the error instance.
+ */
+export const makeExactPublicHttpErrorBodySchema = <
+	Error extends PublicTaggedError,
+	Tag extends string,
+	Type extends PublicHttpErrorType,
+	Status extends PublicHttpErrorStatus,
+>(
+	tag: Schema.Codec<Tag, Tag, never, never>,
+	type: Schema.Codec<Type, Type, never, never>,
+	policy: PublicHttpErrorPolicy<Error, Status>,
+) =>
+	Schema.Struct({
+		_tag: tag,
+		type,
+		...publicHttpErrorBodyFields,
+		code: typeof policy.code === "string" ? Schema.Literal(policy.code) : publicHttpErrorBodyFields.code,
+		title:
+			typeof policy.title === "string" ? Schema.Literal(policy.title) : publicHttpErrorBodyFields.title,
+		message:
+			policy.exposure === "redacted" && typeof policy.message === "string"
+				? Schema.Literal(policy.message)
+				: publicHttpErrorBodyFields.message,
+		retryable: Schema.Literal(policy.retry !== "never"),
+		recovery: Schema.Literal(policy.recovery),
+	})
+
+/** Runtime contract for a public error body when its exact tag/status are not known statically. */
+export const PublicHttpErrorBodySchema = makePublicHttpErrorBodySchema(
+	Schema.String.check(Schema.isPattern(/^@maple\//)),
+	PublicHttpErrorType,
+)
 export type AnyPublicHttpErrorBody = Schema.Schema.Type<typeof PublicHttpErrorBodySchema>
 
 type ErrorValue<Error, Value> = Value | ((error: Error) => Value)
@@ -85,22 +147,37 @@ interface PublicHttpErrorPolicyBase<Error, Status extends PublicHttpErrorStatus>
 	readonly status: Status
 	readonly code: ErrorValue<Error, string>
 	readonly title: ErrorValue<Error, string>
-	readonly retry: HttpErrorRetry
-	readonly recovery: HttpErrorRecovery
 	readonly param?: ErrorValue<Error, string | undefined>
 	readonly retryAfterSeconds?: ErrorValue<Error, number | undefined>
 	readonly retryAt?: ErrorValue<Error, string | undefined>
 }
 
-/** Public HTTP presentation owned by the tagged error class itself. */
-export type PublicHttpErrorPolicy<Error, Status extends PublicHttpErrorStatus> =
-	| (PublicHttpErrorPolicyBase<Error, Status> & {
+type PublicHttpRetryPolicy =
+	| {
+			readonly retry: "never"
+			readonly recovery: Exclude<HttpErrorRecovery, "retry">
+	  }
+	| {
+			readonly retry: Exclude<HttpErrorRetry, "never">
+			readonly recovery: "retry"
+	  }
+
+type PublicHttpMessagePolicy<Error> =
+	| {
 			readonly exposure: "public_message"
-	  })
-	| (PublicHttpErrorPolicyBase<Error, Status> & {
+	  }
+	| {
 			readonly exposure: "redacted"
 			readonly message: ErrorValue<Error, string>
-	  })
+	  }
+
+/** Public HTTP presentation owned by the tagged error class itself. */
+export type PublicHttpErrorPolicy<Error, Status extends PublicHttpErrorStatus> = PublicHttpErrorPolicyBase<
+	Error,
+	Status
+> &
+	PublicHttpRetryPolicy &
+	PublicHttpMessagePolicy<Error>
 
 /** Type-level and runtime link from an error to its class-owned HTTP definition. */
 export const PublicHttpErrorPolicyTypeId: unique symbol = Symbol.for("@maple/http/PublicHttpErrorPolicy")
@@ -152,7 +229,7 @@ export interface SelfDescribingHttpErrorClass<Error extends SelfDescribingHttpEr
 export const HttpTaggedError =
 	<Self>() =>
 	<
-		const Tag extends string,
+		const Tag extends PublicHttpErrorTag,
 		const Fields extends Schema.Struct.Fields,
 		const Policy extends PublicHttpErrorPolicy<
 			Schema.Struct.Type<Fields> & PublicTaggedError,

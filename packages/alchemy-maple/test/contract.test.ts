@@ -6,20 +6,49 @@
 import { describe, expect, it } from "vitest"
 import { Effect, Schema } from "effect"
 import {
+	ApiKeyNotFoundError,
+	AlertDestinationNotFoundError,
+	AlertRuleNotFoundError,
+	DashboardNotFoundError,
+	PublicHttpErrorBodySchema,
+	type AnyPublicHttpErrorBody,
+} from "@maple/domain/http"
+import {
 	V2AlertDestinationCreateParams,
 	V2AlertRuleCreateParams,
 	V2ApiKeyCreateParams,
+	V2InvalidRequest,
 	V2DashboardCreateParams,
 } from "@maple/domain/http/v2"
 import { _alertDestinationCreateBody } from "../src/AlertDestination"
 import { _alertRuleCreateBody } from "../src/AlertRule"
 import { _apiKeyCreateBody } from "../src/ApiKey"
 import { _dashboardCreateBody } from "../src/Dashboard"
+import { MapleErrorTags, MaplePublicErrorBodySchema, type MaplePublicErrorBody } from "../src/errors"
+
+const _clientErrorBodySatisfiesDomain = (body: MaplePublicErrorBody): AnyPublicHttpErrorBody => body
+void _clientErrorBodySatisfiesDomain
+
+const _apiKeyNotFoundTag: ApiKeyNotFoundError["_tag"] = MapleErrorTags.apiKeyNotFound
+const _dashboardNotFoundTag: DashboardNotFoundError["_tag"] = MapleErrorTags.dashboardNotFound
+const _alertRuleNotFoundTag: AlertRuleNotFoundError["_tag"] = MapleErrorTags.alertRuleNotFound
+const _alertDestinationNotFoundTag: AlertDestinationNotFoundError["_tag"] =
+	MapleErrorTags.alertDestinationNotFound
+void _apiKeyNotFoundTag
+void _dashboardNotFoundTag
+void _alertRuleNotFoundTag
+void _alertDestinationNotFoundTag
 
 const decodes = <S extends Schema.Codec<unknown, unknown, never, never>>(schema: S, wire: unknown) =>
 	Effect.runSync(Schema.decodeUnknownEffect(schema)(wire).pipe(Effect.asVoid))
 
 describe("provider request bodies decode against the real v2 create-param schemas", () => {
+	it("public error body", () => {
+		const body = V2InvalidRequest.make().error
+		expect(() => decodes(PublicHttpErrorBodySchema, body)).not.toThrow()
+		expect(() => decodes(MaplePublicErrorBodySchema, body)).not.toThrow()
+	})
+
 	it("dashboard create body", () => {
 		const body = _dashboardCreateBody({
 			name: "Service health",

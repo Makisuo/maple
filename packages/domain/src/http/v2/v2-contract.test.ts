@@ -21,7 +21,7 @@ import {
 	paginateOffsetQuery,
 	Timestamp,
 } from "./envelopes"
-import { notFound, permissionError, rateLimited, V2NotFoundError, V2RateLimitError } from "./errors"
+import { defineV2Error, V2InsufficientScope, V2RateLimited } from "./errors"
 import { encodePublicId } from "./public-id"
 import {
 	LogPublicId,
@@ -451,18 +451,30 @@ describe("V2 alerts wire format", () => {
 })
 
 describe("v2 error envelope", () => {
+	const TestNotFound = defineV2Error({
+		tag: "@maple/http/v2/TestNotFoundError",
+		status: 404,
+		code: "resource_missing",
+		title: "Not found",
+		message: "The resource does not exist.",
+		retry: "never",
+		recovery: "none",
+		identifier: "TestNotFoundError",
+	})
+
 	it("exposes the public message to Effect and telemetry without changing the wire shape", () => {
-		const error = notFound("No such api_key", "id")
+		const error = TestNotFound.make("No such api_key", { param: "id" })
+		expect(error._tag).toBe("@maple/http/v2/TestNotFoundError")
 		expect(error.message).toBe("No such api_key")
 		expect(String(error)).toContain("No such api_key")
 	})
 
 	it("encodes the semantic tag and recovery contract inside the public envelope", () => {
-		const error = notFound("No such api_key", "id")
-		const wire = Schema.encodeSync(V2NotFoundError)(error) as Record<string, unknown>
+		const error = TestNotFound.make("No such api_key", { param: "id" })
+		const wire = Schema.encodeSync(TestNotFound.schema)(error) as Record<string, unknown>
 		expect(wire).toEqual({
 			error: {
-				_tag: "@maple/http/v2/resource_missing",
+				_tag: "@maple/http/v2/TestNotFoundError",
 				type: "not_found_error",
 				code: "resource_missing",
 				title: "Not found",
@@ -479,7 +491,7 @@ describe("v2 error envelope", () => {
 
 	it("requires a semantic tag on every public error", () => {
 		expect(() =>
-			Schema.decodeUnknownSync(V2NotFoundError)({
+			Schema.decodeUnknownSync(TestNotFound.schema)({
 				error: {
 					type: "not_found_error",
 					code: "resource_missing",
@@ -490,24 +502,24 @@ describe("v2 error envelope", () => {
 	})
 
 	it("omits param when not provided", () => {
-		const wire = Schema.encodeSync(V2NotFoundError)(notFound("gone")) as {
-			error: Record<string, unknown>
-		}
+		const wire = Schema.encodeSync(TestNotFound.schema)(TestNotFound.make("gone"))
 		expect("param" in wire.error).toBe(false)
 	})
 
-	it("permissionError has type permission_error", () => {
-		expect(permissionError("insufficient_scope", "nope").error.type).toBe("permission_error")
+	it("permission errors carry their declared category", () => {
+		expect(V2InsufficientScope.make("nope").error.type).toBe("permission_error")
 	})
 
 	it("rateLimited has the stable public 429 envelope", () => {
-		expect(Schema.encodeSync(V2RateLimitError)(rateLimited())).toEqual({
+		expect(
+			Schema.encodeSync(V2RateLimited.schema)(V2RateLimited.make(undefined, { retryAfterSeconds: 60 })),
+		).toEqual({
 			error: {
-				_tag: "@maple/http/v2/rate_limited",
+				_tag: "@maple/http/v2/RateLimitError",
 				type: "rate_limit_error",
 				code: "rate_limited",
 				title: "Too many requests",
-				message: "Too many requests. Retry after 60 seconds.",
+				message: "Too many requests. Retry after the interval in the Retry-After header.",
 				retryable: true,
 				recovery: "retry",
 				retry_after_seconds: 60,

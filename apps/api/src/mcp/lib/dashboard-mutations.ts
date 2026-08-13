@@ -139,6 +139,8 @@ export const withDashboardMutation = Effect.fn("withDashboardMutation")(function
 			Effect.catchTags({
 				"@maple/http/errors/DashboardPersistenceError": (error) =>
 					Effect.fail(new McpQueryError({ message: error.message, pipeName: tool, cause: error })),
+				"@maple/http/errors/DashboardStoredConfigInvalidError": (error) =>
+					Effect.fail(new McpQueryError({ message: error.message, pipeName: tool, cause: error })),
 				"@maple/http/errors/DashboardConcurrencyError": (error) =>
 					Effect.fail(new McpQueryError({ message: error.message, pipeName: tool, cause: error })),
 				"@maple/http/errors/DashboardValidationError": (error) =>

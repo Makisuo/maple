@@ -8,6 +8,7 @@ import {
 } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
+import { toMcpHttpError } from "@/mcp/lib/map-http-error"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
@@ -195,16 +196,9 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 			const alerts = yield* AlertsService
 			const rules = yield* AlertRulesService
 
-			const list = yield* rules.listRules(tenant.orgId).pipe(
-				Effect.mapError(
-					(error) =>
-						new McpQueryError({
-							message: error.message,
-							pipeName: "update_alert_rule",
-							cause: error,
-						}),
-				),
-			)
+			const list = yield* rules
+				.listRules(tenant.orgId)
+				.pipe(Effect.mapError(toMcpHttpError("update_alert_rule")))
 
 			const current = list.rules.find((r) => r.id === params.rule_id)
 			if (!current) {
@@ -240,43 +234,7 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 
 			const rule = yield* alerts
 				.updateRule(tenant.orgId, tenant.userId, tenant.roles, current.id, decoded)
-				.pipe(
-					Effect.catchTag("@maple/http/errors/AlertValidationError", (error) =>
-						Effect.fail(
-							new McpQueryError({
-								message: `${error._tag}: ${error.message}\n${error.details.join("\n")}`,
-								pipeName: "update_alert_rule",
-								cause: error,
-							}),
-						),
-					),
-					Effect.catchTags({
-						"@maple/http/errors/AlertForbiddenError": (error) =>
-							Effect.fail(
-								new McpQueryError({
-									message: `${error._tag}: ${error.message}`,
-									pipeName: "update_alert_rule",
-									cause: error,
-								}),
-							),
-						"@maple/http/errors/AlertPersistenceError": (error) =>
-							Effect.fail(
-								new McpQueryError({
-									message: `${error._tag}: ${error.message}`,
-									pipeName: "update_alert_rule",
-									cause: error,
-								}),
-							),
-						"@maple/http/errors/AlertNotFoundError": (error) =>
-							Effect.fail(
-								new McpQueryError({
-									message: `${error._tag}: ${error.message}`,
-									pipeName: "update_alert_rule",
-									cause: error,
-								}),
-							),
-					}),
-				)
+				.pipe(Effect.mapError(toMcpHttpError("update_alert_rule")))
 
 			const lines: string[] = [
 				`## Alert Rule Updated`,

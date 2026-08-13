@@ -9,6 +9,13 @@ import {
 	IntegrationsUpstreamError,
 	IntegrationsValidationError,
 } from "../integrations"
+import {
+	ScrapeTargetEncryptionError,
+	ScrapeTargetNotFoundError,
+	ScrapeTargetPersistenceError,
+	ScrapeTargetStoredConfigInvalidError,
+	ScrapeTargetValidationError,
+} from "../scrape-targets"
 import { AuthorizationV2 } from "./auth"
 import { Timestamp } from "./envelopes"
 import { V2CallbackHostUnavailable, V2InsufficientPermissions, V2TimeRangeInvalid } from "./errors"
@@ -790,11 +797,32 @@ const organizationErrors = [
 	integrationPersistence,
 ] as const
 
+const [
+	scrapeTargetNotFound,
+	scrapeTargetValidation,
+	scrapeTargetPersistence,
+	scrapeTargetEncryption,
+	scrapeTargetStoredConfigInvalid,
+] = publicErrors(
+	ScrapeTargetNotFoundError,
+	ScrapeTargetValidationError,
+	ScrapeTargetPersistenceError,
+	ScrapeTargetEncryptionError,
+	ScrapeTargetStoredConfigInvalidError,
+)
+const scrapeTargetMutationErrors = [
+	scrapeTargetNotFound,
+	scrapeTargetValidation,
+	scrapeTargetPersistence,
+	scrapeTargetEncryption,
+	scrapeTargetStoredConfigInvalid,
+] as const
+
 export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planetscaleIntegration")
 	.add(
 		HttpApiEndpoint.get("status", "/", {
 			success: V2PlanetScaleIntegration,
-			error: [integrationPersistence],
+			error: [integrationPersistence, scrapeTargetStoredConfigInvalid],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getPlanetScaleIntegration",
@@ -842,7 +870,7 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 		HttpApiEndpoint.post("selectOrganization", "/select_organization", {
 			payload: V2PlanetScaleSelectOrganizationRequest,
 			success: V2PlanetScaleIntegration,
-			error: [V2InsufficientPermissions.schema, ...organizationErrors],
+			error: [V2InsufficientPermissions.schema, ...organizationErrors, ...scrapeTargetMutationErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "selectPlanetScaleOrganization",
@@ -862,6 +890,7 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 				integrationValidation,
 				integrationUpstream,
 				integrationPersistence,
+				...scrapeTargetMutationErrors,
 			],
 		}).annotateMerge(
 			OpenApi.annotations({
@@ -875,7 +904,7 @@ export class V2PlanetScaleIntegrationsApiGroup extends HttpApiGroup.make("planet
 	.add(
 		HttpApiEndpoint.delete("disconnect", "/", {
 			success: V2PlanetScaleDisconnectResponse,
-			error: [V2InsufficientPermissions.schema, integrationPersistence],
+			error: [V2InsufficientPermissions.schema, integrationPersistence, scrapeTargetPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "disconnectPlanetScaleIntegration",

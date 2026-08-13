@@ -5,13 +5,10 @@ import { IssueSeverity } from "../errors"
 import {
 	InvestigationConfidence,
 	InvestigationAgentUnavailableError,
-	InvestigationAutomationDisabledError,
 	InvestigationDataCorruptionError,
 	InvestigationFanoutState,
 	InvestigationNotFoundError,
 	InvestigationPersistenceError,
-	InvestigationQuotaError,
-	InvestigationRejectedError,
 	InvestigationSeededBy,
 	InvestigationStartFailedError,
 	InvestigationStatus,
@@ -500,30 +497,21 @@ export type V2InvestigationsListQuery = Schema.Schema.Type<typeof V2Investigatio
 const [
 	investigationPersistence,
 	investigationNotFound,
-	investigationQuota,
-	investigationAutomationDisabled,
 	investigationAgentUnavailable,
 	investigationStartFailed,
-	investigationRejected,
 	investigationDataCorruption,
 ] = publicErrors(
 	InvestigationPersistenceError,
 	InvestigationNotFoundError,
-	InvestigationQuotaError,
-	InvestigationAutomationDisabledError,
 	InvestigationAgentUnavailableError,
 	InvestigationStartFailedError,
-	InvestigationRejectedError,
 	InvestigationDataCorruptionError,
 )
 
 const investigationStartErrors = [
 	investigationPersistence,
-	investigationQuota,
-	investigationAutomationDisabled,
 	investigationAgentUnavailable,
 	investigationStartFailed,
-	investigationRejected,
 	investigationDataCorruption,
 ] as const
 

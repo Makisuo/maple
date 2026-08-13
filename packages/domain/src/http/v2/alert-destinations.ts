@@ -3,14 +3,28 @@ import { Schema } from "effect"
 import { HazelChannelId, HazelOrganizationId, PostgresTransactionId, UserId } from "../../primitives"
 import {
 	AlertDeliveryError,
+	AlertDestinationDecryptionError,
+	AlertDestinationEncryptionError,
+	AlertDestinationNotFoundError,
+	AlertDestinationStoredConfigInvalidError,
 	AlertDestinationInUseError,
 	AlertDestinationType,
 	AlertForbiddenError,
-	AlertNotFoundError,
+	AlertMemberDirectoryNotConfiguredError,
+	AlertMemberDirectoryUnavailableError,
 	AlertPersistenceError,
+	AlertRecipientSelectionError,
+	AlertRuleStoredConfigInvalidError,
 	AlertValidationError,
 	MAX_EMAIL_RECIPIENTS,
 } from "../alerts"
+import {
+	IntegrationsNotConnectedError,
+	IntegrationsPersistenceError,
+	IntegrationsRevokedError,
+	IntegrationsUpstreamError,
+	IntegrationsValidationError,
+} from "../integrations"
 import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
@@ -345,9 +359,28 @@ const [alertForbidden, alertValidation, alertPersistence, alertNotFound, alertDe
 	AlertForbiddenError,
 	AlertValidationError,
 	AlertPersistenceError,
-	AlertNotFoundError,
+	AlertDestinationNotFoundError,
 	AlertDeliveryError,
 )
+const hazelWebhookProvisionErrors = publicErrors(
+	IntegrationsNotConnectedError,
+	IntegrationsRevokedError,
+	IntegrationsUpstreamError,
+	IntegrationsPersistenceError,
+	IntegrationsValidationError,
+)
+const emailRecipientErrors = publicErrors(
+	AlertRecipientSelectionError,
+	AlertMemberDirectoryNotConfiguredError,
+	AlertMemberDirectoryUnavailableError,
+)
+const [destinationEncryption, destinationDecryption, destinationStoredConfigInvalid] = publicErrors(
+	AlertDestinationEncryptionError,
+	AlertDestinationDecryptionError,
+	AlertDestinationStoredConfigInvalidError,
+)
+const destinationReadErrors = [destinationDecryption, destinationStoredConfigInvalid] as const
+const ruleStoredConfigInvalid = publicError(AlertRuleStoredConfigInvalidError)
 
 const AlertDestinationList = ListOf(V2AlertDestination).annotate({
 	identifier: "AlertDestinationList",
@@ -360,7 +393,7 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 		HttpApiEndpoint.get("list", "/", {
 			query: ListQuery,
 			success: AlertDestinationList,
-			error: [V2ParameterInvalid.schema, alertPersistence],
+			error: [V2ParameterInvalid.schema, alertPersistence, destinationStoredConfigInvalid],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listAlertDestinations",
@@ -374,7 +407,14 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 		HttpApiEndpoint.post("create", "/", {
 			payload: V2AlertDestinationCreateParams,
 			success: V2AlertDestinationMutationResponse,
-			error: [alertForbidden, alertValidation, alertPersistence, alertDelivery],
+			error: [
+				alertForbidden,
+				alertValidation,
+				alertPersistence,
+				destinationEncryption,
+				...hazelWebhookProvisionErrors,
+				...emailRecipientErrors,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "createAlertDestination",
@@ -388,7 +428,7 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: AlertDestinationPublicId },
 			success: V2AlertDestination,
-			error: [alertNotFound, alertPersistence],
+			error: [alertNotFound, alertPersistence, destinationStoredConfigInvalid],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAlertDestination",
@@ -403,7 +443,16 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 			params: { id: AlertDestinationPublicId },
 			payload: V2AlertDestinationUpdateParams,
 			success: V2AlertDestinationMutationResponse,
-			error: [alertForbidden, alertValidation, alertPersistence, alertNotFound],
+			error: [
+				alertForbidden,
+				alertValidation,
+				alertPersistence,
+				alertNotFound,
+				destinationEncryption,
+				...destinationReadErrors,
+				...hazelWebhookProvisionErrors,
+				...emailRecipientErrors,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "updateAlertDestination",
@@ -417,7 +466,13 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 		HttpApiEndpoint.delete("delete", "/:id", {
 			params: { id: AlertDestinationPublicId },
 			success: V2AlertDestinationDeleteResponse,
-			error: [alertForbidden, alertPersistence, alertNotFound, publicError(AlertDestinationInUseError)],
+			error: [
+				alertForbidden,
+				alertPersistence,
+				alertNotFound,
+				publicError(AlertDestinationInUseError),
+				ruleStoredConfigInvalid,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "deleteAlertDestination",
@@ -431,7 +486,7 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 		HttpApiEndpoint.post("test", "/:id/test", {
 			params: { id: AlertDestinationPublicId },
 			success: V2AlertDestinationTestResult,
-			error: [alertForbidden, alertValidation, alertPersistence, alertNotFound, alertDelivery],
+			error: [alertForbidden, alertPersistence, alertNotFound, alertDelivery, ...destinationReadErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "testAlertDestination",

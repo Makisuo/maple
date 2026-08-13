@@ -607,6 +607,7 @@ export class InvestigationStartFailedError extends HttpTaggedError<Investigation
 	"@maple/http/investigations/InvestigationStartFailedError",
 	{
 		message: Schema.String,
+		cause: Schema.optionalKey(Schema.Defect()),
 	},
 	{
 		status: 503,
@@ -614,7 +615,8 @@ export class InvestigationStartFailedError extends HttpTaggedError<Investigation
 		title: "Investigation could not be started",
 		retry: "backoff",
 		recovery: "retry",
-		exposure: "public_message",
+		message: "The investigation could not be started. Retry in a few seconds.",
+		exposure: "redacted",
 	},
 ) {}
 
@@ -645,6 +647,7 @@ export class InvestigationDataCorruptionError extends HttpTaggedError<Investigat
 		value: Schema.String,
 		incidentKind: Schema.optionalKey(Schema.String),
 		incidentId: Schema.optionalKey(Schema.String),
+		cause: Schema.optionalKey(Schema.Defect()),
 	},
 	{
 		status: 500,

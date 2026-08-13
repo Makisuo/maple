@@ -13,6 +13,8 @@ import {
 import {
 	WarehouseMalformedQueryError,
 	WarehouseQuotaExceededError,
+	WarehouseResultDecodeError,
+	WarehouseScopeError,
 	WarehouseSchemaDriftError,
 	WarehouseUpstreamError,
 	WarehouseValidationError,
@@ -70,11 +72,17 @@ describe("HttpTaggedError public body", () => {
 			pipeName: "traces_timeseries",
 			message: "NO_COMMON_TYPE",
 		})
+		const scope = new WarehouseScopeError({
+			pipeName: "compiledQuery",
+			message: "missing tenant scope",
+		})
 
 		expect(publicHttpErrorPolicy(validation).status).toBe(400)
 		expect(publicHttpErrorPolicy(quota).status).toBe(429)
 		expect(publicHttpErrorPolicy(upstream).status).toBe(503)
 		expect(publicHttpErrorPolicy(malformed).status).toBe(500)
+		expect(publicHttpErrorPolicy(scope).status).toBe(500)
+		expect(scope.error.message).not.toContain("missing tenant scope")
 	})
 
 	it("owns warehouse remediation copy without exposing diagnostics", () => {
@@ -86,6 +94,20 @@ describe("HttpTaggedError public body", () => {
 		expect(error.error.message).toContain("schema apply")
 		expect(error.error.message).not.toContain("SecretCustomerColumn")
 		expect(publicHttpErrorPolicy(error).status).toBe(502)
+	})
+
+	it("distinguishes cluster schema drift from Maple result decoding failures", () => {
+		const error = new WarehouseResultDecodeError({
+			pipeName: "service_overview",
+			message: "Secret wire-format mismatch",
+		})
+
+		expect(error.error).toMatchObject({
+			_tag: "@maple/http/errors/WarehouseResultDecodeError",
+			code: "warehouse_result_decode_failed",
+			recovery: "contact_support",
+		})
+		expect(error.error.message).not.toContain("Secret wire-format mismatch")
 	})
 
 	it("serializes query-engine failures directly", () => {

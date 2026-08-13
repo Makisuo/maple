@@ -84,18 +84,6 @@ export type SqlQueryOptions = WarehouseQueryOptions & {
 	 * reads of gateway-written data gated on write-readiness).
 	 */
 	route?: "ingest"
-	/**
-	 * Abort the read once the encoded response crosses these bounds, failing with
-	 * `WarehouseResponseLimitError` instead of buffering the rest.
-	 *
-	 * ClickHouse settings cap what the *warehouse* spends; this caps what *we*
-	 * are willing to materialize in a 128 MB Worker. Set it for queries whose
-	 * result size is driven by user data rather than by the query shape — without
-	 * it an oversized response dies as a platform abort, which the transient
-	 * classifier reads as a flaky upstream and retries. Reach for it via
-	 * `compiledQueryBounded`, which surfaces the error in its signature.
-	 */
-	responseLimits?: { readonly maxRows: number; readonly maxBytes: number }
 }
 
 /**

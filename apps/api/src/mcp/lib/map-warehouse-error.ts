@@ -1,9 +1,9 @@
 import { Effect } from "effect"
 import { type WarehouseError, WarehouseSchemaDriftError } from "@maple/domain"
-import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
+import { warehouseHandlers, warehouseReadHandlers } from "@/services/warehouse/warehouse-error-handlers"
 import { McpQueryError } from "@/mcp/tools/types"
 
-export { warehouseHandlers }
+export { warehouseHandlers, warehouseReadHandlers }
 
 const SCHEMA_DRIFT_HINT =
 	" — your ClickHouse cluster's schema is out of sync with what Maple expects. " +
@@ -17,13 +17,10 @@ const SCHEMA_DRIFT_HINT =
  * column). Every MCP surface that renders a warehouse error should go through
  * this, not `error.message`.
  *
- * `kind: "decode"` drift means the cluster answered fine but the rows failed
- * Maple's own row schema — schema apply cannot fix that, so no hint.
+ * Row-decoding failures have their own tag and never receive this hint.
  */
 export const warehouseErrorText = (error: WarehouseError): string =>
-	error instanceof WarehouseSchemaDriftError && error.kind !== "decode"
-		? `${error.message}${SCHEMA_DRIFT_HINT}`
-		: error.message
+	error instanceof WarehouseSchemaDriftError ? `${error.message}${SCHEMA_DRIFT_HINT}` : error.message
 
 /**
  * Curry the pipe label so call sites read as

@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { OrgId, UserId } from "@maple/domain/http"
+import {
+	AlertMemberDirectoryUnavailableError,
+	IntegrationsRevokedError,
+	OrgId,
+	UserId,
+} from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService } from "@maple/cache"
@@ -20,15 +25,16 @@ import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
-import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
+import { HazelOAuthService, type HazelOAuthServiceShape } from "@/services/auth/HazelOAuthService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
-import { OrgMembersService } from "@/services/org/OrgMembersService"
+import { OrgMembersService, type OrgMembersServiceShape } from "@/services/org/OrgMembersService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	makeWarehouseServiceStub,
 	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
@@ -56,19 +62,19 @@ const testConfig = () =>
 	)
 
 /** The v2 alert CRUD endpoints never reach the warehouse; stub it inert. */
-const warehouseStub: WarehouseQueryServiceShape = {
+const warehouseStub = makeWarehouseServiceStub({
 	query: () => Effect.die(new Error("unexpected warehouse pipe query")),
-	sqlQuery: () => Effect.succeed([]),
 	rawSqlQuery: () => Effect.succeed([]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected compiled query")),
 	ingest: () => Effect.void,
-	asExecutor: () => {
-		throw new Error("asExecutor is not supported by this test stub")
-	},
-}
+})
 
-const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStub) => {
+const makeHarness = (
+	warehouseService: WarehouseQueryServiceShape = warehouseStub,
+	hazelOAuthService?: HazelOAuthServiceShape,
+	orgMembersService?: OrgMembersServiceShape,
+) => {
 	const testDb = createTestDb(createdDbs)
 	const configLive = testConfig()
 	const envLive = Env.layer.pipe(Layer.provide(configLive))
@@ -87,14 +93,18 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 		fetch: globalThis.fetch,
 		deliveryTimeoutMs: () => 15_000,
 	})
-	const hazelOAuthLive = HazelOAuthService.layer.pipe(Layer.provide(Layer.mergeAll(envLive, testDb.layer)))
+	const hazelOAuthLive =
+		hazelOAuthService === undefined
+			? HazelOAuthService.layer.pipe(Layer.provide(Layer.mergeAll(envLive, testDb.layer)))
+			: Layer.succeed(HazelOAuthService, hazelOAuthService)
 	const emailLive = Layer.succeed(EmailService, {
 		isConfigured: false,
 		send: () => Effect.void,
 	})
-	const orgMembersLive = Layer.succeed(OrgMembersService, {
-		resolveMembers: () => Effect.succeed([]),
-	})
+	const orgMembersLive = Layer.succeed(
+		OrgMembersService,
+		orgMembersService ?? { resolveMembers: () => Effect.succeed([]) },
+	)
 	// Held by AlertsService only to hand an autonomous investigation turn its `submit_diagnosis`
 	// tool; nothing in these tests starts one. The real layer is cheap — Env plus the database.
 	const investigationsLive = InvestigationService.layer.pipe(
@@ -449,11 +459,128 @@ describe("v2 alerts over HTTP", () => {
 		await harness.dispose()
 	})
 
+	it("returns the exact rule-destination tag for a missing destination_id", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const destination = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "webhook",
+			name: "Temporary destination",
+			url: "https://example.com/hooks/temporary",
+		})
+		expect(destination.status).toBe(200)
+		const removed = await harness.request(
+			"DELETE",
+			`/v2/alerts/destinations/${destination.body.id}`,
+			key.secret,
+		)
+		expect(removed.status).toBe(200)
+
+		const response = await harness.request("POST", "/v2/alerts/rules", key.secret, {
+			name: "Missing destination",
+			severity: "warning",
+			signal_type: "error_rate",
+			comparator: "gt",
+			threshold: 0.1,
+			window_minutes: 5,
+			destination_ids: [destination.body.id],
+		})
+		expect(response.status).toBe(404)
+		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/errors/AlertRuleDestinationNotFoundError",
+			code: "alert_rule_destination_not_found",
+			param: "destination_ids",
+		})
+
+		await harness.dispose()
+	})
+
+	it("reports malformed stored rules as a redacted storage failure", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const created = await createWebhookAndRule(harness, key.secret)
+		expect(created.rule.status).toBe(200)
+		await executeSql(
+			harness.testDb,
+			"update alert_rules set severity = 'not-a-severity' where org_id = $1",
+			["org_alerts_e2e"],
+		)
+
+		const response = await harness.request("GET", "/v2/alerts/rules", key.secret)
+		expect(response.status).toBe(500)
+		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/errors/AlertRuleStoredConfigInvalidError",
+			code: "alert_rule_stored_config_invalid",
+			retryable: false,
+			recovery: "contact_support",
+		})
+		expect(JSON.stringify(response.body)).not.toContain("not-a-severity")
+
+		await harness.dispose()
+	})
+
+	it("does not erase malformed optional stored rule fields", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const created = await createWebhookAndRule(harness, key.secret)
+		expect(created.rule.status).toBe(200)
+
+		await executeSql(harness.testDb, "update alert_rules set tags_json = '{}'::jsonb where org_id = $1", [
+			"org_alerts_e2e",
+		])
+
+		const response = await harness.request("GET", `/v2/alerts/rules/${created.rule.body.id}`, key.secret)
+		expect(response.status).toBe(500)
+		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/errors/AlertRuleStoredConfigInvalidError",
+			code: "alert_rule_stored_config_invalid",
+		})
+		expect(JSON.stringify(response.body)).not.toContain("tags_json")
+
+		await harness.dispose()
+	})
+
+	it("refuses to delete a destination when stored rule references cannot be decoded", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const created = await createWebhookAndRule(harness, key.secret)
+		expect(created.destination.status).toBe(200)
+		expect(created.rule.status).toBe(200)
+
+		await executeSql(
+			harness.testDb,
+			"update alert_rules set destination_ids_json = '{}'::jsonb where org_id = $1",
+			["org_alerts_e2e"],
+		)
+
+		const response = await harness.request(
+			"DELETE",
+			`/v2/alerts/destinations/${created.destination.body.id}`,
+			key.secret,
+		)
+		expect(response.status).toBe(500)
+		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/errors/AlertRuleStoredConfigInvalidError",
+			code: "alert_rule_stored_config_invalid",
+			retryable: false,
+			recovery: "contact_support",
+		})
+		expect(JSON.stringify(response.body)).not.toContain("destination_ids")
+
+		const destination = await harness.request(
+			"GET",
+			`/v2/alerts/destinations/${created.destination.body.id}`,
+			key.secret,
+		)
+		expect(destination.status).toBe(200)
+
+		await harness.dispose()
+	})
+
 	it("blocks raw SQL preview for non-admin keys without querying the warehouse", async () => {
 		let warehouseCalls = 0
 		const harness = makeHarness({
 			...warehouseStub,
-			sqlQuery: () => {
+			rawSqlQuery: () => {
 				warehouseCalls += 1
 				return Effect.succeed([{ value: 42 }])
 			},
@@ -636,6 +763,65 @@ describe("v2 alerts over HTTP", () => {
 		await harness.dispose()
 	})
 
+	it("preserves the exact Hazel integration failure on destination create", async () => {
+		const unavailable = () => Effect.die("unexpected Hazel OAuth method")
+		const hazelOAuth: HazelOAuthServiceShape = {
+			startConnect: unavailable,
+			completeConnect: unavailable,
+			getStatus: unavailable,
+			getValidAccessToken: unavailable,
+			listOrganizations: unavailable,
+			listChannels: unavailable,
+			createChannelWebhook: () =>
+				Effect.fail(
+					new IntegrationsRevokedError({
+						message: "Hazel rejected the access token — reconnect required",
+					}),
+				),
+			disconnect: unavailable,
+		}
+		const harness = makeHarness(warehouseStub, hazelOAuth)
+		const key = await harness.bootstrapKey(["alerts:write"])
+
+		const response = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "hazel-oauth",
+			name: "Hazel incidents",
+			hazel_organization_id: "hazel-org",
+			hazel_organization_name: "Maple",
+			hazel_channel_id: "hazel-channel",
+			hazel_channel_name: "incidents",
+		})
+
+		expect(response.status).toBe(401)
+		expect(response.body.error._tag).toBe("@maple/http/errors/IntegrationsRevokedError")
+		await harness.dispose()
+	})
+
+	it("preserves a member-directory outage on email destination create", async () => {
+		const orgMembers: OrgMembersServiceShape = {
+			resolveMembers: () =>
+				Effect.fail(
+					new AlertMemberDirectoryUnavailableError({
+						message: "Clerk member lookup failed",
+						cause: new Error("Clerk unavailable"),
+					}),
+				),
+		}
+		const harness = makeHarness(warehouseStub, undefined, orgMembers)
+		const key = await harness.bootstrapKey(["alerts:write"])
+
+		const response = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "email",
+			name: "On-call email",
+			member_user_ids: ["user_2Nk8mXqPfR3yZ1aB4cD5eF6g"],
+		})
+
+		expect(response.status).toBe(503)
+		expect(response.body.error._tag).toBe("@maple/http/errors/AlertMemberDirectoryUnavailableError")
+		expect(JSON.stringify(response.body)).not.toContain("Clerk")
+		await harness.dispose()
+	})
+
 	it("maps slack-bot update params and never clobbers the stored channel with a blank", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey(["alerts:write"])
@@ -684,6 +870,68 @@ describe("v2 alerts over HTTP", () => {
 		const after = await harness.request("GET", `/v2/alerts/destinations/${id}`, key.secret)
 		expect(after.status).toBe(200)
 		expect(after.body.channel_label).toBe("#alerts")
+
+		await harness.dispose()
+	})
+
+	it("preserves exact stored destination failures through the HTTP envelope", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+
+		const invalidConfig = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "webhook",
+			name: "Invalid stored config",
+			url: "https://example.com/hooks/invalid-config",
+		})
+		expect(invalidConfig.status).toBe(200)
+		await executeSql(
+			harness.testDb,
+			"update alert_destinations set config_json = '{}'::jsonb where name = $1",
+			["Invalid stored config"],
+		)
+		const invalidConfigList = await harness.request("GET", "/v2/alerts/destinations", key.secret)
+		expect(invalidConfigList.status).toBe(500)
+		expect(invalidConfigList.body.error._tag).toBe(
+			"@maple/http/errors/AlertDestinationStoredConfigInvalidError",
+		)
+
+		const invalidConfigTest = await harness.request(
+			"POST",
+			`/v2/alerts/destinations/${invalidConfig.body.id}/test`,
+			key.secret,
+		)
+		expect(invalidConfigTest.status).toBe(500)
+		expect(invalidConfigTest.body.error).toMatchObject({
+			_tag: "@maple/http/errors/AlertDestinationStoredConfigInvalidError",
+			code: "alert_destination_stored_config_invalid",
+			retryable: false,
+			recovery: "contact_support",
+		})
+		expect(JSON.stringify(invalidConfigTest.body)).not.toContain("public_config")
+
+		const unreadableSecret = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "webhook",
+			name: "Unreadable stored secret",
+			url: "https://example.com/hooks/unreadable-secret",
+		})
+		expect(unreadableSecret.status).toBe(200)
+		await executeSql(harness.testDb, "update alert_destinations set secret_tag = '' where name = $1", [
+			"Unreadable stored secret",
+		])
+
+		const unreadableSecretTest = await harness.request(
+			"POST",
+			`/v2/alerts/destinations/${unreadableSecret.body.id}/test`,
+			key.secret,
+		)
+		expect(unreadableSecretTest.status).toBe(500)
+		expect(unreadableSecretTest.body.error).toMatchObject({
+			_tag: "@maple/http/errors/AlertDestinationDecryptionError",
+			code: "alert_destination_decryption_failed",
+			retryable: false,
+			recovery: "contact_support",
+		})
+		expect(JSON.stringify(unreadableSecretTest.body)).not.toContain("Decryption failed")
 
 		await harness.dispose()
 	})

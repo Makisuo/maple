@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { WarehouseQueryError, WarehouseSchemaDriftError } from "@maple/domain"
+import { WarehouseQueryError, WarehouseResultDecodeError, WarehouseSchemaDriftError } from "@maple/domain"
 import { toMcpQueryError } from "./map-warehouse-error"
 
 describe("toMcpQueryError", () => {
@@ -26,5 +26,15 @@ describe("toMcpQueryError", () => {
 		const err = new WarehouseQueryError({ message: "boom", pipeName: "service_overview" })
 		const mcp = toMcpQueryError("service_overview")(err)
 		expect(mcp.message).toBe("boom")
+	})
+
+	it("does not tell users to apply schema for a result decode failure", () => {
+		const err = new WarehouseResultDecodeError({
+			message: "row did not decode",
+			pipeName: "service_overview",
+		})
+		const mcp = toMcpQueryError("service_overview")(err)
+		expect(mcp.message).toBe("row did not decode")
+		expect(mcp.message).not.toContain("schema apply")
 	})
 })

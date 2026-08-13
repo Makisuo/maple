@@ -5,7 +5,7 @@ import {
 	DiscordAlertDestinationConfig,
 	EmailAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
-	AlertNotFoundError,
+	AlertDestinationNotFoundError,
 	PagerDutyAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
@@ -176,10 +176,9 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 					const destination = response.destinations.find((doc) => doc.id === params.id)
 					if (destination === undefined)
 						return yield* Effect.fail(
-							new AlertNotFoundError({
+							new AlertDestinationNotFoundError({
 								message: "No such alert destination.",
-								resourceType: "destination",
-								resourceId: params.id,
+								destinationId: params.id,
 							}),
 						)
 					return toV2Destination(destination)

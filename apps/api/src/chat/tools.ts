@@ -9,6 +9,7 @@ import { investigationIdFromChatSessionId } from "@maple/domain/chat-session"
 import { evaluatePermission, type PermissionRuleset } from "@maple/domain/permission"
 import {
 	AiTriageResult,
+	InvestigationDataCorruptionError,
 	InvestigationNotFoundError,
 	InvestigationPersistenceError,
 	SubmitDiagnosisRequest,
@@ -42,7 +43,10 @@ export type SubmitDiagnosis = (
 	orgId: TenantContext["orgId"],
 	investigationId: InvestigationId,
 	request: SubmitDiagnosisRequest,
-) => Effect.Effect<unknown, InvestigationPersistenceError | InvestigationNotFoundError>
+) => Effect.Effect<
+	unknown,
+	InvestigationPersistenceError | InvestigationNotFoundError | InvestigationDataCorruptionError
+>
 
 export const buildSubmitDiagnosisTool = (
 	sessionId: string,

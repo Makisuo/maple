@@ -4,6 +4,7 @@ import {
 	DashboardId,
 	DashboardNotFoundError,
 	DashboardPersistenceError,
+	DashboardStoredConfigInvalidError,
 	DashboardValidationError,
 	DashboardDocument,
 	DashboardsListResponse,
@@ -71,7 +72,14 @@ const parseTimestamp = (field: "createdAt" | "updatedAt", value: string) => {
  * the original lost, so the only safe answer to "this payload doesn't decode" is
  * to refuse it. The read-only version-history path may degrade instead.
  */
-const parsePayload = Effect.fnUntraced(function* (payloadJson: unknown) {
+const parsePayload = Effect.fnUntraced(function* (
+	payloadJson: unknown,
+	context: {
+		readonly dashboardId: DashboardId
+		readonly component: DashboardStoredConfigInvalidError["component"]
+		readonly versionId?: DashboardVersionId
+	},
+) {
 	const outcome = yield* parseStoredDashboard(payloadJson)
 
 	if (outcome._tag === "Rejected") {
@@ -79,8 +87,12 @@ const parsePayload = Effect.fnUntraced(function* (payloadJson: unknown) {
 			fromVersion: outcome.fromVersion,
 			issue: outcome.issue,
 		})
-		return yield* new DashboardPersistenceError({
-			message: "Stored dashboard payload is invalid JSON",
+		return yield* new DashboardStoredConfigInvalidError({
+			message: "Stored dashboard payload is invalid",
+			dashboardId: context.dashboardId,
+			component: context.component,
+			...(context.versionId === undefined ? {} : { versionId: context.versionId }),
+			cause: outcome.issue,
 		})
 	}
 
@@ -172,22 +184,27 @@ export interface DashboardPersistenceServiceShape {
 		orgId: OrgId,
 		userId: UserId,
 		dashboard: PortableDashboardDocument,
-	) => Effect.Effect<
-		DashboardDocument,
-		DashboardValidationError | DashboardPersistenceError | DashboardConcurrencyError
-	>
-	readonly list: (orgId: OrgId) => Effect.Effect<DashboardsListResponse, DashboardPersistenceError>
+	) => Effect.Effect<DashboardDocument, DashboardValidationError | DashboardPersistenceError>
+	readonly list: (
+		orgId: OrgId,
+	) => Effect.Effect<DashboardsListResponse, DashboardPersistenceError | DashboardStoredConfigInvalidError>
 	readonly get: (
 		orgId: OrgId,
 		dashboardId: DashboardId,
-	) => Effect.Effect<DashboardDocument, DashboardPersistenceError | DashboardNotFoundError>
+	) => Effect.Effect<
+		DashboardDocument,
+		DashboardPersistenceError | DashboardNotFoundError | DashboardStoredConfigInvalidError
+	>
 	readonly upsert: (
 		orgId: OrgId,
 		userId: UserId,
 		dashboard: DashboardDocument,
 	) => Effect.Effect<
 		DashboardDocument,
-		DashboardValidationError | DashboardPersistenceError | DashboardConcurrencyError
+		| DashboardValidationError
+		| DashboardPersistenceError
+		| DashboardConcurrencyError
+		| DashboardStoredConfigInvalidError
 	>
 	readonly mutate: <E, R>(
 		orgId: OrgId,
@@ -201,7 +218,8 @@ export interface DashboardPersistenceServiceShape {
 		| DashboardNotFoundError
 		| DashboardValidationError
 		| DashboardConcurrencyError
-		| DashboardPersistenceError,
+		| DashboardPersistenceError
+		| DashboardStoredConfigInvalidError,
 		R
 	>
 	readonly delete: (
@@ -212,14 +230,20 @@ export interface DashboardPersistenceServiceShape {
 		orgId: OrgId,
 		dashboardId: DashboardId,
 		options?: { readonly limit?: number; readonly before?: number },
-	) => Effect.Effect<DashboardVersionsListResponse, DashboardPersistenceError | DashboardNotFoundError>
+	) => Effect.Effect<
+		DashboardVersionsListResponse,
+		DashboardPersistenceError | DashboardNotFoundError | DashboardStoredConfigInvalidError
+	>
 	readonly getVersion: (
 		orgId: OrgId,
 		dashboardId: DashboardId,
 		versionId: DashboardVersionId,
 	) => Effect.Effect<
 		DashboardVersionDetail,
-		DashboardPersistenceError | DashboardNotFoundError | DashboardVersionNotFoundError
+		| DashboardPersistenceError
+		| DashboardNotFoundError
+		| DashboardVersionNotFoundError
+		| DashboardStoredConfigInvalidError
 	>
 	readonly restoreVersion: (
 		orgId: OrgId,
@@ -233,6 +257,7 @@ export interface DashboardPersistenceServiceShape {
 		| DashboardVersionNotFoundError
 		| DashboardValidationError
 		| DashboardConcurrencyError
+		| DashboardStoredConfigInvalidError
 	>
 }
 
@@ -265,7 +290,10 @@ export class DashboardPersistenceService extends Context.Service<
 
 			const row = rows[0]
 			if (!row) return null
-			const document = yield* parsePayload(row.payloadJson)
+			const document = yield* parsePayload(row.payloadJson, {
+				dashboardId,
+				component: "document",
+			})
 			return { document, version: row.version }
 		})
 
@@ -355,10 +383,14 @@ export class DashboardPersistenceService extends Context.Service<
 
 		const list = Effect.fn("DashboardPersistenceService.list")(function* (orgId: OrgId) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			const rows: ReadonlyArray<{ readonly payloadJson: unknown }> = yield* database
+			const rows: ReadonlyArray<{
+				readonly id: DashboardId
+				readonly payloadJson: unknown
+			}> = yield* database
 				.execute((db) =>
 					db
 						.select({
+							id: dashboards.id,
 							payloadJson: dashboards.payloadJson,
 						})
 						.from(dashboards)
@@ -367,7 +399,9 @@ export class DashboardPersistenceService extends Context.Service<
 				)
 				.pipe(Effect.mapError(toPersistenceError))
 
-			const dashboardDocuments = yield* Effect.forEach(rows, (row) => parsePayload(row.payloadJson))
+			const dashboardDocuments = yield* Effect.forEach(rows, (row) =>
+				parsePayload(row.payloadJson, { dashboardId: row.id, component: "document" }),
+			)
 
 			return new DashboardsListResponse({ dashboards: dashboardDocuments })
 		})
@@ -537,7 +571,24 @@ export class DashboardPersistenceService extends Context.Service<
 			const nowMillis = yield* Clock.currentTimeMillis
 			const createdDashboard = createDashboardDocument(dashboard, nowMillis)
 			yield* Effect.annotateCurrentSpan("maple.dashboard.id", createdDashboard.id)
-			return yield* upsertInternal(orgId, userId, createdDashboard)
+			const payloadJson = yield* validatePayload(createdDashboard)
+			const createdAt = yield* parseTimestamp("createdAt", createdDashboard.createdAt)
+			const updatedAt = yield* parseTimestamp("updatedAt", createdDashboard.updatedAt)
+			const txid = yield* insertNew(orgId, userId, createdDashboard, createdAt, updatedAt, payloadJson)
+
+			// Version history is secondary to the authoritative dashboard row.
+			yield* recordVersion(orgId, userId, createdDashboard, null).pipe(
+				Effect.tapError((error) =>
+					Effect.logWarning("Failed to record initial dashboard version").pipe(
+						Effect.annotateLogs({ dashboardId: createdDashboard.id, error: String(error) }),
+					),
+				),
+				Effect.ignore,
+			)
+
+			return txid === undefined
+				? createdDashboard
+				: new DashboardDocument({ ...createdDashboard, txid })
 		})
 
 		// Read-modify-write helper used by the MCP dashboard tools. Loads
@@ -745,7 +796,11 @@ export class DashboardPersistenceService extends Context.Service<
 				)
 			}
 
-			const snapshot = yield* parsePayload(row.snapshotJson)
+			const snapshot = yield* parsePayload(row.snapshotJson, {
+				dashboardId,
+				component: "version_snapshot",
+				versionId,
+			})
 
 			return new DashboardVersionDetail({
 				id: row.id,

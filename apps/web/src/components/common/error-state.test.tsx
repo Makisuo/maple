@@ -56,15 +56,20 @@ describe("ErrorState recovery actions", () => {
 		expect(screen.getByRole("alert").textContent).not.toContain("Retrying automatically")
 	})
 
-	it("keeps timeouts manual instead of treating them as offline", () => {
+	it("automatically retries timeouts when their error contract opts in", () => {
+		const retry = vi.fn()
 		render(
 			<ErrorState
 				error={transportError(new DOMException("timed out", "TimeoutError"))}
-				onRetry={vi.fn()}
+				onRetry={retry}
 			/>,
 		)
 
 		expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
+		expect(screen.getByRole("alert").textContent).toContain("Retrying automatically")
+
+		act(() => vi.runAllTimers())
+		expect(retry).toHaveBeenCalledTimes(6)
 		expect(screen.getByRole("alert").textContent).not.toContain("Retrying automatically")
 	})
 })

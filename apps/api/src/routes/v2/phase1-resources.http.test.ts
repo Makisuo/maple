@@ -27,8 +27,6 @@ import {
 	InvestigationFanout,
 	InvestigationIncidentSubject,
 	InvestigationNotFoundError,
-	InvestigationQuotaError,
-	InvestigationRejectedError,
 	InvestigationSnapshotFact,
 	InvestigationSnapshotReference,
 	InvestigationSubjectSnapshot,
@@ -40,6 +38,8 @@ import {
 	SpanId,
 	TraceId,
 	UserId,
+	OrgClickHouseSettingsEncryptionError,
+	OrgClickHouseSettingsPersistenceError,
 } from "@maple/domain/http"
 import { MapleApiV2, encodePublicId } from "@maple/domain/http/v2"
 import { WarehouseResponseLimitError } from "@maple/query-engine/execution"
@@ -62,6 +62,7 @@ import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	makeWarehouseServiceStub,
 	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
@@ -320,9 +321,7 @@ const errorIssueDetailFixture = new ErrorIssueDetailResponse({
 const die = () => Effect.die(new Error("not exercised in this test harness"))
 
 /** Empty warehouse — enough to exercise the session_replays envelope + 404 paths. */
-const warehouseStub: WarehouseQueryServiceShape = {
-	query: die,
-	sqlQuery: () => Effect.succeed([]),
+const warehouseStub = makeWarehouseServiceStub({
 	rawSqlQuery: () => Effect.succeed([]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	// Replay payload reads go through the bounded variant (they carry an explicit
@@ -333,10 +332,7 @@ const warehouseStub: WarehouseQueryServiceShape = {
 	// route + capabilities, which this stub has nothing to resolve.
 	warmRoute: () => Effect.void,
 	ingest: () => Effect.void,
-	asExecutor: () => {
-		throw new Error("asExecutor is not supported by this test stub")
-	},
-}
+})
 
 const testConfig = () =>
 	ConfigProvider.layer(
@@ -357,11 +353,12 @@ const testConfig = () =>
 const ORG = Schema.decodeUnknownSync(OrgId)("org_phase1_e2e")
 const USER = Schema.decodeUnknownSync(UserId)("user_phase1_e2e")
 
-type InvestigationStartMode = "success" | "quota" | "unavailable" | "rejected" | "restart_not_found"
+type InvestigationStartMode = "success" | "unavailable" | "restart_not_found"
+type IssueReadFailure = "none" | "persistence" | "warehouse_config_lookup" | "warehouse_config_decryption"
 
 const makeHarness = (
 	warehouseService: WarehouseQueryServiceShape = warehouseStub,
-	failIssueReads = false,
+	issueReadFailure: IssueReadFailure = "none",
 	investigationStartMode: InvestigationStartMode = "success",
 ) => {
 	const testDb = createTestDb(createdDbs)
@@ -377,28 +374,30 @@ const makeHarness = (
 		readonly orgId: string
 		readonly options: Record<string, unknown>
 	} | null = null
-	const startInvestigation = () => {
-		switch (investigationStartMode) {
-			case "quota":
+	const issueReadFailureEffect = () => {
+		switch (issueReadFailure) {
+			case "warehouse_config_lookup":
 				return Effect.fail(
-					new InvestigationQuotaError({
-						message: "Daily quota reached",
-						dimension: "passes",
-						limit: 90,
-						retryableAt: decodeIso("2026-07-16T00:00:00.000Z"),
+					new OrgClickHouseSettingsPersistenceError({
+						message: "SECRET_CONFIG_LOOKUP_FAILURE",
 					}),
 				)
+			case "warehouse_config_decryption":
+				return Effect.fail(
+					new OrgClickHouseSettingsEncryptionError({
+						message: "SECRET_DECRYPTION_FAILURE",
+					}),
+				)
+			default:
+				return Effect.fail(new ErrorPersistenceError({ message: "database unavailable" }))
+		}
+	}
+	const startInvestigation = () => {
+		switch (investigationStartMode) {
 			case "unavailable":
 				return Effect.fail(
 					new InvestigationAgentUnavailableError({
 						message: "Agent unavailable",
-					}),
-				)
-			case "rejected":
-				return Effect.fail(
-					new InvestigationRejectedError({
-						message: "Agent rejected the request",
-						status: 401,
 					}),
 				)
 			default:
@@ -474,15 +473,15 @@ const makeHarness = (
 		Layer.succeed(ErrorIssueReadModelsService, {
 			listIssues: (orgId, options) => {
 				lastIssueListCall = { orgId, options }
-				if (failIssueReads) {
-					return Effect.fail(new ErrorPersistenceError({ message: "database unavailable" }))
+				if (issueReadFailure !== "none") {
+					return issueReadFailureEffect()
 				}
 				return Effect.succeed(new ErrorIssuesListResponse({ issues: [errorIssueFixture] }))
 			},
 			getIssue: (orgId, issueId, options) => {
 				lastIssueDetailCall = { orgId, options }
-				return failIssueReads
-					? Effect.fail(new ErrorPersistenceError({ message: "warehouse unavailable" }))
+				return issueReadFailure !== "none"
+					? issueReadFailureEffect()
 					: issueId === errorIssueFixture.id
 						? Effect.succeed(errorIssueDetailFixture)
 						: Effect.fail(ErrorIssueNotFoundError.forIssue(issueId))
@@ -695,7 +694,7 @@ describe("v2 error_issues over HTTP", () => {
 	})
 
 	it("maps list and rich-retrieve dependency failures to v2 503 errors", async () => {
-		const harness = makeHarness(warehouseStub, true)
+		const harness = makeHarness(warehouseStub, "persistence")
 		const key = await harness.bootstrapKey(["error_issues:read"])
 		const list = await harness.request("GET", "/v2/error_issues", {
 			token: key.secret,
@@ -708,6 +707,38 @@ describe("v2 error_issues over HTTP", () => {
 		})
 		expect(detail.status).toBe(503)
 		expect(detail.body.error.type).toBe("api_error")
+		await harness.dispose()
+	})
+
+	it("preserves exact warehouse failures instead of relabeling them as persistence", async () => {
+		const harness = makeHarness(warehouseStub, "warehouse_config_lookup")
+		const key = await harness.bootstrapKey(["error_issues:read"])
+		const response = await harness.request("GET", "/v2/error_issues", { token: key.secret })
+
+		expect(response.status).toBe(503)
+		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/errors/OrgClickHouseSettingsPersistenceError",
+			code: "clickhouse_settings_unavailable",
+			retryable: true,
+			recovery: "retry",
+		})
+		expect(JSON.stringify(response.body)).not.toContain("SECRET_CONFIG_LOOKUP_FAILURE")
+		await harness.dispose()
+	})
+
+	it("preserves and redacts a non-retryable warehouse configuration failure", async () => {
+		const harness = makeHarness(warehouseStub, "warehouse_config_decryption")
+		const key = await harness.bootstrapKey(["error_issues:read"])
+		const response = await harness.request("GET", "/v2/error_issues", { token: key.secret })
+
+		expect(response.status).toBe(500)
+		expect(response.body.error).toMatchObject({
+			_tag: "@maple/http/errors/OrgClickHouseSettingsEncryptionError",
+			code: "clickhouse_settings_encryption_failed",
+			retryable: false,
+			recovery: "contact_support",
+		})
+		expect(JSON.stringify(response.body)).not.toContain("SECRET_DECRYPTION_FAILURE")
 		await harness.dispose()
 	})
 })
@@ -859,7 +890,7 @@ describe("v2 investigations over HTTP", () => {
 		await missingHarness.dispose()
 	})
 
-	it("preserves quota reset time and distinguishes unavailable from rejected starts", async () => {
+	it("preserves the exact unavailable-start failure", async () => {
 		const createBody = {
 			subject: {
 				type: "freeform",
@@ -868,26 +899,6 @@ describe("v2 investigations over HTTP", () => {
 				context_refs: [],
 			},
 		}
-
-		const quotaHarness = makeHarness(warehouseStub, false, "quota")
-		const quotaKey = await quotaHarness.bootstrapKey()
-		const quota = await quotaHarness.request("POST", "/v2/investigations", {
-			token: quotaKey.secret,
-			body: createBody,
-		})
-		expect(quota.status).toBe(429)
-		expect(quota.body.error.code).toBe("investigation_daily_quota")
-		expect(quota.body.error._tag).toBe("@maple/http/investigations/InvestigationQuotaError")
-		expect(quota.body.error.retryable).toBe(true)
-		expect(quota.body.error.recovery).toBe("retry")
-		expect(quota.body.error.retry_at).toBe("2026-07-16T00:00:00.000Z")
-		expect(quota.headers.get("retry-after")).toBe("Thu, 16 Jul 2026 00:00:00 GMT")
-		// The ceiling that was hit is named, so a raised run cap can't look ignored
-		// when it was the pass cap that stopped the start.
-		expect(quota.body.error.message).toBe(
-			"Daily limit of 90 model passes reached. Resets at 2026-07-16T00:00:00.000Z.",
-		)
-		await quotaHarness.dispose()
 
 		const unavailableHarness = makeHarness(warehouseStub, false, "unavailable")
 		const unavailableKey = await unavailableHarness.bootstrapKey()
@@ -902,18 +913,6 @@ describe("v2 investigations over HTTP", () => {
 		)
 		expect(unavailable.body.error.retryable).toBe(true)
 		await unavailableHarness.dispose()
-
-		const rejectedHarness = makeHarness(warehouseStub, false, "rejected")
-		const rejectedKey = await rejectedHarness.bootstrapKey()
-		const rejected = await rejectedHarness.request("POST", "/v2/investigations", {
-			token: rejectedKey.secret,
-			body: createBody,
-		})
-		expect(rejected.status).toBe(502)
-		expect(rejected.body.error.code).toBe("investigation_start_rejected")
-		expect(rejected.body.error._tag).toBe("@maple/http/investigations/InvestigationRejectedError")
-		expect(rejected.body.error.retryable).toBe(false)
-		await rejectedHarness.dispose()
 	})
 })
 

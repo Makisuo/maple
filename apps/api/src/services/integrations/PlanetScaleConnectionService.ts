@@ -9,11 +9,10 @@ import {
 	PlanetScaleIntegrationStatus,
 	PlanetScaleScrapeTargetSummary,
 	ScrapeTargetId,
+	ScrapeTargetNotFoundError,
+	ScrapeTargetStoredConfigInvalidError,
 	UserId,
-	type ScrapeTargetEncryptionError,
-	type ScrapeTargetNotFoundError,
 	type ScrapeTargetPersistenceError,
-	type ScrapeTargetValidationError,
 	type OrgId,
 	type PlanetScaleMetricsTokenRequest,
 	type PlanetScaleSelectOrganizationRequest,
@@ -25,14 +24,14 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
-import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
+import { DiscoveryConfigSchema } from "./planetscale/discovery-config"
 import {
 	HttpSdResponse,
 	PlanetScaleDiscoveryService,
 	subTargetsFromGroup,
 } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "@/services/auth/PlanetScaleOAuthService"
-import { ScrapeTargetsService } from "./ScrapeTargetsService"
+import { ScrapeTargetsService, type ScrapeTargetsServiceShape } from "./ScrapeTargetsService"
 
 /**
  * First-class PlanetScale integration: one OAuth-backed connection per org.
@@ -56,10 +55,17 @@ export interface PlanetScaleDetectedPermissions {
 	readonly readDatabases: boolean
 }
 
+type ScrapeTargetMutationError =
+	| Effect.Error<ReturnType<ScrapeTargetsServiceShape["create"]>>
+	| Effect.Error<ReturnType<ScrapeTargetsServiceShape["update"]>>
+
 export interface PlanetScaleConnectionServiceShape {
 	readonly getStatus: (
 		orgId: OrgId,
-	) => Effect.Effect<PlanetScaleIntegrationStatus, IntegrationsPersistenceError>
+	) => Effect.Effect<
+		PlanetScaleIntegrationStatus,
+		IntegrationsPersistenceError | ScrapeTargetStoredConfigInvalidError
+	>
 	/**
 	 * Bind the org's stored OAuth grant to one PlanetScale organization. Called
 	 * from the OAuth callback (single-org auto-bind) and the org-picker endpoint;
@@ -79,6 +85,7 @@ export interface PlanetScaleConnectionServiceShape {
 		| IntegrationsConfigurationError
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
+		| ScrapeTargetMutationError
 	>
 	/**
 	 * Attach (or rotate) the service token that authenticates branch-metrics
@@ -96,11 +103,15 @@ export interface PlanetScaleConnectionServiceShape {
 		| IntegrationsValidationError
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
+		| ScrapeTargetMutationError
 	>
 	/** Drop the org binding, the managed scrape target, and the OAuth grant. */
 	readonly disconnect: (
 		orgId: OrgId,
-	) => Effect.Effect<{ readonly disconnected: boolean }, IntegrationsPersistenceError>
+	) => Effect.Effect<
+		{ readonly disconnected: boolean },
+		IntegrationsPersistenceError | ScrapeTargetPersistenceError
+	>
 	/** Load the org's connection row (null when not connected) — for pollers/webhooks. */
 	readonly loadConnection: (
 		orgId: OrgId,
@@ -120,6 +131,19 @@ const toPersistenceError = (error: unknown) =>
 	})
 
 const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
+
+const decodeStoredDiscoveryConfig = (row: typeof scrapeTargets.$inferSelect) =>
+	Schema.decodeUnknownEffect(DiscoveryConfigSchema)(row.discoveryConfigJson).pipe(
+		Effect.mapError(
+			(cause) =>
+				new ScrapeTargetStoredConfigInvalidError({
+					rawTargetId: row.id,
+					component: "discovery_config",
+					message: "Stored PlanetScale discovery configuration is invalid",
+					cause,
+				}),
+		),
+	)
 
 export class PlanetScaleConnectionService extends Context.Service<
 	PlanetScaleConnectionService,
@@ -331,7 +355,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 				})
 			}
 			const target = yield* selectManagedTarget(connection)
-			const discoveryConfig = target ? decodeDiscoveryConfig(target.discoveryConfigJson) : null
+			const discoveryConfig = target ? yield* decodeStoredDiscoveryConfig(target) : null
 			// How scraping authenticates: a stored service token wins; grant-resolved
 			// bearer auth counts only while the target is enabled (finalize disables
 			// it unless the bearer passed an end-to-end data-plane scrape probe —
@@ -396,32 +420,11 @@ export class PlanetScaleConnectionService extends Context.Service<
 						),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
-			return (
-				rows.find(
-					(row) => decodeDiscoveryConfig(row.discoveryConfigJson)?.organization === organization,
-				) ?? null
+			const targetsWithConfig = yield* Effect.forEach(rows, (row) =>
+				Effect.map(decodeStoredDiscoveryConfig(row), (config) => ({ row, config })),
 			)
+			return targetsWithConfig.find(({ config }) => config.organization === organization)?.row ?? null
 		})
-
-		// Typed on the concrete scrape-target error union so a new tag added to
-		// ScrapeTargetsService's error channel fails compilation here instead of
-		// silently collapsing into a 503 persistence error.
-		const mapScrapeTargetError = (
-			error:
-				| ScrapeTargetNotFoundError
-				| ScrapeTargetValidationError
-				| ScrapeTargetPersistenceError
-				| ScrapeTargetEncryptionError,
-		): IntegrationsValidationError | IntegrationsPersistenceError => {
-			switch (error._tag) {
-				case "@maple/http/errors/ScrapeTargetValidationError":
-					return new IntegrationsValidationError({ message: error.message })
-				case "@maple/http/errors/ScrapeTargetNotFoundError":
-				case "@maple/http/errors/ScrapeTargetPersistenceError":
-				case "@maple/http/errors/ScrapeTargetEncryptionError":
-					return new IntegrationsPersistenceError({ message: error.message })
-			}
-		}
 
 		const finalizeOrgSelection = Effect.fn("PlanetScaleConnectionService.finalizeOrgSelection")(
 			function* (
@@ -485,37 +488,33 @@ export class PlanetScaleConnectionService extends Context.Service<
 					// enabled only if the bearer probe passed.
 					const keepsToken =
 						adoptable.authType === "token" && adoptable.authCredentialsCiphertext !== null
-					yield* scrapeTargetsService
-						.update(orgId, adoptable.id, {
-							...(keepsToken ? {} : { authType: "planetscale_oauth" }),
-							...(request.includeBranches !== undefined
-								? { includeBranches: request.includeBranches }
-								: {}),
-							...(request.excludeBranches !== undefined
-								? { excludeBranches: request.excludeBranches }
-								: {}),
-							enabled: keepsToken || permissions.readMetricsEndpoints,
-						})
-						.pipe(Effect.mapError(mapScrapeTargetError))
+					yield* scrapeTargetsService.update(orgId, adoptable.id, {
+						...(keepsToken ? {} : { authType: "planetscale_oauth" }),
+						...(request.includeBranches !== undefined
+							? { includeBranches: request.includeBranches }
+							: {}),
+						...(request.excludeBranches !== undefined
+							? { excludeBranches: request.excludeBranches }
+							: {}),
+						enabled: keepsToken || permissions.readMetricsEndpoints,
+					})
 					scrapeTargetId = adoptable.id
 				} else {
-					const created = yield* scrapeTargetsService
-						.create(orgId, {
-							name: `PlanetScale (${organization})`,
-							targetType: "planetscale",
-							organization,
-							authType: "planetscale_oauth",
-							...(request.includeBranches !== undefined
-								? { includeBranches: request.includeBranches }
-								: {}),
-							...(request.excludeBranches !== undefined
-								? { excludeBranches: request.excludeBranches }
-								: {}),
-							// Paused until a service token arrives when the bearer probe
-							// failed — an enabled target would just 401 every scrape.
-							enabled: permissions.readMetricsEndpoints,
-						})
-						.pipe(Effect.mapError(mapScrapeTargetError))
+					const created = yield* scrapeTargetsService.create(orgId, {
+						name: `PlanetScale (${organization})`,
+						targetType: "planetscale",
+						organization,
+						authType: "planetscale_oauth",
+						...(request.includeBranches !== undefined
+							? { includeBranches: request.includeBranches }
+							: {}),
+						...(request.excludeBranches !== undefined
+							? { excludeBranches: request.excludeBranches }
+							: {}),
+						// Paused until a service token arrives when the bearer probe
+						// failed — an enabled target would just 401 every scrape.
+						enabled: permissions.readMetricsEndpoints,
+					})
 					scrapeTargetId = created.id
 					createdTarget = true
 				}
@@ -679,20 +678,25 @@ export class PlanetScaleConnectionService extends Context.Service<
 
 			const target = yield* selectManagedTarget(connection)
 			if (target === null) {
+				if (connection.scrapeTargetId === null) {
+					return yield* Effect.fail(
+						new IntegrationsPersistenceError({
+							message: "The PlanetScale connection has no managed scrape target",
+						}),
+					)
+				}
 				return yield* Effect.fail(
-					new IntegrationsPersistenceError({
-						message:
-							"The managed scrape target is missing — disconnect and reconnect PlanetScale.",
+					new ScrapeTargetNotFoundError({
+						targetId: connection.scrapeTargetId,
+						message: "The managed PlanetScale scrape target no longer exists",
 					}),
 				)
 			}
-			yield* scrapeTargetsService
-				.update(orgId, target.id, {
-					authType: "token",
-					authCredentials: JSON.stringify({ tokenId, tokenSecret: request.tokenSecret }),
-					enabled: true,
-				})
-				.pipe(Effect.mapError(mapScrapeTargetError))
+			yield* scrapeTargetsService.update(orgId, target.id, {
+				authType: "token",
+				authCredentials: JSON.stringify({ tokenId, tokenSecret: request.tokenSecret }),
+				enabled: true,
+			})
 
 			return yield* getStatus(orgId)
 		})
@@ -706,12 +710,16 @@ export class PlanetScaleConnectionService extends Context.Service<
 				// owns it (a user-created row adopted by a *different* connection stays).
 				const target = yield* selectManagedTarget(connection)
 				if (target !== null && target.managedBy === managedByForConnection(connection.id)) {
-					yield* scrapeTargetsService.delete(orgId, target.id).pipe(
-						Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
-							Effect.annotateCurrentSpan("maple.planetscale.disconnect_target_missing", true),
-						),
-						Effect.mapError(toPersistenceError),
-					)
+					yield* scrapeTargetsService
+						.delete(orgId, target.id)
+						.pipe(
+							Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
+								Effect.annotateCurrentSpan(
+									"maple.planetscale.disconnect_target_missing",
+									true,
+								),
+							),
+						)
 				}
 
 				yield* database

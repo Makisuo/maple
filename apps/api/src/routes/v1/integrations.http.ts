@@ -110,6 +110,30 @@ const requireAdmin = (roles: ReadonlyArray<RoleName>) =>
 		() => new IntegrationsForbiddenError({ message: "Only org admins can manage integrations" }),
 	)
 
+/** Preserve v1's collapsed PlanetScale mutation errors while v2 exposes their exact tags. */
+const v1PlanetScaleScrapeTargetErrors = {
+	"@maple/http/errors/ScrapeTargetValidationError": (error: { readonly message: string }) =>
+		Effect.fail(new IntegrationsValidationError({ message: error.message })),
+	"@maple/http/errors/ScrapeTargetNotFoundError": (error: { readonly message: string }) =>
+		Effect.fail(new IntegrationsPersistenceError({ message: error.message })),
+	"@maple/http/errors/ScrapeTargetPersistenceError": (error: { readonly message: string }) =>
+		Effect.fail(new IntegrationsPersistenceError({ message: error.message })),
+	"@maple/http/errors/ScrapeTargetEncryptionError": (error: { readonly message: string }) =>
+		Effect.fail(new IntegrationsPersistenceError({ message: error.message })),
+	"@maple/http/errors/ScrapeTargetStoredConfigInvalidError": (error: { readonly message: string }) =>
+		Effect.fail(new IntegrationsPersistenceError({ message: error.message })),
+} as const
+
+const v1PlanetScaleScrapeTargetPersistenceError = {
+	"@maple/http/errors/ScrapeTargetPersistenceError": (error: { readonly message: string }) =>
+		Effect.fail(new IntegrationsPersistenceError({ message: error.message })),
+} as const
+
+const v1PlanetScaleStatusErrors = {
+	"@maple/http/errors/ScrapeTargetStoredConfigInvalidError": (error: { readonly message: string }) =>
+		Effect.fail(new IntegrationsPersistenceError({ message: error.message })),
+} as const
+
 export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations", (handlers) =>
 	Effect.gen(function* () {
 		const hazel = yield* HazelOAuthService
@@ -435,7 +459,9 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 				.handle("planetscaleStatus", () =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						return yield* planetscale.getStatus(tenant.orgId)
+						return yield* planetscale
+							.getStatus(tenant.orgId)
+							.pipe(Effect.catchTags(v1PlanetScaleStatusErrors))
 					}),
 				)
 				.handle("planetscaleStart", ({ payload }) =>
@@ -468,21 +494,27 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* requireAdmin(tenant.roles)
-						return yield* planetscale.finalizeOrgSelection(tenant.orgId, payload)
+						return yield* planetscale
+							.finalizeOrgSelection(tenant.orgId, payload)
+							.pipe(Effect.catchTags(v1PlanetScaleScrapeTargetErrors))
 					}),
 				)
 				.handle("planetscaleSetMetricsToken", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* requireAdmin(tenant.roles)
-						return yield* planetscale.setMetricsToken(tenant.orgId, payload)
+						return yield* planetscale
+							.setMetricsToken(tenant.orgId, payload)
+							.pipe(Effect.catchTags(v1PlanetScaleScrapeTargetErrors))
 					}),
 				)
 				.handle("planetscaleDisconnect", () =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* requireAdmin(tenant.roles)
-						const result = yield* planetscale.disconnect(tenant.orgId)
+						const result = yield* planetscale
+							.disconnect(tenant.orgId)
+							.pipe(Effect.catchTags(v1PlanetScaleScrapeTargetPersistenceError))
 						return new PlanetScaleDisconnectResponse(result)
 					}),
 				)

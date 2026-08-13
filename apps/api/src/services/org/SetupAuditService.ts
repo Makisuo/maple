@@ -411,10 +411,8 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 				endTime: formatWarehouseDateTime(now),
 			}
 
-			const run = <A>(
-				compiled: Parameters<typeof warehouse.compiledQuery<A>>[1],
-				profile: "discovery" | "list",
-			) => warehouse.compiledQuery(tenant, compiled, { profile, context: "setupAudit" })
+			const run = <A>(compiled: CH.CompiledQuery<A>, profile: "discovery" | "list") =>
+				warehouse.compiledQuery(tenant, compiled, { profile, context: "setupAudit" })
 
 			// Same reason as `fetchTraceCompleteness`. Both are independent entry
 			// points, so each warms; whichever runs second finds the memo warm and
