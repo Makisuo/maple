@@ -142,19 +142,54 @@ chmod 600 "$CONFIG"
 
 echo "native smoke root: $ROOT"
 
-# Prove the real missing-config error is classified narrowly and actionably.
-"$MAPLE" start --port "$PORT" --data-dir "$DATA" --on-dirty-store fail --offline \
+# Both blocks below use their own data dir, so the main scenario further down
+# still starts from a completely fresh store. The PID file lives beside the data
+# dir, so separate parents also keep `maple stop` unambiguous.
+
+# The generated default: a server started with NO --chdb-config-file must be
+# able to checkpoint. Without this, checkpoints were impossible out of the box,
+# which also made `maple restore --yes` — what the dirty-store recovery path
+# tells users to run — point at a checkpoint that could never exist.
+DEFAULT_DATA="$ROOT/default/data"
+mkdir -p "$(dirname "$DEFAULT_DATA")"
+"$MAPLE" start --port "$PORT" --data-dir "$DEFAULT_DATA" --on-dirty-store fail --offline \
+	>"$ROOT/server.log" 2>&1 &
+SERVER_PID=$!
+wait_health
+[[ -f "$ROOT/default/chdb-config.xml" ]] ||
+	fail "maple start did not generate a chDB config beside the data dir"
+grep -q '<allowed_disk>default</allowed_disk>' "$ROOT/default/chdb-config.xml" ||
+	fail "generated chDB config does not enable backups: $(cat "$ROOT/default/chdb-config.xml")"
+"$MAPLE" checkpoint --port "$PORT" --data-dir "$DEFAULT_DATA" >"$ROOT/default-config.out" 2>&1 ||
+	fail "checkpoint with the generated default config failed: $(cat "$ROOT/default-config.out")"
+[[ -f "$DEFAULT_DATA/backups/state.json" ]] ||
+	fail "default-config checkpoint returned without publishing state"
+"$MAPLE" stop --data-dir "$DEFAULT_DATA" >/dev/null
+wait "$SERVER_PID" 2>/dev/null || true
+SERVER_PID=""
+
+# Prove the missing-backups error is still classified narrowly and actionably.
+# Now that `maple start` generates the default, this is only reachable through a
+# custom config that omits the <backups> stanza.
+NOBACKUPS_DATA="$ROOT/nobackups/data"
+mkdir -p "$(dirname "$NOBACKUPS_DATA")"
+printf '%s\n' '<clickhouse>' '</clickhouse>' >"$ROOT/no-backups.xml"
+chmod 600 "$ROOT/no-backups.xml"
+"$MAPLE" start --port "$PORT" --data-dir "$NOBACKUPS_DATA" \
+	--chdb-config-file "$ROOT/no-backups.xml" --on-dirty-store fail --offline \
 	>"$ROOT/server.log" 2>&1 &
 SERVER_PID=$!
 wait_health
 set +e
-"$MAPLE" checkpoint --port "$PORT" --data-dir "$DATA" >"$ROOT/no-config.out" 2>&1
+"$MAPLE" checkpoint --port "$PORT" --data-dir "$NOBACKUPS_DATA" >"$ROOT/no-config.out" 2>&1
 no_config_status=$?
 set -e
-[[ "$no_config_status" -ne 0 ]] || fail "checkpoint without backup config unexpectedly succeeded"
-grep -q -- '--chdb-config-file' "$ROOT/no-config.out" ||
+[[ "$no_config_status" -ne 0 ]] || fail "checkpoint without a <backups> stanza unexpectedly succeeded"
+grep -q -- '<backups>' "$ROOT/no-config.out" ||
 	fail "missing-config failure was not actionable: $(cat "$ROOT/no-config.out")"
-stop_server
+"$MAPLE" stop --data-dir "$NOBACKUPS_DATA" >/dev/null
+wait "$SERVER_PID" 2>/dev/null || true
+SERVER_PID=""
 
 start_server
 insert_marker A
