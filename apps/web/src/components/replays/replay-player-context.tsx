@@ -101,7 +101,7 @@ function eventSpanMs(event: unknown): number {
 	return typeof duration === "number" && Number.isFinite(duration) ? Math.max(0, duration) : 0
 }
 
-export function deriveMeta(events: unknown[]): DerivedMeta {
+export function deriveMeta(events: ReadonlyArray<unknown>): DerivedMeta {
 	let recordedWidth = 1280
 	let recordedHeight = 720
 	const actionMarkers: ActionMarker[] = []
@@ -259,7 +259,7 @@ export function useReplayPlayer(): ReplayPlayerContextValue {
 	return ctx
 }
 
-const EMPTY_EVENTS: unknown[] = []
+const EMPTY_EVENTS: ReadonlyArray<unknown> = []
 
 /** Read the engine's playhead, treating "no engine yet" as 0. */
 function engineTimeMs(engine: ReplayEngine | null): number {
@@ -329,13 +329,27 @@ export function ReplayPlayerProvider({
 		enabled: eventsOverride === undefined,
 	})
 
+	// Normalized separately from the status derivation below, and keyed only on
+	// the injected array. Doing it inline would mint a fresh array on every
+	// recompute of that memo — see the identity note on `events`.
+	const overrideEvents = React.useMemo(
+		() => (eventsOverride ? normalizeEvents(eventsOverride) : undefined),
+		[eventsOverride],
+	)
+
+	// `events` is the engine's mount key, so its IDENTITY is load-bearing, not
+	// just its contents. This memo depends on `manifestResult`, which changes on
+	// every manifest refetch — so building a new array in here (a `normalizeEvents`
+	// call, or a `[...loader.seedEvents]` spread) tears the engine down and
+	// rebuilds it every few seconds on a live session. Both branches now hand back
+	// an already-stable array instead.
 	const { status, error, events } = React.useMemo<{
 		status: ReplayLoadStatus
 		error: unknown
-		events: unknown[]
+		events: ReadonlyArray<unknown>
 	}>(() => {
 		if (eventsOverride) {
-			const decoded = normalizeEvents(eventsOverride)
+			const decoded = overrideEvents ?? EMPTY_EVENTS
 			if (decoded.length >= 2) return { status: "ready" as const, error: null, events: decoded }
 			// Keep injected tests on the same status path as warehouse-loaded sessions.
 			return {
@@ -366,7 +380,7 @@ export function ReplayPlayerProvider({
 					}
 				}
 				if (loader.seedEvents.length >= 2) {
-					return { status: "ready" as const, error: null, events: [...loader.seedEvents] }
+					return { status: "ready" as const, error: null, events: loader.seedEvents }
 				}
 				// Manifest says there are chunks; the opening window is still in
 				// flight, or every chunk in it was unparseable.
@@ -379,7 +393,15 @@ export function ReplayPlayerProvider({
 					: { status: "loading" as const, error: null, events: EMPTY_EVENTS }
 			})
 			.orElse(() => ({ status: "loading" as const, error: null, events: EMPTY_EVENTS }))
-	}, [manifestResult, eventsOverride, recorded, sessionActive, loader.seedEvents, loader.loadError])
+	}, [
+		manifestResult,
+		eventsOverride,
+		overrideEvents,
+		recorded,
+		sessionActive,
+		loader.seedEvents,
+		loader.loadError,
+	])
 
 	// Playable length from the manifest — known before any payload is fetched.
 	const manifestTotalMs = React.useMemo(() => manifestDurationMs(manifestChunks), [manifestChunks])
