@@ -2,6 +2,7 @@ import { formatWarehouseDateTime } from "@maple/query-engine"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
+	type AlertDeliveryFailure,
 	AlertDestinationDecryptionError,
 	AlertDeliveryEventDocument,
 	AlertDestinationDocument,
@@ -108,6 +109,7 @@ import {
 	planEvaluateSource,
 	type NormalizedRule,
 } from "./AlertRuleModel"
+import { resolveSignalDisplay } from "./alert-signal-display"
 
 export { AlertRuntime, type AlertRuntimeShape } from "./AlertRuntime"
 
@@ -308,7 +310,7 @@ export interface AlertsServiceShape
 		| AlertValidationError
 		| AlertPersistenceError
 		| AlertRuleDestinationNotFoundError
-		| AlertDeliveryError
+		| AlertDeliveryFailure
 		| AlertDestinationStorageError
 		| QueryEngineValidationError
 		| QueryEngineTimeoutError
@@ -339,7 +341,7 @@ export interface AlertsServiceShape
 			readonly deliveryFailureCount: number
 		},
 		| AlertPersistenceError
-		| AlertDeliveryError
+		| AlertDeliveryFailure
 		| AlertValidationError
 		| AlertRuleNotFoundError
 		| AlertDestinationNotFoundError
@@ -648,7 +650,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const toDeliveryAttemptFailure = (
 				error:
 					| AlertValidationError
-					| AlertDeliveryError
+					| AlertDeliveryFailure
 					| AlertPersistenceError
 					| AlertDestinationStorageError
 					| AlertRuleStoredConfigInvalidError,
@@ -886,6 +888,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								ruleName: normalized.name,
 								groupKey: null,
 								signalType: normalized.signalType,
+								signalDisplay: resolveSignalDisplay(normalized),
 								severity: normalized.severity,
 								comparator: normalized.comparator,
 								threshold: normalized.threshold,
@@ -1336,6 +1339,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					const payloadRule = payload.rule
 					const storedRule = ruleRow ? yield* decodeStoredAlertRuleMetadata(ruleRow) : null
 					const groupKey = incidentRow?.groupKey ?? payloadRule?.groupKey ?? null
+					const signalType = decodeAlertSignalTypeSync(
+						incidentRow?.signalType ?? payloadRule?.signalType ?? "throughput",
+					)
 
 					const enrichedSecret = yield* enrichSecretForDispatch(hydrated.row, hydrated.secretConfig)
 					const deliveryStart = yield* now
@@ -1348,9 +1354,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							ruleId: decodeAlertRuleIdSync(row.ruleId),
 							ruleName: ruleRow?.name ?? String(payloadRule?.name ?? "Alert"),
 							groupKey,
-							signalType: decodeAlertSignalTypeSync(
-								incidentRow?.signalType ?? payloadRule?.signalType ?? "throughput",
-							),
+							signalType,
+							// The rule row is the only place the measured quantity is
+							// named — the delivery payload carries just the query kind.
+							signalDisplay: resolveSignalDisplay({
+								signalType,
+								queryBuilderDraft: storedRule?.queryBuilderDraft ?? null,
+								rawQueryReducer: ruleRow?.reducer ?? null,
+							}),
 							severity: decodeAlertSeveritySync(
 								incidentRow?.severity ?? payloadRule?.severity ?? "warning",
 							),
@@ -1422,7 +1433,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					row: AlertDeliveryEventRow,
 					error:
 						| AlertValidationError
-						| AlertDeliveryError
+						| AlertDeliveryFailure
 						| AlertPersistenceError
 						| AlertDestinationStorageError
 						| AlertRuleStoredConfigInvalidError,
@@ -2631,7 +2642,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					row: AlertRuleRow,
 					error:
 						| AlertValidationError
-						| AlertDeliveryError
+						| AlertDeliveryFailure
 						| AlertPersistenceError
 						| AlertRuleStoredConfigInvalidError
 						| QueryEngineValidationError

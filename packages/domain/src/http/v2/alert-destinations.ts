@@ -2,7 +2,10 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { HazelChannelId, HazelOrganizationId, PostgresTransactionId, UserId } from "../../primitives"
 import {
+	AlertDeliveryAuthError,
 	AlertDeliveryError,
+	AlertDeliveryRejectedError,
+	AlertDeliveryTargetMissingError,
 	AlertDestinationDecryptionError,
 	AlertDestinationEncryptionError,
 	AlertDestinationNotFoundError,
@@ -355,12 +358,22 @@ export const V2AlertDestinationTestResult = Schema.Struct({
 })
 export type V2AlertDestinationTestResult = Schema.Schema.Type<typeof V2AlertDestinationTestResult>
 
-const [alertForbidden, alertValidation, alertPersistence, alertNotFound, alertDelivery] = publicErrors(
+const [alertForbidden, alertValidation, alertPersistence, alertNotFound] = publicErrors(
 	AlertForbiddenError,
 	AlertValidationError,
 	AlertPersistenceError,
 	AlertDestinationNotFoundError,
+)
+/**
+ * Delivery fails as one of four classes, split by whether the failure is worth
+ * retrying (see `alerts.ts`). All four must be declared here — an endpoint that
+ * can produce an error it cannot encode answers 500 instead of the real status.
+ */
+const alertDeliveryErrors = publicErrors(
 	AlertDeliveryError,
+	AlertDeliveryAuthError,
+	AlertDeliveryTargetMissingError,
+	AlertDeliveryRejectedError,
 )
 const hazelWebhookProvisionErrors = publicErrors(
 	IntegrationsNotConnectedError,
@@ -486,7 +499,13 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 		HttpApiEndpoint.post("test", "/:id/test", {
 			params: { id: AlertDestinationPublicId },
 			success: V2AlertDestinationTestResult,
-			error: [alertForbidden, alertPersistence, alertNotFound, alertDelivery, ...destinationReadErrors],
+			error: [
+				alertForbidden,
+				alertPersistence,
+				alertNotFound,
+				...alertDeliveryErrors,
+				...destinationReadErrors,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "testAlertDestination",

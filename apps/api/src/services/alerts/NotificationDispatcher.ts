@@ -11,11 +11,9 @@ import {
 } from "@maple/domain/http"
 import { and, eq, inArray } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Redacted, Schema } from "effect"
-import {
-	buildAlertChatUrl,
-	dispatchDelivery as dispatchDeliveryImpl,
-	type DispatchContext,
-} from "./AlertDeliveryDispatch"
+import { buildAlertChatUrl } from "./AlertDeliveryDispatch"
+import { dispatchDelivery as dispatchDeliveryImpl } from "./delivery/dispatch"
+import type { DispatchContext } from "./delivery/context"
 import {
 	hydrateDestinationRow,
 	type DestinationSecretConfig,
@@ -81,6 +79,18 @@ export interface NotificationDispatcherShape {
 		readonly destinations: ReadonlyArray<NotificationDestinationResult>
 	}>
 }
+
+/** Every failure this path can catch collapses to the same per-destination row. */
+const failedResult = (
+	row: AlertDestinationRow,
+	error: { readonly message: string },
+): Effect.Effect<NotificationDestinationResult> =>
+	Effect.succeed({
+		destinationId: row.id,
+		destinationName: row.name,
+		status: "failed",
+		error: error.message,
+	})
 
 export interface NotificationDestinationResult {
 	readonly destinationId: AlertDestinationId
@@ -285,19 +295,16 @@ const make: Effect.Effect<
 						),
 						Effect.catchTags({
 							"@maple/api/services/NotificationDispatchError": (error) =>
-								Effect.succeed<NotificationDestinationResult>({
-									destinationId: row.id,
-									destinationName: row.name,
-									status: "failed",
-									error: error.message,
-								}),
-							"@maple/http/errors/AlertDeliveryError": (error) =>
-								Effect.succeed<NotificationDestinationResult>({
-									destinationId: row.id,
-									destinationName: row.name,
-									status: "failed",
-									error: error.message,
-								}),
+								failedResult(row, error),
+							// Every delivery failure class reports the same way here. The
+							// distinction between them exists to drive the delivery
+							// queue's retry decision, which this path does not run.
+							"@maple/http/errors/AlertDeliveryError": (error) => failedResult(row, error),
+							"@maple/http/errors/AlertDeliveryAuthError": (error) => failedResult(row, error),
+							"@maple/http/errors/AlertDeliveryTargetMissingError": (error) =>
+								failedResult(row, error),
+							"@maple/http/errors/AlertDeliveryRejectedError": (error) =>
+								failedResult(row, error),
 						}),
 					)
 				},

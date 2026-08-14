@@ -37,7 +37,7 @@ export const buildAlertEmailContent = (
 				eventLabel,
 				eventEmoji: emoji,
 				severity: context.severity,
-				signalLabel: formatSignalLabel(context.signalType),
+				signalLabel: formatSignalLabel(context),
 				group: context.groupKey ?? "all",
 				observedSummary: formatObservedSummary(context),
 				window: formatWindow(context.windowMinutes),

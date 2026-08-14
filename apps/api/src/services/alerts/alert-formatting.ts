@@ -1,5 +1,6 @@
 import type { AlertComparator, AlertEventType, AlertSeverity, AlertSignalType } from "@maple/domain/http"
 import { Match, Option } from "effect"
+import { resolveSignalDisplay, type SignalDisplay } from "./alert-signal-display"
 import type { NotificationTemplateConfig } from "./alert-templating/renderer"
 
 export interface TemplateRenderContext {
@@ -8,6 +9,12 @@ export interface TemplateRenderContext {
 	readonly eventType: AlertEventType
 	readonly severity: AlertSeverity
 	readonly signalType: AlertSignalType
+	/**
+	 * How this rule's measured quantity is named and unit-formatted. Optional
+	 * because the escalation/error-notification paths dispatch without an alert
+	 * rule; those fall back to what `signalType` alone can say.
+	 */
+	readonly signalDisplay?: SignalDisplay | null
 	readonly comparator: AlertComparator
 	readonly threshold: number
 	readonly thresholdUpper: number | null
@@ -26,6 +33,20 @@ const round = (value: number, decimals = 2): string => {
 	const factor = 10 ** decimals
 	return (Math.round(value * factor) / factor).toString()
 }
+
+/** Clamp to a provider's field limit, marking the cut with an ellipsis. */
+export const truncate = (value: string, max: number): string =>
+	value.length > max ? `${value.slice(0, max - 1)}…` : value
+
+/** Thousands separators — an unpunctuated `1041923` is unreadable at a glance. */
+const grouped = (value: number): string =>
+	new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value)
+
+/** The fields every signal-aware formatter needs. */
+type SignalContext = Pick<TemplateRenderContext, "signalType" | "signalDisplay">
+
+export const signalDisplayOf = (context: SignalContext): SignalDisplay =>
+	context.signalDisplay ?? resolveSignalDisplay({ signalType: context.signalType })
 
 export const formatComparator = (
 	value: AlertComparator,
@@ -51,17 +72,7 @@ export const formatComparator = (
 	return `${operator} ${threshold}`
 }
 
-export const formatSignalLabel = (signal: string) => {
-	const labels: Record<string, string> = {
-		error_rate: "Error Rate",
-		p95_latency: "P95 Latency",
-		p99_latency: "P99 Latency",
-		apdex: "Apdex",
-		throughput: "Throughput",
-		metric: "Metric",
-	}
-	return labels[signal] ?? signal
-}
+export const formatSignalLabel = (context: SignalContext): string => signalDisplayOf(context).label
 
 export const eventTypeEmoji = (type: string) => {
 	const map: Record<string, string> = {
@@ -83,16 +94,21 @@ export const formatEventTypeLabel = (type: string) => {
 	return map[type] ?? type
 }
 
-export const formatSignalMetric = (value: number | null, signalType: string): string =>
+/**
+ * Formats by the signal's UNIT, not by its query kind — a `builder_query` over
+ * `p95(duration)` is milliseconds just as much as the `p95_latency` preset is.
+ */
+export const formatSignalMetric = (value: number | null, display: SignalDisplay): string =>
 	Option.match(Option.fromNullishOr(value), {
 		onNone: () => "n/a",
 		onSome: (metric) =>
-			Match.value(signalType).pipe(
-				Match.when("error_rate", () => `${round(metric * 100, 1)}%`),
-				Match.whenOr("p95_latency", "p99_latency", () => `${round(metric)}ms`),
+			Match.value(display.unit).pipe(
+				Match.when("ratio", () => `${round(metric * 100, 1)}%`),
+				Match.when("ms", () => `${grouped(metric)}ms`),
 				Match.when("apdex", () => `${round(metric, 3)}`),
-				Match.when("throughput", () => `${round(metric)} rpm`),
-				Match.orElse(() => `${round(metric)}`),
+				Match.when("rpm", () => `${grouped(metric)} rpm`),
+				Match.whenOr("count", "plain", () => grouped(metric)),
+				Match.exhaustive,
 			),
 	})
 
@@ -130,23 +146,24 @@ export const discordEmbedColor = (eventType: string, severity: string): number =
 	return 0xecb22e
 }
 
-type ObservedContext = Pick<
-	TemplateRenderContext,
-	"value" | "signalType" | "comparator" | "threshold" | "thresholdUpper"
->
+type ObservedContext = SignalContext &
+	Pick<TemplateRenderContext, "value" | "comparator" | "threshold" | "thresholdUpper">
 type ThresholdContext = Omit<ObservedContext, "value">
 
-export const formatThresholdSummary = (context: ThresholdContext): string =>
-	context.comparator === "between" || context.comparator === "not_between"
-		? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)}`
-		: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`
+export const formatThresholdSummary = (context: ThresholdContext): string => {
+	const display = signalDisplayOf(context)
+	return context.comparator === "between" || context.comparator === "not_between"
+		? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, display)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, display)}`
+		: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, display)}`
+}
 
 export const formatObservedSummary = (context: ObservedContext): string =>
-	`${formatSignalMetric(context.value, context.signalType)} ${formatThresholdSummary(context)}`
+	`${formatSignalMetric(context.value, signalDisplayOf(context))} ${formatThresholdSummary(context)}`
 
 export const comparatorBreachPhrase = (context: ThresholdContext): string => {
-	const threshold = formatSignalMetric(context.threshold, context.signalType)
-	const upper = formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)
+	const display = signalDisplayOf(context)
+	const threshold = formatSignalMetric(context.threshold, display)
+	const upper = formatSignalMetric(context.thresholdUpper ?? context.threshold, display)
 	return Match.value(context.comparator).pipe(
 		Match.whenOr("gt", "gte", () => `above the ${threshold} threshold`),
 		Match.whenOr("lt", "lte", () => `below the ${threshold} threshold`),
