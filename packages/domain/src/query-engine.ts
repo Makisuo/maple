@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { ALERT_REDUCERS } from "@maple/query-model"
 import { PublicHttpErrorBodySchema } from "./http/error-policy"
 import {
 	CommitSha,
@@ -538,7 +539,13 @@ export class QueryEngineExecuteBatchResponse extends Schema.Class<QueryEngineExe
 	results: Schema.Array(QueryEngineBatchOutcome),
 }) {}
 
-export const QueryEngineAlertReducer = Schema.Literals(["identity", "sum", "avg", "min", "max"]).annotate({
+/**
+ * The alert-rule spelling of the shared reducer table in `@maple/query-model`.
+ * `ALERT_REDUCER_TO_SERIES_REDUCER` maps each of these onto the widget spelling
+ * (`STAT_AGGREGATES`); the two sets stay distinct because `"identity"` and
+ * `"first"` coincide only on a one-bucket window.
+ */
+export const QueryEngineAlertReducer = Schema.Literals(ALERT_REDUCERS).annotate({
 	identifier: "@maple/QueryEngineAlertReducer",
 })
 export type QueryEngineAlertReducer = Schema.Schema.Type<typeof QueryEngineAlertReducer>

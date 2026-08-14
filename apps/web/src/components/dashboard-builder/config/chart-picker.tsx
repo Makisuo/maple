@@ -17,6 +17,7 @@ import type {
 import type { WidgetPresetDefinition } from "@/components/dashboard-builder/widgets/widget-definitions"
 import { widgetTypeList } from "@/components/dashboard-builder/widgets/types"
 import { createQueryDraft } from "@maple/query-engine/query-builder"
+import { makeQueryDataSource } from "@maple/widgets/dashboard"
 import { deriveDefaultWidgetTitle } from "@/lib/query-builder/widget-builder-utils"
 
 // "Add widget".
@@ -136,15 +137,12 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 		const draft = createQueryDraft(0)
 		const added = onSelect(
 			"chart",
-			{
-				endpoint: "custom_query_builder_timeseries",
-				params: {
-					queries: [draft],
-					formulas: [],
-					comparison: { mode: "none", includePercentChange: true },
-					debug: false,
-				},
-			},
+			makeQueryDataSource({
+				resultShape: "timeseries",
+				queries: [draft],
+				formulas: [],
+				comparison: { mode: "none", includePercentChange: true },
+			}),
 			// Derived title ("Error rate by service.name") so freshly added
 			// charts never render as "Untitled".
 			{ chartId, title: deriveDefaultWidgetTitle([draft]) },

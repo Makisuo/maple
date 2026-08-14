@@ -94,6 +94,12 @@ Keep these names consistent across services to avoid edge fragmentation on the m
 | `cloudflare-logpush` | Cloudflare logpush source |
 | `clerk` | Clerk auth |
 | `autumn` | Autumn metering |
+| `github` | GitHub REST API (VCS sync) |
+| `planetscale-metrics` | PlanetScale per-branch `/metrics` data plane, via the scrape proxy |
+| `scrape-target` | Any other user-configured Prometheus scrape target, via the scrape proxy |
+
+The last two are deliberately generic. Scrape targets are user-configured and unbounded, so
+naming a peer per target would grow the service map a node at a time. Bucket by target type.
 
 Add new peers to this list as they're introduced — single source of truth.
 

@@ -249,8 +249,12 @@ describe("V2Dashboard wire format", () => {
 				{
 					id: "widget-1",
 					visualization: "chart",
+					// A `route` arm: the only kind that still carries an opaque params
+					// bag in v3, and therefore the only one that exercises the recursive
+					// snake_case wire convention asserted below.
 					data_source: {
-						endpoint: "queryBuilderTimeseries",
+						kind: "route",
+						endpoint: "service_overview",
 						params: { start_time: "now-1h", nested_filter: { attribute_key: "service.name" } },
 						transform: { field_map: { value: "requests" } },
 					},
@@ -294,7 +298,9 @@ describe("V2Dashboard wire format", () => {
 		expect(decoded.timeRange.type).toBe("absolute")
 		expect(decoded.refreshIntervalSeconds).toBeNull()
 		expect(decoded.widgets[0]?.dataSource.transform?.fieldMap).toEqual({ value: "requests" })
-		expect(decoded.widgets[0]?.dataSource.params).toEqual({
+		const decodedSource = decoded.widgets[0]?.dataSource
+		if (decodedSource?.kind !== "route") throw new Error("expected a route data source")
+		expect(decodedSource.params).toEqual({
 			startTime: "now-1h",
 			nestedFilter: { attributeKey: "service.name" },
 		})
@@ -303,7 +309,11 @@ describe("V2Dashboard wire format", () => {
 		expect(wire.id).toMatch(/^dash_/)
 		expect(wire.time_range).toHaveProperty("start_time")
 		expect(wire.widgets[0]?.data_source.transform).toHaveProperty("field_map")
-		expect(wire.widgets[0]?.data_source.params).toHaveProperty("nested_filter.attribute_key")
+		const wireSource = wire.widgets[0]?.data_source
+		if (wireSource === undefined || !("params" in wireSource)) {
+			throw new Error("expected a route data source on the wire")
+		}
+		expect(wireSource.params).toHaveProperty("nested_filter.attribute_key")
 		expect(wire.widgets[0]?.layout).toHaveProperty("min_w")
 		// Section membership snake_cases; `tabs` is already single-word throughout.
 		expect(wire.widgets[0]).toHaveProperty("section_id", "section-1")

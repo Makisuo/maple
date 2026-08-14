@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { parseStoredDashboard, stampCurrentVersion } from "../parse"
 import { CURRENT_DASHBOARD_SCHEMA_VERSION } from "../version"
+import { upgradeStoredDocument } from "../upgrade-to-v3"
 import { DASHBOARD_MIGRATIONS, detectSchemaVersion, migrateToLatest } from "./index"
 
 /** A minimal but complete v1 document, as a pre-versioning row would be stored. */
@@ -47,7 +48,17 @@ const looseDocument = {
 	],
 }
 
-const parse = (payload: unknown) => Effect.runSync(parseStoredDashboard(payload))
+/**
+ * Reads a stored payload the way the BACKFILL does — chain, then the one-shot
+ * v2 -> v3 upgrade — and then decodes.
+ *
+ * `parseStoredDashboard` alone no longer suffices for a legacy fixture: the
+ * decoder is v3 while `migrateToLatest` only reaches v2, because the v2 -> v3
+ * step is a one-shot backfill rather than a chain entry. That gap IS the
+ * migration window, and asserting through `upgradeStoredDocument` is what makes
+ * these tests cover the path that actually closes it.
+ */
+const parse = (payload: unknown) => Effect.runSync(parseStoredDashboard(upgradeStoredDocument(payload)))
 
 const firstWidget = (document: Record<string, unknown>): Record<string, unknown> => {
 	const widgets = document.widgets
@@ -58,14 +69,19 @@ const firstWidget = (document: Record<string, unknown>): Record<string, unknown>
 }
 
 describe("the migration chain", () => {
-	it("is contiguous and terminates at the current version", () => {
+	// The chain no longer runs all the way to the current version, and that is the
+	// design rather than a gap: the v2 -> v3 step is a one-shot backfill
+	// (`upgrade-to-v3.ts`), not a chain entry, so the chain stops at 2 while
+	// current is 3. What must still hold is contiguity from 1 — a hole in the
+	// chain silently skips a document.
+	it("is contiguous from 1", () => {
 		let expected = 1
 		for (const migration of DASHBOARD_MIGRATIONS) {
 			expect(migration.from).toBe(expected)
 			expect(migration.to).toBe(expected + 1)
 			expected = migration.to
 		}
-		expect(expected).toBe(CURRENT_DASHBOARD_SCHEMA_VERSION)
+		expect(expected).toBeLessThanOrEqual(CURRENT_DASHBOARD_SCHEMA_VERSION)
 	})
 
 	// Run idempotence over the *loose* document too: a step that coerces is only
@@ -156,7 +172,10 @@ describe("the v1 -> v2 step", () => {
 
 		expect(outcome._tag).toBe("Decoded")
 		if (outcome._tag !== "Decoded") return
-		expect(outcome.fromVersion).toBe(1)
+		// The stored version is read off the raw payload: `parse` here upgrades
+		// before decoding, so the outcome reports the version it decoded, not the
+		// one the row was written in.
+		expect(detectSchemaVersion(looseDocument)).toBe(1)
 		expect(outcome.document.widgets[0]?.visualization).toBe("chart")
 	})
 
@@ -222,25 +241,60 @@ describe("detectSchemaVersion", () => {
 	})
 })
 
+describe("migrateToLatest with a document from a newer build", () => {
+	// The rollback case. `detectSchemaVersion` reads an unknown version as 1, so
+	// without a guard the document is run through the entire chain as though it
+	// were the oldest shape and then stamped as current — decode fails either
+	// way, but stamped, the next writer persists the lie and the original
+	// version is gone. Failing to read is recoverable; corrupting is not.
+	const fromTheFuture = { ...legacyDocument, schemaVersion: 99, widgets: [] }
+
+	it("returns it untouched rather than restamping it downward", () => {
+		expect(migrateToLatest(fromTheFuture)).toEqual(fromTheFuture)
+	})
+
+	it("does not claim the current version on the way out", () => {
+		expect(migrateToLatest(fromTheFuture).schemaVersion).toBe(99)
+	})
+
+	// `migrateToLatest` stamps the version it actually REACHED, which is where the
+	// chain ends (2) — not the current version (3). Only `upgradeStoredDocument`,
+	// which applies the one-shot v2 -> v3 on top, can honestly stamp 3.
+	it("stamps the version the chain actually reached", () => {
+		const chainEnd = DASHBOARD_MIGRATIONS[DASHBOARD_MIGRATIONS.length - 1]?.to ?? 1
+		expect(migrateToLatest(legacyDocument).schemaVersion).toBe(chainEnd)
+	})
+
+	it("only claims the current version once the v3 upgrade has run too", () => {
+		const upgraded = upgradeStoredDocument(legacyDocument) as Record<string, unknown>
+		expect(upgraded.schemaVersion).toBe(CURRENT_DASHBOARD_SCHEMA_VERSION)
+	})
+})
+
 describe("parseStoredDashboard", () => {
-	it("decodes a legacy unstamped document and reports the version it came from", () => {
+	it("decodes a legacy unstamped document once it has been upgraded", () => {
 		const outcome = parse(legacyDocument)
 
+		// The version the row was STORED in is read off the raw payload — `parse`
+		// here upgrades first, so the outcome reports the version it decoded.
+		expect(detectSchemaVersion(legacyDocument)).toBe(1)
 		expect(outcome._tag).toBe("Decoded")
 		if (outcome._tag !== "Decoded") return
-		expect(outcome.fromVersion).toBe(1)
+		expect(outcome.fromVersion).toBe(CURRENT_DASHBOARD_SCHEMA_VERSION)
 		expect(outcome.degradedWidgetIds).toEqual([])
 		expect(outcome.document.name).toBe("Legacy board")
 		expect(outcome.document.widgets).toHaveLength(1)
 	})
 
-	it("carries widget params through byte-for-byte", () => {
+	// v1 -> v2 carried `params` byte-for-byte; the v3 upgrade rewrites the bag into
+	// typed fields, so the assertion becomes "the queries survived the reshaping".
+	it("carries the widget's queries through the reshaping", () => {
 		const outcome = parse(legacyDocument)
 
 		if (outcome._tag !== "Decoded") throw new Error("expected Decoded")
-		expect(outcome.document.widgets[0]?.dataSource.params).toEqual(
-			legacyDocument.widgets[0]!.dataSource.params,
-		)
+		const dataSource = outcome.document.widgets[0]?.dataSource
+		if (dataSource?.kind !== "query") throw new Error("expected a query data source")
+		expect(dataSource.queries).toEqual(legacyDocument.widgets[0]!.dataSource.params.queries)
 	})
 
 	it("rejects a structurally corrupt document instead of half-decoding it", () => {
@@ -248,7 +302,6 @@ describe("parseStoredDashboard", () => {
 
 		expect(outcome._tag).toBe("Rejected")
 		if (outcome._tag !== "Rejected") return
-		expect(outcome.fromVersion).toBe(1)
 		// The issue names the offending path so a 503 is diagnosable from logs.
 		expect(outcome.issue).not.toBe("")
 	})

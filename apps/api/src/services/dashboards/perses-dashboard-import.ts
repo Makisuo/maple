@@ -10,6 +10,7 @@ import {
 	widgetTypeByVisualization,
 	type WidgetVisualization,
 } from "@maple/domain/http"
+import { makeRawSqlDataSource, makeRouteDataSource, makeStaticDataSource } from "@maple/widgets/dashboard"
 
 type UnknownRecord = Record<string, unknown>
 type DashboardWidget = typeof DashboardWidgetSchema.Type
@@ -278,29 +279,21 @@ function rawSqlDataSource(args: {
 	sql: string
 	displayType: RawSqlDisplayType
 }): DashboardWidget["dataSource"] {
-	const base: DashboardWidget["dataSource"] = {
-		endpoint: "raw_sql_chart",
-		params: {
-			sql: args.sql,
-			displayType: args.displayType,
-		},
-	}
-
 	// `displayType === "stat"` is kept alongside the panel's own scalar flag: a
 	// Perses panel can import as a non-scalar type while its query still yields
 	// the single-row shape a stat renders.
-	if (args.displayType === "stat" || widgetTypeByVisualization(args.visualization)?.isScalar === true) {
-		return {
-			...base,
-			transform: { reduceToValue: { field: "value", aggregate: "first" } },
-		}
-	}
+	const isScalar =
+		args.displayType === "stat" || widgetTypeByVisualization(args.visualization)?.isScalar === true
 
-	return base
+	return makeRawSqlDataSource({
+		sql: args.sql,
+		displayType: args.displayType,
+		...(isScalar ? { transform: { reduceToValue: { field: "value", aggregate: "first" } } } : {}),
+	})
 }
 
 function markdownDataSource(): DashboardWidget["dataSource"] {
-	return { endpoint: "markdown_static" }
+	return makeStaticDataSource()
 }
 
 function markdownWidgetContent(args: {

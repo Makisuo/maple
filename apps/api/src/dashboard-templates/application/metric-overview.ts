@@ -10,10 +10,12 @@ import {
 	templateId,
 } from "@/dashboard-templates/helpers"
 import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
+import { type QueryBuilderMetricType, toQueryBuilderMetricType } from "@maple/query-model"
+import { makeRouteDataSource } from "@maple/widgets/dashboard"
 
 function widgets(opts: {
 	metricName: string
-	metricType: string
+	metricType: QueryBuilderMetricType
 	serviceName?: string
 	aggregation?: string
 }): WidgetDef[] {
@@ -28,42 +30,42 @@ function widgets(opts: {
 		{
 			id: "metric-current",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "custom_timeseries",
-				params: { source: "metrics", metric: agg, groupBy: "none", filters: metricsFilters },
-				transform: {
+			dataSource: makeRouteDataSource(
+				"custom_timeseries",
+				{ source: "metrics", metric: agg, groupBy: "none", filters: metricsFilters },
+				{
 					flattenSeries: { valueField: "value" },
 					reduceToValue: { field: "value", aggregate: "avg" },
 				},
-			},
+			),
 			display: { title: `${opts.metricName} (${agg})` },
 			layout: { x: 0, y: 0, w: 4, h: 2 },
 		},
 		{
 			id: "metric-max",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "custom_timeseries",
-				params: { source: "metrics", metric: "max", groupBy: "none", filters: metricsFilters },
-				transform: {
+			dataSource: makeRouteDataSource(
+				"custom_timeseries",
+				{ source: "metrics", metric: "max", groupBy: "none", filters: metricsFilters },
+				{
 					flattenSeries: { valueField: "value" },
 					reduceToValue: { field: "value", aggregate: "max" },
 				},
-			},
+			),
 			display: { title: `${opts.metricName} (max)` },
 			layout: { x: 4, y: 0, w: 4, h: 2 },
 		},
 		{
 			id: "metric-count",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "custom_timeseries",
-				params: { source: "metrics", metric: "count", groupBy: "none", filters: metricsFilters },
-				transform: {
+			dataSource: makeRouteDataSource(
+				"custom_timeseries",
+				{ source: "metrics", metric: "count", groupBy: "none", filters: metricsFilters },
+				{
 					flattenSeries: { valueField: "value" },
 					reduceToValue: { field: "value", aggregate: "sum" },
 				},
-			},
+			),
 			display: { title: "Data Points", unit: "number" },
 			layout: { x: 8, y: 0, w: 4, h: 2 },
 		},
@@ -154,7 +156,9 @@ export const metricOverviewTemplate: TemplateDefinition = {
 	],
 	build: (params) => {
 		const metricName = paramValue(params, "metric_name") ?? ""
-		const metricType = paramValue(params, "metric_type") ?? "sum"
+		// A template parameter is typed by a human into a text field, so an
+		// unrecognised metric type falls back rather than failing the build.
+		const metricType = toQueryBuilderMetricType(paramValue(params, "metric_type")) ?? "sum"
 		const serviceName = paramValue(params, "service_name")
 		const scope = serviceName ? ` for ${serviceName}` : ""
 		return buildPortableDashboard({

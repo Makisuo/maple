@@ -62,9 +62,27 @@ describe("provider request bodies decode against the real v2 create-param schema
 					// never a real `visualization`, it just went unnoticed while the
 					// field was an open string.
 					visualization: "chart",
-					data_source: { endpoint: "query_builder", params: { granularity_seconds: 60 } },
+					// Schema v3: a data source is a discriminated union on `kind`, not an
+					// `{ endpoint, params }` bag. The provider passes `widgets` straight
+					// through as `Record<string, unknown>`, so this fixture is the only
+					// thing standing between an IaC config and a 400 — which is exactly
+					// what it caught when `/v2` moved to the union.
+					data_source: { kind: "query", result_shape: "timeseries", queries: [] },
 					display: { title: "Throughput" },
 					layout: { x: 0, y: 0, w: 6, h: 4 },
+				},
+				{
+					id: "w2",
+					visualization: "chart",
+					// The other arm the provider realistically emits, and the one that
+					// carries `granularity_seconds` now that there is no params bag.
+					data_source: {
+						kind: "raw_sql",
+						sql: "SELECT 1 WHERE $__orgFilter",
+						granularity_seconds: 60,
+					},
+					display: { title: "Raw" },
+					layout: { x: 6, y: 0, w: 6, h: 4 },
 				},
 			],
 			variables: [{ name: "service", type: "textbox" }],

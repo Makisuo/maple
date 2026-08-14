@@ -6,6 +6,7 @@ import {
 	type McpToolResult,
 } from "./types"
 import { Effect, Schema } from "effect"
+import { dataSourceEndpoint } from "@maple/widgets/dashboard"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { createDualContent } from "@/mcp/lib/structured-output"
@@ -69,11 +70,12 @@ function unsupportedEndpointResult(
 	widget: {
 		id: string
 		visualization: string
-		dataSource: {
-			endpoint: string
-			params?: Record<string, unknown>
-			transform?: Record<string, unknown>
-		}
+		// `unknown`, because that is all this function needs: it hands the value to
+		// `dataSourceEndpoint` (which narrows internally) and to `JSON.stringify`.
+		// Spelling out a shape here only ever pinned it to one schema version — and
+		// this is the diagnostic path for a widget nothing else could read, so it is
+		// the last place that should care what shape the data source is in.
+		dataSource: unknown
 		display: { title?: string; unit?: string }
 	},
 	dashboardName: string,
@@ -82,21 +84,16 @@ function unsupportedEndpointResult(
 		`## Widget inspection: ${widget.display.title ?? widget.id}`,
 		`Dashboard: ${dashboardName}`,
 		`Visualization: ${widget.visualization}`,
-		`Endpoint: ${widget.dataSource.endpoint}`,
+		`Endpoint: ${dataSourceEndpoint(widget.dataSource) ?? "(typed data source)"}`,
 		``,
 		`This endpoint is not yet supported by inspect_chart_data.`,
 		`Use the \`query_data\` tool directly to verify, with the params shown below.`,
 		``,
 		`Widget definition:`,
-		JSON.stringify(
-			{
-				endpoint: widget.dataSource.endpoint,
-				params: widget.dataSource.params,
-				transform: widget.dataSource.transform,
-			},
-			null,
-			2,
-		),
+		// The whole data source rather than three hand-picked fields: this is the
+		// diagnostic path for a widget nothing else could read, so showing exactly
+		// what is stored beats showing the subset an older shape happened to have.
+		JSON.stringify(widget.dataSource, null, 2),
 	].join("\n")
 
 	return { content: [{ type: "text" as const, text }] }
@@ -283,15 +280,7 @@ export function registerInspectChartDataTool(server: McpToolRegistrar) {
 					{
 						id: widget.id,
 						visualization: widget.visualization,
-						dataSource: {
-							endpoint: widget.dataSource.endpoint,
-							...(widget.dataSource.params && {
-								params: widget.dataSource.params as Record<string, unknown>,
-							}),
-							...(widget.dataSource.transform && {
-								transform: widget.dataSource.transform as Record<string, unknown>,
-							}),
-						},
+						dataSource: widget.dataSource,
 						display: {
 							...(widget.display.title !== undefined && { title: widget.display.title }),
 							...(widget.display.unit !== undefined && { unit: widget.display.unit }),

@@ -91,7 +91,7 @@ describe("DashboardDocument with variables", () => {
 const widget = (id: string, membership: Record<string, string> = {}) => ({
 	id,
 	visualization: "chart",
-	dataSource: { endpoint: "custom_query_builder_timeseries" },
+	dataSource: { kind: "query", resultShape: "timeseries", queries: [] },
 	display: {},
 	layout: { x: 0, y: 0, w: 4, h: 4 },
 	...membership,

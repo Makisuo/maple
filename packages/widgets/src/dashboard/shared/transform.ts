@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { SERIES_REDUCERS, type SeriesReducer } from "@maple/query-model"
 
 export const StringRecord = Schema.Record(Schema.String, Schema.String)
 export const UnknownRecord = Schema.Record(Schema.String, Schema.Unknown)
@@ -9,9 +10,15 @@ export const UnknownRecord = Schema.Record(Schema.String, Schema.Unknown)
  * Closed in schema v2 and open (`Schema.String`) in v1. The set is exactly what
  * `applyTransform` implements and what the Aggregate picker offers; `"first"`
  * leads because it is the runtime default for an absent aggregate.
+ *
+ * The widget spelling of the shared reducer table in `@maple/query-model` — the
+ * alert-rule spelling of the same concept is `ALERT_REDUCERS` there. The two
+ * literal sets stay distinct (widgets persist `"first"`, rules persist
+ * `"identity"`), but they derive from one table so a reducer added to one is
+ * forced to declare whether it has a counterpart in the other.
  */
-export const STAT_AGGREGATES = ["first", "sum", "count", "avg", "max", "min"] as const
-export type StatAggregate = (typeof STAT_AGGREGATES)[number]
+export const STAT_AGGREGATES = SERIES_REDUCERS
+export type StatAggregate = SeriesReducer
 
 /**
  * `applyTransform` compares `direction === "desc"` and sorts ascending for

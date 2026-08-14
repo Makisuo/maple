@@ -36,6 +36,7 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { type FormulaDraft, type TimeseriesPoint } from "@/components/query-builder/formula-results"
 import { type QueryBuilderTimeseriesInput } from "@/api/warehouse/query-builder-timeseries"
+import { type TimeseriesQuerySetDiagnostics } from "@maple/query-engine/query-set"
 import {
 	AGGREGATIONS_BY_SOURCE,
 	createFormulaDraft,
@@ -138,23 +139,10 @@ function toRunPoints(rows: Array<Record<string, string | number>>): TimeseriesPo
 	})
 }
 
-function debugWarnings(debug: unknown): string[] {
-	if (!debug || typeof debug !== "object") {
-		return []
-	}
-
-	const debugObj = debug as {
-		queries?: Array<{ queryName?: string; fallbackUsed?: boolean }>
-	}
-
-	const warnings: string[] = []
-	for (const entry of debugObj.queries ?? []) {
-		if (entry.fallbackUsed) {
-			warnings.push(`${entry.queryName ?? "query"} used fallback range`)
-		}
-	}
-
-	return warnings
+function debugWarnings(diagnostics: TimeseriesQuerySetDiagnostics): string[] {
+	return diagnostics.queries
+		.filter((entry) => entry.fallbackUsed)
+		.map((entry) => `${entry.queryName} used fallback range`)
 }
 
 const GROUP_BY_OPTIONS: Record<DataSource, Array<{ label: string; value: string }>> = {
@@ -252,7 +240,7 @@ function QueryBuilderAtomResults({ input }: { input: QueryBuilderTimeseriesInput
 				))
 				.onSuccess((response) => {
 					const data = toRunPoints(response.data)
-					const warnings = debugWarnings(response.debug)
+					const warnings = debugWarnings(response.diagnostics)
 					const seriesKeys = Array.from(
 						new Set(data.flatMap((point) => Object.keys(point.series))),
 					).slice(0, 6)
@@ -471,7 +459,7 @@ function QueryBuilderLabInner({ startTime, endTime }: QueryBuilderLabProps) {
 		}
 
 		setNoQueriesError(null)
-		setSubmittedInput({ startTime, endTime, queries, formulas, debug: true })
+		setSubmittedInput({ startTime, endTime, queries, formulas })
 		setLastRunAt(new Date().toLocaleTimeString())
 	}, [endTime, formulas, queries, startTime])
 

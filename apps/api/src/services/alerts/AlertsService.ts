@@ -113,6 +113,7 @@ import {
 	compileRulePlan,
 	decodeStoredAlertRuleMetadata,
 	isGroupedPlan,
+	toStorageGroupKey,
 	makeAlertValidationError as makeValidationError,
 	planEvaluateSource,
 	type NormalizedRule,
@@ -456,10 +457,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					},
 				)
 
-				const grouped = isGroupedPlan(plan)
 				return observations.map((obs) => ({
 					evaluation: applyEvaluationLogic(rule, obs),
-					groupKey: grouped ? obs.groupKey : UNGROUPED_GROUP_KEY,
+					groupKey: toStorageGroupKey(plan, obs.groupKey),
 				}))
 			})
 
@@ -979,10 +979,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					// Preview must key its series exactly as the scheduler stores them,
 					// or the preview chart and the tracking chart disagree on the
 					// ungrouped series' name.
-					const grouped = isGroupedPlan(plan)
 					for (const obs of observations) {
 						if (HashSet.has(excludeSet, obs.groupKey)) continue
-						record(grouped ? obs.groupKey : UNGROUPED_GROUP_KEY, Date.parse(obs.bucket), {
+						record(toStorageGroupKey(plan, obs.groupKey), Date.parse(obs.bucket), {
 							value: obs.value,
 							sampleCount: obs.sampleCount,
 							hasData: obs.sampleCount > 0,

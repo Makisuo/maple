@@ -1,7 +1,8 @@
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
+import { WIDGET_DATA_SOURCE_KINDS } from "@maple/widgets/dashboard"
 import { DashboardWidgetSchema, WidgetDisplayConfigSchema } from "../dashboards"
-import { V2DashboardWidget, V2WidgetDisplay } from "./dashboards"
+import { V2DashboardWidget, V2WidgetDataSource, V2WidgetDisplay } from "./dashboards"
 
 // The v2 public schema is a hand-maintained clone of the stored widget schema:
 // the same fields again, differing only by `Schema.encodeKeys` for snake_case.
@@ -20,31 +21,26 @@ const snakeCase = (key: string): string => key.replace(/[A-Z]/g, (c) => `_${c.to
 /** Fails to compile unless `A` is assignable to `B`. */
 type AssertAssignable<A extends B, B> = [A, B]
 
-// Bidirectional: a field added to EITHER schema and missed on the other breaks
-// the build here rather than silently changing the public API.
-export type _DisplayInternalToV2 = AssertAssignable<
-	typeof WidgetDisplayConfigSchema.Type,
-	typeof V2WidgetDisplay.Type
->
-export type _DisplayV2ToInternal = AssertAssignable<
-	typeof V2WidgetDisplay.Type,
-	typeof WidgetDisplayConfigSchema.Type
->
-// The widget is asserted in one direction only, and deliberately.
+// The three structural assignability assertions that used to live here are gone,
+// and deliberately.
 //
-// This is the direction the silent-omission bug actually travels:
-// `routes/v2/dashboards.http.ts` assigns `widgets: dashboard.widgets` — internal
-// widgets into the V2 type — so internal must satisfy V2. It still catches a
-// field added to V2 alone, because a new *required* V2 field would leave internal
-// no longer assignable.
+// They asserted that the stored widget/display types were mutually assignable
+// with the v2 ones — which held only while the v2 schemas were a field-for-field
+// clone of storage. Schema v3 ends that: `dataSource.queries` is a typed array of
+// query drafts in storage and an opaque `UnknownRecord` on the wire, because the
+// wire representation of a query has always been opaque (it lived inside the
+// untyped `params` bag) and typing it now would be a second, larger breaking
+// change to the published spec.
 //
-// The reverse does not hold, and forcing it would be wrong: V2 types an absolute
-// `timeRange` as a plain `Timestamp` string while the stored schema brands it
-// `IsoDateTimeString`. `toInternalWidgets` in the route re-brands it on the way
-// in — which is precisely why that function exists.
-export type _WidgetInternalToV2 = AssertAssignable<
-	typeof DashboardWidgetSchema.Type,
-	typeof V2DashboardWidget.Type
+// So assignability is genuinely false, and forcing it would mean either leaking
+// storage types into the public contract or weakening storage to match the wire.
+// What the assertions actually PROTECTED — "you cannot extend the internal schema
+// without deciding what the public API does" — is preserved by the kind-coverage
+// test at the bottom of this file, which fails when an arm is added to the stored
+// union and not mirrored here.
+export type _DisplayFieldsCovered = AssertAssignable<
+	keyof typeof V2WidgetDisplay.Type,
+	keyof typeof WidgetDisplayConfigSchema.Type
 >
 
 /**
@@ -87,7 +83,7 @@ const fullDisplay = {
 	thresholds: [{ value: 1, color: "#f00", label: "warn" }],
 	prefix: "~",
 	suffix: "/s",
-	sparkline: { enabled: true, dataSource: { endpoint: "custom_query_builder_timeseries" } },
+	sparkline: { enabled: true, dataSource: { kind: "route", endpoint: "list_traces" } },
 	columns: [
 		{
 			field: "name",
@@ -144,7 +140,7 @@ describe("the v2 widget display mirrors the stored one", () => {
 			histogram: { bucket_count: 10, bucket_width: 2, log_scale_y: false },
 			heatmap: { color_scale: "amber", scale_type: "linear" },
 			funnel: { show_step_percent: true },
-			sparkline: { data_source: { endpoint: "custom_query_builder_timeseries" } },
+			sparkline: { data_source: { kind: "route", endpoint: "list_traces" } },
 			list_where_clause: "service.name = $service",
 			list_root_only: true,
 		})
@@ -166,8 +162,9 @@ describe("the v2 widget mirrors the stored one", () => {
 		id: "w1",
 		visualization: "chart",
 		dataSource: {
-			endpoint: "custom_query_builder_timeseries",
-			params: { queries: [] },
+			kind: "query",
+			resultShape: "timeseries",
+			queries: [],
 			transform: {
 				fieldMap: { a: "b" },
 				hideSeries: { baseNames: ["x"] },
@@ -213,5 +210,37 @@ describe("the v2 widget mirrors the stored one", () => {
 			},
 			layout: { min_w: 2, min_h: 2, max_w: 12, max_h: 12 },
 		})
+	})
+})
+
+// The structural successor to the deleted assignability assertions.
+//
+// A fifth arm added to the stored data-source union fails here until someone has
+// decided what `/v2/dashboards` does with it — which is the question the old type
+// assertions forced, and the only one worth forcing.
+describe("the v2 data source covers every stored kind", () => {
+	const decode = Schema.decodeUnknownSync(V2WidgetDataSource)
+
+	it.each(WIDGET_DATA_SOURCE_KINDS)("declares an arm for kind %s", (kind) => {
+		const fixture: Record<string, unknown> = {
+			query: { kind: "query", result_shape: "timeseries", queries: [] },
+			raw_sql: { kind: "raw_sql", sql: "SELECT 1" },
+			route: { kind: "route", endpoint: "list_traces" },
+			static: { kind: "static" },
+		}[kind]!
+
+		expect(() => decode(fixture)).not.toThrow()
+	})
+
+	it("snake_cases the scalar fields the union added", () => {
+		const wire = Schema.encodeUnknownSync(V2WidgetDataSource)({
+			kind: "query",
+			resultShape: "breakdown",
+			queries: [],
+			defaultLimit: 20,
+		}) as Record<string, unknown>
+
+		expect(wire).toHaveProperty("result_shape", "breakdown")
+		expect(wire).toHaveProperty("default_limit", 20)
 	})
 })

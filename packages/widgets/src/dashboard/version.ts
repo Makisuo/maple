@@ -11,10 +11,10 @@ import { Schema } from "effect"
  * was introduced after those documents were written, so absence is the only
  * signal they can carry. `detectSchemaVersion` encodes that.
  */
-export const DashboardSchemaVersion = Schema.Literals([1, 2]).annotate({
+export const DashboardSchemaVersion = Schema.Literals([1, 2, 3]).annotate({
 	identifier: "@maple/DashboardSchemaVersion",
 	title: "Dashboard Schema Version",
 })
 export type DashboardSchemaVersion = typeof DashboardSchemaVersion.Type
 
-export const CURRENT_DASHBOARD_SCHEMA_VERSION = 2 satisfies DashboardSchemaVersion
+export const CURRENT_DASHBOARD_SCHEMA_VERSION = 3 satisfies DashboardSchemaVersion

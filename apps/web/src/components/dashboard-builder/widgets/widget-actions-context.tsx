@@ -9,6 +9,7 @@ import {
 	type WidgetFixContext,
 } from "@/components/chat/widget-fix-context"
 import { encodeAlertChartToSearchParam } from "@/lib/alerts/widget-chart-param"
+import { dataSourceRawSql, isQueryDataSource } from "@maple/widgets/dashboard"
 
 export interface WidgetActions {
 	remove?: () => void
@@ -99,13 +100,10 @@ export function WidgetActionsProvider({
 		const configure = readOnly ? undefined : () => configureWidget(widget.id)
 
 		// "Create alert" is offered for query-driven charts; the alert builder
-		// warns when chart-only features need review.
-		const endpoint = widget.dataSource?.endpoint
-		const alertable =
-			endpoint === "raw_sql_chart" ||
-			endpoint === "custom_query_builder_timeseries" ||
-			endpoint === "custom_query_builder_breakdown" ||
-			endpoint === "custom_query_builder_list"
+		// warns when chart-only features need review. Read structurally rather
+		// than by endpoint name so the action survives the v2 -> v3 data-source
+		// flip — an endpoint list would just make it disappear silently.
+		const alertable = isQueryDataSource(widget.dataSource) || dataSourceRawSql(widget.dataSource) !== null
 		const createAlert =
 			dashboardId && alertable
 				? () => {
@@ -117,11 +115,10 @@ export function WidgetActionsProvider({
 							widget: {
 								id: widget.id,
 								visualization: widget.visualization,
-								dataSource: {
-									endpoint: widget.dataSource.endpoint,
-									params: widget.dataSource.params,
-									transform: widget.dataSource.transform,
-								},
+								// The whole data source rather than three hand-picked fields:
+								// the prefill reads it through the version-agnostic accessors,
+								// and a field list here would have to grow with every v3 arm.
+								dataSource: widget.dataSource,
 								display: { title: widget.display.title },
 							},
 						})

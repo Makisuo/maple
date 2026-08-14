@@ -1,3 +1,4 @@
+import type { WidgetDataSource } from "@/components/dashboard-builder/types"
 import { describe, expect, it } from "vitest"
 import { BREAKDOWN_TAIL_LIMIT, createFormulaDraft, createQueryDraft } from "@maple/query-engine/query-builder"
 import {
@@ -12,13 +13,31 @@ import {
 } from "@/lib/query-builder/widget-builder-utils"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
 
+/**
+ * What a widget routed to, as one comparable value.
+ *
+ * v2 answered this with an endpoint string; v3 answers it with `kind` plus, for
+ * queries, `resultShape`. Collapsing the two back into a single token keeps these
+ * routing assertions reading as routing assertions rather than as narrowing.
+ */
+const routedTo = (dataSource: WidgetDataSource): string =>
+	dataSource.kind === "query" ? dataSource.resultShape : dataSource.kind
+
+/** The query arm's request-shaping fields, which v2 kept in the `params` bag. */
+const queryFields = (dataSource: WidgetDataSource): Record<string, unknown> => {
+	if (dataSource.kind !== "query") throw new Error(`expected a query source, got ${dataSource.kind}`)
+	const { kind: _kind, resultShape: _shape, transform: _transform, ...fields } = dataSource
+	return fields
+}
+
 function makeWidget(): DashboardWidget {
 	return {
 		id: "widget-1",
 		visualization: "chart",
 		dataSource: {
-			endpoint: "custom_query_builder_timeseries",
-			params: {},
+			kind: "query",
+			resultShape: "timeseries",
+			queries: [],
 		},
 		display: {},
 		layout: { x: 0, y: 0, w: 6, h: 4 },
@@ -38,7 +57,6 @@ function makeState(): QueryBuilderWidgetState {
 		formulas: [],
 		comparisonMode: "none",
 		includePercentChange: true,
-		debug: false,
 		statAggregate: "first",
 		statValueField: "",
 		unit: "number",
@@ -80,7 +98,7 @@ describe("widget-builder hidden series behavior", () => {
 
 		const dataSource = buildWidgetDataSource(widget, state, ["A", "B"])
 
-		expect(dataSource.endpoint).toBe("custom_query_builder_timeseries")
+		expect(routedTo(dataSource)).toBe("timeseries")
 		expect(dataSource.transform?.hideSeries?.baseNames).toEqual(["A"])
 	})
 
@@ -197,7 +215,7 @@ describe("widget-builder hidden series behavior", () => {
 		const dataSource = buildWidgetDataSource(widget, state, ["B"])
 
 		expect(dataSource.transform?.hideSeries?.baseNames).toEqual(["Errors", "Error ratio"])
-		expect(dataSource.params).toMatchObject({
+		expect(queryFields(dataSource)).toMatchObject({
 			queries: state.queries,
 			formulas: state.formulas,
 		})
@@ -211,19 +229,19 @@ describe("funnel/heatmap endpoint routing (MAP-49)", () => {
 			const widget = makeWidget()
 			const state = { ...makeState(), visualization }
 			const dataSource = buildWidgetDataSource(widget, state, ["A", "B"])
-			expect(dataSource.endpoint).toBe("custom_query_builder_breakdown")
+			expect(routedTo(dataSource)).toBe("breakdown")
 		},
 	)
 
 	it("keeps charts on the timeseries endpoint", () => {
 		const widget = makeWidget()
 		const dataSource = buildWidgetDataSource(widget, makeState(), ["A", "B"])
-		expect(dataSource.endpoint).toBe("custom_query_builder_timeseries")
+		expect(routedTo(dataSource)).toBe("timeseries")
 	})
 
 	it("sends breakdown params the endpoint schema accepts, and nothing more", () => {
 		// QueryBuilderBreakdownInputSchema accepts only startTime/endTime/queries
-		// and the optional defaultLimit. An extra key (formulas, comparison, debug)
+		// and the optional defaultLimit. An extra key (formulas, comparison)
 		// fails the request decode and leaves the widget stuck on its loading
 		// skeleton, so this is a contract test, not a style preference.
 		const state = {
@@ -232,7 +250,7 @@ describe("funnel/heatmap endpoint routing (MAP-49)", () => {
 			formulas: [createFormulaDraft(0, ["A", "B"])],
 		}
 		const dataSource = buildWidgetDataSource(makeWidget(), state, ["A", "B"])
-		expect(Object.keys(dataSource.params ?? {})).toEqual(["queries", "defaultLimit"])
+		expect(Object.keys(queryFields(dataSource))).toEqual(["queries", "defaultLimit"])
 	})
 
 	it("asks for the long tail on a pie, and only on a pie", () => {
@@ -243,14 +261,14 @@ describe("funnel/heatmap endpoint routing (MAP-49)", () => {
 			"A",
 			"B",
 		])
-		expect(pie.params?.defaultLimit).toBe(BREAKDOWN_TAIL_LIMIT)
+		expect(queryFields(pie).defaultLimit).toBe(BREAKDOWN_TAIL_LIMIT)
 
 		for (const visualization of ["funnel", "heatmap", "histogram"] as const) {
 			const dataSource = buildWidgetDataSource(makeWidget(), { ...makeState(), visualization }, [
 				"A",
 				"B",
 			])
-			expect(dataSource.params?.defaultLimit).toBeUndefined()
+			expect(queryFields(dataSource).defaultLimit).toBeUndefined()
 		}
 	})
 })
@@ -269,15 +287,13 @@ describe("histogram data shape routing", () => {
 		// An ungrouped histogram is a distribution of raw values bucketized
 		// client-side — a count-by-group breakdown is a different chart (MAP-49).
 		const dataSource = buildWidgetDataSource(makeWidget(), ungroupedTraceState(), ["A"])
-		expect(dataSource.endpoint).toBe("custom_query_builder_list")
-		expect(dataSource.params).toMatchObject({ columns: ["durationMs"] })
+		expect(routedTo(dataSource)).toBe("list")
+		expect(queryFields(dataSource)).toMatchObject({ columns: ["durationMs"] })
 	})
 
 	it("routes a grouped histogram to the breakdown endpoint", () => {
 		const state = { ...makeState(), visualization: "histogram" as const }
-		expect(buildWidgetDataSource(makeWidget(), state, ["A"]).endpoint).toBe(
-			"custom_query_builder_breakdown",
-		)
+		expect(routedTo(buildWidgetDataSource(makeWidget(), state, ["A"]))).toBe("breakdown")
 	})
 
 	it("round-trips a list-backed histogram instead of dropping its query", () => {
@@ -337,7 +353,7 @@ describe("markdown widgets", () => {
 		const dataSource = buildWidgetDataSource(makeWidget(), state, [])
 		const display = buildWidgetDisplay(makeWidget(), state)
 
-		expect(dataSource.endpoint).toBe("markdown_static")
+		expect(routedTo(dataSource)).toBe("static")
 		expect(display.markdown).toEqual({ content: "# Runbook" })
 		expect(
 			toInitialState({ ...makeWidget(), visualization: "markdown", dataSource, display })

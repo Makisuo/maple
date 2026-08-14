@@ -47,6 +47,7 @@ import {
 	type StatSparklineScenario,
 	type ChartScenario,
 } from "@/components/widget-lab/scenarios"
+import { makeQueryDataSource } from "@maple/widgets/dashboard"
 
 // Widget renderers take no action props — the card menu resolves them from
 // context. The lab renders outside a dashboard, so it supplies its own stubs.
@@ -449,7 +450,7 @@ function StatScenarioCard({ scenario, mode }: { scenario: WidgetScenario; mode: 
  * warehouse. It only has to be present, because `StatWidget` reaches the
  * sparkline branch on `display.sparkline.dataSource` being set.
  */
-const LAB_SPARKLINE_SOURCE = { endpoint: "custom_query_builder_timeseries", params: {} } as const
+const LAB_SPARKLINE_SOURCE = makeQueryDataSource({ resultShape: "timeseries", queries: [] })
 
 /**
  * The real `StatWidget`, with its sparkline series supplied instead of fetched.

@@ -18,7 +18,7 @@ const widget = (
 ): DashboardWidget => ({
 	id,
 	visualization: "chart",
-	dataSource: { endpoint: "custom_query_builder_timeseries" },
+	dataSource: { kind: "query", resultShape: "timeseries", queries: [] },
 	display: {},
 	layout,
 	...(membership ?? {}),

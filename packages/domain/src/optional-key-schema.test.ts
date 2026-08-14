@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { UpsertDigestSubscriptionRequest } from "./http/digest.ts"
 import { UpdateOnboardingStateRequest } from "./http/onboarding.ts"
 import { UpdateScrapeTargetRequest } from "./http/scrape-targets.ts"
-import { CreateApiKeyRequest } from "./http/api-keys.ts"
+import { V2ApiKeyCreateParams } from "./http/v2/api-keys.ts"
 
 /**
  * Verifies `Schema.optionalKey` semantics on JSON-decoded HTTP request models:
@@ -46,7 +46,7 @@ describe("optionalKey HTTP request schemas", () => {
 			expectOk(decode(UpsertDigestSubscriptionRequest, { email: "a@b.com" }))
 		})
 		it("api-key: decodes with only the required name", () => {
-			expectOk(decode(CreateApiKeyRequest, { name: "ci" }))
+			expectOk(decode(V2ApiKeyCreateParams, { name: "ci" }))
 		})
 	})
 
@@ -55,7 +55,7 @@ describe("optionalKey HTTP request schemas", () => {
 			expectFail(decode(UpsertDigestSubscriptionRequest, {}))
 		})
 		it("api-key: rejects a payload missing the required name", () => {
-			expectFail(decode(CreateApiKeyRequest, {}))
+			expectFail(decode(V2ApiKeyCreateParams, {}))
 		})
 	})
 })

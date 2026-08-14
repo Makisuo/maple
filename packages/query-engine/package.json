@@ -8,6 +8,7 @@
 		"./formula-results": "./src/formula-results.ts",
 		"./traces-shared": "./src/traces-shared.ts",
 		"./query-builder": "./src/query-builder/model.ts",
+		"./query-set": "./src/query-set/index.ts",
 		"./ch": "./src/ch/index.ts",
 		"./profiles": "./src/profiles/index.ts",
 		"./caching": "./src/caching/index.ts",
@@ -30,6 +31,7 @@
 		"@maple-dev/clickhouse-builder": "workspace:*",
 		"@maple/cache": "workspace:*",
 		"@maple/domain": "workspace:*",
+		"@maple/query-model": "workspace:*",
 		"effect": "catalog:effect"
 	},
 	"devDependencies": {

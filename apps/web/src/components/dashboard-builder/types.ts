@@ -13,13 +13,23 @@ import type {
 
 // The domain schemas decode to deeply-readonly types; web widgets are mutable
 // React/builder state, so the derived types are unwrapped to mutable form.
+//
+// `dataSource` is the one exception, wherever it appears (a widget's own, and
+// the one `display.sparkline` embeds). A data source is always replaced
+// wholesale, never edited field-by-field, so it stays readonly — which is what
+// lets the constructors in `@maple/widgets/dashboard` be assigned straight into
+// these types instead of every call site fighting a variance mismatch.
 type DeepMutable<T> =
 	T extends ReadonlyArray<infer U>
 		? Array<DeepMutable<U>>
 		: T extends object
-			? { -readonly [K in keyof T]: DeepMutable<T[K]> }
+			? { -readonly [K in keyof T]: K extends "dataSource" ? T[K] : DeepMutable<T[K]> }
 			: T
 
+// Deliberately NOT `@maple/query-model`'s `TimeRange`, which brands its ISO
+// strings. Every producer in the UI (the time-range picker, the builder form)
+// deals in plain strings; branding happens once, at the store's document
+// boundary — the same reason `DashboardWidget["timeRange"]` is re-typed below.
 export type TimeRange =
 	| { type: "relative"; value: string }
 	| { type: "absolute"; startTime: string; endTime: string }
@@ -51,11 +61,26 @@ export type DataSourceEndpoint =
 	| "raw_sql_chart"
 	| "markdown_static"
 
-// `endpoint` is narrowed to the registry key union so the data-source registry
-// stays statically indexable; everything else comes straight from the schema.
-export type WidgetDataSource = Omit<DeepMutable<typeof WidgetDataSourceSchema.Type>, "endpoint"> & {
-	endpoint: DataSourceEndpoint
-}
+// A straight alias of the schema type, as of v3.
+//
+// This used to be `Omit<..., "endpoint"> & { endpoint: DataSourceEndpoint }`,
+// which bundled two unrelated jobs: keeping `serverFunctionMap` statically total,
+// and rejecting a typo'd endpoint at the widget-definition call site. Neither
+// survives contact with a discriminated union — `Omit` over a union collapses to
+// the keys every arm shares, so the result was a type that demanded `endpoint`
+// from arms that do not have one.
+//
+// Both jobs now live where they belong: `DataSourceEndpoint` below is its own
+// union and still keys the registry exhaustively, and the typo check moved to
+// `makeRouteDataSource`'s type parameter in `@maple/widgets/dashboard`.
+//
+// Still deliberately NOT `DeepMutable`, unlike the display/layout aliases below.
+// A data source is replaced wholesale — the builder never edits one field of it
+// in place — and keeping it readonly is what lets the constructors in
+// `@maple/widgets/dashboard` be assigned here directly, instead of every call
+// site fighting a variance mismatch. `DeepMutable` over a union would also strip
+// the readonly modifiers that make the arms discriminate cleanly.
+export type WidgetDataSource = typeof WidgetDataSourceSchema.Type
 
 export type ValueUnit =
 	| "none"

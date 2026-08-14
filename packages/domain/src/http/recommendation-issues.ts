@@ -1,7 +1,5 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { IsoDateTimeString, RecommendationIssueId } from "../primitives"
-import { Authorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 
 export const RecommendationIssueKind = Schema.Literals(["rename", "double-emission", "naming"])
@@ -59,28 +57,3 @@ export class RecommendationIssueNotFoundError extends HttpTaggedError<Recommenda
 		exposure: "redacted",
 	},
 ) {}
-
-export class RecommendationIssuesApiGroup extends HttpApiGroup.make("recommendationIssues")
-	.add(
-		// Reconciles live telemetry → persisted issues, then returns the full numbered list.
-		HttpApiEndpoint.get("list", "/", {
-			success: RecommendationIssuesListResponse,
-			error: RecommendationIssuePersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("dismiss", "/:id/dismiss", {
-			params: { id: RecommendationIssueId },
-			success: RecommendationIssuesListResponse,
-			error: [RecommendationIssueNotFoundError, RecommendationIssuePersistenceError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("reopen", "/:id/reopen", {
-			params: { id: RecommendationIssueId },
-			success: RecommendationIssuesListResponse,
-			error: [RecommendationIssueNotFoundError, RecommendationIssuePersistenceError],
-		}),
-	)
-	.prefix("/api/recommendation-issues")
-	.middleware(Authorization) {}

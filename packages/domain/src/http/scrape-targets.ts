@@ -1,4 +1,3 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import {
 	IsoDateTimeString,
@@ -7,7 +6,6 @@ import {
 	ScrapeTargetId,
 	ScrapeTargetType,
 } from "../primitives"
-import { Authorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 
 export class ScrapeTargetResponse extends Schema.Class<ScrapeTargetResponse>("ScrapeTargetResponse")({
@@ -103,34 +101,6 @@ export class ScrapeTargetProbeResponse extends Schema.Class<ScrapeTargetProbeRes
  * One persisted scheduled-scrape attempt (a `scrape_target_checks` row),
  * reported by the scraper and stored by the API.
  */
-export class ScrapeTargetCheckResponse extends Schema.Class<ScrapeTargetCheckResponse>(
-	"ScrapeTargetCheckResponse",
-)({
-	timestamp: IsoDateTimeString,
-	success: Schema.Boolean,
-	/** Sub-target discriminator (e.g. PlanetScale branch); null for plain targets. */
-	subTargetKey: Schema.NullOr(Schema.String),
-	durationSeconds: Schema.NullOr(Schema.Number),
-	samplesScraped: Schema.NullOr(Schema.Number),
-	samplesPostMetricRelabeling: Schema.NullOr(Schema.Number),
-	/** Null on success; the scrape failure message otherwise. */
-	message: Schema.NullOr(Schema.String),
-}) {}
-
-export class ScrapeTargetChecksListResponse extends Schema.Class<ScrapeTargetChecksListResponse>(
-	"ScrapeTargetChecksListResponse",
-)({
-	checks: Schema.Array(ScrapeTargetCheckResponse),
-}) {}
-
-export const ListScrapeTargetChecksQuery = Schema.Struct({
-	since: Schema.optionalKey(IsoDateTimeString),
-	until: Schema.optionalKey(IsoDateTimeString),
-	limit: Schema.optionalKey(
-		Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 200 })),
-	),
-})
-
 export class ScrapeTargetPersistenceError extends HttpTaggedError<ScrapeTargetPersistenceError>()(
 	"@maple/http/errors/ScrapeTargetPersistenceError",
 	{
@@ -273,68 +243,3 @@ export class ScrapeTargetUpstreamError extends HttpTaggedError<ScrapeTargetUpstr
 		exposure: "redacted",
 	},
 ) {}
-
-export class ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
-	.add(
-		HttpApiEndpoint.get("list", "/", {
-			success: ScrapeTargetsListResponse,
-			error: ScrapeTargetPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("create", "/", {
-			payload: CreateScrapeTargetRequest,
-			success: ScrapeTargetResponse,
-			error: [ScrapeTargetValidationError, ScrapeTargetPersistenceError, ScrapeTargetEncryptionError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.patch("update", "/:targetId", {
-			params: {
-				targetId: ScrapeTargetId,
-			},
-			payload: UpdateScrapeTargetRequest,
-			success: ScrapeTargetResponse,
-			error: [
-				ScrapeTargetNotFoundError,
-				ScrapeTargetValidationError,
-				ScrapeTargetPersistenceError,
-				ScrapeTargetEncryptionError,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.delete("delete", "/:targetId", {
-			params: {
-				targetId: ScrapeTargetId,
-			},
-			success: ScrapeTargetDeleteResponse,
-			error: [ScrapeTargetNotFoundError, ScrapeTargetPersistenceError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("probe", "/:targetId/probe", {
-			params: {
-				targetId: ScrapeTargetId,
-			},
-			success: ScrapeTargetProbeResponse,
-			error: [
-				ScrapeTargetNotFoundError,
-				ScrapeTargetPersistenceError,
-				ScrapeTargetEncryptionError,
-				ScrapeTargetAuthError,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("listChecks", "/:targetId/checks", {
-			params: {
-				targetId: ScrapeTargetId,
-			},
-			query: ListScrapeTargetChecksQuery,
-			success: ScrapeTargetChecksListResponse,
-			error: [ScrapeTargetNotFoundError, ScrapeTargetPersistenceError],
-		}),
-	)
-	.prefix("/api/scrape-targets")
-	.middleware(Authorization) {}

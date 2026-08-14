@@ -1,8 +1,6 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { HttpTaggedError } from "./error-policy"
 import { ApiKeyId, PostgresTransactionId, UserId } from "../primitives"
-import { Authorization } from "./current-tenant"
 
 export const ApiKeyKind = Schema.Literals(["standard", "mcp"])
 export type ApiKeyKind = Schema.Schema.Type<typeof ApiKeyKind>
@@ -49,14 +47,6 @@ export class ApiKeysListResponse extends Schema.Class<ApiKeysListResponse>("ApiK
 	keys: Schema.Array(ApiKeyResponse),
 }) {}
 
-export class CreateApiKeyRequest extends Schema.Class<CreateApiKeyRequest>("CreateApiKeyRequest")({
-	name: Schema.String,
-	description: Schema.optional(Schema.String),
-	expiresInSeconds: Schema.optional(Schema.Number),
-	kind: Schema.optional(ApiKeyKind),
-	scopes: Schema.optionalKey(Schema.Array(Schema.String)),
-}) {}
-
 export class ApiKeyPersistenceError extends HttpTaggedError<ApiKeyPersistenceError>()(
 	"@maple/http/errors/ApiKeyPersistenceError",
 	{
@@ -90,21 +80,6 @@ export class ApiKeyLookupPersistenceError extends HttpTaggedError<ApiKeyLookupPe
 	},
 ) {}
 
-export class ApiKeyForbiddenError extends HttpTaggedError<ApiKeyForbiddenError>()(
-	"@maple/http/errors/ApiKeyForbiddenError",
-	{
-		message: Schema.String,
-	},
-	{
-		status: 403,
-		code: "api_key_forbidden",
-		title: "Permission required",
-		retry: "never",
-		recovery: "request_access",
-		exposure: "public_message",
-	},
-) {}
-
 export class ApiKeyNotFoundError extends HttpTaggedError<ApiKeyNotFoundError>()(
 	"@maple/http/errors/ApiKeyNotFoundError",
 	{
@@ -122,38 +97,3 @@ export class ApiKeyNotFoundError extends HttpTaggedError<ApiKeyNotFoundError>()(
 		exposure: "redacted",
 	},
 ) {}
-
-export class ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
-	.add(
-		HttpApiEndpoint.get("list", "/", {
-			success: ApiKeysListResponse,
-			error: ApiKeyPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("create", "/", {
-			payload: CreateApiKeyRequest,
-			success: ApiKeyCreatedResponse,
-			error: [ApiKeyForbiddenError, ApiKeyPersistenceError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("roll", "/:keyId/roll", {
-			params: {
-				keyId: ApiKeyId,
-			},
-			success: ApiKeyCreatedResponse,
-			error: [ApiKeyForbiddenError, ApiKeyNotFoundError, ApiKeyPersistenceError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.delete("revoke", "/:keyId/revoke", {
-			params: {
-				keyId: ApiKeyId,
-			},
-			success: ApiKeyResponse,
-			error: [ApiKeyForbiddenError, ApiKeyNotFoundError, ApiKeyPersistenceError],
-		}),
-	)
-	.prefix("/api/api-keys")
-	.middleware(Authorization) {}

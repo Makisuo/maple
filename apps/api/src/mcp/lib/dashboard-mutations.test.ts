@@ -68,7 +68,7 @@ const NOW = asIsoDateTimeString(new Date("2026-01-01T00:00:00.000Z").toISOString
 const widget = (id: string) => ({
 	id,
 	visualization: "stat",
-	dataSource: { endpoint: "test" },
+	dataSource: { kind: "route", endpoint: "test" },
 	display: {},
 	layout: { x: 0, y: 0, w: 3, h: 4 },
 })

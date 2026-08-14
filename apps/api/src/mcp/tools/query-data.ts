@@ -35,6 +35,7 @@ import {
 	SpanName,
 	type QueryDataQueryContext,
 } from "@maple/domain"
+import { QUERY_BUILDER_DATA_SOURCES, type QueryResultShape } from "@maple/query-model"
 
 const asServiceName = Schema.decodeUnknownSync(ServiceName)
 const asSpanName = Schema.decodeUnknownSync(SpanName)
@@ -43,13 +44,16 @@ const asCommitSha = Schema.decodeUnknownSync(CommitSha)
 const asMetricName = Schema.decodeUnknownSync(MetricName)
 
 const queryDataSchema = Schema.Struct({
-	source: Schema.Literals(["traces", "logs", "metrics"]).annotate({
+	source: Schema.Literals(QUERY_BUILDER_DATA_SOURCES).annotate({
 		description:
 			"Data source. Use 'traces' for request/span analysis (latency, errors, throughput). " +
 			"Use 'logs' for log volume analysis. " +
 			"Use 'metrics' for custom metric aggregation (requires metric_name and metric_type — call list_metrics first).",
 	}),
-	kind: Schema.Literals(["timeseries", "breakdown"]).annotate({
+	kind: Schema.Literals([
+		"timeseries",
+		"breakdown",
+	] as const satisfies ReadonlyArray<QueryResultShape>).annotate({
 		description:
 			"Query shape. Use 'timeseries' when the user asks about trends, patterns, or 'how has X changed over time'. " +
 			"Use 'breakdown' when asking about top-N, distribution, or 'which services have the most errors'. " +

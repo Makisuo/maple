@@ -60,9 +60,11 @@ describe("deriveDashboardsList", () => {
 				widgets: [
 					{
 						id: "w1",
-						// A panel type in `visualization` — the shape v1 allowed.
+						// A panel type in `visualization` — the shape v1 allowed. The
+						// migration chain still folds this on read; only the data source
+						// moved to the one-shot backfill, so it is written in v3 here.
 						visualization: "bar",
-						dataSource: { endpoint: "spanMetrics" },
+						dataSource: { kind: "route", endpoint: "spanMetrics" },
 						display: { title: "Errors" },
 						layout: { x: 0, y: 0, w: 4, h: 5 },
 					},
@@ -98,7 +100,7 @@ describe("deriveDashboardsList", () => {
 					{
 						id: "w1",
 						visualization: "chart",
-						dataSource: { endpoint: "spanMetrics" },
+						dataSource: { kind: "route", endpoint: "spanMetrics" },
 						display: { title: "p95" },
 						layout: { x: 0, y: 0, w: 4, h: 5 },
 					},

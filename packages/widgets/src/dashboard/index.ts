@@ -19,6 +19,50 @@ export {
 	detectSchemaVersion,
 	migrateToLatest,
 } from "./migrations"
+export {
+	dataSourceEndpoint,
+	dataSourceQuerySet,
+	dataSourceRawSql,
+	dataSourceRouteParams,
+	dataSourceTransform,
+	isQueryDataSource,
+	QUERY_SHAPE_ENDPOINTS,
+	RAW_SQL_ENDPOINT,
+	type RawSqlDataSource,
+	type WidgetQuerySet,
+} from "./access"
+export {
+	makeQueryDataSource,
+	makeRawSqlDataSource,
+	makeRouteDataSource,
+	makeStaticDataSource,
+	type QueryDataSourceInput,
+	type RawSqlDataSourceInput,
+} from "./construct"
+// v3 — what the unsuffixed aliases below now point at. The suffixed names stay
+// exported for the upgrade transform and its tests, which must name a version
+// explicitly.
+export {
+	QueryWidgetDataSource,
+	RawSqlWidgetDataSource,
+	RouteWidgetDataSource,
+	StaticWidgetDataSource,
+	WIDGET_DATA_SOURCE_KINDS,
+	type WidgetDataSourceKind,
+	WidgetDataSourceV3,
+} from "./v3/data-source"
+export { DashboardDocumentV3, PortableDashboardDocumentV3 } from "./v3/document"
+export { DashboardWidgetV3, WidgetDisplayConfigV3 } from "./v3/widget"
+export { MARKDOWN_STATIC_ENDPOINT, QUERY_ENDPOINT_SHAPES } from "./legacy-endpoints"
+// The one-shot upgrade the backfill script runs against Postgres. Deliberately
+// not a `DashboardMigration` — see the header of `upgrade-to-v3.ts`.
+export {
+	fromLegacyDataSource,
+	isDocumentV3,
+	isV3DataSource,
+	upgradeDocumentToV3,
+	upgradeStoredDocument,
+} from "./upgrade-to-v3"
 export { type DashboardParseOutcome, parseStoredDashboard, stampCurrentVersion } from "./parse"
 export { CURRENT_DASHBOARD_SCHEMA_VERSION, DashboardSchemaVersion } from "./version"
 export { makeWidgetDisplayConfigSchema } from "./shared/display"
@@ -58,14 +102,15 @@ export {
 // through a subclass of a `Schema.Class` still constructs the *parent*, so
 // `instanceof` on a decoded value would be false.
 export {
-	DashboardDocumentV2 as DashboardDocument,
-	PortableDashboardDocumentV2 as PortableDashboardDocument,
-} from "./v2/document"
+	DashboardDocumentV3 as DashboardDocument,
+	PortableDashboardDocumentV3 as PortableDashboardDocument,
+} from "./v3/document"
 export { withWidgets } from "./document-helpers"
 export { DASHBOARD_GRID_COLS, findNextPosition, type PlaceableWidget } from "./placement"
-export { WidgetDataSourceV2 as WidgetDataSourceSchema } from "./v2/data-source"
-export { WidgetDisplayConfigV2 as WidgetDisplayConfigSchema } from "./v2/widget"
-export { DashboardWidgetV2 as DashboardWidgetSchema } from "./v2/widget"
+export { DashboardDocumentV2 } from "./v2/document"
+export { WidgetDataSourceV3 as WidgetDataSourceSchema } from "./v3/data-source"
+export { WidgetDisplayConfigV3 as WidgetDisplayConfigSchema } from "./v3/widget"
+export { DashboardWidgetV3 as DashboardWidgetSchema } from "./v3/widget"
 
 // Section helpers: pure placement/repair logic shared by the API write path,
 // the web read path and the tests.
