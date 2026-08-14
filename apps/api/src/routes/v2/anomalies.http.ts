@@ -12,7 +12,7 @@ import {
 	AnomalyForbiddenError,
 	CurrentTenant,
 } from "@maple/domain/http"
-import { MapleApiV2, paginateOffsetQuery } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateOffsetQuery, timestamp } from "@maple/domain/http/v2"
 import type { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { requireAdmin } from "@/services/auth/auth"
@@ -127,6 +127,30 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 							.pipe(Effect.map((response) => response.incidents.map(toV2Incident))),
 					)
 					return { object: "list" as const, ...page }
+				}),
+			)
+			.handle("serviceCounts", ({ query }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* anomalies.countIncidentsByService(
+						tenant.orgId,
+						query.status !== undefined ? { status: query.status } : {},
+					)
+
+					return {
+						object: "list" as const,
+						data: rows.map((row) => ({
+							object: "anomaly_service_count" as const,
+							service_name: row.serviceName,
+							deployment_env: row.deploymentEnv,
+							signal_type: row.signalType,
+							severity: row.severity,
+							incident_count: row.incidentCount,
+							last_triggered_at: timestamp(row.lastTriggeredAt),
+						})),
+						has_more: false,
+						next_cursor: null,
+					}
 				}),
 			)
 			.handle("getIncident", ({ params }) =>

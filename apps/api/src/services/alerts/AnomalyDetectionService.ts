@@ -10,6 +10,7 @@ import {
 	AnomalyLinkedIssueNotFoundError,
 	AnomalyTimeseriesBucket,
 	type AnomalyIncidentId,
+	type AnomalyIncidentSeverity,
 	type AnomalyIncidentStatus,
 	AnomalyPersistenceError,
 	AnomalySignalType,
@@ -163,6 +164,17 @@ interface AnomalyTickResult {
 	readonly orgFailures: number
 }
 
+/** One (service, environment, signal) group of incidents. */
+export interface AnomalyServiceCountRow {
+	readonly serviceName: string
+	readonly deploymentEnv: string
+	readonly signalType: AnomalySignalType
+	readonly severity: AnomalyIncidentSeverity
+	readonly incidentCount: number
+	/** ISO-8601 UTC. Formatted in SQL — see the note on the query. */
+	readonly lastTriggeredAt: string
+}
+
 export interface AnomalyDetectionServiceShape {
 	readonly runTick: () => Effect.Effect<AnomalyTickResult, AnomalyPersistenceError>
 	readonly listIncidents: (
@@ -179,6 +191,16 @@ export interface AnomalyDetectionServiceShape {
 			readonly offset?: number
 		},
 	) => Effect.Effect<AnomalyIncidentsListResponse, AnomalyPersistenceError>
+	/**
+	 * Incidents collapsed to one row per (service, environment, signal).
+	 *
+	 * Exists because the fleet-health surfaces need every open incident at once
+	 * to shade per-service rows, which is a `GROUP BY`, not a page of a list.
+	 */
+	readonly countIncidentsByService: (
+		orgId: OrgId,
+		opts: { readonly status?: AnomalyIncidentStatus },
+	) => Effect.Effect<ReadonlyArray<AnomalyServiceCountRow>, AnomalyPersistenceError>
 	readonly getIncident: (
 		orgId: OrgId,
 		incidentId: AnomalyIncidentId,
@@ -498,6 +520,50 @@ const make = Effect.gen(function* () {
 				.offset(opts.offset ?? 0),
 		)
 		return new AnomalyIncidentsListResponse({ incidents: rows.map(incidentToDocument) })
+	})
+
+	const countIncidentsByService: AnomalyDetectionServiceShape["countIncidentsByService"] = Effect.fn(
+		"AnomalyDetectionService.countIncidentsByService",
+	)(function* (orgId, opts) {
+		yield* Effect.annotateCurrentSpan({ orgId })
+		const status = opts.status ?? "open"
+		const rows = yield* dbExecute((db) =>
+			db
+				.select({
+					serviceName: anomalyIncidents.serviceName,
+					deploymentEnv: anomalyIncidents.deploymentEnv,
+					signalType: anomalyIncidents.signalType,
+					// Severity is a two-value ladder, so a boolean rollup says
+					// exactly what the caller needs without ordering strings.
+					hasCritical: sql<boolean>`bool_or(${anomalyIncidents.severity} = 'critical')`,
+					incidentCount: sql<number>`count(*)::int`,
+					// Drizzle applies a column's codec to a column reference, not to
+					// an aggregate over it, so `max()` arrives as whatever the driver
+					// hands back — a Date under one, a Postgres datetime string under
+					// another. Formatting in SQL removes the guess: one ISO-8601 UTC
+					// string, identical under postgres.js and PGlite.
+					lastTriggeredAt: sql<string>`to_char(
+						max(${anomalyIncidents.lastTriggeredAt}) AT TIME ZONE 'UTC',
+						'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+					)`,
+				})
+				.from(anomalyIncidents)
+				.where(and(eq(anomalyIncidents.orgId, orgId), eq(anomalyIncidents.status, status)))
+				.groupBy(
+					anomalyIncidents.serviceName,
+					anomalyIncidents.deploymentEnv,
+					anomalyIncidents.signalType,
+				),
+		)
+		yield* Effect.annotateCurrentSpan({ groupCount: rows.length })
+		return rows.map((row) => ({
+			serviceName: row.serviceName,
+			deploymentEnv: row.deploymentEnv,
+			signalType: row.signalType,
+			severity: (row.hasCritical ? "critical" : "warning") satisfies AnomalyIncidentSeverity,
+			incidentCount: row.incidentCount,
+			lastTriggeredAt: row.lastTriggeredAt,
+		}))
 	})
 
 	const requireIncidentRow = Effect.fn("AnomalyDetectionService.requireIncidentRow")(function* (
@@ -2089,6 +2155,7 @@ const make = Effect.gen(function* () {
 	return AnomalyDetectionService.of({
 		runTick,
 		listIncidents,
+		countIncidentsByService,
 		getIncident,
 		resolveIncidentManually,
 		setIncidentIssue,

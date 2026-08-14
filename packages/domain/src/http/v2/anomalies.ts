@@ -218,6 +218,58 @@ export const V2AnomalySettings = Schema.Struct({
 })
 export type V2AnomalySettings = Schema.Schema.Type<typeof V2AnomalySettings>
 
+export const V2AnomalyServiceCount = Schema.Struct({
+	object: Schema.Literal("anomaly_service_count").annotate({
+		description: 'The object type — always `"anomaly_service_count"`.',
+		examples: ["anomaly_service_count"],
+	}),
+	service_name: Schema.String.annotate({ description: "The service the incidents were detected on." }),
+	deployment_env: Schema.String.annotate({
+		description: "The deployment environment (e.g. `production`).",
+	}),
+	signal_type: signalTypeField,
+	severity: AnomalyIncidentSeverity.annotate({
+		description: "The worst severity among the incidents in this group.",
+		examples: ["critical"],
+	}),
+	incident_count: Schema.Number.annotate({
+		description: "How many incidents this group contains.",
+	}),
+	last_triggered_at: Timestamp.annotate({
+		description: "The most recent trigger across the incidents in this group.",
+	}),
+}).annotate({
+	identifier: "AnomalyServiceCount",
+	title: "Anomaly service count",
+	description:
+		"Open anomaly incidents for one (service, environment, signal), collapsed to a count with the worst severity and the most recent trigger.",
+	examples: [
+		wireExample({
+			object: "anomaly_service_count",
+			service_name: "payments",
+			deployment_env: "production",
+			signal_type: "error_rate",
+			severity: "critical",
+			incident_count: 2,
+			last_triggered_at: "2026-07-15T09:18:00.000Z",
+		}),
+	],
+})
+export type V2AnomalyServiceCount = Schema.Schema.Type<typeof V2AnomalyServiceCount>
+
+export const V2AnomalyServiceCountsQuery = Schema.Struct({
+	status: Schema.optional(
+		AnomalyIncidentStatus.annotate({
+			description: "Which incidents to aggregate. Defaults to `open`.",
+		}),
+	),
+}).annotate({
+	identifier: "AnomalyServiceCountsQuery",
+	title: "Anomaly service counts query",
+	description: "Optional status filter for the per-service anomaly aggregate.",
+})
+export type V2AnomalyServiceCountsQuery = Schema.Schema.Type<typeof V2AnomalyServiceCountsQuery>
+
 // Requests / queries
 
 export const V2AnomalyLinkIssueParams = Schema.Struct({
@@ -299,6 +351,12 @@ const AnomalyIncidentList = ListOf(V2AnomalyIncident).annotate({
 	description: "A cursor-paginated page of anomaly incidents, newest first.",
 })
 
+const AnomalyServiceCountList = ListOf(V2AnomalyServiceCount).annotate({
+	identifier: "AnomalyServiceCountList",
+	title: "Anomaly service count list",
+	description: "Every group for the org in one page — the aggregate is not paginated.",
+})
+
 export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 	.add(
 		HttpApiEndpoint.get("listIncidents", "/incidents", {
@@ -311,6 +369,21 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 				summary: "List anomaly incidents",
 				description:
 					"Returns your organization's anomaly incidents, newest first, with optional filters. Cursor-paginated. Requires the `anomalies:read` scope.",
+			}),
+		),
+	)
+	.add(
+		// Static path — must be registered before the `/incidents/:id` param route.
+		HttpApiEndpoint.get("serviceCounts", "/incidents/service_counts", {
+			query: V2AnomalyServiceCountsQuery,
+			success: AnomalyServiceCountList,
+			error: anomalyPersistence,
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "listAnomalyServiceCounts",
+				summary: "List anomaly counts by service",
+				description:
+					"Returns open anomaly incidents collapsed to one row per (service, environment, signal), with the worst severity and most recent trigger — the whole fleet in one call, without paging the incident list. Requires the `anomalies:read` scope.",
 			}),
 		),
 	)

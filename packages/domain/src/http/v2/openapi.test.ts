@@ -101,6 +101,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/alerts/rules/{id}/checks",
 			"GET /v2/alerts/rules/{id}/checks/summary",
 			"GET /v2/anomalies/incidents",
+			"GET /v2/anomalies/incidents/service_counts",
 			"GET /v2/anomalies/incidents/{id}",
 			"GET /v2/anomalies/incidents/{id}/timeseries",
 			"GET /v2/anomalies/settings",
