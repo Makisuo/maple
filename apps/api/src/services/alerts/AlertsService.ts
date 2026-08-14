@@ -108,6 +108,7 @@ import {
 	planEvaluateSource,
 	type NormalizedRule,
 } from "./AlertRuleModel"
+import { resolveSignalDisplay } from "./alert-signal-display"
 
 export { AlertRuntime, type AlertRuntimeShape } from "./AlertRuntime"
 
@@ -886,6 +887,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								ruleName: normalized.name,
 								groupKey: null,
 								signalType: normalized.signalType,
+								signalDisplay: resolveSignalDisplay(normalized),
 								severity: normalized.severity,
 								comparator: normalized.comparator,
 								threshold: normalized.threshold,
@@ -1336,6 +1338,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					const payloadRule = payload.rule
 					const storedRule = ruleRow ? yield* decodeStoredAlertRuleMetadata(ruleRow) : null
 					const groupKey = incidentRow?.groupKey ?? payloadRule?.groupKey ?? null
+					const signalType = decodeAlertSignalTypeSync(
+						incidentRow?.signalType ?? payloadRule?.signalType ?? "throughput",
+					)
 
 					const enrichedSecret = yield* enrichSecretForDispatch(hydrated.row, hydrated.secretConfig)
 					const deliveryStart = yield* now
@@ -1348,9 +1353,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							ruleId: decodeAlertRuleIdSync(row.ruleId),
 							ruleName: ruleRow?.name ?? String(payloadRule?.name ?? "Alert"),
 							groupKey,
-							signalType: decodeAlertSignalTypeSync(
-								incidentRow?.signalType ?? payloadRule?.signalType ?? "throughput",
-							),
+							signalType,
+							// The rule row is the only place the measured quantity is
+							// named — the delivery payload carries just the query kind.
+							signalDisplay: resolveSignalDisplay({
+								signalType,
+								queryBuilderDraft: storedRule?.queryBuilderDraft ?? null,
+								rawQueryReducer: ruleRow?.reducer ?? null,
+							}),
 							severity: decodeAlertSeveritySync(
 								incidentRow?.severity ?? payloadRule?.severity ?? "warning",
 							),

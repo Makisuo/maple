@@ -10,11 +10,11 @@ import {
 	buildSlackBlocksFromTemplate,
 	buildSlackFallbackText,
 	buildTemplateContext,
-	dispatchDelivery,
 	type DispatchContext,
-	type DispatchDeps,
 } from "./AlertDeliveryDispatch"
+import { dispatchDelivery, type DispatchDeps } from "./delivery/dispatch"
 import type { TemplateRenderContext } from "./alert-formatting"
+import { resolveSignalDisplay } from "./alert-signal-display"
 import { renderTemplate } from "./alert-templating/renderer"
 import { DEFAULT_BODY_TEMPLATE, DEFAULT_TITLE_TEMPLATE } from "./alert-templating/defaultTemplates"
 
@@ -196,6 +196,55 @@ describe("buildSlackBlocks (default format)", () => {
 			CHAT,
 		)[1] as SectionBlock
 		assert.include(resolved.text.text, "back within its threshold (between 1% and 5%)")
+	})
+
+	/**
+	 * Regression: a query-driven rule used to render its query-kind enum as the
+	 * metric name and its value as a bare unpunctuated integer —
+	 * "*builder_query* is *1041923*".
+	 */
+	it("names what a builder_query rule measures instead of its query kind", () => {
+		const section = buildSlackBlocks(
+			{
+				...baseContext,
+				ruleName: "Slow DB queries",
+				signalType: "builder_query",
+				signalDisplay: { label: "p95(duration)", unit: "ms" },
+				threshold: 500000,
+				value: 1041923,
+			},
+			LINK,
+			CHAT,
+		)[1] as SectionBlock
+		assert.include(section.text.text, "*p95(duration)* is *1,041,923ms*")
+		assert.include(section.text.text, "above the 500,000ms threshold")
+		assert.notInclude(section.text.text, "builder_query")
+	})
+
+	it("resolves a metrics rule's name from its stored draft, end to end", () => {
+		const section = buildSlackBlocks(
+			{
+				...baseContext,
+				ruleName: "DB duration",
+				signalType: "builder_query",
+				signalDisplay: resolveSignalDisplay({
+					signalType: "builder_query",
+					queryBuilderDraft: {
+						id: "q1",
+						name: "Query A",
+						dataSource: "metrics",
+						aggregation: "sum",
+						metricName: "db.query.duration",
+					},
+				}),
+				threshold: 500000,
+				value: 1041923,
+			},
+			LINK,
+			CHAT,
+		)[1] as SectionBlock
+		assert.include(section.text.text, "*sum(db.query.duration)* is *1,041,923*")
+		assert.include(section.text.text, "above the 500,000 threshold")
 	})
 
 	it("styles buttons per Slack guidance — no danger style on navigation links", () => {

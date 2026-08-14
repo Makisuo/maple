@@ -11,11 +11,9 @@ import {
 } from "@maple/domain/http"
 import { and, eq, inArray } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Redacted, Schema } from "effect"
-import {
-	buildAlertChatUrl,
-	dispatchDelivery as dispatchDeliveryImpl,
-	type DispatchContext,
-} from "./AlertDeliveryDispatch"
+import { buildAlertChatUrl } from "./AlertDeliveryDispatch"
+import { dispatchDelivery as dispatchDeliveryImpl } from "./delivery/dispatch"
+import type { DispatchContext } from "./delivery/context"
 import {
 	hydrateDestinationRow,
 	type DestinationSecretConfig,

@@ -39,7 +39,7 @@ import {
 	type OrgMembersServiceShape,
 } from "@/services/org/OrgMembersService"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
-import { PAGERDUTY_ROUTING_KEY_PATTERN, verifyPagerDutyRoutingKey } from "./AlertDeliveryDispatch"
+import { PAGERDUTY_ROUTING_KEY_PATTERN, verifyPagerDutyRoutingKey } from "./delivery/transports/pagerduty"
 import {
 	DestinationPublicConfigSchema,
 	type DestinationPublicConfig,

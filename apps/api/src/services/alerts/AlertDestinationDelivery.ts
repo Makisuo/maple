@@ -12,12 +12,9 @@ import { Effect } from "effect"
 import { parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import type { EmailServiceShape } from "@/platform/EmailService"
 import type { SlackBotTokenResolverShape } from "@/services/integrations/slack-bot-token"
-import {
-	buildAlertChatUrl,
-	dispatchDelivery as dispatchDeliveryImpl,
-	type DispatchContext as DeliveryDispatchContext,
-	type DispatchResult,
-} from "./AlertDeliveryDispatch"
+import { buildAlertChatUrl, type DispatchContext as DeliveryDispatchContext } from "./AlertDeliveryDispatch"
+import { dispatchDelivery as dispatchDeliveryImpl } from "./delivery/dispatch"
+import type { DispatchResult } from "./delivery/context"
 import {
 	hydrateDestinationRow,
 	type DestinationSecretConfig,

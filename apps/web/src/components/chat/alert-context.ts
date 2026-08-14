@@ -70,7 +70,12 @@ export const signalLabel = (signalType: string): string => {
 			return "Apdex"
 		case "throughput":
 			return "throughput"
+		case "builder_query":
+			return "query result"
+		case "raw_query":
+			return "SQL query result"
 		default:
-			return signalType
+			// Never leak a raw enum into prose — these read mid-sentence.
+			return signalType.replace(/[_-]+/g, " ")
 	}
 }
