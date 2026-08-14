@@ -4,7 +4,8 @@ import { Link } from "@tanstack/react-router"
 import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { getServiceHealthSnapshotResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { openAnomalyIncidentsAtom } from "@/lib/services/atoms/anomaly-atoms"
+import { openAnomalyServiceCountsAtom } from "@/lib/services/atoms/anomaly-atoms"
+import { anomalyServiceCountFromV2, type AnomalyServiceCount } from "@/lib/services/anomalies"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 import { QueryErrorState } from "@/components/common/query-error-state"
@@ -13,7 +14,7 @@ import { anomalyAffectsServiceHealth } from "@/components/anomalies/anomaly-form
 import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
 import { ArrowRightIcon, ArrowTrendDownIcon, ArrowTrendUpIcon } from "@/components/icons"
 import type { ServiceHealthSnapshot } from "@/api/warehouse/services"
-import type { AlertIncidentDocument, AnomalyIncidentDocument, AnomalySignalType } from "@maple/domain/http"
+import type { AlertIncidentDocument, AnomalySignalType } from "@maple/domain/http"
 
 import { Card } from "@maple/ui/components/ui/card"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -111,7 +112,7 @@ function useServiceHealthData({ startTime, endTime, environments, canFetch }: Se
 			: disabledResultAtom<{ data: ServiceHealthSnapshot[] }, unknown>(),
 	)
 
-	const anomaliesResult = useRetainedRefreshableResultValue(openAnomalyIncidentsAtom)
+	const anomaliesResult = useRetainedRefreshableResultValue(openAnomalyServiceCountsAtom)
 
 	const { result: alertIncidentsResult } = useAlertIncidentsList()
 	const { result: rulesResult } = useAlertRulesList()
@@ -138,7 +139,7 @@ function useServiceHealthData({ startTime, endTime, environments, canFetch }: Se
 function enrichServices(
 	services: readonly ServiceHealthSnapshot[],
 	openIncidents: ReadonlyArray<AlertIncidentDocument>,
-	openAnomalies: ReadonlyArray<AnomalyIncidentDocument>,
+	openAnomalies: ReadonlyArray<AnomalyServiceCount>,
 ): EnrichedService[] {
 	return services
 		.map((service) => {
@@ -231,7 +232,11 @@ export function ServiceHealthOverview(props: ServiceHealthProps) {
 		.onSuccess(([snapshotResponse, anomaliesResponse, alertsResponse], result) => {
 			const activeAlerts = alertsResponse.incidents.filter((incident) => incident.status === "open")
 			const counts = countByHealth(
-				enrichServices(snapshotResponse.data, activeAlerts, anomaliesResponse.incidents),
+				enrichServices(
+					snapshotResponse.data,
+					activeAlerts,
+					anomaliesResponse.data.map(anomalyServiceCountFromV2),
+				),
 			)
 			return (
 				<section className={cn("mb-4 space-y-3", result.waiting && "opacity-60 transition-opacity")}>
@@ -323,7 +328,7 @@ export function ServiceHealthList(props: ServiceHealthProps) {
 			const rows = enrichServices(
 				snapshotResponse.data,
 				activeAlerts,
-				anomaliesResponse.incidents,
+				anomaliesResponse.data.map(anomalyServiceCountFromV2),
 			).slice(0, MAX_ROWS)
 			return (
 				<section className={cn("mt-4 space-y-3", result.waiting && "opacity-60 transition-opacity")}>
