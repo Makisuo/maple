@@ -20,10 +20,10 @@ const stubFetch = (handler: (url: string, init?: RequestInit) => Response) => {
 }
 
 const stubLocalServer = (rows: ReadonlyArray<Record<string, unknown>>) => {
-	const requests: Array<{ url: string; sql: string }> = []
+	const requests: Array<{ url: string; sql: string; headers: Headers }> = []
 	stubFetch((url, init) => {
 		const body = JSON.parse(String(init?.body ?? "{}")) as { sql?: string }
-		requests.push({ url, sql: body.sql ?? "" })
+		requests.push({ url, sql: body.sql ?? "", headers: new Headers(init?.headers) })
 		return new Response(JSON.stringify(rows), {
 			status: 200,
 			headers: { "content-type": "application/json" },
@@ -53,6 +53,23 @@ describe("makeLocalWarehouseExecutorApi", () => {
 			// strips the trailing FORMAT and the local server owns the output format.
 			expect(requests[0]!.sql).not.toContain("FORMAT JSON")
 			expect(requests[0]!.sql).toContain("OrgId = 'local'")
+		}),
+	)
+
+	it.effect("attaches configured headers to local query requests", () =>
+		Effect.gen(function* () {
+			const requests = stubLocalServer([])
+			const shape = makeLocalWarehouseExecutorApi("http://127.0.0.1:4318", { "X-Test": "1" })
+			yield* shape.compiledQuery(
+				unsafeCompiledQuery({
+					reason: "test-fixture",
+					note: "Synthetic SQL asserting request headers.",
+					tenantScope: "org",
+					sql: "SELECT 1 FROM traces WHERE OrgId = 'local'",
+				}),
+			)
+
+			expect(requests[0]!.headers.get("x-test")).toBe("1")
 		}),
 	)
 

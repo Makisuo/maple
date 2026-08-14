@@ -2,7 +2,8 @@ import { Effect, Schema } from "effect"
 import { OrgId, UserId } from "@maple/domain/http"
 import { makeWarehouseExecutor, type WarehouseSqlClient } from "@maple/query-engine/execution"
 import type { WarehouseExecutorApi } from "@maple/query-engine/observability"
-import { executeLocalQuery } from "@maple/query-engine/local"
+import { executeLocalQuery, LocalQueryHttpError } from "@maple/query-engine/local"
+import { cloudflareAccessError, isCloudflareAccessResponse } from "./cloudflare-access"
 import { debugLog } from "../lib/debug"
 
 // Local mode is single-tenant: the local binary writes every row under this
@@ -17,11 +18,23 @@ const LOCAL_TENANT = { orgId: LOCAL_ORG_ID, userId: LOCAL_USER_ID, authMode: "lo
 // timing the round-trip and (under --debug) printing the SQL + elapsed ms to
 // stderr. The `finally` logs even on failure so a failing query still shows
 // its SQL.
-const localChdbClient = (baseUrl: string): WarehouseSqlClient => ({
+const localChdbClient = (baseUrl: string, headers: Readonly<Record<string, string>>): WarehouseSqlClient => ({
 	sql: async (sql) => {
 		const started = performance.now()
 		try {
-			return { data: await executeLocalQuery<Record<string, unknown>>(sql, baseUrl) }
+			return {
+				data: await executeLocalQuery<Record<string, unknown>>(sql, baseUrl, undefined, {
+					...headers,
+				}).catch((error: unknown) => {
+					if (
+						error instanceof LocalQueryHttpError &&
+						isCloudflareAccessResponse(error.status, error.location)
+					) {
+						throw cloudflareAccessError(baseUrl)
+					}
+					throw error
+				}),
+			}
 		} finally {
 			debugLog(`local query · ${Math.round(performance.now() - started)}ms`, sql)
 		}
@@ -45,9 +58,12 @@ const localChdbClient = (baseUrl: string): WarehouseSqlClient => ({
  * depends on a `WarehouseExecutor` — work unchanged against local mode, with
  * the same `warehouse.backend="chdb"` span contract as the cloud.
  */
-export const makeLocalWarehouseExecutorApi = (baseUrl: string): WarehouseExecutorApi =>
+export const makeLocalWarehouseExecutorApi = (
+	baseUrl: string,
+	headers: Readonly<Record<string, string>> = {},
+): WarehouseExecutorApi =>
 	makeWarehouseExecutor({
-		createClient: () => localChdbClient(baseUrl),
+		createClient: () => localChdbClient(baseUrl, headers),
 		resolveRoute: () =>
 			Effect.succeed({
 				source: "managed" as const,

@@ -4,6 +4,7 @@ import { WarehouseConfigError } from "@maple/domain/http/warehouse-errors"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
 import { Mode } from "./mode"
 import { makeLocalWarehouseExecutorApi } from "./executor"
+import { withCloudflareAccessToken } from "./cloudflare-access"
 
 /**
  * Provides `WarehouseExecutor` whose concrete backend (local chDB vs remote
@@ -28,7 +29,9 @@ export const WarehouseExecutorFromMode = Layer.effect(
 			mode.resolve.pipe(
 				Effect.flatMap((m) =>
 					m._tag === "local"
-						? Effect.succeed(makeLocalWarehouseExecutorApi(m.baseUrl))
+						? withCloudflareAccessToken(m.baseUrl, m.headers ?? {}).pipe(
+								Effect.map((headers) => makeLocalWarehouseExecutorApi(m.baseUrl, headers)),
+							)
 						: // Remote mode never reaches the executor: `operations.ts`
 							// dispatches to the v2 client before asking for one. Anything
 							// that lands here is an operation that forgot to branch, so
