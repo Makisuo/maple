@@ -6,7 +6,6 @@ import { formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-en
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { formatPercent } from "@maple/ui/lib/format"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
@@ -375,16 +374,6 @@ function AnalyticsContent({
 				))
 				.onError((error) => <QueryErrorState error={error} />)
 				.onSuccess((breakdowns, result) => {
-					const coverageNote = Result.builder(summaryResult)
-						.onSuccess((summary) => {
-							if (summary.sessions === 0 || summary.coverage >= 0.98) return undefined
-							if (summary.identifiedSessions === 0) {
-								return "No session in this window reports this dimension — it needs an SDK build that sends the analytics fields."
-							}
-							return `This dimension covers ${formatPercent(summary.coverage)} of sessions; the rest predate the SDK's analytics fields.`
-						})
-						.orElse(() => undefined)
-
 					const pages = Result.builder(pagesResult)
 						.onSuccess((rows) => rows.data)
 						.orElse(() => [])
@@ -400,7 +389,6 @@ function AnalyticsContent({
 							filterKey: "referrerHost",
 							noun: "referrer",
 							nounPlural: "referrers",
-							coverageDependent: true,
 							emptyMessage:
 								"No referrers recorded. Sessions with an empty referrer are excluded rather than bucketed as direct — an empty value also covers internal navigation and Referrer-Policy suppression.",
 						},
@@ -410,7 +398,6 @@ function AnalyticsContent({
 							filterKey: "utmSource",
 							noun: "source",
 							nounPlural: "sources",
-							coverageDependent: true,
 						},
 						{
 							tab: "Medium",
@@ -418,7 +405,6 @@ function AnalyticsContent({
 							filterKey: "utmMedium",
 							noun: "medium",
 							nounPlural: "mediums",
-							coverageDependent: true,
 						},
 						{
 							tab: "Campaign",
@@ -426,7 +412,6 @@ function AnalyticsContent({
 							filterKey: "utmCampaign",
 							noun: "campaign",
 							nounPlural: "campaigns",
-							coverageDependent: true,
 						},
 					]
 
@@ -449,7 +434,6 @@ function AnalyticsContent({
 							renderIcon: multiSite
 								? (row) => <Favicon host={row.secondary ?? ""} />
 								: undefined,
-							note: "Page views cover every session, including those whose SDK build predates the visitor-level analytics fields.",
 							emptyMessage: "No page views in the selected window.",
 						},
 						{
@@ -458,7 +442,6 @@ function AnalyticsContent({
 							filterKey: "pagePath",
 							noun: "entry page",
 							nounPlural: "entry pages",
-							coverageDependent: true,
 						},
 						{
 							tab: "Exits",
@@ -466,7 +449,6 @@ function AnalyticsContent({
 							filterKey: "pagePath",
 							noun: "exit page",
 							nounPlural: "exit pages",
-							coverageDependent: true,
 						},
 					]
 
@@ -514,7 +496,6 @@ function AnalyticsContent({
 							filterKey: "language",
 							noun: "language",
 							nounPlural: "languages",
-							coverageDependent: true,
 							formatValue: languageLabel,
 						},
 						{
@@ -523,7 +504,6 @@ function AnalyticsContent({
 							filterKey: "host",
 							noun: "site",
 							nounPlural: "sites",
-							coverageDependent: true,
 						},
 					]
 
@@ -531,30 +511,25 @@ function AnalyticsContent({
 					// stretching to match the tallest in its row — a Devices card with
 					// three rows should not be as tall as a Pages card with fifty.
 					const cards: ReadonlyArray<{
-						title: string
+						/** Names the theme the tabs share; carried only as a stable key. */
+						id: string
 						dimensions: ReadonlyArray<BreakdownDimension>
-						//
-						// Titles name the *theme*, never the leading tab — "Devices ·
-						// Devices Browsers OS" stutters, and the title then carries no
-						// information the tab strip beside it isn't already carrying.
 					}> = [
-						{ title: "Acquisition", dimensions: referrers },
-						{ title: "Content", dimensions: pageDimensions },
-						{ title: "Technology", dimensions: devices },
-						{ title: "Audience", dimensions: geography },
+						{ id: "acquisition", dimensions: referrers },
+						{ id: "content", dimensions: pageDimensions },
+						{ id: "technology", dimensions: devices },
+						{ id: "audience", dimensions: geography },
 					]
 
 					return (
 						<div className="grid items-start gap-4 lg:grid-cols-2">
 							{cards.map((card) => (
 								<AnalyticsBreakdownPanel
-									key={card.title}
-									title={card.title}
+									key={card.id}
 									dimensions={card.dimensions}
 									activeValue={(key) => filters[key]}
 									onToggleFilter={onToggleFilter}
 									waiting={result.waiting}
-									footnote={coverageNote}
 								/>
 							))}
 						</div>
