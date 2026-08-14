@@ -102,7 +102,7 @@ export const buildSubmitDiagnosisTool = (
  *
  * A gated tool still carries a real handler (rather than being omitted) so the schema the model
  * sees is identical to the read-only case — but the loop never dispatches it, because it breaks on
- * the proposal first, and `POST /api/chat/apply` remains the only path that actually mutates.
+ * the proposal first, and `POST /internal/chat/apply` remains the only path that actually mutates.
  */
 export const buildChatTools = (
 	executor: McpToolExecutorShape,

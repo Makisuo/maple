@@ -24,10 +24,10 @@
  *
  * Flue's event stream had no human-in-the-loop primitive, so `apps/chat-flue/src/lib/approval.ts`
  * swapped every mutating tool for one whose `execute` returned a `{ status: "proposed" }` marker
- * without mutating — a propose-then-apply stub the web client re-ran through `POST /api/chat/apply`.
+ * without mutating — a propose-then-apply stub the web client re-ran through `POST /internal/chat/apply`.
  * Here the loop simply *stops* on a gated call: it emits a `tool-call` with `proposed: true` and
  * ends the turn. Nothing fabricates a tool result, so the model is never told a mutation happened
- * when it did not. `POST /api/chat/apply` is still how the approved mutation runs — the user's own
+ * when it did not. `POST /internal/chat/apply` is still how the approved mutation runs — the user's own
  * action, authenticated as the user, which is where it belongs.
  */
 import { evaluatePermission } from "@maple/domain/permission"
@@ -654,7 +654,7 @@ const runStep = (
 				const observed = observeToolCallBatch(state.doomLoop, calls)
 
 				// The real interrupt. A gated call ends the turn immediately — the client renders an
-				// approval card from this event and applies it through `POST /api/chat/apply`.
+				// approval card from this event and applies it through `POST /internal/chat/apply`.
 				// Read-only calls issued in the same turn are dropped rather than half-run, so the
 				// transcript never shows a partial turn.
 				const gated = calls.find(

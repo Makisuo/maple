@@ -7,9 +7,9 @@ import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
 import { McpToolExecutor, type McpToolExecutorShape } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { HttpChatLive } from "./chat.http"
-import { V1ErrorBoundaryLive } from "./error-boundary"
+import { V1ErrorBoundaryLive } from "../v1/error-boundary"
 
-class ChatOnlyApi extends HttpApi.make("MapleApi")
+class ChatOnlyApi extends HttpApi.make("MapleInternalApi")
 	.add(ChatApiGroup)
 	.middleware(V1SchemaErrors)
 	.middleware(V1UnexpectedErrors) {}
@@ -22,8 +22,8 @@ const TENANT = new CurrentTenant.TenantSchema({
 })
 
 const AuthorizationStubLayer = Layer.succeed(
-	CurrentTenant.Authorization,
-	CurrentTenant.Authorization.of({
+	CurrentTenant.SessionAuthorization,
+	CurrentTenant.SessionAuthorization.of({
 		bearer: (httpEffect) => Effect.provideService(httpEffect, CurrentTenant.Context, TENANT),
 	}),
 )
@@ -42,7 +42,7 @@ const makeHarness = (executor: McpToolExecutorShape) => {
 
 	const apply = async () => {
 		const response = await handler(
-			new Request("http://maple.test/api/chat/apply", {
+			new Request("http://maple.test/internal/chat/apply", {
 				method: "POST",
 				headers: {
 					authorization: "Bearer test-token",
@@ -65,7 +65,7 @@ const makeHarness = (executor: McpToolExecutorShape) => {
 	return { apply, dispose }
 }
 
-describe("POST /api/chat/apply", () => {
+describe("POST /internal/chat/apply", () => {
 	it("executes the approved tool under the authenticated tenant", async () => {
 		let receivedTenant: TenantContext | undefined
 		const harness = makeHarness({

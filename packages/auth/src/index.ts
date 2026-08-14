@@ -427,7 +427,7 @@ export const makeResolveMcpTenant = (
 	// Accept both api_key (programmatic agents) and session_token: this is the
 	// "Clerk / self-hosted session auth" fallback in resolveMcpTenantContext, used
 	// by a logged-in browser applying an approved chat proposal via
-	// POST /api/chat/apply. Both resolve to the caller's own org (and a session
+	// POST /internal/chat/apply. Both resolve to the caller's own org (and a session
 	// token keeps the human userId for attribution). The internal-service and
 	// api-key paths run before this fallback, so this only widens the
 	// already-last-resort branch; self-hosted HS256 mode already ignored
