@@ -13,7 +13,6 @@ import { ObservabilityApiGroup } from "./observability"
 import { OnboardingApiGroup } from "./onboarding"
 import { OrgClickHouseSettingsApiGroup } from "./org-clickhouse-settings"
 import { OrganizationsApiGroup } from "./organizations"
-import { QueryEngineApiGroup } from "./query-engine"
 import { SessionReplaysApiGroup } from "./session-replay"
 import { WarehouseApiGroup } from "./warehouse"
 import { V1SchemaErrors, V1UnexpectedErrors } from "./v1-boundary"
@@ -34,7 +33,6 @@ export class MapleApi extends HttpApi.make("MapleApi")
 	.add(OnboardingApiGroup)
 	.add(OrgClickHouseSettingsApiGroup)
 	.add(OrganizationsApiGroup)
-	.add(QueryEngineApiGroup)
 	.add(SessionReplaysApiGroup)
 	.add(WarehouseApiGroup)
 	.middleware(V1SchemaErrors)

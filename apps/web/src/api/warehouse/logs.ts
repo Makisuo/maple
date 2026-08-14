@@ -8,7 +8,7 @@ import {
 	ServiceName,
 	ServiceNamespace,
 } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import {
 	WarehouseDateTimeString,
 	decodeInput,
@@ -105,7 +105,7 @@ const listLogsEffect = Effect.fn("QueryEngine.listLogs")(function* ({ data }: { 
 
 	const logsResult = yield* runWarehouseQuery("listLogs", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.listLogs({
 				payload: new ListLogsRequest({
 					startTime: input.startTime ?? fallback.startTime,
@@ -165,7 +165,7 @@ const getLogEffect = Effect.fn("QueryEngine.getLog")(function* ({ data }: { data
 
 	const response = yield* runWarehouseQuery("getLog", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.getLog({
 				payload: new GetLogRequest({
 					timestamp: input.timestamp,

@@ -11,7 +11,7 @@ import {
 	WebAnalyticsSummaryRequest,
 	WebAnalyticsTimeseriesRequest,
 } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
 const WebAnalyticsFilterFields = {
@@ -151,7 +151,7 @@ const getWebAnalyticsSummaryEffect = Effect.fn("QueryEngine.getWebAnalyticsSumma
 
 	const result = yield* runWarehouseQuery("webAnalyticsSummary", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.webAnalyticsSummary({
 				payload: new WebAnalyticsSummaryRequest(input),
 			})
@@ -179,7 +179,7 @@ const getWebAnalyticsTimeseriesEffect = Effect.fn("QueryEngine.getWebAnalyticsTi
 
 	const result = yield* runWarehouseQuery("webAnalyticsTimeseries", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.webAnalyticsTimeseries({
 				payload: new WebAnalyticsTimeseriesRequest(input),
 			})
@@ -202,7 +202,7 @@ const getWebAnalyticsPageviewsEffect = Effect.fn("QueryEngine.getWebAnalyticsPag
 
 	const result = yield* runWarehouseQuery("webAnalyticsPageviews", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.webAnalyticsPageviews({
 				payload: new WebAnalyticsPageviewsRequest(input),
 			})
@@ -225,7 +225,7 @@ const getWebAnalyticsPagesEffect = Effect.fn("QueryEngine.getWebAnalyticsPages")
 
 	const result = yield* runWarehouseQuery("webAnalyticsPages", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.webAnalyticsPages({
 				payload: new WebAnalyticsPagesRequest(input),
 			})
@@ -248,7 +248,7 @@ const getWebAnalyticsBreakdownsEffect = Effect.fn("QueryEngine.getWebAnalyticsBr
 
 	const result = yield* runWarehouseQuery("webAnalyticsBreakdowns", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.webAnalyticsBreakdowns({
 				payload: new WebAnalyticsBreakdownsRequest(input),
 			})

@@ -1,4 +1,4 @@
-import { MapleApi } from "@maple/domain/http"
+import { MapleApi, MapleInternalApi } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
 import { Layer } from "effect"
 import { Headers, HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/http"
@@ -25,7 +25,7 @@ import { HttpOrgClickHouseSettingsLive } from "@/routes/v1/org-clickhouse-settin
 import { HttpOrganizationsLive } from "@/routes/v1/organizations.http"
 import { PlanetScaleWebhookRouter } from "@/routes/v1/planetscale-webhook.http"
 import { PrometheusScrapeProxyRouter } from "@/routes/v1/prometheus-scrape-proxy.http"
-import { HttpQueryEngineLive } from "@/routes/v1/query-engine.http"
+import { HttpQueryEngineLive } from "@/routes/internal/query-engine.http"
 import { ScraperInternalRouter } from "@/routes/v1/scraper-internal.http"
 import { HttpSessionReplaysLive } from "@/routes/v1/session-replay.http"
 import { SlackCallbackRouter, SlackInternalRouter } from "@/routes/v1/slack-integration.http"
@@ -58,6 +58,7 @@ import {
 } from "@/routes/v2/telemetry.http"
 import { ApiAuthorizationLayer } from "@/services/auth/ApiAuthorizationLayer"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
+import { SessionAuthorizationLayer } from "@/services/auth/SessionAuthorizationLayer"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 
@@ -91,7 +92,19 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpOnboardingLive),
 	Layer.provide(HttpOrgClickHouseSettingsLive),
 	Layer.provide(HttpOrganizationsLive),
-	Layer.provide(Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysLive, HttpWarehouseLive)),
+	Layer.provide(Layer.mergeAll(HttpSessionReplaysLive, HttpWarehouseLive)),
+	Layer.provide(V1ErrorBoundaryLive),
+)
+
+/**
+ * The dashboard's private transport, served under `/internal/*`.
+ *
+ * Session-only: `SessionAuthorizationLayer` refuses API-key-shaped bearers, so
+ * nothing here is reachable as public API. It is also absent from `/docs`,
+ * which is generated from `MapleApi`.
+ */
+const ApiInternalRoutes = HttpApiBuilder.layer(MapleInternalApi).pipe(
+	Layer.provide(HttpQueryEngineLive),
 	Layer.provide(V1ErrorBoundaryLive),
 )
 
@@ -128,6 +141,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 
 export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
+	ApiInternalRoutes,
 	ApiV2Routes,
 	ChatSessionsRouter,
 	IntegrationsCallbackRouter,
@@ -144,7 +158,11 @@ export const AllRoutes = Layer.mergeAll(
 	DocsV2Route,
 ).pipe(Layer.provideMerge(HttpRouter.cors(API_CORS_OPTIONS)))
 
-export const ApiAuthLive = Layer.mergeAll(ApiAuthorizationLayer, ApiAuthorizationV2Layer).pipe(
+export const ApiAuthLive = Layer.mergeAll(
+	ApiAuthorizationLayer,
+	ApiAuthorizationV2Layer,
+	SessionAuthorizationLayer,
+).pipe(
 	Layer.provideMerge(ApiV2RateLimiter.layer),
 	Layer.provideMerge(ApiKeysService.layer),
 	Layer.provideMerge(Env.layer),

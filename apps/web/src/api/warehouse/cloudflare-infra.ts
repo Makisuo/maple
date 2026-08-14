@@ -19,6 +19,7 @@ import {
 	CloudflareTopTrafficRequest,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
 const ZONE_SERVICE_PREFIX = "cloudflare/"
@@ -151,7 +152,7 @@ export const getCloudflareZones = Effect.fn("QueryEngine.getCloudflareZones")(fu
 	const input = yield* decodeInput(TimeRangeInputSchema, data, "getCloudflareZones")
 	const result = yield* runWarehouseQuery("cloudflareInfraZones", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.cloudflareInfraZones({
 				payload: new CloudflareInfraZonesRequest({
 					startTime: input.startTime,
@@ -197,7 +198,7 @@ export const getCloudflareZoneTimeseries = Effect.fn("QueryEngine.getCloudflareZ
 	const input = yield* decodeInput(TimeseriesInputSchema, data, "getCloudflareZoneTimeseries")
 	const result = yield* runWarehouseQuery("cloudflareInfraZoneTimeseries", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.cloudflareInfraZoneTimeseries({
 				payload: new CloudflareInfraZoneTimeseriesRequest({
 					startTime: input.startTime,
@@ -268,7 +269,7 @@ export const getCloudflareZoneDetail = Effect.fn("QueryEngine.getCloudflareZoneD
 	const input = yield* decodeInput(ZoneDetailInputSchema, data, "getCloudflareZoneDetail")
 	const result = yield* runWarehouseQuery("cloudflareInfraZoneDetail", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.cloudflareInfraZoneDetail({
 				payload: new CloudflareInfraZoneDetailRequest({
 					serviceName: input.serviceName,
@@ -320,7 +321,7 @@ export const getCloudflareWorkers = Effect.fn("QueryEngine.getCloudflareWorkers"
 	const input = yield* decodeInput(TimeRangeInputSchema, data, "getCloudflareWorkers")
 	const result = yield* runWarehouseQuery("cloudflareInfraWorkers", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.cloudflareInfraWorkers({
 				payload: new CloudflareInfraWorkersRequest({
 					startTime: input.startTime,
@@ -375,7 +376,7 @@ export const getCloudflareZoneSecurity = Effect.fn("QueryEngine.getCloudflareZon
 	const input = yield* decodeInput(ZoneDetailInputSchema, data, "getCloudflareZoneSecurity")
 	const result = yield* runWarehouseQuery("cloudflareInfraZoneSecurity", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.cloudflareInfraZoneSecurity({
 				payload: new CloudflareInfraZoneSecurityRequest({
 					serviceName: input.serviceName,
@@ -429,7 +430,7 @@ export const getCloudflareZoneDns = Effect.fn("QueryEngine.getCloudflareZoneDns"
 	const input = yield* decodeInput(ZoneDetailInputSchema, data, "getCloudflareZoneDns")
 	const result = yield* runWarehouseQuery("cloudflareInfraZoneDns", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.cloudflareInfraZoneDns({
 				payload: new CloudflareInfraZoneDnsRequest({
 					serviceName: input.serviceName,
@@ -487,7 +488,7 @@ export const getCloudflarePlatformResources = Effect.fn("QueryEngine.getCloudfla
 		const input = yield* decodeInput(TimeRangeInputSchema, data, "getCloudflarePlatformResources")
 		const result = yield* runWarehouseQuery("cloudflareInfraPlatformResources", () =>
 			Effect.gen(function* () {
-				const client = yield* MapleApiAtomClient
+				const client = yield* MapleInternalAtomClient
 				return yield* client.queryEngine.cloudflareInfraPlatformResources({
 					payload: new CloudflareInfraPlatformResourcesRequest({
 						startTime: input.startTime,
@@ -599,7 +600,7 @@ export const getCloudflareZoneBreakdown = Effect.fn("QueryEngine.getCloudflareZo
 	const input = yield* decodeInput(BreakdownInputSchema, data, "getCloudflareZoneBreakdown")
 	const result = yield* runWarehouseQuery("cloudflareInfraZoneBreakdown", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.cloudflareInfraZoneBreakdown({
 				payload: new CloudflareInfraZoneBreakdownRequest({
 					serviceName: input.serviceName,
@@ -661,7 +662,7 @@ export const getCloudflareZoneFacets = Effect.fn("QueryEngine.getCloudflareZoneF
 	const input = yield* decodeInput(ZoneFacetsInputSchema, data, "getCloudflareZoneFacets")
 	return yield* runWarehouseQuery("cloudflareInfraZoneFacets", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.cloudflareInfraZoneFacets({
 				payload: new CloudflareInfraZoneFacetsRequest({
 					serviceName: input.serviceName,

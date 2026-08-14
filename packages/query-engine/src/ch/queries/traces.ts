@@ -316,7 +316,7 @@ export interface TracesTimeseriesOpts extends TracesQueryOpts {
 	 *
 	 * This is the retry knob for an org whose ClickHouse has not applied migration
 	 * 0015 — not a rollout switch. See `makeRollupFallback` in
-	 * `apps/api/src/routes/v1/query-engine.http.ts`.
+	 * `apps/api/src/routes/internal/query-engine.http.ts`.
 	 */
 	overviewTiers?: "hour" | "minute"
 }

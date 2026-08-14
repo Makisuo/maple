@@ -1,6 +1,6 @@
 import { Clock, Effect, Schema } from "effect"
 import { PlanetScaleInfraTimeseriesRequest } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import {
 	WarehouseDateTimeString,
@@ -209,7 +209,7 @@ export const getPlanetScaleInfraTimeseries = Effect.fn("QueryEngine.getPlanetSca
 
 		const result = yield* runWarehouseQuery("planetscaleInfraTimeseries", () =>
 			Effect.gen(function* () {
-				const client = yield* MapleApiAtomClient
+				const client = yield* MapleInternalAtomClient
 				return yield* client.queryEngine.planetscaleInfraTimeseries({
 					payload: new PlanetScaleInfraTimeseriesRequest({
 						startTime: input.startTime ?? fallback.startTime,
