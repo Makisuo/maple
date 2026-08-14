@@ -100,18 +100,23 @@ describe("local listener addresses", () => {
 })
 
 describe("browser origin policy", () => {
-	const requestUrl = new URL("http://srvmini2.lan:4418/local/query")
+	const requestUrl = new URL("http://node-a.example.test:4418/local/query")
 	const hostedOrigin = "https://local.maple.dev"
-	const browserHosts = ["srvmini2.lan", "127.0.0.1"]
+	const browserHosts = ["node-a.example.test", "127.0.0.1"]
 
 	it("allows non-browser clients, the advertised same-origin UI, and the hosted UI", () => {
 		strictEqual(isBrowserOriginAllowed(requestUrl, null, hostedOrigin, browserHosts), true)
 		strictEqual(
-			isBrowserOriginAllowed(requestUrl, "http://srvmini2.lan:4418", hostedOrigin, browserHosts),
+			isBrowserOriginAllowed(requestUrl, "http://node-a.example.test:4418", hostedOrigin, browserHosts),
 			true,
 		)
 		strictEqual(
-			isBrowserOriginAllowed(requestUrl, "https://srvmini2.lan:4418", hostedOrigin, browserHosts),
+			isBrowserOriginAllowed(
+				requestUrl,
+				"https://node-a.example.test:4418",
+				hostedOrigin,
+				browserHosts,
+			),
 			true,
 		)
 		strictEqual(isBrowserOriginAllowed(requestUrl, hostedOrigin, hostedOrigin, browserHosts), true)

@@ -5,6 +5,7 @@ import {
 	ProjectorRegistry,
 	SignalSourceRegistry,
 	makeEventId,
+	validateGitLabEventData,
 	validateMapleCloudEvent,
 	type SignalPredicate,
 	type SignalProjectionSpec,
@@ -14,10 +15,14 @@ import identities from "./fixtures/gitlab-projector-identities.v1.json"
 import {
 	gitlabDeploymentLifecycleProjector,
 	gitlabIssueCommentProjector,
+	gitlabIssueLifecycleProjector,
 	gitlabJobLifecycleProjector,
+	gitlabMergeRequestCommentProjector,
 	gitlabMergeRequestLifecycleProjector,
 	gitlabPipelineCompletedProjector,
 	gitlabProjectLifecycleProjector,
+	gitlabRefLifecycleProjector,
+	gitlabReleaseLifecycleProjector,
 	registerGitLabProjectors,
 } from "../src/server/eventing/gitlab-projectors"
 import { OTLP_LOG_ADAPTER, normalizeOtlpLogs } from "../src/server/eventing/otlp"
@@ -68,7 +73,7 @@ const gitlabEvent = (eventName: string, eventId: string, extra: readonly unknown
 			},
 			scopeLogs: [
 				{
-					scope: { name: "srvmini2.gitlab.repository-events", version: "1" },
+					scope: { name: "example.gitlab.repository-events", version: "1" },
 					logRecords: [
 						{
 							timeUnixNano: "1786131720123456789",
@@ -78,14 +83,14 @@ const gitlabEvent = (eventName: string, eventId: string, extra: readonly unknown
 							body: { stringValue: `gitlab event ${eventName}` },
 							attributes: [
 								stringAttr("event.id", eventId),
-								stringAttr("event.source", "https://gitlab.internal"),
+								stringAttr("event.source", "https://gitlab.example.test"),
 								stringAttr("event.name", eventName),
 								stringAttr("gitlab.event.id", eventId),
 								stringAttr("gitlab.event.result", "success"),
 								intAttr("gitlab.project.id", "42"),
-								stringAttr("gitlab.project.path", "rdev/maple"),
+								stringAttr("gitlab.project.path", "example/widgets"),
 								intAttr("gitlab.actor.id", "9"),
-								stringAttr("gitlab.actor.name", "rdev"),
+								stringAttr("gitlab.actor.name", "maintainer"),
 								...extra,
 							],
 						},
@@ -140,7 +145,7 @@ describe("GitLab event projectors", () => {
 	it("projects the production receiver's project lifecycle fields", () => {
 		const signal = normalizedEvent(
 			gitlabEvent("project_rename", "project-event-42", [
-				stringAttr("gitlab.project.old_path", "rdev/old-maple"),
+				stringAttr("gitlab.project.old_path", "example/old-widgets"),
 			]),
 		)
 		const result = evaluate(
@@ -152,14 +157,14 @@ describe("GitLab event projectors", () => {
 		strictEqual(result.failures.length, 0)
 		strictEqual(result.events[0]?.id, samples[0]?.id)
 		deepStrictEqual(result.events[0]?.data, {
-			project: { id: "42", path: "rdev/maple", oldPath: "rdev/old-maple" },
+			project: { id: "42", path: "example/widgets", oldPath: "example/old-widgets" },
 			action: "renamed",
 			sourceEvent: "project_rename",
-			actor: { id: "9", name: "rdev" },
+			actor: { id: "9", name: "maintainer" },
 			result: "success",
 			serviceName: "gitlab-repository-events",
 		})
-		strictEqual(result.events[0]?.subject, "rdev/maple")
+		strictEqual(result.events[0]?.subject, "example/widgets")
 	})
 
 	it("maps every normalized project lifecycle event to a version-1 action", () => {
@@ -191,6 +196,11 @@ describe("GitLab event projectors", () => {
 		const signal = normalizedEvent(
 			gitlabEvent("merge_request_open", "mr-event-7", [
 				intAttr("gitlab.merge_request.iid", "7"),
+				stringAttr("gitlab.merge_request.title", "Freeze contracts"),
+				stringAttr(
+					"gitlab.merge_request.url",
+					"https://gitlab.example.test/example/widgets/-/merge_requests/7",
+				),
 				stringAttr("gitlab.merge_request.source_branch", "feature/maple"),
 				stringAttr("gitlab.merge_request.target_branch", "main"),
 				stringAttr("gitlab.merge_request.commit", "abc123"),
@@ -205,20 +215,22 @@ describe("GitLab event projectors", () => {
 		strictEqual(result.failures.length, 0)
 		strictEqual(result.events[0]?.id, samples[1]?.id)
 		deepStrictEqual(result.events[0]?.data, {
-			project: { id: "42", path: "rdev/maple" },
+			project: { id: "42", path: "example/widgets" },
 			mergeRequest: {
 				iid: "7",
+				title: "Freeze contracts",
+				url: "https://gitlab.example.test/example/widgets/-/merge_requests/7",
 				action: "open",
 				sourceBranch: "feature/maple",
 				targetBranch: "main",
 				commit: "abc123",
 			},
 			sourceEvent: "merge_request_open",
-			actor: { id: "9", name: "rdev" },
+			actor: { id: "9", name: "maintainer" },
 			result: "success",
 			serviceName: "gitlab-repository-events",
 		})
-		strictEqual(result.events[0]?.subject, "rdev/maple/-/merge_requests/7")
+		strictEqual(result.events[0]?.subject, "example/widgets/-/merge_requests/7")
 	})
 
 	it("projects only terminal pipeline events from the normalized receiver fields", () => {
@@ -231,6 +243,13 @@ describe("GitLab event projectors", () => {
 				stringAttr("gitlab.ci.pipeline.detailed_status", "failed"),
 				stringAttr("gitlab.ci.pipeline.name", "Maple CI"),
 				stringAttr("gitlab.ci.pipeline.source", "push"),
+				stringAttr(
+					"gitlab.ci.pipeline.url",
+					"https://gitlab.example.test/example/widgets/-/pipelines/900",
+				),
+				intAttr("gitlab.ci.pipeline.failed_job_count", "0"),
+				boolAttr("gitlab.ci.pipeline.failed_jobs_truncated", false),
+				failedJobsAttr([]),
 				stringAttr("vcs.ref", "main"),
 				stringAttr("vcs.ref.head.revision", "deadbeef"),
 				intAttr("gitlab.ci.pipeline.duration_ms", "63000"),
@@ -247,7 +266,7 @@ describe("GitLab event projectors", () => {
 		strictEqual(result.failures.length, 0)
 		strictEqual(result.events[0]?.id, samples[2]?.id)
 		deepStrictEqual(result.events[0]?.data, {
-			project: { id: "42", path: "rdev/maple" },
+			project: { id: "42", path: "example/widgets" },
 			pipeline: {
 				id: "900",
 				iid: "12",
@@ -260,13 +279,17 @@ describe("GitLab event projectors", () => {
 				durationMs: "63000",
 				queuedDurationMs: "10000",
 				stageCount: "3",
+				url: "https://gitlab.example.test/example/widgets/-/pipelines/900",
+				failedJobCount: "0",
+				failedJobsTruncated: false,
+				failedJobs: [],
 			},
 			sourceEvent: "ci_pipeline_completed",
-			actor: { id: "9", name: "rdev" },
+			actor: { id: "9", name: "maintainer" },
 			result: "failure",
 			serviceName: "gitlab-repository-events",
 		})
-		strictEqual(result.events[0]?.subject, "rdev/maple/-/pipelines/900")
+		strictEqual(result.events[0]?.subject, "example/widgets/-/pipelines/900")
 	})
 
 	it("projects every issue lifecycle action and sanitized issue comments", () => {
@@ -284,8 +307,12 @@ describe("GitLab event projectors", () => {
 					gitlabEvent(sourceEvent, `delivery-issue:${sourceEvent}`, [
 						intAttr("gitlab.issue.id", "70"),
 						intAttr("gitlab.issue.iid", "7"),
+						stringAttr("gitlab.issue.type", "issue"),
 						stringAttr("gitlab.issue.title", "Typed events"),
-						stringAttr("gitlab.issue.url", "https://gitlab.internal/rdev/maple/-/issues/7"),
+						stringAttr(
+							"gitlab.issue.url",
+							"https://gitlab.example.test/example/widgets/-/issues/7",
+						),
 						stringArrayAttr("gitlab.issue.labels", ["agent-ready", "backend"]),
 					]),
 				),
@@ -301,26 +328,47 @@ describe("GitLab event projectors", () => {
 			normalizedEvent(
 				gitlabEvent("issue_comment", "delivery-comment:0", [
 					intAttr("gitlab.issue.iid", "7"),
+					stringAttr("gitlab.issue.type", "issue"),
 					intAttr("gitlab.comment.id", "81"),
 					stringArrayAttr("gitlab.issue.labels", ["agent-ready", "backend"]),
 					stringAttr("gitlab.comment.excerpt", "  hello\u0000\n\tMaple  "),
-					stringAttr("gitlab.comment.url", "https://gitlab.internal/rdev/maple/-/issues/7#note_81"),
+					stringAttr(
+						"gitlab.comment.url",
+						"https://gitlab.example.test/example/widgets/-/issues/7#note_81",
+					),
 				]),
 			),
 		)
 		strictEqual(commentResult.failures.length, 0)
 		deepStrictEqual(commentResult.events[0]?.data, {
-			project: { id: "42", path: "rdev/maple" },
-			issue: { iid: "7", labels: ["agent-ready", "backend"] },
+			project: { id: "42", path: "example/widgets" },
+			issue: { iid: "7", type: "issue", labels: ["agent-ready", "backend"] },
 			comment: {
 				id: "81",
 				excerpt: "hello Maple",
-				url: "https://gitlab.internal/rdev/maple/-/issues/7#note_81",
+				url: "https://gitlab.example.test/example/widgets/-/issues/7#note_81",
 			},
 			sourceEvent: "issue_comment",
-			actor: { id: "9", name: "rdev" },
+			actor: { id: "9", name: "maintainer" },
 			result: "success",
 			serviceName: "gitlab-repository-events",
+		})
+
+		const workItem = evaluate(
+			"gitlab.issue.lifecycle",
+			"gitlab-work-item-updated",
+			"issue_update",
+			normalizedEvent(
+				gitlabEvent("issue_update", "delivery-work-item:0", [
+					intAttr("gitlab.issue.iid", "19"),
+					stringAttr("gitlab.issue.type", "incident_response_task"),
+				]),
+			),
+		)
+		deepStrictEqual((workItem.events[0]?.data as { issue: { type: string; action: string } }).issue, {
+			iid: "19",
+			type: "incident_response_task",
+			action: "update",
 		})
 	})
 
@@ -338,7 +386,7 @@ describe("GitLab event projectors", () => {
 				stringAttr("gitlab.merge_request.title", "Freeze contracts"),
 				stringAttr(
 					"gitlab.merge_request.url",
-					"https://gitlab.internal/rdev/maple/-/merge_requests/7",
+					"https://gitlab.example.test/example/widgets/-/merge_requests/7",
 				),
 				...(sourceEvent === "merge_request_review"
 					? [stringAttr("gitlab.merge_request.review_state", "approved")]
@@ -368,8 +416,17 @@ describe("GitLab event projectors", () => {
 				normalizedEvent(
 					gitlabEvent(sourceEvent, `delivery-mr-comment:${sourceEvent}`, [
 						intAttr("gitlab.merge_request.iid", "7"),
+						stringAttr("gitlab.merge_request.title", "Freeze contracts"),
+						stringAttr(
+							"gitlab.merge_request.url",
+							"https://gitlab.example.test/example/widgets/-/merge_requests/7",
+						),
 						intAttr("gitlab.comment.id", "82"),
 						stringAttr("gitlab.comment.excerpt", "Please add a fixture"),
+						stringAttr(
+							"gitlab.comment.url",
+							"https://gitlab.example.test/example/widgets/-/merge_requests/7#note_82",
+						),
 					]),
 				),
 			)
@@ -390,7 +447,7 @@ describe("GitLab event projectors", () => {
 					intAttr("gitlab.ci.pipeline.merge_request_iid", "7"),
 					stringAttr(
 						"gitlab.ci.pipeline.url",
-						"https://gitlab.internal/rdev/maple/-/pipelines/900",
+						"https://gitlab.example.test/example/widgets/-/pipelines/900",
 					),
 					intAttr("gitlab.ci.pipeline.failed_job_count", "3"),
 					boolAttr("gitlab.ci.pipeline.failed_jobs_truncated", true),
@@ -399,7 +456,7 @@ describe("GitLab event projectors", () => {
 							id: "901",
 							name: "unit",
 							stage: "test",
-							url: "https://gitlab.internal/rdev/maple/-/jobs/901",
+							url: "https://gitlab.example.test/example/widgets/-/jobs/901",
 						},
 						{ id: "902", name: "integration", stage: "test" },
 					]),
@@ -414,7 +471,7 @@ describe("GitLab event projectors", () => {
 				id: "900",
 				mergeRequestIid: "7",
 				status: "failed",
-				url: "https://gitlab.internal/rdev/maple/-/pipelines/900",
+				url: "https://gitlab.example.test/example/widgets/-/pipelines/900",
 				failedJobCount: "3",
 				failedJobsTruncated: true,
 				failedJobs: [
@@ -423,7 +480,7 @@ describe("GitLab event projectors", () => {
 						name: "unit",
 						stage: "test",
 						status: "failed",
-						url: "https://gitlab.internal/rdev/maple/-/jobs/901",
+						url: "https://gitlab.example.test/example/widgets/-/jobs/901",
 					},
 					{ id: "902", name: "integration", stage: "test", status: "failed" },
 				],
@@ -452,7 +509,7 @@ describe("GitLab event projectors", () => {
 						stringAttr("gitlab.deployment.revision", "a8123fa"),
 						stringAttr(
 							"gitlab.deployment.url",
-							"https://gitlab.internal/rdev/maple/-/deployments/501",
+							"https://gitlab.example.test/example/widgets/-/deployments/501",
 						),
 					]),
 				),
@@ -544,6 +601,135 @@ describe("GitLab event projectors", () => {
 		}
 	})
 
+	it("requires source-provided identity and remains deterministic across retries for every new family", () => {
+		const mr = [
+			intAttr("gitlab.merge_request.iid", "7"),
+			stringAttr("gitlab.merge_request.title", "Freeze contracts"),
+			stringAttr(
+				"gitlab.merge_request.url",
+				"https://gitlab.example.test/example/widgets/-/merge_requests/7",
+			),
+		]
+		const cases = [
+			{
+				name: "project",
+				projector: gitlabProjectLifecycleProjector,
+				request: gitlabEvent("project_update", "retry-project"),
+			},
+			{
+				name: "issue",
+				projector: gitlabIssueLifecycleProjector,
+				request: gitlabEvent("issue_update", "retry-issue", [
+					intAttr("gitlab.issue.iid", "7"),
+					stringAttr("gitlab.issue.type", "task"),
+				]),
+			},
+			{
+				name: "issue comment",
+				projector: gitlabIssueCommentProjector,
+				request: gitlabEvent("issue_comment", "retry-issue-comment", [
+					intAttr("gitlab.issue.iid", "7"),
+					stringAttr("gitlab.issue.type", "task"),
+					intAttr("gitlab.comment.id", "81"),
+					stringAttr("gitlab.comment.excerpt", "Bounded comment"),
+					stringAttr(
+						"gitlab.comment.url",
+						"https://gitlab.example.test/example/widgets/-/issues/7#note_81",
+					),
+				]),
+			},
+			{
+				name: "merge request",
+				projector: gitlabMergeRequestLifecycleProjector,
+				request: gitlabEvent("merge_request_update", "retry-mr", mr),
+			},
+			{
+				name: "merge request comment",
+				projector: gitlabMergeRequestCommentProjector,
+				request: gitlabEvent("merge_request_comment", "retry-mr-comment", [
+					...mr,
+					intAttr("gitlab.comment.id", "82"),
+					stringAttr("gitlab.comment.excerpt", "Bounded review"),
+					stringAttr(
+						"gitlab.comment.url",
+						"https://gitlab.example.test/example/widgets/-/merge_requests/7#note_82",
+					),
+				]),
+			},
+			{
+				name: "pipeline",
+				projector: gitlabPipelineCompletedProjector,
+				request: gitlabEvent("ci_pipeline_completed", "retry-pipeline", [
+					intAttr("gitlab.ci.pipeline.id", "900"),
+					stringAttr("gitlab.ci.pipeline.status", "success"),
+					stringAttr(
+						"gitlab.ci.pipeline.url",
+						"https://gitlab.example.test/example/widgets/-/pipelines/900",
+					),
+				]),
+			},
+			{
+				name: "deployment",
+				projector: gitlabDeploymentLifecycleProjector,
+				request: gitlabEvent("deployment_success", "retry-deployment", [
+					intAttr("gitlab.deployment.id", "501"),
+					stringAttr("gitlab.deployment.environment", "staging"),
+					stringAttr("gitlab.deployment.status", "success"),
+					stringAttr("gitlab.deployment.revision", "a8123fa"),
+					stringAttr(
+						"gitlab.deployment.url",
+						"https://gitlab.example.test/example/widgets/-/deployments/501",
+					),
+				]),
+			},
+			{
+				name: "job",
+				projector: gitlabJobLifecycleProjector,
+				request: gitlabEvent("ci_job_success", "retry-job", [
+					intAttr("gitlab.ci.job.id", "901"),
+					stringAttr("gitlab.ci.job.name", "unit"),
+					stringAttr("gitlab.ci.job.status", "success"),
+				]),
+			},
+			{
+				name: "ref",
+				projector: gitlabRefLifecycleProjector,
+				request: gitlabEvent("branch_update", "retry-ref", [
+					stringAttr("vcs.ref", "refs/heads/main"),
+					stringAttr("vcs.ref.base.revision", "a8123fa"),
+					stringAttr("vcs.ref.head.revision", "b9123fa"),
+				]),
+			},
+			{
+				name: "release",
+				projector: gitlabReleaseLifecycleProjector,
+				request: gitlabEvent("release_update", "retry-release", [
+					stringAttr("gitlab.release.tag", "v1.0.0"),
+				]),
+			},
+		] as const
+
+		for (const testCase of cases) {
+			const first = normalizedEvent(testCase.request)
+			const retry = normalizedEvent(testCase.request)
+			deepStrictEqual(
+				testCase.projector.project(first),
+				testCase.projector.project(retry),
+				testCase.name,
+			)
+			throws(
+				() =>
+					testCase.projector.project({
+						...first,
+						occurrenceId: "derived:sha256:fixture",
+						identityQuality: "derived",
+					}),
+				/source-provided occurrence identity/,
+				testCase.name,
+			)
+		}
+	})
+
 	it("keeps source identity and the CloudEvent ID deterministic across retries", () => {
 		const first = normalizedEvent(gitlabEvent("project_create", "project-event-42"))
 		const retry = normalizedEvent(gitlabEvent("project_create", "project-event-42"))
@@ -564,7 +750,7 @@ describe("GitLab event projectors", () => {
 		strictEqual(firstResult.events[0]?.id, retryResult.events[0]?.id)
 		strictEqual(
 			firstResult.events[0]?.id,
-			"sha256:8f45527a4e615e057142026df477f20e2e6d63ae55bc761ce4dc151dda706811",
+			"sha256:58a73bebd375da87aef9ce33d28376f127200a83d15d376a1d1d872d3757d653",
 		)
 		strictEqual(firstResult.events[0]?.id?.startsWith("sha256:"), true)
 	})
@@ -594,6 +780,95 @@ describe("GitLab event projectors", () => {
 		strictEqual(missingIdResult.failures[0]?.message, "GitLab projector is missing gitlab.project.id")
 		strictEqual(badIdResult.failures.length, 1)
 		strictEqual(badIdResult.failures[0]?.message, "GitLab projector gitlab.project.id must be an int64")
+	})
+
+	it("requires every semantically available producer handoff field", () => {
+		const issueWithoutType = normalizedEvent(
+			gitlabEvent("issue_update", "issue-no-type", [intAttr("gitlab.issue.iid", "7")]),
+		)
+		throws(() => gitlabIssueLifecycleProjector.project(issueWithoutType), /missing gitlab.issue.type/)
+
+		const malformedWorkItemType = normalizedEvent(
+			gitlabEvent("issue_update", "issue-bad-type", [
+				intAttr("gitlab.issue.iid", "7"),
+				stringAttr("gitlab.issue.type", "Incident Response Task"),
+			]),
+		)
+		throws(() => gitlabIssueLifecycleProjector.project(malformedWorkItemType), /lowercase token/)
+
+		const commentWithoutExcerpt = normalizedEvent(
+			gitlabEvent("issue_comment", "comment-no-excerpt", [
+				intAttr("gitlab.issue.iid", "7"),
+				stringAttr("gitlab.issue.type", "issue"),
+				intAttr("gitlab.comment.id", "81"),
+				stringAttr(
+					"gitlab.comment.url",
+					"https://gitlab.example.test/example/widgets/-/issues/7#note_81",
+				),
+			]),
+		)
+		throws(
+			() => gitlabIssueCommentProjector.project(commentWithoutExcerpt),
+			/missing gitlab.comment.excerpt/,
+		)
+
+		const mergeRequestWithoutTitle = normalizedEvent(
+			gitlabEvent("merge_request_open", "mr-no-title", [
+				intAttr("gitlab.merge_request.iid", "7"),
+				stringAttr(
+					"gitlab.merge_request.url",
+					"https://gitlab.example.test/example/widgets/-/merge_requests/7",
+				),
+			]),
+		)
+		throws(
+			() => gitlabMergeRequestLifecycleProjector.project(mergeRequestWithoutTitle),
+			/missing gitlab.merge_request.title/,
+		)
+
+		const pipelineWithoutUrl = normalizedEvent(
+			gitlabEvent("ci_pipeline_completed", "pipeline-no-url", [
+				intAttr("gitlab.ci.pipeline.id", "900"),
+				stringAttr("gitlab.ci.pipeline.status", "success"),
+			]),
+		)
+		throws(
+			() => gitlabPipelineCompletedProjector.project(pipelineWithoutUrl),
+			/missing gitlab.ci.pipeline.url/,
+		)
+
+		const failedPipelineWithoutSummaryCount = normalizedEvent(
+			gitlabEvent("ci_pipeline_completed", "pipeline-no-summary-count", [
+				intAttr("gitlab.ci.pipeline.id", "900"),
+				stringAttr("gitlab.ci.pipeline.status", "failed"),
+				stringAttr(
+					"gitlab.ci.pipeline.url",
+					"https://gitlab.example.test/example/widgets/-/pipelines/900",
+				),
+				boolAttr("gitlab.ci.pipeline.failed_jobs_truncated", false),
+				failedJobsAttr([]),
+			]),
+		)
+		throws(
+			() => gitlabPipelineCompletedProjector.project(failedPipelineWithoutSummaryCount),
+			/missing gitlab.ci.pipeline.failed_job_count/,
+		)
+
+		const deploymentWithoutRevision = normalizedEvent(
+			gitlabEvent("deployment_success", "deployment-no-revision", [
+				intAttr("gitlab.deployment.id", "501"),
+				stringAttr("gitlab.deployment.environment", "production"),
+				stringAttr("gitlab.deployment.status", "success"),
+				stringAttr(
+					"gitlab.deployment.url",
+					"https://gitlab.example.test/example/widgets/-/deployments/501",
+				),
+			]),
+		)
+		throws(
+			() => gitlabDeploymentLifecycleProjector.project(deploymentWithoutRevision),
+			/missing gitlab.deployment.revision/,
+		)
 	})
 
 	it("rejects nonterminal pipeline status, unknown actions, and unknown config fields", () => {
@@ -654,8 +929,10 @@ describe("GitLab event projectors", () => {
 		const unsafeUrl = normalizedEvent(
 			gitlabEvent("issue_comment", "comment-query", [
 				intAttr("gitlab.issue.iid", "7"),
+				stringAttr("gitlab.issue.type", "issue"),
 				intAttr("gitlab.comment.id", "81"),
-				stringAttr("gitlab.comment.url", "https://gitlab.internal/note?private=value"),
+				stringAttr("gitlab.comment.excerpt", "Safe bounded excerpt"),
+				stringAttr("gitlab.comment.url", "https://gitlab.example.test/note?private=value"),
 			]),
 		)
 		throws(() => gitlabIssueCommentProjector.project(unsafeUrl), /must not contain a query or fragment/)
@@ -664,6 +941,10 @@ describe("GitLab event projectors", () => {
 			gitlabEvent("ci_pipeline_completed", "pipeline-too-many-jobs", [
 				intAttr("gitlab.ci.pipeline.id", "900"),
 				stringAttr("gitlab.ci.pipeline.status", "failed"),
+				stringAttr(
+					"gitlab.ci.pipeline.url",
+					"https://gitlab.example.test/example/widgets/-/pipelines/900",
+				),
 				failedJobsAttr(
 					Array.from({ length: 21 }, (_, index) => ({
 						id: String(index + 1),
@@ -677,8 +958,13 @@ describe("GitLab event projectors", () => {
 		const oversizedExcerpt = normalizedEvent(
 			gitlabEvent("issue_comment", "comment-too-long", [
 				intAttr("gitlab.issue.iid", "7"),
+				stringAttr("gitlab.issue.type", "issue"),
 				intAttr("gitlab.comment.id", "81"),
 				stringAttr("gitlab.comment.excerpt", "x".repeat(1025)),
+				stringAttr(
+					"gitlab.comment.url",
+					"https://gitlab.example.test/example/widgets/-/issues/7#note_81",
+				),
 			]),
 		)
 		throws(() => gitlabIssueCommentProjector.project(oversizedExcerpt), /exceeds 1024 UTF-8 bytes/)
@@ -686,6 +972,7 @@ describe("GitLab event projectors", () => {
 		const tooManyLabels = normalizedEvent(
 			gitlabEvent("issue_open", "issue-too-many-labels", [
 				intAttr("gitlab.issue.iid", "7"),
+				stringAttr("gitlab.issue.type", "issue"),
 				stringArrayAttr(
 					"gitlab.issue.labels",
 					Array.from({ length: 51 }, (_, index) => `label-${index}`),
@@ -739,12 +1026,13 @@ describe("GitLab event projectors", () => {
 		strictEqual(identities.length, samples.length)
 		for (const [index, sample] of samples.entries()) {
 			strictEqual(validateMapleCloudEvent(sample).event.id, sample.id)
+			validateGitLabEventData(sample.dataschema, sample.data)
 			const identity = identities[index]!
 			strictEqual(
 				makeEventId({
 					tenantId: "local",
 					sourceKind: "otel.log",
-					source: "https://gitlab.internal",
+					source: "https://gitlab.example.test",
 					occurrenceId: identity.occurrenceId,
 					projectionId: identity.projectionId,
 					projectionRevision: 1,

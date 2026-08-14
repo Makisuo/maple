@@ -26,6 +26,7 @@ import {
 } from "./eventing/control-store"
 import { ensureEventConsumerToken, eventConsumerTokenMatches } from "./eventing/consumer-auth"
 import { LocalEventingRuntime } from "./eventing/runtime"
+import { makeEffectEventingTelemetry } from "./eventing/telemetry"
 import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch, OtlpFieldError } from "./otlp/encode"
 import {
 	decodeLogsRequest,
@@ -993,9 +994,18 @@ export const startServer = (
 			configFile: options.configFile,
 			rawTelemetryRetentionDays: retention.effective,
 		})
+		// The request handler and synchronous eventing store share one telemetry
+		// runtime; eventing observations contain only bounded operation labels.
+		const telemetry = yield* Effect.acquireRelease(
+			Effect.sync(() => ManagedRuntime.make(TelemetryLayer)),
+			(rt) => Effect.promise(() => rt.dispose()),
+		)
+		const eventingTelemetry = makeEffectEventingTelemetry((effect) => {
+			telemetry.runFork(effect)
+		})
 		const controlStore = yield* Effect.acquireRelease(
 			Effect.tryPromise({
-				try: () => LocalEventingControlStore.open(options.dataDir),
+				try: () => LocalEventingControlStore.open(options.dataDir, undefined, eventingTelemetry),
 				catch: (error) =>
 					new ChdbError({
 						message: `failed to open local eventing control store: ${error instanceof Error ? error.message : String(error)}`,
@@ -1004,7 +1014,7 @@ export const startServer = (
 			(store) => Effect.sync(() => store.close()),
 		)
 		const eventing = yield* Effect.try({
-			try: () => new LocalEventingRuntime(controlStore),
+			try: () => new LocalEventingRuntime(controlStore, eventingTelemetry),
 			catch: (error) =>
 				new ChdbError({
 					message: `failed to compile local event projections: ${error instanceof Error ? error.message : String(error)}`,
@@ -1076,14 +1086,6 @@ export const startServer = (
 				}),
 		})
 		const gate = new RequestQuiescenceGate()
-		// A dedicated runtime carrying the OTel tracer for per-request spans: the
-		// Bun.serve handler runs outside Effect, so each request's span effect is
-		// run through this runtime. Disposed on scope close, which flushes any
-		// pending spans (bounded by the layer's shutdownTimeout).
-		const telemetry = yield* Effect.acquireRelease(
-			Effect.sync(() => ManagedRuntime.make(TelemetryLayer)),
-			(rt) => Effect.promise(() => rt.dispose()),
-		)
 		const runSpan: SpanRunner = (effect) => telemetry.runPromise(effect)
 		const server = yield* Effect.acquireRelease(
 			Effect.try({

@@ -723,6 +723,16 @@ Required low-cardinality telemetry includes:
 Raw field values, subjects, event IDs, and arbitrary event types must not become
 unbounded metric labels.
 
+Maple Local implements the ingest-time subset as
+`maple.eventing.operations_total`, `maple.eventing.operation_duration_ms`, and
+`maple.eventing.consumer_lag_events`. Their only attributes are bounded
+`operation`, `outcome`, and `source_kind` values. The operations cover
+normalization, projection success/failure, outbox stage/ready/deduplication, and
+consumer claim/ack/lease/lag. Tenant IDs, projection and consumer IDs, event
+types and IDs, URLs, payload fields, lease tokens, and credentials are never
+metric attributes. Replay and stranded-outbox telemetry remain applicable only
+when those optional host operations run.
+
 ## Compatibility and migration
 
 This design extends rather than replaces the host-neutral alert-core extraction

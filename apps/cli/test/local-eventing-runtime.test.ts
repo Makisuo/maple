@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert"
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert"
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -7,6 +7,7 @@ import type { SignalProjectionSpec } from "@maple/eventing-core"
 import { LocalEventingControlStore } from "../src/server/eventing/control-store"
 import { normalizeOtlpLogs } from "../src/server/eventing/otlp"
 import { LocalEventingRuntime } from "../src/server/eventing/runtime"
+import type { EventingTelemetryObservation } from "../src/server/eventing/telemetry"
 import { encodeLogs } from "../src/server/otlp/encode"
 
 const withDataDir = async (run: (dataDir: string) => Promise<void>): Promise<void> => {
@@ -44,14 +45,14 @@ const gitlabIssueCreated = {
 							body: { stringValue: "Issue 42 created" },
 							attributes: [
 								attr("event.id", { stringValue: "01K20GITLABISSUE42" }),
-								attr("event.source", { stringValue: "https://gitlab.internal" }),
+								attr("event.source", { stringValue: "https://gitlab.example.test" }),
 								attr("gitlab.project.id", { intValue: "7" }),
-								attr("gitlab.project.path", { stringValue: "platform/maple" }),
+								attr("gitlab.project.path", { stringValue: "example/widgets" }),
 								attr("gitlab.issue.id", { intValue: "4200" }),
 								attr("gitlab.issue.iid", { intValue: "42" }),
 								attr("gitlab.issue.title", { stringValue: "Wire GitLab events" }),
 								attr("gitlab.issue.url", {
-									stringValue: "https://gitlab.internal/platform/maple/-/issues/42",
+									stringValue: "https://gitlab.example.test/example/widgets/-/issues/42",
 								}),
 								attr("gitlab.user.id", { intValue: "9" }),
 								attr("gitlab.user.username", { stringValue: "operator" }),
@@ -94,11 +95,44 @@ const projection = (overrides: Partial<SignalProjectionSpec> = {}): SignalProjec
 })
 
 describe("LocalEventingRuntime", () => {
+	it("records bounded normalization and projection outcomes without signal data", async () =>
+		withDataDir(async (dataDir) => {
+			const observations: EventingTelemetryObservation[] = []
+			const telemetry = {
+				record: (observation: EventingTelemetryObservation) => observations.push(observation),
+			}
+			const store = await LocalEventingControlStore.open(dataDir)
+			try {
+				const runtime = new LocalEventingRuntime(store, telemetry)
+				runtime.activate(projection())
+				strictEqual(runtime.evaluateOtlp("logs", gitlabIssueCreated).events.length, 1)
+
+				const malformed = structuredClone(gitlabIssueCreated)
+				firstLogRecord(malformed).attributes = firstLogRecord(malformed).attributes.filter(
+					({ key }) => key !== "gitlab.project.path",
+				)
+				strictEqual(runtime.evaluateOtlp("logs", malformed).failures.length, 1)
+
+				const operationOutcomes = observations.map(
+					({ operation, outcome }) => `${operation}:${outcome}`,
+				)
+				ok(operationOutcomes.includes("normalization:success"))
+				ok(operationOutcomes.includes("projection:success"))
+				ok(operationOutcomes.includes("projection:failure"))
+				const serialized = JSON.stringify(observations)
+				strictEqual(serialized.includes("Wire GitLab events"), false)
+				strictEqual(serialized.includes("01K20GITLABISSUE42"), false)
+				strictEqual(serialized.includes("gitlab-issue-created"), false)
+			} finally {
+				store.close()
+			}
+		}))
+
 	it("normalizes typed GitLab OTLP fields while preserving the existing warehouse encoding", () => {
 		const [signal] = normalizeOtlpLogs(gitlabIssueCreated, "2026-08-07T20:00:00Z")
 		strictEqual(signal?.occurrenceId, "01K20GITLABISSUE42")
 		strictEqual(signal?.identityQuality, "source")
-		strictEqual(signal?.source, "https://gitlab.internal")
+		strictEqual(signal?.source, "https://gitlab.example.test")
 		deepStrictEqual(signal?.fields.get("attribute:gitlab.issue.iid"), {
 			type: "int64",
 			value: "42",
@@ -185,9 +219,9 @@ describe("LocalEventingRuntime", () => {
 				deepStrictEqual(first.events[0], {
 					specversion: "1.0",
 					id: first.events[0]!.id,
-					source: "https://gitlab.internal",
+					source: "https://gitlab.example.test",
 					type: "dev.maple.gitlab.issue.created.v1",
-					subject: "platform/maple/issues/42",
+					subject: "example/widgets/issues/42",
 					time: "2026-08-07T19:42:00.123456789Z",
 					datacontenttype: "application/json",
 					dataschema: "urn:maple:event-schema:gitlab-issue-created:v1",
@@ -199,12 +233,12 @@ describe("LocalEventingRuntime", () => {
 					sourceoccurrenceid: "01K20GITLABISSUE42",
 					sourceidentityquality: "source",
 					data: {
-						project: { id: "7", path: "platform/maple" },
+						project: { id: "7", path: "example/widgets" },
 						issue: {
 							id: "4200",
 							iid: "42",
 							title: "Wire GitLab events",
-							url: "https://gitlab.internal/platform/maple/-/issues/42",
+							url: "https://gitlab.example.test/example/widgets/-/issues/42",
 						},
 						actor: { id: "9", username: "operator" },
 						serviceName: "gitlab-rails",

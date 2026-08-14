@@ -292,6 +292,11 @@ const eventName = (signal: NormalizedSignal): string =>
 		true,
 	)!
 
+const requireSourceProvidedIdentity = (signal: NormalizedSignal): void => {
+	if (signal.identityQuality !== "source" || signal.occurrenceId === null)
+		throw new Error("GitLab projector requires source-provided occurrence identity")
+}
+
 const actor = (signal: NormalizedSignal) => {
 	const id = optionalPositiveProjectorInt64(
 		field(signal, "attribute", "gitlab.actor.id"),
@@ -319,10 +324,12 @@ const issue = (signal: NormalizedSignal) => {
 	const title = projectorString(field(signal, "attribute", "gitlab.issue.title"), "gitlab.issue.title")
 	const url = projectorUrl(field(signal, "attribute", "gitlab.issue.url"), "gitlab.issue.url")
 	const state = projectorToken(field(signal, "attribute", "gitlab.issue.state"), "gitlab.issue.state")
+	const type = projectorToken(field(signal, "attribute", "gitlab.issue.type"), "gitlab.issue.type", true)!
 	const labels = issueLabels(signal)
 	return {
 		...(id === undefined ? {} : { id }),
 		iid,
+		type,
 		...(title === undefined ? {} : { title }),
 		...(url === undefined ? {} : { url }),
 		...(state === undefined ? {} : { state }),
@@ -338,11 +345,13 @@ const mergeRequest = (signal: NormalizedSignal) => {
 	const title = projectorString(
 		field(signal, "attribute", "gitlab.merge_request.title"),
 		"gitlab.merge_request.title",
-	)
+		true,
+	)!
 	const url = projectorUrl(
 		field(signal, "attribute", "gitlab.merge_request.url"),
 		"gitlab.merge_request.url",
-	)
+		true,
+	)!
 	const sourceBranch = projectorString(
 		field(signal, "attribute", "gitlab.merge_request.source_branch"),
 		"gitlab.merge_request.source_branch",
@@ -361,8 +370,8 @@ const mergeRequest = (signal: NormalizedSignal) => {
 	)
 	return {
 		iid,
-		...(title === undefined ? {} : { title }),
-		...(url === undefined ? {} : { url }),
+		title,
+		url,
 		...(sourceBranch === undefined ? {} : { sourceBranch }),
 		...(targetBranch === undefined ? {} : { targetBranch }),
 		...(commit === undefined ? {} : { commit }),
@@ -376,12 +385,13 @@ const comment = (signal: NormalizedSignal, kind?: "comment" | "review") => {
 		field(signal, "attribute", "gitlab.comment.excerpt"),
 		"gitlab.comment.excerpt",
 	)
+	if (excerpt === undefined) throw new Error("GitLab projector is missing gitlab.comment.excerpt")
 	const url = projectorUrl(
 		field(signal, "attribute", "gitlab.comment.url"),
 		"gitlab.comment.url",
-		false,
 		true,
-	)
+		true,
+	)!
 	const system = projectorBoolean(
 		field(signal, "attribute", "gitlab.comment.system"),
 		"gitlab.comment.system",
@@ -389,8 +399,8 @@ const comment = (signal: NormalizedSignal, kind?: "comment" | "review") => {
 	return {
 		id,
 		...(kind === undefined ? {} : { kind }),
-		...(excerpt === undefined ? {} : { excerpt }),
-		...(url === undefined ? {} : { url }),
+		excerpt,
+		url,
 		...(system === undefined ? {} : { system }),
 	}
 }
@@ -455,6 +465,7 @@ const failedJobs = (signal: NormalizedSignal) => {
 }
 
 const project = (signal: NormalizedSignal) => {
+	requireSourceProvidedIdentity(signal)
 	const id = positiveProjectorInt64(field(signal, "attribute", "gitlab.project.id"), "gitlab.project.id")
 	const path = projectorString(
 		field(signal, "attribute", "gitlab.project.path"),
@@ -698,9 +709,10 @@ export const gitlabPipelineCompletedProjector = {
 		const url = projectorUrl(
 			field(signal, "attribute", "gitlab.ci.pipeline.url"),
 			"gitlab.ci.pipeline.url",
-		)
+			true,
+		)!
 		const ref = projectorString(field(signal, "attribute", "vcs.ref"), "vcs.ref")
-		const sha = projectorString(
+		const sha = projectorRevision(
 			field(signal, "attribute", "vcs.ref.head.revision"),
 			"vcs.ref.head.revision",
 		)
@@ -725,19 +737,23 @@ export const gitlabPipelineCompletedProjector = {
 			"gitlab.ci.pipeline.failed_jobs_truncated",
 		)
 		const pipelineFailedJobs = failedJobs(signal)
-		if ((failedJobCount === undefined) !== (failedJobsTruncated === undefined))
-			throw new Error("GitLab projector failed job count and truncation flag must be supplied together")
-		if (pipelineFailedJobs !== undefined) {
-			if (status !== "failed")
-				throw new Error("GitLab projector failed jobs are only valid for a failed pipeline")
+		if (status === "failed") {
 			if (failedJobCount === undefined)
 				throw new Error("GitLab projector is missing gitlab.ci.pipeline.failed_job_count")
 			if (failedJobsTruncated === undefined)
 				throw new Error("GitLab projector is missing gitlab.ci.pipeline.failed_jobs_truncated")
+			if (pipelineFailedJobs === undefined)
+				throw new Error("GitLab projector is missing gitlab.ci.pipeline.failed_jobs")
 			if (BigInt(failedJobCount) < BigInt(pipelineFailedJobs.length))
 				throw new Error("GitLab projector failed job count is smaller than the summary list")
 			if (failedJobsTruncated !== BigInt(failedJobCount) > BigInt(pipelineFailedJobs.length))
 				throw new Error("GitLab projector failed job truncation flag is inconsistent")
+		} else if (
+			failedJobCount !== undefined ||
+			failedJobsTruncated !== undefined ||
+			pipelineFailedJobs !== undefined
+		) {
+			throw new Error("GitLab projector failed job summaries are only valid for a failed pipeline")
 		}
 		const eventActor = actor(signal)
 		const eventServiceName = serviceName(signal)
@@ -754,7 +770,7 @@ export const gitlabPipelineCompletedProjector = {
 					...(name === undefined ? {} : { name }),
 					...(pipelineSource === undefined ? {} : { source: pipelineSource }),
 					...(detailedStatus === undefined ? {} : { detailedStatus }),
-					...(url === undefined ? {} : { url }),
+					url,
 					...(ref === undefined ? {} : { ref }),
 					...(sha === undefined ? {} : { sha }),
 					...(durationMs === undefined ? {} : { durationMs }),
@@ -805,8 +821,13 @@ export const gitlabDeploymentLifecycleProjector = {
 		const revision = projectorRevision(
 			field(signal, "attribute", "gitlab.deployment.revision"),
 			"gitlab.deployment.revision",
-		)
-		const url = projectorUrl(field(signal, "attribute", "gitlab.deployment.url"), "gitlab.deployment.url")
+			true,
+		)!
+		const url = projectorUrl(
+			field(signal, "attribute", "gitlab.deployment.url"),
+			"gitlab.deployment.url",
+			true,
+		)!
 		const eventActor = actor(signal)
 		const eventResult = result(signal)
 		const eventServiceName = serviceName(signal)
@@ -818,8 +839,8 @@ export const gitlabDeploymentLifecycleProjector = {
 					id,
 					environment,
 					status,
-					...(revision === undefined ? {} : { revision }),
-					...(url === undefined ? {} : { url }),
+					revision,
+					url,
 				},
 				sourceEvent,
 				...(eventActor === undefined ? {} : { actor: eventActor }),

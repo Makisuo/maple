@@ -1,0 +1,280 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:maple:event-schema:gitlab-issue-comment:v1",
+	"$ref": "#/$defs/GitLabIssueCommentDataV1",
+	"$defs": {
+		"GitLabIssueCommentDataV1": {
+			"type": "object",
+			"properties": {
+				"project": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"path": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"oldPath": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						}
+					},
+					"required": ["id", "path"],
+					"additionalProperties": false
+				},
+				"issue": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"iid": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"type": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 64
+								},
+								{
+									"pattern": "^[a-z][a-z0-9_]*$"
+								}
+							]
+						},
+						"title": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"url": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 2048
+								},
+								{
+									"pattern": "^https?:\\/\\/[^/?#@\\s]+(?:\\/[^?#\\s]*)?$"
+								}
+							]
+						},
+						"state": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 64
+								},
+								{
+									"pattern": "^[a-z][a-z0-9_]*$"
+								}
+							]
+						},
+						"labels": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"allOf": [
+									{
+										"minLength": 1
+									},
+									{
+										"maxLength": 256
+									}
+								]
+							},
+							"allOf": [
+								{
+									"maxItems": 50
+								}
+							]
+						}
+					},
+					"required": ["iid", "type"],
+					"additionalProperties": false
+				},
+				"comment": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"kind": {
+							"type": "string",
+							"enum": ["comment", "review"]
+						},
+						"excerpt": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 1024
+								}
+							]
+						},
+						"url": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 2048
+								},
+								{
+									"pattern": "^https?:\\/\\/[^/?#@\\s]+(?:\\/[^?#\\s]*)?(?:#[^?#\\s]+)?$"
+								}
+							]
+						},
+						"system": {
+							"type": "boolean"
+						}
+					},
+					"required": ["id", "excerpt", "url"],
+					"additionalProperties": false
+				},
+				"sourceEvent": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 64
+						},
+						{
+							"pattern": "^[a-z][a-z0-9_]*$"
+						}
+					]
+				},
+				"actor": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"name": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"username": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						}
+					},
+					"additionalProperties": false
+				},
+				"result": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 4096
+						}
+					]
+				},
+				"serviceName": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 4096
+						}
+					]
+				}
+			},
+			"required": ["project", "issue", "comment", "sourceEvent"],
+			"additionalProperties": false
+		}
+	}
+}

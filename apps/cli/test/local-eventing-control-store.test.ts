@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { describe, it } from "vitest"
 import type { MapleCloudEvent, SignalProjectionSpec } from "@maple/eventing-core"
 import { eventingControlPath, LocalEventingControlStore } from "../src/server/eventing/control-store"
+import type { EventingTelemetryObservation } from "../src/server/eventing/telemetry"
 
 const withDataDir = async (run: (dataDir: string) => Promise<void>): Promise<void> => {
 	const parent = mkdtempSync(join(tmpdir(), "maple-eventing-control-"))
@@ -53,6 +54,75 @@ const event = (overrides: Partial<MapleCloudEvent> = {}): MapleCloudEvent => ({
 })
 
 describe("LocalEventingControlStore", () => {
+	it("records bounded outbox and consumer telemetry without identifiers or payloads", async () =>
+		withDataDir(async (dataDir) => {
+			const observations: EventingTelemetryObservation[] = []
+			const store = await LocalEventingControlStore.open(dataDir, undefined, {
+				record: (observation) => observations.push(observation),
+			})
+			try {
+				const sensitiveEvent = event({
+					data: { iid: 42, title: "PAYLOAD-MUST-NOT-BE-METRIC-DATA" },
+				})
+				store.stageEvents([sensitiveEvent, sensitiveEvent])
+				throws(() => store.stageEvents([event({ data: { iid: 43 } })]), /collision/)
+				throws(() => store.markReady(["unknown-event-identifier"]), /unknown event/)
+				store.markReady([sensitiveEvent.id])
+				store.registerConsumer("tenant-a", "private-consumer-identifier", "beginning")
+				const claim = store.claimReady("tenant-a", "private-consumer-identifier", 10, 30)
+				throws(
+					() => store.claimReady("tenant-a", "private-consumer-identifier", 10, 30),
+					/active lease/,
+				)
+				throws(
+					() =>
+						store.acknowledgeClaim(
+							"tenant-a",
+							"private-consumer-identifier",
+							"incorrect-private-token",
+							claim.throughSequence!,
+						),
+					/token does not match/,
+				)
+				store.acknowledgeClaim(
+					"tenant-a",
+					"private-consumer-identifier",
+					claim.leaseToken!,
+					claim.throughSequence!,
+				)
+
+				const operationOutcomes = observations.map(
+					({ operation, outcome }) => `${operation}:${outcome}`,
+				)
+				for (const expected of [
+					"outbox_stage:success",
+					"outbox_stage:failure",
+					"outbox_ready:success",
+					"outbox_ready:failure",
+					"outbox_dedup:success",
+					"consumer_claim:success",
+					"consumer_claim:failure",
+					"consumer_ack:success",
+					"consumer_ack:failure",
+					"consumer_lease:failure",
+					"consumer_lag:observed",
+				])
+					ok(operationOutcomes.includes(expected), `missing telemetry observation ${expected}`)
+
+				const serialized = JSON.stringify(observations)
+				for (const forbidden of [
+					"PAYLOAD-MUST-NOT-BE-METRIC-DATA",
+					"private-consumer-identifier",
+					"incorrect-private-token",
+					sensitiveEvent.id,
+					claim.leaseToken!,
+				])
+					strictEqual(serialized.includes(forbidden), false)
+			} finally {
+				store.close()
+			}
+		}))
+
 	it("stores immutable sequential revisions and only loads the active revision", async () =>
 		withDataDir(async (dataDir) => {
 			const store = await LocalEventingControlStore.open(dataDir)

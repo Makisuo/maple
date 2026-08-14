@@ -15,6 +15,7 @@ import {
 } from "@maple/eventing-core"
 import { Schema } from "effect"
 import { durableWrite, ensurePrivateDirectory } from "../durable-files"
+import { NOOP_EVENTING_TELEMETRY, type EventingTelemetry } from "./telemetry"
 
 const CONTROL_SCHEMA_VERSION = 2
 const CONTROL_DIRECTORY = "control"
@@ -434,12 +435,19 @@ const decodeConsumer = (row: ConsumerRow): EventConsumer => ({
 export class LocalEventingControlStore {
 	readonly #db: Database
 	readonly #limits: ResolvedLocalEventingControlLimits
+	readonly #telemetry: EventingTelemetry
 	readonly path: string
 
-	private constructor(path: string, db: Database, limits: ResolvedLocalEventingControlLimits) {
+	private constructor(
+		path: string,
+		db: Database,
+		limits: ResolvedLocalEventingControlLimits,
+		telemetry: EventingTelemetry,
+	) {
 		this.path = path
 		this.#db = db
 		this.#limits = limits
+		this.#telemetry = telemetry
 	}
 
 	static async open(
@@ -449,6 +457,7 @@ export class LocalEventingControlStore {
 			maxOutboxBytes: DEFAULT_MAX_OUTBOX_BYTES,
 			retainAcknowledgedReadyEvents: DEFAULT_RETAIN_ACKNOWLEDGED_READY_EVENTS,
 		},
+		telemetry: EventingTelemetry = NOOP_EVENTING_TELEMETRY,
 	): Promise<LocalEventingControlStore> {
 		const validatedLimits = validateLimits(limits)
 		const directory = eventingControlDirectory(dataDir)
@@ -471,7 +480,7 @@ export class LocalEventingControlStore {
 				)
 			chmodSync(path, 0o600)
 			validateOpenDatabase(db)
-			return new LocalEventingControlStore(path, db, validatedLimits)
+			return new LocalEventingControlStore(path, db, validatedLimits, telemetry)
 		} catch (error) {
 			db.close()
 			throw error
@@ -557,80 +566,95 @@ export class LocalEventingControlStore {
 		let inserted = 0
 		let deduplicated = 0
 		const eventIds: string[] = []
-		this.#db
-			.transaction(() => {
-				const usage = this.#db
-					.query<OutboxUsageRow, []>(
-						"SELECT count(*) AS count, coalesce(sum(length(CAST(event_json AS BLOB))), 0) AS bytes FROM outbox_events",
-					)
-					.get()
-				if (!usage) throw new Error("event outbox usage query returned no row")
-				let outboxEvents = asNumber(usage.count)
-				let outboxBytes = asNumber(usage.bytes)
-				for (const candidate of events) {
-					const validated = validateMapleCloudEvent(candidate)
-					const { event, canonicalJson: eventJson, byteLength: eventBytes } = validated
-					const existing = this.#db
-						.query<EventRow, [string]>(
-							"SELECT event_id, event_json, state FROM outbox_events WHERE event_id = ?",
+		try {
+			this.#db
+				.transaction(() => {
+					const usage = this.#db
+						.query<OutboxUsageRow, []>(
+							"SELECT count(*) AS count, coalesce(sum(length(CAST(event_json AS BLOB))), 0) AS bytes FROM outbox_events",
 						)
-						.get(event.id)
-					if (existing) {
-						if (existing.event_json !== eventJson)
-							throw new Error(`event ID collision with different payload: ${event.id}`)
-						deduplicated += 1
-					} else {
-						if (
-							outboxEvents + 1 > this.#limits.maxOutboxEvents ||
-							outboxBytes + eventBytes > this.#limits.maxOutboxBytes
-						)
-							throw new Error(
-								`event outbox capacity exceeded (${outboxEvents}/${this.#limits.maxOutboxEvents} events, ${outboxBytes}/${this.#limits.maxOutboxBytes} bytes)`,
+						.get()
+					if (!usage) throw new Error("event outbox usage query returned no row")
+					let outboxEvents = asNumber(usage.count)
+					let outboxBytes = asNumber(usage.bytes)
+					for (const candidate of events) {
+						const validated = validateMapleCloudEvent(candidate)
+						const { event, canonicalJson: eventJson, byteLength: eventBytes } = validated
+						const existing = this.#db
+							.query<EventRow, [string]>(
+								"SELECT event_id, event_json, state FROM outbox_events WHERE event_id = ?",
 							)
-						this.#db.run(
-							"INSERT INTO outbox_events (event_id, tenant_id, projection_id, projection_revision, state, event_json, staged_at) VALUES (?, ?, ?, ?, 'staged', ?, ?)",
-							[
-								event.id,
-								event.tenantid,
-								event.projectionid,
-								event.projectionrevision,
-								eventJson,
-								stagedAt,
-							],
-						)
-						inserted += 1
-						outboxEvents += 1
-						outboxBytes += eventBytes
+							.get(event.id)
+						if (existing) {
+							if (existing.event_json !== eventJson)
+								throw new Error(`event ID collision with different payload: ${event.id}`)
+							deduplicated += 1
+						} else {
+							if (
+								outboxEvents + 1 > this.#limits.maxOutboxEvents ||
+								outboxBytes + eventBytes > this.#limits.maxOutboxBytes
+							)
+								throw new Error(
+									`event outbox capacity exceeded (${outboxEvents}/${this.#limits.maxOutboxEvents} events, ${outboxBytes}/${this.#limits.maxOutboxBytes} bytes)`,
+								)
+							this.#db.run(
+								"INSERT INTO outbox_events (event_id, tenant_id, projection_id, projection_revision, state, event_json, staged_at) VALUES (?, ?, ?, ?, 'staged', ?, ?)",
+								[
+									event.id,
+									event.tenantid,
+									event.projectionid,
+									event.projectionrevision,
+									eventJson,
+									stagedAt,
+								],
+							)
+							inserted += 1
+							outboxEvents += 1
+							outboxBytes += eventBytes
+						}
+						eventIds.push(event.id)
 					}
-					eventIds.push(event.id)
-				}
-			})
-			.immediate()
+				})
+				.immediate()
+		} catch (error) {
+			this.#telemetry.record({ operation: "outbox_stage", outcome: "failure" })
+			throw error
+		}
+		this.#telemetry.record({ operation: "outbox_stage", outcome: "success", count: inserted })
+		this.#telemetry.record({ operation: "outbox_dedup", outcome: "success", count: deduplicated })
 		return { inserted, deduplicated, eventIds }
 	}
 
 	markReady(eventIds: readonly string[], readyAt = new Date().toISOString()): void {
-		this.#db
-			.transaction(() => {
-				for (const eventId of eventIds) {
-					const row = this.#db
-						.query<Pick<EventRow, "state">, [string]>(
-							"SELECT state FROM outbox_events WHERE event_id = ?",
+		let markedReady = 0
+		try {
+			this.#db
+				.transaction(() => {
+					for (const eventId of eventIds) {
+						const row = this.#db
+							.query<Pick<EventRow, "state">, [string]>(
+								"SELECT state FROM outbox_events WHERE event_id = ?",
+							)
+							.get(eventId)
+						if (!row) throw new Error(`cannot mark unknown event ready: ${eventId}`)
+						if (row.state === "ready") continue
+						this.#db.run("INSERT INTO outbox_ready_events (event_id, ready_at) VALUES (?, ?)", [
+							eventId,
+							readyAt,
+						])
+						this.#db.run(
+							"UPDATE outbox_events SET state = 'ready', ready_at = ? WHERE event_id = ? AND state = 'staged'",
+							[readyAt, eventId],
 						)
-						.get(eventId)
-					if (!row) throw new Error(`cannot mark unknown event ready: ${eventId}`)
-					if (row.state === "ready") continue
-					this.#db.run("INSERT INTO outbox_ready_events (event_id, ready_at) VALUES (?, ?)", [
-						eventId,
-						readyAt,
-					])
-					this.#db.run(
-						"UPDATE outbox_events SET state = 'ready', ready_at = ? WHERE event_id = ? AND state = 'staged'",
-						[readyAt, eventId],
-					)
-				}
-			})
-			.immediate()
+						markedReady += 1
+					}
+				})
+				.immediate()
+		} catch (error) {
+			this.#telemetry.record({ operation: "outbox_ready", outcome: "failure" })
+			throw error
+		}
+		this.#telemetry.record({ operation: "outbox_ready", outcome: "success", count: markedReady })
 	}
 
 	#listOutbox(state: "ready" | "staged", limit = 100, after = 0): EventingOutboxPage {
@@ -765,74 +789,95 @@ export class LocalEventingControlStore {
 		leaseSeconds: number,
 		now = new Date().toISOString(),
 	): EventConsumerClaim {
-		validateConsumerId(consumerId)
-		if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000)
-			throw new EventConsumerInputError("claim limit must be between 1 and 1000")
-		if (!Number.isSafeInteger(leaseSeconds) || leaseSeconds < 5 || leaseSeconds > 300)
-			throw new EventConsumerInputError("leaseSeconds must be between 5 and 300")
-		const nowMilliseconds = canonicalInstant(now, "claim time")
-		return this.#db
-			.transaction(() => {
-				const consumer = this.#consumer(tenantId, consumerId)
-				if (!consumer) throw new EventConsumerNotFoundError(`unknown event consumer: ${consumerId}`)
-				if (asNumber(consumer.active) === 0)
-					throw new EventConsumerConflictError(`event consumer is disabled: ${consumerId}`)
-				if (
-					consumer.lease_expires_at !== null &&
-					canonicalInstant(consumer.lease_expires_at, "event consumer leaseExpiresAt") >
-						nowMilliseconds
-				)
-					throw new EventConsumerConflictError(
-						`event consumer already has an active lease: ${consumerId}`,
+		let reclaimedExpiredLease = false
+		let lag = 0
+		try {
+			validateConsumerId(consumerId)
+			if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000)
+				throw new EventConsumerInputError("claim limit must be between 1 and 1000")
+			if (!Number.isSafeInteger(leaseSeconds) || leaseSeconds < 5 || leaseSeconds > 300)
+				throw new EventConsumerInputError("leaseSeconds must be between 5 and 300")
+			const nowMilliseconds = canonicalInstant(now, "claim time")
+			const claim = this.#db
+				.transaction(() => {
+					const consumer = this.#consumer(tenantId, consumerId)
+					if (!consumer)
+						throw new EventConsumerNotFoundError(`unknown event consumer: ${consumerId}`)
+					if (asNumber(consumer.active) === 0)
+						throw new EventConsumerConflictError(`event consumer is disabled: ${consumerId}`)
+					if (
+						consumer.lease_expires_at !== null &&
+						canonicalInstant(consumer.lease_expires_at, "event consumer leaseExpiresAt") >
+							nowMilliseconds
 					)
+						throw new EventConsumerConflictError(
+							`event consumer already has an active lease: ${consumerId}`,
+						)
+					if (consumer.lease_expires_at !== null) reclaimedExpiredLease = true
+					lag = this.#consumerLag(tenantId, asNumber(consumer.last_acked_sequence))
 
-				const rows = this.#db
-					.query<EventJsonRow, [string, number, number]>(
-						`SELECT readiness.sequence, event.event_json, event.staged_at, readiness.ready_at
+					const rows = this.#db
+						.query<EventJsonRow, [string, number, number]>(
+							`SELECT readiness.sequence, event.event_json, event.staged_at, readiness.ready_at
 						 FROM outbox_ready_events AS readiness
 						 INNER JOIN outbox_events AS event ON event.event_id = readiness.event_id
 						 WHERE event.tenant_id = ? AND event.state = 'ready' AND readiness.sequence > ?
 						 ORDER BY readiness.sequence
 						 LIMIT ?`,
-					)
-					.all(tenantId, asNumber(consumer.last_acked_sequence), limit)
-				if (rows.length === 0) {
+						)
+						.all(tenantId, asNumber(consumer.last_acked_sequence), limit)
+					if (rows.length === 0) {
+						this.#db.run(
+							"UPDATE event_consumers SET lease_token_hash = NULL, lease_expires_at = NULL, claimed_through_sequence = NULL WHERE tenant_id = ? AND consumer_id = ?",
+							[tenantId, consumerId],
+						)
+						return {
+							consumerId,
+							leaseToken: null,
+							leaseExpiresAt: null,
+							throughSequence: null,
+							events: [],
+						}
+					}
+
+					const leaseToken = randomBytes(32).toString("hex")
+					const leaseExpiresAt = new Date(nowMilliseconds + leaseSeconds * 1_000).toISOString()
+					const throughSequence = asNumber(rows.at(-1)!.sequence)
 					this.#db.run(
-						"UPDATE event_consumers SET lease_token_hash = NULL, lease_expires_at = NULL, claimed_through_sequence = NULL WHERE tenant_id = ? AND consumer_id = ?",
-						[tenantId, consumerId],
+						`UPDATE event_consumers
+					 SET lease_token_hash = ?, lease_expires_at = ?, claimed_through_sequence = ?
+					 WHERE tenant_id = ? AND consumer_id = ?`,
+						[tokenHash(leaseToken), leaseExpiresAt, throughSequence, tenantId, consumerId],
 					)
 					return {
 						consumerId,
-						leaseToken: null,
-						leaseExpiresAt: null,
-						throughSequence: null,
-						events: [],
+						leaseToken,
+						leaseExpiresAt,
+						throughSequence,
+						events: rows.map(({ sequence, event_json, staged_at, ready_at }) => ({
+							sequence: asNumber(sequence),
+							event: decodeEvent(event_json),
+							stagedAt: staged_at,
+							readyAt: ready_at,
+						})),
 					}
-				}
-
-				const leaseToken = randomBytes(32).toString("hex")
-				const leaseExpiresAt = new Date(nowMilliseconds + leaseSeconds * 1_000).toISOString()
-				const throughSequence = asNumber(rows.at(-1)!.sequence)
-				this.#db.run(
-					`UPDATE event_consumers
-					 SET lease_token_hash = ?, lease_expires_at = ?, claimed_through_sequence = ?
-					 WHERE tenant_id = ? AND consumer_id = ?`,
-					[tokenHash(leaseToken), leaseExpiresAt, throughSequence, tenantId, consumerId],
-				)
-				return {
-					consumerId,
-					leaseToken,
-					leaseExpiresAt,
-					throughSequence,
-					events: rows.map(({ sequence, event_json, staged_at, ready_at }) => ({
-						sequence: asNumber(sequence),
-						event: decodeEvent(event_json),
-						stagedAt: staged_at,
-						readyAt: ready_at,
-					})),
-				}
+				})
+				.immediate()
+			this.#telemetry.record({
+				operation: "consumer_claim",
+				outcome: claim.events.length === 0 ? "empty" : "success",
+				count: Math.max(1, claim.events.length),
 			})
-			.immediate()
+			this.#telemetry.record({ operation: "consumer_lag", outcome: "observed", lag })
+			if (reclaimedExpiredLease)
+				this.#telemetry.record({ operation: "consumer_lease", outcome: "reclaimed" })
+			return claim
+		} catch (error) {
+			this.#telemetry.record({ operation: "consumer_claim", outcome: "failure" })
+			if (error instanceof EventConsumerConflictError && /lease/.test(error.message))
+				this.#telemetry.record({ operation: "consumer_lease", outcome: "failure" })
+			throw error
+		}
 	}
 
 	acknowledgeClaim(
@@ -842,48 +887,82 @@ export class LocalEventingControlStore {
 		throughSequence: number,
 		now = new Date().toISOString(),
 	): EventConsumerAcknowledgement {
-		validateConsumerId(consumerId)
-		if (!Number.isSafeInteger(throughSequence) || throughSequence < 1)
-			throw new EventConsumerInputError("throughSequence must be a positive safe integer")
-		const nowMilliseconds = canonicalInstant(now, "acknowledgement time")
-		return this.#db
-			.transaction(() => {
-				const consumer = this.#consumer(tenantId, consumerId)
-				if (!consumer) throw new EventConsumerNotFoundError(`unknown event consumer: ${consumerId}`)
-				if (asNumber(consumer.active) === 0)
-					throw new EventConsumerConflictError(`event consumer is disabled: ${consumerId}`)
-				if (
-					consumer.lease_token_hash === null ||
-					consumer.lease_expires_at === null ||
-					consumer.claimed_through_sequence === null
-				)
-					throw new EventConsumerConflictError(`event consumer has no active lease: ${consumerId}`)
-				if (
-					canonicalInstant(consumer.lease_expires_at, "event consumer leaseExpiresAt") <=
-					nowMilliseconds
-				)
-					throw new EventConsumerConflictError(`event consumer lease has expired: ${consumerId}`)
-				if (!tokenHashMatches(consumer.lease_token_hash, leaseToken))
-					throw new EventConsumerConflictError("event consumer lease token does not match")
-				const claimedThrough = asNumber(consumer.claimed_through_sequence)
-				if (throughSequence !== claimedThrough)
-					throw new EventConsumerConflictError(
-						`acknowledgement must cover the complete claimed batch through sequence ${claimedThrough}`,
+		try {
+			validateConsumerId(consumerId)
+			if (!Number.isSafeInteger(throughSequence) || throughSequence < 1)
+				throw new EventConsumerInputError("throughSequence must be a positive safe integer")
+			const nowMilliseconds = canonicalInstant(now, "acknowledgement time")
+			const acknowledgement = this.#db
+				.transaction(() => {
+					const consumer = this.#consumer(tenantId, consumerId)
+					if (!consumer)
+						throw new EventConsumerNotFoundError(`unknown event consumer: ${consumerId}`)
+					if (asNumber(consumer.active) === 0)
+						throw new EventConsumerConflictError(`event consumer is disabled: ${consumerId}`)
+					if (
+						consumer.lease_token_hash === null ||
+						consumer.lease_expires_at === null ||
+						consumer.claimed_through_sequence === null
 					)
-				this.#db.run(
-					`UPDATE event_consumers
+						throw new EventConsumerConflictError(
+							`event consumer has no active lease: ${consumerId}`,
+						)
+					if (
+						canonicalInstant(consumer.lease_expires_at, "event consumer leaseExpiresAt") <=
+						nowMilliseconds
+					)
+						throw new EventConsumerConflictError(
+							`event consumer lease has expired: ${consumerId}`,
+						)
+					if (!tokenHashMatches(consumer.lease_token_hash, leaseToken))
+						throw new EventConsumerConflictError("event consumer lease token does not match")
+					const claimedThrough = asNumber(consumer.claimed_through_sequence)
+					if (throughSequence !== claimedThrough)
+						throw new EventConsumerConflictError(
+							`acknowledgement must cover the complete claimed batch through sequence ${claimedThrough}`,
+						)
+					this.#db.run(
+						`UPDATE event_consumers
 					 SET last_acked_sequence = ?, lease_token_hash = NULL, lease_expires_at = NULL,
 					     claimed_through_sequence = NULL
 					 WHERE tenant_id = ? AND consumer_id = ?`,
-					[throughSequence, tenantId, consumerId],
-				)
-				return {
-					consumerId,
-					acknowledgedThrough: throughSequence,
-					prunedEvents: this.#pruneAcknowledgedReady(tenantId),
-				}
+						[throughSequence, tenantId, consumerId],
+					)
+					return {
+						consumerId,
+						acknowledgedThrough: throughSequence,
+						prunedEvents: this.#pruneAcknowledgedReady(tenantId),
+					}
+				})
+				.immediate()
+			this.#telemetry.record({ operation: "consumer_ack", outcome: "success" })
+			this.#telemetry.record({
+				operation: "consumer_lag",
+				outcome: "observed",
+				lag: this.#consumerLag(tenantId, acknowledgement.acknowledgedThrough),
 			})
-			.immediate()
+			return acknowledgement
+		} catch (error) {
+			this.#telemetry.record({ operation: "consumer_ack", outcome: "failure" })
+			if (error instanceof EventConsumerConflictError && /lease/.test(error.message))
+				this.#telemetry.record({ operation: "consumer_lease", outcome: "failure" })
+			throw error
+		}
+	}
+
+	#consumerLag(tenantId: string, lastAcknowledgedSequence: number): number {
+		const latest = this.#db
+			.query<SequenceRow, [string]>(
+				`SELECT max(readiness.sequence) AS sequence
+				 FROM outbox_ready_events AS readiness
+				 INNER JOIN outbox_events AS event ON event.event_id = readiness.event_id
+				 WHERE event.tenant_id = ? AND event.state = 'ready'`,
+			)
+			.get(tenantId)
+		return Math.max(
+			0,
+			(latest?.sequence == null ? 0 : asNumber(latest.sequence)) - lastAcknowledgedSequence,
+		)
 	}
 
 	#consumer(tenantId: string, consumerId: string): ConsumerRow | null {

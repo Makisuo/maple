@@ -13,6 +13,7 @@ import { LocalEventingControlStore } from "./control-store"
 import type { EventConsumerStart } from "./control-store"
 import { registerGitLabProjectors } from "./gitlab-projectors"
 import { OTLP_LOG_ADAPTER } from "./otlp"
+import { NOOP_EVENTING_TELEMETRY, type EventingTelemetry } from "./telemetry"
 
 const TENANT_ID = "local"
 
@@ -39,12 +40,14 @@ export class LocalEventingRuntime {
 	readonly #store: LocalEventingControlStore
 	readonly #sources: SignalSourceRegistry
 	readonly #projectors: ProjectorRegistry
+	readonly #telemetry: EventingTelemetry
 	#compiled: CompiledProjectionRegistry
 	#activeSourceKinds = new Set<string>()
 	#generation = 0
 
-	constructor(store: LocalEventingControlStore) {
+	constructor(store: LocalEventingControlStore, telemetry: EventingTelemetry = NOOP_EVENTING_TELEMETRY) {
 		this.#store = store
+		this.#telemetry = telemetry
 		this.#sources = new SignalSourceRegistry().register(OTLP_LOG_ADAPTER.definition)
 		this.#projectors = registerGitLabProjectors(new ProjectorRegistry())
 		const specs = store.loadEnabledProjections(TENANT_ID)
@@ -93,16 +96,49 @@ export class LocalEventingRuntime {
 	): LocalProjectionEvaluation {
 		const sourceKind = signal === "logs" ? "otel.log" : signal === "traces" ? "otel.span" : "otel.metric"
 		if (!this.hasActiveSource(sourceKind)) return emptyEvaluation()
+		const startedAt = performance.now()
 		const acceptedAt = new Date().toISOString()
-		const normalized = (
-			signal === "logs" ? OTLP_LOG_ADAPTER.normalize(decoded, { acceptedAt, tenantId: TENANT_ID }) : []
-		).filter((occurrence) => !isRetiredUtcDay(occurrence.occurredAt.slice(0, 10)))
+		let normalized
+		try {
+			normalized = (
+				signal === "logs"
+					? OTLP_LOG_ADAPTER.normalize(decoded, { acceptedAt, tenantId: TENANT_ID })
+					: []
+			).filter((occurrence) => !isRetiredUtcDay(occurrence.occurredAt.slice(0, 10)))
+			this.#telemetry.record({
+				operation: "normalization",
+				outcome: "success",
+				count: normalized.length,
+				durationMs: performance.now() - startedAt,
+				sourceKind,
+			})
+		} catch (error) {
+			this.#telemetry.record({
+				operation: "normalization",
+				outcome: "failure",
+				durationMs: performance.now() - startedAt,
+				sourceKind,
+			})
+			throw error
+		}
 		const snapshot = this.#compiled
 		const events: MapleCloudEvent[] = []
 		const failures: ProjectionFailure[] = []
 		const typeMismatchFields = new Set<string>()
 		for (const occurrence of normalized) {
 			const result = snapshot.evaluate(occurrence)
+			this.#telemetry.record({
+				operation: "projection",
+				outcome: "success",
+				count: result.events.length,
+				sourceKind,
+			})
+			this.#telemetry.record({
+				operation: "projection",
+				outcome: "failure",
+				count: result.failures.length,
+				sourceKind,
+			})
 			events.push(...result.events)
 			failures.push(...result.failures)
 			for (const mismatch of result.typeMismatchFields) typeMismatchFields.add(mismatch)

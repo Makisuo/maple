@@ -1,0 +1,142 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:maple:event-schema:gitlab-project-lifecycle:v1",
+	"$ref": "#/$defs/GitLabProjectLifecycleDataV1",
+	"$defs": {
+		"GitLabProjectLifecycleDataV1": {
+			"type": "object",
+			"properties": {
+				"project": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"path": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"oldPath": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						}
+					},
+					"required": ["id", "path"],
+					"additionalProperties": false
+				},
+				"action": {
+					"type": "string",
+					"enum": [
+						"created",
+						"destroyed",
+						"renamed",
+						"transferred",
+						"updated",
+						"archived",
+						"unarchived",
+						"deletion_requested"
+					]
+				},
+				"sourceEvent": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 64
+						},
+						{
+							"pattern": "^[a-z][a-z0-9_]*$"
+						}
+					]
+				},
+				"actor": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"name": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"username": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						}
+					},
+					"additionalProperties": false
+				},
+				"result": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 4096
+						}
+					]
+				},
+				"serviceName": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 4096
+						}
+					]
+				}
+			},
+			"required": ["project", "action", "sourceEvent"],
+			"additionalProperties": false
+		}
+	}
+}

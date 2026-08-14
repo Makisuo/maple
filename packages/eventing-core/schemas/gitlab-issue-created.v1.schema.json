@@ -1,0 +1,62 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:maple:event-schema:gitlab-issue-created:v1",
+	"$ref": "#/$defs/GitLabIssueCreatedDataV1",
+	"$defs": {
+		"GitLabIssueCreatedDataV1": {
+			"type": "object",
+			"properties": {
+				"project": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string"
+						},
+						"path": {
+							"type": "string"
+						}
+					},
+					"required": ["path"],
+					"additionalProperties": false
+				},
+				"issue": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string"
+						},
+						"iid": {
+							"type": "string"
+						},
+						"title": {
+							"type": "string"
+						},
+						"url": {
+							"type": "string"
+						}
+					},
+					"required": ["iid"],
+					"additionalProperties": false
+				},
+				"actor": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string"
+						},
+						"username": {
+							"type": "string"
+						}
+					},
+					"additionalProperties": false
+				},
+				"serviceName": {
+					"type": "string"
+				},
+				"body": {}
+			},
+			"required": ["project", "issue"],
+			"additionalProperties": false
+		}
+	}
+}

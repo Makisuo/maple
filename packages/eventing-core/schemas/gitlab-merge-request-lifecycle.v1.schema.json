@@ -1,0 +1,226 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:maple:event-schema:gitlab-merge-request-lifecycle:v1",
+	"$ref": "#/$defs/GitLabMergeRequestLifecycleDataV1",
+	"$defs": {
+		"GitLabMergeRequestLifecycleDataV1": {
+			"type": "object",
+			"properties": {
+				"project": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"path": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"oldPath": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						}
+					},
+					"required": ["id", "path"],
+					"additionalProperties": false
+				},
+				"mergeRequest": {
+					"type": "object",
+					"properties": {
+						"iid": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"title": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"url": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 2048
+								},
+								{
+									"pattern": "^https?:\\/\\/[^/?#@\\s]+(?:\\/[^?#\\s]*)?$"
+								}
+							]
+						},
+						"sourceBranch": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"targetBranch": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"commit": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 6
+								},
+								{
+									"maxLength": 64
+								},
+								{
+									"pattern": "^[0-9a-f]+$"
+								}
+							]
+						},
+						"reviewState": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 64
+								},
+								{
+									"pattern": "^[a-z][a-z0-9_]*$"
+								}
+							]
+						},
+						"action": {
+							"type": "string",
+							"enum": ["open", "update", "close", "reopen", "merge", "review"]
+						}
+					},
+					"required": ["iid", "title", "url", "action"],
+					"additionalProperties": false
+				},
+				"sourceEvent": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 64
+						},
+						{
+							"pattern": "^[a-z][a-z0-9_]*$"
+						}
+					]
+				},
+				"actor": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"name": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"username": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						}
+					},
+					"additionalProperties": false
+				},
+				"result": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 4096
+						}
+					]
+				},
+				"serviceName": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 4096
+						}
+					]
+				}
+			},
+			"required": ["project", "mergeRequest", "sourceEvent"],
+			"additionalProperties": false
+		}
+	}
+}

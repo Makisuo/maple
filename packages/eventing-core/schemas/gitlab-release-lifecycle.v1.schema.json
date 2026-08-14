@@ -1,0 +1,187 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:maple:event-schema:gitlab-release-lifecycle:v1",
+	"$ref": "#/$defs/GitLabReleaseLifecycleDataV1",
+	"$defs": {
+		"GitLabReleaseLifecycleDataV1": {
+			"type": "object",
+			"properties": {
+				"project": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"path": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"oldPath": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						}
+					},
+					"required": ["id", "path"],
+					"additionalProperties": false
+				},
+				"release": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"tag": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"action": {
+							"type": "string",
+							"enum": ["create", "update", "delete"]
+						},
+						"name": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"url": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 2048
+								},
+								{
+									"pattern": "^https?:\\/\\/[^/?#@\\s]+(?:\\/[^?#\\s]*)?$"
+								}
+							]
+						}
+					},
+					"required": ["tag", "action"],
+					"additionalProperties": false
+				},
+				"sourceEvent": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 64
+						},
+						{
+							"pattern": "^[a-z][a-z0-9_]*$"
+						}
+					]
+				},
+				"actor": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^[1-9][0-9]*$"
+								}
+							]
+						},
+						"name": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						},
+						"username": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 4096
+								}
+							]
+						}
+					},
+					"additionalProperties": false
+				},
+				"result": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 4096
+						}
+					]
+				},
+				"serviceName": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 4096
+						}
+					]
+				}
+			},
+			"required": ["project", "release", "sourceEvent"],
+			"additionalProperties": false
+		}
+	}
+}

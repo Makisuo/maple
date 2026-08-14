@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { Schema } from "effect"
 import { MapleCloudEventSchema, SignalProjectionSpecSchema, SignalScalarSchema } from "../src/model"
+import { GITLAB_DATA_SCHEMAS } from "../src/gitlab"
 
 const root = resolve(import.meta.dirname, "..")
 const check = process.argv.includes("--check")
@@ -23,6 +24,11 @@ const documents = [
 		id: "urn:maple:eventing:schema:cloud-event:v1",
 		schema: MapleCloudEventSchema,
 	},
+	...GITLAB_DATA_SCHEMAS.map(([id, schema]) => ({
+		path: `schemas/${id.slice("urn:maple:event-schema:".length).replace(":v1", ".v1")}.schema.json`,
+		id,
+		schema,
+	})),
 ] as const
 
 let stale = false
