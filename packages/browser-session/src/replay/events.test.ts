@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 // The capture modules install real DOM/global hooks; here we only need the
 // `emit` callback they are handed, so we can drive events through the same
-// path the browser would. Console is the hook we borrow — navigation is no
-// longer a capture module (the sink observes it, so page views are counted even
-// when replay is unsampled).
+// path the browser would. Console is the hook we borrow — navigation, errors
+// and interactions are no longer replay-only capture modules (the sink installs
+// them, so they are counted even when replay is unsampled).
 type EmitFn = (ev: { type: string; level?: string }) => void
 let emitRef: EmitFn | undefined
 
@@ -18,11 +18,7 @@ vi.mock("./capture/console", () => ({
 		emitRef = emit
 	}),
 }))
-vi.mock("./capture/interactions", () => ({
-	installInteractionCapture: () => () => {},
-}))
 vi.mock("./capture/network", () => ({ installNetworkCapture: () => () => {} }))
-vi.mock("./capture/errors", () => ({ installErrorCapture: () => () => {} }))
 
 vi.mock("../session", () => ({
 	markActivity: vi.fn(),

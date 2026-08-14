@@ -1,4 +1,4 @@
-import { activeTraceId } from "../../events-sink"
+import { activeTraceId } from "../trace-id"
 import { type Emit, safeEmit } from "./shared"
 
 const MAX_STACK = 4_000

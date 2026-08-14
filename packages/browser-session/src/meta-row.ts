@@ -1,5 +1,6 @@
 import { browserLocation, browserNavigator } from "./browser-globals"
 import type { ResolvedIdentity } from "./identity"
+import { keepaliveFor } from "./replay/transport"
 import type { EntryContext } from "./session"
 import { parseUserAgent } from "./user-agent"
 
@@ -180,14 +181,15 @@ export async function postSessionMetaRow(
 	row: Record<string, unknown>,
 	keepalive = false,
 ): Promise<void> {
+	const body = `${JSON.stringify(row)}\n`
 	await fetch(`${endpoint.replace(/\/$/, "")}/v1/sessionReplays/meta`, {
 		method: "POST",
 		headers: {
 			Authorization: `Bearer ${ingestKey}`,
 			"content-type": "application/x-ndjson",
 		},
-		body: `${JSON.stringify(row)}\n`,
-		keepalive,
+		body,
+		keepalive: keepaliveFor(keepalive, body.length),
 	}).catch(() => {
 		// Session metadata is best-effort; never throw into the host app.
 	})

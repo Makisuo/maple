@@ -56,6 +56,26 @@ describe("trace ids", () => {
 		expect(() => recordTraceId("orphan")).not.toThrow()
 		expect(getObservedTraceIds()).toEqual([])
 	})
+
+	it("caps retained ids so the ended row can't outgrow the keepalive budget", () => {
+		publishSessionSink("session-a")
+		for (let i = 0; i < 500; i++) recordTraceId(`trace-${i}`)
+
+		const ids = getObservedTraceIds("session-a")
+		expect(ids).toHaveLength(200)
+		// Keep-first: the ids are a join key the UI paginates anyway, and a session
+		// that runs for hours must not grow an unbounded Set behind it.
+		expect(ids[0]).toBe("trace-0")
+		expect(ids).not.toContain("trace-499")
+	})
+
+	it("still dedupes ids already held once the cap is reached", () => {
+		publishSessionSink("session-a")
+		for (let i = 0; i < 300; i++) recordTraceId(`trace-${i}`)
+		recordTraceId("trace-0")
+
+		expect(getObservedTraceIds("session-a")).toHaveLength(200)
+	})
 })
 
 describe("clearSessionSink", () => {

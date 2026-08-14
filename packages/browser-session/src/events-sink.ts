@@ -1,8 +1,10 @@
+import { startBaselineCapture } from "./capture/baseline"
 import { formatCHDateTime } from "./meta-row"
 import type { ReplayEngineConfig } from "./replay/transport"
 import { postSessionEvents } from "./replay/transport"
 import { approximateSize } from "./replay/util"
 import { markActivity, noteNavigation } from "./session"
+import { activeTraceId } from "./trace-id"
 
 /**
  * A distilled, structured session event. Sparse: only the fields relevant to
@@ -29,23 +31,7 @@ export interface SessionEvent {
 const FLUSH_INTERVAL_MS = 5_000
 const FLUSH_BYTES = 64 * 1024
 
-const ZERO_TRACE_ID = "00000000000000000000000000000000"
-
-// Injected by the host SDK (e.g. `@maple-dev/browser` wires OTel's
-// `trace.getActiveSpan()`), keeping this engine free of tracing dependencies.
-// Without a provider, events simply carry no trace id.
-let traceIdProvider: () => string | undefined = () => undefined
-
-/** Wire the host SDK's active-trace-id lookup into event capture. */
-export function setActiveTraceIdProvider(provider: () => string | undefined): void {
-	traceIdProvider = provider
-}
-
-/** The trace id of the active span, or undefined when none is active. */
-export function activeTraceId(): string | undefined {
-	const id = traceIdProvider()
-	return id && id !== ZERO_TRACE_ID ? id : undefined
-}
+export { activeTraceId, setActiveTraceIdProvider } from "./trace-id"
 
 export interface SessionEventSink {
 	/** Session currently receiving newly emitted rows. */
@@ -163,6 +149,10 @@ export function startEventSink(config: ReplayEngineConfig, sessionId: string): S
 	const stopNavigation = installNavigationObserver((url) => {
 		emit({ type: "navigation", url })
 	})
+	// Errors and clicks are counted on the same terms, and for the same reason —
+	// see `startBaselineCapture`. Console and network capture stay on the sampled
+	// replay path.
+	const stopBaselineCapture = startBaselineCapture(emit, config.maskAllText)
 
 	const flushTimer = setInterval(() => void flush(), FLUSH_INTERVAL_MS)
 
@@ -173,6 +163,7 @@ export function startEventSink(config: ReplayEngineConfig, sessionId: string): S
 		stop: () => {
 			clearInterval(flushTimer)
 			stopNavigation()
+			stopBaselineCapture()
 			if (holder()[SINK_KEY]?.sink === sink) holder()[SINK_KEY] = undefined
 		},
 		getPageViews: () => pageViews,
