@@ -1,5 +1,4 @@
 export * from "./event"
-export * from "./gitlab"
 export * from "./model"
 export * from "./predicate"
 export * from "./registry"

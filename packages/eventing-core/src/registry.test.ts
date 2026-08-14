@@ -20,19 +20,19 @@ const signal = (overrides: Partial<NormalizedSignal> = {}): NormalizedSignal => 
 	identityQuality: "source",
 	occurredAt: "2026-08-07T19:42:00.123456789Z",
 	observedAt: "2026-08-07T19:42:01Z",
-	subject: "project/example/issues/42",
+	subject: "records/42",
 	fields: defineSignalFields([
 		{
 			field: { namespace: "attribute", key: "event.name", type: "string" },
-			value: { type: "string", value: "gitlab.issue.created" },
+			value: { type: "string", value: "example.record.observed" },
 		},
 	]),
-	data: { issue: { iid: 42, title: "Example" } },
+	data: { record: { id: 42, label: "Example" } },
 	...overrides,
 })
 
 const projection = (overrides: Partial<SignalProjectionSpec> = {}): SignalProjectionSpec => ({
-	id: "gitlab-issue-created",
+	id: "example-record-observed",
 	revision: 3,
 	enabled: true,
 	tenantId: "tenant-a",
@@ -40,25 +40,25 @@ const projection = (overrides: Partial<SignalProjectionSpec> = {}): SignalProjec
 	selector: {
 		op: "eq",
 		field: { namespace: "attribute", key: "event.name", type: "string" },
-		value: { type: "string", value: "gitlab.issue.created" },
+		value: { type: "string", value: "example.record.observed" },
 	},
-	projector: { id: "gitlab.issue", version: 1, config: { includeTitle: true } },
+	projector: { id: "example.record", version: 1, config: { includeLabel: true } },
 	activeFrom: "2026-08-07T00:00:00Z",
 	...overrides,
 })
 
 const projectors = (): ProjectorRegistry =>
 	new ProjectorRegistry().register({
-		id: "gitlab.issue",
+		id: "example.record",
 		version: 1,
 		sourceKinds: ["otel.log"],
-		outputType: "dev.maple.gitlab.issue.created.v1",
-		dataSchema: "urn:maple:event-schema:gitlab-issue:v1",
+		outputType: "dev.maple.example.record.observed.v1",
+		dataSchema: "urn:maple:event-schema:example-record:v1",
 		decodeConfig: (value) => {
 			if (typeof value !== "object" || value === null) throw new Error("invalid projector config")
 			return value
 		},
-		project: (input) => ({ data: input.data as { issue: { iid: number; title: string } } }),
+		project: (input) => ({ data: input.data as { record: { id: number; label: string } } }),
 	})
 
 const sources = (): SignalSourceRegistry =>
@@ -112,11 +112,11 @@ describe("CompiledProjectionRegistry", () => {
 				sourceKind: "otel.log",
 				source: "urn:maple:source:otel:local",
 				occurrenceId: "event-123",
-				projectionId: "gitlab-issue-created",
+				projectionId: "example-record-observed",
 				projectionRevision: 3,
 			}),
-			type: "dev.maple.gitlab.issue.created.v1",
-			subject: "project/example/issues/42",
+			type: "dev.maple.example.record.observed.v1",
+			subject: "records/42",
 			projectionrevision: 3,
 			sourceoccurrenceid: "event-123",
 			sourceidentityquality: "source",
@@ -136,15 +136,15 @@ describe("CompiledProjectionRegistry", () => {
 
 	it("runs every matching projection from one immutable registry snapshot", () => {
 		const registry = CompiledProjectionRegistry.compile(
-			[projection(), projection({ id: "gitlab-issue-created-audit" })],
+			[projection(), projection({ id: "example-record-observed-audit" })],
 			sources(),
 			projectors(),
 		)
 		const result = registry.evaluate(signal())
 		expect(result.failures).toEqual([])
 		expect(result.events.map(({ projectionid }) => projectionid)).toEqual([
-			"gitlab-issue-created",
-			"gitlab-issue-created-audit",
+			"example-record-observed",
+			"example-record-observed-audit",
 		])
 	})
 
@@ -214,7 +214,7 @@ describe("CompiledProjectionRegistry", () => {
 			registryDefinitions,
 		)
 		const result = registry.evaluate(signal())
-		expect(result.events.map(({ projectionid }) => projectionid)).toEqual(["gitlab-issue-created"])
+		expect(result.events.map(({ projectionid }) => projectionid)).toEqual(["example-record-observed"])
 		expect(result.failures).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -240,7 +240,7 @@ describe("CompiledProjectionRegistry", () => {
 			projectors(),
 		)
 		expect(registry.evaluate(signal()).events.map(({ projectionid }) => projectionid)).toEqual([
-			"gitlab-issue-created",
+			"example-record-observed",
 		])
 		expect(registry.evaluate(signal({ sourceKind: "otel.span" })).events).toEqual([])
 	})
@@ -258,7 +258,7 @@ describe("CompiledProjectionRegistry", () => {
 		const definitions = projectors()
 		expect(() =>
 			definitions.register({
-				id: "gitlab.issue",
+				id: "example.record",
 				version: 1,
 				sourceKinds: ["otel.log"],
 				outputType: "duplicate",
@@ -298,7 +298,7 @@ describe("CompiledProjectionRegistry", () => {
 						selector: {
 							op: "contains",
 							field: { namespace: "attribute", key: "event.name", type: "string" },
-							value: { type: "string", value: "gitlab" },
+							value: { type: "string", value: "example" },
 						},
 					}),
 				],

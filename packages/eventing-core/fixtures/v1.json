@@ -8,10 +8,10 @@
 				"sourceKind": "otel.log",
 				"source": "urn:maple:source:otel:local",
 				"occurrenceId": "event-123",
-				"projectionId": "gitlab-issue-created",
+				"projectionId": "example-record-observed",
 				"projectionRevision": 3
 			},
-			"output": "sha256:061c0b5d99b92ef65ab8813c6d84988e4b1582e705e0077c952e62a0e84b6b08"
+			"output": "sha256:f278b407b3384ae705126120fb7e0919ac3ea63530979f8d43eca10879e4da6a"
 		}
 	],
 	"stringLiteralByteVectors": [
@@ -101,7 +101,7 @@
 					{
 						"op": "contains",
 						"field": { "namespace": "body", "key": "text", "type": "string" },
-						"value": { "type": "string", "value": "issue created" }
+						"value": { "type": "string", "value": "record observed" }
 					}
 				]
 			},
@@ -114,7 +114,7 @@
 				{
 					"namespace": "body",
 					"key": "text",
-					"value": { "type": "string", "value": "gitlab issue created successfully" }
+					"value": { "type": "string", "value": "example record observed successfully" }
 				}
 			],
 			"matches": true

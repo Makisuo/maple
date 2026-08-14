@@ -11,7 +11,6 @@ import {
 import { Schema } from "effect"
 import { LocalEventingControlStore } from "./control-store"
 import type { EventConsumerStart } from "./control-store"
-import { registerGitLabProjectors } from "./gitlab-projectors"
 import { OTLP_LOG_ADAPTER } from "./otlp"
 import { NOOP_EVENTING_TELEMETRY, type EventingTelemetry } from "./telemetry"
 
@@ -45,11 +44,15 @@ export class LocalEventingRuntime {
 	#activeSourceKinds = new Set<string>()
 	#generation = 0
 
-	constructor(store: LocalEventingControlStore, telemetry: EventingTelemetry = NOOP_EVENTING_TELEMETRY) {
+	constructor(
+		store: LocalEventingControlStore,
+		telemetry: EventingTelemetry = NOOP_EVENTING_TELEMETRY,
+		projectors: ProjectorRegistry = new ProjectorRegistry(),
+	) {
 		this.#store = store
 		this.#telemetry = telemetry
 		this.#sources = new SignalSourceRegistry().register(OTLP_LOG_ADAPTER.definition)
-		this.#projectors = registerGitLabProjectors(new ProjectorRegistry())
+		this.#projectors = projectors
 		const specs = store.loadEnabledProjections(TENANT_ID)
 		this.#compiled = CompiledProjectionRegistry.compile(specs, this.#sources, this.#projectors)
 		this.#activeSourceKinds = new Set(specs.map(({ sourceKind }) => sourceKind))

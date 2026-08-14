@@ -174,7 +174,7 @@ describe("Local eventing ingest seam", () => {
 					"content-type": "application/json",
 					"x-maple-maintenance-token": "maintenance-secret",
 				},
-				body: JSON.stringify({ consumerId: "matrix", startAt: "beginning" }),
+				body: JSON.stringify({ consumerId: "automation", startAt: "beginning" }),
 			}),
 		)
 		strictEqual(registration.status, 201)
@@ -189,7 +189,7 @@ describe("Local eventing ingest seam", () => {
 					"content-type": "application/json",
 					"x-maple-maintenance-token": "maintenance-secret",
 				},
-				body: JSON.stringify({ consumerId: "matrix", limit: 10, leaseSeconds: 30 }),
+				body: JSON.stringify({ consumerId: "automation", limit: 10, leaseSeconds: 30 }),
 			}),
 		)
 		strictEqual(wrongClaimCredential.status, 403)
@@ -204,7 +204,7 @@ describe("Local eventing ingest seam", () => {
 					"content-type": "application/json",
 					"x-maple-event-consumer-token": "consumer-secret",
 				},
-				body: JSON.stringify({ consumerId: "matrix", limit: 10, leaseSeconds: 30 }),
+				body: JSON.stringify({ consumerId: "automation", limit: 10, leaseSeconds: 30 }),
 			}),
 		)
 		strictEqual(claim.status, 200)
@@ -221,14 +221,18 @@ describe("Local eventing ingest seam", () => {
 					"x-maple-event-consumer-token": "consumer-secret",
 				},
 				body: JSON.stringify({
-					consumerId: "matrix",
+					consumerId: "automation",
 					leaseToken: claimed.leaseToken,
 					throughSequence: claimed.throughSequence,
 				}),
 			}),
 		)
 		strictEqual(acknowledgement.status, 200)
-		deepStrictEqual(calls, ["register:matrix:beginning", "claim:matrix:10:30", "ack:matrix:7"])
+		deepStrictEqual(calls, [
+			"register:automation:beginning",
+			"claim:automation:10:30",
+			"ack:automation:7",
+		])
 
 		let releaseMaintenance!: () => void
 		const maintenance = gate.exclusive(
@@ -248,7 +252,7 @@ describe("Local eventing ingest seam", () => {
 					"content-type": "application/json",
 					"x-maple-event-consumer-token": "consumer-secret",
 				},
-				body: JSON.stringify({ consumerId: "matrix", limit: 10, leaseSeconds: 30 }),
+				body: JSON.stringify({ consumerId: "automation", limit: 10, leaseSeconds: 30 }),
 			}),
 		)
 		strictEqual(blockedClaim.status, 503)

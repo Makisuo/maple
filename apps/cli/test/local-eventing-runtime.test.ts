@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, it } from "vitest"
-import type { SignalProjectionSpec } from "@maple/eventing-core"
+import {
+	fieldKey,
+	ProjectorRegistry,
+	type NormalizedSignal,
+	type SignalProjectionSpec,
+	type SignalScalar,
+} from "@maple/eventing-core"
 import { LocalEventingControlStore } from "../src/server/eventing/control-store"
 import { normalizeOtlpLogs } from "../src/server/eventing/otlp"
 import { LocalEventingRuntime } from "../src/server/eventing/runtime"
@@ -23,39 +29,39 @@ const withDataDir = async (run: (dataDir: string) => Promise<void>): Promise<voi
 
 const attr = (key: string, value: Record<string, unknown>) => ({ key, value })
 
-const gitlabIssueCreated = {
+const exampleRecordObserved = {
 	resourceLogs: [
 		{
 			resource: {
 				attributes: [
-					attr("service.name", { stringValue: "gitlab-rails" }),
+					attr("service.name", { stringValue: "example-service" }),
 					attr("service.version", { stringValue: "19.1.0" }),
 				],
 			},
 			scopeLogs: [
 				{
-					scope: { name: "gitlab.event_store", version: "1.0.0" },
+					scope: { name: "example.event_store", version: "1.0.0" },
 					logRecords: [
 						{
 							timeUnixNano: "1786131720123456789",
 							observedTimeUnixNano: "1786131721123456789",
-							eventName: "gitlab.issue.created",
+							eventName: "example.record.observed",
 							severityNumber: 9,
 							severityText: "INFO",
-							body: { stringValue: "Issue 42 created" },
+							body: { stringValue: "Record 42 observed" },
 							attributes: [
-								attr("event.id", { stringValue: "01K20GITLABISSUE42" }),
-								attr("event.source", { stringValue: "https://gitlab.example.test" }),
-								attr("gitlab.project.id", { intValue: "7" }),
-								attr("gitlab.project.path", { stringValue: "example/widgets" }),
-								attr("gitlab.issue.id", { intValue: "4200" }),
-								attr("gitlab.issue.iid", { intValue: "42" }),
-								attr("gitlab.issue.title", { stringValue: "Wire GitLab events" }),
-								attr("gitlab.issue.url", {
-									stringValue: "https://gitlab.example.test/example/widgets/-/issues/42",
+								attr("event.id", { stringValue: "01K20EXAMPLERECORD42" }),
+								attr("event.source", { stringValue: "https://events.example.test" }),
+								attr("example.collection.id", { intValue: "7" }),
+								attr("example.collection.name", { stringValue: "example/widgets" }),
+								attr("example.record.id", { intValue: "4200" }),
+								attr("example.record.sequence", { intValue: "42" }),
+								attr("example.record.title", { stringValue: "Observe example events" }),
+								attr("example.record.url", {
+									stringValue: "https://events.example.test/collections/widgets/records/42",
 								}),
-								attr("gitlab.user.id", { intValue: "9" }),
-								attr("gitlab.user.username", { stringValue: "operator" }),
+								attr("example.actor.id", { intValue: "9" }),
+								attr("example.actor.name", { stringValue: "observer" }),
 							],
 						},
 					],
@@ -65,11 +71,11 @@ const gitlabIssueCreated = {
 	],
 }
 
-const firstLogRecord = (request: typeof gitlabIssueCreated) =>
+const firstLogRecord = (request: typeof exampleRecordObserved) =>
 	request.resourceLogs[0]!.scopeLogs[0]!.logRecords[0]!
 
 const projection = (overrides: Partial<SignalProjectionSpec> = {}): SignalProjectionSpec => ({
-	id: "gitlab-issue-created",
+	id: "example-record-observed",
 	revision: 1,
 	enabled: true,
 	tenantId: "local",
@@ -80,19 +86,88 @@ const projection = (overrides: Partial<SignalProjectionSpec> = {}): SignalProjec
 			{
 				op: "eq",
 				field: { namespace: "signal", key: "event.name", type: "string" },
-				value: { type: "string", value: "gitlab.issue.created" },
+				value: { type: "string", value: "example.record.observed" },
 			},
 			{
 				op: "gte",
-				field: { namespace: "attribute", key: "gitlab.issue.iid", type: "int64" },
+				field: { namespace: "attribute", key: "example.record.sequence", type: "int64" },
 				value: { type: "int64", value: "1" },
 			},
 		],
 	},
-	projector: { id: "gitlab.issue.created", version: 1, config: {} },
+	projector: { id: "example.record.observed", version: 1, config: {} },
 	activeFrom: "2000-01-01T00:00:00Z",
 	...overrides,
 })
+
+const signalField = (
+	signal: NormalizedSignal,
+	namespace: "resource" | "attribute",
+	key: string,
+): SignalScalar | undefined => signal.fields.get(fieldKey({ namespace, key }))
+
+const stringField = (
+	signal: NormalizedSignal,
+	namespace: "resource" | "attribute",
+	key: string,
+	required = false,
+): string | undefined => {
+	const value = signalField(signal, namespace, key)
+	if (value === undefined) {
+		if (required) throw new Error(`example event is missing ${key}`)
+		return undefined
+	}
+	if (value.type !== "string") throw new Error(`example event ${key} must be a string`)
+	return value.value
+}
+
+const int64Field = (signal: NormalizedSignal, key: string, required = false): string | undefined => {
+	const value = signalField(signal, "attribute", key)
+	if (value === undefined) {
+		if (required) throw new Error(`example event is missing ${key}`)
+		return undefined
+	}
+	if (value.type !== "int64") throw new Error(`example event ${key} must be an int64`)
+	return value.value
+}
+
+const exampleProjectors = (): ProjectorRegistry =>
+	new ProjectorRegistry().register({
+		id: "example.record.observed",
+		version: 1,
+		sourceKinds: ["otel.log"],
+		outputType: "dev.maple.example.record.observed.v1",
+		dataSchema: "urn:maple:event-schema:example-record-observed:v1",
+		decodeConfig: (value) => {
+			if (typeof value !== "object" || value === null || Array.isArray(value))
+				throw new Error("example projector config must be an object")
+			return {}
+		},
+		project: (signal) => {
+			const collectionName = stringField(signal, "attribute", "example.collection.name", true)!
+			const sequence = int64Field(signal, "example.record.sequence", true)!
+			return {
+				subject: `${collectionName}/records/${sequence}`,
+				data: {
+					collection: {
+						id: int64Field(signal, "example.collection.id"),
+						name: collectionName,
+					},
+					record: {
+						id: int64Field(signal, "example.record.id"),
+						sequence,
+						title: stringField(signal, "attribute", "example.record.title"),
+						url: stringField(signal, "attribute", "example.record.url"),
+					},
+					actor: {
+						id: int64Field(signal, "example.actor.id"),
+						name: stringField(signal, "attribute", "example.actor.name"),
+					},
+					serviceName: stringField(signal, "resource", "service.name"),
+				},
+			}
+		},
+	})
 
 describe("LocalEventingRuntime", () => {
 	it("records bounded normalization and projection outcomes without signal data", async () =>
@@ -103,13 +178,13 @@ describe("LocalEventingRuntime", () => {
 			}
 			const store = await LocalEventingControlStore.open(dataDir)
 			try {
-				const runtime = new LocalEventingRuntime(store, telemetry)
+				const runtime = new LocalEventingRuntime(store, telemetry, exampleProjectors())
 				runtime.activate(projection())
-				strictEqual(runtime.evaluateOtlp("logs", gitlabIssueCreated).events.length, 1)
+				strictEqual(runtime.evaluateOtlp("logs", exampleRecordObserved).events.length, 1)
 
-				const malformed = structuredClone(gitlabIssueCreated)
+				const malformed = structuredClone(exampleRecordObserved)
 				firstLogRecord(malformed).attributes = firstLogRecord(malformed).attributes.filter(
-					({ key }) => key !== "gitlab.project.path",
+					({ key }) => key !== "example.collection.name",
 				)
 				strictEqual(runtime.evaluateOtlp("logs", malformed).failures.length, 1)
 
@@ -120,39 +195,36 @@ describe("LocalEventingRuntime", () => {
 				ok(operationOutcomes.includes("projection:success"))
 				ok(operationOutcomes.includes("projection:failure"))
 				const serialized = JSON.stringify(observations)
-				strictEqual(serialized.includes("Wire GitLab events"), false)
-				strictEqual(serialized.includes("01K20GITLABISSUE42"), false)
-				strictEqual(serialized.includes("gitlab-issue-created"), false)
+				strictEqual(serialized.includes("Observe example events"), false)
+				strictEqual(serialized.includes("01K20EXAMPLERECORD42"), false)
+				strictEqual(serialized.includes("example-record-observed"), false)
 			} finally {
 				store.close()
 			}
 		}))
 
-	it("normalizes typed GitLab OTLP fields while preserving the existing warehouse encoding", () => {
-		const [signal] = normalizeOtlpLogs(gitlabIssueCreated, "2026-08-07T20:00:00Z")
-		strictEqual(signal?.occurrenceId, "01K20GITLABISSUE42")
+	it("normalizes typed generic OTLP fields while preserving the existing warehouse encoding", () => {
+		const [signal] = normalizeOtlpLogs(exampleRecordObserved, "2026-08-07T20:00:00Z")
+		strictEqual(signal?.occurrenceId, "01K20EXAMPLERECORD42")
 		strictEqual(signal?.identityQuality, "source")
-		strictEqual(signal?.source, "https://gitlab.example.test")
-		deepStrictEqual(signal?.fields.get("attribute:gitlab.issue.iid"), {
+		strictEqual(signal?.source, "https://events.example.test")
+		deepStrictEqual(signal?.fields.get("attribute:example.record.sequence"), {
 			type: "int64",
 			value: "42",
 		})
-		const batches = encodeLogs(gitlabIssueCreated)
+		const batches = encodeLogs(exampleRecordObserved)
 		strictEqual(batches.length, 1)
 		strictEqual(batches[0]?.rowCount, 1)
-		strictEqual(JSON.parse(batches[0]!.ndjson).log_attributes["gitlab.issue.iid"], "42")
+		strictEqual(JSON.parse(batches[0]!.ndjson).log_attributes["example.record.sequence"], "42")
 	})
 
 	it("uses the first nonblank occurrence alias and derives identity when every alias is blank", () => {
-		const aliased = structuredClone(gitlabIssueCreated)
+		const aliased = structuredClone(exampleRecordObserved)
 		const aliasedRecord = firstLogRecord(aliased)
 		aliasedRecord.attributes = [
 			attr("event.id", { stringValue: "   " }),
 			attr("cloudevents.id", { stringValue: " cloud-event-42 " }),
-			attr("gitlab.event.id", { stringValue: "gitlab-event-42" }),
-			...aliasedRecord.attributes.filter(
-				({ key }) => !["event.id", "cloudevents.id", "gitlab.event.id"].includes(key),
-			),
+			...aliasedRecord.attributes.filter(({ key }) => !["event.id", "cloudevents.id"].includes(key)),
 		]
 		const [aliasedSignal] = normalizeOtlpLogs(aliased, "2026-08-07T20:00:00Z")
 		strictEqual(aliasedSignal?.occurrenceId, "cloud-event-42")
@@ -161,12 +233,12 @@ describe("LocalEventingRuntime", () => {
 		const derivedA = structuredClone(aliased)
 		const derivedARecord = firstLogRecord(derivedA)
 		derivedARecord.attributes = derivedARecord.attributes.map((entry) =>
-			["event.id", "cloudevents.id", "gitlab.event.id"].includes(entry.key)
+			["event.id", "cloudevents.id"].includes(entry.key)
 				? attr(entry.key, { stringValue: entry.key === "event.id" ? "" : " \t " })
 				: entry,
 		)
 		const derivedB = structuredClone(derivedA)
-		firstLogRecord(derivedB).body = { stringValue: "A different issue occurrence" }
+		firstLogRecord(derivedB).body = { stringValue: "A different record occurrence" }
 		const [signalA] = normalizeOtlpLogs(derivedA, "2026-08-07T20:00:00Z")
 		const [signalB] = normalizeOtlpLogs(derivedB, "2026-08-07T20:00:00Z")
 		strictEqual(signalA?.identityQuality, "derived")
@@ -179,7 +251,7 @@ describe("LocalEventingRuntime", () => {
 		withDataDir(async (dataDir) => {
 			const store = await LocalEventingControlStore.open(dataDir)
 			try {
-				const runtime = new LocalEventingRuntime(store)
+				const runtime = new LocalEventingRuntime(store, undefined, exampleProjectors())
 				throws(
 					() =>
 						runtime.prepareActivation(
@@ -210,38 +282,38 @@ describe("LocalEventingRuntime", () => {
 		withDataDir(async (dataDir) => {
 			const store = await LocalEventingControlStore.open(dataDir)
 			try {
-				const runtime = new LocalEventingRuntime(store)
+				const runtime = new LocalEventingRuntime(store, undefined, exampleProjectors())
 				strictEqual(runtime.hasActiveSource("otel.log"), false)
 				runtime.activate(projection())
-				const first = runtime.evaluateOtlp("logs", gitlabIssueCreated)
+				const first = runtime.evaluateOtlp("logs", exampleRecordObserved)
 				strictEqual(first.failures.length, 0)
 				strictEqual(first.events.length, 1)
 				deepStrictEqual(first.events[0], {
 					specversion: "1.0",
 					id: first.events[0]!.id,
-					source: "https://gitlab.example.test",
-					type: "dev.maple.gitlab.issue.created.v1",
-					subject: "example/widgets/issues/42",
+					source: "https://events.example.test",
+					type: "dev.maple.example.record.observed.v1",
+					subject: "example/widgets/records/42",
 					time: "2026-08-07T19:42:00.123456789Z",
 					datacontenttype: "application/json",
-					dataschema: "urn:maple:event-schema:gitlab-issue-created:v1",
+					dataschema: "urn:maple:event-schema:example-record-observed:v1",
 					tenantid: "local",
-					projectionid: "gitlab-issue-created",
+					projectionid: "example-record-observed",
 					projectionrevision: 1,
-					projectorid: "gitlab.issue.created",
+					projectorid: "example.record.observed",
 					projectorversion: 1,
-					sourceoccurrenceid: "01K20GITLABISSUE42",
+					sourceoccurrenceid: "01K20EXAMPLERECORD42",
 					sourceidentityquality: "source",
 					data: {
-						project: { id: "7", path: "example/widgets" },
-						issue: {
+						collection: { id: "7", name: "example/widgets" },
+						record: {
 							id: "4200",
-							iid: "42",
-							title: "Wire GitLab events",
-							url: "https://gitlab.example.test/example/widgets/-/issues/42",
+							sequence: "42",
+							title: "Observe example events",
+							url: "https://events.example.test/collections/widgets/records/42",
 						},
-						actor: { id: "9", username: "operator" },
-						serviceName: "gitlab-rails",
+						actor: { id: "9", name: "observer" },
+						serviceName: "example-service",
 					},
 				})
 				const staged = runtime.stage(first.events)
@@ -251,7 +323,7 @@ describe("LocalEventingRuntime", () => {
 					runtime.listStaged().events.map(({ event }) => event),
 					first.events,
 				)
-				const retry = runtime.evaluateOtlp("logs", gitlabIssueCreated)
+				const retry = runtime.evaluateOtlp("logs", exampleRecordObserved)
 				strictEqual(retry.events[0]?.id, first.events[0]?.id)
 				strictEqual(runtime.stage(retry.events).deduplicated, 1)
 				runtime.markReady(staged.eventIds)
@@ -268,27 +340,27 @@ describe("LocalEventingRuntime", () => {
 	it("activates a validated revision without restart and reloads it after restart", async () =>
 		withDataDir(async (dataDir) => {
 			let store = await LocalEventingControlStore.open(dataDir)
-			let runtime = new LocalEventingRuntime(store)
+			let runtime = new LocalEventingRuntime(store, undefined, exampleProjectors())
 			runtime.activate(projection())
-			strictEqual(runtime.evaluateOtlp("logs", gitlabIssueCreated).events.length, 1)
+			strictEqual(runtime.evaluateOtlp("logs", exampleRecordObserved).events.length, 1)
 			runtime.activate(
 				projection({
 					revision: 2,
 					selector: {
 						op: "eq",
 						field: { namespace: "signal", key: "event.name", type: "string" },
-						value: { type: "string", value: "gitlab.issue.closed" },
+						value: { type: "string", value: "example.record.closed" },
 					},
 				}),
 			)
-			strictEqual(runtime.evaluateOtlp("logs", gitlabIssueCreated).events.length, 0)
+			strictEqual(runtime.evaluateOtlp("logs", exampleRecordObserved).events.length, 0)
 			store.close()
 
 			store = await LocalEventingControlStore.open(dataDir)
 			try {
-				runtime = new LocalEventingRuntime(store)
+				runtime = new LocalEventingRuntime(store, undefined, exampleProjectors())
 				strictEqual(runtime.listActive()[0]?.revision, 2)
-				strictEqual(runtime.evaluateOtlp("logs", gitlabIssueCreated).events.length, 0)
+				strictEqual(runtime.evaluateOtlp("logs", exampleRecordObserved).events.length, 0)
 			} finally {
 				store.close()
 			}

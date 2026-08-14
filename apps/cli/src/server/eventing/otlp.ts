@@ -243,7 +243,7 @@ const sourceUri = (resource: NormalizedAttributes, record: NormalizedAttributes)
 }
 
 const sourceOccurrenceId = (record: NormalizedAttributes): string | null => {
-	for (const key of ["event.id", "cloudevents.id", "gitlab.event.id"]) {
+	for (const key of ["event.id", "cloudevents.id"]) {
 		const value = stringAttribute(record, key)?.trim()
 		if (value) return boundedIdentity(value, "source")
 	}

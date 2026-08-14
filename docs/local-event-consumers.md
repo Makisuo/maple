@@ -2,9 +2,9 @@
 
 Status: version 1 durable downstream-consumer boundary for the Maple Local event outbox.
 
-This protocol lets a local bridge deliver ready Maple CloudEvents without destructive reads or a
-second delivery database. It is intentionally transport-neutral: Maple does not send Matrix events,
-store Matrix credentials, or choose rooms.
+This protocol lets a local consumer deliver ready Maple CloudEvents without destructive reads or a
+second delivery database. It is intentionally transport-neutral: Maple does not select a downstream
+transport, store downstream credentials, or choose delivery destinations.
 
 ## Credentials
 
@@ -30,7 +30,7 @@ POST /local/eventing/consumers
 Content-Type: application/json
 X-Maple-Maintenance-Token: <maintenance token>
 
-{"consumerId":"matrix","startAt":"beginning"}
+{"consumerId":"automation","startAt":"beginning"}
 ```
 
 `startAt` is exact:
@@ -48,7 +48,7 @@ POST /local/eventing/consumers/disable
 Content-Type: application/json
 X-Maple-Maintenance-Token: <maintenance token>
 
-{"consumerId":"matrix"}
+{"consumerId":"automation"}
 ```
 
 Disabling clears any active lease and removes that cursor from the retention quorum. It does not
@@ -63,14 +63,14 @@ POST /local/eventing/claims
 Content-Type: application/json
 X-Maple-Event-Consumer-Token: <consumer token>
 
-{"consumerId":"matrix","limit":100,"leaseSeconds":60}
+{"consumerId":"automation","limit":100,"leaseSeconds":60}
 ```
 
 A non-empty response has this shape:
 
 ```json
 {
-	"consumerId": "matrix",
+	"consumerId": "automation",
 	"leaseToken": "<64 lowercase hexadecimal characters>",
 	"leaseExpiresAt": "2026-08-13T16:01:00.000Z",
 	"throughSequence": 42,
@@ -80,7 +80,7 @@ A non-empty response has this shape:
 			"event": {
 				"specversion": "1.0",
 				"id": "sha256:...",
-				"type": "dev.maple.gitlab.pipeline.completed.v1"
+				"type": "dev.maple.example.record.observed.v1"
 			},
 			"stagedAt": "2026-08-13T16:00:00.000Z",
 			"readyAt": "2026-08-13T16:00:00.010Z"
@@ -102,18 +102,18 @@ POST /local/eventing/acks
 Content-Type: application/json
 X-Maple-Event-Consumer-Token: <consumer token>
 
-{"consumerId":"matrix","leaseToken":"<claim token>","throughSequence":42}
+{"consumerId":"automation","leaseToken":"<claim token>","throughSequence":42}
 ```
 
 Partial, extended, expired, missing, and wrong-token acknowledgements return `409`. Success returns:
 
 ```json
-{ "consumerId": "matrix", "acknowledgedThrough": 42, "prunedEvents": 0 }
+{ "consumerId": "automation", "acknowledgedThrough": 42, "prunedEvents": 0 }
 ```
 
-Claims are at-least-once. A bridge crash after a downstream send and before acknowledgement causes
-re-delivery after lease expiry. A Matrix bridge must therefore derive its Matrix transaction ID from
-the immutable Maple CloudEvent `id`; retrying the same transaction ID makes that ambiguity harmless.
+Claims are at-least-once. A consumer crash after a downstream send and before acknowledgement causes
+re-delivery after lease expiry. A consumer must therefore use the immutable Maple CloudEvent `id` as
+its downstream idempotency key whenever the destination supports one.
 
 ## Retention, capacity, and checkpoints
 

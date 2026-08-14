@@ -43,8 +43,8 @@ through one event boundary:
   state, and request deliveries;
 - PlanetScale receives signed webhooks and performs provider-specific work;
 - Maple Local accepts OTLP records and writes them directly to chDB;
-- future automation needs individual facts, such as a GitLab issue-created
-  signal, to become events that agents or other consumers can act on.
+- future automation needs individual facts, such as a source record being
+  observed, to become events that agents or other consumers can act on.
 
 Using the alert scheduler for the last case would give it the wrong semantics.
 A windowed query answers a question about a set of stored records and normally
@@ -89,7 +89,8 @@ with chDB retained behind it for analytics and aggregate alert evaluation.
   Maple component.
 - Loading arbitrary third-party code into a running Maple process. A "plugin" in
   this document is a compile-time registered module behind a stable interface.
-- Defining sink delivery, Matrix behavior, agent authorization, or action policy.
+- Defining sink delivery, consumer-specific behavior, agent authorization, or
+  action policy.
 - Replacing the Collector's routing, filtering, queueing, or authentication.
 - Replacing scheduled queries for rates, percentiles, absence, threshold state,
   or other aggregate alerts.
@@ -132,9 +133,9 @@ eventing core.
 production from downstream delivery.
 
 **Event consumer**
-: A downstream component interested in one or more event types. Webhooks, Matrix,
-agents, issue creation, and existing provider responses are consumer concerns,
-not selector or projector concerns.
+: A downstream component interested in one or more event types. Webhooks,
+automation workers, agents, and provider responses are consumer concerns, not
+selector or projector concerns.
 
 ## Architecture
 
@@ -160,7 +161,7 @@ flowchart LR
     AlertProjector --> Outbox
 ```
 
-The upper path handles occurrences such as "this GitLab issue was created". The
+The upper path handles occurrences such as "this source record was observed". The
 lower path handles conclusions such as "the error rate has remained above five
 percent for ten minutes". Both can ultimately notify the same consumers without
 pretending they have the same input or timing semantics.
@@ -175,7 +176,7 @@ The architecture has four replaceable boundaries:
 4. **Consumers** subscribe to event types downstream of the durable outbox.
 
 The eventing core owns the contracts and deterministic behavior. It does not know
-about PlanetScale, GitLab, Matrix, chDB, PostgreSQL, Cloudflare Queues, or HTTP.
+about particular providers, consumers, databases, queues, or network transports.
 
 PlanetScale is therefore one installed composition, not the model itself. Its
 module can register a webhook source adapter and PlanetScale-specific projectors.
@@ -364,11 +365,12 @@ The configuration record is data. Source adapters and projector implementations
 are registered code. This is how matching remains configurable without making
 authentication, provider semantics, or executable code user-supplied.
 
-For example, the first GitLab projection uses the following concrete contract:
+For example, an installed source adapter and projector can use this neutral
+contract:
 
 ```json
 {
-	"id": "gitlab-issue-created",
+	"id": "example-record-observed",
 	"revision": 1,
 	"enabled": true,
 	"tenantId": "local",
@@ -379,16 +381,16 @@ For example, the first GitLab projection uses the following concrete contract:
 			{
 				"op": "eq",
 				"field": { "namespace": "signal", "key": "event.name", "type": "string" },
-				"value": { "type": "string", "value": "gitlab.issue.created" }
+				"value": { "type": "string", "value": "example.record.observed" }
 			},
 			{
 				"op": "gte",
-				"field": { "namespace": "attribute", "key": "gitlab.issue.iid", "type": "int64" },
+				"field": { "namespace": "attribute", "key": "record.sequence", "type": "int64" },
 				"value": { "type": "int64", "value": "1" }
 			}
 		]
 	},
-	"projector": { "id": "gitlab.issue.created", "version": 1, "config": {} },
+	"projector": { "id": "example.record", "version": 1, "config": {} },
 	"activeFrom": "2026-08-07T00:00:00Z"
 }
 ```
@@ -413,8 +415,8 @@ interface SignalProjector {
 ```
 
 A projector must be pure, deterministic, bounded, versioned, and free of I/O. It
-does not create issues, call Matrix, send notifications, or mutate provider
-state. It produces a factual event payload conforming to its declared schema.
+does not invoke downstream systems, send notifications, or mutate source state.
+It produces a factual event payload conforming to its declared schema.
 
 The registry may include a bounded generic field-mapping projector for
 operator-defined factual events. Provider modules register semantic projectors
@@ -429,11 +431,11 @@ Produced events use CloudEvents 1.0 structured representation:
 	"specversion": "1.0",
 	"id": "sha256:...",
 	"source": "urn:maple:source:otel:local",
-	"type": "dev.maple.gitlab.issue.created.v1",
-	"subject": "project/example/issues/42",
+	"type": "dev.maple.example.record.observed.v1",
+	"subject": "records/42",
 	"time": "2026-08-07T19:42:00.000000000Z",
 	"datacontenttype": "application/json",
-	"dataschema": "urn:maple:event-schema:gitlab-issue:v1",
+	"dataschema": "urn:maple:event-schema:example-record:v1",
 	"tenantid": "...",
 	"projectionid": "...",
 	"projectionrevision": 3,
@@ -579,7 +581,7 @@ The architecture uses precise, layered guarantees rather than the blanket phrase
 
 A projection intended to trigger external automation must require
 `identityQuality: "source"` unless an operator explicitly accepts weaker
-semantics. GitLab event instrumentation should therefore furnish a stable event
+semantics. An installed source adapter should therefore furnish a stable event
 or delivery identifier as part of its source contract.
 
 ## chDB responsibilities
@@ -745,8 +747,8 @@ already on the issue-222 branch.
 3. Maple Local adds ingest-time projection behind an explicit feature/config
    gate. With no active projections, observable ingest and chDB behavior remain
    unchanged.
-4. A GitLab issue-created OTLP fixture proves the end-to-end source identity,
-   typed selector, projector, retry deduplication, and durable outbox path.
+4. A neutral OTLP record fixture proves the end-to-end source identity, typed
+   selector, projector, retry deduplication, and durable outbox path.
 5. PlanetScale is adapted behind the same source/projector interfaces while its
    existing externally visible behavior remains intact. A compare/dual-observe
    period should precede removal of direct hard-coded handling.
@@ -784,15 +786,16 @@ sort key.
 - Stage matching events, insert telemetry, mark events ready, and acknowledge.
 - Prove that the live path executes no chDB `SELECT` and adds no scheduler.
 
-### Slice 4 — First vertical: GitLab event to durable Maple event
+### Slice 4 — Example extension: source record to durable Maple event
 
-- Capture the real GitLab OTLP field contract and stable occurrence identity.
-- Register its field catalog and issue-event projector.
-- Configure an issue-created projection without hard-coded selector values.
+- Define a source adapter's OTLP field contract and stable occurrence identity.
+- Register its field catalog and a pure semantic projector outside the core.
+- Configure a record-observed projection without hard-coded selector values in
+  the evaluator.
 - Verify duplicate source deliveries create one logical outbox event.
 
-This slice stops at the outbox. Matrix and agent-action behavior are a downstream
-goal using the produced typed event.
+This slice stops at the outbox. Transport and agent-action behavior are
+downstream concerns using the produced typed event.
 
 ### Slice 5 — Existing producer convergence
 
@@ -811,9 +814,8 @@ goal using the produced typed event.
 
 The first usable implementation is complete when all of the following are true:
 
-1. A configured GitLab issue-created OTLP signal is matched before chDB encoding
-   and produces a schema-valid CloudEvent while the telemetry record is still
-   stored normally.
+1. A configured OTLP record signal is matched before chDB encoding and produces
+   a schema-valid CloudEvent while the telemetry record is still stored normally.
 2. Re-delivery of a source-stable occurrence produces the same event ID and one
    logical outbox record.
 3. A nonmatching signal performs no warehouse read and creates no event.
@@ -845,18 +847,16 @@ FULL`. While ingest is quiesced, backup first completes and verifies a blocking
   backup and binds its byte count, SHA-256 digest, schema version, and row counts
   in the checkpoint manifest. Version-1 checkpoints remain readable and restore
   an empty control store.
-- The first GitLab instrumentation contract is an OTLP log whose LogRecord
-  `eventName` is `gitlab.issue.created`. `event.id` is the preferred stable
-  source occurrence identifier; `cloudevents.id` and `gitlab.event.id` are
-  accepted aliases. The semantic projector requires `gitlab.project.path` and
-  integer `gitlab.issue.iid`; it also recognizes project/issue IDs, title, URL,
-  and actor attributes. GitLab itself does not synthesize this contract merely
-  because Maple is running: the emitting instrumentation or adapter must attach
-  those fields.
+- The reference OTLP extension example uses a LogRecord event name such as
+  `example.record.observed`. An installed adapter defines its own accepted stable
+  occurrence identifiers, field catalog, validation rules, and semantic
+  projector. The eventing core neither synthesizes provider fields nor assigns
+  provider meaning to arbitrary attributes.
 - Maple-owned event types use `dev.maple.*.v1`; schemas use
-  `urn:maple:event-schema:*:v1`. The current vertical emits
-  `dev.maple.gitlab.issue.created.v1` with
-  `urn:maple:event-schema:gitlab-issue-created:v1`.
+  `urn:maple:event-schema:*:v1`. Installed projectors reserve their concrete
+  event type and schema names; neutral fixtures use
+  `dev.maple.example.record.observed.v1` with
+  `urn:maple:event-schema:example-record:v1`.
 - Attribute strings are limited to 16 KiB, source/event identities to 256
   characters (long stable inputs are represented by a SHA-256 URN), each
   attribute namespace to 256 entries,
