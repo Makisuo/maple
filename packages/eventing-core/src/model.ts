@@ -254,7 +254,7 @@ export const MapleCloudEventSchema = Schema.Struct({
 	projectorid: NonEmptyIdentifier,
 	projectorversion: Schema.Int.check(Schema.isGreaterThan(0)),
 	sourceoccurrenceid: Schema.optionalKey(NonEmptyIdentifier),
-	sourceidentityquality: Schema.optionalKey(Schema.Literal("source", "derived", "none")),
+	sourceidentityquality: Schema.optionalKey(Schema.Literals(["source", "derived", "none"])),
 	data: Schema.Unknown,
 }).annotate({ identifier: "MapleCloudEvent" })
 

@@ -155,7 +155,7 @@
 				},
 				"sourceidentityquality": {
 					"type": "string",
-					"enum": ["source"]
+					"enum": ["source", "derived", "none"]
 				},
 				"data": {}
 			},
