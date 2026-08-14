@@ -206,3 +206,37 @@ describe("buildSessionMetaRow analytics fields", () => {
 		expect(row.group_id).toBe("")
 	})
 })
+
+// `maple.session.replay_format` tells the web player which engine to mount
+// before it downloads a chunk. The browser SDK can only ever produce rrweb; the
+// mobile SDKs stamp "video". It must be on BOTH the active and ended rows:
+// session_replays is a ReplacingMergeTree that replaces the whole row at the
+// latest Version, so a marker emitted only on the active row would be destroyed
+// by the ended row and the player would silently fall back to rrweb.
+describe("buildSessionMetaRow replay format marker", () => {
+	it("stamps rrweb on the active row", () => {
+		const row = buildSessionMetaRow({ ...base, status: "active", recorded: true })
+		const attrs = row.resource_attributes as Record<string, string>
+		expect(attrs["maple.session.replay_format"]).toBe("rrweb")
+	})
+
+	it("stamps rrweb on the ended row too, so the merge cannot drop it", () => {
+		const row = buildSessionMetaRow({
+			...base,
+			status: "ended",
+			recorded: true,
+			environment: "production",
+			traceIds: ["trace-1"],
+		})
+		const attrs = row.resource_attributes as Record<string, string>
+		expect(attrs["maple.session.replay_format"]).toBe("rrweb")
+	})
+
+	it("stamps it even when no replay was recorded", () => {
+		// A metadata-only session still describes what it *would* have recorded, so
+		// the attribute stays uniform across every row this builder emits.
+		const row = buildSessionMetaRow({ ...base, status: "active", recorded: false })
+		const attrs = row.resource_attributes as Record<string, string>
+		expect(attrs["maple.session.replay_format"]).toBe("rrweb")
+	})
+})
