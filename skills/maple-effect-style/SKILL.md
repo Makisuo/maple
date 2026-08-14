@@ -47,7 +47,7 @@ Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
 
 The default import resolves to the server build under Node.js. Import `@maple-dev/effect-sdk/server` explicitly when needed.
 
-If `endpoint` is omitted, the server layer auto-detects it from `MAPLE_ENDPOINT` (falling back to `OTEL_EXPORTER_OTLP_ENDPOINT`, then the public Maple ingest). The **ingest key** is what gates export: when neither `ingestKey` nor `MAPLE_INGEST_KEY` resolves, the layer is a no-op and local dev runs without exporting. Inline the key when you want telemetry to flow regardless of env (matches the rest of the maple-onboard inline-key pattern).
+If `endpoint` is omitted, the server layer auto-detects it from `MAPLE_ENDPOINT` (falling back to `OTEL_EXPORTER_OTLP_ENDPOINT`, then the public Maple ingest). `Maple.layer` always exports — a missing ingest key does not disable it, which is what keeps keyless local-mode and self-hosted-collector setups working. Inline the key when you want telemetry to flow regardless of env (matches the rest of the maple-onboard inline-key pattern). `MapleFlush.make` and the Cloudflare `make()` differ: those no-op without a key.
 
 The server layer also auto-fills `vcs.ref.head.revision` from `COMMIT_SHA` / `RAILWAY_GIT_COMMIT_SHA` / `VERCEL_GIT_COMMIT_SHA` / `CF_PAGES_COMMIT_SHA` / `RENDER_GIT_COMMIT` (first match wins). For `vcs.repository.url.full`, use the `repositoryUrl` option or `MAPLE_REPOSITORY_URL` — don't hand-write the attribute.
 

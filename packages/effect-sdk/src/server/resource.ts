@@ -8,7 +8,7 @@ import { getAutoPlatformAttributes } from "./platform.js"
  * `OTEL_EXPORTER_OTLP_ENDPOINT` — so end users only need to supply an ingest
  * key, not an URL.
  */
-const DEFAULT_MAPLE_ENDPOINT = "https://ingest.maple.dev"
+export const DEFAULT_MAPLE_ENDPOINT = "https://ingest.maple.dev"
 
 const stringOrUndefined = (value: unknown): string | undefined =>
 	typeof value === "string" && value.length > 0 ? value : undefined

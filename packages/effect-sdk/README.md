@@ -10,9 +10,11 @@ npm install @maple-dev/effect-sdk effect
 
 ## Server
 
-Auto-detects commit SHA and deployment environment from common platform env vars (Railway, Vercel, Cloudflare Pages, Render). Returns a no-op layer when no ingest key is configured, making it safe for local development.
+Auto-detects commit SHA and deployment environment from common platform env vars (Railway, Vercel, Cloudflare Pages, Render).
 
-The endpoint is not the disable signal — it defaults to the public Maple ingest (`https://ingest.maple.dev`), so you only need to supply a key.
+`Maple.layer` always exports. The endpoint defaults to the public Maple ingest (`https://ingest.maple.dev`), so supplying an ingest key is usually all you need. A missing key does **not** switch export off — that keeps keyless setups working against a local `maple start` sink or your own OTLP collector. Keyless against the public ingest is the one combination that can't work (it 401s), and it logs a one-shot warning.
+
+> `MapleFlush.make` and the Cloudflare `make()` behave differently: they **do** no-op when no ingest key resolves. Reach for those if you want telemetry to disable itself automatically.
 
 ```typescript
 import { Maple } from "@maple-dev/effect-sdk/server"
@@ -29,7 +31,7 @@ Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
 
 | Variable                      | Description                                                     |
 | ----------------------------- | --------------------------------------------------------------- |
-| `MAPLE_INGEST_KEY`            | Maple ingest key. **Without it the SDK is a no-op.**             |
+| `MAPLE_INGEST_KEY`            | Maple ingest key. Required by the public ingest                  |
 | `MAPLE_ENDPOINT`              | Ingest endpoint URL. Defaults to `https://ingest.maple.dev`      |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint fallback, honored when `MAPLE_ENDPOINT` is unset        |
 | `MAPLE_ENVIRONMENT`           | Deployment environment override                                  |
@@ -235,7 +237,7 @@ Both server and client layers accept these options:
 | ----------------------- | ---------------------------------------------- | ------------------------------------------------------------- |
 | `serviceName`           | Yes                                            | Service name reported in telemetry                            |
 | `endpoint`              | No (server: defaults) / Yes (client)           | Maple ingest endpoint URL                                     |
-| `ingestKey`             | No — but the SDK no-ops without one            | Maple ingest key                                              |
+| `ingestKey`             | Required by the public ingest                  | Maple ingest key. Flushable presets no-op without one         |
 | `serviceVersion`        | No                                             | Override auto-detected commit SHA                             |
 | `serviceNamespace`      | No                                             | Logical group, emitted as `service.namespace`                 |
 | `repositoryUrl`         | No (server / Cloudflare only)                  | Repository URL, emitted as `vcs.repository.url.full`          |

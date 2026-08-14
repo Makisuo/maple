@@ -39,7 +39,9 @@ The default import (`@maple-dev/effect-sdk`) resolves to the server build under 
 import { Maple } from "@maple-dev/effect-sdk/server"
 ```
 
-Set `MAPLE_INGEST_KEY` in your environment and the SDK picks it up automatically. If it is unset, the layer becomes a no-op — your app runs without exporting telemetry, which is the right default for local dev. `MAPLE_ENDPOINT` is optional: it defaults to the public Maple ingest, and it is not the disable signal.
+Set `MAPLE_INGEST_KEY` in your environment and the SDK picks it up automatically. `MAPLE_ENDPOINT` is optional — it defaults to the public Maple ingest.
+
+The server layer always exports; there is no disable switch. A missing ingest key does not turn export off, so a keyless app pointed at a local `maple start` sink or your own OTLP collector still ships telemetry. The one combination that cannot work is keyless against the public ingest, which rejects unauthenticated writes with a 401 — the SDK logs a one-shot warning if you land there. For local dev that exports nothing at all, either point `MAPLE_ENDPOINT` at a sink you control, or use `MapleFlush.make`, which does no-op without a key.
 
 ## Environment Variable Auto-Detection
 
@@ -47,7 +49,7 @@ The server layer resolves configuration from environment variables in this order
 
 **Ingest endpoint:** `MAPLE_ENDPOINT` → `OTEL_EXPORTER_OTLP_ENDPOINT` → `https://ingest.maple.dev`
 
-**Ingest key:** `MAPLE_INGEST_KEY` — when this resolves to nothing, the layer is a no-op
+**Ingest key:** `MAPLE_INGEST_KEY` — sent as a bearer token; omitted from the request when unset
 
 **Commit SHA** (first match wins):
 

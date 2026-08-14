@@ -3,10 +3,11 @@ import { Effect, Layer } from "effect"
 import { afterEach, expect, vi } from "vitest"
 import { layer } from "./layer.js"
 
-// `Maple.layer` had no tests, which is how the "no-op when no endpoint" guard
-// survived long after `resolveResource` started defaulting the endpoint — the
-// branch was unreachable and nothing noticed. These cover both sides of the
-// real disable rule: no ingest key resolved → no-op.
+// `Maple.layer` had no tests, which is how a dead `if (!resolved.endpoint)`
+// guard survived long after `resolveResource` started defaulting the endpoint.
+// These pin the real contract: this layer ALWAYS exports. A missing ingest key
+// is not a disable signal — keyless export to a local `maple start` sink or a
+// self-hosted collector is supported, and silently no-op'ing would break it.
 
 const serviceKeys = async (config: Parameters<typeof layer>[0]): Promise<Array<string>> => {
 	const context = await Effect.runPromise(Effect.scoped(Layer.build(layer(config))))
@@ -18,20 +19,6 @@ const serviceKeys = async (config: Parameters<typeof layer>[0]): Promise<Array<s
 describe("Maple.layer", () => {
 	afterEach(() => {
 		vi.restoreAllMocks()
-	})
-
-	it("no-ops when no ingest key is configured", async () => {
-		const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {})
-		const fetchSpy = vi.spyOn(globalThis, "fetch")
-
-		const keys = await serviceKeys({ serviceName: "unit-test", endpoint: "https://collector.test" })
-
-		expect(keys).toEqual([])
-		expect(fetchSpy).not.toHaveBeenCalled()
-		// One-shot notice so a keyless local run says why it is silent.
-		expect(infoSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain(
-			"no ingest key configured",
-		)
 	})
 
 	it("installs tracer, logger, and exporter when an ingest key is configured", async () => {
@@ -46,11 +33,26 @@ describe("Maple.layer", () => {
 		expect(keys).toContain("effect/observability/OtlpExporter/Flusher")
 	})
 
-	it("does not treat a missing endpoint as a disable signal", async () => {
-		// The endpoint always resolves (public ingest is the fallback), so a key
-		// with no endpoint must still produce a live layer.
-		const keys = await serviceKeys({ serviceName: "unit-test", ingestKey: "secret" })
+	it("still exports to a custom endpoint with no ingest key", async () => {
+		// The `examples/effect-todo` shape: local-mode sink, no key. Disabling
+		// this was a real regression, so it gets a test of its own.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		const keys = await serviceKeys({ serviceName: "unit-test", endpoint: "http://127.0.0.1:4318" })
 
 		expect(keys).toContain("effect/Tracer")
+		// A self-hosted collector taking unauthenticated writes is legitimate —
+		// no scolding.
+		expect(warnSpy).not.toHaveBeenCalled()
+	})
+
+	it("warns once when keyless against the public ingest, but still builds", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		// No endpoint → defaults to the public ingest, which 401s without a key.
+		const keys = await serviceKeys({ serviceName: "unit-test" })
+
+		expect(keys).toContain("effect/Tracer")
+		expect(warnSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain("401")
 	})
 })
