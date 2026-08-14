@@ -234,6 +234,8 @@ export interface MapleCloudEvent {
 	readonly projectionrevision: number
 	readonly projectorid: string
 	readonly projectorversion: number
+	readonly sourceoccurrenceid?: string
+	readonly sourceidentityquality?: "source" | "derived" | "none"
 	readonly data: JsonValue
 }
 
@@ -251,6 +253,8 @@ export const MapleCloudEventSchema = Schema.Struct({
 	projectionrevision: Schema.Int.check(Schema.isGreaterThan(0)),
 	projectorid: NonEmptyIdentifier,
 	projectorversion: Schema.Int.check(Schema.isGreaterThan(0)),
+	sourceoccurrenceid: Schema.optionalKey(NonEmptyIdentifier),
+	sourceidentityquality: Schema.optionalKey(Schema.Literal("source", "derived", "none")),
 	data: Schema.Unknown,
 }).annotate({ identifier: "MapleCloudEvent" })
 

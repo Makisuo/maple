@@ -196,6 +196,8 @@ describe("LocalEventingRuntime", () => {
 					projectionrevision: 1,
 					projectorid: "gitlab.issue.created",
 					projectorversion: 1,
+					sourceoccurrenceid: "01K20GITLABISSUE42",
+					sourceidentityquality: "source",
 					data: {
 						project: { id: "7", path: "platform/maple" },
 						issue: {

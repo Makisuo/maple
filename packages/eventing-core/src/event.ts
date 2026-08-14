@@ -142,6 +142,8 @@ export const makeCloudEvent = (input: {
 		projectionrevision: input.projection.revision,
 		projectorid: input.projectorId,
 		projectorversion: input.projectorVersion,
+		sourceoccurrenceid: input.signal.occurrenceId,
+		sourceidentityquality: input.signal.identityQuality,
 		data: input.data,
 	}).event
 }

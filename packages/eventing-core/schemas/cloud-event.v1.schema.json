@@ -139,6 +139,24 @@
 						}
 					]
 				},
+				"sourceoccurrenceid": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"sourceidentityquality": {
+					"type": "string",
+					"enum": ["source"]
+				},
 				"data": {}
 			},
 			"required": [

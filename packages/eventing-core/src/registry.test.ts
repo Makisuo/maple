@@ -7,6 +7,7 @@ import {
 	MAX_CLOUD_EVENT_BYTES,
 	ProjectorRegistry,
 	SignalSourceRegistry,
+	validateMapleCloudEvent,
 	type NormalizedSignal,
 	type SignalProjectionSpec,
 } from "./index"
@@ -117,8 +118,20 @@ describe("CompiledProjectionRegistry", () => {
 			type: "dev.maple.gitlab.issue.created.v1",
 			subject: "project/example/issues/42",
 			projectionrevision: 3,
+			sourceoccurrenceid: "event-123",
+			sourceidentityquality: "source",
 			data: signal().data,
 		})
+	})
+
+	it("validates historical CloudEvents that predate source identity extensions", () => {
+		const registry = CompiledProjectionRegistry.compile([projection()], sources(), projectors())
+		const event = registry.evaluate(signal()).events[0]!
+		const { sourceoccurrenceid: _occurrence, sourceidentityquality: _quality, ...historical } = event
+		const validated = validateMapleCloudEvent(historical).event
+		expect(validated.id).toBe(event.id)
+		expect(validated.sourceoccurrenceid).toBeUndefined()
+		expect(validated.sourceidentityquality).toBeUndefined()
 	})
 
 	it("runs every matching projection from one immutable registry snapshot", () => {
