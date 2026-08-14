@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-vi.mock("./session", () => ({
+vi.mock("../session/session", () => ({
 	markActivity: vi.fn(),
 	noteNavigation: vi.fn(),
 }))
-vi.mock("./replay/transport", () => ({ postSessionEvents: vi.fn(async () => {}) }))
+vi.mock("../platform/transport", () => ({ postSessionEvents: vi.fn(async () => {}) }))
 
 const { resetSinkForTests, startEventSink } = await import("./events-sink")
 

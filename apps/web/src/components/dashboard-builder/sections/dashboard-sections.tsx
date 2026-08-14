@@ -75,10 +75,7 @@ export function DashboardSections({
 	// Resolved as a derivation, not an effect: a `?widget=` deep link has to
 	// force its section open *before* first paint, or the target tile mounts
 	// collapsed, unmounts, and remounts — firing its query twice.
-	const view = useMemo(
-		() => resolveSectionView(sections, widgets, search),
-		[sections, widgets, search],
-	)
+	const view = useMemo(() => resolveSectionView(sections, widgets, search), [sections, widgets, search])
 
 	const rootWidgets = byContainer.get(ROOT_CONTAINER_KEY) ?? []
 
@@ -96,18 +93,15 @@ export function DashboardSections({
 			{measured && (
 				<>
 					{rootWidgets.length > 0 && (
-						<DashboardGrid
-							widgets={rootWidgets}
-							width={width}
-							tier={tier}
-							editable={editable}
-						/>
+						<DashboardGrid widgets={rootWidgets} width={width} tier={tier} editable={editable} />
 					)}
 
 					{sections.map((section, index) => {
-						const activeTabId = view.activeTabs.get(section.id) ?? section.tabs[0]?.id ?? section.id
+						const activeTabId =
+							view.activeTabs.get(section.id) ?? section.tabs[0]?.id ?? section.id
 						const tabWidgets =
-							byContainer.get(containerKeyFor({ sectionId: section.id, tabId: activeTabId })) ?? []
+							byContainer.get(containerKeyFor({ sectionId: section.id, tabId: activeTabId })) ??
+							[]
 						return (
 							<DashboardSectionView
 								key={section.id}
@@ -117,7 +111,8 @@ export function DashboardSections({
 									widgets.filter((widget) => widget.sectionId === section.id).length
 								}
 								widgetCountInTab={(tabId) =>
-									(byContainer.get(containerKeyFor({ sectionId: section.id, tabId })) ?? []).length
+									(byContainer.get(containerKeyFor({ sectionId: section.id, tabId })) ?? [])
+										.length
 								}
 								activeTabId={activeTabId}
 								collapsed={view.collapsed.has(section.id)}

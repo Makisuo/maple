@@ -20,14 +20,14 @@ vi.mock("./capture/console", () => ({
 }))
 vi.mock("./capture/network", () => ({ installNetworkCapture: () => () => {} }))
 
-vi.mock("../session", () => ({
+vi.mock("../session/session", () => ({
 	markActivity: vi.fn(),
 	noteNavigation: vi.fn(),
 }))
-vi.mock("./transport", () => ({ postSessionEvents: vi.fn(async () => {}) }))
+vi.mock("../platform/transport", () => ({ postSessionEvents: vi.fn(async () => {}) }))
 
 const { startEventCapture } = await import("./events")
-const { getActiveSink, resetSinkForTests } = await import("../events-sink")
+const { getActiveSink, resetSinkForTests } = await import("../events/events-sink")
 
 const CONFIG = {
 	endpoint: "https://ingest.test",

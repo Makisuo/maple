@@ -1,10 +1,6 @@
-import { getActiveSink } from "./events-sink"
-import { postSessionMetaRow } from "./meta-row"
-import {
-	type SessionLifecycleHandle,
-	type SessionLifecycleOptions,
-	startSessionLifecycle,
-} from "./session-lifecycle"
+import { getActiveSink } from "../events/events-sink"
+import { postSessionMetaRow } from "../events/meta-row"
+import { type SessionLifecycleHandle, type SessionLifecycleOptions, startSessionLifecycle } from "./lifecycle"
 
 export interface MetadataSessionOptions extends SessionLifecycleOptions {
 	readonly endpoint: string

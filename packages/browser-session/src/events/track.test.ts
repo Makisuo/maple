@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-vi.mock("./session", () => ({
+vi.mock("../session/session", () => ({
 	markActivity: vi.fn(),
 	noteNavigation: vi.fn(),
 }))
 const postSessionEvents = vi.fn(async () => {})
-vi.mock("./replay/transport", () => ({ postSessionEvents }))
+vi.mock("../platform/transport", () => ({ postSessionEvents }))
 
 const { track } = await import("./track")
 const { resetSinkForTests, startEventSink } = await import("./events-sink")
-const { configurePrivacy, resetConsentForTests, setConsent } = await import("./consent")
-const { markActivity } = await import("./session")
+const { configurePrivacy, resetConsentForTests, setConsent } = await import("../identity/consent")
+const { markActivity } = await import("../session/session")
 
 const CONFIG = {
 	endpoint: "https://ingest.test",

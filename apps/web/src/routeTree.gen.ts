@@ -8,1432 +8,1420 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as AccountRouteImport } from './routes/account'
-import { Route as ChatRouteImport } from './routes/chat'
-import { Route as CliLoginRouteImport } from './routes/cli-login'
-import { Route as ConnectorsRouteImport } from './routes/connectors'
-import { Route as DeveloperRouteImport } from './routes/developer'
-import { Route as FlowLabRouteImport } from './routes/flow-lab'
-import { Route as InfraBenchRouteImport } from './routes/infra-bench'
-import { Route as IntegrationsRouteImport } from './routes/integrations'
-import { Route as LogsBenchRouteImport } from './routes/logs-bench'
-import { Route as McpRouteImport } from './routes/mcp'
-import { Route as McpAuthorizeRouteImport } from './routes/mcp-authorize'
-import { Route as NodeLabRouteImport } from './routes/node-lab'
-import { Route as OrgRequiredRouteImport } from './routes/org-required'
-import { Route as OverviewBenchRouteImport } from './routes/overview-bench'
-import { Route as QueryBuilderLabRouteImport } from './routes/query-builder-lab'
-import { Route as QuickStartRouteImport } from './routes/quick-start'
-import { Route as SelectPlanRouteImport } from './routes/select-plan'
-import { Route as ServiceDetailBenchRouteImport } from './routes/service-detail-bench'
-import { Route as ServiceMapRouteImport } from './routes/service-map'
-import { Route as ServiceMapBenchRouteImport } from './routes/service-map-bench'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as SignInRouteImport } from './routes/sign-in'
-import { Route as SignUpRouteImport } from './routes/sign-up'
-import { Route as TimelineLabRouteImport } from './routes/timeline-lab'
-import { Route as WidgetLabRouteImport } from './routes/widget-lab'
-import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
-import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
-import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
-import { Route as AnalyticsIndexRouteImport } from './routes/analytics/index'
-import { Route as AnomaliesIndexRouteImport } from './routes/anomalies/index'
-import { Route as AnomaliesIncidentIdRouteImport } from './routes/anomalies/$incidentId'
-import { Route as DashboardsIndexRouteImport } from './routes/dashboards/index'
-import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards/$dashboardId'
-import { Route as DashboardsTemplatesRouteImport } from './routes/dashboards/templates'
-import { Route as ErrorsIndexRouteImport } from './routes/errors/index'
-import { Route as ErrorsErrorTypeRouteImport } from './routes/errors/$errorType'
-import { Route as InfraIndexRouteImport } from './routes/infra/index'
-import { Route as InfraHostNameRouteImport } from './routes/infra/$hostName'
-import { Route as InvestigationsIndexRouteImport } from './routes/investigations/index'
-import { Route as InvestigationsIdRouteImport } from './routes/investigations/$id'
-import { Route as LogsIndexRouteImport } from './routes/logs/index'
-import { Route as LogsLogIdRouteImport } from './routes/logs/$logId'
-import { Route as MetricsIndexRouteImport } from './routes/metrics/index'
-import { Route as MetricsMetricNameRouteImport } from './routes/metrics/$metricName'
-import { Route as RecommendationsRecommendationKeyRouteImport } from './routes/recommendations/$recommendationKey'
-import { Route as ReplaysIndexRouteImport } from './routes/replays/index'
-import { Route as ReplaysSessionIdRouteImport } from './routes/replays/$sessionId'
-import { Route as ServicesIndexRouteImport } from './routes/services/index'
-import { Route as ServicesServiceNameRouteImport } from './routes/services/$serviceName'
-import { Route as TracesIndexRouteImport } from './routes/traces/index'
-import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
-import { Route as AlertsIncidentsIncidentIdRouteImport } from './routes/alerts/incidents/$incidentId'
-import { Route as ErrorsIssuesIndexRouteImport } from './routes/errors/issues/index'
-import { Route as ErrorsIssuesIssueIdRouteImport } from './routes/errors/issues/$issueId'
-import { Route as InfraCloudflareIndexRouteImport } from './routes/infra/cloudflare/index'
-import { Route as InfraCloudflareZoneNameRouteImport } from './routes/infra/cloudflare/$zoneName'
-import { Route as InfraPlanetscaleIndexRouteImport } from './routes/infra/planetscale/index'
-import { Route as InfraPlanetscaleDbNameRouteImport } from './routes/infra/planetscale/$dbName'
-import { Route as DashboardsDashboardIdWidgetsWidgetIdRouteImport } from './routes/dashboards/$dashboardId_.widgets.$widgetId'
-import { Route as InfraKubernetesNodesIndexRouteImport } from './routes/infra/kubernetes/nodes/index'
-import { Route as InfraKubernetesNodesNodeNameRouteImport } from './routes/infra/kubernetes/nodes/$nodeName'
-import { Route as InfraKubernetesPodsIndexRouteImport } from './routes/infra/kubernetes/pods/index'
-import { Route as InfraKubernetesPodsPodNameRouteImport } from './routes/infra/kubernetes/pods/$podName'
-import { Route as InfraKubernetesWorkloadsIndexRouteImport } from './routes/infra/kubernetes/workloads/index'
-import { Route as InfraKubernetesWorkloadsKindWorkloadNameRouteImport } from './routes/infra/kubernetes/workloads/$kind/$workloadName'
+import { Route as rootRouteImport } from "./routes/__root"
+import { Route as IndexRouteImport } from "./routes/index"
+import { Route as AccountRouteImport } from "./routes/account"
+import { Route as ChatRouteImport } from "./routes/chat"
+import { Route as CliLoginRouteImport } from "./routes/cli-login"
+import { Route as ConnectorsRouteImport } from "./routes/connectors"
+import { Route as DeveloperRouteImport } from "./routes/developer"
+import { Route as FlowLabRouteImport } from "./routes/flow-lab"
+import { Route as InfraBenchRouteImport } from "./routes/infra-bench"
+import { Route as IntegrationsRouteImport } from "./routes/integrations"
+import { Route as LogsBenchRouteImport } from "./routes/logs-bench"
+import { Route as McpRouteImport } from "./routes/mcp"
+import { Route as McpAuthorizeRouteImport } from "./routes/mcp-authorize"
+import { Route as NodeLabRouteImport } from "./routes/node-lab"
+import { Route as OrgRequiredRouteImport } from "./routes/org-required"
+import { Route as OverviewBenchRouteImport } from "./routes/overview-bench"
+import { Route as QueryBuilderLabRouteImport } from "./routes/query-builder-lab"
+import { Route as QuickStartRouteImport } from "./routes/quick-start"
+import { Route as SelectPlanRouteImport } from "./routes/select-plan"
+import { Route as ServiceDetailBenchRouteImport } from "./routes/service-detail-bench"
+import { Route as ServiceMapRouteImport } from "./routes/service-map"
+import { Route as ServiceMapBenchRouteImport } from "./routes/service-map-bench"
+import { Route as SettingsRouteImport } from "./routes/settings"
+import { Route as SignInRouteImport } from "./routes/sign-in"
+import { Route as SignUpRouteImport } from "./routes/sign-up"
+import { Route as TimelineLabRouteImport } from "./routes/timeline-lab"
+import { Route as WidgetLabRouteImport } from "./routes/widget-lab"
+import { Route as AlertsIndexRouteImport } from "./routes/alerts/index"
+import { Route as AlertsRuleIdRouteImport } from "./routes/alerts/$ruleId"
+import { Route as AlertsCreateRouteImport } from "./routes/alerts/create"
+import { Route as AnalyticsIndexRouteImport } from "./routes/analytics/index"
+import { Route as AnomaliesIndexRouteImport } from "./routes/anomalies/index"
+import { Route as AnomaliesIncidentIdRouteImport } from "./routes/anomalies/$incidentId"
+import { Route as DashboardsIndexRouteImport } from "./routes/dashboards/index"
+import { Route as DashboardsDashboardIdRouteImport } from "./routes/dashboards/$dashboardId"
+import { Route as DashboardsTemplatesRouteImport } from "./routes/dashboards/templates"
+import { Route as ErrorsIndexRouteImport } from "./routes/errors/index"
+import { Route as ErrorsErrorTypeRouteImport } from "./routes/errors/$errorType"
+import { Route as InfraIndexRouteImport } from "./routes/infra/index"
+import { Route as InfraHostNameRouteImport } from "./routes/infra/$hostName"
+import { Route as InvestigationsIndexRouteImport } from "./routes/investigations/index"
+import { Route as InvestigationsIdRouteImport } from "./routes/investigations/$id"
+import { Route as LogsIndexRouteImport } from "./routes/logs/index"
+import { Route as LogsLogIdRouteImport } from "./routes/logs/$logId"
+import { Route as MetricsIndexRouteImport } from "./routes/metrics/index"
+import { Route as MetricsMetricNameRouteImport } from "./routes/metrics/$metricName"
+import { Route as RecommendationsRecommendationKeyRouteImport } from "./routes/recommendations/$recommendationKey"
+import { Route as ReplaysIndexRouteImport } from "./routes/replays/index"
+import { Route as ReplaysSessionIdRouteImport } from "./routes/replays/$sessionId"
+import { Route as ServicesIndexRouteImport } from "./routes/services/index"
+import { Route as ServicesServiceNameRouteImport } from "./routes/services/$serviceName"
+import { Route as TracesIndexRouteImport } from "./routes/traces/index"
+import { Route as TracesTraceIdRouteImport } from "./routes/traces/$traceId"
+import { Route as AlertsIncidentsIncidentIdRouteImport } from "./routes/alerts/incidents/$incidentId"
+import { Route as ErrorsIssuesIndexRouteImport } from "./routes/errors/issues/index"
+import { Route as ErrorsIssuesIssueIdRouteImport } from "./routes/errors/issues/$issueId"
+import { Route as InfraCloudflareIndexRouteImport } from "./routes/infra/cloudflare/index"
+import { Route as InfraCloudflareZoneNameRouteImport } from "./routes/infra/cloudflare/$zoneName"
+import { Route as InfraPlanetscaleIndexRouteImport } from "./routes/infra/planetscale/index"
+import { Route as InfraPlanetscaleDbNameRouteImport } from "./routes/infra/planetscale/$dbName"
+import { Route as DashboardsDashboardIdWidgetsWidgetIdRouteImport } from "./routes/dashboards/$dashboardId_.widgets.$widgetId"
+import { Route as InfraKubernetesNodesIndexRouteImport } from "./routes/infra/kubernetes/nodes/index"
+import { Route as InfraKubernetesNodesNodeNameRouteImport } from "./routes/infra/kubernetes/nodes/$nodeName"
+import { Route as InfraKubernetesPodsIndexRouteImport } from "./routes/infra/kubernetes/pods/index"
+import { Route as InfraKubernetesPodsPodNameRouteImport } from "./routes/infra/kubernetes/pods/$podName"
+import { Route as InfraKubernetesWorkloadsIndexRouteImport } from "./routes/infra/kubernetes/workloads/index"
+import { Route as InfraKubernetesWorkloadsKindWorkloadNameRouteImport } from "./routes/infra/kubernetes/workloads/$kind/$workloadName"
 
 const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
+	id: "/",
+	path: "/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const AccountRoute = AccountRouteImport.update({
-  id: '/account',
-  path: '/account',
-  getParentRoute: () => rootRouteImport,
+	id: "/account",
+	path: "/account",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ChatRoute = ChatRouteImport.update({
-  id: '/chat',
-  path: '/chat',
-  getParentRoute: () => rootRouteImport,
+	id: "/chat",
+	path: "/chat",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const CliLoginRoute = CliLoginRouteImport.update({
-  id: '/cli-login',
-  path: '/cli-login',
-  getParentRoute: () => rootRouteImport,
+	id: "/cli-login",
+	path: "/cli-login",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectorsRoute = ConnectorsRouteImport.update({
-  id: '/connectors',
-  path: '/connectors',
-  getParentRoute: () => rootRouteImport,
+	id: "/connectors",
+	path: "/connectors",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const DeveloperRoute = DeveloperRouteImport.update({
-  id: '/developer',
-  path: '/developer',
-  getParentRoute: () => rootRouteImport,
+	id: "/developer",
+	path: "/developer",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const FlowLabRoute = FlowLabRouteImport.update({
-  id: '/flow-lab',
-  path: '/flow-lab',
-  getParentRoute: () => rootRouteImport,
+	id: "/flow-lab",
+	path: "/flow-lab",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const InfraBenchRoute = InfraBenchRouteImport.update({
-  id: '/infra-bench',
-  path: '/infra-bench',
-  getParentRoute: () => rootRouteImport,
+	id: "/infra-bench",
+	path: "/infra-bench",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
-  id: '/integrations',
-  path: '/integrations',
-  getParentRoute: () => rootRouteImport,
+	id: "/integrations",
+	path: "/integrations",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const LogsBenchRoute = LogsBenchRouteImport.update({
-  id: '/logs-bench',
-  path: '/logs-bench',
-  getParentRoute: () => rootRouteImport,
+	id: "/logs-bench",
+	path: "/logs-bench",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const McpRoute = McpRouteImport.update({
-  id: '/mcp',
-  path: '/mcp',
-  getParentRoute: () => rootRouteImport,
+	id: "/mcp",
+	path: "/mcp",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const McpAuthorizeRoute = McpAuthorizeRouteImport.update({
-  id: '/mcp-authorize',
-  path: '/mcp-authorize',
-  getParentRoute: () => rootRouteImport,
+	id: "/mcp-authorize",
+	path: "/mcp-authorize",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const NodeLabRoute = NodeLabRouteImport.update({
-  id: '/node-lab',
-  path: '/node-lab',
-  getParentRoute: () => rootRouteImport,
+	id: "/node-lab",
+	path: "/node-lab",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const OrgRequiredRoute = OrgRequiredRouteImport.update({
-  id: '/org-required',
-  path: '/org-required',
-  getParentRoute: () => rootRouteImport,
+	id: "/org-required",
+	path: "/org-required",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const OverviewBenchRoute = OverviewBenchRouteImport.update({
-  id: '/overview-bench',
-  path: '/overview-bench',
-  getParentRoute: () => rootRouteImport,
+	id: "/overview-bench",
+	path: "/overview-bench",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const QueryBuilderLabRoute = QueryBuilderLabRouteImport.update({
-  id: '/query-builder-lab',
-  path: '/query-builder-lab',
-  getParentRoute: () => rootRouteImport,
+	id: "/query-builder-lab",
+	path: "/query-builder-lab",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const QuickStartRoute = QuickStartRouteImport.update({
-  id: '/quick-start',
-  path: '/quick-start',
-  getParentRoute: () => rootRouteImport,
+	id: "/quick-start",
+	path: "/quick-start",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const SelectPlanRoute = SelectPlanRouteImport.update({
-  id: '/select-plan',
-  path: '/select-plan',
-  getParentRoute: () => rootRouteImport,
+	id: "/select-plan",
+	path: "/select-plan",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ServiceDetailBenchRoute = ServiceDetailBenchRouteImport.update({
-  id: '/service-detail-bench',
-  path: '/service-detail-bench',
-  getParentRoute: () => rootRouteImport,
+	id: "/service-detail-bench",
+	path: "/service-detail-bench",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ServiceMapRoute = ServiceMapRouteImport.update({
-  id: '/service-map',
-  path: '/service-map',
-  getParentRoute: () => rootRouteImport,
+	id: "/service-map",
+	path: "/service-map",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ServiceMapBenchRoute = ServiceMapBenchRouteImport.update({
-  id: '/service-map-bench',
-  path: '/service-map-bench',
-  getParentRoute: () => rootRouteImport,
+	id: "/service-map-bench",
+	path: "/service-map-bench",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
+	id: "/settings",
+	path: "/settings",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const SignInRoute = SignInRouteImport.update({
-  id: '/sign-in',
-  path: '/sign-in',
-  getParentRoute: () => rootRouteImport,
+	id: "/sign-in",
+	path: "/sign-in",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const SignUpRoute = SignUpRouteImport.update({
-  id: '/sign-up',
-  path: '/sign-up',
-  getParentRoute: () => rootRouteImport,
+	id: "/sign-up",
+	path: "/sign-up",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const TimelineLabRoute = TimelineLabRouteImport.update({
-  id: '/timeline-lab',
-  path: '/timeline-lab',
-  getParentRoute: () => rootRouteImport,
+	id: "/timeline-lab",
+	path: "/timeline-lab",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const WidgetLabRoute = WidgetLabRouteImport.update({
-  id: '/widget-lab',
-  path: '/widget-lab',
-  getParentRoute: () => rootRouteImport,
+	id: "/widget-lab",
+	path: "/widget-lab",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const AlertsIndexRoute = AlertsIndexRouteImport.update({
-  id: '/alerts/',
-  path: '/alerts/',
-  getParentRoute: () => rootRouteImport,
+	id: "/alerts/",
+	path: "/alerts/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const AlertsRuleIdRoute = AlertsRuleIdRouteImport.update({
-  id: '/alerts/$ruleId',
-  path: '/alerts/$ruleId',
-  getParentRoute: () => rootRouteImport,
+	id: "/alerts/$ruleId",
+	path: "/alerts/$ruleId",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const AlertsCreateRoute = AlertsCreateRouteImport.update({
-  id: '/alerts/create',
-  path: '/alerts/create',
-  getParentRoute: () => rootRouteImport,
+	id: "/alerts/create",
+	path: "/alerts/create",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const AnalyticsIndexRoute = AnalyticsIndexRouteImport.update({
-  id: '/analytics/',
-  path: '/analytics/',
-  getParentRoute: () => rootRouteImport,
+	id: "/analytics/",
+	path: "/analytics/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const AnomaliesIndexRoute = AnomaliesIndexRouteImport.update({
-  id: '/anomalies/',
-  path: '/anomalies/',
-  getParentRoute: () => rootRouteImport,
+	id: "/anomalies/",
+	path: "/anomalies/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const AnomaliesIncidentIdRoute = AnomaliesIncidentIdRouteImport.update({
-  id: '/anomalies/$incidentId',
-  path: '/anomalies/$incidentId',
-  getParentRoute: () => rootRouteImport,
+	id: "/anomalies/$incidentId",
+	path: "/anomalies/$incidentId",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardsIndexRoute = DashboardsIndexRouteImport.update({
-  id: '/dashboards/',
-  path: '/dashboards/',
-  getParentRoute: () => rootRouteImport,
+	id: "/dashboards/",
+	path: "/dashboards/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardsDashboardIdRoute = DashboardsDashboardIdRouteImport.update({
-  id: '/dashboards/$dashboardId',
-  path: '/dashboards/$dashboardId',
-  getParentRoute: () => rootRouteImport,
+	id: "/dashboards/$dashboardId",
+	path: "/dashboards/$dashboardId",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardsTemplatesRoute = DashboardsTemplatesRouteImport.update({
-  id: '/dashboards/templates',
-  path: '/dashboards/templates',
-  getParentRoute: () => rootRouteImport,
+	id: "/dashboards/templates",
+	path: "/dashboards/templates",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ErrorsIndexRoute = ErrorsIndexRouteImport.update({
-  id: '/errors/',
-  path: '/errors/',
-  getParentRoute: () => rootRouteImport,
+	id: "/errors/",
+	path: "/errors/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ErrorsErrorTypeRoute = ErrorsErrorTypeRouteImport.update({
-  id: '/errors/$errorType',
-  path: '/errors/$errorType',
-  getParentRoute: () => rootRouteImport,
+	id: "/errors/$errorType",
+	path: "/errors/$errorType",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const InfraIndexRoute = InfraIndexRouteImport.update({
-  id: '/infra/',
-  path: '/infra/',
-  getParentRoute: () => rootRouteImport,
+	id: "/infra/",
+	path: "/infra/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const InfraHostNameRoute = InfraHostNameRouteImport.update({
-  id: '/infra/$hostName',
-  path: '/infra/$hostName',
-  getParentRoute: () => rootRouteImport,
+	id: "/infra/$hostName",
+	path: "/infra/$hostName",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const InvestigationsIndexRoute = InvestigationsIndexRouteImport.update({
-  id: '/investigations/',
-  path: '/investigations/',
-  getParentRoute: () => rootRouteImport,
+	id: "/investigations/",
+	path: "/investigations/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const InvestigationsIdRoute = InvestigationsIdRouteImport.update({
-  id: '/investigations/$id',
-  path: '/investigations/$id',
-  getParentRoute: () => rootRouteImport,
+	id: "/investigations/$id",
+	path: "/investigations/$id",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const LogsIndexRoute = LogsIndexRouteImport.update({
-  id: '/logs/',
-  path: '/logs/',
-  getParentRoute: () => rootRouteImport,
+	id: "/logs/",
+	path: "/logs/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const LogsLogIdRoute = LogsLogIdRouteImport.update({
-  id: '/logs/$logId',
-  path: '/logs/$logId',
-  getParentRoute: () => rootRouteImport,
+	id: "/logs/$logId",
+	path: "/logs/$logId",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const MetricsIndexRoute = MetricsIndexRouteImport.update({
-  id: '/metrics/',
-  path: '/metrics/',
-  getParentRoute: () => rootRouteImport,
+	id: "/metrics/",
+	path: "/metrics/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const MetricsMetricNameRoute = MetricsMetricNameRouteImport.update({
-  id: '/metrics/$metricName',
-  path: '/metrics/$metricName',
-  getParentRoute: () => rootRouteImport,
+	id: "/metrics/$metricName",
+	path: "/metrics/$metricName",
+	getParentRoute: () => rootRouteImport,
 } as any)
-const RecommendationsRecommendationKeyRoute =
-  RecommendationsRecommendationKeyRouteImport.update({
-    id: '/recommendations/$recommendationKey',
-    path: '/recommendations/$recommendationKey',
-    getParentRoute: () => rootRouteImport,
-  } as any)
+const RecommendationsRecommendationKeyRoute = RecommendationsRecommendationKeyRouteImport.update({
+	id: "/recommendations/$recommendationKey",
+	path: "/recommendations/$recommendationKey",
+	getParentRoute: () => rootRouteImport,
+} as any)
 const ReplaysIndexRoute = ReplaysIndexRouteImport.update({
-  id: '/replays/',
-  path: '/replays/',
-  getParentRoute: () => rootRouteImport,
+	id: "/replays/",
+	path: "/replays/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ReplaysSessionIdRoute = ReplaysSessionIdRouteImport.update({
-  id: '/replays/$sessionId',
-  path: '/replays/$sessionId',
-  getParentRoute: () => rootRouteImport,
+	id: "/replays/$sessionId",
+	path: "/replays/$sessionId",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ServicesIndexRoute = ServicesIndexRouteImport.update({
-  id: '/services/',
-  path: '/services/',
-  getParentRoute: () => rootRouteImport,
+	id: "/services/",
+	path: "/services/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ServicesServiceNameRoute = ServicesServiceNameRouteImport.update({
-  id: '/services/$serviceName',
-  path: '/services/$serviceName',
-  getParentRoute: () => rootRouteImport,
+	id: "/services/$serviceName",
+	path: "/services/$serviceName",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const TracesIndexRoute = TracesIndexRouteImport.update({
-  id: '/traces/',
-  path: '/traces/',
-  getParentRoute: () => rootRouteImport,
+	id: "/traces/",
+	path: "/traces/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const TracesTraceIdRoute = TracesTraceIdRouteImport.update({
-  id: '/traces/$traceId',
-  path: '/traces/$traceId',
-  getParentRoute: () => rootRouteImport,
+	id: "/traces/$traceId",
+	path: "/traces/$traceId",
+	getParentRoute: () => rootRouteImport,
 } as any)
-const AlertsIncidentsIncidentIdRoute =
-  AlertsIncidentsIncidentIdRouteImport.update({
-    id: '/alerts/incidents/$incidentId',
-    path: '/alerts/incidents/$incidentId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
+const AlertsIncidentsIncidentIdRoute = AlertsIncidentsIncidentIdRouteImport.update({
+	id: "/alerts/incidents/$incidentId",
+	path: "/alerts/incidents/$incidentId",
+	getParentRoute: () => rootRouteImport,
+} as any)
 const ErrorsIssuesIndexRoute = ErrorsIssuesIndexRouteImport.update({
-  id: '/errors/issues/',
-  path: '/errors/issues/',
-  getParentRoute: () => rootRouteImport,
+	id: "/errors/issues/",
+	path: "/errors/issues/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const ErrorsIssuesIssueIdRoute = ErrorsIssuesIssueIdRouteImport.update({
-  id: '/errors/issues/$issueId',
-  path: '/errors/issues/$issueId',
-  getParentRoute: () => rootRouteImport,
+	id: "/errors/issues/$issueId",
+	path: "/errors/issues/$issueId",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const InfraCloudflareIndexRoute = InfraCloudflareIndexRouteImport.update({
-  id: '/infra/cloudflare/',
-  path: '/infra/cloudflare/',
-  getParentRoute: () => rootRouteImport,
+	id: "/infra/cloudflare/",
+	path: "/infra/cloudflare/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const InfraCloudflareZoneNameRoute = InfraCloudflareZoneNameRouteImport.update({
-  id: '/infra/cloudflare/$zoneName',
-  path: '/infra/cloudflare/$zoneName',
-  getParentRoute: () => rootRouteImport,
+	id: "/infra/cloudflare/$zoneName",
+	path: "/infra/cloudflare/$zoneName",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const InfraPlanetscaleIndexRoute = InfraPlanetscaleIndexRouteImport.update({
-  id: '/infra/planetscale/',
-  path: '/infra/planetscale/',
-  getParentRoute: () => rootRouteImport,
+	id: "/infra/planetscale/",
+	path: "/infra/planetscale/",
+	getParentRoute: () => rootRouteImport,
 } as any)
 const InfraPlanetscaleDbNameRoute = InfraPlanetscaleDbNameRouteImport.update({
-  id: '/infra/planetscale/$dbName',
-  path: '/infra/planetscale/$dbName',
-  getParentRoute: () => rootRouteImport,
+	id: "/infra/planetscale/$dbName",
+	path: "/infra/planetscale/$dbName",
+	getParentRoute: () => rootRouteImport,
 } as any)
-const DashboardsDashboardIdWidgetsWidgetIdRoute =
-  DashboardsDashboardIdWidgetsWidgetIdRouteImport.update({
-    id: '/dashboards/$dashboardId_/widgets/$widgetId',
-    path: '/dashboards/$dashboardId/widgets/$widgetId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const InfraKubernetesNodesIndexRoute =
-  InfraKubernetesNodesIndexRouteImport.update({
-    id: '/infra/kubernetes/nodes/',
-    path: '/infra/kubernetes/nodes/',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const InfraKubernetesNodesNodeNameRoute =
-  InfraKubernetesNodesNodeNameRouteImport.update({
-    id: '/infra/kubernetes/nodes/$nodeName',
-    path: '/infra/kubernetes/nodes/$nodeName',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const InfraKubernetesPodsIndexRoute =
-  InfraKubernetesPodsIndexRouteImport.update({
-    id: '/infra/kubernetes/pods/',
-    path: '/infra/kubernetes/pods/',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const InfraKubernetesPodsPodNameRoute =
-  InfraKubernetesPodsPodNameRouteImport.update({
-    id: '/infra/kubernetes/pods/$podName',
-    path: '/infra/kubernetes/pods/$podName',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const InfraKubernetesWorkloadsIndexRoute =
-  InfraKubernetesWorkloadsIndexRouteImport.update({
-    id: '/infra/kubernetes/workloads/',
-    path: '/infra/kubernetes/workloads/',
-    getParentRoute: () => rootRouteImport,
-  } as any)
+const DashboardsDashboardIdWidgetsWidgetIdRoute = DashboardsDashboardIdWidgetsWidgetIdRouteImport.update({
+	id: "/dashboards/$dashboardId_/widgets/$widgetId",
+	path: "/dashboards/$dashboardId/widgets/$widgetId",
+	getParentRoute: () => rootRouteImport,
+} as any)
+const InfraKubernetesNodesIndexRoute = InfraKubernetesNodesIndexRouteImport.update({
+	id: "/infra/kubernetes/nodes/",
+	path: "/infra/kubernetes/nodes/",
+	getParentRoute: () => rootRouteImport,
+} as any)
+const InfraKubernetesNodesNodeNameRoute = InfraKubernetesNodesNodeNameRouteImport.update({
+	id: "/infra/kubernetes/nodes/$nodeName",
+	path: "/infra/kubernetes/nodes/$nodeName",
+	getParentRoute: () => rootRouteImport,
+} as any)
+const InfraKubernetesPodsIndexRoute = InfraKubernetesPodsIndexRouteImport.update({
+	id: "/infra/kubernetes/pods/",
+	path: "/infra/kubernetes/pods/",
+	getParentRoute: () => rootRouteImport,
+} as any)
+const InfraKubernetesPodsPodNameRoute = InfraKubernetesPodsPodNameRouteImport.update({
+	id: "/infra/kubernetes/pods/$podName",
+	path: "/infra/kubernetes/pods/$podName",
+	getParentRoute: () => rootRouteImport,
+} as any)
+const InfraKubernetesWorkloadsIndexRoute = InfraKubernetesWorkloadsIndexRouteImport.update({
+	id: "/infra/kubernetes/workloads/",
+	path: "/infra/kubernetes/workloads/",
+	getParentRoute: () => rootRouteImport,
+} as any)
 const InfraKubernetesWorkloadsKindWorkloadNameRoute =
-  InfraKubernetesWorkloadsKindWorkloadNameRouteImport.update({
-    id: '/infra/kubernetes/workloads/$kind/$workloadName',
-    path: '/infra/kubernetes/workloads/$kind/$workloadName',
-    getParentRoute: () => rootRouteImport,
-  } as any)
+	InfraKubernetesWorkloadsKindWorkloadNameRouteImport.update({
+		id: "/infra/kubernetes/workloads/$kind/$workloadName",
+		path: "/infra/kubernetes/workloads/$kind/$workloadName",
+		getParentRoute: () => rootRouteImport,
+	} as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/account': typeof AccountRoute
-  '/chat': typeof ChatRoute
-  '/cli-login': typeof CliLoginRoute
-  '/connectors': typeof ConnectorsRoute
-  '/developer': typeof DeveloperRoute
-  '/flow-lab': typeof FlowLabRoute
-  '/infra-bench': typeof InfraBenchRoute
-  '/integrations': typeof IntegrationsRoute
-  '/logs-bench': typeof LogsBenchRoute
-  '/mcp': typeof McpRoute
-  '/mcp-authorize': typeof McpAuthorizeRoute
-  '/node-lab': typeof NodeLabRoute
-  '/org-required': typeof OrgRequiredRoute
-  '/overview-bench': typeof OverviewBenchRoute
-  '/query-builder-lab': typeof QueryBuilderLabRoute
-  '/quick-start': typeof QuickStartRoute
-  '/select-plan': typeof SelectPlanRoute
-  '/service-detail-bench': typeof ServiceDetailBenchRoute
-  '/service-map': typeof ServiceMapRoute
-  '/service-map-bench': typeof ServiceMapBenchRoute
-  '/settings': typeof SettingsRoute
-  '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
-  '/timeline-lab': typeof TimelineLabRoute
-  '/widget-lab': typeof WidgetLabRoute
-  '/alerts/$ruleId': typeof AlertsRuleIdRoute
-  '/alerts/create': typeof AlertsCreateRoute
-  '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
-  '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
-  '/dashboards/templates': typeof DashboardsTemplatesRoute
-  '/errors/$errorType': typeof ErrorsErrorTypeRoute
-  '/infra/$hostName': typeof InfraHostNameRoute
-  '/investigations/$id': typeof InvestigationsIdRoute
-  '/logs/$logId': typeof LogsLogIdRoute
-  '/metrics/$metricName': typeof MetricsMetricNameRoute
-  '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
-  '/replays/$sessionId': typeof ReplaysSessionIdRoute
-  '/services/$serviceName': typeof ServicesServiceNameRoute
-  '/traces/$traceId': typeof TracesTraceIdRoute
-  '/alerts/': typeof AlertsIndexRoute
-  '/analytics/': typeof AnalyticsIndexRoute
-  '/anomalies/': typeof AnomaliesIndexRoute
-  '/dashboards/': typeof DashboardsIndexRoute
-  '/errors/': typeof ErrorsIndexRoute
-  '/infra/': typeof InfraIndexRoute
-  '/investigations/': typeof InvestigationsIndexRoute
-  '/logs/': typeof LogsIndexRoute
-  '/metrics/': typeof MetricsIndexRoute
-  '/replays/': typeof ReplaysIndexRoute
-  '/services/': typeof ServicesIndexRoute
-  '/traces/': typeof TracesIndexRoute
-  '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
-  '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
-  '/infra/cloudflare/$zoneName': typeof InfraCloudflareZoneNameRoute
-  '/infra/planetscale/$dbName': typeof InfraPlanetscaleDbNameRoute
-  '/errors/issues/': typeof ErrorsIssuesIndexRoute
-  '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
-  '/infra/planetscale/': typeof InfraPlanetscaleIndexRoute
-  '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
-  '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
-  '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
-  '/infra/kubernetes/nodes/': typeof InfraKubernetesNodesIndexRoute
-  '/infra/kubernetes/pods/': typeof InfraKubernetesPodsIndexRoute
-  '/infra/kubernetes/workloads/': typeof InfraKubernetesWorkloadsIndexRoute
-  '/infra/kubernetes/workloads/$kind/$workloadName': typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
+	"/": typeof IndexRoute
+	"/account": typeof AccountRoute
+	"/chat": typeof ChatRoute
+	"/cli-login": typeof CliLoginRoute
+	"/connectors": typeof ConnectorsRoute
+	"/developer": typeof DeveloperRoute
+	"/flow-lab": typeof FlowLabRoute
+	"/infra-bench": typeof InfraBenchRoute
+	"/integrations": typeof IntegrationsRoute
+	"/logs-bench": typeof LogsBenchRoute
+	"/mcp": typeof McpRoute
+	"/mcp-authorize": typeof McpAuthorizeRoute
+	"/node-lab": typeof NodeLabRoute
+	"/org-required": typeof OrgRequiredRoute
+	"/overview-bench": typeof OverviewBenchRoute
+	"/query-builder-lab": typeof QueryBuilderLabRoute
+	"/quick-start": typeof QuickStartRoute
+	"/select-plan": typeof SelectPlanRoute
+	"/service-detail-bench": typeof ServiceDetailBenchRoute
+	"/service-map": typeof ServiceMapRoute
+	"/service-map-bench": typeof ServiceMapBenchRoute
+	"/settings": typeof SettingsRoute
+	"/sign-in": typeof SignInRoute
+	"/sign-up": typeof SignUpRoute
+	"/timeline-lab": typeof TimelineLabRoute
+	"/widget-lab": typeof WidgetLabRoute
+	"/alerts/$ruleId": typeof AlertsRuleIdRoute
+	"/alerts/create": typeof AlertsCreateRoute
+	"/anomalies/$incidentId": typeof AnomaliesIncidentIdRoute
+	"/dashboards/$dashboardId": typeof DashboardsDashboardIdRoute
+	"/dashboards/templates": typeof DashboardsTemplatesRoute
+	"/errors/$errorType": typeof ErrorsErrorTypeRoute
+	"/infra/$hostName": typeof InfraHostNameRoute
+	"/investigations/$id": typeof InvestigationsIdRoute
+	"/logs/$logId": typeof LogsLogIdRoute
+	"/metrics/$metricName": typeof MetricsMetricNameRoute
+	"/recommendations/$recommendationKey": typeof RecommendationsRecommendationKeyRoute
+	"/replays/$sessionId": typeof ReplaysSessionIdRoute
+	"/services/$serviceName": typeof ServicesServiceNameRoute
+	"/traces/$traceId": typeof TracesTraceIdRoute
+	"/alerts/": typeof AlertsIndexRoute
+	"/analytics/": typeof AnalyticsIndexRoute
+	"/anomalies/": typeof AnomaliesIndexRoute
+	"/dashboards/": typeof DashboardsIndexRoute
+	"/errors/": typeof ErrorsIndexRoute
+	"/infra/": typeof InfraIndexRoute
+	"/investigations/": typeof InvestigationsIndexRoute
+	"/logs/": typeof LogsIndexRoute
+	"/metrics/": typeof MetricsIndexRoute
+	"/replays/": typeof ReplaysIndexRoute
+	"/services/": typeof ServicesIndexRoute
+	"/traces/": typeof TracesIndexRoute
+	"/alerts/incidents/$incidentId": typeof AlertsIncidentsIncidentIdRoute
+	"/errors/issues/$issueId": typeof ErrorsIssuesIssueIdRoute
+	"/infra/cloudflare/$zoneName": typeof InfraCloudflareZoneNameRoute
+	"/infra/planetscale/$dbName": typeof InfraPlanetscaleDbNameRoute
+	"/errors/issues/": typeof ErrorsIssuesIndexRoute
+	"/infra/cloudflare/": typeof InfraCloudflareIndexRoute
+	"/infra/planetscale/": typeof InfraPlanetscaleIndexRoute
+	"/dashboards/$dashboardId/widgets/$widgetId": typeof DashboardsDashboardIdWidgetsWidgetIdRoute
+	"/infra/kubernetes/nodes/$nodeName": typeof InfraKubernetesNodesNodeNameRoute
+	"/infra/kubernetes/pods/$podName": typeof InfraKubernetesPodsPodNameRoute
+	"/infra/kubernetes/nodes/": typeof InfraKubernetesNodesIndexRoute
+	"/infra/kubernetes/pods/": typeof InfraKubernetesPodsIndexRoute
+	"/infra/kubernetes/workloads/": typeof InfraKubernetesWorkloadsIndexRoute
+	"/infra/kubernetes/workloads/$kind/$workloadName": typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/account': typeof AccountRoute
-  '/chat': typeof ChatRoute
-  '/cli-login': typeof CliLoginRoute
-  '/connectors': typeof ConnectorsRoute
-  '/developer': typeof DeveloperRoute
-  '/flow-lab': typeof FlowLabRoute
-  '/infra-bench': typeof InfraBenchRoute
-  '/integrations': typeof IntegrationsRoute
-  '/logs-bench': typeof LogsBenchRoute
-  '/mcp': typeof McpRoute
-  '/mcp-authorize': typeof McpAuthorizeRoute
-  '/node-lab': typeof NodeLabRoute
-  '/org-required': typeof OrgRequiredRoute
-  '/overview-bench': typeof OverviewBenchRoute
-  '/query-builder-lab': typeof QueryBuilderLabRoute
-  '/quick-start': typeof QuickStartRoute
-  '/select-plan': typeof SelectPlanRoute
-  '/service-detail-bench': typeof ServiceDetailBenchRoute
-  '/service-map': typeof ServiceMapRoute
-  '/service-map-bench': typeof ServiceMapBenchRoute
-  '/settings': typeof SettingsRoute
-  '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
-  '/timeline-lab': typeof TimelineLabRoute
-  '/widget-lab': typeof WidgetLabRoute
-  '/alerts/$ruleId': typeof AlertsRuleIdRoute
-  '/alerts/create': typeof AlertsCreateRoute
-  '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
-  '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
-  '/dashboards/templates': typeof DashboardsTemplatesRoute
-  '/errors/$errorType': typeof ErrorsErrorTypeRoute
-  '/infra/$hostName': typeof InfraHostNameRoute
-  '/investigations/$id': typeof InvestigationsIdRoute
-  '/logs/$logId': typeof LogsLogIdRoute
-  '/metrics/$metricName': typeof MetricsMetricNameRoute
-  '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
-  '/replays/$sessionId': typeof ReplaysSessionIdRoute
-  '/services/$serviceName': typeof ServicesServiceNameRoute
-  '/traces/$traceId': typeof TracesTraceIdRoute
-  '/alerts': typeof AlertsIndexRoute
-  '/analytics': typeof AnalyticsIndexRoute
-  '/anomalies': typeof AnomaliesIndexRoute
-  '/dashboards': typeof DashboardsIndexRoute
-  '/errors': typeof ErrorsIndexRoute
-  '/infra': typeof InfraIndexRoute
-  '/investigations': typeof InvestigationsIndexRoute
-  '/logs': typeof LogsIndexRoute
-  '/metrics': typeof MetricsIndexRoute
-  '/replays': typeof ReplaysIndexRoute
-  '/services': typeof ServicesIndexRoute
-  '/traces': typeof TracesIndexRoute
-  '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
-  '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
-  '/infra/cloudflare/$zoneName': typeof InfraCloudflareZoneNameRoute
-  '/infra/planetscale/$dbName': typeof InfraPlanetscaleDbNameRoute
-  '/errors/issues': typeof ErrorsIssuesIndexRoute
-  '/infra/cloudflare': typeof InfraCloudflareIndexRoute
-  '/infra/planetscale': typeof InfraPlanetscaleIndexRoute
-  '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
-  '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
-  '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
-  '/infra/kubernetes/nodes': typeof InfraKubernetesNodesIndexRoute
-  '/infra/kubernetes/pods': typeof InfraKubernetesPodsIndexRoute
-  '/infra/kubernetes/workloads': typeof InfraKubernetesWorkloadsIndexRoute
-  '/infra/kubernetes/workloads/$kind/$workloadName': typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
+	"/": typeof IndexRoute
+	"/account": typeof AccountRoute
+	"/chat": typeof ChatRoute
+	"/cli-login": typeof CliLoginRoute
+	"/connectors": typeof ConnectorsRoute
+	"/developer": typeof DeveloperRoute
+	"/flow-lab": typeof FlowLabRoute
+	"/infra-bench": typeof InfraBenchRoute
+	"/integrations": typeof IntegrationsRoute
+	"/logs-bench": typeof LogsBenchRoute
+	"/mcp": typeof McpRoute
+	"/mcp-authorize": typeof McpAuthorizeRoute
+	"/node-lab": typeof NodeLabRoute
+	"/org-required": typeof OrgRequiredRoute
+	"/overview-bench": typeof OverviewBenchRoute
+	"/query-builder-lab": typeof QueryBuilderLabRoute
+	"/quick-start": typeof QuickStartRoute
+	"/select-plan": typeof SelectPlanRoute
+	"/service-detail-bench": typeof ServiceDetailBenchRoute
+	"/service-map": typeof ServiceMapRoute
+	"/service-map-bench": typeof ServiceMapBenchRoute
+	"/settings": typeof SettingsRoute
+	"/sign-in": typeof SignInRoute
+	"/sign-up": typeof SignUpRoute
+	"/timeline-lab": typeof TimelineLabRoute
+	"/widget-lab": typeof WidgetLabRoute
+	"/alerts/$ruleId": typeof AlertsRuleIdRoute
+	"/alerts/create": typeof AlertsCreateRoute
+	"/anomalies/$incidentId": typeof AnomaliesIncidentIdRoute
+	"/dashboards/$dashboardId": typeof DashboardsDashboardIdRoute
+	"/dashboards/templates": typeof DashboardsTemplatesRoute
+	"/errors/$errorType": typeof ErrorsErrorTypeRoute
+	"/infra/$hostName": typeof InfraHostNameRoute
+	"/investigations/$id": typeof InvestigationsIdRoute
+	"/logs/$logId": typeof LogsLogIdRoute
+	"/metrics/$metricName": typeof MetricsMetricNameRoute
+	"/recommendations/$recommendationKey": typeof RecommendationsRecommendationKeyRoute
+	"/replays/$sessionId": typeof ReplaysSessionIdRoute
+	"/services/$serviceName": typeof ServicesServiceNameRoute
+	"/traces/$traceId": typeof TracesTraceIdRoute
+	"/alerts": typeof AlertsIndexRoute
+	"/analytics": typeof AnalyticsIndexRoute
+	"/anomalies": typeof AnomaliesIndexRoute
+	"/dashboards": typeof DashboardsIndexRoute
+	"/errors": typeof ErrorsIndexRoute
+	"/infra": typeof InfraIndexRoute
+	"/investigations": typeof InvestigationsIndexRoute
+	"/logs": typeof LogsIndexRoute
+	"/metrics": typeof MetricsIndexRoute
+	"/replays": typeof ReplaysIndexRoute
+	"/services": typeof ServicesIndexRoute
+	"/traces": typeof TracesIndexRoute
+	"/alerts/incidents/$incidentId": typeof AlertsIncidentsIncidentIdRoute
+	"/errors/issues/$issueId": typeof ErrorsIssuesIssueIdRoute
+	"/infra/cloudflare/$zoneName": typeof InfraCloudflareZoneNameRoute
+	"/infra/planetscale/$dbName": typeof InfraPlanetscaleDbNameRoute
+	"/errors/issues": typeof ErrorsIssuesIndexRoute
+	"/infra/cloudflare": typeof InfraCloudflareIndexRoute
+	"/infra/planetscale": typeof InfraPlanetscaleIndexRoute
+	"/dashboards/$dashboardId/widgets/$widgetId": typeof DashboardsDashboardIdWidgetsWidgetIdRoute
+	"/infra/kubernetes/nodes/$nodeName": typeof InfraKubernetesNodesNodeNameRoute
+	"/infra/kubernetes/pods/$podName": typeof InfraKubernetesPodsPodNameRoute
+	"/infra/kubernetes/nodes": typeof InfraKubernetesNodesIndexRoute
+	"/infra/kubernetes/pods": typeof InfraKubernetesPodsIndexRoute
+	"/infra/kubernetes/workloads": typeof InfraKubernetesWorkloadsIndexRoute
+	"/infra/kubernetes/workloads/$kind/$workloadName": typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/account': typeof AccountRoute
-  '/chat': typeof ChatRoute
-  '/cli-login': typeof CliLoginRoute
-  '/connectors': typeof ConnectorsRoute
-  '/developer': typeof DeveloperRoute
-  '/flow-lab': typeof FlowLabRoute
-  '/infra-bench': typeof InfraBenchRoute
-  '/integrations': typeof IntegrationsRoute
-  '/logs-bench': typeof LogsBenchRoute
-  '/mcp': typeof McpRoute
-  '/mcp-authorize': typeof McpAuthorizeRoute
-  '/node-lab': typeof NodeLabRoute
-  '/org-required': typeof OrgRequiredRoute
-  '/overview-bench': typeof OverviewBenchRoute
-  '/query-builder-lab': typeof QueryBuilderLabRoute
-  '/quick-start': typeof QuickStartRoute
-  '/select-plan': typeof SelectPlanRoute
-  '/service-detail-bench': typeof ServiceDetailBenchRoute
-  '/service-map': typeof ServiceMapRoute
-  '/service-map-bench': typeof ServiceMapBenchRoute
-  '/settings': typeof SettingsRoute
-  '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
-  '/timeline-lab': typeof TimelineLabRoute
-  '/widget-lab': typeof WidgetLabRoute
-  '/alerts/$ruleId': typeof AlertsRuleIdRoute
-  '/alerts/create': typeof AlertsCreateRoute
-  '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
-  '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
-  '/dashboards/templates': typeof DashboardsTemplatesRoute
-  '/errors/$errorType': typeof ErrorsErrorTypeRoute
-  '/infra/$hostName': typeof InfraHostNameRoute
-  '/investigations/$id': typeof InvestigationsIdRoute
-  '/logs/$logId': typeof LogsLogIdRoute
-  '/metrics/$metricName': typeof MetricsMetricNameRoute
-  '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
-  '/replays/$sessionId': typeof ReplaysSessionIdRoute
-  '/services/$serviceName': typeof ServicesServiceNameRoute
-  '/traces/$traceId': typeof TracesTraceIdRoute
-  '/alerts/': typeof AlertsIndexRoute
-  '/analytics/': typeof AnalyticsIndexRoute
-  '/anomalies/': typeof AnomaliesIndexRoute
-  '/dashboards/': typeof DashboardsIndexRoute
-  '/errors/': typeof ErrorsIndexRoute
-  '/infra/': typeof InfraIndexRoute
-  '/investigations/': typeof InvestigationsIndexRoute
-  '/logs/': typeof LogsIndexRoute
-  '/metrics/': typeof MetricsIndexRoute
-  '/replays/': typeof ReplaysIndexRoute
-  '/services/': typeof ServicesIndexRoute
-  '/traces/': typeof TracesIndexRoute
-  '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
-  '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
-  '/infra/cloudflare/$zoneName': typeof InfraCloudflareZoneNameRoute
-  '/infra/planetscale/$dbName': typeof InfraPlanetscaleDbNameRoute
-  '/errors/issues/': typeof ErrorsIssuesIndexRoute
-  '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
-  '/infra/planetscale/': typeof InfraPlanetscaleIndexRoute
-  '/dashboards/$dashboardId_/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
-  '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
-  '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
-  '/infra/kubernetes/nodes/': typeof InfraKubernetesNodesIndexRoute
-  '/infra/kubernetes/pods/': typeof InfraKubernetesPodsIndexRoute
-  '/infra/kubernetes/workloads/': typeof InfraKubernetesWorkloadsIndexRoute
-  '/infra/kubernetes/workloads/$kind/$workloadName': typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
+	__root__: typeof rootRouteImport
+	"/": typeof IndexRoute
+	"/account": typeof AccountRoute
+	"/chat": typeof ChatRoute
+	"/cli-login": typeof CliLoginRoute
+	"/connectors": typeof ConnectorsRoute
+	"/developer": typeof DeveloperRoute
+	"/flow-lab": typeof FlowLabRoute
+	"/infra-bench": typeof InfraBenchRoute
+	"/integrations": typeof IntegrationsRoute
+	"/logs-bench": typeof LogsBenchRoute
+	"/mcp": typeof McpRoute
+	"/mcp-authorize": typeof McpAuthorizeRoute
+	"/node-lab": typeof NodeLabRoute
+	"/org-required": typeof OrgRequiredRoute
+	"/overview-bench": typeof OverviewBenchRoute
+	"/query-builder-lab": typeof QueryBuilderLabRoute
+	"/quick-start": typeof QuickStartRoute
+	"/select-plan": typeof SelectPlanRoute
+	"/service-detail-bench": typeof ServiceDetailBenchRoute
+	"/service-map": typeof ServiceMapRoute
+	"/service-map-bench": typeof ServiceMapBenchRoute
+	"/settings": typeof SettingsRoute
+	"/sign-in": typeof SignInRoute
+	"/sign-up": typeof SignUpRoute
+	"/timeline-lab": typeof TimelineLabRoute
+	"/widget-lab": typeof WidgetLabRoute
+	"/alerts/$ruleId": typeof AlertsRuleIdRoute
+	"/alerts/create": typeof AlertsCreateRoute
+	"/anomalies/$incidentId": typeof AnomaliesIncidentIdRoute
+	"/dashboards/$dashboardId": typeof DashboardsDashboardIdRoute
+	"/dashboards/templates": typeof DashboardsTemplatesRoute
+	"/errors/$errorType": typeof ErrorsErrorTypeRoute
+	"/infra/$hostName": typeof InfraHostNameRoute
+	"/investigations/$id": typeof InvestigationsIdRoute
+	"/logs/$logId": typeof LogsLogIdRoute
+	"/metrics/$metricName": typeof MetricsMetricNameRoute
+	"/recommendations/$recommendationKey": typeof RecommendationsRecommendationKeyRoute
+	"/replays/$sessionId": typeof ReplaysSessionIdRoute
+	"/services/$serviceName": typeof ServicesServiceNameRoute
+	"/traces/$traceId": typeof TracesTraceIdRoute
+	"/alerts/": typeof AlertsIndexRoute
+	"/analytics/": typeof AnalyticsIndexRoute
+	"/anomalies/": typeof AnomaliesIndexRoute
+	"/dashboards/": typeof DashboardsIndexRoute
+	"/errors/": typeof ErrorsIndexRoute
+	"/infra/": typeof InfraIndexRoute
+	"/investigations/": typeof InvestigationsIndexRoute
+	"/logs/": typeof LogsIndexRoute
+	"/metrics/": typeof MetricsIndexRoute
+	"/replays/": typeof ReplaysIndexRoute
+	"/services/": typeof ServicesIndexRoute
+	"/traces/": typeof TracesIndexRoute
+	"/alerts/incidents/$incidentId": typeof AlertsIncidentsIncidentIdRoute
+	"/errors/issues/$issueId": typeof ErrorsIssuesIssueIdRoute
+	"/infra/cloudflare/$zoneName": typeof InfraCloudflareZoneNameRoute
+	"/infra/planetscale/$dbName": typeof InfraPlanetscaleDbNameRoute
+	"/errors/issues/": typeof ErrorsIssuesIndexRoute
+	"/infra/cloudflare/": typeof InfraCloudflareIndexRoute
+	"/infra/planetscale/": typeof InfraPlanetscaleIndexRoute
+	"/dashboards/$dashboardId_/widgets/$widgetId": typeof DashboardsDashboardIdWidgetsWidgetIdRoute
+	"/infra/kubernetes/nodes/$nodeName": typeof InfraKubernetesNodesNodeNameRoute
+	"/infra/kubernetes/pods/$podName": typeof InfraKubernetesPodsPodNameRoute
+	"/infra/kubernetes/nodes/": typeof InfraKubernetesNodesIndexRoute
+	"/infra/kubernetes/pods/": typeof InfraKubernetesPodsIndexRoute
+	"/infra/kubernetes/workloads/": typeof InfraKubernetesWorkloadsIndexRoute
+	"/infra/kubernetes/workloads/$kind/$workloadName": typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/account'
-    | '/chat'
-    | '/cli-login'
-    | '/connectors'
-    | '/developer'
-    | '/flow-lab'
-    | '/infra-bench'
-    | '/integrations'
-    | '/logs-bench'
-    | '/mcp'
-    | '/mcp-authorize'
-    | '/node-lab'
-    | '/org-required'
-    | '/overview-bench'
-    | '/query-builder-lab'
-    | '/quick-start'
-    | '/select-plan'
-    | '/service-detail-bench'
-    | '/service-map'
-    | '/service-map-bench'
-    | '/settings'
-    | '/sign-in'
-    | '/sign-up'
-    | '/timeline-lab'
-    | '/widget-lab'
-    | '/alerts/$ruleId'
-    | '/alerts/create'
-    | '/anomalies/$incidentId'
-    | '/dashboards/$dashboardId'
-    | '/dashboards/templates'
-    | '/errors/$errorType'
-    | '/infra/$hostName'
-    | '/investigations/$id'
-    | '/logs/$logId'
-    | '/metrics/$metricName'
-    | '/recommendations/$recommendationKey'
-    | '/replays/$sessionId'
-    | '/services/$serviceName'
-    | '/traces/$traceId'
-    | '/alerts/'
-    | '/analytics/'
-    | '/anomalies/'
-    | '/dashboards/'
-    | '/errors/'
-    | '/infra/'
-    | '/investigations/'
-    | '/logs/'
-    | '/metrics/'
-    | '/replays/'
-    | '/services/'
-    | '/traces/'
-    | '/alerts/incidents/$incidentId'
-    | '/errors/issues/$issueId'
-    | '/infra/cloudflare/$zoneName'
-    | '/infra/planetscale/$dbName'
-    | '/errors/issues/'
-    | '/infra/cloudflare/'
-    | '/infra/planetscale/'
-    | '/dashboards/$dashboardId/widgets/$widgetId'
-    | '/infra/kubernetes/nodes/$nodeName'
-    | '/infra/kubernetes/pods/$podName'
-    | '/infra/kubernetes/nodes/'
-    | '/infra/kubernetes/pods/'
-    | '/infra/kubernetes/workloads/'
-    | '/infra/kubernetes/workloads/$kind/$workloadName'
-  fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/account'
-    | '/chat'
-    | '/cli-login'
-    | '/connectors'
-    | '/developer'
-    | '/flow-lab'
-    | '/infra-bench'
-    | '/integrations'
-    | '/logs-bench'
-    | '/mcp'
-    | '/mcp-authorize'
-    | '/node-lab'
-    | '/org-required'
-    | '/overview-bench'
-    | '/query-builder-lab'
-    | '/quick-start'
-    | '/select-plan'
-    | '/service-detail-bench'
-    | '/service-map'
-    | '/service-map-bench'
-    | '/settings'
-    | '/sign-in'
-    | '/sign-up'
-    | '/timeline-lab'
-    | '/widget-lab'
-    | '/alerts/$ruleId'
-    | '/alerts/create'
-    | '/anomalies/$incidentId'
-    | '/dashboards/$dashboardId'
-    | '/dashboards/templates'
-    | '/errors/$errorType'
-    | '/infra/$hostName'
-    | '/investigations/$id'
-    | '/logs/$logId'
-    | '/metrics/$metricName'
-    | '/recommendations/$recommendationKey'
-    | '/replays/$sessionId'
-    | '/services/$serviceName'
-    | '/traces/$traceId'
-    | '/alerts'
-    | '/analytics'
-    | '/anomalies'
-    | '/dashboards'
-    | '/errors'
-    | '/infra'
-    | '/investigations'
-    | '/logs'
-    | '/metrics'
-    | '/replays'
-    | '/services'
-    | '/traces'
-    | '/alerts/incidents/$incidentId'
-    | '/errors/issues/$issueId'
-    | '/infra/cloudflare/$zoneName'
-    | '/infra/planetscale/$dbName'
-    | '/errors/issues'
-    | '/infra/cloudflare'
-    | '/infra/planetscale'
-    | '/dashboards/$dashboardId/widgets/$widgetId'
-    | '/infra/kubernetes/nodes/$nodeName'
-    | '/infra/kubernetes/pods/$podName'
-    | '/infra/kubernetes/nodes'
-    | '/infra/kubernetes/pods'
-    | '/infra/kubernetes/workloads'
-    | '/infra/kubernetes/workloads/$kind/$workloadName'
-  id:
-    | '__root__'
-    | '/'
-    | '/account'
-    | '/chat'
-    | '/cli-login'
-    | '/connectors'
-    | '/developer'
-    | '/flow-lab'
-    | '/infra-bench'
-    | '/integrations'
-    | '/logs-bench'
-    | '/mcp'
-    | '/mcp-authorize'
-    | '/node-lab'
-    | '/org-required'
-    | '/overview-bench'
-    | '/query-builder-lab'
-    | '/quick-start'
-    | '/select-plan'
-    | '/service-detail-bench'
-    | '/service-map'
-    | '/service-map-bench'
-    | '/settings'
-    | '/sign-in'
-    | '/sign-up'
-    | '/timeline-lab'
-    | '/widget-lab'
-    | '/alerts/$ruleId'
-    | '/alerts/create'
-    | '/anomalies/$incidentId'
-    | '/dashboards/$dashboardId'
-    | '/dashboards/templates'
-    | '/errors/$errorType'
-    | '/infra/$hostName'
-    | '/investigations/$id'
-    | '/logs/$logId'
-    | '/metrics/$metricName'
-    | '/recommendations/$recommendationKey'
-    | '/replays/$sessionId'
-    | '/services/$serviceName'
-    | '/traces/$traceId'
-    | '/alerts/'
-    | '/analytics/'
-    | '/anomalies/'
-    | '/dashboards/'
-    | '/errors/'
-    | '/infra/'
-    | '/investigations/'
-    | '/logs/'
-    | '/metrics/'
-    | '/replays/'
-    | '/services/'
-    | '/traces/'
-    | '/alerts/incidents/$incidentId'
-    | '/errors/issues/$issueId'
-    | '/infra/cloudflare/$zoneName'
-    | '/infra/planetscale/$dbName'
-    | '/errors/issues/'
-    | '/infra/cloudflare/'
-    | '/infra/planetscale/'
-    | '/dashboards/$dashboardId_/widgets/$widgetId'
-    | '/infra/kubernetes/nodes/$nodeName'
-    | '/infra/kubernetes/pods/$podName'
-    | '/infra/kubernetes/nodes/'
-    | '/infra/kubernetes/pods/'
-    | '/infra/kubernetes/workloads/'
-    | '/infra/kubernetes/workloads/$kind/$workloadName'
-  fileRoutesById: FileRoutesById
+	fileRoutesByFullPath: FileRoutesByFullPath
+	fullPaths:
+		| "/"
+		| "/account"
+		| "/chat"
+		| "/cli-login"
+		| "/connectors"
+		| "/developer"
+		| "/flow-lab"
+		| "/infra-bench"
+		| "/integrations"
+		| "/logs-bench"
+		| "/mcp"
+		| "/mcp-authorize"
+		| "/node-lab"
+		| "/org-required"
+		| "/overview-bench"
+		| "/query-builder-lab"
+		| "/quick-start"
+		| "/select-plan"
+		| "/service-detail-bench"
+		| "/service-map"
+		| "/service-map-bench"
+		| "/settings"
+		| "/sign-in"
+		| "/sign-up"
+		| "/timeline-lab"
+		| "/widget-lab"
+		| "/alerts/$ruleId"
+		| "/alerts/create"
+		| "/anomalies/$incidentId"
+		| "/dashboards/$dashboardId"
+		| "/dashboards/templates"
+		| "/errors/$errorType"
+		| "/infra/$hostName"
+		| "/investigations/$id"
+		| "/logs/$logId"
+		| "/metrics/$metricName"
+		| "/recommendations/$recommendationKey"
+		| "/replays/$sessionId"
+		| "/services/$serviceName"
+		| "/traces/$traceId"
+		| "/alerts/"
+		| "/analytics/"
+		| "/anomalies/"
+		| "/dashboards/"
+		| "/errors/"
+		| "/infra/"
+		| "/investigations/"
+		| "/logs/"
+		| "/metrics/"
+		| "/replays/"
+		| "/services/"
+		| "/traces/"
+		| "/alerts/incidents/$incidentId"
+		| "/errors/issues/$issueId"
+		| "/infra/cloudflare/$zoneName"
+		| "/infra/planetscale/$dbName"
+		| "/errors/issues/"
+		| "/infra/cloudflare/"
+		| "/infra/planetscale/"
+		| "/dashboards/$dashboardId/widgets/$widgetId"
+		| "/infra/kubernetes/nodes/$nodeName"
+		| "/infra/kubernetes/pods/$podName"
+		| "/infra/kubernetes/nodes/"
+		| "/infra/kubernetes/pods/"
+		| "/infra/kubernetes/workloads/"
+		| "/infra/kubernetes/workloads/$kind/$workloadName"
+	fileRoutesByTo: FileRoutesByTo
+	to:
+		| "/"
+		| "/account"
+		| "/chat"
+		| "/cli-login"
+		| "/connectors"
+		| "/developer"
+		| "/flow-lab"
+		| "/infra-bench"
+		| "/integrations"
+		| "/logs-bench"
+		| "/mcp"
+		| "/mcp-authorize"
+		| "/node-lab"
+		| "/org-required"
+		| "/overview-bench"
+		| "/query-builder-lab"
+		| "/quick-start"
+		| "/select-plan"
+		| "/service-detail-bench"
+		| "/service-map"
+		| "/service-map-bench"
+		| "/settings"
+		| "/sign-in"
+		| "/sign-up"
+		| "/timeline-lab"
+		| "/widget-lab"
+		| "/alerts/$ruleId"
+		| "/alerts/create"
+		| "/anomalies/$incidentId"
+		| "/dashboards/$dashboardId"
+		| "/dashboards/templates"
+		| "/errors/$errorType"
+		| "/infra/$hostName"
+		| "/investigations/$id"
+		| "/logs/$logId"
+		| "/metrics/$metricName"
+		| "/recommendations/$recommendationKey"
+		| "/replays/$sessionId"
+		| "/services/$serviceName"
+		| "/traces/$traceId"
+		| "/alerts"
+		| "/analytics"
+		| "/anomalies"
+		| "/dashboards"
+		| "/errors"
+		| "/infra"
+		| "/investigations"
+		| "/logs"
+		| "/metrics"
+		| "/replays"
+		| "/services"
+		| "/traces"
+		| "/alerts/incidents/$incidentId"
+		| "/errors/issues/$issueId"
+		| "/infra/cloudflare/$zoneName"
+		| "/infra/planetscale/$dbName"
+		| "/errors/issues"
+		| "/infra/cloudflare"
+		| "/infra/planetscale"
+		| "/dashboards/$dashboardId/widgets/$widgetId"
+		| "/infra/kubernetes/nodes/$nodeName"
+		| "/infra/kubernetes/pods/$podName"
+		| "/infra/kubernetes/nodes"
+		| "/infra/kubernetes/pods"
+		| "/infra/kubernetes/workloads"
+		| "/infra/kubernetes/workloads/$kind/$workloadName"
+	id:
+		| "__root__"
+		| "/"
+		| "/account"
+		| "/chat"
+		| "/cli-login"
+		| "/connectors"
+		| "/developer"
+		| "/flow-lab"
+		| "/infra-bench"
+		| "/integrations"
+		| "/logs-bench"
+		| "/mcp"
+		| "/mcp-authorize"
+		| "/node-lab"
+		| "/org-required"
+		| "/overview-bench"
+		| "/query-builder-lab"
+		| "/quick-start"
+		| "/select-plan"
+		| "/service-detail-bench"
+		| "/service-map"
+		| "/service-map-bench"
+		| "/settings"
+		| "/sign-in"
+		| "/sign-up"
+		| "/timeline-lab"
+		| "/widget-lab"
+		| "/alerts/$ruleId"
+		| "/alerts/create"
+		| "/anomalies/$incidentId"
+		| "/dashboards/$dashboardId"
+		| "/dashboards/templates"
+		| "/errors/$errorType"
+		| "/infra/$hostName"
+		| "/investigations/$id"
+		| "/logs/$logId"
+		| "/metrics/$metricName"
+		| "/recommendations/$recommendationKey"
+		| "/replays/$sessionId"
+		| "/services/$serviceName"
+		| "/traces/$traceId"
+		| "/alerts/"
+		| "/analytics/"
+		| "/anomalies/"
+		| "/dashboards/"
+		| "/errors/"
+		| "/infra/"
+		| "/investigations/"
+		| "/logs/"
+		| "/metrics/"
+		| "/replays/"
+		| "/services/"
+		| "/traces/"
+		| "/alerts/incidents/$incidentId"
+		| "/errors/issues/$issueId"
+		| "/infra/cloudflare/$zoneName"
+		| "/infra/planetscale/$dbName"
+		| "/errors/issues/"
+		| "/infra/cloudflare/"
+		| "/infra/planetscale/"
+		| "/dashboards/$dashboardId_/widgets/$widgetId"
+		| "/infra/kubernetes/nodes/$nodeName"
+		| "/infra/kubernetes/pods/$podName"
+		| "/infra/kubernetes/nodes/"
+		| "/infra/kubernetes/pods/"
+		| "/infra/kubernetes/workloads/"
+		| "/infra/kubernetes/workloads/$kind/$workloadName"
+	fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  AccountRoute: typeof AccountRoute
-  ChatRoute: typeof ChatRoute
-  CliLoginRoute: typeof CliLoginRoute
-  ConnectorsRoute: typeof ConnectorsRoute
-  DeveloperRoute: typeof DeveloperRoute
-  FlowLabRoute: typeof FlowLabRoute
-  InfraBenchRoute: typeof InfraBenchRoute
-  IntegrationsRoute: typeof IntegrationsRoute
-  LogsBenchRoute: typeof LogsBenchRoute
-  McpRoute: typeof McpRoute
-  McpAuthorizeRoute: typeof McpAuthorizeRoute
-  NodeLabRoute: typeof NodeLabRoute
-  OrgRequiredRoute: typeof OrgRequiredRoute
-  OverviewBenchRoute: typeof OverviewBenchRoute
-  QueryBuilderLabRoute: typeof QueryBuilderLabRoute
-  QuickStartRoute: typeof QuickStartRoute
-  SelectPlanRoute: typeof SelectPlanRoute
-  ServiceDetailBenchRoute: typeof ServiceDetailBenchRoute
-  ServiceMapRoute: typeof ServiceMapRoute
-  ServiceMapBenchRoute: typeof ServiceMapBenchRoute
-  SettingsRoute: typeof SettingsRoute
-  SignInRoute: typeof SignInRoute
-  SignUpRoute: typeof SignUpRoute
-  TimelineLabRoute: typeof TimelineLabRoute
-  WidgetLabRoute: typeof WidgetLabRoute
-  AlertsRuleIdRoute: typeof AlertsRuleIdRoute
-  AlertsCreateRoute: typeof AlertsCreateRoute
-  AnomaliesIncidentIdRoute: typeof AnomaliesIncidentIdRoute
-  DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
-  DashboardsTemplatesRoute: typeof DashboardsTemplatesRoute
-  ErrorsErrorTypeRoute: typeof ErrorsErrorTypeRoute
-  InfraHostNameRoute: typeof InfraHostNameRoute
-  InvestigationsIdRoute: typeof InvestigationsIdRoute
-  LogsLogIdRoute: typeof LogsLogIdRoute
-  MetricsMetricNameRoute: typeof MetricsMetricNameRoute
-  RecommendationsRecommendationKeyRoute: typeof RecommendationsRecommendationKeyRoute
-  ReplaysSessionIdRoute: typeof ReplaysSessionIdRoute
-  ServicesServiceNameRoute: typeof ServicesServiceNameRoute
-  TracesTraceIdRoute: typeof TracesTraceIdRoute
-  AlertsIndexRoute: typeof AlertsIndexRoute
-  AnalyticsIndexRoute: typeof AnalyticsIndexRoute
-  AnomaliesIndexRoute: typeof AnomaliesIndexRoute
-  DashboardsIndexRoute: typeof DashboardsIndexRoute
-  ErrorsIndexRoute: typeof ErrorsIndexRoute
-  InfraIndexRoute: typeof InfraIndexRoute
-  InvestigationsIndexRoute: typeof InvestigationsIndexRoute
-  LogsIndexRoute: typeof LogsIndexRoute
-  MetricsIndexRoute: typeof MetricsIndexRoute
-  ReplaysIndexRoute: typeof ReplaysIndexRoute
-  ServicesIndexRoute: typeof ServicesIndexRoute
-  TracesIndexRoute: typeof TracesIndexRoute
-  AlertsIncidentsIncidentIdRoute: typeof AlertsIncidentsIncidentIdRoute
-  ErrorsIssuesIssueIdRoute: typeof ErrorsIssuesIssueIdRoute
-  InfraCloudflareZoneNameRoute: typeof InfraCloudflareZoneNameRoute
-  InfraPlanetscaleDbNameRoute: typeof InfraPlanetscaleDbNameRoute
-  ErrorsIssuesIndexRoute: typeof ErrorsIssuesIndexRoute
-  InfraCloudflareIndexRoute: typeof InfraCloudflareIndexRoute
-  InfraPlanetscaleIndexRoute: typeof InfraPlanetscaleIndexRoute
-  DashboardsDashboardIdWidgetsWidgetIdRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRoute
-  InfraKubernetesNodesNodeNameRoute: typeof InfraKubernetesNodesNodeNameRoute
-  InfraKubernetesPodsPodNameRoute: typeof InfraKubernetesPodsPodNameRoute
-  InfraKubernetesNodesIndexRoute: typeof InfraKubernetesNodesIndexRoute
-  InfraKubernetesPodsIndexRoute: typeof InfraKubernetesPodsIndexRoute
-  InfraKubernetesWorkloadsIndexRoute: typeof InfraKubernetesWorkloadsIndexRoute
-  InfraKubernetesWorkloadsKindWorkloadNameRoute: typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
+	IndexRoute: typeof IndexRoute
+	AccountRoute: typeof AccountRoute
+	ChatRoute: typeof ChatRoute
+	CliLoginRoute: typeof CliLoginRoute
+	ConnectorsRoute: typeof ConnectorsRoute
+	DeveloperRoute: typeof DeveloperRoute
+	FlowLabRoute: typeof FlowLabRoute
+	InfraBenchRoute: typeof InfraBenchRoute
+	IntegrationsRoute: typeof IntegrationsRoute
+	LogsBenchRoute: typeof LogsBenchRoute
+	McpRoute: typeof McpRoute
+	McpAuthorizeRoute: typeof McpAuthorizeRoute
+	NodeLabRoute: typeof NodeLabRoute
+	OrgRequiredRoute: typeof OrgRequiredRoute
+	OverviewBenchRoute: typeof OverviewBenchRoute
+	QueryBuilderLabRoute: typeof QueryBuilderLabRoute
+	QuickStartRoute: typeof QuickStartRoute
+	SelectPlanRoute: typeof SelectPlanRoute
+	ServiceDetailBenchRoute: typeof ServiceDetailBenchRoute
+	ServiceMapRoute: typeof ServiceMapRoute
+	ServiceMapBenchRoute: typeof ServiceMapBenchRoute
+	SettingsRoute: typeof SettingsRoute
+	SignInRoute: typeof SignInRoute
+	SignUpRoute: typeof SignUpRoute
+	TimelineLabRoute: typeof TimelineLabRoute
+	WidgetLabRoute: typeof WidgetLabRoute
+	AlertsRuleIdRoute: typeof AlertsRuleIdRoute
+	AlertsCreateRoute: typeof AlertsCreateRoute
+	AnomaliesIncidentIdRoute: typeof AnomaliesIncidentIdRoute
+	DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
+	DashboardsTemplatesRoute: typeof DashboardsTemplatesRoute
+	ErrorsErrorTypeRoute: typeof ErrorsErrorTypeRoute
+	InfraHostNameRoute: typeof InfraHostNameRoute
+	InvestigationsIdRoute: typeof InvestigationsIdRoute
+	LogsLogIdRoute: typeof LogsLogIdRoute
+	MetricsMetricNameRoute: typeof MetricsMetricNameRoute
+	RecommendationsRecommendationKeyRoute: typeof RecommendationsRecommendationKeyRoute
+	ReplaysSessionIdRoute: typeof ReplaysSessionIdRoute
+	ServicesServiceNameRoute: typeof ServicesServiceNameRoute
+	TracesTraceIdRoute: typeof TracesTraceIdRoute
+	AlertsIndexRoute: typeof AlertsIndexRoute
+	AnalyticsIndexRoute: typeof AnalyticsIndexRoute
+	AnomaliesIndexRoute: typeof AnomaliesIndexRoute
+	DashboardsIndexRoute: typeof DashboardsIndexRoute
+	ErrorsIndexRoute: typeof ErrorsIndexRoute
+	InfraIndexRoute: typeof InfraIndexRoute
+	InvestigationsIndexRoute: typeof InvestigationsIndexRoute
+	LogsIndexRoute: typeof LogsIndexRoute
+	MetricsIndexRoute: typeof MetricsIndexRoute
+	ReplaysIndexRoute: typeof ReplaysIndexRoute
+	ServicesIndexRoute: typeof ServicesIndexRoute
+	TracesIndexRoute: typeof TracesIndexRoute
+	AlertsIncidentsIncidentIdRoute: typeof AlertsIncidentsIncidentIdRoute
+	ErrorsIssuesIssueIdRoute: typeof ErrorsIssuesIssueIdRoute
+	InfraCloudflareZoneNameRoute: typeof InfraCloudflareZoneNameRoute
+	InfraPlanetscaleDbNameRoute: typeof InfraPlanetscaleDbNameRoute
+	ErrorsIssuesIndexRoute: typeof ErrorsIssuesIndexRoute
+	InfraCloudflareIndexRoute: typeof InfraCloudflareIndexRoute
+	InfraPlanetscaleIndexRoute: typeof InfraPlanetscaleIndexRoute
+	DashboardsDashboardIdWidgetsWidgetIdRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRoute
+	InfraKubernetesNodesNodeNameRoute: typeof InfraKubernetesNodesNodeNameRoute
+	InfraKubernetesPodsPodNameRoute: typeof InfraKubernetesPodsPodNameRoute
+	InfraKubernetesNodesIndexRoute: typeof InfraKubernetesNodesIndexRoute
+	InfraKubernetesPodsIndexRoute: typeof InfraKubernetesPodsIndexRoute
+	InfraKubernetesWorkloadsIndexRoute: typeof InfraKubernetesWorkloadsIndexRoute
+	InfraKubernetesWorkloadsKindWorkloadNameRoute: typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
 }
 
-declare module '@tanstack/react-router' {
-  interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/account': {
-      id: '/account'
-      path: '/account'
-      fullPath: '/account'
-      preLoaderRoute: typeof AccountRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/chat': {
-      id: '/chat'
-      path: '/chat'
-      fullPath: '/chat'
-      preLoaderRoute: typeof ChatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/cli-login': {
-      id: '/cli-login'
-      path: '/cli-login'
-      fullPath: '/cli-login'
-      preLoaderRoute: typeof CliLoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/connectors': {
-      id: '/connectors'
-      path: '/connectors'
-      fullPath: '/connectors'
-      preLoaderRoute: typeof ConnectorsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/developer': {
-      id: '/developer'
-      path: '/developer'
-      fullPath: '/developer'
-      preLoaderRoute: typeof DeveloperRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/flow-lab': {
-      id: '/flow-lab'
-      path: '/flow-lab'
-      fullPath: '/flow-lab'
-      preLoaderRoute: typeof FlowLabRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra-bench': {
-      id: '/infra-bench'
-      path: '/infra-bench'
-      fullPath: '/infra-bench'
-      preLoaderRoute: typeof InfraBenchRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/integrations': {
-      id: '/integrations'
-      path: '/integrations'
-      fullPath: '/integrations'
-      preLoaderRoute: typeof IntegrationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/logs-bench': {
-      id: '/logs-bench'
-      path: '/logs-bench'
-      fullPath: '/logs-bench'
-      preLoaderRoute: typeof LogsBenchRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mcp': {
-      id: '/mcp'
-      path: '/mcp'
-      fullPath: '/mcp'
-      preLoaderRoute: typeof McpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mcp-authorize': {
-      id: '/mcp-authorize'
-      path: '/mcp-authorize'
-      fullPath: '/mcp-authorize'
-      preLoaderRoute: typeof McpAuthorizeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/node-lab': {
-      id: '/node-lab'
-      path: '/node-lab'
-      fullPath: '/node-lab'
-      preLoaderRoute: typeof NodeLabRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/org-required': {
-      id: '/org-required'
-      path: '/org-required'
-      fullPath: '/org-required'
-      preLoaderRoute: typeof OrgRequiredRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/overview-bench': {
-      id: '/overview-bench'
-      path: '/overview-bench'
-      fullPath: '/overview-bench'
-      preLoaderRoute: typeof OverviewBenchRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/query-builder-lab': {
-      id: '/query-builder-lab'
-      path: '/query-builder-lab'
-      fullPath: '/query-builder-lab'
-      preLoaderRoute: typeof QueryBuilderLabRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/quick-start': {
-      id: '/quick-start'
-      path: '/quick-start'
-      fullPath: '/quick-start'
-      preLoaderRoute: typeof QuickStartRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/select-plan': {
-      id: '/select-plan'
-      path: '/select-plan'
-      fullPath: '/select-plan'
-      preLoaderRoute: typeof SelectPlanRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/service-detail-bench': {
-      id: '/service-detail-bench'
-      path: '/service-detail-bench'
-      fullPath: '/service-detail-bench'
-      preLoaderRoute: typeof ServiceDetailBenchRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/service-map': {
-      id: '/service-map'
-      path: '/service-map'
-      fullPath: '/service-map'
-      preLoaderRoute: typeof ServiceMapRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/service-map-bench': {
-      id: '/service-map-bench'
-      path: '/service-map-bench'
-      fullPath: '/service-map-bench'
-      preLoaderRoute: typeof ServiceMapBenchRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sign-in': {
-      id: '/sign-in'
-      path: '/sign-in'
-      fullPath: '/sign-in'
-      preLoaderRoute: typeof SignInRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sign-up': {
-      id: '/sign-up'
-      path: '/sign-up'
-      fullPath: '/sign-up'
-      preLoaderRoute: typeof SignUpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/timeline-lab': {
-      id: '/timeline-lab'
-      path: '/timeline-lab'
-      fullPath: '/timeline-lab'
-      preLoaderRoute: typeof TimelineLabRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/widget-lab': {
-      id: '/widget-lab'
-      path: '/widget-lab'
-      fullPath: '/widget-lab'
-      preLoaderRoute: typeof WidgetLabRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/alerts/': {
-      id: '/alerts/'
-      path: '/alerts'
-      fullPath: '/alerts/'
-      preLoaderRoute: typeof AlertsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/alerts/$ruleId': {
-      id: '/alerts/$ruleId'
-      path: '/alerts/$ruleId'
-      fullPath: '/alerts/$ruleId'
-      preLoaderRoute: typeof AlertsRuleIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/alerts/create': {
-      id: '/alerts/create'
-      path: '/alerts/create'
-      fullPath: '/alerts/create'
-      preLoaderRoute: typeof AlertsCreateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/analytics/': {
-      id: '/analytics/'
-      path: '/analytics'
-      fullPath: '/analytics/'
-      preLoaderRoute: typeof AnalyticsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/anomalies/': {
-      id: '/anomalies/'
-      path: '/anomalies'
-      fullPath: '/anomalies/'
-      preLoaderRoute: typeof AnomaliesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/anomalies/$incidentId': {
-      id: '/anomalies/$incidentId'
-      path: '/anomalies/$incidentId'
-      fullPath: '/anomalies/$incidentId'
-      preLoaderRoute: typeof AnomaliesIncidentIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dashboards/': {
-      id: '/dashboards/'
-      path: '/dashboards'
-      fullPath: '/dashboards/'
-      preLoaderRoute: typeof DashboardsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dashboards/$dashboardId': {
-      id: '/dashboards/$dashboardId'
-      path: '/dashboards/$dashboardId'
-      fullPath: '/dashboards/$dashboardId'
-      preLoaderRoute: typeof DashboardsDashboardIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dashboards/templates': {
-      id: '/dashboards/templates'
-      path: '/dashboards/templates'
-      fullPath: '/dashboards/templates'
-      preLoaderRoute: typeof DashboardsTemplatesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/errors/': {
-      id: '/errors/'
-      path: '/errors'
-      fullPath: '/errors/'
-      preLoaderRoute: typeof ErrorsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/errors/$errorType': {
-      id: '/errors/$errorType'
-      path: '/errors/$errorType'
-      fullPath: '/errors/$errorType'
-      preLoaderRoute: typeof ErrorsErrorTypeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/': {
-      id: '/infra/'
-      path: '/infra'
-      fullPath: '/infra/'
-      preLoaderRoute: typeof InfraIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/$hostName': {
-      id: '/infra/$hostName'
-      path: '/infra/$hostName'
-      fullPath: '/infra/$hostName'
-      preLoaderRoute: typeof InfraHostNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/investigations/': {
-      id: '/investigations/'
-      path: '/investigations'
-      fullPath: '/investigations/'
-      preLoaderRoute: typeof InvestigationsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/investigations/$id': {
-      id: '/investigations/$id'
-      path: '/investigations/$id'
-      fullPath: '/investigations/$id'
-      preLoaderRoute: typeof InvestigationsIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/logs/': {
-      id: '/logs/'
-      path: '/logs'
-      fullPath: '/logs/'
-      preLoaderRoute: typeof LogsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/logs/$logId': {
-      id: '/logs/$logId'
-      path: '/logs/$logId'
-      fullPath: '/logs/$logId'
-      preLoaderRoute: typeof LogsLogIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/metrics/': {
-      id: '/metrics/'
-      path: '/metrics'
-      fullPath: '/metrics/'
-      preLoaderRoute: typeof MetricsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/metrics/$metricName': {
-      id: '/metrics/$metricName'
-      path: '/metrics/$metricName'
-      fullPath: '/metrics/$metricName'
-      preLoaderRoute: typeof MetricsMetricNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/recommendations/$recommendationKey': {
-      id: '/recommendations/$recommendationKey'
-      path: '/recommendations/$recommendationKey'
-      fullPath: '/recommendations/$recommendationKey'
-      preLoaderRoute: typeof RecommendationsRecommendationKeyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/replays/': {
-      id: '/replays/'
-      path: '/replays'
-      fullPath: '/replays/'
-      preLoaderRoute: typeof ReplaysIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/replays/$sessionId': {
-      id: '/replays/$sessionId'
-      path: '/replays/$sessionId'
-      fullPath: '/replays/$sessionId'
-      preLoaderRoute: typeof ReplaysSessionIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/services/': {
-      id: '/services/'
-      path: '/services'
-      fullPath: '/services/'
-      preLoaderRoute: typeof ServicesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/services/$serviceName': {
-      id: '/services/$serviceName'
-      path: '/services/$serviceName'
-      fullPath: '/services/$serviceName'
-      preLoaderRoute: typeof ServicesServiceNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/traces/': {
-      id: '/traces/'
-      path: '/traces'
-      fullPath: '/traces/'
-      preLoaderRoute: typeof TracesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/traces/$traceId': {
-      id: '/traces/$traceId'
-      path: '/traces/$traceId'
-      fullPath: '/traces/$traceId'
-      preLoaderRoute: typeof TracesTraceIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/alerts/incidents/$incidentId': {
-      id: '/alerts/incidents/$incidentId'
-      path: '/alerts/incidents/$incidentId'
-      fullPath: '/alerts/incidents/$incidentId'
-      preLoaderRoute: typeof AlertsIncidentsIncidentIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/errors/issues/': {
-      id: '/errors/issues/'
-      path: '/errors/issues'
-      fullPath: '/errors/issues/'
-      preLoaderRoute: typeof ErrorsIssuesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/errors/issues/$issueId': {
-      id: '/errors/issues/$issueId'
-      path: '/errors/issues/$issueId'
-      fullPath: '/errors/issues/$issueId'
-      preLoaderRoute: typeof ErrorsIssuesIssueIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/cloudflare/': {
-      id: '/infra/cloudflare/'
-      path: '/infra/cloudflare'
-      fullPath: '/infra/cloudflare/'
-      preLoaderRoute: typeof InfraCloudflareIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/cloudflare/$zoneName': {
-      id: '/infra/cloudflare/$zoneName'
-      path: '/infra/cloudflare/$zoneName'
-      fullPath: '/infra/cloudflare/$zoneName'
-      preLoaderRoute: typeof InfraCloudflareZoneNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/planetscale/': {
-      id: '/infra/planetscale/'
-      path: '/infra/planetscale'
-      fullPath: '/infra/planetscale/'
-      preLoaderRoute: typeof InfraPlanetscaleIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/planetscale/$dbName': {
-      id: '/infra/planetscale/$dbName'
-      path: '/infra/planetscale/$dbName'
-      fullPath: '/infra/planetscale/$dbName'
-      preLoaderRoute: typeof InfraPlanetscaleDbNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dashboards/$dashboardId_/widgets/$widgetId': {
-      id: '/dashboards/$dashboardId_/widgets/$widgetId'
-      path: '/dashboards/$dashboardId/widgets/$widgetId'
-      fullPath: '/dashboards/$dashboardId/widgets/$widgetId'
-      preLoaderRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/kubernetes/nodes/': {
-      id: '/infra/kubernetes/nodes/'
-      path: '/infra/kubernetes/nodes'
-      fullPath: '/infra/kubernetes/nodes/'
-      preLoaderRoute: typeof InfraKubernetesNodesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/kubernetes/nodes/$nodeName': {
-      id: '/infra/kubernetes/nodes/$nodeName'
-      path: '/infra/kubernetes/nodes/$nodeName'
-      fullPath: '/infra/kubernetes/nodes/$nodeName'
-      preLoaderRoute: typeof InfraKubernetesNodesNodeNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/kubernetes/pods/': {
-      id: '/infra/kubernetes/pods/'
-      path: '/infra/kubernetes/pods'
-      fullPath: '/infra/kubernetes/pods/'
-      preLoaderRoute: typeof InfraKubernetesPodsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/kubernetes/pods/$podName': {
-      id: '/infra/kubernetes/pods/$podName'
-      path: '/infra/kubernetes/pods/$podName'
-      fullPath: '/infra/kubernetes/pods/$podName'
-      preLoaderRoute: typeof InfraKubernetesPodsPodNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/kubernetes/workloads/': {
-      id: '/infra/kubernetes/workloads/'
-      path: '/infra/kubernetes/workloads'
-      fullPath: '/infra/kubernetes/workloads/'
-      preLoaderRoute: typeof InfraKubernetesWorkloadsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/infra/kubernetes/workloads/$kind/$workloadName': {
-      id: '/infra/kubernetes/workloads/$kind/$workloadName'
-      path: '/infra/kubernetes/workloads/$kind/$workloadName'
-      fullPath: '/infra/kubernetes/workloads/$kind/$workloadName'
-      preLoaderRoute: typeof InfraKubernetesWorkloadsKindWorkloadNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-  }
+declare module "@tanstack/react-router" {
+	interface FileRoutesByPath {
+		"/": {
+			id: "/"
+			path: "/"
+			fullPath: "/"
+			preLoaderRoute: typeof IndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/account": {
+			id: "/account"
+			path: "/account"
+			fullPath: "/account"
+			preLoaderRoute: typeof AccountRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/chat": {
+			id: "/chat"
+			path: "/chat"
+			fullPath: "/chat"
+			preLoaderRoute: typeof ChatRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/cli-login": {
+			id: "/cli-login"
+			path: "/cli-login"
+			fullPath: "/cli-login"
+			preLoaderRoute: typeof CliLoginRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/connectors": {
+			id: "/connectors"
+			path: "/connectors"
+			fullPath: "/connectors"
+			preLoaderRoute: typeof ConnectorsRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/developer": {
+			id: "/developer"
+			path: "/developer"
+			fullPath: "/developer"
+			preLoaderRoute: typeof DeveloperRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/flow-lab": {
+			id: "/flow-lab"
+			path: "/flow-lab"
+			fullPath: "/flow-lab"
+			preLoaderRoute: typeof FlowLabRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra-bench": {
+			id: "/infra-bench"
+			path: "/infra-bench"
+			fullPath: "/infra-bench"
+			preLoaderRoute: typeof InfraBenchRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/integrations": {
+			id: "/integrations"
+			path: "/integrations"
+			fullPath: "/integrations"
+			preLoaderRoute: typeof IntegrationsRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/logs-bench": {
+			id: "/logs-bench"
+			path: "/logs-bench"
+			fullPath: "/logs-bench"
+			preLoaderRoute: typeof LogsBenchRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/mcp": {
+			id: "/mcp"
+			path: "/mcp"
+			fullPath: "/mcp"
+			preLoaderRoute: typeof McpRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/mcp-authorize": {
+			id: "/mcp-authorize"
+			path: "/mcp-authorize"
+			fullPath: "/mcp-authorize"
+			preLoaderRoute: typeof McpAuthorizeRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/node-lab": {
+			id: "/node-lab"
+			path: "/node-lab"
+			fullPath: "/node-lab"
+			preLoaderRoute: typeof NodeLabRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/org-required": {
+			id: "/org-required"
+			path: "/org-required"
+			fullPath: "/org-required"
+			preLoaderRoute: typeof OrgRequiredRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/overview-bench": {
+			id: "/overview-bench"
+			path: "/overview-bench"
+			fullPath: "/overview-bench"
+			preLoaderRoute: typeof OverviewBenchRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/query-builder-lab": {
+			id: "/query-builder-lab"
+			path: "/query-builder-lab"
+			fullPath: "/query-builder-lab"
+			preLoaderRoute: typeof QueryBuilderLabRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/quick-start": {
+			id: "/quick-start"
+			path: "/quick-start"
+			fullPath: "/quick-start"
+			preLoaderRoute: typeof QuickStartRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/select-plan": {
+			id: "/select-plan"
+			path: "/select-plan"
+			fullPath: "/select-plan"
+			preLoaderRoute: typeof SelectPlanRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/service-detail-bench": {
+			id: "/service-detail-bench"
+			path: "/service-detail-bench"
+			fullPath: "/service-detail-bench"
+			preLoaderRoute: typeof ServiceDetailBenchRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/service-map": {
+			id: "/service-map"
+			path: "/service-map"
+			fullPath: "/service-map"
+			preLoaderRoute: typeof ServiceMapRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/service-map-bench": {
+			id: "/service-map-bench"
+			path: "/service-map-bench"
+			fullPath: "/service-map-bench"
+			preLoaderRoute: typeof ServiceMapBenchRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/settings": {
+			id: "/settings"
+			path: "/settings"
+			fullPath: "/settings"
+			preLoaderRoute: typeof SettingsRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/sign-in": {
+			id: "/sign-in"
+			path: "/sign-in"
+			fullPath: "/sign-in"
+			preLoaderRoute: typeof SignInRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/sign-up": {
+			id: "/sign-up"
+			path: "/sign-up"
+			fullPath: "/sign-up"
+			preLoaderRoute: typeof SignUpRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/timeline-lab": {
+			id: "/timeline-lab"
+			path: "/timeline-lab"
+			fullPath: "/timeline-lab"
+			preLoaderRoute: typeof TimelineLabRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/widget-lab": {
+			id: "/widget-lab"
+			path: "/widget-lab"
+			fullPath: "/widget-lab"
+			preLoaderRoute: typeof WidgetLabRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/alerts/": {
+			id: "/alerts/"
+			path: "/alerts"
+			fullPath: "/alerts/"
+			preLoaderRoute: typeof AlertsIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/alerts/$ruleId": {
+			id: "/alerts/$ruleId"
+			path: "/alerts/$ruleId"
+			fullPath: "/alerts/$ruleId"
+			preLoaderRoute: typeof AlertsRuleIdRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/alerts/create": {
+			id: "/alerts/create"
+			path: "/alerts/create"
+			fullPath: "/alerts/create"
+			preLoaderRoute: typeof AlertsCreateRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/analytics/": {
+			id: "/analytics/"
+			path: "/analytics"
+			fullPath: "/analytics/"
+			preLoaderRoute: typeof AnalyticsIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/anomalies/": {
+			id: "/anomalies/"
+			path: "/anomalies"
+			fullPath: "/anomalies/"
+			preLoaderRoute: typeof AnomaliesIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/anomalies/$incidentId": {
+			id: "/anomalies/$incidentId"
+			path: "/anomalies/$incidentId"
+			fullPath: "/anomalies/$incidentId"
+			preLoaderRoute: typeof AnomaliesIncidentIdRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/dashboards/": {
+			id: "/dashboards/"
+			path: "/dashboards"
+			fullPath: "/dashboards/"
+			preLoaderRoute: typeof DashboardsIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/dashboards/$dashboardId": {
+			id: "/dashboards/$dashboardId"
+			path: "/dashboards/$dashboardId"
+			fullPath: "/dashboards/$dashboardId"
+			preLoaderRoute: typeof DashboardsDashboardIdRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/dashboards/templates": {
+			id: "/dashboards/templates"
+			path: "/dashboards/templates"
+			fullPath: "/dashboards/templates"
+			preLoaderRoute: typeof DashboardsTemplatesRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/errors/": {
+			id: "/errors/"
+			path: "/errors"
+			fullPath: "/errors/"
+			preLoaderRoute: typeof ErrorsIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/errors/$errorType": {
+			id: "/errors/$errorType"
+			path: "/errors/$errorType"
+			fullPath: "/errors/$errorType"
+			preLoaderRoute: typeof ErrorsErrorTypeRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/": {
+			id: "/infra/"
+			path: "/infra"
+			fullPath: "/infra/"
+			preLoaderRoute: typeof InfraIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/$hostName": {
+			id: "/infra/$hostName"
+			path: "/infra/$hostName"
+			fullPath: "/infra/$hostName"
+			preLoaderRoute: typeof InfraHostNameRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/investigations/": {
+			id: "/investigations/"
+			path: "/investigations"
+			fullPath: "/investigations/"
+			preLoaderRoute: typeof InvestigationsIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/investigations/$id": {
+			id: "/investigations/$id"
+			path: "/investigations/$id"
+			fullPath: "/investigations/$id"
+			preLoaderRoute: typeof InvestigationsIdRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/logs/": {
+			id: "/logs/"
+			path: "/logs"
+			fullPath: "/logs/"
+			preLoaderRoute: typeof LogsIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/logs/$logId": {
+			id: "/logs/$logId"
+			path: "/logs/$logId"
+			fullPath: "/logs/$logId"
+			preLoaderRoute: typeof LogsLogIdRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/metrics/": {
+			id: "/metrics/"
+			path: "/metrics"
+			fullPath: "/metrics/"
+			preLoaderRoute: typeof MetricsIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/metrics/$metricName": {
+			id: "/metrics/$metricName"
+			path: "/metrics/$metricName"
+			fullPath: "/metrics/$metricName"
+			preLoaderRoute: typeof MetricsMetricNameRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/recommendations/$recommendationKey": {
+			id: "/recommendations/$recommendationKey"
+			path: "/recommendations/$recommendationKey"
+			fullPath: "/recommendations/$recommendationKey"
+			preLoaderRoute: typeof RecommendationsRecommendationKeyRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/replays/": {
+			id: "/replays/"
+			path: "/replays"
+			fullPath: "/replays/"
+			preLoaderRoute: typeof ReplaysIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/replays/$sessionId": {
+			id: "/replays/$sessionId"
+			path: "/replays/$sessionId"
+			fullPath: "/replays/$sessionId"
+			preLoaderRoute: typeof ReplaysSessionIdRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/services/": {
+			id: "/services/"
+			path: "/services"
+			fullPath: "/services/"
+			preLoaderRoute: typeof ServicesIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/services/$serviceName": {
+			id: "/services/$serviceName"
+			path: "/services/$serviceName"
+			fullPath: "/services/$serviceName"
+			preLoaderRoute: typeof ServicesServiceNameRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/traces/": {
+			id: "/traces/"
+			path: "/traces"
+			fullPath: "/traces/"
+			preLoaderRoute: typeof TracesIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/traces/$traceId": {
+			id: "/traces/$traceId"
+			path: "/traces/$traceId"
+			fullPath: "/traces/$traceId"
+			preLoaderRoute: typeof TracesTraceIdRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/alerts/incidents/$incidentId": {
+			id: "/alerts/incidents/$incidentId"
+			path: "/alerts/incidents/$incidentId"
+			fullPath: "/alerts/incidents/$incidentId"
+			preLoaderRoute: typeof AlertsIncidentsIncidentIdRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/errors/issues/": {
+			id: "/errors/issues/"
+			path: "/errors/issues"
+			fullPath: "/errors/issues/"
+			preLoaderRoute: typeof ErrorsIssuesIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/errors/issues/$issueId": {
+			id: "/errors/issues/$issueId"
+			path: "/errors/issues/$issueId"
+			fullPath: "/errors/issues/$issueId"
+			preLoaderRoute: typeof ErrorsIssuesIssueIdRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/cloudflare/": {
+			id: "/infra/cloudflare/"
+			path: "/infra/cloudflare"
+			fullPath: "/infra/cloudflare/"
+			preLoaderRoute: typeof InfraCloudflareIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/cloudflare/$zoneName": {
+			id: "/infra/cloudflare/$zoneName"
+			path: "/infra/cloudflare/$zoneName"
+			fullPath: "/infra/cloudflare/$zoneName"
+			preLoaderRoute: typeof InfraCloudflareZoneNameRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/planetscale/": {
+			id: "/infra/planetscale/"
+			path: "/infra/planetscale"
+			fullPath: "/infra/planetscale/"
+			preLoaderRoute: typeof InfraPlanetscaleIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/planetscale/$dbName": {
+			id: "/infra/planetscale/$dbName"
+			path: "/infra/planetscale/$dbName"
+			fullPath: "/infra/planetscale/$dbName"
+			preLoaderRoute: typeof InfraPlanetscaleDbNameRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/dashboards/$dashboardId_/widgets/$widgetId": {
+			id: "/dashboards/$dashboardId_/widgets/$widgetId"
+			path: "/dashboards/$dashboardId/widgets/$widgetId"
+			fullPath: "/dashboards/$dashboardId/widgets/$widgetId"
+			preLoaderRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/kubernetes/nodes/": {
+			id: "/infra/kubernetes/nodes/"
+			path: "/infra/kubernetes/nodes"
+			fullPath: "/infra/kubernetes/nodes/"
+			preLoaderRoute: typeof InfraKubernetesNodesIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/kubernetes/nodes/$nodeName": {
+			id: "/infra/kubernetes/nodes/$nodeName"
+			path: "/infra/kubernetes/nodes/$nodeName"
+			fullPath: "/infra/kubernetes/nodes/$nodeName"
+			preLoaderRoute: typeof InfraKubernetesNodesNodeNameRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/kubernetes/pods/": {
+			id: "/infra/kubernetes/pods/"
+			path: "/infra/kubernetes/pods"
+			fullPath: "/infra/kubernetes/pods/"
+			preLoaderRoute: typeof InfraKubernetesPodsIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/kubernetes/pods/$podName": {
+			id: "/infra/kubernetes/pods/$podName"
+			path: "/infra/kubernetes/pods/$podName"
+			fullPath: "/infra/kubernetes/pods/$podName"
+			preLoaderRoute: typeof InfraKubernetesPodsPodNameRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/kubernetes/workloads/": {
+			id: "/infra/kubernetes/workloads/"
+			path: "/infra/kubernetes/workloads"
+			fullPath: "/infra/kubernetes/workloads/"
+			preLoaderRoute: typeof InfraKubernetesWorkloadsIndexRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+		"/infra/kubernetes/workloads/$kind/$workloadName": {
+			id: "/infra/kubernetes/workloads/$kind/$workloadName"
+			path: "/infra/kubernetes/workloads/$kind/$workloadName"
+			fullPath: "/infra/kubernetes/workloads/$kind/$workloadName"
+			preLoaderRoute: typeof InfraKubernetesWorkloadsKindWorkloadNameRouteImport
+			parentRoute: typeof rootRouteImport
+		}
+	}
 }
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  AccountRoute: AccountRoute,
-  ChatRoute: ChatRoute,
-  CliLoginRoute: CliLoginRoute,
-  ConnectorsRoute: ConnectorsRoute,
-  DeveloperRoute: DeveloperRoute,
-  FlowLabRoute: FlowLabRoute,
-  InfraBenchRoute: InfraBenchRoute,
-  IntegrationsRoute: IntegrationsRoute,
-  LogsBenchRoute: LogsBenchRoute,
-  McpRoute: McpRoute,
-  McpAuthorizeRoute: McpAuthorizeRoute,
-  NodeLabRoute: NodeLabRoute,
-  OrgRequiredRoute: OrgRequiredRoute,
-  OverviewBenchRoute: OverviewBenchRoute,
-  QueryBuilderLabRoute: QueryBuilderLabRoute,
-  QuickStartRoute: QuickStartRoute,
-  SelectPlanRoute: SelectPlanRoute,
-  ServiceDetailBenchRoute: ServiceDetailBenchRoute,
-  ServiceMapRoute: ServiceMapRoute,
-  ServiceMapBenchRoute: ServiceMapBenchRoute,
-  SettingsRoute: SettingsRoute,
-  SignInRoute: SignInRoute,
-  SignUpRoute: SignUpRoute,
-  TimelineLabRoute: TimelineLabRoute,
-  WidgetLabRoute: WidgetLabRoute,
-  AlertsRuleIdRoute: AlertsRuleIdRoute,
-  AlertsCreateRoute: AlertsCreateRoute,
-  AnomaliesIncidentIdRoute: AnomaliesIncidentIdRoute,
-  DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
-  DashboardsTemplatesRoute: DashboardsTemplatesRoute,
-  ErrorsErrorTypeRoute: ErrorsErrorTypeRoute,
-  InfraHostNameRoute: InfraHostNameRoute,
-  InvestigationsIdRoute: InvestigationsIdRoute,
-  LogsLogIdRoute: LogsLogIdRoute,
-  MetricsMetricNameRoute: MetricsMetricNameRoute,
-  RecommendationsRecommendationKeyRoute: RecommendationsRecommendationKeyRoute,
-  ReplaysSessionIdRoute: ReplaysSessionIdRoute,
-  ServicesServiceNameRoute: ServicesServiceNameRoute,
-  TracesTraceIdRoute: TracesTraceIdRoute,
-  AlertsIndexRoute: AlertsIndexRoute,
-  AnalyticsIndexRoute: AnalyticsIndexRoute,
-  AnomaliesIndexRoute: AnomaliesIndexRoute,
-  DashboardsIndexRoute: DashboardsIndexRoute,
-  ErrorsIndexRoute: ErrorsIndexRoute,
-  InfraIndexRoute: InfraIndexRoute,
-  InvestigationsIndexRoute: InvestigationsIndexRoute,
-  LogsIndexRoute: LogsIndexRoute,
-  MetricsIndexRoute: MetricsIndexRoute,
-  ReplaysIndexRoute: ReplaysIndexRoute,
-  ServicesIndexRoute: ServicesIndexRoute,
-  TracesIndexRoute: TracesIndexRoute,
-  AlertsIncidentsIncidentIdRoute: AlertsIncidentsIncidentIdRoute,
-  ErrorsIssuesIssueIdRoute: ErrorsIssuesIssueIdRoute,
-  InfraCloudflareZoneNameRoute: InfraCloudflareZoneNameRoute,
-  InfraPlanetscaleDbNameRoute: InfraPlanetscaleDbNameRoute,
-  ErrorsIssuesIndexRoute: ErrorsIssuesIndexRoute,
-  InfraCloudflareIndexRoute: InfraCloudflareIndexRoute,
-  InfraPlanetscaleIndexRoute: InfraPlanetscaleIndexRoute,
-  DashboardsDashboardIdWidgetsWidgetIdRoute:
-    DashboardsDashboardIdWidgetsWidgetIdRoute,
-  InfraKubernetesNodesNodeNameRoute: InfraKubernetesNodesNodeNameRoute,
-  InfraKubernetesPodsPodNameRoute: InfraKubernetesPodsPodNameRoute,
-  InfraKubernetesNodesIndexRoute: InfraKubernetesNodesIndexRoute,
-  InfraKubernetesPodsIndexRoute: InfraKubernetesPodsIndexRoute,
-  InfraKubernetesWorkloadsIndexRoute: InfraKubernetesWorkloadsIndexRoute,
-  InfraKubernetesWorkloadsKindWorkloadNameRoute:
-    InfraKubernetesWorkloadsKindWorkloadNameRoute,
+	IndexRoute: IndexRoute,
+	AccountRoute: AccountRoute,
+	ChatRoute: ChatRoute,
+	CliLoginRoute: CliLoginRoute,
+	ConnectorsRoute: ConnectorsRoute,
+	DeveloperRoute: DeveloperRoute,
+	FlowLabRoute: FlowLabRoute,
+	InfraBenchRoute: InfraBenchRoute,
+	IntegrationsRoute: IntegrationsRoute,
+	LogsBenchRoute: LogsBenchRoute,
+	McpRoute: McpRoute,
+	McpAuthorizeRoute: McpAuthorizeRoute,
+	NodeLabRoute: NodeLabRoute,
+	OrgRequiredRoute: OrgRequiredRoute,
+	OverviewBenchRoute: OverviewBenchRoute,
+	QueryBuilderLabRoute: QueryBuilderLabRoute,
+	QuickStartRoute: QuickStartRoute,
+	SelectPlanRoute: SelectPlanRoute,
+	ServiceDetailBenchRoute: ServiceDetailBenchRoute,
+	ServiceMapRoute: ServiceMapRoute,
+	ServiceMapBenchRoute: ServiceMapBenchRoute,
+	SettingsRoute: SettingsRoute,
+	SignInRoute: SignInRoute,
+	SignUpRoute: SignUpRoute,
+	TimelineLabRoute: TimelineLabRoute,
+	WidgetLabRoute: WidgetLabRoute,
+	AlertsRuleIdRoute: AlertsRuleIdRoute,
+	AlertsCreateRoute: AlertsCreateRoute,
+	AnomaliesIncidentIdRoute: AnomaliesIncidentIdRoute,
+	DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
+	DashboardsTemplatesRoute: DashboardsTemplatesRoute,
+	ErrorsErrorTypeRoute: ErrorsErrorTypeRoute,
+	InfraHostNameRoute: InfraHostNameRoute,
+	InvestigationsIdRoute: InvestigationsIdRoute,
+	LogsLogIdRoute: LogsLogIdRoute,
+	MetricsMetricNameRoute: MetricsMetricNameRoute,
+	RecommendationsRecommendationKeyRoute: RecommendationsRecommendationKeyRoute,
+	ReplaysSessionIdRoute: ReplaysSessionIdRoute,
+	ServicesServiceNameRoute: ServicesServiceNameRoute,
+	TracesTraceIdRoute: TracesTraceIdRoute,
+	AlertsIndexRoute: AlertsIndexRoute,
+	AnalyticsIndexRoute: AnalyticsIndexRoute,
+	AnomaliesIndexRoute: AnomaliesIndexRoute,
+	DashboardsIndexRoute: DashboardsIndexRoute,
+	ErrorsIndexRoute: ErrorsIndexRoute,
+	InfraIndexRoute: InfraIndexRoute,
+	InvestigationsIndexRoute: InvestigationsIndexRoute,
+	LogsIndexRoute: LogsIndexRoute,
+	MetricsIndexRoute: MetricsIndexRoute,
+	ReplaysIndexRoute: ReplaysIndexRoute,
+	ServicesIndexRoute: ServicesIndexRoute,
+	TracesIndexRoute: TracesIndexRoute,
+	AlertsIncidentsIncidentIdRoute: AlertsIncidentsIncidentIdRoute,
+	ErrorsIssuesIssueIdRoute: ErrorsIssuesIssueIdRoute,
+	InfraCloudflareZoneNameRoute: InfraCloudflareZoneNameRoute,
+	InfraPlanetscaleDbNameRoute: InfraPlanetscaleDbNameRoute,
+	ErrorsIssuesIndexRoute: ErrorsIssuesIndexRoute,
+	InfraCloudflareIndexRoute: InfraCloudflareIndexRoute,
+	InfraPlanetscaleIndexRoute: InfraPlanetscaleIndexRoute,
+	DashboardsDashboardIdWidgetsWidgetIdRoute: DashboardsDashboardIdWidgetsWidgetIdRoute,
+	InfraKubernetesNodesNodeNameRoute: InfraKubernetesNodesNodeNameRoute,
+	InfraKubernetesPodsPodNameRoute: InfraKubernetesPodsPodNameRoute,
+	InfraKubernetesNodesIndexRoute: InfraKubernetesNodesIndexRoute,
+	InfraKubernetesPodsIndexRoute: InfraKubernetesPodsIndexRoute,
+	InfraKubernetesWorkloadsIndexRoute: InfraKubernetesWorkloadsIndexRoute,
+	InfraKubernetesWorkloadsKindWorkloadNameRoute: InfraKubernetesWorkloadsKindWorkloadNameRoute,
 }
-export const routeTree = rootRouteImport
-  ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>()
+export const routeTree = rootRouteImport._addFileChildren(rootRouteChildren)._addFileTypes<FileRouteTypes>()

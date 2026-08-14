@@ -2,7 +2,7 @@
  * The slice of configuration the replay engine needs. Both SDKs adapt their
  * own config shapes onto this.
  */
-export interface ReplayEngineConfig {
+export interface IngestConfig {
 	readonly endpoint: string
 	readonly ingestKey: string
 	readonly maskAllInputs: boolean
@@ -50,7 +50,7 @@ export async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
 
 /** POST session metadata (NDJSON, single row). `keepalive` for the final unload write. */
 export async function postSessionMeta(
-	config: ReplayEngineConfig,
+	config: IngestConfig,
 	row: Record<string, unknown>,
 	keepalive = false,
 ): Promise<void> {
@@ -71,7 +71,7 @@ export async function postSessionMeta(
 
 /** POST distilled session events (NDJSON, one row per event). Best-effort. */
 export async function postSessionEvents(
-	config: ReplayEngineConfig,
+	config: IngestConfig,
 	rows: ReadonlyArray<Record<string, unknown>>,
 	keepalive = false,
 ): Promise<void> {
@@ -100,7 +100,7 @@ export interface ChunkMeta {
 
 /** POST a gzipped rrweb event chunk. */
 export async function postSessionBlob(
-	config: ReplayEngineConfig,
+	config: IngestConfig,
 	meta: ChunkMeta,
 	gzipped: Uint8Array,
 	keepalive = false,

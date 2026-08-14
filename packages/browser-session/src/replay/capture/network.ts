@@ -1,5 +1,5 @@
 import { type Emit, safeEmit } from "../../capture/shared"
-import { activeTraceId } from "../../trace-id"
+import { activeTraceId } from "../../events/trace-id"
 
 /**
  * Capture fetch + XHR requests as session events, tagged with the active trace

@@ -30,10 +30,14 @@ export const retainedQueryV2: typeof MapleApiV2AtomClient.query = ((
 	endpoint: string,
 	request: Record<string, unknown> | undefined,
 ) => {
-	const atom = MapleApiV2AtomClient.query(group as never, endpoint as never, {
-		timeToLive: DEFAULT_QUERY_TTL,
-		...request,
-	} as never)
+	const atom = MapleApiV2AtomClient.query(
+		group as never,
+		endpoint as never,
+		{
+			timeToLive: DEFAULT_QUERY_TTL,
+			...request,
+		} as never,
+	)
 
 	const identity = `v2:${group}:${endpoint}:${identityFromKey(
 		encodeOrgScopedKey(getActiveOrgId(), request ?? {}),

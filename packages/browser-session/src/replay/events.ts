@@ -1,8 +1,8 @@
-import type { SessionEventSink } from "../events-sink"
-import { startEventSink } from "../events-sink"
+import type { SessionEventSink } from "../events/events-sink"
+import { startEventSink } from "../events/events-sink"
 import { installConsoleCapture } from "./capture/console"
 import { installNetworkCapture } from "./capture/network"
-import type { ReplayEngineConfig } from "./transport"
+import type { IngestConfig } from "../platform/transport"
 
 // The buffer, seq counter and event shape live in `../events-sink`, which runs
 // on every page load. This module is only the *replay-only* capture half — the
@@ -27,7 +27,7 @@ export interface EventCapture {
  * counts and click counts have to be counted even when replay is unsampled —
  * and a second listener here would double-count every one of them.
  */
-export function startEventCapture(config: ReplayEngineConfig, sessionId: string): EventCapture {
+export function startEventCapture(config: IngestConfig, sessionId: string): EventCapture {
 	const sink: SessionEventSink = startEventSink(config, sessionId)
 	const emit = sink.emit
 

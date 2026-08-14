@@ -398,7 +398,9 @@ function DashboardViewPage() {
 													)
 												}
 												onSelectTab={(sectionId, tabId) =>
-													applySectionView((prev) => withActiveTab(prev, sectionId, tabId))
+													applySectionView((prev) =>
+														withActiveTab(prev, sectionId, tabId),
+													)
 												}
 												onAddWidget={(sectionId, tabId) => {
 													setPendingSectionTarget({ sectionId, tabId })

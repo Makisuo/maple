@@ -25,7 +25,8 @@
 	"scripts": {
 		"build": "tsdown",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "vitest run",
+		"size": "bun scripts/size.ts"
 	},
 	"dependencies": {
 		"@opentelemetry/api": "^1.9.0",

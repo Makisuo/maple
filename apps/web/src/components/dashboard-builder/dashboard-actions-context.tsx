@@ -80,12 +80,7 @@ interface DashboardActionsProviderProps {
 		) => DashboardWidget[] | undefined
 		addTab: (dashboardId: string, sectionId: string, title?: string) => string | undefined
 		renameTab: (dashboardId: string, sectionId: string, tabId: string, title: string) => void
-		deleteTab: (
-			dashboardId: string,
-			sectionId: string,
-			tabId: string,
-			action: "move" | "delete",
-		) => void
+		deleteTab: (dashboardId: string, sectionId: string, tabId: string, action: "move" | "delete") => void
 		moveWidgetToSection: (dashboardId: string, widgetId: string, target: SectionTarget) => void
 		removeWidget: (dashboardId: string, widgetId: string) => DashboardWidget | undefined
 		restoreWidget: (dashboardId: string, widget: DashboardWidget) => void

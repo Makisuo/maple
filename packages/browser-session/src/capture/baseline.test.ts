@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import type { SessionEvent } from "../events-sink"
+import type { SessionEvent } from "../events/events-sink"
 import { startBaselineCapture } from "./baseline"
 
 describe("startBaselineCapture", () => {

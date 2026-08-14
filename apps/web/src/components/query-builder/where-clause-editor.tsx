@@ -134,8 +134,7 @@ export function WhereClauseEditor({
 
 		// The textarea is `resize-y` in most embeddings, and dragging it fires
 		// neither of the window events.
-		const observer =
-			typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => measure())
+		const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => measure())
 		if (observer && textAreaRef.current) observer.observe(textAreaRef.current)
 
 		window.addEventListener("resize", measure)

@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { markActivity, noteNavigation, peekSession, rotateSession } from "./session"
-import {
-	type SessionLifecycleHooks,
-	type SessionSuspendOptions,
-	startSessionLifecycle,
-} from "./session-lifecycle"
-import { resetVisitorCacheForTests } from "./visitor"
+import { type SessionLifecycleHooks, type SessionSuspendOptions, startSessionLifecycle } from "./lifecycle"
+import { resetVisitorCacheForTests } from "../identity/visitor"
 
 // Same in-memory storage stand-in session.test.ts uses, so the rotation logic
 // under test is the real one on a controllable clock.

@@ -1,9 +1,9 @@
-import { startBaselineCapture } from "./capture/baseline"
+import { startBaselineCapture } from "../capture/baseline"
 import { formatCHDateTime } from "./meta-row"
-import type { ReplayEngineConfig } from "./replay/transport"
-import { postSessionEvents } from "./replay/transport"
-import { approximateSize } from "./replay/util"
-import { markActivity, noteNavigation } from "./session"
+import type { IngestConfig } from "../platform/transport"
+import { postSessionEvents } from "../platform/transport"
+import { approximateSize } from "../platform/approximate-size"
+import { markActivity, noteNavigation } from "../session/session"
 import { activeTraceId } from "./trace-id"
 
 /**
@@ -92,7 +92,7 @@ export function getActiveSink(): SessionEventSink | undefined {
  * sampling would make unique visitors and top pages a sample rather than a
  * count. The rrweb recorder stays sampled — it is the expensive part.
  */
-export function startEventSink(config: ReplayEngineConfig, sessionId: string): SessionEventSink {
+export function startEventSink(config: IngestConfig, sessionId: string): SessionEventSink {
 	const existing = holder()[SINK_KEY]
 	if (existing && existing.sessionId === sessionId) return existing.sink
 	// A rotated session means a new sink; drain the old one first so its tail

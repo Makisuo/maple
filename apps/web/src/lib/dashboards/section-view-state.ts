@@ -149,9 +149,7 @@ export function resolveSectionView(
 	search: SectionViewSearch,
 ): ResolvedSectionView {
 	const target =
-		search.widget === undefined
-			? undefined
-			: widgets.find((widget) => widget.id === search.widget)
+		search.widget === undefined ? undefined : widgets.find((widget) => widget.id === search.widget)
 
 	const collapsed = new Set<string>()
 	const activeTabs = new Map<string, string>()

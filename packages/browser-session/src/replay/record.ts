@@ -1,7 +1,7 @@
 import { record } from "rrweb"
-import { markActivity, nextChunkSeq } from "../session"
-import type { ReplayEngineConfig } from "./transport"
-import { gzip, postSessionBlob, type ChunkMeta } from "./transport"
+import { markActivity, nextChunkSeq } from "../session/session"
+import type { IngestConfig } from "../platform/transport"
+import { gzip, postSessionBlob, type ChunkMeta } from "../platform/transport"
 
 // rrweb event shape — typed loosely to avoid coupling to @rrweb/types across
 // alpha releases. We only read `type`, `timestamp`, and incremental `data`.
@@ -45,7 +45,7 @@ export interface Recorder {
 	getClickCount: () => number
 }
 
-export function startRecording(config: ReplayEngineConfig, sessionId: string): Recorder {
+export function startRecording(config: IngestConfig, sessionId: string): Recorder {
 	// Events are serialized once at emit time and buffered as JSON strings, so
 	// flushing is a cheap `join` instead of re-stringifying the whole buffer
 	// (which stalls the main thread for hundreds of ms on full snapshots).

@@ -9,7 +9,7 @@ import {
 	onSessionRotate,
 	peekSession,
 } from "./session"
-import { resetVisitorCacheForTests } from "./visitor"
+import { resetVisitorCacheForTests } from "../identity/visitor"
 
 // Minimal in-memory sessionStorage standing in for the browser's, so the
 // rotation logic can be exercised under Node with a controllable clock.

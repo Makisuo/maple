@@ -1,4 +1,4 @@
-import { claimNewVisitor } from "./visitor"
+import { claimNewVisitor } from "../identity/visitor"
 
 const STORAGE_KEY = "maple.session"
 

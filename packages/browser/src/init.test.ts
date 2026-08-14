@@ -19,7 +19,7 @@ vi.mock("@maple/browser-session/replay", () => ({
 	},
 }))
 
-import { resetSinkForTests } from "../../browser-session/src/events-sink"
+import { resetSinkForTests } from "../../browser-session/src/events/events-sink"
 import { init } from "./init"
 
 class MemoryStorage {

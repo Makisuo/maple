@@ -15,10 +15,7 @@ import { DashboardGrid } from "@/components/dashboard-builder/canvas/dashboard-c
 import type { GridTier } from "@/components/dashboard-builder/canvas/grid-breakpoints"
 import { InlineEditableText } from "@/components/dashboard-builder/sections/inline-editable-text"
 import { SectionTabBar } from "@/components/dashboard-builder/sections/section-tab-bar"
-import {
-	DeleteSectionDialog,
-	DeleteTabDialog,
-} from "@/components/dashboard-builder/sections/section-dialogs"
+import { DeleteSectionDialog, DeleteTabDialog } from "@/components/dashboard-builder/sections/section-dialogs"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
 import type { DashboardSection, DashboardWidget } from "@/components/dashboard-builder/types"
 
@@ -149,7 +146,11 @@ export function DashboardSectionView({
 						<DropdownMenu>
 							<DropdownMenuTrigger
 								render={
-									<Button variant="ghost" size="icon-xs" aria-label={`${section.title} options`}>
+									<Button
+										variant="ghost"
+										size="icon-xs"
+										aria-label={`${section.title} options`}
+									>
 										<DotsVerticalIcon size={14} />
 									</Button>
 								}
@@ -181,17 +182,25 @@ export function DashboardSectionView({
 								{collapsible && (
 									<DropdownMenuItem
 										onClick={() =>
-											setSectionCollapsedDefault(section.id, !(section.collapsed ?? false))
+											setSectionCollapsedDefault(
+												section.id,
+												!(section.collapsed ?? false),
+											)
 										}
 									>
 										{section.collapsed ? "Expanded by default" : "Collapsed by default"}
 									</DropdownMenuItem>
 								)}
-								<DropdownMenuItem onClick={() => setSectionCollapsible(section.id, !collapsible)}>
+								<DropdownMenuItem
+									onClick={() => setSectionCollapsible(section.id, !collapsible)}
+								>
 									{collapsible ? "Always expanded" : "Allow collapsing"}
 								</DropdownMenuItem>
 								<DropdownMenuSeparator />
-								<DropdownMenuItem variant="destructive" onClick={() => setDeleteSectionOpen(true)}>
+								<DropdownMenuItem
+									variant="destructive"
+									onClick={() => setDeleteSectionOpen(true)}
+								>
 									<TrashIcon size={14} />
 									Delete group…
 								</DropdownMenuItem>
