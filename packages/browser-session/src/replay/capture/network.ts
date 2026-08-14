@@ -1,5 +1,5 @@
-import { activeTraceId } from "../../events-sink"
-import { type Emit, safeEmit } from "./shared"
+import { type Emit, safeEmit } from "../../capture/shared"
+import { activeTraceId } from "../../trace-id"
 
 /**
  * Capture fetch + XHR requests as session events, tagged with the active trace

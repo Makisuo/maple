@@ -12,12 +12,30 @@ export interface ReplayEngineConfig {
 // Replay POSTs are best-effort and must never throw into the host app, but a
 // fully broken ingest endpoint should not be *silent*. Warn at most once every
 // 30s so a misconfigured endpoint is visible in the console without spamming it.
-let lastWarnAt = 0
+// Rate-limited per call site, so a broken endpoint surfaces each distinct
+// failure rather than whichever one happened to warn first.
+const lastWarnAt = new Map<string, number>()
 function warnDropped(what: string, error: unknown): void {
 	const now = Date.now()
-	if (now - lastWarnAt < 30_000) return
-	lastWarnAt = now
+	if (now - (lastWarnAt.get(what) ?? 0) < 30_000) return
+	lastWarnAt.set(what, now)
 	console.warn(`[maple] session replay ${what} failed (dropping; will retry on next chunk):`, error)
+}
+
+/**
+ * Largest body we will hand to a `keepalive` fetch.
+ *
+ * The Fetch spec caps the *combined* inflight keepalive body at 64 KiB, and on
+ * the way out we issue up to three of these at once (metadata row, final events
+ * batch, last replay chunk). Over the budget the browser rejects the request
+ * outright, so a normal request — which the page may or may not survive long
+ * enough to finish — is strictly the better bet than a guaranteed rejection.
+ */
+const MAX_KEEPALIVE_BYTES = 48 * 1024
+
+/** Whether a body of `bytes` may still ride the keepalive budget. */
+export function keepaliveFor(requested: boolean, bytes: number): boolean {
+	return requested && bytes <= MAX_KEEPALIVE_BYTES
 }
 
 /** gzip a byte buffer using the native CompressionStream (no library). */
@@ -44,7 +62,7 @@ export async function postSessionMeta(
 			"content-type": "application/x-ndjson",
 		},
 		body,
-		keepalive,
+		keepalive: keepaliveFor(keepalive, body.length),
 	}).catch((error) => {
 		// Replay is best-effort; never throw into the host app.
 		warnDropped("metadata POST", error)
@@ -66,7 +84,7 @@ export async function postSessionEvents(
 			"content-type": "application/x-ndjson",
 		},
 		body,
-		keepalive,
+		keepalive: keepaliveFor(keepalive, body.length),
 	}).catch((error) => {
 		warnDropped("events POST", error)
 	})
@@ -80,7 +98,7 @@ export interface ChunkMeta {
 	readonly durationMs: number
 }
 
-/** PUT a gzipped rrweb event chunk. */
+/** POST a gzipped rrweb event chunk. */
 export async function postSessionBlob(
 	config: ReplayEngineConfig,
 	meta: ChunkMeta,
@@ -99,7 +117,7 @@ export async function postSessionBlob(
 			"x-maple-duration-ms": String(meta.durationMs),
 		},
 		body: gzipped as unknown as BodyInit,
-		keepalive,
+		keepalive: keepaliveFor(keepalive, gzipped.byteLength),
 	}).catch((error) => {
 		// Best-effort.
 		warnDropped("blob PUT", error)

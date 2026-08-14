@@ -56,6 +56,7 @@ export function startRecording(config: ReplayEngineConfig, sessionId: string): R
 	let lastTimestamp = 0
 	let droppedChunk = false
 	let clickCount = 0
+	let stopped = false
 
 	const resetBuffer = () => {
 		parts = []
@@ -66,7 +67,10 @@ export function startRecording(config: ReplayEngineConfig, sessionId: string): R
 	}
 
 	const flush = async (keepalive = false): Promise<void> => {
-		if (parts.length === 0) return
+		// A stopped recorder must not upload, ever. `stop()` is the consent-revoke
+		// path — it discards rather than sends — and the only thing that can still
+		// call in here afterwards is a flush scheduled before the revoke landed.
+		if (stopped || parts.length === 0) return
 		const body = `[${parts.join(",")}]`
 		const isCheckpoint = bufferHasCheckpoint
 		const eventCount = parts.length
@@ -146,9 +150,20 @@ export function startRecording(config: ReplayEngineConfig, sessionId: string): R
 	// The periodic flush yields to idle time so it never competes with an
 	// in-progress interaction; the timeout bounds staleness. Explicit flushes
 	// (pagehide/unload) bypass this and run immediately.
+	//
+	// The handle is retained so `stop()` can cancel it: a callback already
+	// queued when consent is revoked would otherwise still fire — up to the 2s
+	// timeout later — and upload the buffer the revoke was meant to discard.
+	let idleHandle: number | undefined
 	const scheduleFlush = () => {
 		if (typeof requestIdleCallback === "function") {
-			requestIdleCallback(() => void flush(), { timeout: 2_000 })
+			idleHandle = requestIdleCallback(
+				() => {
+					idleHandle = undefined
+					void flush()
+				},
+				{ timeout: 2_000 },
+			)
 		} else {
 			void flush()
 		}
@@ -157,7 +172,15 @@ export function startRecording(config: ReplayEngineConfig, sessionId: string): R
 
 	return {
 		stop: () => {
+			stopped = true
 			clearInterval(flushTimer)
+			if (idleHandle !== undefined && typeof cancelIdleCallback === "function") {
+				cancelIdleCallback(idleHandle)
+				idleHandle = undefined
+			}
+			// Nothing may be uploaded from here on, so the buffer is dead weight —
+			// and on a revoke it is dead weight holding recorded user data.
+			resetBuffer()
 			stop?.()
 		},
 		flush,

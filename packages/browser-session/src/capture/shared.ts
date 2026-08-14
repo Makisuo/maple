@@ -1,4 +1,4 @@
-import type { SessionEvent } from "../../events-sink"
+import type { SessionEvent } from "../events-sink"
 
 /** The sink every capture module pushes distilled events into. */
 export type Emit = (ev: SessionEvent) => void

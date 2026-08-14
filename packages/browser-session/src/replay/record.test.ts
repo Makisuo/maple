@@ -125,4 +125,48 @@ describe("startRecording", () => {
 		warn.mockRestore()
 		recorder.stop()
 	})
+
+	it("uploads nothing once stopped, so a consent revoke discards the buffer", async () => {
+		const recorder = startRecording(CONFIG, "session-1")
+		emitRef!(fullSnapshot(1_000), true)
+		emitRef!(incremental(2_000))
+
+		// A revoke stops the recorder without flushing. Anything still buffered is
+		// recorded user data that consent was just withdrawn for.
+		recorder.stop()
+		await recorder.flush()
+
+		expect(posted).toEqual([])
+	})
+
+	it("cancels a scheduled idle flush on stop", async () => {
+		const idleCallbacks: Array<() => void> = []
+		let nextHandle = 1
+		const cancelIdleCallback = vi.fn()
+		vi.stubGlobal("requestIdleCallback", (cb: () => void) => {
+			idleCallbacks.push(cb)
+			return nextHandle++
+		})
+		vi.stubGlobal("cancelIdleCallback", cancelIdleCallback)
+
+		try {
+			const recorder = startRecording(CONFIG, "session-1")
+			emitRef!(fullSnapshot(1_000), true)
+
+			// The periodic timer queues an idle flush; the revoke lands before the
+			// browser gets round to running it.
+			await vi.advanceTimersByTimeAsync(5_000)
+			expect(idleCallbacks).toHaveLength(1)
+
+			recorder.stop()
+			expect(cancelIdleCallback).toHaveBeenCalledWith(1)
+
+			// Belt and braces: even a callback the browser ran anyway must not post.
+			idleCallbacks[0]!()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(posted).toEqual([])
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
 })
