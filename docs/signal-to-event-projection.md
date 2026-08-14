@@ -886,18 +886,19 @@ FULL`. While ingest is quiesced, backup first completes and verifies a blocking
 
 Maple Local activates immutable revisions with authenticated
 `POST /local/eventing/projections`. The same maintenance credential protects
-`GET /local/eventing/projections`, `/local/eventing/health`, and
-`/local/eventing/outbox`. Ready records receive a separate, append-only
+`GET /local/eventing/projections`, `/local/eventing/health`,
+`/local/eventing/outbox`, and consumer administration. Ready records receive a separate, append-only
 readiness `sequence` on their first staged-to-ready transition;
 `?after=<sequence>&limit=<n>` therefore cannot skip an older staged event that is
 recovered after newer events were already read. `?state=staged` uses the original
 staging sequence for bounded inspection of records stranded before the chDB
 commit point. The Local store defaults to at most 10,000 events and 256 MiB of
 canonical event JSON. Staging fails closed with a retryable ingest error before
-either cap can be exceeded. These endpoints are an operable inspection/recovery
-surface, not yet a delivery protocol: durable consumer claim/acknowledgement and
-deletion/retention begin with the first downstream consumer rather than being
-implied by a destructive read API in this PR.
+either cap can be exceeded. Inspection remains non-destructive. Named downstream
+consumers use the separate [Maple Local event consumer protocol](./local-event-consumers.md) for
+leased, at-least-once claims and exact whole-batch acknowledgement. Ready-event pruning advances only
+through the slowest active consumer and retains a bounded acknowledged tail; staged events are never
+pruned by delivery acknowledgement.
 
 Re-delivery is the safe recovery operation: it deduplicates the same staged event
 ID and promotes it only after the warehouse write succeeds. Maple never blindly

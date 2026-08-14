@@ -17,7 +17,14 @@ import {
 	rawTelemetryTtlStatements,
 } from "./chdb"
 import { buildInsertStatements } from "./inserts"
-import { eventingControlSnapshotPath, LocalEventingControlStore } from "./eventing/control-store"
+import {
+	eventingControlSnapshotPath,
+	EventConsumerConflictError,
+	EventConsumerInputError,
+	EventConsumerNotFoundError,
+	LocalEventingControlStore,
+} from "./eventing/control-store"
+import { ensureEventConsumerToken, eventConsumerTokenMatches } from "./eventing/consumer-auth"
 import { LocalEventingRuntime } from "./eventing/runtime"
 import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch, OtlpFieldError } from "./otlp/encode"
 import {
@@ -631,6 +638,7 @@ const handleRetirement = async (
 const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const MAX_CHECKPOINT_BODY_BYTES = 4 * 1024
 const MAX_PROJECTION_BODY_BYTES = 512 * 1024
+const MAX_CONSUMER_BODY_BYTES = 16 * 1024
 
 /** Typed, authenticated replacement for sending BACKUP through /local/query. */
 const handleCheckpointBackup = async (
@@ -712,6 +720,150 @@ const handleProjectionActivation = async (
 	}
 }
 
+const eventConsumerErrorResponse = (error: unknown): Response => {
+	const message = error instanceof Error ? error.message : String(error)
+	if (error instanceof EventConsumerNotFoundError) return text(message, 404)
+	if (error instanceof EventConsumerConflictError) return text(message, 409)
+	if (error instanceof EventConsumerInputError) return text(message, 400)
+	return text(`event consumer operation failed: ${message}`, 500)
+}
+
+const handleConsumerRegistration = async (
+	eventing: LocalEventingRuntime,
+	gate: RequestQuiescenceGate,
+	maintenanceToken: string,
+	req: Request,
+): Promise<Response> => {
+	const unauthorized = eventingAuthorized(maintenanceToken, req)
+	if (unauthorized) return unauthorized
+	let body: unknown
+	try {
+		body = await readBoundedJson(req, MAX_CONSUMER_BODY_BYTES)
+	} catch (error) {
+		return invalidJsonResponse(error)
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
+	const record = body as Record<string, unknown>
+	if (
+		Object.keys(record).sort().join(",") !== "consumerId,startAt" ||
+		typeof record.consumerId !== "string" ||
+		(record.startAt !== "beginning" && record.startAt !== "latest")
+	)
+		return text("invalid event consumer registration fields", 400)
+	const consumerId = record.consumerId as string
+	const startAt = record.startAt as "beginning" | "latest"
+	return admitted(gate, async () => {
+		try {
+			return json(eventing.registerConsumer(consumerId, startAt), 201)
+		} catch (error) {
+			return eventConsumerErrorResponse(error)
+		}
+	})
+}
+
+const handleConsumerDisable = async (
+	eventing: LocalEventingRuntime,
+	gate: RequestQuiescenceGate,
+	maintenanceToken: string,
+	req: Request,
+): Promise<Response> => {
+	const unauthorized = eventingAuthorized(maintenanceToken, req)
+	if (unauthorized) return unauthorized
+	let body: unknown
+	try {
+		body = await readBoundedJson(req, MAX_CONSUMER_BODY_BYTES)
+	} catch (error) {
+		return invalidJsonResponse(error)
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
+	const record = body as Record<string, unknown>
+	if (Object.keys(record).join(",") !== "consumerId" || typeof record.consumerId !== "string")
+		return text("invalid event consumer disable fields", 400)
+	return admitted(gate, async () => {
+		try {
+			return json(eventing.disableConsumer(record.consumerId as string))
+		} catch (error) {
+			return eventConsumerErrorResponse(error)
+		}
+	})
+}
+
+const handleConsumerClaim = async (
+	eventing: LocalEventingRuntime,
+	gate: RequestQuiescenceGate,
+	consumerToken: string,
+	req: Request,
+): Promise<Response> => {
+	if (!eventConsumerTokenMatches(consumerToken, req.headers.get("x-maple-event-consumer-token")))
+		return text("event consumer authorization required", 403)
+	let body: unknown
+	try {
+		body = await readBoundedJson(req, MAX_CONSUMER_BODY_BYTES)
+	} catch (error) {
+		return invalidJsonResponse(error)
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
+	const record = body as Record<string, unknown>
+	if (
+		Object.keys(record).sort().join(",") !== "consumerId,leaseSeconds,limit" ||
+		typeof record.consumerId !== "string" ||
+		typeof record.limit !== "number" ||
+		typeof record.leaseSeconds !== "number"
+	)
+		return text("invalid event consumer claim fields", 400)
+	return admitted(gate, async () => {
+		try {
+			return json(
+				eventing.claimReady(
+					record.consumerId as string,
+					record.limit as number,
+					record.leaseSeconds as number,
+				),
+			)
+		} catch (error) {
+			return eventConsumerErrorResponse(error)
+		}
+	})
+}
+
+const handleConsumerAcknowledgement = async (
+	eventing: LocalEventingRuntime,
+	gate: RequestQuiescenceGate,
+	consumerToken: string,
+	req: Request,
+): Promise<Response> => {
+	if (!eventConsumerTokenMatches(consumerToken, req.headers.get("x-maple-event-consumer-token")))
+		return text("event consumer authorization required", 403)
+	let body: unknown
+	try {
+		body = await readBoundedJson(req, MAX_CONSUMER_BODY_BYTES)
+	} catch (error) {
+		return invalidJsonResponse(error)
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
+	const record = body as Record<string, unknown>
+	if (
+		Object.keys(record).sort().join(",") !== "consumerId,leaseToken,throughSequence" ||
+		typeof record.consumerId !== "string" ||
+		typeof record.leaseToken !== "string" ||
+		typeof record.throughSequence !== "number"
+	)
+		return text("invalid event consumer acknowledgement fields", 400)
+	return admitted(gate, async () => {
+		try {
+			return json(
+				eventing.acknowledgeClaim(
+					record.consumerId as string,
+					record.leaseToken as string,
+					record.throughSequence as number,
+				),
+			)
+		} catch (error) {
+			return eventConsumerErrorResponse(error)
+		}
+	})
+}
+
 const handleEventingRead = (
 	eventing: LocalEventingRuntime,
 	token: string,
@@ -722,6 +874,7 @@ const handleEventingRead = (
 	if (unauthorized) return unauthorized
 	if (url.pathname === "/local/eventing/health") return json(eventing.health())
 	if (url.pathname === "/local/eventing/projections") return json(eventing.listActive())
+	if (url.pathname === "/local/eventing/consumers") return json(eventing.listConsumers())
 	if (url.pathname === "/local/eventing/outbox") {
 		const rawLimit = url.searchParams.get("limit")
 		const limit = rawLimit === null ? 100 : Number(rawLimit)
@@ -750,6 +903,7 @@ const makeFetch =
 		authority: RetiredDayAuthority,
 		gate: RequestQuiescenceGate,
 		maintenanceToken: string,
+		consumerToken: string,
 		controlStore: LocalEventingControlStore,
 		eventing: LocalEventingRuntime,
 	) =>
@@ -791,6 +945,14 @@ const makeFetch =
 				)
 			if (url.pathname === "/local/eventing/projections")
 				return respond(await handleProjectionActivation(eventing, gate, maintenanceToken, req))
+			if (url.pathname === "/local/eventing/consumers")
+				return respond(await handleConsumerRegistration(eventing, gate, maintenanceToken, req))
+			if (url.pathname === "/local/eventing/consumers/disable")
+				return respond(await handleConsumerDisable(eventing, gate, maintenanceToken, req))
+			if (url.pathname === "/local/eventing/claims")
+				return respond(await handleConsumerClaim(eventing, gate, consumerToken, req))
+			if (url.pathname === "/local/eventing/acks")
+				return respond(await handleConsumerAcknowledgement(eventing, gate, consumerToken, req))
 			if (url.pathname === "/local/retention/retire")
 				return respond(await handleRetirement(db, authority, gate, maintenanceToken, req))
 		}
@@ -906,6 +1068,13 @@ export const startServer = (
 					message: `failed to load maintenance token: ${error instanceof Error ? error.message : String(error)}`,
 				}),
 		})
+		const consumerToken = yield* Effect.tryPromise({
+			try: () => ensureEventConsumerToken(options.dataDir),
+			catch: (error) =>
+				new ChdbError({
+					message: `failed to load event consumer token: ${error instanceof Error ? error.message : String(error)}`,
+				}),
+		})
 		const gate = new RequestQuiescenceGate()
 		// A dedicated runtime carrying the OTel tracer for per-request spans: the
 		// Bun.serve handler runs outside Effect, so each request's span effect is
@@ -929,6 +1098,7 @@ export const startServer = (
 							authority,
 							gate,
 							maintenanceToken,
+							consumerToken,
 							controlStore,
 							eventing,
 						),
@@ -946,6 +1116,10 @@ export const startServer = (
 	})
 
 export const __testables = {
+	handleConsumerAcknowledgement,
+	handleConsumerClaim,
+	handleConsumerDisable,
+	handleConsumerRegistration,
 	handleCheckpointBackup,
 	handleEventingRead,
 	handleProjectionActivation,

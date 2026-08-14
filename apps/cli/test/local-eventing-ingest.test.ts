@@ -137,6 +137,125 @@ describe("Local eventing ingest seam", () => {
 		await maintenance
 	})
 
+	it("separates consumer administration from claim and acknowledgement authorization", async () => {
+		const gate = new __testables.RequestQuiescenceGate()
+		const calls: string[] = []
+		const eventing = {
+			registerConsumer: (consumerId: string, startAt: string) => {
+				calls.push(`register:${consumerId}:${startAt}`)
+				return { consumerId, active: true }
+			},
+			disableConsumer: (consumerId: string) => {
+				calls.push(`disable:${consumerId}`)
+				return { consumerId, active: false }
+			},
+			claimReady: (consumerId: string, limit: number, leaseSeconds: number) => {
+				calls.push(`claim:${consumerId}:${limit}:${leaseSeconds}`)
+				return {
+					consumerId,
+					leaseToken: "a".repeat(64),
+					throughSequence: 7,
+					events: [{ sequence: 7, event: { id: "event-7" } }],
+				}
+			},
+			acknowledgeClaim: (consumerId: string, _leaseToken: string, throughSequence: number) => {
+				calls.push(`ack:${consumerId}:${throughSequence}`)
+				return { consumerId, acknowledgedThrough: throughSequence, prunedEvents: 0 }
+			},
+		}
+
+		const registration = await __testables.handleConsumerRegistration(
+			eventing as never,
+			gate,
+			"maintenance-secret",
+			new Request("http://127.0.0.1/local/eventing/consumers", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-maple-maintenance-token": "maintenance-secret",
+				},
+				body: JSON.stringify({ consumerId: "matrix", startAt: "beginning" }),
+			}),
+		)
+		strictEqual(registration.status, 201)
+
+		const wrongClaimCredential = await __testables.handleConsumerClaim(
+			eventing as never,
+			gate,
+			"consumer-secret",
+			new Request("http://127.0.0.1/local/eventing/claims", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-maple-maintenance-token": "maintenance-secret",
+				},
+				body: JSON.stringify({ consumerId: "matrix", limit: 10, leaseSeconds: 30 }),
+			}),
+		)
+		strictEqual(wrongClaimCredential.status, 403)
+
+		const claim = await __testables.handleConsumerClaim(
+			eventing as never,
+			gate,
+			"consumer-secret",
+			new Request("http://127.0.0.1/local/eventing/claims", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-maple-event-consumer-token": "consumer-secret",
+				},
+				body: JSON.stringify({ consumerId: "matrix", limit: 10, leaseSeconds: 30 }),
+			}),
+		)
+		strictEqual(claim.status, 200)
+		const claimed = (await claim.json()) as { leaseToken: string; throughSequence: number }
+
+		const acknowledgement = await __testables.handleConsumerAcknowledgement(
+			eventing as never,
+			gate,
+			"consumer-secret",
+			new Request("http://127.0.0.1/local/eventing/acks", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-maple-event-consumer-token": "consumer-secret",
+				},
+				body: JSON.stringify({
+					consumerId: "matrix",
+					leaseToken: claimed.leaseToken,
+					throughSequence: claimed.throughSequence,
+				}),
+			}),
+		)
+		strictEqual(acknowledgement.status, 200)
+		deepStrictEqual(calls, ["register:matrix:beginning", "claim:matrix:10:30", "ack:matrix:7"])
+
+		let releaseMaintenance!: () => void
+		const maintenance = gate.exclusive(
+			() =>
+				new Promise<void>((resolve) => {
+					releaseMaintenance = resolve
+				}),
+		)
+		await Promise.resolve()
+		const blockedClaim = await __testables.handleConsumerClaim(
+			eventing as never,
+			gate,
+			"consumer-secret",
+			new Request("http://127.0.0.1/local/eventing/claims", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-maple-event-consumer-token": "consumer-secret",
+				},
+				body: JSON.stringify({ consumerId: "matrix", limit: 10, leaseSeconds: 30 }),
+			}),
+		)
+		strictEqual(blockedClaim.status, 503)
+		releaseMaintenance()
+		await maintenance
+	})
+
 	it("isolates projection failures, stores telemetry, and makes sibling events ready", async () => {
 		const order: string[] = []
 		const event = { id: "event-1" }

@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert"
+import { Database } from "bun:sqlite"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -72,7 +73,7 @@ describe("LocalEventingControlStore", () => {
 				store.saveProjection(projection({ revision: 3 }))
 				deepStrictEqual(store.loadEnabledProjections("tenant-a"), [projection({ revision: 3 })])
 				deepStrictEqual(store.validate(), {
-					schemaVersion: 1,
+					schemaVersion: 2,
 					projectionRevisions: 3,
 					projectionFailures: 0,
 					stagedEvents: 0,
@@ -131,7 +132,7 @@ describe("LocalEventingControlStore", () => {
 			const snapshot = join(dataDir, "backups", "snapshot", "control.sqlite")
 			const validation = await store.backupTo(snapshot)
 			deepStrictEqual(validation, {
-				schemaVersion: 1,
+				schemaVersion: 2,
 				projectionRevisions: 1,
 				projectionFailures: 1,
 				stagedEvents: 0,
@@ -241,6 +242,218 @@ describe("LocalEventingControlStore", () => {
 					[first.id],
 				)
 				strictEqual(recoveredPage.events[0]!.sequence > cursor, true)
+			} finally {
+				store.close()
+			}
+		}))
+
+	it("migrates schema 1 in place and keeps schema-1 snapshots restorable", async () =>
+		withDataDir(async (dataDir) => {
+			let store = await LocalEventingControlStore.open(dataDir)
+			store.stageEvents([event()])
+			store.markReady([event().id])
+			store.close()
+
+			const database = new Database(eventingControlPath(dataDir), {
+				readwrite: true,
+				strict: true,
+				safeIntegers: true,
+			})
+			database.exec("DROP TABLE event_consumers")
+			database.exec("PRAGMA user_version = 1")
+			database.close(true)
+
+			strictEqual(
+				LocalEventingControlStore.validateSnapshot(eventingControlPath(dataDir)).schemaVersion,
+				1,
+			)
+			store = await LocalEventingControlStore.open(dataDir)
+			try {
+				strictEqual(store.validate().schemaVersion, 2)
+				deepStrictEqual(
+					store.listReady().events.map(({ event }) => event.id),
+					[event().id],
+				)
+				deepStrictEqual(store.listConsumers("tenant-a"), [])
+			} finally {
+				store.close()
+			}
+		}))
+
+	it("leases whole batches, redelivers after expiry, and rejects stale acknowledgements", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir, {
+				maxOutboxEvents: 10,
+				maxOutboxBytes: 1024 * 1024,
+				retainAcknowledgedReadyEvents: 0,
+			})
+			try {
+				const second = event({ id: "event-2" })
+				const third = event({ id: "event-3" })
+				const staged = store.stageEvents([event(), second, third])
+				store.markReady(staged.eventIds)
+				store.registerConsumer("tenant-a", "matrix", "beginning", "2026-08-13T12:00:00.000Z")
+
+				const firstClaim = store.claimReady("tenant-a", "matrix", 2, 10, "2026-08-13T12:00:01.000Z")
+				strictEqual(firstClaim.leaseToken?.length, 64)
+				deepStrictEqual(
+					firstClaim.events.map(({ event }) => event.id),
+					[event().id, second.id],
+				)
+				throws(
+					() => store.claimReady("tenant-a", "matrix", 2, 10, "2026-08-13T12:00:02.000Z"),
+					/active lease/,
+				)
+				throws(
+					() =>
+						store.acknowledgeClaim(
+							"tenant-a",
+							"matrix",
+							"0".repeat(64),
+							firstClaim.throughSequence!,
+							"2026-08-13T12:00:03.000Z",
+						),
+					/token does not match/,
+				)
+				throws(
+					() =>
+						store.acknowledgeClaim(
+							"tenant-a",
+							"matrix",
+							firstClaim.leaseToken!,
+							firstClaim.events[0]!.sequence,
+							"2026-08-13T12:00:03.000Z",
+						),
+					/complete claimed batch/,
+				)
+
+				const retry = store.claimReady("tenant-a", "matrix", 2, 10, "2026-08-13T12:00:12.000Z")
+				deepStrictEqual(
+					retry.events.map(({ event }) => event.id),
+					[event().id, second.id],
+				)
+				strictEqual(retry.leaseToken === firstClaim.leaseToken, false)
+				deepStrictEqual(
+					store.acknowledgeClaim(
+						"tenant-a",
+						"matrix",
+						retry.leaseToken!,
+						retry.throughSequence!,
+						"2026-08-13T12:00:13.000Z",
+					),
+					{
+						consumerId: "matrix",
+						acknowledgedThrough: retry.throughSequence,
+						prunedEvents: 2,
+					},
+				)
+				deepStrictEqual(
+					store.listReady().events.map(({ event }) => event.id),
+					[third.id],
+				)
+				throws(
+					() =>
+						store.acknowledgeClaim(
+							"tenant-a",
+							"matrix",
+							firstClaim.leaseToken!,
+							firstClaim.throughSequence!,
+							"2026-08-13T12:00:14.000Z",
+						),
+					/no active lease/,
+				)
+			} finally {
+				store.close()
+			}
+		}))
+
+	it("prunes only after every active consumer advances and never prunes staged events", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir, {
+				maxOutboxEvents: 10,
+				maxOutboxBytes: 1024 * 1024,
+				retainAcknowledgedReadyEvents: 0,
+			})
+			try {
+				const second = event({ id: "event-2" })
+				const third = event({ id: "event-3" })
+				const stranded = event({ id: "event-staged" })
+				const ready = store.stageEvents([event(), second, third])
+				store.markReady(ready.eventIds)
+				store.stageEvents([stranded])
+				store.registerConsumer("tenant-a", "matrix-a", "beginning")
+				store.registerConsumer("tenant-a", "matrix-b", "beginning")
+
+				const fast = store.claimReady("tenant-a", "matrix-a", 3, 30)
+				strictEqual(
+					store.acknowledgeClaim("tenant-a", "matrix-a", fast.leaseToken!, fast.throughSequence!)
+						.prunedEvents,
+					0,
+				)
+				const slow = store.claimReady("tenant-a", "matrix-b", 2, 30)
+				strictEqual(
+					store.acknowledgeClaim("tenant-a", "matrix-b", slow.leaseToken!, slow.throughSequence!)
+						.prunedEvents,
+					2,
+				)
+				deepStrictEqual(
+					store.listReady().events.map(({ event }) => event.id),
+					[third.id],
+				)
+				store.disableConsumer("tenant-a", "matrix-b")
+				deepStrictEqual(store.listReady().events, [])
+				deepStrictEqual(
+					store.listStaged().events.map(({ event }) => event.id),
+					[stranded.id],
+				)
+			} finally {
+				store.close()
+			}
+		}))
+
+	it("starts latest consumers after backlog and checkpoints active leases", async () =>
+		withDataDir(async (dataDir) => {
+			let store = await LocalEventingControlStore.open(dataDir)
+			store.stageEvents([event()])
+			store.markReady([event().id])
+			const registered = store.registerConsumer(
+				"tenant-a",
+				"matrix",
+				"latest",
+				"2099-01-01T00:00:00.000Z",
+			)
+			strictEqual(registered.lastAcknowledgedSequence, store.listReady().events[0]!.sequence)
+			deepStrictEqual(
+				store.claimReady("tenant-a", "matrix", 10, 300, "2099-01-01T00:00:01.000Z").events,
+				[],
+			)
+
+			const second = event({ id: "event-2" })
+			store.stageEvents([second])
+			store.markReady([second.id])
+			const claim = store.claimReady("tenant-a", "matrix", 10, 300, "2099-01-01T00:00:02.000Z")
+			const snapshot = join(dataDir, "backups", "consumer", "control.sqlite")
+			await store.backupTo(snapshot)
+			store.close()
+
+			const restored = join(dataDir, "restored-consumer")
+			await LocalEventingControlStore.restoreSnapshot(snapshot, restored)
+			store = await LocalEventingControlStore.open(restored)
+			try {
+				deepStrictEqual(
+					store.listConsumers("tenant-a")[0]?.claimedThroughSequence,
+					claim.throughSequence,
+				)
+				strictEqual(
+					store.acknowledgeClaim(
+						"tenant-a",
+						"matrix",
+						claim.leaseToken!,
+						claim.throughSequence!,
+						"2099-01-01T00:00:03.000Z",
+					).acknowledgedThrough,
+					claim.throughSequence,
+				)
 			} finally {
 				store.close()
 			}

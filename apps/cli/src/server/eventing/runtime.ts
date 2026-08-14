@@ -10,6 +10,7 @@ import {
 } from "@maple/eventing-core"
 import { Schema } from "effect"
 import { LocalEventingControlStore } from "./control-store"
+import type { EventConsumerStart } from "./control-store"
 import { registerGitLabProjectors } from "./gitlab-projectors"
 import { OTLP_LOG_ADAPTER } from "./otlp"
 
@@ -127,6 +128,26 @@ export class LocalEventingRuntime {
 
 	listStaged(limit?: number, after?: number) {
 		return this.#store.listStaged(limit, after)
+	}
+
+	listConsumers() {
+		return this.#store.listConsumers(TENANT_ID)
+	}
+
+	registerConsumer(consumerId: string, startAt: EventConsumerStart) {
+		return this.#store.registerConsumer(TENANT_ID, consumerId, startAt)
+	}
+
+	disableConsumer(consumerId: string) {
+		return this.#store.disableConsumer(TENANT_ID, consumerId)
+	}
+
+	claimReady(consumerId: string, limit: number, leaseSeconds: number) {
+		return this.#store.claimReady(TENANT_ID, consumerId, limit, leaseSeconds)
+	}
+
+	acknowledgeClaim(consumerId: string, leaseToken: string, throughSequence: number) {
+		return this.#store.acknowledgeClaim(TENANT_ID, consumerId, leaseToken, throughSequence)
 	}
 
 	health() {

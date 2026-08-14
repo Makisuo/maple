@@ -1,4 +1,5 @@
 import { constants as sqliteConstants, Database } from "bun:sqlite"
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
 import { chmodSync, existsSync, lstatSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -15,12 +16,13 @@ import {
 import { Schema } from "effect"
 import { durableWrite, ensurePrivateDirectory } from "../durable-files"
 
-const CONTROL_SCHEMA_VERSION = 1
+const CONTROL_SCHEMA_VERSION = 2
 const CONTROL_DIRECTORY = "control"
 const CONTROL_DATABASE = "eventing.sqlite"
 const MAX_FAILURES_PER_TENANT = 10_000
 export const DEFAULT_MAX_OUTBOX_EVENTS = 10_000
 export const DEFAULT_MAX_OUTBOX_BYTES = 256 * 1024 * 1024
+export const DEFAULT_RETAIN_ACKNOWLEDGED_READY_EVENTS = 1_000
 
 export const eventingControlDirectory = (dataDir: string): string => join(resolve(dataDir), CONTROL_DIRECTORY)
 export const eventingControlPath = (dataDir: string): string =>
@@ -87,7 +89,59 @@ CREATE UNIQUE INDEX projection_failures_occurrence
     ON projection_failures (tenant_id, projection_id, projection_revision, occurrence_id)
     WHERE occurrence_id IS NOT NULL;
 
-PRAGMA user_version = 1;
+CREATE TABLE event_consumers (
+    consumer_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK (active IN (0, 1)),
+    last_acked_sequence INTEGER NOT NULL CHECK (last_acked_sequence >= 0),
+    lease_token_hash TEXT,
+    lease_expires_at TEXT,
+    claimed_through_sequence INTEGER CHECK (claimed_through_sequence > 0),
+    registered_at TEXT NOT NULL,
+    disabled_at TEXT,
+    CHECK (
+        (active = 1 AND disabled_at IS NULL) OR
+        (active = 0 AND disabled_at IS NOT NULL)
+    ),
+    CHECK (
+        (lease_token_hash IS NULL AND lease_expires_at IS NULL AND claimed_through_sequence IS NULL) OR
+        (lease_token_hash IS NOT NULL AND lease_expires_at IS NOT NULL AND claimed_through_sequence IS NOT NULL)
+    ),
+    CHECK (claimed_through_sequence IS NULL OR claimed_through_sequence > last_acked_sequence)
+) STRICT;
+
+CREATE INDEX event_consumers_tenant_active_ack
+    ON event_consumers (tenant_id, active, last_acked_sequence);
+
+PRAGMA user_version = 2;
+`
+
+const MIGRATE_SCHEMA_1_TO_2 = `
+CREATE TABLE event_consumers (
+    consumer_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK (active IN (0, 1)),
+    last_acked_sequence INTEGER NOT NULL CHECK (last_acked_sequence >= 0),
+    lease_token_hash TEXT,
+    lease_expires_at TEXT,
+    claimed_through_sequence INTEGER CHECK (claimed_through_sequence > 0),
+    registered_at TEXT NOT NULL,
+    disabled_at TEXT,
+    CHECK (
+        (active = 1 AND disabled_at IS NULL) OR
+        (active = 0 AND disabled_at IS NOT NULL)
+    ),
+    CHECK (
+        (lease_token_hash IS NULL AND lease_expires_at IS NULL AND claimed_through_sequence IS NULL) OR
+        (lease_token_hash IS NOT NULL AND lease_expires_at IS NOT NULL AND claimed_through_sequence IS NOT NULL)
+    ),
+    CHECK (claimed_through_sequence IS NULL OR claimed_through_sequence > last_acked_sequence)
+) STRICT;
+
+CREATE INDEX event_consumers_tenant_active_ack
+    ON event_consumers (tenant_id, active, last_acked_sequence);
+
+PRAGMA user_version = 2;
 `
 
 interface UserVersionRow {
@@ -134,6 +188,26 @@ interface OutboxUsageRow {
 	readonly bytes: number | bigint
 }
 
+interface SequenceRow {
+	readonly sequence: number | bigint | null
+}
+
+interface ConsumerRow {
+	readonly consumer_id: string
+	readonly tenant_id: string
+	readonly active: number | bigint
+	readonly last_acked_sequence: number | bigint
+	readonly lease_token_hash: string | null
+	readonly lease_expires_at: string | null
+	readonly claimed_through_sequence: number | bigint | null
+	readonly registered_at: string
+	readonly disabled_at: string | null
+}
+
+interface EventIdRow {
+	readonly event_id: string
+}
+
 export interface StageEventsResult {
 	readonly inserted: number
 	readonly deduplicated: number
@@ -151,6 +225,13 @@ export interface EventingControlSnapshotValidation {
 export interface LocalEventingControlLimits {
 	readonly maxOutboxEvents: number
 	readonly maxOutboxBytes: number
+	readonly retainAcknowledgedReadyEvents?: number
+}
+
+interface ResolvedLocalEventingControlLimits {
+	readonly maxOutboxEvents: number
+	readonly maxOutboxBytes: number
+	readonly retainAcknowledgedReadyEvents: number
 }
 
 export interface EventingOutboxRecord {
@@ -164,6 +245,37 @@ export interface EventingOutboxPage {
 	readonly events: readonly EventingOutboxRecord[]
 	readonly nextCursor: number | null
 }
+
+export type EventConsumerStart = "beginning" | "latest"
+
+export interface EventConsumer {
+	readonly consumerId: string
+	readonly tenantId: string
+	readonly active: boolean
+	readonly lastAcknowledgedSequence: number
+	readonly leaseExpiresAt: string | null
+	readonly claimedThroughSequence: number | null
+	readonly registeredAt: string
+	readonly disabledAt: string | null
+}
+
+export interface EventConsumerClaim {
+	readonly consumerId: string
+	readonly leaseToken: string | null
+	readonly leaseExpiresAt: string | null
+	readonly throughSequence: number | null
+	readonly events: readonly EventingOutboxRecord[]
+}
+
+export interface EventConsumerAcknowledgement {
+	readonly consumerId: string
+	readonly acknowledgedThrough: number
+	readonly prunedEvents: number
+}
+
+export class EventConsumerInputError extends Error {}
+export class EventConsumerNotFoundError extends Error {}
+export class EventConsumerConflictError extends Error {}
 
 const asNumber = (value: number | bigint): number => {
 	const number = Number(value)
@@ -208,23 +320,30 @@ const checkpointWal = (db: Database): void => {
 		)
 }
 
-const validateLimits = (limits: LocalEventingControlLimits): LocalEventingControlLimits => {
+const validateLimits = (limits: LocalEventingControlLimits): ResolvedLocalEventingControlLimits => {
 	if (!Number.isSafeInteger(limits.maxOutboxEvents) || limits.maxOutboxEvents < 1)
 		throw new Error("maxOutboxEvents must be a positive safe integer")
 	if (!Number.isSafeInteger(limits.maxOutboxBytes) || limits.maxOutboxBytes < 1)
 		throw new Error("maxOutboxBytes must be a positive safe integer")
-	return limits
+	const retainAcknowledgedReadyEvents =
+		limits.retainAcknowledgedReadyEvents ?? DEFAULT_RETAIN_ACKNOWLEDGED_READY_EVENTS
+	if (!Number.isSafeInteger(retainAcknowledgedReadyEvents) || retainAcknowledgedReadyEvents < 0)
+		throw new Error("retainAcknowledgedReadyEvents must be a non-negative safe integer")
+	return { ...limits, retainAcknowledgedReadyEvents }
 }
 
-const validateOpenDatabase = (db: Database): EventingControlSnapshotValidation => {
+const validateOpenDatabase = (
+	db: Database,
+	acceptedSchemaVersions: readonly number[] = [CONTROL_SCHEMA_VERSION],
+): EventingControlSnapshotValidation => {
 	const quick = db.query<QuickCheckRow, []>("PRAGMA quick_check").get()
 	if (quick?.quick_check !== "ok") throw new Error(`eventing control database quick_check failed`)
 	const version = db.query<UserVersionRow, []>("PRAGMA user_version").get()
 	if (!version) throw new Error("eventing control database has no schema version")
 	const schemaVersion = asNumber(version.user_version)
-	if (schemaVersion !== CONTROL_SCHEMA_VERSION)
+	if (!acceptedSchemaVersions.includes(schemaVersion))
 		throw new Error(
-			`unsupported eventing control schema ${schemaVersion}; expected ${CONTROL_SCHEMA_VERSION}`,
+			`unsupported eventing control schema ${schemaVersion}; expected ${acceptedSchemaVersions.join(" or ")}`,
 		)
 	const count = (where: string): number => {
 		const row = db.query<CountRow, []>(`SELECT count(*) AS count FROM outbox_events ${where}`).get()
@@ -250,6 +369,20 @@ const validateOpenDatabase = (db: Database): EventingControlSnapshotValidation =
 	if (!invalidReadiness) throw new Error("eventing readiness validation query returned no row")
 	if (asNumber(invalidReadiness.count) !== 0)
 		throw new Error("eventing control database has inconsistent outbox readiness state")
+	if (schemaVersion >= 2) {
+		const consumers = db
+			.query<Pick<ConsumerRow, "lease_expires_at" | "registered_at" | "disabled_at">, []>(
+				"SELECT lease_expires_at, registered_at, disabled_at FROM event_consumers",
+			)
+			.all()
+		for (const consumer of consumers) {
+			canonicalInstant(consumer.registered_at, "event consumer registeredAt")
+			if (consumer.lease_expires_at !== null)
+				canonicalInstant(consumer.lease_expires_at, "event consumer leaseExpiresAt")
+			if (consumer.disabled_at !== null)
+				canonicalInstant(consumer.disabled_at, "event consumer disabledAt")
+		}
+	}
 	return {
 		schemaVersion,
 		projectionRevisions: asNumber(revisions.count),
@@ -259,12 +392,51 @@ const validateOpenDatabase = (db: Database): EventingControlSnapshotValidation =
 	}
 }
 
+const CONSUMER_ID = /^[a-z][a-z0-9._-]{0,63}$/
+const LEASE_TOKEN = /^[0-9a-f]{64}$/
+
+const validateConsumerId = (consumerId: string): string => {
+	if (!CONSUMER_ID.test(consumerId))
+		throw new EventConsumerInputError(
+			"consumerId must start with a lowercase letter and contain at most 64 lowercase letters, digits, dots, underscores, or hyphens",
+		)
+	return consumerId
+}
+
+const canonicalInstant = (value: string, label: string): number => {
+	const milliseconds = Date.parse(value)
+	if (Number.isNaN(milliseconds) || new Date(milliseconds).toISOString() !== value)
+		throw new EventConsumerInputError(`${label} must be canonical ISO-8601`)
+	return milliseconds
+}
+
+const tokenHash = (token: string): string => createHash("sha256").update(token).digest("hex")
+
+const tokenHashMatches = (expected: string, token: string): boolean => {
+	if (!LEASE_TOKEN.test(token)) return false
+	const left = Buffer.from(expected, "hex")
+	const right = Buffer.from(tokenHash(token), "hex")
+	return left.length === right.length && timingSafeEqual(left, right)
+}
+
+const decodeConsumer = (row: ConsumerRow): EventConsumer => ({
+	consumerId: row.consumer_id,
+	tenantId: row.tenant_id,
+	active: asNumber(row.active) === 1,
+	lastAcknowledgedSequence: asNumber(row.last_acked_sequence),
+	leaseExpiresAt: row.lease_expires_at,
+	claimedThroughSequence:
+		row.claimed_through_sequence === null ? null : asNumber(row.claimed_through_sequence),
+	registeredAt: row.registered_at,
+	disabledAt: row.disabled_at,
+})
+
 export class LocalEventingControlStore {
 	readonly #db: Database
-	readonly #limits: LocalEventingControlLimits
+	readonly #limits: ResolvedLocalEventingControlLimits
 	readonly path: string
 
-	private constructor(path: string, db: Database, limits: LocalEventingControlLimits) {
+	private constructor(path: string, db: Database, limits: ResolvedLocalEventingControlLimits) {
 		this.path = path
 		this.#db = db
 		this.#limits = limits
@@ -275,9 +447,10 @@ export class LocalEventingControlStore {
 		limits: LocalEventingControlLimits = {
 			maxOutboxEvents: DEFAULT_MAX_OUTBOX_EVENTS,
 			maxOutboxBytes: DEFAULT_MAX_OUTBOX_BYTES,
+			retainAcknowledgedReadyEvents: DEFAULT_RETAIN_ACKNOWLEDGED_READY_EVENTS,
 		},
 	): Promise<LocalEventingControlStore> {
-		validateLimits(limits)
+		const validatedLimits = validateLimits(limits)
 		const directory = eventingControlDirectory(dataDir)
 		await ensurePrivateDirectory(directory)
 		const path = eventingControlPath(dataDir)
@@ -291,13 +464,14 @@ export class LocalEventingControlStore {
 			if (!version) throw new Error("eventing control database has no schema version")
 			const schemaVersion = asNumber(version.user_version)
 			if (schemaVersion === 0) db.transaction(() => db.exec(CREATE_SCHEMA)).exclusive()
+			else if (schemaVersion === 1) db.transaction(() => db.exec(MIGRATE_SCHEMA_1_TO_2)).exclusive()
 			else if (schemaVersion !== CONTROL_SCHEMA_VERSION)
 				throw new Error(
 					`unsupported eventing control schema ${schemaVersion}; expected ${CONTROL_SCHEMA_VERSION}`,
 				)
 			chmodSync(path, 0o600)
 			validateOpenDatabase(db)
-			return new LocalEventingControlStore(path, db, limits)
+			return new LocalEventingControlStore(path, db, validatedLimits)
 		} catch (error) {
 			db.close()
 			throw error
@@ -507,6 +681,246 @@ export class LocalEventingControlStore {
 		return this.#listOutbox("staged", limit, after)
 	}
 
+	listConsumers(tenantId: string): readonly EventConsumer[] {
+		return this.#db
+			.query<ConsumerRow, [string]>(
+				`SELECT consumer_id, tenant_id, active, last_acked_sequence, lease_token_hash,
+				        lease_expires_at, claimed_through_sequence, registered_at, disabled_at
+				 FROM event_consumers
+				 WHERE tenant_id = ?
+				 ORDER BY consumer_id`,
+			)
+			.all(tenantId)
+			.map(decodeConsumer)
+	}
+
+	registerConsumer(
+		tenantId: string,
+		consumerId: string,
+		startAt: EventConsumerStart,
+		registeredAt = new Date().toISOString(),
+	): EventConsumer {
+		validateConsumerId(consumerId)
+		if (startAt !== "beginning" && startAt !== "latest")
+			throw new EventConsumerInputError("startAt must be beginning or latest")
+		canonicalInstant(registeredAt, "event consumer registeredAt")
+		return this.#db
+			.transaction(() => {
+				const existing = this.#consumer(tenantId, consumerId)
+				if (existing)
+					throw new EventConsumerConflictError(`event consumer already exists: ${consumerId}`)
+				const boundary = this.#db
+					.query<SequenceRow, [string]>(
+						startAt === "latest"
+							? `SELECT max(readiness.sequence) AS sequence
+							   FROM outbox_ready_events AS readiness
+							   INNER JOIN outbox_events AS event ON event.event_id = readiness.event_id
+							   WHERE event.tenant_id = ?`
+							: `SELECT min(readiness.sequence) AS sequence
+							   FROM outbox_ready_events AS readiness
+							   INNER JOIN outbox_events AS event ON event.event_id = readiness.event_id
+							   WHERE event.tenant_id = ?`,
+					)
+					.get(tenantId)
+				const sequence = boundary?.sequence == null ? 0 : asNumber(boundary.sequence)
+				const lastAcknowledged = startAt === "beginning" ? Math.max(0, sequence - 1) : sequence
+				this.#db.run(
+					"INSERT INTO event_consumers (consumer_id, tenant_id, active, last_acked_sequence, registered_at) VALUES (?, ?, 1, ?, ?)",
+					[consumerId, tenantId, lastAcknowledged, registeredAt],
+				)
+				return decodeConsumer(this.#consumer(tenantId, consumerId)!)
+			})
+			.immediate()
+	}
+
+	disableConsumer(
+		tenantId: string,
+		consumerId: string,
+		disabledAt = new Date().toISOString(),
+	): EventConsumer {
+		validateConsumerId(consumerId)
+		canonicalInstant(disabledAt, "event consumer disabledAt")
+		return this.#db
+			.transaction(() => {
+				const existing = this.#consumer(tenantId, consumerId)
+				if (!existing) throw new EventConsumerNotFoundError(`unknown event consumer: ${consumerId}`)
+				if (asNumber(existing.active) === 0) return decodeConsumer(existing)
+				this.#db.run(
+					`UPDATE event_consumers
+					 SET active = 0, lease_token_hash = NULL, lease_expires_at = NULL,
+					     claimed_through_sequence = NULL, disabled_at = ?
+					 WHERE tenant_id = ? AND consumer_id = ?`,
+					[disabledAt, tenantId, consumerId],
+				)
+				this.#pruneAcknowledgedReady(tenantId)
+				return decodeConsumer(this.#consumer(tenantId, consumerId)!)
+			})
+			.immediate()
+	}
+
+	claimReady(
+		tenantId: string,
+		consumerId: string,
+		limit: number,
+		leaseSeconds: number,
+		now = new Date().toISOString(),
+	): EventConsumerClaim {
+		validateConsumerId(consumerId)
+		if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000)
+			throw new EventConsumerInputError("claim limit must be between 1 and 1000")
+		if (!Number.isSafeInteger(leaseSeconds) || leaseSeconds < 5 || leaseSeconds > 300)
+			throw new EventConsumerInputError("leaseSeconds must be between 5 and 300")
+		const nowMilliseconds = canonicalInstant(now, "claim time")
+		return this.#db
+			.transaction(() => {
+				const consumer = this.#consumer(tenantId, consumerId)
+				if (!consumer) throw new EventConsumerNotFoundError(`unknown event consumer: ${consumerId}`)
+				if (asNumber(consumer.active) === 0)
+					throw new EventConsumerConflictError(`event consumer is disabled: ${consumerId}`)
+				if (
+					consumer.lease_expires_at !== null &&
+					canonicalInstant(consumer.lease_expires_at, "event consumer leaseExpiresAt") >
+						nowMilliseconds
+				)
+					throw new EventConsumerConflictError(
+						`event consumer already has an active lease: ${consumerId}`,
+					)
+
+				const rows = this.#db
+					.query<EventJsonRow, [string, number, number]>(
+						`SELECT readiness.sequence, event.event_json, event.staged_at, readiness.ready_at
+						 FROM outbox_ready_events AS readiness
+						 INNER JOIN outbox_events AS event ON event.event_id = readiness.event_id
+						 WHERE event.tenant_id = ? AND event.state = 'ready' AND readiness.sequence > ?
+						 ORDER BY readiness.sequence
+						 LIMIT ?`,
+					)
+					.all(tenantId, asNumber(consumer.last_acked_sequence), limit)
+				if (rows.length === 0) {
+					this.#db.run(
+						"UPDATE event_consumers SET lease_token_hash = NULL, lease_expires_at = NULL, claimed_through_sequence = NULL WHERE tenant_id = ? AND consumer_id = ?",
+						[tenantId, consumerId],
+					)
+					return {
+						consumerId,
+						leaseToken: null,
+						leaseExpiresAt: null,
+						throughSequence: null,
+						events: [],
+					}
+				}
+
+				const leaseToken = randomBytes(32).toString("hex")
+				const leaseExpiresAt = new Date(nowMilliseconds + leaseSeconds * 1_000).toISOString()
+				const throughSequence = asNumber(rows.at(-1)!.sequence)
+				this.#db.run(
+					`UPDATE event_consumers
+					 SET lease_token_hash = ?, lease_expires_at = ?, claimed_through_sequence = ?
+					 WHERE tenant_id = ? AND consumer_id = ?`,
+					[tokenHash(leaseToken), leaseExpiresAt, throughSequence, tenantId, consumerId],
+				)
+				return {
+					consumerId,
+					leaseToken,
+					leaseExpiresAt,
+					throughSequence,
+					events: rows.map(({ sequence, event_json, staged_at, ready_at }) => ({
+						sequence: asNumber(sequence),
+						event: decodeEvent(event_json),
+						stagedAt: staged_at,
+						readyAt: ready_at,
+					})),
+				}
+			})
+			.immediate()
+	}
+
+	acknowledgeClaim(
+		tenantId: string,
+		consumerId: string,
+		leaseToken: string,
+		throughSequence: number,
+		now = new Date().toISOString(),
+	): EventConsumerAcknowledgement {
+		validateConsumerId(consumerId)
+		if (!Number.isSafeInteger(throughSequence) || throughSequence < 1)
+			throw new EventConsumerInputError("throughSequence must be a positive safe integer")
+		const nowMilliseconds = canonicalInstant(now, "acknowledgement time")
+		return this.#db
+			.transaction(() => {
+				const consumer = this.#consumer(tenantId, consumerId)
+				if (!consumer) throw new EventConsumerNotFoundError(`unknown event consumer: ${consumerId}`)
+				if (asNumber(consumer.active) === 0)
+					throw new EventConsumerConflictError(`event consumer is disabled: ${consumerId}`)
+				if (
+					consumer.lease_token_hash === null ||
+					consumer.lease_expires_at === null ||
+					consumer.claimed_through_sequence === null
+				)
+					throw new EventConsumerConflictError(`event consumer has no active lease: ${consumerId}`)
+				if (
+					canonicalInstant(consumer.lease_expires_at, "event consumer leaseExpiresAt") <=
+					nowMilliseconds
+				)
+					throw new EventConsumerConflictError(`event consumer lease has expired: ${consumerId}`)
+				if (!tokenHashMatches(consumer.lease_token_hash, leaseToken))
+					throw new EventConsumerConflictError("event consumer lease token does not match")
+				const claimedThrough = asNumber(consumer.claimed_through_sequence)
+				if (throughSequence !== claimedThrough)
+					throw new EventConsumerConflictError(
+						`acknowledgement must cover the complete claimed batch through sequence ${claimedThrough}`,
+					)
+				this.#db.run(
+					`UPDATE event_consumers
+					 SET last_acked_sequence = ?, lease_token_hash = NULL, lease_expires_at = NULL,
+					     claimed_through_sequence = NULL
+					 WHERE tenant_id = ? AND consumer_id = ?`,
+					[throughSequence, tenantId, consumerId],
+				)
+				return {
+					consumerId,
+					acknowledgedThrough: throughSequence,
+					prunedEvents: this.#pruneAcknowledgedReady(tenantId),
+				}
+			})
+			.immediate()
+	}
+
+	#consumer(tenantId: string, consumerId: string): ConsumerRow | null {
+		return this.#db
+			.query<ConsumerRow, [string, string]>(
+				`SELECT consumer_id, tenant_id, active, last_acked_sequence, lease_token_hash,
+				        lease_expires_at, claimed_through_sequence, registered_at, disabled_at
+				 FROM event_consumers
+				 WHERE tenant_id = ? AND consumer_id = ?`,
+			)
+			.get(tenantId, consumerId)
+	}
+
+	#pruneAcknowledgedReady(tenantId: string): number {
+		const boundary = this.#db
+			.query<SequenceRow, [string]>(
+				"SELECT min(last_acked_sequence) AS sequence FROM event_consumers WHERE tenant_id = ? AND active = 1",
+			)
+			.get(tenantId)
+		if (boundary?.sequence == null) return 0
+		const rows = this.#db
+			.query<EventIdRow, [string, number]>(
+				`SELECT readiness.event_id
+				 FROM outbox_ready_events AS readiness
+				 INNER JOIN outbox_events AS event ON event.event_id = readiness.event_id
+				 WHERE event.tenant_id = ? AND readiness.sequence <= ?
+				 ORDER BY readiness.sequence`,
+			)
+			.all(tenantId, asNumber(boundary.sequence))
+		const pruneCount = Math.max(0, rows.length - this.#limits.retainAcknowledgedReadyEvents)
+		for (const { event_id } of rows.slice(0, pruneCount)) {
+			this.#db.run("DELETE FROM outbox_ready_events WHERE event_id = ?", [event_id])
+			this.#db.run("DELETE FROM outbox_events WHERE event_id = ? AND state = 'ready'", [event_id])
+		}
+		return pruneCount
+	}
+
 	outboxCapacity(): LocalEventingControlLimits & {
 		readonly currentEvents: number
 		readonly currentBytes: number
@@ -572,7 +986,7 @@ export class LocalEventingControlStore {
 		const db = new Database(uri, sqliteConstants.SQLITE_OPEN_READONLY | sqliteConstants.SQLITE_OPEN_URI)
 		try {
 			configure(db)
-			return validateOpenDatabase(db)
+			return validateOpenDatabase(db, [1, CONTROL_SCHEMA_VERSION])
 		} finally {
 			db.close(true)
 		}
