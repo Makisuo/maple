@@ -1,4 +1,3 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { DashboardDocument, PortableDashboardDocument } from "@maple/widgets/dashboard"
 import {
@@ -11,13 +10,12 @@ import {
 	PostgresTransactionId,
 	UserId,
 } from "../primitives"
-import { Authorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 
 // The dashboard *document* schema lives in `../dashboard`, which is versioned.
-// This module keeps the HTTP surface: request/response envelopes, tagged errors
-// and the endpoint group — all of which reference the `Authorization` middleware
-// and so must stay under `http/` to keep `http/api.ts` acyclic.
+// This module keeps the HTTP request/response envelopes and tagged errors. The
+// v1 endpoint group that used to live here is gone — `/v2/dashboards` replaced
+// it — but the v2 contract and the dashboard services still import these types.
 //
 // Every document-shape name is re-exported below so importing from
 // `@maple/domain/http` keeps working unchanged. New code should prefer
@@ -153,13 +151,6 @@ export class DashboardVersionsListResponse extends Schema.Class<DashboardVersion
 	versions: Schema.Array(DashboardVersionSummary),
 	hasMore: Schema.Boolean,
 }) {}
-
-const DashboardVersionsListQuery = Schema.Struct({
-	limit: Schema.optional(
-		Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 200 })),
-	),
-	before: Schema.optional(Schema.NumberFromString.check(Schema.isInt())),
-})
 
 export class DashboardVersionNotFoundError extends HttpTaggedError<DashboardVersionNotFoundError>()(
 	"@maple/http/errors/DashboardVersionNotFoundError",
@@ -392,97 +383,3 @@ export class DashboardTemplateNotFoundError extends HttpTaggedError<DashboardTem
 		exposure: "redacted",
 	},
 ) {}
-
-export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
-	.add(
-		HttpApiEndpoint.get("list", "/", {
-			success: DashboardsListResponse,
-			error: DashboardPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("create", "/", {
-			payload: DashboardCreateRequest,
-			success: DashboardDocument,
-			error: [DashboardValidationError, DashboardPersistenceError, DashboardConcurrencyError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("importPerses", "/import/perses", {
-			payload: DashboardPersesImportRequest,
-			success: DashboardPersesImportResponse,
-			error: [DashboardValidationError, DashboardPersistenceError, DashboardConcurrencyError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.put("upsert", "/:dashboardId", {
-			params: {
-				dashboardId: DashboardId,
-			},
-			payload: DashboardUpsertRequest,
-			success: DashboardDocument,
-			error: [
-				DashboardValidationError,
-				DashboardPersistenceError,
-				DashboardConcurrencyError,
-				DashboardNotFoundError,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.delete("delete", "/:dashboardId", {
-			params: {
-				dashboardId: DashboardId,
-			},
-			success: DashboardDeleteResponse,
-			error: [DashboardNotFoundError, DashboardPersistenceError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("listVersions", "/:dashboardId/versions", {
-			params: { dashboardId: DashboardId },
-			query: DashboardVersionsListQuery,
-			success: DashboardVersionsListResponse,
-			error: [DashboardNotFoundError, DashboardPersistenceError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("getVersion", "/:dashboardId/versions/:versionId", {
-			params: { dashboardId: DashboardId, versionId: DashboardVersionId },
-			success: DashboardVersionDetail,
-			error: [DashboardNotFoundError, DashboardVersionNotFoundError, DashboardPersistenceError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("restoreVersion", "/:dashboardId/versions/:versionId/restore", {
-			params: { dashboardId: DashboardId, versionId: DashboardVersionId },
-			success: DashboardDocument,
-			error: [
-				DashboardNotFoundError,
-				DashboardVersionNotFoundError,
-				DashboardValidationError,
-				DashboardPersistenceError,
-				DashboardConcurrencyError,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("listTemplates", "/templates", {
-			success: DashboardTemplatesListResponse,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("instantiateTemplate", "/templates/:templateId/instantiate", {
-			params: { templateId: DashboardTemplateId },
-			payload: DashboardTemplateInstantiateRequest,
-			success: DashboardDocument,
-			error: [
-				DashboardTemplateNotFoundError,
-				DashboardValidationError,
-				DashboardPersistenceError,
-				DashboardConcurrencyError,
-			],
-		}),
-	)
-	.prefix("/api/dashboards")
-	.middleware(Authorization) {}

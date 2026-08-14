@@ -14,7 +14,10 @@ const refreshStaleAuthorization = (request: HttpClientRequest.HttpClientRequest)
 	}
 	// Billing reads can race Clerk's token-settle window and briefly leave without
 	// a bearer token. Keep this exception URL-scoped; genuine 401s elsewhere fail fast.
-	return request.url.includes("/api/billing/")
+	// Both prefixes are load-bearing: the authenticated operations moved to
+	// `/internal/billing`, while the unauthenticated plan catalog stayed on
+	// `/api/billing`. Dropping either one silently reinstates the hard 401.
+	return request.url.includes("/internal/billing/") || request.url.includes("/api/billing/")
 }
 
 export const transformMapleApiClient = <E, R>(

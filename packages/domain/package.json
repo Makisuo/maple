@@ -26,7 +26,6 @@
 		"./clickhouse": "./src/clickhouse/index.ts",
 		"./generated/clickhouse-schema": "./src/generated/clickhouse-schema.ts",
 		"./where-clause": "./src/where-clause.ts",
-		"./http/observability": "./src/http/observability.ts",
 		"./http/warehouse-errors": "./src/http/warehouse-errors.ts",
 		"./chat-preamble": "./src/chat-preamble.ts",
 		"./chat-session": "./src/chat-session.ts"

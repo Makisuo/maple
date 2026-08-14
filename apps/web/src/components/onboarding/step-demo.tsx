@@ -13,7 +13,7 @@ import {
 	PulseIcon,
 	RocketIcon,
 } from "@/components/icons"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { DemoSeedRequest } from "@maple/domain/http"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { getServiceOverviewResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -33,7 +33,7 @@ export function StepDemo({
 	const navigate = useNavigate()
 	const [isSeeding, setIsSeeding] = useState(false)
 
-	const seedMutation = useAtomSet(MapleApiAtomClient.mutation("demo", "seed"), {
+	const seedMutation = useAtomSet(MapleInternalAtomClient.mutation("demo", "seed"), {
 		mode: "promiseExit",
 	})
 
