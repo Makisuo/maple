@@ -4,6 +4,7 @@ import {
 	AlertDeliveryRejectedError,
 	AlertDeliveryTargetMissingError,
 	AlertDestinationId,
+	UNGROUPED_GROUP_KEY,
 } from "@maple/domain/http"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Schema } from "effect"
@@ -110,6 +111,11 @@ describe("buildTemplateContext", () => {
 		assert.strictEqual(ctx.thresholdUpper, "")
 	})
 
+	it("renders the ungrouped sentinel as `all`, never as `__total__`", () => {
+		const ungrouped = buildTemplateContext({ ...baseContext, groupKey: UNGROUPED_GROUP_KEY }, LINK, CHAT)
+		assert.strictEqual(ungrouped.group, "all")
+	})
+
 	it("renders the default templates without any missing variables", () => {
 		const title = renderTemplate(DEFAULT_TITLE_TEMPLATE, ctx)
 		const body = renderTemplate(DEFAULT_BODY_TEMPLATE, ctx)
@@ -166,6 +172,22 @@ describe("buildSlackBlocks (default format)", () => {
 		const blocks = buildSlackBlocks(baseContext, LINK, CHAT)
 		const section = blocks[1] as SectionBlock
 		assert.isTrue(section.fields.some((f) => f.text.includes("\u{1F534} Critical")))
+	})
+
+	/**
+	 * Regression: an ungrouped rule stores `UNGROUPED_GROUP_KEY` ("__total__")
+	 * as its group key — a storage sentinel, not a group anyone named — and it
+	 * was rendering verbatim as a `Group` field reading `__total__`.
+	 */
+	it("treats the ungrouped sentinel as no grouping at all", () => {
+		const fields = (
+			buildSlackBlocks({ ...baseContext, groupKey: UNGROUPED_GROUP_KEY }, LINK, CHAT)[1] as SectionBlock
+		).fields
+		assert.isFalse(
+			fields.some((field) => field.text.startsWith("*Group*")),
+			"the ungrouped sentinel must not render a Group field",
+		)
+		for (const field of fields) assert.notInclude(field.text, "__total__")
 	})
 
 	it("omits the group field when the rule has no grouping, escapes it when present", () => {
