@@ -8,7 +8,7 @@
  * is why no transport re-discriminates on `type` and no `any` is needed to hold
  * the transports in one collection.
  */
-import type { AlertDeliveryError, OrgId } from "@maple/domain/http"
+import type { AlertDeliveryFailure, OrgId } from "@maple/domain/http"
 import { Effect, Match } from "effect"
 import { renderTitleBody } from "../AlertDeliveryDispatch"
 import { discordTransport } from "./transports/discord"
@@ -26,13 +26,17 @@ export interface DispatchDeps {
 	 * Sends one email via the platform email channel (Cloudflare `EMAIL`
 	 * binding). Injected so this module stays dependency-free.
 	 */
-	readonly sendEmail: (to: string, subject: string, html: string) => Effect.Effect<void, AlertDeliveryError>
+	readonly sendEmail: (
+		to: string,
+		subject: string,
+		html: string,
+	) => Effect.Effect<void, AlertDeliveryFailure>
 	/**
 	 * Resolves the decrypted Slack bot token for an org from its
 	 * `slack_workspaces` row. Only the `slack-bot` transport invokes it. Fails
 	 * when the org has no active Slack installation.
 	 */
-	readonly resolveSlackBotToken: (orgId: OrgId) => Effect.Effect<string, AlertDeliveryError>
+	readonly resolveSlackBotToken: (orgId: OrgId) => Effect.Effect<string, AlertDeliveryFailure>
 }
 
 export const dispatchDelivery = (
@@ -43,7 +47,7 @@ export const dispatchDelivery = (
 	linkUrl: string,
 	chatUrl: string,
 	deps: DispatchDeps,
-): Effect.Effect<DispatchResult, AlertDeliveryError> => {
+): Effect.Effect<DispatchResult, AlertDeliveryFailure> => {
 	const runtime: TransportRuntime = { fetchFn, timeoutMs }
 	/**
 	 * Resolved once here rather than by each provider: the template is a

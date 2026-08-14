@@ -1562,6 +1562,107 @@ describe("AlertsService", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
+	/**
+	 * The delivery queue decides whether to re-enqueue from `error.error.retryable`,
+	 * which comes from the failure class's policy. Every delivery failure used to
+	 * be one `AlertDeliveryError` carrying `retry: "backoff"`, so a destination
+	 * whose credentials had been revoked was retried the full
+	 * `MAX_DELIVERY_ATTEMPTS` against a provider that would never accept it.
+	 * These two cases are the guard on that split.
+	 */
+	const deliveryRetryCase = (
+		label: string,
+		status: number,
+		expectRetry: boolean,
+		expectedMessage: string,
+	) =>
+		it.effect(label, () => {
+			const fixedTime = 1_710_000_400_000
+			const testDb = createTestDb(trackedDbs)
+			const respond = (async () => new Response("nope", { status })) as unknown as typeof fetch
+
+			return Effect.gen(function* () {
+				const alerts = yield* AlertsService
+				const orgId = asOrgId(`org_retry_${status}`)
+				const userId = asUserId(`user_retry_${status}`)
+				const destination = yield* createWebhookDestination(alerts, orgId, userId)
+				const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+				const deliveryKey = `retry-${status}-key`
+
+				yield* Effect.promise(() =>
+					insertDeliveryEventRow(testDb, {
+						id: `00000000-0000-4000-8000-${String(status).padStart(12, "0")}`,
+						orgId,
+						incidentId: null,
+						ruleId: rule.id,
+						destinationId: destination.id,
+						deliveryKey,
+						eventType: "test",
+						attemptNumber: 1,
+						status: "queued",
+						scheduledAt: fixedTime - 1,
+						payloadJson: JSON.stringify({
+							eventType: "test",
+							incidentId: null,
+							incidentStatus: "resolved",
+							dedupeKey: `retry-${status}-dedupe`,
+							rule: {
+								id: rule.id,
+								name: rule.name,
+								signalType: rule.signalType,
+								severity: rule.severity,
+								groupKey: null,
+								comparator: rule.comparator,
+								threshold: rule.threshold,
+								windowMinutes: rule.windowMinutes,
+							},
+							observed: { value: 0, sampleCount: 0 },
+							linkUrl: "http://127.0.0.1:3471/alerts",
+							sentAt: new Date(fixedTime).toISOString(),
+						}),
+					}),
+				)
+
+				const tick = yield* alerts.runSchedulerTick()
+				const events = yield* alerts.listDeliveryEvents(orgId)
+
+				assert.strictEqual(tick.deliveryFailureCount, 1)
+				const firstAttempt = events.events.find(
+					(event) => event.deliveryKey === deliveryKey && event.attemptNumber === 1,
+				)
+				const retryAttempt = events.events.find(
+					(event) => event.deliveryKey === deliveryKey && event.attemptNumber === 2,
+				)
+				assert.strictEqual(firstAttempt?.status, "failed")
+				assert.include(firstAttempt?.errorMessage ?? "", expectedMessage)
+				if (expectRetry) {
+					assert.strictEqual(retryAttempt?.status, "queued", "a transient failure must retry")
+				} else {
+					assert.isUndefined(retryAttempt, "a terminal failure must not enqueue another attempt")
+				}
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
+						now: Effect.succeed(fixedTime),
+						fetch: respond,
+					}),
+				),
+			)
+		})
+
+	deliveryRetryCase(
+		"does not retry a destination that rejected our credentials",
+		401,
+		false,
+		"Webhook delivery failed with 401",
+	)
+	deliveryRetryCase(
+		"retries a destination that is temporarily unavailable",
+		503,
+		true,
+		"Webhook delivery failed with 503",
+	)
+
 	it.live("times out stuck deliveries and enqueues a retry attempt", () => {
 		const fixedTime = 1_710_000_300_000
 		const testDb = createTestDb(trackedDbs)

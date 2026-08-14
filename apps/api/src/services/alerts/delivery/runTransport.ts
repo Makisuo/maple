@@ -2,7 +2,14 @@
  * The uniform half of every delivery: spans, timeout, SSRF guard, error
  * construction. A transport contributes only what is provider-specific.
  */
-import { AlertDeliveryError, type AlertDestinationType } from "@maple/domain/http"
+import {
+	AlertDeliveryAuthError,
+	AlertDeliveryError,
+	AlertDeliveryRejectedError,
+	AlertDeliveryTargetMissingError,
+	type AlertDeliveryFailure,
+	type AlertDestinationType,
+} from "@maple/domain/http"
 import { Duration, Effect, Option, Result } from "effect"
 import { safeFetch } from "@/http/url-validator"
 import type {
@@ -39,6 +46,31 @@ const readErrorBody = (response: Response) =>
  */
 const statusFailureMessage = (providerLabel: string, status: number, detail: string) =>
 	`${providerLabel} delivery failed with ${status}${detail ? `: ${detail}` : ""}`
+
+/**
+ * Provider HTTP status → the failure class whose policy says whether the queue
+ * should retry. This is the single place that decision is made; the classes
+ * themselves carry `retry`/`recovery`, and `AlertsService` reads
+ * `error.error.retryable` off whichever one it gets.
+ *
+ * A transport overrides this only when its provider disagrees with the HTTP
+ * convention — see `slack-bot`, which reports channel failures as 200 + a body.
+ */
+export const failureForStatus = (
+	status: number,
+	fields: {
+		readonly message: string
+		readonly destinationType: AlertDestinationType
+		readonly providerStatus: number
+	},
+): AlertDeliveryFailure => {
+	if (status === 401 || status === 403) return new AlertDeliveryAuthError(fields)
+	if (status === 404 || status === 410) return new AlertDeliveryTargetMissingError(fields)
+	// 408/429 are the provider asking us to come back, not a rejection.
+	if (status === 408 || status === 429 || status >= 500) return new AlertDeliveryError(fields)
+	if (status >= 400) return new AlertDeliveryRejectedError(fields)
+	return new AlertDeliveryError(fields)
+}
 
 const hostOf = (url: string) => Option.liftThrowable(() => new URL(url))()
 
@@ -115,7 +147,7 @@ export const runHttpTransport = <Config, Prepared>(
 	transport: HttpTransport<Config, Prepared>,
 	input: RenderInput<Config>,
 	runtime: TransportRuntime,
-): Effect.Effect<DispatchResult, AlertDeliveryError> =>
+): Effect.Effect<DispatchResult, AlertDeliveryFailure> =>
 	Effect.gen(function* () {
 		const prepared = transport.prepare
 			? yield* transport.prepare(input)
@@ -126,13 +158,19 @@ export const runHttpTransport = <Config, Prepared>(
 
 		if (!response.ok) {
 			const detail = yield* readErrorBody(response)
+			// A transport may supply a better sentence for a status it knows well;
+			// it does not get to change whether the failure is retryable.
 			const described = transport.describeStatus?.(response.status) ?? null
-			return yield* Effect.fail(
-				makeDeliveryError(
-					described ?? statusFailureMessage(transport.providerLabel, response.status, detail),
-					transport.type,
-				),
-			)
+			const failure = failureForStatus(response.status, {
+				message: described ?? statusFailureMessage(transport.providerLabel, response.status, detail),
+				destinationType: transport.type,
+				providerStatus: response.status,
+			})
+			yield* Effect.annotateCurrentSpan({
+				"maple.delivery.failure_tag": failure._tag,
+				"maple.delivery.retryable": failure.error.retryable,
+			})
+			return yield* Effect.fail(failure)
 		}
 
 		// A 2xx is not proof of delivery for every provider — Slack answers 200
@@ -161,4 +199,4 @@ export const runEffectTransport = <Config>(
 	transport: EffectTransport<Config>,
 	input: RenderInput<Config>,
 	deps: EffectTransportDeps,
-): Effect.Effect<DispatchResult, AlertDeliveryError> => transport.send(input, deps)
+): Effect.Effect<DispatchResult, AlertDeliveryFailure> => transport.send(input, deps)

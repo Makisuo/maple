@@ -17,7 +17,7 @@
  * of any kind, which is why the four unverified providers were expensive to
  * cover before and are cheap now.
  */
-import type { AlertDeliveryError, AlertDestinationType } from "@maple/domain/http"
+import type { AlertDeliveryFailure, AlertDestinationType } from "@maple/domain/http"
 import type { Effect, Result } from "effect"
 import type { DestinationSecretConfig } from "../AlertDestinationHydration"
 import type { DispatchContext, DispatchResult } from "./context"
@@ -92,7 +92,7 @@ export interface HttpTransport<Config, Prepared = void> {
 	 * The only effectful step, and the only place a secret is fetched. Omitted
 	 * by every provider whose credentials are already in the secret config.
 	 */
-	readonly prepare?: (input: RenderInput<Config>) => Effect.Effect<Prepared, AlertDeliveryError>
+	readonly prepare?: (input: RenderInput<Config>) => Effect.Effect<Prepared, AlertDeliveryFailure>
 	/** PURE. The unit-testable heart of each provider. */
 	readonly render: (input: RenderInput<Config>, prepared: Prepared) => HttpRequestSpec
 	/**
@@ -108,7 +108,7 @@ export interface HttpTransport<Config, Prepared = void> {
 	readonly interpret?: (
 		input: RenderInput<Config>,
 		rawBody: string,
-	) => Result.Result<ProviderAck, AlertDeliveryError>
+	) => Result.Result<ProviderAck, AlertDeliveryFailure>
 	/** PURE. The success shape when `interpret` is absent. */
 	readonly ack: (input: RenderInput<Config>) => ProviderAck
 }
@@ -127,11 +127,15 @@ export interface EffectTransport<Config> {
 	readonly send: (
 		input: RenderInput<Config>,
 		deps: EffectTransportDeps,
-	) => Effect.Effect<DispatchResult, AlertDeliveryError>
+	) => Effect.Effect<DispatchResult, AlertDeliveryFailure>
 }
 
 export interface EffectTransportDeps {
-	readonly sendEmail: (to: string, subject: string, html: string) => Effect.Effect<void, AlertDeliveryError>
+	readonly sendEmail: (
+		to: string,
+		subject: string,
+		html: string,
+	) => Effect.Effect<void, AlertDeliveryFailure>
 }
 
 /** Narrows the secret-config union to the member a given destination type carries. */

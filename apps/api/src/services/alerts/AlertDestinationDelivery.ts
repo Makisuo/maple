@@ -1,5 +1,6 @@
 import {
 	AlertDeliveryError,
+	type AlertDeliveryFailure,
 	AlertDestinationDecryptionError,
 	AlertDestinationStoredConfigInvalidError,
 	AlertValidationError,
@@ -117,7 +118,7 @@ export const makeAlertDestinationDelivery = (options: {
 	const dispatchDelivery = (
 		context: AlertDispatchContext,
 		payloadJson: string,
-	): Effect.Effect<DispatchResult, AlertDeliveryError> =>
+	): Effect.Effect<DispatchResult, AlertDeliveryFailure> =>
 		dispatchDeliveryImpl(
 			context,
 			payloadJson,

@@ -895,13 +895,34 @@ export type AlertNotFoundError =
 	| AlertDestinationNotFoundError
 	| AlertIncidentNotFoundError
 
+// Alert delivery failures are one class per failure mode, discriminated by
+// `_tag`/`catchTags`, for the same reason the warehouse errors are (see the
+// header comment in `warehouse-errors.ts`): `retryable` is derived from the
+// class policy and baked into each endpoint's OpenAPI as a literal, so a
+// `reason` field inside a single class could not change it without the
+// published schema lying.
+//
+// It also matters operationally. Every delivery failure used to be one
+// `AlertDeliveryError` carrying `retry: "backoff"`, and the queue reads
+// `error.error.retryable` to decide whether to re-enqueue — so a destination
+// whose token had been revoked was retried the full `MAX_DELIVERY_ATTEMPTS`
+// against a provider that would never accept it. Splitting the class is what
+// makes "reconfigure the channel" terminal.
+
+const alertDeliveryErrorFields = {
+	message: Schema.String,
+	destinationType: Schema.optionalKey(AlertDestinationType),
+	/** Provider HTTP status, when the failure came from a response. */
+	providerStatus: Schema.optionalKey(Schema.Number),
+	/** Provider-specific failure code, e.g. Slack's `not_in_channel`. */
+	providerErrorCode: Schema.optionalKey(Schema.String),
+	cause: Schema.optionalKey(Schema.Defect()),
+}
+
+/** Transient provider failure — timeout, network, 5xx, 429. Worth retrying. */
 export class AlertDeliveryError extends HttpTaggedError<AlertDeliveryError>()(
 	"@maple/http/errors/AlertDeliveryError",
-	{
-		message: Schema.String,
-		destinationType: Schema.optionalKey(AlertDestinationType),
-		cause: Schema.optionalKey(Schema.Defect()),
-	},
+	alertDeliveryErrorFields,
 	{
 		status: 502,
 		code: "alert_delivery_failed",
@@ -912,6 +933,65 @@ export class AlertDeliveryError extends HttpTaggedError<AlertDeliveryError>()(
 		exposure: "redacted",
 	},
 ) {}
+
+/** Provider rejected our credentials (401/403). Terminal until reconfigured. */
+export class AlertDeliveryAuthError extends HttpTaggedError<AlertDeliveryAuthError>()(
+	"@maple/http/errors/AlertDeliveryAuthError",
+	alertDeliveryErrorFields,
+	{
+		status: 502,
+		code: "alert_delivery_auth_failed",
+		title: "Alert destination rejected our credentials",
+		message: "The destination rejected Maple's credentials. Reconnect it in settings.",
+		retry: "never",
+		recovery: "reconnect",
+		exposure: "redacted",
+	},
+) {}
+
+/**
+ * The target channel/endpoint is gone or unreachable as configured — a 404, a
+ * deleted webhook, or a Slack channel the bot is not a member of. Retrying
+ * cannot fix it; the destination has to be pointed somewhere else.
+ */
+export class AlertDeliveryTargetMissingError extends HttpTaggedError<AlertDeliveryTargetMissingError>()(
+	"@maple/http/errors/AlertDeliveryTargetMissingError",
+	alertDeliveryErrorFields,
+	{
+		status: 502,
+		code: "alert_delivery_target_missing",
+		title: "Alert destination no longer exists",
+		message: "The destination no longer exists or is not reachable. Update it in settings.",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "redacted",
+	},
+) {}
+
+/** Provider refused the request itself (a non-auth 4xx). Retrying re-sends the same rejected payload. */
+export class AlertDeliveryRejectedError extends HttpTaggedError<AlertDeliveryRejectedError>()(
+	"@maple/http/errors/AlertDeliveryRejectedError",
+	alertDeliveryErrorFields,
+	{
+		status: 502,
+		code: "alert_delivery_rejected",
+		title: "Alert provider rejected the request",
+		message: "The alert provider rejected the request.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+/**
+ * Any delivery failure. Use at seams that only propagate; `catchTags` on the
+ * individual classes where the distinction matters.
+ */
+export type AlertDeliveryFailure =
+	| AlertDeliveryError
+	| AlertDeliveryAuthError
+	| AlertDeliveryTargetMissingError
+	| AlertDeliveryRejectedError
 
 export class AlertDestinationInUseError extends HttpTaggedError<AlertDestinationInUseError>()(
 	"@maple/http/errors/AlertDestinationInUseError",

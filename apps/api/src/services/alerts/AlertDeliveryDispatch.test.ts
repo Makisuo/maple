@@ -1,5 +1,10 @@
 import type { AlertDestinationRow } from "@maple/db"
-import { AlertDeliveryError, AlertDestinationId } from "@maple/domain/http"
+import {
+	AlertDeliveryError,
+	AlertDeliveryRejectedError,
+	AlertDeliveryTargetMissingError,
+	AlertDestinationId,
+} from "@maple/domain/http"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Schema } from "effect"
 import { TestClock } from "effect/testing"
@@ -408,8 +413,12 @@ describe("dispatchDelivery", () => {
 				dispatchDelivery(pagerdutyContext, "{}", fetchFn, 5_000, LINK, CHAT, noEmailDeps),
 			)
 
-			assert.instanceOf(error, AlertDeliveryError)
+			// A 400 is the provider refusing this payload — retrying re-sends the
+			// same rejected request, so it classifies as terminal.
+			assert.instanceOf(error, AlertDeliveryRejectedError)
+			assert.isFalse(error.error.retryable)
 			assert.strictEqual(error.destinationType, "pagerduty")
+			assert.strictEqual(error.providerStatus, 400)
 			assert.include(error.message, "PagerDuty delivery failed with 400")
 			// The PagerDuty rejection reason is now surfaced instead of swallowed.
 			assert.include(error.message, "routing_key is invalid")
@@ -484,8 +493,12 @@ describe("dispatchDelivery", () => {
 				dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
 			)
 
-			assert.instanceOf(error, AlertDeliveryError)
+			// Slack reports this as HTTP 200 + `ok:false`, so only the transport can
+			// classify it. Someone has to re-invite the bot; retrying cannot.
+			assert.instanceOf(error, AlertDeliveryTargetMissingError)
+			assert.isFalse(error.error.retryable)
 			assert.strictEqual(error.destinationType, "slack-bot")
+			assert.strictEqual(error.providerErrorCode, "not_in_channel")
 			assert.include(error.message, "not_in_channel")
 			assert.include(error.message, "invite the Maple bot")
 		}),

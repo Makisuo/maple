@@ -1,5 +1,6 @@
 import {
 	AlertDeliveryError,
+	type AlertDeliveryFailure,
 	AlertDestinationDecryptionError,
 	AlertDestinationDeleteResponse,
 	AlertDestinationDocument,
@@ -270,7 +271,7 @@ export interface AlertDestinationsServiceShape {
 		| AlertForbiddenError
 		| AlertPersistenceError
 		| AlertDestinationNotFoundError
-		| AlertDeliveryError
+		| AlertDeliveryFailure
 		| AlertDestinationDecryptionError
 		| AlertDestinationStoredConfigInvalidError
 	>

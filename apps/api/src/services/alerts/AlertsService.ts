@@ -2,6 +2,7 @@ import { formatWarehouseDateTime } from "@maple/query-engine"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
+	type AlertDeliveryFailure,
 	AlertDestinationDecryptionError,
 	AlertDeliveryEventDocument,
 	AlertDestinationDocument,
@@ -309,7 +310,7 @@ export interface AlertsServiceShape
 		| AlertValidationError
 		| AlertPersistenceError
 		| AlertRuleDestinationNotFoundError
-		| AlertDeliveryError
+		| AlertDeliveryFailure
 		| AlertDestinationStorageError
 		| QueryEngineValidationError
 		| QueryEngineTimeoutError
@@ -340,7 +341,7 @@ export interface AlertsServiceShape
 			readonly deliveryFailureCount: number
 		},
 		| AlertPersistenceError
-		| AlertDeliveryError
+		| AlertDeliveryFailure
 		| AlertValidationError
 		| AlertRuleNotFoundError
 		| AlertDestinationNotFoundError
@@ -649,7 +650,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const toDeliveryAttemptFailure = (
 				error:
 					| AlertValidationError
-					| AlertDeliveryError
+					| AlertDeliveryFailure
 					| AlertPersistenceError
 					| AlertDestinationStorageError
 					| AlertRuleStoredConfigInvalidError,
@@ -1432,7 +1433,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					row: AlertDeliveryEventRow,
 					error:
 						| AlertValidationError
-						| AlertDeliveryError
+						| AlertDeliveryFailure
 						| AlertPersistenceError
 						| AlertDestinationStorageError
 						| AlertRuleStoredConfigInvalidError,
@@ -2641,7 +2642,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					row: AlertRuleRow,
 					error:
 						| AlertValidationError
-						| AlertDeliveryError
+						| AlertDeliveryFailure
 						| AlertPersistenceError
 						| AlertRuleStoredConfigInvalidError
 						| QueryEngineValidationError

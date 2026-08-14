@@ -1,5 +1,5 @@
 import { slackWorkspaces } from "@maple/db"
-import { AlertDeliveryError, OrgId } from "@maple/domain/http"
+import { AlertDeliveryAuthError, OrgId } from "@maple/domain/http"
 import { and, eq, isNull } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
@@ -39,11 +39,18 @@ export const loadActiveWorkspaceByOrg = Effect.fnUntraced(function* (database: D
 	return Option.fromNullishOr(rows[0])
 })
 
-const notConnected = (message: string) => new AlertDeliveryError({ message, destinationType: "slack-bot" })
+/**
+ * No active Slack install means no token will ever be resolved until someone
+ * reconnects the workspace, so this must be the non-retryable class — the
+ * delivery queue reads `retryable` off the failure to decide whether to
+ * re-enqueue, and retrying this five times accomplishes nothing.
+ */
+const notConnected = (message: string) =>
+	new AlertDeliveryAuthError({ message, destinationType: "slack-bot" })
 
 /**
  * Resolve the decrypted Slack bot token for an org's active installation.
- * Fails with an {@link AlertDeliveryError} when there is no active install.
+ * Fails with an {@link AlertDeliveryAuthError} when there is no active install.
  */
 export const resolveSlackBotTokenForDispatch = Effect.fn("SlackBotTokenResolver.resolve")(function* (
 	database: DatabaseShape,
@@ -80,7 +87,7 @@ class SlackBotTokenConfigError extends Schema.TaggedError<SlackBotTokenConfigErr
 ) {}
 
 export interface SlackBotTokenResolverShape {
-	readonly resolve: (orgId: OrgId) => Effect.Effect<string, AlertDeliveryError>
+	readonly resolve: (orgId: OrgId) => Effect.Effect<string, AlertDeliveryAuthError>
 }
 
 const make: Effect.Effect<SlackBotTokenResolverShape, SlackBotTokenConfigError, Database | Env> = Effect.gen(
