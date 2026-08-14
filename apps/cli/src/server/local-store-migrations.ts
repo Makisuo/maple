@@ -15,6 +15,7 @@ import {
 	LOCAL_SCHEMA_V1,
 	LOCAL_SCHEMA_SQL,
 	identityLabel,
+	legacyLocalSchemaIdentity,
 	type LocalSchemaIdentity,
 } from "./schema-identity"
 import {
@@ -190,8 +191,8 @@ export const identityFromMarker = (marker: StoreMarker): LocalSchemaIdentity | n
 			chdb: marker.chdb,
 		}
 	}
-	if (marker.schema === LEGACY_LOCAL_SCHEMA.fingerprint)
-		return { ...LEGACY_LOCAL_SCHEMA, chdb: marker.chdb }
+	const legacyIdentity = legacyLocalSchemaIdentity(marker.schema)
+	if (legacyIdentity) return { ...legacyIdentity, chdb: marker.chdb }
 	if (marker.schema === LOCAL_SCHEMA_V1.fingerprint) return { ...LOCAL_SCHEMA_V1, chdb: marker.chdb }
 	return null
 }
@@ -240,7 +241,9 @@ export const resolveMigrationChain = (
 		const migration = byFrom.get(current.version)
 		if (
 			!migration ||
-			migration.from.fingerprint !== current.fingerprint ||
+			(migration.from.version === LEGACY_LOCAL_SCHEMA.version
+				? legacyLocalSchemaIdentity(current.fingerprint) === null
+				: migration.from.fingerprint !== current.fingerprint) ||
 			(migration.from.digest !== "" &&
 				current.digest !== "" &&
 				migration.from.digest !== current.digest)
@@ -423,17 +426,32 @@ const parseStep = (value: unknown, index: number): MigrationStepJournal => {
 const sameJournalIdentity = (a: LocalSchemaIdentity, b: LocalSchemaIdentity): boolean =>
 	a.version === b.version && a.fingerprint === b.fingerprint && a.digest === b.digest && a.chdb === b.chdb
 
+/** The journal's top-level source identity records the store marker as found
+ * (any registered legacy variant), while chain steps carry the frozen module
+ * identities — for the legacy edge, the canonical v0 identity. Both are
+ * correct, so the first-step invariant accepts any registered v0 variant. */
+const sourceMatchesFirstStep = (source: LocalSchemaIdentity, firstFrom: LocalSchemaIdentity): boolean =>
+	sameJournalIdentity(source, firstFrom) ||
+	(source.version === LEGACY_LOCAL_SCHEMA.version &&
+		firstFrom.version === LEGACY_LOCAL_SCHEMA.version &&
+		source.chdb === firstFrom.chdb &&
+		legacyLocalSchemaIdentity(source.fingerprint) !== null &&
+		legacyLocalSchemaIdentity(firstFrom.fingerprint) !== null)
+
 const assertJournalChainInvariants = (journal: MigrationJournal): void => {
 	const { chain, currentStepIndex: current } = journal
 	if (current < 0 || current > chain.length)
 		throw new Error("migration journal currentStepIndex is invalid")
 	if (
-		!sameJournalIdentity(chain[0]!.from, {
-			version: journal.sourceVersion,
-			fingerprint: journal.sourceFingerprint,
-			digest: journal.sourceDigest,
-			chdb: journal.sourceChdb,
-		})
+		!sourceMatchesFirstStep(
+			{
+				version: journal.sourceVersion,
+				fingerprint: journal.sourceFingerprint,
+				digest: journal.sourceDigest,
+				chdb: journal.sourceChdb,
+			},
+			chain[0]!.from,
+		)
 	)
 		throw new Error("migration journal source identity does not match its first step")
 	if (

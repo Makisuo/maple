@@ -25,6 +25,20 @@ export const LEGACY_LOCAL_SCHEMA_VERSION = 0 as const
 export const LEGACY_SCHEMA_PROJECT_REVISION =
 	"d58ce4a83d3ad3f3a29b9bb972272b757547ae793c050194354454634f3abccd"
 export const LEGACY_SCHEMA_FINGERPRINT = "428701854f9fd30e"
+export const LEGACY_SCHEMA_VARIANTS = LOCAL_SCHEMA_HISTORY[0]!.variants!
+export const LEGACY_SCHEMA_FINGERPRINTS: ReadonlyArray<string> = Object.freeze(
+	LEGACY_SCHEMA_VARIANTS.map((variant) => variant.fingerprint),
+)
+
+export const legacyLocalSchemaIdentity = (fingerprint: string): LocalSchemaIdentity | null => {
+	const variant = LEGACY_SCHEMA_VARIANTS.find((candidate) => candidate.fingerprint === fingerprint)
+	if (!variant) return null
+	return {
+		...LEGACY_LOCAL_SCHEMA,
+		fingerprint: variant.fingerprint,
+		projectRevision: variant.projectRevision,
+	}
+}
 
 export const CURRENT_SCHEMA_PROJECT_REVISION =
 	"3bf63ab19fcba1a20ebaf6a97b49acfc2ecf00f1589c11438349bb87d21f77b7"
