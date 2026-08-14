@@ -1,0 +1,46 @@
+[
+	{
+		"occurrenceId": "project-event-42",
+		"projectionId": "gitlab-project-renamed"
+	},
+	{
+		"occurrenceId": "mr-event-7",
+		"projectionId": "gitlab-mr-opened"
+	},
+	{
+		"occurrenceId": "pipeline-event-900",
+		"projectionId": "gitlab-pipeline-completed"
+	},
+	{
+		"occurrenceId": "delivery-issue:issue_close",
+		"projectionId": "gitlab-issue_close"
+	},
+	{
+		"occurrenceId": "delivery-comment:0",
+		"projectionId": "gitlab-issue-comment"
+	},
+	{
+		"occurrenceId": "delivery-mr-comment:merge_request_review_comment",
+		"projectionId": "gitlab-merge_request_review_comment"
+	},
+	{
+		"occurrenceId": "delivery-pipeline:0",
+		"projectionId": "gitlab-pipeline-enriched"
+	},
+	{
+		"occurrenceId": "delivery-deployment:deployment_failed",
+		"projectionId": "gitlab-deployment_failed"
+	},
+	{
+		"occurrenceId": "delivery-job:failed",
+		"projectionId": "gitlab-ci_job_failed"
+	},
+	{
+		"occurrenceId": "delivery-ref:tag_create",
+		"projectionId": "gitlab-tag_create"
+	},
+	{
+		"occurrenceId": "delivery-release:create",
+		"projectionId": "gitlab-release_create"
+	}
+]
