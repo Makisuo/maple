@@ -1,4 +1,10 @@
-import type { AlertComparator, AlertEventType, AlertSeverity, AlertSignalType } from "@maple/domain/http"
+import {
+	UNGROUPED_GROUP_KEY,
+	type AlertComparator,
+	type AlertEventType,
+	type AlertSeverity,
+	type AlertSignalType,
+} from "@maple/domain/http"
 import { Match, Option } from "effect"
 import { resolveSignalDisplay, type SignalDisplay } from "./alert-signal-display"
 import type { NotificationTemplateConfig } from "./alert-templating/renderer"
@@ -33,6 +39,19 @@ const round = (value: number, decimals = 2): string => {
 	const factor = 10 ** decimals
 	return (Math.round(value * factor) / factor).toString()
 }
+
+/**
+ * The group key as a human should see it, or `null` when the rule is not
+ * grouped.
+ *
+ * An ungrouped rule stores `UNGROUPED_GROUP_KEY` (`"__total__"`) as its group
+ * key — a storage sentinel meaning "the whole rule", not a group anyone named.
+ * It was reaching notifications verbatim, so Slack rendered a `Group` field
+ * reading `__total__`. `issue-hub.ts` and the web alert-source card already
+ * guard against it; the notification path did not.
+ */
+export const displayGroupKey = (groupKey: string | null): string | null =>
+	groupKey == null || groupKey === UNGROUPED_GROUP_KEY ? null : groupKey
 
 /** Clamp to a provider's field limit, marking the cut with an ellipsis. */
 export const truncate = (value: string, max: number): string =>

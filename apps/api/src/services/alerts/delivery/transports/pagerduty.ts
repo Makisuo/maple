@@ -1,5 +1,5 @@
 import { Duration, Effect } from "effect"
-import { truncate } from "../../alert-formatting"
+import { displayGroupKey, truncate } from "../../alert-formatting"
 import type { HttpTransport, RenderInput, SecretConfigOf } from "../Transport"
 
 type Config = SecretConfigOf<"pagerduty">
@@ -30,7 +30,7 @@ export const pagerDutyTransport: HttpTransport<Config> = {
 				dedup_key: context.dedupeKey,
 				payload: {
 					summary: truncate(templated?.title ?? `${context.ruleName} ${context.eventType}`, 1024),
-					source: context.groupKey ?? "maple-alerts",
+					source: displayGroupKey(context.groupKey) ?? "maple-alerts",
 					severity: context.severity === "critical" ? "critical" : "warning",
 					custom_details: {
 						...(templated ? { message: templated.body } : {}),

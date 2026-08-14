@@ -18,6 +18,7 @@ import type { DispatchContext } from "./delivery/context"
 import {
 	comparatorBreachPhrase,
 	discordEmbedColor,
+	displayGroupKey,
 	eventTypeEmoji,
 	formatComparator,
 	formatEventTypeLabel,
@@ -170,6 +171,16 @@ const buildSlackContextBlock = (context: Pick<DispatchContext, "sentAtMs" | "inc
 	return { type: "context", elements: [{ type: "mrkdwn", text: parts.join("  ·  ") }] }
 }
 
+/**
+ * The `Group` field, present only when the rule is actually grouped. An
+ * ungrouped rule has no group to report — showing its `__total__` storage
+ * sentinel is worse than showing nothing.
+ */
+const groupField = (groupKey: string | null) => {
+	const group = displayGroupKey(groupKey)
+	return group == null ? [] : [{ type: "mrkdwn", text: `*Group*\n\`${escapeSlackMrkdwn(group)}\`` }]
+}
+
 export const buildSlackBlocks = (context: TemplateRenderContext, linkUrl: string, chatUrl: string) => [
 	{
 		type: "header",
@@ -190,9 +201,7 @@ export const buildSlackBlocks = (context: TemplateRenderContext, linkUrl: string
 				type: "mrkdwn",
 				text: `*Severity*\n${severityEmoji(context.severity)} ${formatSeverityLabel(context.severity)}`,
 			},
-			...(context.groupKey != null
-				? [{ type: "mrkdwn", text: `*Group*\n\`${escapeSlackMrkdwn(context.groupKey)}\`` }]
-				: []),
+			...groupField(context.groupKey),
 		],
 	},
 	buildSlackActionsBlock(linkUrl, chatUrl),
@@ -214,7 +223,7 @@ export const buildDiscordEmbeds = (context: DispatchContext, linkUrl: string, ch
 		fields: [
 			{ name: "Severity", value: context.severity, inline: true },
 			{ name: "Signal", value: formatSignalLabel(context), inline: true },
-			{ name: "Group", value: context.groupKey ?? "all", inline: true },
+			{ name: "Group", value: displayGroupKey(context.groupKey) ?? "all", inline: true },
 			{ name: "Observed", value: formatObservedSummary(context), inline: true },
 			{ name: "Window", value: formatWindow(context.windowMinutes), inline: true },
 			{
@@ -266,7 +275,7 @@ export const buildTemplateContext = (
 		observed: formatSignalMetric(context.value, display),
 		"observed.summary": formatObservedSummary(context),
 		sampleCount: context.sampleCount != null ? String(context.sampleCount) : "",
-		group: context.groupKey ?? "all",
+		group: displayGroupKey(context.groupKey) ?? "all",
 		window: formatWindow(context.windowMinutes),
 		incidentId: context.incidentId ?? "",
 		incidentStatus: context.incidentStatus,

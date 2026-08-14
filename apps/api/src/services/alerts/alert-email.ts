@@ -2,6 +2,7 @@ import { AlertDeliveryError } from "@maple/domain/http"
 import { renderAlertNotification } from "@maple/email/alert-notification"
 import { Effect } from "effect"
 import {
+	displayGroupKey,
 	eventTypeEmoji,
 	formatEventTypeLabel,
 	formatObservedSummary,
@@ -38,7 +39,7 @@ export const buildAlertEmailContent = (
 				eventEmoji: emoji,
 				severity: context.severity,
 				signalLabel: formatSignalLabel(context),
-				group: context.groupKey ?? "all",
+				group: displayGroupKey(context.groupKey) ?? "all",
 				observedSummary: formatObservedSummary(context),
 				window: formatWindow(context.windowMinutes),
 				accentColor: slackAttachmentColor(context.eventType, context.severity),
