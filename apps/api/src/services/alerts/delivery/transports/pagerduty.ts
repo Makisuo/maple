@@ -99,10 +99,6 @@ export const verifyPagerDutyRoutingKey = (
 			}),
 		}),
 	).pipe(
-		Effect.timeoutOrElse({
-			duration: Duration.millis(timeoutMs),
-			orElse: () => Effect.fail(new Error("timeout")),
-		}),
 		Effect.flatMap((response) => {
 			if (response.ok) return Effect.succeed<PagerDutyKeyVerification>({ status: "valid" })
 			if (response.status === 400) {
@@ -114,6 +110,14 @@ export const verifyPagerDutyRoutingKey = (
 				)
 			}
 			return Effect.succeed<PagerDutyKeyVerification>({ status: "unknown" })
+		}),
+		// A timeout is one more way to not know, so it produces the verdict
+		// directly rather than a placeholder failure for `orElseSucceed` to
+		// swallow one line later. Wrapping the whole pipeline also bounds the
+		// 400-body read, which the previous fetch-only timeout left open.
+		Effect.timeoutOrElse({
+			duration: Duration.millis(timeoutMs),
+			orElse: () => Effect.succeed<PagerDutyKeyVerification>({ status: "unknown" }),
 		}),
 		Effect.orElseSucceed(() => ({ status: "unknown" as const })),
 	)
