@@ -144,7 +144,13 @@ export function deriveMeta(events: unknown[]): DerivedMeta {
 			}
 			// A video segment stays "active" for its whole duration, so the next
 			// segment starting right after it is continuous playback, not a gap.
-			prevMeaningfulTs = ev.timestamp + eventSpanMs(raw)
+			//
+			// Monotonic on purpose. The iOS SDK emits `meta`, `video` and
+			// `breadcrumb` all on the *same* timestamp, and the breadcrumb is
+			// processed after the segment — a plain assignment would rewind the
+			// watermark from (ts + duration) back to ts, and every segment would
+			// register as a gap again. Verified against a real recording.
+			prevMeaningfulTs = Math.max(prevMeaningfulTs, ev.timestamp + eventSpanMs(raw))
 		}
 
 		if (ev.type === EventType.Meta && ev.data) {

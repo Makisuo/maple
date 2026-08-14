@@ -100,6 +100,21 @@ describe("deriveMeta idle bands", () => {
 		expect(deriveMeta(events).inactiveIntervals).toEqual([])
 	})
 
+	it("survives the sibling events the SDK emits on the same timestamp", () => {
+		// Modelled on a real recording (9 chunks, 5-6s segments): each chunk is
+		// `meta`, `video` and `breadcrumb` all stamped with the SAME ms, breadcrumb
+		// last. A plain assignment would rewind the watermark from (ts + duration)
+		// back to ts when the breadcrumb lands, and every segment would register as
+		// a gap again — so the watermark has to be monotonic.
+		const chunk = (atMs: number, durationMs: number) => [
+			metaEvent(atMs),
+			videoEvent(atMs, durationMs),
+			{ type: 5, timestamp: T0 + atMs, data: { tag: "breadcrumb", payload: { name: "tap" } } },
+		]
+		const events = [...chunk(0, 5_000), ...chunk(5_001, 6_000), ...chunk(11_007, 6_000)]
+		expect(deriveMeta(events).inactiveIntervals).toEqual([])
+	})
+
 	it("still reports a real gap between segments", () => {
 		// The recorder stops while the app is backgrounded. That hole is genuine
 		// idle and must stay collapsible, or skip-idle stops being useful.
