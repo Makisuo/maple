@@ -1,4 +1,5 @@
 import { warehouseDateTimeToIso, formatWarehouseDateTime } from "@maple/query-engine"
+import type { ReplayFormat } from "./engine/replay-engine"
 import type { ActionKind } from "./replay-player-context"
 
 // Presentation helpers for the session-replay surfaces (list, detail, player,
@@ -59,6 +60,31 @@ export function recordedMarker(resourceAttributes: string | null | undefined): b
 	if (marker === "true") return true
 	if (marker === "false") return false
 	return undefined
+}
+
+/**
+ * Read the SDK's `maple.session.replay_format` marker, which decides *which
+ * engine* plays a session.
+ *
+ * Browser sessions carry rrweb DOM snapshots; mobile sessions carry H.264
+ * segments wrapped in rrweb-shaped events. Reading this from session metadata is
+ * what lets the player pick an engine without downloading a chunk first.
+ *
+ * Everything unrecognised — absent key, unparseable attributes, a value from a
+ * newer SDK than this build knows — falls back to `"rrweb"`. Every session
+ * recorded before the marker existed is a browser recording, so that default is
+ * correct rather than merely safe.
+ */
+export function replayFormat(resourceAttributes: string | null | undefined): ReplayFormat {
+	if (!resourceAttributes) return "rrweb"
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(resourceAttributes)
+	} catch {
+		return "rrweb"
+	}
+	if (typeof parsed !== "object" || parsed === null) return "rrweb"
+	return (parsed as Record<string, unknown>)["maple.session.replay_format"] === "video" ? "video" : "rrweb"
 }
 
 /** A warehouse partition-pruning window, shared by the session-detail atom callers. */

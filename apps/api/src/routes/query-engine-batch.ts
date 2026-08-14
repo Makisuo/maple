@@ -3,7 +3,7 @@ import { Clock, Duration, Effect } from "effect"
 import { QueryEngineTimeoutError, type SelfDescribingHttpError } from "@maple/domain/http"
 
 /**
- * Fan-out for `POST /api/query-engine/execute-batch`.
+ * Fan-out for `POST /internal/query-engine/execute-batch`.
  *
  * Extracted from the route handler so the two things that actually carry risk —
  * the shared deadline and per-item failure isolation — are testable without an

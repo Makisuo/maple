@@ -21,7 +21,27 @@ const timestampOf = (event: unknown): number => (hasTimestamp(event) ? event.tim
 /** Order events by timestamp; ties keep input order (Arr.sort is a stable native sort). */
 const byTimestamp = Order.mapInput(Order.Number, timestampOf)
 
-const isSameEvent = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+/** The `type` field, when the event has a numeric one. */
+const typeOf = (event: unknown): number | undefined =>
+	typeof event === "object" && event !== null && "type" in event && typeof event.type === "number"
+		? event.type
+		: undefined
+
+/**
+ * Exact-duplicate test for two adjacent events.
+ *
+ * `JSON.stringify` is the ground truth, but it is not free: a mobile video event
+ * carries a whole base64-encoded MP4, so stringifying both sides of every
+ * adjacent pair would serialize hundreds of KB per comparison, on every range
+ * decode. Since duplicates must agree on timestamp and type anyway, checking
+ * those first rejects nearly every pair for two field reads — and only genuine
+ * candidates pay for the full comparison.
+ */
+const isSameEvent = (a: unknown, b: unknown): boolean => {
+	if (timestampOf(a) !== timestampOf(b)) return false
+	if (typeOf(a) !== typeOf(b)) return false
+	return JSON.stringify(a) === JSON.stringify(b)
+}
 
 /**
  * Stable-sort the concatenated event stream by timestamp and drop exact adjacent

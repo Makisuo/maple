@@ -22,7 +22,8 @@ import { useAnomalyMutations } from "@/components/anomalies/use-anomaly-mutation
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { SectionHeader } from "@/components/layout/section-header"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
-import { retainedQuery } from "@/lib/services/common/atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
+import { anomalyIncidentFromV2, anomalyTimeseriesFromV2 } from "@/lib/services/anomalies"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import {
@@ -43,6 +44,14 @@ import { cn } from "@maple/ui/lib/utils"
 import { AnomalyIncidentId, type AnomalyIncidentDocument, type ErrorIssueId } from "@maple/domain/http"
 
 const decodeIncidentId = Schema.decodeSync(AnomalyIncidentId)
+
+/**
+ * The v2 envelope nests the failure under `error`, so the tag has to come from
+ * `displayError` rather than a direct `_tag` read — the literal itself is
+ * preserved end to end.
+ */
+const isIncidentNotFound = (error: unknown) =>
+	displayError(error)._tag === "@maple/http/anomalies/AnomalyIncidentNotFoundError"
 const LIVE_REFRESH_INTERVAL_MS = 15_000
 const ANOMALY_LOADING_BREADCRUMBS = [{ label: "Anomalies", href: "/anomalies" }, { label: "…" }] as const
 
@@ -54,8 +63,8 @@ function AnomalyDetailPage() {
 	const { incidentId: rawIncidentId } = Route.useParams()
 	const incidentId = decodeIncidentId(rawIncidentId)
 
-	const incidentQueryAtom = retainedQuery("anomalies", "getIncident", {
-		params: { incidentId },
+	const incidentQueryAtom = retainedQueryV2("anomalies", "getIncident", {
+		params: { id: incidentId },
 		reactivityKeys: ["anomalyIncidents", `anomalyIncident:${incidentId}`],
 	})
 	const incidentResult = useAtomValue(incidentQueryAtom)
@@ -103,14 +112,15 @@ function AnomalyDetailPage() {
 							<Empty>
 								<EmptyHeader>
 									<EmptyTitle>
-										{error._tag === "@maple/http/anomalies/AnomalyIncidentNotFoundError"
+										{isIncidentNotFound(error)
 											? "Anomaly not found"
 											: "Failed to load anomaly"}
 									</EmptyTitle>
 									<EmptyDescription>
-										{error._tag === "@maple/http/anomalies/AnomalyIncidentNotFoundError"
+										{isIncidentNotFound(error)
 											? "It may have been pruned, or the link is stale."
-											: (error.message ?? "Try refreshing or check API logs.")}
+											: (displayError(error).message ??
+												"Try refreshing or check API logs.")}
 									</EmptyDescription>
 								</EmptyHeader>
 								<Button variant="outline" size="sm" render={<Link to="/anomalies" />}>
@@ -122,7 +132,9 @@ function AnomalyDetailPage() {
 				</DashboardLayout.Body>
 			</DashboardLayout.Root>
 		))
-		.onSuccess((incident) => <AnomalyDetailBody incident={incident} incidentId={incidentId} />)
+		.onSuccess((incident) => (
+			<AnomalyDetailBody incident={anomalyIncidentFromV2(incident)} incidentId={incidentId} />
+		))
 		.render()
 }
 
@@ -146,8 +158,8 @@ function AnomalyDetailBody({
 	const isStale = isStaleOpenIncident(incident)
 	const tone = severityToneFor(incident)
 
-	const timeseriesQueryAtom = retainedQuery("anomalies", "getIncidentTimeseries", {
-		params: { incidentId },
+	const timeseriesQueryAtom = retainedQueryV2("anomalies", "getIncidentTimeseries", {
+		params: { id: incidentId },
 		query: {},
 		reactivityKeys: [`anomalyIncident:${incidentId}:timeseries`],
 	})
@@ -309,7 +321,10 @@ function AnomalyDetailBody({
 										</div>
 									))
 									.onSuccess((timeseries) => (
-										<AnomalyTimeseriesChart incident={incident} timeseries={timeseries} />
+										<AnomalyTimeseriesChart
+											incident={incident}
+											timeseries={anomalyTimeseriesFromV2(timeseries)}
+										/>
 									))
 									.render()}
 							</section>

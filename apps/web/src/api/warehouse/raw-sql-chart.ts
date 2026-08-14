@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { RawSqlExecuteRequest, RawSqlDisplayType } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
 // Raw SQL chart server function (widget data source `raw_sql_chart`).
@@ -108,7 +108,7 @@ export const getRawSqlChart = Effect.fn("QueryEngine.getRawSqlChart")(function* 
 
 	const result = yield* runWarehouseQuery("rawSqlChart", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.executeRawSql({
 				payload: new RawSqlExecuteRequest({
 					sql: input.sql,

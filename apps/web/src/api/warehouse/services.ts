@@ -14,7 +14,7 @@ import {
 	ServiceHealthSnapshotRequest,
 	ServiceOverviewRequest,
 } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import {
 	buildBucketTimeline,
 	computeBucketSeconds,
@@ -166,7 +166,7 @@ const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(fun
 	// disagree with the env-scoped detail page.
 	const result = yield* runWarehouseQuery("serviceOverview", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceOverview({
 				payload: new ServiceOverviewRequest({
 					startTime,
@@ -228,7 +228,7 @@ const getServiceHealthSnapshotEffect = Effect.fn("QueryEngine.getServiceHealthSn
 
 	const response = yield* runWarehouseQuery("serviceHealthSnapshot", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceHealthSnapshot({
 				payload: new ServiceHealthSnapshotRequest({
 					startTime,
@@ -305,7 +305,7 @@ const getServiceHealthBaselineEffect = Effect.fn("QueryEngine.getServiceHealthBa
 
 	const response = yield* runWarehouseQuery("serviceHealthBaseline", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceHealthBaseline({
 				payload: new ServiceHealthBaselineRequest({
 					startTime,
@@ -509,7 +509,7 @@ const getServiceApdexTimeSeriesEffect = Effect.fn("QueryEngine.getServiceApdexTi
 
 	const result = yield* runWarehouseQuery("serviceApdex", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceApdex({
 				payload: new ServiceApdexRequest({
 					serviceName: input.serviceName,

@@ -93,6 +93,13 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, 
 			// to distinguish a metadata-only session from one still uploading chunks.
 			// `maple.*` vendor namespace, per the telemetry conventions.
 			"maple.session.recorded": input.recorded ? "true" : "false",
+			// Which engine plays this session's chunks. Hardcoded because the browser
+			// SDK can only ever produce rrweb; the mobile SDKs stamp "video" (H.264
+			// segments wrapped in rrweb-shaped events). The web player reads this from
+			// session metadata so it can pick an engine without downloading a chunk
+			// first, and treats an absent key as "rrweb" — every session recorded
+			// before this marker existed is a browser recording.
+			"maple.session.replay_format": "rrweb",
 			// Storage-blocked visitors get an in-memory id, so their sessions each
 			// look like a distinct visitor. Flag it rather than inflate silently.
 			...(input.visitorId && input.visitorIdPersisted === false

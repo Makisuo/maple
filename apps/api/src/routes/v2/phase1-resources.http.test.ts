@@ -465,6 +465,17 @@ const makeHarness = (
 								incidentId: id,
 							}),
 						),
+			countIncidentsByService: () =>
+				Effect.succeed([
+					{
+						serviceName: anomalyFixture.serviceName,
+						deploymentEnv: anomalyFixture.deploymentEnv,
+						signalType: anomalyFixture.signalType,
+						severity: anomalyFixture.severity,
+						incidentCount: anomalyFixtures.length,
+						lastTriggeredAt: anomalyFixture.lastTriggeredAt,
+					},
+				]),
 			setIncidentIssue: () => Effect.succeed({ incident: anomalyFixture, previousIssueId: null }),
 			getIncidentTimeseries: () => Effect.succeed(timeseriesFixture),
 			getSettings: () => Effect.succeed(settingsFixture),
@@ -939,6 +950,31 @@ describe("v2 anomalies over HTTP", () => {
 		expect(settings.body.object).toBe("anomaly_settings")
 		expect(settings.body.enabled).toBe(true)
 		expect(settings.body.muted_signals).toEqual([])
+		await harness.dispose()
+	})
+
+	// The static aggregate path shares a prefix with `/incidents/:id`, so this
+	// also pins that it is not swallowed by the param route as a public ID.
+	it("aggregates incidents by service without paging the list", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+
+		const counts = await harness.request("GET", "/v2/anomalies/incidents/service_counts", {
+			token: key.secret,
+		})
+		expect(counts.status).toBe(200)
+		expect(counts.body.object).toBe("list")
+		expect(counts.body.has_more).toBe(false)
+		expect(counts.body.next_cursor).toBeNull()
+		expect(counts.body.data[0]).toEqual({
+			object: "anomaly_service_count",
+			service_name: "payments",
+			deployment_env: "production",
+			signal_type: "error_rate",
+			severity: "critical",
+			incident_count: 3,
+			last_triggered_at: "2026-07-15T09:18:00.000Z",
+		})
 		await harness.dispose()
 	})
 
