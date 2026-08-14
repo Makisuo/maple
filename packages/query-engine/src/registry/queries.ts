@@ -1,5 +1,7 @@
 import type {
 	ServiceOperationsRequest,
+	ServiceEndpointsRequest,
+	EndpointStatusBreakdownRequest,
 	ListPodsRequest,
 	NodeFacetsRequest,
 	PodFacetsRequest,
@@ -41,6 +43,7 @@ import type {
 import { Match } from "effect"
 import { attributeIndexMode, logBodySearchMode } from "../capabilities"
 import * as CH from "../ch"
+import { formatWarehouseDateTime, parseWarehouseDateTime } from "../datetime"
 import { LOGS_BODY_SEARCH_SETTINGS } from "../profiles"
 import { makeDirectRouteCachePolicy } from "../runtime/query-engine"
 import { defineQuery } from "./query-definition"
@@ -949,5 +952,93 @@ export const serviceOperationsTimeseriesRaw = defineQuery({
 			CH.serviceOperationsTimeseriesRawQuery(serviceOperationsTimeseriesOptions(payload)),
 			{ ...serviceOperationsParams(payload, orgId), bucketSeconds: payload.bucketSeconds },
 			{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
+		),
+})
+
+// -- Service endpoints (HTTP-API view) --------------------------------------
+
+/**
+ * The profile probe answers a yes/no question, so it reads a short recent
+ * window rather than the page's selected range: a service that serves HTTP now
+ * served HTTP an hour ago, and scanning a year of spans to learn that is pure
+ * waste. Clamped, never widened — a range shorter than this stays as-is.
+ */
+const API_PROFILE_WINDOW_MS = 24 * 60 * 60 * 1000
+
+const apiProfileStartTime = (payload: ServiceEndpointsRequest): string => {
+	const endMs = parseWarehouseDateTime(payload.endTime)
+	const startMs = parseWarehouseDateTime(payload.startTime)
+	const clampedMs = Math.max(startMs, endMs - API_PROFILE_WINDOW_MS)
+	return clampedMs > startMs ? formatWarehouseDateTime(clampedMs) : payload.startTime
+}
+
+export const serviceApiProfile = defineQuery({
+	id: "serviceApiProfile",
+	profile: "aggregation",
+	// Detection is stable over minutes and rides the overview bundle on every
+	// service page load, so it is the one query here worth caching outright.
+	cache: 60,
+	compile: (payload: ServiceEndpointsRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceApiProfileQuery({
+				serviceName: payload.serviceName,
+				environments: payload.environments,
+			}),
+			{ orgId, startTime: apiProfileStartTime(payload), endTime: payload.endTime },
+			{ rowSchema: CH.serviceApiProfileRowSchema },
+		),
+})
+
+const serviceEndpointsSummaryOptions = (payload: ServiceEndpointsRequest) => ({
+	serviceName: payload.serviceName,
+	environments: payload.environments,
+	limit: payload.limit,
+})
+
+const serviceEndpointsParams = (payload: ServiceEndpointsRequest, orgId: string) => ({
+	orgId,
+	startTime: payload.startTime,
+	endTime: payload.endTime,
+})
+
+export const serviceEndpointsSummary = defineQuery({
+	id: "serviceEndpoints",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceEndpointsRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceEndpointsSummaryQuery(serviceEndpointsSummaryOptions(payload)),
+			serviceEndpointsParams(payload, orgId),
+			{ rowSchema: CH.serviceEndpointsSummaryRowSchema },
+		),
+})
+
+export const endpointStatusBreakdown = defineQuery({
+	id: "endpointStatusBreakdown",
+	profile: "aggregation",
+	cache: 30,
+	compile: (payload: EndpointStatusBreakdownRequest, orgId: string) =>
+		CH.compile(
+			CH.endpointStatusBreakdownQuery({
+				serviceName: payload.serviceName,
+				spanName: payload.spanName,
+				environments: payload.environments,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+			{ rowSchema: CH.endpointStatusBreakdownRowSchema },
+		),
+})
+
+/** Same rollup-absent fallback shape (and same fail-fast budget) as serviceOperations. */
+export const serviceEndpointsSummaryRaw = defineQuery({
+	id: "serviceEndpoints",
+	profile: "aggregation",
+	settings: SERVICE_OPERATIONS_RAW_SETTINGS,
+	cache: undefined,
+	compile: (payload: ServiceEndpointsRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceEndpointsSummaryRawQuery(serviceEndpointsSummaryOptions(payload)),
+			serviceEndpointsParams(payload, orgId),
+			{ rowSchema: CH.serviceEndpointsSummaryRowSchema },
 		),
 })

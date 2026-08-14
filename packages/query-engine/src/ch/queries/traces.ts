@@ -400,7 +400,12 @@ export function canUseAnnualServiceOverview(opts: TracesTimeseriesOpts): boolean
 		bucketSeconds >= 60 &&
 		tierIsAvailable &&
 		(opts.groupBy ?? []).every((key) => OVERVIEW_ROLLUP_GROUP_KEYS.has(key)) &&
+		// BOTH spellings of the span-name filter. The rollups aggregate SpanName
+		// away, so either one routed here comes back silently unfiltered —
+		// service-wide numbers under an endpoint's name. `canUseServiceOverviewMv`
+		// has always checked both; this predicate only checked the singular.
 		opts.spanName == null &&
+		!opts.spanNames?.length &&
 		opts.statusCode == null &&
 		!opts.errorsOnly &&
 		opts.minDurationMs == null &&

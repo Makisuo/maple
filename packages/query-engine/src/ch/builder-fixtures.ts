@@ -359,6 +359,50 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 	// fixture, a builder contributes nothing to `__sql_baseline__/catalog.sql`
 	// and its SQL can drift silently.
 
+	// Service-endpoint splice — same three-tier shape as service-operations, plus
+	// the HTTP-server narrowing and the method/route split.
+	{
+		// routes/internal/query-engine.http.ts — service detail "Endpoints" tab.
+		module: "service-endpoints",
+		name: "serviceEndpointsSummaryQuery",
+		label: "default",
+		compile: () => CH.compile(CH.serviceEndpointsSummaryQuery({ serviceName: "api", limit: 50 }), window),
+	},
+	{
+		// Env filter exercises the extra predicate on every tier of the splice.
+		module: "service-endpoints",
+		name: "serviceEndpointsSummaryQuery",
+		label: "envFiltered",
+		compile: () =>
+			CH.compile(
+				CH.serviceEndpointsSummaryQuery({
+					serviceName: "api",
+					environments: ["production"],
+					limit: 50,
+				}),
+				window,
+			),
+	},
+	{
+		// routes/internal/query-engine.http.ts — the API-detection probe carried on
+		// the service-detail overview bundle.
+		module: "service-endpoints",
+		name: "serviceApiProfileQuery",
+		label: "default",
+		compile: () => CH.compile(CH.serviceApiProfileQuery({ serviceName: "api" }), window),
+	},
+	{
+		// routes/internal/query-engine.http.ts — endpoint detail status classes.
+		module: "service-endpoints",
+		name: "endpointStatusBreakdownQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(
+				CH.endpointStatusBreakdownQuery({ serviceName: "api", spanName: "GET /v2/services" }),
+				window,
+			),
+	},
+
 	// Service-operation splice across raw, minutely, and hourly sources.
 	{
 		// routes/v2/services.http.ts — service detail "Operations" tab.

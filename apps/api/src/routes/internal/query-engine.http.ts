@@ -34,6 +34,8 @@ import {
 	ServiceWorkloadsResponse,
 	ServiceUsageResponse,
 	ServiceOperationsResponse,
+	ServiceEndpointsResponse,
+	EndpointStatusBreakdownResponse,
 	ListLogsResponse,
 	GetLogResponse,
 	ListMetricsResponse,
@@ -201,6 +203,57 @@ const withServiceOperationsFallback = makeRollupFallback(
 	isMissingServiceOperationsRollup,
 	"service_operations rollup is absent on this cluster; reading raw traces. Apply ClickHouse schema to restore the fast path.",
 )
+
+/**
+ * Detection verdict + the counts behind it. `isHttpApiService` lives in the
+ * query package next to the query that feeds it, so the API, the web app, and
+ * any future MCP/CLI consumer classify identically.
+ */
+const toApiProfile = (row: {
+	readonly httpServerSpans: unknown
+	readonly entrySpans: unknown
+	readonly distinctEndpoints: unknown
+}) => {
+	const profile = {
+		httpServerSpans: Number(row.httpServerSpans ?? 0),
+		entrySpans: Number(row.entrySpans ?? 0),
+		distinctEndpoints: Number(row.distinctEndpoints ?? 0),
+	}
+	return { ...profile, isHttpApi: CH.isHttpApiService(profile) }
+}
+
+/**
+ * The per-operation sparkline is minute-grain because the rollup it splices is:
+ * every interval must be a whole-minute multiple, or the raw edges and the
+ * rollup interiors stop tiling and buckets double-count. Nearest-minute
+ * rounding of `window/50` keeps roughly fifty points.
+ */
+const sparklineBucketSeconds = (payload: {
+	readonly startTime: string
+	readonly endTime: string
+	readonly bucketSeconds?: number | undefined
+}): number => {
+	const windowSeconds = Math.max(
+		0,
+		(Date.parse(`${payload.endTime.replace(" ", "T")}Z`) -
+			Date.parse(`${payload.startTime.replace(" ", "T")}Z`)) /
+			1000,
+	)
+	return Math.max(1, Math.round((payload.bucketSeconds ?? windowSeconds / 50) / 60)) * 60
+}
+
+const groupSparklines = (
+	rows: ReadonlyArray<{ readonly spanName: unknown; readonly bucket: unknown; readonly count: unknown }>,
+) => {
+	const sparklines = new Map<string, Array<{ bucket: string; count: number }>>()
+	for (const row of rows) {
+		const key = String(row.spanName)
+		const points = sparklines.get(key) ?? []
+		points.push({ bucket: String(row.bucket), count: Number(row.count ?? 0) })
+		sparklines.set(key, points)
+	}
+	return sparklines
+}
 
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
@@ -901,7 +954,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 					// execute-path cache; releases is uncached (mirrors the standalone
 					// handler); environments is edge-cached on a service-scoped key.
 					yield* warehouse.warmRoute(tenant)
-					const [timeseries, releaseRows, environmentRows] = yield* Effect.all(
+					const [timeseries, releaseRows, environmentRows, apiProfileRow] = yield* Effect.all(
 						[
 							queryEngine.execute(tenant, payload.timeseries),
 							runQuery(Queries.serviceReleases, tenant, payload),
@@ -910,8 +963,24 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								startTime: payload.startTime,
 								endTime: payload.endTime,
 							}),
+							// Rides along so the Endpoints tab trigger is known on first
+							// paint of EVERY tab, not just Overview (the header's env
+							// switcher subscribes to this same response).
+							//
+							// Deliberately NOT environment-scoped: whether a service is an
+							// HTTP API is a property of the service, not of the env you
+							// happen to be looking at, and an unscoped answer keeps the tab
+							// from flickering away when you select a low-traffic env.
+							//
+							// Detection is a nicety; the chart is the page. A probe failure
+							// degrades to "not an API" rather than failing the bundle.
+							runQueryFirst(Queries.serviceApiProfile, tenant, {
+								serviceName: payload.serviceName,
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+							}).pipe(Effect.orElseSucceed(() => null)),
 						],
-						{ concurrency: 3 },
+						{ concurrency: 4 },
 					)
 					return new ServiceDetailOverviewResponse({
 						timeseries,
@@ -924,6 +993,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						environments: environmentRows
 							.map((row) => String(row.environment ?? ""))
 							.filter((env) => env !== ""),
+						...(apiProfileRow ? { apiProfile: toApiProfile(apiProfileRow) } : {}),
 					})
 				}),
 			)
@@ -1095,17 +1165,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 							}
 
 							const spanNames = summaryRows.map((row) => String(row.spanName))
-							// The rollup is minute-grain, so every sparkline interval must be
-							// a whole-minute multiple. Nearest-minute rounding keeps ~50 points.
-							const windowSeconds = Math.max(
-								0,
-								(Date.parse(`${payload.endTime.replace(" ", "T")}Z`) -
-									Date.parse(`${payload.startTime.replace(" ", "T")}Z`)) /
-									1000,
-							)
-							const requestedBucketSeconds = payload.bucketSeconds ?? windowSeconds / 50
-							const bucketSeconds = Math.max(1, Math.round(requestedBucketSeconds / 60)) * 60
-							const timeseriesInput = { ...payload, spanNames, bucketSeconds }
+							const timeseriesInput = {
+								...payload,
+								spanNames,
+								bucketSeconds: sparklineBucketSeconds(payload),
+							}
 							const timeseriesRows = yield* mapExecError(
 								withServiceOperationsFallback(
 									(t, pl) => runQuery(Queries.serviceOperationsTimeseries, t, pl),
@@ -1116,13 +1180,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								"serviceOperationsTimeseries query failed",
 							)
 
-							const sparklines = new Map<string, Array<{ bucket: string; count: number }>>()
-							for (const row of timeseriesRows) {
-								const key = String(row.spanName)
-								const points = sparklines.get(key) ?? []
-								points.push({ bucket: String(row.bucket), count: toNumber(row.count) })
-								sparklines.set(key, points)
-							}
+							const sparklines = groupSparklines(timeseriesRows)
 
 							return summaryRows.map((row) => ({
 								spanName: String(row.spanName),
@@ -1140,6 +1198,86 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						30,
 					)
 					return new ServiceOperationsResponse({ data })
+				}),
+			)
+			.handle("serviceEndpoints", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const toNumber = (value: unknown) => Number(value ?? 0)
+					const data = yield* queryEngine.cachedDirect(
+						tenant,
+						"serviceEndpoints",
+						payload,
+						Effect.gen(function* () {
+							// Same rollup-or-raw shape as `serviceOperations`: both reads
+							// try `service_operations_minutely`/`_hourly` and degrade per-org
+							// on UNKNOWN_TABLE, and the timeseries read repeats the probe
+							// rather than inheriting the summary's verdict.
+							const summaryRows = yield* mapExecError(
+								withServiceOperationsFallback(
+									(t, pl) => runQuery(Queries.serviceEndpointsSummary, t, pl),
+									(t, pl) => runQuery(Queries.serviceEndpointsSummaryRaw, t, pl),
+									tenant,
+									payload,
+								),
+								"serviceEndpoints query failed",
+							)
+							if (summaryRows.length === 0) {
+								return []
+							}
+
+							// Sparklines reuse the operations timeseries verbatim — it keys
+							// on the display span name, which is exactly what the endpoint
+							// summary returns alongside the split method/route.
+							const spanNames = summaryRows.map((row) => String(row.spanName))
+							const timeseriesInput = {
+								...payload,
+								spanNames,
+								bucketSeconds: sparklineBucketSeconds(payload),
+							}
+							const timeseriesRows = yield* mapExecError(
+								withServiceOperationsFallback(
+									(t, pl) => runQuery(Queries.serviceOperationsTimeseries, t, pl),
+									(t, pl) => runQuery(Queries.serviceOperationsTimeseriesRaw, t, pl),
+									tenant,
+									timeseriesInput,
+								),
+								"serviceEndpointsTimeseries query failed",
+							)
+							const sparklines = groupSparklines(timeseriesRows)
+
+							return summaryRows.map((row) => ({
+								spanName: String(row.spanName),
+								method: String(row.method ?? ""),
+								route: String(row.route ?? ""),
+								spanCount: toNumber(row.spanCount),
+								estimatedSpanCount: toNumber(row.estimatedSpanCount),
+								errorCount: toNumber(row.errorCount),
+								estimatedErrorCount: toNumber(row.estimatedErrorCount),
+								errorRate: toNumber(row.errorRate),
+								avgDurationMs: toNumber(row.avgDurationMs),
+								p50DurationMs: toNumber(row.p50DurationMs),
+								p95DurationMs: toNumber(row.p95DurationMs),
+								p99DurationMs: toNumber(row.p99DurationMs),
+								sparkline: sparklines.get(String(row.spanName)) ?? [],
+							}))
+						}),
+						30,
+					)
+					return new ServiceEndpointsResponse({ data })
+				}),
+			)
+			.handle("endpointStatusBreakdown", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.endpointStatusBreakdown, tenant, payload)
+					return new EndpointStatusBreakdownResponse({
+						data: rows.map((row) => ({
+							statusClass: String(row.statusClass),
+							spanCount: Number(row.spanCount ?? 0),
+							estimatedSpanCount: Number(row.estimatedSpanCount ?? 0),
+						})),
+					})
 				}),
 			)
 			.handle("listLogs", ({ payload }) =>

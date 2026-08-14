@@ -579,9 +579,13 @@ const GetCustomChartServiceDetailInputSchema = Schema.Struct({
 	// service list's display value (incl. the synthetic `"unknown"`); the
 	// `"unknown" -> ""` remap to the raw warehouse value happens in `toEnvFilter`.
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	// Narrows every chart to one operation — the endpoint detail route passes the
+	// display span name ("GET /api/users"), which `tracesBaseWhereConditions`
+	// matches against both the raw and rewritten spelling.
+	spanNames: Schema.optional(Schema.mutable(Schema.Array(SpanName))),
 })
 
-type GetCustomChartServiceDetailInput = (typeof GetCustomChartServiceDetailInputSchema)["Encoded"]
+export type GetCustomChartServiceDetailInput = (typeof GetCustomChartServiceDetailInputSchema)["Encoded"]
 
 export function getCustomChartServiceDetail({ data }: { data: GetCustomChartServiceDetailInput }) {
 	return getCustomChartServiceDetailEffect({ data })
@@ -595,6 +599,7 @@ function makeAllMetricsTimeseriesRequest(opts: {
 	rootSpansOnly?: boolean
 	environments?: ReadonlyArray<DeploymentEnvironment>
 	commitShas?: ReadonlyArray<CommitSha>
+	spanNames?: ReadonlyArray<SpanName>
 	groupBy?: string[]
 }) {
 	return new QueryEngineExecuteRequest({
@@ -611,6 +616,7 @@ function makeAllMetricsTimeseriesRequest(opts: {
 				rootSpansOnly: opts.rootSpansOnly ?? true,
 				environments: opts.environments,
 				commitShas: opts.commitShas,
+				spanNames: opts.spanNames,
 			},
 			bucketSeconds: opts.bucketSeconds,
 		},
@@ -809,6 +815,7 @@ const getCustomChartServiceDetailEffect = Effect.fn("QueryEngine.getCustomChartS
 		serviceName: input.serviceName,
 		rootSpansOnly: true,
 		environments: toEnvFilter(input.environments),
+		spanNames: input.spanNames,
 	}
 
 	// Throughput renders immediately from the sampling-aware `estimatedSpanCount`
@@ -835,10 +842,26 @@ const getCustomChartServiceDetailEffect = Effect.fn("QueryEngine.getCustomChartS
  * read the SAME atom key, so this fires once for the whole tab instead of three
  * independent browser→Worker round-trips.
  */
+export interface ServiceApiProfile {
+	isHttpApi: boolean
+	httpServerSpans: number
+	entrySpans: number
+	distinctEndpoints: number
+}
+
+/** An API deployed behind this build omits `apiProfile`; treat that as "not an API". */
+const NOT_AN_API: ServiceApiProfile = {
+	isHttpApi: false,
+	httpServerSpans: 0,
+	entrySpans: 0,
+	distinctEndpoints: 0,
+}
+
 export interface ServiceDetailOverviewResult {
 	data: ServiceDetailTimeSeriesPoint[]
 	releases: ReadonlyArray<{ bucket: string; commitSha: CommitSha; count: number; errorCount: number }>
 	environments: string[]
+	apiProfile: ServiceApiProfile
 }
 
 export function getServiceDetailOverview({ data }: { data: GetCustomChartServiceDetailInput }) {
@@ -891,6 +914,7 @@ const getServiceDetailOverviewEffect = Effect.fn("QueryEngine.getServiceDetailOv
 			errorCount: Number(r.errorCount ?? 0),
 		})),
 		environments: [...result.environments],
+		apiProfile: result.apiProfile ? { ...result.apiProfile } : NOT_AN_API,
 	} satisfies ServiceDetailOverviewResult
 })
 

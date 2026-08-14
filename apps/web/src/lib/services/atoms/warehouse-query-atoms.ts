@@ -10,6 +10,7 @@ import {
 	getCustomChartTimeSeries,
 	getOverviewThroughputRefinement,
 	getOverviewTimeSeries,
+	getCustomChartServiceDetail,
 	getServiceDetailOverview,
 	getServiceDetailThroughputRefinement,
 } from "@/api/warehouse/custom-charts"
@@ -54,6 +55,8 @@ import {
 	workloadInfraTimeseries,
 } from "@/api/warehouse/infra"
 import { getServiceUsage } from "@/api/warehouse/service-usage"
+import { getEndpointStatusBreakdown } from "@/api/warehouse/endpoint-status"
+import { getServiceEndpoints } from "@/api/warehouse/service-endpoints"
 import { getServiceOperations } from "@/api/warehouse/service-operations"
 import {
 	getServiceDependenciesBundle,
@@ -191,6 +194,22 @@ export const getServiceUsageResultAtom = makeQueryAtomFamily(getServiceUsage, {
 })
 
 export const getServiceOperationsResultAtom = makeQueryAtomFamily(getServiceOperations, {
+	staleTime: 30_000,
+})
+
+// Same staleTime and same input builder as the operations atom, so the Overview
+// panel and the Endpoints tab share one round-trip (see serviceEndpointsQueryInput).
+export const getServiceEndpointsResultAtom = makeQueryAtomFamily(getServiceEndpoints, {
+	staleTime: 30_000,
+})
+
+// Endpoint detail: the four service charts narrowed to one span name, and the
+// status-class split beside them.
+export const getEndpointDetailChartsResultAtom = makeQueryAtomFamily(getCustomChartServiceDetail, {
+	staleTime: 30_000,
+})
+
+export const getEndpointStatusBreakdownResultAtom = makeQueryAtomFamily(getEndpointStatusBreakdown, {
 	staleTime: 30_000,
 })
 
