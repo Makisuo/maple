@@ -1,5 +1,6 @@
 import { HttpApi, OpenApi } from "effect/unstable/httpapi"
 import { QueryEngineApiGroup } from "./query-engine"
+import { SessionReplaysInternalApiGroup } from "./session-replay"
 import { V1SchemaErrors, V1UnexpectedErrors } from "./v1-boundary"
 
 /**
@@ -22,6 +23,7 @@ import { V1SchemaErrors, V1UnexpectedErrors } from "./v1-boundary"
  */
 export class MapleInternalApi extends HttpApi.make("MapleInternalApi")
 	.add(QueryEngineApiGroup)
+	.add(SessionReplaysInternalApiGroup)
 	.middleware(V1SchemaErrors)
 	.middleware(V1UnexpectedErrors)
 	.annotateMerge(

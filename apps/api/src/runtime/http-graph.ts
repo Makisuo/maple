@@ -26,6 +26,7 @@ import { HttpOrganizationsLive } from "@/routes/v1/organizations.http"
 import { PlanetScaleWebhookRouter } from "@/routes/v1/planetscale-webhook.http"
 import { PrometheusScrapeProxyRouter } from "@/routes/v1/prometheus-scrape-proxy.http"
 import { HttpQueryEngineLive } from "@/routes/internal/query-engine.http"
+import { HttpSessionReplaysInternalLive } from "@/routes/internal/session-replays.http"
 import { ScraperInternalRouter } from "@/routes/v1/scraper-internal.http"
 import { HttpSessionReplaysLive } from "@/routes/v1/session-replay.http"
 import { SlackCallbackRouter, SlackInternalRouter } from "@/routes/v1/slack-integration.http"
@@ -104,7 +105,7 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
  * which is generated from `MapleApi`.
  */
 const ApiInternalRoutes = HttpApiBuilder.layer(MapleInternalApi).pipe(
-	Layer.provide(HttpQueryEngineLive),
+	Layer.provide(Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysInternalLive)),
 	Layer.provide(V1ErrorBoundaryLive),
 )
 
