@@ -35,7 +35,7 @@ describe("AGENTS", () => {
 
 	it("gives no sub-agent a tool that would need approval", () => {
 		// A nested turn cannot surface an approval card: approval ends the *outer* turn and is
-		// applied out of band by `POST /api/chat/apply`. An `ask` here would deadlock the sub-agent
+		// applied out of band by `POST /internal/chat/apply`. An `ask` here would deadlock the sub-agent
 		// into proposing something nobody can accept.
 		for (const agent of subagents) {
 			for (const definition of mapleToolCatalog) {

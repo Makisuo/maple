@@ -358,7 +358,7 @@ describe("makeLoginSelfHosted", () => {
 
 describe("makeResolveMcpTenant", () => {
 	// Regression: a logged-in browser applying an approved chat proposal via
-	// POST /api/chat/apply sends a Clerk session_token. The MCP tenant fallback
+	// POST /internal/chat/apply sends a Clerk session_token. The MCP tenant fallback
 	// must accept it (not only api_key), or every Clerk-mode apply fails.
 	it.effect("accepts a Clerk session_token and resolves the caller's org", () =>
 		Effect.gen(function* () {

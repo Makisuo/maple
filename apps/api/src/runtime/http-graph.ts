@@ -11,7 +11,7 @@ import { HttpAuthLive, HttpAuthPublicLive } from "@/routes/v1/auth.http"
 import { HttpBillingLive } from "@/routes/internal/billing.http"
 import { HttpBillingPublicLive } from "@/routes/v1/billing-public.http"
 import { ChatSessionsRouter } from "@/routes/v1/chat-sessions.http"
-import { HttpChatLive } from "@/routes/v1/chat.http"
+import { HttpChatLive } from "@/routes/internal/chat.http"
 import { V1ErrorBoundaryLive } from "@/routes/v1/error-boundary"
 import { HttpDemoLive } from "@/routes/internal/demo.http"
 import { HttpDigestLive } from "@/routes/internal/digest.http"
@@ -28,7 +28,6 @@ import { ScraperInternalRouter } from "@/routes/v1/scraper-internal.http"
 import { HttpSessionReplaysLive } from "@/routes/v1/session-replay.http"
 import { SlackCallbackRouter, SlackInternalRouter } from "@/routes/v1/slack-integration.http"
 import { VcsWebhookRouter } from "@/routes/v1/vcs-webhook.http"
-import { HttpWarehouseLive } from "@/routes/v1/warehouse.http"
 import { HttpV2AlertDeliveriesLive } from "@/routes/v2/alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "@/routes/v2/alert-destinations.http"
 import { HttpV2AlertIncidentsLive } from "@/routes/v2/alert-incidents.http"
@@ -79,13 +78,12 @@ const DocsV2Route = HttpApiScalar.layerCdn(MapleApiV2, {
 const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpAuthPublicLive),
 	Layer.provide(HttpAuthLive),
-	Layer.provide(HttpChatLive),
 	Layer.provide(HttpBillingPublicLive),
 	Layer.provide(HttpErrorsLive),
 	Layer.provide(HttpIntegrationsLive),
 	Layer.provide(HttpOrgClickHouseSettingsLive),
 	Layer.provide(HttpOrganizationsLive),
-	Layer.provide(Layer.mergeAll(HttpSessionReplaysLive, HttpWarehouseLive)),
+	Layer.provide(HttpSessionReplaysLive),
 	Layer.provide(V1ErrorBoundaryLive),
 )
 
@@ -98,7 +96,9 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
  */
 const ApiInternalRoutes = HttpApiBuilder.layer(MapleInternalApi).pipe(
 	Layer.provide(Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysInternalLive)),
-	Layer.provide(Layer.mergeAll(HttpAiTriageLive, HttpBillingLive, HttpDemoLive, HttpDigestLive)),
+	Layer.provide(
+		Layer.mergeAll(HttpAiTriageLive, HttpBillingLive, HttpChatLive, HttpDemoLive, HttpDigestLive),
+	),
 	Layer.provide(V1ErrorBoundaryLive),
 )
 

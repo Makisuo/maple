@@ -1,7 +1,14 @@
-// The shared operation surface — thin wrappers over @maple/query-engine
-// observability functions, parameterised by simple request objects. The CLI
-// commands call these. Every operation returns an Effect requiring
-// `WarehouseExecutor` (provided by the local executor layer).
+// The shared operation surface the CLI commands call.
+//
+// This is also where local and remote diverge. Local mode runs the
+// @maple/query-engine observability helpers through `WarehouseExecutor`;
+// remote mode calls Maple's public v2 API (see `remote-ops.ts`). The branch
+// lives here, at the operation level, rather than behind a shared executor:
+// v2 is a resource API with no generic `query(pipeName, params)` to implement,
+// so there is nothing for an executor-shaped seam to stand in for.
+//
+// Every operation returns the same type in both modes, so commands and
+// renderers never learn which backend answered.
 
 import { Clock, Effect } from "effect"
 import type { TracesMetric } from "@maple/query-engine"
@@ -21,17 +28,57 @@ import {
 	findSlowTraces as obsFindSlowTraces,
 	topOperations as obsTopOperations,
 } from "@maple/query-engine/observability"
-import { WarehouseClientError } from "@maple/domain/http/warehouse-errors"
+import { WarehouseClientError, WarehouseQueryError } from "@maple/domain/http/warehouse-errors"
 import { executeLocalQuery } from "@maple/query-engine/local"
 import { fingerprintSql, mapWarehouseError, SQL_TRACE_MAX, truncateSql } from "@maple/query-engine/execution"
+import { HttpClient } from "effect/unstable/http"
 import { Mode } from "./mode"
+import * as Remote from "./remote-ops"
+import { makeV2Client, toWarehouseError, unsupportedInRemote } from "./v2-client"
 import type { Range } from "./time"
 
 type AttrSource = "traces" | "metrics" | "services"
 type AttrScope = "span" | "resource"
 
+const ATTRIBUTE_DISCOVERY_GAP =
+	"v2 exposes no attribute-discovery surface — /v2/attribute_mappings is mapping configuration, not the keys and values observed in your telemetry."
+
+/**
+ * Resolve the backend once per operation. `local` yields undefined so the
+ * caller falls through to the observability helper; `remote` yields a v2
+ * client bound to the configured workspace and token.
+ */
+const remoteClient = Effect.gen(function* () {
+	const mode = yield* Mode
+	const resolved = yield* mode.resolve.pipe(
+		Effect.mapError(
+			(error) => new WarehouseClientError({ message: error.message, pipeName: "mode", cause: error }),
+		),
+	)
+	if (resolved._tag === "local") return undefined
+	return yield* makeV2Client(resolved.apiUrl, resolved.token)
+})
+
+type V2Client = NonNullable<Effect.Success<typeof remoteClient>>
+
+/** Run `remote` against v2 when a workspace is configured, else `local`. */
+const dispatch = <A, E, R, R2>(
+	local: Effect.Effect<A, E, R>,
+	remote: (client: V2Client) => Effect.Effect<A, unknown, R2>,
+	pipeName: string,
+): Effect.Effect<A, E | WarehouseClientError | WarehouseQueryError, R | R2 | Mode | HttpClient.HttpClient> =>
+	Effect.flatMap(
+		remoteClient,
+		(client): Effect.Effect<A, E | WarehouseClientError | WarehouseQueryError, R | R2> =>
+			client === undefined ? local : Effect.mapError(remote(client), toWarehouseError(pipeName)),
+	)
+
 export const listServices = (p: { range: Range; environment?: string }) =>
-	obsListServices({ timeRange: p.range, environment: p.environment })
+	dispatch(
+		obsListServices({ timeRange: p.range, environment: p.environment }),
+		(client) => Remote.listServices(client, p),
+		"service_overview",
+	)
 
 export const searchTraces = (p: {
 	range: Range
@@ -46,37 +93,66 @@ export const searchTraces = (p: {
 	limit?: number
 	offset?: number
 }) =>
-	obsSearchTraces({
-		timeRange: p.range,
-		service: p.service,
-		spanName: p.spanName,
-		spanNameMatchMode: p.spanName ? "contains" : undefined,
-		hasError: p.hasError,
-		minDurationMs: p.minDurationMs,
-		maxDurationMs: p.maxDurationMs,
-		httpMethod: p.httpMethod,
-		traceId: p.traceId,
-		rootOnly: p.rootOnly,
-		limit: p.limit,
-		offset: p.offset,
-	})
+	dispatch(
+		obsSearchTraces({
+			timeRange: p.range,
+			service: p.service,
+			spanName: p.spanName,
+			spanNameMatchMode: p.spanName ? "contains" : undefined,
+			hasError: p.hasError,
+			minDurationMs: p.minDurationMs,
+			maxDurationMs: p.maxDurationMs,
+			httpMethod: p.httpMethod,
+			traceId: p.traceId,
+			rootOnly: p.rootOnly,
+			limit: p.limit,
+			offset: p.offset,
+		}),
+		(client) => Remote.searchTraces(client, p),
+		"list_traces",
+	)
 
-export const inspectTrace = (p: { traceId: string }) => obsInspectTrace(p.traceId)
+export const inspectTrace = (p: { traceId: string }) =>
+	dispatch(obsInspectTrace(p.traceId), (client) => Remote.inspectTrace(client, p), "span_hierarchy")
 
 export const findErrors = (p: { range: Range; service?: string; environment?: string; limit?: number }) =>
-	obsFindErrors({ timeRange: p.range, service: p.service, environment: p.environment, limit: p.limit })
+	dispatch(
+		obsFindErrors({ timeRange: p.range, service: p.service, environment: p.environment, limit: p.limit }),
+		() =>
+			unsupportedInRemote(
+				"errors_by_type",
+				"/v2/error_issues returns triage issues keyed by an opaque `erris_…` id, not exception-type counts over a window.",
+			),
+		"errors_by_type",
+	)
 
 export const errorDetail = (p: { fingerprintHash: string; range: Range; service?: string; limit?: number }) =>
-	obsErrorDetail({
-		fingerprintHash: p.fingerprintHash,
-		timeRange: p.range,
-		service: p.service,
-		includeTimeseries: true,
-		limit: p.limit,
-	})
+	dispatch(
+		obsErrorDetail({
+			fingerprintHash: p.fingerprintHash,
+			timeRange: p.range,
+			service: p.service,
+			includeTimeseries: true,
+			limit: p.limit,
+		}),
+		() =>
+			unsupportedInRemote(
+				"error_detail_traces",
+				"v2 identifies errors by an opaque `erris_…` issue id and offers no lookup from a fingerprint hash.",
+			),
+		"error_detail_traces",
+	)
 
 export const diagnoseService = (p: { serviceName: string; range: Range; environment?: string }) =>
-	obsDiagnoseService({ serviceName: p.serviceName, timeRange: p.range, environment: p.environment })
+	dispatch(
+		obsDiagnoseService({ serviceName: p.serviceName, timeRange: p.range, environment: p.environment }),
+		() =>
+			unsupportedInRemote(
+				"diagnose",
+				"its error breakdown depends on exception-type aggregates that v2 does not expose, so a remote diagnosis would silently omit the errors section.",
+			),
+		"diagnose",
+	)
 
 export const searchLogs = (p: {
 	range: Range
@@ -87,15 +163,19 @@ export const searchLogs = (p: {
 	limit?: number
 	offset?: number
 }) =>
-	obsSearchLogs({
-		timeRange: p.range,
-		service: p.service,
-		severity: p.severity,
-		search: p.search,
-		traceId: p.traceId,
-		limit: p.limit,
-		offset: p.offset,
-	})
+	dispatch(
+		obsSearchLogs({
+			timeRange: p.range,
+			service: p.service,
+			severity: p.severity,
+			search: p.search,
+			traceId: p.traceId,
+			limit: p.limit,
+			offset: p.offset,
+		}),
+		(client) => Remote.searchLogs(client, p),
+		"list_logs",
+	)
 
 export const mineLogPatterns = (p: {
 	range: Range
@@ -104,19 +184,40 @@ export const mineLogPatterns = (p: {
 	search?: string
 	limit?: number
 }) =>
-	obsMineLogPatterns({
-		timeRange: p.range,
-		service: p.service,
-		severity: p.severity,
-		search: p.search,
-		limit: p.limit,
-	})
+	dispatch(
+		obsMineLogPatterns({
+			timeRange: p.range,
+			service: p.service,
+			severity: p.severity,
+			search: p.search,
+			limit: p.limit,
+		}),
+		(client) => Remote.mineLogPatterns(client, p),
+		"list_logs",
+	)
 
 export const findSlowTraces = (p: { range: Range; service?: string; environment?: string; limit?: number }) =>
-	obsFindSlowTraces({ timeRange: p.range, service: p.service, environment: p.environment, limit: p.limit })
+	dispatch(
+		obsFindSlowTraces({
+			timeRange: p.range,
+			service: p.service,
+			environment: p.environment,
+			limit: p.limit,
+		}),
+		() =>
+			unsupportedInRemote(
+				"slow_traces",
+				"/v2/traces/search can filter by minimum duration but cannot order by it, so the slowest traces cannot be selected.",
+			),
+		"slow_traces",
+	)
 
 export const serviceMap = (p: { range: Range; service?: string; environment?: string }) =>
-	obsServiceMap({ timeRange: p.range, service: p.service, environment: p.environment })
+	dispatch(
+		obsServiceMap({ timeRange: p.range, service: p.service, environment: p.environment }),
+		(client) => Remote.serviceMap(client, p),
+		"service_dependencies",
+	)
 
 export const attributeKeys = (p: {
 	source: AttrSource
@@ -125,13 +226,17 @@ export const attributeKeys = (p: {
 	range: Range
 	limit?: number
 }) =>
-	obsAttributeKeys({
-		source: p.source,
-		scope: p.scope,
-		service: p.service,
-		timeRange: p.range,
-		limit: p.limit,
-	})
+	dispatch(
+		obsAttributeKeys({
+			source: p.source,
+			scope: p.scope,
+			service: p.service,
+			timeRange: p.range,
+			limit: p.limit,
+		}),
+		() => unsupportedInRemote("attribute_keys", ATTRIBUTE_DISCOVERY_GAP),
+		"attribute_keys",
+	)
 
 export const attributeValues = (p: {
 	key: string
@@ -141,34 +246,56 @@ export const attributeValues = (p: {
 	range: Range
 	limit?: number
 }) =>
-	obsAttributeValues({
-		source: p.source,
-		scope: p.scope,
-		key: p.key,
-		service: p.service,
-		timeRange: p.range,
-		limit: p.limit,
-	})
+	dispatch(
+		obsAttributeValues({
+			source: p.source,
+			scope: p.scope,
+			key: p.key,
+			service: p.service,
+			timeRange: p.range,
+			limit: p.limit,
+		}),
+		() => unsupportedInRemote("attribute_values", ATTRIBUTE_DISCOVERY_GAP),
+		"attribute_values",
+	)
 
 export const topOperations = (p: {
 	serviceName: string
 	metric: TracesMetric
 	range: Range
 	limit?: number
-}) => obsTopOperations({ serviceName: p.serviceName, metric: p.metric, timeRange: p.range, limit: p.limit })
+}) =>
+	dispatch(
+		obsTopOperations({
+			serviceName: p.serviceName,
+			metric: p.metric,
+			timeRange: p.range,
+			limit: p.limit,
+		}),
+		() =>
+			unsupportedInRemote(
+				"top_operations",
+				"it reports call count, latency and error rate per operation together, and /v2/traces/breakdown returns one aggregation per request without a combined ranking.",
+			),
+		"top_operations",
+	)
 
 export const listMetrics = (p: { range: Range; service?: string; search?: string; limit?: number }) =>
-	Effect.gen(function* () {
-		const executor = yield* WarehouseExecutor
-		const result = yield* executor.query("list_metrics", {
-			start_time: p.range.startTime,
-			end_time: p.range.endTime,
-			...(p.service ? { service: p.service } : {}),
-			...(p.search ? { search: p.search } : {}),
-			limit: p.limit ?? 100,
-		})
-		return result.data
-	})
+	dispatch(
+		Effect.gen(function* () {
+			const executor = yield* WarehouseExecutor
+			const result = yield* executor.query("list_metrics", {
+				start_time: p.range.startTime,
+				end_time: p.range.endTime,
+				...(p.service ? { service: p.service } : {}),
+				...(p.search ? { search: p.search } : {}),
+				limit: p.limit ?? 100,
+			})
+			return result.data
+		}),
+		(client) => Remote.listMetrics(client, p),
+		"list_metrics",
+	)
 
 /**
  * Raw SQL escape hatch against the local chDB store — local mode only.
@@ -257,6 +384,21 @@ export const tracesTimeseries = (p: {
 	environment?: string
 	bucketSeconds?: number
 }) =>
+	dispatch(
+		localTracesTimeseries(p),
+		(client) => Remote.tracesTimeseries(client, p),
+		"custom_traces_timeseries",
+	)
+
+const localTracesTimeseries = (p: {
+	range: Range
+	service?: string
+	spanName?: string
+	groupBy?: string
+	errorsOnly?: boolean
+	environment?: string
+	bucketSeconds?: number
+}) =>
 	Effect.gen(function* () {
 		const executor = yield* WarehouseExecutor
 		const result = yield* executor.query("custom_traces_timeseries", {
@@ -281,6 +423,21 @@ export const tracesBreakdown = (p: {
 	errorsOnly?: boolean
 	environment?: string
 }) =>
+	dispatch(
+		localTracesBreakdown(p),
+		(client) => Remote.tracesBreakdown(client, p),
+		"custom_traces_breakdown",
+	)
+
+const localTracesBreakdown = (p: {
+	range: Range
+	service?: string
+	spanName?: string
+	groupBy?: string
+	limit?: number
+	errorsOnly?: boolean
+	environment?: string
+}) =>
 	Effect.gen(function* () {
 		const executor = yield* WarehouseExecutor
 		const result = yield* executor.query("custom_traces_breakdown", {
@@ -297,6 +454,17 @@ export const tracesBreakdown = (p: {
 	})
 
 export const compareServiceOverview = (p: { current: Range; previous: Range; environment?: string }) =>
+	dispatch(
+		localCompareServiceOverview(p),
+		() =>
+			unsupportedInRemote(
+				"service_overview_compare",
+				"v2 has no window-comparison endpoint, and diffing two /v2/services calls client-side would lose the server-side weighting the comparison depends on.",
+			),
+		"service_overview_compare",
+	)
+
+const localCompareServiceOverview = (p: { current: Range; previous: Range; environment?: string }) =>
 	Effect.gen(function* () {
 		const executor = yield* WarehouseExecutor
 		const result = yield* executor.query("service_overview_compare", {
