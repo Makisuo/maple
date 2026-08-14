@@ -161,6 +161,32 @@ describe("sessionReplaysListQuery userId filter", () => {
 	})
 })
 
+// VisitorId is the cross-subdomain browser identity: unlike UserId it survives
+// sign-in, which is what lets the UI walk from an anonymous marketing session to
+// the identified product sessions of the same browser. It is exposed on both the
+// v1 list and the v2 search contract, so it needs coverage of its own rather than
+// riding along on the UserId cases above.
+describe("sessionReplaysListQuery visitorId filter", () => {
+	it("adds an exact VisitorId predicate when provided", () => {
+		const q = sessionReplaysListQuery({ visitorId: "vis_abc" })
+		const { sql } = compileCH(q, { ...baseParams, ...WINDOW })
+		expect(sql).toContain("VisitorId = 'vis_abc'")
+	})
+
+	it("omits the VisitorId predicate when absent", () => {
+		const q = sessionReplaysListQuery({})
+		const { sql } = compileCH(q, { ...baseParams, ...WINDOW })
+		expect(sql).not.toContain("VisitorId =")
+	})
+
+	it("combines with UserId rather than replacing it", () => {
+		const q = sessionReplaysListQuery({ userId: "user_123", visitorId: "vis_abc" })
+		const { sql } = compileCH(q, { ...baseParams, ...WINDOW })
+		expect(sql).toContain("UserId = 'user_123'")
+		expect(sql).toContain("VisitorId = 'vis_abc'")
+	})
+})
+
 // The list marks metadata-only sessions ("No recording") from the SDK's
 // `maple.session.recorded` resource attribute. It must survive every branch —
 // the fast path and all three subquery-wrapping ones — or the badge silently

@@ -293,6 +293,12 @@ export const V2SessionReplaySearchParams = Schema.Struct({
 	group_name: Schema.optionalKey(
 		Schema.String.annotate({ description: "Filter by identified group (company / team) name." }),
 	),
+	visitor_id: Schema.optionalKey(
+		Schema.String.annotate({
+			description:
+				"Filter by browser visitor. Unlike `user_id` this survives sign-in, so it walks from an anonymous session to the identified sessions of the same browser.",
+		}),
+	),
 	has_errors: Schema.optionalKey(
 		Schema.Boolean.annotate({ description: "Only sessions with (or without) errors." }),
 	),

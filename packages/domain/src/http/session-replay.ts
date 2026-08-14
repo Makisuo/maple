@@ -2,7 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { SessionId, TraceId, UserId } from "../primitives"
 import { TinybirdDateTime } from "../query-engine"
-import { Authorization } from "./current-tenant"
+import { Authorization, SessionAuthorization } from "./current-tenant"
 import { QueryEngineExecutionError, QueryEngineTimeoutError } from "./query-engine"
 import { warehouseHttpErrors } from "./warehouse"
 
@@ -295,13 +295,6 @@ export class SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays")
 		}),
 	)
 	.add(
-		HttpApiEndpoint.post("facets", "/facets", {
-			payload: ReplaysFacetsRequest,
-			success: ReplaysFacetsResponse,
-			error: sessionReplayEndpointErrors,
-		}),
-	)
-	.add(
 		HttpApiEndpoint.post("getReplay", "/get", {
 			payload: GetReplayRequest,
 			success: GetReplayResponse,
@@ -321,13 +314,6 @@ export class SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays")
 		}),
 	)
 	.add(
-		HttpApiEndpoint.post("traceSummaries", "/trace-summaries", {
-			payload: SessionTraceSummariesRequest,
-			success: SessionTraceSummariesResponse,
-			error: sessionReplayEndpointErrors,
-		}),
-	)
-	.add(
 		HttpApiEndpoint.post("sessionTranscript", "/transcript", {
 			payload: SessionTranscriptRequest,
 			success: SessionTranscriptResponse,
@@ -336,3 +322,29 @@ export class SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays")
 	)
 	.prefix("/api/session-replays")
 	.middleware(Authorization) {}
+
+/**
+ * Session-replay helpers that exist for the dashboard and are not public API.
+ *
+ * Facet exploration and per-session trace summaries are shapes the replay UI
+ * drives — a filter sidebar's bucket counts and a timeline's span rollups — so
+ * `docs/http-api-migration.md` marks them "do not lift" to `/v2`. They live in
+ * the internal tier instead, where their shape can follow the UI.
+ */
+export class SessionReplaysInternalApiGroup extends HttpApiGroup.make("sessionReplaysInternal")
+	.add(
+		HttpApiEndpoint.post("facets", "/facets", {
+			payload: ReplaysFacetsRequest,
+			success: ReplaysFacetsResponse,
+			error: sessionReplayEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("traceSummaries", "/trace-summaries", {
+			payload: SessionTraceSummariesRequest,
+			success: SessionTraceSummariesResponse,
+			error: sessionReplayEndpointErrors,
+		}),
+	)
+	.prefix("/internal/session-replays")
+	.middleware(SessionAuthorization) {}

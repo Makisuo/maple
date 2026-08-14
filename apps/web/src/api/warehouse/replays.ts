@@ -10,6 +10,7 @@ import {
 	TraceId,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import {
 	WarehouseDateTimeString,
@@ -119,8 +120,8 @@ export const getReplaysFacets = Effect.fn("SessionReplays.facets")(function* ({
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
 	const result = yield* runWarehouseQuery("replaysFacets", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.sessionReplays.facets({
+			const client = yield* MapleInternalAtomClient
+			return yield* client.sessionReplaysInternal.facets({
 				payload: new ReplaysFacetsRequest({
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
@@ -352,8 +353,8 @@ export const getSessionTraceSummaries = Effect.fn("SessionReplays.traceSummaries
 	const input = yield* decodeInput(SessionTraceSummariesInput, data ?? { traceIds: [] }, "traceSummaries")
 	const result = yield* runWarehouseQuery("traceSummaries", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.sessionReplays.traceSummaries({
+			const client = yield* MapleInternalAtomClient
+			return yield* client.sessionReplaysInternal.traceSummaries({
 				payload: new SessionTraceSummariesRequest({
 					traceIds: input.traceIds,
 					windowStart: input.windowStart,
