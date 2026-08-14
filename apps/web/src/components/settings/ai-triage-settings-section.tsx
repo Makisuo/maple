@@ -10,10 +10,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Switch } from "@maple/ui/components/ui/switch"
-import {
-	MapleInternalAtomClient,
-	retainedInternalQuery,
-} from "@/lib/services/common/internal-atom-client"
+import { MapleInternalAtomClient, retainedInternalQuery } from "@/lib/services/common/internal-atom-client"
 import { AiTriageSettingsUpdateRequest } from "@maple/domain/http"
 
 interface AiTriageSettingsSectionProps {

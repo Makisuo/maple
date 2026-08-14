@@ -1,4 +1,4 @@
-import { hasConsent } from "./consent"
+import { hasConsent } from "../identity/consent"
 import { getActiveSink, queuePending, type SessionEvent } from "./events-sink"
 
 /** Properties a host app may attach to a custom event. */

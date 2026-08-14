@@ -110,7 +110,7 @@ maple start
 maple checkpoint
 ```
 
-Checkpoints need `<backups>` in the config of the *running* server, because
+Checkpoints need `<backups>` in the config of the _running_ server, because
 `BACKUP DATABASE default TO Disk('default', …)` is executed by that process;
 `maple checkpoint` is a separate process and cannot add it after the fact. So if
 you pass your own `--chdb-config-file`, it must include the stanza:

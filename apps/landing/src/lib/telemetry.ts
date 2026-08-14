@@ -6,7 +6,7 @@
  * same config surface. Two things follow from that:
  *
  * - The visitor id is a cookie scoped to the registered domain (see
- *   `packages/browser-session/src/visitor.ts`), so a visit to `maple.dev` and
+ *   `packages/browser-session/src/identity/visitor.ts`), so a visit to `maple.dev` and
  *   the session that follows on `app.maple.dev` resolve to the *same*
  *   `VisitorId`. That is the join that makes "which campaign produced this
  *   signup" answerable — the session ids stay separate on purpose.

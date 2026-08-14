@@ -257,8 +257,7 @@ function calculateMaple(values: Record<string, number>, competitor: Competitor) 
 		metricsGB = values.dataVolume / 3
 	}
 
-	const overageGB =
-		Math.max(0, logsGB - 100) + Math.max(0, tracesGB - 100) + Math.max(0, metricsGB - 100)
+	const overageGB = Math.max(0, logsGB - 100) + Math.max(0, tracesGB - 100) + Math.max(0, metricsGB - 100)
 	const overage = overageGB * 0.3
 
 	return {
@@ -482,9 +481,9 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 			{/* Disclaimer */}
 			<p className="mt-4 text-[10px] text-[oklch(0.4_0.02_60)] leading-relaxed">
 				Estimates based on published pricing as of August 2026. Actual costs may vary based on
-				contract terms, volume discounts, and additional features. Maple pricing based on the
-				Startup plan ($39/mo with 100 GB included per signal — logs, traces, metrics — then
-				$0.30/GB, billed per signal), metered on uncompressed (decoded OTLP) bytes.
+				contract terms, volume discounts, and additional features. Maple pricing based on the Startup
+				plan ($39/mo with 100 GB included per signal — logs, traces, metrics — then $0.30/GB, billed
+				per signal), metered on uncompressed (decoded OTLP) bytes.
 				{competitor === "grafana" &&
 					" Grafana bills active series (1 data point per minute per series), so the Maple estimate converts 1k active series to ~4.32 GB/mo assuming ~0.1 KB per decoded metric data point — your real ratio depends on attribute sizes. Grafana log and trace rates model ingest (process + write); retention and query fees are not included."}
 				{competitor === "datadog" &&

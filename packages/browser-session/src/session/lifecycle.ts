@@ -5,10 +5,10 @@
 // suspends and resumes the rrweb recorder, which is what `onStart`/`onSuspend`
 // are for. Keeping one driver is what stops the two SDKs (and the recorded and
 // unrecorded paths within one SDK) from disagreeing about which sessions exist.
-import { browserDocument } from "./browser-globals"
-import { getActiveSink } from "./events-sink"
-import type { ResolvedIdentity } from "./identity"
-import { buildSessionMetaRow } from "./meta-row"
+import { browserDocument } from "../platform/browser-globals"
+import { getActiveSink } from "../events/events-sink"
+import type { ResolvedIdentity } from "../identity/identity"
+import { buildSessionMetaRow } from "../events/meta-row"
 import {
 	entryContextOf,
 	getSession,
@@ -19,7 +19,7 @@ import {
 	peekSession,
 	type SessionRecord,
 } from "./session"
-import { getVisitorId, isVisitorIdPersisted } from "./visitor"
+import { getVisitorId, isVisitorIdPersisted } from "../identity/visitor"
 
 /**
  * How often a visible tab re-posts its `active` row.

@@ -16,7 +16,7 @@ vi.mock("rrweb", () => {
 	return { record }
 })
 
-vi.mock("../session", () => ({
+vi.mock("../session/session", () => ({
 	markActivity: vi.fn(),
 	nextChunkSeq: vi.fn(() => 1),
 }))
@@ -27,7 +27,7 @@ interface PostedChunk {
 }
 const posted: PostedChunk[] = []
 
-vi.mock("./transport", () => ({
+vi.mock("../platform/transport", () => ({
 	// Identity "gzip" so tests can read the serialized payload directly.
 	gzip: vi.fn(async (bytes: Uint8Array) => bytes),
 	postSessionBlob: vi.fn(async (_config: unknown, meta: PostedChunk["meta"], bytes: Uint8Array) => {

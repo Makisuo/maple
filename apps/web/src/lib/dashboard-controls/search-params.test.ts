@@ -4,9 +4,10 @@ import { pickDashboardControlParams } from "./search-params"
 
 describe("pickDashboardControlParams", () => {
 	it("retains every `var-*` selection", () => {
-		expect(
-			pickDashboardControlParams({ "var-service": "api", "var-env": "prod" }),
-		).toEqual({ "var-service": "api", "var-env": "prod" })
+		expect(pickDashboardControlParams({ "var-service": "api", "var-env": "prod" })).toEqual({
+			"var-service": "api",
+			"var-env": "prod",
+		})
 	})
 
 	it("retains every view param", () => {

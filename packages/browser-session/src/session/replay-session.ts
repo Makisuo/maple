@@ -5,19 +5,15 @@
 // `replay` option is on.
 //
 // Everything about the lifecycle itself — heartbeat, visibility/pagehide
-// wiring, idle rotation, metadata rows — lives in `./session-lifecycle`, shared
+// wiring, idle rotation, metadata rows — lives in `./lifecycle`, shared
 // with the metadata-only path. This module is the recorded configuration of it.
-import { type EventCapture, startEventCapture } from "./replay/events"
-import { type Recorder, startRecording } from "./replay/record"
-import { postSessionMeta, type ReplayEngineConfig } from "./replay/transport"
-import {
-	type SessionLifecycleHandle,
-	type SessionLifecycleOptions,
-	startSessionLifecycle,
-} from "./session-lifecycle"
+import { type EventCapture, startEventCapture } from "../replay/events"
+import { type Recorder, startRecording } from "../replay/record"
+import { postSessionMeta, type IngestConfig } from "../platform/transport"
+import { type SessionLifecycleHandle, type SessionLifecycleOptions, startSessionLifecycle } from "./lifecycle"
 import { getObservedTraceIds, publishSessionSink } from "./sink"
 
-export { setActiveTraceIdProvider } from "./events-sink"
+export { setActiveTraceIdProvider } from "../events/events-sink"
 
 export interface ReplaySessionOptions extends SessionLifecycleOptions {
 	readonly endpoint: string
@@ -43,7 +39,7 @@ export type ReplaySessionHandle = SessionLifecycleHandle
 export function startReplaySession(options: ReplaySessionOptions): ReplaySessionHandle | undefined {
 	if (typeof window === "undefined") return undefined
 
-	const engineConfig: ReplayEngineConfig = {
+	const engineConfig: IngestConfig = {
 		endpoint: options.endpoint.replace(/\/$/, ""),
 		ingestKey: options.ingestKey,
 		maskAllInputs: options.maskAllInputs,

@@ -1,8 +1,8 @@
-import { browserLocation, browserNavigator } from "./browser-globals"
-import type { ResolvedIdentity } from "./identity"
-import { keepaliveFor } from "./replay/transport"
-import type { EntryContext } from "./session"
-import { parseUserAgent } from "./user-agent"
+import { browserLocation, browserNavigator } from "../platform/browser-globals"
+import type { ResolvedIdentity } from "../identity/identity"
+import { keepaliveFor } from "../platform/transport"
+import type { EntryContext } from "../session/session"
+import { parseUserAgent } from "../platform/user-agent"
 
 /** ClickHouse-style `YYYY-MM-DD HH:MM:SS.mmm` in UTC (matches the ingest gateway). */
 export function formatCHDateTime(date: Date): string {

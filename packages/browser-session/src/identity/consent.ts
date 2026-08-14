@@ -53,7 +53,7 @@ interface ConsentState {
 
 /**
  * Consent lives on `globalThis`, for the same reason the event sink does
- * (`events-sink.ts`): an app that bundles both `@maple-dev/browser` and the
+ * (`events/events-sink.ts`): an app that bundles both `@maple-dev/browser` and the
  * Effect SDK gets **two copies** of this module, and per-copy state would mean
  * `setConsent(true)` on one never releases the other copy's exporters — or, the
  * other way round, one copy capturing while the other believes consent is

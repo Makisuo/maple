@@ -2,10 +2,7 @@ import { useEffect, useState } from "react"
 import { Exit } from "effect"
 import { toastManager } from "@maple/ui/components/ui/toast"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import {
-	MapleInternalAtomClient,
-	retainedInternalQuery,
-} from "@/lib/services/common/internal-atom-client"
+import { MapleInternalAtomClient, retainedInternalQuery } from "@/lib/services/common/internal-atom-client"
 import { UpsertDigestSubscriptionRequest } from "@maple/domain/http"
 import { useUser } from "@clerk/clerk-react"
 
