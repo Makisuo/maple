@@ -6,7 +6,7 @@ order: 2
 sdk: "effect"
 ---
 
-`@maple-dev/effect-sdk` provides a pre-configured Effect Layer that sets up OpenTelemetry traces, logs, and metrics for Maple. It wraps Effect's built-in `Otlp.layerJson` exporter, fills in resource attributes from the runtime, and returns a no-op layer when no endpoint is configured — so the same code runs locally without exporting telemetry.
+`@maple-dev/effect-sdk` provides a pre-configured Effect Layer that sets up OpenTelemetry traces, logs, and metrics for Maple. It wraps Effect's built-in `Otlp.layerJson` exporter, fills in resource attributes from the runtime, and returns a no-op layer when no ingest key is configured — so the same code runs locally without exporting telemetry.
 
 <div class="flex flex-wrap gap-2 mb-8 not-prose">
     <span class="text-[10px] uppercase tracking-wider px-2 py-1 border border-border text-fg-muted">Node.js</span>
@@ -80,8 +80,10 @@ All options for `Maple.layer()` (server and browser entry points). The Cloudflar
 | ----------------------- | ------------------------- | -------------------------- | -------------------------------------------------------------------- |
 | `serviceName`           | `string`                  | Yes                        | Service name reported in traces, logs, and metrics                   |
 | `endpoint`              | `string`                  | No (server) / Yes (client) | Maple ingest endpoint URL. Server auto-detects from `MAPLE_ENDPOINT` |
-| `ingestKey`             | `string`                  | No                         | Maple ingest key. Server auto-detects from `MAPLE_INGEST_KEY`        |
+| `ingestKey`             | `string`                  | No — but the SDK no-ops without one | Maple ingest key. Server auto-detects from `MAPLE_INGEST_KEY`   |
 | `serviceVersion`        | `string`                  | No                         | Override auto-detected commit SHA                                    |
+| `serviceNamespace`      | `string`                  | No                         | Logical group, emitted as the `service.namespace` resource attribute |
+| `repositoryUrl`         | `string`                  | No (server / Cloudflare)   | Repository URL, emitted as `vcs.repository.url.full`                 |
 | `environment`           | `string`                  | No                         | Override auto-detected deployment environment                        |
 | `attributes`            | `Record<string, unknown>` | No                         | Additional resource attributes merged into telemetry                 |
 | `maxBatchSize`          | `number`                  | No                         | Max telemetry items per export batch                                 |

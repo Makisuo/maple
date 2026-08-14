@@ -66,7 +66,12 @@ const isCommitSha = (value: string | undefined): value is string =>
 	value !== undefined && /^[0-9a-f]{7,40}$/i.test(value)
 
 export interface ResolvedResource {
-	readonly endpoint: string | undefined
+	/**
+	 * Always resolves — `DEFAULT_MAPLE_ENDPOINT` is the final fallback, so this
+	 * is deliberately NOT optional. Presets disable themselves on a missing
+	 * ingest key, never on a missing endpoint.
+	 */
+	readonly endpoint: string
 	readonly ingestKey: Redacted.Redacted<string> | undefined
 	readonly resource: {
 		readonly serviceName: string

@@ -2,12 +2,30 @@
 	"name": "@maple-dev/effect-sdk",
 	"version": "0.7.0",
 	"description": "Maple observability SDK for Effect applications",
+	"keywords": [
+		"effect",
+		"maple",
+		"observability",
+		"opentelemetry",
+		"otel",
+		"tracing"
+	],
+	"homepage": "https://maple.dev/docs/sdks/effect",
+	"bugs": {
+		"url": "https://github.com/MapleTechLabs/maple/issues"
+	},
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/MapleTechLabs/maple.git",
+		"directory": "packages/effect-sdk"
+	},
 	"files": [
 		"dist",
 		"README.md"
 	],
 	"type": "module",
+	"sideEffects": false,
 	"exports": {
 		".": {
 			"node": {
@@ -31,6 +49,9 @@
 			"types": "./dist/cloudflare/index.d.mts",
 			"import": "./dist/cloudflare/index.mjs"
 		}
+	},
+	"publishConfig": {
+		"access": "public"
 	},
 	"scripts": {
 		"build": "tsdown",

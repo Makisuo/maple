@@ -2,12 +2,15 @@ import type { Duration } from "effect"
 import { Effect, Layer, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Otlp } from "effect/unstable/observability"
+import { makeNoOpNotice } from "../shared/no-op-notice.js"
 import { resolveResource } from "./resource.js"
+
+const noOpNotice = makeNoOpNotice("[MapleServerSDK]", "set MAPLE_INGEST_KEY to enable")
 
 export interface MapleConfig {
 	/**
 	 * Service name reported in traces, logs, and metrics. When omitted, falls
-	 * back to `OTEL_SERVICE_NAME` env var, then `"unknown_service"`.
+	 * back to `OTEL_SERVICE_NAME` env var, then `"unknown"`.
 	 */
 	readonly serviceName?: string | undefined
 	/** Override auto-detected service version (commit SHA). */
@@ -51,8 +54,13 @@ export interface MapleConfig {
  * configured for Maple.
  *
  * Auto-detects commit SHA and deployment environment from common platform
- * env vars (Railway, Vercel, Cloudflare Pages, Render). Returns a no-op layer
- * when no endpoint is configured, making it safe for local development.
+ * env vars (Railway, Vercel, Cloudflare Pages, Render).
+ *
+ * Returns a no-op layer when no ingest key resolves (neither `config.ingestKey`
+ * nor `MAPLE_INGEST_KEY`), making it safe for local development — the same rule
+ * the flushable and Cloudflare presets use. The endpoint is NOT the disable
+ * signal: it always resolves, defaulting to the public Maple ingest so users
+ * only have to supply a key.
  *
  * For Cloudflare Workers, prefer `@maple-dev/effect-sdk/cloudflare`'s `make()`
  * — it has no background fiber and exposes an explicit `flush` Effect that
@@ -75,14 +83,15 @@ export const layer = (config: MapleConfig = {}) =>
 	Layer.unwrap(
 		Effect.gen(function* () {
 			const resolved = yield* resolveResource({ ...config, sdkType: "server" })
-			if (!resolved.endpoint) return Layer.empty
+			if (!resolved.ingestKey) {
+				noOpNotice()
+				return Layer.empty
+			}
 
 			return Otlp.layerJson({
 				baseUrl: resolved.endpoint,
 				resource: resolved.resource,
-				headers: resolved.ingestKey
-					? { Authorization: `Bearer ${Redacted.value(resolved.ingestKey)}` }
-					: undefined,
+				headers: { Authorization: `Bearer ${Redacted.value(resolved.ingestKey)}` },
 				maxBatchSize: config.maxBatchSize,
 				loggerExportInterval: config.loggerExportInterval,
 				metricsExportInterval: config.metricsExportInterval,

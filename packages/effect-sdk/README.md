@@ -10,7 +10,9 @@ npm install @maple-dev/effect-sdk effect
 
 ## Server
 
-Auto-detects commit SHA and deployment environment from common platform env vars (Railway, Vercel, Cloudflare Pages, Render). Returns a no-op layer when no endpoint is configured, making it safe for local development.
+Auto-detects commit SHA and deployment environment from common platform env vars (Railway, Vercel, Cloudflare Pages, Render). Returns a no-op layer when no ingest key is configured, making it safe for local development.
+
+The endpoint is not the disable signal — it defaults to the public Maple ingest (`https://ingest.maple.dev`), so you only need to supply a key.
 
 ```typescript
 import { Maple } from "@maple-dev/effect-sdk/server"
@@ -25,15 +27,19 @@ Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
 
 ### Environment Variables
 
-| Variable            | Description                     |
-| ------------------- | ------------------------------- |
-| `MAPLE_ENDPOINT`    | Maple ingest endpoint URL       |
-| `MAPLE_INGEST_KEY`  | Maple ingest key                |
-| `MAPLE_ENVIRONMENT` | Deployment environment override |
+| Variable                      | Description                                                     |
+| ----------------------------- | --------------------------------------------------------------- |
+| `MAPLE_INGEST_KEY`            | Maple ingest key. **Without it the SDK is a no-op.**             |
+| `MAPLE_ENDPOINT`              | Ingest endpoint URL. Defaults to `https://ingest.maple.dev`      |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint fallback, honored when `MAPLE_ENDPOINT` is unset        |
+| `MAPLE_ENVIRONMENT`           | Deployment environment override                                  |
+| `MAPLE_REPOSITORY_URL`        | Repository URL, emitted as `vcs.repository.url.full`             |
+| `OTEL_SERVICE_NAME`           | Service name fallback when `serviceName` is omitted              |
+| `OTEL_RESOURCE_ATTRIBUTES`    | Extra resource attributes, `key=value` pairs (later writers win) |
 
 Commit SHA is auto-detected from `COMMIT_SHA`, `RAILWAY_GIT_COMMIT_SHA`, `VERCEL_GIT_COMMIT_SHA`, `CF_PAGES_COMMIT_SHA`, or `RENDER_GIT_COMMIT`.
 
-Environment is auto-detected from `MAPLE_ENVIRONMENT`, `RAILWAY_ENVIRONMENT`, `VERCEL_ENV`, or `NODE_ENV`.
+Environment is auto-detected from `MAPLE_ENVIRONMENT`, then `RAILWAY_ENVIRONMENT_NAME`, then `DEPLOYMENT_ENV`, falling back to `"development"`. On platforms outside that list (including Vercel), set `MAPLE_ENVIRONMENT` explicitly — `VERCEL_ENV` and `NODE_ENV` are not read.
 
 ## Cloudflare Workers
 
@@ -116,6 +122,7 @@ const TracerLive = Maple.layer({
 ```
 
 - **Bundle size:** the replay engine (rrweb included) loads through a dynamic import, so it lands in a code-split chunk (~360 kB) fetched only when replay is enabled _and_ the session is sampled. The base client bundle stays ~13 kB.
+- **Vendored dependency:** rrweb (MIT) is bundled into that chunk rather than declared in `dependencies`, so it will not appear in your lockfile or in `npm ls` output. Note it directly if your license or supply-chain audit enumerates transitive packages.
 - **Opt out** with `replay: { enabled: false }`. Unsampled or disabled sessions still appear in the Sessions UI (metadata rows + linked traces, no recording); turn that off too with `emitSessionMeta: false`.
 - **Tab lifecycle:** recording suspends on `visibilitychange → hidden` (flushing the tail with `keepalive`) and resumes when the tab becomes visible again, rotating to a fresh session after 30 minutes of inactivity.
 - **Identify users** at any point — the id is attached to the session's next-posted metadata row _and_ stamped as `user.id` on every span the client tracer creates from then on (traces become user-attributable, not just session-grouped). Spans created before you call it stay anonymous. Pass `null` or `undefined` after sign-out to make future telemetry anonymous again.
@@ -224,19 +231,31 @@ By default the client preset flushes on `pagehide` and `visibilitychange→hidde
 
 Both server and client layers accept these options:
 
-| Option                  | Required                                | Description                        |
-| ----------------------- | --------------------------------------- | ---------------------------------- |
-| `serviceName`           | Yes                                     | Service name reported in telemetry |
-| `endpoint`              | Server: env or config, Client: required | Maple ingest endpoint URL          |
-| `ingestKey`             | No                                      | Maple ingest key                   |
-| `serviceVersion`        | No                                      | Override auto-detected commit SHA  |
-| `environment`           | No                                      | Override auto-detected environment |
-| `attributes`            | No                                      | Additional resource attributes     |
-| `maxBatchSize`          | No                                      | Max batch size for export          |
-| `tracerExportInterval`  | No                                      | Trace export interval              |
-| `loggerExportInterval`  | No                                      | Log export interval                |
-| `metricsExportInterval` | No                                      | Metrics export interval            |
-| `shutdownTimeout`       | No                                      | Graceful shutdown timeout          |
+| Option                  | Required                                       | Description                                                   |
+| ----------------------- | ---------------------------------------------- | ------------------------------------------------------------- |
+| `serviceName`           | Yes                                            | Service name reported in telemetry                            |
+| `endpoint`              | No (server: defaults) / Yes (client)           | Maple ingest endpoint URL                                     |
+| `ingestKey`             | No — but the SDK no-ops without one            | Maple ingest key                                              |
+| `serviceVersion`        | No                                             | Override auto-detected commit SHA                             |
+| `serviceNamespace`      | No                                             | Logical group, emitted as `service.namespace`                 |
+| `repositoryUrl`         | No (server / Cloudflare only)                  | Repository URL, emitted as `vcs.repository.url.full`          |
+| `environment`           | No                                             | Override auto-detected environment                            |
+| `attributes`            | No                                             | Additional resource attributes (highest precedence)           |
+| `maxBatchSize`          | No                                             | Max batch size for export                                     |
+| `tracerExportInterval`  | No                                             | Trace export interval                                         |
+| `loggerExportInterval`  | No                                             | Log export interval                                           |
+| `metricsExportInterval` | No                                             | Metrics export interval                                       |
+| `shutdownTimeout`       | No                                             | Graceful shutdown timeout                                     |
+
+The flushable presets (`MapleFlush.make`, and the Cloudflare `make`) replace the
+four interval options with `autoFlushInterval`, and add `excludeLogSpans`,
+`dropSpanNames`, `anticipatedErrorIdentifiers`, `tracesPath`, `logsPath`, and
+`metricsPath`.
+
+> **`anticipatedErrorIdentifiers` is flushable/Cloudflare-only.** `Maple.layer`
+> builds on Effect's stock `Otlp.layerJson`, which has no hook for it — so with
+> the plain server layer, expected 4xx failures still export as `Error` spans.
+> Use `MapleFlush.make` if you need that suppression.
 
 Client-only options:
 

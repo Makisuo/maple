@@ -217,7 +217,8 @@ describe("MapleCloudflareSDK.make", () => {
 
 		expect(calls.length).toBe(0)
 		expect(consoleInfoSpy).toHaveBeenCalledTimes(1)
-		expect(consoleInfoSpy.mock.calls[0][0]).toContain("no MAPLE_INGEST_KEY configured")
+		expect(consoleInfoSpy.mock.calls[0][0]).toContain("no ingest key configured")
+		expect(consoleInfoSpy.mock.calls[0][0]).toContain("set MAPLE_INGEST_KEY to enable")
 
 		// A second flush within the same isolate should stay silent —
 		// the info log is one-shot.
