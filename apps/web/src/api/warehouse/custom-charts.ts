@@ -32,7 +32,7 @@ import {
 	invalidWarehouseInput,
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import type { ServiceDetailTimeSeriesPoint, ServiceTimeSeriesPoint } from "@/api/warehouse/services"
 import { QUERY_BUILDER_DATA_SOURCES, QUERY_BUILDER_METRIC_TYPES } from "@maple/query-model"
 const dateTimeString = WarehouseDateTimeString
@@ -868,7 +868,7 @@ const getServiceDetailOverviewEffect = Effect.fn("QueryEngine.getServiceDetailOv
 
 	const result = yield* runWarehouseQuery("serviceDetailOverview", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceDetailOverview({
 				payload: new ServiceDetailOverviewRequest({
 					serviceName: input.serviceName,

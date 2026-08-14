@@ -5,7 +5,7 @@ Status: implementation plan, audited 2026-08-13.
 This document decides where the remaining `/api/...` surface belongs and defines the gate for deleting it. The governing rule is consumer intent, not transport convenience:
 
 - `/v2` is the stable public resource API for customers, agents, IaC, and the dashboard.
-- `/rpc` is the private dashboard transport for product workflows that can change with the UI.
+- `/internal` is the private dashboard transport for product workflows that can change with the UI. It is a separate `HttpApi` (`MapleInternalApi`), session-only via `SessionAuthorization`, and absent from `/docs`. It is deliberately NOT a distinct wire protocol: the boundary is who may call it, not how. Earlier drafts of this document called this tier `/rpc`; the name changed when it shipped, the intent did not.
 - Raw `HttpRouter` routes remain version-neutral when an external protocol requires redirects, signatures, streaming, or a provider-owned response shape.
 - No new endpoint is added to v1 unless it is required to complete a safe migration of an existing v1 group.
 
@@ -13,15 +13,11 @@ This document decides where the remaining `/api/...` surface belongs and defines
 
 These groups already have a v2 replacement used by the repository. Mark the v1 operations deprecated now, stop feature work on them, and remove each group after the retirement gate below passes.
 
-| v1 group or provider                     | v2 replacement                        | action                                                                                                                                                     |
-| ---------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apiKeys`                                | `/v2/api_keys`                        | Retire the whole v1 group.                                                                                                                                 |
-| `ingestKeys`                             | `/v2/ingest_keys`                     | Retire the whole v1 group.                                                                                                                                 |
-| `ingestAttributeMappings`                | `/v2/attribute_mappings`              | Retire the whole v1 group.                                                                                                                                 |
-| `recommendationIssues`                   | `/v2/instrumentation/recommendations` | Retire the whole v1 group.                                                                                                                                 |
-| `scrapeTargets`                          | `/v2/scrape_targets`                  | Retire the whole v1 group.                                                                                                                                 |
-| `investigations`                         | `/v2/investigations`                  | Retire the whole v1 group.                                                                                                                                 |
-| PlanetScale operations in `integrations` | `/v2/integrations/planetscale`        | Already deprecated. Split provider operations out of the monolithic v1 group so they can be deleted independently. Keep callback and webhook router paths. |
+| v1 group or provider                     | v2 replacement                 | action                                                                                                                                                     |
+| ---------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PlanetScale operations in `integrations` | `/v2/integrations/planetscale` | Already deprecated. Split provider operations out of the monolithic v1 group so they can be deleted independently. Keep callback and webhook router paths. |
+
+`apiKeys`, `ingestKeys`, `ingestAttributeMappings`, `recommendationIssues`, `scrapeTargets`, and `investigations` have passed the gate and are **removed**. Their `HttpApiGroup`s and `apps/api/src/routes/v1/*.http.ts` handlers are deleted; the matching `packages/domain/src/http/*.ts` files remain as schema-and-error modules because the v2 contracts and the backing services import their domain types.
 
 `dashboards`, `anomalies`, and `sessionReplays` are close, but repository callers still use part of their v1 surface. Migrate those callers before starting the external-traffic clock:
 
@@ -40,7 +36,7 @@ These v1 groups mix public resource operations with private orchestration. Split
 | `errors`                                    | Issue events, comments, state transitions, assignee, and severity under `/v2/error_issues/{id}/...`.                                                                                         | Agent registration, claim, heartbeat, release, escalation-policy evaluation, and other worker coordination.                                                                                          |
 | `organizations` + `orgClickHouseSettings`   | Organization update/delete and customer-managed ClickHouse configuration as organization subresources, with explicit admin scopes.                                                           | Setup wizards or UI-only probes that merely coordinate several public operations.                                                                                                                    |
 | `integrations`                              | Promote a provider only when a public resource or supported external automation needs it. Slack and PlanetScale already meet that bar.                                                       | Cloudflare, GitHub, and Hazel dashboard control surfaces remain private until public demand exists. Split providers into independent contracts so one provider does not block retirement of another. |
-| `queryEngine`, `warehouse`, `observability` | Keep the existing stable telemetry resources: traces, logs, metrics, services, and service map. Add a specific public resource endpoint only after its request and response shape is stable. | Raw SQL, generic query documents, arbitrary warehouse execution, attribute/facet discovery used only by dashboard builders, infrastructure drill-down helpers, and provider-specific chart queries.  |
+| `warehouse`, `observability` | Keep the existing stable telemetry resources: traces, logs, metrics, services, and service map. Add a specific public resource endpoint only after its request and response shape is stable. | Raw SQL, generic query documents, arbitrary warehouse execution, attribute/facet discovery used only by dashboard builders, infrastructure drill-down helpers, and provider-specific chart queries. (`queryEngine` is **done** — the whole group moved to `/internal/query-engine`, so nothing was left to split.) |
 
 There must never be a generic `/v2/query`, `/v2/sql`, or public query-builder execution endpoint. Those contracts expose Maple's storage and dashboard implementation rather than a durable product resource.
 
@@ -82,8 +78,8 @@ If external traffic prevents removal, keep the compatibility adapter thin over t
 ## Execution order
 
 1. **Boundary consistency (this change):** apply API-wide v1 request-validation and defect middleware; apply the same v2 middleware once at `MapleApiV2`; distinguish request-decode failures from server-side response drift; define one exhaustive public policy map per domain error union and preserve every typed error's semantic tag through the v2 envelope.
-2. **Deprecate complete duplicates:** `apiKeys`, `ingestKeys`, `ingestAttributeMappings`, `recommendationIssues`, `scrapeTargets`, `investigations`, and PlanetScale v1 operations. Add operation-level traffic counters before starting the 30-day clock.
+2. **Deprecate complete duplicates:** done for `apiKeys`, `ingestKeys`, `ingestAttributeMappings`, `recommendationIssues`, `scrapeTargets`, and `investigations` — per-operation telemetry showed no production caller (the only August 2026 requests were manual `curl` probes), so the groups were deleted outright rather than deprecated. PlanetScale v1 operations still serve traffic and remain deprecated-not-removed.
 3. **Finish near-complete resources:** move the remaining dashboard callers for dashboards, anomalies, and session replays to v2.
-4. **Build the internal RPC tier:** move billing, onboarding, demo, chat apply, digest, AI triage, generic query/warehouse helpers, and error-agent coordination. Preserve the billing-specific authentication retry behavior when its client moves.
+4. **Build the internal tier:** done for `queryEngine`, which now serves from `MapleInternalApi` at `/internal/query-engine` behind `SessionAuthorization` — telemetry showed one API-key call across all 62 endpoints in 30 days, so the group was moved wholesale rather than split. Still to move: billing, onboarding, demo, chat apply, digest, AI triage, the remaining warehouse helpers, and error-agent coordination. Preserve the billing-specific authentication retry behavior when its client moves.
 5. **Split mixed v1 groups:** separate `errors`, provider integrations, and query/warehouse operations so public promotions and private RPC moves can be retired independently.
 6. **Delete by evidence:** remove each empty v1 group as soon as its retirement gate passes; do not wait for every v1 group to be ready.

@@ -19,7 +19,7 @@ import {
 	QueryEngineExecuteResponse,
 	TinybirdDateTime,
 } from "../query-engine"
-import { Authorization } from "./current-tenant"
+import { SessionAuthorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 import { warehouseHttpErrors } from "./warehouse"
 
@@ -1719,16 +1719,9 @@ const validatedQueryEndpointErrors = [
 
 export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 	.add(
-		HttpApiEndpoint.post("execute", "/execute", {
-			payload: QueryEngineExecuteRequest,
-			success: QueryEngineExecuteResponse,
-			error: validatedQueryEndpointErrors,
-		}),
-	)
-	.add(
-		// Batched sibling of `execute`. Per-item failures ride in the SUCCESS
-		// payload (see QueryEngineBatchOutcome); the error list here is for
-		// whole-request failures only — auth, decode, a blown batch cap.
+		// The one query-execution entry point. Per-item failures ride in the
+		// SUCCESS payload (see QueryEngineBatchOutcome); the error list here is
+		// for whole-request failures only — auth, decode, a blown batch cap.
 		HttpApiEndpoint.post("executeBatch", "/execute-batch", {
 			payload: QueryEngineExecuteBatchRequest,
 			success: QueryEngineExecuteBatchResponse,
@@ -1809,20 +1802,6 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceApdex", "/service-apdex", {
 			payload: ServiceApdexRequest,
 			success: ServiceApdexResponse,
-			error: queryEngineEndpointErrors,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("serviceDependencies", "/service-dependencies", {
-			payload: ServiceDependenciesRequest,
-			success: ServiceDependenciesResponse,
-			error: queryEngineEndpointErrors,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("serviceDbEdges", "/service-db-edges", {
-			payload: ServiceDbEdgesRequest,
-			success: ServiceDbEdgesResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)
@@ -1936,13 +1915,6 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceDbQuerySummary", "/service-db-query-summary", {
 			payload: ServiceDbQuerySummaryRequest,
 			success: ServiceDbQuerySummaryResponse,
-			error: queryEngineEndpointErrors,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("servicePlatforms", "/service-platforms", {
-			payload: ServicePlatformsRequest,
-			success: ServicePlatformsResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)
@@ -2161,5 +2133,5 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 			] as const,
 		}),
 	)
-	.prefix("/api/query-engine")
-	.middleware(Authorization) {}
+	.prefix("/internal/query-engine")
+	.middleware(SessionAuthorization) {}

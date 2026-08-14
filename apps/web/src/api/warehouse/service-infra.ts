@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { ServiceName, ServiceWorkloadsRequest } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
 type ServiceWorkloadKind = "deployment" | "statefulset" | "daemonset" | "unknown"
@@ -41,7 +41,7 @@ export const getServiceWorkloads = Effect.fn("QueryEngine.getServiceWorkloads")(
 
 	const result = yield* runWarehouseQuery("serviceWorkloads", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceWorkloads({
 				payload: new ServiceWorkloadsRequest({
 					startTime: input.startTime,

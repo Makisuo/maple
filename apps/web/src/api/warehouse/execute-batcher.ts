@@ -6,7 +6,11 @@ import {
 } from "@maple/query-engine"
 
 /**
- * Coalesces `/api/query-engine/execute` calls into `/execute-batch`.
+ * Coalesces individual query executions into `/internal/query-engine/execute-batch`.
+ *
+ * This is now the only way a query reaches the warehouse from the browser — the
+ * single-query `/execute` endpoint was removed once this batcher had carried all
+ * traffic for a full release.
  *
  * Every warehouse module funnels through one choke point, and each atom runs on
  * its own fiber, so a render pass used to emit one POST per query — each with

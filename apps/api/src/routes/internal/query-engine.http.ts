@@ -1,7 +1,7 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CurrentTenant,
-	MapleApi,
+	MapleInternalApi,
 	RawSqlExecuteResponse,
 	type RawSqlValidationError,
 	SpanHierarchyResponse,
@@ -15,8 +15,6 @@ import {
 	ServiceHealthSnapshotResponse,
 	ServiceHealthBaselineResponse,
 	ServiceApdexResponse,
-	ServiceDependenciesResponse,
-	ServiceDbEdgesResponse,
 	PlanetScaleInfraTimeseriesResponse,
 	ServiceCloudflareStatsResponse,
 	ServicePlanetScaleStatsResponse,
@@ -33,7 +31,6 @@ import {
 	ServiceDetailOverviewResponse,
 	ServiceDependenciesBundleResponse,
 	ServiceMapBundleResponse,
-	ServicePlatformsResponse,
 	ServiceWorkloadsResponse,
 	ServiceUsageResponse,
 	ServiceOperationsResponse,
@@ -271,7 +268,7 @@ const toServiceWorkloadRow = (row: CH.ServiceWorkloadsOutput) => ({
 		row.avgMemoryLimitUtilization == null ? null : Number(row.avgMemoryLimitUtilization),
 })
 
-export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine", (handlers) =>
+export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "queryEngine", (handlers) =>
 	Effect.gen(function* () {
 		const queryEngine = yield* QueryEngineService
 		const warehouse = yield* WarehouseQueryService
@@ -283,12 +280,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 		>(warehouse)
 
 		return handlers
-			.handle("execute", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					return yield* queryEngine.execute(tenant, payload)
-				}),
-			)
 			.handle("executeBatch", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
@@ -501,20 +492,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							apdexScore: Number(row.apdexScore),
 						})),
 					})
-				}),
-			)
-			.handle("serviceDependencies", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.serviceDependencies, tenant, payload)
-					return new ServiceDependenciesResponse({ data: rows.map((row) => ({ ...row })) })
-				}),
-			)
-			.handle("serviceDbEdges", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.serviceDbEdges, tenant, payload)
-					return new ServiceDbEdgesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
 			)
 			.handle("serviceCloudflareStats", ({ payload }) =>
@@ -1071,13 +1048,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							lastSeen: String(row.lastSeen),
 						})),
 					})
-				}),
-			)
-			.handle("servicePlatforms", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const rows = yield* runQuery(Queries.servicePlatforms, tenant, payload)
-					return new ServicePlatformsResponse({ data: rows.map(toServicePlatformRow) })
 				}),
 			)
 			.handle("serviceWorkloads", ({ payload }) =>

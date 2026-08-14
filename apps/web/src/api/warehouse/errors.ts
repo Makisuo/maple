@@ -13,7 +13,7 @@ import {
 	FingerprintHash,
 	ServiceName,
 } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import {
 	WarehouseDateTimeString,
 	decodeInput,
@@ -63,7 +63,7 @@ const getErrorsByTypeEffect = Effect.fn("QueryEngine.getErrorsByType")(function*
 
 	const result = yield* runWarehouseQuery("errorsByType", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.errorsByType({
 				payload: new ErrorsByTypeRequest({
 					startTime: input.startTime ?? fallback.startTime,
@@ -196,7 +196,7 @@ const getErrorsSummaryEffect = Effect.fn("QueryEngine.getErrorsSummary")(functio
 
 	const result = yield* runWarehouseQuery("errorsSummary", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.errorsSummary({
 				payload: new ErrorsSummaryRequest({
 					startTime: input.startTime ?? fallback.startTime,
@@ -260,7 +260,7 @@ const getErrorDetailTracesEffect = Effect.fn("QueryEngine.getErrorDetailTraces")
 
 	const result = yield* runWarehouseQuery("errorDetailTraces", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.errorDetailTraces({
 				payload: new ErrorDetailTracesRequest({
 					startTime: input.startTime ?? fallback.startTime,
@@ -317,7 +317,7 @@ const getErrorsTimeseriesEffect = Effect.fn("QueryEngine.getErrorsTimeseries")(f
 
 	const result = yield* runWarehouseQuery("errorsTimeseries", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.errorsTimeseries({
 				payload: new ErrorsTimeseriesRequest({
 					startTime: input.startTime ?? fallback.startTime,

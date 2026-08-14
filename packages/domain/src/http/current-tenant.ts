@@ -59,3 +59,46 @@ export class Authorization extends HttpApiMiddleware.Service<
 		bearer: HttpApiSecurity.bearer,
 	},
 }) {}
+
+/**
+ * An API key was presented to a session-only (internal) endpoint.
+ *
+ * Distinct from `UnauthorizedError` on purpose: the credential is valid, it is
+ * simply not accepted here. A bare 401 would read as "your key is broken" and
+ * send people to rotate it; this says where the supported surface is instead.
+ */
+export class ApiKeyNotAcceptedError extends HttpTaggedError<ApiKeyNotAcceptedError>()(
+	"@maple/http/errors/ApiKeyNotAcceptedError",
+	{
+		message: Schema.String,
+	},
+	{
+		status: 403,
+		code: "api_key_not_accepted",
+		title: "Not available to API keys",
+		message:
+			"This endpoint backs the Maple dashboard and is not part of the public API. Use the /v2 API instead.",
+		retry: "never",
+		recovery: "none",
+		exposure: "public_message",
+	},
+) {}
+
+/**
+ * Session-only sibling of {@link Authorization}, for endpoints that are
+ * dashboard transport rather than public API.
+ *
+ * Provides the same `Context`, so handlers written against `Authorization` need
+ * no changes — only the group's `.middleware(...)` line differs.
+ */
+export class SessionAuthorization extends HttpApiMiddleware.Service<
+	SessionAuthorization,
+	{
+		provides: Context
+	}
+>()("SessionAuthorization", {
+	error: [UnauthorizedError, AuthorizationUnavailableError, ApiKeyNotAcceptedError],
+	security: {
+		bearer: HttpApiSecurity.bearer,
+	},
+}) {}

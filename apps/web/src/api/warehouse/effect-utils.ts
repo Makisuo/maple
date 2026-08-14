@@ -7,11 +7,17 @@ import {
 	type DurationStats,
 	type AttributeValueItem,
 } from "@maple/query-engine"
-import { Effect, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { PublicHttpErrorBodySchema, type AnyPublicHttpErrorBody } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import { mapleApiClientLayer, mapleApiV2ClientLayer, mapleRuntime } from "@/lib/registry"
+import {
+	mapleApiClientLayer,
+	mapleApiV2ClientLayer,
+	mapleInternalClientLayer,
+	mapleRuntime,
+} from "@/lib/registry"
 import { makeClientErrorBody } from "@/lib/error-messages"
 import { makeExecuteBatcher } from "./execute-batcher"
 
@@ -148,15 +154,22 @@ export function decodeInput<S extends Schema.Top & { readonly DecodingServices: 
 	)
 }
 
+/**
+ * Accepts either v1 client because the warehouse adapters straddle two APIs:
+ * query-engine moved to the private `/internal` transport, while the session
+ * replay and integrations groups it shares this helper with are still on
+ * `/api`. Both layers are provided, so a caller depends only on the one it
+ * actually uses.
+ */
 export function runWarehouseQuery<A, E>(
 	operation: string,
-	execute: () => Effect.Effect<A, E, MapleApiAtomClient>,
+	execute: () => Effect.Effect<A, E, MapleApiAtomClient | MapleInternalAtomClient>,
 ): Effect.Effect<A, WarehouseApiError | BackendError> {
 	return Effect.suspend(execute).pipe(
 		Effect.withSpan(operation),
 		// Warehouse adapters are imperative server-function entrypoints and own this runtime layer.
 		// oxlint-disable-next-line effecttsgo/strict-effect-provide
-		Effect.provide(mapleApiClientLayer),
+		Effect.provide(Layer.mergeAll(mapleApiClientLayer, mapleInternalClientLayer)),
 		Effect.mapError((cause) => normalizeWarehouseError(operation, cause)),
 	)
 }
@@ -198,7 +211,7 @@ export function invalidWarehouseInput(
 const executeBatcher = makeExecuteBatcher((requests) =>
 	mapleRuntime.runPromise(
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response = yield* client.queryEngine.executeBatch({
 				payload: new QueryEngineExecuteBatchRequest({ requests }),
 			})

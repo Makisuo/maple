@@ -1,6 +1,6 @@
 import { Clock, Effect, Schema } from "effect"
 import { ServiceName, ServiceUsageRequest } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
@@ -56,7 +56,7 @@ export const getServiceUsage = Effect.fn("QueryEngine.getServiceUsage")(function
 
 	const result = yield* runWarehouseQuery("serviceUsage", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceUsage({
 				payload: new ServiceUsageRequest({
 					startTime: input.startTime ?? fallback.startTime,
