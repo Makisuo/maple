@@ -1,4 +1,5 @@
-import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient, retainedInternalQuery } from "@/lib/services/common/internal-atom-client"
 
 // Reactivity keys: a mutation that bumps a key invalidates every query atom
 // registered with it. attach/portal change the customer (and thus per-plan
@@ -10,10 +11,10 @@ export const BILLING_USAGE_KEY = "billingUsage"
 export const BILLING_INVOICES_KEY = "billingInvoices"
 
 // Read atoms. Transient token-settle 401s are retried by the shared client
-// (atom-client.ts scopes a 401 retry to /api/billing/*), and effect-atom
+// (api-client-transform.ts scopes a 401 retry to the billing paths), and effect-atom
 // refetches on remount + reactivity invalidation — so these can't freeze the
 // way the old autumn-js QueryClient (retry:false) did.
-export const billingCustomerAtom = retainedQuery("billing", "getCustomer", {
+export const billingCustomerAtom = retainedInternalQuery("billing", "getCustomer", {
 	reactivityKeys: [BILLING_CUSTOMER_KEY],
 })
 
@@ -23,23 +24,26 @@ export const billingPlansAtom = retainedQuery("billingPublic", "listPlans", {
 
 // The billing page always meters the same four features over one billing cycle,
 // so a single static atom (not a family) is enough.
-export const billingUsageAtom = retainedQuery("billing", "getUsage", {
+export const billingUsageAtom = retainedInternalQuery("billing", "getUsage", {
 	query: { featureId: ["logs", "traces", "metrics", "browser_sessions"], range: "1bc" },
 	reactivityKeys: [BILLING_USAGE_KEY],
 })
 
-export const billingInvoicesAtom = retainedQuery("billing", "listInvoices", {
+export const billingInvoicesAtom = retainedInternalQuery("billing", "listInvoices", {
 	reactivityKeys: [BILLING_INVOICES_KEY],
 })
 
 // Warehouse-backed daily volume behind the spend chart. Shares the customer's
 // reactivity key: the series is scoped to the subscription's cycle, so a plan
 // change re-fetches it.
-export const billingDailySpendAtom = retainedQuery("billing", "getDailySpend", {
+export const billingDailySpendAtom = retainedInternalQuery("billing", "getDailySpend", {
 	reactivityKeys: [BILLING_CUSTOMER_KEY],
 })
 
-export const attachMutation = MapleApiAtomClient.mutation("billing", "attach")
-export const previewAttachMutation = MapleApiAtomClient.mutation("billing", "previewAttach")
-export const openCustomerPortalMutation = MapleApiAtomClient.mutation("billing", "openCustomerPortal")
-export const updateBillingControlsMutation = MapleApiAtomClient.mutation("billing", "updateBillingControls")
+export const attachMutation = MapleInternalAtomClient.mutation("billing", "attach")
+export const previewAttachMutation = MapleInternalAtomClient.mutation("billing", "previewAttach")
+export const openCustomerPortalMutation = MapleInternalAtomClient.mutation("billing", "openCustomerPortal")
+export const updateBillingControlsMutation = MapleInternalAtomClient.mutation(
+	"billing",
+	"updateBillingControls",
+)

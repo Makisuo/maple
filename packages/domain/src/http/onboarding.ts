@@ -1,6 +1,8 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { Authorization } from "./current-tenant"
+
+// Onboarding state has no HTTP surface: the v1 `/api/onboarding` group was
+// retired once the quick-start wizard moved to client-local state. These
+// schemas stay because `OnboardingService` and `SetupAuditService` use them.
 
 export class OnboardingStateResponse extends Schema.Class<OnboardingStateResponse>("OnboardingStateResponse")(
 	{
@@ -30,20 +32,3 @@ export class OnboardingPersistenceError extends Schema.TaggedError<OnboardingPer
 	},
 	{ httpApiStatus: 503 },
 ) {}
-
-export class OnboardingApiGroup extends HttpApiGroup.make("onboarding")
-	.add(
-		HttpApiEndpoint.get("getState", "/", {
-			success: OnboardingStateResponse,
-			error: OnboardingPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("updateState", "/", {
-			payload: UpdateOnboardingStateRequest,
-			success: OnboardingStateResponse,
-			error: OnboardingPersistenceError,
-		}),
-	)
-	.prefix("/api/onboarding")
-	.middleware(Authorization) {}

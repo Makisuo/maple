@@ -6,21 +6,18 @@ import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { API_CORS_OPTIONS } from "@/http/api-cors"
 import { McpLive } from "@/mcp/app"
 import { Env } from "@/platform/Env"
-import { HttpAiTriageLive } from "@/routes/v1/ai-triage.http"
-import { HttpAnomaliesLive } from "@/routes/v1/anomalies.http"
+import { HttpAiTriageLive } from "@/routes/internal/ai-triage.http"
 import { HttpAuthLive, HttpAuthPublicLive } from "@/routes/v1/auth.http"
-import { HttpBillingLive, HttpBillingPublicLive } from "@/routes/v1/billing.http"
+import { HttpBillingLive } from "@/routes/internal/billing.http"
+import { HttpBillingPublicLive } from "@/routes/v1/billing-public.http"
 import { ChatSessionsRouter } from "@/routes/v1/chat-sessions.http"
 import { HttpChatLive } from "@/routes/v1/chat.http"
-import { HttpDashboardsLive } from "@/routes/v1/dashboards.http"
 import { V1ErrorBoundaryLive } from "@/routes/v1/error-boundary"
-import { HttpDemoLive } from "@/routes/v1/demo.http"
-import { HttpDigestLive } from "@/routes/v1/digest.http"
+import { HttpDemoLive } from "@/routes/internal/demo.http"
+import { HttpDigestLive } from "@/routes/internal/digest.http"
 import { HttpErrorsLive } from "@/routes/v1/errors.http"
 import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "@/routes/v1/integrations.http"
-import { HttpObservabilityLive } from "@/routes/v1/observability.http"
 import { OAuthDiscoveryRouter } from "@/routes/v1/oauth-discovery.http"
-import { HttpOnboardingLive } from "@/routes/v1/onboarding.http"
 import { HttpOrgClickHouseSettingsLive } from "@/routes/v1/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "@/routes/v1/organizations.http"
 import { PlanetScaleWebhookRouter } from "@/routes/v1/planetscale-webhook.http"
@@ -82,15 +79,10 @@ const DocsV2Route = HttpApiScalar.layerCdn(MapleApiV2, {
 const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpAuthPublicLive),
 	Layer.provide(HttpAuthLive),
-	Layer.provide(Layer.mergeAll(HttpAiTriageLive, HttpAnomaliesLive, HttpChatLive)),
-	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
+	Layer.provide(HttpChatLive),
+	Layer.provide(HttpBillingPublicLive),
 	Layer.provide(HttpErrorsLive),
-	Layer.provide(HttpDashboardsLive),
-	Layer.provide(HttpDemoLive),
-	Layer.provide(HttpDigestLive),
 	Layer.provide(HttpIntegrationsLive),
-	Layer.provide(HttpObservabilityLive),
-	Layer.provide(HttpOnboardingLive),
 	Layer.provide(HttpOrgClickHouseSettingsLive),
 	Layer.provide(HttpOrganizationsLive),
 	Layer.provide(Layer.mergeAll(HttpSessionReplaysLive, HttpWarehouseLive)),
@@ -106,6 +98,7 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
  */
 const ApiInternalRoutes = HttpApiBuilder.layer(MapleInternalApi).pipe(
 	Layer.provide(Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysInternalLive)),
+	Layer.provide(Layer.mergeAll(HttpAiTriageLive, HttpBillingLive, HttpDemoLive, HttpDigestLive)),
 	Layer.provide(V1ErrorBoundaryLive),
 )
 

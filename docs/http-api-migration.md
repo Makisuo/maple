@@ -1,6 +1,6 @@
 # HTTP API migration and v1 retirement
 
-Status: implementation plan, audited 2026-08-13.
+Status: implementation plan, audited 2026-08-13; retirement sweep executed 2026-08-14.
 
 This document decides where the remaining `/api/...` surface belongs and defines the gate for deleting it. The governing rule is consumer intent, not transport convenience:
 
@@ -11,21 +11,18 @@ This document decides where the remaining `/api/...` surface belongs and defines
 
 ## What can leave v1 first
 
-These groups already have a v2 replacement used by the repository. Mark the v1 operations deprecated now, stop feature work on them, and remove each group after the retirement gate below passes.
+`apiKeys`, `ingestKeys`, `ingestAttributeMappings`, `recommendationIssues`, `scrapeTargets`, `investigations`, `anomalies`, `dashboards`, `observability`, and `onboarding` have passed the gate and are **removed**, as are the ten PlanetScale operations in `integrations`. Their `HttpApiGroup`s and `apps/api/src/routes/v1/*.http.ts` handlers are deleted; the matching `packages/domain/src/http/*.ts` files remain as schema-and-error modules because the v2 contracts and the backing services import their domain types. (`observability` is the exception: nothing outside its own two files referenced it, so the domain module went too.)
 
-| v1 group or provider                     | v2 replacement                 | action                                                                                                                                                     |
-| ---------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PlanetScale operations in `integrations` | `/v2/integrations/planetscale` | Already deprecated. Split provider operations out of the monolithic v1 group so they can be deleted independently. Keep callback and webhook router paths. |
+Two of those carry notes worth keeping:
 
-`apiKeys`, `ingestKeys`, `ingestAttributeMappings`, `recommendationIssues`, `scrapeTargets`, and `investigations` have passed the gate and are **removed**. Their `HttpApiGroup`s and `apps/api/src/routes/v1/*.http.ts` handlers are deleted; the matching `packages/domain/src/http/*.ts` files remain as schema-and-error modules because the v2 contracts and the backing services import their domain types.
+- **PlanetScale** was removed against gate condition 3, deliberately. Telemetry for 2026-07-15 → 2026-08-14 showed exactly one call — `GET /api/integrations/planetscale/status` on 2026-08-05 — so the surface was not at zero. `/v2/integrations/planetscale` had been live and the v1 operations OpenAPI-deprecated for long enough that accepting one broken caller beat carrying the group. The OAuth callback and the webhook receiver stay: PlanetScale stores those URLs on its side.
+- **`onboarding`** leaves `OnboardingService` with no consumer at all, because the v1 route was its only one. The service and `org_onboarding_state` are still in the tree, but the table is now written by nobody while `SetupAuditService` still reads it — so setup-audit's onboarding signals go stale from here on. Decide whether setup-audit stops reading it or onboarding persistence comes back; do not leave it as an unstated third state.
 
-`dashboards`, `anomalies`, and `sessionReplays` are close, but repository callers still use part of their v1 surface. Migrate those callers before starting the external-traffic clock:
+`sessionReplays` is **blocked, not close**. The gate's condition 1 is satisfied for the operations, but v2 is not a superset of v1 at the field level: `V2SessionReplay` and `V2SessionReplayListItem` omit the RUM analytics dimensions that v1's `GetReplayResponse` carries — `visitorId`, `visitorIsNew`, `referrer`, `referrerHost`, `utmSource/Medium/Campaign/Term/Content`, `entryPath`, `exitPath` — plus the list's `visitorId`, `utmSource`, `entryPath`, and `recorded`. The web detail page's Session rail and the list's visitor-linking column render these today, so migrating the callers as-is would silently gut cross-subdomain visitor linking and acquisition attribution. Extend the v2 resource first; that is a public-contract design decision, not a client rewrite.
 
 | v1 group         | lift to v2                                                                                                                                                                      | do not lift                                                                                   |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `dashboards`     | Any remaining dashboard CRUD/import/history operation whose v2 equivalent already exists.                                                                                       | Nothing dashboard-specific belongs in RPC while it manipulates the public dashboard resource. |
-| `anomalies`      | Move the dashboard's remaining resolve/link-issue/settings mutations to the implemented v2 operations.                                                                          | None of the current resource operations.                                                      |
-| `sessionReplays` | Use the implemented v2 search, retrieve, events, transcript, manifest, and trace lookup operations. Promote a facet only if customers or agents need it as a stable capability. | Dashboard-only facet exploration and trace-summary helpers start in RPC.                      |
+| `sessionReplays` | Use the implemented v2 search, retrieve, events, transcript, manifest, and trace lookup operations — once they expose the analytics dimensions above. Promote a facet only if customers or agents need it as a stable capability. | Dashboard-only facet exploration and trace-summary helpers start in RPC.                      |
 
 ## Complete the public v2 resources
 
@@ -46,13 +43,20 @@ The following v1 groups are dashboard workflows or protocol surfaces. Do not por
 
 | v1 group                | destination                                                                                                                   |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `billing`               | Internal RPC for checkout, portal, attach/preview, and billing controls. Keep provider webhooks as raw signed receivers.      |
-| `onboarding`            | Internal RPC.                                                                                                                 |
-| `demo`                  | Internal RPC.                                                                                                                 |
-| `chat`                  | Internal RPC for mutations; keep a raw streaming route if the transport requires it.                                          |
-| `digest`                | Internal RPC until there is a separately designed public notification-subscription resource.                                  |
-| `aiTriage`              | Internal RPC.                                                                                                                 |
+| `billing`               | **Done** — `/internal/billing`. `billingPublic` (`listPlans`) stayed on `MapleApi` at `/api/billing/plans`: it is served unauthenticated so a Clerk token-settle gap renders prices instead of a 401, which session-only authorization would defeat. Provider webhooks remain raw signed receivers. |
+| `onboarding`            | Removed outright rather than moved — nothing called it. See the note above.                                                   |
+| `demo`                  | **Done** — `/internal/demo`.                                                                                                  |
+| `chat`                  | Internal RPC for mutations; keep a raw streaming route if the transport requires it. Not yet done: splitting the one `apply` mutation away from its four raw streaming routes buys little today. |
+| `digest`                | **Done** — `/internal/digest`. Revisit if a public notification-subscription resource is ever designed.                       |
+| `aiTriage`              | **Done** — `/internal/ai-triage`.                                                                                             |
 | `auth` and `authPublic` | Keep standards-driven CLI/MCP/OAuth/JWT exchange routes version-neutral; they are authentication protocols, not v2 resources. |
+
+Moving a group to `/internal` swaps `Authorization` for `SessionAuthorization`, which refuses API-key-shaped bearers. That is the intended narrowing, and telemetry showed no API-key traffic to any of these paths — but it means the move is a breaking change for any API-key caller, not a transparent reroute.
+
+The frontend halves of that move are easy to get wrong in ways nothing type-checks:
+
+- `apps/web/src/lib/services/common/api-client-transform.ts` scopes the billing 401-retry by URL. It now matches **both** `/internal/billing/` and `/api/billing/`, because the authenticated operations and the public plan catalog ended up on different prefixes. Dropping either reinstates the hard 401 that the retry exists to prevent.
+- `MapleInternalAtomClient` gained `retainedInternalQuery`, the `/internal` twin of `retainedQuery`, so the migrated settings panels keep unmount-surviving retention instead of flashing a skeleton on every visit. Its cache identity is prefixed `internal:` so a group name present on both clients cannot share a retention slot. Warehouse reads still go through `runWarehouseQuery` and must **not** be wrapped in it as well.
 
 The following raw routes are intentional end-state routes, not v1 debt:
 
@@ -78,8 +82,8 @@ If external traffic prevents removal, keep the compatibility adapter thin over t
 ## Execution order
 
 1. **Boundary consistency (this change):** apply API-wide v1 request-validation and defect middleware; apply the same v2 middleware once at `MapleApiV2`; distinguish request-decode failures from server-side response drift; define one exhaustive public policy map per domain error union and preserve every typed error's semantic tag through the v2 envelope.
-2. **Deprecate complete duplicates:** done for `apiKeys`, `ingestKeys`, `ingestAttributeMappings`, `recommendationIssues`, `scrapeTargets`, and `investigations` — per-operation telemetry showed no production caller (the only August 2026 requests were manual `curl` probes), so the groups were deleted outright rather than deprecated. PlanetScale v1 operations still serve traffic and remain deprecated-not-removed.
-3. **Finish near-complete resources:** move the remaining dashboard callers for dashboards, anomalies, and session replays to v2.
-4. **Build the internal tier:** done for `queryEngine`, which now serves from `MapleInternalApi` at `/internal/query-engine` behind `SessionAuthorization` — telemetry showed one API-key call across all 62 endpoints in 30 days, so the group was moved wholesale rather than split. Still to move: billing, onboarding, demo, chat apply, digest, AI triage, the remaining warehouse helpers, and error-agent coordination. Preserve the billing-specific authentication retry behavior when its client moves.
+2. **Deprecate complete duplicates:** done for `apiKeys`, `ingestKeys`, `ingestAttributeMappings`, `recommendationIssues`, `scrapeTargets`, and `investigations` — per-operation telemetry showed no production caller (the only August 2026 requests were manual `curl` probes), so the groups were deleted outright rather than deprecated. The PlanetScale v1 operations followed in the 2026-08-14 sweep, against the gate — see the note above.
+3. **Finish near-complete resources:** done for dashboards and anomalies, both now deleted. Session replays is blocked on the v2 field gap described above.
+4. **Build the internal tier:** done for `queryEngine`, which now serves from `MapleInternalApi` at `/internal/query-engine` behind `SessionAuthorization` — telemetry showed one API-key call across all 62 endpoints in 30 days, so the group was moved wholesale rather than split. Billing, demo, digest, and AI triage followed on 2026-08-14. Still to move: chat apply, the remaining warehouse helpers, and error-agent coordination.
 5. **Split mixed v1 groups:** separate `errors`, provider integrations, and query/warehouse operations so public promotions and private RPC moves can be retired independently.
 6. **Delete by evidence:** remove each empty v1 group as soon as its retirement gate passes; do not wait for every v1 group to be ready.

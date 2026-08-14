@@ -1,6 +1,5 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { HttpServerRequest } from "effect/unstable/http"
-import { Clock, Effect, Option, Schema } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import { EdgeCacheService } from "@maple/cache"
 import {
 	AttachResult,
@@ -10,11 +9,9 @@ import {
 	BillingInvoicesResponse,
 	BillingUpstreamError,
 	BillingUsage,
-	CatalogPlan,
-	CatalogPlansResponse,
 	CurrentTenant,
 	CustomerPortalResult,
-	MapleApi,
+	MapleInternalApi,
 	PreviewAttachResult,
 } from "@maple/domain/http"
 import {
@@ -24,7 +21,6 @@ import {
 	readCustomerCached,
 } from "@/services/billing/autumn-client"
 import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
-import { AuthService } from "@/services/auth/AuthService"
 import { requireAdmin } from "@/services/auth/auth"
 import { DailySpendService } from "@/services/billing/DailySpendService"
 
@@ -67,7 +63,7 @@ export const resolveCycleWindow = (
 	}
 }
 
-export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handlers) =>
+export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing", (handlers) =>
 	Effect.gen(function* () {
 		const edgeCache = yield* EdgeCacheService
 		const dailySpend = yield* DailySpendService
@@ -206,30 +202,6 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 						return yield* decodeUpstream(CustomerPortalResult, response)
 					}),
 				)
-		)
-	}),
-)
-
-export const HttpBillingPublicLive = HttpApiBuilder.group(MapleApi, "billingPublic", (handlers) =>
-	Effect.gen(function* () {
-		const auth = yield* AuthService
-		const autumn = yield* AutumnClient
-
-		return handlers.handle("listPlans", () =>
-			Effect.gen(function* () {
-				// Public route: resolve the tenant optionally so an onboarding token gap
-				// still serves the catalog, while authed callers get per-customer
-				// `customerEligibility` (autumn marks listPlans' customerId optional).
-				const req = yield* HttpServerRequest.HttpServerRequest
-				const tenant = yield* Effect.option(auth.resolveTenant(req.headers as Record<string, string>))
-				const customerId = Option.getOrUndefined(tenant)?.orgId
-				const result = yield* autumn.listPlans(customerId)
-				const response = yield* ensureOk(result)
-				// Autumn wraps the catalog as `{ list: [...] }`.
-				const list = (response as { list?: unknown })?.list ?? response
-				const plans = yield* decodeUpstream(Schema.Array(CatalogPlan), list)
-				return new CatalogPlansResponse({ plans })
-			}),
 		)
 	}),
 )
