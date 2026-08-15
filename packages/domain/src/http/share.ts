@@ -19,6 +19,15 @@ import { Schema } from "effect"
 import { DashboardId, DashboardShareId, IsoDateTimeString } from "@maple/primitives"
 import { HttpTaggedError } from "./error-policy"
 
+/**
+ * The single body every "no such share" answer carries.
+ *
+ * A constant, not a per-case string: unknown token, revoked token and deleted
+ * dashboard must be indistinguishable, and a varying message would be exactly
+ * the oracle that distinguishes them.
+ */
+export const SHARE_NOT_FOUND_MESSAGE = "This link is no longer available."
+
 /** How a share link resolves. */
 export const DashboardShareMode = Schema.Literals(["public", "org"])
 export type DashboardShareMode = Schema.Schema.Type<typeof DashboardShareMode>
@@ -93,7 +102,12 @@ export class DashboardShareTombstone extends Schema.Class<DashboardShareTombston
  */
 export class ShareNotFoundError extends HttpTaggedError<ShareNotFoundError>()(
 	"@maple/http/errors/ShareNotFoundError",
-	{},
+	{
+		// Always SHARE_NOT_FOUND_MESSAGE. The field exists because the error
+		// contract requires one; the constant exists so the body cannot vary
+		// between "unknown", "revoked" and "dashboard deleted".
+		message: Schema.String,
+	},
 	{
 		status: 404,
 		code: "share_not_found",
@@ -115,6 +129,7 @@ export class ShareNotFoundError extends HttpTaggedError<ShareNotFoundError>()(
 export class ShareForbiddenError extends HttpTaggedError<ShareForbiddenError>()(
 	"@maple/http/errors/ShareForbiddenError",
 	{
+		message: Schema.String,
 		reason: Schema.Literals(["signin_required", "wrong_org"]),
 		orgName: Schema.optionalKey(Schema.String),
 	},
@@ -132,6 +147,7 @@ export class ShareForbiddenError extends HttpTaggedError<ShareForbiddenError>()(
 export class ShareWidgetNotFoundError extends HttpTaggedError<ShareWidgetNotFoundError>()(
 	"@maple/http/errors/ShareWidgetNotFoundError",
 	{
+		message: Schema.String,
 		widgetId: Schema.String,
 	},
 	{
@@ -154,6 +170,7 @@ export class ShareWidgetNotFoundError extends HttpTaggedError<ShareWidgetNotFoun
 export class ShareUnsupportedWidgetError extends HttpTaggedError<ShareUnsupportedWidgetError>()(
 	"@maple/http/errors/ShareUnsupportedWidgetError",
 	{
+		message: Schema.String,
 		widgetId: Schema.String,
 		kind: Schema.String,
 	},
@@ -197,6 +214,7 @@ export class ShareRangeInvalidError extends HttpTaggedError<ShareRangeInvalidErr
 export class ShareVariableInvalidError extends HttpTaggedError<ShareVariableInvalidError>()(
 	"@maple/http/errors/ShareVariableInvalidError",
 	{
+		message: Schema.String,
 		variableName: Schema.String,
 	},
 	{
@@ -213,6 +231,7 @@ export class ShareVariableInvalidError extends HttpTaggedError<ShareVariableInva
 export class ShareRateLimitedError extends HttpTaggedError<ShareRateLimitedError>()(
 	"@maple/http/errors/ShareRateLimitedError",
 	{
+		message: Schema.String,
 		retryAfterSeconds: Schema.optionalKey(Schema.Number),
 	},
 	{
@@ -234,7 +253,9 @@ export class ShareRateLimitedError extends HttpTaggedError<ShareRateLimitedError
  */
 export class ShareNotConfiguredError extends HttpTaggedError<ShareNotConfiguredError>()(
 	"@maple/http/errors/ShareNotConfiguredError",
-	{},
+	{
+		message: Schema.String,
+	},
 	{
 		status: 503,
 		code: "share_not_configured",
@@ -253,7 +274,9 @@ export class SharePersistenceError extends HttpTaggedError<SharePersistenceError
 		cause: Schema.optionalKey(Schema.Defect()),
 	},
 	{
-		status: 500,
+		// 503, per the repo-wide convention that a *PersistenceError is a
+		// retryable dependency failure rather than a generic 500.
+		status: 503,
 		code: "share_persistence_failed",
 		title: "Could not save the share link",
 		message: "Something went wrong updating this dashboard's share link.",

@@ -89,6 +89,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"DELETE /v2/api_keys/{id}",
 			"DELETE /v2/attribute_mappings/{id}",
 			"DELETE /v2/dashboards/{id}",
+			"DELETE /v2/dashboards/{id}/share",
 			"DELETE /v2/integrations/planetscale",
 			"DELETE /v2/integrations/slack",
 			"DELETE /v2/scrape_targets/{id}",
@@ -113,6 +114,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/dashboards",
 			"GET /v2/dashboards/templates",
 			"GET /v2/dashboards/{id}",
+			"GET /v2/dashboards/{id}/share",
 			"GET /v2/dashboards/{id}/versions",
 			"GET /v2/dashboards/{id}/versions/{version_id}",
 			"GET /v2/error_issues",
@@ -163,6 +165,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/dashboards/import/perses",
 			"POST /v2/dashboards/templates/{template_id}/instantiate",
 			"POST /v2/dashboards/templates/{template_id}/preview",
+			"POST /v2/dashboards/{id}/share/rotate",
 			"POST /v2/dashboards/{id}/versions/{version_id}/restore",
 			"POST /v2/ingest_keys/private/roll",
 			"POST /v2/ingest_keys/public/roll",
@@ -190,6 +193,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/traces/search",
 			"POST /v2/traces/timeseries",
 			"PUT /v2/anomalies/incidents/{id}/issue",
+			"PUT /v2/dashboards/{id}/share",
 		])
 	})
 

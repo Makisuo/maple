@@ -49,6 +49,8 @@ import { makeServerQuerySetExecutor } from "./server-query-set-executor"
 import { ROUTE_ENDPOINT_PLANS, type RouteEndpointContext } from "./route-endpoint-plans"
 import { autoBucketSeconds, runRawSql } from "@/mcp/lib/run-raw-sql"
 
+const UNSUPPORTED_WIDGET_MESSAGE = "This widget isn't available in shared views."
+
 const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 
@@ -131,13 +133,23 @@ export class DashboardWidgetDataService extends Context.Service<
 
 			const widget = findWidget(document, request.widgetId)
 			if (widget === undefined) {
-				return yield* Effect.fail(new ShareWidgetNotFoundError({ widgetId: request.widgetId }))
+				return yield* Effect.fail(
+					new ShareWidgetNotFoundError({
+						message: "That widget is not on this dashboard.",
+						widgetId: request.widgetId,
+					}),
+				)
 			}
 
 			const dataSource =
 				request.source === "sparkline" ? widget.display?.sparkline?.dataSource : widget.dataSource
 			if (dataSource === undefined) {
-				return yield* Effect.fail(new ShareWidgetNotFoundError({ widgetId: request.widgetId }))
+				return yield* Effect.fail(
+					new ShareWidgetNotFoundError({
+						message: "That widget is not on this dashboard.",
+						widgetId: request.widgetId,
+					}),
+				)
 			}
 
 			const tenant = shareViewerTenant(orgId)
@@ -196,7 +208,11 @@ export class DashboardWidgetDataService extends Context.Service<
 					// board must not blank its neighbours.
 					Effect.catch(() =>
 						Effect.fail(
-							new ShareUnsupportedWidgetError({ widgetId: request.widgetId, kind: "query" }),
+							new ShareUnsupportedWidgetError({
+								message: UNSUPPORTED_WIDGET_MESSAGE,
+								widgetId: request.widgetId,
+								kind: "query",
+							}),
 						),
 					),
 				)
@@ -231,6 +247,7 @@ export class DashboardWidgetDataService extends Context.Service<
 					Effect.catch(() =>
 						Effect.fail(
 							new ShareUnsupportedWidgetError({
+								message: UNSUPPORTED_WIDGET_MESSAGE,
 								widgetId: request.widgetId,
 								kind: "raw_sql",
 							}),
@@ -250,6 +267,7 @@ export class DashboardWidgetDataService extends Context.Service<
 			if (plan === undefined) {
 				return yield* Effect.fail(
 					new ShareUnsupportedWidgetError({
+						message: UNSUPPORTED_WIDGET_MESSAGE,
 						widgetId: request.widgetId,
 						kind: endpoint ?? "unknown",
 					}),
@@ -281,6 +299,7 @@ export class DashboardWidgetDataService extends Context.Service<
 				Effect.catch(() =>
 					Effect.fail(
 						new ShareUnsupportedWidgetError({
+							message: UNSUPPORTED_WIDGET_MESSAGE,
 							widgetId: request.widgetId,
 							kind: endpoint ?? "unknown",
 						}),

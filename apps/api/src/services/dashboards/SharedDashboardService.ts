@@ -20,6 +20,7 @@ import {
 	DashboardShareTombstone,
 	IsoDateTimeString,
 	OrgId,
+	SHARE_NOT_FOUND_MESSAGE,
 	ShareNotConfiguredError,
 	ShareNotFoundError,
 	SharePersistenceError,
@@ -138,7 +139,12 @@ export class SharedDashboardService extends Context.Service<
 		 */
 		const requireHmacKey = Effect.suspend(() =>
 			Option.match(env.MAPLE_SHARE_TOKEN_HMAC_KEY, {
-				onNone: () => Effect.fail(new ShareNotConfiguredError()),
+				onNone: () =>
+					Effect.fail(
+						new ShareNotConfiguredError({
+							message: "Dashboard sharing is not configured on this deployment.",
+						}),
+					),
 				onSome: (key) => Effect.succeed(Redacted.value(key)),
 			}),
 		)
@@ -277,7 +283,7 @@ export class SharedDashboardService extends Context.Service<
 			const existingRows = yield* loadLive(orgId, dashboardId)
 			const existing = existingRows[0]
 			if (existing === undefined) {
-				return yield* Effect.fail(new ShareNotFoundError())
+				return yield* Effect.fail(new ShareNotFoundError({ message: SHARE_NOT_FOUND_MESSAGE }))
 			}
 
 			const { rawToken, values } = mintRow(orgId, userId, dashboardId, existing.mode, hmacKey, now)
@@ -353,7 +359,7 @@ export class SharedDashboardService extends Context.Service<
 
 			const row = rows[0]
 			if (row === undefined) {
-				return yield* Effect.fail(new ShareNotFoundError())
+				return yield* Effect.fail(new ShareNotFoundError({ message: SHARE_NOT_FOUND_MESSAGE }))
 			}
 
 			// The share id and org, never the token or its hash.
