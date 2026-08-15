@@ -20,7 +20,12 @@ const packageDir = fileURLToPath(new URL("../lib/llm", import.meta.url))
 const upstreamPath = join(packageDir, "UPSTREAM.json")
 
 /** Files under `src/` that Maple intentionally diverges on. Keep in sync with `MAPLE.md`. */
-const KNOWN_DELTAS = new Set(["src/schema/ids.ts", "src/schema/messages.ts"])
+const KNOWN_DELTAS = new Set([
+	"src/protocols/shared.ts",
+	"src/schema/errors.ts",
+	"src/schema/ids.ts",
+	"src/schema/messages.ts",
+])
 /** Files under `src/` that Maple adds and upstream does not have. */
 const MAPLE_ONLY = new Set(["src/schema/opencode-llm.ts"])
 
@@ -32,6 +37,7 @@ const Upstream = Schema.Struct({
 	license: Schema.String,
 	syncedAt: Schema.String,
 })
+type Upstream = typeof Upstream.Type
 
 const args = process.argv.slice(2)
 const checkMode = args.includes("--check")
