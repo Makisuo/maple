@@ -933,17 +933,28 @@ const legacyPrepareTarget = async (
 	context: MigrationModuleContext,
 	state: LegacyModuleState,
 ): Promise<LegacyModuleState> => {
-	await context.openTarget((db) => assertPhysicalSchema(db, LOCAL_SCHEMA_V1_MANIFEST), {
-		schemaSql: LOCAL_SCHEMA_V1_SQL,
-		bootstrapSchema: true,
-	})
 	const retentionDays = state.retentionDays
-	if (retentionDays !== undefined) {
-		await context.openTarget((db) => applyRawTelemetryRetentionFloor(db, retentionDays), {
+	const expectedManifest =
+		retentionDays === undefined
+			? LOCAL_SCHEMA_V1_MANIFEST
+			: withRawTelemetryRetentionFloor(
+					LOCAL_SCHEMA_V1_MANIFEST,
+					LEGACY_RAW_TABLES.map((table) => table.name),
+					retentionDays,
+				)
+	await context.openTarget(
+		(db) => {
+			// A previous attempt may have raised the staged target before the
+			// coordinator durably advanced its phase. Reapply the monotonic floor
+			// before asserting so target preparation is safely resumable.
+			if (retentionDays !== undefined) applyRawTelemetryRetentionFloor(db, retentionDays)
+			assertPhysicalSchema(db, expectedManifest)
+		},
+		{
 			schemaSql: LOCAL_SCHEMA_V1_SQL,
-			bootstrapSchema: false,
-		})
-	}
+			bootstrapSchema: true,
+		},
+	)
 	return state
 }
 

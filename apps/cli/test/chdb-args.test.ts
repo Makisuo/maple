@@ -80,6 +80,31 @@ describe("persistent raw telemetry retention floor", () => {
 		)
 	})
 
+	it("is idempotent when a resumed migration target already has the floor", () => {
+		const executed: string[] = []
+		const tableRows = [
+			["logs", "TimestampTime"],
+			["traces", "Timestamp"],
+			["metrics_sum", "TimeUnix"],
+			["metrics_gauge", "TimeUnix"],
+			["metrics_histogram", "TimeUnix"],
+			["metrics_exponential_histogram", "TimeUnix"],
+		].map(([name, column]) =>
+			JSON.stringify({
+				name,
+				create_table_query: `CREATE TABLE ${name} (...) TTL toDate(${column}) + toIntervalDay(90)`,
+			}),
+		)
+		applyRawTelemetryRetentionFloor(
+			{
+				query: () => `${tableRows.join("\n")}\n`,
+				exec: (sql) => executed.push(sql),
+			},
+			90,
+		)
+		strictEqual(executed.length, 0)
+	})
+
 	it("persists across launches and refuses a later shortening", async () => {
 		const root = mkdtempSync(join(tmpdir(), "maple-retention-config-"))
 		const dataDir = join(root, "data")
