@@ -41,7 +41,9 @@ import {
 import { type LogBuffer, makeLogBuffer } from "../shared/flushable-logger.js"
 import { makeMetricBuffer } from "../shared/flushable-metrics.js"
 import { makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
+import { makeNoOpNotice } from "../shared/no-op-notice.js"
 import { resolveResourceFromEnv } from "../server/resource.js"
+import { SDK_VERSION } from "../version.js"
 
 export interface Config {
 	/**
@@ -128,7 +130,7 @@ const resolveOnce = (env: Record<string, unknown>, config: Config): Resolved => 
 		tracesPath: config.tracesPath,
 		logsPath: config.logsPath,
 		metricsPath: config.metricsPath,
-		userAgent: "maple-effect-sdk-cloudflare/0.0.0",
+		userAgent: `maple-effect-sdk-cloudflare/${SDK_VERSION}`,
 	})
 }
 
@@ -152,37 +154,36 @@ export const make = (config: Config = {}): Telemetry => {
 	const metrics = makeMetricBuffer()
 
 	let resolved: Resolved | undefined = undefined
-	let noOpLogged = false
+	const noOpNotice = makeNoOpNotice("[MapleCloudflareSDK]", "set MAPLE_INGEST_KEY to enable")
 	const tracesState: SignalState = { disabledUntil: 0 }
 	const logsState: SignalState = { disabledUntil: 0 }
 	const metricsState: SignalState = { disabledUntil: 0 }
 
 	const layer = Layer.mergeAll(spans.tracerLayer, logs.loggerLayer, metrics.layer)
 
+	// Never rejects: this runs inside `ctx.waitUntil`, where a rejection would
+	// surface as an unhandled Worker error caused purely by telemetry.
 	const flush = makeSerializedFlush(async (env: Record<string, unknown>): Promise<void> => {
-		if (resolved === undefined) {
-			resolved = resolveOnce(env, config)
-		}
+		try {
+			if (resolved === undefined) {
+				resolved = resolveOnce(env, config)
+			}
 
-		await runFlush({
-			resolved,
-			spans,
-			logs,
-			metrics,
-			tracesState,
-			logsState,
-			metricsState,
-			transport: fetchTransport,
-			logPrefix: "[MapleCloudflareSDK]",
-			onNoOp: () => {
-				if (!noOpLogged) {
-					noOpLogged = true
-					console.info(
-						"[MapleCloudflareSDK] no MAPLE_INGEST_KEY configured — telemetry disabled (set MAPLE_INGEST_KEY to enable)",
-					)
-				}
-			},
-		})
+			await runFlush({
+				resolved,
+				spans,
+				logs,
+				metrics,
+				tracesState,
+				logsState,
+				metricsState,
+				transport: fetchTransport,
+				logPrefix: "[MapleCloudflareSDK]",
+				onNoOp: noOpNotice,
+			})
+		} catch (err) {
+			console.error("[MapleCloudflareSDK] flush failed:", err)
+		}
 	})
 
 	return { layer, flush }

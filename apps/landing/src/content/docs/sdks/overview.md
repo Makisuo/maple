@@ -29,7 +29,7 @@ If your language doesn't have an official SDK yet, see the [Language guides](#la
 A Maple SDK is more than a thin OTel wrapper. Each SDK:
 
 - **Auto-detects platform metadata** — commit SHA, deployment environment, cloud provider, and runtime are picked up from environment variables (Railway, Vercel, Cloudflare Pages, Render, etc.) so you don't have to wire them up by hand.
-- **No-ops safely without an endpoint** — if `MAPLE_ENDPOINT` (or the equivalent) isn't set, the layer becomes a no-op. Local development doesn't need a Maple project.
+- **Points anywhere** — the endpoint defaults to the public Maple ingest, so an ingest key is usually the only setup. Point `MAPLE_ENDPOINT` at a local `maple start` sink or your own OTLP collector to develop without a Maple project; those accept unauthenticated writes, so no key is needed.
 - **Ships with platform-specific entry points** — server, browser, and serverless runtimes get their own builds with the right exporter and lifecycle wiring.
 - **Tracks the Maple ingest API** — when we add new resource attributes or signal types on the backend, the SDK gets updated to match.
 
