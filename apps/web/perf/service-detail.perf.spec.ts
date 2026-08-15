@@ -27,7 +27,7 @@ declare global {
 }
 
 async function measurePointerSweep(page: Page, mode: "recharts" | "cursor"): Promise<InteractionMetrics> {
-	await page.goto(`/service-detail-bench?mode=${mode}`)
+	await page.goto(`/lab/bench/service-detail?mode=${mode}`)
 	await page.waitForFunction(() => window.__serviceDetailBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})
@@ -69,7 +69,7 @@ test("service detail linked cursor avoids synchronized chart render work", async
 test("metrics grid defaults to the linked-cursor sync mode", async ({ page }) => {
 	// No ?mode= — the bench omits the prop so this exercises MetricsGrid's default.
 	// A revert of the "cursor" default (back to recharts syncId storms) fails here.
-	await page.goto("/service-detail-bench")
+	await page.goto("/lab/bench/service-detail")
 	await page.waitForFunction(() => window.__serviceDetailBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})
@@ -80,7 +80,7 @@ test("metrics grid defaults to the linked-cursor sync mode", async ({ page }) =>
 })
 
 test("service detail cursor keeps one tooltip and linked sibling cursors", async ({ page }) => {
-	await page.goto("/service-detail-bench?mode=cursor")
+	await page.goto("/lab/bench/service-detail?mode=cursor")
 	await page.waitForFunction(() => window.__serviceDetailBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})

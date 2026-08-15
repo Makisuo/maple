@@ -46,7 +46,7 @@ import {
 	type WidgetScenario,
 	type StatSparklineScenario,
 	type ChartScenario,
-} from "@/components/widget-lab/scenarios"
+} from "@/lab/widget-lab/scenarios"
 import { makeQueryDataSource } from "@maple/widgets/dashboard"
 
 // Widget renderers take no action props — the card menu resolves them from

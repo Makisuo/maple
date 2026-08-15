@@ -61,7 +61,7 @@ export interface LogAttributeChipProps {
  * The card must also stay cheap. A wide virtualized row carries a dozen chips
  * and ~28 rows are live at once, so mounting Base UI's `PreviewCard.Root` per
  * chip — even closed, even with the popup deferred — more than doubled React
- * render time during a scroll on the /logs-bench gate. So the card mounts as an
+ * render time during a scroll on the /lab/bench/logs gate. So the card mounts as an
  * anchored *sibling*, only while it is actually shown. Open/close is driven from
  * the stable button rather than by Base UI's hover machinery, which is the price
  * of not having a Base UI trigger for that machinery to attach to.

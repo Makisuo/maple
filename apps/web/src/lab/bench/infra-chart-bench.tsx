@@ -8,7 +8,7 @@ import {
 	createReactRecorder,
 	startInteractionBench,
 	type InteractionBenchHarness,
-} from "@/lib/bench/interaction-bench"
+} from "@/lab/bench/interaction-bench"
 
 export type InfraBenchSyncMode = "recharts" | "cursor"
 
@@ -51,7 +51,7 @@ const POD_CPU_ROWS = makeRows(["api", "worker", "ingest"], 1, 2.2)
 const POD_LIMIT_ROWS = makeRows(["value"], 1, 3.3)
 
 /**
- * Synthetic /infra-bench page: the infra detail ChartViews (host + k8s) in one
+ * Synthetic /lab/bench/infra page: the infra detail ChartViews (host + k8s) in one
  * linked-cursor group, mirroring the host-detail and infra-correlation grids.
  * `?mode=recharts` restores Recharts' syncId event bus as the storm baseline
  * the perf spec compares against.

@@ -36,7 +36,14 @@ const chunks = [...staticGraph].map((key) => {
 const gzipBytes = chunks.reduce((total, chunk) => total + chunk.gzipBytes, 0)
 const maxGzipBytes = 650 * 1024
 
+// Anything lazy-only: chat, replay, and every dev-only lab surface. The
+// `src/routes/lab/*` shells are legitimately static (file-based routing has no
+// per-environment tree), and `src/lab/registry.ts` is inlined into startup by
+// design (the auth gate reads it) — only the routes' split chunks and any
+// `src/lab/` module that becomes a chunk of its own are forbidden.
 const forbiddenStartupPatterns = [
+	/src\/lab\//,
+	/src\/routes\/lab\/.*\?tsr-split/,
 	/src\/components\/chat\/global-chat-(?:content|panel)/,
 	/src\/routes\/chat\.tsx\?tsr-split/,
 	/replay-player/,
@@ -55,7 +62,7 @@ for (const chunk of chunks.sort((a, b) => b.gzipBytes - a.gzipBytes).slice(0, 10
 }
 
 if (forbidden.length > 0) {
-	throw new Error(`Chat/replay code leaked into startup:\n${forbidden.join("\n")}`)
+	throw new Error(`Lazy-only code (chat/replay/lab) leaked into startup:\n${forbidden.join("\n")}`)
 }
 if (gzipBytes > maxGzipBytes) {
 	throw new Error(`Initial static JS is ${(gzipBytes / 1024).toFixed(1)} KB gzip; budget is 650.0 KB`)

@@ -2,7 +2,7 @@ import { Profiler, useMemo, type ProfilerOnRenderCallback } from "react"
 
 import type { Log } from "@/api/warehouse/logs"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import { LogsTableView } from "./logs-table"
+import { LogsTableView } from "@/components/logs/logs-table"
 
 interface LogsBenchMetrics {
 	frames: number

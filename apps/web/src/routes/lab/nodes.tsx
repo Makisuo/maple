@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { NodeCatalogueCanvas } from "@/components/investigations/flow/node-catalogue-canvas"
+import { NodeCatalogueCanvas } from "@/lab/node-catalogue/node-catalogue-canvas"
 
-export const Route = createFileRoute("/node-lab")({
+export const Route = createFileRoute("/lab/nodes")({
 	component: NodeLab,
 })
 

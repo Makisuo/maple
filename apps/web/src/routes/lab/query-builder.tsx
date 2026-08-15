@@ -1,7 +1,7 @@
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
 
-import { QueryBuilderLab } from "@/components/query-builder/query-builder-lab"
+import { QueryBuilderLab } from "@/lab/query-builder-lab"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
@@ -12,7 +12,7 @@ const queryBuilderLabSearchSchema = Schema.Struct({
 	...TimeRangeSearchFields,
 })
 
-export const Route = createFileRoute("/query-builder-lab")({
+export const Route = createFileRoute("/lab/query-builder")({
 	component: QueryBuilderLabPage,
 	validateSearch: Schema.toStandardSchemaV1(queryBuilderLabSearchSchema),
 })

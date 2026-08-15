@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { ACTION_GLYPH } from "./flow-nodes"
+import { ACTION_GLYPH } from "@/components/investigations/flow/flow-nodes"
 import { buildNodeCatalogue } from "./node-catalogue"
 
 const catalogue = buildNodeCatalogue()

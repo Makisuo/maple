@@ -85,7 +85,7 @@ interface K8sMetricChartViewProps {
 	chartId?: string
 }
 
-// Exported for the /infra-bench synthetic perf harness.
+// Exported for the /lab/bench/infra synthetic perf harness.
 export function K8sMetricChartView({
 	rows,
 	unit,

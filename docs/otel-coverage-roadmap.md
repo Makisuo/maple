@@ -90,7 +90,7 @@ data exists:
 - **DSL queries:** `packages/query-engine/src/ch/queries/*.ts` (+ export from `packages/query-engine/src/ch/index.ts`).
 - **Filter UIs:** `apps/web/src/components/traces/traces-filter-sidebar.tsx`, `apps/web/src/components/logs/logs-filter-sidebar.tsx`, shared `filter-section.tsx`.
 - **Trace visuals:** `packages/ui/src/components/traces/{trace-timeline,span-hierarchy,flamegraph,flow-view}.tsx`, `apps/web/src/components/traces/span-detail-panel.tsx`.
-- **Chart registry / metric visuals:** `packages/ui/src/components/charts/registry.ts`; verify via `/widget-lab`.
+- **Chart registry / metric visuals:** `packages/ui/src/components/charts/registry.ts`; verify via `/lab/widgets`.
 - **Datasource schemas:** `packages/domain/src/tinybird/datasources.ts` (traces, logs, metric\_\* tables).
 - **Ingest encoder (Tier 3 only):** `apps/ingest/src/telemetry.rs`.
 - **MCP parity:** `apps/api/src/mcp/tools/{search-traces,search-logs,explore-attributes}.ts`.

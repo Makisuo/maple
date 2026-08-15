@@ -7,7 +7,7 @@ import {
 	ServiceMapBench,
 	type BenchParams,
 	type BenchRps,
-} from "@/components/service-map/service-map-bench"
+} from "@/lab/bench/service-map-bench"
 
 // TanStack Router pre-parses numeric search params into numbers before
 // validateSearch runs, so accept Number (not NumberFromString) here.
@@ -24,7 +24,7 @@ const benchSearchSchema = Schema.Struct({
 	focus: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/service-map-bench")({
+export const Route = createFileRoute("/lab/bench/service-map")({
 	component: ServiceMapBenchPage,
 	validateSearch: Schema.toStandardSchemaV1(benchSearchSchema),
 })
@@ -34,9 +34,6 @@ const GROUP_OPTIONS = [0, 3, 6, 10]
 function ServiceMapBenchPage() {
 	const search = Route.useSearch()
 	const navigate = Route.useNavigate()
-
-	// Dev/CI-only synthetic perf harness — inert in production builds.
-	if (!import.meta.env.DEV) return null
 
 	const params: BenchParams = {
 		services: search.services ?? DEFAULT_BENCH_PARAMS.services,

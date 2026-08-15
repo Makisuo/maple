@@ -17,10 +17,10 @@
  * is: coverage over the state space is a fact about this array, and it should be
  * assertable without mounting a canvas.
  */
-import { lensChecks, lensNodeState, type LensRun } from "../lens-derive"
-import { lensCopy } from "../lens-catalogue"
-import { ACTION_GLYPH } from "./flow-nodes"
-import type { ActionKind, ActionTarget } from "./action-target"
+import { lensChecks, lensNodeState, type LensRun } from "@/components/investigations/lens-derive"
+import { lensCopy } from "@/components/investigations/lens-catalogue"
+import { ACTION_GLYPH } from "@/components/investigations/flow/flow-nodes"
+import type { ActionKind, ActionTarget } from "@/components/investigations/flow/action-target"
 import {
 	ACTION_HEIGHT,
 	ACTION_WIDTH,
@@ -38,7 +38,7 @@ import {
 	type ProvenanceNode,
 	type SpineNodeData,
 	type XY,
-} from "./provenance-graph"
+} from "@/components/investigations/flow/provenance-graph"
 
 /* -------------------------------------------------------------------------------------------------
  * Grid

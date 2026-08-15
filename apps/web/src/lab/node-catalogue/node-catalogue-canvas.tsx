@@ -12,9 +12,9 @@ import { useMemo } from "react"
 import { ReactFlow, ReactFlowProvider, type Edge, type Node } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 
-import type { FlowEdgeData } from "./flow-edge"
+import type { FlowEdgeData } from "@/components/investigations/flow/flow-edge"
 import { buildNodeCatalogue } from "./node-catalogue"
-import { edgeTypes, nodeTypes } from "./provenance-canvas"
+import { edgeTypes, nodeTypes } from "@/components/investigations/flow/provenance-canvas"
 
 export function NodeCatalogueCanvas() {
 	const catalogue = useMemo(() => buildNodeCatalogue(), [])

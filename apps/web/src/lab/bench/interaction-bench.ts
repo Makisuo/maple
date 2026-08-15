@@ -2,7 +2,7 @@ import type { ProfilerOnRenderCallback } from "react"
 
 /**
  * Shared instrumentation for the synthetic chart-interaction perf benches
- * (/service-detail-bench, /infra-bench). A bench page mounts a React Profiler
+ * (/lab/bench/service-detail, /lab/bench/infra). A bench page mounts a React Profiler
  * feeding a recorder, installs a harness on `window`, and the Playwright perf
  * specs drive `beginInteraction()` / pointer sweep / `endInteraction()`.
  */

@@ -104,7 +104,7 @@ interface HostMetricChartViewProps {
 	syncMode?: "recharts" | "cursor"
 }
 
-// Exported for the /infra-bench synthetic perf harness.
+// Exported for the /lab/bench/infra synthetic perf harness.
 export function HostMetricChartView({
 	rows,
 	unit,

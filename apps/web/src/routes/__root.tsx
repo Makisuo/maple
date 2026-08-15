@@ -11,7 +11,7 @@ import {
 import { selectedPlanKnownAtomFor } from "@/atoms/selected-plan-atoms"
 import { useAtom } from "@/lib/effect-atom"
 import { hasSelectedPlan, isUsableCustomer } from "@/lib/billing/plan-gating"
-import { FIXTURE_PATHS, isPublicPath } from "@/lib/public-routes"
+import { isFixturePath, isPublicPath } from "@/lib/public-routes"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { AnchoredToastProvider, ToastProvider } from "@maple/ui/components/ui/toast"
 import { AttributesProvider } from "@maple/ui/components/attributes/context"
@@ -177,7 +177,7 @@ function ClerkReverseRedirects() {
 	// A fixture surface has no org-scoped data to gate, so it renders whatever the
 	// plan query is doing. Checked after the auth-page redirects above, which are
 	// about sending a signed-in reader somewhere better rather than gating them.
-	if (FIXTURE_PATHS.includes(pathname)) {
+	if (isFixturePath(pathname)) {
 		return <AppFrame />
 	}
 

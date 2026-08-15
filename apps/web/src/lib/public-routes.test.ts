@@ -1,15 +1,25 @@
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
-import { FIXTURE_PATHS, isChromelessPath, isPublicPath } from "./public-routes"
+import { LAB_ENTRIES } from "@/lab/registry"
+import { isChromelessPath, isPublicPath } from "./public-routes"
 
 const read = (relative: string) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8")
 
 describe("isPublicPath", () => {
-	it("covers the auth pages and dev fixtures", () => {
-		for (const path of ["/sign-in", "/sign-up", "/org-required", ...FIXTURE_PATHS]) {
+	it("covers the auth pages and sessionless lab surfaces", () => {
+		const fixtures = LAB_ENTRIES.filter((entry) => entry.session === "none").map((entry) => entry.path)
+		for (const path of ["/sign-in", "/sign-up", "/org-required", "/lab", ...fixtures]) {
 			expect(isPublicPath(path), path).toBe(true)
 		}
+	})
+
+	it("keeps session-backed labs behind sign-in", () => {
+		// The query-builder lab reads real org data, so it is the one lab surface
+		// that goes through the auth gate like any product route.
+		expect(isPublicPath("/lab/query-builder")).toBe(false)
+		expect(isPublicPath("/lab/does-not-exist")).toBe(false)
+		expect(isPublicPath("/labs-admin")).toBe(false)
 	})
 
 	it("covers every path under a share link", () => {
@@ -38,7 +48,7 @@ describe("isPublicPath", () => {
 		// and must not mount the command palette or chat sheet.
 		expect(isChromelessPath("/share/abc")).toBe(true)
 		expect(isChromelessPath("/sign-in")).toBe(false)
-		expect(isChromelessPath("/widget-lab")).toBe(false)
+		expect(isChromelessPath("/lab/widgets")).toBe(false)
 	})
 })
 

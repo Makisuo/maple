@@ -1,15 +1,5 @@
-import { useState } from "react"
-import { createFileRoute } from "@tanstack/react-router"
-
-import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { TraceFlowView } from "@maple/ui/components/traces/flow-view"
 import { buildTraceDetail, type SpanHierarchyRow } from "@maple/ui/lib/span-tree"
-import type { SpanNode } from "@maple/ui/lib/types"
-
 import { formatWarehouseDateTimeMs } from "@maple/query-engine"
-export const Route = createFileRoute("/flow-lab")({
-	component: FlowLab,
-})
 
 const T0_MS = new Date("2026-07-21T10:00:00.000Z").getTime()
 
@@ -199,38 +189,4 @@ const ROWS: SpanHierarchyRow[] = [
 	}),
 ]
 
-function FlowLab() {
-	const [selected, setSelected] = useState<SpanNode | undefined>(undefined)
-	const detail = buildTraceDetail(ROWS)
-
-	return (
-		<DashboardLayout.Root>
-			<DashboardLayout.Breadcrumbs items={[{ label: "Flow Lab" }]} />
-			<DashboardLayout.Body>
-				<DashboardLayout.Content>
-					<DashboardLayout.Scroll>
-						<div className="flex h-full flex-col">
-							<div className="border-b px-4 py-3">
-								<h1 className="text-sm font-semibold">Flow Lab</h1>
-								<p className="text-xs text-muted-foreground">
-									Synthetic trace exercising every Flow view card variant. Selected:{" "}
-									<span className="font-mono">{selected?.spanName ?? "none"}</span>
-								</p>
-							</div>
-							<div className="min-h-0 flex-1">
-								<TraceFlowView
-									rootSpans={detail.rootSpans}
-									totalDurationMs={detail.totalDurationMs}
-									traceStartTime={detail.traceStartTime}
-									services={detail.services}
-									selectedSpanId={selected?.spanId}
-									onSelectSpan={setSelected}
-								/>
-							</div>
-						</div>
-					</DashboardLayout.Scroll>
-				</DashboardLayout.Content>
-			</DashboardLayout.Body>
-		</DashboardLayout.Root>
-	)
-}
+export const FLOW_LAB_TRACE = buildTraceDetail(ROWS)

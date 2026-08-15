@@ -1,12 +1,5 @@
-import { useState } from "react"
-import { createFileRoute } from "@tanstack/react-router"
-
-import { TraceViewTabs } from "@maple/ui/components/traces/trace-view-tabs"
 import { buildTraceDetail, type SpanHierarchyRow } from "@maple/ui/lib/span-tree"
-import type { SpanNode } from "@maple/ui/lib/types"
 import { formatWarehouseDateTimeMs } from "@maple/query-engine"
-
-export const Route = createFileRoute("/timeline-lab")({ component: TimelineLab })
 
 const T0_MS = new Date("2026-07-21T10:00:00.000Z").getTime()
 
@@ -70,21 +63,5 @@ const ROWS: SpanHierarchyRow[] = [
 	),
 ]
 
-const DETAIL = buildTraceDetail(ROWS)
-
-function TimelineLab() {
-	const [selected, setSelected] = useState<SpanNode | undefined>(undefined)
-	return (
-		<div className="h-screen p-4">
-			<TraceViewTabs
-				rootSpans={DETAIL.rootSpans}
-				spans={DETAIL.spans}
-				totalDurationMs={DETAIL.totalDurationMs}
-				traceStartTime={DETAIL.traceStartTime}
-				services={DETAIL.services}
-				selectedSpanId={selected?.spanId}
-				onSelectSpan={setSelected}
-			/>
-		</div>
-	)
-}
+/** Synthetic trace for the timeline lab: 2s root, mid-size children, sub-ms fan. */
+export const TIMELINE_LAB_TRACE = buildTraceDetail(ROWS)

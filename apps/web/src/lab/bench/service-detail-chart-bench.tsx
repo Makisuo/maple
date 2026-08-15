@@ -6,7 +6,7 @@ import {
 	createReactRecorder,
 	startInteractionBench,
 	type InteractionBenchHarness,
-} from "@/lib/bench/interaction-bench"
+} from "@/lab/bench/interaction-bench"
 
 export type ServiceDetailBenchSyncMode = "recharts" | "cursor"
 

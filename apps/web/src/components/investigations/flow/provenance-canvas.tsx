@@ -43,7 +43,7 @@ import { splitDuration } from "../investigation-display"
 import { buildProvenanceGraph, type ProvenanceGraph } from "./provenance-graph"
 
 /**
- * Exported so the node studio (`routes/node-lab.tsx`) hosts the *same* registration
+ * Exported so the node studio (`src/lab/node-catalogue/`, served at `/lab/nodes`) hosts the *same* registration
  * rather than a copy of it — a catalogue that renders its own idea of these nodes
  * is a catalogue that can go quietly out of date with the page it documents.
  */

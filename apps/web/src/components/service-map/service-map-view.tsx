@@ -1767,7 +1767,7 @@ export function ServiceMapCanvas({
 	/** Selected deployment environment (`undefined` = all); scopes the DB detail panel. */
 	deploymentEnv?: string
 	// Namespaces persisted drag positions / viewport. Lifted to a prop so the
-	// component renders without a Clerk session (e.g. the /service-map-bench
+	// component renders without a Clerk session (e.g. the /lab/bench/service-map
 	// perf harness, which runs in self-hosted mode with no ClerkProvider).
 	layoutKey: string
 	/**

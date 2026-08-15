@@ -1,10 +1,10 @@
 import { Profiler, useCallback, useMemo, useState, type ProfilerOnRenderCallback } from "react"
 import { ReactFlowProvider, useReactFlow, useStoreApi } from "@xyflow/react"
-import type { DeclutterFocus } from "./service-map-declutter"
+import type { DeclutterFocus } from "@/components/service-map/service-map-declutter"
 import type { ServiceDbEdge, ServiceEdge, ServicePlatform } from "@/api/warehouse/service-map"
 import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
-import { ServiceMapCanvas } from "./service-map-view"
+import { ServiceMapCanvas } from "@/components/service-map/service-map-view"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 
 /**
