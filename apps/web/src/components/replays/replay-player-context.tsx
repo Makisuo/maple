@@ -478,7 +478,7 @@ export function ReplayPlayerProvider({
 	// rebuilds. The surface's mount div is committed before this parent effect runs.
 	// The returned cleanup calls observer.disconnect() + engine.destroy(), which
 	// tears down whatever listeners the engine registered.
-	// oxlint-disable-next-line react-doctor/effect-needs-cleanup
+	// react-doctor-disable-next-line react-doctor/effect-needs-cleanup -- The returned engine teardown disconnects the observer and destroys registered listeners.
 	React.useEffect(() => {
 		if (status !== "ready") return
 		const mount = mountRef.current

@@ -11,9 +11,7 @@ export function useRefreshableAtomValue<A>(atom: Atom.Atom<A>): A {
 	const refreshAtom = React.useEffectEvent(() => refresh())
 
 	useMountEffect(() => {
-		// React Doctor cannot infer that useMountEffect is an Effect; this is the
-		// canonical Effect Event pattern for a mount-scoped external subscription.
-		// oxlint-disable-next-line react-doctor/rules-of-hooks
+		// react-doctor-disable-next-line react-doctor/rules-of-hooks -- React Doctor does not recognize useMountEffect as an Effect Event boundary.
 		const onReload = () => refreshAtom()
 		return pageRefresh?.subscribeReload(onReload)
 	})

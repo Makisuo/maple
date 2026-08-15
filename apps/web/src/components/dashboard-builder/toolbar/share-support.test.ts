@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { unsupportedShareWidgets } from "./share-support"
 
-const widget = (id: string, dataSource: unknown, title?: string) => ({
-	id,
-	dataSource,
-	...(title === undefined ? {} : { display: { title } }),
-})
+const widget = (id: string, dataSource: unknown, title?: string) => {
+	const base = { id, dataSource }
+	return title === undefined ? base : { ...base, display: { title } }
+}
 
 describe("unsupportedShareWidgets", () => {
 	it("accepts everything the dashboard builder produces", () => {

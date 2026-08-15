@@ -28,23 +28,25 @@
  */
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import {
-	ShareForbiddenError,
 	ShareNotConfiguredError,
 	ShareNotFoundError,
 	SharePersistenceError,
 	ShareRangeInvalidError,
 	ShareRateLimitedError,
 	ShareResolveRequest,
+	ShareSignInRequiredError,
 	ShareWidgetDataPayload,
 	ShareWidgetDataResponse,
 	SharedDashboardResponse,
 	ShareVariableInvalidError,
+	ShareWrongOrgError,
 } from "../share"
 import { publicErrors } from "./public-error"
 
 const [
 	shareNotFound,
-	shareForbidden,
+	shareSignInRequired,
+	shareWrongOrg,
 	shareRangeInvalid,
 	shareVariableInvalid,
 	shareRateLimited,
@@ -52,7 +54,8 @@ const [
 	sharePersistence,
 ] = publicErrors(
 	ShareNotFoundError,
-	ShareForbiddenError,
+	ShareSignInRequiredError,
+	ShareWrongOrgError,
 	ShareRangeInvalidError,
 	ShareVariableInvalidError,
 	ShareRateLimitedError,
@@ -65,7 +68,14 @@ export class V2SharePublicApiGroup extends HttpApiGroup.make("sharePublic")
 		HttpApiEndpoint.post("resolve", "/resolve", {
 			payload: ShareResolveRequest,
 			success: SharedDashboardResponse,
-			error: [shareNotFound, shareForbidden, shareRateLimited, shareNotConfigured, sharePersistence],
+			error: [
+				shareNotFound,
+				shareSignInRequired,
+				shareWrongOrg,
+				shareRateLimited,
+				shareNotConfigured,
+				sharePersistence,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "resolveShare",
@@ -81,7 +91,8 @@ export class V2SharePublicApiGroup extends HttpApiGroup.make("sharePublic")
 			success: ShareWidgetDataResponse,
 			error: [
 				shareNotFound,
-				shareForbidden,
+				shareSignInRequired,
+				shareWrongOrg,
 				shareRangeInvalid,
 				shareVariableInvalid,
 				shareRateLimited,

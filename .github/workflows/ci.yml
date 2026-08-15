@@ -292,9 +292,9 @@ jobs:
                   --filter=@maple-dev/clickhouse-builder --filter=@maple-dev/alchemy
                   --filter=@maple-dev/browser --concurrency=2
 
-            - name: Lint Effect code
+            - name: Lint TypeScript and Effect code
               if: ${{ matrix.shard == 'effect-lint' }}
-              run: bun run lint:effect
+              run: bun run lint
 
             - name: Build web production bundle
               if: ${{ matrix.shard == 'build-web' }}

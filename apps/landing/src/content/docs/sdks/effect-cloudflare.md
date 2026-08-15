@@ -55,14 +55,14 @@ If a flush fails (network error, 5xx from the collector), the affected signal go
 
 In addition to the [common options](/docs/sdks/effect#configuration-reference), `make()` accepts a few Workers-specific knobs:
 
-| Option                        | Type                    | Default       | Description                                                                          |
-| ----------------------------- | ----------------------- | ------------- | ------------------------------------------------------------------------------------ |
-| `excludeLogSpans`             | `boolean`               | `false`       | Skip Effect log spans in OTLP log attributes                                         |
-| `dropSpanNames`               | `ReadonlyArray<string>` | —             | Drop spans whose name starts with any prefix in this list                            |
+| Option                        | Type                    | Default       | Description                                                                                        |
+| ----------------------------- | ----------------------- | ------------- | -------------------------------------------------------------------------------------------------- |
+| `excludeLogSpans`             | `boolean`               | `false`       | Skip Effect log spans in OTLP log attributes                                                       |
+| `dropSpanNames`               | `ReadonlyArray<string>` | —             | Drop spans whose name starts with any prefix in this list                                          |
 | `anticipatedErrorIdentifiers` | `ReadonlyArray<string>` | —             | `_tag` / `Error.name` values of expected 4xx failures — spans export as `Ok`, no `exception` event |
-| `tracesPath`                  | `string`                | `/v1/traces`  | OTLP traces path appended to `endpoint`                                              |
-| `logsPath`                    | `string`                | `/v1/logs`    | OTLP logs path appended to `endpoint`                                                |
-| `metricsPath`                 | `string`                | `/v1/metrics` | OTLP metrics path appended to `endpoint`                                             |
+| `tracesPath`                  | `string`                | `/v1/traces`  | OTLP traces path appended to `endpoint`                                                            |
+| `logsPath`                    | `string`                | `/v1/logs`    | OTLP logs path appended to `endpoint`                                                              |
+| `metricsPath`                 | `string`                | `/v1/metrics` | OTLP metrics path appended to `endpoint`                                                           |
 
 `anticipatedErrorIdentifiers` keeps expected rejections (a 404, a 401) visible as traces without counting them as errors — matching how Maple's ingest gateway treats 4xx. A span still exports as `Error` if its cause contains any defect.
 

@@ -377,7 +377,6 @@ function BenchDriver({
 		const measureUpdates = async (count: number, update: () => void | Promise<void>) => {
 			recorder.reset()
 			for (let index = 0; index < count; index++) {
-				// oxlint-disable-next-line react-doctor/async-await-in-loop -- Each measured React update must commit before the next sample starts.
 				await update()
 				await nextPaint()
 			}
@@ -470,7 +469,7 @@ function BenchDriver({
 				await nextPaint()
 				const initial = recorder.snapshot()
 				const metricRefresh = await measureUpdates(metricRefreshes, onMetricRefresh)
-				// oxlint-disable-next-line react-doctor/server-sequential-independent-await -- Scenarios share the graph and recorder, so they must not overlap.
+				// react-doctor-disable-next-line react-doctor/server-sequential-independent-await -- Scenarios mutate the same graph and recorder, so overlap would corrupt the benchmark.
 				const topologyChange = await measureUpdates(topologyChanges, async () => {
 					onTopologyChange()
 					// The graph remains visible while the next deterministic layout

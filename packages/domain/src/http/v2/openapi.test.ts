@@ -32,7 +32,7 @@ const spec = OpenApi.fromApi(MapleApiV2)
 // The generated document carries fields (info.contact, top-level externalDocs,
 // security bearerFormat, schema examples) beyond the pruned `OpenAPISpec` type,
 // so read the dynamic bits through an untyped view.
-// oxlint-disable-next-line maple/no-record-string-any, typescript/no-explicit-any -- Effect's public OpenAPI type intentionally omits generated extension fields asserted by this contract test.
+// oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type, maple/no-record-string-any, typescript/no-explicit-any -- Effect's public OpenAPI type intentionally omits generated extension fields asserted by this contract test.
 type GeneratedOpenApiObject = Record<string, any>
 const doc = spec as GeneratedOpenApiObject
 const schemas = doc.components.schemas as GeneratedOpenApiObject
@@ -358,7 +358,6 @@ describe("MapleApiV2 OpenAPI", () => {
 	})
 
 	it("documents the Phase-1 resource schemas with decodable wire examples", () => {
-		type ObjectDecoder = (input: unknown) => { readonly object: string }
 		const cases = [
 			["Investigation", Schema.decodeUnknownSync(V2Investigation), "investigation"],
 			["AnomalyIncident", Schema.decodeUnknownSync(V2AnomalyIncident), "anomaly_incident"],
@@ -371,7 +370,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			["Organization", Schema.decodeUnknownSync(V2Organization), "organization"],
 			["SessionReplayListItem", Schema.decodeUnknownSync(V2SessionReplayListItem), "session_replay"],
 			["SessionReplay", Schema.decodeUnknownSync(V2SessionReplay), "session_replay"],
-		] satisfies ReadonlyArray<readonly [string, ObjectDecoder, string]>
+		] as const
 		for (const [name, decode, objectType] of cases) {
 			const component = schemas[name]
 			expect(component, `component ${name} present`).toBeDefined()

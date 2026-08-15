@@ -213,10 +213,10 @@ export class DashboardWidgetDataService extends Context.Service<
 			// dragging the picker to 30 days would otherwise issue a scan the signed-in
 			// UI refuses. The authed app offers an opt-in "narrow" button; a chrome-less
 			// viewer has nowhere to put one, so the server narrows and says so.
-			const isListShaped =
+			const isListResult =
 				querySet?.resultShape === "list" || (endpoint !== null && LIST_ENDPOINTS.has(endpoint))
 			const requestedSeconds = rangeSecondsOf(window)
-			const narrowed = isListShaped && requestedSeconds > MAX_LIST_RANGE_SECONDS
+			const narrowed = isListResult && requestedSeconds > MAX_LIST_RANGE_SECONDS
 			const effectiveWindow: ResolvedWindow = narrowed
 				? {
 						startTime: new Date(Date.parse(`${window.endTime}Z`) - MAX_LIST_RANGE_SECONDS * 1000)
@@ -230,17 +230,10 @@ export class DashboardWidgetDataService extends Context.Service<
 
 			if (querySet !== null) {
 				const result = yield* runQuerySet(executor, {
-					querySet: {
-						queries: querySet.queries,
-						...(querySet.formulas === undefined ? {} : { formulas: querySet.formulas }),
-						...(querySet.comparison === undefined ? {} : { comparison: querySet.comparison }),
-					},
-					resultShape: querySet.resultShape,
+					...querySet,
+					querySet,
 					startTime: effectiveWindow.startTime,
 					endTime: effectiveWindow.endTime,
-					...(querySet.defaultLimit === undefined ? {} : { defaultLimit: querySet.defaultLimit }),
-					...(querySet.limit === undefined ? {} : { limit: querySet.limit }),
-					...(querySet.columns === undefined ? {} : { columns: querySet.columns }),
 				}).pipe(
 					// A query set that fails still rides inside the batch — one broken
 					// tile on a shared board must not blank its neighbours — but as a

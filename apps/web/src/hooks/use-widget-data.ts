@@ -49,7 +49,7 @@ const isDecodeError = (value: unknown): boolean =>
 
 // Pull the most meaningful error out of whatever `onError` / a Cause hands us:
 // a flattened `Cause` yields its first failure; a bare error is returned as-is.
-const extractError = (input: unknown): unknown =>
+const extractError = <E>(input: E | Cause.Cause<E>): E | Cause.Cause<E> =>
 	Cause.isCause(input) ? Option.getOrElse(Cause.findErrorOption(input), () => input) : input
 
 // A validation error the engine raised because the window is wider than the
@@ -106,13 +106,13 @@ function filterHiddenSeriesRows(
 }
 
 function applyTransform(
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	// react-doctor-disable-next-line typescript/no-explicit-any -- This legacy transform boundary accepts heterogeneous query payloads and narrows before keyed reads.
 	data: any,
 	// The readonly schema type, not the app's deep-mutable `WidgetDataSource`
 	// alias: this only reads the transform, and `dataSourceTransform` hands back
 	// a live slice of the stored document that nothing here may write to.
 	transform: typeof WidgetDataSourceTransformSchema.Type | undefined,
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	// react-doctor-disable-next-line typescript/no-explicit-any -- Transforms intentionally return either row collections or scalar aggregations for the renderer.
 ): any {
 	if (!transform || !data) return data
 

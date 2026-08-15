@@ -78,7 +78,7 @@ const toPersistenceError = (error: unknown) =>
 		cause: error,
 	})
 
-interface ShareRowShape {
+interface DashboardShareRow {
 	readonly id: DashboardShareId
 	readonly orgId: OrgId
 	readonly dashboardId: DashboardId
@@ -92,17 +92,26 @@ interface ShareRowShape {
 	readonly updatedAt: Date
 }
 
-const toDashboardShare = (row: ShareRowShape, token: string) =>
-	new DashboardShare({
+const toDashboardShare = (row: DashboardShareRow, token: string) => {
+	const share = {
 		id: row.id,
 		dashboardId: row.dashboardId,
-		...(row.widgetId === null ? {} : { widgetId: row.widgetId }),
 		mode: row.mode,
 		token,
 		tokenSuffix: row.tokenSuffix,
 		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
 		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
-	})
+	}
+
+	return row.widgetId === null
+		? new DashboardShare(share)
+		: new DashboardShare({ ...share, widgetId: row.widgetId })
+}
+
+class ShareEncryptionKeyConfigError extends Schema.TaggedError<ShareEncryptionKeyConfigError>()(
+	"@maple/api/services/ShareEncryptionKeyConfigError",
+	{ message: Schema.String },
+) {}
 
 /** Columns every read here projects. Keeps `token_hash` out of memory by default. */
 const shareColumns = {
@@ -207,7 +216,10 @@ export class SharedDashboardService extends Context.Service<
 		 */
 		const encryptionKey = yield* parseBase64Aes256GcmKey(
 			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
-			(message) => new Error(`MAPLE_INGEST_KEY_ENCRYPTION_KEY: ${message}`),
+			(message) =>
+				new ShareEncryptionKeyConfigError({
+					message: `MAPLE_INGEST_KEY_ENCRYPTION_KEY: ${message}`,
+				}),
 		).pipe(Effect.orDie)
 
 		/**
@@ -216,7 +228,7 @@ export class SharedDashboardService extends Context.Service<
 		 * HMAC), so reporting it as "not shared" would hide a live public link from
 		 * the only people who can revoke it.
 		 */
-		const readToken = (row: ShareRowShape) =>
+		const readToken = (row: DashboardShareRow) =>
 			decryptAes256Gcm(
 				{ ciphertext: row.tokenCiphertext, iv: row.tokenIv, tag: row.tokenTag },
 				encryptionKey,
@@ -227,7 +239,7 @@ export class SharedDashboardService extends Context.Service<
 				shareTokenAad(row.orgId, row.id),
 			)
 
-		const decodeShare = (row: ShareRowShape) =>
+		const decodeShare = (row: DashboardShareRow) =>
 			readToken(row).pipe(Effect.map((token) => toDashboardShare(row, token)))
 
 		const loadLive = (orgId: OrgId, scope: ShareScope) =>

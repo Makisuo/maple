@@ -29,8 +29,8 @@ Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
 
 ### Environment Variables
 
-| Variable                      | Description                                                     |
-| ----------------------------- | --------------------------------------------------------------- |
+| Variable                      | Description                                                      |
+| ----------------------------- | ---------------------------------------------------------------- |
 | `MAPLE_INGEST_KEY`            | Maple ingest key. Required by the public ingest                  |
 | `MAPLE_ENDPOINT`              | Ingest endpoint URL. Defaults to `https://ingest.maple.dev`      |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint fallback, honored when `MAPLE_ENDPOINT` is unset        |
@@ -233,21 +233,21 @@ By default the client preset flushes on `pagehide` and `visibilitychange→hidde
 
 Both server and client layers accept these options:
 
-| Option                  | Required                                       | Description                                                   |
-| ----------------------- | ---------------------------------------------- | ------------------------------------------------------------- |
-| `serviceName`           | Yes                                            | Service name reported in telemetry                            |
-| `endpoint`              | No (server: defaults) / Yes (client)           | Maple ingest endpoint URL                                     |
-| `ingestKey`             | Required by the public ingest                  | Maple ingest key. Flushable presets no-op without one         |
-| `serviceVersion`        | No                                             | Override auto-detected commit SHA                             |
-| `serviceNamespace`      | No                                             | Logical group, emitted as `service.namespace`                 |
-| `repositoryUrl`         | No (server / Cloudflare only)                  | Repository URL, emitted as `vcs.repository.url.full`          |
-| `environment`           | No                                             | Override auto-detected environment                            |
-| `attributes`            | No                                             | Additional resource attributes (highest precedence)           |
-| `maxBatchSize`          | No                                             | Max batch size for export                                     |
-| `tracerExportInterval`  | No                                             | Trace export interval                                         |
-| `loggerExportInterval`  | No                                             | Log export interval                                           |
-| `metricsExportInterval` | No                                             | Metrics export interval                                       |
-| `shutdownTimeout`       | No                                             | Graceful shutdown timeout                                     |
+| Option                  | Required                             | Description                                           |
+| ----------------------- | ------------------------------------ | ----------------------------------------------------- |
+| `serviceName`           | Yes                                  | Service name reported in telemetry                    |
+| `endpoint`              | No (server: defaults) / Yes (client) | Maple ingest endpoint URL                             |
+| `ingestKey`             | Required by the public ingest        | Maple ingest key. Flushable presets no-op without one |
+| `serviceVersion`        | No                                   | Override auto-detected commit SHA                     |
+| `serviceNamespace`      | No                                   | Logical group, emitted as `service.namespace`         |
+| `repositoryUrl`         | No (server / Cloudflare only)        | Repository URL, emitted as `vcs.repository.url.full`  |
+| `environment`           | No                                   | Override auto-detected environment                    |
+| `attributes`            | No                                   | Additional resource attributes (highest precedence)   |
+| `maxBatchSize`          | No                                   | Max batch size for export                             |
+| `tracerExportInterval`  | No                                   | Trace export interval                                 |
+| `loggerExportInterval`  | No                                   | Log export interval                                   |
+| `metricsExportInterval` | No                                   | Metrics export interval                               |
+| `shutdownTimeout`       | No                                   | Graceful shutdown timeout                             |
 
 The flushable presets (`MapleFlush.make`, and the Cloudflare `make`) replace the
 four interval options with `autoFlushInterval`, and add `excludeLogSpans`,

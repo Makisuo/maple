@@ -310,7 +310,7 @@ export class ShareRateLimitedError extends HttpTaggedError<ShareRateLimitedError
 		retry: "after",
 		recovery: "retry",
 		exposure: "redacted",
-		retryAfterSeconds: (error: { readonly retryAfterSeconds?: number }) => error.retryAfterSeconds,
+		retryAfterSeconds: (error) => error.retryAfterSeconds,
 	},
 ) {}
 
