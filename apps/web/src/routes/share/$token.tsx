@@ -138,9 +138,11 @@ function ShareShell({
 
 function ShareSkeleton() {
 	return (
-		<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+		<div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
 			{[0, 1, 2, 3].map((index) => (
-				<div key={index} className="h-56 animate-pulse rounded-lg border bg-muted/30" />
+				// The skeleton draws its own card because there is no visualization
+				// mounted yet to draw one — unlike the real tiles, which do.
+				<div key={index} className="h-64 animate-pulse rounded-lg border bg-muted/30" />
 			))}
 		</div>
 	)
@@ -249,16 +251,19 @@ function ShareGrid({
 				return (
 					<div
 						key={widget.id}
-						// A single chart fills the space it was given. Sized against the
-						// viewport rather than a flex chain: the chart library measures its
-						// own container, and `h-full` through ancestors with no definite
-						// height collapses it to just the title row.
+						// Sizing only, no border or padding: every visualization already
+						// draws its own card, so chrome here lands as a second frame around
+						// the first.
+						//
+						// Height is set against the viewport rather than a flex chain — the
+						// chart library measures its own container, and `h-full` through
+						// ancestors with no definite height collapses it to the title row.
 						className={
 							single
 								? embed
 									? "h-[calc(100vh-1rem)] w-full"
-									: "h-[calc(100vh-9rem)] w-full rounded-lg border p-3"
-								: "h-64 rounded-lg border p-3"
+									: "h-[calc(100vh-9rem)] w-full"
+								: "h-64"
 						}
 					>
 						<Visualization
