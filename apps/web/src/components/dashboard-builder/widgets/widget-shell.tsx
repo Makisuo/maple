@@ -237,6 +237,19 @@ interface WidgetFrameProps {
 	children: ReactNode
 }
 
+/**
+ * "Nothing to draw here": the muted empty state every tile shows when its query
+ * ran fine and simply returned no rows. Shared with the chart widgets, which
+ * used to hand an empty result to a chart that then drew its sample data.
+ */
+export function WidgetEmptyState() {
+	return (
+		<div className="flex items-center justify-center h-full">
+			<span className="text-xs text-muted-foreground">No data in selected time range</span>
+		</div>
+	)
+}
+
 export function WidgetFrame({
 	title,
 	dataState,
@@ -263,9 +276,7 @@ export function WidgetFrame({
 				loadingSkeleton
 			) : dataState.status === "error" ? (
 				dataState.message === "No query data found in selected time range" ? (
-					<div className="flex items-center justify-center h-full">
-						<span className="text-xs text-muted-foreground">No data in selected time range</span>
-					</div>
+					<WidgetEmptyState />
 				) : dataState.kind === "range" ? (
 					// A constraint, not a failure — muted like the empty state rather
 					// than destructive, since nothing is broken and the neighbouring

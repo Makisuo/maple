@@ -37,6 +37,7 @@ export {
 	type RawSqlDataSource,
 	type WidgetQuerySet,
 } from "./access"
+export { toWidgetRequest, type WidgetRequest } from "./request"
 export {
 	makeQueryDataSource,
 	makeRawSqlDataSource,

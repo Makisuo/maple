@@ -5,6 +5,7 @@ import {
 	type QuerySpec,
 	type TracesMetric,
 	formatWarehouseDateTime,
+	resolveThroughput,
 } from "@maple/query-engine"
 import { Clock, Effect, Schema } from "effect"
 
@@ -627,25 +628,9 @@ interface AllMetricsPoint {
 	estimatedSpanCount: number
 }
 
-/**
- * Resolve the throughput value for a bucket, in priority order:
- *   1. SpanMetrics Connector — per-bucket `increase` of the monotonic `calls`
- *      counter (see `querySpanMetricsCalls`), exact pre-sampling counts.
- *   2. `sum(SampleRate)` from the query engine (per-row weighted sum).
- *   3. Raw traced count — when neither is available (no sampling configured).
- *
- * `?? rawCount` won't work as the fallback because `estimatedSpanCount` is
- * coerced to 0 when the column is missing; treat 0 as "no value" explicitly.
- */
-export function resolveThroughput(
-	rawCount: number,
-	estimatedSpanCount: number,
-	metricsThroughput: number | undefined,
-): number {
-	if (metricsThroughput != null && metricsThroughput > 0) return metricsThroughput
-	if (estimatedSpanCount > 0) return estimatedSpanCount
-	return rawCount
-}
+// Moved to `@maple/query-engine` (see `route-rows.ts`); re-exported so the
+// custom-chart callers keep their import.
+export { resolveThroughput }
 
 function extractAllMetricsSeries(response: QueryEngineExecuteResponse): Map<string, AllMetricsPoint> {
 	const map = new Map<string, AllMetricsPoint>()

@@ -5,7 +5,6 @@ import type { BaseChartProps } from "../_shared/chart-types"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { cn } from "../../../lib/utils"
-import { heatmapSampleData } from "../_shared/sample-data"
 
 interface HeatmapPoint {
 	x: string
@@ -18,7 +17,7 @@ function asFiniteNumber(value: unknown): number {
 	return Number.isFinite(parsed) ? parsed : 0
 }
 
-function deriveHeatmapPoints(rows: Record<string, unknown>[]): HeatmapPoint[] {
+function deriveHeatmapPoints(rows: ReadonlyArray<Record<string, unknown>>): HeatmapPoint[] {
 	if (rows.length === 0) return []
 
 	const first = rows[0]
@@ -434,8 +433,13 @@ const CellGrid = React.memo(function CellGrid({
 	)
 })
 
+// No sample-data fallback: substituting fixtures for real rows made every
+// misconfigured or mis-fed chart draw a plausible-looking picture instead of an
+// empty one. Gallery thumbnails pass their sample rows in explicitly via `data`.
+const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
+
 export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatmap }: BaseChartProps) {
-	const source = Array.isArray(data) && data.length > 0 ? data : heatmapSampleData
+	const source = Array.isArray(data) ? data : EMPTY_ROWS
 	const points = React.useMemo(() => deriveHeatmapPoints(source), [source])
 
 	// Axis entries where every cell is absent or zero carry no information, but

@@ -98,11 +98,34 @@ const redactDataSource = (dataSource: unknown): RedactedDataSource => {
 	return { kind: "static", ...transformField }
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
+/**
+ * The display config, with the one field that embeds a data source redacted.
+ *
+ * `display` is otherwise passed through — titles, units, thresholds, chart
+ * ids are what a viewer needs to draw the tile. But `display.sparkline` carries
+ * a whole `dataSource` (a stat's trend query), and shipping it verbatim would
+ * publish exactly the where-clauses the widget's own redaction withholds. The
+ * server resolves the sparkline from the stored document, never from this.
+ */
+const redactDisplay = (display: unknown): Record<string, unknown> => {
+	if (!isRecord(display)) return {}
+	if (!isRecord(display.sparkline)) return display
+	const { dataSource, ...sparkline } = display.sparkline
+	return {
+		...display,
+		sparkline:
+			dataSource === undefined ? sparkline : { ...sparkline, dataSource: redactDataSource(dataSource) },
+	}
+}
+
 const redactWidget = (widget: ShareWidgetInput): RedactedWidget => {
 	let redacted: RedactedWidget = {
 		id: widget.id,
 		visualization: widget.visualization,
-		display: widget.display ?? {},
+		display: redactDisplay(widget.display),
 		layout: widget.layout,
 		dataSource: redactDataSource(widget.dataSource),
 	}

@@ -17,6 +17,14 @@
  * is the time window and the dashboard variable values. Both are bounded before
  * anything executes: `resolveShareWindow` for the window, and the variable
  * checks in `share-variables.ts` for the values.
+ *
+ * From there the request is built by the same two functions the signed-in
+ * browser runs — `toWidgetRequest` to lower the stored source, then
+ * `planWidgetRequest` for the window (a pinned tile beats the board), the time
+ * macros, the variables and the fetch strategy — and executed by the same
+ * runners. This service adds nothing of its own to the query; it only decides
+ * *which* widget the caller may ask about and confines a list scan to the cap.
+ * That is what makes a shared board show the numbers the board shows.
  */
 import {
 	type DashboardDocument,
@@ -28,19 +36,27 @@ import {
 	UserId,
 } from "@maple/domain/http"
 import { RoleName } from "@maple/domain/primitives"
+import { QuerySetSchema } from "@maple/query-model"
 import {
-	interpolateTimeMacros,
-	interpolateWidgetParams,
-	LIST_ENDPOINTS,
 	MAX_LIST_RANGE_SECONDS,
+	computeBucketSecondsForRange,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+	planWidgetRequest,
+	rawSqlRowsForDisplay,
+	type PlannedWidgetRequest,
 	type VariableValues,
 } from "@maple/query-engine"
-import { runQuerySet } from "@maple/query-engine/query-set"
+import { fallbackStrategyFromWire, runQuerySet } from "@maple/query-engine/query-set"
+import { makeExecuteRawSql } from "@maple/query-engine/runtime"
+import type { WarehouseExecutionError } from "@maple/query-engine/execution"
+import type { RawSqlValidationError } from "@maple/domain/http"
 import {
 	dataSourceQuerySet,
-	dataSourceRawSql,
-	dataSourceRouteParams,
-	dataSourceEndpoint,
+	MARKDOWN_STATIC_ENDPOINT,
+	QUERY_RESULT_ENDPOINTS,
+	RAW_SQL_ENDPOINT,
+	toWidgetRequest,
 } from "@maple/widgets/dashboard"
 import { Context, Effect, Layer, Schema } from "effect"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
@@ -48,7 +64,7 @@ import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryServic
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { makeServerQuerySetExecutor } from "./server-query-set-executor"
 import { ROUTE_ENDPOINT_PLANS, type RouteEndpointContext } from "./route-endpoint-plans"
-import { autoBucketSeconds, runRawSql } from "@/mcp/lib/run-raw-sql"
+import { resolveShareWindow } from "./share-window"
 
 const UNSUPPORTED_WIDGET_MESSAGE = "This widget isn't available in shared views."
 const EXECUTION_FAILED_MESSAGE = "This widget couldn't be loaded. Try again shortly."
@@ -114,6 +130,11 @@ export interface WidgetDataRequest {
 	readonly widgetId: string
 	/** Which data source on the widget — the tile itself, or its sparkline. */
 	readonly source: "primary" | "sparkline"
+	/**
+	 * The tile's rendered width in points, as the signed-in board sends. Handed
+	 * to `planWidgetRequest`, which attaches it to timeseries requests only.
+	 */
+	readonly maxDataPoints?: number
 }
 
 export interface WidgetDataOutcome {
@@ -132,8 +153,44 @@ export interface WidgetDataOutcome {
 const findWidget = (document: DashboardDocument, widgetId: string) =>
 	document.widgets.find((widget) => widget.id === widgetId)
 
-const rangeSecondsOf = (window: ResolvedWindow): number =>
-	Math.max(0, (Date.parse(`${window.endTime}Z`) - Date.parse(`${window.startTime}Z`)) / 1000)
+/**
+ * The interpolated query-set params, read back as typed values.
+ *
+ * `planWidgetRequest` returns an untyped bag (interpolation rebuilds every
+ * object), so this is the boundary check — the same one the browser's
+ * `getQueryBuilderTimeseries` performs on the identical payload before running
+ * the same runner.
+ */
+const PlannedQuerySetParams = Schema.Struct({
+	...QuerySetSchema.fields,
+	defaultLimit: Schema.optionalKey(Schema.Number),
+	limit: Schema.optionalKey(Schema.Number),
+	columns: Schema.optionalKey(Schema.Array(Schema.String)),
+	strategy: Schema.optionalKey(
+		Schema.Struct({
+			enableEmptyRangeFallback: Schema.optionalKey(Schema.Boolean),
+			fallbackWindowSeconds: Schema.optionalKey(Schema.Array(Schema.Number)),
+			maxFallbackRangeSeconds: Schema.optionalKey(Schema.Number),
+		}),
+	),
+	maxDataPoints: Schema.optionalKey(Schema.Number),
+})
+const decodePlannedQuerySet = Schema.decodeUnknownEffect(PlannedQuerySetParams)
+
+const PlannedRawSqlParams = Schema.Struct({
+	sql: Schema.String,
+	displayType: Schema.optionalKey(Schema.String),
+	granularitySeconds: Schema.optionalKey(Schema.Number),
+})
+const decodePlannedRawSql = Schema.decodeUnknownEffect(PlannedRawSqlParams)
+
+/** The list cap applied to a window that exceeds it: last `MAX_LIST_RANGE_SECONDS` up to its end. */
+const narrowToListCap = (window: ResolvedWindow): ResolvedWindow => ({
+	startTime: formatWarehouseDateTime(
+		parseWarehouseDateTime(window.endTime) - MAX_LIST_RANGE_SECONDS * 1000,
+	),
+	endTime: window.endTime,
+})
 
 export interface DashboardWidgetDataServiceApi {
 	readonly resolve: (
@@ -192,16 +249,12 @@ export class DashboardWidgetDataService extends Context.Service<
 			}
 
 			const tenant = shareViewerTenant(orgId)
-			const executor = makeServerQuerySetExecutor(tenant, queryEngine)
 
 			// A markdown/static tile has nothing to fetch. It is a success with no
 			// data, not an unsupported widget — the renderer draws it from the
 			// document alone.
-			const querySet = dataSourceQuerySet(dataSource)
-			const rawSql = dataSourceRawSql(dataSource)
-			const endpoint = dataSourceEndpoint(dataSource)
-
-			if (querySet === null && rawSql === null && endpoint === null) {
+			const lowered = toWidgetRequest(dataSource)
+			if (lowered === null || lowered.endpoint === MARKDOWN_STATIC_ENDPOINT) {
 				return {
 					widgetId: request.widgetId,
 					source: request.source,
@@ -209,31 +262,99 @@ export class DashboardWidgetDataService extends Context.Service<
 				} satisfies WidgetDataOutcome
 			}
 
+			// The signed-in browser's exact planning pass. A pinned tile
+			// (`widget.timeRange`) resolves against the same clock and snap grid
+			// the browser uses; the batch window is the fallback, not the rule.
+			const plan = planWidgetRequest({
+				request: lowered,
+				dashboardWindow: window,
+				...(widget.timeRange === undefined ? undefined : { widgetTimeRange: widget.timeRange }),
+				variableValues,
+				...(request.maxDataPoints === undefined
+					? undefined
+					: { maxDataPoints: request.maxDataPoints }),
+			})
+			if (plan.kind === "disabled") {
+				return yield* Effect.fail(
+					new ShareWidgetExecutionError({
+						message: "This widget's own time range couldn't be resolved.",
+						widgetId: request.widgetId,
+					}),
+				)
+			}
+
+			// A pinned range is the author's, not the viewer's, but it still has to
+			// respect the share ceiling — a 90-day tile is refused here for the same
+			// reason a 90-day batch window is refused at the route.
+			if (widget.timeRange !== undefined) {
+				yield* resolveShareWindow(plan.window).pipe(
+					Effect.mapError(
+						(error) =>
+							new ShareWidgetExecutionError({
+								message: error.message,
+								widgetId: request.widgetId,
+							}),
+					),
+				)
+			}
+
 			// Clamp before executing. A list-shaped tile scans raw rows, so a viewer
 			// dragging the picker to 30 days would otherwise issue a scan the signed-in
 			// UI refuses. The authed app offers an opt-in "narrow" button; a chrome-less
-			// viewer has nowhere to put one, so the server narrows and says so.
-			const isListResult =
-				querySet?.resultShape === "list" || (endpoint !== null && LIST_ENDPOINTS.has(endpoint))
-			const requestedSeconds = rangeSecondsOf(window)
-			const narrowed = isListResult && requestedSeconds > MAX_LIST_RANGE_SECONDS
-			const effectiveWindow: ResolvedWindow = narrowed
-				? {
-						startTime: new Date(Date.parse(`${window.endTime}Z`) - MAX_LIST_RANGE_SECONDS * 1000)
-							.toISOString()
-							.replace("T", " ")
-							.slice(0, 19),
-						endTime: window.endTime,
-					}
-				: window
-			const narrowedFields = narrowed ? { narrowedToSeconds: MAX_LIST_RANGE_SECONDS } : undefined
+			// viewer has nowhere to put one, so the server narrows and says so — by
+			// re-planning over the capped window, exactly what that button does.
+			const executed: PlannedWidgetRequest = plan.exceedsListCap
+				? (() => {
+						const narrowed = planWidgetRequest({
+							request: lowered,
+							dashboardWindow: narrowToListCap(plan.window),
+							variableValues,
+							...(request.maxDataPoints === undefined
+								? undefined
+								: { maxDataPoints: request.maxDataPoints }),
+						})
+						return narrowed.kind === "request" ? narrowed : plan
+					})()
+				: plan
+			const narrowedFields = plan.exceedsListCap
+				? { narrowedToSeconds: MAX_LIST_RANGE_SECONDS }
+				: undefined
+			const outcome = (data: unknown): WidgetDataOutcome => ({
+				widgetId: request.widgetId,
+				source: request.source,
+				data,
+				...narrowedFields,
+			})
 
-			if (querySet !== null) {
-				const result = yield* runQuerySet(executor, {
-					...querySet,
-					querySet,
-					startTime: effectiveWindow.startTime,
-					endTime: effectiveWindow.endTime,
+			// `{ data: rows }` in every branch — the envelope the browser's server
+			// functions return, which the shared `toReadyWidgetData` unwraps on
+			// the client for both paths alike.
+			const querySet = dataSourceQuerySet(dataSource)
+			if (querySet !== null && executed.endpoint === QUERY_RESULT_ENDPOINTS[querySet.resultShape]) {
+				const rows = yield* Effect.gen(function* () {
+					const params = yield* decodePlannedQuerySet(executed.params)
+					const result = yield* runQuerySet(makeServerQuerySetExecutor(tenant, queryEngine), {
+						querySet: {
+							queries: params.queries,
+							...(params.formulas === undefined ? undefined : { formulas: params.formulas }),
+							...(params.comparison === undefined
+								? undefined
+								: { comparison: params.comparison }),
+						},
+						resultShape: querySet.resultShape,
+						startTime: executed.window.startTime,
+						endTime: executed.window.endTime,
+						...(params.defaultLimit === undefined
+							? undefined
+							: { defaultLimit: params.defaultLimit }),
+						...(params.limit === undefined ? undefined : { limit: params.limit }),
+						...(params.columns === undefined ? undefined : { columns: params.columns }),
+						fallback: fallbackStrategyFromWire(params.strategy),
+						...(params.maxDataPoints === undefined
+							? undefined
+							: { maxDataPoints: params.maxDataPoints }),
+					})
+					return result.rows
 				}).pipe(
 					// A query set that fails still rides inside the batch — one broken
 					// tile on a shared board must not blank its neighbours — but as a
@@ -241,89 +362,68 @@ export class DashboardWidgetDataService extends Context.Service<
 					// this run of it did not work.
 					asWidgetOutcomeFailure(request.widgetId, "query"),
 				)
-
-				return {
-					widgetId: request.widgetId,
-					source: request.source,
-					data: { data: result.rows },
-					...narrowedFields,
-				} satisfies WidgetDataOutcome
+				return outcome({ data: rows })
 			}
 
-			if (rawSql !== null) {
+			if (executed.endpoint === RAW_SQL_ENDPOINT) {
 				// The SQL is the dashboard author's, never the viewer's — it comes off
-				// the stored document and no share payload can influence it. It still
-				// goes through `runRawSql`, the same macro-expanding, org-filter-
-				// enforcing path the MCP tools use, so a board shared by an author who
-				// wrote a careless query is still confined to their own org.
-				const result = yield* runRawSql({
-					tenant,
-					sql: rawSql.sql,
-					startTime: effectiveWindow.startTime,
-					endTime: effectiveWindow.endTime,
-					granularitySeconds:
-						rawSql.granularitySeconds ??
-						autoBucketSeconds(effectiveWindow.startTime, effectiveWindow.endTime),
-				}).pipe(
-					// The service instance is already in scope, so the raw-SQL helper's
-					// requirement is discharged here rather than leaking into every
-					// caller of `resolve`.
-					Effect.provideService(WarehouseQueryService, warehouse),
-					asWidgetOutcomeFailure(request.widgetId, "raw_sql"),
-				)
-
-				return {
-					widgetId: request.widgetId,
-					source: request.source,
-					data: { data: result.rows },
-					...narrowedFields,
-				} satisfies WidgetDataOutcome
+				// the stored document and no share payload can influence it beyond
+				// the variable values, which the planner interpolated as escaped SQL
+				// literals. It still goes through `makeExecuteRawSql`, the same
+				// macro-expanding, org-filter-enforcing path the signed-in route uses,
+				// with the same `$__interval_s` policy and the same time-series
+				// reshaping, so the tile is byte-identical to the board's.
+				const rows = yield* Effect.gen(function* () {
+					const params = yield* decodePlannedRawSql(executed.params)
+					const executeRawSql = makeExecuteRawSql<
+						TenantContext,
+						WarehouseExecutionError | RawSqlValidationError
+					>(warehouse)
+					const result = yield* executeRawSql(tenant, {
+						sql: params.sql,
+						orgId: tenant.orgId,
+						startTime: executed.window.startTime,
+						endTime: executed.window.endTime,
+						granularitySeconds:
+							params.granularitySeconds ??
+							computeBucketSecondsForRange(
+								executed.window.startTime,
+								executed.window.endTime,
+								"rawSql",
+							),
+						workload: "interactive",
+						context: "rawSql",
+					})
+					return rawSqlRowsForDisplay(result.rows, params.displayType)
+				}).pipe(asWidgetOutcomeFailure(request.widgetId, "raw_sql"))
+				return outcome({ data: rows })
 			}
 
-			const plan = endpoint === null ? undefined : ROUTE_ENDPOINT_PLANS[endpoint]
-			if (plan === undefined) {
+			const routePlan = ROUTE_ENDPOINT_PLANS[executed.endpoint]
+			if (routePlan === undefined) {
 				return yield* Effect.fail(
 					new ShareUnsupportedWidgetError({
 						message: UNSUPPORTED_WIDGET_MESSAGE,
 						widgetId: request.widgetId,
-						kind: endpoint ?? "unknown",
+						kind: executed.endpoint,
 					}),
 				)
 			}
-
-			// Route params get the same two interpolation passes, in the same order,
-			// as the browser: time macros first, then dashboard variables.
-			const routeParams = interpolateWidgetParams(
-				interpolateTimeMacros(
-					{
-						...(dataSourceRouteParams(dataSource) ?? {}),
-						startTime: effectiveWindow.startTime,
-						endTime: effectiveWindow.endTime,
-					},
-					effectiveWindow,
-				),
-				variableValues,
-			)
 
 			const context: RouteEndpointContext = {
 				tenant,
 				queryEngine,
 				warehouse,
-				window: effectiveWindow,
+				window: executed.window,
 			}
 
-			// `plan === undefined` above is the structural case and stays
+			// `routePlan === undefined` above is the structural case and stays
 			// "unsupported"; a plan that exists and throws is a run that failed.
-			const data = yield* plan
-				.run(routeParams, context)
-				.pipe(asWidgetOutcomeFailure(request.widgetId, endpoint ?? "unknown"))
+			const data = yield* routePlan
+				.run(executed.params, context)
+				.pipe(asWidgetOutcomeFailure(request.widgetId, executed.endpoint))
 
-			return {
-				widgetId: request.widgetId,
-				source: request.source,
-				data,
-				...narrowedFields,
-			} satisfies WidgetDataOutcome
+			return outcome(data)
 		})
 
 		return { resolve } satisfies DashboardWidgetDataServiceApi
