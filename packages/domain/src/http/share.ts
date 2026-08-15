@@ -437,6 +437,97 @@ export class ShareWidgetDataResponse extends Schema.Class<ShareWidgetDataRespons
 	},
 ) {}
 
+// ---------------------------------------------------------------------------
+// Social preview (OG card)
+// ---------------------------------------------------------------------------
+
+/**
+ * The opaque, signed id of a share's preview image (see `shareOgId`).
+ *
+ * Not a token and not interchangeable with one: it names a share so an image
+ * can be drawn for it, and the share token stays out of every URL. Loosely
+ * checked here because its structure is the signer's business — a malformed one
+ * fails verification, which is the same uniform "no such link" as everything
+ * else on this surface.
+ */
+export const ShareOgId = Schema.String.check(Schema.isMinLength(3), Schema.isMaxLength(256)).pipe(
+	Schema.annotate({ identifier: "@maple/ShareOgId", title: "Share preview image id" }),
+)
+export type ShareOgId = Schema.Schema.Type<typeof ShareOgId>
+
+export const ShareOgMetaRequest = Schema.Struct({
+	token: ShareToken,
+}).annotate({ identifier: "ShareOgMetaRequest" })
+
+/**
+ * The social-preview tags for a share link.
+ *
+ * Answered for **public** links only. An org-only link takes the uniform
+ * not-found path instead of returning its board's name: a link preview is
+ * rendered by whichever chat app the URL was pasted into, which is the one
+ * audience an org-scoped board is not shared with.
+ */
+export class ShareOgMetaResponse extends Schema.Class<ShareOgMetaResponse>("ShareOgMetaResponse")({
+	title: Schema.String,
+	description: Schema.String,
+	/** Path of the preview image, relative to the app origin that serves it. */
+	imagePath: Schema.String,
+}) {}
+
+export const ShareOgCardRequest = Schema.Struct({
+	ogId: ShareOgId,
+}).annotate({ identifier: "ShareOgCardRequest" })
+
+/**
+ * One tile on the preview card, in the board's own grid coordinates.
+ *
+ * The card draws these as a bar apiece, so these are layout facts, never data.
+ * `title` is the display title a viewer of the shared board would see anyway,
+ * and `section` the heading it sits under.
+ */
+export const ShareOgCardTile = Schema.Struct({
+	x: Schema.Number,
+	y: Schema.Number,
+	w: Schema.Number,
+	h: Schema.Number,
+	title: Schema.optionalKey(Schema.String),
+	section: Schema.optionalKey(Schema.String),
+	visualization: Schema.String,
+}).annotate({ identifier: "ShareOgCardTile" })
+export type ShareOgCardTile = Schema.Schema.Type<typeof ShareOgCardTile>
+
+/**
+ * Who shared the board.
+ *
+ * Only ever the owning organization's public identity — its display name and
+ * the logo it uploaded — never a person. A share link is published by an org,
+ * and naming the individual who pressed the button would put a colleague's
+ * identity into every chat window the link reaches.
+ */
+export const ShareOgCardOrg = Schema.Struct({
+	name: Schema.String,
+	/** Absent when the org uses no logo; the card draws its initials instead. */
+	imageUrl: Schema.optionalKey(Schema.String),
+}).annotate({ identifier: "ShareOgCardOrg" })
+export type ShareOgCardOrg = Schema.Schema.Type<typeof ShareOgCardOrg>
+
+/**
+ * What the preview image draws.
+ *
+ * Facts rather than a rendered sentence: the card and the `og:description` tag
+ * are different media and phrase the same board differently, so composing the
+ * copy here would force one of them into the other's shape.
+ */
+export class ShareOgCardResponse extends Schema.Class<ShareOgCardResponse>("ShareOgCardResponse")({
+	title: Schema.String,
+	/** The board's own description, when its author wrote one. */
+	description: Schema.optionalKey(Schema.String),
+	/** Absent in self-hosted mode, where there is no directory to ask. */
+	org: Schema.optionalKey(ShareOgCardOrg),
+	widgetCount: Schema.Number,
+	tiles: Schema.Array(ShareOgCardTile),
+}) {}
+
 /**
  * What the share page needs to render before it asks for any data.
  *

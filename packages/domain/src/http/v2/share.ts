@@ -21,15 +21,26 @@
  *     is bearer-secured and declares a 401" invariant, by name. The exemption is
  *     an allowlist so a third public operation cannot appear silently.
  *
- * Every endpoint is a POST with the token in the **body**, never the path. The
- * web URL is `/share/<token>`, but the API need not mirror it, and keeping the
- * token out of `url.full` means it never reaches a span attribute, an access
- * log, or a `Referer` — no tracer suppression rule required.
+ * Every endpoint is a POST, and the ones that take a token take it in the
+ * **body**, never the path. The web URL is `/share/<token>`, but the API need
+ * not mirror it, and keeping the token out of `url.full` means it never reaches
+ * a span attribute, an access log, or a `Referer` — no tracer suppression rule
+ * required.
+ *
+ * `ogCard` is the one operation that names a share without a token at all. It
+ * cannot have one: it exists so a social-preview image can be drawn, and an
+ * `og:image` is a URL that travels to every crawler and chat client that
+ * unfurls the link. It takes a signed share id instead (`shareOgId`), which is
+ * not a credential and cannot be turned back into a token.
  */
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import {
 	ShareNotConfiguredError,
 	ShareNotFoundError,
+	ShareOgCardRequest,
+	ShareOgCardResponse,
+	ShareOgMetaRequest,
+	ShareOgMetaResponse,
 	SharePersistenceError,
 	ShareRangeInvalidError,
 	ShareRateLimitedError,
@@ -105,6 +116,34 @@ export class V2SharePublicApiGroup extends HttpApiGroup.make("sharePublic")
 				summary: "Read data for shared widgets",
 				description:
 					"Returns rows for up to four widgets on a shared dashboard. The caller names widgets only — every query is built server-side from the stored document, never from the request.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("ogMeta", "/og-meta", {
+			payload: ShareOgMetaRequest,
+			success: ShareOgMetaResponse,
+			error: [shareNotFound, shareRateLimited, shareNotConfigured, sharePersistence],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "resolveShareOgMeta",
+				summary: "Read a share link's social preview tags",
+				description:
+					"Returns the title, description and preview-image path for a public share link, for the worker that serves the page to inline into its HTML. Org-only links resolve as not found: their board's name must not travel to whatever renders the link preview.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("ogCard", "/og-card", {
+			payload: ShareOgCardRequest,
+			success: ShareOgCardResponse,
+			error: [shareNotFound, shareRateLimited, shareNotConfigured, sharePersistence],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "resolveShareOgCard",
+				summary: "Read what a share link's preview image draws",
+				description:
+					"Takes the signed image id from `og-meta`, never a share token, and returns the layout facts the preview image is drawn from. Revoked and org-only links resolve as not found, so an image URL stops working the moment its link does.",
 			}),
 		),
 	)

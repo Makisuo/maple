@@ -49,6 +49,7 @@ const shareTokenAad = (orgId: string, shareId: string): Buffer =>
 	Buffer.from(`dashboard_shares:v1:${orgId}:${shareId}:token`, "utf8")
 
 const decodeShareIdSync = Schema.decodeUnknownSync(DashboardShareId)
+const decodeShareId = Schema.decodeUnknownOption(DashboardShareId)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 
 /**
@@ -179,6 +180,28 @@ export interface SharedDashboardServiceApi {
 	) => Effect.Effect<
 		{ readonly share: DashboardShare; readonly orgId: OrgId },
 		SharePersistenceError | ShareNotConfiguredError | ShareNotFoundError
+	>
+
+	/**
+	 * Resolve a **public** live share by its id, for the social-preview image.
+	 *
+	 * Separate from `resolveByToken` because the caller is different in kind: a
+	 * crawler holding an image URL, with no token and no session. It therefore
+	 * enforces `mode = "public"` in the query itself rather than leaving it to a
+	 * branch above — an org-only board's name must not be drawable by anyone who
+	 * saved an image URL, and the check belongs where it cannot be skipped.
+	 *
+	 * The returned share carries no token: nothing on this path needs one, and
+	 * decrypting it would put a live credential into a request that never had it.
+	 */
+	readonly resolvePublicById: (shareId: string) => Effect.Effect<
+		{
+			readonly id: DashboardShareId
+			readonly orgId: OrgId
+			readonly dashboardId: DashboardId
+			readonly widgetId: string | null
+		},
+		SharePersistenceError | ShareNotFoundError
 	>
 }
 
@@ -560,6 +583,50 @@ export class SharedDashboardService extends Context.Service<
 			return { share: toDashboardShare(row, token), orgId: row.orgId }
 		})
 
+		const resolvePublicById = Effect.fn("SharedDashboardService.resolvePublicById")(function* (
+			rawShareId: string,
+		) {
+			// Decoded, never cast: the value arrives from a URL, and an id that is
+			// not a share id has to become the uniform "no such link" here rather
+			// than a branded string the query trusts.
+			const shareId = Option.getOrUndefined(decodeShareId(rawShareId))
+			if (shareId === undefined) {
+				return yield* Effect.fail(new ShareNotFoundError({ message: SHARE_NOT_FOUND_MESSAGE }))
+			}
+
+			const rows = yield* database
+				.execute((db) =>
+					db
+						.select({
+							id: dashboardShares.id,
+							orgId: dashboardShares.orgId,
+							dashboardId: dashboardShares.dashboardId,
+							widgetId: dashboardShares.widgetId,
+						})
+						.from(dashboardShares)
+						.where(
+							and(
+								eq(dashboardShares.id, shareId),
+								eq(dashboardShares.mode, "public"),
+								isNull(dashboardShares.revokedAt),
+							),
+						),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+
+			const row = rows[0]
+			if (row === undefined) {
+				return yield* Effect.fail(new ShareNotFoundError({ message: SHARE_NOT_FOUND_MESSAGE }))
+			}
+
+			yield* Effect.annotateCurrentSpan({
+				"maple.share.id": row.id,
+				orgId: row.orgId,
+				"maple.dashboard.id": row.dashboardId,
+			})
+			return row
+		})
+
 		return {
 			get,
 			listForDashboard,
@@ -567,6 +634,7 @@ export class SharedDashboardService extends Context.Service<
 			rotate,
 			revoke,
 			resolveByToken,
+			resolvePublicById,
 		} satisfies SharedDashboardServiceApi
 	}),
 }) {

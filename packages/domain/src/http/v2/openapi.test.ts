@@ -196,6 +196,8 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/scrape_targets/{id}/probe",
 			"POST /v2/session_replays/for_trace",
 			"POST /v2/session_replays/search",
+			"POST /v2/share/og-card",
+			"POST /v2/share/og-meta",
 			"POST /v2/share/resolve",
 			"POST /v2/share/widget-data",
 			"POST /v2/traces/breakdown",
@@ -229,15 +231,34 @@ describe("MapleApiV2 OpenAPI", () => {
 	 * Operations served without a bearer credential.
 	 *
 	 * An allowlist by operationId, not a path prefix or a group check: the point
-	 * is that a third unauthenticated operation cannot appear in this API without
-	 * someone editing this constant. Share links are the only case — the token in
-	 * the request body *is* the credential, and requiring a bearer alongside it
-	 * would mean the link only worked for people who did not need it.
+	 * is that a further unauthenticated operation cannot appear in this API
+	 * without someone editing this constant. Share links are the only case — the
+	 * token in the request body *is* the credential, and requiring a bearer
+	 * alongside it would mean the link only worked for people who did not need it.
+	 *
+	 * The two OG operations are the same surface seen from the crawler side: one
+	 * is the page worker asking what tags to inline for a link, the other is the
+	 * preview image asking what to draw for a signed image id. Neither can be
+	 * bearer-authenticated, because the caller is a link preview.
 	 *
 	 * These still carry every other operation guarantee below, and every common
 	 * error envelope except `401`, which they cannot emit.
 	 */
-	const PUBLIC_OPERATION_IDS: ReadonlySet<string> = new Set(["resolveShare", "resolveShareWidgetData"])
+	const PUBLIC_OPERATION_IDS: ReadonlySet<string> = new Set([
+		"resolveShare",
+		"resolveShareWidgetData",
+		"resolveShareOgMeta",
+		"resolveShareOgCard",
+	])
+
+	/**
+	 * The public operations that still *consult* a session when one is present,
+	 * which is what makes "wrong organization" an answer they can give.
+	 */
+	const SESSION_READING_PUBLIC_OPERATION_IDS: ReadonlySet<string> = new Set([
+		"resolveShare",
+		"resolveShareWidgetData",
+	])
 
 	it("gives every operation complete metadata, security, and common error envelopes", () => {
 		const operations = Object.entries(spec.paths ?? {}).flatMap(([path, item]) =>
@@ -256,9 +277,19 @@ describe("MapleApiV2 OpenAPI", () => {
 			expect(op.tags).toHaveLength(1)
 			const isPublic = PUBLIC_OPERATION_IDS.has(op.operationId)
 			expect(op.security, `${op.operationId} security`).toEqual(isPublic ? [] : [{ bearer: [] }])
-			const commonStatuses = isPublic
-				? ["400", "403", "429", "500", "504"]
-				: ["400", "401", "403", "429", "500", "504"]
+			// 401 and 403 describe a credential being rejected, so an operation only
+			// declares them if presenting one can change its answer. Every authed
+			// operation can; among the public ones, only the two that read an
+			// optional session to decide whether an org-only link opens. The OG
+			// operations answer a link preview, which has no credential to present
+			// and no way to acquire one, so for them those statuses would be
+			// unreachable documentation.
+			const readsSession = SESSION_READING_PUBLIC_OPERATION_IDS.has(op.operationId)
+			const commonStatuses = !isPublic
+				? ["400", "401", "403", "429", "500", "504"]
+				: readsSession
+					? ["400", "403", "429", "500", "504"]
+					: ["400", "429", "500", "504"]
 			for (const status of commonStatuses) {
 				expect(
 					op.responses[status],

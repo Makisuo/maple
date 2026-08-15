@@ -21,8 +21,12 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpServerRequest } from "effect/unstable/http"
 import {
+	OrgId,
 	SHARE_NOT_FOUND_MESSAGE,
+	ShareNotConfiguredError,
 	ShareNotFoundError,
+	ShareOgCardResponse,
+	ShareOgMetaResponse,
 	ShareRateLimitedError,
 	ShareSignInRequiredError,
 	ShareWidgetDataResponse,
@@ -32,7 +36,7 @@ import {
 } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
 import { MAX_LIST_RANGE_SECONDS, SHARE_MAX_RANGE_SECONDS } from "@maple/query-engine"
-import { hashShareToken } from "@maple/db"
+import { hashShareToken, shareOgId, verifyShareOgId } from "@maple/db"
 import { redactForShare } from "@maple/widgets/dashboard"
 import { Effect, Option, Redacted } from "effect"
 import { Env } from "@/platform/Env"
@@ -40,11 +44,14 @@ import { AuthService } from "@/services/auth/AuthService"
 import {
 	ApiV2RateLimiter,
 	shareIpRateLimitKey,
+	shareOgRateLimitKey,
 	shareTokenRateLimitKey,
 } from "@/services/auth/ApiV2RateLimiter"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { DashboardWidgetDataService } from "@/services/dashboards/DashboardWidgetDataService"
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
+import { ogDescription, ogSubtitle, ogTiles, ogTitle } from "@/services/dashboards/share-og-card"
+import { OrganizationService } from "@/services/org/OrganizationService"
 import { resolveShareVariables } from "@/services/dashboards/share-variables"
 import { resolveShareWindow } from "@/services/dashboards/share-window"
 
@@ -56,6 +63,7 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 		const auth = yield* AuthService
 		const env = yield* Env
 		const rateLimiter = yield* ApiV2RateLimiter
+		const organizations = yield* OrganizationService
 		const shares = yield* SharedDashboardService
 		const persistence = yield* DashboardPersistenceService
 		const widgetData = yield* DashboardWidgetDataService
@@ -85,6 +93,70 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 					}),
 				)
 			}
+		})
+
+		/**
+		 * The preview path's own bucket, per share rather than per viewer.
+		 *
+		 * No IP key here, deliberately: the callers are crawlers and chat clients
+		 * scattered across the internet plus this deployment's own page worker, so
+		 * an IP bucket would either be meaningless (one request each) or would put
+		 * every share page load behind a single key. The per-share bound is the one
+		 * that matters, and it is kept separate from `enforceRateLimit` so unfurl
+		 * traffic can never exhaust the bucket protecting the people reading the
+		 * board.
+		 */
+		const enforceOgRateLimit = Effect.fn("share.ogRateLimit")(function* (shareKey: string) {
+			const outcome = yield* rateLimiter.check(shareOgRateLimitKey(shareKey.slice(0, 24)))
+			if (outcome === "limited") {
+				return yield* Effect.fail(
+					new ShareRateLimitedError({
+						message: "This shared dashboard is receiving too many requests. Try again shortly.",
+					}),
+				)
+			}
+		})
+
+		/**
+		 * The HMAC key, or the configuration failure.
+		 *
+		 * `openShare` treats an absent key as "skip the rate limit and let
+		 * `resolveByToken` report it", which works because that call fails with
+		 * `ShareNotConfiguredError` a line later. The OG handlers need the key for
+		 * themselves — to mint and to verify an image id — so they demand it up
+		 * front rather than deriving one from nothing.
+		 */
+		const requireHmacKey = Effect.suspend(() =>
+			Option.match(env.MAPLE_SHARE_TOKEN_HMAC_KEY, {
+				onNone: () =>
+					Effect.fail(
+						new ShareNotConfiguredError({
+							message: "Dashboard sharing is not configured on this deployment.",
+						}),
+					),
+				onSome: (key) => Effect.succeed(Redacted.value(key)),
+			}),
+		)
+
+		/**
+		 * Who the card says shared the board.
+		 *
+		 * Best-effort by design: the directory is a third party, and a Clerk
+		 * outage — or a self-hosted deployment with no directory at all — must
+		 * cost the card its byline, not its render. Only the org's public
+		 * identity is read; nothing here reaches for the person who made the link.
+		 */
+		const ogOrg = Effect.fn("share.ogOrg")(function* (orgId: OrgId) {
+			const info = yield* Effect.option(organizations.retrieve(orgId))
+			if (Option.isNone(info)) return undefined
+
+			// Self-hosted has no directory, so the name comes back null and the card
+			// simply carries no byline.
+			const name = info.value.name?.trim()
+			if (name === undefined || name.length === 0) return undefined
+
+			const imageUrl = info.value.imageUrl
+			return imageUrl === null ? { name } : { name, imageUrl }
 		})
 
 		/**
@@ -257,6 +329,69 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 					}
 
 					return new ShareWidgetDataResponse({ results })
+				}),
+			)
+			.handle("ogMeta", ({ payload }) =>
+				Effect.gen(function* () {
+					const hmacKey = yield* requireHmacKey
+					yield* enforceOgRateLimit(hashShareToken(payload.token, hmacKey))
+
+					const { share, orgId } = yield* shares.resolveByToken(payload.token)
+
+					// Public only, and taking the uniform not-found path rather than a
+					// distinct error: an org-only board's name must not reach whatever
+					// renders the link preview, and "this link is org-only" is itself
+					// something the anonymous caller does not get to learn.
+					if (share.mode !== "public") return yield* notFound
+
+					const document = yield* persistence
+						.get(orgId, share.dashboardId)
+						.pipe(Effect.catch(() => notFound))
+
+					const dashboard = redactForShare(document, share.widgetId ?? null)
+					if (dashboard === null) return yield* notFound
+
+					return new ShareOgMetaResponse({
+						title: ogTitle(dashboard, share.widgetId),
+						description: ogSubtitle(dashboard, share.widgetId),
+						imagePath: `/share/og/${shareOgId(share.id, hmacKey)}.png`,
+					})
+				}),
+			)
+			.handle("ogCard", ({ payload }) =>
+				Effect.gen(function* () {
+					const hmacKey = yield* requireHmacKey
+					// Keyed on the id as presented. A tampered id is rejected below, but
+					// only after this — otherwise the cheap way to hammer the endpoint
+					// would be to send ids that never reach a bucket.
+					yield* enforceOgRateLimit(payload.ogId)
+
+					const shareId = verifyShareOgId(payload.ogId, hmacKey)
+					if (shareId === undefined) return yield* notFound
+
+					// `resolvePublicById` enforces live-and-public in the query itself,
+					// so a revoked link's image URL stops rendering at the same moment
+					// the link stops resolving.
+					const share = yield* shares.resolvePublicById(shareId)
+
+					const document = yield* persistence
+						.get(share.orgId, share.dashboardId)
+						.pipe(Effect.catch(() => notFound))
+
+					const dashboard = redactForShare(document, share.widgetId)
+					if (dashboard === null) return yield* notFound
+
+					const widgetId = share.widgetId ?? undefined
+					const description = ogDescription(dashboard, widgetId)
+					const org = yield* ogOrg(share.orgId)
+
+					const card = {
+						title: ogTitle(dashboard, widgetId),
+						widgetCount: dashboard.widgets.length,
+						tiles: ogTiles(dashboard),
+					}
+					const described = description === undefined ? card : { ...card, description }
+					return new ShareOgCardResponse(org === undefined ? described : { ...described, org })
 				}),
 			)
 	}),

@@ -83,12 +83,14 @@ const makeHarness = () => {
 			}),
 		)
 
-	const request = async (method: string, path: string, token: string, body?: unknown) => {
+	// `token` is optional so the same helper can call the share group, which is
+	// the one v2 surface a caller reaches with no credential at all.
+	const request = async (method: string, path: string, token?: string, body?: unknown) => {
 		const response = await handler(
 			new Request(`http://maple.test${path}`, {
 				method,
 				headers: {
-					authorization: `Bearer ${token}`,
+					...(token === undefined ? undefined : { authorization: `Bearer ${token}` }),
 					...(body !== undefined ? { "content-type": "application/json" } : undefined),
 				},
 				body: body === undefined ? undefined : JSON.stringify(body),
@@ -734,6 +736,136 @@ describe("v2 dashboard shares", () => {
 		// the first one's share.
 		const other = await harness.request("GET", `/v2/dashboards/${id}/widgets/w-2/share`, key.secret)
 		expect(other.body).toBeNull()
+
+		await harness.dispose()
+	})
+})
+
+/**
+ * The social-preview surface, end to end over HTTP.
+ *
+ * Both endpoints are unauthenticated by design — the callers are the page
+ * worker and whatever chat client unfurled the link — so every request below
+ * deliberately carries no bearer.
+ */
+describe("v2 share previews", () => {
+	const createDashboard = async (harness: Harness, key: string) => {
+		const created = await harness.request("POST", "/v2/dashboards", key, {
+			name: "Checkout health",
+			description: "Latency and errors for the checkout path.",
+			time_range: { type: "relative", value: "12h" },
+			widgets: [
+				{
+					id: "w-1",
+					visualization: "stat",
+					data_source: { kind: "static" },
+					display: { title: "Requests" },
+					layout: { x: 0, y: 0, w: 3, h: 4 },
+				},
+				{
+					id: "w-2",
+					visualization: "chart",
+					data_source: { kind: "static" },
+					display: { title: "Latency" },
+					layout: { x: 3, y: 0, w: 9, h: 4 },
+				},
+			],
+			variables: [],
+		})
+		expect(created.status).toBe(200)
+		return created.body.id as string
+	}
+
+	const share = async (harness: Harness, key: string, id: string, mode: "public" | "org") => {
+		const shared = await harness.request("PUT", `/v2/dashboards/${id}/share`, key, { mode })
+		expect(shared.status).toBe(200)
+		return shared.body.token as string
+	}
+
+	it("describes a public link and draws its board", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+		const token = await share(harness, key.secret, id, "public")
+
+		const meta = await harness.request("POST", "/v2/share/og-meta", undefined, { token })
+		expect(meta.status).toBe(200)
+		expect(meta.body.title).toBe("Checkout health")
+		expect(meta.body.description).toBe("Latency and errors for the checkout path.")
+		expect(meta.body.imagePath).toMatch(/^\/share\/og\/[^/]+\.png$/)
+		// The image URL is the one place a share travels beyond the page, so it
+		// must carry nothing that could be replayed as the link itself.
+		expect(meta.body.imagePath).not.toContain(token)
+
+		const ogId = meta.body.imagePath.slice("/share/og/".length, -".png".length)
+		const card = await harness.request("POST", "/v2/share/og-card", undefined, { ogId })
+		expect(card.status).toBe(200)
+		expect(card.body.title).toBe("Checkout health")
+		// The card draws the board's own words, never a rendered sentence — the
+		// image and the `og:description` tag phrase the same board differently.
+		expect(card.body.description).toBe("Latency and errors for the checkout path.")
+		expect(card.body.widgetCount).toBe(2)
+		// No directory in this harness, so the card carries no byline and still
+		// renders everything else.
+		expect(card.body.org).toBeUndefined()
+		expect(card.body.tiles).toEqual([
+			{ x: 0, y: 0, w: 3, h: 4, title: "Requests", visualization: "stat" },
+			{ x: 3, y: 0, w: 9, h: 4, title: "Latency", visualization: "chart" },
+		])
+
+		await harness.dispose()
+	})
+
+	it("refuses an org-only link, without saying that is why", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+		const token = await share(harness, key.secret, id, "org")
+
+		const meta = await harness.request("POST", "/v2/share/og-meta", undefined, { token })
+		expect(meta.status).toBe(404)
+		// Identical to an unknown token: a preview must not be the thing that
+		// tells an anonymous caller a private board exists.
+		const unknown = await harness.request("POST", "/v2/share/og-meta", undefined, {
+			token: "mshare_not-a-real-token",
+		})
+		expect(unknown.status).toBe(404)
+		expect(meta.body).toEqual(unknown.body)
+
+		await harness.dispose()
+	})
+
+	it("stops drawing the moment the link is revoked", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+		const token = await share(harness, key.secret, id, "public")
+
+		const meta = await harness.request("POST", "/v2/share/og-meta", undefined, { token })
+		const ogId = meta.body.imagePath.slice("/share/og/".length, -".png".length)
+
+		await harness.request("DELETE", `/v2/dashboards/${id}/share`, key.secret)
+
+		const card = await harness.request("POST", "/v2/share/og-card", undefined, { ogId })
+		expect(card.status).toBe(404)
+
+		await harness.dispose()
+	})
+
+	it("rejects a tampered image id", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+		const token = await share(harness, key.secret, id, "public")
+
+		const meta = await harness.request("POST", "/v2/share/og-meta", undefined, { token })
+		const ogId: string = meta.body.imagePath.slice("/share/og/".length, -".png".length)
+		const [encodedId] = ogId.split(".") as [string]
+
+		const forged = await harness.request("POST", "/v2/share/og-card", undefined, {
+			ogId: `${encodedId}.not-a-signature`,
+		})
+		expect(forged.status).toBe(404)
 
 		await harness.dispose()
 	})
