@@ -14,6 +14,12 @@
 // version — a migration step, or a test asserting a legacy document still reads.
 
 export {
+	redactForShare,
+	type RedactedDashboard,
+	type RedactedDataSource,
+	type RedactedWidget,
+} from "./redact"
+export {
 	DASHBOARD_MIGRATIONS,
 	type DashboardMigration,
 	detectSchemaVersion,

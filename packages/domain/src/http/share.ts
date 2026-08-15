@@ -16,6 +16,7 @@
  * here, in the schema, rather than by a check somewhere downstream.
  */
 import { Schema } from "effect"
+import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { DashboardId, DashboardShareId, IsoDateTimeString } from "@maple/primitives"
 import { HttpTaggedError } from "./error-policy"
 
@@ -297,3 +298,151 @@ export class SharePersistenceError extends HttpTaggedError<SharePersistenceError
 		exposure: "redacted",
 	},
 ) {}
+
+// ---------------------------------------------------------------------------
+// Viewer-facing surface (unauthenticated /api/share)
+// ---------------------------------------------------------------------------
+
+/**
+ * The window a viewer asks for. Absolute only — see `resolveShareWindow`.
+ */
+export const ShareTimeRange = Schema.Struct({
+	startTime: Schema.String,
+	endTime: Schema.String,
+}).annotate({ identifier: "ShareTimeRange", title: "Shared dashboard time range" })
+export type ShareTimeRange = Schema.Schema.Type<typeof ShareTimeRange>
+
+/**
+ * One widget's data request.
+ *
+ * **This is the entire input surface a share link's holder has.** There is no
+ * field here for a query, an endpoint name, params, or SQL.
+ *
+ * A caller that sends one anyway is not rejected — the decoder strips unknown
+ * keys — but the field never reaches anything, because no code downstream reads
+ * it. That is the stronger guarantee of the two: rejection depends on a
+ * validation rule someone could relax, whereas "there is no code path that
+ * consumes a client-supplied query" is structural. The server reads the
+ * widget's stored data source and builds the query itself; `widgetId` only says
+ * which tile is being asked about.
+ */
+export const ShareWidgetDataRequest = Schema.Struct({
+	widgetId: Schema.String,
+	source: Schema.optionalKey(Schema.Literals(["primary", "sparkline"])),
+}).annotate({ identifier: "ShareWidgetDataRequest", title: "Shared widget data request" })
+export type ShareWidgetDataRequest = Schema.Schema.Type<typeof ShareWidgetDataRequest>
+
+/** Matches the query-engine batch cap, for the same per-request cost reason. */
+export const SHARE_WIDGET_BATCH_MAX = 4
+
+export const ShareResolveRequest = Schema.Struct({
+	token: ShareToken,
+}).annotate({ identifier: "ShareResolveRequest" })
+
+export const ShareWidgetDataPayload = Schema.Struct({
+	token: ShareToken,
+	requests: Schema.Array(ShareWidgetDataRequest).check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(SHARE_WIDGET_BATCH_MAX),
+	),
+	timeRange: ShareTimeRange,
+	/** Selected values, keyed by variable name. Validated against the board's own definitions. */
+	variableValues: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+}).annotate({ identifier: "ShareWidgetDataPayload" })
+export type ShareWidgetDataPayload = Schema.Schema.Type<typeof ShareWidgetDataPayload>
+
+/**
+ * Per-widget outcome.
+ *
+ * Failures ride inside a 200 rather than failing the batch: one widget the
+ * share cannot serve must not blank its neighbours, and "this tile is
+ * unavailable" is a state the page draws, not an error it reports.
+ */
+export const ShareWidgetDataOutcome = Schema.Union([
+	Schema.Struct({
+		widgetId: Schema.String,
+		ok: Schema.Literal(true),
+		data: Schema.Unknown,
+		/** Set when the server narrowed the window for this widget's shape. */
+		narrowedToSeconds: Schema.optionalKey(Schema.Number),
+	}),
+	Schema.Struct({
+		widgetId: Schema.String,
+		ok: Schema.Literal(false),
+		/** `unsupported` draws a muted tile; `failed` draws a retryable error. */
+		reason: Schema.Literals(["unsupported", "not_found", "failed"]),
+		message: Schema.String,
+	}),
+]).annotate({ identifier: "ShareWidgetDataOutcome" })
+export type ShareWidgetDataOutcome = Schema.Schema.Type<typeof ShareWidgetDataOutcome>
+
+export class ShareWidgetDataResponse extends Schema.Class<ShareWidgetDataResponse>("ShareWidgetDataResponse")(
+	{
+		results: Schema.Array(ShareWidgetDataOutcome),
+	},
+) {}
+
+/**
+ * What the share page needs to render before it asks for any data.
+ *
+ * `dashboard` is a redacted projection (see `redactForShare`), never the stored
+ * document.
+ */
+export class SharedDashboardResponse extends Schema.Class<SharedDashboardResponse>("SharedDashboardResponse")(
+	{
+		mode: DashboardShareMode,
+		scope: DashboardShareScope,
+		dashboard: Schema.Unknown,
+		limits: Schema.Struct({
+			maxRangeSeconds: Schema.Number,
+			maxListRangeSeconds: Schema.Number,
+		}),
+		/** True when this link may be rendered inside a third-party iframe. */
+		embeddable: Schema.Boolean,
+	},
+) {}
+
+/**
+ * The unauthenticated share surface.
+ *
+ * **No `.middleware(...)`** — deliberately, following `BillingPublicApiGroup`.
+ * A public share must resolve with no credential at all, and an org-only share
+ * needs the session resolved *optionally* so an anonymous caller can be told to
+ * sign in rather than being rejected by middleware before the handler can see
+ * which mode the link is.
+ *
+ * Every endpoint is a POST with the token in the **body**, never the path. The
+ * web URL is `/share/<token>`, but the API need not mirror it, and keeping the
+ * token out of `url.full` means it never reaches a span attribute, an access
+ * log, or a `Referer` — no tracer suppression rule required.
+ */
+export class SharePublicApiGroup extends HttpApiGroup.make("sharePublic")
+	.add(
+		HttpApiEndpoint.post("resolve", "/resolve", {
+			payload: ShareResolveRequest,
+			success: SharedDashboardResponse,
+			error: [
+				ShareNotFoundError,
+				ShareForbiddenError,
+				ShareRateLimitedError,
+				ShareNotConfiguredError,
+				SharePersistenceError,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("widgetData", "/widget-data", {
+			payload: ShareWidgetDataPayload,
+			success: ShareWidgetDataResponse,
+			error: [
+				ShareNotFoundError,
+				ShareForbiddenError,
+				ShareRangeInvalidError,
+				ShareVariableInvalidError,
+				ShareRateLimitedError,
+				ShareNotConfiguredError,
+				SharePersistenceError,
+			],
+		}),
+	)
+	.prefix("/api/share") {}

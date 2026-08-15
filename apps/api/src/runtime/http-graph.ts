@@ -10,6 +10,7 @@ import { HttpAiTriageLive } from "@/routes/internal/ai-triage.http"
 import { HttpAuthLive, HttpAuthPublicLive } from "@/routes/v1/auth.http"
 import { HttpBillingLive } from "@/routes/internal/billing.http"
 import { HttpBillingPublicLive } from "@/routes/v1/billing-public.http"
+import { HttpSharePublicLive } from "@/routes/v1/share.http"
 import { ChatSessionsRouter } from "@/routes/v1/chat-sessions.http"
 import { HttpChatLive } from "@/routes/internal/chat.http"
 import { V1ErrorBoundaryLive } from "@/routes/v1/error-boundary"
@@ -79,6 +80,7 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpAuthPublicLive),
 	Layer.provide(HttpAuthLive),
 	Layer.provide(HttpBillingPublicLive),
+	Layer.provide(HttpSharePublicLive),
 	Layer.provide(HttpErrorsLive),
 	Layer.provide(HttpIntegrationsLive),
 	Layer.provide(HttpOrgClickHouseSettingsLive),
