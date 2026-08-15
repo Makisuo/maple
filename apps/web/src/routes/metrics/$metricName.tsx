@@ -57,11 +57,11 @@ function MetricDetailPage() {
 		navigate({
 			search: (prev) => ({
 				...prev,
-				...("agg" in patch ? { agg: patch.agg as MetricDetailSearchParams["agg"] } : {}),
-				...("where" in patch ? { where: patch.where || undefined } : {}),
-				...("groupBy" in patch ? { groupBy: patch.groupBy } : {}),
-				...("step" in patch ? { step: patch.step || undefined } : {}),
-				...("bd" in patch ? { bd: patch.bd } : {}),
+				...("agg" in patch ? { agg: patch.agg as MetricDetailSearchParams["agg"] } : undefined),
+				...("where" in patch ? { where: patch.where || undefined } : undefined),
+				...("groupBy" in patch ? { groupBy: patch.groupBy } : undefined),
+				...("step" in patch ? { step: patch.step || undefined } : undefined),
+				...("bd" in patch ? { bd: patch.bd } : undefined),
 			}),
 			replace: true,
 		})

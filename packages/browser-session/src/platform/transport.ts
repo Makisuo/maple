@@ -116,7 +116,7 @@ export async function postSessionBlob(
 			"x-maple-event-count": String(meta.eventCount),
 			"x-maple-duration-ms": String(meta.durationMs),
 		},
-		body: gzipped as unknown as BodyInit,
+		body: gzipped as BodyInit,
 		keepalive: keepaliveFor(keepalive, gzipped.byteLength),
 	}).catch((error) => {
 		// Best-effort.

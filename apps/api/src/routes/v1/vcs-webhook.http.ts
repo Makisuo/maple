@@ -36,7 +36,7 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 					yield* Effect.annotateCurrentSpan({
 						"http.request.method": req.method,
 						"http.route": route,
-						...(deliveryId ? { "vcs.webhook.delivery_id": deliveryId } : {}),
+						...(deliveryId ? { "vcs.webhook.delivery_id": deliveryId } : undefined),
 					})
 
 					const bodyOpt = yield* req.text.pipe(Effect.option)

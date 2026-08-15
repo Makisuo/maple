@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import type * as Duration from "effect/Duration"
@@ -72,7 +73,7 @@ export const make = <A>(initial: A, options?: Options): Store<A> => ({
 	initial,
 	"~source": true,
 	"~sink": true,
-	...(options?.name === undefined ? {} : { name: options.name }),
+	...(!(options?.name === undefined) ? { name: options.name } : undefined),
 })
 
 export const isStore = (value: unknown): value is Store<unknown> =>
@@ -114,7 +115,7 @@ export const combine = <const Sources extends ReadonlyArray<Source<any>>, A>(
 	// eslint-disable-next-line revizo/no-type-assertion
 	initial: compute(...(sources.map((source) => source.initial) as SourceValues<Sources>)),
 	"~source": true,
-	...(options?.name === undefined ? {} : { name: options.name }),
+	...(!(options?.name === undefined) ? { name: options.name } : undefined),
 })
 
 /**
@@ -180,7 +181,8 @@ const Unresolved = Symbol.for("@unitflow/core/Store/Unresolved")
  * means taking the equivalent `withPermit` path.
  */
 const uncontended = (subscriptionRef: SubscriptionRef.SubscriptionRef<any>): boolean => {
-	const free: unknown = Reflect.get(subscriptionRef.semaphore, "free")
+	if (!("free" in subscriptionRef.semaphore)) return false
+	const free = subscriptionRef.semaphore.free
 	return typeof free === "number" && free >= 1
 }
 
@@ -590,7 +592,7 @@ const storeStream = <A>(store: Source<A>): Stream.Stream<A, never, Registry> =>
 					const items = queue
 					queue = []
 					tracker.outstanding = items.length
-					// eslint-disable-next-line revizo/no-type-assertion
+					// SAFETY: the queue-length guard above proves this array contains at least one item.
 					return Effect.succeed(items as unknown as readonly [A, ...Array<A>])
 				}
 				if (closed) return Cause.done()
@@ -603,7 +605,7 @@ const storeStream = <A>(store: Source<A>): Stream.Stream<A, never, Registry> =>
 						const items = queue
 						queue = []
 						tracker.outstanding = items.length
-						// eslint-disable-next-line revizo/no-type-assertion
+						// SAFETY: the queue-length guard above proves this array contains at least one item.
 						return Effect.succeed(items as unknown as readonly [A, ...Array<A>])
 					}),
 					Effect.onInterrupt(() => {

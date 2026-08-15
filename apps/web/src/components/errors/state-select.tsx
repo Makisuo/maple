@@ -10,7 +10,7 @@ const LABEL: Record<WorkflowState, string> = {
 	done: "Done",
 	cancelled: "Cancelled",
 	wontfix: "Wontfix",
-}
+} satisfies Record<WorkflowState, string>
 
 const ALL_STATES: ReadonlyArray<WorkflowState> = [
 	"triage",

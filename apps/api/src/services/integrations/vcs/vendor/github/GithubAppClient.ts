@@ -244,8 +244,11 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				yield* Effect.annotateCurrentSpan({
 					"http.request.method": init?.method ?? "GET",
 					...(Option.isSome(parsed)
-						? { "server.address": parsed.value.host, "url.path": parsed.value.pathname }
-						: {}),
+						? {
+								"server.address": parsed.value.host,
+								"url.path": parsed.value.pathname,
+							}
+						: undefined),
 				})
 				const response = yield* Effect.tryPromise({
 					try: () => http.fetch(url, init),

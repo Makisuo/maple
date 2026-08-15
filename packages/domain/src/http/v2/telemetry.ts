@@ -2,12 +2,11 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { MetricName, ServiceName, SpanId, TraceId } from "../../primitives"
 import { AuthorizationV2 } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { defineV2Error, V2CursorInvalid, V2ParameterInvalid, V2TimeRangeInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 import { V2QueryErrors, V2WarehouseReadErrors } from "./query-errors"
 
-const wireExample = <A>(example: object): A => example as A
 export const V2TelemetryRangeTooLarge = defineV2Error({
 	tag: "@maple/http/v2/TelemetryRangeTooLargeError",
 	status: 400,

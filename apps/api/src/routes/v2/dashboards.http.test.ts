@@ -82,7 +82,7 @@ const makeHarness = () => {
 				method,
 				headers: {
 					authorization: `Bearer ${token}`,
-					...(body !== undefined ? { "content-type": "application/json" } : {}),
+					...(body !== undefined ? { "content-type": "application/json" } : undefined),
 				},
 				body: body === undefined ? undefined : JSON.stringify(body),
 			}),
@@ -225,7 +225,7 @@ describe("v2 dashboards over HTTP", () => {
 			data_source: { kind: "query", result_shape: "timeseries", queries: [] },
 			display: { title: id },
 			layout: { x: 0, y: 0, w: 3, h: 3 },
-			...(timeRange !== undefined ? { time_range: timeRange } : {}),
+			...(timeRange !== undefined ? { time_range: timeRange } : undefined),
 		})
 
 		const created = await harness.request("POST", "/v2/dashboards", key.secret, {

@@ -20,7 +20,7 @@ export interface ScrapeProxyResponse {
 	readonly retryAfterSeconds: number | null
 }
 
-export interface ApiClientShape {
+export interface ApiClientApi {
 	/** Enabled scrape targets from `/api/internal/scrape-targets`. */
 	readonly listTargets: () => Effect.Effect<ReadonlyArray<InternalScrapeTarget>, ApiRequestError>
 	/**
@@ -40,7 +40,7 @@ export interface ApiClientShape {
 
 const decodeTargets = Schema.decodeUnknownEffect(InternalScrapeTargetList)
 
-export class ApiClient extends Context.Service<ApiClient, ApiClientShape>()("@maple/scraper/ApiClient", {
+export class ApiClient extends Context.Service<ApiClient, ApiClientApi>()("@maple/scraper/ApiClient", {
 	make: Effect.gen(function* () {
 		const env = yield* ScraperEnv
 		const client = yield* HttpClient.HttpClient
@@ -141,7 +141,7 @@ export class ApiClient extends Context.Service<ApiClient, ApiClientShape>()("@ma
 			}
 		})
 
-		return { listTargets, scrapeTarget, reportResults } satisfies ApiClientShape
+		return { listTargets, scrapeTarget, reportResults } satisfies ApiClientApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

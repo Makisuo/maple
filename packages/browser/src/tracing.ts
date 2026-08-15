@@ -94,7 +94,7 @@ export function setupTracing(config: ResolvedConfig): () => Promise<void> {
 	const attributes: Record<string, string> = {
 		[ATTR_SERVICE_NAME]: config.serviceName,
 		"maple.sdk.type": "browser",
-	}
+	} satisfies Record<string, string>
 	if (config.serviceNamespace) {
 		attributes["service.namespace"] = config.serviceNamespace
 	}

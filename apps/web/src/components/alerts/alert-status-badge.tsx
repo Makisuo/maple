@@ -19,7 +19,7 @@ const toneByState: Record<AlertStatusState, { dot: string; text: string; label: 
 	error: { dot: "bg-warning", text: "text-warning font-medium", label: "Error" },
 	stale: { dot: "bg-warning", text: "text-warning", label: "Stale" },
 	"no-data": { dot: "bg-muted-foreground", text: "text-muted-foreground", label: "No data" },
-}
+} satisfies Record<AlertStatusState, { dot: string; text: string; label: string }>
 
 export function AlertStatusBadge({
 	state,

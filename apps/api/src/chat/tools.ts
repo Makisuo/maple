@@ -17,7 +17,7 @@ import {
 import { InvestigationId } from "@maple/domain/primitives"
 import { Tool, ToolFailure, type Model, type Tools } from "@maple/llm"
 import { Effect, Option, Schema } from "effect"
-import type { McpToolExecutorShape } from "@/mcp/dispatcher"
+import type { McpToolExecutorApi } from "@/mcp/dispatcher"
 import { buildMapleTools, summarizeToolFailure } from "@/mcp/tools/llm-tools"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import type { TurnUsage } from "./loop/types"
@@ -105,7 +105,7 @@ export const buildSubmitDiagnosisTool = (
  * the proposal first, and `POST /internal/chat/apply` remains the only path that actually mutates.
  */
 export const buildChatTools = (
-	executor: McpToolExecutorShape,
+	executor: McpToolExecutorApi,
 	tenant: TenantContext,
 	ruleset: PermissionRuleset,
 ): Tools =>

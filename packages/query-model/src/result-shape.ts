@@ -6,5 +6,5 @@
  * a union keyed on the shape would turn that switch into a decode failure for
  * any key the new arm doesn't declare.
  */
-export const QUERY_RESULT_SHAPES = ["timeseries", "breakdown", "list"] as const
-export type QueryResultShape = (typeof QUERY_RESULT_SHAPES)[number]
+export const QUERY_RESULT_KINDS = ["timeseries", "breakdown", "list"] as const
+export type QueryResultContract = (typeof QUERY_RESULT_KINDS)[number]

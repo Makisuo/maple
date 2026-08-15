@@ -564,7 +564,7 @@ function serviceReleasesTimelineRawQuery(
 		.groupBy("bucket", "commitSha")
 		.orderBy(["bucket", "asc"])
 		.limit(1000)
-		.format("JSON") as unknown as CHQuery<ColumnDefs, ServiceReleasesTimelineOutput, {}>
+		.format("JSON") as CHQuery<ColumnDefs, ServiceReleasesTimelineOutput, {}>
 }
 
 export function serviceReleasesTimelineQuery(
@@ -588,7 +588,7 @@ export function serviceReleasesTimelineQuery(
 		.groupBy("bucket", "commitSha")
 		.orderBy(["bucket", "asc"])
 		.limit(1000)
-		.format("JSON") as unknown as CHQuery<ColumnDefs, ServiceReleasesTimelineOutput, {}>
+		.format("JSON") as CHQuery<ColumnDefs, ServiceReleasesTimelineOutput, {}>
 }
 
 // Service environments
@@ -680,7 +680,7 @@ export function serviceApdexTimeseriesQuery(
 			})
 			.groupBy("bucket")
 			.orderBy(["bucket", "asc"])
-			.format("JSON") as unknown as CHQuery<ColumnDefs, ServiceApdexTimeseriesOutput, {}>
+			.format("JSON") as CHQuery<ColumnDefs, ServiceApdexTimeseriesOutput, {}>
 	}
 
 	// Routes through `service_overview_spans` (the entry-point MV) rather than
@@ -699,7 +699,7 @@ export function serviceApdexTimeseriesQuery(
 		.where(($) => serviceOverviewWhereConditions($, { serviceName: opts.serviceName }))
 		.groupBy("bucket")
 		.orderBy(["bucket", "asc"])
-		.format("JSON") as unknown as CHQuery<ColumnDefs, ServiceApdexTimeseriesOutput, {}>
+		.format("JSON") as CHQuery<ColumnDefs, ServiceApdexTimeseriesOutput, {}>
 }
 
 // Service usage

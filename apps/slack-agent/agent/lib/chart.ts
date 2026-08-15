@@ -47,7 +47,7 @@ const SERIES_COLORS: Record<ChartUnit, string> = {
 	percent: "#ef2e43",
 	bytes: "#00aa9a",
 	number: "#4a9eff",
-}
+} satisfies Record<ChartUnit, string>
 
 const WIDTH = 720
 const HEIGHT = 320

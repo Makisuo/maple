@@ -9,7 +9,7 @@ import { isTrustedCallbackOrigin, resolveRequestOrigin } from "./integrations.ht
 const fakeRequest = (
 	headers: Record<string, string | undefined>,
 	url = "/v2/integrations/slack/install",
-): HttpServerRequest.HttpServerRequest => ({ headers, url }) as unknown as HttpServerRequest.HttpServerRequest
+): HttpServerRequest.HttpServerRequest => ({ headers, url }) as HttpServerRequest.HttpServerRequest
 
 /**
  * The resolver is UNTRUSTED by design: `x-forwarded-host` is client-supplied on

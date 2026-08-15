@@ -1,3 +1,5 @@
+import * as Predicate from "effect/Predicate"
+
 export type MapleAuthHeaders = Readonly<Record<string, string>>
 
 type MapleAuthHeadersProvider = () => Promise<MapleAuthHeaders> | MapleAuthHeaders
@@ -40,9 +42,9 @@ const readBearerExpMs = (headers: MapleAuthHeaders): number | undefined => {
 	if (segments.length !== 3 || segments[1] === undefined) return undefined
 	try {
 		const claims: unknown = JSON.parse(decodeBase64Url(segments[1]))
-		if (typeof claims !== "object" || claims === null) return undefined
-		const exp = (claims as { exp?: unknown }).exp
-		return typeof exp === "number" && Number.isFinite(exp) ? exp * 1000 : undefined
+		if (!Predicate.isObject(claims)) return undefined
+		const exp = claims.exp
+		return Predicate.isNumber(exp) && Number.isFinite(exp) ? exp * 1000 : undefined
 	} catch {
 		// Not a JWT we can read — fall through to resolving on every call.
 		return undefined
@@ -130,7 +132,7 @@ export const getMapleAuthHeaders = async (): Promise<MapleAuthHeaders> => {
 }
 
 export const setMapleAuthHeaders = (headers: Record<string, string>) => {
-	authHeaders = { ...headers }
+	authHeaders = { ...headers } satisfies MapleAuthHeaders
 }
 
 export const clearMapleAuthHeaders = () => {

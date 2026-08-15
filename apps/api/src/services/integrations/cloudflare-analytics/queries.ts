@@ -89,7 +89,7 @@ export const DatasetSettings = Schema.Struct({
 	maxDuration: nullableNumber,
 	availableFields: nullable(Schema.Array(Schema.String)),
 })
-export type DatasetSettingsShape = typeof DatasetSettings.Type
+export type DatasetSettingsContract = typeof DatasetSettings.Type
 
 const SettingsResponse = Schema.Struct({
 	viewer: Schema.Struct({
@@ -123,7 +123,7 @@ const SettingsResponse = Schema.Struct({
 		),
 	}),
 })
-export type SettingsResponseShape = typeof SettingsResponse.Type
+export type SettingsResponseContract = typeof SettingsResponse.Type
 
 export const decodeSettingsResponse = Schema.decodeUnknownEffect(SettingsResponse)
 
@@ -224,7 +224,7 @@ const HttpGroup = Schema.Struct({
 		clientRequestHTTPHost: nullableString,
 	}),
 })
-export type HttpGroupShape = typeof HttpGroup.Type
+export type HttpGroupDefinition = typeof HttpGroup.Type
 
 const HttpQuantiles = Schema.Struct({
 	edgeTimeToFirstByteMsP50: nullableNumber,
@@ -240,7 +240,7 @@ const HttpLatencyGroup = Schema.Struct({
 	quantiles: nullable(HttpQuantiles),
 	dimensions: Schema.Struct({ datetimeFiveMinutes: Schema.String }),
 })
-export type HttpLatencyGroupShape = typeof HttpLatencyGroup.Type
+export type HttpLatencyGroupDefinition = typeof HttpLatencyGroup.Type
 
 const HttpZoneNode = Schema.Struct({
 	groups: nullable(Schema.Array(HttpGroup)),
@@ -293,7 +293,7 @@ const HttpPathGroup = Schema.Struct({
 		clientRequestPath: nullableString,
 	}),
 })
-export type HttpPathGroupShape = typeof HttpPathGroup.Type
+export type HttpPathGroupDefinition = typeof HttpPathGroup.Type
 
 const HttpPathsZoneNode = Schema.Struct({
 	paths: nullable(Schema.Array(HttpPathGroup)),
@@ -341,7 +341,7 @@ const HttpCountryGroup = Schema.Struct({
 		clientCountryName: nullableString,
 	}),
 })
-export type HttpCountryGroupShape = typeof HttpCountryGroup.Type
+export type HttpCountryGroupDefinition = typeof HttpCountryGroup.Type
 
 const HttpClientGroup = Schema.Struct({
 	count: Schema.Number,
@@ -353,7 +353,7 @@ const HttpClientGroup = Schema.Struct({
 		clientDeviceType: nullableString,
 	}),
 })
-export type HttpClientGroupShape = typeof HttpClientGroup.Type
+export type HttpClientGroupDefinition = typeof HttpClientGroup.Type
 
 const HttpDimensionsZoneNode = Schema.Struct({
 	countryAgg: nullable(Schema.Array(HttpCountryGroup)),
@@ -392,7 +392,7 @@ const FirewallGroup = Schema.Struct({
 		clientRequestHTTPHost: nullableString,
 	}),
 })
-export type FirewallGroupShape = typeof FirewallGroup.Type
+export type FirewallGroupDefinition = typeof FirewallGroup.Type
 
 const FirewallZoneNode = Schema.Struct({ firewall: nullable(Schema.Array(FirewallGroup)) })
 export const decodeFirewallZoneNode = Schema.decodeUnknownEffect(FirewallZoneNode)
@@ -419,7 +419,7 @@ const DnsGroup = Schema.Struct({
 		responseCode: nullableString,
 	}),
 })
-export type DnsGroupShape = typeof DnsGroup.Type
+export type DnsGroupDefinition = typeof DnsGroup.Type
 
 const DnsZoneNode = Schema.Struct({ dns: nullable(Schema.Array(DnsGroup)) })
 export const decodeDnsZoneNode = Schema.decodeUnknownEffect(DnsZoneNode)
@@ -449,7 +449,7 @@ const QueueBacklogGroup = Schema.Struct({
 		queueId: Schema.String,
 	}),
 })
-export type QueueBacklogGroupShape = typeof QueueBacklogGroup.Type
+export type QueueBacklogGroupDefinition = typeof QueueBacklogGroup.Type
 
 const QueueBacklogAccountNode = Schema.Struct({ queueBacklog: nullable(Schema.Array(QueueBacklogGroup)) })
 export const decodeQueueBacklogAccountNode = Schema.decodeUnknownEffect(QueueBacklogAccountNode)
@@ -470,7 +470,7 @@ const QueueConsumersGroup = Schema.Struct({
 		queueId: Schema.String,
 	}),
 })
-export type QueueConsumersGroupShape = typeof QueueConsumersGroup.Type
+export type QueueConsumersGroupDefinition = typeof QueueConsumersGroup.Type
 
 const QueueConsumersAccountNode = Schema.Struct({
 	queueConsumers: nullable(Schema.Array(QueueConsumersGroup)),
@@ -502,7 +502,7 @@ const DurableObjectsGroup = Schema.Struct({
 		scriptName: Schema.String,
 	}),
 })
-export type DurableObjectsGroupShape = typeof DurableObjectsGroup.Type
+export type DurableObjectsGroupDefinition = typeof DurableObjectsGroup.Type
 
 const DurableObjectsAccountNode = Schema.Struct({
 	durableObjects: nullable(Schema.Array(DurableObjectsGroup)),
@@ -550,7 +550,7 @@ const WorkersGroup = Schema.Struct({
 		status: nullableString,
 	}),
 })
-export type WorkersGroupShape = typeof WorkersGroup.Type
+export type WorkersGroupDefinition = typeof WorkersGroup.Type
 
 const WorkersAccountNode = Schema.Struct({ invocations: nullable(Schema.Array(WorkersGroup)) })
 
@@ -657,7 +657,7 @@ const TopTrafficGroup = Schema.Struct({
 		clientRequestPath: nullableString,
 	}),
 })
-export type TopTrafficGroupShape = typeof TopTrafficGroup.Type
+export type TopTrafficGroupDefinition = typeof TopTrafficGroup.Type
 
 const TopTrafficResponse = Schema.Struct({
 	viewer: Schema.Struct({

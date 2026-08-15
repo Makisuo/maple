@@ -59,7 +59,7 @@ export function registerGetDashboardTool(server: McpToolRegistrar) {
 					// Only present when the widget is pinned to its own window; the
 					// absence is meaningful ("follows the dashboard range"), so it must
 					// not become an explicit `undefined` on the way out.
-					...(w.timeRange ? { timeRange: w.timeRange } : {}),
+					...(w.timeRange ? { timeRange: w.timeRange } : undefined),
 				})),
 				createdAt: dashboard.createdAt,
 				updatedAt: dashboard.updatedAt,

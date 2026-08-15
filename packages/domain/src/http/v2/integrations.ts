@@ -7,12 +7,9 @@ import {
 	IntegrationsUpstreamError,
 } from "../integrations"
 import { AuthorizationV2 } from "./auth"
-import { Timestamp } from "./envelopes"
+import { wireExample, Timestamp } from "./envelopes"
 import { V2CallbackHostUnavailable, V2InsufficientPermissions } from "./errors"
 import { publicErrors } from "./public-error"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 // Public Slack v2 contract shared by the browser client and API handlers. The
 // bot token stays server-side; callers discover valid destination channel IDs

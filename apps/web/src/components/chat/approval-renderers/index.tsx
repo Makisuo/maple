@@ -20,7 +20,7 @@ const RENDERERS: Record<string, React.ComponentType<{ input: unknown }>> = {
 	update_dashboard_widget: UpdateDashboardWidgetSummary,
 	remove_dashboard_widget: RemoveDashboardWidgetSummary,
 	reorder_dashboard_widgets: ReorderDashboardWidgetsSummary,
-}
+} satisfies Record<string, React.ComponentType<{ input: unknown }>>
 
 export function ApprovalSummary({ toolName, input }: SummaryProps) {
 	const Renderer = RENDERERS[toolName]

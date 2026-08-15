@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
@@ -32,7 +33,7 @@ const spec = OpenApi.fromApi(MapleApiV2)
 // The generated document carries fields (info.contact, top-level externalDocs,
 // security bearerFormat, schema examples) beyond the pruned `OpenAPISpec` type,
 // so read the dynamic bits through an untyped view.
-const doc = spec as unknown as Record<string, any>
+const doc = spec as Record<string, any>
 const schemas = doc.components.schemas as Record<string, any>
 const operation = (method: string, path: string): Record<string, any> =>
 	(spec.paths as Record<string, any>)[path][method]

@@ -3,7 +3,7 @@ import { WarehouseExecutor, type SqlQueryOptions } from "@maple/query-engine/obs
 import { WarehouseConfigError } from "@maple/domain/http/warehouse-errors"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
 import { Mode } from "./mode"
-import { makeLocalWarehouseExecutorShape } from "./executor"
+import { makeLocalWarehouseExecutorApi } from "./executor"
 
 /**
  * Provides `WarehouseExecutor` whose concrete backend (local chDB vs remote
@@ -24,11 +24,11 @@ export const WarehouseExecutorFromMode = Layer.effect(
 	WarehouseExecutor,
 	Effect.gen(function* () {
 		const mode = yield* Mode
-		const getShape = yield* Effect.cached(
+		const getExecutor = yield* Effect.cached(
 			mode.resolve.pipe(
 				Effect.flatMap((m) =>
 					m._tag === "local"
-						? Effect.succeed(makeLocalWarehouseExecutorShape(m.baseUrl))
+						? Effect.succeed(makeLocalWarehouseExecutorApi(m.baseUrl))
 						: // Remote mode never reaches the executor: `operations.ts`
 							// dispatches to the v2 client before asking for one. Anything
 							// that lands here is an operation that forgot to branch, so
@@ -51,13 +51,17 @@ export const WarehouseExecutorFromMode = Layer.effect(
 		return WarehouseExecutor.of({
 			orgId: "",
 			query: <T>(pipe: string, params: Record<string, unknown>, options?: SqlQueryOptions) =>
-				getShape.pipe(
-					Effect.flatMap((shape) => shape.query<T>(pipe as WarehouseQueryName, params, options)),
+				getExecutor.pipe(
+					Effect.flatMap((executor) =>
+						executor.query<T>(pipe as WarehouseQueryName, params, options),
+					),
 				),
 			compiledQuery: (compiled, options?: SqlQueryOptions) =>
-				getShape.pipe(Effect.flatMap((shape) => shape.compiledQuery(compiled, options))),
+				getExecutor.pipe(Effect.flatMap((executor) => executor.compiledQuery(compiled, options))),
 			compiledQueryFirst: (compiled, options?: SqlQueryOptions) =>
-				getShape.pipe(Effect.flatMap((shape) => shape.compiledQueryFirst(compiled, options))),
+				getExecutor.pipe(
+					Effect.flatMap((executor) => executor.compiledQueryFirst(compiled, options)),
+				),
 		})
 	}),
 )

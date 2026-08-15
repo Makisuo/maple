@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { InternalRpcToolNotFoundError, type InternalMcpToolDescriptor } from "@maple/domain/internal-rpc"
 import { Context, Effect, Layer } from "effect"
 import { executeRegisteredMcpToolUnscoped, mapleToolCatalog, toInputSchema } from "./tools/registry"
@@ -110,7 +111,7 @@ const callMcpToolUnscoped = Effect.fn("McpToolDispatcher.call")(function* (name:
 	)
 })
 
-export interface McpToolExecutorShape {
+export interface McpToolExecutorApi {
 	readonly execute: (
 		tenant: TenantContext,
 		name: string,
@@ -125,7 +126,7 @@ export interface McpToolExecutorShape {
  * must then supply its authenticated tenant explicitly, so no transport can
  * accidentally execute a raw handler without CurrentMcpTenant.
  */
-export class McpToolExecutor extends Context.Service<McpToolExecutor, McpToolExecutorShape>()(
+export class McpToolExecutor extends Context.Service<McpToolExecutor, McpToolExecutorApi>()(
 	"@maple/api/mcp/McpToolExecutor",
 	{
 		make: Effect.gen(function* () {

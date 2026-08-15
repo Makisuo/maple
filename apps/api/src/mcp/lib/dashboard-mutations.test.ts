@@ -189,7 +189,7 @@ describe("dashboard mutations on tag-less / description-less dashboards", () => 
 		}
 		registerUpdateDashboardTool(registrar)
 		assert.isNotNull(handler)
-		const invoke = handler as unknown as ToolHandler
+		const invoke = handler as ToolHandler
 
 		return Effect.gen(function* () {
 			yield* DashboardPersistenceService.upsert(asOrgId(ORG), asUserId("seed-user"), seed())

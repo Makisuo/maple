@@ -11,7 +11,7 @@ export const SPAN_KIND_LABELS: Record<string, string> = {
 	SPAN_KIND_PRODUCER: "Producer",
 	SPAN_KIND_CONSUMER: "Consumer",
 	SPAN_KIND_INTERNAL: "Internal",
-}
+} satisfies Record<string, string>
 
 /** Human label for a span kind, degrading gracefully for unknown/absent kinds. */
 export function getSpanKindLabel(spanKind: string | null | undefined): string {
@@ -24,7 +24,7 @@ export const SPAN_STATUS_BADGE_CLASSES: Record<string, string> = {
 	Ok: "bg-severity-info/15 text-severity-info border-severity-info/30",
 	Error: "bg-severity-error/15 text-severity-error border-severity-error/30",
 	Unset: "bg-muted text-muted-foreground border-border",
-}
+} satisfies Record<string, string>
 
 /** Badge classes for a span status, treating unknown statuses as `Unset`. */
 export function getSpanStatusBadgeClass(statusCode: string | null | undefined): string {

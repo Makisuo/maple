@@ -4,7 +4,7 @@ import { ConfigProvider, Effect, Layer, Tracer } from "effect"
 import { Env } from "@/platform/Env"
 import { makeRecordingTracer, spansNamed } from "@/testing/recording-tracer"
 import { GithubAppClient } from "@/services/integrations/vcs/vendor/github/GithubAppClient"
-import { GithubHttp, type GithubHttpShape } from "@/services/integrations/vcs/vendor/github/GithubHttp"
+import { GithubHttp, type GithubHttpApi } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 
 // The GitHub REST call must be a Client-kind span carrying `peer.service` —
 // that pair is what draws the GitHub node and its edge on the service map. An
@@ -42,7 +42,7 @@ const jsonResponse = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
 const stubHttp = (respond: () => Response) =>
-	Layer.succeed(GithubHttp, { fetch: async () => respond() } satisfies GithubHttpShape)
+	Layer.succeed(GithubHttp, { fetch: async () => respond() } satisfies GithubHttpApi)
 
 describe("GithubAppClient request span", () => {
 	it.effect("emits a Client-kind span with peer.service and HTTP attributes", () => {

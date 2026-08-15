@@ -10,17 +10,17 @@ const comparatorLabel: Record<string, string> = {
 	gte: ">=",
 	lt: "<",
 	lte: "<=",
-}
+} satisfies Record<string, string>
 
 const statusIcon: Record<string, string> = {
 	open: "🔴",
 	resolved: "✅",
-}
+} satisfies Record<string, string>
 
 const severityIcon: Record<string, string> = {
 	critical: "🔥",
 	warning: "⚠️",
-}
+} satisfies Record<string, string>
 
 function formatTimestamp(iso: string | null): string {
 	if (!iso) return "—"

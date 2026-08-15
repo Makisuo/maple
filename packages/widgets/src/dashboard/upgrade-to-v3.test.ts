@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
@@ -7,7 +8,7 @@ import {
 	dataSourceRouteParams,
 	dataSourceTransform,
 } from "./access"
-import { MARKDOWN_STATIC_ENDPOINT, QUERY_SHAPE_ENDPOINTS, RAW_SQL_ENDPOINT } from "./legacy-endpoints"
+import { MARKDOWN_STATIC_ENDPOINT, QUERY_RESULT_ENDPOINTS, RAW_SQL_ENDPOINT } from "./legacy-endpoints"
 import { DashboardDocumentV3 } from "./v3/document"
 import { isDocumentV3, upgradeDocumentToV3 } from "./upgrade-to-v3"
 
@@ -15,8 +16,8 @@ const query = { id: "a", name: "A", dataSource: "traces", aggregation: "count" }
 
 /** One v2 data source per legacy endpoint family — the full input space. */
 const V2_SOURCES: ReadonlyArray<{ label: string; source: Record<string, unknown> }> = [
-	...Object.entries(QUERY_SHAPE_ENDPOINTS).map(([shape, endpoint]) => ({
-		label: `query/${shape}`,
+	...Object.entries(QUERY_RESULT_ENDPOINTS).map(([resultKind, endpoint]) => ({
+		label: `query/${resultKind}`,
 		source: {
 			endpoint,
 			params: {
@@ -158,7 +159,7 @@ describe("the v3 upgrade recurses into display.sparkline.dataSource", () => {
 				title: "T",
 				sparkline: {
 					enabled: true,
-					dataSource: { endpoint: QUERY_SHAPE_ENDPOINTS.timeseries, params: { queries: [query] } },
+					dataSource: { endpoint: QUERY_RESULT_ENDPOINTS.timeseries, params: { queries: [query] } },
 				},
 			},
 		)
@@ -219,7 +220,7 @@ describe("isDocumentV3", () => {
 // quarantine, and a quarantined row is a dashboard nobody can open.
 describe("repairs v2-era drafts that were never validated", () => {
 	const withLimit = (limit: unknown) => ({
-		endpoint: QUERY_SHAPE_ENDPOINTS.breakdown,
+		endpoint: QUERY_RESULT_ENDPOINTS.breakdown,
 		params: { queries: [{ ...query, limit }] },
 	})
 
@@ -231,9 +232,7 @@ describe("repairs v2-era drafts that were never validated", () => {
 
 	it("makes the repaired document decode, where it would otherwise quarantine", () => {
 		const decode = Schema.decodeUnknownSync(DashboardDocumentV3)
-		expect(() =>
-			decode({ ...upgraded(documentWith(withLimit(50))), schemaVersion: 3 }),
-		).not.toThrow()
+		expect(() => decode({ ...upgraded(documentWith(withLimit(50))), schemaVersion: 3 })).not.toThrow()
 	})
 
 	it("leaves a well-formed string limit alone", () => {

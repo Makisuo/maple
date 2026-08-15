@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 // Hermetic helpers for archive adversarial probes.
 //
 // Every probe must run from a fresh clone with an otherwise-empty /tmp, use an

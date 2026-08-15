@@ -8,7 +8,7 @@ export const PRIORITY_LABEL: Record<PriorityLevel, string> = {
 	2: "High",
 	3: "Medium",
 	4: "Low",
-}
+} satisfies Record<PriorityLevel, string>
 
 interface PriorityBarsIconProps extends IconProps {
 	level: PriorityLevel

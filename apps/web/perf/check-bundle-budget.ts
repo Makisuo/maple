@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { readFileSync } from "node:fs"
 import { gzipSync } from "node:zlib"
 import { join } from "node:path"

@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { Cause, Exit, Option, Schema } from "effect"
 import { HttpClientError } from "effect/unstable/http"
 import {

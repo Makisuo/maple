@@ -74,8 +74,8 @@ export const warehouseTargetIdentity = (config: ResolvedWarehouseConfig): Wareho
 export const warehouseTargetAttributes = (config: ResolvedWarehouseConfig): Record<string, string> => {
 	const { namespace, address } = warehouseTargetIdentity(config)
 	return {
-		...(namespace === "" ? {} : { "db.namespace": namespace }),
-		...(address === "" ? {} : { "server.address": address }),
+		...(!(namespace === "") ? { "db.namespace": namespace } : undefined),
+		...(!(address === "") ? { "server.address": address } : undefined),
 	}
 }
 
@@ -167,4 +167,4 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		unquote64BitIntegers: true,
 		managedSchema: false,
 	},
-}
+} satisfies Record<WarehouseBackendKind, WarehouseBackendDialect>

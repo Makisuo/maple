@@ -6,7 +6,7 @@ import { Effect, Layer } from "effect"
 import {
 	Database,
 	type DatabaseClient,
-	type DatabaseShape,
+	type DatabaseApi,
 	executeWithSpan,
 	toDatabaseError,
 } from "./DatabaseLive"
@@ -26,12 +26,13 @@ export const PGLITE_DB_NAMESPACE = "pglite"
  * only re-derives drizzle's relational config (PGlite still serializes the
  * actual queries), and this layer is vitest/local-only.
  */
-export const databaseFromInstance = (pglite: PGlite): DatabaseShape =>
+export const databaseFromInstance = (pglite: PGlite): DatabaseApi =>
 	Database.of({
 		execute: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 			executeWithSpan(
 				(hooks) =>
 					fn(
+						// SAFETY: this test-only PGlite client implements the query surface used through DatabaseClient.
 						createMaplePgliteClient(pglite, {
 							onQuery: hooks.collect,
 						}) as unknown as DatabaseClient,
@@ -42,7 +43,7 @@ export const databaseFromInstance = (pglite: PGlite): DatabaseShape =>
 				// deployed traffic on visibly distinct nodes.
 				{ "db.namespace": PGLITE_DB_NAMESPACE },
 			),
-	} satisfies DatabaseShape)
+	} satisfies DatabaseApi)
 
 const makeFromInstance = (pglite: PGlite) =>
 	Effect.gen(function* () {

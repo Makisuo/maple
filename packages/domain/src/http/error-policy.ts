@@ -245,6 +245,7 @@ export const HttpTaggedError =
 			fields,
 			{ httpApiStatus: policy.status },
 		)
+		// SAFETY: the generated TaggedError class is extended only to add the self-describing HTTP error view.
 		const SelfDescribingErrorClass = class extends (ErrorClass as unknown as new (
 			...args: Array<unknown>
 		) => SelfDescribingHttpError) {
@@ -338,8 +339,8 @@ export const publicHttpErrorBody = <Error extends SelfDescribingHttpError>(
 		message: policy.exposure === "public_message" ? error.message : resolve(policy.message, error),
 		retryable: policy.retry !== "never",
 		recovery: policy.recovery,
-		...(retryAfterSeconds === undefined ? {} : { retry_after_seconds: retryAfterSeconds }),
-		...(retryAt === undefined ? {} : { retry_at: retryAt }),
-		...(param === undefined ? {} : { param }),
+		...(!(retryAfterSeconds === undefined) ? { retry_after_seconds: retryAfterSeconds } : undefined),
+		...(!(retryAt === undefined) ? { retry_at: retryAt } : undefined),
+		...(!(param === undefined) ? { param } : undefined),
 	}
 }

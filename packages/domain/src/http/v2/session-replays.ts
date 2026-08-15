@@ -2,13 +2,10 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { SessionId, TraceId } from "../../primitives"
 import { AuthorizationV2 } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { defineV2Error, V2ParameterInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 import { V2WarehouseReadErrors } from "./query-errors"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 /** `srep_…` public ID ⇄ internal `SessionId` (free-form string). */
 export const SessionReplayPublicId = PublicId(PublicIdPrefixes.sessionReplay, SessionId)

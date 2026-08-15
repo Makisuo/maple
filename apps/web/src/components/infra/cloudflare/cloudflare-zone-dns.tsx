@@ -23,7 +23,7 @@ const RESPONSE_CODE_COLORS: Record<string, string> = {
 	SERVFAIL: "var(--severity-error)",
 	REFUSED: "color-mix(in oklab, var(--severity-error) 60%, transparent)",
 	unknown: "color-mix(in oklab, var(--muted-foreground) 35%, transparent)",
-}
+} satisfies Record<string, string>
 
 const RESPONSE_CODE_ORDER = ["NOERROR", "NXDOMAIN", "SERVFAIL", "REFUSED", "unknown"]
 

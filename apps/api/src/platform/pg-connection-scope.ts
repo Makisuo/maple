@@ -53,7 +53,7 @@ const CONNECT_TIMEOUT_SECONDS = 10
  * the Workflow entrypoints hold one directly. There is no second implementation
  * of "open a socket, wrap it per call, put a span around it".
  */
-export interface PgConnectionScopeShape {
+export interface PgConnectionScopeApi {
 	/** Run one logical DB call on the scope's connection, inside the standard client span. */
 	readonly run: <T>(fn: (db: DatabaseClient) => Promise<T>) => Effect.Effect<T, DatabaseError>
 	/** Release the connection. Safe when nothing was ever created, and safe to call twice. */
@@ -67,7 +67,7 @@ export interface PgConnectionScopeShape {
  * time and fall back to a per-call scope where none was installed (Workflow
  * entrypoints, tests, any future entry point that forgets to wrap).
  */
-export class PgConnectionScope extends Context.Reference<PgConnectionScopeShape | undefined>(
+export class PgConnectionScope extends Context.Reference<PgConnectionScopeApi | undefined>(
 	"@maple/api/platform/PgConnectionScope",
 	{ defaultValue: () => undefined },
 ) {}
@@ -99,7 +99,7 @@ export const makePgConnectionScope = (
 	connectionString: string,
 	extraAttributes?: Record<string, unknown>,
 	seams?: PgConnectionScopeSeams,
-): PgConnectionScopeShape => {
+): PgConnectionScopeApi => {
 	const options: MaplePgSocketOptions = {
 		maxConnections: MAX_CONNECTIONS,
 		connectTimeoutSeconds: CONNECT_TIMEOUT_SECONDS,
@@ -140,7 +140,7 @@ export const makePgConnectionScope = (
 export const pgConnectionScopeFrom = (
 	db: DatabaseClient,
 	extraAttributes?: Record<string, unknown>,
-): PgConnectionScopeShape => ({
+): PgConnectionScopeApi => ({
 	run: (fn) => executeWithSpan(() => fn(db), extraAttributes),
 	close: () => Promise.resolve(),
 })
@@ -173,7 +173,7 @@ export const executeOnFreshPgClient = <T>(
  * connection string or a live server.
  */
 export const withPgConnectionScopeOf = <A, E, R>(
-	scope: PgConnectionScopeShape,
+	scope: PgConnectionScopeApi,
 	program: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> =>
 	program.pipe(

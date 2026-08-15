@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("../session/session", () => ({
@@ -35,7 +36,7 @@ describe("startEventSink baseline counters", () => {
 
 	it("counts unhandled rejections as errors", () => {
 		const sink = startEventSink(CONFIG, "sess-2")
-		window.dispatchEvent(new Event("unhandledrejection") as unknown as PromiseRejectionEvent)
+		window.dispatchEvent(new Event("unhandledrejection") as PromiseRejectionEvent)
 
 		expect(sink.getErrorCount()).toBe(1)
 		sink.stop()

@@ -420,6 +420,7 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 								<div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
 									Failed to introspect ClickHouse:{" "}
 									{getExitErrorMessage(
+										// SAFETY: this branch has already excluded loading and success, leaving the failure Exit variant.
 										diffResult as unknown as Exit.Exit<unknown, unknown>,
 										"check that credentials are valid",
 									)}

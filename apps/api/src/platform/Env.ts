@@ -6,7 +6,7 @@ class EnvValidationError extends Data.TaggedError("@maple/api/lib/EnvValidationE
 	readonly message: string
 }> {}
 
-export interface EnvShape {
+export interface EnvConfig {
 	readonly PORT: number
 	readonly TINYBIRD_HOST: string
 	readonly TINYBIRD_TOKEN: Redacted.Redacted<string>
@@ -232,7 +232,7 @@ const envConfig = Config.all({
 })
 
 const makeEnv = Effect.gen(function* () {
-	const env: EnvShape = yield* envConfig
+	const env: EnvConfig = yield* envConfig
 
 	if (env.MAPLE_DEFAULT_ORG_ID.trim().length === 0) {
 		return yield* Effect.die(new EnvValidationError({ message: "MAPLE_DEFAULT_ORG_ID cannot be empty" }))
@@ -304,6 +304,6 @@ const makeEnv = Effect.gen(function* () {
 	return Env.of(env)
 })
 
-export class Env extends Context.Service<Env, EnvShape>()("@maple/api/lib/Env") {
+export class Env extends Context.Service<Env, EnvConfig>()("@maple/api/lib/Env") {
 	static readonly layer = Layer.effect(this, makeEnv)
 }

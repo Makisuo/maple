@@ -15,7 +15,7 @@ import { formatSignalValue } from "./anomaly-format"
 const SEVERITY_STROKE: Record<"critical" | "warning", string> = {
 	critical: "var(--destructive)",
 	warning: "var(--chart-4)",
-}
+} satisfies Record<"critical" | "warning", string>
 
 export function AnomalyTimeseriesChart({
 	incident,

@@ -26,7 +26,7 @@ const routedTo = (dataSource: WidgetDataSource): string =>
 /** The query arm's request-shaping fields, which v2 kept in the `params` bag. */
 const queryFields = (dataSource: WidgetDataSource): Record<string, unknown> => {
 	if (dataSource.kind !== "query") throw new Error(`expected a query source, got ${dataSource.kind}`)
-	const { kind: _kind, resultShape: _shape, transform: _transform, ...fields } = dataSource
+	const { kind: _kind, resultShape: _resultKind, transform: _transform, ...fields } = dataSource
 	return fields
 }
 

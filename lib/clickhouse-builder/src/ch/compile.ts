@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 // Query Compilation
 //
 // Compiles a CHQuery + params into a SQL string by:
@@ -121,8 +122,8 @@ const makeCompiledQuery = <Output, Routing extends "ingest" | undefined>(
 		: undefined
 
 	const decodeRows: CompiledQueryBase<Output>["decodeRows"] = (rows) => {
-		if (!rowSchema) return Effect.succeed(rows as unknown as ReadonlyArray<Output>)
-		if (!decodeRow) return Effect.succeed(rows as unknown as ReadonlyArray<Output>)
+		if (!rowSchema) return Effect.succeed(rows as ReadonlyArray<Output>)
+		if (!decodeRow) return Effect.succeed(rows as ReadonlyArray<Output>)
 
 		return Effect.forEach(rows, (row, index) =>
 			decodeRow(row).pipe(
@@ -142,12 +143,12 @@ const makeCompiledQuery = <Output, Routing extends "ingest" | undefined>(
 		sql,
 		tenantScope,
 		rowSchemaDeclared: rowSchema !== undefined,
-		...(routing === undefined ? {} : { routing }),
+		...(!(routing === undefined) ? { routing } : undefined),
 		decodeRows,
 		decodeFirstRow: (rows) => {
 			const row = rows[0]
 			if (row == null) return Effect.succeed(Option.none<Output>())
-			if (!decodeRow) return Effect.succeed(Option.some(row as unknown as Output))
+			if (!decodeRow) return Effect.succeed(Option.some(row as Output))
 
 			return decodeRow(row).pipe(
 				Effect.map(Option.some),

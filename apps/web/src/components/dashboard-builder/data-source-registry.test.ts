@@ -8,7 +8,7 @@ import { getServerFunction, toWidgetRequest } from "./data-source-registry"
  *
  * The cases below are stated as "the stored data source" → "the request the old
  * endpoint/params code sent", because at schema v2 the two MUST be identical.
- * The v3 arm of each pair asserts the same request from the shape it migrates
+ * The v3 arm of each pair asserts the same request from the resultKind it migrates
  * to, which is the property that makes the version flip a no-op here.
  */
 
@@ -26,7 +26,7 @@ describe("toWidgetRequest — query-builder widgets", () => {
 		})
 	})
 
-	it("builds the identical request from the v3 shape", () => {
+	it("builds the identical request from the v3 resultKind", () => {
 		expect(
 			toWidgetRequest({
 				kind: "query",
@@ -43,13 +43,13 @@ describe("toWidgetRequest — query-builder widgets", () => {
 		)
 	})
 
-	it("maps each result shape onto the server function that already serves it", () => {
-		for (const [shape, endpoint] of [
+	it("maps each result resultKind onto the server function that already serves it", () => {
+		for (const [resultKind, endpoint] of [
 			["timeseries", "custom_query_builder_timeseries"],
 			["breakdown", "custom_query_builder_breakdown"],
 			["list", "custom_query_builder_list"],
 		] as const) {
-			const request = toWidgetRequest({ kind: "query", resultShape: shape, queries: [] })
+			const request = toWidgetRequest({ kind: "query", resultShape: resultKind, queries: [] })
 			expect(request?.endpoint).toBe(endpoint)
 			expect(getServerFunction(request?.endpoint ?? "")).toBeDefined()
 		}
@@ -77,7 +77,7 @@ describe("toWidgetRequest — raw SQL", () => {
 		})
 	})
 
-	it("builds the identical request from the v3 shape", () => {
+	it("builds the identical request from the v3 resultKind", () => {
 		expect(toWidgetRequest({ kind: "raw_sql", sql: "SELECT 1", displayType: "line" })).toEqual(
 			toWidgetRequest({ endpoint: "raw_sql_chart", params: { sql: "SELECT 1", displayType: "line" } }),
 		)

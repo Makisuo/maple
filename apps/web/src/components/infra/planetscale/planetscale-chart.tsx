@@ -35,7 +35,7 @@ const METRIC_LABELS: Record<PlanetScaleMetric, string> = {
 	memMaxPercent: "Memory utilization (max)",
 	storageUsedPercent: "Storage used (max)",
 	replicaLagMaxSeconds: "Replica lag (max)",
-}
+} satisfies Record<PlanetScaleMetric, string>
 
 const METRIC_COLORS: Record<PlanetScaleMetric, string> = {
 	connectionsAvg: "var(--chart-1)",
@@ -43,7 +43,7 @@ const METRIC_COLORS: Record<PlanetScaleMetric, string> = {
 	memMaxPercent: "var(--chart-3)",
 	storageUsedPercent: "var(--chart-5)",
 	replicaLagMaxSeconds: "var(--chart-4)",
-}
+} satisfies Record<PlanetScaleMetric, string>
 
 function formatMetricValue(value: number, metric: PlanetScaleMetric): string {
 	if (metric === "cpuMaxPercent" || metric === "memMaxPercent") return formatPercent(value / 100)

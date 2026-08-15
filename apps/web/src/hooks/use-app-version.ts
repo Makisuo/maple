@@ -1,4 +1,5 @@
 import * as React from "react"
+import * as Predicate from "effect/Predicate"
 
 import { useMountEffect } from "@/hooks/use-mount-effect"
 
@@ -22,9 +23,9 @@ const fetchDeployedCommit = async (): Promise<string | null> => {
 		const response = await fetch(`/version.json?t=${Date.now()}`, { cache: "no-store" })
 		if (!response.ok) return null
 		const body: unknown = await response.json()
-		if (typeof body !== "object" || body === null) return null
-		const commit = (body as { commit?: unknown }).commit
-		return typeof commit === "string" && commit.length > 0 ? commit : null
+		if (!Predicate.isObject(body)) return null
+		const commit = body.commit
+		return Predicate.isString(commit) && commit.length > 0 ? commit : null
 	} catch {
 		// Offline, or a deploy swapping assets underneath us. Either way this is a
 		// best-effort background probe: staying quiet and trying again on the next

@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { createHash } from "node:crypto"
 import {
 	LOCAL_SCHEMA_V1_MANIFEST,
@@ -286,9 +287,11 @@ const decodeRawReplayProgress = (value: unknown): RawReplayProgress => {
 	return {
 		sourceInventory,
 		copied,
-		...(progress.pendingBatch === undefined
-			? {}
-			: { pendingBatch: decodePendingBatch(progress.pendingBatch, "legacy raw replay pendingBatch") }),
+		...(!(progress.pendingBatch === undefined)
+			? {
+					pendingBatch: decodePendingBatch(progress.pendingBatch, "legacy raw replay pendingBatch"),
+				}
+			: undefined),
 	}
 }
 
@@ -364,11 +367,13 @@ const tableColumns = async (
 	return rows.map((row) => ({
 		name: row.name,
 		type: row.type,
-		...(!row.default_kind ? {} : { defaultKind: row.default_kind }),
-		...(!row.default_expression ? {} : { defaultExpression: row.default_expression }),
-		...(!row.compression_codec || row.compression_codec === "NONE"
-			? {}
-			: { codec: row.compression_codec }),
+		...(!!row.default_kind ? { defaultKind: row.default_kind } : undefined),
+		...(!!row.default_expression ? { defaultExpression: row.default_expression } : undefined),
+		...(!(!row.compression_codec || row.compression_codec === "NONE")
+			? {
+					codec: row.compression_codec,
+				}
+			: undefined),
 	}))
 }
 

@@ -25,7 +25,7 @@ function widgets(opts: {
 		metricName: opts.metricName,
 		metricType: opts.metricType,
 		...(opts.serviceName && { serviceName: opts.serviceName }),
-	}
+	} satisfies Record<string, unknown>
 	return [
 		{
 			id: "metric-current",

@@ -2285,6 +2285,7 @@ export function ServiceMapCanvas({
 									onMoveEnd={onMoveEnd}
 									defaultViewport={savedViewport ?? undefined}
 									onInit={(instance) => {
+										// SAFETY: this ref intentionally erases the node/edge generics after ReactFlow initialization.
 										rfInstance.current = instance as unknown as ReactFlowInstance
 									}}
 									nodeTypes={nodeTypes}

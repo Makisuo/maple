@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { Clock, Config, Context, Effect, Layer, Option, Schema } from "effect"
 import { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 
@@ -65,7 +66,7 @@ export interface EdgeCacheReadResult<A> {
 	readonly readMs: number
 }
 
-export interface EdgeCacheServiceShape {
+export interface EdgeCacheServiceApi {
 	readonly getOrCompute: <A, E, R, I = unknown>(
 		options: EdgeCacheGetOrComputeOptions<A, I>,
 		compute: Effect.Effect<A, E, R>,
@@ -186,14 +187,14 @@ const READ_BREAKER_OPEN_RATIO = 0.5
 const READ_BREAKER_MIN_SAMPLES = 3
 
 /**
- * Build an `EdgeCacheServiceShape` against a specific backend. Exported for
+ * Build an `EdgeCacheServiceApi` against a specific backend. Exported for
  * tests so they can substitute a fake backend (e.g. a JSON-roundtripping one)
  * without going through `detectWorkersCache`.
  */
 export const makeEdgeCacheService = (
 	backend: EdgeCacheBackend,
 	readTimeoutMs = DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS,
-): EdgeCacheServiceShape => {
+): EdgeCacheServiceApi => {
 	const boundedReadTimeoutMs = Number.isFinite(readTimeoutMs)
 		? Math.max(1, Math.floor(readTimeoutMs))
 		: DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS
@@ -479,10 +480,10 @@ export const makeEdgeCacheService = (
 		rawGetDetailed,
 		rawGet,
 		rawPut,
-	} satisfies EdgeCacheServiceShape
+	} satisfies EdgeCacheServiceApi
 }
 
-export class EdgeCacheService extends Context.Service<EdgeCacheService, EdgeCacheServiceShape>()(
+export class EdgeCacheService extends Context.Service<EdgeCacheService, EdgeCacheServiceApi>()(
 	"@maple/cache/EdgeCacheService",
 ) {
 	/**

@@ -15,14 +15,14 @@ export type DbConnectionSource =
 	  }
 	| { readonly _tag: "Unavailable"; readonly reason: string }
 
-interface HyperdriveBindingShape {
+interface HyperdriveBindingContract {
 	readonly connectionString: string
 	readonly host: string
 	readonly port: number
 	readonly database: string
 }
 
-const isHyperdriveBinding = (value: unknown): value is HyperdriveBindingShape => {
+const isHyperdriveBinding = (value: unknown): value is HyperdriveBindingContract => {
 	if (typeof value !== "object" || value === null) return false
 	const candidate = value as Record<string, unknown>
 	return (

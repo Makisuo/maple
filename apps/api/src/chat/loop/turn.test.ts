@@ -23,7 +23,7 @@ import { MAX_STEP_ATTEMPTS } from "./budgets"
 import { DEFAULT_RULESET } from "../permissions"
 import type { AgentDefinition } from "../agents"
 import { PermissionRule } from "@maple/domain/permission"
-import type { McpToolExecutorShape } from "@/mcp/dispatcher"
+import type { McpToolExecutorApi } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
 const TENANT: TenantContext = {
@@ -38,7 +38,7 @@ const TOOL_EXECUTOR = {
 		Effect.succeed({
 			content: [{ type: "text" as const, text: `${name} completed` }],
 		}),
-} satisfies McpToolExecutorShape
+} satisfies McpToolExecutorApi
 
 const MODEL: Model = CloudflareWorkersAI.configure({
 	accountId: "test",
@@ -139,11 +139,11 @@ const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) =
 		messages: [],
 		messageId: "m1",
 		observability,
-		...(overrides.isCurrent ? { isCurrent: overrides.isCurrent } : {}),
-		...(overrides.softStop ? { softStop: overrides.softStop } : {}),
-		...(overrides.agent ? { agent: overrides.agent } : {}),
-		...(overrides.extraTools ? { extraTools: overrides.extraTools } : {}),
-		...(overrides.closingSubmit ? { closingSubmit: overrides.closingSubmit } : {}),
+		...(overrides.isCurrent ? { isCurrent: overrides.isCurrent } : undefined),
+		...(overrides.softStop ? { softStop: overrides.softStop } : undefined),
+		...(overrides.agent ? { agent: overrides.agent } : undefined),
+		...(overrides.extraTools ? { extraTools: overrides.extraTools } : undefined),
+		...(overrides.closingSubmit ? { closingSubmit: overrides.closingSubmit } : undefined),
 	}).pipe(
 		Stream.runCollect,
 		Effect.map((events) => Array.from(events) as ChatTurnEvent[]),

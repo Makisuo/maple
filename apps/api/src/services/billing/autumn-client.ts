@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { EdgeCacheServiceShape } from "@maple/cache"
+import type { EdgeCacheServiceApi } from "@maple/cache"
 import { isActivePlanSubscription } from "@maple/domain/billing"
 import { BillingUpstreamError } from "@maple/domain/http"
 import type { AutumnResult } from "./autumn-http"
@@ -55,7 +55,7 @@ class UncacheableAutumnResult extends Schema.TaggedError<UncacheableAutumnResult
  * from the cache (for span annotation).
  */
 export const readCustomerCached = (
-	edgeCache: Pick<EdgeCacheServiceShape, "getOrCompute">,
+	edgeCache: Pick<EdgeCacheServiceApi, "getOrCompute">,
 	orgId: string,
 	runAutumn: Effect.Effect<AutumnResult, BillingUpstreamError>,
 ): Effect.Effect<{ readonly result: AutumnResult; readonly hit: boolean }, BillingUpstreamError> =>

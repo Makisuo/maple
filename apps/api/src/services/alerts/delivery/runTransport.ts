@@ -27,7 +27,7 @@ export interface TransportRuntime {
 }
 
 export const makeDeliveryError = (message: string, destinationType?: AlertDestinationType, cause?: unknown) =>
-	new AlertDeliveryError({ message, destinationType, ...(cause === undefined ? {} : { cause }) })
+	new AlertDeliveryError({ message, destinationType, ...(!(cause === undefined) ? { cause } : undefined) })
 
 /**
  * Best-effort read of a failure body for the error message. Truncated and
@@ -100,10 +100,10 @@ const sendHttp = Effect.fn("AlertDelivery.http", { kind: "client" })(function* (
 	yield* Effect.annotateCurrentSpan({
 		"peer.service": transport.peerService,
 		"http.request.method": "POST",
-		...(Option.isSome(parsed) ? { "server.address": parsed.value.host } : {}),
+		...(Option.isSome(parsed) ? { "server.address": parsed.value.host } : undefined),
 		// Never `url.full`, and `url.path` only when the path carries no secret:
 		// Discord and Hazel webhook URLs embed their delivery token in the path.
-		...(Option.isSome(parsed) && !spec.sensitivePath ? { "url.path": parsed.value.pathname } : {}),
+		...(Option.isSome(parsed) && !spec.sensitivePath ? { "url.path": parsed.value.pathname } : undefined),
 	})
 
 	const response = yield* Effect.tryPromise({

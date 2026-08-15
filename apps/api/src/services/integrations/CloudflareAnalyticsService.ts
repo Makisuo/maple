@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 /**
  * Cloudflare edge-analytics collector.
  *
@@ -131,8 +132,8 @@ import {
 	workersSelection,
 	zoneAnalyticsDocument,
 	zoneChunkSizeFor,
-	type DatasetSettingsShape,
-	type SettingsResponseShape,
+	type DatasetSettingsContract,
+	type SettingsResponseContract,
 } from "./cloudflare-analytics/queries"
 import * as Integrations from "@maple/query-engine-integrations"
 
@@ -244,9 +245,9 @@ interface DatasetDef {
 	 * response carried nothing for this row (its cached settings stay untouched).
 	 */
 	readonly settingsNode: (
-		decoded: SettingsResponseShape,
+		decoded: SettingsResponseContract,
 		row: CloudflareAnalyticsStateRow,
-	) => DatasetSettingsShape | null | undefined
+	) => DatasetSettingsContract | null | undefined
 }
 
 const decodeError = (dataset: string) =>
@@ -259,9 +260,9 @@ const decodeError = (dataset: string) =>
  * the path/dimension datasets ride the existing `settingsQuery` unchanged.
  */
 const httpZoneSettingsNode = (
-	decoded: SettingsResponseShape,
+	decoded: SettingsResponseContract,
 	row: CloudflareAnalyticsStateRow,
-): DatasetSettingsShape | null | undefined => {
+): DatasetSettingsContract | null | undefined => {
 	const zone = (decoded.viewer.zones ?? []).find((entry) => entry.zoneTag === row.zoneId)
 	return zone === undefined ? undefined : (zone.settings?.httpRequestsAdaptiveGroups ?? null)
 }
@@ -612,7 +613,7 @@ const parseStoredSettings = (settingsJson: string | null): ParsedSettings => {
 
 /** `availableFields` naming isn't pinned by docs — match on substring, defaulting to available. */
 const quantilesFromAvailableFields = (
-	settings: DatasetSettingsShape | null | undefined,
+	settings: DatasetSettingsContract | null | undefined,
 	needle: string,
 ): boolean => {
 	const fields = settings?.availableFields
@@ -940,7 +941,7 @@ const observeDatasetFailure = (orgId: OrgId, failure: DatasetPollFailure) =>
 		Effect.ignore,
 	)
 
-interface CloudflareAnalyticsZoneStatusShape {
+interface CloudflareAnalyticsZoneStatusFields {
 	readonly id: string
 	readonly name: string
 	readonly enabled: boolean
@@ -950,7 +951,7 @@ interface CloudflareAnalyticsZoneStatusShape {
 }
 
 interface CloudflareAnalyticsStatus {
-	readonly zones: ReadonlyArray<CloudflareAnalyticsZoneStatusShape>
+	readonly zones: ReadonlyArray<CloudflareAnalyticsZoneStatusFields>
 	readonly workers: {
 		readonly enabled: boolean
 		readonly lastSyncedAt: number | null
@@ -981,7 +982,7 @@ interface PollAllOrgsSummary {
 	}>
 }
 
-export interface CloudflareAnalyticsServiceShape {
+export interface CloudflareAnalyticsServiceApi {
 	readonly pollAllOrgs: () => Effect.Effect<PollAllOrgsSummary, IntegrationsPersistenceError>
 	readonly pollOrg: (orgId: OrgId) => Effect.Effect<PollOrgSummary, IntegrationsPersistenceError>
 	readonly getStatus: (
@@ -1001,7 +1002,7 @@ export interface CloudflareAnalyticsServiceShape {
 
 export class CloudflareAnalyticsService extends Context.Service<
 	CloudflareAnalyticsService,
-	CloudflareAnalyticsServiceShape
+	CloudflareAnalyticsServiceApi
 >()("@maple/api/services/CloudflareAnalyticsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -1050,7 +1051,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			updateRows(rowIds, {
 				lastError: message.slice(0, 500),
 				lastErrorAt: new Date(now),
-				...(options?.disable ? { enabled: false } : {}),
+				...(options?.disable ? { enabled: false } : undefined),
 				updatedAt: new Date(now),
 			})
 
@@ -1066,7 +1067,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					.set({
 						lastError: message.slice(0, 500),
 						lastErrorAt: new Date(now),
-						...(options?.disable ? { enabled: false } : {}),
+						...(options?.disable ? { enabled: false } : undefined),
 						updatedAt: new Date(now),
 					})
 					.where(eq(cloudflareAnalyticsState.orgId, orgId)),
@@ -1317,7 +1318,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 						query: settingsQuery({ withZones: plan.zoneIds.length > 0 }),
 						variables: {
 							accountTag: accountId,
-							...(plan.zoneIds.length > 0 ? { zoneTags: plan.zoneIds } : {}),
+							...(plan.zoneIds.length > 0 ? { zoneTags: plan.zoneIds } : undefined),
 						},
 					},
 					apiBaseUrl,
@@ -1367,7 +1368,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 							settings,
 							dataset.availableFieldsNeedle,
 						),
-						...(settings?.enabled === false ? { enabled: false } : {}),
+						...(settings?.enabled === false ? { enabled: false } : undefined),
 						updatedAt: new Date(now),
 					}
 					const key = `${set.settingsJson}|${set.quantilesAvailable}|${set.enabled ?? ""}`
@@ -2292,7 +2293,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 				["queue", QUEUE_SERVICE_PREFIX],
 				["zone", ZONE_SERVICE_PREFIX],
 			]
-			const KIND_ORDER: Record<"zone" | "worker" | "queue", number> = { zone: 0, worker: 1, queue: 2 }
+			const KIND_ORDER: Record<"zone" | "worker" | "queue", number> = {
+				zone: 0,
+				worker: 1,
+				queue: 2,
+			} satisfies Record<"zone" | "worker" | "queue", number>
 			const services = [...byService.entries()]
 				.map(([serviceName, agg]) => {
 					const match = SERVICE_KINDS.find(([, prefix]) => serviceName.startsWith(prefix))
@@ -2399,7 +2404,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			getUsage,
 			listHyperdriveConfigs: listHyperdriveConfigsForOrg,
 			resetOrgState,
-		} satisfies CloudflareAnalyticsServiceShape
+		} satisfies CloudflareAnalyticsServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))

@@ -34,7 +34,7 @@ const KIND_ICON: Record<Exclude<DependencyKind, "service">, typeof DatabaseIcon>
 	http: GlobeIcon,
 	messaging: PaperPlaneIcon,
 	rpc: NetworkNodesIcon,
-}
+} satisfies Record<Exclude<DependencyKind, "service">, typeof DatabaseIcon>
 
 /**
  * "Talks to" strip: the service's busiest downstream targets as one quiet row of

@@ -43,7 +43,7 @@ export const LENS_COPY: Record<SeedLensId, LensCopy> = {
 		question: "Volume and mix against the 7-day baseline for that hour",
 		checkLabel: "Request volume",
 	},
-}
+} satisfies Record<SeedLensId, LensCopy>
 
 /**
  * The subset of a lane this needs. Structural rather than the full wire row, so a

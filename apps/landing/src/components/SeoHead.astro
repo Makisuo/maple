@@ -26,9 +26,8 @@ const jsonLd = {
     "@type": type,
     name: title,
     description,
-    ...(resolvedUrl ? { url: resolvedUrl } : {}),
-    ...(type === "SoftwareApplication"
-        ? {
+    ...((resolvedUrl) ? ({ url: resolvedUrl }) : undefined),
+    ...((type === "SoftwareApplication") ? ({
               applicationCategory: "DeveloperApplication",
               operatingSystem: "Web",
               offers: {
@@ -36,10 +35,8 @@ const jsonLd = {
                   price: "0",
                   priceCurrency: "USD",
               },
-          }
-        : {}),
-    ...(competitorName
-        ? {
+          }) : undefined),
+    ...((competitorName) ? ({
               about: [
                   {
                       "@type": "SoftwareApplication",
@@ -52,8 +49,7 @@ const jsonLd = {
                       applicationCategory: "DeveloperApplication",
                   },
               ],
-          }
-        : {}),
+          }) : undefined),
 };
 
 const organizationJsonLd = includeOrganization ? {

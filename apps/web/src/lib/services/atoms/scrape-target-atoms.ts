@@ -13,7 +13,7 @@ export const scrapeTargetsListAtom = MapleApiV2AtomClient.runtime.atom(
 			client.scrapeTargets.list({
 				query: {
 					limit: PAGE_LIMIT,
-					...(cursor !== undefined ? { cursor } : {}),
+					...(cursor !== undefined ? { cursor } : undefined),
 				},
 			}),
 		)

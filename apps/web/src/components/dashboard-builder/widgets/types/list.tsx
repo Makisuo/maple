@@ -95,7 +95,7 @@ export const listWidgetType: WidgetTypeDefinition = {
 			resultShape: "list",
 			queries: [queryForEngine],
 			limit,
-			...(columnFields.length > 0 ? { columns: columnFields } : {}),
+			...(columnFields.length > 0 ? { columns: columnFields } : undefined),
 		})
 	},
 

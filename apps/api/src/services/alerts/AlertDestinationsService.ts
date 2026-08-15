@@ -31,13 +31,13 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { validateExternalUrl } from "@/http/url-validator"
-import { HazelOAuthService, type HazelOAuthServiceShape } from "@/services/auth/HazelOAuthService"
+import { HazelOAuthService, type HazelOAuthServiceApi } from "@/services/auth/HazelOAuthService"
 import { makeDbExecute } from "@/platform/db-execute"
 import { makePersistenceError } from "./alert-persistence"
 import {
 	OrgMembersService,
 	type OrgMember,
-	type OrgMembersServiceShape,
+	type OrgMembersServiceApi,
 } from "@/services/org/OrgMembersService"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
 import { PAGERDUTY_ROUTING_KEY_PATTERN, verifyPagerDutyRoutingKey } from "./delivery/transports/pagerduty"
@@ -59,7 +59,7 @@ const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
 
 const makeValidationError = (message: string, details: ReadonlyArray<string> = [], cause?: unknown) =>
-	new AlertValidationError({ message, details, ...(cause === undefined ? {} : { cause }) })
+	new AlertValidationError({ message, details, ...(!(cause === undefined) ? { cause } : undefined) })
 
 const normalizeOptionalString = (value: string | null | undefined) => {
 	const trimmed = value?.trim()
@@ -95,8 +95,8 @@ const emailSecretConfig = (members: ReadonlyArray<OrgMember>): DestinationSecret
 })
 
 type AlertDestinationDependencyError =
-	| Effect.Error<ReturnType<HazelOAuthServiceShape["createChannelWebhook"]>>
-	| Effect.Error<ReturnType<OrgMembersServiceShape["resolveMembers"]>>
+	| Effect.Error<ReturnType<HazelOAuthServiceApi["createChannelWebhook"]>>
+	| Effect.Error<ReturnType<OrgMembersServiceApi["resolveMembers"]>>
 
 const encryptSecret = (
 	plaintext: string,
@@ -212,7 +212,7 @@ const rowToDestinationDocument = (
 			}),
 	})
 
-export interface AlertDestinationsServiceShape {
+export interface AlertDestinationsServiceApi {
 	readonly listDestinations: (
 		orgId: OrgId,
 	) => Effect.Effect<
@@ -279,7 +279,7 @@ export interface AlertDestinationsServiceShape {
 
 export class AlertDestinationsService extends Context.Service<
 	AlertDestinationsService,
-	AlertDestinationsServiceShape
+	AlertDestinationsServiceApi
 >()("@maple/api/services/alerts/AlertDestinationsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -309,7 +309,7 @@ export class AlertDestinationsService extends Context.Service<
 			return yield* Effect.fail(
 				new AlertForbiddenError({
 					message: "Only org admins can manage alerts",
-					...(roles.length > 0 ? { roles: [...roles] } : {}),
+					...(roles.length > 0 ? { roles: [...roles] } : undefined),
 				}),
 			)
 		})
@@ -400,7 +400,7 @@ export class AlertDestinationsService extends Context.Service<
 			}
 		})
 
-		const createDestination: AlertDestinationsServiceShape["createDestination"] = Effect.fn(
+		const createDestination: AlertDestinationsServiceApi["createDestination"] = Effect.fn(
 			"AlertsService.createDestination",
 		)(function* (orgId, userId, roles, request) {
 			yield* requireAdmin(roles)
@@ -470,7 +470,7 @@ export class AlertDestinationsService extends Context.Service<
 			return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 		})
 
-		const updateDestination: AlertDestinationsServiceShape["updateDestination"] = Effect.fn(
+		const updateDestination: AlertDestinationsServiceApi["updateDestination"] = Effect.fn(
 			"AlertsService.updateDestination",
 		)(function* (orgId, userId, roles, destinationId, request) {
 			yield* requireAdmin(roles)
@@ -697,7 +697,7 @@ export class AlertDestinationsService extends Context.Service<
 			return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 		})
 
-		const deleteDestination: AlertDestinationsServiceShape["deleteDestination"] = Effect.fn(
+		const deleteDestination: AlertDestinationsServiceApi["deleteDestination"] = Effect.fn(
 			"AlertsService.deleteDestination",
 		)(function* (orgId, roles, destinationId) {
 			yield* requireAdmin(roles)
@@ -741,11 +741,11 @@ export class AlertDestinationsService extends Context.Service<
 			const txid = readTxid(deleted)
 			return new AlertDestinationDeleteResponse({
 				id: destinationId,
-				...(txid !== undefined && { txid }),
+				...(txid !== undefined ? { txid } : undefined),
 			})
 		})
 
-		const testDestination: AlertDestinationsServiceShape["testDestination"] = Effect.fn(
+		const testDestination: AlertDestinationsServiceApi["testDestination"] = Effect.fn(
 			"AlertsService.testDestination",
 		)(function* (orgId, _userId, roles, destinationId) {
 			yield* requireAdmin(roles)
@@ -793,7 +793,7 @@ export class AlertDestinationsService extends Context.Service<
 			updateDestination,
 			deleteDestination,
 			testDestination,
-		} satisfies AlertDestinationsServiceShape
+		} satisfies AlertDestinationsServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SlackBotTokenResolver.layer))

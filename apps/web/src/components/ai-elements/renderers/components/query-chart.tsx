@@ -49,7 +49,10 @@ export function QueryChart({ props }: RendererComponentProps<QueryChartProps>) {
 	const chartData = useMemo(
 		() =>
 			data.map((point) => {
-				const row: Record<string, unknown> = { bucket: point.bucket }
+				const row: Record<string, unknown> = { bucket: point.bucket } satisfies Record<
+					string,
+					unknown
+				>
 				for (const [orig, safe] of keyMap) {
 					if (orig in point.series) {
 						row[safe] = point.series[orig]

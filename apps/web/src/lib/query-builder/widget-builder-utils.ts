@@ -159,7 +159,7 @@ function timeseriesDataSource(state: QueryBuilderWidgetState): {
 				mode: state.comparisonMode,
 				includePercentChange: state.includePercentChange,
 			},
-			...(sharedTransform === undefined ? {} : { transform: sharedTransform }),
+			...(!(sharedTransform === undefined) ? { transform: sharedTransform } : undefined),
 		}),
 	}
 }

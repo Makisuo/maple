@@ -71,7 +71,7 @@ interface GithubConnectStatus {
 	readonly repositories: ReadonlyArray<GithubRepoStatus>
 }
 
-export interface GithubConnectServiceShape {
+export interface GithubConnectServiceApi {
 	/** Create a single-use state row and the GitHub install URL to open. */
 	readonly startConnect: (
 		orgId: OrgId,
@@ -144,10 +144,10 @@ const fromGithubError = (error: GithubAppError) =>
 			})
 		: new IntegrationsUpstreamError({
 				message: error.message,
-				...(error.status === undefined ? {} : { status: error.status }),
+				...(!(error.status === undefined) ? { status: error.status } : undefined),
 			})
 
-export class GithubConnectService extends Context.Service<GithubConnectService, GithubConnectServiceShape>()(
+export class GithubConnectService extends Context.Service<GithubConnectService, GithubConnectServiceApi>()(
 	"@maple/api/services/vcs/vendor/github/GithubConnectService",
 	{
 		make: Effect.gen(function* () {
@@ -321,7 +321,9 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 								error.status === 404 || error.status === 410
 									? "installation gone/missing"
 									: "github upstream failure",
-							...(error.status === undefined ? {} : { "vcs.github.status": error.status }),
+							...(!(error.status === undefined)
+								? { "vcs.github.status": error.status }
+								: undefined),
 						}),
 					),
 					Effect.mapError(fromGithubError),
@@ -658,7 +660,7 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 				disconnect,
 				deleteRepository,
 				setTrackedBranch,
-			} satisfies GithubConnectServiceShape
+			} satisfies GithubConnectServiceApi
 		}),
 	},
 ) {

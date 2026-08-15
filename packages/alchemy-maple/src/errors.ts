@@ -80,6 +80,7 @@ export const makeMapleApiResponseError = <const Tag extends MapleHttpErrorTag>(
 			return this.error.message
 		}
 	}
+	// SAFETY: TaggedResponseError carries the branded body and tag supplied to this factory.
 	return new TaggedResponseError({ status, error }) as unknown as MapleApiResponseError<Tag>
 }
 

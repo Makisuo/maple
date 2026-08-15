@@ -37,7 +37,7 @@ const SEVERITY_RANK: Record<IssueSeverity, number> = {
 	high: 3,
 	medium: 2,
 	low: 1,
-}
+} satisfies Record<IssueSeverity, number>
 
 export const severityRank = (severity: IssueSeverity | null): number =>
 	severity === null ? 0 : SEVERITY_RANK[severity]
@@ -214,7 +214,7 @@ export const applyTriageSeverity = async (
 				investigationId: input.investigationId ?? null,
 				payloadJson: {
 					confidence: input.confidence,
-					...(input.result ? { triage: input.result } : {}),
+					...(input.result ? { triage: input.result } : undefined),
 				},
 				deliveryResultsJson: [],
 				status: "queued",

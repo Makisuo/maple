@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
 import { compileCH } from "@maple-dev/clickhouse-builder"
@@ -19,8 +20,8 @@ import {
 	auditPeerValueRowSchema,
 	auditSamplingByServiceQuery,
 	auditSamplingRowSchema,
-	auditSpanShapeByServiceQuery,
-	auditSpanShapeRowSchema,
+	auditSpanProfileByServiceQuery,
+	auditSpanProfileRowSchema,
 } from "./setup-audit"
 
 const baseParams = {
@@ -32,7 +33,7 @@ const baseParams = {
 /** Compiled up front: the builders return differently-shaped queries, and only the SQL is compared. */
 const compiledQueries: ReadonlyArray<readonly [string, string]> = [
 	["auditAttributeKeyInventoryQuery", compileCH(auditAttributeKeyInventoryQuery(), baseParams).sql],
-	["auditSpanShapeByServiceQuery", compileCH(auditSpanShapeByServiceQuery(), baseParams).sql],
+	["auditSpanShapeByServiceQuery", compileCH(auditSpanProfileByServiceQuery(), baseParams).sql],
 	["auditSamplingByServiceQuery", compileCH(auditSamplingByServiceQuery(), baseParams).sql],
 	["auditLogSeverityByServiceQuery", compileCH(auditLogSeverityByServiceQuery(), baseParams).sql],
 	["auditMetricLabelCardinalityQuery", compileCH(auditMetricLabelCardinalityQuery(), baseParams).sql],
@@ -61,7 +62,7 @@ describe("auditAttributeKeyInventoryQuery", () => {
 
 describe("auditSpanShapeByServiceQuery", () => {
 	it("splits weighted counts by span kind and flags non-Title-Case literals", () => {
-		const { sql } = compileCH(auditSpanShapeByServiceQuery(), baseParams)
+		const { sql } = compileCH(auditSpanProfileByServiceQuery(), baseParams)
 		expect(sql).toContain("FROM traces_aggregates_hourly")
 		expect(sql).toContain("sumIf(WeightedCount, SpanKind = 'Server')")
 		expect(sql).toContain("sumIf(WeightedCount, DeploymentEnv = '')")
@@ -71,7 +72,7 @@ describe("auditSpanShapeByServiceQuery", () => {
 	})
 
 	it("snaps both window bounds to the hour so partial windows still match the rollup", () => {
-		const { sql } = compileCH(auditSpanShapeByServiceQuery(), baseParams)
+		const { sql } = compileCH(auditSpanProfileByServiceQuery(), baseParams)
 		expect(sql).toContain("Hour >= toStartOfHour(toDateTime('2024-01-01 00:00:00'))")
 		expect(sql).toContain("Hour <= toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
 	})
@@ -242,7 +243,7 @@ describe("row schemas decode both ClickHouse and Tinybird numeric encodings", ()
 			"spanShape",
 			() =>
 				expectBothEncodings(
-					Schema.decodeUnknownSync(auditSpanShapeRowSchema),
+					Schema.decodeUnknownSync(auditSpanProfileRowSchema),
 					{ serviceName: "api", badStatusCodes: ["ERROR"], badSpanKinds: [] },
 					{
 						weightedSpanCount: 10,

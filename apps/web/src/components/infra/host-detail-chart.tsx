@@ -51,7 +51,7 @@ const HOST_METRIC_LABELS: Record<HostInfraMetric, string> = {
 	filesystem: "Disk",
 	network: "Network",
 	load15: "Load (15m)",
-}
+} satisfies Record<HostInfraMetric, string>
 
 export function HostDetailChart({
 	hostName,

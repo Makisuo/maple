@@ -49,7 +49,7 @@ const VALID_GROUP_BY: Record<string, readonly string[]> = {
 	traces: ["service.name", "span.name", "status.code", "http.method", "none"],
 	logs: ["service.name", "severity", "none"],
 	metrics: ["service.name", "none"],
-}
+} satisfies Record<string, readonly string[]>
 
 function validateGroupBy(rawGroupBy: string, source: string, widgetTitle: string): string | null {
 	const validOptions = VALID_GROUP_BY[source] ?? []
@@ -137,10 +137,10 @@ function simpleSpecToWidget(
 		whereClause: where,
 		groupBy,
 		metricName: spec.metric_name,
-		...(metricType === null || metricType === undefined ? {} : { metricType }),
+		...(!(metricType === null || metricType === undefined) ? { metricType } : undefined),
 	})
 
-	const display: Record<string, unknown> = { title: spec.title }
+	const display: Record<string, unknown> = { title: spec.title } satisfies Record<string, unknown>
 	display.unit = spec.unit ?? inferUnit(metric)
 
 	if (viz === "table") {
@@ -174,7 +174,7 @@ function simpleSpecToWidget(
 				id,
 				visualization: viz,
 				dataSource: makeRouteDataSource("list_logs", {
-					...(spec.service_name && { service: spec.service_name }),
+					...(spec.service_name ? { service: spec.service_name } : undefined),
 					limit: 10,
 				}),
 				display: { title: spec.title, listDataSource: "logs", listLimit: 10 },
@@ -185,7 +185,7 @@ function simpleSpecToWidget(
 			id,
 			visualization: viz,
 			dataSource: makeRouteDataSource("list_traces", {
-				...(spec.service_name && { service: spec.service_name }),
+				...(spec.service_name ? { service: spec.service_name } : undefined),
 				limit: 10,
 			}),
 			display: { title: spec.title, listDataSource: "traces", listLimit: 10 },
@@ -416,7 +416,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 
 				portable = yield* decodePortableDashboard({
 					name: params.name,
-					...(params.description && { description: params.description }),
+					...(params.description ? { description: params.description } : undefined),
 					timeRange: { type: "relative", value: timeRangeValue },
 					widgets: result,
 				}).pipe(
@@ -475,8 +475,8 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 						const description = params.description ?? built.description
 						return new PortableDashboardDocument({
 							name: params.name || built.name,
-							...(description && { description }),
-							...(built.tags && { tags: built.tags }),
+							...(description ? { description } : undefined),
+							...(built.tags ? { tags: built.tags } : undefined),
 							// An explicit time_range wins over the template's default —
 							// this branch used to drop the parameter entirely.
 							timeRange: params.time_range
@@ -566,7 +566,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 							createdAt: dashboard.createdAt,
 							updatedAt: dashboard.updatedAt,
 						},
-						...(validation.ran && { validation }),
+						...(validation.ran ? { validation } : undefined),
 					},
 				}),
 			}

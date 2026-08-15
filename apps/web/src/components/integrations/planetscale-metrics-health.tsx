@@ -97,4 +97,4 @@ const HEADLINE: Record<MetricsHealthState, string> = {
 	stalled: "Metrics collection stalled",
 	waiting: "Waiting for first metrics",
 	healthy: "Metrics",
-}
+} satisfies Record<MetricsHealthState, string>

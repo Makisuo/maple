@@ -73,7 +73,7 @@ function PolicySimulator() {
 			payload: new EscalationPolicyEvaluationRequest({
 				severity,
 				source,
-				...(source === "ai" ? { confidence } : {}),
+				...(source === "ai" ? { confidence } : undefined),
 			}),
 		})
 		setBusy(false)

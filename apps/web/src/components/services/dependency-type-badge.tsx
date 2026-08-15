@@ -25,7 +25,7 @@ const labels: Record<DependencyKind, string> = {
 	http: "HTTP",
 	messaging: "Queue",
 	rpc: "RPC",
-}
+} satisfies Record<DependencyKind, string>
 
 // Token-based palette so the badge tracks the user's theme. Each tone maps a
 // category onto an existing chart/severity token (mirroring MetricTypeBadge) so
@@ -37,7 +37,7 @@ const tones: Record<DependencyKind, string> = {
 	http: "bg-foreground/5 text-muted-foreground",
 	messaging: "bg-chart-4/10 text-chart-4",
 	rpc: "bg-chart-5/10 text-chart-5",
-}
+} satisfies Record<DependencyKind, string>
 
 function getIcon(kind: DependencyKind) {
 	switch (kind) {

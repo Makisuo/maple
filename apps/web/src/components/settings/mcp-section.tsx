@@ -25,9 +25,9 @@ function generateConfig(client: "claude-code" | "cursor" | "windsurf" | "other",
 	const config = {
 		mcpServers: {
 			maple: {
-				...(isWindsurf ? {} : { type: "http" }),
+				...(!isWindsurf ? { type: "http" } : undefined),
 				[urlKey]: mcpEndpoint,
-				...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}),
+				...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined),
 			},
 		},
 	}
@@ -46,7 +46,7 @@ const CONFIG_FILE_HINTS: Record<string, string> = {
 	cursor: ".cursor/mcp.json",
 	windsurf: "~/.codeium/windsurf/mcp_config.json",
 	other: "",
-}
+} satisfies Record<string, string>
 
 export function McpSection() {
 	const [createDialogOpen, setCreateDialogOpen] = useState(false)

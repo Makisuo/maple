@@ -11,7 +11,7 @@ export class DatabaseError extends Schema.TaggedError<DatabaseError>()("@maple/a
 	cause: Schema.Unknown,
 }) {}
 
-export interface DatabaseShape {
+export interface DatabaseApi {
 	readonly execute: <T>(fn: (db: DatabaseClient) => Promise<T>) => Effect.Effect<T, DatabaseError>
 }
 
@@ -143,4 +143,4 @@ export const executeWithSpan = Effect.fn("Database.execute", {
 	return result
 })
 
-export class Database extends Context.Service<Database, DatabaseShape>()("@maple/api/services/Database") {}
+export class Database extends Context.Service<Database, DatabaseApi>()("@maple/api/services/Database") {}

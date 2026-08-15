@@ -61,7 +61,7 @@ const toTenantContext = (encoded: ChatTurnTenantEncoded): TenantContext => {
 		userId: tenant.userId,
 		roles: [...tenant.roles],
 		authMode: tenant.authMode,
-		...(tenant.actorId === undefined ? {} : { actorId: tenant.actorId }),
+		...(!(tenant.actorId === undefined) ? { actorId: tenant.actorId } : undefined),
 	}
 }
 
@@ -244,14 +244,18 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	const annotateTurn = () =>
 		Effect.annotateCurrentSpan({
 			"maple.chat.outcome": observability.outcome ?? "unknown",
-			...(observability.finishReason === undefined
-				? {}
-				: { "maple.chat.finish_reason": observability.finishReason }),
+			...(!(observability.finishReason === undefined)
+				? {
+						"maple.chat.finish_reason": observability.finishReason,
+					}
+				: undefined),
 			"maple.chat.empty_output": observability.emptyOutput,
 			"maple.chat.recovery_count": observability.recoveryCount,
-			...(observability.failureReason === undefined
-				? {}
-				: { "maple.chat.failure_reason": observability.failureReason }),
+			...(!(observability.failureReason === undefined)
+				? {
+						"maple.chat.failure_reason": observability.failureReason,
+					}
+				: undefined),
 		})
 
 	const program = Effect.gen(function* () {

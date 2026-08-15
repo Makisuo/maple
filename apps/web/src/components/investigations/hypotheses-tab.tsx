@@ -13,7 +13,7 @@ const VERDICT_LABEL: Record<LensVerdict, string> = {
 	ruled_out: "Ruled out",
 	rejected: "Rejected",
 	pending: "Running",
-}
+} satisfies Record<LensVerdict, string>
 
 const VERDICT_TONE: Record<LensVerdict, string> = {
 	promoted: "bg-success/12 text-success",
@@ -21,7 +21,7 @@ const VERDICT_TONE: Record<LensVerdict, string> = {
 	ruled_out: "bg-muted text-muted-foreground",
 	rejected: "bg-destructive/12 text-destructive",
 	pending: "bg-primary/10 text-primary",
-}
+} satisfies Record<LensVerdict, string>
 
 const VERDICT_DOT: Record<LensVerdict, string> = {
 	promoted: "bg-success",
@@ -29,7 +29,7 @@ const VERDICT_DOT: Record<LensVerdict, string> = {
 	ruled_out: "bg-muted-foreground/40",
 	rejected: "bg-destructive",
 	pending: "bg-primary animate-pulse",
-}
+} satisfies Record<LensVerdict, string>
 
 /**
  * The trust payload. A promoted cause on its own asks to be believed; this table

@@ -26,7 +26,7 @@ export const webhookTransport: HttpTransport<Config> = {
 							.update(input.payloadJson)
 							.digest("hex"),
 					}
-				: {}),
+				: undefined),
 		},
 		body: input.payloadJson,
 		// Customer-supplied host: this is exactly what the SSRF guard is for.

@@ -29,12 +29,16 @@ function approvalCtx(toolName: string, auth: AuthOverrides | null = {}): Approva
 		toolName,
 		callId: "call_1",
 		approvedTools: new Set<string>(),
+		getSandbox: () => Promise.reject(new Error("Sandbox access is not available in approval tests.")),
+		getSkill: () => {
+			throw new Error("Skill access is not available in approval tests.")
+		},
 		session: {
 			id: "session_1",
 			auth: { current, initiator: current },
 			turn: { id: "turn_0", sequence: 0 },
 		},
-	} as unknown as ApprovalContext
+	}
 }
 
 const APP_PRINCIPAL: AuthOverrides = {

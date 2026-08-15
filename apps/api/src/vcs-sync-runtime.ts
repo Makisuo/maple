@@ -164,11 +164,13 @@ export const processBatch = (batch: MessageBatch<unknown>) =>
 								"vcs.queue.message.outcome": outcome,
 								// Tag rate-limit errors so `retry_delayed`/`exhausted` spans are filterable without parsing logs.
 								...(isRateLimited
-									? { "vcs.queue.failure.tag": "@maple/http/errors/VcsRateLimitedError" }
-									: {}),
+									? {
+											"vcs.queue.failure.tag": "@maple/http/errors/VcsRateLimitedError",
+										}
+									: undefined),
 								...(isDelaySecondsSet
 									? { "vcs.queue.retry.delay_seconds": delaySeconds }
-									: {}),
+									: undefined),
 							}).pipe(
 								Effect.flatMap(() =>
 									Effect.logError("[VCS] sync message failed").pipe(
@@ -176,8 +178,10 @@ export const processBatch = (batch: MessageBatch<unknown>) =>
 											error: Cause.pretty(cause),
 											attempt: message.attempts,
 											outcome,
-											...(isFinalAttempt ? { exhausted: true } : {}),
-											...(isDelaySecondsSet ? { retryDelaySeconds: delaySeconds } : {}),
+											...(isFinalAttempt ? { exhausted: true } : undefined),
+											...(isDelaySecondsSet
+												? { retryDelaySeconds: delaySeconds }
+												: undefined),
 										}),
 									),
 								),

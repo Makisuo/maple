@@ -107,7 +107,7 @@ const TONE_STROKE: Record<ChartEventTone, string> = {
 	neutral: "var(--muted-foreground)",
 	warn: "var(--severity-warn)",
 	crit: "var(--severity-error)",
-}
+} satisfies Record<ChartEventTone, string>
 
 /**
  * Above this many visible markers the labels stop being readable and the chart

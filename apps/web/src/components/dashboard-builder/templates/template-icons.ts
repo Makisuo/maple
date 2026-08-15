@@ -48,7 +48,7 @@ const TEMPLATE_ICONS: Record<string, IconComponent> = {
 	"kafka-overview": KafkaIcon,
 	"nats-overview": NatsIcon,
 	"rabbitmq-overview": RabbitmqIcon,
-}
+} satisfies Record<string, IconComponent>
 
 // New server templates without a dedicated mark fall back to their category.
 const CATEGORY_ICONS: Record<string, IconComponent> = {
@@ -56,7 +56,7 @@ const CATEGORY_ICONS: Record<string, IconComponent> = {
 	database: DatabaseIcon,
 	infrastructure: ServerIcon,
 	messaging: PaperPlaneIcon,
-}
+} satisfies Record<string, IconComponent>
 
 export function templateIcon(templateId: string, category: string): IconComponent {
 	return TEMPLATE_ICONS[templateId] ?? CATEGORY_ICONS[category] ?? ChartLineIcon

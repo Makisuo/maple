@@ -6,14 +6,14 @@ const SPAN_STATUS_COLORS: Record<string, string> = {
 	ok: "var(--severity-info)",
 	error: "var(--severity-error)",
 	unset: "var(--muted-foreground)",
-}
+} satisfies Record<string, string>
 
 const AGGREGATE_COLORS: Record<string, string> = {
 	p50: "var(--chart-p50)",
 	median: "var(--chart-p50)",
 	p95: "var(--chart-p95)",
 	p99: "var(--chart-p99)",
-}
+} satisfies Record<string, string>
 
 // Base OKLCH parameters for each status code class
 // Each individual code gets a unique variation within its class
@@ -23,7 +23,7 @@ const STATUS_CLASS_BASES: Record<number, { l: number; c: number; h: number }> = 
 	3: { l: 0.62, c: 0.14, h: 250 }, // blue (matches --chart-p50)
 	4: { l: 0.769, c: 0.188, h: 70 }, // amber (matches --severity-warn)
 	5: { l: 0.637, c: 0.237, h: 25 }, // red (matches --severity-error)
-}
+} satisfies Record<number, { l: number; c: number; h: number }>
 
 function getHttpStatusColor(code: number): string | null {
 	const classDigit = Math.floor(code / 100)

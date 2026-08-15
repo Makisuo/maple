@@ -108,7 +108,7 @@ export const mineLogPatterns = Effect.fn("Observability.mineLogPatterns")(functi
 		...(input.severity && { severity: input.severity }),
 		...(input.search && { search: input.search }),
 		...(input.traceId && { trace_id: input.traceId }),
-	}
+	} satisfies Record<string, unknown>
 
 	const result = yield* executor.query<ListLogsOutput>(
 		"list_logs",

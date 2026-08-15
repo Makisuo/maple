@@ -542,7 +542,9 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 						.set({
 							syncStatus: update.status,
 							lastSyncError: update.error ?? null,
-							...("syncedAt" in update ? { lastSyncedAt: msToDate(update.syncedAt) } : {}),
+							...("syncedAt" in update
+								? { lastSyncedAt: msToDate(update.syncedAt) }
+								: undefined),
 							updatedAt: now,
 						})
 						.where(eq(vcsRepositories.id, repositoryId)),

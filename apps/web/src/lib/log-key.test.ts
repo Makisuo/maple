@@ -51,14 +51,14 @@ describe("log-key", () => {
 	})
 
 	it("returns null when the decoded payload has the wrong shape", () => {
-		const wrongShape = encodeLogKey({
+		const validToken = encodeLogKey({
 			timestamp: "2026-05-19 00:00:00",
 			serviceName: "svc",
 			traceId: "",
 			spanId: "",
 		})
 		// sanity: the valid token decodes
-		expect(decodeLogKey(wrongShape)).not.toBeNull()
+		expect(decodeLogKey(validToken)).not.toBeNull()
 		// a token whose payload is a 2-tuple is rejected
 		const shortTuple = Buffer.from(JSON.stringify(["a", "b"]))
 			.toString("base64")

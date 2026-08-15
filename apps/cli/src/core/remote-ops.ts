@@ -47,7 +47,7 @@ export const listServices = (
 			query: {
 				...toV2Window(p.range),
 				limit: V2_LIST_MAX,
-				...(p.environment ? { deployment_environment: p.environment } : {}),
+				...(p.environment ? { deployment_environment: p.environment } : undefined),
 			},
 		}),
 		(list) =>
@@ -72,8 +72,8 @@ export const serviceMap = (
 		client.serviceMap.retrieve({
 			query: {
 				...toV2Window(p.range),
-				...(p.service ? { service_name: serviceName(p.service) } : {}),
-				...(p.environment ? { deployment_environment: p.environment } : {}),
+				...(p.service ? { service_name: serviceName(p.service) } : undefined),
+				...(p.environment ? { deployment_environment: p.environment } : undefined),
 			},
 		}),
 		(map) =>
@@ -130,11 +130,11 @@ export const searchTraces = (
 				limit,
 				filters: {
 					span_scope: "root",
-					...(p.service ? { service_name: serviceName(p.service) } : {}),
-					...(p.hasError ? { has_error: true } : {}),
-					...(p.minDurationMs != null ? { min_duration_ms: p.minDurationMs } : {}),
-					...(p.maxDurationMs != null ? { max_duration_ms: p.maxDurationMs } : {}),
-					...(p.httpMethod ? { http_method: p.httpMethod } : {}),
+					...(p.service ? { service_name: serviceName(p.service) } : undefined),
+					...(p.hasError ? { has_error: true } : undefined),
+					...(p.minDurationMs != null ? { min_duration_ms: p.minDurationMs } : undefined),
+					...(p.maxDurationMs != null ? { max_duration_ms: p.maxDurationMs } : undefined),
+					...(p.httpMethod ? { http_method: p.httpMethod } : undefined),
 				},
 			},
 		}),
@@ -257,10 +257,10 @@ const toLogEntry = (l: {
 })
 
 const logFilters = (p: { service?: string; severity?: string; search?: string; traceId?: string }) => ({
-	...(p.service ? { service_name: serviceName(p.service) } : {}),
-	...(p.severity ? { severity: p.severity } : {}),
-	...(p.search ? { body_search: p.search } : {}),
-	...(p.traceId ? { trace_id: traceId(p.traceId) } : {}),
+	...(p.service ? { service_name: serviceName(p.service) } : undefined),
+	...(p.severity ? { severity: p.severity } : undefined),
+	...(p.search ? { body_search: p.search } : undefined),
+	...(p.traceId ? { trace_id: traceId(p.traceId) } : undefined),
 })
 
 export const searchLogs = (
@@ -345,8 +345,8 @@ export const listMetrics = (
 			query: {
 				...toV2Window(p.range),
 				limit: clampListLimit(p.limit),
-				...(p.service ? { service_name: serviceName(p.service) } : {}),
-				...(p.search ? { search: p.search } : {}),
+				...(p.service ? { service_name: serviceName(p.service) } : undefined),
+				...(p.search ? { search: p.search } : undefined),
 			},
 		}),
 		(list) => list.data,
@@ -384,10 +384,10 @@ const traceFilters = (p: {
 	errorsOnly?: boolean
 	environment?: string
 }) => ({
-	...(p.service ? { service_name: serviceName(p.service) } : {}),
-	...(p.spanName ? { span_name: p.spanName } : {}),
-	...(p.errorsOnly ? { has_error: true } : {}),
-	...(p.environment ? { deployment_environment: p.environment } : {}),
+	...(p.service ? { service_name: serviceName(p.service) } : undefined),
+	...(p.spanName ? { span_name: p.spanName } : undefined),
+	...(p.errorsOnly ? { has_error: true } : undefined),
+	...(p.environment ? { deployment_environment: p.environment } : undefined),
 })
 
 export const tracesTimeseries = (
@@ -412,8 +412,8 @@ export const tracesTimeseries = (
 						...toV2Window(p.range),
 						aggregation,
 						filters,
-						...(group ? { group_by: group } : {}),
-						...(p.bucketSeconds ? { bucket_seconds: p.bucketSeconds } : {}),
+						...(group ? { group_by: group } : undefined),
+						...(p.bucketSeconds ? { bucket_seconds: p.bucketSeconds } : undefined),
 					},
 				}),
 			),
@@ -427,7 +427,7 @@ export const tracesTimeseries = (
 			const field = TRACE_AGGREGATIONS[index]![0]
 			for (const series of result.series) {
 				for (const point of series.points) {
-					const key = `${point.timestamp} ${series.group ?? ""}`
+					const key = `${point.timestamp}\0${series.group ?? ""}`
 					const row = rows.get(key) ?? { timestamp: point.timestamp, group: series.group }
 					row[field] = point.value
 					rows.set(key, row)
@@ -462,7 +462,7 @@ export const tracesBreakdown = (
 						aggregation,
 						group_by: group,
 						filters,
-						...(p.limit ? { limit: p.limit } : {}),
+						...(p.limit ? { limit: p.limit } : undefined),
 					},
 				}),
 			),

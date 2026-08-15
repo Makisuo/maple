@@ -39,7 +39,7 @@ export function installNetworkCapture(emit: Emit, ignoreUrl: (url: string) => bo
 			type: "network",
 			net: { method, url, status, durationMs: Math.round(performance.now() - start) },
 			traceId,
-			...(error ? { attrs: { error } } : {}),
+			...(error ? { attrs: { error } } : undefined),
 		})
 	}
 

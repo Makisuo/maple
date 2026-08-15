@@ -13,7 +13,7 @@ import {
 import { oauthAuthStates } from "@maple/db"
 import { Clock, Context, Effect, Layer, Option, Redacted, Ref, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { Env, type EnvShape } from "@/platform/Env"
+import { Env, type EnvConfig } from "@/platform/Env"
 import { Database } from "@/platform/DatabaseLive"
 import { msToDate } from "@/platform/time"
 import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS, toUpstreamError } from "./oauth/connection-helpers"
@@ -86,7 +86,7 @@ interface ResolvedHazelOAuthConfig extends ResolvedHazelOAuthEnv {
 	readonly userInfoUrl: string
 }
 
-const resolveEnv = Effect.fn("HazelOAuthService.resolveEnv")(function* (env: EnvShape) {
+const resolveEnv = Effect.fn("HazelOAuthService.resolveEnv")(function* (env: EnvConfig) {
 	const requireSome = <A>(
 		opt: Option.Option<A>,
 		message: string,
@@ -119,7 +119,7 @@ interface HazelOAuthAccessToken {
 	readonly externalUserId: string
 }
 
-export interface HazelOAuthServiceShape {
+export interface HazelOAuthServiceApi {
 	readonly startConnect: (
 		orgId: OrgId,
 		userId: UserId,
@@ -209,7 +209,7 @@ export interface HazelOAuthServiceShape {
 	) => Effect.Effect<{ readonly disconnected: boolean }, IntegrationsPersistenceError>
 }
 
-export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelOAuthServiceShape>()(
+export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelOAuthServiceApi>()(
 	"@maple/api/services/HazelOAuthService",
 	{
 		make: Effect.gen(function* () {
@@ -543,7 +543,7 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 					channelId: options.channelId,
 					name: options.name,
 					integrationProvider: "maple",
-				}
+				} satisfies Record<string, unknown>
 				if (options.description) body.description = options.description
 				const request = HttpClientRequest.post(`${config.apiBaseUrl}/api/v1/channel-webhooks`, {
 					headers: {
@@ -621,7 +621,7 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 				listChannels,
 				createChannelWebhook,
 				disconnect,
-			} satisfies HazelOAuthServiceShape
+			} satisfies HazelOAuthServiceApi
 		}),
 	},
 ) {

@@ -7,7 +7,7 @@ const STATUS_TEXT: Record<HostStatus, string> = {
 	active: "text-[var(--severity-info)]",
 	idle: "text-muted-foreground",
 	down: "text-[var(--severity-error)]",
-}
+} satisfies Record<HostStatus, string>
 
 interface HostStatusBadgeProps {
 	lastSeen: string

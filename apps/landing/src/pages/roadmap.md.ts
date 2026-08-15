@@ -14,7 +14,7 @@ const STATUS_HEADING: Record<(typeof STATUS_ORDER)[number], string> = {
 	"in-progress": "In progress",
 	planned: "Planned",
 	exploring: "Exploring",
-}
+} satisfies Record<(typeof STATUS_ORDER)[number], string>
 
 export const GET: APIRoute = async () => {
 	const entries = await getCollection("roadmap")

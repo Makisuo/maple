@@ -1,8 +1,9 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // The local Maple server: OTLP/HTTP ingest + a raw SQL query API + the bundled
 // SPA, all on one port, backed by an embedded chDB. Replaces the Rust
 // `apps/ingest/src/bin/local.rs`. `maple start` calls `startServer`.
 
-import { Effect, Schema, type Scope } from "effect"
+import { Effect, Predicate, Schema, type Scope } from "effect"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
@@ -444,7 +445,9 @@ const querySpan = (
 					"db.duration_ms": durationMs,
 					"result.rowCount": rowCount,
 					"http.response.status_code": response.status,
-					...(sql ? { "db.query.text": truncateSql(sql), "db.query.length": sql.length } : {}),
+					...(sql
+						? { "db.query.text": truncateSql(sql), "db.query.length": sql.length }
+						: undefined),
 				})
 				return yield* recordServerResponse(response)
 			}).pipe(
@@ -514,8 +517,8 @@ const handleRetirement = async (
 	} catch {
 		return text("invalid JSON body", 400)
 	}
-	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
-	const record = body as Record<string, unknown>
+	if (!Predicate.isObject(body)) return text("invalid body", 400)
+	const record = body
 	const keys = Object.keys(record).sort().join(",")
 	if (keys !== "archiveDir,rangeDate,sealingLagHours") return text("invalid retirement fields", 400)
 	if (
@@ -552,9 +555,9 @@ const handleCheckpointBackup = async (db: Chdb, token: string, req: Request): Pr
 	} catch {
 		return text("invalid JSON body", 400)
 	}
-	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
-	const record = body as Record<string, unknown>
-	if (Object.keys(record).sort().join(",") !== "checkpointId" || typeof record.checkpointId !== "string")
+	if (!Predicate.isObject(body)) return text("invalid body", 400)
+	const record = body
+	if (Object.keys(record).sort().join(",") !== "checkpointId" || !Predicate.isString(record.checkpointId))
 		return text("invalid checkpoint fields", 400)
 	if (!CHECKPOINT_ID.test(record.checkpointId)) return text("invalid checkpoint ID", 400)
 	try {

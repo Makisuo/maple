@@ -21,7 +21,7 @@ import { SetupAuditService } from "@/services/org/SetupAuditService"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { HttpV2AlertDeliveriesLive } from "./alert-deliveries.http"
@@ -164,8 +164,8 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 
 /** Inert WarehouseQueryService for harnesses that never touch warehouse-backed groups. */
 export const makeWarehouseServiceStub = (
-	overrides: Partial<WarehouseQueryServiceShape> = {},
-): WarehouseQueryServiceShape => ({
+	overrides: Partial<WarehouseQueryServiceApi> = {},
+): WarehouseQueryServiceApi => ({
 	query: die,
 	crossOrgQuery: die,
 	rawSqlQuery: die,

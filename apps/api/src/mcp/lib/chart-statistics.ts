@@ -1,5 +1,5 @@
 import type { BreakdownItem, TimeseriesPoint } from "@maple/domain"
-import type { QueryBuilderDataSource, QueryResultShape } from "@maple/query-model"
+import type { QueryBuilderDataSource, QueryResultContract } from "@maple/query-model"
 
 export type ChartFlag =
 	| "EMPTY"
@@ -185,7 +185,7 @@ export function computeBreakdownStats(rows: ReadonlyArray<BreakdownItem>): Query
 export interface FlagContext {
 	metric?: string
 	source?: QueryBuilderDataSource
-	kind?: Extract<QueryResultShape, "timeseries" | "breakdown">
+	kind?: Extract<QueryResultContract, "timeseries" | "breakdown">
 	displayUnit?: string
 	/**
 	 * True when the series is a numeric span-attribute aggregation (p95 of

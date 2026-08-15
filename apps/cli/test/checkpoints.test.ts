@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { describe, it } from "@effect/vitest"
 import { Effect, Exit, Option } from "effect"
 import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert"

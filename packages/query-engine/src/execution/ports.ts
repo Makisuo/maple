@@ -13,7 +13,7 @@ import type {
 import type { ResolvedWarehouseConfig } from "./backend"
 import type { CompiledQuery } from "../ch"
 import type { WarehouseCapabilities } from "../capabilities"
-import type { WarehouseExecutorShape } from "../observability"
+import type { WarehouseExecutorApi } from "../observability"
 import type { SqlQueryOptions } from "../profiles"
 import type { WarehouseClassifiedError, WarehouseCompiledQueryError, WarehouseExecutionError } from "./errors"
 import type { WarehouseResponseLimitError, WarehouseResponseLimits } from "./response-limits"
@@ -136,7 +136,7 @@ export interface WarehouseExecutorDeps {
 	readonly invalidateRoute?: (tenant: ExecutionTenant) => Effect.Effect<boolean>
 }
 
-export interface WarehouseQueryServiceShape {
+export interface WarehouseQueryServiceApi {
 	readonly query: (
 		tenant: ExecutionTenant,
 		payload: WarehouseQueryRequest,
@@ -229,5 +229,5 @@ export interface WarehouseQueryServiceShape {
 	 * Present this service as the package-level `WarehouseExecutor` for a given
 	 * tenant — the single managed-warehouse implementation of that interface.
 	 */
-	readonly asExecutor: (tenant: ExecutionTenant) => WarehouseExecutorShape
+	readonly asExecutor: (tenant: ExecutionTenant) => WarehouseExecutorApi
 }

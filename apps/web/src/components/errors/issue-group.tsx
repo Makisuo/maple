@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
-import type { ErrorIssueDocument, WorkflowState } from "@maple/domain/http"
+import { WorkflowState, type ErrorIssueDocument } from "@maple/domain/http"
+import * as Schema from "effect/Schema"
 import { cn } from "@maple/ui/lib/utils"
 
 import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
@@ -14,7 +15,7 @@ function readCollapsed(): Set<WorkflowState> {
 	try {
 		const raw = window.sessionStorage.getItem(STORAGE_KEY)
 		if (!raw) return new Set()
-		const parsed = JSON.parse(raw) as WorkflowState[]
+		const parsed = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(WorkflowState)))(raw)
 		return new Set(parsed)
 	} catch {
 		return new Set()

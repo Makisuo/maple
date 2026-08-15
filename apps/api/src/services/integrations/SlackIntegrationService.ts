@@ -293,7 +293,7 @@ export interface SlackChannelList {
 	readonly truncated: boolean
 }
 
-export interface SlackIntegrationServiceShape {
+export interface SlackIntegrationServiceApi {
 	readonly startInstall: (
 		orgId: OrgId,
 		userId: UserId,
@@ -358,7 +358,7 @@ export interface SlackIntegrationServiceShape {
 // options) so the `SlackIntegrationService.of` in its return does not make the
 // class's base expression circular.
 const make: Effect.Effect<
-	SlackIntegrationServiceShape,
+	SlackIntegrationServiceApi,
 	IntegrationsConfigurationError,
 	Database | Env | ApiKeysService | OAuthStateRepository | HttpClient.HttpClient
 > = Effect.gen(function* () {
@@ -956,7 +956,7 @@ const make: Effect.Effect<
 							apiKeySecretTag: null,
 							...(revoked
 								? { botTokenCiphertext: null, botTokenIv: null, botTokenTag: null }
-								: {}),
+								: undefined),
 						})
 						.where(
 							and(
@@ -1354,7 +1354,7 @@ const make: Effect.Effect<
 
 export class SlackIntegrationService extends Context.Service<
 	SlackIntegrationService,
-	SlackIntegrationServiceShape
+	SlackIntegrationServiceApi
 >()("@maple/api/services/SlackIntegrationService", { make }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 }

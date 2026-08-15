@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 // The replay engine seam
 //
 // The player used to construct `new Replayer(...)` inline, which made rrweb the

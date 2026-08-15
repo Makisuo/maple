@@ -25,7 +25,7 @@ export { makeResolveTenant, type TenantContext }
 
 type HeaderRecord = Record<string, string | undefined>
 
-export interface AuthServiceShape {
+export interface AuthServiceApi {
 	readonly resolveTenant: (headers: HeaderRecord) => Effect.Effect<TenantContext, UnauthorizedError>
 	readonly resolveMcpTenant: (headers: HeaderRecord) => Effect.Effect<TenantContext, UnauthorizedError>
 	readonly loginSelfHosted: (
@@ -37,7 +37,7 @@ export interface AuthServiceShape {
 	) => Effect.Effect<{ email: string | null; orgName: string | null }>
 }
 
-export class AuthService extends Context.Service<AuthService, AuthServiceShape>()(
+export class AuthService extends Context.Service<AuthService, AuthServiceApi>()(
 	"@maple/api/services/AuthService",
 	{
 		make: Effect.gen(function* () {
@@ -54,7 +54,7 @@ export class AuthService extends Context.Service<AuthService, AuthServiceShape>(
 				loginSelfHosted,
 				getUserEmail,
 				getCustomerData,
-			} satisfies AuthServiceShape
+			} satisfies AuthServiceApi
 		}),
 	},
 ) {

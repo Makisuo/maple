@@ -3,20 +3,10 @@ import { Schema } from "effect"
 import { ApiKeyId, PostgresTransactionId, UserId } from "../../primitives"
 import { ApiKeyKind, ApiKeyNotFoundError, ApiKeyPersistenceError } from "../api-keys"
 import { AuthorizationV2, V2Scope } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2InsufficientPermissions, V2ParameterInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 import { publicError } from "./public-error"
-
-/**
- * Author OpenAPI `examples` in wire (encoded) shape. Effect types the `examples`
- * annotation against a schema's decoded `Type`, but an HttpApi response renders
- * the *encoded* schema — so a realistic example must use wire values (`id`
- * as `key_…`, not the internal UUID). This adapter bridges the wire object to
- * the annotation's `Type` slot; each example is verified to be a decodable wire
- * payload in `openapi.test.ts`.
- */
-const wireExample = <A>(example: object): A => example as A
 
 /** `key_…` public ID ⇄ internal `ApiKeyId` (raw UUID). */
 export const ApiKeyPublicId = PublicId(PublicIdPrefixes.apiKey, ApiKeyId)

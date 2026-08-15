@@ -89,7 +89,7 @@ describe("calibration timed-process transport", () => {
 		const child = Object.assign(new EventEmitter(), {
 			stdout: new PassThrough(),
 			stderr: new PassThrough(),
-		}) as unknown as ChildProcess
+		}) as ChildProcess
 		const completion = collectChildOutputAfterClose(child)
 		let settled = false
 		void completion.then(() => {

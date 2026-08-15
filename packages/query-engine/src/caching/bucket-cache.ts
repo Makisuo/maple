@@ -377,7 +377,7 @@ const isBucketCacheSegmentData = (
 	})
 }
 
-export interface BucketCacheServiceShape {
+export interface BucketCacheServiceApi {
 	readonly enabled: boolean
 	readonly getOrComputeBuckets: <E, R>(
 		request: BucketCacheRequest,
@@ -432,7 +432,7 @@ const readConcurrencyConfig = Config.number("QE_BUCKET_CACHE_READ_CONCURRENCY").
 // stampede (the mechanism behind the eval-bucket-cache regression). Bound it.
 const fillConcurrencyConfig = Config.number("QE_BUCKET_CACHE_FILL_CONCURRENCY").pipe(Config.withDefault(4))
 
-export class BucketCacheService extends Context.Service<BucketCacheService, BucketCacheServiceShape>()(
+export class BucketCacheService extends Context.Service<BucketCacheService, BucketCacheServiceApi>()(
 	"@maple/api/lib/BucketCacheService",
 	{
 		make: Effect.gen(function* () {
@@ -557,7 +557,7 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 					)
 					const fillRanges = coalesceMissingRanges(missing)
 					// One warm-up before the fan-out, not one route resolution per
-					// branch. See `prepare` on BucketCacheServiceShape for the trace
+					// branch. See `prepare` on BucketCacheServiceApi for the trace
 					// this came from. Only worth it above one range — see the doc there.
 					if (prepare !== undefined && fillRanges.length > 1) {
 						yield* prepare
@@ -703,7 +703,7 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 				return yield* readOrCompute
 			})
 
-			return { enabled, getOrComputeBuckets } satisfies BucketCacheServiceShape
+			return { enabled, getOrComputeBuckets } satisfies BucketCacheServiceApi
 		}),
 	},
 ) {

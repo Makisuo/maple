@@ -11,8 +11,8 @@ import {
 import type { AlertDestinationRow } from "@maple/db"
 import { Effect } from "effect"
 import { parseBase64Aes256GcmKey } from "@/platform/Crypto"
-import type { EmailServiceShape } from "@/platform/EmailService"
-import type { SlackBotTokenResolverShape } from "@/services/integrations/slack-bot-token"
+import type { EmailServiceApi } from "@/platform/EmailService"
+import type { SlackBotTokenResolverApi } from "@/services/integrations/slack-bot-token"
 import { buildAlertChatUrl, type DispatchContext as DeliveryDispatchContext } from "./AlertDeliveryDispatch"
 import { dispatchDelivery as dispatchDeliveryImpl } from "./delivery/dispatch"
 import type { DispatchResult } from "./delivery/context"
@@ -21,7 +21,7 @@ import {
 	type DestinationSecretConfig,
 	type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
-import type { AlertRuntimeShape } from "./AlertRuntime"
+import type { AlertRuntimeApi } from "./AlertRuntime"
 
 export type AlertDispatchContext = Omit<
 	DeliveryDispatchContext,
@@ -59,9 +59,9 @@ export const parseAlertDestinationEncryptionKey = (
 export const makeAlertDestinationDelivery = (options: {
 	readonly encryptionKey: Buffer
 	readonly appBaseUrl: string
-	readonly runtime: AlertRuntimeShape
-	readonly email: EmailServiceShape
-	readonly resolveSlackBotToken: SlackBotTokenResolverShape["resolve"]
+	readonly runtime: AlertRuntimeApi
+	readonly email: EmailServiceApi
+	readonly resolveSlackBotToken: SlackBotTokenResolverApi["resolve"]
 }) => {
 	const hydrateDestination = Effect.fn("AlertsService.hydrateDestination")(function* (
 		row: AlertDestinationRow,

@@ -13,7 +13,7 @@ interface RateLimitBinding {
 	readonly limit: (options: { readonly key: string }) => Promise<{ readonly success: boolean }>
 }
 
-export interface ApiV2RateLimiterShape {
+export interface ApiV2RateLimiterApi {
 	readonly check: (keyId: ApiKeyId) => Effect.Effect<ApiV2RateLimitOutcome>
 }
 
@@ -44,11 +44,11 @@ const warnFailedOpen = (reason: "binding_missing" | "partition_missing" | "bindi
 		Effect.annotateLogs({
 			"maple.rate_limit.outcome": "failed_open",
 			"maple.rate_limit.reason": reason,
-			...(cause instanceof Error ? { "error.type": cause.name } : {}),
+			...(cause instanceof Error ? { "error.type": cause.name } : undefined),
 		}),
 	)
 
-export class ApiV2RateLimiter extends Context.Service<ApiV2RateLimiter, ApiV2RateLimiterShape>()(
+export class ApiV2RateLimiter extends Context.Service<ApiV2RateLimiter, ApiV2RateLimiterApi>()(
 	"@maple/api/services/ApiV2RateLimiter",
 	{
 		make: Effect.gen(function* () {
@@ -84,7 +84,7 @@ export class ApiV2RateLimiter extends Context.Service<ApiV2RateLimiter, ApiV2Rat
 				)
 			})
 
-			return { check } satisfies ApiV2RateLimiterShape
+			return { check } satisfies ApiV2RateLimiterApi
 		}),
 	},
 ) {

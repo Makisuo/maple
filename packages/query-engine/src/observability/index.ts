@@ -1,7 +1,7 @@
 export {
 	WarehouseExecutor,
 	type WarehouseExecutorError,
-	type WarehouseExecutorShape,
+	type WarehouseExecutorApi,
 } from "./WarehouseExecutor"
 export {
 	attributeIndexMode,

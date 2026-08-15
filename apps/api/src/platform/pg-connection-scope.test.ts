@@ -7,7 +7,7 @@ import {
 	executeOnFreshPgClient,
 	makePgConnectionScope,
 	PgConnectionScope,
-	type PgConnectionScopeShape,
+	type PgConnectionScopeApi,
 	pgConnectionScopeFrom,
 	withPgConnectionScope,
 	withPgConnectionScopeOf,
@@ -284,7 +284,7 @@ describe("pgConnectionScopeFrom", () => {
 				end: () => {
 					closed = true
 				},
-			} as unknown as DatabaseClient
+			} as DatabaseClient
 			const scope = pgConnectionScopeFrom(owned)
 
 			const seen: Array<DatabaseClient> = []
@@ -309,7 +309,7 @@ describe("pgConnectionScopeFrom", () => {
 /** A scope that records release without opening anything. */
 const countingScope = () => {
 	let closes = 0
-	const scope: PgConnectionScopeShape = {
+	const scope: PgConnectionScopeApi = {
 		run: () => Effect.succeed("unused" as never),
 		close: async () => {
 			closes += 1

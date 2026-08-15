@@ -18,7 +18,7 @@ const WORKFLOW_BADGE: Record<WorkflowState, { label: string; tone: string }> = {
 	done: { label: "Done", tone: "bg-success/10 text-success" },
 	cancelled: { label: "Cancelled", tone: "bg-muted text-muted-foreground" },
 	wontfix: { label: "Wontfix", tone: "bg-muted text-muted-foreground" },
-}
+} satisfies Record<WorkflowState, { label: string; tone: string }>
 
 export function WorkflowBadge({ state }: { state: WorkflowState }) {
 	const { label, tone } = WORKFLOW_BADGE[state]

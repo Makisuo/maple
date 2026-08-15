@@ -108,8 +108,8 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 		prepareForMutation()
 		const result = await createMutation({
 			payload: buildApiKeyCreatePayload(newName, newDescription, kind, {
-				...(expiration !== "never" ? { expiresInSeconds: Number(expiration) * 86_400 } : {}),
-				...(restrictedScopes !== undefined ? { scopes: restrictedScopes } : {}),
+				...(expiration !== "never" ? { expiresInSeconds: Number(expiration) * 86_400 } : undefined),
+				...(restrictedScopes !== undefined ? { scopes: restrictedScopes } : undefined),
 			}),
 		})
 		if (Exit.isSuccess(result)) {

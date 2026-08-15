@@ -239,21 +239,24 @@ export function AddDashboardWidgetSummary({ input }: ApprovalRendererProps) {
 	const Icon = vizIcon(visualization)
 	const label = vizLabel(visualization)
 
-	const display = safeParseJson<Record<string, unknown>>(obj.display_json)
-	const dataSource = safeParseJson<Record<string, unknown>>(obj.data_source_json)
-	const layout = safeParseJson<Record<string, unknown>>(obj.layout_json)
+	const displayResult = safeParseJson(obj.display_json)
+	const dataSourceResult = safeParseJson(obj.data_source_json)
+	const layoutResult = safeParseJson(obj.layout_json)
+	const display = displayResult.ok ? asRecord(displayResult.value) : undefined
+	const dataSource = dataSourceResult.ok ? asRecord(dataSourceResult.value) : undefined
+	const layout = layoutResult.ok ? asRecord(layoutResult.value) : undefined
 
-	const title = (display.ok ? asString(display.value.title) : undefined) ?? "Untitled widget"
-	const endpoint = dataSource.ok ? asString(dataSource.value.endpoint) : undefined
-	const params = dataSource.ok ? asRecord(dataSource.value.params) : undefined
+	const title = asString(display?.title) ?? "Untitled widget"
+	const endpoint = asString(dataSource?.endpoint)
+	const params = asRecord(dataSource?.params)
 	const serviceName = params ? asString(params.service_name) : undefined
 
 	const layoutLabel = (() => {
-		if (!layout.ok) return "auto-placed"
-		const x = layout.value.x
-		const y = layout.value.y
-		const w = layout.value.w
-		const h = layout.value.h
+		if (!layout) return "auto-placed"
+		const x = layout.x
+		const y = layout.y
+		const w = layout.w
+		const h = layout.h
 		if (
 			typeof x === "number" &&
 			typeof y === "number" &&
@@ -302,27 +305,30 @@ export function UpdateDashboardWidgetSummary({ input }: ApprovalRendererProps) {
 	const widgetId = asString(obj.widget_id) ?? "—"
 	const visualization = asString(obj.visualization)
 
-	const dataSource = safeParseJson<Record<string, unknown>>(obj.data_source_json)
-	const display = safeParseJson<Record<string, unknown>>(obj.display_json)
-	const layout = safeParseJson<Record<string, unknown>>(obj.layout_json)
+	const dataSourceResult = safeParseJson(obj.data_source_json)
+	const displayResult = safeParseJson(obj.display_json)
+	const layoutResult = safeParseJson(obj.layout_json)
+	const dataSource = dataSourceResult.ok ? asRecord(dataSourceResult.value) : undefined
+	const display = displayResult.ok ? asRecord(displayResult.value) : undefined
+	const layout = layoutResult.ok ? asRecord(layoutResult.value) : undefined
 
 	const changes: Array<{ label: string; detail?: string }> = []
 	if (visualization) changes.push({ label: "Visualization", detail: visualization })
-	if (display.ok) {
-		const title = asString(display.value.title)
+	if (display) {
+		const title = asString(display.title)
 		changes.push({
 			label: "Display config",
 			detail: title ? `title: ${title}` : undefined,
 		})
 	}
-	if (dataSource.ok) {
-		const endpoint = asString(dataSource.value.endpoint)
+	if (dataSource) {
+		const endpoint = asString(dataSource.endpoint)
 		changes.push({
 			label: "Data source",
 			detail: endpoint ? `endpoint: ${endpoint}` : undefined,
 		})
 	}
-	if (layout.ok) {
+	if (layout) {
 		changes.push({ label: "Layout" })
 	}
 

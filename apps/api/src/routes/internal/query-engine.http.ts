@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CurrentTenant,
@@ -1719,7 +1720,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						entryPath: "entryPaths",
 						exitPath: "exitPaths",
 						host: "hosts",
-					}
+					} satisfies Record<string, keyof typeof buckets>
 					for (const row of rows) {
 						const key = bucketOf[row.facetType]
 						if (key) buckets[key].push({ name: String(row.name), count: Number(row.count) || 0 })

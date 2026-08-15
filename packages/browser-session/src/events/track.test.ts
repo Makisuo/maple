@@ -1,3 +1,4 @@
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("../session/session", () => ({
@@ -24,6 +25,7 @@ async function flushedRows(sessionId: string): Promise<Array<Record<string, unkn
 	const sink = startEventSink(CONFIG, sessionId)
 	await sink.flush()
 	return postSessionEvents.mock.calls.flatMap(
+		// SAFETY: `postSessionEvents` is called with the request metadata followed by its row batch.
 		(call) => (call as unknown as [unknown, Array<Record<string, unknown>>])[1],
 	)
 }
@@ -111,7 +113,10 @@ describe("track", () => {
 
 	it("survives a circular prop instead of throwing into the caller", async () => {
 		startEventSink(CONFIG, "sess-5")
-		const circular: Record<string, unknown> = { name: "loop" }
+		interface CircularProps extends Record<string, unknown> {
+			self?: CircularProps
+		}
+		const circular: CircularProps = { name: "loop" }
 		circular.self = circular
 
 		expect(() => track("cyclic", { circular, ok: "yes" })).not.toThrow()

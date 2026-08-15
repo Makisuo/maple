@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 "use client"
 
 import { ChevronRightIcon } from "../icons"

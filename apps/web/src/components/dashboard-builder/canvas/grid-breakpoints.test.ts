@@ -15,7 +15,7 @@ function widget(id: string, x: number, y: number, w: number, h: number): Dashboa
 		dataSource: {},
 		display: {},
 		layout: { x, y, w, h },
-	} as unknown as DashboardWidget
+	} as DashboardWidget
 }
 
 /** A realistic authored dashboard: a row of stats over charts over a wide table. */

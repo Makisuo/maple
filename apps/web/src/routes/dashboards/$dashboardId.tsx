@@ -157,7 +157,7 @@ function DashboardViewPage() {
 			replace: true,
 			search: (prev) => ({
 				...pickDashboardControlParams(prev),
-				...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : undefined),
 				[`${VARIABLE_PARAM_PREFIX}${name}`]: value,
 			}),
 		})
@@ -188,7 +188,7 @@ function DashboardViewPage() {
 			replace: true,
 			search: (prev) => ({
 				...update(pickDashboardControlParams(prev)),
-				...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : undefined),
 			}),
 		})
 	}

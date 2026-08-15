@@ -7,7 +7,7 @@ import {
 	noTenantLayer,
 	okUpstream,
 	recordingElectricClient,
-	shapeRequest,
+	syncRequest,
 } from "../test-support"
 import { ElectricSyncRouter } from "./shape.http"
 
@@ -29,7 +29,7 @@ const routes = (options: {
 			recordingElectricClient({
 				calls: options.calls ?? [],
 				respond: options.respond ?? (() => Effect.succeed(okUpstream())),
-				...(options.ensureConfigured ? { ensureConfigured: options.ensureConfigured } : {}),
+				...(options.ensureConfigured ? { ensureConfigured: options.ensureConfigured } : undefined),
 			}),
 		),
 		Layer.provide(
@@ -40,7 +40,7 @@ const routes = (options: {
 describe("shape route: a served shape", () => {
 	it.effect("returns the upstream body and status", () =>
 		Effect.gen(function* () {
-			const { status, body } = yield* shapeRequest(
+			const { status, body } = yield* syncRequest(
 				routes({ respond: () => Effect.succeed(okUpstream({ body: `[{"key":"row"}]` })) }),
 				"/api/sync/shape?shape=dashboards&offset=-1",
 			)
@@ -58,7 +58,7 @@ describe("shape route: a served shape", () => {
 	it.effect("scopes the upstream call to the org the session resolved to", () =>
 		Effect.gen(function* () {
 			const calls: Array<ElectricCall> = []
-			yield* shapeRequest(
+			yield* syncRequest(
 				routes({ calls, orgId: "org_from_bearer" }),
 				"/api/sync/shape?shape=dashboards&offset=-1",
 			)
@@ -72,10 +72,7 @@ describe("shape route: a served shape", () => {
 	it.effect("passes a scoped shape's scope value through to the upstream", () =>
 		Effect.gen(function* () {
 			const calls: Array<ElectricCall> = []
-			yield* shapeRequest(
-				routes({ calls }),
-				"/api/sync/shape?shape=investigation&scope=inv_1&offset=-1",
-			)
+			yield* syncRequest(routes({ calls }), "/api/sync/shape?shape=investigation&scope=inv_1&offset=-1")
 			assert.deepStrictEqual(calls[0]?.request.scope, { column: "id", value: "inv_1" })
 		}),
 	)
@@ -88,7 +85,7 @@ describe("shape route: a served shape", () => {
 	 */
 	it.effect("cache-isolates the response on the way out", () =>
 		Effect.gen(function* () {
-			const { headers } = yield* shapeRequest(
+			const { headers } = yield* syncRequest(
 				routes({
 					respond: () =>
 						Effect.succeed(
@@ -116,7 +113,7 @@ describe("shape route: rejections", () => {
 	it.effect("401s when the session does not resolve to a tenant", () =>
 		Effect.gen(function* () {
 			const calls: Array<ElectricCall> = []
-			const { status, body } = yield* shapeRequest(
+			const { status, body } = yield* syncRequest(
 				routes({ calls, authenticated: false }),
 				"/api/sync/shape?shape=dashboards&offset=-1",
 			)
@@ -129,7 +126,7 @@ describe("shape route: rejections", () => {
 
 	it.effect("400s an unknown shape", () =>
 		Effect.gen(function* () {
-			const { status, body } = yield* shapeRequest(routes({}), "/api/sync/shape?shape=users&offset=-1")
+			const { status, body } = yield* syncRequest(routes({}), "/api/sync/shape?shape=users&offset=-1")
 			assert.strictEqual(status, 400)
 			assert.strictEqual(body, "Unknown or missing shape")
 		}),
@@ -137,7 +134,7 @@ describe("shape route: rejections", () => {
 
 	it.effect("400s a scoped shape that arrives without a scope", () =>
 		Effect.gen(function* () {
-			const { status, body } = yield* shapeRequest(
+			const { status, body } = yield* syncRequest(
 				routes({}),
 				"/api/sync/shape?shape=investigation&offset=-1",
 			)
@@ -154,7 +151,7 @@ describe("shape route: rejections", () => {
 	 */
 	it.effect("400s an unknown shape even when sync is not configured", () =>
 		Effect.gen(function* () {
-			const { status } = yield* shapeRequest(
+			const { status } = yield* syncRequest(
 				routes({
 					ensureConfigured: Effect.fail(
 						new ElectricNotConfigured({ message: "no url", reason: "missing_url" }),
@@ -173,7 +170,7 @@ describe("shape route: degradation", () => {
 
 	it.effect("503s when ELECTRIC_URL is absent entirely (self-hosted without Electric)", () =>
 		Effect.gen(function* () {
-			const { status, body } = yield* shapeRequest(
+			const { status, body } = yield* syncRequest(
 				routes({ ensureConfigured: notConfigured("missing_url") }),
 				"/api/sync/shape?shape=dashboards&offset=-1",
 			)
@@ -184,7 +181,7 @@ describe("shape route: degradation", () => {
 
 	it.effect("503s when Cloud credentials are half-configured", () =>
 		Effect.gen(function* () {
-			const { status, body } = yield* shapeRequest(
+			const { status, body } = yield* syncRequest(
 				routes({ ensureConfigured: notConfigured("incoherent_credentials") }),
 				"/api/sync/shape?shape=dashboards&offset=-1",
 			)
@@ -201,7 +198,7 @@ describe("shape route: degradation", () => {
 	 */
 	it.effect("503s before authenticating, so an unauthenticated client still sees degradation", () =>
 		Effect.gen(function* () {
-			const { status } = yield* shapeRequest(
+			const { status } = yield* syncRequest(
 				routes({ authenticated: false, ensureConfigured: notConfigured("missing_url") }),
 				"/api/sync/shape?shape=dashboards&offset=-1",
 			)
@@ -213,7 +210,7 @@ describe("shape route: degradation", () => {
 describe("shape route: upstream failures", () => {
 	it.effect("502s when Electric is unreachable", () =>
 		Effect.gen(function* () {
-			const { status, body } = yield* shapeRequest(
+			const { status, body } = yield* syncRequest(
 				routes({
 					respond: () => Effect.fail(new ElectricUpstreamUnreachable({ message: "ECONNREFUSED" })),
 				}),
@@ -226,7 +223,7 @@ describe("shape route: upstream failures", () => {
 
 	it.effect("passes an upstream 5xx through with its status and body", () =>
 		Effect.gen(function* () {
-			const { status, body, headers } = yield* shapeRequest(
+			const { status, body, headers } = yield* syncRequest(
 				routes({
 					respond: () =>
 						Effect.fail(

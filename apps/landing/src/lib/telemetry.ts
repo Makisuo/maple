@@ -76,7 +76,7 @@ export function startLandingTelemetry(): void {
 			maskAllInputs: true,
 			// Empty means "unset" — the SDK's probe finds the shared domain on its
 			// own, and an explicit "" would pin the cookie host-only in production.
-			...(COOKIE_DOMAIN ? { cookieDomain: COOKIE_DOMAIN } : {}),
+			...(COOKIE_DOMAIN ? { cookieDomain: COOKIE_DOMAIN } : undefined),
 		},
 	})
 

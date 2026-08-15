@@ -656,7 +656,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 		],
 	},
-}
+} satisfies Record<string, Competitor>
 
 export const featureCategories = [
 	{

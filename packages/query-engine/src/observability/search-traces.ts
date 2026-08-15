@@ -6,7 +6,7 @@ import { WarehouseValidationError } from "@maple/domain/http/warehouse-errors"
 import {
 	WarehouseExecutor,
 	type WarehouseExecutorError,
-	type WarehouseExecutorShape,
+	type WarehouseExecutorApi,
 } from "./WarehouseExecutor"
 import type { SearchTracesInput, SearchTracesOutput, SpanResult } from "./types"
 import { toSpanResult } from "./row-mappers"
@@ -74,7 +74,7 @@ export const searchTraces = Effect.fn("Observability.searchTraces")(function* (i
  * filters; trace-id searches compile to the TraceId-sorted detail table.
  */
 const spanLevelSearch = (
-	executor: WarehouseExecutorShape,
+	executor: WarehouseExecutorApi,
 	input: SearchTracesInput,
 	limit: number,
 	offset: number,
@@ -93,7 +93,7 @@ const spanLevelSearch = (
 		...(input.httpMethod && { http_method: input.httpMethod }),
 		...(input.traceId && { trace_id: input.traceId }),
 		...(input.attributeFilters?.length && { attribute_filters: input.attributeFilters }),
-	}
+	} satisfies Record<string, unknown>
 
 	return Effect.map(
 		executor.query<SpanSearchOutput>("span_search", params, { profile: "list" }),
@@ -120,7 +120,7 @@ const spanLevelSearch = (
  * Fast (MV-backed) but limited to root span filtering.
  */
 const rootLevelSearch = (
-	executor: WarehouseExecutorShape,
+	executor: WarehouseExecutorApi,
 	input: SearchTracesInput,
 	limit: number,
 	offset: number,
@@ -138,7 +138,7 @@ const rootLevelSearch = (
 		...(input.attributeFilters?.[0]?.value && {
 			attribute_filter_value: input.attributeFilters[0].value,
 		}),
-	}
+	} satisfies Record<string, unknown>
 
 	const params = {
 		start_time: input.timeRange.startTime,

@@ -13,7 +13,7 @@ export function getTimeRange(shorthand: TimeRangeKey): { startTime: string; endT
 		"24h": 24 * 60 * 60 * 1000,
 		"7d": 7 * 24 * 60 * 60 * 1000,
 		"30d": 30 * 24 * 60 * 60 * 1000,
-	}
+	} satisfies Record<TimeRangeKey, number>
 	const start = new Date(now.getTime() - msMap[shorthand])
 	return {
 		startTime: formatForTinybird(start),
@@ -27,7 +27,7 @@ export function getPreviousTimeRange(shorthand: TimeRangeKey): { startTime: stri
 		"24h": 24 * 60 * 60 * 1000,
 		"7d": 7 * 24 * 60 * 60 * 1000,
 		"30d": 30 * 24 * 60 * 60 * 1000,
-	}
+	} satisfies Record<TimeRangeKey, number>
 	const rangeMs = msMap[shorthand]
 	const now = new Date()
 	const currentStart = new Date(now.getTime() - rangeMs)

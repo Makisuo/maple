@@ -37,6 +37,7 @@ export function markIncompleteSegments<T extends Record<string, unknown>>(
 
 	if (firstIncompleteIdx === -1) {
 		// Fall back to the spacing + wall-clock heuristic.
+		// SAFETY: the generic constraint guarantees every row has the bucket field consumed here.
 		const bucketSeconds = inferBucketSeconds(data as unknown as Array<{ bucket: string }>)
 		if (bucketSeconds == null) {
 			return { data, hasIncomplete: false, incompleteKeys: [] }
@@ -92,6 +93,7 @@ export function markIncompleteSegments<T extends Record<string, unknown>>(
 	const bridgeIdx = firstIncompleteIdx - 1
 
 	const result = trimmed.map((row, i) => {
+		// SAFETY: the clone is intentionally widened so the derived incomplete-series keys can be added.
 		const next = { ...row } as Record<string, unknown>
 
 		if (i < firstIncompleteIdx) {

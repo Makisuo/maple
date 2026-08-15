@@ -79,7 +79,7 @@ const recordApplyOutcome = (
 				messageId,
 				callId: toolCallId,
 				output: content,
-				...(isError ? { isError: true } : {}),
+				...(isError ? { isError: true } : undefined),
 			}),
 		)
 	})
@@ -157,7 +157,7 @@ export const HttpChatLive = HttpApiBuilder.group(MapleInternalApi, "chat", (hand
 
 			return new ChatApplyResponse({
 				content,
-				...(result.isError === true ? { isError: true } : {}),
+				...(result.isError === true ? { isError: true } : undefined),
 			})
 		}),
 	),

@@ -52,7 +52,7 @@ const decodeIssueDateTimeSync = Schema.decodeUnknownSync(ErrorIssueDocument.fiel
 const DEFAULT_EVENTS_LIMIT = 100
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 
-export interface ErrorIssueWorkflowPublicShape {
+export interface ErrorIssueWorkflowPublicApi {
 	readonly heartbeatIssue: (
 		orgId: OrgId,
 		actorId: ActorId,
@@ -107,7 +107,7 @@ export interface ErrorIssueWorkflowPublicShape {
 }
 
 /** Internal workflow kernel shared with the compatibility facade's broad operations and tick. */
-export interface ErrorIssueWorkflowServiceShape extends ErrorIssueWorkflowPublicShape {
+export interface ErrorIssueWorkflowServiceApi extends ErrorIssueWorkflowPublicApi {
 	readonly rowToIssue: (
 		row: ErrorIssueRow,
 		hasOpenIncident: boolean,
@@ -159,7 +159,7 @@ export interface ErrorIssueWorkflowServiceShape extends ErrorIssueWorkflowPublic
 	>
 }
 
-const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | ErrorActorsService> = Effect.gen(
+const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorActorsService> = Effect.gen(
 	function* () {
 		const database = yield* Database
 		const actors = yield* ErrorActorsService
@@ -177,7 +177,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			})
 		}
 
-		const rowToIssue: ErrorIssueWorkflowServiceShape["rowToIssue"] = (row, hasOpenIncident, actorMap) =>
+		const rowToIssue: ErrorIssueWorkflowServiceApi["rowToIssue"] = (row, hasOpenIncident, actorMap) =>
 			new ErrorIssueDocument({
 				id: row.id,
 				kind: row.kind,
@@ -226,7 +226,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				createdAt: isoFromDate(row.createdAt),
 			})
 
-		const requireIssue: ErrorIssueWorkflowServiceShape["requireIssue"] = Effect.fn(
+		const requireIssue: ErrorIssueWorkflowServiceApi["requireIssue"] = Effect.fn(
 			"ErrorsService.requireIssue",
 		)(function* (orgId, issueId) {
 			const rows = yield* dbExecute((db) =>
@@ -248,7 +248,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return row
 		})
 
-		const issuesWithOpenIncidents: ErrorIssueWorkflowServiceShape["issuesWithOpenIncidents"] = (
+		const issuesWithOpenIncidents: ErrorIssueWorkflowServiceApi["issuesWithOpenIncidents"] = (
 			orgId,
 			issueIds,
 		) => {
@@ -291,7 +291,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			)
 		}
 
-		const hydrateIssueRows: ErrorIssueWorkflowServiceShape["hydrateIssueRows"] = (orgId, rows) =>
+		const hydrateIssueRows: ErrorIssueWorkflowServiceApi["hydrateIssueRows"] = (orgId, rows) =>
 			Effect.gen(function* () {
 				if (rows.length === 0) return []
 				const openSet = yield* issuesWithOpenIncidents(
@@ -305,14 +305,14 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				return rows.map((row) => rowToIssue(row, openSet.has(row.id), actorMap))
 			})
 
-		const hydrateIssue: ErrorIssueWorkflowServiceShape["hydrateIssue"] = Effect.fn(
+		const hydrateIssue: ErrorIssueWorkflowServiceApi["hydrateIssue"] = Effect.fn(
 			"ErrorsService.hydrateIssue",
 		)(function* (orgId, row) {
 			const hydrated = yield* hydrateIssueRows(orgId, [row])
 			return hydrated[0]!
 		})
 
-		const recordEvent: ErrorIssueWorkflowServiceShape["recordEvent"] = Effect.fn(
+		const recordEvent: ErrorIssueWorkflowServiceApi["recordEvent"] = Effect.fn(
 			"ErrorsService.recordEvent",
 		)(function* (orgId, issueId, actorId, type, opts = {}) {
 			const timestamp = opts.timestamp ?? (yield* Clock.currentTimeMillis)
@@ -344,7 +344,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return Effect.void
 		}
 
-		const applyTransition: ErrorIssueWorkflowServiceShape["applyTransition"] = Effect.fn(
+		const applyTransition: ErrorIssueWorkflowServiceApi["applyTransition"] = Effect.fn(
 			"ErrorsService.applyTransition",
 		)(function* (orgId, actorId, row, toState, opts = {}) {
 			const timestamp = opts.timestamp ?? (yield* Clock.currentTimeMillis)
@@ -426,7 +426,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				leaseExpiresAt: row?.leaseExpiresAt == null ? null : isoFromDate(row.leaseExpiresAt),
 			})
 
-		const heartbeatIssue: ErrorIssueWorkflowServiceShape["heartbeatIssue"] = Effect.fn(
+		const heartbeatIssue: ErrorIssueWorkflowServiceApi["heartbeatIssue"] = Effect.fn(
 			"ErrorsService.heartbeatIssue",
 		)(function* (orgId, actorId, issueId) {
 			const timestamp = yield* Clock.currentTimeMillis
@@ -463,7 +463,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		})
 
-		const releaseIssue: ErrorIssueWorkflowServiceShape["releaseIssue"] = Effect.fn(
+		const releaseIssue: ErrorIssueWorkflowServiceApi["releaseIssue"] = Effect.fn(
 			"ErrorsService.releaseIssue",
 		)(function* (orgId, actorId, issueId, opts) {
 			const timestamp = yield* Clock.currentTimeMillis
@@ -500,7 +500,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return yield* hydrateIssue(orgId, next)
 		})
 
-		const assignIssue: ErrorIssueWorkflowServiceShape["assignIssue"] = Effect.fn(
+		const assignIssue: ErrorIssueWorkflowServiceApi["assignIssue"] = Effect.fn(
 			"ErrorsService.assignIssue",
 		)(function* (orgId, byActorId, issueId, toActorId) {
 			const timestamp = yield* Clock.currentTimeMillis
@@ -566,7 +566,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			)
 		})
 
-		const setSeverity: ErrorIssueWorkflowServiceShape["setSeverity"] = Effect.fn(
+		const setSeverity: ErrorIssueWorkflowServiceApi["setSeverity"] = Effect.fn(
 			"ErrorsService.setSeverity",
 		)(function* (orgId, actorId, issueId, severity, opts) {
 			const timestamp = yield* Clock.currentTimeMillis
@@ -615,7 +615,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		})
 
-		const commentOnIssue: ErrorIssueWorkflowServiceShape["commentOnIssue"] = Effect.fn(
+		const commentOnIssue: ErrorIssueWorkflowServiceApi["commentOnIssue"] = Effect.fn(
 			"ErrorsService.commentOnIssue",
 		)(function* (orgId, actorId, issueId, body, opts) {
 			const timestamp = yield* Clock.currentTimeMillis
@@ -643,7 +643,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return rowToEvent(row, actorMap)
 		})
 
-		const listIssueEvents: ErrorIssueWorkflowServiceShape["listIssueEvents"] = Effect.fn(
+		const listIssueEvents: ErrorIssueWorkflowServiceApi["listIssueEvents"] = Effect.fn(
 			"ErrorsService.listIssueEvents",
 		)(function* (orgId, issueId, opts) {
 			yield* Effect.annotateCurrentSpan({ orgId, issueId })
@@ -686,7 +686,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 
 export class ErrorIssueWorkflowService extends Context.Service<
 	ErrorIssueWorkflowService,
-	ErrorIssueWorkflowServiceShape
+	ErrorIssueWorkflowServiceApi
 >()("@maple/api/services/errors/ErrorIssueWorkflowService", { make }) {
 	static readonly layer = Layer.effect(this, this.make)
 }

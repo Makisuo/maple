@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import * as React from "react"
 import type { ReactNode } from "react"
 import type { DashboardId } from "@maple/domain/http"

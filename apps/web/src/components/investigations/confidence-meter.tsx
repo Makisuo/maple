@@ -4,7 +4,10 @@ import { cn } from "@maple/ui/lib/utils"
 type Confidence = NonNullable<V2Investigation["confidence"]>
 
 /** Sort rank: most confident first, unset last. */
-export const CONFIDENCE_RANK: Record<Confidence, number> = { high: 0, medium: 1, low: 2 }
+export const CONFIDENCE_RANK: Record<Confidence, number> = { high: 0, medium: 1, low: 2 } satisfies Record<
+	Confidence,
+	number
+>
 
 /**
  * The word's tint, alongside this file's other confidence vocabulary. It lived on
@@ -16,15 +19,15 @@ export const CONFIDENCE_TONE: Record<string, string> = {
 	high: "text-success",
 	medium: "text-severity-warn",
 	low: "text-muted-foreground",
-}
+} satisfies Record<string, string>
 
-const FILLED: Record<Confidence, number> = { high: 3, medium: 2, low: 1 }
+const FILLED: Record<Confidence, number> = { high: 3, medium: 2, low: 1 } satisfies Record<Confidence, number>
 
 const BAR_TONE: Record<Confidence, string> = {
 	high: "bg-success",
 	medium: "bg-severity-warn",
 	low: "bg-muted-foreground",
-}
+} satisfies Record<Confidence, string>
 
 /** Ascending bars, so the shape reads before the word does. */
 const BAR_HEIGHT = ["h-1.5", "h-2", "h-2.5"] as const

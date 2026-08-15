@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Result } from "effect"
-import { decodeShapeRequest } from "./request"
+import { decodeSyncRequest } from "./request"
 
-const decode = (query: string) => decodeShapeRequest(new URLSearchParams(query))
+const decode = (query: string) => decodeSyncRequest(new URLSearchParams(query))
 
 const expectFailure = (query: string) => {
 	const result = decode(query)

@@ -81,20 +81,20 @@ const ANOMALY_LABEL: Record<AnomalySignalType, string> = {
 	throughput: "Traffic outage",
 	error_spike: "Error frequency increase",
 	log_volume: "Log volume anomaly",
-}
+} satisfies Record<AnomalySignalType, string>
 
 const ANOMALY_METRIC: Partial<Record<AnomalySignalType, ServiceHealthCause["metric"]>> = {
 	error_rate: "error",
 	latency_p95: "latency",
 	throughput: "traffic",
 	log_volume: "error",
-}
+} satisfies Partial<Record<AnomalySignalType, ServiceHealthCause["metric"]>>
 
 const HEALTH_DOT_COLOR: Record<ServiceHealth, string> = {
 	healthy: "var(--severity-info)",
 	degraded: "var(--severity-warn)",
 	unhealthy: "var(--severity-error)",
-}
+} satisfies Record<ServiceHealth, string>
 
 function metricTone(cause: ServiceHealthCause | undefined): "ok" | "warn" | "crit" {
 	return cause === undefined ? "ok" : cause.severity === "critical" ? "crit" : "warn"
@@ -180,7 +180,7 @@ function countByHealth(services: readonly EnrichedService[]): Record<ServiceHeal
 			acc[health] += 1
 			return acc
 		},
-		{ healthy: 0, degraded: 0, unhealthy: 0 } as Record<ServiceHealth, number>,
+		{ healthy: 0, degraded: 0, unhealthy: 0 } satisfies Record<ServiceHealth, number>,
 	)
 }
 

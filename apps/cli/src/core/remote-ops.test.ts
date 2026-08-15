@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test"
-import { Effect, Exit } from "effect"
+import { Effect, Exit, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import * as Remote from "./remote-ops"
 import { makeV2Client, toV2Timestamp } from "./v2-client"
@@ -30,31 +30,40 @@ interface CapturedRequest {
 	readonly body: Record<string, unknown>
 }
 
+type StubResponse = Record<string, unknown>
+
+const decodeCapturedBody = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))
+
 let requests: Array<CapturedRequest> = []
-let responder: (url: string) => unknown = () => ({})
+let responder: (url: string) => StubResponse = () => ({})
 
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-	// Read through `Request` rather than poking at `init.body`: the HTTP client
-	// may send a stream or a Uint8Array, and stringifying those yields garbage
-	// instead of the payload we mean to assert on.
-	const request =
-		input instanceof Request && init === undefined
-			? input
-			: new Request(input instanceof Request ? input.url : String(input), init)
-	const text = await request.clone().text()
-	requests.push({
-		url: request.url,
-		method: request.method.toUpperCase(),
-		authorization: request.headers.get("authorization"),
-		body: text.length > 0 ? (JSON.parse(text) as Record<string, unknown>) : {},
-	})
-	return new Response(JSON.stringify(responder(request.url)), {
-		status: 200,
-		headers: { "content-type": "application/json" },
-	})
-}) as unknown as typeof fetch
+const fetchStub = Object.assign(
+	async (input: string | URL | Request, init?: RequestInit) => {
+		// Read through `Request` rather than poking at `init.body`: the HTTP client
+		// may send a stream or a Uint8Array, and stringifying those yields garbage
+		// instead of the payload we mean to assert on.
+		const request =
+			input instanceof Request && init === undefined
+				? input
+				: new Request(input instanceof Request ? input.url : String(input), init)
+		const text = await request.clone().text()
+		requests.push({
+			url: request.url,
+			method: request.method.toUpperCase(),
+			authorization: request.headers.get("authorization"),
+			body: text.length > 0 ? decodeCapturedBody(JSON.parse(text)) : {},
+		})
+		return new Response(JSON.stringify(responder(request.url)), {
+			status: 200,
+			headers: { "content-type": "application/json" },
+		})
+	},
+	{ preconnect: globalThis.fetch.preconnect },
+) satisfies typeof fetch
 
-const stubV2 = (respond: (url: string) => unknown) => {
+globalThis.fetch = fetchStub
+
+const stubV2 = (respond: (url: string) => StubResponse) => {
 	responder = respond
 	return requests
 }

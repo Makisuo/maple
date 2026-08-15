@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { WIDGET_TYPES, WIDGET_VISUALIZATIONS } from "../../widget-types"
 import { SORT_DIRECTIONS, STAT_AGGREGATES } from "../shared/transform"
 import type { DashboardMigration } from "./types"
@@ -27,7 +28,7 @@ const coerce = <T extends string>(value: unknown, allowed: ReadonlyArray<T>, fal
 const migrateTransform = (transform: unknown): unknown => {
 	if (!isPlainObject(transform)) return transform
 
-	const next: Record<string, unknown> = { ...transform }
+	const next: Record<string, unknown> = { ...transform } satisfies Record<string, unknown>
 
 	const reduceToValue = transform.reduceToValue
 	if (isPlainObject(reduceToValue) && reduceToValue.aggregate !== undefined) {
@@ -61,7 +62,7 @@ const CHART_PANEL_TYPES = ["line", "bar", "area"] as const
 const migrateWidget = (widget: unknown): unknown => {
 	if (!isPlainObject(widget)) return widget
 
-	const next: Record<string, unknown> = { ...widget }
+	const next: Record<string, unknown> = { ...widget } satisfies Record<string, unknown>
 
 	const storedPanel = CHART_PANEL_TYPES.find((panel) => panel === widget.visualization)
 	if (storedPanel !== undefined) {

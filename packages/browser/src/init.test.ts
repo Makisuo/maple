@@ -1,3 +1,4 @@
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 import { clearSessionSink, resetConsentForTests, setConsent, track } from "@maple/browser-session"
 import { afterEach, describe, expect, it, vi } from "vitest"
 

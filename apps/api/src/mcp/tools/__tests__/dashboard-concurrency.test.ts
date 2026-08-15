@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 // Concurrency regression tests for the shared dashboard mutation pipeline used
 // by the MCP tools (add_dashboard_widget, remove_dashboard_widget,
 // reorder_dashboard_widgets, update_dashboard_widget, update_dashboard).

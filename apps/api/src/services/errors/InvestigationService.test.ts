@@ -542,7 +542,7 @@ describe("InvestigationService", () => {
 		"submit_diagnosis writes the issue-linked ai_triage event exactly once across re-diagnosis",
 		() => {
 			const harness = makeHarness()
-			const raw = createMaplePgliteClient(harness.testDb.pglite) as unknown as MaplePgClient
+			const raw = createMaplePgliteClient(harness.testDb.pglite) as MaplePgClient
 			const issueId = asIssueId(randomUUID())
 			return Effect.gen(function* () {
 				const service = yield* InvestigationService

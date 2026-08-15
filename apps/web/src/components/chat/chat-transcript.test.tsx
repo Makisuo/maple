@@ -33,8 +33,9 @@ vi.stubGlobal("IntersectionObserver", NoopObserver)
 HTMLCanvasElement.prototype.getContext = () => null
 
 const message = (id: string, role: "user" | "assistant", text: string): UIMessage =>
-	({ id, role, parts: [{ type: "text", text }] }) as unknown as UIMessage
+	({ id, role, parts: [{ type: "text", text }] }) as UIMessage
 
+// SAFETY: this fixture constructs the exact tool-message variant consumed by ChatTranscript.
 const toolMessage = (id: string, output: unknown): UIMessage =>
 	({
 		id,
@@ -127,6 +128,7 @@ describe("ChatTranscript", () => {
 
 	describe("the status orb tracks what the agent is doing", () => {
 		/** An assistant turn stopped mid-call on `toolName`. */
+		// SAFETY: this fixture constructs the in-progress tool variant consumed by ChatTranscript.
 		const runningTool = (id: string, toolName: string): UIMessage =>
 			({
 				id,
@@ -181,6 +183,7 @@ describe("ChatTranscript", () => {
 		})
 
 		it("puts one orb in the group header, tracking the call actually in flight", () => {
+			// SAFETY: this fixture deliberately mixes settled and in-flight tool parts for the grouping test.
 			const burst = {
 				id: "m2",
 				role: "assistant",
@@ -211,7 +214,7 @@ describe("ChatTranscript", () => {
 				input: {},
 				output: i < 10 ? "{}" : undefined,
 			}))
-			const burst = { id: "m2", role: "assistant", parts } as unknown as UIMessage
+			const burst = { id: "m2", role: "assistant", parts } as UIMessage
 
 			render(
 				<ChatTranscript {...baseProps} isLoading messages={[message("m1", "user", "hi"), burst]} />,
@@ -229,7 +232,7 @@ describe("ChatTranscript", () => {
 					{ type: "tool-search_traces", toolCallId: "a", state: "input-available", input: {} },
 					{ type: "text", text: "Here's what I found", state: "streaming" },
 				],
-			} as unknown as UIMessage
+			} as UIMessage
 
 			render(
 				<ChatTranscript
@@ -297,6 +300,7 @@ describe("ChatTranscript", () => {
 	// An agent loop emits one message per round-trip; six of them used to read as six
 	// identical `Used 2 tools` cards stacked down the page.
 	it("collapses a run of tool-only turns into a single tool group", () => {
+		// SAFETY: this fixture constructs the repeated tool-only message variant consumed by ChatTranscript.
 		const burst = (id: string): UIMessage =>
 			({
 				id,
@@ -351,7 +355,7 @@ describe("machine-written turns", () => {
 			id,
 			role: "user",
 			parts: [{ type: "text", text: wrapChatContext(block, said) }],
-		}) as unknown as UIMessage
+		}) as UIMessage
 
 	// `apps/api` opens an investigation by sending a JSON snapshot as a user turn.
 	// Now that user turns are durable it replays to every reader, and nobody typed it.
@@ -392,7 +396,7 @@ describe("ChatTranscript sub-agent cards", () => {
 					],
 				},
 			],
-		}) as unknown as UIMessage
+		}) as UIMessage
 
 	it("renders a collapsed card naming the sub-agent and what it was asked", () => {
 		render(<ChatTranscript {...baseProps} messages={[taskMessage()]} />)

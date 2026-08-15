@@ -81,7 +81,7 @@ export interface MapleClientConfig {
 export const layer = (config: MapleClientConfig) => {
 	const attributes: Record<string, unknown> = {
 		"maple.sdk.type": "client",
-	}
+	} satisfies Record<string, unknown>
 	const nav = browserNavigator()
 	if (nav) {
 		if (nav.userAgent) attributes["browser.user_agent"] = nav.userAgent

@@ -30,7 +30,7 @@ const PLAN_FEATURES: Record<string, PlanFeature[]> = {
 		{ icon: "code", label: "API access", value: "Full" },
 		{ icon: "shield", label: "Support", value: "Priority" },
 	],
-}
+} satisfies Record<string, PlanFeature[]>
 
 export function getPlanFeatures(planSlug: string | undefined): PlanFeature[] {
 	return PLAN_FEATURES[planSlug ?? DEFAULT_PLAN] ?? PLAN_FEATURES[DEFAULT_PLAN]
@@ -39,7 +39,7 @@ export function getPlanFeatures(planSlug: string | undefined): PlanFeature[] {
 const PLAN_DESCRIPTIONS: Record<string, string> = {
 	starter: "For individuals and small projects",
 	startup: "For growing teams",
-}
+} satisfies Record<string, string>
 
 export function getPlanDescription(planSlug: string): string {
 	return PLAN_DESCRIPTIONS[planSlug] ?? PLAN_DESCRIPTIONS["startup"]

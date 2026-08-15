@@ -42,9 +42,9 @@ function MetricsPage() {
 		navigate({
 			search: (prev) => ({
 				...prev,
-				...("q" in patch ? { q: patch.q || undefined } : {}),
-				...("type" in patch ? { type: patch.type } : {}),
-				...("view" in patch ? { view: patch.view === "grid" ? undefined : patch.view } : {}),
+				...("q" in patch ? { q: patch.q || undefined } : undefined),
+				...("type" in patch ? { type: patch.type } : undefined),
+				...("view" in patch ? { view: patch.view === "grid" ? undefined : patch.view } : undefined),
 			}),
 			replace: true,
 		})

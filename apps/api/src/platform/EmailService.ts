@@ -6,7 +6,7 @@ class EmailDeliveryError extends Data.TaggedError("@maple/api/platform/EmailDeli
 	readonly message: string
 }> {}
 
-export interface EmailServiceShape {
+export interface EmailServiceApi {
 	readonly isConfigured: boolean
 	readonly send: (
 		to: string,
@@ -34,7 +34,7 @@ interface SendEmailBinding {
 
 const EMAIL_TIMEOUT = Duration.seconds(15)
 
-export class EmailService extends Context.Service<EmailService, EmailServiceShape>()(
+export class EmailService extends Context.Service<EmailService, EmailServiceApi>()(
 	"@maple/api/lib/EmailService",
 	{
 		make: Effect.gen(function* () {
@@ -86,7 +86,7 @@ export class EmailService extends Context.Service<EmailService, EmailServiceShap
 							to,
 							subject,
 							html,
-							...(replyTo ? { replyTo } : {}),
+							...(replyTo ? { replyTo } : undefined),
 						}),
 					catch: (error) => {
 						const code =
@@ -118,7 +118,7 @@ export class EmailService extends Context.Service<EmailService, EmailServiceShap
 				)
 			})
 
-			return { isConfigured, send } satisfies EmailServiceShape
+			return { isConfigured, send } satisfies EmailServiceApi
 		}),
 	},
 ) {

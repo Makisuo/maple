@@ -16,7 +16,7 @@ export interface OrgMember {
 	readonly name: string | null
 }
 
-export interface OrgMembersServiceShape {
+export interface OrgMembersServiceApi {
 	/**
 	 * Resolve workspace-member user ids to their emails via the auth provider.
 	 * Fails when any id is not a member of the org, or when member resolution
@@ -88,7 +88,7 @@ const make = Effect.gen(function* () {
 		return all
 	})
 
-	const resolveMembers: OrgMembersServiceShape["resolveMembers"] = Effect.fn(
+	const resolveMembers: OrgMembersServiceApi["resolveMembers"] = Effect.fn(
 		"OrgMembersService.resolveMembers",
 	)(function* (orgId: OrgId, userIds: ReadonlyArray<UserId>) {
 		yield* Effect.annotateCurrentSpan({
@@ -119,10 +119,10 @@ const make = Effect.gen(function* () {
 		return resolved
 	})
 
-	return { resolveMembers } satisfies OrgMembersServiceShape
+	return { resolveMembers } satisfies OrgMembersServiceApi
 })
 
-export class OrgMembersService extends Context.Service<OrgMembersService, OrgMembersServiceShape>()(
+export class OrgMembersService extends Context.Service<OrgMembersService, OrgMembersServiceApi>()(
 	"@maple/api/services/OrgMembersService",
 	{ make },
 ) {

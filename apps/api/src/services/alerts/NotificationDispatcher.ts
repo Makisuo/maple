@@ -68,7 +68,7 @@ export interface NotificationRequest {
 	readonly escalation?: Record<string, unknown>
 }
 
-export interface NotificationDispatcherShape {
+export interface NotificationDispatcherApi {
 	readonly dispatch: (
 		orgId: OrgId,
 		destinationIds: ReadonlyArray<AlertDestinationId>,
@@ -105,7 +105,7 @@ export interface NotificationDestinationResult {
  * inference through the class's own base expression.
  */
 const make: Effect.Effect<
-	NotificationDispatcherShape,
+	NotificationDispatcherApi,
 	NotificationDispatchError,
 	Database | Env | EmailService | SlackBotTokenResolver
 > = Effect.gen(function* () {
@@ -183,7 +183,7 @@ const make: Effect.Effect<
 		})
 		const payloadJson = JSON.stringify({
 			eventType: request.escalation ? "escalation" : request.eventType,
-			...(request.escalation ? { escalation: request.escalation } : {}),
+			...(request.escalation ? { escalation: request.escalation } : undefined),
 			incidentId: request.incidentId,
 			incidentStatus: request.incidentStatus,
 			dedupeKey: request.dedupeKey,
@@ -217,12 +217,14 @@ const make: Effect.Effect<
 		).pipe(Effect.tapError(() => Effect.annotateCurrentSpan({ "maple.delivery.outcome": "failed" })))
 		yield* Effect.annotateCurrentSpan({
 			"maple.delivery.outcome": "delivered",
-			...(result.responseCode != null ? { "http.response.status_code": result.responseCode } : {}),
+			...(result.responseCode != null
+				? { "http.response.status_code": result.responseCode }
+				: undefined),
 		})
 		return result
 	})
 
-	const dispatch: NotificationDispatcherShape["dispatch"] = Effect.fn("NotificationDispatcher.dispatch")(
+	const dispatch: NotificationDispatcherApi["dispatch"] = Effect.fn("NotificationDispatcher.dispatch")(
 		function* (
 			orgId: OrgId,
 			destinationIds: ReadonlyArray<AlertDestinationId>,
@@ -324,7 +326,7 @@ const make: Effect.Effect<
 
 export class NotificationDispatcher extends Context.Service<
 	NotificationDispatcher,
-	NotificationDispatcherShape
+	NotificationDispatcherApi
 >()("@maple/api/services/NotificationDispatcher", { make }) {
 	// The resolver is self-provided (it needs only Database + Env, which every
 	// caller already supplies) so wiring stays unchanged in app.ts and the

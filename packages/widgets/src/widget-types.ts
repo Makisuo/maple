@@ -289,7 +289,7 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		mcpExposed: true,
 		persesKinds: ["Markdown"],
 	},
-}
+} satisfies Record<PanelType, WidgetTypeMeta>
 
 export const PANEL_TYPES: ReadonlyArray<WidgetTypeMeta> = [
 	// Ordered as the Type picker shows them, not alphabetically.

@@ -68,15 +68,21 @@ interface QueryBuilderTimeseriesResponse {
 function resolveStrategy(input: QueryBuilderTimeseriesInput): EmptyRangeFallbackStrategy {
 	return resolveFallbackStrategy(
 		{
-			...(input.strategy?.enableEmptyRangeFallback === undefined
-				? {}
-				: { enabled: input.strategy.enableEmptyRangeFallback }),
-			...(input.strategy?.fallbackWindowSeconds === undefined
-				? {}
-				: { windowSeconds: input.strategy.fallbackWindowSeconds }),
-			...(input.strategy?.maxFallbackRangeSeconds === undefined
-				? {}
-				: { maxRangeSeconds: input.strategy.maxFallbackRangeSeconds }),
+			...(!(input.strategy?.enableEmptyRangeFallback === undefined)
+				? {
+						enabled: input.strategy.enableEmptyRangeFallback,
+					}
+				: undefined),
+			...(!(input.strategy?.fallbackWindowSeconds === undefined)
+				? {
+						windowSeconds: input.strategy.fallbackWindowSeconds,
+					}
+				: undefined),
+			...(!(input.strategy?.maxFallbackRangeSeconds === undefined)
+				? {
+						maxRangeSeconds: input.strategy.maxFallbackRangeSeconds,
+					}
+				: undefined),
 		},
 		LAB_EMPTY_RANGE_STRATEGY,
 	)
@@ -99,8 +105,8 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 	const outcome = yield* runTimeseriesQuerySet(executor, {
 		querySet: {
 			queries: input.queries,
-			...(input.formulas === undefined ? {} : { formulas: input.formulas }),
-			...(input.comparison === undefined ? {} : { comparison: input.comparison }),
+			...(!(input.formulas === undefined) ? { formulas: input.formulas } : undefined),
+			...(!(input.comparison === undefined) ? { comparison: input.comparison } : undefined),
 		},
 		startTime: input.startTime,
 		endTime: input.endTime,

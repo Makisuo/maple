@@ -127,6 +127,7 @@ function readVariableOptions(
 // same atom instance. The key carries everything the atom body reads, so it
 // never closes over component state.
 const variableOptionsAtomFamily = Atom.family((key: string) => {
+	// SAFETY: The only caller below creates this key from the matching definitions/time object.
 	const { definitions, time } = JSON.parse(key) as {
 		definitions: DashboardVariable[]
 		time: ResolvedTime | null

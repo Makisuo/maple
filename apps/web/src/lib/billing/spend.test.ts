@@ -25,7 +25,7 @@ const startupPlan = {
 		{ featureId: "metrics", included: 100, price: { amount: 0.3 } },
 		{ featureId: "browser_sessions", included: 5_000, price: { amount: 0.002 } },
 	],
-} as unknown as CatalogPlan
+} as CatalogPlan
 
 const buildCustomer = (
 	overrides: {
@@ -50,14 +50,14 @@ const buildCustomer = (
 			metrics: { granted: 100 },
 			browser_sessions: { granted: 5_000 },
 		},
-	}) as unknown as BillingCustomer
+	}) as BillingCustomer
 
 const usage = {
 	logs: { sum: 390 },
 	traces: { sum: 140 },
 	metrics: { sum: 160 },
 	browser_sessions: { sum: 26_700 },
-} as unknown as BillingUsage["total"]
+} as BillingUsage["total"]
 
 const model = () => buildSpendModel({ customer: buildCustomer(), plans: [startupPlan], usage, nowMs: NOW })
 
@@ -91,7 +91,7 @@ describe("buildSpendModel", () => {
 		const result = buildSpendModel({
 			customer: buildCustomer(),
 			plans: [startupPlan],
-			usage: { logs: { sum: 10 } } as unknown as BillingUsage["total"],
+			usage: { logs: { sum: 10 } } as BillingUsage["total"],
 			nowMs: NOW,
 		})
 		expect(result?.topDriver).toBeNull()
@@ -105,7 +105,7 @@ describe("buildSpendModel", () => {
 			addOn: true,
 			price: { amount: 99 },
 			items: [],
-		} as unknown as CatalogPlan
+		} as CatalogPlan
 
 		const result = buildSpendModel({
 			customer: buildCustomer({
@@ -165,7 +165,7 @@ describe("buildCumulativeSeries", () => {
 			})),
 			cycleStart: CYCLE_START,
 			cycleEnd: CYCLE_END,
-		}) as unknown as DailySpendResponse
+		}) as DailySpendResponse
 
 	// A model whose metered logs total equals the series' own sum, so these tests
 	// exercise the accrual walk itself rather than the scaling above it.
@@ -173,7 +173,7 @@ describe("buildCumulativeSeries", () => {
 		const result = buildSpendModel({
 			customer: buildCustomer(),
 			plans: [startupPlan],
-			usage: { logs: { sum: loggedGB } } as unknown as BillingUsage["total"],
+			usage: { logs: { sum: loggedGB } } as BillingUsage["total"],
 			nowMs: NOW,
 		})
 		if (result === null) throw new Error("expected a model")

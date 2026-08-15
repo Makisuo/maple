@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import {
 	type BranchEventJob,
 	type InstallationSyncJob,
@@ -52,14 +53,14 @@ type SyncError =
 	| VcsQueueError
 	| UnknownVcsProviderError
 
-export interface VcsSyncServiceShape {
+export interface VcsSyncServiceApi {
 	readonly processMessage: (raw: unknown) => Effect.Effect<void, SyncError>
 	// Last-resort terminal write for a message that has exhausted its queue retries.
 	// Total (never fails) so the consumer can call it as a final step without risk.
 	readonly recordExhaustedFailure: (raw: unknown) => Effect.Effect<void>
 }
 
-export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServiceShape>()(
+export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServiceApi>()(
 	"@maple/api/services/vcs/VcsSyncService",
 	{
 		make: Effect.gen(function* () {
@@ -142,7 +143,7 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 						{
 							sinceMs: job.sinceMs,
 							branch: job.branch,
-							...(job.untilMs === undefined ? {} : { untilMs: job.untilMs }),
+							...(!(job.untilMs === undefined) ? { untilMs: job.untilMs } : undefined),
 						},
 					)
 
@@ -885,7 +886,7 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 					Effect.ignoreCause,
 				)
 
-			return { processMessage, recordExhaustedFailure } satisfies VcsSyncServiceShape
+			return { processMessage, recordExhaustedFailure } satisfies VcsSyncServiceApi
 		}),
 	},
 ) {

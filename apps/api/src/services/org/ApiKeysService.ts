@@ -126,7 +126,7 @@ const rowToResponse = (row: typeof apiKeys.$inferSelect, txid?: PostgresTransact
 		createdAt: row.createdAt.getTime(),
 		createdBy: row.createdBy,
 		createdByEmail: row.createdByEmail ?? null,
-		...(txid !== undefined ? { txid } : {}),
+		...(txid !== undefined ? { txid } : undefined),
 	})
 
 export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/api/services/ApiKeysService", {
@@ -248,7 +248,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				createdBy: userId,
 				createdByEmail,
 				secret: rawKey,
-				...(txid !== undefined ? { txid } : {}),
+				...(txid !== undefined ? { txid } : undefined),
 			})
 		})
 
@@ -325,7 +325,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				createdBy: userId,
 				createdByEmail,
 				secret: rawKey,
-				...(txid !== undefined ? { txid } : {}),
+				...(txid !== undefined ? { txid } : undefined),
 			})
 		})
 

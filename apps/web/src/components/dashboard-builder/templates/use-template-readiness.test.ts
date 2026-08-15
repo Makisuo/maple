@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { V2DashboardTemplate } from "@maple/domain/http/v2"
 import { computeTemplateReadiness } from "./use-template-readiness"
 
+// SAFETY: the fixture supplies the complete template fields consumed by readiness evaluation; ids are inert test values.
 const template = (
 	id: string,
 	requiredMetricPrefixes: ReadonlyArray<string>,

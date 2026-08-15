@@ -1,6 +1,7 @@
 import type { SlackThreadMessage } from "eve/channels/slack"
 import { botUserIdFromEnvelope } from "./bot-identity.js"
 import { createTtlCache } from "./ttl-cache.js"
+import { isString } from "./type-guards.js"
 
 /**
  * Thread follow-up promotion: lets users keep talking to the bot in a thread
@@ -284,8 +285,8 @@ export function recordThreadEngagement(rawBody: string): void {
 	// A root-level mention has no `thread_ts` yet — its own ts is what becomes
 	// the thread's id once the bot replies, so key on that and the thread is
 	// already warm for its very first follow-up.
-	const threadTs = typeof event.thread_ts === "string" && event.thread_ts.length > 0 ? event.thread_ts : ts
-	const teamId = typeof parsed.team_id === "string" ? parsed.team_id : undefined
+	const threadTs = isString(event.thread_ts) && event.thread_ts.length > 0 ? event.thread_ts : ts
+	const teamId = isString(parsed.team_id) ? parsed.team_id : undefined
 
 	engagementCache.set(engagementCacheKey(teamId, channelId, threadTs), {
 		expiresAt: Date.now() + ENGAGED_TTL_MS,
@@ -383,7 +384,7 @@ function parseFollowUpCandidate(rawBody: string): FollowUpCandidate | null {
 
 	return {
 		envelope: parsed as FollowUpCandidate["envelope"],
-		teamId: typeof parsed.team_id === "string" ? parsed.team_id : undefined,
+		teamId: isString(parsed.team_id) ? parsed.team_id : undefined,
 		channelId,
 		threadTs,
 		botUserId,

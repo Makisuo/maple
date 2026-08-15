@@ -287,8 +287,8 @@ export const listMetrics = (p: { range: Range; service?: string; search?: string
 			const result = yield* executor.query("list_metrics", {
 				start_time: p.range.startTime,
 				end_time: p.range.endTime,
-				...(p.service ? { service: p.service } : {}),
-				...(p.search ? { search: p.search } : {}),
+				...(p.service ? { service: p.service } : undefined),
+				...(p.search ? { search: p.search } : undefined),
 				limit: p.limit ?? 100,
 			})
 			return result.data
@@ -404,11 +404,11 @@ const localTracesTimeseries = (p: {
 		const result = yield* executor.query("custom_traces_timeseries", {
 			start_time: p.range.startTime,
 			end_time: p.range.endTime,
-			...(p.bucketSeconds ? { bucket_seconds: p.bucketSeconds } : {}),
-			...(p.service ? { service_name: p.service } : {}),
-			...(p.spanName ? { span_name: p.spanName } : {}),
-			...(p.errorsOnly ? { errors_only: "1" } : {}),
-			...(p.environment ? { environments: p.environment } : {}),
+			...(p.bucketSeconds ? { bucket_seconds: p.bucketSeconds } : undefined),
+			...(p.service ? { service_name: p.service } : undefined),
+			...(p.spanName ? { span_name: p.spanName } : undefined),
+			...(p.errorsOnly ? { errors_only: "1" } : undefined),
+			...(p.environment ? { environments: p.environment } : undefined),
 			...groupByParam(p.groupBy),
 		})
 		return result.data
@@ -444,10 +444,10 @@ const localTracesBreakdown = (p: {
 			start_time: p.range.startTime,
 			end_time: p.range.endTime,
 			limit: p.limit ?? 10,
-			...(p.service ? { service_name: p.service } : {}),
-			...(p.spanName ? { span_name: p.spanName } : {}),
-			...(p.errorsOnly ? { errors_only: "1" } : {}),
-			...(p.environment ? { environments: p.environment } : {}),
+			...(p.service ? { service_name: p.service } : undefined),
+			...(p.spanName ? { span_name: p.spanName } : undefined),
+			...(p.errorsOnly ? { errors_only: "1" } : undefined),
+			...(p.environment ? { environments: p.environment } : undefined),
 			...groupByParam(p.groupBy ?? "service"),
 		})
 		return result.data
@@ -472,7 +472,7 @@ const localCompareServiceOverview = (p: { current: Range; previous: Range; envir
 			current_end_time: p.current.endTime,
 			previous_start_time: p.previous.startTime,
 			previous_end_time: p.previous.endTime,
-			...(p.environment ? { environments: p.environment } : {}),
+			...(p.environment ? { environments: p.environment } : undefined),
 		})
 		return result.data
 	})

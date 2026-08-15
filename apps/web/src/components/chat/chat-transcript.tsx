@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { memo, useMemo, type ReactNode } from "react"
 
 import { Button } from "@maple/ui/components/ui/button"
@@ -264,7 +265,7 @@ const READ_ONLY_LABEL: Record<"shared" | "resolved" | "transcript", string> = {
 	shared: "Shared conversation · read-only",
 	resolved: "Investigation resolved · read-only",
 	transcript: "Agent reasoning log · read-only",
-}
+} satisfies Record<"shared" | "resolved" | "transcript", string>
 
 /**
  * One transcript row, memoized.

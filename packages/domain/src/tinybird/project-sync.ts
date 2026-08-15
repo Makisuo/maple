@@ -301,7 +301,7 @@ const buildDeployFormData = (overrides: RawTableTtlOverrides) => {
 	return formData
 }
 
-export interface TinybirdProjectSyncShape {
+export interface TinybirdProjectSyncApi {
 	readonly cleanupStaleDeployments: (
 		params: TinybirdProjectSyncParams,
 	) => Effect.Effect<void, TinybirdSyncRejectedError | TinybirdSyncUnavailableError>
@@ -332,7 +332,7 @@ export interface TinybirdProjectSyncShape {
 	readonly getCurrentProjectRevision: () => Effect.Effect<string>
 }
 
-export const makeTinybirdProjectSync = (options: TinybirdProjectSyncOptions): TinybirdProjectSyncShape => {
+export const makeTinybirdProjectSync = (options: TinybirdProjectSyncOptions): TinybirdProjectSyncApi => {
 	const fetchDeploymentStatusInternal = Effect.fn("TinybirdProjectSync.fetchDeploymentStatus")(function* (
 		params: TinybirdProjectSyncParams & { readonly deploymentId: string },
 	) {
@@ -691,7 +691,7 @@ export const makeTinybirdProjectSync = (options: TinybirdProjectSyncOptions): Ti
 		cleanupOwnedDeployment,
 		fetchInstanceHealth,
 		getCurrentProjectRevision,
-	} satisfies TinybirdProjectSyncShape
+	} satisfies TinybirdProjectSyncApi
 }
 
 // Promise-returning wrappers for non-Effect callers (Cloudflare Workflow steps)

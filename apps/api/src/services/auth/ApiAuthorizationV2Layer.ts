@@ -103,7 +103,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 							userId: resolved.userId,
 							roles: resolved.roles ?? apiKeyDefaultRoles,
 							authMode: "self_hosted",
-							...(resolved.scopes !== null ? { scopes: resolved.scopes } : {}),
+							...(resolved.scopes !== null ? { scopes: resolved.scopes } : undefined),
 						})
 						return yield* Effect.provideService(httpEffect, CurrentTenant.Context, tenant)
 					}

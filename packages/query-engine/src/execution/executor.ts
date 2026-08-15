@@ -12,7 +12,7 @@ import {
 } from "@maple/domain/http"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
 import { compilePipeQuery, type CompiledQuery, type TenantScope } from "../ch"
-import type { WarehouseExecutorShape } from "../observability"
+import type { WarehouseExecutorApi } from "../observability"
 import {
 	appendSettings,
 	type QueryProfileName,
@@ -42,7 +42,7 @@ import type {
 	RoutePurpose,
 	SqlQueryOptions,
 	WarehouseExecutorDeps,
-	WarehouseQueryServiceShape,
+	WarehouseQueryServiceApi,
 	WarehouseSqlClient,
 } from "./ports"
 import {
@@ -151,7 +151,7 @@ const clientTimeoutMs = (
  * production (the layer is built once) and a fresh one per test build, so tests
  * never see a stale client from a prior fake factory.
  */
-export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQueryServiceShape => {
+export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQueryServiceApi => {
 	const clientCache = new Map<string, CachedClient>()
 	const capabilitiesCache = Ref.makeUnsafe(HashMap.empty<string, CachedCapabilities>())
 
@@ -921,7 +921,7 @@ WHERE name = 'enable_full_text_index'`,
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
-	) => executeCompiledQuery(tenant, compiled, options)) as WarehouseQueryServiceShape["compiledQuery"]
+	) => executeCompiledQuery(tenant, compiled, options)) as WarehouseQueryServiceApi["compiledQuery"]
 
 	/**
 	 * Read with an explicit ceiling on the response we're willing to materialize.
@@ -1140,11 +1140,11 @@ WHERE name = 'enable_full_text_index'`,
 	// The facade only binds the tenant and defaults `query.context` — the
 	// canonical `WarehouseQueryService.executeSql` span carries all
 	// instrumentation, so no extra span layer is added here.
-	const asExecutor = (tenant: ExecutionTenant): WarehouseExecutorShape => ({
+	const asExecutor = (tenant: ExecutionTenant): WarehouseExecutorApi => ({
 		orgId: tenant.orgId,
 		query: <T>(pipe: WarehouseQueryName, params: Record<string, unknown>, options?: SqlQueryOptions) =>
 			query(tenant, { pipeName: pipe, params }, { context: `pipe:${pipe}`, ...options }).pipe(
-				Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> })),
+				Effect.map((response) => ({ data: response.data as ReadonlyArray<T> })),
 			),
 		compiledQuery: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
 			compiledQuery(tenant, compiled, { context: "warehouseExecutor.compiledQuery", ...options }),
@@ -1176,5 +1176,5 @@ WHERE name = 'enable_full_text_index'`,
 			),
 		ingest,
 		asExecutor,
-	} satisfies WarehouseQueryServiceShape
+	} satisfies WarehouseQueryServiceApi
 }

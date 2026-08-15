@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import type { MessageBatch, ScheduledController } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"

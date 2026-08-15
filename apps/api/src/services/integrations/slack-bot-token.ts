@@ -3,7 +3,7 @@ import { AlertDeliveryAuthError, OrgId } from "@maple/domain/http"
 import { and, eq, isNull } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
-import { Database, type DatabaseShape } from "@/platform/DatabaseLive"
+import { Database, type DatabaseApi } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 
 /*
@@ -28,7 +28,7 @@ export const slackSecretAad = (orgId: string, teamId: string, column: SlackSecre
 	Buffer.from(`slack_workspaces:v1:${orgId}:${teamId}:${column}`, "utf8")
 
 /** The single active (non-revoked) installation for an org, if any. */
-export const loadActiveWorkspaceByOrg = Effect.fnUntraced(function* (database: DatabaseShape, orgId: OrgId) {
+export const loadActiveWorkspaceByOrg = Effect.fnUntraced(function* (database: DatabaseApi, orgId: OrgId) {
 	const rows = yield* database.execute((db) =>
 		db
 			.select()
@@ -53,7 +53,7 @@ const notConnected = (message: string) =>
  * Fails with an {@link AlertDeliveryAuthError} when there is no active install.
  */
 export const resolveSlackBotTokenForDispatch = Effect.fn("SlackBotTokenResolver.resolve")(function* (
-	database: DatabaseShape,
+	database: DatabaseApi,
 	encryptionKey: Buffer,
 	orgId: string,
 ) {
@@ -86,11 +86,11 @@ class SlackBotTokenConfigError extends Schema.TaggedError<SlackBotTokenConfigErr
 	{ message: Schema.String },
 ) {}
 
-export interface SlackBotTokenResolverShape {
+export interface SlackBotTokenResolverApi {
 	readonly resolve: (orgId: OrgId) => Effect.Effect<string, AlertDeliveryAuthError>
 }
 
-const make: Effect.Effect<SlackBotTokenResolverShape, SlackBotTokenConfigError, Database | Env> = Effect.gen(
+const make: Effect.Effect<SlackBotTokenResolverApi, SlackBotTokenConfigError, Database | Env> = Effect.gen(
 	function* () {
 		const database = yield* Database
 		const env = yield* Env
@@ -107,9 +107,9 @@ const make: Effect.Effect<SlackBotTokenResolverShape, SlackBotTokenConfigError, 
 	},
 )
 
-export class SlackBotTokenResolver extends Context.Service<
-	SlackBotTokenResolver,
-	SlackBotTokenResolverShape
->()("@maple/api/services/SlackBotTokenResolver", { make }) {
+export class SlackBotTokenResolver extends Context.Service<SlackBotTokenResolver, SlackBotTokenResolverApi>()(
+	"@maple/api/services/SlackBotTokenResolver",
+	{ make },
+) {
 	static readonly layer = Layer.effect(this, this.make)
 }

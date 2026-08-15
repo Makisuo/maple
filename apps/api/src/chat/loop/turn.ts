@@ -638,7 +638,9 @@ const runStep = (
 											messageId: input.messageId,
 											callId: call.id,
 											output: outcome.result.value,
-											...(outcome.result.type === "error" ? { isError: true } : {}),
+											...(outcome.result.type === "error"
+												? { isError: true }
+												: undefined),
 										}),
 									),
 								]),
@@ -704,7 +706,7 @@ const runStep = (
 								messageId: input.messageId,
 								callId: call.id,
 								output: outcome.result.value,
-								...(outcome.result.type === "error" ? { isError: true } : {}),
+								...(outcome.result.type === "error" ? { isError: true } : undefined),
 							}),
 						)
 

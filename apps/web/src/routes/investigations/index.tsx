@@ -61,7 +61,7 @@ const KIND_FILTER_LABEL: Record<InvestigationKindKey | "all", string> = {
 	error: "Errors",
 	anomaly: "Anomalies",
 	question: "Questions",
-}
+} satisfies Record<InvestigationKindKey | "all", string>
 
 const KIND_FILTER_VALUES = Object.keys(KIND_FILTER_LABEL) as ReadonlyArray<InvestigationKindKey | "all">
 

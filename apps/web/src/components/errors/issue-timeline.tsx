@@ -19,7 +19,7 @@ const EVENT_LABEL: Record<ErrorIssueEventDocument["type"], string> = {
 	ai_triage: "AI triage",
 	anomaly_linked: "Anomaly",
 	severity_change: "Severity",
-}
+} satisfies Record<ErrorIssueEventDocument["type"], string>
 
 const DOT_CLASS: Record<ErrorIssueEventDocument["type"], string> = {
 	created: "bg-primary",
@@ -37,7 +37,7 @@ const DOT_CLASS: Record<ErrorIssueEventDocument["type"], string> = {
 	ai_triage: "bg-violet-500",
 	anomaly_linked: "bg-amber-500",
 	severity_change: "bg-orange-500",
-}
+} satisfies Record<ErrorIssueEventDocument["type"], string>
 
 function payloadString(value: unknown): string | null {
 	if (value == null) return null

@@ -61,13 +61,19 @@ export interface SessionMetaRowInput {
 	readonly recorded: boolean
 }
 
+interface SessionMetaRow extends Record<string, unknown> {
+	end_time?: string
+	duration_ms?: number
+	trace_ids?: Array<string>
+}
+
 /**
  * Build one `/v1/sessionReplays/meta` NDJSON row. Shared by `@maple-dev/browser`
  * and the Effect client SDK so a session looks identical no matter which SDK
  * posted it. UA/URL facets come from the live browser globals; absent (tests,
  * exotic embedders) they fall back to empty strings.
  */
-export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, unknown> {
+export function buildSessionMetaRow(input: SessionMetaRowInput): SessionMetaRow {
 	const userAgent: string = browserNavigator()?.userAgent ?? ""
 	const ua = parseUserAgent(userAgent)
 	const now = new Date()
@@ -77,7 +83,7 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, 
 	const referrer = input.entry?.referrer ?? ""
 	const utm = input.entry?.utm ?? {}
 
-	const row: Record<string, unknown> = {
+	const row: SessionMetaRow = {
 		session_id: input.sessionId,
 		start_time: formatCHDateTime(input.startedAt),
 		status: input.status,
@@ -105,15 +111,15 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, 
 			// look like a distinct visitor. Flag it rather than inflate silently.
 			...(input.visitorId && input.visitorIdPersisted === false
 				? { "maple.visitor.persisted": "false" }
-				: {}),
+				: undefined),
 			...(input.environment
 				? {
 						// Dual-emit: legacy key (pre-extracted by Tinybird MVs) + canonical.
 						"deployment.environment": input.environment,
 						"deployment.environment.name": input.environment,
 					}
-				: {}),
-			...(input.serviceVersion ? { "deployment.commit_sha": input.serviceVersion } : {}),
+				: undefined),
+			...(input.serviceVersion ? { "deployment.commit_sha": input.serviceVersion } : undefined),
 		},
 
 		// Everything below is on the base row on purpose.

@@ -86,7 +86,10 @@ const unwrap = (value: SecretInput): string => (Redacted.isRedacted(value) ? Red
 
 /** The create/update body: all declared props, secrets unwrapped. */
 const desiredBody = (props: AlertDestinationProps): Record<string, unknown> => {
-	const body: Record<string, unknown> = { type: props.type, name: props.name }
+	const body: Record<string, unknown> = { type: props.type, name: props.name } satisfies Record<
+		string,
+		unknown
+	>
 	if (props.enabled !== undefined) body.enabled = props.enabled
 	switch (props.type) {
 		case "pagerduty":

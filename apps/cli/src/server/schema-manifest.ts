@@ -124,13 +124,13 @@ const parseColumn = (line: string): LocalSchemaColumn | undefined => {
 	return {
 		name,
 		type,
-		...(defaultMatch === null
-			? {}
-			: {
+		...(!(defaultMatch === null)
+			? {
 					defaultKind: defaultMatch[1]!.toUpperCase(),
 					defaultExpression: normalize(defaultMatch[2]!),
-				}),
-		...(codecClause === undefined ? {} : { codec: normalize(codecClause) }),
+				}
+			: undefined),
+		...(!(codecClause === undefined) ? { codec: normalize(codecClause) } : undefined),
 	}
 }
 
@@ -203,10 +203,10 @@ const parseStatement = (raw: string): LocalSchemaObject | undefined => {
 		name,
 		kind,
 		columns,
-		...(engine === undefined ? {} : { engine: normalize(engine) }),
-		...(partitionBy === undefined ? {} : { partitionBy: normalize(partitionBy) }),
-		...(orderBy === undefined ? {} : { orderBy: normalize(orderBy) }),
-		...(ttl === undefined ? {} : { ttl: normalize(ttl) }),
+		...(!(engine === undefined) ? { engine: normalize(engine) } : undefined),
+		...(!(partitionBy === undefined) ? { partitionBy: normalize(partitionBy) } : undefined),
+		...(!(orderBy === undefined) ? { orderBy: normalize(orderBy) } : undefined),
+		...(!(ttl === undefined) ? { ttl: normalize(ttl) } : undefined),
 		indexes,
 		definition: normalize(statement),
 	}

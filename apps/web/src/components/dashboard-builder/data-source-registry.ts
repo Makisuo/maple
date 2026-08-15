@@ -6,7 +6,7 @@ import {
 	dataSourceQuerySet,
 	dataSourceRawSql,
 	dataSourceRouteParams,
-	QUERY_SHAPE_ENDPOINTS,
+	QUERY_RESULT_ENDPOINTS,
 	RAW_SQL_ENDPOINT,
 } from "@maple/widgets/dashboard"
 
@@ -75,7 +75,7 @@ export const serverFunctionMap: Record<DataSourceEndpoint, ServerFunction> = {
 	custom_query_builder_list: getQueryBuilderList,
 	raw_sql_chart: getRawSqlChart,
 	markdown_static: markdownStaticServerFn,
-}
+} satisfies Record<DataSourceEndpoint, ServerFunction>
 
 /**
  * Looks up a data-source server function by endpoint name. Accepts an
@@ -112,10 +112,12 @@ export function toWidgetRequest(
 			endpoint: RAW_SQL_ENDPOINT,
 			params: {
 				sql: rawSql.sql,
-				...(rawSql.displayType === undefined ? {} : { displayType: rawSql.displayType }),
-				...(rawSql.granularitySeconds === undefined
-					? {}
-					: { granularitySeconds: rawSql.granularitySeconds }),
+				...(!(rawSql.displayType === undefined) ? { displayType: rawSql.displayType } : undefined),
+				...(!(rawSql.granularitySeconds === undefined)
+					? {
+							granularitySeconds: rawSql.granularitySeconds,
+						}
+					: undefined),
 			},
 		}
 	}
@@ -123,14 +125,16 @@ export function toWidgetRequest(
 	const querySet = dataSourceQuerySet(dataSource)
 	if (querySet !== null) {
 		return {
-			endpoint: QUERY_SHAPE_ENDPOINTS[querySet.resultShape],
+			endpoint: QUERY_RESULT_ENDPOINTS[querySet.resultShape],
 			params: {
 				queries: querySet.queries,
-				...(querySet.formulas === undefined ? {} : { formulas: querySet.formulas }),
-				...(querySet.comparison === undefined ? {} : { comparison: querySet.comparison }),
-				...(querySet.defaultLimit === undefined ? {} : { defaultLimit: querySet.defaultLimit }),
-				...(querySet.limit === undefined ? {} : { limit: querySet.limit }),
-				...(querySet.columns === undefined ? {} : { columns: querySet.columns }),
+				...(!(querySet.formulas === undefined) ? { formulas: querySet.formulas } : undefined),
+				...(!(querySet.comparison === undefined) ? { comparison: querySet.comparison } : undefined),
+				...(!(querySet.defaultLimit === undefined)
+					? { defaultLimit: querySet.defaultLimit }
+					: undefined),
+				...(!(querySet.limit === undefined) ? { limit: querySet.limit } : undefined),
+				...(!(querySet.columns === undefined) ? { columns: querySet.columns } : undefined),
 			},
 		}
 	}

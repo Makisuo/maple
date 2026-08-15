@@ -30,7 +30,7 @@ function renderEdge(overrides: Partial<ServiceEdgeData> = {}) {
 		sourcePosition: Position.Right,
 		targetPosition: Position.Left,
 		data,
-	} as unknown as ComponentProps<typeof ServiceMapEdge>
+	} as ComponentProps<typeof ServiceMapEdge>
 
 	return render(
 		<svg>

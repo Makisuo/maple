@@ -223,7 +223,7 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 			// the deploy outright; caught by deploying the real thing through
 			// scripts/aws-probe.run.ts.
 			context: "apps/ingest",
-			...(existsSync(PREBUILT_BINARY) ? { dockerfile: "Dockerfile.prebuilt" } : {}),
+			...(existsSync(PREBUILT_BINARY) ? { dockerfile: "Dockerfile.prebuilt" } : undefined),
 			// The docker build platform is derived from this (`taskImagePlatform` in
 			// alchemy's ECS/Task). Explicit so a build from an Apple Silicon machine
 			// produces the same artifact CI does — an arm64 image on an X86_64 task
@@ -253,7 +253,7 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 			// `/health` and the service would never stabilize.
 			port: INGEST_PORT,
 			healthCheckPath: "/health",
-			...(certificate ? { certificateArn: certificate.certificateArn } : {}),
+			...(certificate ? { certificateArn: certificate.certificateArn } : undefined),
 
 			// `/health` returns a bare 200 with no dependency checks, so it detects a
 			// dead task but not a wedged export lane or a dead Postgres pool. The
@@ -268,8 +268,10 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				MAPLE_PG_URL: pgUrl.secretArn,
 				MAPLE_INGEST_KEY_ENCRYPTION_KEY: keyEncryptionKey.secretArn,
 				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: keyLookupHmacKey.secretArn,
-				...(autumnSecret ? { AUTUMN_SECRET_KEY: autumnSecret.secretArn } : {}),
-				...(replayR2Secret ? { INGEST_REPLAY_R2_SECRET_ACCESS_KEY: replayR2Secret.secretArn } : {}),
+				...(autumnSecret ? { AUTUMN_SECRET_KEY: autumnSecret.secretArn } : undefined),
+				...(replayR2Secret
+					? { INGEST_REPLAY_R2_SECRET_ACCESS_KEY: replayR2Secret.secretArn }
+					: undefined),
 			},
 
 			env: {
@@ -305,7 +307,7 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 							INGEST_REPLAY_R2_ACCESS_KEY_ID: requireEnv("INGEST_REPLAY_R2_ACCESS_KEY_ID"),
 							...optionalPlain("INGEST_REPLAY_R2_REGION", "auto"),
 						}
-					: {}),
+					: undefined),
 
 				...optionalPlain("INGEST_WRITE_MODE"),
 				...optionalPlain("INGEST_FORWARD_OTLP_ENDPOINT"),

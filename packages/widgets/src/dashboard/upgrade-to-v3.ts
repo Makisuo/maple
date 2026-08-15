@@ -1,5 +1,6 @@
-import type { QueryResultShape, QuerySet } from "@maple/query-model"
-import { MARKDOWN_STATIC_ENDPOINT, QUERY_ENDPOINT_SHAPES, RAW_SQL_ENDPOINT } from "./legacy-endpoints"
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
+import type { QuerySet } from "@maple/query-model"
+import { MARKDOWN_STATIC_ENDPOINT, QUERY_ENDPOINT_RESULT_KINDS, RAW_SQL_ENDPOINT } from "./legacy-endpoints"
 import { migrateToLatest } from "./migrations"
 import { CURRENT_DASHBOARD_SCHEMA_VERSION } from "./version"
 import type { WidgetDataSourceTransformV2 } from "./shared/transform"
@@ -35,8 +36,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
 /** Spread-if-present, so an absent `optionalKey` never becomes a present `undefined`. */
-const put = <K extends string, V>(key: K, value: V | undefined): Record<string, never> | { [P in K]: V } =>
-	value === undefined ? ({} as Record<string, never>) : ({ [key]: value } as { [P in K]: V })
+const put = <K extends string, V>(key: K, value: V | undefined): Record<string, never> | { [P in K]: V } => {
+	if (value === undefined) return {}
+	// SAFETY: the computed property is created from the same generic key and value returned by this helper.
+	return { [key]: value } as { [P in K]: V }
+}
 
 /**
  * TOTAL and never throws — this runs inside the backfill, which must be safe to
@@ -79,11 +83,11 @@ export const fromLegacyDataSource = (dataSource: unknown): V3DataSource => {
 		}
 	}
 
-	const resultShape: QueryResultShape | undefined = QUERY_ENDPOINT_SHAPES[endpoint]
-	if (resultShape !== undefined) {
+	const resultKind = QUERY_ENDPOINT_RESULT_KINDS[endpoint]
+	if (resultKind !== undefined) {
 		return {
 			kind: "query",
-			resultShape,
+			resultShape: resultKind,
 			queries: Array.isArray(params.queries)
 				? (params.queries.map(repairQueryDraft) as QuerySet["queries"])
 				: [],
@@ -171,7 +175,7 @@ const upgradeDisplay = (display: unknown): unknown => {
 const upgradeWidget = (widget: unknown): unknown => {
 	if (!isRecord(widget)) return widget
 
-	const next: Record<string, unknown> = { ...widget }
+	const next: Record<string, unknown> = { ...widget } satisfies Record<string, unknown>
 	if (widget.dataSource !== undefined) next.dataSource = upgradeDataSource(widget.dataSource)
 	if (widget.display !== undefined) next.display = upgradeDisplay(widget.display)
 	return next

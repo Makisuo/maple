@@ -15,7 +15,7 @@ import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
-import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
@@ -25,9 +25,9 @@ import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
-import { HazelOAuthService, type HazelOAuthServiceShape } from "@/services/auth/HazelOAuthService"
+import { HazelOAuthService, type HazelOAuthServiceApi } from "@/services/auth/HazelOAuthService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
-import { OrgMembersService, type OrgMembersServiceShape } from "@/services/org/OrgMembersService"
+import { OrgMembersService, type OrgMembersServiceApi } from "@/services/org/OrgMembersService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
@@ -71,9 +71,9 @@ const warehouseStub = makeWarehouseServiceStub({
 })
 
 const makeHarness = (
-	warehouseService: WarehouseQueryServiceShape = warehouseStub,
-	hazelOAuthService?: HazelOAuthServiceShape,
-	orgMembersService?: OrgMembersServiceShape,
+	warehouseService: WarehouseQueryServiceApi = warehouseStub,
+	hazelOAuthService?: HazelOAuthServiceApi,
+	orgMembersService?: OrgMembersServiceApi,
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const configLive = testConfig()
@@ -185,7 +185,7 @@ const makeHarness = (
 				method,
 				headers: {
 					authorization: `Bearer ${token}`,
-					...(body !== undefined ? { "content-type": "application/json" } : {}),
+					...(body !== undefined ? { "content-type": "application/json" } : undefined),
 				},
 				body: body === undefined ? undefined : JSON.stringify(body),
 			}),
@@ -662,7 +662,7 @@ describe("v2 alerts over HTTP", () => {
 				errorCategory: "",
 			}
 		})
-		const pagedWarehouse: WarehouseQueryServiceShape = {
+		const pagedWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (_tenant, compiled, options) => {
 				if (options?.context !== "listAlertChecks") return compiled.decodeRows([]).pipe(Effect.orDie)
@@ -765,7 +765,7 @@ describe("v2 alerts over HTTP", () => {
 
 	it("preserves the exact Hazel integration failure on destination create", async () => {
 		const unavailable = () => Effect.die("unexpected Hazel OAuth method")
-		const hazelOAuth: HazelOAuthServiceShape = {
+		const hazelOAuth: HazelOAuthServiceApi = {
 			startConnect: unavailable,
 			completeConnect: unavailable,
 			getStatus: unavailable,
@@ -798,7 +798,7 @@ describe("v2 alerts over HTTP", () => {
 	})
 
 	it("preserves a member-directory outage on email destination create", async () => {
-		const orgMembers: OrgMembersServiceShape = {
+		const orgMembers: OrgMembersServiceApi = {
 			resolveMembers: () =>
 				Effect.fail(
 					new AlertMemberDirectoryUnavailableError({

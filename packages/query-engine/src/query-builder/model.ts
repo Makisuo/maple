@@ -95,7 +95,7 @@ export const AGGREGATIONS_BY_SOURCE: Record<
 		{ label: "rate", value: "rate" },
 		{ label: "increase", value: "increase" },
 	],
-}
+} satisfies Record<QueryBuilderDataSource, Array<{ label: string; value: string }>>
 
 // `sum` belongs here alongside rate/increase because those two assume
 // *cumulative* temporality — they lower to `metricsTimeseriesRateQuery`, which
@@ -168,7 +168,7 @@ export const GROUP_BY_OPTIONS: Record<QueryBuilderDataSource, Array<{ label: str
 		{ label: "resource.*", value: "resource." },
 		{ label: "none", value: "none" },
 	],
-}
+} satisfies Record<QueryBuilderDataSource, Array<{ label: string; value: string }>>
 
 const QUERY_BADGE_COLORS = ["bg-chart-1", "bg-chart-2", "bg-chart-4", "bg-chart-5", "bg-chart-3"] as const
 
@@ -361,8 +361,8 @@ function makeAttrFilter(attributeKey: string, operator: string, value: string): 
 	return {
 		key: attributeKey,
 		mode,
-		...(negated ? { negated: true } : {}),
-		...(hasValue ? { value } : {}),
+		...(negated ? { negated: true } : undefined),
+		...(hasValue ? { value } : undefined),
 	}
 }
 
@@ -1056,10 +1056,14 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 			groupBy,
 			filters: {
 				...metricsSpecFilters,
-				...(metricsAttributeFilters.length > 0 ? { attributeFilters: metricsAttributeFilters } : {}),
+				...(metricsAttributeFilters.length > 0
+					? { attributeFilters: metricsAttributeFilters }
+					: undefined),
 				...(metricsResourceFilters.length > 0
-					? { resourceAttributeFilters: metricsResourceFilters }
-					: {}),
+					? {
+							resourceAttributeFilters: metricsResourceFilters,
+						}
+					: undefined),
 			},
 			bucketSeconds,
 		} as QuerySpec,
@@ -1144,7 +1148,7 @@ export function buildListQuerySpec(
 			source: spec.source,
 			filters: (spec as { filters?: unknown }).filters,
 			limit,
-			...(columns?.length ? { columns } : {}),
+			...(columns?.length ? { columns } : undefined),
 		} as QuerySpec,
 		warnings: timeseriesResult.warnings,
 		error: null,
@@ -1158,7 +1162,7 @@ const FILTER_MODE_TO_DISPLAY: Record<string, string> = {
 	lt: "<",
 	lte: "<=",
 	contains: "contains",
-}
+} satisfies Record<string, string>
 
 function formatAttrFilterClause(
 	prefix: string,

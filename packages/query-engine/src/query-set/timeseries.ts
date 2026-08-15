@@ -96,7 +96,7 @@ export const runTimeseriesQuerySet = Effect.fnUntraced(function* <E>(
 		formulas,
 		startTime: input.startTime,
 		endTime: input.endTime,
-		...(input.fallback === undefined ? {} : { fallback: input.fallback }),
+		...(!(input.fallback === undefined) ? { fallback: input.fallback } : undefined),
 	})
 
 	if (countSuccessfulQuerySeries(currentWindow.queryResults) === 0) {
@@ -169,7 +169,7 @@ export const runTimeseriesQuerySet = Effect.fnUntraced(function* <E>(
 			startTime: previousStartTime,
 			endTime: previousEndTime,
 			allowFallback: false,
-			...(input.fallback === undefined ? {} : { fallback: input.fallback }),
+			...(!(input.fallback === undefined) ? { fallback: input.fallback } : undefined),
 		})
 		previousDiagnostics = previousWindow.diagnostics
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 /**
  * Per-PR Electric Cloud environment lifecycle for the PR-preview deploy.
  * Sibling of scripts/planetscale-pr-branch.ts and scripts/tinybird-pr-branch.ts

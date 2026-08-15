@@ -143,7 +143,7 @@ export function startRecording(config: IngestConfig, sessionId: string): Recorde
 		},
 		maskAllInputs: config.maskAllInputs,
 		// rrweb has no `maskAllText` flag; selecting all elements masks every text node.
-		...(config.maskAllText ? { maskTextSelector: "*" } : {}),
+		...(config.maskAllText ? { maskTextSelector: "*" } : undefined),
 		checkoutEveryNms: CHECKOUT_EVERY_MS,
 	})
 

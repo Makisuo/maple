@@ -11,7 +11,7 @@ const comparatorLabel: Record<string, string> = {
 	gte: ">=",
 	lt: "<",
 	lte: "<=",
-}
+} satisfies Record<string, string>
 
 export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 	server.tool(

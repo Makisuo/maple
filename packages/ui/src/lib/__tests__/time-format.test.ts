@@ -42,9 +42,9 @@ describe("toEpochMs", () => {
 		expect(Number.isNaN(toEpochMs("not a timestamp"))).toBe(true)
 	})
 
-	it("agrees across every input shape for the same instant", () => {
-		const shapes = ["2026-05-24 14:30:00", "2026-05-24T14:30:00Z", new Date(NOW), NOW] as const
-		const rendered = shapes.map((shape) => formatRelativeTime(shape, NOW + HOUR))
+	it("agrees across every input input for the same instant", () => {
+		const inputs = ["2026-05-24 14:30:00", "2026-05-24T14:30:00Z", new Date(NOW), NOW] as const
+		const rendered = inputs.map((input) => formatRelativeTime(input, NOW + HOUR))
 		expect(new Set(rendered).size).toBe(1)
 		expect(rendered[0]).toBe("1h ago")
 	})

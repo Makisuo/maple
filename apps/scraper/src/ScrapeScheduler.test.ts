@@ -2,8 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Layer, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { InternalScrapeTarget, ScrapeResultReport, ScrapeTargetId } from "@maple/domain/http"
-import { ApiClient, ApiRequestError, type ApiClientShape, type ScrapeProxyResponse } from "./ApiClient"
-import { OtlpIngest, OtlpIngestError, type OtlpIngestShape } from "./OtlpIngest"
+import { ApiClient, ApiRequestError, type ApiClientApi, type ScrapeProxyResponse } from "./ApiClient"
+import { OtlpIngest, OtlpIngestError, type OtlpIngestApi } from "./OtlpIngest"
 import {
 	initialJitterMs,
 	nextScrapeDelayMs,
@@ -11,7 +11,7 @@ import {
 	sendResultsInChunks,
 	type ScrapeOutcome,
 } from "./ScrapeScheduler"
-import { ScraperEnv, type ScraperEnvShape } from "./Env"
+import { ScraperEnv, type ScraperEnvConfig } from "./Env"
 import type { OtlpExportRequest } from "./prometheus/otlp"
 
 const decodeTarget = Schema.decodeUnknownSync(InternalScrapeTarget)
@@ -56,7 +56,7 @@ const proxyResponse = (fields: {
 	retryAfterSeconds: fields.retryAfterSeconds ?? null,
 })
 
-const testEnv: ScraperEnvShape = {
+const testEnv: ScraperEnvConfig = {
 	MAPLE_API_URL: "http://api.test",
 	SD_INTERNAL_TOKEN: Redacted.make("token"),
 	MAPLE_INGEST_URL: "http://ingest.test",
@@ -88,8 +88,8 @@ const makeHarness = (targets: Array<InternalScrapeTarget>): Harness => ({
 	ingestImpl: () => Effect.void,
 })
 
-const harnessLayer = (harness: Harness, env: ScraperEnvShape = testEnv) => {
-	const api: ApiClientShape = {
+const harnessLayer = (harness: Harness, env: ScraperEnvConfig = testEnv) => {
+	const api: ApiClientApi = {
 		listTargets: () => Effect.sync(() => [...harness.targets]),
 		scrapeTarget: (targetId, subTargetKey) =>
 			Effect.suspend(() => {
@@ -102,7 +102,7 @@ const harnessLayer = (harness: Harness, env: ScraperEnvShape = testEnv) => {
 				harness.reportedResults.push(...results)
 			}),
 	}
-	const otlp: OtlpIngestShape = {
+	const otlp: OtlpIngestApi = {
 		send: (ingestKey, request) =>
 			Effect.suspend(() => {
 				harness.ingestCalls.push({ ingestKey, request })
@@ -406,7 +406,7 @@ describe("ScrapeScheduler", () => {
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
 			let listCalls = 0
-			const api: ApiClientShape = {
+			const api: ApiClientApi = {
 				// First call returns the target; every later refresh fails.
 				listTargets: () =>
 					Effect.suspend(() => {
@@ -537,7 +537,7 @@ describe("ScrapeScheduler", () => {
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 60)])
 			let failReports = true
-			const api: ApiClientShape = {
+			const api: ApiClientApi = {
 				listTargets: () => Effect.sync(() => [...harness.targets]),
 				scrapeTarget: (targetId) =>
 					Effect.suspend(() => {

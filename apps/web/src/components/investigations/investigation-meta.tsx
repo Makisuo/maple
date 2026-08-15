@@ -166,7 +166,7 @@ const ESCALATION_LABEL: Record<IssueEscalationAttemptDocument["status"], string>
 	sent: "Sent",
 	skipped: "Skipped",
 	failed: "Failed",
-}
+} satisfies Record<IssueEscalationAttemptDocument["status"], string>
 
 /**
  * Snapshot references are app-relative paths written by the API, so they route

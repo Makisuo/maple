@@ -298,7 +298,7 @@ export const maybeEnqueueTriage: (
 			type: "incident",
 			incidentKind: input.incidentKind,
 			incidentId: input.incidentId,
-			...(input.issueId ? { issueId: input.issueId } : {}),
+			...(input.issueId ? { issueId: input.issueId } : undefined),
 		})
 		const inserted = yield* database.execute((db) =>
 			db

@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import {
 	AlertDeliveryError,
 	AlertDeliveryTargetMissingError,
@@ -35,7 +36,7 @@ const slackError = (message: string, providerErrorCode?: string) =>
 	new AlertDeliveryError({
 		message,
 		destinationType: "slack-bot",
-		...(providerErrorCode === undefined ? {} : { providerErrorCode }),
+		...(!(providerErrorCode === undefined) ? { providerErrorCode } : undefined),
 	})
 
 /**

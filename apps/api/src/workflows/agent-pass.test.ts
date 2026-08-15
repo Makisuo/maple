@@ -90,7 +90,7 @@ const pass = (
 		submitToolName: "submit_candidate",
 		submitToolDescription: "Record the candidate.",
 		schema: SCHEMA,
-		...(options.deadlineAtMs === undefined ? {} : { deadlineAtMs: options.deadlineAtMs }),
+		...(!(options.deadlineAtMs === undefined) ? { deadlineAtMs: options.deadlineAtMs } : undefined),
 	}).pipe(Effect.provide(Layer.mergeAll(stub(steps), ToolExecutorStubLayer)))
 
 /** Every step calls a tool, so the agent never voluntarily stops. */

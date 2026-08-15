@@ -33,8 +33,8 @@ const getQueryBuilderListEffect = Effect.fn("QueryEngine.getQueryBuilderList")(f
 		querySet: { queries: input.queries },
 		startTime: input.startTime,
 		endTime: input.endTime,
-		...(input.limit === undefined ? {} : { limit: input.limit }),
-		...(input.columns === undefined ? {} : { columns: input.columns }),
+		...(!(input.limit === undefined) ? { limit: input.limit } : undefined),
+		...(!(input.columns === undefined) ? { columns: input.columns } : undefined),
 	}).pipe(
 		Effect.catchTag("@maple/query-engine/query-set/QuerySetInputError", (error) =>
 			invalidWarehouseInput("getQueryBuilderList", error.message),

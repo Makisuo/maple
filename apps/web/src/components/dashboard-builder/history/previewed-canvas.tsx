@@ -39,8 +39,8 @@ export function PreviewedCanvas({ dashboardId, preview, onCancel, onRestored }: 
 				// restoring it would actually produce. Read-only, and the view
 				// callbacks are inert — a preview has no URL state of its own.
 				<DashboardSections
-					widgets={result.value.snapshot.widgets as unknown as DashboardWidget[]}
-					sections={(result.value.snapshot.sections ?? []) as unknown as DashboardSection[]}
+					widgets={result.value.snapshot.widgets as DashboardWidget[]}
+					sections={(result.value.snapshot.sections ?? []) as DashboardSection[]}
 					// Local, not URL-backed: browsing a preview's groups is throwaway
 					// state, and writing it to the URL would leave collapse/tab params
 					// behind after the preview is dismissed. Inert callbacks were the

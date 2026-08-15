@@ -84,7 +84,7 @@ describe("dashboard template previews", () => {
 			"query-builder-line": true,
 			"query-builder-area": false,
 			"query-builder-bar": false,
-		}
+		} satisfies Record<string, boolean>
 
 		let checked = 0
 		for (const template of DASHBOARD_TEMPLATES) {

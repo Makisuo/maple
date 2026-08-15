@@ -28,7 +28,7 @@ const comparatorLabel: Record<string, string> = {
 	gte: ">=",
 	lt: "<",
 	lte: "<=",
-}
+} satisfies Record<string, string>
 
 interface UpdateAlertRuleParams {
 	rule_id: string
@@ -89,7 +89,7 @@ function buildUpdatedRequest(
 		rawQuerySql: current.rawQuerySql,
 		rawQueryReducer: current.rawQueryReducer,
 		destinationIds: [...current.destinationIds],
-	}
+	} satisfies Record<string, unknown>
 
 	if (params.name !== undefined) request.name = params.name
 	if (params.severity !== undefined) request.severity = params.severity
@@ -125,9 +125,9 @@ function buildUpdatedRequest(
 	if (params.notification_title !== undefined || params.notification_body !== undefined) {
 		const existing = current.notificationTemplate
 		const notificationTemplate: Record<string, string> = {
-			...(existing?.title ? { title: existing.title } : {}),
-			...(existing?.body ? { body: existing.body } : {}),
-		}
+			...(existing?.title ? { title: existing.title } : undefined),
+			...(existing?.body ? { body: existing.body } : undefined),
+		} satisfies Record<string, string>
 		if (params.notification_title !== undefined) notificationTemplate.title = params.notification_title
 		if (params.notification_body !== undefined) notificationTemplate.body = params.notification_body
 		request.notificationTemplate =

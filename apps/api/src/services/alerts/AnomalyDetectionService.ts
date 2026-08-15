@@ -175,7 +175,7 @@ export interface AnomalyServiceCountRow {
 	readonly lastTriggeredAt: string
 }
 
-export interface AnomalyDetectionServiceShape {
+export interface AnomalyDetectionServiceApi {
 	readonly runTick: () => Effect.Effect<AnomalyTickResult, AnomalyPersistenceError>
 	readonly listIncidents: (
 		orgId: OrgId,
@@ -413,7 +413,7 @@ const make = Effect.gen(function* () {
 		return refreshed
 	})
 
-	const getSettings: AnomalyDetectionServiceShape["getSettings"] = Effect.fn(
+	const getSettings: AnomalyDetectionServiceApi["getSettings"] = Effect.fn(
 		"AnomalyDetectionService.getSettings",
 	)(function* (orgId) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -422,7 +422,7 @@ const make = Effect.gen(function* () {
 		return settingsToDocument(row)
 	})
 
-	const updateSettings: AnomalyDetectionServiceShape["updateSettings"] = Effect.fn(
+	const updateSettings: AnomalyDetectionServiceApi["updateSettings"] = Effect.fn(
 		"AnomalyDetectionService.updateSettings",
 	)(function* (orgId, userId, request) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -488,7 +488,7 @@ const make = Effect.gen(function* () {
 			lastReopenedAt: row.lastReopenedAt ? isoFromDate(row.lastReopenedAt) : null,
 		})
 
-	const listIncidents: AnomalyDetectionServiceShape["listIncidents"] = Effect.fn(
+	const listIncidents: AnomalyDetectionServiceApi["listIncidents"] = Effect.fn(
 		"AnomalyDetectionService.listIncidents",
 	)(function* (orgId, opts) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -522,7 +522,7 @@ const make = Effect.gen(function* () {
 		return new AnomalyIncidentsListResponse({ incidents: rows.map(incidentToDocument) })
 	})
 
-	const countIncidentsByService: AnomalyDetectionServiceShape["countIncidentsByService"] = Effect.fn(
+	const countIncidentsByService: AnomalyDetectionServiceApi["countIncidentsByService"] = Effect.fn(
 		"AnomalyDetectionService.countIncidentsByService",
 	)(function* (orgId, opts) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -589,7 +589,7 @@ const make = Effect.gen(function* () {
 		return row
 	})
 
-	const getIncident: AnomalyDetectionServiceShape["getIncident"] = Effect.fn(
+	const getIncident: AnomalyDetectionServiceApi["getIncident"] = Effect.fn(
 		"AnomalyDetectionService.getIncident",
 	)(function* (orgId, incidentId) {
 		yield* Effect.annotateCurrentSpan({ orgId, incidentId })
@@ -597,7 +597,7 @@ const make = Effect.gen(function* () {
 		return incidentToDocument(row)
 	})
 
-	const resolveIncidentManually: AnomalyDetectionServiceShape["resolveIncidentManually"] = Effect.fn(
+	const resolveIncidentManually: AnomalyDetectionServiceApi["resolveIncidentManually"] = Effect.fn(
 		"AnomalyDetectionService.resolveIncidentManually",
 	)(function* (orgId, incidentId) {
 		yield* Effect.annotateCurrentSpan({ orgId, incidentId })
@@ -649,7 +649,7 @@ const make = Effect.gen(function* () {
 		return incidentToDocument(refreshed)
 	})
 
-	const setIncidentIssue: AnomalyDetectionServiceShape["setIncidentIssue"] = Effect.fn(
+	const setIncidentIssue: AnomalyDetectionServiceApi["setIncidentIssue"] = Effect.fn(
 		"AnomalyDetectionService.setIncidentIssue",
 	)(function* (orgId, incidentId, issueId) {
 		yield* Effect.annotateCurrentSpan({ orgId, incidentId, issueId: issueId ?? "(none)" })
@@ -690,7 +690,7 @@ const make = Effect.gen(function* () {
 	/** Max chart window; matches the detector's own baseline horizon. */
 	const TIMESERIES_MAX_WINDOW_MS = BASELINE_WINDOW_MS
 
-	const getIncidentTimeseries: AnomalyDetectionServiceShape["getIncidentTimeseries"] = Effect.fn(
+	const getIncidentTimeseries: AnomalyDetectionServiceApi["getIncidentTimeseries"] = Effect.fn(
 		"AnomalyDetectionService.getIncidentTimeseries",
 	)(function* (tenant, incidentId, opts) {
 		const orgId = tenant.orgId
@@ -1701,13 +1701,13 @@ const make = Effect.gen(function* () {
 								severity,
 								lastTriggeredAt: new Date(nowMs),
 								updatedAt: new Date(nowMs),
-								...(fingerprintsJson !== undefined ? { fingerprintsJson } : {}),
+								...(fingerprintsJson !== undefined ? { fingerprintsJson } : undefined),
 							}
 						: {
 								severity,
 								lastTriggeredAt: new Date(nowMs),
 								updatedAt: new Date(nowMs),
-								...(fingerprintsJson !== undefined ? { fingerprintsJson } : {}),
+								...(fingerprintsJson !== undefined ? { fingerprintsJson } : undefined),
 							}
 					const updated = yield* dbExecute((db) =>
 						db
@@ -1767,10 +1767,10 @@ const make = Effect.gen(function* () {
 									lastObservedValue: evaluation.value,
 									lastSampleCount: evaluation.sampleCount,
 								}
-							: {}),
+							: undefined),
 						...(runtime !== undefined && runtime.entries.length > 0
 							? { fingerprintsJson: runtime.entries }
-							: {}),
+							: undefined),
 					}
 					const updated = yield* dbExecute((db) =>
 						db
@@ -1862,11 +1862,11 @@ const make = Effect.gen(function* () {
 												lastObservedValue: evaluation.value,
 												lastSampleCount: evaluation.sampleCount,
 											}
-										: {}),
+										: undefined),
 									updatedAt: new Date(nowMs),
 									...(runtime !== undefined && runtime.entries.length > 0
 										? { fingerprintsJson: runtime.entries }
-										: {}),
+										: undefined),
 								})
 								.where(
 									and(
@@ -1902,7 +1902,7 @@ const make = Effect.gen(function* () {
 										fingerprintsJson: runtime.entries,
 										severity: headlineSeverity(runtime.entries, runtime.row.severity),
 									}
-								: {}),
+								: undefined),
 							...(isPrimary
 								? {
 										detectorKey: next.detectorKey,
@@ -1918,9 +1918,9 @@ const make = Effect.gen(function* () {
 													// type integer: "4729.711321330495"`.
 													lastSampleCount: next.lastSampleCount ?? 0,
 												}
-											: {}),
+											: undefined),
 									}
-								: {}),
+								: undefined),
 						}
 						yield* dbExecute((db) =>
 							db
@@ -2036,7 +2036,7 @@ const make = Effect.gen(function* () {
 		return stats
 	})
 
-	const runTick: AnomalyDetectionServiceShape["runTick"] = Effect.fn("AnomalyDetectionService.runTick")(
+	const runTick: AnomalyDetectionServiceApi["runTick"] = Effect.fn("AnomalyDetectionService.runTick")(
 		function* () {
 			const nowMs = yield* Clock.currentTimeMillis
 			const runRetention = Math.floor(nowMs / TICK_CADENCE_MS) % RETENTION_PHASE_EVERY_N_TICKS === 0
@@ -2167,7 +2167,7 @@ const make = Effect.gen(function* () {
 
 export class AnomalyDetectionService extends Context.Service<
 	AnomalyDetectionService,
-	AnomalyDetectionServiceShape
+	AnomalyDetectionServiceApi
 >()("@maple/api/services/AnomalyDetectionService") {
 	static readonly layer = Layer.effect(this, make)
 }

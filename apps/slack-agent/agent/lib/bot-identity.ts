@@ -18,6 +18,7 @@
  */
 
 import { createTtlCache } from "./ttl-cache.js"
+import { isString } from "./type-guards.js"
 
 // A workspace's bot user id is stable for the life of the installation, so the
 // TTL only bounds how long an uninstalled workspace lingers in memory.
@@ -67,7 +68,7 @@ export function rememberBotUserId(rawBody: string): void {
 		return
 	}
 	if (!isRecord(parsed)) return
-	const teamId = typeof parsed.team_id === "string" ? parsed.team_id : ""
+	const teamId = isString(parsed.team_id) ? parsed.team_id : ""
 	const botUserId = botUserIdFromEnvelope(parsed)
 	if (!teamId || !botUserId) return
 	botUserIds.set(teamId, { botUserId, expiresAt: Date.now() + BOT_USER_ID_TTL_MS })

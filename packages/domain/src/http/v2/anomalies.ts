@@ -18,16 +18,13 @@ import {
 	AnomalyTriageStatus,
 } from "../anomalies"
 import { AuthorizationV2 } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
 import { publicError, publicErrors } from "./public-error"
 import { V2WarehouseReadErrors } from "./query-errors"
 import { AnomalyIncidentPublicId, ErrorIssuePublicId } from "./resource-ids"
 
 export { AnomalyIncidentPublicId } from "./resource-ids"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 const signalTypeField = AnomalySignalType.annotate({
 	description: "The monitored signal that triggered the anomaly.",

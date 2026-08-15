@@ -40,7 +40,7 @@ import {
 	dataSourceQuerySet,
 	dataSourceRawSql,
 	dataSourceTransform,
-	QUERY_SHAPE_ENDPOINTS,
+	QUERY_RESULT_ENDPOINTS,
 	RAW_SQL_ENDPOINT,
 } from "@maple/widgets/dashboard"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -199,8 +199,8 @@ function statsToData(stats: QueryStats): InspectChartQueryStats {
 	return {
 		rowCount: stats.rowCount,
 		seriesCount: stats.seriesCount,
-		...(stats.firstBucket !== undefined && { firstBucket: stats.firstBucket }),
-		...(stats.lastBucket !== undefined && { lastBucket: stats.lastBucket }),
+		...(stats.firstBucket !== undefined ? { firstBucket: stats.firstBucket } : undefined),
+		...(stats.lastBucket !== undefined ? { lastBucket: stats.lastBucket } : undefined),
 		seriesStats: stats.seriesStats.map(
 			(s): InspectChartSeriesStat => ({
 				name: s.name,
@@ -212,7 +212,7 @@ function statsToData(stats: QueryStats): InspectChartQueryStats {
 				zeroCount: s.zeroCount,
 				negativeCount: s.negativeCount,
 				samples: s.samples.map((sample) => ({
-					...(sample.bucket !== undefined && { bucket: sample.bucket }),
+					...(sample.bucket !== undefined ? { bucket: sample.bucket } : undefined),
 					value: sample.value,
 				})),
 			}),
@@ -268,7 +268,7 @@ const metricExistsInCatalog = Effect.fn("metricExistsInCatalog")(function* (
 				start_time: startTime,
 				end_time: endTime,
 				search: metricName,
-				...(metricType ? { metric_type: metricType } : {}),
+				...(metricType ? { metric_type: metricType } : undefined),
 				limit: 200,
 				offset: 0,
 			},
@@ -485,7 +485,7 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 							error: buildResult.error ?? "Failed to build query spec",
 							stats: { rowCount: 0, seriesCount: 0, seriesStats: [] },
 							flags: [...preFlags, ...builderWarningFlags],
-							...(builderWarnings && { builderWarnings }),
+							...(builderWarnings ? { builderWarnings } : undefined),
 						} satisfies InspectChartQueryResult
 					}
 
@@ -498,7 +498,7 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 							error: `Invalid query specification: ${decodedSpecResult.failure.message}`,
 							stats: { rowCount: 0, seriesCount: 0, seriesStats: [] },
 							flags: ["EMPTY", ...builderWarningFlags],
-							...(builderWarnings && { builderWarnings }),
+							...(builderWarnings ? { builderWarnings } : undefined),
 						} satisfies InspectChartQueryResult
 					}
 					const decodedSpec = decodedSpecResult.success
@@ -524,7 +524,7 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 							error: errorMessage,
 							stats: { rowCount: 0, seriesCount: 0, seriesStats: [] },
 							flags: ["EMPTY", ...builderWarningFlags],
-							...(builderWarnings && { builderWarnings }),
+							...(builderWarnings ? { builderWarnings } : undefined),
 						} satisfies InspectChartQueryResult
 					}
 
@@ -559,8 +559,10 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 						metric: draft.aggregation,
 						source: draft.dataSource,
 						kind: isTimeseries ? "timeseries" : "breakdown",
-						...(widget.display.unit !== undefined && { displayUnit: widget.display.unit }),
-						...(preFlags.length > 0 && { preFlags }),
+						...(widget.display.unit !== undefined
+							? { displayUnit: widget.display.unit }
+							: undefined),
+						...(preFlags.length > 0 ? { preFlags } : undefined),
 					})
 
 					// An empty/all-null metrics query might be a typo'd metric name
@@ -610,9 +612,9 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 						status: "ok",
 						spec: buildResult.query,
 						stats: statsToData(stats),
-						...(reducedValue !== undefined && { reducedValue }),
+						...(reducedValue !== undefined ? { reducedValue } : undefined),
 						flags,
-						...(builderWarnings && { builderWarnings }),
+						...(builderWarnings ? { builderWarnings } : undefined),
 					} satisfies InspectChartQueryResult
 				}),
 			{ concurrency: 1 },
@@ -654,7 +656,7 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 				}
 				const fFlags = computeFlags(fstats, {
 					kind: "timeseries",
-					...(widget.display.unit !== undefined && { displayUnit: widget.display.unit }),
+					...(widget.display.unit !== undefined ? { displayUnit: widget.display.unit } : undefined),
 				})
 
 				queryResults.push({
@@ -662,9 +664,9 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 					queryName: fr.queryName,
 					status: "ok",
 					stats: statsToData(fstats),
-					...(fReduced !== undefined && { reducedValue: fReduced }),
+					...(fReduced !== undefined ? { reducedValue: fReduced } : undefined),
 					flags: fFlags,
-					...(fr.warnings.length > 0 && { builderWarnings: fr.warnings }),
+					...(fr.warnings.length > 0 ? { builderWarnings: fr.warnings } : undefined),
 				})
 			}
 		}
@@ -694,11 +696,11 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		const data: InspectChartDataData = {
 			widget: {
 				id: widget.id,
-				...(widget.display.title !== undefined && { title: widget.display.title }),
+				...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 				visualization: widget.visualization,
 				endpoint:
-					dataSourceEndpoint(widget.dataSource) ?? QUERY_SHAPE_ENDPOINTS[querySet.resultShape],
-				...(widget.display.unit !== undefined && { displayUnit: widget.display.unit }),
+					dataSourceEndpoint(widget.dataSource) ?? QUERY_RESULT_ENDPOINTS[querySet.resultShape],
+				...(widget.display.unit !== undefined ? { displayUnit: widget.display.unit } : undefined),
 				// True only when formulas are present but NOT evaluated (non-timeseries
 				// widgets). Timeseries formulas are now evaluated and appear as their
 				// own entries in `queries`, so there's no warning to raise.
@@ -730,7 +732,7 @@ function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): 
 	if (outcome.kind === "supported") {
 		return {
 			widgetId: widget.id,
-			...(widget.display.title !== undefined && { title: widget.display.title }),
+			...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 			visualization: widget.visualization,
 			verdict: outcome.data.verdict satisfies WidgetInspectionVerdict,
 			flags: [...outcome.data.flags],
@@ -739,7 +741,7 @@ function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): 
 	if (outcome.kind === "unsupported") {
 		return {
 			widgetId: widget.id,
-			...(widget.display.title !== undefined && { title: widget.display.title }),
+			...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 			visualization: widget.visualization,
 			verdict: "unsupported",
 			flags: [],
@@ -761,7 +763,7 @@ function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): 
 					: `Raw SQL returned ${outcome.data.rowCount} row(s).`
 		return {
 			widgetId: widget.id,
-			...(widget.display.title !== undefined && { title: widget.display.title }),
+			...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 			visualization: widget.visualization,
 			verdict,
 			flags: [],
@@ -771,7 +773,7 @@ function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): 
 	if (outcome.kind === "skipped") {
 		return {
 			widgetId: widget.id,
-			...(widget.display.title !== undefined && { title: widget.display.title }),
+			...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 			visualization: widget.visualization,
 			verdict: "skipped",
 			flags: [],
@@ -780,7 +782,7 @@ function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): 
 	}
 	return {
 		widgetId: widget.id,
-		...(widget.display.title !== undefined && { title: widget.display.title }),
+		...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 		visualization: widget.visualization,
 		verdict: "error",
 		flags: [],

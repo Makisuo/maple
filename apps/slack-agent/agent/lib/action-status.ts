@@ -93,7 +93,7 @@ const PHRASE_BY_TOOL: Record<string, string> = {
 	propose_fix: "Drafting a fix…",
 	search_sessions: "Searching sessions…",
 	get_session_transcript: "Reading a session transcript…",
-}
+} satisfies Record<string, string>
 
 /** Keyword fallbacks for tools not in {@link PHRASE_BY_TOOL}, checked in order. */
 const PHRASE_BY_KEYWORD: readonly (readonly [string, string])[] = [
