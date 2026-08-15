@@ -17,6 +17,8 @@ import { WidgetActionsProvider } from "@/components/dashboard-builder/widgets/wi
 import { WidgetTimeRangeProvider } from "@/components/dashboard-builder/widgets/widget-time-range-context"
 import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
 import { useWidgetData } from "@/hooks/use-widget-data"
+import { useWidgetMaxDataPoints } from "@/hooks/use-widget-max-data-points"
+import { toPanelType } from "@/lib/query-builder/panel-types"
 
 /**
  * Latches `true` the first time the element scrolls into (near) the viewport,
@@ -65,7 +67,14 @@ function useInViewportSticky() {
 export const LiveWidgetRenderer = memo(function LiveWidgetRenderer({ widget }: { widget: DashboardWidget }) {
 	const { mode } = useDashboardActions()
 	const { ref, visible } = useInViewportSticky()
-	const { dataState, narrowRange, narrowRangeLabel } = useWidgetData(widget, visible)
+	// The tile's width decides its auto bucket (one point per pixel, Grafana's
+	// `$__interval`), so the same widget is coarser at a third of the row than at
+	// full width — measured on the same element the viewport latch observes.
+	const maxDataPoints = useWidgetMaxDataPoints(
+		ref,
+		toPanelType(widget.visualization, widget.display.chartId),
+	)
+	const { dataState, narrowRange, narrowRangeLabel } = useWidgetData(widget, visible, { maxDataPoints })
 	const Visualization = visualizationFor(widget.visualization)
 
 	return (

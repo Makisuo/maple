@@ -219,6 +219,28 @@ function Curve() {
 	)
 }
 
+/**
+ * Point dots on line/area series. Auto is Grafana's rule: isolated points (a
+ * single non-zero bucket a line cannot draw) always get a dot; every point does
+ * only when the series is sparse enough for the dots not to touch.
+ */
+function Points() {
+	const { state, set } = useSettings()
+	return (
+		<Field label="Points">
+			<Segments
+				value={state.pointsMode}
+				onSelect={(pointsMode) => set({ pointsMode })}
+				options={[
+					{ value: "auto", label: "Auto" },
+					{ value: "always", label: "Always" },
+					{ value: "never", label: "Never" },
+				]}
+			/>
+		</Field>
+	)
+}
+
 const titleCase = (value: string) => value[0]!.toUpperCase() + value.slice(1)
 
 /** The ramp itself, so picking a palette is a visual choice rather than a word. */
@@ -668,6 +690,7 @@ export const WidgetSettings = {
 	TypePicker,
 	Stacked,
 	Curve,
+	Points,
 	HeatmapColors,
 	Unit,
 	Legend,

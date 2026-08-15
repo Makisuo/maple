@@ -32,6 +32,14 @@ import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } fro
 // The single widget-side spelling of the shared reducer table.
 export { STAT_AGGREGATES, type StatAggregate } from "@maple/domain/http"
 
+export type PointsMode = "auto" | "always" | "never"
+
+/** `chartPresentation.showPoints` ⇄ `PointsMode`: absent is Auto. */
+export const pointsModeFromShowPoints = (showPoints: boolean | undefined): PointsMode =>
+	showPoints === undefined ? "auto" : showPoints ? "always" : "never"
+export const showPointsFromPointsMode = (mode: PointsMode): boolean | undefined =>
+	mode === "auto" ? undefined : mode === "always"
+
 export interface QueryBuilderWidgetState {
 	visualization: VisualizationType
 	title: string
@@ -53,6 +61,12 @@ export interface QueryBuilderWidgetState {
 	unit: ValueUnit
 	legendPosition: LegendPosition
 	seriesStatsEnabled: boolean
+	/**
+	 * Point dots on line/area series. `auto` (no stored preference) dots isolated
+	 * points always and every point only when they fit the width; the other two
+	 * pin `chartPresentation.showPoints`.
+	 */
+	pointsMode: PointsMode
 	tableLimit: string
 	// Threshold lines (chart) / threshold coloring (stat, gauge)
 	thresholds: Array<{ value: number; color: string }>

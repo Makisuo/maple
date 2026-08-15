@@ -1,5 +1,9 @@
 import { useMemo, useState } from "react"
-import { dataSourceTransform, type WidgetDataSourceTransformSchema } from "@maple/widgets/dashboard"
+import {
+	QUERY_RESULT_ENDPOINTS,
+	dataSourceTransform,
+	type WidgetDataSourceTransformSchema,
+} from "@maple/widgets/dashboard"
 import { Atom, Result } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { Effect, Schedule, Schema } from "effect"
@@ -363,6 +367,17 @@ const widgetFetchAtom = (input: { endpoint: string; params: Record<string, unkno
  * widgets (via `useWidgetData`) and secondary fetches such as a stat widget's
  * sparkline. Pass `undefined` to render a disabled state without a fetch.
  */
+export interface WidgetDataOptions {
+	/**
+	 * How many points the tile can display — its rendered pixel width (a bar
+	 * chart divides by its minimum bar width). Sent only on timeseries fetches,
+	 * where it switches the auto bucket to the width model (Grafana's
+	 * `$__interval`); omitted, the fixed 100-point policy applies. Part of the
+	 * cache key, so quantize it (`useWidgetMaxDataPoints`) before passing it in.
+	 */
+	readonly maxDataPoints?: number
+}
+
 export function useWidgetDataSource(
 	dataSource: WidgetDataSourceLike | undefined,
 	/**
@@ -377,6 +392,7 @@ export function useWidgetDataSource(
 	 * a widget (a stat's sparkline) inherit it from context instead.
 	 */
 	timeRangeOverride?: TimeRange,
+	options?: WidgetDataOptions,
 ) {
 	const {
 		state: { resolvedTimeRange: dashboardTimeRange },
@@ -461,19 +477,23 @@ export function useWidgetDataSource(
 
 	const variableValues = variablesContext?.values
 
+	const maxDataPoints =
+		request?.endpoint === QUERY_RESULT_ENDPOINTS.timeseries ? options?.maxDataPoints : undefined
+
 	const resolvedParams = useMemo(() => {
 		if (!resolvedTimeRange) return {}
 		const base = interpolateTimeMacros(
 			{
 				...request?.params,
 				strategy: { enableEmptyRangeFallback: false },
+				...(!(maxDataPoints === undefined) ? { maxDataPoints } : undefined),
 				startTime: resolvedTimeRange.startTime,
 				endTime: resolvedTimeRange.endTime,
 			},
 			resolvedTimeRange,
 		)
 		return variableValues ? interpolateWidgetParams(base, variableValues) : base
-	}, [resolvedTimeRange, request?.params, variableValues])
+	}, [resolvedTimeRange, request?.params, variableValues, maxDataPoints])
 
 	// Stabilise the atom reference across renders. Atom.family already dedupes
 	// by encoded key, but giving React the same Atom instance avoids any path
@@ -562,8 +582,8 @@ export function useWidgetDataSource(
 	}
 }
 
-export function useWidgetData(widget: DashboardWidget, enabled = true) {
-	return useWidgetDataSource(widget.dataSource, enabled, widget.timeRange)
+export function useWidgetData(widget: DashboardWidget, enabled = true, options?: WidgetDataOptions) {
+	return useWidgetDataSource(widget.dataSource, enabled, widget.timeRange, options)
 }
 
 export const __testables = {

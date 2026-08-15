@@ -42,6 +42,11 @@ const QueryBuilderTimeseriesInputSchema = Schema.Struct({
 	formulas: Schema.optional(Schema.mutable(Schema.Array(QueryBuilderFormulaSchema))),
 	comparison: Schema.optional(QueryComparisonSchema),
 	strategy: Schema.optional(StrategySchema),
+	/**
+	 * How many points the caller can display (its pixel width). Switches the
+	 * auto bucket to the width model; see `RunTimeseriesQuerySetInput`.
+	 */
+	maxDataPoints: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
 })
 
 export type QueryBuilderTimeseriesInput = Schema.Schema.Type<typeof QueryBuilderTimeseriesInputSchema>
@@ -111,6 +116,7 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 		startTime: input.startTime,
 		endTime: input.endTime,
 		fallback: strategy,
+		...(!(input.maxDataPoints === undefined) ? { maxDataPoints: input.maxDataPoints } : undefined),
 	}).pipe(
 		// The runner's tagged failures carry the message this app already showed;
 		// re-raising them as `WarehouseInvalidInputError` keeps `displayError` and

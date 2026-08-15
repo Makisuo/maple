@@ -164,16 +164,18 @@ export function QueryBuilderLineChart({
 		})
 	}, [])
 
-	const { seriesStats, legendSeries, renderDots, integerOnlyData } = useTimeseriesSeriesPresentation({
-		data: processedData,
-		valueKeys,
-		seriesDefinitions,
-		chartConfig,
-		showPoints,
-	})
-
 	const containerRef = React.useRef<HTMLDivElement>(null)
-	const { height: containerHeight } = useContainerSize(containerRef)
+	const { width: containerWidth, height: containerHeight } = useContainerSize(containerRef)
+
+	const { seriesStats, legendSeries, pointsMode, shouldDot, integerOnlyData } =
+		useTimeseriesSeriesPresentation({
+			data: processedData,
+			valueKeys,
+			seriesDefinitions,
+			chartConfig,
+			showPoints,
+			plotWidthPx: containerWidth,
+		})
 
 	const variant = showStats ? "stats" : "compact"
 	const showLegendBlock = legend === "visible" || legend === "right"
@@ -332,9 +334,20 @@ export function QueryBuilderLineChart({
 							stroke={`var(--color-${definition.chartKey})`}
 							strokeWidth={2}
 							dot={
-								renderDots
-									? { r: 2.5, strokeWidth: 0, fill: `var(--color-${definition.chartKey})` }
-									: false
+								// `false` skips the per-point pass entirely; the render function
+								// draws only the points `shouldDot` picks (all, or the isolated ones).
+								pointsMode === "none"
+									? false
+									: (props) =>
+											shouldDot(definition.chartKey, props.index) ? (
+												<circle
+													className="recharts-dot"
+													cx={props.cx}
+													cy={props.cy}
+													r={2.5}
+													fill={`var(--color-${definition.chartKey})`}
+												/>
+											) : null
 							}
 							hide={hiddenSeries.has(definition.chartKey)}
 							isAnimationActive={false}

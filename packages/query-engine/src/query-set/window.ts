@@ -13,6 +13,7 @@ import type { QuerySpec } from "@maple/domain/query-engine"
 import { buildTimeseriesQuerySpec } from "../query-builder/model"
 import { buildFormulaResults, type FormulaDraft, type QueryRunResult } from "../formula-results"
 import {
+	type BucketResolutionOptions,
 	type EmptyRangeFallbackStrategy,
 	type ExecutionWindow,
 	buildExecutionWindows,
@@ -67,13 +68,14 @@ const executeWithFallback = Effect.fnUntraced(function* <E>(
 	spec: QuerySpec,
 	strategy: EmptyRangeFallbackStrategy,
 	allowFallback: boolean,
+	bucketOptions: BucketResolutionOptions | undefined,
 ) {
 	const windows = buildExecutionWindows(startTime, endTime, strategy, allowFallback)
 	const attempts: QuerySetAttempt[] = []
 	let lastPoints: ReadonlyArray<{ bucket: string; series: Record<string, number> }> = []
 
 	for (const [index, window] of windows.entries()) {
-		const windowSpec = resolveExecutionSpecForWindow(spec, window)
+		const windowSpec = resolveExecutionSpecForWindow(spec, window, bucketOptions)
 
 		const outcome = yield* Effect.result(
 			executor.execute({ startTime: window.startTime, endTime: window.endTime, query: windowSpec }),
@@ -132,6 +134,8 @@ export interface RunQuerySetWindowInput {
 	readonly fallback?: EmptyRangeFallbackStrategy
 	/** Whether this window may widen at all. False for a previous-period window. */
 	readonly allowFallback?: boolean
+	/** Auto-bucket policy for queries whose `bucketSeconds` is unset. */
+	readonly bucket?: BucketResolutionOptions
 }
 
 /**
@@ -181,7 +185,12 @@ export const runQuerySetWindow = Effect.fnUntraced(function* <E>(
 					} satisfies QueryRunResult
 				}
 
-				const querySpec = resolveTimeseriesBucketSpec(built.query, input.startTime, input.endTime)
+				const querySpec = resolveTimeseriesBucketSpec(
+					built.query,
+					input.startTime,
+					input.endTime,
+					input.bucket,
+				)
 
 				const outcome = yield* Effect.result(
 					executeWithFallback(
@@ -191,6 +200,7 @@ export const runQuerySetWindow = Effect.fnUntraced(function* <E>(
 						querySpec,
 						strategy,
 						allowFallback,
+						input.bucket,
 					),
 				)
 

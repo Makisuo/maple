@@ -33,6 +33,8 @@ export interface RunQuerySetInput {
 	readonly columns?: ReadonlyArray<string>
 	/** Timeseries only. Defaults to no widening. */
 	readonly fallback?: EmptyRangeFallbackStrategy
+	/** Timeseries only. Width-model auto bucket; see `RunTimeseriesQuerySetInput`. */
+	readonly maxDataPoints?: number
 }
 
 export const runQuerySet = Effect.fnUntraced(function* <E>(
@@ -46,6 +48,9 @@ export const runQuerySet = Effect.fnUntraced(function* <E>(
 				startTime: input.startTime,
 				endTime: input.endTime,
 				...(!(input.fallback === undefined) ? { fallback: input.fallback } : undefined),
+				...(!(input.maxDataPoints === undefined)
+					? { maxDataPoints: input.maxDataPoints }
+					: undefined),
 			})
 			return { shape: "timeseries", ...result } satisfies QuerySetRunOutput
 		}

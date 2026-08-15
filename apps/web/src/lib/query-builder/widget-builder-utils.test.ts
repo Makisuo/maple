@@ -62,6 +62,7 @@ function makeState(): QueryBuilderWidgetState {
 		unit: "number",
 		legendPosition: "bottom",
 		seriesStatsEnabled: false,
+		pointsMode: "auto",
 		tableLimit: "",
 		listDataSource: "traces",
 		listWhereClause: "",
@@ -475,5 +476,37 @@ describe("widget-builder series stats default", () => {
 		const widget = widgetWithPresentation({ legend: "visible", seriesStats: true })
 		const state = toInitialState(widget)
 		expect(buildWidgetDisplay(widget, state).chartPresentation?.seriesStats).toBe(true)
+	})
+})
+
+// Point dots: Auto is the ABSENCE of `showPoints`, so switching back to Auto has
+// to remove a previously pinned value rather than leave it in the spread.
+describe("widget-builder points mode", () => {
+	function widgetWithPresentation(
+		chartPresentation: DashboardWidget["display"]["chartPresentation"],
+	): DashboardWidget {
+		const widget = makeWidget()
+		return { ...widget, display: { ...widget.display, chartPresentation } }
+	}
+
+	it("reads absent / true / false as auto / always / never", () => {
+		expect(toInitialState(widgetWithPresentation({ legend: "visible" })).pointsMode).toBe("auto")
+		expect(toInitialState(widgetWithPresentation(undefined)).pointsMode).toBe("auto")
+		expect(
+			toInitialState(widgetWithPresentation({ legend: "visible", showPoints: true })).pointsMode,
+		).toBe("always")
+		expect(
+			toInitialState(widgetWithPresentation({ legend: "visible", showPoints: false })).pointsMode,
+		).toBe("never")
+	})
+
+	it("writes always / never as showPoints and drops the key for auto", () => {
+		const widget = widgetWithPresentation({ legend: "visible", showPoints: true })
+		const state = toInitialState(widget)
+		expect(
+			buildWidgetDisplay(widget, { ...state, pointsMode: "never" }).chartPresentation?.showPoints,
+		).toBe(false)
+		const auto = buildWidgetDisplay(widget, { ...state, pointsMode: "auto" }).chartPresentation
+		expect(auto).not.toHaveProperty("showPoints")
 	})
 })

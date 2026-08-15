@@ -48,6 +48,12 @@ export interface RunTimeseriesQuerySetInput {
 	readonly endTime: string
 	/** Defaults to no widening. Only explore surfaces pass one. */
 	readonly fallback?: EmptyRangeFallbackStrategy
+	/**
+	 * How many points the caller can display (its pixel width). When set, auto
+	 * buckets follow the width model instead of the fixed 100-point policy —
+	 * see `BucketResolutionOptions`. Dashboard widgets send it; nothing else does.
+	 */
+	readonly maxDataPoints?: number
 }
 
 const OPERATION = "runTimeseriesQuerySet"
@@ -97,6 +103,9 @@ export const runTimeseriesQuerySet = Effect.fnUntraced(function* <E>(
 		startTime: input.startTime,
 		endTime: input.endTime,
 		...(!(input.fallback === undefined) ? { fallback: input.fallback } : undefined),
+		...(!(input.maxDataPoints === undefined)
+			? { bucket: { maxDataPoints: input.maxDataPoints } }
+			: undefined),
 	})
 
 	if (countSuccessfulQuerySeries(currentWindow.queryResults) === 0) {
@@ -170,6 +179,9 @@ export const runTimeseriesQuerySet = Effect.fnUntraced(function* <E>(
 			endTime: previousEndTime,
 			allowFallback: false,
 			...(!(input.fallback === undefined) ? { fallback: input.fallback } : undefined),
+			...(!(input.maxDataPoints === undefined)
+				? { bucket: { maxDataPoints: input.maxDataPoints } }
+				: undefined),
 		})
 		previousDiagnostics = previousWindow.diagnostics
 
