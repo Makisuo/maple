@@ -173,7 +173,7 @@ export const OAuthDiscoveryRouter = HttpRouter.use((router) =>
 					{
 						clientName: decoded.client_name,
 						redirectUris: decoded.redirect_uris,
-						...(decoded.client_uri ? { clientUri: decoded.client_uri } : {}),
+						...(decoded.client_uri ? { clientUri: decoded.client_uri } : undefined),
 					},
 					requesterKey(request),
 				)
@@ -196,11 +196,15 @@ export const OAuthDiscoveryRouter = HttpRouter.use((router) =>
 						clientId: url.searchParams.get("client_id") ?? "",
 						redirectUri: url.searchParams.get("redirect_uri") ?? "",
 						responseType: url.searchParams.get("response_type") ?? "",
-						...(url.searchParams.get("state") ? { state: url.searchParams.get("state")! } : {}),
+						...(url.searchParams.get("state")
+							? { state: url.searchParams.get("state")! }
+							: undefined),
 						codeChallenge: url.searchParams.get("code_challenge") ?? "",
 						codeChallengeMethod: url.searchParams.get("code_challenge_method") ?? "",
 						resource: url.searchParams.get("resource") ?? "",
-						...(url.searchParams.get("scope") ? { scope: url.searchParams.get("scope")! } : {}),
+						...(url.searchParams.get("scope")
+							? { scope: url.searchParams.get("scope")! }
+							: undefined),
 						expectedResource: `${requestOrigin(request)}/mcp`,
 					},
 					requesterKey(request),
@@ -244,7 +248,7 @@ export const OAuthDiscoveryRouter = HttpRouter.use((router) =>
 							refreshToken: yield* requireFormValue(form, "refresh_token"),
 							clientId,
 							resource,
-							...(form.get("scope") ? { scope: form.get("scope")! } : {}),
+							...(form.get("scope") ? { scope: form.get("scope")! } : undefined),
 						},
 						key,
 					)

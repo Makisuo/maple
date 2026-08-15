@@ -101,7 +101,7 @@ const COLOR_SCALES: Record<HeatmapColorScale, readonly string[]> = {
 		"var(--heatmap-cividis-3)",
 		"var(--heatmap-cividis-4)",
 	],
-}
+} satisfies Record<HeatmapColorScale, readonly string[]>
 
 const DEFAULT_COLOR_SCALE: HeatmapColorScale = "amber"
 

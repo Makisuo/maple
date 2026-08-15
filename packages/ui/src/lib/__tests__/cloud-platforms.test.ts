@@ -25,7 +25,7 @@ const FLUE_SPAN_ATTRS: Record<string, string> = {
 	"geo.country.code": "US",
 	"geo.locality.name": "Council Bluffs",
 	wall_time_ms: "4",
-}
+} satisfies Record<string, string>
 
 describe("getCloudPlatform — cloudflare", () => {
 	it("normalizes a real Flue span", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { QueryResultShape } from "@maple/query-model"
+import type { QueryResultContract } from "@maple/query-model"
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 import { buildBreakdownQuerySpec, buildListQuerySpec } from "@maple/query-engine/query-builder"
 import {
@@ -37,14 +37,14 @@ function presetQueries(preset: WidgetPresetDefinition): QueryBuilderQueryDraftPa
 
 /**
  * v3 replaced the `custom_query_builder_*` endpoint names with `kind: "query"`
- * plus a `resultShape`, so the presets are selected by shape here rather than by
+ * plus a `resultShape`, so the presets are selected by resultKind here rather than by
  * endpoint string.
  */
-const hasShape = (preset: WidgetPresetDefinition, shape: QueryResultShape): boolean =>
-	preset.dataSource.kind === "query" && preset.dataSource.resultShape === shape
+const hasResultKind = (preset: WidgetPresetDefinition, resultKind: QueryResultContract): boolean =>
+	preset.dataSource.kind === "query" && preset.dataSource.resultShape === resultKind
 
 describe("widget preset query specs", () => {
-	for (const preset of allPresets.filter((p) => hasShape(p, "breakdown"))) {
+	for (const preset of allPresets.filter((p) => hasResultKind(p, "breakdown"))) {
 		it(`${preset.id} builds a valid breakdown spec for every query`, () => {
 			const queries = presetQueries(preset)
 			expect(queries.length).toBeGreaterThan(0)
@@ -56,7 +56,7 @@ describe("widget preset query specs", () => {
 		})
 	}
 
-	for (const preset of allPresets.filter((p) => hasShape(p, "list"))) {
+	for (const preset of allPresets.filter((p) => hasResultKind(p, "list"))) {
 		it(`${preset.id} builds a valid list spec`, () => {
 			const queries = presetQueries(preset)
 			expect(queries.length).toBeGreaterThan(0)
@@ -80,7 +80,7 @@ describe("widget preset query specs", () => {
 	it("every horizontal-bar preset groups by a category", () => {
 		expect(hbarPresets.length).toBeGreaterThan(0)
 		for (const preset of hbarPresets) {
-			expect(hasShape(preset, "breakdown"), preset.id).toBe(true)
+			expect(hasResultKind(preset, "breakdown"), preset.id).toBe(true)
 			for (const query of presetQueries(preset)) {
 				expect(query.addOns?.groupBy, preset.id).toBe(true)
 				expect(query.groupBy?.length ?? 0, preset.id).toBeGreaterThan(0)

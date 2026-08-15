@@ -29,13 +29,10 @@ import {
 	IntegrationsValidationError,
 } from "../integrations"
 import { AuthorizationV2 } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
 import { publicError, publicErrors } from "./public-error"
 import { AlertDestinationPublicId } from "./resource-ids"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 export { AlertDestinationPublicId } from "./resource-ids"
 

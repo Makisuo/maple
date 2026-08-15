@@ -1,3 +1,4 @@
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 /**
  * Registry-level test for the alerts model's rule-toggle write. Rather than
  * stand up the whole overview model (Electric collections + the delivery query),

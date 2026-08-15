@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { Clock, Context, Effect, Layer, Metric } from "effect"
 import { QueryEngineExecuteResponse, type QueryEngineExecuteRequest } from "@maple/query-engine"
 import type { QueryEngineTimeoutError } from "@maple/domain/http"
@@ -44,7 +45,7 @@ import * as QueryEngineMetrics from "@/observability/QueryEngineMetrics"
 // service composes those impls, wires the edge + bucket caches, and exposes the
 // tenant-scoped HTTP surface.
 
-export interface QueryEngineServiceShape {
+export interface QueryEngineServiceApi {
 	readonly execute: (
 		tenant: TenantContext,
 		request: QueryEngineExecuteRequest,
@@ -85,7 +86,7 @@ export interface QueryEngineServiceShape {
 		policy?: DirectRouteCachePolicyInput,
 	) => Effect.Effect<A, E | QueryEngineTimeoutError>
 }
-export class QueryEngineService extends Context.Service<QueryEngineService, QueryEngineServiceShape>()(
+export class QueryEngineService extends Context.Service<QueryEngineService, QueryEngineServiceApi>()(
 	"@maple/api/services/QueryEngineService",
 	{
 		make: Effect.gen(function* () {
@@ -426,7 +427,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				evaluate: cachedEvaluate,
 				evaluateSeries,
 				cachedDirect,
-			} satisfies QueryEngineServiceShape
+			} satisfies QueryEngineServiceApi
 		}),
 	},
 ) {

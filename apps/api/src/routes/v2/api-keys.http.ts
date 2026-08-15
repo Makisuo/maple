@@ -53,13 +53,13 @@ const toV2ApiKey = (key: ApiKeyFields): V2ApiKey => ({
 
 const toV2ApiKeyWithSecret = (key: ApiKeyCreatedResponse): V2ApiKeyWithSecret => ({
 	...toV2ApiKey(key),
-	...(key.txid !== undefined ? { txid: key.txid } : {}),
+	...(key.txid !== undefined ? { txid: key.txid } : undefined),
 	secret: key.secret,
 })
 
 const toV2ApiKeyMutationResponse = (key: ApiKeyResponse): V2ApiKeyMutationResponse => ({
 	...toV2ApiKey(key),
-	...(key.txid !== undefined ? { txid: key.txid } : {}),
+	...(key.txid !== undefined ? { txid: key.txid } : undefined),
 })
 
 export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (handlers) =>
@@ -104,7 +104,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 						createdByEmail,
 						...(isMcpKey
 							? { metadataJson: { source: "maple_mcp", roles: [...tenant.roles] } }
-							: {}),
+							: undefined),
 					})
 					return toV2ApiKeyWithSecret(created)
 				}),

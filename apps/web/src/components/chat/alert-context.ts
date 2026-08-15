@@ -46,8 +46,8 @@ export const toAlertContext = (
 	windowMinutes: rule.windowMinutes,
 	groupKey: incident.groupKey,
 	sampleCount: incident.lastSampleCount,
-	...(result?.summary ? { aiSummary: result.summary } : {}),
-	...(result?.suspectedCause ? { aiSuspectedCause: result.suspectedCause } : {}),
+	...(result?.summary ? { aiSummary: result.summary } : undefined),
+	...(result?.suspectedCause ? { aiSuspectedCause: result.suspectedCause } : undefined),
 })
 
 export const decodeAlertContextFromSearchParam = (raw: string): AlertContext | undefined => {

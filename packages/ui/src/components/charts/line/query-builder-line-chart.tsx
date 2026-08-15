@@ -83,7 +83,7 @@ export function QueryBuilderLineChart({
 		const chartData = source.map((row) => {
 			const next: Record<string, unknown> = {
 				bucket: row.bucket,
-			}
+			} satisfies Record<string, unknown>
 
 			for (const definition of seriesDefinitions) {
 				next[definition.chartKey] = asFiniteNumber(row[definition.rawKey])
@@ -119,7 +119,7 @@ export function QueryBuilderLineChart({
 	const processedData = React.useMemo(() => {
 		if (unit !== "requests_per_sec" || !bucketSeconds) return incompleteData
 		return incompleteData.map((row) => {
-			const next: Record<string, unknown> = { bucket: row.bucket }
+			const next: Record<string, unknown> = { bucket: row.bucket } satisfies Record<string, unknown>
 			for (const key of Object.keys(row)) {
 				if (key === "bucket") continue
 				const val = row[key]

@@ -114,8 +114,10 @@ function buildRawSqlDataSource(
 	return makeRawSqlDataSource({
 		sql: draft.sql,
 		displayType,
-		...(draft.granularitySeconds == null ? {} : { granularitySeconds: draft.granularitySeconds }),
-		...(transform === undefined ? {} : { transform }),
+		...(!(draft.granularitySeconds == null)
+			? { granularitySeconds: draft.granularitySeconds }
+			: undefined),
+		...(!(transform === undefined) ? { transform } : undefined),
 	})
 }
 

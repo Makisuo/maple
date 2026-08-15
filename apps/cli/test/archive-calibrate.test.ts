@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { ok, rejects, strictEqual, throws } from "node:assert"

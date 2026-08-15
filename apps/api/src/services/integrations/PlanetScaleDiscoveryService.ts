@@ -107,7 +107,7 @@ const toPersistenceError = (message: string) => new ScrapeTargetPersistenceError
 // undecodable payload. Kept distinct from persistence (our DB) so the class —
 // not a regex over the message — carries the failure kind downstream.
 const toUpstreamError = (message: string, status?: number) =>
-	new ScrapeTargetUpstreamError({ message, ...(status === undefined ? {} : { status }) })
+	new ScrapeTargetUpstreamError({ message, ...(!(status === undefined) ? { status } : undefined) })
 
 /** Convert one http_sd group into sub-targets, dropping SSRF-invalid hosts. */
 export const subTargetsFromGroup = (group: {
@@ -212,7 +212,7 @@ const branchPassesFilters = (name: string, filters: BranchFilters): boolean => {
 	return true
 }
 
-export interface PlanetScaleDiscoveryServiceShape {
+export interface PlanetScaleDiscoveryServiceApi {
 	/**
 	 * Resolve a planetscale target row into its discovered sub-targets,
 	 * refreshing the cache when older than the TTL. Fails only when discovery
@@ -236,7 +236,7 @@ export interface PlanetScaleDiscoveryServiceShape {
 
 export class PlanetScaleDiscoveryService extends Context.Service<
 	PlanetScaleDiscoveryService,
-	PlanetScaleDiscoveryServiceShape
+	PlanetScaleDiscoveryServiceApi
 >()("@maple/api/services/PlanetScaleDiscoveryService", {
 	make: Effect.gen(function* () {
 		const env = yield* Env
@@ -461,7 +461,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				Effect.tap(Effect.sync(() => inFlight.delete(targetId))),
 			)
 
-		return { discover, lastError, invalidate } satisfies PlanetScaleDiscoveryServiceShape
+		return { discover, lastError, invalidate } satisfies PlanetScaleDiscoveryServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))

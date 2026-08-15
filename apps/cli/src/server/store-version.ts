@@ -172,16 +172,16 @@ const parseMarker = (value: unknown): StoreMarker => {
 			schemaDigest: value.schemaDigest,
 			schema,
 			activation: value.activation,
-			...(lastMigration === undefined
-				? {}
-				: {
+			...(!(lastMigration === undefined)
+				? {
 						lastMigration: {
 							id: lastMigration.id as string,
 							completedAt: lastMigration.completedAt as string,
 							fromVersion: lastMigration.fromVersion as number,
 							toVersion: lastMigration.toVersion as number,
 						},
-					}),
+					}
+				: undefined),
 		}
 	}
 
@@ -246,7 +246,7 @@ export const makeStoreMarker = (
 		schemaDigest: options.schemaDigest,
 		schema,
 		activation: options.activation ?? "active",
-		...(options.lastMigration === undefined ? {} : { lastMigration: options.lastMigration }),
+		...(!(options.lastMigration === undefined) ? { lastMigration: options.lastMigration } : undefined),
 	}
 }
 
@@ -298,7 +298,9 @@ export const ensureStoreMarkerDurable = async (
 			schemaDigest: identity.digest,
 			schema: identity.fingerprint,
 			activation: options.activation ?? existing.activation,
-			...(options.lastMigration === undefined ? {} : { lastMigration: options.lastMigration }),
+			...(!(options.lastMigration === undefined)
+				? { lastMigration: options.lastMigration }
+				: undefined),
 		}
 		await durableWrite(storeMarkerPath(dataDir), `${JSON.stringify(updated, null, 2)}\n`)
 		return updated

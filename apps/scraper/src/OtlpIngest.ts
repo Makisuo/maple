@@ -8,7 +8,7 @@ export class OtlpIngestError extends Schema.TaggedError<OtlpIngestError>()("@map
 	status: Schema.NullOr(Schema.Number),
 }) {}
 
-export interface OtlpIngestShape {
+export interface OtlpIngestApi {
 	/**
 	 * Send an OTLP/JSON metrics export through the Maple ingest gateway,
 	 * authenticated with the target org's public ingest key — so the data is
@@ -18,7 +18,7 @@ export interface OtlpIngestShape {
 	readonly send: (ingestKey: string, request: OtlpExportRequest) => Effect.Effect<void, OtlpIngestError>
 }
 
-export class OtlpIngest extends Context.Service<OtlpIngest, OtlpIngestShape>()("@maple/scraper/OtlpIngest", {
+export class OtlpIngest extends Context.Service<OtlpIngest, OtlpIngestApi>()("@maple/scraper/OtlpIngest", {
 	make: Effect.gen(function* () {
 		const env = yield* ScraperEnv
 		const client = yield* HttpClient.HttpClient
@@ -52,7 +52,7 @@ export class OtlpIngest extends Context.Service<OtlpIngest, OtlpIngestShape>()("
 			}
 		})
 
-		return { send } satisfies OtlpIngestShape
+		return { send } satisfies OtlpIngestApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

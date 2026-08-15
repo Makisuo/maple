@@ -70,7 +70,7 @@ const MARKER_COALESCE_MS: Record<ActionKind, number> = {
 	input: 800,
 	scroll: 400,
 	nav: 0,
-}
+} satisfies Record<ActionKind, number>
 
 /**
  * Pointer drift and viewport jitter aren't "activity" for idle purposes — a user
@@ -269,7 +269,7 @@ function engineTimeMs(engine: ReplayEngine | null): number {
 const ENGINE_FACTORIES: Record<ReplayFormat, ReplayEngineFactory> = {
 	rrweb: rrwebEngineFactory,
 	video: videoEngineFactory,
-}
+} satisfies Record<ReplayFormat, ReplayEngineFactory>
 
 export function errorMessage(error: unknown): string {
 	if (typeof error === "object" && error !== null && "message" in error) {

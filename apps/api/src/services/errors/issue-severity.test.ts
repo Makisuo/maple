@@ -26,7 +26,7 @@ beforeEach(async () => {
 	const testDb = createTestDb(createdDbs)
 	await runMigrations(testDb.pglite)
 	// Same shared drizzle query-builder surface as the postgres.js client.
-	db = createMaplePgliteClient(testDb.pglite) as unknown as MaplePgClient
+	db = createMaplePgliteClient(testDb.pglite) as MaplePgClient
 	issueId = asIssueId(randomUUID())
 	const now = new Date()
 	await db.insert(errorIssues).values({

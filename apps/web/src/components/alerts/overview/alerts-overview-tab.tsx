@@ -180,7 +180,7 @@ const AlertsOverviewContent = memo(function AlertsOverviewContent({
 	// current user surfaced as "You". Maple has no org-members endpoint, so other
 	// creators are shown by their raw identifier.
 	const creatorOptions = useMemo(() => {
-		const options: Record<string, string> = { [ANY_CREATOR]: "Anyone" }
+		const options: Record<string, string> = { [ANY_CREATOR]: "Anyone" } satisfies Record<string, string>
 		for (const rule of rules) {
 			if (!(rule.createdBy in options)) {
 				options[rule.createdBy] = rule.createdBy === currentUserId ? "You" : rule.createdBy

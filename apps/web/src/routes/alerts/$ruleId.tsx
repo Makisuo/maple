@@ -75,7 +75,7 @@ type RuleDetailTab = (typeof tabValues)[number]
 const SIGNAL_SOURCE_DESCRIPTION: Record<SignalSource, string> = {
 	preview: "The rule's query, replayed now over the selected window.",
 	checks: "What the evaluator actually observed and stored, one point per check.",
-}
+} satisfies Record<SignalSource, string>
 
 function formatBucketRange(bucket: { start: number; end: number }): string {
 	const time = (ms: number) =>
@@ -363,7 +363,7 @@ function RuleDetailContent() {
 					type: "incident",
 					incident_kind: "alert",
 					incident_id: incident.id,
-					...(incident.errorIssueId ? { issue_id: incident.errorIssueId } : {}),
+					...(incident.errorIssueId ? { issue_id: incident.errorIssueId } : undefined),
 				} as never,
 				snapshot: {
 					title: rule.name,
@@ -1345,7 +1345,7 @@ function ChecksPanel({
 						until,
 						limit: 100,
 						cursor: nextCursor,
-						...(statusFilter === "all" ? {} : { status: statusFilter }),
+						...(!(statusFilter === "all") ? { status: statusFilter } : undefined),
 					},
 				}),
 			)

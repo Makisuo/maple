@@ -37,7 +37,7 @@ import { Database, DatabaseError } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { isRetryablePostgresContention } from "@/platform/postgres-errors"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
-import type { SqlQueryOptions, WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import type { SqlQueryOptions, WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { ErrorActorsService } from "./ErrorActorsService"
 import { ErrorIssueReadModelsService } from "./ErrorIssueReadModelsService"
@@ -155,7 +155,7 @@ const makeWarehouseStub = (
 	scanRows: () => ReadonlyArray<Record<string, unknown>> = () => [],
 	onScan?: () => void,
 	fingerprintRows?: () => ReadonlyArray<Record<string, unknown>>,
-): WarehouseQueryServiceShape => ({
+): WarehouseQueryServiceApi => ({
 	query: () => Effect.die(new Error("unexpected warehouse query")),
 	rawSqlQuery: () => Effect.succeed([]),
 	// Active-org discovery is a declared cross-org read, so it arrives here
@@ -307,7 +307,7 @@ const makeGatingLayer = (opts: {
 		dispatch: () => Effect.succeed({ delivered: 0, failed: 0 }),
 	})
 	const scanRows = opts.scanRows ?? (() => [])
-	const warehouseStub: WarehouseQueryServiceShape = {
+	const warehouseStub: WarehouseQueryServiceApi = {
 		query: () => Effect.die(new Error("unexpected warehouse query")),
 		rawSqlQuery: () => Effect.succeed([]),
 		crossOrgQuery: <T>(

@@ -22,7 +22,7 @@ const STATUS_TONE: Record<HostStatus, HoneycombTone> = {
 	active: "ok",
 	idle: "warn",
 	down: "stale",
-}
+} satisfies Record<HostStatus, HoneycombTone>
 
 function toCell(node: NodeRow, referenceTime?: string): HoneycombCell {
 	const status = deriveHostStatus(node.lastSeen, referenceTime)
@@ -60,7 +60,10 @@ export function NodeHoneycomb({ nodes, referenceTime }: NodeHoneycombProps) {
 	const cells = useMemo(() => nodes.map((n) => toCell(n, referenceTime)), [nodes, referenceTime])
 
 	const legend = useMemo<HoneycombLegendItem[]>(() => {
-		const c: Record<HostStatus, number> = { active: 0, idle: 0, down: 0 }
+		const c: Record<HostStatus, number> = { active: 0, idle: 0, down: 0 } satisfies Record<
+			HostStatus,
+			number
+		>
 		for (const n of nodes) c[deriveHostStatus(n.lastSeen, referenceTime)]++
 		return [
 			{ tone: "ok", label: "Healthy", count: c.active },

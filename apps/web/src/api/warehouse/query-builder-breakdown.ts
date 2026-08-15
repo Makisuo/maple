@@ -38,7 +38,7 @@ const getQueryBuilderBreakdownEffect = Effect.fn("QueryEngine.getQueryBuilderBre
 		querySet: { queries: input.queries },
 		startTime: input.startTime,
 		endTime: input.endTime,
-		...(input.defaultLimit === undefined ? {} : { defaultLimit: input.defaultLimit }),
+		...(!(input.defaultLimit === undefined) ? { defaultLimit: input.defaultLimit } : undefined),
 	}).pipe(
 		Effect.catchTags({
 			"@maple/query-engine/query-set/QuerySetInputError": (error) =>

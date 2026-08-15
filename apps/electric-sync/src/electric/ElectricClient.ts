@@ -2,8 +2,8 @@ import { Context, Duration, Effect, Layer, Option, Redacted, Result } from "effe
 import { HttpClient } from "effect/unstable/http"
 import { SyncConfig } from "../config"
 import { ElectricNotConfigured, ElectricUpstreamError, ElectricUpstreamUnreachable } from "../errors"
-import { lookupShape } from "../shapes/registry"
-import type { ScopeBinding, ShapeRequest } from "../shapes/request"
+import { lookupSubscription } from "../shapes/registry"
+import type { ScopeBinding, SyncRequest } from "../shapes/request"
 
 // The client controls only Electric's cursor and cache-buster parameters; table,
 // projection, predicates, and bindings remain server-pinned. Cache busters must
@@ -70,14 +70,14 @@ const isLiveRequest = (clientParams: URLSearchParams): boolean => {
  * assert that a client can never override the pinned `table`/`where`/`params` —
  * only the whitelisted cursor params flow through.
  */
-export const buildUpstreamShapeUrl = (args: {
+export const buildUpstreamSyncUrl = (args: {
 	readonly electricUrl: string
-	readonly request: ShapeRequest
+	readonly request: SyncRequest
 	readonly orgId: string
 	readonly sourceId?: string | undefined
 	readonly secret?: string | undefined
 }): string => {
-	const def = lookupShape(args.request.shape)
+	const def = lookupSubscription(args.request.shape)
 
 	// Every bound predicate, in positional order. The org scope always leads; a
 	// scoped shape adds its own, already paired with its column by the decoder.
@@ -106,11 +106,11 @@ export const buildUpstreamShapeUrl = (args: {
 		...Object.fromEntries(bindings.map(({ value }, index) => [`params[${positional(index)}]`, value])),
 		// The projection is pinned too — a shape that drops secret / oversized
 		// columns must never let the client widen it back to `SELECT *`.
-		...(def.columns ? { columns: def.columns.join(",") } : {}),
+		...(def.columns ? { columns: def.columns.join(",") } : undefined),
 		// Electric Cloud source credentials (absent when self-hosting Electric).
-		...(args.sourceId ? { source_id: args.sourceId } : {}),
-		...(args.secret ? { secret: args.secret } : {}),
-	}
+		...(args.sourceId ? { source_id: args.sourceId } : undefined),
+		...(args.secret ? { secret: args.secret } : undefined),
+	} satisfies Record<string, string>
 
 	const url = new URL(`${args.electricUrl.replace(/\/+$/, "")}/v1/shape`)
 	for (const [key, value] of Object.entries(pinned)) url.searchParams.set(key, value)
@@ -148,7 +148,7 @@ export interface ElectricUpstreamResponse {
 	readonly body: string
 }
 
-export interface ElectricClientShape {
+export interface ElectricClientApi {
 	/**
 	 * Whether this deploy can serve shapes at all. Separate from `fetchShape` so
 	 * the route can take the graceful-degrade path *before* authenticating — an
@@ -157,7 +157,7 @@ export interface ElectricClientShape {
 	 */
 	readonly ensureConfigured: Effect.Effect<void, ElectricNotConfigured>
 	readonly fetchShape: (
-		request: ShapeRequest,
+		request: SyncRequest,
 		orgId: string,
 	) => Effect.Effect<
 		ElectricUpstreamResponse,
@@ -173,7 +173,7 @@ export interface ElectricClientShape {
  * that a 5xx is a failure. The route knows none of it, and a test can replace the
  * whole thing with a recording stub to exercise the handler's own behaviour.
  */
-export class ElectricClient extends Context.Service<ElectricClient, ElectricClientShape>()(
+export class ElectricClient extends Context.Service<ElectricClient, ElectricClientApi>()(
 	"@maple/electric-sync/ElectricClient",
 	{
 		make: Effect.gen(function* () {
@@ -228,64 +228,62 @@ export class ElectricClient extends Context.Service<ElectricClient, ElectricClie
 
 			const ensureConfigured = Effect.asVoid(Effect.fromResult(availability))
 
-			const fetchShape: ElectricClientShape["fetchShape"] = Effect.fnUntraced(
-				function* (request, orgId) {
-					const electricUrl = yield* Effect.fromResult(availability)
-					const url = buildUpstreamShapeUrl({
-						electricUrl,
-						request,
-						orgId,
-						sourceId,
-						secret,
+			const fetchSubscription = Effect.fnUntraced(function* (request, orgId) {
+				const electricUrl = yield* Effect.fromResult(availability)
+				const url = buildUpstreamSyncUrl({
+					electricUrl,
+					request,
+					orgId,
+					sourceId,
+					secret,
+				})
+
+				// Electric `live` requests long-poll, then return a COMPLETE response
+				// (not an open SSE stream), and control-plane shapes are small, so we
+				// buffer the body rather than manage a scoped pass-through stream.
+				const fetched = client.get(url).pipe(
+					Effect.annotateSpans("peer.service", "electric"),
+					Effect.flatMap((response) =>
+						response.text.pipe(Effect.map((body) => ({ response, body }))),
+					),
+				)
+
+				const { response, body } = yield* (
+					isLiveRequest(request.clientParams)
+						? fetched
+						: fetched.pipe(Effect.timeout(UPSTREAM_TIMEOUT))
+				).pipe(
+					// One mapping for transport failures and timeouts alike: the cause
+					// travels in the message instead of the mutable closure variable this
+					// replaces, so the span can say what actually went wrong.
+					Effect.mapError(
+						(error) =>
+							new ElectricUpstreamUnreachable({
+								message: `Electric upstream unreachable (${request.shape}): ${describeUpstreamFailure(error)}`,
+							}),
+					),
+					Effect.tapError((error) =>
+						Effect.logWarning("Electric shape upstream request failed").pipe(
+							Effect.annotateLogs({ shape: request.shape, error: error.message }),
+						),
+					),
+				)
+
+				if (response.status >= 500) {
+					return yield* new ElectricUpstreamError({
+						// The body is what Electric actually said; truncated because a
+						// status description is not a place to put a whole payload.
+						message: `Electric returned ${response.status} for shape ${request.shape}: ${body.slice(0, 300)}`,
+						status: response.status,
+						body,
+						headers: { ...response.headers },
 					})
+				}
 
-					// Electric `live` requests long-poll, then return a COMPLETE response
-					// (not an open SSE stream), and control-plane shapes are small, so we
-					// buffer the body rather than manage a scoped pass-through stream.
-					const fetched = client.get(url).pipe(
-						Effect.annotateSpans("peer.service", "electric"),
-						Effect.flatMap((response) =>
-							response.text.pipe(Effect.map((body) => ({ response, body }))),
-						),
-					)
+				return { status: response.status, headers: { ...response.headers }, body }
+			})
 
-					const { response, body } = yield* (
-						isLiveRequest(request.clientParams)
-							? fetched
-							: fetched.pipe(Effect.timeout(UPSTREAM_TIMEOUT))
-					).pipe(
-						// One mapping for transport failures and timeouts alike: the cause
-						// travels in the message instead of the mutable closure variable this
-						// replaces, so the span can say what actually went wrong.
-						Effect.mapError(
-							(error) =>
-								new ElectricUpstreamUnreachable({
-									message: `Electric upstream unreachable (${request.shape}): ${describeUpstreamFailure(error)}`,
-								}),
-						),
-						Effect.tapError((error) =>
-							Effect.logWarning("Electric shape upstream request failed").pipe(
-								Effect.annotateLogs({ shape: request.shape, error: error.message }),
-							),
-						),
-					)
-
-					if (response.status >= 500) {
-						return yield* new ElectricUpstreamError({
-							// The body is what Electric actually said; truncated because a
-							// status description is not a place to put a whole payload.
-							message: `Electric returned ${response.status} for shape ${request.shape}: ${body.slice(0, 300)}`,
-							status: response.status,
-							body,
-							headers: { ...response.headers },
-						})
-					}
-
-					return { status: response.status, headers: { ...response.headers }, body }
-				},
-			)
-
-			return { ensureConfigured, fetchShape } satisfies ElectricClientShape
+			return { ensureConfigured, fetchShape: fetchSubscription } satisfies ElectricClientApi
 		}),
 	},
 ) {

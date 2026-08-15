@@ -28,7 +28,7 @@ export const FEATURE_LABELS: Record<SpendFeatureId, string> = {
 	traces: "Traces",
 	metrics: "Metrics",
 	browser_sessions: "Browser Sessions",
-}
+} satisfies Record<SpendFeatureId, string>
 
 /**
  * Labels for tight slots — a card header that also carries a cap chip, or a chart
@@ -38,7 +38,7 @@ export const FEATURE_LABELS: Record<SpendFeatureId, string> = {
 export const FEATURE_SHORT_LABELS: Record<SpendFeatureId, string> = {
 	...FEATURE_LABELS,
 	browser_sessions: "Sessions",
-}
+} satisfies Record<SpendFeatureId, string>
 
 /**
  * Series colors, validated for contrast on the card surface and for deutan CVD
@@ -50,7 +50,7 @@ export const FEATURE_COLORS: Record<SpendFeatureId, string> = {
 	traces: "#199e70",
 	metrics: "#9085e9",
 	browser_sessions: "#d55181",
-}
+} satisfies Record<SpendFeatureId, string>
 
 /** `browser_sessions` is metered per session; every other feature per GB. */
 export const featureUnit = (featureId: string): "GB" | "sessions" =>
@@ -301,7 +301,7 @@ export function buildCumulativeSeries({
 		traces: 0,
 		metrics: 0,
 		browser_sessions: 0,
-	}
+	} satisfies Record<SpendFeatureId, number>
 
 	const todayMs = Math.floor(model.cycle.nowMs / DAY_MS) * DAY_MS
 	const lastDay = daily.days[daily.days.length - 1]

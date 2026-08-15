@@ -5,12 +5,12 @@ import { cn } from "@maple/ui/lib/utils"
 const toneBySeverity: Record<AlertSeverity, string> = {
 	warning: "border-severity-warn/30 bg-severity-warn/10 text-severity-warn",
 	critical: "border-destructive/30 bg-destructive/10 text-destructive",
-}
+} satisfies Record<AlertSeverity, string>
 
 const labelBySeverity: Record<AlertSeverity, string> = {
 	warning: "Warning",
 	critical: "Critical",
-}
+} satisfies Record<AlertSeverity, string>
 
 export function AlertSeverityBadge({ severity, className }: { severity: AlertSeverity; className?: string }) {
 	return (

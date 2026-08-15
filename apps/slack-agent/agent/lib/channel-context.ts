@@ -258,7 +258,7 @@ export async function fetchChannelHistoryFromSlack(
 			inclusive: "false",
 			limit: String(options.limit),
 		}),
-		...(options.signal ? { signal: options.signal } : {}),
+		...(options.signal ? { signal: options.signal } : undefined),
 	})
 	if (!res.ok) {
 		throw new SlackHistoryError(`http_${res.status}`)

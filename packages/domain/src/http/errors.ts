@@ -60,7 +60,7 @@ export const WORKFLOW_TRANSITIONS: Record<WorkflowState, ReadonlyArray<WorkflowS
 	done: ["triage", "in_progress", "cancelled", "wontfix"],
 	cancelled: [],
 	wontfix: ["triage", "cancelled"],
-}
+} satisfies Record<WorkflowState, ReadonlyArray<WorkflowState>>
 
 /** States from which no further transition is possible. */
 export const TERMINAL_WORKFLOW_STATES: ReadonlySet<WorkflowState> = new Set<WorkflowState>([

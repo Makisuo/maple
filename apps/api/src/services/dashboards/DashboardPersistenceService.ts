@@ -91,7 +91,7 @@ const parsePayload = Effect.fnUntraced(function* (
 			message: "Stored dashboard payload is invalid",
 			dashboardId: context.dashboardId,
 			component: context.component,
-			...(context.versionId === undefined ? {} : { versionId: context.versionId }),
+			...(!(context.versionId === undefined) ? { versionId: context.versionId } : undefined),
 			cause: outcome.issue,
 		})
 	}
@@ -179,7 +179,7 @@ type VersionOptions = {
 	readonly sourceVersionId?: DashboardVersionId | null
 }
 
-export interface DashboardPersistenceServiceShape {
+export interface DashboardPersistenceServiceApi {
 	readonly create: (
 		orgId: OrgId,
 		userId: UserId,
@@ -263,7 +263,7 @@ export interface DashboardPersistenceServiceShape {
 
 export class DashboardPersistenceService extends Context.Service<
 	DashboardPersistenceService,
-	DashboardPersistenceServiceShape
+	DashboardPersistenceServiceApi
 >()("@maple/api/services/DashboardPersistenceService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -703,7 +703,7 @@ export class DashboardPersistenceService extends Context.Service<
 
 			return new DashboardDeleteResponse({
 				id: deleted.value.id,
-				...(txid !== undefined && { txid }),
+				...(txid !== undefined ? { txid } : undefined),
 			})
 		})
 
@@ -852,7 +852,7 @@ export class DashboardPersistenceService extends Context.Service<
 			listVersions,
 			getVersion,
 			restoreVersion,
-		} satisfies DashboardPersistenceServiceShape
+		} satisfies DashboardPersistenceServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

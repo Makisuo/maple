@@ -10,7 +10,7 @@
  */
 
 import { Effect } from "effect"
-import type { QueryResultShape, QuerySet } from "@maple/query-model"
+import type { QueryResultContract, QuerySet } from "@maple/query-model"
 import type { EmptyRangeFallbackStrategy } from "./bucketing"
 import { type BreakdownQuerySetResult, runBreakdownQuerySet } from "./breakdown"
 import { type ListQuerySetResult, runListQuerySet } from "./list"
@@ -24,7 +24,7 @@ export type QuerySetRunOutput =
 
 export interface RunQuerySetInput {
 	readonly querySet: QuerySet
-	readonly resultShape: QueryResultShape
+	readonly resultShape: QueryResultContract
 	readonly startTime: string
 	readonly endTime: string
 	/** Per-shape request shaping; each field is read by exactly one shape. */
@@ -45,7 +45,7 @@ export const runQuerySet = Effect.fnUntraced(function* <E>(
 				querySet: input.querySet,
 				startTime: input.startTime,
 				endTime: input.endTime,
-				...(input.fallback === undefined ? {} : { fallback: input.fallback }),
+				...(!(input.fallback === undefined) ? { fallback: input.fallback } : undefined),
 			})
 			return { shape: "timeseries", ...result } satisfies QuerySetRunOutput
 		}
@@ -54,7 +54,7 @@ export const runQuerySet = Effect.fnUntraced(function* <E>(
 				querySet: input.querySet,
 				startTime: input.startTime,
 				endTime: input.endTime,
-				...(input.defaultLimit === undefined ? {} : { defaultLimit: input.defaultLimit }),
+				...(!(input.defaultLimit === undefined) ? { defaultLimit: input.defaultLimit } : undefined),
 			})
 			return { shape: "breakdown", ...result } satisfies QuerySetRunOutput
 		}
@@ -63,8 +63,8 @@ export const runQuerySet = Effect.fnUntraced(function* <E>(
 				querySet: input.querySet,
 				startTime: input.startTime,
 				endTime: input.endTime,
-				...(input.limit === undefined ? {} : { limit: input.limit }),
-				...(input.columns === undefined ? {} : { columns: input.columns }),
+				...(!(input.limit === undefined) ? { limit: input.limit } : undefined),
+				...(!(input.columns === undefined) ? { columns: input.columns } : undefined),
 			})
 			return { shape: "list", ...result } satisfies QuerySetRunOutput
 		}

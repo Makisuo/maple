@@ -99,7 +99,7 @@ const PLATFORM_COLORS: Record<ServicePlatform | "unknown", string> = {
 	lambda: "oklch(0.7 0.18 60)",
 	web: "oklch(0.65 0.15 145)",
 	unknown: "oklch(0.55 0.02 270)",
-}
+} satisfies Record<ServicePlatform | "unknown", string>
 
 export function getPlatformColor(platform: ServicePlatform | undefined): string {
 	return PLATFORM_COLORS[platform ?? "unknown"]

@@ -95,7 +95,7 @@ export interface OrganizationInfo {
 	readonly createdAtMs: number | null
 }
 
-export interface OrganizationServiceShape {
+export interface OrganizationServiceApi {
 	readonly retrieve: (orgId: OrgId) => Effect.Effect<OrganizationInfo, OrganizationProviderError>
 	readonly delete: (
 		orgId: OrgId,
@@ -106,7 +106,7 @@ export interface OrganizationServiceShape {
 	>
 }
 
-export class OrganizationService extends Context.Service<OrganizationService, OrganizationServiceShape>()(
+export class OrganizationService extends Context.Service<OrganizationService, OrganizationServiceApi>()(
 	"@maple/api/services/OrganizationService",
 	{
 		make: Effect.gen(function* () {
@@ -193,7 +193,7 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 			return {
 				retrieve,
 				delete: deleteOrganization,
-			} satisfies OrganizationServiceShape
+			} satisfies OrganizationServiceApi
 		}),
 	},
 ) {

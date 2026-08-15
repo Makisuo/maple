@@ -64,7 +64,7 @@ export const SlackCallbackRouter = HttpRouter.use((router) =>
 						// (the permissions-refresh flow) — the web app toasts it differently
 						// from a first-time connect.
 						slack: result.updated ? "updated" : "connected",
-						...(result.teamName ? { slack_team: result.teamName } : {}),
+						...(result.teamName ? { slack_team: result.teamName } : undefined),
 					}),
 				),
 				Effect.catchTags({
@@ -160,7 +160,7 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 			status: number,
 		) {
 			yield* Effect.annotateCurrentSpan({
-				...(teamId === undefined ? {} : { teamId }),
+				...(!(teamId === undefined) ? { teamId } : undefined),
 				outcome,
 				"http.response.status_code": status,
 			})

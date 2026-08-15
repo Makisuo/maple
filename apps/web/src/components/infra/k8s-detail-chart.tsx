@@ -47,18 +47,18 @@ const POD_METRIC_LABELS: Record<PodInfraMetric, string> = {
 	cpu_request: "CPU / request",
 	memory_limit: "Memory / limit",
 	memory_request: "Memory / request",
-}
+} satisfies Record<PodInfraMetric, string>
 
 const NODE_METRIC_LABELS: Record<NodeInfraMetric, string> = {
 	cpu_usage: "CPU usage",
 	uptime: "Uptime",
-}
+} satisfies Record<NodeInfraMetric, string>
 
 const WORKLOAD_METRIC_LABELS: Record<WorkloadInfraMetric, string> = {
 	cpu_usage: "CPU usage",
 	cpu_limit: "CPU / limit",
 	memory_limit: "Memory / limit",
-}
+} satisfies Record<WorkloadInfraMetric, string>
 
 interface K8sMetricChartViewProps {
 	rows: ReadonlyArray<{ bucket: string; attributeValue: string; value: number }>

@@ -54,7 +54,7 @@ import {
 	toGraphqlTime,
 	topTrafficFilterVariables,
 	topTrafficQuery,
-	type TopTrafficGroupShape,
+	type TopTrafficGroupDefinition,
 } from "@/services/integrations/cloudflare-analytics/queries"
 import { PlanetScaleConnectionService } from "@/services/integrations/PlanetScaleConnectionService"
 import { PlanetScaleService } from "@/services/integrations/PlanetScaleService"
@@ -371,7 +371,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 								),
 							)
 							const zone = decoded.viewer.zones?.[0]
-							const keyOf = (group: TopTrafficGroupShape) =>
+							const keyOf = (group: TopTrafficGroupDefinition) =>
 								(payload.dimension === "host"
 									? group.dimensions.clientRequestHTTPHost
 									: group.dimensions.clientRequestPath) ?? "unknown"

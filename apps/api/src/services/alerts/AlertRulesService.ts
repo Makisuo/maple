@@ -25,7 +25,7 @@ import {
 } from "@maple/db"
 import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { Array as Arr, Context, Effect, HashSet, Layer, Schema } from "effect"
-import { Database, type DatabaseShape } from "@/platform/DatabaseLive"
+import { Database, type DatabaseApi } from "@/platform/DatabaseLive"
 import { makeDbExecute } from "@/platform/db-execute"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { dateToMs, msToDate } from "@/platform/time"
@@ -38,7 +38,7 @@ import {
 	type RuleEvaluationState,
 } from "./AlertRuleModel"
 import { makePersistenceError } from "./alert-persistence"
-import { AlertRuntime, type AlertRuntimeShape } from "./AlertRuntime"
+import { AlertRuntime, type AlertRuntimeApi } from "./AlertRuntime"
 
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
@@ -46,7 +46,7 @@ const MAX_ACTIVE_ALERT_RULES_PER_ORG = 100
 
 const isAdmin = (roles: ReadonlyArray<RoleName>) => roles.some((role) => adminRoles.includes(role))
 
-export interface AlertRulesServiceShape {
+export interface AlertRulesServiceApi {
 	readonly listRules: (
 		orgId: OrgId,
 	) => Effect.Effect<AlertRulesListResponse, AlertPersistenceError | AlertRuleStoredConfigInvalidError>
@@ -70,8 +70,8 @@ export interface AlertRulesServiceShape {
 }
 
 export const makeAlertRulePersistence = (options: {
-	readonly database: DatabaseShape
-	readonly runtime: AlertRuntimeShape
+	readonly database: DatabaseApi
+	readonly runtime: AlertRuntimeApi
 }) => {
 	const { database, runtime } = options
 	const { normalizeRule, normalizeRuleRow } = makeAlertRuleNormalizer(runtime)
@@ -83,7 +83,7 @@ export const makeAlertRulePersistence = (options: {
 		return yield* Effect.fail(
 			new AlertForbiddenError({
 				message: "Only org admins can manage alerts",
-				...(roles.length > 0 ? { roles: [...roles] } : {}),
+				...(roles.length > 0 ? { roles: [...roles] } : undefined),
 			}),
 		)
 	})
@@ -302,7 +302,7 @@ export const makeAlertRulePersistence = (options: {
 			notes: normalizeOptionalString(request.notes),
 			userId,
 			timestamp,
-			...(txid === undefined ? {} : { txid }),
+			...(!(txid === undefined) ? { txid } : undefined),
 		})
 	})
 
@@ -334,7 +334,7 @@ export const makeAlertRulePersistence = (options: {
 		const txid = readTxid(deleted)
 		return new AlertRuleDeleteResponse({
 			id: ruleId,
-			...(txid !== undefined && { txid }),
+			...(txid !== undefined ? { txid } : undefined),
 		})
 	})
 
@@ -351,7 +351,7 @@ export const makeAlertRulePersistence = (options: {
 	}
 }
 
-export class AlertRulesService extends Context.Service<AlertRulesService, AlertRulesServiceShape>()(
+export class AlertRulesService extends Context.Service<AlertRulesService, AlertRulesServiceApi>()(
 	"@maple/api/services/alerts/AlertRulesService",
 	{
 		make: Effect.gen(function* () {
@@ -362,7 +362,7 @@ export class AlertRulesService extends Context.Service<AlertRulesService, AlertR
 				listRules: persistence.listRules,
 				createRule: persistence.createRule,
 				deleteRule: persistence.deleteRule,
-			} satisfies AlertRulesServiceShape
+			} satisfies AlertRulesServiceApi
 		}),
 	},
 ) {

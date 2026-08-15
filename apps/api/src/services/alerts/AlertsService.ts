@@ -96,10 +96,10 @@ import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryServic
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
 import { AlertRuntime } from "./AlertRuntime"
-import { AlertDestinationsService, type AlertDestinationsServiceShape } from "./AlertDestinationsService"
+import { AlertDestinationsService, type AlertDestinationsServiceApi } from "./AlertDestinationsService"
 import { makeAlertDestinationDelivery, parseAlertDestinationEncryptionKey } from "./AlertDestinationDelivery"
-import { AlertReadModelsService, type AlertReadModelsServiceShape } from "./AlertReadModelsService"
-import { AlertRulesService, makeAlertRulePersistence, type AlertRulesServiceShape } from "./AlertRulesService"
+import { AlertReadModelsService, type AlertReadModelsServiceApi } from "./AlertReadModelsService"
+import { AlertRulesService, makeAlertRulePersistence, type AlertRulesServiceApi } from "./AlertRulesService"
 import {
 	compileRulePlan,
 	decodeStoredAlertRuleMetadata,
@@ -111,7 +111,7 @@ import {
 } from "./AlertRuleModel"
 import { resolveSignalDisplay } from "./alert-signal-display"
 
-export { AlertRuntime, type AlertRuntimeShape } from "./AlertRuntime"
+export { AlertRuntime, type AlertRuntimeApi } from "./AlertRuntime"
 
 interface EvaluatedRule {
 	readonly status: Schema.Schema.Type<typeof AlertEvaluationResult.fields.status>
@@ -267,7 +267,7 @@ const makeDeliveryError = (message: string, destinationType?: AlertDestinationTy
 	new AlertDeliveryError({
 		message,
 		destinationType,
-		...(cause === undefined ? {} : { cause }),
+		...(!(cause === undefined) ? { cause } : undefined),
 	})
 
 type StoredDeliveryPayloadType = Schema.Schema.Type<typeof StoredDeliveryPayloadSchema>
@@ -281,8 +281,8 @@ const parseDeliveryPayload = (
 
 // Formatting helpers imported from AlertDeliveryDispatch
 
-export interface AlertsServiceShape
-	extends AlertDestinationsServiceShape, AlertReadModelsServiceShape, AlertRulesServiceShape {
+export interface AlertsServiceApi
+	extends AlertDestinationsServiceApi, AlertReadModelsServiceApi, AlertRulesServiceApi {
 	readonly updateRule: (
 		orgId: OrgId,
 		userId: UserId,
@@ -352,7 +352,7 @@ export interface AlertsServiceShape
 	>
 }
 
-export class AlertsService extends Context.Service<AlertsService, AlertsServiceShape>()(
+export class AlertsService extends Context.Service<AlertsService, AlertsServiceApi>()(
 	"@maple/api/services/AlertsService",
 	{
 		make: Effect.gen(function* () {
@@ -1107,7 +1107,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								value: evaluation.value,
 								sampleCount: obs.sampleCount,
 								status: evaluation.status,
-								...(provisional ? { provisional } : {}),
+								...(provisional ? { provisional } : undefined),
 							}),
 						)
 						// The in-progress window charts but doesn't feed the incident
@@ -1748,7 +1748,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									lastSampleCount: evaluation.sampleCount,
 									lastEvaluatedAt: new Date(timestamp),
 									updatedAt: new Date(timestamp),
-									...(renotifyDue ? { lastNotifiedAt: new Date(timestamp) } : {}),
+									...(renotifyDue ? { lastNotifiedAt: new Date(timestamp) } : undefined),
 								})
 								.where(eq(alertIncidents.id, openIncident.id)),
 						)
@@ -2914,13 +2914,17 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 													pipe: error.pipeName,
 													...(error._tag ===
 													"@maple/http/errors/WarehouseQuotaExceededError"
-														? { quotaSetting: error.setting }
-														: {}),
+														? {
+																quotaSetting: error.setting,
+															}
+														: undefined),
 													...(error._tag ===
 														"@maple/http/errors/WarehouseUpstreamError" ||
 													error._tag === "@maple/http/errors/WarehouseAuthError"
-														? { upstreamStatus: error.upstreamStatus }
-														: {}),
+														? {
+																upstreamStatus: error.upstreamStatus,
+															}
+														: undefined),
 												}
 											: undefined,
 									),
@@ -3026,7 +3030,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				summarizeRuleChecks: readModels.summarizeRuleChecks,
 				listDeliveryEvents: readModels.listDeliveryEvents,
 				runSchedulerTick,
-			} satisfies AlertsServiceShape
+			} satisfies AlertsServiceApi
 		}),
 	},
 ) {

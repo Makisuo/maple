@@ -17,13 +17,10 @@ import {
 	ScrapeTargetValidationError,
 } from "../scrape-targets"
 import { AuthorizationV2 } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
 import { publicErrors } from "./public-error"
 import { PublicId, PublicIdPrefixes } from "./public-id"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 /** `scrp_…` public ID ⇄ internal `ScrapeTargetId` (raw UUID). */
 export const ScrapeTargetPublicId = PublicId(PublicIdPrefixes.scrapeTarget, ScrapeTargetId)

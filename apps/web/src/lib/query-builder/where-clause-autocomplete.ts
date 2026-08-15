@@ -156,7 +156,7 @@ const KEY_DEFINITIONS: Record<QueryBuilderDataSource, KeyDefinition[]> = {
 			description: "Filter by a metric attribute",
 		},
 	],
-}
+} satisfies Record<QueryBuilderDataSource, KeyDefinition[]>
 
 const TRACE_SEARCH_KEY_DEFINITIONS: KeyDefinition[] = [
 	{
@@ -731,8 +731,8 @@ function buildValueSuggestions(
 					"http.method": uniqueValues(values?.httpMethods ?? []),
 					"http.status_code": uniqueValues(values?.httpStatusCodes ?? []),
 				}
-			: {}),
-	}
+			: undefined),
+	} satisfies Record<string, string[]>
 
 	const explicit = mappedValues[normalizedKey]
 	if (explicit) {

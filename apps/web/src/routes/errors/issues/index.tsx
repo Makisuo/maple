@@ -58,7 +58,7 @@ const FILTER_LABEL: Record<FilterValue, string> = {
 	cancelled: "Cancelled",
 	wontfix: "Wontfix",
 	all: "All",
-}
+} satisfies Record<FilterValue, string>
 
 const TOOLBAR_TABS = FILTER_VALUES.map((value) => ({
 	value,
@@ -85,7 +85,7 @@ const SEVERITY_FILTER_LABEL: Record<SeverityFilterValue, string> = {
 	medium: "Medium",
 	low: "Low",
 	unset: "Unset",
-}
+} satisfies Record<SeverityFilterValue, string>
 
 const searchSchema = Schema.Struct({
 	workflowState: Schema.optional(

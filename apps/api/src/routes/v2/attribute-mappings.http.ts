@@ -76,7 +76,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 							sourceKey: payload.source_key,
 							targetKey: payload.target_key,
 							operation: payload.operation,
-							...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
+							...(payload.enabled !== undefined ? { enabled: payload.enabled } : undefined),
 						}),
 					)
 
@@ -90,14 +90,22 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 						tenant.orgId,
 						params.id,
 						new UpdateIngestAttributeMappingRequest({
-							...(payload.name !== undefined ? { name: payload.name } : {}),
+							...(payload.name !== undefined ? { name: payload.name } : undefined),
 							...(payload.source_context !== undefined
-								? { sourceContext: payload.source_context }
-								: {}),
-							...(payload.source_key !== undefined ? { sourceKey: payload.source_key } : {}),
-							...(payload.target_key !== undefined ? { targetKey: payload.target_key } : {}),
-							...(payload.operation !== undefined ? { operation: payload.operation } : {}),
-							...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
+								? {
+										sourceContext: payload.source_context,
+									}
+								: undefined),
+							...(payload.source_key !== undefined
+								? { sourceKey: payload.source_key }
+								: undefined),
+							...(payload.target_key !== undefined
+								? { targetKey: payload.target_key }
+								: undefined),
+							...(payload.operation !== undefined
+								? { operation: payload.operation }
+								: undefined),
+							...(payload.enabled !== undefined ? { enabled: payload.enabled } : undefined),
 						}),
 					)
 

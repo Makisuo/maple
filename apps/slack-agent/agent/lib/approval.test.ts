@@ -34,7 +34,7 @@ function approvalCtx(toolName: string, auth: AuthOverrides | null = {}): Approva
 			auth: { current, initiator: current },
 			turn: { id: "turn_0", sequence: 0 },
 		},
-	} as unknown as ApprovalContext
+	} as ApprovalContext
 }
 
 const APP_PRINCIPAL: AuthOverrides = {

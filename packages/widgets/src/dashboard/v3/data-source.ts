@@ -1,4 +1,4 @@
-import { QUERY_RESULT_SHAPES, QuerySetSchema } from "@maple/query-model"
+import { QUERY_RESULT_KINDS, QuerySetSchema } from "@maple/query-model"
 import { Schema } from "effect"
 import { UnknownRecord, WidgetDataSourceTransformV2 } from "../shared/transform"
 
@@ -48,7 +48,7 @@ const transformField = { transform: Schema.optionalKey(WidgetDataSourceTransform
  */
 export const QueryWidgetDataSource = Schema.Struct({
 	kind: Schema.Literal("query"),
-	resultShape: Schema.Literals(QUERY_RESULT_SHAPES),
+	resultShape: Schema.Literals(QUERY_RESULT_KINDS),
 	...QuerySetSchema.fields,
 	/**
 	 * Request shaping — how many rows to fetch and which columns.

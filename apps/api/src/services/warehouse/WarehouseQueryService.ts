@@ -13,7 +13,7 @@ import {
 	type SqlQueryOptions,
 	type TinybirdBackendConfig,
 	type WarehouseExecutorDeps,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 	type WarehouseRawRouteError,
 	type WarehouseRoute,
 	type WarehouseSqlClient,
@@ -36,7 +36,7 @@ import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgToke
 // both into `makeWarehouseExecutor`.
 
 // Re-export the executor types so existing import sites stay stable.
-export type { WarehouseQueryServiceShape, SqlQueryOptions }
+export type { WarehouseQueryServiceApi, SqlQueryOptions }
 
 const createClickHouseSqlClient = (config: ClickHouseProtocolBackendConfig): WarehouseSqlClient => {
 	const client = createClickHouseClient({
@@ -57,7 +57,7 @@ const createClickHouseSqlClient = (config: ClickHouseProtocolBackendConfig): War
 			const resultSet = await client.query({
 				query: sql,
 				format: "JSONEachRow",
-				...(clickhouseSettings ? { clickhouse_settings: clickhouseSettings } : {}),
+				...(clickhouseSettings ? { clickhouse_settings: clickhouseSettings } : undefined),
 			})
 			const limits = options?.responseLimits
 			if (limits === undefined) {
@@ -238,221 +238,223 @@ const createClient = (config: ResolvedWarehouseConfig): WarehouseSqlClient =>
 
 let sqlClientFactory: typeof createClient = createClient
 
-export class WarehouseQueryService extends Context.Service<
-	WarehouseQueryService,
-	WarehouseQueryServiceShape
->()("@maple/api/lib/WarehouseQueryService", {
-	make: Effect.gen(function* () {
-		const env = yield* Env
-		const orgClickHouseSettings = yield* OrgClickHouseSettingsService
-		const orgTokens = yield* TinybirdOrgTokenService
+export class WarehouseQueryService extends Context.Service<WarehouseQueryService, WarehouseQueryServiceApi>()(
+	"@maple/api/lib/WarehouseQueryService",
+	{
+		make: Effect.gen(function* () {
+			const env = yield* Env
+			const orgClickHouseSettings = yield* OrgClickHouseSettingsService
+			const orgTokens = yield* TinybirdOrgTokenService
 
-		// The managed (env-level) READ upstream: the Tinybird CH-gateway or vanilla
-		// ClickHouse when CLICKHOUSE_URL is set, otherwise the managed Tinybird SDK.
-		const resolveManagedConfig = Effect.fn("WarehouseQueryService.resolveManagedConfig")(function* () {
-			if (Option.isSome(env.CLICKHOUSE_URL)) {
-				const configuredUrl = env.CLICKHOUSE_URL.value
-				const clickhouseUrl = yield* Effect.try({
-					try: () => new URL(configuredUrl),
-					catch: () =>
-						new WarehouseConfigError({
-							pipeName: "resolveManagedConfig",
-							message: "CLICKHOUSE_URL is invalid",
-						}),
-				})
-				if (clickhouseUrl.username.length > 0 || clickhouseUrl.password.length > 0) {
+			// The managed (env-level) READ upstream: the Tinybird CH-gateway or vanilla
+			// ClickHouse when CLICKHOUSE_URL is set, otherwise the managed Tinybird SDK.
+			const resolveManagedConfig = Effect.fn("WarehouseQueryService.resolveManagedConfig")(
+				function* () {
+					if (Option.isSome(env.CLICKHOUSE_URL)) {
+						const configuredUrl = env.CLICKHOUSE_URL.value
+						const clickhouseUrl = yield* Effect.try({
+							try: () => new URL(configuredUrl),
+							catch: () =>
+								new WarehouseConfigError({
+									pipeName: "resolveManagedConfig",
+									message: "CLICKHOUSE_URL is invalid",
+								}),
+						})
+						if (clickhouseUrl.username.length > 0 || clickhouseUrl.password.length > 0) {
+							return yield* new WarehouseConfigError({
+								pipeName: "resolveManagedConfig",
+								message: "CLICKHOUSE_URL must not contain embedded credentials",
+							})
+						}
+						yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
+						const kind =
+							env.CLICKHOUSE_PROVIDER === "tinybird"
+								? ("tinybird-gateway" as const)
+								: ("clickhouse" as const)
+						return {
+							config: {
+								kind,
+								url: clickhouseUrl.toString().replace(/\/$/, ""),
+								username: env.CLICKHOUSE_USER,
+								password: Option.match(env.CLICKHOUSE_PASSWORD, {
+									onNone: () =>
+										kind === "tinybird-gateway" ? Redacted.value(env.TINYBIRD_TOKEN) : "",
+									onSome: Redacted.value,
+								}),
+								database: env.CLICKHOUSE_DATABASE,
+							},
+							clientCacheKey: "read:managed",
+						}
+					}
+
+					yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
+					return {
+						config: {
+							kind: "tinybird" as const,
+							host: env.TINYBIRD_HOST,
+							token: Redacted.value(env.TINYBIRD_TOKEN),
+						},
+						clientCacheKey: "read:managed",
+					}
+				},
+			)
+
+			/**
+			 * The single routing decision: purpose → backend + credentials.
+			 *
+			 *   ingest → managed Tinybird Events API, always            (source: managed)
+			 *   read   → org BYO row? that org's ClickHouse             (source: org-byo)
+			 *            else env: tinybird-gateway|clickhouse|tinybird (source: managed)
+			 *   raw    → org BYO row? that org's ClickHouse             (source: org-byo)
+			 *            managed tinybird/gateway? org-scoped JWT       (source: org-jwt)
+			 *            managed vanilla CH? self-hosted mode only      (source: managed)
+			 *
+			 * Ingest notes (why writes NEVER follow the read routing):
+			 * - BILLING: this path bypasses the ingest gateway, where Autumn usage
+			 *   metering happens. Today's only `ingest` callers — demo seed, service-map
+			 *   rollups, alert checks — are derived/internal/demo data and deliberately
+			 *   unmetered. Net-new *customer* telemetry must go through the ingest
+			 *   gateway (as the Cloudflare edge-metrics poller does) so it is metered.
+			 * - When CLICKHOUSE_URL is set, the managed READ backend is a read-only
+			 *   query gateway that rejects inserts ("Only SELECT or DESCRIBE queries
+			 *   are supported. Got: InsertQuery"), and a per-org BYO override is a read
+			 *   concern. Tinybird is the only writable warehouse (TINYBIRD_HOST/TOKEN
+			 *   are required env). Routing writes anywhere else broke demo-seed
+			 *   onboarding.
+			 *
+			 * Raw-SQL isolation invariants (defense-in-depth, preserved verbatim):
+			 * BYO creds are already tenant-isolated; shared Tinybird gets a
+			 * datasource-scoped org JWT (works through both the SDK and the CH
+			 * gateway); a shared vanilla ClickHouse credential has no DB-enforced OrgId
+			 * scope, so raw SQL there is allowed only in single-org self-hosted mode.
+			 */
+			const resolveRouteEffect = Effect.fn("WarehouseQueryService.resolveRoute")(function* (
+				tenant: ExecutionTenant,
+				purpose: RoutePurpose,
+				label: string,
+			) {
+				yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+				yield* Effect.annotateCurrentSpan("warehouse.route", purpose)
+
+				if (purpose === "ingest") {
+					// Legacy attrs, dual-emitted until dashboards move to `warehouse.*`.
+					yield* Effect.annotateCurrentSpan("clientSource", "managed")
+					yield* Effect.annotateCurrentSpan("query.routing", "ingest")
+					yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
+					return {
+						source: "managed" as const,
+						config: {
+							kind: "tinybird" as const,
+							host: env.TINYBIRD_HOST,
+							token: Redacted.value(env.TINYBIRD_TOKEN),
+						},
+						clientCacheKey: "write:managed",
+					}
+				}
+
+				// A per-org BYO ClickHouse row (`org_clickhouse_settings`) overrides the
+				// managed upstream for that org's reads AND raw SQL (the credentials are
+				// already tenant-isolated).
+				const override = yield* orgClickHouseSettings.resolveRuntimeConfig(tenant.orgId)
+				if (Option.isSome(override)) {
+					yield* Effect.annotateCurrentSpan("clientSource", "org_override")
+					yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
+					return {
+						source: "org-byo" as const,
+						config: {
+							kind: "clickhouse" as const,
+							url: override.value.url,
+							username: override.value.user,
+							password: override.value.password,
+							database: override.value.database,
+						},
+						clientCacheKey: purpose === "raw" ? `raw:${tenant.orgId}` : `read:${tenant.orgId}`,
+					}
+				}
+
+				yield* Effect.annotateCurrentSpan("clientSource", "managed")
+				const managed = yield* resolveManagedConfig()
+				if (purpose === "read") return { source: "managed" as const, ...managed }
+
+				// Raw SQL on the shared warehouse needs tenant isolation. Shared Tinybird
+				// is isolated with a datasource-scoped JWT; the same token works through
+				// both the SDK and Tinybird's ClickHouse-compatible gateway.
+				const clientCacheKey = `raw:${tenant.orgId}`
+				if (managed.config.kind === "tinybird" || managed.config.kind === "tinybird-gateway") {
+					const jwt = yield* orgTokens.getOrgReadToken(tenant.orgId)
+					yield* Effect.annotateCurrentSpan("maple.tinybird.token.scope", "org_jwt")
+					return {
+						source: "org-jwt" as const,
+						config:
+							managed.config.kind === "tinybird"
+								? { ...managed.config, token: jwt }
+								: { ...managed.config, password: jwt },
+						clientCacheKey,
+					}
+				}
+
+				// A shared vanilla ClickHouse credential has no database-enforced OrgId
+				// scope. It is safe only in Maple's single-org self-hosted deployment mode.
+				if (env.MAPLE_AUTH_MODE.toLowerCase() !== "self_hosted") {
 					return yield* new WarehouseConfigError({
-						pipeName: "resolveManagedConfig",
-						message: "CLICKHOUSE_URL must not contain embedded credentials",
+						pipeName: label,
+						message:
+							"Raw SQL on managed vanilla ClickHouse is available only in single-org self-hosted mode",
 					})
 				}
-				yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
-				const kind =
-					env.CLICKHOUSE_PROVIDER === "tinybird"
-						? ("tinybird-gateway" as const)
-						: ("clickhouse" as const)
-				return {
-					config: {
-						kind,
-						url: clickhouseUrl.toString().replace(/\/$/, ""),
-						username: env.CLICKHOUSE_USER,
-						password: Option.match(env.CLICKHOUSE_PASSWORD, {
-							onNone: () =>
-								kind === "tinybird-gateway" ? Redacted.value(env.TINYBIRD_TOKEN) : "",
-							onSome: Redacted.value,
-						}),
-						database: env.CLICKHOUSE_DATABASE,
-					},
-					clientCacheKey: "read:managed",
-				}
+				return { source: "managed" as const, config: managed.config, clientCacheKey }
+			})
+
+			function resolveRoute(
+				tenant: ExecutionTenant,
+				purpose: "read",
+				label: string,
+			): Effect.Effect<WarehouseRoute, WarehouseTrustedRouteError>
+			function resolveRoute(
+				tenant: ExecutionTenant,
+				purpose: "ingest",
+				label: string,
+			): Effect.Effect<WarehouseRoute>
+			function resolveRoute(
+				tenant: ExecutionTenant,
+				purpose: "read" | "ingest",
+				label: string,
+			): Effect.Effect<WarehouseRoute, WarehouseTrustedRouteError>
+			function resolveRoute(
+				tenant: ExecutionTenant,
+				purpose: "raw",
+				label: string,
+			): Effect.Effect<WarehouseRoute, WarehouseRawRouteError>
+			function resolveRoute(
+				tenant: ExecutionTenant,
+				purpose: RoutePurpose,
+				label: string,
+			): Effect.Effect<WarehouseRoute, WarehouseRawRouteError>
+			function resolveRoute(
+				tenant: ExecutionTenant,
+				purpose: RoutePurpose,
+				label: string,
+			): Effect.Effect<WarehouseRoute, WarehouseRawRouteError> {
+				return resolveRouteEffect(tenant, purpose, label)
 			}
 
-			yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
-			return {
-				config: {
-					kind: "tinybird" as const,
-					host: env.TINYBIRD_HOST,
-					token: Redacted.value(env.TINYBIRD_TOKEN),
-				},
-				clientCacheKey: "read:managed",
-			}
-		})
+			// Credential-rotation self-heal. `resolveRuntimeConfig` answers from a
+			// stale-tolerant memo, so a rotated BYO ClickHouse password keeps resolving
+			// to the retired credential until the entry ages out; the executor calls
+			// this on `WarehouseAuthError` and retries once. The boolean it returns is
+			// the retry gate — `false` for managed orgs, where re-resolving would
+			// produce the same shared credential that just failed.
+			const invalidateRoute: NonNullable<WarehouseExecutorDeps["invalidateRoute"]> = (tenant) =>
+				orgClickHouseSettings.invalidateRuntimeConfig(tenant.orgId)
 
-		/**
-		 * The single routing decision: purpose → backend + credentials.
-		 *
-		 *   ingest → managed Tinybird Events API, always            (source: managed)
-		 *   read   → org BYO row? that org's ClickHouse             (source: org-byo)
-		 *            else env: tinybird-gateway|clickhouse|tinybird (source: managed)
-		 *   raw    → org BYO row? that org's ClickHouse             (source: org-byo)
-		 *            managed tinybird/gateway? org-scoped JWT       (source: org-jwt)
-		 *            managed vanilla CH? self-hosted mode only      (source: managed)
-		 *
-		 * Ingest notes (why writes NEVER follow the read routing):
-		 * - BILLING: this path bypasses the ingest gateway, where Autumn usage
-		 *   metering happens. Today's only `ingest` callers — demo seed, service-map
-		 *   rollups, alert checks — are derived/internal/demo data and deliberately
-		 *   unmetered. Net-new *customer* telemetry must go through the ingest
-		 *   gateway (as the Cloudflare edge-metrics poller does) so it is metered.
-		 * - When CLICKHOUSE_URL is set, the managed READ backend is a read-only
-		 *   query gateway that rejects inserts ("Only SELECT or DESCRIBE queries
-		 *   are supported. Got: InsertQuery"), and a per-org BYO override is a read
-		 *   concern. Tinybird is the only writable warehouse (TINYBIRD_HOST/TOKEN
-		 *   are required env). Routing writes anywhere else broke demo-seed
-		 *   onboarding.
-		 *
-		 * Raw-SQL isolation invariants (defense-in-depth, preserved verbatim):
-		 * BYO creds are already tenant-isolated; shared Tinybird gets a
-		 * datasource-scoped org JWT (works through both the SDK and the CH
-		 * gateway); a shared vanilla ClickHouse credential has no DB-enforced OrgId
-		 * scope, so raw SQL there is allowed only in single-org self-hosted mode.
-		 */
-		const resolveRouteEffect = Effect.fn("WarehouseQueryService.resolveRoute")(function* (
-			tenant: ExecutionTenant,
-			purpose: RoutePurpose,
-			label: string,
-		) {
-			yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
-			yield* Effect.annotateCurrentSpan("warehouse.route", purpose)
-
-			if (purpose === "ingest") {
-				// Legacy attrs, dual-emitted until dashboards move to `warehouse.*`.
-				yield* Effect.annotateCurrentSpan("clientSource", "managed")
-				yield* Effect.annotateCurrentSpan("query.routing", "ingest")
-				yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
-				return {
-					source: "managed" as const,
-					config: {
-						kind: "tinybird" as const,
-						host: env.TINYBIRD_HOST,
-						token: Redacted.value(env.TINYBIRD_TOKEN),
-					},
-					clientCacheKey: "write:managed",
-				}
-			}
-
-			// A per-org BYO ClickHouse row (`org_clickhouse_settings`) overrides the
-			// managed upstream for that org's reads AND raw SQL (the credentials are
-			// already tenant-isolated).
-			const override = yield* orgClickHouseSettings.resolveRuntimeConfig(tenant.orgId)
-			if (Option.isSome(override)) {
-				yield* Effect.annotateCurrentSpan("clientSource", "org_override")
-				yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
-				return {
-					source: "org-byo" as const,
-					config: {
-						kind: "clickhouse" as const,
-						url: override.value.url,
-						username: override.value.user,
-						password: override.value.password,
-						database: override.value.database,
-					},
-					clientCacheKey: purpose === "raw" ? `raw:${tenant.orgId}` : `read:${tenant.orgId}`,
-				}
-			}
-
-			yield* Effect.annotateCurrentSpan("clientSource", "managed")
-			const managed = yield* resolveManagedConfig()
-			if (purpose === "read") return { source: "managed" as const, ...managed }
-
-			// Raw SQL on the shared warehouse needs tenant isolation. Shared Tinybird
-			// is isolated with a datasource-scoped JWT; the same token works through
-			// both the SDK and Tinybird's ClickHouse-compatible gateway.
-			const clientCacheKey = `raw:${tenant.orgId}`
-			if (managed.config.kind === "tinybird" || managed.config.kind === "tinybird-gateway") {
-				const jwt = yield* orgTokens.getOrgReadToken(tenant.orgId)
-				yield* Effect.annotateCurrentSpan("maple.tinybird.token.scope", "org_jwt")
-				return {
-					source: "org-jwt" as const,
-					config:
-						managed.config.kind === "tinybird"
-							? { ...managed.config, token: jwt }
-							: { ...managed.config, password: jwt },
-					clientCacheKey,
-				}
-			}
-
-			// A shared vanilla ClickHouse credential has no database-enforced OrgId
-			// scope. It is safe only in Maple's single-org self-hosted deployment mode.
-			if (env.MAPLE_AUTH_MODE.toLowerCase() !== "self_hosted") {
-				return yield* new WarehouseConfigError({
-					pipeName: label,
-					message:
-						"Raw SQL on managed vanilla ClickHouse is available only in single-org self-hosted mode",
-				})
-			}
-			return { source: "managed" as const, config: managed.config, clientCacheKey }
-		})
-
-		function resolveRoute(
-			tenant: ExecutionTenant,
-			purpose: "read",
-			label: string,
-		): Effect.Effect<WarehouseRoute, WarehouseTrustedRouteError>
-		function resolveRoute(
-			tenant: ExecutionTenant,
-			purpose: "ingest",
-			label: string,
-		): Effect.Effect<WarehouseRoute>
-		function resolveRoute(
-			tenant: ExecutionTenant,
-			purpose: "read" | "ingest",
-			label: string,
-		): Effect.Effect<WarehouseRoute, WarehouseTrustedRouteError>
-		function resolveRoute(
-			tenant: ExecutionTenant,
-			purpose: "raw",
-			label: string,
-		): Effect.Effect<WarehouseRoute, WarehouseRawRouteError>
-		function resolveRoute(
-			tenant: ExecutionTenant,
-			purpose: RoutePurpose,
-			label: string,
-		): Effect.Effect<WarehouseRoute, WarehouseRawRouteError>
-		function resolveRoute(
-			tenant: ExecutionTenant,
-			purpose: RoutePurpose,
-			label: string,
-		): Effect.Effect<WarehouseRoute, WarehouseRawRouteError> {
-			return resolveRouteEffect(tenant, purpose, label)
-		}
-
-		// Credential-rotation self-heal. `resolveRuntimeConfig` answers from a
-		// stale-tolerant memo, so a rotated BYO ClickHouse password keeps resolving
-		// to the retired credential until the entry ages out; the executor calls
-		// this on `WarehouseAuthError` and retries once. The boolean it returns is
-		// the retry gate — `false` for managed orgs, where re-resolving would
-		// produce the same shared credential that just failed.
-		const invalidateRoute: NonNullable<WarehouseExecutorDeps["invalidateRoute"]> = (tenant) =>
-			orgClickHouseSettings.invalidateRuntimeConfig(tenant.orgId)
-
-		return makeWarehouseExecutor({
-			createClient: (config) => sqlClientFactory(config),
-			resolveRoute,
-			invalidateRoute,
-		})
-	}),
-}) {
+			return makeWarehouseExecutor({
+				createClient: (config) => sqlClientFactory(config),
+				resolveRoute,
+				invalidateRoute,
+			})
+		}),
+	},
+) {
 	static readonly layer = Layer.effect(this, this.make)
 
 	static readonly query = (

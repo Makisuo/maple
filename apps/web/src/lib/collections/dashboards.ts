@@ -65,8 +65,8 @@ const widenSections = (sections: DashboardDocument["sections"] | undefined): Das
 	sections?.map((section) => ({
 		id: section.id,
 		title: section.title,
-		...(section.collapsed !== undefined ? { collapsed: section.collapsed } : {}),
-		...(section.collapsible !== undefined ? { collapsible: section.collapsible } : {}),
+		...(section.collapsed !== undefined ? { collapsed: section.collapsed } : undefined),
+		...(section.collapsible !== undefined ? { collapsible: section.collapsible } : undefined),
 		tabs: section.tabs.map((tab) => ({ id: tab.id, title: tab.title })),
 	}))
 
@@ -114,7 +114,7 @@ export const rowToDashboard = (row: DashboardRow): Dashboard | null => {
 export const v2DashboardToDashboard = (value: V2Dashboard): Dashboard => ({
 	id: value.id,
 	name: value.name,
-	...(value.description !== null ? { description: value.description } : {}),
+	...(value.description !== null ? { description: value.description } : undefined),
 	tags: [...value.tags],
 	timeRange: value.timeRange,
 	widgets: [...value.widgets] as Dashboard["widgets"],
@@ -122,7 +122,7 @@ export const v2DashboardToDashboard = (value: V2Dashboard): Dashboard => ({
 	variables: [...value.variables] as Dashboard["variables"],
 	...(value.refreshIntervalSeconds !== null
 		? { refreshIntervalSeconds: value.refreshIntervalSeconds }
-		: {}),
+		: undefined),
 	createdAt: value.createdAt,
 	updatedAt: value.updatedAt,
 })

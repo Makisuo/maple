@@ -35,8 +35,8 @@ const jsonLd = {
     "@type": "CollectionPage",
     name: "Maple changelog",
     description: pageDescription,
-    ...(canonicalUrl ? { url: canonicalUrl } : {}),
-    ...(latest ? { dateModified: isoDate(latest.data.date) } : {}),
+    ...((canonicalUrl) ? ({ url: canonicalUrl }) : undefined),
+    ...((latest) ? ({ dateModified: isoDate(latest.data.date) }) : undefined),
     publisher: {
         "@type": "Organization",
         name: "Maple",
@@ -47,7 +47,7 @@ const jsonLd = {
         headline: r.data.title,
         description: r.data.description,
         datePublished: isoDate(r.data.date),
-        ...(Astro.site ? { url: new URL(`/changelog/${r.id}`, Astro.site).toString() } : {}),
+        ...((Astro.site) ? ({ url: new URL(`/changelog/${r.id}`, Astro.site).toString() }) : undefined),
     })),
 };
 

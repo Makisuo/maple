@@ -2,12 +2,9 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { IngestKeyEncryptionError, IngestKeyPersistenceError } from "../ingest-keys"
 import { AuthorizationV2 } from "./auth"
-import { Timestamp } from "./envelopes"
+import { wireExample, Timestamp } from "./envelopes"
 import { V2InsufficientPermissions } from "./errors"
 import { publicErrors } from "./public-error"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 const ingestKeysExample = {
 	object: "ingest_keys",

@@ -1,10 +1,11 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { describe, expect, it } from "@effect/vitest"
 import { ChatApiGroup, CurrentTenant, V1SchemaErrors, V1UnexpectedErrors } from "@maple/domain/http"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
-import { McpToolExecutor, type McpToolExecutorShape } from "@/mcp/dispatcher"
+import { McpToolExecutor, type McpToolExecutorApi } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { HttpChatLive } from "./chat.http"
 import { V1ErrorBoundaryLive } from "./error-boundary"
@@ -28,7 +29,7 @@ const AuthorizationStubLayer = Layer.succeed(
 	}),
 )
 
-const makeHarness = (executor: McpToolExecutorShape) => {
+const makeHarness = (executor: McpToolExecutorApi) => {
 	const routes = HttpApiBuilder.layer(ChatOnlyApi).pipe(
 		Layer.provide(HttpChatLive),
 		Layer.provide(V1ErrorBoundaryLive),

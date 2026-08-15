@@ -96,7 +96,7 @@ const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 
 const toV2RuleMutationResponse = (doc: AlertRuleDocument): V2AlertRuleMutationResponse => ({
 	...toV2Rule(doc),
-	...(doc.txid !== undefined ? { txid: doc.txid } : {}),
+	...(doc.txid !== undefined ? { txid: doc.txid } : undefined),
 })
 
 const toV2Check = (check: AlertCheckDocument): V2AlertCheck => ({
@@ -153,36 +153,52 @@ const toUpsertRequest = (
 			threshold: params.threshold,
 			windowMinutes: params.window_minutes,
 			destinationIds: params.destination_ids,
-			...(params.notes !== undefined ? { notes: params.notes } : {}),
+			...(params.notes !== undefined ? { notes: params.notes } : undefined),
 			...(params.notification_template !== undefined
-				? { notificationTemplate: params.notification_template }
-				: {}),
-			...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
-			...(params.service_names !== undefined ? { serviceNames: params.service_names } : {}),
+				? {
+						notificationTemplate: params.notification_template,
+					}
+				: undefined),
+			...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
+			...(params.service_names !== undefined ? { serviceNames: params.service_names } : undefined),
 			...(params.exclude_service_names !== undefined
-				? { excludeServiceNames: params.exclude_service_names }
-				: {}),
-			...(params.environments !== undefined ? { environments: params.environments } : {}),
-			...(params.tags !== undefined ? { tags: params.tags } : {}),
-			...(params.group_by !== undefined ? { groupBy: params.group_by } : {}),
-			...(params.threshold_upper !== undefined ? { thresholdUpper: params.threshold_upper } : {}),
+				? {
+						excludeServiceNames: params.exclude_service_names,
+					}
+				: undefined),
+			...(params.environments !== undefined ? { environments: params.environments } : undefined),
+			...(params.tags !== undefined ? { tags: params.tags } : undefined),
+			...(params.group_by !== undefined ? { groupBy: params.group_by } : undefined),
+			...(params.threshold_upper !== undefined
+				? { thresholdUpper: params.threshold_upper }
+				: undefined),
 			...(params.minimum_sample_count !== undefined
-				? { minimumSampleCount: params.minimum_sample_count }
-				: {}),
+				? {
+						minimumSampleCount: params.minimum_sample_count,
+					}
+				: undefined),
 			...(params.consecutive_breaches_required !== undefined
-				? { consecutiveBreachesRequired: params.consecutive_breaches_required }
-				: {}),
+				? {
+						consecutiveBreachesRequired: params.consecutive_breaches_required,
+					}
+				: undefined),
 			...(params.consecutive_healthy_required !== undefined
-				? { consecutiveHealthyRequired: params.consecutive_healthy_required }
-				: {}),
+				? {
+						consecutiveHealthyRequired: params.consecutive_healthy_required,
+					}
+				: undefined),
 			...(params.renotify_interval_minutes !== undefined
-				? { renotifyIntervalMinutes: params.renotify_interval_minutes }
-				: {}),
+				? {
+						renotifyIntervalMinutes: params.renotify_interval_minutes,
+					}
+				: undefined),
 			...(params.apdex_threshold_ms !== undefined
 				? { apdexThresholdMs: params.apdex_threshold_ms }
-				: {}),
-			...(params.raw_query_sql !== undefined ? { rawQuerySql: params.raw_query_sql } : {}),
-			...(params.raw_query_reducer !== undefined ? { rawQueryReducer: params.raw_query_reducer } : {}),
+				: undefined),
+			...(params.raw_query_sql !== undefined ? { rawQuerySql: params.raw_query_sql } : undefined),
+			...(params.raw_query_reducer !== undefined
+				? { rawQueryReducer: params.raw_query_reducer }
+				: undefined),
 			...draftField,
 		})
 	})
@@ -272,7 +288,7 @@ const toV2PreviewResult = (preview: AlertRulePreviewResponse): V2AlertRulePrevie
 			value: point.value,
 			sample_count: point.sampleCount,
 			status: point.status,
-			...(point.provisional !== undefined ? { provisional: point.provisional } : {}),
+			...(point.provisional !== undefined ? { provisional: point.provisional } : undefined),
 		})),
 	})),
 	would_fire: preview.wouldFire.map((span) => ({
@@ -357,7 +373,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 						id: deleted.id,
 						object: "alert_rule" as const,
 						deleted: true as const,
-						...(deleted.txid !== undefined ? { txid: deleted.txid } : {}),
+						...(deleted.txid !== undefined ? { txid: deleted.txid } : undefined),
 					}
 				}),
 			)
@@ -422,13 +438,16 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const cursor = yield* decodeChecksCursor(query.cursor)
 					const limit = query.limit ?? 20
 					const response = yield* readModels.listRuleChecks(tenant.orgId, params.id, {
-						...(query.group_key !== undefined ? { groupKey: query.group_key } : {}),
-						...(query.status !== undefined ? { status: query.status } : {}),
-						...(query.since !== undefined ? { since: query.since } : {}),
-						...(query.until !== undefined ? { until: query.until } : {}),
+						...(query.group_key !== undefined ? { groupKey: query.group_key } : undefined),
+						...(query.status !== undefined ? { status: query.status } : undefined),
+						...(query.since !== undefined ? { since: query.since } : undefined),
+						...(query.until !== undefined ? { until: query.until } : undefined),
 						...(cursor !== undefined
-							? { beforeTimestamp: cursor[0], beforeGroupKey: cursor[1] }
-							: {}),
+							? {
+									beforeTimestamp: cursor[0],
+									beforeGroupKey: cursor[1],
+								}
+							: undefined),
 						limit: limit + 1,
 					})
 

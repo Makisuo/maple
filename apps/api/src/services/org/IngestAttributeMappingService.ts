@@ -21,7 +21,7 @@ import { Database, DatabaseError } from "@/platform/DatabaseLive"
 
 type MappingRow = typeof orgIngestAttributeMappings.$inferSelect
 
-export interface IngestAttributeMappingServiceShape {
+export interface IngestAttributeMappingServiceApi {
 	readonly list: (
 		orgId: OrgId,
 	) => Effect.Effect<IngestAttributeMappingsListResponse, IngestAttributeMappingPersistenceError>
@@ -109,7 +109,7 @@ const validateRule = Effect.fnUntraced(function* (rule: {
 
 export class IngestAttributeMappingService extends Context.Service<
 	IngestAttributeMappingService,
-	IngestAttributeMappingServiceShape
+	IngestAttributeMappingServiceApi
 >()("@maple/api/services/IngestAttributeMappingService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -243,7 +243,10 @@ export class IngestAttributeMappingService extends Context.Service<
 			yield* validateRule(merged)
 
 			const now = yield* Clock.currentTimeMillis
-			const updates: Record<string, unknown> = { updatedAt: new Date(now) }
+			const updates: Record<string, unknown> = { updatedAt: new Date(now) } satisfies Record<
+				string,
+				unknown
+			>
 			if (request.name !== undefined) updates.name = request.name.trim()
 			if (request.sourceContext !== undefined) updates.sourceContext = request.sourceContext
 			if (request.sourceKey !== undefined) updates.sourceKey = request.sourceKey.trim()
@@ -323,7 +326,7 @@ export class IngestAttributeMappingService extends Context.Service<
 			create,
 			update,
 			delete: remove,
-		} satisfies IngestAttributeMappingServiceShape
+		} satisfies IngestAttributeMappingServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

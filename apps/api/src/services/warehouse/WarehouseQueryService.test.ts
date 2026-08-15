@@ -1,3 +1,5 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import {
@@ -20,7 +22,7 @@ import { makeWarehouseExecutor, type ResolvedWarehouseConfig } from "@maple/quer
 import { __testables, WarehouseQueryService } from "./WarehouseQueryService"
 import {
 	OrgClickHouseSettingsService,
-	type OrgClickHouseSettingsServiceShape,
+	type OrgClickHouseSettingsServiceApi,
 } from "@/services/org/OrgClickHouseSettingsService"
 import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgTokenService"
 import type { TenantContext } from "@/services/auth/AuthService"
@@ -45,7 +47,7 @@ const makeConfig = (extra: Record<string, string> = {}, includeTinybirdSigning =
 						TINYBIRD_SIGNING_KEY: "test-signing-key",
 						TINYBIRD_WORKSPACE_ID: "test-workspace",
 					}
-				: {}),
+				: undefined),
 			MAPLE_AUTH_MODE: "self_hosted",
 			MAPLE_ROOT_PASSWORD: "test-root-password",
 			MAPLE_DEFAULT_ORG_ID: "default",
@@ -236,7 +238,7 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 					}),
 				),
 			invalidateRuntimeConfig: () => Effect.succeed(false),
-		} as unknown as OrgClickHouseSettingsServiceShape)
+		} as OrgClickHouseSettingsServiceApi)
 		const layer = WarehouseQueryService.layer.pipe(
 			Layer.provide(Layer.mergeAll(envLive, tokenLive, orgSettingsLive)),
 		)
@@ -276,7 +278,7 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 				const orgSettingsLive = Layer.succeed(OrgClickHouseSettingsService, {
 					resolveRuntimeConfig: () => Effect.fail(source),
 					invalidateRuntimeConfig: () => Effect.succeed(false),
-				} as unknown as OrgClickHouseSettingsServiceShape)
+				} as OrgClickHouseSettingsServiceApi)
 				const layer = WarehouseQueryService.layer.pipe(
 					Layer.provide(Layer.mergeAll(envLive, tokenLive, orgSettingsLive)),
 				)

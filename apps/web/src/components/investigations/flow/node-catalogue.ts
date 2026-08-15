@@ -279,8 +279,8 @@ const edgeCell = (
 		source,
 		target,
 		kind: edge.kind,
-		...(edge.label ? { label: edge.label } : {}),
-		...(edge.live ? { live: true } : {}),
+		...(edge.label ? { label: edge.label } : undefined),
+		...(edge.live ? { live: true } : undefined),
 	})
 }
 

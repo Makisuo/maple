@@ -465,7 +465,7 @@ function makeManySeries(seriesCount: number, points = 14, namePrefix = "service"
 	return Array.from({ length: points }, (_, p) => {
 		const row: Record<string, unknown> = {
 			bucket: new Date(base + p * 3_600_000).toISOString(),
-		}
+		} satisfies Record<string, unknown>
 		for (let s = 0; s < seriesCount; s++) {
 			const phase = (s * 0.7) % (Math.PI * 2)
 			const amp = 20 + (s % 7) * 8
@@ -524,7 +524,7 @@ const sparseRateSeries: Record<string, unknown>[] = Array.from({ length: 24 }, (
 		"demo-api": 0,
 		"demo-frontend": 0,
 		"demo-worker": 0,
-	}
+	} satisfies Record<string, unknown>
 	if (i === 4) row["demo-api"] = 0.05
 	if (i === 9) row["demo-frontend"] = 0.04
 	if (i === 10) row["demo-frontend"] = 0.07

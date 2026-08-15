@@ -1,4 +1,4 @@
-import type { QueryResultShape, QuerySet } from "@maple/query-model"
+import type { QueryResultContract, QuerySet } from "@maple/query-model"
 import type { RawSqlDataSource } from "./access"
 import type { WidgetDataSourceTransformV2 } from "./shared/transform"
 import type {
@@ -30,7 +30,7 @@ import type {
 type WidgetDataSourceTransform = typeof WidgetDataSourceTransformV2.Type
 
 export interface QueryDataSourceInput extends QuerySet {
-	readonly resultShape: QueryResultShape
+	readonly resultShape: QueryResultContract
 	readonly transform?: WidgetDataSourceTransform
 	/**
 	 * Per-shape request shaping: how many rows to fetch and which columns.
@@ -58,7 +58,7 @@ export interface QueryDataSourceInput extends QuerySet {
  * return type. That is what lets the web app's chart picker narrow on the shape
  * it just constructed without a cast.
  */
-export const makeQueryDataSource = <S extends QueryResultShape>(
+export const makeQueryDataSource = <S extends QueryResultContract>(
 	input: QueryDataSourceInput & { readonly resultShape: S },
 ): typeof QueryWidgetDataSource.Type & { readonly resultShape: S } => ({
 	kind: "query",
@@ -69,12 +69,12 @@ export const makeQueryDataSource = <S extends QueryResultShape>(
 	// widget that never had formulas indistinguishable from one that lost them.
 	// Mandatory under `optionalKey`, where a present `undefined` is a decode error
 	// — which is most of why these constructors still earn their place in v3.
-	...(input.formulas === undefined ? {} : { formulas: input.formulas }),
-	...(input.comparison === undefined ? {} : { comparison: input.comparison }),
-	...(input.defaultLimit === undefined ? {} : { defaultLimit: input.defaultLimit }),
-	...(input.limit === undefined ? {} : { limit: input.limit }),
-	...(input.columns === undefined ? {} : { columns: input.columns }),
-	...(input.transform === undefined ? {} : { transform: input.transform }),
+	...(!(input.formulas === undefined) ? { formulas: input.formulas } : undefined),
+	...(!(input.comparison === undefined) ? { comparison: input.comparison } : undefined),
+	...(!(input.defaultLimit === undefined) ? { defaultLimit: input.defaultLimit } : undefined),
+	...(!(input.limit === undefined) ? { limit: input.limit } : undefined),
+	...(!(input.columns === undefined) ? { columns: input.columns } : undefined),
+	...(!(input.transform === undefined) ? { transform: input.transform } : undefined),
 })
 
 export interface RawSqlDataSourceInput extends RawSqlDataSource {
@@ -85,9 +85,11 @@ export interface RawSqlDataSourceInput extends RawSqlDataSource {
 export const makeRawSqlDataSource = (input: RawSqlDataSourceInput): typeof RawSqlWidgetDataSource.Type => ({
 	kind: "raw_sql",
 	sql: input.sql,
-	...(input.displayType === undefined ? {} : { displayType: input.displayType }),
-	...(input.granularitySeconds === undefined ? {} : { granularitySeconds: input.granularitySeconds }),
-	...(input.transform === undefined ? {} : { transform: input.transform }),
+	...(!(input.displayType === undefined) ? { displayType: input.displayType } : undefined),
+	...(!(input.granularitySeconds === undefined)
+		? { granularitySeconds: input.granularitySeconds }
+		: undefined),
+	...(!(input.transform === undefined) ? { transform: input.transform } : undefined),
 })
 
 /**
@@ -109,8 +111,8 @@ export const makeRouteDataSource = <E extends string>(
 ): typeof RouteWidgetDataSource.Type & { readonly endpoint: E } => ({
 	kind: "route",
 	endpoint,
-	...(params === undefined ? {} : { params }),
-	...(transform === undefined ? {} : { transform }),
+	...(!(params === undefined) ? { params } : undefined),
+	...(!(transform === undefined) ? { transform } : undefined),
 })
 
 /**
@@ -124,5 +126,5 @@ export const makeStaticDataSource = (
 	transform?: WidgetDataSourceTransform,
 ): typeof StaticWidgetDataSource.Type => ({
 	kind: "static",
-	...(transform === undefined ? {} : { transform }),
+	...(!(transform === undefined) ? { transform } : undefined),
 })

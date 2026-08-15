@@ -64,7 +64,7 @@ export const tableWidgetType: WidgetTypeDefinition = {
 			return makeQueryDataSource({
 				resultShape: "breakdown",
 				queries: visibleQueries,
-				...(limit ? { transform: { limit } } : {}),
+				...(limit ? { transform: { limit } } : undefined),
 			})
 		}
 

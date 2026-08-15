@@ -42,7 +42,7 @@ const PRESET_SIGNALS: Record<string, SignalDisplay> = {
 	p99_latency: { label: "P99 Latency", unit: "ms" },
 	apdex: { label: "Apdex", unit: "apdex" },
 	throughput: { label: "Throughput", unit: "rpm" },
-}
+} satisfies Record<string, SignalDisplay>
 
 /**
  * `p95_duration` → `p95(duration)`. Reuses the query builder's own option labels

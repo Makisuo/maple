@@ -68,7 +68,7 @@ function pickBucketColumn(columns: ReadonlyArray<string>, firstRow: Record<strin
 	return null
 }
 
-function reshapeForLineChart(
+function toLineChartRows(
 	rows: ReadonlyArray<Record<string, unknown>>,
 ): Array<Record<string, string | number>> {
 	if (rows.length === 0) return []
@@ -87,7 +87,7 @@ function reshapeForLineChart(
 			bucket: String(
 				row[bucketCol] instanceof Date ? (row[bucketCol] as Date).toISOString() : row[bucketCol],
 			),
-		}
+		} satisfies Record<string, string | number>
 		for (const col of seriesCols) {
 			const value = row[col]
 			const num = typeof value === "number" ? value : Number(value)
@@ -123,14 +123,14 @@ export const getRawSqlChart = Effect.fn("QueryEngine.getRawSqlChart")(function* 
 
 	const rows = result.data as ReadonlyArray<Record<string, unknown>>
 
-	const shaped = TIME_SERIES_DISPLAY_TYPES.includes(
+	const chartRows = TIME_SERIES_DISPLAY_TYPES.includes(
 		input.displayType as (typeof TIME_SERIES_DISPLAY_TYPES)[number],
 	)
-		? reshapeForLineChart(rows)
+		? toLineChartRows(rows)
 		: (rows as Array<Record<string, unknown>>)
 
 	return {
-		data: shaped,
+		data: chartRows,
 		meta: {
 			rowCount: result.meta.rowCount,
 			columns: result.meta.columns,

@@ -188,7 +188,7 @@ export const STATUS_META: Record<ZoneStatusKind, { label: string; order: number;
 	"no-data": { label: "No data", order: 2, dot: "bg-warning" },
 	paused: { label: "Paused", order: 3, dot: "bg-muted-foreground/40" },
 	disabled: { label: "Disabled", order: 4, dot: "bg-muted-foreground/40" },
-}
+} satisfies Record<ZoneStatusKind, { label: string; order: number; dot: string }>
 
 const CHIP_ORDER: ReadonlyArray<ZoneStatusKind> = ["live", "issue", "no-data", "paused", "disabled"]
 
@@ -424,7 +424,7 @@ export function CloudflareZoneBoard({
 			"no-data": 0,
 			paused: 0,
 			disabled: 0,
-		}
+		} satisfies Record<ZoneStatusKind, number>
 		for (const zone of decorated) tally[zone.status.kind] += 1
 		return tally
 	}, [decorated])

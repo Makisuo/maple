@@ -1,3 +1,5 @@
+import * as Schema from "effect/Schema"
+
 /**
  * A persistent per-browser visitor id.
  *
@@ -57,6 +59,10 @@ interface VisitorRecord {
 	/** epoch ms — when the id was minted, for the 400-day expiry. */
 	mintedAt: number
 }
+
+const VisitorRecordFromJson = Schema.fromJsonString(
+	Schema.Struct({ id: Schema.String, mintedAt: Schema.Number }),
+)
 
 let enabled = true
 /** Memoized so the hot path never re-reads storage. */
@@ -174,10 +180,9 @@ function cookieDomain(): string {
 function parseRecord(raw: string | undefined): VisitorRecord | undefined {
 	if (!raw) return undefined
 	try {
-		const parsed = JSON.parse(raw) as Partial<VisitorRecord>
-		if (typeof parsed.id !== "string" || typeof parsed.mintedAt !== "number") return undefined
+		const parsed = Schema.decodeUnknownSync(VisitorRecordFromJson)(raw)
 		if (Date.now() - parsed.mintedAt > MAX_AGE_MS) return undefined
-		return parsed as VisitorRecord
+		return parsed
 	} catch {
 		return undefined
 	}

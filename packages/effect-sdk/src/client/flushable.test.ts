@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { describe, it } from "@effect/vitest"
 import { resetConsentForTests, setConsent } from "@maple/browser-session"
 import { Effect, Metric } from "effect"

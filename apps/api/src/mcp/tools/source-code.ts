@@ -66,7 +66,7 @@ export function registerSourceCodeTools(server: McpToolRegistrar) {
 			const source = yield* VcsSourceService
 			const matches = yield* source
 				.searchCode(tenant.orgId, repository.trim(), query.trim(), {
-					...(path ? { path } : {}),
+					...(path ? { path } : undefined),
 					limit: requestedLimit,
 				})
 				.pipe(Effect.mapError(toSourceError("search_source_code")))

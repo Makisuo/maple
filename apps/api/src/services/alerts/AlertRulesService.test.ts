@@ -11,7 +11,7 @@ import { Effect, Layer, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { msToDate } from "@/platform/time"
 import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
-import { AlertRuntime, type AlertRuntimeShape } from "./AlertRuntime"
+import { AlertRuntime, type AlertRuntimeApi } from "./AlertRuntime"
 import { AlertRulesService } from "./AlertRulesService"
 
 // Compile-time guard: warehouse/query-engine, Env, delivery, scheduler, and
@@ -38,7 +38,7 @@ const createdDbs: TestDb[] = []
 
 afterEach(() => cleanupTestDbs(createdDbs))
 
-const runtime: AlertRuntimeShape = {
+const runtime: AlertRuntimeApi = {
 	now: Effect.succeed(NOW),
 	makeUuid: () => RULE,
 	fetch: globalThis.fetch,

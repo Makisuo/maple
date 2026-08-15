@@ -18,7 +18,7 @@ const message = (role: "user" | "assistant", text: string, toolCalls: unknown[] 
 		toolCalls,
 		createdAt: seq,
 		startSeq: seq,
-	}) as unknown as ChatMessage
+	}) as ChatMessage
 
 const textOf = (messages: ReadonlyArray<{ content: ReadonlyArray<unknown> }>) =>
 	messages.map((m) => m.content.map((part) => (part as { text?: string }).text ?? "").join(""))

@@ -79,14 +79,14 @@ export const Route = createRootRouteWithContext<{ auth: RouterAuthContext } & Ef
 		if (!context.auth?.isAuthenticated) {
 			throw redirect({
 				to: "/sign-in",
-				search: { redirect_url: redirectUrl } as Record<string, string>,
+				search: { redirect_url: redirectUrl } satisfies Record<string, string>,
 			})
 		}
 
 		if (!context.auth.orgId) {
 			throw redirect({
 				to: "/org-required",
-				search: { redirect_url: redirectUrl } as Record<string, string>,
+				search: { redirect_url: redirectUrl } satisfies Record<string, string>,
 			})
 		}
 	},

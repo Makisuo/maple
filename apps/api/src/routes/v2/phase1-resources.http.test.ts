@@ -44,7 +44,7 @@ import {
 import { MapleApiV2, encodePublicId } from "@maple/domain/http/v2"
 import { WarehouseResponseLimitError } from "@maple/query-engine/execution"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
-import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { Env } from "@/platform/Env"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
@@ -357,7 +357,7 @@ type InvestigationStartMode = "success" | "unavailable" | "restart_not_found"
 type IssueReadFailure = "none" | "persistence" | "warehouse_config_lookup" | "warehouse_config_decryption"
 
 const makeHarness = (
-	warehouseService: WarehouseQueryServiceShape = warehouseStub,
+	warehouseService: WarehouseQueryServiceApi = warehouseStub,
 	issueReadFailure: IssueReadFailure = "none",
 	investigationStartMode: InvestigationStartMode = "success",
 ) => {
@@ -578,8 +578,10 @@ const makeHarness = (
 			new Request(`http://maple.test${path}`, {
 				method,
 				headers: {
-					...(options.token !== undefined ? { authorization: `Bearer ${options.token}` } : {}),
-					...(options.body !== undefined ? { "content-type": "application/json" } : {}),
+					...(options.token !== undefined
+						? { authorization: `Bearer ${options.token}` }
+						: undefined),
+					...(options.body !== undefined ? { "content-type": "application/json" } : undefined),
 				},
 				body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
 			}),
@@ -1175,7 +1177,7 @@ describe("v2 session_replays over HTTP", () => {
 			netDurationMs: seq % 2 === 0 ? 0 : 12,
 			errorStack: "",
 		}))
-		const transcriptWarehouse: WarehouseQueryServiceShape = {
+		const transcriptWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (_tenant, compiled, options) => {
 				if (options?.context !== "v2SessionTranscript") {
@@ -1245,7 +1247,7 @@ describe("v2 session_replays over HTTP", () => {
 		}))
 
 		/** Serves rows honouring the ChunkSeq predicates + LIMIT/OFFSET in the SQL. */
-		const chunkWarehouse = (): WarehouseQueryServiceShape => {
+		const chunkWarehouse = (): WarehouseQueryServiceApi => {
 			const serve = (sql: string) => {
 				const from = Number(/ChunkSeq >= (\d+)/.exec(sql)?.[1] ?? 0)
 				const to = Number(/ChunkSeq <= (\d+)/.exec(sql)?.[1] ?? Number.MAX_SAFE_INTEGER)
@@ -1350,8 +1352,8 @@ describe("v2 session_replays over HTTP", () => {
 			// a bodyless 500 — hence the Number() coercion in both handlers.
 			const quotedRows = chunkRows.slice(0, 2).map((row) => ({
 				...row,
-				byteSize: String(row.byteSize) as unknown as number,
-				eventCount: String(row.eventCount) as unknown as number,
+				byteSize: String(row.byteSize) as number,
+				eventCount: String(row.eventCount) as number,
 			}))
 			const harness = makeHarness({
 				...warehouseStub,

@@ -1,3 +1,4 @@
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 // The capture modules install real DOM/global hooks; here we only need the

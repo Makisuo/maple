@@ -25,6 +25,7 @@ const decodeScrapeIntervalSecondsSync = Schema.decodeUnknownSync(ScrapeIntervalS
 const SCRAPER_SYSTEM_USER = Schema.decodeSync(UserId)("system-prometheus-scraper")
 const decodeScrapeResultsEffect = Schema.decodeUnknownEffect(ScrapeResultReportList)
 const decodeLabelsEffect = Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.String))
+const EMPTY_LABELS = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.String))({})
 
 const errorText = (message: string, status: number) =>
 	HttpServerResponse.text(message, {
@@ -39,7 +40,7 @@ export interface ScrapeTargetRowLike {
 	readonly serviceName: string | null
 	readonly url: string
 	readonly scrapeIntervalSeconds: number
-	readonly labelsJson: Record<string, string> | null
+	readonly labelsJson: unknown
 }
 
 export interface SubTargetOverride {
@@ -73,10 +74,8 @@ export const toInternalScrapeTarget = (
 ): Effect.Effect<Option.Option<InternalScrapeTarget>> =>
 	Effect.gen(function* () {
 		const ownLabels = row.labelsJson
-			? yield* decodeLabelsEffect(row.labelsJson).pipe(
-					Effect.orElseSucceed(() => ({}) as Record<string, string>),
-				)
-			: {}
+			? yield* decodeLabelsEffect(row.labelsJson).pipe(Effect.orElseSucceed(() => EMPTY_LABELS))
+			: EMPTY_LABELS
 		const labels = subTarget ? { ...subTarget.labels, ...ownLabels } : ownLabels
 		return yield* Effect.try({
 			try: () =>

@@ -46,7 +46,7 @@ const toV2Dashboard = (dashboard: DashboardDocument): V2Dashboard => ({
 
 const toV2DashboardMutation = (dashboard: DashboardDocument): V2DashboardMutation => ({
 	...toV2Dashboard(dashboard),
-	...(dashboard.txid !== undefined ? { txid: dashboard.txid } : {}),
+	...(dashboard.txid !== undefined ? { txid: dashboard.txid } : undefined),
 })
 
 const toV2Version = (version: {
@@ -108,18 +108,20 @@ const toPortable = (payload: V2DashboardCreateParams): PortableDashboardDocument
 		name: payload.name,
 		...(payload.description !== undefined && payload.description !== null
 			? { description: payload.description }
-			: {}),
-		...(payload.tags !== undefined ? { tags: payload.tags } : {}),
+			: undefined),
+		...(payload.tags !== undefined ? { tags: payload.tags } : undefined),
 		timeRange:
 			payload.timeRange === undefined
 				? { type: "relative", value: "12h" }
 				: toInternalTimeRange(payload.timeRange),
 		widgets: toInternalWidgets(payload.widgets ?? []),
-		...(payload.sections !== undefined ? { sections: payload.sections } : {}),
-		...(payload.variables !== undefined ? { variables: payload.variables } : {}),
+		...(payload.sections !== undefined ? { sections: payload.sections } : undefined),
+		...(payload.variables !== undefined ? { variables: payload.variables } : undefined),
 		...(payload.refreshIntervalSeconds !== undefined && payload.refreshIntervalSeconds !== null
-			? { refreshIntervalSeconds: payload.refreshIntervalSeconds }
-			: {}),
+			? {
+					refreshIntervalSeconds: payload.refreshIntervalSeconds,
+				}
+			: undefined),
 	})
 
 const applyUpdate = (
@@ -142,14 +144,14 @@ const applyUpdate = (
 	return new DashboardDocument({
 		id: current.id,
 		name: payload.name ?? current.name,
-		...(description !== undefined ? { description } : {}),
-		...(tags !== undefined ? { tags } : {}),
+		...(description !== undefined ? { description } : undefined),
+		...(tags !== undefined ? { tags } : undefined),
 		timeRange:
 			payload.timeRange === undefined ? current.timeRange : toInternalTimeRange(payload.timeRange),
 		widgets: payload.widgets ? toInternalWidgets(payload.widgets) : current.widgets,
-		...(sections !== undefined ? { sections } : {}),
-		...(variables !== undefined ? { variables } : {}),
-		...(refreshIntervalSeconds !== undefined ? { refreshIntervalSeconds } : {}),
+		...(sections !== undefined ? { sections } : undefined),
+		...(variables !== undefined ? { variables } : undefined),
+		...(refreshIntervalSeconds !== undefined ? { refreshIntervalSeconds } : undefined),
 		createdAt: current.createdAt,
 		updatedAt,
 	})
@@ -224,7 +226,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 							id: deleted.id,
 							object: "dashboard" as const,
 							deleted: true as const,
-							...(deleted.txid !== undefined ? { txid: deleted.txid } : {}),
+							...(deleted.txid !== undefined ? { txid: deleted.txid } : undefined),
 						}
 					}),
 				)
@@ -259,7 +261,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 						const tenant = yield* CurrentTenant.Context
 						const response = yield* persistence.listVersions(tenant.orgId, params.id, {
 							limit: query.limit ?? LIST_LIMIT_DEFAULT,
-							...(before !== undefined && before !== null ? { before } : {}),
+							...(before !== undefined && before !== null ? { before } : undefined),
 						})
 
 						const data = response.versions.map(toV2Version)
@@ -378,8 +380,10 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 
 						const portable = new PortableDashboardDocument({
 							name: payload.name ?? built.name,
-							...(built.description !== undefined ? { description: built.description } : {}),
-							...(built.tags !== undefined ? { tags: built.tags } : {}),
+							...(built.description !== undefined
+								? { description: built.description }
+								: undefined),
+							...(built.tags !== undefined ? { tags: built.tags } : undefined),
 							timeRange: built.timeRange,
 							widgets: built.widgets,
 						})

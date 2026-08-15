@@ -528,7 +528,7 @@ export type ServiceMapDbEdgesHourlyRow = InferRow<typeof serviceMapDbEdgesHourly
  * sample-rate corrected; raw `CallCount`/`ErrorCount` stay unweighted.
  * Populated by `service_map_db_query_shapes_hourly_mv`.
  */
-export const serviceMapDbQueryShapesHourly = defineDatasource("service_map_db_query_shapes_hourly", {
+export const serviceMapDbQuerySignaturesHourly = defineDatasource("service_map_db_query_shapes_hourly", {
 	description:
 		"Pre-aggregated hourly database query shapes (one row per service/db.system/query-shape) for the service map's database detail panel. Uses AggregatingMergeTree with a sample-weighted t-digest state for true p50/p95. Populated by materialized view.",
 	jsonPaths: false,
@@ -569,7 +569,7 @@ export const serviceMapDbQueryShapesHourly = defineDatasource("service_map_db_qu
 	}),
 })
 
-export type ServiceMapDbQueryShapesHourlyRow = InferRow<typeof serviceMapDbQueryShapesHourly>
+export type ServiceMapDbQuerySignaturesHourlyRow = InferRow<typeof serviceMapDbQuerySignaturesHourly>
 
 /**
  * Pre-aggregated hourly service-to-external-target edges for the service detail

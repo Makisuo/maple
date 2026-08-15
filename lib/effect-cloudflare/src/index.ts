@@ -33,7 +33,7 @@ export {
 export {
 	type DurableObjectId,
 	type AlarmInvocationInfo,
-	type DurableObjectShape,
+	type DurableObjectApi,
 	type DurableObjectStub,
 	type DurableObjectNamespaceHandle,
 	DurableObjectNamespace,

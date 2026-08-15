@@ -66,7 +66,7 @@ export function QueryBuilderBarChart({
 		// "Other" bucket so a high-cardinality group-by stays readable (bars,
 		// unlike lines, get illegible past a dozen stacked/grouped series).
 		const normalizedRows = source.map((row) => {
-			const next: Record<string, unknown> = { bucket: row.bucket }
+			const next: Record<string, unknown> = { bucket: row.bucket } satisfies Record<string, unknown>
 			for (const key of rawSeriesKeys) {
 				next[key] = asFiniteNumber(row[key])
 			}
@@ -84,7 +84,7 @@ export function QueryBuilderBarChart({
 		}))
 
 		const chartData = bucketedRows.map((row) => {
-			const next: Record<string, unknown> = { bucket: row.bucket }
+			const next: Record<string, unknown> = { bucket: row.bucket } satisfies Record<string, unknown>
 			for (const definition of seriesDefinitions) {
 				next[definition.chartKey] = asFiniteNumber(row[definition.rawKey])
 			}
@@ -109,7 +109,7 @@ export function QueryBuilderBarChart({
 	const displayData = React.useMemo(() => {
 		if (unit !== "requests_per_sec" || !bucketSeconds) return chartData
 		return chartData.map((row) => {
-			const next: Record<string, unknown> = { bucket: row.bucket }
+			const next: Record<string, unknown> = { bucket: row.bucket } satisfies Record<string, unknown>
 			for (const key of Object.keys(row)) {
 				if (key === "bucket") continue
 				const val = row[key]

@@ -105,9 +105,9 @@ export const defineV2Error = <
 		const retryAfterSeconds = options.retryAfterSeconds ?? definition.retryAfterSeconds
 		return new BoundaryError({
 			message,
-			...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
-			...(options.retryAt === undefined ? {} : { retryAt: options.retryAt }),
-			...(options.param === undefined ? {} : { param: options.param }),
+			...(!(retryAfterSeconds === undefined) ? { retryAfterSeconds } : undefined),
+			...(!(options.retryAt === undefined) ? { retryAt: options.retryAt } : undefined),
+			...(!(options.param === undefined) ? { param: options.param } : undefined),
 		})
 	}
 

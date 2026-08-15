@@ -21,7 +21,7 @@ const SAMPLE_VALUES: Record<string, number> = {
 	"stat-error-rate": 0.032,
 	"stat-total-errors": 1247,
 	"stat-total-services": 12,
-}
+} satisfies Record<string, number>
 
 function StatPresetPreview({ preset }: { preset: WidgetPresetDefinition }) {
 	const { display } = preset

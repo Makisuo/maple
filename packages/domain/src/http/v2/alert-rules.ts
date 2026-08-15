@@ -26,16 +26,13 @@ import {
 } from "../alerts"
 import { AlertDestinationPublicId } from "./alert-destinations"
 import { AuthorizationV2 } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
 import { publicError, publicErrors } from "./public-error"
 import { V2ManagedWarehouseErrors, V2QueryEngineRouteErrors, V2WarehouseErrors } from "./query-errors"
 import { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
 
 export { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 const NonEmptyString = Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed()))
 const PositiveInt = Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isGreaterThan(0)))

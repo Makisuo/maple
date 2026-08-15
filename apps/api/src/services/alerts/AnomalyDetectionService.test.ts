@@ -9,7 +9,7 @@ import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { AnomalyDetectionService } from "./AnomalyDetectionService"
 
@@ -40,7 +40,7 @@ const makeConfig = () =>
 		}),
 	)
 
-const warehouseStub: WarehouseQueryServiceShape = {
+const warehouseStub: WarehouseQueryServiceApi = {
 	query: () => Effect.die(new Error("unexpected pipe query")),
 	sqlQuery: () => Effect.die(new Error("unexpected raw SQL query")),
 	rawSqlQuery: () => Effect.die(new Error("unexpected raw SQL query")),

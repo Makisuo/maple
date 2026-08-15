@@ -24,7 +24,7 @@ const JWT_REFRESH_SKEW_SECONDS = 60
  */
 export const JWT_CACHE_MAX_ENTRIES = 512
 
-export interface TinybirdOrgTokenServiceShape {
+export interface TinybirdOrgTokenServiceApi {
 	/** A Tinybird read JWT scoped to `orgId` across every OrgId-bearing datasource. */
 	readonly getOrgReadToken: (
 		orgId: OrgId,
@@ -33,7 +33,7 @@ export interface TinybirdOrgTokenServiceShape {
 
 export class TinybirdOrgTokenService extends Context.Service<
 	TinybirdOrgTokenService,
-	TinybirdOrgTokenServiceShape
+	TinybirdOrgTokenServiceApi
 >()("@maple/api/services/TinybirdOrgTokenService", {
 	make: Effect.gen(function* () {
 		const env = yield* Env
@@ -113,7 +113,7 @@ export class TinybirdOrgTokenService extends Context.Service<
 			return token
 		})
 
-		return { getOrgReadToken } satisfies TinybirdOrgTokenServiceShape
+		return { getOrgReadToken } satisfies TinybirdOrgTokenServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

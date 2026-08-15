@@ -76,7 +76,7 @@ interface SinkHolder {
 }
 
 function holder(): Record<string, SinkHolder | undefined> {
-	return globalThis as unknown as Record<string, SinkHolder | undefined>
+	return globalThis as typeof globalThis & Record<string, SinkHolder | undefined>
 }
 
 /** The live sink, if one has been started. */
@@ -235,7 +235,7 @@ interface PendingState {
 }
 
 function pending(): PendingState {
-	const global = globalThis as unknown as Record<string, PendingState | undefined>
+	const global = globalThis as typeof globalThis & Record<string, PendingState | undefined>
 	let state = global[PENDING_KEY]
 	if (!state) {
 		state = { events: [], bytes: 0, warned: false }
@@ -314,6 +314,6 @@ export function resetSinkForTests(): void {
 	const existing = holder()[SINK_KEY]
 	if (existing) existing.sink.stop()
 	holder()[SINK_KEY] = undefined
-	const global = globalThis as unknown as Record<string, PendingState | undefined>
+	const global = globalThis as typeof globalThis & Record<string, PendingState | undefined>
 	global[PENDING_KEY] = undefined
 }

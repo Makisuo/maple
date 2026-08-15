@@ -18,7 +18,7 @@ const BUCKET_SECONDS: Record<string, number> = {
 	"12h": 600,
 	"24h": 900,
 	"7d": 3600,
-}
+} satisfies Record<string, number>
 
 /** Chart bucket width for a preset; falls back to 60s for anything unrecognized. */
 export function bucketSecondsFor(preset: string): number {

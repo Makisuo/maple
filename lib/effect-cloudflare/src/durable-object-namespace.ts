@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 // Simplified port of alchemy-effect's DurableObjectNamespace factory:
 //   https://github.com/alchemy-run/alchemy-effect/blob/main/packages/alchemy/src/Cloudflare/Workers/DurableObjectNamespace.ts
 //
@@ -43,7 +44,7 @@ import { WorkerEnvironment } from "./worker-environment.ts"
 export type DurableObjectId = cf.DurableObjectId
 export type AlarmInvocationInfo = cf.AlarmInvocationInfo
 
-export interface DurableObjectShape {
+export interface DurableObjectApi {
 	fetch?: HttpEffect<any>
 	alarm?: (alarmInfo?: AlarmInvocationInfo) => Effect.Effect<void, never, never>
 	webSocketMessage?: (socket: DurableWebSocket, message: string | ArrayBuffer) => Effect.Effect<void>
@@ -55,17 +56,17 @@ export interface DurableObjectShape {
 	) => Effect.Effect<void>
 }
 
-export type DurableObjectStub<Shape> = {
-	[K in keyof Shape]: Shape[K]
+export type DurableObjectStub<Definition> = {
+	[K in keyof Definition]: Definition[K]
 } & {
 	fetch(
 		request: HttpServerRequest.HttpServerRequest,
 	): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpServerError, never>
 }
 
-export interface DurableObjectNamespaceHandle<Shape = unknown> {
+export interface DurableObjectNamespaceHandle<Definition = unknown> {
 	readonly name: string
-	getByName(name: string): DurableObjectStub<Shape>
+	getByName(name: string): DurableObjectStub<Definition>
 	idFromName(name: string): DurableObjectId
 	idFromString(id: string): DurableObjectId
 	newUniqueId(): DurableObjectId
@@ -95,6 +96,7 @@ export const getDurableObjectImpl = (name: string): DurableObjectImpl | undefine
 // Bridge base class — built once, parameterised per DO name.
 
 const Bridge = makeDurableObjectBridge(
+	// SAFETY: the runtime DurableObject constructor and Workers declaration describe the same platform class.
 	DurableObject as unknown as abstract new (state: unknown, env: unknown) => cf.DurableObject,
 	async (name: string) => {
 		const impl = implRegistry.get(name)
@@ -144,12 +146,12 @@ const Bridge = makeDurableObjectBridge(
  * handle with `.getByName(id)` → typed stub.
  */
 export const DurableObjectNamespace = <_Self = unknown>() => {
-	return <Shape extends DurableObjectShape, InitReq = never>(
+	return <Definition extends DurableObjectApi, InitReq = never>(
 		name: string,
-		impl: Effect.Effect<Effect.Effect<Shape, never, DurableObjectState>, never, InitReq>,
+		impl: Effect.Effect<Effect.Effect<Definition, never, DurableObjectState>, never, InitReq>,
 	) => {
-		registerDurableObjectImpl(name, impl as unknown as DurableObjectImpl)
-		return Bridge(name) as unknown as new (state: cf.DurableObjectState, env: unknown) => cf.DurableObject
+		registerDurableObjectImpl(name, impl as DurableObjectImpl)
+		return Bridge(name) as new (state: cf.DurableObjectState, env: unknown) => cf.DurableObject
 	}
 }
 
@@ -161,7 +163,7 @@ export const DurableObjectNamespace = <_Self = unknown>() => {
  * The class reference is used purely to look up the registered name — the
  * actual binding comes from the worker env at runtime.
  */
-export const namespaceOf = Effect.fn("namespaceOf")(function* <Shape = unknown>(
+export const namespaceOf = Effect.fn("namespaceOf")(function* <Definition = unknown>(
 	classOrName: { name: string } | string,
 ) {
 	const env = yield* WorkerEnvironment
@@ -176,9 +178,9 @@ export const namespaceOf = Effect.fn("namespaceOf")(function* <Shape = unknown>(
 	}
 	return {
 		name,
-		getByName: (id: string) => makeRpcStub<DurableObjectStub<Shape>>(binding.getByName(id)),
+		getByName: (id: string) => makeRpcStub<DurableObjectStub<Definition>>(binding.getByName(id)),
 		idFromName: (id: string) => binding.idFromName(id),
 		idFromString: (id: string) => binding.idFromString(id),
 		newUniqueId: () => binding.newUniqueId(),
-	} satisfies DurableObjectNamespaceHandle<Shape>
+	} satisfies DurableObjectNamespaceHandle<Definition>
 })

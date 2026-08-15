@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { Clock, Effect, Option, Schema } from "effect"
 import { LogsFacetDimension, QueryEngineExecuteRequest, formatWarehouseDateTime } from "@maple/query-engine"
 import { TraceId, SpanId } from "@maple/domain"

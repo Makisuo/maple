@@ -300,7 +300,7 @@ const bucketLabelMap: Record<number, string> = {
 	3600: "/h",
 	14400: "/4h",
 	86400: "/d",
-}
+} satisfies Record<number, string>
 
 /**
  * Map bucket interval seconds to a human-readable rate suffix.

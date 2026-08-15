@@ -15,7 +15,7 @@ import { tracedFetch } from "@/lib/services/common/telemetry"
  * authenticates, injects the org scope, and forwards to Electric. Never point a
  * ShapeStream at Electric directly — it has no auth.
  */
-export const shapeProxyUrl = `${electricSyncBaseUrl}/api/sync/shape`
+export const syncProxyUrl = `${electricSyncBaseUrl}/api/sync/shape`
 
 /**
  * `fetchClient` for every ShapeStream. Mirrors `mapleFetch` in http-client.ts
@@ -26,7 +26,7 @@ export const shapeProxyUrl = `${electricSyncBaseUrl}/api/sync/shape`
  * long-poll (~20s) and the ShapeStream manages its own AbortController and
  * backoff, so we pass `init.signal` straight through.
  */
-export const mapleShapeFetch: typeof globalThis.fetch = async (input, init) => {
+export const mapleSyncFetch: typeof globalThis.fetch = async (input, init) => {
 	const headers = new Headers(init?.headers)
 	const authHeaders = await getMapleAuthHeaders()
 	for (const [name, value] of Object.entries(authHeaders)) {
@@ -86,11 +86,11 @@ export const createSyncedCollection = <A extends Row<unknown>>(config: {
 		schema: config.schema,
 		getKey: config.getKey,
 		shapeOptions: {
-			url: shapeProxyUrl,
-			params: { shape: config.shape, ...(config.scope ? { scope: config.scope } : {}) },
-			fetchClient: mapleShapeFetch,
-			...(config.parser ? { parser: config.parser } : {}),
+			url: syncProxyUrl,
+			params: { shape: config.shape, ...(config.scope ? { scope: config.scope } : undefined) },
+			fetchClient: mapleSyncFetch,
+			...(config.parser ? { parser: config.parser } : undefined),
 		},
-		...(config.onUpdate ? { onUpdate: config.onUpdate } : {}),
-		...(config.onDelete ? { onDelete: config.onDelete } : {}),
+		...(config.onUpdate ? { onUpdate: config.onUpdate } : undefined),
+		...(config.onDelete ? { onDelete: config.onDelete } : undefined),
 	})

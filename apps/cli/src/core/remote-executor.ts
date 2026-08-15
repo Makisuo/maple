@@ -1,6 +1,6 @@
 import { Duration, Effect, Option, Schema, type Option as EffectOption } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { type WarehouseExecutorShape, type SqlQueryOptions } from "@maple/query-engine/observability"
+import { type WarehouseExecutorApi, type SqlQueryOptions } from "@maple/query-engine/observability"
 import {
 	type WarehouseError,
 	WarehouseClientError,
@@ -45,12 +45,12 @@ const unsupported = <A>(pipeName: string): Effect.Effect<A, WarehouseClientError
  *     fails with a clear message. (Every CLI command except `maple query`
  *     routes through `query`, so this only affects raw SQL.)
  */
-export const makeRemoteWarehouseExecutorShape = (
+export const makeRemoteWarehouseExecutorApi = (
 	client: HttpClient.HttpClient,
 	apiUrl: string,
 	token: string,
 	orgId: string,
-): WarehouseExecutorShape => {
+): WarehouseExecutorApi => {
 	const endpoint = `${apiUrl.replace(/\/$/, "")}/api/tinybird/query`
 	const serverAddress = new URL(endpoint).hostname
 	return {

@@ -8,13 +8,10 @@ import {
 	RecommendationIssueStatus,
 } from "../recommendation-issues"
 import { AuthorizationV2 } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 import { publicErrors } from "./public-error"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 /** `rec_…` public ID ⇄ internal `RecommendationIssueId` (raw UUID). */
 export const RecommendationPublicId = PublicId(PublicIdPrefixes.recommendation, RecommendationIssueId)

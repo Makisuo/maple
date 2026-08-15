@@ -364,6 +364,6 @@ function labelFor(kind: DependencyKind, count: number): string {
 		http: ["external HTTP", "external HTTP"],
 		messaging: ["queue", "queues"],
 		rpc: ["RPC target", "RPC targets"],
-	}
+	} satisfies Record<DependencyKind, [singular: string, plural: string]>
 	return count === 1 ? map[kind][0] : map[kind][1]
 }

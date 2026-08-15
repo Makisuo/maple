@@ -1,3 +1,5 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Cause, Clock, ConfigProvider, Duration, Effect, Exit, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
@@ -14,13 +16,13 @@ import {
 	RoleName,
 	UserId,
 } from "@maple/domain/http"
-import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import {
 	AlertRuntime,
-	type AlertRuntimeShape,
+	type AlertRuntimeApi,
 	AlertsService,
-	type AlertsServiceShape,
+	type AlertsServiceApi,
 	interleaveAlertRulesByOrg,
 } from "./AlertsService"
 import { AlertDestinationsService } from "./AlertDestinationsService"
@@ -95,7 +97,7 @@ function makeWarehouseStub(state: {
 	logsAggregateRows?: ReadonlyArray<Record<string, unknown>>
 	logsAggregateByServiceRows?: ReadonlyArray<Record<string, unknown>>
 	rawQueryRows?: ReadonlyArray<Record<string, unknown>>
-}): WarehouseQueryServiceShape {
+}): WarehouseQueryServiceApi {
 	const succeedRows = (rows: ReadonlyArray<Record<string, unknown>>) => Effect.succeed(rows)
 
 	// All alert queries now go through sqlQuery (raw SQL via CH query engine).
@@ -131,7 +133,7 @@ function makeWarehouseStub(state: {
 	}
 }
 
-const defaultTestRuntime: AlertRuntimeShape = {
+const defaultTestRuntime: AlertRuntimeApi = {
 	// Time is sourced from Effect's Clock, which `it.effect` swaps for TestClock —
 	// scheduler-timestamp tests drive it deterministically via TestClock.setTime /
 	// TestClock.adjust. Real `fetch`/`Effect.timeout` settle on the live event loop.
@@ -187,8 +189,8 @@ const stubOrgMembersService = (
 
 const makeLayer = (
 	testDb: TestDb,
-	warehouseStub: WarehouseQueryServiceShape,
-	runtimeOverrides?: Partial<AlertRuntimeShape>,
+	warehouseStub: WarehouseQueryServiceApi,
+	runtimeOverrides?: Partial<AlertRuntimeApi>,
 	emailStub?: (typeof EmailService)["Service"],
 ) => {
 	const configLive = makeConfig()
@@ -254,7 +256,7 @@ const adminRoles = [asRoleName("root")]
 const memberRoles = [asRoleName("org:member")]
 
 const createWebhookDestination = (
-	alerts: AlertsServiceShape,
+	alerts: AlertsServiceApi,
 	orgId: ReturnType<typeof asOrgId>,
 	userId: ReturnType<typeof asUserId>,
 ) =>
@@ -267,7 +269,7 @@ const createWebhookDestination = (
 	})
 
 const createErrorRateRule = (
-	alerts: AlertsServiceShape,
+	alerts: AlertsServiceApi,
 	orgId: ReturnType<typeof asOrgId>,
 	userId: ReturnType<typeof asUserId>,
 	destinationId: AlertDestinationId,
@@ -293,14 +295,14 @@ const createErrorRateRule = (
 		}),
 	)
 
-const makeUuidSequence = (...values: string[]): Pick<AlertRuntimeShape, "makeUuid"> => {
+const makeUuidSequence = (...values: string[]): Pick<AlertRuntimeApi, "makeUuid"> => {
 	let index = 0
 	return {
 		makeUuid: () => values[index++] ?? `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
 	}
 }
 
-const okFetch: typeof fetch = (async () => new Response("ok", { status: 200 })) as unknown as typeof fetch
+const okFetch: typeof fetch = (async () => new Response("ok", { status: 200 })) as typeof fetch
 
 const insertDeliveryEventRow = async (
 	db: TestDb,
@@ -1020,8 +1022,7 @@ describe("AlertsService", () => {
 				},
 			] as ReadonlyArray<Record<string, unknown>>,
 		}
-		const failingFetch: typeof fetch = (async () =>
-			new Response("boom", { status: 500 })) as unknown as typeof fetch
+		const failingFetch: typeof fetch = (async () => new Response("boom", { status: 500 })) as typeof fetch
 
 		return Effect.gen(function* () {
 			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
@@ -1367,7 +1368,7 @@ describe("AlertsService", () => {
 		const fetchImpl = (async () => {
 			requestCount += 1
 			return new Response("ok", { status: 200 })
-		}) as unknown as typeof fetch
+		}) as typeof fetch
 
 		const stub = makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })
 		const overrides = { fetch: fetchImpl }
@@ -1579,7 +1580,7 @@ describe("AlertsService", () => {
 		it.effect(label, () => {
 			const fixedTime = 1_710_000_400_000
 			const testDb = createTestDb(trackedDbs)
-			const respond = (async () => new Response("nope", { status })) as unknown as typeof fetch
+			const respond = (async () => new Response("nope", { status })) as typeof fetch
 
 			return Effect.gen(function* () {
 				const alerts = yield* AlertsService
@@ -1666,7 +1667,7 @@ describe("AlertsService", () => {
 	it.live("times out stuck deliveries and enqueues a retry attempt", () => {
 		const fixedTime = 1_710_000_300_000
 		const testDb = createTestDb(trackedDbs)
-		const hangingFetch = (() => new Promise(() => {})) as unknown as typeof fetch
+		const hangingFetch = (() => new Promise(() => {})) as typeof fetch
 
 		return Effect.gen(function* () {
 			const alerts = yield* AlertsService
@@ -1746,7 +1747,7 @@ describe("AlertsService", () => {
 		const fetchImpl = (async () => {
 			requestCount += 1
 			return new Response("ok", { status: 200 })
-		}) as unknown as typeof fetch
+		}) as typeof fetch
 
 		return Effect.gen(function* () {
 			yield* TestClock.setTime(fixedTime)
@@ -2998,7 +2999,7 @@ describe("AlertsService", () => {
 		}
 
 		const alertRows: ReadonlyArray<Record<string, unknown>> = [breachingRow, healthyRow]
-		const stub: WarehouseQueryServiceShape = {
+		const stub: WarehouseQueryServiceApi = {
 			...makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }),
 			sqlQuery: () => Effect.succeed(alertRows),
 			compiledQuery: (_tenant, compiled) => compiled.decodeRows(alertRows).pipe(Effect.orDie),
@@ -3052,7 +3053,7 @@ describe("AlertsService evaluation error persistence", () => {
 		failing: boolean
 		rows: ReadonlyArray<Record<string, unknown>>
 		ingested: Array<Record<string, unknown>>
-	}): WarehouseQueryServiceShape => {
+	}): WarehouseQueryServiceApi => {
 		const sqlQueryStub = () =>
 			state.failing
 				? Effect.fail(
@@ -3406,7 +3407,7 @@ describe("AlertsService.previewRule", () => {
 		}
 
 		const seedRules = (
-			alerts: AlertsServiceShape,
+			alerts: AlertsServiceApi,
 			orgId: ReturnType<typeof asOrgId>,
 			userId: ReturnType<typeof asUserId>,
 			destinationId: AlertDestinationId,

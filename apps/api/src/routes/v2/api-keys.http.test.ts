@@ -11,7 +11,7 @@ import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
-import { ApiV2RateLimiter, type ApiV2RateLimiterShape } from "@/services/auth/ApiV2RateLimiter"
+import { ApiV2RateLimiter, type ApiV2RateLimiterApi } from "@/services/auth/ApiV2RateLimiter"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -48,7 +48,7 @@ const testConfig = () =>
 	)
 
 const makeHarness = (
-	checkRateLimit: ApiV2RateLimiterShape["check"] = () => Effect.succeed("allowed" as const),
+	checkRateLimit: ApiV2RateLimiterApi["check"] = () => Effect.succeed("allowed" as const),
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
@@ -92,9 +92,11 @@ const makeHarness = (
 			new Request(`http://maple.test${path}`, {
 				method,
 				headers: {
-					...(options.token !== undefined ? { authorization: `Bearer ${options.token}` } : {}),
-					...(options.body !== undefined ? { "content-type": "application/json" } : {}),
-					...(options.origin !== undefined ? { origin: options.origin } : {}),
+					...(options.token !== undefined
+						? { authorization: `Bearer ${options.token}` }
+						: undefined),
+					...(options.body !== undefined ? { "content-type": "application/json" } : undefined),
+					...(options.origin !== undefined ? { origin: options.origin } : undefined),
 					...options.headers,
 				},
 				body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -124,7 +126,9 @@ const makeHarness = (
 					name: scopes === undefined ? "root-key" : `scoped:${scopes.join(",")}`,
 					scopes,
 					kind,
-					...(options.metadataJson !== undefined ? { metadataJson: options.metadataJson } : {}),
+					...(options.metadataJson !== undefined
+						? { metadataJson: options.metadataJson }
+						: undefined),
 				})
 			}),
 		)

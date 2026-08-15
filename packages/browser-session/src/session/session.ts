@@ -1,4 +1,5 @@
 import { claimNewVisitor } from "../identity/visitor"
+import * as Schema from "effect/Schema"
 
 const STORAGE_KEY = "maple.session"
 
@@ -76,6 +77,24 @@ export interface SessionRecord {
 	errorCount?: number
 }
 
+const SessionRecordFromJson = Schema.fromJsonString(
+	Schema.Struct({
+		id: Schema.String,
+		startedAt: Schema.Number,
+		lastActivityAt: Schema.Number,
+		chunkSeq: Schema.Number,
+		metaVersion: Schema.optionalKey(Schema.Number),
+		entryUrl: Schema.optionalKey(Schema.String),
+		entryReferrer: Schema.optionalKey(Schema.String),
+		utm: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+		visitorIsNew: Schema.optionalKey(Schema.Boolean),
+		lastUrl: Schema.optionalKey(Schema.String),
+		pageViews: Schema.optionalKey(Schema.Number),
+		clickCount: Schema.optionalKey(Schema.Number),
+		errorCount: Schema.optionalKey(Schema.Number),
+	}),
+)
+
 /** The immutable acquisition context of a session. */
 export interface EntryContext {
 	readonly entryUrl: string
@@ -141,16 +160,7 @@ function readRecord(): SessionRecord | undefined {
 	try {
 		const raw = window.sessionStorage.getItem(STORAGE_KEY)
 		if (!raw) return undefined
-		const parsed = JSON.parse(raw) as Partial<SessionRecord>
-		if (
-			typeof parsed.id === "string" &&
-			typeof parsed.startedAt === "number" &&
-			typeof parsed.lastActivityAt === "number" &&
-			typeof parsed.chunkSeq === "number"
-		) {
-			return parsed as SessionRecord
-		}
-		return undefined
+		return Schema.decodeUnknownSync(SessionRecordFromJson)(raw)
 	} catch {
 		return ephemeral
 	}

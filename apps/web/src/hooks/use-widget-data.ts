@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { useMemo, useState } from "react"
 import { dataSourceTransform, type WidgetDataSourceTransformSchema } from "@maple/widgets/dashboard"
 import { Atom, Result } from "@/lib/effect-atom"
@@ -155,7 +156,7 @@ function applyTransform(
 	if (transform.fieldMap) {
 		const map = transform.fieldMap
 		rows = rows.map((row: Record<string, unknown>) => {
-			const mapped: Record<string, unknown> = { ...row }
+			const mapped: Record<string, unknown> = { ...row } satisfies Record<string, unknown>
 			for (const [targetKey, sourceKey] of Object.entries(map)) {
 				mapped[targetKey] = row[sourceKey]
 			}
@@ -312,17 +313,19 @@ const toWidgetDataAtomError = (error: unknown): WidgetDataAtomError => {
 	})
 }
 
+const WidgetDataKey = Schema.fromJsonString(
+	Schema.Struct({
+		endpoint: Schema.String,
+		params: Schema.Record(Schema.String, Schema.Unknown),
+	}),
+)
+
 const fetchWidgetData = Effect.fnUntraced(
 	function* (key: string) {
-		const parsed = yield* Effect.try({
-			// The key is org-scoped; only the payload after the separator is JSON.
-			try: () =>
-				JSON.parse(orgScopedKeyPayload(key)) as {
-					endpoint: string
-					params: Record<string, unknown>
-				},
-			catch: toWidgetDataAtomError,
-		})
+		// The key is org-scoped; only the payload after the separator is JSON.
+		const parsed = yield* Schema.decodeUnknownEffect(WidgetDataKey)(orgScopedKeyPayload(key)).pipe(
+			Effect.mapError(toWidgetDataAtomError),
+		)
 
 		const serverFn = getServerFunction(parsed.endpoint)
 		if (!serverFn) {

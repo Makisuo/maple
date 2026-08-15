@@ -33,7 +33,7 @@ export const pagerDutyTransport: HttpTransport<Config> = {
 					source: displayGroupKey(context.groupKey) ?? "maple-alerts",
 					severity: context.severity === "critical" ? "critical" : "warning",
 					custom_details: {
-						...(templated ? { message: templated.body } : {}),
+						...(templated ? { message: templated.body } : undefined),
 						ruleName: context.ruleName,
 						signalType: context.signalType,
 						value: context.value,

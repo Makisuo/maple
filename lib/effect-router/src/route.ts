@@ -216,8 +216,8 @@ export function getEffectContext(context: Record<string, unknown>): EffectRouter
 			"effect-router: effectLoader/effectBeforeLoad requires a router created with createEffectRouter()",
 		)
 	}
-	// Safe after runtime guard validates all required keys exist
-	return context as unknown as EffectRouterContext
+	// SAFETY: the runtime guard above established every EffectRouterContext capability.
+	return context as typeof context & EffectRouterContext
 }
 
 /**

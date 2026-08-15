@@ -1,19 +1,22 @@
 type JsonObject = Record<string, unknown>
 
+const isJsonObject = (value: unknown): value is JsonObject =>
+	value !== null && typeof value === "object" && !Array.isArray(value)
+
 const readObject = async (path: string): Promise<JsonObject> => {
 	const value: unknown = await Bun.file(path).json()
-	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+	if (!isJsonObject(value)) {
 		throw new TypeError(`${path} must contain a JSON object`)
 	}
-	return value as JsonObject
+	return value
 }
 
 const propertyObject = (object: JsonObject, property: string, source: string): JsonObject => {
 	const value = object[property]
-	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+	if (!isJsonObject(value)) {
 		throw new TypeError(`${source}.${property} must be a JSON object`)
 	}
-	return value as JsonObject
+	return value
 }
 
 const schemaPath = "node_modules/@effect/tsgo/oxlint-schema.json"

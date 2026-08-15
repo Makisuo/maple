@@ -1070,16 +1070,16 @@ describe("resource-attribute coverage", () => {
 })
 
 describe("RES-03 — spans carry an environment", () => {
-	const shape = (noEnvCount: number) => [{ ...healthyWarehouse.spanShape[0]!, noEnvCount }]
+	const profile = (noEnvCount: number) => [{ ...healthyWarehouse.spanShape[0]!, noEnvCount }]
 
 	it("flags a service where most spans have no environment", () => {
-		const result = check(telemetry({ spanShape: shape(900) }), "RES-03")
+		const result = check(telemetry({ spanShape: profile(900) }), "RES-03")
 		expect(result.status).toBe("fail")
 		expect(result.affected[0]?.note).toBe("100% of spans have no environment")
 	})
 
 	it("tolerates a minority of unlabeled spans", () => {
-		expect(check(telemetry({ spanShape: shape(100) }), "RES-03").status).toBe("pass")
+		expect(check(telemetry({ spanShape: profile(100) }), "RES-03").status).toBe("pass")
 	})
 })
 

@@ -19,11 +19,11 @@ export const makeChatApplyPayload = (
 	new ChatApplyRequest({
 		tool,
 		input,
-		...(origin?.sessionId === undefined
-			? {}
-			: {
+		...(!(origin?.sessionId === undefined)
+			? {
 					sessionId: origin.sessionId,
 					messageId: origin.messageId,
 					toolCallId: origin.toolCallId,
-				}),
+				}
+			: undefined),
 	})

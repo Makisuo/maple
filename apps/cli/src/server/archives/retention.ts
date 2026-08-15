@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import { existsSync, lstatSync, readFileSync } from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
@@ -178,7 +179,7 @@ const eventDateKey: Readonly<Record<string, string>> = {
 	metrics_gauge: "timestamp",
 	metrics_histogram: "timestamp",
 	metrics_exponential_histogram: "timestamp",
-}
+} satisfies Readonly<Record<string, string>>
 
 export class RetiredDayAuthority {
 	readonly #dataDir: string

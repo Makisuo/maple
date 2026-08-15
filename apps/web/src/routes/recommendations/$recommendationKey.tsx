@@ -59,14 +59,14 @@ const KIND_BADGE: Record<IssueKind, { label: string; variant: "success" | "warni
 	rename: { label: "Safe rename", variant: "success" },
 	"double-emission": { label: "Both emitted", variant: "warning" },
 	naming: { label: "Naming", variant: "info" },
-}
+} satisfies Record<IssueKind, { label: string; variant: "success" | "warning" | "info" }>
 
 const STATUS_BADGE: Record<IssueStatus, { label: string; variant: "success" | "secondary" | "outline" }> = {
 	open: { label: "Open", variant: "outline" },
 	dismissed: { label: "Dismissed", variant: "secondary" },
 	applied: { label: "Applied", variant: "success" },
 	resolved: { label: "Resolved", variant: "success" },
-}
+} satisfies Record<IssueStatus, { label: string; variant: "success" | "secondary" | "outline" }>
 
 const MODE = {
 	auto: {

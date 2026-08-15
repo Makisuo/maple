@@ -127,7 +127,7 @@ export const competitorConfigs: Record<Competitor, { name: string; sliders: Slid
 			},
 		],
 	},
-}
+} satisfies Record<Competitor, { name: string; sliders: SliderConfig[] }>
 
 function calculateDatadog(values: Record<string, number>) {
 	// Published (annual billing): Infrastructure Pro $15/host, APM $31/host,

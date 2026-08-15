@@ -40,6 +40,7 @@
  * correct for stg / PR previews — there the migrate role and the runtime role
  * are the same identity.
  */
+import * as Predicate from "effect/Predicate"
 import postgres from "postgres"
 import { fail } from "./planetscale-connection"
 
@@ -80,7 +81,7 @@ const statements = (owner: string): readonly string[] => {
 const currentUser = async (sql: postgres.Sql): Promise<string> => {
 	const [row] = await sql`SELECT current_user`
 	const role: unknown = row?.current_user
-	if (typeof role !== "string" || role.length === 0) {
+	if (!Predicate.isString(role) || role.length === 0) {
 		return fail("`SELECT current_user` returned no role")
 	}
 	return role

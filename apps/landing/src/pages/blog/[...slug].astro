@@ -47,8 +47,8 @@ const jsonLd = {
         name: "Maple",
         logo: { "@type": "ImageObject", url: "https://maple.dev/logo192.png" },
     },
-    ...(canonicalUrl ? { mainEntityOfPage: canonicalUrl } : {}),
-    ...(absoluteCover ? { image: absoluteCover } : {}),
+    ...((canonicalUrl) ? ({ mainEntityOfPage: canonicalUrl }) : undefined),
+    ...((absoluteCover) ? ({ image: absoluteCover }) : undefined),
 };
 
 const backLink =

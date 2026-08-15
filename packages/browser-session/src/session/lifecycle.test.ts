@@ -50,11 +50,12 @@ interface PostedRow {
 let posted: PostedRow[]
 let documentListeners: Listeners
 let windowListeners: Listeners
-let doc: {
+interface MutableDocumentStub {
 	visibilityState: string
 	addEventListener: Listeners["add"]
 	removeEventListener: Listeners["remove"]
 }
+let doc: MutableDocumentStub
 
 const statuses = (): string[] => posted.map((p) => String(p.row.status))
 const last = (): Record<string, unknown> => posted[posted.length - 1]!.row

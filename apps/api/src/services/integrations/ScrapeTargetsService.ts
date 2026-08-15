@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { randomUUID } from "node:crypto"
 import {
 	IsoDateTimeString,
@@ -74,7 +75,7 @@ const parseRetryAfterSeconds = (value: string | null): number | null => {
 	return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
 }
 
-export interface ScrapeTargetsServiceShape {
+export interface ScrapeTargetsServiceApi {
 	readonly list: (
 		orgId: OrgId,
 	) => Effect.Effect<
@@ -199,7 +200,7 @@ const toPersistenceError = (error: unknown) =>
 	})
 
 const toUpstreamError = (message: string, status?: number) =>
-	new ScrapeTargetUpstreamError({ message, ...(status === undefined ? {} : { status }) })
+	new ScrapeTargetUpstreamError({ message, ...(!(status === undefined) ? { status } : undefined) })
 
 const toEncryptionError = (message: string) => new ScrapeTargetEncryptionError({ message })
 
@@ -479,11 +480,11 @@ const buildDiscoveryConfig = (
 	excludeBranches: ReadonlyArray<string>,
 ): { organization: string; includeBranches?: string[]; excludeBranches?: string[] } => ({
 	organization,
-	...(includeBranches.length > 0 ? { includeBranches: [...includeBranches] } : {}),
-	...(excludeBranches.length > 0 ? { excludeBranches: [...excludeBranches] } : {}),
+	...(includeBranches.length > 0 ? { includeBranches: [...includeBranches] } : undefined),
+	...(excludeBranches.length > 0 ? { excludeBranches: [...excludeBranches] } : undefined),
 })
 
-export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, ScrapeTargetsServiceShape>()(
+export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, ScrapeTargetsServiceApi>()(
 	"@maple/api/services/ScrapeTargetsService",
 	{
 		make: Effect.gen(function* () {
@@ -687,11 +688,12 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				const name = request.name.trim()
 				const serviceName = request.serviceName ?? null
 
-				let credentialFields: {
+				interface EncryptedCredentialFields {
 					authCredentialsCiphertext: string | null
 					authCredentialsIv: string | null
 					authCredentialsTag: string | null
-				} = {
+				}
+				let credentialFields: EncryptedCredentialFields = {
 					authCredentialsCiphertext: null,
 					authCredentialsIv: null,
 					authCredentialsTag: null,
@@ -852,7 +854,10 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				const labels = yield* validateLabelsJson(request.labelsJson)
 
 				const now = yield* Clock.currentTimeMillis
-				const updates: Record<string, unknown> = { updatedAt: new Date(now) }
+				const updates: Record<string, unknown> = { updatedAt: new Date(now) } satisfies Record<
+					string,
+					unknown
+				>
 
 				if (request.name !== undefined) updates.name = request.name.trim()
 				if (request.url !== undefined && request.url !== null) updates.url = request.url.trim()
@@ -1043,8 +1048,11 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 						"http.request.method": "GET",
 						"maple.scrape.target_type": targetType,
 						...(Option.isSome(parsed)
-							? { "server.address": parsed.value.host, "url.path": parsed.value.pathname }
-							: {}),
+							? {
+									"server.address": parsed.value.host,
+									"url.path": parsed.value.pathname,
+								}
+							: undefined),
 					})
 
 					// `safeFetch` is retained for its SSRF protection + per-hop redirect
@@ -1374,7 +1382,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				recordScrapeResults,
 				listChecks,
 				probe,
-			} satisfies ScrapeTargetsServiceShape
+			} satisfies ScrapeTargetsServiceApi
 		}),
 	},
 ) {

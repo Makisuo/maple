@@ -475,8 +475,8 @@ function PlanetScaleOrgPicker(props: {
 		const result = await selectOrganization({
 			payload: {
 				organization: selected,
-				...(include.length > 0 ? { include_branches: include } : {}),
-				...(exclude.length > 0 ? { exclude_branches: exclude } : {}),
+				...(include.length > 0 ? { include_branches: include } : undefined),
+				...(exclude.length > 0 ? { exclude_branches: exclude } : undefined),
 			},
 			// finalizeOrgSelection re-parents the managed scrape target — refresh the list below.
 			reactivityKeys: ["planetscaleIntegration", "scrapeTargets"],

@@ -1,25 +1,18 @@
-import { act, cleanup, render } from "@testing-library/react"
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
+import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toastManager } from "../components/ui/toast"
-import { useCopy, type CopyAPI, type UseCopyOptions } from "./use-copy"
+import { useCopy, type UseCopyOptions } from "./use-copy"
 
 vi.mock("../components/ui/toast", () => ({ toastManager: { add: vi.fn() } }))
 
-function Probe({ options, onReady }: { options?: UseCopyOptions; onReady: (api: CopyAPI) => void }) {
-	const api = useCopy(options)
-	onReady(api)
-	return <span data-testid="status">{api.status}</span>
-}
-
 /** Renders the hook and returns a getter for its latest API surface. */
 function mount(options?: UseCopyOptions) {
-	let latest!: CopyAPI
-	const view = render(<Probe options={options} onReady={(api) => (latest = api)} />)
+	const view = renderHook(() => useCopy(options))
 	return {
 		get api() {
-			return latest
+			return view.result.current
 		},
-		view,
 	}
 }
 

@@ -25,6 +25,7 @@ export class MapleApiV2AtomClient extends AtomHttpApi.Service<MapleApiV2AtomClie
  * Same rationale as `retainedQuery` in `atom-client.ts` — see the note there.
  * Prefer this over calling `.query` directly.
  */
+// SAFETY: this adapter forwards the v2 client's group, endpoint, and request before retaining its atom.
 export const retainedQueryV2: typeof MapleApiV2AtomClient.query = ((
 	group: string,
 	endpoint: string,

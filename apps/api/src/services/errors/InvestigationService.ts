@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { randomUUID } from "node:crypto"
 import {
 	type AiTriageIncidentKind,
@@ -151,7 +152,7 @@ export interface ListInvestigationsOptions {
 	readonly offset?: number
 }
 
-export interface InvestigationServiceShape {
+export interface InvestigationServiceApi {
 	readonly listInvestigations: (
 		orgId: OrgId,
 		opts: ListInvestigationsOptions,
@@ -217,7 +218,7 @@ export interface InvestigationServiceShape {
 /** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
 const internalServiceUserId = Schema.decodeSync(UserIdSchema)("internal-service")
 
-export class InvestigationService extends Context.Service<InvestigationService, InvestigationServiceShape>()(
+export class InvestigationService extends Context.Service<InvestigationService, InvestigationServiceApi>()(
 	"@maple/api/services/InvestigationService",
 	{
 		make: Effect.gen(function* () {
@@ -644,7 +645,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				})
 			})
 
-			const listInvestigations: InvestigationServiceShape["listInvestigations"] = Effect.fn(
+			const listInvestigations: InvestigationServiceApi["listInvestigations"] = Effect.fn(
 				"InvestigationService.listInvestigations",
 			)(function* (orgId, opts) {
 				yield* Effect.annotateCurrentSpan({ orgId })
@@ -688,7 +689,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				})
 			})
 
-			const getInvestigation: InvestigationServiceShape["getInvestigation"] = Effect.fn(
+			const getInvestigation: InvestigationServiceApi["getInvestigation"] = Effect.fn(
 				"InvestigationService.getInvestigation",
 			)(function* (orgId, id) {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
@@ -706,7 +707,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				return yield* documentFor(orgId, settled ?? row)
 			})
 
-			const createInvestigation: InvestigationServiceShape["createInvestigation"] = Effect.fn(
+			const createInvestigation: InvestigationServiceApi["createInvestigation"] = Effect.fn(
 				"InvestigationService.createInvestigation",
 			)(function* (orgId, userId, request) {
 				yield* Effect.annotateCurrentSpan({
@@ -780,7 +781,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				return yield* documentFor(orgId, row)
 			})
 
-			const createAndStartInvestigation: InvestigationServiceShape["createAndStartInvestigation"] =
+			const createAndStartInvestigation: InvestigationServiceApi["createAndStartInvestigation"] =
 				Effect.fn("InvestigationService.createAndStartInvestigation")(
 					function* (orgId, userId, request) {
 						yield* Effect.annotateCurrentSpan({
@@ -849,7 +850,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					},
 				)
 
-			const restartInvestigation: InvestigationServiceShape["restartInvestigation"] = Effect.fn(
+			const restartInvestigation: InvestigationServiceApi["restartInvestigation"] = Effect.fn(
 				"InvestigationService.restartInvestigation",
 			)(function* (orgId, id) {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
@@ -928,7 +929,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				return yield* getInvestigation(orgId, id)
 			})
 
-			const updateStatus: InvestigationServiceShape["updateStatus"] = Effect.fn(
+			const updateStatus: InvestigationServiceApi["updateStatus"] = Effect.fn(
 				"InvestigationService.updateStatus",
 			)(function* (orgId, id, status) {
 				yield* Effect.annotateCurrentSpan({
@@ -965,7 +966,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			 * idempotent on the investigation id so a re-diagnosis or retry can't
 			 * duplicate them.
 			 */
-			const submitDiagnosis: InvestigationServiceShape["submitDiagnosis"] = Effect.fn(
+			const submitDiagnosis: InvestigationServiceApi["submitDiagnosis"] = Effect.fn(
 				"InvestigationService.submitDiagnosis",
 			)(function* (orgId, id, request) {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
@@ -995,7 +996,9 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						nowMs,
 						// A human follow-up that re-diagnoses a ranked fan-out orphans the lens
 						// verdicts: they explain a cause that is no longer on screen.
-						...(row.fanoutState === "ranked" ? { fanoutState: "superseded" as const } : {}),
+						...(row.fanoutState === "ranked"
+							? { fanoutState: "superseded" as const }
+							: undefined),
 					}),
 				)
 
@@ -1034,7 +1037,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				restartInvestigation,
 				updateStatus,
 				submitDiagnosis,
-			} satisfies InvestigationServiceShape
+			} satisfies InvestigationServiceApi
 		}),
 	},
 ) {

@@ -1,6 +1,34 @@
 {
-	"jsPlugins": ["./scripts/oxlint-plugins/maple.mjs"],
+	"jsPlugins": ["./scripts/oxlint-plugins/maple.mjs", "./scripts/oxlint-plugins/anti-slop/index.ts"],
 	"rules": {
+		"anti-slop/no-chained-type-assertions": "error",
+		"anti-slop/no-conditional-empty-object-spread": "error",
+		"anti-slop/no-known-value-widening": "error",
+		"anti-slop/no-module-mocking": ["error", { "allowWithTestSeamComment": true }],
+		"anti-slop/no-object-parameters": "error",
+		"anti-slop/no-reflect-apply": "error",
+		"anti-slop/no-reflect-get": "error",
+		"anti-slop/no-runtime-typeof": [
+			"error",
+			{
+				"allowInTypeGuards": true,
+				"allowInBoundaryFunctions": true,
+				"checkUnknownOnly": true
+			}
+		],
+		"anti-slop/no-shape-in-symbol-names": "error",
+		"anti-slop/no-unknown-parameters": [
+			"error",
+			{ "allowInBoundaryFunctions": true, "allowWithBoundaryComment": true }
+		],
+		"anti-slop/no-unknown-returns": ["error", { "allowWithBoundaryComment": true }],
+		"anti-slop/no-unknown-type-aliases": "error",
+		"anti-slop/no-unsafe-dictionary-type": "error",
+		"anti-slop/no-widen-then-assert": "error",
+		"anti-slop/require-safety-comment-for-type-assertion": [
+			"error",
+			{ "check": "unsafe", "allowFileSafetyComment": true }
+		],
 		"maple/no-record-string-any": "error",
 		"typescript/no-explicit-any": "warn",
 		"no-alert": "error",
@@ -24,6 +52,7 @@
 		{
 			"files": ["lib/**"],
 			"rules": {
+				"anti-slop/no-unsafe-dictionary-type": "off",
 				"maple/no-record-string-any": "off",
 				"typescript/no-explicit-any": "off"
 			}
@@ -34,6 +63,7 @@
 				"packages/domain/src/http/planetscale-v1-compat.test.ts"
 			],
 			"rules": {
+				"anti-slop/no-unsafe-dictionary-type": "off",
 				"maple/no-record-string-any": "off"
 			}
 		},
@@ -57,6 +87,8 @@
 			"files": [
 				"apps/api/src/app.ts",
 				"apps/api/src/vcs-sync-runtime.ts",
+				"apps/api/src/runtime/mcp-service-graph.ts",
+				"apps/api/src/runtime/service-graph.ts",
 				"apps/api/src/services/integrations/vcs/VcsProviderRegistry.ts",
 				"apps/api/src/routes/v1/integrations.http.ts",
 				"apps/api/src/services/integrations/vcs/vendor/**",
@@ -67,5 +99,16 @@
 			}
 		}
 	],
-	"ignorePatterns": [".context", "lib/llm", "lib/thinking-orbs"]
+	"ignorePatterns": [
+		".agents/**",
+		".codex/**",
+		".context/**",
+		".deepsec/**",
+		".factory/**",
+		".impeccable/**",
+		".superset/**",
+		"lib/llm/**",
+		"lib/thinking-orbs/**",
+		"scripts/oxlint-plugins/anti-slop/**"
+	]
 }

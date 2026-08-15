@@ -83,7 +83,7 @@ export async function uploadPngToThread(options: UploadPngOptions): Promise<Uplo
 	const uploadRes = await fetch(upload_url, {
 		method: "POST",
 		headers: { "content-type": "image/png" },
-		body: options.png as unknown as BodyInit,
+		body: options.png as BodyInit,
 		signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
 	})
 	if (!uploadRes.ok) {
@@ -100,7 +100,7 @@ export async function uploadPngToThread(options: UploadPngOptions): Promise<Uplo
 		JSON.stringify({
 			files: [{ id: file_id, title: options.title }],
 			channel_id: options.channelId,
-			...(options.threadTs ? { thread_ts: options.threadTs } : {}),
+			...(options.threadTs ? { thread_ts: options.threadTs } : undefined),
 		}),
 		"application/json; charset=utf-8",
 	)

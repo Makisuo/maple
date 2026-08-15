@@ -14,8 +14,8 @@ const formula = { id: "f1", name: "F1", expression: "A / B", legend: "ratio" }
 
 describe("makeQueryDataSource", () => {
 	it("round-trips every result shape", () => {
-		for (const resultShape of ["timeseries", "breakdown", "list"] as const) {
-			const input = { resultShape, queries: [draft] }
+		for (const resultKind of ["timeseries", "breakdown", "list"] as const) {
+			const input = { resultShape: resultKind, queries: [draft] }
 			expect(dataSourceQuerySet(makeQueryDataSource(input))).toEqual({
 				...input,
 				formulas: undefined,

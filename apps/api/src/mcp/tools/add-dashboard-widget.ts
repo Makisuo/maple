@@ -180,7 +180,7 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 						layout,
 						// Absent unless asked for: the key must not exist at all, so the
 						// widget reads as "follows the dashboard range".
-						...(timeRange ? { timeRange } : {}),
+						...(timeRange ? { timeRange } : undefined),
 					}
 
 					return [...existingWidgets, widget]
@@ -238,7 +238,7 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 							updatedAt: dashboard.updatedAt,
 						},
 						widgetId: newId,
-						...(validation.ran && { validation }),
+						...(validation.ran ? { validation } : undefined),
 					},
 				}),
 			}

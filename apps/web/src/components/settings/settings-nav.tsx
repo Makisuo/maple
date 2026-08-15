@@ -50,7 +50,7 @@ export const settingsTabLabels: Record<SettingsTab, string> = {
 	automation: "Automation",
 	billing: "Billing",
 	"data-platform": "Data Platform",
-}
+} satisfies Record<SettingsTab, string>
 
 interface NavItem {
 	id: SettingsTab

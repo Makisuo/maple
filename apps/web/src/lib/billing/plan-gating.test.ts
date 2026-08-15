@@ -144,6 +144,7 @@ describe("malformed / error-shaped customer payloads", () => {
 	// `subscriptions`/`flags`. The gating helpers must treat it as "no usable
 	// customer" rather than throwing `Cannot read properties of undefined
 	// (reading 'find')`, which previously took down every route.
+	// SAFETY: this test intentionally passes Autumn's malformed error body through the customer-shaped boundary.
 	const errorPayload = {
 		message: "Response validation failed",
 		code: "autumn_api_error",

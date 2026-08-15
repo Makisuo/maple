@@ -1,3 +1,5 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
+// BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -47,7 +49,7 @@ describe("eve multi-workspace patch", () => {
 		// The patch rewrites eve's built JS, not its .d.ts, so the published type
 		// still advertises the unpatched arity — hence the cast. That mismatch is
 		// exactly why this has to be asserted at runtime.
-		const patched = resolveSlackBotToken as unknown as (
+		const patched = resolveSlackBotToken as (
 			credential: (context: unknown) => Promise<string>,
 			context: unknown,
 		) => Promise<string>

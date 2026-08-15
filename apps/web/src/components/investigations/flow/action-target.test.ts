@@ -86,6 +86,7 @@ describe("classifyAction", () => {
 
 describe("routingContextFromInvestigation", () => {
 	it("carries the issue id of an incident subject", () => {
+		// SAFETY: This minimal fixture contains every investigation field read by the routing helper.
 		const investigation = {
 			subject: {
 				type: "incident",
@@ -104,6 +105,7 @@ describe("routingContextFromInvestigation", () => {
 
 	/** A freeform investigation has no incident behind it, so no issue to open. */
 	it("has no issue id for a freeform subject", () => {
+		// SAFETY: This minimal fixture contains every investigation field read by the routing helper.
 		const freeform = {
 			subject: { type: "freeform" },
 			snapshot: { scope: "checkout latency spike" },

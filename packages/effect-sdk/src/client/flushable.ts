@@ -124,7 +124,7 @@ const buildBrowserAttributes = (config: MapleClientFlushableConfig): Record<stri
 	const attributes: Record<string, unknown> = {
 		"maple.sdk.type": "client",
 		"service.instance.id": browserInstanceId,
-	}
+	} satisfies Record<string, unknown>
 	const nav = browserNavigator()
 	if (nav) {
 		if (nav.userAgent) attributes["browser.user_agent"] = nav.userAgent

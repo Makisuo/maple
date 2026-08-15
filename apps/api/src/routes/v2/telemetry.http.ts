@@ -333,9 +333,9 @@ const attributeFilters = (
 ) =>
 	filters?.map((filter) => ({
 		key: filter.key,
-		...(filter.value !== undefined ? { value: String(filter.value) } : {}),
+		...(filter.value !== undefined ? { value: String(filter.value) } : undefined),
 		mode: filter.operator,
-		...(filter.negated !== undefined ? { negated: filter.negated } : {}),
+		...(filter.negated !== undefined ? { negated: filter.negated } : undefined),
 	}))
 
 const traceFilters = (filters: V2TraceFilters | undefined, groupByAttributeKey?: string) => {

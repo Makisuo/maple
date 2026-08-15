@@ -35,7 +35,7 @@ import {
 	SpanName,
 	type QueryDataQueryContext,
 } from "@maple/domain"
-import { QUERY_BUILDER_DATA_SOURCES, type QueryResultShape } from "@maple/query-model"
+import { QUERY_BUILDER_DATA_SOURCES, type QueryResultContract } from "@maple/query-model"
 
 const asServiceName = Schema.decodeUnknownSync(ServiceName)
 const asSpanName = Schema.decodeUnknownSync(SpanName)
@@ -53,7 +53,7 @@ const queryDataSchema = Schema.Struct({
 	kind: Schema.Literals([
 		"timeseries",
 		"breakdown",
-	] as const satisfies ReadonlyArray<QueryResultShape>).annotate({
+	] as const satisfies ReadonlyArray<QueryResultContract>).annotate({
 		description:
 			"Query shape. Use 'timeseries' when the user asks about trends, patterns, or 'how has X changed over time'. " +
 			"Use 'breakdown' when asking about top-N, distribution, or 'which services have the most errors'. " +

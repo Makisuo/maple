@@ -3,7 +3,7 @@ import { Effect, Layer, Schema } from "effect"
 import { OrgId } from "@maple/domain/http"
 import { searchLogs } from "./search-logs"
 import { WarehouseExecutor } from "./WarehouseExecutor"
-import type { WarehouseExecutorShape } from "./WarehouseExecutor"
+import type { WarehouseExecutorApi } from "./WarehouseExecutor"
 import { compilePipeQuery } from "../ch/pipe-dispatch"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -16,7 +16,7 @@ interface CapturedCalls {
 	}>
 }
 
-const makeMockExecutor = (captured: CapturedCalls): WarehouseExecutorShape => ({
+const makeMockExecutor = (captured: CapturedCalls): WarehouseExecutorApi => ({
 	orgId: "org_test",
 	compiledQuery: (compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: (compiled) => compiled.decodeFirstRow([]).pipe(Effect.orDie),
@@ -30,7 +30,7 @@ const makeMockExecutor = (captured: CapturedCalls): WarehouseExecutorShape => ({
 	},
 })
 
-const makeLayer = (executor: WarehouseExecutorShape) => Layer.succeed(WarehouseExecutor, executor)
+const makeLayer = (executor: WarehouseExecutorApi) => Layer.succeed(WarehouseExecutor, executor)
 
 const timeRange = { startTime: "2026-04-01 00:00:00", endTime: "2026-04-02 00:00:00" }
 

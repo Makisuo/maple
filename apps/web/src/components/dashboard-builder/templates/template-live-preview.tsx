@@ -47,7 +47,7 @@ const MIN_HEIGHT: Record<string, number> = {
 	stat: CARD_CHROME + 80,
 	gauge: CARD_CHROME + 108,
 	markdown: CARD_CHROME + 28,
-}
+} satisfies Record<string, number>
 /**
  * Charts and the table/list family. The two terms are the chart box's whole
  * budget: a 128px plot, comfortably clear of `MIN_CHART_PLOT_HEIGHT` (100), and
@@ -199,7 +199,7 @@ export function TemplateLivePreview({ template, parameters, className }: Templat
 
 	return Result.builder(result)
 		.onSuccess((preview) => {
-			const widgets = preview.widgets as unknown as DashboardWidget[]
+			const widgets = preview.widgets as DashboardWidget[]
 			const shown = widgets.slice(0, MAX_PREVIEW_WIDGETS)
 			const hidden = widgets.length - shown.length
 

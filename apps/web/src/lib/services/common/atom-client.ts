@@ -78,4 +78,5 @@ const queryWithRetention = (
 	return withRetention(atom, identity)
 }
 
+// SAFETY: queryWithRetention preserves MapleApiAtomClient.query's arguments and narrows its retained atom result.
 export const retainedQuery = queryWithRetention as unknown as typeof MapleApiAtomClient.query

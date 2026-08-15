@@ -132,7 +132,7 @@ export function initPerfVitals(): void {
 						"maple.perf.js_heap_used_bytes": heap.usedJSHeapSize,
 						"maple.perf.js_heap_limit_bytes": heap.jsHeapSizeLimit,
 					}
-				: {}),
+				: undefined),
 		})
 		longFrames = 0
 		totalBlockingMs = 0

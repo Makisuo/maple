@@ -9,7 +9,7 @@ import { msToDate } from "@/platform/time"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { ErrorActorsService } from "./ErrorActorsService"
 import { ErrorIssueReadModelsService } from "./ErrorIssueReadModelsService"
@@ -33,7 +33,7 @@ const createdDbs: TestDb[] = []
 
 afterEach(() => cleanupTestDbs(createdDbs))
 
-const makeWarehouseStub = (contexts: Array<string>): WarehouseQueryServiceShape => ({
+const makeWarehouseStub = (contexts: Array<string>): WarehouseQueryServiceApi => ({
 	query: () => Effect.die(new Error("unexpected pipe query")),
 	rawSqlQuery: () => Effect.die(new Error("unexpected raw SQL query")),
 	crossOrgQuery: () => Effect.die(new Error("unexpected cross-org query")),

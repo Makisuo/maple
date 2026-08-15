@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 import { trace } from "@opentelemetry/api"
 import type { ReadableSpan, Span } from "@opentelemetry/sdk-trace-base"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -53,13 +54,15 @@ function makeSpan() {
 			attributes.set(key, value)
 			return span
 		},
-	} as unknown as Span
+	} as Span
 	return { attributes, span }
 }
 
 describe("TraceIdCollector", () => {
 	it("stamps future spans with the current identified user", () => {
-		const state: { userId: string | undefined } = { userId: undefined }
+		const state: { userId: string | undefined } = { userId: undefined } satisfies {
+			userId: string | undefined
+		}
 		const collector = new TraceIdCollector(() => state.userId)
 
 		const anonymous = makeSpan()

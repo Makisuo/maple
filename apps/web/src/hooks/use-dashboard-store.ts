@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { useAtom } from "@/lib/effect-atom"
 import { useCallback, useMemo } from "react"
 import { Cause, Exit, Option, Schema } from "effect"
@@ -154,11 +155,11 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 		id: asDashboardId(dashboard.id),
 		createdAt: asIsoDateTimeString(dashboard.createdAt),
 		updatedAt: asIsoDateTimeString(dashboard.updatedAt),
-		...(description !== undefined && { description }),
-		...(tags !== undefined && { tags }),
-		...(sections !== undefined && { sections }),
-		...(variables !== undefined && { variables }),
-		...(refreshIntervalSeconds !== undefined && { refreshIntervalSeconds }),
+		...(description !== undefined ? { description } : undefined),
+		...(tags !== undefined ? { tags } : undefined),
+		...(sections !== undefined ? { sections } : undefined),
+		...(variables !== undefined ? { variables } : undefined),
+		...(refreshIntervalSeconds !== undefined ? { refreshIntervalSeconds } : undefined),
 		widgets: toDocumentWidgets(dashboard.widgets),
 		timeRange: toDocumentTimeRange(dashboard.timeRange),
 	})
@@ -167,6 +168,7 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 // Deep-clone via JSON so present-`undefined` keys are dropped, not preserved
 // (structuredClone keeps them, and the v2 `optionalKey` encode rejects them —
 // see the note in `mutateDashboard`).
+// SAFETY: Callers pass JSON-domain dashboard documents; the round-trip only removes undefined keys.
 const jsonClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDashboardDocument {
@@ -176,11 +178,11 @@ function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDash
 	const { description, tags, sections, variables, refreshIntervalSeconds, ...rest } = dashboard
 	return new PortableDashboardDocument({
 		...rest,
-		...(description !== undefined && { description }),
-		...(tags !== undefined && { tags: [...tags] }),
-		...(sections !== undefined && { sections: jsonClone(sections) }),
-		...(variables !== undefined && { variables: jsonClone(variables) }),
-		...(refreshIntervalSeconds !== undefined && { refreshIntervalSeconds }),
+		...(description !== undefined ? { description } : undefined),
+		...(tags !== undefined ? { tags: [...tags] } : undefined),
+		...(sections !== undefined ? { sections: jsonClone(sections) } : undefined),
+		...(variables !== undefined ? { variables: jsonClone(variables) } : undefined),
+		...(refreshIntervalSeconds !== undefined ? { refreshIntervalSeconds } : undefined),
 		widgets: toDocumentWidgets(jsonClone(dashboard.widgets)),
 		timeRange: toDocumentTimeRange(dashboard.timeRange),
 	})
@@ -654,7 +656,7 @@ function makeWidgetMutators(deps: {
 									...candidate,
 									tabs: remaining,
 									// Falling back to one tab makes the header the label again.
-									...(remaining.length === 1 ? { title: destination.title } : {}),
+									...(remaining.length === 1 ? { title: destination.title } : undefined),
 								}
 							: candidate,
 					),
@@ -933,11 +935,13 @@ export function useDashboardMutations() {
 				client.dashboards.create({
 					payload: {
 						name: portable.name,
-						...(portable.description !== undefined ? { description: portable.description } : {}),
-						...(portable.tags !== undefined ? { tags: portable.tags } : {}),
+						...(portable.description !== undefined
+							? { description: portable.description }
+							: undefined),
+						...(portable.tags !== undefined ? { tags: portable.tags } : undefined),
 						timeRange: portable.timeRange,
 						widgets: portable.widgets,
-						...(portable.variables !== undefined ? { variables: portable.variables } : {}),
+						...(portable.variables !== undefined ? { variables: portable.variables } : undefined),
 					},
 				}),
 			).catch((error) => {

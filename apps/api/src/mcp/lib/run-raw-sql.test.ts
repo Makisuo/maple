@@ -4,7 +4,7 @@ import { MAX_RAW_SQL_RESULT_ROWS } from "@maple/domain/http"
 import { runRawSql, autoBucketSeconds } from "./run-raw-sql"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
@@ -13,7 +13,7 @@ const tenant = { orgId: "org_test" } as TenantContext
 const makeStub = (
 	rows: ReadonlyArray<Record<string, unknown>>,
 	captured?: { sql?: string; profile?: string; context?: string },
-): WarehouseQueryServiceShape =>
+): WarehouseQueryServiceApi =>
 	({
 		rawSqlQuery: (
 			_t: unknown,
@@ -27,9 +27,9 @@ const makeStub = (
 			}
 			return Effect.succeed(rows)
 		},
-	}) as unknown as WarehouseQueryServiceShape
+	}) as WarehouseQueryServiceApi
 
-const provide = (stub: WarehouseQueryServiceShape) => Layer.succeed(WarehouseQueryService, stub)
+const provide = (stub: WarehouseQueryServiceApi) => Layer.succeed(WarehouseQueryService, stub)
 
 const range = { startTime: "2026-04-01 00:00:00", endTime: "2026-04-01 01:00:00" }
 
@@ -40,7 +40,11 @@ describe("runRawSql", () => {
 				sql?: string
 				profile?: string
 				context?: string
-			} = {}
+			} = {} satisfies {
+				sql?: string
+				profile?: string
+				context?: string
+			}
 			const result = yield* runRawSql({
 				tenant,
 				sql: "SELECT ServiceName, count() AS c FROM traces WHERE $__orgFilter GROUP BY ServiceName",

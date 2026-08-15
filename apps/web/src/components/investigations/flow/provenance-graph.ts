@@ -325,7 +325,7 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 					source,
 					target: node.id,
 					kind,
-					...(label ? { label } : {}),
+					...(label ? { label } : undefined),
 				})
 			}
 		}
@@ -355,8 +355,8 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 				statusTone: "destructive",
 				...(occurrences != null && Number.isFinite(occurrences)
 					? { detail: `· ${formatNumber(occurrences)} events` }
-					: {}),
-				...(issueId ? { href: `/errors/issues/${issueId}` } : {}),
+					: undefined),
+				...(issueId ? { href: `/errors/issues/${issueId}` } : undefined),
 			},
 		}
 		pushColumn([origin], SPINE_WIDTH, "causal")
@@ -386,7 +386,7 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 						// No clock time beside the status any more — the footer states
 						// the same instant relatively, and carrying both put "10:12 AM"
 						// and "6h ago" two lines apart saying one thing twice.
-						...(snapshot.incidentStartedAt ? { at: snapshot.incidentStartedAt } : {}),
+						...(snapshot.incidentStartedAt ? { at: snapshot.incidentStartedAt } : undefined),
 					},
 				},
 			],
@@ -422,7 +422,7 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 						.filter(Boolean)
 						.join(" · "),
 					current: true,
-					...(running ? { live: true, phase: livePhase(investigation) } : {}),
+					...(running ? { live: true, phase: livePhase(investigation) } : undefined),
 				},
 			},
 		],
@@ -520,7 +520,9 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 									eyebrow: "PARTIAL RESULT",
 									title: report.suspectedCause,
 									note: `${report.ruledOut?.length ?? 0} ruled out · ${report.unchecked?.length ?? 0} unchecked`,
-									...(investigation.updated_at ? { at: investigation.updated_at } : {}),
+									...(investigation.updated_at
+										? { at: investigation.updated_at }
+										: undefined),
 									lifted: true,
 								}
 							: {
@@ -528,7 +530,9 @@ export function buildProvenanceGraph(investigation: V2Investigation): Provenance
 									eyebrow: "VERDICT",
 									title: report.suspectedCause,
 									note: `${report.confidence} confidence`,
-									...(investigation.diagnosed_at ? { at: investigation.diagnosed_at } : {}),
+									...(investigation.diagnosed_at
+										? { at: investigation.diagnosed_at }
+										: undefined),
 									lifted: true,
 								},
 				},
@@ -772,7 +776,7 @@ const INVESTIGATION_TITLE: Record<string, string> = {
 	inconclusive: "Inconclusive",
 	resolved: "Resolved",
 	failed: "Failed",
-}
+} satisfies Record<string, string>
 
 /**
  * Statuses that end a run without a `diagnosed_at`.

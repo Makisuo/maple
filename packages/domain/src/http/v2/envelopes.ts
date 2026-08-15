@@ -27,6 +27,19 @@ export const Timestamp = Schema.String.pipe(
 )
 export type Timestamp = Schema.Schema.Type<typeof Timestamp>
 
+/**
+ * Author OpenAPI `examples` in wire (encoded) form. Effect types the `examples`
+ * annotation against a schema's decoded `Type`, while HttpApi renders the encoded
+ * schema. The OpenAPI contract test decodes every example before publication.
+ */
+export const wireExample = <A, Encoded extends Record<PropertyKey, unknown> = Record<PropertyKey, unknown>>(
+	example: Encoded,
+): A => {
+	// SAFETY: the OpenAPI contract test decodes every wire example against its owning schema.
+	// @ts-expect-error -- Effect types examples as decoded values but publishes encoded values.
+	return example as A
+}
+
 /** Brand a service-layer ISO value for the strict v2 timestamp wire schema. */
 export const timestamp = (value: string): Timestamp => Timestamp.make(value)
 

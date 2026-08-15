@@ -65,7 +65,7 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 				const candidate: Record<string, unknown> = {
 					...rec,
 					id: typeof rec.id === "string" && rec.id.length > 0 ? rec.id : generateWidgetId(),
-				}
+				} satisfies Record<string, unknown>
 				if (candidate.layout === undefined) {
 					const size = defaultSizeForVisualization(visualization)
 					const position = findNextWidgetPosition(widgets, size.w)

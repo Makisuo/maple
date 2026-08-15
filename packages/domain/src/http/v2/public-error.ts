@@ -39,6 +39,7 @@ export const publicError = <Error extends SelfDescribingHttpError>(
 	}
 	const schema = makePublicErrorSchema<Error>(errorClass, options)
 	if (options === undefined) publicErrorSchemaCache.set(errorClass, schema)
+	// SAFETY: makePublicErrorSchema derives this schema from the same error class generic returned here.
 	return schema as unknown as V2PublicErrorSchema<Error>
 }
 

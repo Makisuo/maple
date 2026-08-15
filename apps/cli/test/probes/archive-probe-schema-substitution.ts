@@ -33,7 +33,7 @@ try {
 		Attributes: "Map(String, String)",
 		Timestamp: "DateTime64(9, 'UTC')",
 		Min: "Nullable(Float64)",
-	}
+	} satisfies Record<string, string>
 	compareSchema(source, parquetFrom(valid), "<valid>") // must not throw
 
 	// 2. Array(UInt64) -> Array(String) must be rejected.

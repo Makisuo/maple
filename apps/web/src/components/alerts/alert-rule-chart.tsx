@@ -89,7 +89,7 @@ type ResolvedSource = SignalSource | "none"
 export const SIGNAL_SOURCE_LABEL: Record<SignalSource, string> = {
 	preview: "Query",
 	checks: "Evaluated",
-}
+} satisfies Record<SignalSource, string>
 
 const Y_AXIS_WIDTH = 72
 const PLOT_RIGHT = 12
@@ -103,7 +103,7 @@ const RAIL_COLOR: Record<RailStatus, string> = {
 	skipped: "bg-muted-foreground/30",
 	healthy: "bg-chart-apdex/70",
 	empty: "bg-muted/50",
-}
+} satisfies Record<RailStatus, string>
 
 function num(value: unknown): number {
 	const parsed = typeof value === "number" ? value : Number(value)
@@ -192,7 +192,11 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 			const keys = previewSeries.map((s) => s.groupKey)
 			const single = keys.length === 1
 			const byT = new Map<number, ChartPoint>()
-			const statusRank: Record<string, number> = { healthy: 0, skipped: 1, breached: 2 }
+			const statusRank: Record<string, number> = {
+				healthy: 0,
+				skipped: 1,
+				breached: 2,
+			} satisfies Record<string, number>
 			// Points plot at the window CLOSE — the moment the evaluator observes
 			// the window — matching check timestamps and reaching the axis edge.
 			const stepMs = (preview?.bucketSeconds ?? 60) * 1000

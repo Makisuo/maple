@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { InternalRpcToolNotFoundError } from "@maple/domain/internal-rpc"
 import { Effect, Schema } from "effect"
 import { registerAddDashboardWidgetTool } from "./add-dashboard-widget"
@@ -111,7 +112,7 @@ export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
 			type: "object",
 			properties: {},
 			additionalProperties: false,
-			...("$defs" in record ? { $defs: record.$defs } : {}),
+			...("$defs" in record ? { $defs: record.$defs } : undefined),
 		}
 	}
 	// A genuinely non-object root (a top-level `Schema.Union`/`Schema.Literals`/array)

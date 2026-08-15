@@ -14,7 +14,7 @@
  */
 import { Tool, ToolFailure, type Tools } from "@maple/llm"
 import { Cause, Effect } from "effect"
-import type { McpToolExecutorShape } from "@/mcp/dispatcher"
+import type { McpToolExecutorApi } from "@/mcp/dispatcher"
 import { mapleToolCatalog, toInputSchema } from "@/mcp/tools/registry"
 import { truncateToolOutput } from "@/mcp/tools/tool-output"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -80,7 +80,7 @@ export interface BuildMapleToolsOptions {
 
 /** Wrap the Maple MCP registry as `@maple/llm` tools. */
 export const buildMapleTools = (
-	executor: McpToolExecutorShape,
+	executor: McpToolExecutorApi,
 	tenant: TenantContext,
 	options: BuildMapleToolsOptions = {},
 ): Tools =>

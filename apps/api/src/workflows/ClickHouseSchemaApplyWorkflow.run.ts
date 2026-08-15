@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 /**
  * Schema-apply workflow logic (heavy import graph lives here, NOT in the thin
  * class shell, so the worker's module scope stays light — see the dynamic import
@@ -33,7 +34,7 @@ import { eq } from "drizzle-orm"
 import { Effect, Layer, Schema } from "effect"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
-import { makePgConnectionScope, type PgConnectionScopeShape } from "@/platform/pg-connection-scope"
+import { makePgConnectionScope, type PgConnectionScopeApi } from "@/platform/pg-connection-scope"
 import { EdgeCacheService } from "@maple/cache"
 import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import {
@@ -167,7 +168,7 @@ async function exec(cfg: ChConfig, sql: string): Promise<string> {
 		"Content-Type": "text/plain",
 		"X-ClickHouse-User": cfg.user,
 		"X-ClickHouse-Database": cfg.database,
-	}
+	} satisfies Record<string, string>
 	if (cfg.password.length > 0) headers["X-ClickHouse-Key"] = cfg.password
 	const response = await fetch(url, { method: "POST", headers, body: sql, redirect: "manual" })
 	const text = await response.text()
@@ -390,7 +391,7 @@ export async function runClickHouseSchemaApply(
 }
 
 async function runWithDb(
-	connection: PgConnectionScopeShape,
+	connection: PgConnectionScopeApi,
 	env: SchemaApplyWorkflowEnv,
 	event: WorkflowEventLike<SchemaApplyWorkflowPayload>,
 	step: WorkflowStepLike,

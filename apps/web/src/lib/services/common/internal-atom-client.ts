@@ -65,5 +65,6 @@ const internalQueryWithRetention = (
 	return withRetention(atom, identity)
 }
 
+// SAFETY: internalQueryWithRetention preserves MapleInternalAtomClient.query's arguments and retained result.
 export const retainedInternalQuery =
 	internalQueryWithRetention as unknown as typeof MapleInternalAtomClient.query

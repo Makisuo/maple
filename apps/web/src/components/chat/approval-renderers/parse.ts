@@ -1,9 +1,9 @@
-export type ParseResult<T = unknown> = { ok: true; value: T } | { ok: false }
+export type ParseResult = { ok: true; value: unknown } | { ok: false }
 
-export function safeParseJson<T = unknown>(value: unknown): ParseResult<T> {
+export function safeParseJson(value: unknown): ParseResult {
 	if (typeof value !== "string" || value.length === 0) return { ok: false }
 	try {
-		return { ok: true, value: JSON.parse(value) as T }
+		return { ok: true, value: JSON.parse(value) as unknown }
 	} catch {
 		return { ok: false }
 	}

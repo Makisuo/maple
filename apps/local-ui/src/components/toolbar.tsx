@@ -38,7 +38,7 @@ const RANGE_LABELS: Record<string, string> = {
 	"24h": "Last 24 hours",
 	"7d": "Last 7 days",
 	"30d": "Last 30 days",
-}
+} satisfies Record<string, string>
 
 const RANGE_OPTIONS = TIME_RANGES.map((range) => ({
 	key: range.key,

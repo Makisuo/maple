@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { randomUUID } from "node:crypto"
 import { spawnSync } from "node:child_process"
 import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -1261,6 +1262,7 @@ export const assertCheckpointPinIdentity = async (
 	) {
 		throw new Error(`checkpoint pin identity mismatch: ${pinPath}`)
 	}
+	// SAFETY: the complete pin key set, identifiers, purpose, version, and timestamp were validated above.
 	return parsed as unknown as CheckpointPin
 }
 

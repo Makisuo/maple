@@ -82,7 +82,7 @@ export interface ListAlertDeliveryEventsOptions {
 	readonly offset?: number
 }
 
-export interface AlertReadModelsServiceShape {
+export interface AlertReadModelsServiceApi {
 	readonly listIncidents: (
 		orgId: OrgId,
 		options?: ListAlertIncidentsOptions,
@@ -182,7 +182,7 @@ const toTinybirdSqlDateTime64 = (iso: string) => {
 
 export class AlertReadModelsService extends Context.Service<
 	AlertReadModelsService,
-	AlertReadModelsServiceShape
+	AlertReadModelsServiceApi
 >()("@maple/api/services/alerts/AlertReadModelsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -203,8 +203,8 @@ export class AlertReadModelsService extends Context.Service<
 		) {
 			yield* Effect.annotateCurrentSpan({
 				orgId,
-				...(options.status !== undefined ? { status: options.status } : {}),
-				...(options.ruleId !== undefined ? { ruleId: options.ruleId } : {}),
+				...(options.status !== undefined ? { status: options.status } : undefined),
+				...(options.ruleId !== undefined ? { ruleId: options.ruleId } : undefined),
 			})
 			const conditions = [
 				eq(alertIncidents.orgId, orgId),
@@ -302,16 +302,16 @@ export class AlertReadModelsService extends Context.Service<
 				{
 					orgId,
 					ruleId,
-					...(hasGroupKey ? { groupKey: options.groupKey } : {}),
-					...(options.status != null ? { status: options.status } : {}),
-					...(since != null ? { since } : {}),
-					...(until != null ? { until } : {}),
+					...(hasGroupKey ? { groupKey: options.groupKey } : undefined),
+					...(options.status != null ? { status: options.status } : undefined),
+					...(since != null ? { since } : undefined),
+					...(until != null ? { until } : undefined),
 					...(beforeTimestamp != null
 						? {
 								beforeTimestamp,
 								beforeGroupKey: options.beforeGroupKey ?? "",
 							}
-						: {}),
+						: undefined),
 				},
 			)
 
@@ -525,7 +525,7 @@ export class AlertReadModelsService extends Context.Service<
 			listRuleChecks,
 			summarizeRuleChecks,
 			listDeliveryEvents,
-		} satisfies AlertReadModelsServiceShape
+		} satisfies AlertReadModelsServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

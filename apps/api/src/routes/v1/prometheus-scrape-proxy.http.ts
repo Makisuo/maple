@@ -70,8 +70,10 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 								// Forward the upstream rate-limit hint so the scraper can
 								// back off precisely on 429/503.
 								...(response.retryAfterSeconds !== null
-									? { "retry-after": String(response.retryAfterSeconds) }
-									: {}),
+									? {
+											"retry-after": String(response.retryAfterSeconds),
+										}
+									: undefined),
 							},
 						}),
 					),

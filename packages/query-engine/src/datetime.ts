@@ -87,7 +87,7 @@ const MS: Record<string, number> = {
 	h: 3_600_000,
 	d: 86_400_000,
 	w: 604_800_000,
-}
+} satisfies Record<string, number>
 
 /**
  * Shift `date` by whole calendar months, clamping the day-of-month to the
@@ -395,7 +395,7 @@ export function computeBucketSecondsForRange(
 
 	return computeBucketSeconds(startMs, endMs, {
 		...policy,
-		...(targetPoints === undefined ? {} : { targetPoints }),
+		...(!(targetPoints === undefined) ? { targetPoints } : undefined),
 	})
 }
 

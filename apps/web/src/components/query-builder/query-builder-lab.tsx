@@ -162,7 +162,7 @@ const GROUP_BY_OPTIONS: Record<DataSource, Array<{ label: string; value: string 
 		{ label: "service.name", value: "service.name" },
 		{ label: "none", value: "none" },
 	],
-}
+} satisfies Record<DataSource, Array<{ label: string; value: string }>>
 
 function GroupByAutocomplete({
 	value,

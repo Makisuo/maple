@@ -75,7 +75,7 @@ const PRESENTATION: Record<string, PlanetScaleEventPresentation> = {
 		short: "Access request",
 		onChart: false,
 	},
-}
+} satisfies Record<string, PlanetScaleEventPresentation>
 
 export const presentEvent = (eventType: string): PlanetScaleEventPresentation =>
 	PRESENTATION[eventType] ?? DEFAULT

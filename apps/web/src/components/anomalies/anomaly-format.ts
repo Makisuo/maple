@@ -12,7 +12,7 @@ export const SIGNAL_LABEL: Record<AnomalySignalType, string> = {
 	throughput: "Throughput",
 	error_spike: "Error frequency increase",
 	log_volume: "Log volume",
-}
+} satisfies Record<AnomalySignalType, string>
 
 export const ANOMALY_STALE_AFTER_MS = 60 * 60 * 1000
 
@@ -53,7 +53,7 @@ export const SIGNAL_ICON: Record<AnomalySignalType, typeof PulseIcon> = {
 	throughput: PulseIcon,
 	error_spike: BoltIcon,
 	log_volume: FileIcon,
-}
+} satisfies Record<AnomalySignalType, typeof PulseIcon>
 
 export function formatSignalValue(signalType: AnomalySignalType, value: number): string {
 	switch (signalType) {
@@ -148,7 +148,7 @@ export const SEVERITY_TONE: Record<"critical" | "warning" | "resolved", Severity
 		accent: "bg-border/60",
 		text: "text-muted-foreground",
 	},
-}
+} satisfies Record<"critical" | "warning" | "resolved", SeverityTone>
 
 export function severityToneFor(
 	incident: Pick<AnomalyIncidentDocument, "status" | "severity">,
@@ -161,11 +161,11 @@ export const RESOLVE_REASON_LABEL: Record<AnomalyResolveReason, string> = {
 	returned_to_baseline: "Returned to baseline",
 	no_data: "No data",
 	manual: "Resolved manually",
-}
+} satisfies Record<AnomalyResolveReason, string>
 
 export const TRIAGE_STATUS_CHIP: Record<AnomalyTriageStatus, { label: string; tone: string } | null> = {
 	none: null,
 	pending: { label: "triaging…", tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
 	completed: { label: "triaged", tone: "bg-success/10 text-success" },
 	skipped: { label: "triage skipped", tone: "bg-muted text-muted-foreground" },
-}
+} satisfies Record<AnomalyTriageStatus, { label: string; tone: string } | null>

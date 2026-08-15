@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { describe, it } from "@effect/vitest"
 import { Effect, Exit, Option, Schema } from "effect"
 import { strict as nodeAssert } from "node:assert"

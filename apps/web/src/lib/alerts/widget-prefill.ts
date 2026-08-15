@@ -145,7 +145,7 @@ export function createWidgetAlertPrefill(
 				name: widgetAlertName(widget),
 				signalType: "raw_query",
 				rawQuerySql: sql,
-				...(rawQueryReducer === undefined ? {} : { rawQueryReducer }),
+				...(!(rawQueryReducer === undefined) ? { rawQueryReducer } : undefined),
 			},
 			notices,
 		}

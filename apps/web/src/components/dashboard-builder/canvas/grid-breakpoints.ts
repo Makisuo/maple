@@ -86,8 +86,8 @@ export function projectLayout(widgets: DashboardWidget[], tier: GridTier): Layou
 		h: w.layout.h,
 		minW: w.layout.minW ?? 2,
 		minH: w.layout.minH ?? 2,
-		...(w.layout.maxW != null ? { maxW: w.layout.maxW } : {}),
-		...(w.layout.maxH != null ? { maxH: w.layout.maxH } : {}),
+		...(w.layout.maxW != null ? { maxW: w.layout.maxW } : undefined),
+		...(w.layout.maxH != null ? { maxH: w.layout.maxH } : undefined),
 	}))
 
 	if (tier.canonical) return base

@@ -159,7 +159,10 @@ function FleetView({
 	)
 
 	const counts = useMemo(() => {
-		const c: Record<HostStatus, number> = { active: 0, idle: 0, down: 0 }
+		const c: Record<HostStatus, number> = { active: 0, idle: 0, down: 0 } satisfies Record<
+			HostStatus,
+			number
+		>
 		for (const a of annotated) c[a.status]++
 		return c
 	}, [annotated])

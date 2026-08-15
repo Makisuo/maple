@@ -67,7 +67,7 @@ const SORT_LABELS: Record<DashboardSortOption, string> = {
 	"name-asc": "Name A–Z",
 	"name-desc": "Name Z–A",
 	widgets: "Most widgets",
-}
+} satisfies Record<DashboardSortOption, string>
 
 export type DashboardScope = "all" | "favorites"
 

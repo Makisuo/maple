@@ -85,7 +85,9 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 		() =>
 			({
 				[PRIMARY]: { label: metric.label, color: PRIMARY_COLOR },
-				...(companion ? { [COMPANION]: { label: companion.label, color: COMPANION_COLOR } } : {}),
+				...(companion
+					? { [COMPANION]: { label: companion.label, color: COMPANION_COLOR } }
+					: undefined),
 			}) satisfies ChartConfig,
 		[metric.label, companion],
 	)

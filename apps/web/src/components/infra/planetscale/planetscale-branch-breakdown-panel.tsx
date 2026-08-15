@@ -74,7 +74,7 @@ const MEASURES: Record<Measure, MeasureSpec> = {
 		className: lagClass,
 		additive: false,
 	},
-}
+} satisfies Record<Measure, MeasureSpec>
 
 const MEASURE_ORDER: ReadonlyArray<Measure> = ["connections", "cpu", "memory", "storage", "lag"]
 

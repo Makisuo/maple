@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert"
 import { Effect, Tracer } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { WarehouseUpstreamError } from "@maple/domain/http/warehouse-errors"
-import { makeRemoteWarehouseExecutorShape } from "./remote-executor"
+import { makeRemoteWarehouseExecutorApi } from "./remote-executor"
 
 const makeRecordingTracer = () => {
 	const spans: Array<Tracer.NativeSpan> = []
@@ -25,6 +25,7 @@ describe("remote warehouse executor", () => {
 				pipeName: "list_services",
 				upstreamStatus: 503,
 			})
+			// SAFETY: the test supplies a complete response for the executor's single fetch call.
 			const fetchStub = (async () =>
 				new Response(JSON.stringify(upstream), {
 					status: 503,
@@ -32,13 +33,13 @@ describe("remote warehouse executor", () => {
 				})) as unknown as typeof fetch
 			const error = yield* Effect.gen(function* () {
 				const client = yield* HttpClient.HttpClient
-				const shape = makeRemoteWarehouseExecutorShape(
+				const executor = makeRemoteWarehouseExecutorApi(
 					client,
 					"https://api.maple.dev",
 					"test-token",
 					"org_test",
 				)
-				return yield* Effect.flip(shape.query("get_service_usage", {}))
+				return yield* Effect.flip(executor.query("get_service_usage", {}))
 			}).pipe(
 				Effect.provide(FetchHttpClient.layer),
 				Effect.provideService(FetchHttpClient.Fetch, fetchStub),
@@ -51,6 +52,7 @@ describe("remote warehouse executor", () => {
 
 	it.effect("attributes the HTTP peer without inventing a database system", () =>
 		Effect.gen(function* () {
+			// SAFETY: the test supplies a complete response for the executor's single fetch call.
 			const fetchStub = (async () =>
 				new Response(JSON.stringify({ data: [] }), {
 					status: 200,
@@ -59,13 +61,13 @@ describe("remote warehouse executor", () => {
 			const { spans, tracer } = makeRecordingTracer()
 			yield* Effect.gen(function* () {
 				const client = yield* HttpClient.HttpClient
-				const shape = makeRemoteWarehouseExecutorShape(
+				const executor = makeRemoteWarehouseExecutorApi(
 					client,
 					"https://api.maple.dev",
 					"test-token",
 					"org_test",
 				)
-				yield* shape
+				yield* executor
 					.query("get_service_usage", {}, { context: "remoteServices", profile: "list" })
 					.pipe(Effect.withTracer(tracer))
 			}).pipe(

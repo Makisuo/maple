@@ -23,7 +23,7 @@ const METRIC_LABELS: Record<CloudflareZoneMetric, string> = {
 	errorRate: "5xx error rate",
 	cacheHitRate: "Cache hit rate",
 	bytes: "Bandwidth",
-}
+} satisfies Record<CloudflareZoneMetric, string>
 
 const CHART_HEIGHT = 200
 

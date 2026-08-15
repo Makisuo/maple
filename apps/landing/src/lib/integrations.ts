@@ -224,4 +224,4 @@ sdk.start();`,
 			},
 		],
 	},
-}
+} satisfies Record<string, Integration>

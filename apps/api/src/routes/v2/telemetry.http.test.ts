@@ -9,13 +9,13 @@ import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
-import { QueryEngineService, type QueryEngineServiceShape } from "@/services/warehouse/QueryEngineService"
+import { QueryEngineService, type QueryEngineServiceApi } from "@/services/warehouse/QueryEngineService"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -212,11 +212,11 @@ const queryEngineStub = {
 	evaluate: () => Effect.die(new Error("not used")),
 	evaluateSeries: () => Effect.die(new Error("not used")),
 	cachedDirect: (_tenant, _route, _payload, effect) => effect,
-} satisfies QueryEngineServiceShape
+} satisfies QueryEngineServiceApi
 
 const makeHarness = (
-	warehouseService: WarehouseQueryServiceShape = warehouseStub,
-	queryEngineService: QueryEngineServiceShape = queryEngineStub,
+	warehouseService: WarehouseQueryServiceApi = warehouseStub,
+	queryEngineService: QueryEngineServiceApi = queryEngineStub,
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
@@ -258,7 +258,7 @@ const makeHarness = (
 				method,
 				headers: {
 					authorization: `Bearer ${token}`,
-					...(body ? { "content-type": "application/json" } : {}),
+					...(body ? { "content-type": "application/json" } : undefined),
 				},
 				body: body ? JSON.stringify(body) : undefined,
 			}),
@@ -463,7 +463,7 @@ describe("v2 telemetry reads over HTTP", () => {
 
 	it("preserves fractional bounds and reads complete traces by their sorting-key identity", async () => {
 		const observedSql: string[] = []
-		const observingWarehouse: WarehouseQueryServiceShape = {
+		const observingWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (tenant, compiled, options) => {
 				observedSql.push(compiled.sql)
@@ -550,7 +550,7 @@ describe("v2 telemetry reads over HTTP", () => {
 
 	it("maps public trace attribute grouping onto the validated internal query", async () => {
 		let observedRequest: QueryEngineExecuteRequest | undefined
-		const queryEngine: QueryEngineServiceShape = {
+		const queryEngine: QueryEngineServiceApi = {
 			...queryEngineStub,
 			execute: (tenant, request) => {
 				observedRequest = request
@@ -583,7 +583,7 @@ describe("v2 telemetry reads over HTTP", () => {
 	})
 
 	it("coerces BYO-ClickHouse numeric strings before encoding aggregation responses", async () => {
-		const queryEngine: QueryEngineServiceShape = {
+		const queryEngine: QueryEngineServiceApi = {
 			...queryEngineStub,
 			execute: (_tenant, request) =>
 				Effect.succeed(
@@ -601,7 +601,7 @@ describe("v2 telemetry reads over HTTP", () => {
 									source: "metrics",
 									data: [{ bucket: "2026-07-15 12:00:00", series: { all: "42" } }],
 								},
-							}) as unknown as QueryEngineExecuteResponse,
+							}) as QueryEngineExecuteResponse,
 				),
 		}
 		const harness = makeHarness(warehouseStub, queryEngine)
@@ -624,8 +624,8 @@ describe("v2 telemetry reads over HTTP", () => {
 	})
 
 	it("applies bounded ClickHouse settings to log body searches", async () => {
-		let observedOptions: Parameters<WarehouseQueryServiceShape["compiledQuery"]>[2]
-		const observingWarehouse: WarehouseQueryServiceShape = {
+		let observedOptions: Parameters<WarehouseQueryServiceApi["compiledQuery"]>[2]
+		const observingWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (tenant, compiled, options) => {
 				observedOptions = options

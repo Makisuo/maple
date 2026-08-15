@@ -1,4 +1,4 @@
-import type { QueryResultShape } from "@maple/query-model"
+import type { QueryResultContract } from "@maple/query-model"
 
 /**
  * The legacy endpoint vocabulary — NOT schema.
@@ -10,37 +10,37 @@ import type { QueryResultShape } from "@maple/query-model"
  * schema.
  *
  * They do not stop existing. Two contracts still speak them, and both outlive
- * the stored v2 shape:
+ * the stored v2 resultKind:
  *
  * 1. The web app's server-function registry (`data-source-registry.ts`) is keyed
  *    by endpoint string, and that key is also the atom family key, the retention
  *    namespace, and the `LIST_ENDPOINTS` membership test.
  * 2. The public v2 HTTP API (`/v2/dashboards`) emits and accepts
  *    `{ endpoint, params }` and always will — a version number in a URL exists
- *    precisely so the internal shape can move without breaking published clients.
+ *    precisely so the internal resultKind can move without breaking published clients.
  *
  * They live in their own file, away from the schema modules, so that this
  * distinction survives contact with the next refactor: these are wire
- * vocabularies that happen to be strings, not a shape anything is stored in.
+ * vocabularies that happen to be strings, not a resultKind anything is stored in.
  */
 
 /**
  * The endpoints that carried a user-authored query set, keyed by the result
- * shape that is their v3 identity.
+ * resultKind that is their v3 identity.
  *
  * Canonical in this direction because the v2 API encoder writes it and the MCP
- * inspector reports it; the endpoint -> shape lookup is derived below, so the
+ * inspector reports it; the endpoint -> resultKind lookup is derived below, so the
  * two cannot drift.
  */
-export const QUERY_SHAPE_ENDPOINTS = {
+export const QUERY_RESULT_ENDPOINTS = {
 	timeseries: "custom_query_builder_timeseries",
 	breakdown: "custom_query_builder_breakdown",
 	list: "custom_query_builder_list",
-} as const satisfies Record<QueryResultShape, string>
+} as const satisfies Record<QueryResultContract, string>
 
-export const QUERY_ENDPOINT_SHAPES: Record<string, QueryResultShape> = Object.fromEntries(
-	Object.entries(QUERY_SHAPE_ENDPOINTS).map(([shape, endpoint]) => [endpoint, shape]),
-) as Record<string, QueryResultShape>
+export const QUERY_ENDPOINT_RESULT_KINDS = Object.fromEntries(
+	Object.entries(QUERY_RESULT_ENDPOINTS).map(([resultKind, endpoint]) => [endpoint, resultKind]),
+) as Record<string, QueryResultContract>
 
 export const RAW_SQL_ENDPOINT = "raw_sql_chart"
 

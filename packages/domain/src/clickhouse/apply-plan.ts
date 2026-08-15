@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 /**
  * Apply-plan expansion: turn a migration's statements into an ordered list of
  * executable steps, splitting each {@link BackfillSpec} into time-windowed

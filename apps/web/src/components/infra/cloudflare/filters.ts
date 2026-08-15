@@ -49,7 +49,7 @@ export const FILTER_CHIP_LABEL: Record<CloudflareFilterKey, string> = {
 	methods: "method",
 	protocols: "http",
 	deviceTypes: "device",
-}
+} satisfies Record<CloudflareFilterKey, string>
 
 /** Filter key → the sidebar section heading. Sentence case, matches the rest of the app. */
 export const FILTER_SECTION_LABEL: Record<CloudflareFilterKey, string> = {
@@ -62,7 +62,7 @@ export const FILTER_SECTION_LABEL: Record<CloudflareFilterKey, string> = {
 	methods: "Method",
 	protocols: "Protocol",
 	deviceTypes: "Device",
-}
+} satisfies Record<CloudflareFilterKey, string>
 
 /**
  * The server reports ignored filters by its own key names (`path`, `host`, …); the UI holds the
@@ -77,7 +77,7 @@ const SERVER_KEY_TO_FILTER: Record<string, CloudflareFilterKey> = {
 	method: "methods",
 	protocol: "protocols",
 	deviceType: "deviceTypes",
-}
+} satisfies Record<string, CloudflareFilterKey>
 
 export const filterKeysFromServer = (
 	ignored: ReadonlyArray<string> | undefined,

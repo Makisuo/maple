@@ -15,17 +15,17 @@
  */
 import { fmtMetricTs, type MetricGaugeRow, type MetricSumRow } from "@/services/warehouse/metric-rows"
 import type {
-	DnsGroupShape,
-	DurableObjectsGroupShape,
-	FirewallGroupShape,
-	HttpClientGroupShape,
-	HttpCountryGroupShape,
-	HttpGroupShape,
-	HttpLatencyGroupShape,
-	HttpPathGroupShape,
-	QueueBacklogGroupShape,
-	QueueConsumersGroupShape,
-	WorkersGroupShape,
+	DnsGroupDefinition,
+	DurableObjectsGroupDefinition,
+	FirewallGroupDefinition,
+	HttpClientGroupDefinition,
+	HttpCountryGroupDefinition,
+	HttpGroupDefinition,
+	HttpLatencyGroupDefinition,
+	HttpPathGroupDefinition,
+	QueueBacklogGroupDefinition,
+	QueueConsumersGroupDefinition,
+	WorkersGroupDefinition,
 } from "./queries"
 
 type Attrs = Record<string, string>
@@ -161,8 +161,8 @@ export interface MapHttpGroupsInput {
 	readonly orgId: string
 	readonly zoneId: string
 	readonly zoneName: string
-	readonly groups: ReadonlyArray<HttpGroupShape>
-	readonly latency: ReadonlyArray<HttpLatencyGroupShape>
+	readonly groups: ReadonlyArray<HttpGroupDefinition>
+	readonly latency: ReadonlyArray<HttpLatencyGroupDefinition>
 }
 
 export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows => {
@@ -188,7 +188,7 @@ export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows =
 			"cache.status": group.dimensions.cacheStatus ?? "unknown",
 			"http.status_class": statusClass(group.dimensions.edgeResponseStatus),
 			"server.address": topHosts.has(host) ? host : OTHER_BUCKET,
-		}
+		} satisfies Attrs
 		const counters: ReadonlyArray<readonly [string, string, string, number]> = [
 			[
 				METRIC_HTTP_REQUESTS,
@@ -296,8 +296,8 @@ export interface MapHttpPathGroupsInput {
 	readonly orgId: string
 	readonly zoneId: string
 	readonly zoneName: string
-	readonly groups: ReadonlyArray<HttpPathGroupShape>
-	readonly errors: ReadonlyArray<HttpPathGroupShape>
+	readonly groups: ReadonlyArray<HttpPathGroupDefinition>
+	readonly errors: ReadonlyArray<HttpPathGroupDefinition>
 }
 
 export const mapHttpPathGroups = (input: MapHttpPathGroupsInput): CloudflareMetricRows => {
@@ -316,7 +316,7 @@ export const mapHttpPathGroups = (input: MapHttpPathGroupsInput): CloudflareMetr
 	const foldPath = foldTail(weights, MAX_HTTP_PATHS)
 
 	const push = (
-		group: HttpPathGroupShape,
+		group: HttpPathGroupDefinition,
 		metricName: string,
 		description: string,
 		unit: string,
@@ -370,8 +370,8 @@ export interface MapHttpDimensionGroupsInput {
 	readonly orgId: string
 	readonly zoneId: string
 	readonly zoneName: string
-	readonly countries: ReadonlyArray<HttpCountryGroupShape>
-	readonly clients: ReadonlyArray<HttpClientGroupShape>
+	readonly countries: ReadonlyArray<HttpCountryGroupDefinition>
+	readonly clients: ReadonlyArray<HttpClientGroupDefinition>
 }
 
 export const mapHttpDimensionGroups = (input: MapHttpDimensionGroupsInput): CloudflareMetricRows => {
@@ -393,7 +393,7 @@ export const mapHttpDimensionGroups = (input: MapHttpDimensionGroupsInput): Clou
 	for (const group of input.countries) {
 		const attributes: Attrs = {
 			"geo.country_iso_code": foldCountry(group.dimensions.clientCountryName ?? "unknown"),
-		}
+		} satisfies Attrs
 		const counters: ReadonlyArray<readonly [string, string, string, number]> = [
 			[
 				METRIC_HTTP_REQUESTS_BY_COUNTRY,
@@ -454,7 +454,7 @@ export interface MapFirewallGroupsInput {
 	readonly orgId: string
 	readonly zoneId: string
 	readonly zoneName: string
-	readonly groups: ReadonlyArray<FirewallGroupShape>
+	readonly groups: ReadonlyArray<FirewallGroupDefinition>
 }
 
 export const mapFirewallGroups = (input: MapFirewallGroupsInput): CloudflareMetricRows => {
@@ -504,7 +504,7 @@ export interface MapDnsGroupsInput {
 	readonly orgId: string
 	readonly zoneId: string
 	readonly zoneName: string
-	readonly groups: ReadonlyArray<DnsGroupShape>
+	readonly groups: ReadonlyArray<DnsGroupDefinition>
 }
 
 export const mapDnsGroups = (input: MapDnsGroupsInput): CloudflareMetricRows => {
@@ -555,7 +555,7 @@ const queueResourceAttrs = (orgId: string, accountId: string, queueId: string): 
 export interface MapQueueBacklogGroupsInput {
 	readonly orgId: string
 	readonly accountId: string
-	readonly groups: ReadonlyArray<QueueBacklogGroupShape>
+	readonly groups: ReadonlyArray<QueueBacklogGroupDefinition>
 }
 
 export const mapQueueBacklogGroups = (input: MapQueueBacklogGroupsInput): CloudflareMetricRows => {
@@ -597,7 +597,7 @@ export const mapQueueBacklogGroups = (input: MapQueueBacklogGroupsInput): Cloudf
 export interface MapQueueConsumersGroupsInput {
 	readonly orgId: string
 	readonly accountId: string
-	readonly groups: ReadonlyArray<QueueConsumersGroupShape>
+	readonly groups: ReadonlyArray<QueueConsumersGroupDefinition>
 }
 
 export const mapQueueConsumersGroups = (input: MapQueueConsumersGroupsInput): CloudflareMetricRows => {
@@ -625,7 +625,7 @@ export const mapQueueConsumersGroups = (input: MapQueueConsumersGroupsInput): Cl
 export interface MapDurableObjectsGroupsInput {
 	readonly orgId: string
 	readonly accountId: string
-	readonly groups: ReadonlyArray<DurableObjectsGroupShape>
+	readonly groups: ReadonlyArray<DurableObjectsGroupDefinition>
 	/** Same live-script filter as Workers invocations — DOs belong to their implementing Worker. */
 	readonly liveScripts?: ReadonlySet<string> | null
 }
@@ -644,7 +644,7 @@ export const mapDurableObjectsGroups = (input: MapDurableObjectsGroupsInput): Cl
 			"service.name": serviceName,
 			"cloud.provider": "cloudflare",
 			"cloudflare.account.id": input.accountId,
-		}
+		} satisfies Attrs
 
 		const counters: ReadonlyArray<readonly [string, string, string, number]> = [
 			[METRIC_DO_REQUESTS, "Durable Object requests", "{requests}", group.sum?.requests ?? 0],
@@ -695,7 +695,7 @@ export const mapDurableObjectsGroups = (input: MapDurableObjectsGroupsInput): Cl
 export interface MapWorkersGroupsInput {
 	readonly orgId: string
 	readonly accountId: string
-	readonly groups: ReadonlyArray<WorkersGroupShape>
+	readonly groups: ReadonlyArray<WorkersGroupDefinition>
 	/**
 	 * Live script names (REST enumeration). GraphQL returns groups for whatever produced
 	 * invocations in the window — including deleted scripts (torn-down PR previews with lingering
@@ -719,8 +719,8 @@ export const mapWorkersGroups = (input: MapWorkersGroupsInput): CloudflareMetric
 			"service.name": serviceName,
 			"cloud.provider": "cloudflare",
 			"cloudflare.account.id": input.accountId,
-		}
-		const attributes: Attrs = { "worker.status": group.dimensions.status ?? "unknown" }
+		} satisfies Attrs
+		const attributes: Attrs = { "worker.status": group.dimensions.status ?? "unknown" } satisfies Attrs
 
 		const counters: ReadonlyArray<readonly [string, string, string, number]> = [
 			[METRIC_WORKER_REQUESTS, "Worker invocations", "{requests}", group.sum?.requests ?? 0],

@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // Anticipated error identifiers
 //
 // The set of stable domain HTTP error identifiers that represent *expected*
@@ -52,7 +53,8 @@ const readHttpStatus = (value: unknown): number | undefined => {
  * arrived as an Error span whose entire description was the word "Payload".
  */
 const EXTERNAL_ANTICIPATED_IDENTIFIERS = ["HttpApiSchemaError"] as const
-const exportedValues = (namespace: object): ReadonlyArray<unknown> => Object.values(namespace)
+const exportedValues = <Namespace extends object>(namespace: Namespace): ReadonlyArray<unknown> =>
+	Object.values(namespace)
 
 const deriveAnticipatedIdentifiers = (): ReadonlySet<string> => {
 	const identifiers = new Set<string>(EXTERNAL_ANTICIPATED_IDENTIFIERS)

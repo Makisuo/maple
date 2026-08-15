@@ -65,7 +65,7 @@ const ALERT_TEMPLATES: Record<string, AlertTemplate> = {
 		defaultThreshold: 100,
 		defaults: {},
 	},
-}
+} satisfies Record<string, AlertTemplate>
 
 interface CreateAlertRuleParams {
 	name: string
@@ -186,7 +186,7 @@ function buildAlertRuleRequest(
 		windowMinutes,
 		destinationIds,
 		...templateDefaults,
-	}
+	} satisfies Record<string, unknown>
 
 	if (params.enabled !== undefined) request.enabled = params.enabled
 	if (params.service_names) request.serviceNames = splitCsv(params.service_names)
@@ -236,7 +236,7 @@ const comparatorLabel: Record<string, string> = {
 	gte: ">=",
 	lt: "<",
 	lte: "<=",
-}
+} satisfies Record<string, string>
 
 export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 	server.tool(

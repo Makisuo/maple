@@ -28,7 +28,7 @@ interface SchedulerStats {
 	readonly pendingResults: number
 }
 
-export interface ScrapeSchedulerShape {
+export interface ScrapeSchedulerApi {
 	/**
 	 * Run the scraper forever: reconcile the target list on an interval,
 	 * keep one scrape-loop fiber per target, flush scrape results back to the
@@ -189,7 +189,7 @@ export const sendResultsInChunks = <E>(
 		return { unsent: [], error: null }
 	})
 
-export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSchedulerShape>()(
+export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSchedulerApi>()(
 	"@maple/scraper/ScrapeScheduler",
 	{
 		make: Effect.gen(function* () {
@@ -223,11 +223,15 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 						subTargetKey: target.subTargetKey,
 						durationMs,
 						...(outcome.samplesScraped !== undefined
-							? { samplesScraped: outcome.samplesScraped }
-							: {}),
+							? {
+									samplesScraped: outcome.samplesScraped,
+								}
+							: undefined),
 						...(outcome.samplesPostMetricRelabeling !== undefined
-							? { samplesPostMetricRelabeling: outcome.samplesPostMetricRelabeling }
-							: {}),
+							? {
+									samplesPostMetricRelabeling: outcome.samplesPostMetricRelabeling,
+								}
+							: undefined),
 					}),
 				)
 
@@ -351,8 +355,10 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 									"maple.scraper.target_name": target.name,
 									"maple.scraper.interval_seconds": target.scrapeIntervalSeconds,
 									...(target.subTargetKey
-										? { "maple.scraper.sub_target_key": target.subTargetKey }
-										: {}),
+										? {
+												"maple.scraper.sub_target_key": target.subTargetKey,
+											}
+										: undefined),
 								},
 							}),
 							Effect.catchTag("@maple/scraper/ScrapeAttemptFailed", ({ outcome }) =>
@@ -400,7 +406,9 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 								Effect.annotateLogs({
 									targetId: target.id,
 									orgId: target.orgId,
-									...(target.subTargetKey ? { subTargetKey: target.subTargetKey } : {}),
+									...(target.subTargetKey
+										? { subTargetKey: target.subTargetKey }
+										: undefined),
 									delayMs,
 									retryAfterMs: outcome.retryAfterMs,
 									consecutiveBackoffs: consecutiveBackoffs + 1,
@@ -530,7 +538,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 				} satisfies SchedulerStats
 			})
 
-			return { run, stats } satisfies ScrapeSchedulerShape
+			return { run, stats } satisfies ScrapeSchedulerApi
 		}),
 	},
 ) {

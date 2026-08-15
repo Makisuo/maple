@@ -45,12 +45,12 @@ const probeLocal = (client: HttpClient.HttpClient, baseUrl: string): Effect.Effe
 	)
 }
 
-export interface ModeShape {
+export interface ModeApi {
 	/** Resolve the active backend. Fails with `ModeError` if none is available. */
 	readonly resolve: Effect.Effect<ResolvedMode, ModeError>
 }
 
-export class Mode extends Context.Service<Mode, ModeShape>()("@maple/cli/Mode", {
+export class Mode extends Context.Service<Mode, ModeApi>()("@maple/cli/Mode", {
 	make: Effect.gen(function* () {
 		const config = yield* MapleConfig
 		const client = yield* HttpClient.HttpClient
@@ -100,7 +100,7 @@ export class Mode extends Context.Service<Mode, ModeShape>()("@maple/cli/Mode", 
 			})
 		})
 
-		return { resolve } satisfies ModeShape
+		return { resolve } satisfies ModeApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

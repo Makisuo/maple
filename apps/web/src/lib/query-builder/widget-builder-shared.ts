@@ -276,7 +276,7 @@ const TRACES_AGGREGATION_TITLES: Record<string, string> = {
 	p99_duration: "P99 duration",
 	error_rate: "Error rate",
 	apdex: "Apdex",
-}
+} satisfies Record<string, string>
 
 /**
  * Human-readable fallback title derived from the first visible query, e.g.
@@ -410,7 +410,7 @@ export function buildListEndpointParams(
 	const { clauses } = parseWhereClauses(whereClause)
 	// NOTE: startTime/endTime are injected by useWidgetData from the dashboard
 	// time range — do NOT include them here or they'll clash with interpolation.
-	const params: Record<string, unknown> = { limit }
+	const params: Record<string, unknown> = { limit } satisfies Record<string, unknown>
 
 	if (dataSource === "traces") {
 		const attributeFilters: Array<{ key: string; value: string; matchMode?: string }> = []

@@ -1,3 +1,6 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
+// BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // rrweb touches the DOM at import time in a real browser; here we only need the
@@ -85,7 +88,10 @@ describe("startRecording", () => {
 
 	it("skips unserializable events without breaking the stream", async () => {
 		const recorder = startRecording(CONFIG, "session-1")
-		const cyclic: Record<string, unknown> = { type: INCREMENTAL, timestamp: 1_000 }
+		interface CyclicEvent extends Record<string, unknown> {
+			data?: CyclicEvent
+		}
+		const cyclic: CyclicEvent = { type: INCREMENTAL, timestamp: 1_000 }
 		cyclic.data = cyclic
 		emitRef!(cyclic)
 		emitRef!(fullSnapshot(2_000), true)

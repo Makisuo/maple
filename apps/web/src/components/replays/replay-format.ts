@@ -1,4 +1,5 @@
 import { warehouseDateTimeToIso, formatWarehouseDateTime } from "@maple/query-engine"
+import * as Predicate from "effect/Predicate"
 import type { ReplayFormat } from "./engine/replay-engine"
 import type { ActionKind } from "./replay-player-context"
 
@@ -14,7 +15,7 @@ export const MARKER_STYLES: Record<ActionKind, string> = {
 	input: "bg-sky-400",
 	scroll: "bg-violet-400",
 	nav: "bg-emerald-400",
-}
+} satisfies Record<ActionKind, string>
 
 /** Human label per action kind, paired with `MARKER_STYLES` for the shared legend. */
 export const MARKER_LABELS: Record<ActionKind, string> = {
@@ -22,7 +23,7 @@ export const MARKER_LABELS: Record<ActionKind, string> = {
 	input: "Input",
 	scroll: "Scroll",
 	nav: "Navigate",
-}
+} satisfies Record<ActionKind, string>
 
 // Partition-pruning window for the session-detail warehouse queries. The replay
 // tables are PARTITION BY toDate(...) over a 30-day TTL, so a query filtered only
@@ -55,8 +56,8 @@ export function recordedMarker(resourceAttributes: string | null | undefined): b
 	} catch {
 		return undefined
 	}
-	if (typeof parsed !== "object" || parsed === null) return undefined
-	const marker = (parsed as Record<string, unknown>)["maple.session.recorded"]
+	if (!Predicate.isObject(parsed)) return undefined
+	const marker = parsed["maple.session.recorded"]
 	if (marker === "true") return true
 	if (marker === "false") return false
 	return undefined
@@ -83,8 +84,8 @@ export function replayFormat(resourceAttributes: string | null | undefined): Rep
 	} catch {
 		return "rrweb"
 	}
-	if (typeof parsed !== "object" || parsed === null) return "rrweb"
-	return (parsed as Record<string, unknown>)["maple.session.replay_format"] === "video" ? "video" : "rrweb"
+	if (!Predicate.isObject(parsed)) return "rrweb"
+	return parsed["maple.session.replay_format"] === "video" ? "video" : "rrweb"
 }
 
 /** A warehouse partition-pruning window, shared by the session-detail atom callers. */

@@ -61,7 +61,7 @@ export interface LlmCallTags {
  */
 const openRouterTagBody = (tags: LlmCallTags) => ({
 	user: tags.orgId,
-	...(tags.sessionId === undefined ? {} : { session_id: tags.sessionId.slice(0, 256) }),
+	...(!(tags.sessionId === undefined) ? { session_id: tags.sessionId.slice(0, 256) } : undefined),
 	trace: { trace_name: tags.surface },
 })
 
@@ -179,7 +179,7 @@ const MODEL_LIMITS: Record<string, { readonly context: number; readonly output: 
 	// maximum. Held at the conservative default until someone measures it; override with
 	// `MAPLE_TRIAGE_MODEL_CONTEXT` if the real figure turns out to be higher.
 	"@cf/moonshotai/kimi-k2.6": { context: 128_000, output: 8_000 },
-}
+} satisfies Record<string, { readonly context: number; readonly output: number }>
 
 /** For a model not in the table at all. Low enough that an unknown model compacts rather than fails. */
 const DEFAULT_MODEL_LIMITS = { context: 128_000, output: 8_000 } as const
@@ -237,7 +237,7 @@ export const resolveTriageModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
 					OpenRouter.configure({
 						apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
 						headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
-						...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
+						...(!(tags === undefined) ? { http: { body: openRouterTagBody(tags) } } : undefined),
 					}).model(readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL),
 					// No default. This resolver serves chat, AI triage *and* the validator, so a
 					// number picked here would silently retune three stages with different shapes at
@@ -313,7 +313,7 @@ export const resolveLensModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
 					OpenRouter.configure({
 						apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
 						headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
-						...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
+						...(!(tags === undefined) ? { http: { body: openRouterTagBody(tags) } } : undefined),
 					}).model(
 						readString(env, "MAPLE_LENS_MODEL_OPENROUTER") ??
 							readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ??

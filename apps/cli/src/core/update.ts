@@ -35,6 +35,8 @@ export const CHECK_TTL_MS = 24 * 60 * 60 * 1000
 const CHECKSUM_TIMEOUT = Duration.seconds(30)
 const DOWNLOAD_TIMEOUT = Duration.minutes(2)
 
+const LatestReleaseResponse = Schema.Struct({ tag_name: Schema.optionalKey(Schema.String) })
+
 /** Drop a leading "v" so release tags ("v0.6.0") compare against MAPLE_VERSION
  *  ("0.6.0", already stripped in version.ts). */
 export const stripV = (v: string): string => v.replace(/^v/, "")
@@ -125,7 +127,7 @@ export const fetchLatestTag = (timeoutMs = 5000): Effect.Effect<string, UpdateEr
 			Effect.mapError((error) => toUpdateError("could not read GitHub release response", error)),
 		)
 		const body = yield* Effect.try({
-			try: () => JSON.parse(text) as { tag_name?: string },
+			try: () => Schema.decodeUnknownSync(Schema.fromJsonString(LatestReleaseResponse))(text),
 			catch: (error) => toUpdateError("could not decode GitHub release response", error),
 		})
 		if (!body.tag_name) {

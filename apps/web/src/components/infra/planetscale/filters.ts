@@ -35,14 +35,14 @@ export const FILTER_CHIP_LABEL: Record<PlanetScaleFilterKey, string> = {
 	branchStates: "state",
 	branchRoles: "role",
 	branchContains: "branch~",
-}
+} satisfies Record<PlanetScaleFilterKey, string>
 
 export const FILTER_SECTION_LABEL: Record<PlanetScaleFilterKey, string> = {
 	branches: "Branch",
 	branchStates: "State",
 	branchRoles: "Role",
 	branchContains: "Branch contains",
-}
+} satisfies Record<PlanetScaleFilterKey, string>
 
 const FILTER_KEYS = Object.keys(FILTER_CHIP_LABEL) as ReadonlyArray<PlanetScaleFilterKey>
 
@@ -132,7 +132,7 @@ export const BRANCH_STATE_LABEL: Record<BranchState, string> = {
 	provisioning: "Provisioning",
 	excluded: "Excluded",
 	untracked: "Not in inventory",
-}
+} satisfies Record<BranchState, string>
 
 export type BranchRole = "production" | "development"
 
@@ -142,7 +142,7 @@ export const branchRoleOf = (candidate: BranchCandidate): BranchRole =>
 export const BRANCH_ROLE_LABEL: Record<BranchRole, string> = {
 	production: "Production",
 	development: "Development",
-}
+} satisfies Record<BranchRole, string>
 
 /** Apply the filters to the merged branch list. Pure — the sidebar needs no server facets. */
 export function applyBranchFilters(

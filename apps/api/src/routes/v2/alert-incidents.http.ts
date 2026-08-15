@@ -40,8 +40,8 @@ export const HttpV2AlertIncidentsLive = HttpApiBuilder.group(MapleApiV2, "alertI
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
 						readModels
 							.listIncidents(tenant.orgId, {
-								...(query.status !== undefined ? { status: query.status } : {}),
-								...(query.rule_id !== undefined ? { ruleId: query.rule_id } : {}),
+								...(query.status !== undefined ? { status: query.status } : undefined),
+								...(query.rule_id !== undefined ? { ruleId: query.rule_id } : undefined),
 								limit,
 								offset,
 							})

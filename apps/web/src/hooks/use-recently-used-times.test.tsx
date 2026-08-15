@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 
 import { RECENTLY_USED_TIMES_STORAGE_KEY, type RecentTimeRange } from "@/atoms/recently-used-times-atoms"
 import { Registry, RegistryContext } from "@/lib/effect-atom"

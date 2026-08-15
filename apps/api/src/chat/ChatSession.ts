@@ -534,7 +534,7 @@ const foldInto = (transcript: Transcript, event: ChatEvent, createdAt: number): 
 				id: event.callId,
 				name: event.name,
 				input: event.input,
-				...(event.proposed === true ? { proposed: true } : {}),
+				...(event.proposed === true ? { proposed: true } : undefined),
 			} as ChatToolCall)
 			break
 		}
@@ -545,7 +545,7 @@ const foldInto = (transcript: Transcript, event: ChatEvent, createdAt: number): 
 				message.toolCalls[index] = {
 					...message.toolCalls[index],
 					output: event.output,
-					...(event.isError === true ? { isError: true } : {}),
+					...(event.isError === true ? { isError: true } : undefined),
 				} as ChatToolCall
 			}
 			break
@@ -575,7 +575,7 @@ const TASK_STATUS: Record<string, ChatTaskState["status"]> = {
 	error: "error",
 	aborted: "aborted",
 	"max-steps": "aborted",
-}
+} satisfies Record<string, ChatTaskState["status"]>
 
 /**
  * Route one sub-agent event into the transcript hanging off its parent's `task` tool call.

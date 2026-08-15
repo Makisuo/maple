@@ -99,7 +99,7 @@ export const eventTypeEmoji = (type: string) => {
 		resolve: "\u2705",
 		renotify: "\u{1F514}",
 		test: "\u{1F9EA}",
-	}
+	} satisfies Record<string, string>
 	return map[type] ?? "\u{1F4E2}"
 }
 
@@ -109,7 +109,7 @@ export const formatEventTypeLabel = (type: string) => {
 		resolve: "Resolved",
 		renotify: "Re-notification",
 		test: "Test",
-	}
+	} satisfies Record<string, string>
 	return map[type] ?? type
 }
 

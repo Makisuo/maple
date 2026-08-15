@@ -6,14 +6,14 @@ import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
-import { McpToolExecutor, type McpToolExecutorShape } from "./dispatcher"
+import { McpToolExecutor, type McpToolExecutorApi } from "./dispatcher"
 import { McpLive } from "./app"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
 
 const makeMcpToolExecutorStubLayer = (
-	execute: McpToolExecutorShape["execute"] = () =>
+	execute: McpToolExecutorApi["execute"] = () =>
 		Effect.succeed({ content: [{ type: "text" as const, text: "ok" }] }),
 ) => Layer.succeed(McpToolExecutor, { execute })
 

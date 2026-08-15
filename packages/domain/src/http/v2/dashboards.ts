@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema, SchemaGetter } from "effect"
 import {
@@ -25,7 +26,7 @@ import {
 } from "../dashboards"
 import { SORT_DIRECTIONS, STAT_AGGREGATES } from "@maple/widgets/dashboard"
 import {
-	QUERY_RESULT_SHAPES,
+	QUERY_RESULT_KINDS,
 	QueryBuilderFormulaSchema,
 	QueryBuilderQueryDraftSchema,
 	QueryComparisonSchema,
@@ -174,7 +175,7 @@ const V2WidgetTransform = Schema.Struct({
  */
 const V2QueryDataSource = Schema.Struct({
 	kind: Schema.Literal("query"),
-	resultShape: Schema.Literals(QUERY_RESULT_SHAPES),
+	resultShape: Schema.Literals(QUERY_RESULT_KINDS),
 	queries: Schema.Array(snakeCasedWire(QueryBuilderQueryDraftSchema)),
 	formulas: optional(Schema.Array(snakeCasedWire(QueryBuilderFormulaSchema))),
 	comparison: optional(snakeCasedWire(QueryComparisonSchema)),

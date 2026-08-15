@@ -23,12 +23,14 @@ export function buildRawSqlDataSource(args: {
 	return makeRawSqlDataSource({
 		sql: args.sql,
 		displayType: args.displayType,
-		...(args.granularitySeconds == null ? {} : { granularitySeconds: args.granularitySeconds }),
+		...(!(args.granularitySeconds == null) ? { granularitySeconds: args.granularitySeconds } : undefined),
 		// A scalar widget needs a reduceToValue transform so the tile reads
 		// `data[0].value`. Mirrors buildRawSqlDataSource in the web app.
 		...(widgetTypeByVisualization(args.visualization)?.isScalar === true
-			? { transform: { reduceToValue: { field: "value", aggregate: "first" } } }
-			: {}),
+			? {
+					transform: { reduceToValue: { field: "value", aggregate: "first" } },
+				}
+			: undefined),
 	})
 }
 
