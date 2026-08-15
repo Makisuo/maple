@@ -16,13 +16,7 @@
  * denylist would leak every future field by default, which is exactly the wrong
  * direction for a payload served without a session.
  */
-import {
-	dataSourceEndpoint,
-	dataSourceQuerySet,
-	dataSourceRawSql,
-	dataSourceTransform,
-	isQueryDataSource,
-} from "./access"
+import { dataSourceEndpoint, dataSourceQuerySet, dataSourceRawSql, dataSourceTransform } from "./access"
 
 /**
  * The data source as a viewer sees it: enough to choose a renderer, nothing
@@ -166,5 +160,3 @@ export function redactForShare(
 			: { refreshIntervalSeconds: document.refreshIntervalSeconds }),
 	}
 }
-
-export const __testables = { redactDataSource }
