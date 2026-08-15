@@ -354,7 +354,7 @@ eve's native idiom:
   which `agent/lib/thread-context.ts` renders out of its Block Kit attachment (see Notes).
 - **Approvals — both sides now interrupt, by different mechanisms:** the web chat stops the turn on
   a gated tool and emits a `tool-call` with `proposed: true` and no result
-  (`apps/api/src/chat/agent.ts`); the user approves and `POST /api/chat/apply` performs the
+  (`apps/api/src/chat/agent.ts`); the user approves and `POST /internal/chat/apply` performs the
   mutation, which is then recorded back into the transcript as that call's result. (Under Flue this
   was propose-then-apply with a fabricated `proposed` marker as the tool's _output_, because Flue's
   event stream had no human-in-the-loop primitive; that marker no longer exists.) eve has native

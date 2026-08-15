@@ -7,39 +7,25 @@ import { TemplateMiner, TemplateMinerConfig } from "../drain"
 const DEFAULT_SAMPLE_SIZE = 10_000
 const DEFAULT_LIMIT = 50
 
+/** The only fields clustering reads — kept structural so any log row shape fits. */
+export interface ClusterableLogRow {
+	readonly body?: unknown
+	readonly severityText?: unknown
+	readonly serviceName?: unknown
+}
+
 /**
- * Cluster log messages into Drain templates and return a ranked summary.
+ * Cluster log bodies into Drain templates, ranked by frequency.
  *
- * Performance note: this samples up to `sampleSize` recent logs from the
- * configured time range / filters and feeds each body through the Drain
- * algorithm in-process. Memory is O(sample), not O(matched). Pair with a
- * narrow time range and selective filters for large data sets.
+ * Pure and transport-agnostic on purpose: the rows may come from the warehouse
+ * executor (local mode) or from `POST /v2/logs/search` (remote mode), and both
+ * must produce byte-identical patterns. Keeping one implementation is the
+ * point — two copies of a clustering heuristic drift silently.
  */
-export const mineLogPatterns = Effect.fn("Observability.mineLogPatterns")(function* (
-	input: MineLogPatternsInput,
-) {
-	const executor = yield* WarehouseExecutor
-	const sampleSize = input.sampleSize ?? DEFAULT_SAMPLE_SIZE
-	const limit = input.limit ?? DEFAULT_LIMIT
-
-	const optionalParams: Record<string, unknown> = {
-		...(input.service && { service: input.service }),
-		...(input.severity && { severity: input.severity }),
-		...(input.search && { search: input.search }),
-		...(input.traceId && { trace_id: input.traceId }),
-	} satisfies Record<string, unknown>
-
-	const result = yield* executor.query<ListLogsOutput>(
-		"list_logs",
-		{
-			start_time: input.timeRange.startTime,
-			end_time: input.timeRange.endTime,
-			limit: sampleSize,
-			...optionalParams,
-		},
-		{ profile: "list" },
-	)
-
+export const clusterLogPatterns = (
+	rows: ReadonlyArray<ClusterableLogRow>,
+	limit: number = DEFAULT_LIMIT,
+): { patterns: LogPattern[]; clusterCount: number } => {
 	const config = new TemplateMinerConfig()
 	// Common variable patterns. Order matters — IPs and UUIDs first, then
 	// generic numbers, so a UUID isn't masked by the numeric token.
@@ -62,7 +48,7 @@ export const mineLogPatterns = Effect.fn("Observability.mineLogPatterns")(functi
 		}
 	>()
 
-	for (const row of result.data) {
+	for (const row of rows) {
 		const body = String(row.body ?? "")
 		if (body.length === 0) continue
 
@@ -99,8 +85,46 @@ export const mineLogPatterns = Effect.fn("Observability.mineLogPatterns")(functi
 		.sort((a, b) => b.count - a.count)
 		.slice(0, limit)
 
+	return { patterns, clusterCount: clusters.size }
+}
+
+/**
+ * Cluster log messages into Drain templates and return a ranked summary.
+ *
+ * Performance note: this samples up to `sampleSize` recent logs from the
+ * configured time range / filters and feeds each body through the Drain
+ * algorithm in-process. Memory is O(sample), not O(matched). Pair with a
+ * narrow time range and selective filters for large data sets.
+ */
+export const mineLogPatterns = Effect.fn("Observability.mineLogPatterns")(function* (
+	input: MineLogPatternsInput,
+) {
+	const executor = yield* WarehouseExecutor
+	const sampleSize = input.sampleSize ?? DEFAULT_SAMPLE_SIZE
+	const limit = input.limit ?? DEFAULT_LIMIT
+
+	const optionalParams: Record<string, unknown> = {
+		...(input.service && { service: input.service }),
+		...(input.severity && { severity: input.severity }),
+		...(input.search && { search: input.search }),
+		...(input.traceId && { trace_id: input.traceId }),
+	} satisfies Record<string, unknown>
+
+	const result = yield* executor.query<ListLogsOutput>(
+		"list_logs",
+		{
+			start_time: input.timeRange.startTime,
+			end_time: input.timeRange.endTime,
+			limit: sampleSize,
+			...optionalParams,
+		},
+		{ profile: "list" },
+	)
+
+	const { patterns, clusterCount } = clusterLogPatterns(result.data, limit)
+
 	yield* Effect.annotateCurrentSpan("totalSampled", result.data.length)
-	yield* Effect.annotateCurrentSpan("clusterCount", clusters.size)
+	yield* Effect.annotateCurrentSpan("clusterCount", clusterCount)
 
 	return {
 		timeRange: input.timeRange,

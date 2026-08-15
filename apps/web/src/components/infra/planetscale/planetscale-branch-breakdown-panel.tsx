@@ -5,7 +5,7 @@ import { formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
 import { ColumnHead, DataTable, MetaChip, useTableSort } from "../primitives/data-table"
-import { relativeRatio, shareTint } from "../primitives/share-tint"
+import { relativeRatio, shareBar } from "../primitives/share-bar"
 import type { BranchCandidate } from "./branch-selection"
 import { BRANCH_STATE_LABEL, branchStateOf } from "./filters"
 import { MISSING, formatLag, formatStoragePercent, lagClass, utilizationClass } from "./metrics"
@@ -254,7 +254,7 @@ export function PlanetScaleBranchBreakdownPanel({
 							<div
 								key="__other"
 								className="flex items-center gap-3 px-3 py-1.5"
-								style={{ backgroundImage: shareTint(row.ratio) }}
+								style={shareBar(row.ratio)}
 							>
 								{Cell}
 							</div>
@@ -271,7 +271,7 @@ export function PlanetScaleBranchBreakdownPanel({
 								"flex w-full items-center gap-3 px-3 py-1.5 text-left transition-colors hover:bg-muted/40",
 								selected && "bg-muted/40",
 							)}
-							style={{ backgroundImage: shareTint(row.ratio) }}
+							style={shareBar(row.ratio)}
 						>
 							{Cell}
 						</button>
@@ -281,9 +281,9 @@ export function PlanetScaleBranchBreakdownPanel({
 
 			<div className="border-t border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
 				{spec.additive
-					? `Shaded by share of ${formatNumber(total)} total across ${candidates.length} branch${candidates.length === 1 ? "" : "es"}.`
+					? `Bars show share of ${formatNumber(total)} total across ${candidates.length} branch${candidates.length === 1 ? "" : "es"}.`
 					: // Not "% of database": these are maxima, and they do not sum.
-						`Shaded relative to the worst branch (${spec.format(max)}). Peaks don't sum, so there is no database total.`}
+						`Bars are relative to the worst branch (${spec.format(max)}). Peaks don't sum, so there is no database total.`}
 			</div>
 		</div>
 	)

@@ -6,7 +6,7 @@ import {
 	ChatToolNotApplicableError,
 	ChatToolNotFoundError,
 	CurrentTenant,
-	MapleApi,
+	MapleInternalApi,
 } from "@maple/domain/http"
 import { Cause, Effect, Schema } from "effect"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
@@ -31,7 +31,7 @@ const executionDefect = (tool: string, defect: unknown) =>
 	)
 
 /**
- * `POST /api/chat/apply` — apply an approval-gated AI chat proposal by re-running
+ * `POST /internal/chat/apply` — apply an approval-gated AI chat proposal by re-running
  * the named MCP mutation tool under the caller's authenticated tenant. The
  * authorization middleware has already resolved CurrentTenant; the executor
  * requires that tenant as an ordinary argument and closes all handler services.
@@ -84,7 +84,7 @@ const recordApplyOutcome = (
 		)
 	})
 
-export const HttpChatLive = HttpApiBuilder.group(MapleApi, "chat", (handlers) =>
+export const HttpChatLive = HttpApiBuilder.group(MapleInternalApi, "chat", (handlers) =>
 	handlers.handle("apply", ({ payload }) =>
 		Effect.gen(function* () {
 			const tool = payload.tool

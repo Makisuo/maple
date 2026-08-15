@@ -13,7 +13,7 @@ import { CHART_HEIGHT, ChartCard, ChartCardMessage } from "../infra/primitives/c
 import type { AnalyticsMetricDescriptor, AnalyticsMetricSource } from "./metrics"
 
 // The page's one accent, same as the KPI sparklines (`SPARK_COLOR.neutral`) and
-// the row tints (`shareTint`). Deliberately not `--chart-1`, which is this same
+// the row bars (`shareBar`). Deliberately not `--chart-1`, which is this same
 // amber only in the dark theme and a blue in the light one — the chart would
 // have disagreed with the tile that selected it, at half of all page loads.
 const PRIMARY_COLOR = "var(--primary)"

@@ -1,15 +1,9 @@
 import { Effect, Layer } from "effect"
-import { HttpClient } from "effect/unstable/http"
-import {
-	WarehouseExecutor,
-	type WarehouseExecutorApi,
-	type SqlQueryOptions,
-} from "@maple/query-engine/observability"
+import { WarehouseExecutor, type SqlQueryOptions } from "@maple/query-engine/observability"
 import { WarehouseConfigError } from "@maple/domain/http/warehouse-errors"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
 import { Mode } from "./mode"
 import { makeLocalWarehouseExecutorApi } from "./executor"
-import { makeRemoteWarehouseExecutorApi } from "./remote-executor"
 
 /**
  * Provides `WarehouseExecutor` whose concrete backend (local chDB vs remote
@@ -30,16 +24,28 @@ export const WarehouseExecutorFromMode = Layer.effect(
 	WarehouseExecutor,
 	Effect.gen(function* () {
 		const mode = yield* Mode
-		const client = yield* HttpClient.HttpClient
 		const getExecutor = yield* Effect.cached(
 			mode.resolve.pipe(
-				Effect.map(
-					(m): WarehouseExecutorApi =>
-						m._tag === "local"
-							? makeLocalWarehouseExecutorApi(m.baseUrl)
-							: makeRemoteWarehouseExecutorApi(client, m.apiUrl, m.token, m.orgId ?? ""),
+				Effect.flatMap((m) =>
+					m._tag === "local"
+						? Effect.succeed(makeLocalWarehouseExecutorApi(m.baseUrl))
+						: // Remote mode never reaches the executor: `operations.ts`
+							// dispatches to the v2 client before asking for one. Anything
+							// that lands here is an operation that forgot to branch, so
+							// fail loudly rather than silently querying the local store.
+							Effect.fail(
+								new WarehouseConfigError({
+									message:
+										"Remote mode does not use the warehouse executor — this operation is missing its v2 dispatch.",
+									pipeName: "mode",
+								}),
+							),
 				),
-				Effect.mapError((e) => new WarehouseConfigError({ message: e.message, pipeName: "mode" })),
+				Effect.mapError((e) =>
+					e instanceof WarehouseConfigError
+						? e
+						: new WarehouseConfigError({ message: e.message, pipeName: "mode" }),
+				),
 			),
 		)
 		return WarehouseExecutor.of({
