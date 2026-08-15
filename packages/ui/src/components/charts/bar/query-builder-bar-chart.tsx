@@ -18,13 +18,12 @@ import {
 } from "../../ui/chart"
 import { formatValueByUnit, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
-const fallbackData: Record<string, unknown>[] = [
-	{ bucket: "2026-01-01T00:00:00Z", A: 12, B: 8 },
-	{ bucket: "2026-01-01T01:00:00Z", A: 15, B: 9 },
-	{ bucket: "2026-01-01T02:00:00Z", A: 11, B: 10 },
-	{ bucket: "2026-01-01T03:00:00Z", A: 18, B: 12 },
-	{ bucket: "2026-01-01T04:00:00Z", A: 16, B: 11 },
-]
+// No sample-data fallback: substituting fixtures for real rows made every
+// misconfigured or mis-fed chart (a share page handing over an envelope where an
+// array belongs, an empty result) draw plausible-looking curves labelled "A" and
+// "B" instead of an empty plot. Gallery thumbnails pass their sample rows in
+// explicitly via `data`.
+const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
 
 function asFiniteNumber(value: unknown): number {
 	const parsed = typeof value === "number" ? value : Number(value)
@@ -50,7 +49,7 @@ export function QueryBuilderBarChart({
 	thresholds,
 }: BaseChartProps) {
 	const { chartData, seriesDefinitions } = React.useMemo(() => {
-		const source = Array.isArray(data) && data.length > 0 ? data : fallbackData
+		const source = Array.isArray(data) ? data : EMPTY_ROWS
 		const rawSeriesKeys: string[] = []
 		const seenSeriesKeys = new Set<string>()
 

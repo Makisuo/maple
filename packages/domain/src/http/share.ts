@@ -384,6 +384,16 @@ export type ShareTimeRange = Schema.Schema.Type<typeof ShareTimeRange>
 export const ShareWidgetDataRequest = Schema.Struct({
 	widgetId: Schema.String,
 	source: Schema.optionalKey(Schema.Literals(["primary", "sparkline"])),
+	/**
+	 * How many points the tile can display — its rendered pixel width, as the
+	 * signed-in board sends on its own fetches. Not a query: it only picks the
+	 * auto bucket width for a timeseries tile (`planWidgetRequest` attaches it
+	 * to nothing else), and it is bounded server-side like every other planner
+	 * input. Without it a shared chart buckets on the fixed 100-point policy
+	 * while the board it shares buckets on the width model, and the two draw
+	 * different curves for the same widget.
+	 */
+	maxDataPoints: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
 }).annotate({ identifier: "ShareWidgetDataRequest", title: "Shared widget data request" })
 export type ShareWidgetDataRequest = Schema.Schema.Type<typeof ShareWidgetDataRequest>
 

@@ -5,7 +5,7 @@ import {
 	LAB_EMPTY_RANGE_STRATEGY,
 	type EmptyRangeFallbackStrategy,
 	type TimeseriesQuerySetDiagnostics,
-	resolveFallbackStrategy,
+	fallbackStrategyFromWire,
 	runTimeseriesQuerySet,
 } from "@maple/query-engine/query-set"
 import { decodeInput, invalidWarehouseInput } from "@/api/warehouse/effect-utils"
@@ -64,33 +64,11 @@ interface QueryBuilderTimeseriesResponse {
 }
 
 /**
- * The wire strategy shape (`enableEmptyRangeFallback` / `fallbackWindowSeconds` /
- * `maxFallbackRangeSeconds`) mapped onto the package's.
- *
- * The wire names stay as they are: `use-widget-data` sends them on every widget
- * fetch, so renaming them would be a behaviour change dressed as a refactor.
+ * The wire strategy shape mapped onto the package's — shared with the share
+ * API's resolver, so both hosts read the same widget params the same way.
  */
 function resolveStrategy(input: QueryBuilderTimeseriesInput): EmptyRangeFallbackStrategy {
-	return resolveFallbackStrategy(
-		{
-			...(!(input.strategy?.enableEmptyRangeFallback === undefined)
-				? {
-						enabled: input.strategy.enableEmptyRangeFallback,
-					}
-				: undefined),
-			...(!(input.strategy?.fallbackWindowSeconds === undefined)
-				? {
-						windowSeconds: input.strategy.fallbackWindowSeconds,
-					}
-				: undefined),
-			...(!(input.strategy?.maxFallbackRangeSeconds === undefined)
-				? {
-						maxRangeSeconds: input.strategy.maxFallbackRangeSeconds,
-					}
-				: undefined),
-		},
-		LAB_EMPTY_RANGE_STRATEGY,
-	)
+	return fallbackStrategyFromWire(input.strategy, LAB_EMPTY_RANGE_STRATEGY)
 }
 
 const executor = makeWarehouseExecutor("queryEngine.timeseriesQuery")

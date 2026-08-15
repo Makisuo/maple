@@ -19,18 +19,25 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useAuth } from "@clerk/clerk-react"
 import { Schema } from "effect"
-import { useMemo } from "react"
-import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
-import type { WidgetDataState } from "@/components/dashboard-builder/types"
+import { useCallback, useMemo, useState } from "react"
+import { resolveTimeRange } from "@/atoms/dashboard-time-range-atoms"
 import { ReadOnlyDashboardView } from "@/components/dashboard-builder/read-only-dashboard-view"
-import { SharedWidgetRenderer, ShareWidgetStatesProvider } from "@/components/share/shared-widget-renderer"
-import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import {
+	SharedWidgetRenderer,
+	ShareWidgetOptionsReporterProvider,
+	ShareWidgetStatesProvider,
+	type ShareWidgetOptionsReporter,
+} from "@/components/share/shared-widget-renderer"
+import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
+import { formatTimeRangeDisplay, presetLabel } from "@/lib/time-utils"
+import {
+	shareTimeRange,
 	useShareWidgetData,
 	useSharedDashboard,
 	type ShareResolveError,
 	type SharedDashboard,
 	type ShareTimeRange,
+	type ShareWidgetRequestOptions,
 } from "@/hooks/use-share-dashboard"
 import { MapleMark } from "@maple/ui/components/icons/maple-mark"
 import { Button } from "@maple/ui/components/ui/button"
@@ -52,10 +59,44 @@ export const Route = createFileRoute("/share/$token")({
 	validateSearch: Schema.toStandardSchemaV1(ShareSearch),
 })
 
-/** Warehouse datetime format, which is what the share API accepts. */
-const formatWarehouseTime = (date: Date): string => date.toISOString().replace("T", " ").slice(0, 19)
+/**
+ * The window a share is viewed over, and how to describe it.
+ *
+ * `?from`/`?to` pin an absolute window; otherwise it is the board's own stored
+ * `timeRange`, resolved through the same `resolveTimeRange` the signed-in
+ * dashboard seeds its picker from — same relative grammar, same cache-grid
+ * snapping, same `"1h"` fallback for a stored preset this build cannot read.
+ * The share page used to hardcode "last 12 hours" here, which is how a board on
+ * "Last 1 hour" shared as a board on twelve.
+ */
+interface ShareWindow {
+	readonly timeRange: ShareTimeRange
+	readonly label: string
+}
 
-const DEFAULT_RANGE_HOURS = 12
+const DEFAULT_SHARE_TIME_RANGE = { type: "relative", value: "1h" } as const
+
+const resolveShareWindow = (
+	search: { readonly from?: string; readonly to?: string },
+	stored: unknown,
+): ShareWindow | null => {
+	if (search.from !== undefined && search.to !== undefined) {
+		return {
+			timeRange: { startTime: search.from, endTime: search.to },
+			label: formatTimeRangeDisplay(search.from, search.to),
+		}
+	}
+	const timeRange = shareTimeRange(stored) ?? DEFAULT_SHARE_TIME_RANGE
+	const resolved = resolveTimeRange(timeRange)
+	if (resolved === null) return null
+	return {
+		timeRange: resolved,
+		label:
+			timeRange.type === "relative"
+				? presetLabel(timeRange.value)
+				: formatTimeRangeDisplay(resolved.startTime, resolved.endTime),
+	}
+}
 
 /**
  * Split in two so `useAuth` is never called conditionally.
@@ -77,16 +118,6 @@ function SharePageContent({ isSignedIn }: { isSignedIn: boolean }) {
 	const { token } = Route.useParams()
 	const search = Route.useSearch()
 	const state = useSharedDashboard(token, isSignedIn)
-
-	const timeRange = useMemo<ShareTimeRange>(() => {
-		const now = new Date()
-		const from =
-			search.from ?? formatWarehouseTime(new Date(now.getTime() - DEFAULT_RANGE_HOURS * 3600_000))
-		const to = search.to ?? formatWarehouseTime(now)
-		return { startTime: from, endTime: to }
-		// Recomputed only when the URL changes: a fresh `new Date()` on every
-		// render would re-key the fetch effect forever.
-	}, [search.from, search.to])
 
 	if (state.status === "loading") {
 		return (
@@ -123,7 +154,8 @@ function SharePageContent({ isSignedIn }: { isSignedIn: boolean }) {
 			<ShareBody
 				share={state.share}
 				token={token}
-				timeRange={timeRange}
+				from={search.from}
+				to={search.to}
 				signedIn={isSignedIn}
 				embed={search.embed === true}
 			/>
@@ -311,37 +343,95 @@ function CenteredCard({
 function ShareBody({
 	share,
 	token,
-	timeRange,
+	from,
+	to,
 	signedIn,
 	embed,
 }: {
 	share: SharedDashboard
 	token: string
-	timeRange: ShareTimeRange
+	from: string | undefined
+	to: string | undefined
 	signedIn: boolean
 	embed: boolean
 }) {
-	const widgetIds = useMemo(
-		() => share.dashboard.widgets.map((widget) => widget.id),
-		[share.dashboard.widgets],
+	// Recomputed only when the URL or the resolved board changes: re-resolving
+	// a relative preset on every render would re-key the fetch effect forever.
+	const window = useMemo(
+		() => resolveShareWindow({ from, to }, share.dashboard.timeRange),
+		[from, to, share.dashboard.timeRange],
 	)
 	const variableValues = useMemo<Record<string, string>>(() => ({}), [])
-	const { states } = useShareWidgetData(token, widgetIds, timeRange, variableValues, true, signedIn)
+
+	// Each mounted tile reports its request options (its measured width) here;
+	// a widget is fetched once it has — and only it refetches when its options
+	// change. Tiles in a collapsed group or an inactive tab never mount, never
+	// report, and are never queried, exactly as on the signed-in board.
+	const [options, setOptions] = useState<Readonly<Record<string, ShareWidgetRequestOptions>>>({})
+	const report = useCallback<ShareWidgetOptionsReporter>((widgetId, next) => {
+		setOptions((current) => {
+			const previous = current[widgetId]
+			if (previous !== undefined && previous.maxDataPoints === next.maxDataPoints) return current
+			return { ...current, [widgetId]: next }
+		})
+	}, [])
+	const reportedWidgets = useMemo(
+		() => share.dashboard.widgets.filter((widget) => options[widget.id] !== undefined),
+		[share.dashboard.widgets, options],
+	)
+	const { states } = useShareWidgetData(
+		token,
+		reportedWidgets,
+		window?.timeRange ?? EMPTY_WINDOW,
+		variableValues,
+		window !== null,
+		signedIn,
+		options,
+	)
+
+	if (window === null) {
+		return (
+			<CenteredCard
+				title="This dashboard's time range couldn't be resolved"
+				body="Open the link with an explicit window (?from=…&to=…) instead."
+			/>
+		)
+	}
 
 	if (share.scope === "widget") {
-		return <SingleWidgetShare share={share} states={states} embed={embed} />
+		return (
+			<ShareWidgetOptionsReporterProvider report={report}>
+				<ShareWidgetStatesProvider states={states}>
+					<SingleWidgetShare share={share} embed={embed} />
+				</ShareWidgetStatesProvider>
+			</ShareWidgetOptionsReporterProvider>
+		)
 	}
 
 	return (
-		<ShareWidgetStatesProvider states={states}>
-			<ReadOnlyDashboardView
-				widgets={share.dashboard.widgets}
-				sections={share.dashboard.sections}
-				renderWidget={SharedWidgetRenderer}
-			/>
-		</ShareWidgetStatesProvider>
+		<div className="flex flex-col gap-3">
+			{/* The one thing a viewer needs to compare this page with the board it
+			    shares: which window they are looking at. */}
+			{embed ? null : (
+				<div className="text-muted-foreground text-xs" data-testid="share-time-range">
+					{window.label}
+				</div>
+			)}
+			<ShareWidgetOptionsReporterProvider report={report}>
+				<ShareWidgetStatesProvider states={states}>
+					<ReadOnlyDashboardView
+						widgets={share.dashboard.widgets}
+						sections={share.dashboard.sections}
+						renderWidget={SharedWidgetRenderer}
+					/>
+				</ShareWidgetStatesProvider>
+			</ShareWidgetOptionsReporterProvider>
+		</div>
 	)
 }
+
+/** Placeholder window while resolution failed; the fetch is disabled then. */
+const EMPTY_WINDOW: ShareTimeRange = { startTime: "", endTime: "" }
 
 /**
  * A single shared chart, filling the page.
@@ -350,43 +440,26 @@ function ShareBody({
  * share out of its section and publishes no layout context around it, so there
  * is no grid to place it in and nothing for authored coordinates to mean.
  */
-function SingleWidgetShare({
-	share,
-	states,
-	embed,
-}: {
-	share: SharedDashboard
-	states: Readonly<Record<string, WidgetDataState>>
-	embed: boolean
-}) {
+function SingleWidgetShare({ share, embed }: { share: SharedDashboard; embed: boolean }) {
 	return (
 		<div className="h-full w-full">
-			{share.dashboard.widgets.map((widget) => {
-				const Visualization = visualizationFor(widget.visualization)
-				const dataState = states[widget.id] ?? { status: "loading" as const }
-				return (
-					<div
-						key={widget.id}
-						// Sizing only, no border or padding: every visualization already
-						// draws its own card, so chrome here lands as a second frame around
-						// the first.
-						//
-						// Height is set against the viewport rather than a flex chain — the
-						// chart library measures its own container, and `h-full` through
-						// ancestors with no definite height collapses it to the title row.
-						className={embed ? "h-[calc(100vh-1rem)] w-full" : "h-[calc(100vh-9rem)] w-full"}
-					>
-						<Visualization
-							dataState={dataState}
-							display={widget.display}
-							// Always "view": a share has no editing affordances to gate,
-							// and passing anything else would surface them.
-							mode="view"
-							rowLimit={(widget.dataSource.transform as { limit?: number } | undefined)?.limit}
-						/>
-					</div>
-				)
-			})}
+			{share.dashboard.widgets.map((widget) => (
+				<div
+					key={widget.id}
+					// Sizing only, no border or padding: every visualization already
+					// draws its own card, so chrome here lands as a second frame around
+					// the first.
+					//
+					// Height is set against the viewport rather than a flex chain — the
+					// chart library measures its own container, and `h-full` through
+					// ancestors with no definite height collapses it to the title row.
+					className={embed ? "h-[calc(100vh-1rem)] w-full" : "h-[calc(100vh-9rem)] w-full"}
+				>
+					{/* The same tile as on a board share — same state, same measured
+					    width, same badges — inside a viewport-sized box. */}
+					<SharedWidgetRenderer widget={widget} />
+				</div>
+			))}
 		</div>
 	)
 }

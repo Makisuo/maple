@@ -38,6 +38,37 @@ export function maxDataPointsForWidth(widthPx: number, panelType: PanelType): nu
 }
 
 /**
+ * The element's quantized width, `undefined` until it has been measured.
+ *
+ * Measured synchronously up front — the ResizeObserver's initial delivery can
+ * be throttled in background tabs, which would leave the tile on the default
+ * width until the next real resize — then kept in step, one 100px step at a
+ * time. Only a step change reaches state: an unchanged step is a no-op
+ * re-render at most, never a new params blob.
+ */
+function useMeasuredWidthPx(ref: React.RefObject<HTMLElement | null>): number | undefined {
+	const [widthPx, setWidthPx] = React.useState<number | undefined>(undefined)
+
+	React.useEffect(() => {
+		const element = ref.current
+		if (!element) return
+
+		setWidthPx(quantizeWidthPx(element.getBoundingClientRect().width))
+
+		const observer = new ResizeObserver((entries) => {
+			for (const entry of entries) {
+				const next = quantizeWidthPx(entry.contentRect.width)
+				setWidthPx((current) => (next === undefined ? current : next))
+			}
+		})
+		observer.observe(element)
+		return () => observer.disconnect()
+	}, [ref])
+
+	return widthPx
+}
+
+/**
  * Measure `ref` and turn its width into a quantized `maxDataPoints` for
  * `useWidgetData`. Returns the `DEFAULT_WIDGET_WIDTH_PX`-derived value until the
  * element has been measured.
@@ -46,28 +77,21 @@ export function useWidgetMaxDataPoints(
 	ref: React.RefObject<HTMLElement | null>,
 	panelType: PanelType,
 ): number {
-	const [widthPx, setWidthPx] = React.useState<number | undefined>(undefined)
-
-	React.useEffect(() => {
-		const element = ref.current
-		if (!element) return
-
-		// Measure synchronously up front — the ResizeObserver's initial delivery
-		// can be throttled in background tabs, which would leave the tile on the
-		// default width until the next real resize.
-		setWidthPx(quantizeWidthPx(element.getBoundingClientRect().width))
-
-		const observer = new ResizeObserver((entries) => {
-			for (const entry of entries) {
-				const next = quantizeWidthPx(entry.contentRect.width)
-				// Only a step change reaches state — an unchanged step is a no-op
-				// re-render at most, never a new params blob.
-				setWidthPx((current) => (next === undefined ? current : next))
-			}
-		})
-		observer.observe(element)
-		return () => observer.disconnect()
-	}, [ref])
-
+	const widthPx = useMeasuredWidthPx(ref)
 	return maxDataPointsForWidth(widthPx ?? DEFAULT_WIDGET_WIDTH_PX, panelType)
+}
+
+/**
+ * `useWidgetMaxDataPoints` without the default: `undefined` until the element
+ * has actually been measured. For callers whose fetch is keyed on the value
+ * and would otherwise pay one request at the default width and a second at
+ * the real one — the share page's tiles, whose data is requested page-level as
+ * soon as a tile reports.
+ */
+export function useMeasuredWidgetMaxDataPoints(
+	ref: React.RefObject<HTMLElement | null>,
+	panelType: PanelType,
+): number | undefined {
+	const widthPx = useMeasuredWidthPx(ref)
+	return widthPx === undefined ? undefined : maxDataPointsForWidth(widthPx, panelType)
 }

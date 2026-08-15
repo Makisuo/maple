@@ -63,23 +63,20 @@ describe("SharedWidgetRenderer", () => {
 	// — so mounting one here would put edit affordances and links into authed
 	// routes on a page served without a session. This is the guard against
 	// someone later "fixing" the missing provider.
-	// The server returns rows and the stored transform is what collapses them.
-	// It reaches the client precisely because the redaction seam keeps it, so a
-	// share that never applies it renders every stat as an em dash — which is
-	// what shipped. Asserted on the rendered number, not on the call, because
-	// the em dash is the symptom a reader actually sees.
-	it("applies the stored transform, so a stat reduces to a single value", () => {
+	// The state a tile receives is already renderer-ready: `useShareWidgetData`
+	// unwraps the server's envelope and applies the stored transform through the
+	// same `toReadyWidgetData` the signed-in hook uses. The renderer must draw
+	// that state as-is — a second transform pass here is exactly how the two
+	// paths drifted before (the renderer reshaped, the hook did not, and every
+	// chart on a shared board got an object where an array belongs).
+	it("draws the renderer-ready state it is handed, without reshaping it", () => {
 		const stat: ShareWidget = {
 			...widget("w-stat"),
 			dataSource: { kind: "query", transform: { reduceToValue: { field: "hits", aggregate: "sum" } } },
 		}
 
 		render(
-			<ShareWidgetStatesProvider
-				states={{
-					"w-stat": { status: "ready", data: [{ hits: 40 }, { hits: 2 }] },
-				}}
-			>
+			<ShareWidgetStatesProvider states={{ "w-stat": { status: "ready", data: 42 } }}>
 				<SharedWidgetRenderer widget={stat} />
 			</ShareWidgetStatesProvider>,
 		)

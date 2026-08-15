@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { MAX_RAW_SQL_RESULT_ROWS } from "@maple/domain/http"
+import { computeBucketSecondsForRange } from "@maple/query-engine"
 import { runRawSql, autoBucketSeconds } from "./run-raw-sql"
 import {
 	WarehouseQueryService,
@@ -108,11 +109,15 @@ describe("runRawSql", () => {
 })
 
 describe("autoBucketSeconds", () => {
-	it("picks a sub-minute bucket for short windows and a coarse one for long windows", () => {
+	it("is the signed-in raw-SQL policy: 300s floor, coarser for long windows", () => {
 		const short = autoBucketSeconds("2026-04-01 00:00:00", "2026-04-01 00:05:00")
 		const long = autoBucketSeconds("2026-04-01 00:00:00", "2026-04-08 00:00:00")
 		assert.isTrue(short < long)
-		assert.isTrue(short >= 1)
+		assert.strictEqual(short, 300)
+		assert.strictEqual(
+			long,
+			computeBucketSecondsForRange("2026-04-01 00:00:00", "2026-04-08 00:00:00", "rawSql"),
+		)
 	})
 
 	it("falls back to 300 for invalid ranges", () => {

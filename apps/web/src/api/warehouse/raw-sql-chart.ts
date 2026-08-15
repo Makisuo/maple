@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 import { RawSqlExecuteRequest, RawSqlDisplayType } from "@maple/domain/http"
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
+import { rawSqlRowsForDisplay } from "@maple/query-engine"
 
 // Raw SQL chart server function (widget data source `raw_sql_chart`).
 //
@@ -24,10 +25,6 @@ import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/w
 //   - heatmap            → raw rows; chart accepts `{ x, y, value }` or wide
 //     `{ name, …numeric }` formats.
 
-const TIME_SERIES_DISPLAY_TYPES: ReadonlyArray<"line" | "area" | "bar"> = ["line", "area", "bar"]
-
-const ISO_OR_TINYBIRD_DATETIME_RE = /^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}:\d{2})/
-
 const GetRawSqlChartInputSchema = Schema.Struct({
 	sql: Schema.String,
 	displayType: RawSqlDisplayType,
@@ -46,57 +43,6 @@ interface RawSqlChartResponse {
 		granularitySeconds: number
 		displayType: Schema.Schema.Type<typeof RawSqlDisplayType>
 	}
-}
-
-function looksLikeDateTime(value: unknown): boolean {
-	if (value instanceof Date) return true
-	if (typeof value !== "string") return false
-	return ISO_OR_TINYBIRD_DATETIME_RE.test(value)
-}
-
-function pickBucketColumn(columns: ReadonlyArray<string>, firstRow: Record<string, unknown>): string | null {
-	// 1. Explicit `bucket` column (matches the rest of the codebase convention).
-	if (columns.includes("bucket") && looksLikeDateTime(firstRow.bucket)) {
-		return "bucket"
-	}
-	// 2. First column whose value looks like a datetime.
-	for (const col of columns) {
-		if (looksLikeDateTime(firstRow[col])) {
-			return col
-		}
-	}
-	return null
-}
-
-function toLineChartRows(
-	rows: ReadonlyArray<Record<string, unknown>>,
-): Array<Record<string, string | number>> {
-	if (rows.length === 0) return []
-	const columns = Object.keys(rows[0])
-	const bucketCol = pickBucketColumn(columns, rows[0])
-	if (!bucketCol) {
-		// Couldn't infer a time axis — return rows untouched so the user can debug
-		// in the table view. The chart renderer will simply render an empty plot.
-		return rows as Array<Record<string, string | number>>
-	}
-
-	const seriesCols = columns.filter((c) => c !== bucketCol)
-
-	return rows.map((row) => {
-		const out: Record<string, string | number> = {
-			bucket: String(
-				row[bucketCol] instanceof Date ? (row[bucketCol] as Date).toISOString() : row[bucketCol],
-			),
-		} satisfies Record<string, string | number>
-		for (const col of seriesCols) {
-			const value = row[col]
-			const num = typeof value === "number" ? value : Number(value)
-			if (Number.isFinite(num)) {
-				out[col] = num
-			}
-		}
-		return out
-	})
 }
 
 export const getRawSqlChart = Effect.fn("QueryEngine.getRawSqlChart")(function* ({
@@ -123,11 +69,9 @@ export const getRawSqlChart = Effect.fn("QueryEngine.getRawSqlChart")(function* 
 
 	const rows = result.data as ReadonlyArray<Record<string, unknown>>
 
-	const chartRows = TIME_SERIES_DISPLAY_TYPES.includes(
-		input.displayType as (typeof TIME_SERIES_DISPLAY_TYPES)[number],
-	)
-		? toLineChartRows(rows)
-		: (rows as Array<Record<string, unknown>>)
+	// The same reshaping the share API applies server-side, so a raw-SQL line
+	// chart draws identically on a board and on its share link.
+	const chartRows = rawSqlRowsForDisplay(rows, input.displayType)
 
 	return {
 		data: chartRows,

@@ -3,7 +3,6 @@ import * as React from "react"
 import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
-import { hbarSampleData } from "../_shared/sample-data"
 import { pickValueField, toBreakdownRows, type BreakdownRow } from "../_shared/breakdown-rows"
 import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import { useContainerSize } from "../../../hooks/use-container-size"
@@ -42,11 +41,13 @@ const ROW_FULL_H = ROW_MIN_H + ROW_GAP
 const BAR_MIN_PCT = 0.02
 const MORE_ROW_H = 16
 
+// No sample-data fallback: substituting fixtures for real rows made every
+// misconfigured or mis-fed chart draw a plausible-looking picture instead of an
+// empty one. Gallery thumbnails pass their sample rows in explicitly via `data`.
+const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
+
 export function QueryBuilderHbarChart({ data, className, unit }: BaseChartProps) {
-	const source: ReadonlyArray<Record<string, unknown>> =
-		Array.isArray(data) && data.length > 0
-			? data
-			: (hbarSampleData as ReadonlyArray<Record<string, unknown>>)
+	const source: ReadonlyArray<Record<string, unknown>> = Array.isArray(data) ? data : EMPTY_ROWS
 
 	const valueField = React.useMemo(() => pickValueField(source), [source])
 

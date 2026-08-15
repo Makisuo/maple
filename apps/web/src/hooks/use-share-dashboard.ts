@@ -9,8 +9,11 @@
  *
  * So the request shape differs (a widget id, not a query) while everything
  * downstream is identical. This hook produces the same `WidgetDataState` union
- * the authed path does, which is what lets the share page render through the
- * unmodified visualization components rather than a parallel set of charts.
+ * the authed path does — through the same `toReadyWidgetData` (envelope
+ * unwrapped, transform applied), not a look-alike — which is what lets the
+ * share page render through the unmodified visualization components rather
+ * than a parallel set of charts. The server, for its part, plans the query with
+ * the same `toWidgetRequest` + `planWidgetRequest` the browser runs.
  *
  * What is deliberately *absent* here, compared to `useWidgetData`: the list-cap
  * guard, variable-reference gating, and range validation. All three moved
@@ -19,15 +22,60 @@
  * is to fail slightly earlier.
  */
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
+import { toReadyWidgetData } from "@/hooks/use-widget-data"
 import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 import { getMapleAuthHeaders } from "@/lib/services/common/auth-headers"
 import { ShareWidgetDataResponse } from "@maple/domain/http"
-import { DashboardSectionSchema, TimeRangeSchema, WidgetLayoutSchema } from "@maple/widgets/dashboard"
+import {
+	DashboardSectionSchema,
+	TimeRangeSchema,
+	WidgetDataSourceTransformSchema,
+	WidgetLayoutSchema,
+} from "@maple/widgets/dashboard"
 import { Schema } from "effect"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 const decodeShareWidgetDataResponse = Schema.decodeUnknownPromise(ShareWidgetDataResponse)
 const decodeVariableValues = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.String))
+const decodeTransform = Schema.decodeUnknownSync(WidgetDataSourceTransformSchema)
+const decodeTimeRange = Schema.decodeUnknownSync(TimeRangeSchema)
+
+export type ShareWidgetTransform = typeof WidgetDataSourceTransformSchema.Type
+
+/**
+ * The widget's transform, or nothing when it doesn't decode.
+ *
+ * Decoded here rather than in the share document's schema so a transform this
+ * build doesn't recognise costs one tile its formatting instead of failing the
+ * whole page — the same trade the section decode makes. `transform` is kept
+ * deliberately loose on the wire (`Schema.Unknown`) for that reason.
+ */
+export const shareTransform = (raw: unknown): ShareWidgetTransform | undefined => {
+	if (raw === undefined) return undefined
+	try {
+		return decodeTransform(raw)
+	} catch {
+		console.warn("[share] widget transform could not be decoded — rendering untransformed")
+		return undefined
+	}
+}
+
+/**
+ * The board's stored time range, or nothing when it doesn't decode.
+ *
+ * Same lenient trade: a `timeRange` shape this build doesn't know costs the
+ * viewer the board's default window (the page falls back exactly as the
+ * signed-in dashboard does), never the board.
+ */
+export const shareTimeRange = (raw: unknown): typeof TimeRangeSchema.Type | undefined => {
+	if (raw === undefined) return undefined
+	try {
+		return decodeTimeRange(raw)
+	} catch {
+		console.warn("[share] dashboard time range could not be decoded — using the default window")
+		return undefined
+	}
+}
 
 export interface ShareTimeRange {
 	readonly startTime: string
@@ -228,8 +276,27 @@ interface WidgetDataResult {
 	readonly refresh: () => void
 }
 
+/**
+ * Per-widget request inputs the page learns after the document resolves.
+ *
+ * `maxDataPoints` is the tile's rendered width in points, as measured by the
+ * same `useWidgetMaxDataPoints` the signed-in board's tiles use. It changes
+ * only when a tile's width crosses a 100px step, and only that tile refetches.
+ */
+export interface ShareWidgetRequestOptions {
+	readonly maxDataPoints?: number
+}
+
 /** Matches the server's per-request cap, so a batch is never rejected wholesale. */
 const BATCH_MAX = 4
+
+/** What one widget's fetch depends on; a change here (and only here) refetches it. */
+const requestKeyFor = (
+	timeRange: ShareTimeRange,
+	variablesKey: string,
+	options: ShareWidgetRequestOptions | undefined,
+): string =>
+	JSON.stringify([timeRange.startTime, timeRange.endTime, variablesKey, options?.maxDataPoints ?? null])
 
 /**
  * Fetch data for every widget on a share, in server-sized batches.
@@ -237,58 +304,116 @@ const BATCH_MAX = 4
  * Batches sequentially rather than all at once: a shared board is served to an
  * audience the org does not control, and issuing every batch in parallel would
  * let one page load fan out across the rate limit that protects it.
+ *
+ * Each widget is fetched against a request key — window, variables and its own
+ * `maxDataPoints` — and only widgets whose key changed are re-requested. A tile
+ * settling on its width, or a hidden tab's tiles mounting later, costs one
+ * batch for those tiles, not a reload of the board.
  */
 export function useShareWidgetData(
 	token: string,
-	widgetIds: ReadonlyArray<string>,
+	widgets: ReadonlyArray<ShareWidget>,
 	timeRange: ShareTimeRange,
 	variableValues: Readonly<Record<string, string>>,
 	enabled: boolean,
 	signedIn: boolean,
+	options: Readonly<Record<string, ShareWidgetRequestOptions>> = {},
 ): WidgetDataResult {
 	const [states, setStates] = useState<Record<string, WidgetDataState>>({})
 	const [narrowed, setNarrowed] = useState<Record<string, number>>({})
 	const [nonce, setNonce] = useState(0)
 	const refresh = useCallback(() => setNonce((value) => value + 1), [])
 
-	// Stringified so the effect keys on value rather than array identity, which
-	// changes on every render of the parent.
-	const idsKey = useMemo(() => widgetIds.join(","), [widgetIds])
+	// The states this hook hands out are renderer-ready — envelope unwrapped,
+	// transform applied — through the same `toReadyWidgetData` the signed-in
+	// hook uses, so a tile cannot tell which path fed it. Transforms are looked
+	// up here, once per widget, rather than re-applied by every renderer.
+	const transforms = useMemo(() => {
+		const byId = new Map<string, ShareWidgetTransform | undefined>()
+		for (const widget of widgets) byId.set(widget.id, shareTransform(widget.dataSource.transform))
+		return byId
+	}, [widgets])
 	const variablesKey = useMemo(() => JSON.stringify(variableValues), [variableValues])
-	const latestRequest = useRef(0)
+
+	// Stringified so the effect keys on value rather than object identity, which
+	// changes on every render of the parent.
+	const requestKeys = useMemo(
+		() =>
+			widgets.map(
+				(widget) => [widget.id, requestKeyFor(timeRange, variablesKey, options[widget.id])] as const,
+			),
+		[widgets, timeRange, variablesKey, options],
+	)
+	const requestKeysKey = useMemo(() => JSON.stringify(requestKeys), [requestKeys])
+
+	// What has been requested (in flight or landed), per widget. A ref, not
+	// state: it is bookkeeping for the effect, and reading it must never render.
+	const requested = useRef(new Map<string, string>())
+	const lastNonce = useRef(nonce)
+
+	// In-flight batches outlive the effect run that issued them: a later run
+	// (one tile changed width) must not drop the results of the others. Only
+	// unmount stops updates.
+	const alive = useRef(true)
+	useEffect(() => {
+		alive.current = true
+		return () => {
+			alive.current = false
+		}
+	}, [])
 
 	// react-doctor-disable-next-line react-doctor/no-fetch-in-effect, react-doctor/no-set-state-after-await-in-effect -- Public share data follows effect dependencies and guards every async update with cancellation and request identity.
 	useEffect(() => {
-		if (!enabled || widgetIds.length === 0) return
-		const requestId = ++latestRequest.current
-		let cancelled = false
+		if (!enabled) return
+		if (lastNonce.current !== nonce) {
+			// A refresh re-requests everything, at the current keys.
+			lastNonce.current = nonce
+			requested.current.clear()
+		}
 
-		const ids = idsKey.split(",").filter(Boolean)
+		// SAFETY: `requestKeysKey` is this hook's own `JSON.stringify(requestKeys)`
+		// from the render above; the parse restores exactly that tuple list.
+		const keys = JSON.parse(requestKeysKey) as ReadonlyArray<readonly [string, string]>
+		const pending = keys.filter(([id, key]) => requested.current.get(id) !== key)
+		if (pending.length === 0) return
+		for (const [id, key] of pending) requested.current.set(id, key)
+
 		setStates((current) => {
 			const next = { ...current }
-			for (const id of ids) next[id] ??= { status: "loading" }
+			for (const [id] of pending) next[id] ??= { status: "loading" }
 			return next
 		})
 
+		// Applies a batch's outcome only to widgets whose request is still the one
+		// this batch was issued for — a tile that changed width mid-flight keeps
+		// its loading state until its own, newer batch lands.
+		const stillCurrent = (id: string, key: string) => requested.current.get(id) === key
+		const optionsFor = (id: string) => options[id]
+
 		const run = async () => {
-			for (let index = 0; index < ids.length; index += BATCH_MAX) {
-				const batch = ids.slice(index, index + BATCH_MAX)
+			for (let index = 0; index < pending.length; index += BATCH_MAX) {
+				const batch = pending.slice(index, index + BATCH_MAX)
 				try {
 					// react-doctor-disable-next-line react-doctor/async-await-in-loop -- Sequential batches enforce the anonymous-viewer rate limit and prevent one page load from fanning out.
 					const response = await post(
 						"/v2/share/widget-data",
 						{
 							token,
-							requests: batch.map((widgetId) => ({ widgetId })),
+							requests: batch.map(([widgetId]) => {
+								const maxDataPoints = optionsFor(widgetId)?.maxDataPoints
+								return maxDataPoints === undefined
+									? { widgetId }
+									: { widgetId, maxDataPoints }
+							}),
 							timeRange,
 							variableValues: decodeVariableValues(JSON.parse(variablesKey)),
 						},
 						signedIn,
 					)
 					const payload = await response.json().catch(() => null)
-					// A stale batch must never overwrite a newer one's results — the
-					// viewer may have moved the time picker mid-flight.
-					if (cancelled || requestId !== latestRequest.current) return
+					if (!alive.current) return
+					const live = batch.filter(([id, key]) => stillCurrent(id, key))
+					if (live.length === 0) continue
 
 					if (!response.ok) {
 						const message =
@@ -296,20 +421,25 @@ export function useShareWidgetData(
 							"This data could not be loaded."
 						setStates((current) => {
 							const next = { ...current }
-							for (const id of batch) next[id] = { status: "error", message }
+							for (const [id] of live) next[id] = { status: "error", message }
 							return next
 						})
 						continue
 					}
 
 					const { results } = await decodeShareWidgetDataResponse(payload)
+					const liveIds = new Set(live.map(([id]) => id))
 					setStates((current) => {
 						const next = { ...current }
 						for (const result of results) {
 							const id = result.widgetId
+							if (!liveIds.has(id)) continue
 							next[id] =
 								result.ok === true
-									? { status: "ready", data: result.data }
+									? {
+											status: "ready",
+											data: toReadyWidgetData(result.data, transforms.get(id)),
+										}
 									: {
 											status: "error",
 											message: result.message,
@@ -323,18 +453,23 @@ export function useShareWidgetData(
 					setNarrowed((current) => {
 						const next = { ...current }
 						for (const result of results) {
+							if (!liveIds.has(result.widgetId)) continue
 							if (result.ok && result.narrowedToSeconds !== undefined) {
 								next[result.widgetId] = result.narrowedToSeconds
+							} else {
+								delete next[result.widgetId]
 							}
 						}
 						return next
 					})
 				} catch {
-					if (cancelled || requestId !== latestRequest.current) return
+					if (!alive.current) return
 					setStates((current) => {
 						const next = { ...current }
-						for (const id of batch) {
-							next[id] = { status: "error", message: "This data could not be loaded." }
+						for (const [id, key] of batch) {
+							if (stillCurrent(id, key)) {
+								next[id] = { status: "error", message: "This data could not be loaded." }
+							}
 						}
 						return next
 					})
@@ -343,10 +478,10 @@ export function useShareWidgetData(
 		}
 
 		void run()
-		return () => {
-			cancelled = true
-		}
-	}, [token, idsKey, timeRange, variablesKey, enabled, nonce, signedIn, widgetIds.length])
+		// `options`, `timeRange` and `variablesKey` are folded into `requestKeysKey`;
+		// listing them too would only add identity-driven reruns.
+		// oxlint-disable-next-line react-hooks/exhaustive-deps -- see above
+	}, [token, requestKeysKey, enabled, nonce, signedIn, transforms])
 
 	return { states, narrowed, refresh }
 }

@@ -282,7 +282,13 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 							.resolve(
 								orgId,
 								document,
-								{ widgetId: request.widgetId, source: request.source ?? "primary" },
+								{
+									widgetId: request.widgetId,
+									source: request.source ?? "primary",
+									...(request.maxDataPoints === undefined
+										? undefined
+										: { maxDataPoints: request.maxDataPoints }),
+								},
 								window,
 								variableValues,
 							)

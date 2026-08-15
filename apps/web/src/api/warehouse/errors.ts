@@ -1,6 +1,8 @@
 import { Clock, Effect, Schema } from "effect"
 import {
 	QueryEngineExecuteRequest,
+	coerceErrorsByTypeRows,
+	coerceErrorsSummary,
 	warehouseDateTimeToIso,
 	formatWarehouseDateTime,
 } from "@maple/query-engine"
@@ -78,17 +80,8 @@ const getErrorsByTypeEffect = Effect.fn("QueryEngine.getErrorsByType")(function*
 		}),
 	)
 
-	return {
-		data: result.data.map((raw) => ({
-			fingerprintHash: raw.fingerprintHash,
-			errorLabel: raw.errorLabel,
-			sampleMessage: raw.sampleMessage,
-			count: Number(raw.count),
-			affectedServicesCount: Number(raw.affectedServicesCount),
-			firstSeen: new Date(warehouseDateTimeToIso(raw.firstSeen)),
-			lastSeen: new Date(warehouseDateTimeToIso(raw.lastSeen)),
-		})),
-	}
+	// Shared with the share API's `errors_by_type` plan.
+	return { data: coerceErrorsByTypeRows(result.data) }
 })
 
 interface FacetItem {
@@ -210,18 +203,8 @@ const getErrorsSummaryEffect = Effect.fn("QueryEngine.getErrorsSummary")(functio
 		}),
 	)
 
-	const summary = result.data
-	return {
-		data: summary
-			? {
-					totalErrors: Number(summary.totalErrors),
-					totalSpans: Number(summary.totalSpans),
-					errorRate: Number(summary.errorRate),
-					affectedServicesCount: Number(summary.affectedServicesCount),
-					affectedTracesCount: Number(summary.affectedTracesCount),
-				}
-			: null,
-	}
+	// Shared with the share API's `errors_summary` plan.
+	return { data: coerceErrorsSummary(result.data) }
 })
 
 export interface ErrorDetailTrace {

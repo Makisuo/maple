@@ -1,7 +1,14 @@
 // BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
-import { Clock, Effect, Option, Schema } from "effect"
-import { LogsFacetDimension, QueryEngineExecuteRequest, formatWarehouseDateTime } from "@maple/query-engine"
-import { TraceId, SpanId } from "@maple/domain"
+import { Clock, Effect, Schema } from "effect"
+import {
+	LogsFacetDimension,
+	QueryEngineExecuteRequest,
+	coerceLogRow,
+	coerceLogRows,
+	formatWarehouseDateTime,
+	type LogRow,
+} from "@maple/query-engine"
+import { TraceId } from "@maple/domain"
 import {
 	DeploymentEnvironment,
 	GetLogRequest,
@@ -18,9 +25,6 @@ import {
 	extractFacets,
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
-
-const toTraceId = Schema.decodeSync(TraceId)
-const toSpanId = Schema.decodeSync(SpanId)
 
 const ListLogsInputSchema = Schema.Struct({
 	limit: Schema.optional(
@@ -47,51 +51,18 @@ export type ListLogsInput = (typeof ListLogsInputSchema)["Encoded"]
 
 const DEFAULT_LIMIT = 100
 
-export interface Log {
-	timestamp: string
-	severityText: string
-	severityNumber: number
-	serviceName: string
-	body: string
-	traceId: TraceId | undefined
-	spanId: SpanId | undefined
-	logAttributes: Record<string, string>
-	resourceAttributes: Record<string, string>
-}
+/**
+ * A log row as the list renders it. The shape (and `coerceLogRow`) lives in
+ * `@maple/query-engine` so the share API's `list_logs` plan produces the same
+ * rows this function does; the alias keeps the existing imports.
+ */
+export type Log = LogRow
 
 export interface LogsResponse {
 	data: Log[]
 	meta: {
 		limit: number
 		cursor: string | null
-	}
-}
-
-const parseJson = Option.liftThrowable((value: string): unknown => JSON.parse(value))
-
-function parseAttributes(value: string | null | undefined): Record<string, string> {
-	if (!value) return {}
-	return parseJson(value).pipe(
-		Option.flatMap((parsed) =>
-			parsed && typeof parsed === "object"
-				? Option.some(parsed as Record<string, string>)
-				: Option.none(),
-		),
-		Option.getOrElse((): Record<string, string> => ({})),
-	)
-}
-
-function transformLog(raw: Record<string, unknown>): Log {
-	return {
-		timestamp: String(raw.timestamp ?? ""),
-		severityText: String(raw.severityText ?? ""),
-		severityNumber: Number(raw.severityNumber ?? 0),
-		serviceName: String(raw.serviceName ?? ""),
-		body: String(raw.body ?? ""),
-		traceId: raw.traceId ? toTraceId(String(raw.traceId)) : undefined,
-		spanId: raw.spanId ? toSpanId(String(raw.spanId)) : undefined,
-		logAttributes: parseAttributes(raw.logAttributes as string),
-		resourceAttributes: parseAttributes(raw.resourceAttributes as string),
 	}
 }
 
@@ -128,7 +99,7 @@ const listLogsEffect = Effect.fn("QueryEngine.listLogs")(function* ({ data }: { 
 		}),
 	)
 
-	const logs = logsResult.data.map(transformLog)
+	const logs = coerceLogRows(logsResult.data)
 	const cursor = logs.length === limit && logs.length > 0 ? logs[logs.length - 1].timestamp : null
 
 	return {
@@ -179,7 +150,7 @@ const getLogEffect = Effect.fn("QueryEngine.getLog")(function* ({ data }: { data
 	)
 
 	return {
-		data: response.data.length > 0 ? transformLog(response.data[0]) : null,
+		data: response.data.length > 0 ? coerceLogRow(response.data[0]) : null,
 	} satisfies GetLogResult
 })
 

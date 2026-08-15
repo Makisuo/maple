@@ -3,6 +3,7 @@ import { redactForShare } from "./redact"
 
 const SECRET_SQL = "SELECT customer_revenue FROM internal_billing WHERE tier = 'enterprise'"
 const SECRET_CLAUSE = "service.name = 'unreleased-project'"
+const SECRET_SPARKLINE_CLAUSE = "service.name = 'stealth-launch'"
 
 const document = {
 	id: "dash-1",
@@ -50,6 +51,32 @@ const document = {
 			layout: { x: 0, y: 4, w: 12, h: 4 },
 			dataSource: { kind: "route", endpoint: "list_traces", params: { service: "unreleased-project" } },
 		},
+		{
+			id: "w-stat",
+			visualization: "stat",
+			display: {
+				title: "Requests",
+				sparkline: {
+					enabled: true,
+					color: "primary",
+					dataSource: {
+						kind: "query",
+						resultShape: "timeseries",
+						queries: [
+							{
+								id: "s1",
+								name: "A",
+								aggregation: "count",
+								dataSource: "traces",
+								whereClause: SECRET_SPARKLINE_CLAUSE,
+							},
+						],
+					},
+				},
+			},
+			layout: { x: 0, y: 8, w: 3, h: 2 },
+			dataSource: { kind: "route", endpoint: "service_overview", params: {} },
+		},
 	],
 	sections: [{ id: "sec-1", title: "Latency" }],
 	variables: [{ name: "service", type: "textbox" as const }],
@@ -66,6 +93,9 @@ describe("redactForShare", () => {
 		// one and forgets it here, which is precisely the failure this guards.
 		expect(serialized).not.toContain(SECRET_SQL)
 		expect(serialized).not.toContain(SECRET_CLAUSE)
+		// `display.sparkline` embeds a whole data source; it is redacted like the
+		// widget's own, not passed through with the rest of the display config.
+		expect(serialized).not.toContain(SECRET_SPARKLINE_CLAUSE)
 		expect(serialized).not.toContain("list_traces")
 		expect(serialized).not.toContain("unreleased-project")
 		expect(serialized).not.toContain("user_alice")
@@ -77,7 +107,7 @@ describe("redactForShare", () => {
 		const redacted = redactForShare(document)
 
 		expect(redacted?.name).toBe("Ops")
-		expect(redacted?.widgets).toHaveLength(3)
+		expect(redacted?.widgets).toHaveLength(4)
 		// Result shape survives because a timeseries and a breakdown draw
 		// differently; it describes the response, not the query.
 		expect(redacted?.widgets[1]).toMatchObject({
@@ -89,6 +119,16 @@ describe("redactForShare", () => {
 		// returned, so withholding it would change the chart, not the disclosure.
 		expect(redacted?.widgets[0]?.dataSource.transform).toEqual({ limit: 10 })
 		expect(redacted?.refreshIntervalSeconds).toBe(60)
+		// The sparkline keeps its presentation and a classified data source, so
+		// the stat still knows it has a trend line to draw.
+		expect(redacted?.widgets[3]?.display).toEqual({
+			title: "Requests",
+			sparkline: {
+				enabled: true,
+				color: "primary",
+				dataSource: { kind: "query", resultShape: "timeseries" },
+			},
+		})
 	})
 
 	// A share renders through the same canvas the authed dashboard does, so these
