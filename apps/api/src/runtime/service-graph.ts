@@ -22,6 +22,7 @@ import { DailySpendService } from "@/services/billing/DailySpendService"
 import { AutumnClient } from "@/services/billing/autumn-http"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
+import { DashboardWidgetDataService } from "@/services/dashboards/DashboardWidgetDataService"
 import { DigestService } from "@/services/digest/DigestService"
 import { AiTriageService } from "@/services/errors/AiTriageService"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
@@ -117,6 +118,13 @@ const QueryEngineServiceLive = QueryEngineService.layer.pipe(
 	Layer.provideMerge(WarehouseQueryServiceLive),
 	Layer.provideMerge(EdgeCacheServiceLive),
 	Layer.provideMerge(BucketCacheServiceLive),
+)
+
+// Server-side widget data for shared dashboards. Needs both the query engine
+// (query sets, caching) and the warehouse (raw SQL), so it composes after them
+// rather than sitting in CoreServicesLive.
+const DashboardWidgetDataServiceLive = DashboardWidgetDataService.layer.pipe(
+	Layer.provideMerge(QueryEngineServiceLive),
 )
 
 const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
@@ -249,6 +257,7 @@ const MainServicesLive = Layer.mergeAll(
 	WarehouseQueryServiceLive,
 	EdgeCacheServiceLive,
 	QueryEngineServiceLive,
+	DashboardWidgetDataServiceLive,
 	AlertDestinationsServiceLive,
 	AlertReadModelsServiceLive,
 	AlertRulesServiceLive,
