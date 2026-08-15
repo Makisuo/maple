@@ -105,7 +105,17 @@ function filterHiddenSeriesRows(
 	})
 }
 
-function applyTransform(
+/**
+ * Collapse, remap and cap the rows a query returned, per the widget's stored
+ * transform.
+ *
+ * Exported because both data paths need it. It runs client-side by design —
+ * the share redaction seam keeps `transform` on the wire for exactly this
+ * reason while dropping everything that describes the query — so a shared board
+ * has to apply it too, or a stat whose `reduceToValue` never runs renders its
+ * whole result set where a single number belongs.
+ */
+export function applyTransform(
 	// react-doctor-disable-next-line typescript/no-explicit-any -- This legacy transform boundary accepts heterogeneous query payloads and narrows before keyed reads.
 	data: any,
 	// The readonly schema type, not the app's deep-mutable `WidgetDataSource`

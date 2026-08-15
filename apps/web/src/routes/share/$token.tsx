@@ -21,6 +21,9 @@ import { useAuth } from "@clerk/clerk-react"
 import { Schema } from "effect"
 import { useMemo } from "react"
 import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
+import type { WidgetDataState } from "@/components/dashboard-builder/types"
+import { ReadOnlyDashboardView } from "@/components/dashboard-builder/read-only-dashboard-view"
+import { SharedWidgetRenderer, ShareWidgetStatesProvider } from "@/components/share/shared-widget-renderer"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import {
 	useShareWidgetData,
@@ -111,8 +114,12 @@ function SharePageContent({ isSignedIn }: { isSignedIn: boolean }) {
 	}
 
 	return (
-		<ShareShell embed={search.embed === true} title={state.share.dashboard.name}>
-			<ShareGrid
+		<ShareShell
+			embed={search.embed === true}
+			scope={state.share.scope}
+			title={state.share.dashboard.name}
+		>
+			<ShareBody
 				share={state.share}
 				token={token}
 				timeRange={timeRange}
@@ -162,10 +169,13 @@ function NotEmbeddableCard() {
 function ShareShell({
 	children,
 	embed,
+	scope = "widget",
 	title,
 }: {
 	children: React.ReactNode
 	embed: boolean
+	/** A board scrolls; a single chart is sized to the frame. */
+	scope?: SharedDashboard["scope"]
 	title?: string
 }) {
 	if (embed) {
@@ -175,7 +185,13 @@ function ShareShell({
 		// `h-screen`, not `h-full`: the iframe's viewport IS the available height,
 		// and `h-full` on a chain with no sized ancestor collapses the chart to its
 		// header.
-		return <div className="h-screen w-full bg-background p-2">{children}</div>
+		//
+		// A whole board is the opposite case — it is as tall as its grid, so
+		// pinning it to the viewport would clip the lower rows with no way to
+		// scroll to them. `min-h-screen` still gives the canvas a definite width
+		// to measure, which is all `useContainerSize` needs.
+		const height = scope === "dashboard" ? "min-h-screen" : "h-screen"
+		return <div className={`${height} w-full bg-background p-2`}>{children}</div>
 	}
 
 	return (
@@ -274,7 +290,15 @@ function CenteredCard({
 	)
 }
 
-function ShareGrid({
+/**
+ * Data for every tile on the share, then the board.
+ *
+ * Both scopes fetch the same way — one batched call set for every widget id —
+ * and differ only in what they draw: a whole board goes through the same canvas
+ * the authed dashboard uses, so tiles land on their authored positions and
+ * sizes, while a single chart has no grid to be placed in at all.
+ */
+function ShareBody({
 	share,
 	token,
 	timeRange,
@@ -294,10 +318,39 @@ function ShareGrid({
 	const variableValues = useMemo<Record<string, string>>(() => ({}), [])
 	const { states } = useShareWidgetData(token, widgetIds, timeRange, variableValues, true, signedIn)
 
-	const single = share.scope === "widget"
+	if (share.scope === "widget") {
+		return <SingleWidgetShare share={share} states={states} embed={embed} />
+	}
 
 	return (
-		<div className={single ? "h-full w-full" : "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"}>
+		<ShareWidgetStatesProvider states={states}>
+			<ReadOnlyDashboardView
+				widgets={share.dashboard.widgets}
+				sections={share.dashboard.sections}
+				renderWidget={SharedWidgetRenderer}
+			/>
+		</ShareWidgetStatesProvider>
+	)
+}
+
+/**
+ * A single shared chart, filling the page.
+ *
+ * Deliberately not the dashboard canvas: `redactForShare` lifts a single-widget
+ * share out of its section and publishes no layout context around it, so there
+ * is no grid to place it in and nothing for authored coordinates to mean.
+ */
+function SingleWidgetShare({
+	share,
+	states,
+	embed,
+}: {
+	share: SharedDashboard
+	states: Readonly<Record<string, WidgetDataState>>
+	embed: boolean
+}) {
+	return (
+		<div className="h-full w-full">
 			{share.dashboard.widgets.map((widget) => {
 				const Visualization = visualizationFor(widget.visualization)
 				const dataState = states[widget.id] ?? { status: "loading" as const }
@@ -311,13 +364,7 @@ function ShareGrid({
 						// Height is set against the viewport rather than a flex chain — the
 						// chart library measures its own container, and `h-full` through
 						// ancestors with no definite height collapses it to the title row.
-						className={
-							single
-								? embed
-									? "h-[calc(100vh-1rem)] w-full"
-									: "h-[calc(100vh-9rem)] w-full"
-								: "h-64"
-						}
+						className={embed ? "h-[calc(100vh-1rem)] w-full" : "h-[calc(100vh-9rem)] w-full"}
 					>
 						<Visualization
 							dataState={dataState}

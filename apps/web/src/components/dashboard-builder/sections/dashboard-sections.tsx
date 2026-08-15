@@ -1,24 +1,29 @@
 import { useMemo, useRef } from "react"
 import { useContainerSize } from "@maple/ui/hooks/use-container-size"
 import { cn } from "@maple/ui/lib/utils"
-import { containerKeyFor, containerKeyOf, ROOT_CONTAINER_KEY } from "@maple/domain/http"
+import { containerKeyFor, groupWidgetsByContainer, ROOT_CONTAINER_KEY } from "@maple/domain/http"
+import type { DashboardSection } from "@maple/widgets/dashboard"
 
-import { DashboardGrid } from "@/components/dashboard-builder/canvas/dashboard-canvas"
+import {
+	DashboardGrid,
+	type CanvasWidget,
+	type WidgetRendererComponent,
+} from "@/components/dashboard-builder/canvas/dashboard-canvas"
 import { tierForWidth } from "@/components/dashboard-builder/canvas/grid-breakpoints"
 import { DashboardSectionView } from "@/components/dashboard-builder/sections/dashboard-section"
-import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
-import type { DashboardSection, DashboardWidget } from "@/components/dashboard-builder/types"
+import { useDashboardActionsOptional } from "@/components/dashboard-builder/dashboard-actions-context"
 import { resolveSectionView, type SectionViewSearch } from "@/lib/dashboards/section-view-state"
 
-interface DashboardSectionsProps {
-	widgets: DashboardWidget[]
-	sections: DashboardSection[]
+interface DashboardSectionsProps<W extends CanvasWidget> {
+	widgets: ReadonlyArray<W>
+	sections: ReadonlyArray<DashboardSection>
 	/** Per-viewer view state from the URL. */
 	search: SectionViewSearch
 	onToggleCollapsed: (sectionId: string, collapsed: boolean) => void
 	onSelectTab: (sectionId: string, tabId: string) => void
 	onAddWidget: (sectionId: string, tabId: string) => void
 	readOnly?: boolean
+	renderWidget: WidgetRendererComponent<W>
 }
 
 /**
@@ -30,7 +35,7 @@ interface DashboardSectionsProps {
  * rearrangeable, its neighbour locked — and would spin up a `ResizeObserver` per
  * group. One measurement, one `tier`, every grid agrees.
  */
-export function DashboardSections({
+export function DashboardSections<W extends CanvasWidget>({
 	widgets,
 	sections,
 	search,
@@ -38,8 +43,11 @@ export function DashboardSections({
 	onSelectTab,
 	onAddWidget,
 	readOnly = false,
-}: DashboardSectionsProps) {
-	const { mode } = useDashboardActions()
+	renderWidget,
+}: DashboardSectionsProps<W>) {
+	// A read-only surface (share link, full-screen board) mounts this with no
+	// store behind it, and a board with no actions is a board in view mode.
+	const mode = useDashboardActionsOptional()?.mode ?? "view"
 
 	const containerRef = useRef<HTMLDivElement>(null)
 	const { width: measuredWidth } = useContainerSize(containerRef)
@@ -57,20 +65,7 @@ export function DashboardSections({
 	// Bucket once per (widgets, sections) identity and hand each grid a
 	// referentially stable subset, so dragging inside one group doesn't
 	// re-render its siblings.
-	const byContainer = useMemo(() => {
-		const buckets = new Map<string, DashboardWidget[]>()
-		buckets.set(ROOT_CONTAINER_KEY, [])
-		for (const section of sections) {
-			for (const tab of section.tabs) {
-				buckets.set(containerKeyFor({ sectionId: section.id, tabId: tab.id }), [])
-			}
-		}
-		for (const widget of widgets) {
-			const bucket = buckets.get(containerKeyOf(widget)) ?? buckets.get(ROOT_CONTAINER_KEY)
-			bucket?.push(widget)
-		}
-		return buckets
-	}, [widgets, sections])
+	const byContainer = useMemo(() => groupWidgetsByContainer({ widgets, sections }), [widgets, sections])
 
 	// Resolved as a derivation, not an effect: a `?widget=` deep link has to
 	// force its section open *before* first paint, or the target tile mounts
@@ -93,7 +88,13 @@ export function DashboardSections({
 			{measured && (
 				<>
 					{rootWidgets.length > 0 && (
-						<DashboardGrid widgets={rootWidgets} width={width} tier={tier} editable={editable} />
+						<DashboardGrid
+							widgets={rootWidgets}
+							width={width}
+							tier={tier}
+							editable={editable}
+							renderWidget={renderWidget}
+						/>
 					)}
 
 					{sections.map((section, index) => {
@@ -124,6 +125,7 @@ export function DashboardSections({
 								onToggleCollapsed={(collapsed) => onToggleCollapsed(section.id, collapsed)}
 								onSelectTab={(tabId) => onSelectTab(section.id, tabId)}
 								onAddWidget={(tabId) => onAddWidget(section.id, tabId)}
+								renderWidget={renderWidget}
 							/>
 						)
 					})}
