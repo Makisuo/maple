@@ -16,7 +16,6 @@
  * here, in the schema, rather than by a check somewhere downstream.
  */
 import { Schema } from "effect"
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { DashboardId, DashboardShareId, IsoDateTimeString } from "@maple/primitives"
 import { HttpTaggedError } from "./error-policy"
 
@@ -327,7 +326,7 @@ export class SharePersistenceError extends HttpTaggedError<SharePersistenceError
 ) {}
 
 // ---------------------------------------------------------------------------
-// Viewer-facing surface (unauthenticated /api/share)
+// Viewer-facing surface (unauthenticated /v2/share)
 // ---------------------------------------------------------------------------
 
 /**
@@ -428,48 +427,3 @@ export class SharedDashboardResponse extends Schema.Class<SharedDashboardRespons
 		embeddable: Schema.Boolean,
 	},
 ) {}
-
-/**
- * The unauthenticated share surface.
- *
- * **No `.middleware(...)`** — deliberately, following `BillingPublicApiGroup`.
- * A public share must resolve with no credential at all, and an org-only share
- * needs the session resolved *optionally* so an anonymous caller can be told to
- * sign in rather than being rejected by middleware before the handler can see
- * which mode the link is.
- *
- * Every endpoint is a POST with the token in the **body**, never the path. The
- * web URL is `/share/<token>`, but the API need not mirror it, and keeping the
- * token out of `url.full` means it never reaches a span attribute, an access
- * log, or a `Referer` — no tracer suppression rule required.
- */
-export class SharePublicApiGroup extends HttpApiGroup.make("sharePublic")
-	.add(
-		HttpApiEndpoint.post("resolve", "/resolve", {
-			payload: ShareResolveRequest,
-			success: SharedDashboardResponse,
-			error: [
-				ShareNotFoundError,
-				ShareForbiddenError,
-				ShareRateLimitedError,
-				ShareNotConfiguredError,
-				SharePersistenceError,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("widgetData", "/widget-data", {
-			payload: ShareWidgetDataPayload,
-			success: ShareWidgetDataResponse,
-			error: [
-				ShareNotFoundError,
-				ShareForbiddenError,
-				ShareRangeInvalidError,
-				ShareVariableInvalidError,
-				ShareRateLimitedError,
-				ShareNotConfiguredError,
-				SharePersistenceError,
-			],
-		}),
-	)
-	.prefix("/api/share") {}

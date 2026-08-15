@@ -17,6 +17,7 @@ import { V2InstrumentationRecommendationsApiGroup } from "./recommendations"
 import { V2ScrapeTargetsApiGroup } from "./scrape-targets"
 import { V2SessionReplaysApiGroup } from "./session-replays"
 import { V2InstrumentationAuditApiGroup } from "./setup-audit"
+import { V2SharePublicApiGroup } from "./share"
 import {
 	V2LogsApiGroup,
 	V2MetricsApiGroup,
@@ -100,6 +101,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2MetricsApiGroup)
 	.add(V2ServicesApiGroup)
 	.add(V2ServiceMapApiGroup)
+	.add(V2SharePublicApiGroup)
 	.middleware(V2SchemaErrors)
 	.middleware(V2UnexpectedErrors)
 	.annotateMerge(

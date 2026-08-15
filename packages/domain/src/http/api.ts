@@ -1,7 +1,6 @@
 import { HttpApi, OpenApi } from "effect/unstable/httpapi"
 import { AuthApiGroup, AuthPublicApiGroup } from "./auth"
 import { BillingPublicApiGroup } from "./billing"
-import { SharePublicApiGroup } from "./share"
 import { ErrorsApiGroup } from "./errors"
 import { IntegrationsApiGroup } from "./integrations"
 import { OrgClickHouseSettingsApiGroup } from "./org-clickhouse-settings"
@@ -12,7 +11,6 @@ export class MapleApi extends HttpApi.make("MapleApi")
 	.add(AuthPublicApiGroup)
 	.add(AuthApiGroup)
 	.add(BillingPublicApiGroup)
-	.add(SharePublicApiGroup)
 	.add(ErrorsApiGroup)
 	.add(IntegrationsApiGroup)
 	.add(OrgClickHouseSettingsApiGroup)

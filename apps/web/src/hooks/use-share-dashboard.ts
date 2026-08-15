@@ -113,7 +113,7 @@ export function useSharedDashboard(token: string, isSignedIn: boolean) {
 	useEffect(() => {
 		let cancelled = false
 		setState({ status: "loading" })
-		post("/api/share/resolve", { token }, isSignedIn)
+		post("/v2/share/resolve", { token }, isSignedIn)
 			.then(async (response) => {
 				const payload = await response.json().catch(() => null)
 				if (cancelled) return
@@ -195,7 +195,7 @@ export function useShareWidgetData(
 				const batch = ids.slice(index, index + BATCH_MAX)
 				try {
 					const response = await post(
-						"/api/share/widget-data",
+						"/v2/share/widget-data",
 						{
 							token,
 							requests: batch.map((widgetId) => ({ widgetId })),

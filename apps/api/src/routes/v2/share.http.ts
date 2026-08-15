@@ -1,11 +1,17 @@
 /**
- * The unauthenticated share surface.
+ * The unauthenticated share surface, served at `/v2/share`.
  *
- * Deliberately has no authorization middleware. A public link must resolve with
- * no credential at all, and an org-only link needs the session resolved
- * *optionally* — middleware would reject an anonymous caller before any handler
- * could see which mode the link is, so the page could never tell "sign in to
- * view this" from "this link does not exist".
+ * Deliberately has no authorization middleware — the only group on `MapleApiV2`
+ * without one; see `packages/domain/src/http/v2/share.ts` for what that costs
+ * and why it is still right. A public link must resolve with no credential at
+ * all, and an org-only link needs the session resolved *optionally*: middleware
+ * would reject an anonymous caller before any handler could see which mode the
+ * link is, so the page could never tell "sign in to view this" from "this link
+ * does not exist".
+ *
+ * Note this means the v2 API-key rate limiter never runs for these routes.
+ * `enforceRateLimit` below is not a supplement to it — it is the only limiter
+ * on this path.
  *
  * Uniformity is the security property throughout: an unknown token, a revoked
  * token, and a token whose dashboard was deleted all take the same path and
@@ -15,7 +21,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpServerRequest } from "effect/unstable/http"
 import {
-	MapleApi,
 	SHARE_NOT_FOUND_MESSAGE,
 	ShareForbiddenError,
 	ShareNotFoundError,
@@ -24,6 +29,7 @@ import {
 	SharedDashboardResponse,
 	type ShareWidgetDataOutcome,
 } from "@maple/domain/http"
+import { MapleApiV2 } from "@maple/domain/http/v2"
 import { MAX_LIST_RANGE_SECONDS, SHARE_MAX_RANGE_SECONDS } from "@maple/query-engine"
 import { hashShareToken } from "@maple/db"
 import { redactForShare } from "@maple/widgets/dashboard"
@@ -44,7 +50,7 @@ import { resolveShareWindow } from "@/services/dashboards/share-window"
 /** Uniform "no such link", used for every reason a token might not resolve. */
 const notFound = Effect.fail(new ShareNotFoundError({ message: SHARE_NOT_FOUND_MESSAGE }))
 
-export const HttpSharePublicLive = HttpApiBuilder.group(MapleApi, "sharePublic", (handlers) =>
+export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePublic", (handlers) =>
 	Effect.gen(function* () {
 		const auth = yield* AuthService
 		const env = yield* Env
