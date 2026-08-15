@@ -59,6 +59,7 @@ import { Route as ReplaysIndexRouteImport } from "./routes/replays/index"
 import { Route as ReplaysSessionIdRouteImport } from "./routes/replays/$sessionId"
 import { Route as ServicesIndexRouteImport } from "./routes/services/index"
 import { Route as ServicesServiceNameRouteImport } from "./routes/services/$serviceName"
+import { Route as ShareTokenRouteImport } from "./routes/share/$token"
 import { Route as TracesIndexRouteImport } from "./routes/traces/index"
 import { Route as TracesTraceIdRouteImport } from "./routes/traces/$traceId"
 import { Route as AlertsIncidentsIncidentIdRouteImport } from "./routes/alerts/incidents/$incidentId"
@@ -301,11 +302,12 @@ const MetricsMetricNameRoute = MetricsMetricNameRouteImport.update({
 	path: "/metrics/$metricName",
 	getParentRoute: () => rootRouteImport,
 } as any)
-const RecommendationsRecommendationKeyRoute = RecommendationsRecommendationKeyRouteImport.update({
-	id: "/recommendations/$recommendationKey",
-	path: "/recommendations/$recommendationKey",
-	getParentRoute: () => rootRouteImport,
-} as any)
+const RecommendationsRecommendationKeyRoute =
+	RecommendationsRecommendationKeyRouteImport.update({
+		id: "/recommendations/$recommendationKey",
+		path: "/recommendations/$recommendationKey",
+		getParentRoute: () => rootRouteImport,
+	} as any)
 const ReplaysIndexRoute = ReplaysIndexRouteImport.update({
 	id: "/replays/",
 	path: "/replays/",
@@ -326,6 +328,11 @@ const ServicesServiceNameRoute = ServicesServiceNameRouteImport.update({
 	path: "/services/$serviceName",
 	getParentRoute: () => rootRouteImport,
 } as any)
+const ShareTokenRoute = ShareTokenRouteImport.update({
+	id: "/share/$token",
+	path: "/share/$token",
+	getParentRoute: () => rootRouteImport,
+} as any)
 const TracesIndexRoute = TracesIndexRouteImport.update({
 	id: "/traces/",
 	path: "/traces/",
@@ -336,11 +343,12 @@ const TracesTraceIdRoute = TracesTraceIdRouteImport.update({
 	path: "/traces/$traceId",
 	getParentRoute: () => rootRouteImport,
 } as any)
-const AlertsIncidentsIncidentIdRoute = AlertsIncidentsIncidentIdRouteImport.update({
-	id: "/alerts/incidents/$incidentId",
-	path: "/alerts/incidents/$incidentId",
-	getParentRoute: () => rootRouteImport,
-} as any)
+const AlertsIncidentsIncidentIdRoute =
+	AlertsIncidentsIncidentIdRouteImport.update({
+		id: "/alerts/incidents/$incidentId",
+		path: "/alerts/incidents/$incidentId",
+		getParentRoute: () => rootRouteImport,
+	} as any)
 const ErrorsIssuesIndexRoute = ErrorsIssuesIndexRouteImport.update({
 	id: "/errors/issues/",
 	path: "/errors/issues/",
@@ -371,36 +379,42 @@ const InfraPlanetscaleDbNameRoute = InfraPlanetscaleDbNameRouteImport.update({
 	path: "/infra/planetscale/$dbName",
 	getParentRoute: () => rootRouteImport,
 } as any)
-const DashboardsDashboardIdWidgetsWidgetIdRoute = DashboardsDashboardIdWidgetsWidgetIdRouteImport.update({
-	id: "/dashboards/$dashboardId_/widgets/$widgetId",
-	path: "/dashboards/$dashboardId/widgets/$widgetId",
-	getParentRoute: () => rootRouteImport,
-} as any)
-const InfraKubernetesNodesIndexRoute = InfraKubernetesNodesIndexRouteImport.update({
-	id: "/infra/kubernetes/nodes/",
-	path: "/infra/kubernetes/nodes/",
-	getParentRoute: () => rootRouteImport,
-} as any)
-const InfraKubernetesNodesNodeNameRoute = InfraKubernetesNodesNodeNameRouteImport.update({
-	id: "/infra/kubernetes/nodes/$nodeName",
-	path: "/infra/kubernetes/nodes/$nodeName",
-	getParentRoute: () => rootRouteImport,
-} as any)
-const InfraKubernetesPodsIndexRoute = InfraKubernetesPodsIndexRouteImport.update({
-	id: "/infra/kubernetes/pods/",
-	path: "/infra/kubernetes/pods/",
-	getParentRoute: () => rootRouteImport,
-} as any)
-const InfraKubernetesPodsPodNameRoute = InfraKubernetesPodsPodNameRouteImport.update({
-	id: "/infra/kubernetes/pods/$podName",
-	path: "/infra/kubernetes/pods/$podName",
-	getParentRoute: () => rootRouteImport,
-} as any)
-const InfraKubernetesWorkloadsIndexRoute = InfraKubernetesWorkloadsIndexRouteImport.update({
-	id: "/infra/kubernetes/workloads/",
-	path: "/infra/kubernetes/workloads/",
-	getParentRoute: () => rootRouteImport,
-} as any)
+const DashboardsDashboardIdWidgetsWidgetIdRoute =
+	DashboardsDashboardIdWidgetsWidgetIdRouteImport.update({
+		id: "/dashboards/$dashboardId_/widgets/$widgetId",
+		path: "/dashboards/$dashboardId/widgets/$widgetId",
+		getParentRoute: () => rootRouteImport,
+	} as any)
+const InfraKubernetesNodesIndexRoute =
+	InfraKubernetesNodesIndexRouteImport.update({
+		id: "/infra/kubernetes/nodes/",
+		path: "/infra/kubernetes/nodes/",
+		getParentRoute: () => rootRouteImport,
+	} as any)
+const InfraKubernetesNodesNodeNameRoute =
+	InfraKubernetesNodesNodeNameRouteImport.update({
+		id: "/infra/kubernetes/nodes/$nodeName",
+		path: "/infra/kubernetes/nodes/$nodeName",
+		getParentRoute: () => rootRouteImport,
+	} as any)
+const InfraKubernetesPodsIndexRoute =
+	InfraKubernetesPodsIndexRouteImport.update({
+		id: "/infra/kubernetes/pods/",
+		path: "/infra/kubernetes/pods/",
+		getParentRoute: () => rootRouteImport,
+	} as any)
+const InfraKubernetesPodsPodNameRoute =
+	InfraKubernetesPodsPodNameRouteImport.update({
+		id: "/infra/kubernetes/pods/$podName",
+		path: "/infra/kubernetes/pods/$podName",
+		getParentRoute: () => rootRouteImport,
+	} as any)
+const InfraKubernetesWorkloadsIndexRoute =
+	InfraKubernetesWorkloadsIndexRouteImport.update({
+		id: "/infra/kubernetes/workloads/",
+		path: "/infra/kubernetes/workloads/",
+		getParentRoute: () => rootRouteImport,
+	} as any)
 const InfraKubernetesWorkloadsKindWorkloadNameRoute =
 	InfraKubernetesWorkloadsKindWorkloadNameRouteImport.update({
 		id: "/infra/kubernetes/workloads/$kind/$workloadName",
@@ -448,6 +462,7 @@ export interface FileRoutesByFullPath {
 	"/recommendations/$recommendationKey": typeof RecommendationsRecommendationKeyRoute
 	"/replays/$sessionId": typeof ReplaysSessionIdRoute
 	"/services/$serviceName": typeof ServicesServiceNameRoute
+	"/share/$token": typeof ShareTokenRoute
 	"/traces/$traceId": typeof TracesTraceIdRoute
 	"/alerts/": typeof AlertsIndexRoute
 	"/analytics/": typeof AnalyticsIndexRoute
@@ -516,6 +531,7 @@ export interface FileRoutesByTo {
 	"/recommendations/$recommendationKey": typeof RecommendationsRecommendationKeyRoute
 	"/replays/$sessionId": typeof ReplaysSessionIdRoute
 	"/services/$serviceName": typeof ServicesServiceNameRoute
+	"/share/$token": typeof ShareTokenRoute
 	"/traces/$traceId": typeof TracesTraceIdRoute
 	"/alerts": typeof AlertsIndexRoute
 	"/analytics": typeof AnalyticsIndexRoute
@@ -585,6 +601,7 @@ export interface FileRoutesById {
 	"/recommendations/$recommendationKey": typeof RecommendationsRecommendationKeyRoute
 	"/replays/$sessionId": typeof ReplaysSessionIdRoute
 	"/services/$serviceName": typeof ServicesServiceNameRoute
+	"/share/$token": typeof ShareTokenRoute
 	"/traces/$traceId": typeof TracesTraceIdRoute
 	"/alerts/": typeof AlertsIndexRoute
 	"/analytics/": typeof AnalyticsIndexRoute
@@ -655,6 +672,7 @@ export interface FileRouteTypes {
 		| "/recommendations/$recommendationKey"
 		| "/replays/$sessionId"
 		| "/services/$serviceName"
+		| "/share/$token"
 		| "/traces/$traceId"
 		| "/alerts/"
 		| "/analytics/"
@@ -723,6 +741,7 @@ export interface FileRouteTypes {
 		| "/recommendations/$recommendationKey"
 		| "/replays/$sessionId"
 		| "/services/$serviceName"
+		| "/share/$token"
 		| "/traces/$traceId"
 		| "/alerts"
 		| "/analytics"
@@ -791,6 +810,7 @@ export interface FileRouteTypes {
 		| "/recommendations/$recommendationKey"
 		| "/replays/$sessionId"
 		| "/services/$serviceName"
+		| "/share/$token"
 		| "/traces/$traceId"
 		| "/alerts/"
 		| "/analytics/"
@@ -860,6 +880,7 @@ export interface RootRouteChildren {
 	RecommendationsRecommendationKeyRoute: typeof RecommendationsRecommendationKeyRoute
 	ReplaysSessionIdRoute: typeof ReplaysSessionIdRoute
 	ServicesServiceNameRoute: typeof ServicesServiceNameRoute
+	ShareTokenRoute: typeof ShareTokenRoute
 	TracesTraceIdRoute: typeof TracesTraceIdRoute
 	AlertsIndexRoute: typeof AlertsIndexRoute
 	AnalyticsIndexRoute: typeof AnalyticsIndexRoute
@@ -1241,6 +1262,13 @@ declare module "@tanstack/react-router" {
 			preLoaderRoute: typeof ServicesServiceNameRouteImport
 			parentRoute: typeof rootRouteImport
 		}
+		"/share/$token": {
+			id: "/share/$token"
+			path: "/share/$token"
+			fullPath: "/share/$token"
+			preLoaderRoute: typeof ShareTokenRouteImport
+			parentRoute: typeof rootRouteImport
+		}
 		"/traces/": {
 			id: "/traces/"
 			path: "/traces"
@@ -1396,6 +1424,7 @@ const rootRouteChildren: RootRouteChildren = {
 	RecommendationsRecommendationKeyRoute: RecommendationsRecommendationKeyRoute,
 	ReplaysSessionIdRoute: ReplaysSessionIdRoute,
 	ServicesServiceNameRoute: ServicesServiceNameRoute,
+	ShareTokenRoute: ShareTokenRoute,
 	TracesTraceIdRoute: TracesTraceIdRoute,
 	AlertsIndexRoute: AlertsIndexRoute,
 	AnalyticsIndexRoute: AnalyticsIndexRoute,
@@ -1416,12 +1445,16 @@ const rootRouteChildren: RootRouteChildren = {
 	ErrorsIssuesIndexRoute: ErrorsIssuesIndexRoute,
 	InfraCloudflareIndexRoute: InfraCloudflareIndexRoute,
 	InfraPlanetscaleIndexRoute: InfraPlanetscaleIndexRoute,
-	DashboardsDashboardIdWidgetsWidgetIdRoute: DashboardsDashboardIdWidgetsWidgetIdRoute,
+	DashboardsDashboardIdWidgetsWidgetIdRoute:
+		DashboardsDashboardIdWidgetsWidgetIdRoute,
 	InfraKubernetesNodesNodeNameRoute: InfraKubernetesNodesNodeNameRoute,
 	InfraKubernetesPodsPodNameRoute: InfraKubernetesPodsPodNameRoute,
 	InfraKubernetesNodesIndexRoute: InfraKubernetesNodesIndexRoute,
 	InfraKubernetesPodsIndexRoute: InfraKubernetesPodsIndexRoute,
 	InfraKubernetesWorkloadsIndexRoute: InfraKubernetesWorkloadsIndexRoute,
-	InfraKubernetesWorkloadsKindWorkloadNameRoute: InfraKubernetesWorkloadsKindWorkloadNameRoute,
+	InfraKubernetesWorkloadsKindWorkloadNameRoute:
+		InfraKubernetesWorkloadsKindWorkloadNameRoute,
 }
-export const routeTree = rootRouteImport._addFileChildren(rootRouteChildren)._addFileTypes<FileRouteTypes>()
+export const routeTree = rootRouteImport
+	._addFileChildren(rootRouteChildren)
+	._addFileTypes<FileRouteTypes>()

@@ -14,6 +14,7 @@ import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { DashboardDocument, DashboardId, IsoDateTimeString, OrgId, UserId } from "@maple/domain/http"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { withDashboardMutation } from "./dashboard-mutations"
@@ -49,6 +50,7 @@ const testConfig = () =>
 const makeLayer = (testDb: TestDb) =>
 	Layer.mergeAll(
 		DashboardPersistenceService.layer,
+		SharedDashboardService.layer,
 		Layer.succeed(CurrentMcpTenant, {
 			orgId: Schema.decodeUnknownSync(OrgId)(ORG),
 			userId: Schema.decodeUnknownSync(UserId)("internal-service"),

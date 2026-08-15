@@ -1,4 +1,3 @@
-// BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
@@ -33,22 +32,26 @@ const spec = OpenApi.fromApi(MapleApiV2)
 // The generated document carries fields (info.contact, top-level externalDocs,
 // security bearerFormat, schema examples) beyond the pruned `OpenAPISpec` type,
 // so read the dynamic bits through an untyped view.
-const doc = spec as Record<string, any>
-const schemas = doc.components.schemas as Record<string, any>
-const operation = (method: string, path: string): Record<string, any> =>
-	(spec.paths as Record<string, any>)[path][method]
-const resolveSchema = (schema: Record<string, any>): Record<string, any> => {
+// oxlint-disable-next-line maple/no-record-string-any, typescript/no-explicit-any -- Effect's public OpenAPI type intentionally omits generated extension fields asserted by this contract test.
+type GeneratedOpenApiObject = Record<string, any>
+const doc = spec as GeneratedOpenApiObject
+const schemas = doc.components.schemas as GeneratedOpenApiObject
+const operation = (method: string, path: string): GeneratedOpenApiObject =>
+	(spec.paths as GeneratedOpenApiObject)[path][method]
+const resolveSchema = (schema: GeneratedOpenApiObject): GeneratedOpenApiObject => {
 	const ref = schema.$ref as string | undefined
 	return ref === undefined ? schema : schemas[ref.slice(ref.lastIndexOf("/") + 1)]
 }
-const schemaBranches = (schema: Record<string, any>): ReadonlyArray<Record<string, any>> => {
+const schemaBranches = (schema: GeneratedOpenApiObject): ReadonlyArray<GeneratedOpenApiObject> => {
 	const resolved = resolveSchema(schema)
-	const alternatives = (resolved.anyOf ?? resolved.oneOf) as ReadonlyArray<Record<string, any>> | undefined
+	const alternatives = (resolved.anyOf ?? resolved.oneOf) as
+		| ReadonlyArray<GeneratedOpenApiObject>
+		| undefined
 	return alternatives === undefined ? [resolved] : alternatives.flatMap(schemaBranches)
 }
 const responseErrorTags = (method: string, path: string, status: string): ReadonlyArray<string> => {
-	const response = operation(method, path).responses[status] as Record<string, any>
-	const responseSchema = response.content["application/json"].schema as Record<string, any>
+	const response = operation(method, path).responses[status] as GeneratedOpenApiObject
+	const responseSchema = response.content["application/json"].schema as GeneratedOpenApiObject
 	return schemaBranches(responseSchema).map((branch) => {
 		const tag = resolveSchema(branch).properties.error.properties._tag
 		expect(tag.type).toBe("string")
@@ -89,6 +92,8 @@ describe("MapleApiV2 OpenAPI", () => {
 			"DELETE /v2/api_keys/{id}",
 			"DELETE /v2/attribute_mappings/{id}",
 			"DELETE /v2/dashboards/{id}",
+			"DELETE /v2/dashboards/{id}/share",
+			"DELETE /v2/dashboards/{id}/widgets/{widget_id}/share",
 			"DELETE /v2/integrations/planetscale",
 			"DELETE /v2/integrations/slack",
 			"DELETE /v2/scrape_targets/{id}",
@@ -113,8 +118,11 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/dashboards",
 			"GET /v2/dashboards/templates",
 			"GET /v2/dashboards/{id}",
+			"GET /v2/dashboards/{id}/share",
+			"GET /v2/dashboards/{id}/shares",
 			"GET /v2/dashboards/{id}/versions",
 			"GET /v2/dashboards/{id}/versions/{version_id}",
+			"GET /v2/dashboards/{id}/widgets/{widget_id}/share",
 			"GET /v2/error_issues",
 			"GET /v2/error_issues/service_counts",
 			"GET /v2/error_issues/{id}",
@@ -163,7 +171,9 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/dashboards/import/perses",
 			"POST /v2/dashboards/templates/{template_id}/instantiate",
 			"POST /v2/dashboards/templates/{template_id}/preview",
+			"POST /v2/dashboards/{id}/share/rotate",
 			"POST /v2/dashboards/{id}/versions/{version_id}/restore",
+			"POST /v2/dashboards/{id}/widgets/{widget_id}/share/rotate",
 			"POST /v2/ingest_keys/private/roll",
 			"POST /v2/ingest_keys/public/roll",
 			"POST /v2/instrumentation/recommendations/{id}/dismiss",
@@ -186,10 +196,14 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/scrape_targets/{id}/probe",
 			"POST /v2/session_replays/for_trace",
 			"POST /v2/session_replays/search",
+			"POST /v2/share/resolve",
+			"POST /v2/share/widget-data",
 			"POST /v2/traces/breakdown",
 			"POST /v2/traces/search",
 			"POST /v2/traces/timeseries",
 			"PUT /v2/anomalies/incidents/{id}/issue",
+			"PUT /v2/dashboards/{id}/share",
+			"PUT /v2/dashboards/{id}/widgets/{widget_id}/share",
 		])
 	})
 
@@ -211,6 +225,20 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(tag?.description).toEqual(expect.stringContaining("Programmatic credentials"))
 	})
 
+	/**
+	 * Operations served without a bearer credential.
+	 *
+	 * An allowlist by operationId, not a path prefix or a group check: the point
+	 * is that a third unauthenticated operation cannot appear in this API without
+	 * someone editing this constant. Share links are the only case — the token in
+	 * the request body *is* the credential, and requiring a bearer alongside it
+	 * would mean the link only worked for people who did not need it.
+	 *
+	 * These still carry every other operation guarantee below, and every common
+	 * error envelope except `401`, which they cannot emit.
+	 */
+	const PUBLIC_OPERATION_IDS: ReadonlySet<string> = new Set(["resolveShare", "resolveShareWidgetData"])
+
 	it("gives every operation complete metadata, security, and common error envelopes", () => {
 		const operations = Object.entries(spec.paths ?? {}).flatMap(([path, item]) =>
 			Object.entries(item ?? {})
@@ -226,14 +254,18 @@ describe("MapleApiV2 OpenAPI", () => {
 			expect(op.summary.length).toBeGreaterThan(0)
 			expect(op.description.length).toBeGreaterThan(20)
 			expect(op.tags).toHaveLength(1)
-			expect(op.security).toEqual([{ bearer: [] }])
-			for (const status of ["400", "401", "403", "429", "500", "504"]) {
+			const isPublic = PUBLIC_OPERATION_IDS.has(op.operationId)
+			expect(op.security, `${op.operationId} security`).toEqual(isPublic ? [] : [{ bearer: [] }])
+			const commonStatuses = isPublic
+				? ["400", "403", "429", "500", "504"]
+				: ["400", "401", "403", "429", "500", "504"]
+			for (const status of commonStatuses) {
 				expect(
 					op.responses[status],
 					`${method.toUpperCase()} ${path} declares ${status}`,
 				).toBeDefined()
 			}
-			const rateLimitResponse = op.responses["429"] as Record<string, any>
+			const rateLimitResponse = op.responses["429"] as GeneratedOpenApiObject
 			expect(rateLimitResponse.headers?.["Retry-After"]).toMatchObject({
 				description: expect.any(String),
 				schema: {
@@ -462,14 +494,14 @@ describe("MapleApiV2 OpenAPI", () => {
 		for (const [path, item] of Object.entries(spec.paths ?? {})) {
 			for (const [method, candidate] of Object.entries(item ?? {})) {
 				if (!["get", "post", "put", "patch", "delete"].includes(method)) continue
-				const op = candidate as Record<string, any>
+				const op = candidate as GeneratedOpenApiObject
 				for (const status of Object.keys(op.responses)) {
 					if (Number(status) < 400) continue
-					const response = (candidate as Record<string, any>).responses[status] as Record<
-						string,
-						any
-					>
-					const responseSchema = response.content["application/json"].schema as Record<string, any>
+					const response = (candidate as GeneratedOpenApiObject).responses[
+						status
+					] as GeneratedOpenApiObject
+					const responseSchema = response.content["application/json"]
+						.schema as GeneratedOpenApiObject
 					const branches = schemaBranches(responseSchema)
 					const tags = responseErrorTags(method, path, status)
 					expect(tags.length, `${method.toUpperCase()} ${path} ${status} has tags`).toBeGreaterThan(
@@ -486,7 +518,7 @@ describe("MapleApiV2 OpenAPI", () => {
 					}
 					for (const branch of branches) {
 						const envelope = resolveSchema(branch)
-						const body = envelope.properties.error as Record<string, any>
+						const body = envelope.properties.error as GeneratedOpenApiObject
 						const label = `${method.toUpperCase()} ${path} ${status}`
 						expect(envelope.required, `${label} envelope fields`).toEqual(["error"])
 						expect(envelope.additionalProperties, `${label} envelope is closed`).toBe(false)

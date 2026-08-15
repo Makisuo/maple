@@ -17,6 +17,7 @@ import {
 	API_V2_RATE_LIMIT_PERIOD_SECONDS,
 	API_V2_RATE_LIMIT_REQUESTS,
 	ApiV2RateLimiter,
+	apiV2RateLimitKey,
 } from "./ApiV2RateLimiter"
 
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
@@ -74,7 +75,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 							keyId: resolved.keyId,
 						})
 
-						const rateLimitOutcome = yield* rateLimiter.check(resolved.keyId)
+						const rateLimitOutcome = yield* rateLimiter.check(apiV2RateLimitKey(resolved.keyId))
 						yield* Effect.annotateCurrentSpan({
 							"maple.rate_limit.outcome": rateLimitOutcome,
 							"maple.rate_limit.limit": API_V2_RATE_LIMIT_REQUESTS,

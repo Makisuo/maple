@@ -41,6 +41,8 @@ import { HttpV2InstrumentationRecommendationsLive } from "./recommendations.http
 import { HttpV2ScrapeTargetsLive } from "./scrape-targets.http"
 import { HttpV2SessionReplaysLive } from "./session-replays.http"
 import { HttpV2InstrumentationAuditLive } from "./setup-audit.http"
+import { HttpV2SharePublicLive } from "./share.http"
+import { DashboardWidgetDataService } from "@/services/dashboards/DashboardWidgetDataService"
 import {
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
@@ -80,6 +82,17 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2MetricsLive,
 	HttpV2ServicesLive,
 	HttpV2ServiceMapLive,
+	// The share group's own dependency is satisfied here rather than by every
+	// harness: no v2 route test exercises the share endpoints, and threading an
+	// inert service through two dozen call sites to register a group they never
+	// call is churn with no assertion behind it.
+	HttpV2SharePublicLive.pipe(
+		Layer.provide(
+			Layer.succeed(DashboardWidgetDataService, {
+				resolve: () => Effect.die("share widget data is not exercised by v2 route harnesses"),
+			}),
+		),
+	),
 )
 
 export const ApiV2RateLimiterAllowAllLayer = Layer.succeed(ApiV2RateLimiter, {

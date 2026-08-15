@@ -14,7 +14,15 @@ interface RateLimitBinding {
 }
 
 export interface ApiV2RateLimiterApi {
-	readonly check: (keyId: ApiKeyId) => Effect.Effect<ApiV2RateLimitOutcome>
+	/**
+	 * Rate-limit one caller-chosen key.
+	 *
+	 * Takes an opaque string rather than an `ApiKeyId` because the v2 API is no
+	 * longer the only caller: the public share surface limits per share token and
+	 * per client IP, neither of which is an API key. The `v2:` / `share:` scoping
+	 * prefix therefore belongs to the caller — see `makeApiV2RateLimitKey`.
+	 */
+	readonly check: (key: string) => Effect.Effect<ApiV2RateLimitOutcome>
 }
 
 class ApiV2RateLimiterBindingError extends Schema.TaggedError<ApiV2RateLimiterBindingError>()(
@@ -36,8 +44,14 @@ const readPartition = (environment: Record<string, unknown>): string | undefined
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
 }
 
-export const makeApiV2RateLimitKey = (partition: string, keyId: ApiKeyId): string =>
-	`${partition}:v2:${keyId}`
+export const makeApiV2RateLimitKey = (partition: string, key: string): string => `${partition}:${key}`
+
+/** The v2 API's own scoping prefix, preserving the pre-generalization key shape. */
+export const apiV2RateLimitKey = (keyId: ApiKeyId): string => `v2:${keyId}`
+
+/** Share links are limited per token, and separately per client IP. */
+export const shareTokenRateLimitKey = (tokenHashPrefix: string): string => `share:${tokenHashPrefix}`
+export const shareIpRateLimitKey = (ip: string): string => `shareip:${ip}`
 
 const warnFailedOpen = (reason: "binding_missing" | "partition_missing" | "binding_error", cause?: unknown) =>
 	Effect.logWarning("API v2 rate limiter unavailable; allowing request").pipe(
@@ -54,7 +68,7 @@ export class ApiV2RateLimiter extends Context.Service<ApiV2RateLimiter, ApiV2Rat
 		make: Effect.gen(function* () {
 			const environment = yield* WorkerEnvironment
 
-			const check = Effect.fn("ApiV2RateLimiter.check")(function* (keyId: ApiKeyId) {
+			const check = Effect.fn("ApiV2RateLimiter.check")(function* (key: string) {
 				const binding = environment[API_V2_RATE_LIMIT_BINDING]
 				if (!isRateLimitBinding(binding)) {
 					yield* warnFailedOpen("binding_missing")
@@ -68,7 +82,7 @@ export class ApiV2RateLimiter extends Context.Service<ApiV2RateLimiter, ApiV2Rat
 				}
 
 				return yield* Effect.tryPromise({
-					try: () => binding.limit({ key: makeApiV2RateLimitKey(partition, keyId) }),
+					try: () => binding.limit({ key: makeApiV2RateLimitKey(partition, key) }),
 					catch: (cause) =>
 						new ApiV2RateLimiterBindingError({
 							message: "Cloudflare rate-limit binding call failed",

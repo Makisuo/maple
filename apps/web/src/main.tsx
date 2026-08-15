@@ -6,6 +6,7 @@ import { apiBaseUrl } from "./lib/services/common/api-base-url"
 import { ClerkAuthBridge } from "./lib/services/common/clerk-auth-bridge"
 import { purgeForeignClerkCookies } from "./lib/services/common/clerk-cookie-guard"
 import { isClerkAuthEnabled } from "./lib/services/common/auth-mode"
+import { isPublicPath } from "./lib/public-routes"
 import { clerkAppearance } from "./lib/clerk-appearance"
 import {
 	installSelfHostedAuthHeadersProvider,
@@ -56,15 +57,6 @@ if (import.meta.env.DEV && isClerkAuthEnabled && !clerkPublishableKey) {
 }
 
 const AUTH_SETTLE_TIMEOUT_MS = 2000
-const PUBLIC_PATHS = [
-	"/sign-in",
-	"/sign-up",
-	"/org-required",
-	"/service-map-bench",
-	"/service-detail-bench",
-	"/logs-bench",
-	"/overview-bench",
-]
 
 /**
  * Wait for Clerk's auth state to settle before rendering the router.
@@ -90,7 +82,10 @@ function useClerkAuthSettled() {
 			return
 		}
 
-		if (PUBLIC_PATHS.includes(window.location.pathname)) {
+		// Shared with `__root.tsx`'s auth gate so the two can no longer disagree
+		// about which paths render without a session — these lists had already
+		// drifted apart before they were unified.
+		if (isPublicPath(window.location.pathname)) {
 			setSettled(true)
 			return
 		}

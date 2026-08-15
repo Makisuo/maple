@@ -1,4 +1,3 @@
-// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { useMemo, useState } from "react"
 import { dataSourceTransform, type WidgetDataSourceTransformSchema } from "@maple/widgets/dashboard"
 import { Atom, Result } from "@/lib/effect-atom"
@@ -33,7 +32,12 @@ import { displayError } from "@/lib/error-messages"
 import { Cause, Option } from "effect"
 import { WarehouseDecodeError, type BackendError, type WarehouseApiError } from "@/api/warehouse/effect-utils"
 import { QueryEngineValidationError } from "@maple/domain/http"
-import { MAX_LIST_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
+import {
+	LIST_ENDPOINTS,
+	MAX_LIST_RANGE_SECONDS,
+	formatRangeSeconds,
+	interpolateTimeMacros,
+} from "@maple/query-engine"
 import { formatForTinybird } from "@/lib/time-utils"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
@@ -66,7 +70,6 @@ const classifyWidgetErrorKind = (input: unknown): "decode" | "runtime" | "range"
 
 // Endpoints whose queries are `kind: "list"` — they scan raw rows and so carry
 // the engine's much tighter list ceiling.
-const LIST_ENDPOINTS: ReadonlySet<string> = new Set(["custom_query_builder_list", "list_traces", "list_logs"])
 
 const rangeSecondsOf = (range: { startTime: string; endTime: string }): number =>
 	(Date.parse(normalizeTimestampInput(range.endTime)) -
@@ -100,29 +103,6 @@ function filterHiddenSeriesRows(
 		}
 		return filtered
 	})
-}
-
-function interpolateParams(
-	params: Record<string, unknown>,
-	resolvedTime: { startTime: string; endTime: string },
-): Record<string, unknown> {
-	const result: Record<string, unknown> = {}
-
-	for (const [key, value] of Object.entries(params)) {
-		if (typeof value === "string") {
-			if (value === "$__startTime") {
-				result[key] = resolvedTime.startTime
-			} else if (value === "$__endTime") {
-				result[key] = resolvedTime.endTime
-			} else {
-				result[key] = value
-			}
-		} else {
-			result[key] = value
-		}
-	}
-
-	return result
 }
 
 function applyTransform(
@@ -473,7 +453,7 @@ export function useWidgetDataSource(
 
 	const resolvedParams = useMemo(() => {
 		if (!resolvedTimeRange) return {}
-		const base = interpolateParams(
+		const base = interpolateTimeMacros(
 			{
 				...request?.params,
 				strategy: { enableEmptyRangeFallback: false },

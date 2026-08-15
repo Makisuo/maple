@@ -255,6 +255,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: Redacted.make(
 					requireEnv("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY"),
 				),
+				MAPLE_SHARE_TOKEN_HMAC_KEY: Redacted.make(requireEnv("MAPLE_SHARE_TOKEN_HMAC_KEY")),
 				MAPLE_INGEST_PUBLIC_URL:
 					process.env.MAPLE_INGEST_PUBLIC_URL?.trim() || "https://ingest.maple.dev",
 				MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",

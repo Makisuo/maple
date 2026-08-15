@@ -64,6 +64,18 @@ The following v1 groups are dashboard workflows or protocol surfaces. Do not por
 | `aiTriage`              | **Done** — `/internal/ai-triage`.                                                                                                                                                                                                                                                                                                                        |
 | `auth` and `authPublic` | Keep standards-driven CLI/MCP/OAuth/JWT exchange routes version-neutral; they are authentication protocols, not v2 resources.                                                                                                                                                                                                                            |
 
+## The one unauthenticated v2 group
+
+`sharePublic` (`POST /v2/share/resolve`, `POST /v2/share/widget-data`) is on `MapleApiV2` **without** `AuthorizationV2` — the only group there that is. It is the viewer half of dashboard share links: the token in the request body is the credential, and the whole proposition is that the link resolves for someone with no Maple account, so requiring a bearer would mean it only worked for people who did not need it. Share _management_ (`/v2/dashboards/{id}/share`, and the widget-scoped twins) is ordinary authenticated v2 surface and carries the `dashboards` scope family.
+
+Three consequences, all deliberate:
+
+- **No scope.** `requiredScopeForRequest` would derive the family `share` from the path, but it is only called by `ApiAuthorizationV2Layer`, which these routes never run. There is no `share:read` scope and nothing issues one.
+- **`security: []` and no `401`** in the OpenAPI spec. `openapi.test.ts` exempts the two operations by operationId through `PUBLIC_OPERATION_IDS` — an allowlist, so a third public operation cannot appear without someone editing it. Every other operation guarantee still applies to them.
+- **The v2 rate limiter never runs.** These routes carry their own per-token and per-IP limiter in the handler; it is the only one on the path, not a supplement.
+
+Prefer this shape over a new unauthenticated group. If a future surface needs anonymous access, weigh `/api/…` (as `billingPublic` did) first — the exemption above is narrow on purpose.
+
 Moving a group to `/internal` swaps `Authorization` for `SessionAuthorization`, which refuses API-key-shaped bearers. That is the intended narrowing, and telemetry showed no API-key traffic to any of these paths — but it means the move is a breaking change for any API-key caller, not a transparent reroute.
 
 The frontend halves of that move are easy to get wrong in ways nothing type-checks:
