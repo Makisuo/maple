@@ -13,6 +13,7 @@ import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import { PlanetScaleDiscoveryService } from "@/services/integrations/PlanetScaleDiscoveryService"
@@ -118,6 +119,7 @@ const makeHarness = (warehouse: WarehouseQueryServiceApi = warehouseStub()) => {
 		ApiKeysService.layer,
 		AuthService.layer,
 		DashboardPersistenceService.layer,
+		SharedDashboardService.layer,
 		IngestAttributeMappingService.layer,
 		OrgIngestKeysService.layer,
 		RecommendationIssueService.layer.pipe(Layer.provide(warehouseLive)),
