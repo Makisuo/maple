@@ -15,6 +15,8 @@ import {
 	getServiceDetailThroughputRefinementResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { mergeExactThroughput } from "@/api/warehouse/custom-charts"
+import type { ServiceDetailOverviewResult } from "@/api/warehouse/custom-charts"
+import type { QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { ServiceDetailTimeSeriesPoint } from "@/api/warehouse/services"
 import { useCommitMarkers } from "@/components/vcs/commit-markers/use-commit-markers"
 import type { ReleasePoint } from "@/components/vcs/commit-markers/marker-layout"
@@ -24,12 +26,16 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 import { Button } from "@maple/ui/components/ui/button"
 import { BellIcon } from "@/components/icons"
 import { ServiceDependenciesTab } from "@/components/services/service-dependencies-tab"
+import { ServiceEndpointsTab } from "@/components/services/service-endpoints-tab"
 import { ServiceOperationsTab } from "@/components/services/service-operations-tab"
 import { ServiceDependencyStrip } from "@/components/services/service-dependency-strip"
 import { ServiceEnvironmentSwitcher } from "@/components/services/service-environment-switcher"
 import { ServiceErrorsPanel } from "@/components/services/service-errors-panel"
 import { ServiceRecentDeploys } from "@/components/services/service-recent-deploys"
-import { ServiceTopOperationsPanel } from "@/components/services/service-top-operations-panel"
+import {
+	ServiceTopEndpointsPanel,
+	ServiceTopOperationsPanel,
+} from "@/components/services/service-top-operations-panel"
 import { ServiceUsagePanel } from "@/components/services/service-usage-panel"
 import { ServiceWorkloadsPanel } from "@/components/services/service-workloads-panel"
 import { OptionalStringArrayParam } from "@/lib/search-params"
@@ -43,7 +49,7 @@ import { LONG_RANGE_PRESET_OPTIONS } from "@/lib/time-utils"
 const EMPTY_RELEASES: ReadonlyArray<ReleasePoint> = []
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
 
-const ServiceDetailTab = Schema.Literals(["overview", "operations", "dependencies"])
+const ServiceDetailTab = Schema.Literals(["overview", "endpoints", "operations", "dependencies"])
 type ServiceDetailTabValue = Schema.Schema.Type<typeof ServiceDetailTab>
 const decodeServiceDetailTab = Schema.decodeUnknownOption(ServiceDetailTab)
 
@@ -145,10 +151,35 @@ function ServiceDetailContent() {
 		[navigate],
 	)
 
-	const activeTab: ServiceDetailTabValue = Option.getOrElse(
+	// Lifted out of OverviewTab: the header's environment switcher and the tab
+	// list below both read it, so it must resolve on every tab — a deep link to
+	// `?tab=operations` still needs to know whether to offer Endpoints. Subscribing
+	// here rather than in two children also collapses the duplicate subscription.
+	const overviewAtom = getServiceDetailOverviewResultAtom({
+		data: {
+			serviceName,
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+			environments: search.environments,
+		},
+	})
+	const overviewResult = useRetainedRefreshableResultValue(overviewAtom)
+
+	// Detection rides the overview bundle (see the `serviceDetailOverview`
+	// handler), so the Endpoints trigger appears with the first paint of the page
+	// rather than after a second round-trip.
+	const isHttpApi = Result.builder(overviewResult)
+		.onSuccess((r) => r.apiProfile.isHttpApi)
+		.orElse(() => false)
+
+	const rawTab: ServiceDetailTabValue = Option.getOrElse(
 		decodeServiceDetailTab(search.tab),
 		(): ServiceDetailTabValue => "overview",
 	)
+	// A stale `?tab=endpoints` on a service that isn't an API (or one whose
+	// detection hasn't resolved yet) falls back rather than rendering a tab with
+	// no trigger.
+	const activeTab: ServiceDetailTabValue = rawTab === "endpoints" && !isHttpApi ? "overview" : rawTab
 	const handleTabChange = useCallback(
 		(value: unknown) => {
 			const next = Option.getOrElse(
@@ -180,6 +211,7 @@ function ServiceDetailContent() {
 
 	const handleShowDependencies = useCallback(() => handleTabChange("dependencies"), [handleTabChange])
 	const handleShowOperations = useCallback(() => handleTabChange("operations"), [handleTabChange])
+	const handleShowEndpoints = useCallback(() => handleTabChange("endpoints"), [handleTabChange])
 
 	return (
 		<DashboardLayout.Root>
@@ -214,6 +246,17 @@ function ServiceDetailContent() {
 										>
 											Overview
 										</TabsTrigger>
+										{/* Only for services detected as HTTP APIs. Additive — the
+										    generic Operations tab stays, since an API service still
+										    has internal spans worth seeing. */}
+										{isHttpApi && (
+											<TabsTrigger
+												value="endpoints"
+												className="h-6 flex-1 px-2.5 text-xs font-medium sm:h-6 sm:flex-initial sm:text-xs"
+											>
+												Endpoints
+											</TabsTrigger>
+										)}
 										<TabsTrigger
 											value="operations"
 											className="h-6 flex-1 px-2.5 text-xs font-medium sm:h-6 sm:flex-initial sm:text-xs"
@@ -269,8 +312,23 @@ function ServiceDetailContent() {
 								effectiveStartTime={effectiveStartTime}
 								effectiveEndTime={effectiveEndTime}
 								environments={search.environments}
+								overviewAtom={overviewAtom}
+								overviewResult={overviewResult}
+								isHttpApi={isHttpApi}
 								onShowDependencies={handleShowDependencies}
 								onShowOperations={handleShowOperations}
+								onShowEndpoints={handleShowEndpoints}
+							/>
+						)}
+						{activeTab === "endpoints" && (
+							<ServiceEndpointsTab
+								serviceName={serviceName}
+								effectiveStartTime={effectiveStartTime}
+								effectiveEndTime={effectiveEndTime}
+								environments={search.environments}
+								startTime={search.startTime}
+								endTime={search.endTime}
+								timePreset={search.timePreset}
 							/>
 						)}
 						{activeTab === "operations" && (
@@ -307,8 +365,22 @@ interface OverviewTabProps {
 	effectiveStartTime: string
 	effectiveEndTime: string
 	environments?: string[]
+	/**
+	 * The overview bundle, subscribed by the page shell rather than here: the
+	 * header's environment switcher and the tab list need it on every tab, so the
+	 * subscription lives one level up and the atom + its result are passed down.
+	 * Still one fetch for the whole tab (the switcher shares this atom key).
+	 */
+	/** Raw search params, forwarded to the endpoint detail route. */
+	startTime?: string
+	endTime?: string
+	timePreset?: string
+	overviewAtom: ReturnType<typeof getServiceDetailOverviewResultAtom>
+	overviewResult: Result.Result<ServiceDetailOverviewResult, QueryAtomFailure>
+	isHttpApi: boolean
 	onShowDependencies: () => void
 	onShowOperations: () => void
+	onShowEndpoints: () => void
 }
 
 function OverviewTab({
@@ -316,21 +388,16 @@ function OverviewTab({
 	effectiveStartTime,
 	effectiveEndTime,
 	environments,
+	startTime,
+	endTime,
+	timePreset,
+	overviewAtom,
+	overviewResult,
+	isHttpApi,
 	onShowDependencies,
 	onShowOperations,
+	onShowEndpoints,
 }: OverviewTabProps) {
-	// One fetch for the whole Overview tab — the primary chart and the environment
-	// switcher's options (the switcher reads this same atom key, so it shares this
-	// round-trip instead of issuing its own overview query).
-	const overviewAtom = getServiceDetailOverviewResultAtom({
-		data: {
-			serviceName,
-			startTime: effectiveStartTime,
-			endTime: effectiveEndTime,
-			environments,
-		},
-	})
-	const overviewResult = useRetainedRefreshableResultValue(overviewAtom)
 	const refreshOverview = useAtomRefresh(overviewAtom)
 
 	// Sampling verdict from the already-loaded primary chart. Drives a separate,
@@ -448,13 +515,29 @@ function OverviewTab({
 				// of these metrics' tick labels (latency ms).
 				yAxisWidth={72}
 			/>
-			<ServiceTopOperationsPanel
-				serviceName={serviceName}
-				effectiveStartTime={effectiveStartTime}
-				effectiveEndTime={effectiveEndTime}
-				environments={environments}
-				onViewAll={onShowOperations}
-			/>
+			{/* An API service leads with its endpoints; everything else leads with
+			    raw operations. Both read the same atom key their tab uses, so the
+			    tab that follows is a cache hit. */}
+			{isHttpApi ? (
+				<ServiceTopEndpointsPanel
+					serviceName={serviceName}
+					effectiveStartTime={effectiveStartTime}
+					effectiveEndTime={effectiveEndTime}
+					environments={environments}
+					startTime={startTime}
+					endTime={endTime}
+					timePreset={timePreset}
+					onViewAll={onShowEndpoints}
+				/>
+			) : (
+				<ServiceTopOperationsPanel
+					serviceName={serviceName}
+					effectiveStartTime={effectiveStartTime}
+					effectiveEndTime={effectiveEndTime}
+					environments={environments}
+					onViewAll={onShowOperations}
+				/>
+			)}
 			<div className="grid gap-3 lg:grid-cols-2">
 				<ServiceErrorsPanel
 					serviceName={serviceName}

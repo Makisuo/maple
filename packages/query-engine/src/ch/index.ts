@@ -351,6 +351,25 @@ export {
 	type ServiceOperationsTimeseriesOutput,
 } from "./queries/service-operations"
 
+// Queries — Service Endpoints (HTTP-API view of the service detail page)
+export {
+	endpointStatusBreakdownQuery,
+	endpointStatusBreakdownRowSchema,
+	isHttpApiService,
+	serviceApiProfileQuery,
+	serviceApiProfileRowSchema,
+	serviceEndpointsSummaryQuery,
+	serviceEndpointsSummaryRawQuery,
+	serviceEndpointsSummaryRowSchema,
+	HTTP_METHODS,
+	type ServiceApiProfileOpts,
+	type ServiceApiProfileOutput,
+	type EndpointStatusBreakdownOpts,
+	type EndpointStatusBreakdownOutput,
+	type ServiceEndpointsSummaryOpts,
+	type ServiceEndpointsSummaryOutput,
+} from "./queries/service-endpoints"
+
 // Queries — Alert Checks (historical rule evaluations)
 export {
 	listRuleChecksQuery,

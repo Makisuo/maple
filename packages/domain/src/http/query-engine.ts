@@ -656,6 +656,20 @@ export class ServiceDetailOverviewResponse extends Schema.Class<ServiceDetailOve
 	// window — feeds the environment switcher dropdown (previously an all-services
 	// overview scan).
 	environments: Schema.Array(Schema.String),
+	// Is this service an HTTP API? Rides the overview bundle rather than taking
+	// its own round-trip, because the answer gates a *tab trigger* in the page
+	// header and so must be known on first paint of every tab — the header's
+	// environment switcher already subscribes to this same response.
+	// `optionalKey` so a web build deployed ahead of the API degrades to "not an
+	// API" (the tab is simply not offered) instead of failing to decode.
+	apiProfile: Schema.optionalKey(
+		Schema.Struct({
+			isHttpApi: Schema.Boolean,
+			httpServerSpans: Schema.Number,
+			entrySpans: Schema.Number,
+			distinctEndpoints: Schema.Number,
+		}),
+	),
 }) {}
 
 export class ServiceDependenciesBundleRequest extends Schema.Class<ServiceDependenciesBundleRequest>(
@@ -862,6 +876,76 @@ export class ServiceOperationsResponse extends Schema.Class<ServiceOperationsRes
 					count: Schema.Number,
 				}),
 			),
+		}),
+	),
+}) {}
+
+export class ServiceEndpointsRequest extends Schema.Class<ServiceEndpointsRequest>("ServiceEndpointsRequest")(
+	{
+		serviceName: ServiceName,
+		startTime: TinybirdDateTime,
+		endTime: TinybirdDateTime,
+		environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
+		// Bucket size for the per-endpoint sparkline sub-query (client-computed,
+		// like ServiceOperationsRequest.bucketSeconds).
+		bucketSeconds: Schema.optional(Schema.Number),
+		limit: Schema.optional(Schema.Number),
+	},
+) {}
+
+export class ServiceEndpointsResponse extends Schema.Class<ServiceEndpointsResponse>(
+	"ServiceEndpointsResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			// Display span name ("GET /api/users"). Kept alongside the split halves
+			// because it — not `route` — is what the /traces `spanNames` filter and
+			// the sparkline timeseries key on.
+			spanName: Schema.String,
+			method: Schema.String,
+			route: Schema.String,
+			spanCount: Schema.Number,
+			estimatedSpanCount: Schema.Number,
+			errorCount: Schema.Number,
+			estimatedErrorCount: Schema.Number,
+			// 0–1 ratio, sampling-weighted.
+			errorRate: Schema.Number,
+			avgDurationMs: Schema.Number,
+			p50DurationMs: Schema.Number,
+			p95DurationMs: Schema.Number,
+			p99DurationMs: Schema.Number,
+			// Sampling-weighted per-bucket counts, joined per endpoint server-side.
+			sparkline: Schema.Array(
+				Schema.Struct({
+					bucket: Schema.String,
+					count: Schema.Number,
+				}),
+			),
+		}),
+	),
+}) {}
+
+export class EndpointStatusBreakdownRequest extends Schema.Class<EndpointStatusBreakdownRequest>(
+	"EndpointStatusBreakdownRequest",
+)({
+	serviceName: ServiceName,
+	// Display span name ("GET /api/users") — matched against both the raw and
+	// rewritten spelling by `tracesBaseWhereConditions`.
+	spanName: Schema.String,
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
+}) {}
+
+export class EndpointStatusBreakdownResponse extends Schema.Class<EndpointStatusBreakdownResponse>(
+	"EndpointStatusBreakdownResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			/** "1xx" | "2xx" | "3xx" | "4xx" | "5xx" | "unknown" */
+			statusClass: Schema.String,
+			spanCount: Schema.Number,
+			estimatedSpanCount: Schema.Number,
 		}),
 	),
 }) {}
@@ -1936,6 +2020,20 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceOperations", "/service-operations", {
 			payload: ServiceOperationsRequest,
 			success: ServiceOperationsResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("serviceEndpoints", "/service-endpoints", {
+			payload: ServiceEndpointsRequest,
+			success: ServiceEndpointsResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("endpointStatusBreakdown", "/endpoint-status-breakdown", {
+			payload: EndpointStatusBreakdownRequest,
+			success: EndpointStatusBreakdownResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)
