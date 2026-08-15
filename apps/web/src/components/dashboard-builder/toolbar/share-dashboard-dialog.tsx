@@ -16,7 +16,6 @@ import { Exit, Schema } from "effect"
 import { DashboardId } from "@maple/domain/http"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import {
-	ArrowRotateAnticlockwiseIcon,
 	CheckIcon,
 	CircleWarningIcon,
 	CopyIcon,
@@ -53,7 +52,7 @@ interface ShareRecord {
 	readonly id: string
 	readonly widgetId?: string
 	readonly mode: ShareMode
-	readonly tokenSuffix: string
+	readonly token: string
 }
 
 const asDashboardId = Schema.decodeUnknownSync(DashboardId)
@@ -94,9 +93,6 @@ export function ShareDashboardDialog({
 	)
 	const boardShare = useMemo(() => shares.find((share) => share.widgetId === undefined), [shares])
 
-	// The raw token only ever exists in the response that minted it, so it is
-	// held here rather than re-read: nothing can fetch it back.
-	const [mintedToken, setMintedToken] = useState<string | null>(null)
 	const [busy, setBusy] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 
@@ -137,6 +133,11 @@ export function ShareDashboardDialog({
 		}
 	}
 
+	/*
+	 * None of these keep the token: the refreshed list carries it, because storage
+	 * holds an encrypted copy the server can read back. There is no shown-once
+	 * value left to stash, and nothing here can lose one.
+	 */
 	const share = (mode: ShareMode) =>
 		run(() =>
 			upsert({
@@ -144,11 +145,7 @@ export function ShareDashboardDialog({
 				payload: { mode },
 				reactivityKeys: [`dashboard-shares:${dashboard.id}`],
 			}),
-		).then((value) => {
-			// Absent on a mode change, which keeps the existing link — showing the
-			// copy affordance then would imply a new URL that does not exist.
-			if (value?.token) setMintedToken(value.token)
-		})
+		)
 
 	const regenerate = () =>
 		run(() =>
@@ -156,25 +153,15 @@ export function ShareDashboardDialog({
 				params: { id: asDashboardId(dashboard.id) },
 				reactivityKeys: [`dashboard-shares:${dashboard.id}`],
 			}),
-		).then((value) => {
-			if (value?.token) setMintedToken(value.token)
-		})
+		)
 
 	const stopSharing = () =>
-		run(
-			() =>
-				revoke({
-					params: { id: asDashboardId(dashboard.id) },
-					reactivityKeys: [`dashboard-shares:${dashboard.id}`],
-				}),
-			// Only on success. `run` resolves `null` on failure (the error is shown),
-			// and clearing regardless threw away the one copy of a token that still
-			// works — storage keeps only its HMAC, so a link the user had just minted
-			// became unrecoverable because the revoke that was meant to kill it
-			// failed.
-		).then((value) => {
-			if (value !== null) setMintedToken(null)
-		})
+		run(() =>
+			revoke({
+				params: { id: asDashboardId(dashboard.id) },
+				reactivityKeys: [`dashboard-shares:${dashboard.id}`],
+			}),
+		)
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -222,11 +209,7 @@ export function ShareDashboardDialog({
 					</RadioGroup>
 
 					{boardShare ? (
-						<ShareLinkRow
-							token={mintedToken}
-							suffix={boardShare.tokenSuffix}
-							onRegenerate={() => void regenerate()}
-						/>
+						<ShareLinkRow token={boardShare.token} onRegenerate={() => void regenerate()} />
 					) : null}
 
 					{unsupported.length > 0 && boardShare ? (
@@ -300,27 +283,18 @@ function NoticeRow({ tone = "muted", children }: { tone?: "muted" | "error"; chi
 	)
 }
 
-function ShareLinkRow({
-	token,
-	suffix,
-	onRegenerate,
-}: {
-	token: string | null
-	suffix: string
-	onRegenerate: () => void
-}) {
+function ShareLinkRow({ token, onRegenerate }: { token: string; onRegenerate: () => void }) {
 	const [copied, setCopied] = useState(false)
 	const [copyBlocked, setCopyBlocked] = useState(false)
 	const resetCopied = useRef<ReturnType<typeof setTimeout>>(undefined)
 	const field = useRef<HTMLInputElement>(null)
-	const url = token === null ? null : `${window.location.origin}/share/${token}`
+	const url = `${window.location.origin}/share/${token}`
 
 	// Browsers deny `writeText` outside a secure context or when the clipboard
 	// permission is refused, and the promise rejects. Without this the button just
 	// sat there — the one thing the dialog exists to hand over, silently withheld.
 	// Falling back to selecting the field leaves ⌘C as a working escape.
 	const copy = () => {
-		if (url === null) return
 		void navigator.clipboard.writeText(url).then(
 			() => {
 				setCopyBlocked(false)
@@ -335,14 +309,6 @@ function ShareLinkRow({
 		)
 	}
 
-	/*
-	 * The field and its button keep the same geometry in both states, so switching
-	 * between them never shifts the dialog. Which action sits in the button slot is
-	 * the only thing that changes: the link is displayable *only* in the session
-	 * that minted it — storage keeps the token's HMAC — so a reopened dialog can
-	 * name the link by its suffix but can never hand it back, and regenerating is
-	 * then the only way to get a copyable one.
-	 */
 	return (
 		<div className="space-y-2">
 			<div className="flex items-center gap-2">
@@ -354,45 +320,21 @@ function ShareLinkRow({
 						ref={field}
 						readOnly
 						aria-label="Share link"
-						value={url ?? `Link ending in …${suffix}`}
+						value={url}
 						onFocus={(event) => event.currentTarget.select()}
-						className={cn(
-							"min-w-0 flex-1 truncate bg-transparent outline-none",
-							url === null && "text-muted-foreground",
-						)}
+						className="min-w-0 flex-1 truncate bg-transparent outline-none"
 					/>
 				</div>
-				{url === null ? (
-					<Button variant="outline" size="sm" onClick={onRegenerate}>
-						<ArrowRotateAnticlockwiseIcon />
-						Regenerate
-					</Button>
-				) : (
-					<Button size="sm" onClick={copy}>
-						{copied ? <CheckIcon /> : <CopyIcon />}
-						{copied ? "Copied" : "Copy"}
-					</Button>
-				)}
+				<Button size="sm" onClick={copy}>
+					{copied ? <CheckIcon /> : <CopyIcon />}
+					{copied ? "Copied" : "Copy"}
+				</Button>
 			</div>
-			{/* Held at one height so swapping between the two states doesn't shift the dialog. */}
-			<div className="flex min-h-9 items-start">
-				{url === null ? (
-					<p className="text-muted-foreground text-xs leading-relaxed">
-						Regenerate to get a copyable link. The current one keeps working until you do.
-					</p>
-				) : (
-					<Button
-						variant="ghost"
-						size="xs"
-						className="-ml-2 text-muted-foreground"
-						onClick={onRegenerate}
-					>
-						Regenerate link
-					</Button>
-				)}
-			</div>
+			<Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground" onClick={onRegenerate}>
+				Regenerate link
+			</Button>
 			{copyBlocked ? (
-				<p className="-mt-1 text-muted-foreground text-xs leading-relaxed">
+				<p className="text-muted-foreground text-xs leading-relaxed">
 					Your browser blocked the clipboard. The link is selected — copy it with ⌘C.
 				</p>
 			) : null}

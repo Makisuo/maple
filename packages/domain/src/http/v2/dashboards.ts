@@ -725,9 +725,9 @@ export const V2DashboardPersesImportResponse = Schema.Struct({
 /**
  * A dashboard's share link, as its owner sees it.
  *
- * There is deliberately no `token` field: the raw token is stored only as an
- * HMAC, so it cannot be read back. It appears exactly once, in the response to
- * the call that mints it.
+ * Carries the raw `token` on every response, not only the one that mints it:
+ * a caller who can read this can already rotate the link, so withholding the
+ * token bought no safety and meant you had to break a live link to see it.
  */
 export const V2DashboardShare = Schema.Struct({
 	id: DashboardSharePublicId,
@@ -739,6 +739,9 @@ export const V2DashboardShare = Schema.Struct({
 	 */
 	widgetId: optional(Schema.String),
 	mode: DashboardShareMode,
+	/** The link's credential. The viewer URL is `/share/<token>`. */
+	token: Schema.String,
+	/** Trailing characters of `token`, for naming a link compactly. */
 	tokenSuffix: Schema.String,
 	createdAt: Timestamp,
 	updatedAt: Timestamp,
@@ -756,26 +759,9 @@ export const V2DashboardShare = Schema.Struct({
 		identifier: "DashboardShare",
 		title: "Dashboard share link",
 		description:
-			"A share link for a dashboard. `mode` is `public` (anyone with the link) or `org` (signed-in members of the owning organization).",
+			"A share link for a dashboard, including its `token`. `mode` is `public` (anyone with the link) or `org` (signed-in members of the owning organization).",
 	})
 export type V2DashboardShare = Schema.Schema.Type<typeof V2DashboardShare>
-
-export const V2DashboardShareCreated = Schema.Struct({
-	share: V2DashboardShare,
-	/**
-	 * The raw share token, shown once and never recoverable. Present only when a
-	 * token was actually minted — creating a share or rotating one. Changing an
-	 * existing share's mode keeps the same link, so it mints nothing and this
-	 * field is absent.
-	 */
-	token: optional(Schema.String),
-}).annotate({
-	identifier: "DashboardShareCreated",
-	title: "Created dashboard share",
-	description:
-		"The share, plus the raw token when one was minted. Store the token on receipt — it cannot be retrieved again.",
-})
-export type V2DashboardShareCreated = Schema.Schema.Type<typeof V2DashboardShareCreated>
 
 export const V2DashboardShareParams = Schema.Struct({
 	mode: DashboardShareMode,
@@ -1026,7 +1012,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				identifier: "listDashboardShares",
 				summary: "List a dashboard's share links",
 				description:
-					"Returns every live share on the dashboard — the board's own link, plus one per shared widget. Never returns raw tokens.",
+					"Returns every live share on the dashboard — the board's own link, plus one per shared widget, each with its token.",
 			}),
 		),
 	)
@@ -1048,7 +1034,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.put("upsertWidgetShare", "/:id/widgets/:widget_id/share", {
 			params: { id: DashboardPublicId, widget_id: Schema.String },
 			payload: V2DashboardShareParams,
-			success: V2DashboardShareCreated,
+			success: V2DashboardShare,
 			error: [
 				sharePersistence,
 				shareNotConfigured,
@@ -1069,7 +1055,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 	.add(
 		HttpApiEndpoint.post("rotateWidgetShare", "/:id/widgets/:widget_id/share/rotate", {
 			params: { id: DashboardPublicId, widget_id: Schema.String },
-			success: V2DashboardShareCreated,
+			success: V2DashboardShare,
 			error: [
 				sharePersistence,
 				shareNotConfigured,
@@ -1111,7 +1097,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				identifier: "getDashboardShare",
 				summary: "Retrieve a dashboard's share link",
 				description:
-					"Returns the dashboard's live share link, or `null` when it is not shared. Never returns the raw token.",
+					"Returns the dashboard's live share link and its token, or `null` when it is not shared.",
 			}),
 		),
 	)
@@ -1119,7 +1105,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.put("upsertShare", "/:id/share", {
 			params: { id: DashboardPublicId },
 			payload: V2DashboardShareParams,
-			success: V2DashboardShareCreated,
+			success: V2DashboardShare,
 			error: [
 				sharePersistence,
 				shareNotConfigured,
@@ -1132,14 +1118,14 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				identifier: "upsertDashboardShare",
 				summary: "Share a dashboard",
 				description:
-					"Creates the dashboard's share link, or changes the mode of the one it already has. The raw token is returned only when a new link is minted — changing the mode of an existing share keeps the same link and returns no token.",
+					"Creates the dashboard's share link, or changes the mode of the one it already has. Changing the mode keeps the same link, so the returned token is unchanged.",
 			}),
 		),
 	)
 	.add(
 		HttpApiEndpoint.post("rotateShare", "/:id/share/rotate", {
 			params: { id: DashboardPublicId },
-			success: V2DashboardShareCreated,
+			success: V2DashboardShare,
 			error: [
 				sharePersistence,
 				shareNotConfigured,

@@ -2770,6 +2770,24 @@
           "primaryKey": false,
           "notNull": true
         },
+        "token_ciphertext": {
+          "name": "token_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_iv": {
+          "name": "token_iv",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_tag": {
+          "name": "token_tag",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "token_suffix": {
           "name": "token_suffix",
           "type": "text",

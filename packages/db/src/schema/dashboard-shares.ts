@@ -36,11 +36,22 @@ export const dashboardShares = pgTable(
 		widgetId: text("widget_id"),
 		// "public" = anyone with the link. "org" = any signed-in member of orgId.
 		mode: text("mode", { enum: ["public", "org"] }).notNull(),
-		// HMAC-SHA256 of the raw token (see share-token-hash.ts). The raw token is
-		// shown once at create/rotate and is not recoverable from this row.
+		// HMAC-SHA256 of the raw token (see share-token-hash.ts). This is what
+		// resolution looks up — deterministic, so it stays one indexed equality.
 		tokenHash: text("token_hash").notNull(),
-		// Last few characters of the raw token, so the dialog can identify a link
-		// it can no longer read back in full.
+		// The raw token, AES-256-GCM encrypted under MAPLE_INGEST_KEY_ENCRYPTION_KEY
+		// with an AAD binding it to this row (see SharedDashboardService).
+		//
+		// Stored recoverably on purpose: a share link nobody can read back is a
+		// link you have to destroy in order to see, and rotating just to re-copy
+		// breaks every URL already pasted somewhere. The key lives in the Worker's
+		// secrets and never in Postgres, so the original property holds — a
+		// database dump on its own is still not a set of working links.
+		tokenCiphertext: text("token_ciphertext").notNull(),
+		tokenIv: text("token_iv").notNull(),
+		tokenTag: text("token_tag").notNull(),
+		// Last few characters in plaintext, so a link can be named in a list or an
+		// audit trail without decrypting anything.
 		tokenSuffix: text("token_suffix").notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 		createdBy: text("created_by").$type<UserId>().notNull(),

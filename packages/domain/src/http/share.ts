@@ -57,9 +57,12 @@ export type ShareToken = Schema.Schema.Type<typeof ShareToken>
 // ---------------------------------------------------------------------------
 
 /**
- * A share as its owner sees it. Never carries the raw token: it is not
- * recoverable from storage, only the suffix is kept so a link can be
- * identified in a list.
+ * A share as its owner sees it, raw token included.
+ *
+ * The token is readable on every response, not just the one that minted it:
+ * anyone who can read this can already mint a replacement, so withholding it
+ * bought no safety and cost the obvious thing — you had to destroy a live link
+ * in order to see it.
  */
 export class DashboardShare extends Schema.Class<DashboardShare>("DashboardShare")({
 	id: DashboardShareId,
@@ -73,24 +76,12 @@ export class DashboardShare extends Schema.Class<DashboardShare>("DashboardShare
 	 */
 	widgetId: Schema.optionalKey(Schema.String),
 	mode: DashboardShareMode,
+	/** The link's credential. Put it in a URL as `/share/<token>`. */
+	token: Schema.String,
+	/** Trailing characters of {@link token}, for naming a link compactly. */
 	tokenSuffix: Schema.String,
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
-}) {}
-
-/**
- * The result of a share write.
- *
- * `token` is present only when a token was actually minted — creating a share,
- * or rotating one — following the shown-once convention API keys already use.
- * Changing an existing share's mode deliberately keeps the same link, so it
- * mints nothing and the field is absent rather than empty: the caller cannot
- * mistake "unchanged, you already have it" for "here is your new link".
- */
-export class DashboardShareCreated extends Schema.Class<DashboardShareCreated>("DashboardShareCreated")({
-	share: DashboardShare,
-	/** Shown once. Not recoverable afterwards. */
-	token: Schema.optionalKey(Schema.String),
 }) {}
 
 export class DashboardShareTombstone extends Schema.Class<DashboardShareTombstone>("DashboardShareTombstone")(
@@ -132,26 +123,56 @@ export class ShareNotFoundError extends HttpTaggedError<ShareNotFoundError>()(
 ) {}
 
 /**
- * The token resolved, but this caller may not use it.
+ * The token resolved, it is an `org`-mode link, and the caller is anonymous.
  *
- * `orgName` is populated ONLY on the `wrong_org` arm, where the caller is
- * already authenticated. An anonymous caller hitting an org-only link must
- * learn nothing about which org owns it.
+ * Two separate error classes rather than one carrying a `reason`, because the
+ * public envelope serializes a **fixed** field set — `_tag`, `type`, `code`,
+ * `title`, `message`, `retryable`, `recovery` — and drops everything else on
+ * the payload. A `reason` field therefore never reached the wire at all, and
+ * the share page, which has to tell "sign in" from "wrong organization" to draw
+ * the right card, could not see it. The distinction has to live in the tag.
+ *
+ * They also genuinely differ in remedy: this one is fixed by signing in, the
+ * other by switching organization. Deliberately says nothing about which org
+ * owns the link — the caller is anonymous, and naming it would tell them
+ * something the link itself does not.
  */
-export class ShareForbiddenError extends HttpTaggedError<ShareForbiddenError>()(
-	"@maple/http/errors/ShareForbiddenError",
+export class ShareSignInRequiredError extends HttpTaggedError<ShareSignInRequiredError>()(
+	"@maple/http/errors/ShareSignInRequiredError",
 	{
 		message: Schema.String,
-		reason: Schema.Literals(["signin_required", "wrong_org"]),
-		orgName: Schema.optionalKey(Schema.String),
 	},
 	{
 		status: 403,
-		code: "share_forbidden",
+		code: "share_signin_required",
 		title: "Sign-in required",
 		message: "This dashboard is shared with its organization only.",
 		retry: "never",
 		recovery: "reauthenticate",
+		exposure: "redacted",
+	},
+) {}
+
+/**
+ * The token resolved and the caller is signed in, but to a different org.
+ *
+ * Naming the owning org is safe here in a way it is not for an anonymous
+ * caller — this one already proved they hold a real link and have an account —
+ * but it is still withheld: nothing in the product needs it, and it would turn
+ * a share link into a probe for org names.
+ */
+export class ShareWrongOrgError extends HttpTaggedError<ShareWrongOrgError>()(
+	"@maple/http/errors/ShareWrongOrgError",
+	{
+		message: Schema.String,
+	},
+	{
+		status: 403,
+		code: "share_wrong_org",
+		title: "Wrong organization",
+		message: "This dashboard belongs to a different organization.",
+		retry: "never",
+		recovery: "request_access",
 		exposure: "redacted",
 	},
 ) {}
@@ -187,10 +208,18 @@ export class ShareUnsupportedWidgetError extends HttpTaggedError<ShareUnsupporte
 		kind: Schema.String,
 	},
 	{
-		// 503 rather than a 4xx: the request is well-formed, the server simply has
-		// no implementation for this data source. In practice this rides inside the
-		// per-widget outcome envelope, so the status is rarely the wire status.
-		status: 503,
+		// 422, not the 503 this started as. The request is well-formed and the
+		// server has no implementation for this data source — which reads like a
+		// 5xx, but is a permanent, expected property of the widget, not a fault.
+		//
+		// The status is load-bearing for telemetry, not just for the wire. The
+		// anticipated-error set is derived from `status >= 400 && status < 500`
+		// (see `anticipated-errors.ts`), so as a 503 this recorded an `Error` span
+		// — per unsupported widget, per view, at anonymous-viewer volume — for a
+		// state this file's own docstring calls "an expected state, not a failure
+		// of the share". That is the flooding the 4xx-is-Ok rule exists to stop,
+		// arriving through a 5xx side door.
+		status: 422,
 		code: "share_widget_unsupported",
 		title: "Widget unavailable in shared views",
 		message: "This widget isn't available in shared views.",

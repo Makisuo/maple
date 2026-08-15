@@ -455,21 +455,21 @@ describe("v2 dashboard shares", () => {
 			mode: "public",
 		})
 		expect(shared.status).toBe(200)
-		expect(shared.body.share.object).toBe("dashboard_share")
-		expect(shared.body.share.id).toMatch(/^dshr_/)
-		expect(shared.body.share.mode).toBe("public")
+		expect(shared.body.object).toBe("dashboard_share")
+		expect(shared.body.id).toMatch(/^dshr_/)
+		expect(shared.body.mode).toBe("public")
 		expect(typeof shared.body.token).toBe("string")
 
 		const token: string = shared.body.token
-		expect(shared.body.share.token_suffix).toBe(token.slice(-6))
+		expect(shared.body.token_suffix).toBe(token.slice(-6))
 
-		// The whole point of hashing at rest: a caller who lost the token cannot
-		// recover it, from this endpoint or any other.
+		// Readable again on a later call, decrypted out of storage: a caller who
+		// never saw the mint response, or who simply reopened the dialog, gets the
+		// same working link rather than having to rotate to see one.
 		const fetched = await harness.request("GET", `/v2/dashboards/${id}/share`, key.secret)
 		expect(fetched.status).toBe(200)
-		expect(fetched.body.id).toBe(shared.body.share.id)
-		expect("token" in fetched.body).toBe(false)
-		expect(JSON.stringify(fetched.body)).not.toContain(token)
+		expect(fetched.body.id).toBe(shared.body.id)
+		expect(fetched.body.token).toBe(token)
 
 		expect(await resolve(harness, token)).toBe(id)
 
@@ -490,12 +490,11 @@ describe("v2 dashboard shares", () => {
 			mode: "org",
 		})
 		expect(switched.status).toBe(200)
-		expect(switched.body.share.mode).toBe("org")
-		// No new token: a link already pasted somewhere must keep working, and the
-		// absent field is what tells the dialog not to show a "copy your new link"
-		// affordance.
-		expect("token" in switched.body).toBe(false)
-		expect(switched.body.share.id).toBe(first.body.share.id)
+		expect(switched.body.mode).toBe("org")
+		// The same token comes back, not a new one: a link already pasted somewhere
+		// must keep working across a mode change.
+		expect(switched.body.token).toBe(token)
+		expect(switched.body.id).toBe(first.body.id)
 		expect(await resolve(harness, token)).toBe(id)
 
 		await harness.dispose()
@@ -515,7 +514,7 @@ describe("v2 dashboard shares", () => {
 		expect(rotated.status).toBe(200)
 		const newToken: string = rotated.body.token
 		expect(newToken).not.toBe(oldToken)
-		expect(rotated.body.share.mode).toBe("public")
+		expect(rotated.body.mode).toBe("public")
 
 		expect(await resolve(harness, oldToken)).toBe("__not_found__")
 		expect(await resolve(harness, newToken)).toBe(id)
@@ -655,7 +654,7 @@ describe("v2 dashboard shares", () => {
 			mode: "public",
 		})
 		expect(shared.status).toBe(200)
-		expect(shared.body.share.widget_id).toBe("w-1")
+		expect(shared.body.widget_id).toBe("w-1")
 		expect(typeof shared.body.token).toBe("string")
 		expect(await resolve(harness, shared.body.token)).toBe(id)
 

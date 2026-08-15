@@ -7,14 +7,15 @@
  * row in the same transaction — so a link can never be resurrected and two
  * links can never be live at once.
  *
- * The raw token exists only in the response to `create` and `rotate`. Storage
- * keeps an HMAC and a short suffix, so nothing here can hand a caller back a
- * link they failed to copy.
+ * Storage keeps two derivations of the raw token: an HMAC, which is what
+ * resolution looks up, and an AES-256-GCM ciphertext, which is what lets an
+ * owner read their own link back at any time. The encryption key lives in the
+ * Worker's secrets and never in Postgres, so a database dump on its own is
+ * still not a set of working links.
  */
 import {
 	DashboardId,
 	DashboardShare,
-	DashboardShareCreated,
 	DashboardShareId,
 	type DashboardShareMode,
 	DashboardShareTombstone,
@@ -30,13 +31,22 @@ import { dashboardShares, generateShareToken, hashShareToken, shareTokenSuffix }
 import { and, eq, isNull } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { randomUUID } from "node:crypto"
+import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Database } from "@/platform/DatabaseLive"
 import { postgresSqlState } from "@/platform/postgres-errors"
-import { dateToMs, msToDate } from "@/platform/time"
+import { msToDate } from "@/platform/time"
 import { Env } from "@/platform/Env"
 
 /** SQLSTATE for `unique_violation` — here, `dashboard_shares_live_unq`. */
 const UNIQUE_VIOLATION = "23505"
+
+/**
+ * AAD for a stored share token. Authenticated but not stored, so it binds the
+ * ciphertext to its row: someone with database write access cannot move an
+ * `(iv, ciphertext, tag)` triple onto another org's share and have it decrypt.
+ */
+const shareTokenAad = (orgId: string, shareId: string): Buffer =>
+	Buffer.from(`dashboard_shares:v1:${orgId}:${shareId}:token`, "utf8")
 
 const decodeShareIdSync = Schema.decodeUnknownSync(DashboardShareId)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
@@ -74,20 +84,24 @@ interface ShareRowShape {
 	readonly dashboardId: DashboardId
 	readonly widgetId: string | null
 	readonly mode: DashboardShareMode
+	readonly tokenCiphertext: string
+	readonly tokenIv: string
+	readonly tokenTag: string
 	readonly tokenSuffix: string
 	readonly createdAt: Date
 	readonly updatedAt: Date
 }
 
-const toDashboardShare = (row: ShareRowShape) =>
+const toDashboardShare = (row: ShareRowShape, token: string) =>
 	new DashboardShare({
 		id: row.id,
 		dashboardId: row.dashboardId,
 		...(row.widgetId === null ? {} : { widgetId: row.widgetId }),
 		mode: row.mode,
+		token,
 		tokenSuffix: row.tokenSuffix,
-		createdAt: decodeIsoDateTimeStringSync(new Date(dateToMs(row.createdAt)).toISOString()),
-		updatedAt: decodeIsoDateTimeStringSync(new Date(dateToMs(row.updatedAt)).toISOString()),
+		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
+		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
 	})
 
 /** Columns every read here projects. Keeps `token_hash` out of memory by default. */
@@ -97,13 +111,16 @@ const shareColumns = {
 	dashboardId: dashboardShares.dashboardId,
 	widgetId: dashboardShares.widgetId,
 	mode: dashboardShares.mode,
+	tokenCiphertext: dashboardShares.tokenCiphertext,
+	tokenIv: dashboardShares.tokenIv,
+	tokenTag: dashboardShares.tokenTag,
 	tokenSuffix: dashboardShares.tokenSuffix,
 	createdAt: dashboardShares.createdAt,
 	updatedAt: dashboardShares.updatedAt,
 } as const
 
 export interface SharedDashboardServiceApi {
-	/** The live share for one scope, or `None`. Never includes the raw token. */
+	/** The live share for one scope, or `None`. Carries the decrypted token. */
 	readonly get: (
 		orgId: OrgId,
 		scope: ShareScope,
@@ -117,24 +134,22 @@ export interface SharedDashboardServiceApi {
 
 	/**
 	 * Create the share for a scope, or change the mode of the one it already
-	 * has. Returns a raw token only when one was minted.
+	 * has. A mode change keeps the existing link, so the token comes back
+	 * unchanged rather than absent.
 	 */
 	readonly upsert: (
 		orgId: OrgId,
 		userId: UserId,
 		scope: ShareScope,
 		mode: DashboardShareMode,
-	) => Effect.Effect<DashboardShareCreated, SharePersistenceError | ShareNotConfiguredError>
+	) => Effect.Effect<DashboardShare, SharePersistenceError | ShareNotConfiguredError>
 
 	/** Revoke a scope's current link and mint a replacement in one transaction. */
 	readonly rotate: (
 		orgId: OrgId,
 		userId: UserId,
 		scope: ShareScope,
-	) => Effect.Effect<
-		DashboardShareCreated,
-		SharePersistenceError | ShareNotConfiguredError | ShareNotFoundError
-	>
+	) => Effect.Effect<DashboardShare, SharePersistenceError | ShareNotConfiguredError | ShareNotFoundError>
 
 	/** Stop sharing a scope. Idempotent: revoking an unshared scope is not an error. */
 	readonly revoke: (
@@ -184,6 +199,37 @@ export class SharedDashboardService extends Context.Service<
 			}),
 		)
 
+		/*
+		 * Unlike the HMAC key this one is required in `Env` and already carries
+		 * every other secret this app stores at rest, so there is no "not
+		 * configured" case to model — a value that is not base64 for 32 bytes is a
+		 * broken deployment, which is a defect rather than an expected failure.
+		 */
+		const encryptionKey = yield* parseBase64Aes256GcmKey(
+			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
+			(message) => new Error(`MAPLE_INGEST_KEY_ENCRYPTION_KEY: ${message}`),
+		).pipe(Effect.orDie)
+
+		/**
+		 * A row whose token will not decrypt is a storage-integrity failure, not a
+		 * missing share: the link still resolves for viewers (that path reads the
+		 * HMAC), so reporting it as "not shared" would hide a live public link from
+		 * the only people who can revoke it.
+		 */
+		const readToken = (row: ShareRowShape) =>
+			decryptAes256Gcm(
+				{ ciphertext: row.tokenCiphertext, iv: row.tokenIv, tag: row.tokenTag },
+				encryptionKey,
+				() =>
+					new SharePersistenceError({
+						message: `Stored share token for ${row.id} could not be decrypted`,
+					}),
+				shareTokenAad(row.orgId, row.id),
+			)
+
+		const decodeShare = (row: ShareRowShape) =>
+			readToken(row).pipe(Effect.map((token) => toDashboardShare(row, token)))
+
 		const loadLive = (orgId: OrgId, scope: ShareScope) =>
 			database
 				.execute((db) =>
@@ -209,7 +255,7 @@ export class SharedDashboardService extends Context.Service<
 			})
 			const rows = yield* loadLive(orgId, scope)
 			const row = rows[0]
-			return row === undefined ? Option.none() : Option.some(toDashboardShare(row))
+			return row === undefined ? Option.none() : Option.some(yield* decodeShare(row))
 		})
 
 		/** Every live share on a dashboard: the board's own, plus one per widget. */
@@ -232,28 +278,44 @@ export class SharedDashboardService extends Context.Service<
 						),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
-			return rows.map(toDashboardShare)
+			return yield* Effect.forEach(rows, decodeShare)
 		})
 
-		/** Mint a token and insert the row. Shared by create and rotate. */
-		const mintRow = (
+		/**
+		 * Mint a token and build the row. Shared by create and rotate.
+		 *
+		 * The share id is drawn here rather than by the database because the AAD
+		 * binds the ciphertext to it — the value has to exist before the token can
+		 * be encrypted for that row.
+		 */
+		const mintRow = Effect.fnUntraced(function* (
 			orgId: OrgId,
 			userId: UserId,
 			scope: ShareScope,
 			mode: DashboardShareMode,
 			hmacKey: string,
 			now: number,
-		) => {
+		) {
 			const rawToken = generateShareToken()
+			const id = decodeShareIdSync(`dshare_${randomUUID()}`)
+			const encrypted = yield* encryptAes256Gcm(
+				rawToken,
+				encryptionKey,
+				(message) => new SharePersistenceError({ message: `Share token encryption: ${message}` }),
+				shareTokenAad(orgId, id),
+			)
 			return {
 				rawToken,
 				values: {
 					orgId,
-					id: decodeShareIdSync(`dshare_${randomUUID()}`),
+					id,
 					dashboardId: scope.dashboardId,
 					widgetId: scope.widgetId,
 					mode,
 					tokenHash: hashShareToken(rawToken, hmacKey),
+					tokenCiphertext: encrypted.ciphertext,
+					tokenIv: encrypted.iv,
+					tokenTag: encrypted.tag,
 					tokenSuffix: shareTokenSuffix(rawToken),
 					createdAt: msToDate(now),
 					createdBy: userId,
@@ -262,7 +324,7 @@ export class SharedDashboardService extends Context.Service<
 					revokedAt: null,
 				},
 			}
-		}
+		})
 
 		const upsert = Effect.fn("SharedDashboardService.upsert")(function* (
 			orgId: OrgId,
@@ -281,9 +343,9 @@ export class SharedDashboardService extends Context.Service<
 			const now = yield* Clock.currentTimeMillis
 
 			// Already shared: a mode change must keep the same link working, so this
-			// updates in place rather than rotating. No token is minted, and none is
-			// returned — the caller already has it, and we could not produce it again
-			// even if they had lost it.
+			// updates in place rather than rotating. Nothing is minted; the token
+			// that comes back is the stored one, decrypted, so the caller sees the
+			// same URL it had before.
 			const updateMode = (shareId: DashboardShareId) =>
 				Effect.gen(function* () {
 					const updated = yield* database
@@ -311,14 +373,14 @@ export class SharedDashboardService extends Context.Service<
 						)
 					}
 					yield* Effect.annotateCurrentSpan("maple.share.id", row.id)
-					return new DashboardShareCreated({ share: toDashboardShare(row) })
+					return yield* decodeShare(row)
 				})
 
 			const existingRows = yield* loadLive(orgId, scope)
 			const existing = existingRows[0]
 			if (existing !== undefined) return yield* updateMode(existing.id)
 
-			const { rawToken, values } = mintRow(orgId, userId, scope, mode, hmacKey, now)
+			const { rawToken, values } = yield* mintRow(orgId, userId, scope, mode, hmacKey, now)
 
 			// The read above and this insert are not one transaction, and making them
 			// one would not help: two concurrent creates both read "not shared", both
@@ -337,7 +399,7 @@ export class SharedDashboardService extends Context.Service<
 				)
 
 			// Lost the race: behave as if this call had simply arrived second, which
-			// is the update-in-place branch — the winner's share, and no token.
+			// is the update-in-place branch — the winner's share, and the winner's link.
 			if (attempt.raced) {
 				yield* Effect.annotateCurrentSpan("maple.share.insert_raced", true)
 				const winner = (yield* loadLive(orgId, scope))[0]
@@ -358,7 +420,9 @@ export class SharedDashboardService extends Context.Service<
 				)
 			}
 			yield* Effect.annotateCurrentSpan("maple.share.id", row.id)
-			return new DashboardShareCreated({ share: toDashboardShare(row), token: rawToken })
+			// The freshly minted token, not a decrypt of what was just written — same
+			// value, one less round through the cipher.
+			return toDashboardShare(row, rawToken)
 		})
 
 		const rotate = Effect.fn("SharedDashboardService.rotate")(function* (
@@ -381,7 +445,7 @@ export class SharedDashboardService extends Context.Service<
 				return yield* Effect.fail(new ShareNotFoundError({ message: SHARE_NOT_FOUND_MESSAGE }))
 			}
 
-			const { rawToken, values } = mintRow(orgId, userId, scope, existing.mode, hmacKey, now)
+			const { rawToken, values } = yield* mintRow(orgId, userId, scope, existing.mode, hmacKey, now)
 
 			// One transaction: the old row must stop resolving at the same instant the
 			// new one starts. Revoke first so the partial unique index — one live row
@@ -405,7 +469,9 @@ export class SharedDashboardService extends Context.Service<
 				)
 			}
 			yield* Effect.annotateCurrentSpan("maple.share.id", row.id)
-			return new DashboardShareCreated({ share: toDashboardShare(row), token: rawToken })
+			// The freshly minted token, not a decrypt of what was just written — same
+			// value, one less round through the cipher.
+			return toDashboardShare(row, rawToken)
 		})
 
 		const revoke = Effect.fn("SharedDashboardService.revoke")(function* (
@@ -476,7 +542,10 @@ export class SharedDashboardService extends Context.Service<
 				orgId: row.orgId,
 				"maple.dashboard.id": row.dashboardId,
 			})
-			return { share: toDashboardShare(row), orgId: row.orgId }
+			// `token` is the one the caller presented — it hashed to this row, so it
+			// is by definition the stored one, and decrypting to prove that again
+			// would only add a cipher round to the viewer hot path.
+			return { share: toDashboardShare(row, token), orgId: row.orgId }
 		})
 
 		return {
