@@ -13,10 +13,6 @@ export interface LocalSchemaHistoryEntry {
 	readonly digest: string
 	readonly manifestDigest: string
 	readonly projectRevision: string
-	readonly variants?: ReadonlyArray<{
-		readonly fingerprint: string
-		readonly projectRevision: string
-	}>
 }
 
 export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Object.freeze([
@@ -26,20 +22,6 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		digest: "",
 		manifestDigest: "",
 		projectRevision: "d58ce4a83d3ad3f3a29b9bb972272b757547ae793c050194354454634f3abccd",
-		variants: Object.freeze([
-			Object.freeze({
-				fingerprint: "428701854f9fd30e",
-				projectRevision: "d58ce4a83d3ad3f3a29b9bb972272b757547ae793c050194354454634f3abccd",
-			}),
-			Object.freeze({
-				fingerprint: "ea2d7ee4f385544e",
-				projectRevision: "ffade4bccc59af00fd33a561c4c919fd0229e0505f659d3242081f670f034a41",
-			}),
-			Object.freeze({
-				fingerprint: "06d3f9912027129b",
-				projectRevision: "c3f2be342187b6f6cf09010043e775b68f0901081a9b861803e55f5fe299e4c6",
-			}),
-		]),
 	}),
 	Object.freeze({
 		version: 1,
