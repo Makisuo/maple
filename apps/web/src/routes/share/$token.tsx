@@ -32,6 +32,7 @@ import {
 	type SharedDashboard,
 	type ShareTimeRange,
 } from "@/hooks/use-share-dashboard"
+import { MapleMark } from "@maple/ui/components/icons/maple-mark"
 import { Button } from "@maple/ui/components/ui/button"
 
 const ShareSearch = Schema.Struct({
@@ -198,7 +199,16 @@ function ShareShell({
 		<div className="flex min-h-screen flex-col bg-background">
 			<header className="flex items-center justify-between border-b px-6 py-3">
 				{title ? <h1 className="font-medium text-sm">{title}</h1> : <span />}
-				<span className="text-muted-foreground text-xs">Shared via Maple</span>
+				<a
+					href="https://maple.dev"
+					target="_blank"
+					rel="noopener noreferrer"
+					className="flex items-center gap-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground"
+				>
+					<span>Shared via</span>
+					<MapleMark size={14} className="shrink-0" aria-hidden="true" />
+					<span className="font-medium">Maple</span>
+				</a>
 			</header>
 			<main className="flex-1 p-6">{children}</main>
 		</div>
