@@ -22,12 +22,13 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpServerRequest } from "effect/unstable/http"
 import {
 	SHARE_NOT_FOUND_MESSAGE,
-	ShareForbiddenError,
 	ShareNotFoundError,
 	ShareRateLimitedError,
+	ShareSignInRequiredError,
 	ShareWidgetDataResponse,
 	SharedDashboardResponse,
 	type ShareWidgetDataOutcome,
+	ShareWrongOrgError,
 } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
 import { MAX_LIST_RANGE_SECONDS, SHARE_MAX_RANGE_SECONDS } from "@maple/query-engine"
@@ -110,9 +111,8 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 					// No org name here: the caller is anonymous, and naming the owning
 					// org would tell them something the link itself does not.
 					return yield* Effect.fail(
-						new ShareForbiddenError({
+						new ShareSignInRequiredError({
 							message: "This dashboard is shared with its organization only.",
-							reason: "signin_required",
 						}),
 					)
 				}
@@ -124,9 +124,8 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 				// about a person, not about an org-scoped key.
 				if (tenant.value.orgId !== orgId) {
 					return yield* Effect.fail(
-						new ShareForbiddenError({
+						new ShareWrongOrgError({
 							message: "This dashboard belongs to a different organization.",
-							reason: "wrong_org",
 						}),
 					)
 				}
@@ -216,17 +215,16 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 								variableValues,
 							)
 							.pipe(
-								Effect.map(
-									(resolved) =>
-										({
-											widgetId: request.widgetId,
-											ok: true,
-											data: resolved.data,
-											...(resolved.narrowedToSeconds === undefined
-												? {}
-												: { narrowedToSeconds: resolved.narrowedToSeconds }),
-										}) satisfies ShareWidgetDataOutcome,
-								),
+								Effect.map((resolved) => {
+									const outcome = {
+										widgetId: request.widgetId,
+										ok: true,
+										data: resolved.data,
+									} satisfies ShareWidgetDataOutcome
+									return resolved.narrowedToSeconds === undefined
+										? outcome
+										: { ...outcome, narrowedToSeconds: resolved.narrowedToSeconds }
+								}),
 								// Per-widget failures ride inside a 200: one tile the share
 								// cannot serve must not blank its neighbours.
 								Effect.catchTags({

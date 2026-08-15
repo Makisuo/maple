@@ -74,12 +74,12 @@ The SDK also auto-detects the **runtime** (Node.js, Bun, Deno) and **cloud provi
 
 Managed platforms expose the commit SHA automatically. The **environment** is only auto-detected on Railway — everywhere else, set `MAPLE_ENVIRONMENT` yourself:
 
-| Platform         | Commit SHA env var       | Environment                              |
-| ---------------- | ------------------------ | ---------------------------------------- |
-| Railway          | `RAILWAY_GIT_COMMIT_SHA` | `RAILWAY_ENVIRONMENT_NAME` (automatic)   |
-| Vercel           | `VERCEL_GIT_COMMIT_SHA`  | Set `MAPLE_ENVIRONMENT`                  |
-| Cloudflare Pages | `CF_PAGES_COMMIT_SHA`    | Set `MAPLE_ENVIRONMENT`                  |
-| Render           | `RENDER_GIT_COMMIT`      | Set `MAPLE_ENVIRONMENT`                  |
+| Platform         | Commit SHA env var       | Environment                                 |
+| ---------------- | ------------------------ | ------------------------------------------- |
+| Railway          | `RAILWAY_GIT_COMMIT_SHA` | `RAILWAY_ENVIRONMENT_NAME` (automatic)      |
+| Vercel           | `VERCEL_GIT_COMMIT_SHA`  | Set `MAPLE_ENVIRONMENT`                     |
+| Cloudflare Pages | `CF_PAGES_COMMIT_SHA`    | Set `MAPLE_ENVIRONMENT`                     |
+| Render           | `RENDER_GIT_COMMIT`      | Set `MAPLE_ENVIRONMENT`                     |
 | Self-hosted      | `COMMIT_SHA` (set in CI) | Set `MAPLE_ENVIRONMENT` or `DEPLOYMENT_ENV` |
 
 For self-hosted deployments, set `COMMIT_SHA` in your build pipeline and `MAPLE_ENVIRONMENT` at runtime.

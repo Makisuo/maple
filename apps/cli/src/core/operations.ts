@@ -62,9 +62,9 @@ const remoteClient = Effect.gen(function* () {
 type V2Client = NonNullable<Effect.Success<typeof remoteClient>>
 
 /** Run `remote` against v2 when a workspace is configured, else `local`. */
-const dispatch = <A, E, R, R2>(
+const dispatch = <A, E, R, E2, R2>(
 	local: Effect.Effect<A, E, R>,
-	remote: (client: V2Client) => Effect.Effect<A, unknown, R2>,
+	remote: (client: V2Client) => Effect.Effect<A, E2, R2>,
 	pipeName: string,
 ): Effect.Effect<A, E | WarehouseClientError | WarehouseQueryError, R | R2 | Mode | HttpClient.HttpClient> =>
 	Effect.flatMap(

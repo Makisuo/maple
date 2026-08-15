@@ -47,6 +47,10 @@ export interface RouteEndpointPlan {
 	) => Effect.Effect<unknown, unknown>
 }
 
+interface RouteEndpointPlanRegistry {
+	readonly [endpoint: string]: RouteEndpointPlan
+}
+
 /**
  * Build a plan from a request schema plus a registry query definition.
  *
@@ -81,7 +85,7 @@ const readModelPlan = <Payload, Row>(
 	}
 }
 
-export const ROUTE_ENDPOINT_PLANS: Readonly<Record<string, RouteEndpointPlan>> = {
+export const ROUTE_ENDPOINT_PLANS: RouteEndpointPlanRegistry = {
 	errors_by_type: readModelPlan(ErrorsByTypeRequest, Queries.errorsByType),
 	errors_summary: readModelPlan(ErrorsSummaryRequest, Queries.errorsSummary),
 	service_overview: readModelPlan(ServiceOverviewRequest, Queries.serviceOverview),

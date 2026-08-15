@@ -3,8 +3,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { FIXTURE_PATHS, isChromelessPath, isPublicPath } from "./public-routes"
 
-const read = (relative: string) =>
-	readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8")
+const read = (relative: string) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8")
 
 describe("isPublicPath", () => {
 	it("covers the auth pages and dev fixtures", () => {

@@ -86,6 +86,17 @@ interface SessionsListProps {
 	durationP95?: number
 }
 
+function observeReachEnd(element: HTMLDivElement, onReachEnd: () => void): () => void {
+	const observer = new IntersectionObserver(
+		(entries) => {
+			if (entries[0]?.isIntersecting) onReachEnd()
+		},
+		{ rootMargin: "400px 0px" },
+	)
+	observer.observe(element)
+	return () => observer.disconnect()
+}
+
 function SessionsSentinel({
 	onReachEnd,
 	loadingMore,
@@ -93,16 +104,9 @@ function SessionsSentinel({
 	const elementRef = useCallback(
 		(element: HTMLDivElement | null) => {
 			if (!element) return
-			const observer = new IntersectionObserver(
-				(entries) => {
-					if (entries[0]?.isIntersecting && !loadingMore) onReachEnd?.()
-				},
-				{ rootMargin: "400px 0px" },
-			)
-			// React Doctor does not yet recognize React 19 callback-ref cleanup.
-			// oxlint-disable-next-line react-doctor/effect-needs-cleanup
-			observer.observe(element)
-			return () => observer.disconnect()
+			return observeReachEnd(element, () => {
+				if (!loadingMore) onReachEnd?.()
+			})
 		},
 		[loadingMore, onReachEnd],
 	)

@@ -220,19 +220,25 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 			event: string,
 			context: Effect.Success<ReturnType<typeof openScope>>,
 			fields: Record<string, unknown>,
-		) =>
-			Effect.logInfo(event).pipe(
+		) => {
+			const baseAnnotations = {
+				orgId: context.tenant.orgId,
+				"tenant.userId": context.tenant.userId,
+				"maple.dashboard.id": context.scope.dashboardId,
+				...fields,
+			}
+			const annotations =
+				context.scope.widgetId === null
+					? baseAnnotations
+					: { ...baseAnnotations, "maple.widget.id": context.scope.widgetId }
+
+			return Effect.logInfo(event).pipe(
 				// Keys match the span attributes the share service sets, so a log and
 				// a span for the same event join on the same names rather than needing
 				// two vocabularies.
-				Effect.annotateLogs({
-					orgId: context.tenant.orgId,
-					"tenant.userId": context.tenant.userId,
-					"maple.dashboard.id": context.scope.dashboardId,
-					...(context.scope.widgetId === null ? {} : { "maple.widget.id": context.scope.widgetId }),
-					...fields,
-				}),
+				Effect.annotateLogs(annotations),
 			)
+		}
 
 		const retrieveShare = (dashboardId: DashboardId, widgetId: string | null) =>
 			Effect.gen(function* () {

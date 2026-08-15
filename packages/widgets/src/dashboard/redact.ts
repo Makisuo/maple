@@ -17,6 +17,7 @@
  * direction for a payload served without a session.
  */
 import { dataSourceEndpoint, dataSourceQuerySet, dataSourceRawSql, dataSourceTransform } from "./access"
+import type { DashboardVariable } from "./shared/variables"
 
 /**
  * The data source as a viewer sees it: enough to choose a renderer, nothing
@@ -52,8 +53,19 @@ export interface RedactedDashboard {
 	readonly timeRange: unknown
 	readonly widgets: ReadonlyArray<RedactedWidget>
 	readonly sections?: unknown
-	readonly variables?: unknown
+	readonly variables?: ReadonlyArray<DashboardVariable>
 	readonly refreshIntervalSeconds?: number
+}
+
+interface ShareWidgetInput {
+	readonly id: string
+	readonly visualization: unknown
+	readonly display?: unknown
+	readonly layout: unknown
+	readonly sectionId?: string
+	readonly tabId?: string
+	readonly timeRange?: unknown
+	readonly dataSource: unknown
 }
 
 const redactDataSource = (dataSource: unknown): RedactedDataSource => {
@@ -86,25 +98,19 @@ const redactDataSource = (dataSource: unknown): RedactedDataSource => {
 	return { kind: "static", ...transformField }
 }
 
-const redactWidget = (widget: {
-	readonly id: string
-	readonly visualization: unknown
-	readonly display?: unknown
-	readonly layout: unknown
-	readonly sectionId?: string
-	readonly tabId?: string
-	readonly timeRange?: unknown
-	readonly dataSource: unknown
-}): RedactedWidget => ({
-	id: widget.id,
-	visualization: widget.visualization,
-	display: widget.display ?? {},
-	layout: widget.layout,
-	...(widget.sectionId === undefined ? {} : { sectionId: widget.sectionId }),
-	...(widget.tabId === undefined ? {} : { tabId: widget.tabId }),
-	...(widget.timeRange === undefined ? {} : { timeRange: widget.timeRange }),
-	dataSource: redactDataSource(widget.dataSource),
-})
+const redactWidget = (widget: ShareWidgetInput): RedactedWidget => {
+	let redacted: RedactedWidget = {
+		id: widget.id,
+		visualization: widget.visualization,
+		display: widget.display ?? {},
+		layout: widget.layout,
+		dataSource: redactDataSource(widget.dataSource),
+	}
+	if (widget.sectionId !== undefined) redacted = { ...redacted, sectionId: widget.sectionId }
+	if (widget.tabId !== undefined) redacted = { ...redacted, tabId: widget.tabId }
+	if (widget.timeRange !== undefined) redacted = { ...redacted, timeRange: widget.timeRange }
+	return redacted
+}
 
 /**
  * Variable names a widget actually references.
@@ -115,7 +121,7 @@ const redactWidget = (widget: {
  * picker the chart needs. `$__`-prefixed built-ins can't match: variable names
  * must begin with a letter.
  */
-const referencedVariableNames = (widget: unknown): ReadonlySet<string> => {
+const referencedVariableNames = (widget: ShareWidgetInput): ReadonlySet<string> => {
 	const names = new Set<string>()
 	for (const match of JSON.stringify(widget ?? null).matchAll(/\$\{?([A-Za-z][A-Za-z0-9_]*)\}?/g)) {
 		const name = match[1]
@@ -131,13 +137,12 @@ const referencedVariableNames = (widget: unknown): ReadonlySet<string> => {
  * variable list of tiles the viewer cannot see — those names, labels, option
  * values and attribute keys are the board's, not the chart's.
  */
-const variablesForWidget = (variables: unknown, widget: unknown): unknown => {
-	if (!Array.isArray(variables)) return variables
+const variablesForWidget = (
+	variables: ReadonlyArray<DashboardVariable>,
+	widget: ShareWidgetInput,
+): ReadonlyArray<DashboardVariable> => {
 	const referenced = referencedVariableNames(widget)
-	return variables.filter((variable) => {
-		const name = (variable as { readonly name?: unknown } | null)?.name
-		return typeof name === "string" && referenced.has(name)
-	})
+	return variables.filter((variable) => referenced.has(variable.name))
 }
 
 /**
@@ -158,9 +163,9 @@ export function redactForShare(
 		readonly name: string
 		readonly description?: string
 		readonly timeRange: unknown
-		readonly widgets: ReadonlyArray<Parameters<typeof redactWidget>[0]>
+		readonly widgets: ReadonlyArray<ShareWidgetInput>
 		readonly sections?: unknown
-		readonly variables?: unknown
+		readonly variables?: ReadonlyArray<DashboardVariable>
 		readonly refreshIntervalSeconds?: number
 	},
 	widgetId?: string | null,
@@ -168,31 +173,35 @@ export function redactForShare(
 	if (widgetId !== undefined && widgetId !== null) {
 		const widget = document.widgets.find((candidate) => candidate.id === widgetId)
 		if (widget === undefined) return null
-		return {
+		let redacted: RedactedDashboard = {
 			id: document.id,
 			name: document.name,
-			...(document.description === undefined ? {} : { description: document.description }),
 			timeRange: document.timeRange,
 			// The tile is lifted out of whatever section held it: a one-widget page
 			// has no grid to place it in, and carrying the section tree would leak
 			// the names of tabs the viewer cannot see.
 			widgets: [redactWidget({ ...widget, sectionId: undefined, tabId: undefined })],
-			...(document.variables === undefined
-				? {}
-				: { variables: variablesForWidget(document.variables, widget) }),
 		}
+		if (document.description !== undefined) {
+			redacted = { ...redacted, description: document.description }
+		}
+		if (document.variables !== undefined) {
+			redacted = { ...redacted, variables: variablesForWidget(document.variables, widget) }
+		}
+		return redacted
 	}
 
-	return {
+	let redacted: RedactedDashboard = {
 		id: document.id,
 		name: document.name,
-		...(document.description === undefined ? {} : { description: document.description }),
 		timeRange: document.timeRange,
 		widgets: document.widgets.map(redactWidget),
-		...(document.sections === undefined ? {} : { sections: document.sections }),
-		...(document.variables === undefined ? {} : { variables: document.variables }),
-		...(document.refreshIntervalSeconds === undefined
-			? {}
-			: { refreshIntervalSeconds: document.refreshIntervalSeconds }),
 	}
+	if (document.description !== undefined) redacted = { ...redacted, description: document.description }
+	if (document.sections !== undefined) redacted = { ...redacted, sections: document.sections }
+	if (document.variables !== undefined) redacted = { ...redacted, variables: document.variables }
+	if (document.refreshIntervalSeconds !== undefined) {
+		redacted = { ...redacted, refreshIntervalSeconds: document.refreshIntervalSeconds }
+	}
+	return redacted
 }

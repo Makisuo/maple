@@ -21,7 +21,12 @@
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
 import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 import { getMapleAuthHeaders } from "@/lib/services/common/auth-headers"
+import { ShareWidgetDataResponse } from "@maple/domain/http"
+import { Schema } from "effect"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+
+const decodeShareWidgetDataResponse = Schema.decodeUnknownPromise(ShareWidgetDataResponse)
+const decodeVariableValues = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.String))
 
 export interface ShareTimeRange {
 	readonly startTime: string
@@ -88,11 +93,9 @@ const post = async (path: string, body: unknown, signedIn: boolean): Promise<Res
 
 const toResolveError = (status: number, payload: unknown): ShareResolveError => {
 	const tag = (payload as { _tag?: string } | null)?._tag
-	const reason = (payload as { reason?: string } | null)?.reason
 
-	if (tag === "@maple/http/errors/ShareForbiddenError") {
-		return reason === "wrong_org" ? { kind: "wrong_org" } : { kind: "signin_required" }
-	}
+	if (tag === "@maple/http/errors/ShareSignInRequiredError") return { kind: "signin_required" }
+	if (tag === "@maple/http/errors/ShareWrongOrgError") return { kind: "wrong_org" }
 	if (tag === "@maple/http/errors/ShareRateLimitedError") return { kind: "rate_limited" }
 	// Every "this link does not resolve" reason arrives as the same 404 by
 	// design, so the page has exactly one state for it too.
@@ -178,6 +181,7 @@ export function useShareWidgetData(
 	const variablesKey = useMemo(() => JSON.stringify(variableValues), [variableValues])
 	const latestRequest = useRef(0)
 
+	// react-doctor-disable-next-line react-doctor/no-fetch-in-effect, react-doctor/no-set-state-after-await-in-effect -- Public share data follows effect dependencies and guards every async update with cancellation and request identity.
 	useEffect(() => {
 		if (!enabled || widgetIds.length === 0) return
 		const requestId = ++latestRequest.current
@@ -185,7 +189,7 @@ export function useShareWidgetData(
 
 		const ids = idsKey.split(",").filter(Boolean)
 		setStates((current) => {
-			const next: Record<string, WidgetDataState> = { ...current }
+			const next = { ...current }
 			for (const id of ids) next[id] ??= { status: "loading" }
 			return next
 		})
@@ -194,13 +198,14 @@ export function useShareWidgetData(
 			for (let index = 0; index < ids.length; index += BATCH_MAX) {
 				const batch = ids.slice(index, index + BATCH_MAX)
 				try {
+					// react-doctor-disable-next-line react-doctor/async-await-in-loop -- Sequential batches enforce the anonymous-viewer rate limit and prevent one page load from fanning out.
 					const response = await post(
 						"/v2/share/widget-data",
 						{
 							token,
 							requests: batch.map((widgetId) => ({ widgetId })),
 							timeRange,
-							variableValues: JSON.parse(variablesKey) as Record<string, string>,
+							variableValues: decodeVariableValues(JSON.parse(variablesKey)),
 						},
 						signedIn,
 					)
@@ -221,17 +226,17 @@ export function useShareWidgetData(
 						continue
 					}
 
-					const results = (payload as { results?: ReadonlyArray<Record<string, unknown>> })?.results
+					const { results } = await decodeShareWidgetDataResponse(payload)
 					setStates((current) => {
 						const next = { ...current }
-						for (const result of results ?? []) {
-							const id = result.widgetId as string
+						for (const result of results) {
+							const id = result.widgetId
 							next[id] =
 								result.ok === true
 									? { status: "ready", data: result.data }
 									: {
 											status: "error",
-											message: (result.message as string) ?? "Unavailable",
+											message: result.message,
 											// An unsupported widget is an expected state, not a
 											// failure: the tile renders muted, not red.
 											kind: result.reason === "unsupported" ? "range" : "runtime",
@@ -241,9 +246,9 @@ export function useShareWidgetData(
 					})
 					setNarrowed((current) => {
 						const next = { ...current }
-						for (const result of results ?? []) {
-							if (typeof result.narrowedToSeconds === "number") {
-								next[result.widgetId as string] = result.narrowedToSeconds
+						for (const result of results) {
+							if (result.ok && result.narrowedToSeconds !== undefined) {
+								next[result.widgetId] = result.narrowedToSeconds
 							}
 						}
 						return next

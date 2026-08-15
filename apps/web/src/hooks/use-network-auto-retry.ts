@@ -18,8 +18,7 @@ export function useNetworkAutoRetry(enabled: boolean, onRetry: (() => void) | un
 	})
 
 	useMountEffect(() => {
-		// React Doctor cannot infer useMountEffect.
-		// oxlint-disable-next-line react-doctor/rules-of-hooks
+		// react-doctor-disable-next-line react-doctor/rules-of-hooks -- React Doctor does not recognize useMountEffect as an Effect Event boundary.
 		const probe = () => fire()
 
 		let attempt = 0

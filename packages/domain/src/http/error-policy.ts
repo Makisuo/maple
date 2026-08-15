@@ -26,10 +26,13 @@ export const PublicHttpErrorType = Schema.Literals([
 export type PublicHttpErrorType = Schema.Schema.Type<typeof PublicHttpErrorType>
 
 export type HttpErrorRetry = "never" | "backoff" | "after"
-export type PublicHttpErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 502 | 503 | 504
+export type PublicHttpErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 500 | 502 | 503 | 504
 export type PublicHttpErrorTag = `@maple/http/${string}`
 
-export type PublicHttpErrorTypeForStatus<Status extends PublicHttpErrorStatus> = Status extends 400 | 413
+export type PublicHttpErrorTypeForStatus<Status extends PublicHttpErrorStatus> = Status extends
+	| 400
+	| 413
+	| 422
 	? "invalid_request_error"
 	: Status extends 401
 		? "authentication_error"

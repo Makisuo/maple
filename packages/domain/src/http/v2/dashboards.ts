@@ -63,14 +63,20 @@ export const V2TimeRange = Schema.Union([
 
 const StringRecord = Schema.Record(Schema.String, Schema.String)
 const UnknownRecordWire = Schema.Record(Schema.String, Schema.Unknown)
+const decodeJsonValueSync = Schema.decodeUnknownSync(Schema.Json)
 
-const mapJsonKeys = (value: unknown, mapKey: (key: string) => string): unknown => {
-	if (Array.isArray(value)) return value.map((item) => mapJsonKeys(item, mapKey))
+const isJsonArray = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value)
+
+const mapDecodedJsonKeys = (value: Schema.Json, mapKey: (key: string) => string): Schema.Json => {
+	if (isJsonArray(value)) return value.map((item) => mapDecodedJsonKeys(item, mapKey))
 	if (typeof value !== "object" || value === null) return value
 	return Object.fromEntries(
-		Object.entries(value).map(([key, item]) => [mapKey(key), mapJsonKeys(item, mapKey)]),
+		Object.entries(value).map(([key, item]) => [mapKey(key), mapDecodedJsonKeys(item, mapKey)]),
 	)
 }
+
+const mapJsonKeys = (value: unknown, mapKey: (key: string) => string): Schema.Json =>
+	mapDecodedJsonKeys(decodeJsonValueSync(value), mapKey)
 
 const toSnakeKey = (key: string): string =>
 	key.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)
@@ -80,8 +86,16 @@ const toCamelKey = (key: string): string =>
 /** Opaque widget params still obey the v2 recursive snake_case wire convention. */
 const UnknownRecord = UnknownRecordWire.pipe(
 	Schema.decodeTo(UnknownRecordWire, {
-		decode: SchemaGetter.transform((value) => mapJsonKeys(value, toCamelKey) as Record<string, unknown>),
-		encode: SchemaGetter.transform((value) => mapJsonKeys(value, toSnakeKey) as Record<string, unknown>),
+		decode: SchemaGetter.transform((value) => {
+			const mapped = mapJsonKeys(value, toCamelKey)
+			// SAFETY: UnknownRecordWire establishes an object root; recursive key mapping preserves it.
+			return mapped as Record<string, unknown>
+		}),
+		encode: SchemaGetter.transform((value) => {
+			const mapped = mapJsonKeys(value, toSnakeKey)
+			// SAFETY: UnknownRecordWire establishes an object root; recursive key mapping preserves it.
+			return mapped as Record<string, unknown>
+		}),
 	}),
 )
 
@@ -103,10 +117,16 @@ const UnknownRecord = UnknownRecordWire.pipe(
 const snakeCasedWire = <S extends Schema.Top>(schema: S) =>
 	UnknownRecordWire.pipe(
 		Schema.decodeTo(schema, {
-			decode: SchemaGetter.transform((value) => mapJsonKeys(value, toCamelKey)),
-			encode: SchemaGetter.transform(
-				(value) => mapJsonKeys(value, toSnakeKey) as Record<string, unknown>,
-			),
+			decode: SchemaGetter.transform((value) => {
+				const mapped = mapJsonKeys(value, toCamelKey)
+				// SAFETY: Every schema passed below decodes the same object after its wire keys are camel-cased.
+				return mapped as S["Encoded"]
+			}),
+			encode: SchemaGetter.transform((value) => {
+				const mapped = mapJsonKeys(value, toSnakeKey)
+				// SAFETY: Every schema passed below encodes an object; recursive key mapping preserves its root.
+				return mapped as Record<string, unknown>
+			}),
 		}),
 	)
 
