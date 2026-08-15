@@ -228,7 +228,7 @@ export class ElectricClient extends Context.Service<ElectricClient, ElectricClie
 
 			const ensureConfigured = Effect.asVoid(Effect.fromResult(availability))
 
-			const fetchSubscription = Effect.fnUntraced(function* (request, orgId) {
+			const fetchSubscription = Effect.fnUntraced(function* (request: SyncRequest, orgId: string) {
 				const electricUrl = yield* Effect.fromResult(availability)
 				const url = buildUpstreamSyncUrl({
 					electricUrl,
