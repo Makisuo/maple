@@ -91,6 +91,18 @@ describe("redactForShare", () => {
 		expect(redacted?.refreshIntervalSeconds).toBe(60)
 	})
 
+	// A share renders through the same canvas the authed dashboard does, so these
+	// three fields decide where every tile lands. Dropping one no longer shows up
+	// as a missing field — it shows up as a board that silently reflows into a
+	// flat grid, which is why the contract is asserted in the package that owns it.
+	it("keeps the placement a share needs to lay itself out", () => {
+		const redacted = redactForShare(document)
+
+		expect(redacted?.widgets[0]?.layout).toEqual({ x: 0, y: 0, w: 6, h: 4 })
+		expect(redacted?.widgets[1]).toMatchObject({ sectionId: "sec-1", tabId: "tab-1" })
+		expect(redacted?.sections).toEqual([{ id: "sec-1", title: "Latency" }])
+	})
+
 	it("narrows a single-chart share to exactly one widget", () => {
 		const redacted = redactForShare(document, "w-query")
 

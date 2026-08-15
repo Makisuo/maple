@@ -22,6 +22,7 @@ import type { WidgetDataState } from "@/components/dashboard-builder/types"
 import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 import { getMapleAuthHeaders } from "@/lib/services/common/auth-headers"
 import { ShareWidgetDataResponse } from "@maple/domain/http"
+import { DashboardSectionSchema, TimeRangeSchema, WidgetLayoutSchema } from "@maple/widgets/dashboard"
 import { Schema } from "effect"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -33,34 +34,81 @@ export interface ShareTimeRange {
 	readonly endTime: string
 }
 
-export interface SharedDashboardDocument {
-	readonly id: string
-	readonly name: string
-	readonly description?: string
-	readonly timeRange: unknown
-	readonly widgets: ReadonlyArray<{
-		readonly id: string
-		readonly visualization: string
-		readonly display: Record<string, unknown>
-		readonly layout: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
-		readonly dataSource: { readonly kind: string; readonly transform?: unknown }
-	}>
-	readonly variables?: ReadonlyArray<{
-		readonly name: string
-		readonly type: string
-		readonly label?: string
-		readonly options?: ReadonlyArray<{ readonly value: string; readonly label?: string }>
-		readonly defaultValue?: string
-		readonly includeAll?: boolean
-	}>
-}
+/**
+ * A widget as a share publishes it.
+ *
+ * Decoded rather than asserted, because the page now *lays out* from this
+ * payload: `layout`, `sectionId` and `tabId` decide where a tile lands, so a
+ * field arriving in the wrong shape has to fail here rather than silently
+ * collapse the board into a flat grid.
+ *
+ * `WidgetLayoutSchema` and `TimeRangeSchema` are the same schemas the stored
+ * document uses — reusing them is what makes this an adapter and not a cast:
+ * the decoded `layout` *is* the canvas's `PlacedWidget["layout"]`.
+ */
+const ShareWidgetSchema = Schema.Struct({
+	id: Schema.String,
+	// Deliberately a plain string, not the closed `WidgetVisualization` union:
+	// an older client reading a newer board must still render. `widgetTypeFor`
+	// is the one place that decides what an unknown type draws as, and it
+	// already warns and falls back.
+	visualization: Schema.String,
+	// Left loose on purpose. The display config's real schema is parameterised
+	// on a data source (`display.sparkline` embeds a whole one), and a share's
+	// data source is redacted — so decoding it strictly here would assert a
+	// shape the share transport does not promise. Passed through to the
+	// visualization exactly as before.
+	display: Schema.Record(Schema.String, Schema.Unknown),
+	layout: WidgetLayoutSchema,
+	sectionId: Schema.optionalKey(Schema.String),
+	tabId: Schema.optionalKey(Schema.String),
+	timeRange: Schema.optionalKey(TimeRangeSchema),
+	dataSource: Schema.Struct({
+		kind: Schema.String,
+		resultShape: Schema.optionalKey(Schema.String),
+		transform: Schema.optionalKey(Schema.Unknown),
+	}),
+})
 
-export interface SharedDashboard {
-	readonly mode: "public" | "org"
-	readonly scope: "dashboard" | "widget"
-	readonly dashboard: SharedDashboardDocument
-	readonly limits: { readonly maxRangeSeconds: number; readonly maxListRangeSeconds: number }
-	readonly embeddable: boolean
+export type ShareWidget = typeof ShareWidgetSchema.Type
+
+/**
+ * `sections` decodes separately from the rest of the document, and failure
+ * degrades to an ungrouped board rather than a dead page: `redactForShare`
+ * passes stored sections through verbatim, so an older stored shape should cost
+ * the grouping, not the dashboard.
+ */
+const ShareSectionsSchema = Schema.Array(DashboardSectionSchema)
+
+const SharedDashboardDocumentSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	description: Schema.optionalKey(Schema.String),
+	timeRange: Schema.Unknown,
+	widgets: Schema.Array(ShareWidgetSchema),
+	// Decoded leniently here, then narrowed below — see `ShareSectionsSchema`.
+	sections: Schema.optionalKey(Schema.Unknown),
+	variables: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+	refreshIntervalSeconds: Schema.optionalKey(Schema.Number),
+})
+
+const SharedDashboardResponseSchema = Schema.Struct({
+	mode: Schema.Literals(["public", "org"]),
+	scope: Schema.Literals(["dashboard", "widget"]),
+	dashboard: SharedDashboardDocumentSchema,
+	limits: Schema.Struct({
+		maxRangeSeconds: Schema.Number,
+		maxListRangeSeconds: Schema.Number,
+	}),
+	embeddable: Schema.Boolean,
+})
+
+export type SharedDashboardDocument = typeof SharedDashboardDocumentSchema.Type
+
+export interface SharedDashboard extends Omit<typeof SharedDashboardResponseSchema.Type, "dashboard"> {
+	readonly dashboard: SharedDashboardDocument & {
+		readonly sections: ReadonlyArray<typeof DashboardSectionSchema.Type>
+	}
 }
 
 /** Why a share failed to open, as the page needs to distinguish it. */
@@ -106,6 +154,29 @@ const toResolveError = (status: number, payload: unknown): ShareResolveError => 
 	}
 }
 
+const decodeSharedDashboard = Schema.decodeUnknownPromise(SharedDashboardResponseSchema)
+const decodeShareSections = Schema.decodeUnknownSync(ShareSectionsSchema)
+
+/**
+ * Decode a resolve payload, keeping a board whose groups fail to decode.
+ *
+ * The tiles are the dashboard; the grouping is how they are arranged. A stored
+ * section shape this build doesn't recognise should drop the grouping and
+ * render an ungrouped board, never blank the page.
+ */
+export const decodeShare = async (payload: unknown): Promise<SharedDashboard> => {
+	const decoded = await decodeSharedDashboard(payload)
+	let sections: ReadonlyArray<typeof DashboardSectionSchema.Type> = []
+	if (decoded.dashboard.sections !== undefined) {
+		try {
+			sections = decodeShareSections(decoded.dashboard.sections)
+		} catch {
+			console.warn("[share] dashboard sections could not be decoded — rendering ungrouped")
+		}
+	}
+	return { ...decoded, dashboard: { ...decoded.dashboard, sections } }
+}
+
 export function useSharedDashboard(token: string, isSignedIn: boolean) {
 	const [state, setState] = useState<
 		| { status: "loading" }
@@ -124,7 +195,12 @@ export function useSharedDashboard(token: string, isSignedIn: boolean) {
 					setState({ status: "error", error: toResolveError(response.status, payload) })
 					return
 				}
-				setState({ status: "ready", share: payload as SharedDashboard })
+				// A payload that fails to decode lands in the same "unavailable" state
+				// a 5xx does, via the `.catch` below — the page must not throw
+				// through the route on a malformed body.
+				const share = await decodeShare(payload)
+				if (cancelled) return
+				setState({ status: "ready", share })
 			})
 			.catch(() => {
 				if (!cancelled) {

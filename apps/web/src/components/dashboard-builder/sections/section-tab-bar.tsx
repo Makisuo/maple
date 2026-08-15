@@ -3,10 +3,10 @@ import { Button } from "@maple/ui/components/ui/button"
 import { PlusIcon, TrashIcon } from "@/components/icons"
 
 import { InlineEditableText } from "@/components/dashboard-builder/sections/inline-editable-text"
-import type { DashboardSectionTab } from "@/components/dashboard-builder/types"
+import type { DashboardSectionTab } from "@maple/widgets/dashboard"
 
 interface SectionTabBarProps {
-	tabs: DashboardSectionTab[]
+	tabs: ReadonlyArray<DashboardSectionTab>
 	activeTabId: string
 	editable: boolean
 	onSelect: (tabId: string) => void

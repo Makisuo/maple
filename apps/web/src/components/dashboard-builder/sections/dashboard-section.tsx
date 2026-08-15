@@ -11,18 +11,22 @@ import {
 import { cn } from "@maple/ui/lib/utils"
 import { ArrowUpIcon, DotsVerticalIcon, PlusIcon, TrashIcon } from "@/components/icons"
 
-import { DashboardGrid } from "@/components/dashboard-builder/canvas/dashboard-canvas"
+import {
+	DashboardGrid,
+	type CanvasWidget,
+	type WidgetRendererComponent,
+} from "@/components/dashboard-builder/canvas/dashboard-canvas"
 import type { GridTier } from "@/components/dashboard-builder/canvas/grid-breakpoints"
 import { InlineEditableText } from "@/components/dashboard-builder/sections/inline-editable-text"
 import { SectionTabBar } from "@/components/dashboard-builder/sections/section-tab-bar"
 import { DeleteSectionDialog, DeleteTabDialog } from "@/components/dashboard-builder/sections/section-dialogs"
-import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
-import type { DashboardSection, DashboardWidget } from "@/components/dashboard-builder/types"
+import { useDashboardActionsOptional } from "@/components/dashboard-builder/dashboard-actions-context"
+import type { DashboardSection } from "@maple/widgets/dashboard"
 
-interface DashboardSectionViewProps {
+interface DashboardSectionViewProps<W extends CanvasWidget> {
 	section: DashboardSection
 	/** Widgets in this section's active tab, already filtered by the parent. */
-	widgets: DashboardWidget[]
+	widgets: ReadonlyArray<W>
 	/** Every widget in the section, across tabs — for the delete confirmations. */
 	sectionWidgetCount: number
 	activeTabId: string
@@ -37,6 +41,7 @@ interface DashboardSectionViewProps {
 	onAddWidget: (tabId: string) => void
 	/** Widgets in a specific tab — for the tab delete confirmation's count. */
 	widgetCountInTab: (tabId: string) => number
+	renderWidget: WidgetRendererComponent<W>
 }
 
 /**
@@ -48,7 +53,7 @@ interface DashboardSectionViewProps {
  * mounting is what stops the query — no `enabled={false}` plumbing, and strictly
  * stronger than hiding with CSS, which would leave the tile fetching.
  */
-export function DashboardSectionView({
+export function DashboardSectionView<W extends CanvasWidget>({
 	section,
 	widgets,
 	sectionWidgetCount,
@@ -63,17 +68,13 @@ export function DashboardSectionView({
 	onSelectTab,
 	onAddWidget,
 	widgetCountInTab,
-}: DashboardSectionViewProps) {
-	const {
-		renameSection,
-		setSectionCollapsedDefault,
-		setSectionCollapsible,
-		reorderSections,
-		deleteSection,
-		addTab,
-		renameTab,
-		deleteTab,
-	} = useDashboardActions()
+	renderWidget,
+}: DashboardSectionViewProps<W>) {
+	// Optional, and every call below is optional with it: a read-only surface
+	// mounts this with no store. Safe by construction rather than by luck —
+	// each of these entry points already sits behind `editable`, or behind a
+	// dialog only reachable from a menu that `editable` gates.
+	const actions = useDashboardActionsOptional()
 
 	const [deleteSectionOpen, setDeleteSectionOpen] = useState(false)
 	const [tabPendingDelete, setTabPendingDelete] = useState<string | null>(null)
@@ -113,7 +114,7 @@ export function DashboardSectionView({
 					value={section.title}
 					ariaLabel={`Rename group ${section.title}`}
 					readOnly={!editable}
-					onChange={(title) => renameSection(section.id, title)}
+					onChange={(title) => actions?.renameSection(section.id, title)}
 					className="truncate text-sm font-semibold"
 				/>
 
@@ -124,9 +125,9 @@ export function DashboardSectionView({
 							activeTabId={activeTabId}
 							editable={editable}
 							onSelect={onSelectTab}
-							onRename={(tabId, title) => renameTab(section.id, tabId, title)}
+							onRename={(tabId, title) => actions?.renameTab(section.id, tabId, title)}
 							onDelete={(tabId) => setTabPendingDelete(tabId)}
-							onAddTab={() => addTab(section.id)}
+							onAddTab={() => actions?.addTab(section.id)}
 						/>
 					</div>
 				)}
@@ -156,20 +157,20 @@ export function DashboardSectionView({
 								}
 							/>
 							<DropdownMenuContent align="end">
-								<DropdownMenuItem onClick={() => addTab(section.id)}>
+								<DropdownMenuItem onClick={() => actions?.addTab(section.id)}>
 									<PlusIcon size={14} />
 									Add tab
 								</DropdownMenuItem>
 								<DropdownMenuItem
 									disabled={index === 0}
-									onClick={() => reorderSections(index, index - 1)}
+									onClick={() => actions?.reorderSections(index, index - 1)}
 								>
 									<ArrowUpIcon size={14} />
 									Move up
 								</DropdownMenuItem>
 								<DropdownMenuItem
 									disabled={index === sectionCount - 1}
-									onClick={() => reorderSections(index, index + 1)}
+									onClick={() => actions?.reorderSections(index, index + 1)}
 								>
 									<ArrowUpIcon size={14} className="rotate-180" />
 									Move down
@@ -182,7 +183,7 @@ export function DashboardSectionView({
 								{collapsible && (
 									<DropdownMenuItem
 										onClick={() =>
-											setSectionCollapsedDefault(
+											actions?.setSectionCollapsedDefault(
 												section.id,
 												!(section.collapsed ?? false),
 											)
@@ -192,7 +193,7 @@ export function DashboardSectionView({
 									</DropdownMenuItem>
 								)}
 								<DropdownMenuItem
-									onClick={() => setSectionCollapsible(section.id, !collapsible)}
+									onClick={() => actions?.setSectionCollapsible(section.id, !collapsible)}
 								>
 									{collapsible ? "Always expanded" : "Allow collapsing"}
 								</DropdownMenuItem>
@@ -218,7 +219,13 @@ export function DashboardSectionView({
 					</p>
 				) : (
 					<div className="pt-2">
-						<DashboardGrid widgets={widgets} width={width} tier={tier} editable={editable} />
+						<DashboardGrid
+							widgets={widgets}
+							width={width}
+							tier={tier}
+							editable={editable}
+							renderWidget={renderWidget}
+						/>
 					</div>
 				))}
 
@@ -227,7 +234,7 @@ export function DashboardSectionView({
 				onOpenChange={setDeleteSectionOpen}
 				sectionTitle={section.title}
 				widgetCount={sectionWidgetCount}
-				onConfirm={(action) => deleteSection(section.id, action)}
+				onConfirm={(action) => actions?.deleteSection(section.id, action)}
 			/>
 
 			{pendingTab && destinationTab && (
@@ -239,7 +246,7 @@ export function DashboardSectionView({
 					tabTitle={pendingTab.title}
 					destinationTitle={destinationTab.title}
 					widgetCount={widgetCountInTab(pendingTab.id)}
-					onConfirm={(action) => deleteTab(section.id, pendingTab.id, action)}
+					onConfirm={(action) => actions?.deleteTab(section.id, pendingTab.id, action)}
 				/>
 			)}
 		</section>

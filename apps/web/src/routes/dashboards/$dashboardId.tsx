@@ -5,6 +5,7 @@ import { Atom, useAtom } from "@/lib/effect-atom"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { DashboardSections } from "@/components/dashboard-builder/sections/dashboard-sections"
+import { LiveWidgetRenderer } from "@/components/dashboard-builder/canvas/live-widget-renderer"
 import {
 	withActiveTab,
 	withSectionCollapsed,
@@ -389,6 +390,7 @@ function DashboardViewPage() {
 											</div>
 										) : (
 											<DashboardSections
+												renderWidget={LiveWidgetRenderer}
 												widgets={activeDashboard.widgets}
 												sections={activeDashboard.sections ?? []}
 												search={sectionViewSearch}

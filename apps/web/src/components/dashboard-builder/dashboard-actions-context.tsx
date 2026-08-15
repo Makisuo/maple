@@ -265,8 +265,25 @@ export function DashboardActionsProvider({
 	return <DashboardActionsContext value={ctx}>{children}</DashboardActionsContext>
 }
 
+/**
+ * The dashboard's actions, or `null` when rendered outside a provider.
+ *
+ * The read-only surfaces — a share link, a full-screen board — mount the same
+ * canvas with no store behind it, and every mutation here needs one. `null`
+ * says exactly that: on this surface no action exists.
+ *
+ * Deliberately not a no-op stub provider. A non-null context makes
+ * `WidgetActionsProvider` viable downstream, and that provider always defines
+ * `remove` and offers `createAlert`, which `WidgetShell` shows in view mode —
+ * so a stub would put edit affordances and authed-route navigation on a public
+ * page. Absence is the only honest empty action set.
+ */
+export function useDashboardActionsOptional(): DashboardActionsContextValue | null {
+	return React.use(DashboardActionsContext)
+}
+
 export function useDashboardActions(): DashboardActionsContextValue {
-	const ctx = React.use(DashboardActionsContext)
+	const ctx = useDashboardActionsOptional()
 	if (!ctx) throw new Error("useDashboardActions must be used within DashboardActionsProvider")
 	return ctx
 }
