@@ -1,5 +1,5 @@
 {
-  "id": "69b2ada9-6268-4cfe-9ba7-be7bd90af888",
+  "id": "a6930e6e-aa02-4dca-b2c5-b4a054168688",
   "prevId": "4f98d76f-3c18-45d9-882b-293708695b62",
   "version": "7",
   "dialect": "postgresql",
@@ -2752,6 +2752,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "widget_id": {
+          "name": "widget_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "mode": {
           "name": "mode",
           "type": "text",
@@ -2830,6 +2836,12 @@
               "expression": "dashboard_id",
               "isExpression": false,
               "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(widget_id, '')",
+              "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],

@@ -410,7 +410,15 @@ describe("v2 dashboard shares", () => {
 		const created = await harness.request("POST", "/v2/dashboards", key, {
 			name: "Shared board",
 			time_range: { type: "relative", value: "12h" },
-			widgets: [],
+			widgets: [
+				{
+					id: "w-1",
+					visualization: "stat",
+					data_source: { kind: "static" },
+					display: {},
+					layout: { x: 0, y: 0, w: 3, h: 4 },
+				},
+			],
 			variables: [],
 		})
 		expect(created.status).toBe(200)
@@ -631,6 +639,102 @@ describe("v2 dashboard shares", () => {
 			(await harness.request("PUT", `/v2/dashboards/${id}/share`, foreign.secret, { mode: "public" }))
 				.status,
 		).toBe(404)
+
+		await harness.dispose()
+	})
+
+	it("shares a single widget on its own link", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+
+		const unshared = await harness.request("GET", `/v2/dashboards/${id}/widgets/w-1/share`, key.secret)
+		expect(unshared.body).toBeNull()
+
+		const shared = await harness.request("PUT", `/v2/dashboards/${id}/widgets/w-1/share`, key.secret, {
+			mode: "public",
+		})
+		expect(shared.status).toBe(200)
+		expect(shared.body.share.widget_id).toBe("w-1")
+		expect(typeof shared.body.token).toBe("string")
+		expect(await resolve(harness, shared.body.token)).toBe(id)
+
+		await harness.dispose()
+	})
+
+	it("refuses to mint a link for a widget that is not on the board", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+
+		// Otherwise the caller walks away with a token that resolves to a
+		// permanently blank tile.
+		const bogus = await harness.request(
+			"PUT",
+			`/v2/dashboards/${id}/widgets/does-not-exist/share`,
+			key.secret,
+			{ mode: "public" },
+		)
+		expect(bogus.status).toBe(404)
+
+		await harness.dispose()
+	})
+
+	it("keeps a widget share independent of the dashboard's own", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+
+		const board = await harness.request("PUT", `/v2/dashboards/${id}/share`, key.secret, {
+			mode: "public",
+		})
+		const widget = await harness.request("PUT", `/v2/dashboards/${id}/widgets/w-1/share`, key.secret, {
+			mode: "public",
+		})
+		const boardToken: string = board.body.token
+		const widgetToken: string = widget.body.token
+		expect(widgetToken).not.toBe(boardToken)
+
+		// Both live at once — the partial unique index folds a null widget_id to
+		// '', so the two scopes do not collide.
+		const listed = await harness.request("GET", `/v2/dashboards/${id}/shares`, key.secret)
+		expect(listed.body).toHaveLength(2)
+
+		// This is the property an embed depends on: unsharing the board must not
+		// break a chart already embedded in someone else's page.
+		await harness.request("DELETE", `/v2/dashboards/${id}/share`, key.secret)
+		expect(await resolve(harness, boardToken)).toBe("__not_found__")
+		expect(await resolve(harness, widgetToken)).toBe(id)
+
+		// And the reverse: rotating the widget link leaves the board's alone.
+		const reshared = await harness.request("PUT", `/v2/dashboards/${id}/share`, key.secret, {
+			mode: "public",
+		})
+		const rotated = await harness.request(
+			"POST",
+			`/v2/dashboards/${id}/widgets/w-1/share/rotate`,
+			key.secret,
+		)
+		expect(await resolve(harness, widgetToken)).toBe("__not_found__")
+		expect(await resolve(harness, rotated.body.token)).toBe(id)
+		expect(await resolve(harness, reshared.body.token)).toBe(id)
+
+		await harness.dispose()
+	})
+
+	it("scopes each widget's link to its own widget", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+
+		await harness.request("PUT", `/v2/dashboards/${id}/widgets/w-1/share`, key.secret, {
+			mode: "public",
+		})
+
+		// A second widget's scope is a separate row; asking for it must not return
+		// the first one's share.
+		const other = await harness.request("GET", `/v2/dashboards/${id}/widgets/w-2/share`, key.secret)
+		expect(other.body).toBeNull()
 
 		await harness.dispose()
 	})

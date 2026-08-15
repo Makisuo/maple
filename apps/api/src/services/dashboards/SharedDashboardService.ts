@@ -37,6 +37,27 @@ import { Env } from "@/platform/Env"
 const decodeShareIdSync = Schema.decodeUnknownSync(DashboardShareId)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 
+/**
+ * The scope a share covers. `null` widget id means the whole dashboard.
+ *
+ * Passed around as an explicit value rather than an optional argument so that
+ * "which scope" is never accidentally defaulted — a rotate that silently fell
+ * back to the dashboard-wide row would mint a board-wide link where the caller
+ * asked for a chart-wide one.
+ */
+export interface ShareScope {
+	readonly dashboardId: DashboardId
+	readonly widgetId: string | null
+}
+
+/**
+ * Matches exactly one scope. Postgres compares NULL with `=` as unknown, so the
+ * whole-board scope has to be selected with `is null` rather than `= null` —
+ * getting this wrong silently matches nothing and reads as "not shared".
+ */
+const scopeMatches = (scope: ShareScope) =>
+	scope.widgetId === null ? isNull(dashboardShares.widgetId) : eq(dashboardShares.widgetId, scope.widgetId)
+
 const toPersistenceError = (error: unknown) =>
 	new SharePersistenceError({
 		message: error instanceof Error ? error.message : "Share persistence failed",
@@ -47,6 +68,7 @@ interface ShareRowShape {
 	readonly id: DashboardShareId
 	readonly orgId: OrgId
 	readonly dashboardId: DashboardId
+	readonly widgetId: string | null
 	readonly mode: DashboardShareMode
 	readonly tokenSuffix: string
 	readonly createdAt: Date
@@ -57,6 +79,7 @@ const toDashboardShare = (row: ShareRowShape) =>
 	new DashboardShare({
 		id: row.id,
 		dashboardId: row.dashboardId,
+		...(row.widgetId === null ? {} : { widgetId: row.widgetId }),
 		mode: row.mode,
 		tokenSuffix: row.tokenSuffix,
 		createdAt: decodeIsoDateTimeStringSync(new Date(dateToMs(row.createdAt)).toISOString()),
@@ -68,6 +91,7 @@ const shareColumns = {
 	id: dashboardShares.id,
 	orgId: dashboardShares.orgId,
 	dashboardId: dashboardShares.dashboardId,
+	widgetId: dashboardShares.widgetId,
 	mode: dashboardShares.mode,
 	tokenSuffix: dashboardShares.tokenSuffix,
 	createdAt: dashboardShares.createdAt,
@@ -75,37 +99,43 @@ const shareColumns = {
 } as const
 
 export interface SharedDashboardServiceApi {
-	/** The live share for a dashboard, or `None`. Never includes the raw token. */
+	/** The live share for one scope, or `None`. Never includes the raw token. */
 	readonly get: (
 		orgId: OrgId,
-		dashboardId: DashboardId,
+		scope: ShareScope,
 	) => Effect.Effect<Option.Option<DashboardShare>, SharePersistenceError>
 
+	/** Every live share on a dashboard — the board's own, plus one per widget. */
+	readonly listForDashboard: (
+		orgId: OrgId,
+		dashboardId: DashboardId,
+	) => Effect.Effect<ReadonlyArray<DashboardShare>, SharePersistenceError>
+
 	/**
-	 * Create the dashboard's share, or change the mode of the one it already
+	 * Create the share for a scope, or change the mode of the one it already
 	 * has. Returns a raw token only when one was minted.
 	 */
 	readonly upsert: (
 		orgId: OrgId,
 		userId: UserId,
-		dashboardId: DashboardId,
+		scope: ShareScope,
 		mode: DashboardShareMode,
 	) => Effect.Effect<DashboardShareCreated, SharePersistenceError | ShareNotConfiguredError>
 
-	/** Revoke the current link and mint a replacement in the same transaction. */
+	/** Revoke a scope's current link and mint a replacement in one transaction. */
 	readonly rotate: (
 		orgId: OrgId,
 		userId: UserId,
-		dashboardId: DashboardId,
+		scope: ShareScope,
 	) => Effect.Effect<
 		DashboardShareCreated,
 		SharePersistenceError | ShareNotConfiguredError | ShareNotFoundError
 	>
 
-	/** Stop sharing. Idempotent: revoking an unshared dashboard is not an error. */
+	/** Stop sharing a scope. Idempotent: revoking an unshared scope is not an error. */
 	readonly revoke: (
 		orgId: OrgId,
-		dashboardId: DashboardId,
+		scope: ShareScope,
 	) => Effect.Effect<DashboardShareTombstone, SharePersistenceError>
 
 	/**
@@ -149,8 +179,41 @@ export class SharedDashboardService extends Context.Service<
 			}),
 		)
 
-		const loadLive = (orgId: OrgId, dashboardId: DashboardId) =>
+		const loadLive = (orgId: OrgId, scope: ShareScope) =>
 			database
+				.execute((db) =>
+					db
+						.select(shareColumns)
+						.from(dashboardShares)
+						.where(
+							and(
+								eq(dashboardShares.orgId, orgId),
+								eq(dashboardShares.dashboardId, scope.dashboardId),
+								scopeMatches(scope),
+								isNull(dashboardShares.revokedAt),
+							),
+						),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+
+		const get = Effect.fn("SharedDashboardService.get")(function* (orgId: OrgId, scope: ShareScope) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"maple.dashboard.id": scope.dashboardId,
+				"maple.share.scope": scope.widgetId === null ? "dashboard" : "widget",
+			})
+			const rows = yield* loadLive(orgId, scope)
+			const row = rows[0]
+			return row === undefined ? Option.none() : Option.some(toDashboardShare(row))
+		})
+
+		/** Every live share on a dashboard: the board's own, plus one per widget. */
+		const listForDashboard = Effect.fn("SharedDashboardService.listForDashboard")(function* (
+			orgId: OrgId,
+			dashboardId: DashboardId,
+		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.dashboard.id": dashboardId })
+			const rows = yield* database
 				.execute((db) =>
 					db
 						.select(shareColumns)
@@ -164,22 +227,14 @@ export class SharedDashboardService extends Context.Service<
 						),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
-
-		const get = Effect.fn("SharedDashboardService.get")(function* (
-			orgId: OrgId,
-			dashboardId: DashboardId,
-		) {
-			yield* Effect.annotateCurrentSpan({ orgId, "maple.dashboard.id": dashboardId })
-			const rows = yield* loadLive(orgId, dashboardId)
-			const row = rows[0]
-			return row === undefined ? Option.none() : Option.some(toDashboardShare(row))
+			return rows.map(toDashboardShare)
 		})
 
 		/** Mint a token and insert the row. Shared by create and rotate. */
 		const mintRow = (
 			orgId: OrgId,
 			userId: UserId,
-			dashboardId: DashboardId,
+			scope: ShareScope,
 			mode: DashboardShareMode,
 			hmacKey: string,
 			now: number,
@@ -190,7 +245,8 @@ export class SharedDashboardService extends Context.Service<
 				values: {
 					orgId,
 					id: decodeShareIdSync(`dshare_${randomUUID()}`),
-					dashboardId,
+					dashboardId: scope.dashboardId,
+					widgetId: scope.widgetId,
 					mode,
 					tokenHash: hashShareToken(rawToken, hmacKey),
 					tokenSuffix: shareTokenSuffix(rawToken),
@@ -206,19 +262,20 @@ export class SharedDashboardService extends Context.Service<
 		const upsert = Effect.fn("SharedDashboardService.upsert")(function* (
 			orgId: OrgId,
 			userId: UserId,
-			dashboardId: DashboardId,
+			scope: ShareScope,
 			mode: DashboardShareMode,
 		) {
 			yield* Effect.annotateCurrentSpan({
 				orgId,
 				"tenant.userId": userId,
-				"maple.dashboard.id": dashboardId,
+				"maple.dashboard.id": scope.dashboardId,
+				"maple.share.scope": scope.widgetId === null ? "dashboard" : "widget",
 				"maple.share.mode": mode,
 			})
 			const hmacKey = yield* requireHmacKey
 			const now = yield* Clock.currentTimeMillis
 
-			const existingRows = yield* loadLive(orgId, dashboardId)
+			const existingRows = yield* loadLive(orgId, scope)
 			const existing = existingRows[0]
 
 			// Already shared: a mode change must keep the same link working, so this
@@ -252,7 +309,7 @@ export class SharedDashboardService extends Context.Service<
 				return new DashboardShareCreated({ share: toDashboardShare(row) })
 			}
 
-			const { rawToken, values } = mintRow(orgId, userId, dashboardId, mode, hmacKey, now)
+			const { rawToken, values } = mintRow(orgId, userId, scope, mode, hmacKey, now)
 			const inserted = yield* database
 				.execute((db) => db.insert(dashboardShares).values(values).returning(shareColumns))
 				.pipe(Effect.mapError(toPersistenceError))
@@ -270,23 +327,24 @@ export class SharedDashboardService extends Context.Service<
 		const rotate = Effect.fn("SharedDashboardService.rotate")(function* (
 			orgId: OrgId,
 			userId: UserId,
-			dashboardId: DashboardId,
+			scope: ShareScope,
 		) {
 			yield* Effect.annotateCurrentSpan({
 				orgId,
 				"tenant.userId": userId,
-				"maple.dashboard.id": dashboardId,
+				"maple.dashboard.id": scope.dashboardId,
+				"maple.share.scope": scope.widgetId === null ? "dashboard" : "widget",
 			})
 			const hmacKey = yield* requireHmacKey
 			const now = yield* Clock.currentTimeMillis
 
-			const existingRows = yield* loadLive(orgId, dashboardId)
+			const existingRows = yield* loadLive(orgId, scope)
 			const existing = existingRows[0]
 			if (existing === undefined) {
 				return yield* Effect.fail(new ShareNotFoundError({ message: SHARE_NOT_FOUND_MESSAGE }))
 			}
 
-			const { rawToken, values } = mintRow(orgId, userId, dashboardId, existing.mode, hmacKey, now)
+			const { rawToken, values } = mintRow(orgId, userId, scope, existing.mode, hmacKey, now)
 
 			// One transaction: the old row must stop resolving at the same instant the
 			// new one starts. Revoke first so the partial unique index — one live row
@@ -315,9 +373,13 @@ export class SharedDashboardService extends Context.Service<
 
 		const revoke = Effect.fn("SharedDashboardService.revoke")(function* (
 			orgId: OrgId,
-			dashboardId: DashboardId,
+			scope: ShareScope,
 		) {
-			yield* Effect.annotateCurrentSpan({ orgId, "maple.dashboard.id": dashboardId })
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"maple.dashboard.id": scope.dashboardId,
+				"maple.share.scope": scope.widgetId === null ? "dashboard" : "widget",
+			})
 			const now = yield* Clock.currentTimeMillis
 
 			const revoked = yield* database
@@ -328,7 +390,8 @@ export class SharedDashboardService extends Context.Service<
 						.where(
 							and(
 								eq(dashboardShares.orgId, orgId),
-								eq(dashboardShares.dashboardId, dashboardId),
+								eq(dashboardShares.dashboardId, scope.dashboardId),
+								scopeMatches(scope),
 								isNull(dashboardShares.revokedAt),
 							),
 						)
@@ -339,7 +402,10 @@ export class SharedDashboardService extends Context.Service<
 			// Idempotent by design: "stop sharing" on a dashboard that was never
 			// shared is a no-op, not a 404. The dialog can call it without first
 			// checking, and a double-click cannot produce an error.
-			return new DashboardShareTombstone({ dashboardId, revoked: revoked.length > 0 })
+			return new DashboardShareTombstone({
+				dashboardId: scope.dashboardId,
+				revoked: revoked.length > 0,
+			})
 		})
 
 		const resolveByToken = Effect.fn("SharedDashboardService.resolveByToken")(function* (token: string) {
@@ -371,26 +437,32 @@ export class SharedDashboardService extends Context.Service<
 			return { share: toDashboardShare(row), orgId: row.orgId }
 		})
 
-		return { get, upsert, rotate, revoke, resolveByToken } satisfies SharedDashboardServiceApi
+		return {
+			get,
+			listForDashboard,
+			upsert,
+			rotate,
+			revoke,
+			resolveByToken,
+		} satisfies SharedDashboardServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)
 
-	static readonly get = (orgId: OrgId, dashboardId: DashboardId) =>
-		this.use((service) => service.get(orgId, dashboardId))
+	static readonly get = (orgId: OrgId, scope: ShareScope) =>
+		this.use((service) => service.get(orgId, scope))
 
-	static readonly upsert = (
-		orgId: OrgId,
-		userId: UserId,
-		dashboardId: DashboardId,
-		mode: DashboardShareMode,
-	) => this.use((service) => service.upsert(orgId, userId, dashboardId, mode))
+	static readonly listForDashboard = (orgId: OrgId, dashboardId: DashboardId) =>
+		this.use((service) => service.listForDashboard(orgId, dashboardId))
 
-	static readonly rotate = (orgId: OrgId, userId: UserId, dashboardId: DashboardId) =>
-		this.use((service) => service.rotate(orgId, userId, dashboardId))
+	static readonly upsert = (orgId: OrgId, userId: UserId, scope: ShareScope, mode: DashboardShareMode) =>
+		this.use((service) => service.upsert(orgId, userId, scope, mode))
 
-	static readonly revoke = (orgId: OrgId, dashboardId: DashboardId) =>
-		this.use((service) => service.revoke(orgId, dashboardId))
+	static readonly rotate = (orgId: OrgId, userId: UserId, scope: ShareScope) =>
+		this.use((service) => service.rotate(orgId, userId, scope))
+
+	static readonly revoke = (orgId: OrgId, scope: ShareScope) =>
+		this.use((service) => service.revoke(orgId, scope))
 
 	static readonly resolveByToken = (token: string) => this.use((service) => service.resolveByToken(token))
 }

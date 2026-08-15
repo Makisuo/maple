@@ -5,6 +5,7 @@ import {
 	DashboardTemplateMetadata,
 	DashboardTemplateNotFoundError,
 	IsoDateTimeString,
+	ShareWidgetNotFoundError,
 	PortableDashboardDocument,
 } from "@maple/domain/http"
 import {
@@ -51,6 +52,7 @@ const toV2DashboardShare = (share: DashboardShare): V2DashboardShare => ({
 	id: share.id,
 	object: "dashboard_share",
 	dashboardId: share.dashboardId,
+	...(share.widgetId === undefined ? undefined : { widgetId: share.widgetId }),
 	mode: share.mode,
 	tokenSuffix: share.tokenSuffix,
 	createdAt: share.createdAt,
@@ -409,6 +411,125 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 				)
 				// Share management.
 				//
+				// A share is scoped to a whole dashboard (widgetId null) or to one
+				// widget. The two are independent links with their own tokens, modes
+				// and revocation, so a public chart embed survives its board being
+				// flipped to org-only or unshared entirely.
+				.handle("listShares", ({ params }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* persistence.get(tenant.orgId, params.id)
+						const live = yield* shares.listForDashboard(tenant.orgId, params.id)
+
+						return live.map(toV2DashboardShare)
+					}),
+				)
+				.handle("retrieveWidgetShare", ({ params }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* persistence.get(tenant.orgId, params.id)
+						const share = yield* shares.get(tenant.orgId, {
+							dashboardId: params.id,
+							widgetId: params.widget_id,
+						})
+
+						return Option.match(share, { onNone: () => null, onSome: toV2DashboardShare })
+					}),
+				)
+				.handle("upsertWidgetShare", ({ params, payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const dashboard = yield* persistence.get(tenant.orgId, params.id)
+
+						// Minting a link for a widget that does not exist would produce a
+						// token that resolves to a permanently blank tile, so the widget is
+						// checked here rather than at first view.
+						if (!dashboard.widgets.some((candidate) => candidate.id === params.widget_id)) {
+							return yield* Effect.fail(
+								new ShareWidgetNotFoundError({
+									message: "That widget is not on this dashboard.",
+									widgetId: params.widget_id,
+								}),
+							)
+						}
+
+						const created = yield* shares.upsert(
+							tenant.orgId,
+							tenant.userId,
+							{ dashboardId: params.id, widgetId: params.widget_id },
+							payload.mode,
+						)
+
+						yield* Effect.logInfo("dashboard widget share upserted").pipe(
+							Effect.annotateLogs({
+								orgId: tenant.orgId,
+								userId: tenant.userId,
+								dashboardId: params.id,
+								widgetId: params.widget_id,
+								shareId: created.share.id,
+								mode: created.share.mode,
+								minted: created.token !== undefined,
+							}),
+						)
+
+						return {
+							share: toV2DashboardShare(created.share),
+							...(created.token === undefined ? undefined : { token: created.token }),
+						}
+					}),
+				)
+				.handle("rotateWidgetShare", ({ params }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* persistence.get(tenant.orgId, params.id)
+						const rotated = yield* shares.rotate(tenant.orgId, tenant.userId, {
+							dashboardId: params.id,
+							widgetId: params.widget_id,
+						})
+
+						yield* Effect.logInfo("dashboard widget share rotated").pipe(
+							Effect.annotateLogs({
+								orgId: tenant.orgId,
+								userId: tenant.userId,
+								dashboardId: params.id,
+								widgetId: params.widget_id,
+								shareId: rotated.share.id,
+							}),
+						)
+
+						return {
+							share: toV2DashboardShare(rotated.share),
+							...(rotated.token === undefined ? undefined : { token: rotated.token }),
+						}
+					}),
+				)
+				.handle("revokeWidgetShare", ({ params }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* persistence.get(tenant.orgId, params.id)
+						const tombstone = yield* shares.revoke(tenant.orgId, {
+							dashboardId: params.id,
+							widgetId: params.widget_id,
+						})
+
+						yield* Effect.logInfo("dashboard widget share revoked").pipe(
+							Effect.annotateLogs({
+								orgId: tenant.orgId,
+								userId: tenant.userId,
+								dashboardId: params.id,
+								widgetId: params.widget_id,
+								hadLiveShare: tombstone.revoked,
+							}),
+						)
+
+						return {
+							dashboardId: params.id,
+							object: "dashboard_share" as const,
+							deleted: true as const,
+						}
+					}),
+				)
+				//
 				// Every handler loads the dashboard first, so a share operation on a
 				// dashboard belonging to another org (or to no one) fails as
 				// `DashboardNotFoundError` before it can touch a share row. The share
@@ -418,7 +539,10 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* persistence.get(tenant.orgId, params.id)
-						const share = yield* shares.get(tenant.orgId, params.id)
+						const share = yield* shares.get(tenant.orgId, {
+							dashboardId: params.id,
+							widgetId: null,
+						})
 
 						return Option.match(share, {
 							onNone: () => null,
@@ -433,7 +557,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 						const created = yield* shares.upsert(
 							tenant.orgId,
 							tenant.userId,
-							params.id,
+							{ dashboardId: params.id, widgetId: null },
 							payload.mode,
 						)
 
@@ -458,7 +582,10 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* persistence.get(tenant.orgId, params.id)
-						const rotated = yield* shares.rotate(tenant.orgId, tenant.userId, params.id)
+						const rotated = yield* shares.rotate(tenant.orgId, tenant.userId, {
+							dashboardId: params.id,
+							widgetId: null,
+						})
 
 						yield* Effect.logInfo("dashboard share rotated").pipe(
 							Effect.annotateLogs({
@@ -479,7 +606,10 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* persistence.get(tenant.orgId, params.id)
-						const tombstone = yield* shares.revoke(tenant.orgId, params.id)
+						const tombstone = yield* shares.revoke(tenant.orgId, {
+							dashboardId: params.id,
+							widgetId: null,
+						})
 
 						yield* Effect.logInfo("dashboard share revoked").pipe(
 							Effect.annotateLogs({

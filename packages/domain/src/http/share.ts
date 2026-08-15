@@ -28,6 +28,10 @@ import { HttpTaggedError } from "./error-policy"
  */
 export const SHARE_NOT_FOUND_MESSAGE = "This link is no longer available."
 
+/** What a share link exposes: a whole dashboard, or one widget on it. */
+export const DashboardShareScope = Schema.Literals(["dashboard", "widget"])
+export type DashboardShareScope = Schema.Schema.Type<typeof DashboardShareScope>
+
 /** How a share link resolves. */
 export const DashboardShareMode = Schema.Literals(["public", "org"])
 export type DashboardShareMode = Schema.Schema.Type<typeof DashboardShareMode>
@@ -60,6 +64,14 @@ export type ShareToken = Schema.Schema.Type<typeof ShareToken>
 export class DashboardShare extends Schema.Class<DashboardShare>("DashboardShare")({
 	id: DashboardShareId,
 	dashboardId: DashboardId,
+	/**
+	 * Absent = the whole dashboard. Present = this one widget, and only this one.
+	 *
+	 * The scope is enforced at resolution, not just recorded: a token minted for
+	 * one chart refuses every other widget id on the same board, so a chart share
+	 * cannot be walked sideways into the rest of the dashboard.
+	 */
+	widgetId: Schema.optionalKey(Schema.String),
 	mode: DashboardShareMode,
 	tokenSuffix: Schema.String,
 	createdAt: IsoDateTimeString,

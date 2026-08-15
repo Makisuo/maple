@@ -1,4 +1,3 @@
-// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema, SchemaGetter } from "effect"
 import {
@@ -30,6 +29,7 @@ import {
 	ShareNotConfiguredError,
 	ShareNotFoundError,
 	SharePersistenceError,
+	ShareWidgetNotFoundError,
 } from "../share"
 import { SORT_DIRECTIONS, STAT_AGGREGATES } from "@maple/widgets/dashboard"
 import {
@@ -733,6 +733,11 @@ export const V2DashboardShare = Schema.Struct({
 	id: DashboardSharePublicId,
 	object: Schema.Literal("dashboard_share"),
 	dashboardId: DashboardPublicId,
+	/**
+	 * Absent = the whole dashboard. Present = this one widget, and only this one:
+	 * a chart link refuses every other widget on the same board.
+	 */
+	widgetId: optional(Schema.String),
 	mode: DashboardShareMode,
 	tokenSuffix: Schema.String,
 	createdAt: Timestamp,
@@ -741,6 +746,7 @@ export const V2DashboardShare = Schema.Struct({
 	.pipe(
 		Schema.encodeKeys({
 			dashboardId: "dashboard_id",
+			widgetId: "widget_id",
 			tokenSuffix: "token_suffix",
 			createdAt: "created_at",
 			updatedAt: "updated_at",
@@ -805,6 +811,7 @@ const [
 	sharePersistence,
 	shareNotConfigured,
 	shareNotFound,
+	shareWidgetNotFound,
 ] = publicErrors(
 	DashboardVersionNotFoundError,
 	DashboardPersistenceError,
@@ -816,6 +823,7 @@ const [
 	SharePersistenceError,
 	ShareNotConfiguredError,
 	ShareNotFoundError,
+	ShareWidgetNotFoundError,
 )
 
 const dashboardCreateErrors = [dashboardValidation, dashboardPersistence] as const
@@ -1005,6 +1013,91 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				identifier: "restoreDashboardVersion",
 				summary: "Restore a dashboard version",
 				description: "Restores a historical snapshot as the dashboard's new current version.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.get("listShares", "/:id/shares", {
+			params: { id: DashboardPublicId },
+			success: Schema.Array(V2DashboardShare),
+			error: [sharePersistence, dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "listDashboardShares",
+				summary: "List a dashboard's share links",
+				description:
+					"Returns every live share on the dashboard — the board's own link, plus one per shared widget. Never returns raw tokens.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.get("retrieveWidgetShare", "/:id/widgets/:widget_id/share", {
+			params: { id: DashboardPublicId, widget_id: Schema.String },
+			success: Schema.NullOr(V2DashboardShare),
+			error: [sharePersistence, dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "getDashboardWidgetShare",
+				summary: "Retrieve a widget's share link",
+				description:
+					"Returns the live share link for one widget, or `null` when that widget is not shared.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.put("upsertWidgetShare", "/:id/widgets/:widget_id/share", {
+			params: { id: DashboardPublicId, widget_id: Schema.String },
+			payload: V2DashboardShareParams,
+			success: V2DashboardShareCreated,
+			error: [
+				sharePersistence,
+				shareNotConfigured,
+				dashboardPersistence,
+				dashboardNotFound,
+				dashboardStoredConfigInvalid,
+				shareWidgetNotFound,
+			],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "upsertDashboardWidgetShare",
+				summary: "Share a single widget",
+				description:
+					"Creates a share link scoped to one widget, or changes the mode of the one it already has. Independent of the dashboard's own share: revoking or re-scoping the board leaves widget links untouched. A `public` widget share may be embedded in an iframe.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("rotateWidgetShare", "/:id/widgets/:widget_id/share/rotate", {
+			params: { id: DashboardPublicId, widget_id: Schema.String },
+			success: V2DashboardShareCreated,
+			error: [
+				sharePersistence,
+				shareNotConfigured,
+				shareNotFound,
+				dashboardPersistence,
+				dashboardNotFound,
+				dashboardStoredConfigInvalid,
+			],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "rotateDashboardWidgetShare",
+				summary: "Regenerate a widget's share link",
+				description:
+					"Revokes the widget's current link and mints a replacement. Any embed using the old URL stops rendering immediately.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.delete("revokeWidgetShare", "/:id/widgets/:widget_id/share", {
+			params: { id: DashboardPublicId, widget_id: Schema.String },
+			success: V2DashboardShareDeleteResponse,
+			error: [sharePersistence, dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "revokeDashboardWidgetShare",
+				summary: "Stop sharing a widget",
+				description:
+					"Revokes the widget's share link. Idempotent — revoking an unshared widget succeeds and reports `deleted: true`.",
 			}),
 		),
 	)
