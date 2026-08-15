@@ -1,4 +1,5 @@
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
+import issue297SchemaSql from "./schema/local-schema-issue-297.sql" with { type: "text" }
 import schemaV1Sql from "./schema/local-schema-v1.sql" with { type: "text" }
 import schemaV2Sql from "./schema/local-schema-v2.sql" with { type: "text" }
 import schemaV3Sql from "./schema/local-schema-v3.sql" with { type: "text" }
@@ -33,6 +34,11 @@ export const CURRENT_SCHEMA_PROJECT_REVISION =
  * fingerprint is the compatibility identity used by the migration. */
 export const ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION =
 	"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91"
+export const ISSUE_297_TARGET_SCHEMA_SQL = issue297SchemaSql
+export const ISSUE_297_TARGET_SCHEMA_FINGERPRINT = fingerprintSchema(issue297SchemaSql)
+export const ISSUE_297_TARGET_SCHEMA_DIGEST = digestSchema(issue297SchemaSql)
+export const ISSUE_297_TARGET_SCHEMA_MANIFEST: LocalSchemaManifest =
+	buildLocalSchemaManifest(issue297SchemaSql)
 export const LOCAL_SCHEMA_SQL = schemaSql
 export const SCHEMA_FINGERPRINT = fingerprintSchema(schemaSql)
 export const SCHEMA_DIGEST = digestSchema(schemaSql)
@@ -137,6 +143,17 @@ export const LEGACY_LOCAL_SCHEMA: LocalSchemaIdentity = {
 	digest: "",
 	chdb: CHDB_VERSION,
 	projectRevision: LEGACY_SCHEMA_PROJECT_REVISION,
+}
+
+/** Fingerprint-only marker written by the issue-297 target build. This is a
+ * second known version-0 physical schema, not an alias for the older legacy
+ * schema: migration routing must retain its truthful source identity. */
+export const ISSUE_297_TARGET_LOCAL_SCHEMA: LocalSchemaIdentity = {
+	version: LEGACY_LOCAL_SCHEMA_VERSION,
+	fingerprint: ISSUE_297_TARGET_SCHEMA_FINGERPRINT,
+	digest: "",
+	chdb: CHDB_VERSION,
+	projectRevision: ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION,
 }
 
 export const identityLabel = (identity: Pick<LocalSchemaIdentity, "version" | "fingerprint">): string =>

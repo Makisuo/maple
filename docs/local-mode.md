@@ -199,7 +199,13 @@ maple schema migrate --yes
 maple schema abandon --yes
 ```
 
-The supported legacy path is a stopped, side-by-side rebuild. It records a
+The supported legacy paths include both known fingerprint-only stores:
+`428701854f9fd30e` and the later issue-297 target `06ac009495b54395`.
+They remain distinct version-0 identities and select separate registry edges;
+Maple never aliases one marker to the other. The issue-297 edge also verifies
+the complete frozen physical schema before it creates a target.
+
+Each supported legacy path is a stopped, side-by-side rebuild. It records a
 cutoff, copies the six authoritative raw telemetry tables with explicit column
 lists and bounded resumable batches, and replays the v1 materialized views from
 rows inside each table's retention horizon. Source/target inventories

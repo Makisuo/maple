@@ -8,11 +8,17 @@
 # reopens the promoted store in a fresh Maple process.
 set -euo pipefail
 
-BUNDLE_DIR="${1:?usage: native-local-store-migration.sh <bundle-dir> [port]}"
+BUNDLE_DIR="${1:?usage: native-local-store-migration.sh <bundle-dir> [port] [legacy|issue297]}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 MAPLE="$BUNDLE_DIR/maple"
 LIBCHDB="${MAPLE_LIBCHDB:-$BUNDLE_DIR/libchdb.so}"
 PORT="${2:-45241}"
+SOURCE_KIND="${3:-legacy}"
+case "$SOURCE_KIND" in
+	legacy) SOURCE_FINGERPRINT="428701854f9fd30e" ;;
+	issue297) SOURCE_FINGERPRINT="06ac009495b54395" ;;
+	*) echo "FAIL: source kind must be legacy or issue297" >&2; exit 1 ;;
+esac
 
 if [[ ! -f "$LIBCHDB" ]]; then
 	echo "SKIP: native local-store migration requires libchdb at $LIBCHDB" >&2
@@ -116,7 +122,7 @@ chmod 600 "$CONFIG"
 
 step "creating legacy v0 source store"
 bounded 60 "legacy source fixture" \
-	env MAPLE_LIBCHDB="$LIBCHDB" bun "$REPO_ROOT/apps/cli/test/native-local-store-migration-fixture.ts" "$DATA" "$CONFIG"
+	env MAPLE_LIBCHDB="$LIBCHDB" bun "$REPO_ROOT/apps/cli/test/native-local-store-migration-fixture.ts" "$DATA" "$CONFIG" "$SOURCE_KIND"
 
 # Install the historical fingerprint-only marker for the v0 physical source.
 # The physical source was created by native chDB; the marker is the only
@@ -124,7 +130,7 @@ bounded 60 "legacy source fixture" \
 step "installing legacy marker"
 CHDB_VERSION="$(bounded 60 "maple --version" env MAPLE_LIBCHDB="$LIBCHDB" "$MAPLE" --version 2>/dev/null | sed -n 's/.*chdb \([^ ]*\).*/\1/p')"
 [[ -n "$CHDB_VERSION" ]] || CHDB_VERSION="v26.1.0"
-printf '%s\n' "{\"chdb\":\"$CHDB_VERSION\",\"maple\":\"native-probe\",\"createdAt\":\"unknown\",\"schema\":\"428701854f9fd30e\"}" >"$ROOT/maple-store-version.json"
+printf '%s\n' "{\"chdb\":\"$CHDB_VERSION\",\"maple\":\"native-probe\",\"createdAt\":\"unknown\",\"schema\":\"$SOURCE_FINGERPRINT\"}" >"$ROOT/maple-store-version.json"
 chmod 600 "$ROOT/maple-store-version.json"
 
 step "running maple schema migrate"
@@ -170,4 +176,6 @@ bounded 60 "service-map ingress bridge probe" \
 rollback="$(sed -n 's/^.*rollback *//p' "$ROOT/migrate.out" | tail -1)"
 [[ -n "$rollback" && -d "$rollback" ]] || fail "native migration did not retain a rollback source"
 [[ -f "$(dirname "$rollback")/maple-store-version.json" ]] || fail "native rollback marker was not retained"
+jq -e --arg fingerprint "$SOURCE_FINGERPRINT" '.formatVersion == 1 and .schema == $fingerprint' \
+	"$(dirname "$rollback")/maple-store-version.json" >/dev/null || fail "native rollback marker lost its truthful source identity"
 echo "PASS: native historical migration, rebuilt aggregates, v3 materialization triggers, fresh reopen, and rollback retention"

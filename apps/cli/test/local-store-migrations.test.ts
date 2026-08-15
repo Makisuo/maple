@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest"
 import {
 	CURRENT_LOCAL_SCHEMA,
 	CURRENT_SCHEMA_PROJECT_REVISION,
+	ISSUE_297_TARGET_LOCAL_SCHEMA,
+	ISSUE_297_TARGET_SCHEMA_DIGEST,
+	ISSUE_297_TARGET_SCHEMA_FINGERPRINT,
+	ISSUE_297_TARGET_SCHEMA_MANIFEST,
 	ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION,
 	LEGACY_LOCAL_SCHEMA,
 	LEGACY_SCHEMA_FINGERPRINT,
 	LOCAL_SCHEMA_MANIFEST,
 	LOCAL_SCHEMA_V1,
+	LOCAL_SCHEMA_V1_MANIFEST,
 	LOCAL_SCHEMA_V2,
 	LOCAL_SCHEMA_V2_MANIFEST,
 	LOCAL_SCHEMA_V3,
@@ -23,6 +28,7 @@ import {
 	executeMigrationModule,
 	executeMigrationChain,
 	identityFromMarker,
+	issue297ToV1Module,
 	legacyToCurrentModule,
 	migrationJournalPath,
 	migrationHistoryPath,
@@ -143,6 +149,42 @@ describe("local migration registry", () => {
 		expect(typeof chain[0]?.apply).toBe("function")
 	})
 
+	it("resolves the issue-297 fingerprint-only store to current without aliasing its identity", () => {
+		expect(ISSUE_297_TARGET_SCHEMA_FINGERPRINT).toBe("06ac009495b54395")
+		expect(ISSUE_297_TARGET_SCHEMA_DIGEST).toBe(
+			"06ac009495b543953779fb91ed3ac1692607d274c34fab4b169bd5674ef8220a",
+		)
+		expect(ISSUE_297_TARGET_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
+		const issueObjects = new Map(
+			ISSUE_297_TARGET_SCHEMA_MANIFEST.objects.map((object) => [object.name, object]),
+		)
+		const v1Objects = new Map(LOCAL_SCHEMA_V1_MANIFEST.objects.map((object) => [object.name, object]))
+		for (const table of [
+			"logs",
+			"traces",
+			"metrics_sum",
+			"metrics_gauge",
+			"metrics_histogram",
+			"metrics_exponential_histogram",
+		])
+			expect(issueObjects.get(table)).toEqual(v1Objects.get(table))
+		expect(
+			[...v1Objects]
+				.filter(([name, object]) => JSON.stringify(object) !== JSON.stringify(issueObjects.get(name)))
+				.map(([name]) => name),
+		).toEqual(["session_events", "session_replays"])
+		const chain = resolveMigrationChain(ISSUE_297_TARGET_LOCAL_SCHEMA, CURRENT_LOCAL_SCHEMA)
+		expect(chain.map((migration) => migration.id)).toEqual([
+			"local-issue297-to-0001-raw-replay",
+			"local-0001-to-0002-error-rollup",
+			"local-0002-to-0003-service-map-ingest-bridge",
+			"local-0003-to-0004-web-events",
+			"local-0004-to-0005-service-overview-minutely",
+		])
+		expect(chain[0]?.from).toEqual(ISSUE_297_TARGET_LOCAL_SCHEMA)
+		expect(validateMigrationRegistry([legacyToCurrentModule, issue297ToV1Module])).toHaveLength(2)
+	})
+
 	it("recognizes legacy and current markers without treating the fingerprint as physical proof", () => {
 		expect(
 			identityFromMarker({
@@ -153,6 +195,15 @@ describe("local migration registry", () => {
 				schema: LEGACY_SCHEMA_FINGERPRINT,
 			}),
 		).toEqual(LEGACY_LOCAL_SCHEMA)
+		expect(
+			identityFromMarker({
+				formatVersion: 1,
+				chdb: "dev",
+				maple: "integration-c3dee692",
+				createdAt: "unknown",
+				schema: ISSUE_297_TARGET_SCHEMA_FINGERPRINT,
+			}),
+		).toEqual({ ...ISSUE_297_TARGET_LOCAL_SCHEMA, chdb: "dev" })
 		expect(
 			identityFromMarker({
 				formatVersion: 2,

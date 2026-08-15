@@ -1,12 +1,21 @@
 import { createHash } from "node:crypto"
+import { applyRawTelemetryRetentionFloor, readRawTelemetryRetentionDays } from "../chdb"
 import {
 	LOCAL_SCHEMA_V1_MANIFEST,
 	LOCAL_SCHEMA_V1_SQL,
+	ISSUE_297_TARGET_LOCAL_SCHEMA,
+	ISSUE_297_TARGET_SCHEMA_MANIFEST,
+	ISSUE_297_TARGET_SCHEMA_SQL,
 	LEGACY_LOCAL_SCHEMA,
 	LOCAL_SCHEMA_V1,
+	type LocalSchemaIdentity,
 } from "../schema-identity"
 import { assertPhysicalSchema } from "../schema-physical"
-import type { LocalSchemaColumn } from "../schema-manifest"
+import {
+	withRawTelemetryRetentionFloor,
+	type LocalSchemaColumn,
+	type LocalSchemaManifest,
+} from "../schema-manifest"
 import type {
 	LocalStoreMigrationModule,
 	MigrationModuleContext,
@@ -113,6 +122,7 @@ export interface PendingBatch {
 export interface LegacyModuleState {
 	readonly module: "local-0000-to-0001-raw-replay"
 	readonly version: 1
+	readonly retentionDays?: number
 }
 
 export interface RawReplayProgress {
@@ -867,22 +877,53 @@ const operations: ReadonlyArray<MigrationOperation> = [
 	},
 ]
 
-const legacyPreflight = async (context: MigrationModuleContext): Promise<LegacyModuleState> => {
+const legacyPreflight = async (
+	context: MigrationModuleContext,
+	sourceSchema?: { readonly sql: string; readonly manifest: LocalSchemaManifest },
+): Promise<LegacyModuleState> => {
 	await context.ensureCapacity()
+	const retentionDays = readRawTelemetryRetentionDays(context.dataDir)
+	if (sourceSchema !== undefined) {
+		const expectedManifest =
+			retentionDays === undefined
+				? sourceSchema.manifest
+				: withRawTelemetryRetentionFloor(
+						sourceSchema.manifest,
+						LEGACY_RAW_TABLES.map((table) => table.name),
+						retentionDays,
+					)
+		await context.openSource((db) => assertPhysicalSchema(db, expectedManifest), {
+			schemaSql: sourceSchema.sql,
+			bootstrapSchema: false,
+		})
+	}
 	await assertKnownSourceObjects(context)
 	for (const table of LEGACY_RAW_TABLES) {
 		if (!(await tableExists(context, "source", table.name)))
 			throw new Error(`source authoritative table is missing: ${table.name}`)
 	}
-	return { module: "local-0000-to-0001-raw-replay", version: 1 } as const
+	return {
+		module: "local-0000-to-0001-raw-replay",
+		version: 1,
+		...(retentionDays === undefined ? {} : { retentionDays }),
+	} as const
 }
 
 const decodeLegacyState = (value: unknown): LegacyModuleState => {
 	const state = record(value, "legacy raw replay state")
-	exactKeys(state, ["module", "version"], "legacy raw replay state")
+	exactKeys(state, ["module", "version", "retentionDays"], "legacy raw replay state")
 	if (state.module !== "local-0000-to-0001-raw-replay" || state.version !== 1)
 		throw new Error("legacy raw replay state has an unsupported module or version")
-	return { module: "local-0000-to-0001-raw-replay", version: 1 }
+	if (
+		state.retentionDays !== undefined &&
+		(typeof state.retentionDays !== "number" || !Number.isSafeInteger(state.retentionDays))
+	)
+		throw new Error("legacy raw replay retentionDays must be an integer")
+	return {
+		module: "local-0000-to-0001-raw-replay",
+		version: 1,
+		...(state.retentionDays === undefined ? {} : { retentionDays: state.retentionDays }),
+	}
 }
 
 const decodeLegacyProgress = (value: unknown): RawReplayProgress | undefined =>
@@ -896,6 +937,13 @@ const legacyPrepareTarget = async (
 		schemaSql: LOCAL_SCHEMA_V1_SQL,
 		bootstrapSchema: true,
 	})
+	const retentionDays = state.retentionDays
+	if (retentionDays !== undefined) {
+		await context.openTarget((db) => applyRawTelemetryRetentionFloor(db, retentionDays), {
+			schemaSql: LOCAL_SCHEMA_V1_SQL,
+			bootstrapSchema: false,
+		})
+	}
 	return state
 }
 
@@ -924,7 +972,7 @@ const legacyApply = async (
 
 const legacyVerify = async (
 	context: MigrationModuleContext,
-	_state: LegacyModuleState,
+	state: LegacyModuleState,
 	progressValue: RawReplayProgress,
 ): Promise<void> => {
 	const progress = asProgress(progressValue)
@@ -941,7 +989,15 @@ const legacyVerify = async (
 		if ((await tableTotalRowCount(context, "target", table.name)) !== targetInventory.rowCount)
 			throw new Error(`target contains rows outside the migration interval for ${table.name}`)
 	}
-	await context.openTarget((db) => assertPhysicalSchema(db, LOCAL_SCHEMA_V1_MANIFEST), {
+	const expectedManifest =
+		state.retentionDays === undefined
+			? LOCAL_SCHEMA_V1_MANIFEST
+			: withRawTelemetryRetentionFloor(
+					LOCAL_SCHEMA_V1_MANIFEST,
+					LEGACY_RAW_TABLES.map((table) => table.name),
+					state.retentionDays,
+				)
+	await context.openTarget((db) => assertPhysicalSchema(db, expectedManifest), {
 		schemaSql: LOCAL_SCHEMA_V1_SQL,
 		bootstrapSchema: false,
 	})
@@ -956,19 +1012,37 @@ const legacyRecover = async (
 	progress: await recoverPendingBatch(context, asProgress(progressValue)),
 })
 
-export const legacyToCurrentModule: LocalStoreMigrationModule<LegacyModuleState, RawReplayProgress> = {
-	id: "local-0000-to-0001-raw-replay",
+const rawReplayModule = (
+	id: string,
+	description: string,
+	from: LocalSchemaIdentity,
+	sourceSchema?: { readonly sql: string; readonly manifest: LocalSchemaManifest },
+): LocalStoreMigrationModule<LegacyModuleState, RawReplayProgress> => ({
+	id,
 	moduleVersion: 1,
-	description: "Rebuild the v1 local store from the known fingerprint-only legacy store",
-	from: LEGACY_LOCAL_SCHEMA,
+	description,
+	from,
 	to: LOCAL_SCHEMA_V1,
 	operations,
 	dispositions: knownDispositions,
 	decodeState: decodeLegacyState,
 	decodeProgress: decodeLegacyProgress,
-	preflight: legacyPreflight,
+	preflight: (context) => legacyPreflight(context, sourceSchema),
 	prepareTarget: legacyPrepareTarget,
 	apply: legacyApply,
 	verify: legacyVerify,
 	recover: legacyRecover,
-}
+})
+
+export const legacyToCurrentModule = rawReplayModule(
+	"local-0000-to-0001-raw-replay",
+	"Rebuild the v1 local store from the known fingerprint-only legacy store",
+	LEGACY_LOCAL_SCHEMA,
+)
+
+export const issue297ToV1Module = rawReplayModule(
+	"local-issue297-to-0001-raw-replay",
+	"Rebuild the v1 local store from the known issue-297 target schema",
+	ISSUE_297_TARGET_LOCAL_SCHEMA,
+	{ sql: ISSUE_297_TARGET_SCHEMA_SQL, manifest: ISSUE_297_TARGET_SCHEMA_MANIFEST },
+)

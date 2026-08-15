@@ -11,6 +11,7 @@ import { dirname, join, relative, resolve } from "node:path"
 import { Chdb } from "./chdb"
 import {
 	CURRENT_LOCAL_SCHEMA,
+	ISSUE_297_TARGET_LOCAL_SCHEMA,
 	LEGACY_LOCAL_SCHEMA,
 	LOCAL_SCHEMA_V1,
 	LOCAL_SCHEMA_SQL,
@@ -32,7 +33,7 @@ import {
 } from "./store-version"
 import { durableJson, durableRename, ensurePrivateDirectory } from "./durable-files"
 import { MAPLE_VERSION } from "../version"
-import { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
+import { issue297ToV1Module, legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
 import { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
 import { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
 import { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
@@ -55,7 +56,7 @@ export {
 	type MigrationStepJournal,
 } from "./local-store-migration-module"
 
-export { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
+export { issue297ToV1Module, legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
 
 const NONTERMINAL_PHASES = new Set<MigrationPhase>([
 	"planned",
@@ -117,6 +118,7 @@ export interface MigrationResult {
 
 export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> = [
 	legacyToCurrentModule,
+	issue297ToV1Module,
 	v1ToV2ErrorRollupModule,
 	v2ToV3ServiceMapIngestBridgeModule,
 	v3ToV4WebEventsModule,
@@ -127,14 +129,23 @@ export const validateMigrationRegistry = (
 	registry: ReadonlyArray<AnyLocalStoreMigrationModule>,
 ): ReadonlyArray<AnyLocalStoreMigrationModule> => {
 	const ids = new Set<string>()
-	const fromVersions = new Set<number>()
+	const fromIdentities: LocalSchemaIdentity[] = []
 	for (const migration of registry) {
 		if (ids.has(migration.id)) throw new Error(`duplicate local migration id: ${migration.id}`)
 		ids.add(migration.id)
-		if (fromVersions.has(migration.from.version)) {
-			throw new Error(`ambiguous local migration path from schema version ${migration.from.version}`)
+		if (
+			fromIdentities.some(
+				(from) =>
+					from.version === migration.from.version &&
+					from.fingerprint === migration.from.fingerprint &&
+					(from.digest === migration.from.digest ||
+						from.digest === "" ||
+						migration.from.digest === ""),
+			)
+		) {
+			throw new Error(`ambiguous local migration path from schema ${identityLabel(migration.from)}`)
 		}
-		fromVersions.add(migration.from.version)
+		fromIdentities.push(migration.from)
 		if (!Number.isInteger(migration.moduleVersion) || migration.moduleVersion < 1) {
 			throw new Error(`migration ${migration.id} has an invalid module version`)
 		}
@@ -192,6 +203,8 @@ export const identityFromMarker = (marker: StoreMarker): LocalSchemaIdentity | n
 	}
 	if (marker.schema === LEGACY_LOCAL_SCHEMA.fingerprint)
 		return { ...LEGACY_LOCAL_SCHEMA, chdb: marker.chdb }
+	if (marker.schema === ISSUE_297_TARGET_LOCAL_SCHEMA.fingerprint)
+		return { ...ISSUE_297_TARGET_LOCAL_SCHEMA, chdb: marker.chdb }
 	if (marker.schema === LOCAL_SCHEMA_V1.fingerprint) return { ...LOCAL_SCHEMA_V1, chdb: marker.chdb }
 	return null
 }
@@ -227,9 +240,7 @@ export const resolveMigrationChain = (
 		)
 	}
 
-	const byFrom = new Map(
-		validateMigrationRegistry(registry).map((migration) => [migration.from.version, migration]),
-	)
+	const validatedRegistry = validateMigrationRegistry(registry)
 	const chain: AnyLocalStoreMigrationModule[] = []
 	let current = source
 	const visited = new Set<number>()
@@ -237,14 +248,21 @@ export const resolveMigrationChain = (
 		if (visited.has(current.version))
 			throw new MigrationResolutionError("missing-path", "local migration registry contains a cycle")
 		visited.add(current.version)
-		const migration = byFrom.get(current.version)
-		if (
-			!migration ||
-			migration.from.fingerprint !== current.fingerprint ||
-			(migration.from.digest !== "" &&
-				current.digest !== "" &&
-				migration.from.digest !== current.digest)
-		) {
+		const candidates = validatedRegistry.filter(
+			(migration) =>
+				migration.from.version === current.version &&
+				migration.from.fingerprint === current.fingerprint &&
+				(migration.from.digest === "" ||
+					current.digest === "" ||
+					migration.from.digest === current.digest),
+		)
+		if (candidates.length > 1)
+			throw new MigrationResolutionError(
+				"missing-path",
+				`multiple registered local migrations match schema ${identityLabel(current)}`,
+			)
+		const migration = candidates[0]
+		if (!migration) {
 			throw new MigrationResolutionError(
 				"missing-path",
 				`no registered local migration from schema ${identityLabel(current)} to v${target.version}`,

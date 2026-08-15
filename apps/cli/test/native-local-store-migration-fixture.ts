@@ -5,11 +5,16 @@
 // by native chDB before the current target schema is created.
 
 import { Chdb } from "../src/server/chdb"
+import { ISSUE_297_TARGET_SCHEMA_SQL } from "../src/server/schema-identity"
 import { markStoreClosedDurable, markStoreOpenDurable } from "../src/server/store-version"
 
-const [dataDir, configFile] = process.argv.slice(2)
+const [dataDir, configFile, sourceKind = "legacy"] = process.argv.slice(2)
 if (!dataDir || !configFile)
-	throw new Error("usage: native-local-store-migration-fixture.ts <data-dir> <config-file>")
+	throw new Error(
+		"usage: native-local-store-migration-fixture.ts <data-dir> <config-file> [legacy|issue297]",
+	)
+if (sourceKind !== "legacy" && sourceKind !== "issue297")
+	throw new Error("source kind must be legacy or issue297")
 
 /** Historical raw-table definitions used by the v0 recovery edge. Derived
  * objects are intentionally omitted: the migration retains them in the
@@ -226,6 +231,8 @@ ORDER BY (OrgId, ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(Time
 TTL toDate(TimeUnix) + INTERVAL 90 DAY;
 `
 
+const sourceSchemaSql = sourceKind === "issue297" ? ISSUE_297_TARGET_SCHEMA_SQL : LEGACY_SCHEMA_SQL
+
 const sharedResourceAttributes = "map('service.namespace', 'payments', 'deployment.environment', 'test')"
 const sharedAttributes =
 	"map('db.system', 'postgresql', 'db.namespace', 'orders', 'db.operation.name', 'SELECT', 'db.query.text', 'SELECT * FROM orders')"
@@ -247,7 +254,7 @@ await markStoreOpenDurable(dataDir)
 let db: Chdb | undefined
 let closed = false
 try {
-	db = Chdb.open({ dataDir, configFile, schemaSql: LEGACY_SCHEMA_SQL })
+	db = Chdb.open({ dataDir, configFile, schemaSql: sourceSchemaSql })
 	for (const statement of insertStatements) db.exec(statement)
 	db.close()
 	db = undefined
