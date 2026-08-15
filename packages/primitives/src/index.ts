@@ -42,6 +42,9 @@ export type DashboardId = Schema.Schema.Type<typeof DashboardId>
 export const DashboardVersionId = MapleUuidId("@maple/DashboardVersionId", "Dashboard Version ID")
 export type DashboardVersionId = Schema.Schema.Type<typeof DashboardVersionId>
 
+export const DashboardShareId = MapleId("@maple/DashboardShareId", "Dashboard Share ID")
+export type DashboardShareId = Schema.Schema.Type<typeof DashboardShareId>
+
 export const DashboardTemplateId = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isTrimmed(),

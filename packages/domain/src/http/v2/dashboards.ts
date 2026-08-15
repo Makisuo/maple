@@ -3,6 +3,7 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema, SchemaGetter } from "effect"
 import {
 	DashboardId,
+	DashboardShareId,
 	DashboardTemplateCategory,
 	DashboardTemplateId,
 	DashboardTemplateParameterKey,
@@ -24,6 +25,12 @@ import {
 	DashboardVersionNotFoundError,
 	DashboardVersionChangeKind,
 } from "../dashboards"
+import {
+	DashboardShareMode,
+	ShareNotConfiguredError,
+	ShareNotFoundError,
+	SharePersistenceError,
+} from "../share"
 import { SORT_DIRECTIONS, STAT_AGGREGATES } from "@maple/widgets/dashboard"
 import {
 	QUERY_RESULT_KINDS,
@@ -41,6 +48,7 @@ import { publicErrors } from "./public-error"
 export const DashboardPublicId = PublicId(PublicIdPrefixes.dashboard, DashboardId)
 export const DashboardVersionPublicId = PublicId(PublicIdPrefixes.dashboardVersion, DashboardVersionId)
 export const DashboardTemplatePublicId = PublicId(PublicIdPrefixes.dashboardTemplate, DashboardTemplateId)
+export const DashboardSharePublicId = PublicId(PublicIdPrefixes.dashboardShare, DashboardShareId)
 
 const optional = <S extends Schema.Top>(schema: S) => Schema.optionalKey(schema)
 
@@ -714,6 +722,74 @@ export const V2DashboardPersesImportResponse = Schema.Struct({
 	warnings: Schema.Array(Schema.String),
 }).annotate({ identifier: "DashboardPersesImport", title: "Perses dashboard import" })
 
+/**
+ * A dashboard's share link, as its owner sees it.
+ *
+ * There is deliberately no `token` field: the raw token is stored only as an
+ * HMAC, so it cannot be read back. It appears exactly once, in the response to
+ * the call that mints it.
+ */
+export const V2DashboardShare = Schema.Struct({
+	id: DashboardSharePublicId,
+	object: Schema.Literal("dashboard_share"),
+	dashboardId: DashboardPublicId,
+	mode: DashboardShareMode,
+	tokenSuffix: Schema.String,
+	createdAt: Timestamp,
+	updatedAt: Timestamp,
+})
+	.pipe(
+		Schema.encodeKeys({
+			dashboardId: "dashboard_id",
+			tokenSuffix: "token_suffix",
+			createdAt: "created_at",
+			updatedAt: "updated_at",
+		}),
+	)
+	.annotate({
+		identifier: "DashboardShare",
+		title: "Dashboard share link",
+		description:
+			"A share link for a dashboard. `mode` is `public` (anyone with the link) or `org` (signed-in members of the owning organization).",
+	})
+export type V2DashboardShare = Schema.Schema.Type<typeof V2DashboardShare>
+
+export const V2DashboardShareCreated = Schema.Struct({
+	share: V2DashboardShare,
+	/**
+	 * The raw share token, shown once and never recoverable. Present only when a
+	 * token was actually minted — creating a share or rotating one. Changing an
+	 * existing share's mode keeps the same link, so it mints nothing and this
+	 * field is absent.
+	 */
+	token: optional(Schema.String),
+}).annotate({
+	identifier: "DashboardShareCreated",
+	title: "Created dashboard share",
+	description:
+		"The share, plus the raw token when one was minted. Store the token on receipt — it cannot be retrieved again.",
+})
+export type V2DashboardShareCreated = Schema.Schema.Type<typeof V2DashboardShareCreated>
+
+export const V2DashboardShareParams = Schema.Struct({
+	mode: DashboardShareMode,
+}).annotate({ identifier: "DashboardShareParams", title: "Dashboard share parameters" })
+export type V2DashboardShareParams = Schema.Schema.Type<typeof V2DashboardShareParams>
+
+export const V2DashboardShareDeleteResponse = Schema.Struct({
+	dashboardId: DashboardPublicId,
+	object: Schema.Literal("dashboard_share"),
+	deleted: Schema.Literal(true),
+})
+	.pipe(Schema.encodeKeys({ dashboardId: "dashboard_id" }))
+	.annotate({
+		identifier: "DashboardShareDeleted",
+		title: "Revoked dashboard share",
+		description:
+			"Returned whether or not a live share existed — revoking an unshared dashboard is a no-op, not an error.",
+	})
+export type V2DashboardShareDeleteResponse = Schema.Schema.Type<typeof V2DashboardShareDeleteResponse>
+
 const DashboardList = ListOf(V2Dashboard).annotate({ identifier: "DashboardList" })
 const DashboardVersionList = ListOf(V2DashboardVersion).annotate({ identifier: "DashboardVersionList" })
 const DashboardTemplateList = ListOf(V2DashboardTemplate).annotate({ identifier: "DashboardTemplateList" })
@@ -726,6 +802,9 @@ const [
 	dashboardConcurrency,
 	dashboardTemplateNotFound,
 	dashboardStoredConfigInvalid,
+	sharePersistence,
+	shareNotConfigured,
+	shareNotFound,
 ] = publicErrors(
 	DashboardVersionNotFoundError,
 	DashboardPersistenceError,
@@ -734,6 +813,9 @@ const [
 	DashboardConcurrencyError,
 	DashboardTemplateNotFoundError,
 	DashboardStoredConfigInvalidError,
+	SharePersistenceError,
+	ShareNotConfiguredError,
+	ShareNotFoundError,
 )
 
 const dashboardCreateErrors = [dashboardValidation, dashboardPersistence] as const
@@ -923,6 +1005,76 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				identifier: "restoreDashboardVersion",
 				summary: "Restore a dashboard version",
 				description: "Restores a historical snapshot as the dashboard's new current version.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.get("retrieveShare", "/:id/share", {
+			params: { id: DashboardPublicId },
+			success: Schema.NullOr(V2DashboardShare),
+			error: [sharePersistence, dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "getDashboardShare",
+				summary: "Retrieve a dashboard's share link",
+				description:
+					"Returns the dashboard's live share link, or `null` when it is not shared. Never returns the raw token.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.put("upsertShare", "/:id/share", {
+			params: { id: DashboardPublicId },
+			payload: V2DashboardShareParams,
+			success: V2DashboardShareCreated,
+			error: [
+				sharePersistence,
+				shareNotConfigured,
+				dashboardPersistence,
+				dashboardNotFound,
+				dashboardStoredConfigInvalid,
+			],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "upsertDashboardShare",
+				summary: "Share a dashboard",
+				description:
+					"Creates the dashboard's share link, or changes the mode of the one it already has. The raw token is returned only when a new link is minted — changing the mode of an existing share keeps the same link and returns no token.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("rotateShare", "/:id/share/rotate", {
+			params: { id: DashboardPublicId },
+			success: V2DashboardShareCreated,
+			error: [
+				sharePersistence,
+				shareNotConfigured,
+				shareNotFound,
+				dashboardPersistence,
+				dashboardNotFound,
+				dashboardStoredConfigInvalid,
+			],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "rotateDashboardShare",
+				summary: "Regenerate a dashboard's share link",
+				description:
+					"Revokes the current link and mints a replacement in one step. The previous URL stops resolving immediately.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.delete("revokeShare", "/:id/share", {
+			params: { id: DashboardPublicId },
+			success: V2DashboardShareDeleteResponse,
+			error: [sharePersistence, dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "revokeDashboardShare",
+				summary: "Stop sharing a dashboard",
+				description:
+					"Revokes the dashboard's share link. Idempotent — revoking an unshared dashboard succeeds and reports `deleted: true`.",
 			}),
 		),
 	)

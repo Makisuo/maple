@@ -1,0 +1,390 @@
+/**
+ * Share links for dashboards.
+ *
+ * At most one live share per dashboard, enforced by a partial unique index on
+ * `(org_id, dashboard_id) WHERE revoked_at IS NULL`. Revoke and rotate are the
+ * same underlying move — stamp `revoked_at`, and for a rotate insert a fresh
+ * row in the same transaction — so a link can never be resurrected and two
+ * links can never be live at once.
+ *
+ * The raw token exists only in the response to `create` and `rotate`. Storage
+ * keeps an HMAC and a short suffix, so nothing here can hand a caller back a
+ * link they failed to copy.
+ */
+import {
+	DashboardId,
+	DashboardShare,
+	DashboardShareCreated,
+	DashboardShareId,
+	type DashboardShareMode,
+	DashboardShareTombstone,
+	IsoDateTimeString,
+	OrgId,
+	ShareNotConfiguredError,
+	ShareNotFoundError,
+	SharePersistenceError,
+	UserId,
+} from "@maple/domain/http"
+import { dashboardShares, generateShareToken, hashShareToken, shareTokenSuffix } from "@maple/db"
+import { and, eq, isNull } from "drizzle-orm"
+import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { randomUUID } from "node:crypto"
+import { Database } from "@/platform/DatabaseLive"
+import { dateToMs, msToDate } from "@/platform/time"
+import { Env } from "@/platform/Env"
+
+const decodeShareIdSync = Schema.decodeUnknownSync(DashboardShareId)
+const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
+
+const toPersistenceError = (error: unknown) =>
+	new SharePersistenceError({
+		message: error instanceof Error ? error.message : "Share persistence failed",
+		cause: error,
+	})
+
+interface ShareRowShape {
+	readonly id: DashboardShareId
+	readonly orgId: OrgId
+	readonly dashboardId: DashboardId
+	readonly mode: DashboardShareMode
+	readonly tokenSuffix: string
+	readonly createdAt: Date
+	readonly updatedAt: Date
+}
+
+const toDashboardShare = (row: ShareRowShape) =>
+	new DashboardShare({
+		id: row.id,
+		dashboardId: row.dashboardId,
+		mode: row.mode,
+		tokenSuffix: row.tokenSuffix,
+		createdAt: decodeIsoDateTimeStringSync(new Date(dateToMs(row.createdAt)).toISOString()),
+		updatedAt: decodeIsoDateTimeStringSync(new Date(dateToMs(row.updatedAt)).toISOString()),
+	})
+
+/** Columns every read here projects. Keeps `token_hash` out of memory by default. */
+const shareColumns = {
+	id: dashboardShares.id,
+	orgId: dashboardShares.orgId,
+	dashboardId: dashboardShares.dashboardId,
+	mode: dashboardShares.mode,
+	tokenSuffix: dashboardShares.tokenSuffix,
+	createdAt: dashboardShares.createdAt,
+	updatedAt: dashboardShares.updatedAt,
+} as const
+
+export interface SharedDashboardServiceApi {
+	/** The live share for a dashboard, or `None`. Never includes the raw token. */
+	readonly get: (
+		orgId: OrgId,
+		dashboardId: DashboardId,
+	) => Effect.Effect<Option.Option<DashboardShare>, SharePersistenceError>
+
+	/**
+	 * Create the dashboard's share, or change the mode of the one it already
+	 * has. Returns a raw token only when one was minted.
+	 */
+	readonly upsert: (
+		orgId: OrgId,
+		userId: UserId,
+		dashboardId: DashboardId,
+		mode: DashboardShareMode,
+	) => Effect.Effect<DashboardShareCreated, SharePersistenceError | ShareNotConfiguredError>
+
+	/** Revoke the current link and mint a replacement in the same transaction. */
+	readonly rotate: (
+		orgId: OrgId,
+		userId: UserId,
+		dashboardId: DashboardId,
+	) => Effect.Effect<
+		DashboardShareCreated,
+		SharePersistenceError | ShareNotConfiguredError | ShareNotFoundError
+	>
+
+	/** Stop sharing. Idempotent: revoking an unshared dashboard is not an error. */
+	readonly revoke: (
+		orgId: OrgId,
+		dashboardId: DashboardId,
+	) => Effect.Effect<DashboardShareTombstone, SharePersistenceError>
+
+	/**
+	 * Resolve a raw token to its live share.
+	 *
+	 * Fails with `ShareNotFoundError` for unknown *and* revoked tokens alike —
+	 * the query itself filters `revoked_at is null`, so the two cases are the
+	 * same single indexed lookup and offer no timing or body distinction.
+	 */
+	readonly resolveByToken: (
+		token: string,
+	) => Effect.Effect<
+		{ readonly share: DashboardShare; readonly orgId: OrgId },
+		SharePersistenceError | ShareNotConfiguredError | ShareNotFoundError
+	>
+}
+
+export class SharedDashboardService extends Context.Service<
+	SharedDashboardService,
+	SharedDashboardServiceApi
+>()("@maple/api/services/SharedDashboardService", {
+	make: Effect.gen(function* () {
+		const database = yield* Database
+		const env = yield* Env
+
+		/**
+		 * The HMAC key is optional in `Env` so the many suites that never touch
+		 * sharing need no stub; a deployment supplies it via `alchemy.run.ts`.
+		 * Absent, every operation fails here rather than hashing under a fallback,
+		 * which would mint links that stop resolving the moment the real key lands.
+		 */
+		const requireHmacKey = Effect.suspend(() =>
+			Option.match(env.MAPLE_SHARE_TOKEN_HMAC_KEY, {
+				onNone: () => Effect.fail(new ShareNotConfiguredError()),
+				onSome: (key) => Effect.succeed(Redacted.value(key)),
+			}),
+		)
+
+		const loadLive = (orgId: OrgId, dashboardId: DashboardId) =>
+			database
+				.execute((db) =>
+					db
+						.select(shareColumns)
+						.from(dashboardShares)
+						.where(
+							and(
+								eq(dashboardShares.orgId, orgId),
+								eq(dashboardShares.dashboardId, dashboardId),
+								isNull(dashboardShares.revokedAt),
+							),
+						),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+
+		const get = Effect.fn("SharedDashboardService.get")(function* (
+			orgId: OrgId,
+			dashboardId: DashboardId,
+		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.dashboard.id": dashboardId })
+			const rows = yield* loadLive(orgId, dashboardId)
+			const row = rows[0]
+			return row === undefined ? Option.none() : Option.some(toDashboardShare(row))
+		})
+
+		/** Mint a token and insert the row. Shared by create and rotate. */
+		const mintRow = (
+			orgId: OrgId,
+			userId: UserId,
+			dashboardId: DashboardId,
+			mode: DashboardShareMode,
+			hmacKey: string,
+			now: number,
+		) => {
+			const rawToken = generateShareToken()
+			return {
+				rawToken,
+				values: {
+					orgId,
+					id: decodeShareIdSync(`dshare_${randomUUID()}`),
+					dashboardId,
+					mode,
+					tokenHash: hashShareToken(rawToken, hmacKey),
+					tokenSuffix: shareTokenSuffix(rawToken),
+					createdAt: msToDate(now),
+					createdBy: userId,
+					updatedAt: msToDate(now),
+					updatedBy: userId,
+					revokedAt: null,
+				},
+			}
+		}
+
+		const upsert = Effect.fn("SharedDashboardService.upsert")(function* (
+			orgId: OrgId,
+			userId: UserId,
+			dashboardId: DashboardId,
+			mode: DashboardShareMode,
+		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"tenant.userId": userId,
+				"maple.dashboard.id": dashboardId,
+				"maple.share.mode": mode,
+			})
+			const hmacKey = yield* requireHmacKey
+			const now = yield* Clock.currentTimeMillis
+
+			const existingRows = yield* loadLive(orgId, dashboardId)
+			const existing = existingRows[0]
+
+			// Already shared: a mode change must keep the same link working, so this
+			// updates in place rather than rotating. No token is minted, and none is
+			// returned — the caller already has it, and we could not produce it again
+			// even if they had lost it.
+			if (existing !== undefined) {
+				const updated = yield* database
+					.execute((db) =>
+						db
+							.update(dashboardShares)
+							.set({ mode, updatedAt: msToDate(now), updatedBy: userId })
+							.where(
+								and(
+									eq(dashboardShares.orgId, orgId),
+									eq(dashboardShares.id, existing.id),
+									isNull(dashboardShares.revokedAt),
+								),
+							)
+							.returning(shareColumns),
+					)
+					.pipe(Effect.mapError(toPersistenceError))
+
+				const row = updated[0]
+				if (row === undefined) {
+					return yield* Effect.fail(
+						new SharePersistenceError({ message: "Share disappeared while updating its mode" }),
+					)
+				}
+				yield* Effect.annotateCurrentSpan("maple.share.id", row.id)
+				return new DashboardShareCreated({ share: toDashboardShare(row) })
+			}
+
+			const { rawToken, values } = mintRow(orgId, userId, dashboardId, mode, hmacKey, now)
+			const inserted = yield* database
+				.execute((db) => db.insert(dashboardShares).values(values).returning(shareColumns))
+				.pipe(Effect.mapError(toPersistenceError))
+
+			const row = inserted[0]
+			if (row === undefined) {
+				return yield* Effect.fail(
+					new SharePersistenceError({ message: "Share insert returned no row" }),
+				)
+			}
+			yield* Effect.annotateCurrentSpan("maple.share.id", row.id)
+			return new DashboardShareCreated({ share: toDashboardShare(row), token: rawToken })
+		})
+
+		const rotate = Effect.fn("SharedDashboardService.rotate")(function* (
+			orgId: OrgId,
+			userId: UserId,
+			dashboardId: DashboardId,
+		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"tenant.userId": userId,
+				"maple.dashboard.id": dashboardId,
+			})
+			const hmacKey = yield* requireHmacKey
+			const now = yield* Clock.currentTimeMillis
+
+			const existingRows = yield* loadLive(orgId, dashboardId)
+			const existing = existingRows[0]
+			if (existing === undefined) {
+				return yield* Effect.fail(new ShareNotFoundError())
+			}
+
+			const { rawToken, values } = mintRow(orgId, userId, dashboardId, existing.mode, hmacKey, now)
+
+			// One transaction: the old row must stop resolving at the same instant the
+			// new one starts. Revoke first so the partial unique index — one live row
+			// per dashboard — is satisfied when the insert lands.
+			const inserted = yield* database
+				.execute((db) =>
+					db.transaction(async (tx) => {
+						await tx
+							.update(dashboardShares)
+							.set({ revokedAt: msToDate(now), updatedAt: msToDate(now), updatedBy: userId })
+							.where(and(eq(dashboardShares.orgId, orgId), eq(dashboardShares.id, existing.id)))
+						return tx.insert(dashboardShares).values(values).returning(shareColumns)
+					}),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+
+			const row = inserted[0]
+			if (row === undefined) {
+				return yield* Effect.fail(
+					new SharePersistenceError({ message: "Share rotate returned no row" }),
+				)
+			}
+			yield* Effect.annotateCurrentSpan("maple.share.id", row.id)
+			return new DashboardShareCreated({ share: toDashboardShare(row), token: rawToken })
+		})
+
+		const revoke = Effect.fn("SharedDashboardService.revoke")(function* (
+			orgId: OrgId,
+			dashboardId: DashboardId,
+		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.dashboard.id": dashboardId })
+			const now = yield* Clock.currentTimeMillis
+
+			const revoked = yield* database
+				.execute((db) =>
+					db
+						.update(dashboardShares)
+						.set({ revokedAt: msToDate(now), updatedAt: msToDate(now) })
+						.where(
+							and(
+								eq(dashboardShares.orgId, orgId),
+								eq(dashboardShares.dashboardId, dashboardId),
+								isNull(dashboardShares.revokedAt),
+							),
+						)
+						.returning({ id: dashboardShares.id }),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+
+			// Idempotent by design: "stop sharing" on a dashboard that was never
+			// shared is a no-op, not a 404. The dialog can call it without first
+			// checking, and a double-click cannot produce an error.
+			return new DashboardShareTombstone({ dashboardId, revoked: revoked.length > 0 })
+		})
+
+		const resolveByToken = Effect.fn("SharedDashboardService.resolveByToken")(function* (token: string) {
+			const hmacKey = yield* requireHmacKey
+			const tokenHash = hashShareToken(token, hmacKey)
+
+			const rows = yield* database
+				.execute((db) =>
+					db
+						.select(shareColumns)
+						.from(dashboardShares)
+						.where(
+							and(eq(dashboardShares.tokenHash, tokenHash), isNull(dashboardShares.revokedAt)),
+						),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+
+			const row = rows[0]
+			if (row === undefined) {
+				return yield* Effect.fail(new ShareNotFoundError())
+			}
+
+			// The share id and org, never the token or its hash.
+			yield* Effect.annotateCurrentSpan({
+				"maple.share.id": row.id,
+				orgId: row.orgId,
+				"maple.dashboard.id": row.dashboardId,
+			})
+			return { share: toDashboardShare(row), orgId: row.orgId }
+		})
+
+		return { get, upsert, rotate, revoke, resolveByToken } satisfies SharedDashboardServiceApi
+	}),
+}) {
+	static readonly layer = Layer.effect(this, this.make)
+
+	static readonly get = (orgId: OrgId, dashboardId: DashboardId) =>
+		this.use((service) => service.get(orgId, dashboardId))
+
+	static readonly upsert = (
+		orgId: OrgId,
+		userId: UserId,
+		dashboardId: DashboardId,
+		mode: DashboardShareMode,
+	) => this.use((service) => service.upsert(orgId, userId, dashboardId, mode))
+
+	static readonly rotate = (orgId: OrgId, userId: UserId, dashboardId: DashboardId) =>
+		this.use((service) => service.rotate(orgId, userId, dashboardId))
+
+	static readonly revoke = (orgId: OrgId, dashboardId: DashboardId) =>
+		this.use((service) => service.revoke(orgId, dashboardId))
+
+	static readonly resolveByToken = (token: string) => this.use((service) => service.resolveByToken(token))
+}

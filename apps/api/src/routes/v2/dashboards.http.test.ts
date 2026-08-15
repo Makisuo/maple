@@ -3,12 +3,13 @@ import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
-import { DashboardTemplatePublicId, MapleApiV2 } from "@maple/domain/http/v2"
+import { DashboardPublicId, DashboardTemplatePublicId, MapleApiV2 } from "@maple/domain/http/v2"
 import { Env } from "@/platform/Env"
-import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
@@ -22,6 +23,8 @@ import {
 } from "./v2-test-support"
 
 const createdDbs: TestDb[] = []
+const encodeDashboardPublicId = Schema.encodeUnknownSync(DashboardPublicId)
+const USER_OTHER = Schema.decodeUnknownSync(UserId)("user_other_org")
 afterEach(() => cleanupTestDbs(createdDbs))
 
 const testConfig = () =>
@@ -36,9 +39,12 @@ const testConfig = () =>
 			MAPLE_DEFAULT_ORG_ID: "default",
 			MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+			MAPLE_SHARE_TOKEN_HMAC_KEY: "maple-test-share-secret",
 			INTERNAL_SERVICE_TOKEN: "test-internal-token",
 		}),
 	)
+
+type Harness = ReturnType<typeof makeHarness>
 
 const makeHarness = () => {
 	const testDb = createTestDb(createdDbs)
@@ -47,6 +53,7 @@ const makeHarness = () => {
 		ApiKeysService.layer,
 		AuthService.layer,
 		DashboardPersistenceService.layer,
+		SharedDashboardService.layer,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
@@ -96,6 +103,8 @@ const makeHarness = () => {
 		bootstrapKey,
 		request,
 		testDb,
+		runtime,
+		ORG,
 		dispose: async () => {
 			await disposeHandler()
 			await runtime.dispose()
@@ -391,6 +400,237 @@ describe("v2 dashboards over HTTP", () => {
 		expect(response.body.error.param).toContain("fill_nulls")
 		expect(response.body.error.message).toContain('widget "error-rate"')
 		expect(response.body.error.message).toContain("true")
+
+		await harness.dispose()
+	})
+})
+
+describe("v2 dashboard shares", () => {
+	const createDashboard = async (harness: Harness, key: string) => {
+		const created = await harness.request("POST", "/v2/dashboards", key, {
+			name: "Shared board",
+			time_range: { type: "relative", value: "12h" },
+			widgets: [],
+			variables: [],
+		})
+		expect(created.status).toBe(200)
+		return created.body.id as string
+	}
+
+	/**
+	 * Resolve a raw token the way the public share endpoint will, in Phase 3.
+	 *
+	 * Returns the dashboard's *public* id so callers can compare against what the
+	 * v2 API handed them — the share row stores the internal id, and the two are
+	 * different strings for the same dashboard.
+	 */
+	const resolve = (harness: Harness, token: string) =>
+		harness.runtime.runPromise(
+			SharedDashboardService.resolveByToken(token).pipe(
+				Effect.map((resolved) => encodeDashboardPublicId(resolved.share.dashboardId)),
+				Effect.catchTag("@maple/http/errors/ShareNotFoundError", () =>
+					Effect.succeed("__not_found__"),
+				),
+			),
+		)
+
+	it("mints a token once, and never hands it back", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+
+		const unshared = await harness.request("GET", `/v2/dashboards/${id}/share`, key.secret)
+		expect(unshared.status).toBe(200)
+		expect(unshared.body).toBeNull()
+
+		const shared = await harness.request("PUT", `/v2/dashboards/${id}/share`, key.secret, {
+			mode: "public",
+		})
+		expect(shared.status).toBe(200)
+		expect(shared.body.share.object).toBe("dashboard_share")
+		expect(shared.body.share.id).toMatch(/^dshr_/)
+		expect(shared.body.share.mode).toBe("public")
+		expect(typeof shared.body.token).toBe("string")
+
+		const token: string = shared.body.token
+		expect(shared.body.share.token_suffix).toBe(token.slice(-6))
+
+		// The whole point of hashing at rest: a caller who lost the token cannot
+		// recover it, from this endpoint or any other.
+		const fetched = await harness.request("GET", `/v2/dashboards/${id}/share`, key.secret)
+		expect(fetched.status).toBe(200)
+		expect(fetched.body.id).toBe(shared.body.share.id)
+		expect("token" in fetched.body).toBe(false)
+		expect(JSON.stringify(fetched.body)).not.toContain(token)
+
+		expect(await resolve(harness, token)).toBe(id)
+
+		await harness.dispose()
+	})
+
+	it("keeps the same link when only the mode changes", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+
+		const first = await harness.request("PUT", `/v2/dashboards/${id}/share`, key.secret, {
+			mode: "public",
+		})
+		const token: string = first.body.token
+
+		const switched = await harness.request("PUT", `/v2/dashboards/${id}/share`, key.secret, {
+			mode: "org",
+		})
+		expect(switched.status).toBe(200)
+		expect(switched.body.share.mode).toBe("org")
+		// No new token: a link already pasted somewhere must keep working, and the
+		// absent field is what tells the dialog not to show a "copy your new link"
+		// affordance.
+		expect("token" in switched.body).toBe(false)
+		expect(switched.body.share.id).toBe(first.body.share.id)
+		expect(await resolve(harness, token)).toBe(id)
+
+		await harness.dispose()
+	})
+
+	it("rotates: the old link stops resolving the moment the new one starts", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+
+		const first = await harness.request("PUT", `/v2/dashboards/${id}/share`, key.secret, {
+			mode: "public",
+		})
+		const oldToken: string = first.body.token
+
+		const rotated = await harness.request("POST", `/v2/dashboards/${id}/share/rotate`, key.secret)
+		expect(rotated.status).toBe(200)
+		const newToken: string = rotated.body.token
+		expect(newToken).not.toBe(oldToken)
+		expect(rotated.body.share.mode).toBe("public")
+
+		expect(await resolve(harness, oldToken)).toBe("__not_found__")
+		expect(await resolve(harness, newToken)).toBe(id)
+
+		// Rotating twice must not leave two live rows behind — the partial unique
+		// index is the guarantee, this asserts it holds in practice.
+		const second = await harness.request("POST", `/v2/dashboards/${id}/share/rotate`, key.secret)
+		expect(second.status).toBe(200)
+		expect(await resolve(harness, newToken)).toBe("__not_found__")
+		expect(await resolve(harness, second.body.token)).toBe(id)
+
+		const live = await queryFirstRow<{ count: number }>(
+			harness.testDb,
+			"select count(*)::int as count from dashboard_shares where revoked_at is null",
+		)
+		expect(live?.count).toBe(1)
+
+		await harness.dispose()
+	})
+
+	it("rotating an unshared dashboard reports no such share", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+
+		const rotated = await harness.request("POST", `/v2/dashboards/${id}/share/rotate`, key.secret)
+		expect(rotated.status).toBe(404)
+
+		await harness.dispose()
+	})
+
+	it("revokes idempotently, and the link stops resolving", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+
+		const shared = await harness.request("PUT", `/v2/dashboards/${id}/share`, key.secret, {
+			mode: "public",
+		})
+		const token: string = shared.body.token
+
+		const revoked = await harness.request("DELETE", `/v2/dashboards/${id}/share`, key.secret)
+		expect(revoked.status).toBe(200)
+		expect(revoked.body.deleted).toBe(true)
+		expect(await resolve(harness, token)).toBe("__not_found__")
+		expect((await harness.request("GET", `/v2/dashboards/${id}/share`, key.secret)).body).toBeNull()
+
+		// "Stop sharing" is a statement about the end state, so a second call — or a
+		// double-clicked button — succeeds rather than 404ing.
+		const again = await harness.request("DELETE", `/v2/dashboards/${id}/share`, key.secret)
+		expect(again.status).toBe(200)
+		expect(again.body.deleted).toBe(true)
+
+		await harness.dispose()
+	})
+
+	it("stops resolving when the dashboard itself is deleted", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+
+		const shared = await harness.request("PUT", `/v2/dashboards/${id}/share`, key.secret, {
+			mode: "public",
+		})
+		const token: string = shared.body.token
+		expect(await resolve(harness, token)).toBe(id)
+
+		const deleted = await harness.request("DELETE", `/v2/dashboards/${id}`, key.secret)
+		expect(deleted.status).toBe(200)
+
+		// A live link to a deleted dashboard is the failure mode the foreign key's
+		// ON DELETE CASCADE exists to prevent.
+		expect(await resolve(harness, token)).toBe("__not_found__")
+
+		await harness.dispose()
+	})
+
+	it("enforces dashboard scopes on share management", async () => {
+		const harness = makeHarness()
+		const readOnly = await harness.bootstrapKey(["dashboards:read"])
+		const writer = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, writer.secret)
+
+		// Reading a share is a read; every mutation is a write. The scope is derived
+		// mechanically from method + path, so this guards that derivation too.
+		expect((await harness.request("GET", `/v2/dashboards/${id}/share`, readOnly.secret)).status).toBe(200)
+		expect(
+			(await harness.request("PUT", `/v2/dashboards/${id}/share`, readOnly.secret, { mode: "public" }))
+				.status,
+		).toBe(403)
+		expect(
+			(await harness.request("POST", `/v2/dashboards/${id}/share/rotate`, readOnly.secret)).status,
+		).toBe(403)
+		expect((await harness.request("DELETE", `/v2/dashboards/${id}/share`, readOnly.secret)).status).toBe(
+			403,
+		)
+
+		await harness.dispose()
+	})
+
+	it("cannot reach a dashboard belonging to another org", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+		const id = await createDashboard(harness, key.secret)
+		await harness.request("PUT", `/v2/dashboards/${id}/share`, key.secret, { mode: "public" })
+
+		const foreign = await harness.runtime.runPromise(
+			Effect.gen(function* () {
+				const service = yield* ApiKeysService
+				return yield* service.create(Schema.decodeUnknownSync(OrgId)("org_other"), USER_OTHER, {
+					name: "other-org",
+					scopes: ["dashboards:write"],
+				})
+			}),
+		)
+
+		// The dashboard load is org-scoped, so another org's key cannot even learn
+		// that this dashboard is shared.
+		expect((await harness.request("GET", `/v2/dashboards/${id}/share`, foreign.secret)).status).toBe(404)
+		expect(
+			(await harness.request("PUT", `/v2/dashboards/${id}/share`, foreign.secret, { mode: "public" }))
+				.status,
+		).toBe(404)
 
 		await harness.dispose()
 	})

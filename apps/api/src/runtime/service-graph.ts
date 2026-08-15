@@ -21,6 +21,7 @@ import { OAuthStateRepository } from "@/services/auth/OAuthStateRepository"
 import { DailySpendService } from "@/services/billing/DailySpendService"
 import { AutumnClient } from "@/services/billing/autumn-http"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { DigestService } from "@/services/digest/DigestService"
 import { AiTriageService } from "@/services/errors/AiTriageService"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
@@ -80,6 +81,7 @@ const CoreServicesLive = Layer.mergeAll(
 	McpOAuthService.layer,
 	CloudflareOAuthService.layer,
 	DashboardPersistenceService.layer,
+	SharedDashboardService.layer,
 	HazelOAuthService.layer,
 	OnboardingService.layer,
 	OrgIngestKeysService.layer,
