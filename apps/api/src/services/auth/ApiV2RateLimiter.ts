@@ -50,8 +50,7 @@ export const makeApiV2RateLimitKey = (partition: string, key: string): string =>
 export const apiV2RateLimitKey = (keyId: ApiKeyId): string => `v2:${keyId}`
 
 /** Share links are limited per token, and separately per client IP. */
-export const shareTokenRateLimitKey = (tokenHashPrefix: string): string =>
-	`share:${tokenHashPrefix}`
+export const shareTokenRateLimitKey = (tokenHashPrefix: string): string => `share:${tokenHashPrefix}`
 export const shareIpRateLimitKey = (ip: string): string => `shareip:${ip}`
 
 const warnFailedOpen = (reason: "binding_missing" | "partition_missing" | "binding_error", cause?: unknown) =>

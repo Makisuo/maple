@@ -105,6 +105,42 @@ describe("redactForShare", () => {
 		expect(redacted?.widgets[0]?.tabId).toBeUndefined()
 	})
 
+	it("narrows a single-chart share's variables to the ones that chart uses", () => {
+		// The board's variable list is the board's. A chart link that shipped it
+		// whole would publish names, labels, option values and attribute keys
+		// belonging to tiles the viewer cannot see.
+		const withVariables = {
+			...document,
+			widgets: [
+				{
+					id: "w-scoped",
+					visualization: "line" as const,
+					display: {},
+					layout: { x: 0, y: 0, w: 6, h: 4 },
+					dataSource: {
+						kind: "query",
+						resultShape: "timeseries",
+						queries: [{ id: "q1", whereClause: "service.name = '$service'" }],
+					},
+				},
+			],
+			variables: [
+				{ name: "service", type: "textbox" as const },
+				{ name: "tier", type: "custom" as const, options: [{ value: "enterprise-only" }] },
+			],
+		}
+
+		const redacted = redactForShare(withVariables, "w-scoped")
+
+		expect(redacted?.variables).toEqual([{ name: "service", type: "textbox" }])
+		expect(JSON.stringify(redacted)).not.toContain("enterprise-only")
+	})
+
+	it("keeps every variable on a whole-board share", () => {
+		const redacted = redactForShare(document)
+		expect(redacted?.variables).toEqual([{ name: "service", type: "textbox" }])
+	})
+
 	it("reports an absent widget as no share rather than an empty board", () => {
 		expect(redactForShare(document, "w-missing")).toBeNull()
 	})

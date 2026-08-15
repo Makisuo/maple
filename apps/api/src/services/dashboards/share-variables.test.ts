@@ -105,6 +105,29 @@ describe("resolveShareVariables", () => {
 		const bad = await run(resolveShareVariables([definition], { env: "secret" }, { env: ["prod"] }))
 		expect(bad._tag).toBe("Failure")
 	})
+
+	it("falls back to the free-text checks when a query variable has no resolved options", async () => {
+		// The share route resolves no option lists, so this — not the case above —
+		// is how every query variable actually arrives. Treating the empty list as
+		// exhaustive rejected the board's own default and blanked the whole batch.
+		const definition = { name: "env", type: "query" as const, defaultValue: "production" }
+
+		const byDefault = await run(resolveShareVariables([definition], {}))
+		expect(byDefault._tag).toBe("Success")
+		if (byDefault._tag === "Success") expect(byDefault.success.env?.value).toBe("production")
+
+		const submitted = await run(resolveShareVariables([definition], { env: "staging" }))
+		expect(submitted._tag).toBe("Success")
+	})
+
+	it("still refuses a query variable value that rewrites a clause", async () => {
+		// The fallback is a weaker check, not an absent one.
+		const definition = { name: "env", type: "query" as const }
+		const result = await run(
+			resolveShareVariables([definition], { env: "a AND status = 500" }, {}, ["environment = $env"]),
+		)
+		expect(result._tag).toBe("Failure")
+	})
 })
 
 describe("preservesClauseStructure", () => {

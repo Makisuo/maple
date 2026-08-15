@@ -24,6 +24,12 @@
  *      assertion. The charset is a guess about a grammar this module does not
  *      own; the clause count is a direct check on the thing that must not
  *      change. Either alone would be weaker than both.
+ *
+ * `query` variables sit across both. Their options are whatever the warehouse
+ * returns right now, so the caller may or may not have resolved a list: with a
+ * list they get defence 1, without one they get defence 2. What they must never
+ * get is an *empty* list treated as an exhaustive one — that rejects every
+ * value including the board's own stored default, which blanks the share.
  */
 import { splitWhereClause } from "@maple/domain/where-clause"
 import { ALL_VALUE, type ResolvedVariable, type VariableValues } from "@maple/query-engine"
@@ -120,18 +126,34 @@ export const resolveShareVariables = Effect.fn("resolveShareVariables")(function
 			continue
 		}
 
+		/** The free-text defence: conservative charset, then the direct clause check. */
+		const passesFreeTextChecks = () => {
+			if (!TEXTBOX_ALLOWED.test(value)) return false
+			return whereClauseTemplates.every((template) => preservesClauseStructure(template, value))
+		}
+
 		switch (definition.type) {
-			case "custom":
-			case "query": {
+			case "custom": {
 				if (!options.includes(value)) return yield* invalid(definition.name)
 				break
 			}
+			case "query": {
+				// A query variable's options are whatever the warehouse currently
+				// returns for its facet or attribute — not something the stored
+				// document carries. When the caller resolved that list, hold the value
+				// to it, which is the strong check. When it did not, fall back to the
+				// free-text defence rather than rejecting everything: an empty list is
+				// "unknown", not "nothing is allowed", and treating the two the same
+				// rejected the board's own stored `defaultValue` and blanked the share.
+				if (options.length > 0) {
+					if (!options.includes(value)) return yield* invalid(definition.name)
+					break
+				}
+				if (!passesFreeTextChecks()) return yield* invalid(definition.name)
+				break
+			}
 			case "textbox": {
-				if (!TEXTBOX_ALLOWED.test(value)) return yield* invalid(definition.name)
-				const rewritesAClause = whereClauseTemplates.some(
-					(template) => !preservesClauseStructure(template, value),
-				)
-				if (rewritesAClause) return yield* invalid(definition.name)
+				if (!passesFreeTextChecks()) return yield* invalid(definition.name)
 				break
 			}
 		}

@@ -31,8 +31,12 @@ import { and, eq, isNull } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import { Database } from "@/platform/DatabaseLive"
+import { postgresSqlState } from "@/platform/postgres-errors"
 import { dateToMs, msToDate } from "@/platform/time"
 import { Env } from "@/platform/Env"
+
+/** SQLSTATE for `unique_violation` — here, `dashboard_shares_live_unq`. */
+const UNIQUE_VIOLATION = "23505"
 
 const decodeShareIdSync = Schema.decodeUnknownSync(DashboardShareId)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
@@ -135,6 +139,7 @@ export interface SharedDashboardServiceApi {
 	/** Stop sharing a scope. Idempotent: revoking an unshared scope is not an error. */
 	readonly revoke: (
 		orgId: OrgId,
+		userId: UserId,
 		scope: ShareScope,
 	) => Effect.Effect<DashboardShareTombstone, SharePersistenceError>
 
@@ -275,46 +280,78 @@ export class SharedDashboardService extends Context.Service<
 			const hmacKey = yield* requireHmacKey
 			const now = yield* Clock.currentTimeMillis
 
-			const existingRows = yield* loadLive(orgId, scope)
-			const existing = existingRows[0]
-
 			// Already shared: a mode change must keep the same link working, so this
 			// updates in place rather than rotating. No token is minted, and none is
 			// returned — the caller already has it, and we could not produce it again
 			// even if they had lost it.
-			if (existing !== undefined) {
-				const updated = yield* database
-					.execute((db) =>
-						db
-							.update(dashboardShares)
-							.set({ mode, updatedAt: msToDate(now), updatedBy: userId })
-							.where(
-								and(
-									eq(dashboardShares.orgId, orgId),
-									eq(dashboardShares.id, existing.id),
-									isNull(dashboardShares.revokedAt),
-								),
-							)
-							.returning(shareColumns),
-					)
-					.pipe(Effect.mapError(toPersistenceError))
+			const updateMode = (shareId: DashboardShareId) =>
+				Effect.gen(function* () {
+					const updated = yield* database
+						.execute((db) =>
+							db
+								.update(dashboardShares)
+								.set({ mode, updatedAt: msToDate(now), updatedBy: userId })
+								.where(
+									and(
+										eq(dashboardShares.orgId, orgId),
+										eq(dashboardShares.id, shareId),
+										isNull(dashboardShares.revokedAt),
+									),
+								)
+								.returning(shareColumns),
+						)
+						.pipe(Effect.mapError(toPersistenceError))
 
-				const row = updated[0]
-				if (row === undefined) {
-					return yield* Effect.fail(
-						new SharePersistenceError({ message: "Share disappeared while updating its mode" }),
-					)
-				}
-				yield* Effect.annotateCurrentSpan("maple.share.id", row.id)
-				return new DashboardShareCreated({ share: toDashboardShare(row) })
-			}
+					const row = updated[0]
+					if (row === undefined) {
+						return yield* Effect.fail(
+							new SharePersistenceError({
+								message: "Share disappeared while updating its mode",
+							}),
+						)
+					}
+					yield* Effect.annotateCurrentSpan("maple.share.id", row.id)
+					return new DashboardShareCreated({ share: toDashboardShare(row) })
+				})
+
+			const existingRows = yield* loadLive(orgId, scope)
+			const existing = existingRows[0]
+			if (existing !== undefined) return yield* updateMode(existing.id)
 
 			const { rawToken, values } = mintRow(orgId, userId, scope, mode, hmacKey, now)
-			const inserted = yield* database
-				.execute((db) => db.insert(dashboardShares).values(values).returning(shareColumns))
-				.pipe(Effect.mapError(toPersistenceError))
 
-			const row = inserted[0]
+			// The read above and this insert are not one transaction, and making them
+			// one would not help: two concurrent creates both read "not shared", both
+			// insert, and `dashboard_shares_live_unq` fails the loser either way. So
+			// the loser is handled rather than prevented — a double-click producing a
+			// 503 is exactly what `revoke` was made idempotent to avoid.
+			const attempt = yield* database
+				.execute((db) => db.insert(dashboardShares).values(values).returning(shareColumns))
+				.pipe(
+					Effect.map((rows) => ({ raced: false, rows }) as const),
+					Effect.catch((error) =>
+						postgresSqlState(error) === UNIQUE_VIOLATION
+							? Effect.succeed({ raced: true, rows: [] } as const)
+							: Effect.fail(toPersistenceError(error)),
+					),
+				)
+
+			// Lost the race: behave as if this call had simply arrived second, which
+			// is the update-in-place branch — the winner's share, and no token.
+			if (attempt.raced) {
+				yield* Effect.annotateCurrentSpan("maple.share.insert_raced", true)
+				const winner = (yield* loadLive(orgId, scope))[0]
+				if (winner === undefined) {
+					return yield* Effect.fail(
+						new SharePersistenceError({
+							message: "Share insert conflicted but no live share was found",
+						}),
+					)
+				}
+				return yield* updateMode(winner.id)
+			}
+
+			const row = attempt.rows[0]
 			if (row === undefined) {
 				return yield* Effect.fail(
 					new SharePersistenceError({ message: "Share insert returned no row" }),
@@ -373,10 +410,12 @@ export class SharedDashboardService extends Context.Service<
 
 		const revoke = Effect.fn("SharedDashboardService.revoke")(function* (
 			orgId: OrgId,
+			userId: UserId,
 			scope: ShareScope,
 		) {
 			yield* Effect.annotateCurrentSpan({
 				orgId,
+				"tenant.userId": userId,
 				"maple.dashboard.id": scope.dashboardId,
 				"maple.share.scope": scope.widgetId === null ? "dashboard" : "widget",
 			})
@@ -386,7 +425,10 @@ export class SharedDashboardService extends Context.Service<
 				.execute((db) =>
 					db
 						.update(dashboardShares)
-						.set({ revokedAt: msToDate(now), updatedAt: msToDate(now) })
+						// `updatedBy` too, not just the timestamp: revoked rows are kept
+						// for audit, and a row that records only who *created* the link
+						// cannot answer who took it down.
+						.set({ revokedAt: msToDate(now), updatedAt: msToDate(now), updatedBy: userId })
 						.where(
 							and(
 								eq(dashboardShares.orgId, orgId),
@@ -461,8 +503,8 @@ export class SharedDashboardService extends Context.Service<
 	static readonly rotate = (orgId: OrgId, userId: UserId, scope: ShareScope) =>
 		this.use((service) => service.rotate(orgId, userId, scope))
 
-	static readonly revoke = (orgId: OrgId, scope: ShareScope) =>
-		this.use((service) => service.revoke(orgId, scope))
+	static readonly revoke = (orgId: OrgId, userId: UserId, scope: ShareScope) =>
+		this.use((service) => service.revoke(orgId, userId, scope))
 
 	static readonly resolveByToken = (token: string) => this.use((service) => service.resolveByToken(token))
 }

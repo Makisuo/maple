@@ -23,6 +23,7 @@ import {
 	type DashboardVariable,
 	OrgId,
 	ShareUnsupportedWidgetError,
+	ShareWidgetExecutionError,
 	ShareWidgetNotFoundError,
 	UserId,
 } from "@maple/domain/http"
@@ -50,6 +51,41 @@ import { ROUTE_ENDPOINT_PLANS, type RouteEndpointContext } from "./route-endpoin
 import { autoBucketSeconds, runRawSql } from "@/mcp/lib/run-raw-sql"
 
 const UNSUPPORTED_WIDGET_MESSAGE = "This widget isn't available in shared views."
+const EXECUTION_FAILED_MESSAGE = "This widget couldn't be loaded. Try again shortly."
+
+/**
+ * A widget's query ran and failed.
+ *
+ * Logs the cause before mapping. Without this the share surface was the one
+ * place in the API where a warehouse failure vanished entirely — the tile said
+ * "not available in shared views" and nothing on the server recorded why, so a
+ * broken shared board looked identical to a deliberately unsupported one.
+ */
+const executionFailed = (widgetId: string, kind: string) => (cause: unknown) =>
+	Effect.logError("shared widget data failed", cause).pipe(
+		Effect.annotateLogs({ "maple.widget.id": widgetId, "maple.widget.kind": kind }),
+		Effect.andThen(
+			Effect.fail(new ShareWidgetExecutionError({ message: EXECUTION_FAILED_MESSAGE, widgetId })),
+		),
+	)
+
+/**
+ * Route both failures and defects for one widget into the per-widget envelope.
+ *
+ * Defects included, deliberately. "One broken tile must not blank its
+ * neighbours" is this endpoint's design property, and a defect — a driver
+ * throwing on an unexpected row shape, say — blanks the entire batch with a 500
+ * if it escapes, which is precisely the outcome the envelope exists to prevent.
+ * Interruption still propagates: `catch` and `catchDefect` leave it alone, which
+ * is why neither is `catchCause`.
+ */
+const asWidgetOutcomeFailure =
+	(widgetId: string, kind: string) =>
+	<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ShareWidgetExecutionError, R> =>
+		effect.pipe(
+			Effect.catch(executionFailed(widgetId, kind)),
+			Effect.catchDefect(executionFailed(widgetId, kind)),
+		)
 
 const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
@@ -106,7 +142,10 @@ export interface DashboardWidgetDataServiceApi {
 		request: WidgetDataRequest,
 		window: ResolvedWindow,
 		variableValues: VariableValues,
-	) => Effect.Effect<WidgetDataOutcome, ShareWidgetNotFoundError | ShareUnsupportedWidgetError>
+	) => Effect.Effect<
+		WidgetDataOutcome,
+		ShareWidgetNotFoundError | ShareUnsupportedWidgetError | ShareWidgetExecutionError
+	>
 }
 
 export class DashboardWidgetDataService extends Context.Service<
@@ -203,18 +242,11 @@ export class DashboardWidgetDataService extends Context.Service<
 					...(querySet.limit === undefined ? {} : { limit: querySet.limit }),
 					...(querySet.columns === undefined ? {} : { columns: querySet.columns }),
 				}).pipe(
-					// A query set that cannot run is reported as an unsupported widget
-					// rather than failing the whole batch: one broken tile on a shared
-					// board must not blank its neighbours.
-					Effect.catch(() =>
-						Effect.fail(
-							new ShareUnsupportedWidgetError({
-								message: UNSUPPORTED_WIDGET_MESSAGE,
-								widgetId: request.widgetId,
-								kind: "query",
-							}),
-						),
-					),
+					// A query set that fails still rides inside the batch — one broken
+					// tile on a shared board must not blank its neighbours — but as a
+					// retryable failure, not as "unsupported". The query set is supported;
+					// this run of it did not work.
+					asWidgetOutcomeFailure(request.widgetId, "query"),
 				)
 
 				return {
@@ -244,15 +276,7 @@ export class DashboardWidgetDataService extends Context.Service<
 					// requirement is discharged here rather than leaking into every
 					// caller of `resolve`.
 					Effect.provideService(WarehouseQueryService, warehouse),
-					Effect.catch(() =>
-						Effect.fail(
-							new ShareUnsupportedWidgetError({
-								message: UNSUPPORTED_WIDGET_MESSAGE,
-								widgetId: request.widgetId,
-								kind: "raw_sql",
-							}),
-						),
-					),
+					asWidgetOutcomeFailure(request.widgetId, "raw_sql"),
 				)
 
 				return {
@@ -295,17 +319,11 @@ export class DashboardWidgetDataService extends Context.Service<
 				window: effectiveWindow,
 			}
 
-			const data = yield* plan.run(routeParams, context).pipe(
-				Effect.catch(() =>
-					Effect.fail(
-						new ShareUnsupportedWidgetError({
-							message: UNSUPPORTED_WIDGET_MESSAGE,
-							widgetId: request.widgetId,
-							kind: endpoint ?? "unknown",
-						}),
-					),
-				),
-			)
+			// `plan === undefined` above is the structural case and stays
+			// "unsupported"; a plan that exists and throws is a run that failed.
+			const data = yield* plan
+				.run(routeParams, context)
+				.pipe(asWidgetOutcomeFailure(request.widgetId, endpoint ?? "unknown"))
 
 			return {
 				widgetId: request.widgetId,

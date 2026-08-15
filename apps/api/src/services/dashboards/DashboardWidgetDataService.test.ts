@@ -21,7 +21,10 @@ const die = () => Effect.die("unexpected call")
  * that the SQL it issued was narrowed.
  */
 const makeHarness = (
-	execute: (request: { startTime: string; endTime: string }) => Effect.Effect<unknown, never>,
+	// Error channel is `unknown`, not `never`: a stub that fails is how the
+	// execution-failure mapping is asserted, and pinning this to `never` forces
+	// the caller into a cast at exactly the point the test is about.
+	execute: (request: { startTime: string; endTime: string }) => Effect.Effect<unknown, unknown>,
 ) => {
 	const windows: Array<{ startTime: string; endTime: string }> = []
 	const queryEngine = Layer.succeed(QueryEngineService, {
@@ -32,10 +35,10 @@ const makeHarness = (
 		evaluate: die,
 		evaluateSeries: die,
 		cachedDirect: die,
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		// oxlint-disable-next-line typescript/no-explicit-any
 	} as any)
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	// oxlint-disable-next-line typescript/no-explicit-any
 	const warehouse = Layer.succeed(WarehouseQueryService, { rawSqlQuery: die } as any)
 
 	const runtime = ManagedRuntime.make(
@@ -49,7 +52,7 @@ const document = (widgets: ReadonlyArray<Record<string, unknown>>): DashboardDoc
 		id: asDashboardId("dash-share"),
 		name: "Shared",
 		timeRange: { type: "relative", value: "12h" },
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		// oxlint-disable-next-line typescript/no-explicit-any
 		widgets: widgets as any,
 		createdAt: NOW,
 		updatedAt: NOW,
@@ -119,6 +122,63 @@ describe("DashboardWidgetDataService", () => {
 		// sharing is refused rather than served through some generic fallback.
 		expect(outcome._tag).toBe("@maple/http/errors/ShareUnsupportedWidgetError")
 		expect(outcome).toMatchObject({ widgetId: "w-facets", kind: "traces_facets" })
+		await runtime.dispose()
+	})
+
+	it("reports a query that ran and failed as retryable, not as unsupported", async () => {
+		// The distinction is the whole point: "unsupported" draws a permanent muted
+		// tile, so a warehouse timeout landing there tells a viewer the chart will
+		// never work and offers them no retry.
+		const { runtime } = makeHarness(() => Effect.fail("warehouse timeout"))
+
+		const outcome = await runtime.runPromise(
+			DashboardWidgetDataService.use((service) =>
+				service.resolve(
+					ORG,
+					document([
+						widget("w-chart", {
+							kind: "query",
+							resultShape: "timeseries",
+							queries: [{ id: "q1", name: "A", aggregation: "count", dataSource: "traces" }],
+						}),
+					]),
+					{ widgetId: "w-chart", source: "primary" },
+					WINDOW,
+					{},
+				),
+			).pipe(Effect.flip),
+		)
+
+		expect(outcome._tag).toBe("@maple/http/errors/ShareWidgetExecutionError")
+		expect(outcome).toMatchObject({ widgetId: "w-chart" })
+		await runtime.dispose()
+	})
+
+	it("keeps a defect inside the per-widget envelope", async () => {
+		// A driver throwing on an unexpected row shape is a defect, not a failure,
+		// and an escaping defect 500s the whole batch — blanking every other tile
+		// on the board, which is exactly what the envelope exists to prevent.
+		const { runtime } = makeHarness(() => Effect.die("driver threw"))
+
+		const outcome = await runtime.runPromise(
+			DashboardWidgetDataService.use((service) =>
+				service.resolve(
+					ORG,
+					document([
+						widget("w-chart", {
+							kind: "query",
+							resultShape: "timeseries",
+							queries: [{ id: "q1", name: "A", aggregation: "count", dataSource: "traces" }],
+						}),
+					]),
+					{ widgetId: "w-chart", source: "primary" },
+					WINDOW,
+					{},
+				),
+			).pipe(Effect.flip),
+		)
+
+		expect(outcome._tag).toBe("@maple/http/errors/ShareWidgetExecutionError")
 		await runtime.dispose()
 	})
 

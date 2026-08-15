@@ -107,6 +107,40 @@ const redactWidget = (widget: {
 })
 
 /**
+ * Variable names a widget actually references.
+ *
+ * Scans the widget's stored form for `$name` / `${name}` rather than reading
+ * any one field, because a variable can land in a where-clause, a route param,
+ * a formula or a raw-SQL body, and a list that missed one of those would hide a
+ * picker the chart needs. `$__`-prefixed built-ins can't match: variable names
+ * must begin with a letter.
+ */
+const referencedVariableNames = (widget: unknown): ReadonlySet<string> => {
+	const names = new Set<string>()
+	for (const match of JSON.stringify(widget ?? null).matchAll(/\$\{?([A-Za-z][A-Za-z0-9_]*)\}?/g)) {
+		const name = match[1]
+		if (name !== undefined) names.add(name)
+	}
+	return names
+}
+
+/**
+ * The board's variables, narrowed to those one widget uses.
+ *
+ * A single-chart share publishes its own tile, so it must not also publish the
+ * variable list of tiles the viewer cannot see — those names, labels, option
+ * values and attribute keys are the board's, not the chart's.
+ */
+const variablesForWidget = (variables: unknown, widget: unknown): unknown => {
+	if (!Array.isArray(variables)) return variables
+	const referenced = referencedVariableNames(widget)
+	return variables.filter((variable) => {
+		const name = (variable as { readonly name?: unknown } | null)?.name
+		return typeof name === "string" && referenced.has(name)
+	})
+}
+
+/**
  * Project a stored dashboard down to what a share may publish.
  *
  * `widgetId` narrows to a single-chart share: the returned document contains
@@ -143,7 +177,9 @@ export function redactForShare(
 			// has no grid to place it in, and carrying the section tree would leak
 			// the names of tabs the viewer cannot see.
 			widgets: [redactWidget({ ...widget, sectionId: undefined, tabId: undefined })],
-			...(document.variables === undefined ? {} : { variables: document.variables }),
+			...(document.variables === undefined
+				? {}
+				: { variables: variablesForWidget(document.variables, widget) }),
 		}
 	}
 

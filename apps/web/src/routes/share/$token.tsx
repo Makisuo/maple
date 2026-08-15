@@ -8,6 +8,13 @@
  * `?embed` drops even this page's own header, for a public chart dropped into
  * someone else's document. The server decides whether a link may be framed at
  * all (`embeddable`); this flag only controls how much chrome is drawn.
+ *
+ * Those are two separate checks and both are needed. `?embed` is chosen by
+ * whoever wrote the URL, so it cannot gate anything; `embeddable` comes off the
+ * resolve response and is gated below, in `FrameGate`. The worker serves this
+ * route without `frame-ancestors` precisely so embedding is possible at all —
+ * which makes the page the only layer that knows which token it is holding, and
+ * therefore the only one that can enforce the server's answer.
  */
 import { createFileRoute } from "@tanstack/react-router"
 import { useAuth } from "@clerk/clerk-react"
@@ -93,6 +100,16 @@ function SharePageContent({ isSignedIn }: { isSignedIn: boolean }) {
 		)
 	}
 
+	// Checked after resolve, because `embeddable` is the server's answer about
+	// this specific token — not something the URL or the page can decide.
+	if (isFramed() && !state.share.embeddable) {
+		return (
+			<ShareShell embed={search.embed === true}>
+				<NotEmbeddableCard />
+			</ShareShell>
+		)
+	}
+
 	return (
 		<ShareShell embed={search.embed === true} title={state.share.dashboard.name}>
 			<ShareGrid
@@ -103,6 +120,42 @@ function SharePageContent({ isSignedIn }: { isSignedIn: boolean }) {
 				embed={search.embed === true}
 			/>
 		</ShareShell>
+	)
+}
+
+/**
+ * Whether this document is inside a frame.
+ *
+ * Cross-origin, reading `window.top` throws rather than answering, and a throw
+ * means we are framed by someone we cannot see — the exact case this gates. So
+ * the catch returns `true`: the safe answer, not the convenient one.
+ */
+const isFramed = (): boolean => {
+	if (typeof window === "undefined") return false
+	try {
+		return window.self !== window.top
+	} catch {
+		return true
+	}
+}
+
+/**
+ * Only a public single-chart link may be framed, and the API decides which
+ * those are. This is the page half of that: the worker serves `/share/` without
+ * `frame-ancestors` so embedding is possible at all, which leaves the decision
+ * here, where the resolved share is known.
+ *
+ * A client-side check is weaker than a header and is not pretending otherwise.
+ * It is the layer that has the information, and the case it covers degrades
+ * safely regardless: an org-only link in a cross-origin frame carries no
+ * session, so it renders the sign-in card rather than any data.
+ */
+function NotEmbeddableCard() {
+	return (
+		<CenteredCard
+			title="This link can't be embedded"
+			body="Only a shared chart set to public can be displayed inside another site. Open the link directly instead."
+		/>
 	)
 }
 

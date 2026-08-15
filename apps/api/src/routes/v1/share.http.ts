@@ -61,10 +61,15 @@ export const HttpSharePublicLive = HttpApiBuilder.group(MapleApi, "sharePublic",
 		 */
 		const enforceRateLimit = Effect.fn("share.rateLimit")(function* (tokenHash: string) {
 			const request = yield* HttpServerRequest.HttpServerRequest
-			const ip = request.headers["cf-connecting-ip"] ?? "unknown"
+			const ip = request.headers["cf-connecting-ip"]
+			// No `cf-connecting-ip` means this is not behind Cloudflare — self-hosted
+			// behind another proxy, or local. Bucketing those under a literal
+			// "unknown" key would put every viewer in the world in one bucket, so one
+			// person could rate-limit everyone. Skip the IP limit there; the per-token
+			// limit still applies, and it is the one that bounds a leaked link.
 			const outcomes = yield* Effect.all([
 				rateLimiter.check(shareTokenRateLimitKey(tokenHash.slice(0, 24))),
-				rateLimiter.check(shareIpRateLimitKey(ip)),
+				...(ip === undefined ? [] : [rateLimiter.check(shareIpRateLimitKey(ip))]),
 			])
 			if (outcomes.some((outcome) => outcome === "limited")) {
 				return yield* Effect.fail(
@@ -231,6 +236,15 @@ export const HttpSharePublicLive = HttpApiBuilder.group(MapleApi, "sharePublic",
 											widgetId: request.widgetId,
 											ok: false as const,
 											reason: "unsupported" as const,
+											message: error.message,
+										}),
+									// `failed` rather than `unsupported`: the tile offers a
+									// retry, because the widget is fine and the run was not.
+									"@maple/http/errors/ShareWidgetExecutionError": (error) =>
+										Effect.succeed({
+											widgetId: request.widgetId,
+											ok: false as const,
+											reason: "failed" as const,
 											message: error.message,
 										}),
 								}),

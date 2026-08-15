@@ -507,7 +507,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* persistence.get(tenant.orgId, params.id)
-						const tombstone = yield* shares.revoke(tenant.orgId, {
+						const tombstone = yield* shares.revoke(tenant.orgId, tenant.userId, {
 							dashboardId: params.id,
 							widgetId: params.widget_id,
 						})
@@ -606,7 +606,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* persistence.get(tenant.orgId, params.id)
-						const tombstone = yield* shares.revoke(tenant.orgId, {
+						const tombstone = yield* shares.revoke(tenant.orgId, tenant.userId, {
 							dashboardId: params.id,
 							widgetId: null,
 						})

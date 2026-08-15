@@ -201,6 +201,33 @@ export class ShareUnsupportedWidgetError extends HttpTaggedError<ShareUnsupporte
 	},
 ) {}
 
+/**
+ * The widget is real and supported, but running it failed.
+ *
+ * The counterpart to `ShareUnsupportedWidgetError`, and the distinction is
+ * structural vs transient: "no server-side implementation exists for this data
+ * source" is permanent and the page draws a muted tile, whereas a warehouse
+ * timeout is worth retrying. Collapsing the two — which is what a single catch
+ * arm did — turned every transient failure into a permanent-looking tile with
+ * no retry, and discarded the cause on the way.
+ */
+export class ShareWidgetExecutionError extends HttpTaggedError<ShareWidgetExecutionError>()(
+	"@maple/http/errors/ShareWidgetExecutionError",
+	{
+		message: Schema.String,
+		widgetId: Schema.String,
+	},
+	{
+		status: 503,
+		code: "share_widget_failed",
+		title: "Widget could not be loaded",
+		message: "This widget couldn't be loaded. Try again shortly.",
+		retry: "after",
+		recovery: "retry",
+		exposure: "redacted",
+	},
+) {}
+
 export class ShareRangeInvalidError extends HttpTaggedError<ShareRangeInvalidError>()(
 	"@maple/http/errors/ShareRangeInvalidError",
 	{
