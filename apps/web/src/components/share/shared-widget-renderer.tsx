@@ -19,12 +19,35 @@
  * fetch. Share data is batched whether or not a tile is on screen, so the
  * observer would gate nothing and cost a 200ms delay per tile.
  */
-import { createContext, memo, use, type ReactNode } from "react"
+import { createContext, memo, use, useMemo, type ReactNode } from "react"
+import { WidgetDataSourceTransformSchema } from "@maple/widgets/dashboard"
+import { Schema } from "effect"
 
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
 import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
 import { WidgetTimeRangeProvider } from "@/components/dashboard-builder/widgets/widget-time-range-context"
+import { applyTransform } from "@/hooks/use-widget-data"
 import type { ShareWidget } from "@/hooks/use-share-dashboard"
+
+const decodeTransform = Schema.decodeUnknownSync(WidgetDataSourceTransformSchema)
+
+/**
+ * The widget's transform, or nothing when it doesn't decode.
+ *
+ * Decoded here rather than in the share document's schema so a transform this
+ * build doesn't recognise costs one tile its formatting instead of failing the
+ * whole page — the same trade the section decode makes. `transform` is kept
+ * deliberately loose on the wire (`Schema.Unknown`) for that reason.
+ */
+const shareTransform = (raw: unknown): typeof WidgetDataSourceTransformSchema.Type | undefined => {
+	if (raw === undefined) return undefined
+	try {
+		return decodeTransform(raw)
+	} catch {
+		console.warn("[share] widget transform could not be decoded — rendering untransformed")
+		return undefined
+	}
+}
 
 const ShareWidgetStatesContext = createContext<Readonly<Record<string, WidgetDataState>>>({})
 
@@ -40,8 +63,19 @@ export function ShareWidgetStatesProvider({
 
 export const SharedWidgetRenderer = memo(function SharedWidgetRenderer({ widget }: { widget: ShareWidget }) {
 	const states = use(ShareWidgetStatesContext)
-	const dataState = states[widget.id] ?? { status: "loading" as const }
 	const Visualization = visualizationFor(widget.visualization)
+
+	const transform = useMemo(() => shareTransform(widget.dataSource.transform), [widget.dataSource])
+
+	// The server returns rows; the transform is what turns them into what the
+	// renderer expects. Without it a stat gets its whole result set where a
+	// single number belongs and formats it as an em dash — which is what a
+	// shared board's stat tiles used to show, on every board.
+	const dataState = useMemo<WidgetDataState>(() => {
+		const state = states[widget.id] ?? { status: "loading" as const }
+		if (state.status !== "ready" || transform === undefined) return state
+		return { ...state, data: applyTransform(state.data, transform) }
+	}, [states, widget.id, transform])
 
 	return (
 		<div className="h-full w-full">
@@ -55,7 +89,7 @@ export const SharedWidgetRenderer = memo(function SharedWidgetRenderer({ widget 
 					// Always "view": a share has no editing affordances to gate, and
 					// passing anything else would surface them.
 					mode="view"
-					rowLimit={(widget.dataSource.transform as { limit?: number } | undefined)?.limit}
+					rowLimit={transform?.limit}
 				/>
 			</WidgetTimeRangeProvider>
 		</div>

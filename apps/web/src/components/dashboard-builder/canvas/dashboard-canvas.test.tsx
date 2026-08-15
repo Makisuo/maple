@@ -63,6 +63,31 @@ describe("SharedWidgetRenderer", () => {
 	// — so mounting one here would put edit affordances and links into authed
 	// routes on a page served without a session. This is the guard against
 	// someone later "fixing" the missing provider.
+	// The server returns rows and the stored transform is what collapses them.
+	// It reaches the client precisely because the redaction seam keeps it, so a
+	// share that never applies it renders every stat as an em dash — which is
+	// what shipped. Asserted on the rendered number, not on the call, because
+	// the em dash is the symptom a reader actually sees.
+	it("applies the stored transform, so a stat reduces to a single value", () => {
+		const stat: ShareWidget = {
+			...widget("w-stat"),
+			dataSource: { kind: "query", transform: { reduceToValue: { field: "hits", aggregate: "sum" } } },
+		}
+
+		render(
+			<ShareWidgetStatesProvider
+				states={{
+					"w-stat": { status: "ready", data: [{ hits: 40 }, { hits: 2 }] },
+				}}
+			>
+				<SharedWidgetRenderer widget={stat} />
+			</ShareWidgetStatesProvider>,
+		)
+
+		expect(screen.getByText("42")).toBeTruthy()
+		expect(screen.queryByText("—")).toBeNull()
+	})
+
 	it("exposes no widget actions at all", () => {
 		render(
 			<ShareWidgetStatesProvider states={{}}>
