@@ -76,6 +76,11 @@ export const dashboardShares = pgTable(
 			.on(table.orgId, table.dashboardId, sql`coalesce(widget_id, '')`)
 			.where(sql`revoked_at is null`),
 		index("dashboard_shares_org_dashboard_idx").on(table.orgId, table.dashboardId),
+		// The OG-card path resolves a signed share id with no org in hand — the
+		// image URL is fetched by a crawler that has no session and, by design,
+		// carries nothing but the id. The primary key leads with `org_id`, so it
+		// cannot serve that lookup.
+		index("dashboard_shares_id_idx").on(table.id),
 		// Deliberate exception to this repo's no-foreign-key convention (see
 		// dashboard_versions, which has none). Everywhere else a dangling row is a
 		// cosmetic problem; here it is a security one — a deleted dashboard whose

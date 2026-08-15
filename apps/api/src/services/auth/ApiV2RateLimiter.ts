@@ -53,6 +53,16 @@ export const apiV2RateLimitKey = (keyId: ApiKeyId): string => `v2:${keyId}`
 export const shareTokenRateLimitKey = (tokenHashPrefix: string): string => `share:${tokenHashPrefix}`
 export const shareIpRateLimitKey = (ip: string): string => `shareip:${ip}`
 
+/**
+ * Social-preview traffic, bucketed apart from the viewer keys above.
+ *
+ * The unfurl path is machine traffic — every chat client that sees the link
+ * fetches it, and the page worker asks on each document request. Sharing the
+ * viewer's bucket would let that crowd rate-limit the humans the link was sent
+ * to, which is the failure this separation exists to prevent.
+ */
+export const shareOgRateLimitKey = (shareKeyPrefix: string): string => `shareog:${shareKeyPrefix}`
+
 const warnFailedOpen = (reason: "binding_missing" | "partition_missing" | "binding_error", cause?: unknown) =>
 	Effect.logWarning("API v2 rate limiter unavailable; allowing request").pipe(
 		Effect.annotateLogs({

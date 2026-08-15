@@ -17,7 +17,8 @@
 		"test:perf:infra": "playwright test perf/infra.perf.spec.ts --project=chromium-performance",
 		"test:perf:renders": "playwright test --grep \"React render work\"",
 		"test:perf:compare-renders": "bun perf/compare-react-render-reports.ts",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"og:fonts": "bun scripts/build-og-fonts.ts"
 	},
 	"dependencies": {
 		"@base-ui/react": "catalog:ui",
@@ -44,6 +45,8 @@
 		"@streamdown/math": "^1.0.2",
 		"@streamdown/mermaid": "^1.0.2",
 		"@tailwindcss/vite": "catalog:tailwind",
+		"@takumi-rs/helpers": "2.9.2",
+		"@takumi-rs/wasm": "2.9.2",
 		"@tanstack/react-db": "0.1.91",
 		"@tanstack/react-hotkeys": "0.10.0",
 		"@tanstack/react-router": "^1.170.16",
@@ -82,7 +85,8 @@
 		"jsdom": "^29.1.1",
 		"typescript": "catalog:tooling",
 		"vite": "catalog:",
-		"vitest": "catalog:"
+		"vitest": "catalog:",
+		"woff2-encoder": "^2.0.0"
 	},
 	"portless": {
 		"name": "web",

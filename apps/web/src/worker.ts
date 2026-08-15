@@ -1,5 +1,15 @@
+import { ogIdFromPath, shareTokenFromPath } from "./og/share-links"
+import { fetchShareOgMeta, renderShareOgImage, shareOgMetaRewriter } from "./og/share-preview"
+
 type Env = {
 	ASSETS: { fetch: (request: Request) => Promise<Response> }
+	/**
+	 * The API this deployment's pages talk to, for the share-preview lookups
+	 * below. Absent in a build that has not set it — every preview then falls
+	 * back to the generic card, which is the same behaviour as before previews
+	 * existed.
+	 */
+	MAPLE_API_BASE_URL?: string
 }
 
 /**
@@ -53,9 +63,36 @@ const applyDocumentSecurityHeaders = (response: Response, pathname: string): Res
 	})
 }
 
+/**
+ * Inline a share link's own `og:*` tags, when it has any.
+ *
+ * Applied to every viewer, not only to crawlers: sniffing user agents to serve
+ * different HTML is cloaking, and the tags change nothing for a human — the app
+ * replaces the head as soon as it boots.
+ */
+const applyShareOgMeta = async (response: Response, url: URL, env: Env): Promise<Response> => {
+	const apiBaseUrl = env.MAPLE_API_BASE_URL
+	const token = shareTokenFromPath(url.pathname)
+	if (apiBaseUrl === undefined || token === undefined || !isHtmlResponse(response)) return response
+
+	const meta = await fetchShareOgMeta(apiBaseUrl, token)
+	// No meta means an org-only link, a dead one, or an API that did not answer.
+	// All three keep the generic card, and none of them is worth a broken page.
+	return meta === undefined ? response : shareOgMetaRewriter(meta, url.origin).transform(response)
+}
+
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url)
+
+		// Ahead of the assets lookup: this path has no asset behind it, and the
+		// 404 the assets layer returns for it would fall through to the SPA shell.
+		const ogId = ogIdFromPath(url.pathname)
+		if (ogId !== undefined) {
+			return env.MAPLE_API_BASE_URL === undefined
+				? new Response(null, { status: 404 })
+				: renderShareOgImage(env.MAPLE_API_BASE_URL, ogId, env.ASSETS)
+		}
 
 		const assetResponse = await env.ASSETS.fetch(request)
 		if (assetResponse.status !== 404) {
@@ -71,7 +108,13 @@ export default {
 			// `/` resolves to a real asset and returns here rather than through the
 			// fallback below, so the headers have to be applied on both paths — this
 			// one is the app's own front door.
-			return applyDocumentSecurityHeaders(assetResponse, url.pathname)
+			//
+			// `/share/<token>` also lands here, not in the fallback: with
+			// `not_found_handling: single-page-application` the assets layer answers
+			// unknown paths with the shell itself, at status 200. The share preview
+			// therefore has to be applied on this branch too — putting it only on
+			// the fallback below silently disables it in every deployment.
+			return applyShareOgMeta(applyDocumentSecurityHeaders(assetResponse, url.pathname), url, env)
 		}
 
 		// Fetch "/" rather than "/index.html": the assets layer's
@@ -81,6 +124,8 @@ export default {
 		// Every SPA route lands here, which is what makes this the one place the
 		// document's security headers can be set from the requested path.
 		const document = await env.ASSETS.fetch(new Request(new URL("/", url), request))
-		return applyDocumentSecurityHeaders(document, url.pathname)
+		// Reached when the assets layer 404s rather than serving the shell — a
+		// deployment without SPA not-found handling, or a request it declines.
+		return applyShareOgMeta(applyDocumentSecurityHeaders(document, url.pathname), url, env)
 	},
 }

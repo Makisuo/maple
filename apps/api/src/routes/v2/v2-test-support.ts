@@ -82,14 +82,24 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2MetricsLive,
 	HttpV2ServicesLive,
 	HttpV2ServiceMapLive,
-	// The share group's own dependency is satisfied here rather than by every
-	// harness: no v2 route test exercises the share endpoints, and threading an
-	// inert service through two dozen call sites to register a group they never
+	// The share group's own dependencies are satisfied here rather than by every
+	// harness: most v2 route tests never touch the share endpoints, and threading
+	// inert services through two dozen call sites to register a group they never
 	// call is churn with no assertion behind it.
 	HttpV2SharePublicLive.pipe(
 		Layer.provide(
 			Layer.succeed(DashboardWidgetDataService, {
 				resolve: () => Effect.die("share widget data is not exercised by v2 route harnesses"),
+			}),
+		),
+		Layer.provide(
+			// A directory with nobody in it, which is the self-hosted shape: the
+			// preview card carries no byline and everything else about it still
+			// renders. The share tests assert exactly that.
+			Layer.succeed(OrganizationService, {
+				retrieve: (orgId) =>
+					Effect.succeed({ id: orgId, name: null, slug: null, imageUrl: null, createdAtMs: null }),
+				delete: () => Effect.die("organization deletion is not exercised by v2 route harnesses"),
 			}),
 		),
 	),
