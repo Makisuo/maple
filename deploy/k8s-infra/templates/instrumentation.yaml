@@ -43,8 +43,8 @@ spec:
   resource:
     resourceAttributes:
       k8s.cluster.name: {{ include "maple-k8s-infra.clusterName" . | quote }}
-      {{- if .Values.global.deploymentEnvironment }}
-      deployment.environment.name: {{ .Values.global.deploymentEnvironment | quote }}
+      {{- with (include "maple-k8s-infra.deploymentEnvironment.attrYaml" .) }}
+      {{- nindent 6 . }}
       {{- end }}
   # Pod-identity env vars injected via downward API. We then layer them into
   # OTEL_RESOURCE_ATTRIBUTES via $(VAR) interpolation so the user's OTel SDK
