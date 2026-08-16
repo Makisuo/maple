@@ -214,10 +214,10 @@ export interface NormalizedSignal<TData = unknown> {
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | { readonly [key: string]: JsonValue } | readonly JsonValue[]
 
-export interface ProjectedEventData {
+export interface ProjectedEventData<TData extends JsonValue = JsonValue> {
 	readonly subject?: string | null
 	readonly time?: string
-	readonly data: JsonValue
+	readonly data: TData
 }
 
 export interface MapleCloudEvent {

@@ -146,6 +146,13 @@ export class LocalEventingRuntime {
 			failures.push(...result.failures)
 			for (const mismatch of result.typeMismatchFields) typeMismatchFields.add(mismatch)
 		}
+		if (typeMismatchFields.size > 0)
+			this.#telemetry.record({
+				operation: "selector_type_mismatch",
+				outcome: "observed",
+				count: typeMismatchFields.size,
+				sourceKind,
+			})
 		return { events, failures, typeMismatchFields: [...typeMismatchFields] }
 	}
 

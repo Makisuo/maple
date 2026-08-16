@@ -169,7 +169,7 @@ const anyValueJson = (
 			anyValueJson(item, `${label}[${index}]`, depth + 1, budget),
 		)
 	if (value.kvlistValue !== undefined) {
-		const output: Record<string, JsonValue> = {}
+		const output: Record<string, JsonValue> = Object.create(null)
 		for (const [index, entry] of (value.kvlistValue.values ?? []).entries()) {
 			const key = assertStringBound(entry.key ?? "", `${label}.key[${index}]`)
 			if (key.length === 0 || SENSITIVE_KEY.test(key)) continue
@@ -189,7 +189,7 @@ const attributes = (values: readonly KeyValue[] | undefined, label: string): Nor
 	if ((values?.length ?? 0) > MAX_ATTRIBUTES)
 		throw new OtlpFieldError(`${label} exceeds ${MAX_ATTRIBUTES} attributes`)
 	const scalars = new Map<string, SignalScalar>()
-	const data: Record<string, JsonValue> = {}
+	const data: Record<string, JsonValue> = Object.create(null)
 	for (const [index, entry] of (values ?? []).entries()) {
 		const key = assertStringBound(entry.key ?? "", `${label}[${index}].key`)
 		if (key.length === 0 || SENSITIVE_KEY.test(key)) continue
@@ -255,7 +255,7 @@ const derivedOccurrenceId = (input: JsonValue): string =>
 
 export const normalizeOtlpLogs = (
 	request: unknown,
-	acceptedAt = new Date().toISOString(),
+	_acceptedAt = new Date().toISOString(),
 	tenantId = "local",
 ): readonly NormalizedSignal[] => {
 	const input = (request ?? {}) as OtlpLogsRequest
@@ -267,9 +267,13 @@ export const normalizeOtlpLogs = (
 			for (const log of scopeLogs.logRecords ?? []) {
 				const record = attributes(log.attributes, "log.attributes")
 				const occurredNanos = epochNanos(log.timeUnixNano) ?? epochNanos(log.observedTimeUnixNano)
+				if (occurredNanos === null)
+					throw new OtlpFieldError(
+						"log record requires timeUnixNano or observedTimeUnixNano for durable projection",
+					)
 				const observedNanos = epochNanos(log.observedTimeUnixNano)
-				const occurredAt = occurredNanos ? nanosToTimestamp(occurredNanos) : acceptedAt
-				const sourceObservedAt = observedNanos ? nanosToTimestamp(observedNanos) : acceptedAt
+				const occurredAt = nanosToTimestamp(occurredNanos)
+				const sourceObservedAt = observedNanos ? nanosToTimestamp(observedNanos) : occurredAt
 				const bodyScalar = anyValueScalar(log.body, "log.body")
 				const traceId = traceIdHex(log.traceId, "logRecord.traceId")
 				const spanId = spanIdHex(log.spanId, "logRecord.spanId")
@@ -305,7 +309,7 @@ export const normalizeOtlpLogs = (
 						derivedOccurrenceId({ source, occurredAt, signalKind: "otel.log", data }),
 					identityQuality: occurrenceId === null ? "derived" : "source",
 					occurredAt,
-					observedAt: acceptedAt,
+					observedAt: sourceObservedAt,
 					subject,
 					fields: defineSignalFields([
 						...(log.eventName

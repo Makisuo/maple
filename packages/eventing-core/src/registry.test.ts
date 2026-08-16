@@ -3,14 +3,21 @@ import {
 	CompiledProjectionRegistry,
 	canonicalJson,
 	defineSignalFields,
+	isJsonValue,
 	makeEventId,
 	MAX_CLOUD_EVENT_BYTES,
 	ProjectorRegistry,
 	SignalSourceRegistry,
 	validateMapleCloudEvent,
 	type NormalizedSignal,
+	type JsonValue,
 	type SignalProjectionSpec,
 } from "./index"
+
+const decodeJsonOutput = (value: unknown): JsonValue => {
+	if (!isJsonValue(value)) throw new Error("projector output must be finite JSON")
+	return value
+}
 
 const signal = (overrides: Partial<NormalizedSignal> = {}): NormalizedSignal => ({
 	sourceKind: "otel.log",
@@ -54,6 +61,7 @@ const projectors = (): ProjectorRegistry =>
 		sourceKinds: ["otel.log"],
 		outputType: "dev.maple.example.record.observed.v1",
 		dataSchema: "urn:maple:event-schema:example-record:v1",
+		decodeOutput: decodeJsonOutput,
 		decodeConfig: (value) => {
 			if (typeof value !== "object" || value === null) throw new Error("invalid projector config")
 			return value
@@ -155,15 +163,32 @@ describe("CompiledProjectionRegistry", () => {
 			sourceKinds: ["otel.log"],
 			outputType: "dev.maple.broken.v1",
 			dataSchema: "urn:maple:event-schema:broken:v1",
+			decodeOutput: decodeJsonOutput,
 			decodeConfig: () => ({}),
 			project: () => {
 				throw new Error("projector invariant failed")
 			},
 		})
+		registryDefinitions.register({
+			id: "invalid-output",
+			version: 1,
+			sourceKinds: ["otel.log"],
+			outputType: "dev.maple.invalid-output.v1",
+			dataSchema: "urn:maple:event-schema:invalid-output:v1",
+			decodeConfig: () => ({}),
+			decodeOutput: () => {
+				throw new Error("projector output violated declared schema")
+			},
+			project: () => ({ data: { invalid: true } }),
+		})
 		const registry = CompiledProjectionRegistry.compile(
 			[
 				projection(),
 				projection({ id: "broken-projection", projector: { id: "broken", version: 1, config: {} } }),
+				projection({
+					id: "invalid-output-projection",
+					projector: { id: "invalid-output", version: 1, config: {} },
+				}),
 			],
 			sources(),
 			registryDefinitions,
@@ -174,6 +199,10 @@ describe("CompiledProjectionRegistry", () => {
 			expect.objectContaining({
 				projectionId: "broken-projection",
 				message: "projector invariant failed",
+			}),
+			expect.objectContaining({
+				projectionId: "invalid-output-projection",
+				message: "projector output violated declared schema",
 			}),
 		])
 	})
@@ -186,6 +215,7 @@ describe("CompiledProjectionRegistry", () => {
 				sourceKinds: ["otel.log"],
 				outputType: "dev.maple.oversized.v1",
 				dataSchema: "urn:maple:event-schema:oversized:v1",
+				decodeOutput: decodeJsonOutput,
 				decodeConfig: () => ({}),
 				project: () => ({ data: { payload: "x".repeat(MAX_CLOUD_EVENT_BYTES) } }),
 			})
@@ -195,6 +225,7 @@ describe("CompiledProjectionRegistry", () => {
 				sourceKinds: ["otel.log"],
 				outputType: "x".repeat(257),
 				dataSchema: "urn:maple:event-schema:invalid-envelope:v1",
+				decodeOutput: decodeJsonOutput,
 				decodeConfig: () => ({}),
 				project: () => ({ data: {} }),
 			})
@@ -263,6 +294,7 @@ describe("CompiledProjectionRegistry", () => {
 				sourceKinds: ["otel.log"],
 				outputType: "duplicate",
 				dataSchema: "duplicate",
+				decodeOutput: decodeJsonOutput,
 				decodeConfig: (value) => value,
 				project: () => ({ data: {} }),
 			}),

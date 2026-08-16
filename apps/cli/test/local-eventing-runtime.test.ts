@@ -5,7 +5,9 @@ import { join } from "node:path"
 import { describe, it } from "vitest"
 import {
 	fieldKey,
+	isJsonValue,
 	ProjectorRegistry,
+	type JsonValue,
 	type NormalizedSignal,
 	type SignalProjectionSpec,
 	type SignalScalar,
@@ -138,6 +140,10 @@ const exampleProjectors = (): ProjectorRegistry =>
 		sourceKinds: ["otel.log"],
 		outputType: "dev.maple.example.record.observed.v1",
 		dataSchema: "urn:maple:event-schema:example-record-observed:v1",
+		decodeOutput: (value): JsonValue => {
+			if (!isJsonValue(value)) throw new Error("example projector output must be finite JSON")
+			return value
+		},
 		decodeConfig: (value) => {
 			if (typeof value !== "object" || value === null || Array.isArray(value))
 				throw new Error("example projector config must be an object")
@@ -188,16 +194,29 @@ describe("LocalEventingRuntime", () => {
 				)
 				strictEqual(runtime.evaluateOtlp("logs", malformed).failures.length, 1)
 
+				const mismatched = structuredClone(exampleRecordObserved)
+				firstLogRecord(mismatched).attributes = firstLogRecord(mismatched).attributes.map(
+					(entry) =>
+						entry.key === "example.record.sequence"
+							? attr(entry.key, { stringValue: "42" })
+							: entry,
+				)
+				deepStrictEqual(runtime.evaluateOtlp("logs", mismatched).typeMismatchFields, [
+					"attribute:example.record.sequence",
+				])
+
 				const operationOutcomes = observations.map(
 					({ operation, outcome }) => `${operation}:${outcome}`,
 				)
 				ok(operationOutcomes.includes("normalization:success"))
 				ok(operationOutcomes.includes("projection:success"))
 				ok(operationOutcomes.includes("projection:failure"))
+				ok(operationOutcomes.includes("selector_type_mismatch:observed"))
 				const serialized = JSON.stringify(observations)
 				strictEqual(serialized.includes("Observe example events"), false)
 				strictEqual(serialized.includes("01K20EXAMPLERECORD42"), false)
 				strictEqual(serialized.includes("example-record-observed"), false)
+				strictEqual(serialized.includes("example.record.sequence"), false)
 			} finally {
 				store.close()
 			}
@@ -245,6 +264,44 @@ describe("LocalEventingRuntime", () => {
 		strictEqual(signalB?.identityQuality, "derived")
 		strictEqual(signalA?.occurrenceId?.startsWith("derived:sha256:"), true)
 		strictEqual(signalA?.occurrenceId === signalB?.occurrenceId, false)
+	})
+
+	it("keeps retries byte-identical and rejects timestamp-less durable logs", () => {
+		const first = normalizeOtlpLogs(exampleRecordObserved, "2026-08-07T20:00:00Z")
+		const retry = normalizeOtlpLogs(exampleRecordObserved, "2026-08-08T20:00:00Z")
+		deepStrictEqual(first, retry)
+
+		const timestampLess = structuredClone(exampleRecordObserved)
+		const timestampLessRecord = firstLogRecord(timestampLess) as {
+			timeUnixNano?: string
+			observedTimeUnixNano?: string
+		}
+		delete timestampLessRecord.timeUnixNano
+		delete timestampLessRecord.observedTimeUnixNano
+		throws(
+			() => normalizeOtlpLogs(timestampLess, "2026-08-07T20:00:00Z"),
+			/requires timeUnixNano or observedTimeUnixNano/,
+		)
+	})
+
+	it("preserves __proto__ as ordinary OTLP data without prototype mutation", () => {
+		const request = structuredClone(exampleRecordObserved)
+		firstLogRecord(request).attributes.push(
+			attr("__proto__", {
+				kvlistValue: { values: [attr("nested", { stringValue: "top-level" })] },
+			}),
+			attr("safe", {
+				kvlistValue: { values: [attr("__proto__", { stringValue: "nested" })] },
+			}),
+		)
+		const [signal] = normalizeOtlpLogs(request, "2026-08-07T20:00:00Z")
+		const record = (signal!.data as { record: { attributes: Record<string, JsonValue> } }).record
+		ok(Object.prototype.hasOwnProperty.call(record.attributes, "__proto__"))
+		deepStrictEqual(record.attributes["__proto__"], { nested: "top-level" })
+		const safe = record.attributes.safe as Record<string, JsonValue>
+		ok(Object.prototype.hasOwnProperty.call(safe, "__proto__"))
+		strictEqual(safe["__proto__"], "nested")
+		strictEqual(({} as { nested?: string }).nested, undefined)
 	})
 
 	it("catalogs only the scalar body field that the OTLP adapter can populate", async () =>

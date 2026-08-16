@@ -3,6 +3,7 @@ import { Effect, Metric } from "effect"
 export type EventingTelemetryOperation =
 	| "normalization"
 	| "projection"
+	| "selector_type_mismatch"
 	| "outbox_stage"
 	| "outbox_ready"
 	| "outbox_dedup"

@@ -11,22 +11,23 @@ import { SignalProjectionSpecSchema } from "./model"
 import { timestampToEpochNanos, compileSignalPredicate, validateSignalProjectionSpec } from "./predicate"
 import { SignalSourceRegistry, validatePredicateAgainstSource } from "./source"
 
-export interface SignalProjector<TConfig = unknown> {
+export interface SignalProjector<TConfig = unknown, TData extends JsonValue = JsonValue> {
 	readonly id: string
 	readonly version: number
 	readonly sourceKinds: readonly string[]
 	readonly outputType: string
 	readonly dataSchema: string
 	readonly decodeConfig: (value: unknown) => TConfig
-	readonly project: (signal: NormalizedSignal, config: TConfig) => ProjectedEventData
+	readonly decodeOutput: (value: unknown) => TData
+	readonly project: (signal: NormalizedSignal, config: TConfig) => ProjectedEventData<TData>
 }
 
-type ErasedSignalProjector = SignalProjector<unknown>
+type ErasedSignalProjector = SignalProjector<unknown, JsonValue>
 
 export class ProjectorRegistry {
 	readonly #projectors = new Map<string, ErasedSignalProjector>()
 
-	register<TConfig>(projector: SignalProjector<TConfig>): this {
+	register<TConfig, TData extends JsonValue>(projector: SignalProjector<TConfig, TData>): this {
 		if (projector.id.trim().length === 0) throw new Error("projector ID must not be empty")
 		if (!Number.isSafeInteger(projector.version) || projector.version < 1)
 			throw new Error("projector version must be a positive safe integer")
@@ -37,7 +38,7 @@ export class ProjectorRegistry {
 			throw new Error("projector data schema must not be empty")
 		const key = ProjectorRegistry.key(projector.id, projector.version)
 		if (this.#projectors.has(key)) throw new Error(`duplicate projector registration: ${key}`)
-		this.#projectors.set(key, projector as ErasedSignalProjector)
+		this.#projectors.set(key, projector as unknown as ErasedSignalProjector)
 		return this
 	}
 
@@ -168,7 +169,7 @@ export class CompiledProjectionRegistry {
 						dataSchema: projection.projector.dataSchema,
 						subject: projected.subject,
 						time: projected.time,
-						data: projected.data as JsonValue,
+						data: projection.projector.decodeOutput(projected.data),
 					}),
 				)
 			} catch (error) {
