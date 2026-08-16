@@ -444,6 +444,15 @@ export type ShareWidgetDataOutcome = Schema.Schema.Type<typeof ShareWidgetDataOu
 export class ShareWidgetDataResponse extends Schema.Class<ShareWidgetDataResponse>("ShareWidgetDataResponse")(
 	{
 		results: Schema.Array(ShareWidgetDataOutcome),
+		/**
+		 * The value each dashboard variable resolved to for this batch — after the
+		 * board's own ladder (selection → default → All → first option) ran
+		 * server-side. `$__all` for an All selection. The page interpolates widget
+		 * titles with these exactly as the signed-in board does; without them a
+		 * shared tile reads "Throughput for $service". Option lists are not
+		 * returned: a title renders "All", never the expansion.
+		 */
+		variables: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
 	},
 ) {}
 

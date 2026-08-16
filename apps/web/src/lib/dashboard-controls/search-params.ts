@@ -59,6 +59,25 @@ export interface DashboardViewParams {
 
 export type DashboardControlParams = VariableSearchParams & DashboardViewParams
 
+/**
+ * The `var-*` params of a decoded search, prefix stripped and coerced to
+ * strings — TanStack JSON-parses values, so `?var-port=8080` arrives as a
+ * number. Shared by the dashboard route and the share page, so a `var-` deep
+ * link means the same thing on both.
+ */
+export function variableValuesFromSearch(search: Record<string, unknown>): Record<string, string> {
+	const values: Record<string, string> = {}
+	for (const [key, value] of Object.entries(search)) {
+		if (!key.startsWith(VARIABLE_PARAM_PREFIX)) continue
+		if (typeof value === "string") {
+			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = value
+		} else if (typeof value === "number" || typeof value === "boolean") {
+			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = String(value)
+		}
+	}
+	return values
+}
+
 const VIEW_PARAM_KEYS = ["filter", "collapsed", "expanded", "tab", "widget"] as const
 
 /**

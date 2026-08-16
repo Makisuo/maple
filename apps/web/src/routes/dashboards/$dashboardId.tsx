@@ -24,6 +24,7 @@ import {
 	dashboardViewParamsSchema,
 	pickDashboardControlParams,
 	variableSearchRest,
+	variableValuesFromSearch,
 } from "@/lib/dashboard-controls/search-params"
 import {
 	DashboardActionsProvider,
@@ -60,19 +61,6 @@ const dashboardViewSearchSchema = Schema.StructWithRest(
 	}),
 	[variableSearchRest],
 )
-
-function variableValuesFromSearch(search: Record<string, unknown>): Record<string, string> {
-	const values: Record<string, string> = {}
-	for (const [key, value] of Object.entries(search)) {
-		if (!key.startsWith(VARIABLE_PARAM_PREFIX)) continue
-		if (typeof value === "string") {
-			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = value
-		} else if (typeof value === "number" || typeof value === "boolean") {
-			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = String(value)
-		}
-	}
-	return values
-}
 
 export const Route = createFileRoute("/dashboards/$dashboardId")({
 	component: DashboardViewPage,

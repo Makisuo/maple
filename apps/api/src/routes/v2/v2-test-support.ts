@@ -89,6 +89,7 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2SharePublicLive.pipe(
 		Layer.provide(
 			Layer.succeed(DashboardWidgetDataService, {
+				variableOptions: () => Effect.succeed({}),
 				resolve: () => Effect.die("share widget data is not exercised by v2 route harnesses"),
 			}),
 		),

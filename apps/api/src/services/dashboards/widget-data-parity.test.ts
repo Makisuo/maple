@@ -83,10 +83,36 @@ const makeHarness = () => {
 	const queryEngine = Layer.succeed(QueryEngineService, {
 		execute: (_tenant: unknown, request: { startTime: string; endTime: string; query: unknown }) => {
 			captured.execute.push(request)
-			const kind = (request.query as { kind?: string }).kind
+			const query = request.query as {
+				kind?: string
+				source?: string
+				facet?: string
+				attributeKey?: string
+			}
+			if (query.kind === "facets") {
+				if (query.source === "logs") return Effect.fail("logs facets are down")
+				return Effect.succeed({
+					result: {
+						kind: "facets",
+						data: [
+							{ facetType: query.facet, name: "checkout", count: 9 },
+							{ facetType: "spanName", name: "GET /", count: 9 },
+							{ facetType: query.facet, name: "search", count: 4 },
+						],
+					},
+				})
+			}
+			if (query.kind === "attributeValues") {
+				return Effect.succeed({
+					result: {
+						kind: "attributeValues",
+						data: [{ value: `${query.attributeKey}-a`, count: 1 }],
+					},
+				})
+			}
 			return Effect.succeed({
 				result:
-					kind === "list"
+					query.kind === "list"
 						? { kind: "list", data: [], meta: { columns: [] } }
 						: { kind: "timeseries", data: [{ bucket: "2026-01-01 00:00:00", series: { A: 1 } }] },
 			})
@@ -374,6 +400,49 @@ describe("shared widget data parity with the signed-in board", () => {
 		// The narrowed window is what the params carry too — not just the runner
 		// bounds — since `$__startTime` macros read from the params.
 		expect(dataSourceQuerySet(listSource)?.resultShape).toBe("list")
+
+		await shared.runtime.dispose()
+	})
+
+	it("variable options: lists each query variable's source once, over the window, and tolerates a failing source", async () => {
+		const shared = makeHarness()
+		const definitions = [
+			{ name: "service", type: "query", source: { kind: "facet", facet: "service" } },
+			{ name: "svc2", type: "query", source: { kind: "facet", facet: "service" } },
+			{
+				name: "pod",
+				type: "query",
+				source: { kind: "attribute", scope: "resource", attributeKey: "k8s.pod" },
+			},
+			{ name: "sev", type: "query", source: { kind: "facet", facet: "log_severity" } },
+			{ name: "free", type: "textbox" },
+			{ name: "fixed", type: "custom", options: [{ value: "x" }] },
+		]
+
+		const options = await shared.runtime.runPromise(
+			DashboardWidgetDataService.use((service) =>
+				// oxlint-disable-next-line typescript/no-explicit-any -- fixture definitions in stored shape
+				service.variableOptions(ORG, definitions as any, WINDOW),
+			),
+		)
+
+		// Two variables on one source share one query; a source that fails lists
+		// nothing rather than failing the batch; custom/textbox run nothing.
+		expect(options).toEqual({
+			service: ["checkout", "search"],
+			svc2: ["checkout", "search"],
+			pod: ["k8s.pod-a"],
+			sev: [],
+		})
+		const facetQueries = shared.captured.execute.filter(
+			(r) => (r.query as { kind: string }).kind === "facets",
+		)
+		expect(facetQueries).toHaveLength(2)
+		expect(
+			shared.captured.execute.every(
+				(r) => r.startTime === WINDOW.startTime && r.endTime === WINDOW.endTime,
+			),
+		).toBe(true)
 
 		await shared.runtime.dispose()
 	})

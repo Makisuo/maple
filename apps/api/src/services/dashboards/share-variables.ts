@@ -26,13 +26,25 @@
  *      change. Either alone would be weaker than both.
  *
  * `query` variables sit across both. Their options are whatever the warehouse
- * returns right now, so the caller may or may not have resolved a list: with a
- * list they get defence 1, without one they get defence 2. What they must never
+ * returns right now — the route lists them server-side over the batch window
+ * (`DashboardWidgetDataService.variableOptions`, the same facet / attribute
+ * queries the signed-in provider runs) — so with a list they get defence 1 and
+ * with a source that listed nothing they get defence 2. What they must never
  * get is an *empty* list treated as an exhaustive one — that rejects every
  * value including the board's own stored default, which blanks the share.
+ *
+ * Which value a variable takes when the viewer picked none is not decided
+ * here: `resolveDashboardVariableValue` (`@maple/query-engine`) is the board's
+ * own ladder — selection → default → All → first option — shared with the
+ * signed-in provider, so a share resolves to what the board resolves to.
  */
 import { splitWhereClause } from "@maple/domain/where-clause"
-import { ALL_VALUE, type ResolvedVariable, type VariableValues } from "@maple/query-engine"
+import {
+	ALL_VALUE,
+	resolveDashboardVariableValue,
+	type ResolvedVariable,
+	type VariableValues,
+} from "@maple/query-engine"
 import { ShareVariableInvalidError } from "@maple/domain/http"
 import { Effect } from "effect"
 
@@ -107,15 +119,23 @@ export const resolveShareVariables = Effect.fn("resolveShareVariables")(function
 	const resolved: Record<string, ResolvedVariable> = {}
 
 	for (const definition of definitions) {
-		const value = submitted[definition.name] ?? definition.defaultValue
-		if (value === undefined) continue
-
 		const options =
 			definition.type === "custom"
 				? (definition.options ?? []).map((option) => option.value)
 				: definition.type === "query"
 					? [...(queryOptions[definition.name] ?? [])]
 					: []
+
+		// The board's own ladder — selection → default → All → first option —
+		// through the same function the signed-in provider runs. Options are
+		// resolved by the time this runs (`loading: false`), so a query variable
+		// with no default lands on its first loaded option here as it does there,
+		// and a textbox with nothing selected is the empty string on both.
+		const value = resolveDashboardVariableValue(definition, submitted[definition.name], {
+			options,
+			loading: false,
+		})
+		if (value === undefined) continue
 
 		if (value === ALL_VALUE) {
 			// "All" is only selectable when the board offers it. Otherwise it is a
