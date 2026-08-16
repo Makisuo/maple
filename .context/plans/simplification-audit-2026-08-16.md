@@ -11,6 +11,13 @@
 > both on 2026-08-16. Their register entries below are marked and kept rather
 > than deleted — the evidence is what makes a later regression recognisable.
 >
+> Stack #499 (2026-08-16) carries twelve more: `R-API04-02` (#494),
+> `R-APP04-01` and `R-APP04-02` (#495), `R-PKG10-01` (#496), `R-OPS02-02` (#497),
+> `R-PKG16-01` (#498), `R-OPS02-01` (#500), `R-WEB09-01` (#501), `R-WEB10-01`
+> (#502), `R-API11-01` (#503), `R-PKG02-02` (#504) and `R-OPS15-01` (#505).
+> Each was reproduced before it was changed; where a finding's stated evidence
+> turned out to be narrower or wider than reality, the entry below says so.
+>
 > Not reproduced: `R-WEB04-01`. The routes do lack `remountDeps`, but with the
 > guard deliberately disabled, navigating widget A -> B in the running app still
 > rendered B's own name, type, query and time range — the editor re-seeds from
@@ -46,14 +53,19 @@ The former `R-WEB05-01` recommendation was removed because external commit `4f27
 
 1. ~~`R-API01-01` — terminal Postgres invocation scope.~~ Landed (#490).
 2. ~~`R-WEB02-01` — generation-keyed authentication refresh.~~ Landed (#491).
-3. `R-API04-02` — conditional API-key roll.
-4. `R-OPS02-02` — dual-key deployment-environment projection.
-5. `R-PKG10-01` — SDK-owned Cloudflare flush finalization.
-6. `R-APP04-01`, then `R-APP04-02` — scraper outcome and result-buffer ownership.
-7. `R-WEB04-01` — route-keyed dashboard/editor sessions.
+3. ~~`R-API04-02` — conditional API-key roll.~~ Landed (#494).
+4. ~~`R-OPS02-02` — dual-key deployment-environment projection.~~ Landed (#497).
+5. ~~`R-PKG10-01` — SDK-owned Cloudflare flush finalization.~~ Landed (#496).
+6. ~~`R-APP04-01`, then `R-APP04-02` — scraper outcome and result-buffer ownership.~~ Landed (#495).
+7. `R-WEB04-01` — route-keyed dashboard/editor sessions. Still wants a reproducer first; see the note at the top.
 8. `R-LIB02-01` — tenant-proof design and adversarial tests before migration.
 9. `R-API08-02`, then `R-API08-01` as separately deployable lifecycle slices.
-10. `R-PKG16-01`, then dependent `R-PKG09-01`.
+10. ~~`R-PKG16-01`~~ landed (#498); dependent `R-PKG09-01` is now unblocked.
+
+Stack #499 also took six findings from the Top tier out of order, because each was
+small, independently deployable and touched a subsystem nothing else in the stack
+touched: `R-OPS02-01` (#500), `R-WEB09-01` (#501), `R-WEB10-01` (#502),
+`R-API11-01` (#503), `R-PKG02-02` (#504), `R-OPS15-01` (#505).
 
 ### Remaining tiers
 
@@ -201,7 +213,7 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 - `R-API04-01` — Atomic schema-apply kickoff claim. Evidence: `OrgClickHouseSettingsService.ts:1277-1348`. Active-run check, queued row and workflow launch fail independently, leaving duplicate launches or permanent queued rows. Claim with conditional insert/update containing a pre-generated workflow ID; distinguish confirmed from ambiguous launch failure. Scope: service/tests, no migration. Validate concurrent calls, retryability and explicit ID propagation. C/I/E: high/high/medium; deferred pending Workflow duplicate-ID semantics.
 
-- `R-API04-02` — Conditional API-key roll. Evidence: `ApiKeysService.ts:268-309,332-348`. Read-then-unconditional updates allow concurrent successors and revoke/roll races. In one transaction, conditionally revoke and return the source row; only the winner inserts a successor. Scope: service/tests. Validate roll-vs-roll and revoke-vs-roll barriers. C/I/E: high/high/small-medium.
+- `R-API04-02` — **LANDED #494.** The conditional revoke became the claim: one `UPDATE … WHERE revoked = false RETURNING`, and only the caller it returns a row to inserts a successor. Revoke took the same predicate so a racing pair no longer re-stamps `revoked_at`. Conditional API-key roll. Evidence: `ApiKeysService.ts:268-309,332-348`. Read-then-unconditional updates allow concurrent successors and revoke/roll races. In one transaction, conditionally revoke and return the source row; only the winner inserts a successor. Scope: service/tests. Validate roll-vs-roll and revoke-vs-roll barriers. C/I/E: high/high/small-medium.
 
 - `R-API05-01` — Inject warehouse client factory per Layer. Evidence: `WarehouseQueryService.ts:236-240,450-454,508-514`; tests/evals mutate a module global. Capture an immutable factory during service construction. Scope: service, tests/eval runtime and composition root. Risk: preserve per-instance route/client cache. Validate two simultaneous layers with different factories. C/I/E: high/high/small-medium.
 
@@ -225,7 +237,7 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 - `R-API10-02` — One compiled unique MCP registry entry per tool. Evidence: `mcp/tools/registry.ts:61-240`, `dispatcher.ts:10-28`, `llm-tools.ts:82-99`. Arrays permit duplicate names with first/last/all behavior depending on surface; schemas compile repeatedly. Use ordered `Map<string,RegisteredTool>` owning codec, handler and descriptor; reject duplicates and expose a handler-free projection for web. Validate ordering, uniqueness and cross-surface parity. C/I/E: high/medium-high/medium.
 
-- `R-API11-01` — Completion tool as one named value. Evidence: `chat/loop/types.ts:34-71`, `turn.ts:163-189,544-728`, `turn-runner.ts:270-290`. Tool map and closing name can disagree; production investigation chat supplies `submit_diagnosis` without enabling structured close. Use optional `{name,tool}`. Scope: loop/types/tool builder/runner and workflow caller. Validate normal, early and forced completion. C/I/E: high/high/small-medium.
+- `R-API11-01` — **LANDED #503.** The consequence was worse than "structured close never engages": a voluntary `submit_diagnosis` was dispatched but did not end the turn, and at the step ceiling the closing step offered no tools at all, so an autonomous investigation that had spent its whole budget answered in prose and left `investigations.diagnosis` null — indistinguishable from finding nothing. Shipped as one `{name,tool,closes}`. `closes` is true for the internal-service actor and false for a human follow-up, which would otherwise have its diagnosis rewritten on every question. Completion tool as one named value. Evidence: `chat/loop/types.ts:34-71`, `turn.ts:163-189,544-728`, `turn-runner.ts:270-290`. Tool map and closing name can disagree; production investigation chat supplies `submit_diagnosis` without enabling structured close. Use optional `{name,tool}`. Scope: loop/types/tool builder/runner and workflow caller. Validate normal, early and forced completion. C/I/E: high/high/small-medium.
 
 - `R-API11-02` — One retry planner for thrown and provider-event failures. Evidence: `turn.ts:298-481`; classification already exists in `retry.ts:23-48`. Two paths duplicate pruning, attempt accounting, budget, markers, sleeps and recursion. Normalize to descriptors and execute one `Retry | Finish` plan. Validate parity across both failure representations. C/I/E: high/medium-high/medium.
 
@@ -243,9 +255,9 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 - `R-APP03-02` — Remove inert exporter-concurrency setting. Evidence: `main.rs:281-285`, `telemetry.rs:402-466,683-703`; exactly one worker exists per shard/destination. Delete parser/config/deployment passthrough and document actual topology. Risk: zero value stops causing startup rejection. Retain WAL/order tests. C/I/E: high/medium/small.
 
-- `R-APP04-01` — Scrape outcome union. Evidence: `ScrapeScheduler.ts:54-78,243-423`; delivery-blocked is already logged as rate-limited. Use `Success` or `Failure{reason,message,retryAfter?}` and derive policy/telemetry/logs once. Scope: scheduler/tests. Validate 429/503, auth, ingest 402 and generic failures. C/I/E: high/high/small.
+- `R-APP04-01` — **LANDED #495.** Confirmed: the log branch had no arm for a delivery block, so an ingest 402 backed off, tagged its span `delivery_blocked` and told the operator it was rate-limited. Shipped as `Success | Failure{reason,message,retryAfterMs?}` with the three derivations reading `reason` through an exhaustive switch. Scrape outcome union. Evidence: `ScrapeScheduler.ts:54-78,243-423`; delivery-blocked is already logged as rate-limited. Use `Success` or `Failure{reason,message,retryAfter?}` and derive policy/telemetry/logs once. Scope: scheduler/tests. Validate 429/503, auth, ingest 402 and generic failures. C/I/E: high/high/small.
 
-- `R-APP04-02` — Serialized pending-result buffer. Evidence: `ScrapeScheduler.ts:201-210,495-538`. Contents, capacity, order and gauge update separately; concurrent enqueue/requeue makes metrics inaccurate. Introduce local `ResultBuffer` with atomic enqueue/take/requeue/size transitions, network outside the lock. Validate blocked flush, overflow and interruption. C/I/E: high/high/small-medium.
+- `R-APP04-02` — **LANDED #495.** Worse than stated: the gauge was never written on enqueue at all, only inside the flush, and an interrupt between drain and requeue dropped the whole in-flight batch. Shipped as a `ResultBuffer` publishing the gauge from inside its own critical section, network outside the lock, and an `onInterrupt` requeueing exactly the undelivered remainder. Serialized pending-result buffer. Evidence: `ScrapeScheduler.ts:201-210,495-538`. Contents, capacity, order and gauge update separately; concurrent enqueue/requeue makes metrics inaccurate. Introduce local `ResultBuffer` with atomic enqueue/take/requeue/size transitions, network outside the lock. Validate blocked flush, overflow and interruption. C/I/E: high/high/small-medium.
 
 - `R-APP05-01` — Unified Slack workspace resolve/cache/revocation state. Evidence: `agent/lib/maple.ts:71-122,145-158`. Revocation deletes only settled cache, so an earlier in-flight resolve can later recache revoked secrets. Use one team-state map with pending/resolved/negative/revoked identity and publish only if still current. Validate resolve→revoke→late-response race. C/I/E: high/high/small-medium.
 
@@ -293,11 +305,11 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 - `R-WEB08-01` — Generation-scoped replay-loader state machine. Evidence: `use-replay-chunk-loader.ts:100-310`, `replay-player-context.tsx:541-548`. Loaded ranges, queue, seed and seek target transition separately; consumed targets can remain live. Use waiting/seeding/ready reducer with generation/range-tagged events and one-shot seed resume. Validate seek, stale completion and recovery/remount. C/I/E: high/high/medium-high.
 
-- `R-WEB09-01` — Alert-rule initialization union. Evidence: `alert-create-page-content.tsx:35-48,169-201`; terminal list failure currently renders a permanent skeleton. Return `loading | failed | ready`, with draft only in ready. Validate edit success/missing/failure and stable remount keys. C/I/E: high/high/low-medium.
+- `R-WEB09-01` — **LANDED #501.** The terminal failure is real (`useAlertRulesList` fails with `SYNC_UNAVAILABLE` once the Electric shape's recovery budget is spent) and rendered byte-for-byte the loading screen, forever. Shipped as `loading | failed | ready` with the draft on `ready` alone, so a blank form on a non-ready state is unrepresentable. The create path still falls back to a usable blank form, since nothing is being edited there. Alert-rule initialization union. Evidence: `alert-create-page-content.tsx:35-48,169-201`; terminal list failure currently renders a permanent skeleton. Return `loading | failed | ready`, with draft only in ready. Validate edit success/missing/failure and stable remount keys. C/I/E: high/high/low-medium.
 
 - `R-WEB09-02` — Pending destination commands keyed by destination ID. Evidence: `settings-tab.tsx:43-78,117-177,269-279`, `destination-card.tsx:112-150`. Global testing/deleting IDs and unowned toggles race across cards. Use `Map<DestinationId,Action>` and exact-entry cleanup in `finally`. Validate out-of-order A/B and same-ID suppression. C/I/E: high/medium-high/medium.
 
-- `R-WEB10-01` — Derive issue actions from canonical transition matrix. Evidence: `packages/domain/src/http/errors.ts:37-63`, `state-select.tsx:34-49`, context/bulk menus. Two menus expose impossible transitions and bulk selection discards state. Carry `{id,state}` and compute allowed intersection from `WORKFLOW_TRANSITIONS`. Validate terminal and mixed selections. C/I/E: high/high/low-medium.
+- `R-WEB10-01` — **LANDED #502.** Two of the three cited menus reproduced: the context menu and the bulk bar each kept their own list of all seven states, so a `cancelled` issue offered all six others and the server rejected each; `state-select.tsx` already consulted the matrix and was only de-duplicated. Selection now carries `{id,state}` and `allowedTransitionsForAll` computes the intersection once in `packages/domain` beside the matrix. Note `TERMINAL_WORKFLOW_STATES` includes `done`, which still has outgoing moves — terminal here means `cancelled` alone. Derive issue actions from canonical transition matrix. Evidence: `packages/domain/src/http/errors.ts:37-63`, `state-select.tsx:34-49`, context/bulk menus. Two menus expose impossible transitions and bulk selection discards state. Carry `{id,state}` and compute allowed intersection from `WORKFLOW_TRANSITIONS`. Validate terminal and mixed selections. C/I/E: high/high/low-medium.
 
 - `R-WEB11-01` — Genuine node/edge discriminants in service map. Evidence: `service-map-utils.ts:63-164,480-520`, node/view selection paths. Optional kind-specific payloads and fake zero traffic for structural edges force casts, scans and ID parsing. Use node and traffic-vs-structural unions plus one node index. Validate detail selection/declutter/ELK. C/I/E: high/high/high.
 
@@ -319,7 +331,7 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 - `R-PKG02-01` — Parse raw auth environment once. Evidence: `packages/auth/src/index.ts:200,231-339,464-480`; API/Electric repeat permissive unknown→self-hosted normalization. Decode to `ClerkConfig | SelfHostedConfig` with mode-owned required secrets. Scope includes host normalization. Validate unknown/blank/mixed modes and brands. C/I/E: high/high/medium.
 
-- `R-PKG02-02` — Normalized verified self-hosted JWT claims. Evidence: `packages/auth/src/index.ts:32-53,121-198,301-410`. Permissive decoded claims require a second validation pipeline. After signature verification, decode `SelfHostedSessionClaims` with required brands, literal mode, normalized roles and HS256. Validate correctly signed malformed claims and temporal boundaries. C/I/E: high/high/low-medium.
+- `R-PKG02-02` — **LANDED #504.** The split hid a live acceptance bug: the second pipeline tested expiry as `payload.exp && now >= payload.exp`, so a correctly signed token carrying `exp: 0` skipped the check on falsiness and was accepted permanently; `1e999` decodes to `Infinity` and read as "never expires" the same way. Claims are now decoded straight after signature verification into branded ids, a literal mode, normalized roles and finite temporal claims, with presence-based guards. HS256 was already pinned against `none` and asymmetric algorithms — now covered by tests. Acceptance narrows only in those two cases. `exp` stays optional because minted tokens carry none at all — tracked separately. Normalized verified self-hosted JWT claims. Evidence: `packages/auth/src/index.ts:32-53,121-198,301-410`. Permissive decoded claims require a second validation pipeline. After signature verification, decode `SelfHostedSessionClaims` with required brands, literal mode, normalized roles and HS256. Validate correctly signed malformed claims and temporal boundaries. C/I/E: high/high/low-medium.
 
 - `R-PKG03-01` — One browser session lifecycle handle. Evidence: `packages/browser/src/init.ts:36-43,104-180`. Replay and metadata handles are mutually exclusive but stored separately. Use one optional `SessionLifecycleHandle` plus pending lazy settlement. Validate lazy failure fallback and exactly one shutdown. C/I/E: high/medium-high/low.
 
@@ -347,7 +359,7 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 - `R-PKG09-02` — Attribute-filter operator arity union. Evidence: `domain/query-engine.ts:41-48`, `traces-shared.ts:102-147`, runtime shadow shape. Missing operands silently become empty string, zero or false predicates. Use exists/no operand, in/values and scalar/value variants. Validate schema rejection and every CH predicate. C/I/E: high/high/medium.
 
-- `R-PKG10-01` — Cloudflare flush owns deferred-finalizer drainage. Evidence: `effect-sdk/src/cloudflare/index.ts:164-187`; API/Electric duplicate `setTimeout(0)` workarounds. Yield one macrotask inside serialized SDK flush. Remove caller workarounds later. Validate next-macrotask span and overlapping flush. C/I/E: high/high/low.
+- `R-PKG10-01` — **LANDED #496.** Cause pinned: Effect ends the root server span from a scheduled task, which `Scheduler` drains on a macrotask, so a promise-chained flush could never see it. One yield now sits inside the `makeSerializedFlush` callback. Caller workarounds deliberately kept — the SDK is published and the workers ship against a pinned version, so removing them before the pin is the skew this fixes. Cloudflare flush owns deferred-finalizer drainage. Evidence: `effect-sdk/src/cloudflare/index.ts:164-187`; API/Electric duplicate `setTimeout(0)` workarounds. Yield one macrotask inside serialized SDK flush. Remove caller workarounds later. Validate next-macrotask span and overlapping flush. C/I/E: high/high/low.
 
 - `R-PKG10-02` — One browser resource builder for both telemetry presets. Evidence: `client/layer.ts:81-103`, `client/flushable.ts:130-155`; only one emits stable instance ID. Share package-private builder with stable ID, dual environment keys and existing precedence. Validate equivalent resource invariants. C/I/E: high/medium/low.
 
@@ -365,7 +377,7 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 - `R-PKG15-02` — Exhaustive named-pipe registry. Evidence: `pipe-dispatch.ts:75-156,202-835`; domain owns names but dispatch accepts strings/unknown records and tests omit builders. Use `Record<WarehouseQueryName, entry>` with explicit per-pipe decoders. Validate exhaustive coverage, coercion policy, baselines and DESCRIBE. C/I/E: high/high/high; depends on `R-PKG09-02`.
 
-- `R-PKG16-01` — Authoritative group-by normalization. Evidence: `query-builder/model.ts:599-737,754-852`; documented/private dashboard aliases include snake case that exported alert resolver omits. Use one source-specific alias map/prefix handler; generate token catalogue from it; retain consumer policy. Validate catalogue/resolver/builder parity and alert compilation. C/I/E: high/high/medium.
+- `R-PKG16-01` — **LANDED #498.** The divergent tokens were `service_name`, `span_name`, `status_code` (traces) and `service_name`, `severity_text` (logs): documented, chartable, and rejected by the exported alert resolver, so a widget saved with one failed to compile as a rule. One source-keyed alias map plus two prefix handlers now decide meaning; the catalogue is generated from it and each consumer keeps its own policy. No SQL baseline moved. Authoritative group-by normalization. Evidence: `query-builder/model.ts:599-737,754-852`; documented/private dashboard aliases include snake case that exported alert resolver omits. Use one source-specific alias map/prefix handler; generate token catalogue from it; retain consumer policy. Validate catalogue/resolver/builder parity and alert compilation. C/I/E: high/high/medium.
 
 - `R-PKG16-02` — Ordered per-query result plus diagnostic. Evidence: `query-set/window.ts:27-35,84-97,157-260`. Concurrent children mutate a completion-order diagnostics array and primary failure attempts are discarded. Each child returns `{result,diagnostic}`; unzip ordered `Effect.forEach` result. Validate delayed completion ordering and retained attempts. C/I/E: high/high/low-medium.
 
@@ -429,9 +441,9 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 - `R-OPS01-02` — Stable CLI UI-asset contract with build-only payload. Evidence: generator overwrites tracked stub, build restores with `git checkout`, MIME truth is duplicated. Keep stable asset/MIME/provider source; inject ignored temporary payload at build time. Validate successful/failed builds leave tracked tree unchanged and embedded headers/bodies match. C/I/E: high/medium/medium.
 
-- `R-OPS02-01` — One cluster-collector activation predicate. Evidence: Fargate activates ConfigMap but Deployment/RBAC/SA/Service omit it. Add chart helper `clusterCollector.enabled && any(receiver)` and use it everywhere. Validate render matrix for every receiver alone/all/none. C/I/E: high/high/low.
+- `R-OPS02-01` — **LANDED #500 (chart 0.5.2).** The rendered matrix confirmed it: the Fargate-only install the README documents produced a ConfigMap and nothing else, so the cadvisor scrape silently never ran. One `cluster.enabled` helper now gates all six resources; every enabled cell renders the complete set and `none` renders nothing. The ClusterRole is still wider than a Fargate-only install needs — least privilege, tracked separately. One cluster-collector activation predicate. Evidence: Fargate activates ConfigMap but Deployment/RBAC/SA/Service omit it. Add chart helper `clusterCollector.enabled && any(receiver)` and use it everywhere. Validate render matrix for every receiver alone/all/none. C/I/E: high/high/low.
 
-- `R-OPS02-02` — One dual-key deployment-environment projection. Evidence: collector emits only legacy `deployment.environment`; instrumentation emits only canonical `.name`; current materializations read legacy. Emit both from one chart helper in all paths. Validate rendered agent/cluster/instrumentation attributes and a representative projected span. C/I/E: high/high/low. Maple telemetry conventions directly shaped this recommendation.
+- `R-OPS02-02` — **LANDED #497 (chart 0.5.1).** Consequence was concrete: since every materialization reads the legacy key, an auto-instrumented user-app span — the one a chart user cares about — materialized an empty environment while collector self-telemetry did not. Both keys now come from one `deploymentEnvironment` helper used by agent, cluster and instrumentation. One dual-key deployment-environment projection. Evidence: collector emits only legacy `deployment.environment`; instrumentation emits only canonical `.name`; current materializations read legacy. Emit both from one chart helper in all paths. Validate rendered agent/cluster/instrumentation attributes and a representative projected span. C/I/E: high/high/low. Maple telemetry conventions directly shaped this recommendation.
 
 - `R-OPS03-01` — Exact executable LLM vendor delta. Evidence: `sync-llm-upstream.ts` allowlists whole files and skips them during sync; arbitrary content drift passes. Commit one machine-applicable patch/delta, reconstruct upstream+patch and byte-compare. Validate unauthorized edits, added files, overlap failure and clean round-trip. C/I/E: high/high/medium.
 
@@ -447,7 +459,7 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 - `R-OPS09-01` — Atomic todo store/cache example state. Evidence: `TodoService.ts:111-123,157-212,246-338`. Separate Refs permit new store with stale cache and delayed read-modify-write loses concurrent changes. Use one `Ref<TodoState>` and synchronous `Ref.modify`, keeping notifications outside. Validate controlled miss/write/toggle/remove interleavings. C/I/E: high/medium/low.
 
-- `R-OPS15-01` — Delete historical one-shot migration generator. Evidence: `gen-error-label-migration.ts:1-54` reads today’s generated snapshot and overwrites migration 0003; registry is now v15. Delete the orphan and make migration provenance comment self-contained without changing statement bytes. Validate no references and exact migration snapshot/replay. C/I/E: high/medium-high/low.
+- `R-OPS15-01` — **LANDED #505.** Correction to the stated evidence: the hazard was latent, not manifest — the generated `error_events_mv` CREATE still matched 0003's third statement byte for byte, so re-running would not have corrupted anything yet, but the next edit to that view would have rewritten an applied v3-era migration. Orphan deleted (no package script, workflow, turbo entry or doc referenced it); 0003's provenance comment is now self-contained and its statement bytes are unchanged — the migration object hashes identically. These are ClickHouse migrations, plain TypeScript objects, so no drizzle journal or snapshot checksum is involved. Delete historical one-shot migration generator. Evidence: `gen-error-label-migration.ts:1-54` reads today’s generated snapshot and overwrites migration 0003; registry is now v15. Delete the orphan and make migration provenance comment self-contained without changing statement bytes. Validate no references and exact migration snapshot/replay. C/I/E: high/medium-high/low.
 
 ## Explicit skips
 
