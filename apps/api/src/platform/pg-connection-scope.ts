@@ -5,10 +5,10 @@ import {
 	wrapMaplePgClient,
 } from "@maple/db/client"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { Context, Effect } from "effect"
+import { Context, Effect, Schema } from "effect"
 import type { HttpMiddleware } from "effect/unstable/http"
 import type { DatabaseClient, DatabaseError } from "./DatabaseLive"
-import { executeWithSpan } from "./DatabaseLive"
+import { executeWithSpan, failExecuteWithSpan, toDatabaseError } from "./DatabaseLive"
 import { resolveDbConnectionSource } from "./pg-connection-source"
 
 /**
@@ -73,6 +73,23 @@ export class PgConnectionScope extends Context.Reference<PgConnectionScopeApi | 
 ) {}
 
 /**
+ * A call arrived after its scope was released.
+ *
+ * Not a database failure — nothing was dialed and no statement ran — so it
+ * carries its own tag rather than being flattened into prose. `run` keeps the
+ * `DatabaseError` channel that ~200 call sites are typed against, and this
+ * travels as that error's `cause`, where a caller can still discriminate it and
+ * a span can name it as something other than a driver fault.
+ */
+export class PgConnectionScopeClosedError extends Schema.TaggedError<PgConnectionScopeClosedError>()(
+	"@maple/api/platform/PgConnectionScopeClosedError",
+	{ message: Schema.String },
+) {}
+
+const CLOSED_MESSAGE =
+	"Postgres connection scope is already closed — this call outlived the request, cron tick or Workflow run that owned the connection"
+
+/**
  * Test seam: how to create the scope's socket. Real callers pass nothing.
  *
  * It receives the options the real factory would have been given, so a test can
@@ -108,25 +125,56 @@ export const makePgConnectionScope = (
 		seams?.openSocket ?? ((opts: MaplePgSocketOptions) => createMaplePgSocket(connectionString, opts))
 	const openSocket = () => create(options)
 
-	let socket: MaplePgSocketHandle | undefined
+	// Three states, not a nullable handle. Cold and Closed both used to be
+	// `undefined`, which made "never dialed" and "already released" the same
+	// value — so a call arriving after the boundary silently dialed a SECOND
+	// socket, outside the invocation that is allowed to own one. Workers tie
+	// sockets to the invocation that opened them, and the call sites that do
+	// this are `Effect.ignore`d (see `fork-request-scoped.ts`), so the failure
+	// never surfaced. Closed is now terminal and refuses instead of reopening.
+	let state: { _tag: "Cold" } | { _tag: "Open"; handle: MaplePgSocketHandle } | { _tag: "Closed" } = {
+		_tag: "Cold",
+	}
 
 	return {
-		run: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			executeWithSpan(async (hooks) => {
+		// `suspend` so the state is read when the effect runs, not when it is built
+		// — a call constructed before teardown must still be refused after it. It
+		// also settles the connection decision in one place: the promise body below
+		// receives a handle, so it can no longer reach a state that says Closed.
+		run: <T>(fn: (db: DatabaseClient) => Promise<T>): Effect.Effect<T, DatabaseError> =>
+			Effect.suspend(() => {
+				if (state._tag === "Closed") {
+					return failExecuteWithSpan(
+						toDatabaseError(new PgConnectionScopeClosedError({ message: CLOSED_MESSAGE })),
+						{
+							...extraAttributes,
+							"db.connect.scope_state": "closed",
+							// `error.type` because `postgresErrorType` has nothing to classify
+							// here: no driver was involved, so without this the span would land
+							// as an unlabelled database error next to real ones.
+							"error.type": "SCOPE_CLOSED",
+						},
+					)
+				}
 				// Lazy: an invocation that never touches the database never creates one.
-				const reused = socket !== undefined
-				const open = (socket ??= openSocket())
-				hooks.record({ "db.connect.reused": reused })
-				// Wrapped per call so each call's statements land in its own span.
-				// One shared wrapper would cross-attribute `db.query.text` between
-				// concurrent calls; the wrapper is cheap (relational config only).
-				return await fn(wrapMaplePgClient(open.sql, { onQuery: hooks.collect }))
-			}, extraAttributes),
+				const reused = state._tag === "Open"
+				const open = state._tag === "Open" ? state.handle : openSocket()
+				state = { _tag: "Open", handle: open }
+				return executeWithSpan(async (hooks) => {
+					hooks.record({ "db.connect.reused": reused })
+					// Wrapped per call so each call's statements land in its own span.
+					// One shared wrapper would cross-attribute `db.query.text` between
+					// concurrent calls; the wrapper is cheap (relational config only).
+					return await fn(wrapMaplePgClient(open.sql, { onQuery: hooks.collect }))
+				}, extraAttributes)
+			}),
 
+		// Closed first, then release: a call racing the teardown is refused
+		// rather than handed a socket that is being ended underneath it.
 		close: async () => {
-			const open = socket
-			socket = undefined
-			if (open !== undefined) await open.end().catch(() => undefined)
+			const previous = state
+			state = { _tag: "Closed" }
+			if (previous._tag === "Open") await previous.handle.end().catch(() => undefined)
 		},
 	}
 }
