@@ -1,4 +1,10 @@
-import { PANEL_TYPES, WIDGET_UNITS, type PanelType, type WidgetTypeMeta } from "@maple/domain/http"
+import {
+	PANEL_TYPES,
+	WIDGET_TYPES,
+	WIDGET_UNITS,
+	type PanelType,
+	type WidgetTypeMeta,
+} from "@maple/domain/http"
 import {
 	makeQueryDataSource,
 	makeRawSqlDataSource,
@@ -6,6 +12,7 @@ import {
 	WIDGET_DATA_SOURCE_KINDS,
 } from "@maple/widgets/dashboard"
 import { AGGREGATIONS_BY_SOURCE, GROUP_BY_TOKENS } from "@maple/query-engine/query-builder"
+import { QUERY_BUILDER_METRIC_TYPES, QUERY_BUILDER_SIGNAL_SOURCES } from "@maple/query-model"
 import { TRACES_NUMERIC_AGGREGATIONS } from "@maple/query-engine/query-builder"
 import { makeQueryDraft } from "@/dashboard-templates/helpers"
 
@@ -57,8 +64,10 @@ const panelTypesSection = (): string => {
 		if (meta.isScalar) notes.push("needs `transform.reduceToValue`")
 		if (meta.rawSqlDisplayType === undefined) notes.push("**no raw-SQL support**")
 		return `| \`${meta.panelType}\` | ${meta.label} | \`${meta.visualization}\` | ${
-			meta.rawSqlDisplayType ? `\`${meta.rawSqlDisplayType}\`` : "—"
-		} | ${meta.defaultLayout.w}×${meta.defaultLayout.h} | ${notes.join("; ") || "—"} |`
+			meta.chartId ? `\`${meta.chartId}\`` : "—"
+		} | ${meta.rawSqlDisplayType ? `\`${meta.rawSqlDisplayType}\`` : "—"} | ${
+			meta.defaultLayout.w
+		}×${meta.defaultLayout.h} | ${notes.join("; ") || "—"} |`
 	})
 
 	return [
@@ -67,10 +76,13 @@ const panelTypesSection = (): string => {
 		"`panel_type` is the whole answer to “what kind of widget is this”. Pass it and the",
 		"persisted `visualization`, the `display.chartId` and the raw-SQL display type are all",
 		"derived for you. The legacy `visualization` parameter is still accepted, but it collapses",
-		"line/bar/area into `chart` and then needs a `display.chartId` to tell them apart.",
+		"line/bar/area into `chart` and then needs a `display.chartId` to tell them apart. The two",
+		"columns below are what `panel_type` resolves to, and are what you write directly when",
+		"authoring an assembled widget rather than calling `add_dashboard_widget`. A panel whose",
+		"`chartId` is `—` takes none: the `visualization` alone identifies it.",
 		"",
-		"| panel_type | Label | Persists as | Raw-SQL type | Default w×h | Requirements |",
-		"|---|---|---|---|---|---|",
+		"| panel_type | Label | `visualization` | `display.chartId` | Raw-SQL type | Default w×h | Requirements |",
+		"|---|---|---|---|---|---|---|",
 		...rows,
 		"",
 		"### Choosing one",
@@ -111,6 +123,44 @@ const exampleScalarSource = () => ({
 		queries: [makeQueryDraft({ id: "q1", name: "A", dataSource: "traces", aggregation: "count" })],
 	}),
 	transform: { reduceToValue: { field: "value", aggregate: "sum" } },
+})
+
+const exampleBreakdownSource = () =>
+	makeQueryDataSource({
+		resultShape: "breakdown",
+		limit: 10,
+		queries: [
+			makeQueryDraft({
+				id: "q1",
+				name: "A",
+				dataSource: "traces",
+				aggregation: "count",
+				groupBy: ["service.name"],
+			}),
+		],
+	})
+
+/**
+ * A complete persisted widget, not just its data source.
+ *
+ * Added because every agent in the documentation A/B flagged the same gap: the
+ * sections describe `add_dashboard_widget`'s *parameters*, but
+ * `update_dashboard_widget`, `replace_dashboard_widgets` and `dashboard_json` all
+ * take a whole widget object, and nothing showed one. Each agent inferred the
+ * envelope — `visualization` + `display.chartId` + `layout` — correctly but said
+ * it was guessing.
+ */
+const exampleWidget = () => ({
+	id: "w-error-rate",
+	visualization: WIDGET_TYPES.line.visualization,
+	dataSource: exampleQuerySource(),
+	display: {
+		title: "Error rate by service",
+		chartId: WIDGET_TYPES.line.chartId,
+		unit: "percent",
+		chartPresentation: { legend: "visible" },
+	},
+	layout: { x: 0, y: 0, ...WIDGET_TYPES.line.defaultLayout },
 })
 
 const dataSourcesSection = (): string =>
@@ -158,7 +208,33 @@ const dataSourcesSection = (): string =>
 		"when you omit it; set it explicitly to choose a different reducer. Valid aggregates:",
 		"`sum`, `first`, `count`, `avg`, `max`, `min` — **there is no `last`**.",
 		"",
+		"Which one depends on what the query returns, because the query is bucketed over time and",
+		"the reducer collapses those buckets into one number:",
+		"",
+		"- **A rate or a count** (`count`, a metrics `rate`) → `sum`, for a window total.",
+		"- **A latency percentile or an average** (`p95_duration`, `avg_duration`, a gauge metric)",
+		"  → `avg` for the typical value over the window, or `max` for the worst bucket. **Not**",
+		"  `sum` — adding percentiles together is meaningless, and it is the common wrong choice.",
+		"- **A current reading**, where only the newest bucket matters → `first`.",
+		"",
 		json(exampleScalarSource()),
+		"",
+		"### The breakdown shape",
+		"",
+		'`resultShape: "breakdown"` returns one row per group instead of a series over time — the',
+		"shape `pie`, `hbar`, `funnel` and `heatmap` need. It requires a group-by, and `limit` caps",
+		"the rows (honoured for 1–100).",
+		"",
+		json(exampleBreakdownSource()),
+		"",
+		"### A complete widget",
+		"",
+		"The sections above describe `add_dashboard_widget`'s parameters, which it assembles into a",
+		"widget for you. `update_dashboard_widget`, `replace_dashboard_widgets` and `dashboard_json`",
+		"take the assembled object instead — this is its shape. `timeRange` and `sectionId`/`tabId`",
+		"are the only other top-level keys, both optional.",
+		"",
+		json(exampleWidget()),
 	].join("\n")
 
 // --- units ---------------------------------------------------------------
@@ -210,8 +286,20 @@ const queriesSection = (): string => {
 		"## Queries",
 		"",
 		"A query draft is discriminated on `dataSource` (`traces` / `logs` / `metrics`). The",
-		"metric-only fields — `metricName`, `metricType`, `isMonotonic`, `signalSource` — belong",
-		"solely to `metrics` queries; do not add them to trace or log queries.",
+		"metric-only fields belong solely to `metrics` queries; do not add them to trace or log",
+		"queries:",
+		"",
+		"- `metricName` — required; discover real names with `list_metrics`.",
+		`- \`metricType\` — required, one of ${QUERY_BUILDER_METRIC_TYPES.map((type) => `\`${type}\``).join(", ")}. Anything else fails to decode.`,
+		`- \`signalSource\` — optional, one of ${QUERY_BUILDER_SIGNAL_SOURCES.map((source) => `\`${source}\``).join(", ")}. Omit it unless you know you need \`meter\`.`,
+		"- `isMonotonic` — optional; `false` marks a Sum as an UpDownCounter, which changes the",
+		"  aggregations that make sense (`rate`/`increase` assume a monotonic counter).",
+		"",
+		"### `addOns` is required, and all five keys must be present",
+		"",
+		"`addOns: { groupBy, having, orderBy, limit, legend }` — every key, every time. A missing",
+		"one fails to decode. Each flag gates whether the matching field is read at all, which is",
+		"why `groupBy` without `addOns.groupBy: true` silently does nothing.",
 		"",
 		"### Aggregations, per source",
 		"",

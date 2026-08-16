@@ -40,23 +40,26 @@ else. Read the verdict: `suspicious` or `broken` means fix and resubmit.
 `panel_type` is the whole answer to “what kind of widget is this”. Pass it and the
 persisted `visualization`, the `display.chartId` and the raw-SQL display type are all
 derived for you. The legacy `visualization` parameter is still accepted, but it collapses
-line/bar/area into `chart` and then needs a `display.chartId` to tell them apart.
+line/bar/area into `chart` and then needs a `display.chartId` to tell them apart. The two
+columns below are what `panel_type` resolves to, and are what you write directly when
+authoring an assembled widget rather than calling `add_dashboard_widget`. A panel whose
+`chartId` is `—` takes none: the `visualization` alone identifies it.
 
-| panel_type | Label | Persists as | Raw-SQL type | Default w×h | Requirements |
-|---|---|---|---|---|---|
-| `line` | Line | `chart` | `line` | 4×6 | — |
-| `bar` | Bar | `chart` | `bar` | 4×6 | — |
-| `hbar` | Horizontal Bar | `hbar` | `hbar` | 4×6 | needs a group-by |
-| `area` | Area | `chart` | `area` | 4×6 | — |
-| `pie` | Pie | `pie` | `pie` | 4×6 | needs a group-by |
-| `stat` | Stat | `stat` | `stat` | 3×4 | needs `transform.reduceToValue` |
-| `gauge` | Gauge | `gauge` | `stat` | 4×6 | needs `transform.reduceToValue` |
-| `table` | Table | `table` | `table` | 6×5 | — |
-| `list` | List | `list` | — | 6×5 | **no raw-SQL support** |
-| `histogram` | Histogram | `histogram` | `histogram` | 4×6 | — |
-| `heatmap` | Heatmap | `heatmap` | `heatmap` | 4×6 | needs a group-by |
-| `funnel` | Funnel | `funnel` | `funnel` | 4×6 | needs a group-by |
-| `markdown` | Note | `markdown` | — | 4×5 | **no raw-SQL support** |
+| panel_type | Label | `visualization` | `display.chartId` | Raw-SQL type | Default w×h | Requirements |
+|---|---|---|---|---|---|---|
+| `line` | Line | `chart` | `query-builder-line` | `line` | 4×6 | — |
+| `bar` | Bar | `chart` | `query-builder-bar` | `bar` | 4×6 | — |
+| `hbar` | Horizontal Bar | `hbar` | `query-builder-hbar` | `hbar` | 4×6 | needs a group-by |
+| `area` | Area | `chart` | `query-builder-area` | `area` | 4×6 | — |
+| `pie` | Pie | `pie` | `query-builder-pie` | `pie` | 4×6 | needs a group-by |
+| `stat` | Stat | `stat` | — | `stat` | 3×4 | needs `transform.reduceToValue` |
+| `gauge` | Gauge | `gauge` | — | `stat` | 4×6 | needs `transform.reduceToValue` |
+| `table` | Table | `table` | — | `table` | 6×5 | — |
+| `list` | List | `list` | — | — | 6×5 | **no raw-SQL support** |
+| `histogram` | Histogram | `histogram` | `query-builder-histogram` | `histogram` | 4×6 | — |
+| `heatmap` | Heatmap | `heatmap` | `query-builder-heatmap` | `heatmap` | 4×6 | needs a group-by |
+| `funnel` | Funnel | `funnel` | `query-builder-funnel` | `funnel` | 4×6 | needs a group-by |
+| `markdown` | Note | `markdown` | — | — | 4×5 | **no raw-SQL support** |
 
 ### Choosing one
 
@@ -148,6 +151,15 @@ A `stat` or `gauge` reads `data[0].value`. Without `transform.reduceToValue` it 
 when you omit it; set it explicitly to choose a different reducer. Valid aggregates:
 `sum`, `first`, `count`, `avg`, `max`, `min` — **there is no `last`**.
 
+Which one depends on what the query returns, because the query is bucketed over time and
+the reducer collapses those buckets into one number:
+
+- **A rate or a count** (`count`, a metrics `rate`) → `sum`, for a window total.
+- **A latency percentile or an average** (`p95_duration`, `avg_duration`, a gauge metric)
+  → `avg` for the typical value over the window, or `max` for the worst bucket. **Not**
+  `sum` — adding percentiles together is meaningless, and it is the common wrong choice.
+- **A current reading**, where only the newest bucket matters → `first`.
+
 ```json
 {
   "kind": "query",
@@ -181,6 +193,106 @@ when you omit it; set it explicitly to choose a different reducer. Valid aggrega
       "field": "value",
       "aggregate": "sum"
     }
+  }
+}
+```
+
+### The breakdown shape
+
+`resultShape: "breakdown"` returns one row per group instead of a series over time — the
+shape `pie`, `hbar`, `funnel` and `heatmap` need. It requires a group-by, and `limit` caps
+the rows (honoured for 1–100).
+
+```json
+{
+  "kind": "query",
+  "resultShape": "breakdown",
+  "queries": [
+    {
+      "id": "q1",
+      "name": "A",
+      "enabled": true,
+      "whereClause": "",
+      "aggregation": "count",
+      "stepInterval": "",
+      "orderByDirection": "desc",
+      "addOns": {
+        "groupBy": true,
+        "having": false,
+        "orderBy": false,
+        "limit": false,
+        "legend": false
+      },
+      "groupBy": [
+        "service.name"
+      ],
+      "having": "",
+      "orderBy": "",
+      "limit": "",
+      "legend": "",
+      "dataSource": "traces"
+    }
+  ],
+  "limit": 10
+}
+```
+
+### A complete widget
+
+The sections above describe `add_dashboard_widget`'s parameters, which it assembles into a
+widget for you. `update_dashboard_widget`, `replace_dashboard_widgets` and `dashboard_json`
+take the assembled object instead — this is its shape. `timeRange` and `sectionId`/`tabId`
+are the only other top-level keys, both optional.
+
+```json
+{
+  "id": "w-error-rate",
+  "visualization": "chart",
+  "dataSource": {
+    "kind": "query",
+    "resultShape": "timeseries",
+    "queries": [
+      {
+        "id": "q1",
+        "name": "A",
+        "enabled": true,
+        "whereClause": "service.name = \"api\"",
+        "aggregation": "error_rate",
+        "stepInterval": "",
+        "orderByDirection": "desc",
+        "addOns": {
+          "groupBy": true,
+          "having": false,
+          "orderBy": false,
+          "limit": false,
+          "legend": false
+        },
+        "groupBy": [
+          "service.name"
+        ],
+        "having": "",
+        "orderBy": "",
+        "limit": "",
+        "legend": "",
+        "dataSource": "traces"
+      }
+    ]
+  },
+  "display": {
+    "title": "Error rate by service",
+    "chartId": "query-builder-line",
+    "unit": "percent",
+    "chartPresentation": {
+      "legend": "visible"
+    }
+  },
+  "layout": {
+    "x": 0,
+    "y": 0,
+    "w": 4,
+    "h": 6,
+    "minW": 2,
+    "minH": 2
   }
 }
 ```
@@ -221,8 +333,20 @@ A gauge's arc is independent of its unit and defaults to 0–100: on a `percent`
 ## Queries
 
 A query draft is discriminated on `dataSource` (`traces` / `logs` / `metrics`). The
-metric-only fields — `metricName`, `metricType`, `isMonotonic`, `signalSource` — belong
-solely to `metrics` queries; do not add them to trace or log queries.
+metric-only fields belong solely to `metrics` queries; do not add them to trace or log
+queries:
+
+- `metricName` — required; discover real names with `list_metrics`.
+- `metricType` — required, one of `sum`, `gauge`, `histogram`, `exponential_histogram`. Anything else fails to decode.
+- `signalSource` — optional, one of `default`, `meter`. Omit it unless you know you need `meter`.
+- `isMonotonic` — optional; `false` marks a Sum as an UpDownCounter, which changes the
+  aggregations that make sense (`rate`/`increase` assume a monotonic counter).
+
+### `addOns` is required, and all five keys must be present
+
+`addOns: { groupBy, having, orderBy, limit, legend }` — every key, every time. A missing
+one fails to decode. Each flag gates whether the matching field is read at all, which is
+why `groupBy` without `addOns.groupBy: true` silently does nothing.
 
 ### Aggregations, per source
 

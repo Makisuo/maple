@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
-import { PANEL_TYPES, WIDGET_UNIT_TOKENS, WidgetDataSourceSchema } from "@maple/domain/http"
+import {
+	DashboardWidgetSchema,
+	PANEL_TYPES,
+	WIDGET_UNIT_TOKENS,
+	WidgetDataSourceSchema,
+} from "@maple/domain/http"
 import { AGGREGATIONS_BY_SOURCE, GROUP_BY_TOKENS } from "@maple/query-engine/query-builder"
 import {
 	DASHBOARD_SCHEMA_SECTIONS,
@@ -9,6 +14,7 @@ import {
 } from "./dashboard-schema-doc"
 
 const decodeDataSource = Schema.decodeUnknownSync(WidgetDataSourceSchema)
+const decodeWidget = Schema.decodeUnknownSync(DashboardWidgetSchema)
 
 const allSections = () =>
 	[renderDashboardSchemaIndex(), ...DASHBOARD_SCHEMA_SECTIONS.map(renderDashboardSchemaSection)].join("\n")
@@ -28,8 +34,21 @@ describe("generated JSON examples decode", () => {
 		const examples = jsonExamples(renderDashboardSchemaSection("data_sources"))
 		expect(examples.length).toBeGreaterThan(0)
 		for (const example of examples) {
-			expect(() => decodeDataSource(example)).not.toThrow()
+			// The whole-widget example decodes through the widget schema instead;
+			// everything else in this section is a bare data source.
+			const decode = Object.hasOwn(example as object, "dataSource") ? decodeWidget : decodeDataSource
+			expect(() => decode(example)).not.toThrow()
 		}
+	})
+
+	it("the section includes a complete widget, not only data sources", () => {
+		// `update_dashboard_widget` / `replace_dashboard_widgets` / `dashboard_json`
+		// all take an assembled widget. Every agent in the documentation A/B
+		// inferred that envelope correctly but reported it as a guess.
+		const examples = jsonExamples(renderDashboardSchemaSection("data_sources"))
+		const widgets = examples.filter((example) => Object.hasOwn(example as object, "dataSource"))
+		expect(widgets).toHaveLength(1)
+		expect(() => decodeWidget(widgets[0])).not.toThrow()
 	})
 
 	it("no example uses the retired v2 shape", () => {
