@@ -123,7 +123,7 @@ export const HttpChatLive = HttpApiBuilder.group(MapleInternalApi, "chat", (hand
 			// Domain-level tool failures are encoded as `isError` by the shared dispatcher.
 			// A defect remains a transport failure, but it is declared and serialized instead
 			// of falling through HttpApi as a bodyless 500.
-			const result = yield* executor.execute(tenant, tool, payload.input).pipe(
+			const result = yield* executor.execute(tenant, tool, payload.input, "chat").pipe(
 				Effect.catchTag("@maple/internal-rpc/ToolNotFoundError", () =>
 					Effect.fail(new ChatToolNotFoundError({ tool, message: `Unknown tool "${tool}".` })),
 				),

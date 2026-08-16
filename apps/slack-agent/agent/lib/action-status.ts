@@ -58,7 +58,6 @@ const PHRASE_BY_TOOL: Record<string, string> = {
 	list_error_incidents: "Listing error incidents…",
 	claim_error_issue: "Updating an issue…",
 	release_error_issue: "Updating an issue…",
-	heartbeat_error_issue: "Updating an issue…",
 	comment_on_error_issue: "Commenting on an issue…",
 	transition_error_issue: "Updating an issue…",
 	set_issue_severity: "Updating issue severity…",

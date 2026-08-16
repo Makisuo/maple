@@ -14,7 +14,7 @@
  */
 import { Tool, ToolFailure, type Tools } from "@maple/llm"
 import { Cause, Effect } from "effect"
-import type { McpToolExecutorApi } from "@/mcp/dispatcher"
+import type { McpToolExecutorApi, McpToolSurface } from "@/mcp/dispatcher"
 import { mapleToolCatalog, toInputSchema } from "@/mcp/tools/registry"
 import { truncateToolOutput } from "@/mcp/tools/tool-output"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -76,6 +76,12 @@ export interface BuildMapleToolsOptions {
 	 * expected to break on the proposal before ever dispatching it.
 	 */
 	readonly gate?: (name: string) => boolean
+	/**
+	 * Telemetry attribution for every tool call these tools dispatch. Defaults to
+	 * `"chat"`; workflow agent passes pass `"workflow"` so the two are separable in
+	 * traces despite sharing this builder and the chat loop below it.
+	 */
+	readonly surface?: McpToolSurface
 }
 
 /** Wrap the Maple MCP registry as `@maple/llm` tools. */
@@ -103,7 +109,7 @@ export const buildMapleTools = (
 											message: `${definition.name} requires user approval and was not executed.`,
 										}),
 									)
-								: executor.execute(tenant, definition.name, params).pipe(
+								: executor.execute(tenant, definition.name, params, options.surface ?? "chat").pipe(
 										Effect.flatMap((result) =>
 											result.isError
 												? Effect.fail(

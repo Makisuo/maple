@@ -17,7 +17,7 @@ import {
 import { InvestigationId, UserId } from "@maple/domain/primitives"
 import { Tool, ToolFailure, type Model, type Tools } from "@maple/llm"
 import { Effect, Option, Schema } from "effect"
-import type { McpToolExecutorApi } from "@/mcp/dispatcher"
+import type { McpToolExecutorApi, McpToolSurface } from "@/mcp/dispatcher"
 import { buildMapleTools, summarizeToolFailure } from "@/mcp/tools/llm-tools"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import type { TurnCompletion, TurnUsage } from "./loop/types"
@@ -133,8 +133,10 @@ export const buildChatTools = (
 	executor: McpToolExecutorApi,
 	tenant: TenantContext,
 	ruleset: PermissionRuleset,
+	surface: McpToolSurface = "chat",
 ): Tools =>
 	buildMapleTools(executor, tenant, {
+		surface,
 		// `deny` means the model never sees the tool. That is a stronger guarantee than refusing the
 		// call afterwards, and it is free — an unoffered tool cannot be called.
 		include: (name) => evaluatePermission(ruleset, name) !== "deny",

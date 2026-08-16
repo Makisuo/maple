@@ -10,7 +10,15 @@ export const FIXTURES = {
 	service: "api",
 	traceId: "0af7651916cd43dd8448eb211c80319c",
 	spanId: "b7ad6b7169203331",
-	fingerprint: "a1b2c3d4e5f60718",
+	/**
+	 * A FingerprintHash is a UInt64 rendered as a DECIMAL string
+	 * (`CH.toString_($.FingerprintHash)`), not hex — hex was what this fixture
+	 * used, and it is the same wrong mental model that makes agents feed
+	 * `error_detail` a truncated issue id in production.
+	 */
+	fingerprint: "11640295108927840024",
+	/** A Postgres error-issue id. A DIFFERENT identity space to `fingerprint`. */
+	issueId: "2b11d788-6f3a-4c21-9f0e-51c4a8d7e930",
 } as const
 
 /**

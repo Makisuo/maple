@@ -45,13 +45,12 @@ const VISUALIZATION_LIST_QUOTED = KNOWN_VISUALIZATIONS.map((viz) => `"${viz}"`).
 export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 	server.tool(
 		TOOL,
-		"Add a single widget to an existing dashboard without re-sending the whole document.\n\n" +
-			"Set `panel_type` to one of: " +
-			PANEL_TYPE_LIST_MD +
-			" — the widget KIND, not a title. Two creation paths:\n\n" +
+		// The panel-type list is on the `panel_type` parameter, where it is binding.
+		// Rendering PANEL_TYPE_LIST_MD here too paid for the same list twice.
+		"Add a single widget to an existing dashboard without re-sending the whole document. Two creation paths:\n\n" +
 			"1. **Structured query builder**: pass `data_source_json` (a `kind`-discriminated data source) plus `display_json`.\n" +
 			"2. **Raw ClickHouse SQL**: pass `sql` instead and the tool builds the data source. `sql` MUST reference `$__orgFilter`. Call `describe_warehouse_tables` first so you do not guess table or column names.\n\n" +
-			"**Call `describe_dashboard_schema` before authoring** — it gives the panel-type table, the four data-source kinds with decodable examples, the unit vocabulary (`percent` is a 0–1 fraction; `percent_100` is 0–100 — inverted from Grafana), valid aggregations and group-by tokens, and the display config. Those tables are generated from the live schema.\n\n" +
+			"**Call `describe_dashboard_schema` before authoring** for the data-source kinds, unit vocabulary (`percent` is a 0–1 fraction, `percent_100` is 0–100 — inverted from Grafana), aggregations and group-by tokens, all generated from the live schema.\n\n" +
 			"Layout is auto-placed when `layout_json` is omitted. The response carries an automatic validation summary; a `suspicious` or `broken` verdict means the chart will not render meaningfully as-is.",
 		Schema.Struct({
 			dashboard_id: requiredStringParam(
