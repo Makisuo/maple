@@ -165,6 +165,17 @@ export const make = (config: Config = {}): Telemetry => {
 	// surface as an unhandled Worker error caused purely by telemetry.
 	const flush = makeSerializedFlush(async (env: Record<string, unknown>): Promise<void> => {
 		try {
+			// Effect defers work onto the scheduler's next macrotask
+			// (`scheduleTask(task, 0)`) — including `HttpMiddleware.tracer`'s
+			// `span.end` and `withSpan` finalizers — while the drain below is
+			// synchronous. Flushing in the same task therefore misses exactly the
+			// spans the request just produced, and an isolated request (e.g. a lone
+			// webhook) can freeze the isolate before a later flush rescues them.
+			// Yield one macrotask so those tasks run first. This sits INSIDE the
+			// serialized body, so overlapping flushes still queue rather than
+			// interleave.
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
 			if (resolved === undefined) {
 				resolved = resolveOnce(env, config)
 			}
