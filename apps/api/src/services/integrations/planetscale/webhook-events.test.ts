@@ -68,7 +68,7 @@ describe("classifyPlanetScaleEvent", () => {
 		)
 	})
 
-	it("keeps source-timestamp identities stable and receipt-time fallbacks payload-consistent", () => {
+	it("keeps source-timestamp retries byte-identical and rejects missing timestamps", () => {
 		const timestamped = Schema.decodeUnknownSync(PlanetScaleWebhookPayload)(JSON.parse(OOM_PAYLOAD))
 		const first = projectPlanetScaleWebhookEvent({
 			orgId: "org_events",
@@ -82,27 +82,22 @@ describe("classifyPlanetScaleEvent", () => {
 			payload: timestamped,
 			receivedAt: 1_698_252_990_000,
 		})
-		assert.strictEqual(first.id, redelivery.id)
-		assert.strictEqual(first.time, redelivery.time)
+		assert.deepStrictEqual(first, redelivery)
 
 		const withoutTimestamp = Schema.decodeUnknownSync(PlanetScaleWebhookPayload)({
 			event: "branch.ready",
 			database: "main-db",
 		})
-		const receivedFirst = projectPlanetScaleWebhookEvent({
-			orgId: "org_events",
-			connectionId: "connection-1",
-			payload: withoutTimestamp,
-			receivedAt: 1_698_252_880_000,
-		})
-		const receivedAgain = projectPlanetScaleWebhookEvent({
-			orgId: "org_events",
-			connectionId: "connection-1",
-			payload: withoutTimestamp,
-			receivedAt: 1_698_252_990_000,
-		})
-		assert.notStrictEqual(receivedFirst.id, receivedAgain.id)
-		assert.notStrictEqual(receivedFirst.time, receivedAgain.time)
+		assert.throws(
+			() =>
+				projectPlanetScaleWebhookEvent({
+					orgId: "org_events",
+					connectionId: "connection-1",
+					payload: withoutTimestamp,
+					receivedAt: 1_698_252_880_000,
+				}),
+			/requires a positive source timestamp/,
+		)
 	})
 
 	it("maps health events to issues and lifecycle events to timeline rows", () => {

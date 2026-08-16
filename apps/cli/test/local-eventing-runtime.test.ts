@@ -195,11 +195,8 @@ describe("LocalEventingRuntime", () => {
 				strictEqual(runtime.evaluateOtlp("logs", malformed).failures.length, 1)
 
 				const mismatched = structuredClone(exampleRecordObserved)
-				firstLogRecord(mismatched).attributes = firstLogRecord(mismatched).attributes.map(
-					(entry) =>
-						entry.key === "example.record.sequence"
-							? attr(entry.key, { stringValue: "42" })
-							: entry,
+				firstLogRecord(mismatched).attributes = firstLogRecord(mismatched).attributes.map((entry) =>
+					entry.key === "example.record.sequence" ? attr(entry.key, { stringValue: "42" }) : entry,
 				)
 				deepStrictEqual(runtime.evaluateOtlp("logs", mismatched).typeMismatchFields, [
 					"attribute:example.record.sequence",

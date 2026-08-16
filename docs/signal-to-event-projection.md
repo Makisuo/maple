@@ -409,14 +409,17 @@ interface SignalProjector {
 	readonly sourceKinds: readonly string[]
 	readonly outputType: string
 	readonly dataSchema: string
-	readonly validateConfig: (value: unknown) => ProjectorConfig
+	readonly decodeConfig: (value: unknown) => ProjectorConfig
+	readonly decodeOutput: (value: unknown) => JsonValue
 	readonly project: (signal: NormalizedSignal, config: ProjectorConfig) => ProjectedEventData
 }
 ```
 
 A projector must be pure, deterministic, bounded, versioned, and free of I/O. It
 does not invoke downstream systems, send notifications, or mutate source state.
-It produces a factual event payload conforming to its declared schema.
+It produces a factual event payload conforming to its declared schema. The
+registry invokes the output decoder before constructing the CloudEvent, so
+`dataschema` is a checked contract rather than documentation.
 
 The registry may include a bounded generic field-mapping projector for
 operator-defined factual events. Provider modules register semantic projectors
@@ -499,7 +502,9 @@ existing chDB insert.
 
 If the event store cannot stage a required event, ingest returns a retryable
 failure rather than silently losing automation. A source retry reuses the same
-event ID when stable occurrence identity is available, so staging is idempotent.
+event ID and canonical event bytes, so staging is idempotent. Durable OTLP log
+projection requires `timeUnixNano` or `observedTimeUnixNano`; server receipt
+time is never incorporated into durable identity or event content.
 
 Staging and chDB insertion are not one transaction. A process crash after the
 chDB insert but before the OTLP acknowledgement can still cause a duplicate raw
@@ -515,9 +520,13 @@ polling does not solve that problem.
 
 Provider authentication and replay protection run before normalization. The
 host must establish a durable event boundary before acknowledging the provider.
-The hosted PlanetScale route therefore projects a verified payload first and
-enqueues the resulting CloudEvent together with its temporary parity payload;
-the queue is its durable event boundary.
+The hosted PlanetScale route therefore requires the provider timestamp,
+projects a verified payload first, and enqueues only the resulting canonical
+CloudEvent plus bounded routing metadata; the queue is its durable event
+boundary. The complete serialized job is measured against a 120 KiB cap before
+send; oversized factual payloads receive a deterministic `413` rather than a
+retryable queue failure. Consumers continue to read legacy payload-only and
+transitional jobs.
 
 The provider source adapter supplies the strongest available delivery or event
 identity. It then uses the same selector, projector, event ID, and outbox
@@ -715,7 +724,8 @@ Required low-cardinality telemetry includes:
 
 - received signals by source kind;
 - selector evaluations and matches by projection ID;
-- selector type mismatches by source kind and field catalog key;
+- bounded selector type-mismatch counts by source kind, without arbitrary open
+  field names as metric labels;
 - projection failures;
 - outbox staged, deduplicated, ready, and stranded counts;
 - evaluation and staging latency;
@@ -869,12 +879,11 @@ FULL`. While ingest is quiesced, backup first completes and verifies a blocking
 - Verified non-test PlanetScale webhooks run through a registered
   `planetscale.webhook` source adapter, selector, and projector before the route
   acknowledges them. The dedicated Cloudflare Queue durably carries
-  `dev.maple.planetscale.webhook.received.v1`; its temporary provider payload
-  keeps the existing issue and timeline consumers behaviorally unchanged while
-  they migrate to the event contract. Queue consumers accept both the new
-  event-bearing message and the exact pre-migration message shape, reconstructing
-  the deterministic event from the older message's durable fields during rolling
-  upgrades.
+  `dev.maple.planetscale.webhook.received.v1` without duplicating the provider
+  payload. Queue consumers accept the event-only message plus transitional and
+  exact pre-migration shapes, reconstructing the deterministic event from older
+  timestamped messages during rolling upgrades. Timestamp-less legacy jobs are
+  terminally acknowledged without durable projection.
 - Hosted query-alert delivery rows remain that producer's durable outbox. Their
   payload now includes an additive deterministic
   `dev.maple.alert.lifecycle.{trigger,resolve,renotify,test}.v1` CloudEvent while

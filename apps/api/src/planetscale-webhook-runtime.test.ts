@@ -5,7 +5,10 @@ import { Effect, Layer, Schema } from "effect"
 import { Database, DatabaseError } from "@/platform/DatabaseLive"
 import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { processPlanetScaleWebhookBatch } from "./planetscale-webhook-runtime"
-import { projectPlanetScaleWebhookEvent } from "./services/integrations/planetscale/webhook-events"
+import {
+	projectPlanetScaleWebhookEvent,
+	type PlanetScaleWebhookPayload,
+} from "./services/integrations/planetscale/webhook-events"
 import type { PlanetScaleWebhookJob } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
 
 const trackedDbs: TestDb[] = []
@@ -14,18 +17,18 @@ afterEach(() => cleanupTestDbs(trackedDbs))
 
 const orgId = Schema.decodeUnknownSync(OrgId)("org_1")
 
-const makeJob = (
-	payload: PlanetScaleWebhookJob["payload"] = {
-		event: "branch.out_of_memory",
-		organization: "acme",
-		database: "shop",
-		resource: { name: "main" },
-	},
-): PlanetScaleWebhookJob => ({
+const basePayload: PlanetScaleWebhookPayload = {
+	timestamp: 1,
+	event: "branch.out_of_memory",
+	organization: "acme",
+	database: "shop",
+	resource: { name: "main" },
+}
+
+const makeJob = (payload: PlanetScaleWebhookPayload = basePayload): PlanetScaleWebhookJob => ({
 	kind: "planetscale-webhook",
 	orgId,
 	connectionId: "connection_1",
-	payload,
 	receivedAt: 1_000,
 	event: projectPlanetScaleWebhookEvent({
 		orgId,
@@ -90,7 +93,7 @@ describe("PlanetScale webhook queue consumer", () => {
 			kind: "planetscale-webhook",
 			orgId,
 			connectionId: "connection_1",
-			payload: job.payload,
+			payload: basePayload,
 			receivedAt: 1_000,
 		}
 		const delivery = makeBatch(legacyJob)
@@ -110,6 +113,26 @@ describe("PlanetScale webhook queue consumer", () => {
 		}).pipe(Effect.provide(testDb.layer))
 	})
 
+	it.effect("terminally acknowledges timestamp-less legacy queue bodies", () => {
+		const testDb = createTestDb(trackedDbs)
+		const delivery = makeBatch({
+			kind: "planetscale-webhook",
+			orgId,
+			connectionId: "connection_1",
+			payload: { ...basePayload, timestamp: null },
+			receivedAt: 1_000,
+		})
+		return processPlanetScaleWebhookBatch(delivery.batch).pipe(
+			Effect.tap(() =>
+				Effect.sync(() => {
+					assert.isTrue(delivery.acknowledged())
+					assert.isFalse(delivery.retried())
+				}),
+			),
+			Effect.provide(testDb.layer),
+		)
+	})
+
 	it.effect("acknowledges terminal malformed jobs", () => {
 		const testDb = createTestDb(trackedDbs)
 		const delivery = makeBatch({ kind: "not-a-planetscale-job" })
@@ -126,7 +149,7 @@ describe("PlanetScale webhook queue consumer", () => {
 
 	it.effect("writes a lifecycle event to the timeline but not to the issue hub", () => {
 		const testDb = createTestDb(trackedDbs)
-		const delivery = makeBatch(makeJob({ ...job.payload, event: "branch.ready" }))
+		const delivery = makeBatch(makeJob({ ...basePayload, event: "branch.ready" }))
 		return Effect.gen(function* () {
 			yield* processPlanetScaleWebhookBatch(delivery.batch)
 			assert.isTrue(delivery.acknowledged())
@@ -177,7 +200,7 @@ describe("PlanetScale webhook queue consumer", () => {
 		const testDb = createTestDb(trackedDbs)
 		const delivery = makeBatch(
 			makeJob({
-				...job.payload,
+				...basePayload,
 				event: "deploy_request.schema_applied",
 				resource: { number: 42 },
 			}),

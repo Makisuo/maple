@@ -3,6 +3,7 @@ import {
 	canonicalJson,
 	CompiledProjectionRegistry,
 	defineSignalFields,
+	isJsonValue,
 	ProjectorRegistry,
 	SignalSourceRegistry,
 	type JsonValue,
@@ -85,6 +86,13 @@ const validDate = (epochMs: number, label: string): Date => {
 	return date
 }
 
+export const planetScaleWebhookTimestampMillis = (payload: PlanetScaleWebhookPayload): number | null => {
+	if (payload.timestamp == null || !Number.isFinite(payload.timestamp) || payload.timestamp <= 0)
+		return null
+	const epochMs = Math.trunc(payload.timestamp * 1_000)
+	return Number.isSafeInteger(epochMs) ? epochMs : null
+}
+
 export const PLANETSCALE_WEBHOOK_ADAPTER: SignalSourceAdapter<
 	PlanetScaleWebhookAdapterInput,
 	PlanetScaleWebhookAdapterContext
@@ -105,10 +113,8 @@ export const PLANETSCALE_WEBHOOK_ADAPTER: SignalSourceAdapter<
 		if (Number.isNaN(observedAtDate.getTime()))
 			throw new Error("PlanetScale receipt time is outside the supported date range")
 		const payloadJson = payload as unknown as JsonValue
-		const occurredAtMs =
-			payload.timestamp != null && payload.timestamp > 0
-				? Math.trunc(payload.timestamp * 1_000)
-				: observedAtDate.getTime()
+		const occurredAtMs = planetScaleWebhookTimestampMillis(payload)
+		if (occurredAtMs === null) throw new Error("PlanetScale webhook requires a positive source timestamp")
 		const occurredAt = validDate(occurredAtMs, "PlanetScale event timestamp").toISOString()
 		const occurrenceId = `derived:sha256:${createHash("sha256")
 			.update(connectionId)
@@ -148,12 +154,29 @@ export const PLANETSCALE_WEBHOOK_ADAPTER: SignalSourceAdapter<
 	},
 }
 
+const PlanetScaleWebhookEventDataSchema = Schema.Struct({
+	connectionId: Schema.String,
+	event: Schema.String,
+	organization: Schema.NullOr(Schema.String),
+	database: Schema.NullOr(Schema.String),
+	resource: Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown)),
+})
+
+const decodePlanetScaleWebhookEventData = Schema.decodeUnknownSync(PlanetScaleWebhookEventDataSchema)
+
+const decodePlanetScaleWebhookProjectorOutput = (value: unknown): JsonValue => {
+	const decoded = decodePlanetScaleWebhookEventData(value)
+	if (!isJsonValue(decoded)) throw new Error("PlanetScale projector output must be finite JSON")
+	return decoded
+}
+
 const PLANETSCALE_WEBHOOK_PROJECTOR: SignalProjector<Record<string, never>> = {
 	id: "planetscale.webhook",
 	version: 1,
 	sourceKinds: ["planetscale.webhook"],
 	outputType: "dev.maple.planetscale.webhook.received.v1",
 	dataSchema: "urn:maple:event-schema:planetscale-webhook:v1",
+	decodeOutput: decodePlanetScaleWebhookProjectorOutput,
 	decodeConfig: (value) => {
 		if (
 			typeof value !== "object" ||
@@ -201,6 +224,30 @@ export const projectPlanetScaleWebhookEvent = (input: PlanetScaleWebhookEventInp
 	if (result.failures.length > 0) throw new Error(result.failures[0]!.message)
 	if (result.events.length !== 1) throw new Error("PlanetScale webhook projection produced no event")
 	return result.events[0]!
+}
+
+export const planetScaleWebhookPayloadFromEvent = (
+	event: Pick<MapleCloudEvent, "type" | "dataschema" | "time"> & { readonly data: unknown },
+	connectionId: string,
+): PlanetScaleWebhookPayload => {
+	if (
+		event.type !== "dev.maple.planetscale.webhook.received.v1" ||
+		event.dataschema !== "urn:maple:event-schema:planetscale-webhook:v1"
+	)
+		throw new Error("queued PlanetScale event contract is invalid")
+	const data = decodePlanetScaleWebhookEventData(event.data)
+	if (data.connectionId !== connectionId)
+		throw new Error("queued PlanetScale event connection identity is contradictory")
+	const timestamp = Date.parse(event.time)
+	if (!Number.isSafeInteger(timestamp) || timestamp <= 0)
+		throw new Error("queued PlanetScale event timestamp is invalid")
+	return {
+		timestamp: timestamp / 1_000,
+		event: data.event,
+		organization: data.organization,
+		database: data.database,
+		resource: data.resource,
+	}
 }
 
 // ---------------------------------------------------------------------------

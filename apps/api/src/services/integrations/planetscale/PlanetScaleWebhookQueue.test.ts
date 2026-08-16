@@ -3,10 +3,16 @@ import { OrgId } from "@maple/domain/http"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Effect, Layer, Schema } from "effect"
 import { projectPlanetScaleWebhookEvent } from "./webhook-events"
-import { PlanetScaleWebhookQueue, type PlanetScaleWebhookJob } from "./PlanetScaleWebhookQueue"
+import {
+	MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES,
+	PlanetScaleWebhookQueue,
+	planetScaleWebhookQueueJobBytes,
+	type PlanetScaleWebhookJob,
+} from "./PlanetScaleWebhookQueue"
 
 const orgId = Schema.decodeUnknownSync(OrgId)("org_1")
 const payload = {
+	timestamp: 1,
 	event: "branch.anomaly",
 	organization: "acme",
 	database: "shop",
@@ -16,7 +22,6 @@ const job: PlanetScaleWebhookJob = {
 	kind: "planetscale-webhook",
 	orgId,
 	connectionId: "connection_1",
-	payload,
 	receivedAt: 1_000,
 	event: projectPlanetScaleWebhookEvent({
 		orgId,
@@ -34,6 +39,7 @@ const provideQueue = (environment: Record<string, unknown>) =>
 describe("PlanetScaleWebhookQueue", () => {
 	it.effect("schema-encodes the internal job onto the dedicated binding", () => {
 		const sent: unknown[] = []
+		assert.isBelow(planetScaleWebhookQueueJobBytes(job), MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES)
 		return Effect.gen(function* () {
 			const queue = yield* PlanetScaleWebhookQueue
 			yield* queue.send(job)
@@ -71,6 +77,41 @@ describe("PlanetScaleWebhookQueue", () => {
 					send: async () => {
 						attempts += 1
 						throw new Error("simulated queue outage")
+					},
+				},
+			}),
+		)
+	})
+
+	it.effect("accepts the serialized cap and rejects one byte above it", () => {
+		let attempts = 0
+		const withPayload = (payload: string): PlanetScaleWebhookJob => ({
+			...job,
+			event: {
+				...job.event,
+				data: { payload },
+			},
+		})
+		const empty = withPayload("")
+		const envelopeBytes = planetScaleWebhookQueueJobBytes(empty)
+		const atCap = withPayload("x".repeat(MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES - envelopeBytes))
+		const oversized = withPayload("x".repeat(MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES - envelopeBytes + 1))
+		assert.strictEqual(planetScaleWebhookQueueJobBytes(atCap), MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES)
+		assert.strictEqual(
+			planetScaleWebhookQueueJobBytes(oversized),
+			MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES + 1,
+		)
+		return Effect.gen(function* () {
+			const queue = yield* PlanetScaleWebhookQueue
+			yield* queue.send(atCap)
+			const error = yield* queue.send(oversized).pipe(Effect.flip)
+			assert.match(error.message, /queue job exceeds/)
+			assert.strictEqual(attempts, 1)
+		}).pipe(
+			provideQueue({
+				PLANETSCALE_WEBHOOK_QUEUE: {
+					send: async () => {
+						attempts += 1
 					},
 				},
 			}),

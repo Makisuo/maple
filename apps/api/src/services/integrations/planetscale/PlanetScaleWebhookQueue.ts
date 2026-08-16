@@ -7,29 +7,40 @@ import { PlanetScaleWebhookPayload } from "./webhook-events"
 
 const QUEUE_BINDING = "PLANETSCALE_WEBHOOK_QUEUE"
 
-const PlanetScaleWebhookJobFields = {
+const PlanetScaleWebhookJobBase = {
 	kind: Schema.Literal("planetscale-webhook"),
 	orgId: OrgId,
 	connectionId: Schema.String,
-	payload: PlanetScaleWebhookPayload,
 	receivedAt: Schema.Number,
 } as const
 
 /** Exact queue body emitted before the typed CloudEvent migration. */
-export const LegacyPlanetScaleWebhookJob = Schema.Struct(PlanetScaleWebhookJobFields)
+export const LegacyPlanetScaleWebhookJob = Schema.Struct({
+	...PlanetScaleWebhookJobBase,
+	payload: PlanetScaleWebhookPayload,
+})
 
-/** Current producer contract. New writers must always include the event. */
+/** Current producer contract. New writers queue only the canonical event. */
 export const PlanetScaleWebhookJob = Schema.Struct({
-	...PlanetScaleWebhookJobFields,
+	...PlanetScaleWebhookJobBase,
 	event: MapleCloudEventSchema,
 })
 export type PlanetScaleWebhookJob = Schema.Schema.Type<typeof PlanetScaleWebhookJob>
 
 /** Consumer contract kept backward-compatible during rolling deployments. */
-export const PlanetScaleWebhookQueueMessage = Schema.Struct({
-	...PlanetScaleWebhookJobFields,
-	event: Schema.optionalKey(MapleCloudEventSchema),
-})
+export const PlanetScaleWebhookQueueMessage = Schema.Union([
+	PlanetScaleWebhookJob,
+	Schema.Struct({
+		...PlanetScaleWebhookJobBase,
+		payload: PlanetScaleWebhookPayload,
+		event: MapleCloudEventSchema,
+	}),
+	LegacyPlanetScaleWebhookJob,
+])
+export type PlanetScaleWebhookQueueMessage = Schema.Schema.Type<typeof PlanetScaleWebhookQueueMessage>
+
+/** Cloudflare's 128 KB body limit includes the complete serialized queue job. */
+export const MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES = 120 * 1024
 
 export class PlanetScaleWebhookQueueError extends Schema.TaggedError<PlanetScaleWebhookQueueError>()(
 	"@maple/api/services/planetscale/PlanetScaleWebhookQueueError",
@@ -44,6 +55,9 @@ export interface PlanetScaleWebhookQueueShape {
 }
 
 const encodeJob = Schema.encodeSync(PlanetScaleWebhookJob)
+
+export const planetScaleWebhookQueueJobBytes = (job: PlanetScaleWebhookJob): number =>
+	new TextEncoder().encode(JSON.stringify(encodeJob(job))).byteLength
 
 export class PlanetScaleWebhookQueue extends Context.Service<
 	PlanetScaleWebhookQueue,
@@ -63,8 +77,14 @@ export class PlanetScaleWebhookQueue extends Context.Service<
 					message: `Missing queue binding: ${QUEUE_BINDING}`,
 				})
 			}
+			const encoded = encodeJob(job)
+			const encodedBytes = planetScaleWebhookQueueJobBytes(job)
+			if (encodedBytes > MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES)
+				return yield* new PlanetScaleWebhookQueueError({
+					message: `PlanetScale queue job exceeds ${MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES} bytes`,
+				})
 			yield* Effect.tryPromise({
-				try: () => queue.send(encodeJob(job)),
+				try: () => queue.send(encoded),
 				catch: (cause) =>
 					new PlanetScaleWebhookQueueError({
 						message: cause instanceof Error ? cause.message : "PlanetScale queue send failed",

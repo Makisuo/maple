@@ -10,9 +10,14 @@ import {
 	classifyPlanetScaleEvent,
 	decodePlanetScaleWebhookPayload,
 	projectPlanetScaleWebhookEvent,
+	planetScaleWebhookTimestampMillis,
 	verifyPlanetScaleSignature,
 } from "@/services/integrations/planetscale/webhook-events"
-import { PlanetScaleWebhookQueue } from "@/services/integrations/planetscale/PlanetScaleWebhookQueue"
+import {
+	MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES,
+	PlanetScaleWebhookQueue,
+	planetScaleWebhookQueueJobBytes,
+} from "@/services/integrations/planetscale/PlanetScaleWebhookQueue"
 
 // Public PlanetScale webhook receiver. NOT behind auth — authenticity comes
 // from the per-connection HMAC secret (`X-PlanetScale-Signature`, SHA-256 hex
@@ -163,10 +168,11 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 				})
 				return textResponse("ok", 200)
 			}
+			if (planetScaleWebhookTimestampMillis(payload) === null)
+				return yield* reject(400, "timestamp_rejected", "Webhook timestamp is required")
 
 			// Every verified factual event is normalized and projected before the
-			// durable queue boundary. The queued CloudEvent is the stable contract;
-			// payload remains temporarily for parity with the existing consumers.
+			// durable queue boundary. The queued CloudEvent is the stable contract.
 			{
 				const now = yield* Clock.currentTimeMillis
 				const orgId = decodeOrgIdSync(connection.orgId)
@@ -183,28 +189,32 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 							message: "Webhook event projection unavailable",
 						}),
 				})
-				const enqueued = yield* webhookQueue
-					.send({
-						kind: "planetscale-webhook",
-						orgId,
-						connectionId,
-						payload,
-						receivedAt: now,
-						event,
-					})
-					.pipe(
-						Effect.tapError((error) =>
-							Effect.logError("PlanetScale webhook enqueue failed").pipe(
-								Effect.annotateLogs({
-									orgId: connection.orgId,
-									connectionId,
-									event: payload.event,
-									error: error.message,
-								}),
-							),
-						),
-						Effect.option,
+				const job = {
+					kind: "planetscale-webhook" as const,
+					orgId,
+					connectionId,
+					receivedAt: now,
+					event,
+				}
+				if (planetScaleWebhookQueueJobBytes(job) > MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES)
+					return yield* reject(
+						413,
+						"queue_message_too_large",
+						"Webhook payload exceeds the durable queue limit",
 					)
+				const enqueued = yield* webhookQueue.send(job).pipe(
+					Effect.tapError((error) =>
+						Effect.logError("PlanetScale webhook enqueue failed").pipe(
+							Effect.annotateLogs({
+								orgId: connection.orgId,
+								connectionId,
+								event: payload.event,
+								error: error.message,
+							}),
+						),
+					),
+					Effect.option,
+				)
 				if (Option.isNone(enqueued)) {
 					return yield* unavailable("queue_unavailable", "Webhook queue unavailable")
 				}
