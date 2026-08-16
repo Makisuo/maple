@@ -48,6 +48,7 @@ const rows = [
 ]
 
 const response = {
+	variables: { service: "checkout", env: "$__all" },
 	results: [
 		{ widgetId: "w-chart", ok: true, data: { data: rows } },
 		{ widgetId: "w-stat", ok: true, data: { data: [{ p95LatencyMs: 10 }, { p95LatencyMs: 20 }] } },
@@ -95,6 +96,12 @@ describe("useShareWidgetData", () => {
 		expect(result.current.states["w-table"]).toEqual({
 			status: "ready",
 			data: [{ name: "GET /a", value: 9 }],
+		})
+		// The server's resolved variables come back in the shape the title
+		// interpolator reads, All flagged as such.
+		expect(result.current.variables).toEqual({
+			service: { value: "checkout", isAll: false, options: [] },
+			env: { value: "$__all", isAll: true, options: [] },
 		})
 	})
 

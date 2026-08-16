@@ -18,11 +18,17 @@ import {
 	getSpanAttributeValuesResultAtom,
 	getTracesFacetValuesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
-import { ALL_VALUE, type VariableValues } from "@maple/query-engine"
+import {
+	ALL_VALUE,
+	dashboardVariableOptionsQuery,
+	resolveDashboardVariableValue,
+	type DashboardVariableOptionsState,
+	type VariableValues,
+} from "@maple/query-engine"
 import type { DashboardVariable } from "./types"
 import { useDashboardTimeRange } from "./dashboard-providers"
 
-export interface VariableOptionsState {
+export interface VariableOptionsState extends DashboardVariableOptionsState {
 	options: string[]
 	loading: boolean
 }
@@ -55,19 +61,12 @@ function fromFacetItems(items: ReadonlyArray<FacetItem> | undefined): VariableOp
 	return { options: (items ?? []).map((item) => item.name), loading: false }
 }
 
-// Variable facet id → traces facets dimension (the `facetType` the engine emits).
-const TRACES_FACET_BY_SOURCE = {
-	service: "service",
-	environment: "deploymentEnv",
-	span_name: "spanName",
-	http_method: "httpMethod",
-	http_status_code: "httpStatus",
-} as const
-
 // Reads the options for one variable inside the derived options atom. Query
 // variables subscribe to the underlying facet / attribute-value family atoms
 // (deduped by their encoded input key), so several variables sharing a source
-// share one fetch.
+// share one fetch. *Which* query lists a variable's options is decided by
+// `dashboardVariableOptionsQuery` — the same answer the share API acts on
+// server-side — so a share cannot list different options than the board.
 function readVariableOptions(
 	get: Atom.AtomContext,
 	variable: DashboardVariable,
@@ -76,21 +75,19 @@ function readVariableOptions(
 	if (variable.type === "custom") {
 		return { options: variable.options.map((option) => option.value), loading: false }
 	}
-	if (variable.type === "textbox") {
-		return NO_OPTIONS
-	}
+	const query = dashboardVariableOptionsQuery(variable)
+	if (query === null) return NO_OPTIONS
 
 	if (!time) return LOADING_OPTIONS
 	const window = { startTime: time.startTime, endTime: time.endTime }
 
-	const source = variable.source
-	if (source.kind === "attribute") {
+	if (query.kind === "attributeValues") {
 		const atom =
-			source.scope === "resource"
+			query.scope === "resource"
 				? getResourceAttributeValuesResultAtom({
-						data: { ...window, attributeKey: source.attributeKey },
+						data: { ...window, attributeKey: query.attributeKey },
 					})
-				: getSpanAttributeValuesResultAtom({ data: { ...window, attributeKey: source.attributeKey } })
+				: getSpanAttributeValuesResultAtom({ data: { ...window, attributeKey: query.attributeKey } })
 		const result = get(atom)
 		if (!Result.isSuccess(result)) {
 			return Result.isFailure(result) ? NO_OPTIONS : LOADING_OPTIONS
@@ -104,8 +101,10 @@ function readVariableOptions(
 	// Facet variables fetch only their one dimension (the facets query compiles
 	// a single UNION branch server-side) — never the full multi-facet scan the
 	// traces/logs sidebars run.
-	if (source.facet === "log_severity") {
-		const result = get(getLogsFacetValuesResultAtom({ data: { ...window, facet: "severity" } }))
+	if (query.source === "logs") {
+		const result = get(
+			getLogsFacetValuesResultAtom({ data: { ...window, facet: query.facet ?? "severity" } }),
+		)
 		if (!Result.isSuccess(result)) {
 			return Result.isFailure(result) ? NO_OPTIONS : LOADING_OPTIONS
 		}
@@ -113,7 +112,7 @@ function readVariableOptions(
 	}
 
 	const result = get(
-		getTracesFacetValuesResultAtom({ data: { ...window, facet: TRACES_FACET_BY_SOURCE[source.facet] } }),
+		getTracesFacetValuesResultAtom({ data: { ...window, facet: query.facet ?? "service" } }),
 	)
 	if (!Result.isSuccess(result)) {
 		return Result.isFailure(result) ? NO_OPTIONS : LOADING_OPTIONS
@@ -141,32 +140,12 @@ const variableOptionsAtomFamily = Atom.family((key: string) => {
 	})
 })
 
-// URL value → declared default → All (when enabled) → first loaded option.
-// Returns `undefined` while a query variable's options are still loading and
-// nothing else pins a value — consumers gate widget fetches on that.
-function resolveValue(
-	variable: DashboardVariable,
-	urlValue: string | undefined,
-	options: VariableOptionsState,
-): string | undefined {
-	const allEnabled = variable.includeAll === true
-	if (urlValue !== undefined && urlValue !== "") {
-		if (urlValue === ALL_VALUE) {
-			if (allEnabled) return ALL_VALUE
-		} else {
-			return urlValue
-		}
-	}
-	if (variable.defaultValue !== undefined && variable.defaultValue !== "") {
-		return variable.defaultValue
-	}
-	if (variable.type === "textbox") return ""
-	if (allEnabled) return ALL_VALUE
-	if (options.options.length > 0) return options.options[0]
-	// No options yet: still loading for query variables, permanently empty for
-	// custom variables with an empty options list.
-	return options.loading ? undefined : ""
-}
+// URL value → declared default → All (when enabled) → first loaded option —
+// the shared ladder (`resolveDashboardVariableValue`), so the share API resolves
+// a variable to the same value the board does. Returns `undefined` while a
+// query variable's options are still loading and nothing else pins a value —
+// consumers gate widget fetches on that.
+const resolveValue = resolveDashboardVariableValue
 
 export function DashboardVariablesProvider({
 	variables,
@@ -226,6 +205,31 @@ export function DashboardVariablesProvider({
 		[definitions, values, optionsByName, setValue],
 	)
 
+	return (
+		<DashboardVariablesContext.Provider value={contextValue}>
+			{children}
+		</DashboardVariablesContext.Provider>
+	)
+}
+
+/**
+ * Variables that were resolved elsewhere — the share page, whose values come
+ * back from the share API after the board's ladder ran server-side. Nothing to
+ * load and nothing to change, so no options and a no-op setter; what it gives
+ * the tiles is the same `values` map the signed-in provider does, which is what
+ * `WidgetShell` interpolates titles with.
+ */
+export function ResolvedDashboardVariablesProvider({
+	values,
+	children,
+}: {
+	values: VariableValues
+	children: ReactNode
+}) {
+	const contextValue = useMemo<DashboardVariablesContextValue>(
+		() => ({ variables: [], values, optionsByName: {}, setValue: () => undefined }),
+		[values],
+	)
 	return (
 		<DashboardVariablesContext.Provider value={contextValue}>
 			{children}

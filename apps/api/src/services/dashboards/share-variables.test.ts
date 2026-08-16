@@ -31,14 +31,31 @@ describe("resolveShareVariables", () => {
 		expect(result._tag).toBe("Failure")
 	})
 
-	it("refuses $__all unless the board offers an All option", async () => {
+	it("honours $__all only when the board offers an All option, as the signed-in board does", async () => {
+		// Not offered: the selection is ignored and the ladder continues to the
+		// first option — the filter is never dropped, which is the widening this
+		// module exists to prevent. Same outcome as the browser's provider.
 		const withoutAll = await run(resolveShareVariables([custom], { service: "$__all" }))
-		expect(withoutAll._tag).toBe("Failure")
+		expect(withoutAll._tag).toBe("Success")
+		if (withoutAll._tag === "Success") {
+			expect(withoutAll.success.service).toEqual({
+				value: "frontend",
+				isAll: false,
+				options: ["frontend", "api"],
+			})
+		}
 
 		const withAll = await run(
 			resolveShareVariables([{ ...custom, includeAll: true }], { service: "$__all" }),
 		)
 		expect(withAll._tag).toBe("Success")
+		if (withAll._tag === "Success") {
+			expect(withAll.success.service).toEqual({
+				value: "$__all",
+				isAll: true,
+				options: ["frontend", "api"],
+			})
+		}
 	})
 
 	it("accepts ordinary free text", async () => {
@@ -107,9 +124,9 @@ describe("resolveShareVariables", () => {
 	})
 
 	it("falls back to the free-text checks when a query variable has no resolved options", async () => {
-		// The share route resolves no option lists, so this — not the case above —
-		// is how every query variable actually arrives. Treating the empty list as
-		// exhaustive rejected the board's own default and blanked the whole batch.
+		// A source that failed to list (or a warehouse with no rows) hands over an
+		// empty list. Treating it as exhaustive rejected the board's own default and
+		// blanked the whole batch.
 		const definition = { name: "env", type: "query" as const, defaultValue: "production" }
 
 		const byDefault = await run(resolveShareVariables([definition], {}))
@@ -118,6 +135,35 @@ describe("resolveShareVariables", () => {
 
 		const submitted = await run(resolveShareVariables([definition], { env: "staging" }))
 		expect(submitted._tag).toBe("Success")
+	})
+
+	it("runs the board's ladder: default → All → first option → empty", async () => {
+		const env = { name: "env", type: "query" as const }
+		const options = { env: ["prod", "stg"] }
+
+		const first = await run(resolveShareVariables([env], {}, options))
+		expect(first._tag).toBe("Success")
+		if (first._tag === "Success") {
+			expect(first.success.env).toEqual({ value: "prod", isAll: false, options: ["prod", "stg"] })
+		}
+
+		const all = await run(resolveShareVariables([{ ...env, includeAll: true }], {}, options))
+		expect(all._tag).toBe("Success")
+		if (all._tag === "Success") {
+			// "All" carries the real option list, so `IN ($env)` expands to it.
+			expect(all.success.env).toEqual({ value: "$__all", isAll: true, options: ["prod", "stg"] })
+		}
+
+		const byDefault = await run(
+			resolveShareVariables([{ ...env, defaultValue: "stg", includeAll: true }], {}, options),
+		)
+		if (byDefault._tag === "Success") expect(byDefault.success.env?.value).toBe("stg")
+
+		const empty = await run(resolveShareVariables([env], {}, { env: [] }))
+		if (empty._tag === "Success") expect(empty.success.env?.value).toBe("")
+
+		const text = await run(resolveShareVariables([textbox], {}))
+		if (text._tag === "Success") expect(text.success.search?.value).toBe("")
 	})
 
 	it("still refuses a query variable value that rewrites a clause", async () => {

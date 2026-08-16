@@ -256,10 +256,15 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 						})
 					})
 
+					// Query-variable options are listed server-side over the same window,
+					// so the board's ladder (selection → default → All → first option)
+					// and its "All" expansion resolve to the same values here.
+					const definitions = document.variables ?? []
+					const queryOptions = yield* widgetData.variableOptions(orgId, definitions, window)
 					const variableValues = yield* resolveShareVariables(
-						(document.variables ?? []) as ReadonlyArray<never>,
+						definitions,
 						payload.variableValues ?? {},
-						{},
+						queryOptions,
 						whereClauses,
 					)
 
@@ -334,7 +339,11 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 						results.push(outcome)
 					}
 
-					return new ShareWidgetDataResponse({ results })
+					const variables: Record<string, string> = {}
+					for (const [name, resolved] of Object.entries(variableValues)) {
+						if (resolved !== undefined) variables[name] = resolved.value
+					}
+					return new ShareWidgetDataResponse({ results, variables })
 				}),
 			)
 			.handle("ogMeta", ({ payload }) =>

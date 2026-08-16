@@ -21,6 +21,7 @@ import { useAuth } from "@clerk/clerk-react"
 import { Schema } from "effect"
 import { useCallback, useMemo, useState } from "react"
 import { resolveTimeRange } from "@/atoms/dashboard-time-range-atoms"
+import { ResolvedDashboardVariablesProvider } from "@/components/dashboard-builder/dashboard-variables-context"
 import { ReadOnlyDashboardView } from "@/components/dashboard-builder/read-only-dashboard-view"
 import {
 	SharedWidgetRenderer,
@@ -29,6 +30,7 @@ import {
 	type ShareWidgetOptionsReporter,
 } from "@/components/share/shared-widget-renderer"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
+import { variableSearchRest, variableValuesFromSearch } from "@/lib/dashboard-controls/search-params"
 import { formatTimeRangeDisplay, presetLabel } from "@/lib/time-utils"
 import {
 	shareTimeRange,
@@ -42,17 +44,23 @@ import {
 import { MapleMark } from "@maple/ui/components/icons/maple-mark"
 import { Button } from "@maple/ui/components/ui/button"
 
-const ShareSearch = Schema.Struct({
-	/**
-	 * `?embed=true` renders the chrome-less embed variant.
-	 *
-	 * A real boolean, not a presence flag: TanStack's search parser JSON-decodes
-	 * values, so `?embed=1` arrives as the number 1 and fails a string schema.
-	 */
-	embed: Schema.optional(Schema.Boolean),
-	from: Schema.optional(Schema.String),
-	to: Schema.optional(Schema.String),
-})
+const ShareSearch = Schema.StructWithRest(
+	Schema.Struct({
+		/**
+		 * `?embed=true` renders the chrome-less embed variant.
+		 *
+		 * A real boolean, not a presence flag: TanStack's search parser JSON-decodes
+		 * values, so `?embed=1` arrives as the number 1 and fails a string schema.
+		 */
+		embed: Schema.optional(Schema.Boolean),
+		from: Schema.optional(Schema.String),
+		to: Schema.optional(Schema.String),
+	}),
+	// `?var-<name>=` selections, exactly as on the dashboard route, so a deep
+	// link into a board and into its share pick the same values. The server
+	// validates every value against the board's own definitions.
+	[variableSearchRest],
+)
 
 export const Route = createFileRoute("/share/$token")({
 	component: SharePage,
@@ -156,6 +164,7 @@ function SharePageContent({ isSignedIn }: { isSignedIn: boolean }) {
 				token={token}
 				from={search.from}
 				to={search.to}
+				search={search}
 				signedIn={isSignedIn}
 				embed={search.embed === true}
 			/>
@@ -345,6 +354,7 @@ function ShareBody({
 	token,
 	from,
 	to,
+	search,
 	signedIn,
 	embed,
 }: {
@@ -352,6 +362,7 @@ function ShareBody({
 	token: string
 	from: string | undefined
 	to: string | undefined
+	search: Record<string, unknown>
 	signedIn: boolean
 	embed: boolean
 }) {
@@ -361,7 +372,10 @@ function ShareBody({
 		() => resolveShareWindow({ from, to }, share.dashboard.timeRange),
 		[from, to, share.dashboard.timeRange],
 	)
-	const variableValues = useMemo<Record<string, string>>(() => ({}), [])
+	// Only what the URL selects; the server runs the board's own ladder
+	// (default → All → first option) for everything else, so an unset variable
+	// resolves as it does on the signed-in board.
+	const variableValues = useMemo(() => variableValuesFromSearch(search), [search])
 
 	// Each mounted tile reports its request options (its measured width) here;
 	// a widget is fetched once it has — and only it refetches when its options
@@ -379,7 +393,7 @@ function ShareBody({
 		() => share.dashboard.widgets.filter((widget) => options[widget.id] !== undefined),
 		[share.dashboard.widgets, options],
 	)
-	const { states } = useShareWidgetData(
+	const { states, variables } = useShareWidgetData(
 		token,
 		reportedWidgets,
 		window?.timeRange ?? EMPTY_WINDOW,
@@ -400,11 +414,13 @@ function ShareBody({
 
 	if (share.scope === "widget") {
 		return (
-			<ShareWidgetOptionsReporterProvider report={report}>
-				<ShareWidgetStatesProvider states={states}>
-					<SingleWidgetShare share={share} embed={embed} />
-				</ShareWidgetStatesProvider>
-			</ShareWidgetOptionsReporterProvider>
+			<ResolvedDashboardVariablesProvider values={variables}>
+				<ShareWidgetOptionsReporterProvider report={report}>
+					<ShareWidgetStatesProvider states={states}>
+						<SingleWidgetShare share={share} embed={embed} />
+					</ShareWidgetStatesProvider>
+				</ShareWidgetOptionsReporterProvider>
+			</ResolvedDashboardVariablesProvider>
 		)
 	}
 
@@ -417,15 +433,20 @@ function ShareBody({
 					{window.label}
 				</div>
 			)}
-			<ShareWidgetOptionsReporterProvider report={report}>
-				<ShareWidgetStatesProvider states={states}>
-					<ReadOnlyDashboardView
-						widgets={share.dashboard.widgets}
-						sections={share.dashboard.sections}
-						renderWidget={SharedWidgetRenderer}
-					/>
-				</ShareWidgetStatesProvider>
-			</ShareWidgetOptionsReporterProvider>
+			{/* Titles interpolate `$service` and friends with the values the server
+			    resolved for this batch — the same `WidgetShell` code path the board
+			    uses, fed by the same ladder. */}
+			<ResolvedDashboardVariablesProvider values={variables}>
+				<ShareWidgetOptionsReporterProvider report={report}>
+					<ShareWidgetStatesProvider states={states}>
+						<ReadOnlyDashboardView
+							widgets={share.dashboard.widgets}
+							sections={share.dashboard.sections}
+							renderWidget={SharedWidgetRenderer}
+						/>
+					</ShareWidgetStatesProvider>
+				</ShareWidgetOptionsReporterProvider>
+			</ResolvedDashboardVariablesProvider>
 		</div>
 	)
 }

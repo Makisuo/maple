@@ -26,6 +26,7 @@ import { toReadyWidgetData } from "@/hooks/use-widget-data"
 import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 import { getMapleAuthHeaders } from "@/lib/services/common/auth-headers"
 import { ShareWidgetDataResponse } from "@maple/domain/http"
+import { ALL_VALUE, type VariableValues } from "@maple/query-engine"
 import {
 	DashboardSectionSchema,
 	TimeRangeSchema,
@@ -273,6 +274,12 @@ export function useSharedDashboard(token: string, isSignedIn: boolean) {
 interface WidgetDataResult {
 	readonly states: Readonly<Record<string, WidgetDataState>>
 	readonly narrowed: Readonly<Record<string, number>>
+	/**
+	 * The board's variables as the server resolved them for the latest batch —
+	 * what the tiles interpolate their titles with, exactly as on the signed-in
+	 * board. Empty until the first batch lands.
+	 */
+	readonly variables: VariableValues
 	readonly refresh: () => void
 }
 
@@ -321,6 +328,7 @@ export function useShareWidgetData(
 ): WidgetDataResult {
 	const [states, setStates] = useState<Record<string, WidgetDataState>>({})
 	const [narrowed, setNarrowed] = useState<Record<string, number>>({})
+	const [variables, setVariables] = useState<VariableValues>({})
 	const [nonce, setNonce] = useState(0)
 	const refresh = useCallback(() => setNonce((value) => value + 1), [])
 
@@ -427,7 +435,19 @@ export function useShareWidgetData(
 						continue
 					}
 
-					const { results } = await decodeShareWidgetDataResponse(payload)
+					const { results, variables: resolvedVariables } =
+						await decodeShareWidgetDataResponse(payload)
+					if (resolvedVariables !== undefined) {
+						// Titles render "All" for an All selection and never the expansion,
+						// so the option list the interpolator would use is not needed here.
+						const next: VariableValues = {}
+						for (const [name, value] of Object.entries(resolvedVariables)) {
+							next[name] = { value, isAll: value === ALL_VALUE, options: [] }
+						}
+						setVariables((current) =>
+							JSON.stringify(current) === JSON.stringify(next) ? current : next,
+						)
+					}
 					const liveIds = new Set(live.map(([id]) => id))
 					setStates((current) => {
 						const next = { ...current }
@@ -483,5 +503,5 @@ export function useShareWidgetData(
 		// oxlint-disable-next-line react-hooks/exhaustive-deps -- see above
 	}, [token, requestKeysKey, enabled, nonce, signedIn, transforms])
 
-	return { states, narrowed, refresh }
+	return { states, narrowed, variables, refresh }
 }

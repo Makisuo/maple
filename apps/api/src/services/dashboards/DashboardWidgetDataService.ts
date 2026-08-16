@@ -40,6 +40,8 @@ import { QuerySetSchema } from "@maple/query-model"
 import {
 	MAX_LIST_RANGE_SECONDS,
 	computeBucketSecondsForRange,
+	dashboardVariableOptionsFromResult,
+	dashboardVariableOptionsQuery,
 	formatWarehouseDateTime,
 	parseWarehouseDateTime,
 	planWidgetRequest,
@@ -193,6 +195,17 @@ const narrowToListCap = (window: ResolvedWindow): ResolvedWindow => ({
 })
 
 export interface DashboardWidgetDataServiceApi {
+	/**
+	 * The option lists of the document's `query` variables over a window — the
+	 * same facet / attribute-value queries the signed-in provider runs, so the
+	 * share's "first option" and "All" expansion are the board's. A source that
+	 * fails to list resolves to no options, as it does in the browser.
+	 */
+	readonly variableOptions: (
+		orgId: OrgId,
+		definitions: ReadonlyArray<DashboardVariable>,
+		window: ResolvedWindow,
+	) => Effect.Effect<Readonly<Record<string, ReadonlyArray<string>>>>
 	readonly resolve: (
 		orgId: OrgId,
 		document: DashboardDocument,
@@ -426,7 +439,59 @@ export class DashboardWidgetDataService extends Context.Service<
 			return outcome(data)
 		})
 
-		return { resolve } satisfies DashboardWidgetDataServiceApi
+		const variableOptions = Effect.fn("DashboardWidgetDataService.variableOptions")(function* (
+			orgId: OrgId,
+			definitions: ReadonlyArray<DashboardVariable>,
+			window: ResolvedWindow,
+		) {
+			const tenant = shareViewerTenant(orgId)
+			// Several variables sharing a source share one query, as the browser's
+			// atom family dedupes them by input.
+			const byQuery = new Map<
+				string,
+				{ query: NonNullable<ReturnType<typeof dashboardVariableOptionsQuery>>; names: string[] }
+			>()
+			for (const definition of definitions) {
+				const query = dashboardVariableOptionsQuery(definition)
+				if (query === null) continue
+				const key = JSON.stringify(query)
+				const entry = byQuery.get(key) ?? { query, names: [] }
+				entry.names.push(definition.name)
+				byQuery.set(key, entry)
+			}
+
+			const listed = yield* Effect.forEach(
+				[...byQuery.values()],
+				({ query, names }) =>
+					queryEngine
+						.execute(tenant, { startTime: window.startTime, endTime: window.endTime, query })
+						.pipe(
+							Effect.map((response) =>
+								dashboardVariableOptionsFromResult(query, response.result),
+							),
+							Effect.tapError((cause) =>
+								Effect.logWarning("shared dashboard variable options failed", cause).pipe(
+									Effect.annotateLogs({ "maple.variable.names": names.join(",") }),
+								),
+							),
+							// No options is a state the browser reaches too (a failed
+							// facet fetch); the ladder then falls through to "" as it
+							// does there. Never fail the batch over a dropdown.
+							Effect.catch(() => Effect.succeed<string[]>([])),
+							Effect.catchDefect(() => Effect.succeed<string[]>([])),
+							Effect.map((options) => ({ names, options })),
+						),
+				{ concurrency: 4 },
+			)
+
+			const byName: Record<string, ReadonlyArray<string>> = {}
+			for (const { names, options } of listed) {
+				for (const name of names) byName[name] = options
+			}
+			return byName
+		})
+
+		return { variableOptions, resolve } satisfies DashboardWidgetDataServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)
