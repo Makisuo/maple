@@ -68,6 +68,7 @@ import {
 	type ChatTurnEvent,
 	type ChatTurnInput,
 	type StepState,
+	type TurnCompletion,
 } from "./types"
 
 /**
@@ -150,6 +151,16 @@ const finishTurn = (
 }
 
 /**
+ * The tool a cut-short turn has to answer *through*, if this turn has one at all.
+ *
+ * A completion with `closes: false` is offered to the model like any other tool and takes no part in
+ * how the turn ends — see `TurnCompletion`. Reading it through one helper is what keeps the closing
+ * step, the prose rescue and the end-after-submit check from ever disagreeing about that.
+ */
+const closingCompletion = (input: ChatTurnInput): TurnCompletion | undefined =>
+	input.completion !== undefined && input.completion.closes ? input.completion : undefined
+
+/**
  * Build the step that closes a turn, in whichever of its two shapes applies.
  *
  * Attended chat gets `tools: []` / `toolChoice: "none"` and answers in prose. A headless pass gets
@@ -162,14 +173,12 @@ const finishTurn = (
  */
 const closingStep = (
 	input: ChatTurnInput,
-	tools: Tools,
 	request: LLMRequest,
 	messages: ReadonlyArray<Message>,
 	notice: string,
 ): { readonly request: LLMRequest; readonly closing: "prose" | "submit" } => {
-	const forced = input.closingSubmit
-	const submitTool = forced === undefined ? undefined : tools[forced.toolName]
-	if (forced === undefined || submitTool === undefined) {
+	const forced = closingCompletion(input)
+	if (forced === undefined) {
 		return {
 			request: LLM.updateRequest(request, {
 				messages: [...messages, Message.user(notice)],
@@ -181,9 +190,9 @@ const closingStep = (
 	}
 	return {
 		request: LLM.updateRequest(request, {
-			messages: [...messages, Message.user(forcedSubmitNotice(forced.toolName))],
-			tools: toDefinitions({ [forced.toolName]: submitTool }),
-			toolChoice: forced.toolName,
+			messages: [...messages, Message.user(forcedSubmitNotice(forced.name))],
+			tools: toDefinitions({ [forced.name]: forced.tool }),
+			toolChoice: forced.name,
 		}),
 		closing: "submit",
 	}
@@ -218,7 +227,11 @@ export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> 
 				...buildChatTools(input.toolExecutor, input.tenant, agent.permission),
 				// Delegation is opt-in per agent: an agent with no `spawns` never sees `task` at all.
 				...buildTaskTool(input, spawnableFor(agent), taskBudget, runChatTurn),
-				...input.extraTools,
+				// One value, so the tool the model is offered and the name the closing step forces are
+				// the same fact rather than two that can drift apart. See `TurnCompletion`.
+				...(input.completion === undefined
+					? undefined
+					: { [input.completion.name]: input.completion.tool }),
 			}
 			const request = LLM.request({
 				id: input.messageId,
@@ -551,13 +564,11 @@ const runStep = (
 					//
 					// `state.closing === undefined` bounds it to one attempt, and the `"submit"` branch
 					// above ends the turn unconditionally whatever comes back — so this cannot loop.
-					const submitName = input.closingSubmit?.toolName
-					if (state.closing === undefined && submitName !== undefined && tools[submitName]) {
+					if (state.closing === undefined && closingCompletion(input) !== undefined) {
 						const replay =
 							emptyOutput && response.reasoning.trim() === "" ? [] : [response.message]
 						const closing = closingStep(
 							input,
-							tools,
 							request,
 							[...request.messages, ...replay],
 							MAX_STEPS_NOTICE,
@@ -602,7 +613,7 @@ const runStep = (
 				// never a mutation). Anything the provider emitted besides the forced tool is dropped
 				// rather than run, because this step offered exactly one tool.
 				if (state.closing === "submit") {
-					const submitName = input.closingSubmit?.toolName
+					const submitName = closingCompletion(input)?.name
 					const forced = calls.filter((call) => call.name === submitName)
 					if (forced.length === 0) {
 						return finishTurn(input, state, "error", {
@@ -718,10 +729,8 @@ const runStep = (
 						// Recursing would spend another model call on a turn that is already over — and
 						// under a one-step budget (the validator's) that next step is the *forced* closing
 						// one, which asks for a second verdict and overwrites the first with it.
-						if (
-							input.closingSubmit !== undefined &&
-							calls.some((call) => call.name === input.closingSubmit?.toolName)
-						) {
+						const closesHere = closingCompletion(input)?.name
+						if (closesHere !== undefined && calls.some((call) => call.name === closesHere)) {
 							return Stream.concat(
 								Stream.fromIterable(results),
 								finishTurn(input, state, "stop", { finishReason }),
@@ -796,7 +805,6 @@ const runStep = (
 						) {
 							const closing = closingStep(
 								input,
-								tools,
 								request,
 								transcript,
 								observed.stop ? DOOM_LOOP_NOTICE : MAX_STEPS_NOTICE,

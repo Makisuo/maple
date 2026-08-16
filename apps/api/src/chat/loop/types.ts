@@ -5,7 +5,7 @@
  * plus two small stamping helpers; nothing here decides anything.
  */
 import type { ChatEvent, ChatTaskRef } from "@maple/domain/chat-session"
-import type { FinishReason, Message, Model, Tools, Usage } from "@maple/llm"
+import type { AnyTool, FinishReason, Message, Model, Usage } from "@maple/llm"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import type { McpToolExecutorApi } from "@/mcp/dispatcher"
 import type { AgentDefinition } from "../agents"
@@ -22,6 +22,42 @@ type WithoutSeq<T> = T extends unknown ? Omit<T, "seq"> : never
  */
 export type ChatTurnEvent = WithoutSeq<Exclude<ChatEvent, { type: "user-message" }>>
 
+/**
+ * The one tool a turn can *answer through*, supplied as a single value.
+ *
+ * The name and the implementation used to arrive separately — a `Tools` record merged into the
+ * turn's tool map, plus a `closingSubmit: { toolName }` naming which key of it closes the turn — and
+ * nothing tied the two together. Every disagreement between them was silent and shipped: the
+ * investigation chat session supplied `submit_diagnosis` and no closing name, so an investigation
+ * that spent its whole step budget reached the tool-less closing step, answered in prose, and left
+ * `investigations.diagnosis` null. A name with no matching tool was equally representable and simply
+ * fell back to the prose closing step.
+ *
+ * Absent means the turn has no structured answer at all — plain attended chat. Present means exactly
+ * this tool, under exactly this name, is offered to the model.
+ *
+ * `closes` is the remaining choice, and it is required rather than defaulted so no caller can make
+ * it by omission:
+ *
+ *   - `true` — the turn's answer *is* this call. The step that closes a cut-short turn carries this
+ *     one tool with `toolChoice` forcing it, a step that produced prose instead of calling it is
+ *     asked once more through it, and the call itself ends the turn. Headless passes.
+ *   - `false` — the tool is merely available. The turn closes in prose like any attended one, and a
+ *     call to it is dispatched and then followed like any other tool result. This is what a human
+ *     follow-up inside an investigation gets: it *may* file a superseding diagnosis, but a question
+ *     about the existing one must not be answered by rewriting it.
+ *
+ * It is supplied by the caller rather than built inside the loop because its handler needs
+ * `InvestigationService`, which would otherwise drag the service graph into the loop's imports.
+ */
+export interface TurnCompletion {
+	/** The name the model sees, and the key it is registered under in the turn's tool map. */
+	readonly name: string
+	readonly tool: AnyTool
+	/** Whether this call is the turn's answer, rather than one tool among many. */
+	readonly closes: boolean
+}
+
 export interface ChatTurnInput {
 	readonly sessionId: string
 	readonly tenant: TenantContext
@@ -32,11 +68,9 @@ export interface ChatTurnInput {
 	readonly messages: ReadonlyArray<Message>
 	readonly messageId: string
 	/**
-	 * Investigate-mode sessions get a `submit_diagnosis` tool. It is supplied rather than built
-	 * inside the loop because it needs `InvestigationService`, which would otherwise drag the
-	 * service graph into the loop's imports.
+	 * The tool this turn answers *through*, if it has one. See {@link TurnCompletion}.
 	 */
-	readonly extraTools?: Tools
+	readonly completion?: TurnCompletion
 	/**
 	 * Whether this turn still holds the session's turn slot.
 	 *
@@ -57,18 +91,6 @@ export interface ChatTurnInput {
 	 * and the lane was recorded as a no-finding.
 	 */
 	readonly softStop?: () => boolean
-	/**
-	 * The tool a headless turn answers *through*.
-	 *
-	 * The closing step that serves attended chat sends `tools: []` and `toolChoice: "none"`, because
-	 * there the answer is prose. An investigation's answer is a `submit_diagnosis` / `submit_candidate`
-	 * call, so that same closing step silences it — an agent that spent its whole budget investigating
-	 * could not report what it found. When this is set, the closing step instead carries exactly this
-	 * one tool with `toolChoice` forcing it. The name must be a key of {@link extraTools}.
-	 *
-	 * Unset — every attended surface — keeps the tool-less closing step byte-for-byte.
-	 */
-	readonly closingSubmit?: { readonly toolName: string }
 	/** Accumulates this turn's token usage; see {@link TurnUsage}. */
 	readonly usage?: TurnUsage
 	/** Mutable outcome facts annotated on the enclosing `chat.turn` span by the session runner. */

@@ -8,17 +8,9 @@
 import { describe, it } from "@effect/vitest"
 import { assert } from "vitest"
 import { Effect, Layer, Schema, Stream } from "effect"
-import {
-	LLMClient,
-	LLMEvent,
-	Tool,
-	type FinishReason,
-	type LLMRequest,
-	type Model,
-	type Tools,
-} from "@maple/llm"
+import { LLMClient, LLMEvent, Tool, type FinishReason, type LLMRequest, type Model } from "@maple/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
-import { makeTurnObservability, runChatTurn, type ChatTurnEvent } from "./index"
+import { makeTurnObservability, runChatTurn, type ChatTurnEvent, type TurnCompletion } from "./index"
 import { MAX_STEP_ATTEMPTS } from "./budgets"
 import { DEFAULT_RULESET } from "../permissions"
 import type { AgentDefinition } from "../agents"
@@ -64,6 +56,41 @@ const providerError = (
  */
 const toolCall = (id: string, name: string, input: unknown = {}): LLMEvent =>
 	({ type: "tool-call", id, name, input, providerExecuted: false }) as LLMEvent
+
+const SUBMIT = "submit_candidate"
+
+/**
+ * The turn's completion, as the one value it now is.
+ *
+ * The name, the implementation and "is this call the turn's answer?" arrive together, so a fixture
+ * cannot express the shape that shipped: a submit tool the model can see and a loop that will never
+ * insist on it.
+ */
+const completionTool = (record: Array<unknown>) =>
+	Tool.make({
+		description: "Record the candidate.",
+		parameters: Schema.Struct({ claim: Schema.String }),
+		success: Schema.String,
+		execute: (value) =>
+			Effect.sync(() => {
+				record.push(value)
+				return "Recorded."
+			}),
+	})
+
+/** A completion the turn answers *through*: it is forced at the close and it ends the turn. */
+const submitCompletion = (record: Array<unknown>): TurnCompletion => ({
+	name: SUBMIT,
+	tool: completionTool(record),
+	closes: true,
+})
+
+/** The same tool, merely offered — what a human follow-up inside an investigation gets. */
+const offeredCompletion = (record: Array<unknown>): TurnCompletion => ({
+	name: SUBMIT,
+	tool: completionTool(record),
+	closes: false,
+})
 
 /**
  * Stub the model with a scripted event stream per step.
@@ -124,8 +151,7 @@ interface CollectOverrides {
 	readonly isCurrent?: () => boolean
 	readonly softStop?: () => boolean
 	readonly agent?: AgentDefinition
-	readonly extraTools?: Tools
-	readonly closingSubmit?: { readonly toolName: string }
+	readonly completion?: TurnCompletion
 }
 
 const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) => {
@@ -142,8 +168,7 @@ const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) =
 		...(overrides.isCurrent ? { isCurrent: overrides.isCurrent } : undefined),
 		...(overrides.softStop ? { softStop: overrides.softStop } : undefined),
 		...(overrides.agent ? { agent: overrides.agent } : undefined),
-		...(overrides.extraTools ? { extraTools: overrides.extraTools } : undefined),
-		...(overrides.closingSubmit ? { closingSubmit: overrides.closingSubmit } : undefined),
+		...(overrides.completion ? { completion: overrides.completion } : undefined),
 	}).pipe(
 		Stream.runCollect,
 		Effect.map((events) => Array.from(events) as ChatTurnEvent[]),
@@ -780,20 +805,93 @@ describe("runChatTurn max steps, defensively", () => {
  * not report any of it, and was recorded identically to one that never looked.
  */
 describe("runChatTurn closing submit", () => {
-	const SUBMIT = "submit_candidate"
+	/**
+	 * Normal completion: the model works, then answers through the tool of its own
+	 * accord, well inside its budget. Nothing is forced, and the payload still lands.
+	 */
+	it.live(
+		"records the answer and ends on stop when the model calls the completion tool itself",
+		() =>
+			Effect.gen(function* () {
+				const submitted: Array<unknown> = []
+				const result = yield* collect(
+					[
+						[toolCall("c1", "find_errors", { page: 0 }), finish()],
+						[toolCall("c2", "search_logs", { page: 1 }), finish()],
+						[
+							textDelta("Filing it."),
+							toolCall("s1", SUBMIT, { claim: "pool exhaustion" }),
+							finish("tool-calls"),
+						],
+					],
+					{ completion: submitCompletion(submitted) },
+				)
 
-	const submitTool = (record: Array<unknown>): Tools => ({
-		[SUBMIT]: Tool.make({
-			description: "Record the candidate.",
-			parameters: Schema.Struct({ claim: Schema.String }),
-			success: Schema.String,
-			execute: (value) =>
-				Effect.sync(() => {
-					record.push(value)
-					return "Recorded."
-				}),
-		}),
-	})
+				assert.deepEqual(submitted, [{ claim: "pool exhaustion" }])
+				// A completed answer, not a ceiling: nothing about this turn was cut short.
+				const end = terminal(result.events)[0]
+				assert.equal(end?.type === "turn-end" ? end.reason : undefined, "stop")
+				assert.equal(result.calls, 3)
+				// The one value registers the tool under its own name on every ordinary step, so the
+				// name the closing step would force cannot name a tool the model was never offered.
+				assert.include(
+					(result.requests[0]?.tools ?? []).map((tool) => tool.name),
+					SUBMIT,
+				)
+			}),
+		30_000,
+	)
+
+	/**
+	 * `closes: false` — the same tool, merely available. This is the human follow-up
+	 * inside an investigation: it *may* file a superseding diagnosis, but a question
+	 * about the existing one has to be answerable in prose, so the call is dispatched
+	 * and followed like any other tool result rather than ending the turn.
+	 */
+	it.live(
+		"follows an offered completion call instead of ending the turn on it",
+		() =>
+			Effect.gen(function* () {
+				const submitted: Array<unknown> = []
+				const result = yield* collect(
+					[
+						[toolCall("s1", SUBMIT, { claim: "revised" }), finish("tool-calls")],
+						[textDelta("Recorded the revised diagnosis."), finish()],
+					],
+					{ completion: offeredCompletion(submitted) },
+				)
+
+				assert.deepEqual(submitted, [{ claim: "revised" }])
+				assert.equal(result.calls, 2)
+				assert.lengthOf(terminal(result.events), 1)
+			}),
+		30_000,
+	)
+
+	/** And it closes in prose, exactly as an attended turn with no completion at all does. */
+	it.live(
+		"closes an offered completion in prose, with no tools at all",
+		() =>
+			Effect.gen(function* () {
+				const submitted: Array<unknown> = []
+				const result = yield* collect(
+					[
+						...Array.from(
+							{ length: 10 },
+							(_, i): Step => [toolCall("c1", "find_errors", { page: i }), finish()],
+						),
+						[textDelta("Here is what I found."), finish()],
+					],
+					{ completion: offeredCompletion(submitted) },
+				)
+
+				const closing = result.requests[result.requests.length - 1]
+				assert.isEmpty(closing?.tools ?? [])
+				assert.equal(closing?.toolChoice?.type, "none")
+				assert.isEmpty(submitted)
+			}),
+		30_000,
+	)
 
 	/** Ten tool-calling steps, then the model finally calls submit. */
 	const exhaustingSteps = (): ReadonlyArray<Step> => [
@@ -807,8 +905,7 @@ describe("runChatTurn closing submit", () => {
 			Effect.gen(function* () {
 				const submitted: Array<unknown> = []
 				const result = yield* collect(exhaustingSteps(), {
-					extraTools: submitTool(submitted),
-					closingSubmit: { toolName: SUBMIT },
+					completion: submitCompletion(submitted),
 				})
 
 				const closing = result.requests[result.requests.length - 1]
@@ -826,8 +923,7 @@ describe("runChatTurn closing submit", () => {
 			Effect.gen(function* () {
 				const submitted: Array<unknown> = []
 				const result = yield* collect(exhaustingSteps(), {
-					extraTools: submitTool(submitted),
-					closingSubmit: { toolName: SUBMIT },
+					completion: submitCompletion(submitted),
 				})
 
 				// The regression: the answer actually reaches the tool.
@@ -857,8 +953,7 @@ describe("runChatTurn closing submit", () => {
 						[toolCall("s1", SUBMIT, { claim: "out of clock" }), finish()],
 					],
 					{
-						extraTools: submitTool(submitted),
-						closingSubmit: { toolName: SUBMIT },
+						completion: submitCompletion(submitted),
 						// Checked after the first real tool step, which is when the forced submit closes it.
 						softStop: () => true,
 					},
@@ -891,7 +986,7 @@ describe("runChatTurn closing submit", () => {
 						[textDelta("The strongest candidate is the pool."), finish()],
 						[toolCall("s1", SUBMIT, { claim: "pool exhaustion" }), finish()],
 					],
-					{ extraTools: submitTool(submitted), closingSubmit: { toolName: SUBMIT } },
+					{ completion: submitCompletion(submitted) },
 				)
 
 				assert.deepEqual(submitted, [{ claim: "pool exhaustion" }])
@@ -911,8 +1006,7 @@ describe("runChatTurn closing submit", () => {
 				yield* collect(
 					[[finish()], [finish()], [toolCall("s1", SUBMIT, { claim: "recovered" }), finish()]],
 					{
-						extraTools: submitTool(submitted),
-						closingSubmit: { toolName: SUBMIT },
+						completion: submitCompletion(submitted),
 					},
 				)
 
@@ -933,8 +1027,7 @@ describe("runChatTurn closing submit", () => {
 						[textDelta("prose again"), finish()],
 					],
 					{
-						extraTools: submitTool(submitted),
-						closingSubmit: { toolName: SUBMIT },
+						completion: submitCompletion(submitted),
 					},
 				)
 
@@ -960,7 +1053,7 @@ describe("runChatTurn closing submit", () => {
 						[toolCall("s1", SUBMIT, { claim: "first" }), finish()],
 						[toolCall("s2", SUBMIT, { claim: "second" }), finish()],
 					],
-					{ extraTools: submitTool(submitted), closingSubmit: { toolName: SUBMIT } },
+					{ completion: submitCompletion(submitted) },
 				)
 
 				assert.deepEqual(submitted, [{ claim: "first" }])
@@ -978,8 +1071,7 @@ describe("runChatTurn closing submit", () => {
 		Effect.gen(function* () {
 			const submitted: Array<unknown> = []
 			const events = yield* collectEvents([[textDelta("hi"), finish()]], {
-				extraTools: submitTool(submitted),
-				closingSubmit: { toolName: SUBMIT },
+				completion: submitCompletion(submitted),
 				isCurrent: () => false,
 			})
 			assert.isEmpty(terminal(events))

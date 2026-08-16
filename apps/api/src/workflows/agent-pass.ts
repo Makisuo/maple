@@ -9,9 +9,9 @@
  * Two things a workflow needs that a chat session gets for free:
  *
  * - **A structured answer.** The turn emits events, not objects, so the schema
- *   arrives the way `submit_diagnosis` already does: a tool supplied through
- *   `extraTools` whose `parameters` *is* the schema. The model filling it in is
- *   the model answering.
+ *   arrives the way `submit_diagnosis` already does: the turn's `completion`
+ *   tool, whose `parameters` *is* the schema. The model filling it in is the
+ *   model answering.
  * - **A deadline.** `softStop`, checked between steps. This used to ride on
  *   `isCurrent`, which looked like the same thing and is not: `isCurrent` is the
  *   *abort* hook, so a pass that ran out of clock returned an empty stream, never
@@ -20,13 +20,14 @@
  *   never looked. `softStop` means "finish by answering", and the loop responds by
  *   spending one last step on the forced submit call.
  *
- * Both of those depend on `closingSubmit`: the tool-less closing step that serves
- * attended chat has nothing to say for an agent whose answer *is* a tool call.
+ * Both of those depend on `completion.closes`: the tool-less closing step that
+ * serves attended chat has nothing to say for an agent whose answer *is* a tool
+ * call.
  */
 import { Cause, Schema, Stream, Effect, Option } from "effect"
-import { Tool, type Model, type Tools } from "@maple/llm"
+import { Tool, type Model } from "@maple/llm"
 import { Message } from "@maple/llm"
-import { runChatTurn, makeTurnUsage, type TurnUsage } from "@/chat/loop"
+import { runChatTurn, makeTurnUsage, type TurnCompletion, type TurnUsage } from "@/chat/loop"
 import type { AgentDefinition } from "@/chat/agents"
 import { McpToolExecutor } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -80,8 +81,11 @@ export const runAgentPass = <S extends Schema.Top>(
 		let toolCalls = 0
 		let deadlineHit = false
 
-		const submit: Tools = {
-			[input.submitToolName]: Tool.make({
+		// The name and the tool are one value, so a pass can never offer its submit tool without the
+		// loop knowing that calling it is how this turn ends. See `TurnCompletion`.
+		const completion: TurnCompletion = {
+			name: input.submitToolName,
+			tool: Tool.make({
 				description: input.submitToolDescription,
 				parameters: input.schema as never,
 				success: Schema.String,
@@ -91,6 +95,8 @@ export const runAgentPass = <S extends Schema.Top>(
 						return "Recorded."
 					}),
 			}),
+			// The turn's answer *is* this tool call, so the closing step has to keep offering it.
+			closes: true,
 		}
 
 		yield* runChatTurn({
@@ -101,10 +107,8 @@ export const runAgentPass = <S extends Schema.Top>(
 			messages: [Message.user(input.prompt)],
 			messageId: input.id,
 			agent: input.agent,
-			extraTools: submit,
+			completion,
 			usage,
-			// The turn's answer is this tool call, so the closing step has to keep offering it.
-			closingSubmit: { toolName: input.submitToolName },
 			softStop: () => {
 				if (input.deadlineAtMs === undefined) return false
 				if (Date.now() < input.deadlineAtMs) return false
