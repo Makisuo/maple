@@ -18,6 +18,7 @@ import {
 	computeBreakdownStats,
 	computeFlags,
 	computeTimeseriesStats,
+	percentScaleAdvice,
 	verdictFromFlags,
 	type ChartFlag,
 	type QueryStats,
@@ -223,7 +224,18 @@ function statsToData(stats: QueryStats): InspectChartQueryStats {
 // A real grouping was requested when the draft enables groupBy and lists at
 // least one token that isn't the ungrouped sentinel (`none`/`all`). Used to
 // distinguish an intentional ungrouped chart from a grouping that collapsed.
-function isGroupByRequested(draft: { addOns?: { groupBy?: boolean }; groupBy?: readonly string[] }): boolean {
+/**
+ * Whether a draft actually asks for a grouping.
+ *
+ * `addOns.groupBy` is the gate: a `groupBy: ["service.name"]` with the addOn
+ * absent or false is SILENTLY IGNORED by the spec builder. Exported so the
+ * widget-shape validator can reject a breakdown panel that would render one
+ * slice, rather than leaving it to post-persist inspection.
+ */
+export function isGroupByRequested(draft: {
+	addOns?: { groupBy?: boolean }
+	groupBy?: readonly string[]
+}): boolean {
 	if (!draft.addOns?.groupBy) return false
 	return (draft.groupBy ?? []).some((g) => {
 		const t = g.trim().toLowerCase()
@@ -461,6 +473,9 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		// Base timeseries data captured for formula evaluation. `concurrency: 1`
 		// below makes the push order deterministic with no race.
 		const formulaBaseInputs: QueryRunResult[] = []
+		// Percent-scale advice, collected per query alongside its flag. `concurrency: 1`
+		// below makes the push order deterministic.
+		const percentAdvice: string[] = []
 
 		const queryResults: InspectChartQueryResult[] = yield* Effect.forEach(
 			enabledRawDrafts,
@@ -555,15 +570,34 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 							: []
 					const preFlags = [...builderWarningFlags, ...emptyGroupingFlags]
 
-					const baseFlags = computeFlags(stats, {
+					// A non-empty `valueField` puts a traces query into
+					// numeric-attribute mode, where the metric-class heuristics do not
+					// apply and small absolute values are ordinary. It has to reach
+					// `computeFlags`, or the ambiguous low-side percent check fires on
+					// exactly the queries it was meant to skip.
+					const numericAggregation =
+						((draft as { valueField?: string }).valueField ?? "").trim().length > 0
+
+					const flagContext = {
 						metric: draft.aggregation,
 						source: draft.dataSource,
-						kind: isTimeseries ? "timeseries" : "breakdown",
+						kind: isTimeseries ? ("timeseries" as const) : ("breakdown" as const),
 						...(widget.display.unit !== undefined
 							? { displayUnit: widget.display.unit }
 							: undefined),
+						...(numericAggregation ? { numericAggregation: true } : undefined),
+					}
+
+					const baseFlags = computeFlags(stats, {
+						...flagContext,
 						...(preFlags.length > 0 ? { preFlags } : undefined),
 					})
+
+					// The advice is derived from the SAME stats and the SAME context as
+					// the flag, because the two disagreeing is how a widget ends up
+					// reported as suspicious with nothing said about what to change.
+					const advice = percentScaleAdvice(stats, flagContext)
+					if (advice !== null && !percentAdvice.includes(advice)) percentAdvice.push(advice)
 
 					// An empty/all-null metrics query might be a typo'd metric name
 					// rather than a real metric with no recent data — check the catalog
@@ -654,10 +688,13 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 					)
 					fReduced = reduced.value
 				}
-				const fFlags = computeFlags(fstats, {
-					kind: "timeseries",
+				const fFlagContext = {
+					kind: "timeseries" as const,
 					...(widget.display.unit !== undefined ? { displayUnit: widget.display.unit } : undefined),
-				})
+				}
+				const fFlags = computeFlags(fstats, fFlagContext)
+				const fAdvice = percentScaleAdvice(fstats, fFlagContext)
+				if (fAdvice !== null && !percentAdvice.includes(fAdvice)) percentAdvice.push(fAdvice)
 
 				queryResults.push({
 					queryId: fr.queryId,
@@ -675,6 +712,11 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		const verdict = verdictFromFlags(allFlags)
 
 		const notes: string[] = []
+		// Percent-scale advice names the token to switch to. The flag alone
+		// ("PERCENT_SCALE_MISMATCH") does not say which direction the error runs,
+		// and getting the direction wrong is the whole problem — so the advice
+		// string, not just the flag, has to reach the caller.
+		for (const advice of percentAdvice) notes.push(advice)
 		if (hasFormulaWarning && !formulaEvaluated) {
 			// Only true for non-timeseries widgets, where formulas don't apply.
 			notes.push(
@@ -730,12 +772,17 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 
 function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): WidgetInspectionEntry {
 	if (outcome.kind === "supported") {
+		// The percent-scale note is the one note that tells the caller what to
+		// change, so it rides along on the mutation-tool summary rather than only
+		// appearing in a full `inspect_chart_data` response.
+		const actionableNote = outcome.data.notes.find((note) => note.startsWith('unit "percent'))
 		return {
 			widgetId: widget.id,
 			...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 			visualization: widget.visualization,
 			verdict: outcome.data.verdict satisfies WidgetInspectionVerdict,
 			flags: [...outcome.data.flags],
+			...(actionableNote !== undefined ? { note: actionableNote } : undefined),
 		}
 	}
 	if (outcome.kind === "unsupported") {

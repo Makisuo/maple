@@ -13,6 +13,7 @@ export type ChartFlag =
 	| "SINGLE_SERIES_DOMINATES"
 	| "CARDINALITY_EXPLOSION"
 	| "UNIT_MISMATCH"
+	| "PERCENT_SCALE_MISMATCH"
 	| "BROKEN_BREAKDOWN"
 	| "EMPTY_GROUPING"
 	| "METRIC_NOT_FOUND"
@@ -27,6 +28,11 @@ const BROKEN_FLAGS: ReadonlySet<ChartFlag> = new Set<ChartFlag>([
 	"EMPTY_GROUPING",
 	"METRIC_NOT_FOUND",
 	"UNIT_MISMATCH",
+	// PERCENT_SCALE_MISMATCH is deliberately NOT here. The high side (a 0–1 unit
+	// on 0–100 data) is unambiguous, but the low side is not: an error rate that
+	// genuinely never exceeds 1% is indistinguishable from a fraction mislabelled
+	// as `percent_100`. Downgrading to `suspicious` reports both without calling
+	// a healthy chart broken.
 ])
 
 // Flags that describe data quirks (sparse/expected) rather than a broken chart.
@@ -207,7 +213,12 @@ const COUNT_METRICS = new Set(["count"])
 
 const DURATION_UNIT_PATTERN =
 	/^(ms|millisecond|milliseconds|sec|secs|second|seconds|us|microsecond|microseconds|ns|nanosecond|nanoseconds|duration|duration_ms|duration_seconds|latency|time)$/i
-const PERCENT_UNIT_PATTERN = /^(%|pct|percent|percentage|ratio|fraction)$/i
+// `percent_100` belongs here: without it the token classified as `unknown`, so
+// an `error_rate` widget carrying it produced NO flag at all and reported
+// `looks_healthy` while rendering 100x low. Both percent tokens are the same
+// *class* (a percentage); which scale each expects is checked separately by
+// `percentScaleAdvice`.
+const PERCENT_UNIT_PATTERN = /^(%|pct|percent|percent_100|percentage|ratio|fraction)$/i
 const COUNT_UNIT_PATTERN = /^(count|requests|events|operations|ops|number|n|total|errors|spans|logs|hits)$/i
 
 function classifyMetric(metric?: string): MetricClass {
@@ -226,6 +237,51 @@ function classifyUnit(unit?: string): UnitClass {
 	if (PERCENT_UNIT_PATTERN.test(trimmed)) return "percent"
 	if (COUNT_UNIT_PATTERN.test(trimmed)) return "count"
 	return "unknown"
+}
+
+/**
+ * Whether the stored numbers match the scale the chosen percent token expects.
+ *
+ * Maple has two percent tokens and they are inverted relative to Grafana's, so
+ * this is the mistake agents actually make:
+ *
+ *   `percent`     expects a FRACTION 0–1 and multiplies by 100  (Grafana: percentunit)
+ *   `percent_100` expects 0–100 and renders as-is               (Grafana: percent)
+ *
+ * Nothing else in the stack notices a mismatch — `display.unit` is an open
+ * string and both tokens render without error — so a widget is simply 100x off.
+ * Driven by the unit token rather than the metric class on purpose: it has to
+ * work for raw metrics and numeric-attribute aggregations too, not just the
+ * `error_rate` builtin.
+ *
+ * Returns the advice string to surface, or `null` when the scale looks right.
+ */
+export function percentScaleAdvice(stats: QueryStats, ctx: FlagContext = {}): string | null {
+	const unit = ctx.displayUnit?.trim()
+	if (unit !== "percent" && unit !== "percent_100") return null
+
+	let observedMax: number | null = null
+	for (const series of stats.seriesStats) {
+		if (series.max === null) continue
+		if (observedMax === null || series.max > observedMax) observedMax = series.max
+	}
+	if (observedMax === null || observedMax <= 0) return null
+
+	const peak = observedMax.toPrecision(3)
+
+	if (unit === "percent" && observedMax > 1.5) {
+		return `unit "percent" expects a fraction 0–1 and multiplies by 100, but values peak at ${peak} — this renders ~100x too high. Use "percent_100" for data already on a 0–100 scale.`
+	}
+
+	// The low side is a genuine ambiguity — a real sub-1% error rate looks
+	// identical to a fraction wearing the wrong token — so it is phrased as a
+	// question and skipped for numeric-attribute aggregations, where small
+	// absolute values are ordinary.
+	if (unit === "percent_100" && !ctx.numericAggregation && observedMax <= 1) {
+		return `unit "percent_100" renders values as-is, and values never exceed ${peak} — if these are fractions (0–1), use "percent"; if this really is a sub-1% rate, ignore this.`
+	}
+
+	return null
 }
 
 export function computeFlags(stats: QueryStats, ctx: FlagContext = {}): ChartFlag[] {
@@ -329,6 +385,10 @@ export function computeFlags(stats: QueryStats, ctx: FlagContext = {}): ChartFla
 		!flags.includes("UNIT_MISMATCH")
 	) {
 		flags.push("UNIT_MISMATCH")
+	}
+
+	if (percentScaleAdvice(stats, ctx) !== null && !flags.includes("PERCENT_SCALE_MISMATCH")) {
+		flags.push("PERCENT_SCALE_MISMATCH")
 	}
 
 	return flags

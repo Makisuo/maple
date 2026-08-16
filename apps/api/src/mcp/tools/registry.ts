@@ -8,6 +8,7 @@ import { registerCreateAlertRuleTool } from "./create-alert-rule"
 import { registerUpdateAlertRuleTool } from "./update-alert-rule"
 import { registerDeleteAlertRuleTool } from "./delete-alert-rule"
 import { registerCreateDashboardTool } from "./create-dashboard"
+import { registerDescribeDashboardSchemaTool } from "./describe-dashboard-schema"
 import { registerDiagnoseServiceTool } from "./diagnose-service"
 import { registerErrorDetailTool } from "./error-detail"
 import { registerExploreAttributesTool } from "./explore-attributes"
@@ -163,6 +164,7 @@ const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition> => {
 	registerCreateAlertRuleTool(registrar)
 	registerUpdateAlertRuleTool(registrar)
 	registerDeleteAlertRuleTool(registrar)
+	registerDescribeDashboardSchemaTool(registrar)
 	registerListDashboardsTool(registrar)
 	registerGetDashboardTool(registrar)
 	registerCreateDashboardTool(registrar)

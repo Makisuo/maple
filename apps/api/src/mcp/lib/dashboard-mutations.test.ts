@@ -17,7 +17,7 @@ import { DashboardPersistenceService } from "@/services/dashboards/DashboardPers
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
-import { withDashboardMutation } from "./dashboard-mutations"
+import { decodeDataSourceJson, decodeWidgetJson, withDashboardMutation } from "./dashboard-mutations"
 import { CurrentMcpTenant } from "./query-warehouse"
 import { registerUpdateDashboardTool } from "@/mcp/tools/update-dashboard"
 import type { McpToolError, McpToolRegistrar, McpToolResult } from "@/mcp/tools/types"
@@ -204,4 +204,87 @@ describe("dashboard mutations on tag-less / description-less dashboards", () => 
 			assert.strictEqual(listed.dashboards[0]!.name, "Renamed")
 		}).pipe(Effect.provide(layer))
 	})
+})
+
+// The payloads the OLD documentation taught. Each one is what an agent trained
+// on the pre-v3 tool descriptions — or working from a stale transcript — still
+// produces. The point is not that they fail (a union decode always failed);
+// it is that the failure now NAMES the v3 replacement instead of dumping four
+// per-arm decode errors.
+describe("legacy v2 payloads get a corrective error", () => {
+	const decodeErrorOf = (json: string) =>
+		Effect.flip(decodeDataSourceJson(json, "test")).pipe(Effect.map((error) => error.message))
+
+	it.effect("markdown_static → kind: static", () =>
+		Effect.gen(function* () {
+			const message = yield* decodeErrorOf('{"endpoint":"markdown_static"}')
+			assert.include(message, "legacy v2 data-source shape")
+			assert.include(message, '{"kind":"static"}')
+		}),
+	)
+
+	it.effect("custom_query_builder_timeseries → kind: query with resultShape", () =>
+		Effect.gen(function* () {
+			const message = yield* decodeErrorOf(
+				'{"endpoint":"custom_query_builder_timeseries","params":{"queries":[]}}',
+			)
+			assert.include(message, '"resultShape":"timeseries"')
+			assert.include(message, "TOP LEVEL")
+		}),
+	)
+
+	it.effect("custom_query_builder_breakdown carries its own result shape", () =>
+		Effect.gen(function* () {
+			const message = yield* decodeErrorOf('{"endpoint":"custom_query_builder_breakdown"}')
+			assert.include(message, '"resultShape":"breakdown"')
+		}),
+	)
+
+	it.effect("raw_sql_chart → kind: raw_sql", () =>
+		Effect.gen(function* () {
+			const message = yield* decodeErrorOf('{"endpoint":"raw_sql_chart","params":{"sql":"SELECT 1"}}')
+			assert.include(message, '{"kind":"raw_sql"')
+		}),
+	)
+
+	it.effect("an unrecognised endpoint maps to the route arm rather than being guessed at", () =>
+		Effect.gen(function* () {
+			const message = yield* decodeErrorOf('{"endpoint":"service_overview","params":{}}')
+			assert.include(message, '"kind":"route"')
+			assert.include(message, "service_overview")
+		}),
+	)
+
+	it.effect("a whole widget carrying a v2 dataSource gets the same hint", () =>
+		Effect.gen(function* () {
+			const error = yield* Effect.flip(
+				decodeWidgetJson(
+					JSON.stringify({
+						id: "w1",
+						visualization: "markdown",
+						dataSource: { endpoint: "markdown_static" },
+						display: {},
+						layout: { x: 0, y: 0, w: 4, h: 5 },
+					}),
+					"test",
+				),
+			)
+			assert.include(error.message, '{"kind":"static"}')
+		}),
+	)
+
+	it.effect("a valid v3 source still decodes untouched", () =>
+		Effect.gen(function* () {
+			const source = yield* decodeDataSourceJson('{"kind":"static"}', "test")
+			assert.deepStrictEqual(source, { kind: "static" })
+		}),
+	)
+
+	it.effect("a genuinely malformed source keeps the raw decode error", () =>
+		Effect.gen(function* () {
+			const message = yield* decodeErrorOf('{"kind":"raw_sql"}')
+			assert.notInclude(message, "legacy v2")
+			assert.include(message, "Invalid data_source_json")
+		}),
+	)
 })

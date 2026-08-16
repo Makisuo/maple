@@ -31,6 +31,7 @@ import type { TemplateParameterValues, WidgetDef } from "@/dashboard-templates"
 import { validateDashboardTimeRange } from "@/mcp/lib/resolve-dashboard-time-range"
 import { MAX_LIST_RANGE_SECONDS, MAX_QUERY_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
 import { makeRouteDataSource } from "@maple/widgets/dashboard"
+import { collectDocumentRenderWarnings } from "@/mcp/lib/validate-widget-renderability"
 
 const decodePortableDashboard = Schema.decodeUnknownEffect(PortableDashboardDocument)
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
@@ -200,7 +201,7 @@ function simpleSpecToWidget(
 		// dashboard that did not go through the query builder — and so the only one
 		// `collectBlockingBuilderWarnings` could never inspect.
 		//
-		// `custom_query_builder_timeseries` returns wide rows (`{ bucket, <series>:
+		// A timeseries query source returns wide rows (`{ bucket, <series>:
 		// value }`), which `reduceToValue` reads directly — no flattening. Naming
 		// the series after the widget title is a best effort; `resolveField` falls
 		// back to the first numeric column, which for a single-query stat is the
@@ -297,14 +298,13 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 			"Templates:\n" +
 			templateList +
 			"\n  custom — provide dashboard_json with full widget definitions\n\n" +
-			"Each template accepts optional service_name (for app templates) or its own params (see list_dashboard_templates).\n\n" +
+			"Each template accepts optional service_name (for app templates) or its own params.\n\n" +
 			"Simplified widgets (provide name + widgets JSON array, same params as query_data):\n" +
 			'  Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }\n' +
 			"  group_by: traces=service.name|span.name|status.code|http.method|none; logs=service.name|severity|none; metrics=service.name|attr.<key>|none\n" +
 			"  Note: table requires a group_by field. list shows recent traces or logs.\n" +
-			"Custom JSON: provide dashboard_json with full widget definitions (use get_dashboard to see schema). " +
-			"For raw widget JSON, trace/log queries omit the metric-only fields (`metricName`/`metricType`/`isMonotonic`); `whereClause` is a custom grammar (use `exists` not SQL `IS NULL`). See `maple://instructions` for the full widget JSON shape.\n\n" +
-			"After persistence, automatically validates every inspectable widget (custom_query_builder_timeseries/breakdown) and includes a per-widget verdict (looks_healthy/suspicious/broken) + sanity flags in the response. " +
+			"Custom JSON: provide dashboard_json with full widget definitions. **Call `describe_dashboard_schema` first** — it gives the panel types, the four `kind`-discriminated data-source shapes with worked examples, the unit vocabulary, and the aggregation and group-by tokens, all generated from the live schema.\n\n" +
+			"After persistence, inspects the query-builder widgets (up to 12) and reports a per-widget verdict (looks_healthy/suspicious/broken) with sanity flags. Widgets beyond that cap are not inspected — check them with `inspect_chart_data`. " +
 			'Pass `validate: "false"` to skip validation when creating dashboards with many widgets.',
 		Schema.Struct({
 			name: requiredStringParam("Dashboard name"),
@@ -546,6 +546,18 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 				lines.push(`Template: ${templateName}`)
 			} else if (params.widgets) {
 				lines.push(`Source: simplified widget specs`)
+			}
+
+			// Advisory across every creation path, including `dashboard_json`, which
+			// previously received no widget validation at all despite the tool
+			// description implying otherwise.
+			const renderWarnings = collectDocumentRenderWarnings(dashboard.widgets)
+			if (renderWarnings.length > 0) {
+				lines.push(
+					"",
+					"### Render warnings (saved anyway)",
+					...renderWarnings.map((warning) => `- ${warning}`),
+				)
 			}
 
 			const validationBlock = formatValidationSummary(validation, false)

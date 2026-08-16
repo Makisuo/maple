@@ -5,6 +5,7 @@ import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { DASHBOARD_TEMPLATES } from "@/dashboard-templates"
 
 export function registerListDashboardsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -64,8 +65,12 @@ export function registerListDashboardsTool(server: McpToolRegistrar) {
 			for (const d of dashboards.slice(0, 3)) {
 				nextSteps.push(`\`get_dashboard dashboard_id="${d.id}"\` — view dashboard configuration`)
 			}
+			// Interpolated rather than hardcoded: this line used to suggest
+			// `service_health`, but template keys are kebab-case, so the suggestion
+			// errored when followed literally.
+			const exampleTemplate = DASHBOARD_TEMPLATES[0]?.id ?? "blank"
 			nextSteps.push(
-				'`create_dashboard template="service_health"` — create a new dashboard from template',
+				`\`create_dashboard template="${exampleTemplate}"\` — create a new dashboard from template`,
 			)
 			lines.push(formatNextSteps(nextSteps))
 

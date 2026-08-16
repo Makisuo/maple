@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
-import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "./model"
+import type { QueryBuilderDataSource } from "@maple/query-model"
+import {
+	AGGREGATIONS_BY_SOURCE,
+	buildBreakdownQuerySpec,
+	buildTimeseriesQuerySpec,
+	GROUP_BY_TOKENS,
+} from "./model"
 
 // Minimal traces draft factory — only the fields the builder reads matter; the
 // rest satisfy the payload shape.
@@ -269,5 +275,102 @@ describe("has_error tri-state (MAP-49)", () => {
 
 	it("absent clause leaves errorsOnly unset", () => {
 		expect(errorsOnlyOf("")).toBeUndefined()
+	})
+})
+
+// `GROUP_BY_TOKENS` is a documentation catalog exported alongside the `Match`
+// chains rather than derived from them, so nothing but a test keeps the two in
+// step. The MCP schema doc renders from this catalog; a token listed here but
+// dropped by the resolver would teach an agent to write a group-by that
+// silently does nothing.
+describe("GROUP_BY_TOKENS catalog matches the resolvers", () => {
+	const draftFor = (
+		dataSource: QueryBuilderDataSource,
+		groupBy: ReadonlyArray<string>,
+	): QueryBuilderQueryDraftPayload => {
+		const base = {
+			...tracesDraft(),
+			dataSource,
+			addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+			groupBy: [...groupBy],
+		}
+		if (dataSource === "logs") return { ...base, aggregation: "count" } as QueryBuilderQueryDraftPayload
+		if (dataSource === "metrics") {
+			return {
+				...base,
+				aggregation: "avg",
+				metricName: "http.server.duration",
+				metricType: "gauge",
+			} as QueryBuilderQueryDraftPayload
+		}
+		return base as QueryBuilderQueryDraftPayload
+	}
+
+	for (const source of ["traces", "logs", "metrics"] as const) {
+		for (const token of GROUP_BY_TOKENS[source].literals) {
+			it(`${source}: "${token}" resolves without a warning`, () => {
+				const result = buildTimeseriesQuerySpec(draftFor(source, [token]))
+				expect(result.error).toBeNull()
+				expect(result.warnings).toEqual([])
+			})
+		}
+
+		for (const prefix of GROUP_BY_TOKENS[source].prefixes) {
+			it(`${source}: "${prefix}myKey" resolves without a warning`, () => {
+				const result = buildTimeseriesQuerySpec(draftFor(source, [`${prefix}myKey`]))
+				expect(result.error).toBeNull()
+				expect(result.warnings).toEqual([])
+			})
+		}
+	}
+
+	it("logs does not support attr.* — the catalog lists no prefixes for it", () => {
+		expect(GROUP_BY_TOKENS.logs.prefixes).toEqual([])
+		const result = buildTimeseriesQuerySpec(draftFor("logs", ["attr.anything"]))
+		expect(result.warnings.join(" ")).toContain("Unsupported logs group by")
+	})
+})
+
+// Aggregation enforcement now reads `AGGREGATIONS_BY_SOURCE`, the same array the
+// builder UI and the MCP schema doc render. These pin the two together.
+describe("aggregation enforcement follows AGGREGATIONS_BY_SOURCE", () => {
+	for (const source of ["traces", "logs", "metrics"] as const) {
+		for (const option of AGGREGATIONS_BY_SOURCE[source]) {
+			it(`${source}: "${option.value}" is accepted`, () => {
+				const draft = {
+					...tracesDraft(),
+					dataSource: source,
+					aggregation: option.value,
+					...(source === "metrics"
+						? { metricName: "http.server.duration", metricType: "gauge" }
+						: undefined),
+				} as QueryBuilderQueryDraftPayload
+				expect(buildTimeseriesQuerySpec(draft).error).toBeNull()
+			})
+		}
+	}
+
+	it("bare p95 on traces is rejected, and the error names valueField", () => {
+		const result = buildTimeseriesQuerySpec(tracesDraft({ aggregation: "p95" }))
+		expect(result.error).toContain("valueField")
+	})
+
+	it("bare p95 on traces is accepted once valueField names a numeric attribute", () => {
+		const result = buildTimeseriesQuerySpec(
+			tracesDraft({ aggregation: "p95", valueField: "attr.result.rowCount" }),
+		)
+		expect(result.error).toBeNull()
+	})
+
+	it("p95 on metrics is rejected and the error lists the valid set", () => {
+		const result = buildTimeseriesQuerySpec({
+			...tracesDraft(),
+			dataSource: "metrics",
+			aggregation: "p95",
+			metricName: "http.server.duration",
+			metricType: "gauge",
+		} as QueryBuilderQueryDraftPayload)
+		expect(result.error).toContain("Unsupported metrics aggregation")
+		expect(result.error).toContain("rate")
 	})
 })

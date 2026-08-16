@@ -38,6 +38,7 @@ export {
 	DashboardWidgetSchema,
 	DASHBOARD_GRID_COLS,
 	findNextPosition,
+	isWidgetUnit,
 	// Any reader that decodes a *stored* payload must migrate it first: a
 	// document is only stamped with the current schema version at its next write,
 	// so Electric hands the browser whatever version it was last written in.
@@ -45,10 +46,14 @@ export {
 	PortableDashboardDocument,
 	STAT_AGGREGATES,
 	type StatAggregate,
+	suggestWidgetUnit,
 	type TimeRange,
 	TimeRangeSchema,
+	WIDGET_UNIT_TOKENS,
+	WIDGET_UNITS,
 	WidgetDataSourceSchema,
 	WidgetDisplayConfigSchema,
+	type WidgetUnitMeta,
 	WidgetLayoutSchema,
 	withWidgets,
 } from "@maple/widgets/dashboard"

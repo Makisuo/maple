@@ -151,9 +151,13 @@ const chartPanel = (
 	isScalar: false,
 	ownedDisplayKeys: ["chartId", "stacked", "curveType", "thresholds"],
 	requiresGroupBy: false,
-	// One `chart` entry covers line/bar/area for the MCP tools; the display type
-	// is chosen separately there.
-	mcpExposed: panelType === "line",
+	// All three are MCP-exposed as *panel types*. `MCP_VISUALIZATIONS` still
+	// dedupes them to a single `"chart"`, which is what the legacy
+	// `visualization` parameter accepts; `MCP_PANEL_TYPES` is what lets a caller
+	// ask for a bar or an area chart by name. Before that existed, the only way
+	// to get one through the structured-query path was to hand-write an
+	// undocumented `display.chartId`.
+	mcpExposed: true,
 	persesKinds,
 })
 
@@ -354,6 +358,22 @@ export const MCP_VISUALIZATIONS: ReadonlyArray<WidgetVisualization> = [
 /** Narrows to the MCP-exposed subset — what `add_dashboard_widget` accepts. */
 export const isMcpVisualization = (value: unknown): value is WidgetVisualization =>
 	MCP_VISUALIZATIONS.some((candidate) => candidate === value)
+
+/**
+ * Panel types the MCP dashboard tools accept for `panel_type`.
+ *
+ * The preferred spelling. `visualization` collapses line/bar/area into `"chart"`
+ * and then needs `display.chartId` to tell them apart, and `display_type` is a
+ * third spelling for the raw-SQL path — three fields for one decision, which is
+ * why agents picked the wrong chart type. A panel type is the whole decision.
+ */
+export const MCP_PANEL_TYPES: ReadonlyArray<PanelType> = PANEL_TYPES.filter(
+	(meta) => meta.mcpExposed,
+).map((meta) => meta.panelType)
+
+/** Narrows to the MCP-exposed panel types — what `panel_type` accepts. */
+export const isMcpPanelType = (value: unknown): value is PanelType =>
+	typeof value === "string" && isPanelType(value) && WIDGET_TYPES[value].mcpExposed
 
 /** Grid size for an auto-placed widget, by persisted `visualization`. */
 export const defaultWidgetLayout = (
