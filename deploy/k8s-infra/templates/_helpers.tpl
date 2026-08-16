@@ -51,6 +51,27 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: agent
 {{- end -}}
 
+{{/*
+The ONE activation predicate for the cluster collector.
+
+The cluster collector is a single Deployment that only exists to host the
+cluster-scoped receivers (k8s_cluster, k8s_events, the Fargate prometheus
+scrape). It is active when it is switched on AND at least one of those
+receivers is enabled — otherwise it would run a collector with no receivers,
+or leave behind a ConfigMap/RBAC/ServiceAccount/Service for a workload that
+never runs. Every cluster-collector resource must gate on this helper so the
+resource set stays coherent for every receiver combination.
+
+Renders "true" or "false".
+*/}}
+{{- define "maple-k8s-infra.cluster.enabled" -}}
+{{- if and .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled .Values.presets.fargateMetrics.enabled) -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
 {{- define "maple-k8s-infra.cluster.selectorLabels" -}}
 {{ include "maple-k8s-infra.selectorLabels" . }}
 app.kubernetes.io/component: cluster-collector
