@@ -11,21 +11,27 @@ describe("toInputSchema nullable-union collapse", () => {
 	// `Schema.NullOr` parameter would render identically while genuinely accepting
 	// null, and would be wrongly narrowed. If this ever fails, make the collapse
 	// selective before trusting it again.
-	it("no tool parameter actually accepts an explicit null", () => {
-		const accepted: string[] = []
+	it("no REQUIRED tool parameter carries a null branch", () => {
+		// An optional parameter's null branch is the artifact being removed: absence
+		// and null mean the same thing there, so collapsing is safe. A REQUIRED one
+		// would be a real `Schema.NullOr` — null is a value it accepts — and
+		// collapsing that would narrow the contract. None exist today; this fails if
+		// one is ever added.
+		const nullableRequired: string[] = []
 		for (const definition of mapleToolCatalog) {
-			const fields = (definition.schema as unknown as { fields?: Record<string, Schema.Top> }).fields
-			if (!fields) continue
-			for (const [name, field] of Object.entries(fields)) {
-				try {
-					Schema.decodeUnknownSync(field as Schema.Codec<unknown, unknown, never, unknown>)(null)
-					accepted.push(`${definition.name}.${name}`)
-				} catch {
-					// Rejecting null is the expected case.
+			const document = Schema.toJsonSchemaDocument(definition.schema)
+			const schema = document.schema as {
+				required?: ReadonlyArray<string>
+				properties?: Record<string, { anyOf?: ReadonlyArray<{ type?: string }> }>
+			}
+			for (const name of schema.required ?? []) {
+				const branches = schema.properties?.[name]?.anyOf ?? []
+				if (branches.some((branch) => branch.type === "null")) {
+					nullableRequired.push(`${definition.name}.${name}`)
 				}
 			}
 		}
-		expect(accepted).toEqual([])
+		expect(nullableRequired).toEqual([])
 	})
 
 	it("publishes no null branch on any tool", () => {

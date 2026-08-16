@@ -2,12 +2,10 @@ import { describe, expect, it } from "vitest"
 import { withTableListOnUnknownTable } from "../run-sql"
 import { McpQueryError } from "../types"
 
-const err = (message: string, withCause = false) =>
-	new McpQueryError({
-		message,
-		pipeName: "run_sql",
-		...(withCause ? { cause: new Error("boom") } : {}),
-	})
+const err = (message: string) => new McpQueryError({ message, pipeName: "run_sql" })
+
+const errWithCause = (message: string) =>
+	new McpQueryError({ message, pipeName: "run_sql", cause: new Error("boom") })
 
 describe("withTableListOnUnknownTable", () => {
 	// The exact production failure: 8 hits on a table the agent invented, answered
@@ -42,7 +40,7 @@ describe("withTableListOnUnknownTable", () => {
 	})
 
 	it("preserves pipeName and cause", () => {
-		const enriched = withTableListOnUnknownTable(err("Unknown table x", true))
+		const enriched = withTableListOnUnknownTable(errWithCause("Unknown table x"))
 		expect(enriched.pipeName).toBe("run_sql")
 		expect(enriched.cause).toBeInstanceOf(Error)
 	})

@@ -23,7 +23,7 @@ interface TokenSet {
 	readonly groupBys: ReadonlyArray<string>
 }
 
-const TOKENS: Record<`${QuerySpecSource}:${QuerySpecKind}`, TokenSet> = {
+const TOKENS = {
 	"traces:timeseries": {
 		metrics: ["count", "avg_duration", "p50_duration", "p95_duration", "p99_duration", "error_rate", "apdex"],
 		groupBys: ["service", "span_name", "status_code", "http_method", "attribute", "none"],
@@ -50,7 +50,9 @@ const TOKENS: Record<`${QuerySpecSource}:${QuerySpecKind}`, TokenSet> = {
 		metrics: ["avg", "sum", "min", "max", "count", "rate", "increase"],
 		groupBys: ["service", "attribute", "resource_attribute", "none"],
 	},
-}
+	// `satisfies` rather than an annotation: it checks every combination is present
+	// and well-shaped while keeping the literal token types visible to callers.
+} satisfies Record<`${QuerySpecSource}:${QuerySpecKind}`, TokenSet>
 
 export const tokensFor = (source: QuerySpecSource, kind: QuerySpecKind): TokenSet =>
 	TOKENS[`${source}:${kind}`]
