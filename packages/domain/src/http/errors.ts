@@ -62,6 +62,30 @@ export const WORKFLOW_TRANSITIONS: Record<WorkflowState, ReadonlyArray<WorkflowS
 	wontfix: ["triage", "cancelled"],
 } satisfies Record<WorkflowState, ReadonlyArray<WorkflowState>>
 
+/**
+ * Every workflow state in canonical display order. The order the issue hub
+ * shows states in — groups, selects, and status menus — so a list of states
+ * reads the same everywhere.
+ */
+export const WORKFLOW_STATE_ORDER: ReadonlyArray<WorkflowState> = WorkflowState.literals
+
+/**
+ * The states that *every* one of `from` can legally move to — the intersection
+ * of their rows in {@link WORKFLOW_TRANSITIONS}, in canonical order.
+ *
+ * This is what a menu should offer: for one issue it is that issue's row, and
+ * for a multi-issue selection it is the moves the server would accept for all
+ * of them, so a bulk action can never half-apply. A state with no outgoing
+ * moves (`cancelled`) contributes an empty row and therefore collapses the
+ * result to nothing, and an empty input yields nothing (nothing selected, no
+ * legal move).
+ */
+export const allowedTransitionsForAll = (from: Iterable<WorkflowState>): ReadonlyArray<WorkflowState> => {
+	const rows = Array.from(from, (state) => WORKFLOW_TRANSITIONS[state])
+	if (rows.length === 0) return []
+	return WORKFLOW_STATE_ORDER.filter((target) => rows.every((row) => row.includes(target)))
+}
+
 /** States from which no further transition is possible. */
 export const TERMINAL_WORKFLOW_STATES: ReadonlySet<WorkflowState> = new Set<WorkflowState>([
 	"done",

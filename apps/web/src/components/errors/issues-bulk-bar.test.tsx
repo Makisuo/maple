@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ErrorIssueId } from "@maple/domain/http"
+import type { ErrorIssueId, WorkflowState } from "@maple/domain/http"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -19,9 +19,11 @@ const mutations = (): IssueMutations => ({
 	setSeverityMany: vi.fn(),
 })
 
+const issue = (id: string, state: WorkflowState) => ({ id: id as ErrorIssueId, state })
+
 const renderBar = (overrides: Partial<React.ComponentProps<typeof IssuesBulkBar>> = {}) => {
 	const props = {
-		selectedIds: ["issue-1" as ErrorIssueId],
+		selected: [issue("issue-1", "triage")],
 		mutations: mutations(),
 		onClear: vi.fn(),
 		...overrides,
@@ -48,11 +50,11 @@ describe("IssuesBulkBar menus open without throwing", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Move to" }))
 
 		expect(screen.getByText("Move to state")).toBeDefined()
-		expect(screen.getByRole("menuitem", { name: "Triage" })).toBeDefined()
+		expect(screen.getByRole("menuitem", { name: "Todo" })).toBeDefined()
 	})
 
 	it("applies a severity to every selected issue", () => {
-		const props = renderBar({ selectedIds: ["a", "b"] as ErrorIssueId[] })
+		const props = renderBar({ selected: [issue("a", "triage"), issue("b", "todo")] })
 		fireEvent.click(screen.getByRole("button", { name: "Severity" }))
 		fireEvent.click(screen.getByRole("menuitem", { name: "critical" }))
 
@@ -62,8 +64,62 @@ describe("IssuesBulkBar menus open without throwing", () => {
 
 	it("renders nothing with an empty selection", () => {
 		const { container } = render(
-			<IssuesBulkBar selectedIds={[]} mutations={mutations()} onClear={vi.fn()} />,
+			<IssuesBulkBar selected={[]} mutations={mutations()} onClear={vi.fn()} />,
 		)
 		expect(container.firstChild).toBeNull()
+	})
+})
+
+// The offered moves come from WORKFLOW_TRANSITIONS, so the bar can never
+// present a bulk transition the API would reject for part of the selection.
+describe("IssuesBulkBar move-to menu follows the transition matrix", () => {
+	const openMoveTo = () => fireEvent.click(screen.getByRole("button", { name: "Move to" }))
+	const moveItems = () => screen.getAllByRole("menuitem").map((item) => item.textContent?.trim() ?? "")
+
+	it("offers exactly the legal targets for a single triage issue", () => {
+		renderBar({ selected: [issue("a", "triage")] })
+		openMoveTo()
+
+		expect(moveItems()).toEqual(["Todo", "In progress", "Done", "Cancelled", "Won't fix"])
+	})
+
+	it("offers exactly the legal targets for a single done issue", () => {
+		renderBar({ selected: [issue("a", "done")] })
+		openMoveTo()
+
+		expect(moveItems()).toEqual(["Triage", "In progress", "Cancelled", "Won't fix"])
+	})
+
+	it("offers nothing for an issue in a state with no outgoing moves", () => {
+		renderBar({ selected: [issue("a", "cancelled")] })
+		openMoveTo()
+
+		expect(moveItems()).toEqual(["No moves from Cancelled"])
+		expect(
+			screen.getByRole("menuitem", { name: "No moves from Cancelled" }).getAttribute("data-disabled"),
+		).not.toBeNull()
+	})
+
+	it("offers the intersection for a mixed selection", () => {
+		renderBar({ selected: [issue("a", "triage"), issue("b", "in_review")] })
+		openMoveTo()
+
+		expect(moveItems()).toEqual(["In progress", "Done", "Cancelled", "Won't fix"])
+	})
+
+	it("explains a mixed selection whose intersection is empty", () => {
+		renderBar({ selected: [issue("a", "triage"), issue("b", "cancelled")] })
+		openMoveTo()
+
+		expect(moveItems()).toEqual(["No move applies to every selected issue"])
+	})
+
+	it("transitions every selected id when a legal target is chosen", () => {
+		const props = renderBar({ selected: [issue("a", "triage"), issue("b", "todo")] })
+		openMoveTo()
+		fireEvent.click(screen.getByRole("menuitem", { name: "In progress" }))
+
+		expect(props.mutations.transitionMany).toHaveBeenCalledWith(["a", "b"], "in_progress")
+		expect(props.onClear).toHaveBeenCalled()
 	})
 })
