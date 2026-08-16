@@ -16,6 +16,8 @@ import {
 } from "@/mcp/lib/inspect-widget"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { validateWidgetRenderability } from "@/mcp/lib/validate-widget-renderability"
+import { resolvePanelType } from "@/mcp/lib/panel-type"
+import { withScalarReduction } from "@/mcp/lib/raw-sql-widget"
 
 const TOOL = "replace_dashboard_widgets"
 
@@ -56,6 +58,7 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 			// are auto-placed against the widgets accumulated so far, matching the
 			// single-widget add path.
 			const widgets: DashboardWidget[] = []
+			const repairedScalarIds: string[] = []
 			for (let i = 0; i < parsed.length; i++) {
 				const obj = parsed[i]
 				if (obj === null || typeof obj !== "object") {
@@ -73,7 +76,7 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 					candidate.layout = { ...position, w: size.w, h: size.h }
 				}
 
-				const widget = yield* decodeWidget(candidate).pipe(
+				const decoded = yield* decodeWidget(candidate).pipe(
 					Effect.mapError(
 						(cause) =>
 							new McpQueryError({
@@ -83,6 +86,24 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 							}),
 					),
 				)
+
+				// Repair a scalar with no reduction, exactly as the single-widget
+				// paths do. Without this the batch tool was the strictest of the
+				// three: `add` injects the default and `update` repairs, but a
+				// get_dashboard -> replace_dashboard_widgets round trip over a board
+				// holding one legacy stat failed outright and saved nothing — and
+				// this is the tool the docs recommend over incremental calls.
+				const panel = resolvePanelType({
+					visualization: decoded.visualization,
+					chartId: decoded.display.chartId,
+				})
+				const widget = panel.ok
+					? {
+							...decoded,
+							dataSource: withScalarReduction(decoded.dataSource, panel.resolved.meta.isScalar),
+						}
+					: decoded
+				if (widget.dataSource !== decoded.dataSource) repairedScalarIds.push(widget.id)
 				widgets.push(widget)
 			}
 
@@ -152,6 +173,13 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 				`Total widgets: ${dashboard.widgets.length}`,
 				`Updated: ${dashboard.updatedAt.slice(0, 19)}`,
 			]
+			if (repairedScalarIds.length > 0) {
+				lines.push(
+					"",
+					`Note: ${repairedScalarIds.length} scalar widget(s) had no \`transform.reduceToValue\` and were given \`{ field: "value", aggregate: "first" }\` — a stat/gauge renders \`[object Object]\` without one: ${repairedScalarIds.join(", ")}`,
+				)
+			}
+
 			if (renderWarnings.length > 0) {
 				lines.push("", "### Render warnings", ...renderWarnings.map((warning) => `- ${warning}`))
 			}

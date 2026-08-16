@@ -473,6 +473,9 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		// Base timeseries data captured for formula evaluation. `concurrency: 1`
 		// below makes the push order deterministic with no race.
 		const formulaBaseInputs: QueryRunResult[] = []
+		// Percent-scale advice, collected per query alongside its flag. `concurrency: 1`
+		// below makes the push order deterministic.
+		const percentAdvice: string[] = []
 
 		const queryResults: InspectChartQueryResult[] = yield* Effect.forEach(
 			enabledRawDrafts,
@@ -567,15 +570,34 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 							: []
 					const preFlags = [...builderWarningFlags, ...emptyGroupingFlags]
 
-					const baseFlags = computeFlags(stats, {
+					// A non-empty `valueField` puts a traces query into
+					// numeric-attribute mode, where the metric-class heuristics do not
+					// apply and small absolute values are ordinary. It has to reach
+					// `computeFlags`, or the ambiguous low-side percent check fires on
+					// exactly the queries it was meant to skip.
+					const numericAggregation =
+						((draft as { valueField?: string }).valueField ?? "").trim().length > 0
+
+					const flagContext = {
 						metric: draft.aggregation,
 						source: draft.dataSource,
-						kind: isTimeseries ? "timeseries" : "breakdown",
+						kind: isTimeseries ? ("timeseries" as const) : ("breakdown" as const),
 						...(widget.display.unit !== undefined
 							? { displayUnit: widget.display.unit }
 							: undefined),
+						...(numericAggregation ? { numericAggregation: true } : undefined),
+					}
+
+					const baseFlags = computeFlags(stats, {
+						...flagContext,
 						...(preFlags.length > 0 ? { preFlags } : undefined),
 					})
+
+					// The advice is derived from the SAME stats and the SAME context as
+					// the flag, because the two disagreeing is how a widget ends up
+					// reported as suspicious with nothing said about what to change.
+					const advice = percentScaleAdvice(stats, flagContext)
+					if (advice !== null && !percentAdvice.includes(advice)) percentAdvice.push(advice)
 
 					// An empty/all-null metrics query might be a typo'd metric name
 					// rather than a real metric with no recent data — check the catalog
@@ -666,10 +688,13 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 					)
 					fReduced = reduced.value
 				}
-				const fFlags = computeFlags(fstats, {
-					kind: "timeseries",
+				const fFlagContext = {
+					kind: "timeseries" as const,
 					...(widget.display.unit !== undefined ? { displayUnit: widget.display.unit } : undefined),
-				})
+				}
+				const fFlags = computeFlags(fstats, fFlagContext)
+				const fAdvice = percentScaleAdvice(fstats, fFlagContext)
+				if (fAdvice !== null && !percentAdvice.includes(fAdvice)) percentAdvice.push(fAdvice)
 
 				queryResults.push({
 					queryId: fr.queryId,
@@ -691,23 +716,7 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		// ("PERCENT_SCALE_MISMATCH") does not say which direction the error runs,
 		// and getting the direction wrong is the whole problem — so the advice
 		// string, not just the flag, has to reach the caller.
-		if (allFlags.includes("PERCENT_SCALE_MISMATCH")) {
-			const anyNumericAggregation = enabledRawDrafts.some(
-				(draft) => ((draft as { valueField?: string }).valueField ?? "").trim().length > 0,
-			)
-			const advice = percentScaleAdvice(
-				{
-					rowCount: 1,
-					seriesCount: 1,
-					seriesStats: queryResults.flatMap((r) => r.stats.seriesStats),
-				},
-				{
-					...(widget.display.unit !== undefined ? { displayUnit: widget.display.unit } : undefined),
-					...(anyNumericAggregation ? { numericAggregation: true } : undefined),
-				},
-			)
-			if (advice) notes.push(advice)
-		}
+		for (const advice of percentAdvice) notes.push(advice)
 		if (hasFormulaWarning && !formulaEvaluated) {
 			// Only true for non-timeseries widgets, where formulas don't apply.
 			notes.push(

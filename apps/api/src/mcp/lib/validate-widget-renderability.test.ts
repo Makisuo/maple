@@ -196,3 +196,30 @@ describe("a legacy widget stays editable", () => {
 		expect(withScalarReduction(source as never, false)).toBe(source)
 	})
 })
+
+describe("all three write paths agree on scalar repair", () => {
+	// Review finding: the batch tool validated without first applying the repair
+	// that `add` and `update` both apply, so it was the strictest of the three —
+	// a get_dashboard -> replace_dashboard_widgets round trip over a board holding
+	// one legacy stat failed outright and saved nothing. That is the tool the docs
+	// recommend over incremental calls, which made it the worst place to be strict.
+	it("a scalar with no reduction is repaired, not rejected, on every path", async () => {
+		const { withScalarReduction } = await import("./raw-sql-widget")
+		const { resolvePanelType } = await import("./panel-type")
+
+		for (const visualization of ["stat", "gauge"] as const) {
+			const panel = resolvePanelType({ visualization })
+			expect(panel.ok).toBe(true)
+			if (!panel.ok) continue
+
+			// Unrepaired: fatal, which is what every path would have returned.
+			expect(
+				validateWidgetRenderability(widget(visualization, querySource())).fatal.length,
+			).toBeGreaterThan(0)
+
+			// Repaired the way each path now does it: clean.
+			const repaired = withScalarReduction(querySource() as never, panel.resolved.meta.isScalar)
+			expect(validateWidgetRenderability(widget(visualization, repaired)).fatal).toEqual([])
+		}
+	})
+})

@@ -487,11 +487,3 @@ export const renderDashboardSchemaIndex = (): string =>
 		"",
 		panelTypesSection(),
 	].join("\n")
-
-/** Panel types as a compact line, for embedding in other tool descriptions. */
-export const panelTypeSummaryLine = (): string =>
-	mcpPanels()
-		.map((meta) => `\`${meta.panelType}\``)
-		.join(", ")
-
-export const MCP_PANEL_TYPE_LIST: ReadonlyArray<PanelType> = mcpPanels().map((meta) => meta.panelType)

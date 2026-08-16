@@ -299,3 +299,41 @@ describe("percent scale", () => {
 		expect(percentScaleAdvice(seriesPeaking(0), { displayUnit: "percent_100" })).toBeNull()
 	})
 })
+
+// Review finding: the flag and its explanation were computed from different
+// contexts, so a widget could be reported PERCENT_SCALE_MISMATCH with nothing
+// said about what to change. `computeFlags` derives the flag from
+// `percentScaleAdvice`, so any context that produces one must produce the other.
+describe("the percent flag and its advice never disagree", () => {
+	const seriesPeaking = (max: number) =>
+		computeTimeseriesStats([point("b1", { s: max / 2 }), point("b2", { s: max })])
+
+	const contexts = [
+		{ label: "percent on 0-100 data", stats: seriesPeaking(87.4), ctx: { displayUnit: "percent" } },
+		{
+			label: "percent_100 on 0-1 data",
+			stats: seriesPeaking(0.042),
+			ctx: { displayUnit: "percent_100" },
+		},
+		{
+			label: "numeric-attribute aggregation, low side",
+			stats: seriesPeaking(0.4),
+			ctx: { displayUnit: "percent_100", numericAggregation: true },
+		},
+		{
+			label: "numeric-attribute aggregation, high side",
+			stats: seriesPeaking(87.4),
+			ctx: { displayUnit: "percent", numericAggregation: true },
+		},
+		{ label: "correctly scaled", stats: seriesPeaking(0.4), ctx: { displayUnit: "percent" } },
+		{ label: "no unit", stats: seriesPeaking(87.4), ctx: {} },
+	]
+
+	for (const { label, stats, ctx } of contexts) {
+		it(`${label}: flag presence matches advice presence`, () => {
+			const flagged = computeFlags(stats, ctx).includes("PERCENT_SCALE_MISMATCH")
+			const advised = percentScaleAdvice(stats, ctx) !== null
+			expect(flagged).toBe(advised)
+		})
+	}
+})
