@@ -1,11 +1,14 @@
 import * as React from "react"
-import { Area, AreaChart, CartesianGrid, ReferenceArea, ReferenceLine, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, ReferenceArea, ReferenceLine } from "recharts"
 import type { AnomalyIncidentDocument, AnomalyIncidentTimeseriesResponse } from "@maple/domain/http"
 import {
 	type ChartConfig,
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { formatBucketLabel } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
@@ -106,17 +109,12 @@ export function AnomalyTimeseriesChart({
 							<stop offset="95%" stopColor={stroke} stopOpacity={0.03} />
 						</linearGradient>
 					</defs>
-					<CartesianGrid vertical={false} />
-					<XAxis
+					<ChartGrid />
+					<ChartXAxis
 						dataKey="bucket"
-						tickLine={false}
-						axisLine={false}
-						tickMargin={8}
 						tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick")}
 					/>
-					<YAxis
-						tickLine={false}
-						axisLine={false}
+					<ChartYAxis
 						tickMargin={8}
 						width={70}
 						tickFormatter={valueFormatter}

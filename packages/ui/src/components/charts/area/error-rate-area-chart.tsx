@@ -1,5 +1,5 @@
 import { memo, useId, useMemo } from "react"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Area, AreaChart } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { errorRateTimeSeriesData } from "../_shared/sample-data"
@@ -12,6 +12,9 @@ import {
 	ChartLegendContent,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "../../ui/chart"
 import { formatErrorRate, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
@@ -70,17 +73,12 @@ export const ErrorRateAreaChart = memo(function ErrorRateAreaChart({
 						/>
 					)}
 				</defs>
-				<CartesianGrid vertical={false} />
-				<XAxis
+				<ChartGrid />
+				<ChartXAxis
 					dataKey="bucket"
-					tickLine={false}
-					axisLine={false}
-					tickMargin={8}
 					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
 				/>
-				<YAxis
-					tickLine={false}
-					axisLine={false}
+				<ChartYAxis
 					tickMargin={8}
 					width={yAxisWidth ?? 60}
 					domain={[0, (dataMax: number) => Math.min(1, Math.max(dataMax * 1.2, 0.01))]}

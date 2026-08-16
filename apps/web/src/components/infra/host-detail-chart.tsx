@@ -1,12 +1,15 @@
 import { useId, useMemo } from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, Line, LineChart, ReferenceLine } from "recharts"
 
 import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
@@ -17,7 +20,6 @@ import type { HostInfraMetric } from "@/api/warehouse/infra"
 import { formatBytesPerSecond } from "@maple/ui/lib/format"
 import {
 	CHART_EMPTY_MESSAGE,
-	CHART_GRID_DASH,
 	formatValueWithUnit,
 	transformRows,
 	UNNAMED_SERIES_KEY,
@@ -217,26 +219,13 @@ export function HostMetricChartView({
 									)
 								})}
 							</defs>
-							<CartesianGrid
-								strokeDasharray={CHART_GRID_DASH}
-								stroke="var(--border)"
-								vertical={false}
-							/>
-							<XAxis
+							<ChartGrid />
+							<ChartXAxis
 								dataKey="time"
-								tickLine={false}
-								axisLine={false}
-								tickMargin={8}
-								fontSize={10}
-								stroke="var(--muted-foreground)"
 							/>
-							<YAxis
-								tickLine={false}
-								axisLine={false}
+							<ChartYAxis
 								tickMargin={8}
-								fontSize={10}
 								width={52}
-								stroke="var(--muted-foreground)"
 								tickFormatter={tickFormatter}
 							/>
 							{showThreshold && (
@@ -254,7 +243,6 @@ export function HostMetricChartView({
 								/>
 							)}
 							<ChartTooltip
-								cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 								content={
 									<ChartTooltipContent
 										indicator="dot"
@@ -287,30 +275,16 @@ export function HostMetricChartView({
 						</AreaChart>
 					) : (
 						<LineChart data={data} margin={margin} syncId={rechartsSyncId} syncMethod="value">
-							<CartesianGrid
-								strokeDasharray={CHART_GRID_DASH}
-								stroke="var(--border)"
-								vertical={false}
-							/>
-							<XAxis
+							<ChartGrid />
+							<ChartXAxis
 								dataKey="time"
-								tickLine={false}
-								axisLine={false}
-								tickMargin={8}
-								fontSize={10}
-								stroke="var(--muted-foreground)"
 							/>
-							<YAxis
-								tickLine={false}
-								axisLine={false}
+							<ChartYAxis
 								tickMargin={8}
-								fontSize={10}
 								width={64}
-								stroke="var(--muted-foreground)"
 								tickFormatter={tickFormatter}
 							/>
 							<ChartTooltip
-								cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 								content={
 									<ChartTooltipContent
 										indicator="line"

@@ -1,11 +1,14 @@
 import { useMemo } from "react"
-import { Area, ComposedChart, CartesianGrid, Line, ReferenceDot, ReferenceLine, XAxis, YAxis } from "recharts"
+import { Area, ComposedChart, Line, ReferenceDot, ReferenceLine } from "recharts"
 
 import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
@@ -123,11 +126,9 @@ export function SpendChart({ model, daily }: { model: SpendModel; daily: DailySp
 			<div className="px-2 pb-2 pt-4">
 				<ChartContainer config={chartConfig} className="w-full" style={{ height: CHART_HEIGHT }}>
 					<ComposedChart data={[...data]} margin={{ top: 8, right: 56, left: 0, bottom: 0 }}>
-						<CartesianGrid vertical={false} strokeDasharray="2 4" />
-						<XAxis
+						<ChartGrid />
+						<ChartXAxis
 							dataKey="date"
-							tickLine={false}
-							axisLine={false}
 							minTickGap={40}
 							tickFormatter={(value: string) =>
 								new Date(`${value}T00:00:00Z`).toLocaleDateString("en-US", {
@@ -138,10 +139,8 @@ export function SpendChart({ model, daily }: { model: SpendModel; daily: DailySp
 							}
 							className="font-mono text-[10px]"
 						/>
-						<YAxis
+						<ChartYAxis
 							domain={[0, yMax]}
-							tickLine={false}
-							axisLine={false}
 							width={52}
 							tickFormatter={(value: number) => `$${Math.round(value)}`}
 							className="font-mono text-[10px]"

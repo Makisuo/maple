@@ -2,6 +2,7 @@ import * as React from "react"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
+import { chartTooltipCardClassName } from "../../ui/chart"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
@@ -368,7 +369,10 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 			{/* Tooltip */}
 			{tooltip !== "hidden" && hover !== null && slices[hover] && (
 				<div
-					className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-[color-mix(in_oklch,var(--border)_80%,var(--foreground)_15%)] bg-popover/95 px-2.5 py-1.5 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] backdrop-blur-sm"
+					className={cn(
+						chartTooltipCardClassName,
+						"pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap",
+					)}
 					style={{
 						left: clamp(
 							cx + Math.cos(angleMid(slices[hover]) - Math.PI / 2) * (outerR * 0.85),

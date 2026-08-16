@@ -1,10 +1,10 @@
 import { useId } from "react"
-import { Area, AreaChart, CartesianGrid, XAxis } from "recharts"
+import { Area, AreaChart } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { areaTimeSeriesData } from "../_shared/sample-data"
 import { VerticalGradient } from "../_shared/svg-patterns"
-import { type ChartConfig, ChartContainer } from "../../ui/chart"
+import { type ChartConfig, ChartContainer, ChartGrid, ChartXAxis } from "../../ui/chart"
 
 const chartConfig = {
 	desktop: { label: "Desktop", color: "var(--chart-1)" },
@@ -28,8 +28,8 @@ export function GradientAreaChart({ data, className, syncId }: BaseChartProps) {
 					<VerticalGradient id={desktopGradientId} color="var(--color-desktop)" />
 					<VerticalGradient id={mobileGradientId} color="var(--color-mobile)" />
 				</defs>
-				<CartesianGrid vertical={false} />
-				<XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
+				<ChartGrid />
+				<ChartXAxis dataKey="month" />
 				<Area
 					type="linear"
 					dataKey="desktop"

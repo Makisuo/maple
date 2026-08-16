@@ -1,11 +1,14 @@
 import { useMemo, useId } from "react"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Area, AreaChart } from "recharts"
 import type { RendererComponentProps } from "./types"
 import {
 	type ChartConfig,
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { VerticalGradient } from "@maple/ui/components/charts/_shared/svg-patterns"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
@@ -108,17 +111,12 @@ export function QueryChart({ props }: RendererComponentProps<QueryChartProps>) {
 							/>
 						))}
 					</defs>
-					<CartesianGrid vertical={false} />
-					<XAxis
+					<ChartGrid />
+					<ChartXAxis
 						dataKey="bucket"
-						tickLine={false}
-						axisLine={false}
-						tickMargin={8}
 						tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
 					/>
-					<YAxis
-						tickLine={false}
-						axisLine={false}
+					<ChartYAxis
 						tickMargin={4}
 						width={50}
 						tickFormatter={(value: number) => formatValueByUnit(value, unit)}

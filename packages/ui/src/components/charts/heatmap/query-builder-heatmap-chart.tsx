@@ -5,6 +5,7 @@ import type { BaseChartProps } from "../_shared/chart-types"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { cn } from "../../../lib/utils"
+import { chartTooltipCardClassName } from "../../ui/chart"
 
 interface HeatmapPoint {
 	x: string
@@ -767,7 +768,10 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 							{tooltip !== "hidden" && hover && (
 								<div
 									ref={tooltipRef}
-									className="pointer-events-none absolute z-20 -translate-x-1/2 whitespace-nowrap rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl transition-opacity duration-100"
+									className={cn(
+										chartTooltipCardClassName,
+										"pointer-events-none absolute z-20 -translate-x-1/2 whitespace-nowrap transition-opacity duration-100",
+									)}
 									style={{
 										left: tooltipLeft,
 										top: tooltipTop,

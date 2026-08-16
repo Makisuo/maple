@@ -28,7 +28,7 @@ import { serviceMapViewPrefsAtomFamily } from "@/atoms/service-map-view-prefs-at
 import { Link } from "@tanstack/react-router"
 import { displayError } from "@/lib/error-messages"
 import { logClientError } from "@/lib/services/common/telemetry"
-import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, Line } from "recharts"
 
 import { cn } from "@maple/ui/lib/utils"
 import { getServiceColor, getValueHue } from "@maple/ui/lib/colors"
@@ -38,6 +38,9 @@ import {
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { Popover, PopoverTrigger, PopoverContent } from "@maple/ui/components/ui/popover"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@maple/ui/components/ui/resizable"
@@ -854,39 +857,27 @@ function DbQueryActivityChart({
 	return (
 		<ChartContainer config={DB_QUERY_CHART_CONFIG} className="h-44 w-full">
 			<BarChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
-				<CartesianGrid
+				<ChartGrid
 					// recharts v3 only draws grid lines for a matching axis id; this chart's
 					// y axes are "count"/"latency" (no default id=0), so pin to the primary "count" axis
 					yAxisId="count"
-					vertical={false}
-					strokeDasharray="3 3"
 				/>
-				<XAxis
+				<ChartXAxis
 					dataKey="bucket"
-					axisLine={false}
-					tickLine={false}
-					tickMargin={8}
 					minTickGap={20}
-					fontSize={10}
 					tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick")}
 				/>
-				<YAxis
+				<ChartYAxis
 					yAxisId="count"
-					axisLine={false}
-					tickLine={false}
 					tickMargin={8}
 					width={34}
-					fontSize={10}
 					tickFormatter={(value) => formatCompactCount(Number(value))}
 				/>
-				<YAxis
+				<ChartYAxis
 					yAxisId="latency"
 					orientation="right"
-					axisLine={false}
-					tickLine={false}
 					tickMargin={8}
 					width={42}
-					fontSize={10}
 					tickFormatter={(value) => formatLatency(Number(value))}
 				/>
 				<ChartTooltip

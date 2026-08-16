@@ -168,7 +168,14 @@ function ChartContainer({
 					// overflowing into the card's header/padding gap instead of reserving inner top
 					// margin (which would squish the series). Recharts clips series via clip-path, not
 					// surface overflow, so overlay-less charts are unaffected. See `commit-markers-layer.tsx`.
-					"[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border flex aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden [&_.recharts-surface]:overflow-visible",
+					//
+					// Axis/grid/cursor look is defined HERE (plus `ChartXAxis`/`ChartYAxis`/`ChartGrid`
+					// below), not per chart: 10px muted tick text, no axis lines, faint dashed
+					// horizontal grid, dashed hairline cursor. Tick text is targeted by the class
+					// recharts puts on the <text> itself (`recharts-cartesian-axis-tick-value`) —
+					// recharts 3.10 dropped the `.recharts-cartesian-axis-tick` wrapper the stock
+					// shadcn selector relied on, which left ticks at recharts' default #666.
+					"[&_.recharts-cartesian-axis-tick-value]:fill-muted-foreground [&_.recharts-cartesian-axis-tick-value]:text-[10px] [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-cartesian-grid_line]:[stroke-dasharray:3_3] [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-curve.recharts-tooltip-cursor]:[stroke-dasharray:3_3] [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border flex aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden [&_.recharts-surface]:overflow-visible",
 					className,
 				)}
 				{...props}
@@ -219,6 +226,39 @@ ${colorConfig
 }
 
 const ChartTooltip = RechartsPrimitive.Tooltip
+
+/**
+ * The tooltip card surface. Shared with charts that position their own card
+ * (pie, heatmap) so every chart tooltip is the same translucent, blurred panel.
+ */
+const chartTooltipCardClassName =
+	"border-border/50 bg-popover/90 text-popover-foreground rounded-xl border px-3 py-2 text-xs shadow-xl backdrop-blur-md"
+
+/**
+ * Cartesian axis + grid with Maple's defaults baked in: no tick/axis lines,
+ * comfortable tick margins, horizontal-only dashed grid. Pass any recharts
+ * prop to override per chart (`width`, `tickFormatter`, `scale`, `yAxisId`, …).
+ * Tick text size/colour and the grid/cursor stroke come from `ChartContainer`.
+ */
+function ChartXAxis(props: React.ComponentProps<typeof RechartsPrimitive.XAxis>) {
+	return (
+		<RechartsPrimitive.XAxis
+			tickLine={false}
+			axisLine={false}
+			tickMargin={8}
+			minTickGap={24}
+			{...props}
+		/>
+	)
+}
+
+function ChartYAxis(props: React.ComponentProps<typeof RechartsPrimitive.YAxis>) {
+	return <RechartsPrimitive.YAxis tickLine={false} axisLine={false} tickMargin={6} width={56} {...props} />
+}
+
+function ChartGrid(props: React.ComponentProps<typeof RechartsPrimitive.CartesianGrid>) {
+	return <RechartsPrimitive.CartesianGrid vertical={false} strokeDasharray="3 3" {...props} />
+}
 
 function ChartTooltipContent({
 	active,
@@ -352,11 +392,16 @@ function ChartTooltipContent({
 						<TooltipPrimitive.Viewport>
 							<div
 								className={cn(
-									"border-border/50 bg-background gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs shadow-xl grid min-w-[8rem] items-start",
+									chartTooltipCardClassName,
+									"grid min-w-[8rem] items-start gap-1.5",
 									className,
 								)}
 							>
-								{!nestLabel ? tooltipLabel : null}
+								{!nestLabel && tooltipLabel ? (
+									<div className="border-border/50 text-muted-foreground border-b pb-1 tracking-tight">
+										{tooltipLabel}
+									</div>
+								) : null}
 								<div className="grid gap-1.5">
 									{payload
 										.filter((item) => item.type !== "none" || !!formatter)
@@ -453,7 +498,7 @@ function ChartTooltipContent({
 															</span>
 														</div>
 														{item.value && (
-															<span className="text-foreground font-mono font-medium tabular-nums">
+															<span className="text-foreground font-mono font-semibold tabular-nums">
 																{item.value.toLocaleString()}
 															</span>
 														)}
@@ -561,4 +606,15 @@ function getPayloadConfigFromPayload(config: ChartConfig, payload: unknown, key:
 	return configLabelKey in config ? config[configLabelKey] : config[key as keyof typeof config]
 }
 
-export { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, ChartStyle }
+export {
+	ChartContainer,
+	ChartTooltip,
+	ChartTooltipContent,
+	ChartLegend,
+	ChartLegendContent,
+	ChartStyle,
+	ChartXAxis,
+	ChartYAxis,
+	ChartGrid,
+	chartTooltipCardClassName,
+}

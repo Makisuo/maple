@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
+import { Line, LineChart } from "recharts"
 
 import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
@@ -16,6 +16,9 @@ import {
 	ChartLegend,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "../../ui/chart"
 import { formatValueByUnit, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
@@ -226,19 +229,12 @@ export function QueryBuilderLineChart({
 				hoistLegend={!showLegendBlock}
 			>
 				<LineChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
-					<CartesianGrid vertical={false} />
-					<XAxis
+					<ChartGrid />
+					<ChartXAxis
 						dataKey="bucket"
-						tickLine={false}
-						axisLine={false}
-						tickMargin={8}
 						tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick")}
 					/>
-					<YAxis
-						tickLine={false}
-						axisLine={false}
-						tickMargin={6}
-						width={56}
+					<ChartYAxis
 						allowDecimals={!integerOnlyData}
 						scale={logScale ? "log" : "auto"}
 						domain={[yDomainMin, yDomainMax]}

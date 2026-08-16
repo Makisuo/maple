@@ -1,15 +1,5 @@
 import * as React from "react"
-import {
-	Area,
-	CartesianGrid,
-	ComposedChart,
-	Legend,
-	Line,
-	ReferenceArea,
-	ReferenceLine,
-	XAxis,
-	YAxis,
-} from "recharts"
+import { Area, ComposedChart, Legend, Line, ReferenceArea, ReferenceLine } from "recharts"
 
 import type {
 	AlertCheckDocument,
@@ -25,6 +15,9 @@ import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { formatBucketLabel } from "@maple/ui/lib/format"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
@@ -570,7 +563,7 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 						/>
 					</pattern>
 				</defs>
-				<CartesianGrid vertical={false} />
+				<ChartGrid />
 
 				{noDataBands.map((band, i) => (
 					<ReferenceArea
@@ -609,23 +602,16 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 					/>
 				))}
 
-				<XAxis
+				<ChartXAxis
 					dataKey="t"
 					type="number"
 					scale="time"
 					domain={[domain.min, domain.max]}
-					tickLine={false}
-					axisLine={false}
-					tickMargin={8}
-					fontSize={11}
 					tickFormatter={(value) => formatTime(value as number, "tick")}
 				/>
-				<YAxis
-					tickLine={false}
-					axisLine={false}
+				<ChartYAxis
 					tickMargin={8}
 					width={Y_AXIS_WIDTH}
-					fontSize={11}
 					domain={yDomain}
 					tickFormatter={(value) => formatSignalValue(signalType, num(value))}
 				/>

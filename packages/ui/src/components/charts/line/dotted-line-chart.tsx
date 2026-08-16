@@ -1,8 +1,8 @@
-import { CartesianGrid, Line, LineChart, XAxis } from "recharts"
+import { Line, LineChart } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { lineTimeSeriesData } from "../_shared/sample-data"
-import { type ChartConfig, ChartContainer } from "../../ui/chart"
+import { type ChartConfig, ChartContainer, ChartGrid, ChartXAxis } from "../../ui/chart"
 
 const chartConfig = {
 	value: { label: "Value", color: "var(--chart-1)" },
@@ -12,8 +12,8 @@ export function DottedLineChart({ data, className, syncId }: BaseChartProps) {
 	return (
 		<ChartContainer config={chartConfig} className={className}>
 			<LineChart data={data ?? lineTimeSeriesData} syncId={syncId} syncMethod="value">
-				<CartesianGrid vertical={false} />
-				<XAxis dataKey="date" tickLine={false} axisLine={false} />
+				<ChartGrid />
+				<ChartXAxis dataKey="date" />
 				<Line
 					type="linear"
 					dataKey="value"

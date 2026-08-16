@@ -1,18 +1,21 @@
 import { useMemo, type ReactNode } from "react"
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
+import { Line, LineChart } from "recharts"
 
 import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
 import type { PlanetScaleInfraTimeseriesRow } from "@/api/warehouse/planetscale-infra"
 import { formatNumber } from "@maple/ui/lib/format"
-import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler } from "../chart-utils"
+import { CHART_EMPTY_MESSAGE, makeBucketLabeler } from "../chart-utils"
 import {
 	renderChartEventMarkers,
 	snapMarkersToBuckets,
@@ -127,32 +130,18 @@ export function PlanetScaleChart({
 						margin={{ top: 12, right: 12, left: 0, bottom: 4 }}
 						syncId={syncId}
 					>
-						<CartesianGrid
-							strokeDasharray={CHART_GRID_DASH}
-							stroke="var(--border)"
-							vertical={false}
-						/>
+						<ChartGrid />
 						{renderChartEventMarkers(snapped)}
-						<XAxis
+						<ChartXAxis
 							dataKey="time"
-							tickLine={false}
-							axisLine={false}
-							tickMargin={8}
-							fontSize={10}
-							stroke="var(--muted-foreground)"
 						/>
-						<YAxis
-							tickLine={false}
-							axisLine={false}
+						<ChartYAxis
 							tickMargin={8}
-							fontSize={10}
 							width={52}
-							stroke="var(--muted-foreground)"
 							domain={isPercentMetric(metric) ? [0, 100] : undefined}
 							tickFormatter={(v: number) => formatMetricValue(v, metric)}
 						/>
 						<ChartTooltip
-							cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 							content={
 								<ChartTooltipContent
 									indicator="dot"

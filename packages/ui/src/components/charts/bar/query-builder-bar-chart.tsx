@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Bar, BarChart } from "recharts"
 
 import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
@@ -15,6 +15,9 @@ import {
 	ChartLegend,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "../../ui/chart"
 import { formatValueByUnit, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
@@ -186,19 +189,12 @@ export function QueryBuilderBarChart({
 					maxBarSize={48}
 					barCategoryGap="15%"
 				>
-					<CartesianGrid vertical={false} />
-					<XAxis
+					<ChartGrid />
+					<ChartXAxis
 						dataKey="bucket"
-						tickLine={false}
-						axisLine={false}
-						tickMargin={8}
 						tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick")}
 					/>
-					<YAxis
-						tickLine={false}
-						axisLine={false}
-						tickMargin={6}
-						width={56}
+					<ChartYAxis
 						scale={logScale ? "log" : "auto"}
 						domain={[softMin ?? (logScale ? 1 : "auto"), softMax ?? "auto"]}
 						allowDecimals={!integerOnlyData}
