@@ -7,7 +7,9 @@
 > the audit itself. Line references are anchored to that HEAD and drift as the
 > code moves; re-verify before acting on one.
 >
-> In flight: `R-API01-01` (Postgres scope), `R-WEB02-01` (auth-token refresh).
+> Landed: `R-API01-01` (#490, `2fcb974a44`) and `R-WEB02-01` (#491, `baac3548c0`),
+> both on 2026-08-16. Their register entries below are marked and kept rather
+> than deleted — the evidence is what makes a later regression recognisable.
 >
 > Not reproduced: `R-WEB04-01`. The routes do lack `remountDeps`, but with the
 > guard deliberately disabled, navigating widget A -> B in the running app still
@@ -42,8 +44,8 @@ The former `R-WEB05-01` recommendation was removed because external commit `4f27
 
 ### Best first implementation slices
 
-1. `R-API01-01` — terminal Postgres invocation scope.
-2. `R-WEB02-01` — generation-keyed authentication refresh.
+1. ~~`R-API01-01` — terminal Postgres invocation scope.~~ Landed (#490).
+2. ~~`R-WEB02-01` — generation-keyed authentication refresh.~~ Landed (#491).
 3. `R-API04-02` — conditional API-key roll.
 4. `R-OPS02-02` — dual-key deployment-environment projection.
 5. `R-PKG10-01` — SDK-owned Cloudflare flush finalization.
@@ -187,7 +189,7 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 ### API
 
-- `R-API01-01` — Terminal Postgres invocation scope. Evidence: `apps/api/src/platform/pg-connection-scope.ts:111-130`; late-fiber contract at `fork-request-scoped.ts:3-15`. Cold and closed currently share `socket === undefined`, allowing reopening after finalization. Use `Cold | Open(handle) | Closed`; close transitions first and remains idempotent. Scope: scope implementation/tests only; preserve API. Risk: concurrent teardown and caller-owned clients. Validate close-before-run, run-after-close, double close and no second socket. C/I/E: high/high/small; blast: all request/cron/workflow DB scopes.
+- `R-API01-01` — **LANDED #490.** Shipped as `Cold | Open(handle) | Closed` with the refusal as a tagged `PgConnectionScopeClosedError` cause and `error.type = SCOPE_CLOSED` on the span. Terminal Postgres invocation scope. Evidence: `apps/api/src/platform/pg-connection-scope.ts:111-130`; late-fiber contract at `fork-request-scoped.ts:3-15`. Cold and closed currently share `socket === undefined`, allowing reopening after finalization. Use `Cold | Open(handle) | Closed`; close transitions first and remains idempotent. Scope: scope implementation/tests only; preserve API. Risk: concurrent teardown and caller-owned clients. Validate close-before-run, run-after-close, double close and no second socket. C/I/E: high/high/small; blast: all request/cron/workflow DB scopes.
 
 - `R-API02-01` — Validated route-owned OAuth callback origin. Evidence: `routes/v1/integrations.http.ts:78-105`, `routes/v2/integrations.http.ts:43-108`. V1 reflects client-controlled forwarding headers while V2 separately validates them. Introduce `TrustedCallbackOrigin`; only trusted values construct provider callbacks. Scope: shared route helper plus v1/v2 tests. Risk: custom domains/proxies. Validate all stage/local hosts and spoofed suffixes. C/I/E: high/high/medium; blast: OAuth starts.
 
@@ -271,7 +273,7 @@ Notation: `C/I/E` = confidence/impact/effort. Every validation item is proposed;
 
 - `R-WEB01-02` — Query Result owns settings load/error state. Evidence: `notifications-section.tsx:27-91`, `escalation-policy-section.tsx:69-138`. Failures become valid-looking defaults or are hidden after local copying. Parent branches on Result and mounts a draft-owning child only from usable data; default only typed not-found. Validate background failure and unsaved draft preservation. C/I/E: high/high/medium.
 
-- `R-WEB02-01` — Generation-keyed authentication refresh. Evidence: `auth-headers.ts:23-30,54-77,93-103`. Post-switch requests can join an old identity’s promise and send its token despite cache-generation checks. Store `{generation,promise}`, reuse/deliver/clear only if current. Validate org/provider/sign-out races. C/I/E: high/high/low.
+- `R-WEB02-01` — **LANDED #491.** Shipped as `{generation, promise}`, plus a bounded re-resolve for a caller whose identity changed while it waited. Generation-keyed authentication refresh. Evidence: `auth-headers.ts:23-30,54-77,93-103`. Post-switch requests can join an old identity’s promise and send its token despite cache-generation checks. Store `{generation,promise}`, reuse/deliver/clear only if current. Validate org/provider/sign-out races. C/I/E: high/high/low.
 
 - `R-WEB02-02` — Normalize legacy trace filters once. Evidence: `api/warehouse/traces.ts:50-94,150-217,288-336,504-557`. List/facet/stat paths redeclare common wire filters and cast between shapes. Create shared wire fragment and canonical plural normalization; keep list-only controls local. Validate parity for every scalar/plural alias and attribute mode. C/I/E: high/medium/medium.
 
