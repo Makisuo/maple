@@ -7,7 +7,7 @@
 import type { ChatEvent, ChatTaskRef } from "@maple/domain/chat-session"
 import type { AnyTool, FinishReason, Message, Model, Usage } from "@maple/llm"
 import type { TenantContext } from "@/services/auth/tenant-context"
-import type { McpToolExecutorApi } from "@/mcp/dispatcher"
+import type { McpToolExecutorApi, McpToolSurface } from "@/mcp/dispatcher"
 import type { AgentDefinition } from "../agents"
 import type { StepRetryBudget, TaskBudget } from "./budgets"
 import type { DoomLoopState } from "./stop"
@@ -63,6 +63,14 @@ export interface ChatTurnInput {
 	readonly tenant: TenantContext
 	/** Closed, tenant-mandatory MCP execution boundary captured by the caller's runtime. */
 	readonly toolExecutor: McpToolExecutorApi
+	/**
+	 * Which entry point this turn belongs to, for tool-call telemetry.
+	 *
+	 * The chat loop is shared by the interactive agent and by workflow agent passes,
+	 * so it is the only place that can tell them apart — the dispatcher below sees
+	 * one identical caller for both. Defaults to `"chat"`, the interactive case.
+	 */
+	readonly surface?: McpToolSurface
 	readonly model: Model
 	/** The full transcript so far, oldest first, already including the new user message. */
 	readonly messages: ReadonlyArray<Message>

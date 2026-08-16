@@ -8,6 +8,7 @@ import {
 	type McpToolResult,
 } from "./types"
 import { resolveTimeRange } from "@/mcp/lib/time"
+import { describeInvalidQuerySpec } from "@/mcp/lib/query-spec-tokens"
 import { Effect, Match, Schema } from "effect"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
@@ -62,11 +63,14 @@ const queryDataSchema = Schema.Struct({
 	metric: optionalStringParam(
 		"Metric to compute. Traces: count (request volume), avg_duration, p50_duration, p95_duration, p99_duration (latency), " +
 			"error_rate (0-1 ratio), apdex (user satisfaction, requires apdex_threshold_ms). Logs: count only. " +
-			"Metrics: avg, sum, min, max, count, rate, increase. For monotonic counters (typically metric_type=sum with isMonotonic=true from list_metrics), prefer rate or increase over raw sum. Default: 'count' for traces/logs, 'avg' for metrics.",
+			"Metrics with kind=timeseries: avg, sum, min, max, count, rate, increase; with kind=breakdown ONLY avg, sum, count. " +
+			"For monotonic counters (typically metric_type=sum with isMonotonic=true from list_metrics), prefer rate or increase over raw sum. " +
+			"Default: 'count' for traces/logs, 'avg' for metrics.",
 	),
 	group_by: optionalStringParam(
-		"Grouping dimension. Traces: service, span_name, status_code, http_method, attribute, none. " +
-			"Logs: service, severity, none. Metrics: service, attribute, none. " +
+		"Grouping dimension. Traces: service, span_name, status_code, http_method, attribute. " +
+			"Logs: service, severity. Metrics: service, attribute, resource_attribute. " +
+			"'none' is additionally valid for kind=timeseries but not for kind=breakdown. " +
 			"Default: 'none' for timeseries, 'service' for breakdown.",
 	),
 	start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss UTC). Defaults to 1 hour ago"),
@@ -148,6 +152,19 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 					)
 				}
 			}
+
+			// Reject an out-of-vocabulary metric/group_by HERE, while we still know which
+			// source and kind were asked for. Downstream, `QuerySpec` rejects the same
+			// value as an opaque SchemaError that names neither the combination nor the
+			// alternatives — which is what every query_data failure in production looked
+			// like, and why agents retried with another guess instead of a valid token.
+			const badToken = describeInvalidQuerySpec({
+				source: params.source,
+				kind: params.kind,
+				metric: params.metric,
+				groupBy: params.group_by,
+			})
+			if (badToken) return validationError(badToken.message, badToken.example)
 
 			const decisions: string[] = []
 

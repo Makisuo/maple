@@ -294,18 +294,15 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 
 	server.tool(
 		"create_dashboard",
-		"Create a dashboard from a template, simplified widget specs, or custom JSON.\n\n" +
+		// Kept deliberately short: this is routing information — which of the three
+		// modes to use — not a schema reference. The per-parameter descriptions carry
+		// the shapes, and `describe_dashboard_schema` carries the full vocabulary.
+		"Create a dashboard one of three ways: from a `template`, from simplified `widgets` specs, or from full `dashboard_json`.\n\n" +
 			"Templates:\n" +
 			templateList +
-			"\n  custom — provide dashboard_json with full widget definitions\n\n" +
-			"Each template accepts optional service_name (for app templates) or its own params.\n\n" +
-			"Simplified widgets (provide name + widgets JSON array, same params as query_data):\n" +
-			'  Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }\n' +
-			"  group_by: traces=service.name|span.name|status.code|http.method|none; logs=service.name|severity|none; metrics=service.name|attr.<key>|none\n" +
-			"  Note: table requires a group_by field. list shows recent traces or logs.\n" +
-			"Custom JSON: provide dashboard_json with full widget definitions. **Call `describe_dashboard_schema` first** — it gives the panel types, the four `kind`-discriminated data-source shapes with worked examples, the unit vocabulary, and the aggregation and group-by tokens, all generated from the live schema.\n\n" +
-			"After persistence, inspects the query-builder widgets (up to 12) and reports a per-widget verdict (looks_healthy/suspicious/broken) with sanity flags. Widgets beyond that cap are not inspected — check them with `inspect_chart_data`. " +
-			'Pass `validate: "false"` to skip validation when creating dashboards with many widgets.',
+			"\n\nCreated widgets are inspected (up to 12) and returned with a per-widget verdict " +
+			"(looks_healthy/suspicious/broken). Use `inspect_chart_data` for any beyond that cap, " +
+			'or pass `validate: "false"` to skip inspection entirely.',
 		Schema.Struct({
 			name: requiredStringParam("Dashboard name"),
 			template: optionalStringParam(
@@ -323,10 +320,12 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 				"Metric type for metric-overview template: sum, gauge, histogram, or exponential_histogram",
 			),
 			widgets: optionalStringParam(
-				"JSON array of simplified widget specs (alternative to templates and dashboard_json).",
+				'JSON array of simplified widget specs (same params as query_data). Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }. ' +
+					"group_by: traces=service.name|span.name|status.code|http.method|none; logs=service.name|severity|none; metrics=service.name|attr.<key>|none. " +
+					'"table" requires group_by; "list" shows recent traces or logs.',
 			),
 			dashboard_json: optionalStringParam(
-				"Full dashboard JSON string for complete control over widget configuration.",
+				"Full dashboard JSON for complete control over widget configuration. Call `describe_dashboard_schema` first for the panel types, the four kind-discriminated data-source shapes, the unit vocabulary and the aggregation/group-by tokens — all generated from the live schema.",
 			),
 			validate: optionalStringParam(
 				"Set to 'false' to skip automatic data validation on the created widgets. Default: validate.",

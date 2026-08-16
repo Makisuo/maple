@@ -103,6 +103,9 @@ export const runAgentPass = <S extends Schema.Top>(
 			sessionId: input.id,
 			tenant: input.tenant,
 			toolExecutor,
+			// Separates workflow tool calls from interactive chat ones in telemetry;
+			// both otherwise reach the dispatcher through this same loop.
+			surface: "workflow",
 			model: input.model,
 			messages: [Message.user(input.prompt)],
 			messageId: input.id,

@@ -224,7 +224,7 @@ export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> 
 			const agent = input.agent ?? agentForSession(input.sessionId)
 			const taskBudget = input.taskBudget ?? makeTaskBudget()
 			const tools = {
-				...buildChatTools(input.toolExecutor, input.tenant, agent.permission),
+				...buildChatTools(input.toolExecutor, input.tenant, agent.permission, input.surface),
 				// Delegation is opt-in per agent: an agent with no `spawns` never sees `task` at all.
 				...buildTaskTool(input, spawnableFor(agent), taskBudget, runChatTurn),
 				// One value, so the tool the model is offered and the name the closing step forces are

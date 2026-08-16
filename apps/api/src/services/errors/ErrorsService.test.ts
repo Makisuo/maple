@@ -1883,3 +1883,56 @@ describe("ErrorsService.runTick", () => {
 		}).pipe(Effect.provide(makeErrorsLayer())),
 	)
 })
+
+describe("ErrorsService.transitionIssue lease renewal", () => {
+	// Covers the non-terminal branch of `applyTransition`: an agent moving its own
+	// claimed issue along is working on it, so the lease should follow rather than
+	// lapse underneath it. `heartbeat_error_issue` used to be the only renewal and
+	// was called zero times in production.
+	it.effect("extends the holder's lease on a non-terminal transition", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			const issueId = asIssueId(randomUUID())
+			const actor = yield* errors.ensureUserActor(ORG, USER)
+			const now = yield* Clock.currentTimeMillis
+			yield* seedIssue(issueId, {
+				workflowState: "in_progress",
+				leaseHolderActorId: actor.id,
+				claimedAt: new Date(now),
+				leaseExpiresAt: new Date(now + 60_000),
+			})
+
+			yield* errors.transitionIssue(ORG, actor.id, issueId, "in_review")
+
+			const [row] = yield* database.execute((db) =>
+				db
+					.select({ leaseExpiresAt: errorIssues.leaseExpiresAt })
+					.from(errorIssues)
+					.where(eq(errorIssues.id, issueId)),
+			)
+			assert.isNotNull(row?.leaseExpiresAt)
+			expect(row.leaseExpiresAt.getTime()).toBeGreaterThan(now + 60_000)
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("clears the lease when the transition is terminal", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const issueId = asIssueId(randomUUID())
+			const actor = yield* errors.ensureUserActor(ORG, USER)
+			const now = yield* Clock.currentTimeMillis
+			yield* seedIssue(issueId, {
+				workflowState: "in_progress",
+				leaseHolderActorId: actor.id,
+				claimedAt: new Date(now),
+				leaseExpiresAt: new Date(now + 60_000),
+			})
+
+			const done = yield* errors.transitionIssue(ORG, actor.id, issueId, "done")
+
+			assert.strictEqual(done.workflowState, "done")
+			assert.isNull(done.leaseExpiresAt)
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+})

@@ -180,11 +180,37 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 		make: (base) => new WarehouseMalformedQueryError(base),
 	},
 	{
+		// The same complaint as the schema-drift rule below, but about SQL the CALLER
+		// wrote — the `run_sql` MCP tool and the raw_sql widget. A bad table alias
+		// (`t.OrgId`) or a column the author invented is a mistake in that query, not
+		// evidence that the cluster's schema is behind.
+		//
+		// This rule exists because the drift rule below had no authorship guard, so
+		// agent typos came back to customers as "your ClickHouse cluster's schema is
+		// out of sync — run schema apply". Ordered first so the caller case is claimed
+		// before the Maple-authored one can match it.
+		authoredBy: "caller",
+		types: new Set([
+			"UNKNOWN_IDENTIFIER",
+			"NO_SUCH_COLUMN_IN_TABLE",
+			"THERE_IS_NO_COLUMN",
+			"NOT_FOUND_COLUMN_IN_BLOCK",
+		]),
+		pattern:
+			/Unknown (?:expression or function )?identifier|Missing columns|There is no column|No such column/i,
+		make: (base) => new WarehouseMalformedQueryError(base),
+	},
+	{
 		// CH error types raised when a column or function reference doesn't exist in
 		// the cluster's schema. For BYO-ClickHouse customers this is almost always
 		// schema drift between Maple's expected schema and what the cluster has —
 		// resolved by running schema apply, not by retrying. Surfacing it as a
 		// distinct error lets the MCP layer return an actionable message.
+		//
+		// `authoredBy: "maple"` is load-bearing for the same reason it is on the
+		// malformed-query rule above: only a query WE generated can testify about the
+		// cluster's schema. See the caller-authored twin directly above.
+		authoredBy: "maple",
 		types: new Set([
 			"UNKNOWN_IDENTIFIER",
 			"NO_SUCH_COLUMN_IN_TABLE",

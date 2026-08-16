@@ -369,9 +369,18 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 				update.snoozeUntil = null
 			}
 			if (TERMINAL_WORKFLOW_STATES.has(toState)) {
+				// Reaching a terminal state ends the work, so the lease ends with it.
 				update.leaseHolderActorId = null
 				update.leaseExpiresAt = null
 				update.claimedAt = null
+			} else if (actorId !== null && actorId !== undefined && row.leaseHolderActorId === actorId) {
+				// Still working, and just proved it. Folded into this same UPDATE rather
+				// than issued separately — the row is already being written.
+				const previous = dateToMs(row.leaseExpiresAt) ?? timestamp
+				update.leaseExpiresAt = msToDate(
+					timestamp +
+						Math.max(DEFAULT_LEASE_DURATION_MS, previous - (dateToMs(row.claimedAt) ?? previous)),
+				)
 			}
 
 			yield* dbExecute((db) =>
@@ -461,6 +470,47 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			const doc = yield* hydrateIssue(orgId, next)
 			const txid = readTxid(heartbeatRows)
 			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
+		})
+
+		/**
+		 * Push the lease deadline out because the holder is demonstrably still working.
+		 *
+		 * A lease used to expire on wall-clock time alone, renewable only by an explicit
+		 * `heartbeat` call — and in practice nothing ever called it: agents claimed
+		 * issues, worked them, and let the lease lapse, dropping the issue back to
+		 * `todo` underneath them. Any mutating action by the holder is better evidence
+		 * of liveness than a separate call the agent has to remember to make.
+		 *
+		 * Silent by design: a no-op for a non-holder (the caller's own conflict check
+		 * owns that decision) and never a reason to fail the action it accompanies.
+		 */
+		const refreshLeaseIfHolder = Effect.fn("ErrorsService.refreshLeaseIfHolder")(function* (
+			orgId: OrgId,
+			actorId: ActorId,
+			issueId: ErrorIssueId,
+			current: ErrorIssueRow,
+			timestamp: number,
+		) {
+			if (current.leaseHolderActorId !== actorId) return
+			const previous = dateToMs(current.leaseExpiresAt) ?? timestamp
+			// Preserve the lease LENGTH the holder originally asked for, exactly as
+			// `heartbeatIssue` does — a claim with a 2h lease should keep renewing at 2h.
+			const leaseMs = Math.max(
+				DEFAULT_LEASE_DURATION_MS,
+				previous - (dateToMs(current.claimedAt) ?? previous),
+			)
+			yield* dbExecute((db) =>
+				db
+					.update(errorIssues)
+					.set({ leaseExpiresAt: msToDate(timestamp + leaseMs) })
+					.where(
+						and(
+							eq(errorIssues.orgId, orgId),
+							eq(errorIssues.id, issueId),
+							eq(errorIssues.leaseHolderActorId, actorId),
+						),
+					),
+			)
 		})
 
 		const releaseIssue: ErrorIssueWorkflowServiceApi["releaseIssue"] = Effect.fn(
@@ -581,6 +631,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			if (source === "ai" && current.severitySource === "manual") {
 				return yield* hydrateIssue(orgId, current)
 			}
+			yield* refreshLeaseIfHolder(orgId, actorId, issueId, current, timestamp)
 			const nextSource: IssueSeveritySource | null = severity === null ? null : source
 			const changed = current.severity !== severity || current.severitySource !== nextSource
 			if (!changed) return yield* hydrateIssue(orgId, current)
@@ -619,7 +670,8 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			"ErrorsService.commentOnIssue",
 		)(function* (orgId, actorId, issueId, body, opts) {
 			const timestamp = yield* Clock.currentTimeMillis
-			yield* requireIssue(orgId, issueId)
+			const current = yield* requireIssue(orgId, issueId)
+			yield* refreshLeaseIfHolder(orgId, actorId, issueId, current, timestamp)
 			const type: ErrorIssueEventType = opts?.kind === "agent_note" ? "agent_note" : "comment"
 			const payload: StoredJsonRecord = {
 				body,
