@@ -477,7 +477,7 @@ export class DashboardWidgetDataService extends Context.Service<
 							// No options is a state the browser reaches too (a failed
 							// facet fetch); the ladder then falls through to "" as it
 							// does there. Never fail the batch over a dropdown.
-							Effect.catch(() => Effect.succeed<string[]>([])),
+							Effect.orElseSucceed((): string[] => []),
 							Effect.catchDefect(() => Effect.succeed<string[]>([])),
 							Effect.map((options) => ({ names, options })),
 						),
