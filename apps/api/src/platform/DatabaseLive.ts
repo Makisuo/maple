@@ -39,6 +39,34 @@ export const toDatabaseError = (cause: unknown): DatabaseError => {
 	})
 }
 
+/** Shared by both entry points below so the two can never describe different origins. */
+const DB_SPAN_OPTIONS = {
+	kind: "client",
+	attributes: {
+		"db.system.name": "postgresql",
+		"peer.service": "planetscale-postgres",
+	},
+} as const
+
+/**
+ * A `Database.execute` span for a call refused before any statement could run.
+ *
+ * The refusal is decided in Effect, so it fails in Effect — there is no promise
+ * to throw out of. It still gets a span: a call that reached `Database.execute`
+ * and was turned away is exactly the thing an operator needs to see, and a
+ * silent `Effect.fail` would leave the trace looking as though it never
+ * happened. `db.query.*` is absent on purpose — there is no statement.
+ */
+export const failExecuteWithSpan = Effect.fn(
+	"Database.execute",
+	DB_SPAN_OPTIONS,
+)(function* (error: DatabaseError, extraAttributes?: Record<string, unknown>) {
+	if (extraAttributes) {
+		yield* Effect.annotateCurrentSpan(extraAttributes)
+	}
+	return yield* Effect.fail(error)
+})
+
 /**
  * Wraps one Database.execute call in a Client-kind span per Maple's telemetry
  * conventions (db.system.name + peer.service power the service-map DB edge;
@@ -64,13 +92,10 @@ export const toDatabaseError = (cause: unknown): DatabaseError => {
  * `CONNECT_TIMEOUT` and a constraint violation are different classes, not
  * different durations.
  */
-export const executeWithSpan = Effect.fn("Database.execute", {
-	kind: "client",
-	attributes: {
-		"db.system.name": "postgresql",
-		"peer.service": "planetscale-postgres",
-	},
-})(function* <T>(run: (hooks: ExecuteHooks) => Promise<T>, extraAttributes?: Record<string, unknown>) {
+export const executeWithSpan = Effect.fn(
+	"Database.execute",
+	DB_SPAN_OPTIONS,
+)(function* <T>(run: (hooks: ExecuteHooks) => Promise<T>, extraAttributes?: Record<string, unknown>) {
 	if (extraAttributes) {
 		yield* Effect.annotateCurrentSpan(extraAttributes)
 	}

@@ -8,6 +8,7 @@ import {
 	makePgConnectionScope,
 	PgConnectionScope,
 	type PgConnectionScopeApi,
+	PgConnectionScopeClosedError,
 	pgConnectionScopeFrom,
 	withPgConnectionScope,
 	withPgConnectionScopeOf,
@@ -245,6 +246,89 @@ describe("PgConnectionScope", () => {
 			yield* Effect.promise(() => scope.close())
 			yield* Effect.promise(() => scope.close())
 
+			assert.strictEqual(rec.creations(), 1)
+			assert.strictEqual(rec.ends(), 1)
+		}),
+	)
+
+	it.effect("refuses a call that arrives after the scope closed instead of dialing again", () =>
+		Effect.gen(function* () {
+			const rec = recorder()
+			const { spans, tracer } = makeRecordingTracer()
+			const scope = makePgConnectionScope("postgres://unused", undefined, {
+				openSocket: rec.openSocket,
+			})
+
+			yield* scope.run(noop)
+			yield* Effect.promise(() => scope.close())
+
+			// The bug this replaces: `close` set the handle back to `undefined`, which
+			// is also what "never dialed" looked like, so this call opened a second
+			// socket after the invocation that owned it had ended — on Workers, past
+			// the point where one may exist at all. Late work is a defect to report,
+			// not a connection to open.
+			const exit = yield* Effect.exit(scope.run(noop).pipe(Effect.withTracer(tracer)))
+
+			assert.isTrue(Exit.isFailure(exit))
+			assert.strictEqual(rec.creations(), 1)
+			assert.strictEqual(rec.ends(), 1)
+			const [span] = dbSpans(spans)
+			assert.isDefined(span)
+			assert.strictEqual(span.attributes.get("db.connect.scope_state"), "closed")
+			// Not a driver fault, so it must not land as an unlabelled database
+			// error beside real ones.
+			assert.strictEqual(span.attributes.get("error.type"), "SCOPE_CLOSED")
+		}),
+	)
+
+	it.effect("keeps the closed-scope failure discriminable behind the DatabaseError channel", () =>
+		Effect.gen(function* () {
+			const scope = makePgConnectionScope("postgres://unused", undefined, {
+				openSocket: recorder().openSocket,
+			})
+
+			yield* Effect.promise(() => scope.close())
+			const error = yield* Effect.flip(scope.run(noop))
+
+			// `run` stays typed as DatabaseError — ~200 call sites depend on that —
+			// but the reason travels as a tagged cause instead of flattened prose.
+			assert.strictEqual(error._tag, "@maple/api/lib/DatabaseError")
+			assert.instanceOf(error.cause, PgConnectionScopeClosedError)
+		}),
+	)
+
+	it.effect("refuses a first call after close without ever creating a connection", () =>
+		Effect.gen(function* () {
+			const rec = recorder()
+			const scope = makePgConnectionScope("postgres://unused", undefined, {
+				openSocket: rec.openSocket,
+			})
+
+			yield* Effect.promise(() => scope.close())
+			const exit = yield* Effect.exit(scope.run(noop))
+
+			assert.isTrue(Exit.isFailure(exit))
+			assert.strictEqual(rec.creations(), 0)
+		}),
+	)
+
+	it.effect("closes an in-flight connection and refuses the calls that follow it", () =>
+		Effect.gen(function* () {
+			const rec = recorder()
+			const scope = makePgConnectionScope("postgres://unused", undefined, {
+				openSocket: rec.openSocket,
+			})
+
+			// Close transitions to Closed before releasing, so a caller racing the
+			// teardown is refused rather than handed a socket being ended underneath it.
+			const running = yield* Effect.forkChild(scope.run(() => new Promise<string>(() => {})))
+			yield* Effect.yieldNow
+			yield* Effect.promise(() => scope.close())
+			yield* Fiber.interrupt(running)
+
+			const exit = yield* Effect.exit(scope.run(noop))
+
+			assert.isTrue(Exit.isFailure(exit))
 			assert.strictEqual(rec.creations(), 1)
 			assert.strictEqual(rec.ends(), 1)
 		}),
