@@ -30,7 +30,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
  */
 export interface SpliceGrain {
 	readonly unit: "HOUR" | "MINUTE"
-	/** `toDateTime(__PARAM_startTime__)` — the window start, unrounded. */
+	/** `parseDateTimeBestEffort(__PARAM_startTime__)` — the window start, unrounded. */
 	readonly startDt: string
 	readonly endDt: string
 	/** The window start rounded DOWN to a bucket boundary. */
@@ -42,8 +42,17 @@ export interface SpliceGrain {
 
 const makeGrain = (unit: "HOUR" | "MINUTE"): SpliceGrain => {
 	const floorFn = unit === "HOUR" ? "toStartOfHour" : "toStartOfMinute"
-	const startDt = "toDateTime(__PARAM_startTime__)"
-	const endDt = "toDateTime(__PARAM_endTime__)"
+	// `parseDateTimeBestEffort`, not `toDateTime`: the latter is strictly
+	// second-precision and rejects a fractional literal outright —
+	// `Cannot parse string '2026-08-15 23:05:00.000' as DateTime`. Callers format
+	// window bounds through more than one helper, and a caller that used the
+	// millisecond variant took `GET /v2/services` down for three weeks without
+	// tripping a test, because the bare `Timestamp >= param` comparisons
+	// elsewhere in the same query tolerate the fraction. Best-effort parsing
+	// accepts both forms and truncates, so a precision mismatch degrades instead
+	// of erroring.
+	const startDt = "parseDateTimeBestEffort(__PARAM_startTime__)"
+	const endDt = "parseDateTimeBestEffort(__PARAM_endTime__)"
 	const startFloor = `${floorFn}(${startDt})`
 	const endFloor = `${floorFn}(${endDt})`
 	return {

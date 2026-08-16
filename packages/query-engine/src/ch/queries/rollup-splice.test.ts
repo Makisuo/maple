@@ -83,6 +83,38 @@ describe("rollup splice boundaries", () => {
 		})
 	})
 
+	// Regression: the splice used to floor its bounds with `toDateTime`, which is
+	// strictly second-precision. A caller formatting the window with millisecond
+	// precision therefore produced
+	//   Cannot parse string '2026-08-15 23:05:00.000' as DateTime
+	// and ClickHouse rejected the whole query. It went unnoticed for three weeks
+	// because the bare `Timestamp >= param` comparisons in the same query accept
+	// the fraction, so only the queries on the splice broke.
+	describe("bound precision", () => {
+		it("parses bounds leniently rather than at strict second precision", () => {
+			for (const grain of [hourGrain, minuteGrain]) {
+				expect(grain.startDt).toContain("parseDateTimeBestEffort")
+				expect(grain.endDt).toContain("parseDateTimeBestEffort")
+				expect(grain.startDt).not.toContain("toDateTime(")
+				expect(grain.endDt).not.toContain("toDateTime(")
+			}
+		})
+
+		it("compiles a millisecond-precision window without a strict cast", () => {
+			const t = CH.table("t", { OrgId: CH.string, Hour: CH.dateTime })
+			const sql = compile(
+				CH.from(t)
+					.select(($) => ({ c: $.OrgId }))
+					.where(($) => [$.OrgId.eq("org"), ...interiorConditions(CH.rawExpr<string>("Hour"))]),
+				{ startTime: "2026-08-15 23:05:00.000", endTime: "2026-08-16 23:05:00.000" },
+			).sql
+
+			expect(sql).toContain("2026-08-15 23:05:00.000")
+			expect(sql).toContain("parseDateTimeBestEffort")
+			expect(sql).not.toContain("toDateTime(")
+		})
+	})
+
 	it("emits placeholders that survive to compile time", () => {
 		// The fragments embed __PARAM_*__ rather than literals, so a compiled
 		// query resolves them once at the outer compile() call.

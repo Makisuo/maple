@@ -97,10 +97,29 @@ const MAX_SEARCH_RANGE_SECONDS = MAX_LIST_RANGE_SECONDS
 // they can span far wider than any query-engine kind — no shared equivalent.
 const MAX_SUMMARY_RANGE_SECONDS = 60 * 60 * 24 * 365
 
+/**
+ * Window bound precision, which has to match the table being read.
+ *
+ * Raw signal tables (`traces`, `logs`) store `DateTime64`, so a fractional
+ * literal is both valid and load-bearing — a log search can legitimately span
+ * 200ms, and rounding to whole seconds would widen it.
+ *
+ * The summary rollups (`service_overview_spans`, the hourly tiers) store plain
+ * `DateTime`. There, a fractional literal is a hard `TYPE_MISMATCH`, and the
+ * splice's floor arithmetic used to reject it earlier still with
+ * `Cannot parse string '…000' as DateTime`. Whole seconds cost nothing on a
+ * window measured in hours.
+ */
+type WindowPrecision = "second" | "millisecond"
+
 const parseWindow = (
 	start: string,
 	end: string,
-	options: { readonly maxSeconds?: number; readonly rangeLabel?: string } = {},
+	options: {
+		readonly maxSeconds?: number
+		readonly rangeLabel?: string
+		readonly precision?: WindowPrecision
+	} = {},
 ) =>
 	Effect.gen(function* () {
 		const startMs = Date.parse(start)
@@ -122,9 +141,10 @@ const parseWindow = (
 				),
 			)
 		}
+		const format = options.precision === "second" ? formatWarehouseDateTime : formatWarehouseDateTimeMs
 		return {
-			startTime: formatWarehouseDateTimeMs(startMs),
-			endTime: formatWarehouseDateTimeMs(endMs),
+			startTime: format(startMs),
+			endTime: format(endMs),
 			rangeSeconds,
 		}
 	})
@@ -1048,6 +1068,8 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 					const tenant = yield* CurrentTenant.Context
 					const window = yield* parseWindow(query.start_time, query.end_time, {
 						maxSeconds: MAX_SUMMARY_RANGE_SECONDS,
+						// Reads the hourly rollups, whose Timestamp is a plain DateTime.
+						precision: "second",
 						rangeLabel: "Service queries",
 					})
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
@@ -1066,6 +1088,8 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 					const tenant = yield* CurrentTenant.Context
 					const window = yield* parseWindow(query.start_time, query.end_time, {
 						maxSeconds: MAX_SUMMARY_RANGE_SECONDS,
+						// Reads the hourly rollups, whose Timestamp is a plain DateTime.
+						precision: "second",
 						rangeLabel: "Service queries",
 					})
 					const rows = yield* execute(tenant, window, {
@@ -1114,6 +1138,8 @@ export const HttpV2ServiceMapLive = HttpApiBuilder.group(MapleApiV2, "serviceMap
 				const tenant = yield* CurrentTenant.Context
 				const window = yield* parseWindow(query.start_time, query.end_time, {
 					maxSeconds: MAX_SUMMARY_RANGE_SECONDS,
+					// Reads the hourly rollups, whose Timestamp is a plain DateTime.
+					precision: "second",
 					rangeLabel: "Service map queries",
 				})
 				const compiled = query.service_name

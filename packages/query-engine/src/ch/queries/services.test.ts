@@ -40,7 +40,7 @@ describe("serviceCatalogQuery", () => {
 		expect(sql).toContain("UNION ALL")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
-		expect(sql).toContain("Hour >= if(toDateTime('2024-01-01 00:00:00')")
+		expect(sql).toContain("Hour >= if(parseDateTimeBestEffort('2024-01-01 00:00:00')")
 		expect(sql).toContain("DeploymentEnv IN ('production')")
 		expect(sql).toContain("ServiceNamespace IN ('checkout')")
 		expect(sql).toContain("GROUP BY serviceName")

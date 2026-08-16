@@ -499,6 +499,45 @@ describe("v2 telemetry reads over HTTP", () => {
 		await harness.dispose()
 	})
 
+	// Regression: the summary endpoints read the hourly rollups, whose Timestamp
+	// is a plain `DateTime`. They were formatting window bounds with millisecond
+	// precision, which ClickHouse rejects outright — `GET /v2/services` returned
+	// a 500 for three weeks. It survived because this file stubs the warehouse
+	// and the SQL-catalog sweep only ever compiles second-precision fixtures, so
+	// nothing checked the parameter VALUES the route actually sends.
+	it("sends second-precision window bounds to the rollup-backed summary endpoints", async () => {
+		const observedSql: string[] = []
+		const observingWarehouse: WarehouseQueryServiceApi = {
+			...warehouseStub,
+			compiledQuery: (tenant, compiled, options) => {
+				observedSql.push(compiled.sql)
+				return warehouseStub.compiledQuery(tenant, compiled, options)
+			},
+			compiledQueryFirst: (tenant, compiled, options) => {
+				observedSql.push(compiled.sql)
+				return warehouseStub.compiledQueryFirst(tenant, compiled, options)
+			},
+		}
+		const harness = makeHarness(observingWarehouse)
+		const key = await harness.bootstrapKey()
+
+		// Deliberately fractional inbound bounds — the route must round them.
+		const services = await harness.request(
+			"GET",
+			"/v2/services?start_time=2026-07-15T12:00:00.900Z&end_time=2026-07-16T12:00:00.100Z",
+			key.secret,
+		)
+		expect(services.status).toBe(200)
+
+		const catalogSql = observedSql.find((sql) => sql.includes("service_overview_spans"))
+		expect(catalogSql).toBeDefined()
+		expect(catalogSql).toContain("'2026-07-15 12:00:00'")
+		expect(catalogSql).toContain("'2026-07-16 12:00:00'")
+		// A fractional literal is a TYPE_MISMATCH against a DateTime column.
+		expect(catalogSql).not.toMatch(/'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+'/)
+		await harness.dispose()
+	})
+
 	it("enforces signal query windows, bucket budgets, and breakdown narrowing", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey(["traces:read"])
