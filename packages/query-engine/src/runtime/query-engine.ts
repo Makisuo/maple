@@ -60,9 +60,12 @@ import { resolveDirectRouteCachePolicy, type DirectRouteCachePolicyInput } from 
 
 export {
 	makeDirectRouteCachePolicy,
+	makeTimeRangeCachePolicy,
 	resolveDirectRouteCachePolicy,
+	timeRangeCache,
 	type DirectRouteCachePolicy,
 	type DirectRouteCachePolicyInput,
+	type TimeRangeCachePayload,
 } from "./cache-policy"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing

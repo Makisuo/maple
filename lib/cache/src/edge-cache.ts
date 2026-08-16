@@ -183,8 +183,16 @@ const READ_BREAKER_OPEN_RATIO = 0.5
 /**
  * Outcomes required before the ratio may open the breaker, so one unlucky first
  * read on a cold bucket cannot skip the next window on a sample size of one.
+ *
+ * Two, not three: at three this breaker had **never fired in production** — zero
+ * spans with `cache.read_status = "skipped"` across 137 reads sitting at a 33.6%
+ * timeout rate. The requests that actually suffer make exactly two cache reads
+ * (measured: 46 of 46 two-read requests lost one read to the deadline, while 36
+ * of 36 one-read requests lost none), so a three-sample gate could never close in
+ * time to protect the very shape it exists for. One unlucky read still cannot
+ * open it alone.
  */
-const READ_BREAKER_MIN_SAMPLES = 3
+const READ_BREAKER_MIN_SAMPLES = 2
 
 /**
  * Build an `EdgeCacheServiceApi` against a specific backend. Exported for

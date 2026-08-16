@@ -8,6 +8,7 @@ import {
 	makeGetCustomerData,
 	makeGetUserEmail,
 	makeLoginSelfHosted,
+	makeRefreshSelfHostedSession,
 	makeResolveMcpTenant,
 	makeResolveTenant,
 	type TenantContext,
@@ -31,6 +32,9 @@ export interface AuthServiceApi {
 	readonly loginSelfHosted: (
 		password: string,
 	) => Effect.Effect<SelfHostedLoginResponse, SelfHostedAuthDisabledError | SelfHostedInvalidPasswordError>
+	readonly refreshSelfHostedSession: (
+		token: string,
+	) => Effect.Effect<SelfHostedLoginResponse, SelfHostedAuthDisabledError | UnauthorizedError>
 	readonly getUserEmail: (userId: string) => Effect.Effect<string | null>
 	readonly getCustomerData: (
 		tenant: TenantContext,
@@ -45,6 +49,7 @@ export class AuthService extends Context.Service<AuthService, AuthServiceApi>()(
 			const resolveTenant = makeResolveTenant(env)
 			const resolveMcpTenant = makeResolveMcpTenant(env)
 			const loginSelfHosted = makeLoginSelfHosted(env)
+			const refreshSelfHostedSession = makeRefreshSelfHostedSession(env)
 			const getUserEmail = makeGetUserEmail(env)
 			const getCustomerData = makeGetCustomerData(env)
 
@@ -52,6 +57,7 @@ export class AuthService extends Context.Service<AuthService, AuthServiceApi>()(
 				resolveTenant,
 				resolveMcpTenant,
 				loginSelfHosted,
+				refreshSelfHostedSession,
 				getUserEmail,
 				getCustomerData,
 			} satisfies AuthServiceApi

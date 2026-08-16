@@ -44,11 +44,15 @@ const decodeBase64Url = (segment: string): string => {
 	return atob(padded.padEnd(padded.length + ((4 - (padded.length % 4)) % 4), "="))
 }
 
-/** Expiry of a bearer JWT in epoch ms, or undefined if it isn't one. */
-const readBearerExpMs = (headers: MapleAuthHeaders): number | undefined => {
-	const authorization = headers.authorization
-	if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) return undefined
-	const segments = authorization.slice("Bearer ".length).split(".")
+/**
+ * Expiry of a JWT in epoch ms, or undefined if the token isn't one we can read.
+ *
+ * Exported because the self-hosted provider renews against the same deadline
+ * this cache keys on — two decoders that could disagree about when a token dies
+ * is exactly the bug worth not having.
+ */
+export const readJwtExpMs = (token: string): number | undefined => {
+	const segments = token.split(".")
 	if (segments.length !== 3 || segments[1] === undefined) return undefined
 	try {
 		const claims: unknown = JSON.parse(decodeBase64Url(segments[1]))
@@ -59,6 +63,13 @@ const readBearerExpMs = (headers: MapleAuthHeaders): number | undefined => {
 		// Not a JWT we can read — fall through to resolving on every call.
 		return undefined
 	}
+}
+
+/** Expiry of a bearer JWT in epoch ms, or undefined if it isn't one. */
+const readBearerExpMs = (headers: MapleAuthHeaders): number | undefined => {
+	const authorization = headers.authorization
+	if (!Predicate.isString(authorization) || !authorization.startsWith("Bearer ")) return undefined
+	return readJwtExpMs(authorization.slice("Bearer ".length))
 }
 
 const refreshAuthHeaders = (): Promise<MapleAuthHeaders> => {

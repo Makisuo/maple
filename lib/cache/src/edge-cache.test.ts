@@ -494,10 +494,15 @@ describe("EdgeCacheService read deadline", () => {
 	})
 
 	it.live("stops reading a bucket whose reads keep timing out, then resumes after a success", () => {
-		// Three timeouts take the decaying ratio past the open threshold (and meet
-		// the minimum sample count), so the fourth call must not issue a read at
+		// Two timeouts take the decaying ratio past the open threshold (0.556) and
+		// meet the minimum sample count, so the third call must not issue a read at
 		// all — that read would only occupy a connection slot the rest of the
 		// request needs.
+		//
+		// Two rather than three is load-bearing, not a tuning nudge: the requests
+		// that actually suffer this contention make exactly two cache reads, so a
+		// three-sample gate could never close in time to protect them. At three
+		// this breaker never fired in production at all.
 		const { backend, getCalls } = makeHangingThenHealthyBackend(3)
 
 		return Effect.gen(function* () {
@@ -507,11 +512,10 @@ describe("EdgeCacheService read deadline", () => {
 
 			yield* cache.getOrCompute(opts, compute)
 			yield* cache.getOrCompute(opts, compute)
-			yield* cache.getOrCompute(opts, compute)
-			assert.strictEqual(getCalls(), 3, "all three reads were attempted and timed out")
+			assert.strictEqual(getCalls(), 2, "both reads were attempted and timed out")
 
 			yield* cache.getOrCompute(opts, compute)
-			assert.strictEqual(getCalls(), 3, "breaker skipped the read instead of issuing it")
+			assert.strictEqual(getCalls(), 2, "breaker skipped the read instead of issuing it")
 		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(2000))
 	})
 
