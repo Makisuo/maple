@@ -216,7 +216,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		{ layerPg },
 		{ layerLlm, resolveTriageModel },
 		loop,
-		{ buildSubmitDiagnosisTool },
+		{ buildDiagnosisCompletion },
 		{ McpToolExecutor },
 	] = await Promise.all([
 		import("../runtime/mcp-service-graph"),
@@ -270,7 +270,10 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		// Shared with the turn so `submit_diagnosis` can report what the investigation cost. See
 		// `TurnUsage` — the tool is invoked mid-turn, so there is no later moment to hand it a total.
 		const usage = loop.makeTurnUsage()
-		const extraTools = buildSubmitDiagnosisTool(
+		// One value: the tool *and* whether this turn's answer is a call to it. Passing the tool alone
+		// is what left an autonomous investigation with no way to file its report once it ran out of
+		// steps — see `buildDiagnosisCompletion`.
+		const completion = buildDiagnosisCompletion(
 			input.sessionId,
 			tenant,
 			investigations.submitDiagnosis,
@@ -286,7 +289,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 				model,
 				messages: toLlmMessages(history, input.session.compaction()),
 				messageId: input.messageId,
-				extraTools,
+				...(completion === undefined ? undefined : { completion }),
 				usage,
 				observability,
 				// An abort clears the claim; the turn notices here and stops at the next event
