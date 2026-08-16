@@ -1,4 +1,4 @@
-{{- if and .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled .Values.presets.fargateMetrics.enabled) -}}
+{{- if eq (include "maple-k8s-infra.cluster.enabled" .) "true" -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
