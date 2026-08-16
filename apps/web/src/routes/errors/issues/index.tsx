@@ -409,8 +409,13 @@ function IssuesPageBody({
 		return out
 	}, [grouped, visibleGroups])
 
-	const selectedArray = useMemo(
-		() => flatIssues.filter((i) => selectedIds.has(i.id)).map((i) => i.id as ErrorIssueId),
+	// The bulk bar needs each selected issue's current state, not just its id —
+	// that is what lets it offer only the moves legal for the whole selection.
+	const selectedIssues = useMemo(
+		() =>
+			flatIssues
+				.filter((issue) => selectedIds.has(issue.id))
+				.map((issue) => ({ id: issue.id, state: issue.workflowState })),
 		[flatIssues, selectedIds],
 	)
 
@@ -541,7 +546,7 @@ function IssuesPageBody({
 							)}
 						</div>
 						<IssuesBulkBar
-							selectedIds={selectedArray}
+							selected={selectedIssues}
 							mutations={mutations}
 							onClear={clearSelection}
 						/>
