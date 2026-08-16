@@ -15,6 +15,7 @@ import {
 	inspectWidgetsAfterMutation,
 } from "@/mcp/lib/inspect-widget"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
+import { validateWidgetRenderability } from "@/mcp/lib/validate-widget-renderability"
 
 const TOOL = "replace_dashboard_widgets"
 
@@ -108,6 +109,25 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 				)
 			}
 
+			// Same all-or-nothing guard for shapes the renderer can't draw. This is
+			// a batch of freshly-authored widgets, not a restore, so fatal issues
+			// block here exactly as they do on the single-widget add path.
+			const renderIssues = widgets.map((widget) => ({
+				widget,
+				issues: validateWidgetRenderability({ widget }),
+			}))
+			const fatalRenderIssues = renderIssues.flatMap(({ widget, issues }) =>
+				issues.fatal.map((message) => `[${widget.id}] ${message}`),
+			)
+			if (fatalRenderIssues.length > 0) {
+				return validationError(
+					`Some widgets cannot render as configured — NOTHING was saved:\n- ${fatalRenderIssues.join("\n- ")}`,
+				)
+			}
+			const renderWarnings = renderIssues.flatMap(({ widget, issues }) =>
+				issues.warnings.map((message) => `[${widget.id}] ${message}`),
+			)
+
 			const result = yield* withDashboardMutation(dashboard_id, TOOL, () => Effect.succeed(widgets))
 
 			if (!result.ok) {
@@ -132,6 +152,9 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 				`Total widgets: ${dashboard.widgets.length}`,
 				`Updated: ${dashboard.updatedAt.slice(0, 19)}`,
 			]
+			if (renderWarnings.length > 0) {
+				lines.push("", "### Render warnings", ...renderWarnings.map((warning) => `- ${warning}`))
+			}
 			const validationBlock = formatValidationSummary(validation, true)
 			if (validationBlock) {
 				lines.push("", validationBlock)

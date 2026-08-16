@@ -1,4 +1,4 @@
-import { Clock, Effect, Schema } from "effect"
+import { Clock, Effect, Result, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import {
 	DashboardId,
@@ -10,6 +10,8 @@ import {
 	WidgetLayoutSchema,
 	defaultWidgetLayout,
 	findNextPosition,
+	WIDGET_TYPES,
+	type PanelType,
 	widgetTypeByVisualization,
 	withWidgets,
 } from "@maple/domain/http"
@@ -36,12 +38,92 @@ const jsonDecodeError = (field: string, tool: string) => (error: unknown) =>
 		cause: error,
 	})
 
+/**
+ * v2 data sources were `{ endpoint, params }`; v3 is a `kind`-discriminated
+ * union. The MCP tool descriptions taught v2 long after the decoders moved to
+ * v3, so this shape is what an agent trained on the old text — or on a stale
+ * transcript — still sends. The raw decode error for a four-arm union is a wall
+ * of per-arm failures that buries the one thing worth saying.
+ *
+ * Detection is deliberately narrow (a string `endpoint`, no `kind`) and the
+ * result is an ERROR, not a coercion. `fromLegacyDataSource` would happily
+ * convert this, but it is total by design — an endpoint name the agent invented
+ * falls through to a `route` source and persists as a permanently blank widget.
+ * Failing loudly with the v3 equivalent is the correction; guessing is not.
+ */
+const LegacyDataSourceFromJson = Schema.fromJsonString(
+	Schema.Struct({
+		endpoint: Schema.String,
+		// A v3 source always carries `kind`; its absence is what identifies the
+		// legacy shape. `Schema.Undefined` makes "must not be present" explicit
+		// rather than a manual `=== undefined` guard.
+		kind: Schema.optionalKey(Schema.Undefined),
+	}),
+)
+
+const decodeLegacyDataSource = Schema.decodeUnknownResult(LegacyDataSourceFromJson)
+
+const legacyDataSourceHint = (json: string): string | null => {
+	const decoded = decodeLegacyDataSource(json)
+	if (Result.isFailure(decoded)) return null
+
+	const { endpoint } = decoded.success
+	const equivalent =
+		endpoint === "markdown_static"
+			? '{"kind":"static"}'
+			: endpoint === "raw_sql_chart"
+				? '{"kind":"raw_sql","sql":"SELECT …"}'
+				: endpoint.startsWith("custom_query_builder_")
+					? `{"kind":"query","resultShape":"${endpoint.slice("custom_query_builder_".length)}","queries":[…]}`
+					: `{"kind":"route","endpoint":"${endpoint}","params":{…}}`
+
+	return (
+		`This is the legacy v2 data-source shape (\`{"endpoint":"${endpoint}", …}\`). ` +
+		`Widgets now use a \`kind\`-discriminated union — the v3 equivalent is \`${equivalent}\`. ` +
+		"Note that a `query` source spreads `queries`/`formulas` at the TOP LEVEL (not under `params`) " +
+		'and requires `resultShape`. Call `describe_dashboard_schema` with `section: "data_sources"` for the full shapes.'
+	)
+}
+
+/**
+ * The same hint, reached through a whole widget's `dataSource` field. Kept
+ * separate so the widget decoder can look one level in without the caller
+ * hand-rolling a parse.
+ */
+const WidgetDataSourceFieldFromJson = Schema.fromJsonString(Schema.Struct({ dataSource: Schema.Unknown }))
+
+const decodeWidgetDataSourceField = Schema.decodeUnknownResult(WidgetDataSourceFieldFromJson)
+
+const legacyWidgetDataSourceHint = (json: string): string | null => {
+	const decoded = decodeWidgetDataSourceField(json)
+	if (Result.isFailure(decoded)) return null
+	return legacyDataSourceHint(JSON.stringify(decoded.success.dataSource))
+}
+
 export const decodeWidgetJson = (json: string, tool: string) =>
-	Schema.decodeEffect(WidgetFromJson)(json).pipe(Effect.mapError(jsonDecodeError("widget_json", tool)))
+	Schema.decodeEffect(WidgetFromJson)(json).pipe(
+		Effect.mapError((error) => {
+			const hint = legacyWidgetDataSourceHint(json)
+			return new McpQueryError({
+				message: hint ? `Invalid widget_json: ${hint}` : `Invalid widget_json: ${String(error)}`,
+				pipeName: tool,
+				cause: error,
+			})
+		}),
+	)
 
 export const decodeDataSourceJson = (json: string, tool: string) =>
 	Schema.decodeEffect(DataSourceFromJson)(json).pipe(
-		Effect.mapError(jsonDecodeError("data_source_json", tool)),
+		Effect.mapError((error) => {
+			const hint = legacyDataSourceHint(json)
+			return hint
+				? new McpQueryError({
+						message: `Invalid data_source_json: ${hint}`,
+						pipeName: tool,
+						cause: error,
+					})
+				: jsonDecodeError("data_source_json", tool)(error)
+		}),
 	)
 
 export const decodeDisplayJson = (json: string, tool: string) =>
@@ -65,6 +147,19 @@ export const generateWidgetId = (): string => randomUUID()
 export const defaultSizeForVisualization = (visualization: string): { w: number; h: number } => {
 	const { w, h } = defaultWidgetLayout(visualization)
 	return { w: widgetTypeByVisualization(visualization)?.mcpWidth ?? w, h }
+}
+
+/**
+ * Grid size by panel type.
+ *
+ * The `visualization` variant above cannot tell a bar from a line (both persist
+ * as `"chart"`), and more importantly `widgetTypeByVisualization("chart")`
+ * resolves to `line`, so any per-type `mcpWidth` on a chart-family panel would
+ * be lost. Callers that have resolved a panel type should use this.
+ */
+export const defaultSizeForPanelType = (panelType: PanelType): { w: number; h: number } => {
+	const meta = WIDGET_TYPES[panelType]
+	return { w: meta.mcpWidth ?? meta.defaultLayout.w, h: meta.defaultLayout.h }
 }
 
 /**

@@ -1,6 +1,6 @@
 import { rawSqlDisplayTypeFor, widgetTypeByVisualization } from "@maple/domain/http"
 import type { RawSqlDisplayType, WidgetDataSourceSchema } from "@maple/domain/http"
-import { makeRawSqlDataSource } from "@maple/widgets/dashboard"
+import { dataSourceQuerySet, dataSourceTransform, makeRawSqlDataSource } from "@maple/widgets/dashboard"
 
 // MCP-side mirror of the web's raw-SQL widget builder so agents can create
 // raw-SQL widgets without hand-crafting the dataSource JSON.
@@ -32,6 +32,35 @@ export function buildRawSqlDataSource(args: {
 				}
 			: undefined),
 	})
+}
+
+/**
+ * Give a scalar panel the `reduceToValue` transform it needs, if it has none.
+ *
+ * A stat or gauge reads `data[0].value`; handed a query result it renders
+ * `[object Object]`. The raw-SQL path has always injected this (above); the
+ * structured-query path never did, so every MCP-authored stat and gauge built
+ * from a query set was broken unless the caller happened to know about a
+ * transform no tool description mentioned.
+ *
+ * `first` matches the raw-SQL injection: it reads the leading row rather than
+ * aggregating across buckets, which is what a "current value" tile means. A
+ * caller that wants a sum over the window sets `reduceToValue` explicitly, and
+ * this leaves it alone.
+ */
+export function withScalarReduction(dataSource: WidgetDataSource, isScalar: boolean): WidgetDataSource {
+	if (!isScalar) return dataSource
+	if (dataSourceTransform(dataSource)?.reduceToValue !== undefined) return dataSource
+	const querySet = dataSourceQuerySet(dataSource)
+	// Only the query arm: a route source owns its own response shape, and a
+	// static source has no response at all.
+	if (querySet === null) return dataSource
+
+	const existing = dataSourceTransform(dataSource)
+	return {
+		...dataSource,
+		transform: { ...existing, reduceToValue: { field: "value", aggregate: "first" } },
+	} as WidgetDataSource
 }
 
 export function validateRawSqlMacro(sql: string): string | null {

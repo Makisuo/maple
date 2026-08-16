@@ -18,6 +18,7 @@ import {
 	computeBreakdownStats,
 	computeFlags,
 	computeTimeseriesStats,
+	percentScaleAdvice,
 	verdictFromFlags,
 	type ChartFlag,
 	type QueryStats,
@@ -223,7 +224,18 @@ function statsToData(stats: QueryStats): InspectChartQueryStats {
 // A real grouping was requested when the draft enables groupBy and lists at
 // least one token that isn't the ungrouped sentinel (`none`/`all`). Used to
 // distinguish an intentional ungrouped chart from a grouping that collapsed.
-function isGroupByRequested(draft: { addOns?: { groupBy?: boolean }; groupBy?: readonly string[] }): boolean {
+/**
+ * Whether a draft actually asks for a grouping.
+ *
+ * `addOns.groupBy` is the gate: a `groupBy: ["service.name"]` with the addOn
+ * absent or false is SILENTLY IGNORED by the spec builder. Exported so the
+ * widget-shape validator can reject a breakdown panel that would render one
+ * slice, rather than leaving it to post-persist inspection.
+ */
+export function isGroupByRequested(draft: {
+	addOns?: { groupBy?: boolean }
+	groupBy?: readonly string[]
+}): boolean {
 	if (!draft.addOns?.groupBy) return false
 	return (draft.groupBy ?? []).some((g) => {
 		const t = g.trim().toLowerCase()
@@ -675,6 +687,27 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		const verdict = verdictFromFlags(allFlags)
 
 		const notes: string[] = []
+		// Percent-scale advice names the token to switch to. The flag alone
+		// ("PERCENT_SCALE_MISMATCH") does not say which direction the error runs,
+		// and getting the direction wrong is the whole problem — so the advice
+		// string, not just the flag, has to reach the caller.
+		if (allFlags.includes("PERCENT_SCALE_MISMATCH")) {
+			const anyNumericAggregation = enabledRawDrafts.some(
+				(draft) => ((draft as { valueField?: string }).valueField ?? "").trim().length > 0,
+			)
+			const advice = percentScaleAdvice(
+				{
+					rowCount: 1,
+					seriesCount: 1,
+					seriesStats: queryResults.flatMap((r) => r.stats.seriesStats),
+				},
+				{
+					...(widget.display.unit !== undefined ? { displayUnit: widget.display.unit } : undefined),
+					...(anyNumericAggregation ? { numericAggregation: true } : undefined),
+				},
+			)
+			if (advice) notes.push(advice)
+		}
 		if (hasFormulaWarning && !formulaEvaluated) {
 			// Only true for non-timeseries widgets, where formulas don't apply.
 			notes.push(
@@ -730,12 +763,17 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 
 function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): WidgetInspectionEntry {
 	if (outcome.kind === "supported") {
+		// The percent-scale note is the one note that tells the caller what to
+		// change, so it rides along on the mutation-tool summary rather than only
+		// appearing in a full `inspect_chart_data` response.
+		const actionableNote = outcome.data.notes.find((note) => note.startsWith('unit "percent'))
 		return {
 			widgetId: widget.id,
 			...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 			visualization: widget.visualization,
 			verdict: outcome.data.verdict satisfies WidgetInspectionVerdict,
 			flags: [...outcome.data.flags],
+			...(actionableNote !== undefined ? { note: actionableNote } : undefined),
 		}
 	}
 	if (outcome.kind === "unsupported") {

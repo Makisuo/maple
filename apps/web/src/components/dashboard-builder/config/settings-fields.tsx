@@ -5,7 +5,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Textarea } from "@maple/ui/components/ui/textarea"
 import { cn } from "@maple/ui/lib/utils"
-import { HEATMAP_COLOR_SCALES, type HeatmapColorScale } from "@maple/domain/http"
+import { HEATMAP_COLOR_SCALES, WIDGET_UNITS, type HeatmapColorScale } from "@maple/domain/http"
 import type { ValueUnit } from "@/components/dashboard-builder/types"
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
@@ -302,15 +302,16 @@ function HeatmapColors() {
 	)
 }
 
+// The four `duration_*` tokens collapse into one "Duration" entry with a
+// separate scale select below, so this list is the shared catalog minus those,
+// plus the grouping affordance. Everything else is derived, so a token added to
+// `WIDGET_UNITS` appears here without an edit.
 const UNIT_OPTIONS: Array<{ value: string; label: string }> = [
-	{ value: "none", label: "None" },
-	{ value: "number", label: "Number" },
-	{ value: "percent", label: "Percent (0–1)" },
-	{ value: "percent_100", label: "Percent (0–100)" },
+	...WIDGET_UNITS.filter((unit) => !unit.token.startsWith("duration_")).map((unit) => ({
+		value: unit.token,
+		label: unit.label,
+	})),
 	{ value: "duration", label: "Duration" },
-	{ value: "bytes", label: "Bytes" },
-	{ value: "requests_per_sec", label: "Requests/sec" },
-	{ value: "short", label: "Short" },
 ]
 
 const DURATION_SCALE_OPTIONS = [

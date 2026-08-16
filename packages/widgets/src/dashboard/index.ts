@@ -84,6 +84,13 @@ export {
 } from "./shared/sections"
 export { type TimeRange, TimeRangeSchema } from "./shared/time-range"
 export {
+	isWidgetUnit,
+	suggestWidgetUnit,
+	WIDGET_UNIT_TOKENS,
+	WIDGET_UNITS,
+	type WidgetUnitMeta,
+} from "./shared/units"
+export {
 	SORT_DIRECTIONS,
 	type SortDirection,
 	STAT_AGGREGATES,

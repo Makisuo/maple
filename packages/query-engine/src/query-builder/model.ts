@@ -97,6 +97,36 @@ export const AGGREGATIONS_BY_SOURCE: Record<
 	],
 } satisfies Record<QueryBuilderDataSource, Array<{ label: string; value: string }>>
 
+/**
+ * The aggregations legal on traces when `valueField` names a numeric span
+ * attribute — a different vocabulary from `AGGREGATIONS_BY_SOURCE.traces`,
+ * because the aggregation applies to an arbitrary number rather than to
+ * duration. This is the ONLY place bare `p50`/`p95`/`p99` are valid; the
+ * duration percentiles are spelled `p95_duration`.
+ *
+ * Exported because the MCP schema doc renders it: the instructions resource
+ * previously advertised bare `p50`/`p95`/`p99` as *metrics* aggregations, which
+ * `buildTimeseriesQuerySpec` hard-errors on. Documenting from the same array the
+ * builder enforces is what keeps that from recurring.
+ */
+export const TRACES_NUMERIC_AGGREGATIONS = ["avg", "sum", "min", "max", "p50", "p95", "p99"] as const
+
+/**
+ * Enforcement sets, derived from the option lists above rather than retyped.
+ *
+ * These used to be inline `new Set([...])` literals inside
+ * `buildQuerySpecFromDraft`, duplicating `AGGREGATIONS_BY_SOURCE` by hand. The
+ * duplication is what let the docs drift: nothing tied the list an agent reads
+ * to the list the builder accepts.
+ */
+const ALLOWED_AGGREGATIONS = {
+	traces: new Set(AGGREGATIONS_BY_SOURCE.traces.map((option) => option.value)),
+	logs: new Set(AGGREGATIONS_BY_SOURCE.logs.map((option) => option.value)),
+	metrics: new Set(AGGREGATIONS_BY_SOURCE.metrics.map((option) => option.value)),
+} satisfies Record<QueryBuilderDataSource, ReadonlySet<string>>
+
+const ALLOWED_TRACES_NUMERIC_AGGREGATIONS: ReadonlySet<string> = new Set(TRACES_NUMERIC_AGGREGATIONS)
+
 // `sum` belongs here alongside rate/increase because those two assume
 // *cumulative* temporality — they lower to `metricsTimeseriesRateQuery`, which
 // reconstructs increments with `lagInFrame` over per-replica accumulation
@@ -554,6 +584,52 @@ function applyMetricsClause(
 
 type TracesGroupByKey = "service" | "span_name" | "status_code" | "http_method" | "attribute" | "none"
 
+/**
+ * Every literal group-by token the resolvers below accept, per source, plus
+ * which prefixed forms that source supports.
+ *
+ * Deliberately a list *alongside* the `Match` chains rather than the input to
+ * them: the chains carry alias semantics (`service_name` → `service`) that a set
+ * lookup would flatten. This exists so the MCP schema doc can enumerate the
+ * accepted tokens without retyping them — the previous hand-written list in
+ * `maple://instructions` omitted the snake_case aliases entirely and claimed
+ * logs supported `attr.*`, which it does not. `group-by-tokens.test.ts` asserts
+ * every token here resolves non-null.
+ */
+export const GROUP_BY_TOKENS = {
+	traces: {
+		literals: [
+			"service",
+			"service.name",
+			"service_name",
+			"span",
+			"span.name",
+			"span_name",
+			"status",
+			"status.code",
+			"status_code",
+			"http.method",
+			"none",
+			"all",
+		],
+		prefixes: ["attr."],
+	},
+	logs: {
+		literals: ["service", "service.name", "service_name", "severity", "severity_text", "none", "all"],
+		// No `attr.*`: `resolveLogsGroupByToken` has no prefix branch, so an
+		// `attr.` token warns and is dropped.
+		prefixes: [],
+	},
+	metrics: {
+		literals: ["service", "service.name", "none", "all"],
+		// One of each, max — a second distinct key warns and is ignored.
+		prefixes: ["attr.", "resource."],
+	},
+} satisfies Record<
+	QueryBuilderDataSource,
+	{ readonly literals: ReadonlyArray<string>; readonly prefixes: ReadonlyArray<string> }
+>
+
 function resolveTracesGroupByToken(
 	token: string,
 	filters: TracesFilterAccumulator,
@@ -836,31 +912,23 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 		// function over that span attribute instead of a duration-based metric.
 		const numericValueField = (query.valueField ?? "").trim()
 		const isNumericAggregation = numericValueField.length > 0
-		const numericAggregationFns = new Set(["avg", "sum", "min", "max", "p50", "p95", "p99"])
 
 		if (isNumericAggregation) {
-			if (!numericAggregationFns.has(query.aggregation)) {
+			if (!ALLOWED_TRACES_NUMERIC_AGGREGATIONS.has(query.aggregation)) {
 				return {
 					query: null,
 					warnings,
-					error: `Numeric-attribute aggregation requires one of avg/sum/min/max/p50/p95/p99 (got: ${query.aggregation})`,
+					error: `Numeric-attribute aggregation requires one of ${TRACES_NUMERIC_AGGREGATIONS.join("/")} (got: ${query.aggregation})`,
 				}
 			}
 		} else {
-			const allowedMetrics = new Set([
-				"count",
-				"avg_duration",
-				"p50_duration",
-				"p95_duration",
-				"p99_duration",
-				"error_rate",
-			])
-
-			if (!allowedMetrics.has(query.aggregation)) {
+			if (!ALLOWED_AGGREGATIONS.traces.has(query.aggregation)) {
 				return {
 					query: null,
 					warnings,
-					error: `Unsupported traces metric: ${query.aggregation}`,
+					// Bare `p95` is the common miss: it is only valid with a
+					// `valueField`, and the duration percentile is `p95_duration`.
+					error: `Unsupported traces metric: ${query.aggregation}. Valid: ${[...ALLOWED_AGGREGATIONS.traces].join(", ")}${ALLOWED_TRACES_NUMERIC_AGGREGATIONS.has(query.aggregation) ? ` — \`${query.aggregation}\` is a numeric-attribute aggregation and requires \`valueField\`` : ""}`,
 				}
 			}
 		}
@@ -940,11 +1008,11 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 	}
 
 	if (query.dataSource === "logs") {
-		if (query.aggregation !== "count") {
+		if (!ALLOWED_AGGREGATIONS.logs.has(query.aggregation)) {
 			return {
 				query: null,
 				warnings,
-				error: "Logs source currently supports only count metric",
+				error: `Logs source currently supports only ${[...ALLOWED_AGGREGATIONS.logs].join("/")} metric (got: ${query.aggregation})`,
 			}
 		}
 
@@ -980,12 +1048,11 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 		}
 	}
 
-	const allowedMetrics = new Set(["avg", "sum", "min", "max", "count", "rate", "increase"])
-	if (!allowedMetrics.has(query.aggregation)) {
+	if (!ALLOWED_AGGREGATIONS.metrics.has(query.aggregation)) {
 		return {
 			query: null,
 			warnings,
-			error: `Unsupported metrics aggregation: ${query.aggregation}`,
+			error: `Unsupported metrics aggregation: ${query.aggregation}. Valid: ${[...ALLOWED_AGGREGATIONS.metrics].join(", ")}`,
 		}
 	}
 
