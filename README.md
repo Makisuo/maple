@@ -18,7 +18,7 @@ Maple is now organized as a monorepo with a SPA frontend and an Effect-based bac
 - `apps/landing`: Astro landing site
 - `apps/alerting`: Alert evaluation worker
 - `apps/cli`: CLI utilities
-- `apps/mobile`: Expo mobile app
+- `apps/ios`: Native SwiftUI app (Clerk + v2 API)
 - `packages/domain`: Shared Effect HTTP contracts and domain types
 - `packages/query-engine`: Shared query and observability logic
 - `packages/ui`: Shared UI primitives and components

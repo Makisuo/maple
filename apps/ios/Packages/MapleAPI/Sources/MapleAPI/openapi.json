@@ -1,0 +1,1754 @@
+{
+  "components": {
+    "schemas": {
+      "ErrorIncident": {
+        "additionalProperties": false,
+        "properties": {
+          "first_triggered_at": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/_maple_ErrorIncidentId"
+          },
+          "issue_id": {
+            "$ref": "#/components/schemas/_maple_ErrorIssueId"
+          },
+          "last_triggered_at": {
+            "type": "string"
+          },
+          "object": {
+            "enum": [
+              "error_incident"
+            ],
+            "type": "string"
+          },
+          "occurrence_count": {
+            "type": "number"
+          },
+          "reason": {
+            "enum": [
+              "first_seen",
+              "regression",
+              "manual"
+            ],
+            "type": "string"
+          },
+          "resolved_at": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "resolved"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "issue_id",
+          "status",
+          "reason",
+          "first_triggered_at",
+          "last_triggered_at",
+          "occurrence_count"
+        ],
+        "title": "Error incident",
+        "type": "object"
+      },
+      "ErrorIssue": {
+        "additionalProperties": false,
+        "description": "A deduplicated error, alert, or integration issue tracked through Maple's workflow.",
+        "properties": {
+          "archived_at": {
+            "type": "string"
+          },
+          "assigned_actor": {
+            "$ref": "#/components/schemas/ErrorIssueActor"
+          },
+          "claimed_at": {
+            "type": "string"
+          },
+          "error_label": {
+            "type": "string"
+          },
+          "exception_message": {
+            "type": "string"
+          },
+          "exception_type": {
+            "type": "string"
+          },
+          "fingerprint_hash": {
+            "type": "string"
+          },
+          "first_seen_at": {
+            "type": "string"
+          },
+          "has_open_incident": {
+            "type": "boolean"
+          },
+          "id": {
+            "$ref": "#/components/schemas/_maple_ErrorIssueId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/_maple_IssueKind"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "lease_expires_at": {
+            "type": "string"
+          },
+          "lease_holder": {
+            "$ref": "#/components/schemas/ErrorIssueActor"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "object": {
+            "enum": [
+              "error_issue"
+            ],
+            "type": "string"
+          },
+          "occurrence_count": {
+            "type": "number"
+          },
+          "priority": {
+            "type": "number"
+          },
+          "resolved_at": {
+            "type": "string"
+          },
+          "service_name": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/_maple_IssueSeverity"
+          },
+          "severity_source": {
+            "$ref": "#/components/schemas/_maple_IssueSeveritySource"
+          },
+          "snooze_until": {
+            "type": "string"
+          },
+          "source_ref": {
+            "type": "object"
+          },
+          "top_frame": {
+            "type": "string"
+          },
+          "workflow_state": {
+            "$ref": "#/components/schemas/_maple_WorkflowState"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "kind",
+          "fingerprint_hash",
+          "service_name",
+          "exception_type",
+          "exception_message",
+          "error_label",
+          "top_frame",
+          "workflow_state",
+          "priority",
+          "first_seen_at",
+          "last_seen_at",
+          "occurrence_count",
+          "has_open_incident"
+        ],
+        "title": "Error issue",
+        "type": "object"
+      },
+      "ErrorIssueActor": {
+        "additionalProperties": false,
+        "description": "A user or agent assigned to, or currently holding the lease for, an error issue.",
+        "properties": {
+          "agent_name": {
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "$ref": "#/components/schemas/_maple_ActorId"
+          },
+          "last_active_at": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/_maple_ActorType"
+          },
+          "user_id": {
+            "minLength": 1,
+            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+            "title": "User ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "capabilities"
+        ],
+        "title": "Error issue actor",
+        "type": "object"
+      },
+      "ErrorIssueDetail": {
+        "additionalProperties": false,
+        "description": "The issue resource with its requested timeseries window, sample traces, and incidents.",
+        "properties": {
+          "archived_at": {
+            "type": "string"
+          },
+          "assigned_actor": {
+            "$ref": "#/components/schemas/ErrorIssueActor"
+          },
+          "claimed_at": {
+            "type": "string"
+          },
+          "error_label": {
+            "type": "string"
+          },
+          "exception_message": {
+            "type": "string"
+          },
+          "exception_type": {
+            "type": "string"
+          },
+          "fingerprint_hash": {
+            "type": "string"
+          },
+          "first_seen_at": {
+            "type": "string"
+          },
+          "has_open_incident": {
+            "type": "boolean"
+          },
+          "id": {
+            "$ref": "#/components/schemas/_maple_ErrorIssueId"
+          },
+          "incidents": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorIncident"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/_maple_IssueKind"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "lease_expires_at": {
+            "type": "string"
+          },
+          "lease_holder": {
+            "$ref": "#/components/schemas/ErrorIssueActor"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "object": {
+            "enum": [
+              "error_issue"
+            ],
+            "type": "string"
+          },
+          "occurrence_count": {
+            "type": "number"
+          },
+          "priority": {
+            "type": "number"
+          },
+          "resolved_at": {
+            "type": "string"
+          },
+          "sample_traces": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorIssueSampleTrace"
+            },
+            "type": "array"
+          },
+          "service_name": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/_maple_IssueSeverity"
+          },
+          "severity_source": {
+            "$ref": "#/components/schemas/_maple_IssueSeveritySource"
+          },
+          "snooze_until": {
+            "type": "string"
+          },
+          "source_ref": {
+            "type": "object"
+          },
+          "timeseries": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorIssueTimeseriesPoint"
+            },
+            "type": "array"
+          },
+          "top_frame": {
+            "type": "string"
+          },
+          "workflow_state": {
+            "$ref": "#/components/schemas/_maple_WorkflowState"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "kind",
+          "fingerprint_hash",
+          "service_name",
+          "exception_type",
+          "exception_message",
+          "error_label",
+          "top_frame",
+          "workflow_state",
+          "priority",
+          "first_seen_at",
+          "last_seen_at",
+          "occurrence_count",
+          "has_open_incident",
+          "timeseries",
+          "sample_traces",
+          "incidents"
+        ],
+        "title": "Error issue detail",
+        "type": "object"
+      },
+      "ErrorIssueList": {
+        "additionalProperties": false,
+        "description": "Cursor-paginated list envelope wrapping a page of objects.",
+        "properties": {
+          "data": {
+            "description": "The page of objects, in the ordering documented by the endpoint.",
+            "items": {
+              "$ref": "#/components/schemas/ErrorIssue"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "description": "Whether more objects exist after this page. When `true`, use `next_cursor` to fetch them.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "description": "Cursor for the next page, or `null` on the last page. Pass it back as the `cursor` query param.",
+            "examples": [
+              "off_1k"
+            ],
+            "type": "string"
+          },
+          "object": {
+            "description": "Always `\"list\"` for a list response.",
+            "enum": [
+              "list"
+            ],
+            "examples": [
+              "list"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "title": "Error issue list",
+        "type": "object"
+      },
+      "ErrorIssueSampleTrace": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_micros": {
+            "type": "number"
+          },
+          "exception_message": {
+            "type": "string"
+          },
+          "service_name": {
+            "type": "string"
+          },
+          "span_id": {
+            "minLength": 1,
+            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+            "title": "Span ID",
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "trace_id": {
+            "minLength": 1,
+            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+            "title": "Trace ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trace_id",
+          "span_id",
+          "service_name",
+          "timestamp",
+          "exception_message",
+          "duration_micros"
+        ],
+        "type": "object"
+      },
+      "ErrorIssueServiceCount": {
+        "additionalProperties": false,
+        "description": "Number of open (actionable-state) error issues for one service.",
+        "properties": {
+          "open_count": {
+            "type": "number"
+          },
+          "service_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_name",
+          "open_count"
+        ],
+        "title": "Error issue service count",
+        "type": "object"
+      },
+      "ErrorIssueServiceCountList": {
+        "additionalProperties": false,
+        "description": "Cursor-paginated list envelope wrapping a page of objects.",
+        "properties": {
+          "data": {
+            "description": "The page of objects, in the ordering documented by the endpoint.",
+            "items": {
+              "$ref": "#/components/schemas/ErrorIssueServiceCount"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "description": "Whether more objects exist after this page. When `true`, use `next_cursor` to fetch them.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "description": "Cursor for the next page, or `null` on the last page. Pass it back as the `cursor` query param.",
+            "examples": [
+              "off_1k"
+            ],
+            "type": "string"
+          },
+          "object": {
+            "description": "Always `\"list\"` for a list response.",
+            "enum": [
+              "list"
+            ],
+            "examples": [
+              "list"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "title": "Error issue service count list",
+        "type": "object"
+      },
+      "ErrorIssueTimeseriesPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "bucket",
+          "count"
+        ],
+        "type": "object"
+      },
+      "MapleErrorEnvelope": {
+        "additionalProperties": false,
+        "description": "Every Maple API failure returns this envelope. Branch on `error._tag`.",
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "_tag": {
+                "description": "Stable semantic error tag. Branch on this exact value.",
+                "type": "string"
+              },
+              "code": {
+                "description": "Stable public integration key, e.g. `invalid_credentials`.",
+                "type": "string"
+              },
+              "message": {
+                "description": "Human-readable detail, safe to show in UI.",
+                "type": "string"
+              },
+              "param": {
+                "description": "The request parameter at fault, for validation failures.",
+                "type": "string"
+              },
+              "recovery": {
+                "description": "Suggested recovery action, e.g. `reauthenticate` or `retry`.",
+                "type": "string"
+              },
+              "retry_after_seconds": {
+                "description": "Seconds to wait before retrying, when the server suggests one.",
+                "type": "number"
+              },
+              "retry_at": {
+                "description": "Absolute time after which a retry is permitted.",
+                "type": "string"
+              },
+              "retryable": {
+                "description": "Whether retrying the same request may succeed.",
+                "type": "boolean"
+              },
+              "title": {
+                "description": "Short human-readable summary, safe to show in UI.",
+                "type": "string"
+              },
+              "type": {
+                "description": "Coarse error class, e.g. `authentication_error`.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "type",
+              "code",
+              "title",
+              "message",
+              "retryable",
+              "recovery"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "Error",
+        "type": "object"
+      },
+      "Service": {
+        "additionalProperties": false,
+        "description": "An observed service aggregated by service name.",
+        "properties": {
+          "deployment_environments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "error_count": {
+            "type": "number"
+          },
+          "error_rate": {
+            "type": "number"
+          },
+          "has_sampling": {
+            "type": "boolean"
+          },
+          "name": {
+            "$ref": "#/components/schemas/_maple_ServiceName"
+          },
+          "object": {
+            "enum": [
+              "service"
+            ],
+            "type": "string"
+          },
+          "p50_latency_ms": {
+            "type": "number"
+          },
+          "p95_latency_ms": {
+            "type": "number"
+          },
+          "p99_latency_ms": {
+            "type": "number"
+          },
+          "sampling_weight": {
+            "type": "number"
+          },
+          "service_namespaces": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "span_count": {
+            "type": "number"
+          },
+          "throughput": {
+            "type": "number"
+          },
+          "traced_throughput": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "object",
+          "name",
+          "service_namespaces",
+          "deployment_environments",
+          "throughput",
+          "traced_throughput",
+          "span_count",
+          "error_count",
+          "error_rate",
+          "p50_latency_ms",
+          "p95_latency_ms",
+          "p99_latency_ms",
+          "has_sampling",
+          "sampling_weight"
+        ],
+        "title": "Service",
+        "type": "object"
+      },
+      "ServiceList": {
+        "additionalProperties": false,
+        "description": "Cursor-paginated list envelope wrapping a page of objects.",
+        "properties": {
+          "data": {
+            "description": "The page of objects, in the ordering documented by the endpoint.",
+            "items": {
+              "$ref": "#/components/schemas/Service"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "description": "Whether more objects exist after this page. When `true`, use `next_cursor` to fetch them.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "description": "Cursor for the next page, or `null` on the last page. Pass it back as the `cursor` query param.",
+            "examples": [
+              "off_1k"
+            ],
+            "type": "string"
+          },
+          "object": {
+            "description": "Always `\"list\"` for a list response.",
+            "enum": [
+              "list"
+            ],
+            "examples": [
+              "list"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "title": "Service list",
+        "type": "object"
+      },
+      "_maple_ActorId": {
+        "description": "Opaque, prefixed public object ID (e.g. `actor_YofPTrK9782DWwcnXhpcCw`). A reversible base58 encoding of the internal ID — treat it as an opaque string.",
+        "examples": [
+          "actor_YofPTrK9782DWwcnXhpcCw"
+        ],
+        "format": "maple.public_id",
+        "title": "Public ID",
+        "type": "string"
+      },
+      "_maple_ActorType": {
+        "enum": [
+          "user",
+          "agent"
+        ],
+        "title": "Actor Type",
+        "type": "string"
+      },
+      "_maple_ErrorIncidentId": {
+        "description": "Opaque, prefixed public object ID (e.g. `einc_YofPTrK9782DWwcnXhpcCw`). A reversible base58 encoding of the internal ID — treat it as an opaque string.",
+        "examples": [
+          "einc_YofPTrK9782DWwcnXhpcCw"
+        ],
+        "format": "maple.public_id",
+        "title": "Public ID",
+        "type": "string"
+      },
+      "_maple_ErrorIssueId": {
+        "description": "Opaque, prefixed public object ID (e.g. `iss_YofPTrK9782DWwcnXhpcCw`). A reversible base58 encoding of the internal ID — treat it as an opaque string.",
+        "examples": [
+          "iss_YofPTrK9782DWwcnXhpcCw"
+        ],
+        "format": "maple.public_id",
+        "title": "Public ID",
+        "type": "string"
+      },
+      "_maple_IssueKind": {
+        "enum": [
+          "error",
+          "alert",
+          "integration"
+        ],
+        "title": "Issue Kind",
+        "type": "string"
+      },
+      "_maple_IssueSeverity": {
+        "enum": [
+          "critical",
+          "high",
+          "medium",
+          "low"
+        ],
+        "title": "Issue Severity",
+        "type": "string"
+      },
+      "_maple_IssueSeveritySource": {
+        "enum": [
+          "detector",
+          "ai",
+          "manual"
+        ],
+        "title": "Issue Severity Source",
+        "type": "string"
+      },
+      "_maple_ServiceName": {
+        "title": "Service Name",
+        "type": "string"
+      },
+      "_maple_WorkflowState": {
+        "enum": [
+          "triage",
+          "todo",
+          "in_progress",
+          "in_review",
+          "done",
+          "cancelled",
+          "wontfix"
+        ],
+        "title": "Workflow State",
+        "type": "string"
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "bearerFormat": "maple_ak_… API key or session JWT",
+        "description": "Authenticate every request with a Bearer token: `Authorization: Bearer <token>`. Accepts a Maple API key (`maple_ak_…`) or a dashboard session token (Clerk / self-hosted JWT). API keys may be restricted with scopes — see the `Scope` schema.",
+        "scheme": "Bearer",
+        "type": "http"
+      }
+    }
+  },
+  "externalDocs": {
+    "description": "Interactive Maple API reference",
+    "url": "https://api.maple.dev/v2/docs"
+  },
+  "info": {
+    "contact": {
+      "email": "support@maple.dev",
+      "name": "Maple Support",
+      "url": "https://maple.dev"
+    },
+    "description": "The Maple public API is a resource-oriented REST interface for customer-stable resources and workflows.\nIt follows Stripe's design philosophy, modernized where useful:\n\n- **Resources** are plural nouns under `/v2` (`/v2/api_keys`). Related resources share a product namespace (`/v2/alerts/rules`, `/v2/alerts/destinations`). Non-CRUD verbs are sub-resource POSTs (`/v2/api_keys/{id}/roll`).\n- **Object IDs** are opaque, prefixed strings (`key_…`, `dash_…`) — reversible encodings of internal IDs.\n- **Wire format** is snake_case JSON with an `object` type field on every resource and ISO-8601 UTC timestamps.\n- **Lists** use cursor pagination and a uniform `{ object: \"list\", data, has_more, next_cursor }` envelope.\n- **Errors** use a uniform `{ error: { _tag, type, code, title, message, retryable, recovery } }` envelope. `_tag` is the semantic Maple error identity; `code` remains the stable public integration key.\n- **Auth** is a Bearer API key (`maple_ak_…`) or dashboard session token; keys can be restricted with scopes.\n\nSee `docs/api-v2.md` for the full conventions.",
+    "summary": "The public, stability-committed HTTP API for the Maple observability platform.",
+    "title": "Maple API",
+    "version": "2.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v2/error_issues": {
+      "get": {
+        "description": "Returns a bounded, cursor-paginated page of your organization's issues. Requires `error_issues:read`.",
+        "operationId": "listErrorIssues",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Opaque pagination cursor. Pass the `next_cursor` from a previous response to fetch the following page. Omit for the first page.",
+              "examples": [
+                "off_1k"
+              ],
+              "title": "Cursor",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workflow_state",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/_maple_WorkflowState"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "unset"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/_maple_IssueKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "service_name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "deployment_environment",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actionable",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "enum": [
+                "last_seen",
+                "severity"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorIssueList"
+                }
+              }
+            },
+            "description": "Cursor-paginated list envelope wrapping a page of objects."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/CursorInvalidError failure. HTTP 400. | The @maple/http/v2/CursorSortMismatchError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQuotaExceededError failure. HTTP 429. | The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseMalformedQueryError failure. HTTP 500. | The @maple/http/errors/WarehouseScopeError failure. HTTP 500. | The @maple/http/errors/OrgClickHouseSettingsEncryptionError failure. HTTP 500. | The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQueryError failure. HTTP 502. | The @maple/http/errors/WarehouseAuthError failure. HTTP 502. | The @maple/http/errors/WarehouseConfigError failure. HTTP 502. | The @maple/http/errors/WarehouseClientError failure. HTTP 502. | The @maple/http/errors/WarehouseSchemaDriftError failure. HTTP 502. | The @maple/http/errors/WarehouseResultDecodeError failure. HTTP 502. | The @maple/http/errors/OrgClickHouseSettingsStoredConfigInvalidError failure. HTTP 502."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/ErrorPersistenceError failure. HTTP 503. | The @maple/http/errors/WarehouseUpstreamError failure. HTTP 503. | The @maple/http/errors/OrgClickHouseSettingsPersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List error issues",
+        "tags": [
+          "Error Issues"
+        ]
+      }
+    },
+    "/v2/error_issues/service_counts": {
+      "get": {
+        "description": "Returns the number of open (actionable-state) error issues per service, in one call. Alert-kind issues are excluded. Requires `error_issues:read`.",
+        "operationId": "listErrorIssueServiceCounts",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorIssueServiceCountList"
+                }
+              }
+            },
+            "description": "Cursor-paginated list envelope wrapping a page of objects."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/ErrorPersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List open issue counts by service",
+        "tags": [
+          "Error Issues"
+        ]
+      }
+    },
+    "/v2/error_issues/{id}": {
+      "get": {
+        "description": "Returns an issue with its timeseries, representative traces, and incident history. Requires `error_issues:read`.",
+        "operationId": "getErrorIssue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/_maple_ErrorIssueId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket_seconds",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sample_limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorIssueDetail"
+                }
+              }
+            },
+            "description": "The issue resource with its requested timeseries window, sample traces, and incidents."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/ErrorIssueNotFoundError failure. HTTP 404."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQuotaExceededError failure. HTTP 429. | The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseMalformedQueryError failure. HTTP 500. | The @maple/http/errors/WarehouseScopeError failure. HTTP 500. | The @maple/http/errors/OrgClickHouseSettingsEncryptionError failure. HTTP 500. | The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQueryError failure. HTTP 502. | The @maple/http/errors/WarehouseAuthError failure. HTTP 502. | The @maple/http/errors/WarehouseConfigError failure. HTTP 502. | The @maple/http/errors/WarehouseClientError failure. HTTP 502. | The @maple/http/errors/WarehouseSchemaDriftError failure. HTTP 502. | The @maple/http/errors/WarehouseResultDecodeError failure. HTTP 502. | The @maple/http/errors/OrgClickHouseSettingsStoredConfigInvalidError failure. HTTP 502."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/ErrorPersistenceError failure. HTTP 503. | The @maple/http/errors/WarehouseUpstreamError failure. HTTP 503. | The @maple/http/errors/OrgClickHouseSettingsPersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retrieve an error issue",
+        "tags": [
+          "Error Issues"
+        ]
+      }
+    },
+    "/v2/services": {
+      "get": {
+        "description": "Lists services aggregated by name in an explicit time window. Requires `services:read`.",
+        "operationId": "listServices",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start_time",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Opaque pagination cursor. Pass the `next_cursor` from a previous response to fetch the following page. Omit for the first page.",
+              "examples": [
+                "off_1k"
+              ],
+              "title": "Cursor",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "deployment_environment",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "service_namespace",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceList"
+                }
+              }
+            },
+            "description": "Cursor-paginated list envelope wrapping a page of objects."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/ParameterInvalidError failure. HTTP 400. | The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQuotaExceededError failure. HTTP 429. | The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseMalformedQueryError failure. HTTP 500. | The @maple/http/errors/WarehouseScopeError failure. HTTP 500. | The @maple/http/errors/OrgClickHouseSettingsEncryptionError failure. HTTP 500. | The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQueryError failure. HTTP 502. | The @maple/http/errors/WarehouseAuthError failure. HTTP 502. | The @maple/http/errors/WarehouseConfigError failure. HTTP 502. | The @maple/http/errors/WarehouseClientError failure. HTTP 502. | The @maple/http/errors/WarehouseSchemaDriftError failure. HTTP 502. | The @maple/http/errors/WarehouseResultDecodeError failure. HTTP 502. | The @maple/http/errors/OrgClickHouseSettingsStoredConfigInvalidError failure. HTTP 502."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseUpstreamError failure. HTTP 503. | The @maple/http/errors/OrgClickHouseSettingsPersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List services",
+        "tags": [
+          "Services"
+        ]
+      }
+    },
+    "/v2/services/{name}": {
+      "get": {
+        "description": "Returns one service aggregated across environments and namespaces. Requires `services:read`.",
+        "operationId": "getService",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/_maple_ServiceName"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Service"
+                }
+              }
+            },
+            "description": "An observed service aggregated by service name."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/ServiceNotFoundError failure. HTTP 404."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQuotaExceededError failure. HTTP 429. | The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseMalformedQueryError failure. HTTP 500. | The @maple/http/errors/WarehouseScopeError failure. HTTP 500. | The @maple/http/errors/OrgClickHouseSettingsEncryptionError failure. HTTP 500. | The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQueryError failure. HTTP 502. | The @maple/http/errors/WarehouseAuthError failure. HTTP 502. | The @maple/http/errors/WarehouseConfigError failure. HTTP 502. | The @maple/http/errors/WarehouseClientError failure. HTTP 502. | The @maple/http/errors/WarehouseSchemaDriftError failure. HTTP 502. | The @maple/http/errors/WarehouseResultDecodeError failure. HTTP 502. | The @maple/http/errors/OrgClickHouseSettingsStoredConfigInvalidError failure. HTTP 502."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseUpstreamError failure. HTTP 503. | The @maple/http/errors/OrgClickHouseSettingsPersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retrieve a service",
+        "tags": [
+          "Services"
+        ]
+      }
+    }
+  },
+  "security": [],
+  "servers": [
+    {
+      "description": "Production",
+      "url": "https://api.maple.dev"
+    }
+  ],
+  "tags": [
+    {
+      "description": "Programmatic credentials for the Maple API. Create scoped keys, list and retrieve them, roll their secrets, and revoke them. Creating, rolling, and revoking keys is admin-only; a key's `secret` is returned only when it is created or rolled.",
+      "name": "API Keys"
+    },
+    {
+      "description": "Create and manage dashboards, browse version history, restore snapshots, and instantiate built-in templates.",
+      "name": "Dashboards"
+    },
+    {
+      "description": "Monitors over your telemetry: error rate, latency percentiles, Apdex, throughput, metrics, query-builder queries, and raw SQL. Rules evaluate on a rolling window, open incidents after consecutive breaches, and notify their alert destinations. Mutations are admin-only.",
+      "name": "Alert Rules"
+    },
+    {
+      "description": "Read-only notification delivery history for alert rules.",
+      "name": "Alert Deliveries"
+    },
+    {
+      "description": "Notification channels for alert rules — Slack bot, PagerDuty, generic webhooks, Hazel OAuth, Discord, and workspace-member email. Create and manage destinations, then reference them from alert rules via `destination_ids`. Mutations are admin-only; channel secrets are write-only.",
+      "name": "Alert Destinations"
+    },
+    {
+      "description": "The incident history produced by your alert rules. Incidents open when a rule breaches for enough consecutive checks and resolve automatically once the signal recovers — this surface is read-only.",
+      "name": "Alert Incidents"
+    },
+    {
+      "description": "Telemetry ingest credentials for your organization: a public key for client-side senders and a private key for server-side senders. Retrieve them or roll either key. All operations are admin-only.",
+      "name": "Ingest Keys"
+    },
+    {
+      "description": "Install and manage the Maple Slack app for your organization: begin an OAuth install, read installation status, list channels, and uninstall.",
+      "name": "Slack Integration"
+    },
+    {
+      "description": "Connect PlanetScale to your organization and manage what Maple collects from it: connection status, organization binding, the metrics service token that enables branch-metrics scraping, the database inventory, webhook setup, query insights, and the lifecycle event timeline.",
+      "name": "PlanetScale Integration"
+    },
+    {
+      "description": "Deduplicated errors and alert-backed issues tracked through Maple's triage workflow.",
+      "name": "Error Issues"
+    },
+    {
+      "description": "Ingest-time attribute rewrite rules. Move or copy span/resource attribute values to new keys as telemetry arrives, normalizing naming across services without redeploying them.",
+      "name": "Attribute Mappings"
+    },
+    {
+      "description": "Metrics endpoints Maple scrapes on a schedule — self-hosted Prometheus endpoints and PlanetScale branch metrics. Manage targets, probe them on demand, and inspect recent scrape checks. Credentials are write-only.",
+      "name": "Scrape Targets"
+    },
+    {
+      "description": "Automatically detected instrumentation improvements — attribute renames toward canonical semantic conventions, double emissions, and naming violations. List them, and dismiss or reopen individual recommendations.",
+      "name": "Instrumentation Recommendations"
+    },
+    {
+      "description": "A health check for your Maple setup — what you are ingesting, whether alerts can reach you, and whether your telemetry follows the conventions Maple's features depend on.",
+      "name": "Setup Audit"
+    },
+    {
+      "description": "Durable investigation war-rooms — autonomous or human-opened diagnostic sessions over incidents and ad-hoc questions, each carrying its structured AI diagnosis.",
+      "name": "Investigations"
+    },
+    {
+      "description": "Baseline-detected anomalies on monitored signals — list and inspect incidents, resolve them, link error issues, and manage detector settings.",
+      "name": "Anomalies"
+    },
+    {
+      "description": "The authenticated organization's identity.",
+      "name": "Organization"
+    },
+    {
+      "description": "Recorded browser sessions — search them, retrieve detail, stream rrweb event chunks, read the distilled transcript, and reverse-correlate from a trace.",
+      "name": "Session Replays"
+    },
+    {
+      "description": "Search and inspect distributed traces.",
+      "name": "Traces"
+    },
+    {
+      "description": "Search and retrieve OpenTelemetry logs.",
+      "name": "Logs"
+    },
+    {
+      "description": "Browse and query OpenTelemetry metrics.",
+      "name": "Metrics"
+    },
+    {
+      "description": "Observed service health summaries.",
+      "name": "Services"
+    },
+    {
+      "description": "Service-to-service topology.",
+      "name": "Service Map"
+    },
+    {
+      "description": "Read a dashboard through a share link. The only unauthenticated group in this API: the token in the request body is the credential, so these operations resolve for a viewer with no Maple account.",
+      "name": "Shares"
+    }
+  ]
+}

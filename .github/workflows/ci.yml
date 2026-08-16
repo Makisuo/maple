@@ -61,6 +61,11 @@ jobs:
                         - 'scripts/**'
                         - '!apps/ingest/**'
                         - '!apps/slack-agent/**'
+                        # Swift; built by ios.yml. Note the asymmetry: a
+                        # packages/domain change still triggers ios:openapi:check
+                        # below, so an iOS contract break fails on the cheap
+                        # Linux runner rather than a macOS one.
+                        - '!apps/ios/**'
                       # The workspace-dependency closure of apps/cli + apps/local-ui
                       # (plus what alchemy:build-deps builds): cli → effect-sdk,
                       # domain, query-engine; local-ui → infra, query-engine, ui;
@@ -275,6 +280,13 @@ jobs:
             - name: Validate generated ClickHouse and local-store schemas
               if: ${{ matrix.shard == 'quality' }}
               run: bun run clickhouse:schema:check
+
+            # The Swift client is generated from a committed, pruned copy of the v2
+            # OpenAPI document. Checking it here means a contract change that breaks
+            # the iOS client fails on Linux, not on a 10x-priced macOS runner.
+            - name: Validate the generated iOS OpenAPI spec
+              if: ${{ matrix.shard == 'quality' }}
+              run: bun run ios:openapi:check
 
             # Shared design tokens live in packages/ui/src/styles/tokens.css;
             # fails if an app re-declares one (landing ↔ web drift guard).

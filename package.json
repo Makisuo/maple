@@ -42,6 +42,8 @@
 		"clickhouse:schema:check": "bun run ./scripts/generate-clickhouse-schema.ts --check && bun run ./scripts/generate-clickhouse-schema-sql.ts --check && bun run ./scripts/generate-clickhouse-insert-mappings.ts --check && bun run ./scripts/lint-clickhouse-schema.ts && bun run ./scripts/check-local-schema-manifest.ts",
 		"clickhouse:schema:lint": "bun run ./scripts/lint-clickhouse-schema.ts",
 		"check:tokens": "bun run ./scripts/check-token-drift.ts",
+		"ios:openapi": "bun run ./scripts/generate-ios-openapi.ts",
+		"ios:openapi:check": "bun run ./scripts/generate-ios-openapi.ts --check",
 		"llm:sync": "bun run ./scripts/sync-llm-upstream.ts",
 		"llm:sync:check": "bun run ./scripts/sync-llm-upstream.ts --check",
 		"knip": "bun run --cwd apps/landing sync:i18n && knip",

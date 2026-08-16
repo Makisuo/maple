@@ -1,0 +1,15 @@
+// Settings shared by every configuration.
+//
+// The Clerk publishable key arrives here (via Secrets.xcconfig) and is mapped
+// into Info.plist by project.yml, so it is never hardcoded in Swift.
+
+// NOTE: `//` starts a comment in xcconfig, so a URL written literally here is
+// silently truncated to its scheme ("https://api.maple.dev" becomes "https:").
+// There is deliberately no default: the base URL comes from the server declared
+// in the OpenAPI document, and Secrets.xcconfig can override it using the
+// `$()` escape shown in Secrets.example.xcconfig.
+MAPLE_API_BASE_URL =
+
+// Placeholder so a checkout without Secrets.xcconfig still configures; the app
+// fails at launch with an actionable message rather than a confusing 401.
+CLERK_PUBLISHABLE_KEY = pk_test_replace_me
