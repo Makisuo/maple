@@ -580,106 +580,222 @@ function applyMetricsClause(
 	)
 }
 
-// Group-by mapping via Match
+// Group-by vocabulary
+//
+// ONE alias map per data source is the authority for what a group-by token
+// means. The dashboard query-spec builder below and the exported
+// `resolveGroupBy` (used by alert compilation) both resolve through it, and the
+// documented `GROUP_BY_TOKENS` catalogue — rendered into the MCP schema doc —
+// is generated from it. Keeping these three in step by hand did not work: the
+// catalogue and the builder accepted the snake_case aliases
+// (`service_name`, `span_name`, `status_code`, `severity_text`) while
+// `resolveGroupBy` did not, so a token an agent read out of the docs and saved
+// in a dashboard widget hard-failed validation the moment the same expression
+// was compiled for an alert rule.
+//
+// Consumer policy is deliberately NOT in here. Which tokens a surface offers,
+// how many `attr.*` dimensions it tolerates, and whether an unusable token is a
+// warning or a hard error stay with the consumer.
 
 type TracesGroupByKey = "service" | "span_name" | "status_code" | "http_method" | "attribute" | "none"
+type LogsGroupByKey = "service" | "severity" | "none"
+type MetricsGroupByKey = "service" | "attribute" | "resource_attribute" | "none"
 
-/**
- * Every literal group-by token the resolvers below accept, per source, plus
- * which prefixed forms that source supports.
- *
- * Deliberately a list *alongside* the `Match` chains rather than the input to
- * them: the chains carry alias semantics (`service_name` → `service`) that a set
- * lookup would flatten. This exists so the MCP schema doc can enumerate the
- * accepted tokens without retyping them — the previous hand-written list in
- * `maple://instructions` omitted the snake_case aliases entirely and claimed
- * logs supported `attr.*`, which it does not. `group-by-tokens.test.ts` asserts
- * every token here resolves non-null.
- */
-export const GROUP_BY_TOKENS = {
+/** Which bucket a prefixed token's key lands in. */
+type GroupByKeyBucket = "attributeKeys" | "resourceAttributeKeys"
+
+interface GroupByPrefixSpec<K extends string> {
+	readonly prefix: string
+	readonly token: K
+	readonly bucket: GroupByKeyBucket
+}
+
+interface GroupBySourceSpec<K extends string> {
+	/** Accepted literal token → canonical QuerySpec group dimension. */
+	readonly aliases: Readonly<Record<string, K>>
+	readonly prefixes: ReadonlyArray<GroupByPrefixSpec<K>>
+}
+
+const ATTRIBUTE_PREFIX = {
+	prefix: "attr.",
+	token: "attribute",
+	bucket: "attributeKeys",
+} as const satisfies GroupByPrefixSpec<"attribute">
+
+const RESOURCE_PREFIX = {
+	prefix: "resource.",
+	token: "resource_attribute",
+	bucket: "resourceAttributeKeys",
+} as const satisfies GroupByPrefixSpec<"resource_attribute">
+
+/** Every prefix any source understands — a token wearing one of these is a
+ * prefixed group-by everywhere, so a source that does not support it says so
+ * rather than reporting it as an unknown token. */
+const ALL_GROUP_BY_PREFIXES = [ATTRIBUTE_PREFIX, RESOURCE_PREFIX] as const
+
+/** A source with no prefixed group-by forms at all. */
+const NO_GROUP_BY_PREFIXES: ReadonlyArray<GroupByPrefixSpec<never>> = []
+
+const GROUP_BY_ALIASES = {
 	traces: {
-		literals: [
-			"service",
-			"service.name",
-			"service_name",
-			"span",
-			"span.name",
-			"span_name",
-			"status",
-			"status.code",
-			"status_code",
-			"http.method",
-			"none",
-			"all",
-		],
-		prefixes: ["attr."],
-	},
-	logs: {
-		literals: ["service", "service.name", "service_name", "severity", "severity_text", "none", "all"],
-		// No `attr.*`: `resolveLogsGroupByToken` has no prefix branch, so an
-		// `attr.` token warns and is dropped.
-		prefixes: [],
-	},
-	metrics: {
-		literals: ["service", "service.name", "none", "all"],
-		// One of each, max — a second distinct key warns and is ignored.
-		prefixes: ["attr.", "resource."],
-	},
-} satisfies Record<
-	QueryBuilderDataSource,
-	{ readonly literals: ReadonlyArray<string>; readonly prefixes: ReadonlyArray<string> }
->
-
-function resolveTracesGroupByToken(
-	token: string,
-	filters: TracesFilterAccumulator,
-	warnings: string[],
-	raw: string,
-): TracesGroupByKey | null {
-	return Match.value(token).pipe(
 		// snake_case aliases match the warehouse column spellings — dashboard
 		// widget presets (and widgets persisted from them) use those, so
 		// dropping them silently broke every preset breakdown (MAP-49).
-		Match.whenOr("service", "service.name", "service_name", () => "service" as const),
-		Match.whenOr("span", "span.name", "span_name", () => "span_name" as const),
-		Match.whenOr("status", "status.code", "status_code", () => "status_code" as const),
-		Match.when("http.method", () => "http_method" as const),
-		Match.whenOr("none", "all", () => "none" as const),
-		Match.orElse((t) => {
-			if (t.startsWith("attr.")) {
-				const attributeKey = t.slice(5)
-				if (!attributeKey) {
-					warnings.push("Invalid attr.* group by ignored")
-					return null
-				}
-				if (!filters.groupByAttributeKeys) filters.groupByAttributeKeys = []
-				filters.groupByAttributeKeys.push(attributeKey)
-				return "attribute" as const
+		aliases: {
+			service: "service",
+			"service.name": "service",
+			service_name: "service",
+			span: "span_name",
+			"span.name": "span_name",
+			span_name: "span_name",
+			status: "status_code",
+			"status.code": "status_code",
+			status_code: "status_code",
+			"http.method": "http_method",
+			none: "none",
+			all: "none",
+		},
+		prefixes: [ATTRIBUTE_PREFIX],
+	},
+	logs: {
+		aliases: {
+			service: "service",
+			"service.name": "service",
+			service_name: "service",
+			severity: "severity",
+			severity_text: "severity",
+			none: "none",
+			all: "none",
+		},
+		// The logs QuerySpec has no attribute group dimension.
+		prefixes: NO_GROUP_BY_PREFIXES,
+	},
+	metrics: {
+		aliases: {
+			service: "service",
+			"service.name": "service",
+			none: "none",
+			all: "none",
+		},
+		prefixes: [ATTRIBUTE_PREFIX, RESOURCE_PREFIX],
+	},
+} as const satisfies {
+	readonly traces: GroupBySourceSpec<TracesGroupByKey>
+	readonly logs: GroupBySourceSpec<LogsGroupByKey>
+	readonly metrics: GroupBySourceSpec<MetricsGroupByKey>
+}
+
+/**
+ * The documented group-by vocabulary, per source — generated from
+ * `GROUP_BY_ALIASES` so the docs cannot drift from the resolvers.
+ */
+export const GROUP_BY_TOKENS = {
+	traces: {
+		literals: Object.keys(GROUP_BY_ALIASES.traces.aliases),
+		prefixes: GROUP_BY_ALIASES.traces.prefixes.map((p) => p.prefix),
+	},
+	logs: {
+		literals: Object.keys(GROUP_BY_ALIASES.logs.aliases),
+		prefixes: GROUP_BY_ALIASES.logs.prefixes.map((p) => p.prefix),
+	},
+	metrics: {
+		literals: Object.keys(GROUP_BY_ALIASES.metrics.aliases),
+		prefixes: GROUP_BY_ALIASES.metrics.prefixes.map((p) => p.prefix),
+	},
+} satisfies Readonly<
+	Record<
+		QueryBuilderDataSource,
+		{ readonly literals: ReadonlyArray<string>; readonly prefixes: ReadonlyArray<string> }
+	>
+>
+
+type GroupByTokenResolution<K extends string> =
+	/** Blank/whitespace-only input — skip it without warning. */
+	| { readonly _tag: "Empty" }
+	| { readonly _tag: "Literal"; readonly token: K }
+	| {
+			readonly _tag: "Prefixed"
+			readonly token: K
+			readonly bucket: GroupByKeyBucket
+			readonly key: string
+	  }
+	| { readonly _tag: "Rejected"; readonly warning: string }
+
+/**
+ * The single group-by token interpreter. Normalises the raw token, applies the
+ * source's prefix handlers, then its alias map. It never decides policy — it
+ * only answers "what does this token mean for this source".
+ */
+function resolveGroupByToken<K extends string>(
+	source: QueryBuilderDataSource,
+	spec: GroupBySourceSpec<K>,
+	raw: string,
+): GroupByTokenResolution<K> {
+	const token = raw.trim().toLowerCase()
+	if (!token) return { _tag: "Empty" }
+
+	for (const known of ALL_GROUP_BY_PREFIXES) {
+		if (!token.startsWith(known.prefix)) continue
+		const key = token.slice(known.prefix.length)
+		if (!key) return { _tag: "Rejected", warning: `Invalid ${known.prefix}* group by ignored` }
+		const supported = spec.prefixes.find((p) => p.prefix === known.prefix)
+		if (!supported) {
+			return {
+				_tag: "Rejected",
+				warning: `${source} source does not support ${known.prefix}* group by: ${raw}`,
 			}
-			warnings.push(`Unsupported traces group by ignored: ${raw}`)
-			return null
-		}),
-	)
+		}
+		return { _tag: "Prefixed", token: supported.token, bucket: supported.bucket, key }
+	}
+
+	const resolved = Object.hasOwn(spec.aliases, token) ? spec.aliases[token] : undefined
+	if (resolved === undefined) {
+		return { _tag: "Rejected", warning: `Unsupported ${source} group by ignored: ${raw}` }
+	}
+	return { _tag: "Literal", token: resolved }
 }
 
-type LogsGroupByKey = "service" | "severity" | "none"
-
-function resolveLogsGroupByToken(token: string, warnings: string[], raw: string): LogsGroupByKey | null {
-	return Match.value(token).pipe(
-		Match.whenOr("service", "service.name", "service_name", () => "service" as const),
-		Match.whenOr("severity", "severity_text", () => "severity" as const),
-		Match.whenOr("none", "all", () => "none" as const),
-		Match.orElse(() => {
-			warnings.push(`Unsupported logs group by ignored: ${raw}`)
+function resolveTracesGroupByToken(
+	raw: string,
+	filters: TracesFilterAccumulator,
+	warnings: string[],
+): TracesGroupByKey | null {
+	const resolution = resolveGroupByToken("traces", GROUP_BY_ALIASES.traces, raw)
+	switch (resolution._tag) {
+		case "Empty":
 			return null
-		}),
-	)
+		case "Rejected":
+			warnings.push(resolution.warning)
+			return null
+		case "Literal":
+			return resolution.token
+		case "Prefixed":
+			// Traces carry an array of attribute group columns, so every distinct
+			// key is kept.
+			if (!filters.groupByAttributeKeys) filters.groupByAttributeKeys = []
+			filters.groupByAttributeKeys.push(resolution.key)
+			return resolution.token
+	}
 }
 
-type MetricsGroupByKey = "service" | "attribute" | "resource_attribute" | "none"
+function resolveLogsGroupByToken(raw: string, warnings: string[]): LogsGroupByKey | null {
+	const resolution = resolveGroupByToken("logs", GROUP_BY_ALIASES.logs, raw)
+	switch (resolution._tag) {
+		case "Empty":
+			return null
+		case "Rejected":
+			warnings.push(resolution.warning)
+			return null
+		case "Literal":
+			return resolution.token
+		case "Prefixed":
+			// Unreachable: the logs spec declares no prefixes.
+			return null
+	}
+}
 
 function resolveMetricsGroupByToken(
-	token: string,
+	raw: string,
 	metricsFilters: {
 		metricName: string
 		metricType: string
@@ -688,52 +804,46 @@ function resolveMetricsGroupByToken(
 		groupByResourceAttributeKey?: string
 	},
 	warnings: string[],
-	raw: string,
 ): MetricsGroupByKey | null {
-	return Match.value(token).pipe(
-		Match.whenOr("service", "service.name", () => "service" as const),
-		Match.whenOr("none", "all", () => "none" as const),
-		Match.orElse((t) => {
-			if (t.startsWith("attr.")) {
-				const attributeKey = t.slice(5)
-				if (!attributeKey) {
-					warnings.push("Invalid attr.* group by ignored")
-					return null
-				}
+	const resolution = resolveGroupByToken("metrics", GROUP_BY_ALIASES.metrics, raw)
+	switch (resolution._tag) {
+		case "Empty":
+			return null
+		case "Rejected":
+			warnings.push(resolution.warning)
+			return null
+		case "Literal":
+			return resolution.token
+		case "Prefixed": {
+			// Consumer policy: the metrics QuerySpec carries a single attribute
+			// group column and a single resource one, so a second distinct key
+			// warns and is dropped rather than silently overwriting the first.
+			if (resolution.bucket === "attributeKeys") {
 				if (
 					metricsFilters.groupByAttributeKey !== undefined &&
-					metricsFilters.groupByAttributeKey !== attributeKey
+					metricsFilters.groupByAttributeKey !== resolution.key
 				) {
 					warnings.push(
-						`Metrics queries support a single attr.* group by; ignoring attr.${attributeKey}`,
+						`Metrics queries support a single attr.* group by; ignoring attr.${resolution.key}`,
 					)
 					return null
 				}
-				metricsFilters.groupByAttributeKey = attributeKey
-				return "attribute" as const
+				metricsFilters.groupByAttributeKey = resolution.key
+				return resolution.token
 			}
-			if (t.startsWith("resource.")) {
-				const resourceKey = t.slice(9)
-				if (!resourceKey) {
-					warnings.push("Invalid resource.* group by ignored")
-					return null
-				}
-				if (
-					metricsFilters.groupByResourceAttributeKey !== undefined &&
-					metricsFilters.groupByResourceAttributeKey !== resourceKey
-				) {
-					warnings.push(
-						`Metrics queries support a single resource.* group by; ignoring resource.${resourceKey}`,
-					)
-					return null
-				}
-				metricsFilters.groupByResourceAttributeKey = resourceKey
-				return "resource_attribute" as const
+			if (
+				metricsFilters.groupByResourceAttributeKey !== undefined &&
+				metricsFilters.groupByResourceAttributeKey !== resolution.key
+			) {
+				warnings.push(
+					`Metrics queries support a single resource.* group by; ignoring resource.${resolution.key}`,
+				)
+				return null
 			}
-			warnings.push(`Unsupported metrics group by ignored: ${raw}`)
-			return null
-		}),
-	)
+			metricsFilters.groupByResourceAttributeKey = resolution.key
+			return resolution.token
+		}
+	}
 }
 
 // Shared resolveGroupBy — used by both the dashboard query builder and the
@@ -764,87 +874,28 @@ export function resolveGroupBy(
 	const seenResourceKeys = new Set<string>()
 
 	for (const raw of rawTokens) {
-		const token = raw.trim().toLowerCase()
-		if (!token) continue
-
-		if (token.startsWith("attr.")) {
-			const attributeKey = token.slice(5)
-			if (!attributeKey) {
-				warnings.push("Invalid attr.* group by ignored")
+		const resolution = resolveGroupByToken(source, GROUP_BY_ALIASES[source], raw)
+		switch (resolution._tag) {
+			case "Empty":
 				continue
-			}
-			if (source === "logs") {
-				warnings.push(`Logs source does not support attr.* group by: ${raw}`)
+			case "Rejected":
+				warnings.push(resolution.warning)
 				continue
+			case "Prefixed": {
+				const seenKeys = resolution.bucket === "attributeKeys" ? seenAttrKeys : seenResourceKeys
+				const keys = resolution.bucket === "attributeKeys" ? attributeKeys : resourceAttributeKeys
+				if (!seenKeys.has(resolution.key)) {
+					seenKeys.add(resolution.key)
+					keys.push(resolution.key)
+				}
+				break
 			}
-			if (!seenAttrKeys.has(attributeKey)) {
-				seenAttrKeys.add(attributeKey)
-				attributeKeys.push(attributeKey)
-			}
-			if (!seenTokens.has("attribute")) {
-				seenTokens.add("attribute")
-				tokens.push("attribute")
-			}
-			continue
+			case "Literal":
+				break
 		}
-
-		if (token.startsWith("resource.")) {
-			const resourceKey = token.slice(9)
-			if (!resourceKey) {
-				warnings.push("Invalid resource.* group by ignored")
-				continue
-			}
-			// Only the metrics QuerySpec has a resource_attribute group dimension.
-			if (source !== "metrics") {
-				warnings.push(`${source} source does not support resource.* group by: ${raw}`)
-				continue
-			}
-			if (!seenResourceKeys.has(resourceKey)) {
-				seenResourceKeys.add(resourceKey)
-				resourceAttributeKeys.push(resourceKey)
-			}
-			if (!seenTokens.has("resource_attribute")) {
-				seenTokens.add("resource_attribute")
-				tokens.push("resource_attribute")
-			}
-			continue
-		}
-
-		const resolved: string | null = Match.value(source).pipe(
-			Match.when("traces", () =>
-				Match.value(token).pipe(
-					Match.whenOr("service", "service.name", () => "service"),
-					Match.whenOr("span", "span.name", () => "span_name"),
-					Match.whenOr("status", "status.code", () => "status_code"),
-					Match.when("http.method", () => "http_method"),
-					Match.whenOr("none", "all", () => "none"),
-					Match.orElse(() => null),
-				),
-			),
-			Match.when("logs", () =>
-				Match.value(token).pipe(
-					Match.whenOr("service", "service.name", () => "service"),
-					Match.when("severity", () => "severity"),
-					Match.whenOr("none", "all", () => "none"),
-					Match.orElse(() => null),
-				),
-			),
-			Match.orElse(() =>
-				Match.value(token).pipe(
-					Match.whenOr("service", "service.name", () => "service"),
-					Match.whenOr("none", "all", () => "none"),
-					Match.orElse(() => null),
-				),
-			),
-		)
-
-		if (resolved == null) {
-			warnings.push(`Unsupported ${source} group by ignored: ${raw}`)
-			continue
-		}
-		if (!seenTokens.has(resolved)) {
-			seenTokens.add(resolved)
-			tokens.push(resolved)
+		if (!seenTokens.has(resolution.token)) {
+			seenTokens.add(resolution.token)
+			tokens.push(resolution.token)
 		}
 	}
 
@@ -954,9 +1005,7 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 		const groupByKeys: TracesGroupByKey[] = []
 		if (query.addOns?.groupBy && (query.groupBy?.length ?? 0) > 0) {
 			for (const raw of query.groupBy ?? []) {
-				const token = raw.trim().toLowerCase()
-				if (!token) continue
-				const resolved = resolveTracesGroupByToken(token, filters, warnings, raw)
+				const resolved = resolveTracesGroupByToken(raw, filters, warnings)
 				if (resolved) groupByKeys.push(resolved)
 			}
 		}
@@ -1024,9 +1073,7 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 		const logsGroupByKeys: LogsGroupByKey[] = []
 		if (query.addOns?.groupBy && (query.groupBy?.length ?? 0) > 0) {
 			for (const raw of query.groupBy ?? []) {
-				const token = raw.trim().toLowerCase()
-				if (!token) continue
-				const resolved = resolveLogsGroupByToken(token, warnings, raw)
+				const resolved = resolveLogsGroupByToken(raw, warnings)
 				if (resolved) logsGroupByKeys.push(resolved)
 			}
 		}
@@ -1077,9 +1124,7 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 	const metricsGroupByKeys: MetricsGroupByKey[] = []
 	if (query.addOns?.groupBy && (query.groupBy?.length ?? 0) > 0) {
 		for (const raw of query.groupBy ?? []) {
-			const token = raw.trim().toLowerCase()
-			if (!token) continue
-			const resolved = resolveMetricsGroupByToken(token, metricsFilters, warnings, raw)
+			const resolved = resolveMetricsGroupByToken(raw, metricsFilters, warnings)
 			if (resolved) metricsGroupByKeys.push(resolved)
 		}
 	}

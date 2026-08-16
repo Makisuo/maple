@@ -6,6 +6,7 @@ import {
 	buildBreakdownQuerySpec,
 	buildTimeseriesQuerySpec,
 	GROUP_BY_TOKENS,
+	resolveGroupBy,
 } from "./model"
 
 // Minimal traces draft factory — only the fields the builder reads matter; the
@@ -327,7 +328,47 @@ describe("GROUP_BY_TOKENS catalog matches the resolvers", () => {
 	it("logs does not support attr.* — the catalog lists no prefixes for it", () => {
 		expect(GROUP_BY_TOKENS.logs.prefixes).toEqual([])
 		const result = buildTimeseriesQuerySpec(draftFor("logs", ["attr.anything"]))
-		expect(result.warnings.join(" ")).toContain("Unsupported logs group by")
+		expect(result.warnings.join(" ")).toContain("logs source does not support attr.*")
+	})
+
+	// The catalogue is the documented vocabulary (MCP schema doc renders it) and
+	// the dashboard builder is one consumer of it; `resolveGroupBy` is the other
+	// (alert compilation). Before these were generated from one alias map the
+	// alert side silently omitted every snake_case alias, so a token an agent
+	// read out of the docs and saved in a widget hard-failed alert validation.
+	for (const source of ["traces", "logs", "metrics"] as const) {
+		for (const token of GROUP_BY_TOKENS[source].literals) {
+			it(`${source}: "${token}" resolves through resolveGroupBy too`, () => {
+				const resolved = resolveGroupBy(source, [token])
+				expect(resolved.warnings).toEqual([])
+				expect(resolved.tokens.length).toBe(1)
+			})
+		}
+
+		for (const prefix of GROUP_BY_TOKENS[source].prefixes) {
+			it(`${source}: "${prefix}myKey" resolves through resolveGroupBy too`, () => {
+				const resolved = resolveGroupBy(source, [`${prefix}myKey`])
+				expect(resolved.warnings).toEqual([])
+				expect(resolved.tokens.length).toBe(1)
+			})
+		}
+	}
+
+	// Same token, same meaning on both sides — not merely "both accept it".
+	it("builder and resolveGroupBy agree on the canonical token for every alias", () => {
+		for (const source of ["traces", "logs", "metrics"] as const) {
+			for (const token of GROUP_BY_TOKENS[source].literals) {
+				const built = buildTimeseriesQuerySpec(draftFor(source, [token]))
+				const spec = built.query as { groupBy?: ReadonlyArray<string> } | null
+				const builderTokens = spec?.groupBy ?? []
+				const resolverTokens = resolveGroupBy(source, [token]).tokens
+				expect({ source, token, tokens: [...builderTokens] }).toEqual({
+					source,
+					token,
+					tokens: [...resolverTokens],
+				})
+			}
+		}
 	})
 })
 
