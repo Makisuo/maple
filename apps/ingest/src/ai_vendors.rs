@@ -50,22 +50,23 @@ pub enum VendorId {
     Crewai = 2,
     Dspy = 3,
     EffectAi = 4,
-    Flue = 5,
-    GoogleAdk = 6,
-    Haystack = 7,
-    Langchain = 8,
-    Litellm = 9,
-    Llamaindex = 10,
-    Mastra = 11,
-    MicrosoftAgentFramework = 12,
-    OpenaiAgentsSdk = 13,
-    OpeninferenceOpenai = 14,
-    PydanticAi = 15,
-    SemanticKernel = 16,
-    Smolagents = 17,
-    SpringAi = 18,
-    Strands = 19,
-    VercelAiSdk = 20,
+    Eve = 5,
+    Flue = 6,
+    GoogleAdk = 7,
+    Haystack = 8,
+    Langchain = 9,
+    Litellm = 10,
+    Llamaindex = 11,
+    Mastra = 12,
+    MicrosoftAgentFramework = 13,
+    OpenaiAgentsSdk = 14,
+    OpeninferenceOpenai = 15,
+    PydanticAi = 16,
+    SemanticKernel = 17,
+    Smolagents = 18,
+    SpringAi = 19,
+    Strands = 20,
+    VercelAiSdk = 21,
     UnknownGenai = 1000,
     UnknownOpeninference = 1001,
     UnknownOther = 1002,
@@ -73,7 +74,7 @@ pub enum VendorId {
 
 impl VendorId {
     /// Number of vendors including the unknown buckets.
-    pub const COUNT: usize = 24;
+    pub const COUNT: usize = 25;
 
     /// First discriminant of the reserved `unknown:` buckets. Everything below is
     /// a dense vendor discriminant; everything at or above sorts after any vendor
@@ -99,6 +100,7 @@ impl VendorId {
             Self::Crewai => "crewai",
             Self::Dspy => "dspy",
             Self::EffectAi => "effect_ai",
+            Self::Eve => "eve",
             Self::Flue => "flue",
             Self::GoogleAdk => "google_adk",
             Self::Haystack => "haystack",
@@ -269,6 +271,7 @@ pub struct UnknownRuleDef {
 pub const VENDORS: &[VendorDef] = &[
     CLAUDE_AGENT_SDK,
     DSPY,
+    EVE,
     FLUE,
     GOOGLE_ADK,
     HAYSTACK,
@@ -851,6 +854,62 @@ fn detect_effect_ai(s: &SpanCtx) -> bool {
     }
 
     false
+}
+
+/// Decoy keys — never consult these as session candidates:
+///
+/// * `eve.turn.id` (and its `ai.settings.context.eve.turn.id` copy): one turn of
+///   a session — session-shaped, stable within a trace, wrong across traces.
+/// * `eve.environment`, `eve.version`: deployment constants.
+/// * `ai.telemetry.functionId`: the agent name, a process-lifetime constant
+///   (also a vercel_ai_sdk decoy).
+///
+/// Traps:
+///
+/// * ONE WIRE FAMILY, TWO VENDORS: eve executes turns through the AI SDK, so an
+///   eve app's model/tool spans (`invoke_agent`/`step`/`chat`/`execute_tool`,
+///   scope `gen_ai`) classify as `vercel_ai_sdk` — this vendor claims only eve's
+///   OWN turn-root span. The session join across the two is `vercel_ai_sdk`'s
+///   `ai.settings.context.eve.session.id` candidate: same value as the root's
+///   bare `eve.session.id`, so both resolve into one hash.
+/// * DOCS BUG: eve's docs put bare `eve.session.id`/`eve.turn.id` on every span
+///   of the trace. On the wire the bare keys exist ONLY on the turn root; the
+///   AI SDK spans carry `ai.settings.context.`-prefixed copies (the runtime
+///   context rides through AI SDK settings serialization), and `chat`/
+///   `execute_tool` spans carry no eve key at all — those join a session only
+///   through their trace.
+/// * The scope name `eve` is a bare English word and never evidence alone; the
+///   hardcoded turn-root span name is the other half of the conjunction. eve
+///   emits exactly one span type under its own tracer today — new eve span
+///   shapes (e.g. `traceChannelRequests` delivery spans) must be captured
+///   before they are claimed.
+pub const EVE: VendorDef = VendorDef {
+    id: VendorId::Eve,
+    detect: detect_eve,
+    keys: &[],
+    prefixes: &[],
+    span_names: &["ai.eve.turn"],
+    session_candidates: &[SessionCandidateDef {
+        key: "eve.session.id",
+        // Every turn root carries the key — eve injects it unconditionally, and
+        // authored runtime context cannot mint `eve.*` keys (eve strips the
+        // prefix), so a root missing it is honestly state 3.
+        authority: |_| true,
+        require_non_empty: true,
+        reject_decoy_values: false,
+        event_key: None,
+        granularity: Granularity::Session,
+        granularity_of_value: None,
+    }],
+    decoy_values: &[],
+};
+
+// The turn root is the one span eve emits through its own tracer (scope `eve`),
+// and `ai.eve.turn` is hardcoded in the framework. Corpus shape: eve_slack's
+// roots carry bare `eve.session.id`/`eve.turn.id`/`eve.environment`/
+// `eve.version` plus `ai.telemetry.functionId`.
+fn detect_eve(s: &SpanCtx) -> bool {
+    s.scope_name() == "eve" && s.span_name() == "ai.eve.turn"
 }
 
 /// Decoy keys — never consult these as session candidates:
@@ -2244,9 +2303,12 @@ fn detect_strands(s: &SpanCtx) -> bool {
 ///   `ai.settings.runtimeContext.*`; the source emits `ai.settings.context.*` in both
 ///   dialects. A session rule built from the docs joins on a key that does not exist.
 /// * `enrichSpan` (GenAI dialect only) is a second, undocumented injection point
-///   applied to EVERY span type at creation — the only way a customer can get a
+///   applied to EVERY span type at creation — the only way a CUSTOMER can get a
 ///   session key onto the token-bearing spans. Its keys are entirely app-chosen, so
-///   it is invisible to any closed-key rule.
+///   it is invisible to any closed-key rule. The framework-injected exception is
+///   eve's `ai.settings.context.eve.session.id` (authored runtime context cannot
+///   mint `eve.*` keys — eve strips the prefix), which is exactly why it is safe
+///   as the session candidate below; see [`EVE`] for the family split.
 /// * The legacy dialect DROPS the post-approval tool span; the GenAI dialect parents
 ///   it to `invoke_agent` (the trace root), not to a `step`. Native HITL emits no
 ///   approval span, event or attribute in either dialect.
@@ -2259,10 +2321,30 @@ fn detect_strands(s: &SpanCtx) -> bool {
 pub const VERCEL_AI_SDK: VendorDef = VendorDef {
     id: VendorId::VercelAiSdk,
     detect: detect_vercel_ai_sdk,
-    keys: &["gen_ai.operation.name", "gen_ai.execute_tool.duration"],
+    keys: &[
+        "gen_ai.operation.name",
+        "gen_ai.execute_tool.duration",
+        // The presence-gated authority below reads it.
+        "ai.settings.context.eve.session.id",
+    ],
     prefixes: &["ai."],
     span_names: &[],
-    session_candidates: &[],
+    session_candidates: &[SessionCandidateDef {
+        // eve-hosted AI SDK spans: the framework splices its session id into the
+        // runtime context, which the AI SDK stamps (prefixed) onto
+        // `invoke_agent`/`step` spans. Same value as the eve turn root's bare
+        // `eve.session.id`, so the two vendors' spans hash into ONE session.
+        key: "ai.settings.context.eve.session.id",
+        // Presence-gated: a plain (non-eve) AI SDK span has no session-key
+        // convention at all and must stay state 2, not report "key absent" —
+        // a span matching this branch has the key by construction.
+        authority: |s| s.has_attr("ai.settings.context.eve.session.id"),
+        require_non_empty: true,
+        reject_decoy_values: false,
+        event_key: None,
+        granularity: Granularity::Session,
+        granularity_of_value: None,
+    }],
     decoy_values: &[],
 };
 
@@ -2283,9 +2365,9 @@ fn detect_vercel_ai_sdk(s: &SpanCtx) -> bool {
     // hardcoded tracer names. Both are bare, unnamespaced, unversioned words that
     // any app hand-rolling an AI tracer would plausibly pick, so neither ever stands
     // alone — the vendor's own namespace is the other half. The guard is what
-    // un-claims eve_slack's `ai.eve.turn` spans (scope `eve`, carrying
-    // `ai.telemetry.functionId`), the corpus-proven false positive, which now falls
-    // through to the unknown tier's `ai.` fingerprint.
+    // un-claims eve's `ai.eve.turn` turn roots (scope `eve`, carrying
+    // `ai.telemetry.functionId`), the corpus-proven false positive — claimed by
+    // [`EVE`], whose detect is disjoint from this one by the same scope guard.
     ((scope == "ai" || scope == "gen_ai") && s.any_attr_prefix("ai."))
         // (B) Scope-independent AI-SDK-invented markers, kept for the custom-tracer
         // wiring, where the scope is app-chosen. `agent_step` is not a semconv
@@ -2345,7 +2427,8 @@ pub const UNKNOWN_TIER: &[UnknownRuleDef] = &[
     },
     // Reachable because vercel_ai_sdk's `ai.` prefix evidence is conjunctive on
     // scope: an `ai.*`-prefixed span outside the AI SDK's own `ai`/`gen_ai` scopes
-    // lands here — on the wire, eve_slack's `ai.eve.turn` trace roots.
+    // lands here. eve's `ai.eve.turn` roots were the wire example until the EVE
+    // vendor claimed them; a hand-rolled tracer stamping `ai.*` keys still is.
     UnknownRuleDef {
         bucket: VendorId::UnknownOther,
         detect: |s| s.any_attr_prefix("ai."),

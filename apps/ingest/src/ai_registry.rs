@@ -626,8 +626,8 @@ mod tests {
         assert_eq!(registry.version(), 1);
         assert_eq!(
             registry.vendors().len(),
-            21 + 3,
-            "21 vendors + 3 unknown buckets"
+            22 + 3,
+            "22 vendors + 3 unknown buckets"
         );
         assert_eq!(
             registry
@@ -635,7 +635,7 @@ mod tests {
                 .iter()
                 .map(|v| v.candidates().len())
                 .sum::<usize>(),
-            29
+            31
         );
         // Every declared key and prefix dispatches at least one detector or is a
         // session-candidate key.
@@ -665,6 +665,7 @@ mod tests {
             "crewai",
             "dspy",
             "effect_ai",
+            "eve",
             "flue",
             "google_adk",
             "haystack",
@@ -724,10 +725,10 @@ mod tests {
     #[test]
     fn resolution_order_covers_the_vendor_set() {
         let mut seen: Vec<VendorId> = VENDORS.iter().map(|def| def.id).collect();
-        assert_eq!(seen.len(), 21);
+        assert_eq!(seen.len(), 22);
         seen.sort_unstable();
         seen.dedup();
-        assert_eq!(seen.len(), 21, "every vendor appears exactly once");
+        assert_eq!(seen.len(), 22, "every vendor appears exactly once");
         assert!(seen.iter().all(|id| !id.is_unknown_bucket()));
         // The unknown tier's internal order. The `input.value`/`output.value`
         // rule's slot is load-bearing — it must sit between the

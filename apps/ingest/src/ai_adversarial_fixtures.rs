@@ -1142,6 +1142,93 @@ fn session_state_groups() -> Vec<Group> {
         ],
     ));
 
+    // -- eve: turn roots under the framework's own scope; ALWAYS authoritative ----
+    out.push(Group::new(
+        "eve",
+        vec![
+            case(
+                "session/eve",
+                "session/eve/state3_key_absent",
+                "a turn root missing the always-injected key — off-wire, but the \
+                 honest state for it",
+                "ai.eve.turn",
+                vec![s("eve.turn.id", "turn-1"), s("ai.telemetry.functionId", "bot")],
+            ),
+            case(
+                "session/eve",
+                "session/eve/state4_empty",
+                "present-but-empty eve.session.id",
+                "ai.eve.turn",
+                vec![s("eve.session.id", ""), s("eve.turn.id", "turn-1")],
+            ),
+            case(
+                "session/eve",
+                "session/eve/state6",
+                "the wire shape: bare eve.* context plus the AI SDK functionId",
+                "ai.eve.turn",
+                vec![
+                    s("eve.version", "0.25.3"),
+                    s("eve.environment", "production"),
+                    s("eve.session.id", "sess-eve"),
+                    s("eve.turn.id", "turn-4"),
+                    s("ai.telemetry.functionId", "eve.turn"),
+                ],
+            ),
+            case(
+                "session/eve",
+                "session/eve/non_root_span_name_stays_unclaimed",
+                "scope `eve` without the hardcoded turn-root name is NOT eve's — \
+                 the bare-word scope never stands alone, so the ai.* key sends it \
+                 to the unknown tier",
+                "deliver.response",
+                vec![
+                    s("eve.session.id", "sess-eve"),
+                    s("ai.telemetry.functionId", "eve.turn"),
+                ],
+            ),
+        ],
+    ));
+
+    // -- vercel_ai_sdk: one presence-gated candidate, eve's injected context ------
+    out.push(Group::new(
+        "gen_ai",
+        vec![
+            case(
+                "session/vercel_ai_sdk",
+                "session/vercel/state2_no_eve_context",
+                "an AI SDK span with no eve runtime context has no session-key \
+                 convention — not-authoritative, never `key absent`",
+                "execute_tool add_reaction",
+                vec![
+                    s("gen_ai.operation.name", "execute_tool"),
+                    s("gen_ai.execute_tool.duration", "0.5"),
+                ],
+            ),
+            case(
+                "session/vercel_ai_sdk",
+                "session/vercel/state4_empty_eve_context",
+                "eve context key present but empty",
+                "step 1",
+                vec![
+                    s("gen_ai.operation.name", "agent_step"),
+                    s("ai.settings.context.eve.session.id", ""),
+                ],
+            ),
+            case(
+                "session/vercel_ai_sdk",
+                "session/vercel/state6_eve_context",
+                "eve-hosted step span: the prefixed copy of the turn root's bare \
+                 key, hashing into the same session",
+                "step 1",
+                vec![
+                    s("gen_ai.operation.name", "agent_step"),
+                    s("ai.settings.context.eve.session.id", "sess-eve"),
+                    s("ai.settings.context.eve.turn.id", "turn-4"),
+                ],
+            ),
+        ],
+    ));
+
     // -- flue: one ALWAYS candidate, one gated; decoy value 'default' -------------
     out.push(Group::new(
         "@flue/opentelemetry",
@@ -1705,13 +1792,14 @@ fn session_state_groups() -> Vec<Group> {
     ));
 
     // -- vendors with no session rules at all ⇒ state 1 ---------------------------
+    // (vercel_ai_sdk left this club when it gained the eve-context candidate;
+    // its ladder above covers states 2/4/6.)
     for (scope_name, label) in [
         ("haystack", "haystack"),
         (
             "semantic_kernel.functions.kernel_function",
             "semantic_kernel",
         ),
-        ("ai", "vercel_ai_sdk"),
     ] {
         out.push(one(
             scope_name,
@@ -2756,7 +2844,7 @@ fn generate(groups: &[Group]) -> String {
         };
 
         let settings =
-            AiClassificationSettings::at(true, RECEIVE_SECS);
+            AiClassificationSettings::at(RECEIVE_SECS);
         let (frames, stats) = encode_traces(
             &datasources,
             ORG_ID,

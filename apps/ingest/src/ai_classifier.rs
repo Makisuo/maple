@@ -1385,14 +1385,14 @@ mod tests {
 
     /// `unknown:other` reachability: because vercel_ai_sdk's `ai.` prefix evidence
     /// is scope-gated, an `ai.*`-carrying span under a scope no vendor claims has to
-    /// reach the bucket — on the wire, eve_slack's `ai.eve.turn` trace roots.
+    /// reach the bucket — a hand-rolled tracer stamping `ai.*` keys.
     #[test]
     fn an_unclaimed_ai_prefixed_span_reaches_unknown_other() {
         let (vendor, state) = classify(
             &[],
-            "eve",
-            "ai.eve.turn",
-            &[kv("ai.telemetry.functionId", "eve.turn")],
+            "acme.pipeline.tracer",
+            "ai.pipeline.run",
+            &[kv("ai.telemetry.functionId", "nightly-batch")],
         );
         assert_eq!(vendor, "unknown:other");
         assert_eq!(state, session_state::NO_RULES);
@@ -1406,6 +1406,56 @@ mod tests {
             &[kv("ai.telemetry.functionId", "eve.turn")],
         );
         assert_eq!(claimed, "vercel_ai_sdk");
+    }
+
+    /// The eve wire family, one span shape at a time (see [`crate::ai_vendors::EVE`]):
+    /// eve's own turn root is `eve` with the bare session key; the AI SDK spans it
+    /// hosts stay `vercel_ai_sdk`, resolving the SAME session value through the
+    /// `ai.settings.context.` copy on the spans that carry it and reporting
+    /// not-authoritative (state 2, never "key absent") on the spans that don't.
+    #[test]
+    fn the_eve_family_resolves_one_session_across_two_vendors() {
+        let registry = registry();
+
+        // Turn root under eve's own tracer scope.
+        let resource_context = ResourceContext::new(registry, &[]);
+        let eve_scope = scope("eve");
+        let eve_ctx = resource_context.scope(Some(&eve_scope), "");
+        let root_attrs = [
+            kv("eve.version", "0.25.3"),
+            kv("eve.environment", "production"),
+            kv("eve.session.id", "sess_slack_1"),
+            kv("eve.turn.id", "turn_4"),
+            kv("ai.telemetry.functionId", "eve.turn"),
+        ];
+        let root = eve_ctx.classify_span("ai.eve.turn", &root_attrs);
+        assert_eq!(root.vendor_slug(), "eve");
+        assert_eq!(root.session_state, session_state::SESSION);
+        assert_eq!(root.session_key.as_deref(), Some("sess_slack_1"));
+
+        // The AI SDK step span eve hosts: vercel_ai_sdk, same session value.
+        let genai_scope = scope("gen_ai");
+        let genai_ctx = resource_context.scope(Some(&genai_scope), "");
+        let step_attrs = [
+            kv("gen_ai.operation.name", "agent_step"),
+            kv("ai.settings.context.eve.session.id", "sess_slack_1"),
+            kv("ai.settings.context.eve.turn.id", "turn_4"),
+        ];
+        let step = genai_ctx.classify_span("step 1", &step_attrs);
+        assert_eq!(step.vendor_slug(), "vercel_ai_sdk");
+        assert_eq!(step.session_state, session_state::SESSION);
+        // Both vendors hash the same bare value — one session in the warehouse.
+        assert_eq!(step.session_key_hash(), root.session_key_hash());
+
+        // An AI SDK span with no eve context (execute_tool, or any non-eve AI SDK
+        // app) is not session-authoritative — state 2, not "key absent".
+        let tool_attrs = [
+            kv("gen_ai.operation.name", "execute_tool"),
+            kv("gen_ai.execute_tool.duration", "0.5"),
+        ];
+        let tool = genai_ctx.classify_span("execute_tool add_reaction", &tool_attrs);
+        assert_eq!(tool.vendor_slug(), "vercel_ai_sdk");
+        assert_eq!(tool.session_state, session_state::NOT_AUTHORITATIVE);
     }
 
     /// pydantic_ai's scope-loss fallback is a 3-way logfire conjunction. The
