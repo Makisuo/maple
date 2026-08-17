@@ -45,6 +45,17 @@ suite) had 7 failures on this commit, including a real crash in
 `diagnosis-scorers.ts:108` — `entry.trim is not a function` when a ruled-out entry is not a
 string. Not caused by and not blocking MCP work.
 
+**The crash is fixed** — the scorers now treat a present-but-wrong-type field as a zero rather
+than trusting the declared type, and the malformed shapes are unit-tested in
+`diagnosis-scorers.test.ts`. The suite still fails, and the remaining cause is plumbing, not
+reasoning: OpenRouter routes `moonshotai/kimi-k2.7-code` to a provider that returns
+`content: null` with the whole answer in `reasoning`, so `generateObject` raises
+`AI_NoObjectGeneratedError`; and `createEvalModel()` leaves `supportsStructuredOutputs` at its
+`false` default, so the report schema is dropped before the request goes out and the model
+free-forms a `{tool_name, tool_input}` envelope that `jsonSchema()` passes through unvalidated.
+Fixing that is a change to the shared `mcp/__evals__/model.ts` and would need this table
+re-baselined.
+
 ### Catalog cost
 
 **57 tools · 17,692 tokens** (`gpt-tokenizer`, name + description + input JSON schema).

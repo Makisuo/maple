@@ -26,6 +26,7 @@ import {
 	V2TracesApiGroup,
 } from "./telemetry"
 import { V2SchemaErrors, V2UnexpectedErrors } from "./auth"
+import { collapseQueryParameterNullBranches } from "./openapi-nullable"
 
 const HTTP_OPERATION_METHODS = ["get", "post", "put", "patch", "delete", "head"] as const
 
@@ -127,7 +128,9 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 			// key (they are not in `OpenAPISpecInfo`), so inject them via the api-level
 			// spec transform, which receives the whole generated document.
 			transform: (spec) => {
-				const withRateLimitHeaders = addRateLimitResponseHeaders(spec)
+				const withRateLimitHeaders = collapseQueryParameterNullBranches(
+					addRateLimitResponseHeaders(spec),
+				)
 				return {
 					...withRateLimitHeaders,
 					info: {

@@ -1010,6 +1010,127 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(bearer.bearerFormat.length).toBeGreaterThan(0)
 	})
 
+	/**
+	 * `Schema.optional(X)` is `optionalKey(UndefinedOr(X))`, and Effect's
+	 * JSON-Schema renderer emits `{type: "null"}` for the `Undefined` keyword just
+	 * as it does for `Null`. Left alone, every optional query parameter published
+	 * `anyOf: [X, {type: "null"}]` while the decoder rejected a present `null`.
+	 * `collapseQueryParameterNullBranches` removes that branch — see
+	 * `openapi-nullable.ts` for why the collapse stops at query parameters.
+	 */
+	describe("nullable-union rendering", () => {
+		const queryParameters = (): ReadonlyArray<GeneratedOpenApiObject> =>
+			Object.values(spec.paths as GeneratedOpenApiObject).flatMap((item) =>
+				Object.entries(item as GeneratedOpenApiObject)
+					.filter(([method]) => method !== "parameters")
+					.flatMap(([, operation]) =>
+						((operation as GeneratedOpenApiObject).parameters ?? []).filter(
+							(parameter: GeneratedOpenApiObject) => parameter.in === "query",
+						),
+					),
+			)
+
+		const hasNullBranch = (schema: GeneratedOpenApiObject): boolean => {
+			const resolved = resolveSchema(schema)
+			const members = resolved.anyOf as ReadonlyArray<GeneratedOpenApiObject> | undefined
+			return members?.some((member) => resolveSchema(member).type === "null") === true
+		}
+
+		it("publishes no query parameter that accepts null", () => {
+			const parameters = queryParameters()
+			expect(parameters.length).toBeGreaterThan(0)
+			const nullable = parameters
+				.filter((parameter) => hasNullBranch(parameter.schema as GeneratedOpenApiObject))
+				.map((parameter) => parameter.name as string)
+			expect(nullable).toEqual([])
+		})
+
+		/**
+		 * The collapse is only sound while no query field is a real `Schema.NullOr`,
+		 * which renders identically. This asserts it against the schema ASTs rather
+		 * than the document, because the document cannot tell the two apart — that
+		 * indistinguishability is exactly why the MCP-side blanket collapse could
+		 * not be reused here.
+		 */
+		it("declares no genuinely nullable query field", () => {
+			// SAFETY: `HttpApi` exposes no public reader for an endpoint's declared
+			// schemas, so the walk is structural. Every read below is optional-chained
+			// and the assertions are on the collected result, so a shape change in
+			// Effect surfaces as an empty walk failing the paired parameter test above,
+			// not as a throw here.
+			const readGroups = (api: unknown): GeneratedOpenApiObject =>
+				(api as GeneratedOpenApiObject).groups ?? {}
+			const record = (value: unknown): GeneratedOpenApiObject =>
+				(value as GeneratedOpenApiObject) ?? {}
+
+			const nullable: string[] = []
+			for (const [groupName, group] of Object.entries(readGroups(MapleApiV2))) {
+				for (const [endpointName, endpoint] of Object.entries(record(group).endpoints ?? {})) {
+					const ast = record(endpoint).query?.ast
+					for (const property of ast?.propertySignatures ?? []) {
+						const type = record(property).type
+						if (type?._tag !== "Union") continue
+						if (type.types.some((member: GeneratedOpenApiObject) => member?._tag === "Null")) {
+							nullable.push(`${groupName}.${endpointName}.${String(record(property).name)}`)
+						}
+					}
+				}
+			}
+			expect(nullable).toEqual([])
+		})
+
+		it("keeps the parameter's own documentation when it drops the null branch", () => {
+			const cursor = queryParameters().find((parameter) => parameter.name === "cursor")
+			expect(cursor?.schema).toMatchObject({
+				type: "string",
+				title: "Cursor",
+				examples: ["off_1k"],
+			})
+			expect(cursor?.required).toBe(false)
+			expect(cursor?.schema.description).toContain("next_cursor")
+		})
+
+		/**
+		 * The other half of the invariant: response and request-body fields declared
+		 * `Schema.NullOr` really do carry `null`, so narrowing them the way the MCP
+		 * registry narrows its tool inputs would publish a spec that rejects the
+		 * server's own output.
+		 */
+		it("leaves genuinely nullable body and response fields alone", () => {
+			for (const [schemaName, property] of [
+				["ApiKey", "description"],
+				["ApiKey", "revoked_at"],
+				["ApiKey", "expires_at"],
+				["ApiKeyList", "next_cursor"],
+			] as const) {
+				const field = (schemas[schemaName] as GeneratedOpenApiObject).properties[property]
+				expect(hasNullBranch(field as GeneratedOpenApiObject), `${schemaName}.${property}`).toBe(
+					true,
+				)
+			}
+		})
+
+		it("carries no component left unreferenced by inlining a parameter schema", () => {
+			const referenced = new Set<string>()
+			const walk = (node: unknown): void => {
+				if (Array.isArray(node)) return node.forEach(walk)
+				if (node === null || typeof node !== "object") return
+				const object = node as GeneratedOpenApiObject
+				const ref = object.$ref as string | undefined
+				if (ref !== undefined) {
+					const name = ref.slice(ref.lastIndexOf("/") + 1)
+					if (!referenced.has(name)) {
+						referenced.add(name)
+						walk(schemas[name])
+					}
+				}
+				Object.values(object).forEach(walk)
+			}
+			walk(spec.paths)
+			expect(Object.keys(schemas).filter((name) => !referenced.has(name))).toEqual([])
+		})
+	})
+
 	it("documents every static error policy field as a literal", () => {
 		const notFound = schemas["ApiKeyNotFoundError"]
 		const properties = notFound.properties.error.properties
