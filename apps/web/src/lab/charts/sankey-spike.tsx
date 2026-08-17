@@ -5,15 +5,16 @@ import { sankeyDiagram } from "@tanstack/charts/network/sankey"
 import { rect } from "@tanstack/charts/rect"
 import { text } from "@tanstack/charts/text"
 import { tooltip } from "@tanstack/charts/tooltip"
-import { cn } from "@maple/ui/lib/utils"
 import { memo, useMemo, type ReactNode } from "react"
 
 import {
 	ChartSeriesLegend,
-	useChartLegendState,
+	MUTED_COLOR_AMOUNT,
+	useChartLegendHighlight,
 	type LegendSeriesSpec,
 } from "@/lab/bench/tanstack/chart-legend"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
+import { muteColor } from "@/lab/charts/color-scale"
 
 /**
  * The service-map edge shape the query engine already returns —
@@ -45,6 +46,9 @@ const FLOW_TOKENS = {
 	healthy: ["--chart-1", "#6366f1"],
 	warning: ["--chart-3", "#f59e0b"],
 	error: ["--destructive", "#ef4444"],
+	// What a muted ribbon mixes toward, resolved in the same call as the rest so
+	// it re-reads on a theme flip.
+	background: ["--background", "#0c0a09"],
 } as const satisfies Record<string, readonly [PlotColorToken, string]>
 
 /**
@@ -341,21 +345,6 @@ function SankeyFigure({
 		})
 	}, [nodes, edges, colors, strokeForEdge])
 
-	// `sankeyDiagram` runs d3-sankey over the node/link set eagerly and throws
-	// inside `resolveNetworkGraph` on an empty graph, so hiding every band has to
-	// be caught before the definition is handed to a renderer. The legend stays —
-	// it is the only way back.
-	if (edges.length === 0) {
-		return (
-			<div className={cn("flex flex-col", className)}>
-				<div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground text-xs">
-					Every flow is hidden
-				</div>
-				{legend}
-			</div>
-		)
-	}
-
 	return (
 		<TanstackChartFrame
 			renderer={renderer}
@@ -418,10 +407,11 @@ function SankeyFigure({
  * The same flow map with a status key beneath it.
  *
  * Unlike every other legend in the lab this one is not a series list — see
- * `FLOW_BANDS`. Toggling a band filters the EDGES, which in turn shrinks the
- * derived node set, so hiding "< 1% errors" leaves a diagram of only the
- * problematic paths. That is the actual reason to want it: an all-healthy sankey
- * is a wall of ribbons, and the error ones are the thin ones.
+ * `FLOW_BANDS`. Picking a band brings those ribbons forward and quiets the rest,
+ * which is the read this diagram actually needs: an all-healthy sankey is a wall
+ * of ribbons and the erroring ones are the thin ones, easily lost. Filtering the
+ * edges instead would drop whole services out of the node set and rerun the
+ * layout, so the columns would jump.
  */
 export const SankeyLegendSpike = memo(function SankeyLegendSpike({
 	edges = SANKEY_SPIKE_EDGES,
@@ -438,23 +428,29 @@ export const SankeyLegendSpike = memo(function SankeyLegendSpike({
 		() => FLOW_BANDS.map((band) => ({ key: band.key, label: band.label, color: colors[band.token] })),
 		[colors],
 	)
-	const { hidden, toggle } = useChartLegendState(legendSeries)
+	const { highlighted, highlight } = useChartLegendHighlight()
 
-	const visibleEdges = useMemo(
-		() => edges.filter((edge) => !hidden.has(bandForEdge(edge))),
-		[edges, hidden],
+	const mutedBands = useMemo(
+		() =>
+			new Set(
+				highlighted === null
+					? []
+					: FLOW_BANDS.filter((band) => band.key !== highlighted).map((band) => band.key),
+			),
+		[highlighted],
 	)
 
 	return (
 		<SankeyFigure
-			edges={visibleEdges}
+			edges={edges}
 			renderer={renderer}
 			className={className}
+			mutedBands={mutedBands}
 			legend={
 				<ChartSeriesLegend
 					series={legendSeries}
-					hidden={hidden}
-					onToggle={toggle}
+					highlighted={highlighted}
+					onHighlight={highlight}
 					label="Flow health"
 				/>
 			}

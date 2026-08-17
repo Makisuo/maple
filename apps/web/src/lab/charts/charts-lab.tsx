@@ -351,19 +351,19 @@ export function ChartsLab({
 			node: <TreemapSpike renderer={renderer} className="h-full w-full" />,
 		},
 		"line-legend-tanstack": {
-			title: "Line + legend — TanStack (DOM series key, click to hide, y axis rescales)",
+			title: "Line + legend — TanStack (click a series to bring it forward; the axis never moves)",
 			node: (
 				<LineLegendSpike rows={TIMESERIES_SPIKE_ROWS} renderer={renderer} className="h-full w-full" />
 			),
 		},
 		"area-legend-tanstack": {
-			title: "Area + legend — TanStack (DOM series key over a fill-only areaY)",
+			title: "Area + legend — TanStack (per-mark fill/stroke opacity, one mark per series)",
 			node: (
 				<AreaLegendSpike rows={TIMESERIES_SPIKE_ROWS} renderer={renderer} className="h-full w-full" />
 			),
 		},
 		"stacked-bar-legend-tanstack": {
-			title: "Stacked bar + legend — TanStack (DOM key; hiding filters rows and re-pins stackMax)",
+			title: "Stacked bar + legend — TanStack (one mark, so emphasis is a muted FILL, not an opacity)",
 			node: (
 				<StackedBarLegendSpike
 					rows={STACKED_BAR_SPIKE_ROWS}
@@ -373,7 +373,7 @@ export function ChartsLab({
 			),
 		},
 		"stacked-bar-legend-scene-tanstack": {
-			title: "Stacked bar + legend — TanStack's OWN legend (interactiveColorLegend, zero DOM — but hiding a band leaves a hole, it cannot restack)",
+			title: "Stacked bar + legend — TanStack's OWN legend (interactiveColorLegend, zero DOM — but it can only HIDE, and on a stack that leaves a hole)",
 			node: (
 				<StackedBarSceneLegendSpike
 					rows={STACKED_BAR_SPIKE_ROWS}
@@ -383,15 +383,15 @@ export function ChartsLab({
 			),
 		},
 		"pie-legend-tanstack": {
-			title: "Pie + legend — TanStack (the only hover-adjacent affordance radialArc allows)",
+			title: "Pie + legend — TanStack (the only affordance radialArc allows; muting keeps every wedge in place)",
 			node: <PieLegendSpike rows={pieRows} renderer={renderer} className="h-full w-full" />,
 		},
 		"treemap-legend": {
-			title: "Span volume + legend — NEW (the mark paints leaves only, so colour IS the grouping)",
+			title: "Span volume + legend — NEW (leaves only, so colour IS the grouping; muting keeps the tiling fixed)",
 			node: <TreemapLegendSpike renderer={renderer} className="h-full w-full" />,
 		},
 		"sankey-legend": {
-			title: "Service flow + status key — NEW (bands filter edges, not series)",
+			title: "Service flow + status key — NEW (bands, not series; picking one lifts those ribbons out of the wall)",
 			node: <SankeyLegendSpike renderer={renderer} className="h-full w-full" />,
 		},
 	} satisfies Record<ChartsLabArm, { title: string; node: ReactNode }>

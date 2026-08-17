@@ -85,10 +85,7 @@ export function useChartLegendHighlight(): {
 		setHighlighted((previous) => (previous === key ? null : key))
 	}, [])
 
-	const isMuted = useCallback(
-		(key: string) => highlighted !== null && highlighted !== key,
-		[highlighted],
-	)
+	const isMuted = useCallback((key: string) => highlighted !== null && highlighted !== key, [highlighted])
 
 	return { highlighted, highlight, isMuted }
 }

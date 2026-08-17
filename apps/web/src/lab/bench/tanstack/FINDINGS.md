@@ -408,10 +408,10 @@ scene, after `stackValues` has assigned every segment its y1/y2, and there is no
 layout and the filter to re-run it. So hiding the bottom band deletes its rects and leaves the
 survivors floating at their old offsets, with a gap along the baseline — verified in the browser,
 and the reason that arm pins its y domain to the full total (a domain over the visible services
-would crop a picture that still occupies its original height). `StackedBarLegendSpike` filters
-ROWS, before the layout, which is why it restacks correctly: 120 rects → 96 and a 7.0K → 5.0K axis
-on hiding one of five services. **For a stacked chart the package's legend is a display control,
-not a data control** — which on current evidence rules it out for the query-builder bar chart.
+would crop a picture that still occupies its original height). **For a stacked chart the package's
+legend is a display control, not a data control** — which on current evidence rules it out for the
+query-builder bar chart. The DOM arm sidesteps the whole question by highlighting instead of
+hiding: nothing is removed, so nothing needs restacking.
 
 `interactiveColorLegend`'s state model is the good part and worth stealing regardless:
 `controlledSignal(value, onChange)` is explicitly "application-owned state described to the chart"
@@ -421,10 +421,40 @@ inference while removing their scene output", which is right for a colour scale 
 axis: the y domain still has to be re-pinned by hand.
 
 The DOM legend is `lab/bench/tanstack/chart-legend.tsx`, a compound component
-(`ChartLegend.Provider/Row/Column/Items/Item/Swatch/Label`) with `useChartLegendState` alongside.
-State lives with the chart, not the legend, because hiding a series has to drop its marks and
-re-derive the domain — which is also the part that is easy to get wrong: without it, hiding P99
-leaves the remaining lines squashed against the floor and the toggle looks inert.
+(`ChartLegend.Provider/Row/Column/Items/Item/Swatch/Label`) with `useChartLegendHighlight`
+alongside. State lives with the chart, not the legend, because emphasis is expressed in the marks.
+
+**Clicking a series highlights it; it does not hide it.** This is a deliberate departure from
+`QueryBuilderLegend`, which toggles visibility, and it is the better interaction on every chart
+here for the same underlying reason: removing a series changes the geometry of everything else.
+On a line chart the y domain re-derives and the axis jumps. On a pie, `pie()` renormalises every
+remaining angle, so the whole donut rearranges around the slice you just clicked. On a treemap,
+`squarify` reruns and every surviving tile changes both size and position — the reader loses the
+mosaic they were reading. On a sankey, dropping edges shrinks the derived node set and the columns
+move. Highlighting leaves all of it in place and just quiets the rest, so a series can be picked
+out of a crowded chart without losing its context. Clicking the same item again restores full
+strength.
+
+**How emphasis is expressed is a package constraint, not a preference.** `fillOpacity` and
+`strokeOpacity` are flat `number`s on every mark in the package — `bar.d.ts`, `area.d.ts`,
+`polar.d.ts`, `hierarchy-treemap.d.ts`, `line.d.ts` all declare them that way — while `fill` and
+`stroke` are `VisualChannel`s. So it splits:
+
+- **line, area** draw one mark per series, so a flat `strokeOpacity`/`fillOpacity` on that mark
+  already is per-series. No colour arithmetic.
+- **stacked bar, pie, treemap, sankey** draw every series from ONE mark, so there is no per-datum
+  opacity to reach for and a muted series has to be a muted _colour_. That is `muteColor` in
+  `lab/charts/color-scale.ts`, mixing toward `--background` with the `mixOklch` machinery the
+  heatmap ramp already needed — for the same reason it needed it, that canvas takes literal colours
+  and cannot resolve a `color-mix()`.
+
+The single-mark charts express it without a new prop at all: they already paint through a
+`colorFor(key)` lookup, so the legend variant hands down a `colorFor` that returns muted colours.
+
+Worth noting against the package's own legend: `interactiveColorLegend` can only _hide_ — its
+contract is a `visible` array and a `filterMark` that deletes scene output. There is no emphasis
+mode, so the interaction the spikes settled on is not expressible through it even on the one chart
+where it applies.
 
 **Not ported: the Min/Max/Mean/Last stats table.** `QueryBuilderLegend`'s stats variant reads
 `Record<string, unknown>` rows by key; the spikes have closed per-chart row types and accessor

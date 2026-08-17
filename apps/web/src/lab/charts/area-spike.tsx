@@ -318,7 +318,8 @@ export const AreaLegendSpike = memo(function AreaLegendSpike({
 	const { highlighted, highlight } = useChartLegendHighlight()
 
 	const mutedIds = useMemo(
-		() => new Set(highlighted === null ? [] : series.filter((s) => s.id !== highlighted).map((s) => s.id)),
+		() =>
+			new Set(highlighted === null ? [] : series.filter((s) => s.id !== highlighted).map((s) => s.id)),
 		[series, highlighted],
 	)
 
