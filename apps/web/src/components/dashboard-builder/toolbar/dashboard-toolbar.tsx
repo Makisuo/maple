@@ -22,7 +22,7 @@ import {
 	DropdownMenuSeparator,
 } from "@maple/ui/components/ui/dropdown-menu"
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
-import { ReloadControls } from "@/components/time-range-picker/reload-controls"
+import { PageRefreshControls } from "@/components/time-range-picker/refresh-controls"
 import { VariableSelects } from "@/components/dashboard-builder/toolbar/variable-selects"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
@@ -33,12 +33,16 @@ import { ShareDashboardDialog } from "@/components/dashboard-builder/toolbar/sha
 import { collectTags } from "@/components/dashboard-builder/list/dashboard-summary"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import type { Dashboard } from "@/components/dashboard-builder/types"
+import type { DashboardRefreshIntervalSeconds } from "@maple/domain/http"
 
 interface DashboardToolbarProps {
 	dashboard: Dashboard
 	onToggleEdit: () => void
 	onAddWidget: () => void
 	onOpenHistory?: () => void
+	/** Effective cadence for this viewer: `?refresh=` if set, else the board's default. */
+	refreshIntervalSeconds: DashboardRefreshIntervalSeconds
+	onRefreshIntervalChange: (value: DashboardRefreshIntervalSeconds) => void
 }
 
 export function DashboardToolbar({
@@ -46,6 +50,8 @@ export function DashboardToolbar({
 	onToggleEdit,
 	onAddWidget,
 	onOpenHistory,
+	refreshIntervalSeconds,
+	onRefreshIntervalChange,
 }: DashboardToolbarProps) {
 	const { mode, readOnly, autoLayoutWidgets, addSection } = useDashboardActions()
 	const {
@@ -94,7 +100,11 @@ export function DashboardToolbar({
 				}}
 			/>
 
-			<ReloadControls />
+			<PageRefreshControls
+				value={refreshIntervalSeconds}
+				onChange={onRefreshIntervalChange}
+				savedDefault={dashboard.refreshIntervalSeconds}
+			/>
 
 			<div className="flex items-center gap-1">
 				{/* Labels collapse to icon-only on a narrow canvas; `aria-label`

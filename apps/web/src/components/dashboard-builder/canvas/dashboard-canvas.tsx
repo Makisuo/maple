@@ -112,6 +112,14 @@ export function DashboardGrid<W extends CanvasWidget>({
 				cols: tier.cols,
 				rowHeight: GRID_ROW_HEIGHT,
 				margin: tier.margin,
+				// `containerPadding` defaults to `margin`, which indents the first and
+				// last column by a gutter's width — so tiles sat inset from everything
+				// stacked above them (section headers, the share page's time-range
+				// label and refresh controls, the page title). The gutter belongs
+				// *between* tiles, not around them; the surrounding layout owns the
+				// outer padding. Vertical keeps the margin, so the gap under a section
+				// header is unchanged.
+				containerPadding: [0, tier.margin[1]],
 			}}
 			dragConfig={{
 				enabled: editable,
