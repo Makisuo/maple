@@ -2,6 +2,7 @@ import type { LogsCountQuery, LogsFilters, LogsTimeseriesQuery } from "@maple/do
 import { attributeIndexMode, logBodySearchMode } from "../capabilities"
 import * as CH from "../ch"
 import { LOGS_BODY_SEARCH_SETTINGS } from "../profiles"
+import { timeRangeCache } from "../runtime/cache-policy"
 import { defineQuery, makeTimeBucketQueryCachePolicy } from "./query-definition"
 
 export const logsQueryOptions = (filters: LogsFilters | undefined) => {
@@ -67,7 +68,7 @@ export const logsCount = defineQuery({
 	id: "logsCount",
 	revision: 1,
 	profile: "discovery",
-	cache: 15,
+	cache: timeRangeCache,
 	capabilityAware: true,
 	settings: (input: LogsCountInput) => (input.filters?.search ? LOGS_BODY_SEARCH_SETTINGS : undefined),
 	compile: (input: LogsCountInput, orgId: string, capabilities) =>

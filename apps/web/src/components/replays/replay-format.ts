@@ -1,4 +1,6 @@
 import { warehouseDateTimeToIso, formatWarehouseDateTime } from "@maple/query-engine"
+import * as Predicate from "effect/Predicate"
+import type { ReplayFormat } from "./engine/replay-engine"
 import type { ActionKind } from "./replay-player-context"
 
 // Presentation helpers for the session-replay surfaces (list, detail, player,
@@ -13,7 +15,7 @@ export const MARKER_STYLES: Record<ActionKind, string> = {
 	input: "bg-sky-400",
 	scroll: "bg-violet-400",
 	nav: "bg-emerald-400",
-}
+} satisfies Record<ActionKind, string>
 
 /** Human label per action kind, paired with `MARKER_STYLES` for the shared legend. */
 export const MARKER_LABELS: Record<ActionKind, string> = {
@@ -21,7 +23,7 @@ export const MARKER_LABELS: Record<ActionKind, string> = {
 	input: "Input",
 	scroll: "Scroll",
 	nav: "Navigate",
-}
+} satisfies Record<ActionKind, string>
 
 // Partition-pruning window for the session-detail warehouse queries. The replay
 // tables are PARTITION BY toDate(...) over a 30-day TTL, so a query filtered only
@@ -30,7 +32,7 @@ export const MARKER_LABELS: Record<ActionKind, string> = {
 const WINDOW_MARGIN_MS = 60 * 60 * 1000 // 1h slack on each side (clock skew, late spans)
 // Upper bound when the session end is unknown (still active). This MUST stay >=
 // the browser SDK's session lifetime cap (`MAX_SESSION_MS` in
-// packages/browser-session/src/session.ts) — the SDK rotates to a fresh session once it
+// packages/browser-session/src/session/session.ts) — the SDK rotates to a fresh session once it
 // exceeds that age, so a session's events provably can't extend past
 // `start + cap`. Both constants are 24h. If the SDK cap is ever raised without
 // raising this one, this window would silently prune out a session's tail events
@@ -54,11 +56,36 @@ export function recordedMarker(resourceAttributes: string | null | undefined): b
 	} catch {
 		return undefined
 	}
-	if (typeof parsed !== "object" || parsed === null) return undefined
-	const marker = (parsed as Record<string, unknown>)["maple.session.recorded"]
+	if (!Predicate.isObject(parsed)) return undefined
+	const marker = parsed["maple.session.recorded"]
 	if (marker === "true") return true
 	if (marker === "false") return false
 	return undefined
+}
+
+/**
+ * Read the SDK's `maple.session.replay_format` marker, which decides *which
+ * engine* plays a session.
+ *
+ * Browser sessions carry rrweb DOM snapshots; mobile sessions carry H.264
+ * segments wrapped in rrweb-shaped events. Reading this from session metadata is
+ * what lets the player pick an engine without downloading a chunk first.
+ *
+ * Everything unrecognised — absent key, unparseable attributes, a value from a
+ * newer SDK than this build knows — falls back to `"rrweb"`. Every session
+ * recorded before the marker existed is a browser recording, so that default is
+ * correct rather than merely safe.
+ */
+export function replayFormat(resourceAttributes: string | null | undefined): ReplayFormat {
+	if (!resourceAttributes) return "rrweb"
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(resourceAttributes)
+	} catch {
+		return "rrweb"
+	}
+	if (!Predicate.isObject(parsed)) return "rrweb"
+	return parsed["maple.session.replay_format"] === "video" ? "video" : "rrweb"
 }
 
 /** A warehouse partition-pruning window, shared by the session-detail atom callers. */

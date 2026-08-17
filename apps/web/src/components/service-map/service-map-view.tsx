@@ -26,9 +26,9 @@ import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { serviceMapLayoutAtomFamily, upsertSnapshot } from "@/atoms/service-map-layout-atoms"
 import { serviceMapViewPrefsAtomFamily } from "@/atoms/service-map-view-prefs-atoms"
 import { Link } from "@tanstack/react-router"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { logClientError } from "@/lib/services/common/telemetry"
-import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, Line } from "recharts"
 
 import { cn } from "@maple/ui/lib/utils"
 import { getServiceColor, getValueHue } from "@maple/ui/lib/colors"
@@ -38,6 +38,9 @@ import {
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { Popover, PopoverTrigger, PopoverContent } from "@maple/ui/components/ui/popover"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@maple/ui/components/ui/resizable"
@@ -854,39 +857,27 @@ function DbQueryActivityChart({
 	return (
 		<ChartContainer config={DB_QUERY_CHART_CONFIG} className="h-44 w-full">
 			<BarChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
-				<CartesianGrid
+				<ChartGrid
 					// recharts v3 only draws grid lines for a matching axis id; this chart's
 					// y axes are "count"/"latency" (no default id=0), so pin to the primary "count" axis
 					yAxisId="count"
-					vertical={false}
-					strokeDasharray="3 3"
 				/>
-				<XAxis
+				<ChartXAxis
 					dataKey="bucket"
-					axisLine={false}
-					tickLine={false}
-					tickMargin={8}
 					minTickGap={20}
-					fontSize={10}
 					tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick")}
 				/>
-				<YAxis
+				<ChartYAxis
 					yAxisId="count"
-					axisLine={false}
-					tickLine={false}
 					tickMargin={8}
 					width={34}
-					fontSize={10}
 					tickFormatter={(value) => formatCompactCount(Number(value))}
 				/>
-				<YAxis
+				<ChartYAxis
 					yAxisId="latency"
 					orientation="right"
-					axisLine={false}
-					tickLine={false}
 					tickMargin={8}
 					width={42}
-					fontSize={10}
 					tickFormatter={(value) => formatLatency(Number(value))}
 				/>
 				<ChartTooltip
@@ -1053,11 +1044,11 @@ function PlanetScaleSection({
 
 			{Result.builder(branchStatsResult)
 				.onError((error) => {
-					const formatted = formatBackendError(error)
+					const formatted = displayError(error)
 					return (
 						<div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs">
 							<p className="font-medium text-destructive">{formatted.title}</p>
-							<p className="mt-1 text-muted-foreground">{formatted.description}</p>
+							<p className="mt-1 text-muted-foreground">{formatted.message}</p>
 						</div>
 					)
 				})
@@ -1409,11 +1400,11 @@ function DatabaseDetailPanel({
 						</div>
 						{Result.builder(summaryResult)
 							.onError((error) => {
-								const formatted = formatBackendError(error)
+								const formatted = displayError(error)
 								return (
 									<div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs">
 										<p className="font-medium text-destructive">{formatted.title}</p>
-										<p className="mt-1 text-muted-foreground">{formatted.description}</p>
+										<p className="mt-1 text-muted-foreground">{formatted.message}</p>
 									</div>
 								)
 							})
@@ -1767,7 +1758,7 @@ export function ServiceMapCanvas({
 	/** Selected deployment environment (`undefined` = all); scopes the DB detail panel. */
 	deploymentEnv?: string
 	// Namespaces persisted drag positions / viewport. Lifted to a prop so the
-	// component renders without a Clerk session (e.g. the /service-map-bench
+	// component renders without a Clerk session (e.g. the /lab/bench/service-map
 	// perf harness, which runs in self-hosted mode with no ClerkProvider).
 	layoutKey: string
 	/**
@@ -2285,6 +2276,7 @@ export function ServiceMapCanvas({
 									onMoveEnd={onMoveEnd}
 									defaultViewport={savedViewport ?? undefined}
 									onInit={(instance) => {
+										// SAFETY: this ref intentionally erases the node/edge generics after ReactFlow initialization.
 										rfInstance.current = instance as unknown as ReactFlowInstance
 									}}
 									nodeTypes={nodeTypes}
@@ -2578,12 +2570,12 @@ export function ServiceMapView({
 	return Result.builder(bundleResult)
 		.onInitial(() => <ServiceMapLoading />)
 		.onError((error) => {
-			const formatted = formatBackendError(error)
+			const formatted = displayError(error)
 			return (
 				<div className="flex items-center justify-center h-full">
 					<div className="text-center space-y-2">
 						<p className="text-sm font-medium text-destructive">{formatted.title}</p>
-						<p className="text-xs text-muted-foreground">{formatted.description}</p>
+						<p className="text-xs text-muted-foreground">{formatted.message}</p>
 					</div>
 				</div>
 			)

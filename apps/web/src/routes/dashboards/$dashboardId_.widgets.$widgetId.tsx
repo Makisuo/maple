@@ -18,16 +18,25 @@ import type {
 } from "@/components/dashboard-builder/types"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { WidgetEditorSkeleton } from "@/components/dashboard-builder/loading-skeletons"
-import { pickVariableParams, variableSearchRest } from "@/lib/dashboard-variables/search-params"
+import {
+	dashboardViewParamsSchema,
+	pickDashboardControlParams,
+	variableSearchRest,
+} from "@/lib/dashboard-controls/search-params"
 import { Button } from "@maple/ui/components/ui/button"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
-// The editor carries the dashboard's `var-*` selections through its own search
+// The editor carries the dashboard's per-viewer controls through its own search
 // (as opaque pass-through — it renders variables at defaults) so returning to the
-// dashboard restores them instead of falling back to first-option values.
+// dashboard restores them instead of falling back to first-option values. The
+// view params have to be declared here, not just picked: TanStack drops any
+// search key the route's schema doesn't accept, so a section left collapsed
+// would silently re-expand on the way back.
 export const Route = createFileRoute("/dashboards/$dashboardId_/widgets/$widgetId")({
 	component: WidgetConfigurePage,
-	validateSearch: Schema.toStandardSchemaV1(variableSearchRest),
+	validateSearch: Schema.toStandardSchemaV1(
+		Schema.StructWithRest(Schema.Struct(dashboardViewParamsSchema), [variableSearchRest]),
+	),
 })
 
 function WidgetConfigurePage() {
@@ -50,8 +59,8 @@ function WidgetConfigurePage() {
 		navigate({
 			to: "/dashboards/$dashboardId",
 			params: { dashboardId },
-			// Restore the `var-*` selections the editor round-tripped, back into edit mode.
-			search: (prev) => ({ ...pickVariableParams(prev), mode: "edit" as const }),
+			// Restore the controls the editor round-tripped, back into edit mode.
+			search: (prev) => ({ ...pickDashboardControlParams(prev), mode: "edit" as const }),
 		})
 	}
 

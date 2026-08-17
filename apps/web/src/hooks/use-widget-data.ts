@@ -1,38 +1,42 @@
 import { useMemo, useState } from "react"
+import { dataSourceTransform, type WidgetDataSourceTransformSchema } from "@maple/widgets/dashboard"
 import { Atom, Result } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { Effect, Schedule, Schema } from "effect"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
 import { useWidgetTimeRangeOverride } from "@/components/dashboard-builder/widgets/widget-time-range-context"
-import { resolveTimeRange } from "@/atoms/dashboard-time-range-atoms"
-import { getServerFunction } from "@/components/dashboard-builder/data-source-registry"
-import { hasUnresolvedVariableRefs, interpolateWidgetParams } from "@maple/query-engine"
+import { getServerFunction, toWidgetRequest } from "@/components/dashboard-builder/data-source-registry"
+import { hasUnresolvedVariableRefs, planWidgetRequest } from "@maple/query-engine"
 import type { DashboardWidget, TimeRange, WidgetDataSource } from "@/components/dashboard-builder/types"
 
 /**
- * The structural shape a data source must satisfy to be fetched. Both the
- * web `WidgetDataSource` and the JSON-decoded `display.sparkline.dataSource`
- * (whose `endpoint` is only typed as `string`) are assignable to this.
+ * Was a structural stand-in, back when a widget's own data source narrowed
+ * `endpoint` to the registry key union while the JSON-decoded
+ * `display.sparkline.dataSource` typed it as a bare `string` — so neither was
+ * assignable to the other and both had to be assignable to a third thing.
+ *
+ * v3 removed the discrepancy: both are the same union now. Kept as an alias only
+ * so the sparkline call sites keep reading as "any data source, not necessarily
+ * this widget's own".
  */
-export type WidgetDataSourceLike = {
-	endpoint: string
-	params?: Record<string, unknown>
-	transform?: WidgetDataSource["transform"]
-}
+export type WidgetDataSourceLike = WidgetDataSource
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
 import { encodeKey, encodeOrgScopedKey, identityFromKey, orgScopedKeyPayload } from "@/lib/cache-key"
 import { nextRetentionNamespace, withRetention } from "@/lib/services/atoms/retained-atom"
 import { getActiveOrgId } from "@/lib/services/common/auth-headers"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { Cause, Option } from "effect"
 import { WarehouseDecodeError, type BackendError, type WarehouseApiError } from "@/api/warehouse/effect-utils"
 import { QueryEngineValidationError } from "@maple/domain/http"
-import { MAX_LIST_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
-import { formatForTinybird } from "@/lib/time-utils"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
+import {
+	MAX_LIST_RANGE_SECONDS,
+	formatRangeSeconds,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+} from "@maple/query-engine"
 
 // An error means "the query input/response failed validation" (rather than a
 // transient runtime failure) when it is one of these tagged validation errors,
@@ -42,7 +46,7 @@ const isDecodeError = (value: unknown): boolean =>
 
 // Pull the most meaningful error out of whatever `onError` / a Cause hands us:
 // a flattened `Cause` yields its first failure; a bare error is returned as-is.
-const extractError = (input: unknown): unknown =>
+const extractError = <E>(input: E | Cause.Cause<E>): E | Cause.Cause<E> =>
 	Cause.isCause(input) ? Option.getOrElse(Cause.findErrorOption(input), () => input) : input
 
 // A validation error the engine raised because the window is wider than the
@@ -61,15 +65,6 @@ const classifyWidgetErrorKind = (input: unknown): "decode" | "runtime" | "range"
 	return "runtime"
 }
 
-// Endpoints whose queries are `kind: "list"` — they scan raw rows and so carry
-// the engine's much tighter list ceiling.
-const LIST_ENDPOINTS: ReadonlySet<string> = new Set(["custom_query_builder_list", "list_traces", "list_logs"])
-
-const rangeSecondsOf = (range: { startTime: string; endTime: string }): number =>
-	(Date.parse(normalizeTimestampInput(range.endTime)) -
-		Date.parse(normalizeTimestampInput(range.startTime))) /
-	1000
-
 function isSeriesNameHidden(seriesName: string, hiddenBaseNames: Set<string>): boolean {
 	for (const base of hiddenBaseNames) {
 		if (seriesName === base) return true
@@ -82,7 +77,7 @@ function isSeriesNameHidden(seriesName: string, hiddenBaseNames: Set<string>): b
 
 function filterHiddenSeriesRows(
 	rows: Array<Record<string, unknown>>,
-	baseNames: string[],
+	baseNames: ReadonlyArray<string>,
 ): Array<Record<string, unknown>> {
 	if (baseNames.length === 0) return rows
 
@@ -99,34 +94,24 @@ function filterHiddenSeriesRows(
 	})
 }
 
-function interpolateParams(
-	params: Record<string, unknown>,
-	resolvedTime: { startTime: string; endTime: string },
-): Record<string, unknown> {
-	const result: Record<string, unknown> = {}
-
-	for (const [key, value] of Object.entries(params)) {
-		if (typeof value === "string") {
-			if (value === "$__startTime") {
-				result[key] = resolvedTime.startTime
-			} else if (value === "$__endTime") {
-				result[key] = resolvedTime.endTime
-			} else {
-				result[key] = value
-			}
-		} else {
-			result[key] = value
-		}
-	}
-
-	return result
-}
-
-function applyTransform(
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+/**
+ * Collapse, remap and cap the rows a query returned, per the widget's stored
+ * transform.
+ *
+ * Exported because both data paths need it. It runs client-side by design —
+ * the share redaction seam keeps `transform` on the wire for exactly this
+ * reason while dropping everything that describes the query — so a shared board
+ * has to apply it too, or a stat whose `reduceToValue` never runs renders its
+ * whole result set where a single number belongs.
+ */
+export function applyTransform(
+	// react-doctor-disable-next-line typescript/no-explicit-any -- This legacy transform boundary accepts heterogeneous query payloads and narrows before keyed reads.
 	data: any,
-	transform: WidgetDataSource["transform"],
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	// The readonly schema type, not the app's deep-mutable `WidgetDataSource`
+	// alias: this only reads the transform, and `dataSourceTransform` hands back
+	// a live slice of the stored document that nothing here may write to.
+	transform: typeof WidgetDataSourceTransformSchema.Type | undefined,
+	// react-doctor-disable-next-line typescript/no-explicit-any -- Transforms intentionally return either row collections or scalar aggregations for the renderer.
 ): any {
 	if (!transform || !data) return data
 
@@ -150,7 +135,7 @@ function applyTransform(
 	if (transform.fieldMap) {
 		const map = transform.fieldMap
 		rows = rows.map((row: Record<string, unknown>) => {
-			const mapped: Record<string, unknown> = { ...row }
+			const mapped: Record<string, unknown> = { ...row } satisfies Record<string, unknown>
 			for (const [targetKey, sourceKey] of Object.entries(map)) {
 				mapped[targetKey] = row[sourceKey]
 			}
@@ -263,6 +248,28 @@ function applyTransform(
 	return rows
 }
 
+/**
+ * A raw fetch response turned into what a visualization renders: the `{ data }`
+ * envelope every warehouse server function — and the share API, which returns
+ * the same functions' output — wraps its rows in is unwrapped (anything else, a
+ * bare array or a scalar summary, passes through), then the widget's stored
+ * transform is applied.
+ *
+ * Exported and used by *both* data paths on purpose. The share hook used to
+ * store the envelope as-is and only the transform happened to unwrap it — so
+ * stat tiles worked while every chart on a shared board got an object where an
+ * array belongs and drew its sample data instead. There is exactly one
+ * definition of "ready data" now; a renderer cannot tell which path fed it.
+ */
+export function toReadyWidgetData(
+	response: unknown,
+	transform: typeof WidgetDataSourceTransformSchema.Type | undefined,
+	// react-doctor-disable-next-line typescript/no-explicit-any -- Same boundary as `applyTransform`: rows or a scalar aggregation, narrowed by the renderer.
+): any {
+	const envelope = response as { data?: unknown } | null | undefined
+	return applyTransform(envelope?.data ?? response, transform)
+}
+
 class WidgetDataAtomError extends Schema.TaggedError<WidgetDataAtomError>()(
 	"@maple/web/hooks/WidgetDataAtomError",
 	{
@@ -290,7 +297,7 @@ const isExpectedEmptyDataError = (error: unknown): boolean => {
 
 // The error channel the widget-fetch atom exposes: every failure is either a
 // `WidgetDataAtomError` (parse / unknown endpoint) or the server function's
-// existing local/v1/v2 error. Preserve those states for `formatBackendError`.
+// existing local/v1/v2 error. Preserve those states for `displayError`.
 type WidgetFetchError = WidgetDataAtomError | WarehouseApiError | BackendError
 
 const toWidgetDataAtomError = (error: unknown): WidgetDataAtomError => {
@@ -307,17 +314,19 @@ const toWidgetDataAtomError = (error: unknown): WidgetDataAtomError => {
 	})
 }
 
+const WidgetDataKey = Schema.fromJsonString(
+	Schema.Struct({
+		endpoint: Schema.String,
+		params: Schema.Record(Schema.String, Schema.Unknown),
+	}),
+)
+
 const fetchWidgetData = Effect.fnUntraced(
 	function* (key: string) {
-		const parsed = yield* Effect.try({
-			// The key is org-scoped; only the payload after the separator is JSON.
-			try: () =>
-				JSON.parse(orgScopedKeyPayload(key)) as {
-					endpoint: string
-					params: Record<string, unknown>
-				},
-			catch: toWidgetDataAtomError,
-		})
+		// The key is org-scoped; only the payload after the separator is JSON.
+		const parsed = yield* Schema.decodeUnknownEffect(WidgetDataKey)(orgScopedKeyPayload(key)).pipe(
+			Effect.mapError(toWidgetDataAtomError),
+		)
 
 		const serverFn = getServerFunction(parsed.endpoint)
 		if (!serverFn) {
@@ -326,8 +335,7 @@ const fetchWidgetData = Effect.fnUntraced(
 			})
 		}
 
-		const response = yield* serverFn({ data: parsed.params })
-		return (response as { data?: unknown })?.data ?? response
+		return yield* serverFn({ data: parsed.params })
 	},
 	Effect.retry({
 		times: 2,
@@ -365,6 +373,17 @@ const widgetFetchAtom = (input: { endpoint: string; params: Record<string, unkno
  * widgets (via `useWidgetData`) and secondary fetches such as a stat widget's
  * sparkline. Pass `undefined` to render a disabled state without a fetch.
  */
+export interface WidgetDataOptions {
+	/**
+	 * How many points the tile can display — its rendered pixel width (a bar
+	 * chart divides by its minimum bar width). Sent only on timeseries fetches,
+	 * where it switches the auto bucket to the width model (Grafana's
+	 * `$__interval`); omitted, the fixed 100-point policy applies. Part of the
+	 * cache key, so quantize it (`useWidgetMaxDataPoints`) before passing it in.
+	 */
+	readonly maxDataPoints?: number
+}
+
 export function useWidgetDataSource(
 	dataSource: WidgetDataSourceLike | undefined,
 	/**
@@ -379,6 +398,7 @@ export function useWidgetDataSource(
 	 * a widget (a stat's sparkline) inherit it from context instead.
 	 */
 	timeRangeOverride?: TimeRange,
+	options?: WidgetDataOptions,
 ) {
 	const {
 		state: { resolvedTimeRange: dashboardTimeRange },
@@ -387,56 +407,85 @@ export function useWidgetDataSource(
 	const override = timeRangeOverride ?? contextOverride ?? undefined
 	const overrideKey = override ? encodeKey(override) : null
 
-	const effectiveTimeRange = useMemo(
-		() => (override ? resolveTimeRange(override) : dashboardTimeRange),
+	// The stored data source resolved to an endpoint + params, once. Everything
+	// below reads `request` rather than `dataSource` so the fetch path never
+	// touches the stored shape — the v2 → v3 flip lands entirely inside
+	// `toWidgetRequest`. Null means no server function can serve it.
+	const request = useMemo(() => toWidgetRequest(dataSource), [dataSource])
+
+	const variablesContext = useDashboardVariablesOptional()
+	const variableValues = variablesContext?.values
+
+	// The whole request — window, macros, variables, strategy, list-cap flag —
+	// comes out of the one planner the share API also runs, so a board and its
+	// share link execute the same query. This hook only adds what the browser
+	// alone knows: whether the tile is on screen, whether variables have loaded,
+	// and the viewer's opt-in list narrowing below.
+	const plan = useMemo(
+		() =>
+			request === null || dashboardTimeRange === null
+				? null
+				: planWidgetRequest({
+						request,
+						dashboardWindow: dashboardTimeRange,
+						...(override === undefined ? undefined : { widgetTimeRange: override }),
+						...(variableValues === undefined ? undefined : { variableValues }),
+						...(options?.maxDataPoints === undefined
+							? undefined
+							: { maxDataPoints: options.maxDataPoints }),
+					}),
 		// Keyed on the serialized override, not its identity: the dashboard object
-		// is rebuilt on every optimistic write, and re-resolving an unchanged
+		// is rebuilt on every optimistic write, and re-planning an unchanged
 		// override would hand every pinned tile fresh params and refetch it.
 		// `dashboardTimeRange` stays in the deps so a manual reload or auto-refresh
 		// (which gives it a new identity) rebases a relative override against "now"
 		// as well.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[overrideKey, dashboardTimeRange],
+		// oxlint-disable-next-line react-hooks/exhaustive-deps -- `overrideKey` stands in for `override` by value.
+		[request, dashboardTimeRange, overrideKey, variableValues, options?.maxDataPoints],
 	)
 
 	// A list-kind tile on a window wider than the engine's list cap. Detected
 	// here rather than left to the API so the tile never fires a request that is
 	// certain to 400 (and never burns the fetch's two retries on it).
-	const exceedsListCap =
-		dataSource !== undefined &&
-		LIST_ENDPOINTS.has(dataSource.endpoint) &&
-		effectiveTimeRange !== null &&
-		rangeSecondsOf(effectiveTimeRange) > MAX_LIST_RANGE_SECONDS
+	const exceedsListCap = plan?.kind === "request" && plan.exceedsListCap
 
 	// Opt-in, per-tile, not persisted: the viewer can pull just this tile back to
 	// the cap without touching the dashboard's range or needing write access.
 	const [narrowedToCap, setNarrowedToCap] = useState(false)
 	const narrowed = narrowedToCap && exceedsListCap
 
-	const resolvedTimeRange = useMemo(() => {
-		if (!narrowed || !effectiveTimeRange) return effectiveTimeRange
-		const endMs = Date.parse(normalizeTimestampInput(effectiveTimeRange.endTime))
-		return {
-			startTime: formatForTinybird(new Date(endMs - MAX_LIST_RANGE_SECONDS * 1000)),
-			endTime: effectiveTimeRange.endTime,
-		}
-	}, [narrowed, effectiveTimeRange])
-	const variablesContext = useDashboardVariablesOptional()
+	// Narrowing re-plans over the capped window (no widget override: the cap is
+	// measured from the window the tile actually resolved to).
+	const executed = useMemo(() => {
+		if (!narrowed || plan === null || plan.kind !== "request" || request === null) return plan
+		const endMs = parseWarehouseDateTime(plan.window.endTime)
+		return planWidgetRequest({
+			request,
+			dashboardWindow: {
+				startTime: formatWarehouseDateTime(endMs - MAX_LIST_RANGE_SECONDS * 1000),
+				endTime: plan.window.endTime,
+			},
+			...(variableValues === undefined ? undefined : { variableValues }),
+			...(options?.maxDataPoints === undefined ? undefined : { maxDataPoints: options.maxDataPoints }),
+		})
+	}, [narrowed, plan, request, variableValues, options?.maxDataPoints])
 
-	const isStatic = dataSource?.endpoint === "markdown_static"
-	const hasServerFn = dataSource ? !!getServerFunction(dataSource.endpoint) : false
+	const isStatic = request?.endpoint === "markdown_static"
+	const hasServerFn = request !== null && !!getServerFunction(request.endpoint)
 
 	const disableReason = !dataSource
 		? "No data source configured"
-		: isStatic
-			? null
-			: !resolvedTimeRange
-				? override
-					? "Unable to resolve this widget's time range"
-					: "Unable to resolve dashboard time range"
-				: !hasServerFn
-					? `Unknown data source endpoint: ${dataSource.endpoint}`
-					: null
+		: request === null
+			? "Unsupported data source"
+			: isStatic
+				? null
+				: dashboardTimeRange === null
+					? "Unable to resolve dashboard time range"
+					: executed?.kind === "disabled"
+						? "Unable to resolve this widget's time range"
+						: !hasServerFn
+							? `Unknown data source endpoint: ${request.endpoint}`
+							: null
 
 	// A params blob referencing a defined dashboard variable whose value hasn't
 	// resolved yet (query-variable options still loading, no default) must not
@@ -446,28 +495,14 @@ export function useWidgetDataSource(
 		() =>
 			variablesContext !== null &&
 			hasUnresolvedVariableRefs(
-				dataSource?.params,
+				request?.params,
 				variablesContext.variables.map((variable) => variable.name),
 				variablesContext.values,
 			),
-		[dataSource?.params, variablesContext],
+		[request?.params, variablesContext],
 	)
 
-	const variableValues = variablesContext?.values
-
-	const resolvedParams = useMemo(() => {
-		if (!resolvedTimeRange) return {}
-		const base = interpolateParams(
-			{
-				...dataSource?.params,
-				strategy: { enableEmptyRangeFallback: false },
-				startTime: resolvedTimeRange.startTime,
-				endTime: resolvedTimeRange.endTime,
-			},
-			resolvedTimeRange,
-		)
-		return variableValues ? interpolateWidgetParams(base, variableValues) : base
-	}, [resolvedTimeRange, dataSource?.params, variableValues])
+	const resolvedParams = useMemo(() => (executed?.kind === "request" ? executed.params : {}), [executed])
 
 	// Stabilise the atom reference across renders. Atom.family already dedupes
 	// by encoded key, but giving React the same Atom instance avoids any path
@@ -477,7 +512,7 @@ export function useWidgetDataSource(
 		if (
 			disableReason !== null ||
 			isStatic ||
-			!dataSource ||
+			request === null ||
 			!enabled ||
 			waitingOnVariables ||
 			(exceedsListCap && !narrowed)
@@ -485,13 +520,13 @@ export function useWidgetDataSource(
 			return disabledResultAtom<unknown, WidgetFetchError>()
 		}
 		return widgetFetchAtom({
-			endpoint: dataSource.endpoint,
+			endpoint: request.endpoint,
 			params: resolvedParams,
 		})
 	}, [
 		disableReason,
 		isStatic,
-		dataSource,
+		request,
 		resolvedParams,
 		enabled,
 		waitingOnVariables,
@@ -501,7 +536,7 @@ export function useWidgetDataSource(
 
 	const result = useRefreshableAtomValue(fetchAtom)
 
-	const transform = dataSource?.transform
+	const transform = dataSourceTransform(dataSource)
 
 	const dataState: WidgetDataState = useMemo(() => {
 		if (isStatic) {
@@ -533,11 +568,13 @@ export function useWidgetDataSource(
 						message: "No query data found in selected time range",
 					} as const
 				}
-				const { title, description } = formatBackendError(error)
+				const { title, message } = displayError(error)
 				const kind = classifyWidgetErrorKind(error)
-				return { status: "error", title, message: description, kind } as const
+				return { status: "error", title, message, kind } as const
 			})
-			.onSuccess((rawData) => ({ status: "ready", data: applyTransform(rawData, transform) }) as const)
+			.onSuccess(
+				(rawData) => ({ status: "ready", data: toReadyWidgetData(rawData, transform) }) as const,
+			)
 			.orElse(() => ({ status: "error", message: "Unknown error" }) as const)
 	}, [result, transform, disableReason, isStatic, enabled, waitingOnVariables, exceedsListCap, narrowed])
 
@@ -556,8 +593,8 @@ export function useWidgetDataSource(
 	}
 }
 
-export function useWidgetData(widget: DashboardWidget, enabled = true) {
-	return useWidgetDataSource(widget.dataSource, enabled, widget.timeRange)
+export function useWidgetData(widget: DashboardWidget, enabled = true, options?: WidgetDataOptions) {
+	return useWidgetDataSource(widget.dataSource, enabled, widget.timeRange, options)
 }
 
 export const __testables = {

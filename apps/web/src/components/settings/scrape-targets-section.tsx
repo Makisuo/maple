@@ -87,7 +87,7 @@ const AUTH_TYPE_LABELS: Record<ScrapeAuthType, string> = {
 	basic: "Basic Auth",
 	token: "Service Token",
 	planetscale_oauth: "PlanetScale OAuth",
-}
+} satisfies Record<ScrapeAuthType, string>
 
 const asScrapeIntervalSeconds = Schema.decodeUnknownSync(ScrapeIntervalSeconds)
 
@@ -309,7 +309,7 @@ export function ScrapeTargetsSection({
 					service_name: formServiceName.trim() || null,
 					url: formUrl.trim(),
 					auth_type: formAuthType,
-					...(authCredentials !== null ? { auth_credentials: authCredentials } : {}),
+					...(authCredentials !== null ? { auth_credentials: authCredentials } : undefined),
 				},
 				reactivityKeys: ["scrapeTargets"],
 			})
@@ -328,7 +328,7 @@ export function ScrapeTargetsSection({
 					service_name: formServiceName.trim() || null,
 					url: formUrl.trim(),
 					auth_type: formAuthType,
-					...(authCredentials !== null ? { auth_credentials: authCredentials } : {}),
+					...(authCredentials !== null ? { auth_credentials: authCredentials } : undefined),
 				},
 				reactivityKeys: ["scrapeTargets"],
 			})

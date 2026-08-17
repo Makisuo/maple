@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Option, Stream } from "effect"
 import {

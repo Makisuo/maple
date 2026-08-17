@@ -18,7 +18,7 @@ Maple is now organized as a monorepo with a SPA frontend and an Effect-based bac
 - `apps/landing`: Astro landing site
 - `apps/alerting`: Alert evaluation worker
 - `apps/cli`: CLI utilities
-- `apps/mobile`: Expo mobile app
+- `apps/ios`: Native SwiftUI app (Clerk + v2 API)
 - `packages/domain`: Shared Effect HTTP contracts and domain types
 - `packages/query-engine`: Shared query and observability logic
 - `packages/ui`: Shared UI primitives and components
@@ -235,6 +235,10 @@ Maple supports exactly two auth modes via `MAPLE_AUTH_MODE`:
     - Set `MAPLE_ROOT_PASSWORD` (required)
     - Set `MAPLE_DEFAULT_ORG_ID` (defaults to `default`)
     - Users must sign in at `/sign-in` with the root password before accessing the dashboard/API.
+    - Session tokens are valid for 12 hours and renew silently against
+      `POST /api/auth/session/refresh`, up to an absolute cap of 7 days from sign-in. Past the cap
+      the root password is required again. Rotating `MAPLE_ROOT_PASSWORD` still invalidates every
+      token immediately — it is the HMAC key, and the only way to revoke a session early.
 
 Start apps:
 
@@ -251,8 +255,10 @@ Validate behavior:
     - Signed-in users with an active org can query the API with bearer auth
 - Self-hosted mode:
     - Signed-out users are redirected to `/sign-in`
-    - `MAPLE_ROOT_PASSWORD` login issues a bearer session token
+    - `MAPLE_ROOT_PASSWORD` login issues a bearer session token with a bounded lifetime
     - Protected API routes reject requests without a valid bearer session token
+    - Expired tokens are rejected; a still-valid one can be traded for a fresh one at
+      `POST /api/auth/session/refresh` until the session's absolute deadline
 
 Breaking change:
 

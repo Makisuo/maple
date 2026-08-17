@@ -842,7 +842,7 @@ export function collectQuerySpecCatalog(): ReadonlyArray<CatalogEntry> {
 					route: fixture.route,
 					sql: capture.sql,
 					fingerprint: fingerprintSql(capture.sql),
-					...(capture.compiled ? { compiled: capture.compiled } : {}),
+					...(capture.compiled ? { compiled: capture.compiled } : undefined),
 				})
 			})
 		}
@@ -881,7 +881,7 @@ export function collectBuilderCatalog(): ReadonlyArray<CatalogEntry> {
 			sql: compiled.sql,
 			fingerprint: fingerprintSql(compiled.sql),
 			compiled,
-			...(fixture.sampleValues ? { sampleValues: fixture.sampleValues } : {}),
+			...(fixture.sampleValues ? { sampleValues: fixture.sampleValues } : undefined),
 		})
 	}
 	return entries

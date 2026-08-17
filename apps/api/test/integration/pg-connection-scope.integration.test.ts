@@ -221,7 +221,7 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 		const rows = await Effect.runPromise(
 			scope.run((db: DatabaseClient) => db.execute(sql.raw(`select count(*)::int as n from ${table}`))),
 		)
-		assert.strictEqual(Number((rows as unknown as Array<{ n: number }>)[0]?.n), 2)
+		assert.strictEqual(Number((rows as Array<{ n: number }>)[0]?.n), 2)
 		assert.isAtMost((await backends()) - baseline, MAX_CONNECTIONS)
 
 		await Effect.runPromise(scope.run((db: DatabaseClient) => db.execute(sql.raw(`drop table ${table}`))))

@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { randomUUID } from "node:crypto"
 import { Retry } from "@distilled.cloud/cloudflare"
 import { afterEach, assert, describe, it } from "@effect/vitest"
@@ -20,7 +21,7 @@ import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { CloudflareAnalyticsService, hasAnalyticsScopes } from "./CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "@/services/auth/CloudflareOAuthService"
@@ -333,7 +334,7 @@ interface CompiledQueryStub {
 const makeWarehouseStub = (
 	captured: CapturedIngest[],
 	queryStub?: CompiledQueryStub,
-): WarehouseQueryServiceShape =>
+): WarehouseQueryServiceApi =>
 	({
 		ingest: (
 			tenant: { orgId: string },
@@ -368,7 +369,7 @@ const makeWarehouseStub = (
 				),
 				Effect.orDie,
 			),
-	}) as unknown as WarehouseQueryServiceShape
+	}) as WarehouseQueryServiceApi
 
 const makeLayer = (
 	testDb: TestDb,

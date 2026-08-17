@@ -192,6 +192,7 @@ const stuckCollectionStub = <T extends object>() => {
 	return stub
 }
 const asCollection = <T extends object>(stub: ReturnType<typeof stuckCollectionStub<T>>) =>
+	// SAFETY: the test stub implements the collection lifecycle and read surface exercised below.
 	stub as unknown as Collection<T, any, any>
 
 /** Lets forked pipelines (the snapshot stream + watchdog) park before the clock moves. */

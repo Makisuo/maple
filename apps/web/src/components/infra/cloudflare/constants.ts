@@ -53,7 +53,7 @@ export const STATUS_CLASS_COLORS: Record<string, string> = {
 	"4xx": "var(--severity-warn)",
 	"5xx": "var(--severity-error)",
 	unknown: "color-mix(in oklab, var(--muted-foreground) 55%, transparent)",
-}
+} satisfies Record<string, string>
 
 export const STATUS_CLASS_ORDER = ["1xx", "2xx", "3xx", "4xx", "5xx", "unknown"]
 
@@ -83,7 +83,7 @@ export const CACHE_STATUS_COLORS: Record<string, string> = {
 	dynamic: "color-mix(in oklab, var(--muted-foreground) 45%, transparent)",
 	none: "color-mix(in oklab, var(--muted-foreground) 35%, transparent)",
 	unknown: "color-mix(in oklab, var(--muted-foreground) 25%, transparent)",
-}
+} satisfies Record<string, string>
 
 export const CACHE_STATUS_ORDER = [
 	...EDGE_SERVED_STATUSES.map((s) => s.status),

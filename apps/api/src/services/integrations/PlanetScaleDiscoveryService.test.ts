@@ -108,8 +108,12 @@ const createPlanetScaleTargetRow = (
 				targetType: "planetscale",
 				organization,
 				authCredentials: JSON.stringify({ tokenId: "tok_id", tokenSecret: "tok_secret" }),
-				...(branchFilters?.includeBranches ? { includeBranches: branchFilters.includeBranches } : {}),
-				...(branchFilters?.excludeBranches ? { excludeBranches: branchFilters.excludeBranches } : {}),
+				...(branchFilters?.includeBranches
+					? { includeBranches: branchFilters.includeBranches }
+					: undefined),
+				...(branchFilters?.excludeBranches
+					? { excludeBranches: branchFilters.excludeBranches }
+					: undefined),
 			}),
 		)
 		const rows = yield* service.listAllEnabled()
@@ -352,6 +356,29 @@ describe("PlanetScaleDiscoveryService", () => {
 				assert.strictEqual(error.reason, "config")
 			}
 			assert.include(error.message, "read_metrics_endpoints")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("preserves a missing managed OAuth grant as IntegrationsNotConnectedError", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const targets = yield* ScrapeTargetsService
+			const discovery = yield* PlanetScaleDiscoveryService
+			const created = yield* targets.create(
+				asOrgId("org_1"),
+				new CreateScrapeTargetRequest({
+					name: "Managed PlanetScale",
+					targetType: "planetscale",
+					organization: "my-org",
+					authType: "planetscale_oauth",
+				}),
+			)
+			const rows = yield* targets.listAllEnabled()
+			const row = rows.find((candidate) => candidate.id === created.id)
+			if (!row) return yield* Effect.die("created row not found")
+
+			const error = yield* discovery.discover(row).pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsNotConnectedError")
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 

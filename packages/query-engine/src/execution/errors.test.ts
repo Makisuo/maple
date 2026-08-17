@@ -87,19 +87,35 @@ describe("mapWarehouseError", () => {
 			})
 		})
 
-		// Schema drift is the customer's cluster missing a column; it must stay
-		// distinct so its "run schema apply" remediation is not shown for our bugs,
-		// and it applies regardless of who wrote the SQL.
-		it("leaves schema drift classified as drift for either author", () => {
-			for (const authoredBy of ["maple", "caller"] as const) {
-				expect(
-					mapWarehouseError(
-						"p",
-						{ message: "Missing columns", type: "UNKNOWN_IDENTIFIER" },
-						authoredBy,
-					),
-				).toBeInstanceOf(WarehouseSchemaDriftError)
-			}
+		// Schema drift is the customer's cluster missing a column, and its remediation
+		// is "run schema apply". Only a query MAPLE generated can testify to that: an
+		// unknown identifier in caller-authored SQL is a typo in that query.
+		//
+		// This previously classified as drift for BOTH authors, so `run_sql` agents
+		// hitting `Missing columns: t.OrgId` — their own bad alias — told the customer
+		// their cluster was out of sync.
+		it("classifies an unknown identifier as drift only for Maple-authored SQL", () => {
+			expect(
+				mapWarehouseError("p", { message: "Missing columns", type: "UNKNOWN_IDENTIFIER" }, "maple"),
+			).toBeInstanceOf(WarehouseSchemaDriftError)
+		})
+
+		it("classifies an unknown identifier in caller-authored SQL as malformed, not drift", () => {
+			const mapped = mapWarehouseError(
+				"p",
+				{ message: "Missing columns: t.OrgId", type: "UNKNOWN_IDENTIFIER" },
+				"caller",
+			)
+			expect(mapped).toBeInstanceOf(WarehouseMalformedQueryError)
+			expect(mapped).not.toBeInstanceOf(WarehouseSchemaDriftError)
+		})
+
+		// `mapWarehouseError` defaults to "caller" — the conservative reading — so an
+		// unannotated call site must not produce a customer-blaming drift error.
+		it("does not claim drift when authorship is unstated", () => {
+			expect(
+				mapWarehouseError("p", { message: "Missing columns", type: "UNKNOWN_IDENTIFIER" }),
+			).not.toBeInstanceOf(WarehouseSchemaDriftError)
 		})
 	})
 
@@ -171,16 +187,22 @@ describe("mapWarehouseError", () => {
 		})
 	})
 
+	// Drift is a claim about the customer's cluster, so every case here passes
+	// `"maple"` explicitly: it is only diagnosable from SQL we generated.
 	describe("schema_drift", () => {
 		it("classifies the unknown-identifier ClickHouse type", () => {
-			expect(mapWarehouseError("p", { message: "x", type: "UNKNOWN_IDENTIFIER" })).toBeInstanceOf(
-				WarehouseSchemaDriftError,
-			)
+			expect(
+				mapWarehouseError("p", { message: "x", type: "UNKNOWN_IDENTIFIER" }, "maple"),
+			).toBeInstanceOf(WarehouseSchemaDriftError)
 		})
 
 		it("classifies an unknown-identifier message", () => {
 			expect(
-				mapWarehouseError("p", "Unknown expression or function identifier 'SampleRate' in scope"),
+				mapWarehouseError(
+					"p",
+					"Unknown expression or function identifier 'SampleRate' in scope",
+					"maple",
+				),
 			).toBeInstanceOf(WarehouseSchemaDriftError)
 		})
 	})

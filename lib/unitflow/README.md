@@ -4,11 +4,11 @@ Vendored copy of [unitflow](https://github.com/timurrakhimzhan/unitflow) (`@unit
 
 - **Upstream commit:** `51729b480fd84ed64a121bf2180eae3c45a7c5c2` (2026-07-06)
 - **Upstream license:** MIT (declared in each upstream `package.json`; upstream ships no standalone LICENSE file)
-- **Ported from:** effect `4.0.0-beta.88` → workspace catalog pin (`catalog:effect`, currently `4.0.0-beta.93`)
+- **Ported from:** effect `4.0.0-beta.88` → workspace catalog pin (`catalog:effect`, currently `4.0.0-rc.108`)
 
 ## Why vendored
 
-Upstream exact-pins `effect@4.0.0-beta.88` as a peer; this workspace pins a bun-patched `4.0.0-beta.93`. Effect v4 betas break between releases, so the package is vendored and ported rather than depended on. When bumping the effect catalog, re-typecheck and re-test this package as part of the upgrade procedure.
+Upstream exact-pins `effect@4.0.0-beta.88` as a peer; this workspace pins a bun-patched `4.0.0-rc.108`. Effect v4 betas break between releases, so the package is vendored and ported rather than depended on. When bumping the effect catalog, re-typecheck and re-test this package as part of the upgrade procedure.
 
 ## Layout
 

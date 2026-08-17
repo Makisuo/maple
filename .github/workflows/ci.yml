@@ -61,6 +61,11 @@ jobs:
                         - 'scripts/**'
                         - '!apps/ingest/**'
                         - '!apps/slack-agent/**'
+                        # Swift; built by ios.yml. Note the asymmetry: a
+                        # packages/domain change still triggers ios:openapi:check
+                        # below, so an iOS contract break fails on the cheap
+                        # Linux runner rather than a macOS one.
+                        - '!apps/ios/**'
                       # The workspace-dependency closure of apps/cli + apps/local-ui
                       # (plus what alchemy:build-deps builds): cli → effect-sdk,
                       # domain, query-engine; local-ui → infra, query-engine, ui;
@@ -218,7 +223,7 @@ jobs:
                     - shard: typecheck-rest
                       install-filters: >-
                           @maple/alerting @maple/cli @maple/electric-sync @maple/landing
-                          @maple/local-ui @maple/scraper mobile ./lib/* ./examples/*
+                          @maple/local-ui @maple/scraper ./lib/* ./examples/*
                     - shard: typecheck-packages
                       install-filters: "./packages/*"
                     - shard: test-api-1
@@ -236,7 +241,7 @@ jobs:
                     - shard: test-rest
                       install-filters: >-
                           @maple/alerting @maple/cli @maple/electric-sync @maple/landing
-                          @maple/local-ui @maple/scraper mobile ./lib/*
+                          @maple/local-ui @maple/scraper ./lib/*
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -281,6 +286,13 @@ jobs:
               if: ${{ matrix.shard == 'quality' }}
               run: bun run clickhouse:schema:check
 
+            # The Swift client is generated from a committed, pruned copy of the v2
+            # OpenAPI document. Checking it here means a contract change that breaks
+            # the iOS client fails on Linux, not on a 10x-priced macOS runner.
+            - name: Validate the generated iOS OpenAPI spec
+              if: ${{ matrix.shard == 'quality' }}
+              run: bun run ios:openapi:check
+
             # Shared design tokens live in packages/ui/src/styles/tokens.css;
             # fails if an app re-declares one (landing ↔ web drift guard).
             - name: Validate shared design tokens
@@ -297,9 +309,9 @@ jobs:
                   --filter=@maple-dev/clickhouse-builder --filter=@maple-dev/alchemy
                   --filter=@maple-dev/browser --concurrency=2
 
-            - name: Lint Effect code
+            - name: Lint TypeScript and Effect code
               if: ${{ matrix.shard == 'effect-lint' }}
-              run: bun run lint:effect
+              run: bun run lint
 
             - name: Build web production bundle
               if: ${{ matrix.shard == 'build-web' }}

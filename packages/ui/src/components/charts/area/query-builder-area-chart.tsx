@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Area, AreaChart } from "recharts"
 
 import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
@@ -16,16 +16,18 @@ import {
 	ChartLegend,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "../../ui/chart"
 import { formatValueByUnit, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
-const fallbackData: Record<string, unknown>[] = [
-	{ bucket: "2026-01-01T00:00:00Z", A: 12, B: 8 },
-	{ bucket: "2026-01-01T01:00:00Z", A: 15, B: 9 },
-	{ bucket: "2026-01-01T02:00:00Z", A: 11, B: 10 },
-	{ bucket: "2026-01-01T03:00:00Z", A: 18, B: 12 },
-	{ bucket: "2026-01-01T04:00:00Z", A: 16, B: 11 },
-]
+// No sample-data fallback: substituting fixtures for real rows made every
+// misconfigured or mis-fed chart (a share page handing over an envelope where an
+// array belongs, an empty result) draw plausible-looking curves labelled "A" and
+// "B" instead of an empty plot. Gallery thumbnails pass their sample rows in
+// explicitly via `data`.
+const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
 
 // Defense-in-depth render cap: never attempt to draw more than this many series,
 // even if a query returns a high-cardinality group-by without a `seriesLimit`.
@@ -60,7 +62,7 @@ export function QueryBuilderAreaChart({
 	showPoints,
 }: BaseChartProps) {
 	const { chartData, seriesDefinitions } = React.useMemo(() => {
-		const source = Array.isArray(data) && data.length > 0 ? data : fallbackData
+		const source = Array.isArray(data) ? data : EMPTY_ROWS
 		const rawSeriesKeys: string[] = []
 		const seenSeriesKeys = new Set<string>()
 
@@ -78,7 +80,7 @@ export function QueryBuilderAreaChart({
 		}))
 
 		const chartData = source.map((row) => {
-			const next: Record<string, unknown> = { bucket: row.bucket }
+			const next: Record<string, unknown> = { bucket: row.bucket } satisfies Record<string, unknown>
 			for (const definition of seriesDefinitions) {
 				next[definition.chartKey] = asFiniteNumber(row[definition.rawKey])
 			}
@@ -109,7 +111,7 @@ export function QueryBuilderAreaChart({
 	const processedData = React.useMemo(() => {
 		if (unit !== "requests_per_sec" || !bucketSeconds) return incompleteData
 		return incompleteData.map((row) => {
-			const next: Record<string, unknown> = { bucket: row.bucket }
+			const next: Record<string, unknown> = { bucket: row.bucket } satisfies Record<string, unknown>
 			for (const key of Object.keys(row)) {
 				if (key === "bucket") continue
 				const val = row[key]
@@ -154,16 +156,18 @@ export function QueryBuilderAreaChart({
 		})
 	}, [])
 
-	const { seriesStats, legendSeries, renderDots, integerOnlyData } = useTimeseriesSeriesPresentation({
-		data: processedData,
-		valueKeys,
-		seriesDefinitions,
-		chartConfig,
-		showPoints,
-	})
-
 	const containerRef = React.useRef<HTMLDivElement>(null)
-	const { height: containerHeight } = useContainerSize(containerRef)
+	const { width: containerWidth, height: containerHeight } = useContainerSize(containerRef)
+
+	const { seriesStats, legendSeries, pointsMode, shouldDot, integerOnlyData } =
+		useTimeseriesSeriesPresentation({
+			data: processedData,
+			valueKeys,
+			seriesDefinitions,
+			chartConfig,
+			showPoints,
+			plotWidthPx: containerWidth,
+		})
 
 	const variant = showStats ? "stats" : "compact"
 	const showLegendBlock = legend === "visible" || legend === "right"
@@ -266,19 +270,12 @@ export function QueryBuilderAreaChart({
 								</linearGradient>
 							))}
 					</defs>
-					<CartesianGrid vertical={false} />
-					<XAxis
+					<ChartGrid />
+					<ChartXAxis
 						dataKey="bucket"
-						tickLine={false}
-						axisLine={false}
-						tickMargin={8}
 						tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick")}
 					/>
-					<YAxis
-						tickLine={false}
-						axisLine={false}
-						tickMargin={6}
-						width={56}
+					<ChartYAxis
 						scale={logScale ? "log" : "auto"}
 						domain={[yDomainMin, yDomainMax]}
 						allowDecimals={!integerOnlyData}
@@ -385,13 +382,20 @@ export function QueryBuilderAreaChart({
 							fillOpacity={stacked ? 0.55 : undefined}
 							strokeWidth={stacked ? 0 : 2}
 							dot={
-								renderDots
-									? {
-											r: 2.5,
-											strokeWidth: 0,
-											fill: `var(--color-${definition.chartKey})`,
-										}
-									: false
+								// `false` skips the per-point pass entirely; the render function
+								// draws only the points `shouldDot` picks (all, or the isolated ones).
+								pointsMode === "none"
+									? false
+									: (props) =>
+											shouldDot(definition.chartKey, props.index) ? (
+												<circle
+													className="recharts-dot"
+													cx={props.cx}
+													cy={props.cy}
+													r={2.5}
+													fill={`var(--color-${definition.chartKey})`}
+												/>
+											) : null
 							}
 							hide={hiddenSeries.has(definition.chartKey)}
 							isAnimationActive={false}

@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { Authorization } from "./current-tenant"
+import { SessionAuthorization } from "./current-tenant"
 
 export const DigestSubscriptionId = Schema.String.check(Schema.isUUID()).pipe(
 	Schema.brand("@maple/DigestSubscriptionId"),
@@ -95,5 +95,5 @@ export class DigestApiGroup extends HttpApiGroup.make("digest")
 			error: [DigestPersistenceError, DigestNotConfiguredError, DigestRenderError],
 		}),
 	)
-	.prefix("/api/digest")
-	.middleware(Authorization) {}
+	.prefix("/internal/digest")
+	.middleware(SessionAuthorization) {}

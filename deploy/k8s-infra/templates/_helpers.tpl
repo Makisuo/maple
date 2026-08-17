@@ -51,6 +51,27 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: agent
 {{- end -}}
 
+{{/*
+The ONE activation predicate for the cluster collector.
+
+The cluster collector is a single Deployment that only exists to host the
+cluster-scoped receivers (k8s_cluster, k8s_events, the Fargate prometheus
+scrape). It is active when it is switched on AND at least one of those
+receivers is enabled — otherwise it would run a collector with no receivers,
+or leave behind a ConfigMap/RBAC/ServiceAccount/Service for a workload that
+never runs. Every cluster-collector resource must gate on this helper so the
+resource set stays coherent for every receiver combination.
+
+Renders "true" or "false".
+*/}}
+{{- define "maple-k8s-infra.cluster.enabled" -}}
+{{- if and .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled .Values.presets.fargateMetrics.enabled) -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
 {{- define "maple-k8s-infra.cluster.selectorLabels" -}}
 {{ include "maple-k8s-infra.selectorLabels" . }}
 app.kubernetes.io/component: cluster-collector
@@ -208,18 +229,50 @@ presets.otlpReceiver.http.enabled.
 {{- printf "%s/%s" .Release.Namespace .Values.autoInstrumentation.instrumentation.name -}}
 {{- end -}}
 
+{{/*
+The ONE deployment-environment projection for this chart.
+
+OTel renamed `deployment.environment` to `deployment.environment.name`. Maple
+dual-emits both keys — the canonical one for spec-compliant consumers, the
+legacy one because the Tinybird materialized views still pre-extract it. Every
+path in this chart (agent collector, cluster collector, auto-instrumentation CR)
+must project the value through this helper so a span carries the same keys no
+matter which path produced it.
+
+Renders comma-joined `key=value` pairs (OTEL_RESOURCE_ATTRIBUTES form), or the
+empty string when global.deploymentEnvironment is unset.
+*/}}
+{{- define "maple-k8s-infra.deploymentEnvironment.attrPairs" -}}
+{{- with .Values.global.deploymentEnvironment -}}
+{{- printf "deployment.environment.name=%s,deployment.environment=%s" . . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The same projection as YAML mapping lines, for CRD `resourceAttributes` blocks.
+Derived from attrPairs so the key set is defined exactly once.
+*/}}
+{{- define "maple-k8s-infra.deploymentEnvironment.attrYaml" -}}
+{{- $lines := list -}}
+{{- range (compact (splitList "," (include "maple-k8s-infra.deploymentEnvironment.attrPairs" .))) -}}
+{{- $kv := splitn "=" 2 . -}}
+{{- $lines = append $lines (printf "%s: %s" $kv._0 ($kv._1 | quote)) -}}
+{{- end -}}
+{{- join "\n" $lines -}}
+{{- end -}}
+
 {{- define "maple-k8s-infra.resourceAttributes.agent" -}}
 {{- $attrs := list "maple.collector.role=agent" (printf "k8s.cluster.name=%s" (include "maple-k8s-infra.clusterName" .)) "k8s.node.name=$(K8S_NODE_NAME)" "host.name=$(K8S_NODE_NAME)" -}}
-{{- if .Values.global.deploymentEnvironment -}}
-{{- $attrs = append $attrs (printf "deployment.environment=%s" .Values.global.deploymentEnvironment) -}}
+{{- with (include "maple-k8s-infra.deploymentEnvironment.attrPairs" .) -}}
+{{- $attrs = append $attrs . -}}
 {{- end -}}
 {{- join "," $attrs -}}
 {{- end -}}
 
 {{- define "maple-k8s-infra.resourceAttributes.cluster" -}}
 {{- $attrs := list "maple.collector.role=cluster" (printf "k8s.cluster.name=%s" (include "maple-k8s-infra.clusterName" .)) -}}
-{{- if .Values.global.deploymentEnvironment -}}
-{{- $attrs = append $attrs (printf "deployment.environment=%s" .Values.global.deploymentEnvironment) -}}
+{{- with (include "maple-k8s-infra.deploymentEnvironment.attrPairs" .) -}}
+{{- $attrs = append $attrs . -}}
 {{- end -}}
 {{- join "," $attrs -}}
 {{- end -}}

@@ -61,6 +61,11 @@ interface QueryPanelProps {
 	onDataSourceChange: (ds: QueryBuilderDataSource) => void
 	showHeaderActions?: boolean
 	showVisibilityToggle?: boolean
+	/**
+	 * The bucket "Auto" currently resolves to for the preview ("2m"), shown in
+	 * the interval placeholder so the auto width is visible before you override it.
+	 */
+	autoIntervalLabel?: string
 }
 
 // Helpers
@@ -100,7 +105,9 @@ export function QueryPanel({
 	onDataSourceChange,
 	showHeaderActions = true,
 	showVisibilityToggle = true,
+	autoIntervalLabel,
 }: QueryPanelProps) {
+	const intervalPlaceholder = autoIntervalLabel ? `Auto (${autoIntervalLabel})` : "Auto"
 	const [collapsed, setCollapsed] = useState(false)
 	const badgeColor = queryBadgeColor(index)
 	const aggregateOptions =
@@ -192,6 +199,7 @@ export function QueryPanel({
 							onUpdate={onUpdate}
 							onMetricSelectionChange={onMetricSelectionChange}
 							onAggregationChange={onAggregationChange}
+							intervalPlaceholder={intervalPlaceholder}
 						/>
 					) : (
 						<TracesLogsBody
@@ -200,6 +208,7 @@ export function QueryPanel({
 							autocompleteValues={autocompleteValues}
 							onUpdate={onUpdate}
 							onAggregationChange={onAggregationChange}
+							intervalPlaceholder={intervalPlaceholder}
 						/>
 					)}
 
@@ -250,12 +259,14 @@ function TracesLogsBody({
 	autocompleteValues,
 	onUpdate,
 	onAggregationChange,
+	intervalPlaceholder,
 }: {
 	query: QueryBuilderQueryDraft
 	aggregateOptions: Array<{ label: string; value: string }>
 	autocompleteValues: AutocompleteValues
 	onUpdate: (updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => void
 	onAggregationChange: (aggregation: string) => void
+	intervalPlaceholder: string
 }) {
 	return (
 		<>
@@ -338,8 +349,9 @@ function TracesLogsBody({
 							stepInterval: event.target.value,
 						}))
 					}
-					placeholder="Auto"
-					className="h-8 w-20 text-xs"
+					placeholder={intervalPlaceholder}
+					// Wide enough for "Auto (15m)" — the resolved width must be readable, not clipped.
+					className="h-8 w-24 text-xs"
 				/>
 
 				<span className="text-xs text-muted-foreground">seconds</span>
@@ -360,6 +372,7 @@ function MetricsBody({
 	onUpdate,
 	onMetricSelectionChange,
 	onAggregationChange,
+	intervalPlaceholder,
 }: {
 	query: QueryBuilderQueryDraft
 	aggregateOptions: Array<{ label: string; value: string }>
@@ -374,6 +387,7 @@ function MetricsBody({
 		isMonotonic: boolean
 	}) => void
 	onAggregationChange: (aggregation: string) => void
+	intervalPlaceholder: string
 }) {
 	// Scope attribute suggestions (WHERE clause + group-by) to the selected
 	// metric — the shared context values span every metric in the org.
@@ -495,8 +509,9 @@ function MetricsBody({
 							stepInterval: event.target.value,
 						}))
 					}
-					placeholder="Auto"
-					className="h-8 w-20 text-xs"
+					placeholder={intervalPlaceholder}
+					// Wide enough for "Auto (15m)" — the resolved width must be readable, not clipped.
+					className="h-8 w-24 text-xs"
 				/>
 
 				<span className="text-xs text-muted-foreground">seconds</span>

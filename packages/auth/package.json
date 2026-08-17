@@ -17,7 +17,7 @@
 	},
 	"devDependencies": {
 		"@effect/language-service": "catalog:effect",
-		"@effect/vitest": "4.0.0-beta.105",
+		"@effect/vitest": "4.0.0-rc.108",
 		"@types/node": "catalog:tooling",
 		"typescript": "catalog:tooling",
 		"vitest": "catalog:"

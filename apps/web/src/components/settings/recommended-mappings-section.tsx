@@ -32,14 +32,14 @@ const KIND_TAG: Record<IssueKind, { label: string; className: string }> = {
 	rename: { label: "Rename", className: "text-info" },
 	"double-emission": { label: "Duplicate", className: "text-warning" },
 	naming: { label: "Naming", className: "text-warning" },
-}
+} satisfies Record<IssueKind, { label: string; className: string }>
 
 const STATUS_BADGE: Record<IssueStatus, { label: string; variant: "success" | "secondary" }> = {
 	open: { label: "Open", variant: "secondary" },
 	dismissed: { label: "Dismissed", variant: "secondary" },
 	applied: { label: "Applied", variant: "success" },
 	resolved: { label: "Resolved", variant: "secondary" },
-}
+} satisfies Record<IssueStatus, { label: string; variant: "success" | "secondary" }>
 
 const MODE = {
 	auto: {

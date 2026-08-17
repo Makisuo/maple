@@ -4,6 +4,7 @@ import { AtomRegistry } from "effect/unstable/reactivity"
 import { MapleApiAtomClient } from "./services/common/atom-client"
 import { MapleFetchHttpClientLive } from "./services/common/http-client"
 import { mapleOtelLayer } from "./services/common/otel-layer"
+import { MapleInternalAtomClient } from "./services/common/internal-atom-client"
 import { MapleApiV2AtomClient } from "./services/common/v2-atom-client"
 import { makeAppRuntime } from "./make-app-runtime"
 
@@ -24,6 +25,7 @@ export const sharedAtomRuntime = MapleApiAtomClient.runtime
 
 appRegistry.mount(sharedAtomRuntime)
 appRegistry.mount(MapleApiV2AtomClient.runtime)
+appRegistry.mount(MapleInternalAtomClient.runtime)
 
 // Extract the typed layer from the AtomRuntime for imperative Effect.provide() usage
 export const mapleApiClientLayer: Layer.Layer<MapleApiAtomClient> = appRegistry.get(
@@ -34,6 +36,10 @@ export const mapleApiV2ClientLayer: Layer.Layer<MapleApiV2AtomClient> = appRegis
 	MapleApiV2AtomClient.runtime.layer,
 )
 
+export const mapleInternalClientLayer: Layer.Layer<MapleInternalAtomClient> = appRegistry.get(
+	MapleInternalAtomClient.runtime.layer,
+)
+
 // One persistent ManagedRuntime built from both typed API layers, shared by every
 // imperative (non-React) Effect run: `runMapleApiV2` (collection write handlers) and
 // the `optimisticAction` atoms in @maple/effect-db. Building it once avoids
@@ -42,6 +48,6 @@ export const mapleApiV2ClientLayer: Layer.Layer<MapleApiV2AtomClient> = appRegis
 // Sharing the registry memo map is load-bearing: nested `Effect.provide` calls
 // reuse the atom-owned client and tracer instances instead of rebuilding them.
 export const mapleRuntime = makeAppRuntime(
-	Layer.mergeAll(mapleApiClientLayer, mapleApiV2ClientLayer),
+	Layer.mergeAll(mapleApiClientLayer, mapleApiV2ClientLayer, mapleInternalClientLayer),
 	appMemoMap,
 )

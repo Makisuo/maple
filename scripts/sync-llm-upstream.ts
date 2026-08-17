@@ -14,29 +14,36 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import * as Schema from "effect/Schema"
 
 const packageDir = fileURLToPath(new URL("../lib/llm", import.meta.url))
 const upstreamPath = join(packageDir, "UPSTREAM.json")
 
 /** Files under `src/` that Maple intentionally diverges on. Keep in sync with `MAPLE.md`. */
-const KNOWN_DELTAS = new Set(["src/schema/ids.ts", "src/schema/messages.ts"])
+const KNOWN_DELTAS = new Set([
+	"src/protocols/shared.ts",
+	"src/schema/errors.ts",
+	"src/schema/ids.ts",
+	"src/schema/messages.ts",
+])
 /** Files under `src/` that Maple adds and upstream does not have. */
 const MAPLE_ONLY = new Set(["src/schema/opencode-llm.ts"])
 
-interface Upstream {
-	readonly repo: string
-	readonly ref: string
-	readonly sha: string
-	readonly path: string
-	readonly license: string
-	readonly syncedAt: string
-}
+const Upstream = Schema.Struct({
+	repo: Schema.String,
+	ref: Schema.String,
+	sha: Schema.String,
+	path: Schema.String,
+	license: Schema.String,
+	syncedAt: Schema.String,
+})
+type Upstream = typeof Upstream.Type
 
 const args = process.argv.slice(2)
 const checkMode = args.includes("--check")
 const shaArg = args.find((arg) => arg.startsWith("--sha="))?.slice("--sha=".length)
 
-const upstream = JSON.parse(readFileSync(upstreamPath, "utf8")) as Upstream
+const upstream = Schema.decodeUnknownSync(Schema.fromJsonString(Upstream))(readFileSync(upstreamPath, "utf8"))
 const sha = shaArg ?? upstream.sha
 
 if (!/^[0-9a-f]{40}$/.test(sha)) {

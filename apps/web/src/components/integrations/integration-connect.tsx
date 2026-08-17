@@ -86,8 +86,7 @@ function useOAuthPopupFlow({
 	})
 
 	useMountEffect(() => {
-		// React Doctor cannot infer useMountEffect.
-		// oxlint-disable-next-line react-doctor/rules-of-hooks
+		// react-doctor-disable-next-line react-doctor/rules-of-hooks -- React Doctor does not recognize useMountEffect as an Effect Event boundary.
 		const poll = () => checkPopup()
 		const id = setInterval(poll, 500)
 		return () => {
@@ -137,8 +136,7 @@ function useIntegrationMessage(
 		onMessage(event.data)
 	})
 	useMountEffect(() => {
-		// React Doctor cannot infer useMountEffect.
-		// oxlint-disable-next-line react-doctor/rules-of-hooks
+		// react-doctor-disable-next-line react-doctor/rules-of-hooks -- React Doctor does not recognize useMountEffect as an Effect Event boundary.
 		const listener = (event: MessageEvent) => handleMessage(event)
 		window.addEventListener("message", listener)
 		return () => window.removeEventListener("message", listener)

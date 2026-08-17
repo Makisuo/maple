@@ -5,6 +5,7 @@ import {
 	AiTriageEvidence,
 	AiTriageResult,
 	InvestigationCreateRequest,
+	InvestigationDataCorruptionError,
 	InvestigationFreeformSubject,
 	InvestigationIncidentSubject,
 	InvestigationId,
@@ -186,6 +187,35 @@ describe("InvestigationService", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	)
 
+	it.effect("surfaces malformed stored snapshots and reports instead of erasing them", () =>
+		Effect.gen(function* () {
+			const service = yield* InvestigationService
+			const database = yield* Database
+			const created = yield* service.createInvestigation(
+				ORG,
+				null,
+				freeformRequest("stored corruption"),
+			)
+
+			yield* database.execute((db) =>
+				db.update(investigations).set({ snapshotJson: {} }).where(eq(investigations.id, created.id)),
+			)
+			const snapshotError = yield* Effect.flip(service.getInvestigation(ORG, created.id))
+			assert.instanceOf(snapshotError, InvestigationDataCorruptionError)
+			assert.strictEqual(snapshotError.field, "snapshot")
+
+			yield* database.execute((db) =>
+				db
+					.update(investigations)
+					.set({ snapshotJson: created.snapshot, reportJson: {} })
+					.where(eq(investigations.id, created.id)),
+			)
+			const reportError = yield* Effect.flip(service.getInvestigation(ORG, created.id))
+			assert.instanceOf(reportError, InvestigationDataCorruptionError)
+			assert.strictEqual(reportError.field, "report")
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
 	it.effect("updateStatus transitions an investigation and persists the new status", () =>
 		Effect.gen(function* () {
 			const service = yield* InvestigationService
@@ -273,9 +303,7 @@ describe("InvestigationService", () => {
 			const database = yield* Database
 			const started = yield* InvestigationService.pipe(
 				Effect.flatMap((service) =>
-					service.createAndStartInvestigation(ORG, null, criticalIncidentRequest("err_fanout"), {
-						automatic: false,
-					}),
+					service.createAndStartInvestigation(ORG, null, criticalIncidentRequest("err_fanout")),
 				),
 			)
 			assert.strictEqual(started.status, "investigating")
@@ -311,9 +339,7 @@ describe("InvestigationService", () => {
 		return Effect.gen(function* () {
 			const started = yield* InvestigationService.pipe(
 				Effect.flatMap((service) =>
-					service.createAndStartInvestigation(ORG, null, freeformRequest("why is checkout slow"), {
-						automatic: false,
-					}),
+					service.createAndStartInvestigation(ORG, null, freeformRequest("why is checkout slow")),
 				),
 			)
 			assert.strictEqual(started.status, "investigating")
@@ -337,14 +363,7 @@ describe("InvestigationService", () => {
 			const exit = yield* Effect.exit(
 				InvestigationService.pipe(
 					Effect.flatMap((service) =>
-						service.createAndStartInvestigation(
-							ORG,
-							null,
-							criticalIncidentRequest("err_fanout"),
-							{
-								automatic: false,
-							},
-						),
+						service.createAndStartInvestigation(ORG, null, criticalIncidentRequest("err_fanout")),
 					),
 				),
 			)
@@ -406,7 +425,6 @@ describe("InvestigationService", () => {
 				ORG,
 				null,
 				criticalIncidentRequest("err_over_budget"),
-				{ automatic: false },
 			)
 			assert.strictEqual(started.status, "investigating")
 
@@ -427,9 +445,7 @@ describe("InvestigationService", () => {
 			const service = yield* InvestigationService
 			const started = yield* InvestigationService.pipe(
 				Effect.flatMap((service) =>
-					service.createAndStartInvestigation(ORG, null, criticalIncidentRequest("err_fanout"), {
-						automatic: false,
-					}),
+					service.createAndStartInvestigation(ORG, null, criticalIncidentRequest("err_fanout")),
 				),
 			)
 			// Seed a lane from the first attempt.
@@ -481,7 +497,6 @@ describe("InvestigationService", () => {
 				ORG,
 				null,
 				freeformRequest("err_autonomous_start"),
-				{ automatic: false },
 			)
 			assert.strictEqual(started.status, "investigating")
 			assert.lengthOf(chat.beginTurns, 1)
@@ -505,9 +520,7 @@ describe("InvestigationService", () => {
 		return Effect.gen(function* () {
 			const service = yield* InvestigationService
 			const error = yield* Effect.flip(
-				service.createAndStartInvestigation(ORG, null, incidentRequest("err_no_binding"), {
-					automatic: false,
-				}),
+				service.createAndStartInvestigation(ORG, null, incidentRequest("err_no_binding")),
 			)
 			assert.instanceOf(error, InvestigationAgentUnavailableError)
 		}).pipe(Effect.provide(harness.layer))
@@ -519,9 +532,7 @@ describe("InvestigationService", () => {
 		return Effect.gen(function* () {
 			const service = yield* InvestigationService
 			const error = yield* Effect.flip(
-				service.createAndStartInvestigation(ORG, null, freeformRequest("err_busy"), {
-					automatic: false,
-				}),
+				service.createAndStartInvestigation(ORG, null, freeformRequest("err_busy")),
 			)
 			assert.instanceOf(error, InvestigationStartFailedError)
 		}).pipe(Effect.provide(harness.layer))
@@ -531,7 +542,7 @@ describe("InvestigationService", () => {
 		"submit_diagnosis writes the issue-linked ai_triage event exactly once across re-diagnosis",
 		() => {
 			const harness = makeHarness()
-			const raw = createMaplePgliteClient(harness.testDb.pglite) as unknown as MaplePgClient
+			const raw = createMaplePgliteClient(harness.testDb.pglite) as MaplePgClient
 			const issueId = asIssueId(randomUUID())
 			return Effect.gen(function* () {
 				const service = yield* InvestigationService

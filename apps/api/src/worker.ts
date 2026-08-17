@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import type { MessageBatch, ScheduledController } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
@@ -14,6 +15,7 @@ import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { serverErrorSpanMiddleware } from "./http/server-error-span"
+import { v2WorkerUnavailableResponse } from "./http/v2-worker-unavailable"
 import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
 import { classifyWorkerQueue } from "./queue-dispatch"
 
@@ -69,6 +71,12 @@ const telemetry = MapleCloudflareSDK.make({
 // hasn't fired yet. Isolated requests (e.g. a GitHub webhook) freeze the isolate
 // before a subsequent request rescues it, so the trace is silently dropped.
 // Yield one macrotask first so `span.end` runs before we drain.
+//
+// The SDK now owns this drain — `telemetry.flush` yields a macrotask inside its
+// own serialized body. This local yield is kept deliberately redundant (an extra
+// macrotask is harmless) so a version skew between the worker and the published
+// SDK can't drop spans; remove it once the SDK version carrying that change is
+// pinned here.
 const flushTelemetry = async (env: Record<string, unknown>): Promise<void> => {
 	await new Promise<void>((resolve) => setTimeout(resolve, 0))
 	await telemetry.flush(env)
@@ -224,6 +232,15 @@ const isMcpPost = (request: Request): boolean => {
 	}
 }
 
+const isV2Request = (request: Request): boolean => {
+	try {
+		const pathname = new URL(request.url).pathname
+		return pathname === "/v2" || pathname.startsWith("/v2/")
+	} catch {
+		return false
+	}
+}
+
 const readMcpSessionsBinding = (env: Record<string, unknown>): SessionsBinding | undefined => {
 	const candidate = env.MCP_SESSIONS
 	if (candidate && typeof candidate === "object" && "get" in candidate && "put" in candidate) {
@@ -336,7 +353,9 @@ const handle = async (
 			)
 		}
 		ctx.waitUntil(flushTelemetry(env))
-		return new Response("The API worker is temporarily unavailable.", { status: 504 })
+		return isV2Request(request)
+			? v2WorkerUnavailableResponse()
+			: new Response("The API worker is temporarily unavailable.", { status: 504 })
 	}
 }
 

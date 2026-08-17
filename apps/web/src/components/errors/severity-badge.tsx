@@ -7,14 +7,14 @@ export const SEVERITY_TONE: Record<IssueSeverity, string> = {
 	high: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
 	medium: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
 	low: "bg-muted text-muted-foreground",
-}
+} satisfies Record<IssueSeverity, string>
 
 export const SEVERITY_LABEL: Record<IssueSeverity, string> = {
 	critical: "Critical",
 	high: "High",
 	medium: "Medium",
 	low: "Low",
-}
+} satisfies Record<IssueSeverity, string>
 
 export const SEVERITY_ORDER: ReadonlyArray<IssueSeverity> = ["critical", "high", "medium", "low"]
 
@@ -28,7 +28,7 @@ export const SEVERITY_SOURCE_LABEL: Record<IssueSeveritySource, string> = {
 	detector: "from detector",
 	ai: "set by AI triage",
 	manual: "manual override",
-}
+} satisfies Record<IssueSeveritySource, string>
 
 export function SeverityBadge({
 	severity,

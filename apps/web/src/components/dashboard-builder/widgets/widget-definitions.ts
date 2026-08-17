@@ -15,6 +15,7 @@ import type {
 	WidgetDataSource,
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
+import { makeQueryDataSource, makeRouteDataSource, makeStaticDataSource } from "@maple/widgets/dashboard"
 
 export interface WidgetPresetDefinition {
 	id: string
@@ -33,12 +34,9 @@ export const statPresets: WidgetPresetDefinition[] = [
 		description: "Sum of traces across all services",
 		icon: PulseIcon,
 		visualization: "stat",
-		dataSource: {
-			endpoint: "service_usage",
-			transform: {
-				reduceToValue: { field: "totalTraces", aggregate: "sum" },
-			},
-		},
+		dataSource: makeRouteDataSource("service_usage", undefined, {
+			reduceToValue: { field: "totalTraces", aggregate: "sum" },
+		}),
 		display: {
 			title: "Total Traces",
 			unit: "number",
@@ -50,12 +48,9 @@ export const statPresets: WidgetPresetDefinition[] = [
 		description: "Sum of logs across all services",
 		icon: FileIcon,
 		visualization: "stat",
-		dataSource: {
-			endpoint: "service_usage",
-			transform: {
-				reduceToValue: { field: "totalLogs", aggregate: "sum" },
-			},
-		},
+		dataSource: makeRouteDataSource("service_usage", undefined, {
+			reduceToValue: { field: "totalLogs", aggregate: "sum" },
+		}),
 		display: {
 			title: "Total Logs",
 			unit: "number",
@@ -67,12 +62,9 @@ export const statPresets: WidgetPresetDefinition[] = [
 		description: "Overall error rate as percentage",
 		icon: AlertWarningIcon,
 		visualization: "stat",
-		dataSource: {
-			endpoint: "errors_summary",
-			transform: {
-				reduceToValue: { field: "errorRate", aggregate: "first" },
-			},
-		},
+		dataSource: makeRouteDataSource("errors_summary", undefined, {
+			reduceToValue: { field: "errorRate", aggregate: "first" },
+		}),
 		display: {
 			title: "Error Rate",
 			unit: "percent",
@@ -84,12 +76,9 @@ export const statPresets: WidgetPresetDefinition[] = [
 		description: "Total number of errors",
 		icon: XmarkIcon,
 		visualization: "stat",
-		dataSource: {
-			endpoint: "errors_summary",
-			transform: {
-				reduceToValue: { field: "totalErrors", aggregate: "first" },
-			},
-		},
+		dataSource: makeRouteDataSource("errors_summary", undefined, {
+			reduceToValue: { field: "totalErrors", aggregate: "first" },
+		}),
 		display: {
 			title: "Total Errors",
 			unit: "number",
@@ -101,13 +90,11 @@ export const statPresets: WidgetPresetDefinition[] = [
 		description: "Error rate for root spans only",
 		icon: AlertWarningIcon,
 		visualization: "stat",
-		dataSource: {
-			endpoint: "errors_summary",
-			params: { rootOnly: true },
-			transform: {
-				reduceToValue: { field: "errorRate", aggregate: "first" },
-			},
-		},
+		dataSource: makeRouteDataSource(
+			"errors_summary",
+			{ rootOnly: true },
+			{ reduceToValue: { field: "errorRate", aggregate: "first" } },
+		),
 		display: {
 			title: "Root Error Rate",
 			unit: "percent",
@@ -119,13 +106,11 @@ export const statPresets: WidgetPresetDefinition[] = [
 		description: "Total number of errors on root spans",
 		icon: XmarkIcon,
 		visualization: "stat",
-		dataSource: {
-			endpoint: "errors_summary",
-			params: { rootOnly: true },
-			transform: {
-				reduceToValue: { field: "totalErrors", aggregate: "first" },
-			},
-		},
+		dataSource: makeRouteDataSource(
+			"errors_summary",
+			{ rootOnly: true },
+			{ reduceToValue: { field: "totalErrors", aggregate: "first" } },
+		),
 		display: {
 			title: "Root Errors",
 			unit: "number",
@@ -137,12 +122,9 @@ export const statPresets: WidgetPresetDefinition[] = [
 		description: "Number of active services",
 		icon: GridIcon,
 		visualization: "stat",
-		dataSource: {
-			endpoint: "service_usage",
-			transform: {
-				reduceToValue: { field: "serviceName", aggregate: "count" },
-			},
-		},
+		dataSource: makeRouteDataSource("service_usage", undefined, {
+			reduceToValue: { field: "serviceName", aggregate: "count" },
+		}),
 		display: {
 			title: "Active Services",
 			unit: "number",
@@ -156,40 +138,34 @@ export const listPresets: WidgetPresetDefinition[] = [
 		name: "Recent Traces",
 		description: "Latest traces with service, duration, and status",
 		visualization: "list",
-		dataSource: {
-			endpoint: "custom_query_builder_list",
-			params: {
-				queries: [
-					{
-						id: "preset-list-traces",
-						name: "A",
-						enabled: true,
-						dataSource: "traces",
-						signalSource: "default",
-						metricName: "",
-						metricType: "sum",
-						isMonotonic: false,
-						whereClause: "root_only = true",
-						aggregation: "count",
-						stepInterval: "",
-						orderByDirection: "desc",
-						addOns: {
-							groupBy: false,
-							having: false,
-							orderBy: false,
-							limit: false,
-							legend: false,
-						},
-						groupBy: [],
-						having: "",
-						orderBy: "",
-						limit: "",
-						legend: "",
+		dataSource: makeQueryDataSource({
+			resultShape: "list",
+			queries: [
+				{
+					id: "preset-list-traces",
+					name: "A",
+					enabled: true,
+					dataSource: "traces",
+					whereClause: "root_only = true",
+					aggregation: "count",
+					stepInterval: "",
+					orderByDirection: "desc",
+					addOns: {
+						groupBy: false,
+						having: false,
+						orderBy: false,
+						limit: false,
+						legend: false,
 					},
-				],
-				limit: 25,
-			},
-		},
+					groupBy: [],
+					having: "",
+					orderBy: "",
+					limit: "",
+					legend: "",
+				},
+			],
+			limit: 25,
+		}),
 		display: {
 			title: "Recent Traces",
 			listDataSource: "traces",
@@ -209,40 +185,34 @@ export const listPresets: WidgetPresetDefinition[] = [
 		name: "Error Traces",
 		description: "Traces with errors",
 		visualization: "list",
-		dataSource: {
-			endpoint: "custom_query_builder_list",
-			params: {
-				queries: [
-					{
-						id: "preset-list-errors",
-						name: "A",
-						enabled: true,
-						dataSource: "traces",
-						signalSource: "default",
-						metricName: "",
-						metricType: "sum",
-						isMonotonic: false,
-						whereClause: "root_only = true AND has_error = true",
-						aggregation: "count",
-						stepInterval: "",
-						orderByDirection: "desc",
-						addOns: {
-							groupBy: false,
-							having: false,
-							orderBy: false,
-							limit: false,
-							legend: false,
-						},
-						groupBy: [],
-						having: "",
-						orderBy: "",
-						limit: "",
-						legend: "",
+		dataSource: makeQueryDataSource({
+			resultShape: "list",
+			queries: [
+				{
+					id: "preset-list-errors",
+					name: "A",
+					enabled: true,
+					dataSource: "traces",
+					whereClause: "root_only = true AND has_error = true",
+					aggregation: "count",
+					stepInterval: "",
+					orderByDirection: "desc",
+					addOns: {
+						groupBy: false,
+						having: false,
+						orderBy: false,
+						limit: false,
+						legend: false,
 					},
-				],
-				limit: 25,
-			},
-		},
+					groupBy: [],
+					having: "",
+					orderBy: "",
+					limit: "",
+					legend: "",
+				},
+			],
+			limit: 25,
+		}),
 		display: {
 			title: "Error Traces",
 			listDataSource: "traces",
@@ -262,10 +232,7 @@ export const listPresets: WidgetPresetDefinition[] = [
 		name: "Recent Logs",
 		description: "Latest log entries",
 		visualization: "list",
-		dataSource: {
-			endpoint: "list_logs",
-			params: { limit: 25 },
-		},
+		dataSource: makeRouteDataSource("list_logs", { limit: 25 }),
 		display: {
 			title: "Recent Logs",
 			listDataSource: "logs",
@@ -316,22 +283,19 @@ export const piePresets: WidgetPresetDefinition[] = [
 		description: "Distribution of errors across services",
 		icon: AlertWarningIcon,
 		visualization: "pie",
-		dataSource: {
-			endpoint: "custom_query_builder_breakdown",
-			params: {
-				queries: [
-					buildBreakdownQuery(0, {
-						dataSource: "traces",
-						whereClause: "has_error = true",
-						aggregation: "count",
-						groupBy: ["service.name"],
-					}),
-				],
-				formulas: [],
-				comparison: { mode: "none", includePercentChange: false },
-				debug: false,
-			},
-		},
+		dataSource: makeQueryDataSource({
+			resultShape: "breakdown",
+			queries: [
+				buildBreakdownQuery(0, {
+					dataSource: "traces",
+					whereClause: "has_error = true",
+					aggregation: "count",
+					groupBy: ["service.name"],
+				}),
+			],
+			formulas: [],
+			comparison: { mode: "none", includePercentChange: false },
+		}),
 		display: {
 			title: "Errors by Service",
 			chartId: "query-builder-pie",
@@ -345,22 +309,19 @@ export const piePresets: WidgetPresetDefinition[] = [
 		description: "Distribution of log volume by severity level",
 		icon: FileIcon,
 		visualization: "pie",
-		dataSource: {
-			endpoint: "custom_query_builder_breakdown",
-			params: {
-				queries: [
-					buildBreakdownQuery(0, {
-						dataSource: "logs",
-						whereClause: "",
-						aggregation: "count",
-						groupBy: ["severity"],
-					}),
-				],
-				formulas: [],
-				comparison: { mode: "none", includePercentChange: false },
-				debug: false,
-			},
-		},
+		dataSource: makeQueryDataSource({
+			resultShape: "breakdown",
+			queries: [
+				buildBreakdownQuery(0, {
+					dataSource: "logs",
+					whereClause: "",
+					aggregation: "count",
+					groupBy: ["severity"],
+				}),
+			],
+			formulas: [],
+			comparison: { mode: "none", includePercentChange: false },
+		}),
 		display: {
 			title: "Logs by Severity",
 			chartId: "query-builder-pie",
@@ -374,22 +335,19 @@ export const piePresets: WidgetPresetDefinition[] = [
 		description: "Distribution of trace volume across services",
 		icon: PulseIcon,
 		visualization: "pie",
-		dataSource: {
-			endpoint: "custom_query_builder_breakdown",
-			params: {
-				queries: [
-					buildBreakdownQuery(0, {
-						dataSource: "traces",
-						whereClause: "root_only = true",
-						aggregation: "count",
-						groupBy: ["service.name"],
-					}),
-				],
-				formulas: [],
-				comparison: { mode: "none", includePercentChange: false },
-				debug: false,
-			},
-		},
+		dataSource: makeQueryDataSource({
+			resultShape: "breakdown",
+			queries: [
+				buildBreakdownQuery(0, {
+					dataSource: "traces",
+					whereClause: "root_only = true",
+					aggregation: "count",
+					groupBy: ["service.name"],
+				}),
+			],
+			formulas: [],
+			comparison: { mode: "none", includePercentChange: false },
+		}),
 		display: {
 			title: "Traces by Service",
 			chartId: "query-builder-pie",
@@ -406,22 +364,19 @@ export const funnelPresets: WidgetPresetDefinition[] = [
 		description: "Trace volume per service as a descending funnel",
 		icon: PulseIcon,
 		visualization: "funnel",
-		dataSource: {
-			endpoint: "custom_query_builder_breakdown",
-			params: {
-				queries: [
-					buildBreakdownQuery(0, {
-						dataSource: "traces",
-						whereClause: "root_only = true",
-						aggregation: "count",
-						groupBy: ["service.name"],
-					}),
-				],
-				formulas: [],
-				comparison: { mode: "none", includePercentChange: false },
-				debug: false,
-			},
-		},
+		dataSource: makeQueryDataSource({
+			resultShape: "breakdown",
+			queries: [
+				buildBreakdownQuery(0, {
+					dataSource: "traces",
+					whereClause: "root_only = true",
+					aggregation: "count",
+					groupBy: ["service.name"],
+				}),
+			],
+			formulas: [],
+			comparison: { mode: "none", includePercentChange: false },
+		}),
 		display: {
 			title: "Traces by Service",
 			chartId: "query-builder-funnel",
@@ -435,22 +390,19 @@ export const funnelPresets: WidgetPresetDefinition[] = [
 		description: "Error volume per service ranked as a funnel",
 		icon: AlertWarningIcon,
 		visualization: "funnel",
-		dataSource: {
-			endpoint: "custom_query_builder_breakdown",
-			params: {
-				queries: [
-					buildBreakdownQuery(0, {
-						dataSource: "traces",
-						whereClause: "has_error = true",
-						aggregation: "count",
-						groupBy: ["service.name"],
-					}),
-				],
-				formulas: [],
-				comparison: { mode: "none", includePercentChange: false },
-				debug: false,
-			},
-		},
+		dataSource: makeQueryDataSource({
+			resultShape: "breakdown",
+			queries: [
+				buildBreakdownQuery(0, {
+					dataSource: "traces",
+					whereClause: "has_error = true",
+					aggregation: "count",
+					groupBy: ["service.name"],
+				}),
+			],
+			formulas: [],
+			comparison: { mode: "none", includePercentChange: false },
+		}),
 		display: {
 			title: "Errors by Service",
 			chartId: "query-builder-funnel",
@@ -467,22 +419,19 @@ export const hbarPresets: WidgetPresetDefinition[] = [
 		description: "Top span names by volume, each as a share of the total",
 		icon: ChartBarHorizontalIcon,
 		visualization: "hbar",
-		dataSource: {
-			endpoint: "custom_query_builder_breakdown",
-			params: {
-				queries: [
-					buildBreakdownQuery(0, {
-						dataSource: "traces",
-						whereClause: "",
-						aggregation: "count",
-						groupBy: ["span.name"],
-					}),
-				],
-				formulas: [],
-				comparison: { mode: "none", includePercentChange: false },
-				debug: false,
-			},
-		},
+		dataSource: makeQueryDataSource({
+			resultShape: "breakdown",
+			queries: [
+				buildBreakdownQuery(0, {
+					dataSource: "traces",
+					whereClause: "",
+					aggregation: "count",
+					groupBy: ["span.name"],
+				}),
+			],
+			formulas: [],
+			comparison: { mode: "none", includePercentChange: false },
+		}),
 		display: {
 			title: "Busiest Operations",
 			chartId: "query-builder-hbar",
@@ -495,22 +444,19 @@ export const hbarPresets: WidgetPresetDefinition[] = [
 		description: "Span volume per service, ranked",
 		icon: PulseIcon,
 		visualization: "hbar",
-		dataSource: {
-			endpoint: "custom_query_builder_breakdown",
-			params: {
-				queries: [
-					buildBreakdownQuery(0, {
-						dataSource: "traces",
-						whereClause: "",
-						aggregation: "count",
-						groupBy: ["service.name"],
-					}),
-				],
-				formulas: [],
-				comparison: { mode: "none", includePercentChange: false },
-				debug: false,
-			},
-		},
+		dataSource: makeQueryDataSource({
+			resultShape: "breakdown",
+			queries: [
+				buildBreakdownQuery(0, {
+					dataSource: "traces",
+					whereClause: "",
+					aggregation: "count",
+					groupBy: ["service.name"],
+				}),
+			],
+			formulas: [],
+			comparison: { mode: "none", includePercentChange: false },
+		}),
 		display: {
 			title: "Spans by Service",
 			chartId: "query-builder-hbar",
@@ -529,41 +475,35 @@ export const histogramPresets: WidgetPresetDefinition[] = [
 		// A list of raw root-span durations, bucketized client-side by the
 		// histogram chart — a count-by-service breakdown is NOT a duration
 		// distribution (MAP-49).
-		dataSource: {
-			endpoint: "custom_query_builder_list",
-			params: {
-				queries: [
-					{
-						id: "preset-histogram-durations",
-						name: "A",
-						enabled: true,
-						dataSource: "traces",
-						signalSource: "default",
-						metricName: "",
-						metricType: "sum",
-						isMonotonic: false,
-						whereClause: "root_only = true",
-						aggregation: "count",
-						stepInterval: "",
-						orderByDirection: "desc",
-						addOns: {
-							groupBy: false,
-							having: false,
-							orderBy: false,
-							limit: false,
-							legend: false,
-						},
-						groupBy: [],
-						having: "",
-						orderBy: "",
-						limit: "",
-						legend: "",
+		dataSource: makeQueryDataSource({
+			resultShape: "list",
+			queries: [
+				{
+					id: "preset-histogram-durations",
+					name: "A",
+					enabled: true,
+					dataSource: "traces",
+					whereClause: "root_only = true",
+					aggregation: "count",
+					stepInterval: "",
+					orderByDirection: "desc",
+					addOns: {
+						groupBy: false,
+						having: false,
+						orderBy: false,
+						limit: false,
+						legend: false,
 					},
-				],
-				limit: 200,
-				columns: ["durationMs"],
-			},
-		},
+					groupBy: [],
+					having: "",
+					orderBy: "",
+					limit: "",
+					legend: "",
+				},
+			],
+			limit: 200,
+			columns: ["durationMs"],
+		}),
 		display: {
 			title: "Trace Duration Distribution",
 			chartId: "query-builder-histogram",
@@ -577,22 +517,19 @@ export const histogramPresets: WidgetPresetDefinition[] = [
 		description: "Distribution of log volume across services",
 		icon: ChartBarIcon,
 		visualization: "histogram",
-		dataSource: {
-			endpoint: "custom_query_builder_breakdown",
-			params: {
-				queries: [
-					buildBreakdownQuery(0, {
-						dataSource: "logs",
-						whereClause: "",
-						aggregation: "count",
-						groupBy: ["service.name"],
-					}),
-				],
-				formulas: [],
-				comparison: { mode: "none", includePercentChange: false },
-				debug: false,
-			},
-		},
+		dataSource: makeQueryDataSource({
+			resultShape: "breakdown",
+			queries: [
+				buildBreakdownQuery(0, {
+					dataSource: "logs",
+					whereClause: "",
+					aggregation: "count",
+					groupBy: ["service.name"],
+				}),
+			],
+			formulas: [],
+			comparison: { mode: "none", includePercentChange: false },
+		}),
 		display: {
 			title: "Log Volume by Service",
 			chartId: "query-builder-histogram",
@@ -609,32 +546,29 @@ export const heatmapPresets: WidgetPresetDefinition[] = [
 		description: "Density of errors across services and types",
 		icon: ChartLineIcon,
 		visualization: "heatmap",
-		dataSource: {
-			endpoint: "custom_query_builder_breakdown",
-			params: {
-				queries: [
-					buildBreakdownQuery(0, {
-						name: "A",
-						legend: "Errors",
-						dataSource: "traces",
-						whereClause: "has_error = true",
-						aggregation: "count",
-						groupBy: ["service.name"],
-					}),
-					buildBreakdownQuery(1, {
-						name: "B",
-						legend: "OK",
-						dataSource: "traces",
-						whereClause: "has_error = false",
-						aggregation: "count",
-						groupBy: ["service.name"],
-					}),
-				],
-				formulas: [],
-				comparison: { mode: "none", includePercentChange: false },
-				debug: false,
-			},
-		},
+		dataSource: makeQueryDataSource({
+			resultShape: "breakdown",
+			queries: [
+				buildBreakdownQuery(0, {
+					name: "A",
+					legend: "Errors",
+					dataSource: "traces",
+					whereClause: "has_error = true",
+					aggregation: "count",
+					groupBy: ["service.name"],
+				}),
+				buildBreakdownQuery(1, {
+					name: "B",
+					legend: "OK",
+					dataSource: "traces",
+					whereClause: "has_error = false",
+					aggregation: "count",
+					groupBy: ["service.name"],
+				}),
+			],
+			formulas: [],
+			comparison: { mode: "none", includePercentChange: false },
+		}),
 		display: {
 			title: "Errors vs OK by Service",
 			chartId: "query-builder-heatmap",
@@ -651,7 +585,7 @@ export const markdownPresets: WidgetPresetDefinition[] = [
 		description: "Static markdown note for context, links, or runbooks",
 		icon: FileIcon,
 		visualization: "markdown",
-		dataSource: { endpoint: "markdown_static" },
+		dataSource: makeStaticDataSource(),
 		display: {
 			title: "Note",
 			markdown: {
@@ -668,11 +602,7 @@ export const tablePresets: WidgetPresetDefinition[] = [
 		name: "Recent Traces",
 		description: "Latest traces with duration and status",
 		visualization: "table",
-		dataSource: {
-			endpoint: "list_traces",
-			params: { limit: 5 },
-			transform: { limit: 5 },
-		},
+		dataSource: makeRouteDataSource("list_traces", { limit: 5 }, { limit: 5 }),
 		display: {
 			title: "Recent Traces",
 			columns: [
@@ -687,11 +617,7 @@ export const tablePresets: WidgetPresetDefinition[] = [
 		name: "Errors by Type",
 		description: "Error types with counts and affected services",
 		visualization: "table",
-		dataSource: {
-			endpoint: "errors_by_type",
-			params: { limit: 5 },
-			transform: { limit: 5 },
-		},
+		dataSource: makeRouteDataSource("errors_by_type", { limit: 5 }, { limit: 5 }),
 		display: {
 			title: "Errors by Type",
 			columns: [
@@ -706,11 +632,7 @@ export const tablePresets: WidgetPresetDefinition[] = [
 		name: "Root Errors by Type",
 		description: "Error types on root spans only",
 		visualization: "table",
-		dataSource: {
-			endpoint: "errors_by_type",
-			params: { limit: 5, rootOnly: true },
-			transform: { limit: 5 },
-		},
+		dataSource: makeRouteDataSource("errors_by_type", { limit: 5, rootOnly: true }, { limit: 5 }),
 		display: {
 			title: "Root Errors by Type",
 			columns: [
@@ -725,9 +647,7 @@ export const tablePresets: WidgetPresetDefinition[] = [
 		name: "Service Overview",
 		description: "Services with latency, errors, and throughput",
 		visualization: "table",
-		dataSource: {
-			endpoint: "service_overview",
-		},
+		dataSource: makeRouteDataSource("service_overview"),
 		display: {
 			title: "Service Overview",
 			columns: [

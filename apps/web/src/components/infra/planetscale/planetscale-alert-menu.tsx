@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui
 import { BellIcon } from "@/components/icons"
 import { encodeAlertChartToSearchParam } from "@/lib/alerts/widget-chart-param"
 import { planetScaleAlertSuggestions } from "./planetscale-alert-suggestions"
+import { makeQueryDataSource } from "@maple/widgets/dashboard"
 
 /**
  * "Alert on this" for a PlanetScale database.
@@ -71,10 +72,10 @@ export function PlanetScaleAlertMenu({
 									widget: {
 										id: crypto.randomUUID(),
 										visualization: "chart",
-										dataSource: {
-											endpoint: "custom_query_builder_timeseries",
-											params: { queries: [suggestion.draft] },
-										},
+										dataSource: makeQueryDataSource({
+											resultShape: "timeseries",
+											queries: [suggestion.draft],
+										}),
 										display: { title: `${suggestion.title} · ${database}` },
 									},
 								})

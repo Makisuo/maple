@@ -1,12 +1,15 @@
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useCallback, useMemo, useRef, useState } from "react"
-import { Bar, BarChart, CartesianGrid, ReferenceArea, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, ReferenceArea } from "recharts"
 
 import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
@@ -207,13 +210,10 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 							onMouseUp={handleMouseUp}
 							onMouseLeave={handleMouseLeave}
 						>
-							<CartesianGrid vertical={false} strokeDasharray="3 3" />
-							<XAxis
+							<ChartGrid />
+							<ChartXAxis
 								dataKey="bucket"
-								tickLine={false}
-								axisLine={false}
 								tickMargin={4}
-								fontSize={10}
 								minTickGap={50}
 								tickFormatter={(value) =>
 									formatBucketLabel(
@@ -223,11 +223,8 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 									)
 								}
 							/>
-							<YAxis
-								tickLine={false}
-								axisLine={false}
+							<ChartYAxis
 								tickMargin={4}
-								fontSize={10}
 								width={40}
 								tickFormatter={(value) => formatNumber(value)}
 							/>

@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test"
 
 // Mirrors service-detail.perf.spec.ts for the infra detail chart grids
 // (host metric strips, k8s pod/node charts, infra correlation panel). The
-// /infra-bench route renders the real ChartViews with synthetic rows in one
+// /lab/bench/infra route renders the real ChartViews with synthetic rows in one
 // linked-cursor group; ?mode=recharts restores the old syncId event bus as the
 // render-storm baseline.
 
@@ -33,7 +33,7 @@ declare global {
 }
 
 async function measurePointerSweep(page: Page, mode: "recharts" | "cursor"): Promise<InteractionMetrics> {
-	await page.goto(`/infra-bench?mode=${mode}`)
+	await page.goto(`/lab/bench/infra?mode=${mode}`)
 	await page.waitForFunction(() => window.__infraBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})
@@ -94,7 +94,7 @@ test("infra charts default to the linked-cursor sync mode", async ({ page }) => 
 	// No ?mode= — the bench omits the prop so this exercises the ChartViews'
 	// default. A revert of the "cursor" default (back to recharts syncId storms)
 	// removes the overlays and fails here.
-	await page.goto("/infra-bench")
+	await page.goto("/lab/bench/infra")
 	await page.waitForFunction(() => window.__infraBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})
@@ -103,7 +103,7 @@ test("infra charts default to the linked-cursor sync mode", async ({ page }) => 
 })
 
 test("infra cursor keeps one tooltip and linked sibling cursors", async ({ page }) => {
-	await page.goto("/infra-bench?mode=cursor")
+	await page.goto("/lab/bench/infra?mode=cursor")
 	await page.waitForFunction(() => window.__infraBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})

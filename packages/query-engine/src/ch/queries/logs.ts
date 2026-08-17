@@ -266,7 +266,7 @@ export function logsTimeseriesQuery(opts: LogsTimeseriesOpts): CHQuery<ColumnDef
 			])
 			.groupBy("bucket", "groupName")
 			.orderBy(["bucket", "asc"], ["groupName", "asc"])
-		return finalizeTimeseries(mv, LOGS_TS_COLUMNS, "count", opts) as unknown as CHQuery<
+		return finalizeTimeseries(mv, LOGS_TS_COLUMNS, "count", opts) as CHQuery<
 			ColumnDefs,
 			LogsTimeseriesOutput,
 			{}
@@ -299,7 +299,7 @@ export function logsTimeseriesQuery(opts: LogsTimeseriesOpts): CHQuery<ColumnDef
 		])
 		.groupBy("bucket", "groupName")
 		.orderBy(["bucket", "asc"], ["groupName", "asc"])
-	return finalizeTimeseries(raw, LOGS_TS_COLUMNS, "count", opts) as unknown as CHQuery<
+	return finalizeTimeseries(raw, LOGS_TS_COLUMNS, "count", opts) as CHQuery<
 		ColumnDefs,
 		LogsTimeseriesOutput,
 		{}
@@ -373,7 +373,7 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 			.groupBy("name")
 			.orderBy(["count", "desc"])
 		const result = opts.limit === null ? raw.format("JSON") : raw.limit(opts.limit ?? 10).format("JSON")
-		return result as unknown as CHQuery<ColumnDefs, LogsBreakdownOutput, {}>
+		return result as CHQuery<ColumnDefs, LogsBreakdownOutput, {}>
 	}
 
 	const rawEdges = from(Logs)
@@ -421,7 +421,7 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 		.orderBy(["count", "desc"])
 	const result =
 		opts.limit === null ? combined.format("JSON") : combined.limit(opts.limit ?? 10).format("JSON")
-	return result as unknown as CHQuery<ColumnDefs, LogsBreakdownOutput, {}>
+	return result as CHQuery<ColumnDefs, LogsBreakdownOutput, {}>
 }
 
 // Count query
@@ -450,7 +450,7 @@ export function logsCountQuery(opts: LogsQueryOpts): CHQuery<ColumnDefs, LogsCou
 				...logAttributeConditions(opts),
 			])
 			.format("JSON")
-		return raw as unknown as CHQuery<ColumnDefs, LogsCountOutput, {}>
+		return raw as CHQuery<ColumnDefs, LogsCountOutput, {}>
 	}
 
 	const rawEdges = from(Logs)
@@ -485,7 +485,7 @@ export function logsCountQuery(opts: LogsQueryOpts): CHQuery<ColumnDefs, LogsCou
 			total: CH.sum($.total),
 		}))
 		.format("JSON")
-	return combined as unknown as CHQuery<ColumnDefs, LogsCountOutput, {}>
+	return combined as CHQuery<ColumnDefs, LogsCountOutput, {}>
 }
 
 // List query

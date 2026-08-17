@@ -65,7 +65,15 @@ export function registerUpdateErrorNotificationPolicyTool(server: McpToolRegistr
 				notifyOnResolve: boolean
 				minOccurrenceCount: number
 				severity: AlertSeverity
-			}> = {}
+			}> = {} satisfies Partial<{
+				enabled: boolean
+				destinationIds: ReadonlyArray<AlertDestinationId>
+				notifyOnFirstSeen: boolean
+				notifyOnRegression: boolean
+				notifyOnResolve: boolean
+				minOccurrenceCount: number
+				severity: AlertSeverity
+			}>
 			if (enabled !== undefined) patch.enabled = enabled
 			if (destination_ids !== undefined) {
 				const tokens = destination_ids

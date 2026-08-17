@@ -61,6 +61,8 @@ const compiled = compile(listRuleChecksQuery({ limit: 1 }), {
 	orgId: "org_test",
 	ruleId: "rule_test",
 })
+const _ingestRoutingIsPartOfTheCompiledType: "ingest" = compiled.routing
+void _ingestRoutingIsPartOfTheCompiledType
 
 // The old `sqlQuery(tenant, sql)` entry point took a raw string; scope now
 // travels on the compiled query, so these execution/span/retry tests wrap their
@@ -341,7 +343,8 @@ describe("makeWarehouseExecutor compiled-query defaults", () => {
 			const error = yield* executor
 				.compiledQuery(tenant, withSchema, { context: "serviceOverview" })
 				.pipe(Effect.flip)
-			assert.strictEqual(error._tag, "@maple/http/errors/WarehouseSchemaDriftError")
+			assert.strictEqual(error._tag, "@maple/http/errors/WarehouseResultDecodeError")
+			if (error._tag !== "@maple/http/errors/WarehouseResultDecodeError") return
 			// The real query identity, not the old constant "compiledQuery".
 			assert.strictEqual(error.pipeName, "serviceOverview")
 		}),

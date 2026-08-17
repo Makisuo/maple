@@ -68,7 +68,7 @@ export function mintOrgReadJwt(input: MintOrgReadJwtInput): string {
 			name: tokenNameForOrg(input.orgId),
 			exp: input.nowSeconds + input.ttlSeconds,
 			scopes,
-			...(input.rpsLimit === undefined ? {} : { limits: { rps: input.rpsLimit } }),
+			...(!(input.rpsLimit === undefined) ? { limits: { rps: input.rpsLimit } } : undefined),
 		}),
 	)
 	const signingInput = `${header}.${payload}`

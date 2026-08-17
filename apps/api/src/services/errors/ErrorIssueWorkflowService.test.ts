@@ -184,4 +184,110 @@ describe("ErrorIssueWorkflowService", () => {
 			assert.lengthOf(events, 0)
 		}).pipe(Effect.provide(makeLayer())),
 	)
+
+	// The lease used to advance only via an explicit `heartbeat` call, which agents
+	// never made: `claim` was used 11 times in 8 days, `heartbeat` zero. Issues were
+	// claimed, worked, and silently dropped back to `todo` when the lease lapsed.
+	// Acting on an issue is now itself the renewal.
+	describe("lease renews on the holder's own activity", () => {
+		const seedLeased = (issueId: ErrorIssueId, holderId: string, now: number) =>
+			seedIssue(issueId, {
+				workflowState: "in_progress",
+				leaseHolderActorId: holderId,
+				claimedAt: new Date(now),
+				leaseExpiresAt: new Date(now + 60_000),
+			})
+
+		const leaseExpiryOf = (issueId: ErrorIssueId) =>
+			Effect.gen(function* () {
+				const database = yield* Database
+				const [row] = yield* database.execute((db) =>
+					db
+						.select({ leaseExpiresAt: errorIssues.leaseExpiresAt })
+						.from(errorIssues)
+						.where(and(eq(errorIssues.orgId, ORG), eq(errorIssues.id, issueId))),
+				)
+				return row?.leaseExpiresAt ?? null
+			})
+
+		it.effect("extends the lease when the holder comments", () =>
+			Effect.gen(function* () {
+				const workflow = yield* ErrorIssueWorkflowService
+				const actors = yield* ErrorActorsService
+				const holder = yield* actors.ensureUserActor(ORG, USER)
+				const issueId = asIssueId(randomUUID())
+				const now = yield* Clock.currentTimeMillis
+				yield* seedLeased(issueId, holder.id, now)
+
+				const before = yield* leaseExpiryOf(issueId)
+				yield* workflow.commentOnIssue(ORG, holder.id, issueId, "still digging")
+				const after = yield* leaseExpiryOf(issueId)
+
+				assert.isNotNull(before)
+				assert.isNotNull(after)
+				expect(after.getTime()).toBeGreaterThan(before.getTime())
+			}).pipe(Effect.provide(makeLayer())),
+		)
+
+		it.effect("extends the lease when the holder sets severity", () =>
+			Effect.gen(function* () {
+				const workflow = yield* ErrorIssueWorkflowService
+				const actors = yield* ErrorActorsService
+				const holder = yield* actors.ensureUserActor(ORG, USER)
+				const issueId = asIssueId(randomUUID())
+				const now = yield* Clock.currentTimeMillis
+				yield* seedLeased(issueId, holder.id, now)
+
+				const before = yield* leaseExpiryOf(issueId)
+				yield* workflow.setSeverity(ORG, holder.id, issueId, "high")
+				const after = yield* leaseExpiryOf(issueId)
+
+				assert.isNotNull(before)
+				assert.isNotNull(after)
+				expect(after.getTime()).toBeGreaterThan(before.getTime())
+			}).pipe(Effect.provide(makeLayer())),
+		)
+
+		// A non-holder acting on the issue must not slide the real holder's deadline.
+		it.effect("leaves the lease alone when someone else acts", () =>
+			Effect.gen(function* () {
+				const workflow = yield* ErrorIssueWorkflowService
+				const actors = yield* ErrorActorsService
+				const holder = yield* actors.ensureUserActor(ORG, USER)
+				const other = yield* actors.ensureUserActor(ORG, OTHER_USER)
+				const issueId = asIssueId(randomUUID())
+				const now = yield* Clock.currentTimeMillis
+				yield* seedLeased(issueId, holder.id, now)
+
+				const before = yield* leaseExpiryOf(issueId)
+				yield* workflow.commentOnIssue(ORG, other.id, issueId, "drive-by note")
+				const after = yield* leaseExpiryOf(issueId)
+
+				assert.isNotNull(before)
+				assert.isNotNull(after)
+				expect(after.getTime()).toBe(before.getTime())
+			}).pipe(Effect.provide(makeLayer())),
+		)
+
+		// Terminal states end the work, so they must still clear the lease rather
+		// than renew it — the renewal branch must not shadow the release branch.
+		it.effect("clears rather than extends the lease on a terminal transition", () =>
+			Effect.gen(function* () {
+				const workflow = yield* ErrorIssueWorkflowService
+				const actors = yield* ErrorActorsService
+				const holder = yield* actors.ensureUserActor(ORG, USER)
+				const issueId = asIssueId(randomUUID())
+				const now = yield* Clock.currentTimeMillis
+				yield* seedLeased(issueId, holder.id, now)
+
+				const done = yield* workflow.releaseIssue(ORG, holder.id, issueId, {
+					transitionTo: "done",
+				})
+
+				assert.strictEqual(done.workflowState, "done")
+				assert.isNull(done.leaseExpiresAt)
+				assert.isNull(done.leaseHolder)
+			}).pipe(Effect.provide(makeLayer())),
+		)
+	})
 })

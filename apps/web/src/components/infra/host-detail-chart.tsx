@@ -1,12 +1,15 @@
 import { useId, useMemo } from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, Line, LineChart, ReferenceLine } from "recharts"
 
 import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
@@ -17,13 +20,12 @@ import type { HostInfraMetric } from "@/api/warehouse/infra"
 import { formatBytesPerSecond } from "@maple/ui/lib/format"
 import {
 	CHART_EMPTY_MESSAGE,
-	CHART_GRID_DASH,
 	formatValueWithUnit,
 	transformRows,
 	UNNAMED_SERIES_KEY,
 } from "./chart-utils"
 import { InfraTooltipItem } from "./chart-tooltip"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { LinkedCursorOverlay, linkedCursorChartProps } from "@/hooks/use-linked-cursor"
 
 interface HostDetailChartProps {
@@ -51,7 +53,7 @@ const HOST_METRIC_LABELS: Record<HostInfraMetric, string> = {
 	filesystem: "Disk",
 	network: "Network",
 	load15: "Load (15m)",
-}
+} satisfies Record<HostInfraMetric, string>
 
 export function HostDetailChart({
 	hostName,
@@ -71,7 +73,7 @@ export function HostDetailChart({
 		.onInitial(() => <Skeleton className="h-[220px] w-full rounded-none" />)
 		.onError((err) => (
 			<div className="flex h-[220px] items-center justify-center border border-destructive/40 bg-destructive/5 font-mono text-[11px] text-destructive">
-				{formatBackendError(err).description}
+				{displayError(err).message}
 			</div>
 		))
 		.onSuccess((response, holder) => (
@@ -104,7 +106,7 @@ interface HostMetricChartViewProps {
 	syncMode?: "recharts" | "cursor"
 }
 
-// Exported for the /infra-bench synthetic perf harness.
+// Exported for the /lab/bench/infra synthetic perf harness.
 export function HostMetricChartView({
 	rows,
 	unit,
@@ -217,26 +219,13 @@ export function HostMetricChartView({
 									)
 								})}
 							</defs>
-							<CartesianGrid
-								strokeDasharray={CHART_GRID_DASH}
-								stroke="var(--border)"
-								vertical={false}
-							/>
-							<XAxis
+							<ChartGrid />
+							<ChartXAxis
 								dataKey="time"
-								tickLine={false}
-								axisLine={false}
-								tickMargin={8}
-								fontSize={10}
-								stroke="var(--muted-foreground)"
 							/>
-							<YAxis
-								tickLine={false}
-								axisLine={false}
+							<ChartYAxis
 								tickMargin={8}
-								fontSize={10}
 								width={52}
-								stroke="var(--muted-foreground)"
 								tickFormatter={tickFormatter}
 							/>
 							{showThreshold && (
@@ -254,7 +243,6 @@ export function HostMetricChartView({
 								/>
 							)}
 							<ChartTooltip
-								cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 								content={
 									<ChartTooltipContent
 										indicator="dot"
@@ -287,30 +275,16 @@ export function HostMetricChartView({
 						</AreaChart>
 					) : (
 						<LineChart data={data} margin={margin} syncId={rechartsSyncId} syncMethod="value">
-							<CartesianGrid
-								strokeDasharray={CHART_GRID_DASH}
-								stroke="var(--border)"
-								vertical={false}
-							/>
-							<XAxis
+							<ChartGrid />
+							<ChartXAxis
 								dataKey="time"
-								tickLine={false}
-								axisLine={false}
-								tickMargin={8}
-								fontSize={10}
-								stroke="var(--muted-foreground)"
 							/>
-							<YAxis
-								tickLine={false}
-								axisLine={false}
+							<ChartYAxis
 								tickMargin={8}
-								fontSize={10}
 								width={64}
-								stroke="var(--muted-foreground)"
 								tickFormatter={tickFormatter}
 							/>
 							<ChartTooltip
-								cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 								content={
 									<ChartTooltipContent
 										indicator="line"

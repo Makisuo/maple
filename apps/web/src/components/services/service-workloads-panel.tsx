@@ -24,7 +24,7 @@ const KIND_LABEL: Record<ServiceWorkload["workloadKind"], string> = {
 	statefulset: "StatefulSet",
 	daemonset: "DaemonSet",
 	unknown: "Workload",
-}
+} satisfies Record<ServiceWorkload["workloadKind"], string>
 
 /**
  * Kubernetes footprint for this service: the workload(s) it runs as, pod count,

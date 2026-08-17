@@ -25,6 +25,7 @@ export {
 	makeTurnUsage,
 	type ChatTurnEvent,
 	type ChatTurnInput,
+	type TurnCompletion,
 	type TurnObservability,
 	type TurnUsage,
 } from "./types"

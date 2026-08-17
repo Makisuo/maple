@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
 import { Fragment, useCallback, useMemo, useRef, useState } from "react"
@@ -75,7 +75,7 @@ type RuleDetailTab = (typeof tabValues)[number]
 const SIGNAL_SOURCE_DESCRIPTION: Record<SignalSource, string> = {
 	preview: "The rule's query, replayed now over the selected window.",
 	checks: "What the evaluator actually observed and stored, one point per check.",
-}
+} satisfies Record<SignalSource, string>
 
 function formatBucketRange(bucket: { start: number; end: number }): string {
 	const time = (ms: number) =>
@@ -363,7 +363,7 @@ function RuleDetailContent() {
 					type: "incident",
 					incident_kind: "alert",
 					incident_id: incident.id,
-					...(incident.errorIssueId ? { issue_id: incident.errorIssueId } : {}),
+					...(incident.errorIssueId ? { issue_id: incident.errorIssueId } : undefined),
 				} as never,
 				snapshot: {
 					title: rule.name,
@@ -489,7 +489,7 @@ function RuleDetailContent() {
 									<EmptyTitle>Failed to load alert rule</EmptyTitle>
 									<EmptyDescription>
 										{Result.builder(rulesResult)
-											.onError((error) => formatBackendError(error).description)
+											.onError((error) => displayError(error).message)
 											.orElse(() => undefined) ?? "Try refreshing or check API logs."}
 									</EmptyDescription>
 								</EmptyHeader>
@@ -885,7 +885,7 @@ function RuleDetailContent() {
 													</EmptyMedia>
 													<EmptyTitle>Failed to load checks</EmptyTitle>
 													<EmptyDescription>
-														{formatBackendError(error).description}
+														{displayError(error).message}
 													</EmptyDescription>
 												</EmptyHeader>
 												<Button
@@ -934,9 +934,7 @@ function RuleDetailContent() {
 												<CircleWarningIcon size={18} />
 											</EmptyMedia>
 											<EmptyTitle>Failed to load incidents</EmptyTitle>
-											<EmptyDescription>
-												{formatBackendError(error).description}
-											</EmptyDescription>
+											<EmptyDescription>{displayError(error).message}</EmptyDescription>
 										</EmptyHeader>
 										<Button
 											variant="outline"
@@ -1347,7 +1345,7 @@ function ChecksPanel({
 						until,
 						limit: 100,
 						cursor: nextCursor,
-						...(statusFilter === "all" ? {} : { status: statusFilter }),
+						...(!(statusFilter === "all") ? { status: statusFilter } : undefined),
 					},
 				}),
 			)

@@ -395,14 +395,34 @@ Env overrides: `MAPLE_API_URL`, `MAPLE_API_TOKEN`, `MAPLE_LOCAL_URL`,
 `MAPLE_LOCAL_BIND_HOST`, and `MAPLE_LOCAL_ADVERTISE_HOST`.
 
 **How queries route.** Local mode compiles the pipe → SQL client-side and POSTs
-it to `/local/query`. Remote mode POSTs `{ pipe, params }` to the API's
-`POST /api/tinybird/query`, where the server compiles it with the
-authenticated tenant's org id (the client never sends `org_id`). Both paths use
-the same `@maple/query-engine` dispatcher, so results are identical.
+it to `/local/query`. Remote mode does **not** compile pipes at all: it calls
+Maple's public v2 API (`/v2/traces/*`, `/v2/logs/*`, `/v2/services`,
+`/v2/service_map`, `/v2/metrics`) with the API key `maple auth login` stored,
+and maps each response into the same output type the local path produces. The
+branch lives in `apps/cli/src/core/operations.ts`; the v2 implementations are in
+`core/remote-ops.ts`.
 
-**`maple query "<sql>"` is local-only.** A generic raw-SQL passthrough against
-the multi-tenant cloud warehouse would let a client read other orgs' data, so
-in remote mode it returns a clear error. Every other command works in both modes.
+This replaced a generic `POST /api/tinybird/query` endpoint that let the client
+name a pipe and have the server compile it. That endpoint has been retired — a
+pipe name is an internal compiler detail, not a public contract, and shipping it
+as one meant every CLI binary pinned the server's query catalog.
+
+**Some commands are local-only.** Where v2 has no equivalent, the command fails
+with the reason rather than returning a narrower answer:
+
+| Command                             | Why it needs local mode                                                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `maple query "<sql>"`               | A raw-SQL passthrough against the multi-tenant warehouse would let a client read other orgs' data.               |
+| `maple attributes keys` / `values`  | v2 exposes no attribute-discovery surface (`/v2/attribute_mappings` is mapping config, not observed keys).       |
+| `maple slow-traces`                 | `/v2/traces/search` filters by minimum duration but cannot order by it.                                          |
+| `maple top-ops`                     | Needs count, latency and error rate ranked together; `/v2/traces/breakdown` returns one aggregation per request. |
+| `maple traces --span-name`          | v2 search returns root-based summaries, not matched spans. `--root-only` works remotely.                         |
+| `maple errors` / `maple error <fp>` | v2 keys errors by an opaque `erris_…` issue id with no lookup from a fingerprint hash.                           |
+| `maple compare`                     | v2 has no window-comparison endpoint.                                                                            |
+| `maple diagnose`                    | Its error breakdown depends on the exception-type aggregates above.                                              |
+
+Remote mode also inherits v2's pagination: lists cap at 100 rows per page and
+seek by opaque cursor, so `--offset` is rejected rather than silently ignored.
 
 ### Seeding data
 

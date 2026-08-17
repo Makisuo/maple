@@ -104,6 +104,87 @@ describe("ApiKeysService.roll", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
+	/**
+	 * Both concurrency barriers live in one place: the conditional
+	 * `UPDATE … WHERE revoked = false` that opens the roll transaction. Each caller
+	 * reads the key as live before anyone writes (the reads interleave on the
+	 * async boundary), so without that predicate every caller would go on to
+	 * insert a successor — two live keys from one roll/roll race, and a live
+	 * successor for a key a concurrent revoke had already retired.
+	 */
+	describe("concurrency barriers", () => {
+		const countKeys = (testDb: TestDb, orgId: string) =>
+			Effect.promise(async () => {
+				const row = await queryFirstRow<{ total: number; active: number }>(
+					testDb,
+					`select count(*)::int as total, count(*) filter (where revoked = false)::int as active
+					 from api_keys where org_id = $1`,
+					[orgId],
+				)
+				return row
+			})
+
+		it.effect("roll vs roll: only one successor is ever created", () => {
+			const testDb = createTestDb(trackedDbs)
+
+			return Effect.gen(function* () {
+				const svc = yield* ApiKeysService
+				const orgId = asOrgId("org_roll_race")
+				const created = yield* svc.create(orgId, asUserId("user_a"), { name: "contended" })
+
+				const exits = yield* Effect.all(
+					[
+						Effect.exit(svc.roll(orgId, asUserId("user_a"), created.id, {})),
+						Effect.exit(svc.roll(orgId, asUserId("user_b"), created.id, {})),
+					],
+					{ concurrency: 2 },
+				)
+
+				const succeeded = exits.filter(Exit.isSuccess)
+				assert.strictEqual(succeeded.length, 1, "exactly one roll may win the source row")
+				const losers = exits.filter(Exit.isFailure)
+				assert.strictEqual(losers.length, 1)
+				assert.instanceOf(Option.getOrUndefined(Exit.findErrorOption(losers[0])), ApiKeyNotFoundError)
+
+				const counts = yield* countKeys(testDb, orgId)
+				assert.deepStrictEqual(
+					{ total: counts?.total, active: counts?.active },
+					{ total: 2, active: 1 },
+					"one successor, and the source is revoked",
+				)
+			}).pipe(Effect.provide(makeLayer(testDb)))
+		})
+
+		it.effect("revoke vs roll: a revoked key never gets a successor", () => {
+			const testDb = createTestDb(trackedDbs)
+
+			return Effect.gen(function* () {
+				const svc = yield* ApiKeysService
+				const orgId = asOrgId("org_revoke_race")
+				const created = yield* svc.create(orgId, asUserId("user_a"), { name: "contended" })
+
+				const [revoked, rollExit] = yield* Effect.all(
+					[
+						svc.revoke(orgId, created.id),
+						Effect.exit(svc.roll(orgId, asUserId("user_b"), created.id, {})),
+					],
+					{ concurrency: 2 },
+				)
+
+				assert.strictEqual(revoked.revoked, true)
+				assert.isTrue(Exit.isFailure(rollExit), "the roll must lose to the committed revoke")
+				assert.instanceOf(Option.getOrUndefined(Exit.findErrorOption(rollExit)), ApiKeyNotFoundError)
+
+				const counts = yield* countKeys(testDb, orgId)
+				assert.deepStrictEqual(
+					{ total: counts?.total, active: counts?.active },
+					{ total: 1, active: 0 },
+					"no successor row exists for the revoked key",
+				)
+			}).pipe(Effect.provide(makeLayer(testDb)))
+		})
+	})
+
 	it.effect("returns a reconciliation txid when revoking", () => {
 		const testDb = createTestDb(trackedDbs)
 

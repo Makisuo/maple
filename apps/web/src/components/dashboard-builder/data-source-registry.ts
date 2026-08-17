@@ -67,7 +67,7 @@ export const serverFunctionMap: Record<DataSourceEndpoint, ServerFunction> = {
 	custom_query_builder_list: getQueryBuilderList,
 	raw_sql_chart: getRawSqlChart,
 	markdown_static: markdownStaticServerFn,
-}
+} satisfies Record<DataSourceEndpoint, ServerFunction>
 
 /**
  * Looks up a data-source server function by endpoint name. Accepts an
@@ -79,3 +79,8 @@ export function getServerFunction(endpoint: string): ServerFunction | undefined 
 		? serverFunctionMap[endpoint as DataSourceEndpoint]
 		: undefined
 }
+
+// `toWidgetRequest` moved to `@maple/widgets/dashboard` so the share API lowers
+// a stored data source through the exact function the browser does. Re-exported
+// here because this file is where the web app has always looked for it.
+export { toWidgetRequest, type WidgetRequest } from "@maple/widgets/dashboard"

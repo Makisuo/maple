@@ -1,12 +1,15 @@
 import { useId, useMemo } from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, Line, LineChart, ReferenceLine } from "recharts"
 
 import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
@@ -25,14 +28,13 @@ import type {
 } from "@/api/warehouse/infra"
 import {
 	CHART_EMPTY_MESSAGE,
-	CHART_GRID_DASH,
 	formatSeconds,
 	formatValueWithUnit,
 	transformRows,
 	UNNAMED_SERIES_KEY,
 } from "./chart-utils"
 import { InfraTooltipItem } from "./chart-tooltip"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { LinkedCursorOverlay, linkedCursorChartProps } from "@/hooks/use-linked-cursor"
 
 const CHART_HEIGHT = 280
@@ -47,18 +49,18 @@ const POD_METRIC_LABELS: Record<PodInfraMetric, string> = {
 	cpu_request: "CPU / request",
 	memory_limit: "Memory / limit",
 	memory_request: "Memory / request",
-}
+} satisfies Record<PodInfraMetric, string>
 
 const NODE_METRIC_LABELS: Record<NodeInfraMetric, string> = {
 	cpu_usage: "CPU usage",
 	uptime: "Uptime",
-}
+} satisfies Record<NodeInfraMetric, string>
 
 const WORKLOAD_METRIC_LABELS: Record<WorkloadInfraMetric, string> = {
 	cpu_usage: "CPU usage",
 	cpu_limit: "CPU / limit",
 	memory_limit: "Memory / limit",
-}
+} satisfies Record<WorkloadInfraMetric, string>
 
 interface K8sMetricChartViewProps {
 	rows: ReadonlyArray<{ bucket: string; attributeValue: string; value: number }>
@@ -85,7 +87,7 @@ interface K8sMetricChartViewProps {
 	chartId?: string
 }
 
-// Exported for the /infra-bench synthetic perf harness.
+// Exported for the /lab/bench/infra synthetic perf harness.
 export function K8sMetricChartView({
 	rows,
 	unit,
@@ -197,26 +199,12 @@ export function K8sMetricChartView({
 									)
 								})}
 							</defs>
-							<CartesianGrid
-								strokeDasharray={CHART_GRID_DASH}
-								stroke="var(--border)"
-								vertical={false}
-							/>
-							<XAxis
+							<ChartGrid />
+							<ChartXAxis
 								dataKey="time"
-								tickLine={false}
-								axisLine={false}
-								tickMargin={8}
-								fontSize={10}
-								stroke="var(--muted-foreground)"
 							/>
-							<YAxis
-								tickLine={false}
-								axisLine={false}
+							<ChartYAxis
 								tickMargin={8}
-								fontSize={10}
-								width={56}
-								stroke="var(--muted-foreground)"
 								tickFormatter={tickFormatter}
 							/>
 							{showThreshold && unit === "percent" && (
@@ -234,7 +222,6 @@ export function K8sMetricChartView({
 								/>
 							)}
 							<ChartTooltip
-								cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 								content={
 									<ChartTooltipContent
 										indicator="dot"
@@ -267,30 +254,16 @@ export function K8sMetricChartView({
 						</AreaChart>
 					) : (
 						<LineChart data={data} margin={margin} syncId={rechartsSyncId} syncMethod="value">
-							<CartesianGrid
-								strokeDasharray={CHART_GRID_DASH}
-								stroke="var(--border)"
-								vertical={false}
-							/>
-							<XAxis
+							<ChartGrid />
+							<ChartXAxis
 								dataKey="time"
-								tickLine={false}
-								axisLine={false}
-								tickMargin={8}
-								fontSize={10}
-								stroke="var(--muted-foreground)"
 							/>
-							<YAxis
-								tickLine={false}
-								axisLine={false}
+							<ChartYAxis
 								tickMargin={8}
-								fontSize={10}
 								width={70}
-								stroke="var(--muted-foreground)"
 								tickFormatter={tickFormatter}
 							/>
 							<ChartTooltip
-								cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 								content={
 									<ChartTooltipContent
 										indicator="line"
@@ -354,7 +327,7 @@ export function PodDetailChart({
 		.onInitial(() => <Skeleton className="h-[280px] w-full rounded-lg" />)
 		.onError((err) => (
 			<div className="flex h-[280px] items-center justify-center rounded-lg border border-destructive/40 bg-destructive/5 text-xs text-destructive">
-				{formatBackendError(err).description}
+				{displayError(err).message}
 			</div>
 		))
 		.onSuccess((response, holder) => (
@@ -398,7 +371,7 @@ export function NodeDetailChart({
 		.onInitial(() => <Skeleton className="h-[280px] w-full rounded-lg" />)
 		.onError((err) => (
 			<div className="flex h-[280px] items-center justify-center rounded-lg border border-destructive/40 bg-destructive/5 text-xs text-destructive">
-				{formatBackendError(err).description}
+				{displayError(err).message}
 			</div>
 		))
 		.onSuccess((response, holder) => (
@@ -456,7 +429,7 @@ export function WorkloadDetailChart({
 		.onInitial(() => <Skeleton className="h-[280px] w-full rounded-lg" />)
 		.onError((err) => (
 			<div className="flex h-[280px] items-center justify-center rounded-lg border border-destructive/40 bg-destructive/5 text-xs text-destructive">
-				{formatBackendError(err).description}
+				{displayError(err).message}
 			</div>
 		))
 		.onSuccess((response, holder) => (

@@ -16,6 +16,7 @@ import {
 	reconcileCheckpointRecovery,
 	resetLiveStorePreservingCheckpoints,
 	restoreCheckpoint,
+	writeBackupConfig,
 } from "../server/checkpoints"
 import { resolveUiAssets } from "../server/ui-assets"
 import { amber, bold, cyan, dim, green, MARK_LINES, MARK_WIDTH, underline } from "../lib/style"
@@ -37,6 +38,18 @@ import {
  *  the process exits non-zero — same role the old `process.exit(1)` paths had,
  *  but typed and handled by the CLI runtime (matches `ModeError`). */
 class ServerError extends Schema.TaggedError<ServerError>()("@maple/cli/ServerError", {
+	message: Schema.String,
+}) {}
+
+/**
+ * A refused command whose precondition simply wasn't met — the server is already
+ * running, or isn't running at all. The message and the non-zero exit are
+ * identical to `ServerError`; the separate tag exists so `bin.ts` can close the
+ * root span `Ok` for these without also swallowing genuine start failures
+ * ("failed to bind …", "did not come up within 10s"), which stay on
+ * `ServerError`. Same rule the ingest gateway follows for expected 4xx.
+ */
+export class ServerStateError extends Schema.TaggedError<ServerStateError>()("@maple/cli/ServerStateError", {
 	message: Schema.String,
 }) {}
 
@@ -178,7 +191,9 @@ const dataDirFlag = Flag.optional(
 
 const chdbConfigFileFlag = Flag.optional(
 	Flag.string("chdb-config-file").pipe(
-		Flag.withDescription("Optional ClickHouse config file passed to embedded chDB"),
+		Flag.withDescription(
+			"ClickHouse config file for embedded chDB (default: a generated backups-enabled config beside the data dir)",
+		),
 	),
 )
 
@@ -230,13 +245,57 @@ const offlineFlag = Flag.boolean("offline").pipe(
 // Log file for `--background` runs, beside the PID file (e.g. ~/.maple/maple.log).
 const logFilePath = (dataDir: string): string => join(dirname(dataDir), "maple.log")
 
+// Generated chDB config, beside the PID and log files (e.g. ~/.maple/chdb-config.xml).
+export const chdbConfigPath = (dataDir: string): string => join(dirname(dataDir), "chdb-config.xml")
+
+/**
+ * Resolve the chDB config file, generating a backups-enabled default when the
+ * user did not supply one.
+ *
+ * `BACKUP DATABASE default TO Disk('default', …)` — how every checkpoint is
+ * taken — needs `<backups><allowed_disk>` in the config of the *running* chDB
+ * connection. chDB allows one connection per process, acquired once at start and
+ * held for the process lifetime, and `maple checkpoint` is a separate process
+ * talking over HTTP: it cannot inject config into a live connection. So a server
+ * started without a backups config can never checkpoint, and `maple checkpoint`
+ * could only ever report that after the fact.
+ *
+ * The effect was that checkpoints were unusable out of the box and, because the
+ * dirty-store recovery path tells users to run `maple restore --yes`, that advice
+ * pointed at a checkpoint which could not exist. Generating the default here
+ * fixes both. A user-supplied `--chdb-config-file` is honoured untouched.
+ */
+export const resolveChdbConfigFile = (dataDir: string, supplied: string | undefined) =>
+	Effect.gen(function* () {
+		if (supplied !== undefined) return supplied
+		const fs = yield* FileSystem
+		const path = chdbConfigPath(dataDir)
+		// Regenerated every start: idempotent, and it self-heals a truncated or
+		// hand-edited file. Failing to write is not fatal — the server still starts,
+		// checkpoints just stay unavailable, which is the old behaviour.
+		yield* fs.makeDirectory(dirname(path), { recursive: true }).pipe(Effect.ignore)
+		return yield* Effect.try(() => {
+			writeBackupConfig(path)
+			return path
+		}).pipe(Effect.orElseSucceed(() => undefined))
+	})
+
 /** Non-fatal `/health` probe used while waiting for a detached server to bind.
- *  A transport error or a >300ms timeout collapses to `false` (not yet up). */
+ *  A transport error or a >300ms timeout collapses to `false` (not yet up).
+ *
+ *  Untraced: the loop below polls until the child binds, so ECONNREFUSED is the
+ *  expected answer for the first ~10 attempts. Each one used to close an
+ *  `http.client GET` span as `Error` inside an otherwise-`Ok` root span — 9k
+ *  events of pure noise. `orElseSucceed` cannot help: it sits outside the client
+ *  call, which has already ended the span by then. `TracerDisabledWhen` is the
+ *  hook that skips span creation entirely, and it is scoped to this request
+ *  rather than provided layer-wide so real `/health` calls stay traced. */
 const probeHealth = (addr: string) =>
 	HttpClient.get(`${addr}/health`).pipe(
 		Effect.map((res) => res.status >= 200 && res.status < 300),
 		Effect.timeout("300 millis"),
 		Effect.orElseSucceed(() => false),
+		Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
 	)
 
 /**
@@ -351,7 +410,7 @@ export const start = Command.make("start", {
 			// Already-running guard.
 			const existingPid = yield* readPid(fs, pidPath)
 			if (Option.isSome(existingPid) && isProcessAlive(existingPid.value)) {
-				return yield* new ServerError({
+				return yield* new ServerStateError({
 					message: `maple is already running (PID ${existingPid.value}) — stop it with \`maple stop\``,
 				})
 			}
@@ -474,6 +533,10 @@ export const start = Command.make("start", {
 			}
 
 			const requestedRetentionDays = Option.getOrUndefined(a.minimumRawTelemetryRetentionDays)
+			const chdbConfigFile = yield* resolveChdbConfigFile(
+				dataDir,
+				Option.getOrUndefined(a.chdbConfigFile),
+			)
 
 			// Detached: spawn the same command without --background and exit.
 			if (a.background)
@@ -483,7 +546,7 @@ export const start = Command.make("start", {
 					a.port,
 					dataDir,
 					a.offline,
-					Option.getOrUndefined(a.chdbConfigFile),
+					chdbConfigFile,
 					a.onDirtyStore,
 					requestedRetentionDays,
 				)
@@ -525,7 +588,7 @@ export const start = Command.make("start", {
 						corsOrigin: hostedUiOrigin(hostedUiUrl),
 						port: a.port,
 						dataDir,
-						configFile: Option.getOrUndefined(a.chdbConfigFile),
+						configFile: chdbConfigFile,
 						minimumRawTelemetryRetentionDays: requestedRetentionDays,
 						assets,
 					}).pipe(
@@ -578,12 +641,12 @@ export const stop = Command.make("stop", { dataDir: dataDirFlag }).pipe(
 			const pidOpt = yield* readPid(fs, pidPath)
 
 			if (Option.isNone(pidOpt)) {
-				return yield* new ServerError({ message: "maple is not running (no PID file found)" })
+				return yield* new ServerStateError({ message: "maple is not running (no PID file found)" })
 			}
 			const pid = pidOpt.value
 			if (!isProcessAlive(pid)) {
 				yield* fs.remove(pidPath, { force: true }).pipe(Effect.ignore)
-				return yield* new ServerError({
+				return yield* new ServerStateError({
 					message: "maple is not running (stale PID file, cleaned up)",
 				})
 			}
@@ -630,7 +693,7 @@ export const reset = Command.make("reset", { dataDir: dataDirFlag, yes: yesFlag 
 			// Refuse while a server still owns the store.
 			const pidOpt = yield* readPid(fs, pidFilePath(dataDir))
 			if (Option.isSome(pidOpt) && isProcessAlive(pidOpt.value)) {
-				return yield* new ServerError({
+				return yield* new ServerStateError({
 					message: `maple is running (PID ${pidOpt.value}) — stop it first with \`maple stop\``,
 				})
 			}
@@ -707,7 +770,7 @@ export const restore = Command.make("restore", {
 
 			const pidOpt = yield* readPid(fs, pidFilePath(dataDir))
 			if (Option.isSome(pidOpt) && isProcessAlive(pidOpt.value)) {
-				return yield* new ServerError({
+				return yield* new ServerStateError({
 					message: `maple is running (PID ${pidOpt.value}) — stop it first with \`maple stop\``,
 				})
 			}

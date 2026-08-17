@@ -31,7 +31,6 @@
 		"tw-animate-css": "catalog:tailwind",
 		"typescript": "catalog:tooling",
 		"vite": "catalog:",
-		"vite-tsconfig-paths": "^6.0.0",
 		"vitest": "catalog:"
 	}
 }

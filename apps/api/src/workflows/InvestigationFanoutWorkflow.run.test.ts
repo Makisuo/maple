@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { randomUUID } from "node:crypto"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
@@ -101,7 +102,7 @@ let harness: Harness
 beforeEach(async () => {
 	const testDb = createTestDb(createdDbs)
 	await runMigrations(testDb.pglite)
-	const db = createMaplePgliteClient(testDb.pglite) as unknown as MaplePgClient
+	const db = createMaplePgliteClient(testDb.pglite) as MaplePgClient
 	const investigationId = asInvestigationId(randomUUID())
 	const issueId = asIssueId(randomUUID())
 	const now = new Date(FIXED_NOW)

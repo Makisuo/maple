@@ -36,8 +36,8 @@ const appendVary = (existing: string | undefined, header: string): string => {
  * We also drop content-encoding/content-length, which misdescribe the re-wrapped
  * body. Effect lowercases header keys, so we match on lowercase names.
  */
-export const shapeResponseHeaders = (upstream: Readonly<Record<string, string>>): Record<string, string> => {
-	const headers: Record<string, string> = { ...upstream }
+export const syncResponseHeaders = (upstream: Readonly<Record<string, string>>): Record<string, string> => {
+	const headers: Record<string, string> = { ...upstream } satisfies Record<string, string>
 	for (const key of STRIPPED_UPSTREAM_HEADERS) delete headers[key]
 
 	headers.vary = appendVary(headers.vary, "Authorization")

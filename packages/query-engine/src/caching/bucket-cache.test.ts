@@ -468,7 +468,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 		const compute = ({ startMs, endMs }: { startMs: number; endMs: number }) => {
 			computeAttempt++
 			if (computeAttempt === 1) {
-				return Effect.fail(new Error("tinybird down") as unknown as never)
+				return Effect.fail(new Error("tinybird down") as never)
 			}
 			void startMs
 			void endMs
@@ -550,7 +550,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 				generateFingerprint(request.orgId, request.query, request.bucketSeconds),
 			)
 			const cacheKey = `v2:${request.orgId}:${fingerprint}:0`
-			// Cast through `unknown` because we're intentionally writing a
+			// SAFETY: cast through `unknown` because we're intentionally writing a
 			// non-current version to simulate a post-migration read.
 			const future = {
 				version: 99,

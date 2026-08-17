@@ -22,7 +22,7 @@ import { GithubProvider } from "@/services/integrations/vcs/vendor/github/Github
 import type { VcsProviderClient } from "@/services/integrations/vcs/VcsProviderClient"
 import {
 	VcsProviderRegistry,
-	type VcsProviderRegistryShape,
+	type VcsProviderRegistryApi,
 } from "@/services/integrations/vcs/VcsProviderRegistry"
 import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
 import { clampQueueDelaySeconds } from "@/services/integrations/vcs/VcsSyncQueue"
@@ -648,7 +648,7 @@ describe("GithubProvider.fetchBranches", () => {
 		Effect.gen(function* () {
 			const provider = yield* GithubProvider
 			// fetchBranches only reads externalInstallationId off the installation.
-			const installation = { externalInstallationId: "42" } as unknown as VcsInstallation
+			const installation = { externalInstallationId: "42" } as VcsInstallation
 			const result = yield* provider.fetchBranches(installation, {
 				externalRepoId: "7",
 				owner: "octo",
@@ -1197,7 +1197,7 @@ describe("VcsSyncService orchestrator", () => {
 					? Effect.fail(opts.fetchCommitsError)
 					: Effect.succeed({
 							commits: opts.commits ?? [],
-							...(opts.commitFetchNext ? { next: opts.commitFetchNext } : {}),
+							...(opts.commitFetchNext ? { next: opts.commitFetchNext } : undefined),
 						}),
 			fetchBranches: () =>
 				opts.fetchBranchesError
@@ -1210,7 +1210,7 @@ describe("VcsSyncService orchestrator", () => {
 		const registry = Layer.succeed(VcsProviderRegistry, {
 			ids: ["github"],
 			resolve: () => Effect.succeed(fakeProvider),
-		} satisfies VcsProviderRegistryShape)
+		} satisfies VcsProviderRegistryApi)
 		const queue = recordingQueueLayer(opts.sent, { sentDelays: opts.sentDelays })
 		const repoLive = testRepoLayer(testDb)
 		return VcsSyncService.layer.pipe(Layer.provideMerge(Layer.mergeAll(repoLive, registry, queue)))

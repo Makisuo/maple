@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test"
 // Dedicated raw-vite dev server on a fixed port, forced into self-hosted auth
 // mode so the bench route renders with no Clerk session and no backend
 // (resolveSelfHostedRouterAuth returns unauthenticated synchronously). The
-// /service-map-bench route is in PUBLIC_PATHS, so beforeLoad lets it through.
+// /lab/bench/service-map route is a sessionless lab (see src/lab/registry.ts), so beforeLoad lets it through.
 const PORT = 4330
 const HOST = "127.0.0.1"
 const baseURL = `http://${HOST}:${PORT}`

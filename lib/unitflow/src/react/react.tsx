@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import type * as Cause from "effect/Cause"
 import * as React from "react"
 import { Event, Model, Store } from "../core/index.js"
@@ -109,7 +110,7 @@ const boundIds = new WeakMap<object, number>()
 
 /** A stable identity per unit object — the `key` that remounts `Bound` when
  * the View switches to another instance. */
-const boundId = (unit: object): number => {
+const boundId = <Unit extends object>(unit: Unit): number => {
 	const existing = boundIds.get(unit)
 	if (existing !== undefined) return existing
 	const id = ++nextBoundId

@@ -26,14 +26,14 @@ const STATUS_ICON: Record<TaskStatus, typeof CircleCheckIcon> = {
 	completed: CircleCheckIcon,
 	error: CircleXmarkIcon,
 	aborted: CircleXmarkIcon,
-}
+} satisfies Record<TaskStatus, typeof CircleCheckIcon>
 
 const STATUS_TINT: Record<TaskStatus, string> = {
 	running: "text-muted-foreground",
 	completed: "text-success",
 	error: "text-destructive",
 	aborted: "text-muted-foreground",
-}
+} satisfies Record<TaskStatus, string>
 
 const toolCount = (messages: readonly UIMessage[]): number =>
 	messages.reduce(

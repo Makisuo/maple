@@ -27,7 +27,7 @@ const STATUS_ICON: Record<DiagnosisStageStatus, { className: string }> = {
 	warn: { className: "text-warning" },
 	fail: { className: "text-destructive" },
 	unknown: { className: "text-muted-foreground" },
-}
+} satisfies Record<DiagnosisStageStatus, { className: string }>
 
 /**
  * "Why isn't this firing? / Why is this failing?" — walks the evaluation
@@ -73,7 +73,9 @@ export function RuleDiagnosisPanel({
 				destinations,
 				deliveryEvents,
 				now,
-				...(groupKeys.length > 0 && activeGroup != null ? { selectedGroupKey: activeGroup } : {}),
+				...(groupKeys.length > 0 && activeGroup != null
+					? { selectedGroupKey: activeGroup }
+					: undefined),
 			}),
 		[rule, states, checks, openIncidents, destinations, deliveryEvents, now, groupKeys, activeGroup],
 	)

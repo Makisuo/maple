@@ -36,21 +36,21 @@ const CATEGORY_COLOR: Record<DbCategory, string> = {
 	cache: "oklch(0.62 0.19 30)",
 	queue: "oklch(0.64 0.15 300)",
 	search: "oklch(0.68 0.12 195)",
-}
+} satisfies Record<DbCategory, string>
 
 const CATEGORY_ICON: Record<DbCategory, IconComponent> = {
 	database: DatabaseIcon,
 	cache: FireIcon,
 	queue: PaperPlaneIcon,
 	search: MagnifierIcon,
-}
+} satisfies Record<DbCategory, IconComponent>
 
 const CATEGORY_FALLBACK_LABEL: Record<DbCategory, string> = {
 	database: "Database",
 	cache: "Cache",
 	queue: "Queue",
 	search: "Search",
-}
+} satisfies Record<DbCategory, string>
 
 const CACHE_SYSTEMS = new Set(["redis", "memcached", "hazelcast"])
 const QUEUE_SYSTEMS = new Set(["kafka", "rabbitmq", "pulsar", "nats", "activemq", "sqs"])

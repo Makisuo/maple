@@ -316,7 +316,7 @@ export interface TracesTimeseriesOpts extends TracesQueryOpts {
 	 *
 	 * This is the retry knob for an org whose ClickHouse has not applied migration
 	 * 0015 — not a rollout switch. See `makeRollupFallback` in
-	 * `apps/api/src/routes/v1/query-engine.http.ts`.
+	 * `apps/api/src/routes/internal/query-engine.http.ts`.
 	 */
 	overviewTiers?: "hour" | "minute"
 }
@@ -590,7 +590,7 @@ export function tracesTimeseriesQuery(
 			})
 			.groupBy("bucket", "groupName")
 			.orderBy(["bucket", "asc"], ["groupName", "asc"])
-		return finalizeTimeseries(annual, TRACES_TS_COLUMNS, "count", opts) as unknown as CHQuery<
+		return finalizeTimeseries(annual, TRACES_TS_COLUMNS, "count", opts) as CHQuery<
 			ColumnDefs,
 			TracesTimeseriesOutput,
 			{}
@@ -707,7 +707,7 @@ export function tracesTimeseriesQuery(
 			}))
 			.groupBy("bucket", "groupName")
 			.orderBy(["bucket", "asc"], ["groupName", "asc"])
-		return finalizeTimeseries(aggregates, TRACES_TS_COLUMNS, "count", opts) as unknown as CHQuery<
+		return finalizeTimeseries(aggregates, TRACES_TS_COLUMNS, "count", opts) as CHQuery<
 			ColumnDefs,
 			TracesTimeseriesOutput,
 			{}
@@ -730,7 +730,7 @@ export function tracesTimeseriesQuery(
 			.where(($) => serviceOverviewWhereConditions($, opts))
 			.groupBy("bucket", "groupName")
 			.orderBy(["bucket", "asc"], ["groupName", "asc"])
-		return finalizeTimeseries(mv, TRACES_TS_COLUMNS, "count", opts) as unknown as CHQuery<
+		return finalizeTimeseries(mv, TRACES_TS_COLUMNS, "count", opts) as CHQuery<
 			ColumnDefs,
 			TracesTimeseriesOutput,
 			{}
@@ -746,7 +746,7 @@ export function tracesTimeseriesQuery(
 		.where(($) => buildWhereConditions($, opts))
 		.groupBy("bucket", "groupName")
 		.orderBy(["bucket", "asc"], ["groupName", "asc"])
-	return finalizeTimeseries(raw, TRACES_TS_COLUMNS, "count", opts) as unknown as CHQuery<
+	return finalizeTimeseries(raw, TRACES_TS_COLUMNS, "count", opts) as CHQuery<
 		ColumnDefs,
 		TracesTimeseriesOutput,
 		{}
@@ -804,7 +804,7 @@ export function tracesBreakdownQuery(opts: TracesBreakdownOpts) {
 			.orderBy(["count", "desc"])
 			.limit(limit)
 			.format("JSON")
-		return mv as unknown as CHQuery<ColumnDefs, TracesBreakdownOutput, {}>
+		return mv as CHQuery<ColumnDefs, TracesBreakdownOutput, {}>
 	}
 
 	const raw = from(Traces)
@@ -826,7 +826,7 @@ export function tracesBreakdownQuery(opts: TracesBreakdownOpts) {
 		.orderBy(["count", "desc"])
 		.limit(limit)
 		.format("JSON")
-	return raw as unknown as CHQuery<ColumnDefs, TracesBreakdownOutput, {}>
+	return raw as CHQuery<ColumnDefs, TracesBreakdownOutput, {}>
 }
 
 // List query

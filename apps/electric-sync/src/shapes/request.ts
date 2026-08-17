@@ -1,6 +1,11 @@
 import { Result, Schema } from "effect"
-import { ShapeRequestInvalid } from "../errors"
-import { ScopeValue, type ShapeName, ShapeNameSchema, shapeScopeColumn } from "./registry"
+import { SyncRequestInvalid } from "../errors"
+import {
+	ScopeValue,
+	type SubscriptionName,
+	SubscriptionNameSchema,
+	subscriptionScopeColumn,
+} from "./registry"
 
 /**
  * A shape request that has passed validation: the shape is whitelisted, and if it
@@ -21,8 +26,8 @@ export interface ScopeBinding {
 	readonly value: string
 }
 
-export interface ShapeRequest {
-	readonly shape: ShapeName
+export interface SyncRequest {
+	readonly shape: SubscriptionName
 	/**
 	 * The resolved scope binding, or `null` for an org-wide shape. Resolved here
 	 * and nowhere else: a scoped shape can only reach a caller *with* its column
@@ -40,23 +45,23 @@ export interface ShapeRequest {
  * belongs to Electric and is forwarded (or dropped) untouched, so this is the
  * whole of what the client can *say* to us.
  */
-const ShapeParam = Schema.decodeUnknownResult(ShapeNameSchema)
+const SubscriptionNameResult = Schema.decodeUnknownResult(SubscriptionNameSchema)
 const ScopeParam = Schema.decodeUnknownResult(ScopeValue)
 
 /**
- * The one place a client's query string becomes a `ShapeRequest`. Total and pure —
+ * The one place a client's query string becomes a `SyncRequest`. Total and pure —
  * every rejection is a `Result` failure, not a thrown error or a response — so the
  * request-validation surface is testable without a runtime or an HTTP handler.
  */
-export const decodeShapeRequest = (
+export const decodeSyncRequest = (
 	clientParams: URLSearchParams,
-): Result.Result<ShapeRequest, ShapeRequestInvalid> =>
-	ShapeParam(clientParams.get("shape")).pipe(
-		Result.mapError(() => new ShapeRequestInvalid({ message: "Unknown or missing shape" })),
-		Result.flatMap((shape): Result.Result<ShapeRequest, ShapeRequestInvalid> => {
-			const column = shapeScopeColumn(shape)
+): Result.Result<SyncRequest, SyncRequestInvalid> =>
+	SubscriptionNameResult(clientParams.get("shape")).pipe(
+		Result.mapError(() => new SyncRequestInvalid({ message: "Unknown or missing shape" })),
+		Result.flatMap((subscription): Result.Result<SyncRequest, SyncRequestInvalid> => {
+			const column = subscriptionScopeColumn(subscription)
 			if (column === null) {
-				return Result.succeed({ shape, scope: null, clientParams })
+				return Result.succeed({ shape: subscription, scope: null, clientParams })
 			}
 
 			// A scoped shape without its scope is a rejection rather than a default —
@@ -64,9 +69,9 @@ export const decodeShapeRequest = (
 			// later point at which one could exist without the other.
 			return ScopeParam(clientParams.get("scope")).pipe(
 				Result.mapError(
-					() => new ShapeRequestInvalid({ message: `Shape ${shape} requires a scope` }),
+					() => new SyncRequestInvalid({ message: `Shape ${subscription} requires a scope` }),
 				),
-				Result.map((value) => ({ shape, scope: { column, value }, clientParams })),
+				Result.map((value) => ({ shape: subscription, scope: { column, value }, clientParams })),
 			)
 		}),
 	)

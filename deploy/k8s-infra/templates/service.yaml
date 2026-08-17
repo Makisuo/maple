@@ -32,10 +32,10 @@ spec:
       targetPort: health
       protocol: TCP
 {{- end }}
-{{- if and .Values.agent.enabled .Values.agent.service.enabled .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled) .Values.clusterCollector.service.enabled }}
+{{- if and .Values.agent.enabled .Values.agent.service.enabled (eq (include "maple-k8s-infra.cluster.enabled" .) "true") .Values.clusterCollector.service.enabled }}
 ---
 {{- end }}
-{{- if and .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled) .Values.clusterCollector.service.enabled }}
+{{- if and (eq (include "maple-k8s-infra.cluster.enabled" .) "true") .Values.clusterCollector.service.enabled }}
 apiVersion: v1
 kind: Service
 metadata:

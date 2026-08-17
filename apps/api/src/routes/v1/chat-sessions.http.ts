@@ -95,7 +95,7 @@ const toChatTurnTenant = (tenant: TenantContext): ChatTurnTenantEncoded =>
 		userId: tenant.userId,
 		roles: tenant.roles,
 		authMode: tenant.authMode,
-		...(tenant.actorId === undefined ? {} : { actorId: tenant.actorId }),
+		...(!(tenant.actorId === undefined) ? { actorId: tenant.actorId } : undefined),
 	})
 
 interface ResolvedSession {

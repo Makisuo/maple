@@ -36,6 +36,33 @@ function bodiesBetween(source: string, header: string, footer: string): string[]
 	return [...source.matchAll(re)].map((m) => stripComments(m[1] ?? ""))
 }
 
+/**
+ * Only the body's *outermost* element can pad the body. Scanning the whole body
+ * string lets padding on some nested `<p className="p-3">` satisfy the check while
+ * the wrapper itself sits flush against the popup edge — which is how the share
+ * dialog shipped unpadded with this sweep green.
+ */
+function outermostTag(body: string): string {
+	const open = body.indexOf("<")
+	if (open === -1) return ""
+	// Depth- and quote-aware, because a naive `indexOf(">")` stops inside
+	// `onClick={() => …}` and inside comparisons in `cn(x > 2 && …)`.
+	let depth = 0
+	let quote: string | null = null
+	for (let i = open; i < body.length; i++) {
+		const char = body[i]
+		if (quote !== null) {
+			if (char === quote) quote = null
+			continue
+		}
+		if (char === '"' || char === "'" || char === "`") quote = char
+		else if (char === "{") depth++
+		else if (char === "}") depth--
+		else if (char === ">" && depth === 0) return body.slice(open, i + 1)
+	}
+	return body.slice(open)
+}
+
 describe("dialog bodies are padded", () => {
 	const sources = trackedTsx.map((file) => ({
 		file,
@@ -46,7 +73,8 @@ describe("dialog bodies are padded", () => {
 		const offenders = sources.flatMap(({ file, source }) =>
 			bodiesBetween(source, "DialogHeader", "DialogFooter")
 				.filter((body) => body.length > 0)
-				.filter((body) => !body.includes("DialogPanel") && !HAS_H_PADDING.test(body))
+				.map(outermostTag)
+				.filter((tag) => !tag.includes("DialogPanel") && !HAS_H_PADDING.test(tag))
 				.map(() => file),
 		)
 		expect(offenders).toEqual([])
@@ -57,7 +85,8 @@ describe("dialog bodies are padded", () => {
 		const offenders = sources.flatMap(({ file, source }) =>
 			bodiesBetween(source, "AlertDialogHeader", "AlertDialogFooter")
 				.filter((body) => body.length > 0)
-				.filter((body) => !HAS_H_PADDING.test(body))
+				.map(outermostTag)
+				.filter((tag) => !HAS_H_PADDING.test(tag))
 				.map(() => file),
 		)
 		expect(offenders).toEqual([])

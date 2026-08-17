@@ -1,4 +1,4 @@
-import { type Emit, safeEmit } from "./shared"
+import { type Emit, safeEmit } from "../../capture/shared"
 
 const LEVELS = ["log", "info", "warn", "error", "debug"] as const
 type Level = (typeof LEVELS)[number]

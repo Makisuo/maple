@@ -160,8 +160,8 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 							set: {
 								email: input.email,
 								enabled: input.enabled !== false,
-								...(input.dayOfWeek != null ? { dayOfWeek: input.dayOfWeek } : {}),
-								...(input.timezone != null ? { timezone: input.timezone } : {}),
+								...(input.dayOfWeek != null ? { dayOfWeek: input.dayOfWeek } : undefined),
+								...(input.timezone != null ? { timezone: input.timezone } : undefined),
 								updatedAt: new Date(now),
 							},
 						}),

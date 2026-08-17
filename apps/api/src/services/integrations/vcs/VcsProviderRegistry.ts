@@ -7,18 +7,21 @@ import type { VcsProviderClient } from "./VcsProviderClient"
 // ONLY module that names a concrete provider. Adding a provider = implement the
 // port + add one entry here; the generic orchestrator/webhook never change.
 
-export interface VcsProviderRegistryShape {
+export interface VcsProviderRegistryApi {
 	/** The ids of every registered provider (e.g. for static webhook routes). */
 	readonly ids: ReadonlyArray<string>
 	readonly resolve: (provider: string) => Effect.Effect<VcsProviderClient, UnknownVcsProviderError>
 }
 
-export class VcsProviderRegistry extends Context.Service<VcsProviderRegistry, VcsProviderRegistryShape>()(
+export class VcsProviderRegistry extends Context.Service<VcsProviderRegistry, VcsProviderRegistryApi>()(
 	"@maple/api/services/vcs/VcsProviderRegistry",
 	{
 		make: Effect.gen(function* () {
 			const github = yield* GithubProvider
-			const byId: Record<string, VcsProviderClient> = { [github.id]: github }
+			const byId: Record<string, VcsProviderClient> = { [github.id]: github } satisfies Record<
+				string,
+				VcsProviderClient
+			>
 
 			const resolve = (provider: string) => {
 				const impl = byId[provider]
@@ -32,7 +35,7 @@ export class VcsProviderRegistry extends Context.Service<VcsProviderRegistry, Vc
 						)
 			}
 
-			return { ids: Object.keys(byId), resolve } satisfies VcsProviderRegistryShape
+			return { ids: Object.keys(byId), resolve } satisfies VcsProviderRegistryApi
 		}),
 	},
 ) {

@@ -6,7 +6,7 @@ class EnvValidationError extends Data.TaggedError("@maple/api/lib/EnvValidationE
 	readonly message: string
 }> {}
 
-export interface EnvShape {
+export interface EnvConfig {
 	readonly PORT: number
 	readonly TINYBIRD_HOST: string
 	readonly TINYBIRD_TOKEN: Redacted.Redacted<string>
@@ -25,6 +25,14 @@ export interface EnvShape {
 	readonly MAPLE_DEFAULT_ORG_ID: string
 	readonly MAPLE_INGEST_KEY_ENCRYPTION_KEY: Redacted.Redacted<string>
 	readonly MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: Redacted.Redacted<string>
+	/**
+	 * Keyed HMAC for dashboard share-link tokens. Optional here, and required by
+	 * `alchemy.run.ts`, so a deploy without it fails loudly while the many test
+	 * suites that never touch sharing need no stub. Absent at runtime, every
+	 * share operation fails with `ShareNotConfiguredError` rather than silently
+	 * hashing under a fallback key.
+	 */
+	readonly MAPLE_SHARE_TOKEN_HMAC_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly MAPLE_INGEST_PUBLIC_URL: string
 	readonly MAPLE_APP_BASE_URL: string
 	/** Deployment environment (`production`, `staging`, `pr-<n>`, `development`) — set by alchemy from the stage. */
@@ -113,6 +121,7 @@ const envConfig = Config.all({
 	MAPLE_DEFAULT_ORG_ID: stringWithDefault("MAPLE_DEFAULT_ORG_ID", "default"),
 	MAPLE_INGEST_KEY_ENCRYPTION_KEY: Config.redacted("MAPLE_INGEST_KEY_ENCRYPTION_KEY"),
 	MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: Config.redacted("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY"),
+	MAPLE_SHARE_TOKEN_HMAC_KEY: optionalRedacted("MAPLE_SHARE_TOKEN_HMAC_KEY"),
 	MAPLE_INGEST_PUBLIC_URL: stringWithDefault("MAPLE_INGEST_PUBLIC_URL", "http://127.0.0.1:3474"),
 	MAPLE_APP_BASE_URL: stringWithDefault("MAPLE_APP_BASE_URL", "http://127.0.0.1:3471"),
 	MAPLE_ENVIRONMENT: stringWithDefault("MAPLE_ENVIRONMENT", "development"),
@@ -232,7 +241,7 @@ const envConfig = Config.all({
 })
 
 const makeEnv = Effect.gen(function* () {
-	const env: EnvShape = yield* envConfig
+	const env: EnvConfig = yield* envConfig
 
 	if (env.MAPLE_DEFAULT_ORG_ID.trim().length === 0) {
 		return yield* Effect.die(new EnvValidationError({ message: "MAPLE_DEFAULT_ORG_ID cannot be empty" }))
@@ -304,6 +313,6 @@ const makeEnv = Effect.gen(function* () {
 	return Env.of(env)
 })
 
-export class Env extends Context.Service<Env, EnvShape>()("@maple/api/lib/Env") {
+export class Env extends Context.Service<Env, EnvConfig>()("@maple/api/lib/Env") {
 	static readonly layer = Layer.effect(this, makeEnv)
 }

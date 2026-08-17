@@ -117,18 +117,20 @@ export class OnboardingService extends Context.Service<OnboardingService>()(
 						db
 							.update(orgOnboardingState)
 							.set({
-								...(input.role != null ? { role: input.role } : {}),
+								...(input.role != null ? { role: input.role } : undefined),
 								...(input.demoDataRequested != null
-									? { demoDataRequested: input.demoDataRequested }
-									: {}),
+									? {
+											demoDataRequested: input.demoDataRequested,
+										}
+									: undefined),
 								...(input.markOnboardingComplete
 									? { onboardingCompletedAt: new Date(now) }
-									: {}),
+									: undefined),
 								...(input.markChecklistDismissed
 									? { checklistDismissedAt: new Date(now) }
-									: {}),
-								...(userId != null ? { userId } : {}),
-								...(email != null ? { email } : {}),
+									: undefined),
+								...(userId != null ? { userId } : undefined),
+								...(email != null ? { email } : undefined),
 								updatedAt: new Date(now),
 							})
 							.where(eq(orgOnboardingState.orgId, orgId)),

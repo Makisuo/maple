@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 /**
  * Does the model actually follow the rules the prompts state?
  *
@@ -47,7 +48,7 @@ const fixtureFor = (input: string): DiagnosisFixture => {
 
 const stringArray = { type: "array", items: { type: "string" } } as const
 
-interface PlanShape {
+interface PlanModel {
 	readonly scopeSummary: string
 	readonly collapseReason: string | null
 	readonly hypotheses: ReadonlyArray<{
@@ -61,7 +62,7 @@ interface PlanShape {
 	}>
 }
 
-interface ReportShape {
+interface ReportModel {
 	readonly summary: string
 	readonly suspectedCause: string
 	readonly severityAssessment: "critical" | "high" | "medium" | "low"
@@ -88,7 +89,7 @@ interface ReportShape {
  * `mcp/__evals__/tools.ts` does — `apps/api` carries no zod, and one eval file is
  * not a reason to add it.
  */
-const PLAN_SCHEMA = jsonSchema<PlanShape>({
+const PLAN_SCHEMA = jsonSchema<PlanModel>({
 	type: "object",
 	additionalProperties: false,
 	required: ["scopeSummary", "collapseReason", "hypotheses"],
@@ -115,7 +116,7 @@ const PLAN_SCHEMA = jsonSchema<PlanShape>({
 	},
 })
 
-const REPORT_SCHEMA = jsonSchema<ReportShape>({
+const REPORT_SCHEMA = jsonSchema<ReportModel>({
 	type: "object",
 	additionalProperties: false,
 	required: [

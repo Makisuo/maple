@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test"
 
 test("Logs scroll stays virtualized without long tasks or render cascades", async ({ page }) => {
-	await page.goto("/logs-bench")
+	await page.goto("/lab/bench/logs")
 	await page.waitForFunction(() => window.__logsBench?.ready === true, undefined, { timeout: 30_000 })
 
 	const mountedBefore = await page.locator("[data-logs-bench] [data-index]").count()

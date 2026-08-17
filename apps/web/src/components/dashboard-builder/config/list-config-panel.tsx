@@ -4,6 +4,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { cn } from "@maple/ui/lib/utils"
+import { WIDGET_UNITS } from "@maple/domain/http"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
 import { useWidgetBuilder } from "@/hooks/use-widget-builder"
 import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
@@ -37,16 +38,12 @@ const TRACE_FIELDS = [
 
 const LOG_FIELDS = ["timestamp", "severityText", "severityNumber", "serviceName", "body", "traceId", "spanId"]
 
-const UNIT_OPTIONS: Array<{ value: string; label: string }> = [
-	{ value: "none", label: "None" },
-	{ value: "number", label: "Number" },
-	{ value: "percent", label: "Percent (0–1)" },
-	{ value: "percent_100", label: "Percent (0–100)" },
-	{ value: "duration_ms", label: "Duration (ms)" },
-	{ value: "duration_us", label: "Duration (us)" },
-	{ value: "bytes", label: "Bytes" },
-	{ value: "requests_per_sec", label: "Req/s" },
-]
+// Derived from the shared catalog so a token added there shows up here, and so
+// the picker can never offer one the formatter does not handle.
+const UNIT_OPTIONS: Array<{ value: string; label: string }> = WIDGET_UNITS.map((unit) => ({
+	value: unit.token,
+	label: unit.label,
+}))
 
 function DraggableColumnRow({
 	id,

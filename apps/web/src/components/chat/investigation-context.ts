@@ -89,10 +89,10 @@ export const alertContextToInvestigation = (alert: AlertContext): InvestigationC
 		refs: {
 			ruleId: alert.ruleId,
 			ruleName: alert.ruleName,
-			...(alert.incidentId ? { incidentId: alert.incidentId } : {}),
+			...(alert.incidentId ? { incidentId: alert.incidentId } : undefined),
 		},
-		...(alert.aiSummary ? { aiSummary: alert.aiSummary } : {}),
-		...(alert.aiSuspectedCause ? { aiSuspectedCause: alert.aiSuspectedCause } : {}),
+		...(alert.aiSummary ? { aiSummary: alert.aiSummary } : undefined),
+		...(alert.aiSuspectedCause ? { aiSuspectedCause: alert.aiSuspectedCause } : undefined),
 	}
 }
 
@@ -101,7 +101,7 @@ const KIND_NOUN: Record<InvestigationKind, string> = {
 	anomaly: "anomaly",
 	error: "error",
 	freeform: "question",
-}
+} satisfies Record<InvestigationKind, string>
 
 export const investigationNoun = (kind: InvestigationKind): string => KIND_NOUN[kind]
 

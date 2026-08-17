@@ -39,15 +39,17 @@ The default import (`@maple-dev/effect-sdk`) resolves to the server build under 
 import { Maple } from "@maple-dev/effect-sdk/server"
 ```
 
-Set `MAPLE_ENDPOINT` and `MAPLE_INGEST_KEY` in your environment and the SDK picks them up automatically. If `MAPLE_ENDPOINT` is unset, the layer becomes a no-op — your app runs without exporting telemetry, which is the right default for local dev.
+Set `MAPLE_INGEST_KEY` in your environment and the SDK picks it up automatically. `MAPLE_ENDPOINT` is optional — it defaults to the public Maple ingest.
+
+The server layer always exports; there is no disable switch. A missing ingest key does not turn export off, so a keyless app pointed at a local `maple start` sink or your own OTLP collector still ships telemetry. The one combination that cannot work is keyless against the public ingest, which rejects unauthenticated writes with a 401 — the SDK logs a one-shot warning if you land there. For local dev that exports nothing at all, either point `MAPLE_ENDPOINT` at a sink you control, or use `MapleFlush.make`, which does no-op without a key.
 
 ## Environment Variable Auto-Detection
 
 The server layer resolves configuration from environment variables in this order:
 
-**Ingest endpoint:** `MAPLE_ENDPOINT` → `OTEL_EXPORTER_OTLP_ENDPOINT`
+**Ingest endpoint:** `MAPLE_ENDPOINT` → `OTEL_EXPORTER_OTLP_ENDPOINT` → `https://ingest.maple.dev`
 
-**Ingest key:** `MAPLE_INGEST_KEY`
+**Ingest key:** `MAPLE_INGEST_KEY` — sent as a bearer token; omitted from the request when unset
 
 **Commit SHA** (first match wins):
 
@@ -60,25 +62,27 @@ The server layer resolves configuration from environment variables in this order
 **Deployment environment** (first match wins):
 
 1. `MAPLE_ENVIRONMENT`
-2. `RAILWAY_ENVIRONMENT`
-3. `VERCEL_ENV`
-4. `NODE_ENV`
+2. `RAILWAY_ENVIRONMENT_NAME`
+3. `DEPLOYMENT_ENV`
+4. Falls back to `"development"`
+
+`VERCEL_ENV` and `NODE_ENV` are **not** read — on any platform outside that list, set `MAPLE_ENVIRONMENT` explicitly or your telemetry lands under `development`.
 
 The SDK also auto-detects the **runtime** (Node.js, Bun, Deno) and **cloud provider** (Railway, Vercel, Cloudflare, Render) and includes them as `maple.runtime` and `maple.provider` resource attributes.
 
 ## Deployment Platform Notes
 
-Most managed platforms expose commit SHA and environment automatically — no extra config needed:
+Managed platforms expose the commit SHA automatically. The **environment** is only auto-detected on Railway — everywhere else, set `MAPLE_ENVIRONMENT` yourself:
 
-| Platform         | Commit SHA env var       | Environment env var   |
-| ---------------- | ------------------------ | --------------------- |
-| Railway          | `RAILWAY_GIT_COMMIT_SHA` | `RAILWAY_ENVIRONMENT` |
-| Vercel           | `VERCEL_GIT_COMMIT_SHA`  | `VERCEL_ENV`          |
-| Cloudflare Pages | `CF_PAGES_COMMIT_SHA`    | —                     |
-| Render           | `RENDER_GIT_COMMIT`      | —                     |
-| Self-hosted      | `COMMIT_SHA` (set in CI) | `NODE_ENV`            |
+| Platform         | Commit SHA env var       | Environment                                 |
+| ---------------- | ------------------------ | ------------------------------------------- |
+| Railway          | `RAILWAY_GIT_COMMIT_SHA` | `RAILWAY_ENVIRONMENT_NAME` (automatic)      |
+| Vercel           | `VERCEL_GIT_COMMIT_SHA`  | Set `MAPLE_ENVIRONMENT`                     |
+| Cloudflare Pages | `CF_PAGES_COMMIT_SHA`    | Set `MAPLE_ENVIRONMENT`                     |
+| Render           | `RENDER_GIT_COMMIT`      | Set `MAPLE_ENVIRONMENT`                     |
+| Self-hosted      | `COMMIT_SHA` (set in CI) | Set `MAPLE_ENVIRONMENT` or `DEPLOYMENT_ENV` |
 
-For self-hosted deployments, set `COMMIT_SHA` in your build pipeline and `MAPLE_ENVIRONMENT` (or rely on `NODE_ENV`) at runtime.
+For self-hosted deployments, set `COMMIT_SHA` in your build pipeline and `MAPLE_ENVIRONMENT` at runtime.
 
 ## Verify
 

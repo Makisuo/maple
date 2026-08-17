@@ -8,8 +8,15 @@ import type { AuditCheckResult, AuditSeverity } from "@maple/domain/setup-audit"
 import { SetupAuditService } from "@/services/org/SetupAuditService"
 
 /** Fail-first, then by severity, so the table's top rows are the ones worth acting on. */
-const SEVERITY_RANK: Record<AuditSeverity, number> = { critical: 0, warn: 1, info: 2 }
-const STATUS_RANK: Record<AuditCheckResult["status"], number> = { fail: 0, skip: 1, pass: 2 }
+const SEVERITY_RANK: Record<AuditSeverity, number> = { critical: 0, warn: 1, info: 2 } satisfies Record<
+	AuditSeverity,
+	number
+>
+const STATUS_RANK: Record<AuditCheckResult["status"], number> = {
+	fail: 0,
+	skip: 1,
+	pass: 2,
+} satisfies Record<AuditCheckResult["status"], number>
 
 export const byUrgency = (a: AuditCheckResult, b: AuditCheckResult) =>
 	STATUS_RANK[a.status] - STATUS_RANK[b.status] ||

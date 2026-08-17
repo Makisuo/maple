@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import {
+	IntegrationsConfigurationError,
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
 	IntegrationsRevokedError,
@@ -95,7 +96,7 @@ export interface PlanetScaleListEventsOptions {
 	readonly cursor?: string | undefined
 }
 
-export interface PlanetScaleServiceShape {
+export interface PlanetScaleServiceApi {
 	readonly pollAllOrgs: () => Effect.Effect<PlanetScalePollSummary, IntegrationsPersistenceError>
 	/** The org's (non-deleted) database inventory, for the API surface. */
 	readonly listDatabases: (
@@ -123,6 +124,7 @@ export interface PlanetScaleServiceShape {
 		options: PlanetScaleQueryInsightsOptions,
 	) => Effect.Effect<
 		PlanetScaleQueryInsightsResponse,
+		| IntegrationsConfigurationError
 		| IntegrationsNotConnectedError
 		| IntegrationsRevokedError
 		| IntegrationsValidationError
@@ -292,9 +294,9 @@ const DEPLOY_BACKFILL_VERB: Record<string, string> = {
 	errored: "failed",
 	reverted: "was reverted",
 	closed: "closed",
-}
+} satisfies Record<string, string>
 
-export class PlanetScaleService extends Context.Service<PlanetScaleService, PlanetScaleServiceShape>()(
+export class PlanetScaleService extends Context.Service<PlanetScaleService, PlanetScaleServiceApi>()(
 	"@maple/api/services/PlanetScaleService",
 	{
 		make: Effect.gen(function* () {
@@ -554,7 +556,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 											lastErrorAt: null,
 											leaseUntil: null,
 											updatedAt: new Date(now),
-											...(watermarkAt === null ? {} : { watermarkAt }),
+											...(!(watermarkAt === null) ? { watermarkAt } : undefined),
 										}
 									: {
 											lastError: error,
@@ -1214,7 +1216,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				listDatabases,
 				listEvents,
 				queryInsights,
-			} satisfies PlanetScaleServiceShape
+			} satisfies PlanetScaleServiceApi
 		}),
 	},
 ) {

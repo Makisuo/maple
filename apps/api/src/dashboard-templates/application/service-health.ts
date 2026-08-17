@@ -10,6 +10,7 @@ import {
 	templateId,
 } from "@/dashboard-templates/helpers"
 import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
+import { makeRouteDataSource } from "@maple/widgets/dashboard"
 
 function widgets(serviceName?: string): WidgetDef[] {
 	const where = serviceWhereClause(serviceName)
@@ -18,11 +19,11 @@ function widgets(serviceName?: string): WidgetDef[] {
 		{
 			id: "throughput",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "service_overview",
-				params: serviceName ? { service_name: serviceName } : {},
-				transform: { reduceToValue: { field: "throughput", aggregate: "sum" } },
-			},
+			dataSource: makeRouteDataSource(
+				"service_overview",
+				serviceName ? { service_name: serviceName } : {},
+				{ reduceToValue: { field: "throughput", aggregate: "sum" } },
+			),
 			display: { title: "Throughput", unit: "number" },
 			layout: { x: 0, y: 0, w: 3, h: 2 },
 		},
@@ -48,22 +49,22 @@ function widgets(serviceName?: string): WidgetDef[] {
 		{
 			id: "p50",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "service_overview",
-				params: serviceName ? { service_name: serviceName } : {},
-				transform: { reduceToValue: { field: "p50LatencyMs", aggregate: "avg" } },
-			},
+			dataSource: makeRouteDataSource(
+				"service_overview",
+				serviceName ? { service_name: serviceName } : {},
+				{ reduceToValue: { field: "p50LatencyMs", aggregate: "avg" } },
+			),
 			display: { title: "P50 Latency", unit: "duration_ms" },
 			layout: { x: 6, y: 0, w: 3, h: 2 },
 		},
 		{
 			id: "p95",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "service_overview",
-				params: serviceName ? { service_name: serviceName } : {},
-				transform: { reduceToValue: { field: "p95LatencyMs", aggregate: "avg" } },
-			},
+			dataSource: makeRouteDataSource(
+				"service_overview",
+				serviceName ? { service_name: serviceName } : {},
+				{ reduceToValue: { field: "p95LatencyMs", aggregate: "avg" } },
+			),
 			display: { title: "P95 Latency", unit: "duration_ms" },
 			layout: { x: 9, y: 0, w: 3, h: 2 },
 		},

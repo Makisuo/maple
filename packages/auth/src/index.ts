@@ -18,7 +18,35 @@ import {
 	UnauthorizedError,
 	UserId,
 } from "@maple/domain/http"
-import { Clock, Data, Effect, Option, Redacted, Schema } from "effect"
+import { Clock, Data, Effect, Option, Redacted, Schema, SchemaGetter } from "effect"
+
+/**
+ * A self-hosted session is bounded by TWO clocks, because the HMAC key IS the
+ * root password: there is no session store to revoke against, so the only thing
+ * that can end a leaked token is time.
+ *
+ * - {@link SELF_HOSTED_SESSION_TTL_SECONDS} bounds ONE minted token — short
+ *   enough that a leaked token dies on its own, long enough to cover a working
+ *   day of dashboard use without a mid-session logout.
+ * - {@link SELF_HOSTED_SESSION_MAX_LIFETIME_SECONDS} bounds the whole login.
+ *   Renewal mints a fresh token but carries the ORIGINAL deadline forward in
+ *   `session_exp`, so a stolen token cannot be refreshed forever; past the
+ *   deadline the root password has to be entered again.
+ *
+ * The second clock is what makes the first one mean something. Sliding renewal
+ * with no absolute cap is indistinguishable from the non-expiring token this
+ * replaced.
+ */
+export const SELF_HOSTED_SESSION_TTL_SECONDS = 12 * 60 * 60
+export const SELF_HOSTED_SESSION_MAX_LIFETIME_SECONDS = 7 * 24 * 60 * 60
+
+// Minting and verification normally share one clock (one deployment verifying
+// what it just signed), but a multi-instance self-hosted install can skew by a
+// few seconds, and a fresh token rejected as "issued in the future" is an
+// unrecoverable login loop. The leeway therefore applies ONLY to `iat`, which we
+// mint ourselves; `nbf`/`exp` boundaries stay exact because they are
+// RFC-specified and, on a correctly signed token, attacker-chosen.
+const CLOCK_SKEW_LEEWAY_SECONDS = 60
 
 export interface TenantContext {
 	readonly orgId: OrgId
@@ -29,28 +57,75 @@ export interface TenantContext {
 
 type HeaderRecord = Record<string, string | undefined>
 
-type JwtPayload = {
-	sub?: string
-	exp?: number
-	nbf?: number
-	iat?: number
-	org_id?: string
-	authMode?: AuthMode
-	roles?: readonly string[] | string
-}
-
 const JwtHeaderSchema = Schema.Struct({
 	alg: Schema.optionalKey(Schema.String),
 })
-const JwtPayloadSchema = Schema.Struct({
-	sub: Schema.optionalKey(Schema.String),
-	exp: Schema.optionalKey(Schema.Number),
-	nbf: Schema.optionalKey(Schema.Number),
-	iat: Schema.optionalKey(Schema.Number),
-	org_id: Schema.optionalKey(Schema.String),
-	authMode: Schema.optionalKey(AuthMode),
-	roles: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String])),
+
+// RFC 7519 temporal claims are "seconds since epoch" numbers. `isFinite` rejects
+// the one JSON-reachable non-number: an overflowing literal such as `1e999`,
+// which parses to `Infinity` and would otherwise mean "never expires".
+const JwtSeconds = Schema.Number.check(Schema.isFinite())
+
+// A `roles` claim arrives either as an array or as a comma-separated string.
+// Normalization is deliberately ASYMMETRIC and must stay that way: the string
+// form splits/trims/drops blanks, the array form is passed through untouched so
+// that `["root", "  "]` keeps failing `RoleName` (trimmed, min length 1). Trimming
+// array entries here would ACCEPT tokens that are rejected today.
+const normalizeRoles = (value: readonly string[] | string): readonly string[] => {
+	const roles =
+		typeof value === "string"
+			? value
+					.split(",")
+					.map((part) => part.trim())
+					.filter(Boolean)
+			: value
+	// A self-hosted token that names no role is the root operator: the HMAC key IS
+	// the root password, so signing capability already implies root. Preserved from
+	// the pre-schema code path rather than introduced here.
+	return roles.length > 0 ? roles : ["root"]
+}
+
+const SelfHostedRoles = Schema.Union([Schema.Array(Schema.String), Schema.String]).pipe(
+	Schema.decodeTo(Schema.Array(RoleName), {
+		decode: SchemaGetter.transform(normalizeRoles),
+		encode: SchemaGetter.passthrough({ strict: false }),
+	}),
+	Schema.withDecodingDefaultKey(Effect.succeed<readonly string[]>([])),
+)
+
+/**
+ * The self-hosted session contract, decoded IMMEDIATELY after the HMAC signature
+ * is verified — there is no permissive intermediate payload and no second
+ * validation pipeline downstream.
+ *
+ * Every field a caller is trusted with is required and branded here: `sub` is a
+ * `UserId`, `org_id` an `OrgId`, `roles` a normalized `RoleName[]`, and `authMode`
+ * the literal `"self_hosted"` (a Clerk-mode token presented on the self-hosted
+ * path is not a self-hosted session).
+ *
+ * `iat` is REQUIRED: `signHs256Jwt` is the only minter that has ever existed and
+ * it has always set `iat`, so requiring it invalidates nothing already issued —
+ * and it is what gives a pre-`exp` token a bounded life (see the max-age check in
+ * {@link verifySelfHostedSessionToken}). `exp`/`session_exp` stay optional for
+ * exactly one release cycle: tokens minted before this change carry neither, and
+ * requiring them would log every running deployment out at deploy time. They age
+ * out under the max-age rule within
+ * {@link SELF_HOSTED_SESSION_MAX_LIFETIME_SECONDS}, after which both can be
+ * promoted to required. `nbf` is optional because nothing mints it; it is honored
+ * if a token carries one.
+ */
+const SelfHostedSessionClaims = Schema.Struct({
+	sub: UserId,
+	org_id: OrgId,
+	authMode: Schema.Literal("self_hosted"),
+	roles: SelfHostedRoles,
+	iat: JwtSeconds,
+	exp: Schema.optionalKey(JwtSeconds),
+	session_exp: Schema.optionalKey(JwtSeconds),
+	nbf: Schema.optionalKey(JwtSeconds),
 })
+type SelfHostedSessionClaims = Schema.Schema.Type<typeof SelfHostedSessionClaims>
+
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
@@ -118,10 +193,10 @@ const decodeBase64Url = (input: string): string => {
 
 const encodeBase64Url = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString("base64url")
 
-const verifyHs256Jwt = Effect.fn("AuthService.verifyHs256Jwt")(function* (
+const verifySelfHostedSessionToken = Effect.fn("AuthService.verifySelfHostedSessionToken")(function* (
 	token: string,
 	secret: string,
-): Effect.fn.Return<JwtPayload, UnauthorizedError> {
+): Effect.fn.Return<SelfHostedSessionClaims, UnauthorizedError> {
 	const parts = token.split(".")
 	if (parts.length !== 3) {
 		return yield* unauthorized("Invalid JWT format")
@@ -131,6 +206,9 @@ const verifyHs256Jwt = Effect.fn("AuthService.verifyHs256Jwt")(function* (
 	const header = yield* Schema.decodeEffect(Schema.fromJsonString(JwtHeaderSchema))(
 		decodeBase64Url(encodedHeader),
 	).pipe(Effect.mapError(() => unauthorized("Invalid JWT header")))
+	// HS256 is pinned, not negotiated: the header cannot select `none`, another MAC,
+	// or an asymmetric algorithm. The only verification below is an HMAC with the
+	// root password, so there is no key-confusion surface either.
 	if (header.alg !== "HS256") {
 		return yield* unauthorized("Unsupported JWT algorithm")
 	}
@@ -144,30 +222,96 @@ const verifyHs256Jwt = Effect.fn("AuthService.verifyHs256Jwt")(function* (
 		return yield* unauthorized("Invalid JWT signature")
 	}
 
-	const payload = yield* Schema.decodeEffect(Schema.fromJsonString(JwtPayloadSchema))(
+	const claims = yield* Schema.decodeEffect(Schema.fromJsonString(SelfHostedSessionClaims))(
 		decodeBase64Url(encodedPayload),
-	).pipe(Effect.mapError(() => unauthorized("Invalid JWT payload")))
+	).pipe(Effect.mapError(() => unauthorized("Invalid self-hosted session token")))
 	// JWT exp/nbf are in seconds since epoch (RFC 7519); divide Clock millis.
 	const now = Math.floor((yield* Clock.currentTimeMillis) / 1000)
 
-	if (payload.nbf && now < payload.nbf) {
+	// Presence, not truthiness: `exp: 0` is a token that expired at the epoch, and
+	// a truthiness guard silently turned it into a token that never expires.
+	// Boundaries follow RFC 7519 §4.1.4/§4.1.5 — `now >= exp` is expired, `now == nbf`
+	// is already active.
+	if (claims.nbf !== undefined && now < claims.nbf) {
 		return yield* unauthorized("JWT is not active yet")
 	}
 
-	if (payload.exp && now >= payload.exp) {
+	// An `iat` ahead of now is either a skewed minter or a forged claim buying
+	// itself extra life under the max-age rule below. Only the first is worth
+	// tolerating, and only by seconds.
+	if (claims.iat > now + CLOCK_SKEW_LEEWAY_SECONDS) {
+		return yield* unauthorized("JWT was issued in the future")
+	}
+
+	if (claims.exp !== undefined && now >= claims.exp) {
 		return yield* unauthorized("JWT has expired")
 	}
 
-	return payload
+	// The absolute deadline of the login this token descends from. It survives
+	// renewal unchanged, so refreshing cannot extend a session past it.
+	if (claims.session_exp !== undefined && now >= claims.session_exp) {
+		return yield* unauthorized("Self-hosted session has expired")
+	}
+
+	// The backstop, and the rollout mechanism: a token minted before `exp` existed
+	// carries only `iat`, and this is what bounds it. It never fires on a current
+	// token — `exp` is at most SELF_HOSTED_SESSION_TTL_SECONDS out and the session
+	// deadline is capped at the same horizon — so it costs nothing to keep
+	// afterwards as a floor under any future minting bug.
+	if (now - claims.iat >= SELF_HOSTED_SESSION_MAX_LIFETIME_SECONDS) {
+		return yield* unauthorized("JWT has expired")
+	}
+
+	return claims
 })
 
-const signHs256Jwt = (payload: JwtPayload, secret: string): string => {
+type SelfHostedTokenClaims = {
+	readonly sub: UserId
+	readonly org_id: OrgId
+	readonly roles: readonly RoleName[]
+	readonly authMode: "self_hosted"
+	readonly iat: number
+	readonly exp: number
+	readonly session_exp: number
+}
+
+const signHs256Jwt = (payload: SelfHostedTokenClaims, secret: string): string => {
 	const header = { alg: "HS256", typ: "JWT" }
 	const encodedHeader = encodeBase64Url(header)
 	const encodedPayload = encodeBase64Url(payload)
 	const data = `${encodedHeader}.${encodedPayload}`
 	const signature = createHmac("sha256", secret).update(data).digest("base64url")
 	return `${data}.${signature}`
+}
+
+/**
+ * The single place a self-hosted session token is minted — login and renewal both
+ * go through it, so they cannot drift apart on lifetime.
+ *
+ * `sessionExpiresAt` is the absolute deadline of the login, chosen once at login
+ * and carried forward by every renewal. Clamping `exp` to it is what stops the
+ * last renewal before the deadline from handing out a token that outlives it.
+ */
+const mintSelfHostedSessionToken = (
+	tenant: TenantContext,
+	nowSeconds: number,
+	sessionExpiresAt: number,
+	secret: string,
+): { readonly token: string; readonly expiresAt: number } => {
+	const expiresAt = Math.min(nowSeconds + SELF_HOSTED_SESSION_TTL_SECONDS, sessionExpiresAt)
+	const token = signHs256Jwt(
+		{
+			sub: tenant.userId,
+			org_id: tenant.orgId,
+			roles: [...tenant.roles],
+			authMode: "self_hosted",
+			iat: nowSeconds,
+			exp: expiresAt,
+			session_exp: sessionExpiresAt,
+		},
+		secret,
+	)
+	return { token, expiresAt }
 }
 
 const constantTimeEquals = (left: string, right: string): boolean => {
@@ -182,20 +326,6 @@ const constantTimeEquals = (left: string, right: string): boolean => {
 
 	return leftBuffer.length === rightBuffer.length && timingSafeEqual(normalizedLeft, normalizedRight)
 }
-
-const parseRawRoles = (value: JwtPayload["roles"]): string[] => {
-	if (Array.isArray(value)) return value
-	if (typeof value === "string") {
-		return value
-			.split(",")
-			.map((part) => part.trim())
-			.filter(Boolean)
-	}
-	return []
-}
-
-const parseRoles = (value: JwtPayload["roles"]): Effect.Effect<Array<RoleName>, UnauthorizedError> =>
-	Effect.forEach(parseRawRoles(value), (role) => decodeRoleName(role, "Invalid role in session token"))
 
 const getAuthMode = (mode: string): AuthMode => (mode.toLowerCase() === "clerk" ? "clerk" : "self_hosted")
 
@@ -298,21 +428,69 @@ export const makeLoginSelfHosted = (
 
 		const tenant = makeSelfHostedTenant(env.MAPLE_DEFAULT_ORG_ID)
 		const now = Math.floor((yield* Clock.currentTimeMillis) / 1000)
-		const token = signHs256Jwt(
-			{
-				sub: tenant.userId,
-				org_id: tenant.orgId,
-				roles: [...tenant.roles],
-				authMode: "self_hosted",
-				iat: now,
-			},
-			rootPassword,
-		)
+		// Entering the root password is what starts the absolute clock. Renewal
+		// never restarts it — only another login does.
+		const sessionExpiresAt = now + SELF_HOSTED_SESSION_MAX_LIFETIME_SECONDS
+		const { token, expiresAt } = mintSelfHostedSessionToken(tenant, now, sessionExpiresAt, rootPassword)
 
 		return new SelfHostedLoginResponse({
 			token,
 			orgId: tenant.orgId,
 			userId: tenant.userId,
+			expiresAt: expiresAt * 1000,
+			sessionExpiresAt: sessionExpiresAt * 1000,
+		})
+	})
+
+/**
+ * Renewal: trade a still-valid self-hosted token for a fresh one, so a bounded
+ * token lifetime does not mean the operator is logged out mid-session.
+ *
+ * The presented token is re-verified from scratch rather than trusted from the
+ * middleware that already let the request through — this function is the only
+ * thing standing between a token and a new one, so it does its own checking. An
+ * expired token cannot be renewed; that is the point of the expiry.
+ */
+export const makeRefreshSelfHostedSession = (env: Pick<AuthEnv, "MAPLE_AUTH_MODE" | "MAPLE_ROOT_PASSWORD">) =>
+	Effect.fn("AuthService.refreshSelfHostedSession")(function* (
+		token: string,
+	): Effect.fn.Return<SelfHostedLoginResponse, SelfHostedAuthDisabledError | UnauthorizedError> {
+		if (getAuthMode(env.MAPLE_AUTH_MODE) !== "self_hosted") {
+			return yield* Effect.fail(
+				new SelfHostedAuthDisabledError({
+					message: "Self-hosted session renewal is disabled",
+				}),
+			)
+		}
+
+		const rootPassword = yield* requireSecret(env.MAPLE_ROOT_PASSWORD, "MAPLE_ROOT_PASSWORD")
+		const claims = yield* verifySelfHostedSessionToken(token, rootPassword)
+		const now = Math.floor((yield* Clock.currentTimeMillis) / 1000)
+
+		// A token minted before `session_exp` existed still gets a bounded renewal
+		// window rather than an unlimited one: its own `iat` plus the same maximum
+		// lifetime, which is exactly the deadline the max-age rule already enforces
+		// against it. That is the rollout path — legacy sessions renew until they
+		// hit the cap, then the operator logs in again.
+		const sessionExpiresAt = claims.session_exp ?? claims.iat + SELF_HOSTED_SESSION_MAX_LIFETIME_SECONDS
+		const renewed = mintSelfHostedSessionToken(
+			{
+				orgId: claims.org_id,
+				userId: claims.sub,
+				roles: claims.roles,
+				authMode: claims.authMode,
+			},
+			now,
+			sessionExpiresAt,
+			rootPassword,
+		)
+
+		return new SelfHostedLoginResponse({
+			token: renewed.token,
+			orgId: claims.org_id,
+			userId: claims.sub,
+			expiresAt: renewed.expiresAt * 1000,
+			sessionExpiresAt: sessionExpiresAt * 1000,
 		})
 	})
 
@@ -391,23 +569,15 @@ export const makeResolveTenant = (
 		}
 
 		const rootPassword = yield* requireSecret(env.MAPLE_ROOT_PASSWORD, "MAPLE_ROOT_PASSWORD")
-		const payload = yield* verifyHs256Jwt(token, rootPassword)
-
-		if (
-			payload.authMode !== "self_hosted" ||
-			typeof payload.sub !== "string" ||
-			typeof payload.org_id !== "string"
-		) {
-			return yield* unauthorized("Invalid self-hosted session token")
-		}
-
-		const roles = yield* parseRoles(payload.roles)
+		// `claims` is already the validated tenant: branded ids, a normalized role
+		// list and a literal `authMode`. Nothing below re-checks it.
+		const claims = yield* verifySelfHostedSessionToken(token, rootPassword)
 
 		const tenant: TenantContext = {
-			orgId: yield* decodeOrgId(payload.org_id, "Invalid organization in self-hosted session token"),
-			userId: yield* decodeUserId(payload.sub, "Invalid user in self-hosted session token"),
-			roles: roles.length > 0 ? roles : [decodeRoleNameSync("root")],
-			authMode: "self_hosted",
+			orgId: claims.org_id,
+			userId: claims.sub,
+			roles: claims.roles,
+			authMode: claims.authMode,
 		}
 
 		const orgIdOverride = getOptionalString(env.MAPLE_ORG_ID_OVERRIDE)
@@ -427,7 +597,7 @@ export const makeResolveMcpTenant = (
 	// Accept both api_key (programmatic agents) and session_token: this is the
 	// "Clerk / self-hosted session auth" fallback in resolveMcpTenantContext, used
 	// by a logged-in browser applying an approved chat proposal via
-	// POST /api/chat/apply. Both resolve to the caller's own org (and a session
+	// POST /internal/chat/apply. Both resolve to the caller's own org (and a session
 	// token keeps the human userId for attribution). The internal-service and
 	// api-key paths run before this fallback, so this only widens the
 	// already-last-resort branch; self-hosted HS256 mode already ignored

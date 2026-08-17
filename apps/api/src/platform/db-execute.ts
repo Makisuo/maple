@@ -9,7 +9,7 @@
  */
 import { Effect, Schedule } from "effect"
 import { describeCause } from "./describe-cause"
-import type { DatabaseClient, DatabaseError, DatabaseShape } from "./DatabaseLive"
+import type { DatabaseClient, DatabaseError, DatabaseApi } from "./DatabaseLive"
 import { isRetryablePostgresContention } from "./postgres-errors"
 
 /** Contention (SQLSTATE 40001/40P01) is safe to replay as a fresh attempt. */
@@ -33,7 +33,7 @@ export const makePersistenceErrorMapper =
 		const cause = describeCause(isError ? error.cause : error)
 		return new Ctor({
 			message: isError ? error.message : fallbackMessage,
-			...(cause === undefined ? {} : { cause }),
+			...(!(cause === undefined) ? { cause } : undefined),
 		})
 	}
 
@@ -46,7 +46,7 @@ export const makePersistenceErrorMapper =
  * plumbing to say which query failed.
  */
 export const makeDbExecute =
-	<E>(database: DatabaseShape, service: string, mapError: (error: DatabaseError) => E) =>
+	<E>(database: DatabaseApi, service: string, mapError: (error: DatabaseError) => E) =>
 	<T>(fn: (db: DatabaseClient) => Promise<T>): Effect.Effect<T, E> =>
 		database.execute(fn).pipe(
 			Effect.retry({

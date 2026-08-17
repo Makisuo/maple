@@ -11,16 +11,16 @@ import {
 } from "@maple/query-engine/runtime"
 import { Clock, Effect, Option } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
-import type { QueryEngineServiceShape } from "@/services/warehouse/QueryEngineService"
-import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import type { QueryEngineServiceApi } from "@/services/warehouse/QueryEngineService"
+import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 
 /**
  * Applies registry cache and error policy. Services are values so the returned
  * effects have no requirements and can run inside `cachedDirect`.
  */
 export interface QueryRunnerDeps {
-	readonly warehouse: WarehouseQueryServiceShape
-	readonly queryEngine: QueryEngineServiceShape
+	readonly warehouse: WarehouseQueryServiceApi
+	readonly queryEngine: QueryEngineServiceApi
 }
 
 export const makeQueryRunners = ({ warehouse, queryEngine }: QueryRunnerDeps) => {

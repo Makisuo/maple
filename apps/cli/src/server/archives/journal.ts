@@ -476,7 +476,7 @@ export const migrateV2CreateIntent = (
 		...raw,
 		formatVersion: ARCHIVE_OPERATION_FORMAT_VERSION,
 		kind: "create",
-	}
+	} satisfies Record<string, unknown>
 	// parseArchiveOperationIntent validates all fields + the kind discriminator.
 	parseArchiveOperationIntent(archiveDir, lifted, expectedDataDir, expectedScratchRoot)
 	return lifted

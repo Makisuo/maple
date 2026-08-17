@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Exit, Schema } from "effect"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -61,7 +61,7 @@ const KIND_FILTER_LABEL: Record<InvestigationKindKey | "all", string> = {
 	error: "Errors",
 	anomaly: "Anomalies",
 	question: "Questions",
-}
+} satisfies Record<InvestigationKindKey | "all", string>
 
 const KIND_FILTER_VALUES = Object.keys(KIND_FILTER_LABEL) as ReadonlyArray<InvestigationKindKey | "all">
 
@@ -149,8 +149,8 @@ function InvestigationsHub() {
 		if (Exit.isSuccess(created)) {
 			void navigate({ to: "/investigations/$id", params: { id: created.value.id } })
 		} else {
-			const { title, description } = formatBackendError(created)
-			toastManager.add({ title, description, type: "error" })
+			const { title, message } = displayError(created)
+			toastManager.add({ title, description: message, type: "error" })
 		}
 	}
 

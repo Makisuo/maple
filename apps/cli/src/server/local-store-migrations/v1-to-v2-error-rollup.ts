@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { cp, mkdir, rm } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import {
@@ -69,7 +70,7 @@ const decodeState = (value: unknown): V1ToV2State => {
 		module: "local-0001-to-0002-error-rollup",
 		version: 1,
 		rawRows: decodeCounts(value.rawRows),
-		...(value.retentionDays === undefined ? {} : { retentionDays: value.retentionDays }),
+		...(!(value.retentionDays === undefined) ? { retentionDays: value.retentionDays } : undefined),
 	}
 }
 
@@ -122,7 +123,7 @@ const preflight = async (context: MigrationModuleContext): Promise<V1ToV2State> 
 		module: "local-0001-to-0002-error-rollup",
 		version: 1,
 		rawRows,
-		...(retentionDays === undefined ? {} : { retentionDays }),
+		...(!(retentionDays === undefined) ? { retentionDays } : undefined),
 	}
 }
 

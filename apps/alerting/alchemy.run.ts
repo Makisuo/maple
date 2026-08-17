@@ -68,7 +68,7 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 			crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *"],
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
-				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
+				...(mapleDb ? { MAPLE_DB: mapleDb } : undefined),
 				INVESTIGATION_FANOUT_WORKFLOW: investigationFanoutWorkflow,
 				// Production only: preview/stg workers run the same email crons against
 				// their own DB branches, so a binding here means every live stage sends
@@ -79,7 +79,7 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 								allowedSenderAddresses: ["notifications@noreply.maple.dev"],
 							}),
 						}
-					: {}),
+					: undefined),
 				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 				TINYBIRD_TOKEN: Redacted.make(requireEnv("TINYBIRD_TOKEN")),
 				// Alert-rule evaluation runs Tinybird-scoped raw SQL through

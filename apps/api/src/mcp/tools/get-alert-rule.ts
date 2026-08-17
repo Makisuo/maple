@@ -1,4 +1,5 @@
-import { McpQueryError, requiredStringParam, type McpToolRegistrar } from "./types"
+import { requiredStringParam, type McpToolRegistrar } from "./types"
+import { toMcpHttpError } from "@/mcp/lib/map-http-error"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
@@ -10,7 +11,7 @@ const comparatorLabel: Record<string, string> = {
 	gte: ">=",
 	lt: "<",
 	lte: "<=",
-}
+} satisfies Record<string, string>
 
 export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 	server.tool(
@@ -23,16 +24,9 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 			const tenant = yield* CurrentMcpTenant
 			const alerts = yield* AlertRulesService
 
-			const result = yield* alerts.listRules(tenant.orgId).pipe(
-				Effect.mapError(
-					(error) =>
-						new McpQueryError({
-							message: error.message,
-							pipeName: "get_alert_rule",
-							cause: error,
-						}),
-				),
-			)
+			const result = yield* alerts
+				.listRules(tenant.orgId)
+				.pipe(Effect.mapError(toMcpHttpError("get_alert_rule")))
 
 			const rule = result.rules.find((r) => r.id === rule_id)
 

@@ -1,20 +1,10 @@
-import { Effect, Result, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
-import { QueryEngineExecuteRequest } from "@maple/query-engine"
-import { buildBreakdownQuerySpec } from "@maple/query-engine/query-builder"
-import {
-	type BackendError,
-	type WarehouseQueryError,
-	decodeInput,
-	executeQueryEngine,
-	invalidWarehouseInput,
-} from "@/api/warehouse/effect-utils"
+import { runBreakdownQuerySet } from "@maple/query-engine/query-set"
+import { decodeInput, invalidWarehouseInput } from "@/api/warehouse/effect-utils"
+import { makeWarehouseExecutor } from "@/api/warehouse/query-set-executor"
 
-// Read the message from either a local/tagged error or a public v2 envelope.
-function queryEngineErrorMessage(error: WarehouseQueryError | BackendError, fallback: string): string {
-	if ("message" in error && typeof error.message === "string") return error.message
-	return "error" in error && typeof error.error.message === "string" ? error.error.message : fallback
-}
+const executor = makeWarehouseExecutor("queryEngine.breakdownQuery")
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 
@@ -33,136 +23,6 @@ const QueryBuilderBreakdownInputSchema = Schema.Struct({
 
 export type QueryBuilderBreakdownInput = Schema.Schema.Type<typeof QueryBuilderBreakdownInputSchema>
 
-interface BreakdownQueryResult {
-	queryId: string
-	queryName: string
-	status: "success" | "error"
-	error: string | null
-	data: Array<{ name: string; value: number }>
-}
-
-const executeBreakdownQuery = Effect.fn("QueryEngine.executeBreakdownQuery")(function* (
-	startTime: string,
-	endTime: string,
-	query: QueryBuilderBreakdownInput["queries"][number],
-	defaultLimit: number | undefined,
-) {
-	const built = buildBreakdownQuerySpec(query, { defaultLimit })
-
-	if (!built.query) {
-		return {
-			queryId: query.id,
-			queryName: query.name,
-			status: "error",
-			error: built.error ?? "Failed to build breakdown query",
-			data: [],
-		} satisfies BreakdownQueryResult
-	}
-
-	const request = yield* decodeInput(
-		QueryEngineExecuteRequest,
-		{
-			startTime,
-			endTime,
-			query: built.query,
-		},
-		"executeBreakdownQuery.request",
-	)
-
-	// Per-query failures are folded into the result status rather than failing the
-	// whole batch, so one bad query doesn't blank the chart. Capture the outcome.
-	const outcome = yield* Effect.result(executeQueryEngine("queryEngine.breakdownQuery", request))
-
-	if (Result.isFailure(outcome)) {
-		const error = outcome.failure
-		return {
-			queryId: query.id,
-			queryName: query.name,
-			status: "error",
-			error: queryEngineErrorMessage(error, "Breakdown query failed"),
-			data: [],
-		} satisfies BreakdownQueryResult
-	}
-
-	const response = outcome.success
-	if (response.result.kind !== "breakdown") {
-		return {
-			queryId: query.id,
-			queryName: query.name,
-			status: "error",
-			error: "Unexpected non-breakdown result",
-			data: [],
-		} satisfies BreakdownQueryResult
-	}
-
-	const mapped = response.result.data.map((item) => ({
-		name: item.name,
-		value: item.value,
-	}))
-
-	return {
-		queryId: query.id,
-		queryName: query.name,
-		status: "success",
-		error: null,
-		// error_rate arrives from the query engine as a 0–1 ratio — the canonical
-		// unit everywhere (the "percent" display unit multiplies by 100 when
-		// formatting). No rescaling here.
-		data: mapped,
-	} satisfies BreakdownQueryResult
-})
-
-function toDisplayName(query: { name: string; legend?: string }): string {
-	const trimmedLegend = (query.legend ?? "").trim()
-	return trimmedLegend || query.name
-}
-
-function mergeBreakdownResults(
-	results: BreakdownQueryResult[],
-	enabledQueries: QueryBuilderBreakdownInput["queries"],
-): Array<Record<string, string | number>> {
-	const successful = results.filter((r) => r.status === "success" && r.data.length > 0)
-	if (successful.length === 0) return []
-
-	// Single query: return simple { name, value } rows
-	if (successful.length === 1) {
-		return successful[0].data
-			.map((item) => ({ name: item.name, value: item.value }))
-			.sort((a, b) => b.value - a.value)
-	}
-
-	const rowsByName = new Map<string, Record<string, string | number>>()
-	const columnNames: string[] = []
-	const queriesById = new Map(enabledQueries.map((q) => [q.id, q]))
-
-	for (const result of successful) {
-		const query = queriesById.get(result.queryId)
-		const displayName = query ? toDisplayName(query) : result.queryName
-		columnNames.push(displayName)
-
-		for (const item of result.data) {
-			const row = rowsByName.get(item.name) ?? { name: item.name }
-			row[displayName] = item.value
-			rowsByName.set(item.name, row)
-		}
-	}
-
-	for (const row of rowsByName.values()) {
-		for (const col of columnNames) {
-			if (typeof row[col] !== "number") {
-				row[col] = 0
-			}
-		}
-	}
-
-	const firstCol = columnNames[0]
-	return Array.from(rowsByName.values()).toSorted((a, b) => {
-		const aVal = typeof a[firstCol] === "number" ? a[firstCol] : 0
-		const bVal = typeof b[firstCol] === "number" ? b[firstCol] : 0
-		return bVal - aVal
-	})
-}
-
 export function getQueryBuilderBreakdown({ data }: { data: QueryBuilderBreakdownInput }) {
 	return getQueryBuilderBreakdownEffect({ data })
 }
@@ -174,33 +34,24 @@ const getQueryBuilderBreakdownEffect = Effect.fn("QueryEngine.getQueryBuilderBre
 }) {
 	const input = yield* decodeInput(QueryBuilderBreakdownInputSchema, data, "getQueryBuilderBreakdown")
 
-	// Hidden breakdown queries feed no formulas, so do not execute them.
-	const enabledQueries = input.queries.filter((query) => query.enabled !== false && !query.hidden)
-	if (enabledQueries.length === 0) {
-		return yield* invalidWarehouseInput("getQueryBuilderBreakdown", "No enabled queries to run")
-	}
-
-	const results = yield* Effect.forEach(
-		enabledQueries,
-		(query) => executeBreakdownQuery(input.startTime, input.endTime, query, input.defaultLimit),
-		{ concurrency: enabledQueries.length },
+	const outcome = yield* runBreakdownQuerySet(executor, {
+		querySet: { queries: input.queries },
+		startTime: input.startTime,
+		endTime: input.endTime,
+		...(!(input.defaultLimit === undefined) ? { defaultLimit: input.defaultLimit } : undefined),
+	}).pipe(
+		Effect.catchTags({
+			"@maple/query-engine/query-set/QuerySetInputError": (error) =>
+				invalidWarehouseInput("getQueryBuilderBreakdown", error.message),
+			"@maple/query-engine/query-set/QuerySetNoDataError": (error) =>
+				invalidWarehouseInput("getQueryBuilderBreakdown", error.message),
+		}),
 	)
 
-	const firstError = results.find((r) => r.status === "error" && r.error)?.error
-	const anySuccess = results.some((r) => r.status === "success" && r.data.length > 0)
-
-	if (!anySuccess) {
-		return yield* invalidWarehouseInput(
-			"getQueryBuilderBreakdown",
-			firstError ?? "No breakdown data found in selected time range",
-		)
-	}
-
-	return {
-		data: mergeBreakdownResults(results, enabledQueries),
-	}
+	return { data: [...outcome.rows] }
 })
 
-export const __testables = {
-	mergeBreakdownResults,
-}
+// The merge and the per-query execution moved to `@maple/query-engine/query-set`
+// and are tested there; what stays worth asserting here is that this module adds
+// no rescaling of its own on the way out.
+export const __testables = {}

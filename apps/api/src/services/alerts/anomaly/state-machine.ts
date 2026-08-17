@@ -39,7 +39,7 @@ export const DEFAULT_STATE_MACHINE_CONFIG: StateMachineConfig = {
  */
 const STATE_MACHINE_CONFIG_OVERRIDES: Partial<Record<AnomalySignalType, Partial<StateMachineConfig>>> = {
 	throughput: { breachesToOpen: 3, healthyToResolve: 1 },
-}
+} satisfies Partial<Record<AnomalySignalType, Partial<StateMachineConfig>>>
 
 export const stateMachineConfigFor = (signalType: AnomalySignalType): StateMachineConfig => ({
 	...DEFAULT_STATE_MACHINE_CONFIG,

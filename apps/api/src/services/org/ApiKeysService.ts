@@ -14,7 +14,7 @@ import {
 	RoleName,
 } from "@maple/domain/http"
 import { API_KEY_PREFIX, apiKeys, generateApiKey, hashApiKey, parseIngestKeyLookupHmacKey } from "@maple/db"
-import { and, desc, eq, isNull, lt, or } from "drizzle-orm"
+import { and, desc, eq, getTableColumns, isNull, lt, or } from "drizzle-orm"
 import { Clock, Effect, Layer, Option, Redacted, Schema, Context } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
@@ -126,7 +126,7 @@ const rowToResponse = (row: typeof apiKeys.$inferSelect, txid?: PostgresTransact
 		createdAt: row.createdAt.getTime(),
 		createdBy: row.createdBy,
 		createdByEmail: row.createdByEmail ?? null,
-		...(txid !== undefined ? { txid } : {}),
+		...(txid !== undefined ? { txid } : undefined),
 	})
 
 export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/api/services/ApiKeysService", {
@@ -248,7 +248,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				createdBy: userId,
 				createdByEmail,
 				secret: rawKey,
-				...(txid !== undefined ? { txid } : {}),
+				...(txid !== undefined ? { txid } : undefined),
 			})
 		})
 
@@ -265,13 +265,6 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				"tenant.userId": userId,
 				"maple.api_key.id": keyId,
 			})
-			const existing = yield* requireById(orgId, keyId)
-			if (existing.revoked) {
-				return yield* Effect.fail(
-					new ApiKeyNotFoundError({ keyId, message: "API key is already revoked" }),
-				)
-			}
-
 			const id = decodeApiKeyIdSync(randomUUID())
 			const rawKey = generateApiKey()
 			const keyHash = hashApiKey(rawKey, hmacKey)
@@ -279,44 +272,71 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			const now = yield* Clock.currentTimeMillis
 			const createdByEmail = params.createdByEmail ?? null
 
-			const rolledRows = yield* database
+			// The revoke of the source row is the barrier, and it runs FIRST: the
+			// `revoked = false` predicate means exactly one concurrent roll can
+			// claim the row, and the row lock it takes makes a second roll (or a
+			// racing revoke) re-read the committed state and match zero rows. Only
+			// the transaction that actually claimed the source inserts a successor,
+			// so a roll/roll race can no longer mint two live keys and a
+			// revoke/roll race can no longer mint a successor for a dead one.
+			const rolled = yield* database
 				.execute((db) =>
 					db.transaction(async (tx) => {
+						const claimed = await tx
+							.update(apiKeys)
+							.set({ revoked: true, revokedAt: msToDate(now) })
+							.where(
+								and(
+									eq(apiKeys.id, keyId),
+									eq(apiKeys.orgId, orgId),
+									eq(apiKeys.revoked, false),
+								),
+							)
+							.returning({ ...getTableColumns(apiKeys), ...txidColumn })
+						if (claimed.length === 0) return undefined
+						const source = claimed[0]
+
 						await tx.insert(apiKeys).values({
 							id,
 							orgId,
-							name: existing.name,
-							description: existing.description ?? null,
+							name: source.name,
+							description: source.description ?? null,
 							keyHash,
 							keyPrefix,
-							kind: existing.kind,
-							scopes: existing.scopes ?? null,
+							kind: source.kind,
+							scopes: source.scopes ?? null,
 							// Carry the role metadata across: a rolled key that lost it
 							// would resolve with the null (= `root`) default, silently
 							// escalating a CLI/MCP key beyond its creator's roles.
-							metadataJson: existing.metadataJson,
+							metadataJson: source.metadataJson,
 							expiresAt: null,
-							createdAt: new Date(now),
+							createdAt: msToDate(now),
 							createdBy: userId,
 							createdByEmail,
 						})
-						return tx
-							.update(apiKeys)
-							.set({ revoked: true, revokedAt: new Date(now) })
-							.where(eq(apiKeys.id, keyId))
-							.returning(txidColumn)
+						return source
 					}),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
-			const txid = readTxid(rolledRows)
+
+			if (rolled === undefined) {
+				// Lost the claim (or never had one): distinguish a key that does not
+				// exist from one that was revoked out from under this roll.
+				yield* requireById(orgId, keyId)
+				return yield* Effect.fail(
+					new ApiKeyNotFoundError({ keyId, message: "API key is already revoked" }),
+				)
+			}
+
+			const txid = readTxid([rolled])
 
 			return new ApiKeyCreatedResponse({
 				id,
-				name: existing.name,
-				description: existing.description ?? null,
+				name: rolled.name,
+				description: rolled.description ?? null,
 				keyPrefix,
-				kind: existing.kind,
-				scopes: existing.scopes ?? null,
+				kind: rolled.kind,
+				scopes: rolled.scopes ?? null,
 				revoked: false,
 				revokedAt: null,
 				lastUsedAt: null,
@@ -325,27 +345,36 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				createdBy: userId,
 				createdByEmail,
 				secret: rawKey,
-				...(txid !== undefined ? { txid } : {}),
+				...(txid !== undefined ? { txid } : undefined),
 			})
 		})
 
 		const revoke = Effect.fn("ApiKeysService.revoke")(function* (orgId: OrgId, keyId: ApiKeyId) {
 			yield* Effect.annotateCurrentSpan({ orgId, "maple.api_key.id": keyId })
 			const now = yield* Clock.currentTimeMillis
-			const row = yield* requireById(orgId, keyId)
 
+			// Conditional for the same reason `roll` is: a revoke that races a roll
+			// must either claim the live row or observe that it is already dead —
+			// never re-stamp `revoked_at` on a row someone else already retired
+			// (which would also replicate a pointless row out through Electric).
 			const revokedRows = yield* database
 				.execute((db) =>
 					db
 						.update(apiKeys)
-						.set({ revoked: true, revokedAt: new Date(now) })
-						.where(eq(apiKeys.id, keyId))
-						.returning(txidColumn),
+						.set({ revoked: true, revokedAt: msToDate(now) })
+						.where(
+							and(eq(apiKeys.id, keyId), eq(apiKeys.orgId, orgId), eq(apiKeys.revoked, false)),
+						)
+						.returning({ ...getTableColumns(apiKeys), ...txidColumn }),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
-			const txid = readTxid(revokedRows)
 
-			return rowToResponse({ ...row, revoked: true, revokedAt: new Date(now) }, txid)
+			// Lost the claim: either the key never existed (404) or it was already
+			// revoked, in which case the stored row — not a freshly stamped copy —
+			// is the truth to report back.
+			if (revokedRows.length === 0) return rowToResponse(yield* requireById(orgId, keyId))
+
+			return rowToResponse(revokedRows[0], readTxid(revokedRows))
 		})
 
 		const resolveByKey = Effect.fn("ApiKeysService.resolveByKey")(function* (rawKey: string) {

@@ -344,6 +344,38 @@ describe("PlanetScaleConnectionService", () => {
 		)
 	})
 
+	it.effect("reports the exact missing managed target when attaching a metrics token", () => {
+		const testDb = createTestDb(trackedDbs)
+		const stub = stubPlanetScaleApi()
+
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleConnectionService
+			const orgId = asOrgId("org_1")
+
+			yield* storeGrant(orgId)
+			const bound = yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
+			const targetId = bound.scrapeTarget!.id
+			yield* Effect.promise(() =>
+				executeSql(testDb, "DELETE FROM scrape_targets WHERE id = $1", [targetId]),
+			)
+
+			const error = yield* service
+				.setMetricsToken(
+					orgId,
+					new PlanetScaleMetricsTokenRequest({ tokenId: "tok_good", tokenSecret: "s3cret" }),
+				)
+				.pipe(Effect.flip)
+
+			assert.strictEqual(error._tag, "@maple/http/errors/ScrapeTargetNotFoundError")
+			if (error._tag === "@maple/http/errors/ScrapeTargetNotFoundError") {
+				assert.strictEqual(error.targetId, targetId)
+			}
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
+
 	it.effect("pauses metrics when the data plane rejects the bearer despite a passing SD probe", () => {
 		const testDb = createTestDb(trackedDbs)
 		const calls: Array<{ url: string; authorization: string | null }> = []

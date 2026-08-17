@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { InternalRpcToolNotFoundError, type InternalMcpToolDescriptor } from "@maple/domain/internal-rpc"
 import { Context, Effect, Layer } from "effect"
 import { executeRegisteredMcpToolUnscoped, mapleToolCatalog, toInputSchema } from "./tools/registry"
@@ -28,6 +29,10 @@ export const listMcpTools = Effect.sync(listToolDescriptors)
 
 /** Raw dispatcher. Executable handlers stay private so callers cannot omit the request tenant. */
 const callMcpToolUnscoped = Effect.fn("McpToolDispatcher.call")(function* (name: string, input: unknown) {
+	// The tool name was a log annotation only, so per-tool attribution worked
+	// solely because each handler happens to carry its own `McpTool.<name>` span
+	// — every usage query had to reconstruct it with `substring(SpanName, 9)`.
+	yield* Effect.annotateCurrentSpan("maple.mcp.tool", name)
 	return yield* executeRegisteredMcpToolUnscoped(name, input).pipe(
 		Effect.catchTag("@maple/mcp/decode-error", (error) =>
 			Effect.logWarning("Invalid parameters").pipe(
@@ -106,15 +111,40 @@ const callMcpToolUnscoped = Effect.fn("McpToolDispatcher.call")(function* (name:
 					} satisfies McpToolResult),
 				),
 		}),
+		// After the catchTags above, so a failure they converted into an in-band
+		// `isError` result is still counted. Tool handlers report failure in the
+		// result rather than the error channel, so span status alone never
+		// reflected a failed tool call.
+		Effect.tap((result) => Effect.annotateCurrentSpan("result.isError", result.isError === true)),
 		Effect.annotateLogs({ "maple.mcp.tool": name }),
 	)
 })
 
-export interface McpToolExecutorShape {
+/**
+ * Which entry point drove this tool call.
+ *
+ * Four surfaces share one dispatcher, and until this existed none of them were
+ * distinguishable in telemetry: the public-vs-internal traffic split had to be
+ * inferred from the ratio of `tools/call` spans to executor spans. Required
+ * rather than defaulted, for the same reason `tenant` is — a caller that forgets
+ * it should not silently be counted as somebody else.
+ */
+export type McpToolSurface =
+	/** The public MCP transport (`mcp/server.ts`). */
+	| "mcp"
+	/** The in-process AI chat agent (`chat/turn-runner.ts`). */
+	| "chat"
+	/** Agent workflow passes (`workflows/agent-pass.ts`). */
+	| "workflow"
+	/** Worker-to-worker internal RPC (`internal-rpc.ts`). */
+	| "rpc"
+
+export interface McpToolExecutorApi {
 	readonly execute: (
 		tenant: TenantContext,
 		name: string,
 		input: unknown,
+		surface: McpToolSurface,
 	) => Effect.Effect<McpToolResult, InternalRpcToolNotFoundError>
 }
 
@@ -125,7 +155,7 @@ export interface McpToolExecutorShape {
  * must then supply its authenticated tenant explicitly, so no transport can
  * accidentally execute a raw handler without CurrentMcpTenant.
  */
-export class McpToolExecutor extends Context.Service<McpToolExecutor, McpToolExecutorShape>()(
+export class McpToolExecutor extends Context.Service<McpToolExecutor, McpToolExecutorApi>()(
 	"@maple/api/mcp/McpToolExecutor",
 	{
 		make: Effect.gen(function* () {
@@ -135,7 +165,12 @@ export class McpToolExecutor extends Context.Service<McpToolExecutor, McpToolExe
 				tenant: TenantContext,
 				name: string,
 				input: unknown,
+				surface: McpToolSurface,
 			) {
+				yield* Effect.annotateCurrentSpan({
+					"maple.mcp.tool": name,
+					"maple.mcp.surface": surface,
+				})
 				return yield* callMcpToolUnscoped(name, input).pipe(
 					Effect.provideService(CurrentMcpTenant, tenant),
 					Effect.provide(runtimeServices),

@@ -3,7 +3,7 @@ import { memo, Suspense } from "react"
 import type { ChartLegendMode } from "@maple/ui/components/charts/_shared/chart-types"
 import { getChartById } from "@maple/ui/components/charts/registry"
 import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleton"
-import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
+import { WidgetEmptyState, WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
 
 // Every widget that mounts a `chartRegistry` component — line/bar/area (all
@@ -59,31 +59,39 @@ export function makeChartWidget(options: ChartWidgetOptions) {
 				mode={mode}
 				loadingSkeleton={skeleton}
 			>
-				<Suspense fallback={skeleton}>
-					<ChartComponent
-						data={chartData}
-						className={options.className ?? "h-full w-full aspect-auto"}
-						legend={display.chartPresentation?.legend ?? options.defaultLegend}
-						// Opt-in, not inherited from legend visibility: the stats table
-						// costs up to 45% of the widget's height, so a chart shows it
-						// only by asking for it.
-						seriesStats={display.chartPresentation?.seriesStats ?? false}
-						tooltip={display.chartPresentation?.tooltip}
-						showPoints={display.chartPresentation?.showPoints}
-						stacked={display.stacked}
-						curveType={display.curveType}
-						thresholds={display.thresholds}
-						unit={display.unit}
-						logScale={display.yAxis?.logScale}
-						softMin={display.yAxis?.softMin}
-						softMax={display.yAxis?.softMax}
-						fitYAxisToData={display.yAxis?.fitYAxisToData}
-						pie={display.pie}
-						histogram={display.histogram}
-						heatmap={display.heatmap}
-						funnel={display.funnel}
-					/>
-				</Suspense>
+				{/* A ready state with nothing chartable — no rows, or not rows at all
+				    (a scalar, an envelope) — is the empty state, decided here. The
+				    chart components no longer fall back to sample data, so leaving
+				    this to them would draw a blank plot with no explanation. */}
+				{dataState.status === "ready" && (chartData === undefined || chartData.length === 0) ? (
+					<WidgetEmptyState />
+				) : (
+					<Suspense fallback={skeleton}>
+						<ChartComponent
+							data={chartData}
+							className={options.className ?? "h-full w-full aspect-auto"}
+							legend={display.chartPresentation?.legend ?? options.defaultLegend}
+							// Opt-in, not inherited from legend visibility: the stats table
+							// costs up to 45% of the widget's height, so a chart shows it
+							// only by asking for it.
+							seriesStats={display.chartPresentation?.seriesStats ?? false}
+							tooltip={display.chartPresentation?.tooltip}
+							showPoints={display.chartPresentation?.showPoints}
+							stacked={display.stacked}
+							curveType={display.curveType}
+							thresholds={display.thresholds}
+							unit={display.unit}
+							logScale={display.yAxis?.logScale}
+							softMin={display.yAxis?.softMin}
+							softMax={display.yAxis?.softMax}
+							fitYAxisToData={display.yAxis?.fitYAxisToData}
+							pie={display.pie}
+							histogram={display.histogram}
+							heatmap={display.heatmap}
+							funnel={display.funnel}
+						/>
+					</Suspense>
+				)}
 			</WidgetFrame>
 		)
 	})

@@ -4,7 +4,7 @@ import { writeFile } from "node:fs/promises"
 /**
  * Service-map rendering perf gate.
  *
- * Loads the synthetic /service-map-bench route (120 services / 400 edges at high
+ * Loads the synthetic /lab/bench/service-map route (120 services / 400 edges at high
  * traffic), asserts the costly SVG constructs are gone, then runs the in-page
  * `window.__smBench` harness to measure frame timing while idle and while
  * panning. Thresholds are locked well below the measured post-fix numbers (and
@@ -12,7 +12,7 @@ import { writeFile } from "node:fs/promises"
  * this fails if the SVG-filter/SMIL regression ever returns.
  */
 
-const BENCH_URL = "/service-map-bench?services=120&edges=400&rps=high&seed=1"
+const BENCH_URL = "/lab/bench/service-map?services=120&edges=400&rps=high&seed=1"
 
 interface Metrics {
 	fps: number

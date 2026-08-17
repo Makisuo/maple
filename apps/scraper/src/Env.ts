@@ -1,6 +1,6 @@
 import { Config, Context, Effect, Layer, Redacted } from "effect"
 
-export interface ScraperEnvShape {
+export interface ScraperEnvConfig {
 	/** Base URL of the Maple API, e.g. `https://api.maple.dev`. */
 	readonly MAPLE_API_URL: string
 	/** Shared internal bearer for the `/api/internal/*` scraper endpoints. */
@@ -37,7 +37,7 @@ const envConfig = Config.all({
 	PORT: Config.number("PORT").pipe(Config.withDefault(3475)),
 })
 
-export class ScraperEnv extends Context.Service<ScraperEnv, ScraperEnvShape>()("@maple/scraper/Env", {
+export class ScraperEnv extends Context.Service<ScraperEnv, ScraperEnvConfig>()("@maple/scraper/Env", {
 	make: Effect.map(envConfig, (env) => ({
 		...env,
 		MAPLE_API_URL: env.MAPLE_API_URL.replace(/\/$/, ""),

@@ -66,7 +66,7 @@ const writeMerged = (
 		yield* fs.chmod(CONFIG_PATH, 0o600).pipe(Effect.ignore)
 	})
 
-export interface MapleConfigShape {
+export interface MapleConfigValues {
 	/** Remote API base URL (env `MAPLE_API_URL` overrides the stored value). */
 	readonly apiUrl: Option.Option<string>
 	/** Remote bearer token (env `MAPLE_API_TOKEN` overrides the stored value). */
@@ -105,7 +105,7 @@ export interface MapleConfigShape {
 	readonly recordUpdateCheck: (latestTag?: string) => Effect.Effect<void, PlatformError.PlatformError>
 }
 
-export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>()("@maple/cli/MapleConfig", {
+export class MapleConfig extends Context.Service<MapleConfig, MapleConfigValues>()("@maple/cli/MapleConfig", {
 	make: Effect.gen(function* () {
 		const fs = yield* FileSystem
 		const stored = yield* readStored(fs)
@@ -156,7 +156,7 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 							userId: next.userId,
 							credentialManaged: next.managed,
 							credentialStore: storedInKeychain ? "keychain" : "file",
-							...(storedInKeychain ? {} : { token: next.token }),
+							...(!storedInKeychain ? { token: next.token } : undefined),
 						}
 					})
 					return storedInKeychain ? "keychain" : "file"
@@ -192,10 +192,10 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 					yield* writeMerged(fs, (cur) => ({
 						...cur,
 						lastUpdateCheck: nowIso,
-						...(latestTag ? { latestKnownVersion: latestTag } : {}),
+						...(latestTag ? { latestKnownVersion: latestTag } : undefined),
 					}))
 				}),
-		} satisfies MapleConfigShape
+		} satisfies MapleConfigValues
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

@@ -589,6 +589,28 @@ describe("ScrapeTargetsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
+	it.effect("classifies proxied transport failures as upstream errors", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const target = yield* service.create(
+				asOrgId("org_1"),
+				new CreateScrapeTargetRequest({
+					name: "Node Exporter",
+					url: "https://metrics.example.com/metrics",
+					scrapeIntervalSeconds: asScrapeIntervalSeconds(15),
+				}),
+			)
+			globalThis.fetch = (async () => {
+				throw new TypeError("connection refused")
+			}) as typeof fetch
+
+			const error = yield* service.scrapeForCollector(target.id).pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/ScrapeTargetUpstreamError")
+			assert.include(error.message, "connection refused")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
 	it.effect("re-reads a target from Postgres after an update invalidates the memo", () => {
 		const testDb = createTestDb(trackedDbs)
 		globalThis.fetch = (async () => new Response("up 1\n", { status: 200 })) as typeof fetch

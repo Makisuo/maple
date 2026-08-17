@@ -26,7 +26,7 @@ const SEVERITY: Record<Severity, { label: string; icon: IconComponent; className
 	critical: { label: "Critical", icon: CircleWarningIcon, className: "text-destructive" },
 	warn: { label: "Warning", icon: CircleWarningIcon, className: "text-warning" },
 	info: { label: "Info", icon: CircleInfoIcon, className: "text-info" },
-}
+} satisfies Record<Severity, { label: string; icon: IconComponent; className: string }>
 
 const SEVERITY_ORDER: ReadonlyArray<Severity> = ["critical", "warn", "info"]
 
@@ -47,7 +47,7 @@ const CATEGORY: Record<Category, CategoryTarget> = {
 	traces: { label: "Traces", fixLabel: "Open traces", to: "/traces" },
 	integrations: { label: "Integrations", fixLabel: "Open integrations", to: "/integrations" },
 	data_platform: { label: "Data platform", fixLabel: "Open data platform", tab: "data-platform" },
-}
+} satisfies Record<Category, CategoryTarget>
 
 function CategoryLink({
 	target,

@@ -1,0 +1,219 @@
+import { describe, expect, it } from "vitest"
+import { redactForShare } from "./redact"
+
+const SECRET_SQL = "SELECT customer_revenue FROM internal_billing WHERE tier = 'enterprise'"
+const SECRET_CLAUSE = "service.name = 'unreleased-project'"
+const SECRET_SPARKLINE_CLAUSE = "service.name = 'stealth-launch'"
+
+const document = {
+	id: "dash-1",
+	name: "Ops",
+	description: "public enough",
+	timeRange: { type: "relative" as const, value: "12h" },
+	tags: ["internal-only"],
+	createdBy: "user_alice",
+	updatedBy: "user_bob",
+	createdAt: "2026-01-01T00:00:00.000Z",
+	updatedAt: "2026-01-02T00:00:00.000Z",
+	widgets: [
+		{
+			id: "w-sql",
+			visualization: "table",
+			display: { title: "Revenue" },
+			layout: { x: 0, y: 0, w: 6, h: 4 },
+			dataSource: { kind: "raw_sql", sql: SECRET_SQL, transform: { limit: 10 } },
+		},
+		{
+			id: "w-query",
+			visualization: "line",
+			display: { title: "Latency" },
+			layout: { x: 6, y: 0, w: 6, h: 4 },
+			sectionId: "sec-1",
+			tabId: "tab-1",
+			dataSource: {
+				kind: "query",
+				resultShape: "timeseries",
+				queries: [
+					{
+						id: "q1",
+						name: "A",
+						aggregation: "count",
+						dataSource: "traces",
+						whereClause: SECRET_CLAUSE,
+					},
+				],
+			},
+		},
+		{
+			id: "w-route",
+			visualization: "list",
+			display: { title: "Traces" },
+			layout: { x: 0, y: 4, w: 12, h: 4 },
+			dataSource: { kind: "route", endpoint: "list_traces", params: { service: "unreleased-project" } },
+		},
+		{
+			id: "w-stat",
+			visualization: "stat",
+			display: {
+				title: "Requests",
+				sparkline: {
+					enabled: true,
+					color: "primary",
+					dataSource: {
+						kind: "query",
+						resultShape: "timeseries",
+						queries: [
+							{
+								id: "s1",
+								name: "A",
+								aggregation: "count",
+								dataSource: "traces",
+								whereClause: SECRET_SPARKLINE_CLAUSE,
+							},
+						],
+					},
+				},
+			},
+			layout: { x: 0, y: 8, w: 3, h: 2 },
+			dataSource: { kind: "route", endpoint: "service_overview", params: {} },
+		},
+	],
+	sections: [{ id: "sec-1", title: "Latency" }],
+	variables: [{ name: "service", type: "textbox" as const }],
+	refreshIntervalSeconds: 60,
+}
+
+describe("redactForShare", () => {
+	it("publishes no stored query text, in any field, at any depth", () => {
+		const redacted = redactForShare(document)
+		const serialized = JSON.stringify(redacted)
+
+		// Asserted as a property over the whole encoded payload rather than
+		// field-by-field: a field-by-field check passes the day someone adds a new
+		// one and forgets it here, which is precisely the failure this guards.
+		expect(serialized).not.toContain(SECRET_SQL)
+		expect(serialized).not.toContain(SECRET_CLAUSE)
+		// `display.sparkline` embeds a whole data source; it is redacted like the
+		// widget's own, not passed through with the rest of the display config.
+		expect(serialized).not.toContain(SECRET_SPARKLINE_CLAUSE)
+		expect(serialized).not.toContain("list_traces")
+		expect(serialized).not.toContain("unreleased-project")
+		expect(serialized).not.toContain("user_alice")
+		expect(serialized).not.toContain("user_bob")
+		expect(serialized).not.toContain("internal-only")
+	})
+
+	it("keeps what a renderer genuinely needs", () => {
+		const redacted = redactForShare(document)
+
+		expect(redacted?.name).toBe("Ops")
+		expect(redacted?.widgets).toHaveLength(4)
+		// Result shape survives because a timeseries and a breakdown draw
+		// differently; it describes the response, not the query.
+		expect(redacted?.widgets[1]).toMatchObject({
+			id: "w-query",
+			visualization: "line",
+			dataSource: { kind: "query", resultShape: "timeseries" },
+		})
+		// Transform survives: it is applied client-side to rows the server already
+		// returned, so withholding it would change the chart, not the disclosure.
+		expect(redacted?.widgets[0]?.dataSource.transform).toEqual({ limit: 10 })
+		expect(redacted?.refreshIntervalSeconds).toBe(60)
+		// The sparkline keeps its presentation and a classified data source, so
+		// the stat still knows it has a trend line to draw.
+		expect(redacted?.widgets[3]?.display).toEqual({
+			title: "Requests",
+			sparkline: {
+				enabled: true,
+				color: "primary",
+				dataSource: { kind: "query", resultShape: "timeseries" },
+			},
+		})
+	})
+
+	// A share renders through the same canvas the authed dashboard does, so these
+	// three fields decide where every tile lands. Dropping one no longer shows up
+	// as a missing field — it shows up as a board that silently reflows into a
+	// flat grid, which is why the contract is asserted in the package that owns it.
+	it("keeps the placement a share needs to lay itself out", () => {
+		const redacted = redactForShare(document)
+
+		expect(redacted?.widgets[0]?.layout).toEqual({ x: 0, y: 0, w: 6, h: 4 })
+		expect(redacted?.widgets[1]).toMatchObject({ sectionId: "sec-1", tabId: "tab-1" })
+		expect(redacted?.sections).toEqual([{ id: "sec-1", title: "Latency" }])
+	})
+
+	it("narrows a single-chart share to exactly one widget", () => {
+		const redacted = redactForShare(document, "w-query")
+
+		expect(redacted?.widgets).toHaveLength(1)
+		expect(redacted?.widgets[0]?.id).toBe("w-query")
+		// A chart link must not enumerate the rest of the board, nor the names of
+		// sections and tabs its viewer cannot open.
+		expect(JSON.stringify(redacted)).not.toContain("w-sql")
+		expect(JSON.stringify(redacted)).not.toContain("w-route")
+		expect(redacted?.sections).toBeUndefined()
+		expect(redacted?.widgets[0]?.sectionId).toBeUndefined()
+		expect(redacted?.widgets[0]?.tabId).toBeUndefined()
+	})
+
+	it("narrows a single-chart share's variables to the ones that chart uses", () => {
+		// The board's variable list is the board's. A chart link that shipped it
+		// whole would publish names, labels, option values and attribute keys
+		// belonging to tiles the viewer cannot see.
+		const withVariables = {
+			...document,
+			widgets: [
+				{
+					id: "w-scoped",
+					visualization: "line" as const,
+					display: {},
+					layout: { x: 0, y: 0, w: 6, h: 4 },
+					dataSource: {
+						kind: "query",
+						resultShape: "timeseries",
+						queries: [{ id: "q1", whereClause: "service.name = '$service'" }],
+					},
+				},
+			],
+			variables: [
+				{ name: "service", type: "textbox" as const },
+				{ name: "tier", type: "custom" as const, options: [{ value: "enterprise-only" }] },
+			],
+		}
+
+		const redacted = redactForShare(withVariables, "w-scoped")
+
+		expect(redacted?.variables).toEqual([{ name: "service", type: "textbox" }])
+		expect(JSON.stringify(redacted)).not.toContain("enterprise-only")
+	})
+
+	it("keeps every variable on a whole-board share", () => {
+		const redacted = redactForShare(document)
+		expect(redacted?.variables).toEqual([{ name: "service", type: "textbox" }])
+	})
+
+	it("reports an absent widget as no share rather than an empty board", () => {
+		expect(redactForShare(document, "w-missing")).toBeNull()
+	})
+
+	it("classifies a legacy v2 data source rather than silently calling it static", () => {
+		// A v2 document stores `{ endpoint, params }` with no `kind`. Falling
+		// through to "static" would render a live tile as an inert one.
+		const legacy = redactForShare({
+			...document,
+			widgets: [
+				{
+					id: "w-legacy",
+					visualization: "stat",
+					display: {},
+					layout: { x: 0, y: 0, w: 3, h: 4 },
+					dataSource: { endpoint: "errors_summary", params: { rootOnly: true } },
+				},
+			],
+		})
+
+		expect(legacy?.widgets[0]?.dataSource.kind).toBe("route")
+		expect(JSON.stringify(legacy)).not.toContain("errors_summary")
+	})
+})

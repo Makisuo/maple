@@ -311,7 +311,7 @@ function DashboardContent({
 						0,
 					)
 					return { bucket: point.bucket, throughput: total }
-				}) as unknown as Record<string, unknown>[],
+				}) as Record<string, unknown>[],
 		)
 		.orElse(() => EMPTY_ARRAY)
 
@@ -345,21 +345,21 @@ function DashboardContent({
 			"error-rate": overviewError,
 			latency: overviewError,
 			"log-volume": logVolumeError,
-		}
+		} satisfies Record<string, { error: unknown; onRetry?: () => void } | undefined>
 
 		const loadingMap: Record<string, boolean> = {
 			throughput: isOverviewLoading,
 			"error-rate": isOverviewLoading,
 			latency: isOverviewLoading,
 			"log-volume": isLogVolumeLoading,
-		}
+		} satisfies Record<string, boolean>
 
 		const dataMap: Record<string, Record<string, unknown>[]> = {
 			throughput: overviewPoints,
 			"error-rate": overviewPoints,
 			latency: overviewPoints,
 			"log-volume": logPoints,
-		}
+		} satisfies Record<string, Record<string, unknown>[]>
 
 		const totalVolume = overviewPoints.reduce(
 			(sum, point) => sum + (typeof point.throughput === "number" ? point.throughput : 0),

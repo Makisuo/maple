@@ -45,6 +45,42 @@ describe("createWidgetAlertPrefill", () => {
 		expect(result.notices).toEqual([])
 	})
 
+	it("carries the chart's own reducer instead of defaulting to identity", () => {
+		const result = createWidgetAlertPrefill(
+			{
+				id: "w1",
+				dataSource: {
+					endpoint: "raw_sql_chart",
+					params: { sql: "SELECT max(Duration) AS value FROM traces WHERE $__orgFilter" },
+					transform: { reduceToValue: { field: "value", aggregate: "max" } },
+				},
+			},
+			defaultRuleForm(),
+		)
+
+		expect(result.form.rawQueryReducer).toBe("max")
+		expect(result.notices).toEqual([])
+	})
+
+	it("warns rather than guessing when the chart reducer has no alert equivalent", () => {
+		const result = createWidgetAlertPrefill(
+			{
+				id: "w1",
+				dataSource: {
+					endpoint: "raw_sql_chart",
+					params: { sql: "SELECT count() AS value FROM traces WHERE $__orgFilter" },
+					transform: { reduceToValue: { field: "value", aggregate: "count" } },
+				},
+			},
+			defaultRuleForm(),
+		)
+
+		expect(result.form.rawQueryReducer).toBe("identity")
+		expect(result.notices.map((notice) => notice.message).join("\n")).toContain(
+			"alert rules cannot express",
+		)
+	})
+
 	it("warns when copied raw SQL does not clearly return value", () => {
 		const result = createWidgetAlertPrefill(
 			{

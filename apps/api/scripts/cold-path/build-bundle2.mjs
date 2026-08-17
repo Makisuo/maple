@@ -21,6 +21,6 @@ await build.write({
 	minify: true,
 	keepNames: true,
 	dir: out,
-	...(seo === undefined ? {} : { strictExecutionOrder: seo === "1" }),
+	...(!(seo === undefined) ? { strictExecutionOrder: seo === "1" } : undefined),
 })
 console.log("built", out)

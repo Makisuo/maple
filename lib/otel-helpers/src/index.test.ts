@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { describe, expect, mock, test } from "bun:test"
 import { SpanStatusCode, type Span, type Tracer } from "@opentelemetry/api"
 
@@ -43,7 +44,7 @@ function fakeTracer(): { tracer: Tracer; spans: RecordedSpan[] } {
 				end() {
 					recorded.ended = true
 				},
-			} as unknown as Span
+			} as Span
 			spans.push(recorded)
 			return fn(span)
 		}) as Tracer["startActiveSpan"],
@@ -133,6 +134,7 @@ describe("withSpan", () => {
 	test("forwards span options to startActiveSpan", async () => {
 		const startActiveSpan = mock((...args: unknown[]) => {
 			const fn = args[args.length - 1] as (span: Span) => unknown
+			// SAFETY: this focused test double implements every Span method exercised by `withSpan`.
 			return fn({
 				setAttribute: () => undefined,
 				setAttributes: () => undefined,
@@ -141,6 +143,7 @@ describe("withSpan", () => {
 				end: () => undefined,
 			} as unknown as Span)
 		})
+		// SAFETY: the test invokes only `startActiveSpan`, which this tracer double implements.
 		const tracer = { startActiveSpan } as unknown as Tracer
 
 		await withSpan("op", () => undefined, {

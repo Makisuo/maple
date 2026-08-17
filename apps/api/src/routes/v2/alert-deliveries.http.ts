@@ -5,7 +5,6 @@ import type { V2AlertDelivery } from "@maple/domain/http/v2"
 import { MapleApiV2, paginateOffsetQuery, timestamp, timestampOrNull } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
-import { mapAlertError } from "./alerts-error-map"
 
 const toV2Delivery = (doc: AlertDeliveryEventDocument): V2AlertDelivery => ({
 	id: doc.id,
@@ -34,10 +33,16 @@ export const HttpV2AlertDeliveriesLive = HttpApiBuilder.group(MapleApiV2, "alert
 			Effect.gen(function* () {
 				const tenant = yield* CurrentTenant.Context
 				const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
-					readModels.listDeliveryEvents(tenant.orgId, { limit, offset }).pipe(
-						mapAlertError("delivery_list"),
-						Effect.map((response) => response.events.map(toV2Delivery)),
-					),
+					readModels
+						.listDeliveryEvents(tenant.orgId, {
+							...(query.incident_id !== undefined
+								? { incidentId: query.incident_id }
+								: undefined),
+							...(query.rule_id !== undefined ? { ruleId: query.rule_id } : undefined),
+							limit,
+							offset,
+						})
+						.pipe(Effect.map((response) => response.events.map(toV2Delivery))),
 				)
 				return { object: "list" as const, ...page }
 			}),

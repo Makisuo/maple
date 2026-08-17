@@ -1,8 +1,8 @@
 import * as React from "react"
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Bar, BarChart } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
-import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "../../ui/chart"
+import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartGrid, ChartXAxis, ChartYAxis } from "../../ui/chart"
 import { formatValueByUnit, formatNumber } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
 
@@ -111,24 +111,17 @@ export function QueryBuilderHistogramChart({
 	return (
 		<ChartContainer config={chartConfig} className={className}>
 			<BarChart data={chartData} accessibilityLayer barCategoryGap={1}>
-				<CartesianGrid vertical={false} />
-				<XAxis
+				<ChartGrid />
+				<ChartXAxis
 					dataKey="name"
-					tickLine={false}
-					axisLine={false}
-					tickMargin={8}
 					interval="preserveStartEnd"
 					minTickGap={32}
-					tick={{ fontSize: 10 }}
 					// Axis ticks show only the bucket's lower bound ("150" instead
 					// of "150-200") — halves label width so ticks stop overlapping;
 					// the full range stays in the tooltip.
 					tickFormatter={(value) => String(value).split("-")[0] || String(value)}
 				/>
-				<YAxis
-					tickLine={false}
-					axisLine={false}
-					tickMargin={6}
+				<ChartYAxis
 					width={48}
 					scale={useLogY ? "log" : "auto"}
 					domain={useLogY ? [1, "auto"] : ["auto", "auto"]}

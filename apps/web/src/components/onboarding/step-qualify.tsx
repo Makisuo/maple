@@ -15,14 +15,14 @@ const ROLE_LABELS: Record<RoleOption, string> = {
 	devops_sre: "DevOps / SRE / Platform",
 	eng_leader: "Engineering leader",
 	founder: "Founder / CTO",
-}
+} satisfies Record<RoleOption, string>
 
 const ROLE_ICONS: Record<RoleOption, React.ComponentType<{ size?: number; className?: string }>> = {
 	engineer: SquareTerminalIcon,
 	devops_sre: ServerIcon,
 	eng_leader: ChartLineIcon,
 	founder: RocketIcon,
-}
+} satisfies Record<RoleOption, React.ComponentType<{ size?: number; className?: string }>>
 
 export const QUALIFY_QUESTIONS = {
 	role: {
@@ -58,7 +58,7 @@ export function StepQualifyQuestion<T extends string>({
 	onContinue: () => void
 	onBack?: () => void
 }) {
-	const iconMap = ROLE_ICONS as unknown as Record<
+	const iconMap = ROLE_ICONS satisfies unknown as Record<
 		string,
 		React.ComponentType<{ size?: number; className?: string }>
 	>

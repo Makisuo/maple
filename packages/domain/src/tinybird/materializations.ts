@@ -5,7 +5,7 @@ import {
 	serviceMapSpans,
 	serviceMapChildren,
 	serviceMapDbEdgesHourly,
-	serviceMapDbQueryShapesHourly,
+	serviceMapDbQuerySignaturesHourly,
 	serviceExternalEdgesHourly,
 	servicePlatformsHourly,
 	serviceOverviewSpans,
@@ -520,12 +520,12 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
  * NOTE: `DbSystem` uses the `db.system.name` → `db.system` coalesce
  * (`DB_SYSTEM_ATTR_SQL`), the same as `service_map_db_edges_hourly_mv`.
  */
-export const serviceMapDbQueryShapesHourlyMv = defineMaterializedView(
+export const serviceMapDbQuerySignaturesHourlyMv = defineMaterializedView(
 	"service_map_db_query_shapes_hourly_mv",
 	{
 		description:
 			"Pre-aggregates Client/Producer DB spans into hourly query-shape buckets (normalized fingerprint + label + sample-weighted t-digest) for the service map's database detail panel.",
-		datasource: serviceMapDbQueryShapesHourly,
+		datasource: serviceMapDbQuerySignaturesHourly,
 		nodes: [
 			node({
 				name: "service_map_db_query_shapes_hourly_mv_node",

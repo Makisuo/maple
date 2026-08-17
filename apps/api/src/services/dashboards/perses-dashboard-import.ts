@@ -5,8 +5,12 @@ import {
 	PortableDashboardDocument,
 	type RawSqlDisplayType,
 	defaultWidgetLayout,
+	findNextPosition,
 	widgetTypeByPersesKind,
+	widgetTypeByVisualization,
+	type WidgetVisualization,
 } from "@maple/domain/http"
+import { makeRawSqlDataSource, makeRouteDataSource, makeStaticDataSource } from "@maple/widgets/dashboard"
 
 type UnknownRecord = Record<string, unknown>
 type DashboardWidget = typeof DashboardWidgetSchema.Type
@@ -95,7 +99,7 @@ function getPanelPlugin(panel: unknown) {
 // (`persesKinds`), so adding a widget kind can't leave the importer behind.
 // Unknown kinds fall back to a line chart, as they always have.
 
-const defaultVisualizationForPanelKind = (kind: string | undefined): string =>
+const defaultVisualizationForPanelKind = (kind: string | undefined): WidgetVisualization =>
 	widgetTypeByPersesKind(kind).visualization
 
 const displayTypeForPanelKind = (kind: string | undefined): RawSqlDisplayType =>
@@ -111,9 +115,9 @@ function displayForPanel(args: {
 	const unit = asString(args.pluginSpec?.unit)
 	const base: Record<string, unknown> = {
 		title: args.title,
-		...(args.description ? { description: args.description } : {}),
-		...(unit ? { unit } : {}),
-	}
+		...(args.description ? { description: args.description } : undefined),
+		...(unit ? { unit } : undefined),
+	} satisfies Record<string, unknown>
 
 	switch (args.kind) {
 		// `seriesStats` follows the same rule as the dashboard templates: on for
@@ -149,8 +153,8 @@ function displayForPanel(args: {
 			return {
 				...base,
 				gauge: {
-					...(typeof args.pluginSpec?.min === "number" ? { min: args.pluginSpec.min } : {}),
-					...(typeof args.pluginSpec?.max === "number" ? { max: args.pluginSpec.max } : {}),
+					...(typeof args.pluginSpec?.min === "number" ? { min: args.pluginSpec.min } : undefined),
+					...(typeof args.pluginSpec?.max === "number" ? { max: args.pluginSpec.max } : undefined),
 				},
 			}
 		default:
@@ -172,20 +176,7 @@ function defaultLayoutForVisualization(visualization: string) {
 
 function nextLayout(widgets: readonly DashboardWidget[], visualization: string) {
 	const defaults = defaultLayoutForVisualization(visualization)
-	if (widgets.length === 0) return { x: 0, y: 0, ...defaults }
-
-	const maxY = Math.max(...widgets.map((widget) => widget.layout.y))
-	const rowWidgets = widgets.filter((widget) => widget.layout.y === maxY)
-	const rightEdge = Math.max(...rowWidgets.map((widget) => widget.layout.x + widget.layout.w))
-	if (rightEdge + defaults.w <= 12) {
-		return { x: rightEdge, y: maxY, ...defaults }
-	}
-
-	return {
-		x: 0,
-		y: Math.max(...widgets.map((widget) => widget.layout.y + widget.layout.h)),
-		...defaults,
-	}
+	return { ...findNextPosition(widgets, defaults.w), ...defaults }
 }
 
 function gridLayoutFromItem(
@@ -288,26 +279,21 @@ function rawSqlDataSource(args: {
 	sql: string
 	displayType: RawSqlDisplayType
 }): DashboardWidget["dataSource"] {
-	const base: DashboardWidget["dataSource"] = {
-		endpoint: "raw_sql_chart",
-		params: {
-			sql: args.sql,
-			displayType: args.displayType,
-		},
-	}
+	// `displayType === "stat"` is kept alongside the panel's own scalar flag: a
+	// Perses panel can import as a non-scalar type while its query still yields
+	// the single-row shape a stat renders.
+	const isScalar =
+		args.displayType === "stat" || widgetTypeByVisualization(args.visualization)?.isScalar === true
 
-	if (args.displayType === "stat" || args.visualization === "stat" || args.visualization === "gauge") {
-		return {
-			...base,
-			transform: { reduceToValue: { field: "value", aggregate: "first" } },
-		}
-	}
-
-	return base
+	return makeRawSqlDataSource({
+		sql: args.sql,
+		displayType: args.displayType,
+		...(isScalar ? { transform: { reduceToValue: { field: "value", aggregate: "first" } } } : undefined),
+	})
 }
 
 function markdownDataSource(): DashboardWidget["dataSource"] {
-	return { endpoint: "markdown_static" }
+	return makeStaticDataSource()
 }
 
 function markdownWidgetContent(args: {
@@ -346,7 +332,7 @@ function placeholderWidget(args: {
 		dataSource: markdownDataSource(),
 		display: {
 			title: args.title,
-			...(args.description ? { description: args.description } : {}),
+			...(args.description ? { description: args.description } : undefined),
 			markdown: {
 				content: markdownWidgetContent({
 					reason: args.reason,
@@ -409,7 +395,7 @@ function convertPanel(args: {
 			dataSource: markdownDataSource(),
 			display: {
 				title,
-				...(display.description ? { description: display.description } : {}),
+				...(display.description ? { description: display.description } : undefined),
 				markdown: { content: text },
 			},
 			layout: args.layout,
@@ -603,7 +589,7 @@ function convertSync(input: unknown): PersesImportConversion {
 	return {
 		dashboard: decodePortableDashboard({
 			name,
-			...(description ? { description } : {}),
+			...(description ? { description } : undefined),
 			tags: ["perses-import"],
 			timeRange: { type: "relative", value: duration ?? "12h" },
 			widgets,

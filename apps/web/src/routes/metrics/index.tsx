@@ -6,16 +6,19 @@ import { MetricsBrowse, type MetricsBrowsePatch } from "@/components/metrics/met
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
+import {
+	QUERY_BUILDER_METRIC_TYPES,
+	type QueryBuilderMetricType,
+	toQueryBuilderMetricType,
+} from "@maple/query-model"
 
-const METRIC_TYPE_VALUES = ["sum", "gauge", "histogram", "exponential_histogram"] as const
-
-function asMetricType(value: string): (typeof METRIC_TYPE_VALUES)[number] | undefined {
-	return METRIC_TYPE_VALUES.find((type) => type === value)
+function asMetricType(value: string): QueryBuilderMetricType | undefined {
+	return toQueryBuilderMetricType(value) ?? undefined
 }
 
 const metricsSearchSchema = Schema.Struct({
 	q: Schema.optional(Schema.String),
-	type: Schema.optional(Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])),
+	type: Schema.optional(Schema.Literals(QUERY_BUILDER_METRIC_TYPES)),
 	view: Schema.optional(Schema.Literals(["grid", "table"])),
 	...TimeRangeSearchFields,
 })
@@ -39,9 +42,9 @@ function MetricsPage() {
 		navigate({
 			search: (prev) => ({
 				...prev,
-				...("q" in patch ? { q: patch.q || undefined } : {}),
-				...("type" in patch ? { type: patch.type } : {}),
-				...("view" in patch ? { view: patch.view === "grid" ? undefined : patch.view } : {}),
+				...("q" in patch ? { q: patch.q || undefined } : undefined),
+				...("type" in patch ? { type: patch.type } : undefined),
+				...("view" in patch ? { view: patch.view === "grid" ? undefined : patch.view } : undefined),
 			}),
 			replace: true,
 		})

@@ -74,4 +74,4 @@ export const RAW_SQL_TEMPLATES: Record<RawSqlDisplayType, string> = {
 	hbar: HBAR_TEMPLATE,
 	histogram: HISTOGRAM_TEMPLATE,
 	heatmap: HEATMAP_TEMPLATE,
-}
+} satisfies Record<RawSqlDisplayType, string>

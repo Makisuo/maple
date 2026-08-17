@@ -26,7 +26,7 @@ interface VcsScheduledSyncResult {
 	readonly skipped: number
 }
 
-export interface VcsScheduledSyncServiceShape {
+export interface VcsScheduledSyncServiceApi {
 	readonly runScheduledSync: () => Effect.Effect<
 		VcsScheduledSyncResult,
 		VcsRepoPersistenceError | VcsRepoDecodeError | VcsQueueError
@@ -35,7 +35,7 @@ export interface VcsScheduledSyncServiceShape {
 
 export class VcsScheduledSyncService extends Context.Service<
 	VcsScheduledSyncService,
-	VcsScheduledSyncServiceShape
+	VcsScheduledSyncServiceApi
 >()("@maple/api/services/vcs/VcsScheduledSyncService", {
 	make: Effect.gen(function* () {
 		const repo = yield* VcsRepository
@@ -75,7 +75,7 @@ export class VcsScheduledSyncService extends Context.Service<
 			Effect.tapCause(() => Effect.annotateCurrentSpan({ "vcs.scheduled.outcome": "failed" })),
 		)
 
-		return { runScheduledSync } satisfies VcsScheduledSyncServiceShape
+		return { runScheduledSync } satisfies VcsScheduledSyncServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

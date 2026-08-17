@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import type { Chdb } from "./chdb"
 import type { LocalSchemaIdentity } from "./schema-identity"
 

@@ -45,7 +45,7 @@ const DB_SYSTEM_LABELS: Record<string, string> = {
 	presto: "Presto",
 	hive: "Hive",
 	spanner: "Spanner",
-}
+} satisfies Record<string, string>
 
 /** Brand-ish accent per system; a small tint on the 12px icon, muted otherwise. */
 const DB_SYSTEM_ACCENTS: Record<string, string> = {
@@ -67,7 +67,7 @@ const DB_SYSTEM_ACCENTS: Record<string, string> = {
 	"aws.dynamodb": "text-[#4053D6]",
 	redshift: "text-[#8C4FFF]",
 	snowflake: "text-[#29B5E8]",
-}
+} satisfies Record<string, string>
 
 /** "microsoft.sql_server" → "SQL Server"; unknown → title-cased last segment. */
 function humanizeDbSystem(system: string): string {

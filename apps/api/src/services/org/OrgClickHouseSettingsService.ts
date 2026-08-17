@@ -1,3 +1,5 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import {
 	IsoDateTimeString,
 	OrgClickHouseApplySchemaStarted,
@@ -9,6 +11,7 @@ import {
 	OrgClickHouseSettingsForbiddenError,
 	OrgClickHouseSettingsPersistenceError,
 	OrgClickHouseSettingsResponse,
+	OrgClickHouseSettingsStoredConfigInvalidError,
 	OrgClickHouseSettingsUpstreamRejectedError,
 	OrgClickHouseSettingsUpstreamUnavailableError,
 	OrgClickHouseSettingsValidationError,
@@ -260,7 +263,7 @@ const ROOT_ROLE = Schema.decodeSync(RoleName)("root")
 const ORG_ADMIN_ROLE = Schema.decodeSync(RoleName)("org:admin")
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 
-export interface OrgClickHouseSettingsServiceShape {
+export interface OrgClickHouseSettingsServiceApi {
 	readonly get: (
 		orgId: OrgId,
 		roles: ReadonlyArray<RoleName>,
@@ -324,7 +327,7 @@ export interface OrgClickHouseSettingsServiceShape {
 		Option.Option<RuntimeBackendConfig>,
 		| OrgClickHouseSettingsPersistenceError
 		| OrgClickHouseSettingsEncryptionError
-		| OrgClickHouseSettingsValidationError
+		| OrgClickHouseSettingsStoredConfigInvalidError
 	>
 	/**
 	 * Warm the runtime-config memo for many orgs in ONE Postgres round-trip.
@@ -660,7 +663,7 @@ const buildClickHouseHeaders = (config: ClickHouseExecConfig): Record<string, st
 		"Content-Type": "text/plain",
 		"X-ClickHouse-User": config.user,
 		"X-ClickHouse-Database": config.database,
-	}
+	} satisfies Record<string, string>
 	if (config.password.length > 0) {
 		headers["X-ClickHouse-Key"] = config.password
 	}
@@ -894,7 +897,7 @@ const parseJsonEachRow = <T>(text: string): ReadonlyArray<T> => {
 
 export class OrgClickHouseSettingsService extends Context.Service<
 	OrgClickHouseSettingsService,
-	OrgClickHouseSettingsServiceShape
+	OrgClickHouseSettingsServiceApi
 >()("@maple/api/services/OrgClickHouseSettingsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -1681,7 +1684,15 @@ export class OrgClickHouseSettingsService extends Context.Service<
 					cached.schemaVersion !== clickHouseSchemaVersion,
 				)
 				const password = yield* decryptStoredPassword(cached)
-				yield* validateClickHouseCredentialTransport(cached.chUrl, password)
+				yield* validateClickHouseCredentialTransport(cached.chUrl, password).pipe(
+					Effect.mapError(
+						(cause) =>
+							new OrgClickHouseSettingsStoredConfigInvalidError({
+								message: cause.message,
+								cause,
+							}),
+					),
+				)
 				return Option.some<RuntimeBackendConfig>({
 					backend: "clickhouse",
 					url: cached.chUrl,
@@ -1756,7 +1767,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			invalidateRuntimeConfig,
 			isWarehouseWriteReady,
 			collectorConfig,
-		} satisfies OrgClickHouseSettingsServiceShape
+		} satisfies OrgClickHouseSettingsServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))

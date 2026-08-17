@@ -10,9 +10,10 @@ import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglit
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
-import { ApiV2RateLimiter, type ApiV2RateLimiterShape } from "@/services/auth/ApiV2RateLimiter"
-import { V2SchemaErrorsLive } from "./error-envelope"
+import { ApiV2RateLimiter, type ApiV2RateLimiterApi } from "@/services/auth/ApiV2RateLimiter"
+import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
@@ -48,7 +49,7 @@ const testConfig = () =>
 	)
 
 const makeHarness = (
-	checkRateLimit: ApiV2RateLimiterShape["check"] = () => Effect.succeed("allowed" as const),
+	checkRateLimit: ApiV2RateLimiterApi["check"] = () => Effect.succeed("allowed" as const),
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
@@ -56,11 +57,12 @@ const makeHarness = (
 		ApiKeysService.layer,
 		AuthService.layer,
 		DashboardPersistenceService.layer,
+		SharedDashboardService.layer,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
-		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(V2TransportErrorBoundaryLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(AlertsServiceStubLayer),
@@ -92,9 +94,11 @@ const makeHarness = (
 			new Request(`http://maple.test${path}`, {
 				method,
 				headers: {
-					...(options.token !== undefined ? { authorization: `Bearer ${options.token}` } : {}),
-					...(options.body !== undefined ? { "content-type": "application/json" } : {}),
-					...(options.origin !== undefined ? { origin: options.origin } : {}),
+					...(options.token !== undefined
+						? { authorization: `Bearer ${options.token}` }
+						: undefined),
+					...(options.body !== undefined ? { "content-type": "application/json" } : undefined),
+					...(options.origin !== undefined ? { origin: options.origin } : undefined),
 					...options.headers,
 				},
 				body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -124,7 +128,9 @@ const makeHarness = (
 					name: scopes === undefined ? "root-key" : `scoped:${scopes.join(",")}`,
 					scopes,
 					kind,
-					...(options.metadataJson !== undefined ? { metadataJson: options.metadataJson } : {}),
+					...(options.metadataJson !== undefined
+						? { metadataJson: options.metadataJson }
+						: undefined),
 				})
 			}),
 		)
@@ -229,11 +235,11 @@ describe("v2 api_keys over HTTP", () => {
 		expect(response.status).toBe(429)
 		expect(response.body).toEqual({
 			error: {
-				_tag: "@maple/http/v2/rate_limited",
+				_tag: "@maple/http/v2/RateLimitError",
 				type: "rate_limit_error",
 				code: "rate_limited",
 				title: "Too many requests",
-				message: "Too many requests. Retry after 60 seconds.",
+				message: "Too many requests. Retry after the interval in the Retry-After header.",
 				retryable: true,
 				recovery: "retry",
 				retry_after_seconds: 60,
@@ -313,7 +319,7 @@ describe("v2 api_keys over HTTP", () => {
 		const { status, body } = await harness.request("GET", "/v2/api_keys", { token: key.secret })
 		expect(status).toBe(503)
 		expect(body.error).toEqual({
-			_tag: "@maple/http/v2/api_key_lookup_unavailable",
+			_tag: "@maple/http/errors/ApiKeyLookupPersistenceError",
 			type: "api_error",
 			code: "api_key_lookup_unavailable",
 			title: "Service temporarily unavailable",
@@ -337,7 +343,7 @@ describe("v2 api_keys over HTTP", () => {
 		})
 		expect(create.status).toBe(403)
 		expect(create.body.error).toEqual({
-			_tag: "@maple/http/v2/insufficient_scope",
+			_tag: "@maple/http/v2/InsufficientScopeError",
 			type: "permission_error",
 			code: "insufficient_scope",
 			title: "Permission required",
@@ -419,7 +425,7 @@ describe("v2 api_keys over HTTP", () => {
 		})
 		expect(status).toBe(403)
 		expect(body.error).toEqual({
-			_tag: "@maple/http/v2/insufficient_permissions",
+			_tag: "@maple/http/v2/InsufficientPermissionsError",
 			type: "permission_error",
 			code: "insufficient_permissions",
 			title: "Permission required",
@@ -468,7 +474,7 @@ describe("v2 api_keys over HTTP", () => {
 		expect(malformed.body.error.type).toBe("invalid_request_error")
 		expect(malformed.body.error.param).toBe("id")
 		expect(malformed.body.error.code).toBe("parameter_invalid")
-		expect(malformed.body.error._tag).toBe("@maple/http/v2/apiKeys/retrieve/InvalidRequestError")
+		expect(malformed.body.error._tag).toBe("@maple/http/v2/InvalidRequestError")
 
 		// valid key_ encoding of a UUID that doesn't exist
 		const { encodePublicId } = await import("@maple/domain/http/v2")

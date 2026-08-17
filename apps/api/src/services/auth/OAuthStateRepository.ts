@@ -12,7 +12,7 @@ import { Database, type DatabaseError } from "@/platform/DatabaseLive"
 const toPersistenceError = (error: DatabaseError) =>
 	new OAuthStatePersistenceError({ message: error.message })
 
-export interface OAuthStateRepositoryShape {
+export interface OAuthStateRepositoryApi {
 	readonly purgeExpired: (now: number) => Effect.Effect<void, OAuthStatePersistenceError>
 	readonly insert: (row: OAuthAuthStateInsert) => Effect.Effect<void, OAuthStatePersistenceError>
 	readonly findByState: (
@@ -21,7 +21,7 @@ export interface OAuthStateRepositoryShape {
 	readonly deleteByState: (state: string) => Effect.Effect<void, OAuthStatePersistenceError>
 }
 
-export class OAuthStateRepository extends Context.Service<OAuthStateRepository, OAuthStateRepositoryShape>()(
+export class OAuthStateRepository extends Context.Service<OAuthStateRepository, OAuthStateRepositoryApi>()(
 	"@maple/api/services/OAuthStateRepository",
 	{
 		make: Effect.gen(function* () {
@@ -56,7 +56,7 @@ export class OAuthStateRepository extends Context.Service<OAuthStateRepository, 
 					.pipe(Effect.mapError(toPersistenceError))
 			})
 
-			return { purgeExpired, insert, findByState, deleteByState } satisfies OAuthStateRepositoryShape
+			return { purgeExpired, insert, findByState, deleteByState } satisfies OAuthStateRepositoryApi
 		}),
 	},
 ) {

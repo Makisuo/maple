@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect"
 import { OrgId, UserId } from "@maple/domain/http"
 import { makeWarehouseExecutor, type WarehouseSqlClient } from "@maple/query-engine/execution"
-import type { WarehouseExecutorShape } from "@maple/query-engine/observability"
+import type { WarehouseExecutorApi } from "@maple/query-engine/observability"
 import { executeLocalQuery } from "@maple/query-engine/local"
 import { debugLog } from "../lib/debug"
 
@@ -45,7 +45,7 @@ const localChdbClient = (baseUrl: string): WarehouseSqlClient => ({
  * depends on a `WarehouseExecutor` — work unchanged against local mode, with
  * the same `warehouse.backend="chdb"` span contract as the cloud.
  */
-export const makeLocalWarehouseExecutorShape = (baseUrl: string): WarehouseExecutorShape =>
+export const makeLocalWarehouseExecutorApi = (baseUrl: string): WarehouseExecutorApi =>
 	makeWarehouseExecutor({
 		createClient: () => localChdbClient(baseUrl),
 		resolveRoute: () =>

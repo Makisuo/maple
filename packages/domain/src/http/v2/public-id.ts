@@ -22,6 +22,7 @@ export const PublicIdPrefixes = {
 	apiKey: "key",
 	dashboard: "dash",
 	dashboardVersion: "dbv",
+	dashboardShare: "dshr",
 	dashboardTemplate: "dtpl",
 	alertRule: "alrt",
 	alertDestination: "dest",

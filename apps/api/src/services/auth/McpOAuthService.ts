@@ -135,8 +135,8 @@ const protocolError = (
 	new McpOAuthProtocolError({
 		error,
 		message,
-		...(options?.redirectUri ? { redirectUri: options.redirectUri } : {}),
-		...(options?.state ? { state: options.state } : {}),
+		...(options?.redirectUri ? { redirectUri: options.redirectUri } : undefined),
+		...(options?.state ? { state: options.state } : undefined),
 	})
 
 const parseScopes = (scope: string | undefined) => {
@@ -374,7 +374,7 @@ export class McpOAuthService extends Context.Service<
 				client_id: clientId,
 				client_id_issued_at: Math.floor(now / 1000),
 				client_name: clientName,
-				...(input.clientUri ? { client_uri: input.clientUri } : {}),
+				...(input.clientUri ? { client_uri: input.clientUri } : undefined),
 				redirect_uris: redirectUris,
 				token_endpoint_auth_method: "none" as const,
 				grant_types: ["authorization_code", "refresh_token"] as const,

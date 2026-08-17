@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 // Raw-vs-rollup parity for web analytics.
 //
 // `web_events` is a performance change, not a semantics change: every one of the

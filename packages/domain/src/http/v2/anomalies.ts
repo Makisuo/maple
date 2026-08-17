@@ -2,6 +2,13 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { UserId } from "../../primitives"
 import {
+	AnomalyForbiddenError,
+	AnomalyIncidentNotFoundError,
+	AnomalyLinkedIssueNotFoundError,
+	AnomalyPersistenceError,
+} from "../anomalies"
+import { ErrorPersistenceError } from "../errors"
+import {
 	AnomalyIncidentSeverity,
 	AnomalyIncidentStatus,
 	AnomalyResolveReason,
@@ -10,20 +17,14 @@ import {
 	AnomalyTimeseriesUnit,
 	AnomalyTriageStatus,
 } from "../anomalies"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import {
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2PermissionError,
-	V2ServiceUnavailableError,
-} from "./errors"
+import { AuthorizationV2 } from "./auth"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
+import { V2ParameterInvalid } from "./errors"
+import { publicError, publicErrors } from "./public-error"
+import { V2WarehouseReadErrors } from "./query-errors"
 import { AnomalyIncidentPublicId, ErrorIssuePublicId } from "./resource-ids"
 
 export { AnomalyIncidentPublicId } from "./resource-ids"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 const signalTypeField = AnomalySignalType.annotate({
 	description: "The monitored signal that triggered the anomaly.",
@@ -214,6 +215,58 @@ export const V2AnomalySettings = Schema.Struct({
 })
 export type V2AnomalySettings = Schema.Schema.Type<typeof V2AnomalySettings>
 
+export const V2AnomalyServiceCount = Schema.Struct({
+	object: Schema.Literal("anomaly_service_count").annotate({
+		description: 'The object type — always `"anomaly_service_count"`.',
+		examples: ["anomaly_service_count"],
+	}),
+	service_name: Schema.String.annotate({ description: "The service the incidents were detected on." }),
+	deployment_env: Schema.String.annotate({
+		description: "The deployment environment (e.g. `production`).",
+	}),
+	signal_type: signalTypeField,
+	severity: AnomalyIncidentSeverity.annotate({
+		description: "The worst severity among the incidents in this group.",
+		examples: ["critical"],
+	}),
+	incident_count: Schema.Number.annotate({
+		description: "How many incidents this group contains.",
+	}),
+	last_triggered_at: Timestamp.annotate({
+		description: "The most recent trigger across the incidents in this group.",
+	}),
+}).annotate({
+	identifier: "AnomalyServiceCount",
+	title: "Anomaly service count",
+	description:
+		"Open anomaly incidents for one (service, environment, signal), collapsed to a count with the worst severity and the most recent trigger.",
+	examples: [
+		wireExample({
+			object: "anomaly_service_count",
+			service_name: "payments",
+			deployment_env: "production",
+			signal_type: "error_rate",
+			severity: "critical",
+			incident_count: 2,
+			last_triggered_at: "2026-07-15T09:18:00.000Z",
+		}),
+	],
+})
+export type V2AnomalyServiceCount = Schema.Schema.Type<typeof V2AnomalyServiceCount>
+
+export const V2AnomalyServiceCountsQuery = Schema.Struct({
+	status: Schema.optional(
+		AnomalyIncidentStatus.annotate({
+			description: "Which incidents to aggregate. Defaults to `open`.",
+		}),
+	),
+}).annotate({
+	identifier: "AnomalyServiceCountsQuery",
+	title: "Anomaly service counts query",
+	description: "Optional status filter for the per-service anomaly aggregate.",
+})
+export type V2AnomalyServiceCountsQuery = Schema.Schema.Type<typeof V2AnomalyServiceCountsQuery>
+
 // Requests / queries
 
 export const V2AnomalyLinkIssueParams = Schema.Struct({
@@ -282,7 +335,12 @@ export const V2AnomalyTimeseriesQuery = Schema.Struct({
 })
 export type V2AnomalyTimeseriesQuery = Schema.Schema.Type<typeof V2AnomalyTimeseriesQuery>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+const [anomalyPersistence, anomalyNotFound, anomalyLinkedIssueNotFound, anomalyForbidden] = publicErrors(
+	AnomalyPersistenceError,
+	AnomalyIncidentNotFoundError,
+	AnomalyLinkedIssueNotFoundError,
+	AnomalyForbiddenError,
+)
 
 const AnomalyIncidentList = ListOf(V2AnomalyIncident).annotate({
 	identifier: "AnomalyIncidentList",
@@ -290,12 +348,18 @@ const AnomalyIncidentList = ListOf(V2AnomalyIncident).annotate({
 	description: "A cursor-paginated page of anomaly incidents, newest first.",
 })
 
+const AnomalyServiceCountList = ListOf(V2AnomalyServiceCount).annotate({
+	identifier: "AnomalyServiceCountList",
+	title: "Anomaly service count list",
+	description: "Every group for the org in one page — the aggregate is not paginated.",
+})
+
 export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 	.add(
 		HttpApiEndpoint.get("listIncidents", "/incidents", {
 			query: V2AnomalyIncidentsListQuery,
 			success: AnomalyIncidentList,
-			error: [...commonErrors],
+			error: [V2ParameterInvalid.schema, anomalyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listAnomalyIncidents",
@@ -306,10 +370,25 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 		),
 	)
 	.add(
+		// Static path — must be registered before the `/incidents/:id` param route.
+		HttpApiEndpoint.get("serviceCounts", "/incidents/service_counts", {
+			query: V2AnomalyServiceCountsQuery,
+			success: AnomalyServiceCountList,
+			error: anomalyPersistence,
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "listAnomalyServiceCounts",
+				summary: "List anomaly counts by service",
+				description:
+					"Returns open anomaly incidents collapsed to one row per (service, environment, signal), with the worst severity and most recent trigger — the whole fleet in one call, without paging the incident list. Requires the `anomalies:read` scope.",
+			}),
+		),
+	)
+	.add(
 		HttpApiEndpoint.get("getIncident", "/incidents/:id", {
 			params: { id: AnomalyIncidentPublicId },
 			success: V2AnomalyIncident,
-			error: [...commonErrors, V2NotFoundError],
+			error: [anomalyPersistence, anomalyNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAnomalyIncident",
@@ -324,7 +403,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 			params: { id: AnomalyIncidentPublicId },
 			query: V2AnomalyTimeseriesQuery,
 			success: V2AnomalyIncidentTimeseries,
-			error: [...commonErrors, V2NotFoundError],
+			error: [anomalyPersistence, anomalyNotFound, ...V2WarehouseReadErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAnomalyIncidentTimeseries",
@@ -338,7 +417,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 		HttpApiEndpoint.post("resolveIncident", "/incidents/:id/resolve", {
 			params: { id: AnomalyIncidentPublicId },
 			success: V2AnomalyIncident,
-			error: [...commonErrors, V2NotFoundError],
+			error: [anomalyPersistence, anomalyNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "resolveAnomalyIncident",
@@ -353,7 +432,12 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 			params: { id: AnomalyIncidentPublicId },
 			payload: V2AnomalyLinkIssueParams,
 			success: V2AnomalyIncident,
-			error: [...commonErrors, V2NotFoundError],
+			error: [
+				publicError(ErrorPersistenceError),
+				anomalyPersistence,
+				anomalyNotFound,
+				anomalyLinkedIssueNotFound,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "setAnomalyIncidentIssue",
@@ -366,7 +450,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 	.add(
 		HttpApiEndpoint.get("getSettings", "/settings", {
 			success: V2AnomalySettings,
-			error: [...commonErrors],
+			error: anomalyPersistence,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getAnomalySettings",
@@ -380,7 +464,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 		HttpApiEndpoint.patch("updateSettings", "/settings", {
 			payload: V2AnomalySettingsUpdateParams,
 			success: V2AnomalySettings,
-			error: [...commonErrors, V2PermissionError],
+			error: [anomalyForbidden, anomalyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "updateAnomalySettings",
@@ -392,7 +476,6 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 	)
 	.prefix("/v2/anomalies")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Anomalies",

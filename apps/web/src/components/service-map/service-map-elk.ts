@@ -133,7 +133,7 @@ export function buildElkGraph(
 		"elk.layered.cycleBreaking.strategy": "GREEDY_MODEL_ORDER",
 		// Stable, source-order-aware crossing minimization for deterministic output.
 		"elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
-	}
+	} satisfies Record<string, string>
 
 	if (nodes.length > LARGE_GRAPH_NODE_COUNT) {
 		layoutOptions["elk.layered.nodePlacement.strategy"] = "BRANDES_KOEPF"

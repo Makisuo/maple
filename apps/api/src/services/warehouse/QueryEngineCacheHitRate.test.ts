@@ -6,13 +6,13 @@ import { baselineWarehouseCapabilities, QueryEngineExecuteRequest, type QuerySpe
 import type { CompiledQuery } from "@maple/query-engine/ch"
 import { QueryEngineService } from "./QueryEngineService"
 import type { TenantContext } from "@/services/auth/AuthService"
-import { WarehouseQueryService, type WarehouseQueryServiceShape } from "./WarehouseQueryService"
+import { WarehouseQueryService, type WarehouseQueryServiceApi } from "./WarehouseQueryService"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import {
 	EdgeCacheService,
 	makeEdgeCacheService,
 	makeMemoryBackend,
-	type EdgeCacheServiceShape,
+	type EdgeCacheServiceApi,
 } from "@maple/cache"
 
 /**
@@ -55,7 +55,7 @@ const makeConfig = (overrides: Record<string, string> = {}) =>
 const makeObservedEdgeCache = () => {
 	const namespaces: string[] = []
 	const inner = makeEdgeCacheService(makeMemoryBackend())
-	const observed: EdgeCacheServiceShape = {
+	const observed: EdgeCacheServiceApi = {
 		getOrCompute: (options, compute) => {
 			namespaces.push(options.bucket)
 			return inner.getOrCompute(options, compute)
@@ -103,7 +103,7 @@ const ROWS = [
 	traceRow("2026-01-01 00:10:00", 5),
 ]
 
-const makeStub = (counter: { n: number }): WarehouseQueryServiceShape =>
+const makeStub = (counter: { n: number }): WarehouseQueryServiceApi =>
 	({
 		query: () => Effect.die(new Error("query not expected")),
 		sqlQuery: () => {
@@ -132,7 +132,7 @@ const makeStub = (counter: { n: number }): WarehouseQueryServiceShape =>
 		warmRoute: () => Effect.void,
 		ingest: () => Effect.void,
 		sql: () => Promise.resolve({ data: [] }),
-	}) as unknown as WarehouseQueryServiceShape
+	}) as WarehouseQueryServiceApi
 
 const makeLayer = (
 	counter: { n: number },
@@ -155,7 +155,7 @@ const timeseriesRequest = (overrides: Partial<{ startTime: string; endTime: stri
 			source: "traces",
 			metric: "count",
 			bucketSeconds: 300,
-		} as unknown as QuerySpec,
+		} as QuerySpec,
 		...overrides,
 	})
 
@@ -197,7 +197,7 @@ describe("QueryEngineService.execute — cache path selection", () => {
 				source: "traces",
 				metric: "count",
 				groupBy: "service",
-			} as unknown as QuerySpec,
+			} as QuerySpec,
 		})
 
 		return Effect.gen(function* () {

@@ -49,6 +49,37 @@ describe("deriveDashboardsList", () => {
 		expect(list.map((d) => d.id)).toEqual(["dash-new", "dash-mid", "dash-old"])
 	})
 
+	// Electric streams `payload_json` straight from Postgres, so the browser sees
+	// whatever schema version a dashboard was last *written* in — the API only
+	// stamps the current version at the next write. Without a migration on the
+	// web read path, a stored legacy value in a field the current schema closed
+	// would silently drop the whole dashboard out of the list.
+	it("migrates a stored legacy document rather than dropping it", () => {
+		const list = deriveDashboardsList([
+			makeRow("dash-legacy", ISO_NEW, {
+				widgets: [
+					{
+						id: "w1",
+						// A panel type in `visualization` — the shape v1 allowed. The
+						// migration chain still folds this on read; only the data source
+						// moved to the one-shot backfill, so it is written in v3 here.
+						visualization: "bar",
+						dataSource: { kind: "route", endpoint: "spanMetrics" },
+						display: { title: "Errors" },
+						layout: { x: 0, y: 0, w: 4, h: 5 },
+					},
+				],
+			}),
+		])
+
+		expect(list.map((d) => d.id)).toEqual(["dash-legacy"])
+		// Folded to the persisted pair, so the bar chart still draws as a bar.
+		expect(list[0]?.widgets[0]).toMatchObject({
+			visualization: "chart",
+			display: { chartId: "query-builder-bar" },
+		})
+	})
+
 	it("drops rows whose payload_json fails to decode", () => {
 		const corrupt: DashboardRow = {
 			...makeRow("dash-corrupt", ISO_NEW),
@@ -68,8 +99,8 @@ describe("deriveDashboardsList", () => {
 				widgets: [
 					{
 						id: "w1",
-						visualization: "timeseries",
-						dataSource: { endpoint: "spanMetrics" },
+						visualization: "chart",
+						dataSource: { kind: "route", endpoint: "spanMetrics" },
 						display: { title: "p95" },
 						layout: { x: 0, y: 0, w: 4, h: 5 },
 					},
@@ -87,7 +118,7 @@ describe("deriveDashboardsList", () => {
 		expect(dashboard.widgets).toHaveLength(1)
 		expect(dashboard.widgets[0]).toMatchObject({
 			id: "w1",
-			visualization: "timeseries",
+			visualization: "chart",
 			layout: { x: 0, y: 0, w: 4, h: 5 },
 		})
 	})

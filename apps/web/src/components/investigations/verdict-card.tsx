@@ -208,7 +208,7 @@ const SEVERITY_TEXT_TONE: Record<string, string> = {
 	medium: "text-severity-warn",
 	low: "text-muted-foreground",
 	unclassified: "text-muted-foreground",
-}
+} satisfies Record<string, string>
 
 /* -------------------------------------------------------------------------------------------------
  * Investigating
@@ -552,14 +552,14 @@ const LANE_DOT: Record<LensRun["status"], string> = {
 	checking: "bg-primary animate-pulse",
 	queued: "border border-muted-foreground/40",
 	no_finding: "bg-muted-foreground/40",
-}
+} satisfies Record<LensRun["status"], string>
 
 const LANE_NOTE: Record<LensRun["status"], string> = {
 	reported: "reported a candidate",
 	checking: "checking",
 	queued: "queued",
 	no_finding: "no finding",
-}
+} satisfies Record<LensRun["status"], string>
 
 /**
  * One row per dispatched lens: where it got to, what it claimed, how long it

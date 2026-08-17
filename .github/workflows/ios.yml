@@ -1,0 +1,85 @@
+name: iOS
+
+# The Swift app is excluded from ci.yml's `ts` filter, so this is the only job
+# that covers it. Kept off the shared TS pipeline because macOS runners bill at
+# roughly 10x Linux — the cheap contract check (`ios:openapi:check`) lives in
+# ci.yml's `quality` shard instead, so a v2 contract change that breaks the iOS
+# client still fails on Linux.
+on:
+    push:
+        branches: [main]
+        paths:
+            - "apps/ios/**"
+            - "scripts/generate-ios-openapi.ts"
+            - ".github/workflows/ios.yml"
+    pull_request:
+        paths:
+            - "apps/ios/**"
+            - "scripts/generate-ios-openapi.ts"
+            - ".github/workflows/ios.yml"
+    workflow_dispatch:
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+jobs:
+    build:
+        name: Build and test
+        runs-on: macos-15
+        timeout-minutes: 30
+        defaults:
+            run:
+                working-directory: apps/ios
+
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - name: Select Xcode
+              uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+              with:
+                  xcode-version: latest-stable
+
+            # The generator plugin builds swift-syntax-adjacent dependencies from
+            # source, which dominates a cold run.
+            - name: Cache SwiftPM
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: |
+                      ~/Library/Caches/org.swift.swiftpm
+                      ~/Library/org.swift.swiftpm
+                      apps/ios/Packages/MapleAPI/.build
+                  key: swiftpm-${{ runner.os }}-${{ hashFiles('apps/ios/Packages/MapleAPI/Package.resolved') }}
+                  restore-keys: swiftpm-${{ runner.os }}-
+
+            # Runs first, and deliberately: it needs no simulator and no signing,
+            # so a broken client or auth change fails in about a minute instead of
+            # waiting out a full app build.
+            - name: Test MapleAPI package
+              working-directory: apps/ios/Packages/MapleAPI
+              run: swift test
+
+            - name: Install XcodeGen
+              run: brew install xcodegen
+
+            - name: Generate Xcode project
+              run: xcodegen generate
+
+            # Build, not test. Running the app target's tests would launch the
+            # host app, which needs a Clerk publishable key and a Keychain
+            # entitlement that an unsigned CI build does not have. Every test
+            # worth having is in the MapleAPI package above, which needs neither.
+            - name: Build app
+              run: |
+                  set -o pipefail
+                  xcodebuild build \
+                    -project Maple.xcodeproj \
+                    -scheme Maple \
+                    -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+                    -skipPackagePluginValidation \
+                    -skipMacroValidation \
+                    CODE_SIGNING_ALLOWED=NO \
+                    | xcbeautify

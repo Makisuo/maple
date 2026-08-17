@@ -15,6 +15,9 @@ import {
 	inspectWidgetsAfterMutation,
 } from "@/mcp/lib/inspect-widget"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
+import { validateWidgetRenderability } from "@/mcp/lib/validate-widget-renderability"
+import { resolvePanelType } from "@/mcp/lib/panel-type"
+import { withScalarReduction } from "@/mcp/lib/raw-sql-widget"
 
 const TOOL = "replace_dashboard_widgets"
 
@@ -55,6 +58,7 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 			// are auto-placed against the widgets accumulated so far, matching the
 			// single-widget add path.
 			const widgets: DashboardWidget[] = []
+			const repairedScalarIds: string[] = []
 			for (let i = 0; i < parsed.length; i++) {
 				const obj = parsed[i]
 				if (obj === null || typeof obj !== "object") {
@@ -65,14 +69,14 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 				const candidate: Record<string, unknown> = {
 					...rec,
 					id: typeof rec.id === "string" && rec.id.length > 0 ? rec.id : generateWidgetId(),
-				}
+				} satisfies Record<string, unknown>
 				if (candidate.layout === undefined) {
 					const size = defaultSizeForVisualization(visualization)
 					const position = findNextWidgetPosition(widgets, size.w)
 					candidate.layout = { ...position, w: size.w, h: size.h }
 				}
 
-				const widget = yield* decodeWidget(candidate).pipe(
+				const decoded = yield* decodeWidget(candidate).pipe(
 					Effect.mapError(
 						(cause) =>
 							new McpQueryError({
@@ -82,6 +86,24 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 							}),
 					),
 				)
+
+				// Repair a scalar with no reduction, exactly as the single-widget
+				// paths do. Without this the batch tool was the strictest of the
+				// three: `add` injects the default and `update` repairs, but a
+				// get_dashboard -> replace_dashboard_widgets round trip over a board
+				// holding one legacy stat failed outright and saved nothing — and
+				// this is the tool the docs recommend over incremental calls.
+				const panel = resolvePanelType({
+					visualization: decoded.visualization,
+					chartId: decoded.display.chartId,
+				})
+				const widget = panel.ok
+					? {
+							...decoded,
+							dataSource: withScalarReduction(decoded.dataSource, panel.resolved.meta.isScalar),
+						}
+					: decoded
+				if (widget.dataSource !== decoded.dataSource) repairedScalarIds.push(widget.id)
 				widgets.push(widget)
 			}
 
@@ -108,6 +130,25 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 				)
 			}
 
+			// Same all-or-nothing guard for shapes the renderer can't draw. This is
+			// a batch of freshly-authored widgets, not a restore, so fatal issues
+			// block here exactly as they do on the single-widget add path.
+			const renderIssues = widgets.map((widget) => ({
+				widget,
+				issues: validateWidgetRenderability({ widget }),
+			}))
+			const fatalRenderIssues = renderIssues.flatMap(({ widget, issues }) =>
+				issues.fatal.map((message) => `[${widget.id}] ${message}`),
+			)
+			if (fatalRenderIssues.length > 0) {
+				return validationError(
+					`Some widgets cannot render as configured — NOTHING was saved:\n- ${fatalRenderIssues.join("\n- ")}`,
+				)
+			}
+			const renderWarnings = renderIssues.flatMap(({ widget, issues }) =>
+				issues.warnings.map((message) => `[${widget.id}] ${message}`),
+			)
+
 			const result = yield* withDashboardMutation(dashboard_id, TOOL, () => Effect.succeed(widgets))
 
 			if (!result.ok) {
@@ -132,6 +173,16 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 				`Total widgets: ${dashboard.widgets.length}`,
 				`Updated: ${dashboard.updatedAt.slice(0, 19)}`,
 			]
+			if (repairedScalarIds.length > 0) {
+				lines.push(
+					"",
+					`Note: ${repairedScalarIds.length} scalar widget(s) had no \`transform.reduceToValue\` and were given \`{ field: "value", aggregate: "first" }\` — a stat/gauge renders \`[object Object]\` without one: ${repairedScalarIds.join(", ")}`,
+				)
+			}
+
+			if (renderWarnings.length > 0) {
+				lines.push("", "### Render warnings", ...renderWarnings.map((warning) => `- ${warning}`))
+			}
 			const validationBlock = formatValidationSummary(validation, true)
 			if (validationBlock) {
 				lines.push("", validationBlock)

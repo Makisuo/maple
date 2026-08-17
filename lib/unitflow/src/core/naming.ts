@@ -1,6 +1,6 @@
 import * as Event from "./event.js"
 import { isFlatten, stateOf as flattenStateOf } from "./internals.js"
-import type { Shape } from "./model.js"
+import type { Definition } from "./model.js"
 import * as Store from "./store.js"
 
 const keyLabel = (key: unknown): string => {
@@ -35,7 +35,7 @@ const namePort = (port: unknown, label: string): void => {
  * wins. Descriptors already named (manually, or by the child model that
  * created and exposed them first) are left untouched.
  */
-export const namePorts = (shape: Shape, modelKey: string, key: unknown): void => {
+export const namePorts = (definition: Definition, modelKey: string, key: unknown): void => {
 	const instance = `${modelKey}${keyLabel(key)}`
 	const visited = new Set<unknown>()
 
@@ -66,7 +66,7 @@ export const namePorts = (shape: Shape, modelKey: string, key: unknown): void =>
 	}
 
 	const entries: Array<[unknown, string]> = []
-	for (const [section, ports] of Object.entries(shape)) {
+	for (const [section, ports] of Object.entries(definition)) {
 		for (const [portName, port] of Object.entries(ports)) {
 			entries.push([port, `${instance}.${section}.${portName}`])
 		}

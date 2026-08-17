@@ -3,9 +3,9 @@ import { Effect, Layer, Redacted, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ScrapeTargetId } from "@maple/domain/http"
 import { ApiClient } from "./ApiClient"
-import { ScraperEnv, type ScraperEnvShape } from "./Env"
+import { ScraperEnv, type ScraperEnvConfig } from "./Env"
 
-const testEnv: ScraperEnvShape = {
+const testEnv: ScraperEnvConfig = {
 	MAPLE_API_URL: "http://api.test",
 	SD_INTERNAL_TOKEN: Redacted.make("internal-token"),
 	MAPLE_INGEST_URL: "http://ingest.test",

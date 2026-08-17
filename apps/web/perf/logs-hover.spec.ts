@@ -8,7 +8,7 @@ import { expect, test } from "@playwright/test"
 // reproduce that — it happily dispatches a synthesized leave to any node — so
 // these assertions live here rather than in the unit suite.
 //
-// /logs-bench renders the real LogsTableView over 2 000 rows × 12 chips with no
+// /lab/bench/logs renders the real LogsTableView over 2 000 rows × 12 chips with no
 // auth and no backend. Rows are `max-content` wide and scroll horizontally, so
 // only the leading chip of each row is reliably on screen; the sweep therefore
 // runs down that column, which is also how a cursor actually crosses the table.
@@ -30,7 +30,7 @@ async function visibleChipCentres(page: import("@playwright/test").Page) {
 }
 
 async function openBench(page: import("@playwright/test").Page) {
-	await page.goto("/logs-bench")
+	await page.goto("/lab/bench/logs")
 	await page.waitForFunction(() => window.__logsBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})
