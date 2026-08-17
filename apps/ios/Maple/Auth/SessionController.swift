@@ -30,7 +30,17 @@ final class SessionController {
 	/// restarts — so org A's services never linger on screen while org B loads.
 	private(set) var dataGeneration = 0
 
-	/// Set when the org picker is showing an error rather than a list.
+	/// The user's organizations, fetched from Clerk rather than read off the
+	/// user object.
+	///
+	/// `User.organizationMemberships` is an `Optional` array populated from the
+	/// client payload; it can be absent or partial. Trusting it meant a user
+	/// with several organizations could be auto-selected into whichever one
+	/// happened to be in that payload and never offered the choice — and a user
+	/// whose payload carried none would be told they belong to no organization
+	/// at all.
+	private(set) var memberships: [OrganizationMembership] = []
+	private(set) var membershipsLoaded = false
 	private(set) var organizationError: String?
 
 	let api: any MapleAPI
@@ -41,12 +51,18 @@ final class SessionController {
 		self.tokens = tokens
 	}
 
-	var memberships: [OrganizationMembership] {
-		Clerk.shared.user?.organizationMemberships ?? []
-	}
-
 	var activeOrganization: Organization? {
 		Clerk.shared.organization
+	}
+
+	var activeOrganizationId: String? {
+		Clerk.shared.session?.lastActiveOrganizationId
+	}
+
+	/// True once switching is actually possible — used to decide whether the
+	/// switcher is worth showing.
+	var canSwitchOrganization: Bool {
+		memberships.count > 1
 	}
 
 	/// Recompute the phase from Clerk's current state.
@@ -57,24 +73,61 @@ final class SessionController {
 	func refresh() async {
 		guard Clerk.shared.user != nil else {
 			phase = .signedOut
+			memberships = []
+			membershipsLoaded = false
 			return
 		}
 
-		if let organizationId = Clerk.shared.session?.lastActiveOrganizationId {
+		// Always load the real list, even when an org is already active: the
+		// switcher needs it, and it is what makes the auto-select decision safe.
+		await loadMemberships()
+
+		if let organizationId = activeOrganizationId {
 			if case .ready(let current) = phase, current == organizationId { return }
 			phase = .ready(organizationId: organizationId)
 			return
 		}
 
-		// Signed in with no active org. One membership is not a choice, so make
-		// it and skip a pointless picker.
-		let memberships = self.memberships
-		if memberships.count == 1, let only = memberships.first {
+		// No active organization. One membership is not a choice, so make it and
+		// skip a pointless picker — but only when we know it is genuinely the
+		// only one.
+		if membershipsLoaded, memberships.count == 1, let only = memberships.first {
 			await select(organizationId: only.organization.id)
 			return
 		}
 
 		phase = .needsOrganization
+	}
+
+	/// Fetch every membership, paging until the reported total is reached.
+	func loadMemberships() async {
+		guard let user = Clerk.shared.user else { return }
+
+		var collected: [OrganizationMembership] = []
+		var page = 1
+		let pageSize = 50
+
+		do {
+			while true {
+				let response = try await user.getOrganizationMemberships(page: page, pageSize: pageSize)
+				collected.append(contentsOf: response.data)
+				if collected.count >= response.totalCount || response.data.isEmpty { break }
+				page += 1
+				// A defensive stop: a server that never reports completion must not
+				// spin here forever.
+				if page > 20 { break }
+			}
+			memberships = collected
+			membershipsLoaded = true
+			organizationError = nil
+		} catch {
+			// Fall back to whatever the client payload carried. Partial is better
+			// than nothing for the switcher, but `membershipsLoaded` stays false so
+			// the auto-select path — the one that can silently pick wrong — is not
+			// taken on unverified data.
+			memberships = user.organizationMemberships ?? []
+			organizationError = "Couldn't load your organizations. \(error.localizedDescription)"
+		}
 	}
 
 	/// Switch the active organization and make every screen reload against it.
@@ -83,6 +136,7 @@ final class SessionController {
 			phase = .signedOut
 			return
 		}
+		if activeOrganizationId == organizationId, case .ready = phase { return }
 
 		organizationError = nil
 		do {
@@ -125,6 +179,8 @@ final class SessionController {
 
 	func signOut() async {
 		try? await Clerk.shared.auth.signOut()
+		memberships = []
+		membershipsLoaded = false
 		await signOutLocally()
 	}
 }

@@ -97,8 +97,15 @@ struct ServicesListView: View {
 				}
 			}
 			.navigationTitle("Services")
-			.toolbarTitleDisplayMode(.inlineLarge)
+			.navigationBarTitleDisplayMode(.inline)
 			.toolbar {
+				// The organization occupies the title slot: it is the context for
+				// everything on screen, the tab bar already names the screen, and
+				// a leading item here gets collapsed into an overflow menu — which
+				// is where a switcher goes to be undiscoverable.
+				ToolbarItem(placement: .principal) {
+					OrganizationSwitcherButton(fallbackTitle: "Services")
+				}
 				if let model {
 					ToolbarItem(placement: .topBarTrailing) {
 						TimeWindowMenu(window: windowBinding(model))
