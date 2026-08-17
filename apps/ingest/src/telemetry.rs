@@ -604,47 +604,34 @@ impl PipelineError {
 pub struct AcceptStats {
     pub rows: usize,
     pub dropped: usize,
-    /// Spans the AI classifier examined in this batch. Zero when the migration
-    /// flag is off; otherwise equal to `rows` for traces.
+    /// Spans the AI classifier examined in this batch — equal to `rows` for
+    /// traces, zero for the other signals.
     pub ai_spans_examined: usize,
 }
 
 /// Per-batch inputs for AI classification and rollup-hour clamping.
 ///
 /// Built once per accepted payload, never per span, so every span in one payload
-/// clamps against the same instant.
+/// clamps against the same instant. Classification itself is unconditional;
+/// `AiRulesVersion = 0` rows exist only from before this binary shipped.
 #[derive(Clone, Debug)]
 pub struct AiClassificationSettings {
-    /// `INGEST_AI_CLASSIFICATION_ENABLED`. Migration-window flag only: once the
-    /// fleet is ramped to 100% the hour is recorded as
-    /// `AI_VENDORS_ROLLUP_ENABLEMENT_HOUR` and the flag goes away. The MV ships
-    /// with the migration chain and is a no-op until the ramp, so there is no
-    /// ordering constraint. `AiRollupHour` is written either way.
-    pub enabled: bool,
     /// Batch receive time, epoch seconds.
     pub receive_time_secs: i64,
 }
 
 impl AiClassificationSettings {
-    pub fn new(enabled: bool) -> Self {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
         Self {
-            enabled,
             receive_time_secs: unix_now_secs(),
         }
     }
 
-    /// Flag off. `AiRollupHour` is still computed and written.
-    pub fn disabled() -> Self {
-        Self::new(false)
-    }
-
     /// Explicit receive time, for tests that assert the clamp windows.
     #[cfg(test)]
-    pub fn at(enabled: bool, receive_time_secs: i64) -> Self {
-        Self {
-            enabled,
-            receive_time_secs,
-        }
+    pub fn at(receive_time_secs: i64) -> Self {
+        Self { receive_time_secs }
     }
 }
 
@@ -667,16 +654,6 @@ struct AiRowFields {
 }
 
 impl AiRowFields {
-    /// Flag-off values. `rules_version = 0` means "never examined", which is what
-    /// a flag-off row is — distinct from an examined-and-non-AI row (non-zero
-    /// version, empty vendor).
-    const UNEXAMINED: Self = Self {
-        vendor: "",
-        session_state: ai_classifier::session_state::NOT_EXAMINED,
-        session_key_hash: 0,
-        rules_version: 0,
-    };
-
     fn from_classification(classification: &SpanClassification<'_>) -> Self {
         Self {
             vendor: classification.vendor_slug(),
@@ -2331,12 +2308,10 @@ fn encode_traces(
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        // Hoisted once per ResourceSpans, and only when the flag is on. Attribute
-        // mappings rewrite *span* attributes only, so the resource/scope contexts
-        // stay valid on the remapped path too.
-        let ai_resource = ai
-            .enabled
-            .then(|| ResourceContext::new(registry(), resource_attributes));
+        // Hoisted once per ResourceSpans. Attribute mappings rewrite *span*
+        // attributes only, so the resource/scope contexts stay valid on the
+        // remapped path too.
+        let ai_resource = ResourceContext::new(registry(), resource_attributes);
 
         for scope_spans in &resource_spans.scope_spans {
             let scope = scope_spans.scope.as_ref();
@@ -2346,9 +2321,7 @@ fn encode_traces(
             let scope_name = scope.map(|scope| scope.name.as_str()).unwrap_or("");
             let scope_version = scope.map(|scope| scope.version.as_str()).unwrap_or("");
             // Hoisted once per ScopeSpans; every span below reuses it.
-            let ai_scope = ai_resource
-                .as_ref()
-                .map(|resource| resource.scope(scope, &scope_spans.schema_url));
+            let ai_scope = ai_resource.scope(scope, &scope_spans.schema_url);
 
             for span in &scope_spans.spans {
                 let trace_id = bytes_hex(&span.trace_id);
@@ -2369,9 +2342,8 @@ fn encode_traces(
                 // span carrying a duplicate key needs this parallel first-wins view
                 // or an unrelated rule flips its verdict. Equal lengths mean no
                 // duplicates and the common path allocates nothing.
-                let mut classify_attrs =
-                    (ai.enabled && remapped && span.attributes.len() != span_attrs.len())
-                        .then(|| attr_map_first_wins(&span.attributes));
+                let mut classify_attrs = (remapped && span.attributes.len() != span_attrs.len())
+                    .then(|| attr_map_first_wins(&span.attributes));
                 if sample_ratio < 1.0
                     && !span_attrs.contains_key("SampleRate")
                     && !span.trace_state.contains("th:")
@@ -2388,28 +2360,18 @@ fn encode_traces(
                 }
 
                 // After remapping, deliberately: an org that moves a custom key onto
-                // a rule key must classify by the remapped shape. Flag-off writes
-                // the never-examined markers; `AiRollupHour` below is written either
-                // way.
-                let ai_fields = if !ai.enabled {
-                    AiRowFields::UNEXAMINED
-                } else {
-                    ai_spans_examined += 1;
-                    let scope_context = ai_scope
-                        .as_ref()
-                        .expect("hoisted whenever classification is enabled");
-                    // `classify_attrs` is the first-wins view built above: `None`
-                    // unless this span carries a duplicate key, in which case the
-                    // last-wins Map is already the same list.
-                    let rewritten = remapped.then(|| {
-                        key_values_from_map(classify_attrs.as_ref().unwrap_or(&span_attrs))
-                    });
-                    AiRowFields::from_classification(&scope_context.classify_span_full(
-                        &span.name,
-                        rewritten.as_deref().unwrap_or(&span.attributes),
-                        &span.events,
-                    ))
-                };
+                // a rule key must classify by the remapped shape.
+                ai_spans_examined += 1;
+                // `classify_attrs` is the first-wins view built above: `None`
+                // unless this span carries a duplicate key, in which case the
+                // last-wins Map is already the same list.
+                let rewritten = remapped
+                    .then(|| key_values_from_map(classify_attrs.as_ref().unwrap_or(&span_attrs)));
+                let ai_fields = AiRowFields::from_classification(&ai_scope.classify_span_full(
+                    &span.name,
+                    rewritten.as_deref().unwrap_or(&span.attributes),
+                    &span.events,
+                ));
                 let ai_rollup_hour = format_datetime_secs(rollup_hour_secs(
                     span.start_time_unix_nano,
                     ai.receive_time_secs,
@@ -3555,7 +3517,7 @@ mod tests {
             &request,
             &SamplingPolicy::default(),
             &[],
-            &AiClassificationSettings::disabled(),
+            &AiClassificationSettings::new(),
         )
         .unwrap();
         assert_eq!(stats.rows, 1);
@@ -3872,7 +3834,7 @@ mod tests {
                 &populated_trace_request(),
                 &SamplingPolicy::default(),
                 &[],
-                &AiClassificationSettings::disabled(),
+                &AiClassificationSettings::new(),
                 ExportDestination::ClickHouse,
             )
             .await
@@ -4841,7 +4803,7 @@ mod tests {
             spring_ai_attributes(),
             AI_RECEIVE_SECS as u64 * 1_000_000_000,
         );
-        let ai = AiClassificationSettings::at(true, AI_RECEIVE_SECS);
+        let ai = AiClassificationSettings::at(AI_RECEIVE_SECS);
         let row = encode_ai_row(&request, &ai);
 
         assert_eq!(row["ai_vendor"], "spring_ai");
@@ -4863,49 +4825,21 @@ mod tests {
             spring_ai_attributes(),
             AI_RECEIVE_SECS as u64 * 1_000_000_000,
         );
-        let (_, on) = encode_traces(
+        let (_, stats) = encode_traces(
             &test_cfg().datasources,
             "org_ai",
             &request,
             &SamplingPolicy::default(),
             &[],
-            &AiClassificationSettings::at(true, AI_RECEIVE_SECS),
+            &AiClassificationSettings::at(AI_RECEIVE_SECS),
         )
         .unwrap();
-        assert_eq!(on.ai_spans_examined, on.rows);
-
-        let (_, off) = encode_traces(
-            &test_cfg().datasources,
-            "org_ai",
-            &request,
-            &SamplingPolicy::default(),
-            &[],
-            &AiClassificationSettings::at(false, AI_RECEIVE_SECS),
-        )
-        .unwrap();
-        assert_eq!(off.ai_spans_examined, 0);
-    }
-
-    #[test]
-    fn classification_off_writes_zeros_but_still_writes_the_rollup_hour() {
-        let request = ai_trace_request(
-            spring_ai_attributes(),
-            AI_RECEIVE_SECS as u64 * 1_000_000_000,
-        );
-        let ai = AiClassificationSettings::at(false, AI_RECEIVE_SECS);
-        let row = encode_ai_row(&request, &ai);
-
-        assert_eq!(row["ai_vendor"], "");
-        assert_eq!(row["ai_session_key_state"], json!(0));
-        assert_eq!(row["ai_session_key_hash"], json!(0));
-        // 0, not the registry version: a flag-off row is "never examined".
-        assert_eq!(row["ai_rules_version"], json!(0));
-        assert_eq!(row["ai_rollup_hour"], "2023-11-14 22:00:00");
+        assert_eq!(stats.ai_spans_examined, stats.rows);
     }
 
     #[test]
     fn a_non_ai_span_is_examined_and_stamped_but_carries_no_vendor() {
-        let ai = AiClassificationSettings::at(true, AI_RECEIVE_SECS);
+        let ai = AiClassificationSettings::at(AI_RECEIVE_SECS);
         let (frames, stats) = encode_traces(
             &test_cfg().datasources,
             "org_contract",
@@ -4926,7 +4860,7 @@ mod tests {
     #[test]
     fn rollup_hour_clamps_stale_and_future_timestamps_to_receive_time() {
         let receive_hour = "2023-11-14 22:00:00";
-        let ai = || AiClassificationSettings::at(true, AI_RECEIVE_SECS);
+        let ai = || AiClassificationSettings::at(AI_RECEIVE_SECS);
 
         // In window, one hour before receive: the span's own hour is kept.
         let in_window = ai_trace_request(
@@ -4985,10 +4919,7 @@ mod tests {
             spring_ai_attributes(),
             AI_RECEIVE_SECS as u64 * 1_000_000_000,
         );
-        let row = encode_ai_row(
-            &request,
-            &AiClassificationSettings::at(false, AI_RECEIVE_SECS),
-        );
+        let row = encode_ai_row(&request, &AiClassificationSettings::at(AI_RECEIVE_SECS));
         let hour = row["ai_rollup_hour"].as_str().unwrap();
         assert_eq!(hour.len(), 19, "not DateTime('UTC'): {hour:?}");
         assert!(hour.ends_with(":00:00"), "not an hour boundary: {hour:?}");
@@ -5025,7 +4956,7 @@ mod tests {
             target_key: SPRING_AI_SESSION_KEY.to_string(),
             operation: MappingOperation::Move,
         }];
-        let ai = AiClassificationSettings::at(true, AI_RECEIVE_SECS);
+        let ai = AiClassificationSettings::at(AI_RECEIVE_SECS);
         let (frames, _) = encode_traces(
             &test_cfg().datasources,
             "org_ai",
@@ -5065,7 +4996,7 @@ mod tests {
             string_kv("gen_ai.operation.name", "chat"),
         ];
         let request = ai_trace_request(duplicated, AI_RECEIVE_SECS as u64 * 1_000_000_000);
-        let ai = AiClassificationSettings::at(true, AI_RECEIVE_SECS);
+        let ai = AiClassificationSettings::at(AI_RECEIVE_SECS);
         let no_op_rule = [AttributeMappingRule {
             source_context: MappingSourceContext::Span,
             source_key: "no.such.key".to_string(),
@@ -5250,7 +5181,7 @@ mod tests {
             &populated_trace_request(),
             &SamplingPolicy::default(),
             &[],
-            &AiClassificationSettings::disabled(),
+            &AiClassificationSettings::new(),
         )
         .unwrap();
         let row = frame_row(&frames[0]);
@@ -5326,7 +5257,7 @@ mod tests {
             &populated_trace_request(),
             &SamplingPolicy::default(),
             &[],
-            &AiClassificationSettings::disabled(),
+            &AiClassificationSettings::new(),
         )
         .unwrap();
         let trace_row = frame_row(&trace_frames[0]);
@@ -5381,7 +5312,7 @@ mod tests {
             &populated_trace_request(),
             &SamplingPolicy::default(),
             &[],
-            &AiClassificationSettings::disabled(),
+            &AiClassificationSettings::new(),
         )
         .unwrap();
         assert_eq!(trace_frames[0].datasource, "tenant_traces_v2");
@@ -5565,7 +5496,7 @@ mod tests {
                 &request,
                 &SamplingPolicy::default(),
                 &[],
-                &AiClassificationSettings::disabled(),
+                &AiClassificationSettings::new(),
             )
             .await
             .unwrap();

@@ -10,25 +10,27 @@ import { SERVICE_AI_VENDORS_HOURLY_SELECT_SQL } from "../../tinybird/ai-vendors-
  *
  * ## Operator step — nothing in this file enforces it
  *
- * This migration cannot gate on the classification flag: it is applied in the
- * same `applySchema` pass as the rest of the chain, while
- * `INGEST_AI_CLASSIFICATION_ENABLED` defaults to `false` and ramps later. So the
- * MV exists *before* the ramp, and the hour the flag reaches 100% is only
- * partially classified while looking perfectly healthy — every counter in it is
- * internally consistent and nothing in the row says so.
+ * This migration cannot gate on the classifying gateway being live: it is
+ * applied in the same `applySchema` pass as the rest of the chain, possibly
+ * while pre-classification gateway binaries still serve traffic. So the MV can
+ * exist *before* classified rows flow, and the hour the last old binary drains
+ * is only partially classified while looking perfectly healthy — every counter
+ * in it is internally consistent and nothing in the row says so.
  *
- * 1. Apply this migration (any time — before the ramp the MV is a no-op, since
- *    `WHERE AiVendor != ''` matches no unclassified row).
- * 2. Ramp `INGEST_AI_CLASSIFICATION_ENABLED` to 100% across the whole fleet.
+ * 1. Apply this migration (any time — under a pre-classification binary the MV
+ *    is a no-op, since `WHERE AiVendor != ''` matches no unclassified row).
+ * 2. Deploy the classifying gateway (ingest classifies unconditionally; there
+ *    is no flag) across the whole fleet.
  * 3. Set `AI_VENDORS_ROLLUP_ENABLEMENT_HOUR` (see `../../ai`) to the **first hour
- *    boundary strictly after the ramp completed**. That hour — not MV creation —
- *    is the first hour the rollup covers in full.
+ *    boundary strictly after the rollout completed**. That hour — not MV
+ *    creation — is the first hour the rollup covers in full.
  * 4. Only then may any reader show a number from this table.
  *
- * Rollback is migration-window-only (production has no flag): flag off ⇒ spans
- * arrive with `AiVendor = ''` and the rollup stops accreting because the MV's
- * `WHERE` no longer matches. Re-enabling repeats steps 2–3 and records a *fresh*
- * boundary; readers treat the hours between the two as unclassified.
+ * Rollback is migration-window-only: reverting to a pre-classification binary
+ * means spans arrive with `AiVendor = ''` and the rollup stops accreting because
+ * the MV's `WHERE` no longer matches. Rolling forward again repeats steps 2–3
+ * and records a *fresh* boundary; readers treat the hours between the two as
+ * unclassified.
  *
  * ## Org deletion and retention
  *
