@@ -106,6 +106,13 @@ const sendHttp = Effect.fn("AlertDelivery.http", { kind: "client" })(function* (
 		...(Option.isSome(parsed) && !spec.sensitivePath ? { "url.path": parsed.value.pathname } : undefined),
 	})
 
+	// Detached from `runtime` on purpose: `runtime.fetchFn(...)` is a METHOD
+	// call, so workerd's global `fetch` runs with `this === runtime` and throws
+	// "Illegal invocation". Only the unguarded transports (slack-bot, pagerduty)
+	// hit it — the guarded ones already launder `fetch` through `safeFetch`,
+	// which calls it as a bare local.
+	const { fetchFn } = runtime
+
 	const response = yield* Effect.tryPromise({
 		try: () =>
 			spec.guarded
@@ -113,9 +120,9 @@ const sendHttp = Effect.fn("AlertDelivery.http", { kind: "client" })(function* (
 						method: "POST",
 						headers: { ...spec.headers },
 						body: spec.body,
-						fetchFn: runtime.fetchFn,
+						fetchFn,
 					})
-				: runtime.fetchFn(spec.url, {
+				: fetchFn(spec.url, {
 						method: "POST",
 						headers: { ...spec.headers },
 						body: spec.body,
