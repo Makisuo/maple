@@ -51,16 +51,23 @@ struct RootView: View {
 	}
 }
 
+/// Three tabs, in the order the questions get asked: is anything wrong
+/// (Home), which service (Services), why (Alerts). Everything the web app does
+/// beyond those stays on the web.
 struct MainTabView: View {
-	@Environment(SessionController.self) private var session
+	@Environment(AppNavigation.self) private var navigation
 
 	var body: some View {
-		TabView {
-			Tab("Services", systemImage: "square.stack.3d.up") {
+		@Bindable var navigation = navigation
+		TabView(selection: $navigation.tab) {
+			Tab("Home", systemImage: "waveform.path.ecg", value: AppTab.home) {
+				HomeView()
+			}
+			Tab("Services", systemImage: "square.stack.3d.up", value: AppTab.services) {
 				ServicesListView()
 			}
-			Tab("Issues", systemImage: "exclamationmark.triangle") {
-				IssuesListView()
+			Tab("Alerts", systemImage: "bell", value: AppTab.alerts) {
+				AlertsHubView()
 			}
 		}
 	}

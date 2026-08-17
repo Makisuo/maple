@@ -9,9 +9,39 @@ public typealias ErrorIssueActor = Components.Schemas.ErrorIssueActor
 public typealias ErrorIncident = Components.Schemas.ErrorIncident
 public typealias ErrorIssueSampleTrace = Components.Schemas.ErrorIssueSampleTrace
 public typealias ErrorIssueServiceCount = Components.Schemas.ErrorIssueServiceCount
+public typealias ErrorIssueTimeseriesPoint = Components.Schemas.ErrorIssueTimeseriesPoint
 public typealias IssueSeverity = Components.Schemas._MapleIssueSeverity
 public typealias WorkflowState = Components.Schemas._MapleWorkflowState
 public typealias IssueKind = Components.Schemas._MapleIssueKind
+
+public typealias AlertIncident = Components.Schemas.AlertIncident
+public typealias AlertRule = Components.Schemas.AlertRule
+public typealias AlertCheck = Components.Schemas.AlertCheck
+public typealias AlertDelivery = Components.Schemas.AlertDelivery
+public typealias AlertSeverity = Components.Schemas._MapleAlertSeverity
+public typealias AlertSignalType = Components.Schemas._MapleAlertSignalType
+public typealias AlertComparator = Components.Schemas._MapleAlertComparator
+public typealias AlertIncidentStatus = Components.Schemas._MapleAlertIncidentStatus
+public typealias AlertCheckStatus = Components.Schemas._MapleAlertCheckStatus
+public typealias AlertEventType = Components.Schemas._MapleAlertEventType
+public typealias AlertDeliveryStatus = Components.Schemas._MapleAlertDeliveryStatus
+public typealias AlertDestinationType = Components.Schemas._MapleAlertDestinationType
+
+public typealias AnomalyIncident = Components.Schemas.AnomalyIncident
+public typealias AnomalyIncidentTimeseries = Components.Schemas.AnomalyIncidentTimeseries
+public typealias AnomalyTimeseriesBucket = Components.Schemas.AnomalyTimeseriesBucket
+public typealias AnomalyIncidentStatus = Components.Schemas._MapleAnomalyIncidentStatus
+public typealias AnomalyIncidentSeverity = Components.Schemas._MapleAnomalyIncidentSeverity
+public typealias AnomalySignalType = Components.Schemas._MapleAnomalySignalType
+
+public typealias TraceTimeseriesResult = Components.Schemas.TraceTimeseriesResult
+public typealias TraceBreakdownResult = Components.Schemas.TraceBreakdownResult
+public typealias TraceAggregation = Components.Schemas.TraceTimeseriesParams.AggregationPayload
+public typealias TraceBreakdownAggregation = Components.Schemas.TraceBreakdownParams.AggregationPayload
+public typealias TraceBreakdownGroup = Components.Schemas.TraceBreakdownParams.GroupByPayload
+public typealias TimeseriesSeries = Components.Schemas.TimeseriesSeries
+public typealias TimeseriesValuePoint = Components.Schemas.TimeseriesValuePoint
+public typealias BreakdownItem = Components.Schemas.BreakdownItem
 
 /// `IssueSeverity` widened with the `unset` sentinel the list filter accepts.
 /// The pruned spec merges the contract's `IssueSeverity | "unset"` union into
@@ -80,12 +110,31 @@ public protocol MapleAPI: Sendable {
 		-> Page<ErrorIssue>
 	func issue(id: String) async throws -> ErrorIssueDetail
 	func issueCountsByService() async throws -> [ErrorIssueServiceCount]
+
+	// Alerts — see MapleClient+Alerts.swift
+	func alertIncidents(status: AlertIncidentStatus?, ruleId: String?, limit: Int, cursor: String?) async throws
+		-> Page<AlertIncident>
+	func alertIncident(id: String) async throws -> AlertIncident
+	func alertRules(limit: Int, cursor: String?) async throws -> Page<AlertRule>
+	func alertRule(id: String) async throws -> AlertRule
+	func alertRuleChecks(ruleId: String, groupKey: String?, since: Date?, limit: Int) async throws -> [AlertCheck]
+	func alertDeliveries(incidentId: String, limit: Int) async throws -> [AlertDelivery]
+
+	// Anomalies — see MapleClient+Alerts.swift
+	func anomalyIncidents(status: AnomalyIncidentStatus?, serviceName: String?, window: ResolvedTimeWindow?, limit: Int, cursor: String?)
+		async throws -> Page<AnomalyIncident>
+	func anomalyIncident(id: String) async throws -> AnomalyIncident
+	func anomalyIncidentTimeseries(id: String) async throws -> AnomalyIncidentTimeseries
+
+	// Telemetry — see MapleClient+Telemetry.swift
+	func traceTimeseries(_ request: TraceTimeseriesRequest) async throws -> TraceTimeseriesResult
+	func traceBreakdown(_ request: TraceBreakdownRequest) async throws -> TraceBreakdownResult
 }
 
 /// The live client: generated operations, wrapped so call sites see plain
 /// values and one error type.
 public struct MapleClient: MapleAPI {
-	private let client: Client
+	let client: Client
 
 	/// - Parameters:
 	///   - tokens: supplies the Clerk session JWT.
@@ -178,7 +227,7 @@ public struct MapleClient: MapleAPI {
 	///
 	/// `ErrorMappingMiddleware` already converts non-2xx responses, so what
 	/// reaches here is a transport failure or a 2xx body that failed to decode.
-	private func mapping<T>(_ work: () async throws -> T) async throws -> T {
+	func mapping<T>(_ work: () async throws -> T) async throws -> T {
 		do {
 			return try await work()
 		} catch let error as MapleAPIError {

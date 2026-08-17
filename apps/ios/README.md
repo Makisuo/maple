@@ -1,7 +1,15 @@
 # Maple for iOS
 
-A native SwiftUI client for Maple: Clerk sign-in, services, and error issues,
-reading the **v2 public API**.
+A native SwiftUI client for Maple, reading the **v2 public API**. Three tabs,
+in the order the questions get asked — see [`PRODUCT.md`](PRODUCT.md):
+
+- **Home** — is anything wrong right now? Status headline, open alerts with
+  the rule's own last hour, services needing attention, what's new in 24h.
+- **Services** — the list, and a detail with golden-signal sparklines, scoped
+  alerts, issues, and top failing/slowest operations.
+- **Alerts** — the triage hub: incidents (with a "why" detail: what the rule
+  saw, what changed on the service, likely cause, timeline), error issues,
+  anomalies.
 
 ## Getting started
 
@@ -32,11 +40,12 @@ Xcode will ask once to trust the swift-openapi-generator build-tool plugin.
 ```
 project.yml                  XcodeGen source of truth; Maple.xcodeproj is generated + gitignored
 Config/                      xcconfigs; Secrets.xcconfig is gitignored
-Maple/App                    entry point, auth gate, build-time config
+Maple/App                    entry point, auth gate, build-time config, Route
 Maple/Auth                   token provider, session state machine, org picker
 Maple/DesignSystem           tokens, type scale, service colours, shared primitives
-Maple/Features               services and issues screens
-Maple/Components             LoadableView, formatting
+Maple/Features               Home, Services, Alerts (incidents/anomalies), Issues
+Maple/Components             LoadableView, formatting, Sparkline, alert formatting
+Maple/Fixtures               FixtureAPI — the app without Clerk or a network
 Maple/Resources/Fonts        Geist + Geist Mono (SIL OFL)
 Packages/MapleAPI            the generated API client — builds and tests with plain `swift test`
 ```
@@ -45,6 +54,22 @@ Everything that is worth unit-testing lives in `Packages/MapleAPI`, which has no
 UIKit, no simulator, and no signing requirement. That is why CI runs
 `swift test` there first: it fails in about a minute rather than after a full
 app build.
+
+## Running without a sign-in
+
+Set `MAPLE_FIXTURES=1` in the scheme's environment (Product → Scheme → Edit →
+Run → Arguments), or from the CLI:
+
+```bash
+SIMCTL_CHILD_MAPLE_FIXTURES=1 xcrun simctl launch booted com.maple.mobile
+```
+
+`FixtureAPI` then stands in for the network with one believable organization
+(nine services, a critical incident, a warning, issues, an anomaly), generated
+relative to now so timestamps always read as current, and the session is pinned
+to `.ready` without touching Clerk. This is how screens get built and
+screenshotted; it is not a test double for logic — that stays in
+`Packages/MapleAPI`.
 
 ## The API client is generated
 
@@ -68,8 +93,10 @@ uses three idioms that generate unusable Swift:
 | `anyOf: [number, enum["NaN", …]]` | a struct wrapping a `Double` | `Double` |
 | `allOf: [{minLength}, {pattern}]` | struct with `value1`/`value2` | `String` |
 
-It also prunes to the five operations the app calls and collapses every error
-response to a single `MapleErrorEnvelope`. Result: 21 schemas instead of 480.
+It also prunes to the operations the app calls, merges the per-annotation-site
+copies of a domain enum (`_maple_AlertSignalType_2` → `_maple_AlertSignalType`)
+so one wire enum is one Swift enum, and collapses every error response to a
+single `MapleErrorEnvelope`. Result: ~75 schemas instead of 480.
 
 Adding a screen means adding its `operationId` to `IOS_OPERATIONS` in that
 script and re-running it. A removed or renamed operation makes the script exit

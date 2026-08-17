@@ -67,40 +67,24 @@ final class IssuesListModel {
 	var canLoadMore: Bool { hasMore }
 }
 
-struct IssuesListView: View {
+/// The Errors segment of the Alerts hub. Content only — the hub owns the
+/// `NavigationStack`, the org switcher, and the destinations; this view
+/// contributes its rows and its own filter menu.
+struct IssuesListContent: View {
 	@Environment(SessionController.self) private var session
 	@State private var model: IssuesListModel?
 
 	var body: some View {
-		NavigationStack {
-			ZStack {
-				Token.background.ignoresSafeArea()
-				if let model {
-					content(model)
-				} else {
-					SkeletonList(rowHeight: 56)
-				}
-			}
-			.navigationTitle("Issues")
-			.navigationBarTitleDisplayMode(.inline)
-			.toolbar {
-				// The organization occupies the title slot: it is the context for
-				// everything on screen, the tab bar already names the screen, and
-				// a leading item here gets collapsed into an overflow menu — which
-				// is where a switcher goes to be undiscoverable.
-				ToolbarItem(placement: .principal) {
-					OrganizationSwitcherButton(fallbackTitle: "Issues")
-				}
-				if let model {
-					ToolbarItem(placement: .topBarTrailing) {
-						FilterMenu(model: model)
+		Group {
+			if let model {
+				content(model)
+					.toolbar {
+						ToolbarItem(placement: .topBarTrailing) {
+							FilterMenu(model: model)
+						}
 					}
-				}
-			}
-			.navigationDestination(for: IssueRoute.self) { route in
-				switch route {
-				case .detail(let id): IssueDetailView(issueID: id)
-				}
+			} else {
+				SkeletonList(rowHeight: 56)
 			}
 		}
 		.task(id: session.dataGeneration) {
@@ -124,7 +108,7 @@ struct IssuesListView: View {
 			ScrollView {
 				LazyVStack(spacing: 0) {
 					ForEach(issues, id: \.id) { issue in
-						NavigationLink(value: IssueRoute.detail(id: issue.id)) {
+						NavigationLink(value: Route.issue(id: issue.id)) {
 							IssueRow(issue: issue, showsService: true)
 						}
 						.buttonStyle(RowButtonStyle())

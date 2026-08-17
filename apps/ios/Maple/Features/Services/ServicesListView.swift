@@ -112,9 +112,7 @@ struct ServicesListView: View {
 					}
 				}
 			}
-			.navigationDestination(for: String.self) { name in
-				ServiceDetailView(serviceName: name, window: model?.window ?? .default)
-			}
+			.mapleDestinations()
 		}
 		// Re-runs on org switch, which is what clears one org's services before
 		// the next org's arrive.
@@ -144,7 +142,7 @@ struct ServicesListView: View {
 						.padding(.top, 48)
 					} else {
 						ForEach(visible, id: \.name) { service in
-							NavigationLink(value: service.name) {
+							NavigationLink(value: Route.service(name: service.name, window: model.window)) {
 								ServiceRow(
 									service: service,
 									openIssues: model.openIssueCounts[service.name] ?? 0
