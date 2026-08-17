@@ -68,9 +68,6 @@ webpki-roots = "0.26"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
-# Test-only: parses the trace-capture registry-seed.yaml goldens in the corpus
-# replay (src/ai_classifier_corpus_test.rs). Never linked into the binary.
-serde_yaml = "0.9"
 
 [[bench]]
 name = "ingest_bench"

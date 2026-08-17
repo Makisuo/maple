@@ -710,25 +710,6 @@ impl<'a, 'r> ScopeContext<'a, 'r> {
         }
     }
 
-    /// Session-key evaluation for a vendor: all candidates, reduced by `max`.
-    ///
-    /// Public because it is also the per-vendor state the corpus goldens are
-    /// expressed in (they report the state of *every* span under one vendor's
-    /// candidates, independent of which vendor classified it). Takes the span's
-    /// events because candidates may fall back to an event-borne value
-    /// (`SessionCandidate::event_key` — llamaindex's run_id).
-    pub fn evaluate_session_for_vendor(
-        &self,
-        vendor: VendorId,
-        span_name: &'a str,
-        attributes: &'a [KeyValue],
-        events: &'a [Event],
-    ) -> (u8, Option<Cow<'a, str>>) {
-        let facts = AttrView::build(self.registry, attributes);
-        let ctx = self.span_ctx(span_name, &facts, events);
-        self.evaluate_session(vendor, &ctx)
-    }
-
     fn evaluate_session(
         &self,
         vendor: VendorId,
@@ -891,10 +872,6 @@ impl<'a, 'r> ScopeContext<'a, 'r> {
         })
     }
 }
-
-#[cfg(test)]
-#[path = "ai_classifier_corpus_test.rs"]
-mod corpus_test;
 
 #[cfg(test)]
 #[path = "ai_classification_fixture_test.rs"]

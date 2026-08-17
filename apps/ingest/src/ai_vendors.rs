@@ -536,9 +536,8 @@ pub const CREWAI: VendorDef = VendorDef {
             // scope-stripped crewai span under `using_session()` still carries
             // `session.id` (the context attributes are read at span end
             // regardless of scope naming). `detect_crewai` rather than
-            // `|_| true` because the per-vendor golden histograms evaluate
-            // crewai's candidates over EVERY span of a capture, including the
-            // sibling instrumentor's.
+            // `|_| true` so a bare `session.id` on a span crewai did not claim
+            // can never read as crewai session authority.
             authority: detect_crewai,
             require_non_empty: true,
             reject_decoy_values: false,
