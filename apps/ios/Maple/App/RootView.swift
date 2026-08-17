@@ -15,8 +15,10 @@ struct RootView: View {
 		Group {
 			switch session.phase {
 			case .loading:
-				ProgressView()
-					.controlSize(.large)
+				// A bare canvas rather than a spinner while Clerk restores the
+				// session — DESIGN.md bans default spinners, and this resolves in
+				// milliseconds from the keychain.
+				Token.background.ignoresSafeArea()
 
 			case .signedOut:
 				AuthView()
@@ -34,7 +36,10 @@ struct RootView: View {
 		.task(id: clerkStateKey) {
 			await session.refresh()
 		}
+		.background(Token.background)
+		.tint(Token.primary)
 		.animation(.default, value: session.phase)
+		.onAppear { Typo.assertAvailable() }
 	}
 
 	/// Everything about Clerk's state that should re-derive the phase.

@@ -6,7 +6,7 @@ import SwiftUI
 final class ServiceDetailModel {
 	private(set) var state: LoadState<Service> = .loading
 	/// This service's open issues. Fetching them here is what makes the screen
-	/// worth opening — metrics alone are already on the list row.
+	/// worth opening — the metrics alone are already on the list row.
 	private(set) var issues: [ErrorIssue] = []
 
 	let serviceName: String
@@ -22,8 +22,8 @@ final class ServiceDetailModel {
 		self.session = session
 	}
 
-	func load(showSpinner: Bool = true) async {
-		if showSpinner && !state.hasContent { state = .loading }
+	func load(showPlaceholder: Bool = true) async {
+		if showPlaceholder && !state.hasContent { state = .loading }
 
 		do {
 			let resolved = window.resolve()
@@ -41,7 +41,7 @@ final class ServiceDetailModel {
 		} catch is CancellationError {
 		} catch let error as MapleAPIError {
 			if await session.handle(error) {
-				await load(showSpinner: false)
+				await load(showPlaceholder: false)
 			} else {
 				state = .failed(error)
 			}
@@ -59,7 +59,8 @@ struct ServiceDetailView: View {
 	@State private var model: ServiceDetailModel?
 
 	var body: some View {
-		Group {
+		ZStack {
+			Token.background.ignoresSafeArea()
 			if let model {
 				LoadableView(
 					state: model.state,
@@ -67,85 +68,141 @@ struct ServiceDetailView: View {
 					emptyMessage: "This service reported nothing in \(model.window.phrase).",
 					retry: { Task { await model.load() } }
 				) { service in
-					detail(service, model: model)
+					ServiceDetailContent(service: service, issues: model.issues, window: model.window)
 				}
-				.refreshable { await model.load(showSpinner: false) }
+				.refreshable { await model.load(showPlaceholder: false) }
 			} else {
-				ProgressView()
+				SkeletonList()
 			}
 		}
-		.navigationTitle(serviceName)
 		.navigationBarTitleDisplayMode(.inline)
+		.toolbar {
+			ToolbarItem(placement: .principal) {
+				HStack(spacing: 6) {
+					ServiceDot(serviceName: serviceName, size: 8)
+					Text(serviceName)
+						.font(Typo.monoTitle)
+						.foregroundStyle(Token.foreground)
+						.lineLimit(1)
+					if let service = model?.state.value {
+						HealthDot(
+							health: ServiceHealth(
+								errorRate: service.errorRate,
+								p95LatencyMs: service.p95LatencyMs
+							)
+						)
+					}
+				}
+			}
+		}
 		.task(id: session.dataGeneration) {
 			let model =
-				model ?? ServiceDetailModel(serviceName: serviceName, window: window, api: session.api, session: session)
+				model
+				?? ServiceDetailModel(
+					serviceName: serviceName, window: window, api: session.api, session: session
+				)
 			self.model = model
 			await model.load()
 		}
 	}
+}
 
-	@ViewBuilder
-	private func detail(_ service: Service, model: ServiceDetailModel) -> some View {
-		List {
-			Section("Golden signals") {
-				LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
-					MetricTile(
-						label: "Error rate",
-						value: Format.percent(service.errorRate),
-						tint: errorRateTint(service.errorRate)
-					)
-					MetricTile(label: "Throughput", value: Format.throughput(service.throughput))
-					MetricTile(label: "p50", value: Format.milliseconds(service.p50LatencyMs))
-					MetricTile(label: "p95", value: Format.milliseconds(service.p95LatencyMs))
-					MetricTile(label: "p99", value: Format.milliseconds(service.p99LatencyMs))
-					MetricTile(label: "Errors", value: Format.count(service.errorCount))
-				}
-				.listRowInsets(EdgeInsets())
-				.listRowBackground(Color.clear)
-			}
+private struct ServiceDetailContent: View {
+	let service: Service
+	let issues: [ErrorIssue]
+	let window: TimeWindow
 
-			Section("Volume") {
-				LabeledContent("Spans", value: Format.count(service.spanCount))
-				if service.hasSampling {
-					LabeledContent("Sampling") {
-						// Sampled data means the raw counts understate reality;
-						// saying so is more useful than silently scaling.
-						Text("1 in \(Format.count(service.samplingWeight))")
-							.foregroundStyle(.secondary)
+	var body: some View {
+		ScrollView {
+			VStack(alignment: .leading, spacing: 24) {
+				section("Golden signals") {
+					StatGrid(columns: 2) {
+						StatTile(
+							label: "Error rate",
+							value: Format.errorRate(service.errorRate),
+							tint: Tone.errorRate(service.errorRate)
+						)
+						StatTile(label: "Throughput", value: Format.throughput(service.throughput))
+						StatTile(
+							label: "p50",
+							value: Format.latency(service.p50LatencyMs),
+							tint: Tone.latency(service.p50LatencyMs, scale: .p50)
+						)
+						StatTile(
+							label: "p95",
+							value: Format.latency(service.p95LatencyMs),
+							tint: Tone.latency(service.p95LatencyMs, scale: .p95)
+						)
+						StatTile(
+							label: "p99",
+							value: Format.latency(service.p99LatencyMs),
+							tint: Tone.latency(service.p99LatencyMs, scale: .p99)
+						)
+						StatTile(label: "Errors", value: Format.count(service.errorCount))
 					}
-					LabeledContent("Estimated spans", value: Format.count(service.tracedThroughput))
+					.padding(.horizontal, 16)
 				}
-			}
 
-			if !service.deploymentEnvironments.isEmpty || !service.serviceNamespaces.isEmpty {
-				Section("Scope") {
-					if !service.deploymentEnvironments.isEmpty {
-						LabeledContent("Environments", value: service.deploymentEnvironments.joined(separator: ", "))
+				section("Volume") {
+					VStack(spacing: 0) {
+						DetailRow("Spans", Format.count(service.spanCount))
+						Hairline()
+						if service.hasSampling {
+							// Sampled data means the raw counts understate reality;
+							// saying so is more useful than silently scaling.
+							DetailRow("Sampling", "1 in \(Format.count(service.samplingWeight))")
+							Hairline()
+							DetailRow("Est. throughput", Format.throughput(service.tracedThroughput))
+							Hairline()
+						}
+						if !service.deploymentEnvironments.isEmpty {
+							DetailRow("Environments", service.deploymentEnvironments.joined(separator: ", "))
+							Hairline()
+						}
+						if !service.serviceNamespaces.isEmpty {
+							DetailRow("Namespaces", service.serviceNamespaces.joined(separator: ", "))
+						}
 					}
-					if !service.serviceNamespaces.isEmpty {
-						LabeledContent("Namespaces", value: service.serviceNamespaces.joined(separator: ", "))
-					}
+					.padding(.horizontal, 16)
 				}
-			}
 
-			Section("Open issues") {
-				if model.issues.isEmpty {
-					Text("No open issues in \(model.window.phrase).")
-						.foregroundStyle(.secondary)
-						.font(.callout)
-				} else {
-					ForEach(model.issues, id: \.id) { issue in
-						NavigationLink(value: IssueRoute.detail(id: issue.id)) {
-							IssueRow(issue: issue, showsService: false)
+				section("Open issues") {
+					if issues.isEmpty {
+						Text("Nothing needs attention in \(window.phrase).")
+							.font(Typo.small)
+							.foregroundStyle(Token.mutedForeground)
+							.padding(.horizontal, 16)
+					} else {
+						VStack(spacing: 0) {
+							ForEach(issues, id: \.id) { issue in
+								NavigationLink(value: IssueRoute.detail(id: issue.id)) {
+									IssueRow(issue: issue, showsService: false)
+								}
+								.buttonStyle(RowButtonStyle())
+								Hairline()
+							}
 						}
 					}
 				}
 			}
+			.padding(.vertical, 16)
 		}
+		.scrollContentBackground(.hidden)
 		.navigationDestination(for: IssueRoute.self) { route in
 			switch route {
 			case .detail(let id): IssueDetailView(issueID: id)
 			}
+		}
+	}
+
+	@ViewBuilder
+	private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content)
+		-> some View
+	{
+		VStack(alignment: .leading, spacing: 10) {
+			SectionLabel(title)
+				.padding(.horizontal, 16)
+			content()
 		}
 	}
 }

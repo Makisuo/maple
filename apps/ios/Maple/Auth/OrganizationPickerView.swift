@@ -14,57 +14,88 @@ struct OrganizationPickerView: View {
 
 	var body: some View {
 		NavigationStack {
-			Group {
+			ZStack {
+				Token.background.ignoresSafeArea()
+
 				if session.memberships.isEmpty {
-					ContentUnavailableView {
-						Label("No organizations", systemImage: "building.2")
-					} description: {
-						Text(
-							"Your account isn't a member of any Maple organization yet. Ask an admin to invite you, then sign in again."
-						)
-					} actions: {
-						Button("Sign out") {
-							Task { await session.signOut() }
-						}
-					}
+					noMemberships
 				} else {
-					List {
-						Section {
-							ForEach(session.memberships, id: \.id) { membership in
-								Button {
-									isSwitching = true
-									Task {
-										await session.select(organizationId: membership.organization.id)
-										isSwitching = false
-									}
-								} label: {
-									OrganizationRow(membership: membership)
-								}
-								.disabled(isSwitching)
-							}
-						} footer: {
-							if let error = session.organizationError {
-								Text(error).foregroundStyle(.red)
-							}
-						}
-					}
+					picker
 				}
 			}
-			.navigationTitle("Choose organization")
+			.navigationTitle("Organization")
+			.navigationBarTitleDisplayMode(.inline)
 			.toolbar {
 				if !session.memberships.isEmpty {
 					ToolbarItem(placement: .topBarTrailing) {
-						Button("Sign out") {
+						Button {
 							Task { await session.signOut() }
+						} label: {
+							Text("Sign out")
+								.font(Typo.smallMedium)
+								.foregroundStyle(Token.mutedForeground)
 						}
 					}
 				}
 			}
-			.overlay {
-				if isSwitching {
-					ProgressView().controlSize(.large)
+		}
+		.tint(Token.primary)
+	}
+
+	private var picker: some View {
+		ScrollView {
+			VStack(alignment: .leading, spacing: 0) {
+				SectionLabel("Choose an organization")
+					.padding(.horizontal, 16)
+					.padding(.top, 8)
+					.padding(.bottom, 12)
+
+				ForEach(session.memberships, id: \.id) { membership in
+					Button {
+						isSwitching = true
+						Task {
+							await session.select(organizationId: membership.organization.id)
+							isSwitching = false
+						}
+					} label: {
+						OrganizationRow(membership: membership)
+					}
+					.buttonStyle(RowButtonStyle())
+					.disabled(isSwitching)
+					Hairline()
+				}
+
+				if let error = session.organizationError {
+					Text(error)
+						.font(Typo.small)
+						.foregroundStyle(Token.destructive)
+						.padding(16)
 				}
 			}
+		}
+		.scrollContentBackground(.hidden)
+		.disabled(isSwitching)
+		.opacity(isSwitching ? 0.5 : 1)
+	}
+
+	private var noMemberships: some View {
+		VStack(spacing: 16) {
+			EmptyStateView(
+				title: "No organizations",
+				message:
+					"This account isn't a member of any Maple organization yet. Ask an admin to invite you, then sign in again."
+			)
+			Button {
+				Task { await session.signOut() }
+			} label: {
+				Text("Sign out")
+					.font(Typo.smallMedium)
+					.foregroundStyle(Token.foreground)
+					.padding(.horizontal, 14)
+					.frame(height: 32)
+					.background(Token.muted, in: .rect(cornerRadius: Token.Radius.md))
+			}
+			.buttonStyle(.plain)
 		}
 	}
 }
@@ -73,24 +104,29 @@ private struct OrganizationRow: View {
 	let membership: OrganizationMembership
 
 	var body: some View {
-		HStack(spacing: 12) {
-			Image(systemName: "building.2.fill")
-				.foregroundStyle(.tint)
-				.frame(width: 28)
+		HStack(spacing: 10) {
+			// Organizations get the same categorical colour treatment services
+			// do, so the mark is meaningful rather than decorative.
+			ServiceDot(serviceName: membership.organization.id, size: 10)
 
-			VStack(alignment: .leading, spacing: 2) {
+			VStack(alignment: .leading, spacing: 3) {
 				Text(membership.organization.name)
-					.font(.body)
-					.foregroundStyle(.primary)
+					.font(Typo.bodyMedium)
+					.foregroundStyle(Token.foreground)
+					.lineLimit(1)
 				Text(membership.role.replacingOccurrences(of: "org:", with: "").capitalized)
-					.font(.caption)
-					.foregroundStyle(.secondary)
+					.font(Typo.tiny)
+					.foregroundStyle(Token.mutedForeground)
 			}
 
 			Spacer()
+
 			Image(systemName: "chevron.right")
-				.font(.caption.weight(.semibold))
-				.foregroundStyle(.tertiary)
+				.font(.system(size: 11, weight: .semibold))
+				.foregroundStyle(Token.mutedForeground.opacity(0.6))
 		}
+		.padding(.horizontal, 16)
+		.padding(.vertical, 14)
+		.contentShape(.rect)
 	}
 }
