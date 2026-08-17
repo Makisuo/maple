@@ -548,7 +548,7 @@ jobs:
                   src/services/warehouse/web-analytics-parity.clickhouse.e2e.test.ts
 
             # Rollup correctness only shows up against a real server: counter
-            # identities, HLL merge grouping, and merged-part behavior all render
+            # identities, HLL merge grouping and merged-part behavior all render
             # as plausible numbers when broken.
             - name: Verify AI vendor rollup reader contract and parity
               env:

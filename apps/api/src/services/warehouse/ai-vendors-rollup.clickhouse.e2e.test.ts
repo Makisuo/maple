@@ -1,9 +1,9 @@
 // Reader contract and raw-vs-rollup parity for `service_ai_vendors_hourly`.
 //
 // The rollup's whole value is a coverage ratio a customer is shown, and every
-// way it can be wrong is silent: an HLL state that merges across the wrong
-// grouping still returns a plausible percentage, a counter identity that stops
-// holding still renders, and a reader that assumes one row per key returns the
+// way it can be wrong is silent: an HLL state merged across the wrong grouping
+// still returns a plausible percentage, a counter identity that stops holding
+// still renders, and a reader that assumes one row per key returns the
 // last-inserted part's numbers instead of the total. None of that is visible in
 // SQL-text tests, so this suite runs the real migrations against a real server,
 // seeds spans whose correct answers are known by construction, and checks the
@@ -11,17 +11,16 @@
 //
 // The failure modes it is shaped to catch:
 //
-//   - The plan's CI identity breaking:
+//   - The eligibility identity breaking:
 //     `EligibleSpanCount = KeyAbsent + KeyInvalid + KeySubSession + KeySession`.
 //     A state enum that grows a value, or a `countIf` predicate that drifts,
 //     shows up here and nowhere else.
-//   - A reader assuming merged parts. The seed deliberately writes each key
-//     across several INSERTs so every key has multiple unmerged rows; a query
-//     without `GROUP BY` reads low, and `FINAL` is not an escape hatch.
-//   - Per-vendor coverage being mistaken for the headline. The two-vendor trace
-//     (litellm + langchain, key on langchain only) is the plan's worked example:
-//     merging TracesWithKey/TracesTotal across vendor rows gives 100%, while
-//     litellm's own row reads 0% on a fully resolvable trace.
+//   - A reader assuming merged parts. The seed writes each key across several
+//     INSERTs so every key has multiple unmerged rows; a query without
+//     `GROUP BY` reads low, and `FINAL` is not an escape hatch.
+//   - Per-vendor coverage mistaken for the headline: the two-vendor trace
+//     (litellm + langchain, key on langchain only) reads 100% merged across
+//     vendor rows and 0% on litellm's own row.
 //   - `WeightedSpanCount` losing its floor. A span with SampleRate 0 must
 //     contribute 1.0, not 0 and not an infinity.
 //   - The MV grouping on something other than the stored `AiRollupHour` — a
@@ -49,9 +48,8 @@ const DAY_MS = 86_400_000
 /**
  * Anchored to *now*, not a fixed date. `traces` carries a 30-day TTL enforced at
  * insert time, so a hardcoded calendar date silently drops every seeded row once
- * it ages past the horizon — both sides of every comparison below go empty and
- * the suite passes by comparing nothing to nothing. `the seed lands` exists to
- * make that impossible.
+ * it ages past the horizon and the suite passes by comparing nothing to nothing.
+ * The `the seed lands` case exists to make that impossible.
  */
 const BASE_MS = Math.floor((Date.now() - 3 * DAY_MS) / HOUR_MS) * HOUR_MS
 
@@ -77,9 +75,8 @@ interface SeedSpan {
 	readonly sampleRate?: number
 	/**
 	 * Raw span `Timestamp`, when it must diverge from `hourIndex`. Defaults to a
-	 * minute into `hourIndex`'s hour — which is what made every other row's
-	 * `toStartOfHour(Timestamp)` identical to its `AiRollupHour`, and the hour
-	 * grouping untestable.
+	 * minute into `hourIndex`'s hour, which makes every other row's
+	 * `toStartOfHour(Timestamp)` identical to its `AiRollupHour`.
 	 */
 	readonly timestampMs?: number
 }
@@ -107,9 +104,9 @@ const span = (
 
 /**
  * A session-key hash above 2^53. UInt64 identity values corrupt as JS numbers,
- * which is why the schema notes require `toString()` in the SELECT — this row
- * makes a regression there a failing assertion rather than a rounding artifact
- * nobody notices.
+ * which is why the schema notes require `toString()` in the SELECT; this row
+ * turns a regression there into a failing assertion rather than a rounding
+ * artifact nobody notices.
  */
 const BIG_HASH = "9007199254740993"
 
@@ -117,8 +114,8 @@ const BIG_HASH = "9007199254740993"
 const SKEWED_TIMESTAMP_MS = Date.UTC(2038, 0, 19, 3, 14, 7)
 
 const SEED_SPANS: ReadonlyArray<SeedSpan> = [
-	// ── The plan's worked case: one trace, two vendors, key on one of them.
-	// Merged across vendor rows the trace is covered; litellm's own row reads 0%.
+	// ── One trace, two vendors, key on one of them. Merged across vendor rows the
+	// trace is covered; litellm's own row reads 0%.
 	span(ORG_A, "checkout", "langchain", "trace-mix", 0, 6, { keyHash: "101" }),
 	span(ORG_A, "checkout", "litellm", "trace-mix", 0, 3),
 
@@ -128,8 +125,8 @@ const SEED_SPANS: ReadonlyArray<SeedSpan> = [
 	span(ORG_A, "checkout", "openai", "trace-dup", 1, 6, { keyHash: "202" }),
 
 	// ── Every state, so the eligibility identity is exercised rather than
-	// asserted over an all-state-6 population. 0/1/2 are AI spans that were never
-	// session-key eligible: they count in SpanCount but not EligibleSpanCount.
+	// asserted over an all-state-6 population. 0/1/2 were never session-key
+	// eligible: they count in SpanCount but not EligibleSpanCount.
 	span(ORG_A, "checkout", "openai", "trace-s0", 0, 0),
 	span(ORG_A, "checkout", "openai", "trace-s1", 0, 1),
 	span(ORG_A, "checkout", "openai", "trace-s2", 0, 2),
@@ -150,15 +147,12 @@ const SEED_SPANS: ReadonlyArray<SeedSpan> = [
 	span(ORG_B, "checkout", "langchain", "trace-b2", 1, 4, { rulesVersion: 9 }),
 	span(ORG_B, "worker", "litellm", "trace-b3", 2, 5, { keyHash: "707", rulesVersion: 8 }),
 
-	// ── The clock-skewed client. Its own service and vendor group, so it
-	// perturbs no per-group assertion, but its raw Timestamp is in 2038 while
-	// the writer's clamp put its AiRollupHour inside the fixture. This is the
-	// only row in the seed for which `toStartOfHour(Timestamp)` and
-	// `AiRollupHour` differ — without it, an MV "simplified" to group on
-	// `toStartOfHour(Timestamp)` passes the hour assertions, the anti-join and
-	// the raw-vs-rollup parity check (whose RAW_READ_SQL groups on
-	// AiRollupHour), and production opens a 20380119 partition whose 400-day TTL
-	// never fires.
+	// ── The clock-skewed client, in its own service and vendor group so it
+	// perturbs no per-group assertion. Its raw Timestamp is in 2038 while the
+	// writer's clamp put its AiRollupHour inside the fixture — the only seed row
+	// where the two differ. Without it, an MV "simplified" to group on
+	// `toStartOfHour(Timestamp)` passes every assertion here and production opens
+	// a 20380119 partition whose 400-day TTL never fires.
 	span(ORG_A, "skewed", "openai", "trace-skew", 0, 6, {
 		keyHash: "909",
 		timestampMs: SKEWED_TIMESTAMP_MS,
@@ -175,8 +169,7 @@ const SEED_NON_AI: ReadonlyArray<SeedSpan> = [
 	span(ORG_A, "checkout", "", "trace-plain-2", 0, 0),
 	span(ORG_A, "worker", "", "trace-plain-3", 1, 0),
 	span(ORG_B, "checkout", "", "trace-plain-4", 1, 0),
-	// A non-AI span carrying a session-key state is the awkward one: if the MV
-	// ever filtered on state instead of vendor, this row would appear.
+	// If the MV ever filtered on state instead of vendor, this row would appear.
 	span(ORG_A, "checkout", "", "trace-plain-5", 0, 6, { keyHash: "808" }),
 ]
 
@@ -184,9 +177,9 @@ const SEED_NON_AI: ReadonlyArray<SeedSpan> = [
  * Three INSERT batches over overlapping keys. Each lands its own part, so every
  * rollup key ends up with several unmerged rows — which is what makes the
  * "aggregate, never assume one row per key" assertions non-vacuous. The overlap
- * also means duplicated *spans*: counters see them twice (correctly — they are
- * distinct SpanIds only in name, and at-least-once counters are the documented
- * behaviour of every Maple rollup), while `uniq` states do not.
+ * also duplicates *spans*: counters see them twice, which is correct, since
+ * at-least-once counters are the documented behaviour of every Maple rollup;
+ * `uniq` states do not.
  */
 const AI_BATCHES: ReadonlyArray<ReadonlyArray<SeedSpan>> = [
 	SEED_SPANS.slice(0, 8),
@@ -268,10 +261,10 @@ GROUP BY OrgId, ServiceName, AiVendor, Hour
 ORDER BY OrgId, ServiceName, AiVendor, Hour`
 
 /**
- * The same numbers computed straight off `traces`. Identical expressions to the
- * MV's, but evaluated at read time over the raw spans — so agreement means the
- * MV's write-time evaluation and the state/merge round-trip preserved every
- * value, and disagreement localizes to whichever column moved.
+ * The same numbers computed straight off `traces` — the MV's expressions, but
+ * evaluated at read time over the raw spans. Agreement means the write-time
+ * evaluation and the state/merge round-trip preserved every value; disagreement
+ * localizes to whichever column moved.
  */
 const RAW_READ_SQL = `SELECT
   OrgId,
@@ -301,8 +294,7 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 		await clickhouseExec(`CREATE DATABASE ${database}`)
 		await applyRealMigrations(database)
 
-		// Three separate INSERTs over overlapping keys, on purpose: each one lands
-		// its own part, so every rollup key has several unmerged rows and a reader
+		// Three separate INSERTs on purpose: each lands its own part, so a reader
 		// that skips the GROUP BY reads low instead of accidentally passing.
 		for (const batch of AI_BATCHES) await insertBatch(batch)
 		await insertBatch(SEED_NON_AI)
@@ -332,7 +324,7 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 		)
 
 		// State types are not cast-compatible, so a widened or narrowed value type
-		// is a silent data loss rather than an error at write time.
+		// is silent data loss rather than an error at write time.
 		const columns = await runJson(
 			`SELECT name, type
 			 FROM system.columns
@@ -364,8 +356,8 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 			"the AI span seed did not land — check the rows against the traces 30-day TTL",
 		)
 
-		// If merges have already collapsed everything, the no-FINAL assertions below
-		// would pass without proving anything.
+		// If merges already collapsed everything, the no-FINAL assertions below
+		// pass without proving anything.
 		const parts = await runJson(
 			`SELECT count() AS rows, uniqExact((OrgId, ServiceName, AiVendor, Hour)) AS keys
 			 FROM service_ai_vendors_hourly`,
@@ -378,8 +370,8 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 	})
 
 	it("keeps the eligibility identity: Eligible = Absent + Invalid + SubSession + Session", async () => {
-		// The plan's CI assertion. Checked per group and in total, because a
-		// per-group break can cancel out in the total and vice versa.
+		// Checked per group and in total, because a per-group break can cancel out
+		// in the total and vice versa.
 		const violations = await runJson(
 			`SELECT count() AS n FROM (
 			   ${ROLLUP_READ_SQL}
@@ -396,8 +388,8 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 			 FROM service_ai_vendors_hourly`,
 		)
 		assert.strictEqual(num(totals[0]?.eligible), num(totals[0]?.parts))
-		// States 0-2 are AI spans that were never eligible; if this were an equality
-		// the fixture would have stopped covering the ineligible half of the enum.
+		// States 0-2 are AI spans that were never eligible; an equality here would
+		// mean the fixture stopped covering the ineligible half of the enum.
 		assert.isBelow(
 			num(totals[0]?.eligible),
 			num(totals[0]?.spans),
@@ -415,8 +407,8 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 		)
 		assert.strictEqual(num(emptyVendor[0]?.n), 0, "non-AI spans produced rollup rows")
 
-		// The state-6 non-AI span in the fixture: it must not have contributed a
-		// session, which is what an MV filtering on state instead of vendor would do.
+		// The fixture's state-6 non-AI span must not have contributed a session,
+		// which is what an MV filtering on state instead of vendor would do.
 		const sessions = await runJson(
 			`SELECT uniqCombinedMerge(12)(SessionsApprox) AS n
 			 FROM service_ai_vendors_hourly`,
@@ -451,10 +443,9 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 	})
 
 	it("groups on the stored AiRollupHour, not the span timestamp", async () => {
-		// The row that makes this test non-vacuous: `trace-skew`'s raw Timestamp
-		// is in 2038 while its stored AiRollupHour is hour 0. Asserted first, so a
-		// future seed edit that quietly removes the divergence fails here rather
-		// than turning the assertions below back into tautologies.
+		// `trace-skew`'s raw Timestamp is in 2038 while its stored AiRollupHour is
+		// hour 0. Asserted first, so a seed edit that removes the divergence fails
+		// here rather than turning the assertions below into tautologies.
 		const skew = await runJson(
 			`SELECT toString(toDateTime(Timestamp)) AS ts, toString(AiRollupHour) AS h
 			 FROM traces WHERE TraceId = 'trace-skew' LIMIT 1`,
@@ -486,8 +477,8 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 	})
 
 	it("reads trace coverage by merging across vendor rows, not per vendor", async () => {
-		// The plan's worked example. `trace-mix` carries a langchain span with a
-		// session key and a litellm span without one.
+		// `trace-mix` carries a langchain span with a session key and a litellm span
+		// without one.
 		const perVendor = await runJson(
 			`SELECT
 			   AiVendor,
@@ -504,8 +495,7 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 			[
 				["langchain", 1, 1],
 				// The diagnostic-only reading: 0% on a trace that is in fact fully
-				// resolvable. Asserting it pins *why* per-vendor ratios are not the
-				// headline, so nobody promotes them later.
+				// resolvable. Pinned so nobody promotes per-vendor ratios later.
 				["litellm", 1, 0],
 			],
 		)
@@ -526,8 +516,7 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 
 	it("counts a trace once per hour and once overall when it straddles hours", async () => {
 		// `trace-dup` appears in two hours. Each hour sees it; merging the hours
-		// must not double it — uniq merge is set union, which is the property the
-		// cross-shard note in the plan also depends on.
+		// must not double it, since uniq merge is set union.
 		const perHour = await runJson(
 			`SELECT toString(Hour) AS h, uniqCombinedMerge(12)(TracesTotal) AS total
 			 FROM service_ai_vendors_hourly
@@ -561,8 +550,8 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 		)
 		assert.strictEqual(String(hashes[0]?.h), BIG_HASH, "the >2^53 hash was corrupted on the raw table")
 
-		// And it is a distinct session, not collapsed into a neighbour by a
-		// float round-trip through the HLL state.
+		// And it is a distinct session, not collapsed into a neighbour by a float
+		// round-trip through the HLL state.
 		const sessions = await runJson(
 			`SELECT uniqCombinedMerge(12)(SessionsApprox) AS n
 			 FROM service_ai_vendors_hourly
@@ -582,8 +571,8 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 			 FROM service_ai_vendors_hourly
 			 WHERE OrgId = ${quote(ORG_B)} AND ServiceName = 'checkout' AND AiVendor = 'langchain'`,
 		)
-		// Two spans written by v8 and v9 in the same group: the range is visible
-		// rather than collapsed to one number.
+		// Two spans written by v8 and v9 in the same group: the range stays visible
+		// rather than collapsing to one number.
 		assert.strictEqual(num(versions[0]?.lo), 8)
 		assert.strictEqual(num(versions[0]?.hi), 9)
 		// For MV-written rows this always equals RowRulesVersionMax; divergence is
@@ -604,9 +593,9 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 	})
 
 	it("does not need FINAL, and a reader that skips the GROUP BY reads low", async () => {
-		// Stated as a property rather than a style rule: the contract is that
-		// aggregating without FINAL is correct, and that the unaggregated read is
-		// wrong — which is what makes the GROUP BY mandatory rather than decorative.
+		// Stated as a property rather than a style rule: aggregating without FINAL
+		// is correct and the unaggregated read is wrong, which is what makes the
+		// GROUP BY mandatory rather than decorative.
 		const aggregated = await runJson("SELECT sum(SpanCount) AS n FROM service_ai_vendors_hourly")
 		const naive = await runJson(
 			`SELECT SpanCount AS n

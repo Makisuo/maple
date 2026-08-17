@@ -56,9 +56,8 @@ describe("ClickHouse migrations", () => {
 		// managed pipeline rather than reject every direct insert.
 		expect(migration_0016_ai_classification_columns.requiredForIngest).toBe(true)
 
-		// 0017 adds a read-path rollup and touches nothing the gateway inserts, so
-		// the ingest gate stays at 16. Bumping it would un-ready every BYO-CH org
-		// over a table their ingest path never writes.
+		// 0017 touches nothing the gateway inserts, so the ingest gate stays at 16.
+		// Bumping it would un-ready every BYO-CH org over a table they never write.
 		expect(migration_0017_service_ai_vendors_hourly.requiredForIngest).toBe(false)
 		expect(clickHouseSchemaVersion).toBe("16")
 	})
@@ -145,7 +144,7 @@ describe("ClickHouse migrations", () => {
 		// 400 days against a 30-day source — deliberate asymmetry, see the migration doc.
 		expect(sql).toContain("TTL Hour + INTERVAL 400 DAY")
 
-		// State types are not cast-compatible, so the value types are pinned to the
+		// State types are not cast-compatible, so value types are pinned to the
 		// source columns: TraceId is String, AiSessionKeyHash is UInt64.
 		expect(sql).toContain("TracesTotal AggregateFunction(uniqCombined(12), String)")
 		expect(sql).toContain("TracesWithKey AggregateFunction(uniqCombined(12), String)")
@@ -163,18 +162,16 @@ describe("ClickHouse migrations", () => {
 		// Adjusted-count convention with the zero/unset floor.
 		expect(sql).toContain("sum(if(SampleRate > 0, SampleRate, 1.0)) AS WeightedSpanCount")
 
-		// Correctness here depends on the source rows having been classified, not
-		// on the view having existed, so there is nothing safe to backfill. The
-		// boundary is covered by an operator step, not by this migration's ordering
-		// — see 0017's header for what is and is not enforced.
+		// Nothing safe to backfill: correctness depends on the source rows having
+		// been classified, not on the view having existed. The boundary is an
+		// operator step — see 0017's header.
 		expect(sql).not.toContain("POPULATE")
 		expect(migration_0017_service_ai_vendors_hourly.statements.filter(isBackfill)).toHaveLength(0)
 	})
 
 	it("keeps the migrated AI rollup view identical to the deployed one", () => {
 		// A BYO cluster migrated to 17 and a freshly bootstrapped one must compute
-		// the same coverage ratio. Both bodies come from one exported constant;
-		// this asserts neither copy drifted away from it.
+		// the same coverage ratio, so both bodies come from one exported constant.
 		const migrationMv = migration_0017_service_ai_vendors_hourly.statements.find((statement) =>
 			statement.includes("CREATE MATERIALIZED VIEW"),
 		)
@@ -187,13 +184,10 @@ describe("ClickHouse migrations", () => {
 	})
 
 	it("keeps the AI rollup MV projection in the target's column order", () => {
-		// An MV writes into its target BY NAME: each SELECT alias must equal a
-		// target column name, and an alias absent from the target raises
-		// THERE_IS_NO_COLUMN. Because the view runs synchronously inside the INSERT
-		// pipeline, that failure hard-fails every INSERT into `traces` — so
-		// renaming a target column without renaming the alias is an ingestion
-		// outage, not a silent transposition. Matching order is a readability
-		// convention this test keeps, not the safety property.
+		// An MV writes into its target BY NAME, and an alias absent from the target
+		// raises THERE_IS_NO_COLUMN inside the INSERT pipeline — so renaming a
+		// target column without its alias is an ingestion outage on `traces`, not a
+		// silent transposition. Matching order is a readability convention.
 		const expectedOrder = [
 			"OrgId",
 			"ServiceName",

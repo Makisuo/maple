@@ -129,23 +129,18 @@ const prepareTarget = async (context: MigrationModuleContext, state: V6ToV7State
 }
 
 /**
- * Purely additive: one new table and the view that fills it. Nothing existing is
- * touched, so — like v3 -> v4 and unlike v5 -> v6 — bootstrapping the v7 DDL is
- * the whole migration. Every other object's `CREATE … IF NOT EXISTS` is a no-op
- * against the cloned store; only `service_ai_vendors_hourly` and its MV are new.
- * There is deliberately no explicit ALTER list here: the objects are *created*,
- * not modified, so the generated DDL is already the single source of truth and a
- * hand-copied CREATE would be a second one.
+ * Purely additive: one new table and the view that fills it, so bootstrapping
+ * the v7 DDL is the whole migration. Every other object's
+ * `CREATE … IF NOT EXISTS` is a no-op against the cloned store. No explicit
+ * ALTER list, because the generated DDL is already the single source of truth.
  *
  * `service_ai_vendors_hourly` starts empty and stays that way for the store's
- * existing history — a materialized view is an insert trigger, so it only sees
- * spans written after this point. That is the same position a deployed cluster
- * is in after ClickHouse migration 0017, and it is why that migration ships no
- * POPULATE either. Backfilling here would mean rewriting a store we have just
- * promised to clone byte-for-byte, and it would be wrong on top of that: rows
- * written before the ingest classifier ran carry `AiVendor = ''`, so a backfill
- * would produce not a partial rollup but an empty one, indistinguishable from
- * "this store genuinely has no AI spans".
+ * existing history — an MV is an insert trigger, so it only sees spans written
+ * after this point, the same position ClickHouse migration 0017 leaves a
+ * deployed cluster in. Backfilling would rewrite a store just promised
+ * byte-for-byte, and would be wrong anyway: rows written before the ingest
+ * classifier ran carry `AiVendor = ''`, so it would produce an empty rollup
+ * indistinguishable from "this store genuinely has no AI spans".
  */
 const apply = async (context: MigrationModuleContext): Promise<V6ToV7Progress> =>
 	context.openTarget(() => ({ installed: true }), {
@@ -207,14 +202,11 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 			"The source of the new view is neither read nor rewritten; the rollup fills from spans written after the migration.",
 	},
 	{
-		// Created empty and filled forward, never backfilled — twice over. The
-		// store was just promised byte-for-byte, and the pre-migration rows would
-		// not produce a usable rollup anyway: local mode has no ingest classifier,
-		// so every existing span carries AiVendor = '' and the view's WHERE
-		// excludes all of them. Unlike web_events, this table does NOT converge
-		// with its source's horizon — it keeps 400 days against traces' 30 — so
-		// what converges is the *overlap*: past 30 days the raw spans are gone and
-		// the rollup is the only record, complete from the migration forward.
+		// Created empty and filled forward, never backfilled: existing spans carry
+		// AiVendor = '' and the view's WHERE excludes them all. Unlike web_events
+		// this table does NOT converge with its source's horizon — 400 days against
+		// traces' 30 — so past 30 days the rollup is the only record, complete from
+		// the migration forward.
 		name: "service_ai_vendors_hourly",
 		classification: "derived",
 		disposition: "rebuild-within-retention-horizon",

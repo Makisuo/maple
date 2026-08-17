@@ -159,9 +159,9 @@ describe("current local schema identity", () => {
 			"idx_scope_name",
 		])
 
-		// v7 is exactly v6 plus the AI vendor discovery rollup and its view — no
-		// column touched anywhere else. Asserted as a name delta against the frozen
-		// v6 manifest so a stray table can't ride along on this version.
+		// v7 is exactly v6 plus the AI vendor rollup and its view. Asserted as a
+		// name delta against the frozen v6 manifest so a stray table can't ride
+		// along on this version.
 		const v6Names = new Set(LOCAL_SCHEMA_V6_MANIFEST.objects.map((object) => object.name))
 		expect(
 			LOCAL_SCHEMA_V7_MANIFEST.objects
@@ -173,9 +173,8 @@ describe("current local schema identity", () => {
 		)
 		expect(aiVendors?.engine).toBe("AggregatingMergeTree")
 		expect(aiVendors?.orderBy).toBe("(OrgId, ServiceName, AiVendor, Hour)")
-		// Daily partitions and a 400-day TTL against a 30-day source: the deliberate
-		// retention asymmetry, and the reason a rebuild can only repair closed days
-		// whose raw spans still exist.
+		// Daily partitions and a 400-day TTL against a 30-day source: a rebuild can
+		// only repair closed days whose raw spans still exist.
 		expect(aiVendors?.partitionBy).toBe("toYYYYMMDD(Hour)")
 		expect(aiVendors?.ttl).toBe("Hour + INTERVAL 400 DAY")
 		const aiVendorsView = LOCAL_SCHEMA_MANIFEST.objects.find(

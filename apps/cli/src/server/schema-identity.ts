@@ -70,8 +70,7 @@ export const LOCAL_SCHEMA_V5_MANIFEST_DIGEST = LOCAL_SCHEMA_V5_MANIFEST.digest
 export const LOCAL_SCHEMA_V6_SQL = schemaV6Sql
 export const LOCAL_SCHEMA_V6_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV6Sql)
 export const LOCAL_SCHEMA_V6_MANIFEST_DIGEST = LOCAL_SCHEMA_V6_MANIFEST.digest
-/** Immutable v7 DDL/manifest snapshot used by the v6 -> v7 module after the
- * generated current schema advances. */
+/** Immutable v7 DDL/manifest snapshot used by the v6 -> v7 module. */
 export const LOCAL_SCHEMA_V7_SQL = schemaV7Sql
 export const LOCAL_SCHEMA_V7_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV7Sql)
 export const LOCAL_SCHEMA_V7_MANIFEST_DIGEST = LOCAL_SCHEMA_V7_MANIFEST.digest

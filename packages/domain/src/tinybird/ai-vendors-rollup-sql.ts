@@ -1,19 +1,17 @@
 /**
- * The single definition of the `service_ai_vendors_hourly` rollup SELECT.
+ * The single definition of the `service_ai_vendors_hourly` rollup SELECT, shared
+ * by the materialized view (`serviceAiVendorsHourlyMv`) and ClickHouse migration
+ * 0017, which creates the same view on an already-deployed cluster. Two copies
+ * would be two chances for the deployed MV and the migrated one to disagree
+ * about what a coverage ratio means; the migration index test asserts they stay
+ * byte-identical.
  *
- * Shared by the materialized view (`serviceAiVendorsHourlyMv`) and ClickHouse
- * migration 0017, which creates the same view on an already-deployed cluster.
- * Two copies of this SELECT would be two chances for the deployed MV and the
- * migrated one to disagree about what a coverage ratio means; the migration
- * index test asserts they stay byte-identical.
- *
- * Column order matches `serviceAiVendorsHourly`'s schema order exactly. That is a
- * readability convention, not the safety property: ClickHouse writes an MV's
- * output into its target **by name**, so every alias here must equal a target
- * column name. An alias with no matching column raises THERE_IS_NO_COLUMN, and
- * because the view runs synchronously inside the INSERT pipeline that hard-fails
- * every INSERT into `traces` — rename a target column and you must rename the
- * alias in the same deploy.
+ * ClickHouse writes an MV's output into its target **by name**, so every alias
+ * here must equal a target column name. An alias with no matching column raises
+ * THERE_IS_NO_COLUMN, and because the view runs synchronously inside the INSERT
+ * pipeline that hard-fails every INSERT into `traces` — rename a target column
+ * and you must rename the alias in the same deploy. Matching column *order* is
+ * only a readability convention.
  */
 export const SERVICE_AI_VENDORS_HOURLY_SELECT_SQL = `SELECT
   OrgId,

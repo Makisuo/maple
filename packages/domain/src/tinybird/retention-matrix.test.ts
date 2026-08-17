@@ -17,10 +17,9 @@ const RETENTION_DAYS = {
 	metrics_histogram: 90,
 	metrics_sum: 90,
 	service_address_resolutions_hourly: 365,
-	// The one 400-day tier, and deliberately so: a year-over-year vendor-adoption
-	// view needs the year *plus* slack, and the row count is a few thousand per
-	// org. It also outlives its 30-day source, which is the constraint that comes
-	// with the privilege — past the raw horizon these rows cannot be rebuilt.
+	// The one 400-day tier: a year-over-year vendor-adoption view needs the year
+	// plus slack, at a few thousand rows per org. It outlives its 30-day source,
+	// so past the raw horizon these rows cannot be rebuilt.
 	service_ai_vendors_hourly: 400,
 	service_external_edges_hourly: 365,
 	service_map_children: 30,
