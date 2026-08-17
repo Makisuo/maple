@@ -1,11 +1,13 @@
 import * as Integrations from "@maple/query-engine-integrations"
-import { formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-engine"
-import type {
-	HostInfraTimeseriesRequest,
-	NodeInfraTimeseriesRequest,
-	PodInfraTimeseriesRequest,
-	WorkloadInfraTimeseriesRequest,
+import { CH, formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-engine"
+import {
+	QueryEngineValidationError,
+	type HostInfraTimeseriesRequest,
+	type NodeInfraTimeseriesRequest,
+	type PodInfraTimeseriesRequest,
+	type WorkloadInfraTimeseriesRequest,
 } from "@maple/domain/http"
+import { Effect, Schema } from "effect"
 
 /**
  * Helpers shared between the query-engine handlers and the app-side query
@@ -159,3 +161,31 @@ export const hostMetricSpec = (metric: HostInfraTimeseriesRequest["metric"]) => 
 			}
 	}
 }
+
+const isProductEventsFunnelError = Schema.is(CH.ProductEventsFunnelError)
+
+/**
+ * A funnel definition the query builder cannot compile is a caller error, not a
+ * warehouse one. The builders validate synchronously and throw
+ * `ProductEventsFunnelError`; the registry's `compile` would turn that into a
+ * defect (a 500 with no remediation), so the definition is checked here first
+ * and the reason lands in the 400 envelope. Anything else thrown is a genuine
+ * defect and stays one. Shared by the internal endpoint and the share API's
+ * `product_events_funnel` route plan.
+ */
+export const validateFunnelDefinition = (
+	opts: CH.ProductEventsFunnelOpts,
+): Effect.Effect<void, QueryEngineValidationError> =>
+	Effect.suspend(() => {
+		try {
+			CH.productEventsFunnelQuery(opts)
+			return Effect.void
+		} catch (error) {
+			if (isProductEventsFunnelError(error)) {
+				return Effect.fail(
+					new QueryEngineValidationError({ message: error.message, details: [error.reason] }),
+				)
+			}
+			return Effect.die(error)
+		}
+	})

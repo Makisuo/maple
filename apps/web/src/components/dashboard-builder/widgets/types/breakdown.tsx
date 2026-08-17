@@ -1,5 +1,5 @@
 import { WIDGET_TYPES } from "@maple/domain/http"
-import { makeQueryDataSource } from "@maple/widgets/dashboard"
+import { makeProductEventsFunnelDataSource, makeQueryDataSource } from "@maple/widgets/dashboard"
 
 import {
 	ArrowTrendDownIcon,
@@ -31,9 +31,15 @@ import { BREAKDOWN_TAIL_LIMIT } from "@maple/query-engine/query-builder"
 import type { BuildDataSourceContext } from "@/lib/query-builder/widget-builder-shared"
 import {
 	hasActiveGroupBy,
+	hasFunnelSteps,
 	histogramValueColumn,
 	parsePositiveNumber,
 } from "@/lib/query-builder/widget-builder-shared"
+import {
+	DEFAULT_FUNNEL_KEY_BY,
+	DEFAULT_FUNNEL_WINDOW_SECONDS,
+	completedSteps,
+} from "@/components/funnels/definition"
 import type { WidgetDataSource } from "@/components/dashboard-builder/types"
 import { chartPresetPreview } from "@/components/dashboard-builder/widgets/types/preset-preview"
 
@@ -85,17 +91,78 @@ export const pieWidgetType: WidgetTypeDefinition = {
 	buildDisplay: ({ base }) => base,
 }
 
+/**
+ * Two funnels share one visualization. Without product-event steps it is the
+ * original: a group-by breakdown drawn as descending stages. With them
+ * (`display.funnel.steps`) it is a conversion funnel over `product_events`,
+ * fetched through the `product_events_funnel` route instead of the query set —
+ * same renderer, same `{ name, value }` rows, one bar per step. The definition
+ * is persisted on the display block (additive: older readers of the document
+ * see a funnel with extra keys they ignore) and mirrored into the route params
+ * so the fetch path never has to read the display.
+ */
 export const funnelWidgetType: WidgetTypeDefinition = {
 	meta: WIDGET_TYPES.funnel,
 	// A funnel is a descending series of stages.
 	icon: ArrowTrendDownIcon,
 	Renderer: FunnelWidget,
 	queryEditor: "builder",
-	ConfigPanel: () => <WidgetSettings.QueryOptions />,
+	ConfigPanel: () => (
+		<>
+			<WidgetSettings.Divider />
+			<WidgetSettings.FunnelSteps />
+			<WidgetSettings.QueryOptions />
+		</>
+	),
 	presets: funnelPresets,
 	PresetPreview: chartPresetPreview("query-builder-funnel"),
-	buildDataSource: breakdownDataSource,
-	buildDisplay: ({ base }) => base,
+
+	initialState: (widget) => {
+		const stored = widget.display.funnel
+		return {
+			funnel: {
+				steps: [...(stored?.steps ?? [])],
+				keyBy: stored?.keyBy ?? DEFAULT_FUNNEL_KEY_BY,
+				windowSeconds: stored?.windowSeconds ?? DEFAULT_FUNNEL_WINDOW_SECONDS,
+				...(stored?.breakdownBy !== undefined ? { breakdownBy: stored.breakdownBy } : undefined),
+			},
+		}
+	},
+
+	ownsDataSource: hasFunnelSteps,
+
+	buildDataSource: (ctx) =>
+		hasFunnelSteps(ctx.state)
+			? makeProductEventsFunnelDataSource(ctx.state.funnel, ctx.sharedTransform)
+			: breakdownDataSource(ctx),
+
+	buildDisplay: ({ base, state, widget }) =>
+		extendDisplay(base, {
+			funnel: hasFunnelSteps(state)
+				? {
+						...widget.display.funnel,
+						steps: state.funnel.steps,
+						keyBy: state.funnel.keyBy,
+						windowSeconds: state.funnel.windowSeconds,
+						...(state.funnel.breakdownBy !== undefined
+							? { breakdownBy: state.funnel.breakdownBy }
+							: undefined),
+					}
+				: // Steps removed: drop the definition, keep the rendering flags.
+					widget.display.funnel && widget.display.funnel.showStepPercent !== undefined
+					? { showStepPercent: widget.display.funnel.showStepPercent }
+					: undefined,
+		}),
+
+	validate: ({ state }) => {
+		if (!hasFunnelSteps(state)) return null
+		const incomplete = state.funnel.steps.findIndex((step) => completedSteps([step]).length === 0)
+		if (incomplete !== -1) return `Step ${incomplete + 1} needs an event name, page path or session value`
+		if (state.funnel.steps.some((step, index) => index > 0 && step.kind === "session")) {
+			return "A session step is only valid as step 1"
+		}
+		return null
+	},
 }
 
 /**

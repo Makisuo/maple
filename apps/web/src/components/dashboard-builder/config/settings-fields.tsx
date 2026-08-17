@@ -16,9 +16,16 @@ import { PANEL_TYPES, fromPanelType, toPanelType } from "@/lib/query-builder/pan
 import {
 	STAT_AGGREGATES,
 	toSeriesFieldOptions,
+	type FunnelWidgetDraft,
 	type QueryBuilderWidgetState,
 	type StatAggregate,
 } from "@/lib/query-builder/widget-builder-shared"
+import { formatWarehouseDateTime } from "@maple/query-engine"
+import { Result } from "@/lib/effect-atom"
+import { productEventNamesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { FunnelStepBuilder } from "@/components/funnels/funnel-step-builder"
+import { FUNNEL_KEY_BY_OPTIONS, FUNNEL_WINDOW_OPTIONS } from "@/components/funnels/definition"
 
 // The settings rail's vocabulary.
 //
@@ -680,10 +687,111 @@ function WidgetTimeRange() {
 }
 
 /**
+ * The funnel widget's product-event definition: steps, what to count, and the
+ * conversion window. Leaving the steps empty keeps the widget on its query set
+ * (a group-by breakdown drawn as a funnel); adding one switches it to the funnel
+ * endpoint and the query builder on the left stops being what it fetches.
+ */
+function FunnelSteps() {
+	const { state, set } = useSettings()
+	const {
+		state: { resolvedTimeRange },
+	} = useDashboardTimeRange()
+	const funnel = state.funnel
+	const usesSteps = funnel.steps.length > 0
+
+	// Suggestions over the dashboard's window; a fresh org's builder shows none
+	// and the inputs stay free-text.
+	const eventNamesResult = useRetainedRefreshableResultValue(
+		productEventNamesResultAtom({
+			data: {
+				startTime:
+					resolvedTimeRange?.startTime ?? formatWarehouseDateTime(Date.now() - 7 * 24 * 3_600_000),
+				endTime: resolvedTimeRange?.endTime ?? formatWarehouseDateTime(Date.now()),
+				limit: 200,
+			},
+		}),
+	)
+	const eventNames = Result.builder(eventNamesResult)
+		.onSuccess((rows) =>
+			rows.data
+				.filter((row) => row.kind !== "navigation")
+				.map((row) => ({ name: row.eventName, count: row.count })),
+		)
+		.orElse(() => [])
+
+	const update = (patch: Partial<FunnelWidgetDraft>) => set({ funnel: { ...funnel, ...patch } })
+
+	return (
+		<>
+			<Field label="Funnel steps">
+				<p className="text-[11px] text-muted-foreground">
+					{usesSteps
+						? "Counting product events per step. The query set on the left is not used."
+						: "Leave empty to draw the query's group-by rows as a funnel, or add product-event steps."}
+				</p>
+				<FunnelStepBuilder
+					steps={funnel.steps}
+					onChange={(steps) => update({ steps: [...steps] })}
+					eventNames={eventNames}
+					compact
+				/>
+			</Field>
+			{usesSteps ? (
+				<>
+					<Field label="Count">
+						<Segments
+							value={funnel.keyBy}
+							onSelect={(keyBy) => update({ keyBy })}
+							options={FUNNEL_KEY_BY_OPTIONS.map((option) => ({
+								value: option.value,
+								label: option.label,
+							}))}
+						/>
+					</Field>
+					<Field label="Conversion window">
+						<Select
+							items={Object.fromEntries(
+								FUNNEL_WINDOW_OPTIONS.map((option) => [String(option.value), option.label]),
+							)}
+							value={String(funnel.windowSeconds)}
+							onValueChange={(value) => {
+								const seconds = Number(value)
+								if (Number.isFinite(seconds) && seconds > 0)
+									update({ windowSeconds: seconds })
+							}}
+						>
+							<SelectTrigger className="w-full">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{FUNNEL_WINDOW_OPTIONS.map((option) => (
+									<SelectItem key={option.value} value={String(option.value)}>
+										{option.label}
+									</SelectItem>
+								))}
+								{FUNNEL_WINDOW_OPTIONS.every(
+									(option) => option.value !== funnel.windowSeconds,
+								) ? (
+									<SelectItem value={String(funnel.windowSeconds)}>
+										{funnel.windowSeconds}s
+									</SelectItem>
+								) : null}
+							</SelectContent>
+						</Select>
+					</Field>
+				</>
+			) : null}
+		</>
+	)
+}
+
+/**
  * The rail's field vocabulary. A panel type's `ConfigPanel` composes these; none
  * of them takes the widget state as a prop.
  */
 export const WidgetSettings = {
+	FunnelSteps,
 	Divider,
 	Name,
 	Description,

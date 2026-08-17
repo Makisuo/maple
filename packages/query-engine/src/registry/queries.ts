@@ -46,6 +46,7 @@ import { makeTimeRangeCachePolicy, timeRangeCache } from "../runtime/query-engin
 import { defineQuery } from "./query-definition"
 
 export { logsCount, logsTimeseries } from "./logs"
+export { productEventsFunnel, productEventsFunnelBreakdown, productEventNames } from "./product-events"
 
 /**
  * Declarative compile, execution, and cache policy. Handlers retain response

@@ -14,7 +14,7 @@ import {
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
-const WebAnalyticsFilterFields = {
+export const WebAnalyticsFilterFields = {
 	host: Schema.optional(Schema.String),
 	pagePath: Schema.optional(Schema.String),
 	referrerHost: Schema.optional(Schema.String),
@@ -29,7 +29,7 @@ const WebAnalyticsFilterFields = {
 	visitorType: Schema.optional(Schema.Literals(["new", "returning"])),
 } as const
 
-const TimeWindowFields = {
+export const TimeWindowFields = {
 	startTime: WarehouseDateTimeString,
 	endTime: WarehouseDateTimeString,
 } as const

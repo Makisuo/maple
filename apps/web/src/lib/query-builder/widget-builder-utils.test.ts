@@ -76,6 +76,7 @@ function makeState(): QueryBuilderWidgetState {
 		gaugeMax: "",
 		sparklineEnabled: false,
 		markdownContent: "",
+		funnel: { steps: [], keyBy: "person", windowSeconds: 86400 },
 	}
 }
 
@@ -271,6 +272,108 @@ describe("funnel/heatmap endpoint routing (MAP-49)", () => {
 			])
 			expect(queryFields(dataSource).defaultLimit).toBeUndefined()
 		}
+	})
+})
+
+describe("product-event funnel widget", () => {
+	const funnelState = (): QueryBuilderWidgetState => ({
+		...makeState(),
+		visualization: "funnel",
+		chartId: "query-builder-funnel",
+		// A placeholder draft with no group-by — what the shared validation would
+		// reject if it ran; the funnel definition owns the source instead.
+		queries: [
+			{
+				...createQueryDraft(0),
+				groupBy: [],
+				addOns: { ...createQueryDraft(0).addOns, groupBy: false },
+			},
+		],
+		funnel: {
+			steps: [
+				{ kind: "page", pagePath: "/pricing" },
+				{ kind: "event", eventName: "signup_completed" },
+			],
+			keyBy: "visitor",
+			windowSeconds: 3600,
+		},
+	})
+
+	it("routes to the product_events_funnel route with the definition as params", () => {
+		const dataSource = buildWidgetDataSource(makeWidget(), funnelState(), ["A"])
+		expect(dataSource.kind).toBe("route")
+		if (dataSource.kind !== "route") throw new Error("expected a route")
+		expect(dataSource.endpoint).toBe("product_events_funnel")
+		expect(dataSource.params).toEqual({
+			steps: [
+				{ kind: "page", pagePath: "/pricing" },
+				{ kind: "event", eventName: "signup_completed" },
+			],
+			keyBy: "visitor",
+			windowSeconds: 3600,
+		})
+	})
+
+	it("stays a group-by breakdown without steps", () => {
+		const state = {
+			...funnelState(),
+			funnel: { steps: [], keyBy: "person" as const, windowSeconds: 86400 },
+		}
+		expect(routedTo(buildWidgetDataSource(makeWidget(), state, ["A"]))).toBe("breakdown")
+	})
+
+	it("persists the definition on display.funnel and reads it back", () => {
+		const state = funnelState()
+		const widget = {
+			...makeWidget(),
+			visualization: "funnel" as const,
+			display: { funnel: { showStepPercent: false } },
+		}
+		const display = buildWidgetDisplay(widget, state)
+		expect(display.funnel).toEqual({
+			showStepPercent: false,
+			steps: state.funnel.steps,
+			keyBy: "visitor",
+			windowSeconds: 3600,
+		})
+
+		const reopened = toInitialState({
+			...widget,
+			display,
+			dataSource: buildWidgetDataSource(widget, state, ["A"]),
+		})
+		expect(reopened.funnel).toEqual({ steps: state.funnel.steps, keyBy: "visitor", windowSeconds: 3600 })
+	})
+
+	it("drops the definition but keeps the rendering flag when the steps are removed", () => {
+		const state = {
+			...funnelState(),
+			funnel: { steps: [], keyBy: "person" as const, windowSeconds: 86400 },
+		}
+		const widget = {
+			...makeWidget(),
+			visualization: "funnel" as const,
+			display: {
+				funnel: { showStepPercent: true, steps: [{ kind: "event" as const, eventName: "x" }] },
+			},
+		}
+		expect(buildWidgetDisplay(widget, state).funnel).toEqual({ showStepPercent: true })
+	})
+
+	it("skips the group-by requirement and validates the steps instead", () => {
+		expect(validateQueries(funnelState())).toBeNull()
+		const blank = {
+			...funnelState(),
+			funnel: {
+				steps: [{ kind: "event" as const, eventName: "" }],
+				keyBy: "person" as const,
+				windowSeconds: 1,
+			},
+		}
+		expect(validateQueries(blank)).toContain("Step 1 needs")
+		// Without steps the ordinary rule is back: a funnel needs a group-by.
+		const plain = { ...funnelState(), funnel: { steps: [], keyBy: "person" as const, windowSeconds: 1 } }
+		expect(validateQueries(plain)).toContain("group-by")
 	})
 })
 

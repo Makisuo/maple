@@ -22,6 +22,7 @@ import {
 import { SessionAuthorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 import { warehouseHttpErrors } from "./warehouse"
+import { FunnelBreakdownBy, FunnelKeyBy, FunnelStep } from "@maple/query-model"
 
 // Dedicated endpoint schemas
 
@@ -1272,6 +1273,89 @@ export class WebAnalyticsBreakdownsResponse extends Schema.Class<WebAnalyticsBre
 	}),
 }) {}
 
+// Product events — funnels
+//
+// Step-based conversion funnels over `product_events` (browser page views and
+// `track()` calls, server- and mobile-emitted events). The definition schemas
+// (`FunnelStep`, `FunnelKeyBy`, `FunnelBreakdownBy`) live in
+// `@maple/query-model` so the dashboard widget schema (below `@maple/domain`)
+// can store the same shape; they are re-exported here for HTTP consumers. Every
+// request keeps the web-analytics filter surface so the `/analytics` sidebar
+// narrows a funnel exactly the way it narrows the page-view panels.
+
+export {
+	FUNNEL_MAX_STEPS,
+	FunnelBreakdownBy,
+	FunnelEventStep,
+	FunnelKeyBy,
+	FunnelPageStep,
+	FunnelSessionDimension,
+	FunnelSessionStep,
+	FunnelStep,
+} from "@maple/query-model"
+
+const ProductEventsFunnelFields = {
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	/** 1–10 steps, in order. */
+	steps: Schema.Array(FunnelStep),
+	keyBy: FunnelKeyBy,
+	/** The whole chain must complete within this many seconds of the step-1 event. */
+	windowSeconds: Schema.Number,
+	...WebAnalyticsFilterFields,
+} as const
+
+export class ProductEventsFunnelRequest extends Schema.Class<ProductEventsFunnelRequest>(
+	"ProductEventsFunnelRequest",
+)(ProductEventsFunnelFields) {}
+
+export class ProductEventsFunnelResponse extends Schema.Class<ProductEventsFunnelResponse>(
+	"ProductEventsFunnelResponse",
+)({
+	/** Exactly one row per step, in step order (1-based `step`). */
+	data: Schema.Array(Schema.Struct({ step: Schema.Number, count: Schema.Number })),
+}) {}
+
+export class ProductEventsFunnelBreakdownRequest extends Schema.Class<ProductEventsFunnelBreakdownRequest>(
+	"ProductEventsFunnelBreakdownRequest",
+)({
+	...ProductEventsFunnelFields,
+	breakdownBy: FunnelBreakdownBy,
+	/** Groups to keep, ranked by step-1 count. Default 10, max 20. */
+	limit: Schema.optional(Schema.Number),
+}) {}
+
+export class ProductEventsFunnelBreakdownResponse extends Schema.Class<ProductEventsFunnelBreakdownResponse>(
+	"ProductEventsFunnelBreakdownResponse",
+)({
+	data: Schema.Array(Schema.Struct({ group: Schema.String, step: Schema.Number, count: Schema.Number })),
+}) {}
+
+export class ProductEventNamesRequest extends Schema.Class<ProductEventNamesRequest>(
+	"ProductEventNamesRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	/** Default 100. */
+	limit: Schema.optional(Schema.Number),
+	...WebAnalyticsFilterFields,
+}) {}
+
+export class ProductEventNamesResponse extends Schema.Class<ProductEventNamesResponse>(
+	"ProductEventNamesResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			eventName: Schema.String,
+			/** `navigation` for page views, `custom` for `track()` calls, `screen` for mobile screens. */
+			kind: Schema.String,
+			count: Schema.Number,
+			sessions: Schema.Number,
+			persons: Schema.Number,
+		}),
+	),
+}) {}
+
 export class PodFacetsRequest extends Schema.Class<PodFacetsRequest>("PodFacetsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -2118,6 +2202,29 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("webAnalyticsBreakdowns", "/web-analytics-breakdowns", {
 			payload: WebAnalyticsBreakdownsRequest,
 			success: WebAnalyticsBreakdownsResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("productEventsFunnel", "/product-events-funnel", {
+			payload: ProductEventsFunnelRequest,
+			success: ProductEventsFunnelResponse,
+			// A funnel the builder rejects (no steps, >10, session step past step 1,
+			// non-positive window) is a 400, not a warehouse failure.
+			error: validatedQueryEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("productEventsFunnelBreakdown", "/product-events-funnel-breakdown", {
+			payload: ProductEventsFunnelBreakdownRequest,
+			success: ProductEventsFunnelBreakdownResponse,
+			error: validatedQueryEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("productEventNames", "/product-event-names", {
+			payload: ProductEventNamesRequest,
+			success: ProductEventNamesResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

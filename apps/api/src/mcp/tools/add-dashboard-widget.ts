@@ -21,6 +21,7 @@ import {
 	type DashboardWidget,
 } from "@/mcp/lib/dashboard-mutations"
 import { buildRawSqlDataSource, validateRawSqlMacro, withScalarReduction } from "@/mcp/lib/raw-sql-widget"
+import { makeProductEventsFunnelDataSource } from "@maple/widgets/dashboard"
 import { PANEL_TYPE_LIST_MD, resolvePanelType } from "@/mcp/lib/panel-type"
 import { formatRenderIssues, validateWidgetRenderability } from "@/mcp/lib/validate-widget-renderability"
 import {
@@ -77,7 +78,7 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 				"Bucket size in seconds for raw SQL timeseries. Only used when `sql` is set. If omitted the server auto-computes from the dashboard time range.",
 			),
 			data_source_json: optionalStringParam(
-				"JSON string for the widget's dataSource: { endpoint, params?, transform? }. Required for the structured-query path; ignored when `sql` is set. Use get_dashboard on an existing widget to see the exact shape.",
+				"JSON string for the widget's dataSource: { endpoint, params?, transform? }. Required for the structured-query path; ignored when `sql` is set, and derived for you when `display_json.funnel.steps` defines a product-event funnel. Use get_dashboard on an existing widget to see the exact shape.",
 			),
 			display_json: optionalStringParam(
 				"JSON string for the widget's display config: { title?, unit?, thresholds?, chartId?, columns?, ... }. Required for the structured-query path; defaults to `{}` for the raw-SQL path. Use get_dashboard on an existing widget to see the exact shape.",
@@ -106,16 +107,30 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 			time_range_json,
 		}) {
 			const useRawSql = typeof sql === "string" && sql.trim().length > 0
-			if (!useRawSql && (!data_source_json || !display_json)) {
-				return validationError(
-					"add_dashboard_widget requires either `sql` (raw ClickHouse SQL path) or both `data_source_json` and `display_json` (structured-query path).",
-					'{ "sql": "SELECT count() FROM logs WHERE $__orgFilter AND $__timeFilter(Timestamp)" }',
-				)
-			}
 
 			const decodedDisplay: DashboardWidget["display"] = display_json
 				? yield* decodeDisplayJson(display_json, TOOL)
 				: {}
+
+			// A product-event funnel is defined by `display_json.funnel.steps` alone:
+			// its data source is derived from that definition, so a caller need not
+			// (and should not) hand-assemble the route.
+			const funnelSteps = decodedDisplay.funnel?.steps
+			const funnelDefinition =
+				funnelSteps !== undefined && funnelSteps.length > 0
+					? {
+							steps: funnelSteps,
+							keyBy: decodedDisplay.funnel?.keyBy,
+							windowSeconds: decodedDisplay.funnel?.windowSeconds,
+						}
+					: undefined
+
+			if (!useRawSql && funnelDefinition === undefined && (!data_source_json || !display_json)) {
+				return validationError(
+					"add_dashboard_widget requires either `sql` (raw ClickHouse SQL path), both `data_source_json` and `display_json` (structured-query path), or a `display_json.funnel.steps` definition (product-event funnel).",
+					'{ "sql": "SELECT count() FROM logs WHERE $__orgFilter AND $__timeFilter(Timestamp)" }',
+				)
+			}
 
 			// One decision, one field. `panel_type` is preferred; `visualization`
 			// stays accepted so agents and transcripts written against the old
@@ -154,6 +169,14 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 					displayType,
 					granularitySeconds: granularity_seconds,
 				})
+			} else if (funnelDefinition !== undefined && !data_source_json) {
+				if (panel.visualization !== "funnel") {
+					return validationError(
+						`\`display_json.funnel.steps\` defines a product-event funnel, which only \`panel_type: "funnel"\` renders (got \`${panel.panelType}\`).`,
+						'{ "panel_type": "funnel", "display_json": "{\\"title\\":\\"Signup funnel\\",\\"funnel\\":{\\"steps\\":[{\\"kind\\":\\"page\\",\\"pagePath\\":\\"/pricing\\"},{\\"kind\\":\\"event\\",\\"eventName\\":\\"signup_completed\\"}]}}" }',
+					)
+				}
+				dataSource = makeProductEventsFunnelDataSource(funnelDefinition)
 			} else {
 				dataSource = yield* decodeDataSourceJson(data_source_json!, TOOL)
 				// A scalar tile reads `data[0].value`, so without a reduction it

@@ -61,6 +61,9 @@ import {
 	WebAnalyticsPageviewsResponse,
 	WebAnalyticsPagesResponse,
 	WebAnalyticsBreakdownsResponse,
+	ProductEventsFunnelResponse,
+	ProductEventsFunnelBreakdownResponse,
+	ProductEventNamesResponse,
 	CommitSha,
 	FingerprintHash,
 	ServiceName,
@@ -88,9 +91,11 @@ import {
 	partitionWindowAround,
 	podMetricSpec,
 	toCloudflareFilters,
+	validateFunnelDefinition,
 	workloadMetricSpec,
 } from "@/routes/query-helpers"
 import { Queries } from "@/routes/queries"
+import { productEventsFunnelOpts } from "@maple/query-engine/registry"
 import { makeQueryRunners } from "@/routes/query-runner"
 import { runQueryEngineBatch } from "@/routes/query-engine-batch"
 import type { ExecutionTenant, WarehouseExecutionError } from "@maple/query-engine/execution"
@@ -1731,6 +1736,51 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						if (key) buckets[key].push({ name: String(row.name), count: Number(row.count) || 0 })
 					}
 					return new WebAnalyticsBreakdownsResponse({ data: buckets })
+				}),
+			)
+			// Funnels have no raw-`session_events` fallback: server and mobile
+			// events exist only in `product_events`, so a cluster without the table
+			// surfaces the missing-table error instead of a silently smaller funnel.
+			.handle("productEventsFunnel", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					yield* validateFunnelDefinition(productEventsFunnelOpts(payload))
+					const rows = yield* runQuery(Queries.productEventsFunnel, tenant, payload)
+					return new ProductEventsFunnelResponse({
+						data: rows.map((row) => ({
+							step: Number(row.step) || 0,
+							count: Number(row.count) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("productEventsFunnelBreakdown", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					yield* validateFunnelDefinition(productEventsFunnelOpts(payload))
+					const rows = yield* runQuery(Queries.productEventsFunnelBreakdown, tenant, payload)
+					return new ProductEventsFunnelBreakdownResponse({
+						data: rows.map((row) => ({
+							group: String(row.group),
+							step: Number(row.step) || 0,
+							count: Number(row.count) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("productEventNames", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.productEventNames, tenant, payload)
+					return new ProductEventNamesResponse({
+						data: rows.map((row) => ({
+							eventName: String(row.eventName),
+							kind: String(row.kind),
+							count: Number(row.count) || 0,
+							sessions: Number(row.sessions) || 0,
+							persons: Number(row.persons) || 0,
+						})),
+					})
 				}),
 			)
 			.handle("executeRawSql", ({ payload }) =>

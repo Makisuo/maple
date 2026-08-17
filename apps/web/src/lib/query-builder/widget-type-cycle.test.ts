@@ -88,6 +88,7 @@ function makeState(overrides: Partial<QueryBuilderWidgetState> = {}): QueryBuild
 		gaugeMax: "",
 		sparklineEnabled: false,
 		markdownContent: "",
+		funnel: { steps: [], keyBy: "person", windowSeconds: 86400 },
 		...overrides,
 	}
 }

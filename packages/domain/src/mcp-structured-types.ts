@@ -964,3 +964,44 @@ export type StructuredToolOutput =
 			tool: "update_error_notification_policy"
 			data: UpdateErrorNotificationPolicyData
 	  }
+	| { tool: "query_funnel"; data: QueryFunnelData }
+	| { tool: "list_product_events"; data: ListProductEventsData }
+
+// Product-event funnels
+
+export interface QueryFunnelStepData {
+	/** 1-based. */
+	step: number
+	label: string
+	count: number
+	/** Share of step 1, 0–1. */
+	ofFirst: number
+	/** Conversion from the previous step, 0–1; null on step 1 or when the previous step counted nobody. */
+	ofPrevious: number | null
+	dropOff: number
+}
+
+export interface QueryFunnelData {
+	timeRange: { start: string; end: string }
+	keyBy: "person" | "visitor" | "user" | "session"
+	windowSeconds: number
+	steps: ReadonlyArray<QueryFunnelStepData>
+	/** Last step over first, 0–1; null with fewer than two steps or an empty first step. */
+	conversion: number | null
+	breakdown?: {
+		by: string
+		groups: ReadonlyArray<{ group: string; counts: ReadonlyArray<number>; conversion: number | null }>
+	}
+}
+
+export interface ListProductEventsData {
+	timeRange: { start: string; end: string }
+	events: ReadonlyArray<{
+		eventName: string
+		/** `navigation` (page view), `custom` (`track()`), `screen` (mobile). */
+		kind: string
+		count: number
+		sessions: number
+		persons: number
+	}>
+}
