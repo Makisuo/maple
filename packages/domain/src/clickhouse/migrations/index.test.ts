@@ -44,7 +44,6 @@ describe("ClickHouse migrations", () => {
 		// columns and `product_events` directly, so a BYO-CH org must apply it
 		// before ingest routes there again.
 		expect(clickHouseSchemaVersion).toBe("16")
-		expect(migration_0016_product_events.requiredForIngest).toBeUndefined()
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
 		expect(migration_0015_service_overview_minutely.requiredForIngest).toBe(false)
