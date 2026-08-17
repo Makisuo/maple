@@ -91,6 +91,17 @@ session token's active-organization claim, and rejects a token without one
 A 401 whose message mentions an active organization routes to the org picker,
 not to sign-out — the user is still authenticated.
 
+Memberships are fetched with `user.getOrganizationMemberships(page:pageSize:)`,
+paging to the reported total. Do **not** read `user.organizationMemberships`:
+it is an `Optional` populated from the client payload and can be absent or
+partial, which previously auto-selected multi-org accounts into whichever
+organization happened to be in that payload. The auto-select-when-one path only
+runs against a verified list.
+
+The switcher lives in the title slot on both tabs. The gate alone is not enough:
+once an organization is active the gate is unreachable, so without it a
+multi-org account is stuck.
+
 ## Design system
 
 `Maple/DesignSystem` ports the product's visual language rather than inventing a

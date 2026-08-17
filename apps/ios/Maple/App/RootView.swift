@@ -24,7 +24,7 @@ struct RootView: View {
 				AuthView()
 
 			case .needsOrganization:
-				OrganizationPickerView()
+				OrganizationPickerView(mode: .gate)
 
 			case .ready:
 				MainTabView()
