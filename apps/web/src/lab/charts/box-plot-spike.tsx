@@ -2,12 +2,12 @@ import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/th
 import { formatLatency, formatNumber } from "@maple/ui/lib/format"
 import { boxY, defineChart } from "@tanstack/charts"
 import { scaleBand } from "@tanstack/charts-scales/band"
+import { scaleLog } from "d3-scale"
 
 import { tooltip } from "@tanstack/charts/tooltip"
 import { memo, useMemo } from "react"
 
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
-import { createLogScale } from "@/lab/charts/log-scale"
 
 /**
  * One RAW observation — a single span's duration, not a pre-computed summary.
@@ -188,15 +188,20 @@ export const BoxPlotSpike = memo(function BoxPlotSpike({
 				// whole decades. Snapping outward added most of an unused decade at each
 				// end here, and on a log axis every wasted decade is a proportional
 				// slice of every box's height.
-				scale: createLogScale({
-					domain: [minDuration * 0.85, maxDuration * 1.2],
-					ticks: "decade-mid",
-					format: formatLatency,
-				}),
-				// No `nice`: `applyScaleNice` throws for a scale with no `nice()`, and
-				// the domain is already snapped to whole decades above.
+				// d3's `scaleLog`, per the Scales and D3 guide: the compact scales cover
+				// linear/band/point/ordinal, and anything beyond that is a documented
+				// d3-scale dependency rather than something to hand-roll.
+				//
+				// A CONFIGURED INSTANCE, not the factory: `isScaleFactory()` is
+				// `typeof source === "function" && !("copy" in source)`, and every d3
+				// scale has `copy`, so passing `scaleLog` bare would be read as an
+				// instance with d3's default `[1, 10]` domain. The domain follows the
+				// data with a little headroom rather than snapping out to whole decades,
+				// which on a log axis would waste most of a decade at each end and take
+				// a proportional slice out of every box's height.
+				scale: scaleLog().domain([minDuration * 0.85, maxDuration * 1.2]),
 				grid: true,
-				axis: { line: false, ticks: { size: 0, padding: 6 } },
+				axis: { line: false, ticks: { size: 0, padding: 6, format: formatLatency } },
 			},
 			// Cartesian, so `focus: "nearest"` engages — the polar caveat from
 			// `pie-spike.tsx` does not apply. Nearest rather than `group-x`: the

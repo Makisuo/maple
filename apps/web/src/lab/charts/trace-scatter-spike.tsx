@@ -5,11 +5,11 @@ import { colorGradientLegend } from "@tanstack/charts/legend"
 import { hexbin } from "@tanstack/charts/spatial/hexbin"
 import { tooltip } from "@tanstack/charts/tooltip"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
+import { scaleLog } from "d3-scale"
 import { memo, useMemo } from "react"
 
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
 import { createSequentialColorScale, DENSITY_RAMP_TOKENS, rampStops } from "@/lab/charts/color-scale"
-import { createLogScale } from "@/lab/charts/log-scale"
 
 /**
  * No index signature. `hexbin` returns
@@ -229,17 +229,18 @@ export const TraceScatterSpike = memo(function TraceScatterSpike({
 				},
 			},
 			y: {
-				scale: createLogScale({
-					domain: DURATION_DOMAIN,
-					ticks: "decade-mid",
-					format: formatDuration,
-				}),
+				// d3's `scaleLog` (see `box-plot-spike.tsx` for the factory-vs-instance
+				// note). `hexbin` bins in pixels and inverts each bin centre back into
+				// data space — it throws `"hexbin: x and y scales must support
+				// inversion"` otherwise — and d3 supplies `invert` along with proper
+				// log `ticks`/`tickFormat`, which is the whole reason not to hand-roll.
+				scale: scaleLog().domain([...DURATION_DOMAIN]),
 				grid: true,
 				// `clip` bounds the hexes to the plot rect, but the rect butts straight
 				// up against the tick labels, so a clipped edge hex still sits ~3px
 				// into them. Tick padding is what buys the gap. `format` is left unset
 				// so the scale's own `tickFormat` keeps producing "300.0ms"/"3.00s".
-				axis: { line: false, ticks: { padding: 10 } },
+				axis: { line: false, ticks: { padding: 10, format: formatDuration } },
 			},
 			color: {
 				scale: colorScale,

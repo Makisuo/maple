@@ -2,6 +2,7 @@ import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/th
 import { formatNumber } from "@maple/ui/lib/format"
 import { defineChart, rect } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
+import { scaleLog } from "d3-scale"
 import { tooltip } from "@tanstack/charts/tooltip"
 import { binX } from "@tanstack/charts/transform/bin"
 import { memo, useMemo } from "react"
@@ -9,7 +10,6 @@ import { memo, useMemo } from "react"
 import { histogramSampleData } from "@maple/ui/components/charts/_shared/sample-data"
 
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
-import { createLogScale } from "@/lab/charts/log-scale"
 
 /**
  * One raw observation. No index signature, deliberately — `binX` returns
@@ -161,11 +161,11 @@ export const HistogramSpike = memo(function HistogramSpike({
 						// `[1, max]`, not `[0, max]`: there is no zero-anchor default for a
 						// log axis and zero has no position on one. Matches the production
 						// chart's `domain={[1, "auto"]}` under `scale="log"`.
-						scale: createLogScale({
-							domain: [1, Math.max(maxCount, 10)],
-							ticks: "decade",
-							format: formatNumber,
-						}),
+						// d3's `scaleLog`, configured. `[1, max]` rather than `[0, max]`:
+						// zero has no position on a log axis, which is also why the bar
+						// baseline below is 1. Matches the production chart's
+						// `domain={[1, "auto"]}` under `scale="log"`.
+						scale: scaleLog().domain([1, Math.max(maxCount, 10)]),
 						grid: true,
 						axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
 					}
