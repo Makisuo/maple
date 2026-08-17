@@ -27,7 +27,6 @@ import {
 	serviceOperationsHourly,
 	productEvents,
 	identityLinks,
-	sessionReplays,
 } from "./datasources"
 import {
 	DB_NAMESPACE_ATTR_SQL,

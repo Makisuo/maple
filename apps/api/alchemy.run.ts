@@ -294,6 +294,13 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...optionalSecret("CLERK_SECRET_KEY"),
 				...optionalPlain("CLERK_PUBLISHABLE_KEY"),
 				...optionalSecret("CLERK_JWT_KEY"),
+				// Svix signing secrets for the public webhook receivers (`/webhooks/clerk`,
+				// `/webhooks/autumn`); each route answers 503 until its secret is set.
+				...optionalSecret("CLERK_WEBHOOK_SECRET"),
+				...optionalSecret("AUTUMN_WEBHOOK_SECRET"),
+				// Server-side product events default to MAPLE_INGEST_KEY (below); set this
+				// only if the funnel should land in a different org than the API's traces.
+				...optionalSecret("MAPLE_PRODUCT_EVENTS_INGEST_KEY"),
 				...optionalSecret("AUTUMN_SECRET_KEY"),
 				...optionalSecret("SD_INTERNAL_TOKEN"),
 				...optionalSecret("INTERNAL_SERVICE_TOKEN"),

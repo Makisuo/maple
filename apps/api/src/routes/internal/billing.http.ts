@@ -21,6 +21,8 @@ import {
 	readCustomerCached,
 } from "@/services/billing/autumn-client"
 import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
+import { emitPlanStartedFromAttach } from "@/services/billing/plan-events"
+import { ProductEventsService } from "@/services/product-events/ProductEventsService"
 import { requireAdmin } from "@/services/auth/auth"
 import { DailySpendService } from "@/services/billing/DailySpendService"
 
@@ -68,6 +70,7 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 		const edgeCache = yield* EdgeCacheService
 		const dailySpend = yield* DailySpendService
 		const autumn = yield* AutumnClient
+		const productEvents = yield* ProductEventsService
 
 		// Invalidate on any 2xx, matching `ensureOk` — otherwise a 201/204 from
 		// attach/openCustomerPortal would decode as success yet leave the stale
@@ -178,7 +181,16 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 						const result = yield* autumn.attach(tenant.orgId, { planId: payload.planId })
 						const response = yield* ensureOk(result)
 						yield* invalidateCustomer(tenant.orgId, result)
-						return yield* decodeUpstream(AttachResult, response)
+						const attached = yield* decodeUpstream(AttachResult, response)
+						// Inline (no-redirect) plan start; the Autumn webhook covers the
+						// Stripe-checkout path. Never fails the request.
+						yield* emitPlanStartedFromAttach(productEvents, {
+							orgId: tenant.orgId,
+							userId: tenant.userId,
+							planId: payload.planId,
+							result: attached,
+						})
+						return attached
 					}),
 				)
 				.handle("previewAttach", ({ payload }) =>

@@ -1,7 +1,7 @@
 // SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 // Raw-vs-rollup parity for web analytics.
 //
-// `web_events` is a performance change, not a semantics change: every one of the
+// `product_events` is a performance change, not a semantics change: every one of the
 // five web-analytics queries must return byte-identical numbers whether it reads
 // raw `session_events` or the rollup. The analyzer sweep next door proves the
 // rollup SQL *parses*; only running both against the same rows proves they
@@ -19,7 +19,7 @@
 //   - The navigation semi-join changing which sessions it selects, which is the
 //     path the breakdown fan-out inlines twelve times.
 //   - The MV's WHERE dropping or admitting the wrong event types: clicks and
-//     network rows must never reach `web_events`, and custom rows must.
+//     network rows must never reach `product_events`, and custom rows must.
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import * as CH from "@maple/query-engine/ch"
@@ -37,7 +37,7 @@ const ORG_ID = "org_web_analytics_parity"
 /**
  * The seed window is anchored to *now*, not to a fixed calendar date.
  *
- * `session_events` and `web_events` both carry a 30-day TTL, and ClickHouse
+ * `session_events` and `product_events` both carry a 30-day TTL, and ClickHouse
  * enforces it at insert time — a hardcoded date silently drops every seeded row
  * the moment it ages past the horizon, both tables end up empty, and every
  * comparison below passes by comparing nothing to nothing. This test was written
@@ -266,7 +266,7 @@ const assertSourcesSwapped = (rawSql: string, rollupSql: string): void => {
 		return
 	}
 	assert.notInclude(rollupSql, "FROM session_events", "the rollup variant still reads the raw table")
-	assert.include(rollupSql, "FROM web_events", "the rollup variant does not read web_events")
+	assert.include(rollupSql, "FROM product_events", "the rollup variant does not read product_events")
 }
 
 /** Order-insensitive comparison keyed on the row's dimension columns — the
@@ -369,8 +369,8 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 		)
 	})
 
-	it("populates web_events from the materialized view with only navigation and custom rows", async () => {
-		const rows = await runJson("SELECT Kind, count() AS n FROM web_events GROUP BY Kind ORDER BY Kind")
+	it("populates product_events from the materialized view with only navigation and custom rows", async () => {
+		const rows = await runJson("SELECT Kind, count() AS n FROM product_events GROUP BY Kind ORDER BY Kind")
 		const byKind = Object.fromEntries(rows.map((row) => [String(row.Kind), Number(row.n)]))
 		const expectedNavigation = SEED_EVENTS.filter((row) => row.type === "navigation").length
 		const expectedCustom = SEED_EVENTS.filter((row) => row.type === "custom").length
@@ -378,7 +378,7 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 
 		// The reserved-name collision lands as a custom row, not a page view.
 		const collision = await runJson(
-			"SELECT Kind FROM web_events WHERE EventName = '$pageview' AND Kind = 'custom'",
+			"SELECT Kind FROM product_events WHERE EventName = '$pageview' AND Kind = 'custom'",
 		)
 		assert.lengthOf(collision, 1, "track('$pageview') must stay a custom event")
 	})
@@ -386,7 +386,7 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 	it("pre-extracts Host and PagePath exactly as the read-time functions would", async () => {
 		const drift = await runJson(
 			`SELECT count() AS n
-			 FROM web_events
+			 FROM product_events
 			 WHERE Host != domain(Url) OR PagePath != path(Url)`,
 		)
 		assert.strictEqual(Number(drift[0]?.n), 0, "write-time URL parsing diverged from read-time")
@@ -396,8 +396,8 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 	for (const query of QUERIES) {
 		for (const filterCase of FILTER_CASES) {
 			it(`${query.name} agrees across sources — ${filterCase.label}`, async () => {
-				const rawSql = query.compile({ ...filterCase.filters, useWebEvents: false })
-				const rollupSql = query.compile({ ...filterCase.filters, useWebEvents: true })
+				const rawSql = query.compile({ ...filterCase.filters, useProductEvents: false })
+				const rollupSql = query.compile({ ...filterCase.filters, useProductEvents: true })
 				assertSourcesSwapped(rawSql, rollupSql)
 
 				const [rawRows, rollupRows] = await Promise.all([runJson(rawSql), runJson(rollupSql)])

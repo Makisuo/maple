@@ -130,13 +130,18 @@ const isMissingServiceOperationsRollup = (error: unknown): boolean => {
 }
 
 /**
- * `web_events` is a read-path rollup on a `requiredForIngest: false` migration,
- * so a BYO cluster can be perfectly healthy and still not have it — the org just
- * hasn't re-applied schema yet. Same shape as the service-operations detector
- * above, and the same reason: the fallback has to be automatic and per-org,
- * because there is no global moment when every cluster has migrated.
+ * `product_events` arrives with migration 0016, so a BYO cluster that predates
+ * it can be perfectly healthy for everything else and still not have the table —
+ * the org just hasn't re-applied schema yet. Same shape as the
+ * service-operations detector above, and the same reason: the fallback has to
+ * be automatic and per-org, because there is no global moment when every cluster
+ * has migrated.
+ *
+ * Only the page-view queries degrade this way — raw `session_events` holds the
+ * same browser rows. Funnels have no raw counterpart (server and mobile rows
+ * exist only in `product_events`) and must surface the missing-table error.
  */
-const isMissingWebEvents = (error: unknown): boolean => {
+const isMissingProductEvents = (error: unknown): boolean => {
 	if (typeof error !== "object" || error === null) return false
 	const candidate = error as {
 		readonly _tag?: unknown
@@ -146,7 +151,7 @@ const isMissingWebEvents = (error: unknown): boolean => {
 	return (
 		candidate._tag === "@maple/http/errors/WarehouseConfigError" &&
 		(candidate.clickhouseType === "UNKNOWN_TABLE" ||
-			(typeof candidate.message === "string" && /web_events/i.test(candidate.message)))
+			(typeof candidate.message === "string" && /product_events/i.test(candidate.message)))
 	)
 }
 
@@ -193,9 +198,9 @@ const makeRollupFallback =
 			}),
 		)
 
-const withWebEventsFallback = makeRollupFallback(
-	isMissingWebEvents,
-	"web_events is absent on this cluster; reading raw session_events. Apply ClickHouse schema to restore the fast path.",
+const withProductEventsFallback = makeRollupFallback(
+	isMissingProductEvents,
+	"product_events is absent on this cluster; reading raw session_events. Apply ClickHouse schema to restore the fast path.",
 )
 
 const withServiceOperationsFallback = makeRollupFallback(
@@ -1602,7 +1607,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 			.handle("webAnalyticsSummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const row = yield* withWebEventsFallback(
+					const row = yield* withProductEventsFallback(
 						(t, pl) => runQueryFirst(Queries.webAnalyticsSummary, t, pl),
 						(t, pl) => runQueryFirst(Queries.webAnalyticsSummaryRaw, t, pl),
 						tenant,
@@ -1625,7 +1630,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 			.handle("webAnalyticsTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const rows = yield* withWebEventsFallback(
+					const rows = yield* withProductEventsFallback(
 						(t, pl) => runQuery(Queries.webAnalyticsTimeseries, t, pl),
 						(t, pl) => runQuery(Queries.webAnalyticsTimeseriesRaw, t, pl),
 						tenant,
@@ -1647,7 +1652,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 			.handle("webAnalyticsPageviews", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const rows = yield* withWebEventsFallback(
+					const rows = yield* withProductEventsFallback(
 						(t, pl) => runQuery(Queries.webAnalyticsPageviews, t, pl),
 						(t, pl) => runQuery(Queries.webAnalyticsPageviewsRaw, t, pl),
 						tenant,
@@ -1665,7 +1670,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 			.handle("webAnalyticsPages", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const rows = yield* withWebEventsFallback(
+					const rows = yield* withProductEventsFallback(
 						(t, pl) => runQuery(Queries.webAnalyticsPages, t, pl),
 						(t, pl) => runQuery(Queries.webAnalyticsPagesRaw, t, pl),
 						tenant,
@@ -1684,7 +1689,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 			.handle("webAnalyticsBreakdowns", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const rows = yield* withWebEventsFallback(
+					const rows = yield* withProductEventsFallback(
 						(t, pl) => runQuery(Queries.webAnalyticsBreakdowns, t, pl),
 						(t, pl) => runQuery(Queries.webAnalyticsBreakdownsRaw, t, pl),
 						tenant,

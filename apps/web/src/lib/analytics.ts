@@ -22,6 +22,12 @@ export type ProductEvent =
 	| "api_key_created"
 	| "dashboard_created"
 	| "chat_message_sent"
+	/**
+	 * Client-side intent signal fired right before the Stripe redirect. The
+	 * server-side `plan_started` (Autumn webhook / inline attach) is the truth for
+	 * "started a plan"; this only exists to size checkout drop-off.
+	 */
+	| "plan_checkout_started"
 
 /**
  * Record a product event. Never throws and never awaits — the SDK buffers and
