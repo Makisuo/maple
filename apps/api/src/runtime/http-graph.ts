@@ -6,6 +6,7 @@ import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { API_CORS_OPTIONS } from "@/http/api-cors"
 import { McpLive } from "@/mcp/app"
 import { Env } from "@/platform/Env"
+import { HttpAgentSessionsInternalLive } from "@/routes/internal/agent-sessions.http"
 import { HttpAiTriageLive } from "@/routes/internal/ai-triage.http"
 import { HttpAuthLive, HttpAuthPublicLive } from "@/routes/v1/auth.http"
 import { HttpBillingLive } from "@/routes/internal/billing.http"
@@ -96,7 +97,9 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
  * which is generated from `MapleApi`.
  */
 const ApiInternalRoutes = HttpApiBuilder.layer(MapleInternalApi).pipe(
-	Layer.provide(Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysInternalLive)),
+	Layer.provide(
+		Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysInternalLive, HttpAgentSessionsInternalLive),
+	),
 	Layer.provide(
 		Layer.mergeAll(HttpAiTriageLive, HttpBillingLive, HttpChatLive, HttpDemoLive, HttpDigestLive),
 	),

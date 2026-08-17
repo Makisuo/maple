@@ -1,4 +1,5 @@
 import { HttpApi, OpenApi } from "effect/unstable/httpapi"
+import { AgentSessionsInternalApiGroup } from "./agent-sessions"
 import { AiTriageApiGroup } from "./ai-triage"
 import { BillingApiGroup } from "./billing"
 import { ChatApiGroup } from "./chat"
@@ -35,6 +36,7 @@ import { V1SchemaErrors, V1UnexpectedErrors } from "./v1-boundary"
  * split costs the frontend nothing.
  */
 export class MapleInternalApi extends HttpApi.make("MapleInternalApi")
+	.add(AgentSessionsInternalApiGroup)
 	.add(AiTriageApiGroup)
 	.add(BillingApiGroup)
 	.add(ChatApiGroup)

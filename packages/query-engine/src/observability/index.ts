@@ -45,3 +45,15 @@ export {
 	type SessionReplayDetailOutput,
 	type SessionTraceSummaryOutput,
 } from "./session-replays"
+export {
+	listAgentSessions,
+	listAgentTraces,
+	agentSessionsFacets,
+	type AgentSessionsFilterInput,
+	type ListAgentSessionsInput,
+	type ListAgentTracesInput,
+	type AgentSessionsFacetsInput,
+	type AgentSessionsListOutput,
+	type AgentTracesListOutput,
+	type AgentSessionsFacetsOutput,
+} from "./agent-sessions"
