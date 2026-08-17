@@ -38,6 +38,11 @@ export const Traces = table("traces", {
 	ResourceAttributeItems: T.array(T.string),
 	ScopeAttributeItems: T.array(T.string),
 	SpanAttributeItems: T.array(T.string),
+	AiVendor: T.string,
+	AiSessionKeyState: T.uint8,
+	AiSessionKeyHash: T.uint64,
+	AiRulesVersion: T.uint32,
+	AiRollupHour: T.dateTime,
 })
 
 export const TraceDetailSpans = table("trace_detail_spans", {
