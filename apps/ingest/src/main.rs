@@ -40,7 +40,7 @@ use maple_ingest::otel::{
 use maple_ingest::otlp_json;
 use maple_ingest::r2::{replay_object_key, ReplayBlobStore};
 use maple_ingest::session_analytics::{
-    derive_referrer_host, sanitize_session_event, sanitize_session_meta,
+    derive_referrer_host, sanitize_product_event, sanitize_session_event, sanitize_session_meta,
 };
 use maple_ingest::telemetry::{
     AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget, ClickHouseTargetProvider,
@@ -315,6 +315,8 @@ impl AppConfig {
             .unwrap_or_else(|_| "session_replay_events".to_string()),
             datasource_session_events: std::env::var("INGEST_TINYBIRD_DATASOURCE_SESSION_EVENTS")
                 .unwrap_or_else(|_| "session_events".to_string()),
+            datasource_product_events: std::env::var("INGEST_TINYBIRD_DATASOURCE_PRODUCT_EVENTS")
+                .unwrap_or_else(|_| "product_events".to_string()),
         };
         if write_mode.uses_tinybird() {
             tinybird.validate()?;
@@ -1679,6 +1681,7 @@ async fn main() {
         .route("/v1/sessionReplays/meta", post(handle_replay_meta))
         .route("/v1/sessionReplays/blob", post(handle_replay_blob))
         .route("/v1/sessionEvents", post(handle_session_events))
+        .route("/v1/events", post(handle_product_events))
         .route(
             "/v1/logpush/cloudflare/http_requests/{connector_id}",
             post(handle_cloudflare_logpush_http_requests),
@@ -2573,6 +2576,155 @@ async fn handle_session_events_inner(
         .await
         .map_err(|e| {
             warn!(org_id = %org_id, error = %e, "session events enqueue rejected");
+            api_error_from_pipeline(&e)
+        })?;
+    Ok(count)
+}
+
+async fn handle_product_events(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    metrics::request_started();
+    let _guard = InFlightGuard;
+    let span = tracing::info_span!(
+        "ingest_product_events",
+        otel.name = "POST /v1/events",
+        otel.kind = "server",
+        otel.status_code = tracing::field::Empty,
+        otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
+        "http.request.method" = "POST",
+        "http.route" = "/v1/events",
+        "http.request.body.size" = body.len(),
+        "http.response.status_code" = tracing::field::Empty,
+        "error.type" = tracing::field::Empty,
+        "maple.signal" = "product_events",
+        "maple.org_id" = tracing::field::Empty,
+        "maple.ingest.clickhouse_ready" = tracing::field::Empty,
+        "maple.ingest.destination" = tracing::field::Empty,
+        "maple.product_events.dropped" = tracing::field::Empty,
+    );
+    let span_handle = span.clone();
+    match handle_product_events_inner(&state, &headers, body)
+        .instrument(span)
+        .await
+    {
+        Ok(count) => {
+            span_handle.record("http.response.status_code", 200u16);
+            span_handle.record("otel.status_code", "Ok");
+            (StatusCode::OK, axum::Json(AcceptedBody { accepted: count })).into_response()
+        }
+        Err(error) => {
+            let status = error.status.as_u16();
+            span_handle.record("http.response.status_code", status);
+            span_handle.record("error.type", error.error_kind());
+            record_rejection_reason(
+                &span_handle,
+                status,
+                error.error_kind(),
+                error.message.as_str(),
+            );
+            error.into_response()
+        }
+    }
+}
+
+/// `POST /v1/events` — product events posted directly by backends and mobile
+/// apps (browser rows reach `product_events` through the `session_events`
+/// materialized view instead). Same auth, entitlement gate, NDJSON framing and
+/// per-row drop policy as `/v1/sessionEvents`; the row shape is fixed by
+/// `sanitize_product_event`.
+async fn handle_product_events_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Result<usize, ApiError> {
+    let resolved_key = match resolve_replay_key(state, headers).await? {
+        Some(resolved_key) => resolved_key,
+        None => return Ok(0),
+    };
+    let org_id = resolved_key.org_id.clone();
+    Span::current().record("maple.org_id", org_id.as_str());
+    Span::current().record(
+        "maple.ingest.clickhouse_ready",
+        resolved_key.clickhouse_ready,
+    );
+    let destination = native_destination_for(&resolved_key);
+    Span::current().record("maple.ingest.destination", destination.as_str());
+
+    // Product events reuse the browser-sessions entitlement (the plan doc's
+    // default) and, like session events, are not separately metered — a
+    // `product_events` meter is a pricing decision, not a schema one.
+    if org_id != SENTINEL_ORG_ID {
+        if let Some(error) =
+            entitlement_rejection(state, &org_id, BROWSER_SESSIONS_FEATURE_ID).await
+        {
+            return Err(error);
+        }
+    }
+
+    let pipeline = native_rows_pipeline_for(
+        state,
+        destination,
+        "Product event storage is not configured",
+    )?;
+
+    // One receipt time for the whole batch: rows without a `timestamp` all
+    // land at the moment the request arrived, not spread across the parse.
+    let received_at = chrono::Utc::now();
+    let mut rows: Vec<Vec<u8>> = Vec::new();
+    let mut dropped: u64 = 0;
+    for line in body.split(|&b| b == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let mut value: serde_json::Value = serde_json::from_slice(line)
+            .map_err(|e| ApiError::bad_request(format!("invalid product event JSON: {e}")))?;
+        let obj = value
+            .as_object_mut()
+            .ok_or_else(|| ApiError::bad_request("product event must be a JSON object"))?;
+        if !sanitize_product_event(obj, received_at) {
+            dropped += 1;
+            continue;
+        }
+        // org_id comes from the authenticated key, never the body — the
+        // sanitizer already discarded whatever the client sent under that name.
+        obj.insert(
+            "org_id".to_string(),
+            serde_json::Value::String(org_id.clone()),
+        );
+        rows.push(
+            serde_json::to_vec(&value)
+                .map_err(|e| ApiError::bad_request(format!("failed to re-serialize event: {e}")))?,
+        );
+    }
+
+    if dropped > 0 {
+        Span::current().record("maple.product_events.dropped", dropped);
+        warn!(
+            org_id = %org_id,
+            dropped,
+            "dropped malformed product events (name, source or timestamp)"
+        );
+    }
+
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    let count = rows.len();
+    pipeline
+        .accept_rows_to(
+            &org_id,
+            state.config.tinybird.datasource_product_events.clone(),
+            rows,
+            TelemetrySignal::ProductEvents,
+            destination,
+        )
+        .await
+        .map_err(|e| {
+            warn!(org_id = %org_id, error = %e, "product events enqueue rejected");
             api_error_from_pipeline(&e)
         })?;
     Ok(count)
@@ -6152,6 +6304,7 @@ mod tests {
             datasource_session_replays: "session_replays".to_string(),
             datasource_session_replay_events: "session_replay_events".to_string(),
             datasource_session_events: "session_events".to_string(),
+            datasource_product_events: "product_events".to_string(),
         }
     }
 

@@ -331,6 +331,10 @@ pub enum TelemetrySignal {
     /// Carried separately from `SessionReplays` so per-signal metrics label it
     /// as `session_events` (matching its `maple.signal` span attribute).
     SessionEvents,
+    /// Product events posted directly by backends and mobile apps via
+    /// `POST /v1/events` (NDJSON, gateway-written). Lands in `product_events`
+    /// next to the browser rows the `session_events` MV materializes there.
+    ProductEvents,
 }
 
 impl TelemetrySignal {
@@ -346,6 +350,7 @@ impl TelemetrySignal {
             Self::Metrics => "metrics",
             Self::SessionReplays => "session_replays",
             Self::SessionEvents => "session_events",
+            Self::ProductEvents => "product_events",
         }
     }
 }
@@ -424,6 +429,7 @@ pub struct TinybirdConfig {
     pub datasource_session_replays: String,
     pub datasource_session_replay_events: String,
     pub datasource_session_events: String,
+    pub datasource_product_events: String,
 }
 
 impl TinybirdConfig {
@@ -1472,6 +1478,7 @@ fn signal_tag(signal: TelemetrySignal) -> u8 {
         TelemetrySignal::Metrics => 3,
         TelemetrySignal::SessionReplays => 4,
         TelemetrySignal::SessionEvents => 5,
+        TelemetrySignal::ProductEvents => 6,
     }
 }
 
@@ -1482,6 +1489,7 @@ fn signal_from_tag(tag: u8) -> Option<TelemetrySignal> {
         3 => Some(TelemetrySignal::Metrics),
         4 => Some(TelemetrySignal::SessionReplays),
         5 => Some(TelemetrySignal::SessionEvents),
+        6 => Some(TelemetrySignal::ProductEvents),
         _ => None,
     }
 }
@@ -3026,6 +3034,7 @@ mod tests {
             datasource_session_replays: "session_replays".to_string(),
             datasource_session_replay_events: "session_replay_events".to_string(),
             datasource_session_events: "session_events".to_string(),
+            datasource_product_events: "product_events".to_string(),
         }
     }
 
@@ -3982,6 +3991,7 @@ mod tests {
         assert_eq!(TelemetrySignal::Metrics.as_str(), "metrics");
         assert_eq!(TelemetrySignal::SessionReplays.as_str(), "session_replays");
         assert_eq!(TelemetrySignal::SessionEvents.as_str(), "session_events");
+        assert_eq!(TelemetrySignal::ProductEvents.as_str(), "product_events");
     }
 
     #[test]
@@ -3994,6 +4004,7 @@ mod tests {
             TelemetrySignal::Metrics,
             TelemetrySignal::SessionReplays,
             TelemetrySignal::SessionEvents,
+            TelemetrySignal::ProductEvents,
         ] {
             assert_eq!(signal_from_tag(signal_tag(signal)), Some(signal));
         }
@@ -4793,6 +4804,7 @@ mod tests {
             "session_replays",
             "session_replay_events",
             "session_events",
+            "product_events",
         ] {
             let mapping = clickhouse_insert_mappings::mapping_for(datasource)
                 .unwrap_or_else(|| panic!("missing ClickHouse mapping for {datasource}"));
