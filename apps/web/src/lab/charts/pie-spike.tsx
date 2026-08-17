@@ -313,6 +313,14 @@ export const PieLegendSpike = memo(function PieLegendSpike({
 					series={legendSeries}
 					highlighted={highlighted}
 					onHighlight={highlight}
+					// The SAME `activeName` the donut reads, and the same setter the
+					// chart's `onFocusChange` calls — so hovering a slice lights its row
+					// and hovering a row grows its slice, off one piece of state. That
+					// symmetry is production's (`query-builder-pie-chart.tsx` feeds one
+					// `hover` index from the arc and the row alike), and it only works
+					// because the state lives out here rather than inside either one.
+					active={activeName}
+					onActiveChange={setActiveName}
 					label="Share by category"
 				/>
 			</div>

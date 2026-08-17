@@ -75,6 +75,11 @@ export type ChartsLabArm =
 	| "stacked-bar-legend-tanstack"
 	| "stacked-bar-legend-scene-tanstack"
 	| "pie-legend-tanstack"
+	// The same donut with the hole closed. `PieSpike`/`PieLegendSpike` already take
+	// `donut`, so the two shapes are one component and two arms rather than two
+	// components — the difference really is one radius.
+	| "pie-solid-tanstack"
+	| "pie-solid-legend-tanstack"
 	| "treemap-legend"
 	| "sankey-legend"
 
@@ -224,7 +229,18 @@ export function ChartsLab({
 		},
 		"heatmap-tanstack": {
 			title: "Heatmap — TanStack (cell + scaleBand + sequential colour)",
-			node: <HeatmapSpike rows={heatmapRows} renderer={renderer} className="h-full w-full" />,
+			node: (
+				<HeatmapSpike
+					rows={heatmapRows}
+					renderer={renderer}
+					// Explicit rather than defaulted: `HeatmapSpike` accepts `scaleType`
+					// and the arm never passed it, so the log path — the one that makes
+					// `colorGradientLegend`'s linear walk visibly wrong — was never
+					// exercised in the gallery. Flip this to `"log"` to see it.
+					scaleType="linear"
+					className="h-full w-full"
+				/>
+			),
 		},
 		"line-production": {
 			title: "Line — production (recharts LineChart, one <Line> per series)",
@@ -386,6 +402,16 @@ export function ChartsLab({
 			title: "Pie + stats legend — TanStack (hover grows the slice via onFocusChange + a second arc mark; click a row to pin it)",
 			node: <PieLegendSpike rows={pieRows} renderer={renderer} className="h-full w-full" />,
 		},
+		"pie-solid-tanstack": {
+			title: "Pie — TanStack (donut hole closed: innerRadius 0)",
+			node: <PieSpike rows={pieRows} renderer={renderer} donut={false} className="h-full w-full" />,
+		},
+		"pie-solid-legend-tanstack": {
+			title: "Pie + stats legend — TanStack (no hole; the hovered wedge grows from the centre out)",
+			node: (
+				<PieLegendSpike rows={pieRows} renderer={renderer} donut={false} className="h-full w-full" />
+			),
+		},
 		"treemap-legend": {
 			title: "Span volume + legend — NEW (leaves only, so colour IS the grouping; muting keeps the tiling fixed)",
 			node: <TreemapLegendSpike renderer={renderer} className="h-full w-full" />,
@@ -458,6 +484,8 @@ export function ChartsLab({
 				 * across two nodes carrying the same name.
 				 */}
 				<Pair a="stacked-bar-legend-tanstack" b="stacked-bar-legend-scene-tanstack" cards={cards} />
+				{/* Donut beside pie — same component, same data, `donut={false}`. */}
+				<Pair a="pie-solid-tanstack" b="pie-solid-legend-tanstack" cards={cards} />
 				<div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
 					{(["treemap-legend", "sankey-legend"] as const).map((key) => (
 						<ChartArm key={key} name={key} title={cards[key].title}>

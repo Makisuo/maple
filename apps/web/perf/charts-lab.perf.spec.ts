@@ -39,6 +39,8 @@ type Arm =
 	| "stacked-bar-legend-tanstack"
 	| "stacked-bar-legend-scene-tanstack"
 	| "pie-legend-tanstack"
+	| "pie-solid-tanstack"
+	| "pie-solid-legend-tanstack"
 	| "treemap-legend"
 	| "sankey-legend"
 

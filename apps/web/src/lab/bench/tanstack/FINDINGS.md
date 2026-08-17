@@ -236,22 +236,23 @@ Four things that will bite anyone building a polar chart:
    cannot wrap a `PolarMark` (`polar({ marks })` requires one, and `InitializedPolarMark` carries
    `colorValues`/`angleValues`/`radiusValues` that `InitializedMark` lacks). The error was the
    conclusion drawn from it — "cannot be reproduced by any route" — reached by only ever looking
-   *inside* the chart definition.
+   _inside_ the chart definition.
 
-   The route is above it. **`onFocusChange` on the Chart component** reports the focused datum to
-   React, and a **second `radialArc` over just that slice** gives it its own radius and opacity.
-   Per-mark options stop being a limitation once the mark list is a function of hover state. The
-   production pie's fade + 1.035 scale is now reproduced exactly — measured on the SVG arm, the
-   hovered wedge's bbox goes 144×272 → 149×281 (1.035) while the other four drop to
-   `fill-opacity="0.55"`.
+    The route is above it. **`onFocusChange` on the Chart component** reports the focused datum to
+    React, and a **second `radialArc` over just that slice** gives it its own radius and opacity.
+    Per-mark options stop being a limitation once the mark list is a function of hover state. The
+    production pie's fade + 1.035 scale is now reproduced exactly — measured on the SVG arm, the
+    hovered wedge's bbox goes 144×272 → 149×281 (1.035) while the other four drop to
+    `fill-opacity="0.55"`.
 
-   The cost is a rebuilt definition per slice crossing, which is affordable only because
-   `onFocusChange` is **edge-triggered** — it fires when the focused datum changes, not on every
-   pointer move. That distinction is the whole reason this is viable rather than a per-tick React
-   storm, and it is worth remembering for any other mark family that lacks `states`.
+    The cost is a rebuilt definition per slice crossing, which is affordable only because
+    `onFocusChange` is **edge-triggered** — it fires when the focused datum changes, not on every
+    pointer move. That distinction is the whole reason this is viable rather than a per-tick React
+    storm, and it is worth remembering for any other mark family that lacks `states`.
 
-   General lesson for the rest of this document: "the mark cannot express X" and "the chart cannot
-   do X" are different claims, and this file conflated them once already.
+    General lesson for the rest of this document: "the mark cannot express X" and "the chart cannot
+    do X" are different claims, and this file conflated them once already.
+
 4. **Row types must not have an index signature.** `pie()` returns
    `Omit<TDatum, PieDerivedField> & …`, and `Omit` over a type with an index signature resolves
    `keyof` to `string | number` and drops every named field — `slice.name` comes back `unknown`.
@@ -466,6 +467,17 @@ strength.
 The single-mark charts express it without a new prop at all: they already paint through a
 `colorFor(key)` lookup, so the legend variant hands down a `colorFor` that returns muted colours.
 
+**The pie carries a second, transient interaction on top of that**, and it is the closest arm in
+the lab to its production counterpart. Hovering grows the slice under the cursor to 1.035 and fades
+the rest to 0.55 — production's own numbers — via `onFocusChange` plus a second `radialArc`; see
+the correction to finding 3 above. Clicking a legend row pins a persistent emphasis instead. Two
+interactions, different in kind and readable together: transient hover, persistent pin.
+
+Its legend is also the only `Column` in the lab rather than a `Row`, matching production's
+`legend="right"`, and the only one carrying figures — `LegendSeriesSpec.value`/`.secondary` are
+**preformatted strings**, because the legend has no idea whether a column is a span count or a
+latency and `formatValueByUnit` belongs with the chart that does.
+
 Worth noting against the package's own legend: `interactiveColorLegend` can only _hide_ — its
 contract is a `visible` array and a `filterMark` that deletes scene output. There is no emphasis
 mode, so the interaction the spikes settled on is not expressible through it even on the one chart
@@ -553,11 +565,44 @@ The x domain is no longer pinned. It was pinned because the solid and dashed mar
 slices, but that hazard was about categorical union ORDERING — a continuous scale takes min/max over
 the union, which is order-independent, and the slices overlap at the bridge row anyway.
 
+### 5. Continuous colour is d3's `scaleSequential` with our own interpolator
+
+`createSequentialColorScale` now returns `scaleSequential` / `scaleSequentialLog` with the pinned
+domain, in place of a bespoke `ConfiguredScaleLike` implementing `copy`/`domain`/`range`/`ticks` and
+a `log1p` normaliser. The oklch machinery stays and is the point: `scaleSequential` accepts **any**
+`(t: number) => string`, so Maple's theme ramps go in as a closure over `usePlotColors`-resolved
+literals. d3's own interpolators (`interpolateBlues`) could not — they are fixed palettes, and
+`d3-scale-chromatic` was not added.
+
+The line count barely moved (277 → 273). That is not the win: what was deleted is scale
+_semantics_ we were maintaining ourselves, and the header comment grew to hold the evidence below.
+
+**The gradient legend was the risk, and it survives.** `colorScaleKind` is
+`return scale.ticks ? "continuous" : "categorical"` after ruling out
+`quantiles`/`thresholds`/`invertExtent` (`dist/scales.js:135`). In d3 4.0.2, `sequential()` is
+`linearish(transformer()(identity))` and `sequentialLog()` is `loggish(transformer())` — both gain
+`ticks`/`tickFormat` and carry none of that trio, so both classify continuous and
+`colorGradientLegend` renders. Verified in the browser on the heatmap (amber ramp, `Count 3…142`)
+and the trace scatter (`Spans per bin 1…90`), light and dark.
+
+Worth knowing: **`@types/d3-scale`'s `ScaleSequentialBase` omits `ticks` entirely.** Classification
+is a runtime property probe, so the types say nothing about whether the legend will work — a place
+where trusting the type definitions would have given the wrong answer in both directions.
+
+Two behavioural notes:
+
+- **d3 does not clamp by default**, and the trace scatter depends on clamping: its density domain is
+  a fixed estimate (the transform reduces after layout, so the real max is unknowable at definition
+  time) and out-of-domain counts must saturate the top stop rather than run off the ramp.
+  `.clamp(true)` on both branches.
+- A log transform cannot include zero, so a non-positive minimum is floored to 1. The old file
+  claimed `scaleSequentialLog` "throws on a domain touching zero" — it does not throw, it silently
+  degenerates through `Math.log(0) = -Infinity`, which is why this is a floor and not a `try`.
+
 ### Still open after the audit
 
-- **`color-scale.ts` → `scaleSequential`** — in progress at the time of writing.
-- **`interactiveColorLegend`** — resolved separately, and against adopting it: see the legend
-  section above. It is a display control, not a data control, and on a stack it punches a hole.
+Nothing. `interactiveColorLegend` was resolved separately and decided **against** — see the legend
+section above: it is a display control, not a data control, and on a stack it punches a hole.
 
 ### Bug 6 was never a bug, and believing it cost us a mount flash (2026-08-18)
 

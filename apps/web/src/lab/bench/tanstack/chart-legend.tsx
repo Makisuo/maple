@@ -41,12 +41,22 @@ export interface LegendSeriesSpec {
 
 interface ChartLegendState {
 	series: readonly LegendSeriesSpec[]
-	/** The emphasised series, or `null` when every series is at full strength. */
+	/** The PINNED series — a click — or `null` when nothing is pinned. */
 	highlighted: string | null
+	/**
+	 * The series under the pointer RIGHT NOW, from either side: hovering the chart
+	 * or hovering a legend row. Transient, and it outranks `highlighted` while set.
+	 *
+	 * Two states rather than one because they answer different questions — "what am
+	 * I pointing at" and "what did I pick" — and production keeps them separate
+	 * too. A chart that only wants the pinned behaviour omits `active` entirely.
+	 */
+	active: string | null
 }
 
 interface ChartLegendActions {
 	highlight: (key: string) => void
+	setActive: (key: string | null) => void
 }
 
 interface ChartLegendMeta {
@@ -99,20 +109,37 @@ function ChartLegendProvider({
 	series,
 	highlighted,
 	onHighlight,
+	active = null,
+	onActiveChange,
 	label,
 	children,
 }: {
 	series: readonly LegendSeriesSpec[]
 	highlighted: string | null
 	onHighlight: (key: string) => void
+	/**
+	 * The hovered series, OWNED BY THE CHART so both sides share one value:
+	 * pointing at a slice lights its legend row, and pointing at a legend row
+	 * lights the slice. Production runs the same single `hover` index through both
+	 * (`query-builder-pie-chart.tsx` sets it from the arc's and the row's
+	 * `onPointerEnter` alike). Omit the pair to opt out.
+	 */
+	active?: string | null
+	onActiveChange?: (key: string | null) => void
 	label: string
 	children: ReactNode
 }) {
-	// The provider is the only place that knows how the highlight is managed, so a
+	const setActive = useCallback((key: string | null) => onActiveChange?.(key), [onActiveChange])
+
+	// The provider is the only place that knows how either state is managed, so a
 	// chart backed by URL state or a store composes the same parts unchanged.
 	const value = useMemo<ChartLegendContextValue>(
-		() => ({ state: { series, highlighted }, actions: { highlight: onHighlight }, meta: { label } }),
-		[series, highlighted, onHighlight, label],
+		() => ({
+			state: { series, highlighted, active },
+			actions: { highlight: onHighlight, setActive },
+			meta: { label },
+		}),
+		[series, highlighted, active, onHighlight, setActive, label],
 	)
 
 	return <ChartLegendContext value={value}>{children}</ChartLegendContext>
@@ -127,10 +154,14 @@ function ChartLegendProvider({
  * exist to prevent.
  */
 function ChartLegendRow({ children, className }: { children: ReactNode; className?: string }) {
-	const { meta } = useChartLegend()
+	const { meta, actions } = useChartLegend()
 	return (
 		<div
 			aria-label={meta.label}
+			// Cleared on the CONTAINER, not per item: leaving one row for the next
+			// fires `pointerleave` before the neighbour's `pointerenter`, so clearing
+			// per item would blank the hover for a frame on every crossing.
+			onPointerLeave={() => actions.setActive(null)}
 			className={cn("flex flex-wrap gap-x-3 gap-y-0.5 pt-2 text-xs select-none", className)}
 		>
 			{children}
@@ -140,10 +171,11 @@ function ChartLegendRow({ children, className }: { children: ReactNode; classNam
 
 /** The vertical list, matching `QueryBuilderLegend`'s `layout="right"`. */
 function ChartLegendColumn({ children, className }: { children: ReactNode; className?: string }) {
-	const { meta } = useChartLegend()
+	const { meta, actions } = useChartLegend()
 	return (
 		<div
 			aria-label={meta.label}
+			onPointerLeave={() => actions.setActive(null)}
 			className={cn("flex flex-col gap-0.5 pl-3 text-xs select-none", className)}
 		>
 			{children}
@@ -180,23 +212,31 @@ function ChartLegendItem({ seriesKey }: { seriesKey: string }) {
 	if (!entry) return null
 
 	const isHighlighted = state.highlighted === entry.key
-	const isMuted = state.highlighted !== null && !isHighlighted
+	// Hover outranks the pin while it lasts, matching production: whatever the
+	// pointer is on is what the eye is following, pinned or not.
+	const hovering = state.active !== null
+	const isActive = state.active === entry.key
+	const isMuted = hovering ? !isActive : state.highlighted !== null && !isHighlighted
 
 	return (
 		<button
 			type="button"
 			// `aria-pressed`, not a bare button: the control is a toggle, and the
 			// pressed state is the only thing that tells a screen reader which series
-			// is emphasised. `opacity-40` says nothing out loud.
+			// is pinned. `opacity-40` says nothing out loud.
 			aria-pressed={isHighlighted}
 			onClick={() => actions.highlight(entry.key)}
+			// `onFocus` alongside `onPointerEnter`, as production does: tabbing the
+			// legend should light the same slice a mouse would.
+			onPointerEnter={() => actions.setActive(entry.key)}
+			onFocus={() => actions.setActive(entry.key)}
 			className={cn(
 				"flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-muted/50",
 				isMuted && "opacity-40",
 				// Emphasis is carried by the OTHERS fading, as it is in the chart —
 				// brightening the picked row as well would double the contrast step and
 				// make a two-series legend look broken.
-				isHighlighted && "bg-muted/50",
+				(isActive || (!hovering && isHighlighted)) && "bg-muted/50",
 			)}
 		>
 			<ChartLegendSwatch color={entry.color} dashed={entry.dashed} />
@@ -303,11 +343,15 @@ export function ChartStatsLegend({
 	series,
 	highlighted,
 	onHighlight,
+	active,
+	onActiveChange,
 	label,
 }: {
 	series: readonly LegendSeriesSpec[]
 	highlighted: string | null
 	onHighlight: (key: string) => void
+	active?: string | null
+	onActiveChange?: (key: string | null) => void
 	label: string
 }) {
 	if (series.length === 0) return null
@@ -316,6 +360,8 @@ export function ChartStatsLegend({
 			series={series}
 			highlighted={highlighted}
 			onHighlight={onHighlight}
+			active={active}
+			onActiveChange={onActiveChange}
 			label={label}
 		>
 			<ChartLegend.Column className="pl-0">
