@@ -399,7 +399,7 @@ So the split is structural, not stylistic:
 | stacked bar            | **yes**                   | already groups by `z`; `barY` has a `color` channel, so `fill: (d) => colorFor(d.service)` becomes `color: (d) => d.service` plus a chart-level domain/range |
 | heatmap, trace scatter | yes (already used)        | continuous `color:` scale — but a gradient ramp, not a series key                                                                                            |
 | line, area             | no                        | one mark per series with a literal stroke; reaching a colour scale means rebuilding both around long-format rows and a `z` channel                           |
-| pie                    | no                        | `radialArc` reads no colour scale, the same wall its missing hover affordance hit                                                                            |
+| pie                    | no                        | `radialArc` reads no colour scale                                                                                                                            |
 | treemap, sankey        | no                        | `fill`/`stroke` are computed per node from data (`serviceColor`, error rate), not scaled                                                                     |
 
 `stacked-bar-legend-scene-tanstack` is the one arm where both are reachable, which makes it the
