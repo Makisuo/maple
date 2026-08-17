@@ -2026,6 +2026,14 @@ export const sessionEvents = defineDatasource("session_events", {
 		Attributes: column(t.map(t.string(), t.string()), {
 			jsonPath: "$.attributes",
 		}),
+		// Identity, stamped by the SDK on every event (the same lazy `identify()`
+		// read that fills session rows and spans). All defaulted: an SDK build that
+		// predates them keeps writing, and `product_events_mv` copies them through
+		// so a funnel never needs an insert-order-dependent join back to
+		// `session_replays`. `''` means "unidentified", never "unknown".
+		VisitorId: column(t.string().default(""), { jsonPath: "$.visitor_id" }),
+		UserId: column(t.string().default(""), { jsonPath: "$.user_id" }),
+		GroupId: column(t.string().default(""), { jsonPath: "$.group_id" }),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
@@ -2062,76 +2070,97 @@ export const sessionEvents = defineDatasource("session_events", {
 export type SessionEventsRow = InferRow<typeof sessionEvents>
 
 /**
- * Web analytics fact table — the page views and custom events out of
- * `session_events`, re-sorted by time and with the URL pre-parsed.
- * Populated by materialized view, not direct ingestion.
+ * Product events fact table — every event a funnel or product-analytics query
+ * can step on, from every surface: browser page views and `track()` calls
+ * (materialized out of `session_events`), and events posted directly by
+ * backends and mobile apps via `POST /v1/events`.
  *
- * ## Why this exists
+ * ## Why this exists (the browser half)
  *
  * `session_events` is sorted `(OrgId, SessionId, Timestamp, Seq)`, so a
  * time-range filter cannot use the primary index at all — only
  * `PARTITION BY toDate(Timestamp)` prunes, at day granularity. Its `idx_type`
  * skip index does not rescue that: navigation rows are interleaved with every
- * session's clicks and network calls, so at `GRANULARITY 4` (32,768 rows per
- * index granule) essentially every granule contains one and it prunes ~nothing.
- * Measured on one production org over 7 days: 6,879 navigation rows out of
- * 88,250 — the analytics queries read ~13x the data they use, and evaluated
- * `domain(Url)`/`path(Url)` per row on top of it.
- *
- * A `host`/`pagePath` filter then multiplies that by twelve, because
- * `navigationSessionsSubquery` is inlined into every branch of the breakdowns
- * UNION.
+ * session's clicks and network calls, so at `GRANULARITY 4` essentially every
+ * granule contains one and it prunes ~nothing. Measured on one production org
+ * over 7 days: 6,879 navigation rows out of 88,250 — the analytics queries read
+ * ~13x the data they used, and evaluated `domain(Url)`/`path(Url)` per row.
  *
  * So: time-first sorting key, `Host`/`PagePath` materialized at write time, and
- * only the two event types product analytics asks about.
+ * only the event types product analytics asks about (navigation + custom —
+ * clicks are ~2x more rows and a CSS selector is not a stable step definition).
+ * In-session debugging still reads `session_events` directly.
  *
- * ## Why only navigation + custom
+ * ## Why it is dual-fed (the server/mobile half)
  *
- * These are the two that answer product questions and the two that can be funnel
- * steps ("viewed /pricing", `track('signup_completed')`). Clicks are the next
- * largest type by far (11,970 vs 6,879 over the same window) and a CSS selector
- * is not a stable step definition, so including them would roughly triple the
- * table to serve a worse funnel. In-session debugging still reads
- * `session_events` directly — this table is not a replacement for it.
+ * "Started a plan" happens on a Stripe/webhook path the browser never sees, and
+ * a mobile app has no `session_events` transcript. Those events are posted
+ * straight into this table with `Source = 'server' | 'mobile'` and no
+ * `SessionId`. `Source` is also what keeps the browser backfill re-runnable:
+ * it deletes `WHERE Source = 'browser'` rather than truncating, so a re-run can
+ * never destroy directly ingested rows (which have no source to rebuild from).
+ *
+ * ## Person key
+ *
+ * `VisitorId` (device/anonymous id — the browser's cross-subdomain cookie, a
+ * mobile install id) and `UserId`/`GroupId` from `identify()`, stamped on the
+ * row by the SDK. A funnel keys on `if(UserId != '', UserId, VisitorId)`,
+ * stitched across the anonymous→identified boundary by `identity_links`.
+ * `VisitorId` sits third in the sorting key so a per-person `windowFunnel`
+ * groups over contiguous rows inside the time range.
  *
  * ## Kind vs EventName
  *
- * Both, deliberately. `track()` puts a caller-supplied name straight into
- * `Message` with no reserved-prefix check, so a customer calling
+ * Both, deliberately. `track()` puts a caller-supplied name straight into the
+ * event with no reserved-prefix check on the browser path, so a customer calling
  * `track('$pageview')` would silently inflate page views if `EventName` were the
  * only discriminator. `Kind` is the column that is provably identical to the old
  * `Type = 'navigation'` predicate; `EventName` is the funnel's step key.
  *
- * TTL 30 days, matching the rest of the session family. Note the source carries
- * the same TTL, so this table can never be rebuilt past that horizon — a longer
- * retention here is a one-way decision, not a tuning knob.
+ * TTL 365 days. The browser half can never be rebuilt past `session_events`'
+ * 30 days, but this table's rows are tiny (a handful of event names per org) and
+ * a referral → paid funnel spans weeks, so retention here is the primary copy,
+ * not a rebuildable cache.
  */
-export const webEvents = defineDatasource("web_events", {
+export const productEvents = defineDatasource("product_events", {
 	description:
-		"Web analytics fact table: navigation and custom events from session_events, sorted by time with domain(Url)/path(Url) pre-extracted. Powers page views, top pages and funnels. Populated by materialized view.",
-	jsonPaths: false,
+		"Product events fact table: browser page views and track() calls (materialized from session_events) plus events posted directly by backends and mobile apps via POST /v1/events. Carries the person key (VisitorId/UserId/GroupId). Powers page views, top pages and funnels.",
 	schema: {
-		OrgId: t.string().lowCardinality(),
-		Timestamp: t.dateTime64(9),
-		SessionId: t.string(),
-		/** Breaks ties within a millisecond, so a funnel's step order is stable. */
-		Seq: t.uint32(),
-		/** `navigation` | `custom` — the source `Type`, carried through unchanged. */
-		Kind: t.string().lowCardinality(),
-		/** `$pageview` for navigation, else the `track()` name. */
-		EventName: t.string(),
+		OrgId: column(t.string().lowCardinality(), { jsonPath: "$.org_id" }),
+		Timestamp: column(t.dateTime64(9), { jsonPath: "$.timestamp" }),
+		/** `browser` (from session_events) | `server` | `mobile`. */
+		Source: column(t.string().lowCardinality().default("browser"), {
+			jsonPath: "$.source",
+		}),
+		/** Empty for server events. */
+		SessionId: column(t.string().default(""), { jsonPath: "$.session_id" }),
+		/** Breaks ties within a millisecond, so a funnel's step order is stable. 0 for direct rows. */
+		Seq: column(t.uint32().default(0), { jsonPath: "$.seq" }),
+		VisitorId: column(t.string().default(""), { jsonPath: "$.visitor_id" }),
+		UserId: column(t.string().default(""), { jsonPath: "$.user_id" }),
+		GroupId: column(t.string().default(""), { jsonPath: "$.group_id" }),
+		/** `navigation` | `custom` | `screen` — the source type, carried through unchanged. */
+		Kind: column(t.string().lowCardinality(), { jsonPath: "$.kind" }),
+		/** `$pageview` for navigation, `$screen` for mobile screen views, else the `track()` name. */
+		EventName: column(t.string(), { jsonPath: "$.event_name" }),
 		/** `domain(Url)`. LowCardinality: an org has a handful of hosts. */
-		Host: t.string().lowCardinality(),
+		Host: column(t.string().lowCardinality().default(""), { jsonPath: "$.host" }),
 		/** `path(Url)` — pathname only, so no query string or fragment. Unbounded for `/orders/:uuid` apps, hence plain String. */
-		PagePath: t.string(),
-		Url: t.string(),
+		PagePath: column(t.string().default(""), { jsonPath: "$.page_path" }),
+		Url: column(t.string().default(""), { jsonPath: "$.url" }),
+		/** The emitting service (`maple-api`, `acme-ios`). Empty on browser rows — the session carries it. */
+		ServiceName: column(t.string().lowCardinality().default(""), {
+			jsonPath: "$.service_name",
+		}),
 		/** `track()` props. Plain String keys — the customer's app chooses them. */
-		Attributes: t.map(t.string(), t.string()),
+		Attributes: column(t.map(t.string(), t.string()).defaultExpr("map()"), {
+			jsonPath: "$.attributes",
+		}),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
-		sortingKey: ["OrgId", "Timestamp", "SessionId", "Seq"],
-		ttl: "toDate(Timestamp) + INTERVAL 30 DAY",
+		sortingKey: ["OrgId", "Timestamp", "VisitorId", "SessionId", "Seq"],
+		ttl: "toDate(Timestamp) + INTERVAL 365 DAY",
 	}),
 	indexes: [
 		{
@@ -2144,7 +2173,47 @@ export const webEvents = defineDatasource("web_events", {
 			type: "set(64)",
 			granularity: 4,
 		},
+		{
+			// "Everything this user did" — the person drill-in and the
+			// UserId-keyed funnel branch. Near-unique values, so a bloom filter.
+			name: "idx_user_id",
+			expr: "UserId",
+			type: "bloom_filter",
+			granularity: 4,
+		},
 	],
 })
 
-export type WebEventsRow = InferRow<typeof webEvents>
+export type ProductEventsRow = InferRow<typeof productEvents>
+
+/**
+ * Identity links — one row per (visitor, user) pair ever observed together on a
+ * session, materialized out of `session_replays` (later also from mobile
+ * `identify` calls). This is how a funnel collapses a person's anonymous
+ * marketing visit (VisitorId only) and their later server-side events (UserId
+ * only) into one row: a `product_events` row resolves its person as
+ * `if(UserId != '', UserId, coalesce(link.UserId, VisitorId))`.
+ *
+ * ReplacingMergeTree keyed on the pair, so re-observing it is a no-op; the
+ * lowest `FirstSeen` wins on merge because the reader takes `min()`.
+ */
+export const identityLinks = defineDatasource("identity_links", {
+	description:
+		"Visitor→user identity links, one row per (VisitorId, UserId) pair observed on a session_replays row with both set. Stitches anonymous and identified product_events into one person for funnels.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		VisitorId: t.string(),
+		UserId: t.string(),
+		FirstSeen: t.dateTime64(9),
+	},
+	engine: engine.replacingMergeTree({
+		partitionKey: "tuple()",
+		sortingKey: ["OrgId", "VisitorId", "UserId"],
+		// A pair not re-observed for a year is dead weight; the reader takes the
+		// most recent link anyway.
+		ttl: "toDate(FirstSeen) + INTERVAL 365 DAY",
+	}),
+})
+
+export type IdentityLinksRow = InferRow<typeof identityLinks>

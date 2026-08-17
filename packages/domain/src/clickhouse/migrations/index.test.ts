@@ -21,6 +21,7 @@ import {
 	migration_0015_service_overview_minutely,
 	serviceOverviewMinutelyBackfill,
 } from "./0015_service_overview_minutely"
+import { migration_0016_product_events } from "./0016_product_events"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -35,14 +36,15 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
-		expect(migrations.at(-1)).toBe(migration_0015_service_overview_minutely)
-		expect(latestMigrationVersion).toBe(15)
-		// 0010, 0014 and 0015 are performance-only, so the ingest-gating version
-		// skips all three and stays at 13 — nothing writes `web_events` or
-		// `service_overview_minutely` directly, and bumping it would un-ready every
-		// BYO-CH org's ingest routing for a read-path change.
-		expect(clickHouseSchemaVersion).toBe("13")
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+		expect(migrations.at(-1)).toBe(migration_0016_product_events)
+		expect(latestMigrationVersion).toBe(16)
+		// 0010, 0014 and 0015 are performance-only and skipped by the ingest-gating
+		// version; 0016 is not — the gateway writes `session_events`' new identity
+		// columns and `product_events` directly, so a BYO-CH org must apply it
+		// before ingest routes there again.
+		expect(clickHouseSchemaVersion).toBe("16")
+		expect(migration_0016_product_events.requiredForIngest).toBeUndefined()
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
 		expect(migration_0015_service_overview_minutely.requiredForIngest).toBe(false)
