@@ -21,6 +21,9 @@ export {
 	argMin,
 	argMax,
 	argMaxMerge,
+	windowFunnel,
+	sequenceMatch,
+	type WindowFunnelMode,
 } from "./aggregate"
 
 export {

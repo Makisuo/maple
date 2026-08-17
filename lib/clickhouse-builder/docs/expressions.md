@@ -113,6 +113,19 @@ The `*If` family takes a `Condition` as its last argument:
 CH.quantile(0.95)($.DurationMs) // quantile(0.95)(DurationMs)
 ```
 
+So are the parametric funnel aggregates — the window / pattern is a parameter,
+the timestamp and step conditions are the arguments:
+
+```ts
+CH.windowFunnel(3600)($.Timestamp, $.Name.eq("view"), $.Name.eq("signup"))
+// windowFunnel(3600)(Timestamp, Name = 'view', Name = 'signup')
+CH.windowFunnel(3600, "strict_order")($.Timestamp, …)
+CH.sequenceMatch("(?1)(?t<3600)(?2)")($.Timestamp, $.Name.eq("view"), $.Name.eq("signup"))
+```
+
+`windowFunnel` takes `Date`, `DateTime` or an unsigned integer for the timestamp
+(not `DateTime64`) and the window is in that column's unit.
+
 _(Backed by `docs/expressions.md > Conditional aggregation`.)_
 
 ## Conditionals

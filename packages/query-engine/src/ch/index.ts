@@ -169,7 +169,31 @@ export {
 	type WebAnalyticsPagesOutput,
 	type WebAnalyticsBreakdownsOpts,
 	type WebAnalyticsBreakdownsOutput,
+	type ProductEventsFilters,
 } from "./queries/web-analytics"
+
+// Queries — Product events (funnels over `product_events`)
+export {
+	productEventsFunnelQuery,
+	productEventsFunnelRowSchema,
+	productEventsFunnelBreakdownQuery,
+	productEventsFunnelBreakdownRowSchema,
+	productEventNamesQuery,
+	productEventNamesRowSchema,
+	ProductEventsFunnelError,
+	FUNNEL_MAX_STEPS,
+	FUNNEL_BREAKDOWN_MAX_GROUPS,
+	type FunnelStep,
+	type FunnelKeyBy,
+	type FunnelSessionDimension,
+	type FunnelBreakdownBy,
+	type ProductEventsFunnelOpts,
+	type ProductEventsFunnelOutput,
+	type ProductEventsFunnelBreakdownOpts,
+	type ProductEventsFunnelBreakdownOutput,
+	type ProductEventNamesOpts,
+	type ProductEventNamesOutput,
+} from "./queries/product-events"
 
 // Queries — Services
 export {

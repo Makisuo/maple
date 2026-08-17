@@ -612,7 +612,7 @@ const webAnalyticsFilters = (
 		readonly utmCampaign?: string
 		readonly visitorType?: "new" | "returning"
 	},
-	useWebEvents: boolean,
+	useProductEvents: boolean,
 ): CH.WebAnalyticsFilters => ({
 	host: payload.host,
 	pagePath: payload.pagePath,
@@ -626,17 +626,17 @@ const webAnalyticsFilters = (
 	utmMedium: payload.utmMedium,
 	utmCampaign: payload.utmCampaign,
 	visitorType: payload.visitorType,
-	useWebEvents,
+	useProductEvents,
 })
 
 // Rollup/raw pairs share ids and cache keys because parity tests require identical results.
 
-const webAnalyticsSummaryDef = (useWebEvents: boolean) => ({
+const webAnalyticsSummaryDef = (useProductEvents: boolean) => ({
 	id: "webAnalyticsSummary" as const,
 	profile: "aggregation" as const,
 	cache: timeRangeCache,
 	compile: (payload: WebAnalyticsSummaryRequest, orgId: string) =>
-		CH.compile(CH.webAnalyticsSummaryQuery(webAnalyticsFilters(payload, useWebEvents)), {
+		CH.compile(CH.webAnalyticsSummaryQuery(webAnalyticsFilters(payload, useProductEvents)), {
 			orgId,
 			startTime: payload.startTime,
 			endTime: payload.endTime,
@@ -646,14 +646,14 @@ const webAnalyticsSummaryDef = (useWebEvents: boolean) => ({
 export const webAnalyticsSummary = defineQuery(webAnalyticsSummaryDef(true))
 export const webAnalyticsSummaryRaw = defineQuery(webAnalyticsSummaryDef(false))
 
-const webAnalyticsTimeseriesDef = (useWebEvents: boolean) => ({
+const webAnalyticsTimeseriesDef = (useProductEvents: boolean) => ({
 	id: "webAnalyticsTimeseries" as const,
 	profile: "aggregation" as const,
 	cache: timeRangeCache,
 	compile: (payload: WebAnalyticsTimeseriesRequest, orgId: string) =>
 		CH.compile(
 			CH.webAnalyticsTimeseriesQuery({
-				...webAnalyticsFilters(payload, useWebEvents),
+				...webAnalyticsFilters(payload, useProductEvents),
 				bucketSeconds: payload.bucketSeconds,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
@@ -663,14 +663,14 @@ const webAnalyticsTimeseriesDef = (useWebEvents: boolean) => ({
 export const webAnalyticsTimeseries = defineQuery(webAnalyticsTimeseriesDef(true))
 export const webAnalyticsTimeseriesRaw = defineQuery(webAnalyticsTimeseriesDef(false))
 
-const webAnalyticsPageviewsDef = (useWebEvents: boolean) => ({
+const webAnalyticsPageviewsDef = (useProductEvents: boolean) => ({
 	id: "webAnalyticsPageviews" as const,
 	profile: "aggregation" as const,
 	cache: timeRangeCache,
 	compile: (payload: WebAnalyticsPageviewsRequest, orgId: string) =>
 		CH.compile(
 			CH.webAnalyticsPageviewsTimeseriesQuery({
-				...webAnalyticsFilters(payload, useWebEvents),
+				...webAnalyticsFilters(payload, useProductEvents),
 				bucketSeconds: payload.bucketSeconds,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
@@ -680,14 +680,14 @@ const webAnalyticsPageviewsDef = (useWebEvents: boolean) => ({
 export const webAnalyticsPageviews = defineQuery(webAnalyticsPageviewsDef(true))
 export const webAnalyticsPageviewsRaw = defineQuery(webAnalyticsPageviewsDef(false))
 
-const webAnalyticsPagesDef = (useWebEvents: boolean) => ({
+const webAnalyticsPagesDef = (useProductEvents: boolean) => ({
 	id: "webAnalyticsPages" as const,
 	profile: "aggregation" as const,
 	cache: timeRangeCache,
 	compile: (payload: WebAnalyticsPagesRequest, orgId: string) =>
 		CH.compile(
 			CH.webAnalyticsPagesQuery({
-				...webAnalyticsFilters(payload, useWebEvents),
+				...webAnalyticsFilters(payload, useProductEvents),
 				limit: payload.limit,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
@@ -697,7 +697,7 @@ const webAnalyticsPagesDef = (useWebEvents: boolean) => ({
 export const webAnalyticsPages = defineQuery(webAnalyticsPagesDef(true))
 export const webAnalyticsPagesRaw = defineQuery(webAnalyticsPagesDef(false))
 
-const webAnalyticsBreakdownsDef = (useWebEvents: boolean) => ({
+const webAnalyticsBreakdownsDef = (useProductEvents: boolean) => ({
 	id: "webAnalyticsBreakdowns" as const,
 	profile: "aggregation" as const,
 	// Bound memory across the UNION fan-out.
@@ -706,7 +706,7 @@ const webAnalyticsBreakdownsDef = (useWebEvents: boolean) => ({
 	compile: (payload: WebAnalyticsBreakdownsRequest, orgId: string) =>
 		CH.compileUnion(
 			CH.webAnalyticsBreakdownsQuery({
-				...webAnalyticsFilters(payload, useWebEvents),
+				...webAnalyticsFilters(payload, useProductEvents),
 				limitPerDimension: payload.limitPerDimension,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
