@@ -14,6 +14,8 @@ import {
 	LOCAL_SCHEMA_V4,
 	LOCAL_SCHEMA_V4_MANIFEST,
 	LOCAL_SCHEMA_V5,
+	LOCAL_SCHEMA_V5_MANIFEST,
+	LOCAL_SCHEMA_V6,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -50,21 +52,22 @@ import {
 	duplicateCursorContinuation,
 	type CopyProgress,
 } from "../src/server/local-store-migrations/legacy-to-current"
+import { v5ToV6ProductEventsModule } from "../src/server/local-store-migrations/v5-to-v6-product-events"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v5 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("c36c52a95568eb68")
-		expect(SCHEMA_DIGEST).toBe("c36c52a95568eb68f8ebc98d7d36b552f21fb09b888bb310c68f0ad52d529fe4")
+	it("matches the generated v6 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("4fb7062f1e068837")
+		expect(SCHEMA_DIGEST).toBe("4fb7062f1e068837ff72848af8e862a47155b7543a1de8401b7b67c9ce176792")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(5)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V5)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(6)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V6)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -89,12 +92,15 @@ describe("current local schema identity", () => {
 
 		// v4 is exactly v3 plus the web analytics fact table and its view. Asserted
 		// against the frozen v3 manifest rather than the diff so a later structural
-		// change can't quietly ride along on this version.
-		const webEvents = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "web_events")
+		// change can't quietly ride along on this version. (v6 drops web_events
+		// again, so it is read from the frozen v4 manifest, not the current one.)
+		const webEvents = LOCAL_SCHEMA_V4_MANIFEST.objects.find((object) => object.name === "web_events")
 		expect(webEvents?.engine).toBe("MergeTree")
 		expect(webEvents?.orderBy).toBe("(OrgId, Timestamp, SessionId, Seq)")
 		expect(webEvents?.indexes).toContain("idx_event_name")
-		const webEventsView = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "web_events_mv")
+		const webEventsView = LOCAL_SCHEMA_V4_MANIFEST.objects.find(
+			(object) => object.name === "web_events_mv",
+		)
 		expect(webEventsView?.definition).toContain("FROM session_events")
 		const v3Names = new Set(LOCAL_SCHEMA_V3_MANIFEST.objects.map((object) => object.name))
 		expect(v3Names.has("web_events")).toBe(false)
@@ -104,14 +110,14 @@ describe("current local schema identity", () => {
 		// v5 is exactly v4 plus the minutely service-overview rollup and its view.
 		// Asserted against the frozen v4 manifest, same as above, so a later
 		// structural change cannot quietly ride along on this version.
-		const minutely = LOCAL_SCHEMA_MANIFEST.objects.find(
+		const minutely = LOCAL_SCHEMA_V5_MANIFEST.objects.find(
 			(object) => object.name === "service_overview_minutely",
 		)
 		expect(minutely?.engine).toBe("AggregatingMergeTree")
 		expect(minutely?.orderBy).toBe(
 			"(OrgId, ServiceName, Minute, DeploymentEnv, ServiceNamespace, CommitSha)",
 		)
-		const minutelyView = LOCAL_SCHEMA_MANIFEST.objects.find(
+		const minutelyView = LOCAL_SCHEMA_V5_MANIFEST.objects.find(
 			(object) => object.name === "service_overview_minutely_mv",
 		)
 		// Reads traces directly — a cascade off the hourly rollup would make the
@@ -119,8 +125,67 @@ describe("current local schema identity", () => {
 		expect(minutelyView?.definition).toContain("FROM traces")
 		expect(minutelyView?.definition).not.toContain("FROM service_overview_minutely")
 		expect(
-			LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name).filter((name) => !v4Names.has(name)),
+			LOCAL_SCHEMA_V5_MANIFEST.objects
+				.map((object) => object.name)
+				.filter((name) => !v4Names.has(name)),
 		).toEqual(["service_overview_minutely", "service_overview_minutely_mv"])
+
+		// v6 replaces web_events with product_events, adds identity_links, and
+		// widens session_events by the three identity columns. Asserted against
+		// the frozen v5 manifest, same as above.
+		const productEvents = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "product_events")
+		expect(productEvents?.engine).toBe("MergeTree")
+		expect(productEvents?.orderBy).toBe("(OrgId, Timestamp, VisitorId, SessionId, Seq)")
+		expect(productEvents?.ttl).toContain("365 DAY")
+		expect(productEvents?.indexes).toEqual(["idx_event_name", "idx_user_id"])
+		expect(productEvents?.columns.map((column) => column.name)).toEqual([
+			"OrgId",
+			"Timestamp",
+			"Source",
+			"SessionId",
+			"Seq",
+			"VisitorId",
+			"UserId",
+			"GroupId",
+			"Kind",
+			"EventName",
+			"Host",
+			"PagePath",
+			"Url",
+			"ServiceName",
+			"Attributes",
+		])
+		const productEventsView = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "product_events_mv",
+		)
+		expect(productEventsView?.definition).toContain("FROM session_events")
+		expect(productEventsView?.definition).toContain("'browser' AS Source")
+		const identityLinks = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "identity_links")
+		expect(identityLinks?.engine).toBe("ReplacingMergeTree")
+		expect(identityLinks?.orderBy).toBe("(OrgId, VisitorId, UserId)")
+		const identityLinksView = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "identity_links_mv",
+		)
+		expect(identityLinksView?.definition).toContain("FROM session_replays")
+		const sessionEventColumns = (manifest: LocalSchemaManifest) =>
+			manifest.objects
+				.find((object) => object.name === "session_events")
+				?.columns.map((column) => column.name) ?? []
+		expect(sessionEventColumns(LOCAL_SCHEMA_V5_MANIFEST)).not.toContain("VisitorId")
+		expect(sessionEventColumns(LOCAL_SCHEMA_MANIFEST).slice(-3)).toEqual([
+			"VisitorId",
+			"UserId",
+			"GroupId",
+		])
+		const v5Names = new Set(LOCAL_SCHEMA_V5_MANIFEST.objects.map((object) => object.name))
+		const v6Names = new Set(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name))
+		expect([...v6Names].filter((name) => !v5Names.has(name))).toEqual([
+			"identity_links",
+			"identity_links_mv",
+			"product_events",
+			"product_events_mv",
+		])
+		expect([...v5Names].filter((name) => !v6Names.has(name))).toEqual(["web_events", "web_events_mv"])
 	})
 })
 
@@ -133,6 +198,7 @@ describe("local migration registry", () => {
 			"local-0002-to-0003-service-map-ingest-bridge",
 			"local-0003-to-0004-web-events",
 			"local-0004-to-0005-service-overview-minutely",
+			"local-0005-to-0006-product-events",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -140,6 +206,7 @@ describe("local migration registry", () => {
 		expect(chain[2]?.to).toEqual(LOCAL_SCHEMA_V3)
 		expect(chain[3]?.to).toEqual(LOCAL_SCHEMA_V4)
 		expect(chain[4]?.to).toEqual(LOCAL_SCHEMA_V5)
+		expect(chain[5]?.to).toEqual(LOCAL_SCHEMA_V6)
 		expect(typeof chain[0]?.apply).toBe("function")
 	})
 
@@ -178,7 +245,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 6, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 7, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
@@ -968,5 +1035,113 @@ describe("legacy raw replay cursor", () => {
 			},
 		}
 		expect(() => legacyToCurrentModule.decodeProgress(progress)).toThrow(/lastHash/)
+	})
+})
+
+describe("v5 -> v6 product events module", () => {
+	const rawRows = {
+		logs: "1",
+		traces: "2",
+		metrics_sum: "0",
+		metrics_gauge: "0",
+		metrics_histogram: "0",
+		metrics_exponential_histogram: "0",
+	}
+	const state = {
+		module: "local-0005-to-0006-product-events",
+		version: 1,
+		rawRows,
+		sourceRows: { browserEvents: "3", identityPairs: "2" },
+	}
+
+	it("binds the frozen v5 and v6 identities and never the current constant", () => {
+		expect(v5ToV6ProductEventsModule.from).toEqual(LOCAL_SCHEMA_V5)
+		expect(v5ToV6ProductEventsModule.to).toEqual(LOCAL_SCHEMA_V6)
+		expect(v5ToV6ProductEventsModule.from).not.toBe(CURRENT_LOCAL_SCHEMA)
+		expect(v5ToV6ProductEventsModule.operations.map((operation) => operation.id)).toEqual([
+			"clone-v5-store",
+			"add-session-event-identity",
+			"install-product-events",
+			"verify-v6-schema",
+		])
+		// The chain must reach v6 through this module and only this module.
+		const chain = resolveMigrationChain(LOCAL_SCHEMA_V5, CURRENT_LOCAL_SCHEMA)
+		expect(chain.map((migration) => migration.id)).toEqual(["local-0005-to-0006-product-events"])
+		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V6)
+		// The dropped table is declared, and the backfilled ones say what they
+		// are rebuilt from.
+		const dispositions = new Map(
+			v5ToV6ProductEventsModule.dispositions.map((entry) => [entry.name, entry.disposition]),
+		)
+		expect(dispositions.get("web_events")).toBe("invalidate")
+		expect(dispositions.get("product_events")).toBe("rebuild-complete")
+		expect(dispositions.get("identity_links")).toBe("rebuild-complete")
+		expect(dispositions.get("session_events")).toBe("preserve-exact")
+	})
+
+	it("decodes only its own well-formed persisted state", () => {
+		expect(v5ToV6ProductEventsModule.decodeState(state)).toEqual(state)
+		expect(v5ToV6ProductEventsModule.decodeState({ ...state, retentionDays: 120 })).toEqual({
+			...state,
+			retentionDays: 120,
+		})
+		expect(() =>
+			v5ToV6ProductEventsModule.decodeState({
+				...state,
+				module: "local-0004-to-0005-service-overview-minutely",
+			}),
+		).toThrow(/unsupported module or version/)
+		expect(() => v5ToV6ProductEventsModule.decodeState({ ...state, version: 2 })).toThrow(
+			/unsupported module or version/,
+		)
+		expect(() => v5ToV6ProductEventsModule.decodeState({ ...state, extra: true })).toThrow(
+			/unknown field/,
+		)
+		expect(() => v5ToV6ProductEventsModule.decodeState({ ...state, retentionDays: "120" })).toThrow(
+			/retentionDays must be an integer/,
+		)
+		expect(() =>
+			v5ToV6ProductEventsModule.decodeState({ ...state, rawRows: { ...rawRows, logs: "-1" } }),
+		).toThrow(/rawRows.logs/)
+		expect(() =>
+			v5ToV6ProductEventsModule.decodeState({ ...state, rawRows: { ...rawRows, web_events: "1" } }),
+		).toThrow(/unknown table/)
+		// The backfill counts are part of the resume key: a state without them
+		// cannot verify, so it must not decode.
+		const { sourceRows: _sourceRows, ...withoutSourceRows } = state
+		expect(() => v5ToV6ProductEventsModule.decodeState(withoutSourceRows)).toThrow(
+			/sourceRows must be an object/,
+		)
+		expect(() =>
+			v5ToV6ProductEventsModule.decodeState({ ...state, sourceRows: { browserEvents: "3" } }),
+		).toThrow(/identityPairs/)
+		expect(() =>
+			v5ToV6ProductEventsModule.decodeState({
+				...state,
+				sourceRows: { browserEvents: 3, identityPairs: "2" },
+			}),
+		).toThrow(/browserEvents/)
+		expect(() =>
+			v5ToV6ProductEventsModule.decodeState({
+				...state,
+				sourceRows: { browserEvents: "3", identityPairs: "2", webEvents: "0" },
+			}),
+		).toThrow(/unknown field/)
+	})
+
+	it("decodes progress as the single installed marker", () => {
+		expect(v5ToV6ProductEventsModule.decodeProgress(undefined)).toBeUndefined()
+		expect(v5ToV6ProductEventsModule.decodeProgress({ installed: true })).toEqual({ installed: true })
+		expect(() => v5ToV6ProductEventsModule.decodeProgress({ installed: false })).toThrow(/invalid/)
+		expect(() => v5ToV6ProductEventsModule.decodeProgress({ installed: true, rows: 1 })).toThrow(
+			/invalid/,
+		)
+	})
+
+	it("recovers by keeping whatever state and progress were persisted", async () => {
+		const progress = { installed: true } as const
+		await expect(
+			v5ToV6ProductEventsModule.recover({} as MigrationModuleContext, state as never, progress),
+		).resolves.toEqual({ state, progress })
 	})
 })
