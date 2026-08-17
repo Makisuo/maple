@@ -196,3 +196,33 @@ struct DroppedSignalGlyph: View {
 		.accessibilityHidden(true)
 	}
 }
+
+extension SessionController {
+	/// Run a screen's load and turn the outcome into a `LoadState`.
+	///
+	/// This is the do/catch every model used to carry by hand: a 401 re-mints
+	/// the token and retries once; a second 401 signs out; a cancellation
+	/// (window change, org switch) yields `nil` so the caller leaves the
+	/// current state alone rather than flashing a placeholder.
+	func perform<T>(_ work: () async throws -> T) async -> LoadState<T>? {
+		do {
+			return .loaded(try await work())
+		} catch is CancellationError {
+			return nil
+		} catch let error as MapleAPIError {
+			guard await handle(error) else { return .failed(error) }
+			do {
+				return .loaded(try await work())
+			} catch is CancellationError {
+				return nil
+			} catch let error as MapleAPIError {
+				if error.requiresReauthentication { await signOutLocally() }
+				return .failed(error)
+			} catch {
+				return .failed(.transport(error))
+			}
+		} catch {
+			return .failed(.transport(error))
+		}
+	}
+}

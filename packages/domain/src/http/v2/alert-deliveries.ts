@@ -39,6 +39,24 @@ export const V2AlertDelivery = Schema.Struct({
 })
 export type V2AlertDelivery = Schema.Schema.Type<typeof V2AlertDelivery>
 
+const DeliveriesQuery = Schema.Struct({
+	...ListQuery.fields,
+	incident_id: Schema.optional(
+		AlertIncidentPublicId.annotate({
+			description: "Only return deliveries produced for this incident (`inc_…`).",
+		}),
+	),
+	rule_id: Schema.optional(
+		AlertRulePublicId.annotate({
+			description: "Only return deliveries produced by this alert rule (`alrt_…`).",
+		}),
+	),
+}).annotate({
+	identifier: "AlertDeliveryListQuery",
+	title: "Alert delivery list query",
+	description: "Pagination plus optional incident / rule filters.",
+})
+
 const AlertDeliveryList = ListOf(V2AlertDelivery).annotate({
 	identifier: "AlertDeliveryList",
 	title: "Alert delivery list",
@@ -47,7 +65,7 @@ const AlertDeliveryList = ListOf(V2AlertDelivery).annotate({
 export class V2AlertDeliveriesApiGroup extends HttpApiGroup.make("alertDeliveries")
 	.add(
 		HttpApiEndpoint.get("list", "/", {
-			query: ListQuery,
+			query: DeliveriesQuery,
 			success: AlertDeliveryList,
 			error: [V2ParameterInvalid.schema, publicError(AlertPersistenceError)],
 		}).annotateMerge(
@@ -55,7 +73,7 @@ export class V2AlertDeliveriesApiGroup extends HttpApiGroup.make("alertDeliverie
 				identifier: "listAlertDeliveries",
 				summary: "List alert deliveries",
 				description:
-					"Returns the organization's most recent alert notification attempts, newest first. Requires the `alerts:read` scope.",
+					"Returns the organization's most recent alert notification attempts, newest first, optionally filtered by `incident_id` or `rule_id`. Requires the `alerts:read` scope.",
 			}),
 		),
 	)

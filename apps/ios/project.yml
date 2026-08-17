@@ -63,14 +63,20 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Maple/Resources/Maple.entitlements
         # iPhone only, portrait only, for the first slice.
         TARGETED_DEVICE_FAMILY: "1"
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
     info:
       path: Maple/Resources/Info.plist
       properties:
         CFBundleDisplayName: Maple
         CFBundleShortVersionString: "0.1.0"
+        # These must live in the plist itself: `INFOPLIST_KEY_*` build settings
+        # are only honoured when Xcode generates the plist, and this one is
+        # written by XcodeGen. Without `UILaunchScreen` iOS assumes a legacy
+        # app and letterboxes it inside the old 4.7" canvas.
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
         # Geist Mono is the body voice and proportional Geist the display face —
         # the inversion that defines Maple's look. See Typography.swift.
         # Bare filenames: Xcode flattens resources to the bundle root, so a

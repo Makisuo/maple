@@ -125,6 +125,17 @@ describe("AlertReadModelsService", () => {
 			assert.strictEqual(deliveries.events[0]?.id, DELIVERY)
 			assert.strictEqual(deliveries.events[0]?.destinationName, "Primary webhook")
 			assert.strictEqual(deliveries.events[0]?.responseCode, 204)
+
+			// The incident filter is what the mobile incident timeline reads.
+			const forNew = yield* readModels.listDeliveryEvents(ORG, { incidentId: INCIDENT_NEW })
+			assert.deepStrictEqual(
+				forNew.events.map((event) => event.id),
+				[DELIVERY],
+			)
+			const forOld = yield* readModels.listDeliveryEvents(ORG, { incidentId: INCIDENT_OLD })
+			assert.deepStrictEqual(forOld.events, [])
+			const forRule = yield* readModels.listDeliveryEvents(ORG, { ruleId: RULE })
+			assert.strictEqual(forRule.events.length, 1)
 			assert.deepStrictEqual(contexts, [])
 		}).pipe(Effect.provide(makeLayer(testDb, contexts)))
 	})

@@ -45,10 +45,27 @@ final class SessionController {
 
 	let api: any MapleAPI
 	private let tokens: ClerkTokenProvider
+	/// True when the phase is pinned by `fixture(api:tokens:)` and Clerk's
+	/// state must be ignored.
+	private let isFixture: Bool
 
 	init(api: any MapleAPI, tokens: ClerkTokenProvider) {
 		self.api = api
 		self.tokens = tokens
+		self.isFixture = false
+	}
+
+	private init(fixtureAPI: any MapleAPI, tokens: ClerkTokenProvider) {
+		self.api = fixtureAPI
+		self.tokens = tokens
+		self.isFixture = true
+		self.phase = .ready(organizationId: FixtureSession.organizationId)
+	}
+
+	/// A session that is already signed in to a fixture organization and never
+	/// consults Clerk. See `FixtureAPI`.
+	static func fixture(api: any MapleAPI, tokens: ClerkTokenProvider) -> SessionController {
+		SessionController(fixtureAPI: api, tokens: tokens)
 	}
 
 	var activeOrganization: Organization? {
@@ -71,6 +88,7 @@ final class SessionController {
 	/// is `@Observable`, so SwiftUI re-runs the enclosing `.task(id:)` for us
 	/// rather than needing a subscription.
 	func refresh() async {
+		if isFixture { return }
 		guard Clerk.shared.user != nil else {
 			phase = .signedOut
 			memberships = []

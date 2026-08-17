@@ -39,11 +39,26 @@ import { MapleApiV2 } from "../packages/domain/src/http/v2/api"
  * re-running the script — the incremental cost of the allowlist is two lines.
  */
 const IOS_OPERATIONS: ReadonlyArray<string> = [
+	// Services
 	"listServices",
 	"getService",
+	"queryTraceTimeseries",
+	"queryTraceBreakdown",
+	// Errors
 	"listErrorIssues",
 	"listErrorIssueServiceCounts",
 	"getErrorIssue",
+	// Alerts
+	"listAlertIncidents",
+	"getAlertIncident",
+	"listAlertRules",
+	"getAlertRule",
+	"listAlertRuleChecks",
+	"listAlertDeliveries",
+	// Anomalies
+	"listAnomalyIncidents",
+	"getAnomalyIncident",
+	"getAnomalyIncidentTimeseries",
 ]
 
 const ERROR_ENVELOPE_SCHEMA_NAME = "MapleErrorEnvelope"
@@ -126,6 +141,7 @@ function render(): { text: string; doc: JsonObject } {
 	prunePaths(doc)
 	collapseNullableUnions(doc)
 	collapseErrorResponses(doc)
+	mergeDuplicateEnums(doc)
 	sweepUnreachableSchemas(doc)
 
 	const sorted = sortKeysDeep(doc)
@@ -292,7 +308,9 @@ function collapseNullableUnions(doc: JsonObject): void {
 				const target = asObject(value)
 				if (target === undefined) continue
 				const { schema, nullable } = resolve(target)
-				properties[key] = schema
+				// Descend as well: a property that is itself an array or object
+				// can carry a union in its `items` (`AlertRule.group_by`).
+				properties[key] = visit(schema)
 				if (nullable) required.delete(key)
 			}
 			if (required.size > 0) object.required = [...required]
@@ -512,6 +530,58 @@ function errorEnvelopeSchema(): JsonObject {
 }
 
 /** Pass 4a — drop components no longer reachable from the pruned paths. */
+/**
+ * Pass 3b — one Swift enum per domain enum.
+ *
+ * Effect registers a component per *annotation site*, so a domain enum such as
+ * `AlertSignalType` that is re-annotated on the incident, the check, and the
+ * rule arrives as `_maple_AlertSignalType`, `_maple_AlertSignalType_2`,
+ * `_maple_AlertSignalType_3` — identical `enum` + `type`, differing only in
+ * `description`/`examples`. Left alone, the generator emits three unrelated
+ * Swift enums and every comparison across them needs a raw-value round trip.
+ * When the numbered copy is the same string enum as its base, point every
+ * `$ref` at the base and drop the copy.
+ */
+function mergeDuplicateEnums(doc: JsonObject): void {
+	const schemas = asObject(asObject(doc.components)?.schemas) ?? {}
+	const aliases = new Map<string, string>()
+
+	for (const name of Object.keys(schemas)) {
+		const match = /^(.+)_(\d+)$/.exec(name)
+		if (match === null) continue
+		const base = match[1]
+		const baseSchema = asObject(schemas[base])
+		const copy = asObject(schemas[name])
+		if (baseSchema === undefined || copy === undefined) continue
+		const baseEnum = asStringArray(baseSchema.enum)
+		const copyEnum = asStringArray(copy.enum)
+		if (baseEnum === undefined || copyEnum === undefined) continue
+		if (baseSchema.type !== "string" || copy.type !== "string") continue
+		if (baseEnum.length !== copyEnum.length || baseEnum.some((value, index) => value !== copyEnum[index]))
+			continue
+		aliases.set(name, base)
+	}
+
+	const rewrite = (node: JsonValue | undefined): void => {
+		if (Array.isArray(node)) {
+			for (const entry of node) rewrite(entry)
+			return
+		}
+		const object = asObject(node)
+		if (object === undefined) return
+		const ref = asString(object.$ref)
+		if (ref !== undefined) {
+			const name = componentNameFromRef(ref)
+			const target = name === undefined ? undefined : aliases.get(name)
+			if (target !== undefined) object.$ref = `#/components/schemas/${target}`
+		}
+		for (const value of Object.values(object)) rewrite(value)
+	}
+
+	rewrite(doc)
+	for (const name of aliases.keys()) delete schemas[name]
+}
+
 function sweepUnreachableSchemas(doc: JsonObject): void {
 	const schemas = asObject(asObject(doc.components)?.schemas) ?? {}
 	const reachable = new Set<string>()

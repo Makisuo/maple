@@ -80,6 +80,8 @@ export interface ListAlertIncidentsOptions {
 export interface ListAlertDeliveryEventsOptions {
 	readonly limit?: number
 	readonly offset?: number
+	readonly incidentId?: AlertIncidentId
+	readonly ruleId?: AlertRuleId
 }
 
 export interface AlertReadModelsServiceApi {
@@ -473,7 +475,17 @@ export class AlertReadModelsService extends Context.Service<
 				db
 					.select()
 					.from(alertDeliveryEvents)
-					.where(eq(alertDeliveryEvents.orgId, orgId))
+					.where(
+						and(
+							eq(alertDeliveryEvents.orgId, orgId),
+							options.incidentId === undefined
+								? undefined
+								: eq(alertDeliveryEvents.incidentId, options.incidentId),
+							options.ruleId === undefined
+								? undefined
+								: eq(alertDeliveryEvents.ruleId, options.ruleId),
+						),
+					)
 					.orderBy(desc(alertDeliveryEvents.createdAt), desc(alertDeliveryEvents.id))
 					.limit(options.limit ?? 100)
 					.offset(options.offset ?? 0),

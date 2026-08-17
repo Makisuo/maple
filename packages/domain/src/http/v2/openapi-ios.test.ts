@@ -34,10 +34,29 @@ const schemas = spec.components.schemas as JsonObject
 const IOS_OPERATIONS = [
 	"listServices",
 	"getService",
+	"queryTraceTimeseries",
+	"queryTraceBreakdown",
 	"listErrorIssues",
 	"listErrorIssueServiceCounts",
 	"getErrorIssue",
+	"listAlertIncidents",
+	"getAlertIncident",
+	"listAlertRules",
+	"getAlertRule",
+	"listAlertRuleChecks",
+	"listAlertDeliveries",
+	"listAnomalyIncidents",
+	"getAnomalyIncident",
+	"getAnomalyIncidentTimeseries",
 ] as const
+
+/**
+ * Unions that are *real* — discriminated request shapes, not Effect's
+ * nullability/non-finite/constraint idioms. These generate a Swift enum with
+ * one case per branch, which is the right thing. Anything else carrying an
+ * `anyOf` is a normalization regression.
+ */
+const GENUINE_UNIONS = ["AttributeFilter"] as const
 
 const operations = (): ReadonlyArray<JsonObject> =>
 	Object.values(spec.paths as JsonObject).flatMap((item) =>
@@ -97,9 +116,23 @@ describe("iOS OpenAPI spec", () => {
 	 * `notes` as `.value1: String?`, `error_rate` as a wrapper around a Double.
 	 */
 	it("collapses every synthetic union", () => {
-		expect(specText).not.toContain('"anyOf"')
+		const withoutGenuine = JSON.stringify(
+			Object.fromEntries(
+				Object.entries(schemas).filter(([name]) => !GENUINE_UNIONS.includes(name as never)),
+			),
+		)
+		expect(withoutGenuine).not.toContain('"anyOf"')
+		expect(withoutGenuine).not.toContain('"allOf"')
+		expect(JSON.stringify(spec.paths)).not.toContain('"anyOf"')
 		expect(specText).not.toContain('"type":"null"')
 		expect(Object.keys(schemas).filter((name) => name.startsWith("Union_"))).toEqual([])
+	})
+
+	it("emits one component per domain enum", () => {
+		// `_maple_AlertSignalType_2` next to `_maple_AlertSignalType` would give
+		// the app two unrelated Swift enums for the same wire values.
+		const numbered = Object.keys(schemas).filter((name) => /^_maple_.+_\d+$/.test(name))
+		expect(numbered).toEqual([])
 	})
 
 	it("keeps nullable fields optional and non-nullable fields required", () => {

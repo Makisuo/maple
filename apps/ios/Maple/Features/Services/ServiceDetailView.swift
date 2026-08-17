@@ -1,13 +1,22 @@
 import MapleAPI
 import SwiftUI
 
+struct ServiceDetail {
+	var service: Service
+	var errorRate: [Double]
+	var p95: [Double]
+	var throughput: [Double]
+	/// Open incidents whose rule names this service (or is grouped on it).
+	var incidents: [IncidentCard]
+	var issues: [ErrorIssue]
+	var slowestOperations: [BreakdownItem]
+	var failingOperations: [BreakdownItem]
+}
+
 @MainActor
 @Observable
 final class ServiceDetailModel {
-	private(set) var state: LoadState<Service> = .loading
-	/// This service's open issues. Fetching them here is what makes the screen
-	/// worth opening — the metrics alone are already on the list row.
-	private(set) var issues: [ErrorIssue] = []
+	private(set) var state: LoadState<ServiceDetail> = .loading
 
 	let serviceName: String
 	var window: TimeWindow
@@ -24,30 +33,67 @@ final class ServiceDetailModel {
 
 	func load(showPlaceholder: Bool = true) async {
 		if showPlaceholder && !state.hasContent { state = .loading }
-
-		do {
-			let resolved = window.resolve()
-			async let serviceTask = api.service(named: serviceName, window: resolved)
-			async let issuesTask = api.issues(
-				query: IssueQuery(serviceName: serviceName, actionableOnly: true),
-				window: resolved,
-				limit: 10,
-				cursor: nil
-			)
-
-			let service = try await serviceTask
-			issues = ((try? await issuesTask) ?? Page(items: [], hasMore: false, nextCursor: nil)).items
-			state = .loaded(service)
-		} catch is CancellationError {
-		} catch let error as MapleAPIError {
-			if await session.handle(error) {
-				await load(showPlaceholder: false)
-			} else {
-				state = .failed(error)
-			}
-		} catch {
-			state = .failed(.transport(error))
+		if let next = await session.perform({ try await self.fetch() }) {
+			state = next
 		}
+	}
+
+	private func fetch() async throws -> ServiceDetail {
+		let resolved = window.resolve()
+		let name = serviceName
+
+		// The service itself is the screen; everything else is context that
+		// degrades to "nothing here" rather than to an error.
+		async let serviceTask = api.service(named: name, window: resolved)
+		async let issuesTask = api.issues(
+			query: IssueQuery(serviceName: name, actionableOnly: true), window: resolved, limit: 10, cursor: nil
+		)
+		async let errorTask = api.traceTimeseries(
+			TraceTimeseriesRequest(aggregation: .errorRate, window: resolved, serviceName: name)
+		)
+		async let p95Task = api.traceTimeseries(
+			TraceTimeseriesRequest(aggregation: .p95Duration, window: resolved, serviceName: name)
+		)
+		async let countTask = api.traceTimeseries(
+			TraceTimeseriesRequest(aggregation: .count, window: resolved, serviceName: name)
+		)
+		async let slowTask = api.traceBreakdown(
+			TraceBreakdownRequest(aggregation: .p95Duration, groupBy: .spanName, window: resolved, serviceName: name, limit: 5)
+		)
+		async let failingTask = api.traceBreakdown(
+			TraceBreakdownRequest(
+				aggregation: .count, groupBy: .spanName, window: resolved, serviceName: name, hasError: true, limit: 5
+			)
+		)
+		async let incidentsTask = api.alertIncidents(status: .open, ruleId: nil, limit: 50, cursor: nil)
+		async let rulesTask = api.alertRules(limit: 100, cursor: nil)
+
+		let service = try await serviceTask
+		let rules = Dictionary(
+			((try? await rulesTask.items) ?? []).map { ($0.id, $0) },
+			uniquingKeysWith: { first, _ in first }
+		)
+		let incidents = ((try? await incidentsTask.items) ?? []).compactMap { incident -> IncidentCard? in
+			guard let rule = rules[incident.ruleId] else { return nil }
+			let scoped = rule.serviceNames.contains(name)
+			let grouped = incident.groupKey == name
+			let global = rule.serviceNames.isEmpty && !rule.excludeServiceNames.contains(name) && incident.groupKey == nil
+			guard scoped || grouped || global else { return nil }
+			return IncidentCard(
+				incident: incident, serviceNames: rule.serviceNames, display: SignalDisplay(rule: rule), observations: []
+			)
+		}
+
+		return ServiceDetail(
+			service: service,
+			errorRate: (try? await errorTask.values) ?? [],
+			p95: (try? await p95Task.values) ?? [],
+			throughput: (try? await countTask.values) ?? [],
+			incidents: incidents,
+			issues: (try? await issuesTask.items) ?? [],
+			slowestOperations: (try? await slowTask.data) ?? [],
+			failingOperations: (try? await failingTask.data) ?? []
+		)
 	}
 }
 
@@ -67,8 +113,8 @@ struct ServiceDetailView: View {
 					emptyTitle: "No data",
 					emptyMessage: "This service reported nothing in \(model.window.phrase).",
 					retry: { Task { await model.load() } }
-				) { service in
-					ServiceDetailContent(service: service, issues: model.issues, window: model.window)
+				) { detail in
+					ServiceDetailContent(detail: detail, window: model.window)
 				}
 				.refreshable { await model.load(showPlaceholder: false) }
 			} else {
@@ -84,23 +130,31 @@ struct ServiceDetailView: View {
 						.font(Typo.monoTitle)
 						.foregroundStyle(Token.foreground)
 						.lineLimit(1)
-					if let service = model?.state.value {
+					if let service = model?.state.value?.service {
 						HealthDot(
-							health: ServiceHealth(
-								errorRate: service.errorRate,
-								p95LatencyMs: service.p95LatencyMs
-							)
+							health: ServiceHealth(errorRate: service.errorRate, p95LatencyMs: service.p95LatencyMs)
 						)
 					}
+				}
+			}
+			if let model {
+				ToolbarItem(placement: .topBarTrailing) {
+					TimeWindowMenu(
+						window: Binding(
+							get: { model.window },
+							set: { newValue in
+								model.window = newValue
+								Task { await model.load() }
+							}
+						)
+					)
 				}
 			}
 		}
 		.task(id: session.dataGeneration) {
 			let model =
 				model
-				?? ServiceDetailModel(
-					serviceName: serviceName, window: window, api: session.api, session: session
-				)
+				?? ServiceDetailModel(serviceName: serviceName, window: window, api: session.api, session: session)
 			self.model = model
 			await model.load()
 		}
@@ -108,30 +162,46 @@ struct ServiceDetailView: View {
 }
 
 private struct ServiceDetailContent: View {
-	let service: Service
-	let issues: [ErrorIssue]
+	let detail: ServiceDetail
 	let window: TimeWindow
+
+	private var service: Service { detail.service }
 
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 24) {
 				section("Golden signals") {
-					StatGrid(columns: 2) {
-						StatTile(
+					// The number is the window aggregate the API computed; the
+					// line under it is the shape of that window.
+					StatGrid(columns: 3) {
+						SignalTile(
 							label: "Error rate",
 							value: Format.errorRate(service.errorRate),
-							tint: Tone.errorRate(service.errorRate)
+							valueTint: Tone.errorRate(service.errorRate),
+							values: detail.errorRate,
+							tint: Token.chartError
 						)
-						StatTile(label: "Throughput", value: Format.throughput(service.throughput))
+						SignalTile(
+							label: "p95",
+							value: Format.latency(service.p95LatencyMs),
+							valueTint: Tone.latency(service.p95LatencyMs, scale: .p95),
+							values: detail.p95,
+							tint: Token.chartP95
+						)
+						SignalTile(
+							label: "Throughput",
+							value: Format.throughput(service.throughput),
+							values: detail.throughput,
+							tint: Token.mutedForeground
+						)
+					}
+					.padding(.horizontal, 16)
+
+					StatGrid(columns: 3) {
 						StatTile(
 							label: "p50",
 							value: Format.latency(service.p50LatencyMs),
 							tint: Tone.latency(service.p50LatencyMs, scale: .p50)
-						)
-						StatTile(
-							label: "p95",
-							value: Format.latency(service.p95LatencyMs),
-							tint: Tone.latency(service.p95LatencyMs, scale: .p95)
 						)
 						StatTile(
 							label: "p99",
@@ -141,6 +211,51 @@ private struct ServiceDetailContent: View {
 						StatTile(label: "Errors", value: Format.count(service.errorCount))
 					}
 					.padding(.horizontal, 16)
+				}
+
+				if !detail.incidents.isEmpty {
+					section("Open alerts") {
+						VStack(spacing: 8) {
+							ForEach(detail.incidents) { card in
+								NavigationLink(value: Route.incident(id: card.id)) {
+									IncidentCardView(card: card)
+								}
+								.buttonStyle(.plain)
+							}
+						}
+						.padding(.horizontal, 16)
+					}
+				}
+
+				section("Open issues") {
+					if detail.issues.isEmpty {
+						Text("Nothing needs attention in \(window.phrase).")
+							.font(Typo.small)
+							.foregroundStyle(Token.mutedForeground)
+							.padding(.horizontal, 16)
+					} else {
+						VStack(spacing: 0) {
+							ForEach(detail.issues, id: \.id) { issue in
+								NavigationLink(value: Route.issue(id: issue.id)) {
+									IssueRow(issue: issue, showsService: false)
+								}
+								.buttonStyle(RowButtonStyle())
+								Hairline()
+							}
+						}
+					}
+				}
+
+				if !detail.failingOperations.isEmpty {
+					section("Failing operations") {
+						BreakdownList(items: detail.failingOperations, unit: .count, tint: Token.chartError)
+					}
+				}
+
+				if !detail.slowestOperations.isEmpty {
+					section("Slowest operations (p95)") {
+						BreakdownList(items: detail.slowestOperations, unit: .milliseconds, tint: Token.chartP95)
+					}
 				}
 
 				section("Volume") {
@@ -165,34 +280,10 @@ private struct ServiceDetailContent: View {
 					}
 					.padding(.horizontal, 16)
 				}
-
-				section("Open issues") {
-					if issues.isEmpty {
-						Text("Nothing needs attention in \(window.phrase).")
-							.font(Typo.small)
-							.foregroundStyle(Token.mutedForeground)
-							.padding(.horizontal, 16)
-					} else {
-						VStack(spacing: 0) {
-							ForEach(issues, id: \.id) { issue in
-								NavigationLink(value: IssueRoute.detail(id: issue.id)) {
-									IssueRow(issue: issue, showsService: false)
-								}
-								.buttonStyle(RowButtonStyle())
-								Hairline()
-							}
-						}
-					}
-				}
 			}
 			.padding(.vertical, 16)
 		}
 		.scrollContentBackground(.hidden)
-		.navigationDestination(for: IssueRoute.self) { route in
-			switch route {
-			case .detail(let id): IssueDetailView(issueID: id)
-			}
-		}
 	}
 
 	@ViewBuilder
@@ -205,8 +296,4 @@ private struct ServiceDetailContent: View {
 			content()
 		}
 	}
-}
-
-enum IssueRoute: Hashable {
-	case detail(id: String)
 }
