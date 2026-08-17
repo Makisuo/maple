@@ -6,10 +6,13 @@ import { memo, useMemo, type ReactNode } from "react"
 
 import {
 	ChartSeriesLegend,
-	useChartLegendState,
+	MUTED_COLOR_AMOUNT,
+	useChartLegendHighlight,
 	type LegendSeriesSpec,
 } from "@/lab/bench/tanstack/chart-legend"
+import { usePlotChromeColors } from "@/lab/bench/tanstack/chart-shared"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
+import { muteColor } from "@/lab/charts/color-scale"
 
 /**
  * One warehouse row: span count for a `(service, operation)` pair — the shape
@@ -285,8 +288,10 @@ function TreemapFigure({
  * it (see the note above). Without a key, a viewer can see that four tiles share
  * a hue but not what the hue means.
  *
- * Hiding a service drops its rows before the layout runs, so the survivors
- * retile across the full area rather than leaving a hole.
+ * Highlighting rather than hiding is doubly right here. Dropping a service's rows
+ * would re-run `squarify` over what remains, so every surviving tile changes size
+ * AND position — the reader loses the mosaic they were reading. Muting keeps the
+ * tiling fixed and just quiets the other services.
  */
 export const TreemapLegendSpike = memo(function TreemapLegendSpike({
 	rows = TREEMAP_SPIKE_ROWS,
@@ -310,22 +315,29 @@ export const TreemapLegendSpike = memo(function TreemapLegendSpike({
 		return items
 	}, [rows, serviceColor])
 
-	const { hidden, toggle } = useChartLegendState(legendSeries)
+	const { highlighted, highlight } = useChartLegendHighlight()
+	const chromeColors = usePlotChromeColors()
 
-	const visibleRows = useMemo(() => rows.filter((row) => !hidden.has(row.service)), [rows, hidden])
+	const emphasisedServiceColor = useMemo(() => {
+		if (highlighted === null) return serviceColor
+		return (service: string) =>
+			service === highlighted
+				? serviceColor(service)
+				: muteColor(serviceColor(service), chromeColors.background, MUTED_COLOR_AMOUNT)
+	}, [serviceColor, highlighted, chromeColors])
 
 	return (
 		<TreemapFigure
-			rows={visibleRows}
+			rows={rows}
 			renderer={renderer}
 			className={className}
 			colors={colors}
-			serviceColor={serviceColor}
+			serviceColor={emphasisedServiceColor}
 			legend={
 				<ChartSeriesLegend
 					series={legendSeries}
-					hidden={hidden}
-					onToggle={toggle}
+					highlighted={highlighted}
+					onHighlight={highlight}
 					label="Span volume by service"
 				/>
 			}

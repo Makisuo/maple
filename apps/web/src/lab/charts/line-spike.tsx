@@ -8,7 +8,9 @@ import { memo, useMemo, type ReactNode } from "react"
 
 import {
 	ChartSeriesLegend,
-	useChartLegendState,
+	MUTED_COLOR_AMOUNT,
+	MUTED_OPACITY,
+	useChartLegendHighlight,
 	type LegendSeriesSpec,
 } from "@/lab/bench/tanstack/chart-legend"
 import {
@@ -21,6 +23,7 @@ import {
 	type TooltipSeriesSpec,
 } from "@/lab/bench/tanstack/chart-shared"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
+import { muteColor } from "@/lab/charts/color-scale"
 import {
 	splitAtFirstPartial,
 	timeseriesAxisContext,
@@ -78,11 +81,11 @@ function useLatencySeries(): readonly LatencySeries[] {
 }
 
 /**
- * The figure itself, over whatever series it is handed.
+ * The figure itself.
  *
- * `series` is the VISIBLE set, not the full one: hiding a percentile removes its
- * marks and re-derives the y domain, which is why the legend's state lives in the
- * variant below rather than inside the legend component.
+ * `mutedIds` names the series the legend is pushing back — every series is still
+ * drawn, and the y domain is still derived from all of them, so emphasis never
+ * moves the axis.
  */
 function LineFigure({
 	rows,
@@ -90,6 +93,7 @@ function LineFigure({
 	incomplete,
 	className,
 	series,
+	mutedIds,
 	legend,
 }: {
 	rows: readonly TimeseriesSpikeRow[]
@@ -97,6 +101,7 @@ function LineFigure({
 	incomplete: boolean
 	className?: string
 	series: readonly LatencySeries[]
+	mutedIds?: ReadonlySet<string>
 	legend?: ReactNode
 }) {
 	const chromeColors = usePlotChromeColors()
@@ -125,16 +130,19 @@ function LineFigure({
 		// domain starts at the data minimum, which clips the p50 line to the axis.
 		// Configuring the scale instance is the only way to pin the floor.
 		//
-		// Derived from the VISIBLE series rather than from `p99LatencyMs`: with the
-		// legend, hiding p99 has to drop the ceiling to p95, or the remaining lines
-		// stay squashed into the bottom third and the toggle looks like it did
-		// nothing. `|| 1` covers every series hidden — a `[0, 0]` domain has no
-		// extent for `nice` to round.
-		const dataMax =
-			rows.reduce(
-				(max, row) => series.reduce((seriesMax, s) => Math.max(seriesMax, row[s.key]), max),
-				0,
-			) || 1
+		// Over every series, muted ones included — that is the point of highlighting
+		// rather than hiding. A domain that tracked the emphasised series would
+		// rescale the axis on every click, which is exactly the jump this interaction
+		// avoids.
+		const dataMax = rows.reduce(
+			(max, row) => series.reduce((seriesMax, s) => Math.max(seriesMax, row[s.key]), max),
+			0,
+		)
+
+		// One mark per series, so a FLAT `strokeOpacity` is already per-series here —
+		// no colour arithmetic needed. The single-mark charts (stacked bar, pie,
+		// treemap) have no such luxury; see `muteColor`.
+		const opacityFor = (id: string) => (mutedIds?.has(id) ? MUTED_OPACITY : 1)
 
 		return defineChart({
 			marks: [
@@ -145,6 +153,7 @@ function LineFigure({
 						y: (d: TimeseriesSpikeRow) => d[s.key],
 						stroke: s.color,
 						strokeWidth: STROKE_WIDTH,
+						strokeOpacity: opacityFor(s.id),
 					}),
 				),
 				...series.map((s) =>
@@ -154,6 +163,7 @@ function LineFigure({
 						y: (d: TimeseriesSpikeRow) => d[s.key],
 						stroke: s.color,
 						strokeWidth: STROKE_WIDTH,
+						strokeOpacity: opacityFor(s.id),
 						// A plain string here, unlike `barY`, where the same option is a
 						// per-datum channel.
 						strokeDasharray: INCOMPLETE_DASHARRAY,
@@ -166,7 +176,12 @@ function LineFigure({
 						rows,
 						(d: TimeseriesSpikeRow) => d.bucket,
 						(d: TimeseriesSpikeRow) => d[s.key],
-						s.color,
+						// The dot has to fade with its line. `dot`'s `fill` is a channel but
+						// its opacity is not, so a muted dot is a muted COLOUR — the same
+						// constraint `muteColor` exists for.
+						mutedIds?.has(s.id)
+							? muteColor(s.color, chromeColors.background, MUTED_COLOR_AMOUNT)
+							: s.color,
 						chromeColors,
 					),
 				),
@@ -213,7 +228,7 @@ function LineFigure({
 				offset: 12,
 			},
 		})
-	}, [rows, series, incomplete, axisContext, tooltipAnchor, chromeColors])
+	}, [rows, series, mutedIds, incomplete, axisContext, tooltipAnchor, chromeColors])
 
 	return (
 		<TanstackChartFrame
@@ -272,8 +287,7 @@ export const LineSpike = memo(function LineSpike({
 })
 
 /**
- * The same chart with a series key beneath it, matching what the Recharts arm
- * renders via `QueryBuilderLegend`.
+ * The same chart with a series key beneath it.
  *
  * A sibling component rather than a `legend` flag on `LineSpike`: the two differ
  * in what state they own, not in what they display, and the legend-less variant
@@ -296,9 +310,12 @@ export const LineLegendSpike = memo(function LineLegendSpike({
 		() => series.map((s) => ({ key: s.id, label: s.label, color: s.color })),
 		[series],
 	)
-	const { hidden, toggle } = useChartLegendState(legendSeries)
+	const { highlighted, highlight } = useChartLegendHighlight()
 
-	const visibleSeries = useMemo(() => series.filter((s) => !hidden.has(s.id)), [series, hidden])
+	const mutedIds = useMemo(
+		() => new Set(highlighted === null ? [] : series.filter((s) => s.id !== highlighted).map((s) => s.id)),
+		[series, highlighted],
+	)
 
 	return (
 		<LineFigure
@@ -306,12 +323,13 @@ export const LineLegendSpike = memo(function LineLegendSpike({
 			renderer={renderer}
 			incomplete={incomplete}
 			className={className}
-			series={visibleSeries}
+			series={series}
+			mutedIds={mutedIds}
 			legend={
 				<ChartSeriesLegend
 					series={legendSeries}
-					hidden={hidden}
-					onToggle={toggle}
+					highlighted={highlighted}
+					onHighlight={highlight}
 					label="Latency percentiles"
 				/>
 			}

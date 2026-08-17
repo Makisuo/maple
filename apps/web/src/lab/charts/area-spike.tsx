@@ -8,7 +8,9 @@ import { memo, useMemo, type ReactNode } from "react"
 
 import {
 	ChartSeriesLegend,
-	useChartLegendState,
+	MUTED_COLOR_AMOUNT,
+	MUTED_OPACITY,
+	useChartLegendHighlight,
 	type LegendSeriesSpec,
 } from "@/lab/bench/tanstack/chart-legend"
 import {
@@ -22,6 +24,7 @@ import {
 	type TooltipSeriesSpec,
 } from "@/lab/bench/tanstack/chart-shared"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
+import { muteColor } from "@/lab/charts/color-scale"
 import {
 	errorThroughput,
 	splitAtFirstPartial,
@@ -86,8 +89,8 @@ function useThroughputSeries(): readonly ThroughputSeries[] {
 }
 
 /**
- * The figure itself, over whatever series it is handed — see `line-spike.tsx`
- * for why the visible set arrives as a prop rather than being resolved here.
+ * The figure itself — see `line-spike.tsx` for why the muted set arrives as a
+ * prop rather than being resolved here.
  */
 function AreaFigure({
 	rows,
@@ -95,6 +98,7 @@ function AreaFigure({
 	incomplete,
 	className,
 	series,
+	mutedIds,
 	idPrefix,
 	legend,
 }: {
@@ -103,6 +107,7 @@ function AreaFigure({
 	incomplete: boolean
 	className?: string
 	series: readonly ThroughputSeries[]
+	mutedIds?: ReadonlySet<string>
 	idPrefix: string
 	legend?: ReactNode
 }) {
@@ -128,14 +133,14 @@ function AreaFigure({
 			? splitAtFirstPartial(rows)
 			: { solid: rows, dashed: [] as readonly TimeseriesSpikeRow[] }
 
-		// Over the VISIBLE series, so hiding Throughput rescales the axis to the
-		// error band instead of leaving it flat against the floor. `|| 1` covers
-		// every series hidden — `nice` has nothing to round on a `[0, 0]` domain.
-		const dataMax =
-			rows.reduce(
-				(max, row) => series.reduce((seriesMax, s) => Math.max(seriesMax, s.value(row)), max),
-				0,
-			) || 1
+		// Over every series, muted ones included: emphasis must not move the axis.
+		const dataMax = rows.reduce(
+			(max, row) => series.reduce((seriesMax, s) => Math.max(seriesMax, s.value(row)), max),
+			0,
+		)
+
+		const isMuted = (id: string) => mutedIds?.has(id) === true
+		const opacityFor = (id: string) => (isMuted(id) ? MUTED_OPACITY : 1)
 
 		return defineChart({
 			gradients: series.flatMap((s) => [
@@ -150,6 +155,7 @@ function AreaFigure({
 						y: s.value,
 						fill: `url(#${idPrefix}${s.id})`,
 						stroke: "none",
+						fillOpacity: opacityFor(s.id),
 					}),
 					areaY(dashed, {
 						id: `${s.id}AreaIncomplete`,
@@ -157,6 +163,7 @@ function AreaFigure({
 						y: s.value,
 						fill: `url(#${idPrefix}${s.id}Faded)`,
 						stroke: "none",
+						fillOpacity: opacityFor(s.id),
 					}),
 					lineY(solid, {
 						id: `${s.id}Line`,
@@ -164,6 +171,7 @@ function AreaFigure({
 						y: s.value,
 						stroke: s.color,
 						strokeWidth: STROKE_WIDTH,
+						strokeOpacity: opacityFor(s.id),
 					}),
 					lineY(dashed, {
 						id: `${s.id}LineIncomplete`,
@@ -171,11 +179,21 @@ function AreaFigure({
 						y: s.value,
 						stroke: s.color,
 						strokeWidth: STROKE_WIDTH,
+						strokeOpacity: opacityFor(s.id),
 						strokeDasharray: INCOMPLETE_DASHARRAY,
 					}),
 				]),
 				...series.map((s) =>
-					focusDot(rows, (d: TimeseriesSpikeRow) => d.bucket, s.value, s.color, chromeColors),
+					focusDot(
+						rows,
+						(d: TimeseriesSpikeRow) => d.bucket,
+						s.value,
+						// `dot` has no per-datum opacity, so a faded dot is a faded colour.
+						isMuted(s.id)
+							? muteColor(s.color, chromeColors.background, MUTED_COLOR_AMOUNT)
+							: s.color,
+						chromeColors,
+					),
 				),
 				focusCrosshair(chromeColors),
 			],
@@ -212,7 +230,7 @@ function AreaFigure({
 				offset: 12,
 			},
 		})
-	}, [rows, series, incomplete, idPrefix, axisContext, tooltipAnchor, chromeColors])
+	}, [rows, series, mutedIds, incomplete, idPrefix, axisContext, tooltipAnchor, chromeColors])
 
 	return (
 		<TanstackChartFrame
@@ -297,9 +315,12 @@ export const AreaLegendSpike = memo(function AreaLegendSpike({
 		() => series.map((s) => ({ key: s.id, label: s.label, color: s.color })),
 		[series],
 	)
-	const { hidden, toggle } = useChartLegendState(legendSeries)
+	const { highlighted, highlight } = useChartLegendHighlight()
 
-	const visibleSeries = useMemo(() => series.filter((s) => !hidden.has(s.id)), [series, hidden])
+	const mutedIds = useMemo(
+		() => new Set(highlighted === null ? [] : series.filter((s) => s.id !== highlighted).map((s) => s.id)),
+		[series, highlighted],
+	)
 
 	return (
 		<AreaFigure
@@ -307,15 +328,16 @@ export const AreaLegendSpike = memo(function AreaLegendSpike({
 			renderer={renderer}
 			incomplete={incomplete}
 			className={className}
-			series={visibleSeries}
+			series={series}
+			mutedIds={mutedIds}
 			// A third namespace: this arm renders beside both others in the gallery,
 			// and two `<defs>` sharing an id is a silently wrong fill, not an error.
 			idPrefix={incomplete ? "areaLegendSpikeIncomplete" : "areaLegendSpike"}
 			legend={
 				<ChartSeriesLegend
 					series={legendSeries}
-					hidden={hidden}
-					onToggle={toggle}
+					highlighted={highlighted}
+					onHighlight={highlight}
 					label="Request volume"
 				/>
 			}

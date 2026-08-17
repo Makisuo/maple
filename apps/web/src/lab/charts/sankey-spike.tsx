@@ -210,11 +210,13 @@ function SankeyFigure({
 	edges,
 	renderer,
 	className,
+	mutedBands,
 	legend,
 }: {
 	edges: readonly SankeySpikeEdge[]
 	renderer: TanstackRenderer
 	className?: string
+	mutedBands?: ReadonlySet<string>
 	legend?: ReactNode
 }) {
 	const colors = usePlotColors(FLOW_TOKENS)
@@ -244,7 +246,18 @@ function SankeyFigure({
 	// Error rate → colour. Three bands rather than a continuous ramp: `stroke` is
 	// a `VisualChannel`, so a per-datum interpolation would also be legal, but
 	// banding reads far better against a dark palette at 1–2px ribbon widths.
-	const strokeForEdge = useMemo(() => (edge: SankeySpikeEdge) => colors[bandForEdge(edge)], [colors])
+	const strokeForEdge = useMemo(
+		() => (edge: SankeySpikeEdge) => {
+			const band = bandForEdge(edge)
+			// `link.strokeOpacity` is a flat number like every other opacity in the
+			// package, and all fourteen ribbons come from ONE mark — so a per-band fade
+			// has to be a per-band COLOUR. See `muteColor`.
+			return mutedBands?.has(band)
+				? muteColor(colors[band], colors.background, MUTED_COLOR_AMOUNT)
+				: colors[band]
+		},
+		[colors, mutedBands],
+	)
 
 	const definition = useMemo(() => {
 		return defineChart({

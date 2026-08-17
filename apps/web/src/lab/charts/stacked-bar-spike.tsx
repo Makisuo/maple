@@ -10,10 +10,13 @@ import { memo, useMemo, useState, type ReactNode } from "react"
 
 import {
 	ChartSeriesLegend,
-	useChartLegendState,
+	MUTED_COLOR_AMOUNT,
+	useChartLegendHighlight,
 	type LegendSeriesSpec,
 } from "@/lab/bench/tanstack/chart-legend"
+import { usePlotChromeColors } from "@/lab/bench/tanstack/chart-shared"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
+import { muteColor } from "@/lab/charts/color-scale"
 import {
 	STACKED_BAR_SERVICES,
 	stackedBarAxisContext,
@@ -104,11 +107,12 @@ function useServiceColor(): (service: string) => string {
 /**
  * The figure itself, over whatever rows it is handed.
  *
- * Unlike line and area, hiding a service here is a ROW filter rather than a mark
- * filter — there is one `barY` and the series live in its `z` channel — which is
- * why `stackMax` has to be recomputed from the same filtered rows below. Leaving
- * it over the full set would keep the axis pinned to the original total and the
- * toggle would shrink the stack without ever reclaiming the empty headroom.
+ * Note it takes no notion of emphasis. It does not need one: every service is
+ * painted through `colorFor`, so the legend variant below highlights by handing
+ * down a `colorFor` that already returns muted colours — no extra prop, no extra
+ * branch here. That works because `barY.fill` is a `VisualChannel` while
+ * `fillOpacity` is a flat `number`, which is the same reason the muting has to be
+ * a colour in the first place.
  */
 function StackedBarFigure({
 	rows,
@@ -315,24 +319,31 @@ export const StackedBarLegendSpike = memo(function StackedBarLegendSpike({
 			})),
 		[colorFor],
 	)
-	const { hidden, toggle } = useChartLegendState(legendSeries)
+	const { highlighted, highlight } = useChartLegendHighlight()
+	const chromeColors = usePlotChromeColors()
 
-	// A row filter, not a mark filter: one `barY` carries every service through its
-	// `z` channel, so this is also what re-derives `stackMax` downstream.
-	const visibleRows = useMemo(() => rows.filter((row) => !hidden.has(row.service)), [rows, hidden])
+	// The whole highlight, expressed as a colour lookup: every row still draws and
+	// the stack keeps its geometry, so the axis never moves.
+	const emphasisedColorFor = useMemo(() => {
+		if (highlighted === null) return colorFor
+		return (service: string) =>
+			service === highlighted
+				? colorFor(service)
+				: muteColor(colorFor(service), chromeColors.background, MUTED_COLOR_AMOUNT)
+	}, [colorFor, highlighted, chromeColors])
 
 	return (
 		<StackedBarFigure
-			rows={visibleRows}
+			rows={rows}
 			renderer={renderer}
 			incomplete={incomplete}
 			className={className}
-			colorFor={colorFor}
+			colorFor={emphasisedColorFor}
 			legend={
 				<ChartSeriesLegend
 					series={legendSeries}
-					hidden={hidden}
-					onToggle={toggle}
+					highlighted={highlighted}
+					onHighlight={highlight}
 					label="Spans by service"
 				/>
 			}

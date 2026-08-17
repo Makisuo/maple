@@ -43,7 +43,7 @@ Two honest caveats:
 | 3   | `whenFocused(dot(...))` renders a dot per datum                                    | **STILL OPEN** — 435 nodes to show 3, but SVG-only; see below                                                       |
 | 4   | `areaY` strokes the whole outline incl. baseline                                   | **STILL OPEN** — worked around with fill-only `areaY` + `lineY` on top                                              |
 | 5   | No time scale in `charts-scales`                                                   | **STILL OPEN** — `band`/`linear`/`ordinal`/`point` only; `scalePoint` over ISO strings, same as Recharts does today |
-| 6   | `<Chart>` needs explicit `width`/`height`                                          | **STILL OPEN** — `useMeasuredSize` in `tanstack-chart.tsx`                                                          |
+| 6   | `<Chart>` needs explicit `width`/`height`                                          | **NOT A BUG — we had it wrong.** Omit `width`; it follows the container. See below                                  |
 | 7   | `.ts-chart-tooltip` inline styles with no opt-out                                  | **FIXED** — every inline style is now a `var(--ts-chart-tooltip-*, fallback)`; see below                            |
 
 ### Bug 2 is the significant one
@@ -437,6 +437,44 @@ Two things fixed in passing, both the same bug: `pie-spike` coloured slices by
 was handed. Both are indexes into a _filtered_ list, so hiding one slice or service renumbered
 everything after it and recoloured the chart. Colours are now keyed by name over the full row set.
 A legend that repaints the series it did not touch is worse than no legend.
+
+### Bug 6 was never a bug, and believing it cost us a mount flash (2026-08-18)
+
+The table above carried "`<Chart>` needs explicit `width`/`height`" from the 0.6.4 notes, and
+`tanstack-chart.tsx` acted on it: a `useMeasuredSize` hook that observed the container and rendered
+`null` until it had both numbers. That is the opposite of how the component is meant to be used, and
+it is what made every chart flash blank for ~100ms on load.
+
+What the package actually does, all of it verifiable in `node_modules`:
+
+- `width` is **optional**. The host renders `width: width === undefined ? "100%" : width`
+  (`dist/react/RendererChart.js`), so omitting it makes the chart fill its container.
+- The renderer installs **its own `ResizeObserver`** on the container (`dist/renderer.js:151`).
+- `adapter.mount()` runs inside a **layout effect**, and `createScene()` reads
+  `container.getBoundingClientRect().width` synchronously there (`dist/renderer.js:659`) — so the
+  first paint is already correctly sized. The `initialWidth: 640` prerender is the SSR placeholder,
+  replaced before paint on the client. That default is what the 0.6.4 note mistook for "no
+  intrinsic sizing".
+
+Gating on our own observer broke exactly that: `observe()` never calls back inline, so the sequence
+was mount → paint an empty card → first record arrives in a later frame → re-render → paint the
+chart. Two blank frames minimum, twenty-one charts on the gallery, each with its own delivery and
+its own React commit.
+
+The guide says this plainly — omit `width` to follow the container, and choose `height` **or**
+`aspectRatio`, never both: <https://tanstack.com/charts/v0/docs/guides/responsive-charts>
+
+`height` genuinely does have to be a number, and that part is not a workaround: the scene height
+comes from `options.height ?? 320` and is never read back off the container
+(`dist/renderer.js:664`), so a CSS `height: 100%` yields a full-height host drawing a 320px scale.
+These charts sit in a flex column whose spare height depends on whether a legend wrapped, so it is
+measured — synchronously in a layout effect, with a fallback so rendering is never _gated_ on the
+measurement. Width is left entirely to the package.
+
+**The transferable lesson:** the two workarounds in this file that were pure cost — this one and
+the `"currentColor"` hover ring — were both cases of trusting a note in this document over the
+installed source. `node_modules/@tanstack/charts/dist` ships readable JS and full `.d.ts`; the
+package is pre-alpha and its notes go stale faster than its code.
 
 ## 3. Migration cost for the other 46 files
 

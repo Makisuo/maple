@@ -9,60 +9,74 @@ import "./tooltip.css"
 export type TanstackRenderer = "tanstack-svg" | "tanstack-canvas"
 
 /**
- * `<Chart>` has no intrinsic sizing: without explicit `width`/`height` it falls
- * back to `initialWidth: 640` plus an aspect ratio and sits inset in its
- * container. Every arm measures its own frame and passes pixels.
+ * Only the HEIGHT is measured, and that is the documented shape.
+ *
+ * An earlier revision of this file measured both axes and passed both to
+ * `<Chart>`, with a comment claiming the component "has no intrinsic sizing".
+ * That was wrong, and it caused the mount flash: `width` is optional, and the
+ * host renders `width: width === undefined ? "100%" : width`
+ * (`dist/react/RendererChart.js`), so omitting it makes the chart follow its
+ * container. The renderer then installs its OWN `ResizeObserver` on the
+ * container (`dist/renderer.js:151`) and — this is the part that matters —
+ * `adapter.mount()` runs inside a layout effect and `createScene()` reads
+ * `container.getBoundingClientRect().width` synchronously there
+ * (`dist/renderer.js:659`), so the first paint is already correctly sized.
+ *
+ * Taking that over meant gating the chart behind our own observer, whose first
+ * record only arrives during a LATER frame's rendering steps: mount → paint an
+ * empty card → observer fires → re-render → paint the chart. Two blank frames
+ * minimum, twenty-one of them on the gallery, each with its own commit.
+ *
+ * The guide is explicit — omit `width` to follow the container, and choose
+ * `height` OR `aspectRatio` but never both:
+ * https://tanstack.com/charts/v0/docs/guides/responsive-charts
+ *
+ * `height` still has to be a number, because the scene height comes from
+ * `options.height ?? 320` and is never read back off the container
+ * (`dist/renderer.js:664`) — a CSS `height: 100%` would give a full-height host
+ * drawing a 320px scale. These charts live in a flex column whose spare height
+ * depends on whether a legend wrapped, so the number has to be measured.
  */
-function useMeasuredSize() {
+function useMeasuredHeight() {
 	const ref = useRef<HTMLDivElement | null>(null)
-	const [size, setSize] = useState<{ width: number; height: number } | null>(null)
+	const [height, setHeight] = useState<number | null>(null)
 
-	// `useLayoutEffect`, not `useMountEffect`: the chart cannot paint until it has
-	// pixels, and `useMountEffect` wraps `useEffect`, which would cost an extra
-	// empty frame on every mount — visible noise in a bench that counts frames.
 	useLayoutEffect(() => {
 		const node = ref.current
 		if (!node) return
 
-		const apply = (width: number, height: number) => {
-			// Round: sub-pixel churn would rebuild the whole scene on every container
-			// reflow and pollute the React commit counts this bench measures.
-			const next = { width: Math.round(width), height: Math.round(height) }
-			setSize((prev) =>
-				prev && prev.width === next.width && prev.height === next.height ? prev : next,
-			)
+		// Round: sub-pixel churn would rebuild the whole scene on every container
+		// reflow and pollute the React commit counts this bench measures.
+		const apply = (next: number) => {
+			const rounded = Math.round(next)
+			setHeight((prev) => (prev === rounded ? prev : rounded))
 		}
 
-		// Measure ONCE, synchronously, before handing the box to the observer.
-		//
-		// This is what stops the chart flashing blank on mount. `size` starts null
-		// and the chart renders nothing until it has one, and `observe()` does NOT
-		// call back inline: ResizeObserver delivers its first record during a later
-		// frame's rendering steps, so the sequence was mount → paint nothing →
-		// observer fires → React re-renders → paint the chart. Two painted frames of
-		// empty card minimum, and the gallery mounts twenty-odd of these at once,
-		// each with its own delivery and its own commit.
-		//
-		// A `setState` inside a LAYOUT effect is flushed before the browser paints,
-		// so reading the box here puts the chart in the very first paint instead.
-		// Layout is already clean at this point in the commit, and every frame does
-		// its read before any of them writes, so this is not a thrashing read.
+		// Synchronously first — a `setState` in a LAYOUT effect is flushed before
+		// the browser paints, so the measured height lands in the first paint
+		// rather than one observer delivery later.
 		const box = node.getBoundingClientRect()
-		if (box.width > 0 && box.height > 0) apply(box.width, box.height)
+		if (box.height > 0) apply(box.height)
 
-		// The observer now only handles LATER size changes — container resize, a
-		// legend rewrapping to a second row, the card reflowing.
 		const observer = new ResizeObserver((entries) => {
 			const contentRect = entries[0]?.contentRect
-			if (!contentRect) return
-			apply(contentRect.width, contentRect.height)
+			if (contentRect) apply(contentRect.height)
 		})
 		observer.observe(node)
 		return () => observer.disconnect()
 	}, [])
 
-	return { ref, size }
+	return { ref, height }
 }
+
+/**
+ * What to draw at before the first measurement resolves. It is the package's own
+ * default height, and it is a fallback rather than a guess that has to be right:
+ * the layout effect above corrects it pre-paint. What it buys is that the chart
+ * is never gated on a measurement at all, so no code path can reintroduce a
+ * blank first frame.
+ */
+const FALLBACK_HEIGHT = 320
 
 export interface TanstackChartFrameProps<TDatum, TXValue extends ChartValue, TYValue extends ChartValue> {
 	renderer: TanstackRenderer
@@ -95,7 +109,7 @@ export function TanstackChartFrame<TDatum, TXValue extends ChartValue, TYValue e
 	renderTooltipBody,
 	legend,
 }: TanstackChartFrameProps<TDatum, TXValue, TYValue>) {
-	const { ref, size } = useMeasuredSize()
+	const { ref, height } = useMeasuredHeight()
 	const ChartComponent = renderer === "tanstack-canvas" ? CanvasChart : SvgChart
 
 	return (
@@ -114,15 +128,19 @@ export function TanstackChartFrame<TDatum, TXValue extends ChartValue, TYValue e
 			 * to it.
 			 */}
 			<div ref={ref} className="min-h-0 flex-1">
-				{size ? (
-					<ChartComponent
-						definition={definition}
-						ariaLabel={ariaLabel}
-						width={size.width}
-						height={size.height}
-						renderTooltipBody={renderTooltipBody}
-					/>
-				) : null}
+				{/*
+				 * No `width`, deliberately — see `useMeasuredHeight`. The host takes
+				 * `width: 100%` and measures itself before first paint, which is both
+				 * the documented behaviour and the reason this no longer flashes.
+				 * Rendering is not gated on a measurement either: `FALLBACK_HEIGHT`
+				 * covers the frame before the layout effect resolves.
+				 */}
+				<ChartComponent
+					definition={definition}
+					ariaLabel={ariaLabel}
+					height={height ?? FALLBACK_HEIGHT}
+					renderTooltipBody={renderTooltipBody}
+				/>
 			</div>
 			{/*
 			 * `max-h-[45%]` is `query-builder-legend.tsx`'s `MAX_LEGEND_FRACTION`,

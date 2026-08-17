@@ -169,6 +169,34 @@ function clamp01(value: number): number {
 	return Math.max(0, Math.min(1, value))
 }
 
+/**
+ * Pushes a colour most of the way toward the page background, for the series a
+ * legend is NOT highlighting.
+ *
+ * This has to be a colour and not an opacity, which is not a stylistic call.
+ * `fillOpacity` and `strokeOpacity` are flat `number`s on every mark in the
+ * package — `bar.d.ts`, `area.d.ts`, `polar.d.ts`, `hierarchy-treemap.d.ts` all
+ * declare them that way, while `fill` and `stroke` are `VisualChannel`s. So a
+ * chart that draws every series from ONE mark (a stacked bar's `z`, a treemap's
+ * nodes, a pie's arcs) has no way to vary opacity per datum, and the only
+ * per-datum dimming it can express is a dimmer colour.
+ *
+ * The charts drawing one mark per series (line, area) can and do use the flat
+ * opacity instead — same picture, less arithmetic.
+ *
+ * `amount` is how far toward the background: 0 leaves the colour alone, 1 erases
+ * it. Both arguments must already be resolved literals; canvas cannot read a
+ * `var(--…)`, which is the whole reason this file exists.
+ */
+export function muteColor(color: string, background: string, amount = 0.72): string {
+	const from = parseOklch(color)
+	const to = parseOklch(background)
+	// Unparseable input keeps its colour rather than silently going black, which
+	// is the failure d3-color has here and the reason for the hex fallback above.
+	if (!from || !to) return color
+	return formatOklch(mixOklch(from, to, clamp01(amount)))
+}
+
 /** Parametric position 0..1 → literal colour, along the resolved stops. */
 function colorAt(t: number, stops: readonly string[], parsed: readonly (Oklch | null)[]): string {
 	const clamped = clamp01(t)

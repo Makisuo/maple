@@ -33,11 +33,12 @@ export interface LegendSeriesSpec {
 
 interface ChartLegendState {
 	series: readonly LegendSeriesSpec[]
-	hidden: ReadonlySet<string>
+	/** The emphasised series, or `null` when every series is at full strength. */
+	highlighted: string | null
 }
 
 interface ChartLegendActions {
-	toggle: (key: string) => void
+	highlight: (key: string) => void
 }
 
 interface ChartLegendMeta {
@@ -60,53 +61,56 @@ function useChartLegend(): ChartLegendContextValue {
 }
 
 /**
- * Which series are hidden, owned by the CHART rather than by the legend.
+ * Which series is emphasised, owned by the CHART rather than by the legend.
  *
- * The legend cannot hold this state: hiding a series has to remove its mark and
- * re-derive the y domain, which only the spike can do. The legend renders the
- * same state and calls back into it.
+ * Clicking a series brings it forward and pushes the others back; clicking it
+ * again returns every series to full strength. Nothing is ever removed — the
+ * shape of the data on screen does not change, so the axes never move under the
+ * reader and a series can be picked out of a crowded chart without losing its
+ * context. (`QueryBuilderLegend` on the production side toggles VISIBILITY
+ * instead, which rescales the axis on every click.)
+ *
+ * The legend cannot hold this state: emphasis is expressed in the marks — a
+ * stroke opacity, or a muted fill — which only the spike can set. The legend
+ * renders the same state and calls back into it.
  */
-export function useChartLegendState(series: readonly LegendSeriesSpec[]): {
-	hidden: ReadonlySet<string>
-	toggle: (key: string) => void
-	isVisible: (key: string) => boolean
-	visible: readonly LegendSeriesSpec[]
+export function useChartLegendHighlight(): {
+	highlighted: string | null
+	highlight: (key: string) => void
+	isMuted: (key: string) => boolean
 } {
-	const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
+	const [highlighted, setHighlighted] = useState<string | null>(null)
 
-	const toggle = useCallback((key: string) => {
-		setHidden((previous) => {
-			const next = new Set(previous)
-			if (!next.delete(key)) next.add(key)
-			return next
-		})
+	const highlight = useCallback((key: string) => {
+		setHighlighted((previous) => (previous === key ? null : key))
 	}, [])
 
-	const isVisible = useCallback((key: string) => !hidden.has(key), [hidden])
+	const isMuted = useCallback(
+		(key: string) => highlighted !== null && highlighted !== key,
+		[highlighted],
+	)
 
-	const visible = useMemo(() => series.filter((entry) => !hidden.has(entry.key)), [series, hidden])
-
-	return { hidden, toggle, isVisible, visible }
+	return { highlighted, highlight, isMuted }
 }
 
 function ChartLegendProvider({
 	series,
-	hidden,
-	onToggle,
+	highlighted,
+	onHighlight,
 	label,
 	children,
 }: {
 	series: readonly LegendSeriesSpec[]
-	hidden: ReadonlySet<string>
-	onToggle: (key: string) => void
+	highlighted: string | null
+	onHighlight: (key: string) => void
 	label: string
 	children: ReactNode
 }) {
-	// The provider is the only place that knows how the hidden set is managed, so
-	// a chart backed by URL state or a store composes the same parts unchanged.
+	// The provider is the only place that knows how the highlight is managed, so a
+	// chart backed by URL state or a store composes the same parts unchanged.
 	const value = useMemo<ChartLegendContextValue>(
-		() => ({ state: { series, hidden }, actions: { toggle: onToggle }, meta: { label } }),
-		[series, hidden, onToggle, label],
+		() => ({ state: { series, highlighted }, actions: { highlight: onHighlight }, meta: { label } }),
+		[series, highlighted, onHighlight, label],
 	)
 
 	return <ChartLegendContext value={value}>{children}</ChartLegendContext>
@@ -173,19 +177,24 @@ function ChartLegendItem({ seriesKey }: { seriesKey: string }) {
 	const entry = state.series.find((candidate) => candidate.key === seriesKey)
 	if (!entry) return null
 
-	const isHidden = state.hidden.has(entry.key)
+	const isHighlighted = state.highlighted === entry.key
+	const isMuted = state.highlighted !== null && !isHighlighted
 
 	return (
 		<button
 			type="button"
-			// `aria-pressed`, not a bare button: the control is a two-state toggle and
-			// the pressed state is the only thing distinguishing a hidden series from a
-			// visible one for a screen reader. `opacity-40` says nothing out loud.
-			aria-pressed={!isHidden}
-			onClick={() => actions.toggle(entry.key)}
+			// `aria-pressed`, not a bare button: the control is a toggle, and the
+			// pressed state is the only thing that tells a screen reader which series
+			// is emphasised. `opacity-40` says nothing out loud.
+			aria-pressed={isHighlighted}
+			onClick={() => actions.highlight(entry.key)}
 			className={cn(
 				"flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-muted/50",
-				isHidden && "opacity-40",
+				isMuted && "opacity-40",
+				// Emphasis is carried by the OTHERS fading, as it is in the chart —
+				// brightening the picked row as well would double the contrast step and
+				// make a two-series legend look broken.
+				isHighlighted && "bg-muted/50",
 			)}
 		>
 			<ChartLegendSwatch color={entry.color} dashed={entry.dashed} />
@@ -232,21 +241,32 @@ export const ChartLegend = {
  */
 export function ChartSeriesLegend({
 	series,
-	hidden,
-	onToggle,
+	highlighted,
+	onHighlight,
 	label,
 }: {
 	series: readonly LegendSeriesSpec[]
-	hidden: ReadonlySet<string>
-	onToggle: (key: string) => void
+	highlighted: string | null
+	onHighlight: (key: string) => void
 	label: string
 }) {
 	if (series.length === 0) return null
 	return (
-		<ChartLegend.Provider series={series} hidden={hidden} onToggle={onToggle} label={label}>
+		<ChartLegend.Provider
+			series={series}
+			highlighted={highlighted}
+			onHighlight={onHighlight}
+			label={label}
+		>
 			<ChartLegend.Row>
 				<ChartLegend.Items />
 			</ChartLegend.Row>
 		</ChartLegend.Provider>
 	)
 }
+
+/** How far a non-highlighted series fades, shared by every spike. */
+export const MUTED_OPACITY = 0.22
+
+/** …and how far toward the background a muted COLOUR mixes — see `muteColor`. */
+export const MUTED_COLOR_AMOUNT = 0.78

@@ -6,10 +6,13 @@ import { memo, useMemo, type ReactNode } from "react"
 
 import {
 	ChartSeriesLegend,
-	useChartLegendState,
+	MUTED_COLOR_AMOUNT,
+	useChartLegendHighlight,
 	type LegendSeriesSpec,
 } from "@/lab/bench/tanstack/chart-legend"
+import { usePlotChromeColors } from "@/lab/bench/tanstack/chart-shared"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
+import { muteColor } from "@/lab/charts/color-scale"
 
 /**
  * No index signature. `pie()` returns `Omit<TDatum, PieDerivedField> & …`, and
@@ -190,10 +193,14 @@ function PieFigure({
  * The same donut with a DOM slice key beneath it, matching what the production
  * pie renders as its `legend="right"`.
  *
- * Hiding a slice renormalises the remaining angles on its own — `pie()` divides
- * by the total of the rows it is handed — so unlike the cartesian spikes there is
- * no domain to re-derive. Colours are pinned by name (see `useSliceColor`) so the
- * survivors keep the hue they had.
+ * This is the chart where highlighting rather than hiding matters most. Removing
+ * a slice would renormalise every remaining angle — `pie()` divides by the total
+ * of the rows it is handed — so the whole donut would rearrange around the one
+ * slice the reader just clicked. Muting the others instead leaves every wedge
+ * exactly where it was.
+ *
+ * It is also the only affordance this chart has: `radialArc` takes no `states`,
+ * so the production pie's hover fade has no expression here (see above).
  */
 export const PieLegendSpike = memo(function PieLegendSpike({
 	rows,
@@ -212,22 +219,29 @@ export const PieLegendSpike = memo(function PieLegendSpike({
 		() => rows.map((row) => ({ key: row.name, label: row.name, color: colorFor(row.name) })),
 		[rows, colorFor],
 	)
-	const { hidden, toggle } = useChartLegendState(legendSeries)
+	const { highlighted, highlight } = useChartLegendHighlight()
+	const chromeColors = usePlotChromeColors()
 
-	const visibleRows = useMemo(() => rows.filter((row) => !hidden.has(row.name)), [rows, hidden])
+	const emphasisedColorFor = useMemo(() => {
+		if (highlighted === null) return colorFor
+		return (name: string) =>
+			name === highlighted
+				? colorFor(name)
+				: muteColor(colorFor(name), chromeColors.background, MUTED_COLOR_AMOUNT)
+	}, [colorFor, highlighted, chromeColors])
 
 	return (
 		<PieFigure
-			rows={visibleRows}
+			rows={rows}
 			renderer={renderer}
 			donut={donut}
 			className={className}
-			colorFor={colorFor}
+			colorFor={emphasisedColorFor}
 			legend={
 				<ChartSeriesLegend
 					series={legendSeries}
-					hidden={hidden}
-					onToggle={toggle}
+					highlighted={highlighted}
+					onHighlight={highlight}
 					label="Share by category"
 				/>
 			}
