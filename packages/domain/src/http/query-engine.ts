@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
+import { RawSqlDisplayType } from "@maple/widgets"
 import {
 	CommitSha,
 	DeploymentEnvironment,
@@ -18,7 +19,8 @@ import {
 	QueryEngineExecuteResponse,
 	TinybirdDateTime,
 } from "../query-engine"
-import { Authorization } from "./current-tenant"
+import { SessionAuthorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 import { warehouseHttpErrors } from "./warehouse"
 
 // Dedicated endpoint schemas
@@ -1558,82 +1560,28 @@ export class WorkloadInfraTimeseriesResponse extends Schema.Class<WorkloadInfraT
 }) {}
 
 // Query Builder drafts (persisted by dashboards and alert rules)
-
-const QueryBuilderAddOnsSchema = Schema.Struct({
-	groupBy: Schema.Boolean,
-	having: Schema.Boolean,
-	orderBy: Schema.Boolean,
-	limit: Schema.Boolean,
-	legend: Schema.Boolean,
-})
-
-// Fields shared by every query-draft source. Metric-specific fields live only
-// on the metrics variant below — traces/logs queries never carry them.
-const queryDraftBaseFields = {
-	id: Schema.String,
-	name: Schema.String,
-	enabled: Schema.optional(Schema.Boolean),
-	hidden: Schema.optional(Schema.Boolean),
-	whereClause: Schema.optional(Schema.String),
-	aggregation: Schema.String,
-	stepInterval: Schema.optional(Schema.String),
-	orderByDirection: Schema.optional(Schema.Literals(["desc", "asc"])),
-	addOns: Schema.optional(QueryBuilderAddOnsSchema),
-	groupBy: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-	having: Schema.optional(Schema.String),
-	orderBy: Schema.optional(Schema.String),
-	limit: Schema.optional(Schema.String),
-	// Opt-in top-N series cap for group-by timeseries charts (entered as a string
-	// in the builder; parsed to a positive integer when lowering to a QuerySpec).
-	seriesLimit: Schema.optional(Schema.String),
-	legend: Schema.optional(Schema.String),
-}
-
-export const TracesQueryDraftSchema = Schema.Struct({
-	...queryDraftBaseFields,
-	dataSource: Schema.Literal("traces"),
-	// A non-empty `valueField` (e.g. "attr.result.rowCount") switches the traces
-	// query into numeric-attribute aggregation mode: `aggregation` becomes a
-	// numeric function over that span attribute instead of a duration-based metric.
-	valueField: Schema.optional(Schema.String),
-})
-
-export const LogsQueryDraftSchema = Schema.Struct({
-	...queryDraftBaseFields,
-	dataSource: Schema.Literal("logs"),
-})
-
-export const MetricsQueryDraftSchema = Schema.Struct({
-	...queryDraftBaseFields,
-	dataSource: Schema.Literal("metrics"),
-	signalSource: Schema.optional(Schema.Literals(["default", "meter"])),
-	metricName: Schema.optional(Schema.String),
-	metricType: Schema.optional(Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])),
-	isMonotonic: Schema.optional(Schema.Boolean),
-})
-
-export const QueryBuilderQueryDraftSchema = Schema.Union([
-	TracesQueryDraftSchema,
+//
+// Defined in `@maple/query-model`, the leaf both writers can import: alert rules
+// persist a draft and so do dashboard widgets, and `@maple/widgets` sits BELOW
+// this package (`MapleApi` embeds the widget schemas), so the widget document
+// schema cannot reach up here for it. Re-exported so `@maple/domain/http` keeps
+// its existing surface.
+export {
 	LogsQueryDraftSchema,
 	MetricsQueryDraftSchema,
-])
-export type QueryBuilderQueryDraftPayload = Schema.Schema.Type<typeof QueryBuilderQueryDraftSchema>
+	QueryBuilderAddOnsSchema,
+	QueryBuilderFormulaSchema,
+	type QueryBuilderFormulaPayload,
+	type QueryBuilderQueryDraftPayload,
+	QueryBuilderQueryDraftSchema,
+	TracesQueryDraftSchema,
+} from "@maple/query-model"
 
 // Raw SQL chart (Hyperdx-style — user-authored ClickHouse SQL with macros)
 
-export const RawSqlDisplayType = Schema.Literals([
-	"line",
-	"area",
-	"bar",
-	"table",
-	"stat",
-	"pie",
-	"histogram",
-	"heatmap",
-	"funnel",
-	"hbar",
-])
-export type RawSqlDisplayType = Schema.Schema.Type<typeof RawSqlDisplayType>
+// Defined in `@maple/widgets` alongside the panel-type table that maps onto it;
+// re-exported here so `@maple/domain/http` keeps its existing surface.
+export { RawSqlDisplayType }
 
 export const MAX_RAW_SQL_LENGTH = 32_768
 export const MAX_RAW_SQL_RESULT_ROWS = 1_000
@@ -1675,31 +1623,78 @@ export class RawSqlValidationError extends Schema.TaggedError<RawSqlValidationEr
 	{ httpApiStatus: 400 },
 ) {}
 
-export class QueryEngineValidationError extends Schema.TaggedError<QueryEngineValidationError>()(
+export class QueryEngineValidationError extends HttpTaggedError<QueryEngineValidationError>()(
 	"@maple/http/errors/QueryEngineValidationError",
 	{
 		message: Schema.String,
 		details: Schema.Array(Schema.String),
 	},
-	{ httpApiStatus: 400 },
+	{
+		status: 400,
+		code: "query_engine_invalid",
+		title: "Invalid query",
+		param: "aggregation",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
 ) {}
 
-export class QueryEngineExecutionError extends Schema.TaggedError<QueryEngineExecutionError>()(
+/**
+ * Legacy v1 contract member. Production query execution now preserves the
+ * underlying warehouse tag, so v2 endpoints must not advertise this wrapper.
+ */
+export class QueryEngineExecutionError extends HttpTaggedError<QueryEngineExecutionError>()(
 	"@maple/http/errors/QueryEngineExecutionError",
 	{
 		message: Schema.String,
 		causeMessage: Schema.optional(Schema.String),
 		pipeName: Schema.optional(Schema.String),
 	},
-	{ httpApiStatus: 502 },
+	{
+		status: 502,
+		code: "query_engine_failed",
+		title: "Query failed",
+		message: "The aggregation query could not be completed.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
 ) {}
 
-export class QueryEngineTimeoutError extends Schema.TaggedError<QueryEngineTimeoutError>()(
+export class QueryEngineTimeoutError extends HttpTaggedError<QueryEngineTimeoutError>()(
 	"@maple/http/errors/QueryEngineTimeoutError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 504 },
+	{
+		status: 504,
+		code: "query_engine_timeout",
+		title: "Query timed out",
+		message: "The aggregation query timed out. Retry with a narrower time range.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
+) {}
+
+/** The query engine returned a result variant that cannot satisfy the requested operation. */
+export class QueryEngineResultMismatchError extends HttpTaggedError<QueryEngineResultMismatchError>()(
+	"@maple/http/errors/QueryEngineResultMismatchError",
+	{
+		message: Schema.String,
+		expectedKind: Schema.String,
+		actualKind: Schema.String,
+	},
+	{
+		status: 500,
+		code: "query_engine_result_mismatch",
+		title: "Maple returned an invalid query result",
+		message: "Maple returned an invalid result for this query.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
 ) {}
 
 // Shared arrays — passing the same reference to every endpoint avoids
@@ -1724,16 +1719,9 @@ const validatedQueryEndpointErrors = [
 
 export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 	.add(
-		HttpApiEndpoint.post("execute", "/execute", {
-			payload: QueryEngineExecuteRequest,
-			success: QueryEngineExecuteResponse,
-			error: validatedQueryEndpointErrors,
-		}),
-	)
-	.add(
-		// Batched sibling of `execute`. Per-item failures ride in the SUCCESS
-		// payload (see QueryEngineBatchOutcome); the error list here is for
-		// whole-request failures only — auth, decode, a blown batch cap.
+		// The one query-execution entry point. Per-item failures ride in the
+		// SUCCESS payload (see QueryEngineBatchOutcome); the error list here is
+		// for whole-request failures only — auth, decode, a blown batch cap.
 		HttpApiEndpoint.post("executeBatch", "/execute-batch", {
 			payload: QueryEngineExecuteBatchRequest,
 			success: QueryEngineExecuteBatchResponse,
@@ -1814,20 +1802,6 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceApdex", "/service-apdex", {
 			payload: ServiceApdexRequest,
 			success: ServiceApdexResponse,
-			error: queryEngineEndpointErrors,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("serviceDependencies", "/service-dependencies", {
-			payload: ServiceDependenciesRequest,
-			success: ServiceDependenciesResponse,
-			error: queryEngineEndpointErrors,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("serviceDbEdges", "/service-db-edges", {
-			payload: ServiceDbEdgesRequest,
-			success: ServiceDbEdgesResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)
@@ -1941,13 +1915,6 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceDbQuerySummary", "/service-db-query-summary", {
 			payload: ServiceDbQuerySummaryRequest,
 			success: ServiceDbQuerySummaryResponse,
-			error: queryEngineEndpointErrors,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("servicePlatforms", "/service-platforms", {
-			payload: ServicePlatformsRequest,
-			success: ServicePlatformsResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)
@@ -2166,5 +2133,5 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 			] as const,
 		}),
 	)
-	.prefix("/api/query-engine")
-	.middleware(Authorization) {}
+	.prefix("/internal/query-engine")
+	.middleware(SessionAuthorization) {}

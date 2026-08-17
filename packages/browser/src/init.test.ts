@@ -1,3 +1,4 @@
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 import { clearSessionSink, resetConsentForTests, setConsent, track } from "@maple/browser-session"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -19,7 +20,7 @@ vi.mock("@maple/browser-session/replay", () => ({
 	},
 }))
 
-import { resetSinkForTests } from "../../browser-session/src/events-sink"
+import { resetSinkForTests } from "../../browser-session/src/events/events-sink"
 import { init } from "./init"
 
 class MemoryStorage {

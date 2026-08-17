@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { PostgresTransactionId } from "@maple/domain"

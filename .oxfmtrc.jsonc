@@ -13,11 +13,19 @@
 	// Vue turns a newline between two inline elements into a rendered space, and
 	// oxfmt happily breaks `<span>NEW</span>{{ message }}` across lines. They are
 	// authored in the exact shape they compile to.
+	// TanStack Router owns routeTree.gen.ts and regenerates it in its configured
+	// style during web builds; formatting it only creates transient churn.
 	// apps/ingest/fixtures/classification holds the vendored classification fixture,
 	// also copied verbatim from trace-capture — its test asserts the files'
 	// sha256 against manifest.json, so any reformat fails CI.
 	"ignorePatterns": [
-		".context",
+		".agents/**",
+		".codex/**",
+		".context/**",
+		".deepsec/**",
+		".factory/**",
+		".impeccable/**",
+		".superset/**",
 		"deploy",
 		"skills",
 		"packages/db/drizzle",
@@ -26,5 +34,7 @@
 		"packages/email/emails",
 		"packages/email/components",
 		"apps/ingest/fixtures/classification",
+		"apps/web/src/routeTree.gen.ts",
+		"scripts/oxlint-plugins/anti-slop/**",
 	],
 }

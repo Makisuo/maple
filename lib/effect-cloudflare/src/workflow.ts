@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 // Simplified port of alchemy-effect's Workflow factory:
 //   https://github.com/alchemy-run/alchemy-effect/blob/main/packages/alchemy/src/Cloudflare/Workers/Workflow.ts
 //
@@ -106,7 +107,7 @@ export const registerWorkflowImpl = (name: string, impl: WorkflowImpl): void => 
 // Bridge base class
 
 const Bridge = makeWorkflowBridge(
-	WorkflowEntrypoint as unknown as abstract new (
+	WorkflowEntrypoint as abstract new (
 		ctx: unknown,
 		env: unknown,
 	) => { run(event: any, step: any): Promise<unknown> },
@@ -153,8 +154,8 @@ export const Workflow = <_Self = unknown>() => {
 		name: string,
 		impl: Effect.Effect<WorkflowBody<Result>, never, InitReq>,
 	) => {
-		registerWorkflowImpl(name, impl as unknown as WorkflowImpl)
-		return Bridge(name) as unknown as new (
+		registerWorkflowImpl(name, impl as WorkflowImpl)
+		return Bridge(name) as new (
 			ctx: unknown,
 			env: unknown,
 		) => { run(event: any, step: any): Promise<unknown> }

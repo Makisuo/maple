@@ -25,13 +25,13 @@ export interface ClickHouseConfig {
  */
 export async function exec(config: ClickHouseConfig, sql: string): Promise<string> {
 	const url = `${config.url.replace(/\/$/, "")}/?database=${encodeURIComponent(config.database)}`
-	const headers: Record<string, string> = {
+	const headers = new Headers({
 		"Content-Type": "text/plain",
 		"X-ClickHouse-User": config.user,
 		"X-ClickHouse-Database": config.database,
-	}
+	})
 	if (config.password.length > 0) {
-		headers["X-ClickHouse-Key"] = config.password
+		headers.set("X-ClickHouse-Key", config.password)
 	}
 	const response = await fetch(url, {
 		method: "POST",

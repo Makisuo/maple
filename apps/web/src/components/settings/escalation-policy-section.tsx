@@ -95,9 +95,11 @@ export function EscalationPolicySection({ isAdmin }: { isAdmin: boolean }) {
 				new IssueEscalationPolicyRule({
 					severity,
 					destinationIds: decodeDestinationIds(rules[severity].destinationIds),
-					...(rules[severity].minConfidence === CONFIDENCE_ANY
-						? {}
-						: { minConfidence: rules[severity].minConfidence as EscalationConfidence }),
+					...(!(rules[severity].minConfidence === CONFIDENCE_ANY)
+						? {
+								minConfidence: rules[severity].minConfidence as EscalationConfidence,
+							}
+						: undefined),
 				}),
 		)
 		const result = await upsertMutation({

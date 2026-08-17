@@ -2,9 +2,12 @@
  * The named-query registry: the canonical set of pipe names that
  * `compilePipeQuery` (in `@maple/query-engine`) lowers to ClickHouse SQL. This
  * is a cross-binary wire contract — it backs `WarehouseExecutor.query(pipe, …)`
- * and the `POST /api/tinybird/query` payload the CLI (local + remote modes)
- * sends. Treat it as additive: only append new names; renaming/removing a name
- * is a breaking change for already-shipped CLI binaries.
+ * and the `/local/query` payload the CLI sends in local mode. Treat it as
+ * additive: only append new names; renaming/removing a name is a breaking
+ * change for already-shipped CLI binaries.
+ *
+ * It is no longer an HTTP contract: the CLI's remote mode calls the public v2
+ * API instead of naming pipes over the wire.
  *
  * NB: alert evaluation does NOT go through this registry — it uses the
  * structured `QuerySpec` → `QueryEngineService.evaluate` path instead.

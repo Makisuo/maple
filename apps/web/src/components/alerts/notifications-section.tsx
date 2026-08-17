@@ -96,7 +96,7 @@ export function NotificationsSection({
 					<AlertMultiSegmentedSelect<string>
 						options={
 							destinations.map((d) => ({
-								value: d.id as unknown as string,
+								value: d.id as string,
 								icon: <ProviderLogo type={d.type} size={24} bare />,
 								label: (
 									<span className="flex items-center gap-2">
@@ -108,7 +108,7 @@ export function NotificationsSection({
 								),
 							})) satisfies AlertSegmentedOption<string>[]
 						}
-						value={form.destinationIds as unknown as string[]}
+						value={form.destinationIds as string[]}
 						onChange={(values) =>
 							onChange((c) => ({
 								...c,

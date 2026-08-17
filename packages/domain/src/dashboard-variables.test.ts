@@ -87,3 +87,67 @@ describe("DashboardDocument with variables", () => {
 		expect(encoded.variables).toHaveLength(2)
 	})
 })
+
+const widget = (id: string, membership: Record<string, string> = {}) => ({
+	id,
+	visualization: "chart",
+	dataSource: { kind: "query", resultShape: "timeseries", queries: [] },
+	display: {},
+	layout: { x: 0, y: 0, w: 4, h: 4 },
+	...membership,
+})
+
+describe("DashboardDocument with sections", () => {
+	it("round-trips a document without sections (back-compat)", () => {
+		const decoded = decodeDocument({ ...baseDocument, widgets: [widget("w1")] })
+		expect(decoded.sections).toBeUndefined()
+		const encoded = encodeDocument(decoded)
+		expect("sections" in encoded).toBe(false)
+		expect("sectionId" in encoded.widgets[0]!).toBe(false)
+	})
+
+	it("round-trips sections and widget membership", () => {
+		const decoded = decodeDocument({
+			...baseDocument,
+			widgets: [widget("w1", { sectionId: "s1", tabId: "t1" })],
+			sections: [
+				{ id: "s1", title: "Overview", collapsed: true, tabs: [{ id: "t1", title: "Latency" }] },
+			],
+		})
+		expect(decoded.sections).toHaveLength(1)
+		expect(decoded.sections?.[0]?.collapsed).toBe(true)
+		expect(decoded.widgets[0]?.sectionId).toBe("s1")
+		expect(encodeDocument(decoded).sections?.[0]?.tabs).toHaveLength(1)
+	})
+
+	// This is the entire back-compat story for an older client reading a newer
+	// document: `Schema.Struct` ignores excess properties, so sections are
+	// dropped on decode and the board renders flat rather than failing to load.
+	// It currently rests on an implicit Effect default, so pin it.
+	it("ignores unknown keys rather than failing the read", () => {
+		const decoded = decodeDocument({
+			...baseDocument,
+			widgets: [widget("w1")],
+			somethingFromTheFuture: { nested: true },
+		})
+		expect(decoded.name).toBe("Test")
+		expect("somethingFromTheFuture" in encodeDocument(decoded)).toBe(false)
+	})
+
+	// The invariants are repaired by `sanitizeDashboardSections` on write, never
+	// by schema checks — an orphaned widget must not fail the whole read.
+	it("decodes a widget pointing at a section that does not exist", () => {
+		const decoded = decodeDocument({
+			...baseDocument,
+			widgets: [widget("w1", { sectionId: "gone", tabId: "t1" })],
+			sections: [{ id: "s1", title: "Overview", tabs: [{ id: "t1", title: "T" }] }],
+		})
+		expect(decoded.widgets[0]?.sectionId).toBe("gone")
+	})
+
+	it("rejects a section with no tabs", () => {
+		expect(() =>
+			decodeDocument({ ...baseDocument, sections: [{ id: "s1", title: "S", tabs: [] }] }),
+		).toThrow()
+	})
+})

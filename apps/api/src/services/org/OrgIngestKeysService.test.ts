@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import { IngestKeyEncryptionError, IngestKeyPersistenceError, OrgId, UserId } from "@maple/domain/http"
@@ -44,7 +45,9 @@ const makeConfig = (encryptionKey?: string) =>
 			MAPLE_AUTH_MODE: "self_hosted",
 			MAPLE_ROOT_PASSWORD: "test-root-password",
 			MAPLE_DEFAULT_ORG_ID: "default",
-			...(encryptionKey === undefined ? {} : { MAPLE_INGEST_KEY_ENCRYPTION_KEY: encryptionKey }),
+			...(!(encryptionKey === undefined)
+				? { MAPLE_INGEST_KEY_ENCRYPTION_KEY: encryptionKey }
+				: undefined),
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
 		}),
 	)

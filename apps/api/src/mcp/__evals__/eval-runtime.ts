@@ -84,6 +84,6 @@ export const runToolDirect = async (
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> => {
 	return rt.runtime.runPromise(
-		McpToolExecutor.pipe(Effect.flatMap((executor) => executor.execute(rt.tenant, name, params))),
+		McpToolExecutor.pipe(Effect.flatMap((executor) => executor.execute(rt.tenant, name, params, "mcp"))),
 	)
 }

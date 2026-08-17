@@ -5,7 +5,7 @@ import { Database } from "@/platform/DatabaseLive"
 import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { AlertReadModelsService } from "./AlertReadModelsService"
 
@@ -31,7 +31,7 @@ const createdDbs: TestDb[] = []
 
 afterEach(() => cleanupTestDbs(createdDbs))
 
-const makeWarehouseStub = (contexts: Array<string>): WarehouseQueryServiceShape => ({
+const makeWarehouseStub = (contexts: Array<string>): WarehouseQueryServiceApi => ({
 	query: () => Effect.die(new Error("unexpected pipe query")),
 	sqlQuery: () => Effect.die(new Error("unexpected raw SQL query")),
 	rawSqlQuery: () => Effect.die(new Error("unexpected raw SQL query")),
@@ -125,6 +125,17 @@ describe("AlertReadModelsService", () => {
 			assert.strictEqual(deliveries.events[0]?.id, DELIVERY)
 			assert.strictEqual(deliveries.events[0]?.destinationName, "Primary webhook")
 			assert.strictEqual(deliveries.events[0]?.responseCode, 204)
+
+			// The incident filter is what the mobile incident timeline reads.
+			const forNew = yield* readModels.listDeliveryEvents(ORG, { incidentId: INCIDENT_NEW })
+			assert.deepStrictEqual(
+				forNew.events.map((event) => event.id),
+				[DELIVERY],
+			)
+			const forOld = yield* readModels.listDeliveryEvents(ORG, { incidentId: INCIDENT_OLD })
+			assert.deepStrictEqual(forOld.events, [])
+			const forRule = yield* readModels.listDeliveryEvents(ORG, { ruleId: RULE })
+			assert.strictEqual(forRule.events.length, 1)
 			assert.deepStrictEqual(contexts, [])
 		}).pipe(Effect.provide(makeLayer(testDb, contexts)))
 	})
@@ -137,10 +148,10 @@ describe("AlertReadModelsService", () => {
 			const readModels = yield* AlertReadModelsService
 
 			const missingIncident = yield* Effect.flip(readModels.getIncident(OTHER_ORG, INCIDENT_NEW))
-			assert.strictEqual(missingIncident._tag, "@maple/http/errors/AlertNotFoundError")
+			assert.strictEqual(missingIncident._tag, "@maple/http/errors/AlertIncidentNotFoundError")
 
 			const missingChecks = yield* Effect.flip(readModels.listRuleChecks(OTHER_ORG, RULE, {}))
-			assert.strictEqual(missingChecks._tag, "@maple/http/errors/AlertNotFoundError")
+			assert.strictEqual(missingChecks._tag, "@maple/http/errors/AlertRuleNotFoundError")
 			assert.deepStrictEqual(contexts, [])
 
 			const checks = yield* readModels.listRuleChecks(ORG, RULE, { limit: 20 })

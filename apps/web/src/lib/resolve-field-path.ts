@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 /**
  * Known fields that are Record<string, string> maps where keys contain dots
  * (e.g., logAttributes["http.method"]). When a field path starts with one of

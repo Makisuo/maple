@@ -1,4 +1,5 @@
 import { WIDGET_TYPES } from "@maple/domain/http"
+import { makeQueryDataSource } from "@maple/widgets/dashboard"
 
 import {
 	ArrowTrendDownIcon,
@@ -51,19 +52,17 @@ const breakdownDataSource = (
 	// they receive — handing them 50 turns a 10-stage funnel into a truncated list.
 	options?: { defaultLimit?: number },
 ) =>
-	({
-		endpoint: "custom_query_builder_breakdown",
+	makeQueryDataSource({
+		resultShape: "breakdown",
 		// Deliberately NOT forwarding `state.formulas`. A formula is a timeseries
 		// expression with no meaning in a categorical breakdown, and
 		// `QueryBuilderBreakdownInputSchema` (api/warehouse/query-builder-breakdown.ts)
-		// accepts only startTime/endTime/queries — smuggling formulas through the
-		// params to preserve them across a reopen fails the request decode and
-		// leaves the widget stuck on its loading skeleton.
-		params: {
-			queries: visibleQueries,
-			...(options?.defaultLimit ? { defaultLimit: options.defaultLimit } : {}),
-		},
-		transform: sharedTransform,
+		// accepts only startTime/endTime/queries — smuggling formulas through to
+		// preserve them across a reopen fails the request decode and leaves the
+		// widget stuck on its loading skeleton.
+		queries: visibleQueries,
+		...(options?.defaultLimit ? { defaultLimit: options.defaultLimit } : undefined),
+		...(!(sharedTransform === undefined) ? { transform: sharedTransform } : undefined),
 	}) satisfies WidgetDataSource
 
 export const pieWidgetType: WidgetTypeDefinition = {
@@ -164,15 +163,13 @@ export const histogramWidgetType: WidgetTypeDefinition = {
 		if (ctx.visibleQueries.some(hasActiveGroupBy)) return breakdownDataSource(ctx)
 
 		const valueColumn = histogramValueColumn(ctx.visibleQueries[0]?.dataSource ?? "traces")
-		return {
-			endpoint: "custom_query_builder_list",
-			params: {
-				queries: ctx.visibleQueries,
-				limit: parsePositiveNumber(ctx.state.tableLimit) ?? 200,
-				...(valueColumn ? { columns: [valueColumn] } : {}),
-			},
-			transform: ctx.sharedTransform,
-		}
+		return makeQueryDataSource({
+			resultShape: "list",
+			queries: ctx.visibleQueries,
+			limit: parsePositiveNumber(ctx.state.tableLimit) ?? 200,
+			...(valueColumn ? { columns: [valueColumn] } : undefined),
+			...(!(ctx.sharedTransform === undefined) ? { transform: ctx.sharedTransform } : undefined),
+		})
 	},
 
 	buildDisplay: ({ base }) => base,

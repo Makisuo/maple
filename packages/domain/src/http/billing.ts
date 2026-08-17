@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Effect, Schema } from "effect"
-import { Authorization } from "./current-tenant"
+import { SessionAuthorization } from "./current-tenant"
 import { WarehouseQueryError } from "./warehouse-errors"
 
 // Contract for raw Autumn proxy responses. Schemas model only consumed fields
@@ -362,8 +362,8 @@ export class BillingApiGroup extends HttpApiGroup.make("billing")
 			error: BillingUpstreamError,
 		}),
 	)
-	.prefix("/api/billing")
-	.middleware(Authorization) {}
+	.prefix("/internal/billing")
+	.middleware(SessionAuthorization) {}
 
 // The plan catalog is global, so `listPlans` stays public — a transient
 // onboarding token gap serves the catalog instead of a 401. The handler still

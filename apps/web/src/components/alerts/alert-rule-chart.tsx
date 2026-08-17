@@ -1,15 +1,5 @@
 import * as React from "react"
-import {
-	Area,
-	CartesianGrid,
-	ComposedChart,
-	Legend,
-	Line,
-	ReferenceArea,
-	ReferenceLine,
-	XAxis,
-	YAxis,
-} from "recharts"
+import { Area, ComposedChart, Legend, Line, ReferenceArea, ReferenceLine } from "recharts"
 
 import type {
 	AlertCheckDocument,
@@ -25,6 +15,9 @@ import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { formatBucketLabel } from "@maple/ui/lib/format"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
@@ -89,7 +82,7 @@ type ResolvedSource = SignalSource | "none"
 export const SIGNAL_SOURCE_LABEL: Record<SignalSource, string> = {
 	preview: "Query",
 	checks: "Evaluated",
-}
+} satisfies Record<SignalSource, string>
 
 const Y_AXIS_WIDTH = 72
 const PLOT_RIGHT = 12
@@ -103,7 +96,7 @@ const RAIL_COLOR: Record<RailStatus, string> = {
 	skipped: "bg-muted-foreground/30",
 	healthy: "bg-chart-apdex/70",
 	empty: "bg-muted/50",
-}
+} satisfies Record<RailStatus, string>
 
 function num(value: unknown): number {
 	const parsed = typeof value === "number" ? value : Number(value)
@@ -192,7 +185,11 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 			const keys = previewSeries.map((s) => s.groupKey)
 			const single = keys.length === 1
 			const byT = new Map<number, ChartPoint>()
-			const statusRank: Record<string, number> = { healthy: 0, skipped: 1, breached: 2 }
+			const statusRank: Record<string, number> = {
+				healthy: 0,
+				skipped: 1,
+				breached: 2,
+			} satisfies Record<string, number>
 			// Points plot at the window CLOSE — the moment the evaluator observes
 			// the window — matching check timestamps and reaching the axis edge.
 			const stepMs = (preview?.bucketSeconds ?? 60) * 1000
@@ -566,7 +563,7 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 						/>
 					</pattern>
 				</defs>
-				<CartesianGrid vertical={false} />
+				<ChartGrid />
 
 				{noDataBands.map((band, i) => (
 					<ReferenceArea
@@ -605,23 +602,16 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 					/>
 				))}
 
-				<XAxis
+				<ChartXAxis
 					dataKey="t"
 					type="number"
 					scale="time"
 					domain={[domain.min, domain.max]}
-					tickLine={false}
-					axisLine={false}
-					tickMargin={8}
-					fontSize={11}
 					tickFormatter={(value) => formatTime(value as number, "tick")}
 				/>
-				<YAxis
-					tickLine={false}
-					axisLine={false}
+				<ChartYAxis
 					tickMargin={8}
 					width={Y_AXIS_WIDTH}
-					fontSize={11}
 					domain={yDomain}
 					tickFormatter={(value) => formatSignalValue(signalType, num(value))}
 				/>

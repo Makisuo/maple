@@ -32,7 +32,7 @@ const {
 } = Astro.props;
 
 const currentLocale = Astro.currentLocale ?? "en";
-const localeMap: Record<string, string> = { en: "en_US", ja: "ja_JP", ko: "ko_KR" };
+const localeMap: Record<string, string>  = { en: "en_US", ja: "ja_JP", ko: "ko_KR" } satisfies Record<string, string>;
 const ogLocale = localeMap[currentLocale] ?? "en_US";
 
 // Build path without locale prefix — used for both hreflang and the canonical.

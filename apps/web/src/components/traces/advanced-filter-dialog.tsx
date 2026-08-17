@@ -86,7 +86,7 @@ export function AdvancedFilterDialog({ initialValue, onApply }: AdvancedFilterDi
 					</Button>
 				}
 			/>
-			<DialogContent className="sm:max-w-2xl">
+			<DialogContent className="sm:max-w-3xl">
 				<DialogHeader>
 					<DialogTitle>Advanced Filter</DialogTitle>
 					<DialogDescription>
@@ -108,7 +108,7 @@ export function AdvancedFilterDialog({ initialValue, onApply }: AdvancedFilterDi
 						highlight
 						onChange={setValue}
 						placeholder='service.name = "checkout" AND attr.http.route != "/health"'
-						textareaClassName="font-mono text-sm leading-relaxed resize-y min-h-[200px]"
+						textareaClassName="font-mono text-sm leading-relaxed resize-y min-h-[200px] max-h-[40vh]"
 						ariaLabel="Advanced traces where clause"
 					/>
 				</DialogPanel>

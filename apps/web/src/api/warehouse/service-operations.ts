@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { DeploymentEnvironment, ServiceName, ServiceOperationsRequest } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
 export interface ServiceOperationSparklinePoint {
@@ -43,7 +43,7 @@ export const getServiceOperations = Effect.fn("QueryEngine.getServiceOperations"
 
 	const result = yield* runWarehouseQuery("serviceOperations", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceOperations({
 				payload: new ServiceOperationsRequest({
 					serviceName: input.serviceName,

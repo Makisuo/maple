@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 // Raw-vs-rollup parity for the service-overview tiers.
 //
 // The services list reconstructs its window from up to three sources at once:

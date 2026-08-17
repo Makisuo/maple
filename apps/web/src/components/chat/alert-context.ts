@@ -46,8 +46,8 @@ export const toAlertContext = (
 	windowMinutes: rule.windowMinutes,
 	groupKey: incident.groupKey,
 	sampleCount: incident.lastSampleCount,
-	...(result?.summary ? { aiSummary: result.summary } : {}),
-	...(result?.suspectedCause ? { aiSuspectedCause: result.suspectedCause } : {}),
+	...(result?.summary ? { aiSummary: result.summary } : undefined),
+	...(result?.suspectedCause ? { aiSuspectedCause: result.suspectedCause } : undefined),
 })
 
 export const decodeAlertContextFromSearchParam = (raw: string): AlertContext | undefined => {
@@ -70,7 +70,12 @@ export const signalLabel = (signalType: string): string => {
 			return "Apdex"
 		case "throughput":
 			return "throughput"
+		case "builder_query":
+			return "query result"
+		case "raw_query":
+			return "SQL query result"
 		default:
-			return signalType
+			// Never leak a raw enum into prose — these read mid-sentence.
+			return signalType.replace(/[_-]+/g, " ")
 	}
 }

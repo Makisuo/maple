@@ -17,12 +17,12 @@ interface Props {
 const { title, category, cover, coverAlt, variant = "card", drench, class: className = "" } = Astro.props;
 
 // Focal pixel glyph per category — the hero of the generated cover art.
-const FOCAL: Record<string, PixelIconName> = {
+const FOCAL: Record<string, PixelIconName>  = {
     engineering: "activity",
     guides: "trend",
     product: "gauge",
     company: "globe",
-};
+} satisfies Record<string, PixelIconName>;
 const focal: PixelIconName = (category && FOCAL[category]) || "window";
 const isDrench = drench ?? variant === "featured";
 const eager = variant === "featured" || variant === "banner";

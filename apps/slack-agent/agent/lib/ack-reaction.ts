@@ -1,5 +1,6 @@
 import { resolveBotToken } from "./maple.js"
 import { ACK_REACTION_NAME, addReactionViaSlack, registerAckedTriggeringMessage } from "./reaction.js"
+import { isString } from "./type-guards.js"
 
 /**
  * Immediate "received" acknowledgement: reacts with :eyes: on the triggering
@@ -93,13 +94,12 @@ export function parseAckReactionTarget(rawBody: string): AckReactionTarget | nul
 		return null
 	}
 
-	const threadTs =
-		typeof event.thread_ts === "string" && event.thread_ts.length > 0 ? event.thread_ts : undefined
+	const threadTs = isString(event.thread_ts) && event.thread_ts.length > 0 ? event.thread_ts : undefined
 	return {
-		teamId: typeof parsed.team_id === "string" ? parsed.team_id : undefined,
+		teamId: isString(parsed.team_id) ? parsed.team_id : undefined,
 		channelId,
 		messageTs: ts,
-		...(threadTs ? { threadTs } : {}),
+		...(threadTs ? { threadTs } : undefined),
 	}
 }
 

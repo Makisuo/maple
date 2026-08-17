@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { BillingUpstreamError } from "@maple/domain/http"
@@ -69,7 +70,7 @@ const ROUTE_PATHS: Record<AutumnRoute, string> = {
 	previewAttach: "/v1/billing.preview_attach",
 	openCustomerPortal: "/v1/billing.open_customer_portal",
 	listPlans: "/v1/plans.list",
-}
+} satisfies Record<AutumnRoute, string>
 
 /**
  * Autumn answers in snake_case; every schema in `@maple/domain/http` is
@@ -151,7 +152,7 @@ const errorResponse = (statusCode: number, text: string): Record<string, unknown
 	const raw = parsed?.message ?? parsed?.error
 	const code = parsed?.code
 	return {
-		...(typeof raw === "string" ? { message: raw } : {}),
+		...(typeof raw === "string" ? { message: raw } : undefined),
 		code: typeof code === "string" ? code : "autumn_api_error",
 		statusCode,
 	}
@@ -215,7 +216,7 @@ const callAutumn = (
 
 type AutumnCall = Effect.Effect<AutumnResult, BillingUpstreamError>
 
-export interface AutumnClientShape {
+export interface AutumnClientApi {
 	readonly getOrCreateCustomer: (
 		customerId: string,
 		options: {
@@ -250,10 +251,10 @@ const customerDataFields = (data: AutumnCustomerData | undefined): Record<string
 	data === undefined
 		? {}
 		: {
-				...(data.name !== undefined ? { name: data.name } : {}),
-				...(data.email !== undefined ? { email: data.email } : {}),
-				...(data.fingerprint !== undefined ? { fingerprint: data.fingerprint } : {}),
-				...(data.metadata !== undefined ? { metadata: data.metadata } : {}),
+				...(data.name !== undefined ? { name: data.name } : undefined),
+				...(data.email !== undefined ? { email: data.email } : undefined),
+				...(data.fingerprint !== undefined ? { fingerprint: data.fingerprint } : undefined),
+				...(data.metadata !== undefined ? { metadata: data.metadata } : undefined),
 			}
 
 /**
@@ -293,7 +294,7 @@ const callUpdateBillingControls = (
 								enabled: alert.enabled,
 								threshold: alert.threshold,
 								threshold_type: alert.thresholdType,
-								...(alert.name ? { name: alert.name } : {}),
+								...(alert.name ? { name: alert.name } : undefined),
 							})),
 						},
 					},
@@ -324,7 +325,7 @@ const callUpdateBillingControls = (
  * runs unconfigured and boot must not depend on billing. The unwrap happens once
  * here, the check stays per call.
  */
-export class AutumnClient extends Context.Service<AutumnClient, AutumnClientShape>()(
+export class AutumnClient extends Context.Service<AutumnClient, AutumnClientApi>()(
 	"@maple/api/services/billing/AutumnClient",
 	{
 		make: Effect.gen(function* () {
@@ -380,7 +381,7 @@ export class AutumnClient extends Context.Service<AutumnClient, AutumnClientShap
 				openCustomerPortal: (customerId, { returnUrl }) =>
 					call("openCustomerPortal", {
 						customer_id: customerId,
-						...(returnUrl !== undefined ? { return_url: returnUrl } : {}),
+						...(returnUrl !== undefined ? { return_url: returnUrl } : undefined),
 					}),
 
 				// The only route Autumn marks customer-optional: an onboarding token gap
@@ -390,7 +391,7 @@ export class AutumnClient extends Context.Service<AutumnClient, AutumnClientShap
 
 				updateCustomerBillingControls: (orgId, controls) =>
 					callUpdateBillingControls(httpClient, secretKey, apiUrl, orgId, controls),
-			} satisfies AutumnClientShape
+			} satisfies AutumnClientApi
 		}),
 	},
 ) {

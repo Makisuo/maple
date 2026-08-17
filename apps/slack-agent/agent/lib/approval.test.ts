@@ -29,12 +29,16 @@ function approvalCtx(toolName: string, auth: AuthOverrides | null = {}): Approva
 		toolName,
 		callId: "call_1",
 		approvedTools: new Set<string>(),
+		getSandbox: () => Promise.reject(new Error("Sandbox access is not available in approval tests.")),
+		getSkill: () => {
+			throw new Error("Skill access is not available in approval tests.")
+		},
 		session: {
 			id: "session_1",
 			auth: { current, initiator: current },
 			turn: { id: "turn_0", sequence: 0 },
 		},
-	} as unknown as ApprovalContext
+	}
 }
 
 const APP_PRINCIPAL: AuthOverrides = {
@@ -171,7 +175,6 @@ describe("MUTATING_TOOL_NAMES", () => {
 				"release_error_issue",
 				"transition_error_issue",
 				"comment_on_error_issue",
-				"heartbeat_error_issue",
 				"set_issue_severity",
 				"update_error_notification_policy",
 				"propose_fix",

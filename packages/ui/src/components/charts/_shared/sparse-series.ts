@@ -1,44 +1,70 @@
 /**
- * Sparse-series detection for time-series charts.
+ * Point-dot policy for time-series charts — Grafana's "Show points: Auto".
  *
- * Low-volume data (a handful of non-zero buckets among zero-filled ones)
- * renders as invisible zero-width spikes on line/area charts. When a series
- * is "sparse" — mostly zeros, or containing isolated non-zero points whose
- * neighbors are all zero — charts auto-enable point dots so single-bucket
- * values stay visible (MAP-49).
+ * A line segment needs two non-zero neighbours to be visible, so an isolated
+ * bucket (both neighbours zero/missing) renders as nothing on a line/area chart
+ * (MAP-49). Those points always get a dot. Every OTHER point gets one only when
+ * the series is sparse enough for dots to be legible — a dot per point on a
+ * 700-point line is noise, not information.
  */
 
-const SPARSE_NONZERO_FRACTION = 0.3
+/**
+ * The spacing unit for the density rule: uPlot's `ptDia` for a 2px stroke
+ * (`3 + 2 × lineWidth`), i.e. the point size Grafana draws — not our r=2.5
+ * dot, so the rule matches Grafana's feel rather than our smaller marker.
+ */
+export const POINT_DOT_DIAMETER_PX = 7
+
+/**
+ * uPlot's default `points.show`: draw every point only when consecutive
+ * points are at least two diameters apart. A 60-point hour on a 700px tile
+ * (12px apart) stays clean; the same hour in the 1000px editor preview
+ * (17px apart) gets its dots.
+ */
+export const MIN_PX_PER_POINT_FOR_DOTS = POINT_DOT_DIAMETER_PX * 2
+
+export type PointsMode = "all" | "isolated" | "none"
 
 function valueAt(row: Record<string, unknown> | undefined, key: string): number {
 	const value = row?.[key]
 	return typeof value === "number" && Number.isFinite(value) ? value : 0
 }
 
-export function isSparseSeries(
+/**
+ * Per series key, the row indexes whose value is non-zero while both
+ * neighbours are zero or missing — the points a line cannot show.
+ * Series with no isolated points are absent from the result.
+ */
+export function isolatedPointIndexes(
 	data: ReadonlyArray<Record<string, unknown>>,
 	keys: ReadonlyArray<string>,
-): boolean {
-	if (data.length < 3 || keys.length === 0) return false
+): ReadonlyMap<string, ReadonlySet<number>> {
+	const result = new Map<string, Set<number>>()
+	if (data.length === 0 || keys.length === 0) return result
 
-	let nonZero = 0
-	let total = 0
 	for (const key of keys) {
 		for (let i = 0; i < data.length; i++) {
-			const value = valueAt(data[i], key)
-			total++
-			if (value === 0) continue
-			nonZero++
-			// An isolated point (both neighbors zero/missing) can never render as
-			// a visible line segment — that alone warrants dots.
-			const prev = valueAt(data[i - 1], key)
-			const next = valueAt(data[i + 1], key)
-			if (prev === 0 && next === 0) return true
+			if (valueAt(data[i], key) === 0) continue
+			if (valueAt(data[i - 1], key) !== 0 || valueAt(data[i + 1], key) !== 0) continue
+			let indexes = result.get(key)
+			if (!indexes) {
+				indexes = new Set()
+				result.set(key, indexes)
+			}
+			indexes.add(i)
 		}
 	}
+	return result
+}
 
-	if (nonZero === 0) return false
-	return nonZero / total < SPARSE_NONZERO_FRACTION
+/**
+ * Whether every point should carry a dot, given how much horizontal room each
+ * one has. `plotWidthPx` of 0 (not yet measured) says "no" — the isolated-point
+ * rule still applies, so nothing is lost while the container settles.
+ */
+export function pointsFit(plotWidthPx: number, pointCount: number): boolean {
+	if (pointCount <= 0 || plotWidthPx <= 0) return false
+	return plotWidthPx / pointCount >= MIN_PX_PER_POINT_FOR_DOTS
 }
 
 /**

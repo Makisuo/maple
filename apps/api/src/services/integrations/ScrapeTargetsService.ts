@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { randomUUID } from "node:crypto"
 import {
 	IsoDateTimeString,
@@ -12,6 +13,7 @@ import {
 	ScrapeTargetPersistenceError,
 	ScrapeTargetProbeResponse,
 	ScrapeTargetResponse,
+	ScrapeTargetStoredConfigInvalidError,
 	ScrapeTargetsListResponse,
 	ScrapeTargetType,
 	ScrapeTargetUpstreamError,
@@ -30,13 +32,16 @@ import {
 	BasicCredentialsSchema,
 	BearerCredentialsSchema,
 	buildScrapeAuthHeaders,
-	catchOAuthTokenFailure,
 	TokenCredentialsSchema,
 } from "@/services/auth/scrape-auth"
 import { safeFetch, validateExternalUrl } from "@/http/url-validator"
-import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
+import { DiscoveryConfigSchema } from "./planetscale/discovery-config"
 import { PlanetScaleDiscoveryService, planetScaleDiscoveryUrl } from "./PlanetScaleDiscoveryService"
-import { PlanetScaleOAuthService, planetScaleBearerHeader } from "@/services/auth/PlanetScaleOAuthService"
+import {
+	PlanetScaleOAuthService,
+	planetScaleBearerHeader,
+	type PlanetScaleAccessTokenError,
+} from "@/services/auth/PlanetScaleOAuthService"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
@@ -70,12 +75,20 @@ const parseRetryAfterSeconds = (value: string | null): number | null => {
 	return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
 }
 
-export interface ScrapeTargetsServiceShape {
-	readonly list: (orgId: OrgId) => Effect.Effect<ScrapeTargetsListResponse, ScrapeTargetPersistenceError>
+export interface ScrapeTargetsServiceApi {
+	readonly list: (
+		orgId: OrgId,
+	) => Effect.Effect<
+		ScrapeTargetsListResponse,
+		ScrapeTargetPersistenceError | ScrapeTargetStoredConfigInvalidError
+	>
 	readonly get: (
 		orgId: OrgId,
 		targetId: ScrapeTargetId,
-	) => Effect.Effect<ScrapeTargetResponse, ScrapeTargetNotFoundError | ScrapeTargetPersistenceError>
+	) => Effect.Effect<
+		ScrapeTargetResponse,
+		ScrapeTargetNotFoundError | ScrapeTargetPersistenceError | ScrapeTargetStoredConfigInvalidError
+	>
 	readonly create: (
 		orgId: OrgId,
 		request: CreateScrapeTargetRequest,
@@ -93,6 +106,7 @@ export interface ScrapeTargetsServiceShape {
 		| ScrapeTargetValidationError
 		| ScrapeTargetPersistenceError
 		| ScrapeTargetEncryptionError
+		| ScrapeTargetStoredConfigInvalidError
 	>
 	readonly delete: (
 		orgId: OrgId,
@@ -111,6 +125,7 @@ export interface ScrapeTargetsServiceShape {
 		| ScrapeTargetEncryptionError
 		| ScrapeTargetAuthError
 		| ScrapeTargetUpstreamError
+		| PlanetScaleAccessTokenError
 	>
 	readonly recordScrapeResults: (
 		results: ReadonlyArray<{
@@ -151,7 +166,7 @@ export interface ScrapeTargetsServiceShape {
 		| ScrapeTargetNotFoundError
 		| ScrapeTargetPersistenceError
 		| ScrapeTargetEncryptionError
-		| ScrapeTargetAuthError
+		| PlanetScaleAccessTokenError
 	>
 }
 
@@ -184,13 +199,14 @@ const toPersistenceError = (error: unknown) =>
 		message: error instanceof Error ? error.message : "Scrape target persistence failed",
 	})
 
+const toUpstreamError = (message: string, status?: number) =>
+	new ScrapeTargetUpstreamError({ message, ...(!(status === undefined) ? { status } : undefined) })
+
 const toEncryptionError = (message: string) => new ScrapeTargetEncryptionError({ message })
 
 const decodeTargetIdSync = Schema.decodeUnknownSync(ScrapeTargetId)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 const decodeScrapeIntervalSecondsSync = Schema.decodeUnknownSync(ScrapeIntervalSeconds)
-const decodeScrapeAuthTypeSync = Schema.decodeUnknownSync(ScrapeAuthType)
-const decodeScrapeTargetTypeSync = Schema.decodeUnknownSync(ScrapeTargetType)
 const ScrapeLabelsSchema = Schema.Record(Schema.String, Schema.String)
 
 /** Cap pattern lists so a target config stays small and bounded. */
@@ -276,29 +292,96 @@ const validateAuthCredentials = (authType: string, authCredentials: string | nul
 	)
 }
 
-const rowToResponse = (row: ScrapeTargetRow): ScrapeTargetResponse => {
-	const discoveryConfig = decodeDiscoveryConfig(row.discoveryConfigJson)
+const storedConfigInvalid = (
+	row: ScrapeTargetRow,
+	component: ScrapeTargetStoredConfigInvalidError["component"],
+	cause: unknown,
+) =>
+	new ScrapeTargetStoredConfigInvalidError({
+		rawTargetId: row.id,
+		component,
+		message: `Stored scrape target ${component} is invalid`,
+		cause,
+	})
+
+const decodeStored = <A, E>(
+	row: ScrapeTargetRow,
+	component: ScrapeTargetStoredConfigInvalidError["component"],
+	decode: (value: unknown) => Effect.Effect<A, E>,
+	value: unknown,
+): Effect.Effect<A, ScrapeTargetStoredConfigInvalidError> =>
+	decode(value).pipe(Effect.mapError((cause) => storedConfigInvalid(row, component, cause)))
+
+const rowToResponse = Effect.fn("ScrapeTargetsService.rowToResponse")(function* (row: ScrapeTargetRow) {
+	const id = yield* decodeStored(row, "id", Schema.decodeUnknownEffect(ScrapeTargetId), row.id)
+	const targetType = yield* decodeStored(
+		row,
+		"target_type",
+		Schema.decodeUnknownEffect(ScrapeTargetType),
+		row.targetType,
+	)
+	const discoveryConfig =
+		targetType === "planetscale"
+			? yield* decodeStored(
+					row,
+					"discovery_config",
+					Schema.decodeUnknownEffect(DiscoveryConfigSchema),
+					row.discoveryConfigJson,
+				)
+			: null
+	const scrapeIntervalSeconds = yield* decodeStored(
+		row,
+		"scrape_interval",
+		Schema.decodeUnknownEffect(ScrapeIntervalSeconds),
+		row.scrapeIntervalSeconds,
+	)
+	const authType = yield* decodeStored(
+		row,
+		"auth_type",
+		Schema.decodeUnknownEffect(ScrapeAuthType),
+		row.authType,
+	)
+	const createdAt = yield* decodeStored(
+		row,
+		"created_at",
+		Schema.decodeUnknownEffect(IsoDateTimeString),
+		row.createdAt.toISOString(),
+	)
+	const updatedAt = yield* decodeStored(
+		row,
+		"updated_at",
+		Schema.decodeUnknownEffect(IsoDateTimeString),
+		row.updatedAt.toISOString(),
+	)
+	const lastScrapeAt = row.lastScrapeAt
+		? yield* decodeStored(
+				row,
+				"last_scrape_at",
+				Schema.decodeUnknownEffect(IsoDateTimeString),
+				row.lastScrapeAt.toISOString(),
+			)
+		: null
 	return new ScrapeTargetResponse({
-		id: decodeTargetIdSync(row.id),
+		id,
 		name: row.name,
 		serviceName: row.serviceName ?? null,
 		url: row.url,
-		targetType: decodeScrapeTargetTypeSync(row.targetType),
+		targetType,
 		organization: discoveryConfig?.organization ?? null,
 		includeBranches: discoveryConfig?.includeBranches ?? [],
 		excludeBranches: discoveryConfig?.excludeBranches ?? [],
-		scrapeIntervalSeconds: decodeScrapeIntervalSecondsSync(row.scrapeIntervalSeconds),
+		scrapeIntervalSeconds,
 		labelsJson: row.labelsJson == null ? null : JSON.stringify(row.labelsJson),
-		authType: decodeScrapeAuthTypeSync(row.authType),
+		authType,
 		hasCredentials: row.authCredentialsCiphertext !== null,
 		managedBy: row.managedBy ?? null,
 		enabled: row.enabled,
-		lastScrapeAt: row.lastScrapeAt ? decodeIsoDateTimeStringSync(row.lastScrapeAt.toISOString()) : null,
+		lastScrapeAt,
 		lastScrapeError: row.lastScrapeError,
-		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
-		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
+		createdAt,
+		updatedAt,
 	})
-}
+})
 
 const MIN_SCRAPE_INTERVAL = 5
 const MAX_SCRAPE_INTERVAL = 300
@@ -397,11 +480,11 @@ const buildDiscoveryConfig = (
 	excludeBranches: ReadonlyArray<string>,
 ): { organization: string; includeBranches?: string[]; excludeBranches?: string[] } => ({
 	organization,
-	...(includeBranches.length > 0 ? { includeBranches: [...includeBranches] } : {}),
-	...(excludeBranches.length > 0 ? { excludeBranches: [...excludeBranches] } : {}),
+	...(includeBranches.length > 0 ? { includeBranches: [...includeBranches] } : undefined),
+	...(excludeBranches.length > 0 ? { excludeBranches: [...excludeBranches] } : undefined),
 })
 
-export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, ScrapeTargetsServiceShape>()(
+export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, ScrapeTargetsServiceApi>()(
 	"@maple/api/services/ScrapeTargetsService",
 	{
 		make: Effect.gen(function* () {
@@ -488,9 +571,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					return yield* buildScrapeAuthHeaders(row, encryptionKey)
 				}
 				const orgId = yield* Schema.decodeEffect(OrgId)(row.orgId).pipe(Effect.orDie)
-				const { accessToken } = yield* psOAuth
-					.getValidAccessToken(orgId)
-					.pipe(Effect.catchTags(catchOAuthTokenFailure))
+				const { accessToken } = yield* psOAuth.getValidAccessToken(orgId)
 				return { Authorization: planetScaleBearerHeader(accessToken) }
 			})
 
@@ -507,7 +588,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					.pipe(Effect.mapError(toPersistenceError))
 
 				return new ScrapeTargetsListResponse({
-					targets: rows.map(rowToResponse),
+					targets: yield* Effect.forEach(rows, rowToResponse),
 				})
 			})
 
@@ -517,7 +598,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 			) {
 				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
 				const row = yield* requireTarget(orgId, targetId)
-				return rowToResponse(row)
+				return yield* rowToResponse(row)
 			})
 
 			const create = Effect.fn("ScrapeTargetsService.create")(function* (
@@ -533,7 +614,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					includeBranches?: string[]
 					excludeBranches?: string[]
 				} | null = null
-				let authType: string
+				let authType: ScrapeAuthType
 
 				if (targetType === "planetscale") {
 					if (request.url) {
@@ -607,11 +688,12 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				const name = request.name.trim()
 				const serviceName = request.serviceName ?? null
 
-				let credentialFields: {
+				interface EncryptedCredentialFields {
 					authCredentialsCiphertext: string | null
 					authCredentialsIv: string | null
 					authCredentialsTag: string | null
-				} = {
+				}
+				let credentialFields: EncryptedCredentialFields = {
 					authCredentialsCiphertext: null,
 					authCredentialsIv: null,
 					authCredentialsTag: null,
@@ -630,41 +712,66 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				const now = yield* Clock.currentTimeMillis
 				const id = decodeTargetIdSync(randomUUID())
 
-				yield* database
+				const inserted = yield* database
 					.execute((db) =>
-						db.insert(scrapeTargets).values({
-							id,
-							orgId,
-							name,
-							serviceName,
-							url,
-							targetType,
-							discoveryConfigJson,
-							scrapeIntervalSeconds:
-								request.scrapeIntervalSeconds ?? (targetType === "planetscale" ? 30 : 15),
-							labelsJson: labels ?? null,
-							authType,
-							...credentialFields,
-							enabled: request.enabled !== false,
-							createdAt: new Date(now),
-							updatedAt: new Date(now),
-						}),
+						db
+							.insert(scrapeTargets)
+							.values({
+								id,
+								orgId,
+								name,
+								serviceName,
+								url,
+								targetType,
+								discoveryConfigJson,
+								scrapeIntervalSeconds:
+									request.scrapeIntervalSeconds ?? (targetType === "planetscale" ? 30 : 15),
+								labelsJson: labels ?? null,
+								authType,
+								...credentialFields,
+								enabled: request.enabled !== false,
+								createdAt: new Date(now),
+								updatedAt: new Date(now),
+							})
+							.returning({ id: scrapeTargets.id }),
 					)
 					.pipe(Effect.mapError(toPersistenceError))
-
-				const row = yield* selectById(orgId, id)
-				if (Option.isNone(row)) {
+				if (inserted.length !== 1) {
 					return yield* Effect.fail(
 						new ScrapeTargetPersistenceError({
 							message: "Failed to create scrape target",
 						}),
 					)
 				}
+				const createdAt = decodeIsoDateTimeStringSync(new Date(now).toISOString())
+				const scrapeIntervalSeconds =
+					request.scrapeIntervalSeconds ??
+					decodeScrapeIntervalSecondsSync(targetType === "planetscale" ? 30 : 15)
+				const created = new ScrapeTargetResponse({
+					id,
+					name,
+					serviceName,
+					url,
+					targetType,
+					organization: discoveryConfigJson?.organization ?? null,
+					includeBranches: discoveryConfigJson?.includeBranches ?? [],
+					excludeBranches: discoveryConfigJson?.excludeBranches ?? [],
+					scrapeIntervalSeconds,
+					labelsJson: labels == null ? null : JSON.stringify(labels),
+					authType,
+					hasCredentials: credentialFields.authCredentialsCiphertext !== null,
+					managedBy: null,
+					enabled: request.enabled !== false,
+					lastScrapeAt: null,
+					lastScrapeError: null,
+					createdAt,
+					updatedAt: createdAt,
+				})
 
 				// Fire the first scrape in the background so target creation returns
 				// promptly, but never swallow its failure silently: a probe that fails
 				// before it can record a result (e.g. a revoked/not-connected OAuth
-				// grant → ScrapeTargetAuthError) would otherwise leave the fresh target
+				// grant) would otherwise leave the fresh target
 				// looking healthy with no log and no lastScrapeError row.
 				// Scoped, not detached: the probe records its result through the
 				// request's Postgres socket, which is released when the request ends.
@@ -682,7 +789,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					),
 				)
 
-				return rowToResponse(row.value)
+				return created
 			})
 
 			const update = Effect.fn("ScrapeTargetsService.update")(function* (
@@ -747,7 +854,10 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				const labels = yield* validateLabelsJson(request.labelsJson)
 
 				const now = yield* Clock.currentTimeMillis
-				const updates: Record<string, unknown> = { updatedAt: new Date(now) }
+				const updates: Record<string, unknown> = { updatedAt: new Date(now) } satisfies Record<
+					string,
+					unknown
+				>
 
 				if (request.name !== undefined) updates.name = request.name.trim()
 				if (request.url !== undefined && request.url !== null) updates.url = request.url.trim()
@@ -758,7 +868,12 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 						request.includeBranches !== undefined ||
 						request.excludeBranches !== undefined)
 				) {
-					const existingConfig = decodeDiscoveryConfig(existing.discoveryConfigJson)
+					const existingConfig = yield* decodeStored(
+						existing,
+						"discovery_config",
+						Schema.decodeUnknownEffect(DiscoveryConfigSchema),
+						existing.discoveryConfigJson,
+					)
 					const organization =
 						request.organization !== undefined
 							? request.organization?.trim()
@@ -844,7 +959,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				// flipped `enabled` must not be masked by a warm entry in this isolate.
 				invalidateScrapeTargetRow(targetId)
 
-				return rowToResponse(row.value)
+				return yield* rowToResponse(row.value)
 			})
 
 			const remove = Effect.fn("ScrapeTargetsService.delete")(function* (
@@ -901,6 +1016,93 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				return rows
 			})
 
+			// The upstream `/metrics` fetch is effectively the entire cost of the
+			// scrape-proxy route: by the time we get here the target row is memoized,
+			// PlanetScale discovery is cached and no Postgres read remains. Without its
+			// own span that time is invisible — it shows up only as the unexplained
+			// residual of `scrapeForCollector`, whose every instrumented child measures
+			// 0ms, which is what made a 2026-07 latency shift take raw SQL to explain.
+			//
+			// `server.address` + `url.path`, never `url.full`: PlanetScale authenticates
+			// the metrics data plane with `?sig=&exp=` query params, i.e. credentials.
+			// `pathname` drops the query, so the signed URL cannot leak into telemetry.
+			//
+			// `peer.service` is deliberately low-cardinality (two values, not one per
+			// target) — a per-target name would fragment the service map into a node
+			// per scrape target.
+			const fetchUpstream = Effect.fn("ScrapeTargetsService.fetchUpstream", { kind: "client" })(
+				function* (
+					scrapeUrl: string,
+					headers: Record<string, string>,
+					// The drizzle column is a plain string, not the domain union — keep it
+					// that way rather than casting a DB read into the branded type.
+					targetType: string,
+					timeoutMs: number,
+				) {
+					const parsed = Option.liftThrowable(() => new URL(scrapeUrl))()
+					// Annotated before the fetch so a failed or timed-out scrape still
+					// draws its service-map edge.
+					yield* Effect.annotateCurrentSpan({
+						"peer.service":
+							targetType === "planetscale" ? "planetscale-metrics" : "scrape-target",
+						"http.request.method": "GET",
+						"maple.scrape.target_type": targetType,
+						...(Option.isSome(parsed)
+							? {
+									"server.address": parsed.value.host,
+									"url.path": parsed.value.pathname,
+								}
+							: undefined),
+					})
+
+					// `safeFetch` is retained for its SSRF protection + per-hop redirect
+					// re-validation (the Effect HttpClient transport has neither). The manual
+					// AbortController/setTimeout is replaced by the interruption-aware signal
+					// from `Effect.tryPromise` plus `Effect.timeout`: on timeout the fiber is
+					// interrupted, which aborts the in-flight fetch via that signal.
+					const result = yield* Effect.tryPromise({
+						try: async (signal) => {
+							const response = await safeFetch(scrapeUrl, {
+								method: "GET",
+								headers,
+								signal,
+							})
+							return {
+								status: response.status,
+								body: await response.text(),
+								contentType:
+									response.headers.get("content-type") ??
+									"text/plain; version=0.0.4; charset=utf-8",
+								retryAfterSeconds: parseRetryAfterSeconds(
+									response.headers.get("retry-after"),
+								),
+							} satisfies ScrapeTargetProxyResponse
+						},
+						// An upstream failure is the scrape TARGET's fault, not ours — a
+						// persistence error here would report someone else's unreachable
+						// endpoint as a Maple storage fault, which is what the exact v2
+						// error contracts (#458) set out to stop.
+						catch: (cause) =>
+							toUpstreamError(
+								cause instanceof Error ? cause.message : "Scrape target request failed",
+							),
+					}).pipe(
+						Effect.timeout(timeoutMs),
+						Effect.catchTag("TimeoutError", () =>
+							Effect.fail(toUpstreamError("Scrape target request timed out")),
+						),
+					)
+
+					yield* Effect.annotateCurrentSpan({
+						"http.response.status_code": result.status,
+						// Decoded character count, not wire bytes — hence the vendor
+						// namespace rather than `http.response.body.size`.
+						"maple.scrape.response_chars": result.body.length,
+					})
+					return result
+				},
+			)
+
 			const scrapeForCollector = Effect.fn("ScrapeTargetsService.scrapeForCollector")(function* (
 				targetId: ScrapeTargetId,
 				subTargetKey?: string,
@@ -955,36 +1157,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					Math.max(1_000, (row.value.scrapeIntervalSeconds - 1) * 1000),
 				)
 
-				// `safeFetch` is retained for its SSRF protection + per-hop redirect
-				// re-validation (the Effect HttpClient transport has neither). The manual
-				// AbortController/setTimeout is replaced by the interruption-aware signal
-				// from `Effect.tryPromise` plus `Effect.timeout`: on timeout the fiber is
-				// interrupted, which aborts the in-flight fetch via that signal.
-				return yield* Effect.tryPromise({
-					try: async (signal) => {
-						const response = await safeFetch(scrapeUrl, {
-							method: "GET",
-							headers,
-							signal,
-						})
-						return {
-							status: response.status,
-							body: await response.text(),
-							contentType:
-								response.headers.get("content-type") ??
-								"text/plain; version=0.0.4; charset=utf-8",
-							retryAfterSeconds: parseRetryAfterSeconds(response.headers.get("retry-after")),
-						} satisfies ScrapeTargetProxyResponse
-					},
-					catch: toPersistenceError,
-				}).pipe(
-					Effect.timeout(timeoutMs),
-					// A timeout surfaces as the same persistence error a fetch abort
-					// produced before, so callers see no new error type.
-					Effect.catchTag("TimeoutError", () =>
-						Effect.fail(toPersistenceError(new Error("The operation was aborted"))),
-					),
-				)
+				return yield* fetchUpstream(scrapeUrl, headers, row.value.targetType, timeoutMs)
 			})
 
 			const recordScrapeResults = Effect.fn("ScrapeTargetsService.recordScrapeResults")(function* (
@@ -1209,7 +1382,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				recordScrapeResults,
 				listChecks,
 				probe,
-			} satisfies ScrapeTargetsServiceShape
+			} satisfies ScrapeTargetsServiceApi
 		}),
 	},
 ) {

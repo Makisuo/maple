@@ -5,6 +5,7 @@ import { deepEqual, isResolved } from "alchemy/Diff"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
 import { listAll, MapleApi } from "./MapleApi"
+import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
 
 /**
@@ -74,7 +75,7 @@ const WireApiKeyWithSecret = Schema.Struct({
 const decodeWireApiKeyWithSecret = Schema.decodeUnknownEffect(WireApiKeyWithSecret)
 
 const createBody = (props: ApiKeyProps): Record<string, unknown> => {
-	const body: Record<string, unknown> = { name: props.name }
+	const body: Record<string, unknown> = { name: props.name } satisfies Record<string, unknown>
 	if (props.description !== undefined) body.description = props.description
 	if (props.scopes !== undefined) body.scopes = props.scopes
 	if (props.kind !== undefined) body.kind = props.kind
@@ -114,7 +115,11 @@ export const ApiKeyProvider = () =>
 					if (output?.keyId) {
 						const fetched = yield* api
 							.get(`/v2/api_keys/${output.keyId}`)
-							.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+							.pipe(
+								Effect.catchTag(MapleErrorTags.apiKeyNotFound, () =>
+									Effect.succeed(undefined),
+								),
+							)
 						if (fetched !== undefined) {
 							const wire = yield* decodeWireApiKey(fetched)
 							if (!wire.revoked) observed = wire
@@ -143,13 +148,13 @@ export const ApiKeyProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/api_keys/${output.keyId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag(MapleErrorTags.apiKeyNotFound, () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ output }) {
 					if (!output?.keyId) return undefined
 					const fetched = yield* api
 						.get(`/v2/api_keys/${output.keyId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+						.pipe(Effect.catchTag(MapleErrorTags.apiKeyNotFound, () => Effect.succeed(undefined)))
 					if (fetched === undefined) return undefined
 					const wire = yield* decodeWireApiKey(fetched)
 					if (wire.revoked) return undefined

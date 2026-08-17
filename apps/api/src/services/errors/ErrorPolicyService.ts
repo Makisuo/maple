@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import {
 	type AlertDestinationId,
 	ErrorNotificationPolicyDocument,
@@ -50,7 +51,7 @@ const decodeEscalationAttemptProcessedAt = Schema.decodeUnknownSync(
 	IssueEscalationAttemptDocument.fields.processedAt,
 )
 
-export interface ErrorPolicyPublicShape {
+export interface ErrorPolicyPublicApi {
 	readonly getNotificationPolicy: (
 		orgId: OrgId,
 	) => Effect.Effect<ErrorNotificationPolicyDocument, ErrorPersistenceError>
@@ -82,7 +83,7 @@ export interface ErrorPolicyPublicShape {
 }
 
 /** Policy persistence shared with the compatibility facade's notification and tick paths. */
-export interface ErrorPolicyServiceShape extends ErrorPolicyPublicShape {
+export interface ErrorPolicyServiceApi extends ErrorPolicyPublicApi {
 	readonly defaultNotificationPolicy: (orgId: OrgId, timestamp: number) => ErrorNotificationPolicyRow
 	readonly parseNotificationDestinationIds: (raw: unknown) => ReadonlyArray<AlertDestinationId>
 	readonly loadNotificationPolicyRow: (
@@ -90,7 +91,7 @@ export interface ErrorPolicyServiceShape extends ErrorPolicyPublicShape {
 	) => Effect.Effect<ErrorNotificationPolicyRow | null, ErrorPersistenceError>
 }
 
-const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen(function* () {
+const make: Effect.Effect<ErrorPolicyServiceApi, never, Database> = Effect.gen(function* () {
 	const database = yield* Database
 	const dbExecute = makeErrorDatabaseExecute(database, "ErrorPolicyService")
 	const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
@@ -101,7 +102,7 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 	// `destinationIdsJson` (not `enabled`) is what holds delivery back. Setting
 	// `enabled: false` here instead made CFG-NOTIF-01 report "turned off" for
 	// row-less orgs and hid the real reason.
-	const defaultNotificationPolicy: ErrorPolicyServiceShape["defaultNotificationPolicy"] = (
+	const defaultNotificationPolicy: ErrorPolicyServiceApi["defaultNotificationPolicy"] = (
 		orgId,
 		timestamp,
 	) => ({
@@ -120,9 +121,7 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 		updatedBy: "system",
 	})
 
-	const parseNotificationDestinationIds: ErrorPolicyServiceShape["parseNotificationDestinationIds"] = (
-		raw,
-	) =>
+	const parseNotificationDestinationIds: ErrorPolicyServiceApi["parseNotificationDestinationIds"] = (raw) =>
 		Option.getOrElse(
 			Option.flatMap(decodeStoredJsonArray(raw), (parsed) =>
 				decodeAlertDestinationIds(parsed.filter((value) => typeof value === "string")),
@@ -146,7 +145,7 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 			updatedBy: decodeUserIdSync(row.updatedBy),
 		})
 
-	const loadNotificationPolicyRow: ErrorPolicyServiceShape["loadNotificationPolicyRow"] = Effect.fn(
+	const loadNotificationPolicyRow: ErrorPolicyServiceApi["loadNotificationPolicyRow"] = Effect.fn(
 		"ErrorsService.loadPolicyRow",
 	)(function* (orgId) {
 		const rows = yield* dbExecute((db) =>
@@ -159,7 +158,7 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 		return rows[0] ?? null
 	})
 
-	const getNotificationPolicy: ErrorPolicyServiceShape["getNotificationPolicy"] = Effect.fn(
+	const getNotificationPolicy: ErrorPolicyServiceApi["getNotificationPolicy"] = Effect.fn(
 		"ErrorsService.getNotificationPolicy",
 	)(function* (orgId) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -168,7 +167,7 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 		return notificationRowToDocument(row ?? defaultNotificationPolicy(orgId, nowMs))
 	})
 
-	const upsertNotificationPolicy: ErrorPolicyServiceShape["upsertNotificationPolicy"] = Effect.fn(
+	const upsertNotificationPolicy: ErrorPolicyServiceApi["upsertNotificationPolicy"] = Effect.fn(
 		"ErrorsService.upsertNotificationPolicy",
 	)(function* (orgId, userId, request) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -250,14 +249,14 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 		return rows[0] ?? null
 	})
 
-	const getEscalationPolicy: ErrorPolicyServiceShape["getEscalationPolicy"] = Effect.fn(
+	const getEscalationPolicy: ErrorPolicyServiceApi["getEscalationPolicy"] = Effect.fn(
 		"ErrorsService.getEscalationPolicy",
 	)(function* (orgId) {
 		yield* Effect.annotateCurrentSpan({ orgId })
 		return escalationRowToDocument(yield* loadEscalationPolicyRow(orgId))
 	})
 
-	const upsertEscalationPolicy: ErrorPolicyServiceShape["upsertEscalationPolicy"] = Effect.fn(
+	const upsertEscalationPolicy: ErrorPolicyServiceApi["upsertEscalationPolicy"] = Effect.fn(
 		"ErrorsService.upsertEscalationPolicy",
 	)(function* (orgId, userId, request) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -354,7 +353,7 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 					: decodeEscalationAttemptProcessedAt(row.processedAt.toISOString()),
 		})
 
-	const evaluatePolicy: ErrorPolicyServiceShape["evaluateEscalationPolicy"] = Effect.fn(
+	const evaluatePolicy: ErrorPolicyServiceApi["evaluateEscalationPolicy"] = Effect.fn(
 		"ErrorsService.evaluateEscalationPolicy",
 	)(function* (orgId, request) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -382,7 +381,7 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 			rules,
 			severity: request.severity,
 			source: request.source,
-			...(request.confidence === undefined ? {} : { confidence: request.confidence }),
+			...(!(request.confidence === undefined) ? { confidence: request.confidence } : undefined),
 			enabledDestinationIds: new Set(enabledRows.map((row) => row.id)),
 		})
 		return new EscalationPolicyEvaluationDocument({
@@ -392,7 +391,7 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 		})
 	})
 
-	const listIssueEscalations: ErrorPolicyServiceShape["listIssueEscalations"] = Effect.fn(
+	const listIssueEscalations: ErrorPolicyServiceApi["listIssueEscalations"] = Effect.fn(
 		"ErrorsService.listIssueEscalations",
 	)(function* (orgId, issueId) {
 		yield* Effect.annotateCurrentSpan({ orgId, issueId })
@@ -406,7 +405,7 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 		return new IssueEscalationAttemptsResponse({ attempts: rows.map(escalationAttemptDocument) })
 	})
 
-	const listRecentEscalations: ErrorPolicyServiceShape["listRecentEscalations"] = Effect.fn(
+	const listRecentEscalations: ErrorPolicyServiceApi["listRecentEscalations"] = Effect.fn(
 		"ErrorsService.listRecentEscalations",
 	)(function* (orgId, limit) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -432,10 +431,10 @@ const make: Effect.Effect<ErrorPolicyServiceShape, never, Database> = Effect.gen
 		defaultNotificationPolicy,
 		parseNotificationDestinationIds,
 		loadNotificationPolicyRow,
-	} satisfies ErrorPolicyServiceShape
+	} satisfies ErrorPolicyServiceApi
 })
 
-export class ErrorPolicyService extends Context.Service<ErrorPolicyService, ErrorPolicyServiceShape>()(
+export class ErrorPolicyService extends Context.Service<ErrorPolicyService, ErrorPolicyServiceApi>()(
 	"@maple/api/services/errors/ErrorPolicyService",
 	{ make },
 ) {

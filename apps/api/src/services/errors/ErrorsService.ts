@@ -49,13 +49,13 @@ import {
 	isOrgWarehouseQuarantined,
 	quarantineOnConfigClassCause,
 } from "@/services/warehouse/warehouse-org-quarantine"
-import { actorRowToDocument, ErrorActorsService, type ErrorActorsPublicShape } from "./ErrorActorsService"
+import { actorRowToDocument, ErrorActorsService, type ErrorActorsPublicApi } from "./ErrorActorsService"
 import {
 	ErrorIssueReadModelsService,
-	type ErrorIssueReadModelsPublicShape,
+	type ErrorIssueReadModelsPublicApi,
 } from "./ErrorIssueReadModelsService"
-import { ErrorIssueWorkflowService, type ErrorIssueWorkflowPublicShape } from "./ErrorIssueWorkflowService"
-import { ErrorPolicyService, type ErrorPolicyPublicShape } from "./ErrorPolicyService"
+import { ErrorIssueWorkflowService, type ErrorIssueWorkflowPublicApi } from "./ErrorIssueWorkflowService"
+import { ErrorPolicyService, type ErrorPolicyPublicApi } from "./ErrorPolicyService"
 import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
 
 export { describeCause, makePersistenceError } from "./error-persistence"
@@ -130,12 +130,12 @@ const RETENTION_PHASE_EVERY_N_TICKS = 60
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 const SYSTEM_AGENT_NAME = SYSTEM_ERRORS_AGENT_NAME
-export interface ErrorsServiceShape
+export interface ErrorsServiceApi
 	extends
-		ErrorActorsPublicShape,
-		ErrorIssueWorkflowPublicShape,
-		ErrorIssueReadModelsPublicShape,
-		ErrorPolicyPublicShape {
+		ErrorActorsPublicApi,
+		ErrorIssueWorkflowPublicApi,
+		ErrorIssueReadModelsPublicApi,
+		ErrorPolicyPublicApi {
 	readonly transitionIssue: (
 		orgId: OrgId,
 		actorId: ActorId,
@@ -200,7 +200,7 @@ export interface ErrorsServiceShape
 }
 
 const make: Effect.Effect<
-	ErrorsServiceShape,
+	ErrorsServiceApi,
 	never,
 	| Database
 	| WarehouseQueryService
@@ -363,7 +363,7 @@ const make: Effect.Effect<
 	} = workflow
 	// Events / audit log
 
-	const recordAnomalyLinkEvent: ErrorsServiceShape["recordAnomalyLinkEvent"] = Effect.fn(
+	const recordAnomalyLinkEvent: ErrorsServiceApi["recordAnomalyLinkEvent"] = Effect.fn(
 		"ErrorsService.recordAnomalyLinkEvent",
 	)(function* (orgId, issueId, actorId, payload) {
 		yield* Effect.annotateCurrentSpan({ orgId, issueId, action: payload.action })
@@ -372,7 +372,7 @@ const make: Effect.Effect<
 
 	// State transitions
 
-	const transitionIssue: ErrorsServiceShape["transitionIssue"] = Effect.fn("ErrorsService.transitionIssue")(
+	const transitionIssue: ErrorsServiceApi["transitionIssue"] = Effect.fn("ErrorsService.transitionIssue")(
 		function* (orgId, actorId, issueId, toState, opts) {
 			yield* Effect.annotateCurrentSpan({ orgId, issueId, toState })
 			const current = yield* requireIssue(orgId, issueId)
@@ -416,7 +416,7 @@ const make: Effect.Effect<
 			leaseExpiresAt: row?.leaseExpiresAt == null ? null : isoFromDate(row.leaseExpiresAt),
 		})
 
-	const claimIssue: ErrorsServiceShape["claimIssue"] = Effect.fn("ErrorsService.claimIssue")(
+	const claimIssue: ErrorsServiceApi["claimIssue"] = Effect.fn("ErrorsService.claimIssue")(
 		function* (orgId, actorId, issueId, leaseDurationMs) {
 			const timestamp = yield* Clock.currentTimeMillis
 			const leaseMs = leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS
@@ -507,15 +507,15 @@ const make: Effect.Effect<
 		},
 	)
 
-	const proposeFix: ErrorsServiceShape["proposeFix"] = Effect.fn("ErrorsService.proposeFix")(
+	const proposeFix: ErrorsServiceApi["proposeFix"] = Effect.fn("ErrorsService.proposeFix")(
 		function* (orgId, actorId, issueId, request) {
 			const timestamp = yield* Clock.currentTimeMillis
 			const current = yield* requireIssue(orgId, issueId)
 			const payload: Record<string, unknown> = {
 				patchSummary: request.patchSummary,
-				...(request.prUrl ? { prUrl: request.prUrl } : {}),
-				...(request.artifacts ? { artifacts: request.artifacts } : {}),
-			}
+				...(request.prUrl ? { prUrl: request.prUrl } : undefined),
+				...(request.artifacts ? { artifacts: request.artifacts } : undefined),
+			} satisfies Record<string, unknown>
 			yield* recordEvent(orgId, issueId, actorId, "fix_proposed", {
 				payload,
 				timestamp,
@@ -1225,7 +1225,7 @@ const make: Effect.Effect<
 	// Align to the latest completed minute. Per-org cursor leases serialize
 	// overlapping cron invocations; the cursor advances atomically with issue,
 	// incident, audit-event, and notification-outbox writes.
-	const runTick: ErrorsServiceShape["runTick"] = Effect.fn("ErrorsService.runTick")(function* () {
+	const runTick: ErrorsServiceApi["runTick"] = Effect.fn("ErrorsService.runTick")(function* () {
 		const nowMs = yield* Clock.currentTimeMillis
 		const cutoffMs = Math.floor(nowMs / TICK_MINUTE_MS) * TICK_MINUTE_MS - TICK_INGESTION_LAG_MS
 
@@ -1385,7 +1385,7 @@ const make: Effect.Effect<
 	})
 })
 
-export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceShape>()(
+export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceApi>()(
 	"@maple/api/services/ErrorsService",
 	{ make },
 ) {

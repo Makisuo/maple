@@ -67,7 +67,7 @@ const STATUS_THEME: Record<
 		pillBg: "#8b3530",
 		pillFg: "#f8d8d2",
 	},
-}
+} satisfies Record<DigestStatusLevel, { accent: string; bannerBg: string; pillBg: string; pillFg: string }>
 
 /** Empty string where the React tree rendered `null`. */
 function deltaPill(delta: number, invertColor = false): string {

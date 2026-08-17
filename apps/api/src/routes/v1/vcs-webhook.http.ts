@@ -1,5 +1,5 @@
 import { HttpRouter, type HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { Data, Effect, Option } from "effect"
+import { Effect, Option, Schema } from "effect"
 import type { VcsProviderClient } from "@/services/integrations/vcs/VcsProviderClient"
 import { VcsProviderRegistry } from "@/services/integrations/vcs/VcsProviderRegistry"
 import { VcsSyncQueue } from "@/services/integrations/vcs/VcsSyncQueue"
@@ -9,9 +9,10 @@ import { VcsSyncQueue } from "@/services/integrations/vcs/VcsSyncQueue"
  * 500. Failed immediately after the span annotation, then caught outside the
  * span (never serialized).
  */
-class EnqueueFailure extends Data.TaggedError("@maple/api/routes/VcsWebhookEnqueueFailure")<{
-	readonly message: string
-}> {}
+class EnqueueFailure extends Schema.TaggedError<EnqueueFailure>()(
+	"@maple/api/routes/VcsWebhookEnqueueFailure",
+	{ message: Schema.String },
+) {}
 
 // Public webhook receiver, one static route per registered provider
 // (`/api/integrations/<provider>/webhook`). Generic pipeline: the provider
@@ -35,7 +36,7 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 					yield* Effect.annotateCurrentSpan({
 						"http.request.method": req.method,
 						"http.route": route,
-						...(deliveryId ? { "vcs.webhook.delivery_id": deliveryId } : {}),
+						...(deliveryId ? { "vcs.webhook.delivery_id": deliveryId } : undefined),
 					})
 
 					const bodyOpt = yield* req.text.pipe(Effect.option)

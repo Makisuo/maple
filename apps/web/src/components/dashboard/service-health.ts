@@ -81,7 +81,7 @@ const SEVERITY_RANK: Record<SeverityLevel, number> = {
 	ok: 0,
 	warn: 1,
 	crit: 2,
-}
+} satisfies Record<SeverityLevel, number>
 
 function maxSeverity(a: SeverityLevel, b: SeverityLevel): SeverityLevel {
 	return SEVERITY_RANK[a] >= SEVERITY_RANK[b] ? a : b
@@ -122,7 +122,7 @@ const SEVERITY_TO_HEALTH: Record<SeverityLevel, ServiceHealth> = {
 	ok: "healthy",
 	warn: "degraded",
 	crit: "unhealthy",
-}
+} satisfies Record<SeverityLevel, ServiceHealth>
 
 /**
  * Derive a service's health. An open alert incident always forces `unhealthy`
@@ -177,7 +177,7 @@ const HEALTH_RANK: Record<ServiceHealth, number> = {
 	unhealthy: 2,
 	degraded: 1,
 	healthy: 0,
-}
+} satisfies Record<ServiceHealth, number>
 
 export function healthRank(health: ServiceHealth): number {
 	return HEALTH_RANK[health]

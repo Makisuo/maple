@@ -28,22 +28,29 @@ type ResolvedMode =
 const hasFlag = (name: string): boolean =>
 	typeof process !== "undefined" && Array.isArray(process.argv) && process.argv.includes(name)
 
-/** Fast, non-fatal liveness probe of the local binary's `/health` route. */
+/** Fast, non-fatal liveness probe of the local binary's `/health` route.
+ *
+ *  Untraced, for the same reason as `probeHealth` in commands/server.ts: "no
+ *  local server running" is the normal answer for anyone on remote mode, and
+ *  recording it as an `Error` span buried real failures. `TracerDisabledWhen`
+ *  skips span creation rather than producing an `Ok` span, and is scoped to this
+ *  request so other `/health` calls stay traced. */
 const probeLocal = (client: HttpClient.HttpClient, baseUrl: string): Effect.Effect<boolean> => {
 	const request = HttpClientRequest.get(`${baseUrl.replace(/\/$/, "")}/health`)
 	return client.execute(request).pipe(
 		Effect.map((response) => response.status >= 200 && response.status < 300),
 		Effect.timeoutOrElse({ duration: Duration.millis(400), orElse: () => Effect.succeed(false) }),
 		Effect.orElseSucceed(() => false),
+		Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
 	)
 }
 
-export interface ModeShape {
+export interface ModeApi {
 	/** Resolve the active backend. Fails with `ModeError` if none is available. */
 	readonly resolve: Effect.Effect<ResolvedMode, ModeError>
 }
 
-export class Mode extends Context.Service<Mode, ModeShape>()("@maple/cli/Mode", {
+export class Mode extends Context.Service<Mode, ModeApi>()("@maple/cli/Mode", {
 	make: Effect.gen(function* () {
 		const config = yield* MapleConfig
 		const client = yield* HttpClient.HttpClient
@@ -93,7 +100,7 @@ export class Mode extends Context.Service<Mode, ModeShape>()("@maple/cli/Mode", 
 			})
 		})
 
-		return { resolve } satisfies ModeShape
+		return { resolve } satisfies ModeApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

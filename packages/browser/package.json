@@ -25,7 +25,8 @@
 	"scripts": {
 		"build": "tsdown",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "vitest run",
+		"size": "bun scripts/size.ts"
 	},
 	"dependencies": {
 		"@opentelemetry/api": "^1.9.0",
@@ -40,6 +41,7 @@
 	},
 	"devDependencies": {
 		"@maple/browser-session": "workspace:*",
+		"jsdom": "^29.1.1",
 		"tsdown": "^0.22.14",
 		"typescript": "^6.0.3",
 		"vitest": "catalog:"

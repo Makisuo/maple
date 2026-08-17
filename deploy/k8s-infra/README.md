@@ -114,7 +114,7 @@ What it collects: per-pod CPU usage (cores) and memory working-set bytes for eve
 
 What it does **not** collect: host metrics (there is no host on Fargate), CPU/memory limit utilization, network I/O. The first two require the kubeletstats receiver, which Fargate doesn't expose; network I/O is left out of v1 because cAdvisor reports it as a counter that we'd need to rate-convert.
 
-The preset adds a `nodes/proxy` permission to the cluster collector's ClusterRole so the prometheus receiver can scrape via the API server proxy. EC2-launched pods are filtered out of the Fargate scrape (relabel keeps only nodes labeled `eks.amazonaws.com/compute-type=fargate`), so there is no double-counting with the DaemonSet.
+The preset adds `nodes` + `nodes/proxy` permissions to the cluster collector's ClusterRole so the prometheus receiver can discover Fargate nodes and scrape them via the API server proxy — and, because every rule group in that ClusterRole is gated on the receiver (or processor) that needs it, a Fargate-only install gets *only* those two rules plus the `k8sattributes` reads. Turning on `presets.clusterMetrics` or `presets.k8sEvents` is what adds the broader workload/event reads. EC2-launched pods are filtered out of the Fargate scrape (relabel keeps only nodes labeled `eks.amazonaws.com/compute-type=fargate`), so there is no double-counting with the DaemonSet.
 
 ## Validate
 

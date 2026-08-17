@@ -1,10 +1,13 @@
-import { Data, Effect } from "effect"
+import { Effect, Schema } from "effect"
 
-export class ClerkRequestError extends Data.TaggedError("@maple/api/services/auth/ClerkRequestError")<{
-	readonly operation: string
-	readonly message: string
-	readonly cause: unknown
-}> {}
+export class ClerkRequestError extends Schema.TaggedError<ClerkRequestError>()(
+	"@maple/api/services/auth/ClerkRequestError",
+	{
+		operation: Schema.String,
+		message: Schema.String,
+		cause: Schema.Defect(),
+	},
+) {}
 
 type ClerkSpanAttributes = Readonly<Record<string, string | number | boolean>>
 

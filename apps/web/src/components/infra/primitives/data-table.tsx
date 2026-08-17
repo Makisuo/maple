@@ -122,12 +122,16 @@ interface DataTableRootProps {
 	ariaLabel: string
 	waiting?: boolean
 	/**
-	 * Cap the row area at this pixel height and scroll inside it, with the column heads pinned.
+	 * Cap the row area at this height and scroll inside it, with the column heads pinned.
 	 * For lists whose length is the server's limit rather than a human number — 100 breakdown keys,
 	 * 500 zones — this keeps the table a fixed-size instrument instead of a page that grows past
 	 * everything below it. Omit for tables that are short by nature.
+	 *
+	 * A number is pixels. A CSS length is passed through, which is what a table inside a dialog
+	 * needs: its ceiling is the viewport, and a pixel figure measured at mount would be wrong
+	 * after the next resize.
 	 */
-	maxHeight?: number
+	maxHeight?: number | string
 	/** Surface the pinned header sits on. Defaults to the page background; pass `bg-card` inside a card. */
 	stickySurfaceClass?: string
 	children: React.ReactNode

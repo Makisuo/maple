@@ -61,7 +61,7 @@ const toTenantContext = (encoded: ChatTurnTenantEncoded): TenantContext => {
 		userId: tenant.userId,
 		roles: [...tenant.roles],
 		authMode: tenant.authMode,
-		...(tenant.actorId === undefined ? {} : { actorId: tenant.actorId }),
+		...(!(tenant.actorId === undefined) ? { actorId: tenant.actorId } : undefined),
 	}
 }
 
@@ -216,7 +216,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		{ layerPg },
 		{ layerLlm, resolveTriageModel },
 		loop,
-		{ buildSubmitDiagnosisTool },
+		{ buildDiagnosisCompletion },
 		{ McpToolExecutor },
 	] = await Promise.all([
 		import("../runtime/mcp-service-graph"),
@@ -244,14 +244,18 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	const annotateTurn = () =>
 		Effect.annotateCurrentSpan({
 			"maple.chat.outcome": observability.outcome ?? "unknown",
-			...(observability.finishReason === undefined
-				? {}
-				: { "maple.chat.finish_reason": observability.finishReason }),
+			...(!(observability.finishReason === undefined)
+				? {
+						"maple.chat.finish_reason": observability.finishReason,
+					}
+				: undefined),
 			"maple.chat.empty_output": observability.emptyOutput,
 			"maple.chat.recovery_count": observability.recoveryCount,
-			...(observability.failureReason === undefined
-				? {}
-				: { "maple.chat.failure_reason": observability.failureReason }),
+			...(!(observability.failureReason === undefined)
+				? {
+						"maple.chat.failure_reason": observability.failureReason,
+					}
+				: undefined),
 		})
 
 	const program = Effect.gen(function* () {
@@ -266,7 +270,10 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		// Shared with the turn so `submit_diagnosis` can report what the investigation cost. See
 		// `TurnUsage` — the tool is invoked mid-turn, so there is no later moment to hand it a total.
 		const usage = loop.makeTurnUsage()
-		const extraTools = buildSubmitDiagnosisTool(
+		// One value: the tool *and* whether this turn's answer is a call to it. Passing the tool alone
+		// is what left an autonomous investigation with no way to file its report once it ran out of
+		// steps — see `buildDiagnosisCompletion`.
+		const completion = buildDiagnosisCompletion(
 			input.sessionId,
 			tenant,
 			investigations.submitDiagnosis,
@@ -282,7 +289,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 				model,
 				messages: toLlmMessages(history, input.session.compaction()),
 				messageId: input.messageId,
-				extraTools,
+				...(completion === undefined ? undefined : { completion }),
 				usage,
 				observability,
 				// An abort clears the claim; the turn notices here and stops at the next event

@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect"
 import { OrgId } from "@maple/domain"
@@ -20,7 +21,7 @@ const testConfig = (extra: Record<string, string> = {}, includeSigning = true) =
 						TINYBIRD_SIGNING_KEY: SIGNING_KEY,
 						TINYBIRD_WORKSPACE_ID: "ws-uuid-abc",
 					}
-				: {}),
+				: undefined),
 			MAPLE_AUTH_MODE: "self_hosted",
 			MAPLE_ROOT_PASSWORD: "test-root-password",
 			MAPLE_DEFAULT_ORG_ID: "default",
@@ -123,7 +124,8 @@ describe("TinybirdOrgTokenService", () => {
 		return Effect.gen(function* () {
 			const svc = yield* TinybirdOrgTokenService
 			const error = yield* Effect.flip(svc.getOrgReadToken(asOrgId("org_a")))
-			assert.strictEqual(error.reason, "MissingSigningKey")
+			assert.strictEqual(error._tag, "@maple/http/errors/TinybirdOrgTokenConfigError")
+			assert.strictEqual(error.setting, "SigningKey")
 			assert.notInclude(error.message, "api-token-is-not-the-signing-key")
 		}).pipe(Effect.provide(missingLayer))
 	})

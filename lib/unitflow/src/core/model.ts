@@ -55,7 +55,7 @@ export interface UnitPorts {
  * to the same rule as `outputs` (see {@link Sections}) and invisible to the
  * View — only other models resolving the unit see them.
  */
-export interface Shape {
+export interface Definition {
 	readonly inputs: Record<string, SinkPort>
 	readonly outputs: Record<string, SourcePort>
 	readonly ui?: Record<string, SourcePort | Event.Sink<any> | UnitPorts>
@@ -76,12 +76,12 @@ type Section<K> = Record<
  * the three base sections required. */
 type Sections<A> = { readonly [K in keyof A]: Section<K> }
 
-export interface Accessor<Key, A extends Shape, E> {
+export interface Accessor<Key, A extends Definition, E> {
 	readonly get: (...args: KeyArgs<Key>) => Effect.Effect<A, E>
 	readonly dispose: (...args: KeyArgs<Key>) => Effect.Effect<void>
 }
 
-export interface Type<Key, A extends Shape, E, R> {
+export interface Type<Key, A extends Definition, E, R> {
 	readonly key: () => Key
 	readonly shape: () => A
 	readonly error: () => E
@@ -121,7 +121,7 @@ export interface ServiceClass<
 	Self,
 	Id extends string,
 	Key,
-	A extends Shape,
+	A extends Definition,
 	E,
 	R,
 > extends Context.ServiceClass<Self, Id, Accessor<Key, A, E>> {
@@ -133,21 +133,21 @@ export interface ServiceClass<
 
 export type AnyService = Context.Service<any, any> & {
 	readonly modelKey: string
-	readonly modelType: Type<any, Shape, any, any>
+	readonly modelType: Type<any, Definition, any, any>
 }
 
 /** A {@link Shape} whose `ui` section is present: what a View can bind. */
-export interface ViewableShape extends Shape {
+export interface ViewableDefinition extends Definition {
 	readonly ui: Record<string, SourcePort | Event.Sink<any> | UnitPorts>
 }
 
 /** A model whose shape exposes a `ui` section — the bound `View.make`
  * requires. Headless models (`inputs`/`outputs` only) do not satisfy it. */
 export type Viewable = AnyService & {
-	readonly modelType: Type<any, ViewableShape, any, any>
+	readonly modelType: Type<any, ViewableDefinition, any, any>
 }
 
-type AnyEffect = Effect.Effect<Shape, unknown, unknown>
+type AnyEffect = Effect.Effect<Definition, unknown, unknown>
 
 /** A key argument list validated by {@link KeyInput}: singleton models take
  * no key, keyed models require one of a valid flat shape. */
@@ -173,15 +173,15 @@ const lifetimeDuration = (lifetime: Lifetime | undefined, fallback: Duration.Dur
  * {@link AnyEffect}) keeps the three base sections required, this one holds
  * every section the returned shape actually has — extras included — to its
  * capability rule. */
-type ValidatedShape<Ret extends AnyEffect> = Effect.Effect<Sections<Effect.Success<Ret>>, unknown, unknown>
+type ValidatedModel<Ret extends AnyEffect> = Effect.Effect<Sections<Effect.Success<Ret>>, unknown, unknown>
 
 type SingletonOptions<Make extends () => AnyEffect> = {
-	readonly make: Make & (() => ValidatedShape<ReturnType<Make>>)
+	readonly make: Make & (() => ValidatedModel<ReturnType<Make>>)
 	readonly lifetime?: Lifetime
 }
 
 type KeyedOptions<Key, Make extends (key: Key) => AnyEffect> = {
-	readonly make: Make & ((key: Key) => ValidatedShape<ReturnType<Make>>)
+	readonly make: Make & ((key: Key) => ValidatedModel<ReturnType<Make>>)
 	readonly lifetime?: Lifetime
 }
 
@@ -212,7 +212,7 @@ export interface Builder<Self, Id extends string> {
 
 export type KeyOf<M extends AnyService> = ReturnType<M["modelType"]["key"]>
 
-export type ShapeOf<M extends AnyService> = ReturnType<M["modelType"]["shape"]>
+export type DefinitionOf<M extends AnyService> = ReturnType<M["modelType"]["shape"]>
 
 export type ErrorOf<M extends AnyService> = ReturnType<M["modelType"]["error"]>
 
@@ -234,7 +234,7 @@ type NarrowUi<T> =
  * stay private in the model's `make` closure — the port system is a type
  * guarantee, not a lint rule.
  */
-export type Ports<A extends Shape> = {
+export type Ports<A extends Definition> = {
 	readonly [S in keyof A]: S extends "inputs"
 		? { readonly [K in keyof A[S]]: NarrowInput<A[S][K]> }
 		: S extends "ui"
@@ -242,7 +242,7 @@ export type Ports<A extends Shape> = {
 			: { readonly [K in keyof A[S]]: NarrowOutput<A[S][K]> }
 }
 
-export type PortsOf<M extends AnyService> = Ports<ShapeOf<M>>
+export type PortsOf<M extends AnyService> = Ports<DefinitionOf<M>>
 
 export type ListItem<M extends AnyService> = PortsOf<M> & {
 	readonly key: KeyInput<KeyOf<M>>
@@ -271,16 +271,16 @@ const materializeValue = (value: unknown): Effect.Effect<void, never, Registry |
 	return Effect.void
 }
 
-const materialize = (shape: Shape): Effect.Effect<void, never, Registry | InstanceScope> =>
+const materialize = (definition: Definition): Effect.Effect<void, never, Registry | InstanceScope> =>
 	Effect.forEach(
 		// Every section, extras included: an extra section's ports must belong to
 		// the instance scope exactly like `outputs`.
-		Object.values(shape).flatMap((section) => Object.values(section)),
+		Object.values(definition).flatMap((section) => Object.values(section)),
 		materializeValue,
 		{ discard: true },
 	)
 
-const makeAccessor = <Key, A extends Shape, E, R>(
+const makeAccessor = <Key, A extends Definition, E, R>(
 	modelKey: string,
 	make: (key: Key) => Effect.Effect<A, E, R>,
 	context: Context.Context<R | Registry>,
@@ -323,7 +323,7 @@ const makeAccessor = <Key, A extends Shape, E, R>(
 				scope,
 			)
 			return yield* make(key).pipe(
-				Effect.tap((shape) => Effect.sync(() => namePorts(shape, modelKey, key))),
+				Effect.tap((definition) => Effect.sync(() => namePorts(definition, modelKey, key))),
 				Effect.tap(materialize),
 				Effect.provideContext(instanceContext),
 				// Failures are not cached: drop the entry BEFORE waiters wake — a
@@ -393,7 +393,7 @@ const makeAccessor = <Key, A extends Shape, E, R>(
 	return { get, dispose }
 }
 
-const define = <Self, Id extends string, Key, A extends Shape, E, R>(
+const define = <Self, Id extends string, Key, A extends Definition, E, R>(
 	id: Id,
 	make: (key: Key) => Effect.Effect<A, E, R>,
 	lifetime: Duration.Duration,
@@ -544,7 +544,7 @@ export const list = <M extends AnyService>(
 	model: M,
 ): Effect.Effect<List<M>, never, Registry | InstanceScope | Context.Service.Identifier<M>> =>
 	Effect.gen(function* () {
-		const accessor: Accessor<KeyOf<M>, ShapeOf<M>, ErrorOf<M>> = yield* model
+		const accessor: Accessor<KeyOf<M>, DefinitionOf<M>, ErrorOf<M>> = yield* model
 		const registry = yield* Registry
 		const instanceScope = yield* InstanceScope
 

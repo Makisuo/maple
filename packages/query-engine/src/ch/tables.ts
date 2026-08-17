@@ -467,7 +467,7 @@ export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 	SampleRateSum: T.float64,
 })
 
-export const ServiceMapDbQueryShapesHourly = table("service_map_db_query_shapes_hourly", {
+export const ServiceMapDbQuerySignaturesHourly = table("service_map_db_query_shapes_hourly", {
 	OrgId: T.string,
 	Hour: T.dateTime,
 	ServiceName: T.string,

@@ -1,17 +1,24 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Layer, Redacted, Schema } from "effect"
+import { Duration, Effect, Fiber, Layer, Metric, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { InternalScrapeTarget, ScrapeResultReport, ScrapeTargetId } from "@maple/domain/http"
-import { ApiClient, ApiRequestError, type ApiClientShape, type ScrapeProxyResponse } from "./ApiClient"
-import { OtlpIngest, OtlpIngestError, type OtlpIngestShape } from "./OtlpIngest"
+import { ApiClient, ApiRequestError, type ApiClientApi, type ScrapeProxyResponse } from "./ApiClient"
+import { OtlpIngest, OtlpIngestError, type OtlpIngestApi } from "./OtlpIngest"
 import {
+	backoffLogMessage,
 	initialJitterMs,
+	makeResultBuffer,
 	nextScrapeDelayMs,
+	outcomeError,
+	scrapeFailed,
+	scrapeSucceeded,
 	ScrapeScheduler,
 	sendResultsInChunks,
+	shouldBackOff,
 	type ScrapeOutcome,
 } from "./ScrapeScheduler"
-import { ScraperEnv, type ScraperEnvShape } from "./Env"
+import { ScraperEnv, type ScraperEnvConfig } from "./Env"
+import { bufferedResults } from "./Metrics"
 import type { OtlpExportRequest } from "./prometheus/otlp"
 
 const decodeTarget = Schema.decodeUnknownSync(InternalScrapeTarget)
@@ -56,7 +63,7 @@ const proxyResponse = (fields: {
 	retryAfterSeconds: fields.retryAfterSeconds ?? null,
 })
 
-const testEnv: ScraperEnvShape = {
+const testEnv: ScraperEnvConfig = {
 	MAPLE_API_URL: "http://api.test",
 	SD_INTERNAL_TOKEN: Redacted.make("token"),
 	MAPLE_INGEST_URL: "http://ingest.test",
@@ -88,8 +95,8 @@ const makeHarness = (targets: Array<InternalScrapeTarget>): Harness => ({
 	ingestImpl: () => Effect.void,
 })
 
-const harnessLayer = (harness: Harness, env: ScraperEnvShape = testEnv) => {
-	const api: ApiClientShape = {
+const harnessLayer = (harness: Harness, env: ScraperEnvConfig = testEnv) => {
+	const api: ApiClientApi = {
 		listTargets: () => Effect.sync(() => [...harness.targets]),
 		scrapeTarget: (targetId, subTargetKey) =>
 			Effect.suspend(() => {
@@ -102,7 +109,7 @@ const harnessLayer = (harness: Harness, env: ScraperEnvShape = testEnv) => {
 				harness.reportedResults.push(...results)
 			}),
 	}
-	const otlp: OtlpIngestShape = {
+	const otlp: OtlpIngestApi = {
 		send: (ingestKey, request) =>
 			Effect.suspend(() => {
 				harness.ingestCalls.push({ ingestKey, request })
@@ -406,7 +413,7 @@ describe("ScrapeScheduler", () => {
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
 			let listCalls = 0
-			const api: ApiClientShape = {
+			const api: ApiClientApi = {
 				// First call returns the target; every later refresh fails.
 				listTargets: () =>
 					Effect.suspend(() => {
@@ -495,6 +502,99 @@ describe("ScrapeScheduler", () => {
 		}),
 	)
 
+	it.effect("backs off a target the upstream answers with 503 (rate limited)", () =>
+		Effect.gen(function* () {
+			const harness = makeHarness([mkTarget(TARGET_A, 10)])
+			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 503, body: "unavailable" }))
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
+
+			yield* TestClock.adjust(Duration.seconds(60))
+
+			// Same exponential ladder as a 429: t=0, 10, 30.
+			assert.strictEqual(harness.scrapeCalls.length, 3)
+			assert.include(harness.reportedResults[0]?.error ?? "", "HTTP 503")
+		}),
+	)
+
+	it.effect("backs off when the ingest gateway blocks delivery (402) instead of re-scraping", () =>
+		Effect.gen(function* () {
+			// Prod scenario: the org is over its billing limit, so every export is
+			// refused. Scraping again cannot help — the data has nowhere to go.
+			const harness = makeHarness([mkTarget(TARGET_A, 10)])
+			harness.ingestImpl = () =>
+				Effect.fail(
+					new OtlpIngestError({
+						message: "ingest gateway rejected metrics: billing limit reached (HTTP 402)",
+						status: 402,
+					}),
+				)
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
+
+			yield* TestClock.adjust(Duration.seconds(60))
+
+			// Exponential backoff off a 10s base: scrapes at t=0, 10, 30.
+			assert.strictEqual(harness.scrapeCalls.length, 3)
+			assert.include(harness.reportedResults[0]?.error ?? "", "billing limit")
+		}),
+	)
+
+	it.effect("holds the configured cadence on a generic failure instead of backing off", () =>
+		Effect.gen(function* () {
+			// A transport error is not a signal that the upstream wants us to slow
+			// down, so the loop must keep its interval (contrast with 429/403/402).
+			const harness = makeHarness([mkTarget(TARGET_A, 10)])
+			harness.scrapeImpl = () =>
+				Effect.fail(new ApiRequestError({ message: "Maple API unreachable: boom", status: null }))
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
+
+			yield* TestClock.adjust(Duration.seconds(60))
+
+			// Fixed 10s cadence → t=0,10,...,60 → 7 scrapes.
+			assert.strictEqual(harness.scrapeCalls.length, 7)
+			assert.include(harness.reportedResults[0]?.error ?? "", "boom")
+		}),
+	)
+
+	it.effect("keeps results and the gauge consistent when a flush is interrupted", () =>
+		Effect.gen(function* () {
+			// The drain empties the buffer before the POST; an interrupt (shutdown)
+			// mid-flight used to drop the whole batch and leave the gauge at 0.
+			const harness = makeHarness([mkTarget(TARGET_A, 60)])
+			const api: ApiClientApi = {
+				listTargets: () => Effect.sync(() => [...harness.targets]),
+				scrapeTarget: (targetId) =>
+					Effect.suspend(() => {
+						harness.scrapeCalls.push(targetId)
+						return harness.scrapeImpl(targetId)
+					}),
+				// Never settles: the flush is in flight when we interrupt.
+				reportResults: () => Effect.never,
+			}
+			const layer = ScrapeScheduler.layer.pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						Layer.succeed(ApiClient, api),
+						Layer.succeed(OtlpIngest, { send: () => Effect.void }),
+						Layer.succeed(ScraperEnv, testEnv),
+					),
+				),
+			)
+			yield* Effect.gen(function* () {
+				const scheduler = yield* ScrapeScheduler
+				const fiber = yield* Effect.forkChild(scheduler.run)
+				yield* TestClock.adjust(Duration.millis(0))
+				// One scrape buffered; the flush at t=10s drains it and hangs.
+				yield* TestClock.adjust(Duration.seconds(11))
+
+				yield* Fiber.interrupt(fiber)
+
+				const stats = yield* scheduler.stats
+				assert.strictEqual(stats.pendingResults, 1)
+				assert.strictEqual((yield* Metric.value(bufferedResults)).value, 1)
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
 	it.effect("honors a longer Retry-After before the next scrape", () =>
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
@@ -537,7 +637,7 @@ describe("ScrapeScheduler", () => {
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 60)])
 			let failReports = true
-			const api: ApiClientShape = {
+			const api: ApiClientApi = {
 				listTargets: () => Effect.sync(() => [...harness.targets]),
 				scrapeTarget: (targetId) =>
 					Effect.suspend(() => {
@@ -632,34 +732,21 @@ describe("sendResultsInChunks", () => {
 })
 
 describe("nextScrapeDelayMs", () => {
-	const ok: ScrapeOutcome = {
-		error: null,
-		rateLimited: false,
-		authFailed: false,
-		deliveryBlocked: false,
-		retryAfterMs: null,
-	}
-	const limited = (retryAfterMs: number | null = null): ScrapeOutcome => ({
-		error: "target returned HTTP 429",
-		rateLimited: true,
-		authFailed: false,
-		deliveryBlocked: false,
-		retryAfterMs,
+	const ok: ScrapeOutcome = scrapeSucceeded({ samplesScraped: 1, samplesPostMetricRelabeling: 1 })
+	const limited = (retryAfterMs: number | null = null): ScrapeOutcome =>
+		scrapeFailed({ reason: "rate_limited", message: "target returned HTTP 429", retryAfterMs })
+	const authRejected: ScrapeOutcome = scrapeFailed({
+		reason: "auth_failed",
+		message: "target returned HTTP 403",
 	})
-	const authRejected: ScrapeOutcome = {
-		error: "target returned HTTP 403",
-		rateLimited: false,
-		authFailed: true,
-		deliveryBlocked: false,
-		retryAfterMs: null,
-	}
-	const deliveryBlocked: ScrapeOutcome = {
-		error: "ingest gateway rejected metrics: billing limit reached (HTTP 402)",
-		rateLimited: false,
-		authFailed: false,
-		deliveryBlocked: true,
-		retryAfterMs: null,
-	}
+	const deliveryBlocked: ScrapeOutcome = scrapeFailed({
+		reason: "delivery_blocked",
+		message: "ingest gateway rejected metrics: billing limit reached (HTTP 402)",
+	})
+	const generic: ScrapeOutcome = scrapeFailed({
+		reason: "scrape_failed",
+		message: "Maple API unreachable: boom",
+	})
 
 	it("holds the base interval on a healthy scrape, ignoring the counter", () => {
 		assert.strictEqual(nextScrapeDelayMs({ baseMs: 5_000, outcome: ok, consecutiveBackoffs: 3 }), 5_000)
@@ -709,6 +796,13 @@ describe("nextScrapeDelayMs", () => {
 		)
 	})
 
+	it("holds the base interval on a generic failure", () => {
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: generic, consecutiveBackoffs: 4 }),
+			10_000,
+		)
+	})
+
 	it("caps the backoff at 5 minutes", () => {
 		assert.strictEqual(
 			nextScrapeDelayMs({ baseMs: 60_000, outcome: limited(), consecutiveBackoffs: 5 }),
@@ -729,6 +823,104 @@ describe("nextScrapeDelayMs", () => {
 			40_000,
 		)
 	})
+})
+
+describe("ScrapeOutcome", () => {
+	// One union, one place each decision is derived. Before this, policy, the
+	// span's `error.type` and the log line each re-derived from four parallel
+	// booleans — and a delivery-blocked (402) scrape logged itself as
+	// "Scrape rate-limited, backing off".
+	const reasons = ["rate_limited", "auth_failed", "delivery_blocked", "scrape_failed"] as const
+
+	it("backs off for every reason a retry cannot immediately clear, and only those", () => {
+		assert.deepStrictEqual(
+			reasons.map((reason) => shouldBackOff(scrapeFailed({ reason, message: reason }))),
+			[true, true, true, false],
+		)
+		assert.isFalse(shouldBackOff(scrapeSucceeded({ samplesScraped: 0, samplesPostMetricRelabeling: 0 })))
+	})
+
+	it("gives each reason its own backoff log line", () => {
+		const lines = reasons.map(backoffLogMessage)
+		assert.lengthOf(new Set(lines), reasons.length)
+		// The regression: 402 used to reuse the rate-limit line verbatim.
+		assert.notStrictEqual(backoffLogMessage("delivery_blocked"), backoffLogMessage("rate_limited"))
+		assert.include(backoffLogMessage("delivery_blocked"), "delivery")
+	})
+
+	it("reports the failure message and nothing on success", () => {
+		assert.strictEqual(
+			outcomeError(scrapeFailed({ reason: "auth_failed", message: "target returned HTTP 403" })),
+			"target returned HTTP 403",
+		)
+		assert.isNull(outcomeError(scrapeSucceeded({ samplesScraped: 3, samplesPostMetricRelabeling: 3 })))
+	})
+})
+
+describe("ResultBuffer", () => {
+	const decodeId = Schema.decodeUnknownSync(ScrapeTargetId)
+	const mkReport = (scrapedAt: number) =>
+		new ScrapeResultReport({ targetId: decodeId(TARGET_A), scrapedAt, error: null })
+	const gauge = Effect.map(Metric.value(bufferedResults), (state) => state.value)
+
+	it.effect("keeps the gauge equal to the buffer size across every transition", () =>
+		Effect.gen(function* () {
+			const buffer = yield* makeResultBuffer(10)
+			yield* Effect.forEach([0, 1, 2].map(mkReport), buffer.enqueue, { discard: true })
+			assert.strictEqual(yield* buffer.size, 3)
+			assert.strictEqual(yield* gauge, 3)
+
+			const drained = yield* buffer.take
+			assert.lengthOf(drained, 3)
+			assert.strictEqual(yield* buffer.size, 0)
+			assert.strictEqual(yield* gauge, 0)
+
+			yield* buffer.requeue(drained)
+			assert.strictEqual(yield* buffer.size, 3)
+			assert.strictEqual(yield* gauge, 3)
+		}),
+	)
+
+	it.effect("requeues in front of results enqueued while the flush was in flight", () =>
+		Effect.gen(function* () {
+			const buffer = yield* makeResultBuffer(10)
+			yield* buffer.enqueue(mkReport(1))
+			const inFlight = yield* buffer.take
+			// A scrape lands mid-flush; the requeue must not clobber it, and the
+			// gauge must count both (it used to be set to the unsent count alone).
+			yield* buffer.enqueue(mkReport(2))
+			yield* buffer.requeue(inFlight)
+
+			assert.strictEqual(yield* buffer.size, 2)
+			assert.strictEqual(yield* gauge, 2)
+			assert.deepStrictEqual(
+				(yield* buffer.take).map((r) => r.scrapedAt),
+				[1, 2],
+			)
+		}),
+	)
+
+	it.effect("caps at capacity by dropping the oldest, gauge included", () =>
+		Effect.gen(function* () {
+			const buffer = yield* makeResultBuffer(3)
+			yield* Effect.forEach([0, 1, 2, 3, 4].map(mkReport), buffer.enqueue, { discard: true })
+			assert.strictEqual(yield* buffer.size, 3)
+			assert.strictEqual(yield* gauge, 3)
+			assert.deepStrictEqual(
+				(yield* buffer.take).map((r) => r.scrapedAt),
+				[2, 3, 4],
+			)
+
+			// Overflow on requeue drops the oldest too, keeping the newest.
+			yield* buffer.requeue([0, 1, 2, 3].map(mkReport))
+			assert.strictEqual(yield* buffer.size, 3)
+			assert.strictEqual(yield* gauge, 3)
+			assert.deepStrictEqual(
+				(yield* buffer.take).map((r) => r.scrapedAt),
+				[1, 2, 3],
+			)
+		}),
+	)
 })
 
 describe("initialJitterMs", () => {

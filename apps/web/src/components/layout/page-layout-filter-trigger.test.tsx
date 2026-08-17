@@ -22,7 +22,7 @@ function setViewport(collapsed: boolean) {
 				addListener: () => {},
 				removeListener: () => {},
 				dispatchEvent: () => false,
-			}) as unknown as MediaQueryList,
+			}) as MediaQueryList,
 	)
 }
 

@@ -1,26 +1,12 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ApiKeyId, PostgresTransactionId, UserId } from "../../primitives"
-import { ApiKeyKind } from "../api-keys"
-import { AuthorizationV2, V2SchemaErrors, V2Scope } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import {
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2PermissionError,
-	V2ServiceUnavailableError,
-} from "./errors"
+import { ApiKeyKind, ApiKeyNotFoundError, ApiKeyPersistenceError } from "../api-keys"
+import { AuthorizationV2, V2Scope } from "./auth"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
+import { V2InsufficientPermissions, V2ParameterInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
-
-/**
- * Author OpenAPI `examples` in wire (encoded) shape. Effect types the `examples`
- * annotation against a schema's decoded `Type`, but an HttpApi response renders
- * the *encoded* schema — so a realistic example must use wire values (`id`
- * as `key_…`, not the internal UUID). This adapter bridges the wire object to
- * the annotation's `Type` slot; each example is verified to be a decodable wire
- * payload in `openapi.test.ts`.
- */
-const wireExample = <A>(example: object): A => example as A
+import { publicError } from "./public-error"
 
 /** `key_…` public ID ⇄ internal `ApiKeyId` (raw UUID). */
 export const ApiKeyPublicId = PublicId(PublicIdPrefixes.apiKey, ApiKeyId)
@@ -201,7 +187,8 @@ export const V2ApiKeyCreateParams = Schema.Struct({
 })
 export type V2ApiKeyCreateParams = Schema.Schema.Type<typeof V2ApiKeyCreateParams>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+const apiKeyNotFound = publicError(ApiKeyNotFoundError)
+const apiKeyPersistence = publicError(ApiKeyPersistenceError)
 
 /** List response: a named, cursor-paginated page of API keys. */
 const ApiKeyList = ListOf(V2ApiKey).annotate({
@@ -215,7 +202,7 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 		HttpApiEndpoint.get("list", "/", {
 			query: ListQuery,
 			success: ApiKeyList,
-			error: [...commonErrors],
+			error: [V2ParameterInvalid.schema, apiKeyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listApiKeys",
@@ -229,7 +216,7 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 		HttpApiEndpoint.post("create", "/", {
 			payload: V2ApiKeyCreateParams,
 			success: V2ApiKeyWithSecret,
-			error: [...commonErrors, V2PermissionError],
+			error: [V2InsufficientPermissions.schema, apiKeyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "createApiKey",
@@ -243,7 +230,7 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: ApiKeyPublicId },
 			success: V2ApiKey,
-			error: [...commonErrors, V2NotFoundError],
+			error: [apiKeyNotFound, apiKeyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getApiKey",
@@ -257,7 +244,7 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 		HttpApiEndpoint.post("roll", "/:id/roll", {
 			params: { id: ApiKeyPublicId },
 			success: V2ApiKeyWithSecret,
-			error: [...commonErrors, V2PermissionError, V2NotFoundError],
+			error: [V2InsufficientPermissions.schema, apiKeyNotFound, apiKeyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "rollApiKey",
@@ -271,7 +258,7 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 		HttpApiEndpoint.delete("revoke", "/:id", {
 			params: { id: ApiKeyPublicId },
 			success: V2ApiKeyMutationResponse,
-			error: [...commonErrors, V2PermissionError, V2NotFoundError],
+			error: [V2InsufficientPermissions.schema, apiKeyNotFound, apiKeyPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "revokeApiKey",
@@ -283,7 +270,6 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 	)
 	.prefix("/v2/api_keys")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "API Keys",

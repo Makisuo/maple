@@ -22,7 +22,7 @@ Open **Integrations → Prometheus** in the Maple dashboard and click **Add Targ
 | **Scrape Interval** | 5–300 seconds (default 15).                                                                                                                                                                                      |
 | **Authentication**  | `None`, `Bearer Token` (`Authorization: Bearer …`), or `Basic Auth` (username + password). Credentials are encrypted at rest and never leave Maple's API — the scrape agent fetches through a server-side proxy. |
 
-Targets can also be managed programmatically via the REST API at `/api/scrape-targets` (create, update, delete, probe, and check history endpoints) using the same fields.
+Targets can also be managed programmatically via the REST API at `/v2/scrape_targets` (create, update, delete, probe, and check history endpoints) using the same fields.
 
 ## Testing and health
 

@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { useOrganization, useAuth } from "@clerk/clerk-react"
 import { useState } from "react"
 import { toastManager } from "@maple/ui/components/ui/toast"

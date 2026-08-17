@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 // Copied (with minimal adaptation) from alchemy-effect to stay API-compatible
 // for a future migration:
 //   https://github.com/alchemy-run/alchemy-effect/blob/main/packages/alchemy/src/Cloudflare/Workers/HttpServer.ts

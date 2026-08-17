@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 // Copied from alchemy-effect to stay API-compatible for a future migration:
 //   https://github.com/alchemy-run/alchemy-effect/blob/main/packages/alchemy/src/Cloudflare/Workers/Rpc.ts
 //
@@ -21,7 +22,7 @@ import { fromWebSocket } from "./websocket.ts"
 
 // Local redeclaration to avoid importing from durable-object-namespace.ts
 // (which imports from this file). Must match the exported shape there.
-interface DurableObjectShapeLocal {
+interface DurableObjectApiLocal {
 	fetch?: HttpEffect<any>
 	alarm?: (alarmInfo?: cf.AlarmInvocationInfo) => Effect.Effect<void, never, never>
 	webSocketMessage?: (socket: any, message: string | ArrayBuffer) => Effect.Effect<void>
@@ -197,7 +198,7 @@ export const decodeRpcResult = (value: unknown): Effect.Effect<unknown, RpcRemot
 	return Effect.succeed(decodeRpcValue(value))
 }
 
-export const makeRpcStub = <Shape>(stub: any): Shape => {
+export const makeRpcStub = <Definition>(stub: any): Definition => {
 	const fetcher = fromCloudflareFetcher(stub)
 
 	return new Proxy(fetcher, {
@@ -209,7 +210,7 @@ export const makeRpcStub = <Shape>(stub: any): Shape => {
 							try: () => stub[prop](...args),
 							catch: (cause) => new RpcCallError({ method: String(prop), cause }),
 						}).pipe(Effect.flatMap(decodeRpcResult)),
-	}) as Shape
+	}) as Definition
 }
 
 export const makeDurableObjectBridge =
@@ -221,12 +222,13 @@ export const makeDurableObjectBridge =
 	) =>
 	(className: string) =>
 		class DurableObjectBridge extends DurableObject {
-			readonly object: Promise<DurableObjectShapeLocal>
+			readonly object: Promise<DurableObjectApiLocal>
 
 			async fetch(request: cf.Request): Promise<cf.Response> {
 				const methods = await this.object
 				if (methods.fetch) {
 					const fetch = methods.fetch as HttpEffect<never>
+					// SAFETY: the Workers and DOM Request declarations describe the same runtime request object.
 					const response = await serveWebRequest(
 						request as unknown as globalThis.Request,
 						fetch,
@@ -285,7 +287,7 @@ export const makeDurableObjectBridge =
 							? target[prop]
 							: async (...args: unknown[]) => {
 									const methods = await this.object
-									const method = methods[prop as keyof DurableObjectShapeLocal] as any
+									const method = methods[prop as keyof DurableObjectApiLocal] as any
 									const value = method(...args)
 									if (Effect.isEffect(value)) {
 										const exit = await Effect.runPromiseExit(

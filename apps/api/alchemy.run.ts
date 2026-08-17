@@ -3,7 +3,7 @@ import * as Cloudflare from "alchemy/Cloudflare"
 import type { Rpc } from "alchemy/Rpc"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
-import type { MapleApiRpcShape } from "@maple/domain/internal-rpc"
+import type { MapleApiRpcContract } from "@maple/domain/internal-rpc"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
@@ -39,7 +39,7 @@ export interface CreateMapleApiOptions {
 }
 
 /** Alchemy resource type for the API Worker, carrying its internal RPC surface. */
-export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcShape>
+export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcContract>
 
 const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
 	const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
@@ -198,7 +198,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			crons: ["0 */12 * * *", "0 * * * *", "0 */6 * * *"],
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
-				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
+				...(mapleDb ? { MAPLE_DB: mapleDb } : undefined),
 				// Workers AI (`env.AI`, the v1 `Ai()` binding), driving the AI-triage agent on
 				// `@maple/llm`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
 				// resource, which also fronts model calls with caching/rate-limits/logging.
@@ -238,7 +238,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 								allowedSenderAddresses: ["notifications@noreply.maple.dev"],
 							}),
 						}
-					: {}),
+					: undefined),
 				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 				TINYBIRD_TOKEN: Redacted.make(requireEnv("TINYBIRD_TOKEN")),
 				...optionalSecret("TINYBIRD_SIGNING_KEY"),
@@ -255,6 +255,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: Redacted.make(
 					requireEnv("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY"),
 				),
+				MAPLE_SHARE_TOKEN_HMAC_KEY: Redacted.make(requireEnv("MAPLE_SHARE_TOKEN_HMAC_KEY")),
 				MAPLE_INGEST_PUBLIC_URL:
 					process.env.MAPLE_INGEST_PUBLIC_URL?.trim() || "https://ingest.maple.dev",
 				MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",

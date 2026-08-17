@@ -118,7 +118,10 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				lines.push("No error issues found.")
 			} else {
 				const headers = [
-					"ID",
+					// Full id, not a prefix. The 8-char truncation this used to render was
+					// being pasted into error_detail as if it were a fingerprint — a
+					// different identity space — where it died as a UInt64 parse error.
+					"Issue ID",
 					"Kind",
 					"State",
 					"Severity",
@@ -131,7 +134,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 					"Holder",
 				]
 				const rows = issues.map((i) => [
-					i.id.slice(0, 8),
+					i.id,
 					i.kind,
 					i.hasOpenIncident ? `${i.workflowState} (incident)` : i.workflowState,
 					i.severity ?? "—",

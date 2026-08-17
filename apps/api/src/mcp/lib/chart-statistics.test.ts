@@ -4,6 +4,7 @@ import {
 	computeBreakdownStats,
 	computeFlags,
 	computeTimeseriesStats,
+	percentScaleAdvice,
 	verdictFromFlags,
 } from "./chart-statistics"
 
@@ -227,4 +228,112 @@ describe("verdictFromFlags", () => {
 		expect(verdictFromFlags(["SUSPICIOUS_GAP", "ALL_ZEROS"])).toBe("suspicious")
 		expect(verdictFromFlags(["SUSPICIOUS_GAP", "EMPTY"])).toBe("broken")
 	})
+})
+
+// Maple's two percent tokens are inverted relative to Grafana's, so an agent
+// reaching for the familiar name picks the wrong one and the widget renders
+// 100x off with no error anywhere. These pin both directions.
+describe("percent scale", () => {
+	const seriesPeaking = (max: number) =>
+		computeTimeseriesStats([point("b1", { s: max / 2 }), point("b2", { s: max })])
+
+	it("flags a 0-1 `percent` unit on 0-100 data and names percent_100", () => {
+		const stats = seriesPeaking(87.4)
+		const flags = computeFlags(stats, { metric: "error_rate", displayUnit: "percent" })
+		expect(flags).toContain("PERCENT_SCALE_MISMATCH")
+		const advice = percentScaleAdvice(stats, { displayUnit: "percent" })
+		expect(advice).toContain("percent_100")
+		expect(advice).toContain("100x too high")
+	})
+
+	it("flags a `percent_100` unit on 0-1 data and names percent", () => {
+		const stats = seriesPeaking(0.042)
+		const flags = computeFlags(stats, { metric: "error_rate", displayUnit: "percent_100" })
+		expect(flags).toContain("PERCENT_SCALE_MISMATCH")
+		expect(percentScaleAdvice(stats, { displayUnit: "percent_100" })).toContain('use "percent"')
+	})
+
+	it("error_rate + percent_100 is no longer silently healthy — the regression this fixes", () => {
+		const flags = computeFlags(seriesPeaking(0.042), {
+			metric: "error_rate",
+			displayUnit: "percent_100",
+		})
+		expect(verdictFromFlags(flags)).not.toBe("looks_healthy")
+	})
+
+	it("does not downgrade to broken — the low side is genuinely ambiguous", () => {
+		expect(verdictFromFlags(["PERCENT_SCALE_MISMATCH"])).toBe("suspicious")
+	})
+
+	it("accepts a correctly-scaled fraction on `percent`", () => {
+		const stats = seriesPeaking(0.042)
+		expect(percentScaleAdvice(stats, { displayUnit: "percent" })).toBeNull()
+		expect(computeFlags(stats, { metric: "error_rate", displayUnit: "percent" })).not.toContain(
+			"PERCENT_SCALE_MISMATCH",
+		)
+	})
+
+	it("accepts correctly-scaled 0-100 data on `percent_100`", () => {
+		expect(percentScaleAdvice(seriesPeaking(87.4), { displayUnit: "percent_100" })).toBeNull()
+	})
+
+	it("percent_100 no longer classifies as an unknown unit against a duration metric", () => {
+		const flags = computeFlags(seriesPeaking(87.4), {
+			metric: "p95_duration",
+			displayUnit: "percent_100",
+		})
+		expect(flags).toContain("UNIT_MISMATCH")
+	})
+
+	it("skips the ambiguous low-side check for numeric-attribute aggregations", () => {
+		expect(
+			percentScaleAdvice(seriesPeaking(0.4), {
+				displayUnit: "percent_100",
+				numericAggregation: true,
+			}),
+		).toBeNull()
+	})
+
+	it("ignores non-percent units and all-zero series", () => {
+		expect(percentScaleAdvice(seriesPeaking(1000), { displayUnit: "duration_ms" })).toBeNull()
+		expect(percentScaleAdvice(seriesPeaking(0), { displayUnit: "percent_100" })).toBeNull()
+	})
+})
+
+// Review finding: the flag and its explanation were computed from different
+// contexts, so a widget could be reported PERCENT_SCALE_MISMATCH with nothing
+// said about what to change. `computeFlags` derives the flag from
+// `percentScaleAdvice`, so any context that produces one must produce the other.
+describe("the percent flag and its advice never disagree", () => {
+	const seriesPeaking = (max: number) =>
+		computeTimeseriesStats([point("b1", { s: max / 2 }), point("b2", { s: max })])
+
+	const contexts = [
+		{ label: "percent on 0-100 data", stats: seriesPeaking(87.4), ctx: { displayUnit: "percent" } },
+		{
+			label: "percent_100 on 0-1 data",
+			stats: seriesPeaking(0.042),
+			ctx: { displayUnit: "percent_100" },
+		},
+		{
+			label: "numeric-attribute aggregation, low side",
+			stats: seriesPeaking(0.4),
+			ctx: { displayUnit: "percent_100", numericAggregation: true },
+		},
+		{
+			label: "numeric-attribute aggregation, high side",
+			stats: seriesPeaking(87.4),
+			ctx: { displayUnit: "percent", numericAggregation: true },
+		},
+		{ label: "correctly scaled", stats: seriesPeaking(0.4), ctx: { displayUnit: "percent" } },
+		{ label: "no unit", stats: seriesPeaking(87.4), ctx: {} },
+	]
+
+	for (const { label, stats, ctx } of contexts) {
+		it(`${label}: flag presence matches advice presence`, () => {
+			const flagged = computeFlags(stats, ctx).includes("PERCENT_SCALE_MISMATCH")
+			const advised = percentScaleAdvice(stats, ctx) !== null
+			expect(flagged).toBe(advised)
+		})
+	}
 })

@@ -13,7 +13,7 @@ import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { listAccounts } from "@/services/integrations/CloudflareApi"
 import { Database } from "@/platform/DatabaseLive"
-import { Env, type EnvShape } from "@/platform/Env"
+import { Env, type EnvConfig } from "@/platform/Env"
 import { msToDate } from "@/platform/time"
 import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS } from "./oauth/connection-helpers"
 
@@ -40,7 +40,7 @@ interface ResolvedCloudflareOAuthConfig {
 	readonly scopes: string
 }
 
-const resolveConfig = Effect.fn("CloudflareOAuthService.resolveConfig")(function* (env: EnvShape) {
+const resolveConfig = Effect.fn("CloudflareOAuthService.resolveConfig")(function* (env: EnvConfig) {
 	// Only the client id is mandatory. Cloudflare public clients (any-user SaaS) authenticate the
 	// token exchange with PKCE alone and carry no secret; confidential clients add one via env.
 	const clientId = yield* Option.match(env.CLOUDFLARE_OAUTH_CLIENT_ID, {
@@ -73,7 +73,7 @@ interface CloudflareAccessToken {
 	readonly scope: string
 }
 
-export interface CloudflareOAuthServiceShape {
+export interface CloudflareOAuthServiceApi {
 	readonly startConnect: (
 		orgId: OrgId,
 		userId: UserId,
@@ -125,7 +125,7 @@ export interface CloudflareOAuthServiceShape {
 
 export class CloudflareOAuthService extends Context.Service<
 	CloudflareOAuthService,
-	CloudflareOAuthServiceShape
+	CloudflareOAuthServiceApi
 >()("@maple/api/services/CloudflareOAuthService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -143,7 +143,9 @@ export class CloudflareOAuthService extends Context.Service<
 				.postForm(config.revokeUrl, {
 					token,
 					client_id: config.clientId,
-					...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
+					...(config.clientSecret
+						? { client_secret: Redacted.value(config.clientSecret) }
+						: undefined),
 				})
 				.pipe(Effect.ignore)
 
@@ -340,7 +342,7 @@ export class CloudflareOAuthService extends Context.Service<
 			getValidAccessToken,
 			disconnect,
 			markConnectionRevoked: oauth.markConnectionRevoked,
-		} satisfies CloudflareOAuthServiceShape
+		} satisfies CloudflareOAuthServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))

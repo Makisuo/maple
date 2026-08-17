@@ -10,7 +10,7 @@
 			"deslop/unused-dependency",
 			"deslop/unused-dev-dependency",
 			"deslop/circular-dependency",
-			"eslint/no-restricted-imports",
+			"maple/no-react-use-effect",
 
 			"react-doctor/design-no-em-dash-in-jsx-text",
 			"react-doctor/design-no-redundant-size-axes",

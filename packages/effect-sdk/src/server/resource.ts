@@ -8,7 +8,7 @@ import { getAutoPlatformAttributes } from "./platform.js"
  * `OTEL_EXPORTER_OTLP_ENDPOINT` — so end users only need to supply an ingest
  * key, not an URL.
  */
-const DEFAULT_MAPLE_ENDPOINT = "https://ingest.maple.dev"
+export const DEFAULT_MAPLE_ENDPOINT = "https://ingest.maple.dev"
 
 const stringOrUndefined = (value: unknown): string | undefined =>
 	typeof value === "string" && value.length > 0 ? value : undefined
@@ -66,7 +66,12 @@ const isCommitSha = (value: string | undefined): value is string =>
 	value !== undefined && /^[0-9a-f]{7,40}$/i.test(value)
 
 export interface ResolvedResource {
-	readonly endpoint: string | undefined
+	/**
+	 * Always resolves — `DEFAULT_MAPLE_ENDPOINT` is the final fallback, so this
+	 * is deliberately NOT optional. Presets disable themselves on a missing
+	 * ingest key, never on a missing endpoint.
+	 */
+	readonly endpoint: string
 	readonly ingestKey: Redacted.Redacted<string> | undefined
 	readonly resource: {
 		readonly serviceName: string

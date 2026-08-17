@@ -1,0 +1,11 @@
+# Consumed by the swift-openapi-generator build-tool plugin.
+#
+# `idiomatic` matters here: the whole v2 wire format is snake_case, and the
+# default `defensive` strategy would surface `p95_latency_ms` verbatim as a
+# Swift property. Idiomatic gives `p95LatencyMs` with the CodingKeys mapping
+# preserved, so the wire format is untouched.
+generate:
+  - types
+  - client
+accessModifier: public
+namingStrategy: idiomatic

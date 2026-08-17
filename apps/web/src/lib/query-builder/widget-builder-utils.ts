@@ -15,23 +15,14 @@ import {
 	isVisibleQuery,
 	legacyQueryDraft,
 	loadQueryDrafts,
+	pointsModeFromShowPoints,
+	showPointsFromPointsMode,
 	toHiddenSeriesBaseNames,
 	type BuildDataSourceContext,
 	type QueryBuilderWidgetState,
 } from "@/lib/query-builder/widget-builder-shared"
 import { WIDGET_TYPES } from "@maple/domain/http"
-
-/**
- * Endpoints whose `params.queries` are query-builder drafts. Histograms with no
- * group-by persist their raw value rows through the list endpoint — without it
- * the preset's query is dropped the moment the widget is opened and replaced by
- * the legacy fallback draft.
- */
-const QUERY_BUILDER_ENDPOINTS = new Set([
-	"custom_query_builder_timeseries",
-	"custom_query_builder_breakdown",
-	"custom_query_builder_list",
-])
+import { dataSourceQuerySet, dataSourceRouteParams, makeQueryDataSource } from "@maple/widgets/dashboard"
 
 // Lowering the widget editor's state to a persisted widget, and back.
 //
@@ -54,11 +45,15 @@ const definitionForState = (state: QueryBuilderWidgetState) =>
 // Persisted widget → editor state
 
 export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState {
-	const params = (widget.dataSource.params ?? {}) as Record<string, unknown>
-	const rawComparison =
-		params.comparison && typeof params.comparison === "object"
-			? (params.comparison as Record<string, unknown>)
-			: {}
+	// `querySet` is non-null for every widget whose queries are query-builder
+	// drafts — including the list shape, which is how a histogram with no group-by
+	// persists its raw value rows. Reading it structurally rather than testing an
+	// endpoint name is what keeps this working when the stored shape flips to v3.
+	const querySet = dataSourceQuerySet(widget.dataSource)
+	// Only a legacy pre-query-builder widget (`custom_timeseries` and friends)
+	// still needs its raw bag, and only for the fallback draft below.
+	const routeParams = dataSourceRouteParams(widget.dataSource) ?? {}
+	const rawComparison = querySet?.comparison ?? {}
 
 	// Normalize the (visualization, chartId) pair through the panel-type map on
 	// open. This repairs widgets corrupted by the old "Chart Style" dropdown —
@@ -100,16 +95,19 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 			typeof rawComparison.includePercentChange === "boolean"
 				? rawComparison.includePercentChange
 				: true,
-		debug: params.debug === true,
 		statAggregate: "first",
 		statValueField: "",
-		unit: widget.display.unit ?? inferDefaultUnitForQueries(loadQueryDrafts(params).queries) ?? "number",
+		unit:
+			widget.display.unit ??
+			inferDefaultUnitForQueries(loadQueryDrafts(querySet ?? {}).queries) ??
+			"number",
 		legendPosition,
 		// The Min/Max/Mean/Last table is opt-in: it costs up to 45% of the widget's
 		// height, so a widget only shows it by asking for it. Widgets persisted
 		// before the flag existed carry no `seriesStats` and therefore lose the
 		// table — that is the intent, and re-ticking the box restores it.
 		seriesStatsEnabled: chartPresentation?.seriesStats ?? false,
+		pointsMode: pointsModeFromShowPoints(chartPresentation?.showPoints),
 		tableLimit: "",
 		thresholds: (widget.display.thresholds ?? []).map((threshold) => ({
 			value: threshold.value,
@@ -135,12 +133,12 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		return { ...shared, queries: [createQueryDraft(0)], formulas: [] }
 	}
 
-	if (QUERY_BUILDER_ENDPOINTS.has(widget.dataSource.endpoint)) {
-		const { queries, formulas } = loadQueryDrafts(params)
+	if (querySet !== null) {
+		const { queries, formulas } = loadQueryDrafts(querySet)
 		if (queries.length > 0) return { ...shared, queries, formulas }
 	}
 
-	return { ...shared, queries: [legacyQueryDraft(params)], formulas: [] }
+	return { ...shared, queries: [legacyQueryDraft(routeParams)], formulas: [] }
 }
 
 // Editor state → persisted widget
@@ -156,19 +154,16 @@ function timeseriesDataSource(state: QueryBuilderWidgetState): {
 
 	return {
 		sharedTransform,
-		base: {
-			endpoint: "custom_query_builder_timeseries",
-			params: {
-				queries: state.queries,
-				formulas: state.formulas,
-				comparison: {
-					mode: state.comparisonMode,
-					includePercentChange: state.includePercentChange,
-				},
-				debug: state.debug,
+		base: makeQueryDataSource({
+			resultShape: "timeseries",
+			queries: state.queries,
+			formulas: state.formulas,
+			comparison: {
+				mode: state.comparisonMode,
+				includePercentChange: state.includePercentChange,
 			},
-			transform: sharedTransform,
-		},
+			...(!(sharedTransform === undefined) ? { transform: sharedTransform } : undefined),
+		}),
 	}
 }
 
@@ -215,6 +210,7 @@ export function buildWidgetDisplay(
 				? ("right" as const)
 				: ("visible" as const)
 
+	const showPoints = showPointsFromPointsMode(state.pointsMode)
 	const base: WidgetDisplayConfig = {
 		...widget.display,
 		// Query-driven widgets saved without a title get a derived one
@@ -230,8 +226,13 @@ export function buildWidgetDisplay(
 			...widget.display.chartPresentation,
 			legend: legendValue,
 			seriesStats: state.seriesStatsEnabled,
+			showPoints,
 		},
 	}
+	// Auto is the ABSENCE of a preference: drop the key rather than persist
+	// `undefined`, and so the spread above cannot carry a stale value forward
+	// once the user switches back to Auto.
+	if (showPoints === undefined) delete base.chartPresentation?.showPoints
 
 	for (const key of OWNED_DISPLAY_KEYS) {
 		delete base[key]

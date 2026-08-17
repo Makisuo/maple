@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm"
 import { Cause, Effect, Exit, Layer, Tracer } from "effect"
 import { Database, type DatabaseClient } from "./DatabaseLive"
 import { layerPg } from "./DatabasePgLive"
-import { PgConnectionScope, type PgConnectionScopeShape } from "./pg-connection-scope"
+import { PgConnectionScope, type PgConnectionScopeApi } from "./pg-connection-scope"
 
 /**
  * A binding pointed at a closed local port.
@@ -86,10 +86,10 @@ describe("layerPg", () => {
 	it.effect("uses the installed scope instead of dialing", () =>
 		Effect.gen(function* () {
 			let calls = 0
-			const scope: PgConnectionScopeShape = {
+			const scope: PgConnectionScopeApi = {
 				run: <T>(fn: (db: DatabaseClient) => Promise<T>) => {
 					calls += 1
-					return Effect.promise(() => fn(undefined as unknown as DatabaseClient))
+					return Effect.promise(() => fn(undefined as DatabaseClient))
 				},
 				close: () => Promise.resolve(),
 			}

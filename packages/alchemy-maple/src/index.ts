@@ -43,13 +43,25 @@ export {
 export { ApiKey, ApiKeyProvider, type ApiKeyProps } from "./ApiKey"
 export { Dashboard, DashboardProvider, type DashboardProps } from "./Dashboard"
 export {
-	MapleApiError,
-	MapleConflictError,
-	MapleNotFoundError,
-	MapleUnauthorizedError,
+	isMapleApiResponseError,
+	makeMapleApiResponseError,
+	MapleApiProtocolError,
+	MapleApiRequestEncodingError,
+	MapleApiResponseDecodeError,
+	MapleApiResponseReadError,
+	MapleApiTransportError,
+	MapleErrorTags,
+	MapleErrorRecovery,
+	MapleHttpErrorTagSchema,
+	MaplePublicErrorBodySchema,
+	MaplePublicErrorType,
 	type MapleError,
+	type MapleApiResponseError,
+	type MapleClientError,
+	type MapleHttpErrorTag,
+	type MaplePublicErrorBody,
 } from "./errors"
 export { IngestKeys, IngestKeysProvider, type IngestKeysProps } from "./IngestKeys"
-export { listAll, MapleApi, MapleApiFromHttpClient, MapleApiLive, type MapleApiShape } from "./MapleApi"
+export { listAll, MapleApi, MapleApiFromHttpClient, MapleApiLive, type MapleApiContract } from "./MapleApi"
 export { DEFAULT_BASE_URL, fromEnv, MapleEnvironment } from "./MapleEnvironment"
 export { Providers, providers, providersWithDependencies } from "./Providers"

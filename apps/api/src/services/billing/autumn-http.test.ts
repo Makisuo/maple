@@ -6,7 +6,7 @@ import { Env } from "@/platform/Env"
 import { decodeUpstream, ensureOk } from "@/services/billing/autumn-client"
 import {
 	AutumnClient,
-	type AutumnClientShape,
+	type AutumnClientApi,
 	type AutumnResult,
 	camelizeKeys,
 } from "@/services/billing/autumn-http"
@@ -62,7 +62,7 @@ const provideFetch = <A, E>(effect: Effect.Effect<A, E>, fetch: typeof globalThi
 /** Resolve the service from its layer, then run the call with the stub ambient. */
 const runWithClient = <A, E>(
 	fetch: typeof globalThis.fetch,
-	run: (client: AutumnClientShape) => Effect.Effect<A, E>,
+	run: (client: AutumnClientApi) => Effect.Effect<A, E>,
 	layer = clientLayer(),
 ) =>
 	Effect.gen(function* () {
@@ -72,7 +72,7 @@ const runWithClient = <A, E>(
 
 const withFetch = async (
 	respond: { readonly status?: number; readonly body?: string },
-	run: (client: AutumnClientShape) => Effect.Effect<AutumnResult, unknown>,
+	run: (client: AutumnClientApi) => Effect.Effect<AutumnResult, unknown>,
 ): Promise<{ readonly captured: Captured | undefined; readonly result: AutumnResult }> => {
 	let captured: Captured | undefined
 	const fetch = (async (input, init) => {

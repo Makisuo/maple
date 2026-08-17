@@ -13,7 +13,8 @@ import {
 	AlertIncidentsListResponse,
 	AlertIncidentStatus,
 	AlertIncidentTransition as AlertIncidentTransitionSchema,
-	AlertNotFoundError,
+	AlertIncidentNotFoundError,
+	AlertRuleNotFoundError,
 	AlertPersistenceError,
 	AlertRuleDocument,
 	AlertSeverity as AlertSeveritySchema,
@@ -25,6 +26,7 @@ import {
 	UserId,
 	type AlertIncidentId,
 	type AlertRuleId,
+	type ManagedWarehouseError,
 } from "@maple/domain/http"
 import {
 	alertDeliveryEvents,
@@ -78,9 +80,11 @@ export interface ListAlertIncidentsOptions {
 export interface ListAlertDeliveryEventsOptions {
 	readonly limit?: number
 	readonly offset?: number
+	readonly incidentId?: AlertIncidentId
+	readonly ruleId?: AlertRuleId
 }
 
-export interface AlertReadModelsServiceShape {
+export interface AlertReadModelsServiceApi {
 	readonly listIncidents: (
 		orgId: OrgId,
 		options?: ListAlertIncidentsOptions,
@@ -88,7 +92,7 @@ export interface AlertReadModelsServiceShape {
 	readonly getIncident: (
 		orgId: OrgId,
 		incidentId: AlertIncidentId,
-	) => Effect.Effect<AlertIncidentDocument, AlertPersistenceError | AlertNotFoundError>
+	) => Effect.Effect<AlertIncidentDocument, AlertPersistenceError | AlertIncidentNotFoundError>
 	readonly listRuleChecks: (
 		orgId: OrgId,
 		ruleId: AlertRuleId,
@@ -101,7 +105,10 @@ export interface AlertReadModelsServiceShape {
 			readonly beforeTimestamp?: string
 			readonly beforeGroupKey?: string
 		},
-	) => Effect.Effect<AlertChecksListResponse, AlertPersistenceError | AlertNotFoundError>
+	) => Effect.Effect<
+		AlertChecksListResponse,
+		AlertPersistenceError | AlertRuleNotFoundError | ManagedWarehouseError
+	>
 	readonly summarizeRuleChecks: (
 		orgId: OrgId,
 		ruleId: AlertRuleId,
@@ -109,7 +116,10 @@ export interface AlertReadModelsServiceShape {
 			readonly since: string
 			readonly until: string
 		},
-	) => Effect.Effect<AlertChecksSummary, AlertPersistenceError | AlertNotFoundError | AlertValidationError>
+	) => Effect.Effect<
+		AlertChecksSummary,
+		AlertPersistenceError | AlertRuleNotFoundError | AlertValidationError | ManagedWarehouseError
+	>
 	readonly listDeliveryEvents: (
 		orgId: OrgId,
 		options?: ListAlertDeliveryEventsOptions,
@@ -174,7 +184,7 @@ const toTinybirdSqlDateTime64 = (iso: string) => {
 
 export class AlertReadModelsService extends Context.Service<
 	AlertReadModelsService,
-	AlertReadModelsServiceShape
+	AlertReadModelsServiceApi
 >()("@maple/api/services/alerts/AlertReadModelsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -195,8 +205,8 @@ export class AlertReadModelsService extends Context.Service<
 		) {
 			yield* Effect.annotateCurrentSpan({
 				orgId,
-				...(options.status !== undefined ? { status: options.status } : {}),
-				...(options.ruleId !== undefined ? { ruleId: options.ruleId } : {}),
+				...(options.status !== undefined ? { status: options.status } : undefined),
+				...(options.ruleId !== undefined ? { ruleId: options.ruleId } : undefined),
 			})
 			const conditions = [
 				eq(alertIncidents.orgId, orgId),
@@ -232,10 +242,9 @@ export class AlertReadModelsService extends Context.Service<
 			)
 			const incident = rows[0]
 			if (incident === undefined) {
-				return yield* new AlertNotFoundError({
+				return yield* new AlertIncidentNotFoundError({
 					message: `No such alert incident: '${incidentId}'`,
-					resourceType: "alert_incident",
-					resourceId: incidentId,
+					incidentId,
 				})
 			}
 			return rowToIncidentDocument(incident)
@@ -264,10 +273,9 @@ export class AlertReadModelsService extends Context.Service<
 					.limit(1),
 			)
 			if (ruleRow.length === 0) {
-				return yield* new AlertNotFoundError({
+				return yield* new AlertRuleNotFoundError({
 					message: "Alert rule not found",
-					resourceType: "alert_rule",
-					resourceId: ruleId,
+					ruleId,
 				})
 			}
 
@@ -296,34 +304,25 @@ export class AlertReadModelsService extends Context.Service<
 				{
 					orgId,
 					ruleId,
-					...(hasGroupKey ? { groupKey: options.groupKey } : {}),
-					...(options.status != null ? { status: options.status } : {}),
-					...(since != null ? { since } : {}),
-					...(until != null ? { until } : {}),
+					...(hasGroupKey ? { groupKey: options.groupKey } : undefined),
+					...(options.status != null ? { status: options.status } : undefined),
+					...(since != null ? { since } : undefined),
+					...(until != null ? { until } : undefined),
 					...(beforeTimestamp != null
 						? {
 								beforeTimestamp,
 								beforeGroupKey: options.beforeGroupKey ?? "",
 							}
-						: {}),
+						: undefined),
 				},
 			)
 
-			const rows = yield* warehouse
-				// listRuleChecksQuery declares .routing("ingest") — alert_checks only
-				// exists in the managed Tinybird pipeline.
-				.compiledQuery(systemTenant(orgId), compiled, {
-					profile: "list",
-					context: "listAlertChecks",
-				})
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new AlertPersistenceError({
-								message: `Failed to list alert checks: ${error.message}`,
-							}),
-					),
-				)
+			// listRuleChecksQuery declares .routing("ingest") — alert_checks only
+			// exists in the managed Tinybird pipeline.
+			const rows = yield* warehouse.compiledQuery(systemTenant(orgId), compiled, {
+				profile: "list",
+				context: "listAlertChecks",
+			})
 
 			const checks = yield* Effect.try({
 				try: () =>
@@ -389,10 +388,9 @@ export class AlertReadModelsService extends Context.Service<
 					.limit(1),
 			)
 			if (ruleRow.length === 0) {
-				return yield* new AlertNotFoundError({
+				return yield* new AlertRuleNotFoundError({
 					message: "Alert rule not found",
-					resourceType: "alert_rule",
-					resourceId: ruleId,
+					ruleId,
 				})
 			}
 
@@ -419,46 +417,28 @@ export class AlertReadModelsService extends Context.Service<
 			// stable across refreshes and matches alert evaluation granularity.
 			const bucketSeconds = Math.max(1, Math.ceil((endMs - startMs) / 1000 / 720 / 60)) * 60
 			const tenant = systemTenant(orgId)
-			const groupRows = yield* warehouse
-				.compiledQuery(
-					tenant,
-					CH.compile(CH.alertCheckGroupTotalsQuery({ since, until, limit: 20 }), {
-						orgId,
-						ruleId,
-						since,
-						until,
-					}),
-					{ profile: "aggregation", context: "alertCheckSummaryGroups" },
-				)
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new AlertPersistenceError({
-								message: `Failed to summarize alert check groups: ${error.message}`,
-							}),
-					),
-				)
+			const groupRows = yield* warehouse.compiledQuery(
+				tenant,
+				CH.compile(CH.alertCheckGroupTotalsQuery({ since, until, limit: 20 }), {
+					orgId,
+					ruleId,
+					since,
+					until,
+				}),
+				{ profile: "aggregation", context: "alertCheckSummaryGroups" },
+			)
 			const topGroupKeys = groupRows.map((row) => String(row.groupKey ?? ""))
-			const rows = yield* warehouse
-				.compiledQuery(
-					tenant,
-					CH.compile(CH.alertChecksSummaryQuery({ topGroupKeys }), {
-						orgId,
-						ruleId,
-						since,
-						until,
-						bucketSeconds,
-					}),
-					{ profile: "aggregation", context: "alertCheckSummary" },
-				)
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new AlertPersistenceError({
-								message: `Failed to summarize alert checks: ${error.message}`,
-							}),
-					),
-				)
+			const rows = yield* warehouse.compiledQuery(
+				tenant,
+				CH.compile(CH.alertChecksSummaryQuery({ topGroupKeys }), {
+					orgId,
+					ruleId,
+					since,
+					until,
+					bucketSeconds,
+				}),
+				{ profile: "aggregation", context: "alertCheckSummary" },
+			)
 
 			const points: AlertChecksSummaryPoint[] = rows.map((row) => ({
 				bucket: String(row.bucket),
@@ -495,7 +475,17 @@ export class AlertReadModelsService extends Context.Service<
 				db
 					.select()
 					.from(alertDeliveryEvents)
-					.where(eq(alertDeliveryEvents.orgId, orgId))
+					.where(
+						and(
+							eq(alertDeliveryEvents.orgId, orgId),
+							options.incidentId === undefined
+								? undefined
+								: eq(alertDeliveryEvents.incidentId, options.incidentId),
+							options.ruleId === undefined
+								? undefined
+								: eq(alertDeliveryEvents.ruleId, options.ruleId),
+						),
+					)
 					.orderBy(desc(alertDeliveryEvents.createdAt), desc(alertDeliveryEvents.id))
 					.limit(options.limit ?? 100)
 					.offset(options.offset ?? 0),
@@ -547,7 +537,7 @@ export class AlertReadModelsService extends Context.Service<
 			listRuleChecks,
 			summarizeRuleChecks,
 			listDeliveryEvents,
-		} satisfies AlertReadModelsServiceShape
+		} satisfies AlertReadModelsServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

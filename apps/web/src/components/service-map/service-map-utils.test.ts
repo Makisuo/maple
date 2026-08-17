@@ -59,7 +59,7 @@ const baseOverview = (overrides: Partial<ServiceOverview> = {}): ServiceOverview
 		p99LatencyMs: 15,
 		commits: [],
 		...overrides,
-	}) as unknown as ServiceOverview
+	}) as ServiceOverview
 
 describe("buildFlowElements", () => {
 	it("emits a database node and edge when given a db edge", () => {

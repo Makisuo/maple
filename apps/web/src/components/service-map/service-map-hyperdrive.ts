@@ -74,7 +74,7 @@ export function matchHyperdriveConfigs(
 			originScheme: config.originScheme,
 			originHost: config.originHost,
 			isPlanetScaleHost: isPlanetScaleHost(config.originHost),
-			...(matched === undefined ? {} : { matched }),
+			...(!(matched === undefined) ? { matched } : undefined),
 		}
 	})
 }

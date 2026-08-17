@@ -28,7 +28,7 @@ const MIME: Record<string, string> = {
 	ttf: "font/ttf",
 	txt: "text/plain",
 	wasm: "application/wasm",
-}
+} satisfies Record<string, string>
 const mimeFor = (p: string): string =>
 	MIME[p.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream"
 

@@ -12,7 +12,7 @@ import { describe, it } from "@effect/vitest"
 import { assert } from "vitest"
 import { runChatTurn, type ChatTurnEvent } from "./index"
 import { AGENTS } from "../agents"
-import type { McpToolExecutorShape } from "@/mcp/dispatcher"
+import type { McpToolExecutorApi } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
 const TENANT: TenantContext = {
@@ -27,7 +27,7 @@ const TOOL_EXECUTOR = {
 		Effect.succeed({
 			content: [{ type: "text" as const, text: `${name} completed` }],
 		}),
-} satisfies McpToolExecutorShape
+} satisfies McpToolExecutorApi
 
 const MODEL: Model = CloudflareWorkersAI.configure({ accountId: "t", apiKey: "t" }).model("@cf/test/model")
 
@@ -82,7 +82,7 @@ const run = (
 		messages: [],
 		messageId: "m1",
 		emit: (event) => emitted.push(event),
-		...(overrides.isCurrent ? { isCurrent: overrides.isCurrent } : {}),
+		...(overrides.isCurrent ? { isCurrent: overrides.isCurrent } : undefined),
 	}).pipe(
 		Stream.runCollect,
 		Effect.map((events) => ({

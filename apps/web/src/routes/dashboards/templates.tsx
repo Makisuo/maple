@@ -11,7 +11,7 @@ import { LIST_LIMIT_MAX } from "@maple/domain/http/v2"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { useDashboardMutationSync } from "@/hooks/use-dashboard-store"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TemplateList, type ReadinessFilter } from "@/components/dashboard-builder/templates/template-list"
 import { TemplateDetailPanel } from "@/components/dashboard-builder/templates/template-detail-panel"
@@ -124,8 +124,8 @@ function TemplatesPage() {
 		setCreating(false)
 
 		if (Exit.isFailure(result)) {
-			const { title, description } = formatBackendError(result)
-			toastManager.add({ title, description, type: "error" })
+			const { title, message } = displayError(result)
+			toastManager.add({ title, description: message, type: "error" })
 			return
 		}
 

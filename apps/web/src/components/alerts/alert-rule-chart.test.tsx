@@ -43,6 +43,7 @@ function check(offsetMinutes: number, status: AlertCheckDocument["status"], obse
 }
 
 /** A preview with real points, i.e. the "Query" source is available. */
+// SAFETY: this focused fixture supplies every preview field rendered by AlertRuleChart.
 const preview = {
 	bucketSeconds: 900,
 	series: [
@@ -71,6 +72,7 @@ const preview = {
 } as unknown as AlertRulePreviewResponse
 
 /** Every window came back empty — the case that used to swap sources silently. */
+// SAFETY: this focused fixture supplies every preview field rendered by AlertRuleChart.
 const emptyPreview = {
 	bucketSeconds: 900,
 	series: [

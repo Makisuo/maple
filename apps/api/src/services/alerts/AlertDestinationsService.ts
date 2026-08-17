@@ -1,19 +1,23 @@
 import {
 	AlertDeliveryError,
+	type AlertDeliveryFailure,
+	AlertDestinationDecryptionError,
 	AlertDestinationDeleteResponse,
 	AlertDestinationDocument,
+	AlertDestinationEncryptionError,
+	AlertDestinationStoredConfigInvalidError,
 	AlertDestinationType as AlertDestinationTypeSchema,
 	AlertDestinationInUseError,
 	AlertDestinationTestResponse,
 	AlertDestinationsListResponse,
 	AlertForbiddenError,
-	AlertNotFoundError,
+	AlertDestinationNotFoundError,
 	AlertPersistenceError,
 	AlertRuleDocument,
+	AlertRuleStoredConfigInvalidError,
 	AlertValidationError,
 	RoleName,
 	type AlertDestinationCreateRequest,
-	type AlertDestinationType,
 	type AlertDestinationUpdateRequest,
 	type OrgId,
 	type UserId,
@@ -27,12 +31,16 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { validateExternalUrl } from "@/http/url-validator"
-import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
+import { HazelOAuthService, type HazelOAuthServiceApi } from "@/services/auth/HazelOAuthService"
 import { makeDbExecute } from "@/platform/db-execute"
 import { makePersistenceError } from "./alert-persistence"
-import { OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
+import {
+	OrgMembersService,
+	type OrgMember,
+	type OrgMembersServiceApi,
+} from "@/services/org/OrgMembersService"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
-import { PAGERDUTY_ROUTING_KEY_PATTERN, verifyPagerDutyRoutingKey } from "./AlertDeliveryDispatch"
+import { PAGERDUTY_ROUTING_KEY_PATTERN, verifyPagerDutyRoutingKey } from "./delivery/transports/pagerduty"
 import {
 	DestinationPublicConfigSchema,
 	type DestinationPublicConfig,
@@ -40,8 +48,8 @@ import {
 } from "./AlertDestinationHydration"
 import { makeAlertDestinationDelivery, parseAlertDestinationEncryptionKey } from "./AlertDestinationDelivery"
 import { AlertRuntime } from "./AlertRuntime"
+import { decodeStoredAlertRuleDestinationIds } from "./AlertRuleModel"
 
-const StringArraySchema = Schema.Array(Schema.String)
 const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.id)
 const decodeAlertDestinationTypeSync = Schema.decodeUnknownSync(AlertDestinationTypeSchema)
 const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.id)
@@ -51,14 +59,7 @@ const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
 
 const makeValidationError = (message: string, details: ReadonlyArray<string> = [], cause?: unknown) =>
-	new AlertValidationError({ message, details, ...(cause === undefined ? {} : { cause }) })
-
-const makeDeliveryError = (message: string, destinationType?: AlertDestinationType, cause?: unknown) =>
-	new AlertDeliveryError({
-		message,
-		destinationType,
-		...(cause === undefined ? {} : { cause }),
-	})
+	new AlertValidationError({ message, details, ...(!(cause === undefined) ? { cause } : undefined) })
 
 const normalizeOptionalString = (value: string | null | undefined) => {
 	const trimmed = value?.trim()
@@ -93,12 +94,23 @@ const emailSecretConfig = (members: ReadonlyArray<OrgMember>): DestinationSecret
 	})),
 })
 
+type AlertDestinationDependencyError =
+	| Effect.Error<ReturnType<HazelOAuthServiceApi["createChannelWebhook"]>>
+	| Effect.Error<ReturnType<OrgMembersServiceApi["resolveMembers"]>>
+
 const encryptSecret = (
 	plaintext: string,
 	encryptionKey: Buffer,
-): Effect.Effect<EncryptedValue, AlertValidationError> =>
-	encryptAes256Gcm(plaintext, encryptionKey, () =>
-		makeValidationError("Failed to encrypt destination secret"),
+	destinationId: AlertDestinationDocument["id"],
+): Effect.Effect<EncryptedValue, AlertDestinationEncryptionError> =>
+	encryptAes256Gcm(
+		plaintext,
+		encryptionKey,
+		() =>
+			new AlertDestinationEncryptionError({
+				message: "Failed to encrypt destination secret",
+				destinationId,
+			}),
 	)
 
 const summarizeWebhookUrl = (url: string) =>
@@ -151,16 +163,25 @@ const buildSecretConfig = (
 		}),
 	)
 
-const safeParsePublicConfig = (row: AlertDestinationRow): DestinationPublicConfig =>
-	Option.getOrElse(Schema.decodeUnknownOption(DestinationPublicConfigSchema)(row.configJson), () => ({
-		summary: "Invalid destination config",
-		channelLabel: null,
-	}))
+const decodePublicConfig = (
+	row: AlertDestinationRow,
+): Effect.Effect<DestinationPublicConfig, AlertDestinationStoredConfigInvalidError> =>
+	Schema.decodeUnknownEffect(DestinationPublicConfigSchema)(row.configJson).pipe(
+		Effect.mapError(
+			(cause) =>
+				new AlertDestinationStoredConfigInvalidError({
+					message: "Stored destination config is invalid",
+					destinationId: row.id,
+					component: "public_config",
+					cause,
+				}),
+		),
+	)
 
-const safeParseStringArray = (value: unknown): ReadonlyArray<string> =>
-	Option.getOrElse(Schema.decodeUnknownOption(StringArraySchema)(value), () => [])
-
-const rowToDestinationDocument = (row: AlertDestinationRow, publicConfig: DestinationPublicConfig) =>
+const destinationDocumentFromRow = (
+	row: AlertDestinationRow,
+	publicConfig: DestinationPublicConfig,
+): AlertDestinationDocument =>
 	new AlertDestinationDocument({
 		id: decodeAlertDestinationIdSync(row.id),
 		name: row.name,
@@ -176,10 +197,28 @@ const rowToDestinationDocument = (row: AlertDestinationRow, publicConfig: Destin
 		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
 	})
 
-export interface AlertDestinationsServiceShape {
+const rowToDestinationDocument = (
+	row: AlertDestinationRow,
+	publicConfig: DestinationPublicConfig,
+): Effect.Effect<AlertDestinationDocument, AlertDestinationStoredConfigInvalidError> =>
+	Effect.try({
+		try: () => destinationDocumentFromRow(row, publicConfig),
+		catch: (cause) =>
+			new AlertDestinationStoredConfigInvalidError({
+				message: "Stored destination document is invalid",
+				destinationId: row.id,
+				component: "document",
+				cause,
+			}),
+	})
+
+export interface AlertDestinationsServiceApi {
 	readonly listDestinations: (
 		orgId: OrgId,
-	) => Effect.Effect<AlertDestinationsListResponse, AlertPersistenceError>
+	) => Effect.Effect<
+		AlertDestinationsListResponse,
+		AlertPersistenceError | AlertDestinationStoredConfigInvalidError
+	>
 	readonly createDestination: (
 		orgId: OrgId,
 		userId: UserId,
@@ -187,7 +226,11 @@ export interface AlertDestinationsServiceShape {
 		request: AlertDestinationCreateRequest,
 	) => Effect.Effect<
 		AlertDestinationDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertDeliveryError
+		| AlertForbiddenError
+		| AlertValidationError
+		| AlertPersistenceError
+		| AlertDestinationEncryptionError
+		| AlertDestinationDependencyError
 	>
 	readonly updateDestination: (
 		orgId: OrgId,
@@ -197,7 +240,14 @@ export interface AlertDestinationsServiceShape {
 		request: AlertDestinationUpdateRequest,
 	) => Effect.Effect<
 		AlertDestinationDocument,
-		AlertForbiddenError | AlertValidationError | AlertPersistenceError | AlertNotFoundError
+		| AlertForbiddenError
+		| AlertValidationError
+		| AlertPersistenceError
+		| AlertDestinationNotFoundError
+		| AlertDestinationEncryptionError
+		| AlertDestinationDecryptionError
+		| AlertDestinationStoredConfigInvalidError
+		| AlertDestinationDependencyError
 	>
 	readonly deleteDestination: (
 		orgId: OrgId,
@@ -205,7 +255,11 @@ export interface AlertDestinationsServiceShape {
 		destinationId: AlertDestinationDocument["id"],
 	) => Effect.Effect<
 		AlertDestinationDeleteResponse,
-		AlertForbiddenError | AlertPersistenceError | AlertNotFoundError | AlertDestinationInUseError
+		| AlertForbiddenError
+		| AlertPersistenceError
+		| AlertDestinationNotFoundError
+		| AlertDestinationInUseError
+		| AlertRuleStoredConfigInvalidError
 	>
 	readonly testDestination: (
 		orgId: OrgId,
@@ -216,15 +270,16 @@ export interface AlertDestinationsServiceShape {
 		AlertDestinationTestResponse,
 		| AlertForbiddenError
 		| AlertPersistenceError
-		| AlertNotFoundError
-		| AlertDeliveryError
-		| AlertValidationError
+		| AlertDestinationNotFoundError
+		| AlertDeliveryFailure
+		| AlertDestinationDecryptionError
+		| AlertDestinationStoredConfigInvalidError
 	>
 }
 
 export class AlertDestinationsService extends Context.Service<
 	AlertDestinationsService,
-	AlertDestinationsServiceShape
+	AlertDestinationsServiceApi
 >()("@maple/api/services/alerts/AlertDestinationsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -254,7 +309,7 @@ export class AlertDestinationsService extends Context.Service<
 			return yield* Effect.fail(
 				new AlertForbiddenError({
 					message: "Only org admins can manage alerts",
-					...(roles.length > 0 ? { roles: [...roles] } : {}),
+					...(roles.length > 0 ? { roles: [...roles] } : undefined),
 				}),
 			)
 		})
@@ -272,26 +327,23 @@ export class AlertDestinationsService extends Context.Service<
 			)
 			if (rows[0]) return rows[0]
 			return yield* Effect.fail(
-				new AlertNotFoundError({
+				new AlertDestinationNotFoundError({
 					message: "Alert destination not found",
-					resourceType: "destination",
-					resourceId: destinationId,
+					destinationId,
 				}),
 			)
 		})
 
-		const resolveEmailMembers = (
-			orgId: OrgId,
-			memberUserIds: ReadonlyArray<string>,
-		): Effect.Effect<ReadonlyArray<OrgMember>, AlertValidationError> =>
-			orgMembers.resolveMembers(orgId, memberUserIds).pipe(
-				Effect.mapError((error) => makeValidationError(error.message, error.unknownUserIds ?? [])),
-				Effect.flatMap((members) =>
-					members.length === 0
-						? Effect.fail(makeValidationError("At least one workspace member is required"))
-						: Effect.succeed(members),
-				),
-			)
+		const resolveEmailMembers = (orgId: OrgId, memberUserIds: ReadonlyArray<UserId>) =>
+			orgMembers
+				.resolveMembers(orgId, memberUserIds)
+				.pipe(
+					Effect.flatMap((members) =>
+						members.length === 0
+							? Effect.fail(makeValidationError("At least one workspace member is required"))
+							: Effect.succeed(members),
+					),
+				)
 
 		const markDestinationTest = Effect.fn("AlertsService.markDestinationTest")(function* (
 			orgId: OrgId,
@@ -319,9 +371,10 @@ export class AlertDestinationsService extends Context.Service<
 					.where(eq(alertDestinations.orgId, orgId))
 					.orderBy(desc(alertDestinations.createdAt), desc(alertDestinations.id)),
 			)
-			return new AlertDestinationsListResponse({
-				destinations: rows.map((row) => rowToDestinationDocument(row, safeParsePublicConfig(row))),
-			})
+			const destinations = yield* Effect.forEach(rows, (row) =>
+				Effect.flatMap(decodePublicConfig(row), (config) => rowToDestinationDocument(row, config)),
+			)
+			return new AlertDestinationsListResponse({ destinations })
 		})
 
 		const validatePagerDutyKey = Effect.fn("AlertsService.validatePagerDutyKey")(function* (
@@ -347,7 +400,7 @@ export class AlertDestinationsService extends Context.Service<
 			}
 		})
 
-		const createDestination: AlertDestinationsServiceShape["createDestination"] = Effect.fn(
+		const createDestination: AlertDestinationsServiceApi["createDestination"] = Effect.fn(
 			"AlertsService.createDestination",
 		)(function* (orgId, userId, roles, request) {
 			yield* requireAdmin(roles)
@@ -382,41 +435,15 @@ export class AlertDestinationsService extends Context.Service<
 										webhookUrl: webhook.webhookUrl,
 										webhookToken: webhook.token,
 									})),
-									Effect.catchTags({
-										"@maple/http/errors/IntegrationsNotConnectedError": (error) =>
-											Effect.fail(
-												makeValidationError(
-													`Could not provision Hazel channel webhook: ${error.message}`,
-												),
-											),
-										"@maple/http/errors/IntegrationsRevokedError": (error) =>
-											Effect.fail(
-												makeValidationError(
-													`Could not provision Hazel channel webhook: ${error.message}`,
-												),
-											),
-										"@maple/http/errors/IntegrationsValidationError": (error) =>
-											Effect.fail(
-												makeValidationError(
-													`Could not provision Hazel channel webhook: ${error.message}`,
-												),
-											),
-										"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-											Effect.fail(makePersistenceError(error)),
-										"@maple/http/errors/IntegrationsUpstreamError": (error) =>
-											Effect.fail(
-												makeDeliveryError(
-													"Could not provision Hazel channel webhook",
-													"hazel-oauth",
-													error,
-												),
-											),
-									}),
 								)
 						: buildSecretConfig(request)
 			}
 			if (secretConfig.type === "pagerduty") yield* validatePagerDutyKey(secretConfig.integrationKey)
-			const encryptedSecret = yield* encryptSecret(JSON.stringify(secretConfig), encryptionKey)
+			const encryptedSecret = yield* encryptSecret(
+				JSON.stringify(secretConfig),
+				encryptionKey,
+				destinationId,
+			)
 			const timestamp = yield* runtime.now
 			const row = {
 				id: destinationId,
@@ -439,11 +466,11 @@ export class AlertDestinationsService extends Context.Service<
 				db.insert(alertDestinations).values(row).returning(txidColumn),
 			)
 			const txid = readTxid(writeRows)
-			const document = rowToDestinationDocument(row, publicConfig)
+			const document = destinationDocumentFromRow(row, publicConfig)
 			return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 		})
 
-		const updateDestination: AlertDestinationsServiceShape["updateDestination"] = Effect.fn(
+		const updateDestination: AlertDestinationsServiceApi["updateDestination"] = Effect.fn(
 			"AlertsService.updateDestination",
 		)(function* (orgId, userId, roles, destinationId, request) {
 			yield* requireAdmin(roles)
@@ -555,18 +582,10 @@ export class AlertDestinationsService extends Context.Service<
 							const channelChanged =
 								previousSecret == null || previousSecret.hazelChannelId !== nextChannelId
 							const provisioned = channelChanged
-								? yield* hazelOAuth
-										.createChannelWebhook(orgId, {
-											channelId: nextChannelId,
-											name: nextName,
-										})
-										.pipe(
-											Effect.mapError((error) =>
-												makeValidationError(
-													`Could not provision Hazel channel webhook: ${error.message}`,
-												),
-											),
-										)
+								? yield* hazelOAuth.createChannelWebhook(orgId, {
+										channelId: nextChannelId,
+										name: nextName,
+									})
 								: null
 							return {
 								nextPublicConfig: {
@@ -636,7 +655,11 @@ export class AlertDestinationsService extends Context.Service<
 			) {
 				yield* validatePagerDutyKey(nextSecretConfig.integrationKey)
 			}
-			const encryptedSecret = yield* encryptSecret(JSON.stringify(nextSecretConfig), encryptionKey)
+			const encryptedSecret = yield* encryptSecret(
+				JSON.stringify(nextSecretConfig),
+				encryptionKey,
+				destinationId,
+			)
 			const timestamp = yield* runtime.now
 			const nextName = normalizeOptionalString(request.name) ?? existing.name
 			const nextEnabled = request.enabled === undefined ? existing.enabled : request.enabled
@@ -657,7 +680,7 @@ export class AlertDestinationsService extends Context.Service<
 					.returning(txidColumn),
 			)
 			const txid = readTxid(writeRows)
-			const document = rowToDestinationDocument(
+			const document = yield* rowToDestinationDocument(
 				{
 					...existing,
 					name: nextName,
@@ -674,7 +697,7 @@ export class AlertDestinationsService extends Context.Service<
 			return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 		})
 
-		const deleteDestination: AlertDestinationsServiceShape["deleteDestination"] = Effect.fn(
+		const deleteDestination: AlertDestinationsServiceApi["deleteDestination"] = Effect.fn(
 			"AlertsService.deleteDestination",
 		)(function* (orgId, roles, destinationId) {
 			yield* requireAdmin(roles)
@@ -688,16 +711,18 @@ export class AlertDestinationsService extends Context.Service<
 					})
 					.from(alertRules)
 					.where(eq(alertRules.orgId, orgId)),
-			).pipe(
-				Effect.map((rows) =>
-					rows.filter((row) =>
-						safeParseStringArray(row.destinationIdsJson).includes(destinationId),
-					),
+			)
+			const decodedRules = yield* Effect.forEach(dependentRules, (row) =>
+				decodeStoredAlertRuleDestinationIds(row.id, row.destinationIdsJson).pipe(
+					Effect.map((destinationIds) => ({ row, destinationIds })),
 				),
 			)
-			if (dependentRules.length > 0) {
-				const ruleIds = dependentRules.map((row) => decodeAlertRuleIdSync(row.id))
-				const ruleNames = dependentRules.map((row) => row.name)
+			const referencedByRules = decodedRules.filter(({ destinationIds }) =>
+				destinationIds.includes(destinationId),
+			)
+			if (referencedByRules.length > 0) {
+				const ruleIds = referencedByRules.map(({ row }) => decodeAlertRuleIdSync(row.id))
+				const ruleNames = referencedByRules.map(({ row }) => row.name)
 				return yield* Effect.fail(
 					new AlertDestinationInUseError({
 						message: `Destination is still used by alert rules: ${ruleNames.join(", ")}`,
@@ -716,11 +741,11 @@ export class AlertDestinationsService extends Context.Service<
 			const txid = readTxid(deleted)
 			return new AlertDestinationDeleteResponse({
 				id: destinationId,
-				...(txid !== undefined && { txid }),
+				...(txid !== undefined ? { txid } : undefined),
 			})
 		})
 
-		const testDestination: AlertDestinationsServiceShape["testDestination"] = Effect.fn(
+		const testDestination: AlertDestinationsServiceApi["testDestination"] = Effect.fn(
 			"AlertsService.testDestination",
 		)(function* (orgId, _userId, roles, destinationId) {
 			yield* requireAdmin(roles)
@@ -754,14 +779,6 @@ export class AlertDestinationsService extends Context.Service<
 							error instanceof Error ? error.message : "Destination test failed",
 						),
 					),
-					Effect.mapError((error) =>
-						error instanceof AlertDeliveryError
-							? error
-							: makeDeliveryError(
-									error instanceof Error ? error.message : "Destination test failed",
-									decodeAlertDestinationTypeSync(row.type),
-								),
-					),
 				)
 			yield* markDestinationTest(orgId, destinationId, null)
 			return new AlertDestinationTestResponse({
@@ -776,7 +793,7 @@ export class AlertDestinationsService extends Context.Service<
 			updateDestination,
 			deleteDestination,
 			testDestination,
-		} satisfies AlertDestinationsServiceShape
+		} satisfies AlertDestinationsServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SlackBotTokenResolver.layer))

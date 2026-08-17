@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { recordedMarker, replayPartitionWindow } from "./replay-format"
+import { recordedMarker, replayFormat, replayPartitionWindow } from "./replay-format"
 
 // The session-detail warehouse queries are PARTITION BY toDate(...) over a 30-day
 // TTL; `replayPartitionWindow` turns a session's start (and optional end) into the
@@ -62,5 +62,40 @@ describe("recordedMarker", () => {
 
 	it("is undefined for an unexpected marker value rather than guessing", () => {
 		expect(recordedMarker(JSON.stringify({ "maple.session.recorded": "1" }))).toBeUndefined()
+	})
+})
+
+// `replayFormat` decides which engine plays a session, from session metadata
+// alone — so the player never has to download a chunk to find out what it is
+// looking at. Every fallback here resolves to "rrweb" on purpose: a session with
+// no marker was recorded before the marker existed, and those are all browser
+// recordings.
+describe("replayFormat", () => {
+	it("reads a mobile session's marker", () => {
+		expect(replayFormat(JSON.stringify({ "maple.session.replay_format": "video" }))).toBe("video")
+	})
+
+	it("reads an explicit browser marker", () => {
+		expect(replayFormat(JSON.stringify({ "maple.session.replay_format": "rrweb" }))).toBe("rrweb")
+	})
+
+	it("treats a session recorded before the marker existed as rrweb", () => {
+		expect(replayFormat(JSON.stringify({ "maple.session.recorded": "true" }))).toBe("rrweb")
+		expect(replayFormat("{}")).toBe("rrweb")
+		expect(replayFormat(undefined)).toBe("rrweb")
+		expect(replayFormat(null)).toBe("rrweb")
+		expect(replayFormat("")).toBe("rrweb")
+	})
+
+	it("falls back to rrweb rather than throwing on unusable attributes", () => {
+		// A player that crashes on a malformed row is worse than one that tries the
+		// engine every existing session uses.
+		expect(replayFormat("not json")).toBe("rrweb")
+		expect(replayFormat("null")).toBe("rrweb")
+		expect(replayFormat("[]")).toBe("rrweb")
+	})
+
+	it("falls back to rrweb for a format a newer SDK invented", () => {
+		expect(replayFormat(JSON.stringify({ "maple.session.replay_format": "av1" }))).toBe("rrweb")
 	})
 })

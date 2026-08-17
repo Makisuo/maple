@@ -1,4 +1,4 @@
-import type { GetExtensions, Row, ShapeStreamOptions } from "@electric-sql/client"
+import type { GetExtensions, Row, ShapeStreamOptions as SyncStreamOptions } from "@electric-sql/client"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
 	DeleteMutationFnParams,
@@ -111,7 +111,7 @@ export interface EffectElectricCollectionConfig<
 	/**
 	 * Configuration options for the ElectricSQL ShapeStream
 	 */
-	shapeOptions: ShapeStreamOptions<GetExtensions<T>>
+	shapeOptions: SyncStreamOptions<GetExtensions<T>>
 
 	/**
 	 * Function to extract the key from an item

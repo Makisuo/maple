@@ -5,7 +5,7 @@ import { siblingUrl } from "../packages/infra/src/dev-urls.ts"
 const overridesByApp: Record<string, Record<string, string>> = {
 	api: { MAPLE_APP_BASE_URL: "web" },
 	alerting: { MAPLE_APP_BASE_URL: "web" },
-}
+} satisfies Record<string, Record<string, string>>
 
 const appName = basename(process.cwd())
 const overrides = overridesByApp[appName] ?? {}

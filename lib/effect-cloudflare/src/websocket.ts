@@ -14,6 +14,7 @@ import { fromWebSocket } from "./durable-websocket.ts"
 export { fromWebSocket, type DurableWebSocket, type RawWebSocket } from "./durable-websocket.ts"
 
 export const upgrade = Effect.fnUntraced(function* () {
+	// SAFETY: The global Response constructor is the same runtime constructor described by Workers types.
 	const _Response = Response as any as typeof cf.Response
 	const ctx = yield* DurableObjectState
 	// @ts-expect-error — WebSocketPair is a Worker global

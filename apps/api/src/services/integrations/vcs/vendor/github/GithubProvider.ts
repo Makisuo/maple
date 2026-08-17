@@ -128,8 +128,8 @@ const toVcsError = (
 	}
 	return new VcsProviderError({
 		message: error.message,
-		...(error.status === undefined ? {} : { status: error.status }),
-		...(error.cause === undefined ? {} : { cause: error.cause }),
+		...(!(error.status === undefined) ? { status: error.status } : undefined),
+		...(!(error.cause === undefined) ? { cause: error.cause } : undefined),
 	})
 }
 
@@ -553,9 +553,11 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 						.listCommits(installation.externalInstallationId, repo.owner, repo.name, {
 							sha: opts.branch,
 							sinceIso: new Date(opts.sinceMs).toISOString(),
-							...(opts.untilMs === undefined
-								? {}
-								: { untilIso: new Date(opts.untilMs).toISOString() }),
+							...(!(opts.untilMs === undefined)
+								? {
+										untilIso: new Date(opts.untilMs).toISOString(),
+									}
+								: undefined),
 						})
 						.pipe(Effect.mapError(toVcsCommitError))
 					const normalized = result.commits.map((c) => normalizeFetchedCommit(c, now))

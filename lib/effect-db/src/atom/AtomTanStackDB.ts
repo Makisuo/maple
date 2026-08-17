@@ -199,6 +199,7 @@ export const makeQuery = <TContext extends Context>(
 
 			const isSingleResult = (collection as any).config?.singleResult === true
 			const entries = Array.from(collection.entries()).map(([_, value]) => value)
+			// SAFETY: `singleResult` is the runtime discriminator for InferResultType's scalar/array branch.
 			const newData = (isSingleResult ? entries[0] : entries) as unknown as InferResultType<TContext>
 			get.setSelf(AsyncResult.success(newData))
 		})
@@ -230,6 +231,7 @@ export const makeQuery = <TContext extends Context>(
 
 		const isSingleResult = (collection as any).config?.singleResult === true
 		const entries = Array.from(collection.entries()).map(([_, value]) => value)
+		// SAFETY: `singleResult` is the runtime discriminator for InferResultType's scalar/array branch.
 		const initialData = (isSingleResult ? entries[0] : entries) as unknown as InferResultType<TContext>
 
 		return AsyncResult.success(initialData)

@@ -4,7 +4,6 @@ export default defineConfig({
 	entry: {
 		"index.server": "./src/index.server.ts",
 		"index.client": "./src/index.client.ts",
-		"index.types": "./src/index.types.ts",
 		"server/index": "./src/server/index.ts",
 		"client/index": "./src/client/index.ts",
 		"cloudflare/index": "./src/cloudflare/index.ts",

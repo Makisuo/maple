@@ -103,6 +103,7 @@ const depValues = <Deps extends Record<string, Store.Source<any>>>(
 		for (const [key, source] of Object.entries(stores)) {
 			out[key] = yield* Store.get(source)
 		}
+		// SAFETY: every own key in `stores` is populated from that key's source before returning.
 		return out as DepValues<Deps>
 	})
 

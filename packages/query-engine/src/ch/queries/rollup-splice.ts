@@ -42,6 +42,14 @@ export interface SpliceGrain {
 
 const makeGrain = (unit: "HOUR" | "MINUTE"): SpliceGrain => {
 	const floorFn = unit === "HOUR" ? "toStartOfHour" : "toStartOfMinute"
+	// `toDateTime` is strictly second-precision: a fractional bound fails here
+	// with `Cannot parse string '…000' as DateTime`, which is how
+	// `GET /v2/services` broke. Making this lenient was tried and reverted —
+	// it does not help. These queries also compare the same parameter directly
+	// against a `DateTime` column (`Timestamp >= __PARAM_startTime__`), and that
+	// is a `TYPE_MISMATCH` for a fractional literal no matter how the floor
+	// arithmetic parses it. Precision has to be right at the caller; see
+	// `WindowPrecision` in apps/api/src/routes/v2/telemetry.http.ts.
 	const startDt = "toDateTime(__PARAM_startTime__)"
 	const endDt = "toDateTime(__PARAM_endTime__)"
 	const startFloor = `${floorFn}(${startDt})`

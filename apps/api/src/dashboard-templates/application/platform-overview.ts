@@ -7,53 +7,50 @@ import {
 	templateId,
 } from "@/dashboard-templates/helpers"
 import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
+import { makeRouteDataSource } from "@maple/widgets/dashboard"
 
 function widgets(): WidgetDef[] {
 	return [
 		{
 			id: "total-throughput",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "service_usage",
-				transform: { reduceToValue: { field: "totalTraceCount", aggregate: "sum" } },
-			},
+			dataSource: makeRouteDataSource("service_usage", undefined, {
+				reduceToValue: { field: "totalTraceCount", aggregate: "sum" },
+			}),
 			display: { title: "Total Traces", unit: "number" },
 			layout: { x: 0, y: 0, w: 3, h: 2 },
 		},
 		{
 			id: "total-errors",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "errors_summary",
-				transform: { reduceToValue: { field: "totalErrors", aggregate: "first" } },
-			},
+			dataSource: makeRouteDataSource("errors_summary", undefined, {
+				reduceToValue: { field: "totalErrors", aggregate: "first" },
+			}),
 			display: { title: "Total Errors", unit: "number" },
 			layout: { x: 3, y: 0, w: 3, h: 2 },
 		},
 		{
 			id: "error-rate",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "errors_summary",
-				transform: { reduceToValue: { field: "errorRate", aggregate: "first" } },
-			},
+			dataSource: makeRouteDataSource("errors_summary", undefined, {
+				reduceToValue: { field: "errorRate", aggregate: "first" },
+			}),
 			display: { title: "Error Rate", unit: "percent" },
 			layout: { x: 6, y: 0, w: 3, h: 2 },
 		},
 		{
 			id: "affected-services",
 			visualization: "stat",
-			dataSource: {
-				endpoint: "errors_summary",
-				transform: { reduceToValue: { field: "affectedServicesCount", aggregate: "first" } },
-			},
+			dataSource: makeRouteDataSource("errors_summary", undefined, {
+				reduceToValue: { field: "affectedServicesCount", aggregate: "first" },
+			}),
 			display: { title: "Affected Services", unit: "number" },
 			layout: { x: 9, y: 0, w: 3, h: 2 },
 		},
 		{
 			id: "service-overview",
 			visualization: "table",
-			dataSource: { endpoint: "service_overview" },
+			dataSource: makeRouteDataSource("service_overview"),
 			display: {
 				title: "Service Overview",
 				columns: [
@@ -98,10 +95,7 @@ function widgets(): WidgetDef[] {
 		{
 			id: "recent-error-traces",
 			visualization: "list",
-			dataSource: {
-				endpoint: "list_traces",
-				params: { hasError: true, limit: 10 },
-			},
+			dataSource: makeRouteDataSource("list_traces", { hasError: true, limit: 10 }),
 			display: {
 				title: "Recent Error Traces",
 				listDataSource: "traces",

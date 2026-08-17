@@ -25,7 +25,7 @@ export function InfraTooltipItem({
 			<div className="size-2.5 shrink-0 rounded-[2px]" style={{ background: color }} />
 			<div className="flex flex-1 items-center justify-between gap-3 leading-none">
 				<span className="text-muted-foreground">{label}</span>
-				<span className="font-mono font-medium tabular-nums text-foreground">
+				<span className="font-mono font-semibold tabular-nums text-foreground">
 					{formatValueWithUnit(value, unit)}
 				</span>
 			</div>

@@ -113,27 +113,28 @@ export interface CHQuery<
 	Cols extends ColumnDefs = ColumnDefs,
 	Output extends Record<string, any> = {},
 	Joins extends Record<string, ColumnDefs> = {},
+	Routing extends "ingest" | undefined = "ingest" | undefined,
 > {
 	/** @internal — runtime query state */
 	readonly _state: CHQueryState
 	/** phantom */
-	readonly _phantom?: { cols: Cols; output: Output; joins: Joins }
+	readonly _phantom?: { cols: Cols; output: Output; joins: Joins; routing: Routing }
 
 	/** Select specific columns by name. Output keys match column names. */
 	select<K extends keyof Cols & string>(
 		...columns: K[]
-	): CHQuery<Cols, { readonly [P in K]: InferTS<Cols[P]> }, Joins>
+	): CHQuery<Cols, { readonly [P in K]: InferTS<Cols[P]> }, Joins, Routing>
 
 	/** Select computed expressions via callback. */
 	select<S extends SelectRecord>(
 		fn: ($: JoinedColumnAccessor<Cols, Joins>) => S,
-	): CHQuery<Cols, InferOutput<S>, Joins>
+	): CHQuery<Cols, InferOutput<S>, Joins, Routing>
 
 	where(
 		fn: ($: JoinedColumnAccessor<Cols, Joins>) => Array<Condition | undefined>,
-	): CHQuery<Cols, Output, Joins>
+	): CHQuery<Cols, Output, Joins, Routing>
 
-	groupBy(...keys: Array<keyof Output & string>): CHQuery<Cols, Output, Joins>
+	groupBy(...keys: Array<keyof Output & string>): CHQuery<Cols, Output, Joins, Routing>
 
 	/**
 	 * Post-aggregation filter, applied after `GROUP BY`.
@@ -148,15 +149,15 @@ export interface CHQuery<
 	 */
 	having(
 		fn: ($: JoinedColumnAccessor<Cols, Joins>) => Array<Condition | undefined>,
-	): CHQuery<Cols, Output, Joins>
+	): CHQuery<Cols, Output, Joins, Routing>
 
-	orderBy(...specs: Array<OrderBySpec<Output>>): CHQuery<Cols, Output, Joins>
+	orderBy(...specs: Array<OrderBySpec<Output>>): CHQuery<Cols, Output, Joins, Routing>
 
-	limit(n: number): CHQuery<Cols, Output, Joins>
+	limit(n: number): CHQuery<Cols, Output, Joins, Routing>
 
-	offset(n: number): CHQuery<Cols, Output, Joins>
+	offset(n: number): CHQuery<Cols, Output, Joins, Routing>
 
-	format(fmt: "JSON" | "JSONEachRow"): CHQuery<Cols, Output, Joins>
+	format(fmt: "JSON" | "JSONEachRow"): CHQuery<Cols, Output, Joins, Routing>
 
 	/**
 	 * Declare that this query reads a datasource that only exists in the managed
@@ -164,7 +165,7 @@ export interface CHQuery<
 	 * a deliberately cross-org managed scan). The executor routes it to the
 	 * ingest backend instead of a per-org read override.
 	 */
-	routing(route: "ingest"): CHQuery<Cols, Output, Joins>
+	routing(route: "ingest"): CHQuery<Cols, Output, Joins, "ingest">
 
 	/**
 	 * Declare that this query deliberately reads across every tenant, forcing
@@ -175,7 +176,7 @@ export interface CHQuery<
 	 * from "someone forgot the `OrgId` filter" until an author says which.
 	 * Executors are expected to refuse these on the ordinary read path.
 	 */
-	crossOrg(): CHQuery<Cols, Output, Joins>
+	crossOrg(): CHQuery<Cols, Output, Joins, Routing>
 
 	// Type-safe joins with Table
 
@@ -183,18 +184,18 @@ export interface CHQuery<
 		table: Table<JName, JCols>,
 		alias: Alias,
 		on: JoinOnCallback<Cols, JCols>,
-	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: JCols }>
+	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: JCols }, Routing>
 
 	leftJoin<JName extends string, JCols extends ColumnDefs, Alias extends string>(
 		table: Table<JName, JCols>,
 		alias: Alias,
 		on: JoinOnCallback<Cols, JCols>,
-	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: NullableColumnDefs<JCols> }>
+	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: NullableColumnDefs<JCols> }, Routing>
 
 	crossJoin<JName extends string, JCols extends ColumnDefs, Alias extends string>(
 		table: Table<JName, JCols>,
 		alias: Alias,
-	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: JCols }>
+	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: JCols }, Routing>
 
 	// Type-safe joins with subquery (CHQuery)
 
@@ -207,7 +208,7 @@ export interface CHQuery<
 		query: CHQuery<JCols, JOutput, JJoins>,
 		alias: Alias,
 		on: JoinOnCallback<Cols, OutputToColumnDefs<JOutput>>,
-	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: OutputToColumnDefs<JOutput> }>
+	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: OutputToColumnDefs<JOutput> }, Routing>
 
 	leftJoinQuery<
 		JCols extends ColumnDefs,
@@ -221,7 +222,8 @@ export interface CHQuery<
 	): CHQuery<
 		Cols,
 		Output,
-		Joins & { readonly [K in Alias]: NullableColumnDefs<OutputToColumnDefs<JOutput>> }
+		Joins & { readonly [K in Alias]: NullableColumnDefs<OutputToColumnDefs<JOutput>> },
+		Routing
 	>
 
 	crossJoinQuery<
@@ -232,7 +234,7 @@ export interface CHQuery<
 	>(
 		query: CHQuery<JCols, JOutput, JJoins>,
 		alias: Alias,
-	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: OutputToColumnDefs<JOutput> }>
+	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: OutputToColumnDefs<JOutput> }, Routing>
 
 	/**
 	 * Add a CTE (WITH clause). The CTE is prepended to the compiled query, and
@@ -243,7 +245,7 @@ export interface CHQuery<
 	 * scope is *derived*, so a query whose only row source is a scoped CTE is
 	 * itself scoped without anyone asserting it.
 	 */
-	withCTE(name: string, query: CHQuery<any, any, any>): CHQuery<Cols, Output, Joins>
+	withCTE(name: string, query: CHQuery<any, any, any>): CHQuery<Cols, Output, Joins, Routing>
 
 	/**
 	 * Attach a CTE from pre-compiled SQL.
@@ -258,7 +260,7 @@ export interface CHQuery<
 		name: string,
 		sql: string,
 		options?: { readonly tenantScope?: TenantScope },
-	): CHQuery<Cols, Output, Joins>
+	): CHQuery<Cols, Output, Joins, Routing>
 }
 
 // Type utilities for extracting output types from queries
@@ -340,7 +342,8 @@ function makeQuery<
 	Cols extends ColumnDefs,
 	Output extends Record<string, any>,
 	Joins extends Record<string, ColumnDefs>,
->(state: CHQueryState): CHQuery<Cols, Output, Joins> {
+	Routing extends "ingest" | undefined,
+>(state: CHQueryState): CHQuery<Cols, Output, Joins, Routing> {
 	return {
 		_state: state,
 
@@ -490,7 +493,7 @@ function makeQuery<
 export function from<Name extends string, Cols extends ColumnDefs>(
 	table: Table<Name, Cols>,
 	alias?: string,
-): CHQuery<Cols, {}, {}> {
+): CHQuery<Cols, {}, {}, undefined> {
 	return makeQuery({
 		tableName: table.name,
 		tableAlias: alias,
@@ -522,7 +525,7 @@ export function fromQuery<
 >(
 	query: CHQuery<InnerCols, InnerOutput, InnerJoins>,
 	alias: Alias,
-): CHQuery<OutputToColumnDefs<InnerOutput>, {}, {}> {
+): CHQuery<OutputToColumnDefs<InnerOutput>, {}, {}, undefined> {
 	return makeQuery({
 		tableName: alias,
 		columns: {},
@@ -553,7 +556,7 @@ export function fromQuery<
 export function fromUnion<Output extends Record<string, any>, Alias extends string>(
 	union: import("./union").CHUnionQuery<Output>,
 	alias: Alias,
-): CHQuery<OutputToColumnDefs<Output>, {}, {}> {
+): CHQuery<OutputToColumnDefs<Output>, {}, {}, undefined> {
 	return makeQuery({
 		tableName: alias,
 		columns: {},

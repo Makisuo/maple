@@ -7,20 +7,20 @@ const ACCENT: Record<string, { stripe: string; tint: string }> = {
 	warning: { stripe: "bg-warning", tint: "bg-warning/[0.04]" },
 	medium: { stripe: "bg-amber-500", tint: "bg-amber-500/[0.04]" },
 	low: { stripe: "bg-muted-foreground", tint: "bg-muted/30" },
-}
+} satisfies Record<string, { stripe: string; tint: string }>
 
 const KIND_LABEL: Record<InvestigationKind, string> = {
 	alert: "Attached alert",
 	anomaly: "Attached anomaly",
 	error: "Attached error",
 	freeform: "Investigation subject",
-}
+} satisfies Record<InvestigationKind, string>
 
 const STATUS_TONE: Record<string, string> = {
 	Firing: "text-destructive",
 	Open: "text-destructive",
 	Resolved: "text-success",
-}
+} satisfies Record<string, string>
 
 const shortId = (id: string): string => {
 	const segments = id.split("-")

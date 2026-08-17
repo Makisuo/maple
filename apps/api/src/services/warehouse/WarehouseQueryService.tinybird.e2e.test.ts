@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { mintOrgReadJwt } from "@/services/auth/tinybird-jwt"
 

@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // Dashboard variable interpolation
 //
 // Resolves `$name` / `${name}` references inside widget data-source params

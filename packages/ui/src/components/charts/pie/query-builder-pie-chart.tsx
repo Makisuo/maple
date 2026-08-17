@@ -2,9 +2,9 @@ import * as React from "react"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
+import { chartTooltipCardClassName } from "../../ui/chart"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
-import { pieSampleData } from "../_shared/sample-data"
 import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import {
 	bucketCategorical,
@@ -134,11 +134,13 @@ const TABLE_MIN_PIE_W = 120
 // too narrow to host text without overflowing onto its neighbours.
 const LABEL_MIN_PCT = 0.06
 
+// No sample-data fallback: substituting fixtures for real rows made every
+// misconfigured or mis-fed chart draw a plausible-looking picture instead of an
+// empty one. Gallery thumbnails pass their sample rows in explicitly via `data`.
+const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
+
 export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, pie }: BaseChartProps) {
-	const source: ReadonlyArray<Record<string, unknown>> =
-		Array.isArray(data) && data.length > 0
-			? data
-			: (pieSampleData as ReadonlyArray<Record<string, unknown>>)
+	const source: ReadonlyArray<Record<string, unknown>> = Array.isArray(data) ? data : EMPTY_ROWS
 
 	const valueField = React.useMemo(() => pickValueField(source), [source])
 
@@ -367,7 +369,10 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 			{/* Tooltip */}
 			{tooltip !== "hidden" && hover !== null && slices[hover] && (
 				<div
-					className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-[color-mix(in_oklch,var(--border)_80%,var(--foreground)_15%)] bg-popover/95 px-2.5 py-1.5 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] backdrop-blur-sm"
+					className={cn(
+						chartTooltipCardClassName,
+						"pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap",
+					)}
 					style={{
 						left: clamp(
 							cx + Math.cos(angleMid(slices[hover]) - Math.PI / 2) * (outerR * 0.85),

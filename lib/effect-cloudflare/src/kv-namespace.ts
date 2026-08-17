@@ -83,6 +83,7 @@ const makeClient = (token: KVNamespaceToken): KVNamespaceClient => {
 	): Effect.Effect<T, KVNamespaceError, WorkerEnvironment> =>
 		raw.pipe(Effect.flatMap((r) => tryPromise(() => fn(r))))
 
+	// SAFETY: every KVNamespaceClient operation is implemented above by delegating to the bound runtime namespace.
 	return {
 		raw,
 		get: (...args: Parameters<runtime.KVNamespace["get"]>) => use((r) => (r.get as any)(...args)),

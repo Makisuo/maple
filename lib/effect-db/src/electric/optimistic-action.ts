@@ -1,6 +1,6 @@
 import { createTransaction, type Collection, type Transaction } from "@tanstack/db"
 import type { Txid } from "@tanstack/electric-db-collection"
-import { Cause, Effect, Exit, type ManagedRuntime } from "effect"
+import { Cause, Effect, Exit, Predicate, type ManagedRuntime } from "effect"
 import type * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Atom from "effect/unstable/reactivity/Atom"
 import {
@@ -102,7 +102,7 @@ export interface OptimisticActionConfig<
 }
 
 function normalizeCollections(collections: CollectionInput): NormalizedCollection[] {
-	if ("state" in collections && typeof (collections as any).insert === "function") {
+	if ("state" in collections && Predicate.isFunction((collections as any).insert)) {
 		return [{ name: "primary", collection: collections as EffectCollection }]
 	}
 

@@ -56,7 +56,7 @@ const TONE_TEXT: Record<LensTone, string> = {
 	info: "text-info",
 	warning: "text-warning",
 	destructive: "text-destructive",
-}
+} satisfies Record<LensTone, string>
 
 const TONE_BORDER: Record<LensTone, string> = {
 	muted: "border-border",
@@ -65,7 +65,7 @@ const TONE_BORDER: Record<LensTone, string> = {
 	info: "border-info",
 	warning: "border-warning",
 	destructive: "border-destructive",
-}
+} satisfies Record<LensTone, string>
 
 const GLYPH: Record<FlowGlyph, IconComponent> = {
 	issue: AlertWarningIcon,
@@ -73,7 +73,7 @@ const GLYPH: Record<FlowGlyph, IconComponent> = {
 	incident: BellIcon,
 	investigation: MagnifierIcon,
 	verdict: CircleCheckIcon,
-}
+} satisfies Record<FlowGlyph, IconComponent>
 
 /**
  * One glyph per lane state, and only the running one is a loader.
@@ -97,7 +97,7 @@ const LENS_GLYPH: Record<LensNodeData["state"]["icon"], IconComponent> = {
 	ruledOut: CircleXmarkIcon,
 	deadline: ClockIcon,
 	failed: CircleXmarkIcon,
-}
+} satisfies Record<LensNodeData["state"]["icon"], IconComponent>
 
 /** The eyebrow strip: an icon in its tile, then the kind in caps. */
 const EYEBROW = "text-[10px] font-medium uppercase tracking-[0.12em]"
@@ -485,7 +485,7 @@ export const ACTION_GLYPH: Record<ActionKind, { Icon: IconComponent; label: stri
 	code: { Icon: CodeIcon, label: "Code change" },
 	service: { Icon: ServerIcon, label: "Service setup" },
 	task: { Icon: BoltIcon, label: "Action" },
-}
+} satisfies Record<ActionKind, { Icon: IconComponent; label: string }>
 
 function ActionGlyph({ kind }: { kind: ActionKind }) {
 	const { Icon, label } = ACTION_GLYPH[kind]

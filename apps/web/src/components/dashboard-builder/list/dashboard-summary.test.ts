@@ -1,5 +1,11 @@
+import { QUERY_ENDPOINT_RESULT_KINDS } from "@maple/widgets/dashboard"
 import { describe, expect, it } from "vitest"
-import type { Dashboard, DashboardWidget, DataSourceEndpoint } from "@/components/dashboard-builder/types"
+import type {
+	Dashboard,
+	DashboardWidget,
+	DataSourceEndpoint,
+	VisualizationType,
+} from "@/components/dashboard-builder/types"
 import {
 	collectTags,
 	dashboardMatches,
@@ -13,10 +19,23 @@ import {
 
 let widgetSeq = 0
 
-const widget = (visualization: string, endpoint: DataSourceEndpoint): DashboardWidget => ({
+// The call sites still name an endpoint, because that is what these tests are
+// about (which tiles a dashboard summary counts). v3 moved the identity onto
+// `kind`, so the name is mapped to the matching arm here rather than at 20 call
+// sites.
+const dataSourceFor = (endpoint: DataSourceEndpoint): DashboardWidget["dataSource"] => {
+	if (endpoint === "markdown_static") return { kind: "static" }
+	if (endpoint === "raw_sql_chart") return { kind: "raw_sql", sql: "SELECT 1" }
+	const resultKind = QUERY_ENDPOINT_RESULT_KINDS[endpoint]
+	return resultKind === undefined
+		? { kind: "route", endpoint }
+		: { kind: "query", resultShape: resultKind, queries: [] }
+}
+
+const widget = (visualization: VisualizationType, endpoint: DataSourceEndpoint): DashboardWidget => ({
 	id: `w${++widgetSeq}`,
 	visualization,
-	dataSource: { endpoint },
+	dataSource: dataSourceFor(endpoint),
 	display: { title: visualization },
 	layout: { x: 0, y: 0, w: 4, h: 4 },
 })

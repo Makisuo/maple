@@ -12,7 +12,7 @@ import { normalizeTimestampInput } from "@/lib/timezone-format"
  * user sees and keeps (the picker writing to the URL) — that should record the
  * instant they actually chose.
  */
-export { cacheSnapSecondsForRange, snapRangeForCache } from "@maple/query-engine"
+export { snapRangeForCache } from "@maple/query-engine"
 
 /**
  * Format a Date as the ClickHouse/Tinybird `YYYY-MM-DD HH:mm:ss` shape.
@@ -69,7 +69,7 @@ export function presetLabel(shorthand: string): string {
 		d: ["day", "days"],
 		w: ["week", "weeks"],
 		mo: ["month", "months"],
-	}
+	} satisfies Record<string, [string, string]>
 
 	const [singular, plural] = unitLabels[unit] ?? [unit, unit]
 	return `Last ${amount} ${amount === 1 ? singular : plural}`

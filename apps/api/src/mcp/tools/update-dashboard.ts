@@ -7,6 +7,7 @@ import { DashboardDocument, DashboardId, PortableDashboardDocument } from "@mapl
 import { IsoDateTimeString } from "@maple/domain"
 import { validateDashboardTimeRange } from "@/mcp/lib/resolve-dashboard-time-range"
 import { MAX_QUERY_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
+import { collectDocumentRenderWarnings } from "@/mcp/lib/validate-widget-renderability"
 
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
 const decodeIsoDateTimeString = Schema.decodeUnknownSync(IsoDateTimeString)
@@ -149,6 +150,18 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 
 			if (dashboard.description) {
 				lines.splice(3, 0, `Description: ${dashboard.description}`)
+			}
+
+			// Advisory only. This tool is the full-replacement / restore escape
+			// hatch, so a legacy board carrying an ungrouped pie or a `"GB"` unit
+			// must still round-trip — blocking here would make it unrestorable.
+			const renderWarnings = collectDocumentRenderWarnings(dashboard.widgets)
+			if (renderWarnings.length > 0) {
+				lines.push(
+					"",
+					"### Render warnings (saved anyway)",
+					...renderWarnings.map((warning) => `- ${warning}`),
+				)
 			}
 
 			return {

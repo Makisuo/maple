@@ -9,19 +9,21 @@ import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
-import { QueryEngineService, type QueryEngineServiceShape } from "@/services/warehouse/QueryEngineService"
-import { V2SchemaErrorsLive } from "./error-envelope"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
+import { QueryEngineService, type QueryEngineServiceApi } from "@/services/warehouse/QueryEngineService"
+import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	makeWarehouseServiceStub,
 	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 } from "./v2-test-support"
@@ -175,19 +177,15 @@ const rowsForSql = (sql: string): ReadonlyArray<Record<string, unknown>> => {
 	return []
 }
 
-const warehouseStub: WarehouseQueryServiceShape = {
+const warehouseStub = makeWarehouseServiceStub({
 	query: () => Effect.die(new Error("unexpected named query")),
-	sqlQuery: () => Effect.succeed([{ bucket: "2026-07-15 12:00:00", value: 1 }]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows(rowsForSql(compiled.sql)),
 	compiledQueryFirst: (_tenant, compiled) =>
 		compiled
 			.decodeRows(rowsForSql(compiled.sql))
 			.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]))),
 	ingest: () => Effect.void,
-	asExecutor: () => {
-		throw new Error("not used")
-	},
-}
+})
 
 const queryEngineStub = {
 	execute: (_tenant, request) => {
@@ -215,11 +213,11 @@ const queryEngineStub = {
 	evaluate: () => Effect.die(new Error("not used")),
 	evaluateSeries: () => Effect.die(new Error("not used")),
 	cachedDirect: (_tenant, _route, _payload, effect) => effect,
-} satisfies QueryEngineServiceShape
+} satisfies QueryEngineServiceApi
 
 const makeHarness = (
-	warehouseService: WarehouseQueryServiceShape = warehouseStub,
-	queryEngineService: QueryEngineServiceShape = queryEngineStub,
+	warehouseService: WarehouseQueryServiceApi = warehouseStub,
+	queryEngineService: QueryEngineServiceApi = queryEngineStub,
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
@@ -227,6 +225,7 @@ const makeHarness = (
 		ApiKeysService.layer,
 		AuthService.layer,
 		DashboardPersistenceService.layer,
+		SharedDashboardService.layer,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 	const telemetryLive = Layer.mergeAll(
 		Layer.succeed(WarehouseQueryService, warehouseService),
@@ -235,7 +234,7 @@ const makeHarness = (
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(telemetryLive),
-		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(V2TransportErrorBoundaryLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(AlertsServiceStubLayer),
@@ -261,7 +260,7 @@ const makeHarness = (
 				method,
 				headers: {
 					authorization: `Bearer ${token}`,
-					...(body ? { "content-type": "application/json" } : {}),
+					...(body ? { "content-type": "application/json" } : undefined),
 				},
 				body: body ? JSON.stringify(body) : undefined,
 			}),
@@ -466,7 +465,7 @@ describe("v2 telemetry reads over HTTP", () => {
 
 	it("preserves fractional bounds and reads complete traces by their sorting-key identity", async () => {
 		const observedSql: string[] = []
-		const observingWarehouse: WarehouseQueryServiceShape = {
+		const observingWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (tenant, compiled, options) => {
 				observedSql.push(compiled.sql)
@@ -497,6 +496,45 @@ describe("v2 telemetry reads over HTTP", () => {
 		expect(hierarchySql).not.toContain("Timestamp >=")
 		expect(hierarchySql).not.toContain("Timestamp <=")
 		expect(hierarchySql).toContain("LIMIT 5001")
+		await harness.dispose()
+	})
+
+	// Regression: the summary endpoints read the hourly rollups, whose Timestamp
+	// is a plain `DateTime`. They were formatting window bounds with millisecond
+	// precision, which ClickHouse rejects outright — `GET /v2/services` returned
+	// a 500 for three weeks. It survived because this file stubs the warehouse
+	// and the SQL-catalog sweep only ever compiles second-precision fixtures, so
+	// nothing checked the parameter VALUES the route actually sends.
+	it("sends second-precision window bounds to the rollup-backed summary endpoints", async () => {
+		const observedSql: string[] = []
+		const observingWarehouse: WarehouseQueryServiceApi = {
+			...warehouseStub,
+			compiledQuery: (tenant, compiled, options) => {
+				observedSql.push(compiled.sql)
+				return warehouseStub.compiledQuery(tenant, compiled, options)
+			},
+			compiledQueryFirst: (tenant, compiled, options) => {
+				observedSql.push(compiled.sql)
+				return warehouseStub.compiledQueryFirst(tenant, compiled, options)
+			},
+		}
+		const harness = makeHarness(observingWarehouse)
+		const key = await harness.bootstrapKey()
+
+		// Deliberately fractional inbound bounds — the route must round them.
+		const services = await harness.request(
+			"GET",
+			"/v2/services?start_time=2026-07-15T12:00:00.900Z&end_time=2026-07-16T12:00:00.100Z",
+			key.secret,
+		)
+		expect(services.status).toBe(200)
+
+		const catalogSql = observedSql.find((sql) => sql.includes("service_overview_spans"))
+		expect(catalogSql).toBeDefined()
+		expect(catalogSql).toContain("'2026-07-15 12:00:00'")
+		expect(catalogSql).toContain("'2026-07-16 12:00:00'")
+		// A fractional literal is a TYPE_MISMATCH against a DateTime column.
+		expect(catalogSql).not.toMatch(/'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+'/)
 		await harness.dispose()
 	})
 
@@ -553,7 +591,7 @@ describe("v2 telemetry reads over HTTP", () => {
 
 	it("maps public trace attribute grouping onto the validated internal query", async () => {
 		let observedRequest: QueryEngineExecuteRequest | undefined
-		const queryEngine: QueryEngineServiceShape = {
+		const queryEngine: QueryEngineServiceApi = {
 			...queryEngineStub,
 			execute: (tenant, request) => {
 				observedRequest = request
@@ -586,7 +624,7 @@ describe("v2 telemetry reads over HTTP", () => {
 	})
 
 	it("coerces BYO-ClickHouse numeric strings before encoding aggregation responses", async () => {
-		const queryEngine: QueryEngineServiceShape = {
+		const queryEngine: QueryEngineServiceApi = {
 			...queryEngineStub,
 			execute: (_tenant, request) =>
 				Effect.succeed(
@@ -604,7 +642,7 @@ describe("v2 telemetry reads over HTTP", () => {
 									source: "metrics",
 									data: [{ bucket: "2026-07-15 12:00:00", series: { all: "42" } }],
 								},
-							}) as unknown as QueryEngineExecuteResponse,
+							}) as QueryEngineExecuteResponse,
 				),
 		}
 		const harness = makeHarness(warehouseStub, queryEngine)
@@ -627,8 +665,8 @@ describe("v2 telemetry reads over HTTP", () => {
 	})
 
 	it("applies bounded ClickHouse settings to log body searches", async () => {
-		let observedOptions: Parameters<WarehouseQueryServiceShape["compiledQuery"]>[2]
-		const observingWarehouse: WarehouseQueryServiceShape = {
+		let observedOptions: Parameters<WarehouseQueryServiceApi["compiledQuery"]>[2]
+		const observingWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (tenant, compiled, options) => {
 				observedOptions = options

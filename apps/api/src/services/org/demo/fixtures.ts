@@ -234,7 +234,7 @@ function generateHttpTrace(timestamp: Date, orgId: string): DemoTraceBatch {
 						},
 					],
 				}
-			: {}),
+			: undefined),
 	})
 
 	const dbRow = makeTraceRow({
@@ -317,7 +317,7 @@ function generateWorkerTrace(timestamp: Date, orgId: string): DemoTraceBatch {
 						},
 					],
 				}
-			: {}),
+			: undefined),
 	})
 
 	return { traceRows: [row], logRows: [] }
@@ -335,7 +335,7 @@ const makeMetricBase = (service: DemoServiceName, orgId: string, startMs: number
 	timestamp: fmtTs(tsMs),
 	start_timestamp: fmtTs(startMs),
 	metric_description: "",
-	metric_attributes: { "maple.demo": "true" } as Attrs,
+	metric_attributes: { "maple.demo": "true" } satisfies Attrs,
 	service_name: service,
 	resource_schema_url: "",
 	resource_attributes: resourceAttrs(service, orgId),

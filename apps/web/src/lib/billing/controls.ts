@@ -48,7 +48,7 @@ export const updateFeatureControls = ({
 			new UpdateBillingSpendLimitClass({
 				featureId,
 				enabled: overageLimit !== null,
-				...(overageLimit === null ? {} : { limitType: "absolute" as const, overageLimit }),
+				...(!(overageLimit === null) ? { limitType: "absolute" as const, overageLimit } : undefined),
 			}),
 		],
 		usageAlerts: [

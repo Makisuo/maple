@@ -1,10 +1,6 @@
 import { Atom, Result } from "@/lib/effect-atom"
 
-import {
-	nextRetentionNamespace,
-	retainResult,
-	retainedResult,
-} from "@/lib/services/atoms/result-retention"
+import { nextRetentionNamespace, retainResult, retainedResult } from "@/lib/services/atoms/result-retention"
 
 export { nextRetentionNamespace }
 

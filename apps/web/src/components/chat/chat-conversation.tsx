@@ -3,7 +3,7 @@ import { Exit } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { toastManager } from "@maple/ui/components/ui/toast"
 import { useAtomSet } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { useMapleChat, type FailedSend } from "@/hooks/use-maple-chat"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
 import {
@@ -158,7 +158,7 @@ export function ChatConversation({
 	const diagnosisMessageId = useMemo(() => findDiagnosisMessageId(messages), [messages])
 
 	// Apply an approved proposal via Maple's authenticated API (propose-then-apply).
-	const applyProposal = useAtomSet(MapleApiAtomClient.mutation("chat", "apply"), {
+	const applyProposal = useAtomSet(MapleInternalAtomClient.mutation("chat", "apply"), {
 		mode: "promiseExit",
 	})
 	const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, "applied" | "denied">>(

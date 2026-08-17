@@ -1,5 +1,5 @@
 /**
- * Local oxlint JS plugin for repo-specific rules oxlint has no built-in for.
+ * Local oxlint JS plugin for repo-specific rules oxlint has no precise built-in for.
  *
  * Wired up in `.oxlintrc.json` via `jsPlugins`.
  *
@@ -13,6 +13,9 @@
 
 const MESSAGE =
 	"Do not use `Record<string, any>` — an open key set whose values are unchecked too. If you genuinely cannot name the shape, `Record<string, unknown>` at least forces you to narrow before use; better still, model it (an interface, a Schema.Struct) or use a typed `ReadonlyRecord`/`Map`."
+
+const NO_REACT_USE_EFFECT_MESSAGE =
+	"Do not call React.useEffect directly. Derive values during render, act in event handlers, use a data-fetching library, or use useMountEffect for mount-scoped external synchronization."
 
 /** `{ [key: string]: any }` written as an index signature — same shape, same problem. */
 const isStringToAnyIndexSignature = (node) =>
@@ -58,9 +61,65 @@ const noRecordStringAny = {
 	},
 }
 
+const importedName = (specifier) => {
+	if (specifier.imported?.type === "Identifier") return specifier.imported.name
+	return specifier.imported?.value
+}
+
+const memberName = (member) => {
+	if (!member.computed && member.property.type === "Identifier") return member.property.name
+	if (member.computed && member.property.type === "Literal") return member.property.value
+	return undefined
+}
+
+const noReactUseEffect = {
+	meta: {
+		type: "suggestion",
+		docs: {
+			description:
+				"Disallow direct React useEffect imports and calls without flagging namespace imports.",
+		},
+		messages: { noReactUseEffect: NO_REACT_USE_EFFECT_MESSAGE },
+	},
+	create(context) {
+		// This module is the single implementation behind the repo's sanctioned
+		// mount-only escape hatch. Keep the exception with the rule so alternate
+		// runners that do not honor root overrides (notably React Doctor) agree.
+		const filename = context.filename?.replaceAll("\\", "/")
+		if (
+			filename === "src/hooks/use-mount-effect.ts" ||
+			filename?.endsWith("/src/hooks/use-mount-effect.ts")
+		) {
+			return {}
+		}
+		const reactNamespaces = new Set()
+		return {
+			ImportDeclaration(node) {
+				if (node.source.value !== "react" || node.importKind === "type") return
+				for (const specifier of node.specifiers) {
+					if (specifier.type === "ImportSpecifier") {
+						if (specifier.importKind !== "type" && importedName(specifier) === "useEffect") {
+							context.report({ node: specifier, messageId: "noReactUseEffect" })
+						}
+						continue
+					}
+					reactNamespaces.add(specifier.local.name)
+				}
+			},
+			MemberExpression(node) {
+				if (node.object.type !== "Identifier") return
+				if (!reactNamespaces.has(node.object.name)) return
+				if (memberName(node) !== "useEffect") return
+				context.report({ node, messageId: "noReactUseEffect" })
+			},
+		}
+	},
+}
+
 export default {
 	meta: { name: "maple" },
 	rules: {
+		"no-react-use-effect": noReactUseEffect,
 		"no-record-string-any": noRecordStringAny,
 	},
 }

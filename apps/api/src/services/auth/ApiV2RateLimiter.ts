@@ -13,8 +13,16 @@ interface RateLimitBinding {
 	readonly limit: (options: { readonly key: string }) => Promise<{ readonly success: boolean }>
 }
 
-export interface ApiV2RateLimiterShape {
-	readonly check: (keyId: ApiKeyId) => Effect.Effect<ApiV2RateLimitOutcome>
+export interface ApiV2RateLimiterApi {
+	/**
+	 * Rate-limit one caller-chosen key.
+	 *
+	 * Takes an opaque string rather than an `ApiKeyId` because the v2 API is no
+	 * longer the only caller: the public share surface limits per share token and
+	 * per client IP, neither of which is an API key. The `v2:` / `share:` scoping
+	 * prefix therefore belongs to the caller — see `makeApiV2RateLimitKey`.
+	 */
+	readonly check: (key: string) => Effect.Effect<ApiV2RateLimitOutcome>
 }
 
 class ApiV2RateLimiterBindingError extends Schema.TaggedError<ApiV2RateLimiterBindingError>()(
@@ -36,25 +44,41 @@ const readPartition = (environment: Record<string, unknown>): string | undefined
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
 }
 
-export const makeApiV2RateLimitKey = (partition: string, keyId: ApiKeyId): string =>
-	`${partition}:v2:${keyId}`
+export const makeApiV2RateLimitKey = (partition: string, key: string): string => `${partition}:${key}`
+
+/** The v2 API's own scoping prefix, preserving the pre-generalization key shape. */
+export const apiV2RateLimitKey = (keyId: ApiKeyId): string => `v2:${keyId}`
+
+/** Share links are limited per token, and separately per client IP. */
+export const shareTokenRateLimitKey = (tokenHashPrefix: string): string => `share:${tokenHashPrefix}`
+export const shareIpRateLimitKey = (ip: string): string => `shareip:${ip}`
+
+/**
+ * Social-preview traffic, bucketed apart from the viewer keys above.
+ *
+ * The unfurl path is machine traffic — every chat client that sees the link
+ * fetches it, and the page worker asks on each document request. Sharing the
+ * viewer's bucket would let that crowd rate-limit the humans the link was sent
+ * to, which is the failure this separation exists to prevent.
+ */
+export const shareOgRateLimitKey = (shareKeyPrefix: string): string => `shareog:${shareKeyPrefix}`
 
 const warnFailedOpen = (reason: "binding_missing" | "partition_missing" | "binding_error", cause?: unknown) =>
 	Effect.logWarning("API v2 rate limiter unavailable; allowing request").pipe(
 		Effect.annotateLogs({
 			"maple.rate_limit.outcome": "failed_open",
 			"maple.rate_limit.reason": reason,
-			...(cause instanceof Error ? { "error.type": cause.name } : {}),
+			...(cause instanceof Error ? { "error.type": cause.name } : undefined),
 		}),
 	)
 
-export class ApiV2RateLimiter extends Context.Service<ApiV2RateLimiter, ApiV2RateLimiterShape>()(
+export class ApiV2RateLimiter extends Context.Service<ApiV2RateLimiter, ApiV2RateLimiterApi>()(
 	"@maple/api/services/ApiV2RateLimiter",
 	{
 		make: Effect.gen(function* () {
 			const environment = yield* WorkerEnvironment
 
-			const check = Effect.fn("ApiV2RateLimiter.check")(function* (keyId: ApiKeyId) {
+			const check = Effect.fn("ApiV2RateLimiter.check")(function* (key: string) {
 				const binding = environment[API_V2_RATE_LIMIT_BINDING]
 				if (!isRateLimitBinding(binding)) {
 					yield* warnFailedOpen("binding_missing")
@@ -68,7 +92,7 @@ export class ApiV2RateLimiter extends Context.Service<ApiV2RateLimiter, ApiV2Rat
 				}
 
 				return yield* Effect.tryPromise({
-					try: () => binding.limit({ key: makeApiV2RateLimitKey(partition, keyId) }),
+					try: () => binding.limit({ key: makeApiV2RateLimitKey(partition, key) }),
 					catch: (cause) =>
 						new ApiV2RateLimiterBindingError({
 							message: "Cloudflare rate-limit binding call failed",
@@ -84,7 +108,7 @@ export class ApiV2RateLimiter extends Context.Service<ApiV2RateLimiter, ApiV2Rat
 				)
 			})
 
-			return { check } satisfies ApiV2RateLimiterShape
+			return { check } satisfies ApiV2RateLimiterApi
 		}),
 	},
 ) {

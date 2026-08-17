@@ -5,17 +5,14 @@ import {
 	GRID_TIERS,
 	projectLayout,
 	tierForWidth,
+	type PlacedWidget,
 } from "@/components/dashboard-builder/canvas/grid-breakpoints"
-import type { DashboardWidget } from "@/components/dashboard-builder/types"
 
-function widget(id: string, x: number, y: number, w: number, h: number): DashboardWidget {
-	return {
-		id,
-		visualization: "stat",
-		dataSource: {},
-		display: {},
-		layout: { x, y, w, h },
-	} as unknown as DashboardWidget
+// No cast: placement reads `id` and `layout`, and nothing else. That is the
+// whole reason a redacted share widget can go through the same projection as a
+// stored one.
+function widget(id: string, x: number, y: number, w: number, h: number): PlacedWidget {
+	return { id, layout: { x, y, w, h } }
 }
 
 /** A realistic authored dashboard: a row of stats over charts over a wide table. */
@@ -147,5 +144,22 @@ describe("projectLayout", () => {
 
 	it("returns an empty layout for a dashboard with no widgets", () => {
 		expect(projectLayout([], GRID_TIERS[2])).toEqual([])
+	})
+})
+
+describe("PlacedWidget", () => {
+	// Guards the seam rather than the maths: re-widening the parameter back to a
+	// full `DashboardWidget` would break every read-only surface, and it would
+	// break here first.
+	it("projects a widget carrying nothing but an id and a layout", () => {
+		const redactedWidgets = [
+			{ id: "a", layout: { x: 0, y: 0, w: 6, h: 4 } },
+			{ id: "b", layout: { x: 6, y: 0, w: 6, h: 4 } },
+		]
+
+		expect(projectLayout(redactedWidgets, GRID_TIERS[0])).toMatchObject([
+			{ i: "a", x: 0, y: 0, w: 6, h: 4 },
+			{ i: "b", x: 6, y: 0, w: 6, h: 4 },
+		])
 	})
 })

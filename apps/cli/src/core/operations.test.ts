@@ -25,6 +25,7 @@ const makeRecordingTracer = () => {
 describe("rawQuery instrumentation", () => {
 	it.effect("emits the canonical chDB Client span", () =>
 		Effect.gen(function* () {
+			// SAFETY: this focused fetch stub returns the only response shape exercised by the query.
 			globalThis.fetch = (async () =>
 				new Response(JSON.stringify([{ value: 1 }]), {
 					status: 200,

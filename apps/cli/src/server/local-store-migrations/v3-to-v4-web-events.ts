@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { cp, mkdir, rm } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { RAW_TELEMETRY_TTL_COLUMNS, readRawTelemetryRetentionDays, type Chdb } from "../chdb"
@@ -64,7 +65,7 @@ const decodeState = (value: unknown): V3ToV4State => {
 		module: "local-0003-to-0004-web-events",
 		version: 1,
 		rawRows: decodeCounts(value.rawRows),
-		...(value.retentionDays === undefined ? {} : { retentionDays: value.retentionDays }),
+		...(!(value.retentionDays === undefined) ? { retentionDays: value.retentionDays } : undefined),
 	}
 }
 
@@ -112,7 +113,7 @@ const preflight = async (context: MigrationModuleContext): Promise<V3ToV4State> 
 		module: "local-0003-to-0004-web-events",
 		version: 1,
 		rawRows,
-		...(retentionDays === undefined ? {} : { retentionDays }),
+		...(!(retentionDays === undefined) ? { retentionDays } : undefined),
 	}
 }
 

@@ -1,4 +1,4 @@
-{{- if and .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled) -}}
+{{- if eq (include "maple-k8s-infra.cluster.enabled" .) "true" -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -6,12 +6,23 @@ metadata:
   labels:
     {{- include "maple-k8s-infra.labels" . | nindent 4 }}
     app.kubernetes.io/component: cluster-collector
+{{- /*
+  Each rule group is gated on the receiver or processor that actually needs it,
+  so a single-preset install gets only the reads that preset performs. The outer
+  gate stays `maple-k8s-infra.cluster.enabled` — the one activation predicate
+  every cluster-collector resource shares — and that predicate is true only when
+  at least one of the three presets below is on, so `rules:` is never empty.
+
+  Groups overlap (nodes, pods, replicasets appear under more than one gate);
+  RBAC rules are additive, so the duplication is harmless and keeps each group
+  readable as the complete permission set for its own component.
+*/}}
 rules:
+  {{- if .Values.presets.clusterMetrics.enabled }}
+  # k8s_cluster receiver — walks the cluster's workload and quota objects to
+  # emit k8s.{pod,node,deployment,...} metrics.
   - apiGroups: [""]
     resources:
-      - configmaps
-      - endpoints
-      - events
       - namespaces
       - nodes
       - persistentvolumeclaims
@@ -21,12 +32,6 @@ rules:
       - resourcequotas
       - services
     verbs: ["get", "list", "watch"]
-  {{- if .Values.presets.fargateMetrics.enabled }}
-  # Required for prometheus to scrape /api/v1/nodes/<name>/proxy/metrics/cadvisor.
-  - apiGroups: [""]
-    resources: ["nodes/proxy"]
-    verbs: ["get"]
-  {{- end }}
   - apiGroups: ["apps"]
     resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
     verbs: ["get", "list", "watch"]
@@ -36,9 +41,36 @@ rules:
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]
     verbs: ["get", "list", "watch"]
+  {{- end }}
+  {{- if .Values.presets.k8sEvents.enabled }}
+  # k8sobjects/events receiver — watches `events` in the events.k8s.io group
+  # (see cluster-configmap.yaml; the core-group alias is not requested).
   - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
+  {{- end }}
+  {{- if .Values.presets.fargateMetrics.enabled }}
+  # prometheus receiver — `kubernetes_sd_configs: role: node` lists/watches
+  # nodes to discover Fargate targets, then scrapes each one through
+  # /api/v1/nodes/<name>/proxy/metrics/cadvisor.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
+  {{- end }}
+  {{- if .Values.processors.kubernetesAttributes.enabled }}
+  # k8sattributes processor — runs in every cluster-collector pipeline, so it
+  # needs its own reads even when k8s_cluster is off (a Fargate-only install
+  # still enriches the scraped cAdvisor metrics).
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

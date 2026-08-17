@@ -1,8 +1,10 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
+// BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { join } from "node:path"
-import { resolveSlackBotToken } from "eve/channels/slack"
+import { resolveSlackBotToken, type SlackBotTokenContext } from "eve/channels/slack"
 
 /**
  * Canary for `patches/eve@0.25.3.patch` — the multi-workspace patch that
@@ -44,17 +46,9 @@ describe("eve multi-workspace patch", () => {
 	})
 
 	test("resolveSlackBotToken passes the request context to the credential", async () => {
-		// The patch rewrites eve's built JS, not its .d.ts, so the published type
-		// still advertises the unpatched arity — hence the cast. That mismatch is
-		// exactly why this has to be asserted at runtime.
-		const patched = resolveSlackBotToken as unknown as (
-			credential: (context: unknown) => Promise<string>,
-			context: unknown,
-		) => Promise<string>
-
-		const seen: unknown[] = []
-		const token = await patched(
-			async (context: unknown) => {
+		const seen: Array<SlackBotTokenContext | undefined> = []
+		const token = await resolveSlackBotToken(
+			async (context) => {
 				seen.push(context)
 				return "xoxb-per-team"
 			},

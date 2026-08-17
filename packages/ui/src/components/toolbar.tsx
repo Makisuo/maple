@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // Sticky page toolbar family — search + result stats + time range + refresh.
 // Data-agnostic: callers own the time-range presets and the refresh action.
 

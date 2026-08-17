@@ -68,6 +68,7 @@ const doFetch = (
 	}
 	const url = urlResult.success
 
+	// SAFETY: DOM and Workers fetch declarations describe the same Fetch API runtime values.
 	const send = (body: BodyInit | undefined) =>
 		Effect.map(
 			Effect.tryPromise({
@@ -76,7 +77,7 @@ const doFetch = (
 						url.toString() as runtime.RequestInfo,
 						{
 							method: request.method,
-							headers: request.headers as unknown as runtime.HeadersInit,
+							headers: request.headers as runtime.HeadersInit,
 							body,
 							duplex: request.body._tag === "Stream" ? "half" : undefined,
 						} as runtime.RequestInit,

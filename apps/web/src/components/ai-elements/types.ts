@@ -21,7 +21,7 @@ export type UIMessagePart =
 	  }
 	/**
 	 * An approval-gated mutation the agent proposed and did NOT run. The turn stops here;
-	 * `POST /api/chat/apply` is what actually mutates, on the user's click.
+	 * `POST /internal/chat/apply` is what actually mutates, on the user's click.
 	 *
 	 * A distinct state rather than a marker parsed back out of `output`: the server emits a
 	 * `tool-call` with `proposed: true` and *no* result, so there is no output to parse. While the

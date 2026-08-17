@@ -56,7 +56,7 @@ export function buildResourceAttributes(input: ResourceAttributeInput = {}): Rec
 		"service.version": input.serviceVersion?.trim() || "development",
 		"maple.sdk.type": "eve",
 		"vcs.repository.url.full": "https://github.com/Makisuo/maple",
-	}
+	} satisfies Record<string, string>
 	if (input.commitSha?.trim()) {
 		attributes["deployment.commit_sha"] = input.commitSha.trim()
 	}

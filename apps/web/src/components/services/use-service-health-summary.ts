@@ -1,7 +1,8 @@
 import React from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useAlertIncidentsList } from "@/hooks/use-alerts-list"
-import { openAnomalyIncidentsAtom } from "@/lib/services/atoms/anomaly-atoms"
+import { openAnomalyServiceCountsAtom } from "@/lib/services/atoms/anomaly-atoms"
+import { anomalyServiceCountFromV2 } from "@/lib/services/anomalies"
 import { getServiceOverviewResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { anomalyAffectsServiceHealth } from "@/components/anomalies/anomaly-format"
 import {
@@ -39,7 +40,7 @@ export const isServiceHealth = (value: string): value is ServiceHealth =>
 export function useServiceHealthSummary(input: GetServiceOverviewInput): ServiceHealthSummary | undefined {
 	const overviewResult = useAtomValue(getServiceOverviewResultAtom({ data: input }))
 	const { result: incidentsResult } = useAlertIncidentsList()
-	const anomaliesResult = useAtomValue(openAnomalyIncidentsAtom)
+	const anomaliesResult = useAtomValue(openAnomalyServiceCountsAtom)
 
 	const overview = Result.isSuccess(overviewResult) ? overviewResult.value : undefined
 	const incidents = Result.isSuccess(incidentsResult) ? incidentsResult.value : undefined
@@ -58,17 +59,21 @@ export function useServiceHealthSummary(input: GetServiceOverviewInput): Service
 		}
 
 		const anomalyCausesByRow = new Map<string, ServiceHealthCause[]>()
-		for (const incident of anomalies.incidents) {
-			if (!anomalyAffectsServiceHealth(incident)) continue
-			const key = serviceHealthRowKey(incident.serviceName, incident.deploymentEnv)
+		for (const row of anomalies.data.map(anomalyServiceCountFromV2)) {
+			if (!anomalyAffectsServiceHealth(row)) continue
+			const key = serviceHealthRowKey(row.serviceName, row.deploymentEnv)
 			const causes = anomalyCausesByRow.get(key)
-			const cause: ServiceHealthCause = { severity: incident.severity, label: "Anomaly" }
+			const cause: ServiceHealthCause = { severity: row.severity, label: "Anomaly" }
 			if (causes) causes.push(cause)
 			else anomalyCausesByRow.set(key, [cause])
 		}
 
 		const byRow = new Map<string, ServiceHealth>()
-		const counts: Record<ServiceHealth, number> = { healthy: 0, degraded: 0, unhealthy: 0 }
+		const counts: Record<ServiceHealth, number> = {
+			healthy: 0,
+			degraded: 0,
+			unhealthy: 0,
+		} satisfies Record<ServiceHealth, number>
 		for (const service of overview.data) {
 			const key = serviceHealthRowKey(service.serviceName, service.environment)
 			const health = deriveServiceHealthFromCauses([

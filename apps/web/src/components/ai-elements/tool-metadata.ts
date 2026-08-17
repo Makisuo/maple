@@ -133,7 +133,7 @@ const toolLabels: Record<string, string> = {
 	// misc
 	register_agent: "Register Agent",
 	get_event: "Get Event",
-}
+} satisfies Record<string, string>
 
 const toolIcons: Record<string, IconComponent> = {
 	system_health: PulseIcon,
@@ -188,7 +188,7 @@ const toolIcons: Record<string, IconComponent> = {
 	get_session_transcript: ChatBubbleSparkleIcon,
 	register_agent: IdBadgeIcon,
 	get_event: CircleInfoIcon,
-}
+} satisfies Record<string, IconComponent>
 
 /**
  * Only the three non-default buckets are listed; everything else resolves to `working` via
@@ -216,4 +216,4 @@ const toolOrbStates: Record<string, OrbState> = {
 	get_service_top_operations: "connecting",
 	diagnose_service: "connecting",
 	audit_setup: "connecting",
-}
+} satisfies Record<string, OrbState>

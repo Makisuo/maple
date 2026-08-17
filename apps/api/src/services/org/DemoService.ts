@@ -10,11 +10,11 @@ const DEMO_RATE_PER_HOUR = 250
 // total for the 6h default) without fanning out into many tiny requests.
 const INGEST_CHUNK = 500
 
-export interface DemoServiceShape {
+export interface DemoServiceApi {
 	readonly seed: (tenant: TenantContext, hours?: number) => Effect.Effect<DemoSeedResponse, DemoSeedError>
 }
 
-export class DemoService extends Context.Service<DemoService, DemoServiceShape>()(
+export class DemoService extends Context.Service<DemoService, DemoServiceApi>()(
 	"@maple/api/services/DemoService",
 	{
 		make: Effect.gen(function* () {
@@ -68,7 +68,7 @@ export class DemoService extends Context.Service<DemoService, DemoServiceShape>(
 				})
 			})
 
-			return { seed } satisfies DemoServiceShape
+			return { seed } satisfies DemoServiceApi
 		}),
 	},
 ) {

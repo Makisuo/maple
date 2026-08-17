@@ -23,7 +23,7 @@ const STATUS: Record<InvestigationStatus, { label: string; tone: string }> = {
 	inconclusive: { label: "Inconclusive", tone: "bg-severity-warn/10 text-severity-warn" },
 	resolved: { label: "Resolved", tone: "bg-muted text-muted-foreground" },
 	failed: { label: "Failed", tone: "bg-destructive/10 text-destructive" },
-}
+} satisfies Record<InvestigationStatus, { label: string; tone: string }>
 
 export function InvestigationStatusBadge({
 	status,
@@ -46,7 +46,7 @@ export function InvestigationStatusBadge({
 const ORIGIN: Record<V2Investigation["seeded_by"], string> = {
 	user: "Manual",
 	system: "Automatic",
-}
+} satisfies Record<V2Investigation["seeded_by"], string>
 
 export const investigationOriginLabel = (seededBy: V2Investigation["seeded_by"]): string => ORIGIN[seededBy]
 
@@ -56,7 +56,7 @@ const KIND_LABEL: Record<InvestigationKindKey, string> = {
 	anomaly: "Anomaly",
 	error: "Error",
 	question: "Question",
-}
+} satisfies Record<InvestigationKindKey, string>
 
 export const investigationKindLabel = (subject: V2Investigation["subject"]): string =>
 	KIND_LABEL[investigationKindKey(subject)]
@@ -66,7 +66,7 @@ const KIND_ICON: Record<InvestigationKindKey, ComponentType<{ className?: string
 	anomaly: PulseIcon,
 	error: CircleWarningIcon,
 	question: CircleQuestionIcon,
-}
+} satisfies Record<InvestigationKindKey, ComponentType<{ className?: string }>>
 
 /**
  * Kind and origin, in the width one column used to take for each. Origin is

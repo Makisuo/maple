@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 // Calibration validation comparison helper for the native acceptance probe.
 //
 // Reads a config document and an observed-metrics JSON (produced by a REAL

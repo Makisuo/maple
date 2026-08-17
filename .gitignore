@@ -58,3 +58,8 @@ drizzle.config.local.ts
 .18bd7*.bun-build
 .[0-9a-f]*.bun-build
 apps/ingest/dist/
+
+# ios (apps/ios has its own .gitignore too; these guard the repo root)
+apps/ios/Maple.xcodeproj/
+apps/ios/Config/Secrets.xcconfig
+apps/ios/build/

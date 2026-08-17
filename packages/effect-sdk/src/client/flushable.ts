@@ -3,6 +3,8 @@
 // unlike sendBeacon it can carry the ingest key's Authorization header.
 
 import { hasConsent, onConsentChange } from "@maple/browser-session"
+import { makeNoOpNotice } from "../shared/no-op-notice.js"
+import { SDK_VERSION } from "../version.js"
 import { Layer, Redacted } from "effect"
 import {
 	buildResolved,
@@ -37,6 +39,11 @@ export interface MapleClientFlushableConfig {
 	readonly ingestKey?: string | undefined
 	/** Service version or commit SHA. */
 	readonly serviceVersion?: string | undefined
+	/**
+	 * Logical group this service belongs to, emitted as the OTel
+	 * `service.namespace` resource attribute. Optional — only stamped when set.
+	 */
+	readonly serviceNamespace?: string | undefined
 	/** Deployment environment (e.g. "production", "staging"). */
 	readonly environment?: string | undefined
 	/** Additional resource attributes (highest precedence). */
@@ -124,7 +131,7 @@ const buildBrowserAttributes = (config: MapleClientFlushableConfig): Record<stri
 	const attributes: Record<string, unknown> = {
 		"maple.sdk.type": "client",
 		"service.instance.id": browserInstanceId,
-	}
+	} satisfies Record<string, unknown>
 	const nav = browserNavigator()
 	if (nav) {
 		if (nav.userAgent) attributes["browser.user_agent"] = nav.userAgent
@@ -142,6 +149,7 @@ const buildBrowserAttributes = (config: MapleClientFlushableConfig): Record<stri
 		attributes["deployment.environment.name"] = config.environment
 	}
 	if (config.serviceVersion) attributes["deployment.commit_sha"] = config.serviceVersion
+	if (config.serviceNamespace) attributes["service.namespace"] = config.serviceNamespace
 	if (config.attributes) Object.assign(attributes, config.attributes)
 	return attributes
 }
@@ -203,40 +211,39 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 		tracesPath: config.tracesPath,
 		logsPath: config.logsPath,
 		metricsPath: config.metricsPath,
-		userAgent: "maple-effect-sdk-client/0.0.0",
+		userAgent: `maple-effect-sdk-client/${SDK_VERSION}`,
 	})
 
 	const tracesState: SignalState = { disabledUntil: 0 }
 	const logsState: SignalState = { disabledUntil: 0 }
 	const metricsState: SignalState = { disabledUntil: 0 }
-	let noOpLogged = false
+	const noOpNotice = makeNoOpNotice("[MapleClientSDK]", "pass `ingestKey` to enable")
 
+	// Never rejects — fired from `pagehide`/`visibilitychange` handlers and the
+	// auto-flush timer as `void flush()`.
 	const flush = makeSerializedFlush(async (): Promise<void> => {
-		if (!hasConsent()) {
-			spans.drain()
-			logs.drain()
-			metrics.drain()
-			return
+		try {
+			if (!hasConsent()) {
+				spans.drain()
+				logs.drain()
+				metrics.drain()
+				return
+			}
+			await runFlush({
+				resolved,
+				spans,
+				logs,
+				metrics,
+				tracesState,
+				logsState,
+				metricsState,
+				transport: keepaliveTransport,
+				logPrefix: "[MapleClientSDK]",
+				onNoOp: noOpNotice,
+			})
+		} catch (err) {
+			console.error("[MapleClientSDK] flush failed:", err)
 		}
-		await runFlush({
-			resolved,
-			spans,
-			logs,
-			metrics,
-			tracesState,
-			logsState,
-			metricsState,
-			transport: keepaliveTransport,
-			logPrefix: "[MapleClientSDK]",
-			onNoOp: () => {
-				if (!noOpLogged) {
-					noOpLogged = true
-					console.info(
-						"[MapleClientSDK] no ingest key configured — telemetry disabled (pass `ingestKey` to enable)",
-					)
-				}
-			},
-		})
 	})
 
 	const intervalMs =

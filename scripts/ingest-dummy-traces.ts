@@ -228,7 +228,7 @@ const generateForSha = (sha: string, at: number, opts: Options): GeneratedSha =>
 			status: isError
 				? { code: STATUS_ERROR, message: "internal server error" }
 				: { code: STATUS_UNSET },
-		}
+		} satisfies Record<string, unknown>
 
 		// Child spans, all parented to the root (flat tree — plenty for the UI).
 		const childCount = randIn(opts.children)

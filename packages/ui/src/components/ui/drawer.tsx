@@ -26,7 +26,7 @@ const directionMap: Record<DrawerPosition, DrawerPrimitive.Root.Props["swipeDire
 	left: "left",
 	right: "right",
 	top: "up",
-}
+} satisfies Record<DrawerPosition, DrawerPrimitive.Root.Props["swipeDirection"]>
 
 export const DrawerCreateHandle: typeof DrawerPrimitive.createHandle = DrawerPrimitive.createHandle
 

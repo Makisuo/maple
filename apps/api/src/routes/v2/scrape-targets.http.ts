@@ -1,26 +1,7 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { ScrapeTargetResponse } from "@maple/domain/http"
-import {
-	CreateScrapeTargetRequest,
-	CurrentTenant,
-	type ScrapeTargetAuthError,
-	type ScrapeTargetEncryptionError,
-	type ScrapeTargetNotFoundError,
-	type ScrapeTargetPersistenceError,
-	type ScrapeTargetUpstreamError,
-	type ScrapeTargetValidationError,
-	UpdateScrapeTargetRequest,
-} from "@maple/domain/http"
-import {
-	MapleApiV2,
-	dependencyUnavailable,
-	invalidRequest,
-	paginateArray,
-	paginateOffsetQuery,
-	resourceNotFound,
-	timestamp,
-	upstreamError,
-} from "@maple/domain/http/v2"
+import { CreateScrapeTargetRequest, CurrentTenant, UpdateScrapeTargetRequest } from "@maple/domain/http"
+import { MapleApiV2, paginateArray, paginateOffsetQuery, timestamp } from "@maple/domain/http/v2"
 import type { V2ScrapeTarget, V2ScrapeTargetCheck } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
@@ -47,92 +28,6 @@ const toV2ScrapeTarget = (target: ScrapeTargetResponse): V2ScrapeTarget => ({
 	updated_at: target.updatedAt,
 })
 
-/** Service tagged errors → v2 envelope errors (create: no 404 on the contract). */
-const mapCommonError =
-	(operation: string) =>
-	<A, R>(
-		effect: Effect.Effect<
-			A,
-			ScrapeTargetValidationError | ScrapeTargetPersistenceError | ScrapeTargetEncryptionError,
-			R
-		>,
-	) =>
-		effect.pipe(
-			Effect.catchTags({
-				"@maple/http/errors/ScrapeTargetValidationError": (error) =>
-					Effect.fail(invalidRequest("parameter_invalid", error.message)),
-				"@maple/http/errors/ScrapeTargetPersistenceError": () =>
-					Effect.fail(dependencyUnavailable(`scrape_target_${operation}_unavailable`)),
-				"@maple/http/errors/ScrapeTargetEncryptionError": () =>
-					Effect.fail(dependencyUnavailable(`scrape_target_${operation}_unavailable`)),
-			}),
-		)
-
-/** Service tagged errors → v2 envelope errors (endpoints with a 404). */
-const mapMutationError =
-	(operation: string) =>
-	<A, R>(
-		effect: Effect.Effect<
-			A,
-			| ScrapeTargetNotFoundError
-			| ScrapeTargetValidationError
-			| ScrapeTargetPersistenceError
-			| ScrapeTargetEncryptionError,
-			R
-		>,
-	) =>
-		effect.pipe(
-			Effect.catchTags({
-				"@maple/http/errors/ScrapeTargetNotFoundError": () =>
-					Effect.fail(resourceNotFound("scrape_target", "No such scrape target.")),
-				"@maple/http/errors/ScrapeTargetValidationError": (error) =>
-					Effect.fail(invalidRequest("parameter_invalid", error.message)),
-				"@maple/http/errors/ScrapeTargetPersistenceError": () =>
-					Effect.fail(dependencyUnavailable(`scrape_target_${operation}_unavailable`)),
-				"@maple/http/errors/ScrapeTargetEncryptionError": () =>
-					Effect.fail(dependencyUnavailable(`scrape_target_${operation}_unavailable`)),
-			}),
-		)
-
-/** Probe can additionally surface upstream/auth failures as 502s. */
-const mapProbeError = <A, R>(
-	effect: Effect.Effect<
-		A,
-		| ScrapeTargetNotFoundError
-		| ScrapeTargetPersistenceError
-		| ScrapeTargetEncryptionError
-		| ScrapeTargetAuthError
-		| ScrapeTargetUpstreamError,
-		R
-	>,
-) =>
-	effect.pipe(
-		Effect.catchTags({
-			"@maple/http/errors/ScrapeTargetNotFoundError": () =>
-				Effect.fail(resourceNotFound("scrape_target", "No such scrape target.")),
-			"@maple/http/errors/ScrapeTargetPersistenceError": () =>
-				Effect.fail(dependencyUnavailable("scrape_target_probe_unavailable")),
-			"@maple/http/errors/ScrapeTargetEncryptionError": () =>
-				Effect.fail(dependencyUnavailable("scrape_target_probe_unavailable")),
-			"@maple/http/errors/ScrapeTargetAuthError": () =>
-				Effect.fail(
-					upstreamError(
-						"scrape_target_probe_auth_failed",
-						"The scrape target rejected Maple's credentials.",
-					),
-				),
-			"@maple/http/errors/ScrapeTargetUpstreamError": () =>
-				Effect.fail(
-					upstreamError(
-						"scrape_target_probe_upstream_failed",
-						"The scrape target could not complete the probe.",
-					),
-				),
-		}),
-	)
-
-const mapPersistenceError = () => dependencyUnavailable("scrape_target_list_unavailable")
-
 export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeTargets", (handlers) =>
 	Effect.gen(function* () {
 		const service = yield* ScrapeTargetsService
@@ -141,9 +36,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* service
-						.list(tenant.orgId)
-						.pipe(Effect.mapError(mapPersistenceError))
+					const response = yield* service.list(tenant.orgId)
 					const page = yield* paginateArray(response.targets.map(toV2ScrapeTarget), query)
 					return { object: "list" as const, ...page }
 				}),
@@ -151,105 +44,122 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 			.handle("retrieve", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const target = yield* service
-						.get(tenant.orgId, params.id)
-						.pipe(mapMutationError("retrieve"))
+					const target = yield* service.get(tenant.orgId, params.id)
+
 					return toV2ScrapeTarget(target)
 				}),
 			)
 			.handle("create", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const created = yield* service
-						.create(
-							tenant.orgId,
-							new CreateScrapeTargetRequest({
-								name: payload.name,
-								...(payload.url !== undefined ? { url: payload.url } : {}),
-								...(payload.target_type !== undefined
-									? { targetType: payload.target_type }
-									: {}),
-								...(payload.organization !== undefined
-									? { organization: payload.organization }
-									: {}),
-								...(payload.include_branches !== undefined
-									? { includeBranches: payload.include_branches }
-									: {}),
-								...(payload.exclude_branches !== undefined
-									? { excludeBranches: payload.exclude_branches }
-									: {}),
-								...(payload.scrape_interval_seconds !== undefined
-									? { scrapeIntervalSeconds: payload.scrape_interval_seconds }
-									: {}),
-								...(payload.labels_json !== undefined
-									? { labelsJson: payload.labels_json }
-									: {}),
-								...(payload.auth_type !== undefined ? { authType: payload.auth_type } : {}),
-								...(payload.service_name !== undefined
-									? { serviceName: payload.service_name }
-									: {}),
-								...(payload.auth_credentials !== undefined
-									? { authCredentials: payload.auth_credentials }
-									: {}),
-								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
-							}),
-						)
-						.pipe(mapCommonError("create"))
+					const created = yield* service.create(
+						tenant.orgId,
+						new CreateScrapeTargetRequest({
+							name: payload.name,
+							...(payload.url !== undefined ? { url: payload.url } : undefined),
+							...(payload.target_type !== undefined
+								? { targetType: payload.target_type }
+								: undefined),
+							...(payload.organization !== undefined
+								? { organization: payload.organization }
+								: undefined),
+							...(payload.include_branches !== undefined
+								? {
+										includeBranches: payload.include_branches,
+									}
+								: undefined),
+							...(payload.exclude_branches !== undefined
+								? {
+										excludeBranches: payload.exclude_branches,
+									}
+								: undefined),
+							...(payload.scrape_interval_seconds !== undefined
+								? {
+										scrapeIntervalSeconds: payload.scrape_interval_seconds,
+									}
+								: undefined),
+							...(payload.labels_json !== undefined
+								? { labelsJson: payload.labels_json }
+								: undefined),
+							...(payload.auth_type !== undefined
+								? { authType: payload.auth_type }
+								: undefined),
+							...(payload.service_name !== undefined
+								? { serviceName: payload.service_name }
+								: undefined),
+							...(payload.auth_credentials !== undefined
+								? {
+										authCredentials: payload.auth_credentials,
+									}
+								: undefined),
+							...(payload.enabled !== undefined ? { enabled: payload.enabled } : undefined),
+						}),
+					)
+
 					return toV2ScrapeTarget(created)
 				}),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const updated = yield* service
-						.update(
-							tenant.orgId,
-							params.id,
-							new UpdateScrapeTargetRequest({
-								...(payload.name !== undefined ? { name: payload.name } : {}),
-								...(payload.url !== undefined ? { url: payload.url } : {}),
-								...(payload.organization !== undefined
-									? { organization: payload.organization }
-									: {}),
-								...(payload.include_branches !== undefined
-									? { includeBranches: payload.include_branches }
-									: {}),
-								...(payload.exclude_branches !== undefined
-									? { excludeBranches: payload.exclude_branches }
-									: {}),
-								...(payload.scrape_interval_seconds !== undefined
-									? { scrapeIntervalSeconds: payload.scrape_interval_seconds }
-									: {}),
-								...(payload.labels_json !== undefined
-									? { labelsJson: payload.labels_json }
-									: {}),
-								...(payload.auth_type !== undefined ? { authType: payload.auth_type } : {}),
-								...(payload.service_name !== undefined
-									? { serviceName: payload.service_name }
-									: {}),
-								...(payload.auth_credentials !== undefined
-									? { authCredentials: payload.auth_credentials }
-									: {}),
-								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
-							}),
-						)
-						.pipe(mapMutationError("update"))
+					const updated = yield* service.update(
+						tenant.orgId,
+						params.id,
+						new UpdateScrapeTargetRequest({
+							...(payload.name !== undefined ? { name: payload.name } : undefined),
+							...(payload.url !== undefined ? { url: payload.url } : undefined),
+							...(payload.organization !== undefined
+								? { organization: payload.organization }
+								: undefined),
+							...(payload.include_branches !== undefined
+								? {
+										includeBranches: payload.include_branches,
+									}
+								: undefined),
+							...(payload.exclude_branches !== undefined
+								? {
+										excludeBranches: payload.exclude_branches,
+									}
+								: undefined),
+							...(payload.scrape_interval_seconds !== undefined
+								? {
+										scrapeIntervalSeconds: payload.scrape_interval_seconds,
+									}
+								: undefined),
+							...(payload.labels_json !== undefined
+								? { labelsJson: payload.labels_json }
+								: undefined),
+							...(payload.auth_type !== undefined
+								? { authType: payload.auth_type }
+								: undefined),
+							...(payload.service_name !== undefined
+								? { serviceName: payload.service_name }
+								: undefined),
+							...(payload.auth_credentials !== undefined
+								? {
+										authCredentials: payload.auth_credentials,
+									}
+								: undefined),
+							...(payload.enabled !== undefined ? { enabled: payload.enabled } : undefined),
+						}),
+					)
+
 					return toV2ScrapeTarget(updated)
 				}),
 			)
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const deleted = yield* service
-						.delete(tenant.orgId, params.id)
-						.pipe(mapMutationError("delete"))
+					const deleted = yield* service.delete(tenant.orgId, params.id)
+
 					return { id: deleted.id, object: "scrape_target" as const, deleted: true as const }
 				}),
 			)
 			.handle("probe", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const result = yield* service.probe(tenant.orgId, params.id).pipe(mapProbeError)
+					const result = yield* service.probe(tenant.orgId, params.id)
+
 					return {
 						object: "scrape_target.probe_result" as const,
 						success: result.success,
@@ -264,13 +174,16 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
 						service
 							.listChecks(tenant.orgId, params.id, {
-								...(query.since !== undefined ? { startTime: Date.parse(query.since) } : {}),
-								...(query.until !== undefined ? { endTime: Date.parse(query.until) } : {}),
+								...(query.since !== undefined
+									? { startTime: Date.parse(query.since) }
+									: undefined),
+								...(query.until !== undefined
+									? { endTime: Date.parse(query.until) }
+									: undefined),
 								limit,
 								offset,
 							})
 							.pipe(
-								mapMutationError("list_checks"),
 								Effect.map(
 									(rows): ReadonlyArray<V2ScrapeTargetCheck> =>
 										rows.map((row) => ({

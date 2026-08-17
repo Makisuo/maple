@@ -1,5 +1,5 @@
-import { Data, Effect, Schema } from "effect"
-import type { EdgeCacheServiceShape } from "@maple/cache"
+import { Effect, Schema } from "effect"
+import type { EdgeCacheServiceApi } from "@maple/cache"
 import { isActivePlanSubscription } from "@maple/domain/billing"
 import { BillingUpstreamError } from "@maple/domain/http"
 import type { AutumnResult } from "./autumn-http"
@@ -40,9 +40,13 @@ export const responseHasActivePlan = (response: unknown): boolean => {
 // Sentinel keeping non-200 Autumn responses out of the edge cache: the compute
 // fails with this so `getOrCompute` never stores it, then the caller recovers it
 // into the normal path. Mirrors `AutumnResult` so `.result` stays typed.
-class UncacheableAutumnResult extends Data.TaggedError("@maple/api/billing/UncacheableAutumnResult")<{
-	readonly result: AutumnResult
-}> {}
+class UncacheableAutumnResult extends Schema.TaggedError<UncacheableAutumnResult>()(
+	"@maple/api/billing/UncacheableAutumnResult",
+	{
+		message: Schema.String,
+		result: Schema.Struct({ statusCode: Schema.Number, response: Schema.Unknown }),
+	},
+) {}
 
 /**
  * Run `getOrCreateCustomer` through the per-org edge cache (200-only). Active-plan
@@ -51,7 +55,7 @@ class UncacheableAutumnResult extends Data.TaggedError("@maple/api/billing/Uncac
  * from the cache (for span annotation).
  */
 export const readCustomerCached = (
-	edgeCache: Pick<EdgeCacheServiceShape, "getOrCompute">,
+	edgeCache: Pick<EdgeCacheServiceApi, "getOrCompute">,
 	orgId: string,
 	runAutumn: Effect.Effect<AutumnResult, BillingUpstreamError>,
 ): Effect.Effect<{ readonly result: AutumnResult; readonly hit: boolean }, BillingUpstreamError> =>
@@ -69,7 +73,12 @@ export const readCustomerCached = (
 				Effect.flatMap((res) =>
 					res.statusCode === 200
 						? Effect.succeed(res)
-						: Effect.fail(new UncacheableAutumnResult({ result: res })),
+						: Effect.fail(
+								new UncacheableAutumnResult({
+									message: `Autumn returned HTTP ${res.statusCode}; response must not be cached`,
+									result: res,
+								}),
+							),
 				),
 			),
 		)

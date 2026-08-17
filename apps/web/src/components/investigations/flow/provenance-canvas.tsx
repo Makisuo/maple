@@ -43,7 +43,7 @@ import { splitDuration } from "../investigation-display"
 import { buildProvenanceGraph, type ProvenanceGraph } from "./provenance-graph"
 
 /**
- * Exported so the node studio (`routes/node-lab.tsx`) hosts the *same* registration
+ * Exported so the node studio (`src/lab/node-catalogue/`, served at `/lab/nodes`) hosts the *same* registration
  * rather than a copy of it — a catalogue that renders its own idea of these nodes
  * is a catalogue that can go quietly out of date with the page it documents.
  */
@@ -197,9 +197,10 @@ function Canvas({
 				height: node.height,
 				// The action nodes are the only interactive ones; the handler is injected
 				// here rather than built into the graph so `buildProvenanceGraph` stays pure.
-				data: (node.type === "action"
-					? { ...node.data, onOpen: openAction }
-					: node.data) as unknown as Record<string, unknown>,
+				data: (node.type === "action" ? { ...node.data, onOpen: openAction } : node.data) as Record<
+					string,
+					unknown
+				>,
 				draggable: false,
 				selectable: false,
 				connectable: false,
@@ -225,8 +226,8 @@ function Canvas({
 				type: "provenance",
 				data: {
 					kind: edge.kind,
-					...(edge.label ? { label: edge.label } : {}),
-					...(edge.live ? { live: true } : {}),
+					...(edge.label ? { label: edge.label } : undefined),
+					...(edge.live ? { live: true } : undefined),
 				} satisfies FlowEdgeData,
 			})),
 		[graph],

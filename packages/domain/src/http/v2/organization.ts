@@ -1,12 +1,10 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { OrgId } from "../../primitives"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
-import { Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2ServiceUnavailableError } from "./errors"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
+import { OrganizationProviderError } from "../organizations"
+import { AuthorizationV2 } from "./auth"
+import { wireExample, Timestamp } from "./envelopes"
+import { publicError } from "./public-error"
 
 /**
  * Clerk `org_…` IDs are already opaque public IDs — they pass through the v2
@@ -55,7 +53,7 @@ export class V2OrganizationApiGroup extends HttpApiGroup.make("organization")
 	.add(
 		HttpApiEndpoint.get("retrieve", "/", {
 			success: V2Organization,
-			error: [V2InvalidRequestError, V2ServiceUnavailableError],
+			error: publicError(OrganizationProviderError),
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getOrganization",
@@ -67,7 +65,6 @@ export class V2OrganizationApiGroup extends HttpApiGroup.make("organization")
 	)
 	.prefix("/v2/organization")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Organization",

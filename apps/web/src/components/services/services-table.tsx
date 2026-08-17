@@ -42,7 +42,7 @@ import {
 	getServiceHealthBaselineResultAtom,
 	getServiceOverviewResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
-import { openAnomalyIncidentsAtom } from "@/lib/services/atoms/anomaly-atoms"
+import { openAnomalyServiceCountsAtom } from "@/lib/services/atoms/anomaly-atoms"
 import type { ServicesSearchParams } from "@/routes/services/index"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 import { LatencyValue } from "@maple/ui/components/latency-value"
@@ -87,7 +87,7 @@ const ENVIRONMENT_PRIORITY: Record<string, number> = {
 	production: 0,
 	staging: 1,
 	development: 2,
-}
+} satisfies Record<string, number>
 
 function groupByEnvironment(services: ServiceOverview[]): [string, ServiceOverview[]][] {
 	const groups = new Map<string, ServiceOverview[]>()
@@ -116,7 +116,7 @@ const HEALTH_DOT_CLASS: Record<ServiceHealth, string> = {
 	healthy: "bg-success",
 	degraded: "bg-severity-warn",
 	unhealthy: "bg-destructive",
-}
+} satisfies Record<ServiceHealth, string>
 
 /** Quiet health marker next to the service name — rendered only when there is
  *  something to say (degraded/unhealthy); healthy rows stay unadorned. */
@@ -586,7 +586,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 	// from "healthy" to "unhealthy" after first paint; the derivation itself
 	// lives in useServiceHealthSummary (shared with the filter sidebar).
 	const { result: incidentsResult } = useAlertIncidentsList()
-	const anomaliesResult = useAtomValue(openAnomalyIncidentsAtom)
+	const anomaliesResult = useAtomValue(openAnomalyServiceCountsAtom)
 	const healthSummary = useServiceHealthSummary({
 		startTime: effectiveStartTime,
 		endTime: effectiveEndTime,

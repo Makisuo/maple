@@ -2,7 +2,7 @@ import { HttpRouter, HttpServerResponse, type HttpServerRequest } from "effect/u
 import { IntegrationsPersistenceError, OrgId } from "@maple/domain/http"
 import { planetscaleConnections } from "@maple/db"
 import { eq } from "drizzle-orm"
-import { Clock, Data, Effect, Option, Redacted, Schema } from "effect"
+import { Clock, Effect, Option, Redacted, Schema } from "effect"
 import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -28,13 +28,10 @@ const textResponse = (body: string, status: number) => HttpServerResponse.text(b
 
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 
-class PlanetScaleWebhookUnavailable extends Data.TaggedError(
+class PlanetScaleWebhookUnavailable extends Schema.TaggedError<PlanetScaleWebhookUnavailable>()(
 	"@maple/api/routes/PlanetScaleWebhookUnavailable",
-)<{ readonly body: string }> {
-	override get message(): string {
-		return this.body
-	}
-}
+	{ message: Schema.String },
+) {}
 
 export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
@@ -74,7 +71,7 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 						"maple.planetscale.webhook.outcome": "enqueue_failed",
 						"maple.planetscale.webhook.reason": reason,
 					})
-					return yield* new PlanetScaleWebhookUnavailable({ body })
+					return yield* new PlanetScaleWebhookUnavailable({ message: body })
 				})
 
 			if (connectionId.length === 0) {
@@ -216,9 +213,15 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 
 		yield* router.add("POST", ROUTE, (req) =>
 			handle(req).pipe(
-				Effect.catchTag("@maple/api/routes/PlanetScaleWebhookUnavailable", ({ body }) =>
-					Effect.succeed(textResponse(body, 503)),
-				),
+				Effect.catchTags({
+					"@maple/api/routes/PlanetScaleWebhookUnavailable": ({ message }) =>
+						Effect.succeed(textResponse(message, 503)),
+					"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+						Effect.logError("PlanetScale webhook persistence failed").pipe(
+							Effect.annotateLogs({ message: error.message }),
+							Effect.as(textResponse("Webhook service unavailable", 503)),
+						),
+				}),
 			),
 		)
 	}),

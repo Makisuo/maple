@@ -1,11 +1,15 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
-import { Timestamp } from "./envelopes"
-import { V2NotFoundError, V2PermissionError, V2ServiceUnavailableError, V2UpstreamError } from "./errors"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
+import {
+	IntegrationsConfigurationError,
+	IntegrationsNotConnectedError,
+	IntegrationsPersistenceError,
+	IntegrationsUpstreamError,
+} from "../integrations"
+import { AuthorizationV2 } from "./auth"
+import { wireExample, Timestamp } from "./envelopes"
+import { V2CallbackHostUnavailable, V2InsufficientPermissions } from "./errors"
+import { publicErrors } from "./public-error"
 
 // Public Slack v2 contract shared by the browser client and API handlers. The
 // bot token stays server-side; callers discover valid destination channel IDs
@@ -163,15 +167,19 @@ export const V2SlackChannelList = Schema.Struct({
 })
 export type V2SlackChannelList = Schema.Schema.Type<typeof V2SlackChannelList>
 
-// Declared per endpoint rather than from a shared `commonErrors` tuple: the
-// handlers in apps/api/src/routes/v2/integrations.http.ts each map a small,
-// fixed set of service failures, and a wider list would publish responses the
-// API can never return. 400/401/403/429/503 come from the middleware.
+const [integrationConfiguration, integrationNotConnected, integrationUpstream, integrationPersistence] =
+	publicErrors(
+		IntegrationsConfigurationError,
+		IntegrationsNotConnectedError,
+		IntegrationsUpstreamError,
+		IntegrationsPersistenceError,
+	)
+
 export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegration")
 	.add(
 		HttpApiEndpoint.get("status", "/", {
 			success: V2SlackIntegrationStatus,
-			error: [V2ServiceUnavailableError],
+			error: [integrationPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getSlackIntegration",
@@ -184,7 +192,12 @@ export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegra
 	.add(
 		HttpApiEndpoint.post("install", "/install", {
 			success: V2SlackInstallResponse,
-			error: [V2ServiceUnavailableError, V2PermissionError],
+			error: [
+				V2InsufficientPermissions.schema,
+				V2CallbackHostUnavailable.schema,
+				integrationConfiguration,
+				integrationPersistence,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "installSlackIntegration",
@@ -197,7 +210,7 @@ export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegra
 	.add(
 		HttpApiEndpoint.delete("uninstall", "/", {
 			success: V2SlackUninstallResponse,
-			error: [V2ServiceUnavailableError, V2PermissionError],
+			error: [V2InsufficientPermissions.schema, integrationPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "uninstallSlackIntegration",
@@ -210,7 +223,12 @@ export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegra
 	.add(
 		HttpApiEndpoint.get("channels", "/channels", {
 			success: V2SlackChannelList,
-			error: [V2ServiceUnavailableError, V2NotFoundError, V2UpstreamError, V2PermissionError],
+			error: [
+				V2InsufficientPermissions.schema,
+				integrationNotConnected,
+				integrationUpstream,
+				integrationPersistence,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listSlackChannels",
@@ -222,7 +240,6 @@ export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegra
 	)
 	.prefix("/v2/integrations/slack")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Slack Integration",

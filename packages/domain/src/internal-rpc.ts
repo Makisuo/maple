@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import type * as Effect from "effect/Effect"
 import { Schema } from "effect"
 import type {
@@ -60,7 +61,7 @@ export class InternalRpcToolNotFoundError extends Schema.TaggedError<InternalRpc
  * structured cloning, not validation, so the implementation must decode each
  * request with the schemas above before using it.
  */
-export interface MapleApiRpcShape {
+export interface MapleApiRpcContract {
 	readonly listMcpTools: () => Effect.Effect<ReadonlyArray<InternalMcpToolDescriptor>>
 	readonly callMcpTool: (
 		request: unknown,

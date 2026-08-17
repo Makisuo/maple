@@ -604,7 +604,7 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 			makeFacetQuery("DeploymentEnv", "deploymentEnv", ($) => $.DeploymentEnv.neq(""), 20),
 		serviceNamespace: () =>
 			makeFacetQuery("ServiceNamespace", "serviceNamespace", ($) => $.ServiceNamespace.neq(""), 20),
-	}
+	} satisfies Record<TracesFacetDimension, () => ReturnType<typeof makeFacetQuery>>
 
 	if (opts.facet) {
 		return unionAll(facetBranches[opts.facet]()).format("JSON")
