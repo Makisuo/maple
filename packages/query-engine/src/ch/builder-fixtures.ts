@@ -632,6 +632,61 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			),
 	},
 
+	// ----- agent-sessions: the AI classification read path (no app call sites
+	// ----- yet — the observability/HTTP layer lands next; parameters mirror its
+	// ----- planned filter payload). Filtered variants force the HAVING
+	// ----- containment branch, and each facet tab is its own grouped-subquery
+	// ----- shape, so both compile here.
+	{
+		module: "agent-sessions",
+		name: "agentSessionsListQuery",
+		label: "default",
+		compile: () => CH.compile(CH.agentSessionsListQuery({}), window),
+	},
+	{
+		module: "agent-sessions",
+		name: "agentSessionsListQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compile(
+				CH.agentSessionsListQuery({
+					vendors: ["crewai", "vercel_ai_sdk"],
+					serviceNames: ["checkout"],
+					hasErrors: true,
+				}),
+				window,
+			),
+	},
+	{
+		module: "agent-sessions",
+		name: "agentTracesListQuery",
+		label: "default",
+		compile: () => CH.compile(CH.agentTracesListQuery({}), window),
+	},
+	{
+		module: "agent-sessions",
+		name: "agentTracesListQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compile(CH.agentTracesListQuery({ vendors: ["claude_agent_sdk"], hasErrors: true }), window),
+	},
+	{
+		module: "agent-sessions",
+		name: "agentSessionsFacetsQuery",
+		label: "sessions-tab",
+		compile: () => CH.compileUnion(CH.agentSessionsFacetsQuery({ tab: "sessions" }), window),
+	},
+	{
+		module: "agent-sessions",
+		name: "agentSessionsFacetsQuery",
+		label: "traces-tab-filtered",
+		compile: () =>
+			CH.compileUnion(
+				CH.agentSessionsFacetsQuery({ tab: "traces", vendors: ["crewai"], hasErrors: true }),
+				window,
+			),
+	},
+
 	// ----- activity: the only deliberately cross-org builders in the product.
 	// ----- Fixtured so the catalog's tenant-scope test actually exercises the
 	// ----- cross-org branch, rather than asserting a rule nothing exemplifies.

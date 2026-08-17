@@ -15,6 +15,7 @@ import {
 } from "./sql-catalog"
 import { builderFixtures } from "./ch/builder-fixtures"
 import * as activityQueries from "./ch/queries/activity"
+import * as agentSessionQueries from "./ch/queries/agent-sessions"
 import * as alertCheckQueries from "./ch/queries/alert-checks"
 import * as anomalyQueries from "./ch/queries/anomaly"
 import * as attributeKeyQueries from "./ch/queries/attribute-keys"
@@ -177,6 +178,7 @@ describe("sql catalog", () => {
 
 const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	activity: activityQueries,
+	"agent-sessions": agentSessionQueries,
 	"alert-checks": alertCheckQueries,
 	anomaly: anomalyQueries,
 	"attribute-keys": attributeKeyQueries,

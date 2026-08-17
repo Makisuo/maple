@@ -151,6 +151,20 @@ export {
 	type SessionActivityOutput,
 } from "./queries/session-events"
 
+// Queries — Agent Sessions (AI-classified spans: sessions + raw AI traces)
+export {
+	agentSessionsListQuery,
+	agentTracesListQuery,
+	agentSessionsFacetsQuery,
+	type AgentSessionsFilterOpts,
+	type AgentSessionsListOpts,
+	type AgentSessionsListOutput,
+	type AgentTracesListOpts,
+	type AgentTracesListOutput,
+	type AgentSessionsFacetsOpts,
+	type AgentSessionsFacetsOutput,
+} from "./queries/agent-sessions"
+
 // Queries — Web Analytics (product analytics over the browser SDK's session data)
 export {
 	webAnalyticsSummaryQuery,

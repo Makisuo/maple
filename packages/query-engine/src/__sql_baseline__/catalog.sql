@@ -22,6 +22,225 @@ SELECT
         GROUP BY orgId
         FORMAT JSON
 
+-- builder:agent-sessions:agentSessionsFacetsQuery:sessions-tab  [26d2d920]
+SELECT
+          arrayJoin(vendors) AS name,
+          count() AS count,
+          'vendor' AS facetType
+        FROM (SELECT
+          toString(AiSessionKeyHash) AS groupKey,
+          groupUniqArray(AiVendor) AS vendors,
+          groupUniqArray(ServiceName) AS serviceNames,
+          countIf(StatusCode = 'Error') AS errorCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiSessionKeyState = 6
+        GROUP BY groupKey) AS g
+        GROUP BY name
+        HAVING name != ''
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(serviceNames) AS name,
+          count() AS count,
+          'service' AS facetType
+        FROM (SELECT
+          toString(AiSessionKeyHash) AS groupKey,
+          groupUniqArray(AiVendor) AS vendors,
+          groupUniqArray(ServiceName) AS serviceNames,
+          countIf(StatusCode = 'Error') AS errorCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiSessionKeyState = 6
+        GROUP BY groupKey) AS g
+        GROUP BY name
+        HAVING name != ''
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          'error' AS name,
+          count() AS count,
+          'error' AS facetType
+        FROM (SELECT
+          toString(AiSessionKeyHash) AS groupKey,
+          groupUniqArray(AiVendor) AS vendors,
+          groupUniqArray(ServiceName) AS serviceNames,
+          countIf(StatusCode = 'Error') AS errorCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiSessionKeyState = 6
+        GROUP BY groupKey) AS g
+        WHERE errorCount > 0
+FORMAT JSON
+
+-- builder:agent-sessions:agentSessionsFacetsQuery:traces-tab-filtered  [671db227]
+SELECT
+          arrayJoin(vendors) AS name,
+          count() AS count,
+          'vendor' AS facetType
+        FROM (SELECT
+          TraceId AS groupKey,
+          groupUniqArray(AiVendor) AS vendors,
+          groupUniqArray(ServiceName) AS serviceNames,
+          countIf(StatusCode = 'Error') AS errorCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiVendor != ''
+        GROUP BY groupKey) AS g
+        WHERE errorCount > 0
+        GROUP BY name
+        HAVING name != ''
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(serviceNames) AS name,
+          count() AS count,
+          'service' AS facetType
+        FROM (SELECT
+          TraceId AS groupKey,
+          groupUniqArray(AiVendor) AS vendors,
+          groupUniqArray(ServiceName) AS serviceNames,
+          countIf(StatusCode = 'Error') AS errorCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiVendor != ''
+        GROUP BY groupKey) AS g
+        WHERE has(vendors, 'crewai')
+          AND errorCount > 0
+        GROUP BY name
+        HAVING name != ''
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          'error' AS name,
+          count() AS count,
+          'error' AS facetType
+        FROM (SELECT
+          TraceId AS groupKey,
+          groupUniqArray(AiVendor) AS vendors,
+          groupUniqArray(ServiceName) AS serviceNames,
+          countIf(StatusCode = 'Error') AS errorCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiVendor != ''
+        GROUP BY groupKey) AS g
+        WHERE has(vendors, 'crewai')
+          AND errorCount > 0
+FORMAT JSON
+
+-- builder:agent-sessions:agentSessionsListQuery:default  [f361c39f]
+SELECT
+          toString(AiSessionKeyHash) AS sessionKeyHash,
+          min(Timestamp) AS startTime,
+          max(Timestamp) AS endTime,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) / 1000000 - min(toUnixTimestamp64Nano(Timestamp)) / 1000000 AS durationMs,
+          uniq(TraceId) AS traceCount,
+          count() AS keyedSpanCount,
+          countIf(StatusCode = 'Error') AS errorCount,
+          groupUniqArray(AiVendor) AS vendors,
+          groupUniqArray(ServiceName) AS serviceNames
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiSessionKeyState = 6
+        GROUP BY sessionKeyHash
+        ORDER BY endTime DESC
+        LIMIT 50
+        OFFSET 0
+        FORMAT JSON
+
+-- builder:agent-sessions:agentSessionsListQuery:filtered  [1afdfb41]
+SELECT
+          toString(AiSessionKeyHash) AS sessionKeyHash,
+          min(Timestamp) AS startTime,
+          max(Timestamp) AS endTime,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) / 1000000 - min(toUnixTimestamp64Nano(Timestamp)) / 1000000 AS durationMs,
+          uniq(TraceId) AS traceCount,
+          count() AS keyedSpanCount,
+          countIf(StatusCode = 'Error') AS errorCount,
+          groupUniqArray(AiVendor) AS vendors,
+          groupUniqArray(ServiceName) AS serviceNames
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiSessionKeyState = 6
+        GROUP BY sessionKeyHash
+        HAVING (has(groupUniqArray(AiVendor), 'crewai') OR has(groupUniqArray(AiVendor), 'vercel_ai_sdk'))
+          AND has(groupUniqArray(ServiceName), 'checkout')
+          AND countIf(StatusCode = 'Error') > 0
+        ORDER BY endTime DESC
+        LIMIT 50
+        OFFSET 0
+        FORMAT JSON
+
+-- builder:agent-sessions:agentTracesListQuery:default  [dc798139]
+SELECT
+          TraceId AS traceId,
+          min(Timestamp) AS startTime,
+          max(Timestamp) AS endTime,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) / 1000000 - min(toUnixTimestamp64Nano(Timestamp)) / 1000000 AS durationMs,
+          count() AS aiSpanCount,
+          countIf(StatusCode = 'Error') AS errorCount,
+          groupUniqArray(AiVendor) AS vendors,
+          groupUniqArray(ServiceName) AS serviceNames,
+          argMin(SpanName, Timestamp) AS firstSpanName,
+          max(AiSessionKeyState) AS bestSessionKeyState,
+          if(maxIf(AiSessionKeyHash, AiSessionKeyState = 6) > 0, toString(maxIf(AiSessionKeyHash, AiSessionKeyState = 6)), '') AS sessionKeyHash
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiVendor != ''
+        GROUP BY traceId
+        ORDER BY startTime DESC
+        LIMIT 50
+        OFFSET 0
+        FORMAT JSON
+
+-- builder:agent-sessions:agentTracesListQuery:filtered  [211143ca]
+SELECT
+          TraceId AS traceId,
+          min(Timestamp) AS startTime,
+          max(Timestamp) AS endTime,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) / 1000000 - min(toUnixTimestamp64Nano(Timestamp)) / 1000000 AS durationMs,
+          count() AS aiSpanCount,
+          countIf(StatusCode = 'Error') AS errorCount,
+          groupUniqArray(AiVendor) AS vendors,
+          groupUniqArray(ServiceName) AS serviceNames,
+          argMin(SpanName, Timestamp) AS firstSpanName,
+          max(AiSessionKeyState) AS bestSessionKeyState,
+          if(maxIf(AiSessionKeyHash, AiSessionKeyState = 6) > 0, toString(maxIf(AiSessionKeyHash, AiSessionKeyState = 6)), '') AS sessionKeyHash
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiVendor != ''
+        GROUP BY traceId
+        HAVING has(groupUniqArray(AiVendor), 'claude_agent_sdk')
+          AND countIf(StatusCode = 'Error') > 0
+        ORDER BY startTime DESC
+        LIMIT 50
+        OFFSET 0
+        FORMAT JSON
+
 -- builder:errors:errorFingerprintsQuery:envFiltered  [f1269c9f]
 SELECT
           toString(FingerprintHash) AS fingerprintHash
