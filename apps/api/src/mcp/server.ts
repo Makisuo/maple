@@ -43,7 +43,7 @@ export const McpToolsLive = Layer.effectDiscard(
 							})
 						}
 
-						return yield* executor.execute(tenant, descriptor.name, payload).pipe(
+						return yield* executor.execute(tenant, descriptor.name, payload, "mcp").pipe(
 							Effect.map(toCallToolResult),
 							Effect.catchTag("@maple/internal-rpc/ToolNotFoundError", (error) =>
 								Effect.succeed(toBoundaryErrorResult(error)),

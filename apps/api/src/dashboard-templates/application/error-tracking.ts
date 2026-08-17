@@ -9,6 +9,7 @@ import {
 	templateId,
 } from "@/dashboard-templates/helpers"
 import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
+import { makeRouteDataSource } from "@maple/widgets/dashboard"
 
 function widgets(serviceName?: string): WidgetDef[] {
 	const where = serviceWhereClause(serviceName)
@@ -33,13 +34,10 @@ function widgets(serviceName?: string): WidgetDef[] {
 		{
 			id: "errors-by-type",
 			visualization: "table",
-			dataSource: {
-				endpoint: "errors_by_type",
-				params: {
-					...(serviceName && { services: [serviceName] }),
-					limit: 20,
-				},
-			},
+			dataSource: makeRouteDataSource("errors_by_type", {
+				...(serviceName && { services: [serviceName] }),
+				limit: 20,
+			}),
 			display: {
 				title: "Errors by Type",
 				columns: [
@@ -53,14 +51,11 @@ function widgets(serviceName?: string): WidgetDef[] {
 		{
 			id: "recent-error-traces",
 			visualization: "list",
-			dataSource: {
-				endpoint: "list_traces",
-				params: {
-					...(serviceName && { service: serviceName }),
-					hasError: true,
-					limit: 10,
-				},
-			},
+			dataSource: makeRouteDataSource("list_traces", {
+				...(serviceName && { service: serviceName }),
+				hasError: true,
+				limit: 10,
+			}),
 			display: {
 				title: "Recent Error Traces",
 				listDataSource: "traces",

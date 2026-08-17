@@ -1,6 +1,0 @@
-src
-*.test.ts
-tsconfig.json
-tsdown.config.ts
-.env.local
-vitest.config.ts

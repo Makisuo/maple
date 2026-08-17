@@ -92,10 +92,19 @@ export interface OrganizationInfo {
 	readonly id: OrgId
 	readonly name: string | null
 	readonly slug: string | null
+	/**
+	 * The org's own logo, or `null` when it never uploaded one.
+	 *
+	 * Clerk always hands back a URL — it generates an initials avatar when
+	 * `hasImage` is false — so the flag is what separates "this is their mark"
+	 * from "this is a placeholder Clerk drew". Callers that want a placeholder
+	 * should draw their own rather than ship Clerk's into a Maple surface.
+	 */
+	readonly imageUrl: string | null
 	readonly createdAtMs: number | null
 }
 
-export interface OrganizationServiceShape {
+export interface OrganizationServiceApi {
 	readonly retrieve: (orgId: OrgId) => Effect.Effect<OrganizationInfo, OrganizationProviderError>
 	readonly delete: (
 		orgId: OrgId,
@@ -106,7 +115,7 @@ export interface OrganizationServiceShape {
 	>
 }
 
-export class OrganizationService extends Context.Service<OrganizationService, OrganizationServiceShape>()(
+export class OrganizationService extends Context.Service<OrganizationService, OrganizationServiceApi>()(
 	"@maple/api/services/OrganizationService",
 	{
 		make: Effect.gen(function* () {
@@ -166,7 +175,13 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 				yield* Effect.annotateCurrentSpan("orgId", orgId)
 				const clerk = clerkClient()
 				if (Option.isNone(clerk)) {
-					return { id: orgId, name: null, slug: null, createdAtMs: null } satisfies OrganizationInfo
+					return {
+						id: orgId,
+						name: null,
+						slug: null,
+						imageUrl: null,
+						createdAtMs: null,
+					} satisfies OrganizationInfo
 				}
 				const org = yield* clerkRequest("Clerk.organizations.getOrganization", { orgId }, () =>
 					clerk.value.organizations.getOrganization({ organizationId: orgId }),
@@ -175,6 +190,7 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 					id: orgId,
 					name: org.name,
 					slug: org.slug,
+					imageUrl: org.hasImage ? org.imageUrl : null,
 					createdAtMs: org.createdAt,
 				} satisfies OrganizationInfo
 			})
@@ -193,7 +209,7 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 			return {
 				retrieve,
 				delete: deleteOrganization,
-			} satisfies OrganizationServiceShape
+			} satisfies OrganizationServiceApi
 		}),
 	},
 ) {

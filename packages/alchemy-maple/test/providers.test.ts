@@ -1,24 +1,34 @@
+// BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
 import { Effect, Layer, Redacted } from "effect"
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli"
 import { ApiKey, ApiKeyProvider } from "../src/ApiKey"
 import { Dashboard, DashboardProvider } from "../src/Dashboard"
-import { MapleApi, type MapleApiShape } from "../src/MapleApi"
-import { MapleNotFoundError, type MapleError } from "../src/errors"
+import { MapleApi, type MapleApiContract } from "../src/MapleApi"
+import { makeMapleApiResponseError, type MapleError } from "../src/errors"
+
+const missingRoute = (message: string) =>
+	makeMapleApiResponseError(404, {
+		_tag: "@maple/http/errors/DashboardNotFoundError",
+		type: "not_found_error",
+		code: "resource_missing",
+		title: "Not found",
+		message,
+		retryable: false,
+		recovery: "none",
+	})
 
 /** In-memory stub of the v2 API: canned responses + a call log. */
 const makeStub = (
 	routes: Record<string, (body?: unknown) => Effect.Effect<unknown, MapleError>>,
-): { api: MapleApiShape; calls: Array<string> } => {
+): { api: MapleApiContract; calls: Array<string> } => {
 	const calls: Array<string> = []
 	const dispatch = (method: string, path: string, body?: unknown) => {
 		calls.push(`${method} ${path}`)
 		const handler = routes[`${method} ${path}`]
 		if (handler === undefined) {
-			return Effect.fail<MapleError>(
-				new MapleNotFoundError({ status: 404, message: `no route: ${method} ${path}` }),
-			)
+			return Effect.fail<MapleError>(missingRoute(`no route: ${method} ${path}`))
 		}
 		return handler(body)
 	}
@@ -52,7 +62,7 @@ const wireDashboard = {
 	updated_at: "2026-07-01T12:00:00.000Z",
 }
 
-const runWithProvider = <A, E, R>(api: MapleApiShape, program: Effect.Effect<A, E, R>) => {
+const runWithProvider = <A, E, R>(api: MapleApiContract, program: Effect.Effect<A, E, R>) => {
 	const apiLayer = Layer.succeed(MapleApi, api)
 	return program.pipe(
 		Effect.provide(

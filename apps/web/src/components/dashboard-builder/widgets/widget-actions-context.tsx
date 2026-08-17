@@ -1,13 +1,15 @@
 import { createContext, use, useMemo, type ReactNode } from "react"
 import { useNavigate } from "@tanstack/react-router"
 
+import type { SectionTarget } from "@maple/domain/http"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
-import type { DashboardWidget, WidgetDataState } from "@/components/dashboard-builder/types"
+import type { DashboardSection, DashboardWidget, WidgetDataState } from "@/components/dashboard-builder/types"
 import {
 	encodeWidgetFixContextToSearchParam,
 	type WidgetFixContext,
 } from "@/components/chat/widget-fix-context"
 import { encodeAlertChartToSearchParam } from "@/lib/alerts/widget-chart-param"
+import { dataSourceRawSql, isQueryDataSource } from "@maple/widgets/dashboard"
 
 export interface WidgetActions {
 	remove?: () => void
@@ -23,6 +25,16 @@ export interface WidgetActions {
 	narrowRange?: () => void
 	/** Label for `narrowRange`, e.g. "Show last 7 days". */
 	narrowRangeLabel?: string
+	/**
+	 * Re-home the widget into a group, or `null` for the root canvas. Present
+	 * only in edit mode on a board that actually has groups — separate grids
+	 * can't share a drag context, so this menu is how a tile changes group.
+	 */
+	moveToSection?: (target: SectionTarget) => void
+	/** Destinations for `moveToSection`, in board order. */
+	moveTargets?: DashboardSection[]
+	/** Where the widget currently lives, so its own container reads as disabled. */
+	moveCurrent?: SectionTarget
 }
 
 const WidgetActionsContext = createContext<WidgetActions | null>(null)
@@ -66,7 +78,15 @@ export function WidgetActionsProvider({
 	narrowRangeLabel,
 	children,
 }: WidgetActionsProviderProps) {
-	const { readOnly, removeWidget, cloneWidget, configureWidget, dashboardId } = useDashboardActions()
+	const {
+		readOnly,
+		removeWidget,
+		cloneWidget,
+		configureWidget,
+		dashboardId,
+		sections,
+		moveWidgetToSection,
+	} = useDashboardActions()
 	const navigate = useNavigate()
 
 	const errorTitle = dataState.status === "error" ? (dataState.title ?? null) : null
@@ -80,13 +100,10 @@ export function WidgetActionsProvider({
 		const configure = readOnly ? undefined : () => configureWidget(widget.id)
 
 		// "Create alert" is offered for query-driven charts; the alert builder
-		// warns when chart-only features need review.
-		const endpoint = widget.dataSource?.endpoint
-		const alertable =
-			endpoint === "raw_sql_chart" ||
-			endpoint === "custom_query_builder_timeseries" ||
-			endpoint === "custom_query_builder_breakdown" ||
-			endpoint === "custom_query_builder_list"
+		// warns when chart-only features need review. Read structurally rather
+		// than by endpoint name so the action survives the v2 -> v3 data-source
+		// flip — an endpoint list would just make it disappear silently.
+		const alertable = isQueryDataSource(widget.dataSource) || dataSourceRawSql(widget.dataSource) !== null
 		const createAlert =
 			dashboardId && alertable
 				? () => {
@@ -98,11 +115,10 @@ export function WidgetActionsProvider({
 							widget: {
 								id: widget.id,
 								visualization: widget.visualization,
-								dataSource: {
-									endpoint: widget.dataSource.endpoint,
-									params: widget.dataSource.params,
-									transform: widget.dataSource.transform,
-								},
+								// The whole data source rather than three hand-picked fields:
+								// the prefill reads it through the version-agnostic accessors,
+								// and a field list here would have to grow with every v3 arm.
+								dataSource: widget.dataSource,
 								display: { title: widget.display.title },
 							},
 						})
@@ -111,7 +127,7 @@ export function WidgetActionsProvider({
 							search: {
 								dashboardId,
 								widgetId: widget.id,
-								...(chart ? { chart } : {}),
+								...(chart ? { chart } : undefined),
 							},
 						})
 					}
@@ -138,13 +154,41 @@ export function WidgetActionsProvider({
 					}
 				: undefined
 
-		return { remove, clone, configure, createAlert, fix, narrowRange, narrowRangeLabel }
+		// Offered only when there is somewhere to move to: on a board with no
+		// groups the submenu would list nothing but "Ungrouped", which is where
+		// the widget already is.
+		const canMove = !readOnly && sections.length > 0
+		const moveToSection = canMove
+			? (target: SectionTarget) => moveWidgetToSection(widget.id, target)
+			: undefined
+
+		return {
+			remove,
+			clone,
+			configure,
+			createAlert,
+			fix,
+			narrowRange,
+			narrowRangeLabel,
+			...(moveToSection
+				? {
+						moveToSection,
+						moveTargets: sections,
+						moveCurrent:
+							widget.sectionId !== undefined && widget.tabId !== undefined
+								? { sectionId: widget.sectionId, tabId: widget.tabId }
+								: null,
+					}
+				: undefined),
+		}
 	}, [
 		widget,
 		readOnly,
 		removeWidget,
 		cloneWidget,
 		configureWidget,
+		sections,
+		moveWidgetToSection,
 		dashboardId,
 		errorKind,
 		errorTitle,

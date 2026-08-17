@@ -6,20 +6,49 @@
 import { describe, expect, it } from "vitest"
 import { Effect, Schema } from "effect"
 import {
+	ApiKeyNotFoundError,
+	AlertDestinationNotFoundError,
+	AlertRuleNotFoundError,
+	DashboardNotFoundError,
+	PublicHttpErrorBodySchema,
+	type AnyPublicHttpErrorBody,
+} from "@maple/domain/http"
+import {
 	V2AlertDestinationCreateParams,
 	V2AlertRuleCreateParams,
 	V2ApiKeyCreateParams,
+	V2InvalidRequest,
 	V2DashboardCreateParams,
 } from "@maple/domain/http/v2"
 import { _alertDestinationCreateBody } from "../src/AlertDestination"
 import { _alertRuleCreateBody } from "../src/AlertRule"
 import { _apiKeyCreateBody } from "../src/ApiKey"
 import { _dashboardCreateBody } from "../src/Dashboard"
+import { MapleErrorTags, MaplePublicErrorBodySchema, type MaplePublicErrorBody } from "../src/errors"
+
+const _clientErrorBodySatisfiesDomain = (body: MaplePublicErrorBody): AnyPublicHttpErrorBody => body
+void _clientErrorBodySatisfiesDomain
+
+const _apiKeyNotFoundTag: ApiKeyNotFoundError["_tag"] = MapleErrorTags.apiKeyNotFound
+const _dashboardNotFoundTag: DashboardNotFoundError["_tag"] = MapleErrorTags.dashboardNotFound
+const _alertRuleNotFoundTag: AlertRuleNotFoundError["_tag"] = MapleErrorTags.alertRuleNotFound
+const _alertDestinationNotFoundTag: AlertDestinationNotFoundError["_tag"] =
+	MapleErrorTags.alertDestinationNotFound
+void _apiKeyNotFoundTag
+void _dashboardNotFoundTag
+void _alertRuleNotFoundTag
+void _alertDestinationNotFoundTag
 
 const decodes = <S extends Schema.Codec<unknown, unknown, never, never>>(schema: S, wire: unknown) =>
 	Effect.runSync(Schema.decodeUnknownEffect(schema)(wire).pipe(Effect.asVoid))
 
 describe("provider request bodies decode against the real v2 create-param schemas", () => {
+	it("public error body", () => {
+		const body = V2InvalidRequest.make().error
+		expect(() => decodes(PublicHttpErrorBodySchema, body)).not.toThrow()
+		expect(() => decodes(MaplePublicErrorBodySchema, body)).not.toThrow()
+	})
+
 	it("dashboard create body", () => {
 		const body = _dashboardCreateBody({
 			name: "Service health",
@@ -29,10 +58,31 @@ describe("provider request bodies decode against the real v2 create-param schema
 			widgets: [
 				{
 					id: "w1",
-					visualization: "timeseries",
-					data_source: { endpoint: "query_builder", params: { granularity_seconds: 60 } },
+					// A line chart persists as `chart` + a `chartId`; `timeseries` was
+					// never a real `visualization`, it just went unnoticed while the
+					// field was an open string.
+					visualization: "chart",
+					// Schema v3: a data source is a discriminated union on `kind`, not an
+					// `{ endpoint, params }` bag. The provider passes `widgets` straight
+					// through as `Record<string, unknown>`, so this fixture is the only
+					// thing standing between an IaC config and a 400 — which is exactly
+					// what it caught when `/v2` moved to the union.
+					data_source: { kind: "query", result_shape: "timeseries", queries: [] },
 					display: { title: "Throughput" },
 					layout: { x: 0, y: 0, w: 6, h: 4 },
+				},
+				{
+					id: "w2",
+					visualization: "chart",
+					// The other arm the provider realistically emits, and the one that
+					// carries `granularity_seconds` now that there is no params bag.
+					data_source: {
+						kind: "raw_sql",
+						sql: "SELECT 1 WHERE $__orgFilter",
+						granularity_seconds: 60,
+					},
+					display: { title: "Raw" },
+					layout: { x: 6, y: 0, w: 6, h: 4 },
 				},
 			],
 			variables: [{ name: "service", type: "textbox" }],

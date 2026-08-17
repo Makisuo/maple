@@ -2,7 +2,7 @@ import { afterEach, assert, describe, expect, it } from "@effect/vitest"
 import { Effect, Fiber, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { ActorId, OrgId, UserId } from "@maple/domain/primitives"
-import { Database, DatabaseError, type DatabaseShape } from "@/platform/DatabaseLive"
+import { Database, DatabaseError, type DatabaseApi } from "@/platform/DatabaseLive"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { ErrorActorsService } from "./ErrorActorsService"
 import { makeErrorDatabaseExecute } from "./error-persistence"
@@ -34,7 +34,7 @@ describe("ErrorActorsService", () => {
 				message: "could not serialize access",
 				cause: Object.assign(new Error("serialization failure"), { code: "40001" }),
 			})
-			const database: DatabaseShape = {
+			const database: DatabaseApi = {
 				execute: <T>() =>
 					Effect.suspend(() => {
 						attempts += 1

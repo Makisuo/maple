@@ -1,4 +1,5 @@
 import * as React from "react"
+import { createPortal } from "react-dom"
 import "@rrweb/replay/dist/style.css"
 import { cn } from "@maple/ui/lib/utils"
 import { type DisplayMarker, type IdleBand, errorMessage, useReplayPlayer } from "./replay-player-context"
@@ -288,10 +289,10 @@ function Scrubber({
 }) {
 	const trackRef = React.useRef<HTMLDivElement | null>(null)
 	const [dragging, setDragging] = React.useState(false)
-	const [hoverMs, setHoverMs] = React.useState<number | null>(null)
+	// The bubble is portalled out of the controls card (which is `overflow-hidden`
+	// for its rounded corners), so it needs the pointer's viewport x, not a percent.
+	const [hover, setHover] = React.useState<{ ms: number; clientX: number } | null>(null)
 	const pct = totalMs > 0 ? Math.min(100, (currentMs / totalMs) * 100) : 0
-	const hoverPct =
-		hoverMs != null && totalMs > 0 ? Math.min(100, Math.max(0, (hoverMs / totalMs) * 100)) : null
 
 	const msFromClientX = React.useCallback(
 		(clientX: number) => {
@@ -320,26 +321,17 @@ function Scrubber({
 			}}
 			onPointerMove={(e) => {
 				const ms = msFromClientX(e.clientX)
-				setHoverMs(ms)
+				setHover({ ms, clientX: e.clientX })
 				if (dragging) onSeek(ms)
 			}}
-			onPointerLeave={() => setHoverMs(null)}
+			onPointerLeave={() => setHover(null)}
 			onPointerUp={(e) => {
 				e.currentTarget.releasePointerCapture(e.pointerId)
 				setDragging(false)
 			}}
 			className="group relative h-6 flex-1 cursor-pointer touch-none select-none"
 		>
-			{/* Hover time bubble — surfaces the timestamp under the cursor while
-			    scanning, so seeking is precise. */}
-			{hoverPct != null && (
-				<div
-					className="pointer-events-none absolute -top-7 z-10 -translate-x-1/2 rounded bg-popover px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-popover-foreground shadow-sm ring-1 ring-border"
-					style={{ left: `${hoverPct}%` }}
-				>
-					{formatClock(hoverMs ?? 0)}
-				</div>
-			)}
+			<HoverTimeBubble hover={hover} trackRef={trackRef} />
 			{/* Track */}
 			<div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-muted">
 				{/* Idle bands — greyed/hatched, under the progress fill */}
@@ -391,6 +383,43 @@ function Scrubber({
 		</div>
 	)
 }
+
+/**
+ * The timestamp under the cursor while scanning the scrubber, so seeking is precise.
+ *
+ * Portalled and fixed-positioned rather than absolute inside the track: the transport
+ * card is `overflow-hidden` (for its rounded corners) with only ~10px of padding above
+ * the track, and the page's stage is an `overflow-y-auto` scroller — an in-flow bubble
+ * gets clipped by both and reads as hidden behind the video. In fullscreen the controls
+ * live inside the fullscreen `<figure>`, so the portal targets the fullscreen element
+ * when there is one; `document.body` is invisible while it's active.
+ */
+function HoverTimeBubble({
+	hover,
+	trackRef,
+}: {
+	hover: { ms: number; clientX: number } | null
+	trackRef: React.RefObject<HTMLDivElement | null>
+}) {
+	// Only ever non-null after a pointer event, so this never runs during SSR.
+	const track = trackRef.current
+	if (!hover || !track) return null
+	const rect = track.getBoundingClientRect()
+	// Keep the bubble on screen when the cursor is at either end of the track.
+	const left = Math.min(Math.max(hover.clientX, EDGE_MARGIN), window.innerWidth - EDGE_MARGIN)
+	return createPortal(
+		<div
+			className="pointer-events-none fixed z-55 -translate-x-1/2 -translate-y-full rounded bg-popover px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-popover-foreground shadow-sm ring-1 ring-border"
+			style={{ left, top: rect.top - 8 }}
+		>
+			{formatClock(hover.ms)}
+		</div>,
+		document.fullscreenElement ?? document.body,
+	)
+}
+
+/** Keeps the hover bubble clear of the viewport edges. */
+const EDGE_MARGIN = 8
 
 function PlayerMessage({
 	children,

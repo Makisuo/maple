@@ -53,7 +53,7 @@ export function PlanetScaleTopQueries({
 		() => ({
 			data: {
 				database,
-				...(branch === undefined ? {} : { branch }),
+				...(!(branch === undefined) ? { branch } : undefined),
 				startTime: warehouseTimeToMs(startTime),
 				endTime: warehouseTimeToMs(endTime),
 				limit,

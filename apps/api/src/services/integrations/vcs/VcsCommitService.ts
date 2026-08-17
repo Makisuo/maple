@@ -65,7 +65,7 @@ interface VcsCommitDetail {
 	readonly resolved: "stored" | "fetched"
 }
 
-export interface VcsCommitServiceShape {
+export interface VcsCommitServiceApi {
 	readonly resolveCommitDetail: (
 		orgId: OrgId,
 		sha: string,
@@ -144,7 +144,7 @@ const detailFromInput = (
 	resolved: "fetched",
 })
 
-export class VcsCommitService extends Context.Service<VcsCommitService, VcsCommitServiceShape>()(
+export class VcsCommitService extends Context.Service<VcsCommitService, VcsCommitServiceApi>()(
 	"@maple/api/services/vcs/VcsCommitService",
 	{
 		make: Effect.gen(function* () {
@@ -172,7 +172,13 @@ export class VcsCommitService extends Context.Service<VcsCommitService, VcsCommi
 						readonly repository: VcsRepo
 						readonly reposProbed: number
 					} | null
-				} = { current: null }
+				} = { current: null } satisfies {
+					current: {
+						readonly normalized: CommitUpsertInput
+						readonly repository: VcsRepo
+						readonly reposProbed: number
+					} | null
+				}
 
 				yield* Effect.forEach(installations, (installation) =>
 					Effect.gen(function* () {
@@ -406,7 +412,7 @@ export class VcsCommitService extends Context.Service<VcsCommitService, VcsCommi
 				return [...details, ...Arr.getSomes(probed)]
 			})
 
-			return { resolveCommitDetail, resolveCommitDetails } satisfies VcsCommitServiceShape
+			return { resolveCommitDetail, resolveCommitDetails } satisfies VcsCommitServiceApi
 		}),
 	},
 ) {

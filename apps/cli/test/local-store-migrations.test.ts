@@ -325,7 +325,7 @@ describe("local migration registry", () => {
 			openTarget: async () => undefined,
 			ensureCapacity: async () => undefined,
 			saveStep: async () => undefined,
-		} as unknown as MigrationModuleContext
+		} as MigrationModuleContext
 		await executeMigrationModule(v2, context, context.step, { prepareTarget: true })
 		expect(events).toEqual(["preflight", "prepareTarget", "apply", "verify"])
 
@@ -622,7 +622,7 @@ describe("durable migration recovery", () => {
 						from: first.from,
 						to: first.to,
 						status: resumeSecondStep ? "completed" : "pending",
-						...(resumeSecondStep ? { state: { module: first.id, version: 1 } } : {}),
+						...(resumeSecondStep ? { state: { module: first.id, version: 1 } } : undefined),
 					},
 					{
 						id: second.id,
@@ -631,8 +631,11 @@ describe("durable migration recovery", () => {
 						to: second.to,
 						status: resumeSecondStep ? "verified" : "pending",
 						...(resumeSecondStep
-							? { state: { module: second.id, version: 1 }, progress: { rows: 1 } }
-							: {}),
+							? {
+									state: { module: second.id, version: 1 },
+									progress: { rows: 1 },
+								}
+							: undefined),
 					},
 				],
 				currentStepIndex: resumeSecondStep ? 1 : 0,

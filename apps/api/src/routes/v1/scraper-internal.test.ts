@@ -46,9 +46,9 @@ describe("toInternalScrapeTarget", () => {
 			// jsonb drift: the column should hold Record<string, string>, but a row
 			// written by an older deploy (or by hand) may not — the decode guard must
 			// degrade it to {} instead of failing the list.
-			const driftedLabels: unknown = { env: 123 }
+			const driftedLabels = { env: 123 }
 			const result = yield* toInternalScrapeTarget(
-				{ ...baseRow, labelsJson: driftedLabels as Record<string, string> },
+				{ ...baseRow, labelsJson: driftedLabels },
 				INGEST_KEY,
 			)
 			assert.isTrue(Option.isSome(result))

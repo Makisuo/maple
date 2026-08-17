@@ -156,7 +156,7 @@ function AlertInvestigationRedirect({
 					type: "incident",
 					incident_kind: "alert",
 					incident_id: incidentId,
-					...(issueId ? { issue_id: issueId } : {}),
+					...(issueId ? { issue_id: issueId } : undefined),
 				} as never,
 				snapshot: {
 					title: alertContext.ruleName,

@@ -1,6 +1,5 @@
-import { bucketTimeline, computeBucketSeconds as computeBucketSecondsMs } from "@maple/query-engine"
+import { bucketTimeline, computeBucketSecondsForRange } from "@maple/query-engine"
 
-const TARGET_POINTS = 100
 const TINYBIRD_DATETIME_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(\.\d+)?$/
 
 function toEpochMs(value: string): number {
@@ -82,20 +81,15 @@ export function toIsoBucket(value: string | Date): string {
 	return new Date(parsed).toISOString()
 }
 
-export function computeBucketSeconds(
-	startTime?: string,
-	endTime?: string,
-	targetPoints = TARGET_POINTS,
-): number {
-	if (!startTime || !endTime) return 300
-
-	const startMs = toEpochMs(startTime)
-	const endMs = toEpochMs(endTime)
-	if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
-		return 300
-	}
-
-	return computeBucketSecondsMs(startMs, endMs, { targetPoints })
+/**
+ * Chart-policy bucket width, from warehouse DateTime strings.
+ *
+ * A thin alias over the shared `computeBucketSecondsForRange` — kept as a local
+ * export because ~15 call sites import it from here, not because it does
+ * anything of its own.
+ */
+export function computeBucketSeconds(startTime?: string, endTime?: string, targetPoints?: number): number {
+	return computeBucketSecondsForRange(startTime, endTime, "chart", targetPoints)
 }
 
 /**

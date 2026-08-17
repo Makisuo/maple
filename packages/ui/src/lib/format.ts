@@ -262,10 +262,12 @@ export function formatBucketLabel(
 	const includeSeconds = context.rangeMs <= 30 * 60 * 1000 && !includeDate
 
 	if (mode === "tooltip") {
+		// The tooltip header always carries the full date — ticks stay terse, but a
+		// hovered point should never make the reader work out which day it was.
 		return date.toLocaleString(undefined, {
-			year: includeDate ? "numeric" : undefined,
-			month: includeDate ? "short" : undefined,
-			day: includeDate ? "numeric" : undefined,
+			year: "numeric",
+			month: "short",
+			day: "numeric",
 			hour: "2-digit",
 			minute: "2-digit",
 			second: includeSeconds ? "2-digit" : undefined,
@@ -300,7 +302,7 @@ const bucketLabelMap: Record<number, string> = {
 	3600: "/h",
 	14400: "/4h",
 	86400: "/d",
-}
+} satisfies Record<number, string>
 
 /**
  * Map bucket interval seconds to a human-readable rate suffix.

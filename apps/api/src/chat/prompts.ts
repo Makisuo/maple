@@ -243,7 +243,7 @@ Configuration:
 - visualization: "list"
 - endpoint: "list_traces" or "list_logs"
 - display.listDataSource: "traces" or "logs"
-- display.listLimit: number (default 10, max 50)
+- display.listLimit: number (default 50, max 50)
 - Optional: display.listWhereClause for filtering, display.listRootOnly for traces
 - No chartId needed.
 

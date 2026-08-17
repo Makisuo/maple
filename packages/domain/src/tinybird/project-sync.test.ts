@@ -23,7 +23,7 @@ describe("Tinybird project sync", () => {
 
 	it("reuses one injected transport across Promise operations", async () => {
 		const fetch = vi.fn(async () => jsonResponse({ deployment: { status: "data_ready" } }))
-		const runtime = makeRuntime(fetch as unknown as typeof globalThis.fetch)
+		const runtime = makeRuntime(fetch as typeof globalThis.fetch)
 		const params = {
 			baseUrl: "https://customer.tinybird.co",
 			token: "token",
@@ -69,7 +69,7 @@ describe("Tinybird project sync", () => {
 					}
 
 					throw new Error(`Unexpected request: ${method} ${url}`)
-				}) as unknown as typeof fetch,
+				}) as typeof fetch,
 			)
 
 			const result = await runtime.startTinybirdDeploymentStep({
@@ -103,7 +103,7 @@ describe("Tinybird project sync", () => {
 						result: "success",
 						deployment: { id: "dep-2", status: "deploying" },
 					}),
-				) as unknown as typeof fetch,
+				) as typeof fetch,
 			)
 
 			const result = await runtime.startTinybirdDeploymentStep({
@@ -118,9 +118,7 @@ describe("Tinybird project sync", () => {
 
 		it("classifies Tinybird deploy rejections as user-fixable upstream errors", async () => {
 			const runtime = makeRuntime(
-				vi.fn(
-					async () => new Response("bad credentials", { status: 401 }),
-				) as unknown as typeof fetch,
+				vi.fn(async () => new Response("bad credentials", { status: 401 })) as typeof fetch,
 			)
 
 			await expect(
@@ -152,7 +150,7 @@ describe("Tinybird project sync", () => {
 						},
 						400,
 					),
-				) as unknown as typeof fetch,
+				) as typeof fetch,
 			)
 
 			await expect(
@@ -175,7 +173,7 @@ describe("Tinybird project sync", () => {
 							status: 200,
 							headers: { "content-type": "application/json" },
 						}),
-				) as unknown as typeof fetch,
+				) as typeof fetch,
 			)
 
 			await expect(
@@ -190,9 +188,7 @@ describe("Tinybird project sync", () => {
 	describe("pollTinybirdDeploymentStep", () => {
 		it("resolves when Tinybird reports data_ready", async () => {
 			const runtime = makeRuntime(
-				vi.fn(async () =>
-					jsonResponse({ deployment: { status: "data_ready" } }),
-				) as unknown as typeof fetch,
+				vi.fn(async () => jsonResponse({ deployment: { status: "data_ready" } })) as typeof fetch,
 			)
 
 			const result = await runtime.pollTinybirdDeploymentStep({
@@ -208,9 +204,7 @@ describe("Tinybird project sync", () => {
 
 		it("resolves when Tinybird reports live", async () => {
 			const runtime = makeRuntime(
-				vi.fn(async () =>
-					jsonResponse({ deployment: { status: "live" } }),
-				) as unknown as typeof fetch,
+				vi.fn(async () => jsonResponse({ deployment: { status: "live" } })) as typeof fetch,
 			)
 
 			const result = await runtime.pollTinybirdDeploymentStep({
@@ -226,9 +220,7 @@ describe("Tinybird project sync", () => {
 
 		it("throws TinybirdDeploymentNotReadyError for non-terminal non-ready statuses so workflow steps retry", async () => {
 			const runtime = makeRuntime(
-				vi.fn(async () =>
-					jsonResponse({ deployment: { status: "deploying" } }),
-				) as unknown as typeof fetch,
+				vi.fn(async () => jsonResponse({ deployment: { status: "deploying" } })) as typeof fetch,
 			)
 
 			await expect(
@@ -246,7 +238,7 @@ describe("Tinybird project sync", () => {
 					jsonResponse({
 						deployment: { status: "failed", errors: ["broken pipe"] },
 					}),
-				) as unknown as typeof fetch,
+				) as typeof fetch,
 			)
 
 			await expect(
@@ -262,9 +254,7 @@ describe("Tinybird project sync", () => {
 	describe("getTinybirdDeploymentStatus", () => {
 		it("treats data_ready as ready to promote, not as terminal", async () => {
 			const runtime = makeRuntime(
-				vi.fn(async () =>
-					jsonResponse({ deployment: { status: "data_ready" } }),
-				) as unknown as typeof fetch,
+				vi.fn(async () => jsonResponse({ deployment: { status: "data_ready" } })) as typeof fetch,
 			)
 
 			const result = await runtime.getTinybirdDeploymentStatus({
@@ -281,9 +271,7 @@ describe("Tinybird project sync", () => {
 
 		it("treats live as the successful terminal deployment state", async () => {
 			const runtime = makeRuntime(
-				vi.fn(async () =>
-					jsonResponse({ deployment: { status: "live" } }),
-				) as unknown as typeof fetch,
+				vi.fn(async () => jsonResponse({ deployment: { status: "live" } })) as typeof fetch,
 			)
 
 			const result = await runtime.getTinybirdDeploymentStatus({
@@ -313,7 +301,7 @@ describe("Tinybird project sync", () => {
 					const method = init?.method ?? "GET"
 					calls.push({ url, method })
 					return new Response("", { status: 200 })
-				}) as unknown as typeof fetch,
+				}) as typeof fetch,
 			)
 
 			await runtime.setTinybirdDeploymentLiveStep({
@@ -359,7 +347,7 @@ describe("Tinybird project sync", () => {
 					}
 
 					return new Response("", { status: 200 })
-				}) as unknown as typeof fetch,
+				}) as typeof fetch,
 			)
 
 			await runtime.cleanupStaleTinybirdDeployments({
@@ -389,7 +377,7 @@ describe("Tinybird project sync", () => {
 					return jsonResponse({
 						deployments: [{ id: "live-1", status: "live", live: true }],
 					})
-				}) as unknown as typeof fetch,
+				}) as typeof fetch,
 			)
 
 			await runtime.cleanupStaleTinybirdDeployments({
@@ -433,7 +421,7 @@ describe("Tinybird project sync", () => {
 					await gate
 					active -= 1
 					return new Response("", { status: 200 })
-				}) as unknown as typeof fetch,
+				}) as typeof fetch,
 			)
 
 			const cleanup = runtime.cleanupStaleTinybirdDeployments({
@@ -470,7 +458,7 @@ describe("Tinybird project sync", () => {
 					}
 
 					return new Response("", { status: 200 })
-				}) as unknown as typeof fetch,
+				}) as typeof fetch,
 			)
 
 			await runtime.cleanupOwnedTinybirdDeployment({
@@ -517,7 +505,7 @@ describe("Tinybird project sync", () => {
 					}
 
 					throw new Error(`Unexpected request: ${method} ${url}`)
-				}) as unknown as typeof fetch,
+				}) as typeof fetch,
 			)
 
 			const result = await runtime.fetchInstanceHealth({

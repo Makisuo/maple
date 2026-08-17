@@ -2,7 +2,7 @@ import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-a
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Exit, Option } from "effect"
 import { toastManager } from "@maple/ui/components/ui/toast"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 
 import { Button } from "@maple/ui/components/ui/button"
@@ -38,8 +38,8 @@ import { DataPlatformUsageSection } from "@/components/settings/data-platform-us
 function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
 	if (Exit.isSuccess(exit)) return fallback
 	const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
-	const formatted = formatBackendError(failure ?? exit)
-	return formatted.description || formatted.title || fallback
+	const formatted = displayError(failure ?? exit)
+	return formatted.message || formatted.title || fallback
 }
 
 const syncDateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -420,6 +420,7 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 								<div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
 									Failed to introspect ClickHouse:{" "}
 									{getExitErrorMessage(
+										// SAFETY: this branch has already excluded loading and success, leaving the failure Exit variant.
 										diffResult as unknown as Exit.Exit<unknown, unknown>,
 										"check that credentials are valid",
 									)}

@@ -20,6 +20,7 @@ import {
 	RoleName,
 	UserId as UserIdSchema,
 	type WorkflowState,
+	type WarehouseReadError,
 } from "@maple/domain/http"
 import { errorIncidents, type ErrorIncidentRow, errorIssues } from "@maple/db"
 import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm"
@@ -35,7 +36,7 @@ import { dateToMs, msToDate } from "@/platform/time"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
-import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
+import { makeErrorDatabaseExecute } from "./error-persistence"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const encodeIssueListCursor = Schema.encodeSync(IssueListCursor)
@@ -76,7 +77,7 @@ const severitySortRank = (severity: IssueSeverity | null): number =>
 		Match.exhaustive,
 	)
 
-export interface ErrorIssueReadModelsPublicShape {
+export interface ErrorIssueReadModelsPublicApi {
 	readonly listIssues: (
 		orgId: OrgId,
 		opts: {
@@ -98,7 +99,7 @@ export interface ErrorIssueReadModelsPublicShape {
 			readonly actionable?: boolean
 			readonly sort?: "last_seen" | "severity"
 		},
-	) => Effect.Effect<ErrorIssuesListResponse, ErrorPersistenceError>
+	) => Effect.Effect<ErrorIssuesListResponse, ErrorPersistenceError | WarehouseReadError>
 	/** Fleet-level open (actionable-state) error-issue counts grouped by service. */
 	readonly countOpenIssuesByService: (
 		orgId: OrgId,
@@ -115,7 +116,10 @@ export interface ErrorIssueReadModelsPublicShape {
 			readonly bucketSeconds?: number
 			readonly sampleLimit?: number
 		},
-	) => Effect.Effect<ErrorIssueDetailResponse, ErrorPersistenceError | ErrorIssueNotFoundError>
+	) => Effect.Effect<
+		ErrorIssueDetailResponse,
+		ErrorPersistenceError | ErrorIssueNotFoundError | WarehouseReadError
+	>
 	readonly listIssueIncidents: (
 		orgId: OrgId,
 		issueId: ErrorIssueId,
@@ -125,10 +129,10 @@ export interface ErrorIssueReadModelsPublicShape {
 	) => Effect.Effect<ErrorIncidentsListResponse, ErrorPersistenceError>
 }
 
-export type ErrorIssueReadModelsServiceShape = ErrorIssueReadModelsPublicShape
+export type ErrorIssueReadModelsServiceApi = ErrorIssueReadModelsPublicApi
 
 const make: Effect.Effect<
-	ErrorIssueReadModelsServiceShape,
+	ErrorIssueReadModelsServiceApi,
 	never,
 	Database | WarehouseQueryService | ErrorIssueWorkflowService
 > = Effect.gen(function* () {
@@ -157,7 +161,7 @@ const make: Effect.Effect<
 			occurrenceCount: row.occurrenceCount,
 		})
 
-	const listIssues: ErrorIssueReadModelsServiceShape["listIssues"] = Effect.fn("ErrorsService.listIssues")(
+	const listIssues: ErrorIssueReadModelsServiceApi["listIssues"] = Effect.fn("ErrorsService.listIssues")(
 		function* (orgId, opts) {
 			const sort = opts.sort ?? "last_seen"
 			yield* Effect.annotateCurrentSpan({
@@ -165,7 +169,7 @@ const make: Effect.Effect<
 				workflowState: opts.workflowState ?? "all",
 				limit: opts.limit ?? 100,
 				sort,
-				...(opts.deploymentEnv ? { deploymentEnv: opts.deploymentEnv } : {}),
+				...(opts.deploymentEnv ? { deploymentEnv: opts.deploymentEnv } : undefined),
 			})
 			const conditions = [eq(errorIssues.orgId, orgId)]
 			if (opts.workflowState) conditions.push(eq(errorIssues.workflowState, opts.workflowState))
@@ -197,11 +201,9 @@ const make: Effect.Effect<
 						endTime: formatWarehouseDateTime(scanEndMs),
 					},
 				)
-				const fingerprintRows = yield* warehouse
-					.compiledQuery(systemTenant(orgId), compiled, {
-						context: "errorIssueEnvFingerprints",
-					})
-					.pipe(Effect.mapError(makePersistenceError))
+				const fingerprintRows = yield* warehouse.compiledQuery(systemTenant(orgId), compiled, {
+					context: "errorIssueEnvFingerprints",
+				})
 				const hashes = fingerprintRows
 					.map((row) => row.fingerprintHash)
 					.filter((hash) => hash.length > 0)
@@ -288,7 +290,7 @@ const make: Effect.Effect<
 		},
 	)
 
-	const countOpenIssuesByService: ErrorIssueReadModelsServiceShape["countOpenIssuesByService"] = Effect.fn(
+	const countOpenIssuesByService: ErrorIssueReadModelsServiceApi["countOpenIssuesByService"] = Effect.fn(
 		"ErrorsService.countOpenIssuesByService",
 	)(function* (orgId) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -314,7 +316,7 @@ const make: Effect.Effect<
 		return counts
 	})
 
-	const getIssue: ErrorIssueReadModelsServiceShape["getIssue"] = Effect.fn("ErrorsService.getIssue")(
+	const getIssue: ErrorIssueReadModelsServiceApi["getIssue"] = Effect.fn("ErrorsService.getIssue")(
 		function* (orgId, issueId, opts) {
 			yield* Effect.annotateCurrentSpan({ orgId, issueId })
 			const issueRow = yield* workflow.requireIssue(orgId, issueId)
@@ -335,11 +337,9 @@ const make: Effect.Effect<
 				bucketSeconds,
 			})
 			const timeseriesEffect = isErrorKind
-				? warehouse
-						.compiledQuery(tenant, timeseriesCompiled, {
-							context: "errorIssueTimeseries",
-						})
-						.pipe(Effect.mapError(makePersistenceError))
+				? warehouse.compiledQuery(tenant, timeseriesCompiled, {
+						context: "errorIssueTimeseries",
+					})
 				: Effect.succeed([])
 
 			const samplesCompiled = CH.compile(
@@ -353,11 +353,9 @@ const make: Effect.Effect<
 				{ rowSchema: CH.ErrorIssueSampleTracesOutputSchema },
 			)
 			const samplesEffect = isErrorKind
-				? warehouse
-						.compiledQuery(tenant, samplesCompiled, {
-							context: "errorIssueSampleTraces",
-						})
-						.pipe(Effect.mapError(makePersistenceError))
+				? warehouse.compiledQuery(tenant, samplesCompiled, {
+						context: "errorIssueSampleTraces",
+					})
 				: Effect.succeed([])
 
 			const incidentsEffect = dbExecute((db) =>
@@ -402,7 +400,7 @@ const make: Effect.Effect<
 		},
 	)
 
-	const listIssueIncidents: ErrorIssueReadModelsServiceShape["listIssueIncidents"] = Effect.fn(
+	const listIssueIncidents: ErrorIssueReadModelsServiceApi["listIssueIncidents"] = Effect.fn(
 		"ErrorsService.listIssueIncidents",
 	)(function* (orgId, issueId) {
 		yield* Effect.annotateCurrentSpan({ orgId, issueId })
@@ -421,7 +419,7 @@ const make: Effect.Effect<
 		})
 	})
 
-	const listOpenIncidents: ErrorIssueReadModelsServiceShape["listOpenIncidents"] = Effect.fn(
+	const listOpenIncidents: ErrorIssueReadModelsServiceApi["listOpenIncidents"] = Effect.fn(
 		"ErrorsService.listOpenIncidents",
 	)(function* (orgId) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -450,7 +448,7 @@ const make: Effect.Effect<
 
 export class ErrorIssueReadModelsService extends Context.Service<
 	ErrorIssueReadModelsService,
-	ErrorIssueReadModelsServiceShape
+	ErrorIssueReadModelsServiceApi
 >()("@maple/api/services/errors/ErrorIssueReadModelsService", { make }) {
 	static readonly layer = Layer.effect(this, this.make)
 }

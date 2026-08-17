@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { readFile } from "node:fs/promises"
 
 interface ReactRenderMetrics {

@@ -11,10 +11,10 @@ import { Config, Context, Effect, Layer, Option, Redacted } from "effect"
  *  - the Electric upstream (`ELECTRIC_*`), and
  *  - the auth fields (`AuthEnv`) consumed by `makeResolveTenant`.
  *
- * `SyncConfigShape extends AuthEnv`, so the value can be handed straight to
+ * `SyncConfigValues extends AuthEnv`, so the value can be handed straight to
  * `makeResolveTenant` (see routes/shape.http.ts).
  */
-export interface SyncConfigShape extends AuthEnv {
+export interface SyncConfigValues extends AuthEnv {
 	readonly ELECTRIC_URL: Option.Option<string>
 	readonly ELECTRIC_SOURCE_ID: Option.Option<string>
 	readonly ELECTRIC_SECRET: Option.Option<Redacted.Redacted<string>>
@@ -41,7 +41,7 @@ const syncConfig = Config.all({
 // Env catches — a missing self-hosted password or Clerk secret would otherwise
 // surface as a per-request defect instead of a startup error.
 const makeSyncConfig = Effect.gen(function* () {
-	const config: SyncConfigShape = yield* syncConfig
+	const config: SyncConfigValues = yield* syncConfig
 	const authMode = config.MAPLE_AUTH_MODE.toLowerCase()
 
 	if (config.MAPLE_DEFAULT_ORG_ID.trim().length === 0) {
@@ -61,7 +61,7 @@ const makeSyncConfig = Effect.gen(function* () {
 	return SyncConfig.of(config)
 })
 
-export class SyncConfig extends Context.Service<SyncConfig, SyncConfigShape>()(
+export class SyncConfig extends Context.Service<SyncConfig, SyncConfigValues>()(
 	"@maple/electric-sync/SyncConfig",
 ) {
 	static readonly layer = Layer.effect(this, makeSyncConfig)

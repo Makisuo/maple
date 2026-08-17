@@ -1,4 +1,4 @@
-import type { EdgeCacheServiceShape } from "@maple/cache"
+import type { EdgeCacheServiceApi } from "@maple/cache"
 import { Cause, Effect, Option } from "effect"
 
 /**
@@ -17,7 +17,7 @@ import { Cause, Effect, Option } from "effect"
 const QUARANTINE_BUCKET = "warehouse-org-quarantine"
 const QUARANTINE_TTL_S = 6 * 60 * 60
 
-type EdgeCache = EdgeCacheServiceShape
+type EdgeCache = EdgeCacheServiceApi
 
 /**
  * Errors that indicate the org's warehouse is unusable until an operator fixes

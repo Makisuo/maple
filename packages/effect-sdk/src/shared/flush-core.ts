@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 // Shared flush core (platform-agnostic)
 //
 // The buffer-drain → OTLP-encode → POST machinery shared by every flushable
@@ -83,7 +84,7 @@ export const buildResolved = (
 	const headers: Record<string, string> = {
 		"content-type": "application/json",
 		"user-agent": opts.userAgent,
-	}
+	} satisfies Record<string, string>
 	if (r.ingestKey) headers.authorization = `Bearer ${Redacted.value(r.ingestKey)}`
 	return {
 		tracesUrl,
@@ -286,7 +287,7 @@ const makeMetricsBody = (snapshots: ReadonlyArray<MetricSnapshot>, r: Resolved) 
 	for (const snapshot of snapshots) {
 		const base = {
 			name: snapshot.id,
-			...(snapshot.description ? { description: snapshot.description } : {}),
+			...(snapshot.description ? { description: snapshot.description } : undefined),
 		}
 		switch (snapshot.type) {
 			case "Counter":

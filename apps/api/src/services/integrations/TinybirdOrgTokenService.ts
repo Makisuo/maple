@@ -1,5 +1,5 @@
-import type { OrgId } from "@maple/domain"
-import { Clock, Context, Data, Effect, Layer, Option, Redacted } from "effect"
+import { TinybirdOrgTokenConfigError, TinybirdOrgTokenMintError, type OrgId } from "@maple/domain"
+import { Clock, Context, Effect, Layer, Option, Redacted } from "effect"
 import { listOrgScopedDatasourceNames } from "@/services/warehouse/warehouse-catalog"
 import { mintOrgReadJwt } from "@/services/auth/tinybird-jwt"
 import { Env } from "@/platform/Env"
@@ -24,19 +24,16 @@ const JWT_REFRESH_SKEW_SECONDS = 60
  */
 export const JWT_CACHE_MAX_ENTRIES = 512
 
-export interface TinybirdOrgTokenServiceShape {
+export interface TinybirdOrgTokenServiceApi {
 	/** A Tinybird read JWT scoped to `orgId` across every OrgId-bearing datasource. */
-	readonly getOrgReadToken: (orgId: OrgId) => Effect.Effect<string, TinybirdOrgTokenError>
+	readonly getOrgReadToken: (
+		orgId: OrgId,
+	) => Effect.Effect<string, TinybirdOrgTokenConfigError | TinybirdOrgTokenMintError>
 }
-
-export class TinybirdOrgTokenError extends Data.TaggedError("@maple/api/services/TinybirdOrgTokenError")<{
-	readonly reason: "MissingSigningKey" | "MissingWorkspaceId" | "MintFailed"
-	readonly message: string
-}> {}
 
 export class TinybirdOrgTokenService extends Context.Service<
 	TinybirdOrgTokenService,
-	TinybirdOrgTokenServiceShape
+	TinybirdOrgTokenServiceApi
 >()("@maple/api/services/TinybirdOrgTokenService", {
 	make: Effect.gen(function* () {
 		const env = yield* Env
@@ -73,22 +70,22 @@ export class TinybirdOrgTokenService extends Context.Service<
 			yield* Effect.annotateCurrentSpan("maple.tinybird.jwt.cache_hit", false)
 			pruneCache(nowMs)
 			if (Option.isNone(env.TINYBIRD_SIGNING_KEY)) {
-				return yield* new TinybirdOrgTokenError({
-					reason: "MissingSigningKey",
+				return yield* new TinybirdOrgTokenConfigError({
+					setting: "SigningKey",
 					message: "TINYBIRD_SIGNING_KEY is required for Tinybird-scoped raw SQL",
 				})
 			}
 			if (Option.isNone(env.TINYBIRD_WORKSPACE_ID) || env.TINYBIRD_WORKSPACE_ID.value.trim() === "") {
-				return yield* new TinybirdOrgTokenError({
-					reason: "MissingWorkspaceId",
+				return yield* new TinybirdOrgTokenConfigError({
+					setting: "WorkspaceId",
 					message: "TINYBIRD_WORKSPACE_ID is required for Tinybird-scoped raw SQL",
 				})
 			}
 			const workspaceId = env.TINYBIRD_WORKSPACE_ID.value
 			const signingKey = Redacted.value(env.TINYBIRD_SIGNING_KEY.value)
 			if (signingKey.trim() === "") {
-				return yield* new TinybirdOrgTokenError({
-					reason: "MissingSigningKey",
+				return yield* new TinybirdOrgTokenConfigError({
+					setting: "SigningKey",
 					message: "TINYBIRD_SIGNING_KEY must not be empty",
 				})
 			}
@@ -103,10 +100,10 @@ export class TinybirdOrgTokenService extends Context.Service<
 						ttlSeconds: JWT_TTL_SECONDS,
 						rpsLimit: Option.getOrUndefined(env.TINYBIRD_RAW_SQL_JWT_RPS_LIMIT),
 					}),
-				catch: () =>
-					new TinybirdOrgTokenError({
-						reason: "MintFailed",
+				catch: (cause) =>
+					new TinybirdOrgTokenMintError({
 						message: "Failed to mint the Tinybird org-scoped read token",
+						cause,
 					}),
 			})
 			cache.set(orgId, {
@@ -116,7 +113,7 @@ export class TinybirdOrgTokenService extends Context.Service<
 			return token
 		})
 
-		return { getOrgReadToken } satisfies TinybirdOrgTokenServiceShape
+		return { getOrgReadToken } satisfies TinybirdOrgTokenServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

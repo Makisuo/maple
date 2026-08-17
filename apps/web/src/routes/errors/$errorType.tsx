@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Schema } from "effect"
 import { formatDistanceToNow, format } from "date-fns"
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Bar, BarChart } from "recharts"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ErrorState } from "@/components/common/error-state"
@@ -14,6 +14,9 @@ import {
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import {
 	formatBucketLabel,
@@ -268,13 +271,10 @@ function ErrorDetailContent() {
 					<h3 className="text-sm font-semibold">Error Frequency</h3>
 					<ChartContainer config={chartConfig} className="h-[160px] w-full">
 						<BarChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-							<CartesianGrid vertical={false} strokeDasharray="3 3" />
-							<XAxis
+							<ChartGrid />
+							<ChartXAxis
 								dataKey="bucket"
-								tickLine={false}
-								axisLine={false}
 								tickMargin={4}
-								fontSize={10}
 								minTickGap={50}
 								tickFormatter={(value) =>
 									formatBucketLabel(
@@ -284,11 +284,8 @@ function ErrorDetailContent() {
 									)
 								}
 							/>
-							<YAxis
-								tickLine={false}
-								axisLine={false}
+							<ChartYAxis
 								tickMargin={4}
-								fontSize={10}
 								width={40}
 								tickFormatter={(value) => formatNumber(value)}
 							/>

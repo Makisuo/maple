@@ -66,7 +66,7 @@ export function registerDeleteAlertRuleTool(server: McpToolRegistrar) {
 								cause: error,
 							}),
 						),
-					"@maple/http/errors/AlertNotFoundError": (error) =>
+					"@maple/http/errors/AlertRuleNotFoundError": (error) =>
 						Effect.fail(
 							new McpQueryError({
 								message: `${error._tag}: ${error.message}. Use list_alert_rules to find available rule IDs.`,

@@ -6,8 +6,9 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete"
+import type { QueryBuilderMetricType } from "@maple/query-model"
 
-export type MetricScopedMetricType = "sum" | "gauge" | "histogram" | "exponential_histogram"
+export type MetricScopedMetricType = QueryBuilderMetricType
 
 const METRIC_TYPES: ReadonlySet<string> = new Set(["sum", "gauge", "histogram", "exponential_histogram"])
 

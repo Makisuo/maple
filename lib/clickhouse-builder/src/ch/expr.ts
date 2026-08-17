@@ -180,7 +180,7 @@ export function makeColumnRef<Name extends string, ColType extends CHType<string
 export function makeCond(fragment: SqlFragment, scopesTenant?: boolean): Condition {
 	return {
 		_brand: "Condition" as const,
-		...(scopesTenant === true ? { scopesTenant: true as const } : {}),
+		...(scopesTenant === true ? { scopesTenant: true as const } : undefined),
 		toFragment: () => fragment,
 		// Composition drops the marker on purpose — see `Condition.scopesTenant`.
 		and: (other) => makeCond(raw(`(${compile(fragment)} AND ${compile(other.toFragment())})`)),

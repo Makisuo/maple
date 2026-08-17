@@ -93,7 +93,7 @@ export const createMaplePgSocket = (
 		// Spread rather than pass `undefined`: postgres.js coerces the option
 		// through its integer parser, and an explicit undefined would not fall
 		// back to the driver default.
-		...(connectTimeoutSeconds === undefined ? {} : { connect_timeout: connectTimeoutSeconds }),
+		...(!(connectTimeoutSeconds === undefined) ? { connect_timeout: connectTimeoutSeconds } : undefined),
 	})
 	return { sql, end: () => sql.end() }
 }

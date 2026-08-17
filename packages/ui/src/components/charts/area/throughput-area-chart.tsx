@@ -1,5 +1,5 @@
 import { memo, useMemo, useId } from "react"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Area, AreaChart } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { throughputTimeSeriesData } from "../_shared/sample-data"
@@ -12,6 +12,9 @@ import {
 	ChartLegendContent,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "../../ui/chart"
 import {
 	inferBucketSeconds,
@@ -140,17 +143,12 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 						/>
 					)}
 				</defs>
-				<CartesianGrid vertical={false} />
-				<XAxis
+				<ChartGrid />
+				<ChartXAxis
 					dataKey="bucket"
-					tickLine={false}
-					axisLine={false}
-					tickMargin={8}
 					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
 				/>
-				<YAxis
-					tickLine={false}
-					axisLine={false}
+				<ChartYAxis
 					tickMargin={8}
 					width={yAxisWidth ?? (rateLabel.length > 3 ? 90 : 60)}
 					tickFormatter={(value: number) => formatThroughput(value, rateLabel)}

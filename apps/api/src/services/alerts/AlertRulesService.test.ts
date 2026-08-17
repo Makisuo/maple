@@ -11,7 +11,7 @@ import { Effect, Layer, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { msToDate } from "@/platform/time"
 import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
-import { AlertRuntime, type AlertRuntimeShape } from "./AlertRuntime"
+import { AlertRuntime, type AlertRuntimeApi } from "./AlertRuntime"
 import { AlertRulesService } from "./AlertRulesService"
 
 // Compile-time guard: warehouse/query-engine, Env, delivery, scheduler, and
@@ -38,7 +38,7 @@ const createdDbs: TestDb[] = []
 
 afterEach(() => cleanupTestDbs(createdDbs))
 
-const runtime: AlertRuntimeShape = {
+const runtime: AlertRuntimeApi = {
 	now: Effect.succeed(NOW),
 	makeUuid: () => RULE,
 	fetch: globalThis.fetch,
@@ -98,7 +98,7 @@ describe("AlertRulesService", () => {
 			assert.deepStrictEqual((yield* rules.listRules(OTHER_ORG)).rules, [])
 
 			const wrongOrg = yield* Effect.flip(rules.deleteRule(OTHER_ORG, ADMIN_ROLES, RULE))
-			assert.strictEqual(wrongOrg._tag, "@maple/http/errors/AlertNotFoundError")
+			assert.strictEqual(wrongOrg._tag, "@maple/http/errors/AlertRuleNotFoundError")
 
 			const deleted = yield* rules.deleteRule(ORG, ADMIN_ROLES, RULE)
 			assert.strictEqual(deleted.id, RULE)
@@ -120,8 +120,8 @@ describe("AlertRulesService", () => {
 					new AlertRuleUpsertRequest({ ...request, destinationIds: [unknown] }),
 				),
 			)
-			assert.strictEqual(error._tag, "@maple/http/errors/AlertValidationError")
-			assert.deepStrictEqual(error.details, [unknown])
+			assert.strictEqual(error._tag, "@maple/http/errors/AlertRuleDestinationNotFoundError")
+			assert.strictEqual(error.destinationId, unknown)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 })

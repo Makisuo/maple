@@ -5,7 +5,7 @@ import type { BaseChartProps } from "../_shared/chart-types"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { cn } from "../../../lib/utils"
-import { heatmapSampleData } from "../_shared/sample-data"
+import { chartTooltipCardClassName } from "../../ui/chart"
 
 interface HeatmapPoint {
 	x: string
@@ -18,7 +18,7 @@ function asFiniteNumber(value: unknown): number {
 	return Number.isFinite(parsed) ? parsed : 0
 }
 
-function deriveHeatmapPoints(rows: Record<string, unknown>[]): HeatmapPoint[] {
+function deriveHeatmapPoints(rows: ReadonlyArray<Record<string, unknown>>): HeatmapPoint[] {
 	if (rows.length === 0) return []
 
 	const first = rows[0]
@@ -101,7 +101,7 @@ const COLOR_SCALES: Record<HeatmapColorScale, readonly string[]> = {
 		"var(--heatmap-cividis-3)",
 		"var(--heatmap-cividis-4)",
 	],
-}
+} satisfies Record<HeatmapColorScale, readonly string[]>
 
 const DEFAULT_COLOR_SCALE: HeatmapColorScale = "amber"
 
@@ -434,8 +434,13 @@ const CellGrid = React.memo(function CellGrid({
 	)
 })
 
+// No sample-data fallback: substituting fixtures for real rows made every
+// misconfigured or mis-fed chart draw a plausible-looking picture instead of an
+// empty one. Gallery thumbnails pass their sample rows in explicitly via `data`.
+const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
+
 export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatmap }: BaseChartProps) {
-	const source = Array.isArray(data) && data.length > 0 ? data : heatmapSampleData
+	const source = Array.isArray(data) ? data : EMPTY_ROWS
 	const points = React.useMemo(() => deriveHeatmapPoints(source), [source])
 
 	// Axis entries where every cell is absent or zero carry no information, but
@@ -763,7 +768,10 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 							{tooltip !== "hidden" && hover && (
 								<div
 									ref={tooltipRef}
-									className="pointer-events-none absolute z-20 -translate-x-1/2 whitespace-nowrap rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl transition-opacity duration-100"
+									className={cn(
+										chartTooltipCardClassName,
+										"pointer-events-none absolute z-20 -translate-x-1/2 whitespace-nowrap transition-opacity duration-100",
+									)}
 									style={{
 										left: tooltipLeft,
 										top: tooltipTop,

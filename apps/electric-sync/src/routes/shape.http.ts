@@ -2,9 +2,9 @@ import { Effect } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { TenantResolver } from "../auth/TenantResolver"
 import { ElectricClient } from "../electric/ElectricClient"
-import { errorResponse, type ShapeError, Unauthorized } from "../errors"
-import { decodeShapeRequest } from "../shapes/request"
-import { shapeResponseHeaders } from "./headers"
+import { errorResponse, type SyncError, Unauthorized } from "../errors"
+import { decodeSyncRequest } from "../shapes/request"
+import { syncResponseHeaders } from "./headers"
 
 /**
  * ElectricSQL shape proxy — the standalone `apps/electric-sync` worker.
@@ -28,7 +28,7 @@ import { shapeResponseHeaders } from "./headers"
 const INTERNAL_URL_BASE = "http://internal"
 
 /** Records the outcome on the `electric_sync.shape` span. Must run inside it. */
-const annotate = (error: ShapeError) => {
+const annotate = (error: SyncError) => {
 	const { status, errorType } = errorResponse(error)
 	return Effect.annotateCurrentSpan({
 		"http.response.status_code": status,
@@ -36,13 +36,13 @@ const annotate = (error: ShapeError) => {
 	})
 }
 
-const respond = (error: ShapeError) => {
+const respond = (error: SyncError) => {
 	const { status, body, headers } = errorResponse(error)
 	return HttpServerResponse.raw(body, { status, headers })
 }
 
 /** Annotate and answer, without failing the span — see the 4xx note below. */
-const rejectClient = (error: ShapeError) => annotate(error).pipe(Effect.as(respond(error)))
+const rejectClient = (error: SyncError) => annotate(error).pipe(Effect.as(respond(error)))
 
 export const ElectricSyncRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
@@ -52,7 +52,7 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 		const handle = Effect.fnUntraced(function* (req: HttpServerRequest.HttpServerRequest) {
 			const clientParams = new URL(req.url, INTERNAL_URL_BASE).searchParams
 
-			const request = yield* Effect.fromResult(decodeShapeRequest(clientParams))
+			const request = yield* Effect.fromResult(decodeSyncRequest(clientParams))
 			yield* Effect.annotateCurrentSpan("maple.sync.shape", request.shape)
 
 			// The configuration gate sits ahead of auth on purpose: a deploy with no
@@ -74,7 +74,7 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 			// caching) and drop headers that misdescribe the re-serialized body.
 			return HttpServerResponse.raw(upstream.body, {
 				status: upstream.status,
-				headers: shapeResponseHeaders(upstream.headers),
+				headers: syncResponseHeaders(upstream.headers),
 			})
 		})
 

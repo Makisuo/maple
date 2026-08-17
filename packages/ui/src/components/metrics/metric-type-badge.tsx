@@ -17,7 +17,7 @@ const metricTypeConfig: Record<string, { label: string; className: string }> = {
 		label: "Exp Hist",
 		className: "bg-primary/15 text-primary",
 	},
-}
+} satisfies Record<string, { label: string; className: string }>
 
 /** Chart color per metric type, paired with the badge palette (sparklines, previews). */
 export const METRIC_TYPE_COLORS: Record<string, string> = {
@@ -25,7 +25,7 @@ export const METRIC_TYPE_COLORS: Record<string, string> = {
 	gauge: "var(--severity-info)",
 	histogram: "var(--chart-4)",
 	exponential_histogram: "var(--primary)",
-}
+} satisfies Record<string, string>
 
 interface MetricTypeBadgeProps {
 	type: string

@@ -16,7 +16,7 @@ export const searchLogs = Effect.fn("Observability.searchLogs")(function* (input
 		...(input.search && { search: input.search }),
 		...(input.traceId && { trace_id: input.traceId }),
 		...(input.spanId && { span_id: input.spanId }),
-	}
+	} satisfies Record<string, unknown>
 
 	const params = {
 		start_time: input.timeRange.startTime,

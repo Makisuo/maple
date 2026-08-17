@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant } from "@maple/domain/http"
-import { MapleApiV2, PublicIdPrefixes, dependencyUnavailable, encodePublicId } from "@maple/domain/http/v2"
+import { MapleApiV2, PublicIdPrefixes, encodePublicId } from "@maple/domain/http/v2"
 import type { PublicIdPrefix, V2SetupAudit, V2SetupAuditAffectedEntity } from "@maple/domain/http/v2"
 import type { AuditAffectedEntity, AuditCheckResult, SetupAuditReport } from "@maple/domain/setup-audit"
 import { Effect } from "effect"
@@ -16,7 +16,7 @@ const PUBLIC_ID_PREFIX_BY_KIND: Partial<Record<AuditAffectedEntity["kind"], Publ
 	alert_destination: PublicIdPrefixes.alertDestination,
 	attribute_mapping: PublicIdPrefixes.attributeMapping,
 	scrape_target: PublicIdPrefixes.scrapeTarget,
-}
+} satisfies Partial<Record<AuditAffectedEntity["kind"], PublicIdPrefix>>
 
 const toV2Affected = (entity: AuditAffectedEntity): V2SetupAuditAffectedEntity => {
 	const prefix = PUBLIC_ID_PREFIX_BY_KIND[entity.kind]
@@ -63,13 +63,7 @@ export const HttpV2InstrumentationAuditLive = HttpApiBuilder.group(
 					const tenant = yield* CurrentTenant.Context
 					// Only a configuration read failure reaches here — a warehouse outage degrades to
 					// skipped checks inside the service rather than failing the request.
-					const report = yield* service
-						.run(tenant)
-						.pipe(
-							Effect.catchTag("@maple/api/services/SetupAuditError", () =>
-								Effect.fail(dependencyUnavailable("setup_audit_unavailable")),
-							),
-						)
+					const report = yield* service.run(tenant)
 					return toV2SetupAudit(report)
 				}),
 			)

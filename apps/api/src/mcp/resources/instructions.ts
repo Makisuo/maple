@@ -46,195 +46,52 @@ export const InstructionsResource = McpServer.resource({
 - Service discovery: list_services -> diagnose_service
 - Alert management: list_alert_rules -> get_alert_rule -> create_alert_rule / update_alert_rule / delete_alert_rule -> list_alert_incidents
 
-## Dashboard Widget JSON
+## Dashboards
 
-Read this before submitting raw widget JSON to \`create_dashboard\` (with \`dashboard_json\`), \`add_dashboard_widget\`, or \`update_dashboard_widget\`. The MCP call returns success even when the stored shape will fail at query time — it produces \`Invalid input for getQueryBuilderTimeseries\` only when the widget is rendered. Prefer the simplified \`widgets\` array on \`create_dashboard\` (\`{ title, source, metric, group_by?, service_name?, unit? }\`) when possible — it fills these traps for you.
+Authoring or editing a dashboard widget? **Call \`describe_dashboard_schema\` first.** It returns
+the panel-type table, the four data-source kinds with worked examples, the unit vocabulary, valid
+aggregations and group-by tokens per source, the display config, and the raw-SQL conventions —
+all generated from the live schema, so unlike a remembered example they cannot be stale.
 
-### Query source determines which fields apply
-Query drafts inside \`params.queries[]\` are discriminated by \`dataSource\`. Trace and log
-queries carry ONLY the shared fields. The metric-only fields — \`metricName\`,
-\`metricType\`, \`isMonotonic\`, \`signalSource\` — belong solely to \`dataSource: "metrics"\`
-queries; do not add them to trace or log queries.
+Three things worth knowing before you get there, because each one fails silently:
 
-### whereClause is a custom grammar (NOT SQL)
-Operators (the only ones): \`=\`, \`!=\`, \`>\`, \`<\`, \`>=\`, \`<=\`, \`contains\`, \`!contains\`, \`exists\`, \`!exists\`. Clauses joined by \` AND \` (case-insensitive). Quoted values use double quotes. Keys are lowercased. **There is no \`IS NULL\` / \`IS NOT NULL\`** — use \`<key> exists\` (present) or \`<key> !exists\` (absent).
-- Wrong: \`service.name = "ingest" AND maple.signal IS NOT NULL\`
-- Right: \`service.name = "ingest" AND maple.signal exists\`
+1. **A data source is a \`kind\`-discriminated union** (\`query\` | \`raw_sql\` | \`route\` | \`static\`).
+   The old \`{ "endpoint": …, "params": … }\` shape is retired and will not decode. A \`query\`
+   source spreads \`queries\`/\`formulas\` at the top level and requires \`resultShape\`.
+2. **\`percent\` means a 0–1 fraction** (multiplied by 100 on render); \`percent_100\` means 0–100.
+   This is inverted from Grafana. The traces \`error_rate\` aggregation returns 0–1, so it pairs
+   with \`percent\`. Any other string — \`"ms"\`, \`"%"\`, \`"GB"\` — saves fine and renders as a bare
+   number.
+3. **\`groupBy\` is ignored unless \`addOns.groupBy\` is \`true\`.** The array being present is not
+   enough; the chart quietly shows an ungrouped total.
 
-On \`dataSource: "traces"\` you can filter by ANY span/resource attribute: a bare key outside the structured allowlist (\`service.name\`, \`span.name\`, \`deployment.environment\`, \`deployment.commit_sha\`, \`root_only\`, \`has_error\`) is auto-treated as \`attr.<key>\`, so \`query.context = "x"\`, \`error.type != "Timeout"\`, \`db.system = "clickhouse"\` all work; or write \`attr.<key>\` / \`resource.<key>\` explicitly (max 5 each). Clauses the engine cannot honor (over the cap, unsupported logs/metrics keys) now **fail the write** (add/update/replace widget) — nothing is saved — instead of being silently dropped.
+### Picking a tool
 
-### Valid \`aggregation\` per \`dataSource\`
-- traces: \`count\`, \`avg_duration\`, \`p50_duration\`, \`p95_duration\`, \`p99_duration\`, \`error_rate\`
-- metrics: \`rate\`, \`increase\`, \`avg\`, \`sum\`, \`count\`, \`min\`, \`max\`, \`p50\`, \`p95\`, \`p99\`
-- logs: \`count\`
-
-\`rate\`/\`sum\`/\`increase\` are invalid for traces.
-
-### \`groupBy\` only accepts a literal allowlist + \`attr.<key>\`
-The query-builder does NOT accept arbitrary attribute names directly. Each data source has a small allowlist of named groupings; for anything outside that list you MUST use \`attr.<key>\`. Unrecognized tokens are dropped — which now makes the widget mutation tools **reject the write** (nothing saved) rather than silently grouping by nothing. Separately, if a groupBy on a valid attribute finds zero distinct values the chart collapses to one "all" series, which \`inspect_chart_data\` flags as \`EMPTY_GROUPING\` (verdict \`broken\`).
-
-- **traces** — recognized literals: \`service\` / \`service.name\`, \`span\` / \`span.name\`, \`status\` / \`status.code\`, \`http.method\`, \`none\` / \`all\`. Everything else (\`maple.signal\`, \`http.response.status_code\`, \`http.route\`, \`server.address\`, \`error.type\`, \`maple.org_id\`, \`maple.ingest.*\`, etc.) MUST be prefixed: \`attr.maple.signal\`, \`attr.http.response.status_code\`, \`attr.http.route\`, \`attr.server.address\`, \`attr.error.type\`, \`attr.maple.org_id\`, \`attr.maple.ingest.upstream_pool\`, etc.
-- **logs** — recognized literals: \`service\` / \`service.name\`, \`severity\`, \`none\` / \`all\`. **No \`attr.*\` support yet** — grouping by arbitrary log attributes is not supported, the token will be silently dropped.
-- **metrics** — recognized literals: \`service\` / \`service.name\`, \`none\` / \`all\`. Everything else MUST be prefixed: \`attr.signal\`, \`attr.org_id\`, etc.
-
-Verify groupBy actually applied by running \`inspect_chart_data\` after writing the widget: \`seriesCount > 1\` (and names that look like attribute values, not the literal string \`"all"\`) confirms the breakdown landed. If you see \`seriesCount: 1\` with name \`"all"\`, the groupBy was silently dropped — add the \`attr.\` prefix.
-
-### \`display.unit\` is mandatory
-Always set on chart and stat widgets. Default \`"number"\`. Pick \`duration_ms\` for \`*_duration\`, \`percent\` for \`error_rate\`, \`bytes\`/\`GB\` for sizes.
-
-### Stat widgets need \`reduceToValue\`
-For \`visualization: "stat"\`, add to dataSource:
-\`\`\`
-"transform": { "reduceToValue": { "field": "value", "aggregate": "sum" } }
-\`\`\`
-Valid aggregates: \`sum | first | count | avg | max | min\`. **No \`last\`.** Without it the stat shows \`[object Object]\`.
-
-### Hiding auxiliary queries on formula charts
-\`query.hidden: true\` alone is UI-only. For raw JSON, also add:
-\`\`\`
-"transform": { "hideSeries": { "baseNames": ["A", "B"] } }
-\`\`\`
-\`baseNames\` matches each hidden query's \`legend || name\`. Otherwise the auxiliary series render at full scale and skew percent-axis charts.
-
-### Per-widget time range (rare)
-A widget follows the dashboard's time range unless it carries its own optional top-level \`timeRange\`, in the dashboard's shape: \`{"type":"relative","value":"30m"}\` or \`{"type":"absolute","startTime":"...","endTime":"..."}\` (ISO 8601). Omit it for almost every widget — pin one only when the window is part of what the tile means ("active in the last 30 minutes" on a 7-day board). A relative override rebases against "now" on each refresh; the widget header labels the pinned range; dashboard variables still apply. \`add_dashboard_widget\` takes it as \`time_range_json\`; the widget-JSON tools take it inline — and since \`update_dashboard_widget\` replaces the whole widget, omitting \`timeRange\` there REMOVES an existing override.
-
-### Batch rebuild
-\`replace_dashboard_widgets\` replaces a dashboard's ENTIRE widget list in one atomic, validated write — \`widgets_json\` is a JSON array of widget objects (same shape as \`widgets[]\` from \`get_dashboard\`); per-widget \`id\`/\`layout\` are optional (auto-generated/auto-placed). Every widget is validated before anything persists, so one bad widget aborts the whole batch. Prefer it over many incremental calls or a corruption-prone full \`dashboard_json\` replace.
+- \`describe_dashboard_schema\` — what a widget can be. Read before writing.
+- \`create_dashboard\` — a new board, from a template, a simplified \`widgets\` array, or full JSON.
+- \`add_dashboard_widget\` / \`update_dashboard_widget\` / \`remove_dashboard_widget\` — one widget.
+  Pass \`panel_type\` (\`line\`, \`bar\`, \`area\`, \`hbar\`, \`pie\`, \`stat\`, \`gauge\`, \`table\`, \`list\`,
+  \`histogram\`, \`heatmap\`, \`funnel\`, \`markdown\`); the \`chartId\` and raw-SQL display type follow.
+- \`replace_dashboard_widgets\` — rebuild the whole widget list atomically. Prefer it over many
+  incremental calls or a full \`dashboard_json\` replace.
+- \`reorder_dashboard_widgets\` — layout only.
+- \`inspect_chart_data\` — what a widget actually returns. Use it after writing.
 
 ### Verification
-The mutation tools now reject clauses the engine can't honor BEFORE persisting (a bad whereClause/groupBy fails the write — nothing saved — instead of degrading to wrong/empty data), and return an automatic \`inspect_chart_data\` summary. \`inspect_chart_data\` now also evaluates \`formulas[]\` (formula/hit-rate widgets verify end-to-end) and applies \`reduceToValue\` with the renderer's first-numeric-field fallback (stat \`reducedValue\` reflects what renders); \`SUSPICIOUS_GAP\` is informational and never downgrades the verdict on its own. After writing a widget: read the validation summary, fix any \`suspicious\`/\`broken\` widget, and resubmit — or call \`inspect_chart_data\` / \`get_dashboard\` / load the dashboard URL. Flags to know: \`EMPTY_GROUPING\` (groupBy found zero distinct values), \`METRIC_NOT_FOUND\` (metrics widget's metric name isn't in the warehouse — distinct from a real metric with no recent data), \`BUILDER_WARNINGS\`.
 
-## Raw SQL Widgets (\`raw_sql_chart\` endpoint)
+The mutation tools reject a widget whose query has clauses the engine cannot honor, and one that
+cannot render at all (a note wired to a query, a scalar with no \`reduceToValue\`, a list backed by
+SQL) — nothing is saved in either case. Softer problems come back as render warnings alongside an
+automatic \`inspect_chart_data\` summary. Read the summary; a \`suspicious\` or \`broken\` verdict means
+the chart is not showing what you intended. Flags worth knowing: \`EMPTY_GROUPING\` (the group-by
+found zero distinct values), \`METRIC_NOT_FOUND\` (the metric name is not in the warehouse, as
+distinct from a real metric with no recent data), \`PERCENT_SCALE_MISMATCH\` (the unit and the data
+disagree about 0–1 vs 0–100), \`UNIT_MISMATCH\`. \`SUSPICIOUS_GAP\` is informational and never
+downgrades a verdict on its own.
 
-When you pass \`sql\` to \`add_dashboard_widget\` (or build a widget with \`dataSource.endpoint: "raw_sql_chart"\`), you author ClickHouse SQL directly. The server expands macros and runs the SQL through the warehouse. Use this path when the structured query builder can't express what you need (window functions, multi-step CTEs, unusual aggregations, joins).
-
-### Macros — what gets substituted
-- \`$__orgFilter\` → \`OrgId = '<your org>'\` — **REQUIRED** for sorting-key pruning and defense in depth. Tenant isolation is also enforced by scoped warehouse credentials.
-- \`$__timeFilter(Column)\` → \`Column >= toDateTime('<start>') AND Column <= toDateTime('<end>')\`. \`Column\` must be a bare identifier (letters/digits/underscores/dots) — no expressions. **Prefer this over \`$__startTime\`/\`$__endTime\`** for WHERE clauses.
-- \`$__startTime\` / \`$__endTime\` → \`toDateTime('…')\` literals. Use when you need the bound inline somewhere other than a WHERE comparison.
-- \`$__interval_s\` → integer bucket size in seconds. Resolved from \`granularity_seconds\` (or auto-derived from the dashboard time range when omitted). **Only interpolate this if your SQL actually buckets time** — otherwise \`granularity_seconds\` is a no-op.
-
-### Safety rules (server-enforced)
-- One statement only. Multiple statements separated by \`;\` are rejected.
-- Deny-listed keywords (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, RENAME, ATTACH, DETACH, CREATE, GRANT, REVOKE, OPTIMIZE, SYSTEM, KILL) trigger a \`DisallowedStatement\` error. Comments and string literals are masked first so a SELECT containing the word "drop" in a string is fine.
-- Every query is wrapped in an outer \`LIMIT 1001\`; the extra row is an overflow sentinel for the public 1,000-row cap.
-
-### Tables — discover at call time
-
-Call \`describe_warehouse_tables\` to enumerate every available table; pass \`table: "<name>"\` to get the full column list (with ClickHouse types and jsonPaths), the sorting-key prefix, and curated notes (enum casing, unit warnings, when to use a pre-aggregated table). The tool reads from the live datasource definitions, so it never goes stale.
-
-**Universal conventions that apply to every table**:
-- Column names are PascalCase (\`ServiceName\`, \`Timestamp\`, \`StatusCode\`) — never snake_case.
-- \`StatusCode\` (spans) and \`SeverityText\` (logs) values are **Title Case** (\`'Error'\`, \`'Ok'\`, \`'Unset'\`, \`'Info'\`, \`'Warn'\`, etc.) — uppercase / lowercase strings silently match zero rows.
-- Span \`Duration\` is **nanoseconds** (UInt64). Divide by \`1e6\` for ms, \`1e9\` for seconds.
-- Attribute access on Map columns: \`SpanAttributes['http.method']\` — square brackets, string key. Missing keys return \`''\`, not NULL.
-- Tables are sorted by some prefix of \`(OrgId, ServiceName, Timestamp)\`. Filter on \`ServiceName\` early to keep queries on the sort-key prefix.
-
-### Result shape per \`display_type\` (what to SELECT)
-
-The renderer is opinionated about column names. Get these wrong and the chart shows empty / \`[object Object]\` / mislabeled axes.
-
-- **line / area / bar (timeseries)** — SELECT a time bucket as the first DateTime column (alias \`bucket\` is conventional but any DateTime-typed first column works) plus one or more **numeric** series columns. The column name becomes the legend label. **String columns are silently dropped**, so for multi-series breakdowns (e.g., one line per service) you must pivot in SQL — the renderer does NOT auto-pivot tall form.
-  Single series:
-  \`\`\`sql
-  SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket,
-         count() AS logs
-  FROM logs
-  WHERE $__orgFilter AND $__timeFilter(Timestamp)
-  GROUP BY bucket
-  ORDER BY bucket
-  \`\`\`
-  Multi-series (wide form via \`countIf\` / \`sumIf\`):
-  \`\`\`sql
-  SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket,
-         countIf(SeverityText = 'Info')  AS Info,
-         countIf(SeverityText = 'Warn')  AS Warn,
-         countIf(SeverityText = 'Error') AS Error
-  FROM logs
-  WHERE $__orgFilter AND $__timeFilter(Timestamp)
-  GROUP BY bucket
-  ORDER BY bucket
-  \`\`\`
-  **Wrong** (tall form, collapses to a single aggregate line — the \`ServiceName\` string column is dropped):
-  \`\`\`sql
-  SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket,
-         ServiceName,
-         count() AS requests
-  FROM service_overview_spans
-  WHERE $__orgFilter AND $__timeFilter(Timestamp)
-  GROUP BY bucket, ServiceName
-  \`\`\`
-  For dynamic series labels (when you don't know the values up-front), discover them first via a separate query — e.g., \`SELECT DISTINCT ServiceName FROM service_overview_spans WHERE $__orgFilter AND $__timeFilter(Timestamp) ORDER BY count() DESC LIMIT 10\` — then build the \`countIf\` columns.
-
-- **stat** — SELECT a single scalar aliased \`value\`. The auto-injected \`reduceToValue\` transform reads \`data[0].value\`; any other alias renders \`[object Object]\`.
-  \`\`\`sql
-  SELECT count() AS value
-  FROM error_spans
-  WHERE $__orgFilter AND $__timeFilter(Timestamp)
-  \`\`\`
-
-- **pie** — SELECT a \`name\` (string label) column plus at least one numeric column (first numeric wins as the value). Cap to ≤ ~10 slices for readability.
-  \`\`\`sql
-  SELECT ServiceName AS name, count() AS value
-  FROM service_overview_spans
-  WHERE $__orgFilter AND $__timeFilter(Timestamp)
-  GROUP BY name
-  ORDER BY value DESC
-  LIMIT 8
-  \`\`\`
-
-- **funnel** — SELECT a \`name\` (string stage label) column plus a numeric column (first numeric wins as the value). Rows render top-to-bottom in the order returned as descending bars; each stage shows its value, share of the first stage, and step-to-step conversion. \`ORDER BY value DESC\` for a classic ranked funnel, or keep your own logical stage order for a conversion funnel. Cap to ≤ ~8 stages.
-  \`\`\`sql
-  SELECT ServiceName AS name, count() AS value
-  FROM service_overview_spans
-  WHERE $__orgFilter AND $__timeFilter(Timestamp)
-  GROUP BY name
-  ORDER BY value DESC
-  LIMIT 8
-  \`\`\`
-
-- **hbar** — SELECT a \`name\` (string category label) column plus a numeric column (first numeric wins as the value). Rows are sorted by value and drawn as horizontal bars; each shows its value and its share of the **total**. This is the panel for any ranked "top N by volume" question — prefer it over \`funnel\`, which implies sequential stages and labels each bar as a share of the largest one. Cap to ≤ ~10 rows.
-  \`\`\`sql
-  SELECT SpanName AS name, count() AS value
-  FROM service_overview_spans
-  WHERE $__orgFilter AND $__timeFilter(Timestamp)
-  GROUP BY name
-  ORDER BY value DESC
-  LIMIT 10
-  \`\`\`
-
-- **heatmap** — SELECT three columns aliased \`x\`, \`y\`, \`value\`. Cast \`x\`/\`y\` to strings if they're numeric (the renderer treats them as labels).
-  \`\`\`sql
-  SELECT ServiceName AS x,
-         toString(toHour(Timestamp)) AS y,
-         count() AS value
-  FROM service_overview_spans
-  WHERE $__orgFilter AND $__timeFilter(Timestamp)
-  GROUP BY x, y
-  ORDER BY x, y
-  \`\`\`
-
-- **table** — any rows; columns render as-is in the order returned. Use explicit \`AS\` aliases for nice headers.
-
-- **histogram** — SELECT one numeric column aliased \`value\` (one row per observation; the renderer buckets client-side). Cap with a sensible LIMIT.
-  \`\`\`sql
-  SELECT Duration / 1000000 AS value
-  FROM service_overview_spans
-  WHERE $__orgFilter AND $__timeFilter(Timestamp)
-  LIMIT 5000
-  \`\`\`
-
-### \`granularity_seconds\` vs manual bucketing
-\`granularity_seconds\` only matters if your SQL references \`$__interval_s\` somewhere (typically inside \`toStartOfInterval\`). Setting it without using the macro is harmless but pointless. Conversely, manual bucketing like \`toStartOfMinute(Timestamp)\` ignores \`granularity_seconds\` entirely. **Pick one**: either \`toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND)\` + \`granularity_seconds\`, or a fixed \`toStartOf*\` and omit \`granularity_seconds\`.
-
-### Common failure modes
-- **Wrong case on enum values** (\`'ERROR'\` vs \`'Error'\`, \`'Server'\` vs \`'SERVER'\`) → query runs, returns zero rows, widget renders empty. Always Title Case for \`StatusCode\` / \`SpanKind\` / \`SeverityText\`.
-- **Wrong duration unit** → numbers look reasonable but are 1000× off. Span \`Duration\` is **nanoseconds** — divide before showing as ms.
-- **Stat alias wrong** → \`SELECT count()\` without \`AS value\` produces \`[object Object]\`.
-- **Pie missing \`name\` column** → renderer can't label slices.
-- **Timeseries with no DateTime in the first row** → reshape skips and you get raw rows; the chart looks empty. Put the bucket column first OR alias it \`bucket\`.
-- **\`Map\` lookup on missing key** returns empty string, not NULL — use \`SpanAttributes['k'] != ''\` not \`IS NOT NULL\`.
-- **High-cardinality groupBy** without LIMIT → the server's outer 1,000-row cap protects the response, but the chart can still struggle. Add a tighter explicit \`LIMIT\` for pie/table/heatmap.`,
+Whole-document writes (\`create_dashboard\`/\`update_dashboard\` with \`dashboard_json\`) report the
+same problems as warnings but never block — they are the restore path, and a board that predates
+a rule still has to round-trip.
+`,
 	),
 })

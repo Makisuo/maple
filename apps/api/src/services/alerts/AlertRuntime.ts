@@ -3,7 +3,7 @@ import { Clock, Context, Effect, Layer } from "effect"
 
 const DELIVERY_TIMEOUT_MS_DEFAULT = 15_000
 
-export interface AlertRuntimeShape {
+export interface AlertRuntimeApi {
 	/** Current wall-clock time in epoch ms, sourced from Effect's `Clock` so tests drive it via `TestClock`. */
 	readonly now: Effect.Effect<number>
 	readonly makeUuid: () => string
@@ -11,8 +11,8 @@ export interface AlertRuntimeShape {
 	readonly deliveryTimeoutMs: () => number
 }
 
-export class AlertRuntime extends Context.Reference<AlertRuntimeShape>("@maple/api/services/AlertRuntime", {
-	defaultValue: (): AlertRuntimeShape => ({
+export class AlertRuntime extends Context.Reference<AlertRuntimeApi>("@maple/api/services/AlertRuntime", {
+	defaultValue: (): AlertRuntimeApi => ({
 		now: Clock.currentTimeMillis,
 		makeUuid: () => randomUUID(),
 		fetch: globalThis.fetch,

@@ -10,7 +10,7 @@ export const CATEGORY_META: Record<BlogCategory, { label: string }> = {
 	product: { label: "product" },
 	guides: { label: "guides" },
 	company: { label: "company" },
-}
+} satisfies Record<BlogCategory, { label: string }>
 
 /** Published posts, newest first. Drafts are excluded in production builds. */
 export async function getSortedPosts(): Promise<BlogPost[]> {

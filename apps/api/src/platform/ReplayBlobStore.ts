@@ -39,7 +39,7 @@ export interface HydratableChunk {
 	readonly events: string
 }
 
-export interface ReplayBlobStoreShape {
+export interface ReplayBlobStoreApi {
 	/**
 	 * Fill in `events` for every blob-backed chunk, preserving order.
 	 *
@@ -62,9 +62,7 @@ export interface ReplayBlobStoreShape {
 const FETCH_CONCURRENCY = 8
 
 const decodeGzip = (bytes: Uint8Array): Promise<string> =>
-	new Response(
-		new Blob([bytes as unknown as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip")),
-	).text()
+	new Response(new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"))).text()
 
 const makeHydrate =
 	(bucket: R2BucketClient) =>
@@ -99,7 +97,7 @@ const makeHydrate =
 			{ concurrency: FETCH_CONCURRENCY },
 		).pipe(Effect.map(Arr.getSomes))
 
-export class ReplayBlobStore extends Context.Service<ReplayBlobStore, ReplayBlobStoreShape>()(
+export class ReplayBlobStore extends Context.Service<ReplayBlobStore, ReplayBlobStoreApi>()(
 	"@maple/api/platform/ReplayBlobStore",
 	{
 		make: Effect.gen(function* () {

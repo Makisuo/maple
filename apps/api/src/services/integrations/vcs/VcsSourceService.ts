@@ -39,7 +39,7 @@ export interface ConnectedSourceRepository {
 	readonly isArchived: boolean
 }
 
-export interface VcsSourceServiceShape {
+export interface VcsSourceServiceApi {
 	readonly listRepositories: (
 		orgId: OrgId,
 	) => Effect.Effect<ReadonlyArray<ConnectedSourceRepository>, VcsSourceError>
@@ -68,12 +68,12 @@ const asUpstream = <A, E extends { readonly message: string; readonly status?: n
 			(error) =>
 				new IntegrationsUpstreamError({
 					message: error.message,
-					...(error.status === undefined ? {} : { status: error.status }),
+					...(!(error.status === undefined) ? { status: error.status } : undefined),
 				}),
 		),
 	)
 
-export class VcsSourceService extends Context.Service<VcsSourceService, VcsSourceServiceShape>()(
+export class VcsSourceService extends Context.Service<VcsSourceService, VcsSourceServiceApi>()(
 	"@maple/api/services/vcs/VcsSourceService",
 	{
 		make: Effect.gen(function* () {
@@ -140,7 +140,7 @@ export class VcsSourceService extends Context.Service<VcsSourceService, VcsSourc
 					.sort((a, b) => a.fullName.localeCompare(b.fullName))
 			})
 
-			const searchCode: VcsSourceServiceShape["searchCode"] = Effect.fn("VcsSourceService.searchCode")(
+			const searchCode: VcsSourceServiceApi["searchCode"] = Effect.fn("VcsSourceService.searchCode")(
 				function* (orgId, repositoryName, query, opts) {
 					yield* Effect.annotateCurrentSpan({
 						orgId,
@@ -164,7 +164,7 @@ export class VcsSourceService extends Context.Service<VcsSourceService, VcsSourc
 				},
 			)
 
-			const readFile: VcsSourceServiceShape["readFile"] = Effect.fn("VcsSourceService.readFile")(
+			const readFile: VcsSourceServiceApi["readFile"] = Effect.fn("VcsSourceService.readFile")(
 				function* (orgId, repositoryName, path, requestedRef) {
 					yield* Effect.annotateCurrentSpan({
 						orgId,
@@ -198,7 +198,7 @@ export class VcsSourceService extends Context.Service<VcsSourceService, VcsSourc
 				},
 			)
 
-			return { listRepositories, searchCode, readFile } satisfies VcsSourceServiceShape
+			return { listRepositories, searchCode, readFile } satisfies VcsSourceServiceApi
 		}),
 	},
 ) {

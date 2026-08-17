@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // Shared plumbing for the ClickHouse-backed e2e tests.
 //
 // Both suites need the same three things: connection settings from the CI job's
@@ -116,7 +117,7 @@ export interface DescribedColumn {
  */
 export const ANALYZER_STRICTNESS: Record<string, string> = {
 	use_variant_as_common_type: "0",
-}
+} satisfies Record<string, string>
 
 /**
  * Run a query through ClickHouse's analyzer without reading a row.

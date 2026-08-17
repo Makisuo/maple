@@ -1,10 +1,4 @@
-import {
-	MAX_QUERY_RANGE_SECONDS,
-	formatWarehouseDateTime,
-	parseWarehouseDateTime,
-	resolveRelativeRangeToWarehouse,
-	validateRelativeRange,
-} from "@maple/query-engine"
+import { MAX_QUERY_RANGE_SECONDS, resolveTimeRangeWindow, validateRelativeRange } from "@maple/query-engine"
 
 export interface ResolvedTimeRange {
 	startTime: string
@@ -36,24 +30,11 @@ export type DashboardTimeRangeInput =
  * Resolves a dashboard `timeRange` (relative shorthand like "24h" or absolute
  * ISO timestamps) into Tinybird's `YYYY-MM-DD HH:mm:ss` UTC format.
  *
+ * The shared resolver, unsnapped: an agent inspecting a chart wants the window
+ * as of now, not the cache-grid-floored one the browser keys its fetches on.
  * Returns `null` for unrecognized relative shorthands so the caller can fall
  * back to a sensible default window.
  */
 export function resolveDashboardTimeRange(timeRange: DashboardTimeRangeInput): ResolvedTimeRange | null {
-	if (timeRange.type === "absolute") {
-		// `parseWarehouseDateTime`, not `Date.parse`: a stored bound may be the
-		// tz-less `YYYY-MM-DD HH:MM:SS` shape, which `Date.parse` reads as local
-		// time and silently shifts by the runtime's UTC offset.
-		const startMs = parseWarehouseDateTime(timeRange.startTime)
-		const endMs = parseWarehouseDateTime(timeRange.endTime)
-		if (Number.isNaN(startMs) || Number.isNaN(endMs)) return null
-		return {
-			startTime: formatWarehouseDateTime(startMs),
-			endTime: formatWarehouseDateTime(endMs),
-		}
-	}
-
-	// Relative shorthand — including "today" — is resolved by the shared grammar,
-	// so this no longer approximates a month as 30 days the way it used to.
-	return resolveRelativeRangeToWarehouse(timeRange.value)
+	return resolveTimeRangeWindow(timeRange, { snap: false })
 }

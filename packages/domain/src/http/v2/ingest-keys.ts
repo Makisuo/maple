@@ -1,11 +1,10 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
-import { Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2PermissionError, V2ServiceUnavailableError } from "./errors"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
+import { IngestKeyEncryptionError, IngestKeyPersistenceError } from "../ingest-keys"
+import { AuthorizationV2 } from "./auth"
+import { wireExample, Timestamp } from "./envelopes"
+import { V2InsufficientPermissions } from "./errors"
+import { publicErrors } from "./public-error"
 
 const ingestKeysExample = {
 	object: "ingest_keys",
@@ -48,13 +47,13 @@ export const V2IngestKeys = Schema.Struct({
 })
 export type V2IngestKeys = Schema.Schema.Type<typeof V2IngestKeys>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError, V2PermissionError] as const
+const ingestKeyErrors = publicErrors(IngestKeyPersistenceError, IngestKeyEncryptionError)
 
 export class V2IngestKeysApiGroup extends HttpApiGroup.make("ingestKeys")
 	.add(
 		HttpApiEndpoint.get("retrieve", "/", {
 			success: V2IngestKeys,
-			error: [...commonErrors],
+			error: [V2InsufficientPermissions.schema, ...ingestKeyErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getIngestKeys",
@@ -67,7 +66,7 @@ export class V2IngestKeysApiGroup extends HttpApiGroup.make("ingestKeys")
 	.add(
 		HttpApiEndpoint.post("rollPublic", "/public/roll", {
 			success: V2IngestKeys,
-			error: [...commonErrors],
+			error: [V2InsufficientPermissions.schema, ...ingestKeyErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "rollPublicIngestKey",
@@ -80,7 +79,7 @@ export class V2IngestKeysApiGroup extends HttpApiGroup.make("ingestKeys")
 	.add(
 		HttpApiEndpoint.post("rollPrivate", "/private/roll", {
 			success: V2IngestKeys,
-			error: [...commonErrors],
+			error: [V2InsufficientPermissions.schema, ...ingestKeyErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "rollPrivateIngestKey",
@@ -92,7 +91,6 @@ export class V2IngestKeysApiGroup extends HttpApiGroup.make("ingestKeys")
 	)
 	.prefix("/v2/ingest_keys")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Ingest Keys",

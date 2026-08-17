@@ -2,6 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema, SchemaGetter } from "effect"
 import {
 	DashboardId,
+	DashboardShareId,
 	DashboardTemplateCategory,
 	DashboardTemplateId,
 	DashboardTemplateParameterKey,
@@ -11,20 +12,43 @@ import {
 } from "../../primitives"
 import {
 	DashboardQueryVariableFacet,
+	DashboardConcurrencyError,
+	DashboardNotFoundError,
+	DashboardPersistenceError,
+	DashboardStoredConfigInvalidError,
 	DashboardRefreshIntervalSeconds,
+	DashboardTemplateNotFoundError,
 	DashboardTemplatePreviewKind,
+	DashboardValidationError,
 	DashboardVariableName,
+	DashboardVersionNotFoundError,
 	DashboardVersionChangeKind,
 } from "../dashboards"
-import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "../widget-types"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
+import {
+	DashboardShareMode,
+	ShareNotConfiguredError,
+	ShareNotFoundError,
+	SharePersistenceError,
+	ShareWidgetNotFoundError,
+} from "../share"
+import { SORT_DIRECTIONS, STAT_AGGREGATES } from "@maple/widgets/dashboard"
+import {
+	QUERY_RESULT_KINDS,
+	QueryBuilderFormulaSchema,
+	QueryBuilderQueryDraftSchema,
+	QueryComparisonSchema,
+} from "@maple/query-model"
+import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES, WIDGET_VISUALIZATIONS } from "../widget-types"
+import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2ConflictError, V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
+import { V2ParameterInvalid, V2ParameterMissing } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
+import { publicErrors } from "./public-error"
 
 export const DashboardPublicId = PublicId(PublicIdPrefixes.dashboard, DashboardId)
 export const DashboardVersionPublicId = PublicId(PublicIdPrefixes.dashboardVersion, DashboardVersionId)
 export const DashboardTemplatePublicId = PublicId(PublicIdPrefixes.dashboardTemplate, DashboardTemplateId)
+export const DashboardSharePublicId = PublicId(PublicIdPrefixes.dashboardShare, DashboardShareId)
 
 const optional = <S extends Schema.Top>(schema: S) => Schema.optionalKey(schema)
 
@@ -39,14 +63,20 @@ export const V2TimeRange = Schema.Union([
 
 const StringRecord = Schema.Record(Schema.String, Schema.String)
 const UnknownRecordWire = Schema.Record(Schema.String, Schema.Unknown)
+const decodeJsonValueSync = Schema.decodeUnknownSync(Schema.Json)
 
-const mapJsonKeys = (value: unknown, mapKey: (key: string) => string): unknown => {
-	if (Array.isArray(value)) return value.map((item) => mapJsonKeys(item, mapKey))
+const isJsonArray = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value)
+
+const mapDecodedJsonKeys = (value: Schema.Json, mapKey: (key: string) => string): Schema.Json => {
+	if (isJsonArray(value)) return value.map((item) => mapDecodedJsonKeys(item, mapKey))
 	if (typeof value !== "object" || value === null) return value
 	return Object.fromEntries(
-		Object.entries(value).map(([key, item]) => [mapKey(key), mapJsonKeys(item, mapKey)]),
+		Object.entries(value).map(([key, item]) => [mapKey(key), mapDecodedJsonKeys(item, mapKey)]),
 	)
 }
+
+const mapJsonKeys = (value: unknown, mapKey: (key: string) => string): Schema.Json =>
+	mapDecodedJsonKeys(decodeJsonValueSync(value), mapKey)
 
 const toSnakeKey = (key: string): string =>
 	key.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)
@@ -56,11 +86,61 @@ const toCamelKey = (key: string): string =>
 /** Opaque widget params still obey the v2 recursive snake_case wire convention. */
 const UnknownRecord = UnknownRecordWire.pipe(
 	Schema.decodeTo(UnknownRecordWire, {
-		decode: SchemaGetter.transform((value) => mapJsonKeys(value, toCamelKey) as Record<string, unknown>),
-		encode: SchemaGetter.transform((value) => mapJsonKeys(value, toSnakeKey) as Record<string, unknown>),
+		decode: SchemaGetter.transform((value) => {
+			const mapped = mapJsonKeys(value, toCamelKey)
+			// SAFETY: UnknownRecordWire establishes an object root; recursive key mapping preserves it.
+			return mapped as Record<string, unknown>
+		}),
+		encode: SchemaGetter.transform((value) => {
+			const mapped = mapJsonKeys(value, toSnakeKey)
+			// SAFETY: UnknownRecordWire establishes an object root; recursive key mapping preserves it.
+			return mapped as Record<string, unknown>
+		}),
 	}),
 )
 
+/**
+ * The same recursive snake_case convention, but decoding into a TYPED schema
+ * instead of an opaque record.
+ *
+ * Needed by the v3 data source. A query draft used to travel inside the untyped
+ * `params` bag, so its fields were snake_cased by `UnknownRecord` above and never
+ * validated. v3 hoists `queries` to a real field, which leaves two bad options
+ * and one good one: keep it opaque (the wire is preserved but the route cannot
+ * assign it into the stored type without a second decode), type it directly (the
+ * route works but every draft field silently renames on the published wire), or
+ * this — snake_case on the wire, typed after decode.
+ *
+ * The wire bytes are therefore identical to v2 while the decoded value is the
+ * real draft, which is what lets `toInternalWidgets` stay a plain field carry.
+ */
+const snakeCasedWire = <S extends Schema.Top>(schema: S) =>
+	UnknownRecordWire.pipe(
+		Schema.decodeTo(schema, {
+			decode: SchemaGetter.transform((value) => {
+				const mapped = mapJsonKeys(value, toCamelKey)
+				// SAFETY: Every schema passed below decodes the same object after its wire keys are camel-cased.
+				return mapped as S["Encoded"]
+			}),
+			encode: SchemaGetter.transform((value) => {
+				const mapped = mapJsonKeys(value, toSnakeKey)
+				// SAFETY: Every schema passed below encodes an object; recursive key mapping preserves its root.
+				return mapped as Record<string, unknown>
+			}),
+		}),
+	)
+
+// The widget schemas below (transform, data source, display, layout, widget) are
+// a deliberate re-declaration of the stored schema in
+// `packages/widgets/src/dashboard/shared/`, differing only by `encodeKeys` for
+// snake_case. Keeping them explicit rather than deriving them mechanically
+// preserves the OpenAPI `identifier`/`title` annotations that shape the published
+// v2 spec.
+//
+// The cost of a clone is drift, so it is guarded rather than trusted:
+// `dashboard-widget-parity.test.ts` asserts the two are assignable and that every
+// stored field reaches the wire under its mechanical snake_case name. Add a field
+// to the stored display and that test fails until it is mirrored here.
 const V2WidgetTransform = Schema.Struct({
 	fieldMap: optional(StringRecord),
 	hideSeries: optional(
@@ -72,9 +152,10 @@ const V2WidgetTransform = Schema.Struct({
 		Schema.Struct({ valueField: Schema.String }).pipe(Schema.encodeKeys({ valueField: "value_field" })),
 	),
 	reduceToValue: optional(
-		Schema.Struct({ field: Schema.String, aggregate: optional(Schema.String) }).pipe(
-			Schema.encodeKeys({}),
-		),
+		Schema.Struct({
+			field: Schema.String,
+			aggregate: optional(Schema.Literals(STAT_AGGREGATES)),
+		}).pipe(Schema.encodeKeys({})),
 	),
 	computeRatio: optional(
 		Schema.Struct({
@@ -86,7 +167,10 @@ const V2WidgetTransform = Schema.Struct({
 	),
 	limit: optional(Schema.Number),
 	sortBy: optional(
-		Schema.Struct({ field: Schema.String, direction: Schema.String }).pipe(Schema.encodeKeys({})),
+		Schema.Struct({
+			field: Schema.String,
+			direction: Schema.Literals(SORT_DIRECTIONS),
+		}).pipe(Schema.encodeKeys({})),
 	),
 }).pipe(
 	Schema.encodeKeys({
@@ -99,11 +183,62 @@ const V2WidgetTransform = Schema.Struct({
 	}),
 )
 
-export const V2WidgetDataSource = Schema.Struct({
+/**
+ * The data source, as a discriminated union on `kind`.
+ *
+ * Schema v3 replaced the stored `{ endpoint, params }` bag with this union, and
+ * `/v2/dashboards` republishes the new shape rather than encoding back to the old
+ * one — a deliberate breaking change, taken so there is exactly one data-source
+ * shape in the system instead of a wire format kept alive by a translation layer.
+ *
+ * Re-declared here rather than aliased to `WidgetDataSourceSchema`, for the same
+ * reason as every other schema in this file: the v2 wire is snake_case
+ * throughout, and the stored schema is not. Aliasing compiles and silently ships
+ * `fieldMap` where the published spec says `field_map`.
+ *
+ * `queries`, `formulas` and `comparison` go through `snakeCasedWire`, so their
+ * wire representation is byte-identical to v2 — where they lived inside the
+ * untyped `params` bag and got the same recursive snake_case treatment — while
+ * decoding to the real stored types. Only the envelope around them moved.
+ */
+const V2QueryDataSource = Schema.Struct({
+	kind: Schema.Literal("query"),
+	resultShape: Schema.Literals(QUERY_RESULT_KINDS),
+	queries: Schema.Array(snakeCasedWire(QueryBuilderQueryDraftSchema)),
+	formulas: optional(Schema.Array(snakeCasedWire(QueryBuilderFormulaSchema))),
+	comparison: optional(snakeCasedWire(QueryComparisonSchema)),
+	defaultLimit: optional(Schema.Number),
+	limit: optional(Schema.Number),
+	columns: optional(Schema.Array(Schema.String)),
+	transform: optional(V2WidgetTransform),
+}).pipe(Schema.encodeKeys({ resultShape: "result_shape", defaultLimit: "default_limit" }))
+
+const V2RawSqlDataSource = Schema.Struct({
+	kind: Schema.Literal("raw_sql"),
+	sql: Schema.String,
+	displayType: optional(Schema.String),
+	granularitySeconds: optional(Schema.Number),
+	transform: optional(V2WidgetTransform),
+}).pipe(Schema.encodeKeys({ displayType: "display_type", granularitySeconds: "granularity_seconds" }))
+
+const V2RouteDataSource = Schema.Struct({
+	kind: Schema.Literal("route"),
 	endpoint: Schema.String,
 	params: optional(UnknownRecord),
 	transform: optional(V2WidgetTransform),
-}).annotate({ identifier: "DashboardWidgetDataSource", title: "Dashboard widget data source" })
+})
+
+const V2StaticDataSource = Schema.Struct({
+	kind: Schema.Literal("static"),
+	transform: optional(V2WidgetTransform),
+})
+
+export const V2WidgetDataSource = Schema.Union([
+	V2QueryDataSource,
+	V2RawSqlDataSource,
+	V2RouteDataSource,
+	V2StaticDataSource,
+]).annotate({ identifier: "DashboardWidgetDataSource", title: "Dashboard widget data source" })
 
 const V2WidgetDisplayColumn = Schema.Struct({
 	field: Schema.String,
@@ -260,14 +395,48 @@ export const V2WidgetLayout = Schema.Struct({
 
 export const V2DashboardWidget = Schema.Struct({
 	id: Schema.String,
-	visualization: Schema.String,
+	// Closed against the widget-type table, matching the stored schema. An
+	// unrecognised kind is a 400 here rather than a widget that silently renders
+	// as a line chart via the renderer registry's fallback.
+	visualization: Schema.Literals(WIDGET_VISUALIZATIONS),
 	dataSource: V2WidgetDataSource,
 	display: V2WidgetDisplay,
 	layout: V2WidgetLayout,
 	// Optional per-widget window. Omit it — the overwhelmingly common case — and
 	// the widget follows the dashboard's `time_range`.
 	timeRange: optional(V2TimeRange),
-}).pipe(Schema.encodeKeys({ dataSource: "data_source", timeRange: "time_range" }))
+	// Section membership. Omit both — the common case — and the widget sits on
+	// the root canvas. `layout` is relative to whichever container these name, so
+	// two widgets in different sections may both be at `x: 0, y: 0`.
+	sectionId: optional(Schema.String),
+	tabId: optional(Schema.String),
+}).pipe(
+	Schema.encodeKeys({
+		dataSource: "data_source",
+		timeRange: "time_range",
+		sectionId: "section_id",
+		tabId: "tab_id",
+	}),
+)
+
+const V2DashboardSectionTab = Schema.Struct({ id: Schema.String, title: Schema.String })
+
+export const V2DashboardSection = Schema.Struct({
+	id: Schema.String,
+	title: Schema.String,
+	// The stored default. Individual viewers override it in their own URL without
+	// changing what anyone else sees.
+	collapsed: optional(Schema.Boolean),
+	// `false` pins the section open: no collapse control, and a viewer's collapse
+	// override naming it is ignored. Omit for the default (collapsible).
+	collapsible: optional(Schema.Boolean),
+	tabs: Schema.Array(V2DashboardSectionTab),
+}).annotate({
+	identifier: "DashboardSection",
+	title: "Dashboard section",
+	description:
+		"A collapsible group of widgets. A section with one tab renders as a plain header; two or more render a tab bar. Widgets join a section by setting `section_id` and `tab_id`.",
+})
 
 const V2DashboardVariableSource = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("facet"), facet: DashboardQueryVariableFacet }),
@@ -307,6 +476,9 @@ const dashboardFields = {
 	tags: Schema.Array(Schema.String),
 	timeRange: V2TimeRange,
 	widgets: Schema.Array(V2DashboardWidget),
+	// Always present, `[]` when the dashboard is one flat canvas — matching how
+	// `tags` and `variables` read on this resource.
+	sections: Schema.Array(V2DashboardSection),
 	variables: Schema.Array(V2DashboardVariable),
 	// `null` is off, matching `description`'s absence convention on this resource.
 	refreshIntervalSeconds: Schema.NullOr(DashboardRefreshIntervalSeconds),
@@ -356,6 +528,7 @@ export const V2DashboardCreateParams = Schema.Struct({
 	tags: optional(Schema.Array(Schema.String)),
 	timeRange: optional(V2TimeRange),
 	widgets: optional(Schema.Array(V2DashboardWidget)),
+	sections: optional(Schema.Array(V2DashboardSection)),
 	variables: optional(Schema.Array(V2DashboardVariable)),
 	refreshIntervalSeconds: optional(Schema.NullOr(DashboardRefreshIntervalSeconds)),
 })
@@ -378,6 +551,7 @@ export const V2DashboardUpdateParams = Schema.Struct({
 	tags: optional(Schema.Array(Schema.String)),
 	timeRange: optional(V2TimeRange),
 	widgets: optional(Schema.Array(V2DashboardWidget)),
+	sections: optional(Schema.Array(V2DashboardSection)),
 	variables: optional(Schema.Array(V2DashboardVariable)),
 	refreshIntervalSeconds: optional(Schema.NullOr(DashboardRefreshIntervalSeconds)),
 })
@@ -568,19 +742,110 @@ export const V2DashboardPersesImportResponse = Schema.Struct({
 	warnings: Schema.Array(Schema.String),
 }).annotate({ identifier: "DashboardPersesImport", title: "Perses dashboard import" })
 
+/**
+ * A dashboard's share link, as its owner sees it.
+ *
+ * Carries the raw `token` on every response, not only the one that mints it:
+ * a caller who can read this can already rotate the link, so withholding the
+ * token bought no safety and meant you had to break a live link to see it.
+ */
+export const V2DashboardShare = Schema.Struct({
+	id: DashboardSharePublicId,
+	object: Schema.Literal("dashboard_share"),
+	dashboardId: DashboardPublicId,
+	/**
+	 * Absent = the whole dashboard. Present = this one widget, and only this one:
+	 * a chart link refuses every other widget on the same board.
+	 */
+	widgetId: optional(Schema.String),
+	mode: DashboardShareMode,
+	/** The link's credential. The viewer URL is `/share/<token>`. */
+	token: Schema.String,
+	/** Trailing characters of `token`, for naming a link compactly. */
+	tokenSuffix: Schema.String,
+	createdAt: Timestamp,
+	updatedAt: Timestamp,
+})
+	.pipe(
+		Schema.encodeKeys({
+			dashboardId: "dashboard_id",
+			widgetId: "widget_id",
+			tokenSuffix: "token_suffix",
+			createdAt: "created_at",
+			updatedAt: "updated_at",
+		}),
+	)
+	.annotate({
+		identifier: "DashboardShare",
+		title: "Dashboard share link",
+		description:
+			"A share link for a dashboard, including its `token`. `mode` is `public` (anyone with the link) or `org` (signed-in members of the owning organization).",
+	})
+export type V2DashboardShare = Schema.Schema.Type<typeof V2DashboardShare>
+
+export const V2DashboardShareParams = Schema.Struct({
+	mode: DashboardShareMode,
+}).annotate({ identifier: "DashboardShareParams", title: "Dashboard share parameters" })
+export type V2DashboardShareParams = Schema.Schema.Type<typeof V2DashboardShareParams>
+
+export const V2DashboardShareDeleteResponse = Schema.Struct({
+	dashboardId: DashboardPublicId,
+	object: Schema.Literal("dashboard_share"),
+	deleted: Schema.Literal(true),
+})
+	.pipe(Schema.encodeKeys({ dashboardId: "dashboard_id" }))
+	.annotate({
+		identifier: "DashboardShareDeleted",
+		title: "Revoked dashboard share",
+		description:
+			"Returned whether or not a live share existed — revoking an unshared dashboard is a no-op, not an error.",
+	})
+export type V2DashboardShareDeleteResponse = Schema.Schema.Type<typeof V2DashboardShareDeleteResponse>
+
 const DashboardList = ListOf(V2Dashboard).annotate({ identifier: "DashboardList" })
 const DashboardVersionList = ListOf(V2DashboardVersion).annotate({ identifier: "DashboardVersionList" })
 const DashboardTemplateList = ListOf(V2DashboardTemplate).annotate({ identifier: "DashboardTemplateList" })
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
-const mutationErrors = [...commonErrors, V2ConflictError] as const
+const [
+	dashboardVersionNotFound,
+	dashboardPersistence,
+	dashboardNotFound,
+	dashboardValidation,
+	dashboardConcurrency,
+	dashboardTemplateNotFound,
+	dashboardStoredConfigInvalid,
+	sharePersistence,
+	shareNotConfigured,
+	shareNotFound,
+	shareWidgetNotFound,
+] = publicErrors(
+	DashboardVersionNotFoundError,
+	DashboardPersistenceError,
+	DashboardNotFoundError,
+	DashboardValidationError,
+	DashboardConcurrencyError,
+	DashboardTemplateNotFoundError,
+	DashboardStoredConfigInvalidError,
+	SharePersistenceError,
+	ShareNotConfiguredError,
+	ShareNotFoundError,
+	ShareWidgetNotFoundError,
+)
+
+const dashboardCreateErrors = [dashboardValidation, dashboardPersistence] as const
+const dashboardUpdateErrors = [
+	dashboardValidation,
+	dashboardPersistence,
+	dashboardConcurrency,
+	dashboardStoredConfigInvalid,
+] as const
 
 export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 	.add(
 		HttpApiEndpoint.get("list", "/", {
 			query: ListQuery,
 			success: DashboardList,
-			error: commonErrors,
+			error: [V2ParameterInvalid.schema, dashboardPersistence, dashboardStoredConfigInvalid],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listDashboards",
@@ -593,7 +858,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.post("create", "/", {
 			payload: V2DashboardCreateParams,
 			success: V2DashboardMutation,
-			error: mutationErrors,
+			error: dashboardCreateErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "createDashboard",
@@ -607,7 +872,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.post("importPerses", "/import/perses", {
 			payload: V2DashboardPersesImportParams,
 			success: V2DashboardPersesImportResponse,
-			error: mutationErrors,
+			error: dashboardCreateErrors,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "importPersesDashboard",
@@ -621,7 +886,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.get("listTemplates", "/templates", {
 			query: ListQuery,
 			success: DashboardTemplateList,
-			error: [V2InvalidRequestError],
+			error: V2ParameterInvalid.schema,
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listDashboardTemplates",
@@ -636,7 +901,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			params: { template_id: DashboardTemplatePublicId },
 			payload: V2DashboardTemplatePreviewParams,
 			success: V2DashboardTemplatePreview,
-			error: [V2InvalidRequestError, V2NotFoundError],
+			error: [V2ParameterInvalid.schema, dashboardTemplateNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "previewDashboardTemplate",
@@ -651,7 +916,12 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			params: { template_id: DashboardTemplatePublicId },
 			payload: V2DashboardTemplateInstantiateParams,
 			success: V2DashboardMutation,
-			error: [...mutationErrors, V2NotFoundError],
+			error: [
+				V2ParameterInvalid.schema,
+				V2ParameterMissing.schema,
+				dashboardTemplateNotFound,
+				...dashboardCreateErrors,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "instantiateDashboardTemplate",
@@ -665,7 +935,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.get("retrieve", "/:id", {
 			params: { id: DashboardPublicId },
 			success: V2Dashboard,
-			error: [...commonErrors, V2NotFoundError],
+			error: [dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getDashboard",
@@ -679,7 +949,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			params: { id: DashboardPublicId },
 			payload: V2DashboardUpdateParams,
 			success: V2DashboardMutation,
-			error: [...mutationErrors, V2NotFoundError],
+			error: [dashboardNotFound, ...dashboardUpdateErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "updateDashboard",
@@ -692,7 +962,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.delete("delete", "/:id", {
 			params: { id: DashboardPublicId },
 			success: V2DashboardDeleteResponse,
-			error: [...commonErrors, V2NotFoundError],
+			error: [dashboardPersistence, dashboardNotFound],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "deleteDashboard",
@@ -707,7 +977,12 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			params: { id: DashboardPublicId },
 			query: ListQuery,
 			success: DashboardVersionList,
-			error: [...commonErrors, V2NotFoundError],
+			error: [
+				V2ParameterInvalid.schema,
+				dashboardPersistence,
+				dashboardNotFound,
+				dashboardStoredConfigInvalid,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listDashboardVersions",
@@ -720,7 +995,12 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.get("retrieveVersion", "/:id/versions/:version_id", {
 			params: { id: DashboardPublicId, version_id: DashboardVersionPublicId },
 			success: V2DashboardVersionDetail,
-			error: [...commonErrors, V2NotFoundError],
+			error: [
+				dashboardPersistence,
+				dashboardNotFound,
+				dashboardVersionNotFound,
+				dashboardStoredConfigInvalid,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getDashboardVersion",
@@ -733,7 +1013,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.post("restoreVersion", "/:id/versions/:version_id/restore", {
 			params: { id: DashboardPublicId, version_id: DashboardVersionPublicId },
 			success: V2DashboardMutation,
-			error: [...mutationErrors, V2NotFoundError],
+			error: [dashboardNotFound, dashboardVersionNotFound, ...dashboardUpdateErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "restoreDashboardVersion",
@@ -742,9 +1022,163 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			}),
 		),
 	)
+	.add(
+		HttpApiEndpoint.get("listShares", "/:id/shares", {
+			params: { id: DashboardPublicId },
+			success: Schema.Array(V2DashboardShare),
+			error: [sharePersistence, dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "listDashboardShares",
+				summary: "List a dashboard's share links",
+				description:
+					"Returns every live share on the dashboard — the board's own link, plus one per shared widget, each with its token.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.get("retrieveWidgetShare", "/:id/widgets/:widget_id/share", {
+			params: { id: DashboardPublicId, widget_id: Schema.String },
+			success: Schema.NullOr(V2DashboardShare),
+			error: [sharePersistence, dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "getDashboardWidgetShare",
+				summary: "Retrieve a widget's share link",
+				description:
+					"Returns the live share link for one widget, or `null` when that widget is not shared.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.put("upsertWidgetShare", "/:id/widgets/:widget_id/share", {
+			params: { id: DashboardPublicId, widget_id: Schema.String },
+			payload: V2DashboardShareParams,
+			success: V2DashboardShare,
+			error: [
+				sharePersistence,
+				shareNotConfigured,
+				dashboardPersistence,
+				dashboardNotFound,
+				dashboardStoredConfigInvalid,
+				shareWidgetNotFound,
+			],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "upsertDashboardWidgetShare",
+				summary: "Share a single widget",
+				description:
+					"Creates a share link scoped to one widget, or changes the mode of the one it already has. Independent of the dashboard's own share: revoking or re-scoping the board leaves widget links untouched. A `public` widget share may be embedded in an iframe.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("rotateWidgetShare", "/:id/widgets/:widget_id/share/rotate", {
+			params: { id: DashboardPublicId, widget_id: Schema.String },
+			success: V2DashboardShare,
+			error: [
+				sharePersistence,
+				shareNotConfigured,
+				shareNotFound,
+				dashboardPersistence,
+				dashboardNotFound,
+				dashboardStoredConfigInvalid,
+			],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "rotateDashboardWidgetShare",
+				summary: "Regenerate a widget's share link",
+				description:
+					"Revokes the widget's current link and mints a replacement. Any embed using the old URL stops rendering immediately.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.delete("revokeWidgetShare", "/:id/widgets/:widget_id/share", {
+			params: { id: DashboardPublicId, widget_id: Schema.String },
+			success: V2DashboardShareDeleteResponse,
+			error: [sharePersistence, dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "revokeDashboardWidgetShare",
+				summary: "Stop sharing a widget",
+				description:
+					"Revokes the widget's share link. Idempotent — revoking an unshared widget succeeds and reports `deleted: true`.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.get("retrieveShare", "/:id/share", {
+			params: { id: DashboardPublicId },
+			success: Schema.NullOr(V2DashboardShare),
+			error: [sharePersistence, dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "getDashboardShare",
+				summary: "Retrieve a dashboard's share link",
+				description:
+					"Returns the dashboard's live share link and its token, or `null` when it is not shared.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.put("upsertShare", "/:id/share", {
+			params: { id: DashboardPublicId },
+			payload: V2DashboardShareParams,
+			success: V2DashboardShare,
+			error: [
+				sharePersistence,
+				shareNotConfigured,
+				dashboardPersistence,
+				dashboardNotFound,
+				dashboardStoredConfigInvalid,
+			],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "upsertDashboardShare",
+				summary: "Share a dashboard",
+				description:
+					"Creates the dashboard's share link, or changes the mode of the one it already has. Changing the mode keeps the same link, so the returned token is unchanged.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("rotateShare", "/:id/share/rotate", {
+			params: { id: DashboardPublicId },
+			success: V2DashboardShare,
+			error: [
+				sharePersistence,
+				shareNotConfigured,
+				shareNotFound,
+				dashboardPersistence,
+				dashboardNotFound,
+				dashboardStoredConfigInvalid,
+			],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "rotateDashboardShare",
+				summary: "Regenerate a dashboard's share link",
+				description:
+					"Revokes the current link and mints a replacement in one step. The previous URL stops resolving immediately.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.delete("revokeShare", "/:id/share", {
+			params: { id: DashboardPublicId },
+			success: V2DashboardShareDeleteResponse,
+			error: [sharePersistence, dashboardPersistence, dashboardNotFound, dashboardStoredConfigInvalid],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "revokeDashboardShare",
+				summary: "Stop sharing a dashboard",
+				description:
+					"Revokes the dashboard's share link. Idempotent — revoking an unshared dashboard succeeds and reports `deleted: true`.",
+			}),
+		),
+	)
 	.prefix("/v2/dashboards")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Dashboards",

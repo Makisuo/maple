@@ -6,6 +6,10 @@
 		"lib": ["ES2022", "DOM"],
 		"moduleResolution": "bundler",
 		"verbatimModuleSyntax": true,
+		// For `version.test.ts`'s package.json import only. Node's `types` are
+		// deliberately NOT enabled here: this package also ships to browsers, and
+		// typing node builtins would let them leak into the client entry unnoticed.
+		"resolveJsonModule": true,
 		"noEmit": true,
 		"skipLibCheck": true,
 		"strict": true,

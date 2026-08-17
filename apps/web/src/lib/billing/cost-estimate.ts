@@ -13,7 +13,7 @@ const FEATURE_LABELS: Record<string, string> = {
 	traces: "Traces",
 	metrics: "Metrics",
 	browser_sessions: "Browser Sessions",
-}
+} satisfies Record<string, string>
 
 export interface CostLine {
 	key: string

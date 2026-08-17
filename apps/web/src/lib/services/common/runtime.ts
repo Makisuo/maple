@@ -1,7 +1,9 @@
-import { Layer, ManagedRuntime } from "effect"
+import { Layer } from "effect"
 import { appMemoMap, mapleApiClientLayer } from "@/lib/registry"
+import { makeAppRuntime } from "@/lib/make-app-runtime"
 import { mapleOtelLayer } from "./otel-layer"
 
-export const runtime = ManagedRuntime.make(mapleApiClientLayer.pipe(Layer.provideMerge(mapleOtelLayer)), {
-	memoMap: appMemoMap,
-})
+export const runtime = makeAppRuntime(
+	mapleApiClientLayer.pipe(Layer.provideMerge(mapleOtelLayer)),
+	appMemoMap,
+)

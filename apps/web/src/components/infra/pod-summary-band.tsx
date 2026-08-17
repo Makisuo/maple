@@ -36,14 +36,14 @@ const SCOPE_TONE: Record<PodScope, SeverityLevel | "neutral"> = {
 	elevated: "warn",
 	unbounded: "warn",
 	stale: "neutral",
-}
+} satisfies Record<PodScope, SeverityLevel | "neutral">
 
 const VALUE_TONE: Record<SeverityLevel | "neutral", string> = {
 	neutral: "text-foreground",
 	ok: "text-foreground",
 	warn: "text-[var(--severity-warn)]",
 	crit: "text-[var(--severity-error)]",
-}
+} satisfies Record<SeverityLevel | "neutral", string>
 
 interface ScopeCellProps {
 	label: string

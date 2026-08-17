@@ -1,10 +1,11 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { snapTimestamp } from "@/lib/time-utils"
 
 /** How a leaf string is treated: snapped to the 15s grid, or dropped entirely. */
 type TimestampMode = "snap" | "drop"
 
 /** Matches the warehouse `YYYY-MM-DD HH:MM:SS[.fff]` shape, with or without a `T`. */
-const TIMESTAMP_SHAPE = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/
+const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/
 
 const DROPPED = Symbol("dropped")
 
@@ -12,7 +13,7 @@ function normalize(value: unknown, mode: TimestampMode): unknown {
 	if (value === null || typeof value !== "object") {
 		if (typeof value === "string") {
 			if (mode === "snap") return snapTimestamp(value)
-			return TIMESTAMP_SHAPE.test(value) ? DROPPED : value
+			return TIMESTAMP_PATTERN.test(value) ? DROPPED : value
 		}
 		return value
 	}

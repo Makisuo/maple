@@ -22,10 +22,11 @@
 		"db:migrate:local": "DATABASE_URL=postgres://maple:maple@localhost:5499/maple bun run --cwd packages/db db:migrate",
 		"migrate:prod": "bun run --cwd packages/db ps:apply-schema main",
 		"dev:alerting": "bun --filter=@maple/alerting dev",
-		"format": "oxfmt && oxlint --ignore-pattern '.context/**' --fix",
-		"lint:effect:config": "bun run ./scripts/check-effect-oxlint-config.ts",
-		"lint:effect": "bun run lint:effect:config && oxlint -c .oxlintrc.effect.json --quiet alchemy.run.ts scripts apps packages lib examples",
-		"lint:effect:audit": "bun run lint:effect:config && oxlint -c .oxlintrc.effect.json alchemy.run.ts scripts apps packages lib examples",
+		"format": "oxfmt",
+		"format:check": "oxfmt --check",
+		"lint": "oxlint -c .oxlintrc.effect.json --quiet alchemy.run.ts scripts apps packages lib examples",
+		"lint:audit": "oxlint -c .oxlintrc.effect.json alchemy.run.ts scripts apps packages lib examples",
+		"lint:fix": "oxlint -c .oxlintrc.effect.json --fix alchemy.run.ts scripts apps packages lib examples",
 		"alchemy:build-deps": "turbo build --filter=@maple-dev/effect-sdk --filter=@maple-dev/browser --filter=@maple-dev/clickhouse-builder",
 		"alchemy:deploy": "bun run alchemy:build-deps && alchemy deploy --yes",
 		"alchemy:deploy:prd": "bun run alchemy:build-deps && alchemy deploy --yes --adopt --stage prd",
@@ -41,6 +42,8 @@
 		"clickhouse:schema:check": "bun run ./scripts/generate-clickhouse-schema.ts --check && bun run ./scripts/generate-clickhouse-schema-sql.ts --check && bun run ./scripts/generate-clickhouse-insert-mappings.ts --check && bun run ./scripts/lint-clickhouse-schema.ts && bun run ./scripts/check-local-schema-manifest.ts",
 		"clickhouse:schema:lint": "bun run ./scripts/lint-clickhouse-schema.ts",
 		"check:tokens": "bun run ./scripts/check-token-drift.ts",
+		"ios:openapi": "bun run ./scripts/generate-ios-openapi.ts",
+		"ios:openapi:check": "bun run ./scripts/generate-ios-openapi.ts --check",
 		"llm:sync": "bun run ./scripts/sync-llm-upstream.ts",
 		"llm:sync:check": "bun run ./scripts/sync-llm-upstream.ts --check",
 		"knip": "bun run --cwd apps/landing sync:i18n && knip",
@@ -50,13 +53,14 @@
 	"dependencies": {},
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260603.1",
-		"@effect/platform-node": "4.0.0-beta.105",
-		"@effect/tsgo": "0.35.0",
-		"@effect/vitest": "4.0.0-beta.105",
+		"@effect/platform-node": "4.0.0-rc.108",
+		"@effect/tsgo": "0.36.4",
+		"@effect/vitest": "4.0.0-rc.108",
 		"@maple/infra": "workspace:*",
+		"@oxlint/plugins": "1.77.0",
 		"@tinybirdco/sdk": "catalog:tinybird",
 		"@types/node": "catalog:tooling",
-		"alchemy": "2.0.0-beta.70",
+		"alchemy": "2.0.0-beta.72",
 		"effect": "catalog:effect",
 		"knip": "^6.17.1",
 		"oxfmt": "^0.55.0",
@@ -67,7 +71,7 @@
 		"typescript": "catalog:tooling"
 	},
 	"overrides": {
-		"@effect/sql-d1": "4.0.0-beta.105"
+		"@effect/sql-d1": "4.0.0-rc.108"
 	},
 	"packageManager": "bun@1.3.11",
 	"catalog": {
@@ -79,10 +83,10 @@
 			"@clickhouse/client-web": "^1.21.0"
 		},
 		"effect": {
-			"@effect/atom-react": "4.0.0-beta.105",
+			"@effect/atom-react": "4.0.0-rc.108",
 			"@effect/language-service": "^0.87.2",
-			"@effect/platform-bun": "4.0.0-beta.105",
-			"effect": "4.0.0-beta.105"
+			"@effect/platform-bun": "4.0.0-rc.108",
+			"effect": "4.0.0-rc.108"
 		},
 		"react": {
 			"@types/react": "^19.2.14",
@@ -112,8 +116,7 @@
 		}
 	},
 	"patchedDependencies": {
-		"@effect/vitest@4.0.0-beta.105": "patches/@effect%2Fvitest@4.0.0-beta.105.patch",
-		"alchemy@2.0.0-beta.70": "patches/alchemy@2.0.0-beta.70.patch",
-		"effect@4.0.0-beta.105": "patches/effect@4.0.0-beta.105.patch"
+		"@effect/vitest@4.0.0-rc.108": "patches/@effect%2Fvitest@4.0.0-rc.108.patch",
+		"effect@4.0.0-rc.108": "patches/effect@4.0.0-rc.108.patch"
 	}
 }

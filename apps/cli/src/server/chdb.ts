@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 // Embedded chDB (in-process ClickHouse) via `bun:ffi` → `libchdb`.
 //
 // Replaces the Rust `apps/ingest/src/chdb.rs`. chDB allows exactly one

@@ -21,7 +21,7 @@ import {
 	paginateOffsetQuery,
 	Timestamp,
 } from "./envelopes"
-import { notFound, permissionError, rateLimited, V2NotFoundError, V2RateLimitError } from "./errors"
+import { defineV2Error, V2InsufficientScope, V2RateLimited } from "./errors"
 import { encodePublicId } from "./public-id"
 import {
 	LogPublicId,
@@ -248,9 +248,13 @@ describe("V2Dashboard wire format", () => {
 			widgets: [
 				{
 					id: "widget-1",
-					visualization: "line",
+					visualization: "chart",
+					// A `route` arm: the only kind that still carries an opaque params
+					// bag in v3, and therefore the only one that exercises the recursive
+					// snake_case wire convention asserted below.
 					data_source: {
-						endpoint: "queryBuilderTimeseries",
+						kind: "route",
+						endpoint: "service_overview",
 						params: { start_time: "now-1h", nested_filter: { attribute_key: "service.name" } },
 						transform: { field_map: { value: "requests" } },
 					},
@@ -260,6 +264,18 @@ describe("V2Dashboard wire format", () => {
 						list_root_only: true,
 					},
 					layout: { x: 0, y: 0, w: 6, h: 4, min_w: 2 },
+					section_id: "section-1",
+					tab_id: "tab-1",
+				},
+			],
+			// Required with a possibly-empty value, like `tags` and `variables`: the
+			// server always emits it, `[]` meaning the dashboard is one flat canvas.
+			sections: [
+				{
+					id: "section-1",
+					title: "Overview",
+					collapsed: true,
+					tabs: [{ id: "tab-1", title: "Latency" }],
 				},
 			],
 			variables: [
@@ -282,7 +298,9 @@ describe("V2Dashboard wire format", () => {
 		expect(decoded.timeRange.type).toBe("absolute")
 		expect(decoded.refreshIntervalSeconds).toBeNull()
 		expect(decoded.widgets[0]?.dataSource.transform?.fieldMap).toEqual({ value: "requests" })
-		expect(decoded.widgets[0]?.dataSource.params).toEqual({
+		const decodedSource = decoded.widgets[0]?.dataSource
+		if (decodedSource?.kind !== "route") throw new Error("expected a route data source")
+		expect(decodedSource.params).toEqual({
 			startTime: "now-1h",
 			nestedFilter: { attributeKey: "service.name" },
 		})
@@ -291,8 +309,21 @@ describe("V2Dashboard wire format", () => {
 		expect(wire.id).toMatch(/^dash_/)
 		expect(wire.time_range).toHaveProperty("start_time")
 		expect(wire.widgets[0]?.data_source.transform).toHaveProperty("field_map")
-		expect(wire.widgets[0]?.data_source.params).toHaveProperty("nested_filter.attribute_key")
+		const wireSource = wire.widgets[0]?.data_source
+		if (wireSource === undefined || !("params" in wireSource)) {
+			throw new Error("expected a route data source on the wire")
+		}
+		expect(wireSource.params).toHaveProperty("nested_filter.attribute_key")
 		expect(wire.widgets[0]?.layout).toHaveProperty("min_w")
+		// Section membership snake_cases; `tabs` is already single-word throughout.
+		expect(wire.widgets[0]).toHaveProperty("section_id", "section-1")
+		expect(wire.widgets[0]).toHaveProperty("tab_id", "tab-1")
+		expect(wire.sections[0]).toEqual({
+			id: "section-1",
+			title: "Overview",
+			collapsed: true,
+			tabs: [{ id: "tab-1", title: "Latency" }],
+		})
 		expect(wire.variables[0]).toHaveProperty("include_all")
 		const variable = wire.variables[0]
 		if (variable?.type !== "query") throw new Error("Expected a query dashboard variable")
@@ -430,18 +461,30 @@ describe("V2 alerts wire format", () => {
 })
 
 describe("v2 error envelope", () => {
+	const TestNotFound = defineV2Error({
+		tag: "@maple/http/v2/TestNotFoundError",
+		status: 404,
+		code: "resource_missing",
+		title: "Not found",
+		message: "The resource does not exist.",
+		retry: "never",
+		recovery: "none",
+		identifier: "TestNotFoundError",
+	})
+
 	it("exposes the public message to Effect and telemetry without changing the wire shape", () => {
-		const error = notFound("No such api_key", "id")
+		const error = TestNotFound.make("No such api_key", { param: "id" })
+		expect(error._tag).toBe("@maple/http/v2/TestNotFoundError")
 		expect(error.message).toBe("No such api_key")
 		expect(String(error)).toContain("No such api_key")
 	})
 
 	it("encodes the semantic tag and recovery contract inside the public envelope", () => {
-		const error = notFound("No such api_key", "id")
-		const wire = Schema.encodeSync(V2NotFoundError)(error) as Record<string, unknown>
+		const error = TestNotFound.make("No such api_key", { param: "id" })
+		const wire = Schema.encodeSync(TestNotFound.schema)(error) as Record<string, unknown>
 		expect(wire).toEqual({
 			error: {
-				_tag: "@maple/http/v2/resource_missing",
+				_tag: "@maple/http/v2/TestNotFoundError",
 				type: "not_found_error",
 				code: "resource_missing",
 				title: "Not found",
@@ -456,37 +499,37 @@ describe("v2 error envelope", () => {
 		expect("_tag" in wire).toBe(false)
 	})
 
-	it("decodes the pre-metadata envelope during rolling upgrades", () => {
-		const decoded = Schema.decodeUnknownSync(V2NotFoundError)({
-			error: {
-				type: "not_found_error",
-				code: "resource_missing",
-				message: "gone",
-			},
-		})
-		expect(decoded.error._tag).toBeUndefined()
-		expect(decoded.error.retryable).toBeUndefined()
+	it("requires a semantic tag on every public error", () => {
+		expect(() =>
+			Schema.decodeUnknownSync(TestNotFound.schema)({
+				error: {
+					type: "not_found_error",
+					code: "resource_missing",
+					message: "gone",
+				},
+			}),
+		).toThrow()
 	})
 
 	it("omits param when not provided", () => {
-		const wire = Schema.encodeSync(V2NotFoundError)(notFound("gone")) as {
-			error: Record<string, unknown>
-		}
+		const wire = Schema.encodeSync(TestNotFound.schema)(TestNotFound.make("gone"))
 		expect("param" in wire.error).toBe(false)
 	})
 
-	it("permissionError has type permission_error", () => {
-		expect(permissionError("insufficient_scope", "nope").error.type).toBe("permission_error")
+	it("permission errors carry their declared category", () => {
+		expect(V2InsufficientScope.make("nope").error.type).toBe("permission_error")
 	})
 
 	it("rateLimited has the stable public 429 envelope", () => {
-		expect(Schema.encodeSync(V2RateLimitError)(rateLimited())).toEqual({
+		expect(
+			Schema.encodeSync(V2RateLimited.schema)(V2RateLimited.make(undefined, { retryAfterSeconds: 60 })),
+		).toEqual({
 			error: {
-				_tag: "@maple/http/v2/rate_limited",
+				_tag: "@maple/http/v2/RateLimitError",
 				type: "rate_limit_error",
 				code: "rate_limited",
 				title: "Too many requests",
-				message: "Too many requests. Retry after 60 seconds.",
+				message: "Too many requests. Retry after the interval in the Retry-After header.",
 				retryable: true,
 				recovery: "retry",
 				retry_after_seconds: 60,

@@ -182,7 +182,7 @@ export const AGENTS: Readonly<Record<string, AgentDefinition>> = {
 		permission: READ_ONLY_RULESET,
 		steps: SUBAGENT_MAX_STEPS,
 	},
-} as const
+} as const satisfies Readonly<Record<string, AgentDefinition>>
 
 /** Every `ChatMode` literal names a primary agent; the mode string *is* the agent name. */
 export const agentForSession = (sessionId: string): AgentDefinition => {

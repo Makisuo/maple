@@ -1,3 +1,5 @@
+import * as Predicate from "effect/Predicate"
+
 export type MapleAuthHeaders = Readonly<Record<string, string>>
 
 type MapleAuthHeadersProvider = () => Promise<MapleAuthHeaders> | MapleAuthHeaders
@@ -19,42 +21,64 @@ interface CachedAuth {
 }
 
 let cachedAuth: CachedAuth | undefined
-let inFlightRefresh: Promise<MapleAuthHeaders> | undefined
 /**
  * Bumped whenever the identity changes (provider swap, sign-out, org switch).
- * A refresh started under an older generation must not populate the cache — its
- * token belongs to an identity we've since left.
+ * A refresh started under an older generation must not populate the cache, be
+ * joined by a later caller, or clear a newer refresh's slot — its token belongs
+ * to an identity we've since left.
  */
 let authGeneration = 0
+/**
+ * The refresh in flight, tagged with the identity that started it.
+ *
+ * Tagged rather than bare: a bare promise was shared with every caller that
+ * arrived while it was open, including callers that arrived *after* an org
+ * switch or sign-out — they awaited it and sent the previous identity's bearer.
+ * Its `finally` also cleared the slot unconditionally, so a straggler could
+ * evict the successor that replaced it.
+ */
+let inFlightRefresh: { readonly generation: number; readonly promise: Promise<MapleAuthHeaders> } | undefined
 
 const decodeBase64Url = (segment: string): string => {
 	const padded = segment.replace(/-/g, "+").replace(/_/g, "/")
 	return atob(padded.padEnd(padded.length + ((4 - (padded.length % 4)) % 4), "="))
 }
 
-/** Expiry of a bearer JWT in epoch ms, or undefined if it isn't one. */
-const readBearerExpMs = (headers: MapleAuthHeaders): number | undefined => {
-	const authorization = headers.authorization
-	if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) return undefined
-	const segments = authorization.slice("Bearer ".length).split(".")
+/**
+ * Expiry of a JWT in epoch ms, or undefined if the token isn't one we can read.
+ *
+ * Exported because the self-hosted provider renews against the same deadline
+ * this cache keys on — two decoders that could disagree about when a token dies
+ * is exactly the bug worth not having.
+ */
+export const readJwtExpMs = (token: string): number | undefined => {
+	const segments = token.split(".")
 	if (segments.length !== 3 || segments[1] === undefined) return undefined
 	try {
 		const claims: unknown = JSON.parse(decodeBase64Url(segments[1]))
-		if (typeof claims !== "object" || claims === null) return undefined
-		const exp = (claims as { exp?: unknown }).exp
-		return typeof exp === "number" && Number.isFinite(exp) ? exp * 1000 : undefined
+		if (!Predicate.isObject(claims)) return undefined
+		const exp = claims.exp
+		return Predicate.isNumber(exp) && Number.isFinite(exp) ? exp * 1000 : undefined
 	} catch {
 		// Not a JWT we can read — fall through to resolving on every call.
 		return undefined
 	}
 }
 
+/** Expiry of a bearer JWT in epoch ms, or undefined if it isn't one. */
+const readBearerExpMs = (headers: MapleAuthHeaders): number | undefined => {
+	const authorization = headers.authorization
+	if (!Predicate.isString(authorization) || !authorization.startsWith("Bearer ")) return undefined
+	return readJwtExpMs(authorization.slice("Bearer ".length))
+}
+
 const refreshAuthHeaders = (): Promise<MapleAuthHeaders> => {
-	if (inFlightRefresh) return inFlightRefresh
+	// Only join a refresh belonging to the identity we are currently serving.
+	if (inFlightRefresh && inFlightRefresh.generation === authGeneration) return inFlightRefresh.promise
 	const provider = authHeadersProvider
 	if (!provider) return Promise.resolve({})
 	const generation = authGeneration
-	inFlightRefresh = Promise.resolve(provider())
+	const promise = Promise.resolve(provider())
 		.then((headers) => {
 			if (generation === authGeneration) {
 				const expMs = readBearerExpMs(headers)
@@ -63,15 +87,21 @@ const refreshAuthHeaders = (): Promise<MapleAuthHeaders> => {
 			return headers
 		})
 		.finally(() => {
-			inFlightRefresh = undefined
+			// Only ever clear our own slot — a straggler must not evict the
+			// successor started after the identity changed.
+			if (inFlightRefresh?.generation === generation) inFlightRefresh = undefined
 		})
-	return inFlightRefresh
+	inFlightRefresh = { generation, promise }
+	return promise
 }
 
 /** Drop the cached bearer token so the next request re-resolves it. */
 export const invalidateMapleAuthToken = () => {
 	authGeneration += 1
 	cachedAuth = undefined
+	// Orphan any refresh already open: it resolves into nothing rather than
+	// being handed to a caller that belongs to the new identity.
+	inFlightRefresh = undefined
 }
 
 /** Whether a bearer token is currently being served from cache. */
@@ -107,12 +137,11 @@ export const subscribeActiveOrgId = (notify: () => void): (() => void) => {
 	return () => activeOrgSubscribers.delete(notify)
 }
 
-export const getMapleAuthHeaders = async (): Promise<MapleAuthHeaders> => {
+/** Cached token if it has enough life left, otherwise a fresh resolve. */
+const resolveProvidedHeaders = async (): Promise<MapleAuthHeaders> => {
 	const cached = cachedAuth
 	const remainingMs = cached === undefined ? -1 : cached.expMs - Date.now()
-	let providedHeaders: MapleAuthHeaders
 	if (cached !== undefined && remainingMs > TOKEN_MIN_REMAINING_MS) {
-		providedHeaders = cached.headers
 		if (remainingMs <= TOKEN_REFRESH_AHEAD_MS) {
 			// Refresh ahead of the deadline. Deliberately not awaited: this request
 			// already has a valid token, and blocking it on Clerk is the cost this
@@ -120,9 +149,19 @@ export const getMapleAuthHeaders = async (): Promise<MapleAuthHeaders> => {
 			// for the next caller to retry.
 			void refreshAuthHeaders().catch(() => undefined)
 		}
-	} else {
-		providedHeaders = authHeadersProvider ? await refreshAuthHeaders() : {}
+		return cached.headers
 	}
+	return authHeadersProvider ? await refreshAuthHeaders() : {}
+}
+
+export const getMapleAuthHeaders = async (): Promise<MapleAuthHeaders> => {
+	const generation = authGeneration
+	let providedHeaders = await resolveProvidedHeaders()
+	// The identity changed while we were waiting, so what we are holding belongs
+	// to an org (or provider) the user has left — the API would resolve it
+	// against the wrong tenant. Resolve once more under the current identity;
+	// bounded to one retry so a burst of switches cannot spin here.
+	if (generation !== authGeneration) providedHeaders = await resolveProvidedHeaders()
 	return {
 		...providedHeaders,
 		...authHeaders,
@@ -130,7 +169,7 @@ export const getMapleAuthHeaders = async (): Promise<MapleAuthHeaders> => {
 }
 
 export const setMapleAuthHeaders = (headers: Record<string, string>) => {
-	authHeaders = { ...headers }
+	authHeaders = { ...headers } satisfies MapleAuthHeaders
 }
 
 export const clearMapleAuthHeaders = () => {

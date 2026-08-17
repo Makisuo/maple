@@ -8,6 +8,7 @@ import {
 	makeGetCustomerData,
 	makeGetUserEmail,
 	makeLoginSelfHosted,
+	makeRefreshSelfHostedSession,
 	makeResolveMcpTenant,
 	makeResolveTenant,
 	type TenantContext,
@@ -25,19 +26,22 @@ export { makeResolveTenant, type TenantContext }
 
 type HeaderRecord = Record<string, string | undefined>
 
-export interface AuthServiceShape {
+export interface AuthServiceApi {
 	readonly resolveTenant: (headers: HeaderRecord) => Effect.Effect<TenantContext, UnauthorizedError>
 	readonly resolveMcpTenant: (headers: HeaderRecord) => Effect.Effect<TenantContext, UnauthorizedError>
 	readonly loginSelfHosted: (
 		password: string,
 	) => Effect.Effect<SelfHostedLoginResponse, SelfHostedAuthDisabledError | SelfHostedInvalidPasswordError>
+	readonly refreshSelfHostedSession: (
+		token: string,
+	) => Effect.Effect<SelfHostedLoginResponse, SelfHostedAuthDisabledError | UnauthorizedError>
 	readonly getUserEmail: (userId: string) => Effect.Effect<string | null>
 	readonly getCustomerData: (
 		tenant: TenantContext,
 	) => Effect.Effect<{ email: string | null; orgName: string | null }>
 }
 
-export class AuthService extends Context.Service<AuthService, AuthServiceShape>()(
+export class AuthService extends Context.Service<AuthService, AuthServiceApi>()(
 	"@maple/api/services/AuthService",
 	{
 		make: Effect.gen(function* () {
@@ -45,6 +49,7 @@ export class AuthService extends Context.Service<AuthService, AuthServiceShape>(
 			const resolveTenant = makeResolveTenant(env)
 			const resolveMcpTenant = makeResolveMcpTenant(env)
 			const loginSelfHosted = makeLoginSelfHosted(env)
+			const refreshSelfHostedSession = makeRefreshSelfHostedSession(env)
 			const getUserEmail = makeGetUserEmail(env)
 			const getCustomerData = makeGetCustomerData(env)
 
@@ -52,9 +57,10 @@ export class AuthService extends Context.Service<AuthService, AuthServiceShape>(
 				resolveTenant,
 				resolveMcpTenant,
 				loginSelfHosted,
+				refreshSelfHostedSession,
 				getUserEmail,
 				getCustomerData,
-			} satisfies AuthServiceShape
+			} satisfies AuthServiceApi
 		}),
 	},
 ) {

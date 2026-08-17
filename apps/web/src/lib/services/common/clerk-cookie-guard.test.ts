@@ -33,7 +33,7 @@ const stubCookieJar = (seeded: string) => {
 
 afterEach(() => {
 	// Drop the own property so `document.cookie` falls back to jsdom's.
-	delete (document as unknown as { cookie?: unknown }).cookie
+	delete (document as { cookie?: unknown }).cookie
 	vi.restoreAllMocks()
 })
 

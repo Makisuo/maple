@@ -3,6 +3,7 @@ import type { AlertCheckDocument, AlertRuleDocument, AlertRulePreviewResponse } 
 import {
 	AlertRulePreviewRequest,
 	AlertRuleUpsertRequest,
+	AlertRuleNotFoundError,
 	CurrentTenant,
 	IsoDateTimeString,
 	QueryBuilderQueryDraftSchema,
@@ -14,22 +15,13 @@ import type {
 	V2AlertRuleMutationResponse,
 	V2AlertRulePreviewResult,
 	V2AlertRuleUpdateParams,
-	V2InvalidRequestError,
 } from "@maple/domain/http/v2"
-import {
-	MapleApiV2,
-	invalidRequest,
-	paginateArray,
-	resourceNotFound,
-	scopeAllows,
-	timestamp,
-} from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray, scopeAllows, timestamp, V2ParameterInvalid } from "@maple/domain/http/v2"
 import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
 import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
-import { mapAlertError } from "./alerts-error-map"
 
 const decodeIsoDateTime = Schema.decodeUnknownSync(IsoDateTimeString)
 
@@ -39,11 +31,11 @@ const encodeChecksCursor = (check: AlertCheckDocument): string =>
 const decodeChecksCursor = (value: string | undefined) => {
 	if (value === undefined) return Effect.succeed<readonly [string, string] | undefined>(undefined)
 	if (!value.startsWith("chk_")) {
-		return Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+		return Effect.fail(V2ParameterInvalid.make("Invalid pagination cursor.", { param: "cursor" }))
 	}
 	const decoded = Encoding.decodeBase64UrlString(value.slice(4))
 	if (Result.isFailure(decoded)) {
-		return Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+		return Effect.fail(V2ParameterInvalid.make("Invalid pagination cursor.", { param: "cursor" }))
 	}
 	try {
 		const parts = JSON.parse(decoded.success) as unknown
@@ -58,7 +50,7 @@ const decodeChecksCursor = (value: string | undefined) => {
 		}
 		return Effect.succeed([parts[0], parts[1]] as const)
 	} catch {
-		return Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+		return Effect.fail(V2ParameterInvalid.make("Invalid pagination cursor.", { param: "cursor" }))
 	}
 }
 
@@ -104,7 +96,7 @@ const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 
 const toV2RuleMutationResponse = (doc: AlertRuleDocument): V2AlertRuleMutationResponse => ({
 	...toV2Rule(doc),
-	...(doc.txid !== undefined ? { txid: doc.txid } : {}),
+	...(doc.txid !== undefined ? { txid: doc.txid } : undefined),
 })
 
 const toV2Check = (check: AlertCheckDocument): V2AlertCheck => ({
@@ -137,17 +129,15 @@ const toV2Check = (check: AlertCheckDocument): V2AlertCheck => ({
 const decodeDraft = (draft: Record<string, unknown>) =>
 	Schema.decodeUnknownEffect(QueryBuilderQueryDraftSchema)(draft).pipe(
 		Effect.mapError(() =>
-			invalidRequest(
-				"parameter_invalid",
-				"query_builder_draft is not a valid query-builder draft document.",
-				"query_builder_draft",
-			),
+			V2ParameterInvalid.make("query_builder_draft is not a valid query-builder draft document.", {
+				param: "query_builder_draft",
+			}),
 		),
 	)
 
 const toUpsertRequest = (
 	params: V2AlertRuleCreateParams,
-): Effect.Effect<AlertRuleUpsertRequest, V2InvalidRequestError> =>
+): Effect.Effect<AlertRuleUpsertRequest, ReturnType<typeof V2ParameterInvalid.make>> =>
 	Effect.gen(function* () {
 		const draftField =
 			params.query_builder_draft === undefined
@@ -163,36 +153,52 @@ const toUpsertRequest = (
 			threshold: params.threshold,
 			windowMinutes: params.window_minutes,
 			destinationIds: params.destination_ids,
-			...(params.notes !== undefined ? { notes: params.notes } : {}),
+			...(params.notes !== undefined ? { notes: params.notes } : undefined),
 			...(params.notification_template !== undefined
-				? { notificationTemplate: params.notification_template }
-				: {}),
-			...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
-			...(params.service_names !== undefined ? { serviceNames: params.service_names } : {}),
+				? {
+						notificationTemplate: params.notification_template,
+					}
+				: undefined),
+			...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
+			...(params.service_names !== undefined ? { serviceNames: params.service_names } : undefined),
 			...(params.exclude_service_names !== undefined
-				? { excludeServiceNames: params.exclude_service_names }
-				: {}),
-			...(params.environments !== undefined ? { environments: params.environments } : {}),
-			...(params.tags !== undefined ? { tags: params.tags } : {}),
-			...(params.group_by !== undefined ? { groupBy: params.group_by } : {}),
-			...(params.threshold_upper !== undefined ? { thresholdUpper: params.threshold_upper } : {}),
+				? {
+						excludeServiceNames: params.exclude_service_names,
+					}
+				: undefined),
+			...(params.environments !== undefined ? { environments: params.environments } : undefined),
+			...(params.tags !== undefined ? { tags: params.tags } : undefined),
+			...(params.group_by !== undefined ? { groupBy: params.group_by } : undefined),
+			...(params.threshold_upper !== undefined
+				? { thresholdUpper: params.threshold_upper }
+				: undefined),
 			...(params.minimum_sample_count !== undefined
-				? { minimumSampleCount: params.minimum_sample_count }
-				: {}),
+				? {
+						minimumSampleCount: params.minimum_sample_count,
+					}
+				: undefined),
 			...(params.consecutive_breaches_required !== undefined
-				? { consecutiveBreachesRequired: params.consecutive_breaches_required }
-				: {}),
+				? {
+						consecutiveBreachesRequired: params.consecutive_breaches_required,
+					}
+				: undefined),
 			...(params.consecutive_healthy_required !== undefined
-				? { consecutiveHealthyRequired: params.consecutive_healthy_required }
-				: {}),
+				? {
+						consecutiveHealthyRequired: params.consecutive_healthy_required,
+					}
+				: undefined),
 			...(params.renotify_interval_minutes !== undefined
-				? { renotifyIntervalMinutes: params.renotify_interval_minutes }
-				: {}),
+				? {
+						renotifyIntervalMinutes: params.renotify_interval_minutes,
+					}
+				: undefined),
 			...(params.apdex_threshold_ms !== undefined
 				? { apdexThresholdMs: params.apdex_threshold_ms }
-				: {}),
-			...(params.raw_query_sql !== undefined ? { rawQuerySql: params.raw_query_sql } : {}),
-			...(params.raw_query_reducer !== undefined ? { rawQueryReducer: params.raw_query_reducer } : {}),
+				: undefined),
+			...(params.raw_query_sql !== undefined ? { rawQuerySql: params.raw_query_sql } : undefined),
+			...(params.raw_query_reducer !== undefined
+				? { rawQueryReducer: params.raw_query_reducer }
+				: undefined),
 			...draftField,
 		})
 	})
@@ -205,7 +211,7 @@ const toUpsertRequest = (
 const mergeUpsertRequest = (
 	doc: AlertRuleDocument,
 	patch: V2AlertRuleUpdateParams,
-): Effect.Effect<AlertRuleUpsertRequest, V2InvalidRequestError> =>
+): Effect.Effect<AlertRuleUpsertRequest, ReturnType<typeof V2ParameterInvalid.make>> =>
 	Effect.gen(function* () {
 		const signalType = patch.signal_type ?? doc.signalType
 		const queryBuilderDraft =
@@ -282,7 +288,7 @@ const toV2PreviewResult = (preview: AlertRulePreviewResponse): V2AlertRulePrevie
 			value: point.value,
 			sample_count: point.sampleCount,
 			status: point.status,
-			...(point.provisional !== undefined ? { provisional: point.provisional } : {}),
+			...(point.provisional !== undefined ? { provisional: point.provisional } : undefined),
 		})),
 	})),
 	would_fire: preview.wouldFire.map((span) => ({
@@ -300,10 +306,15 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 
 		const findRule = (orgId: Parameters<typeof rules.listRules>[0], ruleId: AlertRuleDocument["id"]) =>
 			Effect.gen(function* () {
-				const response = yield* rules.listRules(orgId).pipe(mapAlertError("rule_list"))
+				const response = yield* rules.listRules(orgId)
 				const rule = response.rules.find((doc) => doc.id === ruleId)
 				if (rule === undefined)
-					return yield* Effect.fail(resourceNotFound("alert_rule", "No such alert rule."))
+					return yield* Effect.fail(
+						new AlertRuleNotFoundError({
+							message: "No such alert rule.",
+							ruleId,
+						}),
+					)
 				return rule
 			})
 
@@ -311,7 +322,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* rules.listRules(tenant.orgId).pipe(mapAlertError("rule_list"))
+					const response = yield* rules.listRules(tenant.orgId)
 					const page = yield* paginateArray(response.rules.map(toV2Rule), query)
 					return { object: "list" as const, ...page }
 				}),
@@ -327,9 +338,13 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const request = yield* toUpsertRequest(payload)
-					const created = yield* rules
-						.createRule(tenant.orgId, tenant.userId, tenant.roles, request)
-						.pipe(mapAlertError("rule_create"))
+					const created = yield* rules.createRule(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						request,
+					)
+
 					return toV2RuleMutationResponse(created)
 				}),
 			)
@@ -338,23 +353,27 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const tenant = yield* CurrentTenant.Context
 					const current = yield* findRule(tenant.orgId, params.id)
 					const request = yield* mergeUpsertRequest(current, payload)
-					const updated = yield* alerts
-						.updateRule(tenant.orgId, tenant.userId, tenant.roles, params.id, request)
-						.pipe(mapAlertError("rule_update"))
+					const updated = yield* alerts.updateRule(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						params.id,
+						request,
+					)
+
 					return toV2RuleMutationResponse(updated)
 				}),
 			)
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const deleted = yield* rules
-						.deleteRule(tenant.orgId, tenant.roles, params.id)
-						.pipe(mapAlertError("rule_delete"))
+					const deleted = yield* rules.deleteRule(tenant.orgId, tenant.roles, params.id)
+
 					return {
 						id: deleted.id,
 						object: "alert_rule" as const,
 						deleted: true as const,
-						...(deleted.txid !== undefined ? { txid: deleted.txid } : {}),
+						...(deleted.txid !== undefined ? { txid: deleted.txid } : undefined),
 					}
 				}),
 			)
@@ -362,9 +381,14 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const rule = yield* toUpsertRequest(payload.rule)
-					const result = yield* alerts
-						.testRule(tenant.orgId, tenant.userId, tenant.roles, rule, payload.send_notification)
-						.pipe(mapAlertError("rule_test"))
+					const result = yield* alerts.testRule(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						rule,
+						payload.send_notification,
+					)
+
 					return {
 						object: "alert_rule.test_result" as const,
 						status: result.status,
@@ -393,19 +417,18 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 						return yield* new AlertForbiddenError({
 							message:
 								'Previewing a raw SQL alert requires the "alerts:write" scope, because it executes your query against the warehouse.',
-						}).pipe(mapAlertError("rule_preview"))
+						})
 					}
-					const preview = yield* alerts
-						.previewRule(
-							tenant.orgId,
-							tenant.roles,
-							new AlertRulePreviewRequest({
-								rule,
-								startTime: decodeIsoDateTime(payload.start_time),
-								endTime: decodeIsoDateTime(payload.end_time),
-							}),
-						)
-						.pipe(mapAlertError("rule_preview"))
+					const preview = yield* alerts.previewRule(
+						tenant.orgId,
+						tenant.roles,
+						new AlertRulePreviewRequest({
+							rule,
+							startTime: decodeIsoDateTime(payload.start_time),
+							endTime: decodeIsoDateTime(payload.end_time),
+						}),
+					)
+
 					return toV2PreviewResult(preview)
 				}),
 			)
@@ -414,18 +437,20 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const tenant = yield* CurrentTenant.Context
 					const cursor = yield* decodeChecksCursor(query.cursor)
 					const limit = query.limit ?? 20
-					const response = yield* readModels
-						.listRuleChecks(tenant.orgId, params.id, {
-							...(query.group_key !== undefined ? { groupKey: query.group_key } : {}),
-							...(query.status !== undefined ? { status: query.status } : {}),
-							...(query.since !== undefined ? { since: query.since } : {}),
-							...(query.until !== undefined ? { until: query.until } : {}),
-							...(cursor !== undefined
-								? { beforeTimestamp: cursor[0], beforeGroupKey: cursor[1] }
-								: {}),
-							limit: limit + 1,
-						})
-						.pipe(mapAlertError("rule_checks_list"))
+					const response = yield* readModels.listRuleChecks(tenant.orgId, params.id, {
+						...(query.group_key !== undefined ? { groupKey: query.group_key } : undefined),
+						...(query.status !== undefined ? { status: query.status } : undefined),
+						...(query.since !== undefined ? { since: query.since } : undefined),
+						...(query.until !== undefined ? { until: query.until } : undefined),
+						...(cursor !== undefined
+							? {
+									beforeTimestamp: cursor[0],
+									beforeGroupKey: cursor[1],
+								}
+							: undefined),
+						limit: limit + 1,
+					})
+
 					const hasMore = response.checks.length > limit
 					const checks = hasMore ? response.checks.slice(0, limit) : response.checks
 					const last = checks.at(-1)
@@ -440,12 +465,11 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("checksSummary", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const summary = yield* readModels
-						.summarizeRuleChecks(tenant.orgId, params.id, {
-							since: query.since,
-							until: query.until,
-						})
-						.pipe(mapAlertError("rule_checks_list"))
+					const summary = yield* readModels.summarizeRuleChecks(tenant.orgId, params.id, {
+						since: query.since,
+						until: query.until,
+					})
+
 					return {
 						object: "alert_check.summary" as const,
 						bucket_seconds: summary.bucketSeconds,

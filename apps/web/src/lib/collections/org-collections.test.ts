@@ -1,3 +1,4 @@
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // The self-heal guard is what we're testing; stub everything the module pulls in
@@ -48,6 +49,7 @@ vi.mock("./dashboards", () => ({ createDashboardsCollection: collectionStub }))
 // the exact `runFork` spy the fresh org-collections module captured.
 async function freshModule() {
 	vi.resetModules()
+	// SAFETY: the test replaces registry's runtime with the runFork spy before importing this module.
 	const registry = (await import("@/lib/registry")) as unknown as {
 		mapleRuntime: { runFork: ReturnType<typeof vi.fn> }
 	}

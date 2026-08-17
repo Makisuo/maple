@@ -8,7 +8,7 @@ import {
 import { Effect, Layer } from "effect"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { GithubAppClient } from "@/services/integrations/vcs/vendor/github/GithubAppClient"
-import { GithubHttp, type GithubHttpShape } from "@/services/integrations/vcs/vendor/github/GithubHttp"
+import { GithubHttp, type GithubHttpApi } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 import { GithubProvider } from "@/services/integrations/vcs/vendor/github/GithubProvider"
 import { VcsCommitService } from "@/services/integrations/vcs/VcsCommitService"
 import { VcsProviderRegistry } from "@/services/integrations/vcs/VcsProviderRegistry"
@@ -60,7 +60,7 @@ const routedHttp = (resolvable: (repoName: string, sha: string) => boolean) => {
 			}
 			return jsonResponse({ message: `unexpected ${method} ${url}` }, { status: 500 })
 		},
-	} satisfies GithubHttpShape)
+	} satisfies GithubHttpApi)
 	return { layer, calls }
 }
 

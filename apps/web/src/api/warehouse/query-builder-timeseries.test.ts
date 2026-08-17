@@ -1,408 +1,51 @@
-import { assert, describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
-import type { QuerySpec } from "@maple/query-engine"
+import { describe, expect, it } from "vitest"
+import { LAB_EMPTY_RANGE_STRATEGY } from "@maple/query-engine/query-set"
 import { __testables } from "@/api/warehouse/query-builder-timeseries"
-import { WarehouseQueryError } from "@/api/warehouse/effect-utils"
-import type { QueryRunResult } from "@/components/query-builder/formula-results"
 
-function makeQueryResult(overrides: Partial<QueryRunResult> = {}): QueryRunResult {
-	return {
-		queryId: "q-1",
-		queryName: "A",
-		source: "traces",
-		status: "success",
-		error: null,
-		warnings: [],
-		data: [],
-		...overrides,
-	}
-}
+// This module is now an adapter: the fan-out, fallback ladder, merge, comparison
+// window and no-data diagnosis all live in `@maple/query-engine/query-set` and
+// are tested there against an in-memory executor. What is still this module's own
+// is translating the wire strategy shape, which `use-widget-data` depends on.
 
-describe("query-builder timeseries strategy", () => {
-	it("resolves deterministic auto bucket seconds for timeseries specs", () => {
-		const spec: QuerySpec = {
-			kind: "timeseries",
-			source: "traces",
-			metric: "count",
-			groupBy: ["service"],
-		}
-
-		const resolved = __testables.resolveTimeseriesBucketSpec(
-			spec,
-			"2026-01-01 00:00:00",
-			"2026-01-02 00:00:00",
-		)
-
-		expect(resolved.kind).toBe("timeseries")
-		if (resolved.kind !== "timeseries") {
-			return
-		}
-
-		expect(resolved.bucketSeconds).toBe(900)
-	})
-
-	it("does not mutate explicit bucket seconds", () => {
-		const spec: QuerySpec = {
-			kind: "timeseries",
-			source: "logs",
-			metric: "count",
-			bucketSeconds: 900,
-		}
-
-		const resolved = __testables.resolveTimeseriesBucketSpec(
-			spec,
-			"2026-01-01 00:00:00",
-			"2026-01-01 03:00:00",
-		)
-
-		expect(resolved).toEqual(spec)
-	})
-
-	it("builds deterministic fallback execution windows", () => {
-		const windows = __testables.buildExecutionWindows(
-			"2026-01-02 00:00:00",
-			"2026-01-02 01:00:00",
-			{
-				enableEmptyRangeFallback: true,
-				fallbackWindowSeconds: [86400],
-				maxFallbackRangeSeconds: 86400 * 31,
-			},
-			true,
-		)
-
-		expect(windows).toEqual([
-			{
-				startTime: "2026-01-02 00:00:00",
-				endTime: "2026-01-02 01:00:00",
-				kind: "primary",
-			},
-			{
-				startTime: "2026-01-01 01:00:00",
-				endTime: "2026-01-02 01:00:00",
-				kind: "fallback",
-			},
-		])
-	})
-
-	it("resolves auto bucket per execution window (primary + fallback)", () => {
-		const spec: QuerySpec = {
-			kind: "timeseries",
-			source: "traces",
-			metric: "count",
-		}
-
-		const primary = __testables.resolveExecutionSpecForWindow(spec, {
-			startTime: "2026-01-02 00:00:00",
-			endTime: "2026-01-02 01:00:00",
-			kind: "primary",
-		})
-		const fallback = __testables.resolveExecutionSpecForWindow(spec, {
-			startTime: "2026-01-01 01:00:00",
-			endTime: "2026-01-02 01:00:00",
-			kind: "fallback",
-		})
-
-		expect(primary.kind).toBe("timeseries")
-		expect(fallback.kind).toBe("timeseries")
-		if (primary.kind !== "timeseries" || fallback.kind !== "timeseries") {
-			return
-		}
-
-		expect(primary.bucketSeconds).toBe(60)
-		expect(fallback.bucketSeconds).toBe(900)
-	})
-
-	it("widens explicit bucket on fallback windows to stay within point budget", () => {
-		const spec: QuerySpec = {
-			kind: "timeseries",
-			source: "traces",
-			metric: "count",
-			bucketSeconds: 60,
-		}
-
-		const primary = __testables.resolveExecutionSpecForWindow(spec, {
-			startTime: "2026-01-02 00:00:00",
-			endTime: "2026-01-02 01:00:00",
-			kind: "primary",
-		})
-		const fallback = __testables.resolveExecutionSpecForWindow(spec, {
-			startTime: "2026-01-01 01:00:00",
-			endTime: "2026-01-02 01:00:00",
-			kind: "fallback",
-		})
-
-		expect(primary.kind).toBe("timeseries")
-		expect(fallback.kind).toBe("timeseries")
-		if (primary.kind !== "timeseries" || fallback.kind !== "timeseries") {
-			return
-		}
-
-		expect(primary.bucketSeconds).toBe(60)
-		expect(fallback.bucketSeconds).toBe(900)
-	})
-
-	it.effect("continues fallback execution after an error and recomputes window buckets", () =>
-		Effect.gen(function* () {
-			const spec: QuerySpec = {
-				kind: "timeseries",
-				source: "traces",
-				metric: "count",
-			}
-
-			const seenBucketSeconds: number[] = []
-			const result = yield* __testables.executeTimeseriesQueryWithFallbackUsing(
-				"2026-01-02 00:00:00",
-				"2026-01-02 01:00:00",
-				spec,
-				{
+describe("resolveStrategy (wire shape → package shape)", () => {
+	it("maps the wire field names onto the strategy the package takes", () => {
+		expect(
+			__testables.resolveStrategy({
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 01:00:00",
+				queries: [],
+				strategy: {
 					enableEmptyRangeFallback: true,
-					fallbackWindowSeconds: [24 * 60 * 60, 7 * 24 * 60 * 60],
-					maxFallbackRangeSeconds: 31 * 24 * 60 * 60,
+					fallbackWindowSeconds: [7200, 60],
+					maxFallbackRangeSeconds: 86400,
 				},
-				true,
-				(windowStart, _windowEnd, windowSpec) =>
-					Effect.gen(function* () {
-						if (windowSpec.kind !== "timeseries") {
-							return []
-						}
-
-						seenBucketSeconds.push(windowSpec.bucketSeconds ?? -1)
-
-						if (windowStart === "2026-01-02 00:00:00") {
-							return []
-						}
-
-						if (windowStart === "2026-01-01 01:00:00") {
-							return yield* new WarehouseQueryError({
-								operation: "test",
-								message: "Timeseries query too expensive",
-							})
-						}
-
-						return [
-							{
-								bucket: "2026-01-01T00:00:00.000Z",
-								series: { total: 5 },
-							},
-						]
-					}),
-			)
-
-			assert.deepStrictEqual(seenBucketSeconds, [60, 900, 3600])
-			assert.isTrue(result.fallbackUsed)
-			assert.lengthOf(result.attempts, 3)
-			assert.include(result.attempts[1]?.error ?? "", "too expensive")
-			assert.deepStrictEqual(result.points, [
-				{
-					bucket: "2026-01-01T00:00:00.000Z",
-					series: { total: 5 },
-				},
-			])
-		}),
-	)
-
-	it("uses the shared auto bucket ladder", () => {
-		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-01 00:30:00")).toBe(60)
-		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-01 06:00:00")).toBe(300)
-		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-08 00:00:00")).toBe(3600)
-	})
-
-	it("counts only query results with real series data", () => {
-		const count = __testables.countSuccessfulQuerySeries([
-			makeQueryResult({
-				data: [{ bucket: "2026-01-01T00:00:00.000Z", series: {} }],
 			}),
-			makeQueryResult({
-				queryId: "q-2",
-				queryName: "B",
-				data: [{ bucket: "2026-01-01T00:00:00.000Z", series: { total: 1 } }],
+		).toEqual({ enabled: true, windowSeconds: [60, 7200], maxRangeSeconds: 86400 })
+	})
+
+	/**
+	 * `use-widget-data` sends `enableEmptyRangeFallback: false` on every dashboard
+	 * tile. If that stopped disabling the ladder, an empty tile would silently
+	 * start charting data from outside its own time range.
+	 */
+	it("honours the dashboard tile's explicit opt-out", () => {
+		expect(
+			__testables.resolveStrategy({
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 01:00:00",
+				queries: [],
+				strategy: { enableEmptyRangeFallback: false },
+			}).enabled,
+		).toBe(false)
+	})
+
+	it("defaults to the lab ladder when the caller sends no strategy", () => {
+		expect(
+			__testables.resolveStrategy({
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 01:00:00",
+				queries: [],
 			}),
-		])
-
-		expect(count).toBe(1)
-	})
-
-	it("prefers query error message when no series data exists", () => {
-		const message = __testables.noQueryDataMessage([
-			makeQueryResult({
-				status: "error",
-				error: "Timeseries query too expensive",
-			}),
-			makeQueryResult({
-				queryId: "q-2",
-				queryName: "B",
-				data: [],
-			}),
-		])
-
-		expect(message).toContain("too expensive")
-	})
-
-	it("preserves grouped series instead of summing them per query", () => {
-		const merged = __testables.mergeQueryRunResults(
-			[
-				makeQueryResult({
-					queryId: "q-1",
-					queryName: "A",
-					data: [
-						{
-							bucket: "2026-01-01T00:00:00.000Z",
-							series: { checkout: 2, billing: 1 },
-						},
-						{
-							bucket: "2026-01-01T00:05:00.000Z",
-							series: { checkout: 4 },
-						},
-					],
-				}),
-				makeQueryResult({
-					queryId: "q-2",
-					queryName: "B",
-					data: [
-						{
-							bucket: "2026-01-01T00:00:00.000Z",
-							series: { checkout: 5 },
-						},
-						{
-							bucket: "2026-01-01T00:05:00.000Z",
-							series: { checkout: 7 },
-						},
-					],
-				}),
-			],
-			new Map([
-				["q-1", "Errors"],
-				["q-2", "Throughput"],
-			]),
-		)
-
-		expect(merged.seriesNames).toEqual(["Errors: checkout", "Errors: billing", "Throughput: checkout"])
-
-		expect(merged.rowsByBucket.get("2026-01-01T00:00:00.000Z")).toEqual({
-			bucket: "2026-01-01T00:00:00.000Z",
-			"Errors: checkout": 2,
-			"Errors: billing": 1,
-			"Throughput: checkout": 5,
-		})
-		expect(merged.rowsByBucket.get("2026-01-01T00:05:00.000Z")).toEqual({
-			bucket: "2026-01-01T00:05:00.000Z",
-			"Errors: checkout": 4,
-			"Errors: billing": 0,
-			"Throughput: checkout": 7,
-		})
-	})
-
-	it("keeps non-grouped 'all' series as the display name", () => {
-		const merged = __testables.mergeQueryRunResults(
-			[
-				makeQueryResult({
-					queryId: "q-1",
-					queryName: "A",
-					data: [
-						{
-							bucket: "2026-01-01T00:00:00.000Z",
-							series: { all: 12 },
-						},
-					],
-				}),
-			],
-			new Map([["q-1", "Requests"]]),
-		)
-
-		expect(merged.seriesNames).toEqual(["Requests"])
-		expect(merged.rowsByBucket.get("2026-01-01T00:00:00.000Z")).toEqual({
-			bucket: "2026-01-01T00:00:00.000Z",
-			Requests: 12,
-		})
-	})
-
-	it("keeps formula series labels without redundant namespacing", () => {
-		const merged = __testables.mergeQueryRunResults(
-			[
-				makeQueryResult({
-					queryId: "f-1",
-					queryName: "F1",
-					source: "formula",
-					data: [
-						{
-							bucket: "2026-01-01T00:00:00.000Z",
-							series: { "Error ratio": 0.3 },
-						},
-					],
-				}),
-			],
-			new Map([["f-1", "Error ratio"]]),
-		)
-
-		expect(merged.seriesNames).toEqual(["Error ratio"])
-		expect(merged.rowsByBucket.get("2026-01-01T00:00:00.000Z")).toEqual({
-			bucket: "2026-01-01T00:00:00.000Z",
-			"Error ratio": 0.3,
-		})
-	})
-
-	it("computes percent change per stable grouped series", () => {
-		const rows: Array<Record<string, string | number>> = [
-			{
-				bucket: "2026-01-01T00:00:00.000Z",
-				"Errors: checkout": 20,
-				"Errors: checkout (prev)": 10,
-			},
-		]
-
-		__testables.appendPercentChangeSeries(
-			rows,
-			new Map([["q-1::checkout", "Errors: checkout"]]),
-			new Map([["q-1::checkout", "Errors: checkout (prev)"]]),
-		)
-
-		expect(rows[0]["Errors: checkout (%Δ)"]).toBe(100)
-	})
-
-	it("prev=0 & cur=0 is 0% (genuinely unchanged); prev=0 & cur>0 leaves a gap, not a fake 0%", () => {
-		const rows: Array<Record<string, string | number>> = [
-			{
-				bucket: "2026-01-01T00:00:00.000Z",
-				"Errors: checkout": 0,
-				"Errors: checkout (prev)": 0,
-			},
-			{
-				bucket: "2026-01-01T01:00:00.000Z",
-				"Errors: checkout": 5,
-				"Errors: checkout (prev)": 0,
-			},
-		]
-
-		__testables.appendPercentChangeSeries(
-			rows,
-			new Map([["q-1::checkout", "Errors: checkout"]]),
-			new Map([["q-1::checkout", "Errors: checkout (prev)"]]),
-		)
-
-		expect(rows[0]["Errors: checkout (%Δ)"]).toBe(0)
-		expect(rows[1]).not.toHaveProperty("Errors: checkout (%Δ)")
-	})
-
-	// A ratio widget hides its numerator/denominator queries and plots only the formula. Merging
-	// the hidden operands in anyway put raw counts on the same axis as a 0–1 ratio — and, under
-	// the widget's own `percent` unit, drew them as "416849856400.0%".
-	it("collects hidden query and formula ids so they are dropped before merging", () => {
-		const hidden = __testables.collectHiddenResultIds({
-			queries: [{ id: "num", hidden: true }, { id: "den", hidden: true }, { id: "plain" }],
-			formulas: [{ id: "ratio" }, { id: "scratch", hidden: true }],
-		})
-
-		expect([...hidden].sort()).toEqual(["den", "num", "scratch"])
-	})
-
-	it("treats a widget with no formulas and nothing hidden as fully plotted", () => {
-		expect(__testables.collectHiddenResultIds({ queries: [{ id: "a" }, { id: "b" }] }).size).toBe(0)
-	})
-
-	it("does not rescale error_rate series — the engine's 0–1 ratio is canonical", () => {
-		// Regression guard: a ÷100 "normalize" survived from the Tinybird-pipe
-		// era (which returned percent points) long after the CH engine switched
-		// to emitting ratios, making every error_rate chart 100× too small.
-		expect(__testables).not.toHaveProperty("normalizeErrorRatePoints")
+		).toEqual(LAB_EMPTY_RANGE_STRATEGY)
 	})
 })

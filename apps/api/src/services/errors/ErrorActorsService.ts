@@ -39,7 +39,7 @@ export const actorRowToDocument = (row: ActorRow): ActorDocument =>
 			row.lastActiveAt == null ? null : decodeActorDateTimeSync(row.lastActiveAt.toISOString()),
 	})
 
-export interface ErrorActorsPublicShape {
+export interface ErrorActorsPublicApi {
 	readonly registerAgent: (
 		orgId: OrgId,
 		byUserId: UserId,
@@ -60,7 +60,7 @@ export interface ErrorActorsPublicShape {
 	) => Effect.Effect<ActorDocument, ErrorPersistenceError>
 }
 
-export interface ErrorActorsServiceShape extends ErrorActorsPublicShape {
+export interface ErrorActorsServiceApi extends ErrorActorsPublicApi {
 	/** Existence check used by assignment without changing its span topology. */
 	readonly actorExists: (orgId: OrgId, actorId: ActorId) => Effect.Effect<boolean, ErrorPersistenceError>
 	/** Compatibility-facade support for the scheduled error workflow. */
@@ -74,7 +74,7 @@ export interface ErrorActorsServiceShape extends ErrorActorsPublicShape {
 	) => Effect.Effect<Map<ActorId, ActorDocument>, ErrorPersistenceError>
 }
 
-const make: Effect.Effect<ErrorActorsServiceShape, never, Database> = Effect.gen(function* () {
+const make: Effect.Effect<ErrorActorsServiceApi, never, Database> = Effect.gen(function* () {
 	const database = yield* Database
 	const dbExecute = makeErrorDatabaseExecute(database, "ErrorActorsService")
 	const newActorId = () => decodeActorIdSync(randomUUID())
@@ -88,7 +88,7 @@ const make: Effect.Effect<ErrorActorsServiceShape, never, Database> = Effect.gen
 				.limit(1),
 		).pipe(Effect.map((rows) => rows[0] ?? null))
 
-	const lookupActor: ErrorActorsServiceShape["lookupActor"] = Effect.fn("ErrorsService.lookupActor")(
+	const lookupActor: ErrorActorsServiceApi["lookupActor"] = Effect.fn("ErrorsService.lookupActor")(
 		function* (orgId, actorId) {
 			const row = yield* selectActorRow(orgId, actorId)
 			if (!row) {
@@ -103,12 +103,12 @@ const make: Effect.Effect<ErrorActorsServiceShape, never, Database> = Effect.gen
 		},
 	)
 
-	const actorExists: ErrorActorsServiceShape["actorExists"] = (orgId, actorId) =>
+	const actorExists: ErrorActorsServiceApi["actorExists"] = (orgId, actorId) =>
 		selectActorRow(orgId, actorId).pipe(Effect.map((row) => row !== null))
 
 	// Best-effort: a failed lastActiveAt bump must never fail the calling
 	// mutation, but persistent failures should still be diagnosable.
-	const touchActor: ErrorActorsServiceShape["touchActor"] = (orgId, actorId, timestamp) =>
+	const touchActor: ErrorActorsServiceApi["touchActor"] = (orgId, actorId, timestamp) =>
 		dbExecute((db) =>
 			db
 				.update(actors)
@@ -123,7 +123,7 @@ const make: Effect.Effect<ErrorActorsServiceShape, never, Database> = Effect.gen
 			Effect.ignore,
 		)
 
-	const ensureUserActor: ErrorActorsServiceShape["ensureUserActor"] = Effect.fn(
+	const ensureUserActor: ErrorActorsServiceApi["ensureUserActor"] = Effect.fn(
 		"ErrorsService.ensureUserActor",
 	)(function* (orgId, userId) {
 		const existing = yield* dbExecute((db) =>
@@ -166,7 +166,7 @@ const make: Effect.Effect<ErrorActorsServiceShape, never, Database> = Effect.gen
 		return actorRowToDocument(row)
 	})
 
-	const ensureSystemActor: ErrorActorsServiceShape["ensureSystemActor"] = Effect.fn(
+	const ensureSystemActor: ErrorActorsServiceApi["ensureSystemActor"] = Effect.fn(
 		"ErrorsService.ensureSystemActor",
 	)(function* (orgId) {
 		const existing = yield* dbExecute((db) =>
@@ -221,7 +221,7 @@ const make: Effect.Effect<ErrorActorsServiceShape, never, Database> = Effect.gen
 		return actorRowToDocument(row)
 	})
 
-	const registerAgent: ErrorActorsServiceShape["registerAgent"] = Effect.fn("ErrorsService.registerAgent")(
+	const registerAgent: ErrorActorsServiceApi["registerAgent"] = Effect.fn("ErrorsService.registerAgent")(
 		function* (orgId, byUserId, request) {
 			const name = request.name.trim()
 			if (name.length === 0) {
@@ -281,7 +281,7 @@ const make: Effect.Effect<ErrorActorsServiceShape, never, Database> = Effect.gen
 		},
 	)
 
-	const listAgents: ErrorActorsServiceShape["listAgents"] = Effect.fn("ErrorsService.listAgents")(
+	const listAgents: ErrorActorsServiceApi["listAgents"] = Effect.fn("ErrorsService.listAgents")(
 		function* (orgId) {
 			const rows = yield* dbExecute((db) =>
 				db
@@ -294,7 +294,7 @@ const make: Effect.Effect<ErrorActorsServiceShape, never, Database> = Effect.gen
 		},
 	)
 
-	const collectActorDocs: ErrorActorsServiceShape["collectActorDocs"] = (orgId, actorIds) => {
+	const collectActorDocs: ErrorActorsServiceApi["collectActorDocs"] = (orgId, actorIds) => {
 		const filtered = Array.from(new Set(actorIds.filter((value): value is ActorId => value != null)))
 		if (filtered.length === 0) return Effect.succeed(new Map<ActorId, ActorDocument>())
 		return dbExecute((db) =>
@@ -323,7 +323,7 @@ const make: Effect.Effect<ErrorActorsServiceShape, never, Database> = Effect.gen
 	})
 })
 
-export class ErrorActorsService extends Context.Service<ErrorActorsService, ErrorActorsServiceShape>()(
+export class ErrorActorsService extends Context.Service<ErrorActorsService, ErrorActorsServiceApi>()(
 	"@maple/api/services/errors/ErrorActorsService",
 	{ make },
 ) {

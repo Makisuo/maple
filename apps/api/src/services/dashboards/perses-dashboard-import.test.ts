@@ -103,8 +103,11 @@ describe("convertPersesDashboardToPortable", () => {
 			assert.deepStrictEqual(result.dashboard.tags, ["perses-import"])
 			assert.deepStrictEqual(result.dashboard.timeRange, { type: "relative", value: "6h" })
 			assert.strictEqual(widget.visualization, "chart")
-			assert.strictEqual(widget.dataSource.endpoint, "raw_sql_chart")
-			assert.strictEqual((widget.dataSource.params as Record<string, unknown>).displayType, "line")
+			assert.strictEqual(widget.dataSource.kind, "raw_sql")
+			assert.strictEqual(
+				widget.dataSource.kind === "raw_sql" ? widget.dataSource.displayType : undefined,
+				"line",
+			)
 			assert.strictEqual(widget.display.title, "Requests")
 			assert.strictEqual(widget.layout.x, 10)
 			assert.strictEqual(widget.layout.w, 2)
@@ -271,7 +274,8 @@ describe("convertPersesDashboardToPortable", () => {
 
 			const result = yield* convertPersesDashboardToPortable(input)
 			const widget = result.dashboard.widgets[0]!
-			const params = widget.dataSource.params as Record<string, unknown>
+			if (widget.dataSource.kind !== "raw_sql") throw new Error("expected a raw_sql data source")
+			const params: Record<string, unknown> = widget.dataSource
 
 			assert.strictEqual(widget.visualization, "table")
 			assert.strictEqual(params.displayType, "table")

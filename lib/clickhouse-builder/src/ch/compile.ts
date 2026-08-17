@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 // Query Compilation
 //
 // Compiles a CHQuery + params into a SQL string by:
@@ -71,7 +72,7 @@ const orderByClause = (specs: ReadonlyArray<[string, "asc" | "desc"]>): Array<st
  */
 export type TenantScope = "org" | "cross-org"
 
-export interface CompiledQuery<Output> {
+interface CompiledQueryBase<Output> {
 	readonly sql: string
 	readonly tenantScope: TenantScope
 	/** Whether a `rowSchema` was supplied. Lets a catalog sweep see the queries
@@ -82,7 +83,6 @@ export interface CompiledQuery<Output> {
 	 *  exists in the managed ingest pipeline (declared via `.routing("ingest")` at
 	 *  the query definition), so executors read it there instead of a per-org
 	 *  warehouse override. */
-	readonly routing?: "ingest"
 	/** Runtime decode of raw query results. Queries built from handwritten SQL
 	 *  should provide a row schema so schema drift is caught before consumers
 	 *  read fields from `Record<string, unknown>`. Without a schema this is an
@@ -98,21 +98,32 @@ export interface CompiledQuery<Output> {
 	) => Effect.Effect<Option.Option<Output>, CompiledQueryDecodeError>
 }
 
+/**
+ * Routing is a type-level fact as well as runtime metadata. An ingest-routed
+ * query therefore cannot be passed accidentally to an API that may consult a
+ * per-org read configuration.
+ */
+export type CompiledQuery<
+	Output,
+	Routing extends "ingest" | undefined = "ingest" | undefined,
+> = CompiledQueryBase<Output> &
+	(Routing extends "ingest" ? { readonly routing: "ingest" } : { readonly routing?: undefined })
+
 export type CompiledQueryRowSchema<Output> = Schema.Schema<Output>
 
-const makeCompiledQuery = <Output>(
+const makeCompiledQuery = <Output, Routing extends "ingest" | undefined>(
 	sql: string,
 	tenantScope: TenantScope,
 	rowSchema?: CompiledQueryRowSchema<Output>,
-	routing?: "ingest",
-): CompiledQuery<Output> => {
+	routing?: Routing,
+): CompiledQuery<Output, Routing> => {
 	const decodeRow = rowSchema
 		? (Schema.decodeUnknownEffect(rowSchema) as (row: unknown) => Effect.Effect<Output, unknown, never>)
 		: undefined
 
-	const decodeRows: CompiledQuery<Output>["decodeRows"] = (rows) => {
-		if (!rowSchema) return Effect.succeed(rows as unknown as ReadonlyArray<Output>)
-		if (!decodeRow) return Effect.succeed(rows as unknown as ReadonlyArray<Output>)
+	const decodeRows: CompiledQueryBase<Output>["decodeRows"] = (rows) => {
+		if (!rowSchema) return Effect.succeed(rows as ReadonlyArray<Output>)
+		if (!decodeRow) return Effect.succeed(rows as ReadonlyArray<Output>)
 
 		return Effect.forEach(rows, (row, index) =>
 			decodeRow(row).pipe(
@@ -132,12 +143,12 @@ const makeCompiledQuery = <Output>(
 		sql,
 		tenantScope,
 		rowSchemaDeclared: rowSchema !== undefined,
-		...(routing === undefined ? {} : { routing }),
+		...(!(routing === undefined) ? { routing } : undefined),
 		decodeRows,
 		decodeFirstRow: (rows) => {
 			const row = rows[0]
 			if (row == null) return Effect.succeed(Option.none<Output>())
-			if (!decodeRow) return Effect.succeed(Option.some(row as unknown as Output))
+			if (!decodeRow) return Effect.succeed(Option.some(row as Output))
 
 			return decodeRow(row).pipe(
 				Effect.map(Option.some),
@@ -151,7 +162,7 @@ const makeCompiledQuery = <Output>(
 				),
 			)
 		},
-	}
+	} as CompiledQuery<Output, Routing>
 }
 
 /**
@@ -204,20 +215,22 @@ export type RawSqlReason =
  * DDL, migrations, and another engine's file formats don't reach this function
  * at all; they never produce a `CompiledQuery`.
  */
-export const unsafeCompiledQuery = <Output>(args: {
+export const unsafeCompiledQuery = <Output, Routing extends "ingest" | undefined = undefined>(args: {
 	readonly sql: string
 	readonly tenantScope: TenantScope
 	readonly reason: RawSqlReason
 	/** One sentence, at the call site, on why this instance qualifies. */
 	readonly note: string
 	readonly rowSchema?: CompiledQueryRowSchema<Output>
-	readonly routing?: "ingest"
-}): CompiledQuery<Output> => makeCompiledQuery(args.sql, args.tenantScope, args.rowSchema, args.routing)
+	readonly routing?: Routing
+}): CompiledQuery<Output, Routing> =>
+	makeCompiledQuery(args.sql, args.tenantScope, args.rowSchema, args.routing)
 
 export function compileCH<
 	Cols extends ColumnDefs,
 	Output extends Record<string, any>,
 	Joins extends Record<string, ColumnDefs>,
+	Routing extends "ingest" | undefined,
 	Params extends Record<string, any>,
 	// The row schema, not the SELECT inference, is what actually produces values
 	// at runtime, so it decides the compiled query's output type. `extends Output`
@@ -225,10 +238,10 @@ export function compileCH<
 	// column decoded as a literal union) but never contradict it.
 	Decoded extends Output = Output,
 >(
-	query: CHQuery<Cols, Output, Joins>,
+	query: CHQuery<Cols, Output, Joins, Routing>,
 	params: Params,
 	options?: { skipFormat?: boolean; rowSchema?: CompiledQueryRowSchema<Decoded> },
-): CompiledQuery<Decoded> {
+): CompiledQuery<Decoded, Routing> {
 	const state = query._state
 
 	// Build column accessor — joined or simple depending on joins
@@ -377,9 +390,12 @@ export function compileCH<
 				? "org"
 				: "cross-org"
 
-	return {
-		...makeCompiledQuery<Decoded>(sql, tenantScope, options?.rowSchema, state.routingValue),
-	}
+	return makeCompiledQuery<Decoded, Routing>(
+		sql,
+		tenantScope,
+		options?.rowSchema,
+		state.routingValue as Routing,
+	)
 }
 
 // UNION ALL compilation
@@ -388,7 +404,7 @@ export function compileUnion<Output extends Record<string, any>, Params extends 
 	union: CHUnionQuery<Output>,
 	params: Params,
 	options?: { rowSchema?: CompiledQueryRowSchema<Output> },
-): CompiledQuery<Output> {
+): CompiledQuery<Output, undefined> {
 	const state = union._state
 
 	// Compile each sub-query without FORMAT
@@ -422,9 +438,7 @@ export function compileUnion<Output extends Record<string, any>, Params extends 
 		sql += `\nFORMAT ${state.formatValue}`
 	}
 
-	return {
-		...makeCompiledQuery<Output>(sql, tenantScope, options?.rowSchema),
-	}
+	return makeCompiledQuery<Output, undefined>(sql, tenantScope, options?.rowSchema)
 }
 
 function resolveParam(value: unknown): string {

@@ -8,7 +8,7 @@ import {
 	ServiceName,
 	ServicePlanetScaleStatsRequest,
 } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { summarizeSampling } from "@/lib/sampling"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 import { transformExternalEdge } from "@/api/warehouse/service-external-edges"
@@ -163,7 +163,7 @@ export const getServiceDependenciesBundle = Effect.fn("QueryEngine.getServiceDep
 
 	const result = yield* runWarehouseQuery("serviceDependenciesBundle", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceDependenciesBundle({
 				payload: new ServiceDependenciesBundleRequest({
 					serviceName: input.serviceName,
@@ -260,7 +260,7 @@ export const getServiceMapCloudflare = Effect.fn("QueryEngine.getServiceMapCloud
 
 	const result = yield* runWarehouseQuery("serviceCloudflareStats", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceCloudflareStats({
 				payload: new ServiceCloudflareStatsRequest({
 					startTime: input.startTime ?? fallback.startTime,
@@ -328,7 +328,7 @@ export const getServiceMapPlanetScale = Effect.fn("QueryEngine.getServiceMapPlan
 
 	const result = yield* runWarehouseQuery("servicePlanetScaleStats", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.servicePlanetScaleStats({
 				payload: new ServicePlanetScaleStatsRequest({
 					startTime: input.startTime ?? fallback.startTime,
@@ -361,7 +361,7 @@ export const getPlanetScaleBranchStats = Effect.fn("QueryEngine.getPlanetScaleBr
 
 	const result = yield* runWarehouseQuery("planetscaleBranchStats", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.servicePlanetScaleStats({
 				payload: new ServicePlanetScaleStatsRequest({
 					startTime: input.startTime ?? fallback.startTime,
@@ -392,7 +392,7 @@ export const getServiceDbQuerySummary = Effect.fn("QueryEngine.getServiceDbQuery
 
 	const result = yield* runWarehouseQuery("serviceDbQuerySummary", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceDbQuerySummary({
 				payload: new ServiceDbQuerySummaryRequest({
 					dbSystem: input.dbSystem,
@@ -427,7 +427,7 @@ export const getServiceMapBundle = Effect.fn("QueryEngine.getServiceMapBundle")(
 
 	const result = yield* runWarehouseQuery("serviceMapBundle", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceMapBundle({
 				payload: new ServiceMapBundleRequest({
 					startTime,

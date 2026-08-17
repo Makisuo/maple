@@ -16,9 +16,12 @@ const KIND_LABEL: Record<DashboardVersionChangeKind, string> = {
 	widget_removed: "Widget removed",
 	widget_updated: "Widget updated",
 	layout_changed: "Layout",
+	section_added: "Group added",
+	section_removed: "Group removed",
+	section_updated: "Groups",
 	restored: "Restored",
 	multiple: "Edited",
-}
+} satisfies Record<DashboardVersionChangeKind, string>
 
 // Marker color keyed off changeKind. Pulled from the existing chart/severity
 // tokens so the timeline reads against the rest of the app.
@@ -35,9 +38,14 @@ const KIND_DOT: Record<DashboardVersionChangeKind, string> = {
 	widget_removed: "bg-severity-warn",
 	widget_updated: "bg-chart-4",
 	layout_changed: "bg-muted-foreground",
+	// Structural edits share the widget-lifecycle family: adding a group reads
+	// like adding a widget, removing one like removing a widget.
+	section_added: "bg-chart-3",
+	section_removed: "bg-severity-warn",
+	section_updated: "bg-muted-foreground",
 	restored: "bg-primary ring-[3px] ring-primary/18",
 	multiple: "bg-chart-5",
-}
+} satisfies Record<DashboardVersionChangeKind, string>
 
 function actorInitials(userId: string): string {
 	const trimmed = userId.trim()

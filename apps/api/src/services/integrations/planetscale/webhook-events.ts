@@ -210,14 +210,14 @@ const DEPLOY_STATE_VERB: Record<string, string> = {
 	"deploy_request.errored": "failed",
 	"deploy_request.reverted": "was reverted",
 	"deploy_request.closed": "closed",
-}
+} satisfies Record<string, string>
 
 const BRANCH_STATE_VERB: Record<string, string> = {
 	"branch.ready": "is ready",
 	"branch.sleeping": "went to sleep",
 	"branch.primary_promoted": "was promoted to primary",
 	"branch.start_maintenance": "entered maintenance",
-}
+} satisfies Record<string, string>
 
 /**
  * PlanetScale webhook `timestamp` is epoch SECONDS; the deploy-request REST

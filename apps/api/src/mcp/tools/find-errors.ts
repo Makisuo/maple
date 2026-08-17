@@ -12,7 +12,11 @@ import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/Warehou
 export function registerFindErrorsTool(server: McpToolRegistrar) {
 	server.tool(
 		"find_errors",
-		"Find and categorize errors by type with counts and affected services. Each error has a stable `fingerprint` id — pass it to error_detail for sample traces, or to the error-issue tools (same identity as list_error_issues).",
+		// Do not reinstate the old claim that a fingerprint is the "same identity as
+		// list_error_issues" — it is not. A fingerprint is a decimal UInt64 hash; an
+		// issue id is a UUID. Conflating them was the sole cause of every production
+		// error_detail failure.
+		"Find and categorize errors by type with counts and affected services. Each error has a stable `fingerprint` (a decimal UInt64) — pass it to error_detail for sample traces. The error-issue tools take an `issue_id` UUID from list_error_issues instead, which is a separate identity.",
 		Schema.Struct({
 			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
 			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),

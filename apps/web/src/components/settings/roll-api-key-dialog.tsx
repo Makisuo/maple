@@ -15,7 +15,7 @@ import {
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
 import { useApiKeyMutationSync } from "@/hooks/use-api-keys"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { ApiKeySecretReveal } from "./api-key-secret-reveal"
 
@@ -45,8 +45,8 @@ export function RollApiKeyDialog({ open, onOpenChange, apiKey, onRolled }: RollA
 			onRolled?.()
 			void reconcileTxid(result.value.txid)
 		} else {
-			const { title, description } = formatBackendError(result)
-			toastManager.add({ title, description, type: "error" })
+			const { title, message } = displayError(result)
+			toastManager.add({ title, description: message, type: "error" })
 		}
 		setIsRolling(false)
 	}

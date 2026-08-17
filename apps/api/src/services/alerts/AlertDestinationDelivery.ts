@@ -1,5 +1,8 @@
 import {
 	AlertDeliveryError,
+	type AlertDeliveryFailure,
+	AlertDestinationDecryptionError,
+	AlertDestinationStoredConfigInvalidError,
 	AlertValidationError,
 	type AlertNotificationTemplate,
 	type AlertIncidentId,
@@ -8,20 +11,17 @@ import {
 import type { AlertDestinationRow } from "@maple/db"
 import { Effect } from "effect"
 import { parseBase64Aes256GcmKey } from "@/platform/Crypto"
-import type { EmailServiceShape } from "@/platform/EmailService"
-import type { SlackBotTokenResolverShape } from "@/services/integrations/slack-bot-token"
-import {
-	buildAlertChatUrl,
-	dispatchDelivery as dispatchDeliveryImpl,
-	type DispatchContext as DeliveryDispatchContext,
-	type DispatchResult,
-} from "./AlertDeliveryDispatch"
+import type { EmailServiceApi } from "@/platform/EmailService"
+import type { SlackBotTokenResolverApi } from "@/services/integrations/slack-bot-token"
+import { buildAlertChatUrl, type DispatchContext as DeliveryDispatchContext } from "./AlertDeliveryDispatch"
+import { dispatchDelivery as dispatchDeliveryImpl } from "./delivery/dispatch"
+import type { DispatchResult } from "./delivery/context"
 import {
 	hydrateDestinationRow,
 	type DestinationSecretConfig,
 	type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
-import type { AlertRuntimeShape } from "./AlertRuntime"
+import type { AlertRuntimeApi } from "./AlertRuntime"
 
 export type AlertDispatchContext = Omit<
 	DeliveryDispatchContext,
@@ -59,29 +59,31 @@ export const parseAlertDestinationEncryptionKey = (
 export const makeAlertDestinationDelivery = (options: {
 	readonly encryptionKey: Buffer
 	readonly appBaseUrl: string
-	readonly runtime: AlertRuntimeShape
-	readonly email: EmailServiceShape
-	readonly resolveSlackBotToken: SlackBotTokenResolverShape["resolve"]
+	readonly runtime: AlertRuntimeApi
+	readonly email: EmailServiceApi
+	readonly resolveSlackBotToken: SlackBotTokenResolverApi["resolve"]
 }) => {
 	const hydrateDestination = Effect.fn("AlertsService.hydrateDestination")(function* (
 		row: AlertDestinationRow,
 	) {
 		const { publicConfig, secretConfig } = yield* hydrateDestinationRow(row, options.encryptionKey, {
 			onPublicConfigInvalid: (cause) =>
-				new AlertValidationError({
+				new AlertDestinationStoredConfigInvalidError({
 					message: "Stored destination config is invalid",
-					details: [],
+					destinationId: row.id,
+					component: "public_config",
 					cause,
 				}),
 			onDecryptFailure: () =>
-				new AlertValidationError({
+				new AlertDestinationDecryptionError({
 					message: "Failed to decrypt destination secret",
-					details: [],
+					destinationId: row.id,
 				}),
 			onSecretConfigInvalid: (cause) =>
-				new AlertValidationError({
+				new AlertDestinationStoredConfigInvalidError({
 					message: "Stored destination secret is invalid",
-					details: [],
+					destinationId: row.id,
+					component: "secret_config",
 					cause,
 				}),
 		})
@@ -116,7 +118,7 @@ export const makeAlertDestinationDelivery = (options: {
 	const dispatchDelivery = (
 		context: AlertDispatchContext,
 		payloadJson: string,
-	): Effect.Effect<DispatchResult, AlertDeliveryError> =>
+	): Effect.Effect<DispatchResult, AlertDeliveryFailure> =>
 		dispatchDeliveryImpl(
 			context,
 			payloadJson,

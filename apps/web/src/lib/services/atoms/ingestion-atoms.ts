@@ -23,7 +23,7 @@ export const ingestAttributeMappingsListAtom = MapleApiV2AtomClient.runtime.atom
 		const client = yield* MapleApiV2AtomClient
 		const data: ReadonlyArray<V2AttributeMapping> = yield* collectV2Pages((cursor) =>
 			client.attributeMappings.list({
-				query: { limit: PAGE_LIMIT, ...(cursor !== undefined ? { cursor } : {}) },
+				query: { limit: PAGE_LIMIT, ...(cursor !== undefined ? { cursor } : undefined) },
 			}),
 		)
 		return { data }
@@ -35,7 +35,7 @@ export const recommendationIssuesListAtom = MapleApiV2AtomClient.runtime.atom(
 		const client = yield* MapleApiV2AtomClient
 		const data: ReadonlyArray<V2Recommendation> = yield* collectV2Pages((cursor) =>
 			client.instrumentationRecommendations.list({
-				query: { limit: PAGE_LIMIT, ...(cursor !== undefined ? { cursor } : {}) },
+				query: { limit: PAGE_LIMIT, ...(cursor !== undefined ? { cursor } : undefined) },
 			}),
 		)
 		return { data }

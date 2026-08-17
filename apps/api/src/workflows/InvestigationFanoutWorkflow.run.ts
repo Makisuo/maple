@@ -50,7 +50,7 @@ import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
 import {
 	makePgConnectionScope,
-	type PgConnectionScopeShape,
+	type PgConnectionScopeApi,
 	pgConnectionScopeFrom,
 } from "@/platform/pg-connection-scope"
 import type { WorkflowEventLike, WorkflowStepLike } from "./ClickHouseSchemaApplyWorkflow.run"
@@ -585,7 +585,7 @@ export async function runInvestigationFanout(
 	}
 }
 
-const dialWorkflowDb = (env: InvestigationFanoutWorkflowEnv): PgConnectionScopeShape => {
+const dialWorkflowDb = (env: InvestigationFanoutWorkflowEnv): PgConnectionScopeApi => {
 	const source = resolveDbConnectionSource(env)
 	if (source._tag === "Unavailable") {
 		throw new Error(source.reason)
@@ -594,7 +594,7 @@ const dialWorkflowDb = (env: InvestigationFanoutWorkflowEnv): PgConnectionScopeS
 }
 
 async function runWithDb(
-	connection: PgConnectionScopeShape,
+	connection: PgConnectionScopeApi,
 	env: InvestigationFanoutWorkflowEnv,
 	event: WorkflowEventLike<InvestigationFanoutWorkflowPayload>,
 	step: WorkflowStepLike,

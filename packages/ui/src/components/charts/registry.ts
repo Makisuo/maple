@@ -222,16 +222,9 @@ export function getChartById(id: string): ChartRegistryEntry | undefined {
 	return chartRegistry.find((c) => c.id === id)
 }
 
-export function getChartsByCategory(category: string): ChartRegistryEntry[] {
-	return chartRegistry.filter((c) => c.category === category)
-}
-
-export function searchCharts(query: string): ChartRegistryEntry[] {
-	const lower = query.toLowerCase()
-	return chartRegistry.filter(
-		(c) =>
-			c.name.toLowerCase().includes(lower) ||
-			c.description.toLowerCase().includes(lower) ||
-			c.tags.some((t) => t.includes(lower)),
-	)
-}
+// `getChartsByCategory` and `searchCharts` lived here with no callers in any app
+// or package. `entry.category` is still load-bearing — `makeChartWidget` picks a
+// skeleton from it and `panel-types.ts` maps chartId to panel type through it —
+// but `entry.tags` is now read by nothing. Kept as data rather than deleted from
+// 15 entries: it is the input a real chart search would want, and it costs a
+// string array. Delete it too if a search never materialises.

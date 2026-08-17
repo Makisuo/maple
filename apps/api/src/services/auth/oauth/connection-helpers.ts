@@ -24,9 +24,9 @@ import {
 	parseBase64Aes256GcmKey,
 	type EncryptedValue,
 } from "@/platform/Crypto"
-import type { DatabaseShape } from "@/platform/DatabaseLive"
+import type { DatabaseApi } from "@/platform/DatabaseLive"
 import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
-import type { EnvShape } from "@/platform/Env"
+import type { EnvConfig } from "@/platform/Env"
 import { msToDate } from "@/platform/time"
 
 export const OAUTH_STATE_TTL_MS = 10 * 60_000 // 10 minutes
@@ -66,8 +66,8 @@ const decodeTokenResponse = Schema.decodeUnknownEffect(OAuthTokenResponseSchema)
 export const toUpstreamError = (message: string, status?: number, cause?: unknown) =>
 	new IntegrationsUpstreamError({
 		message,
-		...(status === undefined ? {} : { status }),
-		...(cause === undefined ? {} : { cause }),
+		...(!(status === undefined) ? { status } : undefined),
+		...(!(cause === undefined) ? { cause } : undefined),
 	})
 
 /** The token-endpoint slice of a provider's resolved OAuth config. */
@@ -83,8 +83,8 @@ export interface MakeOAuthConnectionHelpersOptions {
 	readonly provider: string
 	/** Display name used in error messages ("Cloudflare", "Hazel"). */
 	readonly providerLabel: string
-	readonly database: DatabaseShape
-	readonly env: EnvShape
+	readonly database: DatabaseApi
+	readonly env: EnvConfig
 }
 
 /**
@@ -331,7 +331,9 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					code,
 					redirect_uri: redirectUri,
 					client_id: config.clientId,
-					...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
+					...(config.clientSecret
+						? { client_secret: Redacted.value(config.clientSecret) }
+						: undefined),
 					...extraParams,
 				})
 				if (status < 200 || status >= 300) {
@@ -356,7 +358,7 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 				grant_type: "refresh_token",
 				refresh_token: refreshToken,
 				client_id: config.clientId,
-				...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
+				...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : undefined),
 			})
 			if (status === 400 || status === 401) {
 				return yield* Effect.fail(

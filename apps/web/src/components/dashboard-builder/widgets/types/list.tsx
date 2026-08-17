@@ -1,4 +1,5 @@
-import { WIDGET_TYPES } from "@maple/domain/http"
+import { DEFAULT_LIST_LIMIT, WIDGET_TYPES } from "@maple/domain/http"
+import { makeQueryDataSource, makeRouteDataSource } from "@maple/widgets/dashboard"
 
 import { MenuIcon } from "@/components/icons"
 import {
@@ -63,14 +64,14 @@ export const listWidgetType: WidgetTypeDefinition = {
 	},
 
 	buildDataSource: ({ state }) => {
-		const limit = parsePositiveNumber(state.listLimit) ?? 50
+		const limit = parsePositiveNumber(state.listLimit) ?? DEFAULT_LIST_LIMIT
 
 		// Logs without rich filtering fall back to the simple list_logs endpoint.
 		if (state.listDataSource === "logs") {
-			return {
-				endpoint: "list_logs",
-				params: buildListEndpointParams(state.listDataSource, state.listWhereClause, limit),
-			}
+			return makeRouteDataSource(
+				"list_logs",
+				buildListEndpointParams(state.listDataSource, state.listWhereClause, limit),
+			)
 		}
 
 		// Traces go through the query engine, which supports full attr.* filtering.
@@ -90,14 +91,12 @@ export const listWidgetType: WidgetTypeDefinition = {
 		}
 		const columnFields = state.listColumns.flatMap((column) => (column.field ? [column.field] : []))
 
-		return {
-			endpoint: "custom_query_builder_list",
-			params: {
-				queries: [queryForEngine],
-				limit,
-				columns: columnFields.length > 0 ? columnFields : undefined,
-			},
-		}
+		return makeQueryDataSource({
+			resultShape: "list",
+			queries: [queryForEngine],
+			limit,
+			...(columnFields.length > 0 ? { columns: columnFields } : undefined),
+		})
 	},
 
 	// Built from scratch, not from `base`: a list has no chart presentation, no
@@ -109,7 +108,7 @@ export const listWidgetType: WidgetTypeDefinition = {
 		description: state.description.trim() || undefined,
 		listDataSource: state.listDataSource,
 		listWhereClause: state.listWhereClause,
-		listLimit: parsePositiveNumber(state.listLimit) ?? 25,
+		listLimit: parsePositiveNumber(state.listLimit) ?? DEFAULT_LIST_LIMIT,
 		listRootOnly: state.listRootOnly,
 		columns: state.listColumns.length > 0 ? state.listColumns : undefined,
 	}),

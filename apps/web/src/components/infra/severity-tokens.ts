@@ -12,7 +12,7 @@ export const VALUE_TONE: Record<Tone, string> = {
 	ok: "text-foreground",
 	warn: "text-[var(--severity-warn)]",
 	crit: "text-[var(--severity-error)]",
-}
+} satisfies Record<Tone, string>
 
 /** Sparkline fill — a raw CSS var string (consumed as an SVG `fill`, not a class). */
 export const SPARK_COLOR: Record<Tone, string> = {
@@ -20,35 +20,35 @@ export const SPARK_COLOR: Record<Tone, string> = {
 	ok: "var(--severity-info)",
 	warn: "var(--severity-warn)",
 	crit: "var(--severity-error)",
-}
+} satisfies Record<Tone, string>
 
 /** Solid severity fill for inline meter bars. */
 export const BAR_FILL: Record<SeverityLevel, string> = {
 	ok: "bg-[var(--severity-info)]",
 	warn: "bg-[var(--severity-warn)]",
 	crit: "bg-[var(--severity-error)]",
-}
+} satisfies Record<SeverityLevel, string>
 
 /** Dimmer value-text tone used inside compact bar widgets. */
 export const BAR_VALUE_TONE: Record<SeverityLevel, string> = {
 	ok: "text-foreground/75",
 	warn: "text-[var(--severity-warn)]",
 	crit: "text-[var(--severity-error)]",
-}
+} satisfies Record<SeverityLevel, string>
 
 /** Status dot fill. */
 export const STATUS_DOT: Record<HostStatus, string> = {
 	active: "bg-[var(--severity-info)]",
 	idle: "bg-muted-foreground/60",
 	down: "bg-[var(--severity-error)]",
-}
+} satisfies Record<HostStatus, string>
 
 /** Status dot ring. */
 export const STATUS_RING: Record<HostStatus, string> = {
 	active: "ring-[color-mix(in_oklab,var(--severity-info)_45%,transparent)]",
 	idle: "ring-border",
 	down: "ring-[color-mix(in_oklab,var(--severity-error)_45%,transparent)]",
-}
+} satisfies Record<HostStatus, string>
 
 /** Pulse fill behind an active status dot. */
 export const STATUS_PULSE = "bg-[color-mix(in_oklab,var(--severity-info)_55%,transparent)]"
@@ -57,7 +57,7 @@ const STATUS_LABEL: Record<HostStatus, string> = {
 	active: "Active",
 	idle: "Idle",
 	down: "Down",
-}
+} satisfies Record<HostStatus, string>
 
 /** Human-readable status word, paired with color so it is never the sole signal. */
 export function statusLabel(status: HostStatus): string {

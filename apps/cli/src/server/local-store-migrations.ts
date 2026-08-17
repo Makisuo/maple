@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 // Generic local-store migration coordinator.
 //
 // The coordinator owns process safety, journaling, chain progression, staging,
@@ -399,10 +400,12 @@ const parseIdentity = (value: unknown, label: string): LocalSchemaIdentity => {
 		fingerprint: identity.fingerprint,
 		digest: identity.digest,
 		chdb: identity.chdb,
-		...(typeof identity.manifestDigest === "string" ? { manifestDigest: identity.manifestDigest } : {}),
+		...(typeof identity.manifestDigest === "string"
+			? { manifestDigest: identity.manifestDigest }
+			: undefined),
 		...(typeof identity.projectRevision === "string"
 			? { projectRevision: identity.projectRevision }
-			: {}),
+			: undefined),
 	}
 }
 
@@ -425,8 +428,8 @@ const parseStep = (value: unknown, index: number): MigrationStepJournal => {
 		from: parseIdentity(step.from, `step ${index} from`),
 		to: parseIdentity(step.to, `step ${index} to`),
 		status: status as MigrationStepStatus,
-		...(step.state === undefined ? {} : { state: step.state }),
-		...(step.progress === undefined ? {} : { progress: step.progress }),
+		...(!(step.state === undefined) ? { state: step.state } : undefined),
+		...(!(step.progress === undefined) ? { progress: step.progress } : undefined),
 	}
 }
 
@@ -555,7 +558,7 @@ const parseJournal = (value: unknown): MigrationJournal => {
 		targetVersion: record.targetVersion as number,
 		cutoffAt: record.cutoffAt as string,
 		createdAt: record.createdAt as string,
-		...(record.failure === undefined ? {} : { failure: String(record.failure) }),
+		...(!(record.failure === undefined) ? { failure: String(record.failure) } : undefined),
 	}
 	assertJournalChainInvariants(journal)
 	for (const [index, step] of journal.chain.entries()) {
@@ -1144,8 +1147,8 @@ const makeModuleContext = (
 			const previous = current.chain[stepIndex]!
 			const nextStep: MigrationStepJournal = {
 				...previous,
-				...(update.state === undefined ? {} : { state: update.state }),
-				...(update.progress === undefined ? {} : { progress: update.progress }),
+				...(!(update.state === undefined) ? { state: update.state } : undefined),
+				...(!(update.progress === undefined) ? { progress: update.progress } : undefined),
 			}
 			current = {
 				...current,

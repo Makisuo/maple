@@ -9,7 +9,7 @@ export const WORKFLOW_LABEL: Record<WorkflowState, string> = {
 	done: "Done",
 	cancelled: "Cancelled",
 	wontfix: "Won't fix",
-}
+} satisfies Record<WorkflowState, string>
 
 const WORKFLOW_COLOR: Record<WorkflowState, string> = {
 	triage: "oklch(0.72 0.17 55)",
@@ -19,7 +19,7 @@ const WORKFLOW_COLOR: Record<WorkflowState, string> = {
 	done: "oklch(0.60 0.14 250)",
 	cancelled: "oklch(0.55 0.01 286)",
 	wontfix: "oklch(0.55 0.01 286)",
-}
+} satisfies Record<WorkflowState, string>
 
 interface WorkflowRingIconProps extends IconProps {
 	state: WorkflowState

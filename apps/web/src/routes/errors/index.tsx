@@ -33,10 +33,7 @@ export type ErrorsSearchParams = Schema.Schema.Type<typeof errorsSearchSchema>
  * the exact ones `ErrorsSummaryCards` and `ErrorsByTypeTable` go on to read.
  * A mismatch here does not fail loudly — it just fetches everything twice.
  */
-function errorsApiFilters(
-	search: ErrorsSearchParams,
-	range: { startTime: string; endTime: string },
-) {
+function errorsApiFilters(search: ErrorsSearchParams, range: { startTime: string; endTime: string }) {
 	return {
 		startTime: range.startTime,
 		endTime: range.endTime,
@@ -79,11 +76,7 @@ function ErrorsPage() {
 function ErrorsContent() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
-	const effectiveRange = useEffectiveTimeRange(
-		search.startTime,
-		search.endTime,
-		search.timePreset ?? "12h",
-	)
+	const effectiveRange = useEffectiveTimeRange(search.startTime, search.endTime, search.timePreset ?? "12h")
 	const handleTimeChange = (
 		range: {
 			startTime?: string

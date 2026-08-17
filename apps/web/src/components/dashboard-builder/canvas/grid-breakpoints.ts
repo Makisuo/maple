@@ -1,6 +1,18 @@
 import type { Layout, LayoutItem } from "react-grid-layout"
+import type { WidgetLayoutSchema } from "@maple/widgets/dashboard"
 
-import type { DashboardWidget } from "@/components/dashboard-builder/types"
+/**
+ * The minimum a widget must expose to be placed on the grid.
+ *
+ * Narrower than `DashboardWidget` on purpose: the read-only surfaces render a
+ * *redacted* widget whose data source is deliberately not the stored one, and
+ * placement never needed either. Typed against what the projection actually
+ * reads, both shapes satisfy it without a cast.
+ */
+export interface PlacedWidget {
+	readonly id: string
+	readonly layout: typeof WidgetLayoutSchema.Type
+}
 
 /**
  * Grid geometry for the dashboard canvas.
@@ -77,7 +89,7 @@ function clamp(value: number, min: number, max: number): number {
  * width exactly. Rows stay rows, order is preserved, and nothing overlaps —
  * which is why the canvas pairs this with `noCompactor` on derived tiers.
  */
-export function projectLayout(widgets: DashboardWidget[], tier: GridTier): Layout {
+export function projectLayout(widgets: ReadonlyArray<PlacedWidget>, tier: GridTier): Layout {
 	const base = widgets.map((w) => ({
 		i: w.id,
 		x: w.layout.x,
@@ -86,8 +98,8 @@ export function projectLayout(widgets: DashboardWidget[], tier: GridTier): Layou
 		h: w.layout.h,
 		minW: w.layout.minW ?? 2,
 		minH: w.layout.minH ?? 2,
-		...(w.layout.maxW != null ? { maxW: w.layout.maxW } : {}),
-		...(w.layout.maxH != null ? { maxH: w.layout.maxH } : {}),
+		...(w.layout.maxW != null ? { maxW: w.layout.maxW } : undefined),
+		...(w.layout.maxH != null ? { maxH: w.layout.maxH } : undefined),
 	}))
 
 	if (tier.canonical) return base

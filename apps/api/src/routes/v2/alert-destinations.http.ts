@@ -5,6 +5,7 @@ import {
 	DiscordAlertDestinationConfig,
 	EmailAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
+	AlertDestinationNotFoundError,
 	PagerDutyAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
@@ -15,10 +16,9 @@ import type {
 	V2AlertDestinationMutationResponse,
 	V2AlertDestinationUpdateParams,
 } from "@maple/domain/http/v2"
-import { MapleApiV2, paginateArray, resourceNotFound } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
-import { mapAlertError } from "./alerts-error-map"
 
 const toV2Destination = (doc: AlertDestinationDocument): V2AlertDestination => ({
 	id: doc.id,
@@ -37,7 +37,7 @@ const toV2Destination = (doc: AlertDestinationDocument): V2AlertDestination => (
 
 const toV2DestinationMutation = (doc: AlertDestinationDocument): V2AlertDestinationMutationResponse => ({
 	...toV2Destination(doc),
-	...(doc.txid !== undefined ? { txid: doc.txid } : {}),
+	...(doc.txid !== undefined ? { txid: doc.txid } : undefined),
 })
 
 const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
@@ -47,23 +47,25 @@ const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
 				type: "slack-bot",
 				name: params.name,
 				channelId: params.channel_id,
-				...(params.channel_name !== undefined ? { channelName: params.channel_name } : {}),
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.channel_name !== undefined ? { channelName: params.channel_name } : undefined),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "pagerduty":
 			return new PagerDutyAlertDestinationConfig({
 				type: "pagerduty",
 				name: params.name,
 				integrationKey: params.integration_key,
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "webhook":
 			return new WebhookAlertDestinationConfig({
 				type: "webhook",
 				name: params.name,
 				url: params.url,
-				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.signing_secret !== undefined
+					? { signingSecret: params.signing_secret }
+					: undefined),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "hazel-oauth":
 			return new HazelOAuthAlertDestinationConfig({
@@ -72,84 +74,102 @@ const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
 				hazelOrganizationId: params.hazel_organization_id,
 				hazelOrganizationName: params.hazel_organization_name,
 				...(params.hazel_organization_logo_url !== undefined
-					? { hazelOrganizationLogoUrl: params.hazel_organization_logo_url }
-					: {}),
+					? {
+							hazelOrganizationLogoUrl: params.hazel_organization_logo_url,
+						}
+					: undefined),
 				hazelChannelId: params.hazel_channel_id,
 				hazelChannelName: params.hazel_channel_name,
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "discord":
 			return new DiscordAlertDestinationConfig({
 				type: "discord",
 				name: params.name,
 				webhookUrl: params.webhook_url,
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "email":
 			return new EmailAlertDestinationConfig({
 				type: "email",
 				name: params.name,
 				memberUserIds: params.member_user_ids,
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 	}
 }
 
 const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinationUpdateRequest => {
 	const shared = {
-		...(params.name !== undefined ? { name: params.name } : {}),
-		...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+		...(params.name !== undefined ? { name: params.name } : undefined),
+		...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 	}
 	switch (params.type) {
 		case "slack-bot":
 			return {
 				type: "slack-bot",
 				...shared,
-				...(params.channel_id !== undefined ? { channelId: params.channel_id } : {}),
-				...(params.channel_name !== undefined ? { channelName: params.channel_name } : {}),
+				...(params.channel_id !== undefined ? { channelId: params.channel_id } : undefined),
+				...(params.channel_name !== undefined ? { channelName: params.channel_name } : undefined),
 			}
 		case "pagerduty":
 			return {
 				type: "pagerduty",
 				...shared,
-				...(params.integration_key !== undefined ? { integrationKey: params.integration_key } : {}),
+				...(params.integration_key !== undefined
+					? { integrationKey: params.integration_key }
+					: undefined),
 			}
 		case "webhook":
 			return {
 				type: "webhook",
 				...shared,
-				...(params.url !== undefined ? { url: params.url } : {}),
-				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
+				...(params.url !== undefined ? { url: params.url } : undefined),
+				...(params.signing_secret !== undefined
+					? { signingSecret: params.signing_secret }
+					: undefined),
 			}
 		case "hazel-oauth":
 			return {
 				type: "hazel-oauth",
 				...shared,
 				...(params.hazel_organization_id !== undefined
-					? { hazelOrganizationId: params.hazel_organization_id }
-					: {}),
+					? {
+							hazelOrganizationId: params.hazel_organization_id,
+						}
+					: undefined),
 				...(params.hazel_organization_name !== undefined
-					? { hazelOrganizationName: params.hazel_organization_name }
-					: {}),
+					? {
+							hazelOrganizationName: params.hazel_organization_name,
+						}
+					: undefined),
 				...(params.hazel_organization_logo_url !== undefined
-					? { hazelOrganizationLogoUrl: params.hazel_organization_logo_url }
-					: {}),
-				...(params.hazel_channel_id !== undefined ? { hazelChannelId: params.hazel_channel_id } : {}),
+					? {
+							hazelOrganizationLogoUrl: params.hazel_organization_logo_url,
+						}
+					: undefined),
+				...(params.hazel_channel_id !== undefined
+					? { hazelChannelId: params.hazel_channel_id }
+					: undefined),
 				...(params.hazel_channel_name !== undefined
-					? { hazelChannelName: params.hazel_channel_name }
-					: {}),
+					? {
+							hazelChannelName: params.hazel_channel_name,
+						}
+					: undefined),
 			}
 		case "discord":
 			return {
 				type: "discord",
 				...shared,
-				...(params.webhook_url !== undefined ? { webhookUrl: params.webhook_url } : {}),
+				...(params.webhook_url !== undefined ? { webhookUrl: params.webhook_url } : undefined),
 			}
 		case "email":
 			return {
 				type: "email",
 				...shared,
-				...(params.member_user_ids !== undefined ? { memberUserIds: params.member_user_ids } : {}),
+				...(params.member_user_ids !== undefined
+					? { memberUserIds: params.member_user_ids }
+					: undefined),
 			}
 	}
 }
@@ -162,9 +182,8 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* destinations
-						.listDestinations(tenant.orgId)
-						.pipe(mapAlertError("destination_list"))
+					const response = yield* destinations.listDestinations(tenant.orgId)
+
 					const page = yield* paginateArray(response.destinations.map(toV2Destination), query)
 					return { object: "list" as const, ...page }
 				}),
@@ -172,13 +191,15 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("retrieve", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* destinations
-						.listDestinations(tenant.orgId)
-						.pipe(mapAlertError("destination_list"))
+					const response = yield* destinations.listDestinations(tenant.orgId)
+
 					const destination = response.destinations.find((doc) => doc.id === params.id)
 					if (destination === undefined)
 						return yield* Effect.fail(
-							resourceNotFound("alert_destination", "No such alert destination."),
+							new AlertDestinationNotFoundError({
+								message: "No such alert destination.",
+								destinationId: params.id,
+							}),
 						)
 					return toV2Destination(destination)
 				}),
@@ -186,52 +207,57 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 			.handle("create", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const created = yield* destinations
-						.createDestination(
-							tenant.orgId,
-							tenant.userId,
-							tenant.roles,
-							toCreateRequest(payload),
-						)
-						.pipe(mapAlertError("destination_create"))
+					const created = yield* destinations.createDestination(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						toCreateRequest(payload),
+					)
+
 					return toV2DestinationMutation(created)
 				}),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const updated = yield* destinations
-						.updateDestination(
-							tenant.orgId,
-							tenant.userId,
-							tenant.roles,
-							params.id,
-							toUpdateRequest(payload),
-						)
-						.pipe(mapAlertError("destination_update"))
+					const updated = yield* destinations.updateDestination(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						params.id,
+						toUpdateRequest(payload),
+					)
+
 					return toV2DestinationMutation(updated)
 				}),
 			)
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const deleted = yield* destinations
-						.deleteDestination(tenant.orgId, tenant.roles, params.id)
-						.pipe(mapAlertError("destination_delete"))
+					const deleted = yield* destinations.deleteDestination(
+						tenant.orgId,
+						tenant.roles,
+						params.id,
+					)
+
 					return {
 						id: deleted.id,
 						object: "alert_destination" as const,
 						deleted: true as const,
-						...(deleted.txid !== undefined ? { txid: deleted.txid } : {}),
+						...(deleted.txid !== undefined ? { txid: deleted.txid } : undefined),
 					}
 				}),
 			)
 			.handle("test", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const result = yield* destinations
-						.testDestination(tenant.orgId, tenant.userId, tenant.roles, params.id)
-						.pipe(mapAlertError("destination_test"))
+					const result = yield* destinations.testDestination(
+						tenant.orgId,
+						tenant.userId,
+						tenant.roles,
+						params.id,
+					)
+
 					return {
 						object: "alert_destination.test_result" as const,
 						success: result.success,

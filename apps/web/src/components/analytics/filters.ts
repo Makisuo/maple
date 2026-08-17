@@ -55,7 +55,7 @@ export const FILTER_CHIP_LABEL: Record<AnalyticsFilterKey, string> = {
 	utmMedium: "utm_medium",
 	utmCampaign: "utm_campaign",
 	visitorType: "visitor",
-}
+} satisfies Record<AnalyticsFilterKey, string>
 
 /** Filter key → sidebar section heading. Sentence case, matching the rest of the app. */
 export const FILTER_SECTION_LABEL: Record<AnalyticsFilterKey, string> = {
@@ -71,7 +71,7 @@ export const FILTER_SECTION_LABEL: Record<AnalyticsFilterKey, string> = {
 	utmMedium: "UTM medium",
 	utmCampaign: "UTM campaign",
 	visitorType: "Visitor",
-}
+} satisfies Record<AnalyticsFilterKey, string>
 
 const FILTER_KEYS = Object.keys(FILTER_CHIP_LABEL) as ReadonlyArray<AnalyticsFilterKey>
 

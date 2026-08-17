@@ -1,4 +1,4 @@
-import { MapleApi } from "@maple/domain/http"
+import { MapleApi, MapleInternalApi } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
 import { Layer } from "effect"
 import { Headers, HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/http"
@@ -6,36 +6,29 @@ import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { API_CORS_OPTIONS } from "@/http/api-cors"
 import { McpLive } from "@/mcp/app"
 import { Env } from "@/platform/Env"
-import { HttpAiTriageLive } from "@/routes/v1/ai-triage.http"
-import { HttpAnomaliesLive } from "@/routes/v1/anomalies.http"
-import { HttpApiKeysLive } from "@/routes/v1/api-keys.http"
+import { HttpAiTriageLive } from "@/routes/internal/ai-triage.http"
 import { HttpAuthLive, HttpAuthPublicLive } from "@/routes/v1/auth.http"
-import { HttpBillingLive, HttpBillingPublicLive } from "@/routes/v1/billing.http"
+import { HttpBillingLive } from "@/routes/internal/billing.http"
+import { HttpBillingPublicLive } from "@/routes/v1/billing-public.http"
+import { HttpV2SharePublicLive } from "@/routes/v2/share.http"
 import { ChatSessionsRouter } from "@/routes/v1/chat-sessions.http"
-import { HttpChatLive } from "@/routes/v1/chat.http"
-import { HttpDashboardSchemaErrorsLive, HttpDashboardsLive } from "@/routes/v1/dashboards.http"
-import { HttpDemoLive } from "@/routes/v1/demo.http"
-import { HttpDigestLive } from "@/routes/v1/digest.http"
+import { HttpChatLive } from "@/routes/internal/chat.http"
+import { V1ErrorBoundaryLive } from "@/routes/v1/error-boundary"
+import { HttpDemoLive } from "@/routes/internal/demo.http"
+import { HttpDigestLive } from "@/routes/internal/digest.http"
 import { HttpErrorsLive } from "@/routes/v1/errors.http"
-import { HttpIngestAttributeMappingsLive } from "@/routes/v1/ingest-attribute-mappings.http"
-import { HttpIngestKeysLive } from "@/routes/v1/ingest-keys.http"
 import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "@/routes/v1/integrations.http"
-import { HttpInvestigationsLive } from "@/routes/v1/investigations.http"
-import { HttpObservabilityLive } from "@/routes/v1/observability.http"
 import { OAuthDiscoveryRouter } from "@/routes/v1/oauth-discovery.http"
-import { HttpOnboardingLive } from "@/routes/v1/onboarding.http"
 import { HttpOrgClickHouseSettingsLive } from "@/routes/v1/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "@/routes/v1/organizations.http"
 import { PlanetScaleWebhookRouter } from "@/routes/v1/planetscale-webhook.http"
 import { PrometheusScrapeProxyRouter } from "@/routes/v1/prometheus-scrape-proxy.http"
-import { HttpQueryEngineLive } from "@/routes/v1/query-engine.http"
-import { HttpRecommendationIssuesLive } from "@/routes/v1/recommendation-issues.http"
-import { HttpScrapeTargetsLive } from "@/routes/v1/scrape-targets.http"
+import { HttpQueryEngineLive } from "@/routes/internal/query-engine.http"
+import { HttpSessionReplaysInternalLive } from "@/routes/internal/session-replays.http"
 import { ScraperInternalRouter } from "@/routes/v1/scraper-internal.http"
 import { HttpSessionReplaysLive } from "@/routes/v1/session-replay.http"
 import { SlackCallbackRouter, SlackInternalRouter } from "@/routes/v1/slack-integration.http"
 import { VcsWebhookRouter } from "@/routes/v1/vcs-webhook.http"
-import { HttpWarehouseLive } from "@/routes/v1/warehouse.http"
 import { HttpV2AlertDeliveriesLive } from "@/routes/v2/alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "@/routes/v2/alert-destinations.http"
 import { HttpV2AlertIncidentsLive } from "@/routes/v2/alert-incidents.http"
@@ -44,7 +37,7 @@ import { HttpV2AnomaliesLive } from "@/routes/v2/anomalies.http"
 import { HttpV2ApiKeysLive } from "@/routes/v2/api-keys.http"
 import { HttpV2AttributeMappingsLive } from "@/routes/v2/attribute-mappings.http"
 import { HttpV2DashboardsLive } from "@/routes/v2/dashboards.http"
-import { V2SchemaErrorsLive } from "@/routes/v2/error-envelope"
+import { V2TransportErrorBoundaryLive } from "@/routes/v2/error-envelope"
 import { HttpV2ErrorIssuesLive } from "@/routes/v2/error-issues.http"
 import { HttpV2IngestKeysLive } from "@/routes/v2/ingest-keys.http"
 import { HttpV2PlanetScaleIntegrationsLive, HttpV2SlackIntegrationsLive } from "@/routes/v2/integrations.http"
@@ -63,6 +56,7 @@ import {
 } from "@/routes/v2/telemetry.http"
 import { ApiAuthorizationLayer } from "@/services/auth/ApiAuthorizationLayer"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
+import { SessionAuthorizationLayer } from "@/services/auth/SessionAuthorizationLayer"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 
@@ -85,30 +79,28 @@ const DocsV2Route = HttpApiScalar.layerCdn(MapleApiV2, {
 const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpAuthPublicLive),
 	Layer.provide(HttpAuthLive),
-	Layer.provide(Layer.mergeAll(HttpAiTriageLive, HttpAnomaliesLive, HttpChatLive, HttpInvestigationsLive)),
-	Layer.provide(HttpApiKeysLive),
-	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
+	Layer.provide(HttpBillingPublicLive),
 	Layer.provide(HttpErrorsLive),
-	Layer.provide(HttpDashboardsLive),
-	Layer.provide(HttpDashboardSchemaErrorsLive),
-	Layer.provide(HttpDemoLive),
-	Layer.provide(HttpDigestLive),
-	Layer.provide(HttpIngestAttributeMappingsLive),
-	Layer.provide(HttpIngestKeysLive),
 	Layer.provide(HttpIntegrationsLive),
-	Layer.provide(HttpObservabilityLive),
-	Layer.provide(HttpOnboardingLive),
 	Layer.provide(HttpOrgClickHouseSettingsLive),
 	Layer.provide(HttpOrganizationsLive),
-	Layer.provide(HttpScrapeTargetsLive),
+	Layer.provide(HttpSessionReplaysLive),
+	Layer.provide(V1ErrorBoundaryLive),
+)
+
+/**
+ * The dashboard's private transport, served under `/internal/*`.
+ *
+ * Session-only: `SessionAuthorizationLayer` refuses API-key-shaped bearers, so
+ * nothing here is reachable as public API. It is also absent from `/docs`,
+ * which is generated from `MapleApi`.
+ */
+const ApiInternalRoutes = HttpApiBuilder.layer(MapleInternalApi).pipe(
+	Layer.provide(Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysInternalLive)),
 	Layer.provide(
-		Layer.mergeAll(
-			HttpQueryEngineLive,
-			HttpRecommendationIssuesLive,
-			HttpSessionReplaysLive,
-			HttpWarehouseLive,
-		),
+		Layer.mergeAll(HttpAiTriageLive, HttpBillingLive, HttpChatLive, HttpDemoLive, HttpDigestLive),
 	),
+	Layer.provide(V1ErrorBoundaryLive),
 )
 
 const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
@@ -128,6 +120,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2ScrapeTargetsLive,
 			HttpV2InstrumentationRecommendationsLive,
 			HttpV2InstrumentationAuditLive,
+			HttpV2SharePublicLive,
 			HttpV2InvestigationsLive,
 			HttpV2AnomaliesLive,
 			HttpV2OrganizationLive,
@@ -139,11 +132,12 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2ServiceMapLive,
 		),
 	),
-	Layer.provide(V2SchemaErrorsLive),
+	Layer.provide(V2TransportErrorBoundaryLive),
 )
 
 export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
+	ApiInternalRoutes,
 	ApiV2Routes,
 	ChatSessionsRouter,
 	IntegrationsCallbackRouter,
@@ -160,7 +154,11 @@ export const AllRoutes = Layer.mergeAll(
 	DocsV2Route,
 ).pipe(Layer.provideMerge(HttpRouter.cors(API_CORS_OPTIONS)))
 
-export const ApiAuthLive = Layer.mergeAll(ApiAuthorizationLayer, ApiAuthorizationV2Layer).pipe(
+export const ApiAuthLive = Layer.mergeAll(
+	ApiAuthorizationLayer,
+	ApiAuthorizationV2Layer,
+	SessionAuthorizationLayer,
+).pipe(
 	Layer.provideMerge(ApiV2RateLimiter.layer),
 	Layer.provideMerge(ApiKeysService.layer),
 	Layer.provideMerge(Env.layer),

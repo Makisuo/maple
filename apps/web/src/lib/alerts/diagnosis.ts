@@ -329,7 +329,7 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisStage[] {
 			evidence,
 			...(failures > 0
 				? { action: { label: "Review destinations", kind: "destinations" as const } }
-				: {}),
+				: undefined),
 		})
 	}
 

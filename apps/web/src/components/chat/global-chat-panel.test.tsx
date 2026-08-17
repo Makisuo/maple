@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { ComponentProps, ReactNode } from "react"

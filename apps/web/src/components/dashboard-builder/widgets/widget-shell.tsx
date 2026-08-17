@@ -23,6 +23,7 @@ import {
 } from "@maple/ui/components/ui/dropdown-menu"
 import type { WidgetMode, WidgetDataState } from "@/components/dashboard-builder/types"
 import { useWidgetActions } from "@/components/dashboard-builder/widgets/widget-actions-context"
+import { MoveWidgetToSectionMenu } from "@/components/dashboard-builder/sections/move-widget-to-section-menu"
 import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
 import {
 	useWidgetTimeRangeOverride,
@@ -57,6 +58,8 @@ export function WidgetShell({
 	const clone = ctx?.clone
 	const configure = ctx?.configure
 	const createAlert = ctx?.createAlert
+	const moveToSection = ctx?.moveToSection
+	const moveTargets = ctx?.moveTargets
 	const isEditable = mode === "edit"
 	// The menu is also shown in view mode when "Create alert" is available, so
 	// alerts can be spun off a chart without entering dashboard edit mode.
@@ -176,6 +179,13 @@ export function WidgetShell({
 										Clone
 									</DropdownMenuItem>
 								)}
+								{isEditable && moveToSection && moveTargets && (
+									<MoveWidgetToSectionMenu
+										sections={moveTargets}
+										current={ctx?.moveCurrent ?? null}
+										onMove={moveToSection}
+									/>
+								)}
 								{createAlert && (
 									<DropdownMenuItem onClick={createAlert}>
 										<BellIcon size={14} />
@@ -227,6 +237,19 @@ interface WidgetFrameProps {
 	children: ReactNode
 }
 
+/**
+ * "Nothing to draw here": the muted empty state every tile shows when its query
+ * ran fine and simply returned no rows. Shared with the chart widgets, which
+ * used to hand an empty result to a chart that then drew its sample data.
+ */
+export function WidgetEmptyState() {
+	return (
+		<div className="flex items-center justify-center h-full">
+			<span className="text-xs text-muted-foreground">No data in selected time range</span>
+		</div>
+	)
+}
+
 export function WidgetFrame({
 	title,
 	dataState,
@@ -253,9 +276,7 @@ export function WidgetFrame({
 				loadingSkeleton
 			) : dataState.status === "error" ? (
 				dataState.message === "No query data found in selected time range" ? (
-					<div className="flex items-center justify-center h-full">
-						<span className="text-xs text-muted-foreground">No data in selected time range</span>
-					</div>
+					<WidgetEmptyState />
 				) : dataState.kind === "range" ? (
 					// A constraint, not a failure — muted like the empty state rather
 					// than destructive, since nothing is broken and the neighbouring

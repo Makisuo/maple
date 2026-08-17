@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 
 import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -81,8 +82,9 @@ const makeRow = (id: string, widgets: ReadonlyArray<unknown> = []): DashboardRow
 })
 
 const chartDataSource: WidgetDataSource = {
-	endpoint: "custom_query_builder_timeseries",
-	params: { queries: [], formulas: [] },
+	kind: "query",
+	resultShape: "timeseries",
+	queries: [],
 }
 
 const widgetsOf = (id: string) =>

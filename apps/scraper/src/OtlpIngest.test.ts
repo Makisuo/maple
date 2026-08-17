@@ -2,10 +2,10 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OtlpIngest } from "./OtlpIngest"
-import { ScraperEnv, type ScraperEnvShape } from "./Env"
+import { ScraperEnv, type ScraperEnvConfig } from "./Env"
 import type { OtlpExportRequest } from "./prometheus/otlp"
 
-const testEnv: ScraperEnvShape = {
+const testEnv: ScraperEnvConfig = {
 	MAPLE_API_URL: "http://api.test",
 	SD_INTERNAL_TOKEN: Redacted.make("internal-token"),
 	MAPLE_INGEST_URL: "http://ingest.test",

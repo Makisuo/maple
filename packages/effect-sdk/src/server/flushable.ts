@@ -27,6 +27,8 @@ import {
 import { type LogBuffer, makeLogBuffer } from "../shared/flushable-logger.js"
 import { makeMetricBuffer } from "../shared/flushable-metrics.js"
 import { makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
+import { makeNoOpNotice } from "../shared/no-op-notice.js"
+import { SDK_VERSION } from "../version.js"
 import { resolveResource } from "./resource.js"
 
 /** Default auto-flush cadence (ms), matching `Otlp.layerJson`'s 5s export interval. */
@@ -119,49 +121,62 @@ export const make = (config: MapleFlushableConfig = {}): FlushableTelemetry => {
 	const tracesState: SignalState = { disabledUntil: 0 }
 	const logsState: SignalState = { disabledUntil: 0 }
 	const metricsState: SignalState = { disabledUntil: 0 }
-	let noOpLogged = false
+	const noOpNotice = makeNoOpNotice("[MapleServerSDK]", "set MAPLE_INGEST_KEY to enable")
 
 	// Resolve the resource once, lazily, on first flush. Memoize the PROMISE (not
 	// the result) so a manual flush racing the auto-flush timer can't kick off two
 	// `resolveResource` runs. `resolveResource` reads env via the default
 	// ConfigProvider, so this keeps commit-SHA/environment auto-detection without
 	// making `make()` async or reading env at module scope.
+	//
+	// The memo is cleared on rejection. `resolveResource` is `Effect.orDie`, so a
+	// defect (e.g. a runtime without `crypto.randomUUID`) surfaces as a rejected
+	// promise — caching that would disable telemetry for the process lifetime and
+	// turn the auto-flush timer into a recurring unhandled rejection. Dropping it
+	// lets the next flush retry.
 	let resolvedPromise: Promise<Resolved> | undefined
 	const ensureResolved = (): Promise<Resolved> => {
 		if (resolvedPromise === undefined) {
-			resolvedPromise = Effect.runPromise(resolveResource({ ...config, sdkType: "server" })).then((r) =>
+			const pending = Effect.runPromise(resolveResource({ ...config, sdkType: "server" })).then((r) =>
 				buildResolved(r, {
 					tracesPath: config.tracesPath,
 					logsPath: config.logsPath,
 					metricsPath: config.metricsPath,
-					userAgent: "maple-effect-sdk-server/0.0.0",
+					userAgent: `maple-effect-sdk-server/${SDK_VERSION}`,
 				}),
 			)
+			resolvedPromise = pending
+			pending.catch(() => {
+				if (resolvedPromise === pending) resolvedPromise = undefined
+			})
 		}
 		return resolvedPromise
 	}
 
+	// `flush` is documented to never reject: callers `await` it at shutdown and
+	// the auto-flush timer fires it as `void flush()`, where a rejection would be
+	// an unhandled rejection every tick (fatal under
+	// `--unhandled-rejections=strict`). `runFlush` already swallows per-signal
+	// transport errors; this catch covers resource resolution, which runs before
+	// it.
 	const flush = makeSerializedFlush(async (): Promise<void> => {
-		const resolved = await ensureResolved()
-		await runFlush({
-			resolved,
-			spans,
-			logs,
-			metrics,
-			tracesState,
-			logsState,
-			metricsState,
-			transport: fetchTransport,
-			logPrefix: "[MapleServerSDK]",
-			onNoOp: () => {
-				if (!noOpLogged) {
-					noOpLogged = true
-					console.info(
-						"[MapleServerSDK] no ingest key configured — telemetry disabled (set MAPLE_INGEST_KEY to enable)",
-					)
-				}
-			},
-		})
+		try {
+			const resolved = await ensureResolved()
+			await runFlush({
+				resolved,
+				spans,
+				logs,
+				metrics,
+				tracesState,
+				logsState,
+				metricsState,
+				transport: fetchTransport,
+				logPrefix: "[MapleServerSDK]",
+				onNoOp: noOpNotice,
+			})
+		} catch (err) {
+			console.error("[MapleServerSDK] flush failed:", err)
+		}
 	})
 
 	const intervalMs =

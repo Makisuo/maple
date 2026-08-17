@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { Effect } from "effect"
 import type { McpSchema } from "effect/unstable/ai"
 

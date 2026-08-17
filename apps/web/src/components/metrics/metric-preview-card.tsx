@@ -33,7 +33,7 @@ const TYPE_COLORS: Record<string, string> = {
 	gauge: "var(--severity-info)",
 	histogram: "var(--chart-4)",
 	exponential_histogram: "var(--primary)",
-}
+} satisfies Record<string, string>
 
 interface MetricPreviewCardProps {
 	entry: MetricPreviewEntry

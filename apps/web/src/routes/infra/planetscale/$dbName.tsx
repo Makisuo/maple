@@ -472,7 +472,7 @@ function PlanetScaleDatabaseData({
 				startTime,
 				endTime,
 				bucketSeconds,
-				...(branch === undefined ? {} : { branch }),
+				...(!(branch === undefined) ? { branch } : undefined),
 			},
 		}),
 	)
@@ -490,7 +490,7 @@ function PlanetScaleDatabaseData({
 				database,
 				startTime: Date.parse(startTime),
 				endTime: Date.parse(endTime),
-				...(branch === undefined ? {} : { branch }),
+				...(!(branch === undefined) ? { branch } : undefined),
 			},
 		}),
 	)

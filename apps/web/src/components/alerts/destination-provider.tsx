@@ -163,7 +163,7 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		accentOn: INK_ON_BRIGHT_ACCENT,
 		fallbackIcon: ({ size = 22, className }) => <EnvelopeIcon size={size} className={className} />,
 	},
-}
+} satisfies Record<AlertDestinationType, DestinationProvider>
 
 export const DESTINATION_TYPES: ReadonlyArray<AlertDestinationType> = [
 	"slack-bot",

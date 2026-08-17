@@ -13,10 +13,10 @@ import { QueryEngineService } from "./QueryEngineService"
 import type { TenantContext } from "@/services/auth/AuthService"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { BucketCacheService } from "@maple/query-engine/caching"
-import { EdgeCacheService, type EdgeCacheServiceShape } from "@maple/cache"
+import { EdgeCacheService, type EdgeCacheServiceApi } from "@maple/cache"
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -255,7 +255,7 @@ const makeConfig = () =>
 const makeFullStub = (
 	rows: ReadonlyArray<Record<string, unknown>>,
 	counter: { n: number },
-): WarehouseQueryServiceShape =>
+): WarehouseQueryServiceApi =>
 	({
 		query: () => Effect.die(new Error("query not expected")),
 		sqlQuery: () => {
@@ -284,13 +284,13 @@ const makeFullStub = (
 		warmRoute: () => Effect.void,
 		ingest: () => Effect.void,
 		sql: () => Promise.resolve({ data: [] }),
-	}) as unknown as WarehouseQueryServiceShape
+	}) as WarehouseQueryServiceApi
 
 // Records cache options so we can assert both TTL plumbing and the matching
 // time-snap window used by each direct route key.
 const makeRecordingEdge = (
 	calls: Array<{ bucket: string; key: string; ttlSeconds: number }>,
-): EdgeCacheServiceShape => ({
+): EdgeCacheServiceApi => ({
 	getOrCompute: (options, compute) => {
 		calls.push({
 			bucket: options.bucket,

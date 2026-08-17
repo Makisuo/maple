@@ -5,6 +5,7 @@ import {
 	type QuerySpec,
 	type TracesMetric,
 	formatWarehouseDateTime,
+	resolveThroughput,
 } from "@maple/query-engine"
 import { Clock, Effect, Schema } from "effect"
 
@@ -32,8 +33,9 @@ import {
 	invalidWarehouseInput,
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import type { ServiceDetailTimeSeriesPoint, ServiceTimeSeriesPoint } from "@/api/warehouse/services"
+import { QUERY_BUILDER_DATA_SOURCES, QUERY_BUILDER_METRIC_TYPES } from "@maple/query-model"
 const dateTimeString = WarehouseDateTimeString
 
 const asMetricName = Schema.decodeUnknownSync(MetricName)
@@ -222,7 +224,7 @@ const SharedFiltersSchema = Schema.Struct({
 	spanName: Schema.optional(SpanName),
 	severity: Schema.optional(Schema.String),
 	metricName: Schema.optional(MetricName),
-	metricType: Schema.optional(Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])),
+	metricType: Schema.optional(Schema.Literals(QUERY_BUILDER_METRIC_TYPES)),
 	rootSpansOnly: Schema.optional(Schema.Boolean),
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
 	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
@@ -254,7 +256,7 @@ const SharedFiltersSchema = Schema.Struct({
 })
 
 const CustomChartTimeSeriesInputSchema = Schema.Struct({
-	source: Schema.Literals(["traces", "logs", "metrics"]),
+	source: Schema.Literals(QUERY_BUILDER_DATA_SOURCES),
 	metric: Schema.String,
 	groupBy: Schema.optional(
 		Schema.Literals([
@@ -444,7 +446,7 @@ const getCustomChartTimeSeriesEffect = Effect.fn("QueryEngine.getCustomChartTime
 })
 
 const CustomChartBreakdownInputSchema = Schema.Struct({
-	source: Schema.Literals(["traces", "logs", "metrics"]),
+	source: Schema.Literals(QUERY_BUILDER_DATA_SOURCES),
 	metric: Schema.String,
 	groupBy: Schema.Literals(["service", "span_name", "status_code", "http_method", "severity", "attribute"]),
 	filters: Schema.optional(SharedFiltersSchema),
@@ -626,25 +628,9 @@ interface AllMetricsPoint {
 	estimatedSpanCount: number
 }
 
-/**
- * Resolve the throughput value for a bucket, in priority order:
- *   1. SpanMetrics Connector — per-bucket `increase` of the monotonic `calls`
- *      counter (see `querySpanMetricsCalls`), exact pre-sampling counts.
- *   2. `sum(SampleRate)` from the query engine (per-row weighted sum).
- *   3. Raw traced count — when neither is available (no sampling configured).
- *
- * `?? rawCount` won't work as the fallback because `estimatedSpanCount` is
- * coerced to 0 when the column is missing; treat 0 as "no value" explicitly.
- */
-export function resolveThroughput(
-	rawCount: number,
-	estimatedSpanCount: number,
-	metricsThroughput: number | undefined,
-): number {
-	if (metricsThroughput != null && metricsThroughput > 0) return metricsThroughput
-	if (estimatedSpanCount > 0) return estimatedSpanCount
-	return rawCount
-}
+// Moved to `@maple/query-engine` (see `route-rows.ts`); re-exported so the
+// custom-chart callers keep their import.
+export { resolveThroughput }
 
 function extractAllMetricsSeries(response: QueryEngineExecuteResponse): Map<string, AllMetricsPoint> {
 	const map = new Map<string, AllMetricsPoint>()
@@ -867,7 +853,7 @@ const getServiceDetailOverviewEffect = Effect.fn("QueryEngine.getServiceDetailOv
 
 	const result = yield* runWarehouseQuery("serviceDetailOverview", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceDetailOverview({
 				payload: new ServiceDetailOverviewRequest({
 					serviceName: input.serviceName,

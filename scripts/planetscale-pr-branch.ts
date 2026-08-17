@@ -57,6 +57,7 @@
 import { spawnSync } from "node:child_process"
 import { appendFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
+import * as Predicate from "effect/Predicate"
 
 type Subcommand = "up" | "down" | "sweep"
 
@@ -240,7 +241,8 @@ const waitUntilReady = async (database: string, branchName: string): Promise<voi
 		const show = runPscale(["branch", "show", database, branchName, "--format", "json"], { secret: true })
 		if (show.exitCode === 0) {
 			try {
-				const parsed = JSON.parse(show.stdout) as { ready?: boolean; state?: string }
+				const parsed: unknown = JSON.parse(show.stdout)
+				if (!Predicate.isObject(parsed)) throw new TypeError("branch state is not an object")
 				if (parsed.ready === true || parsed.state === "ready") {
 					console.log(`✓ Branch ${branchName} is ready`)
 					return
@@ -321,7 +323,9 @@ const createCredential = (
 	}
 	let parsed: Record<string, unknown>
 	try {
-		parsed = JSON.parse(result.stdout) as Record<string, unknown>
+		const value: unknown = JSON.parse(result.stdout)
+		if (!Predicate.isObject(value)) throw new TypeError("role response is not an object")
+		parsed = value
 	} catch {
 		return fail("Could not parse `pscale role create --format json` output")
 	}
@@ -415,7 +419,11 @@ const sweepOrphanBranches = async (database: string): Promise<void> => {
 	}
 	let branches: ReadonlyArray<{ name?: string }>
 	try {
-		branches = JSON.parse(list.stdout) as ReadonlyArray<{ name?: string }>
+		const value: unknown = JSON.parse(list.stdout)
+		if (!Array.isArray(value) || !value.every(Predicate.isObject)) {
+			throw new TypeError("branch list response is not an object array")
+		}
+		branches = value
 	} catch {
 		return fail("Could not parse `pscale branch list --format json` output")
 	}
@@ -482,7 +490,7 @@ const resetBranchInPlace = (connectionUrl: string, replicationUrl?: string): boo
 			DATABASE_URL: connectionUrl,
 			// The inactive-slot sweep needs the REPLICATION attribute the main
 			// role deliberately lacks.
-			...(replicationUrl ? { REPLICATION_DATABASE_URL: replicationUrl } : {}),
+			...(replicationUrl ? { REPLICATION_DATABASE_URL: replicationUrl } : undefined),
 		},
 	})
 	return proc.status === 0

@@ -531,6 +531,7 @@ export function resolveMetricTable(metricType: MetricType) {
  */
 export function metricsSelectExprs($: ColumnAccessor<typeof MetricsSum.columns>, isHistogram: boolean) {
 	if (isHistogram) {
+		// SAFETY: `isHistogram` selects the histogram table whose accessor includes Count/Sum/Min/Max.
 		const $h = $ as unknown as ColumnAccessor<typeof MetricsHistogram.columns>
 		return {
 			avgValue: CH.if_(CH.sum($h.Count).gt(0), CH.sum($h.Sum).div(CH.sum($h.Count)), CH.lit(0)),

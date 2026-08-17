@@ -332,7 +332,7 @@ const planetscaleStatsParams = (payload: ServicePlanetScaleStatsRequest, orgId: 
 	orgId,
 	startTime: payload.startTime,
 	endTime: payload.endTime,
-	...(payload.database !== undefined ? { database: payload.database } : {}),
+	...(payload.database !== undefined ? { database: payload.database } : undefined),
 })
 
 const planetscaleServiceGauges = defineQuery({

@@ -6,7 +6,7 @@ order: 2
 sdk: "effect"
 ---
 
-`@maple-dev/effect-sdk` provides a pre-configured Effect Layer that sets up OpenTelemetry traces, logs, and metrics for Maple. It wraps Effect's built-in `Otlp.layerJson` exporter, fills in resource attributes from the runtime, and returns a no-op layer when no endpoint is configured — so the same code runs locally without exporting telemetry.
+`@maple-dev/effect-sdk` provides a pre-configured Effect Layer that sets up OpenTelemetry traces, logs, and metrics for Maple. It wraps Effect's built-in `Otlp.layerJson` exporter, fills in resource attributes from the runtime, and defaults the endpoint to the public Maple ingest — so in most cases an ingest key is the only configuration you need. Point `MAPLE_ENDPOINT` at a local `maple start` sink or your own collector to run the same code against a different destination.
 
 <div class="flex flex-wrap gap-2 mb-8 not-prose">
     <span class="text-[10px] uppercase tracking-wider px-2 py-1 border border-border text-fg-muted">Node.js</span>
@@ -76,19 +76,21 @@ Logs emitted inside spans are correlated with the active trace in the Maple dash
 
 All options for `Maple.layer()` (server and browser entry points). The Cloudflare entry point accepts a slightly different shape — see the [Cloudflare page](/docs/sdks/effect-cloudflare) for its config table.
 
-| Option                  | Type                      | Required                   | Description                                                          |
-| ----------------------- | ------------------------- | -------------------------- | -------------------------------------------------------------------- |
-| `serviceName`           | `string`                  | Yes                        | Service name reported in traces, logs, and metrics                   |
-| `endpoint`              | `string`                  | No (server) / Yes (client) | Maple ingest endpoint URL. Server auto-detects from `MAPLE_ENDPOINT` |
-| `ingestKey`             | `string`                  | No                         | Maple ingest key. Server auto-detects from `MAPLE_INGEST_KEY`        |
-| `serviceVersion`        | `string`                  | No                         | Override auto-detected commit SHA                                    |
-| `environment`           | `string`                  | No                         | Override auto-detected deployment environment                        |
-| `attributes`            | `Record<string, unknown>` | No                         | Additional resource attributes merged into telemetry                 |
-| `maxBatchSize`          | `number`                  | No                         | Max telemetry items per export batch                                 |
-| `loggerExportInterval`  | `Duration.Input`          | No                         | Export interval for logs                                             |
-| `metricsExportInterval` | `Duration.Input`          | No                         | Export interval for metrics                                          |
-| `tracerExportInterval`  | `Duration.Input`          | No                         | Export interval for traces                                           |
-| `shutdownTimeout`       | `Duration.Input`          | No                         | Graceful shutdown timeout                                            |
+| Option                  | Type                      | Required                      | Description                                                                                                           |
+| ----------------------- | ------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `serviceName`           | `string`                  | Yes                           | Service name reported in traces, logs, and metrics                                                                    |
+| `endpoint`              | `string`                  | No (server) / Yes (client)    | Maple ingest endpoint URL. Server auto-detects from `MAPLE_ENDPOINT`                                                  |
+| `ingestKey`             | `string`                  | Required by the public ingest | Maple ingest key. Server auto-detects from `MAPLE_INGEST_KEY`. The flushable and Cloudflare presets no-op without one |
+| `serviceVersion`        | `string`                  | No                            | Override auto-detected commit SHA                                                                                     |
+| `serviceNamespace`      | `string`                  | No                            | Logical group, emitted as the `service.namespace` resource attribute                                                  |
+| `repositoryUrl`         | `string`                  | No (server / Cloudflare)      | Repository URL, emitted as `vcs.repository.url.full`                                                                  |
+| `environment`           | `string`                  | No                            | Override auto-detected deployment environment                                                                         |
+| `attributes`            | `Record<string, unknown>` | No                            | Additional resource attributes merged into telemetry                                                                  |
+| `maxBatchSize`          | `number`                  | No                            | Max telemetry items per export batch                                                                                  |
+| `loggerExportInterval`  | `Duration.Input`          | No                            | Export interval for logs                                                                                              |
+| `metricsExportInterval` | `Duration.Input`          | No                            | Export interval for metrics                                                                                           |
+| `tracerExportInterval`  | `Duration.Input`          | No                            | Export interval for traces                                                                                            |
+| `shutdownTimeout`       | `Duration.Input`          | No                            | Graceful shutdown timeout                                                                                             |
 
 > In Effect 3, duration fields use the `Duration.DurationInput` type instead of `Duration.Input`.
 

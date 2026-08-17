@@ -1,5 +1,5 @@
 import { Match, Schema } from "effect"
-import { shapeResponseHeaders } from "./routes/headers"
+import { syncResponseHeaders } from "./routes/headers"
 
 /**
  * Every way a shape request can end other than success, as plain data.
@@ -14,7 +14,7 @@ import { shapeResponseHeaders } from "./routes/headers"
  * itself rather than inferring it from a status code.
  */
 
-export class ShapeRequestInvalid extends Schema.TaggedError<ShapeRequestInvalid>()(
+export class SyncRequestInvalid extends Schema.TaggedError<SyncRequestInvalid>()(
 	"@maple/electric-sync/ShapeRequestInvalid",
 	{ message: Schema.String },
 ) {}
@@ -54,8 +54,8 @@ export class ElectricUpstreamError extends Schema.TaggedError<ElectricUpstreamEr
 	},
 ) {}
 
-export type ShapeError =
-	| ShapeRequestInvalid
+export type SyncError =
+	| SyncRequestInvalid
 	| Unauthorized
 	| ElectricNotConfigured
 	| ElectricUpstreamUnreachable
@@ -79,7 +79,7 @@ const TEXT_HEADERS = { "content-type": "text/plain; charset=utf-8" }
  * the diagnosis into the span, and a 503 caused by a half-configured Electric
  * source is not something to describe to a browser.
  */
-export const errorResponse: (error: ShapeError) => ErrorResponse = Match.type<ShapeError>().pipe(
+export const errorResponse: (error: SyncError) => ErrorResponse = Match.type<SyncError>().pipe(
 	Match.tag(
 		"@maple/electric-sync/ShapeRequestInvalid",
 		(error): ErrorResponse => ({
@@ -128,7 +128,7 @@ export const errorResponse: (error: ShapeError) => ErrorResponse = Match.type<Sh
 		(error): ErrorResponse => ({
 			status: error.status,
 			body: error.body,
-			headers: shapeResponseHeaders(error.headers),
+			headers: syncResponseHeaders(error.headers),
 			errorType: "ElectricUpstreamError",
 		}),
 	),

@@ -21,7 +21,7 @@ const makePersistenceError = makePersistenceErrorMapper(
 	"Investigation settings persistence failure",
 )
 
-export interface AiTriageServiceShape {
+export interface AiTriageServiceApi {
 	readonly getSettings: (orgId: OrgId) => Effect.Effect<AiTriageSettingsDocument, AiTriagePersistenceError>
 	readonly updateSettings: (
 		orgId: OrgId,
@@ -30,7 +30,7 @@ export interface AiTriageServiceShape {
 	) => Effect.Effect<AiTriageSettingsDocument, AiTriagePersistenceError | AiTriageValidationError>
 }
 
-export class AiTriageService extends Context.Service<AiTriageService, AiTriageServiceShape>()(
+export class AiTriageService extends Context.Service<AiTriageService, AiTriageServiceApi>()(
 	"@maple/api/services/AiTriageService",
 	{
 		make: Effect.gen(function* () {
@@ -54,14 +54,14 @@ export class AiTriageService extends Context.Service<AiTriageService, AiTriageSe
 					updatedBy: row?.updatedBy ?? null,
 				})
 
-			const getSettings: AiTriageServiceShape["getSettings"] = Effect.fn("AiTriageService.getSettings")(
+			const getSettings: AiTriageServiceApi["getSettings"] = Effect.fn("AiTriageService.getSettings")(
 				function* (orgId) {
 					yield* Effect.annotateCurrentSpan({ orgId })
 					return settingsToDocument(yield* loadSettingsRow(orgId))
 				},
 			)
 
-			const updateSettings: AiTriageServiceShape["updateSettings"] = Effect.fn(
+			const updateSettings: AiTriageServiceApi["updateSettings"] = Effect.fn(
 				"AiTriageService.updateSettings",
 			)(function* (orgId, userId, request) {
 				yield* Effect.annotateCurrentSpan({ orgId })
@@ -85,7 +85,7 @@ export class AiTriageService extends Context.Service<AiTriageService, AiTriageSe
 				return settingsToDocument(yield* loadSettingsRow(orgId))
 			})
 
-			return { getSettings, updateSettings } satisfies AiTriageServiceShape
+			return { getSettings, updateSettings } satisfies AiTriageServiceApi
 		}),
 	},
 ) {

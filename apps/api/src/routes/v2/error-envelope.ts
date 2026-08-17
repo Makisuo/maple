@@ -1,7 +1,13 @@
 import { Effect, Layer, Schema } from "effect"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { HttpEffect, HttpServerResponse } from "effect/unstable/http"
-import { apiError, invalidRequest, V2SchemaErrors, V2UnexpectedErrors } from "@maple/domain/http/v2"
+import {
+	V2InvalidRequest,
+	V2ResponseSchemaFailure,
+	V2SchemaErrors,
+	V2UnexpectedFailure,
+	V2UnexpectedErrors,
+} from "@maple/domain/http/v2"
 import { describeSchemaIssue } from "@/routes/schema-error-detail"
 
 class V2RouteExecutionDefect extends Schema.TaggedError<V2RouteExecutionDefect>()(
@@ -13,6 +19,22 @@ class V2RouteExecutionDefect extends Schema.TaggedError<V2RouteExecutionDefect>(
 		cause: Schema.Defect(),
 	},
 ) {}
+
+class V2ResponseSchemaError extends Schema.TaggedError<V2ResponseSchemaError>()(
+	"@maple/api/routes/v2/V2ResponseSchemaError",
+	{
+		group: Schema.String,
+		operation: Schema.String,
+		component: Schema.Literals(["Body", "ResponseHeaders"]),
+		message: Schema.String,
+		details: Schema.Array(Schema.String),
+		cause: Schema.Defect(),
+	},
+) {}
+
+type V2SchemaBoundaryError =
+	| ReturnType<typeof V2InvalidRequest.make>
+	| ReturnType<typeof V2ResponseSchemaFailure.make>
 
 /**
  * Request-decode failures (params/query/payload) under /v2 are rewritten into
@@ -28,20 +50,33 @@ class V2RouteExecutionDefect extends Schema.TaggedError<V2RouteExecutionDefect>(
 const V2SchemaErrorTransformLive = HttpApiMiddleware.layerSchemaErrorTransform(
 	V2SchemaErrors,
 	(schemaError, { endpoint, group }) =>
-		Effect.suspend(() => {
-			const metadata = {
-				tag: `@maple/http/v2/${group.identifier}/${endpoint.identifier}/InvalidRequestError`,
-			} as const
+		Effect.suspend((): Effect.Effect<never, V2SchemaBoundaryError> => {
 			const details = describeSchemaIssue(schemaError.cause.issue)
+			if (schemaError.kind === "Body" || schemaError.kind === "ResponseHeaders") {
+				const error = new V2ResponseSchemaError({
+					group: group.identifier,
+					operation: endpoint.identifier,
+					component: schemaError.kind,
+					message: "V2 response failed its declared HTTP schema",
+					details: details.map(({ line }) => line),
+					cause: schemaError.cause,
+				})
+				return Effect.logError(error.message).pipe(
+					Effect.annotateLogs({
+						errorTag: error._tag,
+						group: error.group,
+						operation: error.operation,
+						component: error.component,
+						details: error.details,
+						cause: error.cause,
+					}),
+					Effect.andThen(Effect.fail(V2ResponseSchemaFailure.make())),
+				)
+			}
 			const first = details[0]
 			if (first === undefined) {
 				return Effect.fail(
-					invalidRequest(
-						"parameter_invalid",
-						`Invalid request ${schemaError.kind.toLowerCase()}.`,
-						undefined,
-						metadata,
-					),
+					V2InvalidRequest.make(`Invalid request ${schemaError.kind.toLowerCase()}.`),
 				)
 			}
 			const remaining = details.length - 1
@@ -50,12 +85,9 @@ const V2SchemaErrorTransformLive = HttpApiMiddleware.layerSchemaErrorTransform(
 					? ""
 					: ` (and ${remaining} other invalid ${remaining === 1 ? "field" : "fields"})`
 			return Effect.fail(
-				invalidRequest(
-					"parameter_invalid",
-					`${first.line}${suffix}`,
-					first.path === "" ? undefined : first.path,
-					metadata,
-				),
+				V2InvalidRequest.make(`${first.line}${suffix}`, {
+					...(!(first.path === "") ? { param: first.path } : undefined),
+				}),
 			)
 		}),
 )
@@ -103,18 +135,16 @@ export const V2UnexpectedErrorsLive = Layer.succeed(
 						defectType,
 						cause: error.cause,
 					}),
-					Effect.andThen(
-						Effect.fail(
-							apiError({
-								tag: `@maple/http/v2/${group.identifier}/${endpoint.identifier}/UnexpectedError`,
-							}),
-						),
-					),
+					Effect.andThen(Effect.fail(V2UnexpectedFailure.make())),
 				)
 			}),
 		),
 	),
 )
 
-/** Both cross-cutting v2 error middlewares; kept under the established layer name for harnesses. */
-export const V2SchemaErrorsLive = Layer.merge(V2SchemaErrorTransformLive, V2UnexpectedErrorsLive)
+/**
+ * Transport-only failures and response headers, provided once for the API.
+ * Expected domain errors never pass through this layer; their classes expose
+ * their safe public body and endpoint schemas serialize them directly.
+ */
+export const V2TransportErrorBoundaryLive = Layer.merge(V2SchemaErrorTransformLive, V2UnexpectedErrorsLive)

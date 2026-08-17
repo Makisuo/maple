@@ -51,6 +51,21 @@ describe("scoreEvidenceGrounding", () => {
 	it("penalises a report that cited nothing at all", () => {
 		expect(scoreEvidenceGrounding({ evidence: [] }, POOL).score).toBe(0.5)
 	})
+
+	/** A citation that is not a string is no more checkable than a fabricated one. */
+	it("fails a report whose trace ids are not strings", () => {
+		const result = scoreEvidenceGrounding(
+			{ evidence: [{ traceIds: [{ id: "0af7651916cd43dd8448eb211c80319c" }] }] },
+			POOL,
+		)
+		expect(result.score).toBe(0)
+	})
+
+	it("fails a report whose evidence is not a list", () => {
+		const result = scoreEvidenceGrounding({ evidence: "payments-api timed out" }, POOL)
+		expect(result.score).toBe(0)
+		expect(result.rationale).toContain("malformed")
+	})
 })
 
 describe("scoreUnknownDiscipline", () => {
@@ -96,6 +111,35 @@ describe("scoreUnknownDiscipline", () => {
 		expect(result.score).toBe(0.5)
 	})
 
+	/**
+	 * The crash this replaced: the model returned objects in `ruledOut` and the
+	 * scorer threw `entry.trim is not a function`, erroring the case out instead of
+	 * scoring it. A ruled-out entry that is not prose cannot carry evidence at all,
+	 * so it fails rather than being coerced into something scoreable.
+	 */
+	it("fails ruled-out entries that are not strings", () => {
+		const result = scoreUnknownDiscipline({
+			suspectedCause: "unknown",
+			confidence: "low",
+			ruledOut: [{ cause: "Deploy", evidence: "service.version was unchanged across 41k spans." }, 42],
+		})
+		expect(result.score).toBe(0)
+		expect(result.rationale).toContain("not strings")
+	})
+
+	it("fails a ruledOut that is not a list", () => {
+		const result = scoreUnknownDiscipline({ suspectedCause: "unknown", ruledOut: "Deploy, saturation" })
+		expect(result.score).toBe(0)
+		expect(result.rationale).toContain("malformed")
+	})
+
+	/** A non-string cause must not slip through the "named a cause" early return. */
+	it("fails a suspectedCause that is not a string", () => {
+		const result = scoreUnknownDiscipline({ suspectedCause: { label: "unknown" } })
+		expect(result.score).toBe(0)
+		expect(result.rationale).toContain("malformed")
+	})
+
 	it("passes an unknown that says what it checked", () => {
 		const result = scoreUnknownDiscipline({
 			suspectedCause: "unknown — no signal in this window distinguishes the candidates",
@@ -132,6 +176,12 @@ describe("scoreCauseMatch", () => {
 
 	it("passes an honest unknown on the unknowable fixture", () => {
 		expect(scoreCauseMatch({ suspectedCause: "unknown" }, UNKNOWABLE).score).toBe(1)
+	})
+
+	it("fails a non-string cause instead of reading it as an unknown", () => {
+		const result = scoreCauseMatch({ suspectedCause: ["unknown"] }, UNKNOWABLE)
+		expect(result.score).toBe(0)
+		expect(result.rationale).toContain("malformed")
 	})
 })
 
@@ -177,6 +227,12 @@ describe("scorePlanRelevance", () => {
 
 	it("fails an empty plan", () => {
 		expect(scorePlanRelevance({ hypotheses: [] }, DEPLOY).score).toBe(0)
+	})
+
+	it("fails a plan whose hypotheses are not objects", () => {
+		const result = scorePlanRelevance({ hypotheses: ["The 14:02 rollout"] }, DEPLOY)
+		expect(result.score).toBe(0)
+		expect(result.rationale).toContain("malformed")
 	})
 
 	it("passes a plan on the unknowable fixture that proposed nothing unanswerable", () => {

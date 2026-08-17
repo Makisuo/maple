@@ -9,7 +9,7 @@ const valueToneClass: Record<Tone, string> = {
 	critical: "text-destructive",
 	emerald: "text-success",
 	amber: "text-warning",
-}
+} satisfies Record<Tone, string>
 
 export type AlertStatItem = {
 	label: string

@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { invalidRequest } from "./errors"
+import { V2ParameterInvalid } from "./errors"
 
 /**
  * Shared v2 wire-format primitives (see docs/api-v2.md).
@@ -26,6 +26,19 @@ export const Timestamp = Schema.String.pipe(
 	}),
 )
 export type Timestamp = Schema.Schema.Type<typeof Timestamp>
+
+/**
+ * Author OpenAPI `examples` in wire (encoded) form. Effect types the `examples`
+ * annotation against a schema's decoded `Type`, while HttpApi renders the encoded
+ * schema. The OpenAPI contract test decodes every example before publication.
+ */
+export const wireExample = <A, Encoded extends Record<PropertyKey, unknown> = Record<PropertyKey, unknown>>(
+	example: Encoded,
+): A => {
+	// SAFETY: the OpenAPI contract test decodes every wire example against its owning schema.
+	// @ts-expect-error -- Effect types examples as decoded values but publishes encoded values.
+	return example as A
+}
 
 /** Brand a service-layer ISO value for the strict v2 timestamp wire schema. */
 export const timestamp = (value: string): Timestamp => Timestamp.make(value)
@@ -113,7 +126,7 @@ export const decodeOffsetCursorEffect = (cursor: string | undefined) => {
 	if (cursor === undefined) return Effect.succeed(0)
 	const offset = decodeOffsetCursor(cursor)
 	return offset === null
-		? Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+		? Effect.fail(V2ParameterInvalid.make("Invalid pagination cursor.", { param: "cursor" }))
 		: Effect.succeed(offset)
 }
 

@@ -46,7 +46,7 @@ interface ServiceMapRollupResult {
 	readonly orgFailures: number
 }
 
-export interface ServiceMapRollupServiceShape {
+export interface ServiceMapRollupServiceApi {
 	/**
 	 * Aggregate service-to-service edges for any completed hour in the trailing
 	 * `LOOKBACK_HOURS` window not yet present in `service_map_edges_hourly`, and
@@ -68,7 +68,7 @@ export interface ServiceMapRollupServiceShape {
  */
 export class ServiceMapRollupService extends Context.Service<
 	ServiceMapRollupService,
-	ServiceMapRollupServiceShape
+	ServiceMapRollupServiceApi
 >()("@maple/api/services/ServiceMapRollupService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -281,7 +281,7 @@ export class ServiceMapRollupService extends Context.Service<
 				)
 		})
 
-		const runRollupTick: ServiceMapRollupServiceShape["runRollupTick"] = Effect.fn(
+		const runRollupTick: ServiceMapRollupServiceApi["runRollupTick"] = Effect.fn(
 			"ServiceMapRollupService.runRollupTick",
 		)(function* () {
 			const orgRows = yield* database.execute((db) =>

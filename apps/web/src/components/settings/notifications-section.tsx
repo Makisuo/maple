@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Exit } from "effect"
 import { toastManager } from "@maple/ui/components/ui/toast"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient, retainedInternalQuery } from "@/lib/services/common/internal-atom-client"
 import { UpsertDigestSubscriptionRequest } from "@maple/domain/http"
 import { useUser } from "@clerk/clerk-react"
 
@@ -16,11 +16,11 @@ export function NotificationsSection() {
 	const { user } = useUser()
 	const email = user?.primaryEmailAddress?.emailAddress
 
-	const subscriptionQueryAtom = retainedQuery("digest", "getSubscription", {})
+	const subscriptionQueryAtom = retainedInternalQuery("digest", "getSubscription", {})
 	const subscriptionResult = useAtomValue(subscriptionQueryAtom)
 	const refreshSubscription = useAtomRefresh(subscriptionQueryAtom)
 
-	const upsertMutation = useAtomSet(MapleApiAtomClient.mutation("digest", "upsertSubscription"), {
+	const upsertMutation = useAtomSet(MapleInternalAtomClient.mutation("digest", "upsertSubscription"), {
 		mode: "promiseExit",
 	})
 
@@ -29,7 +29,7 @@ export function NotificationsSection() {
 	const [isSaving, setIsSaving] = useState(false)
 	const [isPreviewing, setIsPreviewing] = useState(false)
 
-	const previewMutation = useAtomSet(MapleApiAtomClient.mutation("digest", "preview"), {
+	const previewMutation = useAtomSet(MapleInternalAtomClient.mutation("digest", "preview"), {
 		mode: "promiseExit",
 	})
 

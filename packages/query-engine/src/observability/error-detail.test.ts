@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { errorDetail } from "./error-detail"
 import { WarehouseExecutor } from "./WarehouseExecutor"
-import type { WarehouseExecutorShape } from "./WarehouseExecutor"
+import type { WarehouseExecutorApi } from "./WarehouseExecutor"
 
 interface CapturedCalls {
 	pipeCalls: Array<{ pipe: string; params: Record<string, unknown> }>
@@ -21,7 +21,7 @@ const traceRow = (traceId: string, startTime: string) => ({
 const makeMockExecutor = (
 	captured: CapturedCalls,
 	tracesData: ReadonlyArray<unknown>,
-): WarehouseExecutorShape => ({
+): WarehouseExecutorApi => ({
 	orgId: "org_test",
 	compiledQuery: (compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: (compiled) => compiled.decodeFirstRow([]).pipe(Effect.orDie),
@@ -33,7 +33,7 @@ const makeMockExecutor = (
 	},
 })
 
-const makeLayer = (executor: WarehouseExecutorShape) => Layer.succeed(WarehouseExecutor, executor)
+const makeLayer = (executor: WarehouseExecutorApi) => Layer.succeed(WarehouseExecutor, executor)
 
 const timeRange = { startTime: "2026-04-01 00:00:00", endTime: "2026-04-08 00:00:00" }
 

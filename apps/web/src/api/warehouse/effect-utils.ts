@@ -7,48 +7,92 @@ import {
 	type DurationStats,
 	type AttributeValueItem,
 } from "@maple/query-engine"
-import { Effect, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
+import { PublicHttpErrorBodySchema, type AnyPublicHttpErrorBody } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import { mapleApiClientLayer, mapleApiV2ClientLayer, mapleRuntime } from "@/lib/registry"
+import {
+	mapleApiClientLayer,
+	mapleApiV2ClientLayer,
+	mapleInternalClientLayer,
+	mapleRuntime,
+} from "@/lib/registry"
+import { makeClientErrorBody } from "@/lib/error-messages"
 import { makeExecuteBatcher } from "./execute-batcher"
 
 export const WarehouseDateTimeString = TinybirdDateTime
 
 export class WarehouseDecodeError extends Schema.TaggedError<WarehouseDecodeError>()(
-	"@maple/web/api/warehouse/WarehouseDecodeError",
+	"@maple/web/errors/WarehouseDecodeError",
 	{
 		operation: Schema.String,
 		message: Schema.String,
 		cause: Schema.optional(Schema.Unknown),
 	},
-) {}
+) {
+	readonly error = makeClientErrorBody({
+		_tag: this._tag,
+		code: "warehouse_decode_failed",
+		title: "Query data could not be read",
+		message: "Maple could not read the query response.",
+		retryable: false,
+		recovery: "contact_support",
+	})
+}
 
 export class WarehouseQueryError extends Schema.TaggedError<WarehouseQueryError>()(
-	"@maple/web/api/warehouse/WarehouseQueryError",
+	"@maple/web/errors/WarehouseQueryError",
 	{
 		operation: Schema.String,
 		message: Schema.String,
 		cause: Schema.optional(Schema.Unknown),
 	},
-) {}
+) {
+	readonly error = makeClientErrorBody({
+		_tag: this._tag,
+		code: "warehouse_query_failed",
+		title: "Warehouse query failed",
+		message: "Maple could not complete the warehouse query.",
+		retryable: true,
+		recovery: "retry",
+	})
+}
 
 export class WarehouseTransformError extends Schema.TaggedError<WarehouseTransformError>()(
-	"@maple/web/api/warehouse/WarehouseTransformError",
+	"@maple/web/errors/WarehouseTransformError",
 	{
 		operation: Schema.String,
 		message: Schema.String,
 		cause: Schema.optional(Schema.Unknown),
 	},
-) {}
+) {
+	readonly error = makeClientErrorBody({
+		_tag: this._tag,
+		code: "warehouse_transform_failed",
+		title: "Query data could not be displayed",
+		message: "Maple could not prepare the query data.",
+		retryable: false,
+		recovery: "contact_support",
+	})
+}
 
 export class WarehouseInvalidInputError extends Schema.TaggedError<WarehouseInvalidInputError>()(
-	"@maple/web/api/warehouse/WarehouseInvalidInputError",
+	"@maple/web/errors/WarehouseInvalidInputError",
 	{
 		operation: Schema.String,
 		message: Schema.String,
 	},
-) {}
+) {
+	readonly error = makeClientErrorBody({
+		_tag: this._tag,
+		code: "warehouse_input_invalid",
+		title: "Invalid query",
+		message: this.message,
+		retryable: false,
+		recovery: "fix_request",
+	})
+}
 
 export type WarehouseApiError =
 	| WarehouseDecodeError
@@ -56,65 +100,29 @@ export type WarehouseApiError =
 	| WarehouseTransformError
 	| WarehouseInvalidInputError
 
-/** Tagged v1 backend error surfaced by the Maple API client. */
-export interface TaggedBackendError {
-	readonly _tag: string
-}
-
-/** Public v2 error envelope. Semantic domain tags live inside `error` on v2. */
-export interface V2BackendError {
-	readonly error: {
-		readonly _tag?: string
-		readonly type: string
-		readonly code: string
-		readonly message: string
-		readonly title?: string
-		readonly retryable?: boolean
-		readonly recovery?: string
-		readonly retry_after_seconds?: number
-		readonly retry_at?: string
-		readonly param?: string
-		readonly doc_url?: string
-	}
-}
-
-export type BackendError = TaggedBackendError | V2BackendError
+/** Backend failures are either a public body or an error carrying that same body. */
+export type BackendError = AnyPublicHttpErrorBody | { readonly error: AnyPublicHttpErrorBody }
 
 function toMessage(cause: unknown, fallback: string): string {
 	return cause instanceof Error ? cause.message : fallback
 }
 
-const isTaggedBackendError = (cause: unknown): cause is TaggedBackendError =>
-	typeof cause === "object" &&
-	cause !== null &&
-	"_tag" in cause &&
-	typeof (cause as { _tag: unknown })._tag === "string" &&
-	(cause as { _tag: string })._tag.startsWith("@maple/http/errors/")
+const isPublicErrorBody = Schema.is(PublicHttpErrorBodySchema)
 
-const isV2BackendError = (cause: unknown): cause is V2BackendError => {
+const isPublicErrorEnvelope = (cause: unknown): cause is { readonly error: AnyPublicHttpErrorBody } => {
 	if (typeof cause !== "object" || cause === null || !("error" in cause)) return false
-	const error = (cause as { error: unknown }).error
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		"type" in error &&
-		typeof error.type === "string" &&
-		"code" in error &&
-		typeof error.code === "string" &&
-		"message" in error &&
-		typeof error.message === "string"
-	)
+	return isPublicErrorBody((cause as { readonly error: unknown }).error)
 }
 
 export const isBackendError = (cause: unknown): cause is BackendError =>
-	isTaggedBackendError(cause) || isV2BackendError(cause)
+	isPublicErrorBody(cause) || isPublicErrorEnvelope(cause)
 
 export const isWarehouseApiError = (cause: unknown): cause is WarehouseApiError =>
 	typeof cause === "object" &&
 	cause !== null &&
 	"_tag" in cause &&
 	typeof cause._tag === "string" &&
-	cause._tag.startsWith("@maple/web/api/warehouse/")
+	cause._tag.startsWith("@maple/web/errors/Warehouse")
 
 /** Preserve known errors; introduce a local query error only for an unstructured failure. */
 export const normalizeWarehouseError = (
@@ -146,15 +154,22 @@ export function decodeInput<S extends Schema.Top & { readonly DecodingServices: 
 	)
 }
 
-export function runWarehouseQuery<A>(
+/**
+ * Accepts either v1 client because the warehouse adapters straddle two APIs:
+ * query-engine moved to the private `/internal` transport, while the session
+ * replay and integrations groups it shares this helper with are still on
+ * `/api`. Both layers are provided, so a caller depends only on the one it
+ * actually uses.
+ */
+export function runWarehouseQuery<A, E>(
 	operation: string,
-	execute: () => Effect.Effect<A, WarehouseApiError | BackendError, MapleApiAtomClient>,
+	execute: () => Effect.Effect<A, E, MapleApiAtomClient | MapleInternalAtomClient>,
 ): Effect.Effect<A, WarehouseApiError | BackendError> {
 	return Effect.suspend(execute).pipe(
 		Effect.withSpan(operation),
 		// Warehouse adapters are imperative server-function entrypoints and own this runtime layer.
 		// oxlint-disable-next-line effecttsgo/strict-effect-provide
-		Effect.provide(mapleApiClientLayer),
+		Effect.provide(Layer.mergeAll(mapleApiClientLayer, mapleInternalClientLayer)),
 		Effect.mapError((cause) => normalizeWarehouseError(operation, cause)),
 	)
 }
@@ -163,10 +178,9 @@ export function runWarehouseQuery<A>(
  * `runWarehouseQuery` against the v2 client.
  *
  * Same span + error normalization, different client layer and a wider input
- * error type: the v2 endpoints fail with the public envelope union
- * (`V2InvalidRequestError`, `V2PayloadTooLargeError`, …) rather than the v1
- * warehouse tags. Both forms pass through unchanged so the UI retains the
- * server's status, code, and remediation copy.
+ * error type: each v2 endpoint exposes its own literal `_tag` envelope union.
+ * Those envelopes pass through unchanged so the UI retains the server's exact
+ * semantic tag, status, code, and remediation copy.
  */
 export function runWarehouseQueryV2<A, E>(
 	operation: string,
@@ -197,7 +211,7 @@ export function invalidWarehouseInput(
 const executeBatcher = makeExecuteBatcher((requests) =>
 	mapleRuntime.runPromise(
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response = yield* client.queryEngine.executeBatch({
 				payload: new QueryEngineExecuteBatchRequest({ requests }),
 			})

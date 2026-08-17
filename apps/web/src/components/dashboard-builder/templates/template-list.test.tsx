@@ -8,6 +8,7 @@ import type { TemplateReadiness } from "./use-template-readiness"
 
 afterEach(cleanup)
 
+// SAFETY: the fixture supplies the complete template fields rendered by TemplateList; ids are inert test values.
 const template = (id: string, name: string, category = "database"): V2DashboardTemplate =>
 	({
 		id,

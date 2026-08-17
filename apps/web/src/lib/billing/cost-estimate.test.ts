@@ -43,7 +43,7 @@ const startupPlan = {
 		{ featureId: "metrics", included: 100, price: { amount: 0.3, billingUnits: 1 } },
 		{ featureId: "browser_sessions", included: 5000, price: { amount: 0.002, billingUnits: 1 } },
 	],
-} as unknown as Plan
+} as Plan
 
 const usage = (total: Record<string, number>): BillingUsage["total"] =>
 	Object.fromEntries(Object.entries(total).map(([k, sum]) => [k, { sum }])) as BillingUsage["total"]
@@ -97,7 +97,7 @@ describe("estimateCycleCost", () => {
 		const plan = {
 			...startupPlan,
 			items: [{ featureId: "logs", included: 100, price: { amount: 1.5, billingUnits: 10 } }],
-		} as unknown as Plan
+		} as Plan
 		const estimate = estimateCycleCost({
 			customer: buildCustomer([buildSubscription()], { logs: { granted: 100 } }),
 			plans: [plan],
@@ -149,7 +149,7 @@ describe("estimateCycleCost", () => {
 			addOn: true,
 			price: { amount: 99, interval: "month" },
 			items: [],
-		} as unknown as Plan
+		} as Plan
 		const estimate = estimateCycleCost({
 			customer: buildCustomer([
 				buildSubscription(),

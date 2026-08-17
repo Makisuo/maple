@@ -37,4 +37,19 @@ export const MapleBrowser: {
 	track: (name: string, props?: TrackProps) => void
 	/** Grant or revoke consent when `privacy.requireConsent` is on. */
 	setConsent: (granted: boolean) => void
-} = { init, identify, track, setConsent }
+} = { init, identify, track, setConsent } satisfies {
+	init: (config: import("./config").MapleBrowserConfig) => MapleBrowserHandle
+	/**
+	 * Attach, replace, or clear the end-user identity on the active session.
+	 * Accepts a bare user id or the full identity object. Safe to call repeatedly.
+	 */
+	identify: (input?: IdentifyInput) => void
+	/**
+	 * Record a custom product event against the active session. Safe to call
+	 * before `init` — events are queued (capped) and drained once the session
+	 * starts.
+	 */
+	track: (name: string, props?: TrackProps) => void
+	/** Grant or revoke consent when `privacy.requireConsent` is on. */
+	setConsent: (granted: boolean) => void
+}

@@ -33,9 +33,27 @@ That single call:
   gzipping them with the native `CompressionStream`, and uploading to
   `POST /v1/sessionReplays/blob`. rrweb ships in a lazy code-split chunk loaded
   only once a session is sampled in, so a `sampleRate` below 1 costs the
-  unsampled visitors nothing beyond the ~8 kB gzipped base SDK;
+  unsampled visitors nothing beyond the base SDK (see [Bundle size](#bundle-size));
 - writes session metadata at start (`active`) and on page hide (`ended`),
   including the trace ids observed during the session.
+
+## Bundle size
+
+Bundled, minified and gzipped, as your bundler would ship it:
+
+|                  | gzipped | what it is                                                |
+| ---------------- | ------- | --------------------------------------------------------- |
+| **eager**        | ~32 kB  | every page load, before any sampling decision             |
+| ↳ our code alone | ~3.5 kB | the marginal cost if your app already ships OpenTelemetry |
+| **lazy**         | ~61 kB  | rrweb — downloaded only by sessions sampled into replay   |
+
+The eager figure is ~90% OpenTelemetry. If your app already uses the OTel web
+SDK, your bundler should dedupe it and you pay closer to the second row; if it
+doesn't dedupe, you will ship two copies, so pin matching versions.
+
+Run `bun run size` in this package for the current numbers. It fails past a
+budget, so a regression has to be argued for in review rather than discovered
+in production.
 
 ## Identifying users
 

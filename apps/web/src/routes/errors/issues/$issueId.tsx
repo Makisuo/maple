@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { Exit, Schema } from "effect"
 import { useMemo, useState } from "react"
 import { toastManager } from "@maple/ui/components/ui/toast"
@@ -327,8 +327,8 @@ function IssueDetailPage() {
 				params: { id: result.value.id },
 			})
 		} else {
-			const { title, description } = formatBackendError(result)
-			toastManager.add({ title, description, type: "error" })
+			const { title, message } = displayError(result)
+			toastManager.add({ title, description: message, type: "error" })
 		}
 	}
 

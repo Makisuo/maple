@@ -141,7 +141,7 @@ const tabLabels: Record<Tab, string> = {
 	flow: "Flow",
 	waterfall: "Waterfall",
 	flamegraph: "Flamegraph",
-}
+} satisfies Record<Tab, string>
 
 // Flat span list for the waterfall view
 const waterfallSpans = [
@@ -160,14 +160,14 @@ const colorMap: Record<string, string> = {
 	"chart-2": "bg-chart-2",
 	"chart-3": "bg-chart-3",
 	"chart-4": "bg-chart-4",
-}
+} satisfies Record<string, string>
 
 const textColorMap: Record<string, string> = {
 	"chart-1": "text-chart-1",
 	"chart-2": "text-chart-2",
 	"chart-3": "text-chart-3",
 	"chart-4": "text-chart-4",
-}
+} satisfies Record<string, string>
 
 function Waterfall({
 	selectedSpanId,

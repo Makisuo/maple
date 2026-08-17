@@ -45,7 +45,7 @@ export const SENSITIVITY: Record<AnomalySensitivity, SensitivityConfig> = {
 	low: { k: 6, ratio: 3.0 },
 	normal: { k: 4, ratio: 2.0 },
 	high: { k: 3, ratio: 1.5 },
-}
+} satisfies Record<AnomalySensitivity, SensitivityConfig>
 
 /** Minimum sealed baseline samples before a series is evaluated at all. */
 const MIN_BASELINE_SAMPLES = 6

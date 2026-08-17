@@ -16,11 +16,13 @@ export const buildApiKeyCreatePayload = (
 
 	return {
 		name: name.trim(),
-		...(trimmedDescription.length > 0 ? { description: trimmedDescription } : {}),
-		...(kind !== undefined ? { kind } : {}),
-		...(options.expiresInSeconds !== undefined ? { expires_in_seconds: options.expiresInSeconds } : {}),
+		...(trimmedDescription.length > 0 ? { description: trimmedDescription } : undefined),
+		...(kind !== undefined ? { kind } : undefined),
+		...(options.expiresInSeconds !== undefined
+			? { expires_in_seconds: options.expiresInSeconds }
+			: undefined),
 		...(kind !== "mcp" && options.scopes !== undefined && options.scopes.length > 0
 			? { scopes: options.scopes }
-			: {}),
+			: undefined),
 	}
 }

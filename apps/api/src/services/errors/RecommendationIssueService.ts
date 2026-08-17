@@ -21,7 +21,7 @@ import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryServic
 
 type IssueRow = typeof orgRecommendationIssues.$inferSelect
 
-export interface RecommendationIssueServiceShape {
+export interface RecommendationIssueServiceApi {
 	/** Reconciles live telemetry → persisted issues, then returns the full numbered list. */
 	readonly listReconciled: (
 		tenant: TenantContext,
@@ -57,17 +57,17 @@ const rowToIssue = (row: IssueRow): RecommendationIssue =>
 		recommendationKey: row.recommendationKey,
 		kind: decodeKindSync(row.kind),
 		sourceKey: row.sourceKey,
-		...(row.canonicalKey != null ? { canonicalKey: row.canonicalKey } : {}),
+		...(row.canonicalKey != null ? { canonicalKey: row.canonicalKey } : undefined),
 		status: decodeStatusSync(row.status),
 		usageCount: row.usageCount,
 		openedAt: decodeIsoSync(row.openedAt.toISOString()),
 		updatedAt: decodeIsoSync(row.updatedAt.toISOString()),
-		...(row.resolvedAt != null ? { resolvedAt: decodeIsoSync(row.resolvedAt.toISOString()) } : {}),
+		...(row.resolvedAt != null ? { resolvedAt: decodeIsoSync(row.resolvedAt.toISOString()) } : undefined),
 	})
 
 export class RecommendationIssueService extends Context.Service<
 	RecommendationIssueService,
-	RecommendationIssueServiceShape
+	RecommendationIssueServiceApi
 >()("@maple/api/services/RecommendationIssueService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -204,7 +204,10 @@ export class RecommendationIssueService extends Context.Service<
 			yield* Effect.forEach(
 				plan.updates,
 				(update) => {
-					const fields: Record<string, unknown> = { updatedAt: new Date(now) }
+					const fields: Record<string, unknown> = { updatedAt: new Date(now) } satisfies Record<
+						string,
+						unknown
+					>
 					if (update.usageCount !== undefined) fields.usageCount = update.usageCount
 					if (update.nextStatus !== undefined) {
 						fields.status = update.nextStatus
@@ -281,7 +284,7 @@ export class RecommendationIssueService extends Context.Service<
 		const reopen = (tenant: TenantContext, id: RecommendationIssueId) =>
 			setStatus(tenant, id, { status: "open", resolvedAt: null })
 
-		return { listReconciled, dismiss, reopen } satisfies RecommendationIssueServiceShape
+		return { listReconciled, dismiss, reopen } satisfies RecommendationIssueServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

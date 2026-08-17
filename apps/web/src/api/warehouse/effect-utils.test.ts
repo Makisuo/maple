@@ -1,23 +1,30 @@
 import { describe, expect, it } from "vitest"
+import { WarehouseQuotaExceededError } from "@maple/domain/http"
 import { WarehouseDecodeError, WarehouseQueryError, normalizeWarehouseError } from "./effect-utils"
 
 describe("normalizeWarehouseError", () => {
 	it("preserves a v2 error envelope", () => {
+		const quota = new WarehouseQuotaExceededError({
+			message: "internal",
+			pipeName: "getReplayEvents",
+			setting: "max_execution_time",
+		})
 		const error = {
-			error: {
-				type: "invalid_request_error",
-				code: "range_too_large",
-				message: "Narrow the chunk range.",
-			},
+			error: quota.error,
 		}
 		expect(normalizeWarehouseError("getReplayEvents", error)).toBe(error)
 	})
 
-	it("preserves tagged backend and local warehouse errors", () => {
-		const backend = { _tag: "@maple/http/errors/WarehouseQuotaExceededError", message: "quota" }
+	it("preserves self-describing backend and local warehouse errors", () => {
+		const backend = new WarehouseQuotaExceededError({
+			message: "internal",
+			pipeName: "query",
+			setting: "max_memory_usage",
+		})
 		const local = new WarehouseDecodeError({ operation: "decode", message: "invalid input" })
 		expect(normalizeWarehouseError("query", backend)).toBe(backend)
 		expect(normalizeWarehouseError("query", local)).toBe(local)
+		expect(local.error.title).toBe("Query data could not be read")
 	})
 
 	it("wraps an unstructured failure exactly once", () => {

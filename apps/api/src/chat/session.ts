@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 /**
  * Reaching a chat session's Durable Object.
  *

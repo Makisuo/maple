@@ -118,7 +118,7 @@ export class ChatToolCall extends Schema.Class<ChatToolCall>("@maple/ChatToolCal
 	isError: Schema.optionalKey(Schema.Boolean),
 	/**
 	 * True when this call is an approval-gated mutation the agent paused on. The tool did NOT run;
-	 * the client renders an approval card and applies it through `POST /api/chat/apply`.
+	 * the client renders an approval card and applies it through `POST /internal/chat/apply`.
 	 */
 	proposed: Schema.optionalKey(Schema.Boolean),
 	/** Present on a `task` call: the sub-agent run it started, and that run's own transcript. */

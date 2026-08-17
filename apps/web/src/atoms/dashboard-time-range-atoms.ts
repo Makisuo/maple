@@ -2,7 +2,7 @@ import { type ReactNode, createElement, useCallback, useMemo } from "react"
 import { Atom, ScopedAtom, useAtom } from "@/lib/effect-atom"
 import { useOptionalPageRefreshContext } from "@/components/time-range-picker/page-refresh-context"
 import type { TimeRange } from "@/components/dashboard-builder/types"
-import { relativeToAbsolute, snapRangeForCache } from "@/lib/time-utils"
+import { resolveTimeRangeWindow } from "@maple/query-engine"
 
 type ResolvedTimeRange = { startTime: string; endTime: string }
 
@@ -16,28 +16,32 @@ export interface ResolveTimeRangeOptions {
 	snap?: boolean
 }
 
+/**
+ * The signed-in dashboard's view of `resolveTimeRangeWindow` — the same
+ * resolver the share page and the share API use, so a board and its share link
+ * run over the same window. Only the DEV warning and the `"1h"` fallback for a
+ * malformed stored preset are this app's own.
+ *
+ * Every widget on the dashboard keys its fetch off this range, so an unsnapped
+ * `now` hands all of them a fresh cache key on each mount at once — hence the
+ * default snap.
+ */
 export function resolveTimeRange(
 	timeRange: TimeRange,
 	options?: ResolveTimeRangeOptions,
 ): ResolvedTimeRange | null {
-	if (timeRange.type === "absolute") {
-		return { startTime: timeRange.startTime, endTime: timeRange.endTime }
-	}
-
-	// Every widget on the dashboard keys its fetch off this range, so an unsnapped
-	// `now` hands all of them a fresh cache key on each mount at once.
-	const snap = (range: ResolvedTimeRange) => (options?.snap === false ? range : snapRangeForCache(range))
-
-	const resolved = relativeToAbsolute(timeRange.value)
-	if (resolved) return snap(resolved)
+	const resolved = resolveTimeRangeWindow(timeRange, { snap: options?.snap })
+	if (resolved) return resolved
 
 	if (import.meta.env.DEV) {
 		console.warn(
-			`[resolveTimeRange] Invalid relative time range value "${timeRange.value}", falling back to "${DEFAULT_RELATIVE_FALLBACK}"`,
+			`[resolveTimeRange] Invalid time range ${JSON.stringify(timeRange)}, falling back to "${DEFAULT_RELATIVE_FALLBACK}"`,
 		)
 	}
-	const fallback = relativeToAbsolute(DEFAULT_RELATIVE_FALLBACK)
-	return fallback ? snap(fallback) : null
+	return resolveTimeRangeWindow(
+		{ type: "relative", value: DEFAULT_RELATIVE_FALLBACK },
+		{ snap: options?.snap },
+	)
 }
 
 function timeRangesEqual(a: TimeRange, b: TimeRange): boolean {

@@ -13,11 +13,12 @@ import {
 	type FormulaDraft,
 	type QueryRunResult,
 } from "@maple/query-engine/formula-results"
-import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
+import { QueryBuilderFormulaSchema, QueryBuilderQueryDraftSchema } from "@maple/domain/http"
 import {
 	computeBreakdownStats,
 	computeFlags,
 	computeTimeseriesStats,
+	percentScaleAdvice,
 	verdictFromFlags,
 	type ChartFlag,
 	type QueryStats,
@@ -35,11 +36,24 @@ import type {
 	WidgetInspectionSummary,
 	WidgetInspectionVerdict,
 } from "@maple/domain"
+import {
+	dataSourceEndpoint,
+	dataSourceQuerySet,
+	dataSourceRawSql,
+	dataSourceTransform,
+	QUERY_RESULT_ENDPOINTS,
+	RAW_SQL_ENDPOINT,
+} from "@maple/widgets/dashboard"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
-const TIMESERIES_ENDPOINT = "custom_query_builder_timeseries"
-const BREAKDOWN_ENDPOINT = "custom_query_builder_breakdown"
-const RAW_SQL_ENDPOINT = "raw_sql_chart"
+// `RAW_SQL_ENDPOINT` and `QUERY_SHAPE_ENDPOINTS` are used here as LABELS, not as
+// dispatch keys — dispatch goes through `dataSourceRawSql` / `dataSourceQuerySet`,
+// which read v2 and v3 alike. `inspect_chart_data` reports `endpoint` as part of
+// its response contract and a v3 `kind: "query"` data source has no endpoint, so
+// the shape is mapped back onto the legacy name to keep the MCP payload stable
+// for agents that already branch on it. Imported rather than re-declared so a
+// fourth result shape cannot compile in `access.ts` while silently missing here.
+
 const MAX_QUERIES = 5
 // Rows captured for a raw-SQL widget inspection — enough to spot-check, capped
 // so a wide/long result doesn't bloat the response.
@@ -49,7 +63,11 @@ export type DashboardWidget = typeof DashboardWidgetSchema.Type
 
 const QueryBuilderParamsSchema = Schema.Struct({
 	queries: Schema.mutable(Schema.Array(QueryBuilderQueryDraftSchema)),
-	formulas: Schema.optional(Schema.mutable(Schema.Array(Schema.Unknown))),
+	// Typed rather than `Schema.Unknown`: the web timeseries server function — the
+	// path that actually renders these charts — already decodes formulas against
+	// the same required shape, so an inspection that tolerated a partial formula
+	// would report on a chart the renderer refuses to draw.
+	formulas: Schema.optional(Schema.mutable(Schema.Array(QueryBuilderFormulaSchema))),
 })
 
 const decodeQueryBuilderParams = Schema.decodeUnknownEffect(QueryBuilderParamsSchema)
@@ -73,15 +91,13 @@ const decodeQuerySpec = Schema.decodeUnknownEffect(QuerySpec)
 export const collectBlockingBuilderWarnings = Effect.fn("collectBlockingBuilderWarnings")(function* (
 	dataSource: DashboardWidget["dataSource"],
 ) {
-	const endpoint = dataSource.endpoint
-	const isTimeseries = endpoint === TIMESERIES_ENDPOINT
-	const isBreakdown = endpoint === BREAKDOWN_ENDPOINT
+	const querySet = dataSourceQuerySet(dataSource)
+	if (querySet === null) return [] as string[]
+	const isTimeseries = querySet.resultShape === "timeseries"
+	const isBreakdown = querySet.resultShape === "breakdown"
 	if (!isTimeseries && !isBreakdown) return [] as string[]
 
-	const rawParams = dataSource.params
-	if (!rawParams || typeof rawParams !== "object") return [] as string[]
-
-	const decoded = yield* Effect.result(decodeQueryBuilderParams(rawParams))
+	const decoded = yield* Effect.result(decodeQueryBuilderParams({ queries: querySet.queries }))
 	if (Result.isFailure(decoded)) return [] as string[]
 
 	const drafts = decoded.success.queries.filter((q) => q.enabled !== false)
@@ -184,8 +200,8 @@ function statsToData(stats: QueryStats): InspectChartQueryStats {
 	return {
 		rowCount: stats.rowCount,
 		seriesCount: stats.seriesCount,
-		...(stats.firstBucket !== undefined && { firstBucket: stats.firstBucket }),
-		...(stats.lastBucket !== undefined && { lastBucket: stats.lastBucket }),
+		...(stats.firstBucket !== undefined ? { firstBucket: stats.firstBucket } : undefined),
+		...(stats.lastBucket !== undefined ? { lastBucket: stats.lastBucket } : undefined),
 		seriesStats: stats.seriesStats.map(
 			(s): InspectChartSeriesStat => ({
 				name: s.name,
@@ -197,7 +213,7 @@ function statsToData(stats: QueryStats): InspectChartQueryStats {
 				zeroCount: s.zeroCount,
 				negativeCount: s.negativeCount,
 				samples: s.samples.map((sample) => ({
-					...(sample.bucket !== undefined && { bucket: sample.bucket }),
+					...(sample.bucket !== undefined ? { bucket: sample.bucket } : undefined),
 					value: sample.value,
 				})),
 			}),
@@ -208,7 +224,18 @@ function statsToData(stats: QueryStats): InspectChartQueryStats {
 // A real grouping was requested when the draft enables groupBy and lists at
 // least one token that isn't the ungrouped sentinel (`none`/`all`). Used to
 // distinguish an intentional ungrouped chart from a grouping that collapsed.
-function isGroupByRequested(draft: { addOns?: { groupBy?: boolean }; groupBy?: readonly string[] }): boolean {
+/**
+ * Whether a draft actually asks for a grouping.
+ *
+ * `addOns.groupBy` is the gate: a `groupBy: ["service.name"]` with the addOn
+ * absent or false is SILENTLY IGNORED by the spec builder. Exported so the
+ * widget-shape validator can reject a breakdown panel that would render one
+ * slice, rather than leaving it to post-persist inspection.
+ */
+export function isGroupByRequested(draft: {
+	addOns?: { groupBy?: boolean }
+	groupBy?: readonly string[]
+}): boolean {
 	if (!draft.addOns?.groupBy) return false
 	return (draft.groupBy ?? []).some((g) => {
 		const t = g.trim().toLowerCase()
@@ -253,7 +280,7 @@ const metricExistsInCatalog = Effect.fn("metricExistsInCatalog")(function* (
 				start_time: startTime,
 				end_time: endTime,
 				search: metricName,
-				...(metricType ? { metric_type: metricType } : {}),
+				...(metricType ? { metric_type: metricType } : undefined),
 				limit: 200,
 				offset: 0,
 			},
@@ -320,10 +347,10 @@ const inspectRawSqlWidget = Effect.fn("inspectRawSqlWidget")(function* (
 	widget: DashboardWidget,
 	timeRange: InspectWidgetTimeRange,
 ) {
-	const rawParams = widget.dataSource.params as Record<string, unknown> | undefined
-	const sql = typeof rawParams?.sql === "string" ? rawParams.sql : undefined
+	const rawSql = dataSourceRawSql(widget.dataSource)
+	const sql = rawSql !== null && rawSql.sql.length > 0 ? rawSql.sql : undefined
 
-	if (!sql) {
+	if (rawSql === null || !sql) {
 		return {
 			kind: "skipped",
 			reason: "no_params",
@@ -332,9 +359,7 @@ const inspectRawSqlWidget = Effect.fn("inspectRawSqlWidget")(function* (
 	}
 
 	const granularitySeconds =
-		typeof rawParams?.granularitySeconds === "number"
-			? rawParams.granularitySeconds
-			: autoBucketSeconds(timeRange.startTime, timeRange.endTime)
+		rawSql.granularitySeconds ?? autoBucketSeconds(timeRange.startTime, timeRange.endTime)
 
 	const result = yield* runRawSql({
 		tenant,
@@ -393,28 +418,24 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 	function* (input: InspectWidgetInput) {
 		const { tenant, widget, timeRange } = input
 
-		const endpoint = widget.dataSource.endpoint
-		const isTimeseries = endpoint === TIMESERIES_ENDPOINT
-		const isBreakdown = endpoint === BREAKDOWN_ENDPOINT
-
-		if (endpoint === RAW_SQL_ENDPOINT) {
+		if (dataSourceRawSql(widget.dataSource) !== null) {
 			return yield* inspectRawSqlWidget(tenant, widget, timeRange)
 		}
 
-		if (!isTimeseries && !isBreakdown) {
-			return { kind: "unsupported", endpoint } satisfies InspectionOutcome
-		}
+		const querySet = dataSourceQuerySet(widget.dataSource)
+		const isTimeseries = querySet?.resultShape === "timeseries"
+		const isBreakdown = querySet?.resultShape === "breakdown"
 
-		const rawParams = widget.dataSource.params
-		if (!rawParams || typeof rawParams !== "object") {
+		if (querySet === null || (!isTimeseries && !isBreakdown)) {
 			return {
-				kind: "skipped",
-				reason: "no_params",
-				detail: "Widget has no dataSource.params; cannot inspect.",
+				kind: "unsupported",
+				endpoint: dataSourceEndpoint(widget.dataSource) ?? "unknown",
 			} satisfies InspectionOutcome
 		}
 
-		const decodedParamsResult = yield* Effect.result(decodeQueryBuilderParams(rawParams))
+		const decodedParamsResult = yield* Effect.result(
+			decodeQueryBuilderParams({ queries: querySet.queries, formulas: querySet.formulas }),
+		)
 		if (Result.isFailure(decodedParamsResult)) {
 			return {
 				kind: "skipped",
@@ -442,10 +463,8 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 
 		const formulas = decodedParams.formulas ?? []
 		const hasFormulaWarning = formulas.length > 0
-		const transformObj = widget.dataSource.transform as Record<string, unknown> | undefined
-		const reduceToValue = transformObj?.reduceToValue as
-			| { field?: unknown; aggregate?: unknown }
-			| undefined
+		const transformObj = dataSourceTransform(widget.dataSource)
+		const reduceToValue = transformObj?.reduceToValue
 		const hasUnsupportedTransform =
 			transformObj !== undefined && Object.keys(transformObj).some((k) => k !== "reduceToValue")
 
@@ -454,6 +473,9 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		// Base timeseries data captured for formula evaluation. `concurrency: 1`
 		// below makes the push order deterministic with no race.
 		const formulaBaseInputs: QueryRunResult[] = []
+		// Percent-scale advice, collected per query alongside its flag. `concurrency: 1`
+		// below makes the push order deterministic.
+		const percentAdvice: string[] = []
 
 		const queryResults: InspectChartQueryResult[] = yield* Effect.forEach(
 			enabledRawDrafts,
@@ -478,7 +500,7 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 							error: buildResult.error ?? "Failed to build query spec",
 							stats: { rowCount: 0, seriesCount: 0, seriesStats: [] },
 							flags: [...preFlags, ...builderWarningFlags],
-							...(builderWarnings && { builderWarnings }),
+							...(builderWarnings ? { builderWarnings } : undefined),
 						} satisfies InspectChartQueryResult
 					}
 
@@ -491,7 +513,7 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 							error: `Invalid query specification: ${decodedSpecResult.failure.message}`,
 							stats: { rowCount: 0, seriesCount: 0, seriesStats: [] },
 							flags: ["EMPTY", ...builderWarningFlags],
-							...(builderWarnings && { builderWarnings }),
+							...(builderWarnings ? { builderWarnings } : undefined),
 						} satisfies InspectChartQueryResult
 					}
 					const decodedSpec = decodedSpecResult.success
@@ -517,7 +539,7 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 							error: errorMessage,
 							stats: { rowCount: 0, seriesCount: 0, seriesStats: [] },
 							flags: ["EMPTY", ...builderWarningFlags],
-							...(builderWarnings && { builderWarnings }),
+							...(builderWarnings ? { builderWarnings } : undefined),
 						} satisfies InspectChartQueryResult
 					}
 
@@ -548,13 +570,34 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 							: []
 					const preFlags = [...builderWarningFlags, ...emptyGroupingFlags]
 
-					const baseFlags = computeFlags(stats, {
+					// A non-empty `valueField` puts a traces query into
+					// numeric-attribute mode, where the metric-class heuristics do not
+					// apply and small absolute values are ordinary. It has to reach
+					// `computeFlags`, or the ambiguous low-side percent check fires on
+					// exactly the queries it was meant to skip.
+					const numericAggregation =
+						((draft as { valueField?: string }).valueField ?? "").trim().length > 0
+
+					const flagContext = {
 						metric: draft.aggregation,
 						source: draft.dataSource,
-						kind: isTimeseries ? "timeseries" : "breakdown",
-						...(widget.display.unit !== undefined && { displayUnit: widget.display.unit }),
-						...(preFlags.length > 0 && { preFlags }),
+						kind: isTimeseries ? ("timeseries" as const) : ("breakdown" as const),
+						...(widget.display.unit !== undefined
+							? { displayUnit: widget.display.unit }
+							: undefined),
+						...(numericAggregation ? { numericAggregation: true } : undefined),
+					}
+
+					const baseFlags = computeFlags(stats, {
+						...flagContext,
+						...(preFlags.length > 0 ? { preFlags } : undefined),
 					})
+
+					// The advice is derived from the SAME stats and the SAME context as
+					// the flag, because the two disagreeing is how a widget ends up
+					// reported as suspicious with nothing said about what to change.
+					const advice = percentScaleAdvice(stats, flagContext)
+					if (advice !== null && !percentAdvice.includes(advice)) percentAdvice.push(advice)
 
 					// An empty/all-null metrics query might be a typo'd metric name
 					// rather than a real metric with no recent data — check the catalog
@@ -603,9 +646,9 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 						status: "ok",
 						spec: buildResult.query,
 						stats: statsToData(stats),
-						...(reducedValue !== undefined && { reducedValue }),
+						...(reducedValue !== undefined ? { reducedValue } : undefined),
 						flags,
-						...(builderWarnings && { builderWarnings }),
+						...(builderWarnings ? { builderWarnings } : undefined),
 					} satisfies InspectChartQueryResult
 				}),
 			{ concurrency: 1 },
@@ -616,15 +659,11 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		// base timeseries by alias, so only the timeseries endpoint supports them.
 		const formulaEvaluated = hasFormulaWarning && isTimeseries
 		if (formulaEvaluated) {
-			const formulaDrafts: FormulaDraft[] = formulas.map((f, i) => {
-				const obj = (f ?? {}) as Record<string, unknown>
-				return {
-					id: typeof obj.id === "string" ? obj.id : `formula-${i}`,
-					name: typeof obj.name === "string" ? obj.name : `Formula ${i + 1}`,
-					expression: typeof obj.expression === "string" ? obj.expression : "",
-					legend: typeof obj.legend === "string" ? obj.legend : "",
-				}
-			})
+			// No per-field narrowing: `QueryBuilderFormulaSchema` already guarantees
+			// all four strings, and `FormulaDraft` asks for exactly them.
+			const formulaDrafts: FormulaDraft[] = formulas.map(
+				({ id, name, expression, legend }): FormulaDraft => ({ id, name, expression, legend }),
+			)
 
 			for (const fr of buildFormulaResults(formulaDrafts, formulaBaseInputs)) {
 				if (fr.status === "error") {
@@ -649,19 +688,22 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 					)
 					fReduced = reduced.value
 				}
-				const fFlags = computeFlags(fstats, {
-					kind: "timeseries",
-					...(widget.display.unit !== undefined && { displayUnit: widget.display.unit }),
-				})
+				const fFlagContext = {
+					kind: "timeseries" as const,
+					...(widget.display.unit !== undefined ? { displayUnit: widget.display.unit } : undefined),
+				}
+				const fFlags = computeFlags(fstats, fFlagContext)
+				const fAdvice = percentScaleAdvice(fstats, fFlagContext)
+				if (fAdvice !== null && !percentAdvice.includes(fAdvice)) percentAdvice.push(fAdvice)
 
 				queryResults.push({
 					queryId: fr.queryId,
 					queryName: fr.queryName,
 					status: "ok",
 					stats: statsToData(fstats),
-					...(fReduced !== undefined && { reducedValue: fReduced }),
+					...(fReduced !== undefined ? { reducedValue: fReduced } : undefined),
 					flags: fFlags,
-					...(fr.warnings.length > 0 && { builderWarnings: fr.warnings }),
+					...(fr.warnings.length > 0 ? { builderWarnings: fr.warnings } : undefined),
 				})
 			}
 		}
@@ -670,6 +712,11 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		const verdict = verdictFromFlags(allFlags)
 
 		const notes: string[] = []
+		// Percent-scale advice names the token to switch to. The flag alone
+		// ("PERCENT_SCALE_MISMATCH") does not say which direction the error runs,
+		// and getting the direction wrong is the whole problem — so the advice
+		// string, not just the flag, has to reach the caller.
+		for (const advice of percentAdvice) notes.push(advice)
 		if (hasFormulaWarning && !formulaEvaluated) {
 			// Only true for non-timeseries widgets, where formulas don't apply.
 			notes.push(
@@ -691,10 +738,11 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		const data: InspectChartDataData = {
 			widget: {
 				id: widget.id,
-				...(widget.display.title !== undefined && { title: widget.display.title }),
+				...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 				visualization: widget.visualization,
-				endpoint,
-				...(widget.display.unit !== undefined && { displayUnit: widget.display.unit }),
+				endpoint:
+					dataSourceEndpoint(widget.dataSource) ?? QUERY_RESULT_ENDPOINTS[querySet.resultShape],
+				...(widget.display.unit !== undefined ? { displayUnit: widget.display.unit } : undefined),
 				// True only when formulas are present but NOT evaluated (non-timeseries
 				// widgets). Timeseries formulas are now evaluated and appear as their
 				// own entries in `queries`, so there's no warning to raise.
@@ -724,18 +772,23 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 
 function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): WidgetInspectionEntry {
 	if (outcome.kind === "supported") {
+		// The percent-scale note is the one note that tells the caller what to
+		// change, so it rides along on the mutation-tool summary rather than only
+		// appearing in a full `inspect_chart_data` response.
+		const actionableNote = outcome.data.notes.find((note) => note.startsWith('unit "percent'))
 		return {
 			widgetId: widget.id,
-			...(widget.display.title !== undefined && { title: widget.display.title }),
+			...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 			visualization: widget.visualization,
 			verdict: outcome.data.verdict satisfies WidgetInspectionVerdict,
 			flags: [...outcome.data.flags],
+			...(actionableNote !== undefined ? { note: actionableNote } : undefined),
 		}
 	}
 	if (outcome.kind === "unsupported") {
 		return {
 			widgetId: widget.id,
-			...(widget.display.title !== undefined && { title: widget.display.title }),
+			...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 			visualization: widget.visualization,
 			verdict: "unsupported",
 			flags: [],
@@ -757,7 +810,7 @@ function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): 
 					: `Raw SQL returned ${outcome.data.rowCount} row(s).`
 		return {
 			widgetId: widget.id,
-			...(widget.display.title !== undefined && { title: widget.display.title }),
+			...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 			visualization: widget.visualization,
 			verdict,
 			flags: [],
@@ -767,7 +820,7 @@ function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): 
 	if (outcome.kind === "skipped") {
 		return {
 			widgetId: widget.id,
-			...(widget.display.title !== undefined && { title: widget.display.title }),
+			...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 			visualization: widget.visualization,
 			verdict: "skipped",
 			flags: [],
@@ -776,7 +829,7 @@ function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): 
 	}
 	return {
 		widgetId: widget.id,
-		...(widget.display.title !== undefined && { title: widget.display.title }),
+		...(widget.display.title !== undefined ? { title: widget.display.title } : undefined),
 		visualization: widget.visualization,
 		verdict: "error",
 		flags: [],

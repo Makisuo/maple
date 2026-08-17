@@ -1,19 +1,22 @@
 import { useId, useMemo } from "react"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Area, AreaChart } from "recharts"
 
 import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 
-import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler } from "../infra/chart-utils"
+import { CHART_EMPTY_MESSAGE, makeBucketLabeler } from "../infra/chart-utils"
 import { CHART_HEIGHT, ChartCard, ChartCardMessage } from "../infra/primitives/chart-card"
 import type { AnalyticsMetricDescriptor, AnalyticsMetricSource } from "./metrics"
 
 // The page's one accent, same as the KPI sparklines (`SPARK_COLOR.neutral`) and
-// the row tints (`shareTint`). Deliberately not `--chart-1`, which is this same
+// the row bars (`shareBar`). Deliberately not `--chart-1`, which is this same
 // amber only in the dark theme and a blue in the light one — the chart would
 // have disagreed with the tile that selected it, at half of all page loads.
 const PRIMARY_COLOR = "var(--primary)"
@@ -85,7 +88,9 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 		() =>
 			({
 				[PRIMARY]: { label: metric.label, color: PRIMARY_COLOR },
-				...(companion ? { [COMPANION]: { label: companion.label, color: COMPANION_COLOR } } : {}),
+				...(companion
+					? { [COMPANION]: { label: companion.label, color: COMPANION_COLOR } }
+					: undefined),
 			}) satisfies ChartConfig,
 		[metric.label, companion],
 	)
@@ -150,18 +155,12 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 								</linearGradient>
 							))}
 						</defs>
-						<CartesianGrid vertical={false} strokeDasharray={CHART_GRID_DASH} />
-						<XAxis
+						<ChartGrid />
+						<ChartXAxis
 							dataKey="label"
-							tickLine={false}
-							axisLine={false}
-							tickMargin={8}
-							minTickGap={24}
 							className="text-[10px]"
 						/>
-						<YAxis
-							tickLine={false}
-							axisLine={false}
+						<ChartYAxis
 							width={52}
 							// The metric formatters render a zero *headline* as "—" ("no
 							// session ended", not "0s"). On an axis that reading is wrong —

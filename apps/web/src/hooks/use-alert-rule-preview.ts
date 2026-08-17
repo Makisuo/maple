@@ -11,7 +11,7 @@ import {
 	type RuleFormState,
 } from "@/lib/alerts/form-utils"
 import { mapBuilderChartFailure } from "@/lib/alerts/preview-failure"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 const emptyPreviewAtom = Atom.make(Result.initial())
@@ -108,7 +108,7 @@ export function useAlertRulePreview(
 				(error): AlertRulePreviewState => ({
 					preview: null,
 					previewLoading: false,
-					previewError: mapBuilderChartFailure(formatBackendError(error).description),
+					previewError: mapBuilderChartFailure(displayError(error).message),
 				}),
 			)
 			.orElse(

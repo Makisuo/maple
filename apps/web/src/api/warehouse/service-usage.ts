@@ -1,26 +1,16 @@
 import { Clock, Effect, Schema } from "effect"
 import { ServiceName, ServiceUsageRequest } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
-import { formatWarehouseDateTime } from "@maple/query-engine"
-interface ServiceUsage {
-	serviceName: string
-	totalLogs: number
-	totalTraces: number
-	totalMetrics: number
-	dataSizeBytes: number
-	logSizeBytes: number
-	traceSizeBytes: number
-	metricSizeBytes: number
-}
-
-export interface ServiceUsageTotals {
-	logs: number
-	traces: number
-	metrics: number
-	dataSize: number
-}
+import {
+	coerceServiceUsageRows,
+	formatWarehouseDateTime,
+	serviceUsagePreviousTotals,
+	type ServiceUsage,
+	type ServiceUsageTotals,
+} from "@maple/query-engine"
+export type { ServiceUsageTotals }
 
 export interface ServiceUsageResponse {
 	data: ServiceUsage[]
@@ -56,7 +46,7 @@ export const getServiceUsage = Effect.fn("QueryEngine.getServiceUsage")(function
 
 	const result = yield* runWarehouseQuery("serviceUsage", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.serviceUsage({
 				payload: new ServiceUsageRequest({
 					startTime: input.startTime ?? fallback.startTime,
@@ -75,44 +65,10 @@ export const getServiceUsage = Effect.fn("QueryEngine.getServiceUsage")(function
 
 	// When a previous window was requested, the rows carry `previous*` columns;
 	// fold them into a single aggregate for the delta chips so the caller doesn't
-	// need a second request.
+	// need a second request. Row shaping is shared with the share API's plan.
 	const wantsPrevious = input.previousStartTime != null && input.previousEndTime != null
-	const previousTotals: ServiceUsageTotals | undefined = wantsPrevious
-		? result.data.reduce<ServiceUsageTotals>(
-				(acc, row: Record<string, unknown>) => ({
-					logs: acc.logs + Number(row.previousLogCount ?? 0),
-					traces: acc.traces + Number(row.previousTraceCount ?? 0),
-					metrics:
-						acc.metrics +
-						Number(row.previousSumMetricCount ?? 0) +
-						Number(row.previousGaugeMetricCount ?? 0) +
-						Number(row.previousHistogramMetricCount ?? 0) +
-						Number(row.previousExpHistogramMetricCount ?? 0),
-					dataSize: acc.dataSize + Number(row.previousSizeBytes ?? 0),
-				}),
-				{ logs: 0, traces: 0, metrics: 0, dataSize: 0 },
-			)
-		: undefined
-
 	return {
-		previousTotals,
-		data: result.data.map((row: Record<string, unknown>) => ({
-			serviceName: String(row.serviceName ?? ""),
-			totalLogs: Number(row.totalLogCount ?? 0),
-			totalTraces: Number(row.totalTraceCount ?? 0),
-			totalMetrics:
-				Number(row.totalSumMetricCount ?? 0) +
-				Number(row.totalGaugeMetricCount ?? 0) +
-				Number(row.totalHistogramMetricCount ?? 0) +
-				Number(row.totalExpHistogramMetricCount ?? 0),
-			dataSizeBytes: Number(row.totalSizeBytes ?? 0),
-			logSizeBytes: Number(row.totalLogSizeBytes ?? 0),
-			traceSizeBytes: Number(row.totalTraceSizeBytes ?? 0),
-			metricSizeBytes:
-				Number(row.totalSumMetricSizeBytes ?? 0) +
-				Number(row.totalGaugeMetricSizeBytes ?? 0) +
-				Number(row.totalHistogramMetricSizeBytes ?? 0) +
-				Number(row.totalExpHistogramMetricSizeBytes ?? 0),
-		})),
+		previousTotals: wantsPrevious ? serviceUsagePreviousTotals(result.data) : undefined,
+		data: coerceServiceUsageRows(result.data),
 	}
 })

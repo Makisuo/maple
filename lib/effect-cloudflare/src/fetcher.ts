@@ -37,6 +37,7 @@ export interface Fetcher {
 
 export const toCloudflareFetcher = Effect.fnUntraced(function* (fetcher: Fetcher) {
 	const context = yield* Effect.context()
+	// SAFETY: DOM and Workers fetch declarations describe the same Fetch API runtime values.
 	return {
 		fetch: (input, init) =>
 			fetcher
@@ -58,6 +59,7 @@ export const toCloudflareFetcher = Effect.fnUntraced(function* (fetcher: Fetcher
 })
 
 export const fromCloudflareFetcher = (fetcher: cf.Fetcher): Fetcher => {
+	// SAFETY: DOM and Workers request declarations describe the same Fetch API runtime values.
 	const fetch = (request: Request) =>
 		Effect.promise((signal) =>
 			fetcher.fetch(request as any as cf.Request, {
@@ -65,6 +67,7 @@ export const fromCloudflareFetcher = (fetcher: cf.Fetcher): Fetcher => {
 			}),
 		)
 
+	// SAFETY: DOM and Workers response declarations describe the same Fetch API runtime values.
 	return {
 		connect: (address, options) => fromCloudflareSocket(fetcher.connect(address, options)),
 		fetch: (request: HttpClientRequest.HttpClientRequest | HttpServerRequest.HttpServerRequest): any =>
@@ -102,6 +105,7 @@ export const fromCloudflareFetcher = (fetcher: cf.Fetcher): Fetcher => {
 									HttpBody.raw(response),
 								)
 							}
+							// SAFETY: DOM and Workers response declarations describe the same runtime response value.
 							return HttpServerResponse.fromWeb(response as any as Response)
 						}),
 					),

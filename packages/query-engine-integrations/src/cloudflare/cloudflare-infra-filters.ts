@@ -74,7 +74,7 @@ export const CF_FILTERABLE: Record<string, ReadonlyArray<CfFilterKey>> = {
 	[CF_METRIC.requestsByClient]: ["method", "protocol", "deviceType"],
 	[CF_METRIC.firewallEvents]: ["host", "firewallAction", "firewallSource", "firewallRuleId"],
 	[CF_METRIC.dnsQueries]: ["dnsQueryName", "dnsResponseCode"],
-}
+} satisfies Record<string, ReadonlyArray<CfFilterKey>>
 
 export interface CloudflareFilterOpts {
 	readonly hosts?: ReadonlyArray<string>
@@ -109,7 +109,7 @@ const VALUES_BY_KEY: Record<CfFilterKey, keyof CloudflareFilterOpts> = {
 	firewallRuleId: "firewallRuleIds",
 	dnsQueryName: "dnsQueryNames",
 	dnsResponseCode: "dnsResponseCodes",
-}
+} satisfies Record<CfFilterKey, keyof CloudflareFilterOpts>
 
 const FILTER_KEYS = Object.keys(VALUES_BY_KEY) as ReadonlyArray<CfFilterKey>
 
