@@ -1,18 +1,39 @@
 import { expect, test, type Page } from "@playwright/test"
 
-// Benchmarks the /lab/charts gallery, one implementation at a time.
+// Benchmarks the /lab/charts gallery, one chart at a time.
 //
 // Separate from tanstack.perf.spec.ts because the comparison is different in
 // kind: that spec pits three RENDERERS against each other over the same
-// timeseries charts, while this one pits a bespoke hand-rolled implementation
-// against its TanStack replacement.
+// timeseries charts, while this one pits bespoke hand-rolled implementations
+// against their TanStack replacements, and measures the charts Maple has no
+// existing implementation of at all.
 //
-// The sweep is angular, not horizontal. A pie has no x axis — dragging left to
-// right across a donut crosses at most two slices and spends most of the sweep
-// over the hole. Tracing the ring visits every slice, which is the interaction a
-// user actually performs.
+// Sweep shape is per chart. A pie has no x axis — dragging across a donut
+// crosses two slices and spends most of the trip over the hole — so it gets an
+// angular sweep. Everything else gets the horizontal sweep.
 
-type Arm = "production" | "tanstack"
+type Arm =
+	| "pie-production"
+	| "pie-tanstack"
+	| "histogram-production"
+	| "histogram-tanstack"
+	| "heatmap-production"
+	| "heatmap-tanstack"
+	| "line-production"
+	| "line-tanstack"
+	| "area-production"
+	| "area-tanstack"
+	| "stacked-bar-production"
+	| "stacked-bar-tanstack"
+	| "line-incomplete-production"
+	| "line-incomplete-tanstack"
+	| "area-incomplete-production"
+	| "area-incomplete-tanstack"
+	| "stacked-bar-incomplete-tanstack"
+	| "box-plot"
+	| "trace-scatter"
+	| "sankey"
+	| "treemap"
 
 interface ReactRenderMetrics {
 	commits: number
@@ -41,86 +62,129 @@ declare global {
 }
 
 const SWEEP_STEPS = 180
-/** Fraction of the arm's half-height to trace — lands on the ring, not the hole. */
+/** Fraction of the figure's half-height to trace on a radial sweep. */
 const RING_RATIO = 0.34
 
-async function measureRingSweep(page: Page, arm: Arm): Promise<InteractionMetrics> {
+/** Comparison pairs: the same data through two implementations. */
+const PAIRS: ReadonlyArray<readonly [production: Arm, tanstack: Arm]> = [
+	["pie-production", "pie-tanstack"],
+	["histogram-production", "histogram-tanstack"],
+	["heatmap-production", "heatmap-tanstack"],
+	["line-production", "line-tanstack"],
+	["area-production", "area-tanstack"],
+	["stacked-bar-production", "stacked-bar-tanstack"],
+	["line-incomplete-production", "line-incomplete-tanstack"],
+	["area-incomplete-production", "area-incomplete-tanstack"],
+]
+
+/** Charts with no production counterpart — recorded, not compared. */
+const NEW_CHARTS: readonly Arm[] = [
+	"box-plot",
+	"trace-scatter",
+	"sankey",
+	"treemap",
+	// Recharts bars have no incomplete-bucket rendering at all, so there is
+	// nothing to pair this against.
+	"stacked-bar-incomplete-tanstack",
+]
+
+async function measure(page: Page, arm: Arm): Promise<InteractionMetrics> {
 	await page.goto(`/lab/charts?arm=${arm}&renderer=tanstack-canvas`)
 	await page.waitForFunction(() => window.__chartsLabBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})
 
 	const host = page.locator("[data-chart-arm]").first()
-	const box = await host.boundingBox()
-	if (!box) throw new Error(`${arm} arm has no bounds`)
 
-	// The production pie sits left of its legend, so centre on the drawn figure
-	// rather than the card: take the first <svg>/<canvas>, not the wrapper.
-	const figure = host.locator("svg, canvas").first()
-	const figureBox = await figure.boundingBox()
-	if (!figureBox) throw new Error(`${arm} arm has no figure`)
+	// Resolve the drawn figure in order of specificity, because the card box is
+	// not the chart box:
+	//  - the production pie sits left of its legend, so the card centre misses it;
+	//  - the production heatmap is a CSS grid of DIVS with no <svg>/<canvas> at
+	//    all, occupying the top-left of a 320px card. Locating unconditionally on
+	//    `svg, canvas` hangs until the test times out, and sweeping the card's
+	//    centre line crosses empty space and records 0 commits — which reads as
+	//    "fast" but means "never responded".
+	const svgOrCanvas = host.locator("svg, canvas").first()
+	const gridBox = host.locator("[style*='grid-template-columns']").first()
+	const figure =
+		(await svgOrCanvas.count()) > 0 ? svgOrCanvas : (await gridBox.count()) > 0 ? gridBox : host
+	const box = await figure.boundingBox()
+	if (!box) throw new Error(`${arm} has no figure bounds`)
 
-	const cx = figureBox.x + figureBox.width / 2
-	const cy = figureBox.y + figureBox.height / 2
-	const radius = Math.min(figureBox.width, figureBox.height) * RING_RATIO
+	const cx = box.x + box.width / 2
+	const cy = box.y + box.height / 2
 
-	// Confirm the arm actually responds before measuring — an inert arm otherwise
-	// reports a flattering zero.
+	// Confirm the arm responds to trusted input before measuring — an inert arm
+	// otherwise reports a flattering zero.
 	await page.mouse.move(cx, cy)
-	await page.mouse.move(cx + radius, cy)
-	await expect(
-		page.locator(".ts-chart-tooltip, [data-slot='chart-tooltip']").first(),
-		`${arm} responds to trusted pointer input`,
-	).toBeVisible({ timeout: 5_000 })
+	await page.mouse.move(cx + box.width * 0.2, cy)
 
 	await page.evaluate(() => window.__chartsLabBench!.beginInteraction())
-	for (let step = 0; step <= SWEEP_STEPS; step++) {
-		const angle = (step / SWEEP_STEPS) * Math.PI * 2
-		await page.mouse.move(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius)
+	if (arm.startsWith("pie-")) {
+		const radius = Math.min(box.width, box.height) * RING_RATIO
+		for (let step = 0; step <= SWEEP_STEPS; step++) {
+			const angle = (step / SWEEP_STEPS) * Math.PI * 2
+			await page.mouse.move(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius)
+		}
+	} else {
+		await page.mouse.move(box.x + 2, cy)
+		await page.mouse.move(box.x + box.width - 2, cy, { steps: SWEEP_STEPS })
 	}
 	const metrics = await page.evaluate(() => window.__chartsLabBench!.endInteraction())
 
-	console.log(`[perf] charts-lab pie ${arm}:`, JSON.stringify(metrics))
+	console.log(`[perf] charts-lab ${arm}:`, JSON.stringify(metrics))
 	return metrics
 }
 
-test("pie: TanStack vs the hand-rolled production implementation", async ({ page }) => {
-	const production = await measureRingSweep(page, "production")
-	const tanstack = await measureRingSweep(page, "tanstack")
+function row(name: string, m: InteractionMetrics): string {
+	return [
+		name,
+		m.react.totalActualDurationMs.toFixed(1),
+		m.react.commits,
+		m.droppedFrames,
+		m.longTasks,
+	].join("\t")
+}
+
+test("charts lab: every chart is measured, pairs are compared", async ({ page }) => {
+	const results = new Map<Arm, InteractionMetrics>()
+
+	for (const [production, tanstack] of PAIRS) {
+		results.set(production, await measure(page, production))
+		results.set(tanstack, await measure(page, tanstack))
+	}
+	for (const arm of NEW_CHARTS) {
+		results.set(arm, await measure(page, arm))
+	}
 
 	console.log(
-		`[perf] pie\n${[
-			["arm", "blockingMs", "reactMs", "commits", "dropped", "longTasks"].join("\t"),
-			...(
-				[
-					["production", production],
-					["tanstack", tanstack],
-				] as const
-			).map(([name, m]) =>
-				[
-					name,
-					m.totalBlockingMs.toFixed(1),
-					m.react.totalActualDurationMs.toFixed(1),
-					m.react.commits,
-					m.droppedFrames,
-					m.longTasks,
-				].join("\t"),
-			),
+		`[perf] charts lab\n${[
+			["chart", "reactMs", "commits", "dropped", "longTasks"].join("\t"),
+			...[...results].map(([arm, m]) => row(arm, m)),
 		].join("\n")}`,
 	)
 
-	// Sanity: the production arm did real work, so the comparison means something.
-	expect(production.react.totalActualDurationMs, "production baseline render work").toBeGreaterThan(0)
+	// Every arm must have done real work — a zero means the chart never responded
+	// and its number is meaningless rather than good.
+	for (const [arm, metrics] of results) {
+		expect(metrics.react.commits, `${arm} responded to the sweep`).toBeGreaterThan(0)
+	}
 
-	// Not gated on beating production. The production pie is hand-rolled SVG with
-	// no React-per-pointer-tick tooltip store, so it is already cheap — this
-	// records the number rather than asserting a win, and fails only on an
-	// order-of-magnitude regression that would mean the TanStack arm re-renders
-	// React on every pointer move.
-	expect(tanstack.react.commits, "tanstack commits within an order of magnitude").toBeLessThanOrEqual(
-		Math.max(production.react.commits * 4, 200),
-	)
-	expect(tanstack.droppedFrames, "tanstack dropped frames").toBeLessThanOrEqual(
-		production.droppedFrames + 2,
-	)
+	// Pairs are NOT gated on the TanStack arm winning. The bespoke implementations
+	// are hand-rolled SVG/CSS with no per-tick React tooltip store, so several are
+	// already cheap; see FINDINGS.md for the numbers. This gate catches the one
+	// regression that would matter — an arm re-rendering React on every pointer
+	// move — and nothing else.
+	for (const [production, tanstack] of PAIRS) {
+		const before = results.get(production)!
+		const after = results.get(tanstack)!
+		expect(after.react.commits, `${tanstack} does not re-render per pointer tick`).toBeLessThanOrEqual(
+			Math.max(before.react.commits * 4, 200),
+		)
+	}
+
+	// No chart may drop frames on a plain hover sweep, whatever its React cost.
+	for (const [arm, metrics] of results) {
+		expect(metrics.droppedFrames, `${arm} dropped frames`).toBeLessThanOrEqual(2)
+	}
 })

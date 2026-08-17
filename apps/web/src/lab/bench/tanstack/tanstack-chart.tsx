@@ -1,3 +1,4 @@
+import { cn } from "@maple/ui/lib/utils"
 import { CanvasChart, Chart as SvgChart } from "@tanstack/charts/react/tooltip"
 import type { ChartTooltipBodyRenderContext } from "@tanstack/charts/react/tooltip"
 import type { ChartValue, DomChartDefinition } from "@tanstack/charts"
@@ -63,7 +64,13 @@ export function TanstackChartFrame<TDatum, TXValue extends ChartValue, TYValue e
 	const ChartComponent = renderer === "tanstack-canvas" ? CanvasChart : SvgChart
 
 	return (
-		<div ref={ref} data-bench-chart={renderer} className={className}>
+		// `select-none`: a chart is a figure, not prose. Without it, dragging the
+		// pointer across one — which is exactly what hovering a timeseries looks
+		// like — starts a text selection and paints the browser's selection
+		// highlight over the whole `<svg>`/`<canvas>`. Recharts charts sit inside
+		// `ChartContainer`, which has never had this problem because its content is
+		// unselectable by construction.
+		<div ref={ref} data-bench-chart={renderer} className={cn("select-none", className)}>
 			{size ? (
 				<ChartComponent
 					definition={definition}

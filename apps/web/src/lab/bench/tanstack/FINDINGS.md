@@ -114,6 +114,110 @@ Two things fell out of building it:
   at all (75.2ms / 146 commits, versus 64–80 / 146 before). `tanstack.perf.spec.ts` pins the 435
   count so an upstream fix gets noticed.
 
+## The chart gallery (`/lab/charts`, `test:perf:charts`)
+
+Ten TanStack charts (seven when the table below was measured), eight of them beside the production
+implementation they'd replace. All render with zero page errors. Ring sweep for the pies, horizontal sweep for the rest, 180 steps.
+
+| chart                       | React ms | commits | verdict                                 |
+| --------------------------- | -------- | ------- | --------------------------------------- |
+| pie — production            | 22.1     | 18      |                                         |
+| **pie — tanstack**          | **4.5**  | **9**   | cheaper, but both trivial — **no case** |
+| histogram — production      | 202.0    | 382     |                                         |
+| **histogram — tanstack**    | **6.3**  | **11**  | **32× less React work — the real win**  |
+| heatmap — production        | 15.4     | 14      |                                         |
+| **heatmap — tanstack**      | **2.6**  | **5**   | cheaper, and −325 lines                 |
+| line — production           | 228.0    | 410     |                                         |
+| **line — tanstack**         | **39.8** | **61**  | **5.7× less React work**                |
+| area — production           | 225.0    | 410     |                                         |
+| **area — tanstack**         | **38.8** | **64**  | **5.8× less React work**                |
+| stacked bar — production    | 195.6    | 374     |                                         |
+| **stacked bar — tanstack**  | **20.6** | **24**  | **9.5× less React work**                |
+| line + partial — prod       | 222.7    | 410     |                                         |
+| **line + partial — ts**     | **36.7** | **61**  | dashed tail is free                     |
+| area + partial — prod       | 216.5    | 410     |                                         |
+| **area + partial — ts**     | **48.5** | **64**  | dashed tail is free                     |
+| box plot — NEW              | 8.5      | 14      | no prior implementation                 |
+| trace scatter — NEW         | 59.3     | 169     | 5,000 spans → ~1,900 hex bins           |
+| sankey — NEW                | 8.5      | 17      | no prior implementation                 |
+| treemap — NEW               | 5.7      | 9       | no prior implementation                 |
+| stacked bar + partial — NEW | 22.7     | 24      | recharts bars have no equivalent        |
+
+21 arms, 41.2s, **zero dropped frames and zero long tasks on every one**. Re-measured after the
+2026-08-18 rendering fixes below, which changed the box-plot fixture and the trace-scatter domain,
+and after the earlier sizing fix — the production charts previously rendered clipped, so the first
+table this file carried was not a fair comparison.
+
+**The timeseries arms are the second real consolidation case, after the histogram.** All three
+production timeseries charts sit at 374–410 commits, the same per-pointer-tick React tooltip
+pattern the histogram shows; the TanStack arms land at 24–64. Note the split within those 61–64:
+that is roughly **one commit per bucket crossed** (60 buckets), which is the floor for a tooltip
+that changes content — Recharts spends ~7 commits per bucket for the same information. The stacked
+bar's 24 is lower still because 24 buckets is all there is to cross.
+
+**Turning the dashed tail on costs nothing.** `line-incomplete` (36.7ms / 61) against `line`
+(39.8 / 61) and `area-incomplete` (48.5 / 64) against `area` (38.8 / 64) — identical commit counts,
+render time inside run-to-run noise. Three extra marks over a six-row slice do not register.
+
+**The histogram is the strongest consolidation case among the three original pairs, not the pie.** 382 commits vs 11 is the same
+structural gap as the overview charts: Recharts drives its tooltip through React on every pointer
+tick. The pie's 18-vs-9 is slice-transition-driven in both arms and means nothing.
+
+Two measurement traps this shook out, both now handled in the spec:
+
+- The production heatmap draws **no `<svg>` or `<canvas>`** — it's a CSS grid of divs. Locating on
+  `svg, canvas` hangs until the test times out.
+- Its grid occupies the top-left of a 320px card, so sweeping the _card's_ centre line crosses
+  empty space and records **0 commits** — which reads as "fastest chart in the table" and actually
+  means "never responded". The `commits > 0` assertion exists to catch exactly this.
+
+### Parity gaps in the ports (visible in the gallery)
+
+- **Pie**: slice order and colours differ. Production uses `resolveSeriesColors(name)` — stable per
+  series name; the spike indexes `--chart-1..5` positionally.
+- **Heatmap**: y-axis order is inverted (production runs `300ms+` at top; the spike runs `0-100ms`).
+- **Line / area / stacked bar**: colours differ, and the cause is upstream of the port. The
+  query-builder charts rename every series to `s1..sN` before colouring, so they always get the
+  generic palette; the spikes use the semantic tokens the real chart would (`--chart-p50/p95/p99`,
+  `--chart-throughput/error`). Geometry is identical — compare shapes, not hues.
+
+### `clip` is off by default, and marks with extent paint outside the plot
+
+`ChartSpecBase.clip` defaults to **false**, so marks are not bounded to the plot rect. A hexagon is
+drawn around its bin _centre_, so `hexbin` bins on the left edge painted half a hex over the y-axis
+tick labels. `clip: true` fixes it.
+
+Two follow-ons worth knowing:
+
+- Clipping alone leaves a clipped edge mark sitting ~3px **into** the labels, because the plot rect
+  butts straight against them. Tick `padding` is what buys the gap (measured: −3px overlap → +3px
+  gap at `padding: 10`).
+- This only affects marks whose shape extends around a point. Audited all seven: `hexbin` was the
+  only one. `rect`/`cell` are bounded by their band or interval, `boxY`'s glyphs sit inside their
+  category, and sankey/treemap are laid out in final pixels. So `clip` is worth setting on
+  point-extent marks specifically, not blanket-enabling.
+
+### Two gallery-harness bugs that looked like chart defects
+
+Both were mine, and both initially got written up here as production problems. Recorded because
+either would mislead the next person reading a side-by-side.
+
+1. **Charts bled across cards.** `ChartContainer` deliberately sets
+   `[&_.recharts-surface]:overflow-visible` so axis labels can escape the SVG box; production
+   clamps that one level up at `CardContent`'s `overflow-hidden` (`widget-shell.tsx:213`). The
+   gallery card had no clamp, so recharts labels landed on the next chart. **This is not a
+   production defect** — I reported it as one.
+2. **The production histogram appeared to have no x axis.** `ChartContainer` also sets
+   `aspect-video`, and `MetricsGrid` cancels it with `className="h-full w-full aspect-auto"`
+   (`metrics-grid.tsx:127`). Without that class the chart sizes itself 16:9 — taller than a 320px
+   card — and the axis is pushed out and clipped. The gallery now passes the same class, and the
+   labels render fully inside the card, evenly spaced and **not** colliding. An earlier note here
+   claiming they collide was wrong.
+
+The `split("-")[0]` bug in `query-builder-histogram-chart.tsx:122` is unaffected by either — it is
+a code-level fact (a negative lower bound yields `""`, and the `||` fallback then prints the whole
+unsplit range), confirmed by reading rather than by rendering.
+
 ### Polar / pie spike (2026-08-17, `/lab/charts`)
 
 `polar` + `pie` + `radialArc` **works**: a donut paints under both renderers, at exactly **one
@@ -153,6 +257,111 @@ distinction matters when deciding where the SVG renderer is still acceptable.
   infers from the data. Pass an instance _only_ to pin a domain — `scaleLinear().domain([0, max])`.
 - **No zero anchor.** Recharts' `YAxis` anchors a numeric domain at 0; TanStack's inferred linear
   domain starts at the data minimum, which clipped the p50 line. Needs an explicit configured domain.
+
+### Timeseries arms: line, area, stacked bar, and the dashed partial tail (2026-08-17)
+
+Added to `/lab/charts` as five pairs plus one solo arm, over
+`apps/web/src/lab/charts/timeseries-data.ts`. Two findings, one in each direction.
+
+**1. The `_incomplete` twin-column trick is a Recharts workaround, not a requirement.**
+
+`markIncompleteSegments` (`packages/ui/src/lib/incomplete-buckets.ts`) rewrites every row into
+`key` / `key_incomplete` column pairs and duplicates one value into both to bridge the join. It has
+to: a `<Line dataKey>` is a **string**, so one series can carry exactly one dash style, and a
+solid-then-dashed line is therefore two series.
+
+TanStack channels are accessors, so the same picture is **two marks over two slices of the same
+array** — `rows.slice(0, first)` and `rows.slice(first - 1)`, where the shared row at `first - 1`
+_is_ the bridge point. No row is copied, no column is invented, and the row type stays closed.
+`splitAtFirstPartial` is nine lines against that function's ninety-seven. `lineY.strokeDasharray`
+being a plain `string` is what makes it work; `areaY` has none at all (bug 4's neighbour), so a
+dashed area edge is still a faded fill plus a dashed `lineY` — the same composition the Recharts
+arm uses, for the same reason.
+
+**2. `barY.strokeDasharray` is a per-datum `VisualChannel` — the one place TanStack is strictly
+more capable.** A partial bucket's bars dash inline, no twin series and no second stack id.
+Compare `query-builder-area-chart.tsx:421-443`, which needs its own `stackId: "b"` to reproduce
+the stack geometry for its dashed twin, and `query-builder-bar-chart.tsx`, which never calls
+`useIncompleteSegments` at all — **Recharts bars have no partial-bucket rendering in Maple today**.
+That is why `stacked-bar-incomplete-tanstack` has no production counterpart to pair against.
+
+Also: `barY` stacks through the `z` channel over **long-form** rows (one row per bucket per
+series), where Recharts needs a `<Bar dataKey>` per service over wide rows. Adding a series becomes
+a data change instead of a JSX change.
+
+**Fixture note — the partial fixtures are anchored to wall-clock `now`, deliberately.**
+`QueryBuilderLineChart` rebuilds its rows as `{bucket, s1..sN}` before calling
+`useIncompleteSegments`, so a `partial` flag set upstream never reaches `markIncompleteSegments`
+(and passing it through would register `partial` as an extra series). The production arm can only
+infer partiality from the spacing + wall-clock heuristic, and a fixed 2026 timestamp exercises
+nothing. `timeseries-data.ts` evaluates that same predicate against one captured `NOW_MS`, so both
+arms classify the same buckets and the dashed tail starts at the same one. The plain arms keep the
+fixed past anchor and stay fully deterministic.
+
+**Bug 3 has regressed at 0.14.0.** The note above says `whenFocused` "sizes the unfocused ones to
+zero". It no longer does: every emitted circle carries `r="3.5"` — verified on both the new arms
+(120 circles, all 3.5) and the existing bench arms (290, all 3.5). The lines are visibly beaded at
+rest under the SVG renderer. Canvas paints the same thing without the DOM, so the cost claim is
+unchanged, but the _visual_ is now wrong rather than merely wasteful.
+
+**Measured.** `test:perf:charts` now covers 21 arms (41.2s); the numbers are in the table above.
+The headline: the three production timeseries charts are 195–228ms / 374–410 commits against
+20–40ms / 24–64, and switching the dashed tail on is free.
+
+### Six rendering defects found by looking at the gallery (2026-08-18)
+
+Every one of these was invisible in the perf numbers and obvious on screen. Four are library
+constraints worth carrying into a migration decision; two were ours.
+
+**1. `lineY` forces round line caps, and it silently eats dash gaps.** `dist/line.js:123-124` sets
+`lineCap: "round"` / `lineJoin: "round"` on every node, and `LineYOptions` exposes no `lineCap`. A
+round cap adds `strokeWidth / 2` of ink to BOTH ends of every dash, so Recharts' `"4 4"` — crisp
+there, because `<Line>` leaves the default butt cap — paints `4 + w` on against a `4 - w` gap here.
+At a 2.5px stroke that is 6.5px of ink and a 1.5px gap: the incomplete tail rendered as a wobbly
+solid line. `roundCapDasharray(on, off, strokeWidth)` in `chart-shared.tsx` takes the cap out of the
+dash and gives it to the gap. **Anyone porting a dashed Recharts series must do this conversion or
+the dash disappears.**
+
+**2. `radius` on a stacked `barY` cannot round only the outer corners.** It is a flat `number`
+handed to one rect node per SEGMENT (`dist/bar.js:142`), and the renderer's `beginRoundedRect`
+(`dist/canvas.js:637`) applies it to all four. So a stack is either rounded at every interior seam
+or square throughout — there is no per-corner or per-stack-position form. Recharts' `<Bar radius>`
+takes `[tl, tr, br, bl]`, so this is a genuine capability loss. The spike is square.
+
+**3. `boxY`'s `inset` is not the width knob it appears to be.** It forwards to the internal `barY`'s
+inset, which the renderer clamps: raising it from 10 to 26 moved the drawn box by about two pixels
+(measured, 92.29px wide either way). `paddingInner` on a **pinned** band scale is what actually
+sizes a box — 0.55 took it to 65.73px. The cost is that the domain must then be supplied by hand.
+
+**4. `clip: true` is not enough for point-extent marks; the domain has to be padded.** The earlier
+note here says `clip` fixed `hexbin` painting over the axis labels. It stopped the overpaint, but
+the edge bins are still CENTRED on the plot edge, so the chart ended in a column of half-hexagons
+that were visibly truncated and yet still hit-tested and still opened a tooltip — the shape lied
+about the bin and the target no longer matched the paint. Padding the x domain (~1.6% of span,
+roughly one bin) moves those centres inward. `clip` goes back to being a backstop.
+
+**5. A chart is a figure, not prose.** Neither renderer sets `user-select`, so dragging across a
+chart — which is what hovering a timeseries looks like — started a text selection and painted the
+browser's selection highlight over the whole `<svg>`/`<canvas>`. `select-none` on
+`TanstackChartFrame`. Recharts never showed this because `ChartContainer`'s content is unselectable
+by construction.
+
+**6. `"currentColor"` is not a portable fill.** The heatmap's hover ring used it: it resolves by
+inheritance on SVG and resolves to nothing on canvas, so the affordance silently differed between
+the two arms. Every colour in a chart spec has to be a resolved literal — which is the entire reason
+`usePlotColors` exists, and the rule was already written down two sections above. (The same state
+also dropped `inset` to 0 on hover, growing the cell by a pixel a side, so the ring arrived with a
+size jump that read as the grid twitching.)
+
+Ours, not the library's: the box plot's fixture. It summed sine terms for the spread and then
+multiplied every 17th sample by ~2.6 to manufacture outliers, which gave every operation a narrow,
+near-symmetric IQR while pushing the axis maximum to ~4× the tallest box — every box collapsed to a
+few pixels and the chart read as a bar chart. Replaced with a seeded lognormal (the generator
+`trace-scatter-spike.tsx` already had), which produces its own outliers past 1.5×IQR, plus a **log
+y axis**: latency across operations spans orders of magnitude, and on a zero-anchored linear axis
+the fast operations' boxes sit on the baseline while the slow one's outliers set the scale. The
+shared `createLogScale` in `lab/charts/log-scale.ts` is that scale — `charts-scales` still ships no
+log scale, so this lab now has one implementation instead of the two copies it had grown.
 
 ## 3. Migration cost for the other 46 files
 

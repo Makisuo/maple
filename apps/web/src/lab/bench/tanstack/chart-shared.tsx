@@ -33,6 +33,27 @@ export function verticalGradient(
 }
 
 /**
+ * A dasharray that actually reads as dashes under a `lineY` mark.
+ *
+ * `lineY` hard-codes `lineCap: "round"` / `lineJoin: "round"` on every line node
+ * it emits (`dist/line.js:123-124`) and `LineYOptions` exposes no `lineCap`, so
+ * a semicircular cap of radius `strokeWidth / 2` is added to BOTH ends of every
+ * dash. Recharts' `<Line>` leaves the default butt cap, so the `"4 4"` that
+ * reads crisply there paints `4 + strokeWidth` of ink against a
+ * `4 - strokeWidth` gap here — at a 2.5px stroke that is 6.5px on, 1.5px off,
+ * which is why a ported incomplete tail reads as a wobbly solid line instead of
+ * a dashed one.
+ *
+ * The fix is geometry, not taste: take the cap out of the dash and give it to
+ * the gap. `on` and `off` are the widths you want to SEE.
+ */
+export function roundCapDasharray(on: number, off: number, strokeWidth: number): string {
+	// A zero-length dash under a round cap still paints a dot, which is the
+	// degenerate case worth keeping rather than collapsing to nothing.
+	return `${Math.max(0.01, on - strokeWidth)} ${off + strokeWidth}`
+}
+
+/**
  * The dashed vertical cursor, matching what Recharts draws: `ChartContainer`
  * styles `.recharts-tooltip-cursor` as `stroke-border` with a `3 3` dasharray.
  *
