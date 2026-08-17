@@ -34,8 +34,10 @@ project.yml                  XcodeGen source of truth; Maple.xcodeproj is genera
 Config/                      xcconfigs; Secrets.xcconfig is gitignored
 Maple/App                    entry point, auth gate, build-time config
 Maple/Auth                   token provider, session state machine, org picker
+Maple/DesignSystem           tokens, type scale, service colours, shared primitives
 Maple/Features               services and issues screens
-Maple/Components             LoadableView, formatting, shared UI
+Maple/Components             LoadableView, formatting
+Maple/Resources/Fonts        Geist + Geist Mono (SIL OFL)
 Packages/MapleAPI            the generated API client — builds and tests with plain `swift test`
 ```
 
@@ -88,6 +90,44 @@ session token's active-organization claim, and rejects a token without one
 
 A 401 whose message mentions an active organization routes to the org picker,
 not to sign-out — the user is still authenticated.
+
+## Design system
+
+`Maple/DesignSystem` ports the product's visual language rather than inventing a
+native one — see `DESIGN.md` and `packages/ui/src/styles/tokens.css`.
+
+- **`Tokens.swift`** holds the palette in OKLCH, the same numbers as the
+  stylesheet, converted to sRGB at runtime so a token can be diffed against the
+  CSS by eye. Light and dark both resolve from one declaration.
+- **`Typography.swift`** — the defining choice is that **Geist Mono is the body
+  font**, with proportional Geist reserved for page titles and empty states.
+  That inversion does most of the identity work; don't undo it. The TTFs are
+  instanced from the `@fontsource-variable` packages and shipped under
+  `Maple/Resources/Fonts` with the SIL OFL licence.
+- **`ServiceColor.swift`** reproduces `packages/ui/src/lib/colors.ts` bit for
+  bit, including its 32-bit signed hash overflow, so a service is the same
+  colour on the phone as in a browser tab.
+- **`Primitives.swift`** carries the badge, health-dot, stat-tile, hairline, and
+  detail-row patterns, plus the error-rate and latency tone thresholds from
+  `latency-tone.ts` and `service-health.ts`.
+
+Conventions worth keeping: hairline borders (never 2px), depth from tonal steps
+rather than shadows, `tabularNumbers()` on every numeral, uppercase only for the
+`SectionLabel` idiom, skeletons instead of spinners, and the amber primary at
+most once per screen.
+
+To change a colour, change it in `tokens.css` first and mirror it here.
+
+## A note on Package.resolved
+
+`Packages/MapleAPI/Package.resolved` is committed and holds every pin including
+Clerk's, because `xcodebuild` resolves the app's dependencies through it. Running
+`swift test` in the package alone rewrites it to just the package's own
+dependencies. Both are valid; the committed superset is the reproducible one, so
+don't commit the shrunken version if a `swift test` run leaves it dirty.
+
+The durable Clerk pin is `exactVersion` in `project.yml` — the app-level resolved
+file lives inside the generated `.xcodeproj`, which is gitignored.
 
 ## Testing
 

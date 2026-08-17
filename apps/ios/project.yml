@@ -24,7 +24,10 @@ packages:
     path: Packages/MapleAPI
   Clerk:
     url: https://github.com/clerk/clerk-ios
-    from: 1.3.9
+    # Exact, not \`from\`: the app-level Package.resolved lives inside the
+    # generated .xcodeproj, which is gitignored, so this line is the only
+    # durable pin. Bump deliberately.
+    exactVersion: 1.3.9
 
 settings:
   base:
@@ -68,6 +71,19 @@ targets:
       properties:
         CFBundleDisplayName: Maple
         CFBundleShortVersionString: "0.1.0"
+        # Geist Mono is the body voice and proportional Geist the display face —
+        # the inversion that defines Maple's look. See Typography.swift.
+        # Bare filenames: Xcode flattens resources to the bundle root, so a
+        # "Fonts/" prefix here silently fails to register and SwiftUI falls back
+        # to the system font.
+        UIAppFonts:
+          - Geist-Regular.ttf
+          - Geist-SemiBold.ttf
+          - GeistMono-Regular.ttf
+          - GeistMono-Medium.ttf
+          - GeistMono-SemiBold.ttf
+        # DESIGN.md: "terminal-native, dark by default".
+        UIUserInterfaceStyle: Dark
         CFBundleVersion: "1"
         ITSAppUsesNonExemptEncryption: false
         # Injected from Config/Secrets.xcconfig so no key is baked into source.

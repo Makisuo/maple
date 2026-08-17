@@ -27,8 +27,8 @@ final class IssuesListModel {
 		self.session = session
 	}
 
-	func load(showSpinner: Bool = true) async {
-		if showSpinner && !state.hasContent { state = .loading }
+	func load(showPlaceholder: Bool = true) async {
+		if showPlaceholder && !state.hasContent { state = .loading }
 		nextCursor = nil
 
 		do {
@@ -39,7 +39,7 @@ final class IssuesListModel {
 		} catch is CancellationError {
 		} catch let error as MapleAPIError {
 			if await session.handle(error) {
-				await load(showSpinner: false)
+				await load(showPlaceholder: false)
 			} else {
 				state = .failed(error)
 			}
@@ -73,14 +73,16 @@ struct IssuesListView: View {
 
 	var body: some View {
 		NavigationStack {
-			Group {
+			ZStack {
+				Token.background.ignoresSafeArea()
 				if let model {
 					content(model)
 				} else {
-					ProgressView()
+					SkeletonList(rowHeight: 56)
 				}
 			}
 			.navigationTitle("Issues")
+			.toolbarTitleDisplayMode(.inlineLarge)
 			.toolbar {
 				if let model {
 					ToolbarItem(placement: .topBarTrailing) {
@@ -109,31 +111,32 @@ struct IssuesListView: View {
 			emptyMessage: model.query.actionableOnly
 				? "Nothing needs attention right now."
 				: "No error issues match these filters.",
+			skeletonRowHeight: 56,
 			retry: { Task { await model.load() } }
 		) { issues in
-			List {
-				ForEach(issues, id: \.id) { issue in
-					NavigationLink(value: IssueRoute.detail(id: issue.id)) {
-						IssueRow(issue: issue, showsService: true)
+			ScrollView {
+				LazyVStack(spacing: 0) {
+					ForEach(issues, id: \.id) { issue in
+						NavigationLink(value: IssueRoute.detail(id: issue.id)) {
+							IssueRow(issue: issue, showsService: true)
+						}
+						.buttonStyle(RowButtonStyle())
+						Hairline()
 					}
-				}
 
-				if model.canLoadMore {
-					HStack {
-						Spacer()
-						ProgressView()
-						Spacer()
+					if model.canLoadMore {
+						// Trigger on the appearance of the trailing row rather than
+						// on a scroll offset — no geometry maths, and it keeps
+						// working if row heights change.
+						SkeletonList(rowHeight: 56, rows: 2)
+							.frame(height: 112)
+							.task { await model.loadMore() }
 					}
-					.listRowSeparator(.hidden)
-					// Trigger on appearance of the trailing row rather than on a
-					// scroll offset — no geometry math, and it keeps working if
-					// the row heights change.
-					.task { await model.loadMore() }
 				}
 			}
-			.listStyle(.plain)
+			.scrollContentBackground(.hidden)
 		}
-		.refreshable { await model.load(showSpinner: false) }
+		.refreshable { await model.load(showPlaceholder: false) }
 	}
 }
 
@@ -160,11 +163,13 @@ private struct FilterMenu: View {
 			Picker("State", selection: $model.query.workflowState) {
 				Text("Any state").tag(WorkflowState?.none)
 				ForEach(WorkflowState.allCases, id: \.self) { state in
-					Text(state.title).tag(WorkflowState?.some(state))
+					Text(state.label).tag(WorkflowState?.some(state))
 				}
 			}
 		} label: {
-			Label("Filter", systemImage: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+			Text(isFiltered ? "Filtered" : "Filter")
+				.font(Typo.smallMedium)
+				.foregroundStyle(isFiltered ? Token.primary : Token.foreground)
 		}
 	}
 
@@ -173,45 +178,99 @@ private struct FilterMenu: View {
 	}
 }
 
+/// The issue row, following `issue-row.tsx`: severity chip, then the exception
+/// type with its message trailing on the same line in muted text, then service,
+/// count, and a terse relative time.
 struct IssueRow: View {
 	let issue: ErrorIssue
 	let showsService: Bool
 
+	/// Some issue kinds (integration and alert issues) carry no exception type.
+	/// The label then becomes the row's identity.
+	private var title: String {
+		let type = issue.exceptionType.trimmingCharacters(in: .whitespacesAndNewlines)
+		if !type.isEmpty { return type }
+		let label = issue.errorLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+		return label.isEmpty ? issue.exceptionMessage : label
+	}
+
+	/// Suppressed when it would merely restate the title, which is what happens
+	/// once the title has fallen back to the label.
+	private var subtitle: String? {
+		let message = issue.exceptionMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !message.isEmpty, !message.hasPrefix(title), !title.hasPrefix(message) else { return nil }
+		return message
+	}
+
 	var body: some View {
-		VStack(alignment: .leading, spacing: 4) {
-			HStack(spacing: 6) {
-				SeverityBadge(severity: issue.severity)
-				Text(issue.exceptionType)
-					.font(.subheadline.weight(.semibold))
-					.lineLimit(1)
-				Spacer()
-				Text(Format.relative(issue.lastSeenAt))
-					.font(.caption2)
-					.foregroundStyle(.tertiary)
-			}
+		HStack(alignment: .top, spacing: 10) {
+			// Fixed-width severity lane, mirroring the web's `w-[60px]`. Without
+			// it the title starts at a different x on every row, because a badge
+			// and an em dash are different widths.
+			SeverityBadge(severity: issue.severity)
+				.frame(width: 56, alignment: .leading)
 
-			Text(issue.exceptionMessage)
-				.font(.caption)
-				.foregroundStyle(.secondary)
-				.lineLimit(2)
-
-			HStack(spacing: 8) {
-				if showsService {
-					Label(issue.serviceName, systemImage: "square.stack.3d.up")
-						.font(.caption2)
-						.foregroundStyle(.tertiary)
+			VStack(alignment: .leading, spacing: 4) {
+				HStack(alignment: .firstTextBaseline, spacing: 8) {
+					Text(title)
+						.font(Typo.bodyMedium)
+						.foregroundStyle(Token.foreground)
 						.lineLimit(1)
+					Spacer(minLength: 4)
+					Text(Format.lastSeen(issue.lastSeenAt))
+						.font(Typo.tiny)
+						.tabularNumbers()
+						.foregroundStyle(Token.mutedForeground)
+						.layoutPriority(1)
 				}
-				Text("\(Format.count(issue.occurrenceCount)) events")
-					.font(.caption2)
-					.foregroundStyle(.tertiary)
-				if issue.hasOpenIncident {
-					Text("Open incident")
-						.font(.caption2.weight(.medium))
-						.foregroundStyle(.red)
+
+				if let subtitle {
+					Text(subtitle)
+						.font(Typo.small)
+						.foregroundStyle(Token.mutedForeground)
+						.lineLimit(2)
+						.fixedSize(horizontal: false, vertical: true)
 				}
+
+				// One line, truncating. Wrapping metadata destroys the row rhythm
+				// that makes a dense list scannable.
+				HStack(spacing: 10) {
+					if showsService {
+						HStack(spacing: 5) {
+							ServiceDot(serviceName: issue.serviceName, size: 6)
+							Text(issue.serviceName)
+								.font(Typo.tiny)
+								.foregroundStyle(Token.mutedForeground)
+						}
+						.fixedSize()
+					}
+
+					Text(Format.count(issue.occurrenceCount))
+						.font(Typo.tiny)
+						.tabularNumbers()
+						.foregroundStyle(Token.mutedForeground)
+						.fixedSize()
+
+					if issue.hasOpenIncident {
+						HStack(spacing: 4) {
+							Circle()
+								.fill(Token.destructive)
+								.frame(width: 5, height: 5)
+							Text("Incident")
+								.font(Typo.tinyMedium)
+								.foregroundStyle(Token.destructive)
+						}
+						.fixedSize()
+					}
+
+					Spacer(minLength: 0)
+				}
+				.lineLimit(1)
 			}
 		}
-		.padding(.vertical, 4)
+		.padding(.horizontal, 16)
+		.padding(.vertical, 12)
+		.frame(minHeight: 56)
+		.contentShape(.rect)
 	}
 }

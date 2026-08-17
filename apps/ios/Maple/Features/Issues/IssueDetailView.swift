@@ -17,15 +17,15 @@ final class IssueDetailModel {
 		self.session = session
 	}
 
-	func load(showSpinner: Bool = true) async {
-		if showSpinner && !state.hasContent { state = .loading }
+	func load(showPlaceholder: Bool = true) async {
+		if showPlaceholder && !state.hasContent { state = .loading }
 
 		do {
 			state = .loaded(try await api.issue(id: issueID))
 		} catch is CancellationError {
 		} catch let error as MapleAPIError {
 			if await session.handle(error) {
-				await load(showSpinner: false)
+				await load(showPlaceholder: false)
 			} else {
 				state = .failed(error)
 			}
@@ -39,8 +39,8 @@ final class IssueDetailModel {
 /// internal-tier operations that v2 deliberately does not expose, so there is
 /// nothing to mutate here.
 ///
-/// The sections are separate views rather than one long `List` body: the type
-/// checker gives up on a body this size ("failed to produce diagnostic for
+/// The sections are separate views rather than one long body: the type checker
+/// gives up on a body this size ("failed to produce diagnostic for
 /// expression"), and the error it emits points at the whole function.
 struct IssueDetailView: View {
 	let issueID: String
@@ -49,7 +49,8 @@ struct IssueDetailView: View {
 	@State private var model: IssueDetailModel?
 
 	var body: some View {
-		Group {
+		ZStack {
+			Token.background.ignoresSafeArea()
 			if let model {
 				LoadableView(
 					state: model.state,
@@ -59,9 +60,9 @@ struct IssueDetailView: View {
 				) { issue in
 					IssueDetailContent(issue: issue)
 				}
-				.refreshable { await model.load(showSpinner: false) }
+				.refreshable { await model.load(showPlaceholder: false) }
 			} else {
-				ProgressView()
+				SkeletonList()
 			}
 		}
 		.navigationTitle("Issue")
@@ -78,60 +79,133 @@ private struct IssueDetailContent: View {
 	let issue: ErrorIssueDetail
 
 	var body: some View {
-		List {
-			IssueHeaderSection(issue: issue)
-			IssueActivitySection(issue: issue)
-			IssueOccurrencesSection(issue: issue)
-			IssueIncidentsSection(incidents: issue.incidents)
-			IssueSamplesSection(samples: issue.sampleTraces)
+		ScrollView {
+			VStack(alignment: .leading, spacing: 24) {
+				IssueHeader(issue: issue)
+				IssueOccurrences(issue: issue)
+				IssueActivity(issue: issue)
+				IssueIncidents(incidents: issue.incidents)
+				IssueSamples(samples: issue.sampleTraces)
+			}
+			.padding(.vertical, 16)
+		}
+		.scrollContentBackground(.hidden)
+	}
+}
+
+/// A titled block with the uppercase section label.
+private struct Section<Content: View>: View {
+	let title: String
+	@ViewBuilder let content: Content
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 10) {
+			SectionLabel(title)
+				.padding(.horizontal, 16)
+			content
 		}
 	}
 }
 
-private struct IssueHeaderSection: View {
+private struct IssueHeader: View {
 	let issue: ErrorIssueDetail
 
 	var body: some View {
-		Section {
-			VStack(alignment: .leading, spacing: 8) {
-				HStack(spacing: 6) {
-					SeverityBadge(severity: issue.severity)
-					Text(issue.workflowState.title)
-						.font(.caption2.weight(.medium))
-						.padding(.horizontal, 6)
-						.padding(.vertical, 2)
-						.background(.quaternary, in: .capsule)
+		VStack(alignment: .leading, spacing: 10) {
+			HStack(spacing: 6) {
+				SeverityBadge(severity: issue.severity)
+				WorkflowBadge(state: issue.workflowState)
+				Spacer()
+			}
+
+			// Mono, not the display face. Proportional Geist is reserved for page
+			// titles and empty states; an exception type is an identifier, and
+			// the nav bar already carries this screen's title.
+			Text(issue.exceptionType)
+				.font(Typo.monoTitle)
+				.foregroundStyle(Token.foreground)
+
+			Text(issue.exceptionMessage)
+				.font(Typo.small)
+				.foregroundStyle(Token.mutedForeground)
+				.fixedSize(horizontal: false, vertical: true)
+
+			Text(issue.topFrame)
+				.font(Typo.tiny)
+				.foregroundStyle(Token.mutedForeground.opacity(0.75))
+				.lineLimit(2)
+				.padding(.horizontal, 10)
+				.padding(.vertical, 8)
+				.frame(maxWidth: .infinity, alignment: .leading)
+				.background(Token.card, in: .rect(cornerRadius: Token.Radius.md))
+				.overlay(
+					RoundedRectangle(cornerRadius: Token.Radius.md)
+						.stroke(Token.border, lineWidth: Token.hairline)
+				)
+		}
+		.padding(.horizontal, 16)
+	}
+}
+
+private struct IssueOccurrences: View {
+	let issue: ErrorIssueDetail
+
+	var body: some View {
+		if !issue.timeseries.isEmpty {
+			Section(title: "Occurrences") {
+				Chart(issue.timeseries, id: \.bucket) { point in
+					BarMark(
+						x: .value("Time", ResolvedTimeWindow.parse(point.bucket) ?? Date()),
+						y: .value("Events", point.count)
+					)
+					.foregroundStyle(Token.chartError)
 				}
-				Text(issue.exceptionType)
-					.font(.headline)
-				Text(issue.exceptionMessage)
-					.font(.callout)
-					.foregroundStyle(.secondary)
-				Text(issue.topFrame)
-					.font(.caption.monospaced())
-					.foregroundStyle(.tertiary)
-					.lineLimit(2)
+				.chartYAxis {
+					AxisMarks(position: .leading) { value in
+						AxisGridLine().foregroundStyle(Token.border)
+						AxisValueLabel().font(Typo.micro).foregroundStyle(Token.mutedForeground)
+					}
+				}
+				.chartXAxis {
+					AxisMarks { value in
+						AxisValueLabel().font(Typo.micro).foregroundStyle(Token.mutedForeground)
+					}
+				}
+				.frame(height: 132)
+				.padding(.horizontal, 16)
 			}
-			.padding(.vertical, 4)
 		}
 	}
 }
 
-private struct IssueActivitySection: View {
+private struct IssueActivity: View {
 	let issue: ErrorIssueDetail
 
 	var body: some View {
-		Section("Activity") {
-			LabeledContent("Service", value: issue.serviceName)
-			LabeledContent("Events", value: Format.count(issue.occurrenceCount))
-			LabeledContent("First seen", value: Format.absolute(issue.firstSeenAt))
-			LabeledContent("Last seen", value: Format.relative(issue.lastSeenAt))
-			if let assignee {
-				LabeledContent("Assigned", value: assignee)
+		Section(title: "Activity") {
+			VStack(spacing: 0) {
+				DetailRow(label: "Service") {
+					HStack(spacing: 6) {
+						ServiceDot(serviceName: issue.serviceName, size: 6)
+						Text(issue.serviceName)
+					}
+				}
+				Hairline()
+				DetailRow("Events", Format.count(issue.occurrenceCount))
+				Hairline()
+				DetailRow("First seen", Format.absolute(issue.firstSeenAt))
+				Hairline()
+				DetailRow("Last seen", Format.lastSeen(issue.lastSeenAt))
+				if let assignee {
+					Hairline()
+					DetailRow("Assigned", assignee)
+				}
+				if let notes = issue.notes, !notes.isEmpty {
+					Hairline()
+					DetailRow("Notes", notes)
+				}
 			}
-			if let notes = issue.notes, !notes.isEmpty {
-				LabeledContent("Notes", value: notes)
-			}
+			.padding(.horizontal, 16)
 		}
 	}
 
@@ -141,50 +215,36 @@ private struct IssueActivitySection: View {
 	}
 }
 
-private struct IssueOccurrencesSection: View {
-	let issue: ErrorIssueDetail
-
-	var body: some View {
-		if !issue.timeseries.isEmpty {
-			Section("Occurrences") {
-				Chart(issue.timeseries, id: \.bucket) { point in
-					BarMark(
-						x: .value("Time", ResolvedTimeWindow.parse(point.bucket) ?? Date()),
-						y: .value("Events", point.count)
-					)
-					.foregroundStyle(issue.severity?.tint ?? Color.accentColor)
-				}
-				.chartYAxis { AxisMarks(position: .leading) }
-				.frame(height: 140)
-				.listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
-			}
-		}
-	}
-}
-
-private struct IssueIncidentsSection: View {
+private struct IssueIncidents: View {
 	let incidents: [ErrorIncident]
 
 	var body: some View {
 		if !incidents.isEmpty {
-			Section("Incidents") {
-				ForEach(incidents, id: \.id) { incident in
-					VStack(alignment: .leading, spacing: 2) {
-						HStack {
-							Text(incident.status == .open ? "Open" : "Resolved")
-								.font(.subheadline.weight(.medium))
-								.foregroundStyle(incident.status == .open ? Color.red : Color.secondary)
+			Section(title: "Incidents") {
+				VStack(spacing: 0) {
+					ForEach(incidents, id: \.id) { incident in
+						HStack(alignment: .firstTextBaseline) {
+							VStack(alignment: .leading, spacing: 3) {
+								Text(incident.status == .open ? "Open" : "Resolved")
+									.font(Typo.smallMedium)
+									.foregroundStyle(
+										incident.status == .open ? Token.destructive : Token.mutedForeground
+									)
+								Text(subtitle(for: incident))
+									.font(Typo.tiny)
+									.foregroundStyle(Token.mutedForeground)
+							}
 							Spacer()
-							Text(Format.relative(incident.lastTriggeredAt))
-								.font(.caption2)
-								.foregroundStyle(.tertiary)
+							Text(Format.lastSeen(incident.lastTriggeredAt))
+								.font(Typo.tiny)
+								.tabularNumbers()
+								.foregroundStyle(Token.mutedForeground)
 						}
-						Text(subtitle(for: incident))
-							.font(.caption)
-							.foregroundStyle(.secondary)
+						.padding(.vertical, 10)
+						Hairline()
 					}
-					.padding(.vertical, 2)
 				}
+				.padding(.horizontal, 16)
 			}
 		}
 	}
@@ -195,27 +255,31 @@ private struct IssueIncidentsSection: View {
 	}
 }
 
-private struct IssueSamplesSection: View {
+private struct IssueSamples: View {
 	let samples: [ErrorIssueSampleTrace]
 
 	var body: some View {
 		if !samples.isEmpty {
-			Section("Sample traces") {
-				ForEach(samples, id: \.traceId) { sample in
-					VStack(alignment: .leading, spacing: 2) {
-						Text(sample.traceId)
-							.font(.caption.monospaced())
-							.lineLimit(1)
-							.truncationMode(.middle)
-						HStack(spacing: 8) {
-							Text(Format.absolute(sample.timestamp))
-							Text(Format.milliseconds(sample.durationMicros / 1000))
+			Section(title: "Sample traces") {
+				VStack(spacing: 0) {
+					ForEach(samples, id: \.traceId) { sample in
+						HStack(alignment: .firstTextBaseline) {
+							Text(sample.traceId)
+								.font(Typo.tiny)
+								.foregroundStyle(Token.foreground)
+								.lineLimit(1)
+								.truncationMode(.middle)
+							Spacer(minLength: 12)
+							Text(Format.latency(sample.durationMicros / 1000))
+								.font(Typo.tiny)
+								.tabularNumbers()
+								.foregroundStyle(Token.mutedForeground)
 						}
-						.font(.caption2)
-						.foregroundStyle(.tertiary)
+						.padding(.vertical, 10)
+						Hairline()
 					}
-					.padding(.vertical, 2)
 				}
+				.padding(.horizontal, 16)
 			}
 		}
 	}
