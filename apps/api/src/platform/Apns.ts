@@ -1,7 +1,7 @@
 import { Clock, Context, Effect, Layer, Option, Redacted, Ref, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import type { MobilePushEnvironment } from "@maple/domain/http"
-import { Env } from "./Env"
+import { Env, type EnvConfig } from "./Env"
 
 /**
  * Apple Push Notification service, token-based (JWT / `.p8`) auth.
@@ -98,7 +98,7 @@ interface ApnsConfig {
 	readonly privateKeyPem: string
 }
 
-const resolveConfig = (env: Env): ApnsConfig | null => {
+const resolveConfig = (env: EnvConfig): ApnsConfig | null => {
 	const teamId = Option.getOrUndefined(env.APNS_TEAM_ID)
 	const keyId = Option.getOrUndefined(env.APNS_KEY_ID)
 	const key = Option.getOrUndefined(env.APNS_PRIVATE_KEY)

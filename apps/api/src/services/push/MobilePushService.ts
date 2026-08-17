@@ -242,9 +242,7 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 							break
 						case "unregistered":
 							unregistered += 1
-							yield* devices
-								.disable(device.id, result.reason)
-								.pipe(Effect.catch(() => Effect.void))
+							yield* devices.disable(device.id, result.reason).pipe(Effect.ignore)
 							break
 						case "failed":
 							failed += 1
@@ -260,7 +258,7 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 							break
 					}
 				}
-				yield* devices.markPushed(pushed).pipe(Effect.catch(() => Effect.void))
+				yield* devices.markPushed(pushed).pipe(Effect.ignore)
 				yield* Effect.annotateCurrentSpan({
 					"maple.push.sent": sent,
 					"maple.push.failed": failed,
