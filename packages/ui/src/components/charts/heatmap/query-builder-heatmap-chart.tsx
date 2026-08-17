@@ -5,7 +5,7 @@ import type { BaseChartProps } from "../_shared/chart-types"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { cn } from "../../../lib/utils"
-import { chartTooltipCardClassName } from "../../ui/chart"
+import { ChartFloatingTooltip } from "../../ui/chart"
 
 interface HeatmapPoint {
 	x: string
@@ -529,18 +529,10 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 
 	const [hover, setHover] = React.useState<HoverState | null>(null)
 
-	// Tooltip is measured, not guessed — the clamp/flip below needs its real box
-	// to keep it inside a small widget.
-	const tooltipRef = React.useRef<HTMLDivElement | null>(null)
-	const [tooltipBox, setTooltipBox] = React.useState({ w: 0, h: 0 })
-	React.useLayoutEffect(() => {
-		const el = tooltipRef.current
-		if (!el) return
-		const rect = el.getBoundingClientRect()
-		setTooltipBox((prev) =>
-			prev.w === rect.width && prev.h === rect.height ? prev : { w: rect.width, h: rect.height },
-		)
-	})
+	// The tooltip anchors to the hovered cell's box (see `gridRef` below), so its
+	// own dimensions no longer need measuring — floating-ui flips and shifts it
+	// against the window.
+	const gridRef = React.useRef<HTMLDivElement | null>(null)
 
 	// Empty state — a quiet placeholder with a tiny suggestive grid.
 	if (xValues.length === 0 || yValues.length === 0) {
@@ -625,21 +617,6 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 	const trackH = gridH + gap * 2
 	const belowTrack = trackH
 
-	// Tooltip placement, in grid coordinates. Clamped horizontally so it can
-	// never spill out of the card, and flipped below the cell when there is no
-	// room above it.
-	const tooltipHalf = tooltipBox.w / 2
-	const tooltipLeft = clamp(
-		colCenterX(hover?.xIdx ?? 0),
-		Math.min(tooltipHalf, gridW / 2),
-		Math.max(gridW - tooltipHalf, gridW / 2),
-	)
-	const preferredTop = rowTop(hover?.yIdx ?? 0) - TOOLTIP_OFFSET - tooltipBox.h
-	const flipBelow = preferredTop < -gap
-	const tooltipTop = flipBelow
-		? rowTop(hover?.yIdx ?? 0) + cellH + TOOLTIP_OFFSET
-		: Math.max(preferredTop, -gap)
-
 	return (
 		<div ref={containerRef} className={cn("relative h-full w-full select-none", className)}>
 			<div
@@ -698,6 +675,7 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 						}}
 					>
 						<div
+							ref={gridRef}
 							className="relative"
 							style={{ width: gridW, height: gridH }}
 							onPointerMove={handlePointerMove}
@@ -763,20 +741,23 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 								</>
 							)}
 
-							{/* Tooltip — above the hovered cell, flipped below and clamped
-							    horizontally when the card runs out of room. */}
+							{/*
+							 * Tooltip — anchored to the hovered cell's box (the same four values
+							 * the crosshair ring uses) and portalled, so it escapes the widget
+							 * card's `overflow-hidden` rather than being clamped inside the grid,
+							 * and so flipping lands it *below* the cell instead of over it.
+							 */}
 							{tooltip !== "hidden" && hover && (
-								<div
-									ref={tooltipRef}
-									className={cn(
-										chartTooltipCardClassName,
-										"pointer-events-none absolute z-20 -translate-x-1/2 whitespace-nowrap transition-opacity duration-100",
-									)}
-									style={{
-										left: tooltipLeft,
-										top: tooltipTop,
-										opacity: hover.active ? 1 : 0,
-									}}
+								<ChartFloatingTooltip
+									containerRef={gridRef}
+									x={colLeft(hover.xIdx)}
+									y={rowTop(hover.yIdx)}
+									width={cellW}
+									height={cellH}
+									open={hover.active}
+									side="top"
+									sideOffset={TOOLTIP_OFFSET}
+									className="whitespace-nowrap"
 								>
 									<div className="text-muted-foreground">
 										<span>{xValues[hover.xIdx]}</span>
@@ -803,7 +784,7 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 											</>
 										)}
 									</div>
-								</div>
+								</ChartFloatingTooltip>
 							)}
 						</div>
 					</div>
