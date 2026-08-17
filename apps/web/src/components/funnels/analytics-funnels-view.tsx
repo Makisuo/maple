@@ -1,6 +1,7 @@
-import type { ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { Result } from "@/lib/effect-atom"
 
+import { useDebouncedValue } from "@maple/ui/hooks/use-debounced-value"
 import { Input } from "@maple/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -28,6 +29,7 @@ import {
 	type FunnelDefinition,
 	type FunnelKeyBy,
 	type FunnelSessionDimension,
+	type FunnelStep,
 } from "./definition"
 import { FunnelStepBuilder } from "./funnel-step-builder"
 import { FunnelBreakdownTable, FunnelResults } from "./funnel-results"
@@ -43,6 +45,9 @@ const BREAKDOWN_LIMIT = 10
 const ATTRIBUTE_PREFIX = "attribute:"
 const NONE = "__none__"
 const ATTRIBUTE = "__attribute__"
+
+/** How long the definition may keep changing before it reaches the warehouse. */
+const DEFINITION_DEBOUNCE_MS = 400
 
 const KEY_BY_NOUN = {
 	person: "persons",
@@ -86,8 +91,22 @@ export function AnalyticsFunnelsView({
 		.orElse(() => [])
 
 	// Only complete steps go to the warehouse — a step still being typed would
-	// otherwise fire a query per keystroke and 400 on the blank name.
-	const steps = completedSteps(definition.steps)
+	// otherwise 400 on the blank name — and they go there DEBOUNCED: every
+	// keystroke in an event name or page path is a new atom key, i.e. its own
+	// `windowFunnel` aggregation (plus a breakdown), and `staleTime` cannot
+	// coalesce keys that never repeat. Debouncing a serialized key rather than the
+	// array keeps the comparison by value, so an unrelated re-render does not
+	// re-arm the timer.
+	const stepsKey = JSON.stringify(completedSteps(definition.steps))
+	const debouncedStepsKey = useDebouncedValue(stepsKey, DEFINITION_DEBOUNCE_MS)
+	// SAFETY: `debouncedStepsKey` is only ever a value `stepsKey` held, i.e. a
+	// `JSON.stringify` of the `completedSteps()` array above, so it parses back to
+	// exactly that shape.
+	const steps = useMemo(
+		() => JSON.parse(debouncedStepsKey) as ReadonlyArray<FunnelStep>,
+		[debouncedStepsKey],
+	)
+	const breakdownBy = useDebouncedValue(definition.breakdownBy, DEFINITION_DEBOUNCE_MS)
 	const labels = steps.map(stepLabel)
 	const unitNoun = KEY_BY_NOUN[definition.keyBy]
 
@@ -226,7 +245,7 @@ export function AnalyticsFunnelsView({
 					}}
 					labels={labels}
 					unitNoun={unitNoun}
-					breakdownBy={definition.breakdownBy}
+					breakdownBy={breakdownBy}
 				/>
 			)}
 		</div>
@@ -310,6 +329,12 @@ function LabelledSelect({ label, children }: { label: string; children: ReactNod
  * Breakdown: none, one of the session dimensions, or `attribute:<key>` typed
  * by hand — the attribute keys on `track()` events are the customer's own
  * vocabulary and there is no cheap way to list them.
+ *
+ * "Attribute…" and the key it needs are two interactions, so the mode is held
+ * here and only a NON-EMPTY key becomes a `breakdownBy`. Emitting the bare
+ * `attribute:` prefix would break the funnel down by `Attributes['']`, which no
+ * event carries: every person lands in the `(none)` group, and the aggregation
+ * that produced it was pure waste.
  */
 function BreakdownPicker({
 	value,
@@ -318,13 +343,21 @@ function BreakdownPicker({
 	value: FunnelBreakdownBy | undefined
 	onChange: (value: FunnelBreakdownBy | undefined) => void
 }) {
-	const isAttribute = value !== undefined && value.startsWith(ATTRIBUTE_PREFIX)
-	const selected = value === undefined ? NONE : isAttribute ? ATTRIBUTE : value
-	const attributeKey = isAttribute ? value.slice(ATTRIBUTE_PREFIX.length) : ""
+	const fromValue = value !== undefined && value.startsWith(ATTRIBUTE_PREFIX)
+	const [attributeMode, setAttributeMode] = useState(fromValue)
+	const [attributeKey, setAttributeKey] = useState(fromValue ? value.slice(ATTRIBUTE_PREFIX.length) : "")
+	// The local mode only survives while nothing else is selected, so a URL that
+	// changes under us (Back, a shared link) wins over a stale "Attribute…".
+	const isAttribute = fromValue || (attributeMode && value === undefined)
+	const selected = isAttribute ? ATTRIBUTE : value === undefined ? NONE : value
 	const items = {
 		[NONE]: "None",
 		...FUNNEL_SESSION_DIMENSION_LABEL,
 		[ATTRIBUTE]: "Attribute…",
+	}
+	const emitAttribute = (key: string) => {
+		const trimmed = key.trim()
+		onChange(trimmed.length > 0 ? `${ATTRIBUTE_PREFIX}${trimmed}` : undefined)
 	}
 	return (
 		<LabelledSelect label="Break down by">
@@ -332,9 +365,14 @@ function BreakdownPicker({
 				items={items}
 				value={selected}
 				onValueChange={(next) => {
-					if (next === NONE) onChange(undefined)
-					else if (next === ATTRIBUTE) onChange(`${ATTRIBUTE_PREFIX}${attributeKey}`)
-					else if (FUNNEL_SESSION_DIMENSIONS.includes(next as FunnelSessionDimension)) {
+					if (next === NONE) {
+						setAttributeMode(false)
+						onChange(undefined)
+					} else if (next === ATTRIBUTE) {
+						setAttributeMode(true)
+						emitAttribute(attributeKey)
+					} else if (FUNNEL_SESSION_DIMENSIONS.includes(next as FunnelSessionDimension)) {
+						setAttributeMode(false)
 						onChange(next as FunnelSessionDimension)
 					}
 				}}
@@ -356,7 +394,10 @@ function BreakdownPicker({
 				<Input
 					size="sm"
 					value={attributeKey}
-					onChange={(event) => onChange(`${ATTRIBUTE_PREFIX}${event.target.value}`)}
+					onChange={(event) => {
+						setAttributeKey(event.target.value)
+						emitAttribute(event.target.value)
+					}}
 					placeholder="attribute key, e.g. plan"
 					aria-label="Breakdown attribute key"
 					className="w-40 font-mono text-xs"

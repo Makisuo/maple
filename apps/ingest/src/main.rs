@@ -751,11 +751,28 @@ const BROWSER_SESSIONS_FEATURE_ID: &str = "browser_sessions";
 /// server-side one; only the transport differs).
 const PRODUCT_EVENTS_FEATURE_ID: &str = "product_events";
 
+/// What a DENIED Autumn reservation means for the batch in flight.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OnDenied {
+    /// 402 the request: the metered feature IS the payload, so an exhausted
+    /// allowance is a reason not to accept it (session starts, `/v1/events`).
+    Reject,
+    /// Keep the batch and record the usage fail-open. For a feature that is only
+    /// PART of the payload — the `type == "custom"` rows of a session-events
+    /// batch — a rejection would also drop the clicks, navigations and errors
+    /// beside them, which is the incoherent outcome the `browser_sessions` gate
+    /// exists to avoid. Autumn also answers `allowed: false` for a customer that
+    /// simply has no balance for the feature yet (a plan item not pushed, or not
+    /// granted to a live subscription), so denial here must never break ingest.
+    MeterAnyway,
+}
+
 /// Meter `value` units of `feature_id` around a WAL enqueue: reserve through
 /// Autumn's atomic check+event lock, run `enqueue`, then confirm or release the
-/// lock. When Autumn could not reserve (disabled or unavailable) the quantity is
-/// recorded fail-open through the retrying tracker after the enqueue succeeds,
-/// so provider outages never drop data or usage. `value <= 0` meters nothing.
+/// lock. When Autumn could not reserve (disabled, unavailable, or denied under
+/// `OnDenied::MeterAnyway`) the quantity is recorded fail-open through the
+/// retrying tracker after the enqueue succeeds, so provider outages never drop
+/// data or usage. `value <= 0` meters nothing.
 ///
 /// This is the one shape every count-metered handler uses (session starts on
 /// the metadata endpoint, product events on both event endpoints); keeping it in
@@ -766,13 +783,28 @@ async fn metered_enqueue<T, F, Fut>(
     org_id: &str,
     feature_id: &'static str,
     value: f64,
+    on_denied: OnDenied,
     enqueue: F,
 ) -> Result<T, ApiError>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T, ApiError>>,
 {
-    let reservation = reserve_autumn_usage(state, org_id, feature_id, value).await?;
+    // `reserve_autumn_usage` fails only on a denial (every other outcome is an
+    // `Ok(None)` fail-open), so swallowing the error here is exactly "denied".
+    let reservation = match reserve_autumn_usage(state, org_id, feature_id, value).await {
+        Ok(reservation) => reservation,
+        Err(error) => {
+            if on_denied == OnDenied::Reject {
+                return Err(error);
+            }
+            warn!(
+                org_id,
+                feature_id, value, "Autumn denied the reservation; metering fail-open"
+            );
+            None
+        }
+    };
     let enqueue_result = enqueue().await;
 
     if let (Some(entitlements), Some(reservation)) =
@@ -2439,6 +2471,7 @@ async fn handle_replay_meta_inner(
         &org_id,
         BROWSER_SESSIONS_FEATURE_ID,
         session_starts as f64,
+        OnDenied::Reject,
         || async {
             pipeline
                 .accept_rows_to(
@@ -2610,6 +2643,7 @@ async fn handle_session_events_inner(
         &org_id,
         PRODUCT_EVENTS_FEATURE_ID,
         custom_events as f64,
+        OnDenied::MeterAnyway,
         || async {
             pipeline
                 .accept_rows_to(
@@ -2772,6 +2806,7 @@ async fn handle_product_events_inner(
         &org_id,
         PRODUCT_EVENTS_FEATURE_ID,
         count as f64,
+        OnDenied::Reject,
         || async {
             pipeline
                 .accept_rows_to(

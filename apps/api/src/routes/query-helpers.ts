@@ -172,13 +172,19 @@ const isProductEventsFunnelError = Schema.is(CH.ProductEventsFunnelError)
  * and the reason lands in the 400 envelope. Anything else thrown is a genuine
  * defect and stays one. Shared by the internal endpoint and the share API's
  * `product_events_funnel` route plan.
+ *
+ * Breakdown options are checked through the BREAKDOWN builder: `limit` is
+ * validated there and nowhere else, so validating the plain funnel for a
+ * breakdown request would let `InvalidLimit` through to `compile` — the exact
+ * defect this helper exists to prevent.
  */
 export const validateFunnelDefinition = (
-	opts: CH.ProductEventsFunnelOpts,
+	opts: CH.ProductEventsFunnelOpts | CH.ProductEventsFunnelBreakdownOpts,
 ): Effect.Effect<void, QueryEngineValidationError> =>
 	Effect.suspend(() => {
 		try {
-			CH.productEventsFunnelQuery(opts)
+			if ("breakdownBy" in opts) CH.productEventsFunnelBreakdownQuery(opts)
+			else CH.productEventsFunnelQuery(opts)
 			return Effect.void
 		} catch (error) {
 			if (isProductEventsFunnelError(error)) {

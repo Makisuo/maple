@@ -493,16 +493,25 @@ function sessionEntryBranch(plan: FunnelPlan, step: Extract<FunnelStep, { kind: 
  * `SELECT key, windowFunnel(w)(ts, s1 = 1, …, sN = 1) AS level [, first dim AS group]
  *  FROM <events ∪ session entries> GROUP BY key` — one row per person with the
  * deepest step they reached in order within the window.
+ *
+ * A funnel whose ONLY step is a `session` step has no event predicate at all, so
+ * the events branch would have nothing to filter on and would read every
+ * `product_events` row in range to project `s1..sN` as zeros — rows that can
+ * never reach a level. That funnel is answered by the session-entry branch
+ * alone, which is the state the step builder is in the moment step 1 becomes a
+ * session step, so the branch is dropped rather than scanned.
  */
 function levelsQuery(plan: FunnelPlan) {
 	const { opts } = plan
-	const events = eventsBranch(plan)
+	const hasEventStep = opts.steps.some((step) => step.kind !== "session")
 	const source = plan.sessionStep
-		? fromUnion(
-				unionAll<FunnelEventRow>(sessionEntryBranch(plan, plan.sessionStep), events),
-				"funnel_events",
-			)
-		: fromQuery(events, "funnel_events")
+		? hasEventStep
+			? fromUnion(
+					unionAll<FunnelEventRow>(sessionEntryBranch(plan, plan.sessionStep), eventsBranch(plan)),
+					"funnel_events",
+				)
+			: fromQuery(sessionEntryBranch(plan, plan.sessionStep), "funnel_events")
+		: fromQuery(eventsBranch(plan), "funnel_events")
 
 	return source
 		.select(($) => {

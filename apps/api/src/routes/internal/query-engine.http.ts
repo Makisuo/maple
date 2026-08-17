@@ -1757,7 +1757,13 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 			.handle("productEventsFunnelBreakdown", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					yield* validateFunnelDefinition(productEventsFunnelOpts(payload))
+					// The breakdown builder, not the plain one: `limit` is validated
+					// only there, and an unvalidated one throws inside `compile`.
+					yield* validateFunnelDefinition({
+						...productEventsFunnelOpts(payload),
+						breakdownBy: payload.breakdownBy,
+						limit: payload.limit,
+					})
 					const rows = yield* runQuery(Queries.productEventsFunnelBreakdown, tenant, payload)
 					return new ProductEventsFunnelBreakdownResponse({
 						data: rows.map((row) => ({
