@@ -1,11 +1,13 @@
 import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
+import { formatNumber } from "@maple/ui/lib/format"
+import { cn } from "@maple/ui/lib/utils"
 import { defineChart } from "@tanstack/charts"
 import { focusGroupAngle, pie, polar, radialArc } from "@tanstack/charts/polar"
 import { tooltip } from "@tanstack/charts/tooltip"
-import { memo, useMemo, type ReactNode } from "react"
+import { memo, useMemo, useState, type ReactNode } from "react"
 
 import {
-	ChartSeriesLegend,
+	ChartStatsLegend,
 	MUTED_COLOR_AMOUNT,
 	useChartLegendHighlight,
 	type LegendSeriesSpec,
@@ -34,20 +36,40 @@ const SLICE_TOKENS = {
 } as const satisfies Record<string, readonly [PlotColorToken, string]>
 
 /**
+ * How much the hovered slice grows, and how far the rest fade — both lifted from
+ * `packages/ui/src/components/charts/pie/query-builder-pie-chart.tsx` so the two
+ * donuts feel identical side by side.
+ */
+const HOVER_GROWTH = 1.035
+const REST_OPACITY = 0.55
+
+/**
  * Phase 0 spike: does `polar` + `pie` + `radialArc` actually draw a donut under
  * both renderers, and what is lost to `radialArc` having no `states`?
  *
- * `radialArc`'s `fill` is a `VisualChannel` — datum-only, with no focus context —
- * while `rect`/`line`/`area`/`dot` all take a `states` array carrying
- * `ChartMarkStateContext` (focus, pointer, matches). So the production pie's
- * hover affordance (dim the others to 0.55, scale the hovered slice to 1.035) has
- * no expression at 0.14.0 — and, verified here, no workaround either: `whenFocused`
- * takes a `ChartMark` and `polar` requires a `PolarMark`, so an overlay arc does
- * not typecheck. See the comment on the mark below.
+ * **Correction to an earlier note in this file.** It said the production pie's
+ * hover affordance — dim the others to 0.55, scale the hovered slice to 1.035 —
+ * "has no expression at 0.14.0 by any route". That was wrong, and wrong in an
+ * instructive way: it took "no `states` on the mark" to mean "no hover", and only
+ * looked for the answer inside the chart definition.
  *
- * In-slice labels are also out of scope here: `radialText`'s `radius` is a
- * channel in radius-scale units, and this chart defines no radius scale, so how
- * a label position maps is a separate question from whether arcs paint.
+ * What is true: `radialArc`'s `fill` is a `VisualChannel` with no focus context,
+ * `outerRadius` is a per-MARK `PolarLength` and `fillOpacity` a flat `number`, so
+ * nothing about one datum can differ from another's on hover WITHIN a mark. And
+ * `whenFocused` really does not typecheck here — it takes a `ChartMark` while
+ * `polar({ marks })` requires a `PolarMark`.
+ *
+ * The route out is above the definition, not inside it: `onFocusChange` on the
+ * Chart component reports the focused datum to React, and a second `radialArc`
+ * over just that slice gives it its own radius and opacity. Per-mark options stop
+ * being a limitation once the mark list is a function of hover state. It costs a
+ * rebuilt definition per slice crossing, which is affordable precisely because
+ * `onFocusChange` is edge-triggered rather than per-pointer-move. See
+ * `PieLegendSpike`, which is where the wiring lives.
+ *
+ * In-slice labels are still out of scope: `radialText`'s `radius` is a channel in
+ * radius-scale units, and this chart defines no radius scale, so how a label
+ * position maps is a separate question from whether arcs paint.
  */
 export const PieSpike = memo(function PieSpike({
 	rows,
@@ -93,6 +115,8 @@ function PieFigure({
 	donut,
 	className,
 	colorFor,
+	activeName,
+	onActiveNameChange,
 	legend,
 }: {
 	rows: readonly PieSpikeRow[]
@@ -100,6 +124,9 @@ function PieFigure({
 	donut: boolean
 	className?: string
 	colorFor: (name: string) => string
+	/** The hovered slice, grown and left at full strength while the rest dim. */
+	activeName?: string | null
+	onActiveNameChange?: (name: string | null) => void
 	legend?: ReactNode
 }) {
 	const definition = useMemo(() => {
@@ -109,10 +136,27 @@ function PieFigure({
 		// pad again (padAngle is forced to 0 on the output).
 		const slices = pie(rows, { value: (row: PieSpikeRow) => row.value, gapAngle: 0.012 })
 
+		// Split AFTER `pie()`, never before: the transform is what assigns the
+		// angles, so slicing its OUTPUT keeps every wedge exactly where it was.
+		// Splitting the rows first would renormalise the whole donut.
+		const active = activeName === null ? [] : slices.filter((slice) => slice.name === activeName)
+		const rest = activeName === null ? slices : slices.filter((slice) => slice.name !== activeName)
+
+		const arcOptions = {
+			startAngle: (slice: (typeof slices)[number]) => slice.startAngle,
+			endAngle: (slice: (typeof slices)[number]) => slice.endAngle,
+			innerRadius: (context: { radius: number }) => (donut ? Math.max(8, context.radius * 0.58) : 0),
+			cornerRadius: 2,
+		}
+
 		return defineChart({
 			marks: [
 				polar({
 					radiusRatio: 1,
+					// Room for the hovered slice to grow into. `HOVER_GROWTH` of a ~110px
+					// radius is ~4px, so 8px of inset covers it with margin — the arc is
+					// clipped at the plot edge otherwise, and a clipped "grown" slice reads
+					// as a rendering bug rather than an affordance.
 					inset: 8,
 					marks: [
 						// Accessors, not `"startAngle"` field-name strings: `ChannelField`
@@ -120,29 +164,25 @@ function PieFigure({
 						// index signature is `unknown`, so every string channel fails to
 						// typecheck. Any row type with an index signature has to use
 						// accessors — worth knowing before writing five more charts.
-						radialArc(slices, {
-							startAngle: (slice) => slice.startAngle,
-							endAngle: (slice) => slice.endAngle,
-							innerRadius: (context) => (donut ? Math.max(8, context.radius * 0.58) : 0),
+						//
+						// TWO marks, not one, and that is the whole hover affordance:
+						// `outerRadius` and `fillOpacity` are per-MARK (`PolarLength` and a
+						// flat `number`), never per-datum, so the only way to give one slice
+						// a different radius is to give it its own mark over a one-element
+						// slice of the same transformed data.
+						radialArc(rest, {
+							...arcOptions,
 							outerRadius: (context) => context.radius,
-							cornerRadius: 2,
+							fill: (slice) => colorFor(slice.name),
+							// Production dims the un-hovered slices to 0.55
+							// (`query-builder-pie-chart.tsx`); matched here.
+							fillOpacity: activeName === null ? 1 : REST_OPACITY,
+						}),
+						radialArc(active, {
+							...arcOptions,
+							outerRadius: (context) => context.radius * HOVER_GROWTH,
 							fill: (slice) => colorFor(slice.name),
 						}),
-						// NO hover affordance is possible here, and there is no workaround.
-						//
-						// `radialArc` has no `states` (nor does any polar mark), so fill and
-						// radius cannot react to focus. The obvious fallback — a
-						// `whenFocused` overlay arc — does not typecheck either: it is
-						// `whenFocused(mark: ChartMark)`, while `polar({ marks })` requires
-						// `PolarMark`, and the two initialize contexts are incompatible
-						// (`InitializedPolarMark` carries colorValues/angleValues/
-						// radiusValues that `InitializedMark` lacks).
-						//
-						// So the production pie's hover fade + 1.035 scale has no expression
-						// at 0.14.0 by any route. Hover feedback here is the tooltip, and
-						// the only other affordance is the DOM legend on
-						// `PieLegendSpike` — which cannot be the package's own legend
-						// either, since `radialArc` reads no colour scale.
 					],
 				}),
 			],
@@ -156,7 +196,7 @@ function PieFigure({
 			focusRing: false,
 			tooltip: { use: tooltip, className: "maple-bench-tooltip" },
 		})
-	}, [rows, colorFor, donut])
+	}, [rows, colorFor, donut, activeName])
 
 	return (
 		<TanstackChartFrame
@@ -165,6 +205,13 @@ function PieFigure({
 			ariaLabel="Share by category"
 			definition={definition}
 			legend={legend}
+			// EDGE-triggered, which is the only reason rebuilding the definition on
+			// hover is affordable: it fires when the focused datum changes, not on
+			// every pointer move, so crossing five slices costs five commits rather
+			// than one per pixel.
+			onFocusChange={
+				onActiveNameChange ? (point) => onActiveNameChange(point?.datum.name ?? null) : undefined
+			}
 			// Mandatory, not cosmetic: the default body prints the mark's x/y
 			// channels, which for a polar mark are the angle in radians and the
 			// radius in pixels ("x 1.336 / y 113.76"). Every polar chart needs its
@@ -190,17 +237,24 @@ function PieFigure({
 }
 
 /**
- * The same donut with a DOM slice key beneath it, matching what the production
- * pie renders as its `legend="right"`.
+ * The donut with a stats key BESIDE it and the production hover affordance, which
+ * together make this the closest arm to `QueryBuilderPieChart` in the lab.
  *
- * This is the chart where highlighting rather than hiding matters most. Removing
- * a slice would renormalise every remaining angle — `pie()` divides by the total
- * of the rows it is handed — so the whole donut would rearrange around the one
- * slice the reader just clicked. Muting the others instead leaves every wedge
- * exactly where it was.
+ * Two interactions, deliberately different in kind:
  *
- * It is also the only affordance this chart has: `radialArc` takes no `states`,
- * so the production pie's hover fade has no expression here (see above).
+ * - **Hover** grows the slice under the cursor and fades the rest to 0.55, the
+ *   same numbers production uses. Transient, driven by `onFocusChange`.
+ * - **Clicking a legend row** pins an emphasis, muting the other slices' colours
+ *   until it is clicked again. Persistent, and it survives moving the mouse away.
+ *
+ * Neither one removes a slice, and on this chart that matters more than anywhere
+ * else in the lab: `pie()` divides by the total of the rows it is handed, so
+ * dropping one would renormalise every remaining angle and rearrange the whole
+ * donut around the slice the reader just picked.
+ *
+ * The legend is a `Column`, not the `Row` every other spike uses — production
+ * renders `legend="right"` here, and a five-row stats table is taller than a
+ * 320px card can spare from the plot.
  */
 export const PieLegendSpike = memo(function PieLegendSpike({
 	rows,
@@ -215,12 +269,22 @@ export const PieLegendSpike = memo(function PieLegendSpike({
 }) {
 	const colorFor = useSliceColor(rows)
 
-	const legendSeries = useMemo<LegendSeriesSpec[]>(
-		() => rows.map((row) => ({ key: row.name, label: row.name, color: colorFor(row.name) })),
-		[rows, colorFor],
-	)
 	const { highlighted, highlight } = useChartLegendHighlight()
+	const [activeName, setActiveName] = useState<string | null>(null)
 	const chromeColors = usePlotChromeColors()
+
+	const legendSeries = useMemo<LegendSeriesSpec[]>(() => {
+		const total = rows.reduce((sum, row) => sum + row.value, 0)
+		return rows.map((row) => ({
+			key: row.name,
+			label: row.name,
+			color: colorFor(row.name),
+			// Formatted HERE, not in the legend: the legend has no idea this column
+			// is a span count rather than a latency.
+			value: formatNumber(row.value),
+			secondary: total === 0 ? "—" : `${Math.round((row.value / total) * 1000) / 10}%`,
+		}))
+	}, [rows, colorFor])
 
 	const emphasisedColorFor = useMemo(() => {
 		if (highlighted === null) return colorFor
@@ -231,20 +295,27 @@ export const PieLegendSpike = memo(function PieLegendSpike({
 	}, [colorFor, highlighted, chromeColors])
 
 	return (
-		<PieFigure
-			rows={rows}
-			renderer={renderer}
-			donut={donut}
-			className={className}
-			colorFor={emphasisedColorFor}
-			legend={
-				<ChartSeriesLegend
+		// The frame's own `legend` slot stacks BELOW the plot, which is the wrong
+		// axis here — so this composes the side layout itself rather than teaching
+		// the frame a placement option it would need for exactly one chart.
+		<div className={cn("flex min-h-0 items-center gap-3", className)}>
+			<PieFigure
+				rows={rows}
+				renderer={renderer}
+				donut={donut}
+				className="h-full min-w-0 flex-1"
+				colorFor={emphasisedColorFor}
+				activeName={activeName}
+				onActiveNameChange={setActiveName}
+			/>
+			<div className="w-56 shrink-0 overflow-auto">
+				<ChartStatsLegend
 					series={legendSeries}
 					highlighted={highlighted}
 					onHighlight={highlight}
 					label="Share by category"
 				/>
-			}
-		/>
+			</div>
+		</div>
 	)
 })

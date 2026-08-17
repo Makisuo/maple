@@ -1,36 +1,48 @@
 import type { PlotColorToken } from "@maple/ui/components/plot/theme"
+import { scaleSequential, scaleSequentialLog, type ScaleSequentialBase } from "d3-scale"
 
 /**
  * Sequential colour scales for the TanStack charts spike.
  *
- * ## Why this file exists at all
+ * ## The scale is d3's, exactly as the docs prescribe
  *
  * `@tanstack/charts-scales@0.14.0` ships **band / linear / ordinal / point only** —
- * there is no colour scale in the package. The documented escape hatch is a d3
- * colour scale (`ChartColorOptions.scale` is typed as `ConfiguredColorScaleLike`,
- * which is exactly d3's shape).
+ * there is no colour scale in the package. The documented escape hatch (the
+ * Legends and Color guide) is a d3 sequential scale: `ChartColorOptions.scale` is
+ * typed as `ConfiguredColorScaleLike`, which is exactly d3's shape, and `d3-scale`
+ * is a direct dependency of `apps/web` (the trace scatter already hands `scaleLog`
+ * to its y axis). So `createSequentialColorScale` below is a thin wrapper over
+ * `scaleSequential` / `scaleSequentialLog` — the domain / ticks / copy plumbing
+ * this file used to hand-roll is d3's problem again.
  *
- * **`d3-scale` and `d3-interpolate` do not resolve from `apps/web`.** They are
- * `devDependencies` of `@tanstack/charts-scales` (it inlines the kernels it needs
- * at build time) and appear in `node_modules/.bun/` only via Recharts' own tree —
- * neither `Bun.resolveSync` nor `require.resolve` finds them from this package, and
- * adding the dependency was explicitly out of scope. So the scale is hand-rolled
- * here against the `ConfiguredColorScaleLike` contract instead.
+ * Two runtime facts verified against `@tanstack/charts/dist` keep that safe:
  *
- * That contract is small and fully documented by the runtime (`dist/scales.js`):
- * a **configured** (non-factory) colour scale is any callable carrying `copy()`,
- * and `createColorScale` then reads `domain()` / `range()` off it and never infers.
- * Exposing `ticks` — and *not* `quantiles` / `thresholds` / `invertExtent` — makes
- * `colorScaleKind()` classify it `"continuous"`, which is the branch
- * `colorGradientLegend` renders.
+ * - **The legend still classifies it `"continuous"`.** `colorScaleKind()`
+ *   (`dist/scales.js:135`) returns `"continuous"` for a scale exposing `ticks`
+ *   and none of `quantiles` / `thresholds` / `invertExtent`. d3's `sequential()`
+ *   is `linearish(...)` and `sequentialLog()` is `loggish(...)`
+ *   (`d3-scale/src/sequential.js`), so both carry `ticks` / `tickFormat` / `nice`
+ *   and nothing from the quantile/threshold families — `colorGradientLegend`
+ *   renders. (Surprise: `@types/d3-scale`'s `ScaleSequentialBase` omits `ticks`
+ *   entirely; classification is a runtime property probe, so the types are
+ *   irrelevant to it.)
+ * - **`copy()` marks it a configured instance, not a factory.**
+ *   `isColorScaleFactory` is `!("copy" in source)` (`dist/scales.js:79`), and
+ *   every d3 scale has `copy` — so the runtime takes the configured branch, treats
+ *   the pinned domain as authoritative, and never infers one from the colour
+ *   channel. That is precisely what both call sites want: the heatmap pins
+ *   `[min, max]` it computed itself, and the trace scatter pins a fixed density
+ *   estimate the transform makes unknowable (see `DENSITY_DOMAIN` there).
  *
- * ## Why the interpolation is hand-rolled too
+ * ## Why the interpolator is still hand-rolled
  *
- * Even with d3 present it could not have consumed the palette directly: the stops
- * live in `tokens.css` as `--heatmap-<name>-0..4`, and d3's interpolators parse
- * colours with `d3-color`, which cannot read `var(--token)` — it yields `NaN`
- * channels and renders black. Every stop is resolved to an `oklch(...)` literal
- * with `resolvePlotColor` *before* it reaches the ramp.
+ * `scaleSequential` accepts any `(t: number) => string`, and d3's stock
+ * interpolators cannot produce Maple's ramps: `d3-scale-chromatic` palettes are
+ * fixed, and anything routed through `d3-color` chokes on `var(--token)` — `NaN`
+ * channels, rendered black. The stops live in `tokens.css` as
+ * `--heatmap-<name>-0..4` and are resolved to `oklch(...)` literals via
+ * `usePlotColors` (re-resolved on theme flip) *before* they reach the ramp, so the
+ * interpolator handed to d3 is a closure over resolved literals.
  *
  * The production heatmap
  * (`packages/ui/src/components/charts/heatmap/query-builder-heatmap-chart.tsx`)
@@ -185,10 +197,13 @@ function clamp01(value: number): number {
  * opacity instead — same picture, less arithmetic.
  *
  * `amount` is how far toward the background: 0 leaves the colour alone, 1 erases
- * it. Both arguments must already be resolved literals; canvas cannot read a
+ * it. Required rather than defaulted: every call site passes `MUTED_COLOR_AMOUNT`,
+ * and a second number living here could only ever drift away from it.
+ *
+ * Both arguments must already be resolved literals; canvas cannot read a
  * `var(--…)`, which is the whole reason this file exists.
  */
-export function muteColor(color: string, background: string, amount = 0.72): string {
+export function muteColor(color: string, background: string, amount: number): string {
 	const from = parseOklch(color)
 	const to = parseOklch(background)
 	// Unparseable input keeps its colour rather than silently going black, which
@@ -216,37 +231,6 @@ function colorAt(t: number, stops: readonly string[], parsed: readonly (Oklch | 
 	return formatOklch(mixOklch(low, high, local))
 }
 
-/**
- * `log1p`-based normalize, identical to the production heatmap's. Not d3's
- * `scaleSequentialLog`, deliberately: that one is `log(v/min)/log(max/min)` and
- * throws on a domain touching zero, which every count-valued heatmap does.
- */
-function normalize(value: number, min: number, span: number, scaleType: SequentialScaleType): number {
-	if (span <= 0) return 0
-	if (scaleType === "log") {
-		const denominator = Math.log1p(span)
-		return denominator > 0 ? Math.log1p(Math.max(0, value - min)) / denominator : 0
-	}
-	return (value - min) / span
-}
-
-/**
- * The shape `ChartColorOptions.scale` accepts as a *configured* scale.
- *
- * `copy()` is what marks it configured rather than a factory (`dist/scales.js`
- * branches on `!("copy" in source)`), so the runtime never tries to infer a domain
- * from the colour channel — the domain here is authoritative. `ticks` is present
- * purely so `colorScaleKind()` reports `"continuous"`; without it the scale is
- * classified categorical and `colorGradientLegend` throws.
- */
-export interface SequentialColorScale {
-	(value: number): string
-	copy: () => SequentialColorScale
-	domain: () => readonly number[]
-	range: () => readonly string[]
-	ticks: (count: number) => readonly number[]
-}
-
 export interface SequentialColorScaleOptions {
 	/** Resolved literal colours, low → high. `var(--token)` will NOT work. */
 	stops: readonly string[]
@@ -255,22 +239,38 @@ export interface SequentialColorScaleOptions {
 	scaleType: SequentialScaleType
 }
 
-export function createSequentialColorScale(options: SequentialColorScaleOptions): SequentialColorScale {
+/**
+ * A log scale's transform is `Math.log`, so its domain cannot touch 0 — `log(0)`
+ * is `-Infinity` and every value would map to the top stop. Both consumers are
+ * count-valued (heatmap counts, hexbin counts), so a non-positive minimum is
+ * floored at 1: with `clamp(true)` anything below the floor renders as the bottom
+ * stop, which is what the old `log1p` normalize gave a zero-count as well.
+ */
+const LOG_DOMAIN_FLOOR = 1
+
+export function createSequentialColorScale(
+	options: SequentialColorScaleOptions,
+): ScaleSequentialBase<string> {
 	const { stops, scaleType } = options
 	const [min, max] = options.domain
-	const span = max - min
 	const parsed = stops.map(parseOklch)
 
-	const map = (value: number): string => colorAt(normalize(value, min, span, scaleType), stops, parsed)
+	// The theme-aware half: a closure over the resolved token literals, in the
+	// `(t: number) => string` shape `scaleSequential` takes as its interpolator.
+	// `colorAt` clamps `t` itself, so even an unclamped scale could not walk off
+	// the ramp — but `clamp(true)` below is still load-bearing for `scale(x)`'s
+	// *inputs*: d3 extrapolates past the domain by default, and the trace
+	// scatter's fixed density estimate relies on out-of-domain counts saturating
+	// the top stop rather than extrapolating (the hand-rolled scale clamped too).
+	const interpolator = (t: number): string => colorAt(t, stops, parsed)
 
-	return Object.assign(map, {
-		copy: () => createSequentialColorScale(options),
-		domain: () => options.domain,
-		range: () => stops,
-		ticks: (count: number): readonly number[] =>
-			Array.from({ length: Math.max(2, count) }, (_value, index) => {
-				const t = index / (Math.max(2, count) - 1)
-				return scaleType === "log" ? min + Math.expm1(t * Math.log1p(span)) : min + t * span
-			}),
-	})
+	// Both branches return configured d3 instances. `dist/scales.js:79` treats any
+	// callable with `copy` as configured (never a factory), so the pinned domain
+	// is authoritative and nothing is inferred from the colour channel.
+	if (scaleType === "log") {
+		return scaleSequentialLog(interpolator)
+			.domain([Math.max(min, LOG_DOMAIN_FLOOR), max])
+			.clamp(true)
+	}
+	return scaleSequential(interpolator).domain([min, max]).clamp(true)
 }

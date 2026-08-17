@@ -64,8 +64,9 @@ function uniqueInOrder(values: readonly string[]): string[] {
  *    gap. The pinned `scaleBand(domain, range)` instances below are what makes a
  *    hole a hole.
  * 3. **`colorGradientLegend` works** — it needs `colors.domain` to be numeric
- *    `[min, max]` and calls `colors.map(value)` per step, both of which the
- *    hand-rolled scale satisfies. One honest caveat: it walks the domain
+ *    `[min, max]` and calls `colors.map(value)` per step, both of which d3's
+ *    `scaleSequential` satisfies (and `colorScaleKind` classifies it
+ *    `"continuous"` — see `color-scale.ts`). One honest caveat: it walks the domain
  *    *linearly* and samples the ramp at each value, so under `scaleType="log"` the
  *    bar shows the log-warped ramp against a linear value axis. That is correct
  *    (each swatch really is that value's colour) but it is not the production

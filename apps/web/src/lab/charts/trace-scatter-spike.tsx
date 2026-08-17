@@ -91,7 +91,8 @@ const DURATION_DOMAIN: readonly [number, number] = [0.4, 10_000]
  * `hexbin` reduces inside `resolveLayout` — after scales and plot bounds resolve —
  * and nothing surfaces the reduced rows back to the caller. So the app cannot know
  * the real `[1, maxBinCount]` before defining the chart, and there is no hook to
- * learn it afterwards. The sequential scale clamps at both ends, so a wrong guess
+ * learn it afterwards. The sequential scale is built with `clamp(true)` (d3
+ * extrapolates past the domain by default), so a wrong guess
  * saturates the top of the ramp rather than breaking; but a genuinely adaptive
  * density legend is not expressible at 0.14.0.
  */

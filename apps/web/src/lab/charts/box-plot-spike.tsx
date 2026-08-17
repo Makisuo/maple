@@ -4,9 +4,9 @@ import { boxY, defineChart } from "@tanstack/charts"
 import { scaleBand } from "@tanstack/charts-scales/band"
 import { scaleLog } from "d3-scale"
 
-import { tooltip } from "@tanstack/charts/tooltip"
 import { memo, useMemo } from "react"
 
+import { cursorTooltip } from "@/lab/bench/tanstack/chart-shared"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
 
 /**
@@ -192,13 +192,17 @@ export const BoxPlotSpike = memo(function BoxPlotSpike({
 				// linear/band/point/ordinal, and anything beyond that is a documented
 				// d3-scale dependency rather than something to hand-roll.
 				//
-				// A CONFIGURED INSTANCE, not the factory: `isScaleFactory()` is
-				// `typeof source === "function" && !("copy" in source)`, and every d3
-				// scale has `copy`, so passing `scaleLog` bare would be read as an
-				// instance with d3's default `[1, 10]` domain. The domain follows the
-				// data with a little headroom rather than snapping out to whole decades,
-				// which on a log axis would waste most of a decade at each end and take
-				// a proportional slice out of every box's height.
+				// A CONFIGURED INSTANCE, and called deliberately rather than defensively.
+				// `isScaleFactory()` is `typeof source === "function" && !("copy" in
+				// source)`, and `copy` lives on the INSTANCE, not on the factory
+				// function — verified: `"copy" in scaleLog` is false, `"copy" in
+				// scaleLog()` is true. So a bare `scaleLog` would be treated as a factory
+				// and would infer its domain from the data, which is a perfectly good
+				// default; it is simply not what this chart wants.
+				//
+				// It wants the domain to follow the data with a little headroom rather
+				// than snapping out to whole decades, because on a log axis every wasted
+				// decade takes a proportional slice out of every box's height.
 				scale: scaleLog().domain([minDuration * 0.85, maxDuration * 1.2]),
 				grid: true,
 				axis: { line: false, ticks: { size: 0, padding: 6, format: formatLatency } },
@@ -209,13 +213,7 @@ export const BoxPlotSpike = memo(function BoxPlotSpike({
 			// is what distinguishes hovering the box from hovering an outlier dot.
 			focus: "nearest",
 			focusRing: false,
-			tooltip: {
-				use: tooltip,
-				className: "maple-bench-tooltip",
-				anchor: "pointer",
-				placement: "right",
-				offset: 12,
-			},
+			tooltip: cursorTooltip("pointer"),
 		})
 	}, [rows, colors])
 

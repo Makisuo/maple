@@ -3,12 +3,12 @@ import { formatNumber } from "@maple/ui/lib/format"
 import { defineChart, rect } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { scaleLog } from "d3-scale"
-import { tooltip } from "@tanstack/charts/tooltip"
 import { binX } from "@tanstack/charts/transform/bin"
 import { memo, useMemo } from "react"
 
 import { histogramSampleData } from "@maple/ui/components/charts/_shared/sample-data"
 
+import { cursorTooltip } from "@/lab/bench/tanstack/chart-shared"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
 
 /**
@@ -184,13 +184,7 @@ export const HistogramSpike = memo(function HistogramSpike({
 			// semantic: there is no series to group across.
 			focus: "nearest",
 			focusRing: false,
-			tooltip: {
-				use: tooltip,
-				className: "maple-bench-tooltip",
-				anchor: "pointer",
-				placement: "right",
-				offset: 12,
-			},
+			tooltip: cursorTooltip("pointer"),
 		})
 	}, [bins, colors, logScaleY])
 

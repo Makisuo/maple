@@ -36,15 +36,15 @@ Two honest caveats:
 
 ## 2. The seven 0.6.4 bugs, re-checked at 0.14.0
 
-| #   | 0.6.4 bug                                                                          | Status at 0.14.0                                                                                                    |
-| --- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 1   | `spec.gradients` dropped by the DOM renderer; `fill: url(#id)` resolved to nothing | **FIXED** — gradients render in both SVG and Canvas, no `<defs>` injection needed                                   |
-| 2   | `focus: "group-x"` returns one mark's point, not the group                         | **STILL OPEN** — see below                                                                                          |
-| 3   | `whenFocused(dot(...))` renders a dot per datum                                    | **STILL OPEN** — 435 nodes to show 3, but SVG-only; see below                                                       |
-| 4   | `areaY` strokes the whole outline incl. baseline                                   | **STILL OPEN** — worked around with fill-only `areaY` + `lineY` on top                                              |
-| 5   | No time scale in `charts-scales`                                                   | **STILL OPEN** — `band`/`linear`/`ordinal`/`point` only; `scalePoint` over ISO strings, same as Recharts does today |
-| 6   | `<Chart>` needs explicit `width`/`height`                                          | **NOT A BUG — we had it wrong.** Omit `width`; it follows the container. See below                                  |
-| 7   | `.ts-chart-tooltip` inline styles with no opt-out                                  | **FIXED** — every inline style is now a `var(--ts-chart-tooltip-*, fallback)`; see below                            |
+| #   | 0.6.4 bug                                                                          | Status at 0.14.0                                                                                                      |
+| --- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 1   | `spec.gradients` dropped by the DOM renderer; `fill: url(#id)` resolved to nothing | **FIXED** — gradients render in both SVG and Canvas, no `<defs>` injection needed                                     |
+| 2   | `focus: "group-x"` returns one mark's point, not the group                         | **STILL OPEN** — see below                                                                                            |
+| 3   | `whenFocused(dot(...))` renders a dot per datum                                    | **STILL OPEN** — 435 nodes to show 3, but SVG-only; see below                                                         |
+| 4   | `areaY` strokes the whole outline incl. baseline                                   | **BY DESIGN** — fill-only `areaY` + `lineY` on top is the documented composition; see below                           |
+| 5   | No time scale in `charts-scales`                                                   | **BY DESIGN — we had it wrong.** Compact scales stop at linear/band/point/ordinal; d3-scale is the documented upgrade |
+| 6   | `<Chart>` needs explicit `width`/`height`                                          | **NOT A BUG — we had it wrong.** Omit `width`; it follows the container. See below                                    |
+| 7   | `.ts-chart-tooltip` inline styles with no opt-out                                  | **FIXED** — every inline style is now a `var(--ts-chart-tooltip-*, fallback)`; see below                              |
 
 ### Bug 2 is the significant one
 
@@ -230,13 +230,28 @@ Four things that will bite anyone building a polar chart:
    error. `focusGroupAngle` (from `@tanstack/charts/polar`) is the polar strategy and works.
 2. **The default tooltip body prints raw polar coordinates** — `x 1.336 / y 113.76`, i.e. the angle
    in radians and the radius in pixels. Every polar chart needs its own `renderTooltipBody`.
-3. **No hover affordance is possible, and there is no workaround.** No polar mark has `states`, so
-   fill/radius cannot react to focus — verified by measurement: hovering changes zero arc
-   attributes (`fill`, `fill-opacity`, `transform` all unchanged). The obvious fallback fails too:
-   `whenFocused(mark: ChartMark)` cannot wrap a `PolarMark` — `polar({ marks })` requires
-   `PolarMark`, and `InitializedPolarMark` carries `colorValues`/`angleValues`/`radiusValues` that
-   `InitializedMark` lacks, so it does not typecheck. **The production pie's hover fade + 1.035
-   scale cannot be reproduced at 0.14.0 by any route.** Hover feedback is tooltip + legend only.
+3. ~~**No hover affordance is possible, and there is no workaround.**~~ **CORRECTED 2026-08-18 —
+   this was wrong, and instructively so.** Everything it observed still holds: no polar mark has
+   `states`, hovering changes zero arc attributes, and `whenFocused(mark: ChartMark)` genuinely
+   cannot wrap a `PolarMark` (`polar({ marks })` requires one, and `InitializedPolarMark` carries
+   `colorValues`/`angleValues`/`radiusValues` that `InitializedMark` lacks). The error was the
+   conclusion drawn from it — "cannot be reproduced by any route" — reached by only ever looking
+   *inside* the chart definition.
+
+   The route is above it. **`onFocusChange` on the Chart component** reports the focused datum to
+   React, and a **second `radialArc` over just that slice** gives it its own radius and opacity.
+   Per-mark options stop being a limitation once the mark list is a function of hover state. The
+   production pie's fade + 1.035 scale is now reproduced exactly — measured on the SVG arm, the
+   hovered wedge's bbox goes 144×272 → 149×281 (1.035) while the other four drop to
+   `fill-opacity="0.55"`.
+
+   The cost is a rebuilt definition per slice crossing, which is affordable only because
+   `onFocusChange` is **edge-triggered** — it fires when the focused datum changes, not on every
+   pointer move. That distinction is the whole reason this is viable rather than a per-tick React
+   storm, and it is worth remembering for any other mark family that lacks `states`.
+
+   General lesson for the rest of this document: "the mark cannot express X" and "the chart cannot
+   do X" are different claims, and this file conflated them once already.
 4. **Row types must not have an index signature.** `pie()` returns
    `Omit<TDatum, PieDerivedField> & …`, and `Omit` over a type with an index signature resolves
    `keyof` to `string | number` and drops every named field — `slice.name` comes back `unknown`.
@@ -467,6 +482,82 @@ Two things fixed in passing, both the same bug: `pie-spike` coloured slices by
 was handed. Both are indexes into a _filtered_ list, so hiding one slice or service renumbered
 everything after it and recoloured the chart. Colours are now keyed by name over the full row set.
 A legend that repaints the series it did not touch is worse than no legend.
+
+### The docs audit: three of our "gaps" are documented features (2026-08-18)
+
+Prompted by "is there an example in the docs?", every workaround in this pilot was re-checked
+against the published guides. Three of them existed because nobody read them.
+
+**1. d3-scale is the documented upgrade path, not a last resort.** The
+[Scales and D3 guide](https://tanstack.com/charts/v0/docs/concepts/scales-and-d3) is explicit:
+the compact scales cover "numeric linear, categorical band and point, and ordinal mappings without
+a production D3 dependency", and you install `d3-scale` when you need more. Its own examples are
+`scaleLog().domain([200, 30_000])` and `scaleUtc` — the exact two scales this lab hand-rolled.
+
+`histogram-spike.tsx` had reasoned itself out of this: d3-scale _is_ in the bun store transitively
+via Recharts, `require.resolve` fails from `apps/web`, "so importing it would mean adding a
+dependency". Adding the dependency was the answer. The guide even anticipates the confusion —
+"Do not declare a D3 module merely because another package uses it internally" — i.e. declare it
+because _you_ import it, which we now do.
+
+`d3-scale@4.0.2` + `@types/d3-scale` are direct deps of `apps/web`, `lab/charts/log-scale.ts` is
+deleted, and the box plot, histogram and trace scatter use `scaleLog()`. Two things got better for
+free: d3 supplies proper log `ticks`/`tickFormat` (the trace scatter now labels clean decades
+instead of the 1/3-mantissa set the hand-rolled version emitted), and `invert` — which `hexbin`
+requires and which was the fiddliest part of the hand-rolled scale.
+
+Factory-vs-instance applies, and the first version of this paragraph got it exactly backwards.
+`isScaleFactory()` is `typeof source === "function" && !("copy" in source)`, and **`copy` lives on
+the instance, not on the factory function** — `"copy" in scaleLog` is `false`, `"copy" in scaleLog()`
+is `true`. So a bare `scaleLog` is read as a FACTORY and infers its domain from the data, exactly as
+the docs' `x: { scale: scaleUtc }` example relies on. Calling it is a deliberate choice to pin a
+domain, not a defensive one; the log charts here call it because they each want a domain the data
+alone would not give (`[1, max]` for counts, a padded `[min, max]` for the box plot, a fixed
+estimate for the density ramp).
+
+**2. Bug 4 is not a bug.** "`areaY` strokes the whole outline incl. baseline" was filed as a defect
+worked around with a fill-only `areaY` plus a `lineY`. That composition is the documented pattern —
+the [Lines and Areas](https://tanstack.com/charts/v0/docs/examples/lines-and-areas) examples layer a
+filled interval mark with a separate centre line for exactly this reason. Nothing to change; the
+table entry was miscategorised.
+
+**3. Continuous colour has a documented shape we did not use.** `lab/charts/color-scale.ts` is 248
+lines of hand-rolled oklch parsing, hue interpolation and a bespoke `ConfiguredScaleLike`. The
+[Legends and Color guide](https://tanstack.com/charts/v0/docs/guides/legends-and-color) says to
+compose `scaleSequential` from d3-scale with an interpolator. **Not yet changed** — see below.
+
+### 4. A real time scale on the timeseries x axes
+
+Line and area used `scalePoint` over ISO **strings** — categorical, which is what Recharts does and
+why axis labels landed on arbitrary buckets (`08:25 PM, 08:45 PM, 09:05 PM`) instead of on clock
+boundaries. They now use a d3 temporal scale, and the ticks land on quarter hours
+(`09:00 PM, 09:15 PM, 09:30 PM…`). `TimeseriesSpikeRow` carries a precomputed `date: Date` beside
+`bucket`; `bucket` stays because the production Recharts arms and `markIncompleteSegments` both
+parse it.
+
+Three things worth keeping:
+
+- **`scaleTime`, not the docs' `scaleUtc`.** `formatBucketLabel` renders ticks in local time via
+  `toLocaleTimeString`, and only local-time ticks land on locally round boundaries — UTC ticks would
+  read `:15`/`:45` in a fractional-offset timezone. The docs example is UTC because it assumes a UTC
+  formatter; the rule is that the scale and the formatter have to agree.
+- **The tick formatter fails silently, not loudly.** `formatBucketLabel` opens with
+  `if (typeof value !== "string") return ""`. The moment the x channel yields a `Date`, the axis
+  keeps its ticks, its spacing and its layout — and every label becomes an empty string. Ticks now
+  round-trip through `value.toISOString()`, which is the same code path the string buckets took.
+- **`Date`, not epoch milliseconds.** The runtime throws
+  `"A temporal scale factory requires Date channel values"` on numbers (`dist/scale-input.js`);
+  `ChartValue` is `number | string | Date`.
+
+The x domain is no longer pinned. It was pinned because the solid and dashed marks cover different
+slices, but that hazard was about categorical union ORDERING — a continuous scale takes min/max over
+the union, which is order-independent, and the slices overlap at the bridge row anyway.
+
+### Still open after the audit
+
+- **`color-scale.ts` → `scaleSequential`** — in progress at the time of writing.
+- **`interactiveColorLegend`** — resolved separately, and against adopting it: see the legend
+  section above. It is a display control, not a data control, and on a stack it punches a hole.
 
 ### Bug 6 was never a bug, and believing it cost us a mount flash (2026-08-18)
 

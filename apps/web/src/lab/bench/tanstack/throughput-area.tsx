@@ -1,7 +1,6 @@
 import { areaY, defineChart, lineY } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { scalePoint } from "@tanstack/charts-scales/point"
-import { tooltip } from "@tanstack/charts/tooltip"
 import { formatBucketLabel, formatThroughput, inferBucketSeconds, inferRangeMs } from "@maple/ui/lib/format"
 import { memo, useMemo } from "react"
 
@@ -10,10 +9,12 @@ import { overviewBenchRows, type OverviewBenchRow } from "./bench-data"
 import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
 
 import {
-	createTooltipFocusProbe,
+	createTooltipFocusStore,
+	cursorTooltip,
 	focusCrosshair,
 	focusDot,
 	TooltipBody,
+	useChartId,
 	usePlotChromeColors,
 	verticalGradient,
 	type TooltipSeriesSpec,
@@ -24,8 +25,6 @@ import { TanstackChartFrame, type TanstackRenderer } from "./tanstack-chart"
 interface ThroughputBenchRow extends OverviewBenchRow {
 	errorThroughput: number
 }
-
-const GRADIENT_ID = "benchThroughputGradient"
 
 const THROUGHPUT_TOKENS = {
 	throughput: ["--chart-throughput", "#3b82f6"],
@@ -60,7 +59,12 @@ export const TanstackThroughputAreaChart = memo(function TanstackThroughputAreaC
 			return {
 				...row,
 				throughput,
-				errorThroughput: (throughput * row.errorRate) / 100,
+				// `errorRate` is a FRACTION (errors / requests), not a percentage —
+				// `formatErrorRate` multiplies by 100 on the way out, and production
+				// says so at `throughput-area-chart.tsx:96`. An earlier `/ 100` here
+				// drew the error series at 1/100 of its value, flat against the axis,
+				// so the two arms of the bench were not painting the same chart.
+				errorThroughput: throughput * row.errorRate,
 			}
 		})
 	}, [bucketSeconds])
@@ -87,93 +91,88 @@ export const TanstackThroughputAreaChart = memo(function TanstackThroughputAreaC
 		[colors],
 	)
 
-	const { probe, anchor: tooltipAnchor } = useMemo(() => createTooltipFocusProbe<ThroughputBenchRow>(), [])
+	const gradientId = useChartId("benchThroughput")
 
-	const definition = useMemo(
-		() =>
-			defineChart({
-				gradients: [verticalGradient(GRADIENT_ID, colors.throughput)],
-				marks: [
-					areaY(rows, {
-						id: "throughputArea",
-						x: (d: ThroughputBenchRow) => d.bucket,
-						y: (d: ThroughputBenchRow) => d.throughput,
-						fill: `url(#${GRADIENT_ID})`,
-						stroke: "none",
-					}),
-					lineY(rows, {
-						id: "throughputLine",
-						x: (d: ThroughputBenchRow) => d.bucket,
-						y: (d: ThroughputBenchRow) => d.throughput,
-						stroke: colors.throughput,
-						strokeWidth: 2,
-					}),
-					lineY(rows, {
-						id: "errorThroughput",
-						x: (d: ThroughputBenchRow) => d.bucket,
-						y: (d: ThroughputBenchRow) => d.errorThroughput,
-						stroke: colors.error,
-						strokeWidth: 1.5,
-						strokeDasharray: "3 3",
-					}),
-					focusDot(
-						rows,
-						(d: ThroughputBenchRow) => d.bucket,
-						(d: ThroughputBenchRow) => d.throughput,
-						colors.throughput,
-						chromeColors,
-					),
-					focusDot(
-						rows,
-						(d: ThroughputBenchRow) => d.bucket,
-						(d: ThroughputBenchRow) => d.errorThroughput,
-						colors.error,
-						chromeColors,
-					),
-					focusCrosshair(chromeColors),
-				],
-				x: {
-					scale: scalePoint,
-					axis: {
-						line: false,
-						ticks: {
-							size: 0,
-							padding: 8,
-							spacing: 72,
-							format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
-						},
+	const focusStore = useMemo(() => createTooltipFocusStore<ThroughputBenchRow>(), [])
+
+	const definition = useMemo(() => {
+		const dataMax = rows.reduce((max, row) => Math.max(max, row.throughput), 0)
+
+		return defineChart({
+			gradients: [verticalGradient(gradientId, colors.throughput)],
+			marks: [
+				areaY(rows, {
+					id: "throughputArea",
+					x: (d: ThroughputBenchRow) => d.bucket,
+					y: (d: ThroughputBenchRow) => d.throughput,
+					fill: `url(#${gradientId})`,
+					stroke: "none",
+				}),
+				lineY(rows, {
+					id: "throughputLine",
+					x: (d: ThroughputBenchRow) => d.bucket,
+					y: (d: ThroughputBenchRow) => d.throughput,
+					stroke: colors.throughput,
+					strokeWidth: 2,
+				}),
+				lineY(rows, {
+					id: "errorThroughput",
+					x: (d: ThroughputBenchRow) => d.bucket,
+					y: (d: ThroughputBenchRow) => d.errorThroughput,
+					stroke: colors.error,
+					strokeWidth: 1.5,
+					strokeDasharray: "3 3",
+				}),
+				focusDot(
+					rows,
+					(d: ThroughputBenchRow) => d.bucket,
+					(d: ThroughputBenchRow) => d.throughput,
+					colors.throughput,
+					chromeColors,
+				),
+				focusDot(
+					rows,
+					(d: ThroughputBenchRow) => d.bucket,
+					(d: ThroughputBenchRow) => d.errorThroughput,
+					colors.error,
+					chromeColors,
+				),
+				focusCrosshair(chromeColors),
+			],
+			x: {
+				scale: scalePoint,
+				axis: {
+					line: false,
+					ticks: {
+						size: 0,
+						padding: 8,
+						spacing: 72,
+						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
 					},
 				},
-				y: {
-					scale: scaleLinear,
-					grid: true,
-					axis: {
-						line: false,
-						ticks: {
-							size: 0,
-							padding: 6,
-							format: (value: number) => formatThroughput(value, rateLabel),
-						},
+			},
+			y: {
+				// Recharts anchors a numeric YAxis at 0 by default (production passes
+				// no `domain`, `throughput-area-chart.tsx:152`); TanStack's inferred
+				// linear domain starts at the data minimum, which floats the area off
+				// the axis. Same pin as `latency-line.tsx`.
+				scale: scaleLinear().domain([0, dataMax]),
+				nice: true,
+				grid: true,
+				axis: {
+					line: false,
+					ticks: {
+						size: 0,
+						padding: 6,
+						format: (value: number) => formatThroughput(value, rateLabel),
 					},
 				},
-				focus: "group-x",
-				focusRing: false,
-				tooltip: {
-					use: tooltip,
-					className: "maple-bench-tooltip",
-					// Anchor to the CURSOR, not the datum. The default "point" anchor
-					// snaps the card to each bucket's plotted position, and with
-					// placement "auto" it re-picks a side as it goes — a 60px pointer
-					// move shifted the card 97px. `ChartFloatingTooltip` anchors at the
-					// cursor with a fixed side for exactly this reason. The callback form
-					// returns the pointer AND captures the scales the row highlight needs.
-					anchor: tooltipAnchor,
-					placement: "right",
-					offset: 12,
-				},
-			}),
-		[rows, colors, axisContext, tooltipAnchor, chromeColors],
-	)
+			},
+			focus: "group-x",
+			focusRing: false,
+			tooltip: cursorTooltip(focusStore.anchor),
+		})
+	}, [rows, colors, gradientId, axisContext, focusStore, chromeColors])
 
 	return (
 		<TanstackChartFrame
@@ -185,7 +184,7 @@ export const TanstackThroughputAreaChart = memo(function TanstackThroughputAreaC
 				<TooltipBody
 					points={points}
 					series={tooltipSeries}
-					probe={probe}
+					focusStore={focusStore}
 					heading={(row: ThroughputBenchRow) =>
 						formatBucketLabel(row.bucket, axisContext, "tooltip")
 					}

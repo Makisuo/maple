@@ -2,8 +2,7 @@ import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/th
 import { formatBucketLabel, formatNumber } from "@maple/ui/lib/format"
 import { areaY, defineChart, lineY } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
-import { scalePoint } from "@tanstack/charts-scales/point"
-import { tooltip } from "@tanstack/charts/tooltip"
+import { scaleTime } from "d3-scale"
 import { memo, useMemo, type ReactNode } from "react"
 
 import {
@@ -14,11 +13,13 @@ import {
 	type LegendSeriesSpec,
 } from "@/lab/bench/tanstack/chart-legend"
 import {
-	createTooltipFocusProbe,
+	createTooltipFocusStore,
+	cursorTooltip,
 	focusCrosshair,
 	focusDot,
 	roundCapDasharray,
 	TooltipBody,
+	useChartId,
 	usePlotChromeColors,
 	verticalGradient,
 	type TooltipSeriesSpec,
@@ -99,7 +100,6 @@ function AreaFigure({
 	className,
 	series,
 	mutedIds,
-	idPrefix,
 	legend,
 }: {
 	rows: readonly TimeseriesSpikeRow[]
@@ -108,9 +108,14 @@ function AreaFigure({
 	className?: string
 	series: readonly ThroughputSeries[]
 	mutedIds?: ReadonlySet<string>
-	idPrefix: string
 	legend?: ReactNode
 }) {
+	// Gradient ids live in one document-wide namespace and the gallery mounts every
+	// arm at once, so two `<defs>` sharing an id is a silently wrong fill rather than
+	// an error. This used to be an `idPrefix` prop each call site had to remember to
+	// vary; `useChartId` makes it a property of the instance instead.
+	const idPrefix = useChartId("areaSpike")
+
 	const chromeColors = usePlotChromeColors()
 
 	const axisContext = useMemo(() => timeseriesAxisContext(rows), [rows])
@@ -126,7 +131,7 @@ function AreaFigure({
 		[series],
 	)
 
-	const { probe, anchor: tooltipAnchor } = useMemo(() => createTooltipFocusProbe<TimeseriesSpikeRow>(), [])
+	const focusStore = useMemo(() => createTooltipFocusStore<TimeseriesSpikeRow>(), [])
 
 	const definition = useMemo(() => {
 		const { solid, dashed } = incomplete
@@ -151,7 +156,7 @@ function AreaFigure({
 				...series.flatMap((s) => [
 					areaY(solid, {
 						id: `${s.id}Area`,
-						x: (d: TimeseriesSpikeRow) => d.bucket,
+						x: (d: TimeseriesSpikeRow) => d.date,
 						y: s.value,
 						fill: `url(#${idPrefix}${s.id})`,
 						stroke: "none",
@@ -159,7 +164,7 @@ function AreaFigure({
 					}),
 					areaY(dashed, {
 						id: `${s.id}AreaIncomplete`,
-						x: (d: TimeseriesSpikeRow) => d.bucket,
+						x: (d: TimeseriesSpikeRow) => d.date,
 						y: s.value,
 						fill: `url(#${idPrefix}${s.id}Faded)`,
 						stroke: "none",
@@ -167,7 +172,7 @@ function AreaFigure({
 					}),
 					lineY(solid, {
 						id: `${s.id}Line`,
-						x: (d: TimeseriesSpikeRow) => d.bucket,
+						x: (d: TimeseriesSpikeRow) => d.date,
 						y: s.value,
 						stroke: s.color,
 						strokeWidth: STROKE_WIDTH,
@@ -175,7 +180,7 @@ function AreaFigure({
 					}),
 					lineY(dashed, {
 						id: `${s.id}LineIncomplete`,
-						x: (d: TimeseriesSpikeRow) => d.bucket,
+						x: (d: TimeseriesSpikeRow) => d.date,
 						y: s.value,
 						stroke: s.color,
 						strokeWidth: STROKE_WIDTH,
@@ -186,7 +191,7 @@ function AreaFigure({
 				...series.map((s) =>
 					focusDot(
 						rows,
-						(d: TimeseriesSpikeRow) => d.bucket,
+						(d: TimeseriesSpikeRow) => d.date,
 						s.value,
 						// `dot` has no per-datum opacity, so a faded dot is a faded colour.
 						isMuted(s.id)
@@ -198,19 +203,21 @@ function AreaFigure({
 				focusCrosshair(chromeColors),
 			],
 			x: {
-				// Pinned, not inferred: the solid and dashed marks each cover only part
-				// of the domain (see `line-spike.tsx` for the same note).
-				scale: scalePoint(
-					rows.map((row) => row.bucket),
-					[0, 1],
-				),
+				// The d3 time-scale FACTORY over `row.date`, inferred rather than
+				// pinned — see `line-spike.tsx` for the full note: a continuous domain
+				// is min/max over the union of the solid and dashed slices
+				// (`dist/scale-input.js` `inferScaleDomain`), so the partial-coverage
+				// hazard that forced the point scale's pinning does not exist here.
+				scale: scaleTime,
 				axis: {
 					line: false,
 					ticks: {
 						size: 0,
 						padding: 8,
 						spacing: 72,
-						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+						// Ticks are scale-chosen Dates now, and `formatBucketLabel` returns
+						// "" for non-strings — round-trip through ISO (see `line-spike.tsx`).
+						format: (value: Date) => formatBucketLabel(value.toISOString(), axisContext, "tick"),
 					},
 				},
 			},
@@ -222,15 +229,9 @@ function AreaFigure({
 			},
 			focus: "group-x",
 			focusRing: false,
-			tooltip: {
-				use: tooltip,
-				className: "maple-bench-tooltip",
-				anchor: tooltipAnchor,
-				placement: "right",
-				offset: 12,
-			},
+			tooltip: cursorTooltip(focusStore.anchor),
 		})
-	}, [rows, series, mutedIds, incomplete, idPrefix, axisContext, tooltipAnchor, chromeColors])
+	}, [rows, series, mutedIds, incomplete, idPrefix, axisContext, focusStore, chromeColors])
 
 	return (
 		<TanstackChartFrame
@@ -243,7 +244,7 @@ function AreaFigure({
 				<TooltipBody
 					points={points}
 					series={tooltipSeries}
-					probe={probe}
+					focusStore={focusStore}
 					heading={(row: TimeseriesSpikeRow) =>
 						`${formatBucketLabel(row.bucket, axisContext, "tooltip")}${row.partial ? " · partial" : ""}`
 					}
@@ -286,10 +287,6 @@ export const AreaSpike = memo(function AreaSpike({
 			incomplete={incomplete}
 			className={className}
 			series={series}
-			// Gradient ids live in one document-wide namespace, and the gallery mounts
-			// every arm at once. Suffixing by variant keeps `url(#…)` pointing at this
-			// chart's own definition.
-			idPrefix={incomplete ? "areaSpikeIncomplete" : "areaSpike"}
 		/>
 	)
 })
@@ -331,9 +328,6 @@ export const AreaLegendSpike = memo(function AreaLegendSpike({
 			className={className}
 			series={series}
 			mutedIds={mutedIds}
-			// A third namespace: this arm renders beside both others in the gallery,
-			// and two `<defs>` sharing an id is a silently wrong fill, not an error.
-			idPrefix={incomplete ? "areaLegendSpikeIncomplete" : "areaLegendSpike"}
 			legend={
 				<ChartSeriesLegend
 					series={legendSeries}

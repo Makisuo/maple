@@ -5,7 +5,6 @@ import { scaleBand } from "@tanstack/charts-scales/band"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { controlledSignal } from "@tanstack/charts/interaction/signal"
 import { interactiveColorLegend } from "@tanstack/charts/legend"
-import { tooltip } from "@tanstack/charts/tooltip"
 import { memo, useMemo, useState, type ReactNode } from "react"
 
 import {
@@ -14,7 +13,7 @@ import {
 	useChartLegendHighlight,
 	type LegendSeriesSpec,
 } from "@/lab/bench/tanstack/chart-legend"
-import { usePlotChromeColors } from "@/lab/bench/tanstack/chart-shared"
+import { cursorTooltip, usePlotChromeColors } from "@/lab/bench/tanstack/chart-shared"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
 import { muteColor } from "@/lab/charts/color-scale"
 import {
@@ -214,13 +213,7 @@ function StackedBarFigure({
 			// tooltip widens back out to the whole bucket itself.
 			focus: "nearest",
 			focusRing: false,
-			tooltip: {
-				use: tooltip,
-				className: "maple-bench-tooltip",
-				anchor: "pointer",
-				placement: "right",
-				offset: 12,
-			},
+			tooltip: cursorTooltip("pointer"),
 		})
 	}, [rows, byBucket, colorFor, incomplete, axisContext, chrome])
 
@@ -476,13 +469,7 @@ export const StackedBarSceneLegendSpike = memo(function StackedBarSceneLegendSpi
 			},
 			focus: "nearest",
 			focusRing: false,
-			tooltip: {
-				use: tooltip,
-				className: "maple-bench-tooltip",
-				anchor: "pointer",
-				placement: "right",
-				offset: 12,
-			},
+			tooltip: cursorTooltip("pointer"),
 		})
 	}, [rows, byBucket, colorFor, axisContext, visibleServices])
 

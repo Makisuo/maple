@@ -1,5 +1,5 @@
 import { cn } from "@maple/ui/lib/utils"
-import { createContext, use, useCallback, useMemo, useState, type ReactNode } from "react"
+import { createContext, Fragment, use, useCallback, useMemo, useState, type ReactNode } from "react"
 
 /**
  * The series key rendered beside a TanStack chart.
@@ -29,6 +29,14 @@ export interface LegendSeriesSpec {
 	color: string
 	/** Renders the swatch as a dashed outline, as `TooltipBody` does. */
 	dashed?: boolean
+	/**
+	 * A trailing figure — a total, a share, a latency. ALREADY FORMATTED: the
+	 * legend has no idea what unit a series carries, and `formatValueByUnit` lives
+	 * with the chart that knows.
+	 */
+	value?: string
+	/** A second trailing figure, right of `value` — typically a percentage. */
+	secondary?: string
 }
 
 interface ChartLegendState {
@@ -77,7 +85,6 @@ function useChartLegend(): ChartLegendContextValue {
 export function useChartLegendHighlight(): {
 	highlighted: string | null
 	highlight: (key: string) => void
-	isMuted: (key: string) => boolean
 } {
 	const [highlighted, setHighlighted] = useState<string | null>(null)
 
@@ -85,9 +92,7 @@ export function useChartLegendHighlight(): {
 		setHighlighted((previous) => (previous === key ? null : key))
 	}, [])
 
-	const isMuted = useCallback((key: string) => highlighted !== null && highlighted !== key, [highlighted])
-
-	return { highlighted, highlight, isMuted }
+	return { highlighted, highlight }
 }
 
 function ChartLegendProvider({
@@ -159,7 +164,7 @@ function ChartLegendItems({ children }: { children?: (series: LegendSeriesSpec) 
 		<>
 			{state.series.map((entry) =>
 				children ? (
-					<span key={entry.key}>{children(entry)}</span>
+					<Fragment key={entry.key}>{children(entry)}</Fragment>
 				) : (
 					<ChartLegendItem key={entry.key} seriesKey={entry.key} />
 				),
@@ -196,7 +201,29 @@ function ChartLegendItem({ seriesKey }: { seriesKey: string }) {
 		>
 			<ChartLegendSwatch color={entry.color} dashed={entry.dashed} />
 			<span className="truncate">{entry.label}</span>
+			{entry.value === undefined ? null : (
+				<ChartLegendValue value={entry.value} secondary={entry.secondary} />
+			)}
 		</button>
+	)
+}
+
+/**
+ * The trailing figures on a stats row.
+ *
+ * `ml-auto` rather than a grid: the rows live in a flex column and the labels
+ * vary in length, so pushing the numbers to the right edge is what keeps the
+ * `tabular-nums` columns aligned with each other. Matches `QueryBuilderLegend`'s
+ * stats cells — `font-mono tabular-nums`, muted secondary.
+ */
+function ChartLegendValue({ value, secondary }: { value: string; secondary?: string }) {
+	return (
+		<span className="ml-auto flex shrink-0 items-baseline gap-2 font-mono tabular-nums">
+			<span className="text-foreground">{value}</span>
+			{secondary === undefined ? null : (
+				<span className="w-11 text-right text-muted-foreground">{secondary}</span>
+			)}
+		</span>
 	)
 }
 
@@ -226,6 +253,7 @@ export const ChartLegend = {
 	Item: ChartLegendItem,
 	Swatch: ChartLegendSwatch,
 	Label: ChartLegendLabel,
+	Value: ChartLegendValue,
 }
 
 /**
@@ -258,6 +286,41 @@ export function ChartSeriesLegend({
 			<ChartLegend.Row>
 				<ChartLegend.Items />
 			</ChartLegend.Row>
+		</ChartLegend.Provider>
+	)
+}
+
+/**
+ * The vertical stats key that sits BESIDE a chart rather than under it — what
+ * `QueryBuilderPieChart` renders as `legend="right"`.
+ *
+ * A separate variant from `ChartSeriesLegend`, not a `layout` prop on it: the two
+ * differ in which container part they compose (`Column` vs `Row`) and in whether
+ * the series carry figures at all. Same provider, same items, same click
+ * behaviour.
+ */
+export function ChartStatsLegend({
+	series,
+	highlighted,
+	onHighlight,
+	label,
+}: {
+	series: readonly LegendSeriesSpec[]
+	highlighted: string | null
+	onHighlight: (key: string) => void
+	label: string
+}) {
+	if (series.length === 0) return null
+	return (
+		<ChartLegend.Provider
+			series={series}
+			highlighted={highlighted}
+			onHighlight={onHighlight}
+			label={label}
+		>
+			<ChartLegend.Column className="pl-0">
+				<ChartLegend.Items />
+			</ChartLegend.Column>
 		</ChartLegend.Provider>
 	)
 }

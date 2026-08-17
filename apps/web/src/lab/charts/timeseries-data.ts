@@ -78,6 +78,16 @@ function bucketStarts(count: number, lastStartMs: number): number[] {
  */
 export interface TimeseriesSpikeRow {
 	bucket: string
+	/**
+	 * The same instant as `bucket`, pre-parsed. The TanStack arms feed a d3 time
+	 * scale, whose temporal inference REQUIRES `Date` channel values —
+	 * `inferScaleDomain` throws "A temporal scale factory requires Date channel
+	 * values" on numbers (`@tanstack/charts/dist/scale-input.js`) — and parsing in
+	 * the accessor would allocate a Date per datum per mark per render. `bucket`
+	 * stays: the production Recharts arms consume it via `toLatencyProductionRows`
+	 * / `toThroughputProductionRows`, and `formatBucketLabel` only accepts strings.
+	 */
+	date: Date
 	throughput: number
 	/** A FRACTION, not a percentage — 0.02 is 2%. */
 	errorRate: number
@@ -92,8 +102,10 @@ function makeTimeseriesRows(lastStartMs: number): TimeseriesSpikeRow[] {
 	return bucketStarts(count, lastStartMs).map((startMs, index) => {
 		const phase = (index / (count - 1)) * Math.PI * 6
 		const base = 0.55 + 0.35 * Math.sin(phase)
+		const date = new Date(startMs)
 		return {
-			bucket: new Date(startMs).toISOString(),
+			bucket: date.toISOString(),
+			date,
 			throughput: Math.round(4000 * base + 400 * Math.sin(phase * 3.1)),
 			errorRate: Math.max(0, 0.02 + 0.018 * Math.sin(phase * 1.7 + 0.9)),
 			p50LatencyMs: 40 + 18 * base,

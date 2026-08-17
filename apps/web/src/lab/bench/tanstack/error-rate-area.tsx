@@ -1,7 +1,6 @@
 import { areaY, defineChart, lineY } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { scalePoint } from "@tanstack/charts-scales/point"
-import { tooltip } from "@tanstack/charts/tooltip"
 import { formatBucketLabel, formatErrorRate, inferBucketSeconds, inferRangeMs } from "@maple/ui/lib/format"
 import { memo, useMemo } from "react"
 
@@ -9,17 +8,17 @@ import { overviewBenchRows, type OverviewBenchRow } from "./bench-data"
 import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
 
 import {
-	createTooltipFocusProbe,
+	createTooltipFocusStore,
+	cursorTooltip,
 	focusCrosshair,
 	focusDot,
 	TooltipBody,
+	useChartId,
 	usePlotChromeColors,
 	verticalGradient,
 	type TooltipSeriesSpec,
 } from "./chart-shared"
 import { TanstackChartFrame, type TanstackRenderer } from "./tanstack-chart"
-
-const GRADIENT_ID = "benchErrorRateGradient"
 
 const ERROR_RATE_TOKENS = {
 	error: ["--chart-error", "#ef4444"],
@@ -64,20 +63,22 @@ export const TanstackErrorRateAreaChart = memo(function TanstackErrorRateAreaCha
 		[color],
 	)
 
-	const { probe, anchor: tooltipAnchor } = useMemo(() => createTooltipFocusProbe<OverviewBenchRow>(), [])
+	const gradientId = useChartId("benchErrorRate")
+
+	const focusStore = useMemo(() => createTooltipFocusStore<OverviewBenchRow>(), [])
 
 	const definition = useMemo(() => {
 		const dataMax = overviewBenchRows.reduce((max, row) => Math.max(max, row.errorRate), 0)
 		const yMax = Math.min(1, Math.max(dataMax * 1.2, 0.01))
 
 		return defineChart({
-			gradients: [verticalGradient(GRADIENT_ID, color)],
+			gradients: [verticalGradient(gradientId, color)],
 			marks: [
 				areaY(overviewBenchRows, {
 					id: "errorRateArea",
 					x: (d: OverviewBenchRow) => d.bucket,
 					y: (d: OverviewBenchRow) => d.errorRate,
-					fill: `url(#${GRADIENT_ID})`,
+					fill: `url(#${gradientId})`,
 					stroke: "none",
 				}),
 				lineY(overviewBenchRows, {
@@ -118,21 +119,9 @@ export const TanstackErrorRateAreaChart = memo(function TanstackErrorRateAreaCha
 			},
 			focus: "group-x",
 			focusRing: false,
-			tooltip: {
-				use: tooltip,
-				className: "maple-bench-tooltip",
-				// Anchor to the CURSOR, not the datum. The default "point" anchor
-				// snaps the card to each bucket's plotted position, and with
-				// placement "auto" it re-picks a side as it goes — a 60px pointer
-				// move shifted the card 97px. `ChartFloatingTooltip` anchors at the
-				// cursor with a fixed side for exactly this reason. The callback form
-				// returns the pointer AND captures the scales the row highlight needs.
-				anchor: tooltipAnchor,
-				placement: "right",
-				offset: 12,
-			},
+			tooltip: cursorTooltip(focusStore.anchor),
 		})
-	}, [color, axisContext, tooltipAnchor, chromeColors])
+	}, [color, gradientId, axisContext, focusStore, chromeColors])
 
 	return (
 		<TanstackChartFrame
@@ -144,7 +133,7 @@ export const TanstackErrorRateAreaChart = memo(function TanstackErrorRateAreaCha
 				<TooltipBody
 					points={points}
 					series={tooltipSeries}
-					probe={probe}
+					focusStore={focusStore}
 					heading={(row: OverviewBenchRow) => formatBucketLabel(row.bucket, axisContext, "tooltip")}
 				/>
 			)}

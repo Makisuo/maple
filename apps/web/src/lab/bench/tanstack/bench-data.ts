@@ -40,12 +40,15 @@ function makeRows(): OverviewBenchRow[] {
 	return rows
 }
 
-export const OVERVIEW_BENCH_ROWS: readonly OverviewBenchRow[] = makeRows()
-
 /**
  * Recharts' `dataKey` reads and TanStack's channel accessors both need a mutable
- * array; the frozen export above is the identity all arms share.
+ * array, so the mutable form is the one that is built and the `readonly` view is
+ * derived from it. The other direction needs a cast to strip `readonly`, which
+ * is a lie the compiler can't check.
  */
-export const overviewBenchRows = OVERVIEW_BENCH_ROWS as OverviewBenchRow[]
+export const overviewBenchRows: OverviewBenchRow[] = makeRows()
+
+/** The same identity, for callers that only read. */
+export const OVERVIEW_BENCH_ROWS: readonly OverviewBenchRow[] = overviewBenchRows
 
 export const BENCH_BUCKETS: readonly string[] = OVERVIEW_BENCH_ROWS.map((row) => row.bucket)

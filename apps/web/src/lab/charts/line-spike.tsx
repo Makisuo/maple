@@ -2,8 +2,7 @@ import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/th
 import { formatBucketLabel, formatLatency } from "@maple/ui/lib/format"
 import { defineChart, lineY } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
-import { scalePoint } from "@tanstack/charts-scales/point"
-import { tooltip } from "@tanstack/charts/tooltip"
+import { scaleTime } from "d3-scale"
 import { memo, useMemo, type ReactNode } from "react"
 
 import {
@@ -14,7 +13,8 @@ import {
 	type LegendSeriesSpec,
 } from "@/lab/bench/tanstack/chart-legend"
 import {
-	createTooltipFocusProbe,
+	createTooltipFocusStore,
+	cursorTooltip,
 	focusCrosshair,
 	focusDot,
 	roundCapDasharray,
@@ -119,7 +119,7 @@ function LineFigure({
 		[series],
 	)
 
-	const { probe, anchor: tooltipAnchor } = useMemo(() => createTooltipFocusProbe<TimeseriesSpikeRow>(), [])
+	const focusStore = useMemo(() => createTooltipFocusStore<TimeseriesSpikeRow>(), [])
 
 	const definition = useMemo(() => {
 		const { solid, dashed } = incomplete
@@ -149,7 +149,7 @@ function LineFigure({
 				...series.map((s) =>
 					lineY(solid, {
 						id: s.id,
-						x: (d: TimeseriesSpikeRow) => d.bucket,
+						x: (d: TimeseriesSpikeRow) => d.date,
 						y: (d: TimeseriesSpikeRow) => d[s.key],
 						stroke: s.color,
 						strokeWidth: STROKE_WIDTH,
@@ -159,7 +159,7 @@ function LineFigure({
 				...series.map((s) =>
 					lineY(dashed, {
 						id: `${s.id}Incomplete`,
-						x: (d: TimeseriesSpikeRow) => d.bucket,
+						x: (d: TimeseriesSpikeRow) => d.date,
 						y: (d: TimeseriesSpikeRow) => d[s.key],
 						stroke: s.color,
 						strokeWidth: STROKE_WIDTH,
@@ -174,7 +174,7 @@ function LineFigure({
 				...series.map((s) =>
 					focusDot(
 						rows,
-						(d: TimeseriesSpikeRow) => d.bucket,
+						(d: TimeseriesSpikeRow) => d.date,
 						(d: TimeseriesSpikeRow) => d[s.key],
 						// The dot has to fade with its line. `dot`'s `fill` is a channel but
 						// its opacity is not, so a muted dot is a muted COLOUR — the same
@@ -188,20 +188,43 @@ function LineFigure({
 				focusCrosshair(chromeColors),
 			],
 			x: {
-				// Pinned to every bucket, not inferred. Two marks over two slices would
-				// otherwise each contribute part of the domain, and a point scale built
-				// from a union has no guarantee of staying in bucket order.
-				scale: scalePoint(
-					rows.map((row) => row.bucket),
-					[0, 1],
-				),
+				// A d3 TIME scale over the precomputed `row.date`, per the Scales and D3
+				// guide — the compact scales stop at linear/band/point/ordinal, and a
+				// point scale over ISO strings put axis ticks on arbitrary buckets
+				// ("08:25 PM") instead of clock boundaries.
+				//
+				// The bare FACTORY, as the docs example passes it: `isScaleFactory` is
+				// `typeof source === "function" && !("copy" in source)`
+				// (`dist/scale-input.js`), and `"copy" in scaleTime` is false — `copy`
+				// lives on the instance, so the factory infers its domain from the data.
+				// Inference is safe here even though the solid and dashed marks each
+				// cover only a slice: a continuous domain is min/max over the union
+				// (`inferScaleDomain`), which is order-independent, and the slices
+				// overlap at the bridge row — so the inferred domain IS the old pinned
+				// one, [first bucket, last bucket]. The point-scale pinning existed
+				// because a CATEGORICAL union had no such guarantee.
+				//
+				// No `nice`: snapping the domain outward would detach the first/last
+				// point from the plot edges, which the Recharts arm this lab diffs
+				// against does not do.
+				//
+				// `scaleTime`, not the docs' `scaleUtc`: labels below render in LOCAL
+				// time (`formatBucketLabel` uses `toLocaleTimeString`), and only
+				// local-time ticks land on locally round boundaries — UTC ticks read as
+				// ":15"/":45" in a fractional-offset timezone.
+				scale: scaleTime,
 				axis: {
 					line: false,
 					ticks: {
 						size: 0,
 						padding: 8,
 						spacing: 72,
-						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+						// Ticks are now Dates the SCALE chose, not row buckets, so this
+						// cannot pass `value.bucket` — and `formatBucketLabel` returns ""
+						// for anything but a string. Round-tripping through ISO keeps the
+						// labels byte-identical to the production arm's; ~7 ticks per
+						// render, so the allocation is noise.
+						format: (value: Date) => formatBucketLabel(value.toISOString(), axisContext, "tick"),
 					},
 				},
 			},
@@ -216,19 +239,9 @@ function LineFigure({
 			},
 			focus: "group-x",
 			focusRing: false,
-			tooltip: {
-				use: tooltip,
-				className: "maple-bench-tooltip",
-				// Anchor to the CURSOR, not the datum: the default "point" anchor snaps
-				// the card to each bucket's plotted position and shifts it as the pointer
-				// moves. The callback form also captures the scales the row highlight
-				// needs.
-				anchor: tooltipAnchor,
-				placement: "right",
-				offset: 12,
-			},
+			tooltip: cursorTooltip(focusStore.anchor),
 		})
-	}, [rows, series, mutedIds, incomplete, axisContext, tooltipAnchor, chromeColors])
+	}, [rows, series, mutedIds, incomplete, axisContext, focusStore, chromeColors])
 
 	return (
 		<TanstackChartFrame
@@ -241,7 +254,7 @@ function LineFigure({
 				<TooltipBody
 					points={points}
 					series={tooltipSeries}
-					probe={probe}
+					focusStore={focusStore}
 					heading={(row: TimeseriesSpikeRow) =>
 						`${formatBucketLabel(row.bucket, axisContext, "tooltip")}${row.partial ? " · partial" : ""}`
 					}

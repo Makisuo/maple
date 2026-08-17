@@ -383,7 +383,7 @@ export function ChartsLab({
 			),
 		},
 		"pie-legend-tanstack": {
-			title: "Pie + legend — TanStack (the only affordance radialArc allows; muting keeps every wedge in place)",
+			title: "Pie + stats legend — TanStack (hover grows the slice via onFocusChange + a second arc mark; click a row to pin it)",
 			node: <PieLegendSpike rows={pieRows} renderer={renderer} className="h-full w-full" />,
 		},
 		"treemap-legend": {

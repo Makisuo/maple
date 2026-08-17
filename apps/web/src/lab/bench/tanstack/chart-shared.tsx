@@ -2,10 +2,55 @@ import { findNearestSeriesKey } from "@maple/ui/components/charts/_shared/neares
 import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
 import { crosshair, dot, whenFocused } from "@tanstack/charts"
 import type { ChartLinearGradient, ChartPoint, ChartTooltipAnchor, ChartValue } from "@tanstack/charts"
-import type { ReactNode } from "react"
+import { tooltip } from "@tanstack/charts/tooltip"
+import { useId, useSyncExternalStore, type ReactNode } from "react"
 
 /** How far from a series' plotted point the cursor may sit and still emphasise it. */
 const HIGHLIGHT_MAX_DISTANCE_PX = 24
+
+/**
+ * A DOM-safe unique id for gradients and anything else referenced as `url(#…)`.
+ *
+ * Gradient ids used to be module constants, which meant two instances of the
+ * same chart on one page emitted duplicate `<defs>` ids and the second silently
+ * painted with the first's stops. `area-spike.tsx` worked around it by threading
+ * an `idPrefix` prop down from every call site — prop-drilling a uniqueness
+ * concern the component can own.
+ *
+ * `useId()` alone is not enough: React 19 returns `«r0»`, and those brackets
+ * inside a `fill="url(#…)"` reference are a portability risk across the SVG and
+ * canvas renderers. Sanitizing to `[A-Za-z0-9_-]` is stable under any
+ * `identifierPrefix`.
+ */
+export function useChartId(prefix: string): string {
+	const raw = useId()
+	return `${prefix}-${raw.replace(/[^A-Za-z0-9_-]/g, "")}`
+}
+
+/**
+ * The cursor-anchored tooltip every timeseries spike uses.
+ *
+ * Anchor to the CURSOR, not the datum. The default "point" anchor snaps the card
+ * to each bucket's plotted position, and with placement "auto" it re-picks a side
+ * as it goes — a 60px pointer move shifted the card 97px. `ChartFloatingTooltip`
+ * anchors at the cursor with a fixed side for exactly this reason.
+ *
+ * Pass a focus store's `anchor` to also capture the scales the tooltip's row
+ * highlight needs; pass `"pointer"` when the chart has no such highlight. Both
+ * produce the same placement — the callback form just observes on the way past.
+ *
+ * `focus` and `focusRing` stay on the caller: they genuinely differ per chart
+ * (`"group-x"`, `"nearest"`, `focusGroupAngle`) and each carries its own reason.
+ */
+export function cursorTooltip<TDatum>(anchor: ChartTooltipAnchor<TDatum, ChartValue, number> | "pointer") {
+	return {
+		use: tooltip,
+		className: "maple-bench-tooltip",
+		anchor,
+		placement: "right",
+		offset: 12,
+	} as const
+}
 
 /**
  * `VerticalGradient` (packages/ui) expressed as a TanStack spec gradient.
@@ -150,7 +195,7 @@ export function usePlotChromeColors(): PlotChromeColors {
  * anchor still returns the pointer, so this also *is* the `anchor: "pointer"`
  * behaviour, not an extra pass.
  */
-export interface TooltipFocusProbe {
+export interface TooltipFocus {
 	pointerY: number | null
 	/**
 	 * `ResolvedScale.map` declares `(value: unknown)`, but every y channel in
@@ -160,19 +205,60 @@ export interface TooltipFocusProbe {
 	mapY: ((value: number) => number) | null
 }
 
-export function createTooltipFocusProbe<TDatum>(): {
-	probe: TooltipFocusProbe
+export interface TooltipFocusStore<TDatum> {
 	anchor: ChartTooltipAnchor<TDatum, ChartValue, number>
-} {
-	const probe: TooltipFocusProbe = { pointerY: null, mapY: null }
+	subscribe: (listener: () => void) => () => void
+	getSnapshot: () => TooltipFocus
+}
+
+const EMPTY_FOCUS: TooltipFocus = { pointerY: null, mapY: null }
+
+/**
+ * A store rather than a mutable object, because `TooltipBody` reads this DURING
+ * RENDER. An earlier revision handed the body a plain object that `anchor`
+ * mutated in place, and that tears under concurrent rendering: any re-render not
+ * caused by a pointer move — a theme flip, a parent update, StrictMode's second
+ * pass — reads whatever the last anchor happened to leave behind.
+ *
+ * `useState` would be the obvious fix and the wrong one here: it adds a render
+ * per pointer move to the exact path this bench exists to measure. A store read
+ * through `useSyncExternalStore` costs nothing extra — `anchor` runs immediately
+ * before the host's own `setTarget` (`dist/react/tooltip.js:56`), so React's
+ * automatic batching collapses the notification into the render that already
+ * happens on every tooltip update.
+ */
+export function createTooltipFocusStore<TDatum>(): TooltipFocusStore<TDatum> {
+	let snapshot: TooltipFocus = EMPTY_FOCUS
+	const listeners = new Set<() => void>()
 
 	const anchor: ChartTooltipAnchor<TDatum, ChartValue, number> = (_points, context) => {
-		probe.pointerY = context.pointer?.y ?? null
-		probe.mapY = context.scales.y?.map ?? null
+		const pointerY = context.pointer?.y ?? null
+		const mapY = context.scales.y?.map ?? null
+		// Re-anchoring at the same position must not notify — otherwise a scene
+		// update that doesn't move the cursor costs a render the old object never did.
+		if (pointerY !== snapshot.pointerY || mapY !== snapshot.mapY) {
+			snapshot = { pointerY, mapY }
+			for (const listener of listeners) listener()
+		}
 		return context.pointer
 	}
 
-	return { probe, anchor }
+	return {
+		anchor,
+		subscribe: (listener) => {
+			listeners.add(listener)
+			return () => {
+				listeners.delete(listener)
+			}
+		},
+		// Returns the CACHED object, never a fresh literal — `useSyncExternalStore`
+		// compares snapshots by identity and would loop forever on a new one.
+		getSnapshot: () => snapshot,
+	}
+}
+
+export function useTooltipFocus<TDatum>(store: TooltipFocusStore<TDatum>): TooltipFocus {
+	return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
 }
 
 export interface TooltipSeriesSpec<TDatum> {
@@ -200,13 +286,17 @@ export function TooltipBody<TDatum>({
 	points,
 	series,
 	heading,
-	probe,
+	focusStore,
 }: {
 	points: readonly ChartPoint<TDatum, ChartValue, number>[]
 	series: readonly TooltipSeriesSpec<TDatum>[]
 	heading: (datum: TDatum) => string
-	probe?: TooltipFocusProbe
+	focusStore: TooltipFocusStore<TDatum>
 }): ReactNode {
+	// Subscribed, not read off a mutable object — see `createTooltipFocusStore`.
+	// Called before the early return below because it is a hook.
+	const focus = useTooltipFocus(focusStore)
+
 	const first = points[0]
 	if (!first) return null
 	const datum = first.datum
@@ -215,16 +305,16 @@ export function TooltipBody<TDatum>({
 	// ChartTooltipContent does. Single-series charts emphasise nothing — there is
 	// no ambiguity to resolve, and bolding the only row is just noise.
 	let highlightLabel: string | undefined
-	if (probe?.mapY && probe.pointerY != null && series.length > 1) {
+	if (focus.mapY && focus.pointerY != null && series.length > 1) {
 		const yByLabel: Record<string, number> = {}
 		for (const spec of series) {
 			const value = spec.value(datum)
-			if (value != null) yByLabel[spec.label] = probe.mapY(value)
+			if (value != null) yByLabel[spec.label] = focus.mapY(value)
 		}
 		highlightLabel = findNearestSeriesKey(
 			yByLabel,
 			series.map((spec) => spec.label),
-			probe.pointerY,
+			focus.pointerY,
 			HIGHLIGHT_MAX_DISTANCE_PX,
 		)
 	}

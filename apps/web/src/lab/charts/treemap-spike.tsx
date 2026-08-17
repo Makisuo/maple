@@ -87,6 +87,13 @@ const PATH_DELIMITER = "\u0000"
 const compactCount = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
 
 /**
+ * How far a muted tile's LABEL mixes toward the background — much less than the
+ * tile itself (`MUTED_COLOR_AMOUNT`), because the label has to stay legible
+ * against a fill that has already receded.
+ */
+const MUTED_LABEL_AMOUNT = 0.45
+
+/**
  * Phase 0 spike: does `treemap` render an area-weighted service → operation
  * breakdown, and are in-cell labels expressible?
  *
@@ -182,6 +189,7 @@ function TreemapFigure({
 	className,
 	colors,
 	serviceColor,
+	labelColorFor,
 	legend,
 }: {
 	rows: readonly TreemapSpikeRow[]
@@ -189,6 +197,13 @@ function TreemapFigure({
 	className?: string
 	colors: Readonly<Record<keyof typeof TILE_TOKENS, string>>
 	serviceColor: (service: string) => string
+	/**
+	 * In-cell label colour, per service. Defaults to `--background`, which is the
+	 * right read on a saturated tile — but a MUTED tile is nearly the background
+	 * already, so a background-coloured label on one disappears rather than
+	 * receding. The legend variant overrides this; nothing else needs to.
+	 */
+	labelColorFor?: (service: string) => string
 	legend?: ReactNode
 }) {
 	const definition = useMemo(() => {
@@ -223,7 +238,7 @@ function TreemapFigure({
 					// In-cell labels, measured and dropped by the mark when they do not
 					// fit. `node.name` is the LAST path segment, i.e. the operation.
 					label: (node) => node.name,
-					labelFill: colors.label,
+					labelFill: (node) => labelColorFor?.(node.data?.service ?? node.name) ?? colors.label,
 					labelFontSize: 10,
 					labelFontWeight: 600,
 					labelPadding: 6,
@@ -238,7 +253,7 @@ function TreemapFigure({
 			focusRing: false,
 			tooltip: { use: tooltip, className: "maple-bench-tooltip" },
 		})
-	}, [rows, colors, serviceColor])
+	}, [rows, colors, serviceColor, labelColorFor])
 
 	const total = useMemo(() => rows.reduce((sum, row) => sum + row.spanCount, 0), [rows])
 
@@ -326,6 +341,18 @@ export const TreemapLegendSpike = memo(function TreemapLegendSpike({
 				: muteColor(serviceColor(service), chromeColors.background, MUTED_COLOR_AMOUNT)
 	}, [serviceColor, highlighted, chromeColors])
 
+	// A muted tile sits close to the background, so the usual `--background` label
+	// would vanish into it. Those tiles get their own service colour at PART
+	// strength instead: still quiet, still legible, and it keeps saying which
+	// service the tile belongs to.
+	const labelColorFor = useMemo(() => {
+		if (highlighted === null) return undefined
+		return (service: string) =>
+			service === highlighted
+				? colors.label
+				: muteColor(serviceColor(service), chromeColors.background, MUTED_LABEL_AMOUNT)
+	}, [serviceColor, highlighted, colors, chromeColors])
+
 	return (
 		<TreemapFigure
 			rows={rows}
@@ -333,6 +360,7 @@ export const TreemapLegendSpike = memo(function TreemapLegendSpike({
 			className={className}
 			colors={colors}
 			serviceColor={emphasisedServiceColor}
+			labelColorFor={labelColorFor}
 			legend={
 				<ChartSeriesLegend
 					series={legendSeries}
