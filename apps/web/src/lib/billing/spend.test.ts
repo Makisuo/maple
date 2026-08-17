@@ -7,7 +7,7 @@ import type {
 	CatalogPlan,
 	DailySpendResponse,
 } from "@maple/domain/http"
-import { buildCumulativeSeries, buildSpendModel } from "./spend"
+import { buildCumulativeSeries, buildSpendModel, featureUnit, formatRateLabel } from "./spend"
 
 // Mock builders construct only the consumed subset of each domain schema, the
 // same approach cost-estimate.test.ts takes.
@@ -24,6 +24,8 @@ const startupPlan = {
 		{ featureId: "traces", included: 100, price: { amount: 0.3 } },
 		{ featureId: "metrics", included: 100, price: { amount: 0.3 } },
 		{ featureId: "browser_sessions", included: 5_000, price: { amount: 0.002 } },
+		// Quoted per 1,000 events: `amount` is the price of one billing block.
+		{ featureId: "product_events", included: 1_000_000, price: { amount: 0.05, billingUnits: 1_000 } },
 	],
 } as CatalogPlan
 
@@ -49,6 +51,7 @@ const buildCustomer = (
 			traces: { granted: 100 },
 			metrics: { granted: 100 },
 			browser_sessions: { granted: 5_000 },
+			product_events: { granted: 1_000_000 },
 		},
 	}) as BillingCustomer
 
@@ -139,6 +142,43 @@ describe("buildSpendModel", () => {
 			nowMs: NOW,
 		})
 		expect(result?.partial).toBe(true)
+	})
+
+	it("prices product events per event from a rate quoted per 1,000", () => {
+		const result = buildSpendModel({
+			customer: buildCustomer(),
+			plans: [startupPlan],
+			usage: { product_events: { sum: 1_400_000 } } as BillingUsage["total"],
+			nowMs: NOW,
+		})
+		if (result === null) throw new Error("expected a model")
+
+		const events = result.features.find((feature) => feature.featureId === "product_events")
+		if (events === undefined) throw new Error("expected product_events")
+		// 400,000 events over × $0.05 / 1,000 = $20 — NOT 400,000 × $0.05.
+		expect(events.overageUnits).toBe(400_000)
+		expect(events.overageCents).toBe(2_000)
+		expect(events.ratePerUnit).toBeCloseTo(0.00005, 10)
+		expect(events.billingUnits).toBe(1_000)
+		expect(result.topDriver?.featureId).toBe("product_events")
+	})
+
+	it("labels rates the way the price list quotes them", () => {
+		const result = model()
+		if (result === null) throw new Error("expected a model")
+		const labels = Object.fromEntries(
+			result.features.map((feature) => [feature.featureId, formatRateLabel(feature)]),
+		)
+		expect(labels).toEqual({
+			logs: "$0.30/GB",
+			traces: "$0.30/GB",
+			metrics: "$0.30/GB",
+			browser_sessions: "$0.002/session",
+			product_events: "$0.05/1,000 events",
+		})
+		expect(featureUnit("product_events")).toBe("events")
+		expect(featureUnit("browser_sessions")).toBe("sessions")
+		expect(featureUnit("logs")).toBe("GB")
 	})
 
 	it("falls back to the calendar month with no active subscription", () => {

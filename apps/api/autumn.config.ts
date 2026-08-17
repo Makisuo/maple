@@ -29,6 +29,16 @@ export const browserSessions = feature({
 	consumable: true,
 })
 
+// Product events (`track()` calls, `/v1/events` rows) — unit is one event.
+// Metered by the ingest gateway on both paths (see `PRODUCT_EVENTS_FEATURE_ID`
+// in apps/ingest/src/main.rs).
+export const productEvents = feature({
+	id: "product_events",
+	name: "Product Events",
+	type: "metered",
+	consumable: true,
+})
+
 export const aiInputTokens = feature({
 	id: "ai_input_tokens",
 	name: "AI Input Tokens",
@@ -93,6 +103,20 @@ export const startup = plan({
 			price: {
 				amount: 0.002,
 				billingUnits: 1,
+				billingMethod: "usage_based",
+				interval: "month",
+			},
+		},
+		{
+			featureId: "product_events",
+			included: 1_000_000,
+			// PLACEHOLDER price, chosen 2026-08-17: $0.05 per 1,000 events past the
+			// first 1M/month (PostHog-style order of magnitude). `amount` is the
+			// price per `billingUnits` in atmn, so 0.05 / 1000 = $0.00005 per event.
+			// To be confirmed before the plan is pushed to production.
+			price: {
+				amount: 0.05,
+				billingUnits: 1000,
 				billingMethod: "usage_based",
 				interval: "month",
 			},

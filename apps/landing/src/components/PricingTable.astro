@@ -23,6 +23,7 @@ import {
     getOffer,
     money,
     platformFeatures,
+    rateBlock,
     rateLabel,
     volume,
     type Allotment,
@@ -43,13 +44,17 @@ const PLATFORM_FEATURES = platformFeatures()
 // trailing "/ unit" one character apart and the rows read as misaligned. The
 // template gives the amount a fixed `ch` slot instead. Splitting on a sentinel
 // keeps every locale's own word order intact — ja renders "超過分 {rate} / セッション".
+// Events are quoted per block ("then $0.05 / 1,000 events"): the per-event rate
+// is a fraction of a cent and would render as "$0.000".
 const RATE_SLOT = "\u0000"
 const rowRate = (a: Allotment) => {
     if (a.rate === undefined) return undefined
     const rendered =
         a.unit === "gb"
             ? m.pricing_rate_gb({ rate: RATE_SLOT })
-            : m.pricing_rate_session({ rate: RATE_SLOT })
+            : a.unit === "sessions"
+              ? m.pricing_rate_session({ rate: RATE_SLOT })
+              : m.pricing_rate_events({ rate: RATE_SLOT, block: rateBlock(a) })
     const [before, after = ""] = rendered.split(RATE_SLOT)
     return { before, amount: rateLabel(a.rate), after }
 }
@@ -176,6 +181,9 @@ const containerClass = variant === "home" ? "shell" : "mx-auto max-w-5xl px-6"
                                     )}
                                     {a.featureId === "browser_sessions" && (
                                         <svg class="h-4 w-4 shrink-0 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M4 6L4 6.01"/><path d="M6 4L6 4.01"/><path d="M20.01 6L20 6"/><path d="M18.01 4L18 4"/><path d="M20.01 18L20 18"/><path d="M18.01 20L18 20"/><path d="M6.01001 20L6.00001 20"/><path d="M4.01001 18L4.00001 18"/><path d="M2 8L2 16"/><path d="M22 14L22 16"/><path d="M8 2L16 2"/><path d="M8 22L16 22"/><path d="M22 8V4"/><path d="M17 12.01V12"/><path d="M14 10H15"/><path d="M14 14H15"/><path d="M12 8H9L9 16L12 16"/></svg>
+                                    )}
+                                    {a.featureId === "product_events" && (
+                                        <svg class="h-4 w-4 shrink-0 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M7 13V2.99988C7 1.89531 7.89543 0.999878 9 0.999878V0.999878C10.1046 0.999878 11 1.89531 11 2.99988V7.99988L18.2185 9.75154C19.6891 10.1045 20.667 11.4969 20.5 13L19.5 23H8V21L4.96516 17.3909C4.34991 16.823 4 16.0238 4 15.1865V12C4 10.8954 4.89543 9.99999 6 9.99999H6.5"/><path d="M11.5 15V17"/><path d="M15.5 15V17"/></svg>
                                     )}
                                     <span class="text-[12.5px] text-fg">{a.label}</span>
                                 </div>

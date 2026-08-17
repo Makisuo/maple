@@ -97,9 +97,24 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 					})
 				}
 
+				const eventRows = yield* warehouse
+					.compiledQuery(
+						tenant,
+						CH.compile(Integrations.dailyProductEventCountQuery(), params, {
+							rowSchema: Integrations.dailyProductEventCountRowSchema,
+						}),
+						{ profile: "list", context: "billingDailyProductEventCount" },
+					)
+					.pipe(Effect.mapError(toQueryError))
+
 				const sessionsByDay = new Map<string, number>()
 				for (const row of sessionRows) {
 					sessionsByDay.set(toUtcDateKey(parseWarehouseDateTime(row.day)), row.sessions)
+				}
+
+				const eventsByDay = new Map<string, number>()
+				for (const row of eventRows) {
+					eventsByDay.set(toUtcDateKey(parseWarehouseDateTime(row.day)), row.events)
 				}
 
 				const days: DailyVolume[] = []
@@ -115,6 +130,7 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 							tracesGB: signals?.tracesGB ?? 0,
 							metricsGB: signals?.metricsGB ?? 0,
 							browserSessions: sessionsByDay.get(key) ?? 0,
+							productEvents: eventsByDay.get(key) ?? 0,
 						}),
 					)
 				}

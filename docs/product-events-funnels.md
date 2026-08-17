@@ -22,6 +22,27 @@ as a real funnel in the product rather than a hand-written `run_sql`.
    to set unless the datasource name differs.
 5. Publish `@maple-dev/effect-sdk` / `@maple-dev/browser` so customers' events start carrying
    identity; older builds keep writing (all new columns default).
+6. **Billing**: `bun run --cwd apps/api atmn push` (no package script exists; `atmn` is an
+   `apps/api` dependency) so the `product_events` feature and its `startup` plan item exist in
+   Autumn before the gateway starts reserving against it. Until pushed, `balances.check` for an
+   unknown feature fails open and usage is still tracked, so nothing is rejected — just unbilled.
+
+### Billing
+
+Product events are their own metered Autumn feature, `product_events` (unit = one event),
+separate from `browser_sessions`. The ingest gateway meters it on two paths, both with the same
+reserve → WAL enqueue → confirm/release shape as session starts (`metered_enqueue` in
+`apps/ingest/src/main.rs`): (1) `POST /v1/events` reserves the number of rows that survived
+`sanitize_product_event`, and its entitlement gate is `product_events`; (2) `POST /v1/sessionEvents`
+reserves the number of `type == "custom"` rows in the batch (a browser `track()` call is the same
+unit as a server-side event) but keeps its entitlement REJECTION on `browser_sessions`, so an
+exhausted product-events allowance bills usage-based overage instead of 402-ing a whole session
+transcript. Automatic session events (clicks, navigations, ...) stay unmetered. `startup` includes
+1,000,000 events/month, then **$0.05 per 1,000 events — a placeholder chosen 2026-08-17 (PostHog-style
+order of magnitude), to be confirmed** before the config is pushed to production. Not yet done:
+`DailySpendService` does not emit `DailyVolume.productEvents` (the domain field is optional for
+that reason), so the spend chart's product-events series reads as zero until a warehouse query
+lands.
 
 ## Where we are
 
@@ -126,8 +147,8 @@ ingest key (org from the key, never the body). Body per line:
   Reject `name` starting with `$` from direct ingest (reserved for `$pageview`/`$screen`).
 - `Kind = 'custom'` unless `name = '$screen'` (mobile screen views → `Kind='screen'`).
 - New `TelemetrySignal::ProductEvents`, `INGEST_TINYBIRD_DATASOURCE_PRODUCT_EVENTS`, entry in
-  `clickhouse_insert_mappings.rs`, entitlement check reusing the browser-sessions feature id (or a
-  new `product_events` feature — billing decision, default: reuse).
+  `clickhouse_insert_mappings.rs`, entitlement check + per-row metering against the new
+  `product_events` feature (see "Billing" above).
 - Writes go where session events go today (Tinybird managed; BYO CH via the export lane).
 - Mobile: no SDK in scope. The endpoint _is_ the contract; a mobile app posts with a persistent
   install id as `visitor_id` and `identify`-equivalent `user_id`. `@maple-dev/effect-sdk` server side
@@ -226,7 +247,8 @@ row for 30d — the rename is a rebuild, not a `RENAME TABLE`.
 ## Open decisions (defaults chosen; flag if you disagree)
 
 - Retention **180d** for `product_events` (could be 365; cost is negligible either way).
-- Reuse the browser-sessions entitlement for `/v1/events` rather than a new billable feature.
+- ~~Reuse the browser-sessions entitlement for `/v1/events` rather than a new billable feature.~~
+  Superseded 2026-08-17: `product_events` is its own metered feature (see "Billing").
 - Person key = `UserId` else `VisitorId`, stitched through `identity_links`; no probabilistic
   matching.
 - `signup_completed` truth = Clerk webhook, not the client.

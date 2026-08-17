@@ -80,7 +80,13 @@ export class BillingSubscription extends Schema.Class<BillingSubscription>("Bill
 export const BillingLimitType = Schema.Literals(["absolute", "usage_percentage"])
 export type BillingLimitType = typeof BillingLimitType.Type
 
-export const BillingFeatureId = Schema.Literals(["logs", "traces", "metrics", "browser_sessions"])
+export const BillingFeatureId = Schema.Literals([
+	"logs",
+	"traces",
+	"metrics",
+	"browser_sessions",
+	"product_events",
+])
 export type BillingFeatureId = typeof BillingFeatureId.Type
 
 export const BillingAlertThresholdType = Schema.Literals([
@@ -186,7 +192,7 @@ export class BillingUsageFeature extends Schema.Class<BillingUsageFeature>("Bill
 }) {}
 
 export class BillingUsage extends Schema.Class<BillingUsage>("BillingUsage")({
-	// Keyed by Autumn featureId (logs/traces/metrics/browser_sessions).
+	// Keyed by Autumn featureId (logs/traces/metrics/browser_sessions/product_events).
 	total: Schema.optionalKey(Schema.Record(Schema.String, BillingUsageFeature)),
 }) {}
 
@@ -208,6 +214,8 @@ export class DailyVolume extends Schema.Class<DailyVolume>("DailyVolume")({
 	tracesGB: Schema.Number,
 	metricsGB: Schema.Number,
 	browserSessions: Schema.Number,
+	/** Product events (browser `track()` + server events) metered that day. Absent until the API emits it. */
+	productEvents: Schema.optionalKey(Schema.Number),
 }) {}
 
 export class DailySpendResponse extends Schema.Class<DailySpendResponse>("DailySpendResponse")({
