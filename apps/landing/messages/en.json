@@ -361,6 +361,8 @@
 	"pricing_rate_gb": "then {rate} / GB",
 	"pricing_rate_session": "then {rate} / session",
 	"pricing_rate_events": "then {rate} / {block} events",
+	"pricing_unlimited": "Unlimited",
+	"pricing_free_beta": "free during beta",
 	"pricing_trial_reassure": "Free for {duration} days · Cancel anytime · Card required to start",
 	"pricing_enterprise_rail": "Higher volume, custom retention, priority support.",
 	"pricing_estimate_link": "Estimate your bill →",

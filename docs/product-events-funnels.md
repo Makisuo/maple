@@ -37,12 +37,13 @@ reserve → WAL enqueue → confirm/release shape as session starts (`metered_en
 reserves the number of `type == "custom"` rows in the batch (a browser `track()` call is the same
 unit as a server-side event) but keeps its entitlement REJECTION on `browser_sessions`, so an
 exhausted product-events allowance bills usage-based overage instead of 402-ing a whole session
-transcript. Automatic session events (clicks, navigations, ...) stay unmetered. `startup` includes
-1,000,000 events/month, then **$0.05 per 1,000 events — a placeholder chosen 2026-08-17 (PostHog-style
-order of magnitude), to be confirmed** before the config is pushed to production. Not yet done:
-`DailySpendService` does not emit `DailyVolume.productEvents` (the domain field is optional for
-that reason), so the spend chart's product-events series reads as zero until a warehouse query
-lands.
+transcript. Automatic session events (clicks, navigations, ...) stay unmetered. **Beta pricing
+(2026-08-17): the `startup` item is `unlimited: true` with no price** — usage is tracked in Autumn
+(and shown on the billing page as "Unlimited · free during beta") so real volumes are known before
+a price is set. To start charging, swap `unlimited` for an `included` allowance + `price` in
+`apps/api/autumn.config.ts` (the commented example is $0.05 per 1,000 events past 1M/month) and
+push. `DailySpendService` emits `DailyVolume.productEvents` from `product_events`
+(`Kind != 'navigation'`, matching what the gateway meters).
 
 ## Where we are
 

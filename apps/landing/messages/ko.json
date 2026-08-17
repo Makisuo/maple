@@ -361,6 +361,8 @@
 	"pricing_rate_gb": "\ucd08\uacfc\ubd84 {rate} / GB",
 	"pricing_rate_session": "\ucd08\uacfc\ubd84 {rate} / \uc138\uc158",
 	"pricing_rate_events": "\ucd08\uacfc\ubd84 {rate} / {block} \uc774\ubca4\ud2b8",
+	"pricing_unlimited": "\ubb34\uc81c\ud55c",
+	"pricing_free_beta": "\ubca0\ud0c0 \uae30\uac04 \ub3d9\uc548 \ubb34\ub8cc",
 	"pricing_trial_reassure": "{duration}\uc77c \ubb34\ub8cc \u00b7 \uc5b8\uc81c\ub4e0 \ucde8\uc18c \u00b7 \uc2dc\uc791 \uc2dc \uce74\ub4dc \ud544\uc694",
 	"pricing_enterprise_rail": "\ub300\uc6a9\ub7c9, \ub9de\ucda4 \ubcf4\uc874 \uae30\uac04, \uc6b0\uc120 \uc9c0\uc6d0.",
 	"pricing_estimate_link": "\uccad\uad6c\uc561 \ucd94\uc815 \u2192",

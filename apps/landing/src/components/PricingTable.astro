@@ -48,6 +48,9 @@ const PLATFORM_FEATURES = platformFeatures()
 // is a fraction of a cent and would render as "$0.000".
 const RATE_SLOT = "\u0000"
 const rowRate = (a: Allotment) => {
+    // Unlimited beta rows have no overage: the cell carries the beta note in
+    // "then" position; the (empty) amount slot trails it harmlessly.
+    if (a.unlimited) return { before: m.pricing_free_beta(), amount: "", after: "" }
     if (a.rate === undefined) return undefined
     const rendered =
         a.unit === "gb"

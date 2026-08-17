@@ -29,6 +29,11 @@ export interface Allotment {
 	label: string
 	unit: Unit
 	included: number
+	/**
+	 * Autumn `unlimited`: no cap and no overage — the row reads "Unlimited · free
+	 * during beta" instead of a number and a rate. `included`/`rate` are ignored.
+	 */
+	unlimited?: boolean
 	/** Price per `rateUnits` units once `included` is used up. */
 	rate?: number
 	/**
@@ -133,6 +138,7 @@ export async function getOffer(): Promise<Offer> {
 							label: labels[featureId] ?? item.feature?.name ?? featureId,
 							unit: unitFor(featureId),
 							included: Number(item.included ?? 0),
+							unlimited: item.unlimited === true,
 							rate: item.price?.amount ?? undefined,
 							rateUnits: Math.max(1, item.price?.billingUnits ?? 1),
 						}
@@ -183,9 +189,10 @@ export async function getOffer(): Promise<Offer> {
 				featureId: "product_events",
 				label: labels.product_events!,
 				unit: "events",
-				included: 1_000_000,
-				rate: 0.05,
-				rateUnits: 1000,
+				// Free and unlimited during beta — mirrors `apps/api/autumn.config.ts`.
+				included: 0,
+				unlimited: true,
+				rateUnits: 1,
 			},
 		],
 		ctaLabel: m.pricing_start_trial({ duration: "14" }),
@@ -213,4 +220,5 @@ export const rateLabel = (n: number) => `$${n < 0.01 ? n.toFixed(3) : n.toFixed(
  */
 export const rateBlock = (a: Allotment) => a.rateUnits.toLocaleString("en-US")
 
-export const volume = (a: Allotment, n: number) => (a.unit === "gb" ? `${n} GB` : n.toLocaleString("en-US"))
+export const volume = (a: Allotment, n: number) =>
+	a.unlimited ? m.pricing_unlimited() : a.unit === "gb" ? `${n} GB` : n.toLocaleString("en-US")
