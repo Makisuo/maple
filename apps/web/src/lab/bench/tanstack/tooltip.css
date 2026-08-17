@@ -1,0 +1,47 @@
+/*
+ * Themes TanStack's tooltip shell to Maple's chart tooltip card.
+ *
+ * The shell writes its own inline styles, but every one of them is a
+ * `var(--ts-chart-tooltip-*, fallback)` reference, so setting those custom
+ * properties on the element wins without `!important` — the 0.6.4 note that this
+ * needed force-overriding from an ancestor no longer holds at 0.14.0.
+ *
+ * Values mirror `chartTooltipCardClassName` in packages/ui/src/components/ui/chart.tsx
+ * ("border-border/50 bg-popover/90 text-popover-foreground rounded-xl border
+ * px-3 py-2 text-xs shadow-xl backdrop-blur-md"). Two properties the shell does
+ * NOT write inline — backdrop-filter and transition — are set directly.
+ */
+.maple-bench-tooltip {
+	--ts-chart-tooltip-background: color-mix(in oklab, var(--popover) 90%, transparent);
+	--ts-chart-tooltip-color: var(--popover-foreground);
+	--ts-chart-tooltip-border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+	--ts-chart-tooltip-border-radius: var(--radius-xl);
+	--ts-chart-tooltip-padding: 0.5rem 0.75rem;
+	--ts-chart-tooltip-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+	--ts-chart-tooltip-font: 400 0.75rem / 1rem var(--font-sans);
+	--ts-chart-tooltip-max-width: 20rem;
+
+	backdrop-filter: blur(12px);
+	/*
+	 * Opacity only — NOT position.
+	 *
+	 * `ChartFloatingTooltip` can transition its position because it moves by
+	 * transform, which the compositor interpolates independently of the cursor.
+	 * This shell positions with `left`/`top`, so the same transition makes the
+	 * card visibly trail the pointer: it reads as lag, not as smoothing. It also
+	 * measured as free, which is the trap — the cost was never CPU.
+	 */
+	transition: opacity 120ms ease-out;
+}
+
+@starting-style {
+	.maple-bench-tooltip {
+		opacity: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.maple-bench-tooltip {
+		transition: none;
+	}
+}
