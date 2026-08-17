@@ -123,10 +123,6 @@ struct AppConfig {
     max_request_body_bytes: usize,
     org_max_in_flight: u64,
     require_tls: bool,
-    /// `INGEST_AI_CLASSIFICATION_ENABLED`. Migration-window ramp flag, default
-    /// false, removed once classification is unconditional. Read once per batch,
-    /// never per span. `AiRollupHour` is written regardless of this flag.
-    ai_classification_enabled: bool,
     key_store_backend: KeyStoreBackend,
     clickhouse_encryption_key: Option<[u8; 32]>,
     lookup_hmac_key: String,
@@ -465,13 +461,6 @@ impl AppConfig {
             }
         };
 
-        // Default off — see the field doc.
-        let ai_classification_enabled = parse_bool(
-            "INGEST_AI_CLASSIFICATION_ENABLED",
-            std::env::var("INGEST_AI_CLASSIFICATION_ENABLED").ok(),
-            false,
-        )?;
-
         // Default off — see the field doc. Set it on services that are only
         // reachable through Cloudflare.
         let trust_proxy_geo = parse_bool(
@@ -490,7 +479,6 @@ impl AppConfig {
             max_request_body_bytes,
             org_max_in_flight,
             require_tls,
-            ai_classification_enabled,
             key_store_backend,
             clickhouse_encryption_key,
             lookup_hmac_key,
@@ -4261,8 +4249,7 @@ async fn accept_native_decoded_payload(
                 attribute_mappings.len(),
             );
             // Once per batch, never per span.
-            let ai = AiClassificationSettings::new(state.config.ai_classification_enabled);
-            Span::current().record("maple.ingest.ai.enabled", ai.enabled);
+            let ai = AiClassificationSettings::new();
             pipeline
                 .accept_traces_to(
                     &resolved_key.org_id,
@@ -6291,18 +6278,6 @@ mod tests {
         forward_endpoint: String,
         routing_ttl: Duration,
     ) -> AppState {
-        test_app_state_with_ai(store, queue_dir, forward_endpoint, routing_ttl, false).await
-    }
-
-    /// `test_app_state` with `INGEST_AI_CLASSIFICATION_ENABLED` settable, so the
-    /// flag's real path through `AppConfig` can be exercised.
-    async fn test_app_state_with_ai(
-        store: Arc<FakeKeyStore>,
-        queue_dir: PathBuf,
-        forward_endpoint: String,
-        routing_ttl: Duration,
-        ai_classification_enabled: bool,
-    ) -> AppState {
         let tinybird = test_tinybird_config(queue_dir);
         let key_store: Arc<dyn KeyStore> = store.clone();
         let routing = make_routing_resolver(Arc::clone(&store), routing_ttl);
@@ -6339,7 +6314,6 @@ mod tests {
                 max_request_body_bytes: 1024 * 1024,
                 org_max_in_flight: 100,
                 require_tls: false,
-                ai_classification_enabled,
                 key_store_backend: KeyStoreBackend::Static {
                     org_id: "org_test".to_string(),
                 },
@@ -7303,10 +7277,10 @@ mod tests {
         assert_eq!(plaintext, "ch-secret-123");
     }
 
-    /// The whole write path with the flag on, down to the NDJSON body ClickHouse
-    /// actually receives.
+    /// The whole write path, down to the NDJSON body ClickHouse actually
+    /// receives.
     #[tokio::test]
-    async fn ai_classification_flag_reaches_the_clickhouse_row() {
+    async fn ai_classification_reaches_the_clickhouse_row() {
         let (ch_tx, mut ch_rx) = tokio::sync::mpsc::unbounded_channel();
         let ch_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -7342,12 +7316,11 @@ mod tests {
                 schema_version: CLICKHOUSE_SCHEMA_VERSION.to_string(),
             },
         );
-        let state = test_app_state_with_ai(
+        let state = test_app_state(
             Arc::clone(&store),
             queue_dir.clone(),
             "http://127.0.0.1:1".to_string(),
             Duration::from_millis(5),
-            true,
         )
         .await;
 

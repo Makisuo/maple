@@ -7,8 +7,9 @@
  *
  * Column contracts (mirrored in `datasources.ts`, keep them in sync):
  *   - `AiVendor` '' means "not classified as AI", not "unknown vendor".
- *   - `AiRulesVersion` 0 means the span was never examined (pre-rollout / flag
- *     off); any non-zero value means examined, including a non-AI verdict.
+ *   - `AiRulesVersion` 0 means the span was never examined (a pre-rollout row —
+ *     ingest now classifies unconditionally); any non-zero value means
+ *     examined, including a non-AI verdict.
  *   - `AiSessionKeyState` is a frozen quality enum 0-6.
  *   - `AiSessionKeyHash` is `cityHash64(value)`, 0 unless state >= 5.
  *   - `AiRollupHour` is a receive-time-clamped rollup hour written by ingest.
