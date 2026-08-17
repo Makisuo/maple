@@ -1788,6 +1788,235 @@
         "title": "Error",
         "type": "object"
       },
+      "MobileDevice": {
+        "additionalProperties": false,
+        "description": "A phone registered for push notifications by the current user in the current organization. Alert incidents fan out to every enabled device whose preferences include the event.",
+        "examples": [
+          {
+            "app_version": "0.2.0",
+            "bundle_id": "com.maple.mobile",
+            "created_at": "2026-08-01T12:00:00.000Z",
+            "device_name": "iPhone",
+            "enabled": true,
+            "environment": "production",
+            "id": "mdev_YofPTrK9782DWwcnXhpcCw",
+            "last_seen_at": "2026-08-17T09:10:00.000Z",
+            "object": "mobile_device",
+            "platform": "ios",
+            "preferences": {
+              "anomalies": false,
+              "critical_incidents": true,
+              "new_error_issues": false,
+              "resolved_incidents": true,
+              "warning_incidents": true
+            },
+            "token": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+          }
+        ],
+        "properties": {
+          "app_version": {
+            "type": "string"
+          },
+          "bundle_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "enabled": {
+            "description": "`false` once the platform reported the token dead. Re-registering the token re-enables the device.",
+            "type": "boolean"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/_maple_MobilePushEnvironment"
+          },
+          "id": {
+            "$ref": "#/components/schemas/_maple_MobileDeviceId"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "object": {
+            "description": "The object type — always `\"mobile_device\"`.",
+            "enum": [
+              "mobile_device"
+            ],
+            "type": "string"
+          },
+          "platform": {
+            "enum": [
+              "ios"
+            ],
+            "title": "Mobile Platform",
+            "type": "string"
+          },
+          "preferences": {
+            "additionalProperties": false,
+            "properties": {
+              "anomalies": {
+                "type": "boolean"
+              },
+              "critical_incidents": {
+                "type": "boolean"
+              },
+              "new_error_issues": {
+                "type": "boolean"
+              },
+              "resolved_incidents": {
+                "type": "boolean"
+              },
+              "warning_incidents": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "critical_incidents",
+              "warning_incidents",
+              "resolved_incidents",
+              "new_error_issues",
+              "anomalies"
+            ],
+            "type": "object"
+          },
+          "token": {
+            "description": "The platform push token — the hex APNs device token on iOS. Opaque to Maple.",
+            "examples": [
+              "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+            ],
+            "maxLength": 512,
+            "minLength": 16,
+            "title": "Device token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "platform",
+          "token",
+          "environment",
+          "bundle_id",
+          "preferences",
+          "enabled",
+          "last_seen_at",
+          "created_at"
+        ],
+        "title": "Mobile Device",
+        "type": "object"
+      },
+      "MobileDeviceDeleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "deleted": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "id": {
+            "$ref": "#/components/schemas/_maple_MobileDeviceId"
+          },
+          "object": {
+            "enum": [
+              "mobile_device"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "deleted"
+        ],
+        "title": "Mobile device delete response",
+        "type": "object"
+      },
+      "MobileDeviceList": {
+        "additionalProperties": false,
+        "description": "Cursor-paginated list envelope wrapping a page of objects.",
+        "properties": {
+          "data": {
+            "description": "The page of objects, in the ordering documented by the endpoint.",
+            "items": {
+              "$ref": "#/components/schemas/MobileDevice"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "description": "Whether more objects exist after this page. When `true`, use `next_cursor` to fetch them.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "description": "Cursor for the next page, or `null` on the last page. Pass it back as the `cursor` query param.",
+            "examples": [
+              "off_1k"
+            ],
+            "type": "string"
+          },
+          "object": {
+            "description": "Always `\"list\"` for a list response.",
+            "enum": [
+              "list"
+            ],
+            "examples": [
+              "list"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "title": "Mobile device list",
+        "type": "object"
+      },
+      "MobileDeviceRegisterParams": {
+        "additionalProperties": false,
+        "description": "Registers or refreshes a device. Idempotent on `(platform, token)` within the organization: the app calls this on every launch and whenever the token or preferences change.",
+        "properties": {
+          "app_version": {
+            "type": "string"
+          },
+          "bundle_id": {
+            "examples": [
+              "com.maple.mobile"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/_maple_MobilePushEnvironment"
+          },
+          "platform": {
+            "enum": [
+              "ios"
+            ],
+            "title": "Mobile Platform",
+            "type": "string"
+          },
+          "preferences": {
+            "$ref": "#/components/schemas/_maple_MobileDevicePreferences"
+          }
+        },
+        "required": [
+          "platform",
+          "environment",
+          "bundle_id"
+        ],
+        "title": "Mobile device registration",
+        "type": "object"
+      },
       "Service": {
         "additionalProperties": false,
         "description": "An observed service aggregated by service name.",
@@ -2589,6 +2818,54 @@
           "manual"
         ],
         "title": "Issue Severity Source",
+        "type": "string"
+      },
+      "_maple_MobileDeviceId": {
+        "description": "Opaque, prefixed public object ID (e.g. `mdev_YofPTrK9782DWwcnXhpcCw`). A reversible base58 encoding of the internal ID — treat it as an opaque string.",
+        "examples": [
+          "mdev_YofPTrK9782DWwcnXhpcCw"
+        ],
+        "format": "maple.public_id",
+        "title": "Public ID",
+        "type": "string"
+      },
+      "_maple_MobileDevicePreferences": {
+        "additionalProperties": false,
+        "description": "Which events this device is pushed. Omitted keys keep their default: `critical_incidents`, `warning_incidents`, and `resolved_incidents` default to `true`; `new_error_issues` and `anomalies` to `false`.",
+        "examples": [
+          {
+            "critical_incidents": true,
+            "resolved_incidents": false,
+            "warning_incidents": true
+          }
+        ],
+        "properties": {
+          "anomalies": {
+            "type": "boolean"
+          },
+          "critical_incidents": {
+            "type": "boolean"
+          },
+          "new_error_issues": {
+            "type": "boolean"
+          },
+          "resolved_incidents": {
+            "type": "boolean"
+          },
+          "warning_incidents": {
+            "type": "boolean"
+          }
+        },
+        "title": "Mobile Device Preferences",
+        "type": "object"
+      },
+      "_maple_MobilePushEnvironment": {
+        "description": "`sandbox` for development builds, `production` for TestFlight and App Store builds.",
+        "enum": [
+          "sandbox",
+          "production"
+        ],
+        "title": "Mobile Push Environment",
         "type": "string"
       },
       "_maple_QueryEngineAlertReducer": {
@@ -4581,6 +4858,401 @@
         ]
       }
     },
+    "/v2/mobile_devices": {
+      "get": {
+        "description": "Returns the devices the current user has registered in the current organization. Requires the `mobile_devices:read` scope.",
+        "operationId": "listMobileDevices",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MobileDeviceList"
+                }
+              }
+            },
+            "description": "Cursor-paginated list envelope wrapping a page of objects."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/MobileDevicePersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my devices",
+        "tags": [
+          "Mobile Devices"
+        ]
+      }
+    },
+    "/v2/mobile_devices/{token}": {
+      "delete": {
+        "description": "Removes the device from the current organization; the app calls this on sign-out. Requires the `mobile_devices:write` scope.",
+        "operationId": "unregisterMobileDevice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "description": "The platform push token — the hex APNs device token on iOS. Opaque to Maple.",
+              "examples": [
+                "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+              ],
+              "maxLength": 512,
+              "minLength": 16,
+              "title": "Device token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MobileDeviceDeleteResponse"
+                }
+              }
+            },
+            "description": "MobileDeviceDeleteResponse"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/MobileDeviceNotFoundError failure. HTTP 404."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/MobileDevicePersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Unregister a device",
+        "tags": [
+          "Mobile Devices"
+        ]
+      },
+      "put": {
+        "description": "Upserts the device identified by its push token for the current user and organization, re-enabling it if the platform had marked it dead. Requires the `mobile_devices:write` scope.",
+        "operationId": "registerMobileDevice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "description": "The platform push token — the hex APNs device token on iOS. Opaque to Maple.",
+              "examples": [
+                "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+              ],
+              "maxLength": 512,
+              "minLength": 16,
+              "title": "Device token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MobileDeviceRegisterParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MobileDevice"
+                }
+              }
+            },
+            "description": "A phone registered for push notifications by the current user in the current organization. Alert incidents fan out to every enabled device whose preferences include the event."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/MobileDevicePersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Register or refresh a device",
+        "tags": [
+          "Mobile Devices"
+        ]
+      }
+    },
     "/v2/services": {
       "get": {
         "description": "Lists services aggregated by name in an explicit time window. Requires `services:read`.",
@@ -5266,6 +5938,10 @@
     {
       "description": "The authenticated organization's identity.",
       "name": "Organization"
+    },
+    {
+      "description": "Push-notification registrations for the native apps. Per user, per organization.",
+      "name": "Mobile Devices"
     },
     {
       "description": "Recorded browser sessions — search them, retrieve detail, stream rrweb event chunks, read the distilled transcript, and reverse-correlate from a trace.",

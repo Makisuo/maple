@@ -76,6 +76,13 @@ final class SessionController {
 		Clerk.shared.session?.lastActiveOrganizationId
 	}
 
+	/// The organization the screens are showing — from the phase, not from
+	/// Clerk, so fixture mode has one too.
+	var currentOrganizationId: String? {
+		if case .ready(let organizationId) = phase { return organizationId }
+		return nil
+	}
+
 	/// True once switching is actually possible — used to decide whether the
 	/// switcher is worth showing.
 	var canSwitchOrganization: Bool {
@@ -196,6 +203,9 @@ final class SessionController {
 	}
 
 	func signOut() async {
+		// While the token is still valid: the server keys the device on the
+		// org in the token, so this has to happen before Clerk drops it.
+		await PushRegistrar.shared.unregisterAll(api: api)
 		try? await Clerk.shared.auth.signOut()
 		memberships = []
 		membershipsLoaded = false
