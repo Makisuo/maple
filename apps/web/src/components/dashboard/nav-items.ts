@@ -2,6 +2,7 @@ import {
 	BellIcon,
 	ChartBarHorizontalIcon,
 	ChartLineIcon,
+	ChatBubbleSparkleIcon,
 	CircleWarningIcon,
 	CloudflareIcon,
 	ComputerIcon,
@@ -110,6 +111,9 @@ const exploreItem: NavItem = {
 		{ title: "Logs", href: "/logs", icon: FileIcon },
 		{ title: "Metrics", href: "/metrics", icon: ChartLineIcon },
 		{ title: "Replays", href: "/replays", icon: PlayRotateClockwiseIcon },
+		// Throwaway scratchpad feature (see routes/agent-sessions) — nav slot is
+		// provisional along with the rest of it.
+		{ title: "Agents", href: "/agent-sessions", icon: ChatBubbleSparkleIcon },
 	],
 }
 

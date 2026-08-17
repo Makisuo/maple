@@ -111,6 +111,11 @@ import {
 	listReplays,
 } from "@/api/warehouse/replays"
 import {
+	getAgentSessionsFacets,
+	listAgentSessions,
+	listAgentTraces,
+} from "@/api/warehouse/agent-sessions"
+import {
 	getWebAnalyticsBreakdowns,
 	getWebAnalyticsPages,
 	getWebAnalyticsPageviews,
@@ -247,6 +252,18 @@ export const listReplaysResultAtom = makeQueryAtomFamily(listReplays, {
 })
 
 export const replaysFacetsResultAtom = makeQueryAtomFamily(getReplaysFacets, {
+	staleTime: 30_000,
+})
+
+export const listAgentSessionsResultAtom = makeQueryAtomFamily(listAgentSessions, {
+	staleTime: 30_000,
+})
+
+export const listAgentTracesResultAtom = makeQueryAtomFamily(listAgentTraces, {
+	staleTime: 30_000,
+})
+
+export const agentSessionsFacetsResultAtom = makeQueryAtomFamily(getAgentSessionsFacets, {
 	staleTime: 30_000,
 })
 
