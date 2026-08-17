@@ -46,6 +46,13 @@ export function verticalGradient(
  *
  * The fix is geometry, not taste: take the cap out of the dash and give it to
  * the gap. `on` and `off` are the widths you want to SEE.
+ *
+ * On duty cycle: Recharts' `"4 4"` at a 2px butt cap is a 50% duty cycle, and it
+ * reads as dashed there partly because the solid twin beside it is BEADED with a
+ * dot at every point (`shouldDot`), while the incomplete twin sets `dot={false}`.
+ * These charts draw no dots at rest, so the dash is carrying the whole "this part
+ * is different" signal on its own and has to be more open than production's to do
+ * the same work.
  */
 export function roundCapDasharray(on: number, off: number, strokeWidth: number): string {
 	// A zero-length dash under a round cap still paints a dot, which is the

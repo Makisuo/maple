@@ -23,15 +23,39 @@ function useMeasuredSize() {
 	useLayoutEffect(() => {
 		const node = ref.current
 		if (!node) return
-		const observer = new ResizeObserver((entries) => {
-			const box = entries[0]?.contentRect
-			if (!box) return
+
+		const apply = (width: number, height: number) => {
 			// Round: sub-pixel churn would rebuild the whole scene on every container
 			// reflow and pollute the React commit counts this bench measures.
-			const next = { width: Math.round(box.width), height: Math.round(box.height) }
+			const next = { width: Math.round(width), height: Math.round(height) }
 			setSize((prev) =>
 				prev && prev.width === next.width && prev.height === next.height ? prev : next,
 			)
+		}
+
+		// Measure ONCE, synchronously, before handing the box to the observer.
+		//
+		// This is what stops the chart flashing blank on mount. `size` starts null
+		// and the chart renders nothing until it has one, and `observe()` does NOT
+		// call back inline: ResizeObserver delivers its first record during a later
+		// frame's rendering steps, so the sequence was mount → paint nothing →
+		// observer fires → React re-renders → paint the chart. Two painted frames of
+		// empty card minimum, and the gallery mounts twenty-odd of these at once,
+		// each with its own delivery and its own commit.
+		//
+		// A `setState` inside a LAYOUT effect is flushed before the browser paints,
+		// so reading the box here puts the chart in the very first paint instead.
+		// Layout is already clean at this point in the commit, and every frame does
+		// its read before any of them writes, so this is not a thrashing read.
+		const box = node.getBoundingClientRect()
+		if (box.width > 0 && box.height > 0) apply(box.width, box.height)
+
+		// The observer now only handles LATER size changes — container resize, a
+		// legend rewrapping to a second row, the card reflowing.
+		const observer = new ResizeObserver((entries) => {
+			const contentRect = entries[0]?.contentRect
+			if (!contentRect) return
+			apply(contentRect.width, contentRect.height)
 		})
 		observer.observe(node)
 		return () => observer.disconnect()
@@ -46,6 +70,16 @@ export interface TanstackChartFrameProps<TDatum, TXValue extends ChartValue, TYV
 	ariaLabel: string
 	className?: string
 	renderTooltipBody?: (context: ChartTooltipBodyRenderContext<TDatum, TXValue, TYValue>) => ReactNode
+	/**
+	 * A DOM legend rendered beneath the plot — see `chart-legend.tsx` for why the
+	 * package's own legends do not apply to most of these charts.
+	 *
+	 * The strip is a flex SIBLING of the measured chart box rather than a height
+	 * subtracted from it. That matters: the existing `ResizeObserver` then reports
+	 * whatever the legend left over, so a legend that rewraps to a second row on
+	 * toggle re-measures the plot with no arithmetic and no second observer.
+	 */
+	legend?: ReactNode
 }
 
 /**
@@ -59,6 +93,7 @@ export function TanstackChartFrame<TDatum, TXValue extends ChartValue, TYValue e
 	ariaLabel,
 	className,
 	renderTooltipBody,
+	legend,
 }: TanstackChartFrameProps<TDatum, TXValue, TYValue>) {
 	const { ref, size } = useMeasuredSize()
 	const ChartComponent = renderer === "tanstack-canvas" ? CanvasChart : SvgChart
@@ -70,16 +105,34 @@ export function TanstackChartFrame<TDatum, TXValue extends ChartValue, TYValue e
 		// highlight over the whole `<svg>`/`<canvas>`. Recharts charts sit inside
 		// `ChartContainer`, which has never had this problem because its content is
 		// unselectable by construction.
-		<div ref={ref} data-bench-chart={renderer} className={cn("select-none", className)}>
-			{size ? (
-				<ChartComponent
-					definition={definition}
-					ariaLabel={ariaLabel}
-					width={size.width}
-					height={size.height}
-					renderTooltipBody={renderTooltipBody}
-				/>
-			) : null}
+		<div data-bench-chart={renderer} className={cn("flex flex-col select-none", className)}>
+			{/*
+			 * `min-h-0` is load-bearing on a flex child: a flex item's default
+			 * `min-height: auto` refuses to shrink below its content, and the chart's
+			 * content is whatever height it was last measured at — so without this the
+			 * plot ratchets and pushes the legend out of the card instead of yielding
+			 * to it.
+			 */}
+			<div ref={ref} className="min-h-0 flex-1">
+				{size ? (
+					<ChartComponent
+						definition={definition}
+						ariaLabel={ariaLabel}
+						width={size.width}
+						height={size.height}
+						renderTooltipBody={renderTooltipBody}
+					/>
+				) : null}
+			</div>
+			{/*
+			 * `max-h-[45%]` is `query-builder-legend.tsx`'s `MAX_LEGEND_FRACTION`,
+			 * expressed as a CSS cap rather than as `responsiveLegendHeight`'s pixel
+			 * arithmetic. The production legend has to compute a number because
+			 * Recharts wants an explicit `<Legend height>`; here flexbox already does
+			 * the division, so the only thing left to state is the ceiling that keeps a
+			 * long series list from starving the plot.
+			 */}
+			{legend ? <div className="max-h-[45%] shrink-0 overflow-auto">{legend}</div> : null}
 		</div>
 	)
 }

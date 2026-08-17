@@ -14,14 +14,18 @@ import {
 	startInteractionBench,
 	type InteractionBenchHarness,
 } from "@/lab/bench/interaction-bench"
-import { AreaSpike } from "@/lab/charts/area-spike"
+import { AreaLegendSpike, AreaSpike } from "@/lab/charts/area-spike"
 import { BoxPlotSpike, boxPlotSpikeRows } from "@/lab/charts/box-plot-spike"
 import { HeatmapSpike, type HeatmapSpikeRow } from "@/lab/charts/heatmap-spike"
 import { HistogramSpike, histogramSpikeRows } from "@/lab/charts/histogram-spike"
-import { LineSpike } from "@/lab/charts/line-spike"
-import { PieSpike, type PieSpikeRow } from "@/lab/charts/pie-spike"
-import { SankeySpike } from "@/lab/charts/sankey-spike"
-import { StackedBarSpike } from "@/lab/charts/stacked-bar-spike"
+import { LineLegendSpike, LineSpike } from "@/lab/charts/line-spike"
+import { PieLegendSpike, PieSpike, type PieSpikeRow } from "@/lab/charts/pie-spike"
+import { SankeyLegendSpike, SankeySpike } from "@/lab/charts/sankey-spike"
+import {
+	StackedBarLegendSpike,
+	StackedBarSceneLegendSpike,
+	StackedBarSpike,
+} from "@/lab/charts/stacked-bar-spike"
 import {
 	STACKED_BAR_PARTIAL_ROWS,
 	STACKED_BAR_SPIKE_ROWS,
@@ -32,7 +36,7 @@ import {
 	toThroughputProductionRows,
 } from "@/lab/charts/timeseries-data"
 import { TraceScatterSpike, TRACE_SCATTER_SPIKE_ROWS } from "@/lab/charts/trace-scatter-spike"
-import { TreemapSpike } from "@/lab/charts/treemap-spike"
+import { TreemapLegendSpike, TreemapSpike } from "@/lab/charts/treemap-spike"
 
 export type ChartsLabRenderer = "tanstack-svg" | "tanstack-canvas"
 
@@ -62,6 +66,17 @@ export type ChartsLabArm =
 	| "trace-scatter"
 	| "sankey"
 	| "treemap"
+	// Legends. Every `*-production` arm above already renders `QueryBuilderLegend`,
+	// so these pair against the EXISTING production arms rather than adding their
+	// own; the legend-less TanStack arms stay as they are so FINDINGS.md's baseline
+	// numbers remain comparable.
+	| "line-legend-tanstack"
+	| "area-legend-tanstack"
+	| "stacked-bar-legend-tanstack"
+	| "stacked-bar-legend-scene-tanstack"
+	| "pie-legend-tanstack"
+	| "treemap-legend"
+	| "sankey-legend"
 
 declare global {
 	interface Window {
@@ -335,6 +350,50 @@ export function ChartsLab({
 			title: "Span volume — NEW (hierarchy/treemap, service → operation)",
 			node: <TreemapSpike renderer={renderer} className="h-full w-full" />,
 		},
+		"line-legend-tanstack": {
+			title: "Line + legend — TanStack (DOM series key, click to hide, y axis rescales)",
+			node: (
+				<LineLegendSpike rows={TIMESERIES_SPIKE_ROWS} renderer={renderer} className="h-full w-full" />
+			),
+		},
+		"area-legend-tanstack": {
+			title: "Area + legend — TanStack (DOM series key over a fill-only areaY)",
+			node: (
+				<AreaLegendSpike rows={TIMESERIES_SPIKE_ROWS} renderer={renderer} className="h-full w-full" />
+			),
+		},
+		"stacked-bar-legend-tanstack": {
+			title: "Stacked bar + legend — TanStack (DOM key; hiding filters rows and re-pins stackMax)",
+			node: (
+				<StackedBarLegendSpike
+					rows={STACKED_BAR_SPIKE_ROWS}
+					renderer={renderer}
+					className="h-full w-full"
+				/>
+			),
+		},
+		"stacked-bar-legend-scene-tanstack": {
+			title: "Stacked bar + legend — TanStack's OWN legend (interactiveColorLegend, zero DOM — but hiding a band leaves a hole, it cannot restack)",
+			node: (
+				<StackedBarSceneLegendSpike
+					rows={STACKED_BAR_SPIKE_ROWS}
+					renderer={renderer}
+					className="h-full w-full"
+				/>
+			),
+		},
+		"pie-legend-tanstack": {
+			title: "Pie + legend — TanStack (the only hover-adjacent affordance radialArc allows)",
+			node: <PieLegendSpike rows={pieRows} renderer={renderer} className="h-full w-full" />,
+		},
+		"treemap-legend": {
+			title: "Span volume + legend — NEW (the mark paints leaves only, so colour IS the grouping)",
+			node: <TreemapLegendSpike renderer={renderer} className="h-full w-full" />,
+		},
+		"sankey-legend": {
+			title: "Service flow + status key — NEW (bands filter edges, not series)",
+			node: <SankeyLegendSpike renderer={renderer} className="h-full w-full" />,
+		},
 	} satisfies Record<ChartsLabArm, { title: string; node: ReactNode }>
 
 	if (arm) {
@@ -372,6 +431,40 @@ export function ChartsLab({
 				>
 					{cards["stacked-bar-incomplete-tanstack"].node}
 				</ChartArm>
+			</Section>
+
+			<Section title="Legends — production beside the TanStack series key">
+				{/*
+				 * Paired against the EXISTING production arms, not new ones: every
+				 * `QueryBuilder*Chart` already renders `QueryBuilderLegend`, so the
+				 * legend-less TanStack arms above have been comparing a chart with a
+				 * legend against a chart without one this whole time. This is the
+				 * like-for-like row.
+				 */}
+				<Pair a="line-production" b="line-legend-tanstack" cards={cards} />
+				<Pair a="area-production" b="area-legend-tanstack" cards={cards} />
+				<Pair a="stacked-bar-production" b="stacked-bar-legend-tanstack" cards={cards} />
+				<Pair a="pie-production" b="pie-legend-tanstack" cards={cards} />
+				{/*
+				 * The one chart where BOTH legends are reachable — see
+				 * `StackedBarSceneLegendSpike` for why it is the only one. Left is DOM,
+				 * right is the `SceneNode` the renderer paints; hide the bottom band on
+				 * the right to watch it punch a hole rather than restack.
+				 *
+				 * This section repeats four `*-production` arms from the section above,
+				 * so a handful of `data-chart-arm` values appear twice in the GALLERY.
+				 * Safe rather than sloppy: the harness installs only under `?arm=`, and
+				 * that path renders exactly one `ChartArm`, so nothing ever selects
+				 * across two nodes carrying the same name.
+				 */}
+				<Pair a="stacked-bar-legend-tanstack" b="stacked-bar-legend-scene-tanstack" cards={cards} />
+				<div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+					{(["treemap-legend", "sankey-legend"] as const).map((key) => (
+						<ChartArm key={key} name={key} title={cards[key].title}>
+							{cards[key].node}
+						</ChartArm>
+					))}
+				</div>
 			</Section>
 
 			<Section title="Unlock — charts Maple cannot render today">

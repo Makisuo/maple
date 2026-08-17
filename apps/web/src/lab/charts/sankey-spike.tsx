@@ -5,8 +5,14 @@ import { sankeyDiagram } from "@tanstack/charts/network/sankey"
 import { rect } from "@tanstack/charts/rect"
 import { text } from "@tanstack/charts/text"
 import { tooltip } from "@tanstack/charts/tooltip"
-import { memo, useMemo } from "react"
+import { cn } from "@maple/ui/lib/utils"
+import { memo, useMemo, type ReactNode } from "react"
 
+import {
+	ChartSeriesLegend,
+	useChartLegendState,
+	type LegendSeriesSpec,
+} from "@/lab/bench/tanstack/chart-legend"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
 
 /**
@@ -168,6 +174,49 @@ export const SankeySpike = memo(function SankeySpike({
 	renderer: TanstackRenderer
 	className?: string
 }) {
+	return <SankeyFigure edges={edges} renderer={renderer} className={className} />
+})
+
+/**
+ * Error-rate bands, in severity order. The thresholds are `strokeForEdge`'s.
+ *
+ * This is why the sankey's legend is a STATUS key rather than a series key:
+ * nothing here is a series. The ribbons are one mark over one edge list and their
+ * colour is a function of a computed rate, so the only thing a legend can name is
+ * what the three colours mean — which is also the thing a viewer cannot otherwise
+ * discover, since a healthy ribbon and an erroring one look identical apart from
+ * hue.
+ */
+const FLOW_BANDS = [
+	{ key: "error", label: "≥ 5% errors", token: "error" },
+	{ key: "warning", label: "1–5% errors", token: "warning" },
+	{ key: "healthy", label: "< 1% errors", token: "healthy" },
+] as const satisfies readonly {
+	key: string
+	label: string
+	token: keyof typeof FLOW_TOKENS
+}[]
+
+type FlowBand = (typeof FLOW_BANDS)[number]["key"]
+
+function bandForEdge(edge: SankeySpikeEdge): FlowBand {
+	const rate = edge.callCount === 0 ? 0 : edge.errorCount / edge.callCount
+	if (rate >= 0.05) return "error"
+	if (rate >= 0.01) return "warning"
+	return "healthy"
+}
+
+function SankeyFigure({
+	edges,
+	renderer,
+	className,
+	legend,
+}: {
+	edges: readonly SankeySpikeEdge[]
+	renderer: TanstackRenderer
+	className?: string
+	legend?: ReactNode
+}) {
 	const colors = usePlotColors(FLOW_TOKENS)
 
 	// Node set derived from the edges, in first-seen order. `sankeyDiagram`
@@ -195,15 +244,7 @@ export const SankeySpike = memo(function SankeySpike({
 	// Error rate → colour. Three bands rather than a continuous ramp: `stroke` is
 	// a `VisualChannel`, so a per-datum interpolation would also be legal, but
 	// banding reads far better against a dark palette at 1–2px ribbon widths.
-	const strokeForEdge = useMemo(
-		() => (edge: SankeySpikeEdge) => {
-			const rate = edge.callCount === 0 ? 0 : edge.errorCount / edge.callCount
-			if (rate >= 0.05) return colors.error
-			if (rate >= 0.01) return colors.warning
-			return colors.healthy
-		},
-		[colors],
-	)
+	const strokeForEdge = useMemo(() => (edge: SankeySpikeEdge) => colors[bandForEdge(edge)], [colors])
 
 	const definition = useMemo(() => {
 		return defineChart({
@@ -287,12 +328,28 @@ export const SankeySpike = memo(function SankeySpike({
 		})
 	}, [nodes, edges, colors, strokeForEdge])
 
+	// `sankeyDiagram` runs d3-sankey over the node/link set eagerly and throws
+	// inside `resolveNetworkGraph` on an empty graph, so hiding every band has to
+	// be caught before the definition is handed to a renderer. The legend stays —
+	// it is the only way back.
+	if (edges.length === 0) {
+		return (
+			<div className={cn("flex flex-col", className)}>
+				<div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground text-xs">
+					Every flow is hidden
+				</div>
+				{legend}
+			</div>
+		)
+	}
+
 	return (
 		<TanstackChartFrame
 			renderer={renderer}
 			className={className}
 			ariaLabel="Service call flow"
 			definition={definition}
+			legend={legend}
 			renderTooltipBody={({ points }) => {
 				const datum = points[0]?.datum
 				if (!datum || !("kind" in datum)) return null
@@ -340,6 +397,54 @@ export const SankeySpike = memo(function SankeySpike({
 					</div>
 				)
 			}}
+		/>
+	)
+}
+
+/**
+ * The same flow map with a status key beneath it.
+ *
+ * Unlike every other legend in the lab this one is not a series list — see
+ * `FLOW_BANDS`. Toggling a band filters the EDGES, which in turn shrinks the
+ * derived node set, so hiding "< 1% errors" leaves a diagram of only the
+ * problematic paths. That is the actual reason to want it: an all-healthy sankey
+ * is a wall of ribbons, and the error ones are the thin ones.
+ */
+export const SankeyLegendSpike = memo(function SankeyLegendSpike({
+	edges = SANKEY_SPIKE_EDGES,
+	renderer,
+	className,
+}: {
+	edges?: readonly SankeySpikeEdge[]
+	renderer: TanstackRenderer
+	className?: string
+}) {
+	const colors = usePlotColors(FLOW_TOKENS)
+
+	const legendSeries = useMemo<LegendSeriesSpec[]>(
+		() => FLOW_BANDS.map((band) => ({ key: band.key, label: band.label, color: colors[band.token] })),
+		[colors],
+	)
+	const { hidden, toggle } = useChartLegendState(legendSeries)
+
+	const visibleEdges = useMemo(
+		() => edges.filter((edge) => !hidden.has(bandForEdge(edge))),
+		[edges, hidden],
+	)
+
+	return (
+		<SankeyFigure
+			edges={visibleEdges}
+			renderer={renderer}
+			className={className}
+			legend={
+				<ChartSeriesLegend
+					series={legendSeries}
+					hidden={hidden}
+					onToggle={toggle}
+					label="Flow health"
+				/>
+			}
 		/>
 	)
 })

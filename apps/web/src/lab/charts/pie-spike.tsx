@@ -2,8 +2,13 @@ import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/th
 import { defineChart } from "@tanstack/charts"
 import { focusGroupAngle, pie, polar, radialArc } from "@tanstack/charts/polar"
 import { tooltip } from "@tanstack/charts/tooltip"
-import { memo, useMemo } from "react"
+import { memo, useMemo, type ReactNode } from "react"
 
+import {
+	ChartSeriesLegend,
+	useChartLegendState,
+	type LegendSeriesSpec,
+} from "@/lab/bench/tanstack/chart-legend"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
 
 /**
@@ -52,10 +57,48 @@ export const PieSpike = memo(function PieSpike({
 	donut?: boolean
 	className?: string
 }) {
+	const colorFor = useSliceColor(rows)
+	return (
+		<PieFigure rows={rows} renderer={renderer} donut={donut} className={className} colorFor={colorFor} />
+	)
+})
+
+/**
+ * Slice name → themed colour, keyed by the row's position in the FULL list.
+ *
+ * Not `palette[slice.index % palette.length]`, which is what this spike used to
+ * do: `slice.index` is an index into whatever rows `pie()` was handed, so hiding
+ * one slice would renumber every slice after it and recolour the chart. A legend
+ * that repaints the series it did not touch is worse than no legend.
+ */
+function useSliceColor(rows: readonly PieSpikeRow[]): (name: string) => string {
 	const colors = usePlotColors(SLICE_TOKENS)
 
-	const palette = useMemo(() => [colors.c1, colors.c2, colors.c3, colors.c4, colors.c5], [colors])
+	return useMemo(() => {
+		const palette = [colors.c1, colors.c2, colors.c3, colors.c4, colors.c5]
+		const order = new Map<string, number>()
+		for (const row of rows) {
+			if (!order.has(row.name)) order.set(row.name, order.size)
+		}
+		return (name: string) => palette[(order.get(name) ?? 0) % palette.length] ?? palette[0]
+	}, [rows, colors])
+}
 
+function PieFigure({
+	rows,
+	renderer,
+	donut,
+	className,
+	colorFor,
+	legend,
+}: {
+	rows: readonly PieSpikeRow[]
+	renderer: TanstackRenderer
+	donut: boolean
+	className?: string
+	colorFor: (name: string) => string
+	legend?: ReactNode
+}) {
 	const definition = useMemo(() => {
 		// `pie()` is an EAGER transform, not a mark: it returns rows carrying
 		// startAngle/endAngle/angle/fraction, which radialArc then reads as plain
@@ -80,7 +123,7 @@ export const PieSpike = memo(function PieSpike({
 							innerRadius: (context) => (donut ? Math.max(8, context.radius * 0.58) : 0),
 							outerRadius: (context) => context.radius,
 							cornerRadius: 2,
-							fill: (slice) => palette[slice.index % palette.length] ?? palette[0],
+							fill: (slice) => colorFor(slice.name),
 						}),
 						// NO hover affordance is possible here, and there is no workaround.
 						//
@@ -93,8 +136,10 @@ export const PieSpike = memo(function PieSpike({
 						// radiusValues that `InitializedMark` lacks).
 						//
 						// So the production pie's hover fade + 1.035 scale has no expression
-						// at 0.14.0 by any route. Hover feedback here is the tooltip and the
-						// legend only.
+						// at 0.14.0 by any route. Hover feedback here is the tooltip, and
+						// the only other affordance is the DOM legend on
+						// `PieLegendSpike` — which cannot be the package's own legend
+						// either, since `radialArc` reads no colour scale.
 					],
 				}),
 			],
@@ -108,7 +153,7 @@ export const PieSpike = memo(function PieSpike({
 			focusRing: false,
 			tooltip: { use: tooltip, className: "maple-bench-tooltip" },
 		})
-	}, [rows, palette, donut])
+	}, [rows, colorFor, donut])
 
 	return (
 		<TanstackChartFrame
@@ -116,6 +161,7 @@ export const PieSpike = memo(function PieSpike({
 			className={className}
 			ariaLabel="Share by category"
 			definition={definition}
+			legend={legend}
 			// Mandatory, not cosmetic: the default body prints the mark's x/y
 			// channels, which for a polar mark are the angle in radians and the
 			// radius in pixels ("x 1.336 / y 113.76"). Every polar chart needs its
@@ -127,7 +173,7 @@ export const PieSpike = memo(function PieSpike({
 					<div className="flex items-center gap-2">
 						<span
 							className="size-2.5 shrink-0 rounded-[2px]"
-							style={{ backgroundColor: palette[slice.index % palette.length] }}
+							style={{ backgroundColor: colorFor(slice.name) }}
 						/>
 						<span className="text-muted-foreground">{slice.name}</span>
 						<span className="font-mono font-semibold tabular-nums">
@@ -136,6 +182,55 @@ export const PieSpike = memo(function PieSpike({
 					</div>
 				)
 			}}
+		/>
+	)
+}
+
+/**
+ * The same donut with a DOM slice key beneath it, matching what the production
+ * pie renders as its `legend="right"`.
+ *
+ * Hiding a slice renormalises the remaining angles on its own — `pie()` divides
+ * by the total of the rows it is handed — so unlike the cartesian spikes there is
+ * no domain to re-derive. Colours are pinned by name (see `useSliceColor`) so the
+ * survivors keep the hue they had.
+ */
+export const PieLegendSpike = memo(function PieLegendSpike({
+	rows,
+	renderer,
+	donut = true,
+	className,
+}: {
+	rows: readonly PieSpikeRow[]
+	renderer: TanstackRenderer
+	donut?: boolean
+	className?: string
+}) {
+	const colorFor = useSliceColor(rows)
+
+	const legendSeries = useMemo<LegendSeriesSpec[]>(
+		() => rows.map((row) => ({ key: row.name, label: row.name, color: colorFor(row.name) })),
+		[rows, colorFor],
+	)
+	const { hidden, toggle } = useChartLegendState(legendSeries)
+
+	const visibleRows = useMemo(() => rows.filter((row) => !hidden.has(row.name)), [rows, hidden])
+
+	return (
+		<PieFigure
+			rows={visibleRows}
+			renderer={renderer}
+			donut={donut}
+			className={className}
+			colorFor={colorFor}
+			legend={
+				<ChartSeriesLegend
+					series={legendSeries}
+					hidden={hidden}
+					onToggle={toggle}
+					label="Share by category"
+				/>
+			}
 		/>
 	)
 })

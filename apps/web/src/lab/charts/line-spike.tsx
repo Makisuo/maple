@@ -4,8 +4,13 @@ import { defineChart, lineY } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { scalePoint } from "@tanstack/charts-scales/point"
 import { tooltip } from "@tanstack/charts/tooltip"
-import { memo, useMemo } from "react"
+import { memo, useMemo, type ReactNode } from "react"
 
+import {
+	ChartSeriesLegend,
+	useChartLegendState,
+	type LegendSeriesSpec,
+} from "@/lab/bench/tanstack/chart-legend"
 import {
 	createTooltipFocusProbe,
 	focusCrosshair,
@@ -36,49 +41,67 @@ const LATENCY_TOKENS = {
 const STROKE_WIDTH = 2.5
 
 /**
- * The trailing incomplete segment. Production draws a visible 4-on / 4-off
- * (`latency-line-chart.tsx:135-173`); this is deliberately longer because the
- * stroke is thicker, and it goes through `roundCapDasharray` because `lineY`
- * forces round caps — see that function for why `"4 4"` does not port.
- */
-const INCOMPLETE_DASHARRAY = roundCapDasharray(6, 5, STROKE_WIDTH)
-
-/**
- * Latency percentiles, replacing
- * `packages/ui/src/components/charts/line/query-builder-line-chart.tsx`.
+ * The trailing incomplete segment: a visible 4.5px on, 7px off.
  *
- * With `incomplete`, the trailing buckets that are still filling are drawn
- * dashed. Recharts can only do that by splitting each series into two columns
- * (`p99LatencyMs` and `p99LatencyMs_incomplete`, bridged by duplicating one
- * value into both) because a `dataKey` is a string and one string means one dash
- * style. TanStack channels are accessors, so the same picture is a second mark
- * over a SLICE of the same rows — see `splitAtFirstPartial`. No row is rewritten
- * and no column is invented; the shared bridge row makes the join seamless.
+ * Production's 4-on / 4-off (`latency-line-chart.tsx:135-173`) is a 50% duty
+ * cycle, and measured side by side an equivalent port here still read as a
+ * textured solid line rather than a dashed one. The reason is not the dash — it
+ * is that Recharts beads the SOLID twin with a dot at every point and sets
+ * `dot={false}` on the incomplete one, so half the "this part is different"
+ * signal there comes from the dots disappearing. This chart draws no dots at
+ * rest, so the dash carries all of it and has to be more open: a ~39% duty cycle
+ * with the gap noticeably longer than the ink.
+ *
+ * Routed through `roundCapDasharray` because `lineY` forces round caps — see
+ * that function for why a literal `"4 4"` does not port at all.
  */
-export const LineSpike = memo(function LineSpike({
-	rows,
-	renderer,
-	incomplete = false,
-	className,
-}: {
-	rows: readonly TimeseriesSpikeRow[]
-	renderer: TanstackRenderer
-	incomplete?: boolean
-	className?: string
-}) {
+const INCOMPLETE_DASHARRAY = roundCapDasharray(4.5, 7, STROKE_WIDTH)
+
+interface LatencySeries {
+	id: string
+	key: "p99LatencyMs" | "p95LatencyMs" | "p50LatencyMs"
+	label: string
+	color: string
+}
+
+/** The three percentiles, themed. Shared by both variants below. */
+function useLatencySeries(): readonly LatencySeries[] {
 	const colors = usePlotColors(LATENCY_TOKENS)
-	const chromeColors = usePlotChromeColors()
-
-	const axisContext = useMemo(() => timeseriesAxisContext(rows), [rows])
-
-	const series = useMemo(
+	return useMemo(
 		() => [
-			{ id: "p99", key: "p99LatencyMs" as const, label: "P99", color: colors.p99 },
-			{ id: "p95", key: "p95LatencyMs" as const, label: "P95", color: colors.p95 },
-			{ id: "p50", key: "p50LatencyMs" as const, label: "P50", color: colors.p50 },
+			{ id: "p99", key: "p99LatencyMs", label: "P99", color: colors.p99 },
+			{ id: "p95", key: "p95LatencyMs", label: "P95", color: colors.p95 },
+			{ id: "p50", key: "p50LatencyMs", label: "P50", color: colors.p50 },
 		],
 		[colors],
 	)
+}
+
+/**
+ * The figure itself, over whatever series it is handed.
+ *
+ * `series` is the VISIBLE set, not the full one: hiding a percentile removes its
+ * marks and re-derives the y domain, which is why the legend's state lives in the
+ * variant below rather than inside the legend component.
+ */
+function LineFigure({
+	rows,
+	renderer,
+	incomplete,
+	className,
+	series,
+	legend,
+}: {
+	rows: readonly TimeseriesSpikeRow[]
+	renderer: TanstackRenderer
+	incomplete: boolean
+	className?: string
+	series: readonly LatencySeries[]
+	legend?: ReactNode
+}) {
+	const chromeColors = usePlotChromeColors()
+
+	const axisContext = useMemo(() => timeseriesAxisContext(rows), [rows])
 
 	const tooltipSeries = useMemo<TooltipSeriesSpec<TimeseriesSpikeRow>[]>(
 		() =>
@@ -101,7 +124,17 @@ export const LineSpike = memo(function LineSpike({
 		// Recharts' YAxis anchors a numeric domain at 0; TanStack's inferred linear
 		// domain starts at the data minimum, which clips the p50 line to the axis.
 		// Configuring the scale instance is the only way to pin the floor.
-		const dataMax = rows.reduce((max, row) => Math.max(max, row.p99LatencyMs), 0)
+		//
+		// Derived from the VISIBLE series rather than from `p99LatencyMs`: with the
+		// legend, hiding p99 has to drop the ceiling to p95, or the remaining lines
+		// stay squashed into the bottom third and the toggle looks like it did
+		// nothing. `|| 1` covers every series hidden — a `[0, 0]` domain has no
+		// extent for `nice` to round.
+		const dataMax =
+			rows.reduce(
+				(max, row) => series.reduce((seriesMax, s) => Math.max(seriesMax, row[s.key]), max),
+				0,
+			) || 1
 
 		return defineChart({
 			marks: [
@@ -188,6 +221,7 @@ export const LineSpike = memo(function LineSpike({
 			className={className}
 			ariaLabel="Latency percentiles"
 			definition={definition}
+			legend={legend}
 			renderTooltipBody={({ points }) => (
 				<TooltipBody
 					points={points}
@@ -198,6 +232,89 @@ export const LineSpike = memo(function LineSpike({
 					}
 				/>
 			)}
+		/>
+	)
+}
+
+/**
+ * Latency percentiles, replacing
+ * `packages/ui/src/components/charts/line/query-builder-line-chart.tsx`.
+ *
+ * With `incomplete`, the trailing buckets that are still filling are drawn
+ * dashed. Recharts can only do that by splitting each series into two columns
+ * (`p99LatencyMs` and `p99LatencyMs_incomplete`, bridged by duplicating one
+ * value into both) because a `dataKey` is a string and one string means one dash
+ * style. TanStack channels are accessors, so the same picture is a second mark
+ * over a SLICE of the same rows — see `splitAtFirstPartial`. No row is rewritten
+ * and no column is invented; the shared bridge row makes the join seamless.
+ */
+export const LineSpike = memo(function LineSpike({
+	rows,
+	renderer,
+	incomplete = false,
+	className,
+}: {
+	rows: readonly TimeseriesSpikeRow[]
+	renderer: TanstackRenderer
+	incomplete?: boolean
+	className?: string
+}) {
+	const series = useLatencySeries()
+	return (
+		<LineFigure
+			rows={rows}
+			renderer={renderer}
+			incomplete={incomplete}
+			className={className}
+			series={series}
+		/>
+	)
+})
+
+/**
+ * The same chart with a series key beneath it, matching what the Recharts arm
+ * renders via `QueryBuilderLegend`.
+ *
+ * A sibling component rather than a `legend` flag on `LineSpike`: the two differ
+ * in what state they own, not in what they display, and the legend-less variant
+ * stays byte-identical so the FINDINGS.md baseline numbers remain comparable.
+ */
+export const LineLegendSpike = memo(function LineLegendSpike({
+	rows,
+	renderer,
+	incomplete = false,
+	className,
+}: {
+	rows: readonly TimeseriesSpikeRow[]
+	renderer: TanstackRenderer
+	incomplete?: boolean
+	className?: string
+}) {
+	const series = useLatencySeries()
+
+	const legendSeries = useMemo<LegendSeriesSpec[]>(
+		() => series.map((s) => ({ key: s.id, label: s.label, color: s.color })),
+		[series],
+	)
+	const { hidden, toggle } = useChartLegendState(legendSeries)
+
+	const visibleSeries = useMemo(() => series.filter((s) => !hidden.has(s.id)), [series, hidden])
+
+	return (
+		<LineFigure
+			rows={rows}
+			renderer={renderer}
+			incomplete={incomplete}
+			className={className}
+			series={visibleSeries}
+			legend={
+				<ChartSeriesLegend
+					series={legendSeries}
+					hidden={hidden}
+					onToggle={toggle}
+					label="Latency percentiles"
+				/>
+			}
 		/>
 	)
 })

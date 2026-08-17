@@ -4,8 +4,13 @@ import { areaY, defineChart, lineY } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { scalePoint } from "@tanstack/charts-scales/point"
 import { tooltip } from "@tanstack/charts/tooltip"
-import { memo, useMemo } from "react"
+import { memo, useMemo, type ReactNode } from "react"
 
+import {
+	ChartSeriesLegend,
+	useChartLegendState,
+	type LegendSeriesSpec,
+} from "@/lab/bench/tanstack/chart-legend"
 import {
 	createTooltipFocusProbe,
 	focusCrosshair,
@@ -45,48 +50,23 @@ const FADED_END_OPACITY = 0
 const STROKE_WIDTH = 2.5
 
 /**
- * The trailing incomplete edge. Routed through `roundCapDasharray` because
- * `lineY` forces round caps, which swallow the gaps in a plain `"4 4"` — see
- * that function.
+ * The trailing incomplete edge, matching `line-spike.tsx` — a visible 4.5 on,
+ * 7 off. See the note there for why this is more open than production's 4/4, and
+ * `roundCapDasharray` for why a literal `"4 4"` does not port.
  */
-const INCOMPLETE_DASHARRAY = roundCapDasharray(6, 5, STROKE_WIDTH)
+const INCOMPLETE_DASHARRAY = roundCapDasharray(4.5, 7, STROKE_WIDTH)
 
-/**
- * Request volume, replacing
- * `packages/ui/src/components/charts/area/query-builder-area-chart.tsx`.
- *
- * Two compositional facts drive the mark list:
- *
- * 1. `areaY` strokes its WHOLE outline, baseline included, so a stroked area
- *    draws a line along y=0. Production composes a fill-only area with a separate
- *    `lineY` on top for exactly this reason, and so does this.
- * 2. `areaY` has no `strokeDasharray` at all (`dist/area.d.ts`), so the dashed
- *    tail cannot come from the area mark. It is a faded fill plus a dashed
- *    `lineY` edge — which is also what the Recharts arm does, since a dashed area
- *    outline is not expressible there either.
- */
-export const AreaSpike = memo(function AreaSpike({
-	rows,
-	renderer,
-	incomplete = false,
-	className,
-}: {
-	rows: readonly TimeseriesSpikeRow[]
-	renderer: TanstackRenderer
-	incomplete?: boolean
-	className?: string
-}) {
+interface ThroughputSeries {
+	id: string
+	label: string
+	color: string
+	value: (row: TimeseriesSpikeRow) => number
+}
+
+/** Total volume and its error share, themed. Shared by both variants below. */
+function useThroughputSeries(): readonly ThroughputSeries[] {
 	const colors = usePlotColors(AREA_TOKENS)
-	const chromeColors = usePlotChromeColors()
-
-	const axisContext = useMemo(() => timeseriesAxisContext(rows), [rows])
-
-	// Gradient ids live in one document-wide namespace, and the gallery mounts the
-	// plain and the incomplete arm at the same time. Suffixing by variant keeps
-	// `url(#…)` pointing at this chart's own definition.
-	const idPrefix = incomplete ? "areaSpikeIncomplete" : "areaSpike"
-
-	const series = useMemo(
+	return useMemo(
 		() => [
 			{
 				id: "throughput",
@@ -103,6 +83,32 @@ export const AreaSpike = memo(function AreaSpike({
 		],
 		[colors],
 	)
+}
+
+/**
+ * The figure itself, over whatever series it is handed — see `line-spike.tsx`
+ * for why the visible set arrives as a prop rather than being resolved here.
+ */
+function AreaFigure({
+	rows,
+	renderer,
+	incomplete,
+	className,
+	series,
+	idPrefix,
+	legend,
+}: {
+	rows: readonly TimeseriesSpikeRow[]
+	renderer: TanstackRenderer
+	incomplete: boolean
+	className?: string
+	series: readonly ThroughputSeries[]
+	idPrefix: string
+	legend?: ReactNode
+}) {
+	const chromeColors = usePlotChromeColors()
+
+	const axisContext = useMemo(() => timeseriesAxisContext(rows), [rows])
 
 	const tooltipSeries = useMemo<TooltipSeriesSpec<TimeseriesSpikeRow>[]>(
 		() =>
@@ -122,7 +128,14 @@ export const AreaSpike = memo(function AreaSpike({
 			? splitAtFirstPartial(rows)
 			: { solid: rows, dashed: [] as readonly TimeseriesSpikeRow[] }
 
-		const dataMax = rows.reduce((max, row) => Math.max(max, row.throughput), 0)
+		// Over the VISIBLE series, so hiding Throughput rescales the axis to the
+		// error band instead of leaving it flat against the floor. `|| 1` covers
+		// every series hidden — `nice` has nothing to round on a `[0, 0]` domain.
+		const dataMax =
+			rows.reduce(
+				(max, row) => series.reduce((seriesMax, s) => Math.max(seriesMax, s.value(row)), max),
+				0,
+			) || 1
 
 		return defineChart({
 			gradients: series.flatMap((s) => [
@@ -207,6 +220,7 @@ export const AreaSpike = memo(function AreaSpike({
 			className={className}
 			ariaLabel="Request volume"
 			definition={definition}
+			legend={legend}
 			renderTooltipBody={({ points }) => (
 				<TooltipBody
 					points={points}
@@ -217,6 +231,94 @@ export const AreaSpike = memo(function AreaSpike({
 					}
 				/>
 			)}
+		/>
+	)
+}
+
+/**
+ * Request volume, replacing
+ * `packages/ui/src/components/charts/area/query-builder-area-chart.tsx`.
+ *
+ * Two compositional facts drive the mark list:
+ *
+ * 1. `areaY` strokes its WHOLE outline, baseline included, so a stroked area
+ *    draws a line along y=0. Production composes a fill-only area with a separate
+ *    `lineY` on top for exactly this reason, and so does this.
+ * 2. `areaY` has no `strokeDasharray` at all (`dist/area.d.ts`), so the dashed
+ *    tail cannot come from the area mark. It is a faded fill plus a dashed
+ *    `lineY` edge — which is also what the Recharts arm does, since a dashed area
+ *    outline is not expressible there either.
+ */
+export const AreaSpike = memo(function AreaSpike({
+	rows,
+	renderer,
+	incomplete = false,
+	className,
+}: {
+	rows: readonly TimeseriesSpikeRow[]
+	renderer: TanstackRenderer
+	incomplete?: boolean
+	className?: string
+}) {
+	const series = useThroughputSeries()
+	return (
+		<AreaFigure
+			rows={rows}
+			renderer={renderer}
+			incomplete={incomplete}
+			className={className}
+			series={series}
+			// Gradient ids live in one document-wide namespace, and the gallery mounts
+			// every arm at once. Suffixing by variant keeps `url(#…)` pointing at this
+			// chart's own definition.
+			idPrefix={incomplete ? "areaSpikeIncomplete" : "areaSpike"}
+		/>
+	)
+})
+
+/**
+ * The same chart with a series key beneath it — the sibling-variant shape
+ * `line-spike.tsx` explains.
+ */
+export const AreaLegendSpike = memo(function AreaLegendSpike({
+	rows,
+	renderer,
+	incomplete = false,
+	className,
+}: {
+	rows: readonly TimeseriesSpikeRow[]
+	renderer: TanstackRenderer
+	incomplete?: boolean
+	className?: string
+}) {
+	const series = useThroughputSeries()
+
+	const legendSeries = useMemo<LegendSeriesSpec[]>(
+		() => series.map((s) => ({ key: s.id, label: s.label, color: s.color })),
+		[series],
+	)
+	const { hidden, toggle } = useChartLegendState(legendSeries)
+
+	const visibleSeries = useMemo(() => series.filter((s) => !hidden.has(s.id)), [series, hidden])
+
+	return (
+		<AreaFigure
+			rows={rows}
+			renderer={renderer}
+			incomplete={incomplete}
+			className={className}
+			series={visibleSeries}
+			// A third namespace: this arm renders beside both others in the gallery,
+			// and two `<defs>` sharing an id is a silently wrong fill, not an error.
+			idPrefix={incomplete ? "areaLegendSpikeIncomplete" : "areaLegendSpike"}
+			legend={
+				<ChartSeriesLegend
+					series={legendSeries}
+					hidden={hidden}
+					onToggle={toggle}
+					label="Request volume"
+				/>
+			}
 		/>
 	)
 })

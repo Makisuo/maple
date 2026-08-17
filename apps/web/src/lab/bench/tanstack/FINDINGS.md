@@ -298,11 +298,12 @@ nothing. `timeseries-data.ts` evaluates that same predicate against one captured
 arms classify the same buckets and the dashed tail starts at the same one. The plain arms keep the
 fixed past anchor and stay fully deterministic.
 
-**Bug 3 has regressed at 0.14.0.** The note above says `whenFocused` "sizes the unfocused ones to
-zero". It no longer does: every emitted circle carries `r="3.5"` — verified on both the new arms
-(120 circles, all 3.5) and the existing bench arms (290, all 3.5). The lines are visibly beaded at
-rest under the SVG renderer. Canvas paints the same thing without the DOM, so the cost claim is
-unchanged, but the _visual_ is now wrong rather than merely wasteful.
+**Bug 3 is unchanged, and an earlier revision of this section said otherwise.** It claimed
+`whenFocused` had regressed to painting every dot at full radius, on the evidence that all 180
+emitted circles carry `r="3.5"`. The radius is real; the conclusion was not. The dots are hidden by
+`visibility: hidden` on their group, not by a zero radius, so nothing is painted at rest and the
+lines are not beaded — what looked like beading in a screenshot was a 1214→800px downscale. The
+original finding stands as written: the waste is DOM nodes, not pixels.
 
 **Measured.** `test:perf:charts` now covers 21 arms (41.2s); the numbers are in the table above.
 The headline: the three production timeseries charts are 195–228ms / 374–410 commits against
@@ -362,6 +363,80 @@ y axis**: latency across operations spans orders of magnitude, and on a zero-anc
 the fast operations' boxes sit on the baseline while the slow one's outliers set the scale. The
 shared `createLogScale` in `lab/charts/log-scale.ts` is that scale — `charts-scales` still ships no
 log scale, so this lab now has one implementation instead of the two copies it had grown.
+
+### Legends: the package ships three, and most of these charts can use none of them (2026-08-18)
+
+Every `QueryBuilder*Chart` on the production side of the gallery renders `QueryBuilderLegend`.
+Until now no TanStack arm rendered a series legend at all, so half the pairs above were comparing
+a chart with a legend against a chart without one. The `*-legend-tanstack` arms close that, and
+finding out how was the more interesting half.
+
+**`@tanstack/charts` has `colorLegend`, `colorGradientLegend` and `interactiveColorLegend`, and
+all three hang off `ChartColorOptions.legend` — a key that only exists once the chart declares a
+chart-level `color:` scale.** A mark therefore has to take its paint FROM that scale. Eight of the
+ten spikes do the opposite: they set a literal `stroke`/`fill` per mark, because Recharts' idiom is
+one `<Line dataKey>` per series and these ports deliberately preserve that shape mark-for-mark.
+
+So the split is structural, not stylistic:
+
+| Chart                  | Package legend reachable? | Why                                                                                                                                                          |
+| ---------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| stacked bar            | **yes**                   | already groups by `z`; `barY` has a `color` channel, so `fill: (d) => colorFor(d.service)` becomes `color: (d) => d.service` plus a chart-level domain/range |
+| heatmap, trace scatter | yes (already used)        | continuous `color:` scale — but a gradient ramp, not a series key                                                                                            |
+| line, area             | no                        | one mark per series with a literal stroke; reaching a colour scale means rebuilding both around long-format rows and a `z` channel                           |
+| pie                    | no                        | `radialArc` reads no colour scale, the same wall its missing hover affordance hit                                                                            |
+| treemap, sankey        | no                        | `fill`/`stroke` are computed per node from data (`serviceColor`, error rate), not scaled                                                                     |
+
+`stacked-bar-legend-scene-tanstack` is the one arm where both are reachable, which makes it the
+only place the two can be priced against each other — see the second test in
+`charts-lab.perf.spec.ts`. What the in-scene legend buys: zero DOM. What it costs: no Tailwind,
+no shared styling with the tooltip, `ChartLegendPlacement` is `'top' | 'bottom'` only (production's
+`legend="right"` is not expressible), and no stats columns.
+
+**Two things about that arm are sharp enough to be worth the whole exercise.**
+
+_Declaring both `z` and `color` produces a legend that silently filters nothing._ `barY` derives
+its series from `color` only when `z` is absent (`dist/bar.js:27`), and sets `seriesFromColor` only
+when `z` is absent AND the layout is grouped or the x positions repeat (`dist/bar.js:50`).
+`interactiveColorLegend`'s `filterMark` short-circuits on `seriesFromColor`. Declaring both — the
+obvious reading, since `z` is exactly what the DOM variant uses to stack — gives a legend that
+renders, toggles, updates `aria-pressed`, and removes nothing. Dropping `z` fixes it; the stack
+then groups by the colour channel instead.
+
+_And on a stack it punches a hole rather than restacking._ `filterMark` runs on the RESOLVED
+scene, after `stackValues` has assigned every segment its y1/y2, and there is no hook between the
+layout and the filter to re-run it. So hiding the bottom band deletes its rects and leaves the
+survivors floating at their old offsets, with a gap along the baseline — verified in the browser,
+and the reason that arm pins its y domain to the full total (a domain over the visible services
+would crop a picture that still occupies its original height). `StackedBarLegendSpike` filters
+ROWS, before the layout, which is why it restacks correctly: 120 rects → 96 and a 7.0K → 5.0K axis
+on hiding one of five services. **For a stacked chart the package's legend is a display control,
+not a data control** — which on current evidence rules it out for the query-builder bar chart.
+
+`interactiveColorLegend`'s state model is the good part and worth stealing regardless:
+`controlledSignal(value, onChange)` is explicitly "application-owned state described to the chart"
+— it creates no store and no subscription of its own, so the visible set is plain React state
+exactly as the DOM legend's hidden set is. Note `seriesVisible` "keeps hidden series in scale
+inference while removing their scene output", which is right for a colour scale and wrong for a y
+axis: the y domain still has to be re-pinned by hand.
+
+The DOM legend is `lab/bench/tanstack/chart-legend.tsx`, a compound component
+(`ChartLegend.Provider/Row/Column/Items/Item/Swatch/Label`) with `useChartLegendState` alongside.
+State lives with the chart, not the legend, because hiding a series has to drop its marks and
+re-derive the domain — which is also the part that is easy to get wrong: without it, hiding P99
+leaves the remaining lines squashed against the floor and the toggle looks inert.
+
+**Not ported: the Min/Max/Mean/Last stats table.** `QueryBuilderLegend`'s stats variant reads
+`Record<string, unknown>` rows by key; the spikes have closed per-chart row types and accessor
+channels. It is a data-shape coupling, not a rendering one, and porting it would mean giving every
+spike an index signature — the exact thing `pie-spike.tsx` documents as poisoning `Omit`/`keyof`
+across the package.
+
+Two things fixed in passing, both the same bug: `pie-spike` coloured slices by
+`palette[slice.index % palette.length]` and `treemap-spike` by first-seen order over the rows it
+was handed. Both are indexes into a _filtered_ list, so hiding one slice or service renumbered
+everything after it and recoloured the chart. Colours are now keyed by name over the full row set.
+A legend that repaints the series it did not touch is worse than no legend.
 
 ## 3. Migration cost for the other 46 files
 

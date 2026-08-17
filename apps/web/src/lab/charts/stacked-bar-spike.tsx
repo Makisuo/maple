@@ -3,9 +3,16 @@ import { formatBucketLabel, formatNumber } from "@maple/ui/lib/format"
 import { barY, defineChart, stack } from "@tanstack/charts"
 import { scaleBand } from "@tanstack/charts-scales/band"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
+import { controlledSignal } from "@tanstack/charts/interaction/signal"
+import { interactiveColorLegend } from "@tanstack/charts/legend"
 import { tooltip } from "@tanstack/charts/tooltip"
-import { memo, useMemo } from "react"
+import { memo, useMemo, useState, type ReactNode } from "react"
 
+import {
+	ChartSeriesLegend,
+	useChartLegendState,
+	type LegendSeriesSpec,
+} from "@/lab/bench/tanstack/chart-legend"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
 import {
 	STACKED_BAR_SERVICES,
@@ -25,8 +32,19 @@ const STACK_TOKENS = {
 	db: ["--chart-5", "#06b6d4"],
 } as const satisfies Record<string, readonly [PlotColorToken, string]>
 
-/** Secondary dash weight, as on every non-primary overlay in the production charts. */
-const PARTIAL_DASHARRAY = "3 3"
+/**
+ * The partial bucket's outline. Open enough to read as dashes at a bar's width —
+ * `"3 3"` around a ~20px rect reads as a shimmer rather than a dash.
+ *
+ * No round-cap correction needed here, unlike `lineY`: `barY` emits rect nodes,
+ * which take the renderer's default butt cap.
+ */
+const PARTIAL_DASHARRAY = "4 4"
+
+/** The outline colour. Module scope — `usePlotColors` memoizes on identity. */
+const BAR_CHROME_TOKENS = {
+	foreground: ["--foreground", "#fafafa"],
+} as const satisfies Record<string, readonly [PlotColorToken, string]>
 
 /** SVG's "no dashes" — an empty string is not a valid `stroke-dasharray`. */
 const SOLID_DASHARRAY = "0"
@@ -60,16 +78,55 @@ export const StackedBarSpike = memo(function StackedBarSpike({
 	incomplete?: boolean
 	className?: string
 }) {
+	const colorFor = useServiceColor()
+	return (
+		<StackedBarFigure
+			rows={rows}
+			renderer={renderer}
+			incomplete={incomplete}
+			className={className}
+			colorFor={colorFor}
+		/>
+	)
+})
+
+/** Service → themed colour. Shared by all three variants in this file. */
+function useServiceColor(): (service: string) => string {
 	const colors = usePlotColors(STACK_TOKENS)
-
-	const axisContext = useMemo(() => stackedBarAxisContext(rows), [rows])
-
-	const colorFor = useMemo(
+	return useMemo(
 		() =>
 			(service: string): string =>
 				colors[service as keyof typeof colors] ?? colors.api,
 		[colors],
 	)
+}
+
+/**
+ * The figure itself, over whatever rows it is handed.
+ *
+ * Unlike line and area, hiding a service here is a ROW filter rather than a mark
+ * filter — there is one `barY` and the series live in its `z` channel — which is
+ * why `stackMax` has to be recomputed from the same filtered rows below. Leaving
+ * it over the full set would keep the axis pinned to the original total and the
+ * toggle would shrink the stack without ever reclaiming the empty headroom.
+ */
+function StackedBarFigure({
+	rows,
+	renderer,
+	incomplete,
+	className,
+	colorFor,
+	legend,
+}: {
+	rows: readonly StackedBarSpikeRow[]
+	renderer: TanstackRenderer
+	incomplete: boolean
+	className?: string
+	colorFor: (service: string) => string
+	legend?: ReactNode
+}) {
+	const chrome = usePlotColors(BAR_CHROME_TOKENS)
+	const axisContext = useMemo(() => stackedBarAxisContext(rows), [rows])
 
 	/** Every service in one bucket, for the tooltip — a datum is a single cell. */
 	const byBucket = useMemo(() => {
@@ -116,10 +173,18 @@ export const StackedBarSpike = memo(function StackedBarSpike({
 					// inference is what carries the x channel's type through to the chart,
 					// and building the options object separately erases it.
 					stroke: (d: StackedBarSpikeRow) =>
-						incomplete && d.partial ? colorFor(d.service) : "transparent",
+						incomplete && d.partial ? chrome.foreground : "transparent",
 					strokeDasharray: (d: StackedBarSpikeRow) =>
 						incomplete && d.partial ? PARTIAL_DASHARRAY : SOLID_DASHARRAY,
-					fillOpacity: incomplete ? 0.9 : 1,
+					strokeWidth: 1.5,
+					// Fully opaque, always. Fading the partial bars to 0.9 made them
+					// quieter than the complete ones, which is backwards: a bucket that is
+					// still filling is the most recent data on the chart and the part the
+					// reader is most likely to be looking for. The dashed outline is what
+					// says "provisional" — and it can only do that in a colour the fill is
+					// not, which is why it is `--foreground` rather than the series colour
+					// it used to be (same-on-same read as no outline at all).
+					fillOpacity: 1,
 					states: [{ when: { focus: "primary" }, style: { fillOpacity: 1 } }],
 				}),
 			],
@@ -153,7 +218,7 @@ export const StackedBarSpike = memo(function StackedBarSpike({
 				offset: 12,
 			},
 		})
-	}, [rows, byBucket, colorFor, incomplete, axisContext])
+	}, [rows, byBucket, colorFor, incomplete, axisContext, chrome])
 
 	return (
 		<TanstackChartFrame
@@ -161,6 +226,7 @@ export const StackedBarSpike = memo(function StackedBarSpike({
 			className={className}
 			ariaLabel="Spans by service"
 			definition={definition}
+			legend={legend}
 			// `TooltipBody` reads every series off `points[0].datum`, which works when
 			// a datum is a whole bucket. Here it is one cell, so the bucket's other
 			// services have to be looked up rather than read.
@@ -212,6 +278,222 @@ export const StackedBarSpike = memo(function StackedBarSpike({
 								{formatNumber(total)}
 							</span>
 						</div>
+					</div>
+				)
+			}}
+		/>
+	)
+}
+
+/**
+ * The same chart with a DOM series key beneath it — the sibling-variant shape
+ * `line-spike.tsx` explains.
+ *
+ * Compare `StackedBarSceneLegendSpike` below: this is the only chart in the lab
+ * where both legends are reachable, so it is the only place the DOM legend's cost
+ * can be priced against the package's own.
+ */
+export const StackedBarLegendSpike = memo(function StackedBarLegendSpike({
+	rows,
+	renderer,
+	incomplete = false,
+	className,
+}: {
+	rows: readonly StackedBarSpikeRow[]
+	renderer: TanstackRenderer
+	incomplete?: boolean
+	className?: string
+}) {
+	const colorFor = useServiceColor()
+
+	const legendSeries = useMemo<LegendSeriesSpec[]>(
+		() =>
+			STACKED_BAR_SERVICES.map((service) => ({
+				key: service,
+				label: service,
+				color: colorFor(service),
+			})),
+		[colorFor],
+	)
+	const { hidden, toggle } = useChartLegendState(legendSeries)
+
+	// A row filter, not a mark filter: one `barY` carries every service through its
+	// `z` channel, so this is also what re-derives `stackMax` downstream.
+	const visibleRows = useMemo(() => rows.filter((row) => !hidden.has(row.service)), [rows, hidden])
+
+	return (
+		<StackedBarFigure
+			rows={visibleRows}
+			renderer={renderer}
+			incomplete={incomplete}
+			className={className}
+			colorFor={colorFor}
+			legend={
+				<ChartSeriesLegend
+					series={legendSeries}
+					hidden={hidden}
+					onToggle={toggle}
+					label="Spans by service"
+				/>
+			}
+		/>
+	)
+})
+
+/**
+ * The same chart drawn with the PACKAGE's legend rather than a DOM one, for
+ * comparison.
+ *
+ * This is the only spike in the lab where that comparison is available, and the
+ * reason is structural. `interactiveColorLegend` hangs off `ChartColorOptions.legend`,
+ * which only exists once the chart declares a `color:` scale — so a mark has to
+ * take its fill FROM that scale rather than from a literal. `barY` has a `color`
+ * channel and this chart already groups by service, so the change is
+ * `fill: (d) => colorFor(d.service)` → `color: (d) => d.service` plus a
+ * chart-level domain/range. Line and area have no such channel to move to: they
+ * are one mark per series with a literal `stroke`, which is Recharts' idiom and
+ * the shape most of these spikes deliberately preserve. Pie cannot get there at
+ * all (`radialArc` reads no scale). See FINDINGS.md.
+ *
+ * What it costs relative to `StackedBarLegendSpike`: no Tailwind, no `right`
+ * layout (`ChartLegendPlacement` is `'top' | 'bottom'`), no stats columns, and no
+ * shared styling with the tooltip — it is a `SceneNode` the renderer paints.
+ * What it buys: zero DOM and no React commit on toggle beyond the state itself.
+ *
+ * **And on a STACK it punches a hole rather than restacking**, which is the
+ * finding this arm exists to show. `filterMark` runs on the resolved scene, after
+ * `stackValues` has already assigned every segment its y1/y2 — so hiding the
+ * bottom band deletes its rects and leaves the survivors floating at their
+ * original offsets, with a gap along the baseline. There is no hook between the
+ * layout and the filter to re-run the stack. `StackedBarLegendSpike` filters
+ * ROWS, before the layout, which is why it restacks correctly and this cannot.
+ * The y domain below is deliberately pinned to the FULL total for the same
+ * reason: the picture still occupies its original height, so a domain derived
+ * from the visible services would clip the top off it.
+ */
+export const StackedBarSceneLegendSpike = memo(function StackedBarSceneLegendSpike({
+	rows,
+	renderer,
+	className,
+}: {
+	rows: readonly StackedBarSpikeRow[]
+	renderer: TanstackRenderer
+	className?: string
+}) {
+	const colorFor = useServiceColor()
+	const axisContext = useMemo(() => stackedBarAxisContext(rows), [rows])
+
+	// `controlledSignal` is explicitly "application-owned state described to the
+	// chart" — it creates no store of its own, so the visible set is plain React
+	// state here exactly as the DOM legend's hidden set is.
+	const [visibleServices, setVisibleServices] = useState<readonly string[]>(() => [...STACKED_BAR_SERVICES])
+
+	const byBucket = useMemo(() => {
+		const map = new Map<string, StackedBarSpikeRow[]>()
+		for (const row of rows) {
+			const existing = map.get(row.bucket)
+			if (existing) existing.push(row)
+			else map.set(row.bucket, [row])
+		}
+		return map
+	}, [rows])
+
+	const definition = useMemo(() => {
+		const buckets = [...byBucket.keys()]
+		// Over EVERY service, hidden ones included — see the note on the component.
+		// The scene filter removes rects but not the offsets they were stacked at, so
+		// the drawing keeps its full height no matter what is hidden, and a domain
+		// over the visible subset would crop it.
+		const stackMax =
+			buckets.reduce((max, bucket) => {
+				const total = (byBucket.get(bucket) ?? []).reduce((sum, row) => sum + row.spans, 0)
+				return Math.max(max, total)
+			}, 0) || 1
+
+		return defineChart({
+			marks: [
+				barY(rows, {
+					x: (d: StackedBarSpikeRow) => d.bucket,
+					y: (d: StackedBarSpikeRow) => d.spans,
+					// `color`, and NO `z` — this is the whole difference from
+					// `StackedBarFigure`, and getting it wrong is silent.
+					//
+					// `barY` derives its series from `color` only when `z` is absent
+					// (`dist/bar.js:27`), and sets `seriesFromColor` only when `z` is
+					// absent AND the layout is grouped or the x positions repeat
+					// (`dist/bar.js:50`). `interactiveColorLegend`'s `filterMark` is a
+					// no-op unless `seriesFromColor` is true. Declaring both `z` and
+					// `color` — the obvious reading, since `z` is what the sibling
+					// variant uses — therefore produces a legend that renders, toggles,
+					// and removes nothing: the hidden segments keep painting while the
+					// y domain drops out from under them.
+					color: (d: StackedBarSpikeRow) => d.service,
+					// Still correct with no `z`: the stack groups by whatever
+					// `seriesValues` resolved to, which is now the colour channel.
+					layout: stack({ order: STACKED_BAR_SERVICES }),
+					inset: 0.5,
+					radius: 0,
+					states: [{ when: { focus: "primary" }, style: { fillOpacity: 1 } }],
+				}),
+			],
+			color: {
+				domain: STACKED_BAR_SERVICES,
+				range: STACKED_BAR_SERVICES.map(colorFor),
+				legend: interactiveColorLegend({
+					visible: controlledSignal(visibleServices, (next) => setVisibleServices(next)),
+					placement: "bottom",
+					ariaLabel: "Spans by service",
+				}),
+			},
+			x: {
+				scale: scaleBand<string>(buckets, [0, 1]).paddingInner(0.2),
+				axis: {
+					line: false,
+					ticks: {
+						size: 0,
+						padding: 8,
+						spacing: 72,
+						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+					},
+				},
+			},
+			y: {
+				scale: scaleLinear().domain([0, stackMax]),
+				nice: true,
+				grid: true,
+				axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
+			},
+			focus: "nearest",
+			focusRing: false,
+			tooltip: {
+				use: tooltip,
+				className: "maple-bench-tooltip",
+				anchor: "pointer",
+				placement: "right",
+				offset: 12,
+			},
+		})
+	}, [rows, byBucket, colorFor, axisContext, visibleServices])
+
+	return (
+		<TanstackChartFrame
+			renderer={renderer}
+			className={className}
+			ariaLabel="Spans by service"
+			definition={definition}
+			renderTooltipBody={({ points }) => {
+				const datum = points[0]?.datum
+				if (!datum) return null
+				return (
+					<div className="flex items-center gap-2">
+						<span
+							className="size-2.5 shrink-0 rounded-[2px]"
+							style={{ backgroundColor: colorFor(datum.service) }}
+						/>
+						<span className="text-muted-foreground">{datum.service}</span>
+						<span className="font-mono font-semibold text-foreground tabular-nums">
+							{formatNumber(datum.spans)}
+						</span>
 					</div>
 				)
 			}}

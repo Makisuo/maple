@@ -2,8 +2,13 @@ import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/th
 import { defineChart } from "@tanstack/charts"
 import { treemap } from "@tanstack/charts/hierarchy/treemap"
 import { tooltip } from "@tanstack/charts/tooltip"
-import { memo, useMemo } from "react"
+import { memo, useMemo, type ReactNode } from "react"
 
+import {
+	ChartSeriesLegend,
+	useChartLegendState,
+	type LegendSeriesSpec,
+} from "@/lab/bench/tanstack/chart-legend"
 import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
 
 /**
@@ -131,23 +136,58 @@ export const TreemapSpike = memo(function TreemapSpike({
 	renderer: TanstackRenderer
 	className?: string
 }) {
+	const { colors, serviceColor } = useTreemapColors(rows)
+	return (
+		<TreemapFigure
+			rows={rows}
+			renderer={renderer}
+			className={className}
+			colors={colors}
+			serviceColor={serviceColor}
+		/>
+	)
+})
+
+/**
+ * Chrome colours plus service → tile colour.
+ *
+ * `rows` here is always the FULL list, never a filtered one: the palette index is
+ * assigned in first-seen order, so hiding a service would otherwise renumber
+ * every service after it and recolour tiles the legend never touched.
+ */
+function useTreemapColors(rows: readonly TreemapSpikeRow[]) {
 	const colors = usePlotColors(TILE_TOKENS)
 
 	// Only `--chart-1`..`--chart-5` exist in `packages/ui/src/styles/tokens.css`;
 	// the sixth service wraps rather than inventing a `--chart-6` that would
 	// resolve to its literal fallback and ignore the theme.
-	const palette = useMemo(() => [colors.c1, colors.c2, colors.c3, colors.c4, colors.c5], [colors])
-
-	// Service → palette index, assigned in first-seen order so the colouring is a
-	// function of the data rather than of the layout's tiling order.
 	const serviceColor = useMemo(() => {
+		const palette = [colors.c1, colors.c2, colors.c3, colors.c4, colors.c5]
 		const order = new Map<string, number>()
 		for (const row of rows) {
 			if (!order.has(row.service)) order.set(row.service, order.size)
 		}
 		return (service: string) => palette[(order.get(service) ?? 0) % palette.length] ?? palette[0]
-	}, [rows, palette])
+	}, [rows, colors])
 
+	return { colors, serviceColor }
+}
+
+function TreemapFigure({
+	rows,
+	renderer,
+	className,
+	colors,
+	serviceColor,
+	legend,
+}: {
+	rows: readonly TreemapSpikeRow[]
+	renderer: TanstackRenderer
+	className?: string
+	colors: Readonly<Record<keyof typeof TILE_TOKENS, string>>
+	serviceColor: (service: string) => string
+	legend?: ReactNode
+}) {
 	const definition = useMemo(() => {
 		return defineChart({
 			marks: [
@@ -205,6 +245,7 @@ export const TreemapSpike = memo(function TreemapSpike({
 			className={className}
 			ariaLabel="Span volume by service and operation"
 			definition={definition}
+			legend={legend}
 			// Mandatory: the default body prints the mark's x/y channels, which for a
 			// treemap are the tile's resolved pixel edges.
 			renderTooltipBody={({ points }) => {
@@ -231,6 +272,63 @@ export const TreemapSpike = memo(function TreemapSpike({
 					</div>
 				)
 			}}
+		/>
+	)
+}
+
+/**
+ * The same mosaic with a service key beneath it.
+ *
+ * This is the legend the treemap most needs, and for a reason specific to the
+ * mark: `treemap` paints LEAVES only, so the service grouping exists in the
+ * colouring and nowhere else — there is no parent frame or header band to label
+ * it (see the note above). Without a key, a viewer can see that four tiles share
+ * a hue but not what the hue means.
+ *
+ * Hiding a service drops its rows before the layout runs, so the survivors
+ * retile across the full area rather than leaving a hole.
+ */
+export const TreemapLegendSpike = memo(function TreemapLegendSpike({
+	rows = TREEMAP_SPIKE_ROWS,
+	renderer,
+	className,
+}: {
+	rows?: readonly TreemapSpikeRow[]
+	renderer: TanstackRenderer
+	className?: string
+}) {
+	const { colors, serviceColor } = useTreemapColors(rows)
+
+	const legendSeries = useMemo<LegendSeriesSpec[]>(() => {
+		const seen = new Set<string>()
+		const items: LegendSeriesSpec[] = []
+		for (const row of rows) {
+			if (seen.has(row.service)) continue
+			seen.add(row.service)
+			items.push({ key: row.service, label: row.service, color: serviceColor(row.service) })
+		}
+		return items
+	}, [rows, serviceColor])
+
+	const { hidden, toggle } = useChartLegendState(legendSeries)
+
+	const visibleRows = useMemo(() => rows.filter((row) => !hidden.has(row.service)), [rows, hidden])
+
+	return (
+		<TreemapFigure
+			rows={visibleRows}
+			renderer={renderer}
+			className={className}
+			colors={colors}
+			serviceColor={serviceColor}
+			legend={
+				<ChartSeriesLegend
+					series={legendSeries}
+					hidden={hidden}
+					onToggle={toggle}
+					label="Span volume by service"
+				/>
+			}
 		/>
 	)
 })

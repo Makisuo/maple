@@ -34,6 +34,13 @@ type Arm =
 	| "trace-scatter"
 	| "sankey"
 	| "treemap"
+	| "line-legend-tanstack"
+	| "area-legend-tanstack"
+	| "stacked-bar-legend-tanstack"
+	| "stacked-bar-legend-scene-tanstack"
+	| "pie-legend-tanstack"
+	| "treemap-legend"
+	| "sankey-legend"
 
 interface ReactRenderMetrics {
 	commits: number
@@ -186,5 +193,42 @@ test("charts lab: every chart is measured, pairs are compared", async ({ page })
 	// No chart may drop frames on a plain hover sweep, whatever its React cost.
 	for (const [arm, metrics] of results) {
 		expect(metrics.droppedFrames, `${arm} dropped frames`).toBeLessThanOrEqual(2)
+	}
+})
+
+/**
+ * The two legends, priced against each other.
+ *
+ * Its own test rather than more entries in PAIRS above, for two reasons. The
+ * comparison is different in kind — same chart, same data, same renderer, one
+ * variable — and the main gate's arm list is what FINDINGS.md's table is keyed
+ * on, so growing it would silently change what those numbers mean.
+ *
+ * The other five legend arms are deliberately NOT measured. A DOM legend costs
+ * the same regardless of which mark it sits under, and this pair isolates it; the
+ * rest would be five more sweeps confirming the same number. What they exist for
+ * is the visual diff, which no gate reads.
+ */
+test("charts lab: DOM legend versus the package's in-scene legend", async ({ page }) => {
+	const dom = await measure(page, "stacked-bar-legend-tanstack")
+	const scene = await measure(page, "stacked-bar-legend-scene-tanstack")
+
+	console.log(
+		`[perf] legend cost\n${[
+			["legend", "reactMs", "commits", "dropped", "longTasks"].join("\t"),
+			row("dom", dom),
+			row("scene", scene),
+		].join("\n")}`,
+	)
+
+	// Not gated on either winning — the hover sweep never touches a legend item, so
+	// what this records is the standing cost of having one, not the cost of using
+	// it. Both must still respond and neither may drop frames.
+	for (const [name, metrics] of [
+		["dom", dom],
+		["scene", scene],
+	] as const) {
+		expect(metrics.react.commits, `${name} legend arm responded to the sweep`).toBeGreaterThan(0)
+		expect(metrics.droppedFrames, `${name} legend arm dropped frames`).toBeLessThanOrEqual(2)
 	}
 })

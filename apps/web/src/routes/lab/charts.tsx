@@ -28,6 +28,13 @@ const chartsLabSearchSchema = Schema.Struct({
 			"trace-scatter",
 			"sankey",
 			"treemap",
+			"line-legend-tanstack",
+			"area-legend-tanstack",
+			"stacked-bar-legend-tanstack",
+			"stacked-bar-legend-scene-tanstack",
+			"pie-legend-tanstack",
+			"treemap-legend",
+			"sankey-legend",
 		]),
 	),
 })
