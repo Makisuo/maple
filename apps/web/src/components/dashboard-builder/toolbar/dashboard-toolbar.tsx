@@ -22,8 +22,7 @@ import {
 	DropdownMenuSeparator,
 } from "@maple/ui/components/ui/dropdown-menu"
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
-import { ReloadControls } from "@/components/time-range-picker/reload-controls"
-import { RefreshIntervalPicker } from "@/components/time-range-picker/refresh-interval-picker"
+import { PageRefreshControls } from "@/components/time-range-picker/refresh-controls"
 import { VariableSelects } from "@/components/dashboard-builder/toolbar/variable-selects"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
@@ -101,14 +100,11 @@ export function DashboardToolbar({
 				}}
 			/>
 
-			<div className="flex items-center gap-1">
-				<ReloadControls />
-				<RefreshIntervalPicker
-					value={refreshIntervalSeconds}
-					onChange={onRefreshIntervalChange}
-					savedDefault={dashboard.refreshIntervalSeconds}
-				/>
-			</div>
+			<PageRefreshControls
+				value={refreshIntervalSeconds}
+				onChange={onRefreshIntervalChange}
+				savedDefault={dashboard.refreshIntervalSeconds}
+			/>
 
 			<div className="flex items-center gap-1">
 				{/* Labels collapse to icon-only on a narrow canvas; `aria-label`

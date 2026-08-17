@@ -36,9 +36,8 @@ import {
 	variableSearchRest,
 	variableValuesFromSearch,
 } from "@/lib/dashboard-controls/search-params"
-import { RefreshIntervalPicker } from "@/components/time-range-picker/refresh-interval-picker"
+import { RefreshControls } from "@/components/time-range-picker/refresh-controls"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
-import { ArrowRotateAnticlockwiseIcon } from "@/components/icons"
 import type { DashboardRefreshIntervalSeconds } from "@maple/domain/http"
 import { formatTimeRangeDisplay, presetLabel } from "@/lib/time-utils"
 import {
@@ -481,17 +480,12 @@ function ShareBody({
 					<div className="text-muted-foreground text-xs" data-testid="share-time-range">
 						{window.label}
 					</div>
-					<div className="flex items-center gap-1">
-						<Button type="button" variant="outline" size="sm" onClick={handleRefresh}>
-							<ArrowRotateAnticlockwiseIcon className="size-3.5" />
-							<span>Reload</span>
-						</Button>
-						<RefreshIntervalPicker
-							value={refreshIntervalSeconds}
-							onChange={handleRefreshIntervalChange}
-							savedDefault={storedRefreshInterval}
-						/>
-					</div>
+					<RefreshControls
+						onReload={handleRefresh}
+						value={refreshIntervalSeconds}
+						onChange={handleRefreshIntervalChange}
+						savedDefault={storedRefreshInterval}
+					/>
 				</div>
 			)}
 			{/* Titles interpolate `$service` and friends with the values the server
