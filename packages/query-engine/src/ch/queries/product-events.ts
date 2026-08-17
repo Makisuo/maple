@@ -24,11 +24,7 @@ import type { CHQuery, ColumnAccessor, ColumnDefs, JoinedColumnAccessor } from "
 import { Schema } from "effect"
 import { ProductEvents, IdentityLinks, SessionReplays } from "../tables"
 import { CHNumber } from "../schema"
-import {
-	replaysWhere,
-	needsSessionSemiJoin,
-	type ProductEventsFilters,
-} from "./web-analytics"
+import { replaysWhere, needsSessionSemiJoin, type ProductEventsFilters } from "./web-analytics"
 
 export type { ProductEventsFilters } from "./web-analytics"
 
@@ -68,7 +64,13 @@ type FunnelBranch = CHQuery<ColumnDefs, FunnelEventRow, Record<string, ColumnDef
 // Public option types
 
 /** Which `session_replays` dimension a `session` step (or a breakdown) reads. */
-export type FunnelSessionDimension = "referrerHost" | "utmSource" | "utmMedium" | "utmCampaign" | "country" | "host"
+export type FunnelSessionDimension =
+	| "referrerHost"
+	| "utmSource"
+	| "utmMedium"
+	| "utmCampaign"
+	| "country"
+	| "host"
 
 /**
  * One funnel step.
@@ -163,7 +165,13 @@ export type ProductEventNamesOutput = typeof productEventNamesRowSchema.Type
 export class ProductEventsFunnelError extends Schema.TaggedError<ProductEventsFunnelError>()(
 	"@maple/query-engine/ProductEventsFunnelError",
 	{
-		reason: Schema.Literals(["NoSteps", "TooManySteps", "SessionStepNotFirst", "InvalidWindow", "InvalidLimit"]),
+		reason: Schema.Literals([
+			"NoSteps",
+			"TooManySteps",
+			"SessionStepNotFirst",
+			"InvalidWindow",
+			"InvalidLimit",
+		]),
 		message: Schema.String,
 	},
 ) {}
@@ -385,7 +393,9 @@ function eventsBranch(plan: FunnelPlan): FunnelBranch {
 	// aliases actually declared above are ever read.
 	let base: OpenJoinQuery<typeof ProductEvents.columns> = from(ProductEvents, "e")
 	if (keyBy === "person") {
-		base = base.leftJoinQuery(identityLinksByVisitor(), LINK_ALIAS, (e, link) => e.VisitorId.eq(link.VisitorId))
+		base = base.leftJoinQuery(identityLinksByVisitor(), LINK_ALIAS, (e, link) =>
+			e.VisitorId.eq(link.VisitorId),
+		)
 	}
 	if (sessionDims) {
 		base = base.leftJoinQuery(sessionDims, "sd", (e, sd) => e.SessionId.eq(sd.SessionId))
@@ -424,7 +434,9 @@ function eventsBranch(plan: FunnelPlan): FunnelBranch {
 				$.Timestamp.lte(param.dateTime("endTime")),
 				anyStep,
 				key.neq(""),
-				hasPopulationFilter(filters) ? inSubquery(key, matchingPersonsSubquery(keyBy, filters)) : undefined,
+				hasPopulationFilter(filters)
+					? inSubquery(key, matchingPersonsSubquery(keyBy, filters))
+					: undefined,
 			]
 		})
 }
@@ -444,7 +456,9 @@ function sessionEntryBranch(plan: FunnelPlan, step: Extract<FunnelStep, { kind: 
 
 	let base: OpenJoinQuery<typeof SessionReplays.columns> = from(SessionReplays, "s")
 	if (keyBy === "person") {
-		base = base.leftJoinQuery(identityLinksByVisitor(), LINK_ALIAS, (s, link) => s.VisitorId.eq(link.VisitorId))
+		base = base.leftJoinQuery(identityLinksByVisitor(), LINK_ALIAS, (s, link) =>
+			s.VisitorId.eq(link.VisitorId),
+		)
 	}
 
 	return base
@@ -455,7 +469,10 @@ function sessionEntryBranch(plan: FunnelPlan, step: Extract<FunnelStep, { kind: 
 			if (dim === undefined) return row
 			// An attribute breakdown has no value on a session row; the events
 			// branch supplies it. A session dimension is read straight off the row.
-			return { ...row, dim: sessionDimension ? sessionDimensionColumn($, sessionDimension) : CH.lit("") }
+			return {
+				...row,
+				dim: sessionDimension ? sessionDimensionColumn($, sessionDimension) : CH.lit(""),
+			}
 		})
 		.where(($) => {
 			const key = personKey(keyBy, $, keyBy === "person" ? $[LINK_ALIAS] : undefined)
@@ -465,7 +482,9 @@ function sessionEntryBranch(plan: FunnelPlan, step: Extract<FunnelStep, { kind: 
 				$.StartTime.lte(param.dateTime("endTime")),
 				sessionDimensionColumn($, step.dimension).eq(step.value),
 				key.neq(""),
-				hasPopulationFilter(filters) ? inSubquery(key, matchingPersonsSubquery(keyBy, filters)) : undefined,
+				hasPopulationFilter(filters)
+					? inSubquery(key, matchingPersonsSubquery(keyBy, filters))
+					: undefined,
 			]
 		})
 }
@@ -479,7 +498,10 @@ function levelsQuery(plan: FunnelPlan) {
 	const { opts } = plan
 	const events = eventsBranch(plan)
 	const source = plan.sessionStep
-		? fromUnion(unionAll<FunnelEventRow>(sessionEntryBranch(plan, plan.sessionStep), events), "funnel_events")
+		? fromUnion(
+				unionAll<FunnelEventRow>(sessionEntryBranch(plan, plan.sessionStep), events),
+				"funnel_events",
+			)
 		: fromQuery(events, "funnel_events")
 
 	return source
@@ -640,4 +662,3 @@ export function productEventNamesQuery(
 		.limit(limit)
 		.format("JSON")
 }
-

@@ -214,7 +214,9 @@ describe("parametric aggregates", () => {
 			level: CH.windowFunnel(86400, "strict_order")($.Timestamp, $.Name.eq("a"), $.Name.eq("b")),
 		}))
 		const { sql } = compileCH(q, {})
-		expect(sql).toContain("windowFunnel(86400, 'strict_order')(Timestamp, Name = 'a', Name = 'b') AS level")
+		expect(sql).toContain(
+			"windowFunnel(86400, 'strict_order')(Timestamp, Name = 'a', Name = 'b') AS level",
+		)
 	})
 
 	it("windowFunnel refuses an empty condition list", () => {
@@ -227,7 +229,9 @@ describe("parametric aggregates", () => {
 			matched: CH.sequenceMatch("(?1)(?t<3600)(?2)")($.Timestamp, $.Name.eq("a"), $.Name.eq("b")),
 		}))
 		const { sql } = compileCH(q, {})
-		expect(sql).toContain("sequenceMatch('(?1)(?t<3600)(?2)')(Timestamp, Name = 'a', Name = 'b') AS matched")
+		expect(sql).toContain(
+			"sequenceMatch('(?1)(?t<3600)(?2)')(Timestamp, Name = 'a', Name = 'b') AS matched",
+		)
 	})
 
 	it("sequenceMatch refuses a pattern that could break out of the literal", () => {

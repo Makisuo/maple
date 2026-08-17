@@ -66,11 +66,11 @@ Decisions baked in:
   `packages/browser-session/src/events/events-sink.ts` (`visitor_id`, `user_id`, `group_id` on each
   NDJSON line). The MV copies them through. No MV-side join against `session_replays` — that would
   depend on insert ordering.
-  - Requires adding `VisitorId`/`UserId`/`GroupId` (`DEFAULT ''`) to `session_events` too
-    (migration + Tinybird forward query, same shape as the 0012 `Attributes` widening).
-  - Rows from older SDKs arrive with `''`; the funnel falls back to a `session_replays` lookup for
-    those, or simply excludes them — pick "exclude + show coverage" (matches how the analytics page
-    already treats sessions without the 0011 block).
+    - Requires adding `VisitorId`/`UserId`/`GroupId` (`DEFAULT ''`) to `session_events` too
+      (migration + Tinybird forward query, same shape as the 0012 `Attributes` widening).
+    - Rows from older SDKs arrive with `''`; the funnel falls back to a `session_replays` lookup for
+      those, or simply excludes them — pick "exclude + show coverage" (matches how the analytics page
+      already treats sessions without the 0011 block).
 - **Sorting key**: `Timestamp` second so time ranges are a primary-index scan (the reason
   `web_events` exists), then `VisitorId` so a per-person `windowFunnel` groups over contiguous rows.
   Keep `SessionId`/`Seq` for stable step order.
@@ -90,9 +90,17 @@ Ingest gateway (`apps/ingest/src/main.rs`), NDJSON like `/v1/sessionEvents`, aut
 ingest key (org from the key, never the body). Body per line:
 
 ```json
-{ "timestamp": "...", "name": "plan_started", "source": "server",
-  "user_id": "user_…", "group_id": "org_…", "visitor_id": "", "session_id": "",
-  "service_name": "maple-api", "attributes": { "plan": "startup" } }
+{
+	"timestamp": "...",
+	"name": "plan_started",
+	"source": "server",
+	"user_id": "user_…",
+	"group_id": "org_…",
+	"visitor_id": "",
+	"session_id": "",
+	"service_name": "maple-api",
+	"attributes": { "plan": "startup" }
+}
 ```
 
 - Same caps as `sanitize_session_event` (name 128, ≤32 props, key 64, value 1024, 8 KiB total).
@@ -102,7 +110,7 @@ ingest key (org from the key, never the body). Body per line:
   `clickhouse_insert_mappings.rs`, entitlement check reusing the browser-sessions feature id (or a
   new `product_events` feature — billing decision, default: reuse).
 - Writes go where session events go today (Tinybird managed; BYO CH via the export lane).
-- Mobile: no SDK in scope. The endpoint *is* the contract; a mobile app posts with a persistent
+- Mobile: no SDK in scope. The endpoint _is_ the contract; a mobile app posts with a persistent
   install id as `visitor_id` and `identify`-equivalent `user_id`. `@maple-dev/effect-sdk` server side
   gets `track()` (`packages/effect-sdk/src/server`?) as a thin client of this endpoint so Node/Bun
   backends have the same call as the browser.
@@ -140,14 +148,16 @@ is one row per (visitor,user) pair.
 ### 5. Query engine
 
 `lib/clickhouse-builder`:
+
 - Parametric aggregates `windowFunnel(windowSec, mode?)(ts, cond1..condN)` and
   `sequenceMatch(pattern)(ts, cond…)` following the handwritten `quantile(q)` pattern in
   `src/ch/functions/aggregate.ts:74`. `retention()` optional.
 
 `packages/query-engine/src/ch/queries/product-events.ts` (replaces `web-analytics.ts`'s
 `web_events` references; the page-view queries move here unchanged):
+
 - `productEventsFunnelQuery({ steps, keyBy: "person" | "visitor" | "user" | "session",
-  windowSeconds, filters })` → per-step `count`, `conversion_from_prev`, `conversion_from_first`.
+windowSeconds, filters })` → per-step `count`, `conversion_from_prev`, `conversion_from_first`.
   Step = `{ eventName } | { pagePath, host? } | { referrerHost | utmSource | ... }`. A
   session-dimension step (referral) becomes step 0's condition through the person's first
   `session_replays` row; event steps are `EventName = …` conditions on `product_events`.
@@ -165,7 +175,7 @@ is one row per (visitor,user) pair.
 ### 6. Surfaces
 
 - **Dashboard widget**: new `funnel` config that is step-based (not group-by). Today's `funnel`
-  render shape stays as the renderer; the *widget type* gains `steps[]`, `keyBy`, `window`.
+  render shape stays as the renderer; the _widget type_ gains `steps[]`, `keyBy`, `window`.
   `packages/domain/src/http/v2/dashboards.ts` + parity test, `dashboard-schema-doc.ts` for MCP.
 - **`/analytics` → Funnels tab** reusing the existing filter sidebar (`WebAnalyticsFilters` become
   `ProductEventsFilters`), plus an event-name breakdown panel.

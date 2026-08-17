@@ -376,7 +376,9 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 	})
 
 	it("populates product_events from the materialized view with only navigation and custom rows", async () => {
-		const rows = await runJson("SELECT Kind, count() AS n FROM product_events GROUP BY Kind ORDER BY Kind")
+		const rows = await runJson(
+			"SELECT Kind, count() AS n FROM product_events GROUP BY Kind ORDER BY Kind",
+		)
 		const byKind = Object.fromEntries(rows.map((row) => [String(row.Kind), Number(row.n)]))
 		const expectedNavigation = SEED_EVENTS.filter((row) => row.type === "navigation").length
 		const expectedCustom = SEED_EVENTS.filter((row) => row.type === "custom").length
@@ -463,7 +465,16 @@ const fev = (
 const FUNNEL_EVENTS: ReadonlyArray<FunnelSeedEvent> = [
 	fev("f1", "v1", "", at(HOUR_MS), 0, "navigation", "https://maple.dev/"),
 	fev("f1", "v1", "", at(HOUR_MS + MINUTE_MS), 1, "navigation", "https://maple.dev/pricing"),
-	fev("f1", "v1", "", at(HOUR_MS + 2 * MINUTE_MS), 2, "custom", "https://maple.dev/pricing", "signup_started"),
+	fev(
+		"f1",
+		"v1",
+		"",
+		at(HOUR_MS + 2 * MINUTE_MS),
+		2,
+		"custom",
+		"https://maple.dev/pricing",
+		"signup_started",
+	),
 	fev("f2", "v2", "", at(2 * HOUR_MS), 0, "navigation", "https://maple.dev/"),
 	fev("f2", "v2", "", at(2 * HOUR_MS + MINUTE_MS), 1, "navigation", "https://maple.dev/pricing"),
 	fev("f3", "v3", "", at(3 * HOUR_MS), 0, "navigation", "https://maple.dev/pricing"),
@@ -640,7 +651,13 @@ describe.skipIf(!clickhouseE2eEnabled)("product events funnels", () => {
 	it("lists event names with counts, sessions and persons", async () => {
 		const rows = await runJson(CH.compile(CH.productEventNamesQuery({ limit: 10 }), funnelWindow).sql)
 		assert.deepStrictEqual(
-			rows.map((row) => [row.eventName, row.kind, Number(row.count), Number(row.sessions), Number(row.persons)]),
+			rows.map((row) => [
+				row.eventName,
+				row.kind,
+				Number(row.count),
+				Number(row.sessions),
+				Number(row.persons),
+			]),
 			[
 				["$pageview", "navigation", 6, 4, 4],
 				["plan_started", "custom", 2, 0, 2],

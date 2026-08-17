@@ -39,7 +39,10 @@ describe("productEventsFunnelQuery", () => {
 	})
 
 	it("emits one windowFunnel condition per step and one output row per step", () => {
-		const { sql } = compileCH(productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 3_600 }), params)
+		const { sql } = compileCH(
+			productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 3_600 }),
+			params,
+		)
 		// The window is passed in the timestamp's unit — epoch milliseconds — since
 		// windowFunnel does not accept DateTime64.
 		expect(sql).toContain("windowFunnel(3600000)(ts, s1 = 1, s2 = 1, s3 = 1) AS level")
@@ -51,32 +54,51 @@ describe("productEventsFunnelQuery", () => {
 	})
 
 	it("projects each step as a flag and only reads rows matching some step", () => {
-		const { sql } = compileCH(productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 3_600 }), params)
-		expect(sql).toContain("toUInt8(((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev')) AS s1")
+		const { sql } = compileCH(
+			productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 3_600 }),
+			params,
+		)
+		expect(sql).toContain(
+			"toUInt8(((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev')) AS s1",
+		)
 		expect(sql).toContain("toUInt8(EventName = 'signup_completed') AS s2")
-		expect(sql).toContain("toUInt8((EventName = 'plan_started' AND Attributes['plan'] = 'startup')) AS s3")
+		expect(sql).toContain(
+			"toUInt8((EventName = 'plan_started' AND Attributes['plan'] = 'startup')) AS s3",
+		)
 		expect(oneLine(sql)).toContain(
 			"AND ((((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev') OR EventName = 'signup_completed') OR (EventName = 'plan_started' AND Attributes['plan'] = 'startup'))",
 		)
 	})
 
 	it("keys by the raw column for visitor / user / session and drops empty keys", () => {
-		const visitor = compileCH(productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 60 }), params).sql
+		const visitor = compileCH(
+			productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 60 }),
+			params,
+		).sql
 		expect(visitor).toContain("VisitorId AS key")
 		expect(visitor).toContain("AND VisitorId != ''")
 		expect(visitor).not.toContain("identity_links")
 
-		const user = compileCH(productEventsFunnelQuery({ steps: STEPS, keyBy: "user", windowSeconds: 60 }), params).sql
+		const user = compileCH(
+			productEventsFunnelQuery({ steps: STEPS, keyBy: "user", windowSeconds: 60 }),
+			params,
+		).sql
 		expect(user).toContain("UserId AS key")
 		expect(user).toContain("AND UserId != ''")
 
-		const session = compileCH(productEventsFunnelQuery({ steps: STEPS, keyBy: "session", windowSeconds: 60 }), params).sql
+		const session = compileCH(
+			productEventsFunnelQuery({ steps: STEPS, keyBy: "session", windowSeconds: 60 }),
+			params,
+		).sql
 		expect(session).toContain("SessionId AS key")
 		expect(session).toContain("AND SessionId != ''")
 	})
 
 	it("stitches the person key through identity_links aggregated per visitor", () => {
-		const { sql } = compileCH(productEventsFunnelQuery({ steps: STEPS, keyBy: "person", windowSeconds: 60 }), params)
+		const { sql } = compileCH(
+			productEventsFunnelQuery({ steps: STEPS, keyBy: "person", windowSeconds: 60 }),
+			params,
+		)
 		expect(oneLine(sql)).toContain(
 			"LEFT JOIN (SELECT VisitorId AS VisitorId, argMin(UserId, FirstSeen) AS UserId FROM identity_links WHERE OrgId = 'org_1' GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId",
 		)
@@ -87,7 +109,11 @@ describe("productEventsFunnelQuery", () => {
 
 	it("turns a session step 1 into a UNION ALL branch of session_replays entries", () => {
 		const { sql } = compileCH(
-			productEventsFunnelQuery({ steps: [REFERRAL, ...STEPS], keyBy: "visitor", windowSeconds: 86_400 }),
+			productEventsFunnelQuery({
+				steps: [REFERRAL, ...STEPS],
+				keyBy: "visitor",
+				windowSeconds: 86_400,
+			}),
 			params,
 		)
 		expect(sql).toContain("UNION ALL")
@@ -97,12 +123,17 @@ describe("productEventsFunnelQuery", () => {
 		)
 		expect(sql).toContain("AND ReferrerHost = 'news.ycombinator.com'")
 		// The events branch never satisfies the session step.
-		expect(oneLine(sql)).toContain("SELECT VisitorId AS key, toUInt64(toUnixTimestamp64Milli(Timestamp)) AS ts, 0 AS s1,")
+		expect(oneLine(sql)).toContain(
+			"SELECT VisitorId AS key, toUInt64(toUnixTimestamp64Milli(Timestamp)) AS ts, 0 AS s1,",
+		)
 		expect(sql).toContain("windowFunnel(86400000)(ts, s1 = 1, s2 = 1, s3 = 1, s4 = 1) AS level")
 	})
 
 	it("has no session_replays branch without a session step", () => {
-		const { sql } = compileCH(productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 60 }), params)
+		const { sql } = compileCH(
+			productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 60 }),
+			params,
+		)
 		expect(sql).not.toContain("UNION ALL")
 		expect(sql).not.toContain("session_replays")
 	})
@@ -125,12 +156,17 @@ describe("productEventsFunnelQuery", () => {
 		// …applies the replays dimension directly…
 		expect(flat).toContain("AND s.Country = 'DE'")
 		// …and the page filter through the navigation semi-join on product_events.
-		expect(flat).toContain("AND s.SessionId IN (SELECT SessionId AS sessionId FROM product_events WHERE OrgId = 'org_1'")
+		expect(flat).toContain(
+			"AND s.SessionId IN (SELECT SessionId AS sessionId FROM product_events WHERE OrgId = 'org_1'",
+		)
 		expect(flat).toContain("AND Kind = 'navigation' AND PagePath = '/' GROUP BY sessionId)")
 	})
 
 	it("omits the population subquery when no filter is set", () => {
-		const { sql } = compileCH(productEventsFunnelQuery({ steps: STEPS, keyBy: "person", windowSeconds: 60 }), params)
+		const { sql } = compileCH(
+			productEventsFunnelQuery({ steps: STEPS, keyBy: "person", windowSeconds: 60 }),
+			params,
+		)
 		expect(sql).not.toContain(" IN (SELECT")
 	})
 
@@ -174,7 +210,9 @@ describe("productEventsFunnelBreakdownQuery", () => {
 		expect(flat).toContain("argMinIf(dim, ts, dim != '') AS group")
 		expect(flat).toContain("countIf(level >= 1) AS entered")
 		expect(flat).toContain("GROUP BY group ORDER BY entered DESC, group ASC LIMIT 5")
-		expect(flat).toContain("SELECT group AS group, arrayJoin([1, 2, 3]) AS step, arrayElement(counts, step) AS count")
+		expect(flat).toContain(
+			"SELECT group AS group, arrayJoin([1, 2, 3]) AS step, arrayElement(counts, step) AS count",
+		)
 		expect(flat).toContain("ORDER BY group ASC, step ASC")
 	})
 
@@ -212,7 +250,12 @@ describe("productEventsFunnelBreakdownQuery", () => {
 
 	it("uses the event Host without a join", () => {
 		const { sql } = compileCH(
-			productEventsFunnelBreakdownQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 60, breakdownBy: "host" }),
+			productEventsFunnelBreakdownQuery({
+				steps: STEPS,
+				keyBy: "visitor",
+				windowSeconds: 60,
+				breakdownBy: "host",
+			}),
 			params,
 		)
 		expect(sql).toContain("Host AS dim")
@@ -249,11 +292,15 @@ describe("productEventNamesQuery", () => {
 
 	it("applies host directly and other filters through the session semi-join", () => {
 		const { sql } = compileCH(
-			productEventNamesQuery({ filters: { host: "maple.dev", referrerHost: "t.co", pagePath: "/pricing" } }),
+			productEventNamesQuery({
+				filters: { host: "maple.dev", referrerHost: "t.co", pagePath: "/pricing" },
+			}),
 			params,
 		)
 		const flat = oneLine(sql)
-		expect(flat).toContain("AND Host = 'maple.dev' AND SessionId IN (SELECT SessionId AS sessionId FROM session_replays")
+		expect(flat).toContain(
+			"AND Host = 'maple.dev' AND SessionId IN (SELECT SessionId AS sessionId FROM session_replays",
+		)
 		expect(flat).toContain("AND ReferrerHost = 't.co'")
 		// pagePath narrows sessions through the navigation semi-join, not the events.
 		expect(flat).toContain("AND Kind = 'navigation' AND PagePath = '/pricing' GROUP BY sessionId)")

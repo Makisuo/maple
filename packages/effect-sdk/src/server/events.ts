@@ -161,6 +161,21 @@ export const make = Effect.fn("MapleEvents.make")(function* (config: MapleEvents
 		lastPostWarnAt = now
 		console.warn(`[MapleEvents] ${error.message} (dropping batch)`, error.cause ?? "")
 	}
+	// Host-app-facing developer warnings, same posture as `warnIfDoomed` in
+	// layer.ts: these go to the console, not to the Effect logger, because the
+	// SDK's own logger may be exporting to the very endpoint that is misconfigured.
+	const warnMissingKey = (): void => {
+		if (warnedAboutKey) return
+		warnedAboutKey = true
+		console.warn(
+			"[MapleEvents] no ingest key — set MAPLE_INGEST_KEY or pass `ingestKey`; dropping events",
+		)
+	}
+	const warnEmptyName = (): void => {
+		if (warnedAboutName) return
+		warnedAboutName = true
+		console.warn("[MapleEvents] track() needs a non-empty event name; the call was ignored.")
+	}
 
 	const post = (lines: ReadonlyArray<ProductEventLine>) =>
 		HttpClientRequest.post(url).pipe(
@@ -193,12 +208,7 @@ export const make = Effect.fn("MapleEvents.make")(function* (config: MapleEvents
 			const batch = buffer
 			buffer = []
 			if (ingestKey === undefined) {
-				if (!warnedAboutKey) {
-					warnedAboutKey = true
-					console.warn(
-						"[MapleEvents] no ingest key — set MAPLE_INGEST_KEY or pass `ingestKey`; dropping events",
-					)
-				}
+				warnMissingKey()
 				return Effect.void
 			}
 			return post(batch).pipe(
@@ -224,10 +234,7 @@ export const make = Effect.fn("MapleEvents.make")(function* (config: MapleEvents
 		Effect.sync(() => {
 			const trimmed = typeof name === "string" ? name.trim() : ""
 			if (trimmed.length === 0) {
-				if (!warnedAboutName) {
-					warnedAboutName = true
-					console.warn("[MapleEvents] track() needs a non-empty event name; the call was ignored.")
-				}
+				warnEmptyName()
 				return false
 			}
 			buffer.push({

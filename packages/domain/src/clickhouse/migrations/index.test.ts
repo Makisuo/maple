@@ -36,7 +36,9 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+		expect(migrations.map((m) => m.version)).toEqual([
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+		])
 		expect(migrations.at(-1)).toBe(migration_0016_product_events)
 		expect(latestMigrationVersion).toBe(16)
 		// 0010, 0014 and 0015 are performance-only and skipped by the ingest-gating

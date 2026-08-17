@@ -131,9 +131,7 @@ const collapseNullableUnions = (node: unknown): unknown => {
 			return collapseNullableUnions({ ...kept, ...siblings })
 		}
 	}
-	return Object.fromEntries(
-		Object.entries(obj).map(([key, value]) => [key, collapseNullableUnions(value)]),
-	)
+	return Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, collapseNullableUnions(value)]))
 }
 
 export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {

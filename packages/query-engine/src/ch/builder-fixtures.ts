@@ -101,7 +101,10 @@ const webAnalyticsFixtures: ReadonlyArray<BuilderFixture> = [
 		CH.compile(CH.webAnalyticsTimeseriesQuery({ bucketSeconds: 3600, useProductEvents }), window),
 	),
 	...webAnalyticsVariants("webAnalyticsPageviewsTimeseriesQuery", "default", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsPageviewsTimeseriesQuery({ bucketSeconds: 3600, useProductEvents }), window),
+		CH.compile(
+			CH.webAnalyticsPageviewsTimeseriesQuery({ bucketSeconds: 3600, useProductEvents }),
+			window,
+		),
 	),
 	// Forces the semi-join: `referrerHost` is a session_replays-only dimension,
 	// so the page-view source has to narrow through a subquery to honour it.
@@ -164,7 +167,11 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 		label: "person",
 		compile: () =>
 			CH.compile(
-				CH.productEventsFunnelQuery({ steps: FUNNEL_STEPS, keyBy: "person", windowSeconds: 7 * 86_400 }),
+				CH.productEventsFunnelQuery({
+					steps: FUNNEL_STEPS,
+					keyBy: "person",
+					windowSeconds: 7 * 86_400,
+				}),
 				window,
 			),
 	},
@@ -189,7 +196,11 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 		label: "visitor-session-step",
 		compile: () =>
 			CH.compile(
-				CH.productEventsFunnelQuery({ steps: REFERRAL_STEPS, keyBy: "visitor", windowSeconds: 3_600 }),
+				CH.productEventsFunnelQuery({
+					steps: REFERRAL_STEPS,
+					keyBy: "visitor",
+					windowSeconds: 3_600,
+				}),
 				window,
 			),
 	},

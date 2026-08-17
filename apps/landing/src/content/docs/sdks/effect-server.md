@@ -97,7 +97,11 @@ import { Effect, Layer } from "effect"
 
 const EventsLive = MapleEvents.layer({ serviceName: "billing" })
 
-const onSubscriptionCreated = Effect.fn("onSubscriptionCreated")(function* (userId: string, orgId: string, plan: string) {
+const onSubscriptionCreated = Effect.fn("onSubscriptionCreated")(function* (
+	userId: string,
+	orgId: string,
+	plan: string,
+) {
 	const events = yield* MapleEvents.MapleEvents
 	yield* events.track("plan_started", { userId, groupId: orgId, attributes: { plan } })
 })

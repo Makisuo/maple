@@ -30,31 +30,31 @@ resolved from the ingest key — an `org_id` in the body is ignored.
 
 ## Fields
 
-| Field          | Type   | Notes                                                                                                                                                       |
-| -------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Field          | Type   | Notes                                                                                                                                                           |
+| -------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`         | string | **Required.** 1–128 bytes. Names starting with `$` are reserved for Maple's SDKs and dropped, except `$screen` (mobile screen view, stored as `Kind = screen`). |
-| `timestamp`    | string | RFC 3339 (`2026-08-17T10:15:30.123Z`) or `YYYY-MM-DD HH:MM:SS[.fff]` (UTC). Defaults to the time the gateway received the batch. Stored as UTC.                |
-| `source`       | string | `server` (default) or `mobile`. `browser` is reserved for the SDKs; other values drop the row.                                                                 |
-| `visitor_id`   | string | Anonymous/device id — the browser SDK cookie value or a persistent mobile install id. ≤ 256 bytes.                                                            |
-| `user_id`      | string | Your user id after sign-in, matching what you pass to `identify()`. ≤ 256 bytes.                                                                              |
-| `group_id`     | string | Account / workspace / org id. ≤ 256 bytes.                                                                                                                    |
-| `session_id`   | string | Optional link to a browser or mobile session. ≤ 256 bytes.                                                                                                   |
-| `service_name` | string | The emitting service (`maple-api`, `acme-ios`). ≤ 128 bytes.                                                                                                 |
-| `url`          | string | Optional. `host` (lowercase) and `page_path` (pathname only) are derived from it.                                                                             |
-| `page_path`    | string | Optional explicit path; overrides the one derived from `url`. Mobile `$screen` events put the screen name here.                                              |
-| `attributes`   | object | Optional properties. ≤ 32 keys, key ≤ 64 bytes, value ≤ 1024 bytes; non-string values are stringified.                                                        |
+| `timestamp`    | string | RFC 3339 (`2026-08-17T10:15:30.123Z`) or `YYYY-MM-DD HH:MM:SS[.fff]` (UTC). Defaults to the time the gateway received the batch. Stored as UTC.                 |
+| `source`       | string | `server` (default) or `mobile`. `browser` is reserved for the SDKs; other values drop the row.                                                                  |
+| `visitor_id`   | string | Anonymous/device id — the browser SDK cookie value or a persistent mobile install id. ≤ 256 bytes.                                                              |
+| `user_id`      | string | Your user id after sign-in, matching what you pass to `identify()`. ≤ 256 bytes.                                                                                |
+| `group_id`     | string | Account / workspace / org id. ≤ 256 bytes.                                                                                                                      |
+| `session_id`   | string | Optional link to a browser or mobile session. ≤ 256 bytes.                                                                                                      |
+| `service_name` | string | The emitting service (`maple-api`, `acme-ios`). ≤ 128 bytes.                                                                                                    |
+| `url`          | string | Optional. `host` (lowercase) and `page_path` (pathname only) are derived from it.                                                                               |
+| `page_path`    | string | Optional explicit path; overrides the one derived from `url`. Mobile `$screen` events put the screen name here.                                                 |
+| `attributes`   | object | Optional properties. ≤ 32 keys, key ≤ 64 bytes, value ≤ 1024 bytes; non-string values are stringified.                                                          |
 
 Over-long strings are truncated at the caps above; unknown fields are discarded.
 
 ## Responses
 
-| Status | Meaning                                                                                                     |
-| ------ | ----------------------------------------------------------------------------------------------------------- |
+| Status | Meaning                                                                                                                                 |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `200`  | `{"accepted": <n>}` — rows durably queued. Malformed rows (bad `name`, `source`, `timestamp`) are dropped individually and not counted. |
-| `400`  | A line is not valid JSON, or not a JSON object. The whole batch is rejected.                                 |
-| `401`  | Missing or invalid ingest key.                                                                              |
-| `402`  | The organization is out of quota for browser sessions (product events share that entitlement).             |
-| `503`  | Storage temporarily unavailable — retry with backoff.                                                       |
+| `400`  | A line is not valid JSON, or not a JSON object. The whole batch is rejected.                                                            |
+| `401`  | Missing or invalid ingest key.                                                                                                          |
+| `402`  | The organization is out of quota for browser sessions (product events share that entitlement).                                          |
+| `503`  | Storage temporarily unavailable — retry with backoff.                                                                                   |
 
 Product events are not metered separately: they are covered by the browser-sessions entitlement.
 

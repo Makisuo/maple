@@ -29,16 +29,10 @@ describe("svix", () => {
 		}),
 	)
 
-	it.effect("accepts a valid delivery", () =>
-		Effect.gen(function* () {
-			yield* verify()
-		}),
-	)
+	it.effect("accepts a valid delivery", () => verify())
 
 	it.effect("accepts when the matching signature is one of several (secret rotation)", () =>
-		Effect.gen(function* () {
-			yield* verify({ headers: headers({ "svix-signature": `v1,AAAA= ${SIGNATURE} v2,ignored` }) })
-		}),
+		verify({ headers: headers({ "svix-signature": `v1,AAAA= ${SIGNATURE} v2,ignored` }) }),
 	)
 
 	it.effect("rejects a tampered body", () =>
