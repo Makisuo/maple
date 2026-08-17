@@ -85,6 +85,7 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 				ingestKey: config.ingestKey,
 				maskAllInputs: config.maskAllInputs,
 				maskAllText: config.maskAllText,
+				getIdentity: () => activeConfig?.identity,
 			},
 			session.id,
 		)

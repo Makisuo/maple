@@ -84,6 +84,36 @@ Managed platforms expose the commit SHA automatically. The **environment** is on
 
 For self-hosted deployments, set `COMMIT_SHA` in your build pipeline and `MAPLE_ENVIRONMENT` at runtime.
 
+## Server-side `track()`
+
+Some funnel steps only happen on the backend — a `signup_completed` in a webhook handler, a
+`plan_started` when billing confirms a subscription. `MapleEvents` posts those to Maple's
+[product events endpoint](/docs/session-replay/product-events-api) so they land in the same
+`product_events` table as the browser SDK's `track()` calls, keyed to the same person.
+
+```typescript
+import { MapleEvents } from "@maple-dev/effect-sdk/server"
+import { Effect, Layer } from "effect"
+
+const EventsLive = MapleEvents.layer({ serviceName: "billing" })
+
+const onSubscriptionCreated = Effect.fn("onSubscriptionCreated")(function* (userId: string, orgId: string, plan: string) {
+	const events = yield* MapleEvents.MapleEvents
+	yield* events.track("plan_started", { userId, groupId: orgId, attributes: { plan } })
+})
+```
+
+`track(name, options)` buffers the event and returns immediately; batches go out every 5 seconds,
+at 100 events, and when the layer's scope closes. It never fails the caller — a rejected batch is
+dropped with a rate-limited console warning. `options` are all optional: `userId`, `groupId`,
+`visitorId` (the browser cookie value, if your backend has it), `sessionId`, `timestamp`, `url`,
+`pagePath`, and `attributes` (coerced and capped exactly like the browser `track()`).
+
+The endpoint and ingest key resolve the same way as the tracer (`endpoint`/`ingestKey` in config,
+else `MAPLE_ENDPOINT` / `MAPLE_INGEST_KEY`); without a key, events are dropped with a one-shot
+warning. Outside an Effect runtime, `MapleEvents.makeHandle(config)` returns a plain
+`{ track, flush, dispose }` — call `dispose()` on shutdown so the last batch is sent.
+
 ## Verify
 
 1. Start your application.

@@ -76,6 +76,7 @@ export const startClientSession = (config: ClientSessionConfig): ClientSessionHa
 		ingestKey: config.ingestKey,
 		maskAllInputs: config.replay?.maskAllInputs ?? true,
 		maskAllText: config.replay?.maskAllText ?? false,
+		getIdentity: getCurrentIdentity,
 	}
 	const replayEnabled = (config.replay?.enabled ?? true) && typeof document !== "undefined"
 	const sampled = replayEnabled && Math.random() < (config.replay?.sampleRate ?? 1)
