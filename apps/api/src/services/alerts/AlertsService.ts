@@ -95,6 +95,9 @@ import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
+import { ApnsClient } from "@/platform/Apns"
+import { MobileDevicesService } from "@/services/push/MobileDevicesService"
+import { MobilePushService } from "@/services/push/MobilePushService"
 import { AlertRuntime } from "./AlertRuntime"
 import { AlertDestinationsService, type AlertDestinationsServiceApi } from "./AlertDestinationsService"
 import { makeAlertDestinationDelivery, parseAlertDestinationEncryptionKey } from "./AlertDestinationDelivery"
@@ -367,6 +370,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 			const email = yield* EmailService
 			const orgChSettings = yield* OrgClickHouseSettingsService
 			const slackBotToken = yield* SlackBotTokenResolver
+			const mobilePush = yield* MobilePushService
 			const encryptionKey = yield* parseAlertDestinationEncryptionKey(
 				Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			)
@@ -669,6 +673,40 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					eventType: AlertEventTypeValue,
 					scheduledAt: number,
 				) {
+					// Phones first, and regardless of destinations: push is per person,
+					// not per rule, and a rule with no Slack channel still has people
+					// who installed the app. Best-effort by contract — it never fails
+					// the tick.
+					yield* mobilePush
+						.notifyIncident({
+							orgId,
+							eventType,
+							incidentId: incident.id,
+							ruleId: rule.id,
+							ruleName: rule.name,
+							severity: rule.severity,
+							signalType: rule.signalType,
+							signalDisplay: resolveSignalDisplay({
+								signalType: rule.signalType,
+								queryBuilderDraft: rule.queryBuilderDraft,
+								rawQueryReducer: rule.rawQueryReducer,
+							}),
+							comparator: rule.comparator,
+							threshold: rule.threshold,
+							thresholdUpper: rule.thresholdUpper,
+							value: evaluation.value,
+							groupKey: incident.groupKey,
+							serviceNames: rule.serviceNames,
+							windowMinutes: rule.windowMinutes,
+							dedupeKey: incident.dedupeKey,
+							openForMs:
+								eventType === "resolve"
+									? Math.max(0, scheduledAt - incident.firstTriggeredAt.getTime())
+									: null,
+							linkUrl: resolveNotificationLinkUrl(rule, incident.groupKey),
+						})
+						.pipe(Effect.timeout("20 seconds"), Effect.ignoreCause)
+
 					if (rule.destinationIds.length === 0) return
 
 					const rows = yield* dbExecute((db) =>
@@ -3036,5 +3074,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 ) {
 	// The resolver remains private to alert delivery; the destination capability
 	// is explicit so composition roots can expose it without the evaluator graph.
-	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SlackBotTokenResolver.layer))
+	static readonly layer = Layer.effect(this, this.make).pipe(
+		Layer.provide(SlackBotTokenResolver.layer),
+		// Push to phones rides along with incident notifications; its own
+		// requirements (Env, Database) are the ones this layer already needs.
+		Layer.provide(
+			MobilePushService.layer.pipe(
+				Layer.provide(Layer.mergeAll(ApnsClient.layer, MobileDevicesService.layer)),
+			),
+		),
+	)
 }

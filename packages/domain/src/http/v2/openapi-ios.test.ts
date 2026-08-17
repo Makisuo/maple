@@ -48,6 +48,9 @@ const IOS_OPERATIONS = [
 	"listAnomalyIncidents",
 	"getAnomalyIncident",
 	"getAnomalyIncidentTimeseries",
+	"listMobileDevices",
+	"registerMobileDevice",
+	"unregisterMobileDevice",
 ] as const
 
 /**

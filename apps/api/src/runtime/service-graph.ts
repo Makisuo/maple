@@ -57,6 +57,7 @@ import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettin
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import { OrgMembersService } from "@/services/org/OrgMembersService"
 import { OrganizationService } from "@/services/org/OrganizationService"
+import { MobileDevicesService } from "@/services/push/MobileDevicesService"
 import { SetupAuditService } from "@/services/org/SetupAuditService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -89,6 +90,7 @@ const CoreServicesLive = Layer.mergeAll(
 	OrgClickHouseSettingsService.layer.pipe(Layer.provide(EdgeCacheServiceLive)),
 	TinybirdOrgTokenService.layer,
 	OrganizationService.layer,
+	MobileDevicesService.layer,
 	PlanetScaleOAuthLive,
 	PlanetScaleDiscoveryLive,
 	PlanetScaleWebhookQueue.layer,
