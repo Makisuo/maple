@@ -14,7 +14,10 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
-import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
+import {
+	PageRefreshProvider,
+	useOptionalPageRefreshContext,
+} from "@/components/time-range-picker/page-refresh-context"
 import type { TimeRange } from "@/components/time-range-picker/types"
 import { resolveEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { QueryErrorState } from "@/components/common/query-error-state"
@@ -44,11 +47,12 @@ const agentSessionsSearchSchema = Schema.Struct({
 
 type AgentSessionsSearch = typeof agentSessionsSearchSchema.Type
 
-const filterInputs = (search: AgentSessionsSearch) => {
+const filterInputs = (search: AgentSessionsSearch, options?: { snap?: boolean }) => {
 	const { startTime, endTime } = resolveEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
 		search.timePreset ?? "24h",
+		options,
 	)
 	return {
 		startTime,
@@ -62,7 +66,7 @@ const filterInputs = (search: AgentSessionsSearch) => {
 const PAGE_SIZE = 50
 
 export const Route = createFileRoute("/agent-sessions/")({
-	component: AgentSessionsPage,
+	component: AgentSessionsRoute,
 	validateSearch: Schema.toStandardSchemaV1(agentSessionsSearchSchema),
 	loaderDeps: ({ search }) => search,
 	loader: ({ context, deps }) => {
@@ -110,13 +114,26 @@ function VendorChips({ vendors }: { vendors: ReadonlyArray<string> }) {
 	)
 }
 
+// Provider above the page so the page can read refreshVersion — the Reload
+// button must bypass the cache-grid window snap or fresh rows stay invisible
+// for up to a grid interval (5m on the 24h preset).
+function AgentSessionsRoute() {
+	const search = Route.useSearch()
+	return (
+		<PageRefreshProvider timePreset={search.timePreset ?? "24h"}>
+			<AgentSessionsPage />
+		</PageRefreshProvider>
+	)
+}
+
 function AgentSessionsPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 	const tab = search.tab ?? "sessions"
+	const refreshVersion = useOptionalPageRefreshContext()?.refreshVersion ?? 0
 
 	const inputs = useMemo(
-		() => filterInputs(search),
+		() => filterInputs(search, { snap: refreshVersion === 0 }),
 		[
 			search.startTime,
 			search.endTime,
@@ -124,6 +141,7 @@ function AgentSessionsPage() {
 			search.vendors,
 			search.services,
 			search.hasErrors,
+			refreshVersion,
 		],
 	)
 
@@ -335,8 +353,7 @@ function AgentSessionsPage() {
 	const { startTime, endTime } = inputs
 
 	return (
-		<PageRefreshProvider timePreset={search.timePreset ?? "24h"}>
-			<DashboardLayout.Root>
+		<DashboardLayout.Root>
 				<DashboardLayout.Breadcrumbs items={[{ label: "Agent Sessions" }]} />
 				<DashboardLayout.Body>
 					<DashboardLayout.Filters>{sidebar}</DashboardLayout.Filters>
@@ -376,7 +393,6 @@ function AgentSessionsPage() {
 						</DashboardLayout.Scroll>
 					</DashboardLayout.Content>
 				</DashboardLayout.Body>
-			</DashboardLayout.Root>
-		</PageRefreshProvider>
+		</DashboardLayout.Root>
 	)
 }
