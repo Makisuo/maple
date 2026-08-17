@@ -1,8 +1,27 @@
 # Product events + funnels — plan
 
-Status: **planned, not started** (2026-08-17). Goal: answer "referral → signed up → started a
-plan" for any org (and for Maple itself), from browser, mobile and backend events, as a real
-funnel in the product rather than a hand-written `run_sql`.
+Status: **implemented in code (2026-08-17), pending rollout.** Goal: answer "referral → signed
+up → started a plan" for any org (and for Maple itself), from browser, mobile and backend events,
+as a real funnel in the product rather than a hand-written `run_sql`.
+
+## Rollout checklist (operator steps the code cannot do)
+
+1. **Tinybird**: `bun run --cwd apps/api tinybird:deploy` creates `product_events`,
+   `identity_links` and their MVs. Then populate both from their sources with an explicit `tb`
+   step (the SDK has no populate option — same caveat as 0014). Until populated, page views
+   read as zero on managed orgs. Old `web_events`/`web_events_mv` can be removed from the
+   workspace afterwards.
+2. **BYO ClickHouse**: migration 0016 bumps `clickHouseSchemaVersion` to 16 (`requiredForIngest`
+   default), so BYO orgs' ingest routing is un-ready until they apply schema. Deliberate — the
+   gateway now writes the new `session_events` columns and `product_events` directly.
+3. **Secrets** (api worker): `CLERK_WEBHOOK_SECRET`, `AUTUMN_WEBHOOK_SECRET` (both routes answer
+   503 until set); optional `MAPLE_PRODUCT_EVENTS_INGEST_KEY` (defaults to `MAPLE_INGEST_KEY`).
+   Register `POST /webhooks/clerk` (event `user.created`) in Clerk and `POST /webhooks/autumn`
+   (`billing.updated`) in Autumn.
+4. **Ingest**: `INGEST_TINYBIRD_DATASOURCE_PRODUCT_EVENTS` defaults to `product_events`; nothing
+   to set unless the datasource name differs.
+5. Publish `@maple-dev/effect-sdk` / `@maple-dev/browser` so customers' events start carrying
+   identity; older builds keep writing (all new columns default).
 
 ## Where we are
 
