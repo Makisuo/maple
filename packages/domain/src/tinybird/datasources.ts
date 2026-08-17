@@ -250,15 +250,11 @@ export const traces = defineDatasource("traces", {
 		/**
 		 * AI classification verdict, written by the ingest classifier.
 		 *
-		 * Each column keeps its constant DEFAULT — rows written before the
-		 * classifier shipped, and any writer that predates it, still read back
-		 * correctly — but now also declares a **snake_case** JSONPath, matching
-		 * the gateway-emitted columns above rather than the identity paths used
-		 * by the computed-DEFAULT columns (`SampleRate`, `IsEntryPoint`, the
-		 * `*AttributeItems`). That distinction is load-bearing: the insert-mapping
-		 * generator drops a column when it has a DEFAULT *and* an identity
-		 * JSONPath, on the assumption the gateway never emits it. These five are
-		 * emitted on every span, so they must not match that shape.
+		 * The constant DEFAULTs keep pre-classifier rows readable, but the
+		 * snake_case JSONPaths are load-bearing: the insert-mapping generator drops
+		 * any column that has a DEFAULT *and* an identity path (`$.<Column>`), on
+		 * the assumption the gateway never emits it. These five are emitted on
+		 * every span, so they must never take that shape.
 		 */
 		/** Normalized vendor slug from the closed allowlist. '' = not classified as AI. */
 		AiVendor: column(t.string().lowCardinality().default(""), { jsonPath: "$.ai_vendor" }),
@@ -266,13 +262,12 @@ export const traces = defineDatasource("traces", {
 		AiSessionKeyState: column(t.uint8().default(0), { jsonPath: "$.ai_session_key_state" }),
 		/** cityHash64 of the session-key value. 0 unless AiSessionKeyState >= 5. */
 		AiSessionKeyHash: column(t.uint64().default(0), { jsonPath: "$.ai_session_key_hash" }),
-		/** Classifier rule-set version. 0 = row predates classification; non-zero means
-		 * the span was examined, including a non-AI verdict. */
+		/** Classifier rule-set version. 0 = never examined; non-zero = examined,
+		 * including a non-AI verdict. */
 		AiRulesVersion: column(t.uint32().default(0), { jsonPath: "$.ai_rules_version" }),
 		/**
-		 * Receive-time-clamped rollup hour. Written unconditionally by the row
-		 * builder for every span, classification flag on or off, as
-		 * `YYYY-MM-DD HH:MM:SS` — no row may carry a garbage rollup hour.
+		 * Receive-time-clamped rollup hour, written for every span as
+		 * `YYYY-MM-DD HH:MM:SS` whether or not classification is enabled.
 		 */
 		AiRollupHour: column(t.dateTime("UTC").defaultExpr("toDateTime(0)"), {
 			jsonPath: "$.ai_rollup_hour",
@@ -322,8 +317,7 @@ export const traces = defineDatasource("traces", {
 			granularity: 1,
 		},
 		{
-			// set(0) is deliberately unbounded: the vendor domain is a closed
-			// ~30-value allowlist, and a capped set() that overflows silently
+			// Unbounded set(0) on purpose: a capped set() that overflows silently
 			// degrades to always-match rather than erroring.
 			name: "idx_ai_vendor",
 			expr: "AiVendor",
@@ -331,8 +325,8 @@ export const traces = defineDatasource("traces", {
 			granularity: 4,
 		},
 		{
-			// tokenbf rather than bloom_filter because registry scope matchers
-			// include prefix rules, which need token-level lookups.
+			// tokenbf rather than bloom_filter: registry scope matchers include
+			// prefix rules, which need token-level lookups.
 			name: "idx_scope_name",
 			expr: "ScopeName",
 			type: "tokenbf_v1(4096, 3, 0)",

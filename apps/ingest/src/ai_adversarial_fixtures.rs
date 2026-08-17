@@ -1,49 +1,31 @@
 //! Adversarial classification fixtures: hand-built hostile spans, driven through
 //! the **real** row writer.
 //!
-//! # What this is
-//!
-//! `fixtures/classification/` is real wire data — what the vendors actually emit.
-//! This module is the opposite corner: a deterministic corpus of spans nobody
-//! sent, constructed to sit on the classifier's edges. Typed and valueless
-//! `AnyValue`s, present-but-empty values, duplicate keys, near-miss key spellings,
-//! astral-plane and NUL-bearing UTF-8, 64 KiB values that spill out of the inline
-//! attribute path, one span carrying six vendors' evidence at once, and the full
+//! Where `fixtures/classification/` is recorded vendor wire data, this is the
+//! opposite corner: spans nobody sent, sitting on the classifier's edges — typed
+//! and valueless `AnyValue`s, present-but-empty values, duplicate keys, near-miss
+//! spellings, astral-plane and NUL-bearing UTF-8, 64 KiB values that spill out of
+//! the inline attribute path, six vendors' evidence on one span, and the full
 //! session-state ladder per vendor.
 //!
-//! Every case runs through [`super::encode_traces`] — the same function the ingest
-//! request path calls, with the classification flag on — so the fixture is a golden
-//! for the classifier **as the write path invokes it**, not for the classifier
-//! called in isolation. The generator additionally asserts, per span, that the
-//! `ai_vendor` / `ai_session_key_state` / `ai_session_key_hash` / `ai_rules_version`
-//! the row writer emitted equal what a direct [`ResourceContext`] call produces, and
-//! that the hash equals `cityhash102::city_hash64` over the winning key — so the row
-//! writer and the classifier cannot drift apart silently.
+//! Cases run through [`super::encode_traces`] with the flag on, so this is a golden
+//! for the classifier **as the write path invokes it**. Per span the generator also
+//! asserts the row's four AI columns equal a direct [`ResourceContext`] call, and
+//! that the hash is `cityhash102::city_hash64` over the winning key — the row writer
+//! and the classifier cannot drift apart silently.
 //!
-//! The checked-in artifact (`fixtures/adversarial/adversarial-spans.jsonl`) carries
-//! the verdict per case, plus the hex of the raw winning session-key value, which is
-//! never stored on a row. That hex is what
-//! `packages/domain/src/ai/hash-alignment.clickhouse.e2e.test.ts` feeds to a real
-//! ClickHouse to prove `cityHash64` there equals `city_hash64` here — the hash
-//! contract the read path's "recompute the column in SQL" claim rests on.
+//! The artifact (`fixtures/adversarial/adversarial-spans.jsonl`) carries the verdict
+//! per case plus the hex of the raw winning session-key value, which no row stores.
+//! `packages/domain/src/ai/hash-alignment.clickhouse.e2e.test.ts` replays that hex
+//! into a real ClickHouse to prove the two `cityHash64`s agree.
 //!
-//! # What this does not prove
+//! Nothing here says anything about `scripts/verify-seed.ts`, a third implementation
+//! that renders kvlist values in insertion order and `JSON.stringify`s bytes where
+//! `any_value_string` sorts kvlist keys and hex-encodes bytes.
 //!
-//! Nothing about the trace-capture reference evaluator (`scripts/verify-seed.ts`),
-//! which is a third implementation: it renders kvlist values in insertion order and
-//! `JSON.stringify`s bytes, where `any_value_string` sorts kvlist keys (the row Map
-//! is a `serde_json::Map`) and hex-encodes bytes. "The fixture agrees with the seed
-//! verifier" is not a claim made here.
-//!
-//! # Determinism
-//!
-//! No clock, no RNG, no environment. Receive time, span start times, trace/span ids
-//! and every attribute value are constants or derived from a fixed counter, so
-//! regenerating the artifact is byte-stable; [`fixture_is_reproducible`] pins that,
-//! which is what turns it into a golden: any rule change that moves a verdict fails
-//! `cargo test` with the moved line.
-//!
-//! # Regeneration
+//! Determinism: no clock, no RNG, no environment — every value is a constant or
+//! derived from a fixed counter, so regeneration is byte-stable and
+//! [`fixture_is_reproducible`] turns a moved verdict into a failing `cargo test`.
 //!
 //! ```sh
 //! ADVERSARIAL_FIXTURE_OUT=apps/ingest/fixtures/adversarial/adversarial-spans.jsonl \
@@ -185,9 +167,8 @@ fn case(
     }
 }
 
-/// A `ResourceSpans`/`ScopeSpans` pair and the spans under it. Groups with more than
-/// one case exercise the hoisting path — resource and scope evidence resolved once and
-/// shared — which a corpus of singletons would never reach.
+/// A `ResourceSpans`/`ScopeSpans` pair and the spans under it. Multi-case groups
+/// exercise the hoisting path, which a corpus of singletons would never reach.
 struct Group {
     resource: Vec<KeyValue>,
     scope: Option<InstrumentationScope>,
@@ -268,8 +249,8 @@ fn groups() -> Vec<Group> {
     out
 }
 
-/// Every vendor whose scope matcher is `sufficient` — the branch where resource/scope
-/// evidence classifies on its own, with no span attribute involved.
+/// Every vendor whose scope matcher is `sufficient`: resource/scope evidence
+/// classifies on its own, with no span attribute involved.
 fn sufficient_scope_groups() -> Vec<Group> {
     const SCOPES: &[(&str, &str)] = &[
         ("openinference.instrumentation.agno", "agno"),
@@ -315,9 +296,8 @@ fn sufficient_scope_groups() -> Vec<Group> {
         ("agent_runtime InProcessRuntime", "semantic_kernel"),
         ("openinference.instrumentation.smolagents", "smolagents"),
         ("strands.telemetry.tracer", "strands"),
-        // Phase-2 SK1/SK2: the module-path enumeration and the pinned
-        // `agent_runtime InProcessRuntime` value became prefix families, so a
-        // utils/telemetry refactor and a non-InProcess CoreRuntime still classify.
+        // Both are prefix families, so a utils/telemetry refactor and a
+        // non-InProcess CoreRuntime still classify.
         (
             "semantic_kernel.utils.telemetry.some_future_module",
             "semantic_kernel",
@@ -351,8 +331,8 @@ fn sufficient_scope_groups() -> Vec<Group> {
         .collect()
 }
 
-/// Insufficient resource/scope matchers: promoted by a same-vendor attr hit, and the
-/// same evidence without one (the negative the plan names explicitly).
+/// Insufficient resource/scope matchers: promoted by a same-vendor attr hit, and
+/// the same evidence without one.
 fn resource_and_promotion_groups() -> Vec<Group> {
     // (label, resource attrs, scope name, promoting attrs)
     let cases: Vec<(&str, Vec<KeyValue>, &str, Vec<KeyValue>)> = vec![
@@ -488,15 +468,14 @@ fn attr_only_groups() -> Vec<Group> {
             vec![s("gen_ai.provider.name", "microsoft.agent_framework")],
         ),
         ("microsoft_prefix", vec![s("agent_framework.run.id", "r")]),
-        // Phase-2 MS1: the provider fingerprint is a value PREFIX, so the harness
-        // subclass's `microsoft.agent_framework.harness` is covered too.
+        // The provider fingerprint is a value PREFIX, so the harness subclass's
+        // `microsoft.agent_framework.harness` is covered too.
         (
             "microsoft_provider_subclass",
             vec![s("gen_ai.provider.name", "microsoft.agent_framework.harness")],
         ),
-        // Phase-2 X4 sweep: `executor.` / `edge_group.` are generic scheduler
-        // vocabulary (the class that already burned `workflow.` on 2,037 eve_slack
-        // spans), so they classify only alongside the co-emitted `message.*` keys.
+        // `executor.` / `edge_group.` are generic scheduler vocabulary, so they
+        // classify only alongside the co-emitted `message.*` keys.
         ("microsoft_executor", vec![s("executor.id", "e")]),
         (
             "microsoft_executor_with_message",
@@ -526,9 +505,8 @@ fn attr_only_groups() -> Vec<Group> {
             "pydantic_ai_usage",
             vec![s("gen_ai.aggregated_usage.input_tokens", "12")],
         ),
-        // Phase-2 P2: the hardened logfire fallback tier — the 3-way conjunction
-        // fires; the queue's 2-conjunct form must NOT (logfire.* is a cross-vendor
-        // dialect; without pydantic-unique co-evidence the span stays unknown:genai).
+        // The logfire fallback tier needs all three conjuncts: `logfire.*` is a
+        // cross-vendor dialect, so two of them must stay unknown:genai.
         (
             "pydantic_ai_logfire_conjunction",
             vec![
@@ -544,16 +522,16 @@ fn attr_only_groups() -> Vec<Group> {
                 s("gen_ai.operation.name", "chat"),
             ],
         ),
-        // Phase-2 X4: the two-letter `sk.` prefix is gone — only the exact
-        // `sk.available_functions` key classifies on scope loss, so a generic
-        // `sk.*` app key (Sidekiq, an `sdk` typo) no longer claims the vendor.
+        // There is no `sk.` prefix rule — only the exact `sk.available_functions`
+        // key — so a generic `sk.*` app key (Sidekiq, an `sdk` typo) cannot claim
+        // the vendor.
         ("semantic_kernel_prefix", vec![s("sk.function.name", "f")]),
         (
             "semantic_kernel_available_functions",
             vec![s("sk.available_functions", "[]")],
         ),
-        // Phase-2 clause 5: the non-streaming chat fallback is conjunctive on SK's
-        // Python-enum-repr finish_reason; the operation value alone must not fire.
+        // The non-streaming chat fallback is conjunctive on SK's Python-enum-repr
+        // finish_reason; the operation value alone must not fire.
         (
             "semantic_kernel_chat_completions_alone",
             vec![s("gen_ai.operation.name", "chat.completions")],
@@ -584,10 +562,9 @@ fn attr_only_groups() -> Vec<Group> {
             "strands_provider",
             vec![s("gen_ai.provider.name", "strands-agents")],
         ),
-        // Phase-2 X4 sweep: `event_loop.` is generic async-runtime vocabulary, not a
-        // vendor namespace, so it needs generic-AI co-evidence (a vendor-owned guard
-        // would collapse the clause into the gen_ai.system one). All 19 corpus carriers
-        // have gen_ai.operation.name; an asyncio monitor has none.
+        // `event_loop.` is generic async-runtime vocabulary, not a vendor namespace,
+        // so it needs generic-AI co-evidence: real carriers have
+        // gen_ai.operation.name, an asyncio monitor has none.
         ("strands_event_loop", vec![s("event_loop.cycle_id", "c")]),
         (
             "strands_event_loop_with_operation",
@@ -624,11 +601,10 @@ fn attr_only_groups() -> Vec<Group> {
             )
         })
         .collect();
-    // Phase-2 C2 witnesses for claude_agent_sdk's scope-rewritten path: the
-    // `claude_code.` span-name fingerprint is conjunctive with span.type
-    // co-evidence — with it the span classifies; without it (span names are
-    // customer data in other dialects: a crewai crew named "claude_code" yields
-    // a span literally named "claude_code.kickoff") the span stays unclaimed.
+    // claude_agent_sdk's scope-rewritten path: the `claude_code.` span-name
+    // fingerprint is conjunctive with span.type co-evidence, because span names are
+    // customer data elsewhere (a crewai crew named "claude_code" emits a span
+    // literally named "claude_code.kickoff").
     out.push(one(
         NEUTRAL_SCOPE,
         case(
@@ -649,9 +625,9 @@ fn attr_only_groups() -> Vec<Group> {
             vec![s("http.route", "/x")],
         ),
     ));
-    // Phase-2 effect_ai (queue E1–E3): the 6 ordinary-English Class.method names
-    // classify only alongside Effect-ecosystem evidence, the 7 module-path names
-    // stay standalone, and the bare-word pair is the guarded rename-proof tier.
+    // effect_ai: ordinary-English Class.method names classify only alongside
+    // Effect-ecosystem evidence, module-path names stay standalone, and the
+    // bare-word pair is the guarded rename-proof tier.
     out.push(one(
         NEUTRAL_SCOPE,
         case(
@@ -695,12 +671,9 @@ fn attr_only_groups() -> Vec<Group> {
         )
         .resource(vec![s("telemetry.sdk.name", "@effect/opentelemetry")]),
     );
-    // The tier-2 hazard, constructed rather than described: `scope_name ==
-    // service.name` is the plain `getTracer(serviceName)` idiom — 100% of the
-    // openrouter capture satisfies it — so it must NOT carry an ordinary-English
-    // guarded name. The scope here is deliberately NOT Effect-branded; using
-    // "effect-ai-user" (as this case did) documents the clause without ever
-    // building the false positive it risks.
+    // The tier-2 hazard: `scope_name == service.name` is the plain
+    // `getTracer(serviceName)` idiom, so it must NOT carry an ordinary-English
+    // guarded name. The scope here is deliberately not Effect-branded.
     out.push(
         Group::new(
             "openrouter",
@@ -727,10 +700,9 @@ fn attr_only_groups() -> Vec<Group> {
         )
         .resource(vec![s("telemetry.sdk.name", "@effect/opentelemetry")]),
     );
-    // Phase-2 spring_ai (fix-queue SP1): the tool-less ChatModel fallback is the
-    // POSITIVE conjunct `boot scope && gen_ai.system == "openai"`. Naive negation
-    // is banned — openrouter carries 1,477 gen_ai.system="openai" spans under its
-    // own scope and its FP ceiling is zero vendor claims.
+    // spring_ai's tool-less ChatModel fallback is the POSITIVE conjunct
+    // `boot scope && gen_ai.system == "openai"`. Naive negation is banned:
+    // `gen_ai.system = "openai"` is common under unrelated scopes.
     out.push(one(
         NEUTRAL_SCOPE,
         case(
@@ -764,8 +736,8 @@ fn attr_only_groups() -> Vec<Group> {
     out
 }
 
-/// Spans carrying two vendors' evidence at once: the global priority ordering, not a
-/// per-candidate probe, decides.
+/// Spans carrying two vendors' evidence: the global priority ordering decides, not a
+/// per-candidate probe.
 fn cross_vendor_groups() -> Vec<Group> {
     vec![
         Group::new(
@@ -908,14 +880,10 @@ fn unknown_tier_groups() -> Vec<Group> {
                 vec![s("input.value", "{}"), s("output.value", "{}")],
             ),
         ),
-        // S11 (owner decision 2026-08-13): the witness for the clause vercel LOST.
-        // Removing a rule leaves nothing behind to fail if it comes back, so the
-        // negative is written down: the AI SDK's own hardcoded tracer scope, holding
-        // a span with the GenAI-semconv key OTel requires on every such span and no
-        // `ai.*` at all, must NOT resolve to `vercel_ai_sdk`. That is exactly eve's
-        // default-config `chat` population — 53 corpus spans given up by choice. Its
-        // positive twin is `pseudo/scope_name_eq_is_case_sensitive`, the same scope
-        // WITH an `ai.*` key, which still classifies.
+        // The negative for a rule vercel deliberately does not have: the AI SDK's own
+        // tracer scope holding a span with only the GenAI-semconv key — required on
+        // every such span — must NOT resolve to `vercel_ai_sdk`. Its positive twin is
+        // `pseudo/scope_name_eq_is_case_sensitive`, the same scope with an `ai.*` key.
         one(
             "gen_ai",
             case(
@@ -941,9 +909,8 @@ fn unknown_tier_groups() -> Vec<Group> {
                 ],
             ),
         ),
-        // Phase-2 X1/D-4: the other OpenInference spelling as co-evidence. The
-        // ordering inside the tier is what makes this unknown:openinference
-        // rather than the unknown:other the bare `llm.` rule would give it.
+        // Tier ordering is what makes this unknown:openinference rather than the
+        // unknown:other the bare `llm.` rule would give it.
         one(
             NEUTRAL_SCOPE,
             case(
@@ -1046,8 +1013,6 @@ fn non_ai_groups() -> Vec<Group> {
 }
 
 /// The session-state ladder (1..6), per vendor, one span per rung it can reach.
-// One `push` per vendor keeps each vendor's ladder a self-contained block with its own
-// comment; a single `vec![]` literal would bury the boundaries.
 #[allow(clippy::vec_init_then_push)]
 fn session_state_groups() -> Vec<Group> {
     let mut out = Vec::new();
@@ -1230,10 +1195,9 @@ fn session_state_groups() -> Vec<Group> {
                     s("gen_ai.conversation.id", "default"),
                 ],
             ),
-            // Phase-2 F1: a delegate whose operation_start dedup guard missed —
-            // kind=prompt AND flue.task.id AND its own SUB-conversation id. The
-            // authority rejects it, so it resolves at instance granularity (5)
-            // instead of minting a sub-conversation session (6).
+            // A delegate carrying kind=prompt, flue.task.id and its own
+            // SUB-conversation id: the authority rejects it, so it resolves at
+            // instance granularity (5) instead of minting a session (6).
             case(
                 "session/flue",
                 "session/flue/state5_delegate_prompt_rejected",
@@ -1784,9 +1748,9 @@ fn session_state_groups() -> Vec<Group> {
     out
 }
 
-/// Typed `AnyValue`s: the canonicalization the alignment contract rests on. Each case
-/// pairs a typed value with a rule that reads it, so a canonicalization difference
-/// changes the verdict rather than hiding in an unread column.
+/// Typed `AnyValue`s. Each case pairs a typed value with a rule that reads it, so a
+/// canonicalization difference changes the verdict rather than hiding in an unread
+/// column.
 fn typed_value_groups() -> Vec<Group> {
     let mut out = vec![
         // bool ⇒ "true"/"false", read by langchain's resource matcher.
@@ -1944,8 +1908,7 @@ fn typed_value_groups() -> Vec<Group> {
     out
 }
 
-/// Present-but-empty: the algebra's load-bearing subtlety. `mapContains` sees it,
-/// `!= ''` would not.
+/// Present-but-empty values: `mapContains` sees them, `!= ''` would not.
 fn present_but_empty_groups() -> Vec<Group> {
     vec![
         one(
@@ -2041,8 +2004,7 @@ fn present_but_empty_groups() -> Vec<Group> {
 }
 
 /// Duplicate keys. Rule-referenced keys are first-occurrence-wins inside the
-/// classifier; the row Map keeps the last occurrence for every key (the v1
-/// row-writer coupling that forced the Map to agree with the matcher is gone).
+/// classifier; the row Map keeps the last occurrence for every key.
 fn duplicate_key_groups() -> Vec<Group> {
     let mut out = Vec::new();
     let orders: [(&str, [&str; 2]); 2] = [
@@ -2197,9 +2159,9 @@ fn duplicate_key_groups() -> Vec<Group> {
     out
 }
 
-/// Near misses: keys engineered to share a first byte and length with a registry key,
-/// or to sit one character away from a registry prefix. These are what the byte/length
-/// screens are for, and a screen that leaks would show up as a spurious vendor.
+/// Near misses: keys sharing a first byte and length with a registry key, or one
+/// character off a registry prefix. A leaking byte/length screen shows up here as a
+/// spurious vendor.
 fn near_miss_groups() -> Vec<Group> {
     let near: Vec<(&str, &str)> = vec![
         ("gen_ai.systen", "same length, last byte differs"),
@@ -2284,8 +2246,8 @@ fn near_miss_groups() -> Vec<Group> {
     out
 }
 
-/// Unicode, including multi-byte boundaries — the byte screens index by first *byte*,
-/// so a multi-byte lead byte is the interesting case.
+/// Unicode: the byte screens index by first *byte*, so a multi-byte lead byte is the
+/// interesting case.
 fn unicode_groups() -> Vec<Group> {
     let mut out = Vec::new();
     let unicode_values: Vec<(&str, String, &str)> = vec![
@@ -2412,8 +2374,8 @@ fn unicode_groups() -> Vec<Group> {
     out
 }
 
-/// Oversized values and attribute lists: the never-truncate list for registry keys,
-/// and the spill path out of the classifier's inline attribute view.
+/// Oversized values and attribute lists: registry keys are never truncated, and the
+/// spill path out of the classifier's inline attribute view.
 fn oversized_groups() -> Vec<Group> {
     let big_value = "x".repeat(64 * 1024);
     let big_unicode = "🙂".repeat(4096);
@@ -2515,9 +2477,8 @@ fn oversized_groups() -> Vec<Group> {
 }
 
 /// Pseudo-keys are real columns on both sides. The interesting cases are span
-/// attributes that impersonate one, and the `value_prefix` op (D1), which the current
-/// registry never uses — covered here at the canonicalization level so the columns it
-/// would read are exercised.
+/// attributes that impersonate one, and the `value_prefix` op, which no current rule
+/// uses — covered here so the columns it would read are still exercised.
 fn pseudo_key_groups() -> Vec<Group> {
     vec![
         one(
@@ -2599,15 +2560,11 @@ fn pseudo_key_groups() -> Vec<Group> {
 /// Cross-class placement probes: registry keys deliberately put where their matcher's
 /// declared class does not look.
 ///
-/// Both engines are class-directed: a matcher's keys resolve in the one attribute list
-/// its class names, and the class-less predicates (unknown-tier fingerprints, session
-/// candidates, authority predicates) are span-local. So every span here must classify
-/// as if the misplaced key were not there at all.
-///
-/// These are the spans that caught the divergence when the Rust side still fell back
-/// span → scope → resource for every key: ten of them, plus
-/// `not_promoted/langchain_resource` and `typed/bool_false_resource`, were pinned
-/// mismatches until 2026-08. They stay in the fixture as the regression surface.
+/// Both engines are class-directed — a matcher's keys resolve only in the attribute
+/// list its class names, and the class-less predicates (unknown-tier fingerprints,
+/// session candidates, authority predicates) are span-local — so every span here must
+/// classify as if the misplaced key were absent. This is the regression surface for a
+/// span → scope → resource fallback creeping back in.
 fn cross_class_groups() -> Vec<Group> {
     vec![
         Group::new(
@@ -2761,8 +2718,8 @@ fn generate(groups: &[Group]) -> String {
     let mut out = String::new();
 
     for (position, group) in groups.iter().enumerate() {
-        // 1-based, and the only source of trace/span ids: stable ids are what makes the
-        // artifact byte-reproducible and what the differential joins fixtures back on.
+        // 1-based, and the only source of trace/span ids: stable ids are what keep the
+        // artifact byte-reproducible.
         let counter = position as u64 + 1;
         let spans: Vec<Span> = group
             .cases
@@ -2820,8 +2777,8 @@ fn generate(groups: &[Group]) -> String {
         let rows: Vec<&str> = payload.lines().filter(|line| !line.is_empty()).collect();
         assert_eq!(rows.len(), group.cases.len());
 
-        // The classifier, called directly, so the raw session-key value (never stored)
-        // is available for the hash-alignment leg.
+        // Called directly so the raw session-key value (never stored on a row) is
+        // available for the hash-alignment leg.
         let resource_context = ResourceContext::new(registry(), &group.resource);
         let scope_context = resource_context.scope(group.scope.as_ref(), &group.schema_url);
 
@@ -2837,8 +2794,8 @@ fn generate(groups: &[Group]) -> String {
             let state = classification.session_state;
             let hash = classification.session_key_hash();
 
-            // The direct call and the row writer must agree — otherwise the fixture's
-            // `rust` block would describe a classification the row never carried.
+            // Otherwise the fixture's `rust` block would describe a classification
+            // the row never carried.
             assert_eq!(
                 row["ai_vendor"].as_str(),
                 Some(vendor.as_str()),
@@ -2866,8 +2823,7 @@ fn generate(groups: &[Group]) -> String {
 
             let session_key = classification.session_key.as_deref();
             if let Some(value) = session_key {
-                // Third leg of the hash claim: the classifier's own hash is exactly
-                // cityhash102 over the pinned construction.
+                // The classifier's own hash is exactly cityhash102 over the value.
                 assert_eq!(
                     hash,
                     crate::cityhash102::city_hash64(value.as_bytes()),
@@ -2886,7 +2842,7 @@ fn generate(groups: &[Group]) -> String {
                     // A string: u64 hashes above 2^53 do not survive JSON.parse.
                     "session_key_hash": hash.to_string(),
                     "rules_version": registry().version(),
-                    // Hex of the raw winning value, which no row carries. The
+                    // Hex of the raw winning value, which no row carries; the
                     // hash-contract e2e replays exactly these bytes into ClickHouse.
                     "session_key_hex": session_key.map(|value| hex(value.as_bytes())),
                 },
@@ -2906,8 +2862,8 @@ fn fixture_path() -> PathBuf {
 // tests
 // ---------------------------------------------------------------------------
 
-/// Writes the artifact. Opt-in, because a test that writes into the source tree on
-/// every `cargo test` would fight the determinism check it exists to feed.
+/// Writes the artifact. Opt-in: writing on every `cargo test` would fight the
+/// determinism check it exists to feed.
 #[test]
 #[ignore = "regeneration: set ADVERSARIAL_FIXTURE_OUT"]
 fn write_adversarial_fixture() {
@@ -2929,15 +2885,9 @@ fn write_adversarial_fixture() {
 }
 
 /// Regeneration is byte-stable: a missing artifact fails, a stale one fails with the
-/// moved line.
-///
-/// This used to skip when the artifact was absent, so that "a fresh checkout of
-/// apps/ingest alone still builds". That rationale is dead — since the TS-mirror test
-/// the crate `include_str!`s `packages/domain/src/ai/vendors.ts` under `cfg(test)`, so
-/// an apps/ingest-only tree does not compile at all. Meanwhile this golden is the only
-/// gate on several rules (tier-2's guard, session authority for non-entry vendors), so
-/// a sparse checkout or a bad merge that dropped the file would have left CI green with
-/// the gate gone.
+/// moved line. It must fail rather than skip — this golden is the only gate on several
+/// rules (tier-2's guard, session authority for non-entry vendors), so a dropped file
+/// would otherwise leave CI green with the gate gone.
 #[test]
 fn fixture_is_reproducible() {
     let path = fixture_path();
@@ -2967,8 +2917,8 @@ fn fixture_is_reproducible() {
     }
 }
 
-/// Composition guard: every branch the plan's §6 fuzz surface names must be present,
-/// so a future edit cannot quietly shrink the corpus.
+/// Composition guard: every branch of the fuzz surface must stay present, so a future
+/// edit cannot quietly shrink the corpus.
 #[test]
 fn fixture_covers_every_branch() {
     let body = generate(&groups());

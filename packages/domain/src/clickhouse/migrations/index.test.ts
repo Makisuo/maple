@@ -41,20 +41,16 @@ describe("ClickHouse migrations", () => {
 		])
 		expect(migrations.at(-1)).toBe(migration_0016_ai_classification_columns)
 		expect(latestMigrationVersion).toBe(16)
-		// 0010, 0014 and 0015 are performance/storage-only, so the ingest-gating
-		// version skips all three — nothing writes `web_events` or
-		// `service_overview_minutely` directly and search indexes change nothing the
-		// gateway sends, and bumping for any of them would un-ready every BYO-CH
-		// org's ingest routing for a read-path change.
+		// 0010, 0014 and 0015 are performance/storage-only: nothing the gateway
+		// sends changed, and gating on a read-path change would un-ready every
+		// BYO-CH org's ingest routing.
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
 		expect(migration_0015_service_overview_minutely.requiredForIngest).toBe(false)
 
-		// 0016 is different: the gateway's INSERT now names all five AI columns,
-		// so a BYO cluster without them would reject every direct insert. Gating
-		// on it is the designed fallback — an org stamped below 16 resolves
-		// `clickhouse_ready = false` and routes to the managed pipeline until its
-		// schema syncs.
+		// 0016 does gate: the gateway's INSERT names all five AI columns, so an org
+		// stamped below 16 must resolve `clickhouse_ready = false` and route to the
+		// managed pipeline rather than reject every direct insert.
 		expect(migration_0016_ai_classification_columns.requiredForIngest).toBe(true)
 		expect(clickHouseSchemaVersion).toBe("16")
 	})
@@ -131,9 +127,8 @@ describe("ClickHouse migrations", () => {
 	it("adds the AI classification columns as defaulted trailing columns with no mutation", () => {
 		const sql = migration_0016_ai_classification_columns.statements.join("\n")
 
-		// Every column defaulted: that is what makes the ALTER metadata-only and
-		// keeps rows written before the classifier shipped readable
-		// (`AiRulesVersion = 0` = never examined).
+		// Constant DEFAULTs are what make the ALTER metadata-only; `AiRulesVersion
+		// = 0` on pre-existing rows means "never examined".
 		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiVendor LowCardinality(String) DEFAULT ''")
 		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiSessionKeyState UInt8 DEFAULT 0")
 		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiSessionKeyHash UInt64 DEFAULT 0")
@@ -144,8 +139,8 @@ describe("ClickHouse migrations", () => {
 			"ADD INDEX IF NOT EXISTS idx_scope_name ScopeName TYPE tokenbf_v1(4096, 3, 0) GRANULARITY 4",
 		)
 
-		// Nothing here may rewrite parts: the 30-day TTL retires unindexed parts on
-		// its own, and a whole-table mutation on `traces` is the expensive mistake.
+		// Nothing here may rewrite parts: a whole-table mutation on `traces` is the
+		// expensive mistake, and the 30-day TTL retires unindexed parts anyway.
 		expect(sql).not.toContain("MATERIALIZE INDEX")
 		expect(sql).not.toContain("MATERIALIZE COLUMN")
 		expect(sql).not.toContain("OPTIMIZE TABLE")

@@ -202,7 +202,7 @@ export function formatTimestampNano(nanos: string | number | undefined): string 
 	return `${calendar}.${frac9}`
 }
 
-/** Seconds in the clamp window's past and future halves (write-side plan §3). */
+/** Seconds in the clamp window's past and future halves. */
 const ROLLUP_CLAMP_PAST_SECS = 7 * 24 * 60 * 60
 const ROLLUP_CLAMP_FUTURE_SECS = 24 * 60 * 60
 
@@ -213,13 +213,11 @@ const ROLLUP_CLAMP_FUTURE_SECS = 24 * 60 * 60
  * `toStartOfHour(receive time)`, rendered as `DateTime('UTC')`'s
  * `YYYY-MM-DD HH:MM:SS`.
  *
- * Local mode has no classifier, so the other four AI columns stay at their
- * "never examined" defaults — but this one is written for real on every span,
- * exactly as the gateway does. It is `service_ai_vendors_hourly`'s partition
- * key, so an unclamped client timestamp means unbounded partition creation and
- * rows whose TTL never fires. Clamping at write time is also what keeps a later
- * partition rebuild from relocating rows: an MV-side clamp would need `now()`,
- * re-evaluated at rebuild time.
+ * The clamp is mandatory: span start times are client-controlled and this column
+ * is `service_ai_vendors_hourly`'s partition key, so unclamped values mean
+ * unbounded partition creation and rows whose TTL never fires. It must happen at
+ * write time — an MV-side clamp would need `now()`, re-evaluated on rebuild, and
+ * would relocate rows.
  */
 export function formatRollupHour(
 	spanStartUnixNano: string | number | undefined,
@@ -582,8 +580,8 @@ interface Span {
 export function encodeTraces(req: unknown): EncodedBatch[] {
 	const request = (req ?? {}) as TraceRequest
 	const rows: Record<string, unknown>[] = []
-	// One receive time for the whole batch, matching the gateway: two spans in
-	// the same request must not be able to land on different clamp anchors.
+	// One receive time per batch, matching the gateway: two spans in the same
+	// request must not land on different clamp anchors.
 	const receiveTimeSecs = Math.floor(Date.now() / 1000)
 
 	for (const resourceSpans of request.resourceSpans ?? []) {
@@ -631,12 +629,11 @@ export function encodeTraces(req: unknown): EncodedBatch[] {
 					links_span_id: links.map((link, i) => spanIdHex(link.spanId, `span.links[${i}].spanId`)),
 					links_trace_state: links.map((link) => link.traceState ?? ""),
 					links_attributes: links.map((link) => attrMap(link.attributes)),
-					// Local mode runs no classifier, so these four stay at the
-					// "never examined" defaults the ClickHouse columns declare:
-					// AiVendor '' = not classified as AI, AiRulesVersion 0 = never
-					// looked at. `service_ai_vendors_hourly` filters on AiVendor != '',
-					// so a local store's rollup stays empty rather than reporting a
-					// confident zero — which is the honest answer here.
+					// Local mode runs no classifier, so these four keep the column
+					// defaults: AiVendor '' = not AI, AiRulesVersion 0 = never
+					// examined. `service_ai_vendors_hourly` filters `AiVendor != ''`,
+					// so a local rollup stays empty rather than reporting a
+					// confident zero.
 					ai_vendor: "",
 					ai_session_key_state: 0,
 					ai_session_key_hash: 0,

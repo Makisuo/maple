@@ -382,10 +382,8 @@ pub fn accept_internal_span(signal_path: &'static str, destination: &'static str
         "maple.ingest.destination" = destination,
         "maple.ingest.native_rows" = Empty,
         "maple.ingest.sampled_dropped" = Empty,
-        // Whether the migration-window classification flag was on for this
-        // batch, and how many spans it examined. Batch-level, not per span:
-        // per-span classification spans on this hot path are exactly what
-        // CLAUDE.md's self-observability rule forbids.
+        // Batch-level, never per span: a classification span on this hot path is
+        // what the self-observability rule forbids.
         "maple.ingest.ai.enabled" = Empty,
         "maple.ingest.ai.spans_examined" = Empty,
     )

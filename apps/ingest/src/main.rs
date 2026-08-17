@@ -123,11 +123,9 @@ struct AppConfig {
     max_request_body_bytes: usize,
     org_max_in_flight: u64,
     require_tls: bool,
-    /// `INGEST_AI_CLASSIFICATION_ENABLED`. **Migration-window flag**, default
-    /// false: it exists only to ramp the write-side plan's §7 step 2 shadow
-    /// deploy and is removed once classification is unconditional in production
-    /// (§7 step 4). Read once per batch, never per span. `AiRollupHour` is
-    /// written on every row regardless of this flag.
+    /// `INGEST_AI_CLASSIFICATION_ENABLED`. Migration-window ramp flag, default
+    /// false, removed once classification is unconditional. Read once per batch,
+    /// never per span. `AiRollupHour` is written regardless of this flag.
     ai_classification_enabled: bool,
     key_store_backend: KeyStoreBackend,
     clickhouse_encryption_key: Option<[u8; 32]>,
@@ -467,8 +465,7 @@ impl AppConfig {
             }
         };
 
-        // Default off: the flag ramps classification per-deployment during the
-        // migration window and is deleted afterwards.
+        // Default off — see the field doc.
         let ai_classification_enabled = parse_bool(
             "INGEST_AI_CLASSIFICATION_ENABLED",
             std::env::var("INGEST_AI_CLASSIFICATION_ENABLED").ok(),
@@ -3431,8 +3428,7 @@ async fn handle_cloudflare_logpush_inner(
                 key_id: resolved.secret_key_id.clone(),
                 self_managed: resolved.self_managed,
                 clickhouse_ready: resolved.clickhouse_ready,
-                // Cloudflare Logpush is a logs-only connector; logs
-                // classification is v2 (write-side plan §3).
+                // Logs-only connector; logs classification is v2.
                 };
             let decoded = DecodedPayload::Logs(request);
             let reservation = reserve_autumn_usage(
@@ -4264,8 +4260,7 @@ async fn accept_native_decoded_payload(
                 "maple.ingest.attribute_mapping_count",
                 attribute_mappings.len(),
             );
-            // The flag is already resolved from the env; this reads it once for
-            // the whole batch.
+            // Once per batch, never per span.
             let ai = AiClassificationSettings::new(state.config.ai_classification_enabled);
             Span::current().record("maple.ingest.ai.enabled", ai.enabled);
             pipeline
@@ -6234,9 +6229,8 @@ mod tests {
         }
     }
 
-    /// One Spring AI span, mirroring `telemetry.rs`'s AI fixture: an app-chosen
-    /// (insufficient) scope promoted by a `spring.ai.` attribute hit, with
-    /// spring_ai's session-granularity key present.
+    /// One Spring AI span: an insufficient app-chosen scope promoted by a
+    /// `spring.ai.` attribute hit, with a session-granularity key present.
     fn test_ai_trace_request() -> ExportTraceServiceRequest {
         use opentelemetry_proto::tonic::trace::v1::{span, ResourceSpans, ScopeSpans, Span};
         let string_kv = |key: &str, value: &str| KeyValue {
@@ -7309,9 +7303,8 @@ mod tests {
         assert_eq!(plaintext, "ch-secret-123");
     }
 
-    /// The whole write path with the flag on: HTTP request → key resolve →
-    /// `AppConfig.ai_classification_enabled` → classification → the NDJSON body
-    /// ClickHouse actually receives.
+    /// The whole write path with the flag on, down to the NDJSON body ClickHouse
+    /// actually receives.
     #[tokio::test]
     async fn ai_classification_flag_reaches_the_clickhouse_row() {
         let (ch_tx, mut ch_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -7374,8 +7367,7 @@ mod tests {
             .expect("ready org should write to ClickHouse")
             .expect("ClickHouse channel should stay open");
 
-        // The INSERT must name the five columns, or the values below would land
-        // in the wrong ones.
+        // The INSERT must name the five columns or the values land in the wrong ones.
         assert!(import.query.contains("AiVendor"), "{}", import.query);
         assert!(import.query.contains("AiRollupHour"), "{}", import.query);
 
@@ -7387,11 +7379,9 @@ mod tests {
             serde_json::json!(maple_ingest::cityhash102::city_hash64(b"sess-e2e"))
         );
         assert_ne!(row["ai_rules_version"], serde_json::json!(0));
-        // The fixture's span start is a fixed 2023 timestamp, i.e. far outside
-        // the [receive − 7d, receive + 1d] window, so the clamp must relocate it
-        // to the hour this batch was received rather than minting a 2023
-        // partition. (The clamp's window arithmetic is covered exhaustively in
-        // `telemetry.rs` against an injected receive time.)
+        // The fixture's 2023 span start is outside the [receive − 7d, receive + 1d]
+        // window, so the clamp must land it on the receive hour rather than mint a
+        // 2023 partition. Window arithmetic itself is covered in `telemetry.rs`.
         let now_secs = (current_time_millis() / 1000) as i64;
         let this_hour = chrono::DateTime::from_timestamp(now_secs - now_secs.rem_euclid(3600), 0)
             .expect("valid receive hour")

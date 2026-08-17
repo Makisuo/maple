@@ -130,25 +130,15 @@ const prepareTarget = async (context: MigrationModuleContext, state: V5ToV6State
 }
 
 /**
- * Runs ClickHouse migration 0016's ALTER list — the imported constant, not a
- * copy of it, so retuning an index or adding a column there reaches migrated
- * local stores too. `traces` already exists here, so bootstrapping the v6 DDL is
- * a no-op on it (`CREATE TABLE IF NOT EXISTS`) and the columns and indexes
- * arrive only through these ALTERs.
+ * Runs ClickHouse migration 0016's ALTER list — the imported constant, not a copy,
+ * so retuning an index or adding a column there reaches migrated local stores too.
+ * `traces` already exists here, so bootstrapping the v6 DDL is a no-op on it and
+ * the columns and indexes arrive only through these ALTERs.
  *
- * Metadata-only and additive: five trailing columns with constant DEFAULTs plus
- * two skip indexes on `traces`. No part is rewritten — existing parts read the
- * defaults for free, and every ALTER is `IF NOT EXISTS`, so a resumed run
- * converges instead of failing.
- *
- * Deliberately no `MATERIALIZE INDEX`: that is a mutation over the whole table,
- * and the store's 30-day raw-telemetry TTL rolls every unindexed part out on its
- * own. Same reasoning as ClickHouse migration 0016 — the local store is not a
- * different decision, just a smaller one.
- *
- * Nothing writes the new columns yet (the ingest classifier lands in a later
- * stage), so the migrated store's `traces` rows all carry the defaults: AiVendor
- * '' = not classified, AiRulesVersion 0 = the row predates classification.
+ * Metadata-only and additive: constant DEFAULTs rewrite no part, and every ALTER
+ * is `IF NOT EXISTS`, so a resumed run converges instead of failing. No
+ * `MATERIALIZE INDEX` — a whole-table mutation is the expensive mistake, and the
+ * store's 30-day raw-telemetry TTL retires unindexed parts anyway.
  */
 const apply = async (context: MigrationModuleContext): Promise<V5ToV6Progress> =>
 	context.openTarget(
@@ -213,11 +203,9 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 			"Trailing defaulted columns and skip indexes are metadata-only; no existing row or part is rewritten and every prior column keeps its value.",
 	},
 	{
-		// The new columns are readable immediately — every pre-migration row reads
-		// its DEFAULT — but they are not *classified*: nothing writes them until the
-		// ingest classifier ships, and AiRulesVersion = 0 is precisely the marker
-		// for "this row was never examined". The skip indexes cover only parts
-		// written after the ALTER; the 30-day TTL retires the rest.
+		// Readable immediately (every pre-migration row reads its DEFAULT) but not
+		// classified: AiRulesVersion 0 marks "never examined". The skip indexes cover
+		// only parts written after the ALTER; the 30-day TTL retires the rest.
 		name: "traces AI classification columns",
 		classification: "derived",
 		disposition: "rebuild-within-retention-horizon",

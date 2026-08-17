@@ -1,27 +1,16 @@
-// The hash contract: `AiSessionKeyHash` is the same 64 bits in Rust and in ClickHouse.
+// The hash contract: `cityHash64(x)` in ClickHouse equals `city_hash64(x)` in the ingest
+// writer, for every byte string. `WHERE AiSessionKeyHash = cityHash64({sessionId})` and
+// repairing the column from the plaintext key in `SpanAttributes` both depend on it, and
+// a divergence goes unnoticed everywhere else in the stack.
 //
-// This is not an equivalence suite — no SQL re-derives a classification anywhere. It
-// proves one narrow, load-bearing fact: `cityHash64(x)` evaluated by ClickHouse equals
-// `city_hash64(x)` computed by the ingest writer, for every byte string. The read path's
-// computability claim rests on exactly that — the plaintext session key stays in
-// `SpanAttributes` on the same row, so `WHERE AiSessionKeyHash = cityHash64({sessionId})`
-// finds a known session through the indexed column, and the column is verifiable and
-// repairable from `SpanAttributes` in SQL. If the two hashes ever diverge, both stop
-// being true and nothing else in the stack notices.
+// The variant is the trap: ClickHouse vendors CityHash **1.0.2**, and 1.1 changed the
+// mixing for inputs <= 32 bytes and > 64 bytes — hence the frozen in-crate port in
+// `apps/ingest/src/cityhash102.rs` and the length bands exercised here.
 //
-// The variant is the load-bearing part: ClickHouse vendors CityHash **1.0.2**, and
-// CityHash 1.1 changed the mixing for inputs ≤ 32 bytes and > 64 bytes. That is why
-// `apps/ingest/src/cityhash102.rs` is a frozen in-crate port rather than a crate
-// dependency, and why this suite exercises those length bands.
-//
-// Vectors come from the adversarial fixture's `session_key_hex` — the raw winning
-// session-key value, which no row carries — so the shapes under test are the hostile
-// ones the classifier actually resolved: astral-plane UTF-8, embedded NULs, quotes and
-// backslashes, and a 64 KiB value. Values are passed as `unhex(...)` rather than string
-// literals so those bytes reach the server exactly as Rust hashed them; a
-// literal-escaping bug would otherwise surface as a hash mismatch and be misread as a
-// variant mismatch. One ASCII vector is additionally checked as a plain literal to prove
-// `unhex` is not itself the thing under test.
+// Vectors are the adversarial fixture's `session_key_hex` (astral-plane UTF-8, embedded
+// NULs, quotes/backslashes, 64 KiB). They travel as `unhex(...)` so the bytes reach the
+// server exactly as Rust hashed them; one ASCII vector also goes as a plain literal so a
+// literal-escaping bug can't masquerade as a variant mismatch.
 //
 //   bun ch:up
 //   CLICKHOUSE_E2E=1 bun run --cwd packages/domain test -- hash-alignment.clickhouse.e2e
@@ -115,8 +104,8 @@ const decode = (hex: string): string => Buffer.from(hex, "hex").toString("utf8")
 
 describe.skipIf(!clickhouseE2eEnabled)("AiSessionKeyHash Rust↔ClickHouse hash contract", () => {
 	it("covers the adversarial value shapes, not just ASCII", () => {
-		// A guard on the guard: if the fixture ever stops producing resolved session keys
-		// with these shapes, the rest of this suite silently proves much less.
+		// If the fixture stops producing resolved session keys with these shapes, the
+		// rest of this suite silently proves much less.
 		expect(vectors.length).toBeGreaterThan(40)
 		const values = vectors.map((vector) => decode(vector.valueHex))
 		expect(values.some((value) => value.includes(" "))).toBe(true)
@@ -159,10 +148,9 @@ FROM values('id String, value_hex String',
 	})
 
 	it("pins the negative: multi-argument cityHash64 is a different function", async () => {
-		// Why any SQL that recomputes this column must pass exactly one argument.
 		// `cityHash64(a, b)` combines per-argument hashes rather than hashing the
-		// concatenation, so a query written that way would never match a stored column.
-		// The landmine `cityhash102.rs`'s module doc warns about, pinned on the SQL side.
+		// concatenation, so SQL recomputing this column must pass exactly one argument
+		// or it will never match a stored value.
 		const body = await clickhouseExec(
 			`SELECT
 	toString(cityHash64('ab')) AS single,

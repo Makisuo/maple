@@ -71,8 +71,8 @@ fn bench_ingest_accept(c: &mut Criterion) {
                         black_box(&fixture.traces),
                         &SamplingPolicy::default(),
                         &[],
-                        // Classification's own cost is measured by the
-                        // `ai_classifier` group; this one measures WAL ack.
+                        // This group measures WAL ack; classification cost is
+                        // the `ai_classifier` group's job.
                         &AiClassificationSettings::disabled(),
                     )
                     .await

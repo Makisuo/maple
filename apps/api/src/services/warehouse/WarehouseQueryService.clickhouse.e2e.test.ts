@@ -23,8 +23,7 @@ import {
 const enabled = clickhouseE2eEnabled
 const database = uniqueDatabase("maple_raw_sql_e2e")
 const orgId = "org_raw_sql_e2e"
-/** Isolates the migration-0016 default-readback probe row from the row-level
- * fixtures the query tests assert on. */
+/** Isolates the 0016 default-readback probe row from the query tests' fixtures. */
 const aiProbeOrgId = "org_raw_sql_e2e_ai_probe"
 
 const assertSearchSchemaApplied = async (): Promise<void> => {
@@ -145,10 +144,8 @@ SETTINGS enable_full_text_index = 1`,
 }
 
 /**
- * Migration 0016 is storage-only — nothing writes these columns yet — so the
- * only thing that can prove it applied is the physical schema. Asserted against
- * a real server because `set(0)` and `tokenbf_v1` are the kind of DDL a
- * SQL-text test happily accepts and ClickHouse rejects.
+ * Migration 0016 against a real server: `set(0)` and `tokenbf_v1` are the kind of
+ * DDL a SQL-text test happily accepts and ClickHouse rejects.
  */
 const assertAiClassificationSchemaApplied = async (): Promise<void> => {
 	const migrationRevision = (
@@ -173,8 +170,7 @@ FORMAT TabSeparated`,
 	)
 		.trim()
 		// TabSeparated escapes single quotes, so `DateTime('UTC')` arrives as
-		// `DateTime(\'UTC\')`. Unescape rather than encode the escaping into the
-		// expectation, which would read as a typo.
+		// `DateTime(\'UTC\')`.
 		.replaceAll("\\'", "'")
 	assert.strictEqual(
 		columns,
@@ -206,9 +202,8 @@ FORMAT TabSeparated`,
 		"AI classification skip indexes are missing or declared with the wrong type",
 	)
 
-	// A writer that names none of the new columns — which is every writer until
-	// the classifier ships — must still land a readable row. Written under its own
-	// org so it stays out of the row-level fixtures the tests below assert on.
+	// A writer that names none of the new columns must still land a readable row.
+	// Own org, so it stays out of the fixtures the tests below assert on.
 	await clickhouseExec(
 		`INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, SpanName, SpanKind, ServiceName, Duration, StatusCode)
 		 VALUES ('${aiProbeOrgId}', now64(9), 'trace-ai-default', 'span-ai-default', 'GET /ai', 'Server', 'api', 1, 'Ok')`,

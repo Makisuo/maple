@@ -590,14 +590,12 @@ pub fn native_rows(signal: &str, count: u64) {
     NATIVE_ROWS_TOTAL.add(count, &[KeyValue::new("signal", signal.to_string())]);
 }
 
-/// Spans the AI classifier examined — write-side plan §4's completeness signal.
+/// Spans the AI classifier examined.
 ///
-/// Labeled by `signal` only, exactly like `native_rows`, so the two are directly
-/// comparable: with classification enabled every accepted trace row is an
-/// examined span, and any divergence between these series is a bug (a code path
-/// building rows without classifying, or a partially-flagged fleet). It is
-/// deliberately *not* org-labeled — this counter moves constantly on a healthy
-/// fleet, which is the opposite of `org_data_loss`'s cardinality budget.
+/// Labeled by `signal` only, exactly like `native_rows`, so the two series are
+/// directly comparable: with classification enabled they must match, and any gap
+/// is a code path building rows without classifying. Deliberately not org-labeled
+/// — this counter moves constantly, unlike `org_data_loss`.
 pub fn ai_spans_examined(signal: &str, count: u64) {
     AI_SPANS_EXAMINED_TOTAL.add(count, &[KeyValue::new("signal", signal.to_string())]);
 }

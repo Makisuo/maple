@@ -605,25 +605,21 @@ pub struct AcceptStats {
     pub rows: usize,
     pub dropped: usize,
     /// Spans the AI classifier examined in this batch. Zero when the migration
-    /// flag is off; otherwise equal to `rows` for traces (plan §4's
-    /// `spans_ingested` vs `spans_examined` completeness pair).
+    /// flag is off; otherwise equal to `rows` for traces.
     pub ai_spans_examined: usize,
 }
 
 /// Per-batch inputs for AI classification and rollup-hour clamping.
 ///
-/// Built once per accepted payload, never per span: the flag is read once and
-/// `receive_time_secs` is captured a single time so every span in one payload
+/// Built once per accepted payload, never per span, so every span in one payload
 /// clamps against the same instant.
 #[derive(Clone, Debug)]
 pub struct AiClassificationSettings {
-    /// `INGEST_AI_CLASSIFICATION_ENABLED`. **Migration-window flag only** — the
-    /// write-side plan (§7 step 4) ramps it to 100% across the fleet, records that
-    /// hour as `AI_VENDORS_ROLLUP_ENABLEMENT_HOUR`, and then removes the flag;
-    /// production classifies unconditionally. There is no full-clock-hour
-    /// condition and no ordering against MV creation — the MV ships with the
-    /// migration chain and is a no-op until the ramp. `AiRollupHour` is written
-    /// whether this is set or not.
+    /// `INGEST_AI_CLASSIFICATION_ENABLED`. Migration-window flag only: once the
+    /// fleet is ramped to 100% the hour is recorded as
+    /// `AI_VENDORS_ROLLUP_ENABLEMENT_HOUR` and the flag goes away. The MV ships
+    /// with the migration chain and is a no-op until the ramp, so there is no
+    /// ordering constraint. `AiRollupHour` is written either way.
     pub enabled: bool,
     /// Batch receive time, epoch seconds.
     pub receive_time_secs: i64,
@@ -660,8 +656,8 @@ fn unix_now_secs() -> i64 {
 }
 
 /// The four classification columns as the row writes them. Extracted from a
-/// [`SpanClassification`] immediately so the row builder never has to hold a
-/// borrow of the span's attribute list.
+/// [`SpanClassification`] immediately, so the row builder never holds a borrow of
+/// the span's attribute list.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct AiRowFields {
     vendor: &'static str,
@@ -671,9 +667,8 @@ struct AiRowFields {
 }
 
 impl AiRowFields {
-    /// Flag-off values. `rules_version = 0` is the plan's pre-rollout marker:
-    /// `AiRulesVersion = 0` means "never examined", which is what a flag-off row
-    /// is, and is distinguishable from an examined-and-non-AI row (non-zero
+    /// Flag-off values. `rules_version = 0` means "never examined", which is what
+    /// a flag-off row is — distinct from an examined-and-non-AI row (non-zero
     /// version, empty vendor).
     const UNEXAMINED: Self = Self {
         vendor: "",
@@ -692,19 +687,17 @@ impl AiRowFields {
     }
 }
 
-/// Seconds in the clamp window's past and future halves (write-side plan §3).
+/// Seconds in the clamp window's past and future halves.
 const ROLLUP_CLAMP_PAST_SECS: i64 = 7 * 24 * 60 * 60;
 const ROLLUP_CLAMP_FUTURE_SECS: i64 = 24 * 60 * 60;
 
 /// `AiRollupHour`: `toStartOfHour(Timestamp)` when the span's start time is
 /// within `[receive − 7d, receive + 1d]`, else `toStartOfHour(receive_time)`.
 ///
-/// Client timestamps are attacker- and replay-controlled, and this column is the
-/// rollup's partition key, so an unclamped value means unbounded partition
-/// creation and rows whose TTL never fires. Clamping at write time rather than
-/// in the MV is the only deterministic option: an MV-side clamp would need
-/// `now()`, which a later partition rebuild re-evaluates at rebuild time and
-/// would silently relocate rows across hours.
+/// Client timestamps are untrusted and this column is the rollup's partition key,
+/// so an unclamped value means unbounded partition creation and rows whose TTL
+/// never fires. It must clamp at write time: an MV-side clamp would need `now()`,
+/// which a partition rebuild re-evaluates, silently relocating rows.
 fn rollup_hour_secs(span_start_unix_nano: u64, receive_time_secs: i64) -> i64 {
     let span_secs = (span_start_unix_nano / 1_000_000_000) as i64;
     let in_window = span_secs >= receive_time_secs - ROLLUP_CLAMP_PAST_SECS
@@ -720,11 +713,8 @@ fn rollup_hour_secs(span_start_unix_nano: u64, receive_time_secs: i64) -> i64 {
 /// `DateTime('UTC')` wire format: `YYYY-MM-DD HH:MM:SS`, the second-precision
 /// sibling of `format_timestamp_nano`'s `DateTime64(9)` rendering.
 ///
-/// A string, not epoch seconds. Both destinations accept either — Tinybird's
-/// JSONPath ingestion and ClickHouse's `input('… AiRollupHour DateTime(\'UTC\')')`
-/// both parse a quoted datetime — but every other timestamp this row writer
-/// emits is a string in this shape, and a lone numeric column would make the
-/// JSON row's timestamps inconsistent to read and to diff.
+/// A string, not epoch seconds: both destinations parse a quoted datetime, and
+/// every other timestamp this row writer emits is a string in this shape.
 fn format_datetime_secs(unix_secs: i64) -> String {
     match chrono::DateTime::from_timestamp(unix_secs, 0) {
         Some(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -2325,10 +2315,9 @@ fn encode_traces(
     let mut routing_key = hash64(org_id);
     let sample_ratio = policy.clamped_ratio();
     let sample_rate = 1.0 / sample_ratio;
-    // Rules can add, rename or delete registry-referenced span attributes, so a
-    // span classified from the wire list would not be the span the row stores.
-    // With no rules configured — the overwhelmingly common case — the Map is a
-    // faithful canonicalization of the wire list, so the wire list *is* the row.
+    // Rules can add, rename or delete registry-referenced span attributes, so with
+    // rules configured the wire list is no longer the span the row stores. Without
+    // them the Map is a faithful canonicalization, so the wire list *is* the row.
     let remapped = !attribute_mappings.is_empty();
 
     for resource_spans in &request.resource_spans {
@@ -2342,11 +2331,9 @@ fn encode_traces(
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        // Hoisted once per ResourceSpans, per the plan's §2 batch algorithm —
-        // but only when a span will actually use it. With the flag off there is
-        // nothing to classify, so hoisting would be pure waste on the default
-        // (flag-off) path. Attribute mappings rewrite *span* attributes only, so
-        // the resource/scope contexts are valid for the remapped path too.
+        // Hoisted once per ResourceSpans, and only when the flag is on. Attribute
+        // mappings rewrite *span* attributes only, so the resource/scope contexts
+        // stay valid on the remapped path too.
         let ai_resource = ai
             .enabled
             .then(|| ResourceContext::new(registry(), resource_attributes));
@@ -2376,15 +2363,12 @@ fn encode_traces(
                 }
 
                 let mut span_attrs = attr_map(&span.attributes);
-                // `attr_map` keeps the LAST duplicate (the storage rule); the
-                // classifier's contract is the FIRST occurrence. Without mapping
-                // rules the classifier reads the wire list and gets first-wins for
-                // free — with them it reads the remapped Map, so a span that
-                // actually carries a duplicate key needs a parallel first-wins view
-                // or the mere presence of an unrelated rule flips its verdict. The
-                // length comparison is exact: `attr_map` only ever collapses
-                // duplicates, so equal lengths mean the two rules agree and the
-                // common path allocates nothing.
+                // `attr_map` keeps the LAST duplicate (storage rule); the classifier
+                // wants the FIRST. Without mapping rules it reads the wire list and
+                // gets first-wins free; with them it reads the remapped Map, so a
+                // span carrying a duplicate key needs this parallel first-wins view
+                // or an unrelated rule flips its verdict. Equal lengths mean no
+                // duplicates and the common path allocates nothing.
                 let mut classify_attrs =
                     (ai.enabled && remapped && span.attributes.len() != span_attrs.len())
                         .then(|| attr_map_first_wins(&span.attributes));
@@ -2403,11 +2387,10 @@ fn encode_traces(
                     apply_attribute_mappings(attribute_mappings, &resource_attrs, attrs);
                 }
 
-                // Classification runs here, after remapping: an org that remaps a
-                // custom key onto a rule key (a session id, a discriminator) must
-                // classify by the remapped shape. Flag-off skips the work entirely
-                // and writes the pre-rollout marker values; `AiRollupHour` below
-                // is written either way.
+                // After remapping, deliberately: an org that moves a custom key onto
+                // a rule key must classify by the remapped shape. Flag-off writes
+                // the never-examined markers; `AiRollupHour` below is written either
+                // way.
                 let ai_fields = if !ai.enabled {
                     AiRowFields::UNEXAMINED
                 } else {
@@ -2415,12 +2398,9 @@ fn encode_traces(
                     let scope_context = ai_scope
                         .as_ref()
                         .expect("hoisted whenever classification is enabled");
-                    // The rewritten attribute list is per-span; the hoisted
-                    // context is not — it borrows the resource and scope, which
-                    // mapping rules never touch. Only the list differs.
-                    // `classify_attrs` is the first-wins view built above; it is
-                    // `None` unless this span carries a duplicate key, in which
-                    // case the last-wins Map is already the same list.
+                    // `classify_attrs` is the first-wins view built above: `None`
+                    // unless this span carries a duplicate key, in which case the
+                    // last-wins Map is already the same list.
                     let rewritten = remapped.then(|| {
                         key_values_from_map(classify_attrs.as_ref().unwrap_or(&span_attrs))
                     });
@@ -2568,7 +2548,7 @@ fn encode_logs(
     let stats = AcceptStats {
         rows: rows.len(),
         dropped: 0,
-        // Logs classification is v2 (write-side plan §3).
+        // Logs classification is v2.
         ai_spans_examined: 0,
     };
     let frames = rows_to_frames(
@@ -2783,7 +2763,7 @@ fn encode_metrics(
         AcceptStats {
             rows: row_count,
             dropped: 0,
-            // Metrics classification is v2 (write-side plan §3).
+            // Metrics classification is v2.
             ai_spans_examined: 0,
         },
     ))
@@ -2995,12 +2975,10 @@ fn format_sample_rate(sample_rate: f64) -> String {
     }
 }
 
-/// The written span-attribute Map back as an attribute list, so the classifier
-/// can be pointed at the post-remapping row.
-///
-/// Only built for orgs that actually configured attribute-mapping rules. Values
-/// are already canonical strings (they came out of [`any_value_string`]), so
-/// re-wrapping them as `StringValue` round-trips exactly.
+/// The written span-attribute Map back as an attribute list, so the classifier can
+/// be pointed at the post-remapping row. Built only for orgs with mapping rules.
+/// Values are already canonical strings from [`any_value_string`], so re-wrapping
+/// them as `StringValue` round-trips exactly.
 fn key_values_from_map(attributes: &Map<String, Value>) -> Vec<KeyValue> {
     attributes
         .iter()
@@ -3017,19 +2995,14 @@ fn key_values_from_map(attributes: &Map<String, Value>) -> Vec<KeyValue> {
 
 /// Canonicalizes an attribute list into the row's Map column.
 ///
-/// **Duplicate keys keep the last occurrence** — the historical JSON-object
-/// behavior, for every key. The classifier separately dedupes its *own* view of
-/// rule-referenced keys first-occurrence-wins (`ai_classifier`); that is a
-/// determinism rule for matching, not a storage rule. (v1 coupled the two so SQL
-/// over the written row could reproduce the Rust verdict; that contract is gone,
-/// and with it a registry probe on the duplicate-key path. Residual caveat: a
-/// future Rust retro-fit re-reading written rows would see the last duplicate
-/// value where the live classifier used the first — duplicate rule-keys within
-/// one span are pathological, and the caveat is cheaper than the coupling.)
+/// **Duplicate keys keep the last occurrence**, for every key. The classifier
+/// dedupes its own view first-occurrence-wins (`ai_classifier`) — a determinism
+/// rule for matching, not a storage rule — and never reads this Map: on the
+/// attribute-mapping path it reads [`attr_map_first_wins`], so its verdict does
+/// not depend on whether the org has mapping rules configured.
 ///
-/// The classifier never reads this Map: on the attribute-mapping path it reads
-/// [`attr_map_first_wins`] instead, so its verdict does not depend on whether the
-/// org happens to have mapping rules configured.
+/// Caveat if a retro-fit ever re-derives classifications from written rows: it
+/// would see the last duplicate value where the live classifier used the first.
 fn attr_map(attributes: &[KeyValue]) -> Map<String, Value> {
     let mut out = Map::with_capacity(attributes.len());
     for attribute in attributes {
@@ -3043,13 +3016,11 @@ fn attr_map(attributes: &[KeyValue]) -> Map<String, Value> {
     out
 }
 
-/// [`attr_map`] under the **classifier's** duplicate rule: the FIRST occurrence of
-/// a key wins, matching `ai_classifier`'s dedup of its own view of the wire list.
+/// [`attr_map`] under the **classifier's** duplicate rule: FIRST occurrence wins.
 ///
-/// Built only for the span that actually carries a duplicate key on an org that
-/// has attribute mappings — the one case where the two rules disagree and the
-/// classifier cannot read the wire list directly. Never stored: the row's Map
-/// keeps [`attr_map`]'s last-wins canonicalization.
+/// Built only for a span that carries a duplicate key on an org with attribute
+/// mappings — the one case where the two rules disagree and the classifier cannot
+/// read the wire list directly. Never stored.
 fn attr_map_first_wins(attributes: &[KeyValue]) -> Map<String, Value> {
     let mut out = Map::with_capacity(attributes.len());
     for attribute in attributes {
@@ -3169,8 +3140,7 @@ fn count_log_rows(request: &ExportLogsServiceRequest) -> usize {
 }
 
 /// Adversarial classification fixtures. A child of this module, not of `tests`,
-/// because it drives [`encode_traces`] — the real row writer — and that is private
-/// here.
+/// because it drives the private [`encode_traces`].
 #[cfg(test)]
 #[path = "ai_adversarial_fixtures.rs"]
 mod ai_adversarial_fixtures;
@@ -4791,7 +4761,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // AI classification (write-side plan §2/§3)
+    // AI classification
     // -----------------------------------------------------------------------
 
     /// Wall-clock instant every AI test clamps against: 2023-11-14 22:13:20 UTC,
@@ -4802,10 +4772,9 @@ mod tests {
     /// `spring.ai.kind = chat_client`.
     const SPRING_AI_SESSION_KEY: &str = "spring.ai.chat.client.conversation.id";
 
-    /// A Spring AI span: a scope that is only a *conditional* candidate
-    /// (`org.springframework.boot` is app-chosen, so insufficient on its own),
-    /// promoted by the `spring.ai.` attribute hit, carrying spring_ai's
-    /// session-granularity key on an authoritative `chat_client` span.
+    /// A Spring AI span: `org.springframework.boot` is app-chosen and so only a
+    /// conditional scope candidate, promoted by the `spring.ai.` attribute hit,
+    /// carrying the session key on an authoritative `chat_client` span.
     fn ai_trace_request(
         span_attributes: Vec<KeyValue>,
         start_unix_nano: u64,
@@ -4950,8 +4919,7 @@ mod tests {
         assert_eq!(stats.ai_spans_examined, 1);
         assert_eq!(row["ai_vendor"], "");
         assert_eq!(row["ai_session_key_state"], json!(0));
-        // Non-zero version with an empty vendor is the plan's "definitively
-        // classified non-AI" marker — the whole point of stamping non-AI spans.
+        // Non-zero version + empty vendor = definitively classified non-AI.
         assert_eq!(row["ai_rules_version"], json!(registry().version()));
     }
 
@@ -5000,8 +4968,8 @@ mod tests {
             receive_hour
         );
 
-        // A zero timestamp is 1970 — far outside the window, so it clamps too
-        // rather than creating a 1970 partition.
+        // A zero timestamp is 1970: outside the window, so it clamps rather than
+        // creating a 1970 partition.
         let epoch_zero = ai_trace_request(spring_ai_attributes(), 0);
         assert_eq!(
             encode_ai_row(&epoch_zero, &ai())["ai_rollup_hour"],
@@ -5027,8 +4995,7 @@ mod tests {
         let parsed = chrono::NaiveDateTime::parse_from_str(hour, "%Y-%m-%d %H:%M:%S")
             .expect("ClickHouse DateTime literal must round-trip");
         assert_eq!(parsed.and_utc().timestamp() % 3600, 0);
-        // The generated insert mapping declares the leaf, so ClickHouse's
-        // `input()` schema is what parses this string.
+        // ClickHouse parses this string through the generated `input()` schema.
         let traces = clickhouse_insert_mappings::DATASOURCES
             .iter()
             .find(|mapping| mapping.datasource == "traces")
@@ -5045,9 +5012,8 @@ mod tests {
 
     #[test]
     fn classification_reads_the_row_after_attribute_remapping() {
-        // The org moves a custom key onto spring_ai's session-key attribute.
-        // Classifying the wire attributes would miss it and write state 3;
-        // classifying the remapped shape resolves it.
+        // The org moves a custom key onto spring_ai's session-key attribute:
+        // classifying the wire list would miss it and write state 3.
         let attributes = vec![
             string_kv("spring.ai.kind", "chat_client"),
             string_kv("app.conversation", "sess-remapped"),
@@ -5087,14 +5053,10 @@ mod tests {
     }
 
     /// Determinism contract: the classifier's first-occurrence-wins duplicate rule
-    /// must not depend on whether the org has attribute mappings configured.
-    ///
-    /// The row writer's Map is last-wins by design, and with any mapping rule
-    /// present the classifier reads a list rebuilt from a Map rather than the wire
-    /// list. Before the first-wins view, two orgs sending byte-identical spans got
-    /// different `AiVendor`, `AiSessionKeyHash` and rollup rows because one of them
-    /// happened to have a rule configured — here a `Move` of a key no span carries,
-    /// which touches nothing.
+    /// must not depend on whether the org has attribute mappings configured. With
+    /// any rule present the classifier reads a list rebuilt from the last-wins Map,
+    /// so without the first-wins view two orgs sending byte-identical spans get
+    /// different verdicts. The rule here is a `Move` of a key no span carries.
     #[test]
     fn duplicate_keys_classify_the_same_with_and_without_mapping_rules() {
         let duplicated = vec![
@@ -5139,8 +5101,7 @@ mod tests {
              not being built first-occurrence-wins"
         );
 
-        // The stored Map stays last-wins on both paths — this is a classifier
-        // contract, not a change to what the row records.
+        // The stored Map stays last-wins on both paths: classifier contract only.
         for rules in [&[][..], &no_op_rule[..]] {
             let (frames, _) = encode_traces(
                 &test_cfg().datasources,

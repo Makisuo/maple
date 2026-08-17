@@ -127,9 +127,8 @@ describe("current local schema identity", () => {
 				.filter((name) => !v4Names.has(name)),
 		).toEqual(["service_overview_minutely", "service_overview_minutely_mv"])
 
-		// v6 adds no objects at all — it is five trailing defaulted columns and two
-		// skip indexes on traces. Asserted as a column/index delta against the
-		// frozen v5 manifest so a stray table or a rewritten column can't ride along.
+		// v6 adds no objects: a column/index delta against the frozen v5 manifest, so
+		// a stray table or a rewritten column can't ride along.
 		const v5Names = new Set(LOCAL_SCHEMA_V5_MANIFEST.objects.map((object) => object.name))
 		expect(
 			LOCAL_SCHEMA_V6_MANIFEST.objects
@@ -142,13 +141,11 @@ describe("current local schema identity", () => {
 		expect(
 			traces?.columns.map((column) => column.name).filter((name) => !v5TraceColumns.has(name)),
 		).toEqual(["AiVendor", "AiSessionKeyState", "AiSessionKeyHash", "AiRulesVersion", "AiRollupHour"])
-		// Every new column carries a DEFAULT, so a store migrated from v4 reads the
-		// same values as a fresh v5 for rows written before the classifier existed.
-		// (A DEFAULT alone does NOT keep a column out of the generated ingest INSERT
-		// list — that needs a DEFAULT *plus* an identity JSONPath (`$.<ColumnName>`),
-		// the shape of a column ClickHouse computes for itself. All five of these carry
-		// a snake_case path instead, so they stay in the insert mappings, which is
-		// correct: the writer stamps them.)
+		// Every new column carries a DEFAULT, so a migrated store reads the same as a
+		// fresh one. A DEFAULT alone does NOT drop a column from the generated ingest
+		// INSERT list — that needs a DEFAULT *plus* an identity JSONPath
+		// (`$.<ColumnName>`); these five carry snake_case paths, so the writer stamps
+		// them.
 		expect(
 			traces?.columns
 				.filter((column) => column.name.startsWith("Ai"))
