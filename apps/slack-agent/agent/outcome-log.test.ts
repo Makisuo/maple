@@ -24,18 +24,34 @@ import outcomeLog from "./hooks/outcome-log.js"
 const handleActionResult = outcomeLog.events?.["action.result"]
 
 /**
- * The real `HookContext` also carries `agent`, `channel`, `getSandbox`, and
- * `getSkill` — none of which the connection-failure branch under test reads,
- * only `session.id` and `session.auth.current.attributes.team_id` — so this
- * fixture is deliberately incomplete. TypeScript's own excess/insufficient
- * overlap check rejects a single-step cast for that reason (it wants proof
- * this is intentional, not a typo), hence the `unknown` step; kept to this
- * one factory rather than repeated per test.
+ * A real, fully-typed `HookContext` — `getSandbox`/`getSkill` throw because
+ * the connection-failure branch under test never calls them, not because
+ * they're unimplemented; every field TypeScript actually requires is here.
  */
 function fakeHookContext(teamId: string): HookContext {
 	return {
-		session: { id: "session-1", auth: { current: { attributes: { team_id: teamId } } } },
-	} as unknown as HookContext
+		session: {
+			id: "session-1",
+			auth: {
+				current: {
+					attributes: { team_id: teamId },
+					authenticator: "test",
+					principalId: "test-principal",
+					principalType: "test",
+				},
+				initiator: null,
+			},
+			turn: { id: "turn-1", sequence: 0 },
+		},
+		agent: { name: "test-agent" },
+		channel: {},
+		getSandbox() {
+			throw new Error("fakeHookContext: getSandbox is not implemented")
+		},
+		getSkill() {
+			throw new Error("fakeHookContext: getSkill is not implemented")
+		},
+	}
 }
 
 const ctx = fakeHookContext("T123")
