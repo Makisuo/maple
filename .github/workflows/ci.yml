@@ -320,6 +320,17 @@ jobs:
                   --filter=@maple-dev/effect-sdk --filter=@maple/landing
                   --filter=@maple/local-ui --concurrency=2
 
+            # Guard what installing @maple-dev/browser costs a page. Splits the
+            # bundled+minified+gzipped graph into what every page load pays and
+            # what only replay-sampled visitors pay, and fails on the budgets in
+            # scripts/size.ts. Without this an eager-graph regression is only
+            # discoverable in a customer's Lighthouse report — which is how a
+            # bundled `effect/Schema` once took the eager side 53% over budget.
+            - name: Browser SDK bundle budget
+              if: ${{ matrix.shard == 'build-other' }}
+              run: bun run size
+              working-directory: packages/browser
+
             # `turbo typecheck` does not cover tsconfig.alchemy.json (alchemy.run.ts and
             # every apps/*/alchemy.run.ts) — only the root `typecheck` script chains it,
             # and CI calls turbo directly. Without this they ship unchecked.
