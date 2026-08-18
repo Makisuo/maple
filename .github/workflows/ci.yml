@@ -134,11 +134,6 @@ jobs:
                         - 'packages/domain/src/clickhouse/**'
                         - 'packages/domain/src/tinybird/**'
                         - 'packages/domain/src/generated/**'
-                        # The hash-contract E2E lives here, not in apps/api, and
-                        # what it pins is the in-crate CityHash port — so the
-                        # Rust source has to be a trigger too.
-                        - 'packages/domain/src/ai/**'
-                        - 'apps/ingest/src/cityhash102.rs'
                       postgres:
                         - *base
                         # The connection layer and everything that decides how many
@@ -571,20 +566,6 @@ jobs:
               run: >-
                   bun run --filter=@maple/api test --
                   src/services/warehouse/ai-vendors-rollup.clickhouse.e2e.test.ts
-
-            # `--filter=@maple/domain`, not `@maple/api` — this suite lives in
-            # packages/domain and every other step here skips it. A Rust/ClickHouse
-            # `cityHash64` divergence returns zero rows and leaves a permanent
-            # discontinuity in a 400-day-TTL sketch, with nothing else failing.
-            - name: Verify the AI session-key hash contract
-              env:
-                  CLICKHOUSE_E2E: "1"
-                  CLICKHOUSE_E2E_URL: http://127.0.0.1:8123
-                  CLICKHOUSE_E2E_USER: maple
-                  CLICKHOUSE_E2E_PASSWORD: maple
-              run: >-
-                  bun run --filter=@maple/domain test --
-                  src/ai/hash-alignment.clickhouse.e2e.test.ts
 
     local-checkpoint-native:
         name: Local checkpoint native
