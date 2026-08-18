@@ -295,6 +295,13 @@
       "when": 1786963071458,
       "tag": "0042_mobile_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1787089609659,
+      "tag": "0043_alert_destination_auto_disable",
+      "breakpoints": true
     }
   ]
 }

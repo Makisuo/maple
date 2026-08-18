@@ -193,6 +193,12 @@ const destinationDocumentFromRow = (
 		lastTestedAt:
 			row.lastTestedAt == null ? null : decodeIsoDateTimeStringSync(row.lastTestedAt.toISOString()),
 		lastTestError: row.lastTestError,
+		consecutiveFailures: row.consecutiveFailures,
+		lastFailureAt:
+			row.lastFailureAt == null ? null : decodeIsoDateTimeStringSync(row.lastFailureAt.toISOString()),
+		disabledAt:
+			row.disabledAt == null ? null : decodeIsoDateTimeStringSync(row.disabledAt.toISOString()),
+		disabledReason: row.disabledReason,
 		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
 		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
 	})
@@ -357,6 +363,13 @@ export class AlertDestinationsService extends Context.Service<
 					.set({
 						lastTestedAt: new Date(timestamp),
 						lastTestError: errorMessage,
+						// A test that got through proves the destination is reachable, so
+						// it clears the auto-disable counter the same way a real delivery
+						// does. A failed test is left alone: only the delivery queue,
+						// which knows whether the failure was terminal, counts up.
+						...(errorMessage === null
+							? { consecutiveFailures: 0, lastFailureAt: null }
+							: undefined),
 						updatedAt: new Date(timestamp),
 					})
 					.where(and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId))),
@@ -457,6 +470,10 @@ export class AlertDestinationsService extends Context.Service<
 				secretTag: encryptedSecret.tag,
 				lastTestedAt: null,
 				lastTestError: null,
+				consecutiveFailures: 0,
+				lastFailureAt: null,
+				disabledAt: null,
+				disabledReason: null,
 				createdAt: new Date(timestamp),
 				updatedAt: new Date(timestamp),
 				createdBy: userId,
@@ -663,6 +680,16 @@ export class AlertDestinationsService extends Context.Service<
 			const timestamp = yield* runtime.now
 			const nextName = normalizeOptionalString(request.name) ?? existing.name
 			const nextEnabled = request.enabled === undefined ? existing.enabled : request.enabled
+			// An edit is the fix for a destination Maple auto-disabled, so it clears
+			// the failure state. Without this the counter stays at the threshold and
+			// the very next terminal failure disables the destination again
+			// immediately, which reads as "editing did nothing".
+			const clearedFailureState = {
+				consecutiveFailures: 0,
+				lastFailureAt: null,
+				disabledAt: null,
+				disabledReason: null,
+			} as const
 			const writeRows = yield* dbExecute((db) =>
 				db
 					.update(alertDestinations)
@@ -673,6 +700,7 @@ export class AlertDestinationsService extends Context.Service<
 						secretCiphertext: encryptedSecret.ciphertext,
 						secretIv: encryptedSecret.iv,
 						secretTag: encryptedSecret.tag,
+						...clearedFailureState,
 						updatedAt: new Date(timestamp),
 						updatedBy: userId,
 					})
@@ -689,6 +717,7 @@ export class AlertDestinationsService extends Context.Service<
 					secretCiphertext: encryptedSecret.ciphertext,
 					secretIv: encryptedSecret.iv,
 					secretTag: encryptedSecret.tag,
+					...clearedFailureState,
 					updatedAt: new Date(timestamp),
 					updatedBy: userId,
 				},
