@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { chdbConfigPath, resolveChdbConfigFile } from "../src/commands/server"
+import { CheckpointPreconditionError } from "../src/server/checkpoints"
 import { recoverExpected } from "../src/core/outcomes"
 
 /** Run an effect, capturing anything written to stderr and restoring the real
@@ -41,6 +42,25 @@ describe("expected CLI outcomes", () => {
 			}),
 		)
 		strictEqual(output, "maple is already running (PID 4242) — stop it with `maple stop`\n")
+	})
+
+	// The "no `<backups>` stanza" refusal used to bill two error events: an Error
+	// span on `CheckpointService.create` plus the `ServerError` the command
+	// re-wrapped it into. It is now an expected outcome carrying the same text.
+	it("recovers the checkpoint precondition refusal with its message intact", async () => {
+		const refusal = new CheckpointPreconditionError({
+			dataDir: "/home/u/.maple/data",
+			message:
+				"the running server's chDB config has no `<backups>` stanza, so it " +
+				"cannot take checkpoints. Restart `maple start` without " +
+				"`--chdb-config-file` to use the generated default, or add " +
+				"`<backups><allowed_disk>default</allowed_disk>" +
+				"<allowed_path>backups</allowed_path></backups>` to your config.",
+		})
+
+		strictEqual(refusal._tag, "@maple/cli/CheckpointPreconditionError")
+		strictEqual(refusal.expected, true)
+		strictEqual(await captureStderr(recoverExpected(refusal)), `${refusal.message}\n`)
 	})
 
 	it("still exits non-zero, so scripts and CI keep their old behaviour", async () => {

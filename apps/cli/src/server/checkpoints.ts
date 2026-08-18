@@ -197,6 +197,34 @@ export class CheckpointCreateError extends Schema.TaggedError<CheckpointCreateEr
 	{ ...checkpointErrorFields, checkpointId: CheckpointId },
 ) {}
 
+/**
+ * A checkpoint the CLI *correctly refuses to take*: the running server's chDB
+ * config carries no `<backups>` stanza, so `BACKUP DATABASE` cannot work.
+ *
+ * Its own tag, and never a `CheckpointCreateError`, because nothing failed —
+ * this is the CLI reporting an unmet precondition with an actionable fix, the
+ * same category as "maple is already running". It used to bill two error events
+ * per occurrence (an `Error` span on `CheckpointService.create`, plus the
+ * `ServerError` the command re-wrapped it into). `bin.ts` now recovers it via
+ * `recoverExpected`, which annotates `maple.cli.outcome`, prints the message and
+ * exits 1 with the root span `Ok`. The `expected` marker states that intent on
+ * the error itself rather than only in the recovery list.
+ */
+/** Kept verbatim — it is the whole remedy the user gets. */
+const MISSING_BACKUPS_CONFIG_MESSAGE =
+	"the running server's chDB config has no `<backups>` stanza, so it " +
+	"cannot take checkpoints. Restart `maple start` without " +
+	"`--chdb-config-file` to use the generated default, or add " +
+	"`<backups><allowed_disk>default</allowed_disk>" +
+	"<allowed_path>backups</allowed_path></backups>` to your config."
+
+export class CheckpointPreconditionError extends Schema.TaggedError<CheckpointPreconditionError>()(
+	"@maple/cli/CheckpointPreconditionError",
+	{ dataDir: Schema.String, message: Schema.String },
+) {
+	readonly expected = true
+}
+
 export class CheckpointRecoveryError extends Schema.TaggedError<CheckpointRecoveryError>()(
 	"@maple/cli/CheckpointRecoveryError",
 	checkpointErrorFields,
@@ -1425,7 +1453,7 @@ const removeCompletedRetirement = async (
 	await faults.afterRetirementCleanupRemoval?.(cleanup)
 }
 
-export const createCheckpoint = Effect.fn("CheckpointService.create")(function* (options: CheckpointOptions) {
+const createCheckpointTraced = Effect.fn("CheckpointService.create")(function* (options: CheckpointOptions) {
 	const operationId = newCheckpointOperationId()
 	const checkpointId = newCheckpointId()
 	const createError = (error: unknown): CheckpointCreateError =>
@@ -1440,6 +1468,10 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 		"maple.checkpoint.operation_id": operationId,
 		"maple.checkpoint.id": checkpointId,
 	})
+	// Settled into a value rather than left in the failure channel: `Effect.fn`
+	// derives this span's status from that channel, and a refused precondition
+	// must not close `CheckpointService.create` as `Error`. `createCheckpoint`
+	// below re-raises it once the span has closed, so callers still see a failure.
 	return yield* withMaintenance(options.dataDir, operationId, createError, () =>
 		Effect.gen(function* () {
 			const prepared = yield* Effect.tryPromise({
@@ -1491,22 +1523,18 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 			})
 			yield* postCheckpointBackup(options.host, options.port, options.dataDir, checkpointId).pipe(
 				Effect.mapError((error) =>
-					createError(
-						isMissingBackupConfigurationError(error)
-							? new Error(
-									// `maple start` generates a backups-enabled config when
-									// `--chdb-config-file` is absent, so reaching this means the
-									// server was started with a custom config carrying no
-									// `<backups>` stanza — or with a build predating that default.
-									"the running server's chDB config has no `<backups>` stanza, so it " +
-										"cannot take checkpoints. Restart `maple start` without " +
-										"`--chdb-config-file` to use the generated default, or add " +
-										"`<backups><allowed_disk>default</allowed_disk>" +
-										"<allowed_path>backups</allowed_path></backups>` to your config.",
-									{ cause: error },
-								)
-							: error,
-					),
+					isMissingBackupConfigurationError(error)
+						? // `maple start` generates a backups-enabled config when
+							// `--chdb-config-file` is absent, so reaching this means the
+							// server was started with a custom config carrying no
+							// `<backups>` stanza — or with a build predating that default.
+							// An unmet precondition, not a failure: see
+							// `CheckpointPreconditionError`.
+							new CheckpointPreconditionError({
+								dataDir: resolve(options.dataDir),
+								message: MISSING_BACKUPS_CONFIG_MESSAGE,
+							})
+						: createError(error),
 				),
 			)
 			return yield* Effect.tryPromise({
@@ -1590,8 +1618,26 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 				catch: createError,
 			})
 		}),
+	).pipe(
+		Effect.catchTag("@maple/cli/CheckpointPreconditionError", (refusal) =>
+			Effect.as(Effect.annotateCurrentSpan({ "maple.checkpoint.refused": refusal._tag }), refusal),
+		),
 	)
 })
+
+/**
+ * Create a checkpoint, or refuse with an expected outcome.
+ *
+ * The refusal travels back through the span as a value (see the note inside
+ * `createCheckpointTraced`) and is turned back into a failure here, outside it —
+ * so the caller's control flow is unchanged while the span stays `Ok`.
+ */
+export const createCheckpoint = (options: CheckpointOptions) =>
+	createCheckpointTraced(options).pipe(
+		Effect.flatMap((outcome) =>
+			outcome instanceof CheckpointPreconditionError ? Effect.fail(outcome) : Effect.succeed(outcome),
+		),
+	)
 
 const parseResetTransaction = (value: unknown, expectedDataDir: string): ResetTransaction => {
 	const transaction = Schema.decodeUnknownSync(ResetTransactionSchema)(value)

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { isCancellation, tracedFetch } from "./telemetry"
+import { describeFetchFailure, isCancellation, tracedFetch } from "./telemetry"
 
 /**
  * Every Electric ShapeStream fetch flows through `tracedFetch`, and Electric
@@ -42,6 +42,40 @@ describe("isCancellation", () => {
 	it("tolerates null and undefined causes", () => {
 		expect(isCancellation(null, undefined)).toBe(false)
 		expect(isCancellation(undefined, undefined)).toBe(false)
+	})
+})
+
+/**
+ * `TracedFetchError` used to carry no message at all, so 37 exception events a
+ * day said only that *a* fetch failed. These pin the parts that make one
+ * diagnosable — and that the query string never rides along.
+ */
+describe("describeFetchFailure", () => {
+	it("names the method, path and transport cause", () => {
+		expect(
+			describeFetchFailure({
+				method: "GET",
+				path: "/api/v1/traces",
+				cause: new TypeError("Failed to fetch"),
+			}),
+		).toBe("Fetch failed: GET /api/v1/traces — TypeError: Failed to fetch")
+	})
+
+	it("includes the status when there was a response", () => {
+		expect(
+			describeFetchFailure({
+				method: "POST",
+				path: "/internal/query-engine/execute",
+				status: 503,
+				cause: new Error("Service Unavailable"),
+			}),
+		).toBe("Fetch failed: POST /internal/query-engine/execute (HTTP 503) — Error: Service Unavailable")
+	})
+
+	it("still identifies the call when the cause carries nothing", () => {
+		expect(describeFetchFailure({ method: "GET", path: "/api/v1/thing", cause: undefined })).toBe(
+			"Fetch failed: GET /api/v1/thing",
+		)
 	})
 })
 

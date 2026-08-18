@@ -39,7 +39,47 @@ type FetchOutcome =
 	| { readonly ok: true; readonly response: Response }
 	| { readonly ok: false; readonly cause: unknown }
 
+const causeName = (cause: unknown): string | null =>
+	typeof cause === "object" && cause !== null && "name" in cause && typeof cause.name === "string"
+		? cause.name
+		: null
+
+const causeMessage = (cause: unknown): string | null => {
+	if (cause instanceof Error) return cause.message.length > 0 ? cause.message : null
+	if (typeof cause === "string") return cause.length > 0 ? cause : null
+	return null
+}
+
+/**
+ * The human half of a `TracedFetchError`.
+ *
+ * These arrived with an empty exception message and were therefore
+ * undiagnosable: a transport rejection carries no response, so nothing in the
+ * span said which call failed or how. Method + path + (when there is one) status
+ * + the cause's name/message is enough to tell "the API is down" apart from
+ * "this one endpoint 500s".
+ *
+ * The path is `URL.pathname` on purpose — a query string can carry ids, filter
+ * values and search text, none of which belong in an error message.
+ *
+ * Exported for tests.
+ */
+export const describeFetchFailure = (input: {
+	readonly method: string
+	readonly path: string
+	readonly status?: number | undefined
+	readonly cause: unknown
+}): string => {
+	const where = `${input.method} ${input.path}`
+	const status = input.status === undefined ? "" : ` (HTTP ${input.status})`
+	const name = causeName(input.cause)
+	const message = causeMessage(input.cause)
+	const detail = [name, message].filter((part) => part !== null).join(": ")
+	return `Fetch failed: ${where}${status}${detail.length > 0 ? ` — ${detail}` : ""}`
+}
+
 class TracedFetchError extends Data.TaggedError("@maple/web/TracedFetchError")<{
+	readonly message: string
 	readonly cause: unknown
 }> {}
 
@@ -88,10 +128,26 @@ export const tracedFetch = (
 						return outcome
 					}
 					if (isCancellation(outcome.cause, init?.signal)) {
-						yield* Effect.annotateCurrentSpan("maple.http.cancelled", true)
+						// An abort is an expected outcome (navigation away, Electric
+						// pause/resume), so the span stays `Ok` and only says what happened.
+						yield* Effect.annotateCurrentSpan({
+							"maple.http.cancelled": true,
+							"error.type": "aborted",
+						})
 						return outcome
 					}
-					return yield* new TracedFetchError({ cause: outcome.cause })
+					yield* Effect.annotateCurrentSpan(
+						"error.type",
+						causeName(outcome.cause) ?? "TracedFetchError",
+					)
+					return yield* new TracedFetchError({
+						cause: outcome.cause,
+						message: describeFetchFailure({
+							method,
+							path: parsed.pathname,
+							cause: outcome.cause,
+						}),
+					})
 				}).pipe(
 					Effect.withSpan("http.client", {
 						kind: "client",
