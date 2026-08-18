@@ -77,7 +77,7 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 	// `hoistsLegend` is the gate, not an unconditional publish: a chart already
 	// drawing the strip under its plot would otherwise print its series twice,
 	// once bottom-left and once in the header. See `hoistsLegend`.
-	usePlotLegendSlot(hoistsLegend(legend) ? series : null)
+	const hoisted = usePlotLegendSlot(hoistsLegend(legend) ? series : null)
 
 	const tooltipSeries = useMemo<PlotTooltipSeries<TimeseriesRow>[]>(
 		() =>
@@ -146,7 +146,7 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 			className={cn("h-full w-full", className)}
 			ariaLabel="Latency percentiles"
 			definition={definition}
-			legend={legend === "visible" ? <FixedMetricLegend series={series} /> : undefined}
+			legend={!hoisted && legend === "visible" ? <FixedMetricLegend series={series} /> : undefined}
 			overlay={overlay}
 			renderTooltipBody={({ points }) => fixedMetricTooltipBody(model, points, tooltipSeries)}
 		/>

@@ -110,3 +110,37 @@ describe("WidgetShell: the headline stat keeps the corner", () => {
 		expect(stat?.className).toContain("ml-auto")
 	})
 })
+
+describe("WidgetShell: dashed series in the header", () => {
+	/**
+	 * The Request Volume tile refused to hoist at all while it had an error
+	 * series, because that series is drawn DASHED in the plot and a header chip
+	 * could only paint a filled square — a solid chip would have claimed the
+	 * overlay was a solid line. The tile kept its under-plot legend as a result.
+	 * Carrying `dashed` through is what let it hoist like every other tile.
+	 */
+	it("draws a dashed outline instead of a filled swatch", () => {
+		const { container } = render(
+			<WidgetShell title="Request volume" mode="view">
+				<PublishingChart
+					series={[
+						{ key: "throughput", label: "Throughput (/s)", color: "#8b5cf6" },
+						{ key: "errors", label: "Errors (/s)", color: "#ef4444", dashed: true },
+					]}
+				/>
+			</WidgetShell>,
+		)
+
+		const swatches = [...container.querySelectorAll("span")].filter((node) =>
+			node.className.includes("size-2"),
+		)
+		expect(swatches, "one swatch per series").toHaveLength(2)
+
+		const [solid, dashed] = swatches
+		expect(solid?.className).not.toContain("border-dashed")
+		expect(solid?.getAttribute("style")).toContain("background-color")
+
+		expect(dashed?.className, "the errors chip is outlined").toContain("border-dashed")
+		expect(dashed?.getAttribute("style"), "and coloured on the border").toContain("border-color")
+	})
+})

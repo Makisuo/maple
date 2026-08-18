@@ -174,11 +174,16 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 	// The card header's series chips, top-right of the tile. A no-op outside a
 	// `WidgetShell` — the service pages draw their own always-on legend.
 	//
-	// Gated, not unconditional, and on the SAME condition the strip below the plot
-	// uses: a chart drawing both would print its series twice, once bottom-left
-	// and once in the header. `hasErrors` is part of it because the error series
-	// forces the strip on whether or not the caller asked for a legend.
-	usePlotLegendSlot(hoistsLegend(legend) && !hasErrors ? legendSeries : null)
+	// `hoisted` is what keeps the series from printing twice, and it has to be the
+	// SLOT's answer rather than a guess: outside a `WidgetShell` — the service
+	// pages — there is no slot, so dropping the strip below the plot would lose
+	// the legend outright.
+	//
+	// This used to also refuse to hoist whenever `hasErrors`, because the errors
+	// overlay is drawn DASHED and a header chip could only render a filled square.
+	// `PlotLegendItem` now carries `dashed`, so the chip states the same thing the
+	// plot does and the tile can hoist like every other one.
+	const hoisted = usePlotLegendSlot(hoistsLegend(legend) ? legendSeries : null)
 
 	const definition = useMemo(() => {
 		// The in-flight tail is a SECOND set of marks over an overlapping slice —
@@ -304,7 +309,9 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 			// unreadable without a key — the legend appears for it whether or not the
 			// caller asked for one.
 			legend={
-				legend === "visible" || hasErrors ? <FixedMetricLegend series={legendSeries} /> : undefined
+				!hoisted && (legend === "visible" || hasErrors) ? (
+					<FixedMetricLegend series={legendSeries} />
+				) : undefined
 			}
 			overlay={overlay}
 			renderTooltipBody={({ points }) => fixedMetricTooltipBody(model, points, tooltipSeries)}

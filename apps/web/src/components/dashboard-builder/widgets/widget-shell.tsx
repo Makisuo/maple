@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react"
 import { cn } from "@maple/ui/lib/utils"
-import { ChartLegendSlotContext, type ChartLegendItem } from "@maple/ui/components/ui/chart"
-import { PlotLegendSlotContext } from "@maple/ui/components/plot/plot-frame"
+import { ChartLegendSlotContext } from "@maple/ui/components/ui/chart"
+import { PlotLegendSlotContext, type PlotLegendItem } from "@maple/ui/components/plot/plot-frame"
 import {
 	GripDotsIcon,
 	TrashIcon,
@@ -66,7 +66,7 @@ export function WidgetShell({
 	// alerts can be spun off a chart without entering dashboard edit mode.
 	const showMenu = isEditable || createAlert != null
 	const [menuOpen, setMenuOpen] = useState(false)
-	const [legendItems, setLegendItems] = useState<readonly ChartLegendItem[]>([])
+	const [legendItems, setLegendItems] = useState<readonly PlotLegendItem[]>([])
 	// One piece of state, two providers. The Recharts `ChartContainer` and the
 	// TanStack plot layer each publish through their own context — the plot layer
 	// declares its own so that importing it does not drag `recharts` into every
@@ -132,9 +132,20 @@ export function WidgetShell({
 											key={item.key}
 											className="flex min-w-0 shrink items-center gap-1.5 text-[10px] text-muted-foreground"
 										>
+											{/* A dashed outline, not a filled square, when the series is
+											    painted as a dashed stroke — an errors overlay drawn dashed
+											    in the plot and solid in the header would state something
+											    the chart does not. Mirrors `FixedMetricLegend`. */}
 											<span
-												className="size-2 shrink-0 rounded-[2px]"
-												style={{ backgroundColor: item.color }}
+												className={cn(
+													"size-2 shrink-0 rounded-[2px]",
+													item.dashed && "border border-dashed",
+												)}
+												style={
+													item.dashed
+														? { borderColor: item.color }
+														: { backgroundColor: item.color }
+												}
 											/>
 											<span className="truncate">{item.label}</span>
 										</span>
