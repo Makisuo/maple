@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::ai_session;
 use crate::clickhouse_insert_mappings::{self, InsertMapping};
 use crate::metrics;
 use crate::otel::{
@@ -2233,6 +2234,25 @@ fn encode_traces(
                 }
                 apply_attribute_mappings(attribute_mappings, &resource_attrs, &mut span_attrs);
 
+                let ai = ai_session::classify_span(&ai_session::SpanView {
+                    scope_name,
+                    span_name: &span.name,
+                    span_attrs: &span_attrs,
+                    resource_attrs: &resource_attrs,
+                    events: &span.events,
+                });
+                if let Some(ai) = ai {
+                    span_attrs.insert(ai_session::VENDOR_ID_ATTR.to_string(), json!(ai.vendor));
+                    span_attrs.insert(
+                        ai_session::VENDOR_VERSION_ATTR.to_string(),
+                        json!(ai_session::VENDOR_VERSION),
+                    );
+                    if let Some(session_id) = ai.session_id {
+                        span_attrs
+                            .insert(ai_session::SESSION_ID_ATTR.to_string(), json!(session_id));
+                    }
+                }
+
                 let events_timestamp: Vec<Value> = span
                     .events
                     .iter()
@@ -3327,6 +3347,96 @@ mod tests {
         assert_eq!(row["resource_attributes"]["maple_org_id"], "org_1");
         assert_eq!(row["span_attributes"]["http.route"], "/checkout");
         assert!(row["span_attributes"].get("SampleRate").is_none());
+    }
+
+    #[test]
+    fn trace_encoder_stamps_ai_vendor_attributes() {
+        let request = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(Resource {
+                    attributes: vec![string_kv("service.name", "agent-app")],
+                    dropped_attributes_count: 0,
+                    entity_refs: Vec::new(),
+                }),
+                scope_spans: vec![
+                    ScopeSpans {
+                        scope: Some(InstrumentationScope {
+                            name: "@mastra/otel-exporter".to_string(),
+                            ..Default::default()
+                        }),
+                        spans: vec![Span {
+                            trace_id: vec![0x11; 16],
+                            span_id: vec![0x22; 8],
+                            name: "agent.generate".to_string(),
+                            attributes: vec![
+                                string_kv("mastra.span.type", "agent_run"),
+                                string_kv("gen_ai.conversation.id", "conv-42"),
+                            ],
+                            ..Default::default()
+                        }],
+                        schema_url: String::new(),
+                    },
+                    ScopeSpans {
+                        scope: Some(InstrumentationScope {
+                            name: "@opentelemetry/instrumentation-http".to_string(),
+                            ..Default::default()
+                        }),
+                        spans: vec![Span {
+                            trace_id: vec![0x11; 16],
+                            span_id: vec![0x33; 8],
+                            name: "POST /checkout".to_string(),
+                            attributes: vec![string_kv("http.route", "/checkout")],
+                            ..Default::default()
+                        }],
+                        schema_url: String::new(),
+                    },
+                ],
+                schema_url: String::new(),
+            }],
+        };
+
+        let (frames, _) = encode_traces(
+            &test_cfg().datasources,
+            "org_1",
+            &request,
+            &SamplingPolicy::default(),
+            &[],
+        )
+        .unwrap();
+        let rows: Vec<Value> = frames
+            .iter()
+            .flat_map(|frame| {
+                frame
+                    .payload
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                    .map(|line| serde_json::from_slice(line).unwrap())
+                    .collect::<Vec<Value>>()
+            })
+            .collect();
+        assert_eq!(rows.len(), 2);
+
+        let ai_row = rows
+            .iter()
+            .find(|row| row["span_name"] == "agent.generate")
+            .unwrap();
+        assert_eq!(ai_row["span_attributes"]["maple.ai.vendor.id"], "mastra");
+        assert_eq!(ai_row["span_attributes"]["maple.ai.vendor.version"], "0");
+        assert_eq!(ai_row["span_attributes"]["maple.ai.session.id"], "conv-42");
+
+        let http_row = rows
+            .iter()
+            .find(|row| row["span_name"] == "POST /checkout")
+            .unwrap();
+        assert!(http_row["span_attributes"]
+            .get("maple.ai.vendor.id")
+            .is_none());
+        assert!(http_row["span_attributes"]
+            .get("maple.ai.vendor.version")
+            .is_none());
+        assert!(http_row["span_attributes"]
+            .get("maple.ai.session.id")
+            .is_none());
     }
 
     #[test]
