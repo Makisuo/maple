@@ -206,6 +206,25 @@ export const applyRawTelemetryRetentionFloor = (db: Pick<Chdb, "query" | "exec">
  * does not make the loader pools single-threaded. RESTORE uses a separate
  * 16-thread pool by default and can trip the same invalid recursive-mutex state
  * while restoring that dependency graph. */
+/**
+ * Parser limit for one statement, applied as a session setting at open.
+ *
+ * The C API has no separate data stream: every INSERT inlines its NDJSON as a
+ * string literal, and the parser reads the whole statement against
+ * `max_query_size` (default 256 KiB). `buildInsertStatements` chunks batches
+ * under that, but it cannot split a single row — a span carrying a large
+ * attribute (a request body, a stack, a prompt) still arrives as one line and
+ * was rejected with "Code: 62 … Max query size exceeded" at the literal. The
+ * limit is a parser guard, not a buffer allocation, so raising it well past any
+ * single OTLP row costs nothing.
+ *
+ * A `SET`, not an argv flag: `chdb_connect` accepts `--<setting>=` for some
+ * settings but `--max_query_size` measurably does not take (system.settings
+ * still reports 262144), while the session `SET` — the same path
+ * `session_timezone` uses — does, and holds for the connection's lifetime.
+ */
+export const MAX_QUERY_SIZE_BYTES = 64 * 1024 * 1024
+
 export const chdbArgv = (options: Pick<ChdbOptions, "dataDir" | "configFile">): string[] => [
 	"clickhouse",
 	"--async_load_databases=0",
@@ -320,6 +339,7 @@ export class Chdb {
 		// Partition expressions, ingest conversions, and retention predicates must
 		// never inherit a host-specific timezone.
 		db.exec("SET session_timezone = 'UTC'")
+		db.exec(`SET max_query_size = ${MAX_QUERY_SIZE_BYTES}`)
 		if (options.bootstrapSchema !== false) {
 			db.#bootstrap(options.schemaSql)
 			if (options.rawTelemetryRetentionDays !== undefined)
