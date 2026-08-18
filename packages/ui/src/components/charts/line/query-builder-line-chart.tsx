@@ -248,7 +248,13 @@ export function QueryBuilderLineChart({
 				...visible.flatMap((entry) => {
 					const indexes = dotIndexes.get(entry.key)
 					if (!indexes || indexes.size === 0) return []
-					const points = scaledRows.filter((_, index) => indexes.has(index))
+					// Dots cover the SOLID run only. Recharts got this for free — its
+					// solid series was null across the in-flight region, so the dot
+					// renderer never ran there — and it matters more than it looks: a
+					// dashboard tile's partial tail is one bucket wide, so a dot at each
+					// end fills the dashes in and the tail reads as a solid line.
+					// `solid` is a prefix of `scaledRows`, so the indexes still line up.
+					const points = solid.filter((_, index) => indexes.has(index))
 					return [
 						dot(points, {
 							x: (row: TimeseriesRow) => row.date,
