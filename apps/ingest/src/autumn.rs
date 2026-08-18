@@ -320,7 +320,7 @@ async fn flush_all(
 /// for replay payloads that belong to an already-metered browser session.
 #[derive(Clone)]
 pub struct AutumnEntitlements {
-    client: Client,
+    client: maple_ingest::telemetry::HttpClient,
     secret_key: String,
     api_url: String,
 }
@@ -364,7 +364,12 @@ pub enum AutumnReserveOutcome {
 }
 
 impl AutumnEntitlements {
-    pub fn new(client: Client, secret_key: String, api_url: &str) -> Self {
+    pub fn new(
+        client: impl Into<maple_ingest::telemetry::HttpClient>,
+        secret_key: String,
+        api_url: &str,
+    ) -> Self {
+        let client = client.into();
         let api_url = api_url.trim_end_matches('/').to_string();
         info!("Autumn native billing enforcement enabled");
 
