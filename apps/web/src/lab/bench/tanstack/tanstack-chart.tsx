@@ -1,9 +1,8 @@
 import { cn } from "@maple/ui/lib/utils"
-import { CanvasChart, RendererChart, Chart as SvgChart } from "@tanstack/charts/react/tooltip"
+import { CanvasChart, Chart as SvgChart } from "@tanstack/charts/react/tooltip"
 import type { ChartTooltipBodyRenderContext } from "@tanstack/charts/react/tooltip"
 import type { ChartPoint, ChartValue, DomChartDefinition } from "@tanstack/charts"
-import { motion, type ChartMotionOptions } from "@tanstack/charts/motion"
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
 
 import "./tooltip.css"
 
@@ -105,21 +104,6 @@ export interface TanstackChartFrameProps<TDatum, TXValue extends ChartValue, TYV
 	 */
 	onFocusChange?: (point: ChartPoint<TDatum, TXValue, TYValue> | null) => void
 	/**
-	 * Opt into animated marks. Omitted, nothing about the render path changes —
-	 * which is deliberate, because the perf numbers in `FINDINGS.md` were taken
-	 * against the static path and every other arm still has to describe them.
-	 *
-	 * **The motion renderer is SVG-only.** `motion()` is not a wrapper around a
-	 * base renderer, it IS a renderer: `dist/motion.js:42` declares
-	 * `id: "svg-motion"`, mounts an `svg.ts-chart` root and throws
-	 * ("The motion SVG renderer must produce an svg.ts-chart root element") if it
-	 * cannot find one. So this composes with `tanstack-svg` and is IGNORED under
-	 * `tanstack-canvas`, which keeps static paint. That asymmetry is a package
-	 * limitation, not a choice, and it is the one thing that makes the two
-	 * renderer arms of an animated chart legitimately differ.
-	 */
-	motion?: ChartMotionOptions
-	/**
 	 * A caption strip below the legend — the heatmap's "N empty columns hidden"
 	 * footnote. A SIBLING of the measured plot for the same reason `legend` is:
 	 * the existing `ResizeObserver` then hands the plot whatever height is left,
@@ -145,24 +129,12 @@ export function TanstackChartFrame<TDatum, TXValue extends ChartValue, TYValue e
 	renderTooltipBody,
 	legend,
 	onFocusChange,
-	motion: motionOptions,
 	footer,
 }: TanstackChartFrameProps<TDatum, TXValue, TYValue>) {
 	const { ref, height } = useMeasuredHeight()
 
-	// Memoized on the OPTIONS object, not created inline: the renderer owns the
-	// animation state machine, so a fresh instance per render would remount the
-	// scene and restart the entry wave on every parent commit. Callers pass a
-	// module-scope constant.
-	const animated = useMemo(
-		() => (motionOptions && renderer === "tanstack-svg" ? motion(motionOptions) : null),
-		[motionOptions, renderer],
-	)
-
 	const ChartComponent = renderer === "tanstack-canvas" ? CanvasChart : SvgChart
 
-	// Identical on both branches; only the component and the extra `renderer` prop
-	// differ, and `RendererChart` requires that prop while the other two reject it.
 	const chartProps = {
 		definition,
 		ariaLabel,
@@ -194,11 +166,7 @@ export function TanstackChartFrame<TDatum, TXValue extends ChartValue, TYValue e
 				 * Rendering is not gated on a measurement either: `FALLBACK_HEIGHT`
 				 * covers the frame before the layout effect resolves.
 				 */}
-				{animated ? (
-					<RendererChart {...chartProps} renderer={animated} />
-				) : (
-					<ChartComponent {...chartProps} />
-				)}
+				<ChartComponent {...chartProps} />
 			</div>
 			{/*
 			 * `max-h-[45%]` is `query-builder-legend.tsx`'s `MAX_LEGEND_FRACTION`,

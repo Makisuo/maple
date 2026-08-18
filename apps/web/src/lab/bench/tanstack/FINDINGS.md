@@ -126,7 +126,7 @@ implementation they'd replace. All render with zero page errors. Ring sweep for 
 | histogram — production      | 202.0    | 382     |                                         |
 | **histogram — tanstack**    | **6.3**  | **11**  | **32× less React work — the real win**  |
 | heatmap — production        | 15.4     | 14      |                                         |
-| **heatmap — tanstack**      | **2.6**  | **5**   | cheaper, and −325 lines                 |
+| **heatmap — tanstack**      | **2.6**  | **5**   | cheaper, and −325 lines — **stale, see below** |
 | line — production           | 228.0    | 410     |                                         |
 | **line — tanstack**         | **39.8** | **61**  | **5.7× less React work**                |
 | area — production           | 225.0    | 410     |                                         |
@@ -171,11 +171,114 @@ Two measurement traps this shook out, both now handled in the spec:
   empty space and records **0 commits** — which reads as "fastest chart in the table" and actually
   means "never responded". The `commits > 0` assertion exists to catch exactly this.
 
+## The heatmap polish pass (2026-08-18)
+
+`heatmap-spike.tsx` was taken from "renders the right rectangles" to something with a real hover
+model, borrowing from `Subhan-code/Amicro--Micro-transitions-`. Four package facts came out of it,
+two of them useful and two of them limits.
+
+### `states[].when.focus` accepts `'unmatched'`, and it is undocumented
+
+`ChartMarkStateSelector.focus` is typed `ChartFocusMatch | 'unmatched'` where `ChartFocusMatch =
+'primary' | 'group' | 'key' | 'x' | 'y' | 'series'` (`types.d.ts:94`). The docs cover the named
+matches; **`'unmatched'` appears nowhere in them**. It resolves to `!context.matches("group")`
+(`mark-state.js:104`) — every point that is not the focused one.
+
+That single selector, plus `'x'` and `'y'` (which compare `xValue`/`yValue` against the focused
+point, `focus-layer.js:233`), is a heatmap crosshair with no DOM overlay and no hit-test
+arithmetic. States apply in array order and merge, so the cascade is literally:
+
+```ts
+states: [
+  { when: { focus: "unmatched" }, style: { opacity: 0.28 } },  // field recedes
+  { when: { focus: "x" },         style: { opacity: 1 } },     // column returns
+  { when: { focus: "y" },         style: { opacity: 1 } },     // row returns
+  { when: { focus: "primary" },   style: { stroke, strokeWidth: 1.5, inset: 0, radius: radius + 1 } },
+]
+```
+
+This closes the largest parity gap against production, and arguably beats it: production paints two
+additive 10%-foreground bands and dims nothing, which reads worse on a grid where every cell already
+carries colour. Subtraction is the stronger affordance here.
+
+Note `ChartRectStateStyle` is `Pick<…, 'fill' | 'fillOpacity' | 'stroke' | 'strokeWidth' | 'opacity'
+| 'radius' | 'inset'>` — **no `strokeOpacity`**, which the previous hover ring was setting. It was
+inert.
+
+### The motion renderer mounts and animates nothing (for `cell`)
+
+`motion()` from `@tanstack/charts/motion` was wired up to port the reference's column-wave entry
+(cells fading in per column, 12ms apart). It does not work at 0.14.0, and the failure is silent —
+the chart simply appears fully painted, exactly as if motion had never been configured.
+
+What was established, in order:
+
+1. **`motion()` is a renderer, not a wrapper.** `dist/motion.js:42` declares `id: "svg-motion"` and
+   mounts an `svg.ts-chart` root, throwing otherwise. It is **SVG-only**; there is no canvas
+   equivalent, so an animated chart could never look the same in both arms.
+2. **It really does mount.** With `RendererChart` + `motion()` the DOM gains a `.ts-chart-surface`
+   root (`dist/react/RendererChart.js`), so the plumbing was live.
+3. **`initial: true` is wrong under SSR** — a genuine trap worth keeping. The gate is
+   `animate = !reduced && (initial ? motion.initial && (!adoptedRoot || motion.initial === "always")
+   : …)`. This app server-renders, the renderer ADOPTS that markup, and an adopted root therefore
+   skips the entry animation entirely. `"always"` is the documented opt-in.
+4. **Even with `"always"`, reduced-motion off, and the sweep stretched to a nine-second window, no
+   `cell` rect ever received an `opacity` attribute and `data-ts-motion-role` was never set.** No
+   enter track is created for `cell` at all. `dist/motion.js` has a generic
+   `opacity: 0 → target` enter track, but the only role with real entrance choreography is `"bar"`
+   (gated on `timingContext.role === "bar"`).
+
+`states[].transition` went out with it: state easing is applied *by* the motion renderer, so with no
+animating renderer mounted it is configuration that cannot take effect. **Hover feedback in this
+chart is instant**, where production eases it over 100ms in CSS. That is the one place the port
+still feels less finished than the thing it replaces, and it is not fixable from our side today.
+
+Retest when the pre-alpha label drops. If `cell` gains an enter track the wave is a dozen lines:
+`delay: (ctx) => columnIndex.get(ctx.datum.x) * 12`.
+
+### Two ways a full-plot background rect does not work
+
+The reference's nicest structural idea is a **two-layer cell** — a neutral track under the coloured
+inner — which is also how production draws grout (`--heatmap-grout`) so a hole reads as a hole *in a
+surface*. Neither route to a single panel behind the plot works:
+
+- `rect` with `x1: firstCategory, x2: lastCategory`. A band scale's `map()` returns the band
+  **centre**, so the rect spans centre-to-centre — measured at `x: 206.64, w: 867.46` against a plot
+  starting at `x: 71.74`. It paints as a slab offset into the grid, visible through any dimmed cell.
+  `inset` cannot rescue it: the missing bleed is half a band per axis (135px vs 76px on that fixture)
+  and `inset` is one number for all four sides.
+- `rect` with the extent channels omitted, hoping it fills the plot. It emits no node at all
+  (rect count 45 → 44).
+
+So grout is per-slot instead: a holes-only `cell` mark under the data. The seams keep showing card
+background. What that buys beyond looks is the important half — **a hole becomes a focusable point**,
+so hovering an empty slot says "no data" instead of `focus: "nearest"` snapping to a neighbour and
+confidently reporting someone else's count.
+
+### A pruned domain does not prune the data
+
+Dropping an all-zero column from the band domain while leaving its rows in the mark does not hide
+them. The scale maps the orphaned category to nothing and the mark emits `<rect x="null">`, which
+the browser resolves to `x=0` — stacking the pruned column on top of the first visible one, so the
+column renders split down the middle by a second, wrongly coloured cell. Domain and data have to be
+filtered together (`model.visibleRows`), and the colour domain has to be computed from the survivors
+or the pruned zeros drag `min` to 0.
+
+### The perf number above is stale
+
+The recorded 2.6ms / 5 commits predates this pass, and the states cascade is real per-hover work:
+every cell now resolves up to four state selectors per focus change instead of one. **Re-run
+`?arm=heatmap-tanstack` before quoting it.** It was not re-measured here because the automated
+browser pane suspends rendering while hidden, and `endInteraction()` awaits frames that never
+arrive — the sweep never completes. It needs a human-visible browser.
+
 ### Parity gaps in the ports (visible in the gallery)
 
 - **Pie**: slice order and colours differ. Production uses `resolveSeriesColors(name)` — stable per
   series name; the spike indexes `--chart-1..5` positionally.
-- **Heatmap**: y-axis order is inverted (production runs `300ms+` at top; the spike runs `0-100ms`).
+- ~~**Heatmap**: y-axis order is inverted~~ — **fixed**. The spike now reverses `yDomain`, so
+  `300ms+` sits at the top as production does. Band `y` maps `domain[0]` to the top, so
+  first-appearance order ran the wrong way.
 - **Line / area / stacked bar**: colours differ, and the cause is upstream of the port. The
   query-builder charts rename every series to `s1..sN` before colouring, so they always get the
   generic palette; the spikes use the semantic tokens the real chart would (`--chart-p50/p95/p99`,
