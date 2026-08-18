@@ -1,24 +1,110 @@
-import { useRef } from "react"
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
-import { useContainerSize } from "@maple/ui/hooks/use-container-size"
+import { useMemo } from "react"
+import { barY, defineChart, stack } from "@tanstack/charts"
+import { scaleTime } from "d3-scale"
+import { PlotFrame, dashedGridY, usePlotColors } from "@maple/ui/components/plot"
 
-import { formatBucketTick, formatNumber, stubBuckets, totalCount } from "./live-logs-volume-data"
+import {
+	formatBucketTick,
+	formatNumber,
+	stubBuckets,
+	totalCount,
+	type LogBucket,
+} from "./live-logs-volume-data"
 
-const SEVERITY_COLORS = {
-	INFO: "var(--severity-info)",
-	DEBUG: "var(--severity-debug)",
-	WARN: "var(--severity-warn)",
-	ERROR: "var(--severity-error)",
-} as const
+/**
+ * Module scope, not an inline literal: `usePlotColors` memoises on this object's
+ * identity, and it reads computed style, so a fresh literal per render would
+ * re-resolve every token on every frame.
+ *
+ * Fallbacks matter more here than in the app — the landing page renders before
+ * its stylesheet has necessarily applied on a cold visit, and canvas holds
+ * whatever literal it was handed.
+ */
+const SEVERITY_TOKENS = {
+	DEBUG: ["--severity-debug", "#94a3b8"],
+	INFO: ["--severity-info", "#38bdf8"],
+	WARN: ["--severity-warn", "#f59e0b"],
+	ERROR: ["--severity-error", "#ef4444"],
+} as const satisfies Record<string, readonly [string, string]>
 
-const STACK_ORDER: (keyof typeof SEVERITY_COLORS)[] = ["DEBUG", "INFO", "WARN", "ERROR"]
+type Severity = keyof typeof SEVERITY_TOKENS
+
+/** Bottom to top, matching the old `STACK_ORDER`. */
+const STACK_ORDER: readonly Severity[] = ["DEBUG", "INFO", "WARN", "ERROR"]
 
 const HEIGHT = 140
 
+/** One bar segment: a bucket, a severity, and its count. */
+interface SeverityCell {
+	date: Date
+	severity: Severity
+	value: number
+}
+
 export default function LiveLogsVolumeChart() {
 	const total = totalCount(stubBuckets)
-	const wrapRef = useRef<HTMLDivElement | null>(null)
-	const { width } = useContainerSize(wrapRef)
+	const colors = usePlotColors(SEVERITY_TOKENS)
+
+	/**
+	 * The stack is built from CELLS rather than from one mark per severity.
+	 *
+	 * Recharts took four `<Bar dataKey stackId>` children and stacked them by
+	 * matching `stackId`; here a single `barY` carries every segment and `z` names
+	 * which severity a cell belongs to, which is what `stack()` groups on.
+	 */
+	const cells = useMemo(
+		() =>
+			stubBuckets.flatMap((bucket: LogBucket) => {
+				const date = new Date(bucket.bucket)
+				return STACK_ORDER.map((severity) => ({ date, severity, value: bucket[severity] }))
+			}),
+		[],
+	)
+
+	const definition = useMemo(
+		() =>
+			defineChart({
+				marks: [
+					dashedGridY(),
+					barY(cells, {
+						x: (cell: SeverityCell) => cell.date,
+						y: (cell: SeverityCell) => cell.value,
+						z: (cell: SeverityCell) => cell.severity,
+						fill: (cell: SeverityCell) => colors[cell.severity],
+						radius: 0,
+						// `order` pins the stack bottom-to-top. Without it the layout
+						// orders by input, which is the same list today and would drift
+						// the moment the cells are built differently.
+						layout: stack({ order: [...STACK_ORDER] }),
+					}),
+				],
+				x: {
+					// A continuous time scale, as the app's bar chart uses — a band scale
+					// over bucket strings puts ticks on arbitrary buckets rather than on
+					// clock boundaries.
+					scale: scaleTime,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 6,
+							spacing: 50,
+							format: (value: Date) => formatBucketTick(value.toISOString()),
+						},
+					},
+				},
+				y: {
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 4, format: (value: number) => formatNumber(value) },
+					},
+				},
+				// The landing chart is a still life: no hover, no tooltip, no focus ring.
+				tooltip: false,
+				focus: false,
+			}),
+		[cells, colors],
+	)
 
 	return (
 		<div className="live-frame">
@@ -36,50 +122,14 @@ export default function LiveLogsVolumeChart() {
 					</span>
 					<span className="text-fg-muted text-xs">in selected range</span>
 				</div>
-				<div ref={wrapRef} className="w-full select-none" style={{ height: HEIGHT }}>
-					{width > 0 && (
-						<BarChart
-							width={width}
-							height={HEIGHT}
-							data={stubBuckets}
-							margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
-						>
-							<CartesianGrid
-								vertical={false}
-								strokeDasharray="3 3"
-								stroke="color-mix(in oklab, var(--foreground) 8%, transparent)"
-							/>
-							<XAxis
-								dataKey="bucket"
-								tickLine={false}
-								axisLine={false}
-								tickMargin={6}
-								fontSize={10}
-								minTickGap={50}
-								stroke="var(--muted-foreground)"
-								tickFormatter={formatBucketTick}
-							/>
-							<YAxis
-								tickLine={false}
-								axisLine={false}
-								tickMargin={4}
-								fontSize={10}
-								width={36}
-								stroke="var(--muted-foreground)"
-								tickFormatter={(v: number) => formatNumber(v)}
-							/>
-							{STACK_ORDER.map((key) => (
-								<Bar
-									key={key}
-									dataKey={key}
-									stackId="severity"
-									fill={SEVERITY_COLORS[key]}
-									radius={0}
-									isAnimationActive={false}
-								/>
-							))}
-						</BarChart>
-					)}
+				{/*
+				 * No width gate any more. The old chart could not render until
+				 * `useContainerSize` reported a width, so it painted an empty box for at
+				 * least one frame; `PlotFrame` omits `width` and lets the host follow its
+				 * container, measuring itself before first paint.
+				 */}
+				<div className="w-full" style={{ height: HEIGHT }}>
+					<PlotFrame definition={definition} ariaLabel="Log volume by severity" className="h-full" />
 				</div>
 			</div>
 			<div className="border-border bg-bg-elevated text-fg-muted flex justify-between border-t px-3.5 py-2.5 text-[10px] uppercase tracking-wider">
