@@ -156,10 +156,7 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 							))}
 						</defs>
 						<ChartGrid />
-						<ChartXAxis
-							dataKey="label"
-							className="text-[10px]"
-						/>
+						<ChartXAxis dataKey="label" className="text-[10px]" />
 						<ChartYAxis
 							width={52}
 							// The metric formatters render a zero *headline* as "—" ("no

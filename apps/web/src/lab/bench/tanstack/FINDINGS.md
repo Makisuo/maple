@@ -63,7 +63,7 @@ Corrections to what is written below:
   into a `visibility="hidden"` `.ts-chart__focus-layer` group, which is what a test must select
   on.
 - **`barY` does not need a band scale.** It falls back to `inferBandwidth(scale, xValues, width,
-  count)`, which takes the minimum gap between distinct plotted x positions and keeps 80% of it —
+count)`, which takes the minimum gap between distinct plotted x positions and keeps 80% of it —
   functionally Recharts' `barCategoryGap="15%"`, so passing an `inset` on top would subtract the
   gap twice. This is what lets bar share the continuous `scaleTime` axis with line and area
   instead of regressing to the categorical band axis the line port deliberately left behind.
