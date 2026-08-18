@@ -745,8 +745,12 @@ const errorEventsSelectSql = `
             ),
             1, 3
           ) AS _rawFrames,
+          -- Redact every volatile token a frame line can carry. The last two
+          -- alternatives (long hex runs, 6+ digit runs) mirror the _msgFallback
+          -- redaction: a trace/span id or request id embedded in the first stack
+          -- line otherwise splits one bug into one issue per occurrence.
           arrayMap(
-            line -> replaceRegexpAll(line, ':[0-9]+|line [0-9]+|0x[0-9a-fA-F]+', ''),
+            line -> replaceRegexpAll(line, ':[0-9]+|line [0-9]+|0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|[0-9]{6,}', ''),
             _rawFrames
           ) AS _topFrames,
           if(length(_topFrames) > 0, _topFrames[1], '') AS _topFrame,
@@ -803,7 +807,15 @@ const errorEventsSelectSql = `
               least(toInt64(length(StatusMessage)), 150)
             ))
           ) AS _statusLabel,
-          if(_exType != '', _exType, _statusLabel) AS _errorLabel
+          if(_exType != '', _exType, _statusLabel) AS _errorLabel,
+          -- Both semconv spellings; the current key wins when both are present.
+          toUInt16OrZero(
+            if(
+              SpanAttributes['http.response.status_code'] != '',
+              SpanAttributes['http.response.status_code'],
+              SpanAttributes['http.status_code']
+            )
+          ) AS _httpStatus
         SELECT
           OrgId,
           toDateTime(Timestamp) AS Timestamp,
@@ -822,6 +834,17 @@ const errorEventsSelectSql = `
           _errorLabel AS ErrorLabel
         FROM traces
         WHERE StatusCode = 'Error'
+          -- Client-side runtimes (notably the native Cloudflare Workers
+          -- observability) mark ANY non-2xx fetch span as Error, so 404s from bot
+          -- traffic arrived here as unlabelled "Unknown Error" issues. Drop a
+          -- span only when all three hold: 4xx, no exception event, and no
+          -- exception type. 5xx and anything carrying an exception still count,
+          -- and SpanKind is deliberately not consulted — these are Client spans.
+          AND NOT (
+            _httpStatus >= 400 AND _httpStatus < 500
+            AND _ei = 0
+            AND _exType = ''
+          )
       `
 
 export const errorEventsMv = defineMaterializedView("error_events_mv", {

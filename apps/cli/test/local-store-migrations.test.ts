@@ -14,6 +14,8 @@ import {
 	LOCAL_SCHEMA_V4,
 	LOCAL_SCHEMA_V4_MANIFEST,
 	LOCAL_SCHEMA_V5,
+	LOCAL_SCHEMA_V5_MANIFEST,
+	LOCAL_SCHEMA_V6,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -55,16 +57,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v5 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("c36c52a95568eb68")
-		expect(SCHEMA_DIGEST).toBe("c36c52a95568eb68f8ebc98d7d36b552f21fb09b888bb310c68f0ad52d529fe4")
+	it("matches the generated v6 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("febb73ca0c1522a3")
+		expect(SCHEMA_DIGEST).toBe("febb73ca0c1522a3585faf1e9e84a414fd761a5f2119a09aa68f57d8679619c8")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(5)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V5)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(6)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V6)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -118,9 +120,33 @@ describe("current local schema identity", () => {
 		// migration's backfill double-count into a table that cannot be rebuilt.
 		expect(minutelyView?.definition).toContain("FROM traces")
 		expect(minutelyView?.definition).not.toContain("FROM service_overview_minutely")
-		expect(
-			LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name).filter((name) => !v4Names.has(name)),
-		).toEqual(["service_overview_minutely", "service_overview_minutely_mv"])
+		const v5Names = new Set(LOCAL_SCHEMA_V5_MANIFEST.objects.map((object) => object.name))
+		expect([...v5Names].filter((name) => !v4Names.has(name))).toEqual([
+			"service_overview_minutely",
+			"service_overview_minutely_mv",
+		])
+
+		// v6 adds and removes nothing: it only replaces two materialized-view
+		// bodies, so the object set is identical to v5 and the manifest digest
+		// differs solely through those two definitions.
+		expect(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name)).toEqual([...v5Names])
+		const errorEventsView = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "error_events_mv",
+		)
+		const errorEventsByTimeView = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "error_events_by_time_mv",
+		)
+		// Exception-less 4xx client spans (Cloudflare marks every non-2xx fetch
+		// span Error) no longer materialize, and ids in the top stack line are
+		// redacted out of the fingerprint frames.
+		for (const view of [errorEventsView, errorEventsByTimeView]) {
+			expect(view?.definition).toContain("_httpStatus >= 400 AND _httpStatus < 500")
+			expect(view?.definition).toContain(":[0-9]+|line [0-9]+|0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|[0-9]{6,}")
+		}
+		const v5ErrorEventsView = LOCAL_SCHEMA_V5_MANIFEST.objects.find(
+			(object) => object.name === "error_events_mv",
+		)
+		expect(v5ErrorEventsView?.definition).not.toContain("_httpStatus")
 	})
 })
 
@@ -133,6 +159,7 @@ describe("local migration registry", () => {
 			"local-0002-to-0003-service-map-ingest-bridge",
 			"local-0003-to-0004-web-events",
 			"local-0004-to-0005-service-overview-minutely",
+			"local-0005-to-0006-error-events-fingerprint-hygiene",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -140,6 +167,7 @@ describe("local migration registry", () => {
 		expect(chain[2]?.to).toEqual(LOCAL_SCHEMA_V3)
 		expect(chain[3]?.to).toEqual(LOCAL_SCHEMA_V4)
 		expect(chain[4]?.to).toEqual(LOCAL_SCHEMA_V5)
+		expect(chain[5]?.to).toEqual(LOCAL_SCHEMA_V6)
 		expect(typeof chain[0]?.apply).toBe("function")
 	})
 
@@ -178,7 +206,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 6, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 7, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)

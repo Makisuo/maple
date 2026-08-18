@@ -106,6 +106,30 @@ describe("error fingerprint normalization", () => {
 		expect(a.fpFrames).toBe(b.fpFrames)
 	})
 
+	it("produces stable fpFrames under trace/span id churn in the frame line", () => {
+		// The real defect behind 634 duplicate @maple/cli/IngestRejected issues: the
+		// first stack line carried a trace id, and only `:<line>` was redacted.
+		const stackA =
+			"    at ingest (/app/cli.ts:10:5) traceId=4bf92f3577b34da6a3ce929d0e0e4736 req=1048576\n    at g (/b.ts:20:5)"
+		const stackB =
+			"    at ingest (/app/cli.ts:10:5) traceId=00f067aa0ba902b7a1b2c3d4e5f60718 req=2097152\n    at g (/b.ts:20:5)"
+
+		const a = computeFingerprintInputs({
+			exceptionType: "IngestRejected",
+			exceptionStacktrace: stackA,
+			statusMessage: "",
+		})
+		const b = computeFingerprintInputs({
+			exceptionType: "IngestRejected",
+			exceptionStacktrace: stackB,
+			statusMessage: "",
+		})
+
+		expect(a.fpFrames).toBe(b.fpFrames)
+		expect(a.topFrame).toBe(b.topFrame)
+		expect(a.fpFrames).not.toMatch(/[0-9a-fA-F]{8,}/)
+	})
+
 	it("distinguishes different call sites even when the top frame is shared", () => {
 		const shared = "    at JSON.parse (/node_modules/json/index.js:5:10)"
 		const stackA = `${shared}\n    at loadConfig (/app/config.ts:42:5)`
