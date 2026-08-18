@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { PLOT_SELECTOR } from "./plot-locator"
 
 interface ReactRenderMetrics {
 	commits: number
@@ -32,7 +33,7 @@ async function measurePointerSweep(page: Page, mode: "recharts" | "cursor"): Pro
 		timeout: 30_000,
 	})
 
-	const plot = page.locator("[data-metrics-grid-sync-mode] .recharts-cartesian-grid").first()
+	const plot = page.locator(`[data-metrics-grid-sync-mode] :is(${PLOT_SELECTOR})`).first()
 	const bounds = await plot.boundingBox()
 	if (!bounds) throw new Error("Service detail benchmark chart has no plot bounds")
 
@@ -85,7 +86,7 @@ test("service detail cursor keeps one tooltip and linked sibling cursors", async
 		timeout: 30_000,
 	})
 
-	const plot = page.locator("[data-linked-cursor-chart='latency'] .recharts-cartesian-grid")
+	const plot = page.locator(`[data-linked-cursor-chart='latency'] :is(${PLOT_SELECTOR})`)
 	const bounds = await plot.boundingBox()
 	if (!bounds) throw new Error("Service detail benchmark chart has no plot bounds")
 
@@ -103,16 +104,18 @@ test("service detail cursor keeps one tooltip and linked sibling cursors", async
 			}).length,
 	)
 	expect(visibleLinkedCursors, "linked cursors shown on sibling charts").toBe(3)
-	const siblingAlignmentErrors = await page.locator("[data-linked-cursor-chart]").evaluateAll((cards) =>
-		cards.flatMap((card) => {
-			const cursor = card.querySelector<HTMLElement>("[data-linked-cursor-overlay]")
-			const line = cursor?.firstElementChild
-			const plot = card.querySelector<SVGGraphicsElement>(".recharts-cartesian-grid")
-			if (!cursor || cursor.hidden || !line || !plot) return []
-			const lineBounds = line.getBoundingClientRect()
-			const plotBounds = plot.getBoundingClientRect()
-			return [Math.abs(lineBounds.x - (plotBounds.x + plotBounds.width / 2))]
-		}),
+	const siblingAlignmentErrors = await page.locator("[data-linked-cursor-chart]").evaluateAll(
+		(cards, plotSelector) =>
+			cards.flatMap((card) => {
+				const cursor = card.querySelector<HTMLElement>("[data-linked-cursor-overlay]")
+				const line = cursor?.firstElementChild
+				const plot = card.querySelector<Element>(plotSelector)
+				if (!cursor || cursor.hidden || !line || !plot) return []
+				const lineBounds = line.getBoundingClientRect()
+				const plotBounds = plot.getBoundingClientRect()
+				return [Math.abs(lineBounds.x - (plotBounds.x + plotBounds.width / 2))]
+			}),
+		PLOT_SELECTOR,
 	)
 	expect(siblingAlignmentErrors, "linked cursors align to the hovered time bucket").toHaveLength(3)
 	expect(Math.max(...siblingAlignmentErrors), "maximum linked cursor alignment error").toBeLessThan(1)

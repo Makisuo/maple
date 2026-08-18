@@ -3,7 +3,7 @@
 import { useId } from "react"
 import { Bar, BarChart } from "recharts"
 import { type ChartConfig, ChartContainer, ChartGrid, ChartXAxis } from "../../ui/chart"
-import type { BaseChartProps } from "../_shared/chart-types"
+import type { SimpleChartProps } from "../_shared/chart-types"
 import { defaultBarData } from "../_shared/sample-data"
 import { DottedPattern } from "../_shared/svg-patterns"
 
@@ -11,7 +11,7 @@ const chartConfig = {
 	value: { label: "Value", color: "var(--chart-1)" },
 } satisfies ChartConfig
 
-export function DefaultBarChart({ data = defaultBarData, className, syncId }: BaseChartProps) {
+export function DefaultBarChart({ data = defaultBarData, className, syncId }: SimpleChartProps) {
 	const id = useId()
 	const patternId = `default-bar-dots-${id}`
 

@@ -184,7 +184,7 @@ export function ChartsLab({
 	// literal keys, and the arm switch below relies on them.
 	const cards = {
 		"pie-production": {
-			title: "Pie — production (hand-rolled SVG arcs, 518 lines)",
+			title: "Pie — production (PORTED: polar + radialArc; was hand-rolled SVG arcs)",
 			// The production charts take loose `Record<string, unknown>` rows, so they
 			// read the fixtures directly; the spikes take closed row types. Same
 			// source arrays either way.
@@ -202,7 +202,7 @@ export function ChartsLab({
 			node: <PieSpike rows={pieRows} renderer={renderer} className="h-full w-full" />,
 		},
 		"histogram-production": {
-			title: "Histogram — production (JS binning → string labels, 161 lines)",
+			title: "Histogram — production (PORTED: binX + rect; was JS binning → string labels)",
 			// Both arms get the SAME raw observations: the production chart bins them
 			// in JS via its own `bucketize`, the spike hands them to `binX`.
 			node: (
@@ -218,7 +218,7 @@ export function ChartsLab({
 			node: <HistogramSpike rows={histogramSpikeRows} renderer={renderer} className="h-full w-full" />,
 		},
 		"heatmap-production": {
-			title: "Heatmap — production (CSS grid + layout solver, 925 lines)",
+			title: "Heatmap — production (PORTED: cell + scaleBand; was CSS grid + layout solver)",
 			node: (
 				<QueryBuilderHeatmapChart
 					data={heatmapSampleData}
@@ -243,7 +243,7 @@ export function ChartsLab({
 			),
 		},
 		"line-production": {
-			title: "Line — production (recharts LineChart, one <Line> per series)",
+			title: "Line — production (PORTED: lineY per series; was recharts LineChart)",
 			node: (
 				<QueryBuilderLineChart
 					data={lineProductionRows}
@@ -257,7 +257,7 @@ export function ChartsLab({
 			node: <LineSpike rows={TIMESERIES_SPIKE_ROWS} renderer={renderer} className="h-full w-full" />,
 		},
 		"area-production": {
-			title: "Area — production (recharts AreaChart + gradient defs)",
+			title: "Area — production (PORTED: fill-only areaY + lineY; was recharts AreaChart)",
 			node: (
 				<QueryBuilderAreaChart
 					data={areaProductionRows}
@@ -271,7 +271,7 @@ export function ChartsLab({
 			node: <AreaSpike rows={TIMESERIES_SPIKE_ROWS} renderer={renderer} className="h-full w-full" />,
 		},
 		"stacked-bar-production": {
-			title: "Stacked bar — production (one <Bar stackId> per service, wide rows)",
+			title: "Stacked bar — production (PORTED: one barY, long-form z channel; was <Bar stackId> per service)",
 			node: (
 				<QueryBuilderBarChart
 					data={stackedBarProductionRows}
@@ -292,7 +292,7 @@ export function ChartsLab({
 			),
 		},
 		"line-incomplete-production": {
-			title: "Line + partial tail — production (twin _incomplete columns)",
+			title: "Line + partial tail — production (PORTED: second mark over a slice; was twin _incomplete columns)",
 			node: (
 				<QueryBuilderLineChart
 					data={linePartialProductionRows}
@@ -313,7 +313,7 @@ export function ChartsLab({
 			),
 		},
 		"area-incomplete-production": {
-			title: "Area + partial tail — production (faded gradient + dashed <Line>)",
+			title: "Area + partial tail — production (PORTED: faded areaY + dashed lineY; was gradient + dashed <Line>)",
 			node: (
 				<QueryBuilderAreaChart
 					data={areaPartialProductionRows}

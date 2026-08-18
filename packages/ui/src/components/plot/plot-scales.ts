@@ -110,16 +110,24 @@ export function linearYDomain(options: LinearYDomainOptions): [number, number] {
 }
 
 /**
- * A log y scale with its domain PINNED, floor at 1.
+ * The domain a log y axis gets, floor at 1.
  *
  * The floor matters twice over: log is undefined at zero, and the library
  * validates an *inferred* log domain and throws when it includes or crosses zero
  * (`validateInferredLogDomain` in `scale-input.js`). Supplying an explicit
  * domain skips inference entirely, so the floor is ours to set — and counts,
  * which are the usual log series, are meaningfully floored at 1.
+ *
+ * Separate from the scale below because a caller that fills from the axis floor
+ * needs the number without building a scale to read it back off.
  */
+export function logYDomain(max: number): [number, number] {
+	return [1, Math.max(max, 10)]
+}
+
+/** A log y scale with its domain PINNED — see `logYDomain`. */
 export function logYScale(max: number) {
-	return scaleLog().domain([1, Math.max(max, 10)])
+	return scaleLog().domain(logYDomain(max))
 }
 
 /** A linear y scale over an explicit domain. */

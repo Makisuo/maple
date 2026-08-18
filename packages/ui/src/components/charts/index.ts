@@ -1,6 +1,27 @@
 export { chartRegistry, getChartById } from "./registry"
+export type { ChartKind, ChartRegistryEntry } from "./registry"
 export { ChartSkeleton, type ChartSkeletonVariant } from "./_shared/chart-skeleton"
-export type { BaseChartProps, ChartCategory, ChartRegistryEntry } from "./_shared/chart-types"
+export type {
+	CartesianPlotProps,
+	ChartCategory,
+	ChartLegendMode,
+	ChartThreshold,
+	ChartTooltipMode,
+	PlotChromeProps,
+	PlotProps,
+	QueryBuilderAreaChartProps,
+	QueryBuilderBarChartProps,
+	QueryBuilderFunnelChartProps,
+	QueryBuilderHbarChartProps,
+	QueryBuilderHeatmapChartProps,
+	QueryBuilderHistogramChartProps,
+	QueryBuilderLineChartProps,
+	QueryBuilderPieChartProps,
+	RechartsSyncProps,
+	ServiceChartProps,
+	SimpleChartProps,
+	ThroughputAreaChartProps,
+} from "./_shared/chart-types"
 export * from "./_shared/sample-data"
 
 // Bar Charts

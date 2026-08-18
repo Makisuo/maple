@@ -1,7 +1,7 @@
 import { memo, useId, useMemo } from "react"
 import { Area, AreaChart } from "recharts"
 
-import type { BaseChartProps } from "../_shared/chart-types"
+import type { ServiceChartProps } from "../_shared/chart-types"
 import { errorRateTimeSeriesData } from "../_shared/sample-data"
 import { VerticalGradient } from "../_shared/svg-patterns"
 import { useIncompleteSegments, extendConfigWithIncomplete } from "../_shared/use-incomplete-segments"
@@ -34,7 +34,7 @@ export const ErrorRateAreaChart = memo(function ErrorRateAreaChart({
 	syncId,
 	overlay,
 	yAxisWidth,
-}: BaseChartProps) {
+}: ServiceChartProps) {
 	const id = useId()
 	const gradientId = `errorRateGradient-${id.replace(/:/g, "")}`
 	const fadedGradientId = `errorRateGradientFaded-${id.replace(/:/g, "")}`

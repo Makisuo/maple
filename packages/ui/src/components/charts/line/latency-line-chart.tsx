@@ -1,7 +1,7 @@
 import { memo, useMemo } from "react"
 import { Line, LineChart } from "recharts"
 
-import type { BaseChartProps } from "../_shared/chart-types"
+import type { ServiceChartProps } from "../_shared/chart-types"
 import { latencyTimeSeriesData } from "../_shared/sample-data"
 import { useIncompleteSegments, extendConfigWithIncomplete } from "../_shared/use-incomplete-segments"
 import {
@@ -35,7 +35,7 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 	syncId,
 	overlay,
 	yAxisWidth,
-}: BaseChartProps) {
+}: ServiceChartProps) {
 	const chartData = data ?? latencyTimeSeriesData
 
 	const {

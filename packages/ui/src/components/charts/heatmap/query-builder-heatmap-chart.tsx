@@ -1,16 +1,40 @@
+import { cell, defineChart } from "@tanstack/charts"
+import type { ChartPoint } from "@tanstack/charts"
+import { scaleBand } from "@tanstack/charts-scales/band"
+import { tooltip } from "@tanstack/charts/tooltip"
 import * as React from "react"
 
-import type { HeatmapColorScale } from "@maple/domain/http"
-import type { BaseChartProps } from "../_shared/chart-types"
-import { formatNumber, formatValueByUnit } from "../../../lib/format"
+import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 import { useContainerSize } from "../../../hooks/use-container-size"
+import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
-import { ChartFloatingTooltip } from "../../ui/chart"
+import { createSequentialColorScale } from "../../plot/color-scale"
+import { PlotFrame } from "../../plot/plot-frame"
+import { usePlotColors, type PlotColorToken } from "../../plot/theme"
+import type { QueryBuilderHeatmapChartProps } from "../_shared/chart-types"
 
+/** One row of the long-form shape the chart draws from. */
 interface HeatmapPoint {
 	x: string
 	y: string
 	value: number
+}
+
+/**
+ * One slot in the grid — a cell with a value, or a hole with none.
+ *
+ * Holes are DATA rather than absences, and they share this type with the
+ * painted cells on purpose. A `{x,y}` pair with no row emits no rect, so
+ * `focus: "nearest"` would snap the pointer to a neighbour and the tooltip
+ * would confidently report someone else's count. Giving a hole its own datum
+ * makes it focusable, so it can say "no data" — and keeping ONE datum type
+ * across both marks means the tooltip body narrows on `value` instead of
+ * casting a union apart.
+ */
+interface HeatmapSlot {
+	x: string
+	y: string
+	value: number | null
 }
 
 function asFiniteNumber(value: unknown): number {
@@ -51,59 +75,87 @@ function deriveHeatmapPoints(rows: ReadonlyArray<Record<string, unknown>>): Heat
 }
 
 /**
- * Five-stop sequential palettes. The stops themselves live in `tokens.css` as
+ * Five-stop sequential palettes. The stops live in `tokens.css` as
  * `--heatmap-<name>-0..4` so they can differ per theme — each ramp is anchored
  * just above the local card surface and climbs to a saturated hot end, which
- * means the whole ramp inverts between light and dark. Interpolation happens via
- * CSS `color-mix(in oklch, …)`, so a value at t=0.4 actually *looks* 40% of the
- * way along, not just numerically.
+ * means the whole ramp inverts between light and dark.
+ *
+ * They are RESOLVED to `oklch()` literals through `usePlotColors` before they
+ * reach the chart definition. The old grid mixed flanking stops with CSS
+ * `color-mix(in oklch, …)` and let the browser do the interpolation; the canvas
+ * renderer takes literal colours and cannot read a `var()`, so both the mixing
+ * (`createSequentialColorScale`) and the resolution (`usePlotColors`) now happen
+ * in JS. `mixOklch` in `plot/color-scale.ts` reproduces `color-mix(in oklch, …)`
+ * numerically, so a value at t=0.4 still *looks* 40% of the way along.
+ *
+ * The literal beside each token is the fallback used when the document has no
+ * stylesheet behind it (SSR, jsdom); they are the dark-theme values.
  */
-const COLOR_SCALES: Record<HeatmapColorScale, readonly string[]> = {
-	amber: [
-		"var(--heatmap-amber-0)",
-		"var(--heatmap-amber-1)",
-		"var(--heatmap-amber-2)",
-		"var(--heatmap-amber-3)",
-		"var(--heatmap-amber-4)",
-	],
-	blues: [
-		"var(--heatmap-blues-0)",
-		"var(--heatmap-blues-1)",
-		"var(--heatmap-blues-2)",
-		"var(--heatmap-blues-3)",
-		"var(--heatmap-blues-4)",
-	],
-	reds: [
-		"var(--heatmap-reds-0)",
-		"var(--heatmap-reds-1)",
-		"var(--heatmap-reds-2)",
-		"var(--heatmap-reds-3)",
-		"var(--heatmap-reds-4)",
-	],
-	viridis: [
-		"var(--heatmap-viridis-0)",
-		"var(--heatmap-viridis-1)",
-		"var(--heatmap-viridis-2)",
-		"var(--heatmap-viridis-3)",
-		"var(--heatmap-viridis-4)",
-	],
-	magma: [
-		"var(--heatmap-magma-0)",
-		"var(--heatmap-magma-1)",
-		"var(--heatmap-magma-2)",
-		"var(--heatmap-magma-3)",
-		"var(--heatmap-magma-4)",
-	],
-	cividis: [
-		"var(--heatmap-cividis-0)",
-		"var(--heatmap-cividis-1)",
-		"var(--heatmap-cividis-2)",
-		"var(--heatmap-cividis-3)",
-		"var(--heatmap-cividis-4)",
-	],
-} satisfies Record<HeatmapColorScale, readonly string[]>
+const RAMP_STOP_TOKENS = {
+	amber0: ["--heatmap-amber-0", "oklch(0.32 0.035 70)"],
+	amber1: ["--heatmap-amber-1", "oklch(0.45 0.075 65)"],
+	amber2: ["--heatmap-amber-2", "oklch(0.58 0.115 60)"],
+	amber3: ["--heatmap-amber-3", "oklch(0.71 0.15 57)"],
+	amber4: ["--heatmap-amber-4", "oklch(0.85 0.13 78)"],
+	blues0: ["--heatmap-blues-0", "oklch(0.32 0.04 255)"],
+	blues1: ["--heatmap-blues-1", "oklch(0.45 0.08 252)"],
+	blues2: ["--heatmap-blues-2", "oklch(0.58 0.12 250)"],
+	blues3: ["--heatmap-blues-3", "oklch(0.71 0.15 248)"],
+	blues4: ["--heatmap-blues-4", "oklch(0.85 0.11 238)"],
+	reds0: ["--heatmap-reds-0", "oklch(0.32 0.045 28)"],
+	reds1: ["--heatmap-reds-1", "oklch(0.45 0.09 28)"],
+	reds2: ["--heatmap-reds-2", "oklch(0.58 0.14 28)"],
+	reds3: ["--heatmap-reds-3", "oklch(0.71 0.185 30)"],
+	reds4: ["--heatmap-reds-4", "oklch(0.85 0.135 45)"],
+	viridis0: ["--heatmap-viridis-0", "oklch(0.32 0.055 285)"],
+	viridis1: ["--heatmap-viridis-1", "oklch(0.45 0.095 265)"],
+	viridis2: ["--heatmap-viridis-2", "oklch(0.58 0.09 200)"],
+	viridis3: ["--heatmap-viridis-3", "oklch(0.71 0.135 150)"],
+	viridis4: ["--heatmap-viridis-4", "oklch(0.85 0.17 112)"],
+	magma0: ["--heatmap-magma-0", "oklch(0.32 0.06 300)"],
+	magma1: ["--heatmap-magma-1", "oklch(0.45 0.12 312)"],
+	magma2: ["--heatmap-magma-2", "oklch(0.58 0.175 350)"],
+	magma3: ["--heatmap-magma-3", "oklch(0.71 0.16 35)"],
+	magma4: ["--heatmap-magma-4", "oklch(0.85 0.115 80)"],
+	cividis0: ["--heatmap-cividis-0", "oklch(0.32 0.045 262)"],
+	cividis1: ["--heatmap-cividis-1", "oklch(0.45 0.055 250)"],
+	cividis2: ["--heatmap-cividis-2", "oklch(0.58 0.03 130)"],
+	cividis3: ["--heatmap-cividis-3", "oklch(0.71 0.075 95)"],
+	cividis4: ["--heatmap-cividis-4", "oklch(0.85 0.13 95)"],
+} as const satisfies Record<`${HeatmapColorScale}${0 | 1 | 2 | 3 | 4}`, readonly [PlotColorToken, string]>
+
+type RampColors = Readonly<Record<keyof typeof RAMP_STOP_TOKENS, string>>
+
+const RAMP_INDICES = [0, 1, 2, 3, 4] as const
 
 const DEFAULT_COLOR_SCALE: HeatmapColorScale = "amber"
+
+/**
+ * The grid's chrome. Module scope, like every token map handed to
+ * `usePlotColors`: the hook memoizes on the object's identity, so a fresh
+ * literal per render would re-read computed style on every frame.
+ */
+const HEATMAP_CHROME_TOKENS = {
+	foreground: ["--foreground", "#fafafa"],
+	/** The recessed surface a hole is a hole *in*. */
+	grout: ["--heatmap-grout", "oklch(0.175 0.008 62)"],
+} as const satisfies Record<string, readonly [PlotColorToken, string]>
+
+/**
+ * Whether a persisted `colorScale` still names a ramp we ship.
+ *
+ * A runtime guard, not a type-level one: a dashboard saved months ago can carry
+ * a scale that has since been renamed, and the old lookup's
+ * `COLOR_SCALES[…] ?? COLOR_SCALES.amber` existed for exactly that. Derived from
+ * the token table itself so the two cannot drift.
+ */
+function isKnownColorScale(value: string): value is HeatmapColorScale {
+	return `${value}0` in RAMP_STOP_TOKENS
+}
+
+function rampStopsFor(scale: HeatmapColorScale, colors: RampColors): readonly string[] {
+	return RAMP_INDICES.map((index) => colors[`${scale}${index}`])
+}
 
 function clamp(value: number, lo: number, hi: number): number {
 	if (!Number.isFinite(value)) return lo
@@ -115,43 +167,52 @@ function clamp01(value: number): number {
 }
 
 /**
- * Compose a CSS color at parametric position t (0..1) along a palette by
- * mixing the two flanking stops in OKLCH. Falls back to endpoints at the
- * boundaries to avoid `color-mix` rounding shenanigans.
+ * The floor `createSequentialColorScale` pins a log domain to — `log(0)` is
+ * `-Infinity`, so a count-valued scale cannot start below 1.
+ *
+ * Duplicated from `plot/color-scale.ts`, which does not export it. The legend
+ * below has to invert the very scale the cells are painted with, so the two
+ * floors have to be the same number; see the report note about exporting it.
  */
-function colorForT(t: number, palette: readonly string[]): string {
-	const clamped = clamp01(t)
-	if (clamped <= 0) return palette[0]
-	if (clamped >= 1) return palette[palette.length - 1]
-	const segments = palette.length - 1
-	const idx = clamped * segments
-	const lo = Math.floor(idx)
-	const hi = Math.min(palette.length - 1, lo + 1)
-	const local = idx - lo
-	const loPct = ((1 - local) * 100).toFixed(2)
-	const hiPct = (local * 100).toFixed(2)
-	return `color-mix(in oklch, ${palette[lo]} ${loPct}%, ${palette[hi]} ${hiPct}%)`
-}
+const LOG_COLOR_DOMAIN_FLOOR = 1
 
-function normalize(value: number, min: number, span: number, scaleType: "linear" | "log"): number {
-	if (span <= 0) return 0
-	if (scaleType === "log") {
-		const denom = Math.log1p(span)
-		return denom > 0 ? Math.log1p(Math.max(0, value - min)) / denom : 0
-	}
-	return (value - min) / span
+/** The `[lo, hi]` the colour scale actually walks, log floor applied. */
+function rampDomain(domain: readonly [number, number], scaleType: HeatmapScaleType): [number, number] {
+	if (scaleType !== "log") return [domain[0], domain[1]]
+	const lo = Math.max(domain[0], LOG_COLOR_DOMAIN_FLOOR)
+	return [lo, Math.max(domain[1], lo)]
 }
 
 /**
- * Inverse of `normalize` — the data value that lands at parametric position t.
+ * The data value that lands at parametric position t along the ramp.
+ *
  * The legend needs this: with a log scale the midpoint *swatch* is not the
- * midpoint *value*, and labelling it as though it were is what made the old
- * gradient bar lie about log-scaled grids.
+ * midpoint *value*, and labelling it as though it were is what made an earlier
+ * gradient bar lie about log-scaled grids. It mirrors d3's own transforms —
+ * `scaleSequential` is linear in the value, `scaleSequentialLog` is linear in
+ * `log(value)` — so a swatch's label and its colour describe the same number.
  */
-function valueAtT(t: number, min: number, span: number, scaleType: "linear" | "log"): number {
-	if (span <= 0) return min
-	if (scaleType === "log") return min + Math.expm1(t * Math.log1p(span))
-	return min + t * span
+function valueAtRampPosition(
+	t: number,
+	domain: readonly [number, number],
+	scaleType: HeatmapScaleType,
+): number {
+	const [lo, hi] = rampDomain(domain, scaleType)
+	if (hi <= lo) return lo
+	if (scaleType === "log") return lo * (hi / lo) ** clamp01(t)
+	return lo + clamp01(t) * (hi - lo)
+}
+
+/** Inverse of `valueAtRampPosition` — where a value sits along the ramp, 0..1. */
+function rampPositionOf(
+	value: number,
+	domain: readonly [number, number],
+	scaleType: HeatmapScaleType,
+): number {
+	const [lo, hi] = rampDomain(domain, scaleType)
+	if (hi <= lo) return 0
+	if (scaleType === "log") return clamp01(Math.log(Math.max(value, lo) / lo) / Math.log(hi / lo))
+	return clamp01((value - lo) / (hi - lo))
 }
 
 function formatScalar(value: number, unit?: string): string {
@@ -161,7 +222,7 @@ function formatScalar(value: number, unit?: string): string {
 /**
  * Legend ticks between the endpoints are interpolated, so they land on values
  * the data never contains — under a log scale the midpoint of 15..103 is
- * 23.434…, which is noise dressed up as precision. Snap to the data's own
+ * 39.3…, which is noise dressed up as precision. Snap to the data's own
  * granularity: integers when the range is integral, three significant figures
  * otherwise.
  */
@@ -186,36 +247,138 @@ function shortenYLabel(raw: string, allIso: boolean): string {
 		.slice(0, 5)
 }
 
-/**
- * Pick x-axis tick indices using a fixed STRIDE guaranteed to give each
- * label `minLabelPx` of horizontal room. First and last index are always
- * included so the axis range is clearly bounded; intermediate picks step by
- * `stride` from index 0. A trailing pick is dropped if it would land within
- * one stride of `count - 1` (which we always append).
- */
-function pickXTicks(count: number, cellStridePx: number, minLabelPx: number): number[] {
-	if (count <= 0) return []
-	if (count === 1) return [0]
-	const stride = Math.max(1, Math.ceil(minLabelPx / cellStridePx))
-	// Endpoints only — even one intermediate would crowd the axis.
-	if (stride * 2 > count - 1) return [0, count - 1]
-	const out: number[] = [0]
-	for (let i = stride; i < count - stride; i += stride) out.push(i)
-	out.push(count - 1)
-	return out
+// ──────────────────────────────────────────────────────────────────────────────
+// Model
+// ──────────────────────────────────────────────────────────────────────────────
+
+interface HeatmapModel {
+	xDomain: string[]
+	yDomain: string[]
+	/** Slots carrying a value — what the coloured mark draws. */
+	cells: HeatmapSlot[]
+	/** Slots with no row behind them — the focusable holes. */
+	holes: HeatmapSlot[]
+	/** `[min, max]` over the DRAWN cells. */
+	domain: [number, number]
+	/** The real spread, before the degenerate bump below. Drives the legend. */
+	span: number
+	hiddenX: number
+	hiddenY: number
+}
+
+const EMPTY_MODEL: HeatmapModel = {
+	xDomain: [],
+	yDomain: [],
+	cells: [],
+	holes: [],
+	domain: [0, 1],
+	span: 0,
+	hiddenX: 0,
+	hiddenY: 0,
+}
+
+function buildModel(points: readonly HeatmapPoint[]): HeatmapModel {
+	if (points.length === 0) return EMPTY_MODEL
+
+	const xs = Array.from(new Set(points.map((p) => p.x)))
+	const ys = Array.from(new Set(points.map((p) => p.y)))
+
+	// Axis entries where every cell is absent or zero carry no information, but
+	// they still claim a full row/column — on a service grid that is routinely
+	// most of the plot, and it reads as a broken chart rather than a quiet one.
+	// Drop them, and report the count rather than hiding data silently.
+	const liveX = new Set<string>()
+	const liveY = new Set<string>()
+	for (const p of points) {
+		if (p.value !== 0) {
+			liveX.add(p.x)
+			liveY.add(p.y)
+		}
+	}
+
+	const keptX = xs.filter((x) => liveX.has(x))
+	const keptY = ys.filter((y) => liveY.has(y))
+
+	// An all-zero result is a real answer ("nothing happened"). Pruning it to
+	// nothing would turn that into an empty state, so keep the axes intact.
+	const pruned = keptX.length > 0 && keptY.length > 0
+	const xDomain = pruned ? keptX : xs
+	// Band `y` maps `domain[0]` to the TOP (`configured-scale.js` normalizes a
+	// categorical y range to ascending), and the CSS grid this replaced drew
+	// `yValues` top-down after the same reverse. Either way the LAST bucket a
+	// query reports — `300ms+` — belongs above `0-100ms`.
+	const yDomain = [...(pruned ? keptY : ys)].reverse()
+
+	/**
+	 * The composite slot key. The separator is an explicit `\u0000` rather than a
+	 * space because band categories are arbitrary strings and a space is a
+	 * plausible one — `"GET /a" + "v2"` and `"GET" + "/a v2"` must not collide.
+	 * Written as an escape, never as a literal control byte: a raw NUL makes git
+	 * classify the whole file as binary, which silently disables diffs on it.
+	 */
+	const slotKey = (x: string, y: string) => `${x}\u0000${y}`
+
+	const lookup = new Map<string, number>()
+	for (const point of points) {
+		lookup.set(slotKey(point.x, point.y), point.value)
+	}
+
+	// Pruning the DOMAIN is only half of it — the slots have to go too. A datum
+	// whose band value is not in the pinned domain does not disappear: the scale
+	// maps it to nothing, the mark emits `<rect x="null">`, and the browser
+	// resolves that to x=0, stacking the pruned column on top of the first
+	// visible one. Walking the surviving cross-product filters both at once, and
+	// hands back the holes for free.
+	const cells: HeatmapSlot[] = []
+	const holes: HeatmapSlot[] = []
+	let min = Number.POSITIVE_INFINITY
+	let max = Number.NEGATIVE_INFINITY
+	for (const x of xDomain) {
+		for (const y of yDomain) {
+			const value = lookup.get(slotKey(x, y))
+			if (value === undefined) {
+				holes.push({ x, y, value: null })
+				continue
+			}
+			cells.push({ x, y, value })
+			if (value < min) min = value
+			if (value > max) max = value
+		}
+	}
+
+	if (!Number.isFinite(min) || !Number.isFinite(max)) {
+		min = 0
+		max = 1
+	}
+	const span = max - min
+	// A single-valued grid has no ramp to walk. Widening the domain by one keeps
+	// every cell on the bottom stop, which is what the old `span <= 0 → t = 0`
+	// normalize painted; a degenerate d3 domain would instead park them all at
+	// the ramp's midpoint.
+	const domain: [number, number] = span > 0 ? [min, max] : [min, min + 1]
+
+	return {
+		xDomain,
+		yDomain,
+		cells,
+		holes,
+		domain,
+		span,
+		hiddenX: pruned ? xs.length - keptX.length : 0,
+		hiddenY: pruned ? ys.length - keptY.length : 0,
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Geometry
+//
+// The CSS grid this replaced solved cell size, seam width and corner radius from
+// the container in two passes (seam width depends on cell size, which depends on
+// seam width). A band scale takes over the hard part — it divides the plot and
+// positions every cell — but its padding is a FRACTION of the step, so the
+// pixel-denominated parts of that solver still have to be expressed here.
 // ──────────────────────────────────────────────────────────────────────────────
 
-const X_AXIS_H = 20
-const LEGEND_HEIGHT = 24
-const GAP_GRID_TO_LEGEND = 8
-const PLOT_PAD_X = 6
-const PLOT_PAD_TOP = 2
-const PLOT_PAD_BOTTOM = 4
-
-const MIN_CELL = 6
 // Upper bounds keep cells from ballooning on huge cards with tiny grids.
 // Wider than tall — matches the grafana / signoz time-bucket heatmap shape.
 const MAX_CELL_W = 72
@@ -228,321 +391,383 @@ const CELL_GAP_WIDE = 2
 const CELL_GAP_TIGHT = 1
 const TIGHT_CELL_THRESHOLD = 14
 
-const LABEL_FONT_PX = 11
-const LEGEND_FONT_PX = 10
-const LABEL_CHAR_PX = 6.3 // tabular-nums approximation at 11px
-const LABEL_GUTTER_PX = 6
-const Y_LABEL_MIN_PX = 36
-const Y_LABEL_MAX_PX = 96
+/**
+ * What the plot rect is, measured from the card.
+ *
+ * Approximate, and unavoidably so: the true rect is resolved by the scene and
+ * published from INSIDE `PlotFrame` (`usePlotRect`), which this component is the
+ * parent of — reading it back would be a render→state→render loop on every
+ * reflow. These two numbers are the room the axes, legend and footnote take, and
+ * being a few pixels out only moves a capped cell from 72px to 68px.
+ */
+const Y_AXIS_ALLOWANCE_PX = 64
+const BELOW_PLOT_ALLOWANCE_PX = 64
 
-// Minimum vertical room each y-label needs to avoid stacking neighbours.
-const Y_LABEL_MIN_VERTICAL_PX = 16
+/** The padding fractions before anything has been measured. */
+const UNMEASURED_PADDING_INNER = 0.05
 
-const LEGEND_STEPS = 5
-const LEGEND_BAR_H = 8
-const TOOLTIP_OFFSET = 6
-// Only reserved when something was actually pruned.
-const FOOTNOTE_H = 13
-
-const TRACK_BG = "var(--heatmap-grout)"
-// The bands sit *over* saturated cells, so a token 5% wash vanishes against
-// them. 10% registers as a crosshair without washing the colours out.
-const CROSSHAIR_BG = "color-mix(in oklch, var(--foreground) 10%, transparent)"
-
-interface HoverState {
-	xIdx: number
-	yIdx: number
-	/** False while fading out after pointer-leave — keeps the last position so
-	 *  the crosshair dissolves in place instead of snapping to a corner. */
-	active: boolean
-}
-
-interface LayoutResult {
-	cellW: number
-	cellH: number
-	gap: number
-	radius: number
-	gridW: number
-	gridH: number
-	yLabelW: number
-	xTickIndices: number[]
-	yTickIndices: number[]
-	gridOffsetX: number
-}
-
-function layoutForGap(
-	containerW: number,
-	containerH: number,
-	xValues: string[],
-	yValues: string[],
-	allYIso: boolean,
-	gap: number,
-	footnoteH: number,
-): LayoutResult | null {
-	const longestYChars = yValues.reduce((m, v) => Math.max(m, shortenYLabel(v, allYIso).length), 0)
-	const yLabelW = clamp(longestYChars * LABEL_CHAR_PX + 10, Y_LABEL_MIN_PX, Y_LABEL_MAX_PX)
-
-	// The grid sits inside a track whose padding equals the seam width, so the
-	// outer cells get the same breathing room as the inner ones.
-	const availW = containerW - yLabelW - PLOT_PAD_X * 2 - gap * 2
-	if (availW <= 0) return null
-
-	const naturalCellW = (availW - (xValues.length - 1) * gap) / xValues.length
-	const cellW = clamp(Math.floor(naturalCellW), MIN_CELL, MAX_CELL_W)
-
-	const availH =
-		containerH -
-		X_AXIS_H -
-		LEGEND_HEIGHT -
-		GAP_GRID_TO_LEGEND -
-		PLOT_PAD_TOP -
-		PLOT_PAD_BOTTOM -
-		gap * 2 -
-		footnoteH
-	if (availH <= 0) return null
-
-	const naturalCellH = (availH - (yValues.length - 1) * gap) / yValues.length
-	const cellH = clamp(Math.floor(naturalCellH), MIN_CELL, MAX_CELL_H)
-
-	const gridW = xValues.length * cellW + (xValues.length - 1) * gap
-	const gridH = yValues.length * cellH + (yValues.length - 1) * gap
-
-	// Center the grid horizontally when the cell width is capped.
-	const gridOffsetX = Math.max(0, Math.floor((availW - gridW) / 2))
-
-	// X-tick density — guaranteed non-overlap via stride-based picking.
-	const longestXChars = xValues.reduce((m, v) => Math.max(m, v.length), 0)
-	const longestXPx = longestXChars * LABEL_CHAR_PX
-	const xTickIndices = pickXTicks(xValues.length, cellW + gap, longestXPx + LABEL_GUTTER_PX)
-
-	// Y-tick density. Aim for >= Y_LABEL_MIN_VERTICAL_PX between visible labels.
-	const yStride = cellH + gap
-	const yTickStep = Math.max(1, Math.ceil(Y_LABEL_MIN_VERTICAL_PX / yStride))
-	const yTickIndices: number[] = []
-	for (let i = 0; i < yValues.length; i += yTickStep) yTickIndices.push(i)
-	// Always label the last row, but drop the previous pick if the two would
-	// land within one step of each other (they'd visually collide).
-	const lastPicked = yTickIndices[yTickIndices.length - 1]
-	if (lastPicked !== yValues.length - 1) {
-		if (yValues.length - 1 - lastPicked < yTickStep) yTickIndices.pop()
-		yTickIndices.push(yValues.length - 1)
-	}
-
-	return {
-		cellW,
-		cellH,
-		gap,
-		radius: cellW >= 10 && cellH >= 10 ? 2 : 1,
-		gridW,
-		gridH,
-		yLabelW,
-		xTickIndices,
-		yTickIndices,
-		gridOffsetX,
-	}
+interface BandGeometry {
+	paddingInner: number
+	paddingOuter: number
+	/** The resolved cell size in pixels, or `null` while unmeasured. */
+	cellPx: number | null
 }
 
 /**
- * Seam width depends on cell size, which depends on seam width — so solve it in
- * two passes: lay out with the wide seam, and if that lands on small cells, redo
- * with the tight one (which also buys those cells a pixel or two back).
+ * Solve a band axis' padding so the seam lands on `gapPx` and the cell never
+ * exceeds `maxCellPx`.
+ *
+ * d3's band math is `step = length / (count - paddingInner + 2 * paddingOuter)`
+ * and `bandwidth = step * (1 - paddingInner)`, so with no outer padding a seam
+ * of `gapPx` is `paddingInner = gapPx * count / (length + gapPx)`, and capping
+ * the bandwidth is then a matter of buying back the surplus as outer padding —
+ * which, with `align(0.5)`, centres the grid instead of stretching it. That
+ * centring is the same thing the old solver's `gridOffsetX` did.
  */
-function computeLayout(
-	containerW: number,
-	containerH: number,
-	xValues: string[],
-	yValues: string[],
-	allYIso: boolean,
-	footnoteH: number,
-): LayoutResult | null {
-	if (containerW <= 0 || containerH <= 0) return null
-	if (xValues.length === 0 || yValues.length === 0) return null
+function solveBandGeometry(length: number, count: number, gapPx: number, maxCellPx: number): BandGeometry {
+	if (!(length > 0) || count <= 0) {
+		return { paddingInner: UNMEASURED_PADDING_INNER, paddingOuter: 0, cellPx: null }
+	}
+	const spread = clamp01((gapPx * count) / (length + gapPx))
+	const uncapped = (length * (1 - spread)) / Math.max(1, count - spread)
+	if (uncapped <= maxCellPx) return { paddingInner: spread, paddingOuter: 0, cellPx: uncapped }
 
-	const wide = layoutForGap(containerW, containerH, xValues, yValues, allYIso, CELL_GAP_WIDE, footnoteH)
-	if (!wide) return null
-	if (wide.cellW >= TIGHT_CELL_THRESHOLD && wide.cellH >= TIGHT_CELL_THRESHOLD) return wide
-
-	return layoutForGap(containerW, containerH, xValues, yValues, allYIso, CELL_GAP_TIGHT, footnoteH) ?? wide
+	// Capped, so the seam has to be re-solved against the cell size it will
+	// actually have: `step = cell + gap`, hence `paddingInner = gap / (cell + gap)`.
+	// Solving it against the uncapped step instead leaves a 0.6px hairline
+	// between 72px cells, which does not read as grout at all.
+	const paddingInner = clamp01(gapPx / (maxCellPx + gapPx))
+	const paddingOuter = Math.max(0, ((length * (1 - paddingInner)) / maxCellPx - count + paddingInner) / 2)
+	return { paddingInner, paddingOuter, cellPx: maxCellPx }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Cell grid. Memoized and completely hover-unaware: focus is drawn by overlays
-// on top, so sweeping the pointer across a 500-cell grid repaints three small
-// divs instead of restyling every cell.
-// ──────────────────────────────────────────────────────────────────────────────
-
-interface CellGridProps {
-	xValues: string[]
-	yValues: string[]
-	lookup: Map<string, number>
-	min: number
-	span: number
-	scaleType: "linear" | "log"
-	palette: readonly string[]
-	cellW: number
-	cellH: number
-	gap: number
+interface HeatmapGeometry {
+	x: BandGeometry
+	y: BandGeometry
 	radius: number
 }
 
-const CellGrid = React.memo(function CellGrid({
-	xValues,
-	yValues,
-	lookup,
-	min,
-	span,
-	scaleType,
-	palette,
-	cellW,
-	cellH,
-	gap,
-	radius,
-}: CellGridProps) {
+function solveGeometry(
+	containerW: number,
+	containerH: number,
+	columns: number,
+	rows: number,
+): HeatmapGeometry {
+	const plotW = containerW - Y_AXIS_ALLOWANCE_PX
+	const plotH = containerH - BELOW_PLOT_ALLOWANCE_PX
+
+	// The seam width depends on the cell size, which depends on the seam width.
+	// The old solver ran the whole layout twice to break that; here the first
+	// pass only needs a cell size, so it is one division rather than one layout.
+	const roughW = plotW > 0 && columns > 0 ? Math.min(plotW / columns, MAX_CELL_W) : MAX_CELL_W
+	const roughH = plotH > 0 && rows > 0 ? Math.min(plotH / rows, MAX_CELL_H) : MAX_CELL_H
+	const gap =
+		roughW >= TIGHT_CELL_THRESHOLD && roughH >= TIGHT_CELL_THRESHOLD ? CELL_GAP_WIDE : CELL_GAP_TIGHT
+
+	const x = solveBandGeometry(plotW, columns, gap, MAX_CELL_W)
+	const y = solveBandGeometry(plotH, rows, gap, MAX_CELL_H)
+
+	return {
+		x,
+		y,
+		radius: (x.cellPx ?? MAX_CELL_W) >= 10 && (y.cellPx ?? MAX_CELL_H) >= 10 ? 2 : 1,
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Legend
+// ──────────────────────────────────────────────────────────────────────────────
+
+const LEGEND_STEPS = 5
+const LEGEND_BAR_H = 8
+const LEGEND_FONT_PX = 10
+
+interface HeatmapLegendProps {
+	domain: readonly [number, number]
+	span: number
+	scaleType: HeatmapScaleType
+	colorAt: (value: number) => string
+	unit?: string
+	/** The hovered cell's value, or `null` — drives the position marker. */
+	hovered: number | null
+}
+
+/**
+ * Discrete steps rather than a gradient bar.
+ *
+ * A gradient implies a linear position→value mapping, which is a lie under a log
+ * scale; five swatches plus values read back through `valueAtRampPosition` stay
+ * honest under both. This is also why the package's own `colorGradientLegend` is
+ * not used: it walks the domain LINEARLY and samples the ramp at each value, so
+ * under `scaleType="log"` it would show the log-warped ramp against a linear
+ * value axis, and it offers no hook to supply tick positions.
+ *
+ * DOM rather than a mark, in `PlotFrame`'s `legend` slot, for the same reason
+ * every other chart's legend is: it is chrome around the plot, not part of it.
+ */
+function HeatmapLegend({ domain, span, scaleType, colorAt, unit, hovered }: HeatmapLegendProps) {
+	const ticks: ReadonlyArray<{ t: number; anchor: "start" | "middle" | "end" }> =
+		span <= 0
+			? [{ t: 0, anchor: "start" }]
+			: [
+					{ t: 0, anchor: "start" },
+					{ t: 0.5, anchor: "middle" },
+					{ t: 1, anchor: "end" },
+				]
+
 	return (
-		<div
-			className="grid"
-			style={{
-				gridTemplateColumns: `repeat(${xValues.length}, ${cellW}px)`,
-				gridTemplateRows: `repeat(${yValues.length}, ${cellH}px)`,
-				gap: `${gap}px`,
-				// Hit-testing is arithmetic on the wrapper, so the cells never need
-				// to be pointer targets themselves.
-				pointerEvents: "none",
-			}}
-		>
-			{yValues.flatMap((y) =>
-				xValues.map((x) => {
-					const key = `${x}::${y}`
-					const value = lookup.get(key)
-					return (
-						<div
-							key={key}
-							style={{
-								// Missing cells stay transparent so the track reads through
-								// them — a hole, visibly different from a min-value cell.
-								backgroundColor:
-									value === undefined
-										? undefined
-										: colorForT(normalize(value, min, span, scaleType), palette),
-								borderRadius: radius,
-							}}
-						/>
-					)
-				}),
-			)}
+		<div className="pt-2">
+			<div className="relative flex gap-px" style={{ height: LEGEND_BAR_H }}>
+				{Array.from({ length: LEGEND_STEPS }).map((_, index) => (
+					<div
+						key={index}
+						className="flex-1 rounded-[2px]"
+						style={{
+							backgroundColor: colorAt(
+								valueAtRampPosition((index + 0.5) / LEGEND_STEPS, domain, scaleType),
+							),
+						}}
+					/>
+				))}
+				{hovered !== null && (
+					<div
+						aria-hidden
+						className="pointer-events-none absolute"
+						style={{
+							left: `${rampPositionOf(hovered, domain, scaleType) * 100}%`,
+							top: -1,
+							width: 1,
+							height: LEGEND_BAR_H + 2,
+							background: "var(--foreground)",
+						}}
+					/>
+				)}
+			</div>
+			<div className="relative mt-1.5" style={{ height: 12 }}>
+				{ticks.map(({ t, anchor }) => (
+					<div
+						key={t}
+						className="absolute tabular-nums text-muted-foreground"
+						style={{
+							left: `${t * 100}%`,
+							transform:
+								anchor === "start"
+									? "translateX(0)"
+									: anchor === "end"
+										? "translateX(-100%)"
+										: "translateX(-50%)",
+							fontSize: LEGEND_FONT_PX,
+							lineHeight: 1,
+						}}
+					>
+						{formatScalar(
+							roundTick(valueAtRampPosition(t, domain, scaleType), domain[0], span),
+							unit,
+						)}
+					</div>
+				))}
+			</div>
 		</div>
 	)
-})
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Chart
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** Everything not the hovered cell recedes to this. */
+const UNMATCHED_OPACITY = 0.28
 
 // No sample-data fallback: substituting fixtures for real rows made every
 // misconfigured or mis-fed chart draw a plausible-looking picture instead of an
 // empty one. Gallery thumbnails pass their sample rows in explicitly via `data`.
 const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
 
-export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatmap }: BaseChartProps) {
+const pluralize = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`
+
+export function QueryBuilderHeatmapChart({
+	data,
+	className,
+	tooltip: tooltipMode,
+	unit,
+	colorScale,
+	scaleType = "linear",
+}: QueryBuilderHeatmapChartProps) {
 	const source = Array.isArray(data) ? data : EMPTY_ROWS
 	const points = React.useMemo(() => deriveHeatmapPoints(source), [source])
+	const model = React.useMemo(() => buildModel(points), [points])
 
-	// Axis entries where every cell is absent or zero carry no information, but
-	// they still claim a full row/column — on a service grid that is routinely
-	// most of the plot, and it reads as a broken chart rather than a quiet one.
-	// Drop them, and report the count rather than hiding data silently.
-	const { xValues, yValues, hiddenX, hiddenY } = React.useMemo(() => {
-		const xs = Array.from(new Set(points.map((p) => p.x)))
-		const ys = Array.from(new Set(points.map((p) => p.y)))
+	const ramp = usePlotColors(RAMP_STOP_TOKENS)
+	const chrome = usePlotColors(HEATMAP_CHROME_TOKENS)
 
-		const liveX = new Set<string>()
-		const liveY = new Set<string>()
-		for (const p of points) {
-			if (p.value !== 0) {
-				liveX.add(p.x)
-				liveY.add(p.y)
-			}
-		}
+	const requested = colorScale ?? DEFAULT_COLOR_SCALE
+	const paletteKey = isKnownColorScale(requested) ? requested : DEFAULT_COLOR_SCALE
+	const stops = React.useMemo(() => rampStopsFor(paletteKey, ramp), [paletteKey, ramp])
 
-		const keptX = xs.filter((x) => liveX.has(x))
-		const keptY = ys.filter((y) => liveY.has(y))
-
-		// An all-zero result is a real answer ("nothing happened"). Pruning it to
-		// nothing would turn that into an empty state, so keep the axes intact.
-		if (keptX.length === 0 || keptY.length === 0) {
-			return { xValues: xs, yValues: ys.reverse(), hiddenX: 0, hiddenY: 0 }
-		}
-
-		return {
-			xValues: keptX,
-			yValues: keptY.reverse(),
-			hiddenX: xs.length - keptX.length,
-			hiddenY: ys.length - keptY.length,
-		}
-	}, [points])
-
-	const lookup = React.useMemo(() => {
-		const map = new Map<string, number>()
-		for (const point of points) {
-			map.set(`${point.x}::${point.y}`, point.value)
-		}
-		return map
-	}, [points])
-
-	const { min, span } = React.useMemo(() => {
-		if (points.length === 0) return { min: 0, span: 0 }
-		let lo = Number.POSITIVE_INFINITY
-		let hi = Number.NEGATIVE_INFINITY
-		for (const p of points) {
-			if (p.value < lo) lo = p.value
-			if (p.value > hi) hi = p.value
-		}
-		return { min: lo, span: hi - lo }
-	}, [points])
-
-	const scaleType = heatmap?.scaleType ?? "linear"
-	const palette = COLOR_SCALES[heatmap?.colorScale ?? DEFAULT_COLOR_SCALE] ?? COLOR_SCALES.amber
+	const colors = React.useMemo(
+		() => createSequentialColorScale({ stops, domain: model.domain, scaleType }),
+		[stops, model.domain, scaleType],
+	)
 
 	const containerRef = React.useRef<HTMLDivElement | null>(null)
 	const { width, height } = useContainerSize(containerRef)
 
-	const allYIso = React.useMemo(() => yValues.every((v) => ISO_RE.test(v)), [yValues])
-
-	const footnote =
-		hiddenX > 0 || hiddenY > 0
-			? [
-					hiddenX > 0 ? `${hiddenX} empty ${hiddenX === 1 ? "column" : "columns"}` : null,
-					hiddenY > 0 ? `${hiddenY} empty ${hiddenY === 1 ? "row" : "rows"}` : null,
-				]
-					.filter(Boolean)
-					.join(" · ") + " hidden"
-			: null
-
-	const layout = React.useMemo(
-		() =>
-			computeLayout(
-				Math.floor(width),
-				Math.floor(height),
-				xValues,
-				yValues,
-				allYIso,
-				footnote ? FOOTNOTE_H : 0,
-			),
-		[width, height, xValues, yValues, allYIso, footnote],
+	const geometry = React.useMemo(
+		() => solveGeometry(width, height, model.xDomain.length, model.yDomain.length),
+		[width, height, model.xDomain.length, model.yDomain.length],
 	)
 
-	const [hover, setHover] = React.useState<HoverState | null>(null)
+	const allYIso = React.useMemo(() => model.yDomain.every((v) => ISO_RE.test(v)), [model.yDomain])
 
-	// The tooltip anchors to the hovered cell's box (see `gridRef` below), so its
-	// own dimensions no longer need measuring — floating-ui flips and shifts it
-	// against the window.
-	const gridRef = React.useRef<HTMLDivElement | null>(null)
+	/**
+	 * The hovered cell's value, for the legend's position marker.
+	 *
+	 * React state on a hover path is only affordable because `onFocusChange` is
+	 * EDGE-triggered — it fires when the focused datum changes, not on every
+	 * pointer tick. The chart definition deliberately does not depend on it, so a
+	 * crossing re-renders the legend marker and rebuilds no scene.
+	 */
+	const [hovered, setHovered] = React.useState<number | null>(null)
+	const handleFocusChange = React.useCallback((point: ChartPoint<HeatmapSlot, string, string> | null) => {
+		setHovered(point?.datum.value ?? null)
+	}, [])
 
-	// Empty state — a quiet placeholder with a tiny suggestive grid.
-	if (xValues.length === 0 || yValues.length === 0) {
+	const definition = React.useMemo(() => {
+		const { radius } = geometry
+
+		/**
+		 * Grout is per-SLOT rather than one panel behind the plot, and that is a
+		 * package limit rather than a preference. Two routes to a full-plot track
+		 * were tried at 0.14.0 and neither works: a `rect` with
+		 * `x1: firstCategory, x2: lastCategory` spans centre-to-centre (a band
+		 * scale's `map()` returns the band CENTRE), so it paints as a slab offset
+		 * into the grid, and `inset` cannot correct it because the missing bleed is
+		 * half a band per axis while `inset` is one number for all four sides; a
+		 * `rect` with the extent channels omitted emits no node at all.
+		 *
+		 * What survives is the half that carries meaning: an empty slot reads as a
+		 * hole in a surface rather than as absence, and it is focusable.
+		 */
+		const holes = cell(model.holes, {
+			x: (slot: HeatmapSlot) => slot.x,
+			y: (slot: HeatmapSlot) => slot.y,
+			fill: chrome.grout,
+			radius,
+		})
+
+		const cells = cell(model.cells, {
+			x: (slot: HeatmapSlot) => slot.x,
+			y: (slot: HeatmapSlot) => slot.y,
+			// The ONLY per-datum colour route on a rect mark: `RectOptions.fill` is
+			// a flat `string`, not a `VisualChannel`, so colour has to travel
+			// through the `color` channel and the chart-level colour scale.
+			color: (slot: HeatmapSlot) => slot.value,
+			radius,
+			/**
+			 * The crosshair, as a state cascade instead of three positioned divs.
+			 *
+			 * `when` is a SELECTOR OBJECT, not a state name. `focus: "unmatched"` is
+			 * undocumented and is the one that matters — it resolves to
+			 * `!matches("group")`, i.e. every cell that is not the focused one —
+			 * while `"x"`/`"y"` compare the focused point's band values. States apply
+			 * in array order and merge, so this reads literally: dim the field,
+			 * restore the cross, ring the cell.
+			 *
+			 * The grid this replaced painted two additive 10%-foreground bands and
+			 * dimmed nothing. Subtraction reads better on a grid where every cell
+			 * already carries colour, and it needs no hit-test arithmetic at all.
+			 */
+			states: [
+				{ when: { focus: "unmatched" }, style: { opacity: UNMATCHED_OPACITY } },
+				{ when: { focus: "x" }, style: { opacity: 1 } },
+				{ when: { focus: "y" }, style: { opacity: 1 } },
+				{
+					when: { focus: "primary" },
+					// Ring only — geometry deliberately fixed. The old grid drew
+					// `0 0 0 1.5px var(--foreground)` OUTSIDE the cell, where an SVG
+					// stroke is centred on the edge, so ~0.75px of this one lands on the
+					// data. Growing the cell into its seam to win that back arrives as
+					// an instant 1px jump per side, which reads as the grid twitching
+					// rather than as feedback: `states[].transition` is applied BY the
+					// motion renderer, which is SVG-only and creates no track for `cell`
+					// at 0.14.0. `ChartRectStateStyle` also omits `strokeOpacity`, so
+					// softening the ring is not available either.
+					style: { stroke: chrome.foreground, strokeWidth: 1.5 },
+				},
+			],
+		})
+
+		return defineChart({
+			// Paint order is mark order: grout slots first, the data over them.
+			marks: [holes, cells],
+			x: {
+				// A pinned INSTANCE, not the bare factory: an inferred domain drops a
+				// fully-empty column, turning a hole into a missing axis slot.
+				scale: scaleBand<string>(model.xDomain, [0, 1])
+					.paddingInner(geometry.x.paddingInner)
+					.paddingOuter(geometry.x.paddingOuter)
+					.align(0.5),
+				grid: false,
+				axis: {
+					line: false,
+					// No `spacing`/`count` policy: a band scale has no `ticks()`, so
+					// every category is a candidate and the axis thins them by MEASURED
+					// label collision, keeping the ends first on a categorical x. That
+					// is what the old `pickXTicks` stride approximated with a
+					// characters-times-6.3px estimate.
+					ticks: { size: 0, padding: 6 },
+				},
+			},
+			y: {
+				scale: scaleBand<string>(model.yDomain, [0, 1])
+					.paddingInner(geometry.y.paddingInner)
+					.paddingOuter(geometry.y.paddingOuter)
+					.align(0.5),
+				grid: false,
+				axis: {
+					line: false,
+					ticks: {
+						size: 0,
+						padding: 6,
+						// An all-ISO y axis is a time axis wearing timestamps; only the
+						// clock time distinguishes the rows, and the date repeated down
+						// the axis costs the width every label has to fit in.
+						format: (value: string) => shortenYLabel(value, allYIso),
+					},
+				},
+			},
+			color: { scale: colors },
+			focus: "nearest",
+			focusRing: false,
+			// Suppression omits the tooltip from the spec rather than rendering an
+			// empty body: returning `null` from `renderTooltipBody` still paints the
+			// shell, so an empty card would follow the cursor.
+			tooltip:
+				tooltipMode === "hidden"
+					? false
+					: {
+							use: tooltip,
+							className: "maple-plot-tooltip",
+							// Anchored to the CELL, as the old floating tooltip was: the
+							// default "point" anchor resolves to the datum's plotted
+							// position, which for a cell is its centre.
+							anchor: "point",
+							placement: "top",
+							offset: 6,
+						},
+		})
+	}, [model, geometry, colors, chrome, allYIso, tooltipMode])
+
+	// Empty state — a quiet placeholder with a tiny suggestive grid. A chart over
+	// an empty domain is not worth mounting; it would draw axes for nothing.
+	if (model.xDomain.length === 0 || model.yDomain.length === 0) {
 		return (
 			<div ref={containerRef} className={cn("relative h-full w-full", className)}>
 				<div className="absolute inset-0 grid place-items-center">
 					<div className="flex flex-col items-center gap-2.5">
 						<div
-							className="grid grid-cols-8 gap-[2px] p-[3px]"
-							style={{ background: TRACK_BG, borderRadius: 4 }}
+							className="grid grid-cols-8 gap-[2px] rounded-[4px] p-[3px]"
+							style={{ background: chrome.grout }}
 						>
 							{Array.from({ length: 32 }).map((_, i) => (
 								<div
@@ -553,11 +778,11 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 										// heatmap rather than graph paper.
 										background:
 											i === 11
-												? "var(--heatmap-amber-1)"
+												? ramp.amber1
 												: i === 12
-													? "var(--heatmap-amber-3)"
+													? ramp.amber3
 													: i === 20
-														? "var(--heatmap-amber-2)"
+														? ramp.amber2
 														: "color-mix(in oklch, var(--foreground) 8%, transparent)",
 									}}
 								/>
@@ -570,356 +795,80 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 		)
 	}
 
-	if (!layout) {
-		return <div ref={containerRef} className={cn("relative h-full w-full", className)} />
-	}
-
-	const { cellW, cellH, gap, radius, gridW, gridH, yLabelW, xTickIndices, yTickIndices, gridOffsetX } =
-		layout
-
-	const xStride = cellW + gap
-	const yStride = cellH + gap
-	const colLeft = (xi: number) => xi * xStride
-	const rowTop = (yi: number) => yi * yStride
-	const colCenterX = (xi: number) => colLeft(xi) + cellW / 2
-	const rowCenterY = (yi: number) => rowTop(yi) + cellH / 2
-
-	const hoverValue =
-		hover && hover.active ? lookup.get(`${xValues[hover.xIdx]}::${yValues[hover.yIdx]}`) : undefined
-
-	// Legend: discrete steps rather than a gradient bar. A gradient implies a
-	// linear position→value mapping, which is a lie under a log scale; five
-	// swatches plus values read from `valueAtT` stay honest under both.
-	const legendTicks: Array<{ t: number; anchor: "start" | "middle" | "end" }> =
-		span <= 0
-			? [{ t: 0, anchor: "start" }]
-			: [
-					{ t: 0, anchor: "start" },
-					{ t: 0.5, anchor: "middle" },
-					{ t: 1, anchor: "end" },
+	const footnote =
+		model.hiddenX > 0 || model.hiddenY > 0
+			? [
+					model.hiddenX > 0 ? pluralize(model.hiddenX, "empty column") : null,
+					model.hiddenY > 0 ? pluralize(model.hiddenY, "empty row") : null,
 				]
-
-	const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-		const xIdx = clamp(Math.floor(event.nativeEvent.offsetX / xStride), 0, xValues.length - 1)
-		const yIdx = clamp(Math.floor(event.nativeEvent.offsetY / yStride), 0, yValues.length - 1)
-		setHover((prev) =>
-			prev && prev.active && prev.xIdx === xIdx && prev.yIdx === yIdx
-				? prev
-				: { xIdx, yIdx, active: true },
-		)
-	}
-
-	// Keep the last cell on pointer-leave so the crosshair fades in place.
-	const handlePointerLeave = () => setHover((prev) => (prev ? { ...prev, active: false } : null))
-
-	const plotLeft = yLabelW + gridOffsetX
-	const trackW = gridW + gap * 2
-	const trackH = gridH + gap * 2
-	const belowTrack = trackH
+					.filter(Boolean)
+					.join(" · ") + " hidden"
+			: null
 
 	return (
-		<div ref={containerRef} className={cn("relative h-full w-full select-none", className)}>
-			<div
-				className="absolute inset-0"
-				style={{
-					padding: `${PLOT_PAD_TOP}px ${PLOT_PAD_X}px ${PLOT_PAD_BOTTOM}px ${PLOT_PAD_X}px`,
-					animation: "tile-in 0.35s ease both",
-				}}
-			>
-				{/* Plot column: cell grid + x-axis + legend, stacked. */}
-				<div className="relative h-full w-full">
-					{/* Y-axis labels — anchored to row centers so the axis stays
-					    aligned with the cell grid regardless of row stride. */}
-					<div
-						className="absolute"
-						style={{ left: gridOffsetX, top: gap, width: yLabelW, height: gridH }}
-					>
-						{yTickIndices.map((yi) => {
-							const raw = yValues[yi]
-							const label = shortenYLabel(raw, allYIso)
-							const isActive = hover?.active && hover.yIdx === yi
-							return (
-								<div
-									key={raw}
-									title={raw}
-									className={cn(
-										"absolute right-0 truncate text-right tabular-nums transition-colors duration-100",
-										isActive ? "font-medium text-foreground" : "text-muted-foreground",
-									)}
-									style={{
-										top: rowCenterY(yi),
-										transform: "translateY(-50%)",
-										paddingRight: LABEL_GUTTER_PX,
-										width: yLabelW,
-										fontSize: LABEL_FONT_PX,
-										lineHeight: 1,
-									}}
-								>
-									{label}
-								</div>
-							)
-						})}
-					</div>
-
-					{/* Track — a recessed surface behind the grid, so gaps and missing
-					    cells read as holes in something rather than bare canvas. */}
-					<div
-						className="absolute top-0"
-						style={{
-							left: plotLeft,
-							width: trackW,
-							height: trackH,
-							padding: gap,
-							background: TRACK_BG,
-							borderRadius: 4,
-						}}
-					>
-						<div
-							ref={gridRef}
-							className="relative"
-							style={{ width: gridW, height: gridH }}
-							onPointerMove={handlePointerMove}
-							onPointerLeave={handlePointerLeave}
-						>
-							<CellGrid
-								xValues={xValues}
-								yValues={yValues}
-								lookup={lookup}
-								min={min}
-								span={span}
-								scaleType={scaleType}
-								palette={palette}
-								cellW={cellW}
-								cellH={cellH}
-								gap={gap}
-								radius={radius}
-							/>
-
-							{/* Crosshair: a row band, a column band and a ring on the cell.
-							    Additive emphasis — nothing else in the grid is dimmed. */}
-							{hover && (
-								<>
-									<div
-										aria-hidden
-										className="pointer-events-none absolute transition-opacity duration-100"
-										style={{
-											left: -gap,
-											top: rowTop(hover.yIdx),
-											width: gridW + gap * 2,
-											height: cellH,
-											background: CROSSHAIR_BG,
-											borderRadius: 2,
-											opacity: hover.active ? 1 : 0,
-										}}
-									/>
-									<div
-										aria-hidden
-										className="pointer-events-none absolute transition-opacity duration-100"
-										style={{
-											left: colLeft(hover.xIdx),
-											top: -gap,
-											width: cellW,
-											height: gridH + gap * 2,
-											background: CROSSHAIR_BG,
-											borderRadius: 2,
-											opacity: hover.active ? 1 : 0,
-										}}
-									/>
-									<div
-										aria-hidden
-										className="pointer-events-none absolute transition-opacity duration-100"
-										style={{
-											left: colLeft(hover.xIdx),
-											top: rowTop(hover.yIdx),
-											width: cellW,
-											height: cellH,
-											borderRadius: radius,
-											boxShadow: "0 0 0 1.5px var(--foreground)",
-											opacity: hover.active ? 1 : 0,
-										}}
-									/>
-								</>
-							)}
-
-							{/*
-							 * Tooltip — anchored to the hovered cell's box (the same four values
-							 * the crosshair ring uses) and portalled, so it escapes the widget
-							 * card's `overflow-hidden` rather than being clamped inside the grid,
-							 * and so flipping lands it *below* the cell instead of over it.
-							 */}
-							{tooltip !== "hidden" && hover && (
-								<ChartFloatingTooltip
-									containerRef={gridRef}
-									x={colLeft(hover.xIdx)}
-									y={rowTop(hover.yIdx)}
-									width={cellW}
-									height={cellH}
-									open={hover.active}
-									side="top"
-									sideOffset={TOOLTIP_OFFSET}
-									className="whitespace-nowrap"
-								>
-									<div className="text-muted-foreground">
-										<span>{xValues[hover.xIdx]}</span>
-										<span className="px-1 text-muted-foreground/50">·</span>
-										<span>{yValues[hover.yIdx]}</span>
-									</div>
-									<div className="mt-1 flex items-center gap-1.5">
-										{hoverValue === undefined ? (
-											<span className="italic text-muted-foreground">no data</span>
-										) : (
-											<>
-												<span
-													className="size-2 shrink-0 rounded-[2px]"
-													style={{
-														backgroundColor: colorForT(
-															normalize(hoverValue, min, span, scaleType),
-															palette,
-														),
-													}}
-												/>
-												<span className="font-medium tabular-nums text-foreground">
-													{formatScalar(hoverValue, unit)}
-												</span>
-											</>
-										)}
-									</div>
-								</ChartFloatingTooltip>
-							)}
-						</div>
-					</div>
-
-					{/* X-axis: ticks + labels, anchored under the track. */}
-					<div
-						className="absolute"
-						style={{ left: plotLeft + gap, top: belowTrack, width: gridW, height: X_AXIS_H }}
-					>
-						{xTickIndices.map((xi, ti) => {
-							const raw = xValues[xi]
-							const isActive = hover?.active && hover.xIdx === xi
-							const isFirst = ti === 0
-							const isLast = ti === xTickIndices.length - 1
-							return (
-								<React.Fragment key={raw}>
-									<div
-										aria-hidden
-										className="absolute"
-										style={{
-											left: colCenterX(xi),
-											top: 0,
-											width: 1,
-											height: 3,
-											transform: "translateX(-0.5px)",
-											background: "var(--border)",
-										}}
-									/>
-									<div
-										title={raw}
-										className={cn(
-											"absolute whitespace-nowrap tabular-nums transition-colors duration-100",
-											isActive
-												? "font-medium text-foreground"
-												: "text-muted-foreground",
-										)}
-										style={{
-											left: colCenterX(xi),
-											top: 5,
-											transform: isFirst
-												? "translateX(0)"
-												: isLast
-													? "translateX(-100%)"
-													: "translateX(-50%)",
-											fontSize: LABEL_FONT_PX,
-											lineHeight: 1,
-										}}
-									>
-										{raw}
-									</div>
-								</React.Fragment>
-							)
-						})}
-					</div>
-
-					{/* Legend — five stepped swatches plus the values at t=0/0.5/1, and
-					    a marker showing where the hovered cell sits in the range. */}
-					<div
-						className="absolute"
-						style={{
-							left: plotLeft + gap,
-							top: belowTrack + X_AXIS_H + GAP_GRID_TO_LEGEND,
-							width: gridW,
-							height: LEGEND_HEIGHT,
-						}}
-					>
-						<div className="relative flex gap-px" style={{ height: LEGEND_BAR_H }}>
-							{Array.from({ length: LEGEND_STEPS }).map((_, i) => (
-								<div
-									key={i}
-									className="flex-1 rounded-[2px]"
-									style={{
-										backgroundColor: colorForT((i + 0.5) / LEGEND_STEPS, palette),
-									}}
-								/>
-							))}
-							{hoverValue !== undefined && (
-								<div
-									aria-hidden
-									className="pointer-events-none absolute transition-opacity duration-100"
-									style={{
-										left: `${clamp01(normalize(hoverValue, min, span, scaleType)) * 100}%`,
-										top: -1,
-										width: 1,
-										height: LEGEND_BAR_H + 2,
-										background: "var(--foreground)",
-										opacity: hover?.active ? 1 : 0,
-									}}
-								/>
-							)}
-						</div>
-						<div className="relative mt-1.5" style={{ height: 12 }}>
-							{legendTicks.map(({ t, anchor }) => (
-								<div
-									key={t}
-									className="absolute tabular-nums text-muted-foreground"
-									style={{
-										left: `${t * 100}%`,
-										transform:
-											anchor === "start"
-												? "translateX(0)"
-												: anchor === "end"
-													? "translateX(-100%)"
-													: "translateX(-50%)",
-										fontSize: LEGEND_FONT_PX,
-										lineHeight: 1,
-									}}
-								>
-									{formatScalar(
-										roundTick(valueAtT(t, min, span, scaleType), min, span),
-										unit,
-									)}
-								</div>
-							))}
-						</div>
-					</div>
-
-					{/* Pruned axes are reported, never dropped silently — otherwise a
-					    trimmed grid reads as the whole result. */}
-					{footnote && (
-						<div
-							className="absolute text-right tabular-nums text-muted-foreground/70"
-							style={{
-								left: plotLeft + gap,
-								top: belowTrack + X_AXIS_H + GAP_GRID_TO_LEGEND + LEGEND_HEIGHT,
-								width: gridW,
-								fontSize: LEGEND_FONT_PX,
-								lineHeight: 1,
-							}}
-						>
+		<div
+			ref={containerRef}
+			className={cn("relative h-full w-full select-none", className)}
+			style={{ animation: "tile-in 0.35s ease both" }}
+		>
+			<PlotFrame
+				className="h-full w-full"
+				ariaLabel="Heatmap"
+				definition={definition}
+				onFocusChange={handleFocusChange}
+				legend={
+					<HeatmapLegend
+						domain={model.domain}
+						span={model.span}
+						scaleType={scaleType}
+						colorAt={colors}
+						unit={unit}
+						hovered={hovered}
+					/>
+				}
+				// Pruned axes are reported, never dropped silently — otherwise a
+				// trimmed grid reads as the whole result.
+				footer={
+					footnote ? (
+						<p className="pt-1 text-right text-[10px] tabular-nums text-muted-foreground/70">
 							{footnote}
-						</div>
-					)}
-				</div>
-			</div>
+						</p>
+					) : null
+				}
+				renderTooltipBody={({ points: focused }) => {
+					const slot = focused[0]?.datum
+					if (!slot) return null
+					return (
+						<>
+							<div className="text-muted-foreground">
+								<span>{slot.x}</span>
+								<span className="px-1 text-muted-foreground/50">·</span>
+								<span>{slot.y}</span>
+							</div>
+							<div className="mt-1 flex items-center gap-1.5">
+								{/*
+								 * A hole carries no value. Distinguishing it here is the point
+								 * of giving holes their own datum: without it `focus: "nearest"`
+								 * would report a neighbouring cell's count for an empty slot.
+								 */}
+								{slot.value === null ? (
+									<span className="italic text-muted-foreground">no data</span>
+								) : (
+									<>
+										<span
+											className="size-2 shrink-0 rounded-[2px]"
+											style={{ backgroundColor: colors(slot.value) }}
+										/>
+										<span className="font-medium tabular-nums text-foreground">
+											{formatScalar(slot.value, unit)}
+										</span>
+									</>
+								)}
+							</div>
+						</>
+					)
+				}}
+			/>
 		</div>
 	)
 }

@@ -1,4 +1,10 @@
-import type { ChartPoint, ChartTooltipAnchor, ChartValue } from "@tanstack/charts"
+import type {
+	ChartPoint,
+	ChartTooltipAnchor,
+	ChartTooltipAnchorContext,
+	ChartTooltipPosition,
+	ChartValue,
+} from "@tanstack/charts"
 import { tooltip } from "@tanstack/charts/tooltip"
 import { useSyncExternalStore, type ReactNode } from "react"
 
@@ -69,8 +75,21 @@ export interface TooltipFocus {
 	mapY: ((value: number) => number) | null
 }
 
-export interface TooltipFocusStore<TDatum> {
-	anchor: ChartTooltipAnchor<TDatum, ChartValue, number>
+export interface TooltipFocusStore {
+	/**
+	 * Generic in the datum rather than fixed to one, so a wide-row chart and a
+	 * long-form one can share a store.
+	 *
+	 * A `ChartTooltipAnchor<TDatum>` puts the datum in a parameter position, which
+	 * makes a store typed for one datum unusable with another even though the
+	 * callback never touches a datum at all — it reads the pointer and the scales
+	 * off the context and nothing else. Declaring the callback generic says that
+	 * directly: it works at whatever datum the chart resolves to.
+	 */
+	anchor: <TDatum>(
+		points: readonly ChartPoint<TDatum, ChartValue, number>[],
+		context: ChartTooltipAnchorContext<TDatum, ChartValue, number>,
+	) => ChartTooltipPosition | null | undefined
 	subscribe: (listener: () => void) => () => void
 	getSnapshot: () => TooltipFocus
 }
@@ -92,11 +111,11 @@ const EMPTY_FOCUS: TooltipFocus = { pointerY: null, mapY: null }
  * batching collapses the notification into the render that already happens on
  * every tooltip update.
  */
-export function createTooltipFocusStore<TDatum>(): TooltipFocusStore<TDatum> {
+export function createTooltipFocusStore(): TooltipFocusStore {
 	let snapshot: TooltipFocus = EMPTY_FOCUS
 	const listeners = new Set<() => void>()
 
-	const anchor: ChartTooltipAnchor<TDatum, ChartValue, number> = (_points, context) => {
+	const anchor: TooltipFocusStore["anchor"] = (_points, context) => {
 		const pointerY = context.pointer?.y ?? null
 		const mapY = context.scales.y?.map ?? null
 		// Re-anchoring at the same position must not notify — otherwise a scene
@@ -122,7 +141,7 @@ export function createTooltipFocusStore<TDatum>(): TooltipFocusStore<TDatum> {
 	}
 }
 
-export function useTooltipFocus<TDatum>(store: TooltipFocusStore<TDatum>): TooltipFocus {
+export function useTooltipFocus(store: TooltipFocusStore): TooltipFocus {
 	return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
 }
 
@@ -132,6 +151,48 @@ export interface PlotTooltipSeries<TDatum> {
 	dashed?: boolean
 	value: (datum: TDatum) => number | null | undefined
 	format: (value: number) => string
+	/**
+	 * Where this series is PLOTTED, in y-data space, when that is not its raw
+	 * value — a stacked band's top edge is its value plus everything beneath it.
+	 *
+	 * The row highlight is a geometry question ("which series is under the
+	 * cursor"), and on a stack the raw value answers a different one: it is a
+	 * thickness, not a position, so a thin band riding high in the stack maps to a
+	 * pixel near the axis and the wrong row is emphasised. Charts that stack say
+	 * where their marks actually landed; unstacked charts omit this and the value
+	 * IS the position.
+	 */
+	position?: (datum: TDatum) => number | null | undefined
+}
+
+/**
+ * The label of the series nearest the cursor, or `undefined` for none.
+ *
+ * Pure and exported so the decision can be tested without a rendered chart:
+ * pointer geometry is exactly the part that a jsdom render cannot exercise.
+ */
+export function resolveTooltipHighlight<TDatum>(
+	series: readonly PlotTooltipSeries<TDatum>[],
+	datum: TDatum,
+	focus: TooltipFocus,
+): string | undefined {
+	// Single-series charts emphasise nothing — there is no ambiguity to resolve,
+	// and bolding the only row is just noise.
+	if (series.length <= 1) return undefined
+	const { mapY, pointerY } = focus
+	if (!mapY || pointerY == null) return undefined
+
+	const yByLabel: Record<string, number> = {}
+	for (const spec of series) {
+		const plotted = spec.position ? spec.position(datum) : spec.value(datum)
+		if (plotted != null) yByLabel[spec.label] = mapY(plotted)
+	}
+	return findNearestSeriesKey(
+		yByLabel,
+		series.map((spec) => spec.label),
+		pointerY,
+		HIGHLIGHT_MAX_DISTANCE_PX,
+	)
 }
 
 /**
@@ -156,11 +217,22 @@ export function PlotTooltipBody<TDatum>({
 	series,
 	heading,
 	focusStore,
+	highlight,
 }: {
 	points: readonly ChartPoint<TDatum, ChartValue, number>[]
 	series: readonly PlotTooltipSeries<TDatum>[]
 	heading: (datum: TDatum) => string
-	focusStore: TooltipFocusStore<TDatum>
+	focusStore: TooltipFocusStore
+	/**
+	 * Which row to emphasise, when the chart already knows without measuring.
+	 *
+	 * A long-form chart's datum IS one series at one bucket, resolved by the
+	 * library's own focus geometry — `axisFocus` picks the candidate nearest the
+	 * pointer on the secondary axis (`dist/focus.js`), so the hovered cell is
+	 * handed over rather than inferred. Re-deriving it from pixel distances would
+	 * be a worse answer to a question already answered.
+	 */
+	highlight?: (datum: TDatum) => string | undefined
 }): ReactNode {
 	// Subscribed, not read off a mutable object — see `createTooltipFocusStore`.
 	// Called before the early return below because it is a hook.
@@ -170,23 +242,10 @@ export function PlotTooltipBody<TDatum>({
 	if (!first) return null
 	const datum = first.datum
 
-	// Emphasise the series whose plotted point is nearest the cursor. Single-series
-	// charts emphasise nothing — there is no ambiguity to resolve, and bolding the
-	// only row is just noise.
-	let highlightLabel: string | undefined
-	if (focus.mapY && focus.pointerY != null && series.length > 1) {
-		const yByLabel: Record<string, number> = {}
-		for (const spec of series) {
-			const value = spec.value(datum)
-			if (value != null) yByLabel[spec.label] = focus.mapY(value)
-		}
-		highlightLabel = findNearestSeriesKey(
-			yByLabel,
-			series.map((spec) => spec.label),
-			focus.pointerY,
-			HIGHLIGHT_MAX_DISTANCE_PX,
-		)
-	}
+	// Emphasise the series under the cursor: the chart's own answer when it has
+	// one, otherwise the nearest plotted point.
+	const highlightLabel =
+		highlight && series.length > 1 ? highlight(datum) : resolveTooltipHighlight(series, datum, focus)
 
 	return (
 		<div className="grid min-w-[9rem] items-start gap-1.5">

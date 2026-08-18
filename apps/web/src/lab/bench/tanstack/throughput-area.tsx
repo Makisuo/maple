@@ -92,7 +92,7 @@ export const TanstackThroughputAreaChart = memo(function TanstackThroughputAreaC
 
 	const gradientId = useChartId("benchThroughput")
 
-	const focusStore = useMemo(() => createTooltipFocusStore<ThroughputBenchRow>(), [])
+	const focusStore = useMemo(() => createTooltipFocusStore(), [])
 
 	const definition = useMemo(() => {
 		const dataMax = rows.reduce((max, row) => Math.max(max, row.throughput), 0)

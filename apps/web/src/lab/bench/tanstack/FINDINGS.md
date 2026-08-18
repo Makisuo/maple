@@ -25,6 +25,104 @@ Supersedes the 2026-08-05 spike, which ported the same three charts to 0.6.4 and
 >   `keyboard: false`, `focus: false`, or a free-mode cursor). The real gap is the per-datum
 >   accessibility tree, which the library does not offer at all.
 
+## Migration log (2026-08-18)
+
+Four query-builder charts are now on TanStack: **line**, **histogram**, **area**, **bar**.
+The 80% they share was extracted first into `packages/ui/src/components/plot/timeseries.tsx`
+(`useTimeseriesModel`, `timeseriesXAxis`, `timeseriesYAxis`, `timeseriesTooltipBody`,
+`timeseriesLegend`), which took the line chart from 375 to 166 lines and is what the area and
+bar ports compose rather than transcribe.
+
+**The perf gate had been failing silently since `f81b028674`.** That commit promoted
+`tanstack-chart.tsx` into `PlotFrame` and deleted the `<div data-bench-chart>` wrapper that both
+`tanstack.perf.spec.ts` and this bench's own `isReady` check selected on, so every TanStack arm
+matched zero elements and three tests failed. The selectors now use `PlotFrame`'s real
+attributes: `[data-chart-plot]` for the plot rect (the true analogue of
+`.recharts-cartesian-grid` — the region inside the axes, not the whole card) and
+`[data-chart-host]` for counting charts. Re-measured after the repair, the §1 numbers hold
+exactly: recharts 243.8ms / 504 commits, tanstack-svg 68.3ms / 146, tanstack-canvas 67.4ms / 146.
+
+Corrections to what is written below:
+
+- **Bug 2 (grouped focus) is no longer a blocker, and both escape routes turned out to be
+  viable.** Wide-row charts (line, area) read the row off `points[0].datum` through
+  `createTooltipFocusStore`; the bar port took the "idiomatic fix" the section says a real
+  migration would be forced into — long-form cells and one `barY` with a `z` channel — because
+  `barY` resolves stacking AND side-by-side grouping within one mark off `z`, so one-mark-per-
+  series would overlay every series with no offset. It was a local change, not the data-layer
+  restructure this section predicted.
+- **The `errorRate` bug in §"Unrelated production bug found in passing" is already fixed.**
+  `throughput-area-chart.tsx` now computes `throughput * errorRate` with no `/ 100`, and carries
+  a comment saying `errorRate` is a fraction. That section is history, not an open defect.
+- **`areaY`'s baseline stroke is still present at 0.14.0.** `dist/area.js` emits
+  `[...top, ...reversed bottom]` and both renderers close the path, so a stroke traces the whole
+  polygon. Worked around as recommended: fill-only `areaY` with `stroke: "none"` plus a `lineY`
+  over the top edge. `areaY` also has no `strokeDasharray` at all, which is why the in-flight
+  tail is a second pair of marks.
+- **`whenFocused` does not size focus nodes to zero.** At 0.14.0 it emits full-radius circles
+  into a `visibility="hidden"` `.ts-chart__focus-layer` group, which is what a test must select
+  on.
+- **`barY` does not need a band scale.** It falls back to `inferBandwidth(scale, xValues, width,
+  count)`, which takes the minimum gap between distinct plotted x positions and keeps 80% of it —
+  functionally Recharts' `barCategoryGap="15%"`, so passing an `inset` on top would subtract the
+  gap twice. This is what lets bar share the continuous `scaleTime` axis with line and area
+  instead of regressing to the categorical band axis the line port deliberately left behind.
+
+Known drift from the Recharts baseline, not fixable at 0.14.0: `minPointSize` has no equivalent
+(tiny non-zero bars render invisible), and `barY`'s `radius` is one scalar on all four corners
+rather than Recharts' top-two-of-the-topmost-segment.
+
+### Second wave: pie and heatmap ported, funnel and hbar deliberately not
+
+**Pie** is `polar` → `radialArc` ×2 + `radialText`, with `pie()` as the eager angle transform.
+The technique that unlocked in-slice labels: `radialText` needs an angle AND a radius scale, so
+pin the angle scale to `[0, 2π]` — making it the identity over the radians `pie()` already
+computed — and range the radius scale from the donut hole to the outer edge
+(`range: [innerRadiusFor, ctx => ctx.radius]`). "How far across the ring" then means the same
+number on a pie and on a donut of any hole size. Returning `null` from the `radius` channel skips
+both the label node and its focus point, which is how a sub-6% wedge opts out without leaving an
+invisible hover target. `radialArc` declares `requiresAngleScale: false` /
+`requiresRadiusScale: false`, so adding those scales for the label mark costs the arcs nothing.
+Lost at 0.14.0: the drop shadow (no mark exposes a filter) and the label's paint-order stroke
+(`RadialTextOptions` has `fill` but no `stroke`).
+
+**Heatmap** is two `cell` marks over two pinned `scaleBand` instances. The two-pass layout solver,
+`pickXTicks` and the y-tick stride loop are gone — a band scale positions the cells and the axis
+thins tick labels by MEASURED collision with ends prioritised on a categorical x (`thinTickLabels`,
+`scene.js:986`), which is what the stride approximated. `CellGrid`, the crosshair overlay divs and
+the manual hit-testing are replaced by the `states[].when.focus` cascade. What survived is a band-
+padding solver: `paddingInner` is solved so the seam lands on 2px and the surplus is bought back as
+`paddingOuter` + `align(0.5)`, so cells cap at 72×40 and the grid centres rather than stretching.
+Lost: hovered axis-label emphasis (`tickLabels.fontWeight` resolves at scene build, so driving it
+from focus means rebuilding the definition per cell crossing), eased hover (motion renderer is
+SVG-only and creates no track for `cell`), and `title` attributes on truncated labels. One
+deliberate change: the colour domain is now `[min, max]` over the DRAWN cells, so pruned all-zero
+tracks no longer drag `min` to 0 and stretch the ramp over data the chart doesn't paint.
+
+**Funnel and hbar were not ported, on purpose.** Neither was ever a Recharts chart — both are flex
+columns of DOM rows with percentage-width fills. Canvas buys nothing at ~10 rows and would cost the
+things DOM gives free: CSS `truncate` with ellipsis on arbitrary category names, the `title`
+attribute that recovers the truncated name, text selection, and the height-driven "+N more" cap
+that keeps rows inside the card. `barX` does exist at 0.14.0; using it would mean re-implementing
+per-row text truncation and right-aligned `tabular-nums` columns as canvas text layout, which is
+strictly worse output for strictly more code.
+
+### `PlotFrame` gained `usePlotScales()` and an `overlay` slot (2026-08-18)
+
+`ChartScene.scales` was always reaching `PlotFrame`'s `onRender`; it is now published through a
+store beside the plot rect, as the replacement for Recharts' `useXAxisScale()`. The store dedupes
+on scale descriptors plus `viewport` plus the plot bounds rather than object identity, because the
+scene hands back a fresh `scales` record — with fresh `Date` domains and fresh `map` closures — on
+every pointer tick; publishing by identity would put a render on the hover hot path.
+`plotScalesInterchangeable` is exported and tested for exactly that reason.
+
+The `overlay` slot renders pointer-transparent DOM over the plot box, replacing the old pattern of
+passing a node as a Recharts CHILD so it could reach `usePlotArea` / `useXAxisScale` /
+`ZIndexLayer`. Note `decorative()` (undocumented, in `dist/mark-decorative.js`) is the right tool
+for annotations that must extend a scale — it keeps a mark's scale contribution and painted
+geometry while `stripMarkSceneInteraction` removes its focus points — but NOT for the commit
+markers, which are pre-snapped to existing buckets and so extend nothing.
+
 Reproduce: `bun run --cwd apps/web test:perf:tanstack`
 Look: `/lab/bench/tanstack?renderer=recharts|tanstack-svg|tanstack-canvas`
 

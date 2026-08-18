@@ -1,7 +1,14 @@
 /// <reference types="vite/client" />
 import { CanvasChart, Chart as SvgChart } from "@tanstack/charts/react/tooltip"
 import type { ChartTooltipBodyRenderContext } from "@tanstack/charts/react/tooltip"
-import type { ChartBounds, ChartPoint, ChartScene, ChartValue, DomChartDefinition } from "@tanstack/charts"
+import type {
+	ChartBounds,
+	ChartPoint,
+	ChartScene,
+	ChartValue,
+	DomChartDefinition,
+	ResolvedScale,
+} from "@tanstack/charts"
 import {
 	createContext,
 	use,
@@ -170,6 +177,130 @@ function createPlotRectStore(): PlotRectStore & { set: (next: ChartBounds) => vo
 }
 
 /**
+ * The chart's RESOLVED scales — `{ x, y, … }` keyed by scale id, each with the
+ * `map(value) => pixel` the marks were painted with.
+ *
+ * This is the replacement for Recharts' `useXAxisScale()`, and it is what lets
+ * an overlay place DOM at a data coordinate. It rides the same store mechanism
+ * as `PlotRect` and for the same reason: `onRender` runs outside React's render
+ * phase, so publishing through state would cost a commit per pointer tick.
+ */
+export type PlotScales = Readonly<Record<string, ResolvedScale>>
+
+export interface PlotScalesStore {
+	subscribe: (listener: () => void) => () => void
+	getSnapshot: () => PlotScales | null
+}
+
+const PlotScalesContext = createContext<PlotScalesStore | null>(null)
+
+/**
+ * The resolved scales of the nearest enclosing `PlotFrame`, or `null` outside
+ * one. Pair it with `usePlotRect()` — a scale maps a value to a plot-relative
+ * pixel, so the rect is what turns that into a position in the overlay.
+ */
+export function usePlotScales(): PlotScales | null {
+	const store = use(PlotScalesContext)
+	return useSyncExternalStore(
+		store?.subscribe ?? noopSubscribe,
+		store?.getSnapshot ?? nullSnapshot,
+		nullSnapshot,
+	)
+}
+
+/**
+ * `Date` domains are rebuilt per scene, so identity comparison would report a
+ * change on every pointer tick even when nothing moved.
+ */
+function sameChartValue(a: ChartValue, b: ChartValue): boolean {
+	if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime()
+	return Object.is(a, b)
+}
+
+function sameDomain(a: readonly ChartValue[], b: readonly ChartValue[]): boolean {
+	if (a.length !== b.length) return false
+	for (let index = 0; index < a.length; index += 1) {
+		const left = a[index]
+		const right = b[index]
+		if (left === undefined || right === undefined) {
+			if (left !== right) return false
+			continue
+		}
+		if (!sameChartValue(left, right)) return false
+	}
+	return true
+}
+
+/**
+ * Whether two resolved scale maps are INTERCHANGEABLE — not identical objects.
+ *
+ * The scene hands back a fresh `scales` record on every update, including every
+ * hover tick, so publishing it by identity would notify subscribers constantly.
+ * A scale's `map` is a pure function of its domain and its range, so when the
+ * descriptors below all match, the cached snapshot's older closure returns the
+ * same pixel for the same value and may be kept.
+ *
+ * `viewport` is included because a pan or zoom shifts the mapping while leaving
+ * the content domain alone — that is exactly the case a naive domain-only check
+ * would miss. The plot bounds are the other half of the range and are compared
+ * by the store, which sees them on the same callback.
+ *
+ * Exported for its own tests: getting this wrong is silent, and shows up only as
+ * either a stale overlay or a per-tick render storm.
+ */
+export function plotScalesInterchangeable(a: PlotScales | null, b: PlotScales): boolean {
+	if (a === null) return false
+	const aKeys = Object.keys(a)
+	const bKeys = Object.keys(b)
+	if (aKeys.length !== bKeys.length) return false
+
+	for (const key of aKeys) {
+		const left = a[key]
+		const right = b[key]
+		if (left === undefined || right === undefined) return false
+		if (left.id !== right.id || left.type !== right.type) return false
+		if (left.bandwidth !== right.bandwidth) return false
+		if (!sameDomain(left.domain, right.domain)) return false
+
+		const leftViewport = left.viewport
+		const rightViewport = right.viewport
+		if ((leftViewport === undefined) !== (rightViewport === undefined)) return false
+		if (leftViewport && rightViewport) {
+			if (leftViewport.translate !== rightViewport.translate) return false
+			if (!sameDomain(leftViewport.domain, rightViewport.domain)) return false
+		}
+	}
+	return true
+}
+
+function createPlotScalesStore(): PlotScalesStore & {
+	set: (next: PlotScales, bounds: ChartBounds) => void
+} {
+	let snapshot: PlotScales | null = null
+	let boundsKey: string | null = null
+	const listeners = new Set<() => void>()
+
+	return {
+		subscribe: (listener) => {
+			listeners.add(listener)
+			return () => {
+				listeners.delete(listener)
+			}
+		},
+		getSnapshot: () => snapshot,
+		set: (next, bounds) => {
+			// The bounds ARE the scales' range, so a resize changes every mapping
+			// even when the domains are untouched.
+			const nextBoundsKey = `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`
+			if (boundsKey === nextBoundsKey && plotScalesInterchangeable(snapshot, next)) return
+			boundsKey = nextBoundsKey
+			snapshot = next
+			for (const listener of listeners) listener()
+		},
+	}
+}
+
+/**
  * Whether this environment can actually paint to a canvas.
  *
  * The canvas renderer calls `getContext("2d")` during mount and THROWS when it
@@ -237,6 +368,22 @@ export interface PlotFrameProps<TDatum, TXValue extends ChartValue, TYValue exte
 	 * footnote. A SIBLING of the measured plot for the same reason `legend` is.
 	 */
 	footer?: ReactNode
+	/**
+	 * A DOM layer stacked OVER the plot, for annotations that need real pointer
+	 * semantics — hover cards, focus, open/close delays — which a mark cannot
+	 * provide. The commit deploy markers are the reason it exists.
+	 *
+	 * This is the replacement for passing a node as a Recharts CHILD (the old
+	 * `overlay` prop), which only worked because Recharts exposed `usePlotArea`,
+	 * `useXAxisScale` and `ZIndexLayer` from inside its own tree. Here the layer
+	 * is an ordinary sibling and reads the same information from `usePlotRect()`
+	 * and `usePlotScales()`.
+	 *
+	 * Anything that merely PAINTS still belongs in the definition as a mark, where
+	 * it participates in scale resolution — wrap it in `decorative()` so it feeds
+	 * the scale without taking focus away from the series.
+	 */
+	overlay?: ReactNode
 }
 
 /**
@@ -258,10 +405,12 @@ export function PlotFrame<TDatum, TXValue extends ChartValue, TYValue extends Ch
 	legend,
 	onFocusChange,
 	footer,
+	overlay,
 }: PlotFrameProps<TDatum, TXValue, TYValue>) {
 	const { ref, height } = useMeasuredHeight()
 	const anchorRef = useRef<HTMLDivElement | null>(null)
 	const rectStore = useMemo(createPlotRectStore, [])
+	const scalesStore = useMemo(createPlotScalesStore, [])
 
 	if (import.meta.env.DEV) assertResolvedColors(definition, ariaLabel)
 
@@ -283,64 +432,84 @@ export function PlotFrame<TDatum, TXValue extends ChartValue, TYValue extends Ch
 				node.style.height = `${bounds.height}px`
 			}
 			rectStore.set(bounds)
+			scalesStore.set(context.scene.scales, bounds)
 		},
-		[rectStore],
+		[rectStore, scalesStore],
 	)
 
 	const ChartComponent = renderer === "canvas" && supportsCanvas2d() ? CanvasChart : SvgChart
 
 	return (
 		<PlotRectContext value={rectStore}>
-			{/*
-			 * `select-none`: a chart is a figure, not prose. Without it, dragging the
-			 * pointer across one — which is exactly what hovering a timeseries looks
-			 * like — starts a text selection and paints the browser's selection
-			 * highlight over the whole `<svg>`/`<canvas>`.
-			 */}
-			<div data-chart-host={renderer} className={cn("flex flex-col select-none", className)}>
+			<PlotScalesContext value={scalesStore}>
 				{/*
-				 * `min-h-0` is load-bearing on a flex child: a flex item's default
-				 * `min-height: auto` refuses to shrink below its content, and the chart's
-				 * content is whatever height it was last measured at — so without this the
-				 * plot ratchets and pushes the legend out of the card instead of yielding
-				 * to it.
+				 * `select-none`: a chart is a figure, not prose. Without it, dragging the
+				 * pointer across one — which is exactly what hovering a timeseries looks
+				 * like — starts a text selection and paints the browser's selection
+				 * highlight over the whole `<svg>`/`<canvas>`.
 				 */}
-				<div ref={ref} className="relative min-h-0 flex-1">
+				<div data-chart-host={renderer} className={cn("flex flex-col select-none", className)}>
 					{/*
-					 * No `width`, deliberately — see `useMeasuredHeight`. The host takes
-					 * `width: 100%` and measures itself before first paint. Rendering is
-					 * not gated on a measurement either: `FALLBACK_HEIGHT` covers the
-					 * frame before the layout effect resolves.
+					 * `min-h-0` is load-bearing on a flex child: a flex item's default
+					 * `min-height: auto` refuses to shrink below its content, and the chart's
+					 * content is whatever height it was last measured at — so without this the
+					 * plot ratchets and pushes the legend out of the card instead of yielding
+					 * to it.
 					 */}
-					<ChartComponent
-						definition={definition}
-						ariaLabel={ariaLabel}
-						height={height ?? FALLBACK_HEIGHT}
-						renderTooltipBody={renderTooltipBody}
-						onFocusChange={onFocusChange}
-						onRender={handleRender}
-					/>
+					<div ref={ref} className="relative min-h-0 flex-1">
+						{/*
+						 * No `width`, deliberately — see `useMeasuredHeight`. The host takes
+						 * `width: 100%` and measures itself before first paint. Rendering is
+						 * not gated on a measurement either: `FALLBACK_HEIGHT` covers the
+						 * frame before the layout effect resolves.
+						 */}
+						<ChartComponent
+							definition={definition}
+							ariaLabel={ariaLabel}
+							height={height ?? FALLBACK_HEIGHT}
+							renderTooltipBody={renderTooltipBody}
+							onFocusChange={onFocusChange}
+							onRender={handleRender}
+						/>
+						{/*
+						 * `pointer-events-none` and empty: this is a measurement handle, not a
+						 * layer. Anything that needs to PAINT over the plot belongs in the
+						 * definition as a mark, where it participates in scale resolution.
+						 */}
+						<div
+							ref={anchorRef}
+							data-chart-plot=""
+							aria-hidden="true"
+							className="pointer-events-none absolute top-0 left-0"
+						/>
+						{/*
+						 * The overlay layer. Last child, so it stacks above the chart surface
+						 * without a z-index.
+						 *
+						 * `pointer-events-none` on the LAYER with the annotations opting back
+						 * in: a full-bleed transparent div that swallowed the pointer would
+						 * kill hover on every chart that has an overlay, which is the whole
+						 * plot. `overflow` is left visible on purpose — chips sit above the
+						 * plot's top edge, and under Recharts that needed the `foreignObject`
+						 * box extending upward to stay hoverable. A DOM sibling has no such
+						 * limit, so the overhang is now just layout.
+						 */}
+						{overlay ? (
+							<div data-chart-overlay="" className="pointer-events-none absolute inset-0">
+								{overlay}
+							</div>
+						) : null}
+					</div>
 					{/*
-					 * `pointer-events-none` and empty: this is a measurement handle, not a
-					 * layer. Anything that needs to PAINT over the plot belongs in the
-					 * definition as a mark, where it participates in scale resolution.
+					 * `max-h-[45%]` is the legend ceiling that keeps a long series list from
+					 * starving the plot, expressed as a CSS cap rather than pixel arithmetic.
+					 * Recharts needed a computed number because it wants an explicit
+					 * `<Legend height>`; here flexbox already does the division.
 					 */}
-					<div
-						ref={anchorRef}
-						data-chart-plot=""
-						aria-hidden="true"
-						className="pointer-events-none absolute top-0 left-0"
-					/>
+					{legend ? <div className="max-h-[45%] shrink-0 overflow-auto">{legend}</div> : null}
+					{footer ? <div className="shrink-0">{footer}</div> : null}
 				</div>
-				{/*
-				 * `max-h-[45%]` is the legend ceiling that keeps a long series list from
-				 * starving the plot, expressed as a CSS cap rather than pixel arithmetic.
-				 * Recharts needed a computed number because it wants an explicit
-				 * `<Legend height>`; here flexbox already does the division.
-				 */}
-				{legend ? <div className="max-h-[45%] shrink-0 overflow-auto">{legend}</div> : null}
-				{footer ? <div className="shrink-0">{footer}</div> : null}
-			</div>
+			</PlotScalesContext>
 		</PlotRectContext>
 	)
 }

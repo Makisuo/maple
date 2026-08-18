@@ -64,7 +64,7 @@ export const TanstackErrorRateAreaChart = memo(function TanstackErrorRateAreaCha
 
 	const gradientId = useChartId("benchErrorRate")
 
-	const focusStore = useMemo(() => createTooltipFocusStore<OverviewBenchRow>(), [])
+	const focusStore = useMemo(() => createTooltipFocusStore(), [])
 
 	const definition = useMemo(() => {
 		const dataMax = overviewBenchRows.reduce((max, row) => Math.max(max, row.errorRate), 0)

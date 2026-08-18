@@ -43,11 +43,14 @@ export function TanstackChartBench({ renderer = "recharts" }: { renderer?: Chart
 		const bench = startInteractionBench({
 			recorder,
 			// Per-renderer readiness: `.recharts-wrapper` only exists in the Recharts
-			// arm, so both paths report through a wrapper this bench emits itself.
+			// arm, so each path waits on whatever its own renderer paints into.
+			// `[data-chart-host]` is `PlotFrame`'s wrapper; this used to wait on a
+			// `[data-bench-chart]` element the bench emitted itself, which stopped
+			// existing when the foundation moved into `packages/ui`.
 			isReady: () =>
 				document.querySelectorAll(
 					isTanstack
-						? "[data-testid='tanstack-chart-bench'] [data-bench-chart] svg, [data-testid='tanstack-chart-bench'] [data-bench-chart] canvas"
+						? "[data-testid='tanstack-chart-bench'] [data-chart-host] svg, [data-testid='tanstack-chart-bench'] [data-chart-host] canvas"
 						: "[data-testid='tanstack-chart-bench'] .recharts-wrapper",
 				).length >= CHART_COUNT,
 		})

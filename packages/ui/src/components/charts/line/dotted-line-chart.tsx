@@ -1,6 +1,6 @@
 import { Line, LineChart } from "recharts"
 
-import type { BaseChartProps } from "../_shared/chart-types"
+import type { SimpleChartProps } from "../_shared/chart-types"
 import { lineTimeSeriesData } from "../_shared/sample-data"
 import { type ChartConfig, ChartContainer, ChartGrid, ChartXAxis } from "../../ui/chart"
 
@@ -8,7 +8,7 @@ const chartConfig = {
 	value: { label: "Value", color: "var(--chart-1)" },
 } satisfies ChartConfig
 
-export function DottedLineChart({ data, className, syncId }: BaseChartProps) {
+export function DottedLineChart({ data, className, syncId }: SimpleChartProps) {
 	return (
 		<ChartContainer config={chartConfig} className={className}>
 			<LineChart data={data ?? lineTimeSeriesData} syncId={syncId} syncMethod="value">

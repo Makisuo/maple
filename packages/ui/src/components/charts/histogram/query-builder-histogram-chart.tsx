@@ -9,7 +9,7 @@ import { PlotFrame } from "../../plot/plot-frame"
 import { integerTickValues, logYScale } from "../../plot/plot-scales"
 import { cursorTooltip } from "../../plot/plot-tooltip"
 import { usePlotColors, type PlotColorToken } from "../../plot/theme"
-import type { BaseChartProps } from "../_shared/chart-types"
+import type { QueryBuilderHistogramChartProps } from "../_shared/chart-types"
 
 const HISTOGRAM_TOKENS = {
 	bar: ["--chart-1", "#6366f1"],
@@ -21,7 +21,7 @@ const HISTOGRAM_TOKENS = {
  */
 const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
 
-/** Matches the previous chart's `histogram.bucketCount` default. */
+/** Matches the previous chart's `bucketCount` default. */
 const DEFAULT_BIN_COUNT = 30
 
 function asFiniteNumber(value: unknown): number {
@@ -383,16 +383,18 @@ export function QueryBuilderHistogramChart({
 	className,
 	tooltip,
 	unit,
-	histogram,
 	logScale,
-}: BaseChartProps) {
+	bucketCount,
+	bucketWidth,
+	logScaleY,
+}: QueryBuilderHistogramChartProps) {
 	// No sample-data fallback: substituting fixtures for real rows made every
 	// misconfigured histogram (a source with no numeric column, an empty result)
 	// render a plausible-looking distribution instead of an empty state.
 	const source = Array.isArray(data) ? data : EMPTY_ROWS
-	const binCount = histogram?.bucketCount ?? DEFAULT_BIN_COUNT
-	const binWidth = histogram?.bucketWidth
-	const useLogY = histogram?.logScaleY ?? logScale ?? false
+	const binCount = bucketCount ?? DEFAULT_BIN_COUNT
+	const binWidth = bucketWidth
+	const useLogY = logScaleY ?? logScale ?? false
 	const showTooltip = tooltip !== "hidden"
 
 	const colors = usePlotColors(HISTOGRAM_TOKENS)

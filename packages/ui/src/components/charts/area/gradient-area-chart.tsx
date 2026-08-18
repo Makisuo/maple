@@ -1,7 +1,7 @@
 import { useId } from "react"
 import { Area, AreaChart } from "recharts"
 
-import type { BaseChartProps } from "../_shared/chart-types"
+import type { SimpleChartProps } from "../_shared/chart-types"
 import { areaTimeSeriesData } from "../_shared/sample-data"
 import { VerticalGradient } from "../_shared/svg-patterns"
 import { type ChartConfig, ChartContainer, ChartGrid, ChartXAxis } from "../../ui/chart"
@@ -11,7 +11,7 @@ const chartConfig = {
 	mobile: { label: "Mobile", color: "var(--chart-2)" },
 } satisfies ChartConfig
 
-export function GradientAreaChart({ data, className, syncId }: BaseChartProps) {
+export function GradientAreaChart({ data, className, syncId }: SimpleChartProps) {
 	const id = useId()
 	const desktopGradientId = `desktopGradient-${id.replace(/:/g, "")}`
 	const mobileGradientId = `mobileGradient-${id.replace(/:/g, "")}`

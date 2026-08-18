@@ -1,7 +1,7 @@
 import { memo, useMemo, useId } from "react"
 import { Area, AreaChart } from "recharts"
 
-import type { BaseChartProps } from "../_shared/chart-types"
+import type { ThroughputAreaChartProps } from "../_shared/chart-types"
 import { throughputTimeSeriesData } from "../_shared/sample-data"
 import { VerticalGradient } from "../_shared/svg-patterns"
 import { useIncompleteSegments, extendConfigWithIncomplete } from "../_shared/use-incomplete-segments"
@@ -37,7 +37,7 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 	syncId,
 	overlay,
 	yAxisWidth,
-}: BaseChartProps) {
+}: ThroughputAreaChartProps) {
 	const id = useId()
 	const gradientId = `throughputGradient-${id.replace(/:/g, "")}`
 	const fadedGradientId = `throughputGradientFaded-${id.replace(/:/g, "")}`

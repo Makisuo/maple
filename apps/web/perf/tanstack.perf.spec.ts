@@ -55,7 +55,13 @@ async function plotBounds(page: Page, renderer: Renderer) {
 	const plot =
 		renderer === "recharts"
 			? page.locator(`${BENCH} .recharts-cartesian-grid`).first()
-			: page.locator(`${BENCH} [data-bench-chart]`).first()
+			: // `[data-chart-plot]` is `PlotFrame`'s own plot-rect handle, and it is the
+				// true analogue of `.recharts-cartesian-grid` — the region inside the axes,
+				// not the whole card. The bench used to emit a `[data-bench-chart]` wrapper
+				// of its own, but that lived in `tanstack-chart.tsx`, which was deleted when
+				// the foundation was promoted into `packages/ui`; the selectors outlived the
+				// element and every TanStack arm silently matched nothing.
+				page.locator(`${BENCH} [data-chart-plot]`).first()
 	const bounds = await plot.boundingBox()
 	if (!bounds) throw new Error(`${renderer} bench chart has no plot bounds`)
 	return bounds
@@ -142,7 +148,7 @@ test("focus draws a dashed cursor and a dot on the hovered series", async ({ pag
 
 	// Third chart = latency, the only multi-series one, so "the dot lands on the
 	// series nearest the cursor" is actually a claim worth checking.
-	const latency = page.locator(`${BENCH} [data-bench-chart]`).nth(2)
+	const latency = page.locator(`${BENCH} [data-chart-host]`).nth(2)
 	const latencyBox = await latency.boundingBox()
 	if (!latencyBox) throw new Error("latency bench chart has no bounds")
 
@@ -185,7 +191,9 @@ test("every renderer arm draws all three charts without page errors", async ({ p
 		const surfaces =
 			renderer === "recharts"
 				? page.locator(`${BENCH} .recharts-wrapper`)
-				: page.locator(`${BENCH} [data-bench-chart]`)
+				: // `[data-chart-host]` is the per-chart wrapper `PlotFrame` emits, so it
+					// counts charts the way `.recharts-wrapper` does for the other arm.
+					page.locator(`${BENCH} [data-chart-host]`)
 		await expect(surfaces, `${renderer} renders three charts`).toHaveCount(3)
 	}
 

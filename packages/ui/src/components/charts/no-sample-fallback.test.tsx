@@ -54,7 +54,7 @@ vi.mock("recharts", async (importOriginal) => {
 	return { ...actual, ResponsiveContainer }
 })
 
-import type { BaseChartProps } from "./_shared/chart-types"
+import type { ChartLegendMode, PlotProps } from "./_shared/chart-types"
 import { QueryBuilderAreaChart } from "./area/query-builder-area-chart"
 import { QueryBuilderBarChart } from "./bar/query-builder-bar-chart"
 import { QueryBuilderFunnelChart } from "./funnel/query-builder-funnel-chart"
@@ -100,11 +100,18 @@ const textNodesOf = (container: HTMLElement): ReadonlyArray<string> => {
  */
 // SAFETY: test fixtures for mis-fed inputs; the chart's runtime guard, not its
 // prop type, is under test.
-const misfed = (value: unknown): BaseChartProps["data"] => value as BaseChartProps["data"]
+const misfed = (value: unknown): PlotProps["data"] => value as PlotProps["data"]
 
 const cases: ReadonlyArray<{
 	name: string
-	Chart: React.ComponentType<BaseChartProps>
+	/**
+	 * The widest shape all six charts accept. They no longer share one props
+	 * interface — that erasure is exactly what this refactor removed — but every
+	 * chart's own props are a supertype of this, so a uniform driver still
+	 * typechecks. Legitimate here because the behaviour under test is what a
+	 * chart draws for missing `data`, which is the one prop they all read.
+	 */
+	Chart: React.ComponentType<PlotProps & { legend?: ChartLegendMode }>
 	rows: Array<Record<string, unknown>>
 	/** Text the chart shows for `rows` and must not show for no data. */
 	marker: string

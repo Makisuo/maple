@@ -120,7 +120,7 @@ function LineFigure({
 		[series],
 	)
 
-	const focusStore = useMemo(() => createTooltipFocusStore<TimeseriesSpikeRow>(), [])
+	const focusStore = useMemo(() => createTooltipFocusStore(), [])
 
 	const definition = useMemo(() => {
 		const { solid, dashed } = incomplete

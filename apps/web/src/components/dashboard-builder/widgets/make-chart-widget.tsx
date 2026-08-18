@@ -1,7 +1,7 @@
-import { memo, Suspense } from "react"
+import { memo, Suspense, type ReactNode } from "react"
 
 import type { ChartLegendMode } from "@maple/ui/components/charts/_shared/chart-types"
-import { getChartById } from "@maple/ui/components/charts/registry"
+import { getChartById, type ChartRegistryEntry } from "@maple/ui/components/charts/registry"
 import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleton"
 import { WidgetEmptyState, WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
@@ -13,10 +13,17 @@ import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/compone
 // and that last difference was pure accident: a `thresholds` array set on a pie
 // silently did nothing because `pie-widget.tsx` never passed it on.
 //
-// `BaseChartProps` is one interface covering every chart, and charts ignore the
-// fields they don't read, so the factory forwards the whole display config. What
-// a panel type can actually *set* is decided by its settings rail, not by which
-// props its renderer happened to spell out.
+// Collapsing them into one factory fixed the duplication but not the accident:
+// the first version forwarded the WHOLE display config to a single
+// `BaseChartProps` surface, so a setting a chart couldn't honour still vanished
+// without a word — the erasure just moved from seven files into one.
+//
+// `renderChart` below is the fix. The registry is discriminated on `kind`, so
+// each branch hands its chart only the settings that chart declares, and the
+// compiler rejects the rest. This function is also the ONLY place that knows
+// both shapes: `WidgetDisplayConfig` is a persisted, versioned schema and keeps
+// its nested `pie` / `histogram` / `heatmap` / `funnel` bags, while the
+// component props are flat. The unnesting belongs here and nowhere else.
 
 interface ChartWidgetProps {
 	dataState: WidgetDataState
@@ -42,12 +49,152 @@ interface ChartWidgetOptions {
 	className?: string
 }
 
+interface RenderArgs {
+	entry: ChartRegistryEntry
+	display: WidgetDisplayConfig
+	data: Record<string, unknown>[] | undefined
+	className: string
+	legend: ChartLegendMode | undefined
+}
+
+function renderChart({ entry, display, data, className, legend }: RenderArgs): ReactNode {
+	const presentation = display.chartPresentation
+	const tooltip = presentation?.tooltip
+	// Opt-in, not inherited from legend visibility: the stats table costs up to
+	// 45% of the widget's height, so a chart shows it only by asking for it.
+	const seriesStats = presentation?.seriesStats ?? false
+	const yAxis = display.yAxis
+
+	// The axis block every cartesian chart reads. Spread rather than repeated so
+	// a new axis setting reaches line, area and bar together — the three that
+	// share a y scale — instead of reaching whichever branch was remembered.
+	const cartesian = {
+		data,
+		className,
+		legend,
+		tooltip,
+		seriesStats,
+		unit: display.unit,
+		thresholds: display.thresholds,
+		logScale: yAxis?.logScale,
+		softMin: yAxis?.softMin,
+		softMax: yAxis?.softMax,
+		fitYAxisToData: yAxis?.fitYAxisToData,
+	}
+
+	switch (entry.kind) {
+		case "line": {
+			const Chart = entry.component
+			return (
+				<Chart {...cartesian} curveType={display.curveType} showPoints={presentation?.showPoints} />
+			)
+		}
+		case "area": {
+			const Chart = entry.component
+			return (
+				<Chart
+					{...cartesian}
+					stacked={display.stacked}
+					curveType={display.curveType}
+					showPoints={presentation?.showPoints}
+				/>
+			)
+		}
+		case "bar": {
+			const Chart = entry.component
+			return <Chart {...cartesian} stacked={display.stacked} />
+		}
+		case "pie": {
+			const Chart = entry.component
+			return (
+				<Chart
+					data={data}
+					className={className}
+					legend={legend}
+					tooltip={tooltip}
+					unit={display.unit}
+					donut={display.pie?.donut}
+					innerRadius={display.pie?.innerRadius}
+					showLabels={display.pie?.showLabels}
+					showPercent={display.pie?.showPercent}
+				/>
+			)
+		}
+		case "histogram": {
+			const Chart = entry.component
+			return (
+				<Chart
+					data={data}
+					className={className}
+					tooltip={tooltip}
+					unit={display.unit}
+					logScale={yAxis?.logScale}
+					bucketCount={display.histogram?.bucketCount}
+					bucketWidth={display.histogram?.bucketWidth}
+					logScaleY={display.histogram?.logScaleY}
+				/>
+			)
+		}
+		case "heatmap": {
+			const Chart = entry.component
+			return (
+				<Chart
+					data={data}
+					className={className}
+					tooltip={tooltip}
+					unit={display.unit}
+					colorScale={display.heatmap?.colorScale}
+					scaleType={display.heatmap?.scaleType}
+				/>
+			)
+		}
+		case "funnel": {
+			const Chart = entry.component
+			return (
+				<Chart
+					data={data}
+					className={className}
+					unit={display.unit}
+					showStepPercent={display.funnel?.showStepPercent}
+				/>
+			)
+		}
+		case "hbar": {
+			const Chart = entry.component
+			return <Chart data={data} className={className} unit={display.unit} />
+		}
+		// The fixed-metric service charts and the presentational gallery charts
+		// take no query-builder settings — their series are decided at authoring
+		// time. Reachable only through a hand-written or imported `chartId`, since
+		// the Type picker never offers them; drawing them with their defaults is
+		// the honest answer, and the compiler is what stops a settings rail from
+		// quietly pretending they apply.
+		case "service": {
+			const Chart = entry.component
+			return <Chart data={data} className={className} legend={legend} tooltip={tooltip} />
+		}
+		case "throughput": {
+			const Chart = entry.component
+			return <Chart data={data} className={className} legend={legend} tooltip={tooltip} />
+		}
+		case "simple": {
+			const Chart = entry.component
+			return <Chart data={data} className={className} />
+		}
+		default: {
+			// Exhaustiveness: adding a registry kind without a branch fails here at
+			// compile time rather than rendering nothing at runtime.
+			const unhandled: never = entry
+			return unhandled
+		}
+	}
+}
+
 export function makeChartWidget(options: ChartWidgetOptions) {
 	const Widget = memo(function ChartWidget({ dataState, display, mode }: ChartWidgetProps) {
 		const entry = getChartById(display.chartId ?? options.defaultChartId)
 		if (!entry) return null
 
-		const ChartComponent = entry.component
 		const chartData =
 			dataState.status === "ready" && Array.isArray(dataState.data) ? dataState.data : undefined
 		const skeleton = <ChartSkeleton variant={entry.category} />
@@ -67,29 +214,13 @@ export function makeChartWidget(options: ChartWidgetOptions) {
 					<WidgetEmptyState />
 				) : (
 					<Suspense fallback={skeleton}>
-						<ChartComponent
-							data={chartData}
-							className={options.className ?? "h-full w-full aspect-auto"}
-							legend={display.chartPresentation?.legend ?? options.defaultLegend}
-							// Opt-in, not inherited from legend visibility: the stats table
-							// costs up to 45% of the widget's height, so a chart shows it
-							// only by asking for it.
-							seriesStats={display.chartPresentation?.seriesStats ?? false}
-							tooltip={display.chartPresentation?.tooltip}
-							showPoints={display.chartPresentation?.showPoints}
-							stacked={display.stacked}
-							curveType={display.curveType}
-							thresholds={display.thresholds}
-							unit={display.unit}
-							logScale={display.yAxis?.logScale}
-							softMin={display.yAxis?.softMin}
-							softMax={display.yAxis?.softMax}
-							fitYAxisToData={display.yAxis?.fitYAxisToData}
-							pie={display.pie}
-							histogram={display.histogram}
-							heatmap={display.heatmap}
-							funnel={display.funnel}
-						/>
+						{renderChart({
+							entry,
+							display,
+							data: chartData,
+							className: options.className ?? "h-full w-full aspect-auto",
+							legend: display.chartPresentation?.legend ?? options.defaultLegend,
+						})}
 					</Suspense>
 				)}
 			</WidgetFrame>

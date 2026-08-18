@@ -67,7 +67,7 @@ export const TanstackLatencyLineChart = memo(function TanstackLatencyLineChart({
 		[series],
 	)
 
-	const focusStore = useMemo(() => createTooltipFocusStore<OverviewBenchRow>(), [])
+	const focusStore = useMemo(() => createTooltipFocusStore(), [])
 
 	const definition = useMemo(() => {
 		// Recharts' YAxis anchors a numeric domain at 0; TanStack's inferred linear
