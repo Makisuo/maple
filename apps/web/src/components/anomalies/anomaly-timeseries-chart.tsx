@@ -27,10 +27,10 @@ import { cn } from "@maple/ui/lib/utils"
 import { formatSignalValue } from "./anomaly-format"
 
 /** Tokens plus the literal each falls back to — canvas cannot read `var()`. */
-const SEVERITY_STROKE: Record<"critical" | "warning", readonly [string, string]> = {
+const SEVERITY_STROKE = {
 	critical: ["--destructive", "#ef4444"],
 	warning: ["--chart-4", "#fbbf24"],
-}
+} satisfies Record<"critical" | "warning", readonly [string, string]>
 
 /** One bucket of the observed signal. */
 interface SignalPoint {
@@ -49,7 +49,9 @@ export function AnomalyTimeseriesChart({
 }) {
 	const { signalType, baselineMedian, thresholdValue } = timeseries
 	const { theme } = useTheme()
-	// oxlint-disable-next-line react-hooks/exhaustive-deps
+	// `theme` is in the deps but not in the body on purpose: `resolvePlotColor`
+	// reads computed style, so the colour has to be re-resolved when the theme
+	// flips even though nothing here references it.
 	const stroke = React.useMemo(() => {
 		const [token, fallback] = SEVERITY_STROKE[incident.severity]
 		return resolvePlotColor(token, fallback)

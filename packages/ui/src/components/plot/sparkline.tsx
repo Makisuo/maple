@@ -55,7 +55,7 @@ export function PlotSparkline({
 	const definition = useMemo(() => {
 		const at = (point: SparkPoint) => point.index
 		const value = (point: SparkPoint) => point.value
-		const shape = curve === "monotone" ? d3Curve(curveMonotoneX) : undefined
+		const interpolation = curve === "monotone" ? d3Curve(curveMonotoneX) : undefined
 
 		return defineChart({
 			gradients: [verticalGradient(gradientId, stroke, fillOpacity[0], fillOpacity[1])],
@@ -68,9 +68,9 @@ export function PlotSparkline({
 					y1: () => 0,
 					fill: `url(#${gradientId})`,
 					stroke: "none",
-					curve: shape,
+					curve: interpolation,
 				}),
-				lineY(points, { x: at, y: value, stroke, strokeWidth: STROKE_WIDTH, curve: shape }),
+				lineY(points, { x: at, y: value, stroke, strokeWidth: STROKE_WIDTH, curve: interpolation }),
 			],
 			// The bare FACTORIES, so both domains infer from the marks. An instance
 			// keeps its own empty configured domain and paints nothing — and `axis:

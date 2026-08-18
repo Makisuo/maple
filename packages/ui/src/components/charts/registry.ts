@@ -258,14 +258,14 @@ export const chartRegistry: ChartRegistryEntry[] = [
  * is really an area widget. Redirecting is what makes the deletion invisible:
  * the style is gone, the widget it described is not.
  */
-const REMOVED_CHART_IDS: Readonly<Record<string, string>> = {
-	"default-bar": "query-builder-bar",
-	"gradient-area": "query-builder-area",
-	"dotted-line": "query-builder-line",
-}
+const REMOVED_CHART_IDS = new Map([
+	["default-bar", "query-builder-bar"],
+	["gradient-area", "query-builder-area"],
+	["dotted-line", "query-builder-line"],
+])
 
 export function getChartById(id: string): ChartRegistryEntry | undefined {
-	const resolved = REMOVED_CHART_IDS[id] ?? id
+	const resolved = REMOVED_CHART_IDS.get(id) ?? id
 	return chartRegistry.find((c) => c.id === resolved)
 }
 

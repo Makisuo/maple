@@ -111,11 +111,11 @@ export function snapMarkersToBuckets(
  * Resolved rather than passed through: these now reach a canvas 2D context,
  * which takes literal colour strings and silently paints nothing for a `var()`.
  */
-const TONE_TOKENS: Record<ChartEventTone, readonly [token: string, fallback: string]> = {
+const TONE_TOKENS = {
 	neutral: ["--muted-foreground", "#71717a"],
 	warn: ["--severity-warn", "#f59e0b"],
 	crit: ["--severity-error", "#ef4444"],
-}
+} satisfies Record<ChartEventTone, readonly [token: string, fallback: string]>
 
 function toneColor(tone: ChartEventTone): string {
 	const [token, fallback] = TONE_TOKENS[tone]

@@ -55,13 +55,13 @@ const METRIC_LABELS: Record<PlanetScaleMetric, string> = {
  * `var(--chart-2)` paints on SVG and resolves to NOTHING on canvas, so the token
  * is read off the document before it reaches a definition.
  */
-const METRIC_COLORS: Record<PlanetScaleMetric, readonly [token: string, fallback: string]> = {
+const METRIC_COLORS = {
 	connectionsAvg: ["--chart-1", "#6366f1"],
 	cpuMaxPercent: ["--chart-2", "#22d3ee"],
 	memMaxPercent: ["--chart-3", "#a78bfa"],
 	storageUsedPercent: ["--chart-5", "#f472b6"],
 	replicaLagMaxSeconds: ["--chart-4", "#fbbf24"],
-}
+} satisfies Record<PlanetScaleMetric, readonly [token: string, fallback: string]>
 
 function formatMetricValue(value: number, metric: PlanetScaleMetric): string {
 	if (metric === "cpuMaxPercent" || metric === "memMaxPercent") return formatPercent(value / 100)
@@ -113,7 +113,9 @@ export function PlanetScaleChart({
 	const chromeColors = usePlotChromeColors()
 	const focusStore = useMemo(() => createTooltipFocusStore(), [])
 	const { theme } = useTheme()
-	// oxlint-disable-next-line react-hooks/exhaustive-deps
+	// `theme` is in the deps but not in the body on purpose: `resolvePlotColor`
+	// reads computed style, so the colour has to be re-resolved when the theme
+	// flips even though nothing here references it.
 	const color = useMemo(() => {
 		const [token, fallback] = METRIC_COLORS[metric]
 		return resolvePlotColor(token, fallback)
