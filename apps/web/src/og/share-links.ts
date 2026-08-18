@@ -75,3 +75,24 @@ export const ogMetaAdditions = (meta: ShareOgMeta): string =>
 	`<meta property="og:image:width" content="${OG_IMAGE_WIDTH}" />` +
 	`<meta property="og:image:height" content="${OG_IMAGE_HEIGHT}" />` +
 	`<meta property="og:image:alt" content="${escapeAttribute(meta.title)}" />`
+
+const ALERT_CHART_PREFIX = "/alerts/chart/"
+const ALERT_CHART_SUFFIX = ".png"
+
+/**
+ * The signed chart id in an `/alerts/chart/<id>.png` path, or `undefined`.
+ *
+ * The id is base64url plus a `.` plus a signature, so unlike a share OG id it
+ * legitimately contains a dot — only the `.png` at the very end is the
+ * extension. A `/` anywhere is rejected: the id is one path segment, and
+ * anything with structure in it is not one this repo minted.
+ */
+export const alertChartIdFromPath = (pathname: string): string | undefined => {
+	if (!pathname.startsWith(ALERT_CHART_PREFIX) || !pathname.endsWith(ALERT_CHART_SUFFIX)) {
+		return undefined
+	}
+	const id = decodeURIComponent(
+		pathname.slice(ALERT_CHART_PREFIX.length, pathname.length - ALERT_CHART_SUFFIX.length),
+	)
+	return id.length === 0 || id.includes("/") ? undefined : id
+}
