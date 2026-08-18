@@ -26,7 +26,13 @@ use opentelemetry_proto::tonic::metrics::v1::{
     metric, number_data_point, Exemplar, NumberDataPoint,
 };
 use opentelemetry_proto::tonic::trace::v1::{span, status, Span};
+#[cfg(test)]
 use reqwest::Client;
+
+/// The shared outbound HTTP client type: plain `reqwest::Client` in normal
+/// builds, hotpath's instrumented wrapper (same request API) under
+/// `--features hotpath`.
+pub type HttpClient = hotpath::wrap::reqwest::Client;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use tokio::sync::mpsc;
@@ -652,13 +658,16 @@ struct EncodedFrame {
 }
 
 impl TelemetryPipeline {
-    pub async fn new(cfg: TinybirdConfig, http: Client) -> Result<Self, String> {
+    // `HttpClient` is the raw `reqwest::Client` in normal builds and the
+    // hotpath-instrumented wrapper under `--features hotpath`; `impl Into<_>`
+    // lets callers (and tests) keep handing in a plain `reqwest::Client`.
+    pub async fn new(cfg: TinybirdConfig, http: impl Into<HttpClient>) -> Result<Self, String> {
         Self::new_with_clickhouse(cfg, http, None).await
     }
 
     pub async fn new_with_clickhouse(
         cfg: TinybirdConfig,
-        http: Client,
+        http: impl Into<HttpClient>,
         clickhouse_targets: Option<Arc<dyn ClickHouseTargetProvider>>,
     ) -> Result<Self, String> {
         Self::new_with_clickhouse_validation(cfg, http, clickhouse_targets, true).await
@@ -666,10 +675,11 @@ impl TelemetryPipeline {
 
     pub async fn new_with_clickhouse_validation(
         cfg: TinybirdConfig,
-        http: Client,
+        http: impl Into<HttpClient>,
         clickhouse_targets: Option<Arc<dyn ClickHouseTargetProvider>>,
         require_tinybird_credentials: bool,
     ) -> Result<Self, String> {
+        let http: HttpClient = http.into();
         cfg.validate_for_pipeline(require_tinybird_credentials)?;
         std::fs::create_dir_all(&cfg.queue_dir)
             .map_err(|error| format!("create ingest WAL dir: {error}"))?;
@@ -684,6 +694,9 @@ impl TelemetryPipeline {
 
         for shard in 0..cfg.wal_shards {
             for destination in ExportDestination::ALL {
+                // Deliberately not `hotpath::channel!`-wrapped: commit_frames
+                // relies on `try_reserve_owned` permits (reserve before the WAL
+                // append), which the profiler's Sender wrapper does not expose.
                 let (sender, receiver) = mpsc::channel(cfg.queue_channel_capacity);
                 debug_assert_eq!(lane_senders.len(), lane_index(shard, destination));
                 lane_senders.push(sender);
@@ -732,6 +745,7 @@ impl TelemetryPipeline {
         .await
     }
 
+    #[hotpath::measure]
     pub async fn accept_traces_to(
         &self,
         org_id: &str,
@@ -766,6 +780,7 @@ impl TelemetryPipeline {
             .await
     }
 
+    #[hotpath::measure]
     pub async fn accept_logs_to(
         &self,
         org_id: &str,
@@ -792,6 +807,7 @@ impl TelemetryPipeline {
             .await
     }
 
+    #[hotpath::measure]
     pub async fn accept_metrics_to(
         &self,
         org_id: &str,
@@ -830,6 +846,7 @@ impl TelemetryPipeline {
         .await
     }
 
+    #[hotpath::measure]
     pub async fn accept_rows_to(
         &self,
         org_id: &str,
@@ -847,6 +864,7 @@ impl TelemetryPipeline {
         Ok(stats)
     }
 
+    #[hotpath::measure]
     async fn commit_frames(
         &self,
         frames: Vec<EncodedFrame>,
@@ -985,6 +1003,7 @@ impl TelemetryPipeline {
         release_org_queue_bytes(&self.inner.org_queue_bytes, org_id, bytes);
     }
 
+    #[hotpath::measure]
     async fn replay_committed_frames(&self) {
         for lane in 0..self.inner.lane_senders.len() {
             let frames = match self.inner.wal.replay(lane).await {
@@ -1134,6 +1153,7 @@ impl ShardedWal {
         self.append_inner(lane, frame, true).await
     }
 
+    #[hotpath::measure]
     async fn append_inner(
         &self,
         lane: usize,
@@ -1186,6 +1206,7 @@ impl ShardedWal {
             .map_err(|error| format!("join WAL replay: {error}"))?
     }
 
+    #[hotpath::measure]
     async fn mark_exported(&self, lane: usize, offset: u64) -> Result<(), String> {
         let shard_ref = Arc::clone(
             self.lanes
@@ -1547,7 +1568,7 @@ struct ExportWorker {
     org_queue_bytes: Arc<DashMap<String, Arc<AtomicU64>>>,
     clickhouse_breakers: Arc<ClickHouseBreakerRegistry>,
     clickhouse_targets: Option<Arc<dyn ClickHouseTargetProvider>>,
-    http: Client,
+    http: HttpClient,
     receiver: mpsc::Receiver<QueuedFrame>,
 }
 
@@ -1612,6 +1633,7 @@ impl ExportWorker {
         }
     }
 
+    #[hotpath::measure]
     async fn export_and_mark(&self, frames: Vec<QueuedFrame>) -> Result<(), String> {
         if frames.is_empty() {
             return Ok(());
@@ -1682,6 +1704,7 @@ impl ExportWorker {
         Ok(())
     }
 
+    #[hotpath::measure]
     async fn post_tinybird(
         &self,
         datasource: &str,
@@ -1803,6 +1826,7 @@ impl ExportWorker {
         }
     }
 
+    #[hotpath::measure]
     async fn post_clickhouse(
         &self,
         org_id: &str,
@@ -2167,6 +2191,7 @@ fn escape_clickhouse_sql_literal(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
+#[hotpath::measure]
 fn gzip(body: Vec<u8>) -> Result<Vec<u8>, String> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
     encoder
@@ -2177,6 +2202,7 @@ fn gzip(body: Vec<u8>) -> Result<Vec<u8>, String> {
         .map_err(|error| format!("finish gzip Tinybird body: {error}"))
 }
 
+#[hotpath::measure]
 fn encode_traces(
     datasources: &DatasourceNames,
     org_id: &str,
@@ -2311,6 +2337,7 @@ fn encode_traces(
     Ok((frames, stats))
 }
 
+#[hotpath::measure]
 fn encode_logs(
     datasources: &DatasourceNames,
     org_id: &str,
@@ -2400,6 +2427,7 @@ fn encode_log_row(
     }))
 }
 
+#[hotpath::measure]
 fn encode_metrics(
     datasources: &DatasourceNames,
     org_id: &str,

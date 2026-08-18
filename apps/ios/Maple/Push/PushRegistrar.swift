@@ -161,11 +161,13 @@ final class PushRegistrar: NSObject {
 /// mode: Apple answers a token sent to the other host with `BadDeviceToken`
 /// and the server disables the device, so the phone goes silent.
 ///
-/// Xcode-installed builds carry `aps-environment = development` in the
-/// embedded provisioning profile; TestFlight archives carry `production`.
-/// **App Store installs have no embedded profile at all** — Apple strips it
-/// when it re-signs — and their tokens are production, so "no profile" must
-/// mean production. The simulator also has no profile, but a simulator token
+/// Xcode-installed (and ad-hoc) builds carry `aps-environment = development`
+/// or `production` in the embedded provisioning profile. **TestFlight and App
+/// Store installs have no embedded profile at all** — anything uploaded through
+/// App Store Connect is re-signed by Apple, which strips it — and their tokens
+/// are production, so "no profile" must mean production. (Observed 2026-08-18:
+/// a TestFlight build read as sandbox here, its token went to the sandbox host,
+/// Apple answered `BadDeviceToken`, and the server disabled the phone.) The simulator also has no profile, but a simulator token
 /// is undeliverable from a server on either host, so nothing is lost by
 /// treating it the same way.
 enum PushEnvironmentDetector {

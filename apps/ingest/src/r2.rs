@@ -66,7 +66,7 @@ pub fn replay_object_key(org_id: &str, session_id: &str, chunk_seq: u32) -> Stri
 /// Writes replay chunk payloads to an S3-compatible bucket.
 #[derive(Clone)]
 pub struct ReplayBlobStore {
-    client: reqwest::Client,
+    client: crate::telemetry::HttpClient,
     /// Origin only, no trailing slash: `https://<account>.r2.cloudflarestorage.com`.
     endpoint: String,
     host: String,
@@ -79,7 +79,7 @@ pub struct ReplayBlobStore {
 
 impl ReplayBlobStore {
     pub fn new(
-        client: reqwest::Client,
+        client: impl Into<crate::telemetry::HttpClient>,
         endpoint: String,
         bucket: String,
         access_key_id: String,
@@ -90,7 +90,7 @@ impl ReplayBlobStore {
         let endpoint = endpoint.trim_end_matches('/').to_string();
         let host = host_from_endpoint(&endpoint);
         Self {
-            client,
+            client: client.into(),
             endpoint,
             host,
             bucket,

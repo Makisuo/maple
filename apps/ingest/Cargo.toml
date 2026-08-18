@@ -65,6 +65,20 @@ deadpool-postgres = "0.14"
 tokio-postgres-rustls = "0.13"
 rustls = { version = "0.23", features = ["ring"] }
 webpki-roots = "0.26"
+# Opt-in profiler (https://hotpath.rs). Every macro is a no-op and no profiler
+# code is compiled unless `--features hotpath` is passed; the `tokio` and
+# `reqwest-0-13` features only exist so the `hotpath::wrap::*` type aliases
+# resolve to the raw tokio/reqwest types in normal builds.
+hotpath = { version = "0.23", features = ["tokio", "reqwest-0-13"] }
+
+[features]
+default = []
+# `cargo run --features hotpath` prints a timing report on exit; add
+# `hotpath-alloc` for allocation tracking (swaps in a counting allocator around
+# jemalloc). Never enable by default — the report and metrics server cost real
+# CPU on the request path.
+hotpath = ["hotpath/hotpath"]
+hotpath-alloc = ["hotpath/hotpath-alloc"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }

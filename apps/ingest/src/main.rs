@@ -1,3 +1,12 @@
+// The tonic `#[async_trait]` export handlers nest deep enough that, with the
+// `#[hotpath::measure]` futures layered inside them under `--features hotpath`,
+// rustc's layout query overflows the default limit of 128.
+#![recursion_limit = "256"]
+
+// Under `--features hotpath-alloc`, `#[hotpath::main(allocator = ...)]` installs
+// its own counting allocator wrapped around jemalloc, so this static must step
+// aside or the two `#[global_allocator]`s collide at link time.
+#[cfg(not(feature = "hotpath-alloc"))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
@@ -823,7 +832,9 @@ struct ClickHouseTargetRow {
 
 struct AppState {
     config: AppConfig,
-    http_client: Client,
+    /// The raw `reqwest::Client` in normal builds; the hotpath-instrumented
+    /// wrapper (same request API) under `--features hotpath`.
+    http_client: hotpath::wrap::reqwest::Client,
     telemetry_pipeline: Option<TelemetryPipeline>,
     /// Set once the key store has answered a probe. Drives `/ready`; never
     /// `/health` — see the comment on `health()`.
@@ -1470,8 +1481,12 @@ fn endpoint_loopback_to_self(forward_endpoint: &str, bind_port: u16) -> bool {
 }
 
 #[tokio::main]
+#[hotpath::main(allocator = tikv_jemallocator::Jemalloc)]
 async fn main() {
     let _ = dotenvy::dotenv();
+    // No-op unless `--features hotpath`: exports tokio runtime metrics (workers,
+    // park/unpark, queue depth) into the profiler report alongside function timings.
+    hotpath::tokio_runtime!();
 
     let config = match AppConfig::from_env() {
         Ok(config) => config,
@@ -1499,7 +1514,10 @@ async fn main() {
         .http2_keep_alive_timeout(Duration::from_secs(5))
         .build()
     {
-        Ok(client) => client,
+        // `http!` is identity unless `--features hotpath`, where it reports
+        // per-endpoint request counts/latency/errors (Tinybird, ClickHouse,
+        // the forward collector, Autumn, R2 — all outbound calls share this pool).
+        Ok(client) => hotpath::http!(client, label = "outbound"),
         Err(error) => {
             eprintln!("HTTP client init error: {error}");
             std::process::exit(1);
@@ -2083,6 +2101,13 @@ async fn ready(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
+// The request entry points (`handle_*`, `handle_*_inner`, `accept_grpc_decoded`)
+// are deliberately not `#[hotpath::measure]`d: wrapping their futures pushed the
+// fully-inlined request state machine over the 2 MB tokio worker stack
+// (release overflowed at the axum handlers, debug one level down). The stages
+// underneath — `resolve_ingest_key`, `decode_and_enrich_payload`,
+// `process_decoded_payload`, `forward_to_collector`, and the pipeline in
+// `telemetry.rs` — are measured and add up to the same work.
 async fn handle_traces(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -3824,6 +3849,7 @@ fn detect_payload_format(content_type: &str) -> Result<PayloadFormat, ApiError> 
     ))
 }
 
+#[hotpath::measure]
 fn decode_payload(body: &Bytes, content_encoding: Option<&str>) -> Result<Vec<u8>, ApiError> {
     match content_encoding {
         None => Ok(body.to_vec()),
@@ -3841,6 +3867,7 @@ fn decode_payload(body: &Bytes, content_encoding: Option<&str>) -> Result<Vec<u8
     }
 }
 
+#[hotpath::measure]
 fn encode_payload(payload: &[u8], content_encoding: Option<&str>) -> Result<Vec<u8>, ApiError> {
     match content_encoding {
         None => Ok(payload.to_vec()),
@@ -3859,6 +3886,7 @@ fn encode_payload(payload: &[u8], content_encoding: Option<&str>) -> Result<Vec<
     }
 }
 
+#[hotpath::measure]
 fn decode_and_enrich_payload(
     signal: Signal,
     payload_format: PayloadFormat,
@@ -4049,6 +4077,7 @@ fn native_rows_pipeline_for<'a>(
         .ok_or_else(|| ApiError::service_unavailable(unavailable_message))
 }
 
+#[hotpath::measure]
 async fn forward_to_collector(
     state: &AppState,
     signal: Signal,
@@ -4164,6 +4193,7 @@ async fn forward_to_collector(
         .map_err(|_| ApiError::service_unavailable("Telemetry backend unavailable"))
 }
 
+#[hotpath::measure]
 async fn process_decoded_payload(
     state: &AppState,
     signal: Signal,
@@ -4204,6 +4234,7 @@ async fn process_decoded_payload(
     Ok(StatusCode::OK.into_response())
 }
 
+#[hotpath::measure]
 async fn accept_native_decoded_payload(
     state: &AppState,
     signal: Signal,
@@ -4327,6 +4358,7 @@ impl OrgRoutingResolver {
 }
 
 impl IngestKeyResolver {
+    #[hotpath::measure]
     async fn resolve_ingest_key(&self, raw_key: &str) -> Result<Option<ResolvedIngestKey>, String> {
         // Recorded on `ingest.authenticate` when this runs under the HTTP path;
         // a no-op elsewhere (the field is only declared on that span).
@@ -4428,6 +4460,7 @@ impl CloudflareConnectorResolver {
 }
 
 impl SamplingPolicyResolver {
+    #[hotpath::measure]
     async fn resolve_policy(&self, org_id: &str) -> SamplingPolicy {
         if let Some(policy) = self.cache.get(org_id).await {
             return policy;
@@ -4488,6 +4521,7 @@ fn parse_attribute_mapping_row(row: AttributeMappingRow) -> Option<AttributeMapp
 }
 
 impl AttributeMappingResolver {
+    #[hotpath::measure]
     async fn resolve_mappings(&self, org_id: &str) -> Arc<Vec<AttributeMappingRule>> {
         if let Some(rules) = self.cache.get(org_id).await {
             return rules;
@@ -6260,7 +6294,7 @@ mod tests {
                 replay_blob_store: None,
                 trust_proxy_geo: false,
             },
-            http_client,
+            http_client: http_client.into(),
             telemetry_pipeline: Some(telemetry_pipeline),
             resolver: IngestKeyResolver {
                 store: Arc::clone(&key_store),
