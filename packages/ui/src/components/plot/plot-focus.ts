@@ -44,7 +44,10 @@ export function focusCrosshair(chromeColors: PlotChromeColors) {
 export function focusDot<TDatum>(
 	rows: readonly TDatum[],
 	x: (datum: TDatum) => ChartValue,
-	y: (datum: TDatum) => number,
+	// `null` is a real answer for a sparse series — a bucket the source never
+	// reported. `dot` skips a null y, so the gap simply has no focus dot rather
+	// than one pinned to zero.
+	y: (datum: TDatum) => number | null,
 	color: string,
 	chromeColors: PlotChromeColors,
 ) {

@@ -1,15 +1,24 @@
 import { useMemo, type ReactNode } from "react"
-import { Line, LineChart } from "recharts"
+import { d3Curve, defineChart, lineY } from "@tanstack/charts"
+import { scaleLinear } from "@tanstack/charts-scales/linear"
+import { scalePoint } from "@tanstack/charts-scales/point"
+import { curveMonotoneX } from "d3-shape"
 
 import {
-	ChartContainer,
-	ChartTooltip,
-	ChartTooltipContent,
-	type ChartConfig,
-	ChartGrid,
-	ChartXAxis,
-	ChartYAxis,
-} from "@maple/ui/components/ui/chart"
+	PlotFrame,
+	PlotTooltipBody,
+	createTooltipFocusStore,
+	cursorTooltip,
+	dashedGridY,
+	focusCrosshair,
+	focusDot,
+	linearYDomain,
+	niceLinearDomain,
+	resolvePlotColor,
+	usePlotChromeColors,
+	type PlotTooltipSeries,
+} from "@maple/ui/components/plot"
+import { useTheme } from "@maple/ui/hooks/use-theme"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
@@ -17,7 +26,7 @@ import type { PlanetScaleInfraTimeseriesRow } from "@/api/warehouse/planetscale-
 import { formatNumber } from "@maple/ui/lib/format"
 import { CHART_EMPTY_MESSAGE, makeBucketLabeler } from "../chart-utils"
 import {
-	renderChartEventMarkers,
+	chartEventMarkerMarks,
 	snapMarkersToBuckets,
 	type ChartEventMarker,
 } from "../primitives/chart-event-markers"
@@ -40,13 +49,19 @@ const METRIC_LABELS: Record<PlanetScaleMetric, string> = {
 	replicaLagMaxSeconds: "Replica lag (max)",
 } satisfies Record<PlanetScaleMetric, string>
 
-const METRIC_COLORS: Record<PlanetScaleMetric, string> = {
-	connectionsAvg: "var(--chart-1)",
-	cpuMaxPercent: "var(--chart-2)",
-	memMaxPercent: "var(--chart-3)",
-	storageUsedPercent: "var(--chart-5)",
-	replicaLagMaxSeconds: "var(--chart-4)",
-} satisfies Record<PlanetScaleMetric, string>
+/**
+ * Tokens, plus the literal each falls back to.
+ *
+ * `var(--chart-2)` paints on SVG and resolves to NOTHING on canvas, so the token
+ * is read off the document before it reaches a definition.
+ */
+const METRIC_COLORS: Record<PlanetScaleMetric, readonly [token: string, fallback: string]> = {
+	connectionsAvg: ["--chart-1", "#6366f1"],
+	cpuMaxPercent: ["--chart-2", "#22d3ee"],
+	memMaxPercent: ["--chart-3", "#a78bfa"],
+	storageUsedPercent: ["--chart-5", "#f472b6"],
+	replicaLagMaxSeconds: ["--chart-4", "#fbbf24"],
+}
 
 function formatMetricValue(value: number, metric: PlanetScaleMetric): string {
 	if (metric === "cpuMaxPercent" || metric === "memMaxPercent") return formatPercent(value / 100)
@@ -69,12 +84,17 @@ export function PlanetScaleChartLoading({ metric }: { metric: PlanetScaleMetric 
 	)
 }
 
+/** One point: its bucket label, and the metric's value there (null = no sample). */
+interface MetricPoint {
+	time: string
+	value: number | null
+}
+
 /** One single-series health chart for the /infra/planetscale database detail page. */
 export function PlanetScaleChart({
 	buckets,
 	metric,
 	waiting,
-	syncId,
 	scope,
 	markers,
 	emptyMessage,
@@ -83,7 +103,6 @@ export function PlanetScaleChart({
 	buckets: ReadonlyArray<PlanetScaleInfraTimeseriesRow>
 	metric: PlanetScaleMetric
 	waiting?: boolean
-	syncId?: string
 	scope?: ReactNode
 	/** Deploys and branch events drawn onto the plot — what explains a cliff. */
 	markers?: ReadonlyArray<ChartEventMarker>
@@ -91,7 +110,16 @@ export function PlanetScaleChart({
 	emptyMessage?: ReactNode
 	className?: string
 }) {
-	const data = useMemo(() => {
+	const chromeColors = usePlotChromeColors()
+	const focusStore = useMemo(() => createTooltipFocusStore(), [])
+	const { theme } = useTheme()
+	// oxlint-disable-next-line react-hooks/exhaustive-deps
+	const color = useMemo(() => {
+		const [token, fallback] = METRIC_COLORS[metric]
+		return resolvePlotColor(token, fallback)
+	}, [metric, theme])
+
+	const data = useMemo<MetricPoint[]>(() => {
 		const labeler = makeBucketLabeler(buckets.map((row) => row.bucket))
 		return buckets.map((row) => ({ time: labeler(row.bucket), value: row[metric] }))
 	}, [buckets, metric])
@@ -109,10 +137,82 @@ export function PlanetScaleChart({
 	// gaps in the line, not zeroes — but a series of only gaps is an empty chart.
 	const hasValues = useMemo(() => data.some((point) => point.value !== null), [data])
 
-	const config = useMemo<ChartConfig>(
-		() => ({ value: { label: METRIC_LABELS[metric], color: METRIC_COLORS[metric] } }),
-		[metric],
+	/**
+	 * ONE domain, feeding both the axis and the event bands.
+	 *
+	 * A band is a `rect` and needs both edges, so it cannot discover the plot's
+	 * extent the way Recharts' `ReferenceArea` did. Computing it here is what
+	 * keeps the band flush with the axis instead of stopping wherever the data
+	 * happened to end.
+	 */
+	const yDomain = useMemo<[number, number]>(() => {
+		if (isPercentMetric(metric)) return [0, 100]
+		return niceLinearDomain(
+			linearYDomain({
+				rows: data.map((point) => ({ value: point.value ?? 0 })),
+				keys: ["value"],
+			}),
+		)
+	}, [data, metric])
+
+	const tooltipSeries = useMemo<PlotTooltipSeries<MetricPoint>[]>(
+		() => [
+			{
+				label: METRIC_LABELS[metric],
+				color,
+				value: (point: MetricPoint) => point.value,
+				format: (value: number) => formatMetricValue(value, metric),
+			},
+		],
+		[metric, color],
 	)
+
+	const definition = useMemo(() => {
+		const at = (point: MetricPoint) => point.time
+		// A bucket with no sample is a hole in the data; bridging it would draw a
+		// disk trend that never happened. `null` is what breaks the path — the
+		// equivalent of Recharts' `connectNulls={false}`.
+		const value = (point: MetricPoint) => point.value
+
+		return defineChart({
+			marks: [
+				dashedGridY(),
+				...chartEventMarkerMarks(snapped, { yDomain }),
+				lineY(data, {
+					x: at,
+					y: value,
+					stroke: color,
+					strokeWidth: 1.5,
+					curve: d3Curve(curveMonotoneX),
+				}),
+				focusDot(data, at, value, color, chromeColors),
+				focusCrosshair(chromeColors),
+			],
+			x: {
+				// A POINT scale over the bucket labels: this axis is categorical, which
+				// is also what lets the markers snap by index.
+				scale: scalePoint,
+				axis: { line: false, ticks: { size: 0, padding: 8 }, tickLabels: { thin: { minGap: 12 } } },
+			},
+			y: {
+				scale: scaleLinear().domain(yDomain),
+				axis: {
+					line: false,
+					ticks: {
+						size: 0,
+						padding: 8,
+						format: (v: number) => formatMetricValue(v, metric),
+					},
+				},
+			},
+			// A pinned left margin keeps this chart's plot aligned with its siblings
+			// on the page, as `<YAxis width={52}>` did.
+			margin: { left: 52, top: 12, right: 12, bottom: 4 },
+			focus: "group-x",
+			focusRing: false,
+			tooltip: cursorTooltip(focusStore.anchor),
+		})
+	}, [data, snapped, yDomain, color, chromeColors, metric, focusStore])
 
 	return (
 		<ChartCard
@@ -124,53 +224,21 @@ export function PlanetScaleChart({
 			{!hasValues ? (
 				<ChartCardMessage>{emptyMessage ?? CHART_EMPTY_MESSAGE}</ChartCardMessage>
 			) : (
-				<ChartContainer config={config} className="w-full" style={{ height: CHART_HEIGHT }}>
-					<LineChart
-						data={data}
-						margin={{ top: 12, right: 12, left: 0, bottom: 4 }}
-						syncId={syncId}
-					>
-						<ChartGrid />
-						{renderChartEventMarkers(snapped)}
-						<ChartXAxis
-							dataKey="time"
-						/>
-						<ChartYAxis
-							tickMargin={8}
-							width={52}
-							domain={isPercentMetric(metric) ? [0, 100] : undefined}
-							tickFormatter={(v: number) => formatMetricValue(v, metric)}
-						/>
-						<ChartTooltip
-							content={
-								<ChartTooltipContent
-									indicator="dot"
-									formatter={(value) => (
-										<div className="flex flex-1 items-center justify-between gap-3 leading-none">
-											<span className="text-muted-foreground">
-												{METRIC_LABELS[metric]}
-											</span>
-											<span className="font-mono font-medium tabular-nums text-foreground">
-												{formatMetricValue(Number(value), metric)}
-											</span>
-										</div>
-									)}
-								/>
-							}
-						/>
-						<Line
-							type="monotone"
-							dataKey="value"
-							stroke={METRIC_COLORS[metric]}
-							strokeWidth={1.5}
-							dot={false}
-							// A bucket with no sample is a hole in the data; bridging it would
-							// draw a disk trend that never happened.
-							connectNulls={false}
-							isAnimationActive={false}
-						/>
-					</LineChart>
-				</ChartContainer>
+				<div className="w-full" style={{ height: CHART_HEIGHT }}>
+					<PlotFrame
+						definition={definition}
+						ariaLabel={METRIC_LABELS[metric]}
+						className="h-full w-full"
+						renderTooltipBody={({ points }) => (
+							<PlotTooltipBody
+								points={points}
+								series={tooltipSeries}
+								focusStore={focusStore}
+								heading={(point: MetricPoint) => point.time}
+							/>
+						)}
+					/>
+				</div>
 			)}
 		</ChartCard>
 	)

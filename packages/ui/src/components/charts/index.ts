@@ -19,21 +19,17 @@ export type {
 	QueryBuilderLineChartProps,
 	QueryBuilderPieChartProps,
 	ServiceChartProps,
-	SimpleChartProps,
 	ThroughputAreaChartProps,
 } from "./_shared/chart-types"
 export * from "./_shared/sample-data"
 
 // Bar Charts
-export { DefaultBarChart } from "./bar/default-bar-chart"
 export { QueryBuilderBarChart } from "./bar/query-builder-bar-chart"
 
 // Area Charts
-export { GradientAreaChart } from "./area/gradient-area-chart"
 export { QueryBuilderAreaChart } from "./area/query-builder-area-chart"
 
 // Line Charts
-export { DottedLineChart } from "./line/dotted-line-chart"
 export { QueryBuilderLineChart } from "./line/query-builder-line-chart"
 
 // Service Charts

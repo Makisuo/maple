@@ -167,3 +167,6 @@ export {
 	type StatsSeries,
 } from "./series-stats"
 export { useSeriesVisibility } from "./series-visibility"
+
+// The chrome-less trend line, shared by the table and stat-widget sparklines.
+export { PlotSparkline, type PlotSparklineProps } from "./sparkline"

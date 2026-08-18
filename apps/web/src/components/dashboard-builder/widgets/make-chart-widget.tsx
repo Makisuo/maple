@@ -188,10 +188,6 @@ function renderChart({ entry, display, data, className, legend }: RenderArgs): R
 			const Chart = entry.component
 			return <Chart data={data} className={className} legend={legend} tooltip={tooltip} />
 		}
-		case "simple": {
-			const Chart = entry.component
-			return <Chart data={data} className={className} />
-		}
 		default: {
 			// Exhaustiveness: adding a registry kind without a branch fails here at
 			// compile time rather than rendering nothing at runtime.

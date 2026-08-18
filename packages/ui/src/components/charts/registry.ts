@@ -11,13 +11,9 @@ import type {
 	QueryBuilderLineChartProps,
 	QueryBuilderPieChartProps,
 	ServiceChartProps,
-	SimpleChartProps,
 	ThroughputAreaChartProps,
 } from "./_shared/chart-types"
 import {
-	defaultBarData,
-	areaTimeSeriesData,
-	lineTimeSeriesData,
 	latencyTimeSeriesData,
 	throughputTimeSeriesData,
 	apdexTimeSeriesData,
@@ -66,25 +62,10 @@ export type ChartRegistryEntry =
 	| ChartEntry<"hbar", QueryBuilderHbarChartProps>
 	| ChartEntry<"service", ServiceChartProps>
 	| ChartEntry<"throughput", ThroughputAreaChartProps>
-	| ChartEntry<"simple", SimpleChartProps>
 
 export type ChartKind = ChartRegistryEntry["kind"]
 
 export const chartRegistry: ChartRegistryEntry[] = [
-	// Bar Charts
-	{
-		kind: "simple",
-		id: "default-bar",
-		name: "Default Bar",
-		description: "Bar chart with dotted SVG pattern background",
-		category: "bar",
-		component: lazy(() =>
-			import("./bar/default-bar-chart").then((m) => ({ default: m.DefaultBarChart })),
-		),
-		sampleData: defaultBarData,
-		tags: ["bar", "basic", "dotted", "pattern"],
-	},
-
 	// Query Builder Bar
 	{
 		kind: "bar",
@@ -117,20 +98,6 @@ export const chartRegistry: ChartRegistryEntry[] = [
 		tags: ["hbar", "horizontal", "bar", "ranked", "top", "breakdown", "query-builder"],
 	},
 
-	// Area Charts
-	{
-		kind: "simple",
-		id: "gradient-area",
-		name: "Gradient Area",
-		description: "Stacked area chart with gradient fills",
-		category: "area",
-		component: lazy(() =>
-			import("./area/gradient-area-chart").then((m) => ({ default: m.GradientAreaChart })),
-		),
-		sampleData: areaTimeSeriesData,
-		tags: ["area", "gradient", "stacked"],
-	},
-
 	// Query Builder Area
 	{
 		kind: "area",
@@ -148,18 +115,6 @@ export const chartRegistry: ChartRegistryEntry[] = [
 	},
 
 	// Line Charts
-	{
-		kind: "simple",
-		id: "dotted-line",
-		name: "Dotted Line",
-		description: "Line chart with dashed stroke",
-		category: "line",
-		component: lazy(() =>
-			import("./line/dotted-line-chart").then((m) => ({ default: m.DottedLineChart })),
-		),
-		sampleData: lineTimeSeriesData,
-		tags: ["line", "dotted", "dashed"],
-	},
 	{
 		kind: "line",
 		id: "query-builder-line",
@@ -288,8 +243,30 @@ export const chartRegistry: ChartRegistryEntry[] = [
 	},
 ]
 
+/**
+ * Ids that were REMOVED, and what they resolve to now.
+ *
+ * `default-bar`, `gradient-area` and `dotted-line` were Recharts demos that
+ * existed only as the chart picker's thumbnails — the widget a card actually
+ * created was always the `query-builder-*` entry beside it. They were also
+ * reachable as persisted `display.chartId` values, because the old "Chart Style"
+ * dropdown wrote them and `v1-to-v2` preserves whatever `chartId` a widget
+ * already has.
+ *
+ * So deleting the entries outright would blank every dashboard tile still
+ * carrying one, and would send `toPanelType` down its `"line"` fallback for what
+ * is really an area widget. Redirecting is what makes the deletion invisible:
+ * the style is gone, the widget it described is not.
+ */
+const REMOVED_CHART_IDS: Readonly<Record<string, string>> = {
+	"default-bar": "query-builder-bar",
+	"gradient-area": "query-builder-area",
+	"dotted-line": "query-builder-line",
+}
+
 export function getChartById(id: string): ChartRegistryEntry | undefined {
-	return chartRegistry.find((c) => c.id === id)
+	const resolved = REMOVED_CHART_IDS[id] ?? id
+	return chartRegistry.find((c) => c.id === resolved)
 }
 
 // `getChartsByCategory` and `searchCharts` lived here with no callers in any app
