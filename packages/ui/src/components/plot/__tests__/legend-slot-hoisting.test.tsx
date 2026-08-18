@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react"
+import { act, cleanup, render } from "@testing-library/react"
 import { useMemo, useState, type ReactNode } from "react"
 import { afterEach, describe, expect, it } from "vitest"
 
@@ -93,5 +93,72 @@ describe("usePlotLegendSlot", () => {
 		const chips = [...container.querySelectorAll("[data-testid='host'] span")]
 		expect(chips.map((node) => node.getAttribute("data-key"))).toEqual(["requests", "errors"])
 		expect(chips.map((node) => node.getAttribute("data-dashed"))).toEqual(["false", "true"])
+	})
+})
+
+/**
+ * The loop guard.
+ *
+ * `usePlotLegendSlot` publishes into state an ANCESTOR owns, so a caller that
+ * rebuilds `items` every render used to be a hang, not a slow path: publish →
+ * host `setState` → chart re-render → fresh array → publish. An inline
+ * `mapSeries` on `useTimeseriesModel` was one arrow function away from it.
+ */
+describe("usePlotLegendSlot republish guard", () => {
+	/** Counts host commits, and rebuilds `items` every render as the footgun did. */
+	function LoopHost({ renders }: { renders: { count: number } }) {
+		const [items, setItems] = useState<readonly PlotLegendItem[]>([])
+		const slot = useMemo(() => ({ setItems }), [])
+		renders.count += 1
+		return (
+			<PlotLegendSlotContext value={slot}>
+				<div data-testid="host">{items.map((item) => item.key).join(",")}</div>
+				{/* A NEW array each render — never memoised, on purpose. */}
+				<Publisher items={series.map((entry) => ({ ...entry }))} />
+			</PlotLegendSlotContext>
+		)
+	}
+
+	it("settles when the caller rebuilds items every render", () => {
+		const renders = { count: 0 }
+		const { container } = render(<LoopHost renders={renders} />)
+
+		// Rendering at all is the assertion: an unguarded publish exhausts React's
+		// update depth here rather than returning. The bound is generous — one
+		// mount plus the single commit the first publish legitimately causes —
+		// and still orders of magnitude below a loop.
+		expect(renders.count).toBeLessThan(6)
+		expect(container.querySelector("[data-testid='host']")?.textContent).toBe("requests,errors")
+	})
+
+	it("publishes again when the content actually changes", () => {
+		// The guard must not be so eager that a real series change stops reaching
+		// the header — a chart swapping group-by keeps its array length.
+		function ChangingHost() {
+			const [items, setItems] = useState<readonly PlotLegendItem[]>([])
+			const slot = useMemo(() => ({ setItems }), [])
+			const [swapped, setSwapped] = useState(false)
+			return (
+				<PlotLegendSlotContext value={slot}>
+					<div data-testid="host">{items.map((item) => item.key).join(",")}</div>
+					<button type="button" onClick={() => setSwapped(true)}>
+						swap
+					</button>
+					<Publisher
+						items={
+							swapped ? [{ key: "latency", label: "Latency", color: "#a78bfa" }] : series
+						}
+					/>
+				</PlotLegendSlotContext>
+			)
+		}
+
+		const { container } = render(<ChangingHost />)
+		expect(container.querySelector("[data-testid='host']")?.textContent).toBe("requests,errors")
+
+		act(() => {
+			container.querySelector("button")?.click()
+		})
+		expect(container.querySelector("[data-testid='host']")?.textContent).toBe("latency")
 	})
 })

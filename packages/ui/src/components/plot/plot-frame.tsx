@@ -360,6 +360,32 @@ export interface PlotLegendSlot {
 
 export const PlotLegendSlotContext = createContext<PlotLegendSlot | null>(null)
 
+/**
+ * Whether two published legends say the SAME thing.
+ *
+ * `label` is a `ReactNode` and is compared by identity, which is exact for the
+ * strings every chart actually passes and errs toward republishing for an
+ * element — the safe direction, since a missed publish is a stale header while a
+ * spurious one is a single extra commit.
+ */
+function sameLegendItems(a: readonly PlotLegendItem[], b: readonly PlotLegendItem[]): boolean {
+	if (a === b) return true
+	if (a.length !== b.length) return false
+	for (let index = 0; index < a.length; index += 1) {
+		const left = a[index]
+		const right = b[index]
+		if (left === undefined || right === undefined) {
+			if (left !== right) return false
+			continue
+		}
+		if (left.key !== right.key) return false
+		if (left.color !== right.color) return false
+		if (left.dashed !== right.dashed) return false
+		if (!Object.is(left.label, right.label)) return false
+	}
+	return true
+}
+
 /** Stable empty reference, so clearing the slot cannot loop the publish effect. */
 const NO_LEGEND_ITEMS: readonly PlotLegendItem[] = []
 
@@ -367,10 +393,15 @@ const NO_LEGEND_ITEMS: readonly PlotLegendItem[] = []
  * Publishes a chart's series into an enclosing legend slot, if one is open.
  *
  * An effect, because this writes into state that an ANCESTOR owns — the one
- * case where a render-phase write is not available. It is edge-triggered on the
- * `items` identity, so it must be handed a memoised array: the hover path
- * rebuilds nothing here, and a fresh array per render would put a parent commit
- * on every pointer tick.
+ * case where a render-phase write is not available. Publishing is guarded by
+ * CONTENT rather than by array identity, because identity alone made an
+ * unmemoised caller a hang rather than a slow path: a fresh `items` array per
+ * render republishes, the host's `setState` re-renders the chart, and the chart
+ * builds another fresh array. `mapSeries` passed inline was one arrow function
+ * away from that loop, with only a doc comment holding the line.
+ *
+ * Memoising `items` is still worth doing — it skips the effect entirely rather
+ * than skipping its body — but it is no longer load-bearing.
  *
  * Pass `null` when the chart draws its own legend, so the header does not
  * duplicate what the plot already shows.
@@ -388,13 +419,30 @@ const NO_LEGEND_ITEMS: readonly PlotLegendItem[] = []
  */
 export function usePlotLegendSlot(items: readonly PlotLegendItem[] | null): boolean {
 	const slot = use(PlotLegendSlotContext)
+	// What the slot was last handed, so an equal republish can be skipped. A ref
+	// rather than state: nothing renders off it.
+	const published = useRef<readonly PlotLegendItem[] | null>(null)
+
 	useEffect(() => {
 		if (!slot) return
-		slot.setItems(items ?? NO_LEGEND_ITEMS)
-		// Clearing on unmount matters on a dashboard: a tile that swaps chart type
-		// would otherwise keep the old chart's series in its header.
-		return () => slot.setItems(NO_LEGEND_ITEMS)
+		const next = items ?? NO_LEGEND_ITEMS
+		if (published.current === next) return  // TEMP: identity-only, the old behaviour
+		published.current = next
+		slot.setItems(next)
 	}, [slot, items])
+
+	// Clearing is keyed on the SLOT alone, deliberately. Folding it into the
+	// publish effect above would make every `items` change a clear-then-set pair,
+	// which is two host commits per change and reintroduces the loop the guard
+	// exists to close. What it has to catch is a tile that swaps chart type: the
+	// old chart's series would otherwise stay in the card header forever.
+	useEffect(() => {
+		if (!slot) return
+		return () => {
+			published.current = null
+			slot.setItems(NO_LEGEND_ITEMS)
+		}
+	}, [slot])
 	// `null` means the caller declined to hoist, so it is `false` even under an
 	// open slot — the slot received an empty list, and an empty header is not a
 	// legend the chart can rely on.
