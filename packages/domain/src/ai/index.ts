@@ -9,4 +9,11 @@
 
 export { AI_VENDORS, AI_VENDOR_LABELS, type AiVendor } from "./vendors"
 
+export {
+	normalizeAiSpan,
+	type AiSpanFacts,
+	type AiSpanInput,
+	type AiSpanRole,
+} from "./integrations"
+
 export { AI_VENDORS_ROLLUP_ENABLEMENT_HOUR_ENV, AI_VENDORS_ROLLUP_TABLE } from "./rollup-enablement"
