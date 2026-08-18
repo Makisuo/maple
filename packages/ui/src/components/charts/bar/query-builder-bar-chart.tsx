@@ -2,18 +2,17 @@ import { barY, defineChart, group } from "@tanstack/charts"
 import * as React from "react"
 
 import { formatBucketLabel, formatValueByUnit } from "../../../lib/format"
-import { cn } from "../../../lib/utils"
 import { dashedGridY } from "../../plot/plot-grid"
 import { findFirstPartialIndex, trimEmptyTrailingBuckets } from "../../plot/partial-buckets"
-import { PlotFrame, UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
+import { UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
 import { PlotTooltipBody, cursorTooltip, type PlotTooltipSeries } from "../../plot/plot-tooltip"
 import { usePlotColors, type PlotColorToken } from "../../plot/theme"
 import { thresholdRules } from "../../plot/threshold-rules"
 import {
+	Timeseries,
 	asFiniteNumber,
 	bucketBandDomain,
 	timeseriesBandXAxis,
-	timeseriesLegend,
 	timeseriesYAxis,
 	useTimeseriesModel,
 	type TimeseriesRow,
@@ -146,8 +145,8 @@ export function QueryBuilderBarChart({
 		[otherColor],
 	)
 
-	const model = useTimeseriesModel({ data: bucketed, unit, legend, mapSeries: recolor })
-	const { rows, visible, visibleKeys, axisContext, focusStore, containerRef } = model
+	const model = useTimeseriesModel({ data: bucketed, unit, mapSeries: recolor })
+	const { rows, visible, visibleKeys, axisContext, focusStore } = model
 
 	const { cells, plotRows } = React.useMemo(() => {
 		const first = findFirstPartialIndex(rows)
@@ -384,18 +383,19 @@ export function QueryBuilderBarChart({
 	}, [cells, xAxis, yAxis, bandDomain, plotRows, floored, focusStore, stacked, thresholds, tooltip])
 
 	return (
-		<div ref={containerRef} className={cn("h-full w-full", className)}>
-			<PlotFrame
-				className="h-full w-full"
-				ariaLabel="Time series"
+		<Timeseries.Provider model={model}>
+			<Timeseries.Frame
 				definition={definition}
-				// `series`, not the model's: `model.series` still carries the hashed
-				// identity colour for "Other".
-				legend={timeseriesLegend(model, { legend, seriesStats: showStats, unit })}
+				className={className}
+				legend={legend}
+				seriesStats={showStats}
+				unit={unit}
 				renderTooltipBody={({ points }) => (
 					// The long-form body `PlotTooltipBody` documents: one datum is one
 					// CELL, so the bucket's other series are read back off `cell.row`
 					// rather than off `points`, which `focus: "group-x"` returns one of.
+					// That is why this chart overrides the frame's default body: its
+					// datum is not a row.
 					<PlotTooltipBody
 						points={points}
 						series={tooltipSeries}
@@ -407,6 +407,6 @@ export function QueryBuilderBarChart({
 					/>
 				)}
 			/>
-		</div>
+		</Timeseries.Provider>
 	)
 }

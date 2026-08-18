@@ -1,4 +1,4 @@
-import type { ChartPoint, ChartValue } from "@tanstack/charts"
+import type { ChartPoint, ChartValue, DomChartDefinition } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { scaleTime } from "d3-scale"
 import * as React from "react"
@@ -12,11 +12,12 @@ import {
 	parseBucketMs,
 } from "../../lib/format"
 import { resolveSeriesColors } from "../../lib/semantic-series-colors"
+import { cn } from "../../lib/utils"
 import type { ChartLegendMode } from "../charts/_shared/chart-types"
 import { QueryBuilderLegend } from "../charts/_shared/query-builder-legend"
 import { hasOnlyIntegerValues } from "../charts/_shared/sparse-series"
 import { findFirstPartialIndex } from "./partial-buckets"
-import { usePlotLegendSlot, type PlotLegendItem } from "./plot-frame"
+import { PlotFrame, usePlotLegendSlot, type PlotFrameProps, type PlotLegendItem } from "./plot-frame"
 import {
 	NICE_TICK_COUNT,
 	bucketTimeScale,
@@ -186,14 +187,6 @@ export interface TimeseriesModelOptions {
 	data?: Record<string, unknown>[]
 	unit?: string
 	/**
-	 * The chart's legend mode, so the model knows whether an ancestor's legend
-	 * slot should be filled — see `hoistsLegend`. A chart that omits it publishes,
-	 * which is the right default: `make-chart-widget` defaults every board tile to
-	 * `"hidden"`, so publishing is the common path and forgetting to opt in is the
-	 * failure that loses the header strip.
-	 */
-	legend?: ChartLegendMode
-	/**
 	 * Rewrites a series after its colour is resolved — the bar chart's "Other"
 	 * bucket, which must not wear the identity hue `resolveSeriesColors` hashes
 	 * out of its name.
@@ -248,12 +241,7 @@ export interface TimeseriesModel {
  * would let a consumer run them out of order. Every stage keeps its own memo —
  * this sits on the hover hot path, and a dropped boundary is a real regression.
  */
-export function useTimeseriesModel({
-	data,
-	unit,
-	legend,
-	mapSeries,
-}: TimeseriesModelOptions): TimeseriesModel {
+export function useTimeseriesModel({ data, unit, mapSeries }: TimeseriesModelOptions): TimeseriesModel {
 	const { rows, seriesDefinitions } = React.useMemo(() => normaliseTimeseriesRows(data), [data])
 
 	const allKeys = React.useMemo(
@@ -319,20 +307,6 @@ export function useTimeseriesModel({
 		}))
 		return mapSeries ? resolved.map(mapSeries) : resolved
 	}, [seriesDefinitions, colors, mapSeries])
-
-	/**
-	 * The header strip's copy of the series, or `null` while the chart draws its
-	 * own legend. Memoised on `series`, which is stable across hovers, so the
-	 * host's `setState` cannot land on the pointer path.
-	 */
-	const legendItems = React.useMemo<PlotLegendItem[] | null>(
-		() =>
-			hoistsLegend(legend)
-				? series.map((entry) => ({ key: entry.key, label: entry.label, color: entry.color }))
-				: null,
-		[series, legend],
-	)
-	usePlotLegendSlot(legendItems)
 
 	const { hidden, toggle, visible, visibleKeys } = useSeriesVisibility(series)
 
@@ -630,7 +604,28 @@ export function timeseriesTooltipSeries(
 	}))
 }
 
-export interface TimeseriesTooltipOptions {
+/**
+ * The model, shared with every `Timeseries.*` part below.
+ *
+ * Before this, each chart threaded `model` by hand into three free functions
+ * that returned JSX — `timeseriesLegend(model, …)`, `timeseriesTooltipBody(model,
+ * points)`. Those had no memo boundary, no hooks, and no identity React could
+ * reconcile, so the legend rebuilt on every chart render no matter what.
+ */
+const TimeseriesContext = React.createContext<TimeseriesModel | null>(null)
+
+function useTimeseriesModelContext(): TimeseriesModel {
+	const model = React.use(TimeseriesContext)
+	if (!model) throw new Error("Timeseries parts must render inside <Timeseries.Provider>")
+	return model
+}
+
+function TimeseriesProvider({ model, children }: { model: TimeseriesModel; children: React.ReactNode }) {
+	return <TimeseriesContext value={model}>{children}</TimeseriesContext>
+}
+
+export interface TimeseriesTooltipProps {
+	points: readonly ChartPoint<TimeseriesRow, ChartValue, number>[]
 	/**
 	 * Replaces `model.tooltipSeries`, for a chart whose marks do not sit at their
 	 * raw values — see `timeseriesTooltipSeries`. Memoise it: this runs on every
@@ -639,17 +634,9 @@ export interface TimeseriesTooltipOptions {
 	series?: readonly PlotTooltipSeries<TimeseriesRow>[]
 }
 
-/**
- * The tooltip card's contents.
- *
- * A function rather than a component so the chart can hand it straight to
- * `PlotFrame`'s `renderTooltipBody` callback, which is where the points arrive.
- */
-export function timeseriesTooltipBody(
-	model: TimeseriesModel,
-	points: readonly ChartPoint<TimeseriesRow, ChartValue, number>[],
-	{ series }: TimeseriesTooltipOptions = {},
-) {
+/** The tooltip card's contents. */
+function TimeseriesTooltipBody({ points, series }: TimeseriesTooltipProps) {
+	const model = useTimeseriesModelContext()
 	return (
 		<PlotTooltipBody
 			points={points}
@@ -660,46 +647,155 @@ export function timeseriesTooltipBody(
 	)
 }
 
-export interface TimeseriesLegendOptions {
-	legend: ChartLegendMode | undefined
+export interface TimeseriesLegendProps {
+	mode: ChartLegendMode | undefined
 	/** Adds the per-series Min/Max/Mean/Last table. */
 	seriesStats?: boolean
 	unit?: string
-	/**
-	 * Replaces `model.series`, for a chart that repaints a series before drawing
-	 * it — the bar chart's "Other" bucket, which must not wear the identity hue
-	 * `resolveSeriesColors` hashes out of its name. The keys must still be the
-	 * model's, since they are what `toggle` and `stats` are keyed by.
-	 */
-	series?: readonly TimeseriesSeries[]
 }
 
 /**
- * The legend strip, or `undefined` when there is none.
+ * The legend, in WHICHEVER form the mode calls for — a strip this chart draws,
+ * or a payload published into an ancestor's slot.
  *
- * `undefined` rather than an empty node on purpose: `PlotFrame` only reserves
- * the strip's flex row when it is handed something, so a hidden legend has to be
- * absent, not empty.
+ * One component owns both arms because they are one decision. They used to be
+ * two: `useTimeseriesModel` published to the slot when `hoistsLegend(legend)`,
+ * and `timeseriesLegend` drew the strip when `legend !== "visible" && legend
+ * !== "right"` — the same predicate, written twice, in complementary form, in
+ * two modules. A chart that forgot to thread `legend` into the model got both
+ * arms at once and printed its series twice, which is why the line chart still
+ * carries a comment warning about it.
+ *
+ * Renders `null` in the hoisting case rather than being absent: `PlotFrame`
+ * reserves its legend row for anything non-null, and an empty row is 0px under
+ * `shrink-0`, so the layout is unchanged and the chart no longer has to answer
+ * the same question a second time to decide whether to pass this at all.
  */
-export function timeseriesLegend(
-	model: TimeseriesModel,
-	{ legend, seriesStats, unit, series }: TimeseriesLegendOptions,
-) {
-	if (legend !== "visible" && legend !== "right") return undefined
+function TimeseriesLegend({ mode, seriesStats, unit }: TimeseriesLegendProps) {
+	const model = useTimeseriesModelContext()
+	const hoist = hoistsLegend(mode)
+
+	/**
+	 * Memoised on `series`, which is stable across hovers, so the host's
+	 * `setState` cannot land on the pointer path.
+	 */
+	const items = React.useMemo<PlotLegendItem[] | null>(
+		() =>
+			hoist
+				? model.series.map((entry) => ({
+						key: entry.key,
+						label: entry.label,
+						color: entry.color,
+					}))
+				: null,
+		[model.series, hoist],
+	)
+	usePlotLegendSlot(items)
+
+	// Sorted HERE and nowhere else: all-zero series sink to the bottom so they
+	// cannot bury the ones carrying data (MAP-49), while `model.series` and
+	// `model.visible` keep their order because they are paint order and stack
+	// order.
+	const sorted = React.useMemo(
+		() => sortZeroSeriesLast(model.series, model.stats),
+		[model.series, model.stats],
+	)
+
+	if (hoist) return null
 	return (
 		<QueryBuilderLegend
-			// Sorted HERE and nowhere else: all-zero series sink to the bottom so
-			// they cannot bury the ones carrying data (MAP-49), while `model.series`
-			// and `model.visible` keep their order because they are paint order and
-			// stack order.
-			series={sortZeroSeriesLast(series ?? model.series, model.stats)}
+			series={sorted}
 			stats={model.stats}
 			hidden={model.hidden}
 			onToggle={model.toggle}
 			unit={unit}
-			layout={legend === "right" ? "right" : "bottom"}
+			layout={mode === "right" ? "right" : "bottom"}
 			variant={seriesStats ? "stats" : "compact"}
-			maxHeight={legend === "right" ? model.containerHeight : undefined}
+			maxHeight={mode === "right" ? model.containerHeight : undefined}
 		/>
 	)
+}
+
+/**
+ * Where a legend mode puts the strip.
+ *
+ * `"right"` is a PLACEMENT, and until this existed nothing told `PlotFrame` so:
+ * every timeseries chart passed the legend and left `legendPlacement` at its
+ * `"bottom"` default, so `legend="right"` rendered `QueryBuilderLegend`'s
+ * vertical column — height-capped to the container, one series per row — and
+ * then stacked it UNDER the plot. That is the exact regression `PlotFrame`
+ * documents `"right"` as having been added to fix.
+ */
+export function legendPlacementFor(mode: ChartLegendMode | undefined): "bottom" | "right" {
+	return mode === "right" ? "right" : "bottom"
+}
+
+export interface TimeseriesFrameProps<TDatum> {
+	definition: DomChartDefinition<TDatum, ChartValue, number>
+	ariaLabel?: string
+	className?: string
+	legend?: ChartLegendMode
+	seriesStats?: boolean
+	unit?: string
+	/**
+	 * Replaces the default tooltip body, for a chart whose datum is not a row —
+	 * the bar chart, where one datum is a CELL.
+	 */
+	renderTooltipBody?: PlotFrameProps<TDatum, ChartValue, number>["renderTooltipBody"]
+	/** Replaces `model.tooltipSeries`, for marks that do not sit at raw values. */
+	tooltipSeries?: readonly PlotTooltipSeries<TimeseriesRow>[]
+}
+
+/**
+ * The plot, its legend and its tooltip, wired to the model in context.
+ *
+ * This is the whole tail of a query-builder time-series chart. Each of the
+ * three used to open-code it: the same measured wrapper div, the same
+ * `ariaLabel`, and three hand-threaded `model` arguments — which is how the
+ * `legendPlacement` bug above survived in all three at once.
+ */
+function TimeseriesFrame<TDatum>({
+	definition,
+	ariaLabel = "Time series",
+	className,
+	legend,
+	seriesStats,
+	unit,
+	renderTooltipBody,
+	tooltipSeries,
+}: TimeseriesFrameProps<TDatum>) {
+	const model = useTimeseriesModelContext()
+	return (
+		<div ref={model.containerRef} className={cn("h-full w-full", className)}>
+			<PlotFrame
+				className="h-full w-full"
+				ariaLabel={ariaLabel}
+				definition={definition}
+				legend={<TimeseriesLegend mode={legend} seriesStats={seriesStats} unit={unit} />}
+				legendPlacement={legendPlacementFor(legend)}
+				renderTooltipBody={
+					renderTooltipBody ??
+					(({ points }) => (
+						<TimeseriesTooltipBody
+							points={points as readonly ChartPoint<TimeseriesRow, ChartValue, number>[]}
+							series={tooltipSeries}
+						/>
+					))
+				}
+			/>
+		</div>
+	)
+}
+
+/**
+ * The compound surface a query-builder time-series chart composes.
+ *
+ * A chart builds its own marks — that is the one thing line, area and bar do
+ * not share — and composes everything else from here.
+ */
+export const Timeseries = {
+	Provider: TimeseriesProvider,
+	Frame: TimeseriesFrame,
+	Legend: TimeseriesLegend,
+	TooltipBody: TimeseriesTooltipBody,
 }

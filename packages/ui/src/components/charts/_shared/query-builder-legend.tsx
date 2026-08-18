@@ -1,69 +1,16 @@
 import { cn } from "../../../lib/utils"
 import { formatValueByUnit } from "../../../lib/format"
-
-export interface LegendSeries {
-	/** Internal chart key (s1, s2, …). */
-	key: string
-	/** Human-readable series name. */
-	label: string
-	/** Resolved CSS color (a `var(--…)` token or literal color). */
-	color: string
-}
-
-export interface SeriesStats {
-	min: number
-	max: number
-	mean: number
-	last: number
-}
-
-/** Computes Min/Max/Mean/Last for each series key across the chart's rows. */
-export function computeSeriesStats(
-	data: ReadonlyArray<Record<string, unknown>>,
-	keys: ReadonlyArray<string>,
-): Record<string, SeriesStats> {
-	const result: Record<string, SeriesStats> = {}
-
-	for (const key of keys) {
-		let min = Number.POSITIVE_INFINITY
-		let max = Number.NEGATIVE_INFINITY
-		let sum = 0
-		let count = 0
-		let last = 0
-
-		for (const row of data) {
-			const value = row[key]
-			if (typeof value !== "number" || !Number.isFinite(value)) continue
-			if (value < min) min = value
-			if (value > max) max = value
-			sum += value
-			count += 1
-			last = value
-		}
-
-		result[key] =
-			count === 0 ? { min: 0, max: 0, mean: 0, last: 0 } : { min, max, mean: sum / count, last }
-	}
-
-	return result
-}
-
-function isAllZeroStats(stats: SeriesStats | undefined): boolean {
-	return stats != null && stats.min === 0 && stats.max === 0 && stats.mean === 0 && stats.last === 0
-}
+import { isAllZeroStats, type SeriesStats, type StatsSeries } from "../../plot/series-stats"
 
 /**
- * Stable sort that pushes all-zero series to the bottom of the legend, so
- * series with actual data aren't buried under rows of zeros (MAP-49).
+ * A series row, as the legend draws it.
+ *
+ * An alias rather than a second declaration: `StatsSeries` is the same
+ * `{ key, label, color }` triple, and keeping two of them is what let the stats
+ * helpers below drift from their counterparts in `plot/series-stats.ts` — same
+ * names, opposite handling of a missing entry.
  */
-export function sortZeroSeriesLast(
-	series: ReadonlyArray<LegendSeries>,
-	stats: Record<string, SeriesStats>,
-): LegendSeries[] {
-	return [...series].sort(
-		(a, b) => Number(isAllZeroStats(stats[a.key])) - Number(isAllZeroStats(stats[b.key])),
-	)
-}
+export type LegendSeries = StatsSeries
 
 interface QueryBuilderLegendProps {
 	series: ReadonlyArray<LegendSeries>

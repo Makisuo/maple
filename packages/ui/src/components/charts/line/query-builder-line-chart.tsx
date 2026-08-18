@@ -2,18 +2,15 @@ import { d3Curve, defineChart, dot, lineY } from "@tanstack/charts"
 import { curveMonotoneX } from "d3-shape"
 import * as React from "react"
 
-import { cn } from "../../../lib/utils"
 import { dashedGridY } from "../../plot/plot-grid"
 import { splitAtFirstPartial } from "../../plot/partial-buckets"
 import { focusCrosshair, focusDot } from "../../plot/plot-focus"
-import { PlotFrame } from "../../plot/plot-frame"
 import { roundCapDasharray } from "../../plot/plot-paint"
 import { cursorTooltip } from "../../plot/plot-tooltip"
 import { thresholdRules } from "../../plot/threshold-rules"
 import {
+	Timeseries,
 	asFiniteNumber,
-	timeseriesLegend,
-	timeseriesTooltipBody,
 	timeseriesXAxis,
 	timeseriesYAxis,
 	useTimeseriesModel,
@@ -39,20 +36,8 @@ export function QueryBuilderLineChart({
 	showPoints,
 	thresholds,
 }: QueryBuilderLineChartProps) {
-	// `legend` is threaded in, not dropped: it is what tells the model whether to
-	// publish into a host header. Without it the tile printed its series twice —
-	// once in the card header, once in the strip this chart draws itself.
-	const model = useTimeseriesModel({ data, unit, legend })
-	const {
-		rows,
-		visible,
-		visibleKeys,
-		chromeColors,
-		axisContext,
-		focusStore,
-		containerRef,
-		containerWidth,
-	} = model
+	const model = useTimeseriesModel({ data, unit })
+	const { rows, visible, visibleKeys, chromeColors, axisContext, focusStore, containerWidth } = model
 
 	/** Which points carry a dot — every one, only the isolated ones, or none. */
 	const dotIndexes = React.useMemo<ReadonlyMap<string, ReadonlySet<number>>>(() => {
@@ -164,14 +149,14 @@ export function QueryBuilderLineChart({
 	])
 
 	return (
-		<div ref={containerRef} className={cn("h-full w-full", className)}>
-			<PlotFrame
-				className="h-full w-full"
-				ariaLabel="Time series"
+		<Timeseries.Provider model={model}>
+			<Timeseries.Frame
 				definition={definition}
-				legend={timeseriesLegend(model, { legend, seriesStats: showStats, unit })}
-				renderTooltipBody={({ points }) => timeseriesTooltipBody(model, points)}
+				className={className}
+				legend={legend}
+				seriesStats={showStats}
+				unit={unit}
 			/>
-		</div>
+		</Timeseries.Provider>
 	)
 }

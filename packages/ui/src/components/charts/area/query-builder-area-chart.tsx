@@ -2,7 +2,6 @@ import { areaY, d3Curve, defineChart, dot, lineY } from "@tanstack/charts"
 import { curveMonotoneX } from "d3-shape"
 import * as React from "react"
 
-import { cn } from "../../../lib/utils"
 import {
 	findFirstPartialIndex,
 	splitAtFirstPartial,
@@ -10,14 +9,13 @@ import {
 } from "../../plot/partial-buckets"
 import { dashedGridY } from "../../plot/plot-grid"
 import { focusCrosshair, focusDot } from "../../plot/plot-focus"
-import { PlotFrame, UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
+import { UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
 import { roundCapDasharray, useChartId, verticalGradient } from "../../plot/plot-paint"
 import { cursorTooltip } from "../../plot/plot-tooltip"
 import { thresholdRules } from "../../plot/threshold-rules"
 import {
+	Timeseries,
 	asFiniteNumber,
-	timeseriesLegend,
-	timeseriesTooltipBody,
 	timeseriesTooltipSeries,
 	timeseriesXAxis,
 	timeseriesYAxis,
@@ -91,17 +89,8 @@ export function QueryBuilderAreaChart({
 	thresholds,
 	showPoints,
 }: QueryBuilderAreaChartProps) {
-	const model = useTimeseriesModel({ data, unit, legend })
-	const {
-		rows,
-		visible,
-		visibleKeys,
-		chromeColors,
-		axisContext,
-		focusStore,
-		containerRef,
-		containerWidth,
-	} = model
+	const model = useTimeseriesModel({ data, unit })
+	const { rows, visible, visibleKeys, chromeColors, axisContext, focusStore, containerWidth } = model
 
 	const gradientPrefix = useChartId("qbArea")
 
@@ -362,19 +351,18 @@ export function QueryBuilderAreaChart({
 	])
 
 	return (
-		<div ref={containerRef} className={cn("h-full w-full", className)}>
-			<PlotFrame
-				className="h-full w-full"
-				ariaLabel="Time series"
+		<Timeseries.Provider model={model}>
+			<Timeseries.Frame
 				definition={definition}
-				legend={timeseriesLegend(model, { legend, seriesStats: showStats, unit })}
-				renderTooltipBody={({ points }) =>
-					// `tooltipSeries`, not the model's: the card's row highlight is a
-					// geometry question, and a stacked band's rows are not at their raw
-					// values.
-					timeseriesTooltipBody(model, points, { series: tooltipSeries })
-				}
+				className={className}
+				legend={legend}
+				seriesStats={showStats}
+				unit={unit}
+				// `tooltipSeries`, not the model's: the card's row highlight is a
+				// geometry question, and a stacked band's rows are not at their raw
+				// values.
+				tooltipSeries={tooltipSeries}
 			/>
-		</div>
+		</Timeseries.Provider>
 	)
 }

@@ -37,9 +37,7 @@ function hoisted(container: HTMLElement): string {
 	return container.querySelector("[data-testid='hoisted']")?.textContent ?? ""
 }
 
-const swappedSeries: readonly PlotLegendItem[] = [
-	{ key: "latency", label: "Latency", color: "#a78bfa" },
-]
+const swappedSeries: readonly PlotLegendItem[] = [{ key: "latency", label: "Latency", color: "#a78bfa" }]
 
 const series: readonly PlotLegendItem[] = [
 	{ key: "requests", label: "Requests", color: "#22d3ee" },
@@ -128,9 +126,7 @@ describe("usePlotLegendSlot republish guard", () => {
 			<PlotLegendSlotContext value={slot}>
 				<div data-testid="host">{items.map((item) => item.key).join(",")}</div>
 				{/* A NEW array each render — never memoised, on purpose. */}
-				{renders.count < BREAKER ? (
-					<Publisher items={series.map((entry) => ({ ...entry }))} />
-				) : null}
+				{renders.count < BREAKER ? <Publisher items={series.map((entry) => ({ ...entry }))} /> : null}
 			</PlotLegendSlotContext>
 		)
 	}
