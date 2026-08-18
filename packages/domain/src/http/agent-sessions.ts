@@ -116,6 +116,88 @@ export class AgentSessionsFacetsResponse extends Schema.Class<AgentSessionsFacet
 	errorCount: Schema.Number,
 }) {}
 
+export class AgentSessionDetailRequest extends Schema.Class<AgentSessionDetailRequest>(
+	"AgentSessionDetailRequest",
+)({
+	/** Opaque session id from the list rows: `toString(AiSessionKeyHash)`. */
+	sessionKeyHash: Schema.String,
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+}) {}
+
+/** One AI span with the vendor-integration facts merged in. The raw attribute
+ *  maps stay out of this shape — conversational content travels only as the
+ *  integration layer's extracted (and truncated) `inputText`/`outputText`. */
+export const NormalizedAiSpanItem = Schema.Struct({
+	spanId: Schema.String,
+	parentSpanId: Schema.String,
+	startTime: Schema.String,
+	durationMs: Schema.Number,
+	spanName: Schema.String,
+	spanKind: Schema.String,
+	serviceName: Schema.String,
+	statusCode: Schema.String,
+	statusMessage: Schema.String,
+	vendor: Schema.String,
+	sessionKeyState: Schema.Number,
+	role: Schema.Literals(["llm", "tool", "agent", "workflow", "other"]),
+	model: Schema.NullOr(Schema.String),
+	inputTokens: Schema.NullOr(Schema.Number),
+	outputTokens: Schema.NullOr(Schema.Number),
+	cacheReadTokens: Schema.NullOr(Schema.Number),
+	cacheCreationTokens: Schema.NullOr(Schema.Number),
+	costUsd: Schema.NullOr(Schema.Number),
+	sessionKey: Schema.NullOr(Schema.String),
+	/** Vendor-recorded conversational content (messages JSON / prompt / tool
+	 *  args and result), truncated server-side. Raw strings — format varies per
+	 *  vendor and rendering is the client's job. */
+	inputText: Schema.NullOr(Schema.String),
+	outputText: Schema.NullOr(Schema.String),
+})
+
+export const AgentSessionTraceItem = Schema.Struct({
+	traceId: TraceId,
+	startTime: Schema.String,
+	durationMs: Schema.Number,
+	errorCount: Schema.Number,
+	spans: Schema.Array(NormalizedAiSpanItem),
+})
+
+export const AgentSessionDetail = Schema.Struct({
+	sessionKeyHash: Schema.String,
+	/** Plaintext session key when a vendor integration resolved one; the UI
+	 *  falls back to the hash. */
+	sessionKey: Schema.NullOr(Schema.String),
+	startTime: Schema.String,
+	endTime: Schema.String,
+	durationMs: Schema.Number,
+	/** The session blew a fetch cap and every count below undercounts. */
+	truncated: Schema.Boolean,
+	totals: Schema.Struct({
+		spanCount: Schema.Number,
+		llmCallCount: Schema.Number,
+		toolCallCount: Schema.Number,
+		errorCount: Schema.Number,
+		inputTokens: Schema.Number,
+		outputTokens: Schema.Number,
+		cacheReadTokens: Schema.Number,
+		cacheCreationTokens: Schema.Number,
+		/** `null` when no span priced itself — unknown, never free. */
+		costUsd: Schema.NullOr(Schema.Number),
+	}),
+	vendors: Schema.Array(Schema.String),
+	serviceNames: Schema.Array(Schema.String),
+	models: Schema.Array(Schema.String),
+	traces: Schema.Array(AgentSessionTraceItem),
+})
+
+export class AgentSessionDetailResponse extends Schema.Class<AgentSessionDetailResponse>(
+	"AgentSessionDetailResponse",
+)({
+	/** `null`: the hash matched nothing in the window (expired, or a foreign id). */
+	session: Schema.NullOr(AgentSessionDetail),
+}) {}
+
 const agentSessionsEndpointErrors = [
 	QueryEngineExecutionError,
 	QueryEngineTimeoutError,
@@ -134,6 +216,13 @@ export class AgentSessionsInternalApiGroup extends HttpApiGroup.make("agentSessi
 		HttpApiEndpoint.post("traces", "/traces", {
 			payload: AgentTracesListRequest,
 			success: AgentTracesListResponse,
+			error: agentSessionsEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("detail", "/detail", {
+			payload: AgentSessionDetailRequest,
+			success: AgentSessionDetailResponse,
 			error: agentSessionsEndpointErrors,
 		}),
 	)

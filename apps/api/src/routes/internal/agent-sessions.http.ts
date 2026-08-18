@@ -1,5 +1,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
+	AgentSessionDetailResponse,
 	AgentSessionsFacetsResponse,
 	AgentSessionsListResponse,
 	AgentTracesListResponse,
@@ -10,6 +11,7 @@ import {
 import { Effect, Schema } from "effect"
 import {
 	agentSessionsFacets,
+	getAgentSessionDetail,
 	listAgentSessions,
 	listAgentTraces,
 	type AgentSessionsFilterInput,
@@ -94,6 +96,37 @@ export const HttpAgentSessionsInternalLive = HttpApiBuilder.group(
 								bestSessionKeyState: Number(row.bestSessionKeyState),
 								sessionKeyHash: row.sessionKeyHash,
 							})),
+						})
+					}),
+				)
+				.handle("detail", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+						const detail = yield* getAgentSessionDetail({
+							sessionKeyHash: payload.sessionKeyHash,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+						}).pipe(provideWarehouseExecutorFromTenant(tenant))
+						// The read function already normalizes every numeric through the
+						// integration layer (real JS numbers, not wire strings); only the
+						// TraceId brand needs decoding at this boundary.
+						return new AgentSessionDetailResponse({
+							session:
+								detail === null
+									? null
+									: {
+											...detail,
+											traces: detail.traces.map((trace) => ({
+												traceId: decodeTraceId(trace.traceId),
+												startTime: trace.startTime,
+												durationMs: trace.durationMs,
+												errorCount: trace.errorCount,
+												spans: trace.spans.map(
+													({ traceId: _traceId, ...span }) => span,
+												),
+											})),
+										},
 						})
 					}),
 				)
