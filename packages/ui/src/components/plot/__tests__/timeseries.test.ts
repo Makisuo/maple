@@ -5,6 +5,7 @@ import {
 	asFiniteNumber,
 	normaliseTimeseriesRows,
 	scaleTimeseriesRates,
+	timeseriesXAxis,
 	timeseriesYAxis,
 	type TimeseriesRow,
 } from "../timeseries"
@@ -180,5 +181,23 @@ describe("timeseriesYAxis", () => {
 	it("widens to the stack total when stacked", () => {
 		const axis = timeseriesYAxis({ rows, visibleKeys: ["s1", "s2"], stacked: true })
 		expect(axis.domain).toEqual([0, 70])
+	})
+})
+
+describe("the shared x axis' label spacing", () => {
+	// The port dropped Recharts' `minTickGap={24}` and took the library's 4px
+	// thinning default, which packed "01:00 AM 01:30 AM 02:00 AM" nearly edge to
+	// edge on a card. `spacing` is the fix — it widens the tick CANDIDATES, so the
+	// labels stay on round clock boundaries and evenly spaced — and the gap is the
+	// backstop for a tile too narrow for even those.
+	it("spaces tick candidates wide enough for a bucket label", () => {
+		const axis = timeseriesXAxis({ rangeMs: 6 * 3_600_000, bucketSeconds: 1800 })
+		// A bucket label ("01:00 AM") runs ~55px at the axis font size.
+		expect(axis.axis.ticks.spacing).toBeGreaterThan(55 * 1.5)
+	})
+
+	it("keeps a legible gap when labels still collide", () => {
+		const axis = timeseriesXAxis({ rangeMs: 6 * 3_600_000, bucketSeconds: 1800 })
+		expect(axis.axis.tickLabels.thin.minGap).toBeGreaterThanOrEqual(12)
 	})
 })

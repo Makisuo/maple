@@ -409,9 +409,20 @@ export function timeseriesXAxis(axisContext: TimeseriesAxisContext) {
 			ticks: {
 				size: 0,
 				padding: 8,
-				spacing: 72,
+				// 72px put "01:00 AM 01:30 AM 02:00 AM" almost edge to edge on a card:
+				// a bucket label runs ~55px, so the gap between two of them was single
+				// digits. Widening the CANDIDATE spacing is what buys the room without
+				// touching how the labels are chosen — the scale still lands them on
+				// round clock boundaries, evenly spaced.
+				spacing: 104,
 				format: (value: Date) => formatBucketLabel(value.toISOString(), axisContext, "tick"),
 			},
+			// The port's missing `minTickGap={24}`. Thinning is the backstop, not the
+			// spacing mechanism: it drops colliding labels — at a 4px default, almost
+			// none — and a thinned time axis reads unevenly (01:00, 02:00, 03:30). A
+			// gap wide enough to be legible, left to fire only where a long label or a
+			// narrow tile still collides.
+			tickLabels: { thin: { minGap: 12 } },
 		},
 	}
 }
