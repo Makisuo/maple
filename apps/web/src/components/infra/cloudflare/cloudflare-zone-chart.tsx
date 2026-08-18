@@ -27,6 +27,7 @@ import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-inf
 import { formatNumber } from "@maple/ui/lib/format"
 import { formatBytes, formatPercent } from "@maple/ui/lib/format"
 import { CHART_EMPTY_MESSAGE, makeBucketLabeler, transformRows, type TransformedPoint } from "../chart-utils"
+import { CHART_HEIGHT, ChartCardMessage } from "../primitives/chart-card"
 import { OTHER_ZONES_COLOR, OTHER_ZONES_SERIES } from "./constants"
 
 export type CloudflareZoneMetric = "requests" | "errorRate" | "cacheHitRate" | "bytes"
@@ -38,7 +39,6 @@ const METRIC_LABELS: Record<CloudflareZoneMetric, string> = {
 	bytes: "Bandwidth",
 } satisfies Record<CloudflareZoneMetric, string>
 
-const CHART_HEIGHT = 200
 
 function formatMetricValue(value: number, metric: CloudflareZoneMetric): string {
 	if (metric === "errorRate" || metric === "cacheHitRate") return formatPercent(value)
@@ -211,12 +211,7 @@ export function CloudflareZoneChart({
 				<span className="text-[11px] font-medium text-muted-foreground">{METRIC_LABELS[metric]}</span>
 			</div>
 			{data.length === 0 ? (
-				<div
-					className="flex items-center justify-center font-mono text-[11px] text-muted-foreground"
-					style={{ height: CHART_HEIGHT }}
-				>
-					{CHART_EMPTY_MESSAGE}
-				</div>
+				<ChartCardMessage>{CHART_EMPTY_MESSAGE}</ChartCardMessage>
 			) : (
 				<div className="w-full" style={{ height: CHART_HEIGHT }}>
 					<PlotFrame

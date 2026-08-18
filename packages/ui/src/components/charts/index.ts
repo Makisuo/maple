@@ -1,6 +1,13 @@
 export { chartRegistry, getChartById } from "./registry"
 export type { ChartKind, ChartRegistryEntry } from "./registry"
 export { ChartSkeleton, type ChartSkeletonVariant } from "./_shared/chart-skeleton"
+export {
+	ChartEmpty,
+	ChartError,
+	ChartLoading,
+	ChartPlotArea,
+	useChartPlotHeight,
+} from "./_shared/chart-state"
 export type {
 	CartesianPlotProps,
 	ChartCategory,

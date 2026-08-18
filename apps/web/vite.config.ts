@@ -73,6 +73,7 @@ export default defineConfig(({ mode }) => {
 		// run — it's executed separately via `bun run test:perf`.
 		test: {
 			include: ["src/**/*.test.{ts,tsx}"],
+			setupFiles: ["./src/test-setup.ts"],
 		},
 		resolve: {
 			tsconfigPaths: true,

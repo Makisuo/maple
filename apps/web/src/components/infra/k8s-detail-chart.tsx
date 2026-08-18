@@ -1,6 +1,6 @@
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ChartError, ChartLoading } from "@maple/ui/components/charts"
 
 import {
 	podInfraTimeseriesResultAtom,
@@ -17,6 +17,11 @@ import { formatValueWithUnit } from "./chart-utils"
 import { InfraMetricChart, type InfraSeriesInfo } from "./primitives/infra-metric-chart"
 import { displayError } from "@/lib/error-messages"
 
+/**
+ * k8s detail charts plot taller than the shared infra default: a pod/node page
+ * shows one metric at a time, so it can afford the height. Declared once and
+ * passed to every branch — the plot and its loading/error stand-ins.
+ */
 const CHART_HEIGHT = 280
 
 type Unit = "percent" | "cores" | "seconds"
@@ -145,12 +150,8 @@ export function PodDetailChart({
 	)
 
 	return Result.builder(result)
-		.onInitial(() => <Skeleton className="h-[280px] w-full rounded-lg" />)
-		.onError((err) => (
-			<div className="flex h-[280px] items-center justify-center rounded-lg border border-destructive/40 bg-destructive/5 text-xs text-destructive">
-				{displayError(err).message}
-			</div>
-		))
+		.onInitial(() => <ChartLoading variant="area" height={CHART_HEIGHT} />)
+		.onError((err) => <ChartError height={CHART_HEIGHT}>{displayError(err).message}</ChartError>)
 		.onSuccess((response, holder) => (
 			<K8sMetricChartView
 				rows={response.data}
@@ -189,12 +190,8 @@ export function NodeDetailChart({
 	)
 
 	return Result.builder(result)
-		.onInitial(() => <Skeleton className="h-[280px] w-full rounded-lg" />)
-		.onError((err) => (
-			<div className="flex h-[280px] items-center justify-center rounded-lg border border-destructive/40 bg-destructive/5 text-xs text-destructive">
-				{displayError(err).message}
-			</div>
-		))
+		.onInitial(() => <ChartLoading variant="area" height={CHART_HEIGHT} />)
+		.onError((err) => <ChartError height={CHART_HEIGHT}>{displayError(err).message}</ChartError>)
 		.onSuccess((response, holder) => (
 			<K8sMetricChartView
 				rows={response.data}
@@ -247,12 +244,8 @@ export function WorkloadDetailChart({
 	)
 
 	return Result.builder(result)
-		.onInitial(() => <Skeleton className="h-[280px] w-full rounded-lg" />)
-		.onError((err) => (
-			<div className="flex h-[280px] items-center justify-center rounded-lg border border-destructive/40 bg-destructive/5 text-xs text-destructive">
-				{displayError(err).message}
-			</div>
-		))
+		.onInitial(() => <ChartLoading variant="area" height={CHART_HEIGHT} />)
+		.onError((err) => <ChartError height={CHART_HEIGHT}>{displayError(err).message}</ChartError>)
 		.onSuccess((response, holder) => (
 			<K8sMetricChartView
 				rows={response.data}

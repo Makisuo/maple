@@ -1,7 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react"
 import { cn } from "@maple/ui/lib/utils"
-import { ChartLegendSlotContext } from "@maple/ui/components/ui/chart"
-import { PlotLegendSlotContext, type PlotLegendItem } from "@maple/ui/components/plot/plot-frame"
+import { PlotLegendSlotContext, type PlotLegendItem } from "@maple/ui/components/plot"
 import {
 	GripDotsIcon,
 	TrashIcon,
@@ -237,11 +236,7 @@ export function WidgetShell({
 			    (list/table/markdown) override with overflow-auto, which wins the
 			    tailwind-merge conflict. */}
 			<CardContent className={cn("overflow-hidden", contentClassName ?? "flex-1 min-h-0 p-2")}>
-				<ChartLegendSlotContext.Provider value={legendSlot}>
-					<PlotLegendSlotContext.Provider value={legendSlot}>
-						{children}
-					</PlotLegendSlotContext.Provider>
-				</ChartLegendSlotContext.Provider>
+				<PlotLegendSlotContext.Provider value={legendSlot}>{children}</PlotLegendSlotContext.Provider>
 			</CardContent>
 			{footer != null && (
 				<div className="shrink-0 px-3 pb-2.5 text-[11px] text-muted-foreground">{footer}</div>

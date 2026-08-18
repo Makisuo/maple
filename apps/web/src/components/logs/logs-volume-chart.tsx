@@ -18,7 +18,7 @@ import {
 	type PlotTooltipSeries,
 } from "@maple/ui/components/plot"
 import { useTheme } from "@maple/ui/hooks/use-theme"
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ChartLoading } from "@maple/ui/components/charts"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { getCustomChartTimeSeriesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { computeBucketSeconds } from "@/api/warehouse/timeseries-utils"
@@ -185,7 +185,8 @@ function LogsVolumePlot({
 
 	return (
 		<div
-			className={`h-[120px] w-full select-none ${interactive ? "cursor-crosshair" : ""}`}
+			style={{ height: LOGS_VOLUME_CHART_HEIGHT }}
+			className={`w-full select-none ${interactive ? "cursor-crosshair" : ""}`}
 			onPointerDown={onSelectStart}
 			onPointerUp={onSelectEnd}
 			onPointerLeave={onSelectCancel}
@@ -216,6 +217,13 @@ interface LogsVolumeChartProps {
 	filters?: LogsSearchParams
 	onTimeRangeSelect?: (range: { startTime: string; endTime: string }) => void
 }
+
+/**
+ * The volume strip is deliberately short — it is a scrubber above the log list,
+ * not a chart in its own right. Declared once so the plot and its loading
+ * stand-in reserve the same strip.
+ */
+const LOGS_VOLUME_CHART_HEIGHT = 120
 
 export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartProps) {
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
@@ -334,7 +342,7 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 	}, [isSelecting])
 
 	return Result.builder(timeSeriesResult)
-		.onInitial(() => <Skeleton className="h-[120px] w-full rounded-md" />)
+		.onInitial(() => <ChartLoading variant="bar" height={LOGS_VOLUME_CHART_HEIGHT} />)
 		.onError(() => null)
 		.onSuccess((response, result) => {
 			const points = response.data

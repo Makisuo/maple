@@ -21,6 +21,7 @@ import {
 	verticalGradient,
 	type PlotTooltipSeries,
 } from "@maple/ui/components/plot"
+import { ChartEmpty, useChartPlotHeight } from "@maple/ui/components/charts"
 import { cn } from "@maple/ui/lib/utils"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 
@@ -113,7 +114,14 @@ function rowOf(datum: InfraDatum): TransformedPoint {
 	return isCell(datum) ? datum.point : (datum as TransformedPoint)
 }
 
-const DEFAULT_HEIGHT = 220
+/**
+ * The plot height for every chart built on this primitive.
+ *
+ * Exported so a call site's loading/empty/error branches reserve the SAME box
+ * (`<ChartPlotArea height={INFRA_METRIC_CHART_HEIGHT}>`) instead of repeating
+ * the number as an `h-[220px]` literal that silently drifts from it.
+ */
+export const INFRA_METRIC_CHART_HEIGHT = 220
 const STROKE_WIDTH = 1.5
 const THRESHOLD_FRACTION = 0.8
 
@@ -126,9 +134,17 @@ export function InfraMetricChart({
 	linkedChartId,
 	header,
 	waiting = false,
-	height = DEFAULT_HEIGHT,
+	height,
 	className,
 }: InfraMetricChartProps) {
+	// A surrounding `ChartPlotArea` has already reserved a box; matching it here
+	// keeps the plot and the loading/empty/error branches it alternates with
+	// exactly the same size. An explicit prop still wins. The hook is called
+	// unconditionally — `height ?? useChartPlotHeight()` would skip it whenever a
+	// prop was passed, which is a conditional hook.
+	const inheritedHeight = useChartPlotHeight()
+	const plotHeight = height ?? inheritedHeight ?? INFRA_METRIC_CHART_HEIGHT
+
 	const chromeColors = usePlotChromeColors()
 	const gradientPrefix = useChartId("infra")
 	const focusStore = useMemo(() => createTooltipFocusStore(), [])
@@ -284,18 +300,14 @@ export function InfraMetricChart({
 	])
 
 	if (data.length === 0) {
-		return (
-			<div className="flex h-[220px] items-center justify-center border border-dashed border-border/60 font-mono text-[11px] text-muted-foreground">
-				{CHART_EMPTY_MESSAGE}
-			</div>
-		)
+		return <ChartEmpty height={height}>{CHART_EMPTY_MESSAGE}</ChartEmpty>
 	}
 
 	return (
 		<div className={cn("transition-opacity", waiting && "opacity-60", className)}>
 			{header?.({ series, colors, lastValues, labelFor, unit })}
 			<div className="relative" {...linkedCursorChartProps(linkedChartId)}>
-				<div style={{ height }}>
+				<div style={{ height: plotHeight }}>
 					<PlotFrame
 						definition={definition}
 						ariaLabel={seriesLabel ?? "Utilization"}

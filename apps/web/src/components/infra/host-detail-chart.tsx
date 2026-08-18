@@ -1,11 +1,15 @@
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ChartError, ChartLoading, ChartPlotArea } from "@maple/ui/components/charts"
 
 import { hostInfraTimeseriesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { HostInfraMetric } from "@/api/warehouse/infra"
 import { formatValueWithUnit } from "./chart-utils"
-import { InfraMetricChart, type InfraSeriesInfo } from "./primitives/infra-metric-chart"
+import {
+	InfraMetricChart,
+	INFRA_METRIC_CHART_HEIGHT,
+	type InfraSeriesInfo,
+} from "./primitives/infra-metric-chart"
 import { displayError } from "@/lib/error-messages"
 
 interface HostDetailChartProps {
@@ -47,24 +51,24 @@ export function HostDetailChart({
 		}),
 	)
 
-	return Result.builder(result)
-		.onInitial(() => <Skeleton className="h-[220px] w-full rounded-none" />)
-		.onError((err) => (
-			<div className="flex h-[220px] items-center justify-center border border-destructive/40 bg-destructive/5 font-mono text-[11px] text-destructive">
-				{displayError(err).message}
-			</div>
-		))
-		.onSuccess((response, holder) => (
-			<HostMetricChartView
-				rows={response.data}
-				unit={response.unit}
-				metric={metric}
-				seriesLabel={HOST_METRIC_LABELS[metric]}
-				waiting={Boolean(holder.waiting)}
-				syncId={syncId}
-			/>
-		))
-		.render()
+	return (
+		<ChartPlotArea height={INFRA_METRIC_CHART_HEIGHT}>
+			{Result.builder(result)
+				.onInitial(() => <ChartLoading variant="area" />)
+				.onError((err) => <ChartError>{displayError(err).message}</ChartError>)
+				.onSuccess((response, holder) => (
+					<HostMetricChartView
+						rows={response.data}
+						unit={response.unit}
+						metric={metric}
+						seriesLabel={HOST_METRIC_LABELS[metric]}
+						waiting={Boolean(holder.waiting)}
+						syncId={syncId}
+					/>
+				))
+				.render()}
+		</ChartPlotArea>
+	)
 }
 
 interface HostMetricChartViewProps {

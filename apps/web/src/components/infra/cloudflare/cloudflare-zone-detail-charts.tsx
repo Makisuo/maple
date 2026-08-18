@@ -31,7 +31,7 @@ import type {
 import { formatLatency, formatNumber } from "@maple/ui/lib/format"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import { CHART_EMPTY_MESSAGE, makeBucketLabeler, transformRows } from "../chart-utils"
-import { CHART_HEIGHT, ChartCard } from "../primitives/chart-card"
+import { CHART_HEIGHT, ChartCard, ChartCardMessage } from "../primitives/chart-card"
 import {
 	BREAKDOWN_OTHER_KEY,
 	BREAKDOWN_OTHER_LABEL,
@@ -253,12 +253,7 @@ export function StackedBreakdownChart({
 			}
 		>
 			{data.length === 0 ? (
-				<div
-					className="flex items-center justify-center font-mono text-[11px] text-muted-foreground"
-					style={{ height: CHART_HEIGHT }}
-				>
-					{CHART_EMPTY_MESSAGE}
-				</div>
+				<ChartCardMessage>{CHART_EMPTY_MESSAGE}</ChartCardMessage>
 			) : (
 				<div
 					className="w-full"

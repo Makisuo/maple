@@ -37,7 +37,7 @@ function dayOf(datum: SpendDatum): CumulativePoint {
 		? (datum as SpendCell).point
 		: (datum as CumulativePoint)
 }
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ChartEmpty, ChartLoading } from "@maple/ui/components/charts"
 
 import { formatCurrency } from "@/lib/billing/currency"
 import {
@@ -61,7 +61,14 @@ import type { DailySpendResponse } from "@maple/domain/http"
  * dashed projection carries today's actual total to the end of the cycle.
  */
 
+/** The plot itself. The states around it reserve {@link SPEND_CHART_HEIGHT}. */
 const CHART_HEIGHT = 260
+
+/**
+ * The box the chart occupies including its legend strip, so the skeleton and the
+ * empty state don't collapse the card while the cycle's spend loads.
+ */
+const SPEND_CHART_HEIGHT = 300
 
 const chartConfig = {
 	base: { label: "Base plan", color: "#57534a" },
@@ -77,7 +84,7 @@ const chartConfig = {
 const BANDS = ["base", ...SPEND_FEATURES] as const
 
 export function SpendChartSkeleton() {
-	return <Skeleton className="h-[300px] w-full rounded-none" />
+	return <ChartLoading variant="area" height={SPEND_CHART_HEIGHT} />
 }
 
 export function SpendChart({ model, daily }: { model: SpendModel; daily: DailySpendResponse | undefined }) {
@@ -111,11 +118,7 @@ export function SpendChart({ model, daily }: { model: SpendModel; daily: DailySp
 	const hasFuture = lastPoint !== undefined && lastPoint.future
 
 	if (data.length === 0) {
-		return (
-			<div className="flex h-[300px] items-center justify-center border border-dashed border-border/60 font-mono text-[11px] text-muted-foreground">
-				No ingest recorded this cycle yet
-			</div>
-		)
+		return <ChartEmpty height={SPEND_CHART_HEIGHT}>No ingest recorded this cycle yet</ChartEmpty>
 	}
 
 	const chromeColors = usePlotChromeColors()
