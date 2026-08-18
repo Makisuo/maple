@@ -37,7 +37,11 @@ settings:
     # future downgrade is loud rather than silent.
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
-    DEVELOPMENT_TEAM: ""
+    # DEVELOPMENT_TEAM is deliberately NOT set here. A value at project level
+    # outranks the xcconfigs, so hardcoding it (even to "") pinned every
+    # checkout to one team and left `""` winning over anything a developer set.
+    # It now comes from Config/Secrets.xcconfig, the same gitignored file the
+    # Clerk key uses — signing identity is per-developer, not per-repo.
     CODE_SIGN_STYLE: Automatic
 
 targets:

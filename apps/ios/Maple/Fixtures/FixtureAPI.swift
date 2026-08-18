@@ -577,6 +577,42 @@ struct FixtureAPI: MapleAPI {
 		)
 	}
 
+	// MARK: Push
+
+	func registerDevice(_ registration: DeviceRegistration) async throws -> MobileDevice {
+		try await pause()
+		let prefs = registration.preferences ?? .default
+		return MobileDevice(
+			appVersion: registration.appVersion,
+			bundleId: registration.bundleId,
+			createdAt: stamp(-86_400),
+			deviceName: registration.deviceName,
+			enabled: true,
+			environment: registration.environment,
+			id: "mdev_fixture",
+			lastSeenAt: stamp(0),
+			object: .mobileDevice,
+			platform: .ios,
+			preferences: .init(
+				anomalies: prefs.anomalies,
+				criticalIncidents: prefs.criticalIncidents,
+				newErrorIssues: prefs.newErrorIssues,
+				resolvedIncidents: prefs.resolvedIncidents,
+				warningIncidents: prefs.warningIncidents
+			),
+			token: registration.token
+		)
+	}
+
+	func unregisterDevice(token: String) async throws {
+		try await pause()
+	}
+
+	func myDevices() async throws -> [MobileDevice] {
+		try await pause()
+		return []
+	}
+
 	// MARK: Helpers
 
 	private func stamp(_ offset: TimeInterval) -> String {

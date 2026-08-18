@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import { Schema } from "effect"
+import { AlertRuleId, OrgId } from "@maple/domain/primitives"
 import {
 	alertChartId,
 	generateShareToken,
@@ -59,9 +61,14 @@ describe("shareOgId", () => {
 	})
 })
 
+// Decoded, not cast: `AlertRuleId` is a UUID brand, so a placeholder like
+// "rule_1" is not merely untyped here — it is not a valid id at all.
+const ORG_ID = Schema.decodeUnknownSync(OrgId)("org_3Aui9f2b6a8e")
+const RULE_ID = Schema.decodeUnknownSync(AlertRuleId)("1f2b6a8e-6c1b-4f2a-9f6e-1d2c3b4a5e6f")
+
 const claims = {
-	orgId: "org_1",
-	ruleId: "rule_1",
+	orgId: ORG_ID,
+	ruleId: RULE_ID,
 	groupKey: "checkout-api",
 	fromMs: Date.UTC(2026, 7, 18, 13, 0),
 	toMs: Date.UTC(2026, 7, 18, 14, 0),
@@ -69,6 +76,19 @@ const claims = {
 	unit: "percent",
 	threshold: 2,
 	breachSide: "above",
+} as const
+
+/** What `claims` looks like coming back out — ids undecoded, by design. */
+const verified = {
+	rawOrgId: ORG_ID as string,
+	rawRuleId: RULE_ID as string,
+	groupKey: claims.groupKey,
+	fromMs: claims.fromMs,
+	toMs: claims.toMs,
+	title: claims.title,
+	unit: claims.unit,
+	threshold: claims.threshold,
+	breachSide: claims.breachSide,
 }
 
 /**
@@ -86,13 +106,18 @@ const tamperAlertChartClaim = (id: string, index: number, value: unknown): strin
 }
 
 describe("alertChartId", () => {
-	it("round-trips the claims", () => {
-		expect(verifyAlertChartId(alertChartId(claims, KEY), KEY)).toEqual(claims)
+	it("round-trips the claims, with the ids left undecoded", () => {
+		// The signature proves we minted it; it does not decode an entity id, so
+		// they come back as `raw*` for the caller to parse at its boundary.
+		expect(verifyAlertChartId(alertChartId(claims, KEY), KEY)).toEqual(verified)
 	})
 
 	it("round-trips an ungrouped rule's null group", () => {
 		const ungrouped = { ...claims, groupKey: null }
-		expect(verifyAlertChartId(alertChartId(ungrouped, KEY), KEY)).toEqual(ungrouped)
+		expect(verifyAlertChartId(alertChartId(ungrouped, KEY), KEY)).toEqual({
+			...verified,
+			groupKey: null,
+		})
 	})
 
 	it("is deterministic, so a redelivery renders the same image", () => {
@@ -124,7 +149,13 @@ describe("alertChartId", () => {
 
 	it("rejects a swapped rule id", () => {
 		const id = alertChartId(claims, KEY)
-		const other = alertChartId({ ...claims, ruleId: "rule_2" }, KEY)
+		const other = alertChartId(
+			{
+				...claims,
+				ruleId: Schema.decodeUnknownSync(AlertRuleId)("2f2b6a8e-6c1b-4f2a-9f6e-1d2c3b4a5e6f"),
+			},
+			KEY,
+		)
 		const forged = `${id.split(".")[0]}.${other.split(".")[1]}`
 		expect(verifyAlertChartId(forged, KEY)).toBeUndefined()
 	})

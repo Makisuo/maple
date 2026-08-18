@@ -96,6 +96,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"DELETE /v2/dashboards/{id}/widgets/{widget_id}/share",
 			"DELETE /v2/integrations/planetscale",
 			"DELETE /v2/integrations/slack",
+			"DELETE /v2/mobile_devices/{token}",
 			"DELETE /v2/scrape_targets/{id}",
 			"GET /v2/alerts/deliveries",
 			"GET /v2/alerts/destinations",
@@ -139,6 +140,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/investigations/{id}",
 			"GET /v2/logs/{id}",
 			"GET /v2/metrics",
+			"GET /v2/mobile_devices",
 			"GET /v2/organization",
 			"GET /v2/scrape_targets",
 			"GET /v2/scrape_targets/{id}",
@@ -207,6 +209,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"PUT /v2/anomalies/incidents/{id}/issue",
 			"PUT /v2/dashboards/{id}/share",
 			"PUT /v2/dashboards/{id}/widgets/{widget_id}/share",
+			"PUT /v2/mobile_devices/{token}",
 		])
 	})
 

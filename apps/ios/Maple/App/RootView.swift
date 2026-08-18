@@ -56,6 +56,8 @@ struct RootView: View {
 /// beyond those stays on the web.
 struct MainTabView: View {
 	@Environment(AppNavigation.self) private var navigation
+	@Environment(SessionController.self) private var session
+	private let push = PushRegistrar.shared
 
 	var body: some View {
 		@Bindable var navigation = navigation
@@ -69,6 +71,14 @@ struct MainTabView: View {
 			Tab("Alerts", systemImage: "bell", value: AppTab.alerts) {
 				AlertsHubView()
 			}
+		}
+		// One PUT per change in (token, org, permission, preferences): the key
+		// folds all four, so a token arriving after launch or an org switch
+		// re-registers exactly once.
+		.task(id: push.syncKey(orgId: session.currentOrganizationId)) {
+			await push.refreshAuthorization()
+			guard let orgId = session.currentOrganizationId else { return }
+			await push.sync(api: session.api, orgId: orgId)
 		}
 	}
 }

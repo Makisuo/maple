@@ -118,6 +118,12 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 				...optionalSecret("CLERK_JWT_KEY"),
 				...optionalSecret("AUTUMN_SECRET_KEY"),
 				...optionalSecret("INTERNAL_SERVICE_TOKEN"),
+				// Apple push for the iOS app: the alerting worker is where incidents
+				// open and resolve, so it is the one that sends. Same three
+				// bindings as the api worker (platform/Apns.ts).
+				...optionalPlain("APNS_TEAM_ID"),
+				...optionalPlain("APNS_KEY_ID"),
+				...optionalSecret("APNS_PRIVATE_KEY"),
 				// Cloudflare integration (account OAuth — Authorization Code + PKCE).
 				// The alerting worker runs the cloudflare analytics poller (cloudflareAnalyticsTick
 				// → CloudflareAnalyticsService.pollAllOrgs), which resolves + refreshes each org's
