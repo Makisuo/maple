@@ -45,6 +45,12 @@ enum Typo {
 	/// Tab bar and other chrome that should still read as Maple.
 	static let chrome = Font.custom(Face.monoMedium, size: 11)
 
+	/// The body family, by name, for the one consumer that builds its own scale
+	/// rather than picking from this one: `ClerkTheme.Fonts(fontFamily:)`, whose
+	/// sizes are Dynamic Type-relative. `Face` stays private — a family name is
+	/// the only part of it anything outside this file should need.
+	static let bodyFamily = Face.mono
+
 	/// Registers the bundled faces. Fonts declared in Info.plist's `UIAppFonts`
 	/// are registered automatically; this only reports a mismatch, which is
 	/// otherwise invisible — SwiftUI silently falls back to the system font and

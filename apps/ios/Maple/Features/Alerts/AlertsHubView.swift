@@ -25,10 +25,11 @@ struct AlertsHubView: View {
 					}
 				}
 			}
-			.navigationBarTitleDisplayMode(.inline)
+			.navigationTitle("Alerts")
+			.navigationBarTitleDisplayMode(.large)
 			.toolbar {
-				ToolbarItem(placement: .principal) {
-					OrganizationSwitcherButton(fallbackTitle: "Alerts")
+				ToolbarItem(placement: .topBarLeading) {
+					OrganizationSwitcherButton()
 				}
 			}
 			.mapleDestinations()
