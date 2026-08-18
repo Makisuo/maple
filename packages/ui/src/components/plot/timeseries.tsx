@@ -15,14 +15,25 @@ import { resolveSeriesColors } from "../../lib/semantic-series-colors"
 import type { ChartLegendMode } from "../charts/_shared/chart-types"
 import { QueryBuilderLegend } from "../charts/_shared/query-builder-legend"
 import { hasOnlyIntegerValues } from "../charts/_shared/sparse-series"
-import { integerTickValues, linearYDomain, logYDomain, logYScale, type DomainThreshold } from "./plot-scales"
+import { findFirstPartialIndex } from "./partial-buckets"
+import { usePlotLegendSlot, type PlotLegendItem } from "./plot-frame"
+import {
+	NICE_TICK_COUNT,
+	bucketTimeScale,
+	integerTickValues,
+	linearYDomain,
+	logYDomain,
+	logYScale,
+	niceLinearDomain,
+	type DomainThreshold,
+} from "./plot-scales"
 import {
 	PlotTooltipBody,
 	createTooltipFocusStore,
 	type PlotTooltipSeries,
 	type TooltipFocusStore,
 } from "./plot-tooltip"
-import { computeSeriesStats, type SeriesStats } from "./series-stats"
+import { computeSeriesStats, sortZeroSeriesLast, type SeriesStats } from "./series-stats"
 import { useSeriesVisibility } from "./series-visibility"
 import { usePlotChromeColors, useResolvedSeriesColors, type PlotChromeColors } from "./theme"
 
@@ -174,6 +185,35 @@ export interface TimeseriesAxisContext {
 export interface TimeseriesModelOptions {
 	data?: Record<string, unknown>[]
 	unit?: string
+	/**
+	 * The chart's legend mode, so the model knows whether an ancestor's legend
+	 * slot should be filled — see `hoistsLegend`. A chart that omits it publishes,
+	 * which is the right default: `make-chart-widget` defaults every board tile to
+	 * `"hidden"`, so publishing is the common path and forgetting to opt in is the
+	 * failure that loses the header strip.
+	 */
+	legend?: ChartLegendMode
+	/**
+	 * Rewrites a series after its colour is resolved — the bar chart's "Other"
+	 * bucket, which must not wear the identity hue `resolveSeriesColors` hashes
+	 * out of its name.
+	 *
+	 * Applied INSIDE the model rather than by the chart afterwards so that one
+	 * list feeds the marks, the legend, the tooltip and the hoisted header
+	 * together. Memoise it: it sits inside the series memo.
+	 */
+	mapSeries?: (series: TimeseriesSeries) => TimeseriesSeries
+}
+
+/**
+ * Whether the chart draws its own legend strip.
+ *
+ * The one place the question is answered, because two things read it: the strip
+ * itself, and the decision not to ALSO publish into a host header — a tile
+ * showing both would print its series twice.
+ */
+export function hoistsLegend(legend: ChartLegendMode | undefined): boolean {
+	return legend !== "visible" && legend !== "right"
 }
 
 export interface TimeseriesModel {
@@ -208,7 +248,12 @@ export interface TimeseriesModel {
  * would let a consumer run them out of order. Every stage keeps its own memo —
  * this sits on the hover hot path, and a dropped boundary is a real regression.
  */
-export function useTimeseriesModel({ data, unit }: TimeseriesModelOptions): TimeseriesModel {
+export function useTimeseriesModel({
+	data,
+	unit,
+	legend,
+	mapSeries,
+}: TimeseriesModelOptions): TimeseriesModel {
 	const { rows, seriesDefinitions } = React.useMemo(() => normaliseTimeseriesRows(data), [data])
 
 	const allKeys = React.useMemo(
@@ -238,23 +283,56 @@ export function useTimeseriesModel({ data, unit }: TimeseriesModelOptions): Time
 	const chromeColors = usePlotChromeColors()
 
 	/**
+	 * The buckets the stats describe: the CLOSED ones.
+	 *
+	 * An in-flight bucket is usually queried before its data has landed, so it
+	 * arrives empty or zero-filled — and a zero that means "not measured yet" is
+	 * not a reading. Averaging it in dragged `Mean` down and, far worse, made
+	 * `Last` read 0 on a perfectly healthy series, which is the single number a
+	 * reader takes off a dashboard tile. The Recharts predecessor got this by
+	 * accident: `markIncompleteSegments` moved in-flight values onto `_incomplete`
+	 * keys, so the main key was null there and the stats loop skipped it.
+	 *
+	 * When EVERY bucket is in flight there is nothing closed to report, and four
+	 * zeros would be a worse lie than provisional numbers — so that case keeps the
+	 * whole range.
+	 */
+	const statsRows = React.useMemo(() => {
+		const first = findFirstPartialIndex(scaledRows)
+		return first <= 0 ? scaledRows : scaledRows.slice(0, first)
+	}, [scaledRows])
+
+	/**
 	 * Stats over ALL series, including hidden ones.
 	 *
 	 * Computed BEFORE the visibility filter, deliberately: a hidden series keeps
 	 * its legend row and its numbers so it can be brought back. See
 	 * `useSeriesVisibility` for the rest of that ordering.
 	 */
-	const stats = React.useMemo(() => computeSeriesStats(scaledRows, allKeys), [scaledRows, allKeys])
+	const stats = React.useMemo(() => computeSeriesStats(statsRows, allKeys), [statsRows, allKeys])
 
-	const series = React.useMemo(
+	const series = React.useMemo(() => {
+		const resolved = seriesDefinitions.map((definition) => ({
+			key: definition.chartKey,
+			label: definition.rawKey,
+			color: colors.get(definition.chartKey) ?? SERIES_FALLBACK_COLOR,
+		}))
+		return mapSeries ? resolved.map(mapSeries) : resolved
+	}, [seriesDefinitions, colors, mapSeries])
+
+	/**
+	 * The header strip's copy of the series, or `null` while the chart draws its
+	 * own legend. Memoised on `series`, which is stable across hovers, so the
+	 * host's `setState` cannot land on the pointer path.
+	 */
+	const legendItems = React.useMemo<PlotLegendItem[] | null>(
 		() =>
-			seriesDefinitions.map((definition) => ({
-				key: definition.chartKey,
-				label: definition.rawKey,
-				color: colors.get(definition.chartKey) ?? SERIES_FALLBACK_COLOR,
-			})),
-		[seriesDefinitions, colors],
+			hoistsLegend(legend)
+				? series.map((entry) => ({ key: entry.key, label: entry.label, color: entry.color }))
+				: null,
+		[series, legend],
 	)
+	usePlotLegendSlot(legendItems)
 
 	const { hidden, toggle, visible, visibleKeys } = useSeriesVisibility(series)
 
@@ -338,6 +416,81 @@ export function timeseriesXAxis(axisContext: TimeseriesAxisContext) {
 	}
 }
 
+/**
+ * The x axis for a chart whose marks have WIDTH — the bar chart.
+ *
+ * Same ticks and same clock as `timeseriesXAxis`, over a domain padded by half a
+ * bucket at each end. A bar is drawn centred on its bucket at
+ * `centre - bandwidth / 2` (`dist/bar.js`), so against the unpadded domain — which
+ * ends exactly at the first and last timestamps — half of the first column lands
+ * in the y-axis tick-label gutter and half of the last one past the plot's right
+ * edge. Measured at 24px each way on a 6-bucket 800px chart, and 74px once a
+ * grouped layout widens the band; the overhang is worst exactly where bars are
+ * chunkiest, which is the low-bucket-count dashboard tile.
+ *
+ * PADDING rather than `clip: true`, which is the other available lever:
+ * - Clipping would slice those columns in half rather than place them. Recharts'
+ *   categorical axis reserved a whole band per bucket, so both end columns were
+ *   drawn WHOLE and inside the plot — padding reproduces that, clipping does not.
+ * - `clip` is a chart-level flag, so it would also cut the threshold rules and
+ *   their labels, which are meant to span the plot.
+ * Half a bucket is exactly the slot a band scale would have reserved, and it
+ * comfortably covers the widest a bar can get (0.4 × the bucket gap).
+ *
+ * Line and area deliberately keep the unpadded `timeseriesXAxis`: their marks
+ * have no width, so padding there would just inset the series from the plot
+ * edges and waste the plot.
+ */
+export function timeseriesBandXAxis(axisContext: TimeseriesAxisContext, rows: readonly TimeseriesRow[]) {
+	const domain = bucketBandDomain(rows, axisContext.bucketSeconds)
+	// No usable spacing — a single bucket, or an unparseable one. Inferring is
+	// then no worse than a padding guess, and `barY` has its own single-position
+	// fallback for the bandwidth.
+	if (!domain) return timeseriesXAxis(axisContext)
+	return { ...timeseriesXAxis(axisContext), scale: bucketTimeScale(domain) }
+}
+
+/**
+ * `[first - half a bucket, last + half a bucket]`, or `null` when the bucket
+ * spacing cannot be established.
+ *
+ * The interval comes from `bucketSeconds` when the caller knows it and from the
+ * smallest observed gap otherwise — the smallest, because that is also what
+ * `inferBandwidth` measures, so the padding and the bar width are derived from
+ * the same number even when a range has a ragged bucket in it.
+ */
+export function bucketBandDomain(
+	rows: readonly TimeseriesRow[],
+	bucketSeconds: number | undefined,
+): [Date, Date] | null {
+	if (rows.length < 2) return null
+
+	let min = Number.POSITIVE_INFINITY
+	let max = Number.NEGATIVE_INFINITY
+	let smallestGap = Number.POSITIVE_INFINITY
+	let previous: number | null = null
+
+	for (const row of rows) {
+		const time = row.date.getTime()
+		if (!Number.isFinite(time)) continue
+		if (time < min) min = time
+		if (time > max) max = time
+		if (previous != null && time > previous) smallestGap = Math.min(smallestGap, time - previous)
+		previous = time
+	}
+
+	if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) return null
+	const interval =
+		bucketSeconds != null && bucketSeconds > 0
+			? bucketSeconds * 1000
+			: Number.isFinite(smallestGap)
+				? smallestGap
+				: 0
+	if (interval <= 0) return null
+
+	return [new Date(min - interval / 2), new Date(max + interval / 2)]
+}
+
 export interface TimeseriesYAxisOptions {
 	rows: ReadonlyArray<Record<string, unknown>>
 	/** The VISIBLE series keys — hidden series must not widen the axis. */
@@ -350,6 +503,17 @@ export interface TimeseriesYAxisOptions {
 	thresholds?: ReadonlyArray<DomainThreshold>
 	/** Sums the visible keys per row, for the stacked area and bar charts. */
 	stacked?: boolean
+	/**
+	 * Overrides the tick label formatter.
+	 *
+	 * `unit` covers the query-builder charts, whose units come off a persisted
+	 * widget config and go through `formatValueByUnit`. The fixed-metric charts
+	 * have no such config and their own long-standing formatters — `formatLatency`
+	 * is not `formatValueByUnit(v, "duration_ms")`, and a throughput tick carries
+	 * a rate suffix derived from the bucket size. Passing the function is what
+	 * keeps them on the shared axis instead of hand-rolling one each.
+	 */
+	format?: (value: number) => string
 }
 
 /**
@@ -365,8 +529,18 @@ export interface TimeseriesYAxisOptions {
  * `-Infinity` and `configured-scale.js` does no clamping.
  */
 export function timeseriesYAxis(options: TimeseriesYAxisOptions) {
-	const { rows, visibleKeys, unit, logScale, softMin, softMax, fitYAxisToData, thresholds, stacked } =
-		options
+	const {
+		rows,
+		visibleKeys,
+		unit,
+		logScale,
+		softMin,
+		softMax,
+		fitYAxisToData,
+		thresholds,
+		stacked,
+		format,
+	} = options
 
 	const dataDomain = linearYDomain({
 		rows,
@@ -380,8 +554,16 @@ export function timeseriesYAxis(options: TimeseriesYAxisOptions) {
 	// A log axis does not use the data floor — it pins its own at 1. Both branches
 	// go through `logYDomain`, so the returned domain and the scale below cannot
 	// describe different axes.
-	const domain: [number, number] = logScale ? logYDomain(dataDomain[1]) : dataDomain
-	const integerOnly = hasOnlyIntegerValues(rows, visibleKeys) && unit == null
+	//
+	// The linear branch is NICED here rather than left to the renderer, because
+	// the renderer nices a pinned domain too (`resolveScaleInput`) — so a caller
+	// reading `domain` back to fill a band from the axis floor would otherwise be
+	// describing an axis nobody draws. See `niceLinearDomain`.
+	const domain: [number, number] = logScale ? logYDomain(dataDomain[1]) : niceLinearDomain(dataDomain)
+	// A supplied formatter is as much a statement that the values carry a unit as
+	// `unit` itself is — a latency axis whose ticks read "12.0ms" must not have
+	// its tick VALUES snapped to integers behind the formatter's back.
+	const integerOnly = hasOnlyIntegerValues(rows, visibleKeys) && unit == null && format == null
 
 	return {
 		domain,
@@ -390,7 +572,10 @@ export function timeseriesYAxis(options: TimeseriesYAxisOptions) {
 			// field, and an instance is what pins it (a bare factory infers, which
 			// is how the zero anchor gets lost).
 			scale: logScale ? logYScale(dataDomain[1]) : scaleLinear().domain(domain),
-			nice: !logScale,
+			// A COUNT, not `true`: `true` lets the renderer derive the nice count
+			// from the plot's pixel height, so the domain computed above and the
+			// axis drawn would agree only at some window sizes.
+			nice: logScale ? false : NICE_TICK_COUNT,
 			grid: true,
 			axis: {
 				line: false,
@@ -401,7 +586,7 @@ export function timeseriesYAxis(options: TimeseriesYAxisOptions) {
 					size: 0,
 					padding: 6,
 					values: integerOnly && !logScale ? integerTickValues(domain) : undefined,
-					format: (value: number) => formatValueByUnit(value, unit),
+					format: format ?? ((value: number) => formatValueByUnit(value, unit)),
 				},
 			},
 		},
@@ -490,7 +675,11 @@ export function timeseriesLegend(
 	if (legend !== "visible" && legend !== "right") return undefined
 	return (
 		<QueryBuilderLegend
-			series={series ?? model.series}
+			// Sorted HERE and nowhere else: all-zero series sink to the bottom so
+			// they cannot bury the ones carrying data (MAP-49), while `model.series`
+			// and `model.visible` keep their order because they are paint order and
+			// stack order.
+			series={sortZeroSeriesLast(series ?? model.series, model.stats)}
 			stats={model.stats}
 			hidden={model.hidden}
 			onToggle={model.toggle}

@@ -86,7 +86,13 @@ export function QueryBuilderLineChart({
 
 		return defineChart({
 			marks: [
-				...thresholdRules(thresholds ?? []),
+				// `labelX` anchors the label at the last bucket; without it
+				// `thresholdRules` draws the rule and omits the text, which is how a
+				// widget that names a threshold "SLO" ended up with an anonymous
+				// dashed line indistinguishable from every other one. The label mark
+				// is `decorative`, so it paints without emitting a hoverable datum
+				// into the shared tooltip.
+				...thresholdRules(thresholds ?? [], { labelX: rows.at(-1)?.date }),
 				...visible.map((entry) => line(solid, entry, false)),
 				...(dashed.length > 0 ? visible.map((entry) => line(dashed, entry, true)) : []),
 				...visible.flatMap((entry) => {

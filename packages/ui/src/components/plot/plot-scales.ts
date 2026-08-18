@@ -1,3 +1,4 @@
+import { scaleLinear as niceableScaleLinear } from "@tanstack/charts-scales/linear"
 import { scaleLinear, scaleLog, scaleTime } from "d3-scale"
 
 /**
@@ -34,7 +35,26 @@ export interface LinearYDomainOptions {
 	stacked?: boolean
 	/** Start the axis at the data minimum (with padding) rather than at zero. */
 	fitYAxisToData?: boolean
+	/**
+	 * A floor the axis takes *unless the data goes lower* — Grafana's soft-min,
+	 * not a clamp.
+	 *
+	 * Soft, deliberately, and the persisted config settles the question: the
+	 * widget schema carries `min`/`max` AND `softMin`/`softMax` as separate
+	 * fields (`packages/widgets/src/dashboard/shared/display.ts`), which is only
+	 * coherent if the soft pair yields to the data and the hard pair does not.
+	 * The Recharts predecessor paired its bound with `allowDataOverflow`, which
+	 * CLIPPED the overflowing part of the series; TanStack marks are not clipped
+	 * (`clip` defaults to false at 0.14.0), so porting the clamp literally would
+	 * paint the out-of-range part of the series over the axis labels instead of
+	 * hiding it — the same defect as an unconditional zero floor.
+	 *
+	 * It still overrides both the zero anchor and `fitYAxisToData`, which is what
+	 * makes it the stronger control that `ChartYAxisOptions` documents: a
+	 * `softMin` of 40 over data that bottoms out at 40 moves the axis to 40.
+	 */
 	softMin?: number
+	/** A ceiling the axis takes unless the data goes higher. See `softMin`. */
 	softMax?: number
 	/**
 	 * Threshold values are unioned into the domain.
@@ -90,23 +110,74 @@ export function linearYDomain(options: LinearYDomainOptions): [number, number] {
 	// Recharts chart drew.
 	if (dataMin === Number.POSITIVE_INFINITY) return [0, 1]
 
-	let min = fitYAxisToData ? dataMin - (dataMax - dataMin) * FIT_PADDING_RATIO : 0
-	let max = dataMax
+	// The zero anchor means ZERO IS IN THE DOMAIN, not "zero is the floor". Pinning
+	// `min` to 0 outright dropped every negative reading below the axis — and
+	// nothing clips it, so a period-comparison delta painted over the x tick
+	// labels. `Math.min`/`Math.max` keep the anchor exactly where it earns its
+	// keep (positive data starts at zero rather than floating) and let a series
+	// that crosses or sits below zero describe its own floor, which is what
+	// Recharts' `"auto"` did.
+	let min = fitYAxisToData ? dataMin - (dataMax - dataMin) * FIT_PADDING_RATIO : Math.min(0, dataMin)
+	let max = fitYAxisToData ? dataMax : Math.max(0, dataMax)
 
+	// Applied against the DATA extent, before thresholds: a soft bound yields to
+	// the data, so it replaces the base bound rather than only widening it (the
+	// old `softMin < min` test could never fire against a zero floor and positive
+	// data, which is how the setting came to do nothing at all).
+	if (softMin != null && Number.isFinite(softMin)) min = Math.min(softMin, dataMin)
+	if (softMax != null && Number.isFinite(softMax)) max = Math.max(softMax, dataMax)
+
+	// Last, so a threshold outside every other bound still lands inside the plot.
 	for (const threshold of thresholds ?? []) {
 		if (!Number.isFinite(threshold.value)) continue
 		if (threshold.value < min) min = threshold.value
 		if (threshold.value > max) max = threshold.value
 	}
 
-	if (softMin != null && softMin < min) min = softMin
-	if (softMax != null && softMax > max) max = softMax
-
 	// A degenerate domain maps every value to the same pixel, so the series
 	// collapses onto one line. Widen it rather than paint a flat chart.
 	if (max <= min) max = min + 1
 
 	return [min, max]
+}
+
+/**
+ * The tick count a niced linear y axis rounds to.
+ *
+ * Pinned rather than left to the library because `resolveConfiguredScale` passes
+ * its own `tickCount` as the nice count, and that count is derived from the
+ * PIXEL HEIGHT of the plot (`resolveTickCount(definition.y, chart.height, 48, 7)`
+ * in `scene.js`). A height-dependent nice count means the rounded domain this
+ * module computes and the one the renderer computes agree only at some window
+ * sizes. An axis that passes `nice: NICE_TICK_COUNT` gets the same number back.
+ */
+export const NICE_TICK_COUNT = 5
+
+/**
+ * The domain after `nice()` — the one the axis is actually drawn with.
+ *
+ * `resolveScaleInput` applies `nice()` to the resolved scale whether the domain
+ * was inferred or PINNED, so a caller that hands over an explicit domain and
+ * then reads that same domain back is describing an axis the renderer does not
+ * draw. It matters because the returned domain is a data value, not decoration:
+ * an area band fills from `domain[0]`, so a 41–97 series whose raw domain is
+ * `[35.4, 97]` and whose drawn axis is `[30, 100]` leaves a blank strip beneath
+ * the whole series, and `integerTickValues` computed off the raw domain can drop
+ * the top gridline.
+ *
+ * Uses the renderer's own `scaleLinear` rather than d3's so the rounding is the
+ * same implementation, not merely the same algorithm. Nicing is idempotent (both
+ * iterate to a fixed point), so an axis may still declare `nice` on top of this.
+ */
+export function niceLinearDomain(
+	[min, max]: readonly [number, number],
+	count = NICE_TICK_COUNT,
+): [number, number] {
+	const niced = niceableScaleLinear().domain([min, max]).nice(count).domain()
+	// `nice()` is a no-op on a degenerate domain, and a non-finite bound would
+	// come back untouched too — keep the caller's domain rather than invent one.
+	const [low, high] = niced
+	return Number.isFinite(low) && Number.isFinite(high) && low !== high ? [low, high] : [min, max]
 }
 
 /**
@@ -120,9 +191,16 @@ export function linearYDomain(options: LinearYDomainOptions): [number, number] {
  *
  * Separate from the scale below because a caller that fills from the axis floor
  * needs the number without building a scale to read it back off.
+ *
+ * The CEILING is only a degenerate-domain guard. It used to be `max(max, 10)`,
+ * an undocumented full decade of dead headroom: a histogram whose tallest bucket
+ * holds 3 rows drew that bucket at log(3)/log(10) ≈ 44% of the plot. The real
+ * constraint is narrower — a log scale over `[1, 1]` divides by a zero span and
+ * maps every value to NaN — so the guard only has to fire when `max` fails to
+ * clear the floor. The Recharts predecessor's `[1, "auto"]` behaved this way.
  */
 export function logYDomain(max: number): [number, number] {
-	return [1, Math.max(max, 10)]
+	return [1, Number.isFinite(max) && max > 1 ? max : 10]
 }
 
 /** A log y scale with its domain PINNED — see `logYDomain`. */

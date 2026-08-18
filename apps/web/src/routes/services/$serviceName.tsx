@@ -438,14 +438,12 @@ function OverviewTab({
 			<MetricsGrid
 				items={metrics}
 				waiting={!!isWaiting}
-				syncMode="cursor"
 				syncId={`service-${serviceName}`}
 				overlay={commitMarkers}
-				// Pin every chart's y-axis to one width so their plot areas align — the
-				// synced cursor and the commit markers then line up and group identically
-				// across charts (otherwise each chart's own y-axis width shifts the plot,
-				// and the same commits group differently per chart). 72 fits the widest
-				// of these metrics' tick labels (latency ms).
+				// Pin every chart's plot to one left edge so the commit markers group the
+				// same commits identically across cards — each chart's own y-axis gutter
+				// otherwise varies by ~26px. 72 clears the widest of these metrics' tick
+				// labels (latency ms); a lock below a chart's natural gutter clips them.
 				yAxisWidth={72}
 			/>
 			<ServiceTopOperationsPanel

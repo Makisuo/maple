@@ -35,22 +35,44 @@ import { useCallback, useMemo, useState } from "react"
 export function useSeriesVisibility<T extends { key: string }>(series: ReadonlyArray<T>) {
 	const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
 
-	const toggle = useCallback((key: string) => {
-		setHidden((previous) => {
-			const next = new Set(previous)
-			if (next.has(key)) next.delete(key)
-			else next.add(key)
-			return next
-		})
-	}, [])
+	/**
+	 * The floor lives HERE, in the state transition, not in the derived view.
+	 *
+	 * An empty plot with a collapsed axis reads as a broken chart rather than as a
+	 * choice, so the last visible series cannot be hidden. Enforcing that on
+	 * `visible` instead — by painting every series again once `hidden` covered them
+	 * all — made the chart and its legend assert opposite things: the plot showed
+	 * three lines while all three legend rows were dimmed and struck through. The
+	 * legend renders `hidden` directly, so `hidden` is what has to stay honest, and
+	 * the only way to keep it honest is to never let it reach a state the plot
+	 * refuses to draw. A refused click is a no-op the legend can't misreport.
+	 */
+	const toggle = useCallback(
+		(key: string) => {
+			setHidden((previous) => {
+				if (previous.has(key)) {
+					const next = new Set(previous)
+					next.delete(key)
+					return next
+				}
+				// Counted over `series` rather than over set sizes: `hidden` can outlive
+				// a series (a query change swaps the keys) and a stale key must not be
+				// mistaken for one of the survivors.
+				const remaining = series.filter(
+					(entry) => entry.key !== key && !previous.has(entry.key),
+				).length
+				if (remaining === 0) return previous
+				const next = new Set(previous)
+				next.add(key)
+				return next
+			})
+		},
+		[series],
+	)
 
 	const visible = useMemo(() => {
 		if (hidden.size === 0) return series
-		const shown = series.filter((entry) => !hidden.has(entry.key))
-		// Hiding the LAST visible series would leave an empty plot with a collapsed
-		// axis, which reads as a broken chart rather than as a choice. Recharts had
-		// the same floor.
-		return shown.length === 0 ? series : shown
+		return series.filter((entry) => !hidden.has(entry.key))
 	}, [series, hidden])
 
 	const visibleKeys = useMemo(() => visible.map((entry) => entry.key), [visible])

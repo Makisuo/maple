@@ -240,19 +240,64 @@ export interface SequentialColorScaleOptions {
 }
 
 /**
+ * The floor a log domain gets when the data's own minimum cannot serve as one.
+ *
  * A log scale's transform is `Math.log`, so its domain cannot touch 0 — `log(0)`
- * is `-Infinity` and every value would map to the top stop. Both consumers are
- * count-valued (heatmap counts, hexbin counts), so a non-positive minimum is
- * floored at 1: with `clamp(true)` anything below the floor renders as the bottom
- * stop, which is what the old `log1p` normalize gave a zero-count as well.
+ * is `-Infinity`. The count-valued consumers (heatmap counts, hexbin counts) want
+ * a zero to land on the bottom stop, which `clamp(true)` gives for anything below
+ * the floor, and 1 is where a count meaningfully starts.
+ *
+ * It is a FALLBACK rather than a hard floor, and that distinction is the bug this
+ * comment exists for. Applied unconditionally as `Math.max(min, 1)` it INVERTS
+ * the domain of any all-sub-1 grid — an error ratio, an apdex, a seconds-valued
+ * heatmap. `[1, 0.9]` makes `scaleSequentialLog` compute `log(v/1) / log(0.9/1)`
+ * with a negative denominator, so every value under the max comes back above 1
+ * and clamps to the HOTTEST stop: 0.02, 0.4 and 0.9 all painted identically.
  */
-const LOG_DOMAIN_FLOOR = 1
+const LOG_FALLBACK_FLOOR = 1
+
+/**
+ * How far below the maximum the fallback floor is allowed to sit when the data
+ * itself offers no positive minimum — two decades of ramp, which is enough spread
+ * to tell sub-1 values apart without pretending to resolve arbitrarily small ones.
+ */
+const LOG_FALLBACK_DECADES = 2
+
+/**
+ * The `[lo, hi]` a scale of this type actually walks.
+ *
+ * Exported because anything that LABELS the ramp — a legend's swatch values, a
+ * hover marker's position — has to invert the very scale the marks were painted
+ * with. Deriving both from this one function is what keeps a legend from
+ * disagreeing with the grid beside it.
+ */
+export function resolveSequentialDomain(
+	domain: readonly [number, number],
+	scaleType: SequentialScaleType,
+): [number, number] {
+	const [min, max] = domain
+	if (scaleType !== "log") return [min, max]
+	// Nothing positive anywhere in the data: there is no log ramp to walk, so hand
+	// back a valid ascending domain and let `clamp(true)` park every value on the
+	// bottom stop rather than emit `NaN` positions.
+	if (!(max > 0)) return [LOG_FALLBACK_FLOOR, LOG_FALLBACK_FLOOR * 10]
+	// The data's own minimum first; then 1 where it still leaves a ramp (the count
+	// case); then two decades below the maximum, which is the sub-1 case where a
+	// floor of 1 would invert the domain.
+	const floor =
+		min > 0
+			? Math.min(min, max)
+			: max > LOG_FALLBACK_FLOOR
+				? LOG_FALLBACK_FLOOR
+				: max / 10 ** LOG_FALLBACK_DECADES
+	return [floor, max]
+}
 
 export function createSequentialColorScale(
 	options: SequentialColorScaleOptions,
 ): ScaleSequentialBase<string> {
 	const { stops, scaleType } = options
-	const [min, max] = options.domain
+	const resolved = resolveSequentialDomain(options.domain, scaleType)
 	const parsed = stops.map(parseOklch)
 
 	// The theme-aware half: a closure over the resolved token literals, in the
@@ -268,9 +313,7 @@ export function createSequentialColorScale(
 	// callable with `copy` as configured (never a factory), so the pinned domain
 	// is authoritative and nothing is inferred from the colour channel.
 	if (scaleType === "log") {
-		return scaleSequentialLog(interpolator)
-			.domain([Math.max(min, LOG_DOMAIN_FLOOR), max])
-			.clamp(true)
+		return scaleSequentialLog(interpolator).domain(resolved).clamp(true)
 	}
-	return scaleSequential(interpolator).domain([min, max]).clamp(true)
+	return scaleSequential(interpolator).domain(resolved).clamp(true)
 }

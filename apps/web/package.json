@@ -51,7 +51,6 @@
 		"@takumi-rs/wasm": "2.9.2",
 		"@tanstack/charts": "0.14.0",
 		"@tanstack/charts-scales": "0.14.0",
-		"@tanstack/react-charts": "0.14.0",
 		"@tanstack/react-db": "0.1.91",
 		"@tanstack/react-hotkeys": "0.10.0",
 		"@tanstack/react-router": "^1.170.16",

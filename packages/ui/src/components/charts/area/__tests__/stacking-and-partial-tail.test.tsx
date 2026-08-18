@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react"
+import { cleanup, fireEvent, render } from "@testing-library/react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { QueryBuilderAreaChart } from "../query-builder-area-chart"
@@ -167,5 +167,72 @@ describe("query-builder area: trailing partial bucket", () => {
 		// tile's tail is one bucket wide, so a dot at each end would fill the
 		// dashes in and the tail would read as a closed band.
 		expect(pointDots).toHaveLength(rows.length - 1)
+	})
+})
+
+/** The Min/Max/Mean/Last cells of the stats legend, per series row. */
+function statsRow(container: HTMLElement, label: string): string[] {
+	const row = [...container.querySelectorAll("tbody tr")].find((node) =>
+		node.textContent?.startsWith(label),
+	)
+	if (!row) throw new Error(`no legend row for ${label}`)
+	return [...row.querySelectorAll("td")].slice(1).map((cell) => cell.textContent ?? "")
+}
+
+/**
+ * Eight hourly buckets climbing 100 → 106, with the in-flight one zero-filled —
+ * exactly what the warehouse returns for the current interval before any of its
+ * data has landed.
+ */
+function climbingWithEmptyTail() {
+	const hour = 3_600_000
+	const currentBucketStart = Math.floor(Date.now() / hour) * hour
+	return Array.from({ length: 8 }, (_, index) => ({
+		bucket: new Date(currentBucketStart - (7 - index) * hour).toISOString(),
+		"demo-api": index === 7 ? 0 : 100 + index,
+	}))
+}
+
+describe("query-builder area: legend stats over the in-flight tail", () => {
+	it("reports the last CLOSED bucket rather than the zero-filled one", () => {
+		// The stats used to run over the raw normalised rows, which still carry the
+		// zero-filled in-flight bucket — so a healthy chart's legend read
+		// `Last 0` and `Min 0`. `Last` is the number people read off a dashboard
+		// tile, and zero is what an outage looks like.
+		const { container } = render(
+			<QueryBuilderAreaChart data={climbingWithEmptyTail()} legend="visible" seriesStats />,
+		)
+		expect(statsRow(container, "demo-api")).toEqual(["100", "106", "103", "106"])
+	})
+
+	it("keeps a hidden series' numbers in the legend", () => {
+		// Stats are computed BEFORE the visibility filter on purpose: a hidden
+		// series keeps its row and its figures so it can be brought back. Trimming
+		// the in-flight tail must not disturb that ordering.
+		const rows = climbingWithEmptyTail().map((row) => ({ ...row, "other-api": 5 }))
+		const { container } = render(<QueryBuilderAreaChart data={rows} legend="visible" seriesStats />)
+		const row = [...container.querySelectorAll("tbody tr")].find((node) =>
+			node.textContent?.startsWith("other-api"),
+		)
+		if (!row) throw new Error("no legend row for other-api")
+		fireEvent.click(row)
+		expect(statsRow(container, "other-api")).toEqual(["5", "5", "5", "5"])
+	})
+})
+
+describe("query-builder area: the dropped in-flight bucket", () => {
+	it("does not extend the x axis past the last painted bucket", () => {
+		// `splitAtFirstPartial` trims the empty trailing bucket out of the drawn
+		// slices, but the focus-dot marks were still built over the UNTRIMMED
+		// rows — and a mark's channels feed scale inference, so the axis kept
+		// running out to a bucket nothing paints, and that phantom slot stayed
+		// hoverable with a zero-value tooltip.
+		const rows = climbingWithEmptyTail()
+		const { container } = render(<QueryBuilderAreaChart data={rows} showPoints />)
+		// One focus dot per row per series, plus one point dot per closed bucket.
+		const focusDots = [...container.querySelectorAll("circle")].filter(
+			(circle) => circle.getAttribute("r") !== "2.5",
+		)
+		expect(focusDots).toHaveLength(rows.length - 1)
 	})
 })

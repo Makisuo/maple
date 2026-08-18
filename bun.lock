@@ -236,7 +236,6 @@
         "@takumi-rs/wasm": "2.9.2",
         "@tanstack/charts": "0.14.0",
         "@tanstack/charts-scales": "0.14.0",
-        "@tanstack/react-charts": "0.14.0",
         "@tanstack/react-db": "0.1.91",
         "@tanstack/react-hotkeys": "0.10.0",
         "@tanstack/react-router": "^1.170.16",
@@ -1947,8 +1946,6 @@
     "@tanstack/pacer-lite": ["@tanstack/pacer-lite@0.2.2", "", {}, "sha512-eQ1MyLKCHyXiH7NbdmB80W77OhiMgGBUb+qDx/8WMGbwg5Lf/NlfD0TfNYAqY77i8V3AxoDoYdICrQE5ADw4Yw=="],
 
     "@tanstack/query-core": ["@tanstack/query-core@5.101.4", "", {}, "sha512-gNwcvOJcRbLWPOLG/2OBm+zM+Yv+MKsXKEOWC57USuZDEsI71hEErQsiEGx5wX9rzWWkfwM0fVSPoiIFSsxfiw=="],
-
-    "@tanstack/react-charts": ["@tanstack/react-charts@0.14.0", "", { "dependencies": { "@tanstack/charts": "0.14.0" }, "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-hE/X6u8LQqpPa0SYdu8rJqOeWlXorApkdQAcLmAHe7eOb81I5PUdY3IfjzsdvO1Jxlpj54wU/oA6kAwpKQfPWQ=="],
 
     "@tanstack/react-db": ["@tanstack/react-db@0.1.91", "", { "dependencies": { "@tanstack/db": "0.6.13", "use-sync-external-store": "^1.6.0" }, "peerDependencies": { "react": ">=16.8.0" } }, "sha512-iiGXa0NUR5ZgWnaIzUw6T+VvkKv2kTo5jYYK57EtajDcrJbBlNw2+pnRp8Ni2QhXWG7GxFbDEuyY8aj4V975NA=="],
 

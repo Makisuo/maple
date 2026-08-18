@@ -154,8 +154,12 @@ describe("timeseriesYAxis", () => {
 
 	it("reports the fitted floor rather than zero", () => {
 		const axis = timeseriesYAxis({ rows, visibleKeys: ["s1"], fitYAxisToData: true })
-		// 40 minus 10% of the 40..60 extent.
-		expect(axis.domain[0]).toBeCloseTo(38)
+		// The fit puts the floor at 38 — 40 minus 10% of the 40..60 extent — and
+		// the axis is then NICED to 35, because the renderer nices a pinned domain
+		// too. The reported domain has to be the one that is drawn: a band fills
+		// from `domain[0]`, so reporting the pre-nice 38 would leave a blank strip
+		// under the whole series.
+		expect(axis.domain[0]).toBeCloseTo(35)
 		expect(scaleDomain(axis)).toEqual([...axis.domain])
 	})
 

@@ -3,9 +3,13 @@ import { curveMonotoneX } from "d3-shape"
 import * as React from "react"
 
 import { cn } from "../../../lib/utils"
-import { splitAtFirstPartial } from "../../plot/partial-buckets"
+import {
+	findFirstPartialIndex,
+	splitAtFirstPartial,
+	trimEmptyTrailingBuckets,
+} from "../../plot/partial-buckets"
 import { focusCrosshair, focusDot } from "../../plot/plot-focus"
-import { PlotFrame } from "../../plot/plot-frame"
+import { PlotFrame, UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
 import { roundCapDasharray, useChartId, verticalGradient } from "../../plot/plot-paint"
 import { cursorTooltip } from "../../plot/plot-tooltip"
 import { thresholdRules } from "../../plot/threshold-rules"
@@ -83,16 +87,10 @@ export function QueryBuilderAreaChart({
 	softMin,
 	softMax,
 	fitYAxisToData,
-	// Recharts' hover-sync bus, accepted and IGNORED. TanStack has no equivalent
-	// wired up — the shared plot cursor provider is a later phase — and inventing
-	// a private one here would have to be unpicked when it lands. The prop stays
-	// on the interface so the call sites that set it keep compiling and stay
-	// findable.
-	syncId: _syncId,
 	thresholds,
 	showPoints,
 }: QueryBuilderAreaChartProps) {
-	const model = useTimeseriesModel({ data, unit })
+	const model = useTimeseriesModel({ data, unit, legend })
 	const {
 		rows,
 		visible,
@@ -106,15 +104,31 @@ export function QueryBuilderAreaChart({
 
 	const gradientPrefix = useChartId("qbArea")
 
+	/**
+	 * The buckets this chart actually draws.
+	 *
+	 * A trailing in-flight bucket that reported nothing is dropped — see
+	 * `trimEmptyTrailingBuckets`. Everything downstream has to agree on that, and
+	 * that is the part that was missed: the bands were built from the trimmed
+	 * slices while the focus dots were still built over `rows`, and a mark's
+	 * channels feed scale inference. So the x axis kept running out to a bucket
+	 * nothing painted, and that phantom slot stayed hoverable with a zero-value
+	 * tooltip an hour past the end of the data.
+	 */
+	const plotRows = React.useMemo(() => {
+		const first = findFirstPartialIndex(rows)
+		return first === -1 ? rows : trimEmptyTrailingBuckets(rows, visibleKeys, first)
+	}, [rows, visibleKeys])
+
 	const bases = React.useMemo(
-		() => (stacked ? computeStackBases(rows, visible) : null),
-		[stacked, rows, visible],
+		() => (stacked ? computeStackBases(plotRows, visible) : null),
+		[stacked, plotRows, visible],
 	)
 
 	const yAxis = React.useMemo(
 		() =>
 			timeseriesYAxis({
-				rows,
+				rows: plotRows,
 				visibleKeys,
 				unit,
 				logScale,
@@ -124,7 +138,7 @@ export function QueryBuilderAreaChart({
 				thresholds,
 				stacked,
 			}),
-		[rows, visibleKeys, unit, logScale, softMin, softMax, fitYAxisToData, thresholds, stacked],
+		[plotRows, visibleKeys, unit, logScale, softMin, softMax, fitYAxisToData, thresholds, stacked],
 	)
 
 	/**
@@ -168,19 +182,19 @@ export function QueryBuilderAreaChart({
 		if (showPoints === false) return new Map()
 		// Auto: dots on every point only when they fit the width, otherwise only on
 		// the isolated points a band cannot show at all.
-		if (showPoints === true || pointsFit(containerWidth, rows.length)) {
-			const every = new Set(rows.map((_, index) => index))
+		if (showPoints === true || pointsFit(containerWidth, plotRows.length)) {
+			const every = new Set(plotRows.map((_, index) => index))
 			return new Map(visibleKeys.map((key) => [key, every]))
 		}
-		return isolatedPointIndexes(rows, visibleKeys)
-	}, [showPoints, rows, containerWidth, visibleKeys])
+		return isolatedPointIndexes(plotRows, visibleKeys)
+	}, [showPoints, plotRows, containerWidth, visibleKeys])
 
 	const definition = React.useMemo(() => {
 		// The in-flight tail is a SECOND pair of marks over an overlapping slice,
 		// not a dash pattern on the first. `areaY` has no `strokeDasharray` at all
 		// and `lineY`'s is a scalar rather than a per-datum channel, so no single
 		// mark can change style mid-series.
-		const { solid, dashed } = splitAtFirstPartial(rows, visibleKeys)
+		const { solid, dashed } = splitAtFirstPartial(plotRows, visibleKeys)
 
 		// `curve` takes a ChartCurve, not a string. Linear is the default shape, so
 		// only monotone needs one built.
@@ -274,7 +288,7 @@ export function QueryBuilderAreaChart({
 		return defineChart({
 			gradients,
 			marks: [
-				...thresholdRules(thresholds ?? []),
+				...thresholdRules(thresholds ?? [], { labelX: plotRows.at(-1)?.date }),
 				...visible.map((entry) => band(solid, entry, false)),
 				...(hasDashed ? visible.map((entry) => band(dashed, entry, true)) : []),
 				...(stacked ? [] : visible.map((entry) => edge(solid, entry, false))),
@@ -299,8 +313,11 @@ export function QueryBuilderAreaChart({
 					]
 				}),
 				...visible.map((entry) =>
+					// `plotRows`, not `rows`: a focus dot over a bucket no band draws
+					// is what kept the dropped in-flight slot on the axis and
+					// hoverable.
 					focusDot(
-						rows,
+						plotRows,
 						(row: TimeseriesRow) => row.date,
 						// `topOf`, not the raw value: on a stack the active dot belongs on
 						// the band's own top edge. Recharts arrived at the same place by
@@ -316,11 +333,16 @@ export function QueryBuilderAreaChart({
 			x: timeseriesXAxis(axisContext),
 			y: yAxis.y,
 			focus: "group-x",
+			// Recharts snapped to the nearest bucket anywhere in the plot; the
+			// library stops looking 48px out, which blanks the tooltip, crosshair
+			// and focus dot in the gaps of any chart with buckets more than ~96px
+			// apart. See `UNBOUNDED_FOCUS_DISTANCE`.
+			maxFocusDistance: UNBOUNDED_FOCUS_DISTANCE,
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : cursorTooltip(focusStore.anchor),
 		})
 	}, [
-		rows,
+		plotRows,
 		visible,
 		visibleKeys,
 		baseOf,

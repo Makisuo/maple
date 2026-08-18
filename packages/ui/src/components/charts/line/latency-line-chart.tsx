@@ -1,174 +1,142 @@
+import { defineChart, lineY } from "@tanstack/charts"
 import { memo, useMemo } from "react"
-import { Line, LineChart } from "recharts"
 
+import { formatLatency } from "../../../lib/format"
+import { cn } from "../../../lib/utils"
+import {
+	FixedMetricLegend,
+	fixedMetricTooltipBody,
+	useFixedMetricModel,
+	type FixedMetricSeries,
+} from "../../plot/fixed-metrics"
+import { splitAtFirstPartial } from "../../plot/partial-buckets"
+import { focusCrosshair, focusDot } from "../../plot/plot-focus"
+import { PlotFrame, usePlotLegendSlot } from "../../plot/plot-frame"
+import { roundCapDasharray } from "../../plot/plot-paint"
+import { maybeTooltip, type PlotTooltipSeries } from "../../plot/plot-tooltip"
+import { usePlotColors, type PlotColorToken } from "../../plot/theme"
+import { asFiniteNumber, timeseriesXAxis, timeseriesYAxis, type TimeseriesRow } from "../../plot/timeseries"
 import type { ServiceChartProps } from "../_shared/chart-types"
 import { latencyTimeSeriesData } from "../_shared/sample-data"
-import { useIncompleteSegments, extendConfigWithIncomplete } from "../_shared/use-incomplete-segments"
-import {
-	type ChartConfig,
-	ChartContainer,
-	ChartLegend,
-	ChartLegendContent,
-	ChartTooltip,
-	ChartTooltipContent,
-	ChartGrid,
-	ChartXAxis,
-	ChartYAxis,
-} from "../../ui/chart"
-import { formatLatency, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
-const VALUE_KEYS = ["p99LatencyMs", "p95LatencyMs", "p50LatencyMs"]
+const STROKE_WIDTH = 2
 
-const baseChartConfig = {
-	p99LatencyMs: { label: "P99", color: "var(--chart-p99)" },
-	p95LatencyMs: { label: "P95", color: "var(--chart-p95)" },
-	p50LatencyMs: { label: "P50", color: "var(--chart-p50)" },
-} satisfies ChartConfig
+/**
+ * Paint order, and it is deliberate: p99 first so the tighter percentiles draw
+ * over it. The colours are the product-wide latency identities, so they are
+ * named tokens rather than palette slots — see `semantic-series-colors.ts`,
+ * which assigns the same three to a query-builder series called "p95".
+ *
+ * Module scope: `usePlotColors` memoizes on this object's identity, and a fresh
+ * literal per render would re-read computed style every frame.
+ */
+const LATENCY_TOKENS = {
+	p99LatencyMs: ["--chart-p99", "#e0484a"],
+	p95LatencyMs: ["--chart-p95", "#e0a23a"],
+	p50LatencyMs: ["--chart-p50", "#4f8ef7"],
+} as const satisfies Record<string, readonly [PlotColorToken, string]>
+
+const LATENCY_LABELS = {
+	p99LatencyMs: "P99",
+	p95LatencyMs: "P95",
+	p50LatencyMs: "P50",
+} as const satisfies Record<keyof typeof LATENCY_TOKENS, string>
+
+const VALUE_KEYS = Object.keys(LATENCY_TOKENS) as (keyof typeof LATENCY_TOKENS)[]
 
 // Memoized: these charts sit in synced grids whose parent rerenders on every
-// atom/query settle; with stable props the whole Recharts subtree is skipped.
+// atom/query settle; with stable props the whole chart subtree is skipped.
 export const LatencyLineChart = memo(function LatencyLineChart({
 	data,
 	className,
 	legend,
 	tooltip,
-	syncId,
 	overlay,
 	yAxisWidth,
 }: ServiceChartProps) {
-	const chartData = data ?? latencyTimeSeriesData
+	const model = useFixedMetricModel(data ?? latencyTimeSeriesData)
+	const { rows, axisContext, chromeColors, focusStore, suppressed } = model
 
-	const {
-		data: processedData,
-		hasIncomplete,
-		incompleteKeys,
-	} = useIncompleteSegments(chartData, VALUE_KEYS)
+	const colors = usePlotColors(LATENCY_TOKENS)
 
-	const chartConfig = useMemo(
-		() => extendConfigWithIncomplete(baseChartConfig, incompleteKeys),
-		[incompleteKeys],
+	const series = useMemo<FixedMetricSeries[]>(
+		() => VALUE_KEYS.map((key) => ({ key, label: LATENCY_LABELS[key], color: colors[key] })),
+		[colors],
 	)
 
-	const axisContext = useMemo(
-		() => ({
-			rangeMs: inferRangeMs(chartData as Array<Record<string, unknown>>),
-			bucketSeconds: inferBucketSeconds(chartData as Array<{ bucket: string }>),
-		}),
-		[chartData],
+	// The card header's series chips. A no-op outside a `WidgetShell` — the
+	// service pages draw their own always-on legend, so nothing duplicates.
+	usePlotLegendSlot(series)
+
+	const tooltipSeries = useMemo<PlotTooltipSeries<TimeseriesRow>[]>(
+		() =>
+			series.map((entry) => ({
+				label: entry.label,
+				color: entry.color,
+				value: (row: TimeseriesRow) => {
+					const value = row[entry.key]
+					return typeof value === "number" ? value : null
+				},
+				format: formatLatency,
+			})),
+		[series],
 	)
+
+	const definition = useMemo(() => {
+		// The dashed tail is a SECOND mark over an overlapping slice, not a dash
+		// pattern on the first: `strokeDasharray` on `lineY` is a scalar, not a
+		// per-datum channel, so one mark cannot change style mid-line. This is what
+		// replaces the `key`/`key_incomplete` twin-column rewrite Recharts needed,
+		// where a `<Line dataKey>` string could not change style mid-series.
+		const { solid, dashed } = splitAtFirstPartial(rows, VALUE_KEYS)
+		// `lineY` hard-codes a round cap, which eats the gap — see `roundCapDasharray`.
+		const partialDash = roundCapDasharray(4, 4, STROKE_WIDTH)
+
+		const line = (rowSlice: readonly TimeseriesRow[], entry: FixedMetricSeries, dash: boolean) =>
+			lineY(rowSlice, {
+				id: dash ? `${entry.key}-partial` : entry.key,
+				x: (row: TimeseriesRow) => row.date,
+				y: (row: TimeseriesRow) => asFiniteNumber(row[entry.key]),
+				stroke: entry.color,
+				strokeWidth: STROKE_WIDTH,
+				strokeDasharray: dash ? partialDash : undefined,
+			})
+
+		return defineChart({
+			// A left-margin LOCK, not an axis width: `resolveMarginLocks` pins the
+			// side named here and leaves the rest to the automatic solver, which is
+			// what keeps plot rects aligned across a grid. See `PlotOverlayProps`.
+			margin: yAxisWidth == null ? undefined : { left: yAxisWidth },
+			marks: [
+				...series.map((entry) => line(solid, entry, false)),
+				...(dashed.length > 0 ? series.map((entry) => line(dashed, entry, true)) : []),
+				...series.map((entry) =>
+					focusDot(
+						rows,
+						(row: TimeseriesRow) => row.date,
+						(row: TimeseriesRow) => asFiniteNumber(row[entry.key]),
+						entry.color,
+						chromeColors,
+					),
+				),
+				focusCrosshair(chromeColors),
+			],
+			x: timeseriesXAxis(axisContext),
+			y: timeseriesYAxis({ rows, visibleKeys: VALUE_KEYS, format: formatLatency }).y,
+			focus: "group-x",
+			focusRing: false,
+			tooltip: tooltip === "hidden" ? false : maybeTooltip(suppressed, focusStore.anchor),
+		})
+	}, [rows, series, chromeColors, axisContext, focusStore, tooltip, suppressed, yAxisWidth])
 
 	return (
-		<ChartContainer config={chartConfig} className={className}>
-			<LineChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
-				<ChartGrid />
-				<ChartXAxis
-					dataKey="bucket"
-					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
-				/>
-				<ChartYAxis tickMargin={8} width={yAxisWidth ?? 70} tickFormatter={(v) => formatLatency(v)} />
-				{tooltip !== "hidden" && (
-					<ChartTooltip
-						content={
-							<ChartTooltipContent
-								labelFormatter={(_, payload) => {
-									if (!payload?.[0]?.payload?.bucket) return ""
-									const bucket = payload[0].payload.bucket as string
-									return formatBucketLabel(bucket, axisContext, "tooltip")
-								}}
-								formatter={(value, name, item) => {
-									const nameStr = String(name)
-									const isIncomplete = nameStr.endsWith("_incomplete")
-									const baseKey = isIncomplete
-										? nameStr.replace(/_incomplete$/, "")
-										: nameStr
-									if (isIncomplete && item.payload?.[baseKey] != null) return null
-									if (!isIncomplete && value == null) return null
-									const config = baseChartConfig[baseKey as keyof typeof baseChartConfig]
-									return (
-										<span className="flex items-center gap-2">
-											<span
-												className="shrink-0 size-2.5 rounded-[2px]"
-												style={{ backgroundColor: config?.color ?? item.color }}
-											/>
-											<span className="text-muted-foreground">
-												{config?.label ?? baseKey}
-											</span>
-											<span className="font-mono font-medium">
-												{formatLatency(value as number)}
-											</span>
-										</span>
-									)
-								}}
-							/>
-						}
-					/>
-				)}
-				{legend === "visible" && <ChartLegend content={<ChartLegendContent />} />}
-				<Line
-					type="linear"
-					dataKey="p99LatencyMs"
-					stroke="var(--color-p99LatencyMs)"
-					strokeWidth={2}
-					dot={false}
-					isAnimationActive={false}
-				/>
-				<Line
-					type="linear"
-					dataKey="p95LatencyMs"
-					stroke="var(--color-p95LatencyMs)"
-					strokeWidth={2}
-					dot={false}
-					isAnimationActive={false}
-				/>
-				<Line
-					type="linear"
-					dataKey="p50LatencyMs"
-					stroke="var(--color-p50LatencyMs)"
-					strokeWidth={2}
-					dot={false}
-					isAnimationActive={false}
-				/>
-				{hasIncomplete && (
-					<Line
-						type="linear"
-						dataKey="p99LatencyMs_incomplete"
-						stroke="var(--color-p99LatencyMs)"
-						strokeWidth={2}
-						strokeDasharray="4 4"
-						dot={false}
-						connectNulls
-						legendType="none"
-						isAnimationActive={false}
-					/>
-				)}
-				{hasIncomplete && (
-					<Line
-						type="linear"
-						dataKey="p95LatencyMs_incomplete"
-						stroke="var(--color-p95LatencyMs)"
-						strokeWidth={2}
-						strokeDasharray="4 4"
-						dot={false}
-						connectNulls
-						legendType="none"
-						isAnimationActive={false}
-					/>
-				)}
-				{hasIncomplete && (
-					<Line
-						type="linear"
-						dataKey="p50LatencyMs_incomplete"
-						stroke="var(--color-p50LatencyMs)"
-						strokeWidth={2}
-						strokeDasharray="4 4"
-						dot={false}
-						connectNulls
-						legendType="none"
-						isAnimationActive={false}
-					/>
-				)}
-				{overlay}
-			</LineChart>
-		</ChartContainer>
+		<PlotFrame
+			className={cn("h-full w-full", className)}
+			ariaLabel="Latency percentiles"
+			definition={definition}
+			legend={legend === "visible" ? <FixedMetricLegend series={series} /> : undefined}
+			overlay={overlay}
+			renderTooltipBody={({ points }) => fixedMetricTooltipBody(model, points, tooltipSeries)}
+		/>
 	)
 })

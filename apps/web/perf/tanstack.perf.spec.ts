@@ -1,19 +1,22 @@
 import { expect, test, type Page } from "@playwright/test"
 
-// TanStack Charts pilot. /lab/bench/tanstack renders the three `/` overview
-// charts (throughput area, error-rate area, latency lines) off identical rows
-// under one of three renderers, so the only variable is the charting library.
+// /lab/bench/tanstack renders the three `/` overview charts (throughput area,
+// error-rate area, latency lines) off identical rows under one of the two
+// TanStack renderers, so the only variable is how the marks are painted.
 //
-// The bar: TanStack's Canvas renderer must beat Recharts on hover cost. The SVG
-// arm is measured and reported but not gated — it is the control that reproduces
-// the 2026-08-05 spike's result.
+// The `recharts` arm is gone. It rendered the production overview charts as the
+// baseline, and those are TanStack now — the arm had become its own opposition.
+// The pilot's verdict (canvas ~3.3x less React render work than Recharts) is
+// recorded in `apps/web/src/lab/bench/tanstack/FINDINGS.md` §1; what this spec
+// still gates is the standing choice between the two renderers, since
+// `PlotFrame` defaults to canvas and SVG is what a chart opts into for a CSS
+// animation or `motion()`.
 //
-// Recharts ignores pointer events whose offsetX/Y is 0, which is what synthetic
-// events carry. Every sweep here uses Playwright's trusted input and asserts the
-// arm actually responded before the numbers are trusted — a Recharts arm that
-// never opens a tooltip is a broken benchmark, not a win.
+// Every sweep uses Playwright's TRUSTED input and asserts the arm actually
+// responded before the numbers are trusted — an arm that never opens a tooltip
+// is a broken benchmark, not a win.
 
-type Renderer = "recharts" | "tanstack-svg" | "tanstack-canvas"
+type Renderer = "tanstack-svg" | "tanstack-canvas"
 
 interface ReactRenderMetrics {
 	commits: number
@@ -52,26 +55,21 @@ async function openBench(page: Page, renderer: Renderer) {
 
 /** The first chart's plot rect, however the arm happens to draw it. */
 async function plotBounds(page: Page, renderer: Renderer) {
-	const plot =
-		renderer === "recharts"
-			? page.locator(`${BENCH} .recharts-cartesian-grid`).first()
-			: // `[data-chart-plot]` is `PlotFrame`'s own plot-rect handle, and it is the
-				// true analogue of `.recharts-cartesian-grid` — the region inside the axes,
-				// not the whole card. The bench used to emit a `[data-bench-chart]` wrapper
-				// of its own, but that lived in `tanstack-chart.tsx`, which was deleted when
-				// the foundation was promoted into `packages/ui`; the selectors outlived the
-				// element and every TanStack arm silently matched nothing.
-				page.locator(`${BENCH} [data-chart-plot]`).first()
+	// `[data-chart-plot]` is `PlotFrame`'s own plot-rect handle — the region
+	// inside the axes, not the whole card. The bench used to emit a
+	// `[data-bench-chart]` wrapper of its own, but that lived in
+	// `tanstack-chart.tsx`, which was deleted when the foundation was promoted
+	// into `packages/ui`; the selector outlived the element and every arm
+	// silently matched nothing.
+	const plot = page.locator(`${BENCH} [data-chart-plot]`).first()
 	const bounds = await plot.boundingBox()
 	if (!bounds) throw new Error(`${renderer} bench chart has no plot bounds`)
 	return bounds
 }
 
-/** Whether this arm currently shows a tooltip — the "did it respond" check. */
-function tooltipCount(page: Page, renderer: Renderer) {
-	return renderer === "recharts"
-		? page.locator("body [data-chart]:not([data-slot='chart'])")
-		: page.locator(".ts-chart-tooltip")
+/** Whether the bench currently shows a tooltip — the "did it respond" check. */
+function tooltipCount(page: Page) {
+	return page.locator(".ts-chart-tooltip")
 }
 
 async function measurePointerSweep(page: Page, renderer: Renderer): Promise<InteractionMetrics> {
@@ -84,10 +82,9 @@ async function measurePointerSweep(page: Page, renderer: Renderer): Promise<Inte
 	// flattering zero.
 	await page.mouse.move(bounds.x + 8, midY)
 	await page.mouse.move(bounds.x + bounds.width / 2, midY)
-	await expect(
-		tooltipCount(page, renderer).first(),
-		`${renderer} responds to trusted pointer input`,
-	).toBeVisible({ timeout: 5_000 })
+	await expect(tooltipCount(page).first(), `${renderer} responds to trusted pointer input`).toBeVisible({
+		timeout: 5_000,
+	})
 
 	await page.mouse.move(bounds.x + 1, midY)
 	await page.evaluate(() => window.__tanstackBench!.beginInteraction())
@@ -98,8 +95,7 @@ async function measurePointerSweep(page: Page, renderer: Renderer): Promise<Inte
 	return metrics
 }
 
-test("TanStack Canvas beats Recharts on overview-chart hover cost", async ({ page }) => {
-	const recharts = await measurePointerSweep(page, "recharts")
+test("canvas stays at or under the SVG renderer's hover cost", async ({ page }) => {
 	const svg = await measurePointerSweep(page, "tanstack-svg")
 	const canvas = await measurePointerSweep(page, "tanstack-canvas")
 
@@ -107,7 +103,6 @@ test("TanStack Canvas beats Recharts on overview-chart hover cost", async ({ pag
 		["renderer", "blockingMs", "reactMs", "commits", "dropped", "longTasks"].join("\t"),
 		...(
 			[
-				["recharts", recharts],
 				["tanstack-svg", svg],
 				["tanstack-canvas", canvas],
 			] as const
@@ -122,23 +117,23 @@ test("TanStack Canvas beats Recharts on overview-chart hover cost", async ({ pag
 			].join("\t"),
 		),
 	].join("\n")
-	console.log(`[perf] TanStack pilot\n${table}`)
+	console.log(`[perf] TanStack renderers\n${table}`)
 
-	// Sanity: the Recharts baseline did real work. A zero here means the arm never
-	// responded and every comparison below is meaningless.
-	expect(recharts.react.totalActualDurationMs, "Recharts baseline render work").toBeGreaterThan(0)
+	// Sanity: the SVG control did real work. A zero means the arm never responded
+	// and every comparison below is meaningless.
+	expect(svg.react.totalActualDurationMs, "SVG control render work").toBeGreaterThan(0)
 
-	// The pass bar. Canvas removes per-mark DOM cost, which is the one thing
-	// Recharts has no answer for — if it cannot win here it cannot win anywhere.
-	expect(canvas.totalBlockingMs, "canvas blocking ms vs Recharts").toBeLessThanOrEqual(
-		recharts.totalBlockingMs,
+	// Both arms drive React identically — the definition and the hooks are the
+	// same object — so commits should MATCH rather than merely not regress. A
+	// divergence means one renderer started scheduling React work of its own.
+	expect(canvas.react.commits, "canvas React commits vs SVG").toBeLessThanOrEqual(svg.react.commits)
+	// Canvas removes per-mark DOM, which is where the difference actually lands.
+	// A small slack: at these sizes both arms are near the floor, and gating on an
+	// exact win would fail a quiet runner for being quiet.
+	expect(canvas.totalBlockingMs, "canvas blocking ms vs SVG").toBeLessThanOrEqual(
+		Math.max(svg.totalBlockingMs, 50),
 	)
-	expect(canvas.react.totalActualDurationMs, "canvas React render work vs Recharts").toBeLessThanOrEqual(
-		recharts.react.totalActualDurationMs,
-	)
-	expect(canvas.droppedFrames, "canvas dropped frames vs Recharts").toBeLessThanOrEqual(
-		recharts.droppedFrames,
-	)
+	expect(canvas.droppedFrames, "canvas dropped frames vs SVG").toBeLessThanOrEqual(svg.droppedFrames + 1)
 })
 
 test("focus draws a dashed cursor and a dot on the hovered series", async ({ page }) => {
@@ -180,20 +175,17 @@ test("focus draws a dashed cursor and a dot on the hovered series", async ({ pag
 	await expect(latency.locator("circle"), "whenFocused still emits a node per datum").toHaveCount(435)
 })
 
-test("every renderer arm draws all three charts without page errors", async ({ page }) => {
+test("both renderer arms draw all three charts without page errors", async ({ page }) => {
 	const pageErrors: string[] = []
 	page.on("pageerror", (error) => pageErrors.push(error.message))
 
-	for (const renderer of ["recharts", "tanstack-svg", "tanstack-canvas"] as const) {
+	for (const renderer of ["tanstack-svg", "tanstack-canvas"] as const) {
 		await openBench(page, renderer)
 		await expect(page.locator(`${BENCH}[data-bench-renderer='${renderer}']`)).toHaveCount(1)
 
-		const surfaces =
-			renderer === "recharts"
-				? page.locator(`${BENCH} .recharts-wrapper`)
-				: // `[data-chart-host]` is the per-chart wrapper `PlotFrame` emits, so it
-					// counts charts the way `.recharts-wrapper` does for the other arm.
-					page.locator(`${BENCH} [data-chart-host]`)
+		// `[data-chart-host]` is the per-chart wrapper `PlotFrame` emits, so it
+		// counts charts however the arm paints them.
+		const surfaces = page.locator(`${BENCH} [data-chart-host]`)
 		await expect(surfaces, `${renderer} renders three charts`).toHaveCount(3)
 	}
 

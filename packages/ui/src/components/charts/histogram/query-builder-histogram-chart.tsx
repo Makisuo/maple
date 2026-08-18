@@ -5,8 +5,8 @@ import * as React from "react"
 
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
-import { PlotFrame } from "../../plot/plot-frame"
-import { integerTickValues, logYScale } from "../../plot/plot-scales"
+import { PlotFrame, UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
+import { integerTickValues, logYScale, niceLinearDomain } from "../../plot/plot-scales"
 import { cursorTooltip } from "../../plot/plot-tooltip"
 import { usePlotColors, type PlotColorToken } from "../../plot/theme"
 import type { QueryBuilderHistogramChartProps } from "../_shared/chart-types"
@@ -20,6 +20,9 @@ const HISTOGRAM_TOKENS = {
  * every render and defeat the binning memos below.
  */
 const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
+
+/** How far the bins that are not under the pointer fade while one is focused. */
+const DIMMED_BIN_OPACITY = 0.5
 
 /** Matches the previous chart's `bucketCount` default. */
 const DEFAULT_BIN_COUNT = 30
@@ -137,6 +140,19 @@ interface NumericBin {
  * A log scale cannot include zero, so `baseline` is the domain floor in both
  * directions: empty bins collapse to zero height rather than mapping log10(0) to
  * -Infinity.
+ *
+ * The linear branch is NICED, which the line and area axes have always been and
+ * this one was not. Two things went wrong without it. The tallest bin touched
+ * the plot's top edge, with no headroom and no gridline to read it against. And
+ * `integerTickValues` walks its range in whole steps and stops at or below the
+ * ceiling, so an unrounded ceiling loses the top tick outright: over `[0, 137]`
+ * it rounds the step to 28 and ends at 112, leaving the top quarter of the plot
+ * unlabelled. Rounding the ceiling first gives both — headroom, and a tick that
+ * lands on it.
+ *
+ * `niceLinearDomain` rounds with the renderer's own `scaleLinear`, so the domain
+ * here is the one the axis is drawn with; the ticks are then derived FROM that
+ * rounded domain, which is what keeps every tick inside the plot.
  */
 function useCountAxis(maxCount: number, useLogY: boolean) {
 	return React.useMemo(() => {
@@ -152,7 +168,8 @@ function useCountAxis(maxCount: number, useLogY: boolean) {
 		}
 		// Counts are integers and there is no `allowDecimals` option, so the tick
 		// values are supplied outright.
-		const domain: [number, number] = [0, Math.max(maxCount, 1)]
+		const domain = niceLinearDomain([0, Math.max(maxCount, 1)])
+		const ticks = integerTickValues(domain)
 		return {
 			baseline: 0,
 			y: {
@@ -163,7 +180,7 @@ function useCountAxis(maxCount: number, useLogY: boolean) {
 					ticks: {
 						size: 0,
 						padding: 6,
-						values: integerTickValues(domain),
+						values: ticks,
 						format: formatNumber,
 					},
 				},
@@ -230,12 +247,18 @@ function NumericHistogram({
 						y1: () => baseline,
 						y2: (bin: NumericBin) => Math.max(bin.value, baseline),
 						fill: color,
-						fillOpacity: 0.85,
+						// OPAQUE, as Recharts painted it. The hover affordance is the
+						// inverse — every OTHER bin fades — so the bin under the pointer
+						// is the one at full strength rather than the one that steps from
+						// 0.85 to 1, a change nobody can see.
+						fillOpacity: 1,
 						// The equivalent of Recharts' `barCategoryGap={1}`, and it survives
 						// bins of unequal width where a gap fraction would not.
 						inset: 0.5,
 						radius: 2,
-						states: [{ when: { focus: "primary" }, style: { fillOpacity: 1 } }],
+						states: [
+							{ when: { focus: "unmatched" }, style: { fillOpacity: DIMMED_BIN_OPACITY } },
+						],
 					}),
 				],
 				x: {
@@ -255,10 +278,20 @@ function NumericHistogram({
 					},
 				},
 				y,
-				// Cartesian, so `focus: "nearest"` engages — which is what lets the
-				// `states` entry above light the hovered bar. One bar is one datum, so
-				// nearest is also the right semantic: there is no series to group across.
-				focus: "nearest",
+				// Resolved on HORIZONTAL distance, not 2-D proximity.
+				//
+				// `focus: "nearest"` reads well for a scatter and is wrong for a
+				// distribution: the pointer is measured against the bin's centre
+				// POINT, so the empty space above a short bin resolved to nothing at
+				// all, and a pointer just off a short bin beside a tall one lit the
+				// TALL one, whose centre sits closer in 2-D. A histogram column is
+				// live over its whole height — which is what Recharts' category
+				// cursor did. Each bin is its own x value, so its focus group is
+				// itself and the `states` entry above still names it.
+				focus: "group-x",
+				// …and live across the whole plot rather than within 48px of a bin
+				// centre. See `UNBOUNDED_FOCUS_DISTANCE`.
+				maxFocusDistance: UNBOUNDED_FOCUS_DISTANCE,
 				focusRing: false,
 				tooltip: showTooltip ? cursorTooltip("pointer") : false,
 			}),
@@ -324,9 +357,13 @@ function CategoricalHistogram({
 						y1: baseline,
 						y2: (bin: PrebucketedBin) => Math.max(bin.value, baseline),
 						fill: color,
-						fillOpacity: 0.85,
+						// Opaque, and the fade goes on the bins that are NOT hovered —
+						// see `NumericHistogram`.
+						fillOpacity: 1,
 						radius: 2,
-						states: [{ when: { focus: "primary" }, style: { fillOpacity: 1 } }],
+						states: [
+							{ when: { focus: "unmatched" }, style: { fillOpacity: DIMMED_BIN_OPACITY } },
+						],
 					}),
 				],
 				x: {
@@ -355,7 +392,9 @@ function CategoricalHistogram({
 					},
 				},
 				y,
-				focus: "nearest",
+				// Horizontal distance over the whole plot — see `NumericHistogram`.
+				focus: "group-x",
+				maxFocusDistance: UNBOUNDED_FOCUS_DISTANCE,
 				focusRing: false,
 				tooltip: showTooltip ? cursorTooltip("pointer") : false,
 			}),

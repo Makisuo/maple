@@ -20,8 +20,21 @@ export type PlotColorToken = `--${string}` | (string & {})
  */
 export function resolvePlotColor(token: PlotColorToken, fallback: string): string {
 	if (typeof document === "undefined") return fallback
-	if (!token.startsWith("--")) return token
-	const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
+	// `resolveSeriesColors` hands back WRAPPED tokens — `var(--chart-p95)`,
+	// `var(--severity-error)` — for every semantically named series, and a bare
+	// `--token` only for the hashed identity palette. Accepting just the bare form
+	// let the wrapped ones through untouched, straight into the definition, where
+	// `assertResolvedColors` threw during render in DEV. It fired on the most
+	// ordinary chart there is: an ungrouped series is named `value`/`count`/`all`,
+	// which is exactly the semantic set.
+	// Unwrap `var(--token)` only when it names ONE custom property. A `var()`
+	// carrying its own fallback (`var(--x, #abc)`) must reach the renderer intact:
+	// unwrapping it would look up a property literally named `--x, #abc`, miss, and
+	// silently swap the author's fallback for ours.
+	const inner = token.startsWith("var(") && token.endsWith(")") ? token.slice(4, -1).trim() : token
+	const name = inner.includes(",") ? token : inner
+	if (!name.startsWith("--")) return token
+	const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 	return value === "" ? fallback : value
 }
 

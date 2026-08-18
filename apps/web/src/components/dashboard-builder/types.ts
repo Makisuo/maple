@@ -139,7 +139,6 @@ export type DashboardWidget = Omit<
 export type DashboardVariable = DeepMutable<typeof DashboardVariableSchema.Type>
 
 export type DashboardSection = DeepMutable<typeof DashboardSectionSchema.Type>
-export type DashboardSectionTab = DashboardSection["tabs"][number]
 
 export interface Dashboard {
 	id: string

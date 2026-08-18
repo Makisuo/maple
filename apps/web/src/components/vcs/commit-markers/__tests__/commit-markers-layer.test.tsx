@@ -40,6 +40,25 @@ function timeScale(): ResolvedScale {
 	}
 }
 
+/**
+ * A categorical scale over three buckets, recording what it was handed. Every
+ * category maps to the same pixel — the position under test is what the layer adds
+ * to it, not what the scale computes.
+ */
+function bandScale(seen: unknown[]): ResolvedScale {
+	return {
+		id: "x",
+		type: "band",
+		domain: [bucket(0), bucket(1), bucket(2)],
+		map: (value: unknown) => {
+			seen.push(value)
+			return 200
+		},
+		ticks: [],
+		bandwidth: 20,
+	}
+}
+
 /** UTC hours past the domain start, in the tz-less warehouse bucket format. */
 function bucket(hoursPastStart: number): string {
 	return new Date(DOMAIN_START + hoursPastStart * 3_600_000).toISOString().replace("T", " ").slice(0, 19)
@@ -104,6 +123,55 @@ describe("CommitMarkersOverlay", () => {
 			expect(container.innerHTML).toBe("")
 		})
 
+		/**
+		 * A continuous scale EXTRAPOLATES rather than failing, so a bucket past the
+		 * domain still maps to a finite pixel — one outside the plot rect. The overlay
+		 * is `inset-0` with visible overflow, so an unchecked dash paints over the
+		 * y-axis labels or out in the card padding.
+		 *
+		 * Reachable in production: the markers are built from the REQUESTED time range
+		 * while the chart's rows can be shortened by `trimEmptyTrailingBuckets`, so a
+		 * deploy in the trimmed in-flight tail maps past the right edge.
+		 */
+		it("skips a marker past the end of the domain instead of drawing it outside the plot", () => {
+			const { container } = mount([marker(7, "abc1234")])
+			expect(pixelFor(7)).toBeGreaterThan(PLOT.x + PLOT.width)
+			expect(container.innerHTML).toBe("")
+		})
+
+		it("skips a marker before the start of the domain", () => {
+			const { container } = mount([marker(-2, "abc1234")])
+			expect(pixelFor(-2)).toBeLessThan(PLOT.x)
+			expect(container.innerHTML).toBe("")
+		})
+
+		it("keeps the in-range markers when a sibling falls outside", () => {
+			const { dashes } = mount([marker(1, "abc1234"), marker(9, "def5678")])
+
+			expect(dashes).toHaveLength(1)
+			expect(dashes[0].style.left).toBe(`${pixelFor(1) - DASH_HIT}px`)
+		})
+
+		it("keeps a marker sitting exactly on an edge", () => {
+			// The last bucket's own pixel IS the right edge; dropping it would delete a
+			// legitimate deploy marker on every chart whose range ends on a deploy.
+			const { dashes } = mount([marker(0, "aaaaaaa"), marker(6, "bbbbbbb")])
+
+			expect(dashes.map((el) => el.style.left)).toEqual([
+				`${PLOT.x - DASH_HIT}px`,
+				`${PLOT.x + PLOT.width - DASH_HIT}px`,
+			])
+		})
+
+		it("skips a band-scale marker whose centred pixel leaves the plot", () => {
+			// The band centring is applied BEFORE the range check, so a column at the
+			// very edge cannot be nudged out of the plot by half a bandwidth.
+			const { container } = mount([marker(1, "abc1234")], {
+				xScale: { ...bandScale([]), map: () => PLOT.x + PLOT.width },
+			})
+			expect(container.innerHTML).toBe("")
+		})
+
 		it("skips a marker whose bucket a time scale cannot parse", () => {
 			const unparseable: CommitMarker = {
 				bucket: "not-a-date",
@@ -132,22 +200,12 @@ describe("CommitMarkersOverlay", () => {
 		 */
 		it("hands a categorical scale the bucket string verbatim", () => {
 			const seen: unknown[] = []
-			const { dashes } = mount([marker(1, "abc1234")], {
-				xScale: {
-					id: "x",
-					type: "band",
-					domain: [bucket(0), bucket(1), bucket(2)],
-					map: (value: unknown) => {
-						seen.push(value)
-						return 200
-					},
-					ticks: [],
-					bandwidth: 20,
-				},
-			})
+			const { dashes } = mount([marker(1, "abc1234")], { xScale: bandScale(seen) })
 
 			expect(seen).toEqual([bucket(1)])
-			expect(dashes[0].style.left).toBe(`${200 - DASH_HIT}px`)
+			// A band scale maps to the column's LEFT EDGE, so the dash is centred over
+			// the column (200 + 20/2) rather than sitting half a column to its left.
+			expect(dashes[0].style.left).toBe(`${210 - DASH_HIT}px`)
 		})
 
 		it("hands a numeric scale epoch milliseconds", () => {

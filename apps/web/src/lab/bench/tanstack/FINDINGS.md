@@ -123,8 +123,61 @@ for annotations that must extend a scale — it keeps a mark's scale contributio
 geometry while `stripMarkSceneInteraction` removes its focus points — but NOT for the commit
 markers, which are pre-snapped to existing buckets and so extend nothing.
 
+### Third wave: the fixed-metric service charts, and the end of the sync bus (2026-08-18)
+
+Latency, throughput, apdex and error rate are ported, which is the whole `MetricsGrid` — `/` and
+the service detail page.
+
+**`useTimeseriesModel` does not fit them, and forcing it would have been wrong.** That hook is
+built around series DISCOVERED from the data: it treats every column that is not `bucket`/`partial`
+as a series, remaps each to a synthetic `s1..sN` key, and hashes an identity colour out of the raw
+column name. A service-detail row carries `hasSampling`, `errorRate`, `tracedThroughput` and three
+percentiles at once, so discovery would plot the booleans and the operands of derived series; and
+`p50`/`p95`/`p99` have designated tokens that mean the same thing product-wide, which a hash would
+break. What DID generalise is everything downstream of the series list, and that is
+`plot/fixed-metrics.tsx` — bucket parsing that KEEPS every column, the axis context, the chrome
+colours, the tooltip focus store, and the suppression flag. The axis builders in `timeseries.tsx`
+are shared verbatim on top of it, with one new option: `timeseriesYAxis({ format })`, because
+`formatLatency` is not `formatValueByUnit(v, "duration_ms")` and a throughput tick carries a rate
+suffix derived from the bucket size.
+
+**`syncId` is gone from the chart layer entirely** — the prop, the `RechartsSyncProps` mixin (now
+`PlotOverlayProps`), `MetricsGrid`'s two-mode switch, and the call sites. It had been dead in
+production since `syncMode` defaulted to `"cursor"`.
+
+**`yAxisWidth` survived, and the measurement is why.** The hypothesis was that the ported charts
+would line up on their own. They do not: measured across the service grid, the four plots start at
+64.5 / 58.1 / 38.3 / 51.6 px from the card edge, because each solves its own margin from its own
+tick labels ("155.0ms" against "0.9"). The linked cursor genuinely does not care — it works in
+per-plot ratios, and the sub-pixel alignment assertion passes either way — but the commit markers
+do: `layoutMarkerLabels` decides whether two deploys merge into one chip from the plot WIDTH, so a
+26px spread groups the same commits differently on adjacent cards. Reimplemented as a LEFT MARGIN
+LOCK (`ChartSpecBase.margin`, `resolveMarginLocks` in `scene.js`) rather than Recharts'
+`<YAxis width>`; `service-detail.perf.spec.ts` now asserts the four plot rects share one left edge.
+
+**The linked cursor's capture-phase throttle stays.** `PLOT_SELECTOR` widened to
+`[data-chart-plot], .recharts-cartesian-grid` (mirroring `perf/plot-locator.ts`), but the 30Hz
+`onMouseMoveCapture` throttle was NOT removed. It is unreachable for a TanStack chart — the
+renderer binds native `pointermove` on its own container (`dist/renderer.js:574`,
+`dist/interaction-cursor.js:183`), a sibling of the React tree, and a synthetic `mousemove` stopped
+in React's capture phase never reaches a native listener on a descendant — but the infra grids
+(host metrics, k8s workloads, the correlation panel) are still Recharts and still linked, and for
+them it is load-bearing.
+
+**The bench's `recharts` arm is retired.** It rendered the PRODUCTION overview charts as the
+baseline, so once those became TanStack the arm was its own opposition and matched zero
+`.recharts-wrapper` elements. `/lab/bench/tanstack` now A/Bs canvas against SVG, which is still a
+standing choice, and `tanstack.perf.spec.ts` gates that instead. The pilot's verdict below is the
+record of the Recharts comparison; it is not re-measured.
+
+`/lab/bench/service-detail` lost its `?mode=` arm for the same reason, and its perf spec's
+recharts-vs-cursor ratio became an absolute commit ceiling: the hovered chart's tooltip body reads
+the focus store through `useSyncExternalStore`, so a 180-step sweep commits ~180 times (one chart's
+worth), against the ~1117 a four-chart sync storm produced. The storm baseline lives on in
+`infra.perf.spec.ts`.
+
 Reproduce: `bun run --cwd apps/web test:perf:tanstack`
-Look: `/lab/bench/tanstack?renderer=recharts|tanstack-svg|tanstack-canvas`
+Look: `/lab/bench/tanstack?renderer=tanstack-svg|tanstack-canvas`
 
 ## 1. Perf
 

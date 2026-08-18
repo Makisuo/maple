@@ -4,14 +4,15 @@ import * as React from "react"
 import { formatBucketLabel, formatValueByUnit } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
 import { findFirstPartialIndex, trimEmptyTrailingBuckets } from "../../plot/partial-buckets"
-import { PlotFrame } from "../../plot/plot-frame"
+import { PlotFrame, UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
 import { PlotTooltipBody, cursorTooltip, type PlotTooltipSeries } from "../../plot/plot-tooltip"
 import { usePlotColors, type PlotColorToken } from "../../plot/theme"
 import { thresholdRules } from "../../plot/threshold-rules"
 import {
 	asFiniteNumber,
+	bucketBandDomain,
+	timeseriesBandXAxis,
 	timeseriesLegend,
-	timeseriesXAxis,
 	timeseriesYAxis,
 	useTimeseriesModel,
 	type TimeseriesRow,
@@ -69,6 +70,12 @@ interface BarCell {
 	key: string
 	color: string
 	value: number
+	/**
+	 * Where this cell's rect starts on the y axis: the sum of everything stacked
+	 * beneath it, or 0 when the bars sit side by side. Computed here rather than
+	 * left to `barY`'s stack layout — see `lane`.
+	 */
+	base: number
 	/** True when this bucket is still in flight. */
 	partial: boolean
 }
@@ -118,32 +125,28 @@ export function QueryBuilderBarChart({
 	logScale,
 	softMin,
 	softMax,
-	// Recharts' hover-sync bus. Accepted and ignored: TanStack has no equivalent,
-	// and the replacement is the plot cursor provider, which is a later phase.
-	// Dropping the prop would silently change every synced grid's call site, so
-	// it stays declared and inert until there is something to wire it to.
-	syncId: _syncId,
 	thresholds,
 }: QueryBuilderBarChartProps) {
 	const bucketed = React.useMemo(() => bucketBarSeries(data), [data])
-	const model = useTimeseriesModel({ data: bucketed, unit })
-	const { rows, visibleKeys, axisContext, focusStore, containerRef } = model
 
 	const { other: otherColor } = usePlotColors(BAR_TOKENS)
 
 	/**
-	 * The model's series, with "Other" recoloured.
+	 * "Other", recoloured.
 	 *
 	 * `resolveSeriesColors` hashes any unrecognised name into the identity
-	 * palette, and an "Other" wearing a service's hue reads as a service.
+	 * palette, and an "Other" wearing a service's hue reads as a service. Handed
+	 * to the model rather than mapped over its output afterwards, so the marks,
+	 * the legend, the tooltip and the hoisted card header all read one list.
 	 */
 	const recolor = React.useCallback(
 		(entry: TimeseriesSeries): TimeseriesSeries =>
 			entry.label === OTHER_LABEL ? { ...entry, color: otherColor } : entry,
 		[otherColor],
 	)
-	const series = React.useMemo(() => model.series.map(recolor), [model.series, recolor])
-	const visible = React.useMemo(() => model.visible.map(recolor), [model.visible, recolor])
+
+	const model = useTimeseriesModel({ data: bucketed, unit, legend, mapSeries: recolor })
+	const { rows, visible, visibleKeys, axisContext, focusStore, containerRef } = model
 
 	const { cells, plotRows } = React.useMemo(() => {
 		const first = findFirstPartialIndex(rows)
@@ -157,18 +160,26 @@ export function QueryBuilderBarChart({
 		const built: BarCell[] = []
 		trimmed.forEach((row, index) => {
 			const partial = first !== -1 && index >= first
+			// The running total beneath the current series, in `visible` order — so
+			// the first visible series sits on the axis, which is the bottom-up
+			// order Recharts gave a shared `stackId`. Hiding a series restacks the
+			// rest instead of leaving a gap, because it is absent from `visible`.
+			let base = 0
 			for (const entry of visible) {
+				const value = asFiniteNumber(row[entry.key])
 				built.push({
 					row,
 					key: entry.key,
 					color: entry.color,
-					value: asFiniteNumber(row[entry.key]),
+					value,
+					base: stacked ? base : 0,
 					partial,
 				})
+				base += value
 			}
 		})
 		return { cells: built, plotRows: trimmed }
-	}, [rows, visible, visibleKeys])
+	}, [rows, visible, visibleKeys, stacked])
 
 	/**
 	 * Which legend row the card emphasises: the hovered cell's own series.
@@ -198,6 +209,50 @@ export function QueryBuilderBarChart({
 			})),
 		[visible, unit],
 	)
+
+	/**
+	 * The x axis, padded by half a bucket at each end so the end columns are drawn
+	 * whole and inside the plot — see `timeseriesBandXAxis`.
+	 */
+	const xAxis = React.useMemo(() => timeseriesBandXAxis(axisContext, plotRows), [axisContext, plotRows])
+	const bandDomain = React.useMemo(
+		() => bucketBandDomain(plotRows, axisContext.bucketSeconds),
+		[plotRows, axisContext.bucketSeconds],
+	)
+
+	const yAxis = React.useMemo(
+		() =>
+			timeseriesYAxis({
+				rows: plotRows,
+				visibleKeys,
+				unit,
+				logScale,
+				softMin,
+				softMax,
+				thresholds,
+				stacked,
+				// `fitYAxisToData` is deliberately NOT forwarded, which is also what
+				// the Recharts chart did (it never destructured the prop). A bar
+				// encodes its value as the area between the baseline and its top, so
+				// lifting the baseline off zero makes the ratio between two bars a
+				// lie — the setting exists for line and area, where only the shape of
+				// the curve carries meaning.
+			}),
+		[plotRows, visibleKeys, unit, logScale, softMin, softMax, thresholds, stacked],
+	)
+
+	/**
+	 * The pixel the bars are drawn FROM: the axis floor, not the value zero.
+	 *
+	 * `barY` with no `y1` baselines every rect at the data value 0, and a log
+	 * axis is pinned to `[1, max]` — `scaleLog(0)` is NaN, so `y` and `height`
+	 * came out NaN and the mark's finiteness guard, which tests the DATA value,
+	 * waved it through. Every bar of an unstacked log chart vanished; stacked, the
+	 * series sitting on the axis did. The area chart already reads its floor off
+	 * the resolved domain for exactly this reason.
+	 */
+	const yDomainFloor = yAxis.domain[0]
+	const floored = React.useCallback((value: number) => Math.max(yDomainFloor, value), [yDomainFloor])
 
 	const definition = React.useMemo(() => {
 		/**
@@ -245,13 +300,29 @@ export function QueryBuilderBarChart({
 				 */
 				x: (cell: BarCell) => cell.row.date,
 				y: (cell: BarCell) => (cell.partial === partialLane ? cell.value : null),
+				/**
+				 * An EXPLICIT extent, so both edges of the rect are ours.
+				 *
+				 * This also takes stacking off `barY`: `dist/bar.js` refuses to
+				 * combine `y1`/`y2` with a stack layout and skips `stackValues`
+				 * whenever either is set, so the offsets are computed on `BarCell`
+				 * instead. That is the price of a baseline that can sit at the
+				 * axis floor, and it buys the same clamp on both edges — a stacked
+				 * segment whose cumulative start is 0 is exactly as fatal on a log
+				 * axis as an unstacked bar is.
+				 */
+				y1: (cell: BarCell) => floored(cell.base),
+				y2: (cell: BarCell) =>
+					cell.partial === partialLane ? floored(cell.base + cell.value) : null,
 				z: (cell: BarCell) => cell.key,
 				fill: (cell: BarCell) => cell.color,
 				fillOpacity: partialLane ? PARTIAL_FILL_OPACITY : undefined,
 				maxThickness: MAX_BAR_THICKNESS,
 				radius: stacked ? 0 : BAR_RADIUS,
-				// Omitting the layout is what selects stacking: `barY` stacks by `z`
-				// whenever there is no group layout and no explicit y1/y2.
+				// No layout at all is what stacking looks like now that the extent is
+				// explicit: the group scale is what offsets a bar sideways, so
+				// omitting it leaves every series centred on its bucket at full
+				// bandwidth, which the y1/y2 above have already stacked.
 				layout: stacked ? undefined : group(),
 				/**
 				 * The focus affordance: the hovered COLUMN keeps its fill and every
@@ -282,48 +353,33 @@ export function QueryBuilderBarChart({
 			})
 
 		return defineChart({
-			marks: [...thresholdRules(thresholds ?? []), lane(false), lane(true)],
-			x: timeseriesXAxis(axisContext),
-			// `.y` only: a bar has no band to fill from an axis floor — `barY` draws
-			// each rect from the scale's own baseline — so the resolved domain the
-			// area chart needs is not wanted here.
-			y: timeseriesYAxis({
-				rows: plotRows,
-				visibleKeys,
-				unit,
-				logScale,
-				softMin,
-				softMax,
-				thresholds,
-				stacked,
-				// `fitYAxisToData` is deliberately NOT forwarded, which is also what
-				// the Recharts chart did (it never destructured the prop). A bar
-				// encodes its value as the area between the baseline and its top, so
-				// lifting the baseline off zero makes the ratio between two bars a
-				// lie — the setting exists for line and area, where only the shape of
-				// the curve carries meaning.
-			}).y,
+			marks: [
+				// The label rides the PADDED domain's right edge, not the last
+				// bucket's timestamp: on this chart that timestamp is the last
+				// column's centre, so an end-anchored label would print across the
+				// bar rather than in the plot's top-right corner.
+				...thresholdRules(thresholds ?? [], {
+					labelX: bandDomain?.[1] ?? plotRows.at(-1)?.date,
+				}),
+				lane(false),
+				lane(true),
+			],
+			x: xAxis,
+			y: yAxis.y,
 			// Resolves on horizontal distance alone (`dist/focus.js`), so the whole
 			// column is live wherever the pointer sits inside it — which is what
 			// Recharts' category cursor did.
 			focus: "group-x",
+			// Recharts snapped to the nearest category anywhere in the plot. The
+			// library caps focus at 48px from the resolved point, so a chart with
+			// columns further apart than ~96px — a 7-day board at day buckets, or a
+			// wide editor preview — went dead in the gaps between them. See
+			// `UNBOUNDED_FOCUS_DISTANCE`.
+			maxFocusDistance: UNBOUNDED_FOCUS_DISTANCE,
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : cursorTooltip(focusStore.anchor),
 		})
-	}, [
-		cells,
-		plotRows,
-		visibleKeys,
-		axisContext,
-		focusStore,
-		stacked,
-		unit,
-		logScale,
-		softMin,
-		softMax,
-		thresholds,
-		tooltip,
-	])
+	}, [cells, xAxis, yAxis, bandDomain, plotRows, floored, focusStore, stacked, thresholds, tooltip])
 
 	return (
 		<div ref={containerRef} className={cn("h-full w-full", className)}>
@@ -333,7 +389,7 @@ export function QueryBuilderBarChart({
 				definition={definition}
 				// `series`, not the model's: `model.series` still carries the hashed
 				// identity colour for "Other".
-				legend={timeseriesLegend(model, { legend, seriesStats: showStats, unit, series })}
+				legend={timeseriesLegend(model, { legend, seriesStats: showStats, unit })}
 				renderTooltipBody={({ points }) => (
 					// The long-form body `PlotTooltipBody` documents: one datum is one
 					// CELL, so the bucket's other series are read back off `cell.row`

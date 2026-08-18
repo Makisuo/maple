@@ -73,6 +73,47 @@ function scaleInputForBucket(bucket: string, scale: ResolvedScale): Date | numbe
 	return sample instanceof Date ? new Date(ms) : ms
 }
 
+// A marker that lands within this many pixels of an edge counts as on it: the
+// last bucket's own pixel is the plot's right edge up to float error.
+const EDGE_EPSILON = 0.5
+
+/**
+ * Where a marker's dash belongs, or `null` if it does not belong on this plot.
+ *
+ * A continuous d3 scale EXTRAPOLATES: a bucket outside the domain still maps to a
+ * finite number, just one outside the plot rect — and since the overlay is
+ * `inset-0` with visible overflow, nothing clips the result, so the dash lands on
+ * the y-axis labels or out in the card's padding. That is reachable in
+ * production: markers are built from the REQUESTED time range while the chart's
+ * rows can be shortened by `trimEmptyTrailingBuckets`, so a deploy in the trimmed
+ * in-flight tail maps past the right edge.
+ *
+ * Out of range means NOT RENDERED, rather than clamped to the edge. A dash claims
+ * "the deploy happened at this x", and a clamped one is indistinguishable from a
+ * genuine marker at the edge — the reader has no way to tell it is approximate,
+ * and its hover card would name a time the position contradicts. Dropping it is
+ * the behaviour a marker outside the window already gets (it is never built at
+ * all), and in the trimmed-tail case it is self-healing: the marker reappears as
+ * soon as the bucket it belongs to carries data.
+ */
+function markerPixel(
+	bucket: string,
+	scale: ResolvedScale,
+	plotLeft: number,
+	plotRight: number,
+): number | null {
+	const input = scaleInputForBucket(bucket, scale)
+	if (input === null) return null
+	const mapped = scale.map(input)
+	if (!Number.isFinite(mapped)) return null
+	// A band scale maps a category to its column's LEFT EDGE. A marker means "in
+	// this bucket", so it belongs in the column's middle — otherwise every dash on
+	// a categorical x sits half a column to the left of the bar it annotates.
+	const x = typeof input === "string" ? mapped + scale.bandwidth / 2 : mapped
+	if (x < plotLeft - EDGE_EPSILON || x > plotRight + EDGE_EPSILON) return null
+	return x
+}
+
 /**
  * Renders commit deploy markers (dashed verticals + labels + hover cards) over a
  * time-series chart. Mounted through `PlotFrame`'s `overlay` slot; one instance per
@@ -135,18 +176,14 @@ export function CommitMarkersOverlay({ markers, plotRect, xScale }: CommitMarker
 
 	const { groups, labeled } = useMemo(() => {
 		if (!xScale || !plotRect || markers.length === 0) return { groups: [] as LabelGroup[], labeled: true }
-		const positioned: PositionedMarker[] = []
-		for (const marker of markers) {
-			const input = scaleInputForBucket(marker.bucket, xScale)
-			if (input === null) continue
-			const x = xScale.map(input)
-			if (Number.isFinite(x)) {
-				positioned.push({ marker, x })
-			}
-		}
-		positioned.sort((a, b) => a.x - b.x)
 		const plotLeft = plotRect.x
 		const plotRight = plotRect.x + plotRect.width
+		const positioned: PositionedMarker[] = []
+		for (const marker of markers) {
+			const x = markerPixel(marker.bucket, xScale, plotLeft, plotRight)
+			if (x !== null) positioned.push({ marker, x })
+		}
+		positioned.sort((a, b) => a.x - b.x)
 		if (!shouldRenderLabels(positioned, plotLeft, plotRight)) {
 			// Dashes-only mode: no label merging — every marker keeps its own dash and
 			// hover card (a zero-width "box" makes the card anchor sit on the dash).

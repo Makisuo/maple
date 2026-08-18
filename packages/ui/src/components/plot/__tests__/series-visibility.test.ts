@@ -40,6 +40,55 @@ describe("useSeriesVisibility", () => {
 		const { result } = renderHook(() => useSeriesVisibility([{ key: "only" }]))
 		act(() => result.current.toggle("only"))
 		expect(result.current.visibleKeys).toEqual(["only"])
+		// …and the refusal has to leave `hidden` empty, because the legend renders
+		// `hidden` directly. A struck-through row over a painted series is a lie.
+		expect(result.current.hidden.size).toBe(0)
+	})
+
+	it("keeps the legend's `hidden` and the plot's `visible` in agreement", () => {
+		// Clicking every row in turn used to leave `hidden` holding all three keys
+		// while `visible` fell back to painting all three: the legend struck through
+		// series the chart was still drawing. Whatever the floor is, the two sides
+		// have to describe the same picture.
+		const { result } = renderHook(() => useSeriesVisibility(SERIES))
+
+		act(() => result.current.toggle("s1"))
+		act(() => result.current.toggle("s2"))
+		act(() => result.current.toggle("s3"))
+
+		expect(result.current.visibleKeys).toEqual(["s3"])
+		expect([...result.current.hidden].sort()).toEqual(["s1", "s2"])
+		expect(result.current.visibleKeys.some((key) => result.current.hidden.has(key))).toBe(false)
+	})
+
+	it("lets the refused series be hidden once another comes back", () => {
+		const { result } = renderHook(() => useSeriesVisibility([{ key: "s1" }, { key: "s2" }]))
+
+		act(() => result.current.toggle("s1"))
+		act(() => result.current.toggle("s2"))
+		expect(result.current.visibleKeys).toEqual(["s2"])
+
+		// Un-hide s1, and s2 becomes hideable again — the floor is on the state
+		// transition, not a permanent pin on whichever series survived.
+		act(() => result.current.toggle("s1"))
+		act(() => result.current.toggle("s2"))
+		expect(result.current.visibleKeys).toEqual(["s1"])
+	})
+
+	it("counts the floor over the current series, not the hidden set's size", () => {
+		// `hidden` outlives a query change that swaps the keys, so a stale key must
+		// not be mistaken for one of the survivors and block a legitimate hide.
+		const { result, rerender } = renderHook(({ series }) => useSeriesVisibility(series), {
+			initialProps: { series: [{ key: "s1" }, { key: "s2" }] },
+		})
+
+		act(() => result.current.toggle("s1"))
+		rerender({ series: [{ key: "s2" }, { key: "s3" }] })
+
+		// s1 is still in `hidden` but no longer a series; s2 and s3 are both visible,
+		// so hiding one of them must be allowed.
+		act(() => result.current.toggle("s2"))
+		expect(result.current.visibleKeys).toEqual(["s3"])
 	})
 })
 

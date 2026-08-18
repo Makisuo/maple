@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react"
 import { cn } from "@maple/ui/lib/utils"
 import { ChartLegendSlotContext, type ChartLegendItem } from "@maple/ui/components/ui/chart"
+import { PlotLegendSlotContext } from "@maple/ui/components/plot/plot-frame"
 import {
 	GripDotsIcon,
 	TrashIcon,
@@ -65,7 +66,12 @@ export function WidgetShell({
 	// alerts can be spun off a chart without entering dashboard edit mode.
 	const showMenu = isEditable || createAlert != null
 	const [menuOpen, setMenuOpen] = useState(false)
-	const [legendItems, setLegendItems] = useState<ChartLegendItem[]>([])
+	const [legendItems, setLegendItems] = useState<readonly ChartLegendItem[]>([])
+	// One piece of state, two providers. The Recharts `ChartContainer` and the
+	// TanStack plot layer each publish through their own context — the plot layer
+	// declares its own so that importing it does not drag `recharts` into every
+	// ported chart's bundle — and a tile holds exactly one chart, so only one of
+	// them ever fires.
 	const legendSlot = useMemo(() => ({ setItems: setLegendItems }), [])
 
 	// Titles can reference dashboard variables ("Latency — $service"); render
@@ -212,7 +218,9 @@ export function WidgetShell({
 			    tailwind-merge conflict. */}
 			<CardContent className={cn("overflow-hidden", contentClassName ?? "flex-1 min-h-0 p-2")}>
 				<ChartLegendSlotContext.Provider value={legendSlot}>
-					{children}
+					<PlotLegendSlotContext.Provider value={legendSlot}>
+						{children}
+					</PlotLegendSlotContext.Provider>
 				</ChartLegendSlotContext.Provider>
 			</CardContent>
 			{footer != null && (

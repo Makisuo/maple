@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 
-import { bucketTimeScale, integerTickValues, linearYDomain, logYScale } from "../plot-scales"
+import {
+	NICE_TICK_COUNT,
+	bucketTimeScale,
+	integerTickValues,
+	linearYDomain,
+	logYDomain,
+	logYScale,
+	niceLinearDomain,
+} from "../plot-scales"
 
 const LATENCY_ROWS = [
 	{ bucket: "a", p50: 40, p99: 600 },
@@ -30,10 +38,55 @@ describe("linearYDomain", () => {
 		])
 	})
 
-	it("honours softMin and softMax only when they widen the domain", () => {
-		expect(linearYDomain({ rows: LATENCY_ROWS, keys: ["p99"], softMax: 1000 })).toEqual([0, 1000])
-		// A softMax INSIDE the data must not clip the series.
+	it("moves the axis floor to softMin, overriding the zero anchor", () => {
+		// The bug this replaces: `softMin` was only consulted when it was BELOW the
+		// running minimum, which for positive data was already zero — so the
+		// setting a user typed into the y-axis rail did nothing at all.
+		expect(linearYDomain({ rows: LATENCY_ROWS, keys: ["p50"], softMin: 40 })).toEqual([40, 45])
+	})
+
+	it("yields to data that goes beyond a soft bound rather than clipping it", () => {
+		// Soft, not a clamp: nothing clips a mark in TanStack, so an axis that
+		// refused to show the data would paint it over the tick labels instead of
+		// hiding it. `min`/`max` are the separate hard pair in the widget schema.
+		expect(linearYDomain({ rows: LATENCY_ROWS, keys: ["p50"], softMin: 100 })).toEqual([40, 45])
 		expect(linearYDomain({ rows: LATENCY_ROWS, keys: ["p99"], softMax: 100 })).toEqual([0, 700])
+	})
+
+	it("honours softMin and softMax when they widen the domain", () => {
+		expect(linearYDomain({ rows: LATENCY_ROWS, keys: ["p99"], softMax: 1000 })).toEqual([0, 1000])
+		expect(linearYDomain({ rows: LATENCY_ROWS, keys: ["p50"], softMin: -10 })).toEqual([-10, 45])
+	})
+
+	it("keeps a soft bound from hiding a threshold", () => {
+		// Thresholds are unioned LAST, so a rule outside every other bound still
+		// lands inside the plot instead of painting over the axis labels.
+		expect(
+			linearYDomain({
+				rows: LATENCY_ROWS,
+				keys: ["p50"],
+				softMin: 40,
+				thresholds: [{ value: 20 }],
+			}),
+		).toEqual([20, 45])
+	})
+
+	it("keeps negative readings inside the plot instead of below the axis", () => {
+		// The zero anchor means zero is IN the domain, not that zero is the floor.
+		// Pinning `min` to 0 drew a period-comparison delta under the x tick labels,
+		// because marks are not clipped.
+		expect(
+			linearYDomain({
+				rows: [
+					{ bucket: "a", delta: -30 },
+					{ bucket: "b", delta: 12 },
+				],
+				keys: ["delta"],
+			}),
+		).toEqual([-30, 12])
+		// All-negative data keeps zero as its ceiling for the same reason a
+		// positive series keeps zero as its floor: the baseline stays visible.
+		expect(linearYDomain({ rows: [{ bucket: "a", delta: -30 }], keys: ["delta"] })).toEqual([-30, 0])
 	})
 
 	it("widens a degenerate domain rather than collapsing the series to one line", () => {
@@ -43,6 +96,59 @@ describe("linearYDomain", () => {
 	it("falls back to [0, 1] when there are no finite readings", () => {
 		expect(linearYDomain({ rows: [{ bucket: "a", v: null }], keys: ["v"] })).toEqual([0, 1])
 		expect(linearYDomain({ rows: [], keys: ["v"] })).toEqual([0, 1])
+	})
+})
+
+describe("niceLinearDomain", () => {
+	it("returns the domain the axis is DRAWN with, not the raw data extent", () => {
+		// The measured regression: `fitYAxisToData` over 41–97 yields [35.4, 97],
+		// the renderer nices that to [30, 100], and an area band filling from the
+		// returned 35.4 floats above the real axis floor.
+		const raw = linearYDomain({
+			rows: [
+				{ bucket: "a", v: 41 },
+				{ bucket: "b", v: 97 },
+			],
+			keys: ["v"],
+			fitYAxisToData: true,
+		})
+		expect(raw[0]).toBeCloseTo(35.4, 5)
+		expect(niceLinearDomain(raw)).toEqual([30, 100])
+	})
+
+	it("is idempotent, so an axis may still declare `nice` on top of it", () => {
+		const once = niceLinearDomain([35.4, 97])
+		expect(niceLinearDomain(once)).toEqual(once)
+	})
+
+	it("leaves an already-round domain alone", () => {
+		expect(niceLinearDomain([0, 700])).toEqual([0, 700])
+	})
+
+	it("keeps the caller's domain when nicing cannot produce a usable one", () => {
+		expect(niceLinearDomain([5, 5])).toEqual([5, 5])
+	})
+
+	it("rounds to the tick count the axis must pin", () => {
+		// The count is exported because the renderer otherwise derives it from the
+		// plot's pixel height, which would make the two disagree at some sizes.
+		expect(NICE_TICK_COUNT).toBe(5)
+		expect(niceLinearDomain([35.4, 97], NICE_TICK_COUNT)).toEqual([30, 100])
+	})
+})
+
+describe("logYDomain", () => {
+	it("does not waste a decade of height on a small peak", () => {
+		// The old `Math.max(max, 10)` drew a 3-count histogram's tallest bucket at
+		// log(3)/log(10) ≈ 44% of the plot.
+		expect(logYDomain(3)).toEqual([1, 3])
+	})
+
+	it("still widens a domain that would collapse to a single point", () => {
+		// A log scale over [1, 1] has a zero span and maps every value to NaN.
+		expect(logYDomain(1)).toEqual([1, 10])
+		expect(logYDomain(0)).toEqual([1, 10])
+		expect(logYDomain(Number.NaN)).toEqual([1, 10])
 	})
 })
 

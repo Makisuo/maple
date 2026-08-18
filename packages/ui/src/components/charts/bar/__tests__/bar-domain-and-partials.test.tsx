@@ -224,3 +224,94 @@ describe("query-builder bar: legend", () => {
 		expect(container.querySelectorAll("button")).toHaveLength(0)
 	})
 })
+
+/**
+ * The plot rect, read back off the measurement anchor `PlotFrame` positions
+ * from `onRender`. It is the only handle on the region inside the axes, and
+ * geometry assertions need it: a bar's `x` is meaningless without knowing where
+ * the plot starts.
+ */
+function plotRect(container: HTMLElement): { x: number; width: number } {
+	const node = container.querySelector<HTMLElement>("[data-chart-plot]")
+	if (!node) throw new Error("no plot anchor")
+	const match = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(node.style.transform)
+	return { x: Number(match?.[1] ?? 0), width: Number.parseFloat(node.style.width) }
+}
+
+describe("query-builder bar: a log y axis", () => {
+	const rows = closedRows(6, (index) => ({ api: [1, 10, 100, 1000, 30, 5][index] ?? 0 }))
+
+	it("paints bars at finite geometry", () => {
+		// `barY` with no `y1` baselines every bar at the DATA value 0, and
+		// `scaleLog(0)` is NaN — so every rect came out with `y="NaN"
+		// height="NaN"` and the chart painted its axes over an empty plot. The
+		// finiteness guard inside the mark checks the data value (0 is finite),
+		// never the pixel it maps to, so nothing warned.
+		const { container } = render(<QueryBuilderBarChart data={rows} logScale />)
+		const bars = barRects(container)
+		expect(bars).toHaveLength(6)
+		for (const bar of bars) {
+			expect(Number.isFinite(Number(bar.getAttribute("y")))).toBe(true)
+			expect(Number.isFinite(Number(bar.getAttribute("height")))).toBe(true)
+			expect(Number(bar.getAttribute("height"))).toBeGreaterThanOrEqual(0)
+		}
+	})
+
+	it("paints the bottom band of a stacked log chart", () => {
+		// Stacked, the bottom series starts at a cumulative 0 — the same NaN, but
+		// only for the series sitting on the axis, so the chart looked merely
+		// wrong rather than empty.
+		const stackedRows = closedRows(4, () => ({ alpha: 40, bravo: 60 }))
+		const { container } = render(<QueryBuilderBarChart data={stackedRows} logScale stacked />)
+		const bars = barRects(container)
+		expect(bars).toHaveLength(8)
+		for (const bar of bars) {
+			expect(Number.isFinite(Number(bar.getAttribute("y")))).toBe(true)
+			expect(Number.isFinite(Number(bar.getAttribute("height")))).toBe(true)
+		}
+	})
+
+	it("still stacks segments on a log axis", () => {
+		const stackedRows = closedRows(3, () => ({ alpha: 40, bravo: 60 }))
+		const { container } = render(<QueryBuilderBarChart data={stackedRows} logScale stacked />)
+		// Two segments per column that do not share a bottom edge: an overlay
+		// (which is what dropping the library's stack layout would produce) puts
+		// both on the baseline.
+		const bottoms = barRects(container).map((rect) =>
+			(Number(rect.getAttribute("y")) + Number(rect.getAttribute("height"))).toFixed(2),
+		)
+		expect(new Set(bottoms).size).toBe(2)
+	})
+})
+
+describe("query-builder bar: bars stay inside the plot", () => {
+	it("keeps the first and last columns off the axis gutter", () => {
+		// `timeseriesXAxis` hands over the bare `scaleTime` FACTORY, so the domain
+		// is inferred as exactly [firstBucket, lastBucket] with no padding. A bar
+		// is drawn at `center - bandwidth / 2`, and nothing clips — so the first
+		// bar hung 24px into the y-axis tick labels and the last one the same
+		// distance past the plot's right edge.
+		const rows = closedRows(6, () => ({ api: 50 }))
+		const { container } = render(<QueryBuilderBarChart data={rows} />)
+		const rect = plotRect(container)
+		const bars = barRects(container)
+		expect(bars).toHaveLength(6)
+		const lefts = bars.map((bar) => Number(bar.getAttribute("x")))
+		const rights = bars.map((bar) => Number(bar.getAttribute("x")) + Number(bar.getAttribute("width")))
+		expect(Math.min(...lefts)).toBeGreaterThanOrEqual(rect.x - 0.5)
+		expect(Math.max(...rights)).toBeLessThanOrEqual(rect.x + rect.width + 0.5)
+	})
+
+	it("keeps grouped columns inside the plot too", () => {
+		// Grouping halves each bar and offsets it, so the overhang is smaller but
+		// the outermost edge of the first group is still the leftmost geometry.
+		const rows = closedRows(4, () => ({ alpha: 30, bravo: 20 }))
+		const { container } = render(<QueryBuilderBarChart data={rows} />)
+		const rect = plotRect(container)
+		const bars = barRects(container)
+		const lefts = bars.map((bar) => Number(bar.getAttribute("x")))
+		const rights = bars.map((bar) => Number(bar.getAttribute("x")) + Number(bar.getAttribute("width")))
+		expect(Math.min(...lefts)).toBeGreaterThanOrEqual(rect.x - 0.5)
+		expect(Math.max(...rights)).toBeLessThanOrEqual(rect.x + rect.width + 0.5)
+	})
+})

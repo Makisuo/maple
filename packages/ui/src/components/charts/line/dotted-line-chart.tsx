@@ -8,10 +8,10 @@ const chartConfig = {
 	value: { label: "Value", color: "var(--chart-1)" },
 } satisfies ChartConfig
 
-export function DottedLineChart({ data, className, syncId }: SimpleChartProps) {
+export function DottedLineChart({ data, className }: SimpleChartProps) {
 	return (
 		<ChartContainer config={chartConfig} className={className}>
-			<LineChart data={data ?? lineTimeSeriesData} syncId={syncId} syncMethod="value">
+			<LineChart data={data ?? lineTimeSeriesData}>
 				<ChartGrid />
 				<ChartXAxis dataKey="date" />
 				<Line

@@ -1,5 +1,13 @@
 import { defineChart } from "@tanstack/charts"
-import { focusGroupAngle, pie, polar, radialArc, radialText, type PieDatum } from "@tanstack/charts/polar"
+import type { ChartFocusStrategy, ChartPoint } from "@tanstack/charts"
+import {
+	pie,
+	polar,
+	radialArc,
+	radialText,
+	type PieDatum,
+	type PolarLayoutContext,
+} from "@tanstack/charts/polar"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
 import * as React from "react"
 
@@ -11,7 +19,7 @@ import { muteColor } from "../../plot/color-scale"
 import { PlotFrame, usePlotRect } from "../../plot/plot-frame"
 import {
 	MUTED_COLOR_AMOUNT,
-	PlotSeriesLegend,
+	PlotLegend,
 	PlotStatsLegend,
 	usePlotLegendHighlight,
 	type PlotLegendSeries,
@@ -92,6 +100,23 @@ const TABLE_LEGEND_MIN_W = TABLE_FIXED_W + 52
 const TABLE_LEGEND_MAX_W = 240
 const TABLE_MIN_PIE_W = 120
 
+/**
+ * The bottom chip strip, centred and capped at two rows.
+ *
+ * Neither is `PlotLegend.Row`'s default, and both are the pie's own shape rather
+ * than taste. A pie is centred in its box, so a key that hugs the left edge under
+ * it reads as a misalignment. And the cap is what stops the key eating the
+ * picture: `PlotFrame` bounds a legend at 45% of the card, which on a short card
+ * with a dozen long category names leaves the pie at a third of its size. Two
+ * rows is as much colour key as is read at a glance; past that the strip clips,
+ * and the side legend is the layout that shows every row.
+ *
+ * The pixel cap is the two rows plus the strip's own padding, spelled out because
+ * a `max-h-[…]` cannot carry arithmetic: `pt-2` (8) + two `text-xs` items at
+ * `py-0.5` (2 × 20) + one `gap-y-0.5` (2).
+ */
+const CHIP_STRIP_CLASS = "max-h-[50px] justify-center overflow-hidden"
+
 // Slices below this fraction do not get an in-slice label — the wedge is too
 // narrow to host text without overflowing onto its neighbours.
 const LABEL_MIN_FRACTION = 0.06
@@ -142,14 +167,121 @@ function resolveInnerRadius(outerRadius: number, donut: boolean, innerRadius: nu
 }
 
 /**
+ * The polar layout the arcs were struck from, recorded on the way past.
+ *
+ * A focus strategy is handed the pointer position and the chart's points and
+ * nothing else — never the circle those points sit on — but deciding whether the
+ * pointer is over a WEDGE needs that circle's centre and radius. The marks'
+ * `PolarLength` accessors are the one place the layout is handed to code this
+ * file owns, so `innerRadiusFor` writes it into this box and `wedgeFocus` reads
+ * it back.
+ *
+ * The two are created together, once per definition, so a strategy can never see
+ * another chart's layout. The write happens while the scene is being built and
+ * the read on a pointer event over the scene that build produced, so a resize —
+ * which re-runs the accessors without rebuilding the definition — is picked up
+ * as well. Before the first build the box is empty and focus simply does not
+ * engage.
+ */
+interface PolarLayoutBox {
+	layout: PolarLayoutContext | null
+}
+
+/**
+ * The pointer's bearing from the pie's centre, in the convention `pie()` cuts
+ * its slices in: zero at 12 o'clock, growing clockwise, wrapped into [0, 2π).
+ *
+ * A d3 arc places its geometry at `(sin θ, −cos θ)`, so inverting that with
+ * `atan2(dx, −dy)` reads back the same angle the slices were cut at, with no
+ * quarter-turn correction anywhere.
+ */
+function pointerAngle(dx: number, dy: number): number {
+	const angle = Math.atan2(dx, -dy)
+	return angle < 0 ? angle + Math.PI * 2 : angle
+}
+
+/**
+ * Focus that engages only over a WEDGE.
+ *
+ * The library's polar strategy, `focusGroupAngle`, scores a slice by the
+ * perpendicular distance from the pointer to its radial ray and accepts anything
+ * inside `maxFocusDistance` — 48px by default. It never asks whether the pointer
+ * is in the wedge, so a donut's empty hole and the plot box's corners are live
+ * hover targets: sweeping the middle of a donut pops a tooltip and grows a slice
+ * picked by geometry the reader cannot see, and the pointer resting anywhere
+ * over the card leaves every other slice dimmed to `REST_OPACITY`. Tuning
+ * `maxFocusDistance` cannot fix that, because the distance it bounds is measured
+ * ACROSS the ray rather than along it — inside a hole of radius `r` with twelve
+ * slices the worst case is only `r·sin(15°)`.
+ *
+ * So this one is containment rather than proximity: the pointer is inside the
+ * ring and inside the wedge's angular span, or nothing is focused. No near-miss
+ * tolerance, deliberately — a slice is a large target with a drawn edge, and
+ * "near the pie" is somewhere the reader can see is not on it.
+ */
+function wedgeFocus(
+	box: PolarLayoutBox,
+	donut: boolean,
+	innerRadius: number | undefined,
+): ChartFocusStrategy<PieSlice, number, number> {
+	const wedgeAt = (
+		points: readonly ChartPoint<PieSlice, number, number>[],
+		x: number,
+		y: number,
+	): ChartPoint<PieSlice, number, number> | undefined => {
+		const layout = box.layout
+		if (layout === null) return undefined
+
+		const dx = x - layout.centerX
+		const dy = y - layout.centerY
+		const distance = Math.hypot(dx, dy)
+		if (distance < resolveInnerRadius(layout.radius, donut, innerRadius)) return undefined
+		// The hovered slice is drawn `HOVER_GROWTH` past the layout radius, so the
+		// outer bound has to cover the grown arc — otherwise a wedge that grew under
+		// a pointer near its rim would immediately lose the focus that grew it and
+		// flicker.
+		if (distance > layout.radius * HOVER_GROWTH) return undefined
+
+		const angle = pointerAngle(dx, dy)
+		// The arc marks come before the label mark, so this finds a wedge's own
+		// point rather than its label's; both carry the same slice either way.
+		return points.find((point) => point.datum.startAngle <= angle && angle < point.datum.endAngle)
+	}
+
+	return {
+		resolve: (points, context) => {
+			const point = wedgeAt(points, context.x, context.y)
+			return point ? [point] : []
+		},
+		// One wedge is one datum, so there is nothing to group across — and the
+		// label mark contributes a second point per slice, which a group would send
+		// to the tooltip as a duplicate row.
+		group: (_points, context) => [context.point],
+		navigation: (points) => {
+			// Keyboard order is the pie's reading order — clockwise from 12 — with
+			// those duplicate label points dropped.
+			const seen = new Set<string>()
+			const unique: ChartPoint<PieSlice, number, number>[] = []
+			for (const point of points) {
+				if (seen.has(point.datum.name)) continue
+				seen.add(point.datum.name)
+				unique.push(point)
+			}
+			return unique.sort((left, right) => left.datum.startAngle - right.datum.startAngle)
+		},
+	}
+}
+
+/**
  * The donut's centre total, as DOM in the frame's overlay layer.
  *
  * DOM rather than a mark, and that is a decision rather than an oversight: a
  * `radialText` at radius zero would push a focus point into the middle of the
- * hole, so hovering the empty centre of a donut would open a tooltip for a datum
- * that is not a slice — `focusGroupAngle` resolves an angle happily whether or
- * not the pointer is over a wedge. The overlay layer is `pointer-events-none`
- * and nothing here opts back in, so the hole stays untargetable.
+ * hole, and every reading of that point — the tooltip, the keyboard order — would
+ * offer the total as though it were a slice. The overlay layer is
+ * `pointer-events-none` and nothing here opts back in, so the total itself takes
+ * no pointer. What keeps the hole under it inert is `wedgeFocus`, which rejects
+ * a pointer inside the inner radius; the library's own polar strategy does not.
  *
  * Positioned off `usePlotRect()` rather than off the layer's own box: the rect is
  * the region the scene actually painted the polar chart into, so the total is
@@ -330,8 +462,14 @@ export function QueryBuilderPieChart({
 				? slice.color
 				: muteColor(slice.color, chrome.background, MUTED_COLOR_AMOUNT)
 
-		const innerRadiusFor = (context: { radius: number }) =>
-			resolveInnerRadius(context.radius, donut === true, innerRadius)
+		// The layout hand-off to the focus strategy — see `PolarLayoutBox`. One box
+		// per definition, written by the accessor below on every scene build.
+		const layoutBox: PolarLayoutBox = { layout: null }
+
+		const innerRadiusFor = (context: PolarLayoutContext) => {
+			layoutBox.layout = context
+			return resolveInnerRadius(context.radius, donut === true, innerRadius)
+		}
 
 		const arcOptions = {
 			startAngle: (slice: PieSlice) => slice.startAngle,
@@ -423,10 +561,10 @@ export function QueryBuilderPieChart({
 			x: null,
 			y: null,
 			// Cartesian `focus: "nearest"` does not engage on polar marks at all — no
-			// tooltip, no focus state, no error. `focusGroupAngle` is the polar
-			// strategy. It groups by angle, so a slice's label and its arc resolve to
-			// the same datum and the tooltip reads the same slice either way.
-			focus: focusGroupAngle,
+			// tooltip, no focus state, no error — and the library's polar strategy,
+			// `focusGroupAngle`, engages far too readily: see `wedgeFocus`, which
+			// takes the pointer only where a slice was actually painted.
+			focus: wedgeFocus(layoutBox, donut === true, innerRadius),
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : cursorTooltip<PieSlice>("pointer"),
 		})
@@ -443,15 +581,25 @@ export function QueryBuilderPieChart({
 		)
 	}
 
-	const seriesLegend = (
-		<PlotSeriesLegend
+	/**
+	 * Composed here rather than taken from `PlotSeriesLegend`, which is the same
+	 * three parts with no way to restyle the strip: the centring and the row cap
+	 * above are the pie's, not every chart's, and `PlotLegend.Row` already takes a
+	 * `className` for exactly this.
+	 */
+	const chipStrip = (
+		<PlotLegend.Provider
 			series={legendSeries}
 			highlighted={highlighted}
 			onHighlight={highlight}
 			active={activeName}
 			onActiveChange={setActiveName}
 			label="Share by category"
-		/>
+		>
+			<PlotLegend.Row className={CHIP_STRIP_CLASS}>
+				<PlotLegend.Items />
+			</PlotLegend.Row>
+		</PlotLegend.Provider>
 	)
 
 	/**
@@ -471,7 +619,11 @@ export function QueryBuilderPieChart({
 			)}
 		>
 			<PlotFrame
-				className="min-h-0 min-w-0 flex-1"
+				// `min-h-12` is a FLOOR, not a size: below ~48px there is no pie left,
+				// and a card that short should overflow visibly rather than reserve a
+				// few pixels for the legend and draw nothing at all. Width still shrinks
+				// freely — the side legend degrades to chips well before it gets tight.
+				className="min-h-12 min-w-0 flex-1"
 				ariaLabel="Share by category"
 				definition={definition}
 				// EDGE-triggered, which is the only reason rebuilding the definition
@@ -479,7 +631,7 @@ export function QueryBuilderPieChart({
 				// on every pointer move, so crossing five slices costs five commits
 				// rather than one per pixel.
 				onFocusChange={(point) => setActiveName(point?.datum.name ?? null)}
-				legend={chipLegend ? seriesLegend : undefined}
+				legend={chipLegend ? chipStrip : undefined}
 				overlay={
 					donut === true ? (
 						<DonutCenterTotal total={total} unit={unit} innerRadius={innerRadius} />

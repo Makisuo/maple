@@ -4,11 +4,15 @@ import { scaleBand } from "@tanstack/charts-scales/band"
 import { tooltip } from "@tanstack/charts/tooltip"
 import * as React from "react"
 
-import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
+import {
+	DEFAULT_HEATMAP_COLOR_SCALE,
+	type HeatmapColorScale,
+	type HeatmapScaleType,
+} from "@maple/domain/http"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
-import { createSequentialColorScale } from "../../plot/color-scale"
+import { createSequentialColorScale, resolveSequentialDomain } from "../../plot/color-scale"
 import { PlotFrame } from "../../plot/plot-frame"
 import { usePlotColors, type PlotColorToken } from "../../plot/theme"
 import type { QueryBuilderHeatmapChartProps } from "../_shared/chart-types"
@@ -128,8 +132,6 @@ type RampColors = Readonly<Record<keyof typeof RAMP_STOP_TOKENS, string>>
 
 const RAMP_INDICES = [0, 1, 2, 3, 4] as const
 
-const DEFAULT_COLOR_SCALE: HeatmapColorScale = "amber"
-
 /**
  * The grid's chrome. Module scope, like every token map handed to
  * `usePlotColors`: the hook memoizes on the object's identity, so a fresh
@@ -167,23 +169,6 @@ function clamp01(value: number): number {
 }
 
 /**
- * The floor `createSequentialColorScale` pins a log domain to — `log(0)` is
- * `-Infinity`, so a count-valued scale cannot start below 1.
- *
- * Duplicated from `plot/color-scale.ts`, which does not export it. The legend
- * below has to invert the very scale the cells are painted with, so the two
- * floors have to be the same number; see the report note about exporting it.
- */
-const LOG_COLOR_DOMAIN_FLOOR = 1
-
-/** The `[lo, hi]` the colour scale actually walks, log floor applied. */
-function rampDomain(domain: readonly [number, number], scaleType: HeatmapScaleType): [number, number] {
-	if (scaleType !== "log") return [domain[0], domain[1]]
-	const lo = Math.max(domain[0], LOG_COLOR_DOMAIN_FLOOR)
-	return [lo, Math.max(domain[1], lo)]
-}
-
-/**
  * The data value that lands at parametric position t along the ramp.
  *
  * The legend needs this: with a log scale the midpoint *swatch* is not the
@@ -191,13 +176,18 @@ function rampDomain(domain: readonly [number, number], scaleType: HeatmapScaleTy
  * gradient bar lie about log-scaled grids. It mirrors d3's own transforms —
  * `scaleSequential` is linear in the value, `scaleSequentialLog` is linear in
  * `log(value)` — so a swatch's label and its colour describe the same number.
+ *
+ * The domain comes from `resolveSequentialDomain`, the same function the cells'
+ * scale is built from. Reimplementing the log floor here is what let the legend
+ * label a sub-1 grid `1 / 1 / 1` while the cells were painted from a different
+ * (inverted) domain entirely.
  */
 function valueAtRampPosition(
 	t: number,
 	domain: readonly [number, number],
 	scaleType: HeatmapScaleType,
 ): number {
-	const [lo, hi] = rampDomain(domain, scaleType)
+	const [lo, hi] = resolveSequentialDomain(domain, scaleType)
 	if (hi <= lo) return lo
 	if (scaleType === "log") return lo * (hi / lo) ** clamp01(t)
 	return lo + clamp01(t) * (hi - lo)
@@ -209,7 +199,7 @@ function rampPositionOf(
 	domain: readonly [number, number],
 	scaleType: HeatmapScaleType,
 ): number {
-	const [lo, hi] = rampDomain(domain, scaleType)
+	const [lo, hi] = resolveSequentialDomain(domain, scaleType)
 	if (hi <= lo) return 0
 	if (scaleType === "log") return clamp01(Math.log(Math.max(value, lo) / lo) / Math.log(hi / lo))
 	return clamp01((value - lo) / (hi - lo))
@@ -392,86 +382,173 @@ const CELL_GAP_TIGHT = 1
 const TIGHT_CELL_THRESHOLD = 14
 
 /**
- * What the plot rect is, measured from the card.
+ * The y gutter, BOUNDED.
  *
- * Approximate, and unavoidably so: the true rect is resolved by the scene and
- * published from INSIDE `PlotFrame` (`usePlotRect`), which this component is the
- * parent of — reading it back would be a render→state→render loop on every
- * reflow. These two numbers are the room the axes, legend and footnote take, and
- * being a few pixels out only moves a capped cell from 72px to 68px.
+ * The axis grows `margin.left` to fit whatever it measures (`includeLabelMargin`
+ * in `scene.js`), so an unbounded label wins the argument with the grid: a
+ * service/operation axis on a 480px widget took ~230px of gutter and left ~250px
+ * of plot. The old CSS grid clamped the gutter to `[36, 96]` and ellipsised
+ * inside it, and the same two numbers apply here — with the difference that the
+ * bound now has to be enforced twice, once by locking the margin and once by
+ * truncating the label so nothing is drawn outside the lock.
+ *
+ * `6.3px` per character is the same average-glyph estimate the old solver used
+ * for the repo's 11px UI face; the inset covers the tick padding plus a little
+ * air between the longest label and the first column.
  */
-const Y_AXIS_ALLOWANCE_PX = 64
-const BELOW_PLOT_ALLOWANCE_PX = 64
+const Y_LABEL_CHAR_PX = 6.3
+const Y_LABEL_INSET_PX = 10
+const Y_GUTTER_MIN = 36
+const Y_GUTTER_MAX = 96
 
-/** The padding fractions before anything has been measured. */
+/**
+ * The band below the plot that the x tick labels live in: the tick padding plus
+ * one 11px line plus its descender. Locked rather than measured, because a locked
+ * `margin.bottom` is half of what keeps the grid and the x axis together.
+ */
+const X_AXIS_BAND_PX = 20
+
+/** A hair of headroom so the top row's rounded corners are not flush to the card. */
+const PLOT_TOP_PAD = 2
+
+/**
+ * The heights of the two DOM strips below the plot, which is what makes the
+ * vertical arithmetic exact rather than an estimate.
+ *
+ * `PlotFrame` puts the legend and the footnote in flex siblings of the measured
+ * chart box, so the chart gets `containerH` minus whatever they take. Both are
+ * rendered by this file at a FIXED height for that reason — an estimate here
+ * lands as a gap between the last row and the x axis, which is exactly the
+ * regression this replaced.
+ */
+const LEGEND_BLOCK_H = 34
+const FOOTNOTE_BLOCK_H = 16
+
+/** The padding fraction before anything has been measured. */
 const UNMEASURED_PADDING_INNER = 0.05
 
-interface BandGeometry {
-	paddingInner: number
-	paddingOuter: number
-	/** The resolved cell size in pixels, or `null` while unmeasured. */
-	cellPx: number | null
+export interface HeatmapMargin {
+	top: number
+	right: number
+	bottom: number
+	left: number
+}
+
+export interface HeatmapLayout {
+	/**
+	 * The margin LOCK handed to the chart spec, or `null` before the container has
+	 * been measured (in which case the scene's automatic margins run).
+	 *
+	 * Locking all four sides is what pins the plot rect to the grid. The band
+	 * scales below therefore carry no `paddingOuter`: buying a capped grid's
+	 * surplus back as outer padding centres the cells inside the plot rect, but
+	 * the axis labels are drawn at the RECT's edges, so a 4×3 grid on a 700×320
+	 * card ended up with its y labels ~170px left of the first column. Spending the
+	 * surplus as margin instead shrinks the rect onto the grid, and the labels
+	 * follow.
+	 */
+	margin: HeatmapMargin | null
+	paddingInnerX: number
+	paddingInnerY: number
+	radius: number
+	/** Bounded y gutter in px. Also the legend's left inset. */
+	gutter: number
+	/** What a capped grid leaves on the right. Also the legend's right inset. */
+	rightInset: number
+	/** Characters a y label may show before it is ellipsised into the gutter. */
+	yLabelChars: number
+}
+
+export interface HeatmapLayoutInput {
+	containerW: number
+	containerH: number
+	columns: number
+	rows: number
+	/** Length of the longest y label AFTER `shortenYLabel`, in characters. */
+	longestYLabelChars: number
+	hasFootnote: boolean
 }
 
 /**
- * Solve a band axis' padding so the seam lands on `gapPx` and the cell never
- * exceeds `maxCellPx`.
- *
- * d3's band math is `step = length / (count - paddingInner + 2 * paddingOuter)`
- * and `bandwidth = step * (1 - paddingInner)`, so with no outer padding a seam
- * of `gapPx` is `paddingInner = gapPx * count / (length + gapPx)`, and capping
- * the bandwidth is then a matter of buying back the surplus as outer padding —
- * which, with `align(0.5)`, centres the grid instead of stretching it. That
- * centring is the same thing the old solver's `gridOffsetX` did.
+ * The seam is a fraction of the step, so it has to be solved from the length the
+ * axis will actually have: with no outer padding, `bandwidth = (length - (count -
+ * 1) * gap) / count` exactly when `paddingInner = gap * count / (length + gap)`.
+ * That is the CSS grid formula the old solver used, restated in d3's terms.
  */
-function solveBandGeometry(length: number, count: number, gapPx: number, maxCellPx: number): BandGeometry {
-	if (!(length > 0) || count <= 0) {
-		return { paddingInner: UNMEASURED_PADDING_INNER, paddingOuter: 0, cellPx: null }
+function seamPaddingInner(length: number, count: number, gapPx: number): number {
+	return clamp01((gapPx * count) / (length + gapPx))
+}
+
+/** The pixel length a grid of `count` capped cells wants, seams included. */
+function cappedGridLength(count: number, maxCellPx: number, gapPx: number): number {
+	return count * maxCellPx + Math.max(0, count - 1) * gapPx
+}
+
+/**
+ * Solve the whole layout — gutter, margins, band padding — in one pass.
+ *
+ * Pure, and exported for its own tests: every number here is a pixel the chart
+ * cannot assert on from the outside, because jsdom lays nothing out.
+ */
+export function solveHeatmapLayout(input: HeatmapLayoutInput): HeatmapLayout {
+	const { containerW, containerH, columns, rows, longestYLabelChars, hasFootnote } = input
+
+	const gutter = clamp(longestYLabelChars * Y_LABEL_CHAR_PX + Y_LABEL_INSET_PX, Y_GUTTER_MIN, Y_GUTTER_MAX)
+	const yLabelChars = Math.max(1, Math.floor((gutter - Y_LABEL_INSET_PX) / Y_LABEL_CHAR_PX))
+
+	const chartBoxH = containerH - LEGEND_BLOCK_H - (hasFootnote ? FOOTNOTE_BLOCK_H : 0)
+	const availW = containerW - gutter
+	const availH = chartBoxH - PLOT_TOP_PAD - X_AXIS_BAND_PX
+
+	if (!(availW > 0) || !(availH > 0) || columns <= 0 || rows <= 0) {
+		return {
+			margin: null,
+			paddingInnerX: UNMEASURED_PADDING_INNER,
+			paddingInnerY: UNMEASURED_PADDING_INNER,
+			radius: 2,
+			gutter,
+			rightInset: 0,
+			yLabelChars,
+		}
 	}
-	const spread = clamp01((gapPx * count) / (length + gapPx))
-	const uncapped = (length * (1 - spread)) / Math.max(1, count - spread)
-	if (uncapped <= maxCellPx) return { paddingInner: spread, paddingOuter: 0, cellPx: uncapped }
-
-	// Capped, so the seam has to be re-solved against the cell size it will
-	// actually have: `step = cell + gap`, hence `paddingInner = gap / (cell + gap)`.
-	// Solving it against the uncapped step instead leaves a 0.6px hairline
-	// between 72px cells, which does not read as grout at all.
-	const paddingInner = clamp01(gapPx / (maxCellPx + gapPx))
-	const paddingOuter = Math.max(0, ((length * (1 - paddingInner)) / maxCellPx - count + paddingInner) / 2)
-	return { paddingInner, paddingOuter, cellPx: maxCellPx }
-}
-
-interface HeatmapGeometry {
-	x: BandGeometry
-	y: BandGeometry
-	radius: number
-}
-
-function solveGeometry(
-	containerW: number,
-	containerH: number,
-	columns: number,
-	rows: number,
-): HeatmapGeometry {
-	const plotW = containerW - Y_AXIS_ALLOWANCE_PX
-	const plotH = containerH - BELOW_PLOT_ALLOWANCE_PX
 
 	// The seam width depends on the cell size, which depends on the seam width.
-	// The old solver ran the whole layout twice to break that; here the first
-	// pass only needs a cell size, so it is one division rather than one layout.
-	const roughW = plotW > 0 && columns > 0 ? Math.min(plotW / columns, MAX_CELL_W) : MAX_CELL_W
-	const roughH = plotH > 0 && rows > 0 ? Math.min(plotH / rows, MAX_CELL_H) : MAX_CELL_H
+	// The old solver ran the whole layout twice to break that; here the first pass
+	// only needs a cell size, so it is one division rather than one layout.
+	const roughW = Math.min(availW / columns, MAX_CELL_W)
+	const roughH = Math.min(availH / rows, MAX_CELL_H)
 	const gap =
 		roughW >= TIGHT_CELL_THRESHOLD && roughH >= TIGHT_CELL_THRESHOLD ? CELL_GAP_WIDE : CELL_GAP_TIGHT
 
-	const x = solveBandGeometry(plotW, columns, gap, MAX_CELL_W)
-	const y = solveBandGeometry(plotH, rows, gap, MAX_CELL_H)
+	const gridW = Math.min(availW, cappedGridLength(columns, MAX_CELL_W, gap))
+	const gridH = Math.min(availH, cappedGridLength(rows, MAX_CELL_H, gap))
+
+	const cellW = (gridW - Math.max(0, columns - 1) * gap) / columns
+	const cellH = (gridH - Math.max(0, rows - 1) * gap) / rows
 
 	return {
-		x,
-		y,
-		radius: (x.cellPx ?? MAX_CELL_W) >= 10 && (y.cellPx ?? MAX_CELL_H) >= 10 ? 2 : 1,
+		// Top-anchored, left-anchored: the surplus a capped grid leaves goes to the
+		// right and the bottom, where it pushes nothing.
+		margin: {
+			top: PLOT_TOP_PAD,
+			right: Math.max(0, containerW - gutter - gridW),
+			bottom: Math.max(X_AXIS_BAND_PX, chartBoxH - PLOT_TOP_PAD - gridH),
+			left: gutter,
+		},
+		paddingInnerX: seamPaddingInner(gridW, columns, gap),
+		paddingInnerY: seamPaddingInner(gridH, rows, gap),
+		radius: cellW >= 10 && cellH >= 10 ? 2 : 1,
+		gutter,
+		rightInset: Math.max(0, containerW - gutter - gridW),
+		yLabelChars,
 	}
+}
+
+/** Ellipsise a y label into the characters the bounded gutter can show. */
+export function truncateYLabel(label: string, maxChars: number): string {
+	if (label.length <= maxChars) return label
+	// One character of the budget is the ellipsis itself.
+	return `${label.slice(0, Math.max(1, maxChars - 1))}…`
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -490,6 +567,14 @@ interface HeatmapLegendProps {
 	unit?: string
 	/** The hovered cell's value, or `null` — drives the position marker. */
 	hovered: number | null
+	/**
+	 * The plot's own left and right insets, so the stepped bar spans exactly the
+	 * columns. `PlotFrame`'s legend slot is full-bleed, so without these the bar
+	 * starts under the y gutter and runs past the last column — and a legend that
+	 * does not line up with the grid reads as a second, unrelated scale.
+	 */
+	insetLeft: number
+	insetRight: number
 }
 
 /**
@@ -505,7 +590,16 @@ interface HeatmapLegendProps {
  * DOM rather than a mark, in `PlotFrame`'s `legend` slot, for the same reason
  * every other chart's legend is: it is chrome around the plot, not part of it.
  */
-function HeatmapLegend({ domain, span, scaleType, colorAt, unit, hovered }: HeatmapLegendProps) {
+function HeatmapLegend({
+	domain,
+	span,
+	scaleType,
+	colorAt,
+	unit,
+	hovered,
+	insetLeft,
+	insetRight,
+}: HeatmapLegendProps) {
 	const ticks: ReadonlyArray<{ t: number; anchor: "start" | "middle" | "end" }> =
 		span <= 0
 			? [{ t: 0, anchor: "start" }]
@@ -516,7 +610,14 @@ function HeatmapLegend({ domain, span, scaleType, colorAt, unit, hovered }: Heat
 				]
 
 	return (
-		<div className="pt-2">
+		// The height is FIXED, not intrinsic: `solveHeatmapLayout` subtracts this
+		// strip from the container to get the chart box, and an intrinsic height
+		// would make that arithmetic a guess.
+		<div
+			data-heatmap-legend=""
+			className="pt-2"
+			style={{ height: LEGEND_BLOCK_H, paddingLeft: insetLeft, paddingRight: insetRight }}
+		>
 			<div className="relative flex gap-px" style={{ height: LEGEND_BAR_H }}>
 				{Array.from({ length: LEGEND_STEPS }).map((_, index) => (
 					<div
@@ -600,8 +701,8 @@ export function QueryBuilderHeatmapChart({
 	const ramp = usePlotColors(RAMP_STOP_TOKENS)
 	const chrome = usePlotColors(HEATMAP_CHROME_TOKENS)
 
-	const requested = colorScale ?? DEFAULT_COLOR_SCALE
-	const paletteKey = isKnownColorScale(requested) ? requested : DEFAULT_COLOR_SCALE
+	const requested = colorScale ?? DEFAULT_HEATMAP_COLOR_SCALE
+	const paletteKey = isKnownColorScale(requested) ? requested : DEFAULT_HEATMAP_COLOR_SCALE
 	const stops = React.useMemo(() => rampStopsFor(paletteKey, ramp), [paletteKey, ramp])
 
 	const colors = React.useMemo(
@@ -612,12 +713,42 @@ export function QueryBuilderHeatmapChart({
 	const containerRef = React.useRef<HTMLDivElement | null>(null)
 	const { width, height } = useContainerSize(containerRef)
 
-	const geometry = React.useMemo(
-		() => solveGeometry(width, height, model.xDomain.length, model.yDomain.length),
-		[width, height, model.xDomain.length, model.yDomain.length],
+	const allYIso = React.useMemo(() => model.yDomain.every((v) => ISO_RE.test(v)), [model.yDomain])
+
+	// Pruned axes are reported, never dropped silently — otherwise a trimmed grid
+	// reads as the whole result. Resolved before the layout because the strip it
+	// occupies is height the plot does not get.
+	const footnote =
+		model.hiddenX > 0 || model.hiddenY > 0
+			? [
+					model.hiddenX > 0 ? pluralize(model.hiddenX, "empty column") : null,
+					model.hiddenY > 0 ? pluralize(model.hiddenY, "empty row") : null,
+				]
+					.filter(Boolean)
+					.join(" · ") + " hidden"
+			: null
+
+	const longestYLabelChars = React.useMemo(
+		() =>
+			model.yDomain.reduce(
+				(longest, value) => Math.max(longest, shortenYLabel(value, allYIso).length),
+				0,
+			),
+		[model.yDomain, allYIso],
 	)
 
-	const allYIso = React.useMemo(() => model.yDomain.every((v) => ISO_RE.test(v)), [model.yDomain])
+	const layout = React.useMemo(
+		() =>
+			solveHeatmapLayout({
+				containerW: width,
+				containerH: height,
+				columns: model.xDomain.length,
+				rows: model.yDomain.length,
+				longestYLabelChars,
+				hasFootnote: footnote !== null,
+			}),
+		[width, height, model.xDomain.length, model.yDomain.length, longestYLabelChars, footnote],
+	)
 
 	/**
 	 * The hovered cell's value, for the legend's position marker.
@@ -633,7 +764,46 @@ export function QueryBuilderHeatmapChart({
 	}, [])
 
 	const definition = React.useMemo(() => {
-		const { radius } = geometry
+		const { radius } = layout
+
+		/**
+		 * The hover cascade, shared by BOTH marks.
+		 *
+		 * `states` on the cells alone left the grout holes at full strength while
+		 * every non-cross cell dropped to `UNMATCHED_OPACITY`, so hovering made the
+		 * empty slots the brightest thing on the grid — and a focused hole drew no
+		 * ring at all. The holes are data (see `HeatmapSlot`), so they take part in
+		 * the cascade like data.
+		 *
+		 * `when` is a SELECTOR OBJECT, not a state name. `focus: "unmatched"` is
+		 * undocumented and is the one that matters — it resolves to
+		 * `!matches("group")`, i.e. every cell that is not the focused one — while
+		 * `"x"`/`"y"` compare the focused point's band values. States apply in array
+		 * order and merge, so this reads literally: dim the field, restore the cross,
+		 * ring the cell.
+		 *
+		 * The grid this replaced painted two additive 10%-foreground bands and dimmed
+		 * nothing. Subtraction reads better on a grid where every cell already
+		 * carries colour, and it needs no hit-test arithmetic at all.
+		 */
+		const focusStates = [
+			{ when: { focus: "unmatched" }, style: { opacity: UNMATCHED_OPACITY } },
+			{ when: { focus: "x" }, style: { opacity: 1 } },
+			{ when: { focus: "y" }, style: { opacity: 1 } },
+			{
+				when: { focus: "primary" },
+				// Ring only — geometry deliberately fixed. The old grid drew
+				// `0 0 0 1.5px var(--foreground)` OUTSIDE the cell, where an SVG stroke is
+				// centred on the edge, so ~0.75px of this one lands on the data. Growing
+				// the cell into its seam to win that back arrives as an instant 1px jump
+				// per side, which reads as the grid twitching rather than as feedback:
+				// `states[].transition` is applied BY the motion renderer, which is
+				// SVG-only and creates no track for `cell` at 0.14.0.
+				// `ChartRectStateStyle` also omits `strokeOpacity`, so softening the ring
+				// is not available either.
+				style: { stroke: chrome.foreground, strokeWidth: 1.5 },
+			},
+		] as const
 
 		/**
 		 * Grout is per-SLOT rather than one panel behind the plot, and that is a
@@ -653,6 +823,7 @@ export function QueryBuilderHeatmapChart({
 			y: (slot: HeatmapSlot) => slot.y,
 			fill: chrome.grout,
 			radius,
+			states: focusStates,
 		})
 
 		const cells = cell(model.cells, {
@@ -663,50 +834,23 @@ export function QueryBuilderHeatmapChart({
 			// through the `color` channel and the chart-level colour scale.
 			color: (slot: HeatmapSlot) => slot.value,
 			radius,
-			/**
-			 * The crosshair, as a state cascade instead of three positioned divs.
-			 *
-			 * `when` is a SELECTOR OBJECT, not a state name. `focus: "unmatched"` is
-			 * undocumented and is the one that matters — it resolves to
-			 * `!matches("group")`, i.e. every cell that is not the focused one —
-			 * while `"x"`/`"y"` compare the focused point's band values. States apply
-			 * in array order and merge, so this reads literally: dim the field,
-			 * restore the cross, ring the cell.
-			 *
-			 * The grid this replaced painted two additive 10%-foreground bands and
-			 * dimmed nothing. Subtraction reads better on a grid where every cell
-			 * already carries colour, and it needs no hit-test arithmetic at all.
-			 */
-			states: [
-				{ when: { focus: "unmatched" }, style: { opacity: UNMATCHED_OPACITY } },
-				{ when: { focus: "x" }, style: { opacity: 1 } },
-				{ when: { focus: "y" }, style: { opacity: 1 } },
-				{
-					when: { focus: "primary" },
-					// Ring only — geometry deliberately fixed. The old grid drew
-					// `0 0 0 1.5px var(--foreground)` OUTSIDE the cell, where an SVG
-					// stroke is centred on the edge, so ~0.75px of this one lands on the
-					// data. Growing the cell into its seam to win that back arrives as
-					// an instant 1px jump per side, which reads as the grid twitching
-					// rather than as feedback: `states[].transition` is applied BY the
-					// motion renderer, which is SVG-only and creates no track for `cell`
-					// at 0.14.0. `ChartRectStateStyle` also omits `strokeOpacity`, so
-					// softening the ring is not available either.
-					style: { stroke: chrome.foreground, strokeWidth: 1.5 },
-				},
-			],
+			states: focusStates,
 		})
 
 		return defineChart({
 			// Paint order is mark order: grout slots first, the data over them.
 			marks: [holes, cells],
+			// The plot rect, pinned. See `HeatmapLayout.margin`: `null` before the
+			// first measurement, where the scene's automatic margins are the better
+			// answer anyway.
+			margin: layout.margin ?? undefined,
 			x: {
 				// A pinned INSTANCE, not the bare factory: an inferred domain drops a
 				// fully-empty column, turning a hole into a missing axis slot.
-				scale: scaleBand<string>(model.xDomain, [0, 1])
-					.paddingInner(geometry.x.paddingInner)
-					.paddingOuter(geometry.x.paddingOuter)
-					.align(0.5),
+				//
+				// No `paddingOuter`: the plot rect is already the grid, so there is no
+				// surplus left inside it to buy back.
+				scale: scaleBand<string>(model.xDomain, [0, 1]).paddingInner(layout.paddingInnerX),
 				grid: false,
 				axis: {
 					line: false,
@@ -719,10 +863,7 @@ export function QueryBuilderHeatmapChart({
 				},
 			},
 			y: {
-				scale: scaleBand<string>(model.yDomain, [0, 1])
-					.paddingInner(geometry.y.paddingInner)
-					.paddingOuter(geometry.y.paddingOuter)
-					.align(0.5),
+				scale: scaleBand<string>(model.yDomain, [0, 1]).paddingInner(layout.paddingInnerY),
 				grid: false,
 				axis: {
 					line: false,
@@ -731,9 +872,17 @@ export function QueryBuilderHeatmapChart({
 						padding: 6,
 						// An all-ISO y axis is a time axis wearing timestamps; only the
 						// clock time distinguishes the rows, and the date repeated down
-						// the axis costs the width every label has to fit in.
-						format: (value: string) => shortenYLabel(value, allYIso),
+						// the axis costs the width every label has to fit in. The
+						// truncation is what makes the locked `margin.left` safe — the
+						// axis would otherwise measure the full string and want a gutter
+						// it is not going to get.
+						format: (value: string) =>
+							truncateYLabel(shortenYLabel(value, allYIso), layout.yLabelChars),
 					},
+					// `thinTickLabels` only prioritises the ends automatically for a
+					// categorical X, so a y axis was thinned middle-out and could drop the
+					// first and last ROW labels — the two that say what the axis spans.
+					tickLabels: { thin: { priority: "ends" } },
 				},
 			},
 			color: { scale: colors },
@@ -756,7 +905,7 @@ export function QueryBuilderHeatmapChart({
 							offset: 6,
 						},
 		})
-	}, [model, geometry, colors, chrome, allYIso, tooltipMode])
+	}, [model, layout, colors, chrome, allYIso, tooltipMode])
 
 	// Empty state — a quiet placeholder with a tiny suggestive grid. A chart over
 	// an empty domain is not worth mounting; it would draw axes for nothing.
@@ -795,16 +944,6 @@ export function QueryBuilderHeatmapChart({
 		)
 	}
 
-	const footnote =
-		model.hiddenX > 0 || model.hiddenY > 0
-			? [
-					model.hiddenX > 0 ? pluralize(model.hiddenX, "empty column") : null,
-					model.hiddenY > 0 ? pluralize(model.hiddenY, "empty row") : null,
-				]
-					.filter(Boolean)
-					.join(" · ") + " hidden"
-			: null
-
 	return (
 		<div
 			ref={containerRef}
@@ -824,13 +963,24 @@ export function QueryBuilderHeatmapChart({
 						colorAt={colors}
 						unit={unit}
 						hovered={hovered}
+						insetLeft={layout.gutter}
+						insetRight={layout.rightInset}
 					/>
 				}
 				// Pruned axes are reported, never dropped silently — otherwise a
-				// trimmed grid reads as the whole result.
+				// trimmed grid reads as the whole result. Right-aligned to the grid's
+				// last column, and a FIXED height for the same reason the legend has
+				// one: `solveHeatmapLayout` subtracts this strip from the container.
 				footer={
 					footnote ? (
-						<p className="pt-1 text-right text-[10px] tabular-nums text-muted-foreground/70">
+						<p
+							className="pt-1 text-right text-[10px] leading-[12px] tabular-nums text-muted-foreground/70"
+							style={{
+								height: FOOTNOTE_BLOCK_H,
+								paddingLeft: layout.gutter,
+								paddingRight: layout.rightInset,
+							}}
+						>
 							{footnote}
 						</p>
 					) : null

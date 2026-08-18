@@ -57,30 +57,44 @@ export interface CartesianPlotProps extends PlotChromeProps {
 }
 
 /**
- * The Recharts-era hover-sync and overlay escape hatches.
+ * The annotation slot, for charts that can host one.
  *
- * Deliberately a separate mixin applied only to the charts that actually read
- * them, rather than a field on every chart's props. They are all scheduled for
- * removal: `syncId` and `overlay` are replaced by the plot cursor provider and
- * by children positioned from `usePlotRect()`, and `yAxisWidth` exists only
- * because those two need plot rects to line up across a grid. Keeping them
- * visible and narrow is what makes that removal a bounded change.
+ * A separate mixin applied only to the charts that actually read it, rather than
+ * a field on every chart's props.
+ *
+ * This is what is left of the old `RechartsSyncProps`. `syncId` is gone: it drove
+ * Recharts' hover-sync event bus, which re-rendered every synced chart's tooltip
+ * store on each pointer tick, and the linked cursor in `useLinkedCursor`
+ * replaced it — CSS variables on a container, no React state at all. The prop
+ * had been dead in production since that became the default.
  */
-export interface RechartsSyncProps {
+export interface PlotOverlayProps {
 	/**
-	 * Synchronises hover across charts sharing the same id, through Recharts'
-	 * own sync bus.
-	 */
-	syncId?: string
-	/**
-	 * Extra content rendered as a child INSIDE the Recharts chart, so it can use
-	 * Recharts' hooks (`useXAxisScale`, `usePlotArea`, `ZIndexLayer`) — the commit
-	 * deploy markers are the only consumer.
+	 * A DOM layer stacked over the plot — the commit deploy markers.
+	 *
+	 * Routed into `PlotFrame`'s `overlay` slot, where it reads the plot geometry
+	 * from `usePlotRect()` / `usePlotScales()`. Under Recharts it had to be a
+	 * CHILD of the chart to reach `useXAxisScale` and `ZIndexLayer`.
 	 */
 	overlay?: React.ReactNode
 	/**
-	 * Pins the y-axis to a fixed pixel width so plot areas line up across a
-	 * synced grid. Omit to keep the chart's own content-sized width.
+	 * Pins the plot's left edge, in pixels, so plot areas line up across a grid.
+	 * Omit to let each chart size its own y-axis gutter.
+	 *
+	 * This survived the port because the charts do NOT line up on their own —
+	 * measured across the service grid, the four plots start between 38px and
+	 * 65px from the card's edge, because each solves its margin from its own tick
+	 * labels ("155.0ms" against "0.9"). The linked cursor does not care (it works
+	 * in per-plot ratios), but the commit markers do: whether two deploys merge
+	 * into one label chip is decided by `layoutMarkerLabels` against the plot
+	 * width, so a 26px spread can group the same commits differently on adjacent
+	 * cards.
+	 *
+	 * Recharts implemented this as `<YAxis width>`. Here it is a LEFT MARGIN LOCK
+	 * (`ChartSpecBase.margin`) — `resolveMarginLocks` pins the side you name and
+	 * leaves the rest to the automatic solver. Pick a value above every chart's
+	 * natural gutter, since a lock below it clips the tick labels rather than
+	 * growing.
 	 */
 	yAxisWidth?: number
 }
@@ -100,13 +114,13 @@ export interface QueryBuilderLineChartProps extends CartesianPlotProps {
 	showPoints?: boolean
 }
 
-export interface QueryBuilderAreaChartProps extends CartesianPlotProps, Pick<RechartsSyncProps, "syncId"> {
+export interface QueryBuilderAreaChartProps extends CartesianPlotProps {
 	stacked?: boolean
 	curveType?: "linear" | "monotone"
 	showPoints?: boolean
 }
 
-export interface QueryBuilderBarChartProps extends CartesianPlotProps, Pick<RechartsSyncProps, "syncId"> {
+export interface QueryBuilderBarChartProps extends CartesianPlotProps {
 	stacked?: boolean
 }
 
@@ -161,16 +175,17 @@ export interface QueryBuilderHbarChartProps extends PlotProps {
  * The fixed-metric service charts (latency, throughput, apdex, error rate).
  *
  * They read no query-builder settings — their series are known at authoring
- * time — but they do live in the synced grids on `/` and the service detail
- * page, which is why they carry the sync mixin.
+ * time — but they do live in the linked-cursor grids on `/` and the service
+ * detail page, and the service page draws commit markers over them, which is
+ * why they carry the overlay slot.
  */
-export interface ServiceChartProps extends PlotChromeProps, RechartsSyncProps {}
+export interface ServiceChartProps extends PlotChromeProps, PlotOverlayProps {}
 
 export interface ThroughputAreaChartProps extends ServiceChartProps {
 	rateMode?: "per_second"
 }
 
 /** The presentational gallery charts, which take data and nothing else. */
-export interface SimpleChartProps extends PlotProps, Pick<RechartsSyncProps, "syncId"> {}
+export interface SimpleChartProps extends PlotProps {}
 
 export type ChartCategory = "bar" | "hbar" | "area" | "line" | "pie" | "histogram" | "heatmap" | "funnel"

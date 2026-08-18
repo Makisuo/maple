@@ -13,6 +13,7 @@ import {
 	createContext,
 	use,
 	useCallback,
+	useEffect,
 	useLayoutEffect,
 	useMemo,
 	useRef,
@@ -31,6 +32,23 @@ import { assertResolvedColors } from "./plot-colors-guard"
 import "./plot-tooltip.css"
 
 export type PlotRenderer = "svg" | "canvas"
+
+/**
+ * `maxFocusDistance` for a chart that must resolve focus ANYWHERE in the plot.
+ *
+ * The renderer caps focus at 48px from the resolved point
+ * (`dist/renderer.js:764`), which is a sensible default for a scatter and wrong
+ * for a bucketed series: Recharts snapped to the nearest bucket wherever the
+ * pointer was, so a 7-day board at day buckets (7 points across ~800px, 133px
+ * apart) now has dead gaps between every column where the tooltip, the crosshair
+ * and the focus dot all disappear.
+ *
+ * A very large FINITE cap rather than `Infinity`. The two resolve identically
+ * today, and the finite one is the safer statement of it: the renderer squares
+ * this value and subtracts it while ranking candidates (`dist/nearest.js`), and
+ * a finite number cannot fall out of that arithmetic as `NaN`.
+ */
+export const UNBOUNDED_FOCUS_DISTANCE = Number.MAX_SAFE_INTEGER
 
 /**
  * Only the HEIGHT is measured, and that is the documented shape.
@@ -298,6 +316,63 @@ function createPlotScalesStore(): PlotScalesStore & {
 			for (const listener of listeners) listener()
 		},
 	}
+}
+
+/**
+ * One entry in a hoisted legend — the same `{ key, label, colour }` triple the
+ * in-plot legend draws, in the shape the host strip consumes.
+ */
+export interface PlotLegendItem {
+	key: string
+	label: ReactNode
+	color?: string
+}
+
+/**
+ * A slot an ancestor opens to say "I will draw this chart's legend myself".
+ *
+ * The dashboard card header is the only consumer today: a board tile hides the
+ * in-plot legend to keep the plot tall, and prints `api • web • worker` beside
+ * the title instead, which is the only thing telling a reader which line is
+ * which.
+ *
+ * Declared HERE rather than reused from `components/ui/chart.tsx`, whose
+ * identical slot serves the Recharts `ChartContainer`. That module imports
+ * `recharts` at the top, so importing its context would pull the whole library
+ * into every plot chart's graph — the opposite of what the port is for. A host
+ * that wants to serve both mounts both providers over one piece of state; they
+ * cannot both fire, because a tile holds one chart.
+ */
+export interface PlotLegendSlot {
+	setItems: (items: readonly PlotLegendItem[]) => void
+}
+
+export const PlotLegendSlotContext = createContext<PlotLegendSlot | null>(null)
+
+/** Stable empty reference, so clearing the slot cannot loop the publish effect. */
+const NO_LEGEND_ITEMS: readonly PlotLegendItem[] = []
+
+/**
+ * Publishes a chart's series into an enclosing legend slot, if one is open.
+ *
+ * An effect, because this writes into state that an ANCESTOR owns — the one
+ * case where a render-phase write is not available. It is edge-triggered on the
+ * `items` identity, so it must be handed a memoised array: the hover path
+ * rebuilds nothing here, and a fresh array per render would put a parent commit
+ * on every pointer tick.
+ *
+ * Pass `null` when the chart draws its own legend, so the header does not
+ * duplicate what the plot already shows.
+ */
+export function usePlotLegendSlot(items: readonly PlotLegendItem[] | null): void {
+	const slot = use(PlotLegendSlotContext)
+	useEffect(() => {
+		if (!slot) return
+		slot.setItems(items ?? NO_LEGEND_ITEMS)
+		// Clearing on unmount matters on a dashboard: a tile that swaps chart type
+		// would otherwise keep the old chart's series in its header.
+		return () => slot.setItems(NO_LEGEND_ITEMS)
+	}, [slot, items])
 }
 
 /**
