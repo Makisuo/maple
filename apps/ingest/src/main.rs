@@ -1531,14 +1531,14 @@ async fn main() {
     // process exit, so a bad deploy never goes ready while a transient database
     // fault can no longer kill a healthy running fleet.
     let key_store_ready = Arc::new(AtomicBool::new(false));
-    let store: Arc<dyn KeyStore> = match build_key_store(&config, Arc::clone(&key_store_ready)).await
-    {
-        Ok(store) => store,
-        Err(error) => {
-            eprintln!("Key store init error: {error}");
-            std::process::exit(1);
-        }
-    };
+    let store: Arc<dyn KeyStore> =
+        match build_key_store(&config, Arc::clone(&key_store_ready)).await {
+            Ok(store) => store,
+            Err(error) => {
+                eprintln!("Key store init error: {error}");
+                std::process::exit(1);
+            }
+        };
 
     // The Postgres key store resolves BYO-ClickHouse export targets from
     // org_clickhouse_settings (the Static backend has no DB to resolve from).
@@ -1678,6 +1678,9 @@ async fn main() {
             CONTENT_TYPE,
             CONTENT_ENCODING,
             HeaderName::from_static("x-maple-ingest-key"),
+            // SDK identity hint, sent by every browser SDK on every request. Not
+            // allowing it fails preflight for the whole SDK, not just this header.
+            HeaderName::from_static(SDK_HINT_HEADER),
             // Session-replay chunk metadata headers (POST /v1/sessionReplays/blob).
             // Without these the browser preflight blocks the cross-origin blob upload.
             HeaderName::from_static("x-maple-session-id"),
@@ -2097,7 +2100,11 @@ async fn ready(State(state): State<Arc<AppState>>) -> Response {
     if state.key_store_ready.load(Ordering::Relaxed) {
         (StatusCode::OK, "READY").into_response()
     } else {
-        (StatusCode::SERVICE_UNAVAILABLE, "DEGRADED: key store unavailable").into_response()
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "DEGRADED: key store unavailable",
+        )
+            .into_response()
     }
 }
 
@@ -2197,6 +2204,78 @@ impl ReplaySessionBudget {
     }
 }
 
+/// Header every Maple SDK stamps on every ingest request: `<sdk-name>/<version>`,
+/// e.g. `maple-browser/0.3.0` or `maple-effect-sdk-client/0.7.0`.
+///
+/// Browsers do not let a page set `user-agent`, and until this existed a
+/// rejected request from a browser SDK carried NOTHING that said which SDK or
+/// version produced it — a malformed replay chunk could not be traced back to a
+/// release. Recorded as `maple.sdk` on every request span. Must stay in the CORS
+/// allow-list: an SDK that sends it against a gateway that doesn't allow it
+/// fails preflight, and with it every browser request.
+const SDK_HINT_HEADER: &str = "x-maple-sdk";
+/// Longest `x-maple-sdk` / `user-agent` value recorded; longer ones are cut so
+/// a hostile client cannot bloat span attributes.
+const CLIENT_IDENTITY_MAX_LEN: usize = 128;
+
+/// Record who sent this request on the current handler span: `maple.sdk` from
+/// `SDK_HINT_HEADER`, `user_agent.original` from `user-agent`. Both fields must
+/// be declared `Empty` on the span. Missing headers record nothing, so an
+/// absent value reads as absent rather than as an empty string.
+fn record_client_identity(span: &Span, headers: &HeaderMap) {
+    if let Some(sdk) = replay_header(headers, SDK_HINT_HEADER) {
+        span.record("maple.sdk", truncate_chars(&sdk, CLIENT_IDENTITY_MAX_LEN));
+    }
+    if let Some(ua) = replay_header(headers, "user-agent") {
+        span.record(
+            "user_agent.original",
+            truncate_chars(&ua, CLIENT_IDENTITY_MAX_LEN),
+        );
+    }
+}
+
+fn truncate_chars(value: &str, max: usize) -> &str {
+    match value.char_indices().nth(max) {
+        Some((idx, _)) => &value[..idx],
+        None => value,
+    }
+}
+
+/// Turn a gunzip failure on the replay blob path into the 400 the SDK expects,
+/// after recording what the body actually looked like on the current span.
+///
+/// The prefix and content-type go on the span, not into the message: the
+/// message is the error fingerprint, and a per-body hex prefix in it would
+/// split one cause into thousands of issues. `first_bytes` is what tells a
+/// gzip stream (`1f8b08`) apart from JSON someone forgot to compress (`5b7b`)
+/// or a stringified byte array (`33312c31...`).
+fn replay_gunzip_rejection(headers: &HeaderMap, body: &[u8], error: &std::io::Error) -> ApiError {
+    let span = Span::current();
+    span.record(
+        "maple.replay.body_prefix",
+        hex_prefix(body, REPLAY_BODY_PREFIX_BYTES).as_str(),
+    );
+    if let Some(content_type) = replay_header(headers, "content-type") {
+        span.record(
+            "http.request.header.content-type",
+            truncate_chars(&content_type, CLIENT_IDENTITY_MAX_LEN),
+        );
+    }
+    ApiError::bad_request(format!("failed to gunzip replay chunk: {error}"))
+}
+
+const REPLAY_BODY_PREFIX_BYTES: usize = 16;
+
+fn hex_prefix(body: &[u8], n: usize) -> String {
+    use std::fmt::Write as _;
+    body.iter()
+        .take(n)
+        .fold(String::with_capacity(n * 2), |mut acc, b| {
+            let _ = write!(acc, "{b:02x}");
+            acc
+        })
+}
+
 fn replay_header(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(name)
@@ -2289,7 +2368,10 @@ async fn handle_replay_meta(
         "maple.org_id" = tracing::field::Empty,
         "maple.ingest.clickhouse_ready" = tracing::field::Empty,
         "maple.ingest.destination" = tracing::field::Empty,
+        "maple.sdk" = tracing::field::Empty,
+        "user_agent.original" = tracing::field::Empty,
     );
+    record_client_identity(&span, &headers);
     let span_handle = span.clone();
     match handle_replay_meta_inner(&state, &headers, body)
         .instrument(span)
@@ -2478,7 +2560,10 @@ async fn handle_session_events(
         "maple.ingest.clickhouse_ready" = tracing::field::Empty,
         "maple.ingest.destination" = tracing::field::Empty,
         "maple.session_events.dropped" = tracing::field::Empty,
+        "maple.sdk" = tracing::field::Empty,
+        "user_agent.original" = tracing::field::Empty,
     );
+    record_client_identity(&span, &headers);
     let span_handle = span.clone();
     match handle_session_events_inner(&state, &headers, body)
         .instrument(span)
@@ -2609,7 +2694,7 @@ async fn handle_session_events_inner(
 /// rejection of malformed gzip — it just doesn't keep the bytes. Used on the
 /// blob-store path, where the decompressed text is never needed but `ByteSize`
 /// and the per-session budget are still denominated in decompressed bytes.
-fn decompressed_len(body: &[u8]) -> Result<u64, ApiError> {
+fn decompressed_len(body: &[u8]) -> Result<u64, std::io::Error> {
     use std::io::Read as _;
     let mut decoder = flate2::read::GzDecoder::new(body);
     let mut buffer = [0u8; 64 * 1024];
@@ -2618,11 +2703,7 @@ fn decompressed_len(body: &[u8]) -> Result<u64, ApiError> {
         match decoder.read(&mut buffer) {
             Ok(0) => return Ok(total),
             Ok(n) => total += n as u64,
-            Err(e) => {
-                return Err(ApiError::bad_request(format!(
-                    "failed to gunzip replay chunk: {e}"
-                )))
-            }
+            Err(e) => return Err(e),
         }
     }
 }
@@ -2654,7 +2735,12 @@ async fn handle_replay_blob(
         "maple.replay.storage" = tracing::field::Empty,
         "maple.replay.object_key" = tracing::field::Empty,
         "maple.replay.blob_put_ms" = tracing::field::Empty,
+        "maple.replay.body_prefix" = tracing::field::Empty,
+        "http.request.header.content-type" = tracing::field::Empty,
+        "maple.sdk" = tracing::field::Empty,
+        "user_agent.original" = tracing::field::Empty,
     );
+    record_client_identity(&span, &headers);
     let span_handle = span.clone();
     match handle_replay_blob_inner(&state, &headers, body)
         .instrument(span)
@@ -2755,14 +2841,17 @@ async fn handle_replay_blob_inner(
     // What that avoids is the part that actually cost: materializing a
     // multi-megabyte String, JSON-escaping it, and pushing it through the WAL.
     let (events_json, byte_size) = if state.replay_blob_store.is_some() {
-        (None, decompressed_len(&body)?)
+        (
+            None,
+            decompressed_len(&body).map_err(|e| replay_gunzip_rejection(headers, &body, &e))?,
+        )
     } else {
         use std::io::Read as _;
         let mut decoder = flate2::read::GzDecoder::new(&body[..]);
         let mut events_json = String::new();
         decoder
             .read_to_string(&mut events_json)
-            .map_err(|e| ApiError::bad_request(format!("failed to gunzip replay chunk: {e}")))?;
+            .map_err(|e| replay_gunzip_rejection(headers, &body, &e))?;
         let byte_size = events_json.len() as u64;
         (Some(events_json), byte_size)
     };
@@ -2932,7 +3021,10 @@ async fn handle_signal(
         "maple.ingest.content_encoding" = tracing::field::Empty,
         "maple.ingest.decoded_bytes" = tracing::field::Empty,
         "maple.ingest.item_count" = tracing::field::Empty,
+        "maple.sdk" = tracing::field::Empty,
+        "user_agent.original" = tracing::field::Empty,
     );
+    record_client_identity(&span, &headers);
     let span_handle = span.clone();
 
     let result = handle_signal_inner(&state, &headers, body, signal)
@@ -4792,7 +4884,12 @@ impl PostgresKeyStore {
                  WHERE k.private_key_hash = $1 LIMIT 1",
                 &[&"__ingest_probe_no_match__"],
             )
-            .instrument(postgres_client_span("probe", "SELECT", "org_ingest_keys", &self.target))
+            .instrument(postgres_client_span(
+                "probe",
+                "SELECT",
+                "org_ingest_keys",
+                &self.target,
+            ))
             .await
             .map(|_| ())
             .map_err(|error| format!("postgres probe query failed: {}", error_chain(&error)))
@@ -4827,7 +4924,9 @@ impl KeyStore for PostgresKeyStore {
                 &self.target,
             ))
             .await
-            .map_err(|error| format!("postgres fetch_ingest_key failed: {}", error_chain(&error)))?;
+            .map_err(|error| {
+                format!("postgres fetch_ingest_key failed: {}", error_chain(&error))
+            })?;
         let Some(row) = rows.into_iter().next() else {
             return Ok(None);
         };
@@ -6475,11 +6574,7 @@ mod tests {
         walk(dir)
     }
 
-    async fn replay_blob_test_state(
-        raw_key: &str,
-        org_id: &str,
-        queue_dir: PathBuf,
-    ) -> AppState {
+    async fn replay_blob_test_state(raw_key: &str, org_id: &str, queue_dir: PathBuf) -> AppState {
         let store = Arc::new(FakeKeyStore::default());
         store.insert_private(
             raw_key,
@@ -6549,9 +6644,9 @@ mod tests {
         assert_eq!(captured.content_type, "application/json");
         assert_eq!(captured.content_encoding, "gzip");
         assert!(
-            captured.authorization.starts_with(
-                "AWS4-HMAC-SHA256 Credential=test-access-key/"
-            ),
+            captured
+                .authorization
+                .starts_with("AWS4-HMAC-SHA256 Credential=test-access-key/"),
             "expected a SigV4 authorization header, got {:?}",
             captured.authorization
         );
@@ -6653,7 +6748,35 @@ mod tests {
 
         let error = decompressed_len(b"not gzip at all")
             .expect_err("malformed gzip must still be rejected");
-        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        let rejection = replay_gunzip_rejection(&HeaderMap::new(), b"not gzip at all", &error);
+        assert_eq!(rejection.status, StatusCode::BAD_REQUEST);
+        assert!(
+            rejection
+                .message
+                .starts_with("failed to gunzip replay chunk: "),
+            "message must keep the stable fingerprint prefix, got {:?}",
+            rejection.message
+        );
+    }
+
+    #[test]
+    fn replay_gunzip_rejection_keeps_body_bytes_out_of_the_message() {
+        // The message is the error fingerprint. Diagnostics (hex prefix,
+        // content-type) go on the span so one cause stays one issue.
+        let error = decompressed_len(b"[{\"type\":4}]").expect_err("json is not gzip");
+        let mut headers = HeaderMap::new();
+        headers.insert("content-type", "application/octet-stream".parse().unwrap());
+        let rejection = replay_gunzip_rejection(&headers, b"[{\"type\":4}]", &error);
+        assert!(!rejection.message.contains("5b7b"), "{}", rejection.message);
+        assert!(
+            !rejection.message.contains("octet-stream"),
+            "{}",
+            rejection.message
+        );
+        assert_eq!(hex_prefix(b"\x1f\x8b\x08\x00", 16), "1f8b0800");
+        assert_eq!(hex_prefix(b"[{", 1), "5b");
+        assert_eq!(truncate_chars("héllo", 2), "hé");
+        assert_eq!(truncate_chars("ab", 5), "ab");
     }
 
     #[tokio::test]

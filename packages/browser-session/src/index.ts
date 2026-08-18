@@ -34,4 +34,5 @@ export { getObservedTraceIds, publishSessionSink, readSessionSink, recordTraceId
 export type { TrackProps } from "./events/track"
 export { track } from "./events/track"
 export { parseUserAgent } from "./platform/user-agent"
+export { SDK_HINT_HEADER, sdkHint } from "./platform/transport"
 export { getVisitorId, isVisitorIdPersisted, setVisitorTracking } from "./identity/visitor"
