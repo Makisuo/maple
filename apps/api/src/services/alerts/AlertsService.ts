@@ -41,7 +41,6 @@ import {
 	type QueryEngineTimeoutError,
 	type QueryEngineValidationError,
 	RoleName,
-	UserId as UserIdSchema,
 	type UserId,
 } from "@maple/domain/http"
 import {
@@ -82,7 +81,6 @@ import { INVESTIGATION_FANOUT_BINDING } from "@/services/errors/ai-triage-enqueu
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import type { TenantContext } from "@/services/auth/AuthService"
 import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
 import { formatComparator } from "./alert-formatting"
 import { EmailService } from "@/platform/EmailService"
@@ -94,6 +92,8 @@ import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { chartImageUrl, chartWindow, loadChartSeries } from "./alert-chart-series"
+import { systemTenant } from "./system-tenant"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
 import { ApnsClient } from "@/platform/Apns"
@@ -113,7 +113,7 @@ import {
 	planEvaluateSource,
 	type NormalizedRule,
 } from "./AlertRuleModel"
-import { resolveSignalDisplay } from "./alert-signal-display"
+import { mapSignalUnit, resolveSignalDisplay } from "./alert-signal-display"
 
 export { AlertRuntime, type AlertRuntimeApi } from "./AlertRuntime"
 
@@ -192,14 +192,20 @@ const StoredDeliveryPayloadSchema = Schema.Struct({
 		}),
 	),
 	template: Schema.optionalKey(Schema.NullOr(AlertNotificationTemplate)),
+	chart: Schema.optionalKey(
+		Schema.NullOr(
+			Schema.Struct({
+				sparkline: Schema.optionalKey(Schema.String),
+				url: Schema.optionalKey(Schema.String),
+			}),
+		),
+	),
 })
 
 const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.id)
 const decodeAlertIncidentIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.id)
 const decodeAlertDeliveryEventIdSync = Schema.decodeUnknownSync(AlertDeliveryEventDocument.fields.id)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.createdAt)
-const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
-const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
 const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
@@ -420,13 +426,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 			} = rulePersistence
 
 			const dbExecute = makeDbExecute(database, "AlertsService", makePersistenceError)
-
-			const systemTenant = (orgId: OrgId): TenantContext => ({
-				orgId,
-				userId: decodeUserIdSync("system-alerting"),
-				roles: [decodeRoleNameSync("root")],
-				authMode: "self_hosted",
-			})
 
 			/**
 			 * Services a rule's telemetry-liveness probe should cover. An empty list
@@ -749,6 +748,52 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					)
 
 					const destinations = new Map(rows.map((row) => [row.id, row]))
+
+					// Once per notification, not once per destination: N destinations
+					// on one rule must not mean N reads of the same series. Never
+					// fails — `loadChartSeries` answers `null` for every problem it
+					// can have, so a slow or broken warehouse costs the sparkline and
+					// nothing else.
+					const window = chartWindow({
+						incidentStartedAtMs: incident.firstTriggeredAt.getTime(),
+						nowMs: scheduledAt,
+						windowMinutes: rule.windowMinutes,
+					})
+					const series = yield* loadChartSeries(warehouse, systemTenant(orgId), {
+						orgId,
+						ruleId: rule.id,
+						groupKey: incident.groupKey,
+						comparator: rule.comparator,
+						threshold: rule.threshold,
+						...window,
+					})
+
+					// The image URL rides with the series it describes: both pin the
+					// same window, so a retry an hour later renders the same picture
+					// this notification was written about.
+					const display = resolveSignalDisplay(rule)
+					const displayGroup = incident.groupKey === "__total__" ? null : incident.groupKey
+					const chartUrl =
+						series === null
+							? null
+							: chartImageUrl({
+									appBaseUrl: env.MAPLE_APP_BASE_URL,
+									hmacKey: Option.match(env.MAPLE_SHARE_TOKEN_HMAC_KEY, {
+										onNone: () => null,
+										onSome: (key) => Redacted.value(key),
+									}),
+									orgId,
+									ruleId: rule.id,
+									groupKey: incident.groupKey,
+									...window,
+									title: displayGroup
+										? `${display.label} · ${displayGroup}`
+										: display.label,
+									unit: mapSignalUnit(display.unit),
+									threshold: series.threshold,
+									breachSide: series.breachSide,
+								})
+
 					const payload = buildPayload({
 						eventType,
 						incidentId: incident.id,
@@ -765,6 +810,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						windowMinutes: rule.windowMinutes,
 						value: evaluation.value,
 						sampleCount: evaluation.sampleCount,
+						sparkline: series?.sparkline ?? null,
+						chartUrl,
 						template: rule.notificationTemplate,
 						linkUrl: resolveNotificationLinkUrl(rule, incident.groupKey),
 						sentAtMs: scheduledAt,
@@ -1441,6 +1488,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							value: payload.observed?.value ?? null,
 							sampleCount: payload.observed?.sampleCount ?? null,
 							template: payload.template ?? storedRule?.notificationTemplate ?? null,
+							sparkline: payload.chart?.sparkline ?? null,
+							chartUrl: payload.chart?.url ?? null,
 							linkUrl: resolveNotificationLinkUrl(
 								{
 									serviceNames: storedRule?.serviceNames ?? [],

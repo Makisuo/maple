@@ -17,7 +17,7 @@
  *     middleware, not annotated, and it is accurate: no credential is required.
  *     An `org`-mode link *reads* a session token when one is present, but
  *     OpenAPI's `security` describes what is required, not what is consulted.
- *   - `openapi.test.ts` exempts these two operations from the "every operation
+ *   - `openapi.test.ts` exempts these operations from the "every operation
  *     is bearer-secured and declares a 401" invariant, by name. The exemption is
  *     an allowlist so a third public operation cannot appear silently.
  *
@@ -27,6 +27,12 @@
  * a span attribute, an access log, or a `Referer` — no tracer suppression rule
  * required.
  *
+ * `alertChart` is not about a shared dashboard at all — it lives here because
+ * this is the API's one unauthenticated surface, and it is unauthenticated for
+ * the same reason: the image is fetched by Slack's and Discord's servers, which
+ * hold no Maple credential. Like `ogCard` it takes a signed id, never a token,
+ * and that id pins the rule and the window it may read.
+ *
  * `ogCard` is the one operation that names a share without a token at all. It
  * cannot have one: it exists so a social-preview image can be drawn, and an
  * `og:image` is a URL that travels to every crawler and chat client that
@@ -34,6 +40,7 @@
  * not a credential and cannot be turned back into a token.
  */
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
+import { AlertChartRequest, AlertChartResponse } from "../alerts"
 import {
 	ShareNotConfiguredError,
 	ShareNotFoundError,
@@ -144,6 +151,20 @@ export class V2SharePublicApiGroup extends HttpApiGroup.make("sharePublic")
 				summary: "Read what a share link's preview image draws",
 				description:
 					"Takes the signed image id from `og-meta`, never a share token, and returns the layout facts the preview image is drawn from. Revoked and org-only links resolve as not found, so an image URL stops working the moment its link does.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("alertChart", "/alert-chart", {
+			payload: AlertChartRequest,
+			success: AlertChartResponse,
+			error: [shareNotFound, shareRateLimited, shareNotConfigured, sharePersistence],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "resolveAlertChart",
+				summary: "Read the series an alert notification's chart draws",
+				description:
+					"Takes the signed chart id embedded in a Slack, Discord or email alert and returns the observed values over the window that id pins. Unauthenticated for the same reason as the rest of this group: the image is fetched by Slack and Discord themselves, which carry no Maple credential.",
 			}),
 		),
 	)

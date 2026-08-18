@@ -53,6 +53,25 @@ export interface DispatchContext {
 	readonly template?: NotificationTemplateConfig | null
 	/** Epoch ms the notification was sent — exposed to templates as `sentAt`. */
 	readonly sentAtMs?: number
+	/**
+	 * Unicode sparkline of the rule's recent observed values, or absent when
+	 * the series was unavailable or too short to be worth drawing.
+	 *
+	 * Text rather than an image because this has to survive where images do not
+	 * — a phone's lock screen, a push preview, a plain-text email client. It is
+	 * snapshotted at queue time so a retry shows what the alert saw, not what
+	 * the metric has done since.
+	 */
+	readonly sparkline?: string | null
+	/**
+	 * Public URL of this notification's chart image, or absent when there was no
+	 * series to draw or the deployment has no share HMAC key.
+	 *
+	 * Signed and window-pinned (see `alertChartId`), so it renders the same
+	 * picture forever. Providers that can show an image use it; the sparkline
+	 * stays regardless, because an image block does not reach a lock screen.
+	 */
+	readonly chartUrl?: string | null
 }
 
 export interface DispatchResult {
