@@ -64,6 +64,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.maple.mobile
         PRODUCT_NAME: Maple
+        # App Store Connect refuses any distributed build without a 1024pt
+        # icon — including TestFlight — and the failure surfaces as the
+        # unhelpful "Preparing build for App Store Connect failed".
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: Maple/Resources/Maple.entitlements
         # iPhone only, portrait only, for the first slice.
         TARGETED_DEVICE_FAMILY: "1"
@@ -94,7 +98,9 @@ targets:
           - GeistMono-SemiBold.ttf
         # DESIGN.md: "terminal-native, dark by default".
         UIUserInterfaceStyle: Dark
-        CFBundleVersion: "1"
+        # Ahead of the 98 builds this app record carries from its previous
+        # life: App Store Connect rejects a build number it has already seen.
+        CFBundleVersion: "100"
         ITSAppUsesNonExemptEncryption: false
         # Injected from Config/Secrets.xcconfig so no key is baked into source.
         MapleClerkPublishableKey: $(CLERK_PUBLISHABLE_KEY)
