@@ -15,7 +15,7 @@ use flate2::read::GzDecoder;
 use maple_ingest::ai_classifier::ResourceContext;
 use maple_ingest::ai_registry::registry;
 use maple_ingest::telemetry::{
-    AiClassificationSettings, ClickHouseBreakerConfig, DatasourceNames, SamplingPolicy,
+    ClickHouseBreakerConfig, DatasourceNames, SamplingPolicy,
     TelemetryPipeline, TinybirdConfig,
 };
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
@@ -71,9 +71,6 @@ fn bench_ingest_accept(c: &mut Criterion) {
                         black_box(&fixture.traces),
                         &SamplingPolicy::default(),
                         &[],
-                        // This group measures WAL ack; classification cost is
-                        // the `ai_classifier` group's job.
-                        &AiClassificationSettings::disabled(),
                     )
                     .await
                     .expect("accept traces"),

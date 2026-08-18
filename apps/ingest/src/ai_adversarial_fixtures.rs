@@ -45,11 +45,10 @@ use crate::ai_classifier::ResourceContext;
 // constants
 // ---------------------------------------------------------------------------
 
-/// Batch receive time, epoch seconds — 2023-11-14 22:13:20 UTC. Fixed so
-/// `ai_rollup_hour` never depends on when the fixture was generated.
-const RECEIVE_SECS: i64 = 1_700_000_000;
-/// Every span starts at the receive second, inside the rollup clamp window.
-const START_NANOS: u64 = RECEIVE_SECS as u64 * 1_000_000_000;
+/// Fixed span start second — 2023-11-14 22:13:20 UTC — so fixtures never
+/// depend on when they were generated.
+const START_SECS: i64 = 1_700_000_000;
+const START_NANOS: u64 = START_SECS as u64 * 1_000_000_000;
 
 const ORG_ID: &str = "org_adversarial";
 
@@ -2843,15 +2842,12 @@ fn generate(groups: &[Group]) -> String {
             }],
         };
 
-        let settings =
-            AiClassificationSettings::at(RECEIVE_SECS);
         let (frames, stats) = encode_traces(
             &datasources,
             ORG_ID,
             &request,
             &SamplingPolicy::default(),
             &[],
-            &settings,
         )
         .expect("encode_traces");
         assert_eq!(

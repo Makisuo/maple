@@ -17,7 +17,7 @@ export const SERVICE_AI_VENDORS_HOURLY_SELECT_SQL = `SELECT
   OrgId,
   ServiceName,
   AiVendor,
-  AiRollupHour AS Hour,
+  toStartOfHour(toDateTime(Timestamp)) AS Hour,
   count() AS SpanCount,
   sum(if(SampleRate > 0, SampleRate, 1.0)) AS WeightedSpanCount,
   countIf(AiSessionKeyState >= 3) AS EligibleSpanCount,

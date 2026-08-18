@@ -23,9 +23,6 @@
 //     vendor rows and 0% on litellm's own row.
 //   - `WeightedSpanCount` losing its floor. A span with SampleRate 0 must
 //     contribute 1.0, not 0 and not an infinity.
-//   - The MV grouping on something other than the stored `AiRollupHour` — a
-//     `toStartOfHour(Timestamp)` regression is invisible until a clock-skewed
-//     client opens a partition in 2038.
 //   - Non-AI traffic leaking into the rollup, which is both a cost regression
 //     and a semantics one: post-enablement, "no rows" must mean "no AI spans".
 
@@ -55,7 +52,7 @@ const BASE_MS = Math.floor((Date.now() - 3 * DAY_MS) / HOUR_MS) * HOUR_MS
 
 const chDateTime = (epochMs: number): string => new Date(epochMs).toISOString().replace("T", " ").slice(0, 19)
 
-/** Hour `n` of the fixture, as the value ingest would have written to AiRollupHour. */
+/** Hour `n` of the fixture — the `toStartOfHour(Timestamp)` bucket seeded spans land in. */
 const hour = (n: number): string => chDateTime(BASE_MS + n * HOUR_MS)
 
 /**
@@ -73,12 +70,6 @@ interface SeedSpan {
 	readonly keyHash: string
 	readonly rulesVersion: number
 	readonly sampleRate?: number
-	/**
-	 * Raw span `Timestamp`, when it must diverge from `hourIndex`. Defaults to a
-	 * minute into `hourIndex`'s hour, which makes every other row's
-	 * `toStartOfHour(Timestamp)` identical to its `AiRollupHour`.
-	 */
-	readonly timestampMs?: number
 }
 
 const span = (
@@ -110,8 +101,6 @@ const span = (
  */
 const BIG_HASH = "9007199254740993"
 
-/** 2038-01-19, past the 32-bit epoch wall and well outside the fixture's hours. */
-const SKEWED_TIMESTAMP_MS = Date.UTC(2038, 0, 19, 3, 14, 7)
 
 const SEED_SPANS: ReadonlyArray<SeedSpan> = [
 	// ── One trace, two vendors, key on one of them. Merged across vendor rows the
@@ -146,17 +135,6 @@ const SEED_SPANS: ReadonlyArray<SeedSpan> = [
 	span(ORG_B, "checkout", "langchain", "trace-b1", 1, 6, { keyHash: "606", rulesVersion: 8 }),
 	span(ORG_B, "checkout", "langchain", "trace-b2", 1, 4, { rulesVersion: 9 }),
 	span(ORG_B, "worker", "litellm", "trace-b3", 2, 5, { keyHash: "707", rulesVersion: 8 }),
-
-	// ── The clock-skewed client, in its own service and vendor group so it
-	// perturbs no per-group assertion. Its raw Timestamp is in 2038 while the
-	// writer's clamp put its AiRollupHour inside the fixture — the only seed row
-	// where the two differ. Without it, an MV "simplified" to group on
-	// `toStartOfHour(Timestamp)` passes every assertion here and production opens
-	// a 20380119 partition whose 400-day TTL never fires.
-	span(ORG_A, "skewed", "openai", "trace-skew", 0, 6, {
-		keyHash: "909",
-		timestampMs: SKEWED_TIMESTAMP_MS,
-	}),
 ]
 
 /**
@@ -198,11 +176,11 @@ const insertBatch = async (rows: ReadonlyArray<SeedSpan>): Promise<void> => {
 	const withoutRate = rows.filter((row) => row.sampleRate === undefined)
 
 	const common = (row: SeedSpan): string =>
-		`${quote(row.orgId)}, ${quote(chDateTime(row.timestampMs ?? (BASE_MS + row.hourIndex * HOUR_MS + 60_000)))}, ${quote(row.traceId)}, ${quote(`span-${row.traceId}-${row.vendor}-${row.hourIndex}`)}, 'op', 'Client', ${quote(row.service)}, 1000, 'Ok', ${quote(row.vendor)}, ${row.state}, ${row.keyHash}, ${row.rulesVersion}, ${quote(hour(row.hourIndex))}`
+		`${quote(row.orgId)}, ${quote(chDateTime(BASE_MS + row.hourIndex * HOUR_MS + 60_000))}, ${quote(row.traceId)}, ${quote(`span-${row.traceId}-${row.vendor}-${row.hourIndex}`)}, 'op', 'Client', ${quote(row.service)}, 1000, 'Ok', ${quote(row.vendor)}, ${row.state}, ${row.keyHash}, ${row.rulesVersion}`
 
 	if (withRate.length > 0) {
 		await clickhouseExec(
-			`INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, SpanName, SpanKind, ServiceName, Duration, StatusCode, AiVendor, AiSessionKeyState, AiSessionKeyHash, AiRulesVersion, AiRollupHour, SampleRate) VALUES\n${withRate
+			`INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, SpanName, SpanKind, ServiceName, Duration, StatusCode, AiVendor, AiSessionKeyState, AiSessionKeyHash, AiRulesVersion, SampleRate) VALUES\n${withRate
 				.map((row) => `(${common(row)}, ${row.sampleRate})`)
 				.join(",\n")}`,
 			database,
@@ -210,7 +188,7 @@ const insertBatch = async (rows: ReadonlyArray<SeedSpan>): Promise<void> => {
 	}
 	if (withoutRate.length > 0) {
 		await clickhouseExec(
-			`INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, SpanName, SpanKind, ServiceName, Duration, StatusCode, AiVendor, AiSessionKeyState, AiSessionKeyHash, AiRulesVersion, AiRollupHour) VALUES\n${withoutRate
+			`INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, SpanName, SpanKind, ServiceName, Duration, StatusCode, AiVendor, AiSessionKeyState, AiSessionKeyHash, AiRulesVersion) VALUES\n${withoutRate
 				.map((row) => `(${common(row)})`)
 				.join(",\n")}`,
 			database,
@@ -270,7 +248,7 @@ const RAW_READ_SQL = `SELECT
   OrgId,
   ServiceName,
   AiVendor,
-  toString(AiRollupHour) AS Hour,
+  toString(toStartOfHour(toDateTime(Timestamp))) AS Hour,
   count() AS SpanCount,
   sum(if(SampleRate > 0, SampleRate, 1.0)) AS WeightedSpanCount,
   countIf(AiSessionKeyState >= 3) AS EligibleSpanCount,
@@ -286,7 +264,7 @@ const RAW_READ_SQL = `SELECT
   max(AiRulesVersion) AS RollupRulesVersion
 FROM traces
 WHERE AiVendor != ''
-GROUP BY OrgId, ServiceName, AiVendor, AiRollupHour
+GROUP BY OrgId, ServiceName, AiVendor, Hour
 ORDER BY OrgId, ServiceName, AiVendor, Hour`
 
 describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () => {
@@ -305,8 +283,8 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 	}, 30_000)
 
 	it("creates the rollup table and its materialized view from the real migrations", async () => {
-		const recorded = await runJson("SELECT count() AS n FROM _maple_schema_migrations WHERE version = 16")
-		assert.strictEqual(num(recorded[0]?.n), 1, "migration 16 was not recorded")
+		const recorded = await runJson("SELECT count() AS n FROM _maple_schema_migrations WHERE version = 17")
+		assert.strictEqual(num(recorded[0]?.n), 1, "migration 17 was not recorded")
 
 		const objects = await runJson(
 			`SELECT name, engine
@@ -440,40 +418,6 @@ describe.skipIf(!clickhouseE2eEnabled)("service_ai_vendors_hourly rollup", () =>
 			 WHERE NOT isFinite(WeightedSpanCount) OR WeightedSpanCount <= 0`,
 		)
 		assert.strictEqual(num(finite[0]?.n), 0, "WeightedSpanCount went non-finite or non-positive")
-	})
-
-	it("groups on the stored AiRollupHour, not the span timestamp", async () => {
-		// `trace-skew`'s raw Timestamp is in 2038 while its stored AiRollupHour is
-		// hour 0. Asserted first, so a seed edit that removes the divergence fails
-		// here rather than turning the assertions below into tautologies.
-		const skew = await runJson(
-			`SELECT toString(toDateTime(Timestamp)) AS ts, toString(AiRollupHour) AS h
-			 FROM traces WHERE TraceId = 'trace-skew' LIMIT 1`,
-		)
-		assert.strictEqual(String(skew[0]?.ts), chDateTime(SKEWED_TIMESTAMP_MS))
-		assert.strictEqual(String(skew[0]?.h), hour(0))
-
-		const hours = await runJson(
-			`SELECT DISTINCT toString(Hour) AS h FROM service_ai_vendors_hourly ORDER BY h`,
-		)
-		// Three hours, all inside the fixture. An MV grouping on
-		// toStartOfHour(Timestamp) yields a fourth row in 2038 here.
-		assert.deepStrictEqual(
-			hours.map((row) => String(row.h)),
-			[hour(0), hour(1), hour(2)],
-		)
-
-		// And the same in the other direction: no rollup hour may disagree with a
-		// stored one.
-		const drift = await runJson(
-			`SELECT count() AS n FROM (
-			   SELECT DISTINCT AiRollupHour AS h FROM traces WHERE AiVendor != ''
-			 ) AS raw
-			 LEFT ANTI JOIN (
-			   SELECT DISTINCT Hour AS h FROM service_ai_vendors_hourly
-			 ) AS rollup USING (h)`,
-		)
-		assert.strictEqual(num(drift[0]?.n), 0, "a stored AiRollupHour has no matching rollup hour")
 	})
 
 	it("reads trace coverage by merging across vendor rows, not per vendor", async () => {

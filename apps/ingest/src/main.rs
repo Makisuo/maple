@@ -43,7 +43,7 @@ use maple_ingest::session_analytics::{
     derive_referrer_host, sanitize_session_event, sanitize_session_meta,
 };
 use maple_ingest::telemetry::{
-    AiClassificationSettings, AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget,
+    AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget,
     ClickHouseTargetProvider, DatasourceNames, ExportDestination, MappingOperation,
     MappingSourceContext, PipelineError, SamplingPolicy, TelemetryPipeline, TelemetrySignal,
     TinybirdConfig,
@@ -4248,15 +4248,12 @@ async fn accept_native_decoded_payload(
                 "maple.ingest.attribute_mapping_count",
                 attribute_mappings.len(),
             );
-            // Once per batch, never per span.
-            let ai = AiClassificationSettings::new();
             pipeline
                 .accept_traces_to(
                     &resolved_key.org_id,
                     request,
                     &policy,
                     attribute_mappings.as_slice(),
-                    &ai,
                     destination,
                 )
                 .await
@@ -7340,9 +7337,9 @@ mod tests {
             .expect("ready org should write to ClickHouse")
             .expect("ClickHouse channel should stay open");
 
-        // The INSERT must name the five columns or the values land in the wrong ones.
+        // The INSERT must name the AI columns or the values land in the wrong ones.
         assert!(import.query.contains("AiVendor"), "{}", import.query);
-        assert!(import.query.contains("AiRollupHour"), "{}", import.query);
+        assert!(import.query.contains("AiRulesVersion"), "{}", import.query);
 
         let row: serde_json::Value = serde_json::from_str(import.body.trim()).expect("NDJSON row");
         assert_eq!(row["ai_vendor"], "spring_ai");
@@ -7352,15 +7349,6 @@ mod tests {
             serde_json::json!(maple_ingest::cityhash102::city_hash64(b"sess-e2e"))
         );
         assert_ne!(row["ai_rules_version"], serde_json::json!(0));
-        // The fixture's 2023 span start is outside the [receive − 7d, receive + 1d]
-        // window, so the clamp must land it on the receive hour rather than mint a
-        // 2023 partition. Window arithmetic itself is covered in `telemetry.rs`.
-        let now_secs = (current_time_millis() / 1000) as i64;
-        let this_hour = chrono::DateTime::from_timestamp(now_secs - now_secs.rem_euclid(3600), 0)
-            .expect("valid receive hour")
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string();
-        assert_eq!(row["ai_rollup_hour"], serde_json::json!(this_hour));
 
         let _ = std::fs::remove_dir_all(queue_dir);
     }

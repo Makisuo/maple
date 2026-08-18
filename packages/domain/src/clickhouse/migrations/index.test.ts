@@ -158,7 +158,7 @@ describe("ClickHouse migrations", () => {
 		expect(sql).toContain("WHERE AiVendor != ''")
 		// The stored clamped hour, not toStartOfHour(Timestamp) — a skewed client
 		// must not be able to open a partition in 2038.
-		expect(sql).toContain("AiRollupHour AS Hour")
+		expect(sql).toContain("toStartOfHour(toDateTime(Timestamp)) AS Hour")
 		// Adjusted-count convention with the zero/unset floor.
 		expect(sql).toContain("sum(if(SampleRate > 0, SampleRate, 1.0)) AS WeightedSpanCount")
 
@@ -234,7 +234,6 @@ describe("ClickHouse migrations", () => {
 		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiSessionKeyState UInt8 DEFAULT 0")
 		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiSessionKeyHash UInt64 DEFAULT 0")
 		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiRulesVersion UInt32 DEFAULT 0")
-		expect(sql).toContain("ADD COLUMN IF NOT EXISTS AiRollupHour DateTime('UTC') DEFAULT toDateTime(0)")
 		expect(sql).toContain("ADD INDEX IF NOT EXISTS idx_ai_vendor AiVendor TYPE set(0) GRANULARITY 4")
 		expect(sql).toContain(
 			"ADD INDEX IF NOT EXISTS idx_scope_name ScopeName TYPE tokenbf_v1(4096, 3, 0) GRANULARITY 4",

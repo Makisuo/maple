@@ -150,11 +150,11 @@ SETTINGS enable_full_text_index = 1`,
 const assertAiClassificationSchemaApplied = async (): Promise<void> => {
 	const migrationRevision = (
 		await clickhouseExec(
-			"SELECT count() FROM _maple_schema_migrations WHERE version = 15 FORMAT TabSeparated",
+			"SELECT count() FROM _maple_schema_migrations WHERE version = 16 FORMAT TabSeparated",
 			database,
 		)
 	).trim()
-	assert.strictEqual(migrationRevision, "1", "AI classification migration 15 was not recorded")
+	assert.strictEqual(migrationRevision, "1", "AI classification migration 16 was not recorded")
 
 	const columns = (
 		await clickhouseExec(
@@ -162,7 +162,7 @@ const assertAiClassificationSchemaApplied = async (): Promise<void> => {
 FROM system.columns
 WHERE database = currentDatabase()
   AND table = 'traces'
-  AND name IN ('AiVendor', 'AiSessionKeyState', 'AiSessionKeyHash', 'AiRulesVersion', 'AiRollupHour')
+  AND name IN ('AiVendor', 'AiSessionKeyState', 'AiSessionKeyHash', 'AiRulesVersion')
 ORDER BY name
 FORMAT TabSeparated`,
 			database,
@@ -175,7 +175,6 @@ FORMAT TabSeparated`,
 	assert.strictEqual(
 		columns,
 		[
-			"AiRollupHour\tDateTime('UTC')\tDEFAULT",
 			"AiRulesVersion\tUInt32\tDEFAULT",
 			"AiSessionKeyHash\tUInt64\tDEFAULT",
 			"AiSessionKeyState\tUInt8\tDEFAULT",
@@ -211,14 +210,14 @@ FORMAT TabSeparated`,
 	)
 	const defaults = (
 		await clickhouseExec(
-			`SELECT AiVendor = '', AiSessionKeyState, AiSessionKeyHash, AiRulesVersion, toUnixTimestamp(AiRollupHour)
+			`SELECT AiVendor = '', AiSessionKeyState, AiSessionKeyHash, AiRulesVersion
 FROM traces
 WHERE OrgId = '${aiProbeOrgId}' AND TraceId = 'trace-ai-default'
 FORMAT TabSeparated`,
 			database,
 		)
 	).trim()
-	assert.strictEqual(defaults, "1\t0\t0\t0\t0", "AI classification defaults do not read back")
+	assert.strictEqual(defaults, "1\t0\t0\t0", "AI classification defaults do not read back")
 }
 
 const trackedDbs: TestDb[] = []

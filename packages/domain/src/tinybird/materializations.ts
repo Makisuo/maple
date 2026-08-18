@@ -1482,11 +1482,10 @@ export const webEventsMv = defineMaterializedView("web_events_mv", {
  * AI traffic, not total traffic. It is also what makes "no rows for a
  * service-hour" mean *genuinely no AI spans* post-enablement.
  *
- * `Hour` is `traces.AiRollupHour`, a receive-time-clamped hour ingest writes for
- * every span. Grouping on that stored column rather than
- * `toStartOfHour(Timestamp)` keeps a clock-skewed client from opening partitions
- * in 2038. `WeightedSpanCount` sums `SampleRate` (adjusted-count convention, see
- * the target's column docs); the `if(> 0, …, 1.0)` floor guards unset/zero rows.
+ * `Hour` is `toStartOfHour(Timestamp)`, the same span-time bucketing every
+ * other hourly rollup uses. `WeightedSpanCount` sums `SampleRate`
+ * (adjusted-count convention, see the target's column docs); the
+ * `if(> 0, …, 1.0)` floor guards unset/zero rows.
  *
  * No `POPULATE`, and nothing safe to backfill: correctness depends on the source
  * rows having been classified, not on the view having existed. The view is

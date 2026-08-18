@@ -609,39 +609,6 @@ pub struct AcceptStats {
     pub ai_spans_examined: usize,
 }
 
-/// Per-batch inputs for AI classification and rollup-hour clamping.
-///
-/// Built once per accepted payload, never per span, so every span in one payload
-/// clamps against the same instant. Classification itself is unconditional;
-/// `AiRulesVersion = 0` rows exist only from before this binary shipped.
-#[derive(Clone, Debug)]
-pub struct AiClassificationSettings {
-    /// Batch receive time, epoch seconds.
-    pub receive_time_secs: i64,
-}
-
-impl AiClassificationSettings {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self {
-            receive_time_secs: unix_now_secs(),
-        }
-    }
-
-    /// Explicit receive time, for tests that assert the clamp windows.
-    #[cfg(test)]
-    pub fn at(receive_time_secs: i64) -> Self {
-        Self { receive_time_secs }
-    }
-}
-
-fn unix_now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 /// The four classification columns as the row writes them. Extracted from a
 /// [`SpanClassification`] immediately, so the row builder never holds a borrow of
 /// the span's attribute list.
@@ -661,41 +628,6 @@ impl AiRowFields {
             session_key_hash: classification.session_key_hash(),
             rules_version: classification.rules_version,
         }
-    }
-}
-
-/// Seconds in the clamp window's past and future halves.
-const ROLLUP_CLAMP_PAST_SECS: i64 = 7 * 24 * 60 * 60;
-const ROLLUP_CLAMP_FUTURE_SECS: i64 = 24 * 60 * 60;
-
-/// `AiRollupHour`: `toStartOfHour(Timestamp)` when the span's start time is
-/// within `[receive − 7d, receive + 1d]`, else `toStartOfHour(receive_time)`.
-///
-/// Client timestamps are untrusted and this column is the rollup's partition key,
-/// so an unclamped value means unbounded partition creation and rows whose TTL
-/// never fires. It must clamp at write time: an MV-side clamp would need `now()`,
-/// which a partition rebuild re-evaluates, silently relocating rows.
-fn rollup_hour_secs(span_start_unix_nano: u64, receive_time_secs: i64) -> i64 {
-    let span_secs = (span_start_unix_nano / 1_000_000_000) as i64;
-    let in_window = span_secs >= receive_time_secs - ROLLUP_CLAMP_PAST_SECS
-        && span_secs <= receive_time_secs + ROLLUP_CLAMP_FUTURE_SECS;
-    let chosen = if in_window {
-        span_secs
-    } else {
-        receive_time_secs
-    };
-    chosen - chosen.rem_euclid(3600)
-}
-
-/// `DateTime('UTC')` wire format: `YYYY-MM-DD HH:MM:SS`, the second-precision
-/// sibling of `format_timestamp_nano`'s `DateTime64(9)` rendering.
-///
-/// A string, not epoch seconds: both destinations parse a quoted datetime, and
-/// every other timestamp this row writer emits is a string in this shape.
-fn format_datetime_secs(unix_secs: i64) -> String {
-    match chrono::DateTime::from_timestamp(unix_secs, 0) {
-        Some(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
-        None => "1970-01-01 00:00:00".to_string(),
     }
 }
 
@@ -816,14 +748,12 @@ impl TelemetryPipeline {
         request: &ExportTraceServiceRequest,
         sampling_policy: &SamplingPolicy,
         attribute_mappings: &[AttributeMappingRule],
-        ai: &AiClassificationSettings,
     ) -> Result<AcceptStats, PipelineError> {
         self.accept_traces_to(
             org_id,
             request,
             sampling_policy,
             attribute_mappings,
-            ai,
             ExportDestination::Tinybird,
         )
         .await
@@ -835,7 +765,6 @@ impl TelemetryPipeline {
         request: &ExportTraceServiceRequest,
         sampling_policy: &SamplingPolicy,
         attribute_mappings: &[AttributeMappingRule],
-        ai: &AiClassificationSettings,
         destination: ExportDestination,
     ) -> Result<AcceptStats, PipelineError> {
         let (frames, stats) = {
@@ -847,7 +776,6 @@ impl TelemetryPipeline {
                 request,
                 sampling_policy,
                 attribute_mappings,
-                ai,
             )?;
             record_encode_stats(&span, &frames, &stats);
             (frames, stats)
@@ -2284,7 +2212,6 @@ fn encode_traces(
     request: &ExportTraceServiceRequest,
     policy: &SamplingPolicy,
     attribute_mappings: &[AttributeMappingRule],
-    ai: &AiClassificationSettings,
 ) -> Result<(Vec<EncodedFrame>, AcceptStats), PipelineError> {
     let mut rows = Vec::with_capacity(count_trace_rows(request));
     let mut dropped = 0usize;
@@ -2372,11 +2299,6 @@ fn encode_traces(
                     rewritten.as_deref().unwrap_or(&span.attributes),
                     &span.events,
                 ));
-                let ai_rollup_hour = format_datetime_secs(rollup_hour_secs(
-                    span.start_time_unix_nano,
-                    ai.receive_time_secs,
-                ));
-
                 let events_timestamp: Vec<Value> = span
                     .events
                     .iter()
@@ -2439,8 +2361,7 @@ fn encode_traces(
                     "ai_vendor": ai_fields.vendor,
                     "ai_session_key_state": ai_fields.session_state,
                     "ai_session_key_hash": ai_fields.session_key_hash,
-                    "ai_rules_version": ai_fields.rules_version,
-                    "ai_rollup_hour": ai_rollup_hour
+                    "ai_rules_version": ai_fields.rules_version
                 }))?);
             }
         }
@@ -3517,7 +3438,6 @@ mod tests {
             &request,
             &SamplingPolicy::default(),
             &[],
-            &AiClassificationSettings::new(),
         )
         .unwrap();
         assert_eq!(stats.rows, 1);
@@ -3834,8 +3754,7 @@ mod tests {
                 &populated_trace_request(),
                 &SamplingPolicy::default(),
                 &[],
-                &AiClassificationSettings::new(),
-                ExportDestination::ClickHouse,
+                    ExportDestination::ClickHouse,
             )
             .await
             .unwrap();
@@ -4558,7 +4477,6 @@ mod tests {
             "ai_session_key_state",
             "ai_session_key_hash",
             "ai_rules_version",
-            "ai_rollup_hour",
         ];
 
         const METRIC_COMMON: &[&str] = &[
@@ -4783,14 +4701,13 @@ mod tests {
         ]
     }
 
-    fn encode_ai_row(request: &ExportTraceServiceRequest, ai: &AiClassificationSettings) -> Value {
+    fn encode_ai_row(request: &ExportTraceServiceRequest) -> Value {
         let (frames, stats) = encode_traces(
             &test_cfg().datasources,
             "org_ai",
             request,
             &SamplingPolicy::default(),
             &[],
-            ai,
         )
         .unwrap();
         assert_eq!(stats.rows, 1);
@@ -4803,8 +4720,7 @@ mod tests {
             spring_ai_attributes(),
             AI_RECEIVE_SECS as u64 * 1_000_000_000,
         );
-        let ai = AiClassificationSettings::at(AI_RECEIVE_SECS);
-        let row = encode_ai_row(&request, &ai);
+        let row = encode_ai_row(&request);
 
         assert_eq!(row["ai_vendor"], "spring_ai");
         assert_eq!(
@@ -4816,7 +4732,6 @@ mod tests {
         let expected = crate::cityhash102::city_hash64(b"sess-abc");
         assert_ne!(expected, 0);
         assert_eq!(row["ai_session_key_hash"], json!(expected));
-        assert_eq!(row["ai_rollup_hour"], "2023-11-14 22:00:00");
     }
 
     #[test]
@@ -4831,7 +4746,6 @@ mod tests {
             &request,
             &SamplingPolicy::default(),
             &[],
-            &AiClassificationSettings::at(AI_RECEIVE_SECS),
         )
         .unwrap();
         assert_eq!(stats.ai_spans_examined, stats.rows);
@@ -4839,14 +4753,12 @@ mod tests {
 
     #[test]
     fn a_non_ai_span_is_examined_and_stamped_but_carries_no_vendor() {
-        let ai = AiClassificationSettings::at(AI_RECEIVE_SECS);
         let (frames, stats) = encode_traces(
             &test_cfg().datasources,
             "org_contract",
             &populated_trace_request(),
             &SamplingPolicy::default(),
             &[],
-            &ai,
         )
         .unwrap();
         let row = frame_row(&frames[0]);
@@ -4858,83 +4770,11 @@ mod tests {
     }
 
     #[test]
-    fn rollup_hour_clamps_stale_and_future_timestamps_to_receive_time() {
-        let receive_hour = "2023-11-14 22:00:00";
-        let ai = || AiClassificationSettings::at(AI_RECEIVE_SECS);
-
-        // In window, one hour before receive: the span's own hour is kept.
-        let in_window = ai_trace_request(
-            spring_ai_attributes(),
-            (AI_RECEIVE_SECS as u64 - 3_600) * 1_000_000_000,
-        );
-        assert_eq!(
-            encode_ai_row(&in_window, &ai())["ai_rollup_hour"],
-            "2023-11-14 21:00:00"
-        );
-
-        // In window, at the far edge of the past half (exactly 7 days back).
-        let edge_past = ai_trace_request(
-            spring_ai_attributes(),
-            (AI_RECEIVE_SECS as u64 - 7 * 86_400) * 1_000_000_000,
-        );
-        assert_eq!(
-            encode_ai_row(&edge_past, &ai())["ai_rollup_hour"],
-            "2023-11-07 22:00:00"
-        );
-
-        // Older than 7 days: clamped to the receive hour.
-        let too_old = ai_trace_request(
-            spring_ai_attributes(),
-            (AI_RECEIVE_SECS as u64 - 8 * 86_400) * 1_000_000_000,
-        );
-        assert_eq!(
-            encode_ai_row(&too_old, &ai())["ai_rollup_hour"],
-            receive_hour
-        );
-
-        // Further ahead than 1 day: clamped too. This is the replay/attacker case.
-        let too_new = ai_trace_request(
-            spring_ai_attributes(),
-            (AI_RECEIVE_SECS as u64 + 86_400 + 3_600) * 1_000_000_000,
-        );
-        assert_eq!(
-            encode_ai_row(&too_new, &ai())["ai_rollup_hour"],
-            receive_hour
-        );
-
-        // A zero timestamp is 1970: outside the window, so it clamps rather than
-        // creating a 1970 partition.
-        let epoch_zero = ai_trace_request(spring_ai_attributes(), 0);
-        assert_eq!(
-            encode_ai_row(&epoch_zero, &ai())["ai_rollup_hour"],
-            receive_hour
-        );
-    }
-
-    #[test]
-    fn rollup_hour_matches_the_clickhouse_datetime_format() {
-        // `DateTime('UTC')` parses `YYYY-MM-DD HH:MM:SS` — 19 chars, no
-        // fractional part (that is `format_timestamp_nano`'s DateTime64(9)).
-        let request = ai_trace_request(
-            spring_ai_attributes(),
-            AI_RECEIVE_SECS as u64 * 1_000_000_000,
-        );
-        let row = encode_ai_row(&request, &AiClassificationSettings::at(AI_RECEIVE_SECS));
-        let hour = row["ai_rollup_hour"].as_str().unwrap();
-        assert_eq!(hour.len(), 19, "not DateTime('UTC'): {hour:?}");
-        assert!(hour.ends_with(":00:00"), "not an hour boundary: {hour:?}");
-        let parsed = chrono::NaiveDateTime::parse_from_str(hour, "%Y-%m-%d %H:%M:%S")
-            .expect("ClickHouse DateTime literal must round-trip");
-        assert_eq!(parsed.and_utc().timestamp() % 3600, 0);
-        // ClickHouse parses this string through the generated `input()` schema.
+    fn clickhouse_insert_mapping_names_the_ai_columns() {
         let traces = clickhouse_insert_mappings::DATASOURCES
             .iter()
             .find(|mapping| mapping.datasource == "traces")
             .unwrap();
-        assert!(traces.columns.contains(&"AiRollupHour"));
-        assert!(traces
-            .input_schema
-            .contains("ai_rollup_hour DateTime('UTC')"));
         assert!(traces.columns.contains(&"AiVendor"));
         assert!(traces.columns.contains(&"AiSessionKeyState"));
         assert!(traces.columns.contains(&"AiSessionKeyHash"));
@@ -4956,14 +4796,12 @@ mod tests {
             target_key: SPRING_AI_SESSION_KEY.to_string(),
             operation: MappingOperation::Move,
         }];
-        let ai = AiClassificationSettings::at(AI_RECEIVE_SECS);
         let (frames, _) = encode_traces(
             &test_cfg().datasources,
             "org_ai",
             &request,
             &SamplingPolicy::default(),
             &rules,
-            &ai,
         )
         .unwrap();
         let row = frame_row(&frames[0]);
@@ -4996,7 +4834,6 @@ mod tests {
             string_kv("gen_ai.operation.name", "chat"),
         ];
         let request = ai_trace_request(duplicated, AI_RECEIVE_SECS as u64 * 1_000_000_000);
-        let ai = AiClassificationSettings::at(AI_RECEIVE_SECS);
         let no_op_rule = [AttributeMappingRule {
             source_context: MappingSourceContext::Span,
             source_key: "no.such.key".to_string(),
@@ -5011,8 +4848,7 @@ mod tests {
                 &request,
                 &SamplingPolicy::default(),
                 rules,
-                &ai,
-            )
+                )
             .unwrap();
             let row = frame_row(&frames[0]);
             (
@@ -5040,8 +4876,7 @@ mod tests {
                 &request,
                 &SamplingPolicy::default(),
                 rules,
-                &ai,
-            )
+                )
             .unwrap();
             assert_eq!(
                 frame_row(&frames[0])["span_attributes"]["gen_ai.system"],
@@ -5181,7 +5016,6 @@ mod tests {
             &populated_trace_request(),
             &SamplingPolicy::default(),
             &[],
-            &AiClassificationSettings::new(),
         )
         .unwrap();
         let row = frame_row(&frames[0]);
@@ -5257,7 +5091,6 @@ mod tests {
             &populated_trace_request(),
             &SamplingPolicy::default(),
             &[],
-            &AiClassificationSettings::new(),
         )
         .unwrap();
         let trace_row = frame_row(&trace_frames[0]);
@@ -5312,7 +5145,6 @@ mod tests {
             &populated_trace_request(),
             &SamplingPolicy::default(),
             &[],
-            &AiClassificationSettings::new(),
         )
         .unwrap();
         assert_eq!(trace_frames[0].datasource, "tenant_traces_v2");
@@ -5496,8 +5328,7 @@ mod tests {
                 &request,
                 &SamplingPolicy::default(),
                 &[],
-                &AiClassificationSettings::new(),
-            )
+                )
             .await
             .unwrap();
         assert_eq!(stats.rows, 1);
