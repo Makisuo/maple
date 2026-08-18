@@ -4,20 +4,20 @@ import { scalePoint } from "@tanstack/charts-scales/point"
 import { formatBucketLabel, formatLatency, inferBucketSeconds, inferRangeMs } from "@maple/ui/lib/format"
 import { memo, useMemo } from "react"
 
-import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
-
-import { overviewBenchRows, type OverviewBenchRow } from "./bench-data"
-import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import { focusCrosshair, focusDot } from "@maple/ui/components/plot/plot-focus"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
 import {
+	PlotFrame,
 	PlotTooltipBody,
-	type PlotTooltipSeries,
 	createTooltipFocusStore,
 	cursorTooltip,
-} from "@maple/ui/components/plot/plot-tooltip"
-import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
-
+	focusCrosshair,
+	focusDot,
+	usePlotChromeColors,
+	usePlotColors,
+	type PlotColorToken,
+	type PlotTooltipSeries,
+} from "@maple/ui/components/plot"
+import { overviewBenchRows, type OverviewBenchRow } from "./bench-data"
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
 const LATENCY_TOKENS = {
 	p99: ["--chart-p99", "#f97316"],
 	p95: ["--chart-p95", "#eab308"],

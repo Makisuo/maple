@@ -1,4 +1,10 @@
-import { usePlotColors } from "@maple/ui/components/plot/theme"
+import {
+	DENSITY_RAMP_TOKENS,
+	PlotFrame,
+	createSequentialColorScale,
+	rampStops,
+	usePlotColors,
+} from "@maple/ui/components/plot"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { defineChart } from "@tanstack/charts"
 import { colorGradientLegend } from "@tanstack/charts/legend"
@@ -9,13 +15,6 @@ import { scaleLog } from "d3-scale"
 import { memo, useMemo } from "react"
 
 import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import {
-	DENSITY_RAMP_TOKENS,
-	createSequentialColorScale,
-	rampStops,
-} from "@maple/ui/components/plot/color-scale"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
-
 /**
  * No index signature. `hexbin` returns
  * `TransformLineage<TDatum> & Omit<TransformOutputRow<TOutputs>, …> & {x,y}`, and

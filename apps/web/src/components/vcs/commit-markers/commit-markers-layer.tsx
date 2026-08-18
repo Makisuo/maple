@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 import type { ResolvedScale } from "@tanstack/charts"
 
-import { useSuppressChartTooltip } from "@maple/ui/components/plot/floating-tooltip"
-import { usePlotRect, usePlotScales, type PlotRect } from "@maple/ui/components/plot/plot-frame"
+import { usePlotRect, usePlotScales, useSuppressChartTooltip, type PlotRect } from "@maple/ui/components/plot"
 import { parseBucketMs } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 

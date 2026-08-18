@@ -83,12 +83,23 @@ interface PlotLegendContextValue {
 	meta: PlotLegendMeta
 }
 
+/** Stable identity, so a hide-only provider's memo does not churn. */
+const noopHighlight = () => {}
+
 /** Stable identity: a fresh `new Set()` per render would break the memo below. */
 const EMPTY_HIDDEN: ReadonlySet<string> = new Set()
 
 const PlotLegendContext = createContext<PlotLegendContextValue | null>(null)
 
-function usePlotLegendContext(): PlotLegendContextValue {
+/**
+ * The nearest `PlotLegend.Provider`'s state, actions and meta.
+ *
+ * Exported so a legend that keeps its OWN markup can still take its series,
+ * hidden set and toggle from the one context — `QueryBuilderLegend` does, which
+ * is what stopped the two legends from being two independent state pipelines
+ * feeding two independent renderers.
+ */
+export function usePlotLegend(): PlotLegendContextValue {
 	const value = use(PlotLegendContext)
 	if (!value) throw new Error("PlotLegend parts must render inside <PlotLegend.Provider>")
 	return value
@@ -123,7 +134,7 @@ export function usePlotLegendHighlight(): {
 
 function PlotLegendProvider({
 	series,
-	highlighted,
+	highlighted = null,
 	onHighlight,
 	hidden,
 	onToggle,
@@ -133,8 +144,13 @@ function PlotLegendProvider({
 	children,
 }: {
 	series: readonly PlotLegendSeries[]
-	highlighted: string | null
-	onHighlight: (key: string) => void
+	/**
+	 * Supply BOTH to make a click PIN a series and mute the others. Omit them for
+	 * a legend that only hides — a chart picks one mode or the other, and
+	 * `QueryBuilderLegend` is the one that hides.
+	 */
+	highlighted?: string | null
+	onHighlight?: (key: string) => void
 	/**
 	 * Supply BOTH to make a click HIDE rather than pin. The set is owned by the
 	 * chart, because the chart is what has to filter its rows with it before
@@ -161,7 +177,7 @@ function PlotLegendProvider({
 	const value = useMemo<PlotLegendContextValue>(
 		() => ({
 			state: { series, highlighted, active, hidden: hidden ?? EMPTY_HIDDEN },
-			actions: { highlight: onHighlight, setActive, toggle: onToggle ?? null },
+			actions: { highlight: onHighlight ?? noopHighlight, setActive, toggle: onToggle ?? null },
 			meta: { label },
 		}),
 		[series, highlighted, active, hidden, onHighlight, setActive, onToggle, label],
@@ -179,7 +195,7 @@ function PlotLegendProvider({
  * exist to prevent.
  */
 function PlotLegendRow({ children, className }: { children: ReactNode; className?: string }) {
-	const { meta, actions } = usePlotLegendContext()
+	const { meta, actions } = usePlotLegend()
 	return (
 		<div
 			aria-label={meta.label}
@@ -196,7 +212,7 @@ function PlotLegendRow({ children, className }: { children: ReactNode; className
 
 /** The vertical list, matching `QueryBuilderLegend`'s `layout="right"`. */
 function PlotLegendColumn({ children, className }: { children: ReactNode; className?: string }) {
-	const { meta, actions } = usePlotLegendContext()
+	const { meta, actions } = usePlotLegend()
 	return (
 		<div
 			aria-label={meta.label}
@@ -216,7 +232,7 @@ function PlotLegendColumn({ children, className }: { children: ReactNode; classN
  * Omitting it renders the default `Item`.
  */
 function PlotLegendItems({ children }: { children?: (series: PlotLegendSeries) => ReactNode }) {
-	const { state } = usePlotLegendContext()
+	const { state } = usePlotLegend()
 	return (
 		<>
 			{state.series.map((entry) =>
@@ -232,7 +248,7 @@ function PlotLegendItems({ children }: { children?: (series: PlotLegendSeries) =
 
 /** One clickable series row. Reads everything but its identity from context. */
 function PlotLegendItem({ seriesKey }: { seriesKey: string }) {
-	const { state, actions } = usePlotLegendContext()
+	const { state, actions } = usePlotLegend()
 	const entry = state.series.find((candidate) => candidate.key === seriesKey)
 	if (!entry) return null
 

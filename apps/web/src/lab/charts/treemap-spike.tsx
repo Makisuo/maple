@@ -1,20 +1,20 @@
-import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
+import {
+	MUTED_COLOR_AMOUNT,
+	PlotFrame,
+	PlotSeriesLegend,
+	muteColor,
+	usePlotChromeColors,
+	usePlotColors,
+	usePlotLegendHighlight,
+	type PlotColorToken,
+	type PlotLegendSeries,
+} from "@maple/ui/components/plot"
 import { defineChart } from "@tanstack/charts"
 import { treemap } from "@tanstack/charts/hierarchy/treemap"
 import { tooltip } from "@tanstack/charts/tooltip"
 import { memo, useMemo, type ReactNode } from "react"
 
 import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import { muteColor } from "@maple/ui/components/plot/color-scale"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
-import {
-	MUTED_COLOR_AMOUNT,
-	type PlotLegendSeries,
-	PlotSeriesLegend,
-	usePlotLegendHighlight,
-} from "@maple/ui/components/plot/plot-legend"
-import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
-
 /**
  * One warehouse row: span count for a `(service, operation)` pair — the shape
  * `getServiceTopOperations` already returns, flattened to what an area-weighted

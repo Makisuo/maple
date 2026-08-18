@@ -1,4 +1,14 @@
-import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
+import {
+	MUTED_COLOR_AMOUNT,
+	PlotFrame,
+	PlotStatsLegend,
+	muteColor,
+	usePlotChromeColors,
+	usePlotColors,
+	usePlotLegendHighlight,
+	type PlotColorToken,
+	type PlotLegendSeries,
+} from "@maple/ui/components/plot"
 import { formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 import { defineChart } from "@tanstack/charts"
@@ -7,16 +17,6 @@ import { tooltip } from "@tanstack/charts/tooltip"
 import { memo, useMemo, useState, type ReactNode } from "react"
 
 import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import { muteColor } from "@maple/ui/components/plot/color-scale"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
-import {
-	MUTED_COLOR_AMOUNT,
-	type PlotLegendSeries,
-	PlotStatsLegend,
-	usePlotLegendHighlight,
-} from "@maple/ui/components/plot/plot-legend"
-import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
-
 /**
  * No index signature. `pie()` returns `Omit<TDatum, PieDerivedField> & …`, and
  * `Omit` over a type with an index signature resolves `keyof` to `string | number`

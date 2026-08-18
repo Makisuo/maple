@@ -3,26 +3,27 @@ import { curveMonotoneX } from "d3-shape"
 import * as React from "react"
 
 import {
-	findFirstPartialIndex,
-	splitAtFirstPartial,
-	trimEmptyTrailingBuckets,
-} from "../../plot/partial-buckets"
-import { dashedGridY } from "../../plot/plot-grid"
-import { focusCrosshair, focusDot } from "../../plot/plot-focus"
-import { UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
-import { roundCapDasharray, useChartId, verticalGradient } from "../../plot/plot-paint"
-import { cursorTooltip } from "../../plot/plot-tooltip"
-import { thresholdRules } from "../../plot/threshold-rules"
-import {
 	Timeseries,
+	UNBOUNDED_FOCUS_DISTANCE,
 	asFiniteNumber,
+	cursorTooltip,
+	dashedGridY,
+	findFirstPartialIndex,
+	focusCrosshair,
+	focusDot,
+	roundCapDasharray,
+	splitAtFirstPartial,
+	thresholdRules,
 	timeseriesTooltipSeries,
 	timeseriesXAxis,
 	timeseriesYAxis,
+	trimEmptyTrailingBuckets,
+	useChartId,
 	useTimeseriesModel,
+	verticalGradient,
 	type TimeseriesRow,
 	type TimeseriesSeries,
-} from "../../plot/timeseries"
+} from "../../plot"
 import type { QueryBuilderAreaChartProps } from "../_shared/chart-types"
 import { isolatedPointIndexes, pointsFit } from "../_shared/sparse-series"
 

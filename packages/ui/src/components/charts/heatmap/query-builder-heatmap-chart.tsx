@@ -12,9 +12,13 @@ import {
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
-import { createSequentialColorScale, resolveSequentialDomain } from "../../plot/color-scale"
-import { PlotFrame } from "../../plot/plot-frame"
-import { usePlotColors, type PlotColorToken } from "../../plot/theme"
+import {
+	PlotFrame,
+	createSequentialColorScale,
+	resolveSequentialDomain,
+	usePlotColors,
+	type PlotColorToken,
+} from "../../plot"
 import type { QueryBuilderHeatmapChartProps } from "../_shared/chart-types"
 
 /** One row of the long-form shape the chart draws from. */

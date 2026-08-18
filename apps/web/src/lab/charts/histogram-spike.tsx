@@ -1,4 +1,4 @@
-import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
+import { PlotFrame, cursorTooltip, usePlotColors, type PlotColorToken } from "@maple/ui/components/plot"
 import { formatNumber } from "@maple/ui/lib/format"
 import { defineChart, rect } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
@@ -9,9 +9,6 @@ import { memo, useMemo } from "react"
 import { histogramSampleData } from "@maple/ui/components/charts/_shared/sample-data"
 
 import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
-import { cursorTooltip } from "@maple/ui/components/plot/plot-tooltip"
-
 /**
  * One raw observation. No index signature, deliberately — `binX` returns
  * `TransformLineage<TDatum> & …`, and any `Omit`/`keyof` walk over a type with an

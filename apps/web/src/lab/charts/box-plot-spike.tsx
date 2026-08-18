@@ -1,4 +1,4 @@
-import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
+import { PlotFrame, cursorTooltip, usePlotColors, type PlotColorToken } from "@maple/ui/components/plot"
 import { formatLatency, formatNumber } from "@maple/ui/lib/format"
 import { boxY, defineChart } from "@tanstack/charts"
 import { scaleBand } from "@tanstack/charts-scales/band"
@@ -7,9 +7,6 @@ import { scaleLog } from "d3-scale"
 import { memo, useMemo } from "react"
 
 import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
-import { cursorTooltip } from "@maple/ui/components/plot/plot-tooltip"
-
 /**
  * One RAW observation — a single span's duration, not a pre-computed summary.
  *

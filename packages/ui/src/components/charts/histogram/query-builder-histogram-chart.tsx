@@ -5,11 +5,17 @@ import * as React from "react"
 
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
-import { dashedGridY } from "../../plot/plot-grid"
-import { PlotFrame, UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
-import { integerTickValues, logYScale, niceLinearDomain } from "../../plot/plot-scales"
-import { cursorTooltip } from "../../plot/plot-tooltip"
-import { usePlotColors, type PlotColorToken } from "../../plot/theme"
+import {
+	PlotFrame,
+	UNBOUNDED_FOCUS_DISTANCE,
+	cursorTooltip,
+	dashedGridY,
+	integerTickValues,
+	logYScale,
+	niceLinearDomain,
+	usePlotColors,
+	type PlotColorToken,
+} from "../../plot"
 import type { QueryBuilderHistogramChartProps } from "../_shared/chart-types"
 
 const HISTOGRAM_TOKENS = {

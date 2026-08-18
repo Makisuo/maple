@@ -2,22 +2,26 @@ import { barY, defineChart, group } from "@tanstack/charts"
 import * as React from "react"
 
 import { formatBucketLabel, formatValueByUnit } from "../../../lib/format"
-import { dashedGridY } from "../../plot/plot-grid"
-import { findFirstPartialIndex, trimEmptyTrailingBuckets } from "../../plot/partial-buckets"
-import { UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
-import { PlotTooltipBody, cursorTooltip, type PlotTooltipSeries } from "../../plot/plot-tooltip"
-import { usePlotColors, type PlotColorToken } from "../../plot/theme"
-import { thresholdRules } from "../../plot/threshold-rules"
 import {
+	PlotTooltipBody,
 	Timeseries,
+	UNBOUNDED_FOCUS_DISTANCE,
 	asFiniteNumber,
 	bucketBandDomain,
+	cursorTooltip,
+	dashedGridY,
+	findFirstPartialIndex,
+	thresholdRules,
 	timeseriesBandXAxis,
 	timeseriesYAxis,
+	trimEmptyTrailingBuckets,
+	usePlotColors,
 	useTimeseriesModel,
+	type PlotColorToken,
+	type PlotTooltipSeries,
 	type TimeseriesRow,
 	type TimeseriesSeries,
-} from "../../plot/timeseries"
+} from "../../plot"
 import { MAX_BAR_SERIES, OTHER_LABEL, bucketTimeseries } from "../_shared/bucket-series"
 import type { QueryBuilderBarChartProps } from "../_shared/chart-types"
 

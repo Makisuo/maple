@@ -5,24 +5,26 @@ import { formatLatency } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
 import {
 	FixedMetricLegend,
-	fixedMetricTooltipBody,
-	useFixedMetricModel,
-	type FixedMetricSeries,
-} from "../../plot/fixed-metrics"
-import { dashedGridY } from "../../plot/plot-grid"
-import { splitAtFirstPartial } from "../../plot/partial-buckets"
-import { focusCrosshair, focusDot } from "../../plot/plot-focus"
-import { PlotFrame, usePlotLegendSlot } from "../../plot/plot-frame"
-import { roundCapDasharray } from "../../plot/plot-paint"
-import { maybeTooltip, type PlotTooltipSeries } from "../../plot/plot-tooltip"
-import { usePlotColors, type PlotColorToken } from "../../plot/theme"
-import {
-	hoistsLegend,
+	PlotFrame,
 	asFiniteNumber,
+	dashedGridY,
+	fixedMetricTooltipBody,
+	focusCrosshair,
+	focusDot,
+	hoistsLegend,
+	maybeTooltip,
+	roundCapDasharray,
+	splitAtFirstPartial,
 	timeseriesXAxis,
 	timeseriesYAxis,
+	useFixedMetricModel,
+	usePlotColors,
+	usePlotLegendSlot,
+	type FixedMetricSeries,
+	type PlotColorToken,
+	type PlotTooltipSeries,
 	type TimeseriesRow,
-} from "../../plot/timeseries"
+} from "../../plot"
 import type { ServiceChartProps } from "../_shared/chart-types"
 import { latencyTimeSeriesData } from "../_shared/sample-data"
 

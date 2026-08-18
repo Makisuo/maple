@@ -1,4 +1,15 @@
-import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
+import {
+	MUTED_COLOR_AMOUNT,
+	PlotFrame,
+	PlotSeriesLegend,
+	cursorTooltip,
+	muteColor,
+	usePlotChromeColors,
+	usePlotColors,
+	usePlotLegendHighlight,
+	type PlotColorToken,
+	type PlotLegendSeries,
+} from "@maple/ui/components/plot"
 import { formatBucketLabel, formatNumber } from "@maple/ui/lib/format"
 import { barY, defineChart, stack } from "@tanstack/charts"
 import { scaleBand } from "@tanstack/charts-scales/band"
@@ -8,17 +19,6 @@ import { interactiveColorLegend } from "@tanstack/charts/legend"
 import { memo, useMemo, useState, type ReactNode } from "react"
 
 import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import { muteColor } from "@maple/ui/components/plot/color-scale"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
-import {
-	MUTED_COLOR_AMOUNT,
-	type PlotLegendSeries,
-	PlotSeriesLegend,
-	usePlotLegendHighlight,
-} from "@maple/ui/components/plot/plot-legend"
-import { cursorTooltip } from "@maple/ui/components/plot/plot-tooltip"
-import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
-
 import {
 	STACKED_BAR_SERVICES,
 	stackedBarAxisContext,

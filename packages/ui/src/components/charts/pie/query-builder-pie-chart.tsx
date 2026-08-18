@@ -15,17 +15,19 @@ import { useContainerSize } from "../../../hooks/use-container-size"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import { cn } from "../../../lib/utils"
-import { muteColor } from "../../plot/color-scale"
-import { PlotFrame, usePlotRect } from "../../plot/plot-frame"
 import {
 	MUTED_COLOR_AMOUNT,
+	PlotFrame,
 	PlotLegend,
 	PlotStatsLegend,
+	cursorTooltip,
+	muteColor,
+	usePlotChromeColors,
 	usePlotLegendHighlight,
+	usePlotRect,
+	useResolvedSeriesColors,
 	type PlotLegendSeries,
-} from "../../plot/plot-legend"
-import { cursorTooltip } from "../../plot/plot-tooltip"
-import { usePlotChromeColors, useResolvedSeriesColors } from "../../plot/theme"
+} from "../../plot"
 import {
 	bucketCategorical,
 	MAX_CATEGORICAL,

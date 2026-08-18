@@ -1,4 +1,24 @@
-import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
+import {
+	MUTED_COLOR_AMOUNT,
+	MUTED_OPACITY,
+	PlotFrame,
+	PlotSeriesLegend,
+	PlotTooltipBody,
+	createTooltipFocusStore,
+	cursorTooltip,
+	focusCrosshair,
+	focusDot,
+	muteColor,
+	roundCapDasharray,
+	useChartId,
+	usePlotChromeColors,
+	usePlotColors,
+	usePlotLegendHighlight,
+	verticalGradient,
+	type PlotColorToken,
+	type PlotLegendSeries,
+	type PlotTooltipSeries,
+} from "@maple/ui/components/plot"
 import { formatBucketLabel, formatNumber } from "@maple/ui/lib/format"
 import { areaY, defineChart, lineY } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
@@ -6,25 +26,6 @@ import { scaleTime } from "d3-scale"
 import { memo, useMemo, type ReactNode } from "react"
 
 import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import { muteColor } from "@maple/ui/components/plot/color-scale"
-import { focusCrosshair, focusDot } from "@maple/ui/components/plot/plot-focus"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
-import {
-	MUTED_COLOR_AMOUNT,
-	MUTED_OPACITY,
-	type PlotLegendSeries,
-	PlotSeriesLegend,
-	usePlotLegendHighlight,
-} from "@maple/ui/components/plot/plot-legend"
-import { roundCapDasharray, useChartId, verticalGradient } from "@maple/ui/components/plot/plot-paint"
-import {
-	PlotTooltipBody,
-	type PlotTooltipSeries,
-	createTooltipFocusStore,
-	cursorTooltip,
-} from "@maple/ui/components/plot/plot-tooltip"
-import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
-
 import {
 	errorThroughput,
 	splitAtFirstPartial,

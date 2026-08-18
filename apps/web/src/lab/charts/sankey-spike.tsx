@@ -1,4 +1,13 @@
-import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
+import {
+	MUTED_COLOR_AMOUNT,
+	PlotFrame,
+	PlotSeriesLegend,
+	muteColor,
+	usePlotColors,
+	usePlotLegendHighlight,
+	type PlotColorToken,
+	type PlotLegendSeries,
+} from "@maple/ui/components/plot"
 import { defineChart, type ChartCurve } from "@tanstack/charts"
 import { link } from "@tanstack/charts/link"
 import { sankeyDiagram } from "@tanstack/charts/network/sankey"
@@ -8,15 +17,6 @@ import { tooltip } from "@tanstack/charts/tooltip"
 import { memo, useMemo, type ReactNode } from "react"
 
 import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import { muteColor } from "@maple/ui/components/plot/color-scale"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
-import {
-	MUTED_COLOR_AMOUNT,
-	type PlotLegendSeries,
-	PlotSeriesLegend,
-	usePlotLegendHighlight,
-} from "@maple/ui/components/plot/plot-legend"
-
 /**
  * The service-map edge shape the query engine already returns —
  * `ServiceDependenciesOutput` in

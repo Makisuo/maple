@@ -1,4 +1,12 @@
-import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
+import {
+	HEATMAP_RAMP_TOKENS,
+	PlotFrame,
+	createSequentialColorScale,
+	rampStops,
+	usePlotColors,
+	type PlotColorToken,
+	type SequentialScaleType,
+} from "@maple/ui/components/plot"
 import { formatNumber } from "@maple/ui/lib/format"
 import { cell, defineChart } from "@tanstack/charts"
 import { colorGradientLegend } from "@tanstack/charts/legend"
@@ -7,14 +15,6 @@ import { scaleBand } from "@tanstack/charts-scales/band"
 import { memo, useMemo } from "react"
 
 import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import {
-	HEATMAP_RAMP_TOKENS,
-	type SequentialScaleType,
-	createSequentialColorScale,
-	rampStops,
-} from "@maple/ui/components/plot/color-scale"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
-
 /**
  * No index signature — same trap as `PieSpikeRow`. `cell`'s channel type is
  * `Channel<TDatum, …> = ChannelField<TDatum, …> | ChannelAccessor<…>`, and

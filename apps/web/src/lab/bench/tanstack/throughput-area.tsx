@@ -6,20 +6,21 @@ import { memo, useMemo } from "react"
 
 import { overviewBenchRows, type OverviewBenchRow } from "./bench-data"
 
-import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
-
-import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
-import { focusCrosshair, focusDot } from "@maple/ui/components/plot/plot-focus"
-import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
-import { useChartId, verticalGradient } from "@maple/ui/components/plot/plot-paint"
 import {
+	PlotFrame,
 	PlotTooltipBody,
-	type PlotTooltipSeries,
 	createTooltipFocusStore,
 	cursorTooltip,
-} from "@maple/ui/components/plot/plot-tooltip"
-import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
-
+	focusCrosshair,
+	focusDot,
+	useChartId,
+	usePlotChromeColors,
+	usePlotColors,
+	verticalGradient,
+	type PlotColorToken,
+	type PlotTooltipSeries,
+} from "@maple/ui/components/plot"
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
 /** The overview row plus the two per-second series this chart derives. */
 interface ThroughputBenchRow extends OverviewBenchRow {
 	errorThroughput: number

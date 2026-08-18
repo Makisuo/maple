@@ -2,9 +2,11 @@
 	"name": "@maple/ui",
 	"private": true,
 	"type": "module",
+	"sideEffects": ["**/*.css"],
 	"exports": {
 		"./styles/tokens.css": "./src/styles/tokens.css",
 		"./lib/cloud-platforms": "./src/lib/cloud-platforms/index.ts",
+		"./components/plot": "./src/components/plot/index.ts",
 		"./*": "./src/*"
 	},
 	"scripts": {

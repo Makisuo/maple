@@ -2,20 +2,21 @@ import { d3Curve, defineChart, dot, lineY } from "@tanstack/charts"
 import { curveMonotoneX } from "d3-shape"
 import * as React from "react"
 
-import { dashedGridY } from "../../plot/plot-grid"
-import { splitAtFirstPartial } from "../../plot/partial-buckets"
-import { focusCrosshair, focusDot } from "../../plot/plot-focus"
-import { roundCapDasharray } from "../../plot/plot-paint"
-import { cursorTooltip } from "../../plot/plot-tooltip"
-import { thresholdRules } from "../../plot/threshold-rules"
 import {
 	Timeseries,
 	asFiniteNumber,
+	cursorTooltip,
+	dashedGridY,
+	focusCrosshair,
+	focusDot,
+	roundCapDasharray,
+	splitAtFirstPartial,
+	thresholdRules,
 	timeseriesXAxis,
 	timeseriesYAxis,
 	useTimeseriesModel,
 	type TimeseriesRow,
-} from "../../plot/timeseries"
+} from "../../plot"
 import type { QueryBuilderLineChartProps } from "../_shared/chart-types"
 import { isolatedPointIndexes, pointsFit } from "../_shared/sparse-series"
 
